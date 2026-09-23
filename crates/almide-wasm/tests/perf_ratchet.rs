@@ -33,6 +33,9 @@
 //!      t(run_wasm) on mandelbrot's escape-time loop. The 30 s epoch
 //!      watchdog of the test runner checks at every loop header (1.9x on
 //!      mandelbrot); `almide bench --target wasm` must not pay it. Line 0.85.
+//!   R8 accumulator recursion elimination (#2577), a COUNT relation: fib(n)
+//!      enters `fib` exactly fib(n + 1) times on the structural leg — the
+//!      hand-written accumulator form's count, LLVM's — not 2 fib(n + 1) - 1.
 //!
 //! Anti-vacuous floor: the small-size measurement must be slow enough
 //! to mean something — if an optimizer ever elides the loop, the gate
@@ -286,4 +289,173 @@ fn group_by_key_count_relation() {
          (the accumulator must grow in place so its address is stable; a per-key copy pins it to the \
          linear scan, #2156's 110x)"
     );
+}
+
+/// The `fib` shape (#2577) and its hand-written accumulator form, as a
+/// LIBRARY so both are exports the gate can call without a host.
+const ACCUM_SRC: &str = r#"fn fib(n: Int) -> Int = if n < 2 then n else fib(n - 1) + fib(n - 2)
+
+fn fib_acc(n: Int, acc: Int) -> Int = if n < 2 then acc + n else fib_acc(n - 2, acc + fib_acc(n - 1, 0))
+"#;
+
+/// Re-encode a module so every entry into function `target` increments a
+/// new exported i64 global `__calls` — an exact dynamic call count.
+struct CountCalls {
+    target: u32,
+    imported_funcs: u32,
+    imported_globals: u32,
+    next_body: u32,
+    counter: Option<u32>,
+}
+
+impl wasm_encoder::reencode::Reencode for CountCalls {
+    type Error = std::convert::Infallible;
+
+    fn parse_global_section(
+        &mut self,
+        globals: &mut wasm_encoder::GlobalSection,
+        section: wasmparser::GlobalSectionReader<'_>,
+    ) -> Result<(), wasm_encoder::reencode::Error<Self::Error>> {
+        self.counter = Some(self.imported_globals + section.count());
+        wasm_encoder::reencode::utils::parse_global_section(self, globals, section)?;
+        let ty = wasm_encoder::GlobalType { val_type: wasm_encoder::ValType::I64, mutable: true, shared: false };
+        globals.global(ty, &wasm_encoder::ConstExpr::i64_const(0));
+        Ok(())
+    }
+
+    fn parse_export_section(
+        &mut self,
+        exports: &mut wasm_encoder::ExportSection,
+        section: wasmparser::ExportSectionReader<'_>,
+    ) -> Result<(), wasm_encoder::reencode::Error<Self::Error>> {
+        wasm_encoder::reencode::utils::parse_export_section(self, exports, section)?;
+        exports.export("__calls", wasm_encoder::ExportKind::Global, self.counter.expect("a global section"));
+        Ok(())
+    }
+
+    fn parse_function_body(
+        &mut self,
+        code: &mut wasm_encoder::CodeSection,
+        func: wasmparser::FunctionBody<'_>,
+    ) -> Result<(), wasm_encoder::reencode::Error<Self::Error>> {
+        use wasm_encoder::Instruction as I;
+        let this = self.imported_funcs + self.next_body;
+        self.next_body += 1;
+        let mut f = self.new_function_with_parsed_locals(&func)?;
+        if this == self.target {
+            let g = self.counter.expect("globals precede code");
+            for i in [I::GlobalGet(g), I::I64Const(1), I::I64Add, I::GlobalSet(g)] {
+                f.instruction(&i);
+            }
+        }
+        let mut reader = func.get_operators_reader()?;
+        while !reader.eof() {
+            f.instruction(&self.parse_instruction(&mut reader)?);
+        }
+        code.function(&f);
+        Ok(())
+    }
+}
+
+/// Call export `name` of `bytes` with `args`, counting entries into it.
+/// Returns (calls, result).
+fn counted_call(bytes: &[u8], name: &str, args: &[wasmtime::Val]) -> (i64, i64) {
+    use wasmparser::{ExternalKind, Parser, Payload, TypeRef};
+    let (mut funcs, mut globals, mut target) = (0, 0, None);
+    for payload in Parser::new(0).parse_all(bytes) {
+        match payload.expect("parse") {
+            Payload::ImportSection(s) => {
+                for imp in s.into_imports() {
+                    match imp.expect("import").ty {
+                        TypeRef::Func(_) => funcs += 1,
+                        TypeRef::Global(_) => globals += 1,
+                        _ => {}
+                    }
+                }
+            }
+            Payload::ExportSection(s) => {
+                for e in s {
+                    let e = e.expect("export");
+                    if e.name == name && e.kind == ExternalKind::Func {
+                        target = Some(e.index);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut counter = CountCalls {
+        target: target.expect("fn export"),
+        imported_funcs: funcs,
+        imported_globals: globals,
+        next_body: 0,
+        counter: None,
+    };
+    let mut module = wasm_encoder::Module::new();
+    wasm_encoder::reencode::Reencode::parse_core_module(&mut counter, &mut module, Parser::new(0), bytes)
+        .expect("reencode");
+    let engine = wasmtime::Engine::default();
+    let module = wasmtime::Module::new(&engine, module.finish()).expect("module");
+    let mut linker = wasmtime::Linker::new(&engine);
+    linker.define_unknown_imports_as_traps(&module).expect("imports");
+    let mut store = wasmtime::Store::new(&engine, ());
+    let inst = linker.instantiate(&mut store, &module).expect("instantiate");
+    let f = inst.get_func(&mut store, name).expect("fn");
+    let mut out = [wasmtime::Val::I64(0)];
+    f.call(&mut store, args, &mut out).expect("call");
+    let calls = inst.get_global(&mut store, "__calls").expect("counter").get(&mut store).unwrap_i64();
+    (calls, out[0].unwrap_i64())
+}
+
+/// R8 (#2577): accumulator recursion elimination, as an exact CALL COUNT
+/// (no clock). `fib(n - 1) + fib(n - 2)` must reach wasm as ONE recursive
+/// call plus a loop — LLVM's accumulator TRE, which the native leg gets
+/// through TailCallOpt — so fib(n) enters `fib` exactly fib(n + 1) times,
+/// the hand-written accumulator form's count. As emitted before #2577 it
+/// entered 2 fib(n + 1) - 1 times (29.9M against 14.9M for fib(35)).
+/// A call count, not wasmtime fuel: the loop form executes MORE operators
+/// than the two-call form (fuel 3.64M against 2.43M at fib(25)) and still
+/// runs faster, so fuel would gate the wrong direction.
+#[test]
+fn accumulator_recursion_halves_the_calls() {
+    let ir = almide_spine::s5::lower_to_ir("perf_ratchet.almd", ACCUM_SRC).expect("front");
+    let (bytes, _) = almide_wasm::emit_library_with_ops(&ir).expect("emit");
+    const N: i64 = 25;
+    const FIB_N_PLUS_1: i64 = 121_393;
+    let (plain, a) = counted_call(&bytes, "fib", &[wasmtime::Val::I64(N)]);
+    let (acc, b) = counted_call(&bytes, "fib_acc", &[wasmtime::Val::I64(N), wasmtime::Val::I64(0)]);
+    println!("RATCHET fib({N}) calls: emitted={plain} accumulator form={acc}");
+    assert_eq!((a, b), (75_025, 75_025), "fib({N}) answered wrong");
+    // Anti-vacuous: the counter sees the hand-written form's calls.
+    assert_eq!(acc, FIB_N_PLUS_1, "the call counter is not counting fib_acc's entries");
+    assert_eq!(
+        plain, FIB_N_PLUS_1,
+        "fib({N}) entered `fib` {plain} times, not fib({}) = {FIB_N_PLUS_1} — the second recursive \
+         call is back (almide_ir::accum_tre did not fire on the structural leg, #2577)",
+        N + 1
+    );
+}
+
+/// The preconditions of `almide_ir::accum_tre`, read off the two #2577
+/// fixtures: every recursive fn of the rewritten fixture is a candidate, and
+/// no fn of the declined one is (Float, String, effect, a call in the
+/// condition, division, an equality bound, subtraction).
+#[test]
+fn accumulator_recursion_preconditions_match_the_fixtures() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../spec/wasm_cross");
+    let candidates = |file: &str| -> Vec<(String, bool)> {
+        let src = std::fs::read_to_string(root.join(file)).expect("fixture");
+        let ir = almide_spine::s5::lower_to_ir(file, &src).expect("front");
+        ir.functions
+            .iter()
+            .filter(|f| f.name.as_str() != "main")
+            .map(|f| (f.name.as_str().to_string(), almide_ir::accum_tre::is_candidate(f)))
+            .collect()
+    };
+    let taken = candidates("accum_recursion_int.almd");
+    assert_eq!(taken.len(), 7, "{taken:?}");
+    assert!(taken.iter().all(|(_, c)| *c), "a rewritten-fixture fn was declined: {taken:?}");
+    let declined = candidates("accum_recursion_declined.almd");
+    assert!(declined.len() >= 8, "{declined:?}");
+    assert!(declined.iter().all(|(_, c)| !*c), "a declined-fixture fn was taken: {declined:?}");
 }
