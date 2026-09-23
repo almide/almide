@@ -133,6 +133,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_EXPECT_TOOLS", Flag, Harness, "make a harness test FAIL instead of skipping when an external tool (wasmtime, wasm-tools) is missing; CI sets it"),
     sw("ALMIDE_FALLBACK_NAMES", Flag, Tool, "make `almide test` print one `FALLBACK <file>` line per file the wasm leg did not pass — the wasm coverage ratchet's data feed"),
     sw("ALMIDE_FAN_SEQUENTIAL", Flag, Runtime, "run `fan.*` sequentially in the native runtime (a determinism lever for measurement; the observable result is the same by contract)"),
+    sw("ALMIDE_FLOAT_SWEEP_N", Value, Harness, "how many xorshift64 bit patterns the float printer sweep prints and compares with Rust `format!` on each leg (default 100000; tests/float_to_string_cross_target_test.rs)"),
     sw("ALMIDE_FN_ESCAPE_OFF", Flag, Ablation, "make BorrowInsertion borrow EVERY fn-typed param as `&dyn Fn`, escaping or not (#2288) — the ablation the ownership certifier's C5 sensitivity test drives"),
     sw("ALMIDE_FUEL_PROBE", Flag, Route,"insert fuel charges and force the INCUMBENT wasm leg (the charge probe); `almide run --time-report` sets it internally"),
     sw("ALMIDE_FUZZ_BASE", Value, Harness, "the first seed of the differential fuzz's fixed seed range (default 0)"),
