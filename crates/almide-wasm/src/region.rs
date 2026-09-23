@@ -58,7 +58,11 @@ use crate::*;
 const SCALAR_MODULES: &[&str] = &["int", "float", "math", "bool"];
 
 /// Size of the save block payload: the bump pointer + one head per class.
-const SAVE_BYTES: u32 = 4 + 4 * FREELIST_CLASSES;
+const SAVE_BYTES: u32 = 4 + HEADS_BYTES;
+/// The free-list class heads, `class_slot(0) .. class_slot(FREELIST_CLASSES)`.
+const HEADS_BYTES: u32 = 4 * FREELIST_CLASSES;
+/// Where the save block keeps the heads: after the payload's bump word.
+const SAVED_HEADS: u32 = almide_layout::PAYLOAD + 4;
 
 fn abs(offset: u32) -> MemArg {
     MemArg { offset: offset as u64, align: 2, memory_index: 0 }
@@ -324,12 +328,13 @@ impl<'a> Emitter<'a> {
         let mut i = self.f.instructions();
         i.i32_const(SAVE_BYTES as i32).call(F_ALLOC).local_set(blk);
         i.local_get(blk).global_get(G_HEAP).i32_store(abs(almide_layout::PAYLOAD));
-        for k in 0..FREELIST_CLASSES {
-            i.local_get(blk);
-            i.i32_const(class_slot(k)).i32_load(abs(0));
-            i.i32_store(abs(almide_layout::PAYLOAD + 4 + 4 * k));
-            i.i32_const(class_slot(k)).i32_const(0).i32_store(abs(0));
-        }
+        // #2312 shape 2: the class heads `[class_slot(0), +HEADS_BYTES)`
+        // and their save slots `[blk + SAVED_HEADS, +HEADS_BYTES)` are both
+        // contiguous, so the save is one copy and one fill — not 16
+        // load/store/zero triples per window site.
+        i.local_get(blk).i32_const(SAVED_HEADS as i32).i32_add();
+        i.i32_const(class_slot(0)).i32_const(HEADS_BYTES as i32).memory_copy(0, 0);
+        i.i32_const(class_slot(0)).i32_const(0).i32_const(HEADS_BYTES as i32).memory_fill(0);
         Ok(blk)
     }
 
@@ -364,11 +369,10 @@ impl<'a> Emitter<'a> {
             i.global_get(G_HEAP).global_get(G_HEAP_HIGH).i32_gt_u().if_(BlockType::Empty);
             i.global_get(G_HEAP).global_set(G_HEAP_HIGH);
             i.end();
-            for k in 0..FREELIST_CLASSES {
-                i.i32_const(class_slot(k));
-                i.local_get(blk).i32_load(abs(almide_layout::PAYLOAD + 4 + 4 * k));
-                i.i32_store(abs(0));
-            }
+            // The heads back in one copy (the save's mirror, #2312).
+            i.i32_const(class_slot(0));
+            i.local_get(blk).i32_const(SAVED_HEADS as i32).i32_add();
+            i.i32_const(HEADS_BYTES as i32).memory_copy(0, 0);
             i.local_get(blk).i32_load(abs(almide_layout::PAYLOAD)).global_set(G_HEAP);
             i.local_get(blk).call(F_FREE);
         }
