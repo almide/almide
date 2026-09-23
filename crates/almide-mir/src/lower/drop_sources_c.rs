@@ -162,9 +162,12 @@ fn __drop_cellmap(ch: Int) -> Unit = {
 pub fn generate_record_drop_sources(
     type_decls: &[almide_ir::IrTypeDecl],
     anon_records: &[Vec<(almide_lang::intern::Sym, Ty)>],
+    anon_tuples: &[Ty],
     uses_result_opt_str: bool,
 ) -> String {
     use almide_ir::IrTypeDeclKind;
+    let anon_tuple_names: std::collections::HashSet<String> =
+        anon_tuples.iter().map(anon_tuple_drop_name).collect();
     let rec_names = recursive_record_drop_names(type_decls);
     let generic_decls = generic_record_decls(type_decls);
     let flat_variant_names = flat_variant_type_names(type_decls);
@@ -209,6 +212,7 @@ pub fn generate_record_drop_sources(
                 flat_variant_names: &flat_variant_names,
                 rec_variant_names: &rec_variant_names,
                 generic_decls: &generic_decls,
+                anon_tuples: &anon_tuple_names,
             },
             &mut list_drops,
             &mut needs,
@@ -259,6 +263,7 @@ pub fn generate_record_drop_sources(
                 flat_variant_names: &flat_variant_names,
                 rec_variant_names: &rec_variant_names,
                 generic_decls: &generic_decls,
+                anon_tuples: &anon_tuple_names,
             },
             &mut list_drops,
             &mut needs,
@@ -270,6 +275,28 @@ pub fn generate_record_drop_sources(
         out.push_str("  } else ()\n");
         out.push_str("  prim.rc_dec(h)\n");
         out.push_str("}\n");
+    }
+    {
+        let mut needs = DropNeeds {
+            map_ss: need_map_ss, list_str: need_list_str,
+            matrix: need_matrix, list_matrix: need_list_matrix,
+        };
+        emit_anon_tuple_drops(
+            &mut out,
+            anon_tuples,
+            DropShapes {
+                rec_names: &rec_names,
+                flat_variant_names: &flat_variant_names,
+                rec_variant_names: &rec_variant_names,
+                generic_decls: &generic_decls,
+                anon_tuples: &anon_tuple_names,
+            },
+            &mut needs,
+        );
+        need_map_ss = needs.map_ss;
+        need_list_str = needs.list_str;
+        need_matrix = needs.matrix;
+        need_list_matrix = needs.list_matrix;
     }
     emit_anon_list_wrapper_drops(&mut out, anon_records);
     let _ = &list_drops; // (subsumed by rec_names below)

@@ -268,6 +268,12 @@ impl LowerCtx {
             self.value_drops.entry(dst).or_default().list_list_str = true;
             return true;
         }
+        if let Some(n) = crate::lower::anon_tuple_list_route(ty) {
+            // `List[<anon heap tuple>]` (#2520) — the synthesized per-slot sweep; the
+            // flat heap_elem_lists DropListStr would leak every tuple's heap slots.
+            self.value_drops.entry(dst).or_default().named_route = Some(n);
+            return true;
+        }
         if crate::lower::is_list_str_str_ty(ty) {
             // `List[(String,String)]` (map.entries) — DropListStrStr frees each tuple's two
             // Strings; the flat heap_elem_lists DropListStr would leak them (a render loop OOMs).
