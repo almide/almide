@@ -277,6 +277,13 @@ impl LowerCtx {
         if let Some(rewritten) = crate::lower::desugar_list_pattern_match(body) {
             return Some(rewritten);
         }
+        // #2473 — the SAME last rung `desugar_all` runs (desugar-before-both).
+        if let Some(rewritten) = crate::lower::desugar_variant_guard_match(body) {
+            return Some(rewritten);
+        }
+        if let Some(rewritten) = crate::lower::desugar_prune_unreachable_arms(body) {
+            return Some(rewritten);
+        }
         None
     }
 
