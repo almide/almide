@@ -52,17 +52,12 @@ pub(crate) fn rc_tail(e: &almide_ir::IrExpr) -> &almide_ir::IrExpr {
 }
 
 impl Emitter<'_> {
-    /// The droppable set (#2010 stage 1): every block shape with NO heap
-    /// interiors — Str, Bytes, and a List / tuple / record / variant /
-    /// Option / Result whose payload slots are all flat. Such a block is
-    /// released by `$dec_flat` alone: there is no shared field to
-    /// dangle and no glue to recurse into. A shape holding a block (a
-    /// `List[String]`, an `(Int, String)`, a `Map`) stays on the bump
-    /// graveyard until its typed drop glue exists (#2010 stages 2–4).
     /// A slot whose value is a heap HANDLE the holder owns one credit of
     /// (#2010 stage 2b/2c): Str / Bytes, a List, an Option / Result /
     /// tuple block, a record / variant (2c-ii), a Map / Set (Map stage
-    /// b). Value and Fn handles carry no credit the holder releases yet.
+    /// b), a Value (its tagged payload glue), a Fn (the env's own drop
+    /// glue, ruling B) and a Matrix (one flat block) — every heap shape
+    /// (#2010 closed the graveyard).
     pub(crate) fn elem_is_handle(&self, elem: SliceTy) -> bool {
         match elem {
             SliceTy::Scalar(Scalar::Str | Scalar::Bytes)
