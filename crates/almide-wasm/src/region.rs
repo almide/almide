@@ -20,7 +20,10 @@
 //! reaches, so its drop walk would be pure cost. A block the consumer's
 //! own body frees (an owned param, a local it builds) is still freed one
 //! by one — the incumbent's `__rgn_` twins, which skip that too, have no
-//! counterpart here yet.
+//! counterpart here yet. A constructor inside a region-pure fn inlines
+//! its bump (alloc_inline.rs, #2318 direction 2): in the window the class
+//! heads are zero, so a node is three header stores and a `$heap` advance
+//! with no `$alloc` call.
 //!
 //! Soundness rests on nothing crossing the window edge:
 //! * `consume` returns Int/Float/Bool/Unit — no window block escapes by
