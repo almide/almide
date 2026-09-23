@@ -265,12 +265,26 @@ fn collect_pipeline_record_layouts(ir: &almide_ir::IrProgram) -> crate::lower::R
         }
     }
     for (base, ks) in owners {
-        if ks.len() == 1 && !record_layouts.contains_key(&base) {
+        if ks.len() == 1 && !record_layouts.contains_key(&base) && !user_shadow_of_stdlib_type(&base, &ks[0]) {
             let v = record_layouts.get(&ks[0]).cloned().expect("ks[0] came from record_layouts.keys() above, so the key is guaranteed present");
             record_layouts.insert(base, v);
         }
     }
     record_layouts
+}
+
+/// Is `qualified` a USER declaration of a stdlib-owned type name (`self.Value`
+/// for the builtin `Value`, `m.Endian` for `bytes.Endian`)? The bare `base`
+/// then stays UNBOUND in the layout registry (#2567): it is the identity of
+/// the stdlib's own type — the `Ty::Named("Value")` every linked registry
+/// body carries (`json.parse`'s `List[Value]` accumulator, `__drop_value`) —
+/// and the bare-name alias below would hand that name the user's field
+/// layout. It did: the parser's dynamic values lowered as the user's
+/// `{ n: Int }` record, their drops walked an Int as a handle, and the
+/// incumbent leg of `stdlib_type_shadow.almd` never terminated where native
+/// and the structural leg print three lines.
+fn user_shadow_of_stdlib_type(base: &str, qualified: &str) -> bool {
+    almide_lang::stdlib_info::stdlib_type_vs_user_shadow(base, qualified)
 }
 
 /// Extracted from `collect_pipeline_layouts` (codopsy8 complexity sweep, phase 4 of 4):
@@ -291,7 +305,7 @@ fn collect_pipeline_variant_layouts(ir: &almide_ir::IrProgram) -> crate::lower::
         }
     }
     for (base, ks) in owners {
-        if ks.len() == 1 && !variant_layouts.by_type.contains_key(&base) {
+        if ks.len() == 1 && !variant_layouts.by_type.contains_key(&base) && !user_shadow_of_stdlib_type(&base, &ks[0]) {
             let v = variant_layouts.by_type.get(&ks[0]).cloned().expect("ks[0] came from variant_layouts.by_type.keys() above, so the key is guaranteed present");
             variant_layouts.by_type.insert(base, v);
         }

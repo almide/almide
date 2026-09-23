@@ -660,4 +660,59 @@ fn main() -> Unit = {
         // which the fuzz corpus exercises (its call-bearing-arm walls), not stable
         // hand-written source.
     }
+
+    /// #2567: a user record named after the builtin `Value` (`type Value = { n: Int }`,
+    /// keyed `self.Value` by the checker — #1828) must leave the stdlib's own `Value`
+    /// exactly what the linked registry bodies carry. The bare-name layout alias and
+    /// the unique-suffix resolver both bridged the two names, so `json.parse`'s
+    /// `List[Value]` accumulator lowered against the user's `{ n: Int }` layout: its
+    /// drop walked an Int as a handle and the incumbent leg of
+    /// spec/wasm_cross/stdlib_type_shadow.almd never terminated. Pinned structurally:
+    /// the linked parser (`$__jp_array`) renders BYTE-IDENTICALLY whether the user's
+    /// record is called `Value` or `Other` — the parser never sees the user's type,
+    /// so its text cannot depend on the spelling.
+    #[test]
+    fn a_user_record_named_value_does_not_relayout_the_linked_json_parser() {
+        let program = |ty: &str| {
+            format!(
+                r#"
+import json
+type {ty} = {{ n: Int }}
+fn main() -> Unit = {{
+  let mine = {ty} {{ n: 7 }}
+  match json.parse("{{\"a\":1}}") {{
+    ok(doc) => println(int.to_string(mine.n) + " " + json.stringify(doc))
+    err(e) => println(e)
+  }}
+}}
+"#
+            )
+        };
+        let func_text = |wat: &str, name: &str| -> String {
+            let needle = format!("(func {name} ");
+            let start = wat.find(&needle).unwrap_or_else(|| panic!("{name} present in:\n{wat}"));
+            let end = wat[start + 1..].find("\n  (func ").map(|i| start + 1 + i).unwrap_or(wat.len());
+            wat[start..end].to_string()
+        };
+        let shadow = try_render_wasm_source(&program("Value"), &[], false)
+            .expect("the program with a user `Value` record renders");
+        let control = try_render_wasm_source(&program("Other"), &[], false)
+            .expect("the program with a user `Other` record renders");
+        for f in ["$__jp_array", "$__jp_object", "$__drop_value", "$json.parse"] {
+            assert_eq!(
+                func_text(&shadow, f),
+                func_text(&control, f),
+                "{f} is a linked stdlib body over the builtin Value: its rendering must not \
+                 depend on whether the USER declared a record spelled `Value` — the bare \
+                 stdlib name is the stdlib's own identity, never the user's `self.Value`"
+            );
+        }
+        // The consequence the issue reported: the parser's push loops stayed full-copy
+        // concats (the drop flavor the append window needs was the user record's).
+        assert!(
+            shadow.contains("__list_append1_rc"),
+            "the linked json parser must still reach the amortized append with a user \
+             `Value` record in scope"
+        );
+    }
 }
