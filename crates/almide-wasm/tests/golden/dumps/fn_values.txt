@@ -18,8 +18,9 @@ type 16: FuncType { params: [I32], results: [] }
 type 17: FuncType { params: [I32, I32, I32], results: [] }
 type 18: FuncType { params: [I64], results: [I64] }
 type 19: FuncType { params: [I64], results: [I64] }
-type 20: FuncType { params: [I32, I64], results: [I64] }
-type 21: FuncType { params: [I64], results: [] }
+type 20: FuncType { params: [I32], results: [] }
+type 21: FuncType { params: [I32, I64], results: [I64] }
+type 22: FuncType { params: [I64], results: [] }
 import almide.println Func(0)
 import almide.eprintln Func(0)
 import almide.exit Func(1)
@@ -65,9 +66,10 @@ func 36 -> type 0
 func 37 -> type 18
 func 38 -> type 19
 func 39 -> type 4
-func 40 -> type 21
-func 41 -> type 20
-func 42 -> type 20
+func 40 -> type 20
+func 41 -> type 22
+func 42 -> type 21
+func 43 -> type 21
 table TableType { element_type: funcref, table64: false, initial: 3, maximum: Some(3), shared: false }
 memory MemoryType { memory64: false, shared: false, initial: 2, maximum: None, page_size_log2: None }
 global GlobalType { content_type: I32, mutable: false, shared: false } = I32Const { value: 256 } End
@@ -91,7 +93,7 @@ export main Func 44
 export __heap Global 1
 export add1 Func 42
 export add2 Func 43
-element funcs [46,47]
+element funcs [47,48]
 code locals=[]
   Unreachable
   End
@@ -276,6 +278,8 @@ code locals=[1xI64,1xI32,1xI64,1xI64,3xI32,1xI64,1xF64,24xI32,16xI64,8xF64,8xI32
   Else
   I32Const { value: 161 }
   End
+  LocalGet { local_index: 1 }
+  Call { function_index: 45 }
   LocalSet { local_index: 1 }
   LocalGet { local_index: 1 }
   LocalSet { local_index: 9 }
@@ -283,8 +287,22 @@ code locals=[1xI64,1xI32,1xI64,1xI64,3xI32,1xI64,1xF64,24xI32,16xI64,8xF64,8xI32
   I64Const { value: 41 }
   LocalGet { local_index: 9 }
   I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 12, memory: 0 } }
-  CallIndirect { type_index: 20, table_index: 0 }
+  CallIndirect { type_index: 21, table_index: 0 }
+  Call { function_index: 46 }
+  LocalGet { local_index: 1 }
   Call { function_index: 45 }
+  End
+code locals=[]
+  LocalGet { local_index: 0 }
+  GlobalGet { global_index: 3 }
+  I32LtU
+  If { blockty: Empty }
+  Return
+  End
+  LocalGet { local_index: 0 }
+  LocalGet { local_index: 0 }
+  I32Load { memarg: MemArg { align: 2, max_align: 2, offset: 16, memory: 0 } }
+  CallIndirect { type_index: 20, table_index: 0 }
   End
 code locals=[1xI32]
   LocalGet { local_index: 0 }
