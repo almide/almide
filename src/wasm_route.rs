@@ -531,9 +531,7 @@ fn trim_name_section_to_function_names(payload: &[u8]) -> Option<Vec<u8>> {
     let mut i = prefix_end;
     while i < payload.len() {
         let id = payload[i];
-        let Some((sub_len, sub_len_bytes)) = read_leb128_u32(&payload[i + 1..]) else {
-            return None;
-        };
+        let (sub_len, sub_len_bytes) = read_leb128_u32(&payload[i + 1..])?;
         let sub_start = i + 1 + sub_len_bytes;
         let sub_end = (sub_start + sub_len as usize).min(payload.len());
         if id == 1 {
