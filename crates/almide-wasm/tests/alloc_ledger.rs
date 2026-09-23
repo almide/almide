@@ -140,6 +140,44 @@ fn emit_armed(ir: &almide_ir::IrProgram) -> Vec<u8> {
     almide_wasm::emit_program(ir).expect("the armed emission of a fixture the unarmed one accepted")
 }
 
+/// A structural refusal must be a ledgered `!` row in `what`.
+fn note_refusal(rel: &str, what: &str, refused: &mut std::collections::BTreeSet<String>, offences: &mut Vec<String>) {
+    if !refused.remove(rel) {
+        offences.push(format!("{rel}: structural leg refuses it but the {what} has no `!` row — regenerate"));
+    }
+}
+
+/// The check side for one fixture: both ledgers' verdicts, then the
+/// instrument's own obligation — the armed module prints the same stdout
+/// and ends at the same watermark as the unarmed one. (The watermark is
+/// compared only where the unarmed one is pinned — an entropy-fed
+/// fixture's two runs differ on their own.)
+fn check_fixture(
+    rel: &str,
+    bytes: Option<&[u8]>,
+    armed: Option<&[u8]>,
+    pinned: Option<Option<String>>,
+    count_pinned: Option<Option<String>>,
+    offences: &mut Vec<String>,
+) {
+    let got = bytes.map(|b| run_wasm(b).expect("engine runs the module"));
+    let got_s = got.as_ref().map(|r| r.heap_end.expect("__heap export present").to_string());
+    let deterministic = matches!(pinned, Some(Some(_)));
+    offences.extend(verdict("watermark", rel, pinned, got_s.as_deref()));
+    let armed_got = armed.map(counted);
+    offences.extend(verdict("count", rel, count_pinned, armed_got.as_ref().map(|(c, _, _)| c.as_str())));
+    let (Some(r), Some((_, aw, astdout))) = (&got, &armed_got) else { return };
+    if deterministic && Some(*aw) != r.heap_end {
+        offences.push(format!(
+            "{rel}: the armed module's watermark {aw} != the unarmed {:?} — the counter perturbed the heap",
+            r.heap_end
+        ));
+    }
+    if *astdout != r.stdout {
+        offences.push(format!("{rel}: the armed module's stdout differs from the unarmed one"));
+    }
+}
+
 #[cfg_attr(debug_assertions, ignore = "ledger sweep is release-only (CI: release-shape job)")]
 #[test]
 fn corpus_allocation_watermarks_hold() {
@@ -176,16 +214,8 @@ fn corpus_allocation_watermarks_hold() {
                         rows.push_str(&format!("!\t{rel}\n"));
                         count_rows.push_str(&format!("!\t{rel}\n"));
                     } else {
-                        if !refused.remove(rel) {
-                            offences.push(format!(
-                                "{rel}: structural leg refuses it but the ledger has no `!` row — regenerate"
-                            ));
-                        }
-                        if !count_refused.remove(rel) {
-                            offences.push(format!(
-                                "{rel}: structural leg refuses it but the count ledger has no `!` row — regenerate"
-                            ));
-                        }
+                        note_refusal(rel, "ledger", &mut refused, &mut offences);
+                        note_refusal(rel, "count ledger", &mut count_refused, &mut offences);
                     }
                     continue;
                 }
@@ -201,34 +231,7 @@ fn corpus_allocation_watermarks_hold() {
             count_rows.push_str(&c);
             continue;
         }
-        let got = bytes.map(|b| run_wasm(b).expect("engine runs the module"));
-        let got_w = got.as_ref().map(|r| r.heap_end.expect("__heap export present"));
-        let got_s = got_w.map(|w| w.to_string());
-        let pinned = baseline.remove(rel);
-        let deterministic = matches!(pinned, Some(Some(_)));
-        offences.extend(verdict("watermark", rel, pinned, got_s.as_deref()));
-        let armed_got = armed.map(counted);
-        offences.extend(verdict(
-            "count",
-            rel,
-            counts.remove(rel),
-            armed_got.as_ref().map(|(c, _, _)| c.as_str()),
-        ));
-        // The instrument must not perturb the measured run: the armed
-        // module prints the same stdout and ends at the same watermark.
-        // (The watermark is compared only where the unarmed one is pinned
-        // — an entropy-fed fixture's two runs differ on their own.)
-        if let (Some(r), Some((_, aw, astdout))) = (&got, &armed_got) {
-            if deterministic && Some(*aw) != r.heap_end {
-                offences.push(format!(
-                    "{rel}: the armed module's watermark {aw} != the unarmed {:?} — the counter perturbed the heap",
-                    r.heap_end
-                ));
-            }
-            if *astdout != r.stdout {
-                offences.push(format!("{rel}: the armed module's stdout differs from the unarmed one"));
-            }
-        }
+        check_fixture(rel, bytes, armed, baseline.remove(rel), counts.remove(rel), &mut offences);
     }
     if update {
         std::fs::write(&bp, &rows).expect("write baseline");

@@ -47,6 +47,30 @@ pub(crate) const REUSED: u32 = 1;
 pub(crate) const BYTES: u32 = 2;
 pub(crate) const FREES: u32 = 3;
 
+/// Declare the four counter globals (i64, mutable, 0) when `counters` names
+/// their first index — a no-op for a shipped module.
+pub(crate) fn declare_globals(globals: &mut wasm_encoder::GlobalSection, counters: Option<u32>) {
+    use wasm_encoder::{ConstExpr, GlobalType, ValType};
+    if counters.is_none() {
+        return;
+    }
+    for _ in EXPORTS {
+        globals.global(
+            GlobalType { val_type: ValType::I64, mutable: true, shared: false },
+            &ConstExpr::i64_const(0),
+        );
+    }
+}
+
+/// Export the counters under their names, base index `counters` — a no-op
+/// for a shipped module.
+pub(crate) fn export_globals(exports: &mut wasm_encoder::ExportSection, counters: Option<u32>) {
+    let Some(base) = counters else { return };
+    for (k, name) in EXPORTS.iter().enumerate() {
+        exports.export(name, wasm_encoder::ExportKind::Global, base + k as u32);
+    }
+}
+
 /// Turn the switch on for a scope and restore the previous state on drop.
 #[must_use = "the guard restores the previous state when dropped; binding it to `_` restores immediately"]
 pub struct CountGuard(bool);

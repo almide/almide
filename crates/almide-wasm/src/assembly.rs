@@ -264,14 +264,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     // present only under the `alloc_count` switch (a shipped module has
     // none: byte-identical to a build without the switch).
     let counters = crate::alloc_count::armed().then(|| G_FIXED_COUNT + global_decls.len() as u32);
-    if counters.is_some() {
-        for _ in crate::alloc_count::EXPORTS {
-            globals.global(
-                GlobalType { val_type: ValType::I64, mutable: true, shared: false },
-                &ConstExpr::i64_const(0),
-            );
-        }
-    }
+    crate::alloc_count::declare_globals(&mut globals, counters);
 
     let mut exports = ExportSection::new();
     exports.export("memory", ExportKind::Memory, 0);
@@ -288,11 +281,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         exports.export("__heap_high", ExportKind::Global, G_HEAP_HIGH);
     }
     // #2407: the counters, read by the host beside `__heap` (armed only).
-    if let Some(base) = counters {
-        for (k, name) in crate::alloc_count::EXPORTS.iter().enumerate() {
-            exports.export(name, ExportKind::Global, base + k as u32);
-        }
-    }
+    crate::alloc_count::export_globals(&mut exports, counters);
     // #457: every clean-closure entry pub fn is host-callable.
     for (name, idx) in export_fns {
         exports.export(name, ExportKind::Func, *idx);
