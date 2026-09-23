@@ -505,9 +505,9 @@ path = "scripts/check-perf-ratio.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"
 class = "NEGATIVE_TESTED"
-evidence = "#1244 round 5: three forged baselines, each a REAL measurement run (bench.py --quick). fft 1.272->0.500 => 'fft 1.275 (baseline 0.500) OVER ceiling 0.700'; nbody 0.997->5.000 => 'nbody 1.004 UNDER floor 2.500 (broken bench or durable win)' — so the two-sided band both bites; the spectralnorm line deleted => 'baseline has no entry for [spectralnorm] — a gated benchmark was added without anchoring it'. Unforged run: all four ok"
+evidence = "#1244 round 5: three forged baselines, each a REAL measurement run (bench.py --quick). fft 1.272->0.500 => 'fft 1.275 (baseline 0.500) OVER ceiling 0.700'; nbody 0.997->5.000 => 'nbody 1.004 UNDER floor 2.500 (broken bench or durable win)' — so the two-sided band both bites; the spectralnorm line deleted => 'baseline has no entry for [spectralnorm] — a gated benchmark was added without anchoring it'. Unforged run: all four ok. 2026-09-23 #2156, the wordfreq-wasm-idiom relation: the SAME relation test in crates/almide-wasm/tests/perf_ratchet.rs (group_by_key_count_relation) against the pre-fix emitter read t(K=4000)/t(K=40) = 64.21 and failed the 8x line; the fixed emitter reads 1.13; bench.py's wasm pair read 103x on the pre-fix binary (6.00 s vs 0.058 s at 1M) and 0.78x fixed"
 measures = "per-benchmark ratio of Almide-native runtime to the same-shape handwritten Rust in one interleaved run (bench.py --quick medians), against scripts/perf-ratio-baseline.txt; the victory rows' ablation ratio under the region / fan knob"
-varies = "2026-09-15 #2229/#2235: the four ablation/<bench> rows were found CONSTANT (byte-identical binaries) and retired — the first row of this ledger to fail this test; the anchored rows moved at 2062dd0cf (2026-09-09) and #1338 (fft 1.272 -> 1.176)"
+varies = "2026-09-15 #2229/#2235: the four ablation/<bench> rows were found CONSTANT (byte-identical binaries) and retired — the first row of this ledger to fail this test; the anchored rows moved at 2062dd0cf (2026-09-09) and #1338 (fft 1.272 -> 1.176); 2026-09-23 #2156 added the wordfreq-wasm-idiom row at 0.78 (the same pair read 103 on the pre-fix binary)"
 
 [[gate]]
 path = "scripts/check-rt-oracle-registry.sh"

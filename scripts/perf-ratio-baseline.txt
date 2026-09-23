@@ -65,6 +65,16 @@ binarytrees 0.610
 # The gate fails on the 3x ceiling in check-perf-ratio.sh, never on this value —
 # verified: `baseline[key]` appears only inside its report strings.
 strbuild-wasm-idiom 0.99
+# The wasm-leg group_by relation (#2156): `wordfreq-group` (the CHEATSHEET's
+# `list.group_by |> map.map`) over `wordfreq` (the imperative `m[w] = …` loop),
+# both 2M draws from the 5,000-word vocabulary, whole-process wall time under
+# `wasmtime run`, min of the interleaved rounds. Before the fix it read 103x
+# on an M4 Pro (bench.py at 1M, 2026-09-23: 6.00 s against 0.058 s) — the
+# accumulator copy-grew per key and every element walked the linear scan.
+# After: 0.78 at 1M and 0.77 at 2M on the same box (the idiomatic row skips
+# the per-draw `map.get_or` read the loop pays). The gate fails on
+# IDIOM_CEILING in check-perf-ratio.sh, never on this value.
+wordfreq-wasm-idiom 0.78
 treealloc 0.343
 # `decode` (#1679) is reported and not anchored, like strchurn: N derived
 # `User.decode`s of one 8-field document against the same-shape hand-written
