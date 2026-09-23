@@ -55,14 +55,22 @@ and serves as the cross-target oracle / executable spec.
   binary.
 - **`--target wasm`** — two legs
   (`src/cli/build.rs::render_wasm_module_routed`): cheap PROJECT-SHAPE
-  routes pick the leg up front, and a structural wall reroutes (below):
+  routes pick the leg up front, and a structural wall reroutes (below).
+  The routing is ONE library function, `almide::wasm_route::route_wasm`
+  (src/wasm_route.rs, #2554): the CLI reads the probe switches off the
+  environment into its `RouteOptions` and renders its `RouteError`s; a
+  wasm32 consumer (the playground) calls `render_wasm_routed` with its
+  pre-parsed tabs (`ModuleSource::Provided`) and gets the same leg choice —
+  `tests/wasm_route_parity_test.rs` holds the two equal on every
+  wasm_cross fixture (leg and bytes):
   - the **commissioned structural leg** (default): `almide::wasm_leg`
     (parse→check→lower→self-host link→`link_ir`) feeds
     `almide-wasm::emit_program`, which emits wasm bytes structurally
     (wasm-encoder — no WAT text). Measured 610/610 byte-identical to native
     on the full wasm_cross corpus. `almide run` executes on the embedded
     `almide-wasm-run` host (fs/env/stdin included); `almide build` ships the
-    `to_wasi` form, which runs on STOCK runtimes (`wasmtime run mod.wasm` —
+    `to_wasi` form (`almide-wasi`, a pure crate re-exported as
+    `almide_wasm_run::wasi`), which runs on STOCK runtimes (`wasmtime run mod.wasm` —
     the 578-fixture stock-runtime gate is the witness). The same artifact
     runs on `almide-wasm-vm`, the qualification-scoped interpreter (#865)
     whose instruction set is pinned to this emitter's;
