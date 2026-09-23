@@ -118,6 +118,23 @@ bindgen = { git = "https://github.com/almide/almide-bindgen", tag = "v0.1.0" }
 json = { git = "https://github.com/almide/json", tag = "v2.0.0" }
 ```
 
+**Each key appears once per table, and each table once** (#2583). TOML forbids
+a repeated key, and every command that reads `almide.toml` (`check`, `run`,
+`test`, `build`, …) refuses one before fetching anything or touching the lock,
+naming both lines:
+
+```text
+error: almide.toml:7: dependency `almai` is declared twice in [dependencies] (first at line 6)
+  hint: keep one of lines 6 and 7 and delete the other — TOML allows a key only once per table
+```
+
+The rule covers every table the manifest reader reads (`[package]`,
+`[dependencies]`, `[permissions]`, `[native-deps]`), including a repeated
+table header. Two spellings of the same url (`…/almai` and `…/almai.git`) are
+still one dependency declared twice.
+
+Test: `tests/manifest_duplicate_key_test.rs`.
+
 Short form (defaults to github.com/almide/):
 ```bash
 almide add bindgen@v0.1.0
@@ -127,17 +144,19 @@ almide add bindgen@v0.1.0
 ## 7. Lock File
 
 ```toml
-# almide.lock (auto-generated, commit to VCS)
-[bindgen]
-git = "https://github.com/almide/almide-bindgen"
-ref = "v0.1.0"
-commit = "a629eded8d20..."
+# almide.lock — auto-generated, do not edit
 
-[json]
-git = "https://github.com/almide/json"
-ref = "v2.0.0"
-commit = "b8f3a1..."
+bindgen = { git = "https://github.com/almide/almide-bindgen", ref = "v0.1.0", commit = "a629eded8d20..." }
+json = { git = "https://github.com/almide/json", ref = "v2.0.0", commit = "b8f3a1..." }
 ```
+
+One entry per direct dependency, one line each; the writer never emits a name
+twice. A lock that holds a name twice (written by a compiler before #2583
+from a manifest that declared the dependency twice) is refused with the two
+lines and the way out — delete one of them, keeping the one whose `git`
+matches `almide.toml`, or delete the lock and let the next run rewrite it.
+
+Test: `tests/manifest_duplicate_key_test.rs`, `tests/lock_roundtrip_test.rs`.
 
 ## 8. Resolution Algorithm
 
