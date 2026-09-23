@@ -4554,3 +4554,14 @@ evidence  = [
   { path = "tests/diagnostic_harness_test.rs", name = "broken_files_produce_expected_diagnostics", class = "fixture" },
   { path = "tests/scoped_region_test.rs", name = "the_same_refusal_on_both_check_targets", class = "fixture" },
 ]
+[[contract]]
+id        = "C-365"
+spec      = "ALS-M5"
+title     = "A generic protocol with explicit conformance dispatches to the one declared implementation, identically on both targets"
+statement = "ALS-M5: a protocol declared with type parameters (`protocol Repository[K, V] { ... }`) is used through an EXPLICIT conformance that names its arguments (`type Users: Repository[Int, User]`) and through an APPLIED bound (`[R: Repository[Int, User]]`). A method call on a bound value runs the conforming type's own `Type.method` — the one implementation its declaration names; no other is searched for — and the program is byte-identical native == wasm. Covered by the fixture: two types conforming to one protocol at different arguments, a type letter only the bound names (`[V, R: Repository[Int, V]]`, pinned by the conformance), a `mut self` method called through the bound (the write-back of C-226 at the method position), and an effect method whose `!` exits exactly as an ordinary effect call's. The protocol name may be qualified by the module that declares it (`ports.Repository`)."
+since     = "0.64.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/generic_protocol_conformance.almd", class = "fixture" },
+  { path = "spec/integration/generic_protocol_ports/src/shop_test.almd", class = "fixture" },
+]
