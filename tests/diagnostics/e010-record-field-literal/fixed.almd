@@ -1,0 +1,8 @@
+type P = { x: Int, y: Int }
+
+fn f(p: P) -> String = match p {
+  P { x: 0, y } => "zero:${y}",
+  P { x, .. } => "other:${x}",
+}
+
+effect fn main() -> Unit = println(f({ x: 2, y: 3 }))

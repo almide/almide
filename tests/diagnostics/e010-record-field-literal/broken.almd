@@ -1,0 +1,9 @@
+// #2553: a literal in a plain record pattern's field refines the arm, so a
+// match whose only arm pins `x: 0` does not cover every `P`.
+type P = { x: Int, y: Int }
+
+fn f(p: P) -> String = match p {
+  P { x: 0, y } => "zero:${y}"
+}
+
+effect fn main() -> Unit = println(f({ x: 2, y: 3 }))

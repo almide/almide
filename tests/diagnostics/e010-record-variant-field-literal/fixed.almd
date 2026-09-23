@@ -1,0 +1,10 @@
+type Shape = | Circle { r: Int, tag: String } | Dot
+
+fn name(s: Shape) -> String = match s {
+  Circle { r: 0, tag: _ } => "zero",
+  Circle { r: _, tag: "unit" } => "unit",
+  Circle { .. } => "circle",
+  Dot => "dot",
+}
+
+effect fn main() -> Unit = println(name(Circle { r: 5, tag: "x" }))
