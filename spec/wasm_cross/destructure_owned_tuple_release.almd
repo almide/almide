@@ -1,0 +1,53 @@
+// @contract: C-066
+// #2515: `let (a, b) = <owned tuple>` releases the tuple and what it holds.
+// The destructure reads each bound position as a view of the subject, so the
+// subject needs an owner: an owned one (a call result) is named by the frame
+// and released at its exit or on the loop's next rebind, exactly as
+// `let t = mk(i); let (a, b) = t` is. Before the fix nobody owned it and every
+// call leaked the tuple and the 64-byte buffer inside (160 B per call, on pure
+// code, on a `mut` parameter's value return and on an effect one alike), so the
+// allocation ledger's watermark for this fixture is what a reintroduced leak
+// moves. The borrowed cell beside them destructures a var twice and reads it
+// again: an over-release there would read freed memory.
+fn mk(v: Int) -> (Bytes, Int) = (bytes.new(64), v)
+
+fn named(v: Int) -> (String, List[Int]) = ("n" + int.to_string(v % 10), [v, v + 1])
+
+fn stamp(mut b: Bytes, v: Int) -> Int = {
+  bytes.set_at(b, 0, v % 200)
+  v % 7
+}
+
+effect fn estamp(mut b: Bytes, v: Int) -> Int = {
+  bytes.set_at(b, 1, v % 200)
+  ok(v % 5)
+}
+
+fn first(v: Int) -> Bytes = {
+  let (b, _) = mk(v)
+  b
+}
+
+effect fn main() -> Unit = {
+  var owned = 0
+  var mutp = 0
+  var borrowed = 0
+  for i in 0..<2000 {
+    let (b, k) = mk(i)
+    let (s, xs) = named(i)
+    owned = owned + bytes.len(b) + k - i + string.len(s) + list.len(xs)
+    let tail = first(i)
+    owned = owned + bytes.len(tail)
+    var buf = bytes.new(64)
+    let r = stamp(buf, i)
+    let e = estamp(buf, i)!
+    mutp = mutp + r + e + bytes.get_or(buf, 0, 0) + bytes.get_or(buf, 1, 0)
+    let t = mk(i)
+    let (c, n) = t
+    let (d, _) = t
+    borrowed = borrowed + bytes.len(c) + bytes.len(d) + n - i
+  }
+  println("owned ${owned}")
+  println("mut ${mutp}")
+  println("borrowed ${borrowed}")
+}
