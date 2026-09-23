@@ -656,10 +656,20 @@ impl Emitter<'_> {
                     IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => &expr.kind,
                     k => k,
                 };
+                // Arm-aware (#2010 item 4): a MODULE call never spends the
+                // var's own credit — a native arm declares Borrow (reads it)
+                // or Retain (+1 share), the registry route incs an owned
+                // position and passes a borrowed one as is — so the old
+                // occupant is still this local's to release, and the RC-5
+                // inc above already made an aliasing result (`s =
+                // set.insert(s, x)`'s present path) its own credit. Only a
+                // table fn / runtime helper can take the block over.
+                let module_call = matches!(call_core, IrExprKind::Call { target: almide_ir::CallTarget::Module { .. }, .. });
                 let call_shaped_self = matches!(
                     call_core,
                     IrExprKind::Call { .. } | IrExprKind::RuntimeCall { .. }
-                ) && crate::rc_ownership::rc_mentions_var(value, *var);
+                ) && !module_call
+                    && crate::rc_ownership::rc_mentions_var(value, *var);
                 if let Some(idx) = local
                     && !self.cells.contains(var)
                     && self.rc_droppable(declared)
