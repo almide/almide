@@ -133,6 +133,18 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(hc).end();
                     self.release_i32();
                     self.release_i32();
+                    // #2516: over an OWNED carrier the some-cell is fresh at
+                    // rc 1 AND holds the payload's one credit (moved out of
+                    // the carrier just released above), so it is an owned
+                    // value — mark the node, or the bind takes the
+                    // borrowed-source `+1` and the cell stays at rc 1
+                    // forever. Over a BORROWED carrier the cell's payload
+                    // slot is a view (no `$inc`): the cell cannot own it,
+                    // the node stays unmarked, and today's `+1` keeps the
+                    // payload's one credit with the carrier's holder.
+                    if owned_carrier {
+                        self.owned_call_marks.insert(e as *const IrExpr as usize);
+                    }
                     SliceTy::Option(o)
                 }
                 got @ SliceTy::Option(_) => got,
