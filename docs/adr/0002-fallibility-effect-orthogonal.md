@@ -61,8 +61,9 @@ spec に purity / fallibility / totality の区別が書かれておらず、
 `effect` キーワードは capability のみを、戻り型位置の後置 `!`(`-> T!`)は
 fallibility のみを意味する。** 最終文法は 4 象限:
 
-> **2026-09-24 改訂(§D6)**: 3 行目「effect・総」は撤回。effect は可謬を含意し、
-> `effect fn f() -> Int` は 4 行目と同じ意味(lift あり)で確定。直交するのは pure 側だけ。
+> **2026-09-24 改訂(§D6)**: 3 行目「effect・総」はユーザー宣言では撤回。effect は可謬を含意し、
+> `effect fn f() -> Int` は 4 行目と同じ意味(lift あり)で確定。stdlib の never-err effect fn は
+> 呼び出し側で素の値を返す既存の扱いのまま(§D6 の表)。
 
 ```almide
 fn        f() -> Int      // pure  ・総(失敗しない)
@@ -122,23 +123,33 @@ operand 型を見て hint を分岐、末尾形には machine-applicable な
 
 ### D6. 改訂(2026-09-24): effect は可謬を含意する — 「effect・総」象限の撤回
 
-**`effect fn f() -> T` は常に `T!` の意味(`Result[T, String]` への lift)とし、これを最終形とする。**
-Phase 2(`-> T!` 綴りの受理と警告窓、#2563)と Phase 3(`effect fn -> T` を総に意味反転)は
-実施しない。pure 側の 2 象限(`-> T` / `-> T!`、Phase 1)は変更なし。
+**ユーザーが宣言する `effect fn f() -> T` は常に `T!` の意味(`Result[T, String]` への lift)とし、
+これを最終形とする。** Phase 2(`-> T!` 綴りの受理と警告窓、#2563)と Phase 3(`effect fn -> T` を
+総に意味反転)は実施しない。pure 側の 2 象限(`-> T` / `-> T!`、Phase 1)は変更なし。
+
+**現状の事実(2026-09-24、0.63.0 dev で check 実測)** — 呼び出し側の見え方は宣言元で分かれている:
+
+| 呼び先 | 例 | `!` なし | `!` あり |
+|---|---|---|---|
+| stdlib の never-err effect fn | `random.float()`、`io.read_line()` | 素の値(`Float` / `String`) | 通る(no-op) |
+| ユーザー宣言の effect fn(本体が失敗しなくても) | `effect fn roll() -> Float = random.float()` | `let` で E041、文で E042 | 通る(伝搬) |
+
+stdlib 側の扱いは never-err elision(#840/#841)が checker まで表に出ているもので、本改訂はこれを
+変えない。fern 例の `walk(..)!` が要るのは `walk` がユーザー宣言の effect fn だからで、
+`random.float()` には最初から `!` は要らない。
 
 理由:
 
 1. **本 ADR 自身の規準(D1)と矛盾していた。** D1 は「世界の状態に依存する失敗は effect 圏で表す」
    と定める。effect fn は定義上世界に触る関数なので、この規準では可謬になる。「effect・総」は
    規準の外にある升だった。
-2. **「総」に見える effect fn も実行時には失敗しうる。** #2556 の計測で total に分類された
-   effect fn(`io.print`、`random.float`、`env.sleep_ms` …)は、Almide の字面に `!` / `err` が無い
-   というだけで、SIGPIPE・OS の乱数源・シグナルによる中断で失敗しうる。分類器は世界を見ていない。
+2. **ユーザー宣言の effect fn について「総」は字面の判定でしかない。** #2556 の分類器は本体に
+   `!` / `err` が無いことしか見ておらず、呼んでいる host 側が世界の状態で失敗するか
+   (SIGPIPE、OS の乱数源、シグナルによる中断)は見ていない。stdlib の never-err 集合は
+   runtime 側で個別に面倒を見た上での宣言であり、ユーザーコードに同じ保証は無い。
 3. **MSR の観点で損が大きい。**
    - 修正の局所性: 総の effect fn に可謬な呼び出しを 1 つ足すと署名が `-> T!` に変わり、
      全呼び出し元に `!` が要る(上へ連鎖)。今は全 effect fn が lift 済みなので、その修正は関数内で閉じる。
-   - 既存コーパスは effect 呼び出しに一律 `!` を付けており、Phase 3 後は `random.float()!` の
-     ような付けすぎが新しいエラー群になる。
    - Phase 2 の窓は `-> T` / `-> T!` の同義併存を作り、Falsifier 1 の懸念そのものになる。
    - 得るものは小さい: 意味のない `!` が消えるのは spec 37 / playground 7 箇所。実行時性能は
      never-err elision(#840/#841)が既に取っている。
@@ -147,8 +158,10 @@ Phase 2(`-> T!` 綴りの受理と警告窓、#2563)と Phase 3(`effect fn -> T`
 
 帰結:
 
-- `!` が失敗しない呼び先(`random.float()` など)にも要る現状は**仕様**として残す。Swift / Rust
-  出身の読み手には儀式に見えるが、書き手(LLM)の失点源ではない。
+- 本体が失敗しないユーザー宣言の effect fn(fern の `walk`)でも、呼び出しに `!` が要る現状は
+  **仕様**として残す。Swift / Rust 出身の読み手には儀式に見えるが、書き手(LLM)の失点源ではない。
+  「effect を呼んだら `!`」の一律規則として書けば、stdlib の never-err 呼び出しに付けた `!` も
+  no-op で通るので、書き手は呼び先を区別しなくてよい。
 - 綴りは `effect fn f() -> T` のまま。`-> T!` を必須にする案は、`effect` と同じ情報の
   二重記載・約 880 署名の移行・「`!` の書き忘れ」という新エラーを生むため採らない。
 - never-err elision は型ではなく codegen の最適化として存続する。
@@ -227,7 +240,7 @@ D4 の check 時エラー化はその是正。変換フック(From 相当)の導
 
 **得るもの**: 上記 Rationale の波及 4 点。加えて `effect` / `!` が 1 キーワード 1 意味に
 戻り、stdlib の署名が正直になる(Phase 3)。**2026-09-24 改訂: Phase 3 は撤回(§D6)。
-`effect` は capability に加えて可謬を含意する — 「1 キーワード 1 意味」は pure 側でのみ成立。**
+ユーザー宣言の `effect` は capability に加えて可謬を含意する — 「1 キーワード 1 意味」は pure 側でのみ成立。**
 
 **払うもの**:
 - 文法表面の追加(戻り位置の `!`、fn 型 slot の `!`)とその教育コスト。
