@@ -1,0 +1,8 @@
+// The bare form is the accepted no-op import (#2541).
+import fan
+
+effect fn main() -> Unit = {
+  let r = fan.bounded(compute.ms(50)) { 21 * 2 } ?? -1
+  let t = fan.timeout(duration.ms(5000)) { r + 1 } ?? -1
+  println(int.to_string(t))
+}

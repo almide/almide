@@ -72,6 +72,18 @@ impl Parser {
         Ok(Decl::Module { path, span: Some(span) })
     }
 
+    /// `import fan` on a line of its own (no alias, no selector): the no-op
+    /// import of an always-in-scope surface (#2541). Any other shape that
+    /// starts `import fan` still reaches `parse_import_decl`'s diagnostic.
+    pub(crate) fn at_bare_import_fan(&self) -> bool {
+        self.check(TokenType::Import)
+            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Fan)
+            && matches!(
+                self.peek_at(2).map(|t| &t.token_type),
+                None | Some(TokenType::Newline) | Some(TokenType::Comment) | Some(TokenType::EOF)
+            )
+    }
+
     pub(crate) fn parse_import_decl(&mut self) -> Result<Decl, String> {
         let span = self.current_span();
         self.expect(TokenType::Import)?;
@@ -84,12 +96,15 @@ impl Parser {
             ));
         }
 
-        // `fan` is a keyword head, not a module — without this the user gets a
+        // `fan` is a keyword head, not a module. A bare `import fan` never
+        // reaches here (the caller accepts it as a no-op, #2541); what does is
+        // `import fan as f` / `import fan.{…}` — an alias or selector for a
+        // surface that has no module behind it. Without this the user gets a
         // raw "Expected identifier (got Fan 'fan')" that hides the actual fix.
         if self.check(TokenType::Fan) {
             let tok = self.current();
             return Err(format!(
-                "'fan' is auto-available — it is a built-in surface, not a module, at line {}:{}\n  Hint: Remove the `import fan` line; fan.bounded / fan.race / fan.timeout are always in scope",
+                "'fan' is auto-available — it is a built-in surface, not a module, so it takes no alias or selector, at line {}:{}\n  Hint: Write `fan.timeout(...)` / `fan.map(...)` directly — fan is always in scope; a plain `import fan` is accepted but not needed",
                 tok.line, tok.col
             ));
         }

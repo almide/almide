@@ -1,0 +1,10 @@
+// #2541: a bare `import fan` is accepted as a no-op (like `import string`),
+// but `fan` is a built-in surface with no module behind it, so an ALIAS has
+// nothing to name. Before #2541 even the bare line died here, and a model
+// repeated it through four repair rounds.
+import fan as f
+
+effect fn main() -> Unit = {
+  let r = fan.bounded(compute.ms(50)) { 21 * 2 } ?? -1
+  println(int.to_string(r))
+}
