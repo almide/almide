@@ -143,20 +143,22 @@ pub fn rewrite(func: &mut IrFunction, vars: &mut VarTable) -> bool {
     true
 }
 
-fn match_shape(func: &IrFunction) -> Option<Shape> {
+/// The signature half of the preconditions: `(p: Int) -> Int`, a plain
+/// pure user fn (no effect, test, generics or attributes).
+fn int_to_int_param(func: &IrFunction) -> Option<&IrParam> {
     let [p] = func.params.as_slice() else { return None };
-    if p.ty != Ty::Int || p.is_mut || p.default.is_some() || func.ret_ty != Ty::Int {
-        return None;
-    }
-    if func.is_effect
-        || func.is_test
-        || func.generics.as_ref().is_some_and(|g| !g.is_empty())
-        || !func.extern_attrs.is_empty()
-        || !func.export_attrs.is_empty()
-        || !func.attrs.is_empty()
-    {
-        return None;
-    }
+    let plain_param = p.ty == Ty::Int && !p.is_mut && p.default.is_none();
+    let plain_fn = !func.is_effect
+        && !func.is_test
+        && func.generics.as_ref().is_none_or(|g| g.is_empty())
+        && func.extern_attrs.is_empty()
+        && func.export_attrs.is_empty()
+        && func.attrs.is_empty();
+    (plain_param && plain_fn && func.ret_ty == Ty::Int).then_some(p)
+}
+
+fn match_shape(func: &IrFunction) -> Option<Shape> {
+    let p = int_to_int_param(func)?;
     let IrExprKind::If { cond, then, else_ } = &peel(&func.body).kind else { return None };
     let (rec_when_true, base, rec) = if is_rec_op(then) { (true, else_, then) } else { (false, then, else_) };
     let bound = rec_bound(cond, p.var, rec_when_true)?;
