@@ -21,6 +21,7 @@ pub fn register_builtin_protocols(env: &mut TypeEnv) {
             params: vec![("a".into(), self_ty.clone()), ("b".into(), self_ty.clone())],
             ret: Ty::Bool,
             is_effect: false,
+            mut_params: vec![],
         }],
     });
 
@@ -34,6 +35,7 @@ pub fn register_builtin_protocols(env: &mut TypeEnv) {
             params: vec![("v".into(), self_ty.clone())],
             ret: Ty::String,
             is_effect: false,
+            mut_params: vec![],
         }],
     });
 
@@ -47,6 +49,7 @@ pub fn register_builtin_protocols(env: &mut TypeEnv) {
             params: vec![("a".into(), self_ty.clone()), ("b".into(), self_ty.clone())],
             ret: Ty::Int,
             is_effect: false,
+            mut_params: vec![],
         }],
     });
 
@@ -60,6 +63,7 @@ pub fn register_builtin_protocols(env: &mut TypeEnv) {
             params: vec![("v".into(), self_ty.clone())],
             ret: Ty::Int,
             is_effect: false,
+            mut_params: vec![],
         }],
     });
 
@@ -74,12 +78,14 @@ pub fn register_builtin_protocols(env: &mut TypeEnv) {
                 params: vec![("v".into(), self_ty.clone())],
                 ret: value_ty.clone(),
                 is_effect: false,
+                mut_params: vec![],
             },
             ProtocolMethodSig {
                 name: "decode".into(),
                 params: vec![("v".into(), value_ty.clone())],
                 ret: Ty::result(self_ty.clone(), Ty::String),
                 is_effect: false,
+                mut_params: vec![],
             },
         ],
     });
@@ -94,6 +100,7 @@ pub fn register_builtin_protocols(env: &mut TypeEnv) {
             params: vec![("v".into(), self_ty.clone())],
             ret: value_ty.clone(),
             is_effect: false,
+            mut_params: vec![],
         }],
     });
 
@@ -107,6 +114,7 @@ pub fn register_builtin_protocols(env: &mut TypeEnv) {
             params: vec![("v".into(), value_ty.clone())],
             ret: Ty::result(self_ty.clone(), Ty::String),
             is_effect: false,
+            mut_params: vec![],
         }],
     });
 
@@ -124,24 +132,28 @@ pub fn register_builtin_protocols(env: &mut TypeEnv) {
                 params: vec![("a".into(), self_ty.clone()), ("b".into(), self_ty.clone())],
                 ret: self_ty.clone(),
                 is_effect: false,
+                mut_params: vec![],
             },
             ProtocolMethodSig {
                 name: "sub".into(),
                 params: vec![("a".into(), self_ty.clone()), ("b".into(), self_ty.clone())],
                 ret: self_ty.clone(),
                 is_effect: false,
+                mut_params: vec![],
             },
             ProtocolMethodSig {
                 name: "mul".into(),
                 params: vec![("a".into(), self_ty.clone()), ("b".into(), self_ty.clone())],
                 ret: self_ty.clone(),
                 is_effect: false,
+                mut_params: vec![],
             },
             ProtocolMethodSig {
                 name: "div".into(),
                 params: vec![("a".into(), self_ty.clone()), ("b".into(), self_ty.clone())],
                 ret: self_ty.clone(),
                 is_effect: false,
+                mut_params: vec![],
             },
         ],
     });

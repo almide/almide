@@ -85,7 +85,7 @@ impl Checker {
             self.validate_ufcs_mut_args(&field, object, args);
             return ty;
         }
-        if let Some(ty) = self.check_call_target_typevar_protocol(&obj_concrete, &field) {
+        if let Some(ty) = self.check_call_target_typevar_protocol(&obj_concrete, &field, arg_tys) {
             return ty;
         }
         // UFCS: user-defined function obj.func(args) -> func(obj, args)
@@ -205,14 +205,34 @@ impl Checker {
         None
     }
     /// Protocol method on TypeVar: `item.show()` where `item: T, T: Showable`. Verbatim text move out of [`Self::check_call_target_member`].
-    fn check_call_target_typevar_protocol(&mut self, obj_concrete: &Ty, field: &Sym) -> Option<Ty> {
+    fn check_call_target_typevar_protocol(&mut self, obj_concrete: &Ty, field: &Sym, arg_tys: &[Ty]) -> Option<Ty> {
         if let Ty::TypeVar(tv) = obj_concrete {
             if let Some(proto_names) = self.env.generic_protocol_bounds.get(tv).cloned() {
                 for proto_name in &proto_names {
                     if let Some(proto_def) = self.env.protocols.get(proto_name).cloned() {
                         if let Some(method_sig) = proto_def.methods.iter().find(|m| m.name == *field) {
                             // Resolve method return type: substitute Self -> T (the TypeVar)
-                            let ret = self.substitute_self_in_ty(&method_sig.ret, obj_concrete);
+                            let mut ret = self.substitute_self_in_ty(&method_sig.ret, obj_concrete);
+                            // A GENERIC protocol's parameters take the bound's
+                            // arguments exactly (#1589): `[R: Repository[K, User]]`
+                            // makes `r.get(k)` a `(K) -> User?` call, and its
+                            // arguments are checked against that — nothing is
+                            // inferred from an implementation elsewhere. A bound
+                            // with the wrong argument count is reported at the
+                            // declaration; its parameters stay Unknown here so
+                            // the one diagnostic is not followed by a cascade.
+                            if !proto_def.generics.is_empty() {
+                                let args = self.env.generic_protocol_bound_args.get(&(*tv, *proto_name)).cloned()
+                                    .filter(|a| a.len() == proto_def.generics.len())
+                                    .unwrap_or_else(|| vec![Ty::Unknown; proto_def.generics.len()]);
+                                let bindings: HashMap<Sym, Ty> = proto_def.generics.iter().copied().zip(args).collect();
+                                ret = crate::types::substitute(&ret, &bindings);
+                                for ((pname, pty), aty) in method_sig.params.iter().skip(1).zip(arg_tys.iter()) {
+                                    let expected = crate::types::substitute(&self.substitute_self_in_ty(pty, obj_concrete), &bindings);
+                                    if expected.contains_unknown() { continue; }
+                                    self.constrain(expected, aty.clone(), format!("argument '{}' of {}.{}", pname, proto_name, field));
+                                }
+                            }
                             // An effect protocol method reached through a generic bound is
                             // lifted to Result[T, String] by codegen's ResultPropagation, the
                             // same as a named effect fn (see `finalize_call_return_ty`, which

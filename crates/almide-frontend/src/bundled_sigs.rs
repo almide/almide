@@ -187,6 +187,7 @@ fn build_fn_sig(
         is_effect,
         structural_bounds: HashMap::new(),
         protocol_bounds: HashMap::new(),
+        protocol_bound_args: HashMap::new(),
         mut_params,
     }
 }

@@ -160,6 +160,9 @@ pub struct ProtocolMethodSig {
     pub params: Vec<(Sym, Ty)>,
     pub ret: Ty,
     pub is_effect: bool,
+    /// Which parameters are `mut` (the receiver included) — the ownership
+    /// half of the method signature an implementation must match (#1589).
+    pub mut_params: Vec<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -172,6 +175,10 @@ pub struct FnSig {
     pub structural_bounds: std::collections::HashMap<Sym, Ty>,
     /// Protocol bounds for generics: TypeVar name → list of protocol names
     pub protocol_bounds: std::collections::HashMap<Sym, Vec<Sym>>,
+    /// Type arguments of an APPLIED protocol bound (#1589): `(TypeVar,
+    /// protocol) → args` for `[R: Repository[K, V]]`. Absent for a bound
+    /// written without arguments, so every pre-#1589 signature is unchanged.
+    pub protocol_bound_args: std::collections::HashMap<(Sym, Sym), Vec<Ty>>,
     /// Which parameters are `mut` (in-place mutation). Indices into `params`.
     pub mut_params: Vec<usize>,
 }
@@ -180,7 +187,7 @@ pub struct FnSig {
 #[macro_export]
 macro_rules! fn_sig {
     (params: $params:expr, ret: $ret:expr, is_effect: $eff:expr) => {
-        FnSig { params: $params, ret: $ret, is_effect: $eff, generics: vec![], structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new(), mut_params: vec![] }
+        FnSig { params: $params, ret: $ret, is_effect: $eff, generics: vec![], structural_bounds: std::collections::HashMap::new(), protocol_bounds: std::collections::HashMap::new(), protocol_bound_args: std::collections::HashMap::new(), mut_params: vec![] }
     };
 }
 
