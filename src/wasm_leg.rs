@@ -50,16 +50,68 @@ fn lower_to_ir_impl(
     dep_paths: &[(crate::project::PkgId, std::path::PathBuf)],
     tests: Option<Option<&str>>,
 ) -> Result<crate::ir::IrProgram, String> {
+    let program = parse_entry(path, source_text)?;
+    let resolved = resolve_modules(path, &program, ModuleSource::Disk { dep_paths })?;
+    lower_resolved(path, source_text, program, resolved, tests)
+}
+
+/// Where the modules an entry program imports come from (#2554).
+///
+/// The CLI reads them off disk through the project resolver; a consumer
+/// that has no filesystem — the browser playground, whose tabs are the
+/// project — hands the SAME list the incumbent renderer takes, already
+/// parsed: `(module name, program, is_self_import)`, leaves first, with the
+/// bundled stdlib modules it needs (`almide_mir::pipeline::bundled_self_modules`
+/// resolves those for a single entry) — the resolver's auto-import step does
+/// not run on this form.
+#[derive(Clone, Copy)]
+pub enum ModuleSource<'a> {
+    /// Resolve `import` declarations relative to the entry file; external
+    /// packages through `dep_paths` (`resolve_imports_with_deps`).
+    Disk { dep_paths: &'a [(crate::project::PkgId, std::path::PathBuf)] },
+    /// Pre-parsed modules; nothing is read from disk.
+    Provided(&'a [(String, crate::ast::Program, bool)]),
+}
+
+/// The front's parse step: the entry program, or the wall reason.
+pub(crate) fn parse_entry(path: &str, source_text: &str) -> Result<crate::ast::Program, String> {
     let tokens = crate::lexer::Lexer::tokenize(source_text);
     let mut parser = crate::parser::Parser::new(tokens).with_file(path);
-    let mut program = parser.parse().map_err(|e| format!("parse: {e}"))?;
+    let program = parser.parse().map_err(|e| format!("parse: {e}"))?;
     if !parser.errors.is_empty() {
         return Err(format!("parse errors: {}", parser.errors.len()));
     }
+    Ok(program)
+}
 
-    let mut resolved = crate::resolve::resolve_imports_with_deps(path, &program, dep_paths)
-        .map_err(|e| format!("resolve: {e}"))?;
+/// The front's module step: the resolved module list for `program`.
+pub(crate) fn resolve_modules(
+    path: &str,
+    program: &crate::ast::Program,
+    modules: ModuleSource<'_>,
+) -> Result<crate::resolve::ResolvedModules, String> {
+    match modules {
+        ModuleSource::Disk { dep_paths } => crate::resolve::resolve_imports_with_deps(path, program, dep_paths)
+            .map_err(|e| format!("resolve: {e}")),
+        // No package id (a provided module is project-local by construction)
+        // and no source map: the map only attributes a module's own type
+        // errors to its file, and a provided module has no file.
+        ModuleSource::Provided(list) => Ok(crate::resolve::ResolvedModules {
+            modules: list.iter().map(|(n, p, s)| (n.clone(), p.clone(), None, *s)).collect(),
+            sources: std::collections::HashMap::new(),
+        }),
+    }
+}
 
+/// The front's lowering half: canonicalize → check → lower → module
+/// lowering → self-host linking → `link_ir` → the shared post-link rewrites.
+pub(crate) fn lower_resolved(
+    path: &str,
+    source_text: &str,
+    mut program: crate::ast::Program,
+    mut resolved: crate::resolve::ResolvedModules,
+    tests: Option<Option<&str>>,
+) -> Result<crate::ir::IrProgram, String> {
     let canon = crate::canonicalize::canonicalize_program(
         &program,
         resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
