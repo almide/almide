@@ -22,10 +22,10 @@ effect fn noisy(n: Int) -> Int = {
   else noisy(n - 1)! + noisy(n - 2)!
 }
 
-// A call in the condition is not a scalar expression over `n`.
-fn small(n: Int) -> Bool = n < 2
-
-fn gated(n: Int) -> Int = if small(n) then n else gated(n - 1) + gated(n - 2)
+// A condition that allocates (it formats `n`) is not a scalar expression
+// over `n`. (A small pure helper like `fn small(n: Int) -> Bool = n < 2` is
+// inlined before this check and then qualifies.)
+fn gated(n: Int) -> Int = if string.len("${n}") < 2 then n else gated(n - 1) + gated(n - 2)
 
 // Division in the base can trap; the body is not trap-free.
 fn divided(n: Int) -> Int = if n < 2 then 100 / (n + 3) else divided(n - 1) + divided(n - 2)
