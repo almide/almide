@@ -124,7 +124,7 @@ fn make_test_program() -> IrProgram {
         type_registry: Default::default(),
         effect_fn_names: Default::default(),
         effect_map: Default::default(),
-        codegen_annotations: Default::default(), used_stdlib_modules: Default::default(),
+        codegen_annotations: Default::default(), used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(),
     }
 }
 
