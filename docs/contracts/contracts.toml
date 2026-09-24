@@ -2821,6 +2821,7 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_elementwise_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_product_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_composition_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_softmax_nonfinite_rows.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-224"
