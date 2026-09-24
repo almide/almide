@@ -5,10 +5,11 @@
 // constant g(j), rendered in FIXED notation (never scientific) + a `.0` integer suffix —
 // byte-identical to v0 native's `format!("{}", n)` + suffix. It replaced the Dragon4
 // transcription (#1985) because the exact-bignum digit loop cost 6.4 KB of wasm per program
-// that prints a float; Schubfach's per-digit work is three 64x64 multiplies, and its one
-// large table (617 x 128 bits, 9.9 KB) is NOT stored: g(j) is DERIVED AT RUN TIME by exact
-// big-integer arithmetic (one multiply-by-small and one divide-by-small loop over u32
-// limbs), which is ~1.2 KB of code. The measurement that chose this is
+// that prints a float; Schubfach's per-value work is three 126x64-bit products. Its full table
+// (617 x 126 bits, 9.9 KB) is NOT stored: g(j) comes from a COMPACT table of 24 entries (552
+// bytes, a string literal in the data segment) and one 127x63-bit product (#2099, the shape of
+// Swift's, Wado's and Ryu's small tables), exact for every j. Until #2099 g(j) was derived at run
+// time by big-integer arithmetic — smaller by the table, but 3x slower. The measurements are
 // docs/benchmarks/float-printer.md. Two places deliberately depart from Giulietti's Java:
 // an exact tie between the two closest candidates rounds the magnitude UP (Rust's Dragon4
 // "2R >= S"), and the shorter multiple-of-10 candidate is tried from s >= 10 (Java prints at
@@ -31,12 +32,11 @@
 // bit patterns vs `format!`) and the 1M-value cross-target diff recorded in the benchmark doc.
 //
 // ── Big-integer layout ──
-// One bignum lives at the start of a scratch block (one prim.alloc_list, read/written by byte
-// address via prim.load32/store32): [len:u32 @ +0][limb_0 @ +4][limb_1 @ +8]... little-endian u32
-// limbs. to_string: g(j)'s bignum of up to 38 limbs (2^1202) @0, then the two g words @160 —
-// prim.alloc_list(22) = 176 bytes.
-// to_fixed: up to 460 limbs (c * 2^1025 * 10^4096 < 2^14687) at @0, then the 9-digit chunks of
-// the answer (i64 each, at most 492) at @1856 — prim.alloc_list(724) = 5792 bytes.
+// to_fixed's bignum lives at the start of a scratch block (one prim.alloc_list, read/written by
+// byte address via prim.load32/store32): [len:u32 @ +0][limb_0 @ +4][limb_1 @ +8]... little-endian
+// u32 limbs, up to 460 limbs (c * 2^1025 * 10^4096 < 2^14687) at @0, then the 9-digit chunks of
+// the answer (i64 each, at most 492) at @1856 — prim.alloc_list(724) = 5792 bytes. to_string
+// allocates nothing but its result.
 // All offsets below are BYTE offsets from the scratch byte-base (handle(block) + 12).
 // ───────────────────────── big-integer helpers ─────────────────────────
 // Each takes the absolute BYTE address of a bignum's len word. limb i is at p + 4 + i*4.
@@ -167,57 +167,37 @@ else if bits0 < 0 then "-inf" else "inf"
 // r = floor(log2 10^j) - 125 makes vb = floor(4v * 10^-k) with a sticky bit, and the
 // candidates s = vb >> 2, s + 1 and the multiple of 10 at s are tested against the rounding
 // interval [vbl, vbr] computed the same way from c - 1/2 (or - 1/4) and c + 1/2.
-// Floor-log helpers, exact over the f64 range (checked offline against big-integer logs).
+// g(j) is read off the compact table below (__sf_gtab). Floor-log helpers, exact over the f64
+// range (checked offline against big-integer logs).
 fn __sf_flog10pow2(e: Int) -> Int = prim.bshr(e * 661971961083, 41)
 
 fn __sf_flog10_3q_pow2(e: Int) -> Int = prim.bshr(e * 661971961083 - 274743187321, 41)
 
 fn __sf_flog2pow10(e: Int) -> Int = prim.bshr(e * 913124641741, 38)
 
-// p = 2^e: zero the limbs below, one bit in the top limb.
-fn __sf_set_pow2(p: Int, e: Int, i: Int) -> Unit = if i < prim.bshr(e, 5) then {
-  prim.store32(p + 4 + i * 4, 0)
-  __sf_set_pow2(p, e, i + 1)
-} else {
-  prim.store32(p, i + 1)
-  prim.store32(p + 4 + i * 4, prim.bshl(1, prim.band(e, 31)))
-}
+// g(j) from a COMPACT TABLE (#2099; the Swift / Wado / Ryu-small-table shape). 10^j = 2^j * 5^j
+// and 5^j = 5^b * 5^f with b = the multiple of 27 at or below j and f = j - b in 0..26, so
+// g(j) - 1 = floor(C(b) * 5^f / 2^u) + d(j), where C(b) = floor(5^b * 2^-s) is 5^b's top 127 bits
+// (s = floor(log2 5^b) - 126), 5^f < 2^63 is exact, u = floor(log2 5^j) - floor(log2 5^b) + 1 is
+// in 1..62, and d(j) in {0, 1} is the correction for C(b)'s truncation (the error is below one
+// unit because C has one bit more than the 126 kept). The table therefore reproduces the exact
+// 126-bit g(j) of the paper for every j the printer can ask for (-292..324) — checked offline for
+// all 617 against big-integer arithmetic — so the candidate selection below sees bit-identical
+// values. 24 entries of 23 bytes, one per b = -297, -270, ..., 324: C's low 63 bits (9 bytes),
+// C >> 63 (10 bytes), then the 27 correction bits d(b + f) (4 bytes). Each byte carries 7 bits
+// so the table is a plain string literal: it lives in the data segment (552 bytes), not in code.
+// tests/float_gtable_exact_test.rs decodes it and checks every g(j) against the definition.
+fn __sf_gtab() -> Int = prim.handle("'rm+@+^JW!L4G3\x04\x166'\x01\x00\x00@\x00H\x22\x09 7Jh\x1d-h\x1c\x09\x11^n\x13\x1f\x07\x01\x00o;?O\x09UA*G4NWHPY\x04Y~V?Z\x01\x00\x09 \x10YOUZl\x14/c^l;R!L%\x0e@0\x01Nfo\x03Nn\x05J[GV\x1f*>j+A(LaI\x0e\x01\x04\x01\x01\x00\x09QTD\x18Z\x14-\x06z\x15,#06\x0a,f\x01\x08\x10\x00 \x09dY\x05\x13Vi<Ik;\x13\x07eH\x06\x09:\x01\x10\x00\x02 7x!TF\x7f@\x1a\x1dULh\x0dI1!'\x16\x01|yP+a9\x7f\x08J)N8\x7d\x22\x05\x07Z\x0arYjr\x01L\x04(\x06C8Mpa\x14|%UL<T#*\x0b4\x14D\x012B 0>4*=&&TW;H|\x01\x0fy64:\x1e\x01&cu,\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00:\x1e\x00!\x7fdceN\x01\x00\x00\x00\x00\x12YO\x7d2\x0b\x12dLQX92\x0a\x08\x0f\x06'\x01\x00\x00\x00\x00QqZwY\x0b\x05h4\x7d5#'\x1b\x13+x\x06\x01v3S;J\x14\x19\x03AtM\x03ti\x1bBSAL\x7b\x00Z\x014\x24\x1d!G\x7f\x5c\x5c\x7f\x5c\x0b0/dS\x07\x08[h9\x0d0\x01\x04\x22I\x16\x03s\x08z\x1dq\x11\x16\x0a\x7d\x04/_\x1f=k \x0e\x01*\x22\x18\x01\x7d%[!E\x0cMEG\x01]\x10Q\x02e\x7bie\x01\x04\x04\x13(I6.\x5c^b'e6a]8>c@RS9\x01\x00\x00\x00 GyIU\x00q5/%Y9Z\x7d!!\x0f|\x15\x01\x00\x00\x00\x00v\x0cy\x1cK3g\x18^O9Kgs4\x00%r\x01\x00\x00\x00\x00d\x00\x0e1\x07xE!\x05\x07\x1e!O\x100\x0d\x5cC\x01\x00\x00\x00\x00hF\x06*\x13,t\x016)7\x0c'+rv\x0c\x1e\x01\x00\x00\x00\x00") + 12
 
-// The n (<= 63) bits of bignum p starting at bit position pos; pos < 0 reads zeros below bit 0.
-fn __sf_getbits(p: Int, pos: Int, n: Int) -> Int = if pos + n <= 0 then 0
-else if pos < 0 then prim.bshl(__sf_getbits(p, 0, n + pos), 0 - pos)
-else {
-  let i = prim.bshr(pos, 5)
-  let s = prim.band(pos, 31)
-  let l0 = __sf_limb(p, i)
-  let l1 = __sf_limb(p, i + 1)
-  let l2 = __sf_limb(p, i + 2)
-  let hi = if s == 0 then 0 else prim.bshl(l2, 64 - s)
-  let v = prim.bor(prim.bor(prim.bshr_u(l0, s), prim.bshl(l1, 32 - s)), hi)
-  prim.band(v, prim.bshl(1, n) - 1)
-}
+// n table bytes from p (7 bits each, little-endian) -> their bits, top byte first.
+fn __sf_rd(p: Int, n: Int, acc: Int) -> Int = if n == 0 then acc
+else __sf_rd(p, n - 1, prim.bor(prim.bshl(acc, 7), prim.load8(p + n - 1)))
 
-// g(j) = floor(10^j * 2^-r) + 1, r = floor(log2 10^j) - 125, derived exactly:
-//   j >= 0: P = 10^j (chunked *10^9), g - 1 = its top 126 bits
-//   j <  0: P = 2^(125 - floor(log2 10^j)) divided by 10^-j (chunked /10^9) = exactly g - 1
-// Leaves g1 @ sb+160 and g0 @ sb+168.
-fn __sf_compute_g(j: Int, sb: Int) -> Unit = {
-  // l = bit length of the bignum whose top 126 bits are g - 1.
-  let l = if j >= 0 then {
-    prim.store32(sb, 1)
-    prim.store32(sb + 4, 1)
-    let _m = __sf_pow10_loop(sb, j, false, 0)
-    __sf_flog2pow10(j) + 1
-  } else {
-    __sf_set_pow2(sb, 125 - __sf_flog2pow10(j), 0)
-    let _d = __sf_pow10_loop(sb, 0 - j, true, 0)
-    126
-  }
-  let g0 = __sf_getbits(sb, l - 126, 63) + 1
-  let carry = if g0 == prim.bshl(1, 63) then 1 else 0
-  prim.store64(sb + 160, __sf_getbits(sb, l - 63, 63) + carry)
-  prim.store64(sb + 168, prim.band(g0, 9223372036854775807))
-}
+// 5^f (f in 0..26, so < 2^63).
+fn __sf_pow5(f: Int, acc: Int) -> Int = if f == 0 then acc else __sf_pow5(f - 1, acc * 5)
+
+// a < b on the unsigned 64-bit reading of both.
+fn __sf_ult(a: Int, b: Int) -> Bool = if (a < 0) == (b < 0) then a < b else b < 0
 
 // 64x64 -> the high 64 bits (unsigned), from four 32x32 partial products.
 fn __sf_mulhi(a: Int, b: Int) -> Int = {
@@ -294,16 +274,36 @@ else {
 // v = c * 2^q (c > 0): the shortest decimal in the rounding interval, closest on a draw, and on
 // an exact tie the LARGER magnitude — Rust's `{}` (Dragon4 "2R >= S") rounds a half up, not to
 // even: format! prints 1669760939663944.3 for ...944.25 where Giulietti's even rule gives ...4.2.
-fn __sf_core(q: Int, c: Int, neg: Bool, dot0: Bool, sb: Int) -> String = {
+fn __sf_core(q: Int, c: Int, neg: Bool, dot0: Bool) -> String = {
   let out = prim.band(c, 1)
   let cb = prim.bshl(c, 2)
   let regular = if c != 4503599627370496 then true else q == 0 - 1074
   let cbl = if regular then cb - 2 else cb - 1
   let k = if regular then __sf_flog10pow2(q) else __sf_flog10_3q_pow2(q)
   let h = q + __sf_flog2pow10(0 - k) + 2
-  __sf_compute_g(0 - k, sb)
-  let g1 = prim.load64(sb + 160)
-  let g0 = prim.load64(sb + 168)
+  // g(j), j = -k: entry e = (j + 297) / 27 at byte e * 23, f = j - b.
+  let j = 0 - k
+  let e = (j + 297) / 27
+  let f = j + 297 - e * 27
+  let p = __sf_gtab() + e * 23
+  let lo = __sf_rd(p, 9, 0)
+  let hi = __sf_rd(p + 9, 10, 0)
+  // C = c1 * 2^64 + c0 (c0 read as unsigned); w = C * 5^f as three 64-bit words w2:w1:w0.
+  let c0 = prim.bor(lo, prim.bshl(hi, 63))
+  let c1 = prim.bshr_u(hi, 1)
+  let pf = __sf_pow5(f, 1)
+  let l1 = c1 * pf
+  let w1 = l1 + __sf_mulhi(c0, pf)
+  let w2 = __sf_mulhi(c1, pf) + (if __sf_ult(w1, l1) then 1 else 0)
+  let w0 = c0 * pf
+  // T = floor(w / 2^u) (< 2^126) + d(j); g = T + 1 as two 63-bit words.
+  let u = __sf_flog2pow10(j) - j - (__sf_flog2pow10(j - f) - (j - f)) + 1
+  let tlo = prim.bor(prim.bshl(w1, 64 - u), prim.bshr_u(w0, u))
+  let thi = prim.bor(prim.bshl(w2, 64 - u), prim.bshr_u(w1, u))
+  let d = prim.band(prim.bshr_u(prim.load8(p + 19 + f / 7), f - (f / 7) * 7), 1)
+  let g0x = prim.band(tlo, 9223372036854775807) + d + 1
+  let g1 = prim.bor(prim.bshl(thi, 1), prim.bshr_u(tlo, 63)) + prim.bshr_u(g0x, 63)
+  let g0 = prim.band(g0x, 9223372036854775807)
   let vb = __sf_rop(g1, g0, prim.bshl(cb, h))
   let vbl = __sf_rop(g1, g0, prim.bshl(cbl, h))
   let vbr = __sf_rop(g1, g0, prim.bshl(cb + 2, h))
@@ -329,11 +329,9 @@ fn __sf_core(q: Int, c: Int, neg: Bool, dot0: Bool, sb: Int) -> String = {
 // that MIN_VALUE gets Java's mandatory second digit "4.9E-324", is deliberately absent: format!
 // prints the one-digit shortest "5e-324".)
 fn __sf_nonzero(bq: Int, t: Int, neg: Bool, dot0: Bool) -> String = {
-  let blk = prim.alloc_list(22)
-  let sb = prim.handle(blk) + 12
   let q = if bq != 0 then bq - 1075 else 0 - 1074
   let c = if bq != 0 then t + 4503599627370496 else t
-  __sf_core(q, c, neg, dot0, sb)
+  __sf_core(q, c, neg, dot0)
 }
 
 // every arm is one call → the heap-result-if lowering handles it. A zero renders as the one
