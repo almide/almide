@@ -54,15 +54,17 @@ fn __softmax_row(row: List[Float]) -> List[Float] = {
     let mx = __sm_row_max(row, n, 1, list.get(row, 0) ?? 0.0)
     let exps = row |> list.map((x) => __fast_exp(x - mx))
     let s = exps |> list.fold(0.0, (acc, v) => acc + v)
-    if s <= 0.0 or s != s then row |> list.map((_x) => 1.0 / int.to_float(n))
-    else {
-      // RECIPROCAL-MULTIPLY, not divide (#1197): the native kernel scales by
-      // `inv = 1.0/sum` and multiplies, and `v * (1/s)` is not `v / s` — they
-      // differ by up to one ULP. After the exp and the reduction order were
-      // unified this was the last byte between the legs.
-      let inv = 1.0 / s
-      exps |> list.map((v) => v * inv)
-    }
+    // NO uniform fallback for a NaN sum (#2624): a row holding NaN or +inf, or
+    // one that is all -inf, has `x - max` = NaN somewhere, so the sum is NaN
+    // and every entry is NaN — the native kernel's IEEE propagation (PyTorch
+    // answers the same). A `1/n` row here printed a plausible distribution on
+    // wasm where native printed NaN. The sum is never 0: the max entry's exp is 1.
+    // RECIPROCAL-MULTIPLY, not divide (#1197): the native kernel scales by
+    // `inv = 1.0/sum` and multiplies, and `v * (1/s)` is not `v / s` — they
+    // differ by up to one ULP. After the exp and the reduction order were
+    // unified this was the last byte between the legs.
+    let inv = 1.0 / s
+    exps |> list.map((v) => v * inv)
   }
 }
 
@@ -481,21 +483,18 @@ else {
   __mha_max(sch, sk, j + 1, if v > acc then v else acc)
 }
 
+// The native `mha_core` exps through the vendored musl `exp` (C-223), not the
+// fast-exp `softmax_rows` uses: the fast-exp here printed every
+// multi_head_attention value ~1e-8 off native (#2624).
 fn __mha_exp(sch: Int, sk: Int, mx: Float, j: Int, sum: Float) -> Float = if j >= sk then sum
 else {
   let s = prim.ffrombits(prim.load64(sch + 12 + j * 8))
-  let e = __fast_exp(s - mx)
+  let e = math.exp(s - mx)
   prim.store64(sch + 12 + j * 8, prim.fbits(e))
   __mha_exp(sch, sk, mx, j + 1, sum + e)
 }
 
-// out[col0+k] += w * v[j, col0+k] for k in 0..dh (w = scores[j]/sum), accumulated over j.
-fn __mha_fill_one(sch: Int, sk: Int, j: Int) -> Int = if j >= sk then 0
-else {
-  prim.store64(sch + 12 + j * 8, prim.fbits(1.0))
-  __mha_fill_one(sch, sk, j + 1)
-}
-
+// out[col0+k] += w * v[j, col0+k] for k in 0..dh (w = scores[j] * (1/sum)), accumulated over j.
 fn __mha_acc_cols(oh: Int, vh: Int, col0: Int, dh: Int, w: Float, k: Int) -> Int = if k >= dh then 0
 else {
   let old = prim.ffrombits(prim.load64(oh + 12 + (col0 + k) * 8))
@@ -504,12 +503,15 @@ else {
   __mha_acc_cols(oh, vh, col0, dh, w, k + 1)
 }
 
-fn __mha_out(oh: Int, sch: Int, vmat: List[List[Float]], col0: Int, dh: Int, sk: Int, sum: Float, j: Int) -> Int = if j >= sk then 0
+// Native's order (#2624): reciprocal-multiply (`w = e * inv`, not `e / sum`,
+// which differs by an ULP), and a weight of exactly 0 contributes NOTHING — a
+// key whose exp underflowed does not turn an inf/NaN value into `inf * 0 = NaN`.
+fn __mha_out(oh: Int, sch: Int, vmat: List[List[Float]], col0: Int, dh: Int, sk: Int, inv: Float, j: Int) -> Int = if j >= sk then 0
 else {
-  let w = prim.ffrombits(prim.load64(sch + 12 + j * 8)) / sum
-  let vh = prim.load64(prim.handle(vmat) + 12 + j * 8)
-  let _c = __mha_acc_cols(oh, vh, col0, dh, w, 0)
-  __mha_out(oh, sch, vmat, col0, dh, sk, sum, j + 1)
+  let w = prim.ffrombits(prim.load64(sch + 12 + j * 8)) * inv
+  let _c = if w == 0.0 then 0
+  else __mha_acc_cols(oh, prim.load64(prim.handle(vmat) + 12 + j * 8), col0, dh, w, 0)
+  __mha_out(oh, sch, vmat, col0, dh, sk, inv, j + 1)
 }
 
 fn __mha_heads(oh: Int, qh: Int, kmat: List[List[Float]], vmat: List[List[Float]], nh: Int, dh: Int, sk: Int, sq: Int, i: Int, scale: Float, causal: Bool, h: Int) -> Int = if h >= nh then 0
@@ -519,14 +521,13 @@ else {
   let sch = prim.handle(scores)
   let mask = if causal then (sk - sq) + i else 0 - 1
   let _s = __mha_scores(sch, qh, kmat, col0, dh, sk, scale, mask, 0)
-  let mx = __mha_max(sch, sk, 1, prim.ffrombits(prim.load64(sch + 12)))
-  let sum0 = __mha_exp(sch, sk, mx, 0, 0.0)
-  let bad = sum0 <= 0.0 or sum0 != sum0
-  let sum = if bad then {
-    let _f = __mha_fill_one(sch, sk, 0)
-    int.to_float(sk)
-  } else sum0
-  let _o = __mha_out(oh, sch, vmat, col0, dh, sk, sum, 0)
+  // Max from -inf over every score, as native (an empty key set reads nothing);
+  // 4095 << 52 is the bit pattern of -inf.
+  // No uniform fallback for a NaN sum (#2624): a score row holding NaN or +inf
+  // propagates NaN through the weights, the native IEEE answer.
+  let mx = __mha_max(sch, sk, 0, prim.ffrombits(int.bshl(4095, 52)))
+  let sum = __mha_exp(sch, sk, mx, 0, 0.0)
+  let _o = __mha_out(oh, sch, vmat, col0, dh, sk, 1.0 / sum, 0)
   __mha_heads(oh, qh, kmat, vmat, nh, dh, sk, sq, i, scale, causal, h + 1)
 }
 
