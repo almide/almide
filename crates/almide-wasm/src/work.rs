@@ -106,6 +106,12 @@ pub(crate) enum Helper {
     MapIdxSideGet,
     MapIdxSideRaw,
     MapIdxSideSet { raw: u32 },
+    /// `$mapidx_forget(block, 0) -> 0` — a dying block's side record
+    /// retired: its index block (a record past `1`) freed, then the record
+    /// tombstoned through `side_set`. The Map / Set drops call it; a bare
+    /// `side_set(block, 0)` there leaked every index a dropped block had
+    /// been given — one per functional rebuild probed twice.
+    MapIdxForget { side_get: u32, side_set: u32 },
     MapIdxHash { key: crate::map_index::IdxKey },
     MapIdxBuild { key: crate::map_index::IdxKey, hash: u32 },
     MapIdxFind { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns, build: u32 },
@@ -139,9 +145,10 @@ pub(crate) enum Helper {
     IncShape { ty: SliceTy },
     /// `$drop_map(block)` — the drop of a Map / Set whose entries hold NO
     /// heap handle (flat keys and values): the block's credit down; at
-    /// zero its index side-table entry is cleared (`side_clear` =
-    /// `$mapidx_side_set`, so a reused address inherits no stale index)
-    /// and the entries array freed. Handle entries take `DropEntries`.
+    /// zero its index side-table entry is cleared and the index it named
+    /// freed (`side_clear` = `$mapidx_forget`, so a reused address
+    /// inherits no stale index and no index outlives its block) and the
+    /// entries array freed. Handle entries take `DropEntries`.
     DropMapSpine { side_clear: u32 },
     /// `$drop_entries(block)` — the typed drop of a Map / Set whose
     /// entries hold heap HANDLES (#2010, Map stage b): the block's credit

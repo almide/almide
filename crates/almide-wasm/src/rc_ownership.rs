@@ -199,7 +199,9 @@ impl Emitter<'_> {
             }
             SliceTy::Map(..) | SliceTy::Set(_) => {
                 let raw = self.work.helper(crate::work::Helper::MapIdxSideRaw);
-                let side_clear = self.work.helper(crate::work::Helper::MapIdxSideSet { raw });
+                let side_set = self.work.helper(crate::work::Helper::MapIdxSideSet { raw });
+                let side_get = self.work.helper(crate::work::Helper::MapIdxSideGet);
+                let side_clear = self.work.helper(crate::work::Helper::MapIdxForget { side_get, side_set });
                 let (stride, decs) = self.entry_slots(t);
                 let slots: [Option<(u32, u32)>; 2] =
                     [decs[0].map(|(off, ft)| (off, self.dec_fn_of(ft))), decs[1].map(|(off, ft)| (off, self.dec_fn_of(ft)))];

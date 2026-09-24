@@ -328,6 +328,27 @@ pub(crate) fn emit_build(key: IdxKey, hash: u32) -> Function {
     f
 }
 
+/// `$mapidx_forget(block, val) -> 0`: the side-record release a Map / Set
+/// drop runs at rc 0. The record's value is 0 (none), 1 (seen once) or the
+/// address of the block's INDEX — which nothing else owns, so it is freed
+/// here before the record is overwritten with `val` (the drops pass 0).
+/// A dropped block that had been probed twice used to keep its index
+/// forever: a functional `m = map.set(m, k, map.get(m, k) ?? 0 + 1)` fold
+/// builds a fresh block per step and indexes it on the second lookup, so
+/// every step leaked an index the size of the map.
+pub(crate) fn emit_forget(side_get: u32, side_set: u32) -> Function {
+    // params: 0=block, 1=val; locals: 2=v
+    let (block, val, v) = (0u32, 1u32, 2u32);
+    let mut f = Function::new([(1, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).call(side_get).local_tee(v).i32_const(1).i32_gt_u().if_(BlockType::Empty);
+    i.local_get(v).call(F_FREE);
+    i.end();
+    i.local_get(block).local_get(val).call(side_set);
+    i.end();
+    f
+}
+
 /// The dependency indices a find/append body calls into.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) struct IdxFns {
@@ -447,7 +468,7 @@ pub(crate) fn helper_params(h: &Helper) -> Option<Vec<ValType>> {
     Some(match h {
         Helper::MapIdxSideGet => vec![ValType::I32],
         Helper::MapIdxSideRaw => vec![ValType::I32, ValType::I32, ValType::I32],
-        Helper::MapIdxSideSet { .. } => vec![ValType::I32, ValType::I32],
+        Helper::MapIdxSideSet { .. } | Helper::MapIdxForget { .. } => vec![ValType::I32, ValType::I32],
         Helper::MapIdxHash { key } => vec![key.needle()],
         Helper::MapIdxBuild { .. } => vec![ValType::I32, ValType::I32, ValType::I32],
         Helper::MapIdxFind { key, .. } => vec![ValType::I32, ValType::I32, ValType::I32, key.needle()],
@@ -462,6 +483,7 @@ pub(crate) fn helper_body(h: &Helper) -> Option<Function> {
         Helper::MapIdxSideGet => emit_side_get(),
         Helper::MapIdxSideRaw => emit_side_raw(),
         Helper::MapIdxSideSet { raw } => emit_side_set(*raw),
+        Helper::MapIdxForget { side_get, side_set } => emit_forget(*side_get, *side_set),
         Helper::MapIdxHash { key } => match key {
             IdxKey::Int => emit_hash_int(),
             IdxKey::Str => emit_hash_str(),
