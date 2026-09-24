@@ -1,0 +1,105 @@
+// @contract: C-015
+// Deep `==` / `!=` inside a match guard reads the arm's pattern binding
+// without taking it (#2605). A derived Eq lowers to `R_eq(a, b)` over owned
+// operands on native; the guard walked like an arm body moved the binding
+// out (rustc E0507 — a guard sees its bindings by reference) and moved the
+// outer operand the later arms still read (E0382), so the program built on
+// wasm and not on native. Covered: a record bound by some/ok/variant/tuple/
+// list patterns, `!=`, a derived Eq over String and List fields, a guard
+// that falls through to an arm reading the same vars, and a guard calling a
+// user fn with the binding.
+// Expected: same differs absent ne:a eq:a none:b ok-same ok-other:2 err-key
+// err:q circle-same circle:2 square-same square:2:1 pair-eq:b first:1
+// second:1 head:2 second:a no:a bag-same:p bag-diff:q bag-none heavier:2
+// lighter:1:2 none (one per line).
+type R: Eq, Repr = { k: String, n: Int }
+
+type Bag: Eq = { name: String, items: List[String] }
+
+type Shape = | Circle(R) | Square(R, Int)
+
+fn same(xs: List[R], r: R) -> String = match list.find(xs, (o) => o.k == r.k) {
+  some(o) if o == r => "same",
+  some(_) => "differs",
+  none => "absent",
+}
+
+fn ne_guard(o: R?, r: R) -> String = match o {
+  some(x) if x != r => "ne:${r.k}",
+  some(x) => "eq:${x.k}",
+  none => "none:${r.k}",
+}
+
+fn res_guard(v: Result[R, String], r: R) -> String = match v {
+  ok(x) if x == r => "ok-same",
+  ok(x) => "ok-other:${x.n}",
+  err(e) if e == r.k => "err-key",
+  err(e) => "err:${e}",
+}
+
+fn shape_guard(s: Shape, r: R) -> String = match s {
+  Circle(c) if c == r => "circle-same",
+  Square(q, side) if q == r and side > 0 => "square-same",
+  Circle(c) => "circle:${c.n}",
+  Square(q, _) => "square:${q.n}:${r.n}",
+}
+
+fn tuple_guard(p: (R, R), r: R) -> String = match p {
+  (a, b) if a == b => "pair-eq:${r.k}",
+  (a, _) if a == r => "first:${r.n}",
+  (_, b) => "second:${b.n}",
+}
+
+fn list_guard(xs: List[R], r: R) -> String = match xs {
+  [a, ..rest] if a == r => "head:${list.len(rest)}",
+  [_, b, ..] if b == r => "second:${r.k}",
+  _ => "no:${r.k}",
+}
+
+fn bag_guard(o: Bag?, b: Bag) -> String = match o {
+  some(x) if x == b => "bag-same:${b.name}",
+  some(x) if x != b => "bag-diff:${x.name}",
+  _ => "bag-none",
+}
+
+fn heavier(x: R, r: R) -> Bool = x.n > r.n
+
+fn call_guard(o: R?, r: R) -> String = match o {
+  some(x) if heavier(x, r) => "heavier:${x.n}",
+  some(x) => "lighter:${x.n}:${r.n}",
+  none => "none",
+}
+
+effect fn main() -> Unit = {
+  let a1 = R { k: "a", n: 1 }
+  let a2 = R { k: "a", n: 2 }
+  let b1 = R { k: "b", n: 1 }
+  let xs = [a1]
+  println(same(xs, R { k: "a", n: 1 }))
+  println(same(xs, R { k: "a", n: 2 }))
+  println(same(xs, R { k: "z", n: 1 }))
+  println(ne_guard(some(a1), a2))
+  println(ne_guard(some(a1), a1))
+  println(ne_guard(none, b1))
+  println(res_guard(ok(a1), a1))
+  println(res_guard(ok(a2), a1))
+  println(res_guard(err("a"), a1))
+  println(res_guard(err("q"), a1))
+  println(shape_guard(Circle(a1), a1))
+  println(shape_guard(Circle(a2), a1))
+  println(shape_guard(Square(a1, 3), a1))
+  println(shape_guard(Square(a2, 3), a1))
+  println(tuple_guard((a1, a1), b1))
+  println(tuple_guard((a1, a2), a1))
+  println(tuple_guard((a2, b1), a1))
+  println(list_guard([a1, a2, b1], a1))
+  println(list_guard([b1, a2], a2))
+  println(list_guard([b1], a1))
+  let bag = Bag { name: "p", items: ["x", "y"] }
+  println(bag_guard(some(Bag { name: "p", items: ["x", "y"] }), bag))
+  println(bag_guard(some(Bag { name: "q", items: ["x"] }), bag))
+  println(bag_guard(none, bag))
+  println(call_guard(some(a2), a1))
+  println(call_guard(some(a1), a2))
+  println(call_guard(none, a1))
+}
