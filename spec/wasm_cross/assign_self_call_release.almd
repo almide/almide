@@ -1,0 +1,56 @@
+// @contract: C-066
+// `x = f(x, …)` releases the old value of `x` unless the callee SPENT it
+// (#2616). The Assign lowering used to skip the release for every call
+// that mentioned the var, assuming the callee took the argument over. A
+// BORROWED parameter (#2028: `g` only reads `xs`) is never released by
+// the callee, and an OWNED one takes the site's +1 and releases only
+// that, so each old generation kept its credit forever: 20,000 steps of
+// the list accumulator below reached 1.5 GB on wasm against 30 MB
+// native. Only a `mut` parameter (the C-132 write-back, `push_all`
+// here) hands the block over. That site must still skip the release,
+// because the callee may reallocate the block in place.
+fn g(xs: List[Int], x: Int) -> List[Int] = xs + [x]
+
+fn apply(f: (List[Int]) -> List[Int], xs: List[Int]) -> List[Int] = f(xs)
+
+fn g_owned(xs: List[Int], x: Int) -> List[Int] = apply((v) => v + [x], xs)
+
+fn put(m: Map[Int, Int], r: Int) -> Map[Int, Int] = map.set(m, r, r * 2)
+
+fn tag(s: String, r: Int) -> String = s + int.to_string(r % 10)
+
+fn push_all(mut v: List[Int], n: Int) -> Unit = {
+  var k = 0
+  while k < n {
+    list.push(v, k)
+    k = k + 1
+  }
+}
+
+effect fn main() -> Unit = {
+  var borrowed: List[Int] = []
+  for r in list.range(0, 2000) {
+    borrowed = g(borrowed, r)
+  }
+  println("borrowed: ${list.len(borrowed)} ${list.fold(borrowed, 0, (a, x) => a + x)}")
+  var owned: List[Int] = []
+  for r in list.range(0, 2000) {
+    owned = g_owned(owned, r)
+  }
+  println("owned: ${list.len(owned)} ${list.fold(owned, 0, (a, x) => a + x)}")
+  var m: Map[Int, Int] = map.new()
+  for r in list.range(0, 1000) {
+    m = put(m, r)
+  }
+  println("map: ${map.len(m)} ${map.get(m, 999) ?? -1}")
+  var s = ""
+  for r in list.range(0, 2000) {
+    s = tag(s, r)
+  }
+  println("string: ${string.len(s)} ${string.slice(s, 0, 12)}")
+  var v: List[Int] = []
+  for _ in list.range(0, 200) {
+    push_all(v, 10)
+  }
+  println("mut: ${list.len(v)} ${list.fold(v, 0, (a, x) => a + x)}")
+}
