@@ -635,45 +635,19 @@ impl Emitter<'_> {
                 }
                 // RC-3: same ownership settlement as Bind — locals only
                 // (globals are main-lifetime), never through a cell, and
-                // NEVER when the rhs mentions the assigned var: a
-                // self-referential assign (the C-132 write-back
-                // `xs = f(xs)`, `xs = $push(xs, v)`) transfers ownership
-                // through the call — the callee already released what it
-                // outgrew, and a dec here double-frees (mut_heap_param
-                // exit-1'd on exactly this).
-                // The self-mention skip is CALL-shaped only: `xs = f(xs)` /
-                // `xs = $push(xs, v)` transfer ownership through the callee
-                // (a dec here double-freed — mut_heap_param). A NON-call
-                // self-mentioning rhs (`data = data + [x]` — the append
-                // loop's ConcatList) merely READS the old block and builds a
-                // FRESH one; skipping the dec leaked every outgrown
-                // generation, and a 65k-append loop exhausted the 4 GiB
-                // address space in a quarter second (#1729). Aliasing rhs
-                // shapes (`xs = if c then xs else ys`) stay safe by order:
+                // NEVER when the rhs SPENDS the assigned var's own credit
+                // (`assign_rhs_spends_var`): then the callee already released
+                // or reallocated the old block, and a dec here double-frees
+                // (mut_heap_param exit-1'd on exactly this). Every other rhs
+                // leaves the old occupant this local's to release. Aliasing
+                // rhs shapes (`xs = if c then xs else ys`) stay safe by order:
                 // the RC-5 inc above runs before this dec, so a same-block
                 // result nets to zero.
-                let call_core = match &value.kind {
-                    IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => &expr.kind,
-                    k => k,
-                };
-                // Arm-aware (#2010 item 4): a MODULE call never spends the
-                // var's own credit — a native arm declares Borrow (reads it)
-                // or Retain (+1 share), the registry route incs an owned
-                // position and passes a borrowed one as is — so the old
-                // occupant is still this local's to release, and the RC-5
-                // inc above already made an aliasing result (`s =
-                // set.insert(s, x)`'s present path) its own credit. Only a
-                // table fn / runtime helper can take the block over.
-                let module_call = matches!(call_core, IrExprKind::Call { target: almide_ir::CallTarget::Module { .. }, .. });
-                let call_shaped_self = matches!(
-                    call_core,
-                    IrExprKind::Call { .. } | IrExprKind::RuntimeCall { .. }
-                ) && !module_call
-                    && crate::rc_ownership::rc_mentions_var(value, *var);
+                let rhs_spends_var = self.assign_rhs_spends_var(value, *var);
                 if let Some(idx) = local
                     && !self.cells.contains(var)
                     && self.rc_droppable(declared)
-                    && !call_shaped_self
+                    && !rhs_spends_var
                 {
                     let dec = self.dec_fn_of(declared);
                     self.f.instructions().local_get(idx).call(dec);
@@ -685,7 +659,7 @@ impl Emitter<'_> {
                 if let Some(idx) = local
                     && self.cells.contains(var)
                     && self.rc_droppable(declared)
-                    && !call_shaped_self
+                    && !rhs_spends_var
                 {
                     let dec = self.dec_fn_of(declared);
                     self.f.instructions().local_get(idx);
@@ -700,6 +674,55 @@ impl Emitter<'_> {
                     }
                 }
                 Ok(())
+    }
+}
+
+impl Emitter<'_> {
+    /// Does the rhs of `var = rhs` spend `var`'s own credit, so the Assign
+    /// must NOT release the old occupant? (#2616)
+    ///
+    /// * A NON-call rhs never does: `data = data + [x]` (the append loop's
+    ///   ConcatList) READS the old block and builds a fresh one; skipping
+    ///   the dec leaked every outgrown generation, and a 65k-append loop
+    ///   exhausted the 4 GiB address space in a quarter second (#1729).
+    /// * A MODULE call never does (arm-aware, #2010 item 4): a native arm
+    ///   declares Borrow (reads it) or Retain (+1 share), the registry route
+    ///   incs an owned position and passes a borrowed one as is — and the
+    ///   RC-5 inc already made an aliasing result (`s = set.insert(s, x)`'s
+    ///   present path) its own credit.
+    /// * A program-fn call spends it only through a `mut` parameter: the
+    ///   C-132 write-back hands the var to a callee that may reallocate it
+    ///   in place and returns the buffer the var is rebound to. Any other
+    ///   position leaves the local's credit where it was — a BORROWED param
+    ///   (#2028) takes no share and the callee releases nothing, an OWNED
+    ///   one takes the site's +1 (`rc_arg_guard`) and its exit plan releases
+    ///   exactly that. Skipping the dec there leaked every old value of
+    ///   `m = g(m, r)`: 1.6 GB over 20k steps of a list accumulator.
+    ///   A var mentioned INSIDE an argument (`g(h(m), r)`) keeps the
+    ///   conservative skip: the nested call's convention is not read here.
+    /// * A runtime helper (`xs = $push(xs, v)`) consumes its operand.
+    fn assign_rhs_spends_var(&self, value: &IrExpr, var: VarId) -> bool {
+        use almide_ir::CallTarget;
+        let call = match &value.kind {
+            IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => expr.as_ref(),
+            _ => value,
+        };
+        let mentions = || crate::rc_ownership::rc_mentions_var(call, var);
+        match &call.kind {
+            IrExprKind::Call { target: CallTarget::Module { .. }, .. } => false,
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                let name = name.as_str();
+                let resolved = if self.is_variant_ctor(name, call) { None } else { self.resolve_named_fn(name) };
+                let Some(i) = resolved else { return mentions() };
+                let param_mut = &self.table.infos[i].param_mut;
+                args.iter().enumerate().any(|(k, a)| match &a.kind {
+                    IrExprKind::Var { id } if *id == var => param_mut.get(k).copied().unwrap_or(true),
+                    _ => crate::rc_ownership::rc_mentions_var(a, var),
+                })
+            }
+            IrExprKind::Call { .. } | IrExprKind::RuntimeCall { .. } => mentions(),
+            _ => false,
+        }
     }
 }
 
