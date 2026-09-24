@@ -554,6 +554,11 @@ impl Emitter<'_> {
             almide_ir::CallTarget::Module { .. } => {
                 return self.owned_call_marks.contains(&(target as *const almide_ir::CallTarget as usize));
             }
+            // A closure call (#2010): the lifted body is lowered by the same
+            // `lower_fn` a table fn is — its epilogue hands the caller ONE
+            // credit on every path (a named fn's shim forwards the plain
+            // fn's owned result; an adapter's ok-carrier is fresh).
+            almide_ir::CallTarget::Computed { .. } => return true,
             _ => return false,
         };
         // A variant constructor is OWNED (#2317): a case with a payload is
