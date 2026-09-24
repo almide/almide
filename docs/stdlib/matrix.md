@@ -125,6 +125,17 @@ stride below 1 aborts with `Error: stride must be positive`.
 dequantization rule below is the deliberate exception, and only for a zero
 *magnitude*.
 
+**Softmax propagates NaN** (C-223): `softmax_rows`, and every kernel built on
+it (`attention_weights`, `scaled_dot_product_attention`, the multi-head forms),
+subtracts the row max before the exp. A row holding NaN or `+inf`, or one that
+is all `-inf`, makes `x - max` NaN, so the row's sum is NaN and every entry of
+that row is NaN — the IEEE answer, and what PyTorch's softmax returns. There
+is no uniform `1/n` substitute; mask with a large finite negative
+(`causal_mask_add(m, -1.0e9)`), not `-inf`, when a row may be fully masked.
+In `multi_head_attention` a key whose weight underflows to exactly `0.0`
+contributes nothing, so a non-finite value row it would multiply stays out
+of the output. Both targets print the same bytes.
+
 ## Quantized loaders
 
 GGUF-style block-quantized weights, decoded straight from the packed bytes.
@@ -334,7 +345,7 @@ matrix.rms_norm_rows(m: Matrix, gamma: List[Float], eps: Float) -> Matrix
 // @since 0.15.0 or earlier
 matrix.swiglu_gate(x: Matrix, w_gate: Matrix, w_up: Matrix) -> Matrix
 
-// Row-wise softmax, max-subtracted.
+// Row-wise softmax, max-subtracted; a row holding NaN or +inf, or all -inf, is all NaN.
 // @since 0.13.4 or earlier
 matrix.softmax_rows(m: Matrix) -> Matrix
 
@@ -378,7 +389,7 @@ matrix.concat_cols_many(matrices: List[Matrix]) -> Matrix
 // @since 0.13.4 or earlier
 matrix.causal_mask_add(m: Matrix, mask_val: Float) -> Matrix
 
-// Attention over n_heads; n_heads < 1 aborts.
+// Attention over n_heads; n_heads < 1 aborts; a NaN or +inf score row is NaN.
 // @since 0.13.4 or earlier
 matrix.multi_head_attention(q: Matrix, k: Matrix, v: Matrix, n_heads: Int) -> Matrix
 
