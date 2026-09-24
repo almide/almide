@@ -1,4 +1,4 @@
-# oracle: almide 0.63.1 (dev) at 2526303dc — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.1 (dev, dba5f63fb) at dba5f63fb — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -1073,7 +1073,7 @@ f2a1c53017020ff7274d725834adc53c4dad0fc429ab5a1b49a08b17b180d15a	spec/wasm_cross
 ebc0648c12f212aa3dd5870f57b944121600b66c9b5fc0af22336c2f70f8e66f	spec/wasm_cross/matrix_slice_rows_domain.almd
 2d6d44e8aa0dfb3b9a7c06a2bdfa7fe379b8c0bbc7746a80e506fc788097e290	spec/wasm_cross/matrix_softmax_fastexp.almd
 40470b8aacc9e48ff675cafe9d1a82f3ef056143cc747a51fedaf33bc4d37b8f	spec/wasm_cross/matrix_softmax_nonfinite_rows.almd
-b97ebce380c2441d4c3c69fca89677ef13ade056fd44dd012612ce1e5227ce19	spec/wasm_cross/matrix_zero_cols_rows.almd
+3bbc4e7711573289a92f74d6aea5d184653e0bd8160bcfe8dfec9085bc9b6dcc	spec/wasm_cross/matrix_zero_cols_rows.almd
 9975ae41c307db07d4f9035a63216555c9792bf442542260ee536809a6188709	spec/wasm_cross/mem_checkpoint.almd
 7860af482bc0d3fcaa4405ce335171ad514e5fe3c7e490359c48d652fc57ca25	spec/wasm_cross/memory_stress.almd
 fbdd27a52cc65a1078ca763bcba6e9bdeb6c5dab09e659f88181ddd3caef45b4	spec/wasm_cross/mg_rebuild_two_phase.almd
