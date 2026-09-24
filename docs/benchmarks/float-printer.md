@@ -54,7 +54,8 @@ Dragon4 printer) was run on the same programs as a second reference.
 | 4. `float.to_fixed` (the retained Dragon4 fixed path), random bit patterns × precision 0..10 | 100,000 | **0** | identical, byte for byte |
 
 Set 2 is run under `wasmtime` directly: the wasm-leg `float.parse` takes ~0.3 ms per
-string and the `almide run` host interrupts at 30 s. No rule change came out of these
+string and the `almide run` host of that release interrupted at 30 s (it no longer does:
+#2615). No rule change came out of these
 sets; the two Java-vs-Rust departures below were both found by the boundary set. The
 out-of-memory in set 1's Dragon4 reference run is the old printer's 3,744 B scratch block
 per call under the 0.62.0 release; the shipped printer completes a 10,000,000-call probe

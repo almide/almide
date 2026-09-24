@@ -211,6 +211,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_WASM_FREES", Flag, Ci, "the frees-churn gate's switch; its compiler reader retired with the v0 emitter (#782), the gate that still sets it is #2207's"),
     sw("ALMIDE_WASM_INCUMBENT", Flag, Route, "force the INCUMBENT wasm leg (the v1 MIR renderer) instead of the structural-first route"),
     sw("ALMIDE_WASM_STRUCTURAL", Flag, Route, "force the STRUCTURAL wasm leg for a shape the router would send to the incumbent (the route-flip probe)"),
+    sw("ALMIDE_WASM_WATCHDOG_SECS", Value, Harness, "the wall-time seconds the IN-PROCESS test runner's epoch watchdog (`run_wasm` / `run_wasm_with` / `run_wasm_capped` in almide-wasm-run) lets a module run before it traps with `interrupt` (default 30); `almide run --target wasm` and `almide bench --target wasm` arm no watchdog on any setting, as native has none (#2615)"),
     sw("ALMIDE_WAT_PRELUDE_REACH", Flag, Ci, "make the prelude audit re-render every named fixture to measure reachability (CI sets it)"),
     sw("ALMIDE_WITNESS_DUMP", Flag, Harness, "print every fixture's certificate witness in the witness-floor test"),
     sw("ALMIDE_WRITE_FUZZ_CORPUS", Flag, Harness, "write the generated fuzz programs to disk"),
