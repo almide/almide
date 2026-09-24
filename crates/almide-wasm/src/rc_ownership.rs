@@ -584,7 +584,7 @@ impl Emitter<'_> {
     /// Does the Named call `name` build a variant case? The same two routes
     /// `lower_call_at` takes: the concrete ctor map, then a generic
     /// instance's case looked up in the call's own annotated type.
-    fn is_variant_ctor(&self, name: &str, e: &almide_ir::IrExpr) -> bool {
+    pub(crate) fn is_variant_ctor(&self, name: &str, e: &almide_ir::IrExpr) -> bool {
         self.types.ctors.contains_key(name)
             || matches!(slice_ty_of(&e.ty, self.types), Some(SliceTy::Named(ti))
                 if matches!(self.types.def(ti), crate::types_table::NamedDef::Variant(v)
