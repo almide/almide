@@ -1,0 +1,42 @@
+// @contract: C-066
+//
+// A Map or Set block that is looked up twice gets a hash index beside it on
+// the structural wasm leg (map_index.rs). The index belongs to the block,
+// so it must be freed when the block is (#2614). A counting fold whose
+// callback reads the accumulator and then sets it (`map.get` then
+// `map.set`, or `set.contains` then `set.insert`) builds a fresh copy at
+// every step and looks each copy up twice. So every dropped copy had an
+// index, and the drop only tombstoned the side record and never freed the
+// index: memory grew with the square of the entry count, and at 20,000
+// entries the wasm leg ran out of memory where native stays flat. The
+// values below pin the folds byte-identically. The alloc ledger pins the
+// watermark, which stays flat across the rounds only if each dropped
+// copy's index is freed with it.
+fn counts(xs: List[Int]) -> Map[Int, Int] = xs |> list.fold(
+  map.new(),
+  (m, r) => map.set(m, r, (map.get(m, r) ?? 0) + 1),
+)
+
+fn tally(ws: List[String]) -> Map[String, Int] = ws |> list.fold(
+  map.new(),
+  (m, w) => map.set(m, w, (map.get(m, w) ?? 0) + string.len(w)),
+)
+
+fn distinct(xs: List[Int]) -> Set[Int] = xs |> list.fold(
+  set.new(),
+  (s, x) => if set.contains(s, x) then s else set.insert(s, x),
+)
+
+effect fn main() -> Unit = {
+  let sums = list.range(0, 30) |> list.map((round) => {
+    let xs = list.range(0, 80) |> list.map((j) => (j * 7 + round) % (30 + round % 11))
+    let ws = xs |> list.map((x) => "w" + int.to_string(x % 24))
+    let c = counts(xs)
+    let t = tally(ws)
+    let d = distinct(xs)
+    map.len(c) * 1000000 + (map.get(c, round % 30) ?? 0) * 10000 + (map.get(t, "w7") ?? 0) * 10 + set.len(d) % 10
+  })
+  println(int.to_string(list.len(sums)))
+  println(sums |> list.take(4) |> list.map((s) => int.to_string(s)) |> list.join(" "))
+  println(int.to_string(sums |> list.fold(0, (a, s) => a + s)))
+}

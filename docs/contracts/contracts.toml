@@ -662,6 +662,7 @@ evidence  = [
   { path = "spec/wasm_cross/destructure_owned_tuple_release.almd", class = "fixture" },
   { path = "spec/wasm_cross/to_option_owned_carrier_release.almd", class = "fixture" },
   { path = "spec/wasm_cross/captured_var_value_stored.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_index_released_with_block.almd", class = "fixture" },
   { path = "spec/churn/string_accumulator_churn.almd", class = "by-construction" },
   { path = "spec/churn/construct_from_temp_churn.almd", class = "by-construction" },
   { path = "spec/churn/record_churn.almd", class = "by-construction" },
