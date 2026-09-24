@@ -1,0 +1,57 @@
+// @contract: C-066
+//
+// A `var` that a closure captures and the enclosing scope then reassigns
+// lives in a shared cell, and the cell holds one credit on its occupant that
+// the next assignment releases. A container that stores a READ of that var
+// must therefore take its own credit, exactly as it does for a plain local
+// (#2613). Before the fix the structural wasm leg skipped that credit for a
+// cell var, so the holder kept a block the next `t = ...` (or the frame's
+// release of the cell at exit) freed, and every line below printed
+// allocator words in place of the stored records.
+// Every store below reads the cell var into a different holder: a list
+// append, a list literal and a record field.
+type T = { x: Int, y: Int }
+
+type Box = { t: T, tag: Int }
+
+fn walk(steps: List[Int]) -> List[T] = {
+  var t = T { x: 0, y: 0 }
+  var trail: List[T] = []
+  for n in steps {
+    let near = [n] |> list.map((k) => t.x + k)
+    t = T { x: t.x + n, y: list.len(near) }
+    trail = trail + [t]
+  }
+  trail
+}
+
+fn boxes(steps: List[Int]) -> List[Box] = {
+  var t = T { x: 0, y: 0 }
+  var out: List[Box] = []
+  for n in steps {
+    let peek = () => t.x
+    t = T { x: peek() + n, y: n }
+    out = out + [
+      Box { t: t, tag: n }
+    ]
+  }
+  out
+}
+
+fn show(t: T) -> String = "(${int.to_string(t.x)},${int.to_string(t.y)})"
+
+effect fn main() -> Unit = {
+  var t = T { x: 0, y: 0 }
+  var trail: List[T] = []
+  for n in [1, 2, 3] {
+    let c = [n] |> list.map((k) => t.x + k)
+    t = T { x: n, y: list.len(c) }
+    trail = trail + [t]
+  }
+  println(trail |> list.map((u) => show(u)) |> list.join(" "))
+  println(walk([1, 2, 3, 4]) |> list.map((u) => show(u)) |> list.join(" "))
+  println(boxes([5, 6, 7]) |> list.map((b) => "${show(b.t)}#${int.to_string(b.tag)}") |> list.join(" "))
+  let lit = [t, t]
+  t = T { x: 99, y: 99 }
+  println("${show(lit[0])} ${show(lit[1])} ${show(t)}")
+}

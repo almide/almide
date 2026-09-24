@@ -236,6 +236,8 @@ evidence  = [
   { path = "spec/wasm_cross/num_edge_to_string.almd", class = "fixture" },
   { path = "spec/wasm_cross/int_float_ops.almd", class = "fixture" },
   { path = "spec/wasm_cross/float_interp_forms.almd", class = "fixture" },
+  { path = "tests/float_to_string_cross_target_test.rs", name = "to_string_wasm_matches_rust_display_over_the_sweep", class = "fuzz", n = 100000 },
+  { path = "tests/float_gtable_exact_test.rs", name = "the_table_reproduces_the_exact_g_for_every_j", class = "fixture" },
 ]
 [[contract]]
 id        = "C-012"
@@ -384,6 +386,8 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float_shortest_roundtrip.almd", class = "fixture" },
   { path = "spec/wasm_cross/num_edge_to_string.almd", class = "fixture" },
+  { path = "tests/float_to_string_cross_target_test.rs", name = "to_string_wasm_matches_rust_display_over_the_sweep", class = "fuzz", n = 100000 },
+  { path = "tests/float_gtable_exact_test.rs", name = "the_table_reproduces_the_exact_g_for_every_j", class = "fixture" },
 ]
 [[contract]]
 id        = "C-024"
@@ -405,6 +409,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float_to_fixed.almd", class = "fixture" },
   { path = "tests/float_to_fixed_cross_target_test.rs", name = "to_fixed_cross_target_random_fuzz", class = "fuzz", n = 1000 },
+  { path = "tests/float_to_string_cross_target_test.rs", name = "to_string_wasm_matches_rust_display_over_the_sweep", class = "fuzz", n = 100000 },
 ]
 
 # ── VENDORED-LIBM MATH ───────────────────────────────────────────────
@@ -648,6 +653,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/rc_reclaim_churn.almd", class = "fixture" },
   { path = "spec/wasm_cross/assign_alias_rc.almd", class = "fixture" },
+  { path = "spec/wasm_cross/assign_self_call_release.almd", class = "fixture" },
   { path = "spec/wasm_cross/container_alias_return.almd", class = "fixture" },
   { path = "spec/wasm_cross/loop_outer_inplace_mutate_rc.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_entries_reclaim.almd", class = "fixture" },
@@ -656,6 +662,8 @@ evidence  = [
   { path = "spec/wasm_cross/variant_result_credit_shapes.almd", class = "fixture" },
   { path = "spec/wasm_cross/destructure_owned_tuple_release.almd", class = "fixture" },
   { path = "spec/wasm_cross/to_option_owned_carrier_release.almd", class = "fixture" },
+  { path = "spec/wasm_cross/captured_var_value_stored.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_index_released_with_block.almd", class = "fixture" },
   { path = "spec/churn/string_accumulator_churn.almd", class = "by-construction" },
   { path = "spec/churn/construct_from_temp_churn.almd", class = "by-construction" },
   { path = "spec/churn/record_churn.almd", class = "by-construction" },

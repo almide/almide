@@ -1,35 +1,42 @@
-// float_to_string — SELF-HOSTED `float.to_string` and `float.to_fixed`.
+// float_to_string — SELF-HOSTED `float.to_string`, `float.to_string_compound` and `float.to_fixed`.
 //
 // `float.to_string` is SCHUBFACH (Giulietti, "The Schubfach way to render doubles"): the
 // shortest round-trip decimal from three 126x64-bit products against a power-of-ten
 // constant g(j), rendered in FIXED notation (never scientific) + a `.0` integer suffix —
 // byte-identical to v0 native's `format!("{}", n)` + suffix. It replaced the Dragon4
 // transcription (#1985) because the exact-bignum digit loop cost 6.4 KB of wasm per program
-// that prints a float; Schubfach's per-digit work is three 64x64 multiplies, and its one
-// large table (617 x 128 bits, 9.9 KB) is NOT stored: g(j) is DERIVED AT RUN TIME by exact
-// big-integer arithmetic (one multiply-by-small and one divide-by-small loop over u32
-// limbs), which is ~1.2 KB of code. The measurement that chose this is
+// that prints a float; Schubfach's per-value work is three 126x64-bit products. Its full table
+// (617 x 126 bits, 9.9 KB) is NOT stored: g(j) comes from a COMPACT table of 24 entries (552
+// bytes, a string literal in the data segment) and one 127x63-bit product (#2099, the shape of
+// Swift's, Wado's and Ryu's small tables), exact for every j. Until #2099 g(j) was derived at run
+// time by big-integer arithmetic — smaller by the table, but 3x slower. The measurements are
 // docs/benchmarks/float-printer.md. Two places deliberately depart from Giulietti's Java:
 // an exact tie between the two closest candidates rounds the magnitude UP (Rust's Dragon4
 // "2R >= S"), and the shorter multiple-of-10 candidate is tried from s >= 10 (Java prints at
 // least two digits; format! prints "1e-322" for 20 * 2^-1074).
 //
-// `float.to_fixed` is still the Steele & White / Burger–Dubois "Dragon4" exact-bignum
-// expansion (fixed mode: exactly N fractional digits, ties-to-even) — a faithful
-// transcription of crates/almide-codegen/src/emit_wasm/rt_dragon.rs (v0's WASM-target dtoa),
-// byte-matching `format!("{:.N}", x)`. It reaches nothing of Schubfach and Schubfach reaches
-// nothing of its digit loop, so a program pays only for the printer it calls.
+// `float.to_string_compound` is the SAME printer with the `.0` suffix switched off — the form v0
+// uses for a Float inside `${...}`, a record, a tuple or a list (`1.0` -> "1", `-0.0` -> "-0"),
+// so a program that interpolates a float carries one printer, not a printer plus a copy.
 //
-// Both are pure String building (cert `i`, like int.to_string): no host effect, no caps, no
-// proof touched. The only risk is byte-exactness, caught by the byte-match e2e tests and the
-// 1M-value cross-target diff recorded in the benchmark doc.
+// `float.to_fixed(x, nd)` — exactly nd fractional digits, byte-matching `format!("{:.N}", x)`:
+// the exact binary value rounded half-to-even — is the SAME scaling on the same bignum: M =
+// floor(2 * v * 10^nd) with its sticky bit, N = M / 2 rounded up on a half when the sticky bit or
+// N's last bit is set, then N's decimal digits by repeated division by 10^9. It replaced the
+// Steele & White / Burger–Dubois "Dragon4" fixed-mode digit loop (one bignum compare-subtract
+// per digit), which cost 4.7 KB of wasm and 30 us per conversion.
 //
-// ── Big-integer layout (shared) ──
-// A bignum lives in a contiguous scratch block (one prim.alloc_list, read/written by byte address
-// via prim.load32/store32). Each bignum: [len:u32 @ +0][limb_0 @ +4][limb_1 @ +8]... little-endian
-// u32 limbs. to_fixed: NLIMBS=128 limbs cover the widest intermediate (S scaled by 10^k, < ~2150
-// bits), BN_STRIDE = 528 (16-aligned), R @0, S @528, TMP @2112, digits @2640. to_string: one
-// bignum of up to 38 limbs (2^1202) @0, the two g words @160, the digit buffer @176.
+// All are pure String building (cert `i`, like int.to_string): no host effect, no caps, no
+// proof touched. The only risk is byte-exactness, caught by the byte-match e2e tests, the
+// tests/float_to_string_cross_target_test.rs sweep (both printers, every biased exponent, 100k
+// bit patterns vs `format!`) and the 1M-value cross-target diff recorded in the benchmark doc.
+//
+// ── Big-integer layout ──
+// to_fixed's bignum lives at the start of a scratch block (one prim.alloc_list, read/written by
+// byte address via prim.load32/store32): [len:u32 @ +0][limb_0 @ +4][limb_1 @ +8]... little-endian
+// u32 limbs, up to 460 limbs (c * 2^1025 * 10^4096 < 2^14687) at @0, then the 9-digit chunks of
+// the answer (i64 each, at most 492) at @1856 — prim.alloc_list(724) = 5792 bytes. to_string
+// allocates nothing but its result.
 // All offsets below are BYTE offsets from the scratch byte-base (handle(block) + 12).
 // ───────────────────────── big-integer helpers ─────────────────────────
 // Each takes the absolute BYTE address of a bignum's len word. limb i is at p + 4 + i*4.
@@ -65,240 +72,6 @@ fn __dg_mul_small(p: Int, m: Int) -> Unit = {
   prim.store32(p, len2)
 }
 
-fn __dg_mul10(p: Int) -> Unit = __dg_mul_small(p, 10)
-
-// cmp(a, b) -> -1/0/1. Assumes both normalized.
-fn __dg_cmp_limbs(a: Int, b: Int, i: Int) -> Int = if i == 0 then 0
-else {
-  let va = prim.load32(a + 4 + (i - 1) * 4)
-  let vb = prim.load32(b + 4 + (i - 1) * 4)
-  if va != vb then (if va < vb then 0 - 1 else 1)
-  else __dg_cmp_limbs(a, b, i - 1)
-}
-
-fn __dg_cmp(a: Int, b: Int) -> Int = {
-  let la = prim.load32(a)
-  let lb = prim.load32(b)
-  if la != lb then (if la < lb then 0 - 1 else 1)
-  else __dg_cmp_limbs(a, b, la)
-}
-
-// sub(dst, src): dst -= src (requires dst >= src). Normalizes.
-fn __dg_sub_body(dst: Int, src: Int, ld: Int, ls: Int, i: Int, borrow: Int) -> Int = if i >= ld then 0
-else {
-  let b = if i < ls then prim.load32(src + 4 + i * 4) else 0
-  let diff = prim.load32(dst + 4 + i * 4) - b - borrow
-  // diff < 0 → add 2^32, borrow=1 (these are full i64 values, so a plain sign test works).
-  let nb = if diff < 0 then 1 else 0
-  let d2 = if diff < 0 then diff + 4294967296 else diff
-  prim.store32(dst + 4 + i * 4, prim.band(d2, 4294967295))
-  __dg_sub_body(dst, src, ld, ls, i + 1, nb)
-}
-
-fn __dg_sub(dst: Int, src: Int) -> Unit = {
-  let ld = prim.load32(dst)
-  let ls = prim.load32(src)
-  let _b = __dg_sub_body(dst, src, ld, ls, 0, 0)
-  __dg_norm(dst)
-}
-
-// copy(dst, src): dst = src.
-fn __dg_copy_limbs(dst: Int, src: Int, len: Int, i: Int) -> Int = if i >= len then 0
-else {
-  prim.store32(dst + 4 + i * 4, prim.load32(src + 4 + i * 4))
-  __dg_copy_limbs(dst, src, len, i + 1)
-}
-
-fn __dg_copy(dst: Int, src: Int) -> Unit = {
-  let len = prim.load32(src)
-  prim.store32(dst, len)
-  let _z = __dg_copy_limbs(dst, src, len, 0)
-}
-
-// shl(p, bits): p <<= bits. limb_shift = bits/32, bit_shift = bits%32.
-fn __dg_shl_move(p: Int, ls: Int, i: Int) -> Int = if i == 0 then 0
-else {
-  prim.store32(p + 4 + (i - 1 + ls) * 4, prim.load32(p + 4 + (i - 1) * 4))
-  __dg_shl_move(p, ls, i - 1)
-}
-
-fn __dg_shl_zero(p: Int, ls: Int, i: Int) -> Int = if i >= ls then 0
-else {
-  prim.store32(p + 4 + i * 4, 0)
-  __dg_shl_zero(p, ls, i + 1)
-}
-
-fn __dg_shl_bits(p: Int, bs: Int, len: Int, i: Int, carry: Int) -> Int = if i >= len then carry
-else {
-  let v = prim.load32(p + 4 + i * 4)
-  let lo = prim.band(prim.bshl(v, bs), 4294967295)
-  prim.store32(p + 4 + i * 4, prim.bor(lo, carry))
-  __dg_shl_bits(p, bs, len, i + 1, prim.bshr_u(v, 32 - bs))
-}
-
-fn __dg_shl(p: Int, bits: Int) -> Unit = {
-  let len0 = prim.load32(p)
-  let ls = bits / 32
-  let bs = bits % 32
-  // limb shift
-  let len1 = if ls != 0 then {
-    let _m = __dg_shl_move(p, ls, len0)
-    let _z = __dg_shl_zero(p, ls, 0)
-    len0 + ls
-  } else len0
-  // bit shift within limbs
-  let len2 = if bs != 0 then {
-    let carry = __dg_shl_bits(p, bs, len1, ls, 0)
-    if carry != 0 then {
-      prim.store32(p + 4 + len1 * 4, prim.band(carry, 4294967295))
-      len1 + 1
-    } else len1
-  } else len1
-  prim.store32(p, len2)
-  __dg_norm(p)
-}
-
-// Set bignum at byte addr `p` to a small u32 constant (1 limb).
-fn __dg_set_small(p: Int, v: Int) -> Unit = {
-  prim.store32(p, 1)
-  prim.store32(p + 4, v)
-}
-
-// Set bignum at byte addr `p` to a full u64 (two limbs).
-fn __dg_set_u64(p: Int, val: Int) -> Unit = {
-  let lo = prim.band(val, 4294967295)
-  let hi = prim.bshr_u(val, 32)
-  prim.store32(p + 4, lo)
-  prim.store32(p + 8, hi)
-  let len = if hi == 0 then 1 else 2
-  prim.store32(p, len)
-}
-
-// ───────────────────────── byte / string helpers ─────────────────────────
-// Shift the `n` digit bytes at [dp, dp+n) right by 1 (dp[n..1] = dp[n-1..0]); MSD-first so no
-// overwrite. Used by the round-up carry overflow (prepend a leading digit).
-fn __dg_shift_right(dp: Int, n: Int, i: Int) -> Int = if i == 0 then 0
-else {
-  prim.store8(dp + i, prim.load8(dp + i - 1))
-  __dg_shift_right(dp, n, i - 1)
-}
-
-// Copy `len` digit bytes from `src` to `dst` ascending (no overlap in render).
-fn __dg_bcopy(src: Int, dst: Int, len: Int) -> Int = if len <= 0 then dst
-else {
-  prim.store8(dst, prim.load8(src))
-  __dg_bcopy(src + 1, dst + 1, len - 1)
-}
-
-// Write `count` '0' bytes at `dst`; returns the address just past.
-fn __dg_zeros(dst: Int, count: Int) -> Int = if count <= 0 then dst
-else {
-  prim.store8(dst, 48)
-  __dg_zeros(dst + 1, count - 1)
-}
-
-// ───────────────────────── to_fixed: scale + position ─────────────────────────
-// Scale loop when k >= 0: S *= 10, k times.
-fn __dg_scale_up(s: Int, k: Int, i: Int) -> Int = if i >= k then 0
-else {
-  __dg_mul10(s)
-  __dg_scale_up(s, k, i + 1)
-}
-
-// One digit's repeated-subtraction: while cmp(R,S) >= 0 { R -= S; d++ }.
-fn __dg_digit(r: Int, s: Int, d: Int) -> Int = if __dg_cmp(r, s) < 0 then d
-else {
-  __dg_sub(r, s)
-  __dg_digit(r, s, d + 1)
-}
-
-// Round-up carry propagation over digits[0..dlen). Returns the (possibly incremented) k.
-// At i==0 a carry overflows: shift right, set digits[0]='1', dlen++, k++.
-fn __dg_carry(dp: Int, dlen0: Int, k: Int) -> Int = {
-  let i = dlen0
-  __dg_carry_loop(dp, dlen0, k, i)
-}
-
-fn __dg_carry_loop(dp: Int, dlen: Int, k: Int, i: Int) -> Int = if i == 0 then {
-  let _s = __dg_shift_right(dp, dlen, dlen)
-  prim.store8(dp, 49)
-  // '1'
-  k + 1
-} else {
-  let j = i - 1
-  let c = prim.load8(dp + j)
-  if c == 57 then {
-    // '9' → '0', carry continues
-    prim.store8(dp + j, 48)
-    __dg_carry_loop(dp, dlen, k, j)
-  } else {
-    prim.store8(dp + j, c + 1)
-    k
-  }
-}
-
-// ───────────────────────── to_string render ─────────────────────────
-// digits in dp (m of them), decimal exponent k, sign neg. Build the String (never scientific):
-//   k <= 0 :  "[-]0." + (-k) zeros + digits
-//   k >= m :  "[-]" + digits + (k-m) zeros + ".0"
-//   else   :  "[-]" + digits[0..k] + "." + digits[k..m]
-fn __dg_render(dp: Int, m: Int, k: Int, neg: Bool) -> String = {
-  let body = if k <= 0 then 2 + (0 - k) + m
-  else if k >= m then k + 2 else m + 1
-  // NB: `(if neg ...) + body` as a BinOp operand silently mis-lowers in v1 (the if-in-operand
-  // gap), so bind the sign width FIRST then add — see the dual-oracle byte-match.
-  let sign_w = if neg then 1 else 0
-  let out_len = sign_w + body
-  let buf = prim.alloc_str(out_len)
-  let base = prim.handle(buf) + 12
-  let c0 = if neg then {
-    prim.store8(base, 45)
-    base + 1
-  } else base
-  // '-'
-  let _e = if k <= 0 then {
-    prim.store8(c0, 48)
-    // '0'
-    prim.store8(c0 + 1, 46)
-    // '.'
-    let c1 = __dg_zeros(c0 + 2, 0 - k)
-    __dg_bcopy(dp, c1, m)
-  } else if k >= m then {
-    let c1 = __dg_bcopy(dp, c0, m)
-    let c2 = __dg_zeros(c1, k - m)
-    prim.store8(c2, 46)
-    // '.'
-    prim.store8(c2 + 1, 48)
-    // '0'
-    c2 + 2
-  } else {
-    let c1 = __dg_bcopy(dp, c0, k)
-    prim.store8(c1, 46)
-    // '.'
-    __dg_bcopy(dp + k, c1 + 1, m - k)
-  }
-  buf
-}
-
-// ───────────────────────── float_to_string: Schubfach ─────────────────────────
-// v = c * 2^q, c the 53-bit significand. k = floor(log10 v) (three-quarters form on the
-// asymmetric power-of-two boundary); j = -k; the 126-bit g(j) = floor(10^j * 2^-r) + 1 with
-// r = floor(log2 10^j) - 125 makes vb = floor(4v * 10^-k) with a sticky bit, and the
-// candidates s = vb >> 2, s + 1 and the multiple of 10 at s are tested against the rounding
-// interval [vbl, vbr] computed the same way from c - 1/2 (or - 1/4) and c + 1/2.
-//
-// Scratch block (byte offsets from sb = handle(block) + 12):
-//   P   @ 0    len word + up to 38 u32 limbs (2^1202 needs 38)     160 bytes
-//   G   @ 160  g1 @ +0, g0 @ +8 (two i64 slots, each < 2^63)         16 bytes
-//   DP  @ 176  17 decimal digits, written backwards from +196        24 bytes
-//   total 200 → prim.alloc_list(26) = 208 bytes.
-// Floor-log helpers, exact over the f64 range (checked offline against big-integer logs).
-fn __sf_flog10pow2(e: Int) -> Int = prim.bshr(e * 661971961083, 41)
-
-fn __sf_flog10_3q_pow2(e: Int) -> Int = prim.bshr(e * 661971961083 - 274743187321, 41)
-
-fn __sf_flog2pow10(e: Int) -> Int = prim.bshr(e * 913124641741, 38)
-
 fn __sf_limb(p: Int, i: Int) -> Int = if i < prim.load32(p) then prim.load32(p + 4 + i * 4) else 0
 
 // p = floor(p / d) (d < 2^31), top limb down; the length is kept (high limbs may read zero).
@@ -310,65 +83,121 @@ else {
   __sf_ds_body(p, d, i - 1, cur - q * d)
 }
 
+// p = floor(p / d), returning the remainder.
+fn __sf_div_small(p: Int, d: Int) -> Int = __sf_ds_body(p, d, prim.load32(p) - 1, 0)
+
 fn __sf_pow10_small(n: Int) -> Int = if n == 0 then 1 else 10 * __sf_pow10_small(n - 1)
 
-fn __sf_step(p: Int, m: Int, dv: Bool) -> Int = if dv then __sf_ds_body(p, m, prim.load32(p) - 1, 0)
+// One chunk: p = floor(p / m) returning the remainder (dv = true), or p *= m returning 0.
+fn __sf_step(p: Int, m: Int, dv: Bool) -> Int = if dv then __sf_div_small(p, m)
 else {
   __dg_mul_small(p, m)
   0
 }
 
 // p *= 10^j (dv = false) or p = floor(p / 10^j) (dv = true), in chunks of 10^9 (< 2^30):
-// floor(floor(x / a) / b) = floor(x / ab) on integers, so the chunked division is exact.
-fn __sf_pow10_loop(p: Int, j: Int, dv: Bool) -> Int = if j >= 9 then {
-  let _s = __sf_step(p, 1000000000, dv)
-  __sf_pow10_loop(p, j - 9, dv)
-} else __sf_step(p, __sf_pow10_small(j), dv)
+// floor(floor(x / a) / b) = floor(x / ab) on integers, so the chunked division is exact, and
+// x mod ab != 0 iff some chunk's remainder is non-zero — `acc` sums them (< 2^40, no overflow).
+fn __sf_pow10_loop(p: Int, j: Int, dv: Bool, acc: Int) -> Int = if j >= 9 then {
+  let r = __sf_step(p, 1000000000, dv)
+  __sf_pow10_loop(p, j - 9, dv, acc + r)
+} else acc + __sf_step(p, __sf_pow10_small(j), dv)
 
-// p = 2^e: zero the limbs below, one bit in the top limb.
-fn __sf_set_pow2(p: Int, e: Int, i: Int) -> Unit = if i < prim.bshr(e, 5) then {
-  prim.store32(p + 4 + i * 4, 0)
-  __sf_set_pow2(p, e, i + 1)
+// p *= 2^e, in multiply-by-small steps of 2^31.
+fn __sf_shl(p: Int, e: Int) -> Unit = if e >= 31 then {
+  __dg_mul_small(p, 2147483648)
+  __sf_shl(p, e - 31)
+} else __dg_mul_small(p, prim.bshl(1, e))
+
+// Is any limb below index i non-zero?
+fn __sf_low_nz(p: Int, i: Int) -> Bool = if i <= 0 then false
+else if __sf_limb(p, i - 1) != 0 then true else __sf_low_nz(p, i - 1)
+
+// P @ sb = floor(x * 2^q * 10^-k) exactly (x < 2^57), as the limbs from index i upward — returns
+// i * 2 + sticky, the sticky bit set when the discarded part was non-zero. P = x * 2^max(q,0) *
+// 10^max(-k,0), then floor(P / 10^max(k,0)) in 10^9 chunks (the remainders are sticky), then
+// floor(P / 2^max(-q,0)): the low n % 32 bits by one small division (its remainder is sticky),
+// the n / 32 whole limbs below the answer by a scan. q and k usually share a sign, but not
+// always (c = 2^52, q = 0 has k = -1), so every step is guarded by its own sign; a no-op step
+// costs one pass by 1.
+fn __sf_scale(x: Int, q: Int, k: Int, sb: Int) -> Int = {
+  prim.store32(sb, 2)
+  prim.store32(sb + 4, prim.band(x, 4294967295))
+  prim.store32(sb + 8, prim.bshr_u(x, 32))
+  let e = if q > 0 then q else 0
+  __sf_shl(sb, e)
+  let _m = if k < 0 then __sf_pow10_loop(sb, 0 - k, false, 0)
+  else 0
+  let rem = if k > 0 then __sf_pow10_loop(sb, k, true, 0)
+  else 0
+  let n = if q < 0 then 0 - q else 0
+  let rem2 = __sf_div_small(sb, prim.bshl(1, prim.band(n, 31)))
+  let i = prim.bshr(n, 5)
+  let sticky = if rem + rem2 != 0 then 1
+  else (if __sf_low_nz(sb, i) then 1 else 0)
+  i + i + sticky
+}
+
+// ───────────────────────── shared digit writer ─────────────────────────
+// Write n digits backwards from `end`: the next digit of f each step (f / 10; '0' once f is
+// spent — the leading and trailing zeros), and '.' at address `dot` (0 = none) as it is passed,
+// not counted. Returns the address of the last byte written.
+fn __sf_wd(f: Int, end: Int, n: Int, dot: Int) -> Int = if n <= 0 then end
+else if end - 1 == dot then {
+  prim.store8(dot, 46)
+  __sf_wd(f, end - 1, n, dot)
 } else {
-  prim.store32(p, i + 1)
-  prim.store32(p + 4 + i * 4, prim.bshl(1, prim.band(e, 31)))
+  // a spent f skips the divide: a huge or tiny value is mostly zeros
+  let q = if f == 0 then 0 else f / 10
+  prim.store8(end - 1, 48 + f - q * 10)
+  __sf_wd(q, end - 1, n - 1, dot)
 }
 
-// The n (<= 63) bits of bignum p starting at bit position pos; pos < 0 reads zeros below bit 0.
-fn __sf_getbits(p: Int, pos: Int, n: Int) -> Int = if pos + n <= 0 then 0
-else if pos < 0 then prim.bshl(__sf_getbits(p, 0, n + pos), 0 - pos)
-else {
-  let i = prim.bshr(pos, 5)
-  let s = prim.band(pos, 31)
-  let l0 = __sf_limb(p, i)
-  let l1 = __sf_limb(p, i + 1)
-  let l2 = __sf_limb(p, i + 2)
-  let hi = if s == 0 then 0 else prim.bshl(l2, 64 - s)
-  let v = prim.bor(prim.bor(prim.bshr_u(l0, s), prim.bshl(l1, 32 - s)), hi)
-  prim.band(v, prim.bshl(1, n) - 1)
-}
+// The number of decimal digits of f (0 for 0), by comparison against rising powers of ten — a
+// multiply per digit, not a divide (f < 10^18, so p never overflows).
+fn __sf_ndig(f: Int, p: Int, acc: Int) -> Int = if f < p then acc
+else __sf_ndig(f, p * 10, acc + 1)
 
-// g(j) = floor(10^j * 2^-r) + 1, r = floor(log2 10^j) - 125, derived exactly:
-//   j >= 0: P = 10^j (chunked *10^9), g - 1 = its top 126 bits
-//   j <  0: P = 2^(125 - floor(log2 10^j)) divided by 10^-j (chunked /10^9) = exactly g - 1
-// Leaves g1 @ sb+160 and g0 @ sb+168.
-fn __sf_compute_g(j: Int, sb: Int) -> Unit = {
-  // l = bit length of the bignum whose top 126 bits are g - 1.
-  let l = if j >= 0 then {
-    prim.store32(sb, 1)
-    prim.store32(sb + 4, 1)
-    let _m = __sf_pow10_loop(sb, j, false)
-    __sf_flog2pow10(j) + 1
-  } else {
-    __sf_set_pow2(sb, 125 - __sf_flog2pow10(j), 0)
-    let _d = __sf_pow10_loop(sb, 0 - j, true)
-    126
-  }
-  let g0 = __sf_getbits(sb, l - 126, 63) + 1
-  let carry = if g0 == prim.bshl(1, 63) then 1 else 0
-  prim.store64(sb + 160, __sf_getbits(sb, l - 63, 63) + carry)
-  prim.store64(sb + 168, prim.band(g0, 9223372036854775807))
-}
+fn __dg_special(bits0: Int, raw_mant0: Int) -> String = if raw_mant0 != 0 then "NaN"
+else if bits0 < 0 then "-inf" else "inf"
+
+// ───────────────────────── float_to_string: Schubfach ─────────────────────────
+// v = c * 2^q, c the 53-bit significand. k = floor(log10 v) (three-quarters form on the
+// asymmetric power-of-two boundary); j = -k; the 126-bit g(j) = floor(10^j * 2^-r) + 1 with
+// r = floor(log2 10^j) - 125 makes vb = floor(4v * 10^-k) with a sticky bit, and the
+// candidates s = vb >> 2, s + 1 and the multiple of 10 at s are tested against the rounding
+// interval [vbl, vbr] computed the same way from c - 1/2 (or - 1/4) and c + 1/2.
+// g(j) is read off the compact table below (__sf_gtab). Floor-log helpers, exact over the f64
+// range (checked offline against big-integer logs).
+fn __sf_flog10pow2(e: Int) -> Int = prim.bshr(e * 661971961083, 41)
+
+fn __sf_flog10_3q_pow2(e: Int) -> Int = prim.bshr(e * 661971961083 - 274743187321, 41)
+
+fn __sf_flog2pow10(e: Int) -> Int = prim.bshr(e * 913124641741, 38)
+
+// g(j) from a COMPACT TABLE (#2099; the Swift / Wado / Ryu-small-table shape). 10^j = 2^j * 5^j
+// and 5^j = 5^b * 5^f with b = the multiple of 27 at or below j and f = j - b in 0..26, so
+// g(j) - 1 = floor(C(b) * 5^f / 2^u) + d(j), where C(b) = floor(5^b * 2^-s) is 5^b's top 127 bits
+// (s = floor(log2 5^b) - 126), 5^f < 2^63 is exact, u = floor(log2 5^j) - floor(log2 5^b) + 1 is
+// in 1..62, and d(j) in {0, 1} is the correction for C(b)'s truncation (the error is below one
+// unit because C has one bit more than the 126 kept). The table therefore reproduces the exact
+// 126-bit g(j) of the paper for every j the printer can ask for (-292..324) — checked offline for
+// all 617 against big-integer arithmetic — so the candidate selection below sees bit-identical
+// values. 24 entries of 23 bytes, one per b = -297, -270, ..., 324: C's low 63 bits (9 bytes),
+// C >> 63 (10 bytes), then the 27 correction bits d(b + f) (4 bytes). Each byte carries 7 bits
+// so the table is a plain string literal: it lives in the data segment (552 bytes), not in code.
+// tests/float_gtable_exact_test.rs decodes it and checks every g(j) against the definition.
+fn __sf_gtab() -> Int = prim.handle("'rm+@+^JW!L4G3\x04\x166'\x01\x00\x00@\x00H\x22\x09 7Jh\x1d-h\x1c\x09\x11^n\x13\x1f\x07\x01\x00o;?O\x09UA*G4NWHPY\x04Y~V?Z\x01\x00\x09 \x10YOUZl\x14/c^l;R!L%\x0e@0\x01Nfo\x03Nn\x05J[GV\x1f*>j+A(LaI\x0e\x01\x04\x01\x01\x00\x09QTD\x18Z\x14-\x06z\x15,#06\x0a,f\x01\x08\x10\x00 \x09dY\x05\x13Vi<Ik;\x13\x07eH\x06\x09:\x01\x10\x00\x02 7x!TF\x7f@\x1a\x1dULh\x0dI1!'\x16\x01|yP+a9\x7f\x08J)N8\x7d\x22\x05\x07Z\x0arYjr\x01L\x04(\x06C8Mpa\x14|%UL<T#*\x0b4\x14D\x012B 0>4*=&&TW;H|\x01\x0fy64:\x1e\x01&cu,\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00:\x1e\x00!\x7fdceN\x01\x00\x00\x00\x00\x12YO\x7d2\x0b\x12dLQX92\x0a\x08\x0f\x06'\x01\x00\x00\x00\x00QqZwY\x0b\x05h4\x7d5#'\x1b\x13+x\x06\x01v3S;J\x14\x19\x03AtM\x03ti\x1bBSAL\x7b\x00Z\x014\x24\x1d!G\x7f\x5c\x5c\x7f\x5c\x0b0/dS\x07\x08[h9\x0d0\x01\x04\x22I\x16\x03s\x08z\x1dq\x11\x16\x0a\x7d\x04/_\x1f=k \x0e\x01*\x22\x18\x01\x7d%[!E\x0cMEG\x01]\x10Q\x02e\x7bie\x01\x04\x04\x13(I6.\x5c^b'e6a]8>c@RS9\x01\x00\x00\x00 GyIU\x00q5/%Y9Z\x7d!!\x0f|\x15\x01\x00\x00\x00\x00v\x0cy\x1cK3g\x18^O9Kgs4\x00%r\x01\x00\x00\x00\x00d\x00\x0e1\x07xE!\x05\x07\x1e!O\x100\x0d\x5cC\x01\x00\x00\x00\x00hF\x06*\x13,t\x016)7\x0c'+rv\x0c\x1e\x01\x00\x00\x00\x00") + 12
+
+// n table bytes from p (7 bits each, little-endian) -> their bits, top byte first.
+fn __sf_rd(p: Int, n: Int, acc: Int) -> Int = if n == 0 then acc
+else __sf_rd(p, n - 1, prim.bor(prim.bshl(acc, 7), prim.load8(p + n - 1)))
+
+// 5^f (f in 0..26, so < 2^63).
+fn __sf_pow5(f: Int, acc: Int) -> Int = if f == 0 then acc else __sf_pow5(f - 1, acc * 5)
+
+// a < b on the unsigned 64-bit reading of both.
+fn __sf_ult(a: Int, b: Int) -> Bool = if (a < 0) == (b < 0) then a < b else b < 0
 
 // 64x64 -> the high 64 bits (unsigned), from four 32x32 partial products.
 fn __sf_mulhi(a: Int, b: Int) -> Int = {
@@ -389,27 +218,6 @@ fn __sf_rop(g1: Int, g0: Int, cp: Int) -> Int = {
   if prim.band(z, 9223372036854775807) != 0 then prim.bor(vbp, 1) else vbp
 }
 
-// Write f's digits backwards ending just before `end`; returns the address of the first digit.
-fn __sf_wdigits(f: Int, end: Int) -> Int = {
-  let q = f / 10
-  prim.store8(end - 1, 48 + (f - q * 10))
-  if q == 0 then end - 1 else __sf_wdigits(q, end - 1)
-}
-
-// |v| = f * 10^e (f > 0): strip trailing zeros, write the digits, render.
-fn __sf_finish(f: Int, e: Int, neg: Bool, sb: Int) -> String = if (f / 10) * 10 == f then __sf_finish(
-  f / 10,
-  e + 1,
-  neg,
-  sb,
-)
-else {
-  let end = sb + 196
-  let dp = __sf_wdigits(f, end)
-  let m = end - dp
-  __dg_render(dp, m, m + e, neg)
-}
-
 // Which of the candidates lo < hi lies in the rounding interval [vbl, vbr] (open when out = 1):
 // 1 = only lo, 2 = only hi, 0 = neither, 3 = both.
 fn __sf_pick(vbl: Int, vbr: Int, out: Int, lo: Int, hi: Int) -> Int = {
@@ -418,19 +226,84 @@ fn __sf_pick(vbl: Int, vbr: Int, out: Int, lo: Int, hi: Int) -> Int = {
   su + sw
 }
 
+// |v| = f * 10^e with f > 0 and no trailing zero, m digits, k = m + e the point position:
+//   k <= 0 :  "[-]0." + (-k) zeros + digits
+//   k >= m :  "[-]" + digits + (k-m) zeros + ".0"      (the ".0" only when dot0)
+//   else   :  "[-]" + digits[0..k] + "." + digits[k..m]
+// Backwards passes of __sf_wd: the point sits at c0 + k (k > 0) or c0 + 1 (k <= 0, where the pass
+// writes the leading "0" as the zero it emits once f is spent). A whole value's (k - m) zeros and
+// the "0" of its ".0" sit to the RIGHT of the digits: a first pass with f = 0 writes them (and
+// the point), the digits follow below.
+fn __sf_render(f: Int, m: Int, k: Int, neg: Bool, dot0: Bool) -> String = {
+  let whole = k >= m
+  let tail = if whole then (if dot0 then 2 else 0)
+  else 1
+  let body = if k <= 0 then 2 - k + m
+  else if whole then k + tail else m + 1
+  // NB: `(if neg ...) + body` as a BinOp operand silently mis-lowers in v1 (the if-in-operand
+  // gap), so bind the sign width FIRST then add — see the dual-oracle byte-match.
+  let sign_w = if neg then 1 else 0
+  let out_len = sign_w + body
+  let buf = prim.alloc_str(out_len)
+  let base = prim.handle(buf) + 12
+  let c0 = if neg then {
+    prim.store8(base, 45)
+    base + 1
+  } else base
+  let dot = if k <= 0 then c0 + 1
+  else if tail == 0 then 0 else c0 + k
+  let right = if whole then k - m + tail / 2 else 0
+  let mid = __sf_wd(0, base + out_len, right, dot)
+  let left = if k <= 0 then m + 1 - k else m
+  let _w = __sf_wd(f, mid, left, dot)
+  buf
+}
+
+// |v| = f * 10^e (f > 0): strip trailing zeros, then render.
+fn __sf_finish(f: Int, e: Int, neg: Bool, dot0: Bool) -> String = if (f / 10) * 10 == f then __sf_finish(
+  f / 10,
+  e + 1,
+  neg,
+  dot0,
+)
+else {
+  let m = __sf_ndig(f, 1, 0)
+  __sf_render(f, m, m + e, neg, dot0)
+}
+
 // v = c * 2^q (c > 0): the shortest decimal in the rounding interval, closest on a draw, and on
 // an exact tie the LARGER magnitude — Rust's `{}` (Dragon4 "2R >= S") rounds a half up, not to
 // even: format! prints 1669760939663944.3 for ...944.25 where Giulietti's even rule gives ...4.2.
-fn __sf_core(q: Int, c: Int, neg: Bool, sb: Int) -> String = {
+fn __sf_core(q: Int, c: Int, neg: Bool, dot0: Bool) -> String = {
   let out = prim.band(c, 1)
   let cb = prim.bshl(c, 2)
   let regular = if c != 4503599627370496 then true else q == 0 - 1074
   let cbl = if regular then cb - 2 else cb - 1
   let k = if regular then __sf_flog10pow2(q) else __sf_flog10_3q_pow2(q)
   let h = q + __sf_flog2pow10(0 - k) + 2
-  __sf_compute_g(0 - k, sb)
-  let g1 = prim.load64(sb + 160)
-  let g0 = prim.load64(sb + 168)
+  // g(j), j = -k: entry e = (j + 297) / 27 at byte e * 23, f = j - b.
+  let j = 0 - k
+  let e = (j + 297) / 27
+  let f = j + 297 - e * 27
+  let p = __sf_gtab() + e * 23
+  let lo = __sf_rd(p, 9, 0)
+  let hi = __sf_rd(p + 9, 10, 0)
+  // C = c1 * 2^64 + c0 (c0 read as unsigned); w = C * 5^f as three 64-bit words w2:w1:w0.
+  let c0 = prim.bor(lo, prim.bshl(hi, 63))
+  let c1 = prim.bshr_u(hi, 1)
+  let pf = __sf_pow5(f, 1)
+  let l1 = c1 * pf
+  let w1 = l1 + __sf_mulhi(c0, pf)
+  let w2 = __sf_mulhi(c1, pf) + (if __sf_ult(w1, l1) then 1 else 0)
+  let w0 = c0 * pf
+  // T = floor(w / 2^u) (< 2^126) + d(j); g = T + 1 as two 63-bit words.
+  let u = __sf_flog2pow10(j) - j - (__sf_flog2pow10(j - f) - (j - f)) + 1
+  let tlo = prim.bor(prim.bshl(w1, 64 - u), prim.bshr_u(w0, u))
+  let thi = prim.bor(prim.bshl(w2, 64 - u), prim.bshr_u(w1, u))
+  let d = prim.band(prim.bshr_u(prim.load8(p + 19 + f / 7), f - (f / 7) * 7), 1)
+  let g0x = prim.band(tlo, 9223372036854775807) + d + 1
+  let g1 = prim.bor(prim.bshl(thi, 1), prim.bshr_u(tlo, 63)) + prim.bshr_u(g0x, 63)
+  let g0 = prim.band(g0x, 9223372036854775807)
   let vb = __sf_rop(g1, g0, prim.bshl(cb, h))
   let vbl = __sf_rop(g1, g0, prim.bshl(cbl, h))
   let vbr = __sf_rop(g1, g0, prim.bshl(cb + 2, h))
@@ -449,194 +322,110 @@ fn __sf_core(q: Int, c: Int, neg: Bool, sb: Int) -> String = {
   else if sel == 1 then s
   else if sel == 2 then s + 1
   else if vb < prim.bshl(s + s + 1, 1) then s else s + 1
-  __sf_finish(f, k, neg, sb)
+  __sf_finish(f, k, neg, dot0)
 }
 
 // The Schubfach main path for a FINITE, NON-ZERO x. (Java's C_TINY branch, which feeds 10*t so
 // that MIN_VALUE gets Java's mandatory second digit "4.9E-324", is deliberately absent: format!
 // prints the one-digit shortest "5e-324".)
-fn __sf_main(x: Float) -> String = {
+fn __sf_nonzero(bq: Int, t: Int, neg: Bool, dot0: Bool) -> String = {
+  let q = if bq != 0 then bq - 1075 else 0 - 1074
+  let c = if bq != 0 then t + 4503599627370496 else t
+  __sf_core(q, c, neg, dot0)
+}
+
+// every arm is one call → the heap-result-if lowering handles it. A zero renders as the one
+// digit 0 at point position 1 — "0.0" / "0" / "-0.0" / "-0" — through the same writer, so the
+// printer ships no string literal beyond the three specials (the pool shifts every alloc row).
+fn __sf_main(x: Float, dot0: Bool) -> String = {
   let bits0 = prim.fbits(x)
+  let bq = prim.band(prim.bshr_u(bits0, 52), 2047)
+  let t = prim.band(bits0, 4503599627370495)
+  // 0xF_FFFF_FFFF_FFFF
+  let neg = bits0 < 0
+  if bq == 2047 then __dg_special(bits0, t)
+  else if prim.feq(x, 0.0) then __sf_render(0, 1, 1, neg, dot0)
+  else __sf_nonzero(bq, t, neg, dot0)
+}
+
+fn float_to_string(x: Float) -> String = __sf_main(x, true)
+
+// The `${...}` / record / tuple / list form: integer-valued floats DROP the ".0" (`1.0` -> "1",
+// `-0.0` -> "-0"); every other value prints exactly as `float.to_string` does.
+fn float_to_string_compound(x: Float) -> String = __sf_main(x, false)
+
+// ───────────────────────── float.to_fixed: exact value, round half to even ─────────────────────────
+// v0 native: `format!("{:.N}", x)` — the EXACT decimal expansion rounded to N fractional digits,
+// ties-to-even (core::fmt flt2dec). M = floor(2 * v * 10^nd) with the sticky bit, N = M >> 1,
+// and the dropped bit of M is the half: round N up when it is set and either the sticky bit or
+// N's last bit is. Zero flows through unchanged (c = 0 -> N = 0 -> "0.00…", "-0.00…" for -0.0).
+// p += 1 (the round-up carry).
+fn __tf_inc(p: Int, i: Int) -> Unit = if i >= prim.load32(p) then {
+  prim.store32(p, i + 1)
+  prim.store32(p + 4 + i * 4, 1)
+} else {
+  let v = prim.load32(p + 4 + i * 4) + 1
+  prim.store32(p + 4 + i * 4, prim.band(v, 4294967295))
+  if v == 4294967296 then __tf_inc(p, i + 1) else ()
+}
+
+// N's decimal digits as 9-digit chunks, least significant first, i64 each at cp; returns the count.
+fn __tf_chunks(p: Int, cp: Int, n: Int) -> Int = {
+  let r = __sf_div_small(p, 1000000000)
+  prim.store64(cp + n * 8, r)
+  __dg_norm(p)
+  let zero = if prim.load32(p) == 1 then prim.load32(p + 4) == 0 else false
+  if zero then n + 1
+  else __tf_chunks(p, cp, n + 1)
+}
+
+// Write chunks j .. jmax-1 (9 digits each, least significant first) backwards from `end`.
+fn __tf_write(cp: Int, j: Int, jmax: Int, end: Int, dot: Int) -> Int = if j >= jmax then end
+else __tf_write(cp, j + 1, jmax, __sf_wd(prim.load64(cp + j * 8), end, 9, dot), dot)
+
+fn __tf_main(bits0: Int, nd: Int) -> String = {
   let neg = bits0 < 0
   let bq = prim.band(prim.bshr_u(bits0, 52), 2047)
   let t = prim.band(bits0, 4503599627370495)
-  let blk = prim.alloc_list(26)
+  let q = if bq != 0 then bq - 1075 else 0 - 1074
+  let c = if bq != 0 then t + 4503599627370496 else t
+  let blk = prim.alloc_list(724)
   let sb = prim.handle(blk) + 12
-  if bq != 0 then __sf_core(bq - 1075, t + 4503599627370496, neg, sb)
-  else __sf_core(0 - 1074, t, neg, sb)
-}
-
-fn __dg_special(bits0: Int, raw_mant0: Int) -> String = if raw_mant0 != 0 then "NaN"
-else if bits0 < 0 then "-inf" else "inf"
-
-fn float_to_string(x: Float) -> String = {
-  let bits0 = prim.fbits(x)
-  let raw_exp0 = prim.band(prim.bshr_u(bits0, 52), 2047)
-  let raw_mant0 = prim.band(bits0, 4503599627370495)
-  // 0xF_FFFF_FFFF_FFFF
-  let is_special = raw_exp0 == 2047
-  let is_zero = prim.feq(x, 0.0)
-  let neg = bits0 < 0
-  // every arm is a single string literal or one call → the heap-result-if lowering handles it.
-  if is_special then __dg_special(bits0, raw_mant0)
-  else if is_zero then (if neg then "-0.0" else "0.0")
-  else __sf_main(x)
-}
-
-// ───────────────────────── float.to_fixed (Dragon fixed mode) ─────────────────────────
-// v0 native: `format!("{:.N}", x)` — the EXACT decimal expansion rounded to N fractional
-// digits, ties-to-even (core::fmt flt2dec). Same bignum floor: x = R/S with the fixups
-// pinning R/S ∈ [1/10, 1) so x = (R/S)·10^k; generate EXACTLY k+N digits, then round on
-// the remainder (2R vs S; a tie rounds up iff the last digit is odd), carry-propagate
-// via __dg_carry (which bumps k on overflow — the 0.999→"1.00" case). No MP/MM (fixed
-// mode has no shortest-interval); NaN/inf render like to_string (precision ignored).
-// k estimate = ceil(log10((f64)f) + e*log10(2)). Only needs to be close; the fixups correct it.
-fn __dg_log10(x: Float) -> Float = math.log10(x)
-
-// R-only ×10 scale.
-fn __dgf_scale_down(r: Int, nk: Int, i: Int) -> Int = if i >= nk then 0
-else {
-  __dg_mul10(r)
-  __dgf_scale_down(r, nk, i + 1)
-}
-
-// fix1': while R >= S { S *= 10; k++ }  (pin R/S < 1)
-fn __dgf_fix1(r: Int, s: Int, k: Int) -> Int = if __dg_cmp(r, s) < 0 then k
-else {
-  __dg_mul10(s)
-  __dgf_fix1(r, s, k + 1)
-}
-
-// fix2': while R*10 < S { R *= 10; k-- }  (pin R/S >= 1/10)
-fn __dgf_fix2(r: Int, s: Int, tmp: Int, k: Int) -> Int = {
-  __dg_copy(tmp, r)
-  __dg_mul10(tmp)
-  if __dg_cmp(tmp, s) >= 0 then k
+  let cp = sb + 1856
+  // M as the limbs from index i of the bignum at sb; re-head it at p (limb i-1 is below the
+  // answer and its part in the sticky bit is already taken).
+  let r = __sf_scale(c, q + 1, 0 - nd, sb)
+  let i = prim.bshr(r, 1)
+  let len0 = prim.load32(sb)
+  let p = sb + i * 4
+  let len = if len0 > i then len0 - i else 1
+  prim.store32(p, len)
+  let _pad = if len0 > i then 0
   else {
-    __dg_mul10(r)
-    __dgf_fix2(r, s, tmp, k - 1)
+    prim.store32(p + 4, 0)
+    0
   }
-}
-
-// Exactly n digits: R *= 10; d = floor(R/S); R -= d*S (the repeated-subtraction digit).
-fn __dgf_gen(r: Int, s: Int, dp: Int, n: Int, i: Int) -> Int = if i >= n then n
-else {
-  __dg_mul10(r)
-  let d = __dg_digit(r, s, 0)
-  prim.store8(dp + i, 48 + d)
-  __dgf_gen(r, s, dp, n, i + 1)
-}
-
-// "0.000…0" (nd zeros; no point when nd == 0), signed.
-fn __dgf_zeros(nd: Int, neg: Bool) -> String = {
-  let sign_w = if neg then 1 else 0
+  let half = __sf_div_small(p, 2)
+  let odd = prim.band(prim.load32(p + 4), 1)
+  let up = if half == 0 then false else prim.band(r, 1) + odd != 0
+  if up then __tf_inc(p, 0) else ()
+  let nchunks = __tf_chunks(p, cp, 0)
+  let top = prim.load64(cp + (nchunks - 1) * 8)
+  let ndigits = (nchunks - 1) * 9 + __sf_ndig(top, 1, 0)
+  let int_len = if ndigits > nd then ndigits - nd else 1
   let point_w = if nd > 0 then 1 else 0
-  let buf = prim.alloc_str(sign_w + 1 + point_w + nd)
+  let sign_w = if neg then 1 else 0
+  let out_len = sign_w + int_len + point_w + nd
+  let buf = prim.alloc_str(out_len)
   let base = prim.handle(buf) + 12
   let c0 = if neg then {
     prim.store8(base, 45)
     base + 1
   } else base
-  prim.store8(c0, 48)
-  let _e = if nd > 0 then {
-    prim.store8(c0 + 1, 46)
-    __dg_zeros(c0 + 2, nd)
-  } else 0
+  let dot = if nd > 0 then c0 + int_len else 0
+  let mid = __tf_write(cp, 0, nchunks - 1, base + out_len, dot)
+  let _w = __sf_wd(top, mid, int_len + nd - (nchunks - 1) * 9, dot)
   buf
-}
-
-// digits dp[0..dlen) at decimal exponent kf, dlen == kf + nd (the fixed invariant):
-//   kf <= 0 : "[-]0." + (-kf) zeros + digits      kf > 0 : "[-]" + digits[0..kf] + "." + rest
-fn __dgf_render(dp: Int, dlen: Int, kf: Int, nd: Int, neg: Bool) -> String = {
-  let int_len = if kf > 0 then kf else 1
-  let sign_w = if neg then 1 else 0
-  let point_w = if nd > 0 then 1 else 0
-  let buf = prim.alloc_str(sign_w + int_len + point_w + nd)
-  let base = prim.handle(buf) + 12
-  let c0 = if neg then {
-    prim.store8(base, 45)
-    base + 1
-  } else base
-  let c1 = if kf > 0 then __dg_bcopy(dp, c0, kf)
-  else {
-    prim.store8(c0, 48)
-    c0 + 1
-  }
-  let _e = if nd > 0 then {
-    prim.store8(c1, 46)
-    let zeros = if kf < 0 then 0 - kf else 0
-    let c2 = __dg_zeros(c1 + 1, zeros)
-    let taken = if kf > 0 then kf else 0
-    __dg_bcopy(dp + taken, c2, dlen - taken)
-  } else 0
-  buf
-}
-
-fn __dgf_main(x: Float, nd: Int) -> String = {
-  let bits0 = prim.fbits(x)
-  let neg = bits0 < 0
-  let bits = prim.band(bits0, 9223372036854775807)
-  let raw_exp = prim.band(prim.bshr_u(bits, 52), 2047)
-  let raw_mant = prim.band(bits, 4503599627370495)
-  let ff = if raw_exp == 0 then raw_mant else raw_mant + 4503599627370496
-  let e = if raw_exp == 0 then 0 - 1074 else raw_exp - 1075
-  // Scratch layout: R @0 (528B), S @528 (1584B), TMP @2112 (528B), then the DIGIT
-  // buffer at @2640. `__dgf_gen` writes `n = k + nd` digits there, so the digit room
-  // must cover the WHOLE requested precision, not just an f64's exact expansion:
-  // k ≤ 309 (the largest finite decimal exponent) and nd ≤ 4096 (the domain bound
-  // float_to_fixed enforces), so n ≤ 4405, plus one byte for __dg_carry's overflow
-  // digit. The block was sized 468 slots = 3744B, leaving only 1104B — enough for
-  // the ~1074-digit exact expansion but NOT for a larger `nd`, so `to_fixed(1.5, 1200)`
-  // ran off the end and `__dgf_render` copied adjacent heap back out: native printed
-  // trailing zeros where wasm printed block headers (differential-fuzz, seed
-  // 1784965210163815000). 906 slots = 7248B leaves 4608B of digit room.
-  let blk = prim.alloc_list(906)
-  let sb = prim.handle(blk) + 12
-  let off_r = sb + 0
-  let off_s = sb + 528
-  let off_tmp = sb + 2112
-  let dp = sb + 2640
-  __dg_set_u64(off_r, ff)
-  let _init = if e >= 0 then {
-    __dg_shl(off_r, e)
-    __dg_set_small(off_s, 1)
-    0
-  } else {
-    __dg_set_small(off_s, 1)
-    __dg_shl(off_s, 0 - e)
-    0
-  }
-  let log10_2 = prim.ffrombits(4599094494223104511)
-  let approx = prim.fadd(__dg_log10(prim.i2f(ff)), prim.fmul(prim.i2f(e), log10_2))
-  let k0 = prim.f2i(prim.fceil(approx))
-  let _sc = if k0 >= 0 then __dg_scale_up(off_s, k0, 0)
-  else __dgf_scale_down(off_r, 0 - k0, 0)
-  let k1 = __dgf_fix1(off_r, off_s, k0)
-  let k = __dgf_fix2(off_r, off_s, off_tmp, k1)
-  let n = k + nd
-  if n < 0 then __dgf_zeros(nd, neg)
-  else {
-    let dlen = __dgf_gen(off_r, off_s, dp, n, 0)
-    __dg_copy(off_tmp, off_r)
-    __dg_shl(off_tmp, 1)
-    let c = __dg_cmp(off_tmp, off_s)
-    let last_odd = if dlen == 0 then false else prim.band(prim.load8(dp + dlen - 1) - 48, 1) == 1
-    let up = if c > 0 then true
-    else (if c == 0 then last_odd else false)
-    if up then {
-      if dlen == 0 then {
-        prim.store8(dp, 49)
-        __dgf_render(dp, 1, k + 1, nd, neg)
-      } else {
-        let kf = __dg_carry(dp, dlen, k)
-        let dl2 = if kf > k then dlen + 1 else dlen
-        __dgf_render(dp, dl2, kf, nd, neg)
-      }
-    } else {
-      if dlen == 0 then __dgf_zeros(nd, neg)
-      else __dgf_render(dp, dlen, k, nd, neg)
-    }
-  }
 }
 
 fn float_to_fixed(x: Float, nd: Int) -> String = {
@@ -647,9 +436,7 @@ fn float_to_fixed(x: Float, nd: Int) -> String = {
   if nd < 0 or nd > 4096 then prim.die(prim.handle("Error: to_fixed requires decimals in 0..=4096\n"))
   else ()
   let bits0 = prim.fbits(x)
-  let bits = prim.band(bits0, 9223372036854775807)
-  let raw_exp = prim.band(prim.bshr_u(bits, 52), 2047)
-  let raw_mant = prim.band(bits, 4503599627370495)
-  if raw_exp == 2047 then __dg_special(bits0, raw_mant)
-  else if bits == 0 then __dgf_zeros(nd, bits0 < 0) else __dgf_main(x, nd)
+  let raw_exp = prim.band(prim.bshr_u(bits0, 52), 2047)
+  let raw_mant = prim.band(bits0, 4503599627370495)
+  if raw_exp == 2047 then __dg_special(bits0, raw_mant) else __tf_main(bits0, nd)
 }

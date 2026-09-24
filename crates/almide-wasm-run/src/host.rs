@@ -753,10 +753,24 @@ pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<RunResult> {
 
 /// Run with a fixed stdin buffer (tests; piped byte streams).
 pub fn run_wasm_with(bytes: &[u8], stdin: &[u8]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::Buf(stdin.to_vec()), None, &[], true)
+    run_wasm_src(bytes, StdinSource::Buf(stdin.to_vec()), None, &[], Some(harness_watchdog()))
 }
 
-/// `run_wasm` WITHOUT the 30 s epoch watchdog — the timing runner
+/// The in-process TEST runner's epoch watchdog: a fixture (or a MUTANT under
+/// a gate) that diverges must FAIL the run, never hang the suite. 30 s of
+/// wall time is orders beyond any fixture; `ALMIDE_WASM_WATCHDOG_SECS`
+/// shortens or lengthens it. It is test-harness equipment and nothing else
+/// arms it: the product runner (`almide run --target wasm`) and the timing
+/// runner (`almide bench --target wasm`) run to completion, exactly as the
+/// native binary does, which has no time limit (#2615).
+fn harness_watchdog() -> std::time::Duration {
+    let secs = almide_base::env::var("ALMIDE_WASM_WATCHDOG_SECS")
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(30);
+    std::time::Duration::from_secs(secs)
+}
+
+/// `run_wasm` WITHOUT the epoch watchdog — the timing runner
 /// (`almide bench --target wasm`, #2150). The watchdog is test-harness
 /// equipment, and it is not free: epoch interruption makes wasmtime check
 /// the epoch at every loop header and function entry, which measured 1.9x
@@ -765,7 +779,7 @@ pub fn run_wasm_with(bytes: &[u8], stdin: &[u8]) -> anyhow::Result<RunResult> {
 /// emitted program, as the native leg's bench does and as a stock runtime
 /// runs it. A bench of a diverging program hangs, exactly as it does natively.
 pub fn run_wasm_unbounded(bytes: &[u8]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::Buf(Vec::new()), None, &[], false)
+    run_wasm_src(bytes, StdinSource::Buf(Vec::new()), None, &[], None)
 }
 
 /// Run under a hard linear-memory budget (bytes). Growth past the cap
@@ -773,19 +787,24 @@ pub fn run_wasm_unbounded(bytes: &[u8]) -> anyhow::Result<RunResult> {
 /// "Error: out of memory" + exit 1 (C-197) — the heap-budget
 /// acceptance-gate observable (W-8; the RC arc's floor).
 pub fn run_wasm_capped(bytes: &[u8], max_memory_bytes: usize) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::Buf(Vec::new()), Some(max_memory_bytes), &[], true)
+    run_wasm_src(bytes, StdinSource::Buf(Vec::new()), Some(max_memory_bytes), &[], Some(harness_watchdog()))
 }
 
 /// Run with the process's real stdin, read lazily on first guest read
-/// (the product runner — never blocks for programs that skip stdin).
+/// (the product runner — never blocks for programs that skip stdin). No
+/// time limit, as native has none (#2615).
 pub fn run_wasm_real_stdin(bytes: &[u8]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::RealOnce, None, &[], true)
+    run_wasm_src(bytes, StdinSource::RealOnce, None, &[], None)
 }
 
 /// The product runner with program args (#1716): op 29 answers
-/// [argv0, args...] and the guest's frame walk skips argv0.
+/// [argv0, args...] and the guest's frame walk skips argv0. No time limit:
+/// `almide run --target wasm` runs a program to completion exactly as the
+/// native binary does (#2615 — it used to arm the test harness's 30 s
+/// watchdog, so a program native finished in 36 s trapped with `interrupt`
+/// on wasm, and every loop header paid the epoch check).
 pub fn run_wasm_real_stdin_args(bytes: &[u8], args: &[String]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::RealOnce, None, args, true)
+    run_wasm_src(bytes, StdinSource::RealOnce, None, args, None)
 }
 
 fn run_wasm_src(
@@ -793,14 +812,13 @@ fn run_wasm_src(
     stdin: StdinSource,
     max_memory_bytes: Option<usize>,
     args: &[String],
-    deadline: bool,
+    watchdog: Option<std::time::Duration>,
 ) -> anyhow::Result<RunResult> {
     wasmparser::validate(bytes)?; // the wall: never instantiate an invalid module
-    // Epoch deadline: a fixture (or a MUTANT under the gate) that
-    // diverges must FAIL the run, never hang the suite. 30s of real time
-    // is orders beyond any fixture; the deadline maps to a plain trap.
+    // Epoch deadline (test harness only, see `harness_watchdog`): the
+    // deadline maps to a plain trap.
     let mut cfg = wasmtime::Config::new();
-    cfg.epoch_interruption(deadline);
+    cfg.epoch_interruption(watchdog.is_some());
     let engine = wasmtime::Engine::new(&cfg)?;
     let module = wasmtime::Module::new(&engine, bytes)?;
     let out = Arc::new(Mutex::new(String::new()));
@@ -932,11 +950,11 @@ fn run_wasm_src(
             Ok(())
         },
     )?;
-    let ticker = deadline.then(|| {
+    let ticker = watchdog.map(|after| {
         store.set_epoch_deadline(1);
         let eng = engine.clone();
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(30));
+            std::thread::sleep(after);
             eng.increment_epoch();
         })
     });

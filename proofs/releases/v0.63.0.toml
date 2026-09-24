@@ -1,0 +1,27 @@
+# Release evidence seal — v0.63.0. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.63.0"
+tag = "v0.63.0"
+tag_commit = "4e9fee88fd90327987463477e069630ea2ca51e2"
+date = "2026-09-24"
+url = "https://github.com/almide/almide/releases/tag/v0.63.0"
+
+[derived]
+cargo_version = "0.63.0"
+contracts_sha256 = "808b4703a96449a0ec70d525b20acd3219d1553282c6d15a4e84faed5445aba6"
+contracts_total = "365"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "1ffb0a93a505f176c95cc18c1da5a6d5505f0a5a9e5f98948160aa885d8a3444"
+abstain_ledger_entries = "21"
+wasm_cross_fixtures = "777"
+rust_toolchain = "1.94.0"
+wasmtime = "v47.0.3"
+
+[recorded]
+release_gate = "Minor release through the rc channel (#1484): rc1 (2026-09-18), rc2 (45491e049), rc3 (636a9f771), rc4 (e3d74551d, #2604: 514 commits over rc3 incl. generic protocols stage 1 #2586), rc5 (4e9fee88f, #2610). The final is tagged on the rc5 commit itself, tree-identical to develop cf3499ec4, so it ships exactly what soaked. After rc4 the bank authoring for #1998 found #2605 (I-divergence, present since 0.62: a match guard with derived Eq moved its binding on native, E0507, while wasm ran it) — fixed by #2609 (native clone-pass only, adds clones never removes one; emitted Rust changed in 4 of 1417 spec files, certifier verdict unchanged everywhere). rc5 also carries #2603 (#2010 drop glue for closure envs, C-319 cells, Value and matrix blocks on the structural wasm leg; closure tail calls A/B-probed against rc4 on three deep-recursion shapes, identical on both targets). Blocker gate at the tag: 0 (#1482). Interface diff v0.62.0 -> v0.63.0: additive (added=15 removed=0; #1488). Tag-tree CI: release PR #2610 — every required check green; the commissioned mutation gate shows CANCELLED on the PR (cancelled by the concurrent develop push run), and the full mutation sweep on the same SHA cf3499ec4 passed. Fuzz soak: two generative differential fuzz dispatches on the rc5 tag, 35955335655 and 35961934193 — 102,172 programs over 16 shards, findings=0, summed from the shard job logs (14 of 16 readable; the night verdict's own summary reported 1/8 shards per run because it does not reclaim preempted shards' logs, #2611)."
+assets = "7: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256, almide-dossier-v0.63.0.md (the qualification dossier)"
+known_problems = "None release-blocking. Standing: (1) checker-accepts / rustc-rejects shapes present since 0.62, both targets refuse rather than miscompute: #2599 (ok/err if-expression in a -> T! fn, E001), #2600 (list patterns inside a tuple pattern: exhaustiveness wrong both ways), #2601 (typed-error fallible fold callback), #2606 (== on a type containing a function); #2607 (E022 names the wrong cause); (2) #2608 — almide test's native worker cache has an age bound but no size bound (85 GB in two hours under a bank-authoring workload); (3) #2611 — the fuzz-night verdict under-counts preempted shards, and hosted-runner shards die after a stall; (4) #1589 stage 2 (protocol-as-type) not shipped; a bare cross-module protocol name is a deprecation warning, removal awaits a dialect epoch; (5) #1998 — the 400-cluster modification bank is complete in almide-dojo but its pilot has not been run; the dojo pin moves to v0.63.0 next."

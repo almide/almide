@@ -199,7 +199,9 @@ impl Emitter<'_> {
             }
             SliceTy::Map(..) | SliceTy::Set(_) => {
                 let raw = self.work.helper(crate::work::Helper::MapIdxSideRaw);
-                let side_clear = self.work.helper(crate::work::Helper::MapIdxSideSet { raw });
+                let side_set = self.work.helper(crate::work::Helper::MapIdxSideSet { raw });
+                let side_get = self.work.helper(crate::work::Helper::MapIdxSideGet);
+                let side_clear = self.work.helper(crate::work::Helper::MapIdxForget { side_get, side_set });
                 let (stride, decs) = self.entry_slots(t);
                 let slots: [Option<(u32, u32)>; 2] =
                     [decs[0].map(|(off, ft)| (off, self.dec_fn_of(ft))), decs[1].map(|(off, ft)| (off, self.dec_fn_of(ft)))];
@@ -424,10 +426,12 @@ impl Emitter<'_> {
         // var's block is its alone). Binds/assigns copy, so a plain var
         // never shares; a fresh value has no other holder to witness.
         match &e.kind {
+            // A C-319 cell var reads its OCCUPANT out of the cell, and the
+            // cell holds one credit on it that the next assign releases
+            // (#2010) — so a container storing the read co-owns it exactly
+            // as it would a plain local's block. (The cell skip this
+            // replaced dated from when an occupant was never released.)
             almide_ir::IrExprKind::Var { id } => {
-                if self.cells.contains(id) {
-                    return;
-                }
                 let Some(&(_, vt)) = self.locals.get(id) else { return };
                 self.share_handle_top(vt);
             }
@@ -580,7 +584,7 @@ impl Emitter<'_> {
     /// Does the Named call `name` build a variant case? The same two routes
     /// `lower_call_at` takes: the concrete ctor map, then a generic
     /// instance's case looked up in the call's own annotated type.
-    fn is_variant_ctor(&self, name: &str, e: &almide_ir::IrExpr) -> bool {
+    pub(crate) fn is_variant_ctor(&self, name: &str, e: &almide_ir::IrExpr) -> bool {
         self.types.ctors.contains_key(name)
             || matches!(slice_ty_of(&e.ty, self.types), Some(SliceTy::Named(ti))
                 if matches!(self.types.def(ti), crate::types_table::NamedDef::Variant(v)

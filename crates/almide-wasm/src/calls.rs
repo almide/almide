@@ -165,25 +165,8 @@ impl Emitter<'_> {
                 }
                 // Entry fns resolve by name; a miss falls back to the
                 // module-fn simple-name index (intra-module calls arrive
-                // as Named after lower_module).
-                // Intra-module Named calls resolve within the CURRENT
-                // module first (simple names collide across modules),
-                // then the entry program's globals.
-                let resolved = self
-                    .cur_module
-                    .and_then(|m| self.table.by_name.get(&format!("{m}.{name}")))
-                    .or_else(|| self.table.by_name.get(name))
-                    .copied();
-                // Codec splices resolve by BARE name through the same
-                // registry/whitelist path module calls use.
-                let resolved = resolved.or_else(|| self.resolve_qualified(name));
-                // Cross-module convention method: `Type.method` defined
-                // beside its type in ANOTHER module — resolve by SUFFIX
-                // when exactly one module defines it (unique-or-wall:
-                // the #1558/#1087 bare-name landmine family demands the
-                // ambiguity case refuse, never guess).
-                let resolved = resolved.or_else(|| self.resolve_method_suffix(name));
-                let Some(i) = resolved else {
+                // as Named after lower_module) — see `resolve_named_fn`.
+                let Some(i) = self.resolve_named_fn(name) else {
                     return unsup(&format!("call:{name}"));
                 };
                 let info = &self.table.infos[i];
@@ -393,6 +376,26 @@ impl Emitter<'_> {
         self.f.instructions().local_get(hold);
         self.release_i32();
         Ok(Some(SliceTy::Named(ti)))
+    }
+
+    /// The table entry a Named call to `name` lowers to — the one
+    /// resolution `lower_call_at` uses, shared with the Assign release rule
+    /// (#2616) so the two cannot resolve the same call differently.
+    /// Intra-module Named calls resolve within the CURRENT module first
+    /// (simple names collide across modules), then the entry program's
+    /// globals. Codec splices resolve by BARE name through the same
+    /// registry/whitelist path module calls use. A cross-module convention
+    /// method (`Type.method` defined beside its type in ANOTHER module)
+    /// resolves by SUFFIX when exactly one module defines it (unique-or-wall:
+    /// the #1558/#1087 bare-name landmine family demands the ambiguity case
+    /// refuse, never guess).
+    pub(crate) fn resolve_named_fn(&self, name: &str) -> Option<usize> {
+        self.cur_module
+            .and_then(|m| self.table.by_name.get(&format!("{m}.{name}")))
+            .or_else(|| self.table.by_name.get(name))
+            .copied()
+            .or_else(|| self.resolve_qualified(name))
+            .or_else(|| self.resolve_method_suffix(name))
     }
 
     /// A `Type.method` spelling that missed both the current module and
