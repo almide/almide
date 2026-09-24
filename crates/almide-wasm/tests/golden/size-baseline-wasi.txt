@@ -407,6 +407,7 @@
 2153	spec/wasm_cross/match_box_pattern_backstop.almd
 3680	spec/wasm_cross/match_container_literal.almd
 2802	spec/wasm_cross/match_forms.almd
+7289	spec/wasm_cross/match_guard_eq_borrows_binding.almd
 6429	spec/wasm_cross/match_payload_string_literal.almd
 3026	spec/wasm_cross/match_result.almd
 7525	spec/wasm_cross/math_atan_tanh.almd
