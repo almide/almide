@@ -62,7 +62,7 @@ pub(crate) enum Helper {
     NamedOp { op: NamedOp, ti: u32 },
     /// `$jp_set(j, path, k, nv) -> Value` — json.set_path's recursive
     /// core over THIS backend's Value layout.
-    JsonPathSet,
+    JsonPathSet { vdec: u32 },
     /// `$jp_remove(j, path, k) -> Value` — json.remove_path's core.
     JsonPathRemove,
     /// `$scan_deep_<key>(block, stride, off, needle) -> i32` — the scan
@@ -158,6 +158,22 @@ pub(crate) enum Helper {
     /// `$copy_entries(block) -> block`: `$block_copy` plus the entry
     /// credits of the whole copy.
     CopyEntries { inc_entries: u32 },
+    /// `$drop_env_<layout>(block)` — the drop of ONE closure env layout
+    /// (#2010 closures, ruling B): the block's credit down; at zero every
+    /// handle capture released through its own dec fn (`slots` =
+    /// `(payload offset, dec fn)`), then the block freed. Its funcref-table
+    /// slot is what the env stores at `ENV_DROP_OFF`; one helper per slot
+    /// table, so lambdas with the same capture layout share it.
+    DropEnv { slots: Vec<(u32, u32)> },
+    /// `$drop_fn(block)` — the release of a Fn VALUE: a pool-static block
+    /// (a named fn, a capture-free lambda) is immortal; any other env
+    /// `call_indirect`s the drop fn its own payload names (type `ti` =
+    /// `(i32) -> ()`, the one fixed drop signature).
+    DropFn { ti: u32 },
+    /// `$drop_cell(block)` — the release of a C-319 shared cell (#2010):
+    /// the cell's credit down; at zero its occupant released through
+    /// `elem_dec` (none for a flat occupant), then the cell freed.
+    DropCell { elem_dec: Option<u32> },
     /// #2312 shape 1 — the ROOM-FREE appends of a bounded build
     /// (`runtime_line::BoundedBuild`): the same writes as `$append_copy` /
     /// `$append_i64` / `$append_bool`, without the room check and so

@@ -281,6 +281,13 @@ impl Emitter<'_> {
             // local holds its ADDRESS from here on.
             let hv = self.hold_val(declared)?;
             self.f.instructions().local_set(hv);
+            // #2010: the cell is refcounted — the frame holds one credit
+            // (released at its exits, and here at a loop rebind: the
+            // previous pass's cell lives on only in the envs that captured
+            // it), each capturing env one more.
+            let dec_cell = self.dec_cell_fn(declared);
+            self.f.instructions().local_get(idx).call(dec_cell);
+            self.rc_own(idx, declared);
             self.f
                 .instructions()
                 .i32_const(declared.slot_size() as i32)
@@ -649,10 +656,20 @@ impl Emitter<'_> {
                     IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => &expr.kind,
                     k => k,
                 };
+                // Arm-aware (#2010 item 4): a MODULE call never spends the
+                // var's own credit — a native arm declares Borrow (reads it)
+                // or Retain (+1 share), the registry route incs an owned
+                // position and passes a borrowed one as is — so the old
+                // occupant is still this local's to release, and the RC-5
+                // inc above already made an aliasing result (`s =
+                // set.insert(s, x)`'s present path) its own credit. Only a
+                // table fn / runtime helper can take the block over.
+                let module_call = matches!(call_core, IrExprKind::Call { target: almide_ir::CallTarget::Module { .. }, .. });
                 let call_shaped_self = matches!(
                     call_core,
                     IrExprKind::Call { .. } | IrExprKind::RuntimeCall { .. }
-                ) && crate::rc_ownership::rc_mentions_var(value, *var);
+                ) && !module_call
+                    && crate::rc_ownership::rc_mentions_var(value, *var);
                 if let Some(idx) = local
                     && !self.cells.contains(var)
                     && self.rc_droppable(declared)
@@ -661,6 +678,19 @@ impl Emitter<'_> {
                     let dec = self.dec_fn_of(declared);
                     self.f.instructions().local_get(idx).call(dec);
                     self.rc_own(idx, declared);
+                }
+                // #2010: a C-319 cell's occupant is released as it is
+                // replaced (the cell holds exactly one credit on it) — the
+                // same settlement, one load deeper.
+                if let Some(idx) = local
+                    && self.cells.contains(var)
+                    && self.rc_droppable(declared)
+                    && !call_shaped_self
+                {
+                    let dec = self.dec_fn_of(declared);
+                    self.f.instructions().local_get(idx);
+                    self.load_ty_slot(declared, 0);
+                    self.f.instructions().call(dec);
                 }
                 match local {
                     Some(idx) => self.emit_store_var(*var, idx, declared)?,

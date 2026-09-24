@@ -1,19 +1,21 @@
 diff --git a/crates/almide-wasm/src/emitter_values.rs b/crates/almide-wasm/src/emitter_values.rs
-index 730bdb293..7c4bc6a71 100644
+index 847ca9648..1a68b8396 100644
 --- a/crates/almide-wasm/src/emitter_values.rs
 +++ b/crates/almide-wasm/src/emitter_values.rs
-@@ -122,18 +122,7 @@ impl Emitter<'_> {
-                         .i32_store(slot_memarg(0));
+@@ -131,20 +131,7 @@ impl Emitter<'_> {
+                         .i32_store(slot_memarg(ENV_DROP_OFF));
                      for (v, t, off, is_cell) in &captures {
                          let (idx, _) = self.locals[v];
 -                        self.f.instructions().local_get(hb).local_get(idx);
 -                        if *is_cell {
--                            // the local already holds the cell address
+-                            // the local already holds the cell address; the
+-                            // env co-owns the cell (+1, released by its glue)
+-                            self.f.instructions().call(F_INC).local_get(idx);
 -                            self.f.instructions().i32_store(slot_memarg(*off));
 -                        } else {
--                            // The env is a holder: a captured handle takes +1
--                            // (leak-not-dangle until closures drop, #2010) —
--                            // a tail-called closure returning its capture read
+-                            // The env is a holder: a captured handle takes +1,
+-                            // released by the env's drop glue (#2010) — a
+-                            // tail-called closure returning its capture read
 -                            // the frame's released local (fuzz 20260909).
 -                            self.share_handle_top(*t);
 -                            self.store_ty_slot(*t, *off);

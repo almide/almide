@@ -35,6 +35,11 @@ pub(crate) fn rc_certainly_fresh(k: &almide_ir::IrExprKind) -> bool {
             // `none` is NULL_ADDR — no block, so "owned" costs nothing and
             // lets an `if c then some(x) else none` tail count as owned.
             | K::OptionNone
+            // A Fn value (#2010 closures): a capturing lambda allocates its
+            // env at rc 1; a capture-free lambda and a named fn are pool
+            // statics the rc ops no-op on.
+            | K::Lambda { .. }
+            | K::FnRef { .. }
     )
 }
 
@@ -47,17 +52,12 @@ pub(crate) fn rc_tail(e: &almide_ir::IrExpr) -> &almide_ir::IrExpr {
 }
 
 impl Emitter<'_> {
-    /// The droppable set (#2010 stage 1): every block shape with NO heap
-    /// interiors — Str, Bytes, and a List / tuple / record / variant /
-    /// Option / Result whose payload slots are all flat. Such a block is
-    /// released by `$dec_flat` alone: there is no shared field to
-    /// dangle and no glue to recurse into. A shape holding a block (a
-    /// `List[String]`, an `(Int, String)`, a `Map`) stays on the bump
-    /// graveyard until its typed drop glue exists (#2010 stages 2–4).
     /// A slot whose value is a heap HANDLE the holder owns one credit of
     /// (#2010 stage 2b/2c): Str / Bytes, a List, an Option / Result /
     /// tuple block, a record / variant (2c-ii), a Map / Set (Map stage
-    /// b). Value and Fn handles carry no credit the holder releases yet.
+    /// b), a Value (its tagged payload glue), a Fn (the env's own drop
+    /// glue, ruling B) and a Matrix (one flat block) — every heap shape
+    /// (#2010 closed the graveyard).
     pub(crate) fn elem_is_handle(&self, elem: SliceTy) -> bool {
         match elem {
             SliceTy::Scalar(Scalar::Str | Scalar::Bytes)
@@ -69,6 +69,14 @@ impl Emitter<'_> {
             SliceTy::Named(ti) => self.named_has_layout(ti),
             // Map stage b: the entries array and its entries are credits.
             SliceTy::Map(..) | SliceTy::Set(_) => true,
+            // Closures (#2010 ruling B): the env block is released through
+            // the drop glue its own payload names (`$drop_fn`).
+            SliceTy::Fn(_) => true,
+            // #2010 item 5: a Value block releases its Str / Array / Object
+            // payload through its tagged glue.
+            SliceTy::Value => true,
+            // A flat matrix block: `$dec_flat` (dec_fn_of's default).
+            SliceTy::Matrix => true,
             _ => false,
         }
     }
@@ -112,6 +120,19 @@ impl Emitter<'_> {
                 }
                 crate::types_table::NamedDef::Excluded => (Vec::new(), None),
             },
+            // #2010 item 5: a Value's payload by its tag — a Str block, an
+            // Array's `List[Value]`, an Object's `List[(String, Value)]`.
+            SliceTy::Value => {
+                let items = SliceTy::List(self.types.intern(SliceTy::Value));
+                let pair = self.types.tuple(vec![STR, SliceTy::Value]);
+                let pairs = SliceTy::List(self.types.intern(SliceTy::Tuple(pair)));
+                let cases = vec![
+                    (crate::value::VT_STR as u32, vec![(almide_layout::SUM_FIELD, F_DEC_FLAT)]),
+                    (crate::value::VT_ARRAY as u32, vec![(almide_layout::SUM_FIELD, self.dec_fn_of(items))]),
+                    (crate::value::VT_OBJECT as u32, vec![(almide_layout::SUM_FIELD, self.dec_fn_of(pairs))]),
+                ];
+                (Vec::new(), Some((almide_layout::SUM_TAG, cases)))
+            }
             _ => (Vec::new(), None),
         }
     }
@@ -130,6 +151,7 @@ impl Emitter<'_> {
                 }
                 crate::types_table::NamedDef::Excluded => false,
             },
+            SliceTy::Value => true,
             _ => false,
         }
     }
@@ -168,7 +190,7 @@ impl Emitter<'_> {
                     F_DEC_FLAT
                 }
             }
-            SliceTy::Option(_) | SliceTy::Result(..) | SliceTy::Tuple(_) | SliceTy::Named(_) => {
+            SliceTy::Option(_) | SliceTy::Result(..) | SliceTy::Tuple(_) | SliceTy::Named(_) | SliceTy::Value => {
                 if self.shape_has_handles(t) {
                     self.shape_helper(crate::work::Helper::DropShape { ty: t }, t)
                 } else {
@@ -187,8 +209,22 @@ impl Emitter<'_> {
                     self.work.helper(crate::work::Helper::DropEntries { stride, slots, side_clear })
                 }
             }
+            SliceTy::Fn(_) => {
+                let ti = self.work.itype(vec![ValType::I32], None);
+                self.work.helper(crate::work::Helper::DropFn { ti })
+            }
             _ => F_DEC_FLAT,
         }
+    }
+
+    /// The release of a C-319 cell holding a `t` (#2010): the cell's
+    /// credit down; at zero its occupant released by `t`'s own drop (a
+    /// flat occupant needs none), then the cell freed. Credits: one for
+    /// the binding frame (released at its exits and at a loop rebind),
+    /// one per capturing env (released by the env's glue).
+    pub(crate) fn dec_cell_fn(&self, t: SliceTy) -> u32 {
+        let elem_dec = self.elem_is_handle(t).then(|| self.dec_fn_of(t));
+        self.work.helper(crate::work::Helper::DropCell { elem_dec })
     }
 
     /// The entry layout of a Map / Set: `(stride, [key slot, value slot])`
@@ -237,7 +273,10 @@ impl Emitter<'_> {
     /// The release fn of an owned LOCAL, by the type `rc_own` recorded
     /// for it (a param is recorded at frame entry).
     pub(crate) fn dec_fn_of_local(&self, idx: u32) -> u32 {
-        self.owned_ty.get(&idx).map_or(F_DEC_FLAT, |&t| self.dec_fn_of(t))
+        let Some(&t) = self.owned_ty.get(&idx) else { return F_DEC_FLAT };
+        // A C-319 cell local owns the CELL, not the occupant (#2010).
+        let is_cell = self.locals.iter().any(|(v, &(i, _))| i == idx && self.cells.contains(v));
+        if is_cell { self.dec_cell_fn(t) } else { self.dec_fn_of(t) }
     }
 
     /// `Some($inc_elems)` when a spine of `elem` slots copied from another
@@ -262,7 +301,7 @@ impl Emitter<'_> {
                 Some(inc_elems) => self.work.helper(crate::work::Helper::CopyElems { inc_elems }),
                 None => F_BLOCK_COPY,
             },
-            SliceTy::Option(_) | SliceTy::Result(..) | SliceTy::Tuple(_) | SliceTy::Named(_)
+            SliceTy::Option(_) | SliceTy::Result(..) | SliceTy::Tuple(_) | SliceTy::Named(_) | SliceTy::Value
                 if self.shape_has_handles(t) =>
             {
                 let inc_elems = self.shape_helper(crate::work::Helper::IncShape { ty: t }, t);
@@ -287,7 +326,7 @@ impl Emitter<'_> {
                 Some(inc_elems) => self.work.helper(crate::work::Helper::CowElems { inc_elems }),
                 None => F_COW,
             },
-            SliceTy::Option(_) | SliceTy::Result(..) | SliceTy::Tuple(_) | SliceTy::Named(_)
+            SliceTy::Option(_) | SliceTy::Result(..) | SliceTy::Tuple(_) | SliceTy::Named(_) | SliceTy::Value
                 if self.shape_has_handles(t) =>
             {
                 let inc_elems = self.shape_helper(crate::work::Helper::IncShape { ty: t }, t);
@@ -335,6 +374,14 @@ pub(crate) fn rc_droppable_ty(types: &crate::types_table::TypeTable, t: SliceTy)
             // index side-table entry, and every handle key / value / member
             // through the typed entry walk (`DropEntries`).
             SliceTy::Map(..) | SliceTy::Set(_) => true,
+            // Closures (#2010 ruling B): a Fn value is an env block that
+            // names its own drop glue; pool-static Fn blocks are immortal.
+            SliceTy::Fn(_) => true,
+            // #2010 item 5: a Value through its tagged payload glue.
+            SliceTy::Value => true,
+            // A matrix is ONE flat block (`[rows][cols][f64…]`, no interior
+            // handles): `$dec_flat` releases it whole.
+            SliceTy::Matrix => true,
             _ => false,
         }
     }
@@ -507,6 +554,11 @@ impl Emitter<'_> {
             almide_ir::CallTarget::Module { .. } => {
                 return self.owned_call_marks.contains(&(target as *const almide_ir::CallTarget as usize));
             }
+            // A closure call (#2010): the lifted body is lowered by the same
+            // `lower_fn` a table fn is — its epilogue hands the caller ONE
+            // credit on every path (a named fn's shim forwards the plain
+            // fn's owned result; an adapter's ok-carrier is fresh).
+            almide_ir::CallTarget::Computed { .. } => return true,
             _ => return false,
         };
         // A variant constructor is OWNED (#2317): a case with a payload is

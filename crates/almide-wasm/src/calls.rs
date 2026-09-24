@@ -58,7 +58,30 @@ impl Emitter<'_> {
                 ps.extend(def.params.iter().map(|t| t.val_type()));
                 let ti = self.work.itype(ps, def.ret.map(SliceTy::val_type));
                 // Encoder argument order is (table, type).
-                if tail && def.ret.is_some() && def.ret == self.fn_ret && self.tail_transfer_ok(true) {
+                // #2010: the callee VALUE is an env block the lifted body
+                // reads as a view. A fresh one (a call result, a lambda
+                // literal) is this site's to release after the call.
+                let callee_owned = self.rc_owned_result(callee);
+                // The env must outlive a frame-replacing jump, and nothing
+                // releases it after one: only a callee this frame's exit
+                // plan does NOT release may be tail-called — a borrowed
+                // param, a capture, a global. An owned local or param, or a
+                // fresh callee, takes the plain call and its release here /
+                // at the epilogue (a leak-free env over O(1) stack for that
+                // one shape; the self-recursive loop is a named call).
+                let callee_survives_exit = !callee_owned
+                    && match &callee.kind {
+                        IrExprKind::Var { id } => self.locals.get(id).is_none_or(|&(idx, _)| {
+                            !self.rc_owned.contains(&idx) && !self.rc_frame_params.contains(&idx)
+                        }),
+                        _ => false,
+                    };
+                if tail
+                    && callee_survives_exit
+                    && def.ret.is_some()
+                    && def.ret == self.fn_ret
+                    && self.tail_transfer_ok(true)
+                {
                     // A tail call REPLACES the frame — the epilogue's param
                     // release never runs, so it runs HERE (args are already
                     // +1'd by rc_arg_guard, so a pass-through param
@@ -68,6 +91,10 @@ impl Emitter<'_> {
                     self.f.instructions().return_call_indirect(0, ti);
                 } else {
                     self.f.instructions().call_indirect(0, ti);
+                    if callee_owned {
+                        let dec = self.dec_fn_of(got);
+                        self.f.instructions().local_get(h).call(dec);
+                    }
                 }
                 self.release_i32();
                 let _ = ret_hint;

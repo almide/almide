@@ -168,11 +168,14 @@ impl Emitter<'_> {
                     && func.as_str() == "set_path"
                     && args.len() == 3 =>
             {
-                let h = self.work.helper(crate::work::Helper::JsonPathSet);
-                self.lower_arg(&args[0], Some(SliceTy::Value), ArgMode::Retain)?;
+                // #2010 item 5: `$jp_set` BORROWS the document and the new
+                // value and takes its own credit on every block it shares.
+                let vdec = self.dec_fn_of(SliceTy::Value);
+                let h = self.work.helper(crate::work::Helper::JsonPathSet { vdec });
+                self.lower_arg(&args[0], Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.lower_arg(&args[1], None, ArgMode::Borrow)?;
                 self.f.instructions().i32_const(0);
-                self.lower_arg(&args[2], Some(SliceTy::Value), ArgMode::Retain)?;
+                self.lower_arg(&args[2], Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.f.instructions().call(h);
                 // ok(v) — the surface is Result[Value, String], always ok.
                 let hv = self.tmp_i32_local;

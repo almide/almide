@@ -609,6 +609,10 @@ pub(crate) enum TableEntry {
     Adapter { target: usize, raw: SliceTy },
     /// A lifted non-capturing lambda (index into `FnWork::lifted`).
     Lambda(u32),
+    /// A function index placed in the table AS IS — a closure env's drop
+    /// glue (`Helper::DropEnv`, #2010), reached through `$drop_fn`'s
+    /// `call_indirect (i32) -> ()`, never through the closure convention.
+    Direct(u32),
 }
 
 #[derive(Clone)]
@@ -633,6 +637,14 @@ pub(crate) struct LiftedLambda {
     /// charges nothing for reaching a top-let's value.
     pub(crate) charge_hop: bool,
 }
+
+/// Closure env payload layout (#2010, ruling B — the Roc erased-callable
+/// shape): `[code slot: i32 @0][drop slot: i32 @ENV_DROP_OFF][captures…]`.
+/// The code slot stays at 0 (every `call_indirect` site reads it there);
+/// the drop slot is the +1-biased funcref slot of the env's `DropEnv`
+/// glue. A pool-static Fn block (named fn, capture-free lambda) is only
+/// the code slot: it is immortal, so `$drop_fn` never reads a drop slot.
+pub(crate) const ENV_DROP_OFF: u32 = 4;
 
 /// A call_indirect signature at the wasm value-type level.
 type WasmSig = (Vec<ValType>, Option<ValType>);

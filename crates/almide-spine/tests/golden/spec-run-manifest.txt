@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 (dev) at f3665c838 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 (dev) at 5e50390b4 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -408,6 +408,7 @@ e222949f12244150562f830bb7de5a0a92a386d82893a9f6d466f09baa1f702c	0	spec/wasm_cro
 16a78b6ac89ac8e7ddcd10cbffc9afa9d2f2aa1053a6fc3f92fdb8fc69663a39	0	spec/wasm_cross/match_box_pattern_backstop.almd
 0d1186e594caffb687fad662e2520589d5c65e8a30b13ec3b4dacd31d4951355	0	spec/wasm_cross/match_container_literal.almd
 7f2884c792e903ef445ac7bc635819a2907657f1d2fe8f89c7714db8bb2b1d5f	0	spec/wasm_cross/match_forms.almd
+76c85d2d7881e08b8ec23813d7a47ecb58087d0d78a7d580c605a55b31cf62a8	0	spec/wasm_cross/match_guard_eq_borrows_binding.almd
 a796791af3a4a88665eecf5039fa2ee6fa59f3fef60efc4dde34ada08a32e38a	0	spec/wasm_cross/match_payload_string_literal.almd
 52df461f42906ad89554bc60ab090d0e296562e901b10ef9e4e497218fd68fbb	0	spec/wasm_cross/match_result.almd
 abcf49a0a42abffaa0ec268c7558c238e4fab96fe44de08646920ff12e08a84a	0	spec/wasm_cross/math_atan_tanh.almd

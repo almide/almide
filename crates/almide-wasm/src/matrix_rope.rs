@@ -262,6 +262,17 @@ impl Emitter<'_> {
             i.local_get(hsk).i32_const(8).i32_mul().call(F_ALLOC).local_set(hsc);
         }
         let ho = self.mat_alloc_out(hsq, hdm)?;
+        // An empty K writes no output cell (the weighted V sum runs over
+        // zero keys) and native answers zeros: the cells start ZERO here —
+        // `$alloc` hands back reused blocks unzeroed, which became reachable
+        // the moment matrices were released (#2010).
+        {
+            let mut i = self.f.instructions();
+            i.local_get(ho).i32_const((almide_layout::PAYLOAD + 8) as i32).i32_add();
+            i.i32_const(0);
+            i.local_get(hsq).local_get(hdm).i32_mul().i32_const(8).i32_mul();
+            i.memory_fill(0);
+        }
         let hi = self.hold_i32()?;
         let hh = self.hold_i64()?;
         let hj = self.hold_i32()?;

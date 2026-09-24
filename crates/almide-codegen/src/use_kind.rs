@@ -142,6 +142,7 @@ struct Walk<'a> {
     in_chain: bool,
     mut_depth: u32,
     loop_depth: u32,
+    guard_depth: u32,
     outer_lambda: Option<u32>,
     stmt: u32,
     /// See [`Use::top_stmt`]: set by [`Walk::stmt`] while `nest <= 1` — the
@@ -174,7 +175,7 @@ struct Walk<'a> {
 impl<'a> Walk<'a> {
     fn new(oracle: &'a dyn SlotOracle) -> Self {
         Walk {
-            oracle, uses: Vec::new(), depth: 0, in_chain: false, mut_depth: 0, loop_depth: 0,
+            oracle, uses: Vec::new(), depth: 0, in_chain: false, mut_depth: 0, loop_depth: 0, guard_depth: 0,
             outer_lambda: None, stmt: 0, top_stmt: 0, nest: 0, arm: 0, next_arm: 0, arm_parent: HashMap::new(), guarded: Vec::new(),
             held: Vec::new(), held_outside: 0, fan_arm: None, held_fan_outside: 0,
         }
@@ -192,7 +193,7 @@ impl<'a> Walk<'a> {
         self.uses.push(Use {
             var, site, chain, depth: self.depth, in_chain: self.in_chain, in_mut: self.mut_depth > 0,
             in_loop: self.loop_depth > 0, outer_lambda: self.outer_lambda, stmt: self.stmt, top_stmt: self.top_stmt,
-            arm: self.arm, guard_forced, held_across, fan_arm: self.fan_arm,
+            arm: self.arm, guard_forced, held_across, fan_arm: self.fan_arm, in_guard: self.guard_depth > 0,
         });
     }
 
@@ -460,7 +461,19 @@ impl<'a> Walk<'a> {
                     self.arm = self.next_arm;
                     self.arm_parent.insert(self.arm, parent);
                     self.pattern(&arm.pattern);
-                    if let Some(g) = &arm.guard { self.expr(g, Site::Operand); }
+                    // A guard is walked by the clone pass like a loop body
+                    // (#2605): it never moves what it reads — Rust binds the
+                    // arm's pattern by reference while it runs, and a failed
+                    // guard falls through to arms that may read the same
+                    // vars — so its consuming occurrences are `in_loop`,
+                    // cloned anyway, and earn a param no ownership.
+                    if let Some(g) = &arm.guard {
+                        self.loop_depth += 1;
+                        self.guard_depth += 1;
+                        self.expr(g, Site::Operand);
+                        self.guard_depth -= 1;
+                        self.loop_depth -= 1;
+                    }
                     self.expr(&arm.body, Site::Result);
                     self.arm = parent;
                 }
