@@ -424,10 +424,12 @@ impl Emitter<'_> {
         // var's block is its alone). Binds/assigns copy, so a plain var
         // never shares; a fresh value has no other holder to witness.
         match &e.kind {
+            // A C-319 cell var reads its OCCUPANT out of the cell, and the
+            // cell holds one credit on it that the next assign releases
+            // (#2010) — so a container storing the read co-owns it exactly
+            // as it would a plain local's block. (The cell skip this
+            // replaced dated from when an occupant was never released.)
             almide_ir::IrExprKind::Var { id } => {
-                if self.cells.contains(id) {
-                    return;
-                }
                 let Some(&(_, vt)) = self.locals.get(id) else { return };
                 self.share_handle_top(vt);
             }
