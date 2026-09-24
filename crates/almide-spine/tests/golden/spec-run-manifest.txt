@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 (dev) at 5e50390b4 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 (dev) at 6112418f2 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -57,6 +57,7 @@ bd9f07b46848fb2cd63fc7ed578609786d8d8621268239d43160bee08a9326c8	0	spec/wasm_cro
 d22a4c2bc94e2b65c7256467c627df13bcf967abb94cf681fbfac776b03846df	0	spec/wasm_cross/call_closure_lambda_param.almd
 bd915dec3fcf8ea83a6c1b98768fcceb1d516c03e70f0be93dd600c7aca44793	0	spec/wasm_cross/call_lambda_ctor.almd
 e4c1fa6c32efd43aec45789d3cb81dd04fcdd18944c54f6fc4c7b1d90089c39e	0	spec/wasm_cross/callee_shadowing_family.almd
+a01cee3fcc306fdc19e9f60c9f84960234345af1546b9ded029e1ebfa79e14e6	0	spec/wasm_cross/captured_var_value_stored.almd
 c561eb58ceae2dfff3ca8aa861561c7f342985d3b2d7e0a8efd1abe8f16e6e65	0	spec/wasm_cross/checked_conversion_exact_bounds.almd
 efbd70cf56b43659d23bc20227df4dfc035d62fd57c99502167447f76e941b23	0	spec/wasm_cross/checked_conversion_value_match.almd
 f2230fa03d41f8aeac94bed62238d20871037979b05730b6b36f836d2362ad9e	0	spec/wasm_cross/chunk_str.almd

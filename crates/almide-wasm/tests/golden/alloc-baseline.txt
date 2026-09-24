@@ -56,6 +56,7 @@
 66016	spec/wasm_cross/call_closure_lambda_param.almd
 65888	spec/wasm_cross/call_lambda_ctor.almd
 66144	spec/wasm_cross/callee_shadowing_family.almd
+66592	spec/wasm_cross/captured_var_value_stored.almd
 71072	spec/wasm_cross/checked_conversion_exact_bounds.almd
 ~	spec/wasm_cross/checked_conversion_value_match.almd
 66336	spec/wasm_cross/chunk_str.almd
