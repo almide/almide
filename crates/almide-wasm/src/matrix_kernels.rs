@@ -41,7 +41,11 @@ impl Emitter<'_> {
         i.local_get(hr).local_get(hc).i32_mul().i32_const(8).i32_mul();
         i.i32_const(8).i32_add().call(F_ALLOC).local_set(ho);
         i.local_get(ho).local_get(hr).i32_store(slot_memarg(0));
-        i.local_get(ho).local_get(hc).i32_store(slot_memarg(4));
+        // rows = 0 stores cols = 0: a rowless matrix has no columns (the
+        // `mat_alloc_out64` invariant, docs/stdlib/matrix.md).
+        i.local_get(ho);
+        i.i32_const(0).local_get(hc).local_get(hr).i32_eqz().select();
+        i.i32_store(slot_memarg(4));
         let _ = i;
         Ok(ho)
     }
