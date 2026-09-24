@@ -49,6 +49,25 @@ fn a_closure_env_releases_its_captures() {
     );
 }
 
+/// A closure handed to a fn that calls it in TAIL position: the param the
+/// exit plan releases cannot ride a frame-replacing jump, so the call is a
+/// plain one and the env is released at the callee's epilogue.
+#[test]
+fn a_tail_called_closure_param_is_released() {
+    flat(
+        "tail-called closure",
+        |n| {
+            looped(
+                n,
+                "fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)",
+                "    let s = \"k\" + int.to_string(i % 7)\n    total = total + apply((x) => x + string.len(s), 1)",
+            )
+        },
+        "3000",
+        "24000",
+    );
+}
+
 /// A C-319 cell captured and mutated by a closure: the cell is released
 /// with its last holder (the frame's exit, the env's glue), and every
 /// replaced occupant as it is replaced.
