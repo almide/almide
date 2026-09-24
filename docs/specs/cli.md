@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-09-23
+> Last updated: 2026-09-24
 
 ## Overview
 
@@ -35,6 +35,14 @@ almide run app.almd -- arg1 arg2        # ファイル指定 + プログラム�
 `almide` 自身のフラグ（`--target` / `--no-check` / `--release`）は `--` の前で解釈され、`--` 以降はそのままプログラムに渡る（`cargo run` と同じ規約）。プログラム内で `env.args()` を呼ぶと `--` 以降の引数が `List[String]` で返る。
 
 テスト: `tests/run_target_flag_test.rs`
+
+**実行時間の上限は無い**(#2615): `almide run` はどちらのターゲットでもプログラムを最後まで走らせる。
+native バイナリに時間制限が無いのと同じく、`--target wasm` の埋め込みホストも watchdog を張らない
+（以前は 30 秒で `wasm trap: interrupt` になり、ループ先頭ごとに epoch 検査の費用も払っていた）。
+時間制限が要るのはハーネスの側で、ハーネスが自分で張る: in-process のテストランナー
+（`run_wasm` / `run_wasm_with` / `run_wasm_capped`）は 30 秒の watchdog を持ち、
+`ALMIDE_WASM_WATCHDOG_SECS` で変えられる。fuzz（`tools/xtarget-fuzz` の `--timeout`）や掃引スクリプトは
+プロセス単位の制限を自前で持つ。テスト: `tests/wasm_run_no_time_limit_test.rs`
 
 **native のビルドキャッシュ**(#2500): native ターゲットは生成 Rust を共有スクラッチ dir
 （`ALMIDE_RUN_PROJECT_DIR`、既定 `<temp>/almide-run`）でビルドし、生成コードの内容ハッシュを名前にした
@@ -862,6 +870,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_WASM_FREES` | ci | the frees-churn gate's switch; its compiler reader retired with the v0 emitter (#782), the gate that still sets it is #2207's |
 | `ALMIDE_WASM_INCUMBENT` | route | force the INCUMBENT wasm leg (the v1 MIR renderer) instead of the structural-first route |
 | `ALMIDE_WASM_STRUCTURAL` | route | force the STRUCTURAL wasm leg for a shape the router would send to the incumbent (the route-flip probe) |
+| `ALMIDE_WASM_WATCHDOG_SECS=value` | harness | the wall-time seconds the IN-PROCESS test runner's epoch watchdog (`run_wasm` / `run_wasm_with` / `run_wasm_capped` in almide-wasm-run) lets a module run before it traps with `interrupt` (default 30); `almide run --target wasm` and `almide bench --target wasm` arm no watchdog on any setting, as native has none (#2615) |
 | `ALMIDE_WAT_PRELUDE_REACH` | ci | make the prelude audit re-render every named fixture to measure reachability (CI sets it) |
 | `ALMIDE_WITNESS_DUMP` | harness | print every fixture's certificate witness in the witness-floor test |
 | `ALMIDE_WRITE_FUZZ_CORPUS` | harness | write the generated fuzz programs to disk |
