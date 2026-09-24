@@ -1,4 +1,4 @@
-# oracle: almide 0.63.0 (dev) at 10b7c759f — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.63.0 (dev) at 99927909e — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -641,6 +641,7 @@ c6398d348fdbd440fa4c6f642b5b1b581fcc9d6c1ac773d258e2e1550e3320c4	spec/wasm_cross
 8df22d17631d24cb17130ce7772c3d03f4fedc021f807656349bb67bf6b2b1e6	spec/wasm_cross/assert_abort_multiline.almd
 1073800032d5d0fecbca112091585648afcc843b07883fbdc6a765eeaa33e95e	spec/wasm_cross/assert_abort_ne.almd
 79cd8752bd4a1f20f45e12a5a321154ad679c78dd96300be394888e06a52d42a	spec/wasm_cross/assign_alias_rc.almd
+4d3aafee1901a35703043a5be9b434d1b5d3682963960e985e9b05e656123d05	spec/wasm_cross/assign_self_call_release.almd
 459af07cffedfaefae2f030efd65952528f934b0291d1b1dc3d2ea1aee8c88e8	spec/wasm_cross/autotry_construction.almd
 ee046f2f1eb927007fc6318c3ac919578662418f49d8a08a6cce08eddb6a3acd	spec/wasm_cross/autotry_result_first_arg.almd
 28db7bd55bcb3250749f7d74b27369da344a243bb63a175a04eb45db9e192bfe	spec/wasm_cross/availability_pure_batch.almd
