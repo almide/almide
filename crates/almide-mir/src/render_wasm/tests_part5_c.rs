@@ -43,13 +43,15 @@ fn matrix_rope_rotate_byte_matches_scalar_oracle() {
 }
 
 #[test]
-fn matrix_multi_head_attention_byte_matches_the_canonical_fast_exp() {
-    // ORACLE CHANGED (#1197): this pinned the retired promise "the wasm leg
-    // reproduces v0's scalar libm exp". The leg now runs the CANONICAL fast-exp
-    // — the same unfused algorithm, reduction order and scaling spelling the
-    // native SIMD kernel runs — so the pinned value is the one BOTH legs
-    // produce (verified by running this very program on native and wasm, and by
-    // spec/wasm_cross/matrix_softmax_fastexp.almd under C-223).
+fn matrix_multi_head_attention_byte_matches_native_mha_core() {
+    // ORACLE CHANGED AGAIN (#2624): this pinned `1.0487146726665257`, the
+    // fast-exp value, and said native printed it too — it did not. Native
+    // `mha_core` exps through the vendored musl `exp` (C-223) and prints
+    // `1.0487146726713201` (0.62.0, 0.63.0 and develop alike); only the wasm
+    // legs ran the fast-exp. They now run native's exp, `1/sum` scaling and
+    // zero-weight skip, so the pinned value is native's — checked by running
+    // this very program on native, structural wasm and incumbent wasm, and by
+    // spec/wasm_cross/matrix_softmax_nonfinite_rows.almd under C-223.
 
     // Phase D1: MHA — per head, per query row: scaled Q·K^T (+ causal -1e9 mask), softmax
     // (scalar rt.math_exp = math.exp), weighted V-sum. Heads write DISJOINT columns so the
@@ -59,7 +61,7 @@ fn matrix_multi_head_attention_byte_matches_the_canonical_fast_exp() {
     assert!(prog.functions.iter().any(|f| f.name == "matrix.masked_multi_head_attention"), "masked mha self-host must link");
     if let Some(out) = build_and_run("matrix_mha", &render_wasm_program(&prog)) {
         assert_eq!(out.lines().count(), 24, "2×(3 rows × 4 cols)");
-        assert_eq!(out.lines().next().unwrap(), "1.0487146726665257");
+        assert_eq!(out.lines().next().unwrap(), "1.0487146726713201");
     }
 }
 
