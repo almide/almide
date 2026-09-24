@@ -446,7 +446,7 @@
 169	100	2291	134	spec/wasm_cross/matrix_slice_rows_domain.almd
 49	10	1834	24	spec/wasm_cross/matrix_softmax_fastexp.almd
 135	62	3551	100	spec/wasm_cross/matrix_softmax_nonfinite_rows.almd
-69	50	905	69	spec/wasm_cross/matrix_zero_cols_rows.almd
+99	73	1363	99	spec/wasm_cross/matrix_zero_cols_rows.almd
 266	249	77161	266	spec/wasm_cross/mem_checkpoint.almd
 350	171	14655	340	spec/wasm_cross/memory_stress.almd
 26	4	235	9	spec/wasm_cross/mg_rebuild_two_phase.almd
