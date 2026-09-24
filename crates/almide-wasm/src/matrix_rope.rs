@@ -11,7 +11,6 @@ use wasm_encoder::{BlockType, ValType};
 
 use crate::emitter::Emitter;
 use crate::matrix_kernels::mat_elem;
-use crate::work::Helper;
 use crate::*;
 
 impl Emitter<'_> {
@@ -207,7 +206,10 @@ impl Emitter<'_> {
         v: &IrExpr,
         n_heads: &IrExpr,
     ) -> ArmResult {
-        let fe = self.work.helper(Helper::FastExp);
+        // native's `mha_core` exps through the vendored musl `exp` (C-223),
+        // not the fast-exp `softmax_rows` uses — the fast-exp here put every
+        // multi_head_attention value ~1e-8 off native (#2624)
+        let fe = self.linked_math("math.exp")?;
         let (hq, hsq, hdm) = self.mat_open(q)?;
         let (hk, hsk, hkc) = self.mat_open(k)?;
         let (hv, hvr, hvc) = self.mat_open(v)?;
@@ -347,9 +349,9 @@ impl Emitter<'_> {
         i.local_get(hacc).f64_store(slot_memarg(0));
         i.local_get(hj).i32_const(1).i32_add().local_set(hj);
         i.br(0).end().end();
-        // mx = scores[0]; scan from 1 with `>` — reuse hacc as mx
-        i.local_get(hsc).f64_load(slot_memarg(0)).local_set(hacc);
-        i.i32_const(1).local_set(hj);
+        // mx = -inf; scan every score with `>`, as native — reuse hacc as mx
+        i.f64_const(f64::NEG_INFINITY.into()).local_set(hacc);
+        i.i32_const(0).local_set(hj);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hj).local_get(hsk).i32_ge_u().br_if(1);
         i.local_get(hsc).local_get(hj).i32_const(8).i32_mul().i32_add().f64_load(slot_memarg(0));
@@ -371,25 +373,19 @@ impl Emitter<'_> {
         i.local_get(hsum).local_get(hw).f64_add().local_set(hsum);
         i.local_get(hj).i32_const(1).i32_add().local_set(hj);
         i.br(0).end().end();
-        // bad sum → scores all 1.0, sum = f64(sk)
-        i.local_get(hsum).f64_const(0.0f64.into()).f64_le();
-        i.local_get(hsum).local_get(hsum).f64_ne();
-        i.i32_or().if_(BlockType::Empty);
-        i.i32_const(0).local_set(hj);
-        i.block(BlockType::Empty).loop_(BlockType::Empty);
-        i.local_get(hj).local_get(hsk).i32_ge_u().br_if(1);
-        i.local_get(hsc).local_get(hj).i32_const(8).i32_mul().i32_add();
-        i.f64_const(1.0f64.into()).f64_store(slot_memarg(0));
-        i.local_get(hj).i32_const(1).i32_add().local_set(hj);
-        i.br(0).end().end();
-        i.local_get(hsk).f64_convert_i32_s().local_set(hsum);
-        i.end();
-        // out[i, col0+kk] += (scores[j]/sum) * v[j, col0+kk]
+        // No uniform fallback (#2624): a NaN sum (a score row holding NaN or
+        // +inf) propagates NaN through the weights, native's IEEE answer.
+        // hsum becomes the reciprocal — native scales by `inv = 1/sum`.
+        i.f64_const(1.0f64.into()).local_get(hsum).f64_div().local_set(hsum);
+        // out[i, col0+kk] += (scores[j] * inv) * v[j, col0+kk]; a weight of
+        // exactly 0 is skipped as native does, so an underflowed key's inf/NaN
+        // value does not become `inf * 0 = NaN`
         i.i32_const(0).local_set(hj);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hj).local_get(hsk).i32_ge_u().br_if(1);
         i.local_get(hsc).local_get(hj).i32_const(8).i32_mul().i32_add().f64_load(slot_memarg(0));
-        i.local_get(hsum).f64_div().local_set(hw);
+        i.local_get(hsum).f64_mul().local_set(hw);
+        i.local_get(hw).f64_const(0.0f64.into()).f64_ne().if_(BlockType::Empty);
         i.i32_const(0).local_set(hkk);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hkk).local_get(hdh).i32_wrap_i64().i32_ge_u().br_if(1);
@@ -430,6 +426,7 @@ impl Emitter<'_> {
         i.f64_store(mat_elem());
         i.local_get(hkk).i32_const(1).i32_add().local_set(hkk);
         i.br(0).end().end();
+        i.end();
         i.local_get(hj).i32_const(1).i32_add().local_set(hj);
         i.br(0).end().end();
         i.local_get(hh).i64_const(1).i64_add().local_set(hh);

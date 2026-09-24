@@ -420,7 +420,7 @@
 15506	spec/wasm_cross/math_log_gamma_negative.almd
 9225	spec/wasm_cross/math_pow.almd
 21035	spec/wasm_cross/math_transcendental_bits.almd
-21770	spec/wasm_cross/matrix_composition_family.almd
+21709	spec/wasm_cross/matrix_composition_family.almd
 3423	spec/wasm_cross/matrix_dims_guard.almd
 2337	spec/wasm_cross/matrix_dims_guard_overflow.almd
 2420	spec/wasm_cross/matrix_dims_guard_product.almd
@@ -429,7 +429,7 @@
 16059	spec/wasm_cross/matrix_elementwise_family.almd
 7795	spec/wasm_cross/matrix_from_bytes_count_domain.almd
 8683	spec/wasm_cross/matrix_from_bytes_offset_domain.almd
-20782	spec/wasm_cross/matrix_head_count_domain.almd
+21290	spec/wasm_cross/matrix_head_count_domain.almd
 7623	spec/wasm_cross/matrix_index_domain_family.almd
 8381	spec/wasm_cross/matrix_neg_signed_zero.almd
 10978	spec/wasm_cross/matrix_pow_libm.almd
@@ -442,9 +442,10 @@
 9739	spec/wasm_cross/matrix_select_rows_q1_partial_block.almd
 14980	spec/wasm_cross/matrix_shape_family.almd
 10842	spec/wasm_cross/matrix_shape_precondition_activations.almd
-17022	spec/wasm_cross/matrix_shape_precondition_family.almd
+17647	spec/wasm_cross/matrix_shape_precondition_family.almd
 15665	spec/wasm_cross/matrix_slice_rows_domain.almd
-7782	spec/wasm_cross/matrix_softmax_fastexp.almd
+7660	spec/wasm_cross/matrix_softmax_fastexp.almd
+20139	spec/wasm_cross/matrix_softmax_nonfinite_rows.almd
 9832	spec/wasm_cross/matrix_zero_cols_rows.almd
 2712	spec/wasm_cross/mem_checkpoint.almd
 10326	spec/wasm_cross/memory_stress.almd

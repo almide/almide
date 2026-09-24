@@ -4,7 +4,7 @@
 //! (fast-exp #1197, reciprocal-multiply softmax, halve-first gelu).
 
 use almide_ir::IrExpr;
-use wasm_encoder::{BlockType, MemArg, ValType};
+use wasm_encoder::{BlockType, MemArg};
 
 use crate::emitter::Emitter;
 use crate::work::Helper;
@@ -110,7 +110,7 @@ impl Emitter<'_> {
 
     /// softmax_rows: per row — max scan (init row[0], `>` keeps NaN out),
     /// fast-exp(x − max) into out, LEFT-TO-RIGHT sum, then RECIPROCAL
-    /// MULTIPLY (#1197); a bad sum (≤0 or NaN) yields the uniform 1/n row.
+    /// MULTIPLY (#1197); a NaN sum propagates NaN, no uniform row (#2624).
     /// A zero-width matrix loops over nothing per row — no special case.
     pub(crate) fn lower_matrix_softmax(&mut self, m: &IrExpr) -> ArmResult {
         let fe = self.work.helper(Helper::FastExp);
@@ -154,26 +154,16 @@ impl Emitter<'_> {
         i.local_get(hs).local_get(he).f64_add().local_set(hs);
         i.local_get(hj).i32_const(8).i32_add().local_set(hj);
         i.br(0).end().end();
-        // bad sum → uniform 1/n; else reciprocal multiply
-        i.local_get(hs).f64_const(0.0f64.into()).f64_le();
-        i.local_get(hs).local_get(hs).f64_ne();
-        i.i32_or().if_(BlockType::Empty);
-        i.f64_const(1.0f64.into()).local_get(hc).f64_convert_i32_s().f64_div().local_set(he);
-        i.else_();
+        // reciprocal multiply — a NaN sum (a row holding NaN or +inf, or all
+        // -inf) propagates NaN to every entry, as native's kernel (#2624); the
+        // `1/n` row this used to substitute printed a number native never did
         i.f64_const(1.0f64.into()).local_get(hs).f64_div().local_set(he);
-        i.end();
         i.i32_const(0).local_set(hj);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hj).local_get(hwidth).i32_ge_u().br_if(1);
         i.local_get(ho).local_get(hrow).i32_add().local_get(hj).i32_add();
-        i.local_get(hs).f64_const(0.0f64.into()).f64_le();
-        i.local_get(hs).local_get(hs).f64_ne();
-        i.i32_or().if_(BlockType::Result(ValType::F64));
-        i.local_get(he);
-        i.else_();
         i.local_get(ho).local_get(hrow).i32_add().local_get(hj).i32_add().f64_load(mat_elem());
         i.local_get(he).f64_mul();
-        i.end();
         i.f64_store(mat_elem());
         i.local_get(hj).i32_const(8).i32_add().local_set(hj);
         i.br(0).end().end();
