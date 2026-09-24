@@ -6,6 +6,11 @@
 // rows at all for empty data — `to_lists` printed `[]` while `rows` said 3
 // and the wasm leg printed `[[], [], []]` (differential fuzz, seed
 // 544254236199 index 170, a mutation of matrix_from_bytes_offset_domain).
+// The converse holds too: a 0×c matrix has NO columns — `shape` is (0, 0)
+// and `cols` is 0 whatever width the constructor was asked for. The wasm
+// byte loaders and `select_rows_f32` wrote the requested width into the
+// header and answered (0, 3) where native answered (0, 0) (#2627,
+// differential fuzz seed 576831800136 index 11987).
 fn shape(m: Matrix) -> String = "rows=${matrix.rows(m)} cols=${matrix.cols(m)} lists=${matrix.to_lists(m)}"
 
 fn main() -> Unit = {
@@ -24,5 +29,14 @@ fn main() -> Unit = {
     []
   ]))}")
   println("add3x0: ${shape(matrix.add(matrix.zeros(3, 0), matrix.zeros(3, 0)))}")
+  let b3 = matrix.to_bytes_f32_le(matrix.from_lists([
+    [0.5, 1.5, 2.5]
+  ]))
+  println("zeros0x3 shape: ${matrix.shape(matrix.zeros(0, 3))}")
+  println("f32 0x3: ${shape(matrix.from_bytes_f32_le(b3, 0, 0, 3))} ${matrix.shape(matrix.from_bytes_f32_le(b3, 1, 0, 3))}")
+  println("f32 0x3 empty buf: ${matrix.shape(matrix.from_bytes_f32_le(bytes.new(0), 0, 0, 3))}")
+  println("f16 0x3: ${shape(matrix.from_bytes_f16_le(b3, 0, 0, 3))}")
+  println("f64 0x3 past-end: ${shape(matrix.from_bytes_f64_le(b3, 99, 0, 3))}")
+  println("select none x3: ${shape(matrix.select_rows_f32(b3, 0, 3, []))}")
   println("transpose3x0: ${shape(matrix.transpose(matrix.zeros(3, 0)))}")
 }
