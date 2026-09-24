@@ -310,7 +310,9 @@ pub(crate) fn scrutinee_binders_borrow_only(body: &IrExpr, var: VarId, uses: &Us
                 if nested_subject(u) {
                     if !scan.matches.contains_key(b) { return false; }
                     todo.push(*b);
-                } else if consumed(u) {
+                } else if consumed(u) && !u.in_guard {
+                    // A guard's consuming read clones (#2605), from a `&T`
+                    // binder as well as from an owned one.
                     return false;
                 }
             }

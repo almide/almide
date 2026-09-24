@@ -177,6 +177,12 @@ pub struct Use {
     /// identity the capture-move rule keys on (#2239); `None` outside every
     /// fan, or for a fan node without a span.
     pub fan_arm: Option<(almide_base::span::Span, u32)>,
+    /// Inside a `match` arm's guard (#2605). A guard never moves what it
+    /// reads — Rust binds the arm's pattern by reference while it runs — so
+    /// the clone pass clones every consuming read there (the occurrence is
+    /// also `in_loop`), and a pattern binder read only there does not need
+    /// its subject matched by value.
+    pub in_guard: bool,
 }
 
 impl Use {
