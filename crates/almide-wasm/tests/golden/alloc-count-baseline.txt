@@ -16,6 +16,7 @@
 0	0	0	0	spec/wasm_cross/assert_abort_multiline.almd
 0	0	0	0	spec/wasm_cross/assert_abort_ne.almd
 3	0	16	1	spec/wasm_cross/assign_alias_rc.almd
+15221	15186	43781645	15212	spec/wasm_cross/assign_self_call_release.almd
 9	0	121	9	spec/wasm_cross/autotry_construction.almd
 5	3	55	5	spec/wasm_cross/autotry_result_first_arg.almd
 204	137	2797	200	spec/wasm_cross/availability_pure_batch.almd
@@ -26,8 +27,8 @@
 0	0	0	0	spec/wasm_cross/binding_stmts.almd
 19	12	115	19	spec/wasm_cross/block_line_collect.almd
 4	3	104	4	spec/wasm_cross/bool_literal_tail.almd
-12	0	184	2	spec/wasm_cross/bounded_kernel.almd
-12	0	184	2	spec/wasm_cross/bounded_kernel_plain.almd
+12	10	184	12	spec/wasm_cross/bounded_kernel.almd
+12	10	184	12	spec/wasm_cross/bounded_kernel_plain.almd
 25	19	189	25	spec/wasm_cross/branch_lift_in_loop.almd
 49	39	333	45	spec/wasm_cross/bundled_pure_modules.almd
 30	18	185	30	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
@@ -324,7 +325,7 @@
 8	1	160	8	spec/wasm_cross/koka_parc6_local_scrutinee.almd
 8	1	76	2	spec/wasm_cross/koka_parcleak1_half_consumed.almd
 76	49	778	76	spec/wasm_cross/koka_rbtree_balance.almd
-58	36	450	52	spec/wasm_cross/koka_reuse1_unzip.almd
+58	39	450	58	spec/wasm_cross/koka_reuse1_unzip.almd
 31	16	266	31	spec/wasm_cross/koka_reuse4_map_rebuild.almd
 10	4	111	10	spec/wasm_cross/koka_unicode_combining.almd
 7	2	111	7	spec/wasm_cross/let_unwrap_propagation.almd
@@ -763,7 +764,7 @@
 170	110	2127	166	spec/wasm_cross/value_keys_non_object.almd
 30	6	387	30	spec/wasm_cross/value_merge.almd
 55000	54978	700000	55000	spec/wasm_cross/value_object_leak_loop.almd
-141	55	1597	95	spec/wasm_cross/value_object_ops_share.almd
+141	80	1597	138	spec/wasm_cross/value_object_ops_share.almd
 38	0	565	14	spec/wasm_cross/value_repr.almd
 14019	13995	176214	14019	spec/wasm_cross/variant_pair_result_return.almd
 4	0	96	1	spec/wasm_cross/variant_record_literal_equality.almd
