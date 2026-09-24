@@ -593,7 +593,22 @@ fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCt
             .filter(|v| !borrowed.as_ref().is_some_and(|vars| vars.contains(v))).collect();
         let mut arm_ctx = CloneCtx { owned: &owned, always: ctx.always, eligible: ctx.eligible,
             remaining: ctx.remaining, in_loop: ctx.in_loop, memo: ctx.memo, fresh: ctx.fresh, loops: ctx.loops, captured: ctx.captured };
-        let new_guard = arm.guard.map(|g| insert_clones_live(g, &mut arm_ctx));
+        // A guard never owns what it reads (#2605): Rust binds the arm's
+        // pattern variables by reference while the guard runs (a move is
+        // E0507), and a failed guard falls through to the later arms, which
+        // may still read any outer var (a move is E0382). So the guard is
+        // walked like a closure body — every consuming read of a var bound
+        // outside it clones, never moves at its last occurrence; a read the
+        // walk already turns into a borrow (`==` on Strings, a borrowed
+        // param) stays a borrow. Only values the guard itself binds may move.
+        let new_guard = arm.guard.map(|g| {
+            let captured: HashSet<VarId> = almide_ir::free_vars::free_vars(&g, &HashSet::new()).into_iter().collect();
+            let owned_in_guard = almide_ir::free_vars::bound_vars(&g);
+            let no_fresh: HashSet<VarId> = HashSet::new();
+            let mut guard_ctx = CloneCtx { owned: &owned_in_guard, always: arm_ctx.always, eligible: arm_ctx.eligible,
+                remaining: arm_ctx.remaining, in_loop: true, memo: arm_ctx.memo, fresh: &no_fresh, loops: arm_ctx.loops, captured: &captured };
+            insert_clones_live(g, &mut guard_ctx)
+        });
         let new_body = insert_clones_live(arm.body, &mut arm_ctx);
         new_arms.push(IrMatchArm { pattern: arm.pattern, guard: new_guard, body: new_body });
 
