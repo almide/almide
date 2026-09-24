@@ -93,7 +93,17 @@ impl Emitter<'_> {
         i.local_get(hr).local_get(hc).i64_mul().i64_const(8).i64_mul().i64_const(8).i64_add();
         i.i32_wrap_i64().call(F_ALLOC).local_set(ho);
         i.local_get(ho).local_get(hr).i32_wrap_i64().i32_store(slot_memarg(0));
-        i.local_get(ho).local_get(hc).i32_wrap_i64().i32_store(slot_memarg(4));
+        // A rowless matrix has NO columns (docs/stdlib/matrix.md: `shape` is
+        // (0, 0) with no rows): the header's cols is 0 whenever rows is 0,
+        // the invariant `zeros`/`ones` and native's first-row-derived width
+        // already keep. Storing the requested width here made
+        // `from_bytes_f32_le(b, 0, 0, 3)` / `select_rows_f32(b, 0, 3, [])`
+        // answer (0, 3) on wasm against native's (0, 0) (differential fuzz,
+        // seed 576831800136 index 11987). Only the header changes — with
+        // rows = 0 there are no cells, so the caller's own width is inert.
+        i.local_get(ho);
+        i.i64_const(0).local_get(hc).local_get(hr).i64_eqz().select();
+        i.i32_wrap_i64().i32_store(slot_memarg(4));
         // The cells start ZERO by contract (the OOB→zeros edge of the byte
         // loaders fills nothing): `$alloc` hands back reused blocks
         // unzeroed, so the constructor zeroes — the `bytes.new` lesson
