@@ -257,7 +257,7 @@ fn rms_norm_rows(m: Matrix, gamma: List[Float], eps: Float) -> Matrix = _
 @intrinsic("almide_rt_matrix_swiglu_gate")
 fn swiglu_gate(x: Matrix, w_gate: Matrix, w_up: Matrix) -> Matrix = _
 
-/// Row-wise softmax, max-subtracted.
+/// Row-wise softmax, max-subtracted; a row holding NaN or +inf, or all -inf, is all NaN.
 @intrinsic("almide_rt_matrix_softmax_rows")
 fn softmax_rows(m: Matrix) -> Matrix = _
 
@@ -331,7 +331,7 @@ fn concat_cols_many(matrices: List[Matrix]) -> Matrix = _
 @intrinsic("almide_rt_matrix_causal_mask_add")
 fn causal_mask_add(m: Matrix, mask_val: Float) -> Matrix = _
 
-/// Attention over n_heads; n_heads < 1 aborts.
+/// Attention over n_heads; n_heads < 1 aborts; a NaN or +inf score row is NaN.
 @intrinsic("almide_rt_matrix_multi_head_attention")
 fn multi_head_attention(q: Matrix, k: Matrix, v: Matrix, n_heads: Int) -> Matrix = _
 
