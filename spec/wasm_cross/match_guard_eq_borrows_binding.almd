@@ -4,13 +4,13 @@
 // operands on native; the guard walked like an arm body moved the binding
 // out (rustc E0507 — a guard sees its bindings by reference) and moved the
 // outer operand the later arms still read (E0382), so the program built on
-// wasm and not on native. Covered: a record bound by some/ok/variant/tuple/
-// list patterns, `!=`, a derived Eq over String and List fields, a guard
-// that falls through to an arm reading the same vars, and a guard calling a
-// user fn with the binding.
+// wasm and not on native. Covered: a record bound by some/ok/variant/tuple
+// patterns and a list element bound through `list.get`, `!=`, a derived Eq
+// over String and List fields, a guard that falls through to an arm reading
+// the same vars, and a guard calling a user fn with the binding.
 // Expected: same differs absent ne:a eq:a none:b ok-same ok-other:2 err-key
 // err:q circle-same circle:2 square-same square:2:1 pair-eq:b first:1
-// second:1 head:2 second:a no:a bag-same:p bag-diff:q bag-none heavier:2
+// second:1 other:2:3 second:a no:a bag-same:p bag-diff:q bag-none heavier:2
 // lighter:1:2 none (one per line).
 type R: Eq, Repr = { k: String, n: Int }
 
@@ -50,10 +50,13 @@ fn tuple_guard(p: (R, R), r: R) -> String = match p {
   (_, b) => "second:${b.n}",
 }
 
-fn list_guard(xs: List[R], r: R) -> String = match xs {
-  [a, ..rest] if a == r => "head:${list.len(rest)}",
-  [_, b, ..] if b == r => "second:${r.k}",
-  _ => "no:${r.k}",
+// A list element reaches the guard through an Option binding: a list
+// PATTERN (`[a, ..rest] if ...`) is desugared to an if-chain before this
+// point, so it is not a Rust guard (and the incumbent wasm brick walls it).
+fn list_guard(xs: List[R], r: R) -> String = match list.get(xs, 1) {
+  some(b) if b == r => "second:${r.k}",
+  some(b) => "other:${b.n}:${list.len(xs)}",
+  none => "no:${r.k}",
 }
 
 fn bag_guard(o: Bag?, b: Bag) -> String = match o {
