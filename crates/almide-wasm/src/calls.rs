@@ -1,7 +1,7 @@
 //! Call lowering: user functions, variant constructors, the
 //! println/eprintln special forms, and the `list.*` runtime forms.
 
-use almide_ir::{CallTarget, IrExpr, IrExprKind, IrStringPart};
+use almide_ir::{CallTarget, IrExpr, IrExprKind};
 
 use crate::emitter::Emitter;
 use crate::types_table::NamedDef;
@@ -173,8 +173,18 @@ impl Emitter<'_> {
                 // before the arguments (the producer call IS one), closed
                 // right after the call; a return_call site keeps its C-292
                 // constant stack instead.
-                let window = !(tail && ret.is_some() && ret == self.fn_ret)
-                    && self.region_window_opens(i, ret, args, &params);
+                // A `scoped { … }` entry (#1997) is the DECLARED form of the
+                // same window: the checker admitted the block, so the window
+                // is an obligation here — it wins over the tail transfer and
+                // over `ALMIDE_REGION_OFF`, and a recogniser that disagrees
+                // with the checker is a compiler defect, never a wall.
+                let window = if info.scoped_entry {
+                    self.scoped_entry_window(i, name, ret)?;
+                    true
+                } else {
+                    !(tail && ret.is_some() && ret == self.fn_ret)
+                        && self.region_window_opens(i, ret, args, &params)
+                };
                 let save = if window { Some(self.emit_region_save()?) } else { None };
                 // A self tail call in LOOP form under the raw-address rule:
                 // the loop-back rebinds the params and releases nothing
@@ -185,6 +195,8 @@ impl Emitter<'_> {
                 let loop_form_raw = tail && Some(index) == self.self_index && !self.tail_release_allowed;
                 let mut moved: Vec<u32> = Vec::new();
                 let param_owned = self.table.infos[i].param_owned.clone();
+                // #2503: which arguments the callee writes back into.
+                let param_mut = self.table.infos[i].param_mut.clone();
                 // Owned temporaries handed to BORROWED params are parked
                 // here and released right after the call (the arm.rs
                 // borrow pool): the callee spends nothing on them. A TRUE
@@ -233,7 +245,9 @@ impl Emitter<'_> {
                     {
                         continue;
                     }
-                    self.lower(a, Some(want))?;
+                    if !self.lower_mut_param_arg(a, param_mut.get(k).copied().unwrap_or(false))? {
+                        self.lower(a, Some(want))?;
+                    }
                     if loop_form_raw && let Some(p) = self.frame_param_var(a) && !moved.contains(&p) {
                         moved.push(p);
                         self.witness_arg(a, want);
@@ -331,10 +345,12 @@ impl Emitter<'_> {
             return Ok(Some(SliceTy::Named(ti)));
         }
         let hold = self.hold_i32()?;
+        // A case with a payload is a fixed-size block: the size class folds
+        // at compile time and the bump is inlined, `$alloc` only for a
+        // reuse / grow (alloc_inline.rs, #2318).
+        self.emit_alloc_fixed(size, hold);
         self.f
             .instructions()
-            .i32_const(size as i32)
-            .call(F_ALLOC)
             .local_tee(hold)
             .i32_const(tag as i32)
             .i32_store(slot_memarg(almide_layout::SUM_TAG));
@@ -463,20 +479,14 @@ impl Emitter<'_> {
                 // level slicing and int parsing, Result via ok()/err().
                 "datetime_parse_iso",
             ];
-            if !VERIFIED.contains(&impl_fn)
-                && !VERIFIED_SUM_BUILDERS.contains(&impl_fn)
-                && !crate::whitelist::SIZED_CONVERT_VERIFIED.contains(&impl_fn)
-                && !crate::whitelist::SIZED_CONVERT_SUM_BUILDERS.contains(&impl_fn)
-                && !crate::whitelist::SCALAR_TEXT_VERIFIED.contains(&impl_fn)
-                && !crate::whitelist::SCALAR_TEXT_SUM_BUILDERS.contains(&impl_fn)
-                && !crate::whitelist::MATH_VERIFIED.contains(&impl_fn)
-                && !crate::whitelist::CODEC_ENCODE_VERIFIED.contains(&impl_fn)
-                && !crate::whitelist::BYTES_FAMILY_VERIFIED.contains(&impl_fn)
-                && !crate::whitelist::BYTES_FAMILY_SUM.contains(&impl_fn)
-                && !crate::whitelist::HTTP_CLIENT_SUM.contains(&impl_fn)
-            {
-                return None;
-            }
+            // The local tiers first, then the audited families (whitelist.rs).
+            let exempt = if VERIFIED.contains(&impl_fn) {
+                false
+            } else if VERIFIED_SUM_BUILDERS.contains(&impl_fn) {
+                true
+            } else {
+                crate::whitelist::tier_of(impl_fn)?
+            };
             let i = self.table.impl_index.get(impl_fn).copied()?;
             // LAYOUT BOUNDARY: self-host impls encode the INCUMBENT's
             // block layout. Scalars, strings and List[scalar] match our
@@ -503,13 +513,7 @@ impl Emitter<'_> {
                     _ => false,
                 }
             };
-            if !VERIFIED_SUM_BUILDERS.contains(&impl_fn)
-                && !crate::whitelist::SIZED_CONVERT_SUM_BUILDERS.contains(&impl_fn)
-                && !crate::whitelist::SCALAR_TEXT_SUM_BUILDERS.contains(&impl_fn)
-                && !crate::whitelist::CODEC_ENCODE_VERIFIED.contains(&impl_fn)
-                && !crate::whitelist::BYTES_FAMILY_SUM.contains(&impl_fn)
-                && !crate::whitelist::HTTP_CLIENT_SUM.contains(&impl_fn)
-                && (info.params.iter().any(coupled) || info.ret.as_ref().is_some_and(coupled))
+            if !exempt && (info.params.iter().any(coupled) || info.ret.as_ref().is_some_and(coupled))
             {
                 return None;
             }
@@ -525,6 +529,11 @@ impl Emitter<'_> {
     /// everything else must lower to a String block and goes through the
     /// stream's block-print helper.
     pub(crate) fn lower_print(&mut self, arg: &IrExpr, import: u32, block_print: u32) -> Result<(), EmitError> {
+        // #2312: a line that is one Int prints from the itoa scratch — no
+        // block, no build (line_bounded.rs).
+        if self.lower_int_line(arg, import)? {
+            return Ok(());
+        }
         if let IrExprKind::StringInterp { parts } = &arg.kind {
             let start = self.lower_interp_build(parts)?;
             // Flush [start, cursor) from its PHYSICAL home (the region may
@@ -553,50 +562,35 @@ impl Emitter<'_> {
         })
     }
 
-    /// Build interpolation parts into the line buffer from the CURRENT
-    /// global cursor (stack-disciplined: nested value-position builds
-    /// start after our partial content and restore on their exit).
-    /// Returns the hold local carrying the build's start; the caller
-    /// consumes the region [start, cursor_local), then must restore
-    /// `G_LINE_CURSOR = start` and `release_i32()`.
-    pub(crate) fn lower_interp_build(
-        &mut self,
-        parts: &[IrStringPart],
-    ) -> Result<u32, EmitError> {
-        let start = self.hold_i32()?;
-        self.f
-            .instructions()
-            .global_get(G_LINE_CURSOR)
-            .local_tee(start)
-            .local_set(self.cursor_local);
-        for part in parts {
-            match part {
-                IrStringPart::Lit { value } => {
-                    if value.is_empty() {
-                        continue;
-                    }
-                    let base = self.pool.intern(value);
-                    let len = value.len() as i32;
-                    self.f
-                        .instructions()
-                        .local_get(self.cursor_local)
-                        .i32_const((base + almide_layout::PAYLOAD) as i32)
-                        .i32_const(len)
-                        .call(F_APPEND_COPY)
-                        .local_set(self.cursor_local);
-                }
-                IrStringPart::Expr { expr } => {
-                    // Publish our cursor so a nested build starts past it.
-                    self.f
-                        .instructions()
-                        .local_get(self.cursor_local)
-                        .global_set(G_LINE_CURSOR);
-                    let got = self.lower(expr, None)?;
-                    self.emit_display_value(got, false)?;
-                }
-            }
+    /// #2503: the argument in a `mut`-PARAMETER position, read through the
+    /// caller's own copy-on-write. The callee writes this buffer in place
+    /// and the C-132 move-mode rewrite hands it back for the site to store,
+    /// so the site is a mutation of THIS frame's var — and takes the same
+    /// rc-gated `$cow` a direct `bytes.set_u8(b, …)` here would: a shared
+    /// block copies and the var is repointed at the unique copy, so an alias
+    /// bound BEFORE the call keeps its pre-write value (C-033), while an
+    /// unaliased buffer (rc == 1, the ordinary case) is not copied at all.
+    /// Judging it in the CALLEE instead cannot work: the argument's own
+    /// credit makes rc >= 2 there on the effect-call convention, so every
+    /// call would copy (measured: a 64 KiB buffer in a 20k-call loop went
+    /// out of memory).
+    ///
+    /// `false` = not this shape; the caller lowers the argument normally.
+    /// Strings and maps fall through to the plain read inside
+    /// `emit_read_mut_var_cow` (a string mutates functionally; a map has its
+    /// own judge in map_inplace.rs).
+    fn lower_mut_param_arg(&mut self, a: &IrExpr, is_mut_param: bool) -> Result<bool, EmitError> {
+        if !is_mut_param {
+            return Ok(false);
         }
-        Ok(start)
+        let IrExprKind::Var { id } = &a.kind else {
+            return Ok(false);
+        };
+        let Some((idx, ty, global)) = self.mut_var(id) else {
+            return Ok(false);
+        };
+        self.emit_read_mut_var_cow(id, idx, ty, global)?;
+        Ok(true)
     }
 
     /// One already-lowered argument under the callee's declared convention
@@ -685,8 +679,11 @@ impl Emitter<'_> {
         let must_transfer = std::mem::take(&mut self.try_see_through) && true_tail;
         let depth = self.borrowed_temps.len();
         let mut no_transfer = false;
+        let param_mut = self.table.infos[i].param_mut.clone();
         for (k, (a, want)) in args.iter().zip(params).enumerate() {
-            self.lower(a, Some(want))?;
+            if !self.lower_mut_param_arg(a, param_mut.get(k).copied().unwrap_or(false))? {
+                self.lower(a, Some(want))?;
+            }
             let owned_pos = param_owned.get(k).copied().unwrap_or(true);
             if self.lower_conv_arg(a, want, owned_pos, true_tail, must_transfer)? {
                 no_transfer = true;

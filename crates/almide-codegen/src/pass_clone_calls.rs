@@ -10,6 +10,10 @@ fn call_borrowed_vars(args: &[IrExpr], target: Option<&CallTarget>) -> HashSet<V
     let mut borrowed: HashSet<VarId> = HashSet::new();
     for a in args {
         if let IrExprKind::Borrow { expr, .. } = &a.kind {
+            // `&x`, and `&*x` of a box-deref'd pattern binder (#2582): the
+            // Borrow arm strips a clone under either, so both stay borrowed
+            // until the call runs.
+            let expr = match &expr.kind { IrExprKind::Deref { expr: d } => d, _ => expr };
             if let IrExprKind::Var { id } = &expr.kind {
                 borrowed.insert(*id);
             }

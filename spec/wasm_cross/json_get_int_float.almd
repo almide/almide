@@ -1,0 +1,36 @@
+// @contract: C-357
+// `json.get_int` is Int-only (#2476): a Float field is `none`, even an
+// integral one (`3.0`), never truncated — the same answer `value.as_int`
+// gives (err) and Codec Int decode gives. The
+// widening runs ONE way: `json.get_float` / `value.as_float` accept an Int
+// (C-085). Native's accessor had an extra `Float(f) => Some(f as i64)` arm,
+// so `get_int` of `2.7` was `some(2)` there and `none` on both wasm legs.
+import json
+
+// The err SHAPE, not its text: the `expected Int, received Float` wording is
+// C-084's vocabulary and is pinned by the Codec fixtures.
+fn show(r: Result[Int, String]) -> String = match r {
+  ok(n) => "ok(${n})",
+  err(_) => "err",
+}
+
+fn showf(r: Result[Float, String]) -> String = match r {
+  ok(f) => "ok(${float.to_string(f)})",
+  err(_) => "err",
+}
+
+effect fn main() -> Unit = {
+  let v = json.parse("{\"f\": 2.7, \"g\": 3.0, \"n\": -0.5, \"i\": 3, \"s\": \"x\", \"z\": null}")!
+  println("get_int f=${json.get_int(v, "f")} g=${json.get_int(v, "g")} n=${json.get_int(v, "n")}")
+  println("get_int i=${json.get_int(v, "i")} s=${json.get_int(v, "s")} z=${json.get_int(v, "z")} missing=${json.get_int(
+    v,
+    "q",
+  )}")
+  println("get_float f=${json.get_float(v, "f")} i=${json.get_float(v, "i")}")
+  let f = value.field(v, "f")!
+  let g = value.field(v, "g")!
+  let i = value.field(v, "i")!
+  println("as_int f=" + show(value.as_int(f)) + " g=" + show(value.as_int(g)) + " i=" + show(value.as_int(i)))
+  println("as_float i=" + showf(value.as_float(i)))
+  println("fallback: ${json.get_int(v, "f") ?? -1} ${json.get_int(v, "i") ?? -1}")
+}

@@ -10,7 +10,7 @@
 # cross net was skipped by every shard, covered by no release job, and failed
 # for months on a nondeterministic fixture while CI read green.
 #
-# The six under `crates/almide-wasm/tests/` are covered by the commissioned
+# The seven under `crates/almide-wasm/tests/` are covered by the commissioned
 # wasm gates job (`cargo test --release -p almide-wasm …`). The ROOT package's
 # are covered by one step, and this gate is what keeps that list honest: a new
 # release-only root test that nobody added to the step fails here instead of
@@ -33,7 +33,7 @@ done
 # The crate-level release-only tests ride their own package job; assert that
 # job still exists rather than trusting the comment above.
 grep -q 'cargo test --release --locked -p almide-wasm' "$WORKFLOW" || {
-  echo "::error::the commissioned wasm gates no longer run almide-wasm in release — the six release-only tests there now run nowhere"
+  echo "::error::the commissioned wasm gates no longer run almide-wasm in release — the seven release-only tests there now run nowhere"
   missing=$((missing + 1))
 }
 

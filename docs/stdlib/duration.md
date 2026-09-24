@@ -40,3 +40,35 @@ duration.ms(1) < duration.s(1)     // Bool
 `Duration ⊕ Compute` in any operator is a type error — a wall-clock deadline
 can never leak into a deterministic budget (`fan.bounded(duration.ms(5))` is
 rejected with a pointer to `compute.ms(...)` / `fan.timeout`).
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (6 functions)
+
+```
+// n nanoseconds of wall-clock time; negative n aborts.
+// @since 0.51.0 or earlier
+duration.ns(n: Int) -> Duration
+
+// n microseconds of wall-clock time; negative n aborts.
+// @since 0.51.0 or earlier
+duration.us(n: Int) -> Duration
+
+// n milliseconds of wall-clock time; negative n aborts.
+// @since 0.51.0 or earlier
+duration.ms(n: Int) -> Duration
+
+// n seconds of wall-clock time; negative n aborts.
+// @since 0.51.0 or earlier
+duration.s(n: Int) -> Duration
+
+// n minutes of wall-clock time; negative n aborts.
+// @since 0.51.0 or earlier
+duration.min(n: Int) -> Duration
+
+// n hours of wall-clock time; negative n aborts.
+// @since 0.51.0 or earlier
+duration.h(n: Int) -> Duration
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

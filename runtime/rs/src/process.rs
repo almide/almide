@@ -133,18 +133,6 @@ pub fn almide_rt_process_exec_with_stdin(cmd: &str, args: &[String], input: &str
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_process_exec() {
-        let result = almide_rt_process_exec("echo", &vec!["hello".into()]);
-        assert!(result.is_ok());
-        assert!(result.unwrap().trim() == "hello");
-    }
-}
-
 pub fn almide_rt_process_exec_status(cmd: &str, args: &[String]) -> Result<AlmideProcessStatus, String> {
     almide_stdout_flush();
     match std::process::Command::new(cmd).args(args).output() {
@@ -168,6 +156,13 @@ pub fn almide_rt_process_exec_status(cmd: &str, args: &[String]) -> Result<Almid
 ///
 /// stdout/stderr are drained on READER THREADS so a chatty child can never
 /// deadlock against a full pipe while the parent polls `try_wait`.
+///
+/// The child runs in its OWN process group (so a timeout can stop its whole
+/// tree, #2065) — which makes it a BACKGROUND job for the controlling
+/// terminal. A child that changes terminal settings (`stty -echo`) or reads
+/// the terminal is stopped by the kernel with SIGTTOU / SIGTTIN; that stop
+/// is detected and answered at once with an error naming
+/// `process.exec_attached` (#2540), instead of waiting out the deadline.
 pub fn almide_rt_process_exec_status_timeout(
     cmd: &str,
     args: &[String],
@@ -203,8 +198,17 @@ pub fn almide_rt_process_exec_status_timeout(
     let mut exit_status = None;
     let status = loop {
         if exit_status.is_none() {
-            match child.try_wait() {
-                Ok(status) => exit_status = status,
+            match almide_process_poll_child(&mut child) {
+                Ok(AlmideChildPoll::Running) => {}
+                Ok(AlmideChildPoll::Exited(status)) => exit_status = Some(status),
+                Ok(AlmideChildPoll::TerminalStop(sig)) => {
+                    almide_process_stop_tree(&mut child);
+                    return Err(format!(
+                        "process.exec_status_timeout({cmd:?}, {timeout_ms}): the child was stopped by {sig}: \
+                         it tried to use the terminal from a background process group; \
+                         run terminal programs with process.exec_attached"
+                    ));
+                }
                 Err(e) => {
                     almide_process_stop_tree(&mut child);
                     return Err(call_err("process.exec_status_timeout", &format!("{cmd:?}, {timeout_ms}"), e));
@@ -227,6 +231,66 @@ pub fn almide_rt_process_exec_status_timeout(
     let stdout = String::from_utf8_lossy(&out_h.join().unwrap_or_default()).to_string();
     let stderr = String::from_utf8_lossy(&err_h.join().unwrap_or_default()).to_string();
     Ok(AlmideProcessStatus { code: status.code().unwrap_or(-1) as i64, stdout, stderr })
+}
+
+enum AlmideChildPoll {
+    Running,
+    Exited(std::process::ExitStatus),
+    /// Stopped by SIGTTOU / SIGTTIN (the signal's name): a background-group
+    /// child touched the controlling terminal and will never resume on its own.
+    TerminalStop(&'static str),
+}
+
+/// `try_wait` that ALSO reports a child stopped for touching the terminal
+/// (#2540). First the ordinary non-blocking reap; only if the child is still
+/// running, a `waitpid(pid, WNOHANG | WUNTRACED)` — which reports a stop
+/// without reaping. If the child exits between the two calls that waitpid
+/// reaps it, so its raw status is returned as the exit status (the Child
+/// handle is then never waited again: the caller breaks out on it).
+fn almide_process_poll_child(child: &mut std::process::Child) -> std::io::Result<AlmideChildPoll> {
+    if let Some(status) = child.try_wait()? {
+        return Ok(AlmideChildPoll::Exited(status));
+    }
+    #[cfg(unix)]
+    {
+        extern "C" {
+            fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
+        }
+        // POSIX values, identical on Linux and macOS / BSD.
+        const WNOHANG: i32 = 1;
+        const WUNTRACED: i32 = 2;
+        const SIGTTIN: i32 = 21;
+        const SIGTTOU: i32 = 22;
+        let mut raw: i32 = 0;
+        let r = unsafe { waitpid(child.id() as i32, &mut raw, WNOHANG | WUNTRACED) };
+        if r == child.id() as i32 {
+            // WIFSTOPPED / WSTOPSIG (the same encoding on Linux and macOS).
+            if raw & 0xff == 0x7f {
+                return Ok(match (raw >> 8) & 0xff {
+                    SIGTTOU => AlmideChildPoll::TerminalStop("SIGTTOU"),
+                    SIGTTIN => AlmideChildPoll::TerminalStop("SIGTTIN"),
+                    _ => AlmideChildPoll::Running,
+                });
+            }
+            use std::os::unix::process::ExitStatusExt;
+            return Ok(AlmideChildPoll::Exited(std::process::ExitStatus::from_raw(raw)));
+        }
+    }
+    Ok(AlmideChildPoll::Running)
+}
+
+/// The TERMINAL-ATTACHED run (#2540): the child inherits this program's
+/// stdin, stdout and stderr and stays in its process group, so it is a
+/// foreground job whenever this program is — pagers, editors, `stty` and
+/// anything else that reads or reconfigures the terminal work. Nothing is
+/// captured; the answer is the exit code (-1 if killed by a signal).
+pub fn almide_rt_process_exec_attached(cmd: &str, args: &[String]) -> Result<i64, String> {
+    almide_stdout_flush();
+    match std::process::Command::new(cmd).args(args).status() {
+        Ok(status) => Ok(status.code().unwrap_or(-1) as i64),
+        // C-214's error family: quote the command, omit arguments, keep the host error.
+        Err(e) => Err(call_err("process.exec_attached", &format!("{cmd:?}"), e)),
+    }
 }
 
 fn almide_process_stop_tree(child: &mut std::process::Child) {
@@ -260,15 +324,37 @@ pub fn almide_rt_process_env(key: &str) -> Option<String> {
     std::env::var(key).ok()
 }
 
+// The children this process spawned and has not yet reaped, by pid (#2494).
+// `spawn` used to drop the `Child` handle, so an exited child stayed a zombie
+// for the parent's whole life, and `is_alive` — a `kill -0`, which a zombie
+// answers — reported it alive forever, before and after `process.kill`. The
+// handle is kept here; `is_alive` polls it with `try_wait`, which reaps an
+// exited child and answers the truth. Process-wide (not thread-local): a fan
+// sibling may ask about a child the main thread spawned.
+fn almide_spawned_children() -> &'static std::sync::Mutex<std::collections::HashMap<u32, std::process::Child>> {
+    static CHILDREN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<u32, std::process::Child>>> =
+        std::sync::OnceLock::new();
+    CHILDREN.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
 pub fn almide_rt_process_spawn(cmd: &str, args: &[String]) -> Result<i64, String> {
-    std::process::Command::new(cmd)
+    let child = std::process::Command::new(cmd)
         .args(args)
         .stdin(std::process::Stdio::null())
         .spawn()
-        .map(|child| child.id() as i64)
         // Was `spawn '{cmd}' failed: {e}` — it named the command, in a spelling
         // shared with nothing else (#2090). Nothing pinned it.
-        .map_err(|e| call_err("process.spawn", &proc_q(cmd), e))
+        .map_err(|e| call_err("process.spawn", &proc_q(cmd), e))?;
+    let pid = child.id();
+    let mut children = almide_spawned_children().lock().unwrap_or_else(|e| e.into_inner());
+    // Reap the children that have exited since the last look, so a program
+    // that spawns without ever asking is_alive does not accumulate zombies
+    // (each `try_wait` is one non-blocking waitpid). The kernel may then
+    // reuse a reaped pid; a later is_alive on that pid answers for whatever
+    // the OS runs under it, exactly as it would for a pid we never spawned.
+    children.retain(|_, c| matches!(c.try_wait(), Ok(None)));
+    children.insert(pid, child);
+    Ok(pid as i64)
 }
 
 pub fn almide_rt_process_kill(pid: i64, signal: i64) -> Result<(), String> {
@@ -297,6 +383,28 @@ pub fn almide_rt_process_sleep(ms: i64) {
 }
 
 pub fn almide_rt_process_is_alive(pid: i64) -> bool {
+    // A child of ours: the handle is the oracle. `try_wait` reaps an exited
+    // child (the zombie disappears with its handle) and answers false; a
+    // still-running child answers true. A pid we did not spawn falls through
+    // to the platform query below.
+    if let Ok(pid32) = u32::try_from(pid) {
+        let mut children = almide_spawned_children().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(child) = children.get_mut(&pid32) {
+            return match child.try_wait() {
+                Ok(None) => true,
+                Ok(Some(_)) => {
+                    children.remove(&pid32);
+                    false
+                }
+                // waitpid itself failed (ECHILD: someone else reaped it, or
+                // it was never ours after all) — nothing left to hold.
+                Err(_) => {
+                    children.remove(&pid32);
+                    false
+                }
+            };
+        }
+    }
     #[cfg(unix)]
     {
         std::process::Command::new("kill")

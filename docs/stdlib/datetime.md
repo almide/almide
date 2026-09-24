@@ -33,7 +33,16 @@ fn main() -> Unit = {
 
 ### `datetime.parse_iso(s: String) -> Result[Int, String]`
 
-Parse an ISO 8601 date string into a timestamp.
+Parse an ISO 8601 date-time into a timestamp: `YYYY-MM-DDTHH:MM:SS` followed
+by `Z`, `+HH:MM`, `-HH:MM` or nothing (UTC). The offset is applied — the
+result is the UTC instant, so `2024-01-15T10:30:00+09:00` is
+`2024-01-15T01:30:00Z`. Every field is ASCII digits of any width; exactly three
+date and three time fields; month `1..=12`, day `1..=` the month's length
+(proleptic Gregorian leap rule), hour `0..=23`, minute and second `0..=59`, and
+the offset within `23:59`. A refusal names the field and the value it saw
+(`"month out of range: 13"`, `"invalid offset: +24:00"`); a malformed string is
+`"invalid datetime format"`, and one without a `T` is
+`"expected YYYY-MM-DDTHH:MM:SSZ"`.
 
 ```almd check
 fn show(r: Result[Int, String]) -> String = match r {
@@ -88,8 +97,9 @@ fn main() -> Unit = {
 2024-01-15T12:00:00Z
 ```
 
-The output is byte-identical on the native and wasm targets (contract C-128), for
-years `0..9999`.
+The output is byte-identical on the native and wasm targets (contract C-128).
+`%Y` is at least four columns, zero-padded, the sign taking one of them — the
+same rule as `to_iso`, for any year.
 
 ### `datetime.to_iso(ts: Int) -> String`
 
@@ -205,6 +215,10 @@ fn main() -> Unit = {
 ### `datetime.weekday(ts: Int) -> String`
 
 Get the day of week as a string (Monday-Sunday).
+
+Every civil extractor (`year` / `month` / `day` / `weekday`, and `to_iso` /
+`format` over them) floors a negative timestamp to the day it belongs to:
+`-1` is `1969-12-31T23:59:59Z`, a Wednesday.
 
 ```almd run
 fn main() -> Unit = {
@@ -322,27 +336,92 @@ true
 ## Signature index (22 functions)
 
 ```
+// ts + n * 86400; no DST or calendar logic.
+// @since 0.6.0 or earlier
 datetime.add_days(ts: Int, n: Int) -> Int
+
+// ts + n * 3600; n may be negative.
+// @since 0.6.0 or earlier
 datetime.add_hours(ts: Int, n: Int) -> Int
+
+// ts + n * 60; n may be negative.
+// @since 0.6.0 or earlier
 datetime.add_minutes(ts: Int, n: Int) -> Int
+
+// ts + n; n may be negative.
+// @since 0.6.0 or earlier
 datetime.add_seconds(ts: Int, n: Int) -> Int
+
+// Calendar day 1..31 (UTC).
+// @since 0.6.0 or earlier
 datetime.day(ts: Int) -> Int
+
+// a - b; positive when a is later.
+// @since 0.6.0 or earlier
 datetime.diff_seconds(a: Int, b: Int) -> Int
+
+// Replaces %Y %m %d %H %M %S (UTC); no %% escape.
+// @since 0.6.0 or earlier
 datetime.format(ts: Int, pattern: String) -> String
+
+// UTC epoch secs; out-of-range fields roll over.
+// @since 0.6.0 or earlier
 datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int
+
+// Identity: seconds are already a timestamp.
+// @since 0.6.0 or earlier
 datetime.from_unix(seconds: Int) -> Int
+
+// UTC hour of day, 0..23.
+// @since 0.6.0 or earlier
 datetime.hour(ts: Int) -> Int
+
+// a > b; false when equal.
+// @since 0.6.0 or earlier
 datetime.is_after(a: Int, b: Int) -> Bool
+
+// a < b; false when equal.
+// @since 0.6.0 or earlier
 datetime.is_before(a: Int, b: Int) -> Bool
+
+// UTC minute, 0..59.
+// @since 0.6.0 or earlier
 datetime.minute(ts: Int) -> Int
+
+// UTC month, 1..12.
+// @since 0.6.0 or earlier
 datetime.month(ts: Int) -> Int
+
+// Wall-clock Unix seconds (not monotonic).
+// @since 0.6.0 or earlier
 effect datetime.now() -> Int
+
+// Monotonic ns since first call; compare differences.
+// @since 0.15.0 or earlier
 effect datetime.monotonic_ns() -> Int
+
+// Epoch secs of YYYY-MM-DDTHH:MM:SSZ; fractions err.
+// @since 0.6.0 or earlier
 datetime.parse_iso(s: String) -> Result[Int, String]
+
+// UTC second, 0..59.
+// @since 0.6.0 or earlier
 datetime.second(ts: Int) -> Int
+
+// YYYY-MM-DDTHH:MM:SSZ in UTC.
+// @since 0.6.0 or earlier
 datetime.to_iso(ts: Int) -> String
+
+// Identity: a timestamp is already Unix seconds.
+// @since 0.6.0 or earlier
 datetime.to_unix(ts: Int) -> Int
+
+// English day name in UTC; 0 is Thursday.
+// @since 0.6.0 or earlier
 datetime.weekday(ts: Int) -> String
+
+// Calendar year in UTC.
+// @since 0.6.0 or earlier
 datetime.year(ts: Int) -> Int
 ```
 

@@ -66,6 +66,14 @@ fn append_location_line(out: &mut String, d: &Diagnostic, color: bool) {
     }
 }
 
+/// `display`'s `= <note>` fact rows (`Diagnostic::notes`), before the `in` row.
+fn append_note_lines(out: &mut String, d: &Diagnostic, color: bool) {
+    for note in &d.notes {
+        let line = if color { format!("{}={}  {}", DIM, RESET, note) } else { format!("= {}", note) };
+        out.push_str(&format!("\n  {}", line));
+    }
+}
+
 /// `display`'s `in <context>` line appender. Extracted verbatim.
 fn append_context_line(out: &mut String, d: &Diagnostic, color: bool) {
     if !d.context.is_empty() {
@@ -110,6 +118,7 @@ pub fn display(d: &Diagnostic) -> String {
     let color = use_color();
     let mut out = build_diagnostic_header(d, color);
     append_location_line(&mut out, d, color);
+    append_note_lines(&mut out, d, color);
     append_context_line(&mut out, d, color);
     append_here_line(&mut out, d, color);
     append_hint_line(&mut out, d, color);
@@ -170,12 +179,28 @@ pub fn to_json(d: &Diagnostic) -> String {
         ),
         _ => "[]".to_string(),
     };
+    // #1997: `notes` is emitted ONLY when the diagnostic carries one, so a
+    // diagnostic without notes keeps the exact bytes it had before the field
+    // existed — the check-parity manifest and the greenfield
+    // `check_file_json` query compare this stdout byte-for-byte, and an
+    // always-present empty array would have rewritten every row.
+    let notes = if d.notes.is_empty() {
+        String::new()
+    } else {
+        let items: Vec<String> = d
+            .notes
+            .iter()
+            .map(|n| format!("\"{}\"", n.replace('\\', r"\\").replace('"', r#"\""#).replace('\n', "\\n")))
+            .collect();
+        format!(r#""notes":[{}],"#, items.join(","))
+    };
     // Manual JSON to avoid serde dependency in this module
     format!(
-        r#"{{"level":"{}","code":"{}","message":"{}","hint":"{}","here":{},"try":{},"try_replace":{},"applicability":"{}","suggestions":{},"context":"{}","file":"{}","line":{},"col":{},"end_col":{},"secondary":{}}}"#,
+        r#"{{"level":"{}","code":"{}","message":"{}","hint":"{}",{}"here":{},"try":{},"try_replace":{},"applicability":"{}","suggestions":{},"context":"{}","file":"{}","line":{},"col":{},"end_col":{},"secondary":{}}}"#,
         level, code,
         d.message.replace('"', r#"\""#).replace('\n', "\\n"),
         d.hint.replace('"', r#"\""#).replace('\n', "\\n"),
+        notes,
         here_json, try_json, try_replace_json,
         d.try_applicability.as_str(), suggestions,
         d.context.replace('"', r#"\""#),

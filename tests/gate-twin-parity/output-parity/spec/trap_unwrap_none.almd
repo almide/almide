@@ -1,0 +1,5 @@
+// A second trap shape (C-035): unwrap of none through `!` in an effect main.
+effect fn main() -> Unit = {
+  let v = list.get([1, 2, 3], 9)
+  println("got " + int.to_string(v!))
+}

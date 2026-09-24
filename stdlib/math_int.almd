@@ -33,16 +33,44 @@ fn __fact(n: Int, acc: Int) -> Int = if n <= 1 then acc else __fact(n - 1, acc *
 
 fn math_factorial(n: Int) -> Int = __fact(n, 1)
 
-// math.choose = C(n,k): 0 when k<0 or k>n, else the running product (n-i)/(i+1) over
-// i in 0..min(k,n-k). Multiply-before-divide keeps each step an exact integer (the
-// running value is always a binomial coefficient), matching v0 exactly.
-fn __choose_loop(n: Int, k: Int, i: Int, result: Int) -> Int = if i >= k then result
-else {
-  let term = n - i
-  let num = result * term
-  let denom = i + 1
-  let r2 = num / denom
-  __choose_loop(n, k, i + 1, r2)
+// math.choose = C(n,k): 0 when k<0 or k>n, else C(n, min(k, n-k)) EXACTLY, reduced mod
+// 2^64 like every Int product (the true binomial whenever it fits in an Int). The same
+// algorithm, op for op, as v0's `almide_rt_math_choose` (runtime/rs/src/math.rs, which
+// says why): each factor's power of two is counted in `twos` and its odd part multiplied
+// in (wrapping), and the odd denominators are divided out at the end by their Newton
+// inverse mod 2^64. #2491: the old `result * (n - i) / (i + 1)` overflowed before it
+// divided (`choose(62, 31)` was negative). Every argument here is >= 1, so the two-adic
+// helpers terminate.
+fn __choose_tz(x: Int, c: Int) -> Int = if x % 2 == 0 then __choose_tz(x / 2, c + 1) else c
+
+fn __choose_inv_step(a: Int, x: Int) -> Int = x * (2 - a * x)
+
+// `a` odd is its own inverse mod 2^3; five Newton steps double that to 96 >= 64 bits.
+fn __choose_inv(a: Int) -> Int = {
+  let x1 = __choose_inv_step(a, a)
+  let x2 = __choose_inv_step(a, x1)
+  let x3 = __choose_inv_step(a, x2)
+  let x4 = __choose_inv_step(a, x3)
+  __choose_inv_step(a, x4)
+}
+
+fn __choose_finish(num: Int, den: Int, twos: Int) -> Int = {
+  let inv = __choose_inv(den)
+  let odd = num * inv
+  prim.bshl(odd, twos)
+}
+
+fn __choose_loop(n: Int, k: Int, i: Int, num: Int, den: Int, twos: Int) -> Int = {
+  if i >= k then __choose_finish(num, den, twos)
+  else {
+    let a = n - i
+    let b = i + 1
+    let ta = __choose_tz(a, 0)
+    let tb = __choose_tz(b, 0)
+    let oa = prim.bshr(a, ta)
+    let ob = prim.bshr(b, tb)
+    __choose_loop(n, k, i + 1, num * oa, den * ob, twos + ta - tb)
+  }
 }
 
 fn math_choose(n: Int, k: Int) -> Int = if k < 0 then 0
@@ -50,5 +78,5 @@ else if k > n then 0
 else {
   let nk = n - k
   let k2 = if k < nk then k else nk
-  __choose_loop(n, k2, 0, 1)
+  __choose_loop(n, k2, 0, 1, 1, 0)
 }

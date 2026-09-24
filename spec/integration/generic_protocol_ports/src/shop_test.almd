@@ -1,0 +1,33 @@
+// @contract: C-365
+// #1589 stage 1: the ports-and-adapters split the v0.59.0 DDD probe could not
+// express. `ports` declares `protocol Repository[K, V]`; `adapters` conforms
+// to `ports.Repository[domain.UserId, domain.User]`; `service` is generic over
+// the applied, module-qualified bound. src/main.almd is the same program as a
+// runnable entry (native and wasm print the same six lines).
+import self.adapters
+import self.domain
+import self.service
+
+test "a service generic over the port runs against the in-memory adapter" {
+  var repo = adapters.empty()
+  service.register(repo, 1, "ada")
+  service.register(repo, 2, "lin")
+  service.register(repo, 1, "ada lovelace")
+  assert_eq(service.describe(repo, 1), "ada lovelace (#1)")
+  assert_eq(service.describe(repo, 3), "no user 3")
+  assert_eq(repo.count(), 2)
+}
+
+test "a letter only the bound names is pinned by the adapter's conformance" {
+  var repo = adapters.empty()
+  service.register(repo, 2, "lin")
+  let found = service.lookup(repo, domain.UserId { value: 2 })
+  assert_eq(found.map((u) => u.name) ?? "none", "lin")
+}
+
+test "an effect port method exits through the bound like an ordinary effect call" {
+  var repo = adapters.empty()
+  service.register(repo, 2, "lin")
+  assert_eq(service.require(repo, 2) ?? "ERR", "lin")
+  assert_eq(service.require(repo, 9) ?? "ERR", "ERR")
+}

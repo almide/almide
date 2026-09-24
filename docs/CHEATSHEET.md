@@ -186,14 +186,28 @@ let add10 = (x) => add(x, 10)   // ✓ name the missing value with a lambda
 ```
 
 ### Mutable parameters
-```
+```almide check
 fn incr(mut x: Int) -> Unit = { x = x + 1 }
-var n = 5
-incr(n)          // n is now 6 -- mutated in place, not returned
+
+fn stamp(mut b: Bytes, v: Int) -> Unit = bytes.set_u8(b, 0, v)  // a helper that fills its caller's buffer
+
+fn main() -> Unit = {
+  var n = 5
+  incr(n)          // n is now 6 -- mutated in place, not returned
+  var buf = bytes.new(4)   // `var`, not `let`: the writers take `mut b`
+  bytes.append_u8(buf, 7)
+  stamp(buf, 9)
+  println("${n} ${bytes.to_list(buf)}")
+}
 ```
-Caller must pass a `var` binding (`let` or a temporary is E007). `mut` can be
-on any parameter, any position. This is how in-place stdlib ops work
-(`list.push`, `list.pop`, `list.clear`, …).
+Caller must pass a `var` binding (`let`, a non-`mut` parameter or a temporary
+is E032). `mut` can be on any parameter, any position. This is how every
+in-place stdlib op works (`list.push`, `list.pop`, `list.clear`, `map.insert`,
+`string.push`, and the whole `bytes` writer family — `push`, `append_*`,
+`set_*`, `write_*`, `fill`, `clear`, `copy_from`): the receiver is a `mut`
+parameter, so a local buffer is a `var` and a helper that writes its caller's
+buffer declares `mut b: Bytes`. Value semantics otherwise: `let c = a` copies,
+and a callee cannot reach its caller's binding through a plain parameter.
 
 ## Built-in Protocols
 Eq and Hash are automatic (compiler-derived from type structure). No annotation needed.
@@ -222,7 +236,41 @@ fn run_action[T: Action](action: T, ctx: Context) -> Result[String, String] =
 ```
 Built-in conventions (Eq, Repr, Ord, Hash, Codec) are protocols too.
 
-The first parameter can be named/typed explicitly (`a: GreetAction`) or written as bare `self` (sugar for `self: Self`) — both resolve to the declaring type on a convention method, same as inside a `protocol { ... }` declaration.
+The first parameter can be named/typed explicitly (`a: GreetAction`) or written as bare `self` (sugar for `self: Self`) — both resolve to the declaring type on a convention method, same as inside a `protocol { ... }` declaration. A mutating receiver is `mut self` (sugar for `mut self: Self`).
+
+### Generic protocols (explicit conformance)
+A protocol may take type parameters. A type conforms to ONE instantiation, named at its declaration; a generic fn is bounded by the applied protocol. The call runs that type's own method — nothing else is searched for.
+```almide check
+protocol Repository[K, V] {
+  fn find(self, key: K) -> V?
+  fn put(mut self, key: K, value: V) -> Unit
+}
+
+type User = { id: Int, name: String }
+type Users: Repository[Int, User] = { rows: List[User] }
+
+fn Users.find(self, key: Int) -> User? = self.rows |> list.find((u) => u.id == key)
+
+fn Users.put(mut self, key: Int, value: User) -> Unit = {
+  self.rows = (self.rows |> list.filter((u) => u.id != key)) + [value]
+}
+
+fn rename[R: Repository[Int, User]](mut repo: R, id: Int, name: String) -> Unit =
+  repo.put(id, User { id: id, name: name })
+
+fn lookup[K, V, R: Repository[K, V]](repo: R, key: K) -> V? = repo.find(key)
+
+effect fn main() -> Unit = {
+  var users = Users { rows: [] }
+  rename(users, 1, "ada")
+  println(lookup(users, 1).map((u) => u.name) ?? "-")
+}
+```
+- Give exactly one type per parameter, at the conformance and in the bound: `Repository[Int, User]`, never bare `Repository`.
+- One conformance per protocol per type; wrap the type for a second instantiation.
+- An implementation matches the protocol method's `effect` and `mut` exactly.
+- A protocol from another module is named with the module, like a type: `[R: ports.Repository[K, V]]`, `type Mem: ports.Repository[Id, User]`.
+- A protocol is a bound, not a type: `List[Repository[Int, User]]` is an error.
 
 ## Expressions
 
@@ -358,6 +406,7 @@ while i < 10 {
 for i in 0..<n { ... }   // optimized: no list allocation
 let xs = list.map(0..<10, (i) => i * i)  // range as List[Int]
 ```
+Prefer `for i in 0..<n` whenever the iteration count is known up front (thread state with `var`); use recursion only for early exit or an unknown bound — see "✗ counted recursion".
 
 ### Pipe
 ```
@@ -399,6 +448,12 @@ m["key"] = value           // index write (var only)
 ```
 "hello ${name}, result=${1 + 1}"
 ```
+Numbers, `Bool` and `String` print their value; a `List`, `Map`, `Set`,
+`Option`, `Result`, tuple, record or variant prints its Almide-literal form
+(`[1, 2]`, `["a": 1]`, `some(3)`, `P { n: 1 }`). A value with no string form —
+`Bytes`, `Unit`, `Matrix`, a raw pointer, a function value, or a container
+holding one — is [E089](diagnostics/E089.md): interpolate what you mean
+(`${bytes.to_list(b)}`, `${matrix.to_lists(m)}`, `${f(x)}`).
 
 ### String escapes
 ```
@@ -618,6 +673,42 @@ duration.ms(5000)   // Duration — wall-clock time (fan.timeout deadlines)
 - There is no literal suffix: `100ms` does not parse — write `compute.ms(100)`
 - A negative argument aborts at runtime (`Error: negative time: ...`); an overflowing construction saturates to the maximum
 - `fan.race` / `fan.bounded` results are deterministic: same program + same inputs = same winner/verdict on every target and every machine
+## scoped — a declared reclamation boundary
+
+`scoped { ... }` declares where the storage a block allocates ends; `scoped fn`
+makes "may run inside a region" part of a worker's signature. Both are checked
+obligations, not hints — the value of the block is the value of its body, and a
+shape outside the admitted fragment is refused at check time on both targets.
+
+```almide check
+type Chain = Nil | Cons(Int, Chain)
+
+scoped fn build(n: Int, acc: Chain) -> Chain =
+  if n == 0 then acc else build(n - 1, Cons(n, acc))
+
+scoped fn total(c: Chain, acc: Int) -> Int =
+  match c {
+    Nil => acc,
+    Cons(h, t) => total(t, acc + h),
+  }
+
+fn sum_to(n: Int) -> Int = scoped { total(build(n, Nil), 0) }
+
+effect fn main() -> Unit = println(int.to_string(sum_to(100)))
+```
+
+- Admitted inside: scalars (`Int`/`Float`/`Bool`/`Unit`), variant types over
+  scalars declared in the same file, records of scalars, tuples and `Option`
+  of those; calls to other `scoped fn`, constructors, and `int`/`float`/`math`/
+  `bool` members
+- Only a scalar crosses the boundary — a value built inside is **E086**
+- A callee that is not `scoped fn`, a global, `println`, a lambda, a captured
+  heap value, `!` / `?` / `guard` — **E087**
+- A single non-tail self-call or mutual recursion — **E088** (carry an
+  accumulator; a tree walk with two self-calls per arm is admitted)
+- `scoped` is contextual: a variable named `scoped` still works, and
+  `match scoped { ... }` still matches on it
+
 ## Test
 ```
 test "description" {
@@ -956,6 +1047,30 @@ Use a recursive helper function instead of loop control keywords.
 ```
 ✗ while cond { if done then break }
 ✓ fn loop(state) = if done then state else loop(next_state)
+```
+
+### ✗ counted recursion `f(n - 1)` → ✓ `for _ in 0..<n`
+When the iteration count is known up front, write a range `for` and thread state with `var`. Recursion is for early exit (`break`/`continue` shapes) and for loops whose bound is not known in advance.
+```almide
+// ✗ correct (tail calls are optimized), but the shape says nothing a `for` would not,
+//   reads as a stack risk, and drags `!` onto every iteration in an effect fn
+fn fib(a: Int, b: Int, n: Int) -> Int =
+  if n == 0 then a else fib(b, a + b, n - 1)
+```
+```almide check
+// ✓ known bound: range for, state in var
+fn fib(n: Int) -> Int = {
+  var a = 0
+  var b = 1
+  for _ in 0..<n {
+    let next = a + b
+    a = b
+    b = next
+  }
+  a
+}
+
+fn main() -> Unit = println(int.to_string(fib(10)))
 ```
 
 ### ✗ `return expr` → ✓ just `expr`

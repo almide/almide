@@ -387,7 +387,9 @@ fn find_ident_type(expr: &crate::ast::Expr, name: &str, type_map: &crate::types:
                 .or_else(|| find_ident_type(then, name, type_map))
                 .or_else(|| find_ident_type(else_, name, type_map))
         }
-        crate::ast::ExprKind::Lambda { body, .. } => find_ident_type(body, name, type_map),
+        crate::ast::ExprKind::Lambda { body, .. } | crate::ast::ExprKind::Scoped { body, .. } => {
+            find_ident_type(body, name, type_map)
+        }
         crate::ast::ExprKind::Pipe { left, right } => {
             find_ident_type(left, name, type_map)
                 .or_else(|| find_ident_type(right, name, type_map))

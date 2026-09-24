@@ -30,6 +30,10 @@ fn spec_corpus_check_matches_oracle_hashes() {
     // manifest rows: sha256 \t exit \t path  → path -> sha256
     let mut manifest: BTreeMap<String, String> = BTreeMap::new();
     let text = std::fs::read_to_string(golden.join("spec-check-manifest.txt")).expect("run scripts/gen-check-manifest.sh");
+    // #2405: the `# oracle:` header is read, not skipped — the rows must have
+    // been recorded by the CLI built from this tree (version + `dev`).
+    almide_corpus::verify_oracle_header(&root, &text)
+        .unwrap_or_else(|e| panic!("spec-check-manifest.txt: {e}"));
     for l in almide_corpus::manifest_rows(&text) {
         let mut it = l.splitn(3, '\t');
         let h = it.next().expect("test harness invariant").to_string();

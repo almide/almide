@@ -18,8 +18,12 @@ separator-free form.
 Parses `scheme://host[:port][/path][?query][#fragment]` into the `Url`
 record. `port` is `none` when absent; `path` is `""` when the authority is
 not followed by `/`; `query`/`fragment` are `""` when their separators are
-absent. Rejects inputs without a `scheme://` authority and ports outside
-`0..=65535`, with the reason in the `err`.
+absent. Rejects, with the reason in the `err`: inputs without a `scheme://`
+authority; an empty host (`http://`, `http://:8`); a host outside RFC 3986's
+reg-name characters (unreserved, sub-delims, `%`); userinfo (`user@host`)
+and IPv6 literals (`[::1]`), which are out of scope and refused by name rather
+than read as a host; and a port that is not all ASCII digits or is outside
+`0..=65535`.
 
 ```almd run
 import url
@@ -93,12 +97,37 @@ q=a%20b&lang=ja
 ## Signature index (6 functions)
 
 ```
+// All but A-Za-z0-9-._~ as UTF-8 %XX escapes.
+// @since 0.60.0 or earlier
 url.encode_component(s: String) -> String
+
+// Percent-decoded s; err on bad escape/UTF-8; + kept.
+// @since 0.60.0 or earlier
 url.decode_component(s: String) -> Result[String, String]
+
+// Url from s; err without ://, on an empty/invalid host, userinfo, an IPv6 literal, or a bad port.
+// @since 0.6.0 or earlier
 url.parse(s: String) -> Result[Url, String]
+
+// URL text of u; empty query/fragment omitted.
+// @since 0.6.0 or earlier
 url.to_string(u: Url) -> String
+
+// Undecoded (k, v) pairs; bare key gets "".
+// @since 0.60.0 or earlier
 url.query_pairs(query: String) -> List[(String, String)]
+
+// k=v joined by &, both sides percent-encoded.
+// @since 0.60.0 or earlier
 url.build_query(pairs: List[(String, String)]) -> String
+```
+
+## Type index (1 types)
+
+```
+// Parsed URL; port none, other parts "" when absent.
+// @since 0.6.0 or earlier
+type url.Url = { scheme: String, host: String, port: Option[Int], path: String, query: String, fragment: String }
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

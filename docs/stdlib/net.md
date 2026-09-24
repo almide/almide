@@ -92,18 +92,65 @@ effect fn serve() -> Unit = {
 ## Signature index (12 functions)
 
 ```
+// Connected stream handle; err if refused.
+// @since 0.20.0 or earlier
 effect net.tcp_connect(host: String, port: Int) -> Int
+
+// Up to len bytes; empty once the peer closed.
+// @since 0.20.0 or earlier
 effect net.tcp_read(stream: Int, len: Int) -> Bytes
+
+// Sends all of data, flushed; err if closed.
+// @since 0.20.0 or earlier
 effect net.tcp_write(stream: Int, data: Bytes) -> Unit
+
+// Exactly len bytes; err on early EOF.
+// @since 0.20.0 or earlier
 effect net.tcp_read_exact(stream: Int, len: Int) -> Bytes
+
+// Shuts down the stream; twice is ok.
+// @since 0.20.0 or earlier
 effect net.tcp_close(stream: Int) -> Unit
+
+// False after tcp_close; a peer close is not seen.
+// @since 0.20.0 or earlier
 net.tcp_is_open(stream: Int) -> Bool
+
+// Up to len bytes; err on timeout or 0 ms.
+// @since 0.20.0 or earlier
 effect net.tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Bytes
+
+// Sets read/write timeout; <= 0 clears it.
+// @since 0.20.0 or earlier
 effect net.tcp_set_timeout(stream: Int, timeout_ms: Int) -> Unit
+
+// Bytes readable now, capped at 65536; 0 if none.
+// @since 0.20.0 or earlier
 effect net.tcp_available(stream: Int) -> Int
+
+// Listener bound to host:port; err if in use.
+// @since 0.20.0 or earlier
 effect net.tcp_listen(host: String, port: Int) -> Int
+
+// Blocks for the next client; its stream handle.
+// @since 0.20.0 or earlier
 effect net.tcp_accept(listener: Int) -> Int
+
+// Stops listening; closing twice is ok.
+// @since 0.20.0 or earlier
 effect net.tcp_close_listener(listener: Int) -> Unit
+```
+
+## Type index (2 types)
+
+```
+// Opaque Int handle to a TCP connection.
+// @since 0.20.0 or earlier
+type net.TcpStream = Int
+
+// Opaque Int handle to a listening socket.
+// @since 0.20.0 or earlier
+type net.TcpListener = Int
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

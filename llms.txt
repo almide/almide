@@ -120,6 +120,8 @@ fn shout(items: List[String]) -> List[String] = items |> list.map(transform)
 
 ### Recursion for stateful loops (no head :: tail)
 
+When the iteration count is known up front, write a range `for` (`for _ in 0..<n`) and thread state with `var`. Recursion is for early exit (`break`/`continue` shapes) and for loops whose bound is not known in advance — not for counted `f(n - 1)` loops.
+
 ```almide check
 fn peek(s: String, p: Int) -> String = string.slice(s, p, p + 1)
 fn is_ws(c: String) -> Bool = c == " " or c == "\t"
@@ -251,7 +253,7 @@ fn isqrt(n: Int) -> Int = {
 | E029 | Unknown type name in an annotation or record literal (would fail the native build after check accepted) | Declare the type, fix the spelling, or add the missing import |
 | E030 | Type has no ordering — `list.sort/min/max` or a `sort_by` key over Map/Set/Fn or compound-nested Float | Sort by an explicit orderable key (`list.sort_by(xs, (m) => <Int/String key>)`) |
 | E031 | Retired range spelling — `..`/`..=` were replaced by Swift-style `..<` (exclusive) / `...` (inclusive) | Write `0 ..< n` / `1 ... n`, or run `almide fix <file>` to migrate every range mechanically |
-| E032 | Immutable binding (or a temporary) passed to a `mut` parameter | Declare the root binding with `var` instead of `let`; a temporary must be bound first (split from E007 in 2026-08) |
+| E032 | Immutable binding (a `let`, a non-`mut` parameter, or a temporary) passed to a `mut` parameter — including every in-place writer's receiver (`list.push`, `map.insert`, the `bytes` writers `append_*`/`set_*`/`write_*`/`fill`/`clear`/`copy_from`) | A local: declare the root binding with `var` instead of `let`. A helper that writes its caller's buffer: declare the parameter `mut b: Bytes` and pass a `var`. A temporary must be bound to a `var` first (split from E007 in 2026-08) |
 | E033 | Opaque type constructed outside its defining module | Use the defining module's public constructor API (split from E008 in 2026-08) |
 | E034 | Error-channel operator (`!` / `?` / `??`) on a non-Option/Result operand | Drop the operator — a plain value has no error channel; if a fallible call was intended, apply it to that call's Result |
 | E035 | (warning) Branch condition reads error message text (`string.contains(e, …)` / `e == "…"` on an err binding) | Branch on a variant error type or use `??` for a kind-independent fallback; message text is a report, not an API |
@@ -294,8 +296,13 @@ fn isqrt(n: Int) -> Int = {
 | E082 | Both wasm legs refuse the program on `--target wasm` (each leg's reason is printed above the code; on the build route typically a shape the incumbent walls whose host ops the p1 shim cannot serve) — `almide check --target wasm` reports it at check time | On the build route try `almide run --target wasm` (the embedded host serves the ops); otherwise restructure the walled shape named above the code |
 | E083 | The wasm emitter's own exit validator found a frame whose exit window releases a different set of credits than its exit plan declared (an owned block dropped or released twice) — a compiler defect, never a program error | Report it with the program; `almide run` (native) is unaffected |
 | E084 | A literal argument to stdlib `process.exit` is outside `0..=125` (dialect 4) | Choose `0` for success or `1` through `125` for failure; computed arguments keep the runtime range check |
+| E085 | `@intrinsic` / `@wasm_intrinsic` on a fn outside the stdlib and runtime trees (a user file binding a runtime symbol directly bypasses the capability profile) | Intrinsics live in the stdlib; wrap in an effect fn — import the stdlib module that owns the operation (`fs`, `http`, `process`, …) and call it from an `effect fn` of your own |
 | E081 | The called stdlib fn is not available on `--target wasm` (the declared both-legs wall set, `proofs/target-availability.toml`) | Run natively, use the named portable alternative from the `try:` line, or wait for the port the reason names |
 | E040 | Retired json.*/value.* alias — the dynamic surface has one name per operation: `value.*` is the data model, `json.*` the format (parse/stringify) | Use the named `value.*` survivor (`json.as_int(v)` → `value.as_int(v)?`, `json.get` → `value.field(v,k)?`, `value.get` → `value.field`), or run `almide fix <file>` |
+| E089 | A `${…}` segment whose value has no defined string form — Bytes, Unit, Matrix, a raw pointer, a function value, or a container/record/variant holding one; also reported at the CALL that instantiates a generic fn whose body interpolates its type parameter | Interpolate what you mean: `${bytes.to_list(b)}` / `${bytes.to_string_lossy(b)}`, `${matrix.to_lists(m)}`, the result of calling the function (`${f(x)}`); a Unit carries nothing, so drop the segment |
+| E086 | A value built inside a `scoped { … }` block would outlive it (the block's value, or a write to an outer binding) — the rows name where it was allocated and where the scope ends (ALS-E31) | Compute the scalar summary inside the scope and let that cross the boundary |
+| E087 | An operation not permitted in a scoped region: a callee that is not `scoped fn`, a global, host output or an `effect fn`, an unknown indirect call, a heap value captured from outside, a type outside the fragment, or `!` / `?` / `guard` (ALS-E31) | Declare the callee `scoped fn`, pass the value in as a parameter, or move the effect outside the scope |
+| E088 | A recursive call in a `scoped fn` retains the current activation — a single non-tail self-call, or mutual recursion between scoped workers (ALS-E31) | Carry the pending work in an accumulator and return the recursive call, or fold the mutual pair into one worker |
 | E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
 
 A rustc 4-digit code (`error[E0XXX]`) leaking through always indicates

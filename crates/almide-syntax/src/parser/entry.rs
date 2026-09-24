@@ -117,6 +117,20 @@ impl Parser {
 
         // Import declarations (with recovery)
         while self.check(TokenType::Import) {
+            // #2541: a bare `import fan` names a surface that is always in
+            // scope — accept it as a no-op, exactly like a redundant
+            // `import string`. `fan` is a keyword head, not a module, so there
+            // is nothing to resolve: the line is consumed and leaves no decl
+            // (fmt therefore drops it). Its comments stay pending for whatever
+            // comes next, so no comment slot shifts.
+            if self.at_bare_import_fan() {
+                self.advance();
+                self.advance();
+                let (p, b) = self.skip_newlines_collect_comments();
+                pending.extend(p);
+                gap_blanks = gap_blanks.max(b);
+                continue;
+            }
             program.comment_map.push(std::mem::take(&mut pending));
             match self.parse_import_decl() {
                 Ok(import) => program.imports.push(import),

@@ -34,8 +34,12 @@ jobs:
       fail-fast: false
       matrix:
         # The six modules the ledger was measured over (proofs/domain-edges.toml
-        # header); `--only` scopes both the measurement and the declared rows.
-        module: [bytes, list, string, datetime, io, math]
+        # header) plus json and value (#2402: the json family was skipped, not
+        # measured, and the skip carried #2396); `--only` scopes both the
+        # measurement and the declared rows. The population is EVERY public
+        # stdlib fn with an Int parameter — a module absent from this list is
+        # unmeasured, and the ledger header says so.
+        module: [bytes, list, string, datetime, io, math, json, value]
     steps:
       - uses: actions/checkout@v7
 
@@ -49,6 +53,33 @@ jobs:
 
       - name: Build the compiler (release, embedded wasm host)
         run: cargo build --release
+
+      # The wasm leg is measured on the wasmtime CLI under the declared budget
+      # (proofs/domain-edges.toml `wasm_budget_bytes`, #2387) — the embedded
+      # host's ceiling is the runner's free memory, and six parallel jobs are
+      # exactly the pressure that turned an `i32_max` verdict into a coin.
+      - name: Cache wasmtime tarball
+        uses: actions/cache@v6
+        with:
+          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
+          key: wasmtime-v47.0.3-x86_64-linux
+      - name: Install wasmtime
+        run: |
+          # Pinned + cached + retried, the ci-cross-target.yml block verbatim.
+          VERSION=v47.0.3
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          if [ ! -s "$TARBALL" ]; then
+            for i in 1 2 3 4 5; do
+              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+            done
+          fi
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+
+      - name: Ledger admission rules (forged availability-dependent cells are refused)
+        run: bash scripts/check-domain-edges.sh --selftest
 
       - name: Measure ${{ matrix.module }} on both targets and diff against proofs/domain-edges.toml
         run: bash scripts/check-domain-edges.sh --only ${{ matrix.module }}

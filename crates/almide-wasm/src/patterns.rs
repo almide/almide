@@ -31,13 +31,31 @@ impl Emitter<'_> {
             return unsup("match:no-arms");
         }
         let subj_ty = self.lower(subject, None)?;
-        let scr = match subj_ty.val_type() {
-            ValType::I64 => self.scr_i64_local,
-            ValType::F64 => self.scr_f64_local,
-            _ => self.scr_i32_local,
+        // The shared scratch is sound only while nothing else lowers
+        // between two arms' tests of the same subject. A GUARD runs
+        // exactly there, and its operand can be anything — `g()!`
+        // (lower_try_unwrap tees scr_i32), a nested match, `??` — so a
+        // false guard on a guarded chain would hand the next arm a
+        // clobbered subject and it would fall through to `_` (#2464:
+        // C-352's per-alternative retry, on every pointer-typed
+        // subject). A guarded chain parks the subject in a hold, which
+        // is stack-disciplined against whatever the guard acquires.
+        let guarded = arms.iter().any(|a| a.guard.is_some());
+        let scr = if guarded {
+            self.hold_val(subj_ty)?
+        } else {
+            match subj_ty.val_type() {
+                ValType::I64 => self.scr_i64_local,
+                ValType::F64 => self.scr_f64_local,
+                _ => self.scr_i32_local,
+            }
         };
         self.f.instructions().local_set(scr);
-        self.lower_arm_chain(arms, subj_ty, scr, result, tail)
+        let r = self.lower_arm_chain(arms, subj_ty, scr, result, tail);
+        if guarded {
+            self.release_val(subj_ty);
+        }
+        r
     }
 
     pub(crate) fn lower_arm_chain(
@@ -181,23 +199,48 @@ impl Emitter<'_> {
                 }
                 Ok(())
             }
-            (IrPattern::RecordPattern { name, .. }, SliceTy::Named(ti)) => {
-                // Record-shaped case: the TEST is the tag; the named field
-                // binds happen in emit_pattern_binds. A plain record
-                // subject matches structurally (always true).
-                let NamedDef::Variant(v) = &self.types.def(ti) else {
-                    self.f.instructions().i32_const(1);
+            (IrPattern::RecordPattern { name, fields, .. }, SliceTy::Named(ti)) => {
+                // Record-shaped case: the tag (a plain record subject is
+                // always its one shape), AND every refutable field pattern
+                // at its named slot — a literal or nested constructor in a
+                // field is a test, exactly like a positional ctor argument
+                // (#2553: the field tests were dropped, so
+                // `Circle { r: 0, .. }` matched every Circle).
+                match &self.types.def(ti) {
+                    NamedDef::Variant(v) => {
+                        let Some(c) = v.cases.iter().find(|c| c.name == name.as_str()) else {
+                            return unsup(&format!("pattern:case-unknown:{name}"));
+                        };
+                        self.f
+                            .instructions()
+                            .local_get(scr)
+                            .i32_load(slot_memarg(almide_layout::SUM_TAG))
+                            .i32_const(c.tag as i32)
+                            .i32_eq();
+                    }
+                    _ => {
+                        self.f.instructions().i32_const(1);
+                    }
+                }
+                let refutable: Vec<(&str, &IrPattern)> = fields
+                    .iter()
+                    .filter_map(|fp| fp.pattern.as_ref().map(|p| (fp.name.as_str(), p)))
+                    .filter(|(_, p)| !pattern_irrefutable(p))
+                    .collect();
+                if refutable.is_empty() {
                     return Ok(());
-                };
-                let Some(c) = v.cases.iter().find(|c| c.name == name.as_str()) else {
-                    return unsup(&format!("pattern:case-unknown:{name}"));
-                };
-                self.f
-                    .instructions()
-                    .local_get(scr)
-                    .i32_load(slot_memarg(almide_layout::SUM_TAG))
-                    .i32_const(c.tag as i32)
-                    .i32_eq();
+                }
+                let layout = self.record_pattern_layout(name, ti)?;
+                for (fname, fpat) in refutable {
+                    let Some(&(_, fty, off)) = layout.iter().find(|(n, ..)| n == fname) else {
+                        return unsup("pattern:record-unknown-field");
+                    };
+                    self.f.instructions().if_(BlockType::Result(ValType::I32));
+                    self.f.instructions().local_get(scr);
+                    self.load_ty_slot(fty, off);
+                    self.test_nested(fpat, fty)?;
+                    self.f.instructions().else_().i32_const(0).end();
+                }
                 Ok(())
             }
             (IrPattern::Ok { inner }, SliceTy::Result(o, _))
@@ -546,18 +589,7 @@ impl Emitter<'_> {
                 let SliceTy::Named(ti) = subj_ty else {
                     return unsup("pattern:record-on-non-named");
                 };
-                let finfo: Vec<(String, SliceTy, u32)> = match &self.types.def(ti) {
-                    NamedDef::Variant(v) => {
-                        let Some(c) = v.cases.iter().find(|c| c.name == name) else {
-                            return unsup(&format!("pattern:case-unknown:{name}"));
-                        };
-                        c.fields.iter().map(|f| (f.name.clone(), f.ty, f.offset)).collect()
-                    }
-                    NamedDef::Record(r) => {
-                        r.fields.iter().map(|f| (f.name.clone(), f.ty, f.offset)).collect()
-                    }
-                    NamedDef::Excluded => return unsup("pattern:record-excluded"),
-                };
+                let finfo = self.record_pattern_layout(name, ti)?;
                 for fp in fields {
                     let Some((_, fty, off)) = finfo
                         .iter()
@@ -577,11 +609,32 @@ impl Emitter<'_> {
                             self.load_ty_slot(fty, off);
                             self.f.instructions().local_set(idx);
                         }
+                        // A nested pattern (a constructor, `some(..)`, a
+                        // tuple, …) binds through the nested-bind machinery,
+                        // as a positional ctor argument does.
                         Some(other) => {
-                            return unsup(&format!("pattern:record-{}", pattern_name(other)))
+                            self.f.instructions().local_get(scr);
+                            self.load_ty_slot(fty, off);
+                            self.bind_nested(other, fty)?;
                         }
                     }
                 }
                 Ok(())
+    }
+
+    /// `(field name, slot type, offset)` of the record shape a
+    /// `RecordPattern` names: a record-payload variant case of `ti`, or `ti`
+    /// itself when it is a plain record.
+    fn record_pattern_layout(&self, name: &str, ti: u32) -> Result<Vec<(String, SliceTy, u32)>, EmitError> {
+        match &self.types.def(ti) {
+            NamedDef::Variant(v) => {
+                let Some(c) = v.cases.iter().find(|c| c.name == name) else {
+                    return unsup(&format!("pattern:case-unknown:{name}"));
+                };
+                Ok(c.fields.iter().map(|f| (f.name.clone(), f.ty, f.offset)).collect())
+            }
+            NamedDef::Record(r) => Ok(r.fields.iter().map(|f| (f.name.clone(), f.ty, f.offset)).collect()),
+            NamedDef::Excluded => unsup("pattern:record-excluded"),
+        }
     }
 }

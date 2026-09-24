@@ -68,10 +68,14 @@ impl Emitter<'_> {
             }
             IrExprKind::Unit => Ok(()),
             // Statement-position `f()!` / `f()?`: the marker machinery
-            // runs (propagation/abort), the ok payload is discarded.
+            // runs (propagation/abort), the ok payload is discarded — and
+            // RELEASED when the extraction handed this frame its credit
+            // (#2509: an owned carrier's payload moves out, so a bare
+            // `drop` here would leak exactly what the carrier stopped
+            // holding). A borrowed extraction drops as before.
             IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } => {
-                self.lower(e, None)?;
-                self.f.instructions().drop();
+                let ty = self.lower(e, None)?;
+                self.discard_result(e, ty);
                 Ok(())
             }
             // Any other value expression in statement position: evaluate
@@ -104,6 +108,10 @@ impl Emitter<'_> {
     /// `continue` brs to the loop head (the next cond CHECK, which
     /// charges — the interp's per-check meter), `break` to the block.
     fn lower_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> Result<(), EmitError> {
+        // #2150: one copy-on-write judge per loop entry for a list the loop
+        // reaches only element-wise — cleared before the unrolled lane too,
+        // which runs copies of this same condition and body.
+        let flags = self.hoist_cow_flags(Some(cond), body)?;
         // Counted-shape fast lane (unroll.rs): on `true` the rolled loop
         // below drains the remainder iterations.
         let _ = self.try_unroll_while(cond, body)?;
@@ -119,6 +127,7 @@ impl Emitter<'_> {
         self.lower_loop_body(body, false)?;
         self.f.instructions().br(0).end().end();
         self.drop_hoisted_counts(hoisted);
+        self.drop_cow_flags(flags);
         Ok(())
     }
 
@@ -386,6 +395,7 @@ impl Emitter<'_> {
                     self.lower(end, Some(INT))?;
                     let stop = self.hold_i64()?;
                     self.f.instructions().local_set(stop);
+                    let flags = self.hoist_cow_flags(None, body)?;
                     self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                     self.emit_det_charge_const(1);
                     self.f.instructions().local_get(var_idx).local_get(stop);
@@ -405,6 +415,7 @@ impl Emitter<'_> {
                         .br(0)
                         .end()
                         .end();
+                    self.drop_cow_flags(flags);
                     self.release_i64();
                     return Ok(());
                 }
@@ -418,6 +429,7 @@ impl Emitter<'_> {
                             return unsup("forin-range-nonint");
                         }
                         self.f.instructions().local_get(sl).local_set(var_idx);
+                        let flags = self.hoist_cow_flags(None, body)?;
                         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                         self.emit_det_charge_const(1);
                         self.f.instructions().local_get(var_idx).local_get(el);
@@ -437,6 +449,7 @@ impl Emitter<'_> {
                             .br(0)
                             .end()
                             .end();
+                        self.drop_cow_flags(flags);
                         return Ok(());
                     }
                 }
@@ -663,8 +676,9 @@ impl Emitter<'_> {
 impl Emitter<'_> {
     /// `p.field = v` on a record var: copy-on-write write-back — fresh
     /// block, one slot replaced, rebound. Split from `lower_stmt` for the
-    /// complexity budget.
-    fn lower_field_assign(
+    /// complexity budget. Also the path `list.push` / `list.clear` on a
+    /// record field desugar into (`list_mut.rs`, #2411).
+    pub(crate) fn lower_field_assign(
         &mut self,
         target: &almide_ir::VarId,
         field: &almide_base::intern::Sym,

@@ -5,45 +5,59 @@
 // ...), so there's no reason to keep inline `{ts} + {n} * 86400`
 // templates around. `from_unix` / `to_unix` are identity conversions
 // and stay as pure Almide bodies.
+/// ts + n * 86400; no DST or calendar logic.
 @intrinsic("almide_rt_datetime_add_days")
 fn add_days(ts: Int, n: Int) -> Int = _
 
+/// ts + n * 3600; n may be negative.
 @intrinsic("almide_rt_datetime_add_hours")
 fn add_hours(ts: Int, n: Int) -> Int = _
 
+/// ts + n * 60; n may be negative.
 @intrinsic("almide_rt_datetime_add_minutes")
 fn add_minutes(ts: Int, n: Int) -> Int = _
 
+/// ts + n; n may be negative.
 @intrinsic("almide_rt_datetime_add_seconds")
 fn add_seconds(ts: Int, n: Int) -> Int = _
 
+/// Calendar day 1..31 (UTC).
 @intrinsic("almide_rt_datetime_day")
 fn day(ts: Int) -> Int = _
 
+/// a - b; positive when a is later.
 @intrinsic("almide_rt_datetime_diff_seconds")
 fn diff_seconds(a: Int, b: Int) -> Int = _
 
+/// Replaces %Y %m %d %H %M %S (UTC); no %% escape.
 @intrinsic("almide_rt_datetime_format")
 fn format(ts: Int, pattern: String) -> String = _
 
+/// UTC epoch secs; out-of-range fields roll over.
 @intrinsic("almide_rt_datetime_from_parts")
 fn from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int = _
 
+/// Identity: seconds are already a timestamp.
 @intrinsic("almide_rt_datetime_from_unix")
 fn from_unix(seconds: Int) -> Int = _
 
+/// UTC hour of day, 0..23.
 @intrinsic("almide_rt_datetime_hour")
 fn hour(ts: Int) -> Int = _
 
+/// a > b; false when equal.
 @intrinsic("almide_rt_datetime_is_after")
 fn is_after(a: Int, b: Int) -> Bool = _
 
+/// a < b; false when equal.
 @intrinsic("almide_rt_datetime_is_before")
 fn is_before(a: Int, b: Int) -> Bool = _
 
+/// UTC minute, 0..59.
 @intrinsic("almide_rt_datetime_minute")
 fn minute(ts: Int) -> Int = _
 
+/// UTC month, 1..12.
 @intrinsic("almide_rt_datetime_month")
 fn month(ts: Int) -> Int = _
 
@@ -55,26 +69,34 @@ fn month(ts: Int) -> Int = _
 // are never Result-lifted), so inside an effect fn the spelling is unchanged:
 // `let t = datetime.now()`. `env.millis` took this shape first; these two
 // were the last Clock reads a pure fn could reach.
+/// Wall-clock Unix seconds (not monotonic).
 @intrinsic("almide_rt_datetime_now")
 effect fn now() -> Int = _
 
+/// Monotonic ns since first call; compare differences.
 @intrinsic("almide_rt_datetime_monotonic_ns")
 effect fn monotonic_ns() -> Int = _
 
+/// Epoch secs of YYYY-MM-DDTHH:MM:SSZ; fractions err.
 @intrinsic("almide_rt_datetime_parse_iso")
 fn parse_iso(s: String) -> Result[Int, String] = _
 
+/// UTC second, 0..59.
 @intrinsic("almide_rt_datetime_second")
 fn second(ts: Int) -> Int = _
 
+/// YYYY-MM-DDTHH:MM:SSZ in UTC.
 @intrinsic("almide_rt_datetime_to_iso")
 fn to_iso(ts: Int) -> String = _
 
+/// Identity: a timestamp is already Unix seconds.
 @intrinsic("almide_rt_datetime_to_unix")
 fn to_unix(ts: Int) -> Int = _
 
+/// English day name in UTC; 0 is Thursday.
 @intrinsic("almide_rt_datetime_weekday")
 fn weekday(ts: Int) -> String = _
 
+/// Calendar year in UTC.
 @intrinsic("almide_rt_datetime_year")
 fn year(ts: Int) -> Int = _

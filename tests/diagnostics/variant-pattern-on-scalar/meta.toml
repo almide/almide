@@ -1,2 +1,2 @@
 expects_error = "pattern `some(..)` cannot match Int"
-hint_substring = "auto-`?` has unwrapped it"
+hint_substring = "`!` already unwrapped it"

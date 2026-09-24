@@ -156,6 +156,21 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
             ctx.pop_scope();
             body
         }
+        // `scoped { … }` (#1997): the body is OUTLINED into a synthesized fn
+        // `__almd_scoped_N(captures…)` marked as a scoped ENTRY, and the site
+        // becomes one call to it. The checker admitted the block, so every
+        // capture is a scalar (a by-value snapshot is exact), nothing inside
+        // assigns an outer binding, and no `!` / `guard` / `break` crosses the
+        // boundary — outlining changes no observable behaviour. The call is
+        // the region boundary each leg honours (docs/specs/scoped.md).
+        ast::ExprKind::Scoped { body, .. } => {
+            let body_ir = lower_expr(ctx, body);
+            let call = outline_ir_as_fn(ctx, body_ir, "__almd_scoped", span);
+            if let Some(f) = ctx.synthesized_fns.last_mut() {
+                f.attrs.push(almide_ir::IrFunction::scoped_marker(almide_ir::SCOPED_BLOCK_ATTR));
+            }
+            call
+        }
 
         ast::ExprKind::Fan { exprs, .. } => {
             let ir_exprs: Vec<IrExpr> = exprs.iter().map(|e| lower_expr(ctx, e)).collect();

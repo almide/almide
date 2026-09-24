@@ -139,3 +139,9 @@ fn main() -> Unit = {}
 ### shebang-after-leading-space
  #!/usr/bin/env almide
 fn main() -> Unit = {}
+
+### scoped-qualifier-twice
+scoped scoped fn f() -> Int = 1
+
+### scoped-block-without-a-block
+fn f() -> Int = scoped 1

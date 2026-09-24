@@ -107,7 +107,8 @@ pub enum DynNode {
 
 impl DynNode {
     /// `value_stringify` byte-for-byte (stdlib/value_core.almd): scalars
-    /// rendered directly, Float via Rust's raw `{}` (the native oracle),
+    /// rendered directly, Float via Rust's raw `{}` (the native oracle) and
+    /// `null` when it is not finite (#2499, C-356),
     /// strings JSON-quoted with the exact escape set/order (`\` first, then
     /// quote, newline, CR, tab), arrays/objects comma-joined, no spaces.
     pub fn to_json(&self) -> String {
@@ -131,7 +132,7 @@ impl DynNode {
             DynNode::Null => "null".to_string(),
             DynNode::Bool(b) => b.to_string(),
             DynNode::Int(n) => n.to_string(),
-            DynNode::Float(f) => format!("{}", f),
+            DynNode::Float(f) => if f.is_finite() { format!("{}", f) } else { "null".to_string() },
             DynNode::Str(s) => quote(s),
             DynNode::Arr(xs) => {
                 let parts: Vec<String> = xs.iter().map(|x| x.to_json()).collect();

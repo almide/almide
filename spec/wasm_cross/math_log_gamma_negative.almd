@@ -1,0 +1,47 @@
+// @contract: C-358, C-051
+// `math.log_gamma` is `ln|Γ(x)|` on the whole real line, bit-identical on
+// every leg (#2493): below 0.5 the reflection formula
+// `ln|Γ(x)| = ln(π / |sin(πx)|) - ln Γ(1 - x)` carries the work to `1 - x`,
+// with `|sin(πx)|` taken on the reduced fraction so the value keeps its
+// accuracy next to the integers. The non-positive integers are poles (+inf),
+// as are ±inf; NaN stays NaN. The Lanczos series alone gave NaN at -0.5 and
+// +inf at -6.5 (its log arguments cross zero) and 3e-11 error at 1e-6.
+fn main() -> Unit = {
+  let inf = 1.0 / 0.0
+  let xs = [
+    -0.5,
+    -1.5,
+    -2.5,
+    -3.7,
+    -6.5,
+    -0.1,
+    -100.5,
+    -170.5,
+    -0.0000000001,
+    -4503599627370495.5,
+    0.0,
+    -0.0,
+    -1.0,
+    -2.0,
+    -100.0,
+    -1000000000000000.0,
+    0.000001,
+    0.1,
+    0.25,
+    0.4999,
+    0.49999999999999994,
+    0.5,
+    0.5000001,
+    1.0,
+    2.0,
+    3.0,
+    10.0,
+    171.5,
+    inf,
+    0.0 - inf,
+    0.0 / 0.0
+  ]
+  for x in xs {
+    println(float.to_string(x) + " -> " + float.to_string(math.log_gamma(x)))
+  }
+}

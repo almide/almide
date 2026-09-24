@@ -20,6 +20,7 @@ impl Checker {
     fn validate_after_solve(&mut self, program: &ast::Program) {
         self.validate_map_key_types();
         self.validate_result_interpolations();
+        self.validate_interp_instantiations();
         self.validate_ord_elem_types();
         self.validate_unknown_named_types();
         self.validate_empty_collection_elements();
@@ -30,6 +31,7 @@ impl Checker {
         self.validate_implicit_propagation();
         self.lint_error_surface(program);
         self.check_bounded_profile(program);
+        self.check_scoped(program);
     }
 
     /// Type-check a module's declarations. Populates type_map for all expressions.
@@ -73,6 +75,7 @@ impl Checker {
             &mut self.current_module_prefix,
             Some(module_name.to_string()),
         );
+        self.validate_protocol_refs(prog);
         for decl in prog.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();
@@ -127,6 +130,8 @@ impl Checker {
             self.deferred_numeric_narrowing_checks.len(),
             self.deferred_float_overflow_checks.len(),
             self.deferred_implicit_prop_checks.len(),
+            self.deferred_result_interp_checks.len(),
+            self.deferred_generic_calls.len(),
         );
 
         let self_name = self.env.self_module_name.map(|s| s.to_string());
@@ -176,6 +181,8 @@ impl Checker {
         self.deferred_numeric_narrowing_checks.truncate(saved_deferred_lens.8);
         self.deferred_float_overflow_checks.truncate(saved_deferred_lens.9);
         self.deferred_implicit_prop_checks.truncate(saved_deferred_lens.10);
+        self.deferred_result_interp_checks.truncate(saved_deferred_lens.11);
+        self.deferred_generic_calls.truncate(saved_deferred_lens.12);
     }
 
     /// Upgrade `env.top_lets` entries from the POST-solve resolution of their
@@ -240,6 +247,17 @@ impl Checker {
                 }
             }
         }
+        // Applied bounds' type arguments (#1589), resolved once every letter
+        // of this declaration is in scope — `[R: Repository[K, V], K, V]`
+        // names letters declared after the bound.
+        for g in gs.iter() {
+            for (i, b) in g.bounds.iter().flatten().enumerate() {
+                let Some(r) = ast::protocol_ref_at(&g.bound_refs, i) else { continue };
+                if r.args.is_empty() { continue; }
+                let args: Vec<Ty> = r.args.iter().map(|a| self.resolve_type_expr(a)).collect();
+                self.env.generic_protocol_bound_args.insert((g.name, *b), args);
+            }
+        }
         shadowed
     }
 
@@ -251,6 +269,9 @@ impl Checker {
                 self.env.types.remove(&sym(&g.name));
                 self.env.structural_bounds.remove(&sym(&g.name));
                 self.env.generic_protocol_bounds.remove(&sym(&g.name));
+                for b in g.bounds.iter().flatten() {
+                    self.env.generic_protocol_bound_args.remove(&(g.name, *b));
+                }
             }
         }
         for (gn, prev) in shadowed.into_iter().rev() {
@@ -373,6 +394,10 @@ impl Checker {
         // one fn because a callee had a `var arms` (#2242). Restore the set
         // the fn entered with (top-level `var`s) on the way out.
         let outer_mutable = self.env.mutable_vars.clone();
+        // `param_vars` is keyed by name the same way: a parameter of one fn
+        // must not make a `let` of the same name in the next fn read as a
+        // parameter (the E009/E032 hints tell the two apart).
+        let outer_params = std::mem::take(&mut self.env.param_vars);
         let shadowed_generics = self.enter_generics(generics);
         // A bare `self` first param is sugar for `self: Self` (see
         // registration.rs's matching fix). `Self` only stays an unresolved
@@ -410,7 +435,14 @@ impl Checker {
         self.env.can_call_effect = is_effect;
         self.env.auto_unwrap = is_effect;
         self.env.lambda_depth = 0;
+        // #2496: the body's interpolation segments and generic calls are
+        // attributed to this fn under the key its callers resolve it by.
+        let prev_fn = self.current_fn.replace((
+            self.fn_decl_key(name),
+            generics.as_ref().map(|gs| gs.iter().map(|g| sym(&g.name)).collect()).unwrap_or_default(),
+        ));
         let body_ity = self.infer_expr(body);
+        self.current_fn = prev_fn;
         self.check_return_width(name, &ret_ty, &body_ity, body, is_effect);
         // ADR-0002 Phase 1b (#1103): a `-> T!` fn's body gets the SAME
         // value-tail acceptance an effect fn's lifted body has — the
@@ -427,6 +459,7 @@ impl Checker {
         self.env.current_ret = prev.0; self.env.can_call_effect = prev.1; self.env.auto_unwrap = prev.2; self.env.lambda_depth = prev.3;
         self.exit_generics(generics, shadowed_generics);
         self.env.mutable_vars = outer_mutable;
+        self.env.param_vars = outer_params;
         self.env.pop_scope();
     }
 
@@ -440,6 +473,7 @@ impl Checker {
             // the native build (rustc: cannot find function; sweep finding
             // 2026-08-18, the acceptance-parity class).
             ast::Decl::Fn { name, body: None, extern_attrs, attrs, span, .. } => {
+                self.reject_user_intrinsic(name.as_str(), attrs, *span);
                 let declared_extern = !extern_attrs.is_empty()
                     || attrs.iter().any(|a| a.name.as_str() == "intrinsic");
                 if !declared_extern {
@@ -459,7 +493,8 @@ impl Checker {
                     self.emit(d);
                 }
             }
-            ast::Decl::Fn { name, params, return_type, body: Some(body), effect, generics, .. } => {
+            ast::Decl::Fn { name, params, return_type, body: Some(body), effect, generics, attrs, span, .. } => {
+                self.reject_user_intrinsic(name.as_str(), attrs, *span);
                 self.check_fn_decl(name, FnToCheck {
                     params, return_type, body, effect, generics,
                 });

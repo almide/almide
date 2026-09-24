@@ -15,6 +15,20 @@
 - **main** — protected. Never commit directly. Only accepts PRs from `develop`
 - **develop** — the working branch. All commits go here
 - Always confirm `git branch` before committing
+- **Enqueue when the REQUIRED checks are green, not when everything is.** The
+  merge queue asks for the branch protection's required contexts only; the
+  commissioned mutation gate is not one of them (it runs on pull_request only,
+  and `mutation-sweep.yml` judges every develop push after landing). Waiting
+  for it waits for the one job the queue never asks about — 56 min against
+  27 min for the slowest required shard, measured 2026-09-21. Use
+  `scripts/enqueue-when-required-green.sh <pr> [--wait]`: it reads the
+  required set from the API, compares the PR's rollup against exactly that,
+  and enqueues through the GraphQL mutation. An auto-merge armed with
+  `gh pr merge --auto` also enters the queue by itself, but only once EVERY
+  check is green (its method reads MERGE against the REBASE queue; GitHub
+  normalises that field and it is harmless) — the script is the earlier
+  moment. A mutation-gate red on a PR is still read, after the fact, as a
+  develop sweep finding.
 
 ## Git Commit Rules
 
@@ -77,6 +91,18 @@ brew install lefthook  # or: https://github.com/evilmartians/lefthook
 lefthook install
 ```
 
+The pre-push clippy ratchet gives a VERDICT only under CI's pinned toolchain
+(1.94.0); off-pin it prints `NO VERDICT` and skips, because the count is not
+comparable across clippy releases. `rustup toolchain install 1.94.0 --component
+clippy` makes it a verdict where rustup manages the toolchain; on a qusp-managed
+machine (no rustup) it stays CI's alone — a green push is never a clippy verdict
+there. run_parity in the same hook verdicts everywhere.
+
+Without `lefthook install` no pre-commit or pre-push gate runs at all, and every
+gate failure that a hook would have caught in seconds costs a CI round (30–56 min)
+instead — measured 2026-09-21, three rounds in one night. `which lefthook` before
+the first push of a session.
+
 Submodules (`actions/checkout` does NOT fetch them, so CI never sees these — they are
 local-only conveniences and nothing in the build depends on them):
 
@@ -127,7 +153,7 @@ almide check app.almd --profile critical --allow IO  # Critical profile (#567): 
 almide fmt app.almd               # Format source
 almide fmt --check spec/          # Formatting gate (non-zero on drift)
 almide fmt --no-import-edit stdlib/  # Format WITHOUT touching imports (splice-context sources)
-almide clean                     # Clear dependency cache
+almide clean                     # Clear dependency cache + native build scratch (#2500)
 almide add almide/pkg@v0.1.0    # Add dependency (github.com/almide/ default)
 almide update [dep]              # Advance a locked git dep to its ref's remote head (tags never move)
 almide deps                      # List dependencies
@@ -235,6 +261,7 @@ types |> list.find((t) => get_str(t, "name") == name) ?? json.null()
 ```
 
 ### Prefer recursion over var + while + flag
+When the iteration count is known up front, write a range `for` (`for _ in 0..<n`) and thread state with `var`. Recursion is for early exit (`break`/`continue` shapes) and for loops whose bound is not known in advance — not for counted `f(n - 1)` loops.
 ```almide
 // ✗ avoid
 var i = p

@@ -70,3 +70,39 @@ test "query_pairs and build_query are a family pair" {
   assert_eq(url.build_query([("q", "a b"), ("lang", "ja")]), "q=a%20b&lang=ja")
   assert_eq(url.build_query([]), "")
 }
+
+fn parse_err(s: String) -> String = match url.parse(s) {
+  ok(u) => "ok host='${u.host}' port=${u.port}",
+  err(e) => e,
+}
+
+test "parse checks the host after the host:port split (#2490)" {
+  assert_eq(parse_err("http://:8"), "url.parse: empty host")
+  assert_eq(parse_err("http://:"), "url.parse: empty host")
+  assert_eq(parse_err("http://"), "url.parse: empty host")
+  assert_eq(parse_err("http:///path"), "url.parse: empty host")
+  assert_eq(parse_err("http://?q"), "url.parse: empty host")
+}
+
+test "parse requires an all-digit port in 0..=65535" {
+  assert_eq(parse_err("http://h:08"), "ok host='h' port=some(8)")
+  assert_eq(parse_err("http://h:65535"), "ok host='h' port=some(65535)")
+  assert_eq(parse_err("http://h:65536"), "url.parse: port out of range: 65536")
+  assert_eq(parse_err("http://h:"), "url.parse: invalid port: ")
+  assert_eq(parse_err("http://h:+80"), "url.parse: invalid port: +80")
+  assert_eq(parse_err("http://h:-0"), "url.parse: invalid port: -0")
+  assert_eq(parse_err("http://h: 80"), "url.parse: invalid port:  80")
+  assert_eq(parse_err("http://h:80:90"), "url.parse: invalid port: 80:90")
+}
+
+test "parse refuses the documented out-of-scope authorities by name" {
+  assert_eq(parse_err("http://user@host/p"), "url.parse: userinfo is not supported: user@host")
+  assert_eq(parse_err("http://u:p@host/p"), "url.parse: userinfo is not supported: u:p@host")
+  assert_eq(parse_err("http://[::1]:8080/"), "url.parse: IPv6 hosts are not supported: [::1]:8080")
+  assert_eq(parse_err("http://a b/"), "url.parse: invalid host: a b")
+  // RFC 3986 reg-name: unreserved, sub-delims and pct-encoded all pass
+  assert_eq(
+    parse_err("http://ex-am.ple_~!$&'()*+,;=%41:80/p"),
+    "ok host='ex-am.ple_~!$&'()*+,;=%41' port=some(80)",
+  )
+}

@@ -78,10 +78,24 @@ fn main() -> Unit = {
 ## Signature index (5 functions)
 
 ```
+// s with & < > " ' turned into HTML entities.
+// @since 0.18.1 or earlier
 html.escape(s: String) -> SafeHtml
+
+// s as SafeHtml, unescaped; trusted input only.
+// @since 0.18.1 or earlier
 html.raw(s: String) -> SafeHtml
+
+// HTML text inside h, as-is.
+// @since 0.18.1 or earlier
 html.to_string(h: SafeHtml) -> String
+
+// a then b as one SafeHtml; nothing re-escaped.
+// @since 0.18.1 or earlier
 html.concat(a: SafeHtml, b: SafeHtml) -> SafeHtml
+
+// SafeHtml of the empty string.
+// @since 0.18.1 or earlier
 html.empty() -> SafeHtml
 ```
 

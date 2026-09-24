@@ -245,6 +245,39 @@ check_per_function caps  "$OUTDIR/caps.cert"  "no undeclared Stdout effect, tran
 # even via a callee, is REJECTED. This is the stronger sibling of the per-function caps gate.
 check_per_function caps-transitive "$OUTDIR/caps_graph.cert" "transitive reach ⊆ declared, fold in-proof (per program)"
 
+# #2152: the SAME corpus witness set through almide-verify — the portable
+# checker a binary distribution runs without Rocq — as ONE certificate bundle
+# (the ownership file as one witness, names / caps / caps-transitive one
+# witness per line, exactly the granularity the proven checker used above).
+# Every witness the proven checker accepted must be accepted here too.
+echo
+echo "== almide-verify re-checks the whole corpus witness set (one bundle) =="
+(cd "$ROOT" && cargo build -q -p almide-verify)
+VERIFY="${CARGO_TARGET_DIR:-$ROOT/target}/debug/almide-verify"
+python3 - "$OUTDIR" > "$OUTDIR/corpus.bundle" <<'PYEOF'
+import sys
+out = sys.argv[1]
+w = sys.stdout.buffer
+w.write(b"almide-certificate-bundle 1\nproducer proofs/corpus-wall.sh classify_corpus\n")
+def rec(prop, name, data):
+    w.write(b"witness %s %d %s\n" % (prop.encode(), len(data), name.encode()) + data + b"\n")
+rec("ownership", "corpus", open(f"{out}/ownership.cert", "rb").read())
+for prop, cert in [("names", "names"), ("caps", "caps"), ("caps-transitive", "caps_graph")]:
+    for i, line in enumerate(open(f"{out}/{cert}.cert", "rb").read().split(b"\n")):
+        if line:
+            rec(prop, f"{cert}:{i + 1}", line + b"\n")
+PYEOF
+set +e
+"$VERIFY" bundle "$OUTDIR/corpus.bundle" > /tmp/corpus-wall.verify.out 2>&1
+VRC=$?
+set -e
+tail -1 /tmp/corpus-wall.verify.out | sed 's/^/  /'
+if [ "$VRC" -ne 0 ]; then
+  grep -E '^REJECT' /tmp/corpus-wall.verify.out | head -5 >&2
+  echo "WALL GATE FAIL: almide-verify did not certify a corpus witness set the proven checker accepted (exit $VRC)." >&2
+  cleanup; exit 1
+fi
+
 echo
 echo "== KERNEL ORACLE (brick 6b): the Rocq KERNEL re-verifies the ENTIRE corpus witness set =="
 # One generated assertion file over ALL witnesses (ownership = one multi-line

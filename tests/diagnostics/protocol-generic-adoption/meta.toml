@@ -1,2 +1,2 @@
-expects_error = "adopts generic protocol"
-hint_substring = "cannot bind 'T'"
+expects_error = "is used without its type arguments"
+hint_substring = "Write one type per parameter"

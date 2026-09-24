@@ -150,14 +150,14 @@ rt_date="$(grep -E '^date' "$RT_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]
   echo '| Benchmark (`almide bench`, verify-then-time, median of 5) | wasm/native ratio |'
   echo "|---|---:|"
   grep -E '^[a-z].*\| measured' "$RT_LEDGER" | while IFS='|' read -r n _ _ _ r; do
-    printf '| %s | **%s×** |\n' "$(echo "$n" | xargs)" "$(echo "$r" | xargs)"
+    printf '| %s | **%s×** |\n' "$(echo "$n" | xargs)" "$(echo "$r" | xargs | cut -d' ' -f1)"
   done
   routed=$(grep -cE '^[a-z].*\| routed-incumbent' "$RT_LEDGER" || true)
   walled=$(grep -cE '^[a-z].*\| walled' "$RT_LEDGER" || true)
   oom=$(grep -cE '^[a-z].*\| oom-embedded' "$RT_LEDGER" || true)
   echo
   printf '%s%s%s\n' \
-    'Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the ratio verdict runs on the stamping machine class and CI gates the STATUS taxonomy below (`scripts/check-wasm-runtime-ratio.sh`). binarytrees runs its fan arms on the embedded host'"'"'s thread pool, which is why wasm WINS there. The unmeasured corpus cells stay honest instead of estimated: ' \
+    'Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the stamped ratio verdict runs on the stamping machine class; CI gates the STATUS taxonomy below and judges the wasm leg by a same-runner A/B against the latest release binary (interleaved, min-of-runs, `ab_band` in the ledger — #2143) (`scripts/check-wasm-runtime-ratio.sh`). binarytrees runs its fan arms on the embedded host'"'"'s thread pool, which is why wasm WINS there. The unmeasured corpus cells stay honest instead of estimated: ' \
     "${routed} route to the incumbent artifact, ${walled} wall on the wasm build path, ${oom} exhaust the embedded heap (#1729)" \
     ' — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` ('"${rt_version}, ${rt_date}"').' 
 } > "$rt_body"

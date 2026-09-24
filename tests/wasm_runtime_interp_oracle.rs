@@ -18,6 +18,12 @@
 // the native, wasm and interp legs.
 #![allow(dead_code)]
 
+// The legs this binary reads: corpus.rs builds exactly these (plain wasm is
+// always built), and its `corpus_legs_declared_match_reads` holds this line
+// to the gate body below. Wasm-opt is never compared here.
+const NEEDED_LEGS: Legs = Legs { native: true, wasm_opt: false, interp: true };
+const GATE_SOURCE: &str = include_str!("wasm_runtime_interp_oracle.rs");
+
 include!("wasm_runtime_test_parts/common.rs");
 include!("wasm_runtime_test_parts/interp_leg.rs");
 include!("wasm_runtime_test_parts/corpus.rs");
@@ -55,15 +61,15 @@ fn interp_cross_target_spec() {
 
     for l in legs {
         let name = &l.name;
-        let (ic, iout, ierr) = match &l.interp {
+        let (ic, iout, ierr) = match l.interp() {
             InterpLeg::Ran(c, o, e) => (*c, o.clone(), e.clone()),
             InterpLeg::Skip(reason) => {
                 skipped.push((name.clone(), reason.clone()));
                 continue;
             }
         };
-        let (nc, nout, nerr) = (&l.native.0, &l.native.1, &l.native.2);
-        let (nc, nout, nerr) = (*nc, nout.clone(), nerr.clone());
+        let native = l.native();
+        let (nc, nout, nerr) = (native.0, native.1.clone(), native.2.clone());
         let (wc, wout, werr) = (l.wasm.0, l.wasm.1.clone(), l.wasm.2.clone());
 
         let native_wasm_agree = nc == wc && nout == wout && nerr == werr;

@@ -96,10 +96,50 @@ pub struct ProtocolMethod {
     pub effect: bool,
 }
 
+/// What a protocol reference says beyond its bare name (#1589): the module
+/// alias it was qualified with (`ports.Repository` → `ports`) and its type
+/// arguments (`Repository[UserId, User]`). A bare `Store` is
+/// `ProtocolRef::default()`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProtocolRef {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<Sym>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<TypeExpr>,
+}
+
+impl ProtocolRef {
+    pub fn is_bare(&self) -> bool { self.module.is_none() && self.args.is_empty() }
+}
+
+/// `refs` collapsed to `None` when every entry is bare — the AST-stability
+/// rule for `bound_refs` / `deriving_refs`.
+pub fn protocol_refs_if_any(refs: Vec<ProtocolRef>) -> Option<Vec<ProtocolRef>> {
+    if refs.iter().all(ProtocolRef::is_bare) { None } else { Some(refs) }
+}
+
+/// The ref aligned with entry `i` of a name list whose refs may be `None`
+/// (all bare).
+pub fn protocol_ref_at(refs: &Option<Vec<ProtocolRef>>, i: usize) -> Option<&ProtocolRef> {
+    refs.as_ref().and_then(|rs| rs.get(i))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenericParam {
     pub name: Sym,
+    /// Protocol (or const-param scalar) bound NAMES, always the bare
+    /// protocol name — the qualifier and type arguments live in
+    /// `bound_refs`, so every consumer that keys on the name is unchanged.
     pub bounds: Option<Vec<Sym>>,
+    /// Qualifier and type arguments of each bound, index-aligned with
+    /// `bounds` (#1589: `[R: ports.Repository[K, V]]`). `None` when every
+    /// bound is a bare, argument-free name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bound_refs: Option<Vec<ProtocolRef>>,
+    /// Where each bound was written (index-aligned with `bounds`), for the
+    /// qualification diagnostics and their fix-its.
+    #[serde(skip)]
+    pub bound_spans: Vec<Span>,
     /// Structural type constraint (e.g., `T: { name: String, .. }`)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structural_bound: Option<TypeExpr>,
@@ -205,6 +245,12 @@ pub enum ExprKind {
     IfLet { name: Sym, scrutinee: Box<Expr>, then: Box<Expr>, else_: Box<Expr> },
     Match { subject: Box<Expr>, arms: Vec<MatchArm> },
     Block { stmts: Vec<Stmt>, expr: Option<Box<Expr>> },
+    /// `scoped { body }` (#1997): a reclamation boundary. `body` is always a
+    /// `Block`. Everything the block allocates belongs to its region; the
+    /// checker refuses any shape whose value or reference could outlive it
+    /// (docs/specs/scoped.md). `end` is the closing brace — the "scope ends
+    /// at" line of E086 — and, like every span, is not part of the JSON.
+    Scoped { body: Box<Expr>, #[serde(skip)] end: Option<Span> },
     Fan { exprs: Vec<Expr> },
     /// `fan.bounded(budget) { body }` — deterministic computation budget
     /// (Stage 2 v1: body is a single call expression; budget is a `Compute`).
@@ -399,10 +445,24 @@ impl Default for Visibility {
 pub enum Decl {
     Module { path: Vec<Sym>, #[serde(skip)] span: Option<Span> },
     Import { path: Vec<Sym>, names: Option<Vec<Sym>>, alias: Option<Sym>, #[serde(skip)] span: Option<Span> },
-    Type { name: Sym, #[serde(rename = "type")] ty: TypeExpr, deriving: Option<Vec<Sym>>, #[serde(default)] visibility: Visibility, #[serde(default)] generics: Option<Vec<GenericParam>>, #[serde(skip)] span: Option<Span> },
+    Type {
+        name: Sym, #[serde(rename = "type")] ty: TypeExpr, deriving: Option<Vec<Sym>>,
+        /// Qualifier and type arguments of each `deriving` entry, index-aligned
+        /// with it (#1589: `type X: ports.Repository[UserId, User]`). `None`
+        /// when every entry is a bare, argument-free name, so every AST from
+        /// before generic conformance serializes unchanged.
+        #[serde(default, skip_serializing_if = "Option::is_none")] deriving_refs: Option<Vec<ProtocolRef>>,
+        /// Where each `deriving` entry was written (index-aligned).
+        #[serde(skip)] deriving_spans: Vec<Span>,
+        #[serde(default)] visibility: Visibility, #[serde(default)] generics: Option<Vec<GenericParam>>, #[serde(skip)] span: Option<Span>,
+    },
     Fn {
         name: Sym,
         #[serde(default)] effect: Option<bool>,
+        /// `scoped fn` (#1997): the fn is eligible to run inside a `scoped`
+        /// region — a checked part of its signature, not a discovery. Omitted
+        /// from the JSON when false, so every pre-`scoped` AST is unchanged.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")] scoped: bool,
         #[serde(default)] visibility: Visibility,
         #[serde(default)] extern_attrs: Vec<ExternAttr>,
         #[serde(default)] export_attrs: Vec<ExportAttr>,
@@ -688,6 +748,7 @@ pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
         | ExprKind::ToOption { expr: e } | ExprKind::Paren { expr: e }
         | ExprKind::Some { expr: e } | ExprKind::Ok { expr: e } | ExprKind::Err { expr: e }
         | ExprKind::OptionalChain { expr: e, .. }
+        | ExprKind::Scoped { body: e, .. }
         | ExprKind::TypeAscription { expr: e, .. } => visit_expr_mut(e, f),
 
         // ── Two children, left to right ──
@@ -884,6 +945,7 @@ pub fn visit_expr(expr: &Expr, f: &mut impl FnMut(&Expr)) {
         | ExprKind::ToOption { expr: e } | ExprKind::Paren { expr: e }
         | ExprKind::Some { expr: e } | ExprKind::Ok { expr: e } | ExprKind::Err { expr: e }
         | ExprKind::OptionalChain { expr: e, .. }
+        | ExprKind::Scoped { body: e, .. }
         | ExprKind::TypeAscription { expr: e, .. } => visit_expr(e, f),
 
         // ── Two children, left to right ──

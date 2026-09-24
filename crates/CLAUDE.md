@@ -38,9 +38,15 @@ almide-layout         THE single source for heap block layout — every consumer
                       (almide-wasm, almide-interp's arena) derives from it
 almide-wasm           Commissioned structural wasm emitter: typed IR → wasm
                       bytes via wasm-encoder (no WAT text). The default
-                      `--target wasm` leg (routing: src/cli/build.rs)
-almide-wasm-run       The embedded almide.* host (wasmtime) + the `to_wasi`
-                      transform that makes build artifacts stock-runtime
+                      `--target wasm` leg (routing: `almide::wasm_route` in
+                      the root lib — the CLI and the playground call the
+                      same `route_wasm`, #2554)
+almide-wasi           The `to_wasi` transform that makes build artifacts
+                      stock-runtime, and the p1 host-op set it serves — pure
+                      wasm-encoder/wasmparser, builds for wasm32 (#2554);
+                      re-exported as `almide_wasm_run::wasi`
+almide-wasm-run       The embedded almide.* host (wasmtime) + the p2/p3
+                      component transforms
 almide-wasm-vm        The qualification-scoped wasm interpreter (#865): runs a
                       shipped `to_wasi` artifact with an instruction set pinned
                       to the emitter's, fixed buffers and fuel; std only.

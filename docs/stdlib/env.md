@@ -17,7 +17,10 @@ effect fn main() -> Unit = {
 
 ### `env.args() -> List[String]`
 
-Get the command-line arguments as a list of strings.
+Get the command-line arguments as a list of strings: `argv[1..]`, verbatim, on
+every target. A `--` among the program's arguments is the program's (`./p a -- b`
+sees `["a", "--", "b"]`); `almide run app.almd -- a -- b` consumes its own
+separator and forwards the rest unchanged.
 
 ```almd check
 import env
@@ -82,7 +85,10 @@ effect fn main() -> Unit = {
 
 ### `env.sleep_ms(ms: Int) -> Unit`
 
-Sleep for the given number of milliseconds.
+Sleep for the given number of milliseconds. A zero or negative duration is an
+elapsed one and returns at once, on every target (`process.sleep` and the
+`timeout_ms` parameters of `process.exec_status_timeout` / `net.tcp_read_timeout`
+follow the same rule).
 
 ```almd check
 import env
@@ -123,14 +129,40 @@ effect fn main() -> Unit = {
 ## Signature index (9 functions)
 
 ```
+// Wall-clock seconds since the Unix epoch.
+// @since 0.5.0 or earlier
 effect env.unix_timestamp() -> Int
+
+// Program arguments, argv[0] excluded.
+// @since 0.5.0 or earlier
 effect env.args() -> List[String]
+
+// Value of name, or none if unset.
+// @since 0.5.0 or earlier
 effect env.get(name: String) -> Option[String]
+
+// Sets name for this process and later spawns.
+// @since 0.5.0 or earlier
 effect env.set(name: String, value: String) -> Unit
+
+// Absolute current directory; err if unreadable.
+// @since 0.5.0 or earlier
 effect env.cwd() -> String
+
+// Wall-clock ms since the Unix epoch.
+// @since 0.5.0 or earlier
 effect env.millis() -> Int
+
+// Blocks ms milliseconds; a negative ms hangs.
+// @since 0.5.0 or earlier
 effect env.sleep_ms(ms: Int) -> Unit
+
+// Host temp dir; may end with /.
+// @since 0.5.0 or earlier
 effect env.temp_dir() -> String
+
+// Host OS: macos, linux, windows or unknown.
+// @since 0.5.0 or earlier
 env.os() -> String
 ```
 

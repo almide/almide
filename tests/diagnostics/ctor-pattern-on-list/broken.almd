@@ -1,0 +1,6 @@
+// `some(..)`/`none` over a List subject (#2533): a list is not an Option.
+// This used to bind `x` as `Unknown` and panic in ConcretizeTypes.
+fn first_or_zero(xs: List[Int]) -> Int = match xs {
+  some(x) => x,
+  none => 0,
+}

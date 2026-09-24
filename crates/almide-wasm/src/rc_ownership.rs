@@ -278,13 +278,21 @@ impl Emitter<'_> {
     }
 
     /// The copy-on-write judge for a value of type `t`: `$cow`, or for a
-    /// List of handles the variant whose copy takes its element credits.
+    /// List of handles — or a fixed-slot shape holding one (a record whose
+    /// field a set writes through, bytes_recv.rs) — the variant whose copy
+    /// takes its slot credits, as `copy_fn_of` picks for the plain copy.
     pub(crate) fn cow_fn_of(&self, t: SliceTy) -> u32 {
         match t {
             SliceTy::List(h) => match self.inc_elems_fn(self.types.el(h)) {
                 Some(inc_elems) => self.work.helper(crate::work::Helper::CowElems { inc_elems }),
                 None => F_COW,
             },
+            SliceTy::Option(_) | SliceTy::Result(..) | SliceTy::Tuple(_) | SliceTy::Named(_)
+                if self.shape_has_handles(t) =>
+            {
+                let inc_elems = self.shape_helper(crate::work::Helper::IncShape { ty: t }, t);
+                self.work.helper(crate::work::Helper::CowElems { inc_elems })
+            }
             _ => F_COW,
         }
     }
@@ -461,6 +469,22 @@ impl Emitter<'_> {
         if let almide_ir::IrExprKind::Match { arms, .. } = &e.kind {
             // lower_arm_body normalizes every value arm to one credit.
             return !arms.is_empty();
+        }
+        // An extraction (`expr!`) is owned exactly when ITS lowering
+        // released the carrier it read the payload out of (#2509,
+        // `release_ok_carrier`): the carrier's one credit on the payload
+        // moved to the value. Every other extraction borrows the payload
+        // from a carrier some other route releases, and stays borrowed.
+        // `r?` (Result → Option) is owned on the same terms (#2516): its
+        // lowering marks the node exactly when the carrier was owned and the
+        // payload's credit moved into the fresh some-cell.
+        if matches!(
+            &e.kind,
+            almide_ir::IrExprKind::Try { .. }
+                | almide_ir::IrExprKind::Unwrap { .. }
+                | almide_ir::IrExprKind::ToOption { .. }
+        ) {
+            return self.owned_call_marks.contains(&(e as *const almide_ir::IrExpr as usize));
         }
         let almide_ir::IrExprKind::Call { target, .. } = &e.kind else {
             return false;

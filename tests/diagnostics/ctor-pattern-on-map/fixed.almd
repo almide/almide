@@ -1,0 +1,4 @@
+fn lookup(m: Map[String, Int]) -> Int = match map.get(m, "k") {
+  some(v) => v,
+  none => 0,
+}

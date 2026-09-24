@@ -1,0 +1,3 @@
+expects_code = "E032"
+expects_error = "cannot pass immutable binding 'b' to `mut` parameter of bytes.fill()"
+hint_substring = "Declare 'b' with `var` instead of `let`"

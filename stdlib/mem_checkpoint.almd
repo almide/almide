@@ -1,0 +1,12 @@
+// mem_checkpoint — SELF-HOSTED `mem.save` / `mem.restore` (#1423 stage 4): the
+// C-041 arena-checkpoint pair on the wasm legs. v0's wasm leg saved and reset a
+// bump pointer; v1's RC discipline reclaims scratch deterministically at scope
+// end, so — exactly like native (runtime/rs/src/mem.rs: save() = 0, restore() =
+// no-op, the allocator manages memory) — the trivial pair IS the implementation.
+// Same shape as bytes.heap_save / bytes.heap_restore (stdlib/bytes_core.almd):
+// the checkpoint is OPAQUE (never printed) and post-restore results are
+// identical by construction on every leg. Parity evidence:
+// spec/wasm_cross/mem_checkpoint.almd.
+fn mem_save() -> Int = 0
+
+fn mem_restore(mark: Int) -> Unit = ()

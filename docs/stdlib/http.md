@@ -645,42 +645,152 @@ effect fn main() -> Unit = {
 ## Signature index (37 functions)
 
 ```
+// Serves 0.0.0.0:port forever; handler err is a 500.
+// @since 0.5.0 or earlier
 effect http.serve(port: Int, f: (HttpRequest) -> Result[HttpResponse, String]) -> Unit
+
+// Reply with Content-Type text/plain.
+// @since 0.5.0 or earlier
 http.response(status: Int, body: String) -> HttpResponse
+
+// Reply with Content-Type application/json.
+// @since 0.5.0 or earlier
 http.json(status: Int, body: String) -> HttpResponse
+
+// Reply with headers as-is; no default Content-Type.
+// @since 0.5.0 or earlier
 http.with_headers(status: Int, body: String, headers: Map[String, String]) -> HttpResponse
+
+// 302 with Location url and empty body.
+// @since 0.6.0 or earlier
 http.redirect(url: String) -> HttpResponse
+
+// resp with code set; not range-checked.
+// @since 0.6.0 or earlier
 http.status(resp: HttpResponse, code: Int) -> HttpResponse
+
+// Payload text; lossy UTF-8 when fetched.
+// @since 0.6.0 or earlier
 http.body(resp: HttpResponse) -> String
+
+// Case-insensitive upsert of header key.
+// @since 0.6.0 or earlier
 http.set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse
+
+// First value for key, any case; none if absent.
+// @since 0.6.0 or earlier
 http.get_header(resp: HttpResponse, key: String) -> Option[String]
+
+// HTTP status; 0 if the status line was bad.
+// @since 0.62.0
 http.status_code(resp: HttpResponse) -> Int
+
+// Map by lowercased name; first value wins.
+// @since 0.62.0
 http.headers(resp: HttpResponse) -> Map[String, String]
+
+// Every value for key, wire order; [] if absent.
+// @since 0.62.0
 http.header_values(resp: HttpResponse, key: String) -> List[String]
+
+// Request method as sent, e.g. GET.
+// @since 0.6.0 or earlier
 http.req_method(req: HttpRequest) -> String
+
+// Request target, query string included.
+// @since 0.6.0 or earlier
 http.req_path(req: HttpRequest) -> String
+
+// Body text; empty without a Content-Length.
+// @since 0.6.0 or earlier
 http.req_body(req: HttpRequest) -> String
+
+// First value for key, any case; none if absent.
+// @since 0.6.0 or earlier
 http.req_header(req: HttpRequest, key: String) -> Option[String]
+
+// Decoded query map; last duplicate wins.
+// @since 0.6.0 or earlier
 http.query_params(req: HttpRequest) -> Map[String, String]
+
+// + to space, %XX to byte; bad escapes kept.
+// @since 0.27.7 or earlier
 http.url_decode(s: String) -> String
+
+// Body even for a 404; err only on transport.
+// @since 0.5.0 or earlier
 effect http.get(url: String) -> String
+
+// Reply body of a POST; JSON type by default.
+// @since 0.5.0 or earlier
 effect http.post(url: String, body: String) -> String
+
+// Reply body of a PUT; JSON type by default.
+// @since 0.6.0 or earlier
 effect http.put(url: String, body: String) -> String
+
+// Reply body of a PATCH; JSON type by default.
+// @since 0.6.0 or earlier
 effect http.patch(url: String, body: String) -> String
+
+// Reply body of a DELETE; any status is ok.
+// @since 0.6.0 or earlier
 effect http.delete(url: String) -> String
+
+// Reply body for any method; any status is ok.
+// @since 0.5.0 or earlier
 effect http.request(method: String, url: String, body: String, headers: Map[String, String]) -> String
+
+// (status, body); a 404 is ok, not err.
+// @since 0.61.0
 effect http.get_status(url: String) -> (Int, String)
+
+// (status, body) for any method; 3xx not followed.
+// @since 0.61.0
 effect http.request_status(method: String, url: String, body: String, headers: Map[String, String]) -> (Int, String)
+
+// Whole reply, 404 included; redirects not followed.
+// @since 0.62.0
 effect http.get_response(url: String) -> HttpResponse
+
+// Whole reply to a POST; any status is ok.
+// @since 0.62.0
 effect http.post_response(url: String, body: String) -> HttpResponse
+
+// Whole reply to a PUT; any status is ok.
+// @since 0.62.0
 effect http.put_response(url: String, body: String) -> HttpResponse
+
+// Whole reply to a PATCH; any status is ok.
+// @since 0.62.0
 effect http.patch_response(url: String, body: String) -> HttpResponse
+
+// Whole reply to a DELETE; any status is ok.
+// @since 0.62.0
 effect http.delete_response(url: String) -> HttpResponse
+
+// Whole reply for any method; 3xx not followed.
+// @since 0.62.0
 effect http.request_response(method: String, url: String, body: String, headers: Map[String, String]) -> HttpResponse
+
+// Raw body bytes, not UTF-8 decoded.
+// @since 0.27.7 or earlier
 effect http.get_bytes(url: String) -> Bytes
+
+// Raw body bytes for any method and headers.
+// @since 0.27.7 or earlier
 effect http.request_bytes(method: String, url: String, body: String, headers: Map[String, String]) -> Bytes
+
+// Body chunks to on_chunk; err on a non-2xx.
+// @since 0.15.1 or earlier
 effect http.request_stream(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Unit
+
+// Streams base_url/chat/completions; LLM-response JSON.
+// @since 0.15.1 or earlier
 effect http.openai_streaming_call(base_url: String, api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> String
+
+// Streams Anthropic Messages; LLM-response JSON.
+// @since 0.15.1 or earlier
 effect http.anthropic_streaming_call(api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> String
 ```
 

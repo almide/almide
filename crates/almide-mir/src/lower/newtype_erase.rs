@@ -584,6 +584,48 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
     // Program-wide (both regions + every module body), so a global mutated in ONE
     // module is fenced everywhere it is referenced.
     let mutated = collect_inplace_mutator_receivers(program);
+    // C-007 (#2571): the MAIN-region members of the substitution set whose init
+    // can abort — the same admission `run_region` applies, plus `init_can_abort`.
+    // Their value still inlines below; `synthesize_global_init` re-evaluates the
+    // init once at startup so the abort is eager (see EAGER_ABORT_GLOBALS).
+    let eager_abort: HashSet<almide_ir::VarId> = program
+        .top_lets
+        .iter()
+        .filter(|tl| !tl.mutable)
+        .filter(|tl| !mutated.contains(&tl.var))
+        .filter(|tl| crate::lower::expr_contains_call(&tl.value))
+        .filter(|tl| almide_ir::top_let_storage::init_can_abort(&tl.value))
+        .filter(|tl| {
+            let mut visiting = HashSet::new();
+            expr_is_pure(&tl.value, &fns_snapshot, &effects_snapshot, &mut visiting)
+        })
+        .map(|tl| tl.var)
+        .collect();
+    crate::trace::trace("ALMIDE_DBG_GINIT", || {
+        let rows: Vec<String> = program
+            .top_lets
+            .iter()
+            .map(|tl| {
+                let mut visiting = HashSet::new();
+                format!(
+                    "{:?} mutable={} mutated={} call={} abort={} pure={}",
+                    tl.var,
+                    tl.mutable,
+                    mutated.contains(&tl.var),
+                    crate::lower::expr_contains_call(&tl.value),
+                    almide_ir::top_let_storage::init_can_abort(&tl.value),
+                    expr_is_pure(&tl.value, &fns_snapshot, &effects_snapshot, &mut visiting)
+                )
+            })
+            .collect();
+        format!("[ginit] main top-lets: {} -> eager_abort={eager_abort:?}", rows.join("; "))
+    });
+    // This pass also runs over the top-let-free stdlib splice programs of the
+    // same render; those must not clear the user program's set (its runner is
+    // synthesized after them). A program with top-lets always recomputes.
+    if !program.top_lets.is_empty() {
+        crate::lower::EAGER_ABORT_GLOBALS.with(|s| *s.borrow_mut() = eager_abort);
+    }
     run_region(
         &mut program.top_lets,
         &mut program.functions,

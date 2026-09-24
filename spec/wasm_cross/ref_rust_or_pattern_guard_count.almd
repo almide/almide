@@ -1,0 +1,64 @@
+// @contract: C-352, C-323
+// rust tests/ui/or-patterns/ — search-via-bindings.rs (`search`,
+// `search_with_dummy`) and issue-70413-no-unreachable-pat-and-guard.rs, ported
+// binder-free (C-323 / E080: an alternative cannot bind, so the reference's
+// `(a, _) | (_, a)` search becomes literal / wildcard alternatives over a
+// scalar subject; the tuple / string / Option-subject spelling is
+// ref_rust_or_pattern_guard_retry.almd, #2464's repro). The observable is the GUARD-EVALUATION
+// COUNT: an or-pattern arm's guard runs once per alternative that matches, left
+// to right, until one evaluation holds; a false guard falls through to the next
+// alternative and only then to the next arm. A dummy `_ | _ | _` triples the
+// count, exactly as rustc's `search_with_dummy` asserts (1 / 3 / 5 / 7).
+var hits = 0
+
+effect fn stop_at(n: Int) -> Bool = {
+  hits = hits + 1
+  hits == n
+}
+
+effect fn hit_false() -> Bool = {
+  hits = hits + 1
+  false
+}
+
+// `search`: four alternatives all match the subject 1; the guard is tried in
+// order until the target alternative is reached, and the count is the result —
+// rustc's `search(target) == 1..=8` on a scalar. Past the last alternative the
+// arm is not taken, and the negative count says how many were tried.
+effect fn search(target: Int) -> Int = {
+  hits = 0
+  match 1 {
+    1 | _ | 1 | _ if stop_at(target)! => hits,
+    _ => 0 - hits,
+  }
+}
+
+// `search_with_dummy`: a wildcard-only or-pattern still runs the guard once
+// per alternative.
+effect fn dummy(x: Int) -> Int = {
+  hits = 0
+  let r = match x {
+    _ | _ | _ if hit_false()! => 100,
+    _ => 0,
+  }
+  r + hits
+}
+
+// issue-70413: the guard is evaluated for the alternative that matched (42),
+// not skipped because an earlier alternative (3) did not match.
+fn above_ten(n: Int) -> String = match n {
+  3 | 42 if n > 10 => "big",
+  _ => "small",
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(search(1)!))
+  println(int.to_string(search(2)!))
+  println(int.to_string(search(3)!))
+  println(int.to_string(search(4)!))
+  println(int.to_string(search(5)!))
+  println(int.to_string(dummy(7)!))
+  println(above_ten(42))
+  println(above_ten(3))
+  println(above_ten(11))
+}

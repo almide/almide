@@ -225,12 +225,20 @@ else {
 // reads only (both Values BORROWED), allocates nothing → no ownership event.
 // String content equality, value_core-LOCAL (string.eq is a cross-module call the value_core
 // type-checker cannot resolve). Two String values: equal byte length + equal bytes.
-fn value_keys(v: Value) -> List[String] = {
+// The slot-count word at @8 only counts PAIRS under tag Object (@4 == 6), so
+// the walk is guarded by the tag (#2395). It answered [] for a non-object
+// before only because the word happened to be 0 for every other tag in this
+// layout — right by luck, not by a check — and the interp, whose arena gives
+// that word a different meaning, computed a pair count of 2^28 from it and
+// abstained rather than voting. The same missing tag test is what let the
+// wasm helper walk arbitrary memory. Guarded, all three legs answer [] for
+// the same reason instead of three different ones.
+fn value_keys(v: Value) -> List[String] = if prim.load32(prim.handle(v) + 4) == 6 then {
   let h = prim.handle(v)
   let n = prim.load32(h + 8) / 2
   // @8 is the SLOT count (2 per pair); the pair count is /2
   __vobj_keys(v, 0, n, [])
-}
+} else []
 
 fn __veq_str_bytes(pa: Int, pb: Int, n: Int, k: Int) -> Bool = if k >= n then true
 else if prim.load8(pa + k) == prim.load8(pb + k) then __veq_str_bytes(pa, pb, n, k + 1)
@@ -978,7 +986,9 @@ else {
 // oracle: `format!("{}", f)` — "15000000000", "-0"), NOT float.to_string's
 // ".0"-suffixed form. float.to_string IS `{}` plus a ".0" appended to
 // integral finite values, and `{}` itself never ends in ".0" (it prints the
-// shorter "X"), so stripping that suffix reproduces `{}` exactly.
+// shorter "X"), so stripping that suffix reproduces `{}` exactly. A
+// NON-FINITE float (NaN, ±inf) is the JSON `null` (#2499, C-356) — see the
+// native `almide_rt_value_float_json` for the ruling.
 fn value_stringify(v: Value) -> String = {
   let h = prim.handle(v)
   let tag = prim.load32(h + 4)
@@ -993,9 +1003,16 @@ fn value_stringify(v: Value) -> String = {
 }
 
 // Recursively release each element Value of a tag-5 Array (called only at the Array's last ref).
-fn __vstr_float(f: Float) -> String = {
+fn __vstr_float_finite(f: Float) -> String = {
   let s = float.to_string(f)
   if string.ends_with(s, ".0") then string.drop_end(s, 2) else s
+}
+
+fn __vstr_float(f: Float) -> String = {
+  let nan = float.is_nan(f)
+  let inf = float.is_infinite(f)
+  if nan then "null"
+  else if inf then "null" else __vstr_float_finite(f)
 }
 
 // The runtime-tag-dispatched RECURSIVE Value free (the render of `Op::DropValue` calls this). At the

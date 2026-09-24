@@ -1,0 +1,33 @@
+// @contract: C-358
+// `int.rotate_left` / `rotate_right` reduce the count into `[0, bits)`
+// Euclidean-ly, so a negative count rotates the other way and any count is
+// taken modulo the width, on every leg (#2492). Native computed
+// `(n % bits) as u32`, which kept the sign of `n`: `-1 as u32` became an
+// over-wide shift and every negative count returned 0. The width rules of
+// C-047 (`bits <= 0` aborts) and C-048 (`bits >= 64` saturates the mask)
+// are unchanged.
+fn main() -> Unit = {
+  let rots = [
+    (1, -1, 8),
+    (1, -9, 8),
+    (1, -17, 8),
+    (1, 7, 8),
+    (1, 9, 8),
+    (128, -1, 8),
+    (255, -3, 8),
+    (5, -2, 3),
+    (1, 0, 1),
+    (1, -1, 1),
+    (1, -1, 64),
+    (1, -63, 64),
+    (1, -65, 64),
+    (1, 64, 64),
+    (1, -64, 64),
+    (-1, -1, 64),
+    (1, -9223372036854775807 - 1, 8),
+    (1, 9223372036854775807, 8)
+  ]
+  for (a, n, b) in rots {
+    println("rotl(${a}, ${n}, ${b}) = ${int.rotate_left(a, n, b)} rotr = ${int.rotate_right(a, n, b)}")
+  }
+}

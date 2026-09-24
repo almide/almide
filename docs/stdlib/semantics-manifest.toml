@@ -2240,6 +2240,16 @@ EXIT CODE, observable to the parent — 0 is success by convention.
 """
 
 [[process.fn]]
+name = "exec_attached"
+index_unit = "value"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability): the Int is the child's EXIT CODE, or -1
+when a signal killed it — the same reading as ProcessStatus.code (#2540).
+"""
+
+[[process.fn]]
 name = "exec_status_timeout"
 index_unit = "millisecond"
 probe = "1"

@@ -10,37 +10,48 @@
 // ops not in the IterChain list) go through the declarative bundled
 // path.
 // ── basic accessors ──
+/// Element count; 0 for an empty list.
 @intrinsic("almide_rt_list_len")
 fn len[A](xs: List[A]) -> Int = _
 
+/// Element count; same as list.len.
 @intrinsic("almide_rt_list_len")
 fn length[A](xs: List[A]) -> Int = _
 
+/// Element at index i, or none when out of range.
 @intrinsic("almide_rt_list_get")
 fn get[A](xs: List[A], i: Int) -> A? = _
 
+/// Element at i, or default when out of range.
 @intrinsic("almide_rt_list_get_or")
 fn get_or[A](xs: List[A], i: Int, default: A) -> A = _
 
+/// Copy with slot i = val; no-op if i out of range.
 @intrinsic("almide_rt_list_set")
 fn set[A](xs: List[A], i: Int, val: A) -> List[A] = _
 
+/// Copy with i and j swapped; no-op if either OOB.
 @intrinsic("almide_rt_list_swap")
 fn swap[A](xs: List[A], i: Int, j: Int) -> List[A] = _
 
+/// Ascending copy; Floats in IEEE totalOrder.
 @intrinsic("almide_rt_list_sort")
 fn sort[A](xs: List[A]) -> List[A] = _
 
+/// Elements in reverse order.
 @intrinsic("almide_rt_list_reverse")
 fn reverse[A](xs: List[A]) -> List[A] = _
 
+/// true if some element == x; NaN never matches.
 @intrinsic("almide_rt_list_contains")
 fn contains[A](xs: List[A], x: A) -> Bool = _
 
+/// (index, element) pairs, index from 0.
 @intrinsic("almide_rt_list_enumerate")
 @consume(xs)
 fn enumerate[A](xs: List[A]) -> List[(Int, A)] = _
 
+/// Pairs by position; stops at the shorter list.
 @intrinsic("almide_rt_list_zip")
 @consume(xs, ys)
 fn zip[A, B](xs: List[A], ys: List[B]) -> List[(A, B)] = _
@@ -50,49 +61,64 @@ fn zip[A, B](xs: List[A], ys: List[B]) -> List[(A, B)] = _
 // Consuming it made `list.get_or(xs, 0, list.flatten(xs))` move `xs` into
 // `flatten` while `get_or` borrowed it — `check` accepted, rustc rejected with
 // E0505 (differential fuzz).
+/// Inner lists concatenated in order.
 @intrinsic("almide_rt_list_flatten")
 fn flatten[T](xss: List[List[T]]) -> List[T] = _
 
+/// First n elements; all if n >= len or n < 0.
 @intrinsic("almide_rt_list_take")
 @consume(xs)
 fn take[A](xs: List[A], n: Int) -> List[A] = _
 
+/// All but the first n; [] if n >= len or n < 0.
 @intrinsic("almide_rt_list_drop")
 @consume(xs)
 fn drop[A](xs: List[A], n: Int) -> List[A] = _
 
+/// All but the first element; [] when empty.
 fn tail[A](xs: List[A]) -> List[A] = list.drop(xs, 1)
 
+/// Duplicates removed; first occurrences kept.
 @intrinsic("almide_rt_list_unique")
 fn unique[A](xs: List[A]) -> List[A] = _
 
+/// Index of the first x, or none.
 @intrinsic("almide_rt_list_index_of")
 fn index_of[A](xs: List[A], x: A) -> Int? = _
 
+/// Final element, or none when empty.
 @intrinsic("almide_rt_list_last")
 fn last[A](xs: List[A]) -> A? = _
 
+/// Runs of n, last may be short; n = 0 aborts.
 @intrinsic("almide_rt_list_chunk")
 fn chunk[A](xs: List[A], n: Int) -> List[List[A]] = _
 
+/// Sum; 0 when empty; wraps on overflow.
 @intrinsic("almide_rt_list_sum")
 fn sum(xs: List[Int]) -> Int = _
 
+/// Product; 1 when empty; wraps on overflow.
 @intrinsic("almide_rt_list_product")
 fn product(xs: List[Int]) -> Int = _
 
+/// Head element, or none when empty.
 @intrinsic("almide_rt_list_first")
 fn first[A](xs: List[A]) -> A? = _
 
+/// true iff xs has no elements.
 @intrinsic("almide_rt_list_is_empty")
 fn is_empty[A](xs: List[A]) -> Bool = _
 
+/// Least element, or none when empty.
 @intrinsic("almide_rt_list_min")
 fn min[A](xs: List[A]) -> A? = _
 
+/// Greatest element, or none when empty.
 @intrinsic("almide_rt_list_max")
 fn max[A](xs: List[A]) -> A? = _
 
+/// Strings joined by sep; empty string for [].
 @intrinsic("almide_rt_list_join")
 fn join(xs: List[String], sep: String) -> String = _
 
@@ -100,155 +126,194 @@ fn join(xs: List[String], sep: String) -> String = _
 //    count, flat_map, filter_map, fold — the `try_lower_to_iter_chain`
 //    intercept in `pass_stdlib_lowering` fires before the `@inline_rust`
 //    dispatch below and produces a fused iterator chain) ──
+/// f applied to each element, in order.
 @intrinsic("almide_rt_list_map")
 @consume(xs)
 fn map[A, B](xs: List[A], f: (A) -> B) -> List[B] = _
 
+/// Elements where f is true, order kept.
 @intrinsic("almide_rt_list_filter")
 @consume(xs)
 fn filter[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
+/// First element where f holds, or none.
 @intrinsic("almide_rt_list_find")
 @consume(xs)
 fn find[A](xs: List[A], f: (A) -> Bool) -> A? = _
 
+/// true if f holds for some x; false when empty.
 @intrinsic("almide_rt_list_any")
 fn any[A](xs: List[A], f: (A) -> Bool) -> Bool = _
 
+/// true if f holds for every x; true when empty.
 @intrinsic("almide_rt_list_all")
 fn all[A](xs: List[A], f: (A) -> Bool) -> Bool = _
 
+/// Number of elements where f holds.
 @intrinsic("almide_rt_list_count")
 fn count[A](xs: List[A], f: (A) -> Bool) -> Int = _
 
+/// f(x) lists concatenated in order.
 @intrinsic("almide_rt_list_flat_map")
 @consume(xs)
 fn flat_map[A, B](xs: List[A], f: (A) -> List[B]) -> List[B] = _
 
+/// The some values of f(x), in order.
 @intrinsic("almide_rt_list_filter_map")
 @consume(xs)
 fn filter_map[A, B](xs: List[A], f: (A) -> B?) -> List[B] = _
 
+/// Left fold from init; init when empty.
 @intrinsic("almide_rt_list_fold")
 @consume(xs)
 fn fold[A, B](xs: List[A], init: B, f: (B, A) -> B) -> B = _
 
 // ── closure-bearing (not IterChain-handled — direct runtime dispatch) ──
+/// Stable sort by key f(x); f runs once per x.
 @intrinsic("almide_rt_list_sort_by")
 @consume(xs)
 fn sort_by[A, B](xs: List[A], f: (A) -> B) -> List[A] = _
 
+/// Longest prefix where f holds.
 @intrinsic("almide_rt_list_take_while")
 @consume(xs)
 fn take_while[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
+/// Rest after the longest prefix where f holds.
 @intrinsic("almide_rt_list_drop_while")
 @consume(xs)
 fn drop_while[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
+/// (where f holds, the rest), order kept.
 @intrinsic("almide_rt_list_partition")
 @consume(xs)
 fn partition[A](xs: List[A], f: (A) -> Bool) -> (List[A], List[A]) = _
 
+/// Left fold seeded by xs[0]; none when empty.
 @intrinsic("almide_rt_list_reduce")
 @consume(xs)
 fn reduce[A](xs: List[A], f: (A, A) -> A) -> A? = _
 
+/// Key f(x) -> elements; keys in first-seen order.
 @intrinsic("almide_rt_list_group_by")
 @consume(xs)
 fn group_by[A, B](xs: List[A], f: (A) -> B) -> Map[B, List[A]] = _
 
+/// Index of the first x where f holds, or none.
 @intrinsic("almide_rt_list_find_index")
 @consume(xs)
 fn find_index[A](xs: List[A], f: (A) -> Bool) -> Int? = _
 
+/// Copy with slot i = f(old); no-op if i out of range.
 @intrinsic("almide_rt_list_update")
 @consume(xs)
 fn update[A](xs: List[A], i: Int, f: (A) -> A) -> List[A] = _
 
+/// Running fold values, init excluded.
 @intrinsic("almide_rt_list_scan")
 @consume(xs)
 fn scan[A, B](xs: List[A], init: B, f: (B, A) -> B) -> List[B] = _
 
+/// f over pairs; stops at the shorter list.
 @intrinsic("almide_rt_list_zip_with")
 @consume(xs, ys)
 fn zip_with[A, B, C](xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C] = _
 
+/// First element per distinct key f(x).
 @intrinsic("almide_rt_list_unique_by")
 @consume(xs)
 fn unique_by[A, K](xs: List[A], f: (A) -> K) -> List[A] = _
 
 // ── non-closure constructors / slicing ──
+/// start up to end, exclusive; [] if end <= start.
 @intrinsic("almide_rt_list_range")
 fn range(start: Int, end: Int) -> List[Int] = _
 
+/// Indices start..<end, clamped; [] if start >= end.
 @intrinsic("almide_rt_list_slice")
 @consume(xs)
 fn slice[A](xs: List[A], start: Int, end: Int) -> List[A] = _
 
+/// Copy with val at i; i >= len or i < 0 appends.
 @intrinsic("almide_rt_list_insert")
 @consume(xs)
 fn insert[A](xs: List[A], i: Int, val: A) -> List[A] = _
 
+/// Copy without slot i; no-op if i out of range.
 @intrinsic("almide_rt_list_remove_at")
 @consume(xs)
 fn remove_at[A](xs: List[A], i: Int) -> List[A] = _
 
+/// n copies of val; [] for n <= 0.
 @intrinsic("almide_rt_list_repeat")
 fn repeat[A](val: A, n: Int) -> List[A] = _
 
+/// sep between adjacent elements.
 @intrinsic("almide_rt_list_intersperse")
 @consume(xs)
 fn intersperse[A](xs: List[A], sep: A) -> List[A] = _
 
+/// All n-long runs; [] if n > len; n = 0 aborts.
 @intrinsic("almide_rt_list_windows")
 fn windows[A](xs: List[A], n: Int) -> List[List[A]] = _
 
+/// Adjacent equal runs collapsed; not global.
 @intrinsic("almide_rt_list_dedup")
 fn dedup[A](xs: List[A]) -> List[A] = _
 
+/// Last n elements; all if n >= len or n < 0.
 @intrinsic("almide_rt_list_take_end")
 @consume(xs)
 fn take_end[A](xs: List[A], n: Int) -> List[A] = _
 
+/// All but the last n; [] if n >= len or n < 0.
 @intrinsic("almide_rt_list_drop_end")
 @consume(xs)
 fn drop_end[A](xs: List[A], n: Int) -> List[A] = _
 
+/// Random permutation; unseeded, differs per run.
 @intrinsic("almide_rt_list_shuffle")
 @consume(xs)
 fn shuffle[A](xs: List[A]) -> List[A] = _
 
+/// All n-long runs; [] if n > len; n = 0 aborts.
 @intrinsic("almide_rt_list_window")
 @consume(xs)
 fn window[A](xs: List[A], n: Int) -> List[List[A]] = _
 
+/// Index of target in ascending xs, or none.
 @intrinsic("almide_rt_list_binary_search")
 fn binary_search(xs: List[Int], target: Int) -> Int? = _
 
 // ── mutable (in-place) ──
+/// Appends x to xs in place.
 @intrinsic("almide_rt_list_push")
 fn push[A](mut xs: List[A], x: A) -> Unit = _
 
 // Create an empty list with preallocated capacity. Subsequent `push`es
 // up to `cap` avoid the repeated Vec doublings that dominate tight
 // decode loops. Use when the final length is known ahead of time.
+/// Empty list; cap is only a preallocation hint.
 @intrinsic("almide_rt_list_with_capacity")
 fn with_capacity[A](cap: Int) -> List[A] = _
 
+/// Removes and yields the last element; none if empty.
 @intrinsic("almide_rt_list_pop")
 fn pop[A](mut xs: List[A]) -> A? = _
 
+/// Removes every element of xs in place.
 @intrinsic("almide_rt_list_clear")
 fn clear[A](mut xs: List[A]) -> Unit = _
 
 // ── bundled-Almide extensions (non-TOML, pure Almide body) ──
 // Smoke fn: covered by spec/stdlib/list_bundled_test.almd as a regression
 // guard for the bundled-dispatch pipeline. Do not remove.
+/// n + 1; bundled-dispatch smoke fn.
 fn bundled_probe(n: Int) -> Int = n + 1
 
 // Split a list at index `n`. Equivalent to `(list.take(xs, n), list.drop(xs, n))`.
 // Demonstrates bundled-Almide calling existing stdlib fns.
+/// (take n, drop n); n past the end gives (xs, []).
 fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) = (list.take(xs, n), list.drop(xs, n))
 
 // Build [seed, f(seed), f(f(seed)), ...] of length `n`. `f` runs exactly `n`
@@ -265,6 +330,7 @@ fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) = (list.take(xs, n), l
 // native and 1.002x wasm over 4M appends (#2353). So `list.push` stays because
 // it is the spelling this body already holds its constant stack with, and
 // swapping it would move the allocation ledger to buy nothing.
+/// [seed, f(seed), ...] of length n; [] if n <= 0.
 fn iterate[T](seed: T, f: (T) -> T, n: Int) -> List[T] = {
   var out: List[T] = []
   var x = seed

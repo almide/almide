@@ -6,13 +6,23 @@
 VERSION := $(shell awk '/^\[/{f=($$0=="[package]")} f && /^version = "/{sub(/^version = "/,""); sub(/".*$$/,""); print; exit}' Cargo.toml)
 INSTALL_DIR := $(HOME)/.local/almide
 BIN := target/release/almide
+# The independent verifier (#2152): its own crate, its own version, installed
+# NEXT TO almide because `almide verify` execs it from there (no linked copy).
+VERIFY_BIN := target/release/almide-verify
+VERIFY_VERSION := $(shell awk '/^\[/{f=($$0=="[package]")} f && /^version = "/{sub(/^version = "/,""); sub(/".*$$/,""); print; exit}' crates/almide-verify/Cargo.toml)
 
 .PHONY: build install test test-wasm check clean fmt cross-target verify-trust receipt stdlib-docs
 
 ## Build
 
+# The sha is passed in rather than read inside build.rs, which would put a
+# `rerun-if-changed` on .git/HEAD and rebuild the root crate after every commit
+# (#2384). `|| true` because a build from a tarball has no git and must still
+# work — it then reports `(dev)` with no sha, which is still the true half.
+BUILD_SHA := $(shell git rev-parse --short=9 HEAD 2>/dev/null || true)
+
 build:
-	cargo build --release
+	ALMIDE_BUILD_SHA=$(BUILD_SHA) cargo build --release
 
 ## Install
 
@@ -22,6 +32,11 @@ install: build
 	@mkdir -p $(HOME)/.local/bin
 	rm -f $(HOME)/.local/bin/almide
 	cp $(BIN) $(HOME)/.local/bin/almide
+	@# The verifier ships beside BOTH copies of almide: `almide verify` looks
+	@# next to its own executable first, and has no fallback when it is absent.
+	cp $(VERIFY_BIN) $(INSTALL_DIR)/almide-verify
+	rm -f $(HOME)/.local/bin/almide-verify
+	cp $(VERIFY_BIN) $(HOME)/.local/bin/almide-verify
 	@# Install stdlib sources (read-only, for LSP go-to-definition)
 	@if [ -d $(INSTALL_DIR)/stdlib ]; then chmod -R u+w $(INSTALL_DIR)/stdlib; fi
 	@rm -rf $(INSTALL_DIR)/stdlib
@@ -38,6 +53,12 @@ install: build
 		exit 1; \
 	fi
 	@$(HOME)/.local/bin/almide --version
+	@reported=$$($(HOME)/.local/bin/almide-verify --version | awk '{print $$2}'); \
+	if [ "$$reported" != "$(VERIFY_VERSION)" ]; then \
+		echo "crates/almide-verify/Cargo.toml says $(VERIFY_VERSION) but the installed almide-verify reports $$reported"; \
+		exit 1; \
+	fi
+	@$(HOME)/.local/bin/almide-verify --version
 
 ## Test
 
@@ -70,11 +91,15 @@ check:
 ## the Coq proof + independent re-check + axiom audit, then the proof-carrying
 ## gate (untrusted compiler emits an ownership certificate, the kernel-proven
 ## checker re-verifies it), then the MIR core + verifier tests. Requires Rocq/Coq.
+## almide-verify is the checker a BINARY distribution runs (no Rocq needed);
+## gate.sh and corpus-wall.sh hold it to the extracted checker's verdicts, and
+## its own tests replay every Coq Example.
 verify-trust:
 	proofs/check.sh
 	proofs/gate.sh
 	proofs/corpus-wall.sh
 	cargo test -p almide-mir
+	cargo test -p almide-verify
 	@## Record WHICH tree+toolchain this verification describes, so a `make
 	@## receipt` on the identical tree can fold these verdicts into the receipt
 	@## instead of re-deriving them (it runs the same three scripts — 232s of the
@@ -119,8 +144,8 @@ version:
 	@echo $(VERSION)
 
 help:
-	@echo "make build      - Build release binary"
-	@echo "make install    - Build + install to ~/.local/almide/"
+	@echo "make build      - Build the release binaries (almide + almide-verify)"
+	@echo "make install    - Build + install both to ~/.local/almide/ and ~/.local/bin/"
 	@echo "make test       - Run almide spec/ tests"
 	@echo "make test-rust  - Run cargo tests"
 	@echo "make test-wasm  - Run WASM target tests"

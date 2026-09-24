@@ -5,62 +5,81 @@
 // templates replace the TOML glue. Closure args ride the generic
 // lambda-prep added in Stage 3a.
 // ── basic accessors & construction ──
+/// An empty Set[A].
 @intrinsic("almide_rt_set_new")
 fn new[A]() -> Set[A] = _
 
+/// Distinct elements of xs in first-seen order.
 @intrinsic("almide_rt_set_from_list")
 fn from_list[A](xs: List[A]) -> Set[A] = _
 
+/// Copy with value appended; unchanged if present.
 @intrinsic("almide_rt_set_insert")
 fn insert[A](s: Set[A], value: A) -> Set[A] = _
 
+/// Copy without value; unchanged if absent.
 @intrinsic("almide_rt_set_remove")
 fn remove[A](s: Set[A], value: A) -> Set[A] = _
 
+/// true when value is a member.
 @intrinsic("almide_rt_set_contains")
 @borrow_ref(value)
 fn contains[A](s: Set[A], value: A) -> Bool = _
 
+/// Member count; 0 for an empty set.
 @intrinsic("almide_rt_set_len")
 fn len[A](s: Set[A]) -> Int = _
 
+/// true iff s has no members.
 @intrinsic("almide_rt_set_is_empty")
 fn is_empty[A](s: Set[A]) -> Bool = _
 
+/// Members in insertion order.
 @intrinsic("almide_rt_set_to_list")
 fn to_list[A](s: Set[A]) -> List[A] = _
 
 // ── set algebra ──
+/// Members of a, then b's new ones.
 @intrinsic("almide_rt_set_union")
 fn union[A](a: Set[A], b: Set[A]) -> Set[A] = _
 
+/// Members of a also in b, in a's order.
 @intrinsic("almide_rt_set_intersection")
 fn intersection[A](a: Set[A], b: Set[A]) -> Set[A] = _
 
+/// Members of a not in b, in a's order.
 @intrinsic("almide_rt_set_difference")
 fn difference[A](a: Set[A], b: Set[A]) -> Set[A] = _
 
+/// In exactly one set: a-only, then b-only.
 @intrinsic("almide_rt_set_symmetric_difference")
 fn symmetric_difference[A](a: Set[A], b: Set[A]) -> Set[A] = _
 
+/// true if all of a is in b; true for empty a.
 @intrinsic("almide_rt_set_is_subset")
 fn is_subset[A](a: Set[A], b: Set[A]) -> Bool = _
 
+/// true if a and b share no member.
 @intrinsic("almide_rt_set_is_disjoint")
 fn is_disjoint[A](a: Set[A], b: Set[A]) -> Bool = _
 
 // ── closure-bearing ──
+/// Members where f holds, order kept.
 @intrinsic("almide_rt_set_filter")
 fn filter[A](s: Set[A], f: (A) -> Bool) -> Set[A] = _
 
+/// Set of f(x); shrinks when f results collide.
 @intrinsic("almide_rt_set_map")
 fn map[A, B](s: Set[A], f: (A) -> B) -> Set[B] = _
 
+/// Folds f(acc, x) in insertion order.
 @intrinsic("almide_rt_set_fold")
 fn fold[A, B](s: Set[A], init: B, f: (B, A) -> B) -> B = _
 
+/// true if f holds for some member; false if empty.
 @intrinsic("almide_rt_set_any")
 fn any[A](s: Set[A], f: (A) -> Bool) -> Bool = _
 
+/// true if f holds for every member; true if empty.
 @intrinsic("almide_rt_set_all")
 fn all[A](s: Set[A], f: (A) -> Bool) -> Bool = _

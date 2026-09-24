@@ -117,7 +117,49 @@ fail=0; n=0
 # standing refusal of every non-scalar element (C-147). Measured directly on
 # this tree: 676 emitted, 31 walled, 707 total — the emitted count is unchanged,
 # so this is one more input the incumbent never rendered, not coverage lost.
-MAX_WALLED=31
+# 33 as of 2026-09-22: ref_grain_or_pattern_alias_match.almd and
+# ref_rust_or_pattern_heap_subject.almd (C-323, #2435) — heap-valued subjects
+# (String, `some(String)`, `List[String]`) matched by literal and wildcard
+# alternatives. The structural leg emits both; the incumbent refuses the
+# non-scalar subject (C-147). The same two, for the same reason, as the
+# host-arch twin of this gate (scripts/check-host-determinism.sh).
+# 34 as of 2026-09-22: or_pattern_guarded_nullary.almd (C-323, #2463) — the
+# fixture pinning the native fixpoint fix (a guarded or-pattern arm over a
+# nullary constructor). The incumbent refuses its lifted guard arms as a
+# heap-result match outside its subset (proofs/walled-real-baseline.txt has the
+# five rows, owned by #2473); the structural leg lowers it byte-identical to
+# native. One more input the incumbent never rendered, not coverage lost.
+# 33 as of 2026-09-22 (fourth A-ci batch, measured on the assembled tree with
+# the native wasmgen harness: 712 emitted + 33 walled of 745): the ceiling goes
+# DOWN by one although the batch adds seven fixtures. #2466 made the bytes
+# writers take `mut` receivers, and bytes_temp_receiver.almd — walled since
+# 2026-09-03 as a temporary receiver outside the incumbent's value subset — now
+# drives its writers through a `var`, so the incumbent renders it. The matrix,
+# bytes-domain and record-field fixtures this batch adds all emit on both legs.
+# 29 as of 2026-09-23 (#2473/#2520, measured with the native wasmgen harness
+# on the tree rebased over develop: 742 emitted + 29 walled of 771): DOWN from 33
+# (this branch lifts three; the ceiling is set to the measured count). The
+# incumbent now specializes
+# guarded / literal-payload Option, Result and custom-variant matches and
+# String-literal list patterns per constructor, so ref_grain_or_pattern_alias_match,
+# ref_rust_or_pattern_heap_subject and or_pattern_guarded_nullary render and
+# byte-match native; the two fixtures the change adds
+# (or_pattern_heap_subject_matrix, list_heap_tuple_return) emit on both legs.
+# 30 as of 2026-09-23 (#2553): record_variant_field_literal.almd (C-036/C-070)
+# pins a record pattern with refutable fields, which only the structural leg
+# lowers; the incumbent's variant-arm specializer admits a refutable payload only
+# on a single-field positional constructor (proofs/walled-real-baseline.txt has
+# the four rows). One more input the incumbent never rendered, not coverage lost.
+# 28 as of 2026-09-23 (#2559, measured with the native wasmgen harness on the
+# tree rebased over develop: 745 emitted + 28 walled of 773): DOWN from 30. The
+# incumbent's variant-arm specializer now compiles refutable MULTI-field
+# positional payloads, record-form field patterns and nested constructor
+# patterns column by column, so record_variant_field_literal (the four rows
+# #2553 added to proofs/walled-real-baseline.txt, pruned) and
+# nested_payload_guard (`OCons(some(x), _) if x == y`) render and byte-match
+# native; the positional twin the change adds
+# (positional_variant_field_literal) emits on both legs.
+MAX_WALLED=28
 walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue

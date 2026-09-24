@@ -188,6 +188,19 @@ impl Emitter<'_> {
         Ok(None)
     }
 
+    /// clear (native `Vec::clear`: length 0, #1423 stage 4): the mutator
+    /// family's shape — a fresh EMPTY block, written back through a var
+    /// receiver or released for a temporary (bytes_recv.rs). The receiver
+    /// is still evaluated (a temporary's construction is observable), and
+    /// an alias bound before the clear keeps its bytes (value semantics).
+    fn lower_bytes_clear(&mut self, b: &IrExpr) -> ArmResult {
+        let recv = self.bytes_recv("clear", b)?;
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
+        self.f.instructions().drop().i32_const(0).call(F_ALLOC);
+        self.emit_bytes_writeback(&recv)?;
+        Ok(None)
+    }
+
     fn lower_bytes_concat(&mut self, a: &IrExpr, b: &IrExpr) -> ArmResult {
         self.lower_arg(a, Some(BYTES), ArgMode::Borrow)?;
         self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
@@ -428,6 +441,7 @@ impl Emitter<'_> {
                 self.lower_bytes_lenprefix(b, p, c)
             }
             ("fill", [b, v]) => self.lower_bytes_fill(b, v),
+            ("clear", [b]) => self.lower_bytes_clear(b),
             // some(byte) / none (native b.get — usize-wrap: negative i
             // is huge and misses). Its default is NONE, not 0, so it
             // takes its own guard instead of the bits path.
@@ -611,9 +625,21 @@ impl Emitter<'_> {
                 Ok(None)
             }
             // copy_within: memmove inside the buffer, NO-OP when the
-            // range is empty or the destination does not fit (native
-            // guard verbatim — the adds wrap in i64 exactly like the
-            // release-mode usize arithmetic they mirror).
+            // range is empty or the destination does not fit (C-213).
+            // The fit test is SUBTRACTIVE and signed — `d >= 0 && d <=
+            // len - (e - s)` — like `bytes_room`. The first cut copied
+            // native's `d + (e - s) <= len` "verbatim", and that sum
+            // wraps in i64 exactly as native's release usize arithmetic
+            // did: `-1 + 2 = 1 <= 6` passed, and where native's
+            // `Vec::copy_within` still had a slice bounds check behind
+            // the guard, this leg ran `memory.copy(payload - 1, ..)` and
+            // stored into the block header (#2474 — `[2, 2, 3, 4, 5, 6]`
+            // for `copy_within(b, 0, 2, -1)`, and `dst = -len` rewrote
+            // the length field). With `e <= len` (the clamp below) and
+            // `s < e`, `e - s` is in `[1, len]` and `len - (e - s)` in
+            // `[0, len)`, so a `d` that passes puts `[d, d + (e - s))`
+            // inside the payload — no offset can reach memory.copy
+            // otherwise.
             ("copy_within", [b, s, e, d]) => {
                 let IrExprKind::Var { id } = &b.kind else {
                     return unsup("bytes-copy-within-nonvar");
@@ -649,11 +675,14 @@ impl Emitter<'_> {
                     .i64_extend_i32_u()
                     .i64_lt_u();
                 i.select().local_set(he);
-                // s < e  &&  d + (e - s) <= len
+                // s < e (unsigned: a negative s is enormous and fails)
+                //   && d >= 0 && d <= len - (e - s)
                 i.local_get(hs).local_get(he).i64_lt_u();
-                i.local_get(hd).local_get(he).i64_add().local_get(hs).i64_sub();
+                i.local_get(hd).i64_const(0).i64_ge_s().i32_and();
+                i.local_get(hd);
                 i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
-                i.i64_le_u();
+                i.local_get(he).local_get(hs).i64_sub().i64_sub();
+                i.i64_le_s();
                 i.i32_and().if_(BlockType::Empty);
                 i.local_get(ho)
                     .i32_const(almide_layout::PAYLOAD as i32)

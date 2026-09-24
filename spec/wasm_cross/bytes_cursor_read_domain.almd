@@ -1,0 +1,143 @@
+// @contract: C-229
+// The `bytes.read_*_at` cursor family over the offset domain — the #1408 rule
+// ("a negative offset is the type default for every `bytes.read_*`, never a
+// panic") applied to the readers whose default is `(pos, none)`: when the
+// window `[pos, pos + width)` leaves the buffer, the POSITION IS UNCHANGED and
+// the value is `none`, on every leg, for every width and both endiannesses,
+// and for `read_bool_at`, `take_at` and `read_string_be_at` alike.
+//
+// #2479, the residue of #1408: that fix reached the fourteen hand-written
+// `set_*` accessors and recorded the readers as already `checked_add`-guarded,
+// but the two cursor MACROS (`cursor_read_int!` / `cursor_read_float!`, every
+// `read_*_at` of width 1/2/4/8) were not in the set. They cast `pos as usize`
+// and ADDED: `read_u32_le_at(b, -2)` computed `usize::MAX - 1 + 4 = 2`, passed,
+// and the slice index panicked `range start index 18446744073709551614`
+// (exit 101) where both wasm legs answered `-2 none`. The wasm self-host had
+// the OTHER end wrong: its `pos + W > n` wrapped for a pos near i64::MAX, so
+// `read_u32_le_at(b, i64::MAX)` answered `(i64::MIN + 3, some(0))` there and
+// `take_at(b, 2, i64::MAX)` asked the allocator for i64::MAX bytes. This is
+// the family matrix: every width at -1, at -width, at -len, at a large
+// negative, at i64::MIN, at i64::MAX and its neighbours, at the 2^32 boundary,
+// at len - 1 (only the 1-byte reads fit), at len, and at 0 as the in-range
+// control that proves the position advances. Float VALUES print as `some`
+// only — the decoding is bytes_cursor_test's; the window is what is judged.
+fn show_i(label: String, r: (Int, Int?)) -> String = {
+  let (p, v) = r
+  "${label}=${p}/${v}"
+}
+
+fn show_f(label: String, r: (Int, Float?)) -> String = {
+  let (p, v) = r
+  let tag = match v {
+    some(_) => "some",
+    none => "none",
+  }
+  "${label}=${p}/${tag}"
+}
+
+fn row(b: Bytes, pos: Int) -> String = {
+  [
+    show_i("u8", bytes.read_u8_at(b, pos)),
+    show_i("u16le", bytes.read_u16_le_at(b, pos)),
+    show_i("u16be", bytes.read_u16_be_at(b, pos)),
+    show_i("i16le", bytes.read_i16_le_at(b, pos)),
+    show_i("i16be", bytes.read_i16_be_at(b, pos)),
+    show_i("u32le", bytes.read_u32_le_at(b, pos)),
+    show_i("u32be", bytes.read_u32_be_at(b, pos)),
+    show_i("i32le", bytes.read_i32_le_at(b, pos)),
+    show_i("i32be", bytes.read_i32_be_at(b, pos)),
+    show_i("i64le", bytes.read_i64_le_at(b, pos)),
+    show_i("i64be", bytes.read_i64_be_at(b, pos)),
+    show_f("f16le", bytes.read_f16_le_at(b, pos)),
+    show_f("f32le", bytes.read_f32_le_at(b, pos)),
+    show_f("f32be", bytes.read_f32_be_at(b, pos)),
+    show_f("f64le", bytes.read_f64_le_at(b, pos)),
+    show_f("f64be", bytes.read_f64_be_at(b, pos))
+  ] |> list.join(" ")
+}
+
+fn misc(b: Bytes, pos: Int) -> String = {
+  let (p1, v1) = bytes.read_bool_at(b, pos)
+  let (p2, v2) = bytes.take_at(b, pos, 2)
+  let t2 = match v2 {
+    some(x) => "${bytes.to_list(x)}",
+    none => "none",
+  }
+  let (p3, v3) = bytes.read_string_be_at(b, pos)
+  "bool=${p1}/${v1} take=${p2}/${t2} sbe=${p3}/${v3}"
+}
+
+fn main() -> Unit = {
+  let b = bytes.from_list([
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ])
+  let hi = 9223372036854775807
+  let positions = [
+    -1,
+    -2,
+    -4,
+    -8,
+    -9,
+    -999999,
+    0 - hi,
+    0 - hi - 1,
+    hi,
+    hi - 1,
+    hi - 3,
+    hi - 7,
+    4294967296,
+    4294967295,
+    7,
+    8,
+    0
+  ]
+  for pos in positions {
+    println("pos ${pos}: ${row(b, pos)}")
+  }
+  // read_bool_at / take_at / read_string_be_at on the same domain. The
+  // string buffer carries a length prefix of 2 at 0 (`AB`) so the in-range
+  // control answers a value; every other position is `none`.
+  let s = bytes.from_list([
+    0,
+    0,
+    0,
+    2,
+    65,
+    66,
+    7,
+    8
+  ])
+  for pos in positions {
+    println("pos ${pos}: ${misc(s, pos)}")
+  }
+  // take_at's LENGTH is the other half of its window: negative, huge, and
+  // huge from a position near the top.
+  for n in [
+    -1,
+    -2,
+    0,
+    1,
+    hi,
+    hi - 1,
+    0 - hi - 1
+  ] {
+    let (p, v) = bytes.take_at(s, 2, n)
+    let t = match v {
+      some(x) => "${bytes.to_list(x)}",
+      none => "none",
+    }
+    let (q, w) = bytes.take_at(s, hi - 1, n)
+    let u = match w {
+      some(x) => "${bytes.to_list(x)}",
+      none => "none",
+    }
+    println("take n=${n}: at2=${p}/${t} athi=${q}/${u}")
+  }
+}

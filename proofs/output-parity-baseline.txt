@@ -77,12 +77,18 @@ spec/wasm_cross/block_line_collect.almd
 spec/wasm_cross/bool_literal_tail.almd
 spec/wasm_cross/branch_lift_in_loop.almd
 spec/wasm_cross/bundled_pure_modules.almd
+spec/wasm_cross/bytes_array_count_domain.almd
+spec/wasm_cross/bytes_copy_from_negative_len.almd
+spec/wasm_cross/bytes_copy_within_offset_domain.almd
+spec/wasm_cross/bytes_cursor_read_domain.almd
 spec/wasm_cross/bytes_f16.almd
 spec/wasm_cross/bytes_f16_offset_overflow.almd
 spec/wasm_cross/bytes_from_list_param.almd
+spec/wasm_cross/bytes_negative_offset_family.almd
 spec/wasm_cross/bytes_push_inplace.almd
 spec/wasm_cross/bytes_rawptr.almd
 spec/wasm_cross/bytes_set_value_semantics.almd
+spec/wasm_cross/bytes_string_window_domain.almd
 spec/wasm_cross/bytes_writer_family.almd
 spec/wasm_cross/call_closure_lambda_param.almd
 spec/wasm_cross/checked_conversion_value_match.almd
@@ -221,6 +227,7 @@ spec/wasm_cross/list_eq.almd
 spec/wasm_cross/list_eq_float_bool.almd
 spec/wasm_cross/list_flatten_borrow.almd
 spec/wasm_cross/list_float_total_order.almd
+spec/wasm_cross/list_heap_tuple_return.almd
 spec/wasm_cross/list_heapelem_rc.almd
 spec/wasm_cross/list_index_element_append.almd
 spec/wasm_cross/list_insert_clamp.almd
@@ -272,6 +279,7 @@ spec/wasm_cross/module_global_const.almd
 spec/wasm_cross/module_var_alias_cow.almd
 spec/wasm_cross/mut_heap_param.almd
 spec/wasm_cross/mut_map_param.almd
+spec/wasm_cross/mut_param_alias_cow.almd
 spec/wasm_cross/mutable_global_bytes_arena.almd
 spec/wasm_cross/mutable_global_bytes_copy_from.almd
 spec/wasm_cross/mutable_global_repeat_writes.almd
@@ -298,6 +306,9 @@ spec/wasm_cross/option_none_unwrap_term.almd
 spec/wasm_cross/option_result.almd
 spec/wasm_cross/option_tuple_payload_matrix.almd
 spec/wasm_cross/option_unwrap_or_else_heap.almd
+spec/wasm_cross/or_pattern.almd
+spec/wasm_cross/or_pattern_guarded_nullary.almd
+spec/wasm_cross/or_pattern_heap_subject_matrix.almd
 spec/wasm_cross/phantom_type_param.almd
 spec/wasm_cross/pipe_lambda_block_value.almd
 spec/wasm_cross/place_mutation.almd
@@ -319,6 +330,11 @@ spec/wasm_cross/records_variants.almd
 spec/wasm_cross/recursion_depth_within_limits.almd
 spec/wasm_cross/recursive_generic_repr_interp.almd
 spec/wasm_cross/reduce_str.almd
+spec/wasm_cross/ref_gleam_or_pattern_alternatives.almd
+spec/wasm_cross/ref_grain_or_pattern_alias_match.almd
+spec/wasm_cross/ref_rust_or_pattern_guard_count.almd
+spec/wasm_cross/ref_rust_or_pattern_guard_retry.almd
+spec/wasm_cross/ref_rust_or_pattern_heap_subject.almd
 spec/wasm_cross/regex_engine.almd
 spec/wasm_cross/regex_fuzz_batch.almd
 spec/wasm_cross/repeat_size_ceiling.almd
@@ -377,6 +393,7 @@ spec/wasm_cross/to_fixed_domain_abort.almd
 spec/wasm_cross/to_fixed_domain_abort_hi.almd
 spec/wasm_cross/to_fixed_wide_precision.almd
 spec/wasm_cross/to_result_nested_share.almd
+spec/wasm_cross/top_let_closure_eager.almd
 spec/wasm_cross/top_let_div_eager.almd
 spec/wasm_cross/top_let_div_used.almd
 spec/wasm_cross/toplevel_const_wrapping.almd

@@ -271,34 +271,33 @@ pub fn validate_protocol_impls(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>)
                 None => continue,
             };
 
-            // #1590/#1589: a GENERIC protocol adopted here is a dead end in
-            // every direction — the adoption cannot bind the parameter
-            // (`: Repository[User]` does not parse), so the per-method
-            // checks below produce hints containing a FREE `T` the writer
-            // cannot implement, and a concrete implementation is then
-            // rejected with "change the return type to 'Option[T]'". Name
-            // the root cause ONCE at the adoption and skip the method
-            // checks entirely.
-            if !proto_def.generics.is_empty() {
-                diagnostics.push(err(
-                    format!(
-                        "type '{}' adopts generic protocol '{}[{}]', which cannot be implemented yet",
-                        type_name, proto_name,
-                        proto_def.generics.iter().map(|g| g.to_string()).collect::<Vec<_>>().join(", ")
-                    ),
-                    format!(
-                        "Generic-protocol adoption is not supported (#1589): the adoption cannot bind '{}', so no method signature can satisfy it. Drop the protocol from the declaration and implement the methods as plain convention fns on '{}' for now.",
-                        proto_def.generics.iter().map(|g| g.to_string()).collect::<Vec<_>>().join(", "),
-                        type_name
-                    ),
-                    format!("type {} : {}", type_name, proto_name),
-                ));
+            // #1589: a conformance binds the protocol's parameters EXACTLY —
+            // one argument per parameter, written at the conformance
+            // (`type UserRepo: Repository[UserId, User]`). A count mismatch is
+            // reported once at the adoption; the per-method checks below
+            // would otherwise compare against a free `K`.
+            let args = env.type_protocol_args.get(type_name)
+                .and_then(|m| m.get(proto_name)).cloned().unwrap_or_default();
+            if args.len() != proto_def.generics.len() {
+                diagnostics.push(protocol_arg_count_err(&proto_def, args.len(), &format!("type '{}'", type_name), &format!("type {}: {}", type_name, proto_name)));
                 continue;
             }
+            let bindings: HashMap<Sym, Ty> = proto_def.generics.iter().copied().zip(args).collect();
+            let is_generic_protocol = !proto_def.generics.is_empty();
 
             for method_sig in &proto_def.methods {
                 let target = ImplTarget { name: *type_name, is_generic, ty: &type_ty };
-                validate_protocol_method_impl(env, diagnostics, &target, *proto_name, method_sig);
+                if !is_generic_protocol {
+                    validate_protocol_method_impl(env, diagnostics, &target, *proto_name, method_sig);
+                    continue;
+                }
+                let applied = crate::types::ProtocolMethodSig {
+                    params: method_sig.params.iter().map(|(n, t)| (*n, crate::types::substitute(t, &bindings))).collect(),
+                    ret: crate::types::substitute(&method_sig.ret, &bindings),
+                    ..method_sig.clone()
+                };
+                validate_protocol_method_impl(env, diagnostics, &target, *proto_name, &applied);
+                validate_protocol_method_modes(env, diagnostics, &target, *proto_name, &applied);
             }
         }
     }
@@ -400,6 +399,66 @@ fn validate_protocol_method_impl(
             format!("method '{}.{}' returns '{}', expected '{}' to satisfy protocol '{}'",
                 type_name, method_sig.name, actual_ret.display(), expected_ret.display(), proto_name),
             format!("Change return type to '{}'", expected_ret.display()),
+            format!("fn {}.{}", type_name, method_sig.name),
+        ));
+    }
+}
+/// E-wrong-arity for a protocol reference (#1589): a conformance or a bound
+/// names a protocol with a different number of type arguments than it
+/// declares parameters. `site` names who wrote it (`type 'UserRepo'`,
+/// `bound 'R' of 'find'`), `ctx` is the diagnostic context line.
+pub fn protocol_arg_count_err(proto: &ProtocolDef, given: usize, site: &str, ctx: &str) -> Diagnostic {
+    let params = proto.generics.iter().map(|g| g.to_string()).collect::<Vec<_>>().join(", ");
+    let (msg, hint) = if proto.generics.is_empty() {
+        (
+            format!("protocol '{}' takes no type arguments, but {} gives it {}", proto.name, site, given),
+            format!("Drop the brackets: write `{}` — only a protocol declared with parameters (`protocol {}[T] {{ ... }}`) takes arguments", proto.name, proto.name),
+        )
+    } else if given == 0 {
+        (
+            format!("generic protocol '{}[{}]' is used without its type arguments by {}", proto.name, params, site),
+            format!("Write one type per parameter where the protocol is named: `{}[{}]` with each of {} replaced by a concrete type (e.g. `{}[{}]`). The arguments are how a conformance says WHICH '{}' it implements", proto.name, params, params, proto.name, proto.generics.iter().map(|_| "String").collect::<Vec<_>>().join(", "), proto.name),
+        )
+    } else {
+        (
+            format!("protocol '{}[{}]' takes {} type argument(s), but {} gives it {}", proto.name, params, proto.generics.len(), site, given),
+            format!("Write exactly one type per parameter: `{}[{}]`", proto.name, params),
+        )
+    };
+    err(msg, hint, ctx.to_string())
+}
+/// The effect and ownership halves of a GENERIC protocol's method signature
+/// (#1589): an implementation is `effect` exactly when the protocol method
+/// is, and takes `mut` exactly the parameters the protocol method does. The
+/// dispatch through a bound is monomorphized to the implementation, so a
+/// mismatch here would be a call whose ExitPlan (effect) or borrow mode
+/// (mut) differs from what the generic caller was checked against.
+fn validate_protocol_method_modes(
+    env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>,
+    target: &ImplTarget<'_>, proto_name: Sym,
+    method_sig: &crate::types::ProtocolMethodSig,
+) {
+    let type_name = target.name;
+    let fn_key = super::registration::convention_fn_key(env, &type_name.to_string(), &method_sig.name.to_string())
+        .map_or_else(|| format!("{}.{}", type_name, method_sig.name), |k| k.to_string());
+    let Some(sig) = env.functions.get(&sym(&fn_key)) else { return };
+    if sig.is_effect != method_sig.is_effect {
+        let (want, have) = if method_sig.is_effect { ("an `effect fn`", "a pure fn") } else { ("a pure fn", "an `effect fn`") };
+        diagnostics.push(err(
+            format!("method '{}.{}' is {}, but protocol '{}' declares '{}' as {}", type_name, method_sig.name, have, proto_name, method_sig.name, want),
+            format!("Match the protocol's declaration: {} `fn {}.{}` — effect-ness is part of the method signature a conformance must implement",
+                if method_sig.is_effect { "write" } else { "drop `effect` from" }, type_name, method_sig.name),
+            format!("fn {}.{}", type_name, method_sig.name),
+        ));
+    }
+    if sig.mut_params != method_sig.mut_params {
+        let names = |idx: &[usize]| -> String {
+            let v: Vec<String> = idx.iter().filter_map(|i| method_sig.params.get(*i).map(|(n, _)| format!("`mut {}`", n))).collect();
+            if v.is_empty() { "no `mut` parameter".to_string() } else { v.join(", ") }
+        };
+        diagnostics.push(err(
+            format!("method '{}.{}' takes {}, but protocol '{}' declares {}", type_name, method_sig.name, names(&sig.mut_params), proto_name, names(&method_sig.mut_params)),
+            format!("Match the protocol's parameter modes on `fn {}.{}` — `mut` (in-place mutation of the caller's value) is part of the method signature a conformance must implement", type_name, method_sig.name),
             format!("fn {}.{}", type_name, method_sig.name),
         ));
     }

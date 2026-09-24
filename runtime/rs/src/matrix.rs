@@ -159,6 +159,73 @@ pub fn almide_rt_matrix_head_geometry(n_heads_u: usize, head_dim_u: usize, rows:
     }
 }
 
+/// The SHAPE precondition of the two-operand kernels (#2481 / #2482 / #2483):
+/// two extents that the kernel indexes against each other must be EQUAL —
+/// `cols(a) == rows(b)` for `mul`, `cols(x) == cols(weight)` and
+/// `len(bias) == rows(weight)` for `linear_row`, the three widths and two row
+/// counts of `swiglu_gate`, `k`/`v` against `q` in the attention entries, the
+/// weight width and bias length of `conv1d`, every member's row count in
+/// `concat_cols`, and `cols(extra) == cols(base)` in `append_rows`. Violating
+/// it used to be a RAW slice panic natively (exit 101, the form ALS-T6
+/// forbids) against a silently TRUNCATED product (`mul` clamped the inner sum
+/// to `min(cols(a), rows(b))`), a missing bias read as 0.0, or an out-of-block
+/// read on the self-hosted leg — a shape that does not fit never has a
+/// plausible answer, so it aborts in the unified T6 form on both targets, the
+/// same family as the head-count (C-198) and index (C-282) domains. The
+/// EMPTY-operand short-circuits each kernel already had stay in front of the
+/// guard (C-278's "the empty matrix has no row to violate"): `mul(2x3, 0x0)`
+/// is still the 2x0 matrix, not an abort.
+#[inline]
+pub fn almide_rt_matrix_shape_eq(a: usize, b: usize) {
+    if a != b {
+        eprintln!("Error: matrix shape mismatch");
+        std::process::exit(1);
+    }
+}
+
+/// The ORDERED half of the same precondition: the causal attention offset
+/// `sk - sq` needs `rows(q) <= rows(k)` (new tokens never outnumber the keys
+/// they attend to). Past it the offset underflowed here (no row was masked
+/// at all) while the self-hosted body masked from a negative offset — two
+/// exit-0 answers that differed.
+#[inline]
+pub fn almide_rt_matrix_shape_le(a: usize, b: usize) {
+    if a > b {
+        eprintln!("Error: matrix shape mismatch");
+        std::process::exit(1);
+    }
+}
+
+/// `matrix.from_lists` (#2482): every row must have the FIRST row's width — a
+/// ragged list of lists is not a matrix. The flat store asserted
+/// `data.len() == rows * cols` (a raw `assertion left == right failed` panic,
+/// exit 101) while the wasm leg, a list of rows with no shape invariant, built
+/// the ragged value and read on. C-282 already stated that no public
+/// constructor builds a ragged matrix; this is the guard that makes it so.
+pub fn almide_rt_matrix_rows_uniform(rows: &[Vec<f64>]) {
+    if let Some(first) = rows.first() {
+        if rows.iter().any(|r| r.len() != first.len()) {
+            eprintln!("Error: matrix rows must have equal length");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// `conv1d`'s stride is a STEP: below 1 it has no meaning (0 divides the
+/// output length by zero, a negative one walks backwards) — the head-count
+/// class (C-198), not the negative-dimension clamp class. A stride of 0 was a
+/// raw `attempt to divide by zero` panic natively (exit 101) against the
+/// language's own `Error: division by zero` on the wasm leg; a negative one
+/// wrapped through `as usize` natively to a huge step (one output row) while
+/// the wasm leg divided by it and answered no rows.
+pub fn almide_rt_matrix_stride(stride: i64) -> usize {
+    if stride < 1 {
+        eprintln!("Error: stride must be positive");
+        std::process::exit(1);
+    }
+    stride as usize
+}
+
 pub fn almide_rt_matrix_zeros(rows: i64, cols: i64) -> AlmideMatrix {
     let (r, c) = almide_rt_matrix_dims(rows, cols);
     // Row-lazy on purpose (#1532 confirm night, seed 514359535655/2163):
@@ -225,6 +292,7 @@ pub fn almide_rt_matrix_transpose(m: &AlmideMatrix) -> AlmideMatrix {
 }
 
 pub fn almide_rt_matrix_from_lists(rows: &[Vec<f64>]) -> AlmideMatrix {
+    almide_rt_matrix_rows_uniform(rows);
     rows.to_vec().into()
 }
 
@@ -349,6 +417,10 @@ pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix 
     if m == 0 || k == 0 || n == 0 {
         return mk(m, n, vec![0.0f64; m * n]);
     }
+    // #2481: the inner dimension is a precondition, not a clamp — `b` was
+    // indexed as if it had `k` rows (a raw slice panic past its data) while
+    // the wasm body summed over `min(k, rows(b))` and printed a product.
+    almide_rt_matrix_shape_eq(k, b.rows);
     let mut out = vec![0.0f64; m * n];
     #[cfg(have_blas)]
     {
@@ -484,6 +556,12 @@ pub fn almide_rt_matrix_swiglu_gate(
     let r = x.len();
     let d_in = x[0].len();
     let d_out = w_gate.len();
+    // Both weights are (d_out, d_in): the gate/up dots read `w[j][k]` for
+    // k < d_in and j < d_out, so a narrower weight or a shorter `w_up` was a
+    // raw index panic here and an out-of-block read on the wasm leg.
+    almide_rt_matrix_shape_eq(w_gate.cols, d_in);
+    almide_rt_matrix_shape_eq(w_up.cols, d_in);
+    almide_rt_matrix_shape_eq(w_up.rows, d_out);
     let mut out = vec![vec![0.0f64; d_out]; r];
     for i in 0..r {
         let xi = &x[i];
@@ -524,8 +602,13 @@ pub fn almide_rt_matrix_scaled_dot_product_attention(
 }
 
 pub fn almide_rt_matrix_split_cols_even(m: &AlmideMatrix, n: i64) -> Vec<AlmideMatrix> {
+    // #2480: a part count of 0 or less is the EMPTY list, the same answer
+    // `n == 0` has always had here and on the self-hosted leg (the C-034
+    // signed-clamp reading: a negative count is no parts). Cast raw, -1
+    // became 18446744073709551615 parts and the collect died in a raw
+    // `capacity overflow` panic (exit 101) where wasm printed 0.
+    if m.is_empty() || n <= 0 { return vec![].into(); }
     let n = n as usize;
-    if m.is_empty() || n == 0 { return vec![].into(); }
     let cols = m[0].len();
     let chunk = cols / n;
     (0..n).map(|h| {
@@ -539,11 +622,21 @@ pub fn almide_rt_matrix_concat_cols_many(matrices: &[AlmideMatrix]) -> AlmideMat
     if matrices.is_empty() { return vec![].into(); }
     let rows = matrices[0].len();
     if rows == 0 { return vec![vec![]].into(); }
+    // #2482: every NON-EMPTY member must have the first member's row count —
+    // a member with fewer rows left the output ragged (the flat store's
+    // assertion panic) while the wasm leg built the ragged value; a member
+    // with more rows silently lost its tail on both. An EMPTY member
+    // contributes no columns and no shape (C-278's empty-operand rule).
+    for m in matrices {
+        if !m.is_empty() {
+            almide_rt_matrix_shape_eq(m.len(), rows);
+        }
+    }
     let total_cols: usize = matrices.iter().map(|m| if m.is_empty() { 0 } else { m[0].len() }).sum();
     (0..rows).map(|r| {
         let mut row = Vec::with_capacity(total_cols);
         for m in matrices {
-            if r < m.len() {
+            if !m.is_empty() {
                 row.extend_from_slice(&m[r]);
             }
         }
@@ -573,6 +666,19 @@ pub fn almide_rt_matrix_mha_core(q: &AlmideMatrix, k: &AlmideMatrix, v: &AlmideM
     let sq = q.len();
     let sk = k.len();
     let d = q[0].len();
+    // `k` and `v` are read at `[j][col0 + kk]` for j < sk: a narrower `k` or
+    // `v` was a raw index panic natively and an out-of-block read on the wasm
+    // leg (the two wasm legs even disagreed with each other on the garbage);
+    // a `v` with fewer rows than `k` panicked past its data. An EMPTY `k`
+    // reads nothing and needs no shape.
+    if sk > 0 {
+        almide_rt_matrix_shape_eq(k.cols, d);
+        almide_rt_matrix_shape_eq(v.rows, sk);
+        almide_rt_matrix_shape_eq(v.cols, d);
+    }
+    if causal {
+        almide_rt_matrix_shape_le(sq, sk);
+    }
     let dh = d / n_heads;
     let scale = (dh as f64).sqrt().recip();
 
@@ -633,6 +739,11 @@ pub fn almide_rt_matrix_linear_row(x: &AlmideMatrix, weight: &AlmideMatrix, bias
     let r = x.len();
     let n_in = x[0].len();
     let n_out = weight.len();
+    // #2483: the weight is (n_out, n_in) and the bias has one entry per
+    // output — `bias[j]` for j < n_out was a raw index panic on a short bias
+    // while the wasm body read 0.0 past the list and printed a value.
+    almide_rt_matrix_shape_eq(weight.cols, n_in);
+    almide_rt_matrix_shape_eq(bias.len(), n_out);
     let mut out = vec![vec![0.0f64; n_out]; r];
     for i in 0..r {
         let xi = &x[i];
@@ -675,6 +786,7 @@ pub fn almide_rt_matrix_linear_row_no_bias(x: &AlmideMatrix, weight: &AlmideMatr
     let r = x.len();
     let n_in = x[0].len();
     let n_out = weight.len();
+    almide_rt_matrix_shape_eq(weight.cols, n_in);
     let mut out = vec![vec![0.0f64; n_out]; r];
     for i in 0..r {
         let xi = &x[i];
@@ -692,9 +804,15 @@ pub fn almide_rt_matrix_linear_row_no_bias(x: &AlmideMatrix, weight: &AlmideMatr
 }
 
 pub fn almide_rt_matrix_slice_rows(m: &AlmideMatrix, start: i64, end: i64) -> AlmideMatrix {
+    // `list.slice` over the rows, with C-034's index doctrine spelled out
+    // instead of left to the `as usize` wrap that used to carry it: a
+    // NEGATIVE start is the EMPTY (0-row) matrix, a negative or past-the-end
+    // end is `len`, and `start >= end` is empty (#2475 — the self-hosted leg
+    // clamped only `end` and read the list header as a row pointer).
+    let len = m.len();
+    let e = if end < 0 { len } else { (end as u64).min(len as u64) as usize };
+    if start < 0 || (start as u64) >= e as u64 { return vec![].into(); }
     let s = start as usize;
-    let e = (end as usize).min(m.len());
-    if s >= e { return vec![].into(); }
     mk(e - s, m.cols, m.data[s * m.cols..e * m.cols].to_vec())
 }
 
@@ -706,12 +824,28 @@ pub fn almide_rt_matrix_conv1d(input: &AlmideMatrix, weight: &AlmideMatrix, bias
     if t_in == 0 || weight.is_empty() { return vec![].into(); }
     let in_ch = input[0].len();
     let out_ch = weight.len();
-    let k = kernel as usize;
-    let s = stride as usize;
-    let p = padding as usize;
+    // The count domain, in one fixed order on both legs: stride is a step
+    // (below 1 aborts), kernel and padding are widths (a negative one clamps
+    // to 0 like every C-034/C-161 dimension — a kernel of 0 taps is the
+    // bias-only output both legs already agreed on), and the padded length
+    // is bounded by the shared ceiling BEFORE `t_in + 2 * p` is formed, so
+    // the two legs never disagree by an overflow one of them wrapped.
+    let s = almide_rt_matrix_stride(stride);
+    let k = kernel.max(0) as usize;
+    let p = padding.max(0) as usize;
+    if p as i64 > ALMIDE_MATRIX_MAX_ELEMS {
+        eprintln!("Error: matrix dimensions too large");
+        std::process::exit(1);
+    }
+    // The weight row is `in_ch * kernel` taps wide and the bias has one entry
+    // per output channel: a short weight row or bias was a raw index panic
+    // natively and an out-of-block read on the wasm leg.
+    almide_rt_matrix_shape_eq(weight.cols, in_ch.checked_mul(k).unwrap_or(usize::MAX));
+    almide_rt_matrix_shape_eq(bias.len(), out_ch);
     let t_padded = t_in + 2 * p;
     if t_padded < k { return vec![].into(); }
     let t_out = (t_padded - k) / s + 1;
+    let (t_out, out_ch) = almide_rt_matrix_dims(t_out as i64, out_ch as i64);
     let mut out = vec![vec![0.0f64; out_ch]; t_out];
     for t in 0..t_out {
         let base = t * s;  // start in padded coords

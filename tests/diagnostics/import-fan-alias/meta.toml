@@ -1,0 +1,2 @@
+expects_error = "takes no alias or selector"
+hint_substring = "fan is always in scope"

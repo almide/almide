@@ -537,8 +537,12 @@ fn bytes_copy_within(xs: &mut [Value], it: &mut std::vec::IntoIter<Value>) -> Op
     let Value::Int(src_end) = it.next()? else { return None };
     let Value::Int(dst) = it.next()? else { return None };
     let cur = raw(xs)?;
-    let (s, d) = (src_start as usize, dst as usize);
-    let e = (src_end as usize).min(cur.len());
+    // The sign tests are written out (the #2474 shape): a negative offset is
+    // a window that does not fit, decided BEFORE any cast. `src_end` alone
+    // keeps the unsigned reading — negative is enormous and clamps to len.
+    let Ok(s) = usize::try_from(src_start) else { return Some(Value::Unit) };
+    let Ok(d) = usize::try_from(dst) else { return Some(Value::Unit) };
+    let e = usize::try_from(src_end).map_or(cur.len(), |e| e.min(cur.len()));
     if s >= e {
         return Some(Value::Unit);
     }
@@ -984,6 +988,18 @@ mod tests {
             write("copy_within", &[1, 2, 3], vec![Value::Int(2), Value::Int(2), Value::Int(0)]),
             [1, 2, 3]
         );
+        // A NEGATIVE destination or source start is a window that does not
+        // fit — a no-op, never a store before the payload (#2474: native's
+        // `dst as usize` wrapped the fit test and panicked, the structural
+        // wasm leg stored into the block header). The top of i64 is the
+        // other end of the same domain.
+        for (s, e, d) in [(0, 2, -1), (0, 6, -6), (1, 4, -3), (-1, 2, 0), (0, 2, i64::MAX), (0, 2, i64::MAX - 1), (i64::MAX, 2, 0)] {
+            assert_eq!(
+                write("copy_within", &[1, 2, 3, 4, 5, 6], vec![Value::Int(s), Value::Int(e), Value::Int(d)]),
+                [1, 2, 3, 4, 5, 6],
+                "copy_within({s}, {e}, {d})"
+            );
+        }
     }
 
     /// A name the family does not define must stay `None` — an abstain, never a

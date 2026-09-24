@@ -14,11 +14,11 @@
 # and the old row is retired only once no contract names it).
 #
 # Lines beginning with '#' and blank lines are comments — the gate strips them.
-dojo:scope-escape
+dojo:scope-escape	C-362
 dojo:fallible-producer	C-217
 dojo:early-recovery
 dojo:helper-extraction
-dojo:callback-retention
-dojo:nested-scopes
+dojo:callback-retention	C-364
+dojo:nested-scopes	C-363
 dojo:representation-change
 dojo:port-evolution

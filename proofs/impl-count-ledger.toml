@@ -1,0 +1,4920 @@
+# IMPLEMENTATION-COUNT LEDGER — written by `almide-gates impl-count --update`.
+# One row per stdlib hole (`= _`): (native @intrinsic, `fn lower_<mod>_<fn>[_suffix]`
+# definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
+# self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
+# Gated by tools/almide-gates impl-count: a total may not grow without its row.
+# holes = 702  implementations = 1715
+[[hole]]
+module   = "base64"
+name     = "encode"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "base64"
+name     = "decode"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "base64"
+name     = "encode_url"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "base64"
+name     = "decode_url"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "append_f32_be"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "append_f32_le"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "append_f64_be"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "append_f64_le"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "append_i16_be"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "append_i16_le"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "append_i32_be"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "append_i32_le"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "append_i64_be"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "append_i64_le"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "append_u16_be"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "append_u16_le"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "append_u32_be"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "append_u32_le"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "append_u8"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "as_mut_ptr"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "as_ptr"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "chunks"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "clear"
+native   = 1
+emitter  = 1
+selfhost = 0
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "cmp"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "concat"
+native   = 1
+emitter  = 1
+selfhost = 0
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "contains"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "copy_from"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "copy_to_ptr"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "data_ptr"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "ends_with"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "eof"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "fill"
+native   = 1
+emitter  = 1
+selfhost = 0
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "from_list"
+native   = 1
+emitter  = 1
+selfhost = 0
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "from_raw_ptr"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "from_string"
+native   = 1
+emitter  = 1
+selfhost = 0
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "get"
+native   = 1
+emitter  = 2
+selfhost = 0
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "get_or"
+native   = 1
+emitter  = 1
+selfhost = 0
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "index_of"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "insert"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "is_empty"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "is_valid_utf8"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "len"
+native   = 1
+emitter  = 1
+selfhost = 0
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "lines"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "map_each"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "new"
+native   = 1
+emitter  = 1
+selfhost = 0
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "pad_left"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "pad_right"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "push"
+native   = 1
+emitter  = 1
+selfhost = 0
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "set_at"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "copy_within"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "read_bool"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_bool_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_f16_le"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "bytes"
+name     = "read_f16_le_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_f16_le_array"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_f32_be"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "read_f32_be_array"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_f32_be_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_f32_le"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "read_f32_le_array"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_f32_le_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_f64_be"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "read_f64_be_array"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_f64_be_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_f64_le"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "read_f64_le_array"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_f64_le_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_i16_be"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "read_i16_be_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_i16_be_array"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_i16_le"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "read_i16_le_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_i16_le_array"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_i32_be"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "read_i32_be_array"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_i32_be_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_i32_le"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "read_i32_le_array"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_i32_le_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_i64_be"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "read_i64_be_array"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_i64_be_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_i64_le"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "read_i64_le_array"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_i64_le_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_length_prefixed_strings_le"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_string_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_string_be"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "read_string_be_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_u16_be"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "read_u16_be_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_u16_be_array"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_u16_le"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "read_u16_le_array"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_u16_le_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_u32_be"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "read_u32_be_array"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_u32_be_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_u32_le"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "read_u32_le_array"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_u32_le_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_u8"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_u8_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "remove_at"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "repeat"
+native   = 1
+emitter  = 1
+selfhost = 0
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "reverse"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "set"
+native   = 1
+emitter  = 2
+selfhost = 4
+total    = 7
+[[hole]]
+module   = "bytes"
+name     = "set_f32_be"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "set_f32_le"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "set_f64_be"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "set_f64_le"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "set_i16_be"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "set_i16_le"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "set_i32_be"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "set_i32_le"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "set_i64_be"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "set_i64_le"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "set_u16_be"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "set_u16_le"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "set_u32_be"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "set_u32_le"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "set_u8"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "skip"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "skip_length_prefixed_le"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "slice"
+native   = 1
+emitter  = 1
+selfhost = 0
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "split"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "starts_with"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "take_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "to_list"
+native   = 1
+emitter  = 1
+selfhost = 0
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "to_string"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "bytes"
+name     = "to_string_lossy"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "write_bool"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "write_f64_be"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "write_i64_be"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "write_string_be"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "write_u32_be"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "write_u8"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "xor"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "heap_save"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "heap_restore"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "read_uint16"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_uint32"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_int32"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "read_float32"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "write_uint16"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "write_uint32"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "write_int32"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "write_float32"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "set_uint16"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "set_uint32"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "set_int32"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "set_float32"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "add_days"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "add_hours"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "add_minutes"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "add_seconds"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "day"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "diff_seconds"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "format"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "from_parts"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "from_unix"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "hour"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "is_after"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "is_before"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "minute"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "month"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "parse_iso"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "second"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "to_iso"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "to_unix"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "weekday"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "year"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "env"
+name     = "os"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "error"
+name     = "chain"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "error"
+name     = "context"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "error"
+name     = "message"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "float"
+name     = "to_string"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "float"
+name     = "to_int"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "float"
+name     = "from_int"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "float"
+name     = "parse"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "float"
+name     = "to_fixed"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "float"
+name     = "to_bits"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "float"
+name     = "sqrt"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "float"
+name     = "abs"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "float"
+name     = "floor"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "float"
+name     = "ceil"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "float"
+name     = "round"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "float"
+name     = "min"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "float"
+name     = "max"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "float"
+name     = "clamp"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "float"
+name     = "sign"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "float"
+name     = "is_nan"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "float"
+name     = "is_infinite"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "float"
+name     = "to_int8"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "float"
+name     = "to_int16"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "float"
+name     = "to_int32"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "float"
+name     = "to_uint8"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "float"
+name     = "to_uint16"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "float"
+name     = "to_uint32"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "float"
+name     = "to_uint64"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "float"
+name     = "to_float32"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "float"
+name     = "to_int64"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "float"
+name     = "to_float64"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "float"
+name     = "from_float32"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "float"
+name     = "from_float64"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "hash"
+name     = "fnv1a32"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "hash"
+name     = "fnv1a32_bytes"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "hash"
+name     = "sha256"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "hash"
+name     = "sha256_hex"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "hex"
+name     = "encode"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "hex"
+name     = "encode_upper"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "hex"
+name     = "decode"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "response"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "json"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "with_headers"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "redirect"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "status"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "http"
+name     = "body"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "set_header"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "get_header"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "status_code"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "headers"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "header_values"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "req_method"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "req_path"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "req_body"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "req_header"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "query_params"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "url_decode"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "to_string"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "to_hex"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "parse"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "from_hex"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "to_float"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "bits_to_float"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "bits_to_f32"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "abs"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "min"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "int"
+name     = "max"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "int"
+name     = "clamp"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "band"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "bor"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "bxor"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "bnot"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "bshl"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "bshr"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "count_leading_zeros"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "count_trailing_zeros"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "pop_count"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "bit_reverse"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "byte_swap"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "bit_width"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "log2_floor"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "log2_ceil"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "next_power_of_two"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "prev_power_of_two"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "wrap_add"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "wrap_mul"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "rotate_right"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "rotate_left"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "to_u32"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "to_u8"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "to_int8"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "to_int16"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "to_int32"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "to_uint8"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "to_uint16"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "to_uint32"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "to_uint64"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "to_float32"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "int"
+name     = "to_float64"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "to_int64"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "int"
+name     = "from_int8"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "int"
+name     = "from_int16"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "int"
+name     = "from_int32"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "int"
+name     = "from_int64"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "int"
+name     = "from_uint8"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "int"
+name     = "from_uint16"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "int"
+name     = "from_uint32"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "int"
+name     = "from_uint64"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "io"
+name     = "read_byte"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "io"
+name     = "read_n_bytes"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "io"
+name     = "write_bytes"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "io"
+name     = "write"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "json"
+name     = "parse"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "json"
+name     = "stringify"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "json"
+name     = "stringify_pretty"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "json"
+name     = "get_string"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "json"
+name     = "get_int"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "json"
+name     = "get_float"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "json"
+name     = "get_bool"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "json"
+name     = "get_array"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "json"
+name     = "root"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "json"
+name     = "field"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "json"
+name     = "index"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "json"
+name     = "get_path"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "json"
+name     = "set_path"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "json"
+name     = "remove_path"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "json"
+name     = "to_map"
+native   = 1
+emitter  = 1
+selfhost = 0
+total    = 2
+[[hole]]
+module   = "list"
+name     = "len"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "list"
+name     = "length"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "list"
+name     = "get"
+native   = 1
+emitter  = 2
+selfhost = 9
+total    = 12
+[[hole]]
+module   = "list"
+name     = "get_or"
+native   = 1
+emitter  = 1
+selfhost = 4
+total    = 6
+[[hole]]
+module   = "list"
+name     = "set"
+native   = 1
+emitter  = 1
+selfhost = 4
+total    = 6
+[[hole]]
+module   = "list"
+name     = "swap"
+native   = 1
+emitter  = 1
+selfhost = 4
+total    = 6
+[[hole]]
+module   = "list"
+name     = "sort"
+native   = 1
+emitter  = 1
+selfhost = 14
+total    = 16
+[[hole]]
+module   = "list"
+name     = "reverse"
+native   = 1
+emitter  = 1
+selfhost = 2
+total    = 4
+[[hole]]
+module   = "list"
+name     = "contains"
+native   = 1
+emitter  = 1
+selfhost = 4
+total    = 6
+[[hole]]
+module   = "list"
+name     = "enumerate"
+native   = 1
+emitter  = 1
+selfhost = 4
+total    = 6
+[[hole]]
+module   = "list"
+name     = "zip"
+native   = 1
+emitter  = 1
+selfhost = 7
+total    = 9
+[[hole]]
+module   = "list"
+name     = "flatten"
+native   = 1
+emitter  = 1
+selfhost = 2
+total    = 4
+[[hole]]
+module   = "list"
+name     = "take"
+native   = 1
+emitter  = 3
+selfhost = 10
+total    = 14
+[[hole]]
+module   = "list"
+name     = "drop"
+native   = 1
+emitter  = 2
+selfhost = 10
+total    = 13
+[[hole]]
+module   = "list"
+name     = "unique"
+native   = 1
+emitter  = 3
+selfhost = 6
+total    = 10
+[[hole]]
+module   = "list"
+name     = "index_of"
+native   = 1
+emitter  = 1
+selfhost = 4
+total    = 6
+[[hole]]
+module   = "list"
+name     = "last"
+native   = 1
+emitter  = 1
+selfhost = 5
+total    = 7
+[[hole]]
+module   = "list"
+name     = "chunk"
+native   = 1
+emitter  = 1
+selfhost = 2
+total    = 4
+[[hole]]
+module   = "list"
+name     = "sum"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "list"
+name     = "product"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "list"
+name     = "first"
+native   = 1
+emitter  = 1
+selfhost = 5
+total    = 7
+[[hole]]
+module   = "list"
+name     = "is_empty"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "list"
+name     = "min"
+native   = 1
+emitter  = 1
+selfhost = 8
+total    = 10
+[[hole]]
+module   = "list"
+name     = "max"
+native   = 1
+emitter  = 0
+selfhost = 8
+total    = 9
+[[hole]]
+module   = "list"
+name     = "join"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "list"
+name     = "map"
+native   = 1
+emitter  = 2
+selfhost = 3
+total    = 6
+[[hole]]
+module   = "list"
+name     = "filter"
+native   = 1
+emitter  = 2
+selfhost = 4
+total    = 7
+[[hole]]
+module   = "list"
+name     = "find"
+native   = 1
+emitter  = 2
+selfhost = 4
+total    = 7
+[[hole]]
+module   = "list"
+name     = "any"
+native   = 1
+emitter  = 1
+selfhost = 2
+total    = 4
+[[hole]]
+module   = "list"
+name     = "all"
+native   = 1
+emitter  = 1
+selfhost = 2
+total    = 4
+[[hole]]
+module   = "list"
+name     = "count"
+native   = 1
+emitter  = 1
+selfhost = 2
+total    = 4
+[[hole]]
+module   = "list"
+name     = "flat_map"
+native   = 1
+emitter  = 1
+selfhost = 3
+total    = 5
+[[hole]]
+module   = "list"
+name     = "filter_map"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "list"
+name     = "fold"
+native   = 1
+emitter  = 3
+selfhost = 7
+total    = 11
+[[hole]]
+module   = "list"
+name     = "sort_by"
+native   = 1
+emitter  = 1
+selfhost = 7
+total    = 9
+[[hole]]
+module   = "list"
+name     = "take_while"
+native   = 1
+emitter  = 1
+selfhost = 2
+total    = 4
+[[hole]]
+module   = "list"
+name     = "drop_while"
+native   = 1
+emitter  = 1
+selfhost = 2
+total    = 4
+[[hole]]
+module   = "list"
+name     = "partition"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "list"
+name     = "reduce"
+native   = 1
+emitter  = 1
+selfhost = 2
+total    = 4
+[[hole]]
+module   = "list"
+name     = "group_by"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "list"
+name     = "find_index"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "list"
+name     = "update"
+native   = 1
+emitter  = 1
+selfhost = 4
+total    = 6
+[[hole]]
+module   = "list"
+name     = "scan"
+native   = 1
+emitter  = 1
+selfhost = 2
+total    = 4
+[[hole]]
+module   = "list"
+name     = "zip_with"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "list"
+name     = "unique_by"
+native   = 1
+emitter  = 2
+selfhost = 2
+total    = 5
+[[hole]]
+module   = "list"
+name     = "range"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "list"
+name     = "slice"
+native   = 1
+emitter  = 1
+selfhost = 3
+total    = 5
+[[hole]]
+module   = "list"
+name     = "insert"
+native   = 1
+emitter  = 0
+selfhost = 4
+total    = 5
+[[hole]]
+module   = "list"
+name     = "remove_at"
+native   = 1
+emitter  = 1
+selfhost = 4
+total    = 6
+[[hole]]
+module   = "list"
+name     = "repeat"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "list"
+name     = "intersperse"
+native   = 1
+emitter  = 1
+selfhost = 2
+total    = 4
+[[hole]]
+module   = "list"
+name     = "windows"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "list"
+name     = "dedup"
+native   = 1
+emitter  = 1
+selfhost = 4
+total    = 6
+[[hole]]
+module   = "list"
+name     = "take_end"
+native   = 1
+emitter  = 1
+selfhost = 4
+total    = 6
+[[hole]]
+module   = "list"
+name     = "drop_end"
+native   = 1
+emitter  = 1
+selfhost = 4
+total    = 6
+[[hole]]
+module   = "list"
+name     = "shuffle"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "list"
+name     = "window"
+native   = 1
+emitter  = 1
+selfhost = 2
+total    = 4
+[[hole]]
+module   = "list"
+name     = "binary_search"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "list"
+name     = "push"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "list"
+name     = "with_capacity"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "list"
+name     = "pop"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "list"
+name     = "clear"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "map"
+name     = "new"
+native   = 1
+emitter  = 0
+selfhost = 8
+total    = 9
+[[hole]]
+module   = "map"
+name     = "get"
+native   = 1
+emitter  = 0
+selfhost = 13
+total    = 14
+[[hole]]
+module   = "map"
+name     = "get_or"
+native   = 1
+emitter  = 0
+selfhost = 5
+total    = 6
+[[hole]]
+module   = "map"
+name     = "set"
+native   = 1
+emitter  = 0
+selfhost = 9
+total    = 10
+[[hole]]
+module   = "map"
+name     = "contains"
+native   = 1
+emitter  = 0
+selfhost = 5
+total    = 6
+[[hole]]
+module   = "map"
+name     = "remove"
+native   = 1
+emitter  = 0
+selfhost = 4
+total    = 5
+[[hole]]
+module   = "map"
+name     = "keys"
+native   = 1
+emitter  = 0
+selfhost = 4
+total    = 5
+[[hole]]
+module   = "map"
+name     = "values"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "map"
+name     = "len"
+native   = 1
+emitter  = 0
+selfhost = 5
+total    = 6
+[[hole]]
+module   = "map"
+name     = "entries"
+native   = 1
+emitter  = 0
+selfhost = 4
+total    = 5
+[[hole]]
+module   = "map"
+name     = "merge"
+native   = 1
+emitter  = 1
+selfhost = 3
+total    = 5
+[[hole]]
+module   = "map"
+name     = "is_empty"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "map"
+name     = "from_list"
+native   = 1
+emitter  = 0
+selfhost = 11
+total    = 12
+[[hole]]
+module   = "map"
+name     = "map"
+native   = 1
+emitter  = 1
+selfhost = 6
+total    = 8
+[[hole]]
+module   = "map"
+name     = "filter"
+native   = 1
+emitter  = 1
+selfhost = 3
+total    = 5
+[[hole]]
+module   = "map"
+name     = "fold"
+native   = 1
+emitter  = 0
+selfhost = 7
+total    = 8
+[[hole]]
+module   = "map"
+name     = "any"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "map"
+name     = "all"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "map"
+name     = "count"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "map"
+name     = "find"
+native   = 1
+emitter  = 1
+selfhost = 2
+total    = 4
+[[hole]]
+module   = "map"
+name     = "update"
+native   = 1
+emitter  = 1
+selfhost = 3
+total    = 5
+[[hole]]
+module   = "map"
+name     = "upsert"
+native   = 1
+emitter  = 1
+selfhost = 3
+total    = 5
+[[hole]]
+module   = "map"
+name     = "insert"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "map"
+name     = "delete"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "map"
+name     = "clear"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "math"
+name     = "abs"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "atan"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "choose"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "cos"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "e"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "exp"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "factorial"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "fmax"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "fmin"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "fpow"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "log"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "math"
+name     = "log10"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "log2"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "log_gamma"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "max"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "min"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "pi"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "pow"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "sign"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "sin"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "sqrt"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "tan"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "math"
+name     = "tanh"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "zeros"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "matrix"
+name     = "ones"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "matrix"
+name     = "shape"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "matrix"
+name     = "transpose"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "matrix"
+name     = "from_lists"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "matrix"
+name     = "from_q1_0_bytes"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "select_rows"
+native   = 1
+emitter  = 1
+selfhost = 3
+total    = 5
+[[hole]]
+module   = "matrix"
+name     = "linear_q1_0_row_no_bias"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "matrix"
+name     = "silu_mul"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "select_rows_q1_0"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "rope_rotate"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "matrix"
+name     = "rope_rotate_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "append_rows"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "qwen3_block_q1_0_kv"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "matrix"
+name     = "linear_f32_row_no_bias"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "select_rows_f32"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "rope_rotate_neox_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "qwen3_block_f32_kv"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "matrix"
+name     = "linear_q8_0_row_no_bias"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "matrix"
+name     = "select_rows_q8_0_dq"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "qwen3_block_q8_0_kv"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "matrix"
+name     = "to_lists"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "matrix"
+name     = "get"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "matrix"
+name     = "rows"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "cols"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "add"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "mul"
+native   = 1
+emitter  = 1
+selfhost = 6
+total    = 8
+[[hole]]
+module   = "matrix"
+name     = "scale"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "fma"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "fma3"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "sub"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "div"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "neg"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "pow"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "map"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "from_bytes_f32_le"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "to_bytes_f64_le"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "to_bytes_f32_le"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "from_bytes_f16_le"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "from_bytes_f64_le"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "broadcast_add_row"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "layer_norm_rows"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "rms_norm_rows"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "swiglu_gate"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "softmax_rows"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "gelu"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "fused_gemm_bias_scale_gelu"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "attention_weights"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "scaled_dot_product_attention"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "linear_row_gelu"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "pre_norm_linear"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "split_cols_even"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "concat_cols"
+native   = 1
+emitter  = 1
+selfhost = 2
+total    = 4
+[[hole]]
+module   = "matrix"
+name     = "concat_cols_many"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "causal_mask_add"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "multi_head_attention"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "masked_multi_head_attention"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "linear_row"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "matrix"
+name     = "linear_row_no_bias"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "slice_rows"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "matrix"
+name     = "conv1d"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "matrix"
+name     = "gather_rows"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "matrix"
+name     = "dot_row"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "row_dot"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "matrix"
+name     = "zeros_f32"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "ones_f32"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "mul_f32"
+native   = 1
+emitter  = 0
+selfhost = 4
+total    = 5
+[[hole]]
+module   = "matrix"
+name     = "mul_f32_scaled"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "mul_f32_t"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "matrix"
+name     = "mul_f32_t_scaled"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "mul_scaled"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "mem"
+name     = "save"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "mem"
+name     = "restore"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "net"
+name     = "tcp_is_open"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "option"
+name     = "map"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "option"
+name     = "flat_map"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "option"
+name     = "flatten"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "option"
+name     = "unwrap_or"
+native   = 1
+emitter  = 0
+selfhost = 5
+total    = 6
+[[hole]]
+module   = "option"
+name     = "unwrap_or_else"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "option"
+name     = "is_some"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "option"
+name     = "is_none"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "option"
+name     = "filter"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "option"
+name     = "zip"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "option"
+name     = "or_else"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "option"
+name     = "to_list"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "prim"
+name     = "handle"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "load8"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "load32"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "load64"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "store32"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "store8"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "store64"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "band"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "bor"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "bxor"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "bshl"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "bshr"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "bshr_u"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "alloc_str"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "alloc_bytes"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "alloc_list"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "alloc_list_f64"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "alloc_set"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "alloc_map"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "alloc_map_str"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "alloc_map_skv"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "alloc_value"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "alloc_list_str"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "alloc_set_str"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "store_str"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "load_str"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "load_handle"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "rc_dec"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "rc_inc"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "fd_write"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "random_get"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "args_get_list"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "args_get_list_full"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "env_get"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "read_text_file"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "read_bytes_file"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "read_text_file_as"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "read_bytes_file_as"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "read_text_file_as_pair"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "read_dir"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "read_dir_as"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "write_text_file"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "write_text_file_as"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "write_text_file_as_pair"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "make_dir"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "make_dir_as"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "remove_all"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "remove_all_as"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "path_exists"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "ptr_to_int"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "int_to_ptr"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "path_filestat"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "path_filestat_nofollow"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "rename"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "read_line"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "read_n_bytes"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "clock_time_get"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "fabs"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "fsqrt"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "ffloor"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "fnearest"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "fceil"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "fneg"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "fadd"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "fsub"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "fmul"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "fdiv"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "fmin"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "fmax"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "fcopysign"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "flt"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "fle"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "fgt"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "fge"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "feq"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "fne"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "f2i"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "i2f"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "fbits"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "ffrombits"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "f2f32"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "f32_2f"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "bits_to_f32"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "i2f32"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "f32bits"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "die"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "prim"
+name     = "alloc_map_kv"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "process"
+name     = "args"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "process"
+name     = "pid"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "process"
+name     = "env"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "process"
+name     = "sleep"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "process"
+name     = "is_alive"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "regex"
+name     = "is_match"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "regex"
+name     = "full_match"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "regex"
+name     = "find"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "regex"
+name     = "find_all"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "regex"
+name     = "replace"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "regex"
+name     = "replace_first"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "regex"
+name     = "split"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "regex"
+name     = "captures"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "result"
+name     = "map"
+native   = 1
+emitter  = 1
+selfhost = 5
+total    = 7
+[[hole]]
+module   = "result"
+name     = "map_err"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "result"
+name     = "flat_map"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "result"
+name     = "unwrap_or"
+native   = 1
+emitter  = 0
+selfhost = 5
+total    = 6
+[[hole]]
+module   = "result"
+name     = "unwrap_or_else"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "result"
+name     = "is_ok"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "result"
+name     = "is_err"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "result"
+name     = "to_option"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "result"
+name     = "to_err_option"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "result"
+name     = "partition"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "set"
+name     = "new"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "set"
+name     = "from_list"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "set"
+name     = "insert"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "set"
+name     = "remove"
+native   = 1
+emitter  = 1
+selfhost = 2
+total    = 4
+[[hole]]
+module   = "set"
+name     = "contains"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "set"
+name     = "len"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "set"
+name     = "is_empty"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "set"
+name     = "to_list"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "set"
+name     = "union"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "set"
+name     = "intersection"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "set"
+name     = "difference"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "set"
+name     = "symmetric_difference"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "set"
+name     = "is_subset"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "set"
+name     = "is_disjoint"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "set"
+name     = "filter"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "set"
+name     = "map"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "set"
+name     = "fold"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "set"
+name     = "any"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "set"
+name     = "all"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "string"
+name     = "trim"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "string"
+name     = "split"
+native   = 1
+emitter  = 1
+selfhost = 2
+total    = 4
+[[hole]]
+module   = "string"
+name     = "split_once"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "join"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "len"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "length"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "contains"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "starts_with"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "string"
+name     = "ends_with"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "slice"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "byte_slice"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "pad_start"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "to_bytes"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "capitalize"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "string"
+name     = "to_upper"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "to_lower"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "replace"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "string"
+name     = "get"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "string"
+name     = "lines"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "string"
+name     = "chars"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "string"
+name     = "index_of"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "repeat"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "from_bytes"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "string"
+name     = "is_digit"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "is_alpha"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "is_alphanumeric"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "is_whitespace"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "is_upper"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "is_lower"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "codepoint"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "string"
+name     = "from_codepoint"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "pad_end"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "trim_start"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "trim_end"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "count"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "is_empty"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "reverse"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "string"
+name     = "strip_prefix"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "strip_suffix"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "replace_first"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "last_index_of"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "first"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "string"
+name     = "last"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "string"
+name     = "take"
+native   = 1
+emitter  = 1
+selfhost = 2
+total    = 4
+[[hole]]
+module   = "string"
+name     = "take_end"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "drop"
+native   = 1
+emitter  = 1
+selfhost = 2
+total    = 4
+[[hole]]
+module   = "string"
+name     = "drop_end"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "run_length_encode"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "string"
+name     = "push"
+native   = 1
+emitter  = 1
+selfhost = 0
+total    = 2
+[[hole]]
+module   = "string"
+name     = "clear"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "testing"
+name     = "assert_throws"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "testing"
+name     = "assert_contains"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "testing"
+name     = "assert_approx"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "testing"
+name     = "assert_gt"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "testing"
+name     = "assert_lt"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "testing"
+name     = "assert_some"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "testing"
+name     = "assert_ok"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "testing"
+name     = "assert_none"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "testing"
+name     = "assert_err"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "value"
+name     = "array"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "value"
+name     = "as_array"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "value"
+name     = "as_bool"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "value"
+name     = "as_float"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "value"
+name     = "as_int"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "value"
+name     = "as_string"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "value"
+name     = "bool"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "value"
+name     = "float"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "value"
+name     = "int"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "value"
+name     = "merge"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "value"
+name     = "null"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "value"
+name     = "object"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "value"
+name     = "omit"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "value"
+name     = "pick"
+native   = 1
+emitter  = 1
+selfhost = 1
+total    = 3
+[[hole]]
+module   = "value"
+name     = "str"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "value"
+name     = "stringify"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "value"
+name     = "to_camel_case"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "value"
+name     = "to_snake_case"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "value"
+name     = "field"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "value"
+name     = "keys"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2

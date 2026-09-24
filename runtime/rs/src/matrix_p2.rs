@@ -278,6 +278,9 @@ pub fn almide_rt_matrix_rope_rotate_at(
 pub fn almide_rt_matrix_append_rows(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
     if a.is_empty() { return b.clone(); }
     if b.is_empty() { return a.clone(); }
+    // Row-wise concat needs one width: a different one left the flat store
+    // ragged (its assertion panic, exit 101).
+    almide_rt_matrix_shape_eq(b.cols, a.cols);
     let mut out = Vec::<Vec<f64>>::with_capacity(a.len() + b.len());
     out.extend(a.iter().map(|r| r.to_vec()));
     out.extend(b.iter().map(|r| r.to_vec()));
@@ -394,7 +397,17 @@ pub fn almide_rt_matrix_linear_q1_0_row_no_bias(
     if x_rows == 0 || out_cols == 0 || n_in == 0 {
         return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
     }
+    // The activation row is read `n_in` wide out of the flat store: a wider
+    // `x` was silently mis-strided, a narrower one a raw slice panic.
+    almide_rt_matrix_shape_eq(x.cols, n_in);
     let (x_rows, out_cols) = almide_rt_matrix_dims(x_rows as i64, out_cols as i64);
+    // Out-of-buffer weights are the all-zero output, as in the f32 twin
+    // (18 bytes per 128-weight block, `out_cols` rows of them).
+    let off = w_offset.max(0) as usize;
+    let need = out_cols.saturating_mul(n_in / 128).saturating_mul(18);
+    if off > w_bytes.len() || need > w_bytes.len() - off {
+        return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
+    }
     let mut out = vec![0.0f64; x_rows * out_cols];
     almide_kernel::q1_0_packed::linear_q1_0_packed(
         &x.data,
@@ -424,8 +437,12 @@ pub fn almide_rt_matrix_silu_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMa
         almide_kernel::silu::silu_mul(&a.data, &b.data, &mut out);
         return mk(a.rows, a.cols, out);
     }
-    // shape mismatch fallback (ragged): keep the elementwise definition
-    let rows = a.len();
+    // Shape-mismatch fallback: the elementwise definition with the ZIP
+    // truncation every elementwise pair (`add`/`sub`/`div`/`fma`) takes on
+    // both legs — rows to the shorter operand, cols per row to the shorter
+    // row. `a.len()` alone indexed `b[i]` past a shorter `b` (a raw slice
+    // panic) where the self-hosted body already truncated.
+    let rows = a.len().min(b.len());
     let mut out = Vec::<Vec<f64>>::with_capacity(rows);
     for i in 0..rows {
         let ai = &a[i];
@@ -677,6 +694,17 @@ pub fn almide_rt_matrix_linear_f32_row_no_bias(
     let out_cols = w_rows.max(0) as usize;
     let off = w_offset.max(0) as usize;
     if x_rows == 0 || out_cols == 0 || n_in == 0 {
+        return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
+    }
+    almide_rt_matrix_shape_eq(x.cols, n_in);
+    // The weight window must be IN the buffer. Out of it, the answer is the
+    // all-zero output — the same edge the unfused composition takes, because
+    // `from_bytes_f32_le` over a window past the end is the all-zero matrix
+    // (C-341) and a zero weight makes a zero product. Without the test the
+    // slice below was a raw `range end index N out of range` panic (exit 101,
+    // the form ALS-T6 forbids) on a buffer one element short.
+    let need = out_cols.saturating_mul(n_in).saturating_mul(4);
+    if off > w_bytes.len() || need > w_bytes.len() - off {
         return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
     }
     let mut out = vec![0.0f64; x_rows * out_cols];
@@ -975,7 +1003,13 @@ pub fn almide_rt_matrix_linear_q8_0_row_no_bias(
     if x_rows == 0 || out_cols == 0 || n_in == 0 || n_in % ALMIDE_Q8_BLOCK != 0 {
         return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
     }
+    almide_rt_matrix_shape_eq(x.cols, n_in);
     let row_bytes = n_in / ALMIDE_Q8_BLOCK * ALMIDE_Q8_BLOCK_BYTES;
+    // Out-of-buffer weights are the all-zero output, as in the f32 twin.
+    let need = out_cols.saturating_mul(row_bytes);
+    if off > w_bytes.len() || need > w_bytes.len() - off {
+        return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
+    }
     let w_all = &w_bytes[off..off + out_cols * row_bytes];
     let mut out = vec![0.0f64; x_rows * out_cols];
     for i in 0..x_rows {

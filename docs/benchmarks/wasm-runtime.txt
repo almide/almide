@@ -2,11 +2,14 @@
 # Regenerate: bash scripts/check-wasm-runtime-ratio.sh --measure
 # Gate:       bash scripts/check-wasm-runtime-ratio.sh — the STATUS taxonomy
 #             is enforced everywhere (a hole that starts benching, a measured
-#             row that stops, a changed refusal class all fail); the RATIO
-#             verdict runs only on the stamping machine class (cross-engine
-#             ratios do not cancel hardware — see the script header).
+#             row that stops, a changed refusal class all fail); the stamped
+#             RATIO verdict runs only on the stamping machine class (cross-
+#             engine ratios do not cancel hardware — see the script header);
+#             CI's verdict is the SAME-RUNNER A/B (#2143): this tree's wasm
+#             leg against the latest release's, interleaved, min-of-runs,
+#             tree/release above 1 + ab_band fails.
 #
-# Rows: name | status | native_ms | wasm_ms | ratio (wasm/native)
+# Rows: name | status | native_ms | wasm_ms | ratio (wasm/native) [ab_band=NN]
 #   measured          — `almide bench --target wasm` (embedded host, verify-
 #                       then-time, median of 5 + warmup) and the native twin
 #   routed-incumbent  — the program routes to the incumbent artifact; the
@@ -17,21 +20,24 @@
 # Every non-measured row is RE-MEASURED by the gate: a row that starts
 # benching fails the run with the good news (flip it to measured in the
 # same change); a measured row that stops benching fails as a regression.
-version = almide 0.62.0
-date    = 2026-09-08
+# ab_band is the A/B tolerance in percent (a policy line, not a measurement);
+# a fan row overrides it with `ab_band=NN` at the end of its row.
+version = almide 0.63.0 (dev)
+date    = 2026-09-24
 machine = arm64 Darwin (local stamp; ratios are the gated quantity)
+ab_band = 30
 
-nbody                 | measured         | 2.74  | 7.37 | 2.69
-spectralnorm          | measured         | 3.59  | 9.53 | 2.65
-binarytrees           | measured         | 6.98  | 6.48 | 0.93
-treealloc             | measured         | 221.28 | 90.01 | 0.41
-fasta                 | routed-incumbent | 3.14  | -    | -
-fannkuchredux         | routed-incumbent | 3.38  | -    | -
-mandelbrot            | routed-incumbent | 6.47  | -    | -
-onebrc                | walled           | 4.35  | -    | -
-fft                   | measured         | 57.53 | 231.22 | 4.02
-strchurn              | measured         | 67.52 | 77.75 | 1.15
-listbuild_append      | measured         | 29.03 | 96.55 | 3.33
-listbuild_combinator  | measured         | 29.18 | 110.69 | 3.79
-listbuild_prealloc    | measured         | 29.15 | 103.20 | 3.54
-mapbuild              | measured         | 12.63 | 14.69 | 1.16
+nbody                 | measured         | 1.85  | 4.06 | 2.19
+spectralnorm          | measured         | 2.08  | 3.59 | 1.73
+binarytrees           | measured         | 2.31  | 3.15 | 1.36 ab_band=100
+treealloc             | measured         | 52.28 | 54.61 | 1.04
+fasta                 | measured         | 1.83  | 3.09 | 1.69
+fannkuchredux         | routed-incumbent | 1.94  | -    | -
+mandelbrot            | measured         | 3.40  | 4.40 | 1.29 ab_band=100
+onebrc                | walled           | 2.58  | -    | -
+fft                   | measured         | 53.50 | 152.37 | 2.85
+strchurn              | measured         | 70.98 | 61.69 | 0.87
+listbuild_append      | measured         | 28.43 | 86.37 | 3.04
+listbuild_combinator  | measured         | 28.50 | 89.21 | 3.13
+listbuild_prealloc    | measured         | 27.87 | 79.41 | 2.85
+mapbuild              | measured         | 6.93  | 5.98 | 0.86

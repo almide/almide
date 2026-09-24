@@ -33,24 +33,34 @@ fn fill_example_ty(ty: &Ty) -> Ty {
 /// Infer types for default value expressions in type declarations.
 /// Prevents ICE "missing type for expr" during lowering.
 fn infer_default_exprs(checker: &mut Checker, ty: &mut ast::TypeExpr) {
-    if let ast::TypeExpr::Variant { cases, .. } = ty {
-        for case in cases {
-            if let ast::VariantCase::Record { fields, .. } = case {
-                for field in fields {
-                    let declared = checker.resolve_type_expr(&field.ty);
-                    if let Some(ref mut default_expr) = field.default {
-                        let val_ty = checker.infer_expr(default_expr);
-                        // The field's declared type is the source of truth for
-                        // its default value — flow it in so an empty default
-                        // (`items: List[Shape] = []`) pins its element to `Shape`
-                        // instead of staying undecidable (E018).
-                        checker.constrain(declared, val_ty, format!("default for field {}", field.name));
-                    }
+    match ty {
+        ast::TypeExpr::Variant { cases, .. } => {
+            for case in cases {
+                if let ast::VariantCase::Record { fields, .. } = case {
+                    infer_field_defaults(checker, fields);
                 }
             }
         }
+        // A plain record's defaults are checked too (#2518): a record-literal
+        // default (`s: Sampling = Sampling {}`) left unchecked reached the
+        // native build with a missing field (E0063) and no qualified type.
+        ast::TypeExpr::Record { fields } => infer_field_defaults(checker, fields),
+        _ => {}
     }
+}
 
+fn infer_field_defaults(checker: &mut Checker, fields: &mut [ast::FieldType]) {
+    for field in fields {
+        let declared = checker.resolve_type_expr(&field.ty);
+        if let Some(ref mut default_expr) = field.default {
+            let val_ty = checker.infer_expr(default_expr);
+            // The field's declared type is the source of truth for
+            // its default value — flow it in so an empty default
+            // (`items: List[Shape] = []`) pins its element to `Shape`
+            // instead of staying undecidable (E018).
+            checker.constrain(declared, val_ty, format!("default for field {}", field.name));
+        }
+    }
 }
 
 impl Checker {
@@ -584,51 +594,6 @@ impl Checker {
             prev = c;
         }
         depth == 0 && !in_str
-    }
-
-    fn validate_result_interpolations(&mut self) {
-        let checks = std::mem::take(&mut self.deferred_result_interp_checks);
-        for (ty, span) in checks {
-            let resolved = resolve_ty(&ty, &self.uf);
-            // `"${b}"` over Bytes passed check and died downstream on BOTH
-            // legs — native emitted `Display` on `Vec<u8>` (rustc E0277, the
-            // check-vs-build gap class) and the wasm renderer walled — so a
-            // Bytes segment has never printed anywhere. Reject it at check
-            // time with the spellings that ARE defined.
-            if matches!(resolved, Ty::Bytes) {
-                let mut diag = err(
-                    "a Bytes value has no defined string form — it cannot be interpolated".to_string(),
-                    "Interpolate what you mean: `${bytes.to_list(b)}` for the octets, \
-                     `${bytes.to_string_lossy(b)}` for UTF-8 text, or \
-                     `${int.to_string(bytes.len(b))}` for the length."
-                        .to_string(),
-                    "string interpolation".to_string(),
-                );
-                if let Some(s) = span {
-                    diag.file = self.source_file.clone();
-                    diag.line = Some(s.line);
-                    diag.col = Some(s.col);
-                }
-                self.diagnostics.push(diag);
-                continue;
-            }
-            if !resolved.is_result() {
-                continue;
-            }
-            let mut diag = Diagnostic::warning(
-                format!("interpolating a {} prints its debug form (ok(…)/err(…))", resolved.display()),
-                "If you meant the payload, unwrap first: `?? fallback` supplies a default, \
-                 `match` handles ok/err, `!` propagates in an effect fn body. Interpolate \
-                 the Result itself only for debug output",
-                "string interpolation",
-            );
-            if let Some(s) = span {
-                diag.file = self.source_file.clone();
-                diag.line = Some(s.line);
-                diag.col = Some(s.col);
-            }
-            self.diagnostics.push(diag);
-        }
     }
 
     fn validate_map_key_types(&mut self) {

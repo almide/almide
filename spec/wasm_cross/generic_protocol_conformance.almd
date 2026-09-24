@@ -1,0 +1,89 @@
+// @contract: C-365
+// ALS-M5 / C-365: a generic protocol used with EXPLICIT conformance. Each type
+// names the one instantiation it implements (`type Users: Repository[Int,
+// User]`); a generic fn bounded by the applied protocol (`[R: Repository[Int,
+// User]]`) dispatches to that type's own methods — no other implementation is
+// searched for. Covered: two conformances of one protocol at different
+// arguments, a letter only the bound names (`[V, R: Repository[Int, V]]`,
+// pinned by the conformance), a `mut self` receiver (the shorthand on the
+// implementations), and an effect method whose `!` carries the same exit as an
+// ordinary effect call.
+protocol Repository[K, V] {
+  fn find(self, key: K) -> V?
+  fn put(mut self: Self, key: K, value: V) -> Unit
+  fn size(self) -> Int
+  effect fn load(self, key: K) -> V!
+}
+
+type User = { id: Int, name: String }
+
+type Users: Repository[Int, User] = { rows: List[User] }
+
+fn Users.find(self, key: Int) -> User? = self.rows |> list.find((u) => u.id == key)
+
+fn Users.put(mut self, key: Int, value: User) -> Unit = {
+  self.rows = (self.rows |> list.filter((u) => u.id != key)) + [value]
+}
+
+fn Users.size(self) -> Int = list.len(self.rows)
+
+effect fn Users.load(self, key: Int) -> User! = match self.find(key) {
+  some(u) => ok(u),
+  none => err("no user ${int.to_string(key)}"),
+}
+
+type Tags: Repository[String, Int] = { names: List[String] }
+
+fn Tags.find(self, key: String) -> Int? = list.index_of(self.names, key)
+
+fn Tags.put(mut self, key: String, value: Int) -> Unit = {
+  self.names = self.names + [key]
+}
+
+fn Tags.size(self) -> Int = list.len(self.names)
+
+effect fn Tags.load(self, key: String) -> Int! = match self.find(key) {
+  some(i) => ok(i),
+  none => err("no tag ${key}"),
+}
+
+fn rename[R: Repository[Int, User]](mut repo: R, id: Int, name: String) -> Unit = repo.put(
+  id,
+  User { id: id, name: name },
+)
+
+fn first[V, R: Repository[Int, V]](repo: R) -> V? = repo.find(1)
+
+fn lookup[K, V, R: Repository[K, V]](repo: R, key: K) -> V? = repo.find(key)
+
+effect fn name_of[R: Repository[Int, User]](repo: R, id: Int) -> String = {
+  let u = repo.load(id)!
+  u.name
+}
+
+effect fn main() -> Unit = {
+  var users = Users { rows: [] }
+  rename(users, 1, "ada")
+  rename(users, 2, "lin")
+  rename(users, 1, "ada lovelace")
+  println(int.to_string(users.size()))
+  match first(users) {
+    some(u) => println(u.name),
+    none => println("none"),
+  }
+  match lookup(users, 3) {
+    some(u) => println(u.name),
+    none => println("no 3"),
+  }
+  var tags = Tags { names: ["red"] }
+  tags.put("blue", 0)
+  match lookup(tags, "blue") {
+    some(i) => println("blue at ${int.to_string(i)}"),
+    none => println("no blue"),
+  }
+  println(name_of(users, 2)!)
+  match name_of(users, 9) {
+    ok(n) => println(n),
+    err(e) => println("error: ${e}"),
+  }
+}

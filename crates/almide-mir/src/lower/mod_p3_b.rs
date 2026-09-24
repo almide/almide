@@ -776,22 +776,53 @@ fn rewrite_push_concat(module: &str, func: &str, args: &[IrExpr]) -> Option<IrSt
     Some(stmt)
 }
 
-/// `map.clear(m)` / `list.clear(xs)` — the in-place empty: rebind to the
-/// EMPTY literal of the receiver's own type (adds no call; mir <= ir holds).
+/// `map.clear(m)` / `list.clear(xs)` / `string.clear(s)` / `bytes.clear(b)` —
+/// the in-place empty: rebind the var to a FRESH empty value of the receiver's
+/// own type. The var write-back is the C-033 discipline (#2465): an alias or
+/// holder bound BEFORE the clear keeps the pre-clear block, and through a `mut`
+/// parameter the rebind persists to the caller exactly as `list.clear` does.
+/// The self-hosted `string_clear` / `bytes_clear` bodies (a length-header
+/// store into the SHARED block) must never be reached from here — they are
+/// the alias-observes-clear defect the released 0.62.0 default route shipped.
+/// map / list / string rebind to a literal (adds no call); bytes rebinds to
+/// `bytes.new(0)` — one call for the one clear call the source node credits
+/// (mir <= ir holds). A `Var` receiver rebinds via Assign; a FIELD receiver
+/// (`string.clear(r.name)` — the C-132 mut-param write-back shape) routes
+/// through FieldAssign exactly as `list.push(b.xs, v)` does, so the record's
+/// alias keeps its field too. Any other receiver keeps the (walling)
+/// effect-call path.
 fn rewrite_clear(module: &str, func: &str, args: &[IrExpr]) -> Option<IrStmt> {
-    if func != "clear" || !matches!(module, "map" | "list") || args.len() != 1 {
+    if func != "clear" || !matches!(module, "map" | "list" | "string" | "bytes") || args.len() != 1 {
         return None;
     }
-    let IrExprKind::Var { id } = &args[0].kind else { return None };
-    let empty = if module == "map" {
-        IrExpr { kind: IrExprKind::EmptyMap, ty: args[0].ty.clone(), span: None, def_id: None }
-    } else {
-        IrExpr {
-            kind: IrExprKind::List { elements: vec![] },
-            ty: args[0].ty.clone(),
-            span: None,
-            def_id: None,
-        }
+    let (var, field) = match &args[0].kind {
+        IrExprKind::Var { id } => (*id, None),
+        IrExprKind::Member { object, field } => match &object.kind {
+            IrExprKind::Var { id } => (*id, Some(*field)),
+            _ => return None,
+        },
+        _ => return None,
     };
-    Some(IrStmt { kind: IrStmtKind::Assign { var: *id, value: empty }, span: None })
+    let ty = args[0].ty.clone();
+    let kind = match module {
+        "map" => IrExprKind::EmptyMap,
+        "list" => IrExprKind::List { elements: vec![] },
+        "string" => IrExprKind::LitStr { value: String::new() },
+        _ => IrExprKind::Call {
+            target: CallTarget::Module { module: sym("bytes"), func: sym("new"), def_id: None },
+            args: vec![IrExpr {
+                kind: IrExprKind::LitInt { value: 0 },
+                ty: Ty::Int,
+                span: None,
+                def_id: None,
+            }],
+            type_args: vec![],
+        },
+    };
+    let value = IrExpr { kind, ty, span: None, def_id: None };
+    let kind = match field {
+        None => IrStmtKind::Assign { var, value },
+        Some(field) => IrStmtKind::FieldAssign { target: var, field, value },
+    };
+    Some(IrStmt { kind, span: None })
 }

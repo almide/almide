@@ -141,6 +141,22 @@ pub fn populate_abi_registries(fns: &[IrFunction], _record_layouts: &RecordLayou
         *s.borrow_mut() =
             lifted_effect_fns.iter().filter(|n| !can_err.contains(*n)).cloned().collect();
     });
+    // #2503 / C-033: the `mut`-parameter positions of every PURE user fn, so a
+    // call site can copy-on-write its argument var before the callee writes
+    // through it (`cow_mut_param_call_args`). Effect fns are excluded — see the
+    // registry's doc.
+    MUT_PARAM_FNS.with(|s| {
+        *s.borrow_mut() = fns
+            .iter()
+            .filter(|f| !f.is_effect && f.params.iter().any(|p| p.is_mut))
+            .map(|f| {
+                (
+                    f.name.as_str().to_string(),
+                    f.params.iter().map(|p| p.is_mut).collect::<Vec<bool>>(),
+                )
+            })
+            .collect();
+    });
     let abi_probe = almide_base::env::flag("ALMIDE_ABI_PROBE");
     AUTO_WRAP_ABI_FNS.with(|s| {
         *s.borrow_mut() = fns

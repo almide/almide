@@ -1,0 +1,32 @@
+// #2518: a record-literal field default declared in another module rendered
+// as a bare `Sampling {}` at the caller's construction site, against the
+// flattened `almide_rt_recdefault_Sampling` struct — `almide check` passed and
+// the native build failed with rustc E0422. The spliced default now carries
+// the flattened name on every leg.
+import recdefault
+
+test "a record-literal default fills from another module (#2518)" {
+  let r = recdefault.Response { content: "hi" }
+  assert_eq(r.content, "hi")
+  assert_eq(r.sampling.temperature_sent, false)
+  assert_eq(r.sampling.top_p, 1.0)
+}
+
+test "a record-literal default with an explicit field fills from another module (#2518)" {
+  let p = recdefault.Pinned { label: "x" }
+  assert_eq(p.sampling.temperature_sent, true)
+}
+
+test "the declaring module's own construction still fills the default (#2518)" {
+  let r = recdefault.make("m")
+  assert_eq(r.sampling.temperature_sent, false)
+}
+
+test "an explicit value still overrides the record-literal default (#2518)" {
+  let r = recdefault.Response {
+    content: "o",
+    sampling: recdefault.Sampling { temperature_sent: true },
+  }
+  assert_eq(r.sampling.temperature_sent, true)
+  assert_eq(r.sampling.top_p, 1.0)
+}

@@ -1,0 +1,82 @@
+// @contract: C-213
+// `bytes.copy_within(b, src_start, src_end, dst)` over the offset domain: the
+// move happens only when the source range is non-empty AND the destination
+// window fits, and any other window — a NEGATIVE src_start or dst, a dst near
+// i64::MAX or at the 2^32 narrowing boundary — is a SILENT no-op that changes
+// neither the bytes nor the length.
+//
+// #2474: three legs, three answers for `copy_within(b, 0, 2, -1)`. Native cast
+// `dst as usize` and ADDED — `usize::MAX + 2` wrapped to 1, `1 <= 6` passed —
+// and `Vec::copy_within` panicked `dest is out of bounds` (exit 101). The
+// structural wasm leg carried the same guard "verbatim" with no slice check
+// behind it, so it ran `memory.copy(payload - 1, payload, 2)` and stored into
+// the block HEADER: `[2, 2, 3, 4, 5, 6]`, exit 0; with `dst = -6` it rewrote the
+// length field. The incumbent leg tested `dst >= 0` first and was a no-op —
+// but its fit test `dst + cnt <= n` wrapped at the OTHER end: `dst = i64::MAX`
+// passed and stored through a wrapped address (`[2, 2, 3, 4, 5, 6]` on that leg
+// alone). Every leg now judges the window by subtraction after the sign test.
+//
+// Every case prints the byte list AND the length, because the header write
+// is only visible through the length field.
+fn cw(s: Int, e: Int, d: Int) -> String = {
+  var b = bytes.from_list([
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ])
+  bytes.copy_within(b, s, e, d)
+  "cw(${s}, ${e}, ${d}) len=${bytes.len(b)} ${bytes.to_list(b)}"
+}
+
+fn main() -> Unit = {
+  let hi = 9223372036854775807
+  // ── in-range controls: forward, backward (overlap-safe), exact fit ──
+  println(cw(0, 2, 4))
+  println(cw(0, 3, 2))
+  println(cw(2, 5, 0))
+  println(cw(0, 6, 0))
+  // a window one past the fit, and the empty source range
+  println(cw(0, 2, 5))
+  println(cw(3, 3, 0))
+  println(cw(4, 2, 0))
+  // ── negative dst: the smallest wrap, the whole buffer, -len, far negative ──
+  println(cw(0, 2, -1))
+  println(cw(0, 6, -1))
+  println(cw(0, 6, -6))
+  println(cw(1, 4, -3))
+  println(cw(0, 3, -100))
+  println(cw(0, 2, 0 - hi))
+  println(cw(0, 2, 0 - hi - 1))
+  // ── negative src_start ──
+  println(cw(-1, 2, 0))
+  println(cw(-2, 2, 3))
+  println(cw(0 - hi, 2, 3))
+  println(cw(0 - hi - 1, 6, 0))
+  // ── negative src_end clamps to the length (enormous as usize) ──
+  println(cw(0, -1, 0))
+  println(cw(2, -1, 0))
+  // ── the top of i64 and the 2^32 narrowing boundary ──
+  println(cw(0, 2, hi))
+  println(cw(0, 2, hi - 1))
+  println(cw(0, 2, hi - 2))
+  println(cw(0, 2, 4294967295))
+  println(cw(0, 2, 4294967296))
+  println(cw(hi, 2, 0))
+  println(cw(hi, hi, 0))
+  println(cw(0, hi, 1))
+  println(cw(2, hi, 0))
+  println(cw(0, 4294967296, 1))
+  // ── the one-byte and empty buffers ──
+  var one = bytes.from_list([9])
+  bytes.copy_within(one, 0, 1, -1)
+  bytes.copy_within(one, 0, 1, 1)
+  bytes.copy_within(one, 0, 1, 0)
+  println("one len=${bytes.len(one)} ${bytes.to_list(one)}")
+  var empty = bytes.new(0)
+  bytes.copy_within(empty, 0, 1, 0)
+  bytes.copy_within(empty, 0, 0, -1)
+  println("empty len=${bytes.len(empty)} ${bytes.to_list(empty)}")
+}

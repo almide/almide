@@ -32,6 +32,41 @@ cd "$(dirname "$0")/.."
 DEFAULT_WEIGHT=5     # seconds; the median target is a few seconds
 WEIGHTS="scripts/ci-test-weights.txt"
 
+# SOLO targets (#2381): the five corpus sweeps that are each ONE test walking
+# spec/wasm_cross serially for 18–35 minutes. They are not partitioned; each
+# runs as its own `Test Rust (solo …)` job from the same archive, and the
+# interp ledger's two gates get a job each. Measured on the first run of the
+# family-aware packer (PR #2440, run 35581361256): with a giant and three
+# other suites sharing a 4-vCPU runner every giant ran 40–95 % slower than
+# alone (opt_parity 1075 s → 2110 s, interp_oracle 1223 → 2040, cross_target
+# 1377 → 1981, run_parity 1310 → 1907) and the shard walls were 32–44 min for
+# 4.2–5.0 ks sums — the runner, not the packing, was the floor. A giant on
+# its own runner costs what it costs alone; the remaining ~6.5 ks of gravel
+# packs across the four shards at ~1.6 ks each. `--list-solo-archive` prints
+# these rows so the coverage gate can prove shards ∪ solos == everything.
+# Rows are `pkg<TAB>name`; each is one solo leg (the ledger binary's two
+# gates share one sweep in one test since #2446, so it is one leg too).
+SOLO_TARGETS="almide	wasm_runtime_cross_target
+almide	wasm_runtime_interp_oracle
+almide	wasm_runtime_opt_parity
+almide	wasm_runtime_interp_ledger
+almide-spine	run_parity"
+
+# leg name -> nextest filterset. The coverage gate asserts the ledger leg's
+# filterset selects the binary's whole test list.
+solo_filter() {
+  case "$1" in
+    wasm_runtime_cross_target) echo 'binary_id(=almide::wasm_runtime_cross_target)' ;;
+    wasm_runtime_interp_oracle) echo 'binary_id(=almide::wasm_runtime_interp_oracle)' ;;
+    wasm_runtime_opt_parity)   echo 'binary_id(=almide::wasm_runtime_opt_parity)' ;;
+    run_parity)                echo 'binary_id(=almide-spine::run_parity)' ;;
+    interp_ledger)             echo 'binary_id(=almide::wasm_runtime_interp_ledger)' ;;
+    *) echo "unknown solo leg: $1" >&2; return 2 ;;
+  esac
+}
+SOLO_LEGS="wasm_runtime_cross_target wasm_runtime_interp_oracle wasm_runtime_opt_parity run_parity interp_ledger"
+export SOLO_TARGETS
+
 enumerate() {
   cargo test --workspace --no-run --message-format=json 2>/dev/null | python3 -c '
 import sys, json
@@ -74,16 +109,47 @@ if os.path.exists(path):
         name, w = line.rsplit(None, 1)
         weights[name.strip()] = int(w)
 rows = [l.rstrip("\n").split("\t") for l in sys.stdin if l.strip()]
+solo = set(tuple(l.split("\t")) for l in os.environ.get("SOLO_TARGETS", "").splitlines() if l.strip())
+if os.environ.get("LIST_SOLO"):
+    # The solo rows, from the SAME enumeration the shards partition — a solo
+    # target that stopped existing prints nothing here and the coverage
+    # gate sees the difference.
+    for pkg, kind, name in rows:
+        if (pkg, name) in solo:
+            print("%s\t%s\t%s" % (pkg, kind, name))
+    sys.exit(0)
 if not shard:
     for pkg, kind, name in rows:
         print("%s\t%s\t%s" % (pkg, kind, name))
     sys.exit(0)
 shard, total = int(shard), int(total)
+# Solo targets run in their own jobs (see SOLO_TARGETS above); the shards
+# partition everything else.
+rows = [r for r in rows if (r[0], r[2]) not in solo]
 # Longest-processing-time-first: pack the giants before the gravel.
 rows.sort(key=lambda r: (-weights.get(r[2], default), r[2]))
 load = [0] * total
 bins = [[] for _ in range(total)]
-for r in rows:
+# The shared-fixture family first, spread one per shard (#2381). The
+# `wasm_runtime_*` corpus gates run ONE AT A TIME on a shard (.config/
+# nextest.toml, test-group shared-fixture-serial), so two of them on one
+# shard cost their SUM in wall clock while everything else on the shard
+# overlaps. Summed seconds — the only thing the weights measure — cannot
+# see that: on develop run 35569545602 the packer put interp_oracle
+# (1223 s) and opt_parity (1075 s) together and that shard ran 2391 s
+# for a 2771 s sum, the second-longest job in CI. So the family is placed
+# before the gravel, each member on the shard with the fewest family
+# members (then the least load); the interp ledger is not in the family
+# (its tests are backend-free and run in parallel — see nextest.toml).
+def serial_family(name):
+    return name.startswith("wasm_runtime_") and name != "wasm_runtime_interp_ledger"
+family_count = [0] * total
+for r in [r for r in rows if serial_family(r[2])]:
+    i = min(range(total), key=lambda j: (family_count[j], load[j], j))
+    bins[i].append(r)
+    load[i] += weights.get(r[2], default)
+    family_count[i] += 1
+for r in [r for r in rows if not serial_family(r[2])]:
     i = load.index(min(load))
     bins[i].append(r)
     load[i] += weights.get(r[2], default)
@@ -117,6 +183,40 @@ case "${1:-}" in
   --list-archive)
     ARCHIVE="$4"
     SHARD="$2" TOTAL="$3" DEFAULT_WEIGHT=$DEFAULT_WEIGHT WEIGHTS=$WEIGHTS ENUM=archive partition ;;
+  --list-solo-archive)
+    # The solo rows (pkg/kind/name), for the coverage gate's union.
+    ARCHIVE="$2"
+    SHARD="" TOTAL="" DEFAULT_WEIGHT=$DEFAULT_WEIGHT WEIGHTS=$WEIGHTS ENUM=archive LIST_SOLO=1 partition ;;
+  --solo-legs) echo "$SOLO_LEGS" ;;
+  --list-solo-tests-archive)
+    # `<binary_id>\t<test>` for one solo leg's filterset — the coverage gate
+    # proves the two ledger legs partition their binary with nothing lost.
+    leg="$2"; ARCHIVE="$3"
+    expr="$(solo_filter "$leg")" || exit 2
+    cargo nextest list --archive-file "$ARCHIVE" --workspace-remap . --message-format json -E "$expr" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+# `list -E` still prints every testcase of a matched binary; the filter verdict
+# is per testcase under filter-match.status.
+for bid, v in sorted(d["rust-suites"].items()):
+    for t, tc in sorted(v["testcases"].items()):
+        if tc.get("filter-match", {}).get("status") == "matches":
+            print("%s\t%s" % (bid, t))
+'
+    ;;
+  --run-solo-archive)
+    # One solo leg on its own runner (#2381): the same archive replay as a
+    # shard, over the leg's filterset instead of a partition.
+    leg="$2"; ARCHIVE="$3"
+    expr="$(solo_filter "$leg")" || exit 2
+    # The tool tripwire rides along (#983): a solo runner whose wasmtime or
+    # wasm-opt install broke must fail HERE, not let a tool-gated giant
+    # self-skip as a pass. It also runs in its shard; ~1 s, not a dup the
+    # coverage gate counts (it is not a solo target).
+    expr="($expr) | binary_id(=almide::tool_arming_tripwire_test)"
+    echo "== solo $leg: $expr =="
+    exec cargo nextest run --archive-file "$ARCHIVE" --extract-to . --workspace-remap . --no-fail-fast -E "$expr"
+    ;;
   --run-archive)
     # The no-compile shard run (#1732): partition from the archive, then
     # ONE nextest invocation over the union filterset of this shard's
@@ -180,6 +280,8 @@ case "${1:-}" in
     ;;
   *)
     echo "usage: $0 --run <shard> <total> | --list <shard> <total> | --list-all" >&2
+    echo "       $0 --run-archive <shard> <total> <archive> | --list-archive <shard> <total> <archive> | --list-all-archive <archive>" >&2
+    echo "       $0 --run-solo-archive <leg> <archive> | --list-solo-archive <archive> | --list-solo-tests-archive <leg> <archive> | --solo-legs" >&2
     exit 2
     ;;
 esac

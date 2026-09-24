@@ -323,6 +323,13 @@ pub fn lower_module(
     versioned_name: Option<String>,
 ) -> IrModule {
     let mut ir_prog = lower_program_with_prefix(prog, env, type_map, Some(name));
+    // An imported module's `test` blocks belong to that module's own test run,
+    // never to the importer's build (#2550). Kept here, the native leg flattened
+    // them into the importer's test binary as `almide_rt_<mod>___test_*` and
+    // libtest ran them under the importer's path; the wasm leg's runner already
+    // took only the entry program's tests. Dropping them at the module's lowering
+    // makes both legs agree: a file's test run is exactly that file's tests.
+    ir_prog.functions.retain(|f| !f.is_test);
     // Set module_origin on top_let VarInfo — walker prefixes at emit time.
     // IR names stay clean (no ALMIDE_RT_ mangling in the IR).
     let mod_ident = versioned_name.as_deref().unwrap_or(name).replace('.', "_");

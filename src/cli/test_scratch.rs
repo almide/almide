@@ -34,8 +34,23 @@ pub(crate) struct TestScratch {
     keep: bool,
 }
 
+/// The persistent per-test-file native build cache: `<temp>/almide-test/native`.
+/// One resolution, shared by [`TestScratch`] and by `almide clean` (#2504).
+pub(crate) fn native_worker_cache() -> PathBuf {
+    std::env::temp_dir().join("almide-test").join("native")
+}
+
 impl TestScratch {
     pub(crate) fn new() -> Self {
+        let scratch = Self::unswept();
+        scratch.evict_stale_workers();
+        scratch
+    }
+
+    /// [`TestScratch::new`] WITHOUT the housekeeping sweep — the unit tests
+    /// below build one, and `cargo test` must never evict from the machine's
+    /// real worker cache. Every command path goes through `new`.
+    fn unswept() -> Self {
         // pid + wall clock + an in-process counter: distinct across parallel
         // processes AND across two roots created in one process.
         static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -49,9 +64,55 @@ impl TestScratch {
         };
         let root = std::env::temp_dir().join(format!("almide-test-{}-{:016x}", std::process::id(), nonce));
         std::fs::create_dir_all(root.join("wasm")).ok();
-        let native_cache = std::env::temp_dir().join("almide-test").join("native");
+        let native_cache = native_worker_cache();
         let keep = almide_base::env::flag("ALMIDE_KEEP_SCRATCH");
         TestScratch { root, native_cache, keep }
+    }
+
+    /// Empty the worker dirs nothing has used for `run::CACHE_MAX_AGE`
+    /// (#2504), at most once a day per cache root.
+    ///
+    /// The worker cache holds ONE dir per test-file absolute path, each with
+    /// its own `target/` — 4,510 dirs and 39 GB on the machine that filed it,
+    /// 14 GB of that untouched for three days. Nothing ever removed one: a
+    /// renamed test file, a deleted worktree or a branch that is gone leaves
+    /// its dir behind forever.
+    ///
+    /// Each dir is emptied under ITS OWN lock, taken without blocking: a dir
+    /// another process is compiling in keeps its lock and is skipped, and the
+    /// staleness question is asked again under the lock so a dir rebuilt
+    /// between the scan and the lock survives. As in #2500, the lockfile
+    /// itself stays — the dir remains as an empty directory holding a 0-byte
+    /// file, which is what makes the removal safe against a builder already
+    /// blocked on that lock. The bytes are what grew, and the bytes go.
+    ///
+    /// `ALMIDE_KEEP_SCRATCH` turns the sweep off with the rest of the
+    /// scratch cleanup: a run kept for inspection keeps the whole cache.
+    fn evict_stale_workers(&self) {
+        if self.keep || !super::run::sweep_due(&self.native_cache) {
+            return;
+        }
+        let Some(cutoff) = std::time::SystemTime::now().checked_sub(super::run::CACHE_MAX_AGE) else { return };
+        let Ok(entries) = std::fs::read_dir(&self.native_cache) else { return };
+        for entry in entries.flatten() {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let dir = entry.path();
+            // Already emptied by an earlier sweep: nothing to lock or remove.
+            if Self::is_empty_worker(&dir) || super::run::used_since(&dir, cutoff) {
+                continue;
+            }
+            super::run::clear_build_dir_if_idle(&dir, || !super::run::used_since(&dir, cutoff));
+        }
+        super::run::stamp_sweep(&self.native_cache);
+    }
+
+    /// A worker dir an earlier sweep already emptied: only its lockfile is left.
+    fn is_empty_worker(dir: &Path) -> bool {
+        std::fs::read_dir(dir)
+            .map(|rd| rd.flatten().all(|e| e.file_name() == super::run::BUILD_LOCK_FILE))
+            .unwrap_or(false)
     }
 
     /// The scratch `.wasm` module for one test file on the wasm leg:
@@ -108,7 +169,7 @@ mod tests {
 
     #[test]
     fn same_name_different_directories_never_share_a_path() {
-        let s = TestScratch::new();
+        let s = TestScratch::unswept();
         let a = s.wasm_module_path("a/x_test.almd");
         let b = s.wasm_module_path("b/x_test.almd");
         assert_ne!(a, b);
@@ -116,15 +177,15 @@ mod tests {
         assert!(a.starts_with(s.root.join("wasm")));
         // The native worker dir is the persistent cache, keyed on the
         // absolute path — the same across two runs of one file.
-        let t = TestScratch::new();
+        let t = TestScratch::unswept();
         assert_eq!(s.native_worker_dir("a/x_test.almd"), t.native_worker_dir("a/x_test.almd"));
         assert!(!s.native_worker_dir("a/x_test.almd").starts_with(&s.root));
     }
 
     #[test]
     fn two_runs_never_share_a_root() {
-        let a = TestScratch::new();
-        let b = TestScratch::new();
+        let a = TestScratch::unswept();
+        let b = TestScratch::unswept();
         assert_ne!(a.root, b.root);
         assert!(a.root.is_dir() && b.root.is_dir());
         let root = a.root.clone();

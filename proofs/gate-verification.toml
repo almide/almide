@@ -66,25 +66,24 @@
 # A RATCHET (the check detects one from the gate's own text: a committed
 # `*-baseline.txt`, an in-source `MAX_*=` ceiling, a `*_ceiling`) must carry
 # `varies` — that is exactly the row class the ablation rows were. Any other
-# row may leave it empty under the shrink-only ceiling below; the 2 as of
-# #2234 are the two Almide twins (`output-parity`, `fuzz-track-record`) that
-# are UNVERIFIED for the same reason (#2130): nothing has run them against
-# their originals, so nothing has seen their quantity move.
+# row may leave it empty under the shrink-only ceiling below. The two that
+# sat there as of #2234 — the Almide twins `output-parity` and
+# `fuzz-track-record`, UNVERIFIED because nothing had run them against their
+# originals — joined the twin parity test in #2163 and both ceilings are 0.
 #
-# unverified_ceiling = "2"
+# unverified_ceiling = "0"
 # unclassified_reads_ceiling = "81"
-# unwired_ceiling = "6"
-# unvaried_ceiling = "2"
+# unwired_ceiling = "2"
+# unvaried_ceiling = "0"
 #
-# The ceiling moved 0 -> 2 for the first time since it reached 0, and the reason
-# is the opposite of a regression: enumerating the Almide gates (#2128) brought
-# `output-parity` and `fuzz-track-record` INTO the ledger's field of view. Their
-# debt is not new — nothing has ever compared either twin to its `.sh` original,
-# which is exactly what #2130 is open about; what is new is that the ledger can
-# see it. A gate the ledger cannot see is worse than one it records as
-# unverified. The burn-down is #2130 step 1 for those two twins (`output-parity`
-# sweeps the whole corpus and `fuzz-track-record` queries the GitHub API, so
-# each needs a fixture design of its own), and this ceiling returns to 0 there.
+# History of the unverified ceiling: it moved 0 -> 2 when enumerating the
+# Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
+# ledger's field of view — debt that was not new, only newly visible — and
+# back to 0 at #2163, where each got the input design its comparison needed
+# (a recorded `gh` for the one that queries the API, a purpose-built corpus
+# with forged baselines for the one that sweeps spec/) and the comparison
+# found drift in both on its first run. The unwired ceiling went 6 -> 2 in
+# the same change: the four twins the parity test runs are wired by it.
 
 [[gate]]
 path = "scripts/check-regex-reference.sh"
@@ -134,9 +133,18 @@ path = "scripts/check-als-pin.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"
 class = "NEGATIVE_TESTED"
-evidence = "als #60 second-half landing (2026-09-07, almide #1982): a judge ledger with C-347 removed (ALS_LEDGER=<file>) went red naming the id and the remedy (land it in almide/als first, then advance proofs/als-pin.txt; ours 347, judge 346 at 12099f3), the live judge ledger at the pin green (347/347). A fetch failure is exit 2, red in CI — the gate cannot pass by not looking."
-measures = "the set of contract ids in docs/contracts/contracts.toml absent from the judge's ledger at the commit pinned in proofs/als-pin.txt"
-varies = "als #60 second half (2026-09-07, almide #1982): 0 absent on the pinned ledger, 1 (C-347) on the ledger with that row removed"
+evidence = "als #60 second-half landing (2026-09-07, almide #1982): a judge ledger with C-347 removed (ALS_LEDGER=<file>) went red naming the id and the remedy (land it in almide/als first, then advance proofs/als-pin.txt; ours 347, judge 346 at 12099f3), the live judge ledger at the pin green (347/347). A fetch failure is exit 2, red in CI — the gate cannot pass by not looking. 2026-09-21 (#2403): the gate compared IDS only, so a `statement` rewritten here without an als PR was invisible — measured against the judge at the pin a7a8f7f, 8 of 351 shared statements differed (C-004 / C-053 / C-076 / C-197 / C-215 / C-237 / C-273 with text the judge lacked, C-122 with text the judge had), every title identical, and the id-only gate reported `OK 351/351`. Now every shared `statement` and `title` is compared byte-for-byte; a drift is refused naming `<id>.<field>`, the first differing byte, a window of each side and the direction (almide ahead / als ahead / diverged). The als-ahead direction is tolerated only for an id listed in proofs/als-ahead.txt, and a listed id that no longer drifts is refused (shrink-only). A/B on one forged judge statement (C-001 plus a sentence, ALS_LEDGER=<file>): the pre-#2403 gate exits 0 `OK 351/351`, the new gate exits 1 naming `C-001.statement`; the forged-input matrix lives in check-als-pin-negative.sh (row below). Item 4 of #2403 in the same gate: a four-or-more-digit `C-NNNN` anywhere in either ledger is refused with file:line as a line number cited as a contract (the a four-digit id (1063 wearing the C- prefix) that opened the issue was the line of C-076's title); the token must start at a boundary so the ledgers' `RFC-7386` citation is not reported — measured 0 phantoms in both ledgers at the pin and at als main on 2026-09-21. The reads axis stays UNCLASSIFIED knowingly: the gate now reads two TOML ledgers in awk, which the #2128 rule says belongs in Almide — declared undecided rather than mislabelled, the same call as the regex reference gate."
+measures = "the set of contract ids in docs/contracts/contracts.toml absent from the judge's ledger at the commit pinned in proofs/als-pin.txt, and the set of shared (id, statement|title) fields whose text differs byte-for-byte between the two ledgers, split by direction against the als-ahead allowance"
+varies = "als #60 second half (2026-09-07, almide #1982): 0 absent on the pinned ledger, 1 (C-347) on the ledger with that row removed; #2403 (2026-09-21): 8 drifted statements against the judge at a7a8f7f, 4 (C-122 / C-226 / C-229 / C-334, all als-ahead) against the judge's main after almide/als#82, 0 on the ledger against an exact copy of itself"
+
+[[gate]]
+path = "scripts/check-als-pin-negative.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "EXERCISED"
+evidence = "#2403 landing (2026-09-21): recorded 12-mode exercise on every run (the nine below plus a forged four-digit id (1063, a line number wearing the C- prefix) in the judge's statement and in ours — each exit 1 naming `<file>:<line>: four-digit contract id a four-digit id (1063 wearing the C- prefix)`, while the committed ledger's real `RFC-7386` line, present in every control, is never reported — the boundary guard) against mutated copies of docs/contracts/contracts.toml (the gate reads both ledgers and the allowance from files — ALS_LEDGER / OUR_LEDGER / ALS_AHEAD — so a forged input is a file; the real tree, pin and network are never touched). One positive control (the ledger against an exact copy of itself is green with 702 fields compared, so a harness blind to the fields cannot pass vacuously) plus nine forged inputs: the judge's statement with a sentence appended (exit 1, names `C-001.statement`, `als ahead`, points at the allowance); this tree's statement with a sentence appended (exit 1, `almide ahead`, remedy `land the wording in almide/als first`); the judge's title changed (exit 1, names `.title`, not `.statement`); the statement's middle rewritten (exit 1, `diverged`); the als-ahead drift with its id listed in the allowance (exit 0, `tolerated`, `1 tolerated as als-ahead`); the almide-ahead drift with the same allowance (still exit 1 — the list covers only the judge's extra text); an allowance for an id that does not drift (exit 1, `stale`); the subject's [[contract]] removed from the judge (exit 1, the original id refusal); a malformed allowance entry (exit 2). The pre-#2403 gate, given the first forged judge, exits 0 — the demonstration that the controls are not decorative. ALS_PIN_GATE points the controls at another copy of the gate for that A/B."
+measures = "the exit code and named id/field/direction check-als-pin.sh gives ten forged ledger/allowance files (a judge statement extended, our statement extended, a title changed, a diverged statement, a listed and a stale allowance, a removed id, ...)"
+varies = "#2403 landing (2026-09-21): the pre-#2403 id-only gate reads the extended-judge-statement control as `OK 351/351` (exit 0); the new gate reads it as `FAILED: 1 drifted` naming `C-001.statement`"
 
 [[gate]]
 path = "scripts/check-exit-sites.sh"
@@ -161,18 +169,18 @@ path = "scripts/check-wasi-pins.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"
 class = "NEGATIVE_TESTED"
-evidence = "#1628 stage-4 landing (2026-08-28): policy crate_major hand-flipped 47->48 went red naming the exact drifted pin (wasmtime Cargo pin is 47, policy says 48), restored green. The gate re-derives every fact the policy states from the tree per run — vendored WIT versions, the p3 shim's import versions, the wasmtime Cargo/CI pins, the p3 harness flag surface, the wasm-tools lockstep family — so the WASI-minor compat target is a checked ledger row, not an assumption."
-measures = "per-fact agreement of proofs/wasi-pin-policy.toml with the vendored WIT versions, the shim imports, the wasmtime Cargo pin, the CI install line and the wasm-tools pins"
-varies = "#1628 stage-4 landing (2026-08-28): crate_major 47 -> 48 in the policy read as one drifted pin against the Cargo pin 47"
+evidence = "#1628 stage-4 landing (2026-08-28): policy crate_major hand-flipped 47->48 went red naming the exact drifted pin (wasmtime Cargo pin is 47, policy says 48), restored green. The gate re-derives every fact the policy states from the tree per run — vendored WIT versions, the p3 shim's import versions, the wasmtime Cargo/CI pins, the p3 harness flag surface, the wasm-tools lockstep family — so the WASI-minor compat target is a checked ledger row, not an assumption. #2152 item 6 landing (2026-09-22), capability DCE: (a) the fs control program hand-rewritten to use no fs went red naming the reader (the fs CONTROL shows no fs import); (b) the recorded base five hand-shrunk to three went red naming the two real imports beyond it (clock_time_get, random_get); (c) ALMIDE_BIN pointed at a missing file went red (no almide binary) instead of skipping."
+measures = "per-fact agreement of proofs/wasi-pin-policy.toml with the vendored WIT versions, the shim imports, the wasmtime Cargo pin, the CI install line and the wasm-tools pins; and (#2152 item 6) the count of denied-family host imports (fs / net / env / process names, wasi:http|sockets|filesystem modules) read from the import section of the wasm the compiler builds for an IO-only program that passes --profile critical --allow IO, against a control program using fs that must show one"
+varies = "#1628 stage-4 landing (2026-08-28): crate_major 47 -> 48 in the policy read as one drifted pin against the Cargo pin 47. #2152 item 6 landing (2026-09-22): 0 denied-family imports in the IO-only artifact (base five only: fd_write, proc_exit, random_get, clock_time_get, fd_read) against 6 fs-family imports (path_open, fd_prestat_get, fd_prestat_dir_name, fd_close, fd_filestat_get + environ_*) in the fs control built by the same run"
 
 [[gate]]
 path = "scripts/check-target-availability.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"
 class = "NEGATIVE_TESTED"
-evidence = "#1423 stage-2+3 landing (2026-08-28): a declared row hand-renamed (int.bnot -> int.bnot_GONE) went red in BOTH directions at once — the measured wall named as UNDECLARED, restored green. Stage 3 doubled the sweep: the DEFAULT-routing measurement diffs against the [[wasm-unavailable]] table the E081 check-time diagnostic consumes (four directions total: 323 lower / 66 native-only / 31 ratchet / 34 both-legs). The gate re-measures the whole surface per run with the renderer's own verdict (tools/target_availability_probe.py, ALMIDE_WASM_STRUCTURAL=1 hard-wall probe per public stdlib fn), so neither a silent new wall nor a stale row survives; name-diff false positives are structurally impossible (the ~199-row over-report experiment is the design's reason)."
-measures = "per-leg symmetric difference between the declared unavailable fns in proofs/target-availability.toml and the measured walls of tools/target_availability_probe.py over the whole public stdlib surface"
-varies = "2026-09-03 04d93c1d7: 38 pending-self-host rows left the ledger (74 -> 36) as the structural leg resolved them; 2026-09-07 b1944391a: string.split_once and datetime.parse_iso joined the resolvable set"
+evidence = "#1423 stage-2+3 landing (2026-08-28): a declared row hand-renamed (int.bnot -> int.bnot_GONE) went red in BOTH directions at once — the measured wall named as UNDECLARED, restored green. Stage 3 doubled the sweep: the DEFAULT-routing measurement diffs against the [[wasm-unavailable]] table the E081 check-time diagnostic consumes (four directions total: 323 lower / 66 native-only / 31 ratchet / 34 both-legs). The gate re-measures the whole surface per run with the renderer's own verdict (tools/target_availability_probe.py, ALMIDE_WASM_STRUCTURAL=1 hard-wall probe per public stdlib fn), so neither a silent new wall nor a stale row survives; name-diff false positives are structurally impossible (the ~199-row over-report experiment is the design's reason). Schema 3 (2026-09-21, #1423 bucket C): four forged matrices against one reused sweep (AVAIL_TSV_DIR) each went red — bytes.clear with its class line removed (unknown class + tag/class disagreement + the self-host ratchet shrank to 33), process.pid with its justification removed (forever without a sentence), process.env silently reclassified pending-port -> native-only-forever (pending-port shrank to 77 against ceiling 78), bytes.clear reclassified pending-port under a pending-self-host reason tag (disagreement + both ratchets moved) — restored green at 56/56, 56/56, 10 forever."
+measures = "per-leg symmetric difference between the declared unavailable fns in proofs/target-availability.toml and the measured walls of tools/target_availability_probe.py over the whole public stdlib surface, plus the schema-3 closure classes: the pending-self-host and pending-port row counts against their shrink-only ceilings, a justification sentence on every native-only-forever row, an issue on every pending row, and no reason tag contradicting its class"
+varies = "2026-09-03 04d93c1d7: 38 pending-self-host rows left the ledger (74 -> 36) as the structural leg resolved them; 2026-09-07 b1944391a: string.split_once and datetime.parse_iso joined the resolvable set; 2026-09-21 schema 3: 122 rows classified 56 pending-self-host (every row that closes by a body, an arm or an emitter representation) / 56 pending-port / 10 native-only-forever with the bucket-C rulings (testing.assert_throws and the nine-fn subprocess family forever; env.set has no row, the overlay shim serves it)"
 
 [[gate]]
 path = "scripts/check-contracts.sh"
@@ -182,6 +190,15 @@ class = "MUTATION_TESTED"
 evidence = "flight-evidence-gaps.md F1 progress-2 (2026-07-04): spec-resolution mutation test (nonexistent ALS section reference => FAIL) SIGPIPE FLAKE FIXED (2026-08-16): seven membership tests were `printf '%s\\n' \"$SET\" | grep -q \"$x\"`, which is a RACE under this script's `set -o pipefail` — `grep -q` exits the instant it matches and closes the pipe, so a `printf` still writing dies of SIGPIPE and the PIPELINE reports failure even though the element WAS found. The gate then declared a contract \"not in the ledger\", naming whichever id lost the race, so it accused a DIFFERENT contract every time (observed: C-084, C-059, C-087). Measured on the 286-id ledger: an EARLY match false-failed 1 run in 400 and a LATE match never did — exactly the shape the race predicts, since a late match leaves nothing left to write. Locally the gate was red about 1 run in 6. All seven now read from a here-string via a single `has()` helper, so there is no pipe to break: 25 consecutive runs green, 0 red. This is not cosmetic — a verdict-bearing gate that is randomly red teaches everyone to re-run until green, which is also what you do to a real failure, and CI's green history on this gate was therefore luck rather than evidence. 2026-08-27: the #1544 canonical reservation range emptied (C-310..C-318 ported verbatim with the 0.59.2 checker landing); negative directions re-demonstrated at the closure — a gap inside the formerly-reserved range now fails the CONTIGUITY branch (C-315 removed locally: red, restored: green), and the retired collision branch is unreachable by construction (LO>HI)."
 measures = "count of contracts without evidence of class >= fixture, fixtures naming no contract, one-directional links, and flagged-for-revision rows above MAX_FLAGGED, read from docs/contracts/contracts.toml and spec/wasm_cross/*.almd headers"
 varies = "2026-09-14 ba461e34d: the ledger's unescaped quotes made the parse count differ from the row count; C-322..C-347 (2026-08-25..09-06) each moved the contract count and the evidence classes as they landed"
+
+[[gate]]
+path = "scripts/check-contract-citations.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml, lefthook.yml, tests/contract_citation_gate_test.rs"
+class = "NEGATIVE_TESTED"
+evidence = "#2406 landing (2026-09-21): first run on the unfixed tree named the four sites of the one dangling citation (a fuzz-finding index wearing the C- prefix in stdlib/result_map.almd, crates/almide-mir/src/lower/mod_p4_c.rs x2, docs/roadmap/active/selfhost-link-v2.md) and nothing else — 0 malformed, the two self-test vector files silent. tests/contract_citation_gate_test.rs forges a scan root with a well-formed dangling id, a four-digit id and a one-digit id and asserts exit 1 naming each, then a clean root and RFC-7386 prose read exit 0."
+measures = "count of C-NNN tokens (token-boundary guarded) across the tree's text files whose id is not three digits or is absent from the id rows of docs/contracts/contracts.toml, minus the fixture header lines check-contracts.sh owns and the two allowlisted self-test files"
+varies = "#2406 landing (2026-09-21): dangling 4 -> 0 on the same tree when the four sites were rewritten to name C-139 and the fuzz index without the prefix; malformed stayed 0 throughout."
 
 [[gate]]
 path = "scripts/check-scalar-read-audit.sh"
@@ -245,8 +262,8 @@ path = "scripts/fuzz-night-verdict.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/fuzz-nightly.yml"
 class = "EXERCISED"
-evidence = "PR #1238: slow-only/mixed/legacy 3-mode local exercise; production class-split verdict on run 31515916427 (correctness=1 => red)"
-measures = "per-night shard completion, minutes delivered, programs generated and findings by class, read from the sharded campaign's artifacts"
+evidence = "PR #1238: slow-only/mixed/legacy 3-mode local exercise; production class-split verdict on run 31515916427 (correctness=1 => red). #2513 (2026-09-22): tests/fuzz_night_report_test.rs forges the JOB LOGS of the shards that uploaded nothing — one killed mid-budget, one whose log holds no progress line, one killed at 0s, one with no log at all — and asserts that only the readable ones are folded in (`recovered=1@295s,4@0s`), that the rest stay in `missing=` with `could not read shard N's log` on stderr rather than scoring as zero minutes, and that a finding recovered from a truncated log makes the night unclassified instead of green"
+measures = "per-night shard completion, minutes delivered, programs generated and findings by class, read from the sharded campaign's artifacts and, for a shard that uploaded none, from that shard's own job log"
 varies = "run 31515916427: correctness=1 rendered a red verdict; PR #1238's 3-mode exercise rendered green, mixed and legacy nights differently"
 
 [[gate]]
@@ -273,7 +290,7 @@ reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml, .github/workflows/mutation-sweep.yml"
 class = "KERNEL_PROVEN"
 evidence = "verdict core = extracted checker (qualified-by-proof); toolchain stamp FATAL demonstrated live 2026-08-12 (PATH != workspace build)"
-measures = "the extracted checker's accept / reject verdict per flight-grade property over the per-build witness, and the toolchain stamp's equality with the workspace build"
+measures = "the extracted checker's accept / reject verdict per flight-grade property over the per-build witness, almide-verify's agreement with that verdict on every row and on 1,000 seeded random witnesses (#2152), and the toolchain stamp's equality with the workspace build"
 varies = "2026-08-12: the stamp read PATH != workspace build and the gate went FATAL; the checker's reject direction is the F8 via_if catch (proofs/corpus-wall.sh)"
 
 [[gate]]
@@ -282,7 +299,7 @@ reads = "UNCLASSIFIED"
 wired_by = "Makefile"
 class = "KERNEL_PROVEN"
 evidence = "checker-phase ACCEPTs are kernel-proven; flight-evidence-gaps.md F8: a live REJECT exposed the via_if miscompile (the fail direction caught a real bug)"
-measures = "per-function lowering outcome over the v0 spec corpus (Ok / explicit Unsupported / panic) and the checker's accept count, diffed against proofs/walled-real-baseline.txt"
+measures = "per-function lowering outcome over the v0 spec corpus (Ok / explicit Unsupported / panic) and the checker's accept count, diffed against proofs/walled-real-baseline.txt; almide-verify's bundle verdict over the same corpus witness set (#2152)"
 varies = "flight-evidence-gaps.md F8: a live REJECT exposed the via_if miscompile; 2026-09-04 f1a511468 and 95cf925c8 each added walled rows the incumbent refuses"
 
 [[gate]]
@@ -291,7 +308,7 @@ reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci-cross-target.yml"
 class = "EXERCISED"
 evidence = "flight-evidence-gaps.md F4 close: 5 consecutive full-run greens after the LC_ALL root-cause; regression direction fired throughout the parity war"
-measures = "per-program byte diff of stdout between `almide run` (native) and the render_program -> wasmtime path over spec/*.almd with a main, against proofs/output-parity-baseline.txt"
+measures = "per-program byte diff of stdout between `almide run` (native) and the render_program -> wasmtime path over spec/*.almd with a main, against proofs/output-parity-baseline.txt; every wasmtime run is under a per-fixture alarm and a fired alarm is its own HANG class that fails the gate, never a RUNERR to ratchet (#2567)"
 varies = "flight-evidence-gaps.md F4: the LC_ALL collation difference read as diffs until pinned; 2026-08-13 4c6f40db6 and 2026-08-06 54c6f7035 each moved the baseline rows"
 
 [[gate]]
@@ -417,7 +434,7 @@ reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"
 class = "NEGATIVE_TESTED"
 evidence = "#1244 round 2: baseline forged DOWN (measured > ceiling) demonstrated to fail with the raise-in-same-change instruction; restored green"
-measures = "byte size of the embedded stdlib payload (every SRC_<STEM> and include_str! of stdlib/*.almd) against scripts/embedded-size-baseline.txt"
+measures = "byte size of the embedded stdlib payload (every SRC_<STEM> and include_str! of stdlib/*.almd, whole-line `//` blanked and whole-line `///` doc lines counted as shipped, #2436) against scripts/embedded-size-baseline.txt"
 varies = "2026-08-30 5eed63240: 904266 bytes anchored when the four streaming twins landed on purpose; 88fa77e47 the same day moved it again; #1244 round 2 a baseline forged below the measurement read red"
 
 [[gate]]
@@ -466,6 +483,15 @@ measures = "the set of public stdlib fns transitively reaching the clock or entr
 varies = "#1515: `datetime.now` forged back to a plain fn read 1 (`+ datetime.now`); the tree reads 0 of 10 floor-reaching fns"
 
 [[gate]]
+path = "scripts/check-mut-receivers.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#2466 introduction (2026-09-22): fed forged trees through MUT_RECEIVERS_STDLIB / MUT_RECEIVERS_RUNTIME, each red naming exactly the forged row, with the real tree as the positive control (646 joined, 59 `&mut`-first, 58 `mut` + 1 allowlisted) — (1) `bytes.fill` forged back to a plain receiver: `+ bytes.fill -> almide_rt_bytes_fill`; (2) `bytes.copy_from` forged plain, whose runtime signature spans six lines: `+ bytes.copy_from`, so the multi-line join is live; (3) `bytes.len` forged `mut` over a `&Vec<u8>` runtime: the reverse direction, `+ bytes.len`; (4) `list.push`'s runtime forged to `&Vec<A>`: reverse direction on a non-bytes module; (5) `almide_rt_bytes_as_mut_ptr` forged to `&Vec<u8>`: the allowlist entry reported stale."
+measures = "the set of stdlib `@intrinsic` declarations whose first-parameter `mut` disagrees with the `&mut` of the first parameter of the joined `pub fn almide_rt_*` in runtime/rs/src, read from stdlib/*.almd and runtime/rs/src/*.rs"
+varies = "#2466: origin/develop 71cc55d47 read 47 disagreeing rows (every one a bytes writer); the #2466 tree reads 0"
+
+[[gate]]
 path = "scripts/check-pass-isolated.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"
@@ -479,9 +505,9 @@ path = "scripts/check-perf-ratio.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"
 class = "NEGATIVE_TESTED"
-evidence = "#1244 round 5: three forged baselines, each a REAL measurement run (bench.py --quick). fft 1.272->0.500 => 'fft 1.275 (baseline 0.500) OVER ceiling 0.700'; nbody 0.997->5.000 => 'nbody 1.004 UNDER floor 2.500 (broken bench or durable win)' — so the two-sided band both bites; the spectralnorm line deleted => 'baseline has no entry for [spectralnorm] — a gated benchmark was added without anchoring it'. Unforged run: all four ok"
+evidence = "#1244 round 5: three forged baselines, each a REAL measurement run (bench.py --quick). fft 1.272->0.500 => 'fft 1.275 (baseline 0.500) OVER ceiling 0.700'; nbody 0.997->5.000 => 'nbody 1.004 UNDER floor 2.500 (broken bench or durable win)' — so the two-sided band both bites; the spectralnorm line deleted => 'baseline has no entry for [spectralnorm] — a gated benchmark was added without anchoring it'. Unforged run: all four ok. 2026-09-23 #2156, the wordfreq-wasm-idiom relation: the SAME relation test in crates/almide-wasm/tests/perf_ratchet.rs (group_by_key_count_relation) against the pre-fix emitter read t(K=4000)/t(K=40) = 64.21 and failed the 8x line; the fixed emitter reads 1.13; bench.py's wasm pair read 103x on the pre-fix binary (6.00 s vs 0.058 s at 1M) and 0.78x fixed"
 measures = "per-benchmark ratio of Almide-native runtime to the same-shape handwritten Rust in one interleaved run (bench.py --quick medians), against scripts/perf-ratio-baseline.txt; the victory rows' ablation ratio under the region / fan knob"
-varies = "2026-09-15 #2229/#2235: the four ablation/<bench> rows were found CONSTANT (byte-identical binaries) and retired — the first row of this ledger to fail this test; the anchored rows moved at 2062dd0cf (2026-09-09) and #1338 (fft 1.272 -> 1.176)"
+varies = "2026-09-15 #2229/#2235: the four ablation/<bench> rows were found CONSTANT (byte-identical binaries) and retired — the first row of this ledger to fail this test; the anchored rows moved at 2062dd0cf (2026-09-09) and #1338 (fft 1.272 -> 1.176); 2026-09-23 #2156 added the wordfreq-wasm-idiom row at 0.78 (the same pair read 103 on the pre-fix binary)"
 
 [[gate]]
 path = "scripts/check-rt-oracle-registry.sh"
@@ -500,6 +526,15 @@ class = "NEGATIVE_TESTED"
 evidence = "#1244 burn-down PR: a LANDED bogus-unit forge sailed through green (real hole — unit spellings unvalidated); fixed with measured pinned vocabularies (21 entry units, 5 default units, 4 required fields), then default-unit and entry-unit branches each demonstrated to fail"
 measures = "count of Int-bearing stdlib fns without a manifest entry, plus the byte diff between the regenerated property test and the committed one, read from docs/stdlib/semantics-manifest.toml"
 varies = "#1244 burn-down: a landed bogus unit read green (a real hole) until the unit vocabularies were pinned, then red; 2026-09-06 59f5b7f6d and 2026-09-10 bd6e74dd9 each added entries"
+
+[[gate]]
+path = "scripts/check-stdlib-docs.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml, lefthook.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#1469 landing (2026-09-21): the wrapper around tools/gen-stdlib-doc-index.py --check, added so the generator's regenerate-and-diff is an enumerable gate (the ledger enumerates scripts/check-*.sh, not tools/*.py; the CI step had run the .py directly since #918). Positive control: the freshly regenerated tree, 45/45 pages with a block (was 43/45 — compute and duration were skipped by name; now derived from crates/almide-types/src/time_units.rs). Negative controls, each restored through the generator and re-passed: (1) `list.len(...) -> Int` hand-edited to `-> Bool` in docs/stdlib/list.md => FAIL 'stale ... for: list'; (2) the new type index deleted from docs/stdlib/url.md => FAIL for url (a type is a public name the block must carry); (3) the whole block stripped from docs/stdlib/compute.md => FAIL for compute (a page without a block is stale, not exempt — the generator appends one, so the diff is non-empty). #1469 completion (2026-09-22): the gate became a COMPLETENESS gate — every public name carries its signature, its `///` doc (986/986 stdlib fns + 6 types, from stdlib/<module>.almd through the interface JSON's doc slot; the 12 clock constructors from the unit table) and its @since row (docs/stdlib/since.toml, derived by --since-from-tags from the release tags' committed indexes and declaration sources). Positive control: the regenerated tree, 1004 public names, green; prose markers added above the block and after END in docs/stdlib/hex.md survived a regenerate byte for byte with --check green (the generator owns only its block). Negative controls, each restored and re-passed: (4) a `// ` doc line hand-edited inside the docs/stdlib/list.md block => FAIL 'stale ... for: list'; (5) a `// @since` line hand-edited inside the docs/stdlib/hex.md block => FAIL for hex; (6) the `///` line of hex.encode deleted from stdlib/hex.almd and the binary rebuilt => FAIL '1 public name(s) without a `///` doc comment ...: hex.encode'; (7) a new `fn gate_probe` appended to stdlib/hex.almd and rebuilt => FAIL both 'without a docs/stdlib/since.toml row: hex.gate_probe' and 'without a `///` doc comment ...: hex.gate_probe'; (8) the hex.decode row deleted from since.toml => FAIL 'without a docs/stdlib/since.toml row: hex.decode'; (9) a row for the non-public hex.bogus added => FAIL 'since.toml row(s) for names that are not public: hex.bogus'"
+measures = "byte diff between each docs/stdlib/*.md page's generated block and the block rebuilt from `almide compile <module> --json` (types, `///` docs and the since.toml release included) or, for the two clock pages, from the TIME_UNITS x TIME_MODULES table; plus the count of public names without a `///` doc, the symmetric difference between the public names and the since.toml rows, and the byte diff of since.toml itself; read from docs/stdlib/*.md, docs/stdlib/since.toml and the embedded stdlib"
+varies = "#1832 (tuple members rendered as `()` until the JSON spelling was read) and #1735 (deprecated steer appended) each changed the block; 2026-09-21 #1469 added the type index to bytes/fs/net/process/url and the clock blocks to compute/duration — seven pages moved in one regeneration; 2026-09-22 #1469 completion moved the undocumented count 991 -> 0 across seven doc commits and all 45 pages in one regeneration (doc and @since lines)"
 
 [[gate]]
 path = "scripts/check-gate-verification.sh"
@@ -601,6 +636,15 @@ measures = "symmetric difference between long-lived pipeline types found by scri
 varies = "#1316 landing: nine forged inputs (an unregistered type in a [scope] file among them) each read as a finding; 2026-08-16 314a44290 recorded the dialect stamp in the frozen AST serde count"
 
 [[gate]]
+path = "tools/almide-gates:impl-count"
+reads = "structured"
+wired_by = ".github/workflows/ci.yml, lefthook.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#2413 (landing PR, 2026-09-21), run through the Almide gate `main.almd -- impl-count .`: four forged inputs, each run and each demonstrated to FAIL, tree restored and green after each — (1) a new emitter arm `fn lower_list_fold_extra()` appended to crates/almide-wasm/src/list_fuse.rs => 'list.fold: total 11 (1/3/7) -> 12 (1/4/7) GREW' with the fold-it-or-add-the-row remedy; (2) a new hole `fn zzz_probe[A](xs: List[A]) -> Int = _` appended to stdlib/list.almd => 'NEW hole list.zzz_probe (total 0) is not in the ledger'; (3) the ledger's list.fold row edited ABOVE reality (selfhost 7->8, total 12) => 'ledger says 12 (1/3/8), tree has 11 (1/3/7) — run --update', so the ledger cannot sit above the tree in the flattering direction; (4) blind-enumerator guard — the LOWER_FN pattern typo'd to `lowerX_` => the enumerator still prints 702 rows with every emitter column 0, so every pinned row disagrees and the gate reports 99 drifts rather than a clean tree (and an enumerator printing fewer than 100 rows is refused outright before any comparison). Baseline after restore: 702 holes, 1698 implementations (worst list.sort=16, list.take=14, map.get=14)"
+measures = "per stdlib hole (`fn f(...) = _`), the triple (native @intrinsic, `fn lower_<mod>_<fn>[_suffix]` definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in self_host_registry.rs) re-derived by scripts/lib/impl-count-enumerate.py against proofs/impl-count-ledger.toml: any total that grew, any triple that differs, any hole added or gone"
+varies = "#2413 landing: four forged inputs each read as a finding (a grown total, a new hole, a ledger above reality, a blinded enumerator)"
+
+[[gate]]
 path = "scripts/check-downstream-grammar.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/downstream-sync.yml"
@@ -682,6 +726,15 @@ measures = "symmetric difference between `@intrinsic(\"almide_rt_*\")` declarati
 varies = "intrinsic-boundary landing (2026-08-17, #1468): a dangling `@intrinsic` name read 1 on the declaration side; the join reads 0 both ways on the tree"
 
 [[gate]]
+path = "scripts/check-runtime-test-placement.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "landing (2026-09-22, #2507): a forged runtime/rs/burn/__forge_2507.rs carrying `#[cfg(test)] mod tests { #[test] fn forged() }` made the gate exit 1 listing all three marker lines; deleting it restored exit 0. The rule the gate encodes was measured first, not assumed: `runtime/rs` added to the root workspace `members` and `cargo check -p almide_rt` reports 220 errors (124 E0425, 83 E0433, 13 E0405) across 15 of the 25 modules lib.rs declares, in two classes — prelude items that exist only as string literals in crates/almide-codegen/src/lib.rs (almide_stdout_flush, AlmideRepr, AlmideMap, AlmideValue via the flat namespace) and cross-module calls with no path (json.rs -> almide_rt_value_stringify, math.rs -> almide_rt_libm_*, fan.rs -> almide_rt_list_par_*, sse.rs -> almide_rt_json_parse). Every emitted crate additionally runs strip_test_blocks, so the block is deleted before rustc sees it on the one path that DOES compile this source."
+measures = "count of Rust unit-test markers (`#[cfg(test)]`, `#[test]`, `mod tests {`) under runtime/rs"
+varies = "#2507 (2026-09-22): the marker count read 34 on origin/develop d377ed228 (seven dead test modules in env/int/string/list/base64/process/regex) and 0 after they were deleted; the forged control read 3"
+
+[[gate]]
 path = "scripts/check-wasm-runtime-ratio.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"
@@ -756,13 +809,13 @@ varies = "retired-spelling ledger landing (2026-08-16): the 5-mode exercise is r
 [[gate]]
 path = "scripts/check-domain-edges.sh"
 reads = "UNCLASSIFIED"
-wired_by = ".github/workflows/domain-edges.yml"
+wired_by = ".github/workflows/domain-edges.yml, .github/workflows/ci.yml"
 class = "NEGATIVE_TESTED"
-evidence = "PR #1449 (landing): the ledger row `datetime.to_iso:ts:i64_max` was DELETED and the gate exited 1 naming that exact cell as UNDECLARED; restoring the row returned exit 0. The reverse direction is enforced by the same run — a row whose cell no longer diverges is reported as stale and also fails, so the ledger cannot decay into a list of things that used to be true. SOLO RETRY (2026-08-16): a DIVERGE is re-measured once, alone, before it is believed, because the sweep deliberately feeds u32::MAX and i64::MAX to parameters that SIZE AN ALLOCATION — so a cell just inside the 2 GiB ceiling asks both legs for 2 GiB, and under memory pressure one can lose that race while the other wins. Measured: a full sweep run concurrently with another heavy job reported `string.pad_start:n:i32_max` and `pad_end:n:i32_max` divergent; on a quiet machine both agree, and so does the ceiling value itself. Two phantoms out of 7767 is enough to poison a SHRINK-ONLY ledger, because a phantom that lands once is declared forever. Negative-tested both directions with forged verdicts: a first-pass DIVERGE whose re-run agrees is dropped and NAMED as a load artifact rather than silently discarded; a DIVERGE on both passes is kept (243 rows survived the sticky variant, 0 dropped). The retry can only ever REMOVE a finding, never add one."
+evidence = "PR #1449 (landing): the ledger row `datetime.to_iso:ts:i64_max` was DELETED and the gate exited 1 naming that exact cell as UNDECLARED; restoring the row returned exit 0. The reverse direction is enforced by the same run — a row whose cell no longer diverges is reported as stale and also fails, so the ledger cannot decay into a list of things that used to be true. SOLO RETRY (2026-08-16): a DIVERGE is re-measured once, alone, before it is believed, because the sweep deliberately feeds u32::MAX and i64::MAX to parameters that SIZE AN ALLOCATION — so a cell just inside the 2 GiB ceiling asks both legs for 2 GiB, and under memory pressure one can lose that race while the other wins. Measured: a full sweep run concurrently with another heavy job reported `string.pad_start:n:i32_max` and `pad_end:n:i32_max` divergent; on a quiet machine both agree, and so does the ceiling value itself. Two phantoms out of 7767 is enough to poison a SHRINK-ONLY ledger, because a phantom that lands once is declared forever. Negative-tested both directions with forged verdicts: a first-pass DIVERGE whose re-run agrees is dropped and NAMED as a load artifact rather than silently discarded; a DIVERGE on both passes is kept (243 rows survived the sticky variant, 0 dropped). The retry can only ever REMOVE a finding, never add one. BUDGET PIN (#2387, 2026-09-21): the retry could not survive six parallel CI jobs — the pressure lasts the whole sweep — and the two rows above had been DECLARED for a month on one reading. The wasm leg now runs on the wasmtime CLI under the ledger's declared `wasm_budget_bytes` (`-W max-memory-size`), so a request past it aborts on every machine; the ledger step (tools/domain_edge_ledger.py) REFUSES a measurement whose budget is absent, differs, or whose DIVERGE cell is marked unpinned, before diffing. `--selftest` (wired into the PR `checks` job) forges all four availability shapes and asserts each is refused with exit 1 and the ledger left byte-identical, and that a pinned run is diffed both ways, cells and skips (13 cases, the skip census merged from #2402). Determinism measured on `almide 0.63.0 (dev)`: the five 1-byte-element `i32_max` cells read DIVERGE on three consecutive runs and on a fourth under a 6 GiB memory hog, where the unpinned leg had read AGREE and DIVERGE from the same binary minutes apart."
 
 evidence = "PR #1449 (landing): the ledger row `datetime.to_iso:ts:i64_max` was DELETED and the gate exited 1 naming that exact cell as UNDECLARED; restoring the row returned exit 0. The reverse direction is enforced by the same run — a row whose cell no longer diverges is reported as stale and also fails, so the ledger cannot decay into a list of things that used to be true."
-measures = "symmetric difference between the measured integer-domain edge matrix (each guard cell probed) and the declared ledger rows"
-varies = "PR #1449: the row datetime.to_iso:ts:i64_max deleted read UNDECLARED; a declared cell whose guard was removed read the reverse direction"
+measures = "symmetric difference between the measured integer-domain edge matrix (each guard cell probed) and the declared ledger rows, and (#2402) the symmetric difference between the slots the matrix could not build and the declared [[skip]] rows — a skip that appears is coverage lost"
+varies = "PR #1449: the row datetime.to_iso:ts:i64_max deleted read UNDECLARED; a declared cell whose guard was removed read the reverse direction. #2402 (2026-09-21): tests/domain_edge_skip_ledger_test.rs forges the public `json.index` with a parameter type the tables lack and the gate exits 1 naming `json.index(i)` as an UNDECLARED skip; a phantom [[skip]] row for a buildable slot reads the reverse direction; the real stdlib reads 1 of 1 json signatures exercised and passes"
 
 [[gate]]
 path = "scripts/check-alloc-ceilings.sh"
@@ -832,9 +885,18 @@ path = "scripts/check-readme-numbers.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml, lefthook.yml"
 class = "NEGATIVE_TESTED"
-evidence = "README resync landing (2026-08-27, PR #1605): the rule is that every count the README quotes is either derived inside a generated block or carries its measurement date on the same line — the '164-contract' ledger (real count 311), '310 test files' (421), and the 703 B Hello, world measured four releases earlier were each a bare number no gate read. Negative-tested with the committed tree as the positive control (pass): (1) an appended undated '999 test files and 12 contracts' => FAIL; (2) the same line with '(measured 2026-08-27)' => pass, so the date is the escape hatch and nothing else; (3) 'the sole wasm path' => FAIL and (4) '164-contract' => FAIL, the two retired phrases the fossil list refuses; (5) '41 Theorems' with a capital => FAIL (the match is case-folded, so a heading cannot hide a count); (6) '96 audited theorems' => pass, the one exemption, because proofs/check.sh asserts that count where it is computed and now lists README.md in its COUNT_DOCS. The companion generator scripts/gen-readme-stats.sh --check was forged twice the same day: a stats row hand-edited from 421 to 420 => FAIL (stale block), and the stamped baseline docs/benchmarks/wasm-size.txt with incumbent_bytes 1096 rewritten to 1000 => FAIL naming both legs' bytes ('structural 4361 vs 4361, incumbent 1096 vs 1000'), with the restored tree passing again as the control."
-measures = "count of bare numeric claims in README.md that sit neither in a generated block nor on a dated line"
-varies = "README resync (2026-08-27, PR #1605): the first run read the undated `164-contract ledger`, `310 test files` and the 703 B Hello, world; 0 after dating or deriving each"
+evidence = "README resync landing (2026-08-27, PR #1605): the rule is that every count the README quotes is either derived inside a generated block or carries its measurement date on the same line — the '164-contract' ledger (real count 311), '310 test files' (421), and the 703 B Hello, world measured four releases earlier were each a bare number no gate read. Negative-tested with the committed tree as the positive control (pass): (1) an appended undated '999 test files and 12 contracts' => FAIL; (2) the same line with '(measured 2026-08-27)' => pass, so the date is the escape hatch and nothing else; (3) 'the sole wasm path' => FAIL and (4) '164-contract' => FAIL, the two retired phrases the fossil list refuses; (5) '41 Theorems' with a capital => FAIL (the match is case-folded, so a heading cannot hide a count); (6) '96 audited theorems' => pass, the one exemption, because proofs/check.sh asserts that count where it is computed and now lists README.md in its COUNT_DOCS. The companion generator scripts/gen-readme-stats.sh --check was forged twice the same day: a stats row hand-edited from 421 to 420 => FAIL (stale block), and the stamped baseline docs/benchmarks/wasm-size.txt with incumbent_bytes 1096 rewritten to 1000 => FAIL naming both legs' bytes ('structural 4361 vs 4361, incumbent 1096 vs 1000'), with the restored tree passing again as the control. MSR row added 2026-09-22 (#2146 item 4, #1617): the LLM-writability scorecard — the one number the tagline rests on — must cite the almide-dojo run it came from AND carry that run's date on the SAME line, no older than 90 days. The reading is anchored to the citation, not to the section, because the section also holds the MiniGit bench's date: with the section as the anchor, deleting the MSR date left the gate aging a DIFFERENT measurement (observed on this tree, then fixed). Negative-tested with the refreshed tree as the positive control (pass, 'MSR scorecard (README.md:116) measured 2026-09-22, 0 days ago'): (1) the cited date rolled back to 2026-04-12 => FAIL naming the line, the date, 163 days and the 90-day line; (2) the almide-dojo@<sha> citation removed => FAIL ('no line cites an almide-dojo@<sha> run'), so a number with no recomputable source cannot stand; (3) the sha replaced by 'HEAD' => FAIL the same way, so a non-sha cannot pose as a citation; (4) the date deleted from the citation line while the section kept the MiniGit 2026-07-15 date => FAIL, which is exactly the case a section anchor let through; (5) a SECOND, older cited run appended (almide-dojo@0000abc, measured 2026-01-01) => FAIL at 264 days, so a fresh row cannot carry a fossil beside it. The restored tree passed again as the control. The 90-day line and the section list live in scripts/lib/readme-freshness.sh, which scripts/check-readme-freshness.sh reads too, so the PR gate and the nightly delivery cannot disagree about where the line is."
+measures = "count of bare numeric claims in README.md that sit neither in a generated block nor on a dated line, plus the age in days of every almide-dojo run the MSR scorecard cites"
+varies = "README resync (2026-08-27, PR #1605): the first run read the undated `164-contract ledger`, `310 test files` and the 703 B Hello, world; 0 after dating or deriving each. MSR row (2026-09-22, #2146 item 4): the scorecard age read 163 days on the tree of that morning and 0 once #1617 re-measurement replaced the table, the date and the sha"
+
+[[gate]]
+path = "scripts/check-readme-freshness.sh"
+reads = "scalar"
+wired_by = ".github/workflows/readme-freshness.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#2146 item 4 landing (2026-09-21): on the tree of that day the gate read the `### LLM writability` section's 2026-04-12 date as 162 days old and went red naming the section, the date, the age and the 90-day line; `MAX_DAYS=200` turned the same reading green, so both verdicts were seen on one tree. Delivered nightly as a comment on #1617 (one per day, green only as the close of a red), not as a PR gate — a calendar red in a diff gate gets the date edited. Since 2026-09-22 the arithmetic, the 90-day line and the section list live in scripts/lib/readme-freshness.sh, which scripts/check-readme-numbers.sh sources too, so the nightly delivery and the PR gate read one answer; the refactor was re-verified on the same tree (163 days red at the default line, green at MAX_DAYS=200)."
+measures = "the age in days of the first YYYY-MM-DD in each listed README section against MAX_DAYS (90)"
+varies = "#2146 item 4 (2026-09-21): 162 days (red) at the default line, green at MAX_DAYS=200 on the same tree; the number moves every day by construction and drops to 0 when #1617's re-measurement lands"
 
 [[gate]]
 path = "scripts/check-docs-only.sh"
@@ -931,9 +993,18 @@ measures = "byte equality of the switch table embedded in docs/specs/cli.md with
 varies = "#2205 landing (2026-09-14): one cell hand-flipped (`debug` -> `route` on ALMIDE_ABI_PROBE) read a diff at row 3; #2231 wave 4 (2026-09-16) changed the ALMIDE_CERTIFY_OWNERSHIP description and the table followed"
 
 [[gate]]
+path = "tools/almide-gates:fold-seed-source"
+wired_by = ".github/workflows/ci.yml, lefthook.yml"
+reads = "structured"
+class = "NEGATIVE_TESTED"
+evidence = "#2380 landing (2026-09-21): a forged corpus root carrying the fixture with its last test cut (3 sites under a floor of 4) went red naming the file, its count and the floor (exit 1); the same root with the fixture deleted went red at 0 sites (exit 1); the real corpus (1,749 files, 4 sites, stdlib/ 0) went green. The scanner's own tests pin that both #2377 shapes fire (the sort_by seed and `list.fold(v, v, f)`), plus the fuzzer's multi-line scan seed, the pipe form and every callee in the family, and that the floor verdict fails on a census one site short — `almide test tools/almide-gates/`"
+measures = "the number of `list.fold`/`foldf`/`fold_float`/`reduce`/`scan` call sites whose first argument (or piped receiver) is a bare identifier reappearing in the seed, per file, read from the `.almd` text under stdlib/ spec/ examples/ tools/ with comments and string literals blanked, against the per-file floors in proofs/fold-seed-source-baseline.txt"
+varies = "#2380 landing (2026-09-21): the real corpus read 4 sites in spec/lang/fold_seed_source_test.almd; the forged roots read 3 and 0 against the same floor"
+
+[[gate]]
 path = "tools/almide-gates:check-contracts"
 reads = "structured"
-wired_by = "UNWIRED"
+wired_by = "tests/almide_gate_twin_parity_test.rs"
 class = "NEGATIVE_TESTED"
 evidence = "#2130 step 1 (2026-09-13): tests/almide_gate_twin_parity_test.rs compares this twin against scripts/check-contracts.sh — exit code and output, byte for byte — and the comparator itself was demonstrated to name the first differing line. The twin was already identical on its first run; the same harness caught real drift in the `stamp` twin, which is what makes the green here evidence rather than assumption."
 measures = "the same counts as scripts/check-contracts.sh (unevidenced contracts, unlinked fixtures, flagged rows), read from docs/contracts/contracts.toml"
@@ -942,7 +1013,7 @@ varies = "#2130 step 1 (2026-09-13): tests/almide_gate_twin_parity_test.rs reads
 [[gate]]
 path = "tools/almide-gates:stamp"
 reads = "scalar"
-wired_by = "UNWIRED"
+wired_by = "tests/almide_gate_twin_parity_test.rs"
 class = "NEGATIVE_TESTED"
 evidence = "#2130 step 1 (2026-09-13): the twin parity test found this one DRIFTED from proofs/lib/stamp.sh on its first run — the bash had learned to name the cause of a hash mismatch (a `cargo test` relinking target/release after the last `make install`) and to RETURN there, while the port carried the original one-liner and went on printing the toolchain lines. Fixed to byte-identity on both paths; a forged message line was demonstrated to fail the comparison naming `line 8`."
 measures = "the toolchain stamp (rustc / cargo / binary hashes) and its equality with the workspace build"
@@ -951,10 +1022,11 @@ varies = "#2130 step 1 (2026-09-13): the twin parity test read this twin DRIFTED
 [[gate]]
 path = "tools/almide-gates:output-parity"
 reads = "structured"
-wired_by = "UNWIRED"
-class = "UNVERIFIED"
-measures = "per-program byte diff of stdout between the native run and the render_program -> wasmtime path over spec/, against proofs/output-parity-baseline.txt (the Almide twin of proofs/output-parity.sh)"
-varies = ""
+wired_by = "tests/almide_gate_twin_parity_test.rs"
+class = "NEGATIVE_TESTED"
+evidence = "#2163 (2026-09-21): `the_output_parity_twin_answers_what_the_shell_gate_answers` in tests/almide_gate_twin_parity_test.rs runs proofs/output-parity.sh and the twin over tests/gate-twin-parity/output-parity/spec/ (nine fixtures, one per verdict row producible without a miscompile) and demands identical exit code and bytes. Negative input: a FORGED baseline naming a part-file that can never match and omitting two that do — the original reports the phantom as a REGRESSION, the pair as NEW matches, the unbracketed-warning fixture under XFAIL and exits 1, and the twin must say the same, offender for offender; then `--update` into a scratch baseline, compared as the bytes written. The first run found the twin lacked the --update ratchet, the no-baseline path, the tool checks and the #1123 warning-block stripping (a trap fixture printing an unused-import warning read XFAIL where the bash reads match), and that the stamp's coqc line printed empty where every pipefail caller prints n/a"
+measures = "per-program byte diff of stdout between the native run and the render_program -> wasmtime path over spec/, against proofs/output-parity-baseline.txt (the Almide twin of proofs/output-parity.sh); a fired per-fixture deadline on the wasm leg is the HANG class and fails the gate (#2567)"
+varies = "#2163 (2026-09-21): the twin parity test read this twin DIVERGED from proofs/output-parity.sh on its first run (trap_with_bracket_warning: bash match, twin xfail; no --update; no n/a in the stamp), then identical after the port was corrected; the forged baseline flips the verdict OK -> REGRESSION with the offender named"
 
 [[gate]]
 path = "tools/almide-gates:bench"
@@ -986,7 +1058,8 @@ varies = "#1843: the index changed with every contract that landed since, and th
 [[gate]]
 path = "tools/almide-gates:fuzz-track-record"
 reads = "structured"
-wired_by = "UNWIRED"
-class = "UNVERIFIED"
+wired_by = "tests/almide_gate_twin_parity_test.rs"
+class = "NEGATIVE_TESTED"
+evidence = "#2163 (2026-09-21): `the_fuzz_track_record_twin_answers_what_the_shell_gate_answers` in tests/almide_gate_twin_parity_test.rs runs scripts/fuzz-track-record.sh and the twin with a recorded `gh` first on PATH (tests/gate-twin-parity/fuzz-track-record/) and demands identical bytes at N=8 and N=3. The first run found the twin still printing the four-column pre-sharding table with no `shards` column, no `Night verdict` job and `full-budget streak:` for `verdict streak:` — it would have scored every sharded night as TRUNCATED. #2452 (2026-09-22): re-ported to the #2429 scoring (a night counts at >= 75% of its planned fuzz-minutes, read from the `fuzz-night:` line of the verdict job's per-job log; jobs fetched with ?per_page=100) and re-recorded: six real nights 2026-09-16..21 whose verdict-job logs are the real ones trimmed to the record line, plus a synthetic NO VERDICT night (cancelled verdict job, log without a record line) and a synthetic pre-sharding night. The window prints every row shape: an in-flight run, 7/8 89% FINDINGS (a streak night), 5/8 64% PARTIAL (a green verdict below the line), `?` NO VERDICT, the legacy 1/1 row; the comparison had been #[ignore]d between #2451 and the re-port because the twin still scored nights from shard-job conclusions. #2513 (2026-09-22): the comparison now runs with FUZZ_NIGHT_RECOVER=0, which SCOPES it to scoring — the bash additionally recovers a reclaimed shard's minutes from its job log before scoring, and the twin does not, because that fold rounds the delivered minutes to one decimal after every shard and Almide's float formatting is not yet promised to agree with printf's. Declared in the test's env rather than left to the fixtures, all eight of which are pre-#2390 lines with no `missing=` list and would have hidden the difference."
 measures = "the nightly fuzz verdict streak over the last N nights, read from the GitHub Actions API"
-varies = ""
+varies = "#2163 (2026-09-21): the twin parity test read this twin DIVERGED from scripts/fuzz-track-record.sh on its first run (four columns, no sharded scoring), identical after the port was corrected. #2452 (2026-09-22): it diverged a second time when #2429 moved the bash to the record-line scoring (the twin asked for `jobs` without `?per_page=100` and printed a `5/8 GREEN` row shape the bash no longer has); identical after the re-port, and by hand also under FUZZ_NIGHT_BUDGET_PCT=90 (the 89% night flips to PARTIAL on both sides) and with one log recording removed (both sides score NO RECORD)"

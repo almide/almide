@@ -415,6 +415,21 @@ impl Checker {
             bindings.entry(*g).or_insert_with(|| self.fresh_var());
         }
 
+        // #2496: a generic USER fn's instantiation is judged post-solve
+        // against what its body interpolates (`interp_string_form.rs`).
+        if !sig.generics.is_empty()
+            && let Some(callee) = self.generic_call_key(name, qualified_via_direct.as_deref())
+        {
+            self.deferred_generic_calls.push(super::DeferredGenericCall {
+                callee,
+                bindings: bindings.clone(),
+                span: self.current_span,
+                caller: self.current_fn.as_ref()
+                    .filter(|(_, gs)| !gs.is_empty())
+                    .map(|(k, _)| *k),
+            });
+        }
+
         self.check_protocol_bounds(name, &sig, &bindings);
         self.propagate_call_arg_types(name, &sig, CheckedArgs {
             arg_tys, aligned_raw: &aligned_raw, e005_fired: &e005_fired,
@@ -578,13 +593,65 @@ impl Checker {
                             .get(&type_name)
                             .map_or(false, |ps| ps.contains(proto));
                         if !has_proto {
+                            let applied = self.display_applied_bound(sig, *tv_name, *proto, bindings);
                             self.emit(super::err(
-                                format!("type '{}' does not implement protocol '{}'", type_name, proto),
-                                format!("Add `: {}` to the type declaration: type {}: {} = ...", proto, type_name, proto),
+                                format!("type '{}' does not implement protocol '{}'", type_name, applied),
+                                format!("Add `: {}` to the type declaration: type {}: {} = ...", applied, type_name, applied),
                                 format!("call to {}()", name)));
                         }
                     }
                 }
+            }
+        }
+        self.check_protocol_bound_args(name, sig, bindings);
+    }
+    /// `Repository[User]` for the bound `(tv, proto)` of `sig`, with the
+    /// call's bindings substituted — the bare name when the bound is not
+    /// applied.
+    fn display_applied_bound(&self, sig: &crate::types::FnSig, tv: Sym, proto: Sym, bindings: &HashMap<Sym, Ty>) -> String {
+        match sig.protocol_bound_args.get(&(tv, proto)) {
+            Some(args) => format!("{}[{}]", proto, args.iter()
+                .map(|a| resolve_ty(&crate::types::substitute(a, bindings), &self.uf).display())
+                .collect::<Vec<_>>().join(", ")),
+            None => proto.to_string(),
+        }
+    }
+    /// #1589: an APPLIED bound `[R: Repository[K, User]]` is satisfied by the
+    /// ONE conformance the argument's type declares for that protocol, with
+    /// its type arguments equal to the bound's (after the call's bindings) —
+    /// unifying them also pins a letter only the bound mentions (`K` from
+    /// `type UserRepo: Repository[UserId, User]`). No other implementation
+    /// is searched for: a conformance with different arguments is a mismatch.
+    fn check_protocol_bound_args(&mut self, name: &str, sig: &crate::types::FnSig, bindings: &HashMap<Sym, Ty>) {
+        let mut applied: Vec<(&(Sym, Sym), &Vec<Ty>)> = sig.protocol_bound_args.iter().collect();
+        applied.sort_by_key(|((tv, p), _)| (tv.as_str(), p.as_str()));
+        for ((tv, proto), want) in applied {
+            let Some(bound_ty) = bindings.get(tv) else { continue };
+            let concrete = resolve_ty(bound_ty, &self.uf);
+            let Some(type_name) = self.resolve_type_name_for_protocol(&concrete) else { continue };
+            let Some(have) = self.env.type_protocol_args.get(&type_name).and_then(|m| m.get(proto)).cloned() else { continue };
+            if have.len() != want.len() { continue; }
+            let want: Vec<Ty> = want.iter().map(|a| crate::types::substitute(a, bindings)).collect();
+            // Nominal, not structural: two record types with the same fields
+            // are different arguments (`Repository[Int, User]` is not
+            // `Repository[Int, Order]`). Only a still-open inference var is
+            // unified — that is how a letter only the bound names gets pinned.
+            let fits = want.iter().zip(have.iter()).all(|(w, h)| {
+                let w = resolve_ty(w, &self.uf);
+                if ty_has_inference_var(&w) {
+                    self.unify_infer(&w, h)
+                } else {
+                    strip_ty_module(&w) == strip_ty_module(&resolve_ty(h, &self.uf))
+                }
+            });
+            if !fits {
+                let shown = |ts: &[Ty], uf: &super::types::UnionFind| ts.iter().map(|t| resolve_ty(t, uf).display()).collect::<Vec<_>>().join(", ");
+                self.emit(super::err(
+                    format!("type '{}' implements '{}[{}]', but {}() requires '{}[{}]'",
+                        type_name, proto, shown(&have, &self.uf), name, proto, shown(&want, &self.uf)),
+                    format!("A type conforms to '{}' exactly once, with the arguments written at its declaration (`type {}: {}[{}]`). Pass a value whose type conforms to '{}[{}]', or change the bound",
+                        proto, type_name, proto, shown(&have, &self.uf), proto, shown(&want, &self.uf)),
+                    format!("call to {}()", name)));
             }
         }
     }
@@ -949,7 +1016,7 @@ impl Checker {
                     if !self.env.mutable_vars.contains(&sym(name)) {
                         self.emit(super::err(
                             format!("cannot pass immutable binding '{}' to `mut` parameter of {}()", name, fn_name),
-                            format!("Declare '{}' with `var` instead of `let` to allow mutation", name),
+                            self.immutable_mut_arg_hint(name),
                             format!("call to {}()", fn_name),
                         ).with_code("E032"));
                     }
@@ -961,7 +1028,7 @@ impl Checker {
                         Some(root) => {
                             self.emit(super::err(
                                 format!("cannot mutate a field of immutable binding '{}' via `mut` parameter of {}()", root, fn_name),
-                                format!("Declare '{}' with `var` instead of `let`", root),
+                                self.immutable_mut_arg_hint(root),
                                 format!("call to {}()", fn_name),
                             ).with_code("E032"));
                         }
@@ -982,6 +1049,19 @@ impl Checker {
                     ).with_code("E032"));
                 }
             }
+        }
+    }
+    /// The E032 hint for an immutable binding passed (itself, or a field of it) to a `mut` parameter. There are two fixes and the hint names both, leading with the one that fits the binding: a LOCAL becomes `var`; a PARAMETER becomes `mut name: T`, so the write reaches the caller's value and the caller passes a `var`. The parameter case is the helper that fills its caller's buffer (#2466): a hint naming only `var` sent the writer to a local copy, whose write the caller never sees.
+    fn immutable_mut_arg_hint(&self, name: &str) -> String {
+        if self.env.param_vars.contains(&sym(name)) {
+            let ty = self.env.lookup_var(name).map(|t| t.display()).unwrap_or_else(|| "T".to_string());
+            format!(
+                "'{name}' is a parameter, and parameters are immutable: declare it `mut {name}: {ty}` so the write reaches the caller's value (the caller then passes a `var`), or copy it into a local `var` if the caller must not see the write"
+            )
+        } else {
+            format!(
+                "Declare '{name}' with `var` instead of `let` to allow mutation (a helper that writes its caller's value takes it as a `mut` parameter instead)"
+            )
         }
     }
     /// Root identifier of a place expression (member/tuple-index chain), or None if it doesn't bottom out at a plain identifier (i.e. a temporary).
@@ -1081,5 +1161,24 @@ fn is_lambda_arg(a: &ast::Expr) -> bool {
         ExprKind::Lambda { .. } => true,
         ExprKind::Paren { expr } => is_lambda_arg(expr),
         _ => false,
+    }
+}
+
+/// Whether `ty` still holds an open inference var (`?N`) anywhere.
+fn ty_has_inference_var(ty: &Ty) -> bool {
+    super::types::is_inference_var(ty).is_some()
+        || ty.any_child_recursive(&|c| super::types::is_inference_var(c).is_some())
+}
+
+/// `ty` with every `Named` qualifier dropped (`ports.User` → `User`): a
+/// conformance written in one module and a bound written in another spell
+/// the same nominal type with different qualification.
+fn strip_ty_module(ty: &Ty) -> Ty {
+    match ty {
+        Ty::Named(name, args) => {
+            let bare = name.as_str().rsplit('.').next().unwrap_or(name.as_str());
+            Ty::Named(sym(bare), args.iter().map(strip_ty_module).collect())
+        }
+        _ => ty.map_children(&strip_ty_module),
     }
 }

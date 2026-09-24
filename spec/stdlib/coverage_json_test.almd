@@ -13,6 +13,16 @@ test "json.get_int" {
   assert_eq(json.get_int(v, "missing"), none)
 }
 
+// #2476 — Int-only: a Float field is none, even an integral one, never truncated
+// (the `value.as_int` rule); the widening runs one way (get_float takes an Int).
+test "json.get_int on a Float field is none" {
+  let v = json.parse('{"f": 2.7, "g": 3.0, "i": 3}')!
+  assert_eq(json.get_int(v, "f"), none)
+  assert_eq(json.get_int(v, "g"), none)
+  assert_eq(json.get_int(v, "i"), some(3))
+  assert_eq(json.get_float(v, "i"), some(3.0))
+}
+
 test "json.get_bool" {
   let v = json.parse('{"active": true}')!
   assert_eq(json.get_bool(v, "active"), some(true))

@@ -1,10 +1,10 @@
-// The reporting half of `scripts/fuzz-track-record.sh` — the streak RULE lives in
+// The reporting half of `scripts/fuzz-track-record.sh` — the streak FOLD lives in
 // [streak.almd], already extracted and tested; this is what it takes to feed it.
 //
 // The tool answers two closure conditions with one command:
 //
-//   #924 — 14 consecutive FULL-BUDGET nights (the campaign step completed, findings or not)
-//   #796 —  2 consecutive GREEN nights       (the campaign completed and found nothing)
+//   #924 — 14 consecutive nights with a verdict AT >= 75% OF PLANNED FUZZ-MINUTES
+//   #796 —  2 consecutive GREEN nights       (a verdict was delivered and it found nothing)
 //
 // The bash reads both from the GitHub API through `gh api --jq`, which means jq does the
 // extraction and the shell only formats. This port parses the API's JSON in Almide instead.
@@ -14,13 +14,69 @@
 // quote, a `sed` that mistook a terminator for an empty line). Parsing here puts the shape of
 // the response in front of the compiler.
 //
-// Reporting tool, NOT a CI gate — it needs `gh` auth and network.
+// SHARDED NIGHTS. Since 2026-08-08 the campaign runs as N parallel shard jobs aggregated by a
+// `Night verdict` job that runs `if: always()`, so a reclaimed shard costs 1/N of the night's
+// coverage and nothing else. A night is scored from the VERDICT job — GREEN / FINDINGS / NO
+// VERDICT — and, since #2429 (the #924 ruling of 2026-09-21), from the `fuzz-night:` record
+// line that job writes to its log: a streak night is one that delivered at least 75% of its
+// planned fuzz-minutes. The shard jobs' conclusions say whether a job ended green, not how
+// many minutes it fuzzed before the runner took it, so they are not read at all any more.
+// The rule is `fuzz_night_line` / `fuzz_night_score` in scripts/lib/fuzz-night-line.sh,
+// shared with scripts/fuzz-green-streak.sh; [night_line] / [score] below mirror it field for
+// field, and the inline tests forge the same lines its Rust test forges.
+//
+// A shard that did not report is UNKNOWN, not zero (#2390): the verdict text names the missing
+// shards. A night whose record line cannot be read at all is NOT scored as full — an absent
+// value read as a full night would be the same defect one level up. Nights before the sharding
+// change have no verdict job and are scored the old way, from the single campaign job's step,
+// with coverage `1/1`.
+//
+// A shard that uploaded nothing may still have been RECOVERED from its own job log (#2513), and
+// `recovered=` names those with the second each one's campaign reached. Their minutes are already
+// in the line's totals; their findings are, too, and `findings_recovered=` says how many — a
+// count with no class, so a night with one is not green however the verdict job concluded.
+// [score] below mirrors that rule.
+//
+// What this twin does NOT mirror is the RETROSPECTIVE half of #2513: the bash also fetches each
+// `missing=` shard's job log and amends the night's line before scoring it, so a night written
+// before the recovery existed is still measured on what it ran. Its fold rounds the delivered
+// minutes to one decimal after EVERY shard, and matching that needs Almide's float formatting to
+// agree with printf's on the half-way cases — not a promise either side makes today. The parity
+// test therefore runs the bash with `FUZZ_NIGHT_RECOVER=0`, which is where this difference is
+// declared; porting it means porting the rounding first.
+//
+// This twin DRIFTED from the bash twice, and the #2163 diff found it both times: first it still
+// printed the four-column, pre-sharding table; then (#2452) it still scored a night from its
+// shard jobs' conclusions after the bash had moved to the record line. Reproduced here as the
+// bash writes it.
+//
+// Reporting tool, NOT a CI gate — it needs `gh` auth and network. The twin parity test feeds
+// both sides recorded responses through a `gh` shim on PATH (tests/gate-twin-parity/).
 import process
 import json
+import env
 import streak
 
-type Night = { date: String, id: String, conclusion: String, verdict: String, scored: Bool }
+type Night = { date: String, id: String, conclusion: String, coverage: String, verdict: String, full: Bool, green: Bool, scored: Bool }
 
+// `fuzz_night_budget`'s four words: `<full|partial|unknown> <pct|?> <reporting/planned|?> <missing>`.
+type Budget = { budget: String, pct: String, reported: String, missing: String }
+
+// `fuzz_night_score`'s tab-separated row: the two streak bits, the coverage column, the verdict.
+type Score = { full: Bool, green: Bool, coverage: String, verdict: String }
+
+let verdict_job_name = "Night verdict"
+
+// Pre-2026-08-08 nights ran a single unsharded campaign job; keep reading them so the
+// history above the sharding change stays scoreable.
+let legacy_job_name = "Generative differential fuzz"
+
+let legacy_step_name = "Run fuzz campaign"
+
+let record_marker = "fuzz-night: "
+
+// `gh api ... 2>/dev/null || true` — a request that fails (an expired per-job log, a 404)
+// reads as EMPTY on the bash side, never as an error, and the scorer decides what empty means.
 effect fn gh_api(path: String) -> String = {
   let st = process.exec_status("gh", ["api", path]) ?? process.ProcessStatus {
     code: 1,
@@ -46,85 +102,300 @@ fn date_of(run: json.Value) -> String = list.get_or(
   "",
 )
 
-// The campaign STEP's conclusion, which is what separates a night that ran out of budget from
-// one whose runner was reclaimed. The step's script only reaches its exit after the campaign
-// returns, so a reclaimed runner cannot leave it `success` — that is the whole reason the
-// verdict reads the step and not just the run.
-fn campaign_step(jobs_json: json.Value, job_name: String, step_name: String) -> String = {
-  let jobs = json.get_array(jobs_json, "jobs") ?? []
-  let job = jobs |> list.find((j) => (json.get_string(j, "name") ?? "") == job_name)
-  match job {
-    some(j) => {
-      let steps = json.get_array(j, "steps") ?? []
-      let st = steps |> list.find((s) => (json.get_string(s, "name") ?? "") == step_name)
-      match st {
-        some(s) => json.get_string(s, "conclusion") ?? "absent",
-        none => "absent",
-      }
-    },
-    none => "absent",
+fn jobs_of(jobs_json: json.Value) -> List[json.Value] = json.get_array(jobs_json, "jobs") ?? []
+
+fn job_named(jobs_json: json.Value, name: String) -> json.Value? = jobs_of(jobs_json) |> list.find((j) => (json.get_string(j, "name") ?? "") == name)
+
+// `[.jobs[] | select(.name == "Night verdict") | .conclusion][0] // "absent"` — a night with
+// no verdict job at all is a LEGACY night, and so is one whose verdict job has no conclusion
+// yet (jq's `//` treats `null` the same as a missing element).
+fn verdict_job(jobs_json: json.Value) -> String = match job_named(jobs_json, verdict_job_name) {
+  some(j) => json.get_string(j, "conclusion") ?? "absent",
+  none => "absent",
+}
+
+// `[.jobs[] | select(.name == "Night verdict") | .id][0]` under `jq -r` — a number, or the
+// word `null` when the job carries none. The bash then asks for `jobs/null/logs`, which fails,
+// which is an empty log; the twin asks for the same path so the shim refuses both alike.
+fn verdict_job_id(jobs_json: json.Value) -> String = match job_named(jobs_json, verdict_job_name) {
+  some(j) => match json.get_int(j, "id") {
+    some(id) => int.to_string(id),
+    none => "null",
+  },
+  none => "null",
+}
+
+// The campaign STEP's conclusion, which is what separates a legacy night that ran out of
+// budget from one whose runner was reclaimed. The step's script only reaches its exit after
+// the campaign returns, so a reclaimed runner cannot leave it `success` — that is the whole
+// reason the legacy verdict reads the step and not just the run.
+fn campaign_step(jobs_json: json.Value, job_name: String, step_name: String) -> String = match job_named(
+  jobs_json,
+  job_name,
+) {
+  some(j) => {
+    let steps = json.get_array(j, "steps") ?? []
+    let st = steps |> list.find((s) => (json.get_string(s, "name") ?? "") == step_name)
+    match st {
+      some(s) => json.get_string(s, "conclusion") ?? "absent",
+      none => "absent",
+    }
+  },
+  none => "absent",
+}
+
+// ── scripts/lib/fuzz-night-line.sh, field for field ──
+// `grep -oE 'fuzz-night: .*' "$file" | tail -1 | tr -d '\r'` — the LAST record line in the log
+// (a retried verdict job appends), from the marker to the end of its line, with any Actions
+// timestamp prefix in front of the marker dropped and any CR stripped. Empty when the log has
+// none: the caller decides what an absent record means (UNKNOWN, never 0).
+fn night_line(log: String) -> String = {
+  let records = string.split(log, "\n") |> list.filter((l) => string.contains(l, record_marker)) |> list.map((l) => string.replace(string.drop(l, string.index_of(l, record_marker) ?? 0), "\r", ""))
+  list.last(records) ?? ""
+}
+
+// `grep -oE "(^| )$key=[^ ]*" | head -1 | sed -E "s/^ ?$key=//"` — the first space-delimited
+// token that starts with `key=`, minus the key. Empty when the line does not carry it.
+fn field(line: String, key: String) -> String = {
+  let prefix = key + "="
+  match string.split(line, " ") |> list.find((tok) => string.starts_with(tok, prefix)) {
+    some(tok) => string.drop(tok, string.len(prefix)),
+    none => "",
   }
 }
 
-// `printf '%-12s %-13s %-11s %s\n'` — left-justified, space-padded, and the LAST column is not
-// padded at all. Padding it would add trailing spaces to every row.
-fn row(date: String, id: String, conclusion: String, verdict: String) -> String = string.pad_end(
+// awk reads a field as a number: a string that is not one is 0.
+fn awk_num(s: String) -> Float = float.parse(s) ?? 0.0
+
+// `awk 'BEGIN{printf "%d", (100*d)/p}'` — the integer percentage of planned fuzz-minutes the
+// night delivered, computed in that order so the float rounds as awk's does, and truncated as
+// `%d` truncates (35.9 of 40 is 89, not 90). Empty when it cannot be known: a missing field, a
+// planned `0`, or a planned value awk would divide by zero on (awk then prints nothing).
+fn delivered_pct(line: String) -> String = {
+  let planned = field(line, "minutes_planned")
+  let delivered = field(line, "minutes_delivered")
+  if planned == "" or delivered == "" or planned == "0" then ""
+  else {
+    let p = awk_num(planned)
+    if p == 0.0 then "" else int.to_string(float.to_int((100.0 * awk_num(delivered)) / p))
+  }
+}
+
+// `${shards#*/}` — everything after the FIRST `/`, or the whole string when there is none.
+fn after_first_slash(s: String) -> String = match string.index_of(s, "/") {
+  some(i) => string.drop(s, i + 1),
+  none => s,
+}
+
+// `${shards%/*}` — everything before the LAST `/`, or the whole string when there is none.
+fn before_last_slash(s: String) -> String = match string.last_index_of(s, "/") {
+  some(i) => string.take(s, i),
+  none => s,
+}
+
+fn or_question(s: String) -> String = if s == "" then "?" else s
+
+// `fuzz_night_budget`: the night's budget verdict from its record line. `unknown` when there is
+// no line or the percentage cannot be derived; `missing` is the unreturned shard list, `none`,
+// or `unknown` for a pre-#2390 line that did not record it.
+fn budget_of(line: String, bar: Int) -> Budget = if line == "" then Budget {
+  budget: "unknown",
+  pct: "?",
+  reported: "?",
+  missing: "unknown",
+} else {
+  let pct = delivered_pct(line)
+  let shards = field(line, "shards")
+  let planned = after_first_slash(shards)
+  let reporting_field = field(line, "reporting")
+  let missing_field = field(line, "missing")
+  let missing = if missing_field == "" then "unknown" else missing_field
+  // Legacy (unsharded) or the no-shard line: reporting == completed.
+  let reporting = if reporting_field == "" then before_last_slash(shards) else reporting_field
+  let reported = or_question(reporting) + "/" + or_question(planned)
+  if pct == "" then Budget { budget: "unknown", pct: "?", reported: reported, missing: missing } else if (int.parse(pct) ?? 0) >= bar then Budget {
+    budget: "full",
+    pct: pct,
+    reported: reported,
+    missing: missing,
+  } else Budget { budget: "partial", pct: pct, reported: reported, missing: missing }
+}
+
+// `fuzz_night_score`: one sharded night scored from the verdict job's conclusion and its record
+// line. The verdict streak (#924) needs a verdict AND >= `bar`% of planned minutes; the green
+// streak (#796) needs that night's verdict to be `success` AND `findings_recovered=0` (#2513: a
+// count read off a truncated log has no class, so it cannot make a night clean).
+// `bar` is FUZZ_NIGHT_BUDGET_PCT.
+fn score(vjob: String, line: String, bar: Int) -> Score = {
+  let b = budget_of(line, bar)
+  let coverage = if b.budget == "unknown" then "?"
+  else b.reported + " " + b.pct + "%"
+  let missing_qual = match b.missing {
+    "none" => "",
+    "unknown" => "",
+    "" => "",
+    _ => " (shard(s) " + string.replace(b.missing, ",", ", ") + " did not report: findings unknown, not zero)",
+  }
+  // #2513: shards that uploaded nothing and were read back out of their job logs instead. Their
+  // minutes and findings are already in the line's totals; what the text carries is that each
+  // recovered count stops at the second it is tagged with.
+  let recovered = field(line, "recovered")
+  let rec_findings = field(line, "findings_recovered")
+  let rec_dirty = rec_findings != "" and rec_findings != "0"
+  let rec_qual = match recovered {
+    "none" => "",
+    "unknown" => "",
+    "" => "",
+    _ => " (shard(s) " + string.replace(recovered, ",", ", ") + " recovered from their job logs: counted only up to the second named)",
+  }
+  let concluded = match vjob {
+    "success" => "GREEN",
+    "failure" => "FINDINGS (verdict delivered, red on findings)",
+    _ => "",
+  }
+  // The verdict job only ever sees the shards that UPLOADED, so it can conclude success over a
+  // night whose reclaimed shards had already recorded findings. GREEN does not survive that.
+  let text = if rec_dirty and vjob == "success" then "NOT GREEN (the shards that uploaded were clean, but " + rec_findings + " finding(s) came back in a reclaimed shard's log, class unknown, counted only to the second named)"
+  else concluded
+  let qual = if rec_dirty and vjob != "success" then missing_qual + rec_qual + " [" + rec_findings + " of them recovered from a reclaimed shard's log, class unknown]"
+  else missing_qual + rec_qual
+  if concluded == "" then Score {
+    full: false,
+    green: false,
+    coverage: coverage,
+    verdict: "NO VERDICT (verdict job: " + vjob + ")",
+  } else match b.budget {
+    "full" => Score {
+      full: true,
+      green: vjob == "success" and not rec_dirty,
+      coverage: coverage,
+      verdict: text + qual,
+    },
+    "partial" => Score {
+      full: false,
+      green: false,
+      coverage: coverage,
+      verdict: "PARTIAL " + b.pct + "% of planned fuzz-minutes — " + text + qual + "; below the " + int.to_string(bar) + "% line, not a streak night",
+    },
+    _ => Score {
+      full: false,
+      green: false,
+      coverage: coverage,
+      verdict: "NO RECORD (verdict job wrote no fuzz-night: line) — " + text + "; coverage unknown, not a streak night",
+    },
+  }
+}
+
+// ── the report ──
+// `printf '%-12s %-13s %-11s %-13s %s\n'` — left-justified, space-padded, and the LAST column
+// is not padded at all. Padding it would add trailing spaces to every row.
+fn row(date: String, id: String, conclusion: String, coverage: String, verdict: String) -> String = string.pad_end(
   date,
   12,
   " ",
-) + " " + string.pad_end(id, 13, " ") + " " + string.pad_end(conclusion, 11, " ") + " " + verdict
+) + " " + string.pad_end(id, 13, " ") + " " + string.pad_end(conclusion, 11, " ") + " " + string.pad_end(
+  coverage,
+  13,
+  " ",
+) + " " + verdict
 
 // A run still in flight is PRINTED but not SCORED. Dropping it would silently shift the streak
 // window by one night; scoring it would count a night that has not happened yet.
 fn in_flight(state: String) -> Bool = state == "in_progress" or state == "queued"
 
-fn verdict_text(conclusion: String, step: String) -> String = {
-  let v = streak.verdict(conclusion, step)
-  match v {
-    "GREEN" => "GREEN",
-    "FINDINGS" => "FINDINGS (full budget, red on findings)",
-    _ => "TRUNCATED (campaign step: " + step + ")",
-  }
+// A legacy (unsharded) night, scored from the campaign step. One job, one runner: a completed
+// step IS the full budget.
+fn legacy_score(conclusion: String, step: String) -> Score = match streak.verdict(conclusion, step) {
+  "GREEN" => Score { full: true, green: true, coverage: "1/1", verdict: "GREEN" },
+  "FINDINGS" => Score {
+    full: true,
+    green: false,
+    coverage: "1/1",
+    verdict: "FINDINGS (full budget, red on findings)",
+  },
+  _ => Score {
+    full: false,
+    green: false,
+    coverage: "1/1",
+    verdict: "TRUNCATED (campaign step: " + step + ")",
+  },
 }
 
-effect fn night_of(repo: String, run: json.Value, job_name: String, step_name: String) -> Night = {
+// The fold in [streak.almd] classifies on a key; the two streak bits the scorer already decided
+// map onto it exactly (a green night is a full night), so the fold stays the one implementation.
+fn streak_key(s: Score) -> String = if s.green then "GREEN"
+else if s.full then "FINDINGS" else "TRUNCATED"
+
+effect fn night_of(repo: String, run: json.Value, bar: Int) -> Night = {
   let state = run_state(run)
   let id = int.to_string(json.get_int(run, "id") ?? 0)
   if in_flight(state) then Night {
     date: date_of(run),
     id: id,
     conclusion: state,
+    coverage: "-",
     verdict: "IN PROGRESS (not scored)",
+    full: false,
+    green: false,
     scored: false,
   } else {
-    let jobs = json.parse(gh_api("repos/" + repo + "/actions/runs/" + id + "/jobs")!) ?? value.null()
-    let step = campaign_step(jobs, job_name, step_name)
+    let jobs = json.parse(gh_api("repos/" + repo + "/actions/runs/" + id + "/jobs?per_page=100")!) ?? value.null()
+    let vjob = verdict_job(jobs)
+    let s = if vjob == "absent" then legacy_score(
+      state,
+      campaign_step(jobs, legacy_job_name, legacy_step_name),
+    )
+    else {
+      // Sharded night: the record line in the verdict job's log carries the shards that
+      // reported, the ones that did not, and the minutes delivered. Per-job logs outlive
+      // `gh run view --log` and the 30-day artifacts.
+      let log = gh_api("repos/" + repo + "/actions/jobs/" + verdict_job_id(jobs) + "/logs")!
+      score(vjob, night_line(log), bar)
+    }
     Night {
       date: date_of(run),
       id: id,
       conclusion: state,
-      verdict: verdict_text(state, step),
+      coverage: s.coverage,
+      verdict: s.verdict,
+      full: s.full,
+      green: s.green,
       scored: true,
     }
   }
 }
 
-effect fn report(repo: String, n: Int, job_name: String, step_name: String) -> List[String] = {
+// `REPO="${FUZZ_REPO:-almide/almide}"` — the same override the bash honours.
+effect fn repo_of() -> String = {
+  let r = env.get("FUZZ_REPO") ?? ""
+  if r == "" then "almide/almide" else r
+}
+
+// `FUZZ_NIGHT_BUDGET_PCT="${FUZZ_NIGHT_BUDGET_PCT:-75}"` — the streak line, overridable.
+effect fn budget_bar() -> Int = {
+  let r = env.get("FUZZ_NIGHT_BUDGET_PCT") ?? ""
+  if r == "" then 75
+  else int.parse(r) ?? 75
+}
+
+effect fn report(n: Int) -> List[String] = {
+  let repo = repo_of()!
+  let bar = budget_bar()!
   let url = "repos/" + repo + "/actions/workflows/fuzz-nightly.yml/runs?event=schedule&per_page=" + int.to_string(n)
   let runs = json.get_array(json.parse(gh_api(url)!) ?? value.null(), "workflow_runs") ?? []
   var nights: List[Night] = []
   for r in runs {
     nights = nights + [
-      night_of(repo, r, job_name, step_name)!
+      night_of(repo, r, bar)!
     ]
   }
-  let header = row("date", "run", "conclusion", "verdict")
-  let rows = nights |> list.map((x) => row(x.date, x.id, x.conclusion, x.verdict))
+  let header = row("date", "run", "conclusion", "coverage", "verdict")
+  let rows = nights |> list.map((x) => row(x.date, x.id, x.conclusion, x.coverage, x.verdict))
   // Only SCORED nights reach the fold — an in-flight run is not a night.
-  let s = streak.streaks(nights |> list.filter((x) => x.scored) |> list.map((x) => streak.verdict_key(x.verdict)))
+  let s = streak.streaks(nights |> list.filter((x) => x.scored) |> list.map((x) => streak_key(Score { full: x.full, green: x.green, coverage: "", verdict: "" })))
   [header] + rows + [
     "",
-    "full-budget streak: " + int.to_string(s.full) + "/14  (#924 closes at 14)",
+    "verdict streak:     " + int.to_string(s.full) + "/14  (#924 closes at 14: nights at >= " + int.to_string(bar) + "% of planned fuzz-minutes)",
     "green streak:       " + int.to_string(s.green) + "/2   (#796 needs 2 consecutive)"
   ]
 }
@@ -133,20 +404,20 @@ test "the row format is the printf widths, and the last column is not padded" {
   // A padded final column adds trailing spaces to every line — invisible on screen, and a
   // byte difference against the original on every row.
   assert_eq(
-    row("2026-08-01", "123", "success", "GREEN"),
-    "2026-08-01   123           success     GREEN",
+    row("2026-08-01", "123", "success", "8/8 100%", "GREEN"),
+    "2026-08-01   123           success     8/8 100%      GREEN",
   )
   assert_eq(
-    row("date", "run", "conclusion", "verdict"),
-    "date         run           conclusion  verdict",
+    row("date", "run", "conclusion", "coverage", "verdict"),
+    "date         run           conclusion  coverage      verdict",
   )
 }
 
 test "an over-wide field is not truncated, only under-wide ones are padded" {
   // `printf`'s `%-12s` is a MINIMUM width. Truncating instead would corrupt a long run id.
   assert_eq(
-    row("2026-08-01", "99999999999999999", "x", "y"),
-    "2026-08-01   99999999999999999 x           y",
+    row("2026-08-01", "99999999999999999", "x", "1/1", "y"),
+    "2026-08-01   99999999999999999 x           1/1           y",
   )
 }
 
@@ -157,9 +428,179 @@ test "a run still in flight is printed but not scored" {
   assert_eq(in_flight("failure"), false)
 }
 
-test "the verdict text carries the step name only when the night was truncated" {
-  assert_eq(verdict_text("success", "success"), "GREEN")
-  assert_eq(verdict_text("failure", "success"), "FINDINGS (full budget, red on findings)")
-  assert_eq(verdict_text("failure", "absent"), "TRUNCATED (campaign step: absent)")
-  assert_eq(verdict_text("cancelled", "cancelled"), "TRUNCATED (campaign step: cancelled)")
+test "a legacy night carries the step name only when it was truncated" {
+  assert_eq(legacy_score("success", "success").verdict, "GREEN")
+  assert_eq(legacy_score("failure", "success").verdict, "FINDINGS (full budget, red on findings)")
+  assert_eq(legacy_score("failure", "absent").verdict, "TRUNCATED (campaign step: absent)")
+  assert_eq(legacy_score("cancelled", "cancelled").verdict, "TRUNCATED (campaign step: cancelled)")
+  assert_eq(legacy_score("failure", "success").full, true)
+  assert_eq(legacy_score("failure", "absent").full, false)
+}
+
+test "the record line is the last one, from the marker on, with the timestamp and CR gone" {
+  let log = "\u{feff}2026-09-19T07:49:18Z Current runner version\r\n2026-09-19T07:49:22Z fuzz-night: shards=1/8 old\r\nnoise\n2026-09-19T07:50:00Z fuzz-night: shards=5/8 reporting=5\r\n"
+  assert_eq(night_line(log), "fuzz-night: shards=5/8 reporting=5")
+  assert_eq(night_line("the job ran but wrote nothing recognisable\n"), "")
+  assert_eq(night_line(""), "")
+}
+
+test "a field is the first token that starts with its key, and a key is not matched inside another" {
+  let line = "fuzz-night: shards=7/8 reporting=7 missing=8 minutes_planned=40 minutes_delivered=35.0"
+  assert_eq(field(line, "shards"), "7/8")
+  assert_eq(field(line, "missing"), "8")
+  assert_eq(field(line, "minutes_planned"), "40")
+  assert_eq(field(line, "budget"), "")
+  assert_eq(field("fuzz-night: xshards=1/1", "shards"), "")
+}
+
+test "the percentage is truncated as awk's %d truncates, and is unknown without both minutes" {
+  assert_eq(delivered_pct("fuzz-night: minutes_planned=40 minutes_delivered=35.9"), "89")
+  assert_eq(delivered_pct("fuzz-night: minutes_planned=40 minutes_delivered=25.7"), "64")
+  assert_eq(delivered_pct("fuzz-night: minutes_planned=40 minutes_delivered=41.3"), "103")
+  assert_eq(delivered_pct("fuzz-night: minutes_planned=40"), "")
+  assert_eq(delivered_pct("fuzz-night: minutes_planned=0 minutes_delivered=3"), "")
+  assert_eq(delivered_pct("fuzz-night: minutes_planned=0.0 minutes_delivered=3"), "")
+}
+
+// The forged lines scripts/lib/fuzz-night-line.sh is tested on (tests/fuzz_night_report_test.rs),
+// scored to the same bits, coverage and text.
+test "a pre-#2390 line at 76% is a streak night whose missing shards are unknown" {
+  let s = score(
+    "failure",
+    "fuzz-night: shards=6/8 reporting=6 minutes_planned=40 minutes_delivered=30.7 generated=9980 throughput=324.9prog/min findings=23 correctness=23 slow=0",
+    75,
+  )
+  assert_eq(s.full, true)
+  assert_eq(s.green, false)
+  assert_eq(s.coverage, "6/8 76%")
+  assert_eq(s.verdict, "FINDINGS (verdict delivered, red on findings)")
+}
+
+test "a quarter-executed green night is PARTIAL, not a streak night" {
+  let s = score(
+    "success",
+    "fuzz-night: shards=1/8 reporting=2 minutes_planned=480 minutes_delivered=119.9 generated=20143 throughput=167.9prog/min findings=1 correctness=0 slow=1",
+    75,
+  )
+  assert_eq(s.full, false)
+  assert_eq(s.green, false)
+  assert_eq(s.coverage, "2/8 24%")
+  assert_eq(
+    s.verdict,
+    "PARTIAL 24% of planned fuzz-minutes — GREEN; below the 75% line, not a streak night",
+  )
+}
+
+test "a post-#2390 line at the bar counts, and names the shard that did not report" {
+  let s = score(
+    "success",
+    "fuzz-night: shards=7/8 reporting=7 missing=8 minutes_planned=40 minutes_delivered=35.0 delivered_pct=87 budget=full generated=9000 throughput=257.1prog/min findings=0 correctness=0 slow=0",
+    75,
+  )
+  assert_eq(s.full, true)
+  assert_eq(s.green, true)
+  assert_eq(s.coverage, "7/8 87%")
+  assert_eq(s.verdict, "GREEN (shard(s) 8 did not report: findings unknown, not zero)")
+  let two = score(
+    "failure",
+    "fuzz-night: shards=6/8 reporting=6 missing=3,8 minutes_planned=40 minutes_delivered=30.0",
+    75,
+  )
+  assert_eq(
+    two.verdict,
+    "FINDINGS (verdict delivered, red on findings) (shard(s) 3, 8 did not report: findings unknown, not zero)",
+  )
+}
+
+test "a night whose reclaimed shards were recovered counts, and says where their counts stop" {
+  // Run 35702279584 as #2513 recovers it: four shards killed at 295s/180s/275s/100s, read back
+  // out of their job logs, 34.2 of 40 minutes — over the line the unrecovered night missed.
+  let s = score(
+    "success",
+    "fuzz-night: shards=4/8 reporting=4 recovered=1@295s,2@180s,4@275s,6@100s missing=none minutes_planned=40 minutes_delivered=34.2 delivered_pct=85 budget=full generated=7021 findings=0 findings_recovered=0 correctness=0 slow=0",
+    75,
+  )
+  assert_eq(s.full, true)
+  assert_eq(s.green, true)
+  assert_eq(s.coverage, "4/8 85%")
+  assert_eq(
+    s.verdict,
+    "GREEN (shard(s) 1@295s, 2@180s, 4@275s, 6@100s recovered from their job logs: counted only up to the second named)",
+  )
+}
+
+test "a finding recovered from a reclaimed shard's log is not a green night" {
+  let s = score(
+    "success",
+    "fuzz-night: shards=7/8 reporting=7 recovered=8@200s missing=none minutes_planned=40 minutes_delivered=38.3 delivered_pct=95 budget=full findings=2 findings_recovered=2",
+    75,
+  )
+  assert_eq(s.full, true)
+  assert_eq(s.green, false)
+  assert_eq(
+    s.verdict,
+    "NOT GREEN (the shards that uploaded were clean, but 2 finding(s) came back in a reclaimed shard's log, class unknown, counted only to the second named) (shard(s) 8@200s recovered from their job logs: counted only up to the second named)",
+  )
+}
+
+test "no record line is NO RECORD: not full, not clean, coverage unknown" {
+  let s = score("success", "", 75)
+  assert_eq(s.full, false)
+  assert_eq(s.green, false)
+  assert_eq(s.coverage, "?")
+  assert_eq(
+    s.verdict,
+    "NO RECORD (verdict job wrote no fuzz-night: line) — GREEN; coverage unknown, not a streak night",
+  )
+  // A line with no minutes at all: the percentage cannot be derived, so it is unknown too.
+  let m = score("failure", "fuzz-night: shards=8/8 reporting=8 findings=0", 75)
+  assert_eq(m.coverage, "?")
+  assert_eq(m.full, false)
+}
+
+test "a verdict job that never concluded scores nothing either way, but still shows its coverage" {
+  let s = score(
+    "cancelled",
+    "fuzz-night: shards=8/8 reporting=8 minutes_planned=40 minutes_delivered=40.0 findings=0",
+    75,
+  )
+  assert_eq(s.full, false)
+  assert_eq(s.green, false)
+  assert_eq(s.coverage, "8/8 100%")
+  assert_eq(s.verdict, "NO VERDICT (verdict job: cancelled)")
+  assert_eq(score("cancelled", "", 75).coverage, "?")
+}
+
+test "a legacy record line without a reporting field reads reporting as completed" {
+  let b = budget_of("fuzz-night: shards=1/1 minutes_planned=40 minutes_delivered=40", 75)
+  assert_eq(b.reported, "1/1")
+  assert_eq(b.missing, "unknown")
+  assert_eq(b.budget, "full")
+  let none_at_all = budget_of("fuzz-night: minutes_planned=40 minutes_delivered=40", 75)
+  assert_eq(none_at_all.reported, "?/?")
+}
+
+test "the streak bits map onto the fold's keys: a green night is a full night" {
+  assert_eq(streak_key(Score { full: true, green: true, coverage: "", verdict: "" }), "GREEN")
+  assert_eq(streak_key(Score { full: true, green: false, coverage: "", verdict: "" }), "FINDINGS")
+  assert_eq(streak_key(Score { full: false, green: false, coverage: "", verdict: "" }), "TRUNCATED")
+}
+
+test "the verdict job's id is read for the log request, and a missing id is jq's null" {
+  let jobs = json.parse("{\"jobs\":[{\"name\":\"Night verdict\",\"id\":105863686105,\"conclusion\":\"success\",\"steps\":[]}]}") ?? value.null()
+  assert_eq(verdict_job_id(jobs), "105863686105")
+  assert_eq(verdict_job(jobs), "success")
+  let no_id = json.parse("{\"jobs\":[{\"name\":\"Night verdict\",\"conclusion\":\"failure\",\"steps\":[]}]}") ?? value.null()
+  assert_eq(verdict_job_id(no_id), "null")
+}
+
+test "a night with no verdict job, or one without a conclusion, reads as legacy" {
+  let none_at_all = json.parse("{\"jobs\":[{\"name\":\"Generative differential fuzz\",\"conclusion\":\"failure\",\"steps\":[{\"name\":\"Run fuzz campaign\",\"conclusion\":\"success\"}]}]}") ?? value.null()
+  assert_eq(verdict_job(none_at_all), "absent")
+  assert_eq(
+    campaign_step(none_at_all, "Generative differential fuzz", "Run fuzz campaign"),
+    "success",
+  )
+  let unconcluded = json.parse("{\"jobs\":[{\"name\":\"Night verdict\",\"conclusion\":null,\"steps\":[]}]}") ?? value.null()
+  assert_eq(verdict_job(unconcluded), "absent")
 }

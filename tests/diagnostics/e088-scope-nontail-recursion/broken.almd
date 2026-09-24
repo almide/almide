@@ -1,0 +1,10 @@
+type Chain = | Nil | Cons(Int, Chain)
+
+scoped fn total(c: Chain) -> Int = match c {
+  Nil => 0,
+  Cons(h, t) => h + total(t),
+}
+
+effect fn main() -> Unit = println(int.to_string(scoped {
+  total(Cons(1, Cons(2, Nil)))
+}))

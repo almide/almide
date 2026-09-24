@@ -48,6 +48,7 @@ structural leg.
 | AST → IR lowering | trusted | the checker's `TypeMap` is the source of truth; 974-file emit baselines |
 | IR → MIR lowering | **trusted** | ← *this is the gap F3 (#777) is about* |
 | MIR ownership witness | **proven to be re-checkable** | `proofs/gate.sh`: the untrusted producer emits a witness, the kernel-proven checker re-verifies it |
+| `almide-verify` (the checker a binary distribution runs, #2152) | trusted — agreement-gated, not proven | an independently versioned Rust transcription of the five Coq checkers, linking no compiler crate; `proofs/gate.sh` holds it to the extracted checker's verdict on every row plus a seeded random differential, `proofs/corpus-wall.sh` on the whole corpus witness set |
 | MIR → wasm bytes | trusted | `proofs/check-wasm-bytes.sh`, `WasmEncode.v` for the `rc_inc`/`rc_dec` byte trees |
 | wasmtime | unqualified tool | out of scope by construction |
 
@@ -160,11 +161,27 @@ caught two real compiler bugs (almide#1428: checker-accepted program dies
 in codegen; almide#1429: the v1 renderer splits an effect fn's signature
 from its body on a bare-parameter tail) — the gate bites.
 
+### Above L1: L4 and L5 (`edit-locality.md` §1a)
+
+Each obligation is split by what can be said about it, because the halves
+have different standings and a single "L4 holds" would hide which one was
+checked. All theorems below are in
+`crates/almide-edit-belt/AlmideEditBelt/Contract.lean`, 0 `sorry`, no new
+axiom.
+
+| Obligation | Standing | Claims | Does NOT claim |
+|---|---|---|---|
+| L4, effect frame | **proven** (`l4_pure_replacement_silent`) | a replacement of a pure-declared definition that checks against the unchanged signature produces an empty trace, in any environment, in the edited λ_almd program | anything about the replacement's return value, or about what a caller does with it — the caller may print something different next |
+| L4, non-vacuity | **proven** (`l4_witness`, `l4_loud_replacement_prints`) | the four hypotheses hold together, and without the purity hypothesis the conclusion is false (an effectful replacement prints `"hi"`) | that the hypotheses are the weakest possible |
+| L4, resource frame (`scoped`, #1997) | **gated**, not proven — C-362 / C-363 / C-364 fixtures | a `scoped` block's observables are its body's; a `scoped fn` answers the same inside and outside a region; an out-of-fragment shape is refused at check time on both targets | any property of λ_almd: the kernel has no heap and no regions, so there is no statement to make there until a region component is added |
+| L5, composition | **proven** (`l5_edits_compose`, `l5_pure_silent_after_edits`) | any sequence of signature-preserving replacements keeps the program well-typed, and every pure-declared definition in the result is silent | that the sequence preserves any observable other than the empty trace of pure code |
+| L5, realization on both targets | **trusted** — backend refinement | — | that the checked lowering (#1995's ExitPlan, #1996's E-OWN-LOWERING) preserves the above on native and wasm. That is the same kernel-to-backend seam as every other row in this section, gated by `spec/wasm_cross` and the contract ledger, not proven |
+
 ## What each gate actually claims
 
 | Gate | Claim | NOT a claim |
 |---|---|---|
-| `proofs/gate.sh` | the witnessed MIR is RC-safe, name-total, capability-bounded | that the wasm bytes match the witness |
+| `proofs/gate.sh` | the witnessed MIR is RC-safe, name-total, capability-bounded; `almide-verify` gives the extracted checker's verdict on every row and on 1,000 seeded random witnesses | that the wasm bytes match the witness; that `almide-verify` agrees on inputs outside those rows (it carries no theorem) |
 | `proofs/corpus-wall.sh` | `lower_function` is total over the corpus: every function is `Ok` or an explicit `Unsupported` | that an `Ok` function has correct output |
 | `proofs/output-parity.sh` | native and wasm agree, for the baseline set | anything outside that set |
 | `scripts/check-contracts.sh` | every observable cross-target promise has executable evidence | that the promise is the right one |

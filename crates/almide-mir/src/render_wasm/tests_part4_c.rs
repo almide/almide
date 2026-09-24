@@ -317,7 +317,9 @@
 
     #[test]
     fn self_hosted_audit_clean_batch() {
-        // int.to_float32_checked (Option round-trip), string.clear (borrow+store len=0), and
+        // int.to_float32_checked (Option round-trip), string.clear (a var rebind to the
+        // empty literal — #2465: the self-hosted borrow+store twin cleared the SHARED
+        // block under an alias, so `rewrite_clear` never reaches it), and
         // bytes.read_f32_be/le (4-byte f32 read → Float). All audit-confirmed clean.
         let src = "fn main() -> Unit = {\n  \
             match int.to_float32_checked(100) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
@@ -328,7 +330,8 @@
             bytes.set_u32_le(b, 0, 1069547520)\n  let g = bytes.read_f32_le(b, 0)\n  let eq2 = prim.feq(g, 1.5)\n  let ne2 = if eq2 then 1 else 0\n  println(int.to_string(ne2)) }\n";
         let prog = lower_source(src);
         assert!(prog.functions.iter().any(|f| f.name == "int.to_float32_checked"));
-        assert!(prog.functions.iter().any(|f| f.name == "string.clear"));
+        // The clear is a rebind, not a call: no `string.clear` twin may be linked.
+        assert!(!prog.functions.iter().any(|f| f.name == "string.clear"));
         assert!(prog.functions.iter().any(|f| f.name == "bytes.read_f32_be"));
         if let Some(out) = build_and_run("self_hosted_audit_clean_batch", &render_wasm_program(&prog)) {
             // 100 round-trips f32 (some); 2^24+1 loses precision (none); clear -> len 0; 1069547520=0x3FC00000=f32 1.5.

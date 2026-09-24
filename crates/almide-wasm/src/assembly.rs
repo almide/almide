@@ -259,6 +259,12 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         };
         globals.global(GlobalType { val_type: vt, mutable: true, shared: false }, &init);
     }
+    // #2407: the allocation counters, APPENDED after the top-let globals so
+    // no existing index moves — four i64 globals `$alloc` / `$free` bump,
+    // present only under the `alloc_count` switch (a shipped module has
+    // none: byte-identical to a build without the switch).
+    let counters = crate::alloc_count::armed().then(|| G_FIXED_COUNT + global_decls.len() as u32);
+    crate::alloc_count::declare_globals(&mut globals, counters);
 
     let mut exports = ExportSection::new();
     exports.export("memory", ExportKind::Memory, 0);
@@ -274,6 +280,8 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     if work.region_used.get() {
         exports.export("__heap_high", ExportKind::Global, G_HEAP_HIGH);
     }
+    // #2407: the counters, read by the host beside `__heap` (armed only).
+    crate::alloc_count::export_globals(&mut exports, counters);
     // #457: every clean-closure entry pub fn is host-callable.
     for (name, idx) in export_fns {
         exports.export(name, ExportKind::Func, *idx);
@@ -307,7 +315,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         (F_ITOA, emit_itoa()),
         (F_APPEND_I64, emit_append_i64()),
         (F_APPEND_BOOL, emit_append_bool(true_base, false_base)),
-        (F_ALLOC, emit_alloc(oom_msg)),
+        (F_ALLOC, emit_alloc(oom_msg, counters)),
         (F_INT_TO_STRING, emit_int_to_string()),
         (F_CONCAT, emit_concat()),
         (F_STR_EQ, emit_str_eq()),
@@ -329,7 +337,7 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         (F_STR_CMP, emit_str_cmp()),
         (F_STR_REPLACE, emit_str_replace()),
         (F_COPY, emit_copy()),
-        (F_FREE, emit_free()),
+        (F_FREE, emit_free(counters)),
         (F_INC, emit_inc()),
         (F_DEC_FLAT, emit_dec_flat()),
         (F_COW, emit_cow()),
@@ -409,15 +417,15 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
 /// complexity budget).
 fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usize) -> Function {
     match h {
-    Helper::JsonValue { float_to_string, frags } => value_helpers::emit_json_value_helper(
+    Helper::JsonValue { float_to_string, frags } => json_helpers::emit_json_value_helper(
         work.helper_base.get(),
         helper_snapshot,
         *float_to_string,
         *frags,
     ),
-    Helper::JsonQuote { frags } => value_helpers::emit_json_quote_helper(*frags),
+    Helper::JsonQuote { frags } => json_helpers::emit_json_quote_helper(*frags),
     Helper::JsonValuePretty { float_to_string, frags, pfrags } => {
-        value_helpers::emit_json_value_pretty_helper(
+        json_helpers::emit_json_value_pretty_helper(
             work.helper_base.get(),
             helper_snapshot,
             *float_to_string,
@@ -442,7 +450,10 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
     Helper::BytesToString { inv_pre, inv_mid, inc_pre } => {
         utf8_helpers::emit_bytes_to_string_helper(*inv_pre, *inv_mid, *inc_pre)
     }
-    _ => match map_index::helper_body(h).or_else(|| runtime_alloc::helper_body(h, work)) {
+    _ => match map_index::helper_body(h)
+        .or_else(|| runtime_alloc::helper_body(h, work))
+        .or_else(|| runtime_line::helper_body(h, work))
+    {
         Some(f) => f,
         None => helper_body_b(h, work, helper_snapshot),
     },
@@ -462,7 +473,10 @@ pub(crate) fn resolve_extras(
     // lowering; the table-entry extras follow.
     let helper_snapshot: Vec<Helper> = work.helpers.borrow().clone();
     for (hpos, h) in helper_snapshot.iter().enumerate() {
-        let params = match map_index::helper_params(h).or_else(|| runtime_alloc::helper_params(h)) {
+        let params = match map_index::helper_params(h)
+            .or_else(|| runtime_alloc::helper_params(h))
+            .or_else(|| runtime_line::helper_params(h))
+        {
             Some(p) => p,
             None => match h {
             Helper::ValueKeys
@@ -485,6 +499,7 @@ pub(crate) fn resolve_extras(
         };
         let ret = match h {
             Helper::FastExp | Helper::GeluScalar { .. } | Helper::Q10Val => Some(ValType::F64),
+            _ if runtime_line::helper_is_void(h) => None,
             _ => runtime_alloc::helper_result(h),
         };
         let ti = work.itype(params, ret);

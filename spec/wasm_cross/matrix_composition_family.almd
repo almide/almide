@@ -1,0 +1,123 @@
+// @contract: C-161, C-223
+// Native's fused matrix entry points are its own compositions, and they run
+// byte-identically on every leg once each leg serves the leaves (#1423 stage
+// 4; stdlib/matrix_fused.almd links them prim-free):
+// - fma / fma3: native's `x*ka + y*kb [+ z*kc]` — two rounded products and a
+//   rounded sum per term, never a fused step — IS add∘scale, zip shape included;
+// - fused_gemm_bias_scale_gelu = gelu∘scale∘add∘mul, linear_row_gelu =
+//   gelu∘linear_row, pre_norm_linear = linear_row∘layer_norm_rows,
+//   attention_weights = softmax_rows∘scale∘mul, scaled_dot_product_attention
+//   multiplies that by V, mul_scaled = scale∘mul — gelu and softmax through the
+//   canonical fast-exp (C-223);
+// - append_rows: an operand with no rows yields the other, else base's rows
+//   then extra's;
+// - linear_f32_row_no_bias: the sequential widen-mul-add dot over the f32
+//   weights in the byte buffer, the all-zero rows(x) × w_rows matrix for an
+//   empty extent, a negative offset read from 0;
+// - the f32 family (C-161's `_f32` constructor aliases, mul_f32 and its scaled
+//   / transposed forms) is the f64 arithmetic on every leg.
+fn show(tag: String, m: Matrix) -> Unit = {
+  let l = matrix.to_lists(m)
+  let s = matrix.shape(m)
+  println("${tag}: ${s} ${l}")
+}
+
+fn main() -> Unit = {
+  let a = matrix.from_lists([
+    [1.0, 2.0, 3.0],
+    [4.0, 5.0, 6.0]
+  ])
+  let b = matrix.from_lists([
+    [0.5, -1.0],
+    [2.0, 8.0],
+    [3.0, 0.25]
+  ])
+  let c = matrix.from_lists([
+    [1.0, 0.0, 1.0],
+    [0.0, 1.0, 0.0],
+    [1.0, 1.0, 1.0]
+  ])
+  let e = matrix.zeros(0, 0)
+  show("fma", matrix.fma(a, 2.0, c, -3.0))
+  show(
+    "fma_zip",
+    matrix.fma(
+      a,
+      1.0,
+      matrix.from_lists([
+        [10.0, 20.0],
+        [30.0, 40.0],
+        [50.0, 60.0]
+      ]),
+      1.0,
+    ),
+  )
+  show("fma3", matrix.fma3(a, 2.0, c, -3.0, a, 0.5))
+  show(
+    "fgemm",
+    matrix.fused_gemm_bias_scale_gelu(
+      a,
+      b,
+      matrix.from_lists([
+        [0.5, 1.0],
+        [0.0, -1.0]
+      ]),
+      0.125,
+    ),
+  )
+  show("lin_gelu", matrix.linear_row_gelu(a, c, [0.5, -0.5, 1.0]))
+  show(
+    "pre_norm",
+    matrix.pre_norm_linear(a, [1.0, 1.0, 1.0], [0.0, 0.0, 0.0], 0.0, c, [0.0, 1.0, 2.0]),
+  )
+  show("mul_scaled", matrix.mul_scaled(a, 0.5, b))
+  show("attn", matrix.attention_weights(a, b, 0.25))
+  show(
+    "sdpa",
+    matrix.scaled_dot_product_attention(
+      a,
+      b,
+      matrix.from_lists([
+        [1.0],
+        [2.0]
+      ]),
+      0.25,
+    ),
+  )
+  show("append", matrix.append_rows(a, matrix.from_lists([
+    [7.0, 8.0, 9.0]
+  ])))
+  show("append_base0", matrix.append_rows(e, a))
+  show("append_extra0", matrix.append_rows(a, matrix.zeros(0, 5)))
+  let w = matrix.from_lists([
+    [0.1, 0.25, -3.0],
+    [1.5, 2.0, 0.3],
+    [-0.7, 0.0, 9.0],
+    [1.0, 1.0, 1.0]
+  ])
+  let wb = matrix.to_bytes_f32_le(w)
+  let x = matrix.from_lists([
+    [1.1, 2.2, 3.3],
+    [-0.5, 0.125, 7.0]
+  ])
+  show("lin_f32", matrix.linear_f32_row_no_bias(x, wb, 0, 4, 3))
+  show("lin_f32_off", matrix.linear_f32_row_no_bias(x, wb, 12, 3, 3))
+  show("lin_f32_negoff", matrix.linear_f32_row_no_bias(x, wb, -5, 2, 3))
+  show("lin_f32_rows0", matrix.linear_f32_row_no_bias(x, wb, 0, 0, 3))
+  show("lin_f32_cols0", matrix.linear_f32_row_no_bias(x, wb, 0, 2, 0))
+  let f = matrix.ones_f32(2, 3)
+  let z = matrix.zeros_f32(3, 2)
+  let fs = matrix.shape(f)
+  let zs = matrix.shape(z)
+  let z21 = matrix.get(z, 2, 1)
+  println("f32 ctors: ${fs} ${zs} ${z21}")
+  let m1 = matrix.mul_f32(f, matrix.ones_f32(3, 2))
+  let m2 = matrix.mul_f32_scaled(f, 4.0, matrix.ones_f32(3, 2))
+  let m3 = matrix.mul_f32_t(f, matrix.ones_f32(2, 3))
+  let m4 = matrix.mul_f32_t_scaled(f, 0.5, matrix.ones_f32(2, 3))
+  let v1 = matrix.get(m1, 1, 1)
+  let v2 = matrix.get(m2, 0, 0)
+  let s3 = matrix.shape(m3)
+  let v4 = matrix.get(m4, 1, 1)
+  println("f32 mul: ${v1} ${v2} ${s3} ${v4}")
+}

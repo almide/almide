@@ -647,55 +647,204 @@ hel
 ## Signature index (50 functions)
 
 ```
+// s without leading/trailing whitespace.
+// @since 0.5.0 or earlier
 string.trim(s: String) -> String
+
+// Pieces around sep; empty pieces kept.
+// @since 0.5.0 or earlier
 string.split(s: String, sep: String) -> List[String]
+
+// Split at the FIRST occurrence of `sep`: `(before, after)`, none ⇔ `sep` absent.
+// @since 0.57.0
 string.split_once(s: String, sep: String) -> Option[(String, String)]
+
+// Items with sep between; "" for [].
+// @since 0.5.0 or earlier
 string.join(list: List[String], sep: String) -> String
+
+// Codepoint count (not bytes).
+// @since 0.5.0 or earlier
 string.len(s: String) -> Int
+
+// Alias of string.len.
+// @since 0.19.2 or earlier
 string.length(s: String) -> Int   (deprecated — use string.len)
+
+// sub occurs in s; true for empty sub.
+// @since 0.6.0 or earlier
 string.contains(s: String, sub: String) -> Bool
+
+// s begins with prefix; "" always matches.
+// @since 0.6.0 or earlier
 string.starts_with(s: String, prefix: String) -> Bool
+
+// s ends with suffix; "" always matches.
+// @since 0.6.0 or earlier
 string.ends_with(s: String, suffix: String) -> Bool
+
+// Codepoints [start, end), clamped to s.
+// @since 0.5.0 or earlier
 string.slice(s: String, start: Int, end: Int) -> String
+
+// Byte range [start, end); none if bad or mid-char.
+// @since 0.63.0
 string.byte_slice(s: String, start: Int, end: Int) -> Option[String]
+
+// Left-padded to n chars with ch; never truncates.
+// @since 0.6.1 or earlier
 string.pad_start(s: String, n: Int, ch: String) -> String
+
+// UTF-8 bytes of s as Ints 0..255.
+// @since 0.5.0 or earlier
 string.to_bytes(s: String) -> List[Int]
+
+// First char uppercased, rest untouched.
+// @since 0.5.13 or earlier
 string.capitalize(s: String) -> String
+
+// Unicode uppercase; may lengthen s.
+// @since 0.5.0 or earlier
 string.to_upper(s: String) -> String
+
+// Unicode lowercase, not just ASCII.
+// @since 0.5.0 or earlier
 string.to_lower(s: String) -> String
+
+// Every from replaced by to.
+// @since 0.5.0 or earlier
 string.replace(s: String, from: String, to: String) -> String
+
+// Codepoint at i, or none if out of range.
+// @since 0.6.1 or earlier
 string.get(s: String, i: Int) -> Option[String]
+
+// Split on \n or \r\n; endings dropped.
+// @since 0.5.0 or earlier
 string.lines(s: String) -> List[String]
+
+// Each codepoint as a one-char string.
+// @since 0.5.0 or earlier
 string.chars(s: String) -> List[String]
+
+// Codepoint index of first needle, or none.
+// @since 0.5.0 or earlier
 string.index_of(s: String, needle: String) -> Option[Int]
+
+// s repeated n times; empty for n <= 0.
+// @since 0.5.0 or earlier
 string.repeat(s: String, n: Int) -> String
+
+// Lossy UTF-8 decode; bad sequences become U+FFFD.
+// @since 0.5.0 or earlier
 string.from_bytes(bytes: List[Int]) -> String
+
+// All ASCII 0-9; false for empty s.
+// @since 0.6.0 or earlier
 string.is_digit(s: String) -> Bool
+
+// All Unicode letters; false for empty s.
+// @since 0.6.0 or earlier
 string.is_alpha(s: String) -> Bool
+
+// All letters/digits; false for empty s.
+// @since 0.6.0 or earlier
 string.is_alphanumeric(s: String) -> Bool
+
+// All whitespace; true for empty s.
+// @since 0.6.0 or earlier
 string.is_whitespace(s: String) -> Bool
+
+// Has letters, all uppercase; others ignored.
+// @since 0.6.0 or earlier
 string.is_upper(s: String) -> Bool
+
+// Has letters, all lowercase; others ignored.
+// @since 0.6.0 or earlier
 string.is_lower(s: String) -> Bool
+
+// Scalar value of first char; none if s empty.
+// @since 0.6.0 or earlier
 string.codepoint(s: String) -> Option[Int]
+
+// One-char string; "" if n is not a scalar.
+// @since 0.6.0 or earlier
 string.from_codepoint(n: Int) -> String
+
+// Right-padded to n chars with ch; never truncates.
+// @since 0.6.1 or earlier
 string.pad_end(s: String, n: Int, ch: String) -> String
+
+// s without leading whitespace.
+// @since 0.5.0 or earlier
 string.trim_start(s: String) -> String
+
+// s without trailing whitespace.
+// @since 0.5.0 or earlier
 string.trim_end(s: String) -> String
+
+// Non-overlapping sub count; len+1 if sub empty.
+// @since 0.5.0 or earlier
 string.count(s: String, sub: String) -> Int
+
+// True only for ""; " " is not empty.
+// @since 0.6.0 or earlier
 string.is_empty(s: String) -> Bool
+
+// Codepoints reversed; not grapheme-aware.
+// @since 0.5.0 or earlier
 string.reverse(s: String) -> String
+
+// s without prefix, or none if s lacks it.
+// @since 0.5.0 or earlier
 string.strip_prefix(s: String, prefix: String) -> Option[String]
+
+// s without suffix, or none if s lacks it.
+// @since 0.5.0 or earlier
 string.strip_suffix(s: String, suffix: String) -> Option[String]
+
+// First from replaced by to, if any.
+// @since 0.5.0 or earlier
 string.replace_first(s: String, from: String, to: String) -> String
+
+// Codepoint index of last needle, or none.
+// @since 0.5.0 or earlier
 string.last_index_of(s: String, needle: String) -> Option[Int]
+
+// Leading codepoint, or none if empty.
+// @since 0.7.0 or earlier
 string.first(s: String) -> Option[String]
+
+// Final codepoint, or none if empty.
+// @since 0.7.0 or earlier
 string.last(s: String) -> Option[String]
+
+// First n codepoints; all of s if n < 0.
+// @since 0.7.0 or earlier
 string.take(s: String, n: Int) -> String
+
+// Last n codepoints; all of s if n < 0.
+// @since 0.7.0 or earlier
 string.take_end(s: String, n: Int) -> String
+
+// s minus first n codepoints; "" if n < 0.
+// @since 0.7.0 or earlier
 string.drop(s: String, n: Int) -> String
+
+// s minus last n codepoints; "" if n < 0.
+// @since 0.7.0 or earlier
 string.drop_end(s: String, n: Int) -> String
+
+// (char, count) per run of equal codepoints.
+// @since 0.14.6 or earlier
 string.run_length_encode(s: String) -> List[(String, Int)]
+
+// Appends suffix to s in place.
+// @since 0.23.3 or earlier
 string.push(s: String, suffix: String) -> Unit
+
+// Empties s in place.
+// @since 0.23.3 or earlier
 string.clear(s: String) -> Unit
 ```
 

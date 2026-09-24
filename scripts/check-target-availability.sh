@@ -12,7 +12,16 @@
 #                                     shrink direction, a leg that
 #                                     started serving)
 #   leg without a reason            → FAIL (mandatory-stability rule)
-#   pending-self-host count         → shrink-only ratchet vs the ceiling
+#   class missing / unknown         → FAIL (schema 3: every row names its
+#                                     closure class — pending-self-host,
+#                                     pending-port, native-only-forever)
+#   pending-self-host row count     → shrink-only ratchet vs the ceiling
+#   pending-port row count          → shrink-only ratchet vs its ceiling
+#   native-only-forever row         → FAIL without a `justification`
+#                                     sentence; a pending row → FAIL
+#                                     without an `issue`
+#   reason tag vs class             → FAIL when `reason = "pending-self-host"`
+#                                     sits on a row of another class
 #   probe `error` line              → FAIL (a public fn the synthesizer
 #                                     could not build a probe for — the
 #                                     probe is the thing to fix; a silent
@@ -32,7 +41,10 @@
 #
 # Tool policy (#921): locally a missing binary is an honest skip; in CI a
 # failure. The probe needs the built almide binary (ALMIDE env or
-# target/release/almide).
+# target/release/almide). AVAIL_TSV_DIR=<dir> reuses a previous sweep's
+# per-leg TSVs (written there when the dir is empty) so the declaration
+# side can be iterated — or forged, for the negative test — without
+# re-probing ~1000 fns per leg.
 set -euo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
@@ -46,7 +58,11 @@ if ! "$ALMIDE" --version >/dev/null 2>&1; then
   exit 0
 fi
 command -v python3 >/dev/null 2>&1 || { echo "python3 missing"; exit 1; }
-tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+if [ -n "${AVAIL_TSV_DIR:-}" ]; then
+  tmp="$AVAIL_TSV_DIR"; mkdir -p "$tmp"
+else
+  tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+fi
 
 if [ "${AVAIL_EMBEDDED:-}" = "1" ] || [ "${CI:-}" = "true" ] && [ "${AVAIL_EMBEDDED:-}" != "0" ]; then
   LEGS="structural stock-p1 embedded"
@@ -57,6 +73,10 @@ fi
 # lines are in the TSV and the diff below reports them by name, so the
 # sweep continues to the report instead of dying on set -e here.
 for leg in $LEGS; do
+  if [ -n "${AVAIL_TSV_DIR:-}" ] && [ -s "$tmp/$leg.tsv" ]; then
+    echo "check-target-availability: reusing $tmp/$leg.tsv"
+    continue
+  fi
   ALMIDE="$ALMIDE" python3 tools/target_availability_probe.py --leg "$leg" > "$tmp/$leg.tsv" || true
 done
 
@@ -67,6 +87,8 @@ import sys
 tmp, toml_path, legs = sys.argv[1], sys.argv[2], sys.argv[3:]
 toml = open(toml_path).read()
 ceiling = int(re.search(r"^pending_self_host_ceiling = (\d+)$", toml, re.M).group(1))
+port_ceiling = int(re.search(r"^pending_port_ceiling = (\d+)$", toml, re.M).group(1))
+CLASSES = ("pending-self-host", "pending-port", "native-only-forever")
 
 
 def unprobed_ceiling(leg):
@@ -78,13 +100,33 @@ def unprobed_ceiling(leg):
     return int(m.group(1))
 
 
-# declared[leg] = {fn}; reasons[(fn, leg)] = reason
+# declared[leg] = {fn}; reasons[(fn, leg)] = reason; classes[fn] = class
 declared = {leg: set() for leg in legs}
 reasons = {}
+classes = {}
 row_count = 0
+fail = 0
 for block in re.findall(r"\[\[unavailable\]\]\n(?:[a-z0-9_-]+ = .*\n)+", toml):
     fn = re.search(r'fn = "([^"]+)"', block).group(1)
     row_count += 1
+    cls = re.search(r'^class = "([^"]*)"$', block, re.M)
+    cls = cls.group(1) if cls else ""
+    if cls not in CLASSES:
+        print(f"::error::row {fn}: class {cls!r} is not one of {'/'.join(CLASSES)} — every row names its closure class (schema 3)")
+        fail = 1
+    classes[fn] = cls
+    tagged_pending = re.search(r'^reason(?:-[a-z0-9-]+)? = "pending-self-host"$', block, re.M) is not None
+    if tagged_pending and cls != "pending-self-host":
+        print(f"::error::row {fn}: reason says pending-self-host but class is {cls!r} — the tag and the class cannot disagree")
+        fail = 1
+    if cls == "native-only-forever":
+        j = re.search(r'^justification = "([^"]*)"$', block, re.M)
+        if not j or len(j.group(1).split()) < 8:
+            print(f"::error::row {fn}: native-only-forever without a justification sentence (why the fn cannot exist on the wasm target as specified)")
+            fail = 1
+    elif cls.startswith("pending-") and not re.search(r'^issue = "#\d+"$', block, re.M):
+        print(f"::error::row {fn}: {cls} without an `issue` — a pending row names where it closes")
+        fail = 1
     row_legs = re.findall(r'"([a-z0-9-]+)"', re.search(r"legs = \[(.*)\]", block).group(1))
     shared = re.search(r'^reason = "([^"]*)"$', block, re.M)
     for leg in row_legs:
@@ -93,7 +135,6 @@ for block in re.findall(r"\[\[unavailable\]\]\n(?:[a-z0-9_-]+ = .*\n)+", toml):
         if leg in declared:
             declared[leg].add(fn)
 
-fail = 0
 probed = {}
 for leg in legs:
     walls, oks, unprobed, errors = set(), set(), {}, {}
@@ -136,18 +177,27 @@ for leg in legs:
         print(f"::error::[{leg}] unprobed shrank to {len(unprobed)} — lower unprobed_ceiling_{leg.replace('-', '_')} to match (ratchet bookkeeping)")
         fail = 1
 
-pending = sum(1 for (fn, leg), r in reasons.items() if r == "pending-self-host" and leg == "structural")
+pending = sum(1 for c in classes.values() if c == "pending-self-host")
 if pending > ceiling:
     print(f"::error::pending-self-host grew: {pending} > ceiling {ceiling} (the ratchet only shrinks)")
     fail = 1
 if pending < ceiling:
     print(f"::error::pending-self-host shrank to {pending} — lower pending_self_host_ceiling to match (ratchet bookkeeping)")
     fail = 1
+pending_port = sum(1 for c in classes.values() if c == "pending-port")
+if pending_port > port_ceiling:
+    print(f"::error::pending-port grew: {pending_port} > ceiling {port_ceiling} (the ratchet only shrinks)")
+    fail = 1
+if pending_port < port_ceiling:
+    print(f"::error::pending-port shrank to {pending_port} — lower pending_port_ceiling to match (ratchet bookkeeping)")
+    fail = 1
+forever = sum(1 for c in classes.values() if c == "native-only-forever")
 
 if not fail:
     per = ", ".join(f"{leg}={len(declared[leg])}" for leg in legs)
     swept = ", ".join(f"{leg}={probed[leg]}" for leg in legs)
     print(f"target-availability OK ({row_count} rows; fns swept per leg: {swept}; declared walls per leg: {per}; "
-          f"pending-self-host {pending}/{ceiling}; two directions agree per swept leg).")
+          f"classes: pending-self-host {pending}/{ceiling}, pending-port {pending_port}/{port_ceiling}, "
+          f"native-only-forever {forever}; two directions agree per swept leg).")
 sys.exit(fail)
 PY

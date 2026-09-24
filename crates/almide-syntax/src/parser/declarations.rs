@@ -72,6 +72,18 @@ impl Parser {
         Ok(Decl::Module { path, span: Some(span) })
     }
 
+    /// `import fan` on a line of its own (no alias, no selector): the no-op
+    /// import of an always-in-scope surface (#2541). Any other shape that
+    /// starts `import fan` still reaches `parse_import_decl`'s diagnostic.
+    pub(crate) fn at_bare_import_fan(&self) -> bool {
+        self.check(TokenType::Import)
+            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Fan)
+            && matches!(
+                self.peek_at(2).map(|t| &t.token_type),
+                None | Some(TokenType::Newline) | Some(TokenType::Comment) | Some(TokenType::EOF)
+            )
+    }
+
     pub(crate) fn parse_import_decl(&mut self) -> Result<Decl, String> {
         let span = self.current_span();
         self.expect(TokenType::Import)?;
@@ -84,12 +96,15 @@ impl Parser {
             ));
         }
 
-        // `fan` is a keyword head, not a module — without this the user gets a
+        // `fan` is a keyword head, not a module. A bare `import fan` never
+        // reaches here (the caller accepts it as a no-op, #2541); what does is
+        // `import fan as f` / `import fan.{…}` — an alias or selector for a
+        // surface that has no module behind it. Without this the user gets a
         // raw "Expected identifier (got Fan 'fan')" that hides the actual fix.
         if self.check(TokenType::Fan) {
             let tok = self.current();
             return Err(format!(
-                "'fan' is auto-available — it is a built-in surface, not a module, at line {}:{}\n  Hint: Remove the `import fan` line; fan.bounded / fan.race / fan.timeout are always in scope",
+                "'fan' is auto-available — it is a built-in surface, not a module, so it takes no alias or selector, at line {}:{}\n  Hint: Write `fan.timeout(...)` / `fan.map(...)` directly — fan is always in scope; a plain `import fan` is accepted but not needed",
                 tok.line, tok.col
             ));
         }
@@ -159,6 +174,7 @@ impl Parser {
         if self.check(TokenType::Fn) || self.check(TokenType::Pub)
             || self.check(TokenType::Effect)
             || self.check(TokenType::Local) || self.check(TokenType::Mod)
+            || self.at_scoped_fn_head()
         {
             return self.parse_qualified_top_decl();
         }
@@ -438,18 +454,26 @@ impl Parser {
         let name = self.expect_type_name()?;
         let generics = self.try_parse_generic_params()?;
         // Conventions: type Name: Eq, Show = ...
+        // Each entry is a protocol reference (#1589): `ports.Repository[K, V]`
+        // keeps its bare name in `deriving` and its qualifier / type
+        // arguments in `deriving_refs`.
+        let mut refs = Vec::new();
+        let mut deriving_spans = Vec::new();
         let deriving = if self.check(TokenType::Colon) {
             self.advance();
             let mut d = Vec::new();
-            d.push(self.expect_type_name()?);
+            let (n, r, sp) = self.parse_protocol_ref()?;
+            d.push(n); refs.push(r); deriving_spans.push(sp);
             while self.check(TokenType::Comma) {
                 self.advance();
-                d.push(self.expect_type_name()?);
+                let (n, r, sp) = self.parse_protocol_ref()?;
+                d.push(n); refs.push(r); deriving_spans.push(sp);
             }
             Some(d)
         } else {
             None
         };
+        let deriving_refs = crate::ast::protocol_refs_if_any(refs);
         self.skip_newlines();
         self.expect(TokenType::Eq)?;
         let type_start = self.pos;
@@ -472,7 +496,7 @@ impl Parser {
         if let TypeExpr::Variant { comments, .. } = &mut ty {
             *comments = super::variant_comments::collect(&self.tokens[type_start..self.pos]);
         }
-        Ok(Decl::Type { name, ty, deriving, visibility, generics, span: Some(span) })
+        Ok(Decl::Type { name, ty, deriving, deriving_refs, deriving_spans, visibility, generics, span: Some(span) })
     }
 
     fn parse_protocol_decl(&mut self) -> Result<Decl, String> {
@@ -669,16 +693,27 @@ impl Parser {
 
     /// The implicit `self` receiver, if the list opens with one. It carries the
     /// `Self` type and no attributes; a following comma is consumed too.
+    ///
+    /// `mut self` is the same receiver with the mutable-borrow mode (#1589):
+    /// exactly the param `mut self: Self` spells, so the shorthand parses
+    /// everywhere the typed form does. A `mut self:` with an explicit type is
+    /// left to the ordinary param parse.
     fn take_self_param(&mut self, params: &mut Vec<Param>) {
-        if !self.check_ident("self") {
+        let is_mut = self.check(TokenType::Mut)
+            && self.peek_at(1).is_some_and(|t| t.value == "self")
+            && !self.peek_at(2).is_some_and(|t| t.token_type == TokenType::Colon);
+        if !is_mut && !self.check_ident("self") {
             return;
+        }
+        if is_mut {
+            self.advance();
         }
         params.push(Param {
             name: sym("self"),
             ty: TypeExpr::Simple { name: sym("Self") },
             default: None,
             attrs: Vec::new(),
-            is_mut: false,
+            is_mut,
         });
         self.advance();
         if self.check(TokenType::Comma) {

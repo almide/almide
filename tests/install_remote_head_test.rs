@@ -1,5 +1,5 @@
 //! `almide install` of a branch (no tag) builds the remote's CURRENT head
-//! (#1956). Before, the clone cached under `~/.almide/cache/<name>/main` was
+//! (#1956). Before, the clone cached under the dependency's `main` entry was
 //! reused as-is on every later install, so pushing new commits and running
 //! `almide install` again silently reinstalled the stale version; only
 //! `almide clean` fixed it. A branch install now resolves the remote head

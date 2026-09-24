@@ -302,6 +302,64 @@ fn an_error_exit_releases_the_frame_like_the_ok_exit() {
     );
 }
 
+/// #2509 — the OK path of `f(x)!` releases the carrier the effect ABI built
+/// for the call. The usual shape never showed the gap: arg_temps parks a
+/// Result-TYPED operand in a local, whose dec releases the carrier AND the
+/// credit it holds on the payload. A MOVE-MODE effect call (the C-132 `mut`
+/// parameter rewrite) is typed with the RAW payload, so the park never fired
+/// and the carrier had no owner at all — the argument's count grew by one per
+/// call and the buffer was never freed. Latent while nothing read the count;
+/// #2503's rc-gated copy read it and a 64 KiB buffer through a 20,000-call
+/// effect loop went out of memory. Pinned flat across N, with the buffer FRESH
+/// per call so the leak is a watermark and not only a count.
+#[test]
+fn an_effect_call_releases_its_heap_argument_credit() {
+    fn mut_param(n: u32, body: &str) -> String {
+        format!(
+            r#"effect fn poke(mut b: Bytes, v: Int) -> Unit = bytes.set_at(b, 0, v)
+
+effect fn width(b: Bytes) -> Int = ok(bytes.len(b))
+
+effect fn main() -> Unit = {{
+  var total = 0
+  var held = bytes.new(64)
+  var i = 0
+  while i < {n} {{
+{body}
+    i = i + 1
+  }}
+  println("${{total}}")
+}}
+"#
+        )
+    }
+    // A fresh buffer per call: a leaked argument credit keeps every one alive.
+    flat_in(
+        mut_param,
+        "poke(fresh buffer)!",
+        "    var b = bytes.new(64)\n    poke(b, 7)!\n    total = total + bytes.get_or(b, 0, 0)",
+        "7000",
+        "56000",
+    );
+    // One long-lived buffer: the carrier block itself, 32 B per call.
+    flat_in(
+        mut_param,
+        "poke(held buffer)!",
+        "    poke(held, 7)!\n    total = total + bytes.get_or(held, 0, 0)",
+        "7000",
+        "56000",
+    );
+    // The plain (non-mut) heap argument through the same `!`: the carrier is
+    // typed Result and parked in a temporary — the shape that always balanced.
+    flat_in(
+        mut_param,
+        "width(fresh buffer)!",
+        "    let t = bytes.new(64)\n    total = total + width(t)!",
+        "64000",
+        "512000",
+    );
+}
+
 /// The registry-table tail call (`lower_linked_call`'s `return_call`) is
 /// the third tail site — found by scripts/check-exit-sites.sh the day it
 /// went in (#1995): a user fn whose tail is `string.to_upper(s)` replaced its
@@ -534,4 +592,183 @@ fn a_generic_constructor_hands_back_one_credit() {
         "3330",
         "26663",
     );
+}
+
+/// `value.keys(v)` copies the object's key HANDLES into a fresh list, and
+/// the list's typed drop releases every element — so the list has to take
+/// its own credit per key, as `map.keys` does (#2010 stage 2b). Without the
+/// inc, each dropped key list spent one of the Value's credits: two calls
+/// freed the keys under the object, and the next allocations overwrote them
+/// (`{"beta":20,…}` stringified as `{"�":20,"zzz…3":10,…}`). Found while
+/// closing #2515: the leaked destructure tuple of `json.parse`'s key loop
+/// had been holding one spare credit per key, which is what one extra
+/// release used to spend.
+#[test]
+fn a_value_keys_list_holds_its_own_key_credits() {
+    let src = r#"import json
+
+fn count(b: Value) -> Int = {
+  let ks = value.keys(b)
+  list.len(ks)
+}
+
+fn main() -> Unit = {
+  let b = json.parse("{\"beta\":20,\"alpha\":10,\"gamma\":30}") ?? value.null()
+  let n = count(b) + count(b) + count(b)
+  let junk = list.map([1, 2, 3, 4, 5, 6], (x) => "zzzzzzzzzzzzzzzzzzz" + int.to_string(x))
+  println("${n} ${json.stringify(b)} ${json.get_int(b, "alpha") ?? -1}")
+  println(list.join(junk, ","))
+}
+"#;
+    let (_, out) = heap_of(src);
+    assert_eq!(
+        out,
+        "9 {\"beta\":20,\"alpha\":10,\"gamma\":30} 10\nzzzzzzzzzzzzzzzzzzz1,zzzzzzzzzzzzzzzzzzz2,zzzzzzzzzzzzzzzzzzz3,zzzzzzzzzzzzzzzzzzz4,zzzzzzzzzzzzzzzzzzz5,zzzzzzzzzzzzzzzzzzz6"
+    );
+}
+
+/// Per-call high-water growth of `body` in `program`, after checking both
+/// outputs — the measurement the two #2515/#2516 cell pairs share.
+fn growth_in(program: fn(u32, &str) -> String, name: &str, body: &str, expect_1000: &str, expect_8000: &str) -> u64 {
+    let (h1, o1) = heap_of(&program(1000, body));
+    let (h8, o8) = heap_of(&program(8000, body));
+    assert_eq!(o1, expect_1000, "{name}: output at N=1000");
+    assert_eq!(o8, expect_8000, "{name}: output at N=8000");
+    (h8 - h1) / 7000
+}
+
+/// #2515 — `let (a, b) = <owned tuple>`: the destructure read the fields out
+/// of a subject nobody owned, so the tuple and everything it held stayed at
+/// rc 1 forever (160 B per call with a fresh 64 B buffer inside). The owned
+/// subject is now named first (`let t = mk(i); let (a, b) = t`, arg_temps.rs),
+/// so the Bind route owns it and the frame exit releases it; the binds stay
+/// borrowed views of its fields, exactly as they are under a written-out name.
+fn destructure_program(n: u32, body: &str) -> String {
+    format!(
+        r#"fn mkt(v: Int) -> (Bytes, Int) = (bytes.new(64), v)
+
+fn mks(v: Int) -> (String, List[Int]) = (int.to_string(v % 10) + "s", [v, v])
+
+fn stamp(mut b: Bytes, v: Int) -> Int = {{
+  bytes.set_at(b, 0, v)
+  v
+}}
+
+effect fn estamp(mut b: Bytes, v: Int) -> Int = {{
+  bytes.set_at(b, 0, v)
+  ok(v)
+}}
+
+fn first(v: Int) -> Bytes = {{
+  let (b, k) = mkt(v)
+  b
+}}
+
+effect fn main() -> Unit = {{
+  var total = 0
+  for i in 0..<{n} {{
+{body}
+  }}
+  println("${{total}}")
+}}
+"#
+    )
+}
+
+#[test]
+fn an_owned_tuple_destructure_releases_the_tuple_and_its_contents() {
+    let rows = [
+        ("let (b, k) = mkt(i)", "    let (b, k) = mkt(i)\n    total = total + bytes.len(b) + k - i", "64000", "512000"),
+        (
+            "let (s, xs) = mks(i)",
+            "    let (s, xs) = mks(i)\n    total = total + string.len(s) + list.len(xs)",
+            "4000",
+            "32000",
+        ),
+        ("let (b, _) = mkt(i) in a tail", "    let b = first(i)\n    total = total + bytes.len(b)", "64000", "512000"),
+        (
+            "stamp(fresh buffer) — the mut-param value return",
+            "    var b = bytes.new(64)\n    let r = stamp(b, 7)\n    total = total + r + bytes.get_or(b, 0, 0)",
+            "14000",
+            "112000",
+        ),
+        (
+            "estamp(fresh buffer)! — the mut-param effect value return",
+            "    var b = bytes.new(64)\n    let r = estamp(b, 7)!\n    total = total + r + bytes.get_or(b, 0, 0)",
+            "14000",
+            "112000",
+        ),
+    ]
+    .map(|(name, body, e1, e8)| (name, growth_in(destructure_program, name, body, e1, e8)));
+    let leaked: Vec<_> = rows.iter().filter(|(_, g)| *g != 0).collect();
+    assert!(leaked.is_empty(), "B per call leaked: {leaked:?}");
+}
+
+/// #2515, the BORROWED-subject cell: a destructure of a var the frame
+/// already owns must neither take nor spend a credit on it — it stays at
+/// today's (flat) count; an over-release would read freed memory here.
+#[test]
+fn a_borrowed_tuple_destructure_keeps_its_subject() {
+    let g = growth_in(
+        destructure_program,
+        "let t = mkt(i); let (b, k) = t; read t again",
+        "    let t = mkt(i)\n    let (b, k) = t\n    let (c, _) = t\n    total = total + bytes.len(b) + bytes.len(c) + k - i",
+        "128000",
+        "1024000",
+    );
+    assert_eq!(g, 0, "borrowed destructure: {g} B per call");
+}
+
+/// #2516 — `f(x)?` over an OWNED carrier: the some-cell receives the
+/// payload's credit (the carrier's spine is released under it, #2509), so
+/// the node is owned and the bind must not add the conservative `+1` that
+/// left the cell at rc 1 forever (144 B per call).
+fn to_option_program(n: u32, body: &str) -> String {
+    format!(
+        r#"effect fn mko(v: Int) -> Bytes = if v % 3 == 2 then err("skip") else ok(bytes.new(64))
+
+fn mkr(v: Int) -> Result[Bytes, String] = if v % 3 == 2 then err("skip") else ok(bytes.new(64))
+
+fn width(o: Bytes?) -> Int = match o {{
+  some(b) => bytes.len(b),
+  none => 1,
+}}
+
+effect fn main() -> Unit = {{
+  var total = 0
+  for i in 0..<{n} {{
+{body}
+  }}
+  println("${{total}}")
+}}
+"#
+    )
+}
+
+#[test]
+fn an_owned_carrier_to_option_releases_the_some_cell() {
+    let g = growth_in(
+        to_option_program,
+        "let o = mko(i)?",
+        "    let o = mko(i)?\n    total = total + width(o)",
+        "43021",
+        "344042",
+    );
+    assert_eq!(g, 0, "owned `?`: {g} B per call leaked");
+}
+
+/// #2516, the BORROWED-carrier cell: the some-cell's payload slot is a view
+/// of a carrier some other holder releases, so the node stays borrowed and
+/// the bind keeps its `+1` — the cell is not released (the payload must not
+/// be spent twice). Pinned at today's count, which this change must not move.
+#[test]
+fn a_borrowed_carrier_to_option_keeps_todays_count() {
+    let g = growth_in(
+        to_option_program,
+        "let r: Result = mkr(i); let o = r?",
+        "    let r: Result[Bytes, String] = mkr(i)\n    let o = r?\n    let p = r?\n    total = total + width(o) + width(p)",
+        "86042",
+        "688084",
+    );
+    assert_eq!(g, 21, "borrowed `?`: {g} B per call (today: the two some-cells, 2 × 16 B on two calls in three)");
 }

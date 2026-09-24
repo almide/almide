@@ -50,7 +50,7 @@ use almide_ir::*;
 use almide_lang::types::Ty;
 
 use super::pass::{NanoPass, PassResult, Postcondition, Target};
-use super::pass_region_window_clone::{admissible_enums, closure_typable, synthesize_twins, RGN_PREFIX};
+use super::pass_region_window_clone::{admissible_enums, closure_typable, named_types_in, synthesize_twins, RGN_PREFIX};
 
 /// Stdlib modules whose every fn is side-effect free and touches no
 /// variant block (the wasm leg's `SCALAR_MODULES`). After `ResolveCalls` a
@@ -72,9 +72,6 @@ impl NanoPass for RegionWindowPass {
     }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        if almide_base::env::flag("ALMIDE_REGION_OFF") {
-            return PassResult { program, changed: false };
-        }
         let changed = rewrite_windows(&mut program);
         PassResult { program, changed }
     }
@@ -300,30 +297,184 @@ pub(crate) fn build_cx(program: &IrProgram) -> Cx<'_> {
     cx
 }
 
-/// Find every window site in the root fns, synthesize the twins once, and
-/// rewrite each site onto them. Returns whether anything changed.
+/// Find every window site in the root fns — the DECLARED ones (`scoped`
+/// entries, #1997) and the DISCOVERED `consume(produce(scalars))` pairs —
+/// synthesize the twin set ONCE for both, and rewrite each site onto it.
+/// Returns whether anything changed.
+///
+/// One synthesis for both kinds: a program that declares a region over the
+/// same pair the recogniser would have found otherwise (the `scoped {
+/// count(make(d)) }` shape) must not get two copies of `__rgn_Tree`.
 fn rewrite_windows(program: &mut IrProgram) -> bool {
-    let plan = {
-        let cx = build_cx(program);
-        if cx.pure.is_empty() {
-            return false;
-        }
+    let entries: HashSet<Sym> = program
+        .functions
+        .iter()
+        .filter(|f| f.is_scoped_block_entry())
+        .map(|f| f.name)
+        .collect();
+    let cx = build_cx(program);
+    if cx.pure.is_empty() && entries.is_empty() {
+        return false;
+    }
+    // A DECLARED region is an obligation, not a discovery: the A/B knob
+    // disables the recogniser, never a `scoped` block.
+    let discovery = if almide_base::env::flag("ALMIDE_REGION_OFF") {
+        None
+    } else {
         let sites = find_sites(program, &cx);
-        if sites.is_empty() {
-            return false;
-        }
-        match plan_twins(program, &cx, sites) {
-            Some(plan) => plan,
-            None => return false,
-        }
+        (!sites.is_empty()).then(|| plan_twins(program, &cx, sites)).flatten()
     };
-    synthesize_twins(program, &plan);
-    let admitted: HashSet<(Sym, Sym)> = plan.sites.iter().map(|s| (s.consume, s.produce)).collect();
-    let mut rw = SiteRewriter { admitted: &admitted };
+    let mut twinned_entries: HashSet<Sym> = HashSet::new();
+    let mut fns: HashSet<Sym> = HashSet::new();
+    let mut enums: HashSet<Sym> = HashSet::new();
+    for entry in &entries {
+        match declared_plan(program, &cx, *entry) {
+            Some((f, e)) => {
+                twinned_entries.insert(*entry);
+                fns.extend(f);
+                enums.extend(e);
+            }
+            None => {
+                if almide_base::env::flag("ALMIDE_REGION_DEBUG") {
+                    eprintln!("[region:native] declared window {entry} runs on ownership (its closure is not twin-able)");
+                }
+            }
+        }
+    }
+    if let Some(plan) = &discovery {
+        fns.extend(plan.fns.iter().copied());
+        enums.extend(plan.enums.iter().copied());
+    }
+    if entries.is_empty() && discovery.is_none() {
+        return false;
+    }
+    if !fns.is_empty() {
+        synthesize_twins(program, &TwinPlan { sites: Vec::new(), enums, fns });
+    }
+    let admitted: HashSet<(Sym, Sym)> = discovery
+        .iter()
+        .flat_map(|p| p.sites.iter().map(|s| (s.consume, s.produce)))
+        .collect();
+    // The declared rewrite runs FIRST: a `scoped` entry whose body is also a
+    // discovered pair keeps its declared window, and the pair inside the
+    // twin body is rewritten by the site rewriter on the twin.
+    let mut declared = DeclaredRewriter { entries: &entries, twinned: &twinned_entries };
+    let mut discovered = SiteRewriter { admitted: &admitted };
     for f in &mut program.functions {
-        rw.visit_expr_mut(&mut f.body);
+        declared.visit_expr_mut(&mut f.body);
+        discovered.visit_expr_mut(&mut f.body);
     }
     true
+}
+
+/// The DECLARED window (#1997): every call to the outlined entry of a
+/// `scoped { … }` block is a region boundary this leg must honour.
+///
+/// The site always becomes `almide_region_window(|| … )` — the arena mark is
+/// taken and rewound at exactly the block's close point. What varies is what
+/// runs inside: when the entry's callee closure is twin-able (root fns, the
+/// `Copy`-admissible enums of `pass_region_window_clone.rs`), the twins run
+/// and every node the block builds comes from the prelude arena, reclaimed in
+/// one rewind. When it is not — a callee in an imported module, a type whose
+/// twin cannot be typed — the ORIGINALS run inside the window and their
+/// storage is released by ownership at the same close point: the boundary
+/// still holds, the bulk reclamation does not. `ALMIDE_REGION_DEBUG=1` names
+/// which of the two each site got.
+/// The twin plan for one declared entry: its transitive root-fn closure and
+/// the admissible enums every fn in it mentions. `None` when the closure
+/// leaves the root program or a mentioned type cannot be twinned.
+fn declared_plan(program: &IrProgram, cx: &Cx, entry: Sym) -> Option<(HashSet<Sym>, HashSet<Sym>)> {
+    let mut fns: HashSet<Sym> = HashSet::new();
+    let mut todo = vec![entry];
+    while let Some(n) = todo.pop() {
+        if !fns.insert(n) {
+            continue;
+        }
+        let idx = *cx.fns.get(&n)?;
+        let mut found = Vec::new();
+        collect_named_callees(&program.functions[idx].body, &mut found);
+        for c in found {
+            if cx.ctors.contains_key(&c) || is_scalar_module_call(c.as_str()) {
+                continue;
+            }
+            // A callee outside the root program (a module fn, an intrinsic):
+            // its twin cannot be synthesized here.
+            cx.fns.get(&c)?;
+            todo.push(c);
+        }
+    }
+    let mut enums: HashSet<Sym> = HashSet::new();
+    for n in &fns {
+        let f = &program.functions[cx.fns[n]];
+        for t in named_types_in(f) {
+            if variant_named(cx.decls, t) {
+                enums.extend(admissible_enums(t, cx.decls)?);
+            }
+        }
+    }
+    if !closure_typable(program, cx, &fns, &enums) {
+        return None;
+    }
+    if almide_base::env::flag("ALMIDE_REGION_DEBUG") {
+        let mut names: Vec<&str> = fns.iter().map(|n| n.as_str()).collect();
+        names.sort_unstable();
+        eprintln!("[region:native] declared window {entry} twins {{{}}}", names.join(" "));
+    }
+    Some((fns, enums))
+}
+
+fn variant_named(decls: &[IrTypeDecl], n: Sym) -> bool {
+    decls.iter().any(|td| td.name == n && matches!(td.kind, IrTypeDeclKind::Variant { .. }))
+}
+
+fn collect_named_callees(body: &IrExpr, out: &mut Vec<Sym>) {
+    struct C<'a>(&'a mut Vec<Sym>);
+    impl IrVisitor for C<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &e.kind {
+                self.0.push(*name);
+            }
+            walk_expr(self, e);
+        }
+    }
+    C(out).visit_expr(body);
+}
+
+/// Wrap every call to a declared entry in the arena window, re-pointing the
+/// callee at its twin where one was synthesized.
+struct DeclaredRewriter<'a> {
+    entries: &'a HashSet<Sym>,
+    twinned: &'a HashSet<Sym>,
+}
+
+impl IrMutVisitor for DeclaredRewriter<'_> {
+    fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+        walk_expr_mut(self, e);
+        let IrExprKind::Call { target: CallTarget::Named { name }, args, type_args } = &e.kind else { return };
+        if !self.entries.contains(name) {
+            return;
+        }
+        let callee = if self.twinned.contains(name) { twin_name(*name) } else { *name };
+        let call = IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Named { name: callee },
+                args: args.clone(),
+                type_args: type_args.clone(),
+            },
+            ty: e.ty.clone(),
+            span: e.span,
+            def_id: None,
+        };
+        e.kind = IrExprKind::InlineRust {
+            template: "almide_region_window(|| {call})".to_string(),
+            args: vec![(sym("call"), call)],
+        };
+        e.def_id = None;
+    }
+
+    fn visit_stmt_mut(&mut self, s: &mut IrStmt) {
+        walk_stmt_mut(self, s);
+    }
 }
 
 /// Every window site in the root fn bodies (a site nested in another

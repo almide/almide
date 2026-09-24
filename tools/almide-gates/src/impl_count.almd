@@ -1,0 +1,141 @@
+// `impl-count` — one stdlib operation, N implementations (#2397, #2413).
+//
+// A stdlib hole (`fn f(...) = _`) is one operation whose body a backend
+// supplies. Three of the four defects the 0.63.0-rc3 soak found (#2395,
+// #2397, #2398) were the same shape: the operation implemented several times
+// — a native intrinsic, hand-written structural-wasm lowerings, shape-
+// monomorphic Almide copies on the prim floor — and a rule that landed in one
+// copy never reaching the others. A fixture cannot catch the copy that does
+// not take its shape; a sweep keyed on a guard's spelling cannot see the copy
+// that predates the spelling. The COUNT can.
+//
+// The counting half is `scripts/lib/impl-count-enumerate.py` — it greps three
+// sources and prints one TSV row per hole, so it stays a script (#2128). This
+// half reads the pinned ledger `proofs/impl-count-ledger.toml`, compares, and
+// is the only writer of that ledger (`--update`), so it is Almide: the typed
+// TOML reader already exists here, and one writer means one format.
+//
+// Verdicts, each a failure:
+//   - a hole whose total GREW: a new copy must add its row in the same change,
+//     so the copy is a diff line and not a blocker nine weeks later;
+//   - a hole whose triple differs otherwise (a shrink, a column moved): the
+//     ledger never sits above reality in the flattering direction either —
+//     run `--update` and commit the shrink;
+//   - a hole added, or a ledger row that is no longer a hole.
+import fs
+import process
+import toml
+
+type Verdict = { lines: List[String], ok: Bool }
+
+type Row = { modname: String, name: String, native: Int, emitter: Int, selfhost: Int, total: Int }
+
+fn key(r: Row) -> String = r.modname + "." + r.name
+
+fn triple(r: Row) -> String = int.to_string(r.native) + "/" + int.to_string(r.emitter) + "/" + int.to_string(r.selfhost)
+
+fn num(s: String) -> Int = int.parse(string.trim(s)) ?? 0
+
+// One enumerator line: module, name, native, emitter, selfhost, total — tab-separated.
+fn tsv_row(line: String) -> Row? = {
+  let f = string.split(line, "\t")
+  if list.len(f) != 6 then none
+  else some(Row {
+    modname: list.get_or(f, 0, ""),
+    name: list.get_or(f, 1, ""),
+    native: num(list.get_or(f, 2, "0")),
+    emitter: num(list.get_or(f, 3, "0")),
+    selfhost: num(list.get_or(f, 4, "0")),
+    total: num(list.get_or(f, 5, "0")),
+  })
+}
+
+fn ledger_row(t: toml.Table) -> Row = Row {
+  modname: toml.table_get(t, "module"),
+  name: toml.table_get(t, "name"),
+  native: num(toml.table_get(t, "native")),
+  emitter: num(toml.table_get(t, "emitter")),
+  selfhost: num(toml.table_get(t, "selfhost")),
+  total: num(toml.table_get(t, "total")),
+}
+
+fn row_toml(r: Row) -> String = """
+  [[hole]]
+  module   = "${r.modname}"
+  name     = "${r.name}"
+  native   = ${int.to_string(r.native)}
+  emitter  = ${int.to_string(r.emitter)}
+  selfhost = ${int.to_string(r.selfhost)}
+  total    = ${int.to_string(r.total)}
+
+  """
+
+fn implementations(rows: List[Row]) -> Int = rows |> list.fold(0, (acc, r) => acc + r.total)
+
+fn ledger_text(rows: List[Row]) -> String = {
+  let head = """
+    # IMPLEMENTATION-COUNT LEDGER — written by `almide-gates impl-count --update`.
+    # One row per stdlib hole (`= _`): (native @intrinsic, `fn lower_<mod>_<fn>[_suffix]`
+    # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
+    # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
+    # Gated by tools/almide-gates impl-count: a total may not grow without its row.
+    # holes = ${int.to_string(list.len(rows))}  implementations = ${int.to_string(implementations(rows))}
+
+    """
+  head + (rows |> list.map((r) => row_toml(r)) |> list.join(""))
+}
+
+// The drift of one current row against its pinned twin, if any.
+fn drift(pinned: Map[String, Row], c: Row) -> String? = match map.get(pinned, key(c)) {
+  none => some("NEW hole " + key(c) + " (total " + int.to_string(c.total) + ") is not in the ledger"),
+  some(p) => {
+    let was = int.to_string(p.total) + " (" + triple(p) + ")"
+    let now = int.to_string(c.total) + " (" + triple(c) + ")"
+    let remedy = "a new copy of one operation; fold it into an existing body, or add the row with --update and say why in the PR"
+    let grew = key(c) + ": total " + was + " -> " + now + " GREW — " + remedy
+    let moved = key(c) + ": ledger says " + was + ", tree has " + now + " — run --update to record the shrink"
+    if c.total > p.total then some(grew)
+    else if triple(c) != triple(p) or c.total != p.total then some(moved) else none
+  },
+}
+
+fn gone(current: Map[String, Row], p: Row) -> String? = match map.get(current, key(p)) {
+  none => some("ledger row " + key(p) + " is no longer a hole — run --update"),
+  some(_) => none,
+}
+
+fn worst(rows: List[Row]) -> String = rows |> list.sort_by((r) => 0 - r.total) |> list.take(3) |> list.map((r) => key(r) + "=" + int.to_string(r.total)) |> list.join(", ")
+
+effect fn run(root: String, update: Bool) -> Verdict = {
+  let enumerator = root + "/scripts/lib/impl-count-enumerate.py"
+  let out = process.exec("python3", [enumerator, root])!
+  let current = string.split(string.trim_end(out), "\n") |> list.filter_map((l) => tsv_row(l))
+  let path = root + "/proofs/impl-count-ledger.toml"
+  // A blinded enumerator prints nothing, or a handful of rows: refuse to write or judge
+  // against that rather than pin an empty ledger as clean.
+  if list.len(current) < 100 then Verdict {
+    lines: [
+      "::error::impl-count: the enumerator found only " + int.to_string(list.len(current)) + " hole(s) — refusing to judge"
+    ],
+    ok: false,
+  } else if update then {
+    fs.write(path, ledger_text(current))!
+    Verdict {
+      lines: ["impl-count: ledger rewritten — " + int.to_string(list.len(current)) + " holes, " + int.to_string(implementations(current)) + " implementations"],
+      ok: true,
+    }
+  } else {
+    let text = fs.read_text(path)!
+    let pinned_rows = toml.parse_tables(text) |> list.filter((t) => toml.table_get(t, "module") != "") |> list.map((t) => ledger_row(t))
+    let pinned = map.from_list(pinned_rows |> list.map((r) => (key(r), r)))
+    let cur = map.from_list(current |> list.map((r) => (key(r), r)))
+    let bad = (current |> list.filter_map((c) => drift(pinned, c))) + (pinned_rows |> list.filter_map((p) => gone(cur, p)))
+    if list.len(bad) == 0 then Verdict {
+      lines: ["impl-count OK: " + int.to_string(list.len(current)) + " holes, " + int.to_string(implementations(current)) + " implementations pinned (worst: " + worst(current) + ")"],
+      ok: true,
+    } else Verdict {
+      lines: (bad |> list.map((b) => "::error::impl-count: " + b)) + ["impl-count: FAILED — " + int.to_string(list.len(bad)) + " drift(s) against " + path],
+      ok: false,
+    }
+  }
+}

@@ -6,6 +6,7 @@
 //
 //   render fails + oracle also failed  → v0fail   (the fixture itself is broken, not v1)
 //   render fails + oracle succeeded    → wall     (v1 declines a program v0 runs — honest)
+//   wasmtime hit the per-run deadline  → hang     (v1 renders something that never finishes; #2567)
 //   oracle ok + wasmtime failed        → runerr   (v1 renders something that traps)
 //   stdout differs                     → mismatch (the silent-miscompile class)
 //   oracle FAILED, stdout agrees       → the trap comparison: exit code + normalised stderr
@@ -31,6 +32,12 @@ fn verdict_of(oracle_ok: Bool, render_ok: Bool, wasm_ok: Bool, oracle_out: Strin
 } else if oracle_ok and not wasm_ok then "runerr"
 else if oracle_out != wasm_out then "mismatch" else "match"
 
+// The deadline row (#2567). `run_capped` maps a fired deadline to exit code 124 — the code
+// a `timeout`-style wrapper reports — and a module that never finished is a HANG whatever
+// the oracle did: the byte compare cannot see a non-termination, and under the runerr row
+// it was one entry among the ratcheted while a sweep with no limit simply stopped on it.
+fn is_deadline(wasm_code: Int) -> Bool = wasm_code == 124
+
 // The full rule, trap row included. Reached only when `verdict_of` already said "match": a
 // SUCCEEDING oracle needs nothing more, but a FAILING one has two more observables to agree
 // on. Splitting it this way keeps the common path exactly as the bash wrote it and makes the
@@ -54,7 +61,38 @@ fn verdict_full(oracle_ok: Bool, render_ok: Bool, wasm_ok: Bool, oracle_out: Str
 // native-fallback notice went always-on in #931 — so every trap fixture that walls the
 // native-verified rung "regressed" the moment that notice appeared. It is infrastructure
 // chatter about HOW the program was built, in the same class as wasmtime's module preamble.
-fn normalize_oracle_err(s: String) -> String = lines_of(s) |> list.filter((l) => not string.starts_with(l, "note: verified native render walled")) |> list.filter((l) => not string.starts_with(l, "  reason: ")) |> list.join("\n")
+fn normalize_oracle_err(s: String) -> String = strip_warning_blocks(lines_of(s)) |> list.filter((l) => not string.starts_with(l, "note: verified native render walled")) |> list.filter((l) => not string.starts_with(l, "  reason: ")) |> list.join("\n")
+
+// #1123: E041-era deprecation WARNINGS are compiler infrastructure too — the render leg never
+// prints them, so a pinned trap fixture carrying one "regressed" the moment the warning
+// shipped. Each `warning[CODE]` block is dropped from its first line through its trailing
+// blank line; a block that runs straight into the program's own `Error:` / `error[` /
+// `error:` line ends there, and that line is kept. This is the bash's awk, state and all,
+// and it was MISSING from the twin until the #2163 diff ran a trap fixture that also prints
+// an unused-import warning: the bash read match, the twin read xfail.
+//
+// Keyed on the BRACKETED spelling on purpose: `warning: unused variable` has no code, is not
+// stripped by the bash, and so fails the trap comparison there. Reproduced, not fixed — the
+// comparison pins what the gate does.
+fn strip_warning_blocks(lines: List[String]) -> List[String] = strip_warnings_from(
+  lines,
+  0,
+  false,
+  [],
+)
+
+fn strip_warnings_from(lines: List[String], i: Int, skipping: Bool, acc: List[String]) -> List[String] = if i >= list.len(lines) then acc
+else {
+  let l = list.get_or(lines, i, "")
+  if string.starts_with(l, "warning[") then strip_warnings_from(lines, i + 1, true, acc)
+  else if skipping and l == "" then strip_warnings_from(lines, i + 1, false, acc)
+  else if skipping and (string.starts_with(l, "Error:") or string.starts_with(l, "error[") or string.starts_with(
+    l,
+    "error:",
+  )) then strip_warnings_from(lines, i + 1, false, acc + [l])
+  else if skipping then strip_warnings_from(lines, i + 1, true, acc)
+  else strip_warnings_from(lines, i + 1, false, acc + [l])
+}
 
 // v1: wasmtime wraps a trap in its own frame — a preamble naming the module PATH (which is a
 // temp file, so it differs every run and can never match), a `Caused by:` header, and an
@@ -111,6 +149,15 @@ test "render failure with a working oracle is a wall, not a v0 failure" {
 
 test "a rendered module that traps is a runerr" {
   assert_eq(verdict_of(true, true, false, "x", ""), "runerr")
+}
+
+test "a rendered module that hits the deadline is a hang, not a runerr" {
+  // The deadline is checked BEFORE the verdict rule: a killed wasmtime has a non-zero
+  // code and no stdout, exactly the runerr shape, so the order is what keeps a hang
+  // from filing itself where nothing fails (#2567).
+  assert_eq(is_deadline(124), true)
+  assert_eq(is_deadline(1), false)
+  assert_eq(is_deadline(0), false)
 }
 
 test "differing output is a mismatch, identical is a match" {
@@ -194,6 +241,20 @@ test "a succeeding oracle never reaches the trap comparison" {
 test "the native-fallback notice is compiler chatter, not program stderr" {
   let raw = "note: verified native render walled — building via the standard codegen\n  reason: native: whatever\nError: divide by zero"
   assert_eq(normalize_oracle_err(raw), "Error: divide by zero")
+}
+
+test "a bracketed warning block is stripped through its blank line, or up to the error line" {
+  // The #1123 shape: an unused-import warning printed before the trap message, with no blank
+  // line between them — the block ends where the program's own error begins.
+  let raw = "warning[E060]: unused import 'json'\n  at line 1\n  hint: remove it\n  |\n1 | import json\nError: division by zero\n"
+  assert_eq(normalize_oracle_err(raw), "Error: division by zero")
+  // A block terminated by a blank line: the blank goes with the block.
+  assert_eq(normalize_oracle_err("warning[E041]: implicit\n  here\n\nError: boom\n"), "Error: boom")
+  // An UNBRACKETED warning is not a block the bash recognises, and stays.
+  assert_eq(
+    normalize_oracle_err("warning: unused variable 'x'\n  here\nError: boom\n"),
+    "warning: unused variable 'x'\n  here\nError: boom",
+  )
 }
 
 test "a stream's final newline is a terminator, not an empty line" {

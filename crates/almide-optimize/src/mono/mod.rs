@@ -29,7 +29,7 @@ use almide_base::Sym;
 
 use utils::{module_mono_suffix, BoundedParam, MonoKey, ty_contains_typevar};
 use almide_base::intern::sym;
-use discovery::{collect_mono_bindings, discover_instances, discover_instances_in_frontier};
+use discovery::{bind_from_conformances, collect_mono_bindings, discover_instances, discover_instances_in_frontier};
 use specialization::specialize_function;
 use rewrite::rewrite_calls;
 use propagation::propagate_concrete_types;
@@ -106,7 +106,8 @@ pub fn monomorphize(program: &mut IrProgram) {
         let mut new_functions = Vec::new();
         for ((fn_name, suffix), bindings) in &new {
             if let Some(orig) = program.functions.iter().find(|f| !f.is_test && f.name == *fn_name) {
-                new_functions.push(specialize_function(orig, suffix, bindings, &mut program.var_table, &global_vars));
+                let bindings = bind_from_conformances(orig, bindings, &program.protocol_conformance_args);
+                new_functions.push(specialize_function(orig, suffix, &bindings, &mut program.var_table, &global_vars));
             }
         }
 
@@ -550,6 +551,7 @@ fn specialize_discovered(
         let module_globals: std::collections::HashSet<almide_ir::VarId> =
             program.modules[mi].top_lets.iter().map(|tl| tl.var).collect();
         let orig = program.modules[mi].functions[fi].clone();
+        let bindings = bind_from_conformances(&orig, &bindings, &program.protocol_conformance_args);
         let mod_vt = &mut program.modules[mi].var_table;
         let specialized = specialize_function(&orig, &suffix, &bindings, mod_vt, &module_globals);
         let new_name = specialized.name.to_string();

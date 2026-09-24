@@ -14,10 +14,11 @@ let text = x.to_string()
 
 ## Conversion semantics
 
-The bodies are pure Almide, routed through canonical `Int` (i64) as a dimensional
-pivot: `int.from_float32(x)` widens, then `int.to_<dst>(...)` narrows or re-widens.
-Both hops collapse — Rust folds the double cast, and the wasm renderer resolves
-them inline — so this costs nothing at runtime and both targets agree by
+The bodies are pure Almide, routed through canonical `Float` (f64) as a
+dimensional pivot: `float.from_float32(x)` widens, then `float.to_<dst>(...)`
+narrows to the integer width or re-renders (`stdlib/float32.almd`). Both hops
+collapse — Rust folds the double cast, and the wasm renderer resolves them
+inline — so this costs nothing at runtime and both targets agree by
 construction.
 
 The rules match Rust's `as`:
@@ -48,15 +49,44 @@ value outside binary32's range becomes an infinity rather than an error.
 ## Signature index (10 functions)
 
 ```
+// Truncates toward 0, saturating; NaN gives 0.
+// @since 0.15.0 or earlier
 float32.to_int8(x: Float32) -> Int8
+
+// Truncates toward 0, saturating; NaN gives 0.
+// @since 0.15.0 or earlier
 float32.to_int16(x: Float32) -> Int16
+
+// Truncates toward 0, saturating; NaN gives 0.
+// @since 0.15.0 or earlier
 float32.to_int32(x: Float32) -> Int32
+
+// Truncates toward 0, saturating; NaN gives 0.
+// @since 0.15.0 or earlier
 float32.to_int64(x: Float32) -> Int64
+
+// Truncates toward 0, saturating; NaN gives 0.
+// @since 0.15.0 or earlier
 float32.to_uint8(x: Float32) -> UInt8
+
+// Truncates toward 0, saturating; NaN gives 0.
+// @since 0.15.0 or earlier
 float32.to_uint16(x: Float32) -> UInt16
+
+// Truncates toward 0, saturating; NaN gives 0.
+// @since 0.15.0 or earlier
 float32.to_uint32(x: Float32) -> UInt32
+
+// Truncates toward 0, saturating; NaN gives 0.
+// @since 0.15.0 or earlier
 float32.to_uint64(x: Float32) -> UInt64
+
+// Exact widening; never rounds.
+// @since 0.15.0 or earlier
 float32.to_float64(x: Float32) -> Float64
+
+// f64 digits of x; 0.1 prints 0.10000000149011612.
+// @since 0.15.0 or earlier
 float32.to_string(x: Float32) -> String
 ```
 

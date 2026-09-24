@@ -65,15 +65,44 @@ Inverse of `gzip`.
 ## Signature index (10 functions)
 
 ```
+// Zlib-framed DEFLATE of data; bytes vary by target.
+// @since 0.20.0 or earlier
 effect zlib.compress(data: Bytes) -> Bytes
+
+// Like compress; level clamped to 0..9, unused on wasm.
+// @since 0.20.0 or earlier
 effect zlib.compress_level(data: Bytes, level: Int) -> Bytes
+
+// Inflated zlib stream; err on corrupt input.
+// @since 0.20.0 or earlier
 effect zlib.decompress(data: Bytes) -> Bytes
+
+// Raw DEFLATE, no header; bytes vary by target.
+// @since 0.20.0 or earlier
 effect zlib.deflate(data: Bytes) -> Bytes
+
+// Like deflate; level clamped to 0..9, unused on wasm.
+// @since 0.20.0 or earlier
 effect zlib.deflate_level(data: Bytes, level: Int) -> Bytes
+
+// Raw DEFLATE decoded; err on a corrupt stream.
+// @since 0.20.0 or earlier
 effect zlib.inflate(data: Bytes) -> Bytes
+
+// RFC 1952 gzip of data; bytes vary by target.
+// @since 0.20.0 or earlier
 effect zlib.gzip(data: Bytes) -> Bytes
+
+// Gzip member decoded; err on bad header, CRC or empty input.
+// @since 0.20.0 or earlier
 effect zlib.gunzip(data: Bytes) -> Bytes
+
+// CRC-32 (IEEE) as an unsigned Int; 0 for empty data.
+// @since 0.62.0
 zlib.crc32(data: Bytes) -> Int
+
+// Adler-32 as an unsigned Int; 1 for empty data.
+// @since 0.62.0
 zlib.adler32(data: Bytes) -> Int
 ```
 

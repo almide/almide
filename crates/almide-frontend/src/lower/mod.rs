@@ -430,11 +430,16 @@ fn lower_decls(
         let blank_lines = prog.blank_lines_map.get(decl_idx).copied().unwrap_or(0);
 
         match decl {
-            ast::Decl::Fn { name, params, body: Some(body), effect, span, generics, extern_attrs, export_attrs, attrs, visibility, return_type, .. } => {
+            ast::Decl::Fn { name, params, body: Some(body), effect, scoped, span, generics, extern_attrs, export_attrs, attrs, visibility, return_type, .. } => {
                 let mut f = lower_fn(ctx, &FnToLower {
                     name, params, body: body, effect, span, generics,
                     extern_attrs, export_attrs, attrs, visibility, module_prefix,
                 });
+                // #1997: the qualifier rides into the IR as a marker the
+                // legs and the module interface read (never re-derived).
+                if *scoped {
+                    f.attrs.push(IrFunction::scoped_marker(almide_ir::SCOPED_FN_ATTR));
+                }
                 // ADR-0002 Phase 1b (#1103): a `-> T!` fn's VALUE tail lifts
                 // into ok(...) — the same ergonomics an effect fn's lifted
                 // body has. Done HERE, before the IR splits to the three
@@ -554,12 +559,18 @@ fn build_ir_program(mut ctx: LowerCtx, functions: Vec<IrFunction>, top_lets: Vec
         }
     }
     functions.append(&mut ctx.synthesized_fns);
-    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default(), used_stdlib_modules: Default::default() };
+    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default(), used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default() };
 
     // Register user-defined types in the type constructor registry (HKT foundation)
     for td in &program.type_decls {
         let arity = td.generics.as_ref().map_or(0, |g| g.len());
         program.type_registry.register_user_type(&*td.name, arity);
+    }
+    // Generic-protocol conformances (#1589), for monomorphization.
+    for (ty, protos) in &env.type_protocol_args {
+        for (proto, args) in protos {
+            program.protocol_conformance_args.insert((*ty, *proto), args.clone());
+        }
     }
 
     program

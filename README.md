@@ -70,7 +70,16 @@ curl -fsSL https://raw.githubusercontent.com/almide/almide/main/tools/install.sh
 irm https://raw.githubusercontent.com/almide/almide/main/tools/install.ps1 | iex        # Windows (PowerShell)
 ```
 
-From source, with [Rust](https://rustup.rs/) 1.94+ (the binary embeds the wasmtime host): `cargo build --release && cp target/release/almide ~/.local/bin/`.
+The installer checks the archive against the release's `almide-checksums.sha256` before unpacking. To verify a downloaded asset yourself — every release asset, the checksums file included, is Sigstore-attested by the release workflow (see [SECURITY.md](./SECURITY.md)):
+
+```bash
+gh attestation verify almide-macos-aarch64.tar.gz -R almide/almide   # provenance: built by almide/almide's release workflow
+sha256sum -c --ignore-missing almide-checksums.sha256                # digest matches the published checksums file
+```
+
+Each archive also carries `almide-verify`, the independently versioned certificate checker: `almide verify app.almd` emits the program's ownership / name / capability / call-mode witnesses and hands them to it (it must sit next to `almide` or on `PATH` — there is no built-in fallback).
+
+From source, with [Rust](https://rustup.rs/) 1.94+ (the binary embeds the wasmtime host): `cargo build --release && cp target/release/almide target/release/almide-verify ~/.local/bin/` (or `make install`).
 
 ```almd
 fn main() -> Unit = {
@@ -100,16 +109,16 @@ almide run hello.almd --target wasm   # same bytes, on wasmtime
 
 ## What is measured
 
-Every claim in this section is either derived by a script or carries the date it was measured; `scripts/check-readme-numbers.sh` refuses a bare number in CI.
+Every claim in this section is either derived by a script or carries the date it was measured; `scripts/check-readme-numbers.sh` refuses a bare number in CI, and refuses an LLM-writability scorecard that is older than 90 days or that does not name the almide-dojo run it came from.
 
 ### LLM writability
 
-Measured by [almide-dojo](https://github.com/almide/almide-dojo) across 30 tasks (basic / intermediate / advanced) on 2026-04-12; later runs are on the [live dashboard](https://almide.github.io/almide-dojo/):
+Measured by [almide-dojo](https://github.com/almide/almide-dojo) on 2026-09-22 across its bank of 38 tasks (basic / intermediate / advanced), with the pinned compiler `almide 0.62.0`, by that repo's CI lane. Both runs are stamped **`comparable`** by the harness — every planned task reached the model, so each rate is a point and not an interval — and both were sampled at a fixed seed (`20260922`) and temperature 0, recorded in the run's manifest as what the provider actually put on the wire. The runs are committed — [`almide-dojo@8af34bc`](https://github.com/almide/almide-dojo/commit/8af34bc3) — so the table below can be recomputed from their `summary.md` rather than believed; later runs are on the [live dashboard](https://almide.github.io/almide-dojo/). No Anthropic or OpenAI key is in CI by decision, so the models here are the ones the lane can reach without one:
 
 | Model | Pass Rate | 1-Shot Rate |
 |---|---|---|
-| Claude Sonnet 4.6 | **100%** (30/30) | 47% |
-| Llama 3.3 70B | 61% (17/28) | 33% |
+| Llama 3.3 70B (fp8-fast) | 65% (25/38) | 39% (15/38) |
+| Llama 3.1 8B | 44% (17/38) | 34% (13/38) |
 
 The most recent same-model comparison is the MiniGit bench: Sonnet 5 × 20 trials on 2026-07-15, 100% pass, the most concise of 5 languages (233 LOC), and the fastest agent wall-clock against Gleam and MoonBit — an LLM-writability number, measured under 6–9× self-parallelism, **not** generated-code speed ([chart](docs/figures/lang-bench-snapshot-2026-07.png) · [method](research/benchmark/lang-bench/README.md) · [upstream](https://github.com/mame/ai-coding-lang-bench)).
 
@@ -122,8 +131,8 @@ The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-i
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI):
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> <!-- counts:generated:start (as of 2026-09-20) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
-> **Ledger: 351 contracts — 351 active, 0 flagged-for-revision.**
+> <!-- counts:generated:start (as of 2026-09-23) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
+> **Ledger: 364 contracts — 364 active, 0 flagged-for-revision.**
 > <!-- counts:generated:end -->
 >
 > **Divergences awaiting a fix: none.** Every contract in the ledger is
@@ -184,18 +193,20 @@ build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; t
 <!-- wasm-runtime:generated:start — rendered from docs/benchmarks/wasm-runtime.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
 | Benchmark (`almide bench`, verify-then-time, median of 5) | wasm/native ratio |
 |---|---:|
-| nbody | **2.69×** |
-| spectralnorm | **2.65×** |
-| binarytrees | **0.93×** |
-| treealloc | **0.41×** |
-| fft | **4.02×** |
-| strchurn | **1.15×** |
-| listbuild_append | **3.33×** |
-| listbuild_combinator | **3.79×** |
-| listbuild_prealloc | **3.54×** |
-| mapbuild | **1.16×** |
+| nbody | **2.19×** |
+| spectralnorm | **1.73×** |
+| binarytrees | **1.36×** |
+| treealloc | **1.04×** |
+| fasta | **1.69×** |
+| mandelbrot | **1.29×** |
+| fft | **2.85×** |
+| strchurn | **0.87×** |
+| listbuild_append | **3.04×** |
+| listbuild_combinator | **3.13×** |
+| listbuild_prealloc | **2.85×** |
+| mapbuild | **0.86×** |
 
-Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the ratio verdict runs on the stamping machine class and CI gates the STATUS taxonomy below (`scripts/check-wasm-runtime-ratio.sh`). binarytrees runs its fan arms on the embedded host's thread pool, which is why wasm WINS there. The unmeasured corpus cells stay honest instead of estimated: 3 route to the incumbent artifact, 1 wall on the wasm build path, 0 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (almide 0.62.0, 2026-09-08).
+Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the stamped ratio verdict runs on the stamping machine class; CI gates the STATUS taxonomy below and judges the wasm leg by a same-runner A/B against the latest release binary (interleaved, min-of-runs, `ab_band` in the ledger — #2143) (`scripts/check-wasm-runtime-ratio.sh`). binarytrees runs its fan arms on the embedded host's thread pool, which is why wasm WINS there. The unmeasured corpus cells stay honest instead of estimated: 1 route to the incumbent artifact, 1 wall on the wasm build path, 0 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (almide 0.63.0 (dev), 2026-09-24).
 <!-- wasm-runtime:generated:end -->
 
 ## How It Works
@@ -244,13 +255,17 @@ The Perceus proof above proves one compiler pass, once. v1 generalizes that prin
 | Playground | [Live](https://almide.github.io/playground/) — the compiler runs as WASM in the browser |
 
 <!-- stats:generated:start — derived from docs/stdlib/*.md, spec/, and docs/contracts/contracts.toml by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
-<!-- counts:generated:start (as of 2026-09-20) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
+<!-- counts:generated:start (as of 2026-09-23) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
 | Derived count | Value |
 |---|---|
-| Stdlib | 986 functions across 43 modules — self-hosted `.almd`, signature indexes regenerated from the compiler by `tools/gen-stdlib-doc-index.py` |
-| Tests | 446 `.almd` test files under `spec/` (`almide test spec/`) + the 351-contract cross-target ledger |
+| Stdlib | 1000 functions across 45 modules — self-hosted `.almd`, signature indexes regenerated from the compiler by `tools/gen-stdlib-doc-index.py` |
+| Tests | 450 `.almd` test files under `spec/` (`almide test spec/`) + the 364-contract cross-target ledger |
 <!-- counts:generated:end -->
 <!-- stats:generated:end -->
+
+<!-- mutation-score:generated:start (as of 2026-09-22) — stamped from proofs/mutation-score.toml by scripts/gen-mutation-score.sh; re-measured by every mutation-sweep run, refreshed only by `--from-run`; DO NOT EDIT between the markers -->
+**Mutation score** — 41/41 mutants caught (100.0 %), 0 survived, 0 stale: the full release-shape net sweep of `ci/mutations/` ([`scripts/check-mutation-gate.sh`](./scripts/check-mutation-gate.sh)), stamped 2026-09-22 from mutation-sweep run [35650396971](https://github.com/almide/almide/actions/runs/35650396971) at `3b02f7dc4`.
+<!-- mutation-score:generated:end -->
 
 ## Ecosystem and documentation
 

@@ -55,14 +55,22 @@ and serves as the cross-target oracle / executable spec.
   binary.
 - **`--target wasm`** — two legs
   (`src/cli/build.rs::render_wasm_module_routed`): cheap PROJECT-SHAPE
-  routes pick the leg up front, and a structural wall reroutes (below):
+  routes pick the leg up front, and a structural wall reroutes (below).
+  The routing is ONE library function, `almide::wasm_route::route_wasm`
+  (src/wasm_route.rs, #2554): the CLI reads the probe switches off the
+  environment into its `RouteOptions` and renders its `RouteError`s; a
+  wasm32 consumer (the playground) calls `render_wasm_routed` with its
+  pre-parsed tabs (`ModuleSource::Provided`) and gets the same leg choice —
+  `tests/wasm_route_parity_test.rs` holds the two equal on every
+  wasm_cross fixture (leg and bytes):
   - the **commissioned structural leg** (default): `almide::wasm_leg`
     (parse→check→lower→self-host link→`link_ir`) feeds
     `almide-wasm::emit_program`, which emits wasm bytes structurally
     (wasm-encoder — no WAT text). Measured 610/610 byte-identical to native
     on the full wasm_cross corpus. `almide run` executes on the embedded
     `almide-wasm-run` host (fs/env/stdin included); `almide build` ships the
-    `to_wasi` form, which runs on STOCK runtimes (`wasmtime run mod.wasm` —
+    `to_wasi` form (`almide-wasi`, a pure crate re-exported as
+    `almide_wasm_run::wasi`), which runs on STOCK runtimes (`wasmtime run mod.wasm` —
     the 578-fixture stock-runtime gate is the witness). The same artifact
     runs on `almide-wasm-vm`, the qualification-scoped interpreter (#865)
     whose instruction set is pinned to this emitter's;
@@ -184,6 +192,12 @@ walker sees only typed IR nodes — it never checks what target it renders for.
    allocates exactly the (allocs, deallocs) pair pinned per program in
    `tests/golden/native-borrow-oracle-alloc.txt`: a clone where a borrow
    would do changes neither stdout nor the build, only that count (#2228).
+   The wasm leg has the twin: `ALMIDE_WASM_ALLOC_COUNT=1` makes the
+   structural emitter count `$alloc` / `$free` in four exported globals
+   (absent, not zero, when off) and `crates/almide-wasm/tests/alloc_ledger.rs`
+   pins `allocs reused bytes frees` per corpus fixture beside the `__heap`
+   watermark, so churn the watermark cannot see is ratcheted too (#2407;
+   [docs/wasm/WASM-OUTPUT.md](./wasm/WASM-OUTPUT.md)).
    The verdicts themselves are certified on every DEBUG native build, and on
    a release build that asks (`ALMIDE_CERTIFY_OWNERSHIP=report|fail|off`,
    `crates/almide-codegen/src/certify_ownership.rs`, #2231): the final IR is

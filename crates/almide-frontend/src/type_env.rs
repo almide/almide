@@ -214,6 +214,9 @@ pub struct TypeEnv {
     pub structural_bounds: std::collections::HashMap<Sym, Ty>,
     /// Protocol bounds for generic type parameters in scope: TypeVar name → list of protocol names
     pub generic_protocol_bounds: std::collections::HashMap<Sym, Vec<Sym>>,
+    /// Type arguments of the APPLIED protocol bounds in scope (#1589):
+    /// `(TypeVar, protocol) → args` for `[R: Repository[K, V]]`.
+    pub generic_protocol_bound_args: std::collections::HashMap<(Sym, Sym), Vec<Ty>>,
     /// Minimum required arguments for functions with default params: fn key -> min count
     pub fn_min_params: std::collections::HashMap<Sym, usize>,
     /// Default parameter expressions, keyed by the SAME prefixed fn key as
@@ -228,6 +231,12 @@ pub struct TypeEnv {
     pub explicit_convention_fns: std::collections::HashSet<Sym>,
     /// Types' declared protocol conformances: type name → set of protocol names
     pub type_protocols: std::collections::HashMap<Sym, std::collections::HashSet<Sym>>,
+    /// Type arguments of an explicit conformance to a GENERIC protocol
+    /// (#1589): type name → protocol → args, keyed exactly like
+    /// `type_protocols` (`type UserRepo: Repository[UserId, User]`). The one
+    /// conformance a type declares per protocol is THE implementation — no
+    /// other is searched for.
+    pub type_protocol_args: std::collections::HashMap<Sym, std::collections::HashMap<Sym, Vec<Ty>>>,
     /// Function declaration locations: fn key -> (line, col)
     pub fn_decl_spans: std::collections::HashMap<Sym, (usize, usize)>,
     /// Whether we're inside a test block (effect fn calls return Result[T, String])
@@ -294,11 +303,13 @@ impl TypeEnv {
             eq_types: std::collections::HashSet::new(),
             structural_bounds: std::collections::HashMap::new(),
             generic_protocol_bounds: std::collections::HashMap::new(),
+            generic_protocol_bound_args: std::collections::HashMap::new(),
             fn_min_params: std::collections::HashMap::new(),
             fn_defaults: std::collections::HashMap::new(),
             explicit_convention_fns: std::collections::HashSet::new(),
             protocols: std::collections::HashMap::new(),
             type_protocols: std::collections::HashMap::new(),
+            type_protocol_args: std::collections::HashMap::new(),
             fn_decl_spans: std::collections::HashMap::new(),
             in_test_block: false,
             failed_fn_names: std::collections::HashSet::new(),
@@ -617,6 +628,9 @@ impl TypeEnv {
         if let Some(origins) = self.let_origins.last_mut() {
             origins.remove(&sym(name));
         }
+        // A new binding also shadows a parameter of the same name; the fn
+        // decl re-inserts its own parameters right after defining them.
+        self.param_vars.remove(&sym(name));
     }
 
     /// #2097: remember the value expression a `let` bound in the CURRENT

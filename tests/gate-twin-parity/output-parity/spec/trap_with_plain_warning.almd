@@ -1,0 +1,9 @@
+// The XFAIL row, and a documented edge of the gate: the stripping is keyed on the bracketed
+// `warning[CODE]` spelling, and an unused-variable warning is printed WITHOUT a code, so it
+// survives normalisation and the trap comparison fails on stderr. Both sides must agree on
+// that, which is the point — the comparison pins the gate's behaviour, not its intent.
+fn main() -> Unit = {
+  let unused = 5
+  let zero = list.len([1]) - 1
+  println(int.to_string(10 / zero))
+}

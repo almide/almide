@@ -366,7 +366,7 @@ fn ir_program_construction() {
         type_registry: Default::default(),
         effect_fn_names: Default::default(),
         effect_map: Default::default(),
-        codegen_annotations: Default::default(), used_stdlib_modules: Default::default(),
+        codegen_annotations: Default::default(), used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(),
     };
     assert!(prog.functions.is_empty());
     assert!(prog.top_lets.is_empty());
@@ -546,7 +546,7 @@ fn make_program_with_vars(vars: Vec<(&str, Option<Span>, bool)>) -> IrProgram {
         type_registry: Default::default(),
         effect_fn_names: Default::default(),
         effect_map: Default::default(),
-        codegen_annotations: Default::default(), used_stdlib_modules: Default::default(),
+        codegen_annotations: Default::default(), used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(),
     }
 }
 
@@ -657,7 +657,7 @@ fn unused_var_warning_used_var_no_warning() {
         type_registry: Default::default(),
         effect_fn_names: Default::default(),
         effect_map: Default::default(),
-        codegen_annotations: Default::default(), used_stdlib_modules: Default::default(),
+        codegen_annotations: Default::default(), used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(),
     };
     compute_use_counts(&mut prog);
     let warnings = collect_unused_var_warnings(&prog, "test.almd");

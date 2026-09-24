@@ -24,20 +24,84 @@
 // than one of the three: each process builds the table once. Every gate keeps
 // its own `#[test]`, its own name, and its own assertions verbatim.
 //
+// A table is built ON DEMAND, leg by leg (#2381). Every gate reads the plain
+// wasm leg, so that one is always built; the other three are built only when
+// the binary's `NEEDED_LEGS` asks for them. Before this, every binary built
+// all four legs for all ~720 fixtures and then read two or three of them:
+// the parity gate paid a rustc compile per fixture (the native leg) and a
+// full interpreter evaluation it never compared, the equivalence gate paid
+// the interpreter and wasm-opt legs it never compared, the oracle paid
+// wasm-opt. Each binary declares, before the `include!`:
+//
+//   const NEEDED_LEGS: Legs = Legs { native: …, wasm_opt: …, interp: … };
+//   const GATE_SOURCE: &str = include_str!("<its own file>");
+//
+// and `corpus_legs_declared_match_reads` (below, compiled into each binary)
+// holds the declaration to the gate body both ways: a leg the body reads
+// must be declared, a declared leg must be read. A body that reaches for an
+// undeclared leg through the accessors panics on the first fixture with the
+// leg's name — never a sentinel value that a byte-compare would judge.
+//
 // The interp leg needs no build at all — it evaluates the linked IR in-process,
 // before any target lowering (interp_leg.rs; see crates/almide-interp/CLAUDE.md).
 
-/// Every observable this corpus can produce for one fixture.
+/// The legs a gate binary reads. Plain wasm is not listed: every gate reads
+/// it, so `build_corpus` always builds it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Legs {
+    native: bool,
+    wasm_opt: bool,
+    interp: bool,
+}
+
+/// Every observable this corpus can produce for one fixture. A leg the
+/// binary did not declare in `NEEDED_LEGS` is `None` and is reached only
+/// through the accessors below, which name the missing leg instead of
+/// handing a gate something to compare.
 struct FixtureLegs {
     name: String,
     /// `// @xt-allow: <reason>` — a KNOWN, tracked native/wasm divergence.
     allow: Option<String>,
-    native: (i32, String, String),
+    /// `None` when `NEEDED_LEGS.native` is false.
+    native: Option<(i32, String, String)>,
     wasm: (i32, String, String),
-    /// `None` when the `wasm-opt` binary is absent — the other gates still run.
+    /// `None` when `NEEDED_LEGS.wasm_opt` is false OR the `wasm-opt` binary
+    /// is absent — the accessor tells the two apart.
     wasm_opt: Option<(i32, String, String)>,
     /// `Ran` = the interpreter voted; `Skip` = its own reasoned abstention.
-    interp: InterpLeg,
+    /// `None` when `NEEDED_LEGS.interp` is false.
+    interp: Option<InterpLeg>,
+}
+
+impl FixtureLegs {
+    fn native(&self) -> &(i32, String, String) {
+        self.native
+            .as_ref()
+            .unwrap_or_else(|| self.undeclared("native"))
+    }
+
+    /// `None` = the `wasm-opt` binary is absent (the gate self-skips).
+    fn wasm_opt(&self) -> Option<&(i32, String, String)> {
+        if !NEEDED_LEGS.wasm_opt {
+            self.undeclared("wasm-opt");
+        }
+        self.wasm_opt.as_ref()
+    }
+
+    fn interp(&self) -> &InterpLeg {
+        self.interp
+            .as_ref()
+            .unwrap_or_else(|| self.undeclared("interp"))
+    }
+
+    /// A gate body reached for a leg this binary never built: loud, named,
+    /// on the first fixture — never a value a byte-compare could judge.
+    fn undeclared(&self, leg: &str) -> ! {
+        panic!(
+            "{}: the {leg} leg was not built — this binary's NEEDED_LEGS = {:?} does not declare it",
+            self.name, NEEDED_LEGS
+        )
+    }
 }
 
 /// The corpus, built on first use — once per process, i.e. once per gate
@@ -58,8 +122,10 @@ fn build_corpus() -> Option<Vec<FixtureLegs>> {
         return None;
     }
     // wasm-opt is OPTIONAL: without it the parity gate self-skips, but the
-    // equivalence and 3-way gates still have everything they need.
-    let have_wasm_opt = Command::new("wasm-opt").arg("--version").output().is_ok();
+    // equivalence and 3-way gates still have everything they need. A binary
+    // that does not read the leg does not probe for the tool either.
+    let have_wasm_opt =
+        NEEDED_LEGS.wasm_opt && Command::new("wasm-opt").arg("--version").output().is_ok();
 
     let spec_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/wasm_cross");
     if !spec_dir.exists() {
@@ -71,6 +137,22 @@ fn build_corpus() -> Option<Vec<FixtureLegs>> {
         .filter(|e| e.path().extension().map(|x| x == "almd").unwrap_or(false))
         .collect();
     entries.sort_by_key(|e| e.path());
+    // ALMIDE_CORPUS_SHARD=k/N (#2381): the k-th modulo slice of the SORTED
+    // list, taken here and nowhere else. The three gates over this table
+    // assert per fixture, so a slice is judged whole in its shard; the
+    // walked list goes to ALMIDE_CORPUS_SHARD_DIR for the coverage step
+    // (∪ shards == ls spec/wasm_cross) — the only thing that makes a
+    // partition safe. `merge/N` is refused: nothing here needs aggregating.
+    if let Some(shard) = almide_corpus::corpus_shard() {
+        let gate = env!("CARGO_CRATE_NAME");
+        shard.require_slice(gate);
+        entries = shard.apply(entries, gate, |e| e.path().file_stem().unwrap().to_str().unwrap().to_string());
+        let walked: Vec<String> = entries
+            .iter()
+            .map(|e| e.path().file_stem().unwrap().to_str().unwrap().to_string())
+            .collect();
+        almide_corpus::write_partial(shard, gate, "fixtures", &walked);
+    }
     // ALMIDE_CORPUS_FILTER=<substring>: a developer's single-fixture loop for
     // the 3-way harnesses (seconds instead of the ~6 min full corpus). Never
     // set in CI — the ledger gate over a filtered corpus would read every
@@ -87,19 +169,112 @@ fn build_corpus() -> Option<Vec<FixtureLegs>> {
         return None;
     }
 
+    let sources: Vec<String> = entries
+        .iter()
+        .map(|entry| std::fs::read_to_string(entry.path()).unwrap())
+        .collect();
+
+    // The interp leg needs no build, so — when this binary declares it — it
+    // runs over the whole corpus on a scoped pool
+    // (interp_leg.rs::interp_sweep_parallel, #2381) while THIS thread walks
+    // the native/wasm builds fixture by fixture as before; the rows come back
+    // in corpus order and are zipped onto the built legs below, so nothing
+    // about the table depends on which finished first. An undeclared interp
+    // leg spawns no sweep at all: every row gets `None`.
+    let stems: Vec<String> = entries.iter().map(|e| e.path().file_stem().unwrap().to_str().unwrap().to_string()).collect();
+    let (built, interps) = std::thread::scope(|scope| {
+        let sweep = NEEDED_LEGS
+            .interp
+            .then(|| scope.spawn(|| interp_sweep_parallel(&sources, &stems)));
+        let built = build_backend_legs(&entries, &sources, have_wasm_opt);
+        let interps: Vec<Option<InterpLeg>> = match sweep {
+            Some(handle) => handle
+                .join()
+                .expect("interp sweep panicked")
+                .into_iter()
+                .map(|(leg, _fallbacks)| Some(leg))
+                .collect(),
+            None => entries.iter().map(|_| None).collect(),
+        };
+        (built, interps)
+    });
+    let n_interp = interps.iter().filter(|i| i.is_some()).count();
+    let (n_native, n_wasm, n_wasm_opt) = (
+        built.iter().filter(|b| b.2.is_some()).count(),
+        built.len(),
+        built.iter().filter(|b| b.4.is_some()).count(),
+    );
+    let legs: Vec<FixtureLegs> = built
+        .into_iter()
+        .zip(interps)
+        .map(|((name, allow, native, wasm, wasm_opt), interp)| FixtureLegs {
+            name,
+            allow,
+            native,
+            wasm,
+            wasm_opt,
+            interp,
+        })
+        .collect();
+    // One line per table so a CI log shows what each binary paid for (#2381).
+    eprintln!(
+        "corpus: {} fixture(s) — built {n_native} native / {n_wasm} wasm / {n_wasm_opt} wasm-opt / {n_interp} interp leg(s) \
+         (NEEDED_LEGS: native={} wasm_opt={} interp={})",
+        legs.len(),
+        NEEDED_LEGS.native,
+        NEEDED_LEGS.wasm_opt,
+        NEEDED_LEGS.interp
+    );
+    Some(legs)
+}
+
+/// The binary's `NEEDED_LEGS` must match what its gate body reads, both
+/// ways. Read-but-undeclared would panic on the first fixture anyway (the
+/// accessors); declared-but-unread is the silent one — a leg paid for and
+/// then discarded, which is exactly what this table stopped doing. The read
+/// set is the gate's own source: `.native` / `.wasm_opt` / `.interp` appear
+/// there only as accessor calls (this file is `include!`d, not part of
+/// `GATE_SOURCE`).
+#[test]
+fn corpus_legs_declared_match_reads() {
+    for (leg, declared, marker) in [
+        ("native", NEEDED_LEGS.native, ".native"),
+        ("wasm-opt", NEEDED_LEGS.wasm_opt, ".wasm_opt"),
+        ("interp", NEEDED_LEGS.interp, ".interp"),
+    ] {
+        let read = GATE_SOURCE.contains(marker);
+        assert_eq!(
+            declared, read,
+            "{leg} leg: NEEDED_LEGS declares it = {declared}, the gate body reads it = {read} \
+             (marker {marker:?} in GATE_SOURCE)"
+        );
+    }
+}
+
+/// The built legs of every fixture — native (when declared), wasm and (when
+/// declared and the optimizer is present) wasm-opt — in corpus order, exactly
+/// as `build_corpus` walked them before the interp leg moved onto its pool;
+/// each is a subprocess build so the walk stays serial on the caller's thread.
+type BackendLegs = (String, Option<String>, Option<(i32, String, String)>, (i32, String, String), Option<(i32, String, String)>);
+
+fn build_backend_legs(entries: &[std::fs::DirEntry], sources: &[String], have_wasm_opt: bool) -> Vec<BackendLegs> {
     let mut legs = Vec::with_capacity(entries.len());
-    for entry in &entries {
+    // Per-fixture build wall (native + wasm + wasm-opt subprocesses),
+    // recorded under ALMIDE_CORPUS_WEIGHTS_DIR (#2457) — the `build` column
+    // of proofs/corpus-weights.txt.
+    let mut walls: Vec<(String, std::time::Duration)> = Vec::with_capacity(entries.len());
+    for (entry, source) in entries.iter().zip(sources) {
         let path = entry.path();
         let name = path.file_stem().unwrap().to_str().unwrap().to_string();
-        let source = std::fs::read_to_string(&path).unwrap();
+        let t0 = std::time::Instant::now();
         let allow = source
             .lines()
             .find_map(|l| l.trim().strip_prefix("// @xt-allow:").map(|r| r.trim().to_string()));
 
-        let native = run_native_capture(&source);
+        let native = NEEDED_LEGS.native.then(|| run_native_capture(source));
         // A build/run panic is a BACKEND bug, not a corpus problem: record it as
         // a divergent leg so the owning gate reports it with its own wording.
-        let wasm = match std::panic::catch_unwind(|| run_wasm_capture(&source)) {
+        let wasm = match std::panic::catch_unwind(|| run_wasm_capture(source)) {
             Ok(Some(w)) => w,
             // A mid-run wasmtime spawn failure (it WAS probed at entry) is a
             // sentinel leg like a panic — NEVER a whole-corpus None, which
@@ -109,7 +284,7 @@ fn build_corpus() -> Option<Vec<FixtureLegs>> {
             Err(_) => (i32::MIN, "<panicked>".to_string(), "<panicked>".to_string()),
         };
         let wasm_opt = if have_wasm_opt {
-            match std::panic::catch_unwind(|| run_wasm_opt_capture(&source)) {
+            match std::panic::catch_unwind(|| run_wasm_opt_capture(source)) {
                 Ok(Some(o)) => Some(o),
                 Ok(None) => Some((i32::MIN, "<wasmtime-spawn-failed>".to_string(), "<wasmtime-spawn-failed>".to_string())),
                 Err(_) => Some((i32::MIN, "<panicked>".to_string(), "<panicked>".to_string())),
@@ -117,11 +292,11 @@ fn build_corpus() -> Option<Vec<FixtureLegs>> {
         } else {
             None
         };
-        let interp = run_interp_capture(&source);
-
-        legs.push(FixtureLegs { name, allow, native, wasm, wasm_opt, interp });
+        walls.push((name.clone(), t0.elapsed()));
+        legs.push((name, allow, native, wasm, wasm_opt));
     }
-    Some(legs)
+    almide_corpus::record_weights("build", env!("CARGO_CRATE_NAME"), &walls);
+    legs
 }
 
 /// `--wasm-opt` twin of `run_wasm_capture`: same build, same wasmtime

@@ -30,6 +30,27 @@ impl Emitter<'_> {
             .i32_add();
     }
 
+    /// Judge a LOCAL list copy-on-write into `hb` and write the result back
+    /// to its slot. Inside a loop that reaches the list only element-wise
+    /// (cow_hoist.rs, #2150) the judge runs once per loop entry: the first
+    /// store judges and sets the flag, and nothing in that loop can share
+    /// the list again, so every later store's judge would return its
+    /// argument.
+    fn emit_local_cow(&mut self, target: VarId, cow: u32, hb: u32) {
+        let idx = self.locals[&target].0;
+        let flag = self.cow_flag_of(target);
+        let mut i = self.f.instructions();
+        if let Some(flag) = flag {
+            i.local_get(flag).i32_eqz().if_(BlockType::Empty);
+            i.local_get(idx).call(cow).local_set(idx);
+            i.i32_const(1).local_set(flag).end();
+            i.local_get(idx).local_set(hb);
+        } else {
+            i.local_get(idx).call(cow).local_set(hb);
+            i.local_get(hb).local_set(idx);
+        }
+    }
+
     /// `xs[i] = v` — copy-on-write (split from lower_stmt for the complexity budget).
     pub(crate) fn lower_index_assign(
         &mut self,
@@ -105,13 +126,12 @@ impl Emitter<'_> {
                 // writes into a preallocated list retained O(n²) bytes
                 // (#1729: the prealloc/fft rows OOM'd at 2^16 writes where
                 // the live payload is 512 KiB).
-                get_target(self.f, self.locals, self.globals);
                 let cow = self.cow_fn_of(declared);
-                self.f.instructions().call(cow).local_set(hb);
                 if is_local {
-                    let idx = self.locals[target].0;
-                    self.f.instructions().local_get(hb).local_set(idx);
+                    self.emit_local_cow(*target, cow, hb);
                 } else {
+                    get_target(self.f, self.locals, self.globals);
+                    self.f.instructions().call(cow).local_set(hb);
                     let g = self.globals[&(self.var_space, *target)].0;
                     self.f.instructions().local_get(hb).global_set(g);
                 }

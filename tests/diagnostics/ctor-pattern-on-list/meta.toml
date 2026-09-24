@@ -1,0 +1,2 @@
+expects_error = "pattern `some(..)` cannot match List[Int]"
+hint_substring = "the subject is not an Option"

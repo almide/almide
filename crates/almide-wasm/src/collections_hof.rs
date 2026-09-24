@@ -8,6 +8,7 @@ use wasm_encoder::BlockType;
 
 use crate::collections::entry_layout;
 use crate::emitter::Emitter;
+use crate::work::Helper;
 use crate::*;
 
 impl Emitter<'_> {
@@ -589,9 +590,19 @@ impl Emitter<'_> {
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let kt = self.infer(body)?;
         let SliceTy::Scalar(_) = kt else { return unsup("list-group-by-key-nonscalar") };
-        // the accumulator copy-grows per new key (a fresh address each
-        // time): the plain scan, never the index lane
-        let scan = self.scan_helper(kt)?;
+        // The accumulator is the loop's own (rc == 1 from `$alloc`) and
+        // grows IN PLACE through `$map_reserve` — class slack, else the
+        // doubled block with the outgrown one freed — so its address is
+        // stable across the loop and the lookup takes the index lane
+        // (#1219 stage 2) exactly as the imperative `m[k] = …` window does,
+        // with the append hook carrying the index across a relocation.
+        // Before #2156 it copy-grew per new key (a fresh address per
+        // insert), which pinned it to the linear `$scan_*`: every element
+        // walked every group key — ~11 µs per element over a 5,000-word
+        // vocabulary, 110× the imperative spelling of the same program.
+        let scan = self.keyed_find(kt)?;
+        let append = self.keyed_append(kt);
+        let reserve = self.work.helper(Helper::MapReserve);
         let inner = SliceTy::List(self.types.intern(elem));
         let (koff, voff, esz) = entry_layout(kt, inner);
         let push = match elem.slot_size() {
@@ -600,6 +611,8 @@ impl Emitter<'_> {
         };
         let hm = self.hold_i32()?;
         let he = self.hold_i32()?;
+        let ho = self.hold_i32()?;
+        let hl = self.hold_i32()?;
         let hkey = self.hold_for(kt)?;
         {
             let mut i = self.f.instructions();
@@ -638,15 +651,25 @@ impl Emitter<'_> {
             i.call(push);
             i.i32_store(MemArg { offset: u64::from(voff), align: 2, memory_index: 0 });
             i.else_();
-            // absent: grow-append the (key, [x]) entry; the outgrown
-            // accumulator (uniquely ours) is freed once its entries moved
-            i.local_get(hm).i32_load(len_memarg()).i32_const(esz as i32).i32_add();
-            i.call(F_ALLOC).local_set(he);
-            i.local_get(he).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+            // absent: the group's `[x]` first (no allocation may sit
+            // between the reserve and the append hook — the hook is what
+            // retires the outgrown address from the index side table)
+            i.i32_const(0).call(F_ALLOC);
+            i.local_get(params[0]);
+        }
+        self.share_handle_top(elem);
+        if elem.val_type() == wasm_encoder::ValType::F64 {
+            self.f.instructions().i64_reinterpret_f64();
+        }
+        {
+            let mut i = self.f.instructions();
+            i.call(push).local_set(hl);
+            // room for one entry (in place under class slack, else the
+            // doubled block; the outgrown one is ours and freed), then the
+            // (key, [x]) pair at the old end and the length bump
+            i.local_get(hm).local_set(ho);
+            i.local_get(hm).i32_const(esz as i32).call(reserve).local_set(hm);
             i.local_get(hm).i32_const(almide_layout::PAYLOAD as i32).i32_add();
-            i.local_get(hm).i32_load(len_memarg());
-            i.memory_copy(0, 0);
-            i.local_get(he).i32_const(almide_layout::PAYLOAD as i32).i32_add();
             i.local_get(hm).i32_load(len_memarg()).i32_add().local_set(he);
             i.local_get(he).i32_const(koff as i32).i32_add();
             i.local_get(hkey);
@@ -657,32 +680,21 @@ impl Emitter<'_> {
         self.store_ty_slot_at(kt);
         {
             let mut i = self.f.instructions();
-            i.local_get(he);
-            i.i32_const(0).call(F_ALLOC);
-            i.local_get(params[0]);
-        }
-        self.share_handle_top(elem);
-        if elem.val_type() == wasm_encoder::ValType::F64 {
-            self.f.instructions().i64_reinterpret_f64();
-        }
-        {
-            let mut i = self.f.instructions();
-            i.call(push);
+            i.local_get(he).local_get(hl);
             i.i32_store(MemArg { offset: u64::from(voff), align: 2, memory_index: 0 });
-            // the grown block replaces the old handle, and the outgrown
-            // one (uniquely ours, its entries moved) is freed
             i.local_get(hm);
-            i.local_get(he);
-            i.local_get(hm).i32_load(len_memarg()).i32_sub();
-            i.i32_const(almide_layout::PAYLOAD as i32).i32_sub();
-            i.local_set(hm);
-            i.call(F_FREE);
+            i.local_get(hm).i32_load(len_memarg()).i32_const(esz as i32).i32_add();
+            i.i32_store(len_memarg());
+            // the index follows the entry (and the block, if it moved)
+            if let Some(append) = append {
+                i.local_get(ho).local_get(hm).i32_const(esz as i32).i32_const(koff as i32).call(append).drop();
+            }
             i.end();
         }
         self.hof_step(ih);
         self.f.instructions().local_get(hm);
         self.release_for(kt);
-        for _ in 0..5 {
+        for _ in 0..7 {
             self.release_i32();
         }
         Ok(Some(Lowered::owned(SliceTy::Map(self.types.intern(kt), self.types.intern(inner)))))

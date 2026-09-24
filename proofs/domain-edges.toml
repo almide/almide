@@ -5,11 +5,34 @@
 # the gate diffs BOTH directions, so a new divergence fails and a row that stopped
 # diverging also fails and must be deleted. `count` is a shrink-only ceiling.
 #
+# POPULATION vs MEASURED (#2402). The tool's population is EVERY public stdlib
+# fn with an Int parameter — `parse_stdlib(only=None)` walks all of stdlib/, and
+# the `[[skip]]` rows at the bottom name each slot of that population it could
+# not build. The divergence rows below are what particular RUNS measured, and a
+# run is scoped by `--only`: the 2026-08-17 run covered six modules (bytes,
+# list, string, datetime, io, math), and `.github/workflows/domain-edges.yml`
+# now also measures json and value weekly. Any module not in that list has NO
+# measured divergence rows here — not because it is clean, but because nobody
+# has run it; "not in the ledger" and "measured 0 divergent" are different
+# claims and this header is where the difference is written down.
+#
 # Measured 2026-08-17 on the A-ratified tree, six modules (bytes, list, string,
 # datetime, io, math), quiet machine, solo-retry instrument:
 #   AGREE 4823   DIVERGE 64   WALL 627   BOMB 2
+# That run's AGREE count included cells whose probe did not type-check (an
+# `Int?` return rendered as `Int`; a self-host helper called by its private
+# name) and so agreed on "compile error" — the tool now type-checks each slot
+# first and names such slots as skips or helpers instead of counting them.
+# json and value measured 2026-09-21 on the tree carrying #2396's fix:
+#   json  14 cells / 1 slot (`json.index(i)`)  AGREE 14   skipped 0
+#   value 11 cells / 1 slot (`value.int(n)`)   AGREE 11   skipped 0
+# The rest of the population is unmeasured under the widened tool until the
+# weekly run lands: `string`'s tail, `datetime`, `io`, `math` were never swept
+# under the widening (the 2026-09-21 partial sweep stopped for disk after
+# bytes / list / part of string), and the widening ADDS cells to every module
+# (generic fns, `T?` / `Result` returns) that the earlier runs never had.
 #
-# Every one of the 64 divergent rows below is the CONTRACTED divergence (C-197,
+# Every one of the divergent rows below is the CONTRACTED divergence (C-197,
 # ratified A): a cell between the two legs' structural allocation bounds, where
 # the narrower leg (wasm32) takes the defined out-of-memory abort and the wider
 # one answers. These are DECLARED, not defects — the count is not a defect
@@ -18,8 +41,70 @@
 # ZERO of those. datetime/io/math measured 0 divergent — their former rows were
 # fixed (#1455) and are deleted as stale. BOMB 2 are declared timeout outcomes
 # (native filling tens of GB), not findings.
+#
+# 2026-09-21, #2385 — the first `domain-edges.yml` run (the gate had been
+# committed but never executed) failed on string, and the reason above was the
+# finding rather than the frame. `string.pad_start`/`pad_end` did NOT take the
+# defined abort past the wasm leg's bound: the width was narrowed with a bare
+# `i32_wrap_i64`, so the leg ANSWERED with the width mod 2^32 —
+# `pad_start("ab", 2^32+5, "x")` returned `"xxxab"`. Four rows sat inside this
+# file's "every row is the contracted divergence" claim while being something
+# worse, because a ledger of WHICH cells diverge cannot see HOW. The narrowing
+# now aborts on the defined line, which makes the two surviving pad rows true
+# and removes four cells outright (`i64_max`, `i64_max_m1` on both fns: both
+# legs now print `Error: out of memory` and exit 1, byte-identical). Those four
+# are deterministic on any machine — `i64::MAX` is a size nothing can satisfy,
+# so no amount of free memory changes the answer.
+#
+# The two `i32_max` rows went for a DIFFERENT reason from the other four.
+# `i32_max` asks both legs for 2 GiB, and the wasm leg's ceiling on the
+# `almide run --target wasm` path is `StoreLimits::default()`
+# (`crates/almide-wasm-run/src/host.rs:663`) — HOST AVAILABILITY, not a
+# structural bound. So the verdict for an `i32_max` cell tracked how much memory
+# was free when it ran: a sweep run concurrently with another heavy job called
+# them divergent; on a quiet machine both legs agreed. They were deleted because
+# a phantom that landed once was being declared forever, NOT because anything
+# about them was fixed — and the same run reported the three bytes cells
+# (`bytes.new:len`, `bytes.pad_left`/`pad_right:target_len`) the other way.
+#     string: DIVERGE 8 -> 4;  count 64 -> 62;  UNTRIAGED stays 0.
+#
+# 2026-09-21, #2387 — THE BUDGET PIN. `wasm_budget_bytes` below is the
+# linear-memory budget every wasm reading in this file was taken under:
+# tools/domain_edge_matrix.py builds the module and runs it on the wasmtime CLI
+# with `-W max-memory-size=<budget>`, so a request past the budget takes the
+# defined C-197 abort on EVERY machine, and the `i32_max` cells that read
+# AGREE and DIVERGE from one binary minutes apart now read one thing. The
+# native leg is uncapped: RLIMIT_AS is unenforced on Darwin (setrlimit ->
+# EINVAL), so a native cap would split the local and CI verdicts, and its 2 GiB
+# request at `i32_max` is the same availability claim this file already makes
+# at 4 GiB for every `u32_max` row (#2387 item 2, open). The verdict that moved
+# in every recorded reading was the wasm leg's, and that one is pinned.
+#
+# What the pin changed, measured 2026-09-21 on `almide 0.63.0 (dev)`, three runs
+# plus one under a 6 GiB memory hog, identical on all four: the five 1-byte-
+# element `i32_max` cells (`bytes.new:len`, `bytes.pad_left`/`pad_right:
+# target_len`, `string.pad_start`/`pad_end:n`) are now DIVERGE at the declared
+# budget — the wasm leg aborts structurally, native answers — and are declared
+# below with the C-197 reason, which is what they were whenever the machine
+# happened to have 2 GiB free. The 17 `i32_max` rows already here (array
+# readers, `bytes.repeat`, `list.range`) request >= 4 GiB on wasm32 and were
+# structural before the pin; they do not move. The count is a ceiling on the
+# UNTRIAGED population, which stays 0; these five are the instrument's fixed
+# boundary made visible, not new defects.
+#     bytes: DIVERGE +3; string: DIVERGE +2;  count 62 -> 67.
+#
+# tools/domain_edge_ledger.py REFUSES a measurement that is not pinned to this
+# budget (absent, different, or a cell marked unpinned) before diffing it, so an
+# availability reading can neither fail the gate nor be written here.
+# `scripts/check-domain-edges.sh --selftest` proves that with forged cells.
 
-count = 64
+wasm_budget_bytes = 1073741824
+count = 67
+skip_count = 186
+
+[[divergence]]
+cell   = "bytes.new:len:i32_max"
+reason = "contracted divergence (C-197) at the declared wasm budget (#2387): a 2 GiB request (1-byte element at i32_max) exceeds wasm_budget_bytes, so the wasm leg takes the defined abort structurally while native answers; unpinned, this cell read AGREE and DIVERGE from one binary minutes apart"
 
 [[divergence]]
 cell   = "bytes.new:len:two_pow_32"
@@ -30,12 +115,20 @@ cell   = "bytes.new:len:u32_max"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
 
 [[divergence]]
+cell   = "bytes.pad_left:target_len:i32_max"
+reason = "contracted divergence (C-197) at the declared wasm budget (#2387): a 2 GiB request (1-byte element at i32_max) exceeds wasm_budget_bytes, so the wasm leg takes the defined abort structurally while native answers; unpinned, this cell read AGREE and DIVERGE from one binary minutes apart"
+
+[[divergence]]
 cell   = "bytes.pad_left:target_len:two_pow_32"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
 
 [[divergence]]
 cell   = "bytes.pad_left:target_len:u32_max"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "bytes.pad_right:target_len:i32_max"
+reason = "contracted divergence (C-197) at the declared wasm budget (#2387): a 2 GiB request (1-byte element at i32_max) exceeds wasm_budget_bytes, so the wasm leg takes the defined abort structurally while native answers; unpinned, this cell read AGREE and DIVERGE from one binary minutes apart"
 
 [[divergence]]
 cell   = "bytes.pad_right:target_len:two_pow_32"
@@ -255,7 +348,7 @@ reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocat
 
 [[divergence]]
 cell   = "string.pad_end:n:i32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+reason = "contracted divergence (C-197) at the declared wasm budget (#2387): a 2 GiB request (1-byte element at i32_max) exceeds wasm_budget_bytes, so the wasm leg takes the defined abort structurally while native answers; unpinned, this was the measured phantom (declared 2026-08-17, deleted 2026-09-21, now reproducible)"
 
 [[divergence]]
 cell   = "string.pad_end:n:two_pow_32"
@@ -267,7 +360,7 @@ reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocat
 
 [[divergence]]
 cell   = "string.pad_start:n:i32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+reason = "contracted divergence (C-197) at the declared wasm budget (#2387): a 2 GiB request (1-byte element at i32_max) exceeds wasm_budget_bytes, so the wasm leg takes the defined abort structurally while native answers; unpinned, this was the measured phantom (declared 2026-08-17, deleted 2026-09-21, now reproducible)"
 
 [[divergence]]
 cell   = "string.pad_start:n:two_pow_32"
@@ -276,3 +369,753 @@ reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocat
 [[divergence]]
 cell   = "string.pad_start:n:u32_max"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+# ── Skipped slots: coverage the matrix does NOT have, by name (#2402) ──────
+# One row per public Int-parameter slot the tool could not build, render, or
+# type-check, with the measured reason (`skip_count` above). The gate diffs
+# these both ways too: a slot that BECOMES unbuildable is coverage lost and
+# fails; a slot that becomes buildable must have its row deleted.
+
+[[skip]]
+slot   = "bytes.copy_to_ptr(cap)"
+reason = "unbuildable: no VALUES entry for parameter type `RawPtr`"
+
+[[skip]]
+slot   = "bytes.from_raw_ptr(len)"
+reason = "unbuildable: no VALUES entry for parameter type `RawPtr`"
+
+[[skip]]
+slot   = "bytes.read_bool_at(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int, Bool?)`"
+
+[[skip]]
+slot   = "bytes.read_f16_le_at(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int, Float?)`"
+
+[[skip]]
+slot   = "bytes.read_f32_be_at(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int, Float?)`"
+
+[[skip]]
+slot   = "bytes.read_f32_le_at(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int, Float?)`"
+
+[[skip]]
+slot   = "bytes.read_f64_be_at(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int, Float?)`"
+
+[[skip]]
+slot   = "bytes.read_f64_le_at(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int, Float?)`"
+
+[[skip]]
+slot   = "bytes.read_float32(offset)"
+reason = "unbuildable: no VALUES entry for parameter type `Endian`"
+
+[[skip]]
+slot   = "bytes.read_i16_be_at(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+
+[[skip]]
+slot   = "bytes.read_i16_le_at(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+
+[[skip]]
+slot   = "bytes.read_i32_be_at(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+
+[[skip]]
+slot   = "bytes.read_i32_le_at(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+
+[[skip]]
+slot   = "bytes.read_i64_be_at(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+
+[[skip]]
+slot   = "bytes.read_i64_le_at(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+
+[[skip]]
+slot   = "bytes.read_int32(offset)"
+reason = "unbuildable: no VALUES entry for parameter type `Endian`"
+
+[[skip]]
+slot   = "bytes.read_string_be_at(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int, String?)`"
+
+[[skip]]
+slot   = "bytes.read_u16_be_at(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+
+[[skip]]
+slot   = "bytes.read_u16_le_at(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+
+[[skip]]
+slot   = "bytes.read_u32_be_at(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+
+[[skip]]
+slot   = "bytes.read_u32_le_at(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+
+[[skip]]
+slot   = "bytes.read_u8_at(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+
+[[skip]]
+slot   = "bytes.read_uint16(offset)"
+reason = "unbuildable: no VALUES entry for parameter type `Endian`"
+
+[[skip]]
+slot   = "bytes.read_uint32(offset)"
+reason = "unbuildable: no VALUES entry for parameter type `Endian`"
+
+[[skip]]
+slot   = "bytes.set_float32(offset)"
+reason = "unbuildable: no VALUES entry for parameter type `Float32`"
+
+[[skip]]
+slot   = "bytes.set_int32(offset)"
+reason = "unbuildable: no VALUES entry for parameter type `Int32`"
+
+[[skip]]
+slot   = "bytes.set_uint16(offset)"
+reason = "unbuildable: no VALUES entry for parameter type `UInt16`"
+
+[[skip]]
+slot   = "bytes.set_uint32(offset)"
+reason = "unbuildable: no VALUES entry for parameter type `UInt32`"
+
+[[skip]]
+slot   = "bytes.take_at(n)"
+reason = "unrenderable: no RENDER entry for return type `(Int, Bytes?)`"
+
+[[skip]]
+slot   = "bytes.take_at(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int, Bytes?)`"
+
+[[skip]]
+slot   = "fs.fold_lines(init)"
+reason = "unbuildable: no VALUES entry for parameter type `(Int, String) -> Int`"
+
+[[skip]]
+slot   = "fs.fold_lines_chunked(init)"
+reason = "unbuildable: no VALUES entry for parameter type `(Int, String) -> Int`"
+
+[[skip]]
+slot   = "fs.fold_lines_chunked(workers)"
+reason = "unbuildable: no VALUES entry for parameter type `(Int, String) -> Int`"
+
+[[skip]]
+slot   = "fs.fold_lines_range(end)"
+reason = "unbuildable: no VALUES entry for parameter type `(Int, String) -> Int`"
+
+[[skip]]
+slot   = "fs.fold_lines_range(init)"
+reason = "unbuildable: no VALUES entry for parameter type `(Int, String) -> Int`"
+
+[[skip]]
+slot   = "fs.fold_lines_range(start)"
+reason = "unbuildable: no VALUES entry for parameter type `(Int, String) -> Int`"
+
+[[skip]]
+slot   = "http.json(status)"
+reason = "unrenderable: no RENDER entry for return type `HttpResponse`"
+
+[[skip]]
+slot   = "http.response(status)"
+reason = "unrenderable: no RENDER entry for return type `HttpResponse`"
+
+[[skip]]
+slot   = "http.serve(port)"
+reason = "unbuildable: no VALUES entry for parameter type `effect (HttpRequest) -> HttpResponse`"
+
+[[skip]]
+slot   = "http.status(code)"
+reason = "unbuildable: no VALUES entry for parameter type `HttpResponse`"
+
+[[skip]]
+slot   = "http.with_headers(status)"
+reason = "unbuildable: no VALUES entry for parameter type `Map[String, String]`"
+
+[[skip]]
+slot   = "int.to_float32(n)"
+reason = "unrenderable: no RENDER entry for return type `Float32`"
+
+[[skip]]
+slot   = "int.to_float32_checked(n)"
+reason = "unrenderable: no RENDER entry for return type `Float32?`"
+
+[[skip]]
+slot   = "int.to_float64(n)"
+reason = "unrenderable: no RENDER entry for return type `Float64`"
+
+[[skip]]
+slot   = "int.to_int16(n)"
+reason = "unrenderable: no RENDER entry for return type `Int16`"
+
+[[skip]]
+slot   = "int.to_int16_checked(n)"
+reason = "unrenderable: no RENDER entry for return type `Int16?`"
+
+[[skip]]
+slot   = "int.to_int16_saturating(n)"
+reason = "unrenderable: no RENDER entry for return type `Int16`"
+
+[[skip]]
+slot   = "int.to_int32(n)"
+reason = "unrenderable: no RENDER entry for return type `Int32`"
+
+[[skip]]
+slot   = "int.to_int32_checked(n)"
+reason = "unrenderable: no RENDER entry for return type `Int32?`"
+
+[[skip]]
+slot   = "int.to_int32_saturating(n)"
+reason = "unrenderable: no RENDER entry for return type `Int32`"
+
+[[skip]]
+slot   = "int.to_int64(n)"
+reason = "unrenderable: no RENDER entry for return type `Int64`"
+
+[[skip]]
+slot   = "int.to_int8(n)"
+reason = "unrenderable: no RENDER entry for return type `Int8`"
+
+[[skip]]
+slot   = "int.to_int8_checked(n)"
+reason = "unrenderable: no RENDER entry for return type `Int8?`"
+
+[[skip]]
+slot   = "int.to_int8_saturating(n)"
+reason = "unrenderable: no RENDER entry for return type `Int8`"
+
+[[skip]]
+slot   = "int.to_uint16(n)"
+reason = "unrenderable: no RENDER entry for return type `UInt16`"
+
+[[skip]]
+slot   = "int.to_uint16_checked(n)"
+reason = "unrenderable: no RENDER entry for return type `UInt16?`"
+
+[[skip]]
+slot   = "int.to_uint16_saturating(n)"
+reason = "unrenderable: no RENDER entry for return type `UInt16`"
+
+[[skip]]
+slot   = "int.to_uint32(n)"
+reason = "unrenderable: no RENDER entry for return type `UInt32`"
+
+[[skip]]
+slot   = "int.to_uint32_checked(n)"
+reason = "unrenderable: no RENDER entry for return type `UInt32?`"
+
+[[skip]]
+slot   = "int.to_uint32_saturating(n)"
+reason = "unrenderable: no RENDER entry for return type `UInt32`"
+
+[[skip]]
+slot   = "int.to_uint64(n)"
+reason = "unrenderable: no RENDER entry for return type `UInt64`"
+
+[[skip]]
+slot   = "int.to_uint64_checked(n)"
+reason = "unrenderable: no RENDER entry for return type `UInt64?`"
+
+[[skip]]
+slot   = "int.to_uint64_saturating(n)"
+reason = "unrenderable: no RENDER entry for return type `UInt64`"
+
+[[skip]]
+slot   = "int.to_uint8(n)"
+reason = "unrenderable: no RENDER entry for return type `UInt8`"
+
+[[skip]]
+slot   = "int.to_uint8_checked(n)"
+reason = "unrenderable: no RENDER entry for return type `UInt8?`"
+
+[[skip]]
+slot   = "int.to_uint8_saturating(n)"
+reason = "unrenderable: no RENDER entry for return type `UInt8`"
+
+[[skip]]
+slot   = "list.fold(init)"
+reason = "unbuildable: no VALUES entry for parameter type `(Int, Int) -> Int`"
+
+[[skip]]
+slot   = "list.iterate(n)"
+reason = "unbuildable: no VALUES entry for parameter type `(Int) -> Int`"
+
+[[skip]]
+slot   = "list.iterate(seed)"
+reason = "unbuildable: no VALUES entry for parameter type `(Int) -> Int`"
+
+[[skip]]
+slot   = "list.scan(init)"
+reason = "unbuildable: no VALUES entry for parameter type `(Int, Int) -> Int`"
+
+[[skip]]
+slot   = "list.split_at(n)"
+reason = "unrenderable: no RENDER entry for return type `(List[Int], List[Int])`"
+
+[[skip]]
+slot   = "list.update(i)"
+reason = "unbuildable: no VALUES entry for parameter type `(Int) -> Int`"
+
+[[skip]]
+slot   = "list.with_capacity(cap)"
+reason = "probe does not type-check: error[E018]: cannot infer the element type of `list.with_capacity(n)`"
+
+[[skip]]
+slot   = "map.contains(key)"
+reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
+
+[[skip]]
+slot   = "map.delete(key)"
+reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
+
+[[skip]]
+slot   = "map.fold(init)"
+reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
+
+[[skip]]
+slot   = "map.get(key)"
+reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
+
+[[skip]]
+slot   = "map.get_or(default)"
+reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
+
+[[skip]]
+slot   = "map.get_or(key)"
+reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
+
+[[skip]]
+slot   = "map.insert(key)"
+reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
+
+[[skip]]
+slot   = "map.insert(value)"
+reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
+
+[[skip]]
+slot   = "map.remove(key)"
+reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
+
+[[skip]]
+slot   = "map.set(key)"
+reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
+
+[[skip]]
+slot   = "map.set(value)"
+reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
+
+[[skip]]
+slot   = "map.update(key)"
+reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
+
+[[skip]]
+slot   = "map.upsert(init)"
+reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
+
+[[skip]]
+slot   = "map.upsert(key)"
+reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
+
+[[skip]]
+slot   = "matrix.conv1d(kernel)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.conv1d(padding)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.conv1d(stride)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.dot_row(r)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.from_bytes_f16_le(cols)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.from_bytes_f16_le(offset)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.from_bytes_f16_le(rows)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.from_bytes_f32_le(cols)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.from_bytes_f32_le(offset)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.from_bytes_f32_le(rows)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.from_bytes_f64_le(cols)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.from_bytes_f64_le(offset)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.from_bytes_f64_le(rows)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.from_q1_0_bytes(cols)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.from_q1_0_bytes(offset)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.from_q1_0_bytes(rows)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.get(col)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.get(row)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.linear_f32_row_no_bias(w_cols)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.linear_f32_row_no_bias(w_offset)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.linear_f32_row_no_bias(w_rows)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.linear_q1_0_row_no_bias(w_cols)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.linear_q1_0_row_no_bias(w_offset)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.linear_q1_0_row_no_bias(w_rows)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.linear_q8_0_row_no_bias(w_cols)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.linear_q8_0_row_no_bias(w_offset)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.linear_q8_0_row_no_bias(w_rows)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.masked_multi_head_attention(n_heads)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.multi_head_attention(n_heads)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.ones(cols)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.ones(rows)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.ones_f32(cols)"
+reason = "unrenderable: no RENDER entry for return type `Matrix[Float32]`"
+
+[[skip]]
+slot   = "matrix.ones_f32(rows)"
+reason = "unrenderable: no RENDER entry for return type `Matrix[Float32]`"
+
+[[skip]]
+slot   = "matrix.qwen3_block_f32_kv(ffn_hidden)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.qwen3_block_f32_kv(head_dim)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.qwen3_block_f32_kv(n_kv_heads)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.qwen3_block_f32_kv(n_q_heads)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.qwen3_block_f32_kv(start_pos)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.qwen3_block_q1_0_kv(ffn_hidden)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.qwen3_block_q1_0_kv(head_dim)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.qwen3_block_q1_0_kv(n_kv_heads)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.qwen3_block_q1_0_kv(n_q_heads)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.qwen3_block_q1_0_kv(start_pos)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.qwen3_block_q8_0_kv(ffn_hidden)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.qwen3_block_q8_0_kv(head_dim)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.qwen3_block_q8_0_kv(n_kv_heads)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.qwen3_block_q8_0_kv(n_q_heads)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.qwen3_block_q8_0_kv(start_pos)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.rope_rotate(head_dim)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.rope_rotate(n_heads)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.rope_rotate_at(head_dim)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.rope_rotate_at(n_heads)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.rope_rotate_at(start_pos)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.rope_rotate_neox_at(head_dim)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.rope_rotate_neox_at(n_heads)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.rope_rotate_neox_at(start_pos)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.row_dot(r)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.select_rows_f32(cols)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.select_rows_f32(offset)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.select_rows_q1_0(cols)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.select_rows_q1_0(offset)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.select_rows_q8_0_dq(cols)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.select_rows_q8_0_dq(offset)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.slice_rows(end)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.slice_rows(start)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.split_cols_even(n)"
+reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
+
+[[skip]]
+slot   = "matrix.zeros(cols)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.zeros(rows)"
+reason = "unrenderable: no RENDER entry for return type `Matrix`"
+
+[[skip]]
+slot   = "matrix.zeros_f32(cols)"
+reason = "unrenderable: no RENDER entry for return type `Matrix[Float32]`"
+
+[[skip]]
+slot   = "matrix.zeros_f32(rows)"
+reason = "unrenderable: no RENDER entry for return type `Matrix[Float32]`"
+
+[[skip]]
+slot   = "net.tcp_accept(listener)"
+reason = "probe does not type-check: error[E010]: non-exhaustive match: missing _"
+
+[[skip]]
+slot   = "net.tcp_available(stream)"
+reason = "probe does not type-check: error[E010]: non-exhaustive match: missing _"
+
+[[skip]]
+slot   = "net.tcp_close(stream)"
+reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
+
+[[skip]]
+slot   = "net.tcp_close_listener(listener)"
+reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
+
+[[skip]]
+slot   = "net.tcp_connect(port)"
+reason = "probe does not type-check: error[E010]: non-exhaustive match: missing _"
+
+[[skip]]
+slot   = "net.tcp_listen(port)"
+reason = "probe does not type-check: error[E010]: non-exhaustive match: missing _"
+
+[[skip]]
+slot   = "net.tcp_set_timeout(stream)"
+reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
+
+[[skip]]
+slot   = "net.tcp_set_timeout(timeout_ms)"
+reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
+
+[[skip]]
+slot   = "net.tcp_write(stream)"
+reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
+
+[[skip]]
+slot   = "prim.alloc_list_str(n)"
+reason = "probe does not type-check: error[E025]: cannot infer a concrete type for this expression (type List[?0])"
+
+[[skip]]
+slot   = "prim.alloc_map(slots)"
+reason = "unrenderable: no RENDER entry for return type `Map[Int, Int]`"
+
+[[skip]]
+slot   = "prim.alloc_map_kv(slots)"
+reason = "unrenderable: no RENDER entry for return type `Map[Int, Int]`"
+
+[[skip]]
+slot   = "prim.alloc_map_skv(slots)"
+reason = "unrenderable: no RENDER entry for return type `Map[String, Int]`"
+
+[[skip]]
+slot   = "prim.alloc_map_str(slots)"
+reason = "unrenderable: no RENDER entry for return type `Map[String, String]`"
+
+[[skip]]
+slot   = "prim.alloc_set(n)"
+reason = "unrenderable: no RENDER entry for return type `Set[Int]`"
+
+[[skip]]
+slot   = "prim.alloc_set_str(n)"
+reason = "unrenderable: no RENDER entry for return type `Set[Int]`"
+
+[[skip]]
+slot   = "prim.i2f32(x)"
+reason = "unrenderable: no RENDER entry for return type `Float32`"
+
+[[skip]]
+slot   = "prim.int_to_ptr(a)"
+reason = "unrenderable: no RENDER entry for return type `RawPtr`"
+
+[[skip]]
+slot   = "process.exec_status_timeout(timeout_ms)"
+reason = "unrenderable: no RENDER entry for return type `Result[ProcessStatus, String]`"
+
+[[skip]]
+slot   = "process.exit(code)"
+reason = "unrenderable: no RENDER entry for return type `Never`"
+
+[[skip]]
+slot   = "process.kill(pid)"
+reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
+
+[[skip]]
+slot   = "process.kill(signal)"
+reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
+
+[[skip]]
+slot   = "result.filter(err_val)"
+reason = "unbuildable: no VALUES entry for parameter type `Result[Int, Int]`"
+
+[[skip]]
+slot   = "result.unwrap_or(default)"
+reason = "unbuildable: no VALUES entry for parameter type `Result[Int, Int]`"
+
+[[skip]]
+slot   = "set.contains(value)"
+reason = "unbuildable: no VALUES entry for parameter type `Set[Int]`"
+
+[[skip]]
+slot   = "set.fold(init)"
+reason = "unbuildable: no VALUES entry for parameter type `Set[Int]`"
+
+[[skip]]
+slot   = "set.insert(value)"
+reason = "unbuildable: no VALUES entry for parameter type `Set[Int]`"
+
+[[skip]]
+slot   = "set.remove(value)"
+reason = "unbuildable: no VALUES entry for parameter type `Set[Int]`"
+
+[[skip]]
+slot   = "string.slice(start)"
+reason = "unbuildable: no VALUES entry for parameter type `Int = 9223372036854775807`"

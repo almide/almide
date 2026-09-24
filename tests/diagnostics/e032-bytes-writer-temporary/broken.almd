@@ -1,0 +1,8 @@
+// E032: a bytes writer on a temporary (#2466). The receiver is `mut`, and a
+// temporary has no binding to write back into, so it is rejected like a
+// temporary passed to `list.push`. Before #2466 the statement compiled and the
+// write was dropped with the temporary.
+fn main() -> Unit = {
+  bytes.append_u8(bytes.new(0), 7)
+  println("done")
+}

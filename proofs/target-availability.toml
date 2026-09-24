@@ -30,14 +30,38 @@
 # wall MUST have its leg in a row, every declared leg MUST still measure
 # as a wall (a leg that starts serving makes the entry STALE — remove
 # the leg, the shrink direction), a reasonless leg fails, and the
-# pending-self-host count is a both-way ratchet. A public fn the probe
+# pending-class counts are both-way ratchets. A public fn the probe
 # cannot synthesize a call for FAILS the gate (never a silent skip — the
 # #1827 shape). A fn the probe reaches but whose leg walls on an ARGUMENT
 # CONSTRUCTOR the probe itself injected (an HttpRequest exists only
 # inside an http.serve handler) is `unprobed` on that leg: claimed
 # neither way, listed by the gate, and held to the leg's
 # unprobed_ceiling_<leg> both ways.
-schema = 2
+#
+# Closure class (schema 3, #1423 stage 4's follow-up): every row carries
+# `class`, the honest ENDGAME of the row, one of the closed vocabulary —
+#   pending-self-host    closes by work IN THIS REPO: a self-host body
+#                        the leg can link, a structural-leg arm for the
+#                        body's layout, an emitter representation the
+#                        leg lacks — landed with a cross fixture in one
+#                        PR. Shrink-only ratchet: pending_self_host_ceiling.
+#   pending-port         the leg lacks a HOST surface the fn needs (a
+#                        wasi:http@0.3 station, a structural-leg host
+#                        import, a p3 world); closes when the port lands.
+#                        Shrink-only ratchet: pending_port_ceiling.
+#   native-only-forever  the fn cannot exist on the wasm target as
+#                        specified (no subprocess API in stock WASI, an
+#                        uncatchable trap); the row carries a
+#                        `justification` sentence and never counts as
+#                        pending. No ceiling — but a forever leg that
+#                        starts serving is still STALE (the two-direction
+#                        agreement covers every class).
+# A pending row needs an `issue`; a row that says `reason = "pending-self-
+# host"` must be class pending-self-host (the reason tag and the class
+# cannot disagree); a missing or unknown class fails the gate. Moving a
+# row between classes moves a ceiling, so a reclassification is always a
+# visible edit, never a silent one.
+schema = 3
 
 # 2026-09-02 (#1827): 15 -> 82. The MEASUREMENT widened, not the surface:
 # the sweep now enumerates all 973 public fns (from 391), and the 67
@@ -58,7 +82,97 @@ schema = 2
 # linked-impl whitelist, split and lines get native arms (their self-host
 # twins write the incumbent's 8-byte List slot stride raw), and the
 # i2f32 prim converts i64 -> f32 directly (single rounding).
-pending_self_host_ceiling = 34
+# 2026-09-08 (#1423 stage 4): the 25 remaining matrix rows and
+# list.partition are one blocker, not 26: stdlib/matrix_core.almd reads
+# the incumbent's list layout (LEN as an element count, 8-byte handle
+# slots) and the structural leg stores LEN in bytes with 4-byte slots.
+# They close together — by a layout-abstract prim family or by the
+# structural leg's own matrix arms once the incumbent retires (#1696
+# step 5). Still pending-self-host: a body exists, the leg cannot link it.
+# 2026-09-21 (#1423 bucket C, schema 3): the reason vocabulary is a
+# `class` per row. The two ruled rows land here — env.set has NO row
+# (the embedded overlay shim serves it, crates/almide-wasm/tests/
+# wasi_services.rs), testing.assert_throws is native-only-forever with
+# the subprocess family (process.exec/exec_in/exec_status/
+# exec_status_timeout/exec_with_stdin/spawn/is_alive/kill/pid; and
+# exec_attached, #2540);
+# process.env and process.stdin_lines stay pending-port (environ and
+# stdin exist in WASI; the split the ruling asked for).
+# 2026-09-21 (schema 3): 34 -> 56 is the CLASS basis, not a regression.
+# The count now spans every row that closes by work in this repo — a
+# self-host body, a structural-leg arm, an emitter representation — not
+# only the rows tagged `pending-self-host` on the structural leg: the
+# fused matrix kernels and append_rows/fma/fma3 (native intrinsics with
+# no wasm body on any leg, 12), the structural-leg-gap rows (Matrix
+# [Float32] representation, fold_lines_range arm, string.clear's Hole;
+# 8) and mem.save/restore (the allocator-mark scalar; 2) join. Burn-down
+# to 0 is still the stage-4 finish line; only the denominator is honest now.
+# 2026-09-22 (#1423 stage 4): 56 -> 50. The in-place clear/delete family
+# (map.delete, map.clear, bytes.clear, string.clear) gets structural-leg
+# arms — var write-backs of a fresh block, the map.insert / list.clear
+# shape, so an alias bound before the mutation keeps its value (C-033;
+# the incumbent's string_clear twin stores into the SHARED block and the
+# 0.62.0 default route printed the alias cleared — the new arm is the
+# fix on the default route); mem.save / mem.restore get the C-041
+# trivial-pair twins (stdlib/mem_checkpoint.almd — v1's RC discipline
+# makes both no-ops on every leg, exactly as native and bytes.heap_save
+# already are) and leave every leg. Parity evidence:
+# spec/wasm_cross/inplace_clear_family.almd, spec/wasm_cross/mem_checkpoint.almd.
+# Same day (#2465): the incumbent's twin follows — `rewrite_clear` (the
+# `list.clear` rebind) now covers string / bytes and a record-field
+# receiver for all four, so the forced incumbent and the shapes the router
+# still sends there agree with native; the shared-block `string_clear` /
+# `bytes_clear` bodies stay as rows but are not reached from a var or field
+# receiver. Evidence: spec/wasm_cross/inplace_clear_alias.almd (var and
+# mut-param shapes, every leg) + inplace_clear_alias_field.almd (the field
+# shapes; the structural leg still refuses `string-clear-nonvar`, so the
+# default route serves it from the incumbent) + tests/incumbent_clear_alias_test.rs
+# (native == default route == forced incumbent).
+# Same day: 50 -> 48. fs.stat and fs.glob cross the embedded host on the
+# structural leg (ops 38 / 39 — the four FileStat fields as i64s, the
+# C-228 segment-wise glob transcribed into the host), the fs.walk shape.
+# An fs program routes to the incumbent on the BUILD path, so the parity
+# evidence is the embedded lane: spec/embedded_cross/fs_stat_glob_structural.almd.
+# Left this round, each for a stated reason: fs.fold_lines_range /
+# fold_lines_chunked (a byte-range walk and the chunk partition need a
+# host op pair plus C-220's ownership rule in the guest — more than one
+# sitting), list.shuffle (a generic `[A]` element move: the structural
+# leg would need per-element-type twins and the entropy floor; the
+# random.shuffle twins wall on the same leg), list.partition and every
+# matrix row (the 2026-09-08 layout finding above — one blocker, not 45).
+# 2026-09-22 (#1423 stage 4): 48 -> 9. The matrix blocker was one finding,
+# not 44 rows: the structural leg's Matrix is its OWN flat block
+# (`[rows][cols][f64 cells]`, matrix.rs), so no reading of
+# stdlib/matrix_core.almd's list-of-rows layout could ever serve it — the
+# leg needed the family's entry points on its layout. matrix_elem.rs (the
+# zip family add/sub/div/silu_mul, neg/scale/map, broadcast_add_row,
+# causal_mask_add, layer_norm_rows), matrix_prod.rs (mul, linear_row[_no_bias],
+# swiglu_gate, conv1d) and matrix_shape.rs (slice_rows, gather_rows,
+# concat_cols[_many], split_cols_even, to_bytes_f64/f32_le) are those arms,
+# from_bytes_f64_le joins the byte loader, and `Matrix[Float32]` is the same
+# flat f64 block (native stores every dtype as one AlmideMatrix). The rest are
+# native's own compositions, linked prim-free from stdlib/matrix_fused.almd on
+# EVERY leg (whitelist.rs MATRIX_COMPOSITIONS): mul_scaled, attention_weights,
+# scaled_dot_product_attention, the f32 family, and — closing all three legs —
+# fma / fma3 (native's `x*ka + y*kb [+ z*kc]` IS add∘scale, two rounded products
+# and one rounded sum), fused_gemm_bias_scale_gelu, linear_row_gelu,
+# pre_norm_linear, append_rows and linear_f32_row_no_bias (the sequential
+# widen-mul-add dot over from_bytes_f32_le's decode). En route, four incumbent
+# bodies moved to native's rule: neg's sign (`-x`, not `0.0 - x`),
+# slice_rows' `as usize` bounds, swiglu_gate's libm sigmoid and silu_mul's
+# fast-exp on equal shapes; and structural matrix.zeros now zero-fills (a freed
+# block came back with its dead cells). Parity evidence:
+# spec/wasm_cross/matrix_elementwise_family.almd, matrix_product_family.almd,
+# matrix_shape_family.almd, matrix_composition_family.almd.
+# Left, each for a stated reason: linear_q1_0_row_no_bias (almide-kernel's
+# packed dot scales each 128-weight block once and fuses its accumulators with
+# vfmaq on aarch64 — not the unfused composition's rounding, and not one
+# rounding across native arches), linear_q8_0_row_no_bias (native quantizes the
+# activation row to Q8 and runs an integer dot — a transcription, not a
+# composition), and the three qwen3_block_* layers (whole fused decoder layers
+# over those kernels plus repeat_kv / per-head norm — their own arc).
+pending_self_host_ceiling = 9
+pending_port_ceiling = 56
 
 # The unprobed class (#1827), per leg. Today: the five HttpRequest
 # accessors (http.query_params / req_body / req_header / req_method /
@@ -71,20 +185,16 @@ unprobed_ceiling_stock_p1 = 5
 unprobed_ceiling_embedded = 5
 
 [[unavailable]]
-fn = "bytes.clear"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
 fn = "datetime.monotonic_ns"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1827"
 
 [[unavailable]]
 fn = "datetime.now"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1827"
 
@@ -92,42 +202,35 @@ issue = "#1827"
 [[unavailable]]
 fn = "env.millis"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1423"
 
 [[unavailable]]
 fn = "env.unix_timestamp"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1423"
 
 [[unavailable]]
 fn = "fs.fold_lines_chunked"
 legs = ["structural"]
+class = "pending-self-host"
 reason = "pending-self-host"
 issue = "#1423"
 
 [[unavailable]]
 fn = "fs.fold_lines_range"
 legs = ["structural"]
+class = "pending-self-host"
 reason = "structural-leg-gap: the incumbent links the four self-host twins (#1423 bucket A) and the default route BUILDS; the structural leg has no fold_lines_range arm yet and declines under ALMIDE_WASM_STRUCTURAL=1"
-issue = "#1423"
-
-[[unavailable]]
-fn = "fs.glob"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1423"
-
-[[unavailable]]
-fn = "fs.stat"
-legs = ["structural"]
-reason = "pending-self-host"
 issue = "#1423"
 
 [[unavailable]]
 fn = "http.anthropic_streaming_call"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the streaming client (the framed ops 43..=50 serve the non-streaming family only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-stock-p1 = "no wasm host binding for the streaming client (the framed ops 43..=50 serve the non-streaming family only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-structural = "host-surface"
@@ -136,30 +239,35 @@ issue = "#1827"
 [[unavailable]]
 fn = "http.delete"
 legs = ["stock-p1"]
+class = "pending-port"
 reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328), and the ALMIDE_COMPONENT_P3 component serves the family over wasi:http@0.3 (#1710 PR B, `-S http=y`); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]
 fn = "http.get"
 legs = ["stock-p1"]
+class = "pending-port"
 reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328), and the ALMIDE_COMPONENT_P3 component serves the family over wasi:http@0.3 (#1710 PR B, `-S http=y`); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]
 fn = "http.get_bytes"
 legs = ["stock-p1"]
+class = "pending-port"
 reason = "embedded-lane-served (#1710 increment 3, the framed ops 48..=50): `almide run --target wasm` serves the 4-arg request family through the http_framed splice and the transcribed native client (C-328); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]
 fn = "http.get_status"
 legs = ["stock-p1"]
+class = "pending-port"
 reason = "embedded-lane-served (#1710 increment 3, the framed ops 48..=50): `almide run --target wasm` serves the 4-arg request family through the http_framed splice and the transcribed native client (C-328); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]
 fn = "http.openai_streaming_call"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the streaming client (the framed ops 43..=50 serve the non-streaming family only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-stock-p1 = "no wasm host binding for the streaming client (the framed ops 43..=50 serve the non-streaming family only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-structural = "host-surface"
@@ -168,72 +276,84 @@ issue = "#1827"
 [[unavailable]]
 fn = "http.patch"
 legs = ["stock-p1"]
+class = "pending-port"
 reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328), and the ALMIDE_COMPONENT_P3 component serves the family over wasi:http@0.3 (#1710 PR B, `-S http=y`); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]
 fn = "http.post"
 legs = ["stock-p1"]
+class = "pending-port"
 reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328), and the ALMIDE_COMPONENT_P3 component serves the family over wasi:http@0.3 (#1710 PR B, `-S http=y`); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]
 fn = "http.put"
 legs = ["stock-p1"]
+class = "pending-port"
 reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328), and the ALMIDE_COMPONENT_P3 component serves the family over wasi:http@0.3 (#1710 PR B, `-S http=y`); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]
 fn = "http.query_params"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1827"
 
 [[unavailable]]
 fn = "http.req_body"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1827"
 
 [[unavailable]]
 fn = "http.req_header"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1827"
 
 [[unavailable]]
 fn = "http.req_method"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1827"
 
 [[unavailable]]
 fn = "http.req_path"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1827"
 
 [[unavailable]]
 fn = "http.request"
 legs = ["stock-p1"]
+class = "pending-port"
 reason = "embedded-lane-served (#1710 increment 3, the framed ops 48..=50): `almide run --target wasm` serves the 4-arg request family through the http_framed splice and the transcribed native client (C-328); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]
 fn = "http.request_bytes"
 legs = ["stock-p1"]
+class = "pending-port"
 reason = "embedded-lane-served (#1710 increment 3, the framed ops 48..=50): `almide run --target wasm` serves the 4-arg request family through the http_framed splice and the transcribed native client (C-328); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]
 fn = "http.request_status"
 legs = ["stock-p1"]
+class = "pending-port"
 reason = "embedded-lane-served (#1710 increment 3, the framed ops 48..=50): `almide run --target wasm` serves the 4-arg request family through the http_framed splice and the transcribed native client (C-328); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
 
 [[unavailable]]
 fn = "http.get_response"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-stock-p1 = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-structural = "host-surface"
@@ -242,6 +362,7 @@ issue = "#1710"
 [[unavailable]]
 fn = "http.post_response"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-stock-p1 = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-structural = "host-surface"
@@ -250,6 +371,7 @@ issue = "#1710"
 [[unavailable]]
 fn = "http.put_response"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-stock-p1 = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-structural = "host-surface"
@@ -258,6 +380,7 @@ issue = "#1710"
 [[unavailable]]
 fn = "http.patch_response"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-stock-p1 = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-structural = "host-surface"
@@ -266,6 +389,7 @@ issue = "#1710"
 [[unavailable]]
 fn = "http.delete_response"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-stock-p1 = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-structural = "host-surface"
@@ -274,6 +398,7 @@ issue = "#1710"
 [[unavailable]]
 fn = "http.request_response"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-stock-p1 = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-structural = "host-surface"
@@ -282,6 +407,7 @@ issue = "#1710"
 [[unavailable]]
 fn = "http.request_stream"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the streaming client (the framed ops 43..=50 serve the non-streaming family only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-stock-p1 = "no wasm host binding for the streaming client (the framed ops 43..=50 serve the non-streaming family only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-structural = "host-surface"
@@ -290,6 +416,7 @@ issue = "#1827"
 [[unavailable]]
 fn = "http.serve"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the http server (http.serve is not an admitted effectful call on the incumbent) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-stock-p1 = "no wasm host binding for the http server (http.serve is not an admitted effectful call on the incumbent) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-structural = "host-surface"
@@ -298,317 +425,63 @@ issue = "#1827"
 [[unavailable]]
 fn = "http.url_decode"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1423"
 
 [[unavailable]]
 fn = "list.partition"
 legs = ["structural"]
+class = "pending-self-host"
 reason = "pending-self-host"
 issue = "#1827"
 
 [[unavailable]]
 fn = "list.shuffle"
 legs = ["structural"]
+class = "pending-self-host"
 reason = "pending-self-host"
 issue = "#1423"
-
-[[unavailable]]
-fn = "map.clear"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1423"
-
-[[unavailable]]
-fn = "map.delete"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1423"
-
-[[unavailable]]
-fn = "matrix.add"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.append_rows"
-legs = ["structural", "stock-p1", "embedded"]
-reason = "native intrinsic (almide_rt_matrix_append_rows) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm"
-alt = "matrix.from_lists(matrix.to_lists(base) + matrix.to_lists(extra))"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.attention_weights"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.broadcast_add_row"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.causal_mask_add"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.concat_cols"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.concat_cols_many"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.conv1d"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.div"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.fma"
-legs = ["structural", "stock-p1", "embedded"]
-reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_fma) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm"
-alt = "matrix.add(matrix.scale(a, ka), matrix.scale(b, kb))"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.fma3"
-legs = ["structural", "stock-p1", "embedded"]
-reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_fma3) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm"
-alt = "matrix.add(matrix.add(matrix.scale(a, ka), matrix.scale(b, kb)), matrix.scale(c, kc))"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.from_bytes_f64_le"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.fused_gemm_bias_scale_gelu"
-legs = ["structural", "stock-p1", "embedded"]
-reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_fused_gemm_bias_scale_gelu) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.gather_rows"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.layer_norm_rows"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.linear_f32_row_no_bias"
-legs = ["structural", "stock-p1", "embedded"]
-reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_linear_f32_row_no_bias) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
-issue = "#1827"
 
 [[unavailable]]
 fn = "matrix.linear_q1_0_row_no_bias"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-self-host"
 reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_linear_q1_0_row_no_bias) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
 issue = "#1827"
 
 [[unavailable]]
 fn = "matrix.linear_q8_0_row_no_bias"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-self-host"
 reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_linear_q8_0_row_no_bias) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.linear_row"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.linear_row_gelu"
-legs = ["structural", "stock-p1", "embedded"]
-reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_linear_row_gelu) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm"
-alt = "matrix.gelu(matrix.linear_row(x, weight, bias))"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.linear_row_no_bias"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.map"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.mul"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.mul_f32"
-legs = ["structural"]
-reason = "structural-leg-gap: the structural leg has no representation for the Matrix[Float32] value (bind-ty:Applied); the incumbent serves it"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.mul_f32_scaled"
-legs = ["structural"]
-reason = "structural-leg-gap: the structural leg has no representation for the Matrix[Float32] value (bind-ty:Applied); the incumbent serves it"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.mul_f32_t"
-legs = ["structural"]
-reason = "structural-leg-gap: the structural leg has no representation for the Matrix[Float32] value (bind-ty:Applied); the incumbent serves it"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.mul_f32_t_scaled"
-legs = ["structural"]
-reason = "structural-leg-gap: the structural leg has no representation for the Matrix[Float32] value (bind-ty:Applied); the incumbent serves it"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.mul_scaled"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.neg"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.ones_f32"
-legs = ["structural"]
-reason = "structural-leg-gap: the structural leg has no representation for the Matrix[Float32] value (bind-ty:Applied); the incumbent serves it"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.pre_norm_linear"
-legs = ["structural", "stock-p1", "embedded"]
-reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_pre_norm_linear) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm"
-alt = "matrix.linear_row(matrix.layer_norm_rows(x, gamma, beta, eps), weight, bias)"
 issue = "#1827"
 
 [[unavailable]]
 fn = "matrix.qwen3_block_f32_kv"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-self-host"
 reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_qwen3_block_f32_kv) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
 issue = "#1827"
 
 [[unavailable]]
 fn = "matrix.qwen3_block_q1_0_kv"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-self-host"
 reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_qwen3_block_q1_0_kv) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
 issue = "#1827"
 
 [[unavailable]]
 fn = "matrix.qwen3_block_q8_0_kv"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-self-host"
 reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_qwen3_block_q8_0_kv) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.scale"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.scaled_dot_product_attention"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.silu_mul"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.slice_rows"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.split_cols_even"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.sub"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.swiglu_gate"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.to_bytes_f32_le"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.to_bytes_f64_le"
-legs = ["structural"]
-reason = "pending-self-host"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.zeros_f32"
-legs = ["structural"]
-reason = "structural-leg-gap: the structural leg has no representation for the Matrix[Float32] value (bind-ty:Applied); the incumbent serves it"
-issue = "#1827"
-
-[[unavailable]]
-fn = "mem.restore"
-legs = ["structural", "stock-p1", "embedded"]
-reason = "the wasm MIR lowering refuses the allocator-mark scalar (`scalar binding outside the value subset`) and mem.restore is not an admitted effectful call, so the module's stated wasm-leg purpose is unreachable from a wasm build today (the structural leg has no arm either); on the native leg both are no-ops"
-issue = "#1827"
-
-[[unavailable]]
-fn = "mem.save"
-legs = ["structural", "stock-p1", "embedded"]
-reason = "the wasm MIR lowering refuses the allocator-mark scalar (`scalar binding outside the value subset`) and mem.restore is not an admitted effectful call, so the module's stated wasm-leg purpose is unreachable from a wasm build today (the structural leg has no arm either); on the native leg both are no-ops"
 issue = "#1827"
 
 [[unavailable]]
 fn = "net.tcp_accept"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-structural = "host-surface"
@@ -617,6 +490,7 @@ issue = "#1827"
 [[unavailable]]
 fn = "net.tcp_available"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-structural = "host-surface"
@@ -625,6 +499,7 @@ issue = "#1827"
 [[unavailable]]
 fn = "net.tcp_close"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-structural = "host-surface"
@@ -633,6 +508,7 @@ issue = "#1827"
 [[unavailable]]
 fn = "net.tcp_close_listener"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-structural = "host-surface"
@@ -641,6 +517,7 @@ issue = "#1827"
 [[unavailable]]
 fn = "net.tcp_connect"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-structural = "host-surface"
@@ -649,6 +526,7 @@ issue = "#1827"
 [[unavailable]]
 fn = "net.tcp_is_open"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-structural = "host-surface"
@@ -657,6 +535,7 @@ issue = "#1827"
 [[unavailable]]
 fn = "net.tcp_listen"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-structural = "host-surface"
@@ -665,6 +544,7 @@ issue = "#1827"
 [[unavailable]]
 fn = "net.tcp_read"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-structural = "host-surface"
@@ -673,6 +553,7 @@ issue = "#1827"
 [[unavailable]]
 fn = "net.tcp_read_exact"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-structural = "host-surface"
@@ -681,6 +562,7 @@ issue = "#1827"
 [[unavailable]]
 fn = "net.tcp_read_timeout"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-structural = "host-surface"
@@ -689,6 +571,7 @@ issue = "#1827"
 [[unavailable]]
 fn = "net.tcp_set_timeout"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-structural = "host-surface"
@@ -697,6 +580,7 @@ issue = "#1827"
 [[unavailable]]
 fn = "net.tcp_write"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-structural = "host-surface"
@@ -705,6 +589,7 @@ issue = "#1827"
 [[unavailable]]
 fn = "process.env"
 legs = ["embedded", "stock-p1", "structural"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-structural = "host-surface"
@@ -713,70 +598,97 @@ issue = "#1423"
 [[unavailable]]
 fn = "process.exec"
 legs = ["embedded", "stock-p1", "structural"]
-reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-structural = "host-surface"
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API, so a child process cannot be started on the wasm target as specified — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
+reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-structural = "host-surface (native-only-forever)"
+issue = "#1423"
+
+[[unavailable]]
+fn = "process.exec_attached"
+legs = ["embedded", "stock-p1", "structural"]
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API, so a child process cannot be started on the wasm target as specified — ruled native-only-forever (#1423 bucket C, 2026-08-31); the terminal-attached entry point (#2540) joins the subprocess family"
+reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-structural = "host-surface (native-only-forever)"
 issue = "#1423"
 
 [[unavailable]]
 fn = "process.exec_in"
 legs = ["embedded", "stock-p1", "structural"]
-reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-structural = "host-surface"
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API, so a child process cannot be started on the wasm target as specified — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
+reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-structural = "host-surface (native-only-forever)"
 issue = "#1423"
 
 [[unavailable]]
 fn = "process.exec_status"
 legs = ["embedded", "stock-p1", "structural"]
-reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-structural = "host-surface"
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API, so a child process cannot be started on the wasm target as specified — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
+reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-structural = "host-surface (native-only-forever)"
 issue = "#1423"
 
 [[unavailable]]
 fn = "process.exec_status_timeout"
 legs = ["embedded", "stock-p1", "structural"]
-reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-structural = "host-surface"
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API, so a child process cannot be started on the wasm target as specified — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
+reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-structural = "host-surface (native-only-forever)"
 issue = "#1423"
 
 [[unavailable]]
 fn = "process.exec_with_stdin"
 legs = ["embedded", "stock-p1", "structural"]
-reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-structural = "host-surface"
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API, so a child process cannot be started on the wasm target as specified — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
+reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-structural = "host-surface (native-only-forever)"
 issue = "#1423"
 
 [[unavailable]]
 fn = "process.is_alive"
 legs = ["embedded", "stock-p1", "structural"]
-reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-structural = "host-surface"
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API and no process handles, so there is no child to query on the wasm target — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
+reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-structural = "host-surface (native-only-forever)"
 issue = "#1423"
 
 [[unavailable]]
 fn = "process.kill"
 legs = ["embedded", "stock-p1", "structural"]
-reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-structural = "host-surface"
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API and no process handles, so there is no child to signal on the wasm target — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
+reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-structural = "host-surface (native-only-forever)"
 issue = "#1423"
 
 [[unavailable]]
 fn = "process.pid"
 legs = ["embedded", "stock-p1", "structural"]
-reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-structural = "host-surface"
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no process identity (no getpid), so the value does not exist on the wasm target — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
+reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-structural = "host-surface (native-only-forever)"
 issue = "#1423"
 
 [[unavailable]]
 fn = "process.sleep"
 legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for process.sleep (not an admitted effectful call) — the served clock spelling is env.sleep_ms"
 reason-stock-p1 = "no wasm host binding for process.sleep (not an admitted effectful call) — the served clock spelling is env.sleep_ms"
 reason-structural = "host-surface"
@@ -786,14 +698,17 @@ issue = "#1827"
 [[unavailable]]
 fn = "process.spawn"
 legs = ["embedded", "stock-p1", "structural"]
-reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-structural = "host-surface"
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API, so a child process cannot be started on the wasm target as specified — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
+reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
+reason-structural = "host-surface (native-only-forever)"
 issue = "#1423"
 
 [[unavailable]]
 fn = "process.stdin_lines"
 legs = ["embedded", "stock-p1", "structural"]
+class = "pending-port"
 reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-structural = "host-surface"
@@ -802,81 +717,88 @@ issue = "#1423"
 [[unavailable]]
 fn = "random.choice"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1423"
 
 [[unavailable]]
 fn = "random.float"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1423"
 
 [[unavailable]]
 fn = "random.shuffle"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1423"
-
-[[unavailable]]
-fn = "string.clear"
-legs = ["structural"]
-reason = "structural-leg-gap: the structural leg declines the self-host body's hole expression (expr:Hole); the incumbent serves it"
-issue = "#1827"
 
 
 [[unavailable]]
 fn = "testing.assert_approx"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1423"
 
 [[unavailable]]
 fn = "testing.assert_contains"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1423"
 
 [[unavailable]]
 fn = "testing.assert_err"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1827"
 
 [[unavailable]]
 fn = "testing.assert_gt"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1423"
 
 [[unavailable]]
 fn = "testing.assert_lt"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1423"
 
 [[unavailable]]
 fn = "testing.assert_none"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1827"
 
 [[unavailable]]
 fn = "testing.assert_ok"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1827"
 
 [[unavailable]]
 fn = "testing.assert_some"
 legs = ["structural"]
+class = "pending-port"
 reason = "host-surface"
 issue = "#1423"
 
 [[unavailable]]
 fn = "testing.assert_throws"
 legs = ["embedded", "stock-p1", "structural"]
-reason-embedded = "the assertion helper has no wasm lowering yet — the plain assert forms work"
-reason-stock-p1 = "the assertion helper has no wasm lowering yet — the plain assert forms work"
-reason-structural = "host-surface"
+class = "native-only-forever"
+justification = "a wasm trap is uncatchable in-guest, so the native panic-catch semantics cannot be reproduced; redefining the repo-wide testing primitive to Result-carrying semantics for one row was refused — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
+reason-embedded = "a wasm trap is uncatchable in-guest, so the panic-catch assertion has no wasm meaning — the plain assert forms work (native-only-forever, #1423)"
+reason-stock-p1 = "a wasm trap is uncatchable in-guest, so the panic-catch assertion has no wasm meaning — the plain assert forms work (native-only-forever, #1423)"
+reason-structural = "host-surface (native-only-forever)"
 alt = "match on the err arm and assert"
 issue = "#1423"

@@ -1,0 +1,35 @@
+// @contract: C-363
+// ALS-E31 (docs/specs/als/expressions.md): a `scoped fn` is an ordinary
+// function outside a region. Each worker below is called BOTH directly and
+// from inside a `scoped { … }` block, and the two answers must agree — with
+// each other and across the two targets. `sum_to` is the direct tail-recursive
+// form (called at a depth where the tail transfer's constant stack matters),
+// `depth_of` an ordinary worker over managed algebraic data, and `both` shows
+// a worker reached from inside and outside the same expression.
+type Tree = | Leaf | Node(Tree, Tree)
+
+scoped fn sum_to(n: Int, acc: Int) -> Int = if n == 0 then acc else sum_to(n - 1, acc + n)
+
+scoped fn spine(n: Int, acc: Tree) -> Tree = if n == 0 then acc else spine(n - 1, Node(acc, Leaf))
+
+scoped fn depth_of(t: Tree) -> Int = match t {
+  Leaf => 0,
+  Node(l, r) => 1 + depth_of(l) + depth_of(r),
+}
+
+scoped fn scale(x: Int) -> Int = x * 3
+
+fn both(n: Int) -> Int = scale(n) + scoped {
+  scale(n)
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(sum_to(100, 0)))
+  println(int.to_string(scoped { sum_to(100, 0) }))
+  println(int.to_string(sum_to(50000, 0)))
+  println(int.to_string(scoped { sum_to(50000, 0) }))
+  println(int.to_string(depth_of(spine(6, Leaf))))
+  println(int.to_string(scoped { depth_of(spine(6, Leaf)) }))
+  println(int.to_string(both(7)))
+  println("${scale(4)} ${scoped { scale(4) }}")
+}

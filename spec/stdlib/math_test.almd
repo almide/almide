@@ -128,3 +128,16 @@ test "math.choose" {
   assert_eq(math.choose(5, 2), 10)
   assert_eq(math.choose(10, 0), 1)
 }
+
+// #2491 — exact whenever the answer fits in an Int (the old running product
+// overflowed before it divided); past 2^63 the wrap mod 2^64 of every Int product.
+test "math.choose is exact up to the Int bound and wraps past it" {
+  assert_eq(math.choose(62, 31), 465428353255261088)
+  assert_eq(math.choose(66, 33), 7219428434016265740)
+  assert_eq(math.choose(67, 33), -4220223336089263246)
+  assert_eq(math.choose(100, 50), 1184508333840160104)
+  assert_eq(math.choose(9223372036854775807, 1), 9223372036854775807)
+  assert_eq(math.choose(9223372036854775807, 2), 4611686018427387905)
+  assert_eq(math.choose(5, 6), 0)
+  assert_eq(math.choose(5, -1), 0)
+}

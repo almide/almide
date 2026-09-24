@@ -514,6 +514,10 @@ fn desugar_all_try_match_branch_passes(
         .or_else(|| desugar_fan_block(cur))
         .or_else(|| desugar_record_destructure_match(cur))
         .or_else(|| desugar_list_pattern_match(cur))
+        // #2473: the arms a regrouped or-pattern / nested-literal match leaves behind
+        // an already-exhaustive prefix.
+        .or_else(|| desugar_variant_guard_match(cur, layouts))
+        .or_else(|| desugar_prune_unreachable_arms(cur))
 }
 
 /// Rewrite the FIRST `guard` in a loop-body statement list into an `if` statement:

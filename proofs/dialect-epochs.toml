@@ -65,3 +65,12 @@ summary = "Literal process exit codes must fit the portable exit-code domain."
 breaks = [
   "a direct call to stdlib process.exit with an integer literal outside 0..=125 is E084, including signed/parenthesized literals and pipe calls — choose an exit code within that range; computed arguments retain the runtime domain check",
 ]
+
+[[epoch]]
+n = 5
+since = "0.63.0"
+name = "mut-byte-writers"
+summary = "The bytes in-place writers declare their receiver `mut`, like `list.push` and `bytes.push` (#2466)."
+breaks = [
+  "passing a `let` binding, a non-`mut` parameter or a temporary to a bytes writer (`bytes.append_*`, `set_*`, `write_*`, `fill`, `clear`, `copy_from`) is E032 — declare a local buffer with `var`, and give a helper that fills its caller's buffer a `mut b: Bytes` parameter (the caller then passes a `var`)",
+]

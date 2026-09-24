@@ -1,0 +1,713 @@
+{
+ "jobs": [
+  {
+   "name": "MC/DC vectors are real — operator-swap mutants must die (#566)",
+   "conclusion": "success",
+   "steps": [
+    {
+     "name": "Set up job",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run dtolnay/rust-toolchain@stable",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/cache@v6",
+     "conclusion": "success"
+    },
+    {
+     "name": "Every vectors-resolved ledger site kills its mutant",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/cache@v6",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Complete job",
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "name": "Compiler structural coverage ratchet (#566)",
+   "conclusion": "success",
+   "steps": [
+    {
+     "name": "Set up job",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run dtolnay/rust-toolchain@stable",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/cache@v6",
+     "conclusion": "success"
+    },
+    {
+     "name": "Install llvm-tools",
+     "conclusion": "success"
+    },
+    {
+     "name": "Build almide (stamp expects an installed binary)",
+     "conclusion": "success"
+    },
+    {
+     "name": "Measure coverage and enforce the ratchet",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/cache@v6",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Complete job",
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "name": "Build compiler + fuzzer (aarch64)",
+   "conclusion": "success",
+   "steps": [
+    {
+     "name": "Set up job",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run dtolnay/rust-toolchain@stable",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/cache@v6",
+     "conclusion": "success"
+    },
+    {
+     "name": "Build almide",
+     "conclusion": "success"
+    },
+    {
+     "name": "Build fuzzer",
+     "conclusion": "success"
+    },
+    {
+     "name": "Upload binaries",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/cache@v6",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Complete job",
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "name": "Condition-level coverage — the MC/DC ledger's measured backstop (#566)",
+   "conclusion": "success",
+   "steps": [
+    {
+     "name": "Set up job",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run dtolnay/rust-toolchain@stable",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/cache@v6",
+     "conclusion": "success"
+    },
+    {
+     "name": "Probe — this pin accepts -Z coverage-options=condition",
+     "conclusion": "success"
+    },
+    {
+     "name": "Build almide (stamp expects an installed binary)",
+     "conclusion": "success"
+    },
+    {
+     "name": "Measure with per-condition records — same floors, same ratchet",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/cache@v6",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Complete job",
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "name": "Build compiler + fuzzer (x86_64)",
+   "conclusion": "success",
+   "steps": [
+    {
+     "name": "Set up job",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run dtolnay/rust-toolchain@stable",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/cache@v6",
+     "conclusion": "success"
+    },
+    {
+     "name": "Build almide",
+     "conclusion": "success"
+    },
+    {
+     "name": "Build fuzzer",
+     "conclusion": "success"
+    },
+    {
+     "name": "Upload binaries",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/cache@v6",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Complete job",
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "name": "Generative differential fuzz (shard 6, aarch64)",
+   "conclusion": "success",
+   "steps": [
+    {
+     "name": "Set up job",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Download binaries",
+     "conclusion": "success"
+    },
+    {
+     "name": "Restore the executable bit",
+     "conclusion": "success"
+    },
+    {
+     "name": "Cache wasmtime tarball",
+     "conclusion": "success"
+    },
+    {
+     "name": "Install wasmtime",
+     "conclusion": "success"
+    },
+    {
+     "name": "Start the memory sampler",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run fuzz campaign",
+     "conclusion": "success"
+    },
+    {
+     "name": "Upload shard output",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Cache wasmtime tarball",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Complete job",
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "name": "Generative differential fuzz (shard 3, x86_64)",
+   "conclusion": "success",
+   "steps": [
+    {
+     "name": "Set up job",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Download binaries",
+     "conclusion": "success"
+    },
+    {
+     "name": "Restore the executable bit",
+     "conclusion": "success"
+    },
+    {
+     "name": "Cache wasmtime tarball",
+     "conclusion": "success"
+    },
+    {
+     "name": "Install wasmtime",
+     "conclusion": "success"
+    },
+    {
+     "name": "Start the memory sampler",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run fuzz campaign",
+     "conclusion": "success"
+    },
+    {
+     "name": "Upload shard output",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Cache wasmtime tarball",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Complete job",
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "name": "Generative differential fuzz (shard 2, x86_64)",
+   "conclusion": "success",
+   "steps": [
+    {
+     "name": "Set up job",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Download binaries",
+     "conclusion": "success"
+    },
+    {
+     "name": "Restore the executable bit",
+     "conclusion": "success"
+    },
+    {
+     "name": "Cache wasmtime tarball",
+     "conclusion": "success"
+    },
+    {
+     "name": "Install wasmtime",
+     "conclusion": "success"
+    },
+    {
+     "name": "Start the memory sampler",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run fuzz campaign",
+     "conclusion": "success"
+    },
+    {
+     "name": "Upload shard output",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Cache wasmtime tarball",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Complete job",
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "name": "Generative differential fuzz (shard 7, aarch64)",
+   "conclusion": "success",
+   "steps": [
+    {
+     "name": "Set up job",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Download binaries",
+     "conclusion": "success"
+    },
+    {
+     "name": "Restore the executable bit",
+     "conclusion": "success"
+    },
+    {
+     "name": "Cache wasmtime tarball",
+     "conclusion": "success"
+    },
+    {
+     "name": "Install wasmtime",
+     "conclusion": "success"
+    },
+    {
+     "name": "Start the memory sampler",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run fuzz campaign",
+     "conclusion": "success"
+    },
+    {
+     "name": "Upload shard output",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Cache wasmtime tarball",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Complete job",
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "name": "Generative differential fuzz (shard 5, aarch64)",
+   "conclusion": "success",
+   "steps": [
+    {
+     "name": "Set up job",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Download binaries",
+     "conclusion": "success"
+    },
+    {
+     "name": "Restore the executable bit",
+     "conclusion": "success"
+    },
+    {
+     "name": "Cache wasmtime tarball",
+     "conclusion": "success"
+    },
+    {
+     "name": "Install wasmtime",
+     "conclusion": "success"
+    },
+    {
+     "name": "Start the memory sampler",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run fuzz campaign",
+     "conclusion": "success"
+    },
+    {
+     "name": "Upload shard output",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Cache wasmtime tarball",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Complete job",
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "name": "Generative differential fuzz (shard 1, x86_64)",
+   "conclusion": "success",
+   "steps": [
+    {
+     "name": "Set up job",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Download binaries",
+     "conclusion": "success"
+    },
+    {
+     "name": "Restore the executable bit",
+     "conclusion": "success"
+    },
+    {
+     "name": "Cache wasmtime tarball",
+     "conclusion": "success"
+    },
+    {
+     "name": "Install wasmtime",
+     "conclusion": "success"
+    },
+    {
+     "name": "Start the memory sampler",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run fuzz campaign",
+     "conclusion": "success"
+    },
+    {
+     "name": "Upload shard output",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Cache wasmtime tarball",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Complete job",
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "name": "Generative differential fuzz (shard 4, x86_64)",
+   "conclusion": "success",
+   "steps": [
+    {
+     "name": "Set up job",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Download binaries",
+     "conclusion": "success"
+    },
+    {
+     "name": "Restore the executable bit",
+     "conclusion": "success"
+    },
+    {
+     "name": "Cache wasmtime tarball",
+     "conclusion": "success"
+    },
+    {
+     "name": "Install wasmtime",
+     "conclusion": "success"
+    },
+    {
+     "name": "Start the memory sampler",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run fuzz campaign",
+     "conclusion": "success"
+    },
+    {
+     "name": "Upload shard output",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Cache wasmtime tarball",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Complete job",
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "name": "Generative differential fuzz (shard 8, aarch64)",
+   "conclusion": "success",
+   "steps": [
+    {
+     "name": "Set up job",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Download binaries",
+     "conclusion": "success"
+    },
+    {
+     "name": "Restore the executable bit",
+     "conclusion": "success"
+    },
+    {
+     "name": "Cache wasmtime tarball",
+     "conclusion": "success"
+    },
+    {
+     "name": "Install wasmtime",
+     "conclusion": "success"
+    },
+    {
+     "name": "Start the memory sampler",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run fuzz campaign",
+     "conclusion": "success"
+    },
+    {
+     "name": "Upload shard output",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Cache wasmtime tarball",
+     "conclusion": "success"
+    },
+    {
+     "name": "Post Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Complete job",
+     "conclusion": "success"
+    }
+   ]
+  },
+  {
+   "name": "Night verdict",
+   "id": 105525890863,
+   "conclusion": "failure",
+   "steps": [
+    {
+     "name": "Set up job",
+     "conclusion": "success"
+    },
+    {
+     "name": "Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Download shard outputs",
+     "conclusion": "success"
+    },
+    {
+     "name": "Aggregate findings",
+     "conclusion": "success"
+    },
+    {
+     "name": "Fail the night when no shard reported",
+     "conclusion": "success"
+    },
+    {
+     "name": "Campaign verdict",
+     "conclusion": "success"
+    },
+    {
+     "name": "Upload findings",
+     "conclusion": "success"
+    },
+    {
+     "name": "Open / update tracking issue",
+     "conclusion": "success"
+    },
+    {
+     "name": "Open / update perf (slow) tracking issue",
+     "conclusion": "success"
+    },
+    {
+     "name": "Fail the night on correctness findings",
+     "conclusion": "failure"
+    },
+    {
+     "name": "Post Run actions/checkout@v7",
+     "conclusion": "success"
+    },
+    {
+     "name": "Complete job",
+     "conclusion": "success"
+    }
+   ]
+  }
+ ]
+}

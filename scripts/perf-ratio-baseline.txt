@@ -29,6 +29,11 @@ fft 1.176
 # repo has one architecture's reading. On an M4 Pro it reads 1.12x against the
 # same-shape reference and 1.94x against the idiomatic one.
 nbody 0.997
+# wordfreq anchored by #2150 at the 4M quick workload: 1.97 on an M4 Pro
+# (2026-09-24, median of 9); the runner read 1.66-1.75 at 2M. Anchored at 1.90
+# between the two so the +40% ceiling (2.66) and the 50% floor (0.95) hold on
+# both; re-anchor from the first runner reading at 4M if it sits far off.
+wordfreq 1.90
 spectralnorm 1.001
 # VICTORY rows (#1330): `binarytrees` (#1991) and `treealloc` (#2028) against
 # their same-shape `Box` references — the ordinary Rust for the program. The
@@ -65,6 +70,16 @@ binarytrees 0.610
 # The gate fails on the 3x ceiling in check-perf-ratio.sh, never on this value —
 # verified: `baseline[key]` appears only inside its report strings.
 strbuild-wasm-idiom 0.99
+# The wasm-leg group_by relation (#2156): `wordfreq-group` (the CHEATSHEET's
+# `list.group_by |> map.map`) over `wordfreq` (the imperative `m[w] = …` loop),
+# both 2M draws from the 5,000-word vocabulary, whole-process wall time under
+# `wasmtime run`, min of the interleaved rounds. Before the fix it read 103x
+# on an M4 Pro (bench.py at 1M, 2026-09-23: 6.00 s against 0.058 s) — the
+# accumulator copy-grew per key and every element walked the linear scan.
+# After: 0.78 at 1M and 0.77 at 2M on the same box (the idiomatic row skips
+# the per-draw `map.get_or` read the loop pays). The gate fails on
+# IDIOM_CEILING in check-perf-ratio.sh, never on this value.
+wordfreq-wasm-idiom 0.78
 treealloc 0.343
 # `decode` (#1679) is reported and not anchored, like strchurn: N derived
 # `User.decode`s of one 8-field document against the same-shape hand-written

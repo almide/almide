@@ -61,7 +61,13 @@ pub fn almide_rt_zlib_gzip(data: &[u8]) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
+/// Empty input is an error on every leg, with THIS text (#2478): a gzip file
+/// has at least one member. flate2's decoder happens to say the same, but the
+/// self-hosted decoder (stdlib/zlib_inflate.almd, code 5) pins the bytes, so the
+/// native answer is spelled here rather than borrowed from the library's Display.
+pub const ALMIDE_GUNZIP_EMPTY_MSG: &str = "zlib.gunzip: unexpected end of file";
 pub fn almide_rt_zlib_gunzip(data: &[u8]) -> Result<Vec<u8>, String> {
+    if data.is_empty() { return Err(ALMIDE_GUNZIP_EMPTY_MSG.to_string()); }
     let mut decoder = GzDecoder::new(data);
     let mut out = Vec::new();
     decoder.read_to_end(&mut out)

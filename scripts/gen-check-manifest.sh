@@ -28,6 +28,9 @@ ORACLE="${ORACLE:?set ORACLE to the almide binary built from this tree (target/r
 case "$ORACLE" in /*) ;; *) ORACLE="$PWD/$ORACLE" ;; esac
 "$ORACLE" --version >/dev/null || exit 2
 . scripts/lib/oracle-header.sh
+# #2405: a stale oracle, a foreign binary, a worktree behind upstream or an
+# untracked fixture is refused HERE, before anything is truncated.
+refuse_stale_tree || exit $?
 
 OUT_DIR="crates/almide-spine/tests/golden"
 mkdir -p "$OUT_DIR"

@@ -1,0 +1,18 @@
+# Stdlib-linking size ladder (#2141): shipped (to_wasi) bytes per rung, pinned exactly.
+# Regenerate (claims every move): ALMIDE_UPDATE_SIZE_LADDER=1 cargo test --release -p almide-wasm --test size_ladder
+# shipped<TAB>rung<TAB>program; the last row is the ladder's total.
+1330	T0 nothing	research/benchmark/perf/wasm-size/hello.almd
+1499	T1 Int print	research/benchmark/perf/wasm-size/fibonacci.almd
+7677	T1 Int print	research/benchmark/perf/binarytrees/binarytrees.almd
+12121	T2 Float print	research/benchmark/perf/spectralnorm/spectralnorm.almd
+7331	T3 String	research/benchmark/perf/strchurn/strchurn.almd
+6662	T3 String	research/benchmark/perf/strbuild/strbuild_append.almd
+21466	T4 List	research/benchmark/perf/listbuild/listbuild_append.almd
+21866	T4 List	research/benchmark/perf/listbuild/listbuild_combinator.almd
+9325	T5 Map	research/benchmark/perf/mapbuild/mapbuild.almd
+11447	T5 Map	research/benchmark/perf/wordfreq/wordfreq.almd
+11470	T5 Map	research/benchmark/perf/wordfreq/wordfreq_group.almd
+31728	T6 JSON	research/benchmark/perf/decode/decode.almd
+26675	T6 JSON	spec/wasm_cross/json_gltf_walk.almd
+20120	T7 regex	spec/wasm_cross/regex_engine.almd
+190717	Σ	total

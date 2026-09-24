@@ -412,6 +412,21 @@ pub fn collect_protocol_bounds(generics: &Option<Vec<ast::GenericParam>>) -> Has
     }
     pb
 }
+/// Type arguments of every APPLIED protocol bound (#1589), resolved in the
+/// declaring module's scope — call inside the window where the generic
+/// letters are shadowed to `Ty::TypeVar`, so `[K, R: Repository[K, User]]`
+/// resolves `K` to the fn's own letter.
+pub fn collect_protocol_bound_args(env: &TypeEnv, generics: &Option<Vec<ast::GenericParam>>, cur_mod: Option<&str>) -> HashMap<(Sym, Sym), Vec<Ty>> {
+    let mut out = HashMap::new();
+    for g in generics.iter().flatten() {
+        for (i, b) in g.bounds.iter().flatten().enumerate() {
+            let Some(r) = ast::protocol_ref_at(&g.bound_refs, i) else { continue };
+            if r.args.is_empty() { continue; }
+            out.insert((g.name, *b), r.args.iter().map(|a| resolve_in(env, a, cur_mod)).collect());
+        }
+    }
+    out
+}
 /// A borrowed view of the `fn` signature being registered.
 ///
 /// `effect` is an `&Option<bool>` and was adjacent
@@ -477,6 +492,7 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
         .map(|(i, _)| i)
         .collect();
     let ret = resolve_in(env, return_type, tcm);
+    let pba = collect_protocol_bound_args(env, generics, tcm);
     for (gn, prev) in shadowed.into_iter().rev() {
         match prev {
             Some(t) => { env.types.insert(gn, t); }
@@ -486,7 +502,7 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
     let is_effect = effect.unwrap_or(false);
     let key = prefixed_key(prefix, name);
     let min_p = params.iter().take_while(|p| p.default.is_none()).count();
-    env.functions.insert(sym(&key), FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb, protocol_bounds: pb, mut_params });
+    env.functions.insert(sym(&key), FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb, protocol_bounds: pb, protocol_bound_args: pba, mut_params });
     match crate::deprecation::parse(attrs) {
         Ok(Some(dep)) => { env.deprecations.insert(sym(&key), dep); }
         Ok(None) => {}
@@ -565,11 +581,11 @@ pub fn register_derive_sigs(env: &mut TypeEnv, derives: &[Sym], type_name: &str,
     };
     for d in derives {
         match d.as_str() {
-            "Eq" => register(env, "eq", FnSig { params: vec![("a".into(), type_ty.clone()), ("b".into(), type_ty.clone())], ret: Ty::Bool, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), mut_params: vec![] }),
-            "Repr" => register(env, "repr", FnSig { params: vec![("v".into(), type_ty.clone())], ret: Ty::String, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), mut_params: vec![] }),
+            "Eq" => register(env, "eq", FnSig { params: vec![("a".into(), type_ty.clone()), ("b".into(), type_ty.clone())], ret: Ty::Bool, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] }),
+            "Repr" => register(env, "repr", FnSig { params: vec![("v".into(), type_ty.clone())], ret: Ty::String, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] }),
             "Codec" => {
-                register(env, "encode", FnSig { params: vec![("v".into(), type_ty.clone())], ret: value_ty.clone(), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), mut_params: vec![] });
-                register(env, "decode", FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), mut_params: vec![] });
+                register(env, "encode", FnSig { params: vec![("v".into(), type_ty.clone())], ret: value_ty.clone(), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] });
+                register(env, "decode", FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] });
             }
             _ => {}
         }
@@ -601,6 +617,7 @@ pub fn register_protocol_decl(env: &mut TypeEnv, name: &str, generics: &Option<V
             params,
             ret,
             is_effect: m.effect,
+            mut_params: m.params.iter().enumerate().filter(|(_, p)| p.is_mut).map(|(i, _)| i).collect(),
         }
     }).collect();
 
@@ -983,7 +1000,57 @@ fn register_decl_type(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
                     .insert(sym(d));
             }
         }
+        register_conformance_args(env, diagnostics, decl, prefix, &protocol_keys);
     }
+}
+/// The type arguments of each explicit conformance (#1589: `type UserRepo:
+/// Repository[UserId, User]`), resolved in the declaring module's scope with
+/// the type's own letters shadowed, recorded under the same keys as
+/// `type_protocols`. A type conforms to a protocol at most ONCE: its
+/// `Type.method` fns are the implementation, and two conformances to one
+/// protocol would need two — the second is reported as ambiguous rather than
+/// silently picking one.
+fn register_conformance_args(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl: &ast::Decl, prefix: Option<&str>, keys: &[Sym]) {
+    let ast::Decl::Type { name, deriving: Some(derives), deriving_refs, generics, .. } = decl else { return };
+    let mut seen: HashMap<Sym, usize> = HashMap::new();
+    for (i, d) in derives.iter().enumerate() {
+        if let Some(&first) = seen.get(d) {
+            let show = |j: usize| display_protocol_ref(env, derives[j], ast::protocol_ref_at(deriving_refs, j), prefix);
+            diagnostics.push(err(
+                format!("type '{}' conforms to protocol '{}' twice ('{}' and '{}') — the conformance is ambiguous", name, d, show(first), show(i)),
+                format!("A type implements a protocol at most once: its `fn {}.<method>` definitions are that one implementation. Keep one conformance and wrap the type (`type {}2: {} = {{ inner: {} }}`) for the other", name, name, show(i), name),
+                format!("type {} : {}", name, d),
+            ));
+            continue;
+        }
+        seen.insert(*d, i);
+    }
+    let Some(refs) = deriving_refs else { return };
+    let gnames: Vec<Sym> = generics.iter().flatten().map(|g| g.name).collect();
+    let shadowed: Vec<(Sym, Option<Ty>)> =
+        gnames.iter().map(|gn| (*gn, env.types.insert(*gn, Ty::TypeVar(*gn)))).collect();
+    let tcm = type_cur_mod(env, prefix);
+    let resolved: Vec<(Sym, Vec<Ty>)> = derives.iter().zip(refs.iter()).enumerate()
+        .filter(|(i, (d, r))| !r.args.is_empty() && seen.get(*d) == Some(i))
+        .map(|(_, (d, r))| (*d, r.args.iter().map(|a| resolve_in(env, a, tcm)).collect()))
+        .collect();
+    for (gn, prev) in shadowed.into_iter().rev() {
+        match prev {
+            Some(t) => { env.types.insert(gn, t); }
+            None => { env.types.remove(&gn); }
+        }
+    }
+    for (d, args) in resolved {
+        for key in keys.iter().copied() {
+            env.type_protocol_args.entry(key).or_default().entry(d).or_insert_with(|| args.clone());
+        }
+    }
+}
+/// `Repository[UserId, User]` as written in a conformance list, for messages.
+fn display_protocol_ref(env: &TypeEnv, name: Sym, r: Option<&ast::ProtocolRef>, prefix: Option<&str>) -> String {
+    let Some(r) = r.filter(|r| !r.args.is_empty()) else { return name.to_string() };
+    let tcm = type_cur_mod(env, prefix);
+    format!("{}[{}]", name, r.args.iter().map(|a| resolve_in(env, a, tcm).display()).collect::<Vec<_>>().join(", "))
 }
 /// `ast::Decl::TopLet` arm of [`register_decls`] — top-level `let` type seeding (or reuse of a fully-inferred prior entry) and DefTable registration. Verbatim text move out of [`register_decls`].
 fn register_decl_top_let(env: &mut TypeEnv, decl: &ast::Decl, prefix: Option<&str>) {

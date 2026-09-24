@@ -1,4 +1,4 @@
-> Last updated: 2026-08-15
+> Last updated: 2026-09-23
 
 # Edit Locality
 
@@ -15,6 +15,24 @@ present-tense truth.
 The observable set is fixed once, by the contract ledger
 (`docs/contracts/contracts.toml`): **stdout bytes, stderr bytes, exit
 code**. Nothing below ever means anything else by "observable".
+
+**`L<n>` here is the edit-locality ladder, and it is not the only one in this
+repository.** `docs/roadmap/active/trust-layer.md` runs its own L0-L4 — L1
+"the binary proves what it can do inside the wall", L2-L4 "rederivable without
+taking anyone's word" — and a reader who meets `L3` in a roadmap document is
+as likely to be holding that one as this one. The two ladders are unrelated:
+nothing here is a prerequisite for anything there. Say which ladder you mean
+when the surrounding text does not make it obvious.
+
+**L1 to L5 below are taken.** A new proof obligation on this ladder takes
+**L6** and upward, never a free-looking small number. almide/almide#2009 and
+#1998 were written against an earlier revision of this file that named L1
+only, and both propose "L2" and "L3" for obligations that are not the two
+defined here (#2009's are declared-frame preservation, and checked lowering
+that composes); those are **L4 and L5** in §1a, adopted once #1997 fixed the
+`scoped` surface they quantify over. A number reused for a second meaning is
+the defect this document exists to rule out of programs — it should not be
+in the document.
 
 ## 1. The invariant
 
@@ -51,6 +69,62 @@ every other derivation untouched), and `pure_silent` (code typed outside
 an `effect fn` has an empty trace). The implementation-level statement
 over the full language remains gated by §2's evidence, per
 `docs/contracts/proven-vs-trusted.md`.
+
+## 1a. Above L1: the declared frame and its composition
+
+L1 says nothing about an execution that DOES pass through the edited
+definition, and it cannot: a legitimate replacement may compute a different
+value. What survives there is not the value but the **frame** the declared
+contract draws around the definition. L4 and L5 are the two obligations
+that say so.
+
+**L4 — Declared-frame preservation.** A replacement of `f` that satisfies
+`f`'s declared contract preserves the frame that contract covers.
+
+- *Effect frame — proven for λ_almd.* If `f` is declared pure, ANY
+  replacement body that checks against `f`'s unchanged signature produces no
+  observables, in any environment, in the edited program. The `effect` flag
+  is a fence a replacement cannot cross. Evidence:
+  `l4_pure_replacement_silent` in
+  `crates/almide-edit-belt/AlmideEditBelt/Contract.lean` — `typing_modular`
+  (the edited program stays well-typed) composed with `pure_silent`. Two
+  checked witnesses sit beside it: `l4_witness` (all four hypotheses hold at
+  once, so the theorem is not vacuous) and `l4_loud_replacement_prints` (a
+  replacement checking against its own *effectful* signature prints `"hi"` —
+  drop the purity hypothesis and the conclusion is false).
+- *Resource frame (`scoped`, #1997) — fixture evidence, not a proof.*
+  λ_almd has no heap and no regions, so a region contract has nothing to
+  quantify over there; mechanizing this half needs a region component in the
+  kernel first. At the implementation level it is three contracts, each with
+  its own evidence:
+  - C-362 — a `scoped` block's observables are its body's; the region is not
+    observable. `spec/wasm_cross/scoped_region_value.almd`.
+  - C-363 — a `scoped fn` computes the same answer inside and outside a
+    region. `spec/wasm_cross/scoped_worker_in_and_out.almd`.
+  - C-364 — a shape outside the scoped fragment is refused at check time,
+    identically on both targets.
+    `tests/diagnostics/e087-scope-unscoped-callee/broken.almd`,
+    `tests/scoped_region_test.rs`.
+
+L4 claims nothing about business behaviour. A pure replacement may return
+something else, and that value may change what the *caller* prints next;
+L4 says only that the replacement itself adds nothing to the trace.
+
+**L5 — Realization and composition.**
+
+- *Composition — proven for λ_almd.* Any sequence of signature-preserving
+  replacements keeps a well-typed program well-typed, and after all of them
+  every definition declared pure is still silent: no chain of
+  contract-preserving edits opens the effect fence, however long. Evidence:
+  `l5_edits_compose` and `l5_pure_silent_after_edits` in
+  `crates/almide-edit-belt/AlmideEditBelt/Contract.lean`, by induction on the
+  edit list.
+- *Realization on both targets — trusted.* That the checked lowering (#1995's
+  ExitPlan, #1996's E-OWN-LOWERING) preserves these observations on native
+  and wasm is a refinement obligation between λ_almd and the two backends. Like
+  every backend claim in this file it is gated by the `spec/wasm_cross`
+  fixtures and the contract ledger, and is listed as trusted — not proven —
+  in `docs/contracts/proven-vs-trusted.md`.
 
 ## 2. What enforces it today
 

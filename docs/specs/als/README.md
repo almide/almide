@@ -76,7 +76,7 @@
 | [ALS-E15](./expressions.md#als-e15-while-文exprkindwhile) | while 文(`ExprKind::While`) | C-244 |
 | [ALS-E16](./expressions.md#als-e16-文字列補間exprkindinterpolatedstring) | 文字列補間(`ExprKind::InterpolatedString`) | C-245 |
 | [ALS-E17](./expressions.md#als-e17-識別子exprkindident) | 識別子(`ExprKind::Ident`) | C-246 |
-| [ALS-E18](./expressions.md#als-e18-match-式exprkindmatch) | match 式(`ExprKind::Match`) | C-247, C-281, C-323, C-332, C-333 |
+| [ALS-E18](./expressions.md#als-e18-match-式exprkindmatch) | match 式(`ExprKind::Match`) | C-247, C-281, C-323, C-332, C-333, C-352 |
 | [ALS-E19](./expressions.md#als-e19-for-in-文exprkindforin) | for-in 文(`ExprKind::ForIn`) | C-248, C-279 |
 | [ALS-ST2](./expressions.md#als-st2-分解束縛stmtletdestructure) | 分解束縛(`Stmt::LetDestructure`) | C-249 |
 | [ALS-E20](./expressions.md#als-e20-パイプと合成exprkindpipe--exprkindcompose) | パイプと合成(`ExprKind::Pipe` / `ExprKind::Compose`) | C-250 |
@@ -119,7 +119,7 @@
 | [ALS-R6](./runtime.md#als-r6-ファイルシステムのパス解決) | ファイルシステムのパス解決 | C-042, C-137, C-220, C-225, C-227, C-228, C-229, C-230, C-270, C-272, C-273, C-278, C-282, C-283, C-284 |
 | [ALS-R7](./runtime.md#als-r7-ストリーミング行走査の可謬コールバック) | ストリーミング行走査の可謬コールバック | C-274, C-335 |
 | [ALS-R8](./runtime.md#als-r8-http-レスポンスヘッダの規範) | HTTP レスポンスヘッダの規範 | C-275 |
-| [ALS-R9](./runtime.md#als-r9-プロセス終了コードの値域) | プロセス終了コードの値域 | C-350 |
+| [ALS-R9](./runtime.md#als-r9-プロセス終了コードの値域) | プロセス終了コードの値域 | C-350, C-351 |
 
 ## semantics.md — 15 section(s)
 
@@ -152,7 +152,7 @@
 | [ALS-S5](./strings.md#als-s5-split-の区切り規範) | split の区切り規範 | C-050 |
 | [ALS-S6](./strings.md#als-s6-規模不変性) | 規模不変性 | C-074 |
 
-## text-and-numbers.md — 25 section(s)
+## text-and-numbers.md — 27 section(s)
 
 | ID | Section | Contracts |
 |----|---------|-----------|
@@ -181,5 +181,7 @@
 | [ALS-T23](./text-and-numbers.md#als-t23-符号付きゼロ) | 符号付きゼロ | C-306 |
 | [ALS-T24](./text-and-numbers.md#als-t24-float-→-int-変換) | Float → Int 変換 | C-307, C-338, C-341 |
 | [ALS-T25](./text-and-numbers.md#als-t25-正準-fast-exp) | 正準 fast-exp | C-223 |
+| [ALS-T26](./text-and-numbers.md#als-t26-datetime-の暦フィールドと-parse_iso-の文法) | datetime の暦フィールドと parse_iso の文法 | C-359, C-360 |
+| [ALS-T27](./text-and-numbers.md#als-t27-urlparse-の-authority-規範) | url.parse の authority 規範 | C-361 |
 
-129 sections across 11 chapters.
+131 sections across 11 chapters.

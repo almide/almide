@@ -18,7 +18,15 @@
 //   * The RE-SORT before comparison. The retry pass appends to the match list after it was
 //     first sorted, and the baseline comparison is a sorted-set difference — an unsorted tail
 //     once reported three phantom regressions.
+//
+// The corpus and the baseline are overridable (OUTPUT_PARITY_SPEC / OUTPUT_PARITY_BASELINE)
+// for ONE consumer: the twin parity test (#2163) runs this and the bash over the same small
+// purpose-built corpus with the same forged baseline and demands identical bytes. The
+// defaults are the gate. That diff found, on its first run, that this half had no `--update`
+// ratchet, no "no baseline" path, no tool checks, and that [parity.almd] did not strip
+// warning blocks — every one of them a different byte from the bash on the day of a promotion.
 import fs
+import env
 import process
 import parity
 
@@ -54,7 +62,11 @@ effect fn run_one(root: String, alm: String, rp: String, file: String, secs: Int
   } else {
     fs.write(wat, render.stdout)!
     let v1 = run_capped(secs, "wasmtime", [wat])!
-    parity.verdict_full(
+    // The deadline fired on the wasm leg: the module never finished. HANG, never
+    // runerr — the byte compare cannot see a non-termination, and a sweep with no
+    // per-run limit simply stopped on it (#2567).
+    if parity.is_deadline(v1.code) then "hang"
+    else parity.verdict_full(
       v0.code == 0,
       true,
       v1.code == 0,
@@ -84,11 +96,17 @@ effect fn is_runnable(path: String) -> Bool = {
 // line, and a gate that silently narrowed its own sweep would read as full coverage. The count
 // is the only thing standing between "300 files agree" and "300 of the files I chose to look
 // at agree".
-effect fn candidates(root: String) -> Candidates = {
-  // `find spec -name '*.almd'` runs after the bash `cd`s to ROOT, so its paths are
+effect fn corpus_dir(root: String) -> String = {
+  // `find "$SPEC" -name '*.almd'` runs after the bash `cd`s to ROOT, so its paths are
   // repository-relative with no leading `./` — and the baseline is a list of exactly those
   // strings. A root of "." would make every path `./spec/…` and match nothing.
-  let dir = if root == "." then "spec" else root + "/spec"
+  let over = env.get("OUTPUT_PARITY_SPEC") ?? ""
+  if over != "" then over
+  else if root == "." then "spec" else root + "/spec"
+}
+
+effect fn candidates(root: String) -> Candidates = {
+  let dir = corpus_dir(root)!
   let all = (fs.walk(dir) ?? []) |> list.filter((p) => string.ends_with(p, ".almd")) |> list.sort
   var out: List[String] = []
   var skipped = 0
@@ -156,11 +174,62 @@ fn class_report_wrapped(cells: List[(String, String)], want: String, marker: Str
 // a regression AND a new match on every run.
 fn missing_from(want: List[String], have: List[String]) -> List[String] = want |> list.filter((f) => not list.contains(have, f))
 
-effect fn sweep(root: String, alm: String, rp: String, baseline_path: String) -> Sweep = {
+// In CI a missing tool is a FAILURE, not a skip (#978 — this gate spent its life skipping
+// because CI never had the oracle on PATH, and nothing noticed). `ok = true` with a single
+// line is the local SKIP; `ok = false` is the CI failure; an empty list means both tools are
+// present and the sweep may start.
+effect fn tool_check(alm: String) -> Sweep = {
+  let ci = (env.get("CI") ?? "") == "true"
+  // `command` is a shell BUILTIN: macOS ships a /usr/bin/command shim, Linux does not, so a
+  // direct spawn "found" wasmtime on every developer machine and never on a CI runner
+  // (#2438's shard 3 went red on exactly this). Ask a shell, as the bash original does.
+  let have_wasmtime = (process.exec_status("sh", ["-c", "command -v \"$1\"", "_", "wasmtime"]) ?? process.ProcessStatus {
+    code: 1,
+    stdout: "",
+    stderr: "",
+  }).code == 0
+  if not have_wasmtime then {
+    if ci then Sweep {
+      lines: [
+        "::error::output-parity: wasmtime not found — in CI a missing tool is a failure (#978)"
+      ],
+      matches: [],
+      ok: false,
+    } else Sweep {
+      lines: [
+        "output-parity: wasmtime not found — SKIP"
+      ],
+      matches: [],
+      ok: true,
+    }
+  } else if not fs.is_file(alm)! then {
+    if ci then Sweep {
+      lines: [
+        "::error::output-parity: almide (v0 oracle) not found at " + alm + " — in CI a missing oracle is a failure (#978)"
+      ],
+      matches: [],
+      ok: false,
+    } else Sweep {
+      lines: [
+        "output-parity: almide (v0 oracle) not found at " + alm + " — SKIP"
+      ],
+      matches: [],
+      ok: true,
+    }
+  } else Sweep { lines: [], matches: [], ok: true }
+}
+
+// The baseline path: the env override, else the committed ratchet under `proofs/`.
+effect fn baseline_path_of(root: String) -> String = {
+  let over = env.get("OUTPUT_PARITY_BASELINE") ?? ""
+  if over != "" then over else root + "/proofs/output-parity-baseline.txt"
+}
+
+effect fn sweep(root: String, alm: String, rp: String, baseline_path: String, update: Bool) -> Sweep = {
   let cand = candidates(root)!
   let cells = retry_suspects(root, alm, rp, classify_all(root, alm, rp, cand.files)!)!
   let matches = files_of(cells, "match") |> list.sort
-  let summary = "output-parity: match=" + int.to_string(count_of(cells, "match")) + " wall=" + int.to_string(count_of(cells, "wall")) + " MISMATCH=" + int.to_string(count_of(cells, "mismatch")) + " RUNERR=" + int.to_string(count_of(cells, "runerr")) + " XFAIL=" + int.to_string(count_of(cells, "xfail")) + " v0fail=" + int.to_string(count_of(cells, "v0fail")) + " skip=" + int.to_string(cand.skipped)
+  let summary = "output-parity: match=" + int.to_string(count_of(cells, "match")) + " wall=" + int.to_string(count_of(cells, "wall")) + " MISMATCH=" + int.to_string(count_of(cells, "mismatch")) + " RUNERR=" + int.to_string(count_of(cells, "runerr")) + " HANG=" + int.to_string(count_of(cells, "hang")) + " XFAIL=" + int.to_string(count_of(cells, "xfail")) + " v0fail=" + int.to_string(count_of(cells, "v0fail")) + " skip=" + int.to_string(cand.skipped)
   let classes = class_report(
     cells,
     "mismatch",
@@ -171,6 +240,11 @@ effect fn sweep(root: String, alm: String, rp: String, baseline_path: String) ->
     "runerr",
     "r",
     "  (RUNERR = renders but wasmtime rejects or traps where v0 succeeds):",
+  ) + class_report(
+    cells,
+    "hang",
+    "h",
+    "  (HANG = renders but wasmtime did not finish within the per-run limit — a non-termination the byte compare never sees):",
   ) + class_report_wrapped(
     cells,
     "xfail",
@@ -180,21 +254,47 @@ effect fn sweep(root: String, alm: String, rp: String, baseline_path: String) ->
       "   the trap-semantics contract surface not yet implemented on the MIR render path):"
     ],
   )
-  let baseline = (fs.read_lines(baseline_path) ?? []) |> list.filter((l) => l != "") |> list.sort
-  let regressions = missing_from(baseline, matches)
-  let gained = missing_from(matches, baseline)
-  let gained_lines = if list.len(gained) == 0 then []
-  else [
-    "output-parity: NEW matches not yet in baseline (run --update to ratchet):"
-  ] + (gained |> list.map((f) => "  + " + f))
-  let tail = if list.len(regressions) > 0 then [
-    "output-parity: REGRESSION — these baseline files stopped byte-matching v0:"
-  ] + (regressions |> list.map((f) => "  - " + f))
-  else ["output-parity: OK — all " + int.to_string(list.len(baseline)) + " baseline files still byte-match v0."]
-  Sweep {
-    lines: [summary] + classes + gained_lines + tail,
+  // A hang fails LOUDLY and before any ratchet (#2567): the sweep that found it had no
+  // per-run limit and simply stopped, and the one that had a limit filed the fixture under
+  // RUNERR, where nothing fails. Neither is a verdict. After it, `--update` is the ratchet:
+  // the match list, sorted, one path per line — and an EMPTY list writes an empty file, as
+  // `cp` of an empty matches.txt does, not a lone newline.
+  let hung = count_of(cells, "hang")
+  if hung > 0 then Sweep {
+    lines: [summary] + classes + [
+      "::error::output-parity: " + int.to_string(hung) + " fixture(s) HUNG on the v1 leg — a hang is never a baseline verdict; fix the renderer or wall the shape (#2567)"
+    ],
     matches: matches,
-    ok: list.len(regressions) == 0,
+    ok: false,
+  } else if update then {
+    let text = if list.len(matches) == 0 then "" else list.join(matches, "\n") + "\n"
+    fs.write(baseline_path, text)!
+    Sweep {
+      lines: [summary] + classes + ["output-parity: baseline updated -> " + baseline_path + " (" + int.to_string(list.len(matches)) + " files)"],
+      matches: matches,
+      ok: true,
+    }
+  } else if not fs.is_file(baseline_path)! then Sweep {
+    lines: [summary] + classes + ["output-parity: no baseline (" + baseline_path + ") — run with --update first"],
+    matches: matches,
+    ok: true,
+  } else {
+    let baseline = (fs.read_lines(baseline_path) ?? []) |> list.filter((l) => l != "") |> list.sort
+    let regressions = missing_from(baseline, matches)
+    let gained = missing_from(matches, baseline)
+    let gained_lines = if list.len(gained) == 0 then []
+    else [
+      "output-parity: NEW matches not yet in baseline (run --update to ratchet):"
+    ] + (gained |> list.map((f) => "  + " + f))
+    let tail = if list.len(regressions) > 0 then [
+      "output-parity: REGRESSION — these baseline files stopped byte-matching v0:"
+    ] + (regressions |> list.map((f) => "  - " + f))
+    else ["output-parity: OK — all " + int.to_string(list.len(baseline)) + " baseline files still byte-match v0."]
+    Sweep {
+      lines: [summary] + classes + gained_lines + tail,
+      matches: matches,
+      ok: list.len(regressions) == 0,
+    }
   }
 }
 
@@ -223,9 +323,26 @@ test "an empty class prints nothing at all, not an empty heading" {
 }
 
 test "counting is per class, and the classes do not overlap" {
-  let cells: List[(String, String)] = [("a", "match"), ("b", "match"), ("c", "wall"), ("d", "mismatch"), ("e", "v0fail")]
+  let cells: List[(String, String)] = [
+    ("a", "match"),
+    ("b", "match"),
+    ("c", "wall"),
+    ("d", "mismatch"),
+    ("e", "v0fail"),
+    ("f", "hang")
+  ]
   assert_eq(count_of(cells, "match"), 2)
   assert_eq(count_of(cells, "wall"), 1)
   assert_eq(count_of(cells, "runerr"), 0)
+  assert_eq(count_of(cells, "hang"), 1)
   assert_eq(files_of(cells, "mismatch"), ["d"])
+  assert_eq(files_of(cells, "hang"), ["f"])
+}
+
+test "a hang names its file under its own heading, apart from the runerr row" {
+  // #2567: the incumbent leg of one fixture never terminated. Under the runerr row it was
+  // one entry among the ratcheted; as its own class it is the line the gate fails on.
+  let cells: List[(String, String)] = [("x.almd", "hang"), ("y.almd", "runerr")]
+  assert_eq(class_report(cells, "hang", "h", "H"), ["H", "    h x.almd"])
+  assert_eq(class_report(cells, "runerr", "r", "R"), ["R", "    r y.almd"])
 }

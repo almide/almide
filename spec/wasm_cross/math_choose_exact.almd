@@ -1,0 +1,39 @@
+// @contract: C-358
+// `math.choose(n, k)` is the exact binomial coefficient whenever it fits in
+// an Int, and its two's-complement wrap (mod 2^64, like every Int product)
+// when it does not, on every leg (#2491). The old running product
+// `result * (n - i) / (i + 1)` multiplied before it divided, so the product
+// overflowed several steps before the answer did: `choose(62, 31)` was
+// negative although C(62, 31) = 465428353255261088 < 2^63. `choose(67, 33)`
+// is the first central column past 2^63 and prints its wrap.
+fn main() -> Unit = {
+  let cases = [
+    (62, 31),
+    (66, 33),
+    (67, 33),
+    (68, 34),
+    (64, 32),
+    (63, 31),
+    (100, 50),
+    (200, 100),
+    (128, 64),
+    (60, 30),
+    (30, 15),
+    (52, 26),
+    (1000, 3),
+    (9223372036854775807, 1),
+    (9223372036854775807, 2),
+    (9223372036854775807, 3),
+    (5, 2),
+    (0, 0),
+    (10, 0),
+    (10, 10),
+    (1, 1),
+    (-5, 2),
+    (5, -1),
+    (5, 6)
+  ]
+  for (n, k) in cases {
+    println("choose(${n}, ${k}) = ${math.choose(n, k)}")
+  }
+}

@@ -218,8 +218,12 @@ pub fn almide_json_get_string(j: &AlmideValue, key: &str) -> Option<String> {
     match almide_json_get(j, key)? { AlmideValue::Str(s) => Some(s), _ => None }
 }
 
+/// An Int field only: a Float value is `None`, even an integral one (`3.0`),
+/// never truncated — the same answer as `value.as_int` and Codec Int decode, and
+/// the self-hosted `json_get_int` the wasm legs link (#2476). The widening runs
+/// one way only: `get_float` accepts an Int (C-085).
 pub fn almide_json_get_int(j: &AlmideValue, key: &str) -> Option<i64> {
-    match almide_json_get(j, key)? { AlmideValue::Int(n) => Some(n), AlmideValue::Float(f) => Some(f as i64), _ => None }
+    match almide_json_get(j, key)? { AlmideValue::Int(n) => Some(n), _ => None }
 }
 
 pub fn almide_json_get_float(j: &AlmideValue, key: &str) -> Option<f64> {
@@ -241,7 +245,7 @@ pub fn almide_json_to_string(j: &AlmideValue) -> Option<String> {
 }
 
 pub fn almide_json_to_int(j: &AlmideValue) -> Option<i64> {
-    match j { AlmideValue::Int(n) => Some(*n), AlmideValue::Float(f) => Some(*f as i64), _ => None }
+    match j { AlmideValue::Int(n) => Some(*n), _ => None }
 }
 
 pub fn almide_json_as_float(j: &AlmideValue) -> Option<f64> {
@@ -318,7 +322,7 @@ fn stringify_value(v: &AlmideValue, depth: usize) -> String {
         AlmideValue::Null => "null".into(),
         AlmideValue::Bool(b) => if *b { "true" } else { "false" }.into(),
         AlmideValue::Int(n) => n.to_string(),
-        AlmideValue::Float(f) => format!("{}", f),
+        AlmideValue::Float(f) => almide_rt_value_float_json(*f),
         AlmideValue::Str(s) => json_quote(s),
         AlmideValue::Array(items) => {
             if items.is_empty() { return "[]".into(); }

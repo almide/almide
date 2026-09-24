@@ -596,7 +596,16 @@ impl Emitter<'_> {
             ("keys", [v]) => {
                 self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
                 let vk = self.work.helper(Helper::ValueKeys);
-                self.f.instructions().call(vk);
+                // The keys are COPIES of the object's key handles: the list
+                // takes its own credits, as `map.keys` does (#2010 stage 2b).
+                // Its typed drop releases every element, so without the inc
+                // each dropped key list spent one of the Value's own credits
+                // — `value.keys(v)` released twice freed the keys under `v`.
+                let hl = self.hold_i32()?;
+                self.f.instructions().call(vk).local_set(hl);
+                self.emit_inc_elems(hl, STR);
+                self.f.instructions().local_get(hl);
+                self.release_i32();
                 Some(Lowered::owned(SliceTy::List(self.types.intern(STR))))
             }
             ("stringify", [v]) => {
@@ -636,7 +645,7 @@ impl Emitter<'_> {
             let mut i = self.f.instructions();
             i.local_set(hv);
             i.local_get(hv)
-                .i32_load(slot_memarg(0))
+                .i32_load(slot_memarg(almide_layout::SUM_TAG))
                 .i32_const(value_tags::VT_OBJECT)
                 .i32_ne()
                 .if_(BlockType::Result(wasm_encoder::ValType::I32));
@@ -673,7 +682,7 @@ impl Emitter<'_> {
             i.local_get(hw).i32_const(voff as i32).i32_add();
             i.local_get(hpair).i32_load(slot_memarg(val_off)).local_set(hpair);
             i.local_get(hpair)
-                .i32_load(slot_memarg(0))
+                .i32_load(slot_memarg(almide_layout::SUM_TAG))
                 .i32_const(VT_STR)
                 .i32_eq()
                 .if_(BlockType::Result(wasm_encoder::ValType::I32));

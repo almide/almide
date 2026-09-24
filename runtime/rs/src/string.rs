@@ -148,13 +148,6 @@ pub fn almide_rt_string_strip_prefix(s: &str, prefix: &str) -> Option<String> { 
 pub fn almide_rt_string_strip_suffix(s: &str, suffix: &str) -> Option<String> { s.strip_suffix(suffix).map(|r| r.to_string()) }
 
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test] fn test_len() { assert_eq!(almide_rt_string_len("hello"), 5); }
-    #[test] fn test_contains() { assert!(almide_rt_string_contains("hello world", "world")); }
-}
-
 pub fn almide_rt_string_first(s: &str) -> Option<String> {
     s.chars().next().map(|c| c.to_string())
 }

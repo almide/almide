@@ -20,7 +20,10 @@
 //! reaches, so its drop walk would be pure cost. A block the consumer's
 //! own body frees (an owned param, a local it builds) is still freed one
 //! by one — the incumbent's `__rgn_` twins, which skip that too, have no
-//! counterpart here yet.
+//! counterpart here yet. A constructor inside a region-pure fn inlines
+//! its bump (alloc_inline.rs, #2318 direction 2): in the window the class
+//! heads are zero, so a node is three header stores and a `$heap` advance
+//! with no `$alloc` call.
 //!
 //! Soundness rests on nothing crossing the window edge:
 //! * `consume` returns Int/Float/Bool/Unit — no window block escapes by
@@ -55,7 +58,11 @@ use crate::*;
 const SCALAR_MODULES: &[&str] = &["int", "float", "math", "bool"];
 
 /// Size of the save block payload: the bump pointer + one head per class.
-const SAVE_BYTES: u32 = 4 + 4 * FREELIST_CLASSES;
+const SAVE_BYTES: u32 = 4 + HEADS_BYTES;
+/// The free-list class heads, `class_slot(0) .. class_slot(FREELIST_CLASSES)`.
+const HEADS_BYTES: u32 = 4 * FREELIST_CLASSES;
+/// Where the save block keeps the heads: after the payload's bump word.
+const SAVED_HEADS: u32 = almide_layout::PAYLOAD + 4;
 
 fn abs(offset: u32) -> MemArg {
     MemArg { offset: offset as u64, align: 2, memory_index: 0 }
@@ -288,6 +295,30 @@ impl<'a> Emitter<'a> {
         self.globals.keys().map(|g| g.1).collect()
     }
 
+    /// The DECLARED window (#1997): a call to the entry of a `scoped { … }`
+    /// block. The checker admitted the block against the same vocabulary
+    /// `region_pure_fns` reads (docs/specs/scoped.md), so the entry is in
+    /// the pure set and returns a scalar; if either fails here the two
+    /// disagree, which is a compiler defect reported through the
+    /// E-OWN-LOWERING channel (E083) — the build must not reroute a valid
+    /// program around it, and it must never pass silently.
+    pub(crate) fn scoped_entry_window(&self, g: usize, name: &str, ret: Option<SliceTy>) -> Result<(), EmitError> {
+        let pure = self.work.region_pure.borrow().contains(&g);
+        if pure && scalar_slot(ret) {
+            if almide_base::env::flag("ALMIDE_REGION_DEBUG") {
+                eprintln!("[region] declared window at call #{g} ({name})");
+            }
+            return Ok(());
+        }
+        Err(EmitError::OwnershipLowering(OwnDefect {
+            headline: "a `scoped` block the checker admitted is outside the emitter's region vocabulary".to_string(),
+            function: name.to_string(),
+            value: if pure { format!("return slot {ret:?}") } else { "the entry's body".to_string() },
+            expected: "a region-pure entry returning a scalar (the checker's admitted fragment)".to_string(),
+            emitted: if pure { "a heap-typed return".to_string() } else { "a body the region-pure fixpoint dropped".to_string() },
+        }))
+    }
+
     /// `RegionSave`: allocate the save block, file the bump pointer and
     /// the class heads into it, zero the heads. Returns the local holding
     /// the block (released by `emit_region_restore`).
@@ -297,12 +328,13 @@ impl<'a> Emitter<'a> {
         let mut i = self.f.instructions();
         i.i32_const(SAVE_BYTES as i32).call(F_ALLOC).local_set(blk);
         i.local_get(blk).global_get(G_HEAP).i32_store(abs(almide_layout::PAYLOAD));
-        for k in 0..FREELIST_CLASSES {
-            i.local_get(blk);
-            i.i32_const(class_slot(k)).i32_load(abs(0));
-            i.i32_store(abs(almide_layout::PAYLOAD + 4 + 4 * k));
-            i.i32_const(class_slot(k)).i32_const(0).i32_store(abs(0));
-        }
+        // #2312 shape 2: the class heads `[class_slot(0), +HEADS_BYTES)`
+        // and their save slots `[blk + SAVED_HEADS, +HEADS_BYTES)` are both
+        // contiguous, so the save is one copy and one fill — not 16
+        // load/store/zero triples per window site.
+        i.local_get(blk).i32_const(SAVED_HEADS as i32).i32_add();
+        i.i32_const(class_slot(0)).i32_const(HEADS_BYTES as i32).memory_copy(0, 0);
+        i.i32_const(class_slot(0)).i32_const(0).i32_const(HEADS_BYTES as i32).memory_fill(0);
         Ok(blk)
     }
 
@@ -337,11 +369,10 @@ impl<'a> Emitter<'a> {
             i.global_get(G_HEAP).global_get(G_HEAP_HIGH).i32_gt_u().if_(BlockType::Empty);
             i.global_get(G_HEAP).global_set(G_HEAP_HIGH);
             i.end();
-            for k in 0..FREELIST_CLASSES {
-                i.i32_const(class_slot(k));
-                i.local_get(blk).i32_load(abs(almide_layout::PAYLOAD + 4 + 4 * k));
-                i.i32_store(abs(0));
-            }
+            // The heads back in one copy (the save's mirror, #2312).
+            i.i32_const(class_slot(0));
+            i.local_get(blk).i32_const(SAVED_HEADS as i32).i32_add();
+            i.i32_const(HEADS_BYTES as i32).memory_copy(0, 0);
             i.local_get(blk).i32_load(abs(almide_layout::PAYLOAD)).global_set(G_HEAP);
             i.local_get(blk).call(F_FREE);
         }

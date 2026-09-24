@@ -58,7 +58,7 @@ jobs:
           path: wasmtime-v47.0.3-x86_64-linux.tar.xz
           key: wasmtime-v47.0.3-x86_64-linux
 
-      - name: Install runtime required by cargo tests
+      - name: Install the runtime `almide test` uses for its wasm leg
         run: |
           set -euo pipefail
           VERSION=v47.0.3
@@ -72,12 +72,21 @@ jobs:
           sudo install -m 755 "wasmtime-${VERSION}-x86_64-linux/wasmtime" /usr/local/bin/wasmtime
           wasmtime --version
 
-      - name: Cargo tests
-        # Parallel-safe on Unix: the shared build scratch dir is serialized
-        # across processes by an advisory flock (src/cli/run.rs BuildDirLock).
-        # This runner is ubuntu, so the lock applies. Matches ci.yml.
-        # --workspace: a bare `cargo test` tests only the root package (see ci.yml).
-        run: cargo test --workspace
+      # No `cargo test --workspace` here, on purpose.
+      #
+      # It used to run, UNSHARDED on this one runner, and it was the whole cost
+      # of this workflow: measured median 119 min over 19 runs, the most recent
+      # 187-223 min — on a file whose first line calls it "lightweight". The
+      # same suite runs in ci.yml split across four shards (`Test Rust (shard
+      # N/4)`, ~27 min end to end), and THOSE are the required checks on
+      # develop; this job never was. So the step duplicated a required check,
+      # 8x slower, gated nothing, and — because `concurrency` only cancels a
+      # superseded push, not a merge — kept a runner for hours after its
+      # branch had already landed (2026-09-23: 2h on a merged branch).
+      #
+      # What stays is what a pre-PR branch actually needs quickly: it builds,
+      # the example corpus runs, and emit does not crash. The test suite
+      # arrives with the pull request, sharded, as a required check.
 
       # The execution signal for feature branches. This step was a double
       # no-op for months (#979): it globbed `exercises/` — deleted long ago —

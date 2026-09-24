@@ -32,8 +32,9 @@ impl Emitter<'_> {
         d: &IrExpr,
     ) -> ArmResult {
         match func {
-            "from_bytes_f32_le" => self.lower_matrix_from_bytes(false, a, b, c, d),
-            "from_bytes_f16_le" => self.lower_matrix_from_bytes(true, a, b, c, d),
+            "from_bytes_f32_le" => self.lower_matrix_from_bytes(4, a, b, c, d),
+            "from_bytes_f16_le" => self.lower_matrix_from_bytes(2, a, b, c, d),
+            "from_bytes_f64_le" => self.lower_matrix_from_bytes(8, a, b, c, d),
             "select_rows_f32" => self.lower_matrix_select_f32(a, b, c, d),
             "from_q1_0_bytes" => self.lower_matrix_q1_0(false, a, b, c, d),
             "select_rows_q1_0" => self.lower_matrix_q1_0(true, a, b, c, d),
@@ -80,7 +81,7 @@ impl Emitter<'_> {
 
     /// Alloc a flat matrix from i64 dims with the structural OOM bound
     /// (C-197: past it the allocator's die fires, no chosen ceiling).
-    fn mat_alloc_out64(&mut self, hr: u32, hc: u32) -> Result<u32, EmitError> {
+    pub(crate) fn mat_alloc_out64(&mut self, hr: u32, hc: u32) -> Result<u32, EmitError> {
         let ho = self.hold_i32()?;
         let oom = self.pool.intern("Error: out of memory");
         let mut i = self.f.instructions();
@@ -105,12 +106,13 @@ impl Emitter<'_> {
         Ok(ho)
     }
 
-    /// from_bytes_f32_le / from_bytes_f16_le: negative dims clamp to the
-    /// empty matrix; a negative offset or a short buffer is the all-zero
-    /// matrix (the family's OOB→zeros edge).
+    /// from_bytes_f32_le / from_bytes_f16_le / from_bytes_f64_le (`width`
+    /// = the element's byte count): negative dims clamp to the empty
+    /// matrix; a negative offset or a short buffer is the all-zero matrix
+    /// (the family's OOB→zeros edge).
     pub(crate) fn lower_matrix_from_bytes(
         &mut self,
-        half: bool,
+        width: i64,
         data: &IrExpr,
         offset: &IrExpr,
         rows: &IrExpr,
@@ -140,7 +142,6 @@ impl Emitter<'_> {
         let ho = self.mat_alloc_out64(hr, hc)?;
         let hk = self.hold_i32()?;
         let hn = self.hold_i32()?;
-        let width: i64 = if half { 2 } else { 4 };
         let mut i = self.f.instructions();
         // in-bounds? offset >= 0 && offset <= len && r*c*width <= len - offset
         // — subtraction on the buffer side, never `offset + r*c*width`:
@@ -169,11 +170,12 @@ impl Emitter<'_> {
             .i32_const(width as i32)
             .i32_mul()
             .i32_add();
-        if half {
-            i.i32_load16_u(raw16()).call(F_F16_TO_F64);
-        } else {
-            i.i32_load(raw32()).f32_reinterpret_i32().f64_promote_f32();
-        }
+        match width {
+            2 => i.i32_load16_u(raw16()).call(F_F16_TO_F64),
+            4 => i.i32_load(raw32()).f32_reinterpret_i32().f64_promote_f32(),
+            // the 8 raw bytes ARE the f64 (wasm memory is little endian)
+            _ => i.i64_load(raw32()).f64_reinterpret_i64(),
+        };
         i.f64_store(mat_elem());
         i.local_get(hk).i32_const(1).i32_add().local_set(hk);
         i.br(0).end().end();
@@ -366,16 +368,30 @@ impl Emitter<'_> {
         } else {
             i.local_get(hi).i64_extend_i32_u().local_set(hrow);
         }
-        // in bounds? off + rid*row_bytes + row_bytes <= len
-        i.local_get(hoff)
-            .local_get(hrow)
-            .local_get(hrb)
-            .i64_mul()
-            .i64_add()
-            .local_get(hrb)
-            .i64_add();
-        i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u();
-        i.i64_le_s().if_(BlockType::Empty);
+        if select {
+            // Selector: a selected row is `cols / 128` whole blocks on native's
+            // ROW schedule (#1787); a row whose blocks leave the buffer stays
+            // all-zero — in bounds? off + rid*row_bytes + row_bytes <= len.
+            i.local_get(hoff)
+                .local_get(hrow)
+                .local_get(hrb)
+                .i64_mul()
+                .i64_add()
+                .local_get(hrb)
+                .i64_add();
+            i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u();
+            i.i64_le_s();
+        } else {
+            // Full loader: NO row-level bound — native has none. Its rule is
+            // per ELEMENT on the global-k schedule (`$q10_val`, #1532): a k
+            // whose 18-byte block lies inside the buffer decodes, any other is
+            // 0.0. Applying the selector's row test here skipped whole rows
+            // whenever `cols/128*18` exceeded the buffer, so a `cols` beyond
+            // the buffer answered all zeros where native decoded the blocks
+            // that were present (#2419, fuzz seed 990100/151 on 0.62.0 too).
+            i.i32_const(1);
+        }
+        i.if_(BlockType::Empty);
         i.i32_const(0).local_set(hj);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hj).local_get(hc).i32_wrap_i64().i32_ge_u().br_if(1);

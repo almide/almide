@@ -1,0 +1,86 @@
+// @contract: C-161, C-223
+// The matrix element-wise and row-wise family runs byte-identically on every
+// leg, the structural one included — its Matrix is its own flat block, so these
+// are its own arms, transcribed from native (#1423 stage 4):
+// - the zip family (add / sub / div / silu_mul) truncates rows AND cols to the
+//   shorter operand, and a result with no rows has no cols;
+// - neg is native's sign flip, so neg(0.0) is -0.0 (the incumbent's `0.0 - x`
+//   printed 0);
+// - silu_mul on equal shapes is native's kernel path through the canonical
+//   fast-exp, on a shape mismatch its ragged fallback through libm exp (C-223);
+// - broadcast_add_row's width is min(cols, len(bias)); causal_mask_add adds
+//   strictly above the diagonal; layer_norm_rows normalizes over the full row
+//   and emits min(cols, len(gamma), len(beta)) cells.
+// - matrix.zeros after a released matrix is still all zeros (C-161): the
+//   structural constructor assumed fresh pages were zero and handed back the
+//   dead block's cells once frees were real.
+// The div0 row divides by zero on both signs (inf, -inf) and deliberately
+// not 0/0: a NaN inside a container is the interp's declared abstain (#1403,
+// NaN bits are arch-conditional), and an abstaining row pins nothing.
+fn show(tag: String, m: Matrix) -> Unit = {
+  let l = matrix.to_lists(m)
+  let s = matrix.shape(m)
+  println("${tag}: ${s} ${l}")
+}
+
+fn main() -> Unit = {
+  let a = matrix.from_lists([
+    [1.0, 2.0, 3.0],
+    [4.0, 5.0, 6.0]
+  ])
+  let c = matrix.from_lists([
+    [10.0, 20.0, 30.0],
+    [40.0, 50.0, 60.0],
+    [70.0, 80.0, 90.0]
+  ])
+  let e = matrix.zeros(0, 0)
+  show("add", matrix.add(a, c))
+  show("sub_cols", matrix.sub(c, matrix.from_lists([
+    [1.0],
+    [2.0]
+  ])))
+  show("div", matrix.div(c, a))
+  show("div0", matrix.div(matrix.from_lists([
+    [1.0, -1.0]
+  ]), matrix.zeros(1, 2)))
+  show("add_empty", matrix.add(a, e))
+  show("add_r0", matrix.add(matrix.zeros(3, 0), c))
+  show("zeros_after_free", matrix.neg(matrix.zeros(1, 2)))
+  show("neg", matrix.neg(a))
+  show("scale", matrix.scale(a, -0.5))
+  let k = 3.0
+  show("map", matrix.map(a, (x) => x * k - 1.0))
+  show("map_empty", matrix.map(e, (x) => x + 1.0))
+  show("bar", matrix.broadcast_add_row(a, [100.0, 200.0]))
+  show("bar_long", matrix.broadcast_add_row(a, [1.0, 2.0, 3.0, 4.0]))
+  show("bar_nobias", matrix.broadcast_add_row(a, []))
+  show("mask", matrix.causal_mask_add(c, -1000.0))
+  show("mask_wide", matrix.causal_mask_add(a, 0.5))
+  show("mask_tall", matrix.causal_mask_add(matrix.transpose(a), 0.5))
+  show("ln", matrix.layer_norm_rows(a, [1.0, 2.0, 0.5], [0.0, 1.0, -1.0], 0.001))
+  show(
+    "ln_const",
+    matrix.layer_norm_rows(
+      matrix.from_lists([
+        [2.0, 2.0, 2.0, 2.0]
+      ]),
+      [1.0, 1.0, 1.0, 1.0],
+      [0.5, 0.5, 0.5, 0.5],
+      0.25,
+    ),
+  )
+  show("ln_short", matrix.layer_norm_rows(a, [1.0, 2.0], [0.0, 0.0, 0.0], 0.5))
+  let s = matrix.from_lists([
+    [0.3, -1.7, 2.9],
+    [4.1, -0.05, 0.77]
+  ])
+  let t = matrix.from_lists([
+    [1.1, 2.2, -3.3],
+    [0.4, 0.5, 0.6]
+  ])
+  show("silu", matrix.silu_mul(s, t))
+  show("silu_mismatch", matrix.silu_mul(s, matrix.from_lists([
+    [1.1, 2.2],
+    [0.4, 0.5]
+  ])))
+}

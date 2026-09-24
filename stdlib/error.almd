@@ -6,13 +6,16 @@
 // default `Result → Own` would collide with their `&Result<T, String>`
 // runtime fn; `chain`'s two `String`s flow through the default
 // `String → RefStr` decoration without an override.
+/// outer + "\ncaused by: " + cause.
 @intrinsic("almide_rt_error_chain")
 fn chain(outer: String, cause: String) -> String = _
 
+/// err(e) becomes err("msg: e"); ok unchanged.
 @intrinsic("almide_rt_error_context")
 @borrow_ref(r)
 fn context[T](r: Result[T, String], msg: String) -> Result[T, String] = _
 
+/// Error text of r; "" when r is ok.
 @intrinsic("almide_rt_error_message")
 @borrow_ref(r)
 fn message[T](r: Result[T, String]) -> String = _

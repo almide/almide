@@ -1,0 +1,22 @@
+// @expect-fail: Error: matrix shape mismatch
+// @contract: C-353
+// #2483: `matrix.linear_row(x, w, bias)` needs one bias entry per output —
+// `len(bias) == rows(weight)`. Native read `bias[j]` for every j < rows(w)
+// and died on a raw index panic (`index out of bounds: the len is 1 but the
+// index is 1`, exit 101) while both wasm legs read the missing entries as
+// 0.0 off the fresh pages and printed a 1x3 row (`[[15, 11, 17]]`, exit 0) —
+// a missing bias treated as no bias. The same call also requires
+// `cols(x) == cols(weight)`, which was a raw index panic natively and an
+// out-of-block read on the wasm legs.
+fn main() -> Unit = {
+  let x = matrix.from_lists([
+    [1.0, 2.0]
+  ])
+  let w = matrix.from_lists([
+    [1.0, 0.0],
+    [0.0, 1.0],
+    [1.0, 1.0]
+  ])
+  let y = matrix.linear_row(x, w, [10.0])
+  println("UNREACHABLE ${matrix.rows(y)}x${matrix.cols(y)}")
+}

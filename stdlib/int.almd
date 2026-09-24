@@ -20,21 +20,27 @@
 // Rust fns in `runtime/rs/src/int.rs` remain — they are the actual
 // implementations referenced by the templates.
 // ── Conversions ──
+/// Decimal digits, with - when negative.
 @intrinsic("almide_rt_int_to_string")
 fn to_string(n: Int) -> String = _
 
+/// Lowercase hex, no 0x; -1 gives 16 f digits.
 @intrinsic("almide_rt_int_to_hex")
 fn to_hex(n: Int) -> String = _
 
+/// Decimal Int from trimmed s; err on junk or overflow.
 @intrinsic("almide_rt_int_parse")
 fn parse(s: String) -> Result[Int, String] = _
 
+/// Hex, any case, 0x optional; err on junk or > 2^63-1.
 @intrinsic("almide_rt_int_parse_hex")
 fn from_hex(s: String) -> Result[Int, String] = _
 
+/// Nearest Float; may round when |n| > 2^53.
 @intrinsic("almide_rt_int_to_float")
 fn to_float(n: Int) -> Float = _
 
+/// Float whose IEEE-754 binary64 bits are bits.
 @intrinsic("almide_rt_int_bits_to_float")
 fn bits_to_float(bits: Int) -> Float = _
 
@@ -42,19 +48,24 @@ fn bits_to_float(bits: Int) -> Float = _
 // return it widened to `Float` (f64). Counterpart to `bits_to_float`
 // which consumes 64 bits directly. Used for reading F32 tensors out of
 // GGUF/ggml files (and any other binary format that stores single-precision).
+/// Low 32 bits read as binary32, widened to Float.
 @intrinsic("almide_rt_int_bits_to_f32")
 fn bits_to_f32(bits: Int) -> Float = _
 
 // ── Arithmetic ──
+/// Magnitude of n; min_value wraps to itself.
 @intrinsic("almide_rt_int_abs")
 fn abs(n: Int) -> Int = _
 
+/// Lesser of a and b.
 @intrinsic("almide_rt_int_min")
 fn min(a: Int, b: Int) -> Int = _
 
+/// Greater of a and b.
 @intrinsic("almide_rt_int_max")
 fn max(a: Int, b: Int) -> Int = _
 
+/// n limited to lo..hi; aborts when lo > hi.
 @intrinsic("almide_rt_int_clamp")
 fn clamp(n: Int, lo: Int, hi: Int) -> Int = _
 
@@ -67,132 +78,177 @@ fn clamp(n: Int, lo: Int, hi: Int) -> Int = _
 // pair through `int.from_int8(x)`. `%` is remainder with the dividend's
 // sign, so `-3 % 2 == -1`: parity is `% 2 == 0` and its negation, never
 // `% 2 == 1`.
+/// True when n % 2 == 0; exact for negatives.
 fn is_even(n: Int) -> Bool = n % 2 == 0
 
+/// True when n % 2 != 0; -3 counts as odd.
 fn is_odd(n: Int) -> Bool = n % 2 != 0
 
 // ── Bitwise ──
+/// Bitwise AND over all 64 bits.
 @intrinsic("almide_rt_int_band")
 fn band(a: Int, b: Int) -> Int = _
 
+/// Bitwise OR over all 64 bits.
 @intrinsic("almide_rt_int_bor")
 fn bor(a: Int, b: Int) -> Int = _
 
+/// Bitwise XOR over all 64 bits.
 @intrinsic("almide_rt_int_bxor")
 fn bxor(a: Int, b: Int) -> Int = _
 
+/// Bitwise complement; equals -a - 1.
 @intrinsic("almide_rt_int_bnot")
 fn bnot(a: Int) -> Int = _
 
+/// a shifted left by n bits; n is taken mod 64.
 @intrinsic("almide_rt_int_bshl")
 fn bshl(a: Int, n: Int) -> Int = _
 
+/// Arithmetic (sign-filling) right shift; n mod 64.
 @intrinsic("almide_rt_int_bshr")
 fn bshr(a: Int, n: Int) -> Int = _
 
 // ── Bit introspection ──
+/// Leading zero bits of the 64-bit word; 64 for 0.
 @intrinsic("almide_rt_int_count_leading_zeros")
 fn count_leading_zeros(n: Int) -> Int = _
 
+/// Trailing zero bits; 64 for 0.
 @intrinsic("almide_rt_int_count_trailing_zeros")
 fn count_trailing_zeros(n: Int) -> Int = _
 
+/// Number of set bits; 64 for -1.
 @intrinsic("almide_rt_int_pop_count")
 fn pop_count(n: Int) -> Int = _
 
+/// The 64 bits in reverse order; 1 gives min_value.
 @intrinsic("almide_rt_int_bit_reverse")
 fn bit_reverse(n: Int) -> Int = _
 
+/// The 8 bytes in reverse order (endian flip).
 @intrinsic("almide_rt_int_byte_swap")
 fn byte_swap(n: Int) -> Int = _
 
+/// Bits needed to hold n; 0 for 0, 64 if negative.
 @intrinsic("almide_rt_int_bit_width")
 fn bit_width(n: Int) -> Int = _
 
+/// Floor of log2(n); -1 when n <= 0.
 @intrinsic("almide_rt_int_log2_floor")
 fn log2_floor(n: Int) -> Int = _
 
+/// Ceiling of log2(n); 0 when n <= 1.
 @intrinsic("almide_rt_int_log2_ceil")
 fn log2_ceil(n: Int) -> Int = _
 
+/// Least power of 2 >= n; 1 if n <= 1; min_value past 2^62.
 @intrinsic("almide_rt_int_next_power_of_two")
 fn next_power_of_two(n: Int) -> Int = _
 
+/// Greatest power of 2 <= n; 0 when n <= 0.
 @intrinsic("almide_rt_int_prev_power_of_two")
 fn prev_power_of_two(n: Int) -> Int = _
 
 // ── Wrapping / masking ──
+/// (a + b) mod 2^bits, non-negative when bits < 64.
 @intrinsic("almide_rt_int_wrap_add")
 fn wrap_add(a: Int, b: Int, bits: Int) -> Int = _
 
+/// (a * b) mod 2^bits, non-negative when bits < 64.
 @intrinsic("almide_rt_int_wrap_mul")
 fn wrap_mul(a: Int, b: Int, bits: Int) -> Int = _
 
+// The count is reduced into [0, bits) Euclidean-ly: a negative count rotates
+// the other way (#2492, C-358). bits <= 0 aborts (C-047), bits >= 64
+// saturates the mask (C-048).
+/// Low bits of a rotated right by n mod bits; bits <= 0 aborts.
 @intrinsic("almide_rt_int_rotate_right")
 fn rotate_right(a: Int, n: Int, bits: Int) -> Int = _
 
+/// Low bits of a rotated left by n mod bits; bits <= 0 aborts.
 @intrinsic("almide_rt_int_rotate_left")
 fn rotate_left(a: Int, n: Int, bits: Int) -> Int = _
 
+/// Low 32 bits as unsigned; -1 becomes 4294967295.
 @intrinsic("almide_rt_int_to_u32")
 fn to_u32(a: Int) -> Int = _
 
+/// Low 8 bits as unsigned; 300 becomes 44.
 @intrinsic("almide_rt_int_to_u8")
 fn to_u8(a: Int) -> Int = _
 
 // ── Sized type conversions (Stage 3) ──
+/// Wraps to 8 bits; 200 becomes -56.
 @intrinsic("almide_rt_int_to_int8")
 fn to_int8(n: Int) -> Int8 = _
 
+/// Wraps to 16 bits; 40000 becomes -25536.
 @intrinsic("almide_rt_int_to_int16")
 fn to_int16(n: Int) -> Int16 = _
 
+/// Wraps to 32 bits; 2^31 becomes -2^31.
 @intrinsic("almide_rt_int_to_int32")
 fn to_int32(n: Int) -> Int32 = _
 
+/// Wraps to 8 bits; -1 becomes 255.
 @intrinsic("almide_rt_int_to_uint8")
 fn to_uint8(n: Int) -> UInt8 = _
 
+/// Wraps to 16 bits; -1 becomes 65535.
 @intrinsic("almide_rt_int_to_uint16")
 fn to_uint16(n: Int) -> UInt16 = _
 
+/// Wraps to 32 bits; -1 becomes 2^32-1.
 @intrinsic("almide_rt_int_to_uint32")
 fn to_uint32(n: Int) -> UInt32 = _
 
+/// Wraps to 64 bits; -1 becomes 2^64-1.
 @intrinsic("almide_rt_int_to_uint64")
 fn to_uint64(n: Int) -> UInt64 = _
 
+/// Float32 value; may round when |n| > 2^24.
 @intrinsic("almide_rt_int_to_float32")
 fn to_float32(n: Int) -> Float32 = _
 
+/// Float64 value; may round when |n| > 2^53.
 @intrinsic("almide_rt_int_to_float64")
 fn to_float64(n: Int) -> Float64 = _
 
+/// Same value as Int64; always exact.
 @intrinsic("almide_rt_int_to_int64")
 fn to_int64(n: Int) -> Int64 = _
 
 // ── Widening: sized integer → Int ──
+/// Sign-extending widen; always exact.
 @intrinsic("almide_rt_int_from_int8")
 fn from_int8(n: Int8) -> Int = _
 
+/// Sign-extending widen; always exact.
 @intrinsic("almide_rt_int_from_int16")
 fn from_int16(n: Int16) -> Int = _
 
+/// Sign-extending widen; always exact.
 @intrinsic("almide_rt_int_from_int32")
 fn from_int32(n: Int32) -> Int = _
 
+/// Same value as Int; always exact.
 @intrinsic("almide_rt_int_from_int64")
 fn from_int64(n: Int64) -> Int = _
 
+/// Zero-extending widen; always exact.
 @intrinsic("almide_rt_int_from_uint8")
 fn from_uint8(n: UInt8) -> Int = _
 
+/// Zero-extending widen; always exact.
 @intrinsic("almide_rt_int_from_uint16")
 fn from_uint16(n: UInt16) -> Int = _
 
+/// Zero-extending widen; always exact.
 @intrinsic("almide_rt_int_from_uint32")
 fn from_uint32(n: UInt32) -> Int = _
 
+/// Reinterprets bits; values >= 2^63 go negative.
 @intrinsic("almide_rt_int_from_uint64")
 fn from_uint64(n: UInt64) -> Int = _
 
@@ -203,55 +259,81 @@ fn from_uint64(n: UInt64) -> Int = _
 // Widening sources (Int is Int64) are implicit here — e.g.
 // `to_int64_checked` is omitted because the identity conversion can't
 // fail.
+/// some(n), or none outside -128..127.
 fn to_int8_checked(n: Int) -> Int8? = if n < -128 or n > 127 then none else some(int.to_int8(n))
 
+/// some(n), or none outside -32768..32767.
 fn to_int16_checked(n: Int) -> Int16? = if n < -32768 or n > 32767 then none else some(int.to_int16(n))
 
+/// some(n), or none outside -2^31..2^31-1.
 fn to_int32_checked(n: Int) -> Int32? = if n < -2147483648 or n > 2147483647 then none else some(int.to_int32(n))
 
+/// some(n), or none outside 0..255.
 fn to_uint8_checked(n: Int) -> UInt8? = if n < 0 or n > 255 then none else some(int.to_uint8(n))
 
+/// some(n), or none outside 0..65535.
 fn to_uint16_checked(n: Int) -> UInt16? = if n < 0 or n > 65535 then none else some(int.to_uint16(n))
 
+/// some(n), or none outside 0..2^32-1.
 fn to_uint32_checked(n: Int) -> UInt32? = if n < 0 or n > 4294967295 then none else some(int.to_uint32(n))
 
 // Only the sign bit can fail for `Int → UInt64` since `|Int64| ≤ UInt64::MAX`.
+/// some(n), or none if n is negative.
 fn to_uint64_checked(n: Int) -> UInt64? = if n < 0 then none else some(int.to_uint64(n))
 
-// `Int → Float32` loses precision for `|n| > 2^24`. Round-trip through
-// `Float32 → Int` to detect the loss.
+// `Int → Float32` loses precision for `|n| > 2^24`. Widen the f32 back
+// and compare through `Float → Int`, which is exact below 2^63 — but
+// `float.to_int` SATURATES at 2^63, so a widened value there is bounded
+// out first (#2487: `max_value` rounds to 2^63 as an f32, the saturated
+// read-back equalled `max_value`, and the cell answered `some`). The
+// family rule: a `_checked` cell never trusts a round trip through a
+// conversion that wraps or saturates. Cell twin: stdlib/int_checked.almd.
+/// some(f), or none if the f32 does not hold n exactly.
 fn to_float32_checked(n: Int) -> Float32? = {
   let f: Float32 = int.to_float32(n)
-  if float.to_int(float.from_float32(f)) == n then some(f) else none
+  let back: Float = float.from_float32(f)
+  if back >= 9223372036854776000.0 then none
+  else if float.to_int(back) == n then some(f) else none
 }
 
+/// Clamps n to -128..127.
 fn to_int8_saturating(n: Int) -> Int8 = if n < -128 then int.to_int8(-128)
 else if n > 127 then int.to_int8(127) else int.to_int8(n)
 
+/// Clamps n to -32768..32767.
 fn to_int16_saturating(n: Int) -> Int16 = if n < -32768 then int.to_int16(-32768)
 else if n > 32767 then int.to_int16(32767) else int.to_int16(n)
 
+/// Clamps n to -2^31..2^31-1.
 fn to_int32_saturating(n: Int) -> Int32 = if n < -2147483648 then int.to_int32(-2147483648)
 else if n > 2147483647 then int.to_int32(2147483647) else int.to_int32(n)
 
+/// Clamps n to 0..255.
 fn to_uint8_saturating(n: Int) -> UInt8 = if n < 0 then int.to_uint8(0)
 else if n > 255 then int.to_uint8(255) else int.to_uint8(n)
 
+/// Clamps n to 0..65535.
 fn to_uint16_saturating(n: Int) -> UInt16 = if n < 0 then int.to_uint16(0)
 else if n > 65535 then int.to_uint16(65535) else int.to_uint16(n)
 
+/// Clamps n to 0..2^32-1.
 fn to_uint32_saturating(n: Int) -> UInt32 = if n < 0 then int.to_uint32(0)
 else if n > 4294967295 then int.to_uint32(4294967295) else int.to_uint32(n)
 
+/// Negative n clamps to 0.
 fn to_uint64_saturating(n: Int) -> UInt64 = if n < 0 then int.to_uint64(0) else int.to_uint64(n)
 
 // ── U64 → Int is the one lossy widening (the upper half exceeds i64::MAX);
 //    checked/saturating complete its trio next to the plain `from_uint64` ──
+/// some(n), or none if n exceeds 2^63-1.
 fn from_uint64_checked(n: UInt64) -> Int? = if int.from_uint64(n) >= 0 then some(int.from_uint64(n)) else none
 
+/// Clamps n to at most 2^63-1.
 fn from_uint64_saturating(n: UInt64) -> Int = if int.from_uint64(n) >= 0 then int.from_uint64(n) else 9223372036854775807
 
 // ── Bounds ──
+/// Smallest Int: -2^63.
 fn min_value() -> Int = -9223372036854775807 - 1
 
+/// Largest Int: 2^63-1.
 fn max_value() -> Int = 9223372036854775807

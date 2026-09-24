@@ -1,0 +1,3 @@
+expects_code = "E089"
+expects_error = "makes it `Bytes`"
+hint_substring = "bytes.to_list(b)"

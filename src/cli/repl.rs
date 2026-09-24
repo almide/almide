@@ -211,7 +211,11 @@ impl Session {
         // the rustc path's answer DIFFER from the wasm fast path's (a
         // String answered `"hi"` here and `hi` there). One rendering — the
         // language's own — on both paths.
-        let bin = super::cargo_build_generated(&rust_code, &self.build_dir, false)?;
+        // `~/.almide/repl/build` persists across sessions, so an interrupted
+        // build can leave it the stale incremental session #2500 recovers from.
+        let bin = super::cargo_build::build_recovering_from_ice(&self.build_dir, || {
+            super::cargo_build_generated(&rust_code, &self.build_dir, false)
+        })?;
         let output = std::process::Command::new(&bin)
             .output()
             .map_err(|e| format!("execution failed: {}", e))?;

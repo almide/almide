@@ -561,6 +561,9 @@ impl LowerCtx {
                 name.as_str()
             )));
         }
+        // #2503 / C-033: the C-132 write-back bind (`let __mp = f(b); b = __mp`)
+        // is where the caller's `mut`-position var is mutated — COW it here.
+        self.cow_mut_param_call_args(name.as_str(), args);
         let lowered = self.lower_call_args(args)?;
         let dst = self.fresh_value();
         // A function-VALUED result (`let f = mk()`) is a CLOSURE BLOCK — the uniform
@@ -638,6 +641,12 @@ impl LowerCtx {
         }
         if crate::lower::is_list_list_str_ty(ty) {
             self.value_drops.entry(dst).or_default().list_list_str = true;
+            return true;
+        }
+        if let Some(n) = crate::lower::anon_tuple_list_route(ty) {
+            // `List[<anon heap tuple>]` (#2520) — the synthesized per-slot sweep; the
+            // flat heap_elem_lists DropListStr would leak every tuple's heap slots.
+            self.value_drops.entry(dst).or_default().named_route = Some(n);
             return true;
         }
         if crate::lower::is_list_str_str_ty(ty) {

@@ -290,7 +290,7 @@ mod hard_gate_tests {
             effect_fn_names: Default::default(),
             effect_map: Default::default(),
             codegen_annotations: Default::default(),
-            used_stdlib_modules: Default::default(),
+            used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(),
         }
     }
 

@@ -79,6 +79,34 @@ fn __mx_dims_guard(rows: Int, cols: Int) -> Int = {
   0
 }
 
+// The SHAPE precondition of the two-operand kernels (#2481 / #2482 / #2483),
+// byte-identical to the native `almide_rt_matrix_shape_eq`: two extents a
+// kernel indexes against each other must be EQUAL, or the call aborts in the
+// unified T6 form. Before it, `matrix_mul` summed over `min(cols(a), rows(b))`
+// and printed a product where native panicked, `__mx_lin_row` read a short
+// bias's missing entries as 0.0, and the wasm attention/swiglu bodies read
+// past a narrower operand's row block.
+fn __mx_shape_eq(a: Int, b: Int) -> Int = {
+  if a != b then prim.die(prim.handle("Error: matrix shape mismatch\n")) else ()
+  0
+}
+
+// `from_lists`' ragged-row guard (#2482): every row must have row 0's width.
+// The native flat store asserted it (a raw panic); this leg built the ragged
+// value and read on, since a v1 Matrix is a list of rows with no invariant.
+fn __mx_uniform_from(h: Int, w: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  if prim.load32(prim.load64(h + 12 + i * 8) + 4) != w then prim.die(prim.handle("Error: matrix rows must have equal length\n"))
+  else ()
+  __mx_uniform_from(h, w, n, i + 1)
+}
+
+fn __mx_rows_uniform(h: Int) -> Int = {
+  let n = prim.load32(h + 4)
+  if n == 0 then 0
+  else __mx_uniform_from(h, prim.load32(prim.load64(h + 12) + 4), n, 1)
+}
+
 fn __mx_const(rows: Int, cols: Int, x: Float) -> List[List[Float]] = {
   let r = __mx_dim(rows)
   let c = __mx_dim(cols)
@@ -103,7 +131,10 @@ else {
 }
 
 // ── construction + metadata ──
-fn matrix_from_lists(rows: List[List[Float]]) -> List[List[Float]] = __mx_share(rows)
+fn matrix_from_lists(rows: List[List[Float]]) -> List[List[Float]] = {
+  let _u = __mx_rows_uniform(prim.handle(rows))
+  __mx_share(rows)
+}
 
 fn matrix_to_lists(m: List[List[Float]]) -> List[List[Float]] = __mx_share(m)
 
@@ -250,11 +281,22 @@ fn matrix_transpose(m: List[List[Float]]) -> List[List[Float]] = {
 }
 
 // v0 slice_rows: rows start..min(end, len); start >= that end → the 0-row matrix.
+// Both bounds read as native's `as usize`: a negative end is past every row
+// (the slice runs to the last row), a negative start is past every row (the
+// empty slice) — the signed reading read rows at negative offsets (#1423).
+// That is `list.slice`'s index doctrine (C-034) and exactly what native's
+// `almide_rt_matrix_slice_rows` answers. The negative-start half was also an
+// out-of-bounds READ (#2475): this body clamped only `end`, so `start = -1`
+// reached `__mx_slice_fill`, whose first load `hm + 12 + (-1) * 8 = hm + 4` is
+// the outer block's own LENGTH word — dereferenced as a row pointer, for a
+// length and that many elements. The guard sits BEFORE any address is formed,
+// so no load below it can start outside the row-handle array:
+// `0 <= start < e <= len` bounds every `start + i`.
 fn matrix_slice_rows(m: List[List[Float]], start: Int, end: Int) -> List[List[Float]] = {
   let hm = prim.handle(m)
   let len = prim.load32(hm + 4)
-  let e = if end < len then end else len
-  let n = if start < e then e - start else 0
+  let e = if end < 0 or end > len then len else end
+  let n = if start >= 0 and start < e then e - start else 0
   let out: List[List[Float]] = prim.alloc_list_str(n)
   let _x = __mx_slice_fill(prim.handle(out), hm, start, n, 0)
   out
@@ -358,26 +400,32 @@ else {
 // from 0.0 — the tiling reduces to exactly this per-element order. Degenerate dims fall
 // out of the loops (m==0 → no rows; n==0 → empty rows; k==0 → all-zero rows), matching
 // v0's explicit zero-matrix early-return.
+// #2481: the inner dimension `cols(a) == rows(b)` is a PRECONDITION, checked
+// after the same empty-operand short-circuit native takes (`m == 0 || k == 0 ||
+// n == 0` answers the m×n zero matrix without looking at the shapes). This
+// body used to clamp the inner sum to `min(cols(a), rows(b))` and print a
+// product of the overlapping part where native panicked past `b`'s data.
 fn matrix_mul(a: List[List[Float]], b: List[List[Float]]) -> List[List[Float]] = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
   let m = prim.load32(ha + 4)
   let br = prim.load32(hb + 4)
+  let k = if m == 0 then 0 else prim.load32(prim.load64(ha + 12) + 4)
   let n = if br == 0 then 0 else prim.load32(prim.load64(hb + 12) + 4)
+  let _g = if m == 0 or k == 0 or n == 0 then 0 else __mx_shape_eq(k, br)
   let out: List[List[Float]] = prim.alloc_list_str(m)
-  let _x = __mx_mul_rows(prim.handle(out), ha, hb, br, m, n, 0)
+  let _x = __mx_mul_rows(prim.handle(out), ha, hb, m, n, 0)
   out
 }
 
-fn __mx_mul_rows(ho: Int, ha: Int, hb: Int, br: Int, m: Int, n: Int, i: Int) -> Int = if i >= m then 0
+fn __mx_mul_rows(ho: Int, ha: Int, hb: Int, m: Int, n: Int, i: Int) -> Int = if i >= m then 0
 else {
   let arh = prim.load64(ha + 12 + i * 8)
   let k = prim.load32(arh + 4)
-  let kk = if k < br then k else br
   let row = prim.alloc_list_f64(n)
-  let _f = __mx_mul_row(prim.handle(row), arh, hb, kk, n, 0)
+  let _f = __mx_mul_row(prim.handle(row), arh, hb, k, n, 0)
   prim.store_str(ho + 12 + i * 8, row)
-  __mx_mul_rows(ho, ha, hb, br, m, n, i + 1)
+  __mx_mul_rows(ho, ha, hb, m, n, i + 1)
 }
 
 fn __mx_mul_row(rh: Int, arh: Int, hb: Int, k: Int, n: Int, j: Int) -> Int = if j >= n then 0
@@ -396,12 +444,22 @@ else {
 }
 
 // v0 linear_row: y[i][j] = Σ_k x[i][k]·w[j][k] + bias[j] (k ascending, bias added last);
-// empty x or weight → the 0-row matrix.
+// empty x or weight → the 0-row matrix. #2483: the weight is (n_out, n_in) and
+// the bias has one entry per output, checked after the empty short-circuit —
+// `__mx_lin_row` read a short bias's missing entries from past the list block
+// (0.0 off the fresh pages) where native panicked on the index.
+fn __mx_lin_guard(hx: Int, hw: Int, r: Int, wr: Int) -> Int = if r == 0 or wr == 0 then 0 else __mx_shape_eq(
+  prim.load32(prim.load64(hw + 12) + 4),
+  prim.load32(prim.load64(hx + 12) + 4),
+)
+
 fn matrix_linear_row(x: List[List[Float]], weight: List[List[Float]], bias: List[Float]) -> List[List[Float]] = {
   let hx = prim.handle(x)
   let hw = prim.handle(weight)
   let r = prim.load32(hx + 4)
   let wr = prim.load32(hw + 4)
+  let _g = __mx_lin_guard(hx, hw, r, wr)
+  let _b = if r == 0 or wr == 0 then 0 else __mx_shape_eq(prim.load32(prim.handle(bias) + 4), wr)
   let n = if wr == 0 then 0 else r
   let out: List[List[Float]] = prim.alloc_list_str(n)
   let _x = __mx_lin_rows(prim.handle(out), hx, hw, prim.handle(bias), 1, wr, n, 0)
@@ -413,6 +471,7 @@ fn matrix_linear_row_no_bias(x: List[List[Float]], weight: List[List[Float]]) ->
   let hw = prim.handle(weight)
   let r = prim.load32(hx + 4)
   let wr = prim.load32(hw + 4)
+  let _g = __mx_lin_guard(hx, hw, r, wr)
   let n = if wr == 0 then 0 else r
   let out: List[List[Float]] = prim.alloc_list_str(n)
   let _x = __mx_lin_rows(prim.handle(out), hx, hw, 0, 0, wr, n, 0)
@@ -558,7 +617,13 @@ fn matrix_from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
   // 544202078563 index 874).
   let _g = __mx_dims_guard(r, c)
   let need = r * c * 4
-  if offset < 0 or offset + need > len then __mx_const(r, c, 0.0)
+  // C-341, SUBTRACTIVE: `offset + need > len` WRAPS for an offset near
+  // i64::MAX — the sum went negative, passed the test and the decode read
+  // whatever bytes it landed on (#1909 fixed the structural leg's copy of
+  // this test and left the self-host's, so the incumbent leg still answered
+  // a subnormal where native answered zeros). `len` is a length, so
+  // `len - offset` cannot overflow once `offset` is known non-negative.
+  if offset < 0 or offset > len or need > len - offset then __mx_const(r, c, 0.0)
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
     let _x = __mx_f32_rows(prim.handle(out), hd, offset, r, c, 0)
@@ -661,7 +726,13 @@ fn matrix_from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
   // 544202078563 index 874).
   let _g = __mx_dims_guard(r, c)
   let need = r * c * 2
-  if offset < 0 or offset + need > len then __mx_const(r, c, 0.0)
+  // C-341, SUBTRACTIVE: `offset + need > len` WRAPS for an offset near
+  // i64::MAX — the sum went negative, passed the test and the decode read
+  // whatever bytes it landed on (#1909 fixed the structural leg's copy of
+  // this test and left the self-host's, so the incumbent leg still answered
+  // a subnormal where native answered zeros). `len` is a length, so
+  // `len - offset` cannot overflow once `offset` is known non-negative.
+  if offset < 0 or offset > len or need > len - offset then __mx_const(r, c, 0.0)
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
     let _x = __mx_f16_rows(prim.handle(out), hd, offset, r, c, 0)
@@ -719,11 +790,23 @@ else {
 // v0 concat_cols_many: the empty list → the 0-row matrix; matrices[0] empty → ONE empty
 // row (v0's `vec![vec![]]`); else per output row r the concat of every m[r] with r in
 // range (each contributing its OWN row length — the extend_from_slice semantics).
+// #2482: every NON-EMPTY member must have the first member's row count (an
+// empty member contributes no columns and no shape) — a member with fewer
+// rows built a ragged output here where native's flat store asserted.
+fn __mx_cc_guard(hs: Int, k: Int, rows0: Int, mi: Int) -> Int = if mi >= k then 0
+else {
+  let mr = prim.load32(prim.load64(hs + 12 + mi * 8) + 4)
+  let _g = if mr == 0 then 0 else __mx_shape_eq(mr, rows0)
+  __mx_cc_guard(hs, k, rows0, mi + 1)
+}
+
 fn matrix_concat_cols(matrices: List[List[List[Float]]]) -> List[List[Float]] = {
   let hs = prim.handle(matrices)
   let k = prim.load32(hs + 4)
   let rows0 = if k == 0 then 0 else prim.load32(prim.load64(hs + 12) + 4)
   let empty_case = k > 0 and rows0 == 0
+  let _g = if rows0 == 0 then 0
+  else __mx_cc_guard(hs, k, rows0, 1)
   let out_rows = if k == 0 then 0
   else {
     if rows0 == 0 then 1 else rows0

@@ -432,11 +432,44 @@ const MAIN_SIGPIPE_PRELUDE: &str = "    #[cfg(unix)]\n    {\n        extern \"C\
 /// panic to the default hook — the message and exit code are unchanged.
 const MAIN_STDOUT_PRELUDE: &str = "    {\n        let __almide_hook = std::panic::take_hook();\n        std::panic::set_hook(std::boxed::Box::new(move |info| { almide_stdout_flush(); __almide_hook(info); }));\n    }\n";
 
+/// A lazy top-let whose value holds a closure renders as a per-thread slot
+/// behind a `Deref` handle (`top_let_thread_lazy`), not a `static LazyLock`:
+/// `Rc<dyn Fn>` is not `Sync`, so rustc refuses it in a static (#2537).
+/// A public alias (`type Handler = (Int) -> Int`) is expanded transparently
+/// by `render_type`, so it is looked through here too; `fn_blocked_types`
+/// already covers records and variants transitively.
+pub(crate) fn top_let_is_thread_local(ctx: &RenderContext, ty: &Ty) -> bool {
+    fn holds_fn(ctx: &RenderContext, ty: &Ty, depth: u32) -> bool {
+        if declarations::ty_has_fn_with(ty, &ctx.ann.fn_blocked_types) {
+            return true;
+        }
+        if depth > 32 {
+            return false;
+        }
+        match ty {
+            Ty::Named(name, args) => {
+                args.iter().any(|t| holds_fn(ctx, t, depth + 1))
+                    || ctx.type_aliases.get(name).is_some_and(|t| holds_fn(ctx, t, depth + 1))
+            }
+            Ty::Tuple(elems) | Ty::Applied(_, elems) => elems.iter().any(|t| holds_fn(ctx, t, depth + 1)),
+            Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                fields.iter().any(|(_, t)| holds_fn(ctx, t, depth + 1))
+            }
+            _ => false,
+        }
+    }
+    holds_fn(ctx, ty, 0)
+}
+
 fn wrap_main_fn_code(fn_code: String, ctx: &RenderContext, is_rust_effect_main: bool, is_rust_plain_main_with_forces: bool) -> String {
     let force_lines: String = ctx.ann.global_init_order.iter()
-        .filter_map(|v| ctx.ann.globals.get(v))
-        .filter(|i| matches!(i.storage, almide_ir::top_let_storage::TopLetStorage::Lazy { eager_force: true }))
-        .map(|i| format!("    std::sync::LazyLock::force(&{});\n", i.static_name))
+        .filter_map(|v| ctx.ann.globals.get(v).map(|i| (v, i)))
+        .filter(|(_, i)| matches!(i.storage, almide_ir::top_let_storage::TopLetStorage::Lazy { eager_force: true }))
+        .map(|(v, i)| if top_let_is_thread_local(ctx, &ctx.var_table.get(*v).ty) {
+            format!("    let _ = &*{};\n", i.static_name)
+        } else {
+            format!("    std::sync::LazyLock::force(&{});\n", i.static_name)
+        })
         .collect();
     if is_rust_effect_main {
         format!("{}\n\nfn main() {{\n{}{}{}    if let Err(__almide_err) = __almide_main() {{\n        almide_stdout_finish();\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines)

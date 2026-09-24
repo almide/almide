@@ -255,7 +255,9 @@ fn main() -> Unit = {
 
 ### `math.choose(n: Int, k: Int) -> Int`
 
-Return the binomial coefficient C(n, k) = n! / (k! * (n-k)!).
+Return the binomial coefficient C(n, k) = n! / (k! * (n-k)!), exactly whenever it fits in an
+Int (`choose(62, 31)` = 465428353255261088); a larger result wraps modulo 2^64 like every Int
+product. `k < 0` or `k > n` gives 0.
 
 ```almd run
 fn main() -> Unit = {
@@ -268,7 +270,8 @@ fn main() -> Unit = {
 
 ### `math.log_gamma(x: Float) -> Float`
 
-Return the natural logarithm of the gamma function at x.
+Return `ln|Γ(x)|`, the natural logarithm of the absolute gamma function, on the whole real
+line (negative non-integers included). The non-positive integers are poles and give `inf`.
 
 ```almd run
 fn main() -> Unit = {
@@ -284,28 +287,96 @@ fn main() -> Unit = {
 ## Signature index (23 functions)
 
 ```
+// Magnitude of n; min_value wraps to itself.
+// @since 0.5.0 or earlier
 math.abs(n: Int) -> Int
+
+// Arctangent in radians, within -pi/2..pi/2.
+// @since 0.30.0 or earlier
 math.atan(x: Float) -> Float
+
+// Binomial n over k; 0 if k < 0 or k > n; overflow wraps.
+// @since 0.5.13 or earlier
 math.choose(n: Int, k: Int) -> Int
+
+// Cosine of x radians; NaN for infinite x.
+// @since 0.5.0 or earlier
 math.cos(x: Float) -> Float
+
+// Euler's number, 2.718281828459045.
+// @since 0.5.0 or earlier
 math.e() -> Float
+
+// e to the x; overflows to inf above ~709.78.
+// @since 0.5.0 or earlier
 math.exp(x: Float) -> Float
+
+// Product 1..n; 1 for n <= 0; wraps past 20.
+// @since 0.5.13 or earlier
 math.factorial(n: Int) -> Int
+
+// Greater; a NaN operand is ignored; 0.0 > -0.0.
+// @since 0.5.13 or earlier
 math.fmax(a: Float, b: Float) -> Float
+
+// Lesser; a NaN operand is ignored; -0.0 < 0.0.
+// @since 0.5.13 or earlier
 math.fmin(a: Float, b: Float) -> Float
+
+// base to the exp; NaN for negative base, fractional exp.
+// @since 0.5.13 or earlier
 math.fpow(base: Float, exp: Float) -> Float
+
+// Natural log; -inf at 0, NaN for negative x.
+// @since 0.5.0 or earlier
 math.log(x: Float) -> Float
+
+// Base-10 log; -inf at 0, NaN for negative x.
+// @since 0.5.13 or earlier
 math.log10(x: Float) -> Float
+
+// Base-2 log; -inf at 0, NaN for negative x.
+// @since 0.5.13 or earlier
 math.log2(x: Float) -> Float
+
+// ln|Gamma(x)| on the whole line; inf at the poles.
+// @since 0.5.13 or earlier
 math.log_gamma(x: Float) -> Float
+
+// Greater of a and b.
+// @since 0.5.0 or earlier
 math.max(a: Int, b: Int) -> Int
+
+// Lesser of a and b.
+// @since 0.5.0 or earlier
 math.min(a: Int, b: Int) -> Int
+
+// The circle constant, 3.141592653589793.
+// @since 0.5.0 or earlier
 math.pi() -> Float
+
+// base to the exp, wrapping; negative exp aborts.
+// @since 0.5.0 or earlier
 math.pow(base: Int, exp: Int) -> Int
+
+// -1, 0 or 1 by the sign of n.
+// @since 0.5.13 or earlier
 math.sign(n: Int) -> Int
+
+// Sine of x radians; NaN for infinite x.
+// @since 0.5.0 or earlier
 math.sin(x: Float) -> Float
+
+// Square root; NaN below 0, -0.0 stays -0.0.
+// @since 0.5.0 or earlier
 math.sqrt(x: Float) -> Float
+
+// Tangent of x radians; NaN for infinite x.
+// @since 0.5.0 or earlier
 math.tan(x: Float) -> Float
+
+// Hyperbolic tangent in -1..1; inf gives 1.0.
+// @since 0.30.0 or earlier
 math.tanh(x: Float) -> Float
 ```
 

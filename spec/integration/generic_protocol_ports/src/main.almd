@@ -1,0 +1,22 @@
+import self.adapters
+import self.domain
+import self.service
+
+effect fn main() -> Unit = {
+  var repo = adapters.empty()
+  service.register(repo, 1, "ada")
+  service.register(repo, 2, "lin")
+  service.register(repo, 1, "ada lovelace")
+  println(service.describe(repo, 1))
+  println(service.describe(repo, 3))
+  println(int.to_string(repo.count()))
+  match service.lookup(repo, domain.UserId { value: 2 }) {
+    some(u) => println(u.name),
+    none => println("none"),
+  }
+  println(service.require(repo, 2)!)
+  match service.require(repo, 9) {
+    ok(n) => println(n),
+    err(e) => println("error: ${e}"),
+  }
+}

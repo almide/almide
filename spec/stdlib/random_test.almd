@@ -31,6 +31,16 @@ effect fn rand_float_unit_range() -> Result[Bool, String] = {
   ok(f >= 0.0 and f < 1.0)
 }
 
+// [0, 1) is the 53-bit construction on both legs (#2495): native used to
+// divide by u64::MAX as f64, which rounds to 2^64 and let the top draws
+// reach exactly 1.0. Not observable by sampling; the construction is pinned
+// by runtime/rs/src/random.rs's unit test, this is the sampled floor.
+effect fn rand_float_many_below_one(n: Int, acc: Bool) -> Result[Bool, String] = if n == 0 then ok(acc)
+else {
+  let f = random.float()
+  rand_float_many_below_one(n - 1, acc and f >= 0.0 and f < 1.0)
+}
+
 effect fn rand_float_multiple() -> Result[Bool, String] = {
   let a = random.float()
   let b = random.float()
@@ -110,6 +120,23 @@ test "random.int repeated all in range" {
 
 test "random.float in unit range" {
   assert_eq(rand_float_unit_range(), ok(true))
+}
+
+test "random.float stays below 1.0 over many draws (#2495)" {
+  assert_eq(rand_float_many_below_one(2000, true), ok(true))
+}
+
+// The construction's TOP value, deterministically: both legs scale 53 bits by
+// 2^-53, so the largest float the draw can produce is (2^53-1)/2^53, which is
+// below 1.0. Sampling cannot reach it (p ~ 1e-16 per call), so the boundary is
+// asserted on the arithmetic itself. The native leg used to divide by
+// u64::MAX as f64 — 2^64 after rounding — and the top 1024 u64 draws each came
+// out exactly 1.0.
+test "the 53-bit float construction tops out below 1.0 (#2495)" {
+  let top = int.to_float(9007199254740991) / 9007199254740992.0
+  assert(top < 1.0)
+  assert(top > 0.9999999999999)
+  assert(int.to_float(0) / 9007199254740992.0 == 0.0)
 }
 
 test "random.float multiple calls succeed" {

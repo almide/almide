@@ -138,8 +138,10 @@ fn __sg_cell(xrow_h: Int, wg: List[List[Float]], wu: List[List[Float]], j: Int, 
   let wuj = prim.load64(prim.handle(wu) + 12 + j * 8)
   let g = __sg_dot(xrow_h, wgj, d_in, 0, 0.0)
   let u = __sg_dot(xrow_h, wuj, d_in, 0, 0.0)
-  let negg = float.max(float.min(0.0 - g, 40.0), -40.0)
-  let sig = 1.0 / (1.0 + __fast_exp(negg))
+  // native's sigmoid (matrix.rs almide_rt_matrix_swiglu_gate): 1 / (1 + exp(-g))
+  // through the vendored libm exp — the clamped fast-exp this used answered
+  // differently from native in the last bits, and past |g| = 40 by far more.
+  let sig = 1.0 / (1.0 + math.exp(-g))
   (g * sig) * u
 }
 
@@ -156,6 +158,49 @@ else {
   let _c = __sg_row_cells(prim.handle(row), xrow_h, wg, wu, d_out, d_in, 0)
   prim.store_str(ho + 12 + i * 8, row)
   __sg_rows(ho, x, wg, wu, r, d_out, d_in, i + 1)
+}
+
+// ── silu_mul: out[i][j] = a·σ(a)·b, cols zip-truncated per row ──
+// native (matrix_p2.rs almide_rt_matrix_silu_mul): EQUAL shapes run
+// almide-kernel's silu_mul — the canonical fast-exp above, bit for bit; a shape
+// mismatch is its ragged fallback through libm exp. (It used libm exp for both,
+// "within ~1e-7 of the kernel" — last-bit different from native on every input.)
+fn __silu_row(dh: Int, ah: Int, bh: Int, n: Int, fast: Bool, j: Int) -> Int = if j >= n then 0
+else {
+  let x = prim.ffrombits(prim.load64(ah + 12 + j * 8))
+  let y = prim.ffrombits(prim.load64(bh + 12 + j * 8))
+  let e = if fast then __fast_exp(-x) else math.exp(-x)
+  let sig = 1.0 / (1.0 + e)
+  prim.store64(dh + 12 + j * 8, prim.fbits(x * sig * y))
+  __silu_row(dh, ah, bh, n, fast, j + 1)
+}
+
+fn __silu_rows(ho: Int, ha: Int, hb: Int, n: Int, fast: Bool, i: Int) -> Int = if i >= n then 0
+else {
+  let ar = prim.load64(ha + 12 + i * 8)
+  let br = prim.load64(hb + 12 + i * 8)
+  let ca = prim.load32(ar + 4)
+  let cb = prim.load32(br + 4)
+  let c = if ca < cb then ca else cb
+  let row = prim.alloc_list_f64(c)
+  let _f = __silu_row(prim.handle(row), ar, br, c, fast, 0)
+  prim.store_str(ho + 12 + i * 8, row)
+  __silu_rows(ho, ha, hb, n, fast, i + 1)
+}
+
+fn matrix_silu_mul(a: List[List[Float]], b: List[List[Float]]) -> List[List[Float]] = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  let n = if la < lb then la else lb
+  // native's fast path: `a.rows == b.rows && a.cols == b.cols` (cols = row 0's)
+  let ca = if la == 0 then 0 else prim.load32(prim.load64(ha + 12) + 4)
+  let cb = if lb == 0 then 0 else prim.load32(prim.load64(hb + 12) + 4)
+  let fast = la == lb and ca == cb
+  let out: List[List[Float]] = prim.alloc_list_str(n)
+  let _x = __silu_rows(prim.handle(out), ha, hb, n, fast, 0)
+  out
 }
 
 // rope_rotate(x, n_heads, head_dim, theta) — RoPE. Per row p (position pos=p), per head h,
@@ -177,9 +222,31 @@ fn matrix_swiglu_gate(x: List[List[Float]], w_gate: List[List[Float]], w_up: Lis
   // clamped-away weight matrix (C-161) gave 4x0 here and 0x0 natively
   // (differential-fuzz, seed 1784965680755102000).
   let rows = if r == 0 or d_out == 0 or up_rows == 0 then 0 else r
+  // Both weights are (d_out, d_in) — the gate/up dots read `w[j][k]` for
+  // k < d_in and j < d_out, so a narrower weight or a shorter `w_up` read
+  // past a row block here (native: a raw index panic). Same order as
+  // native: gate width, up width, up rows.
+  let _g = if rows == 0 then 0
+  else __mxa_shape_guard(w_gate, w_up, d_in, d_out)
   let out: List[List[Float]] = prim.alloc_list_str(rows)
   let _x = __sg_rows(prim.handle(out), x, w_gate, w_up, rows, d_out, d_in, 0)
   out
+}
+
+// The shape precondition (#2481 family), byte-identical to the native
+// `almide_rt_matrix_shape_eq`: two extents a kernel indexes against each
+// other must be EQUAL, or the call aborts in the unified T6 form.
+fn __mxa_shape_eq(a: Int, b: Int) -> Int = {
+  if a != b then prim.die(prim.handle("Error: matrix shape mismatch\n")) else ()
+  0
+}
+
+fn __mxa_shape_guard(w_gate: List[List[Float]], w_up: List[List[Float]], d_in: Int, d_out: Int) -> Int = {
+  let hg = prim.handle(w_gate)
+  let hu = prim.handle(w_up)
+  let _a = __mxa_shape_eq(prim.load32(prim.load64(hg + 12) + 4), d_in)
+  let _b = __mxa_shape_eq(prim.load32(prim.load64(hu + 12) + 4), d_in)
+  __mxa_shape_eq(prim.load32(hu + 4), d_out)
 }
 
 fn __rope_copy(dh: Int, sh: Int, cols: Int, j: Int) -> Int = if j >= cols then 0
@@ -480,12 +547,35 @@ else {
   __mha_rows(ho, qmat, kmat, vmat, nh, dh, dm, sk, sq, scale, causal, i + 1)
 }
 
+// `k` and `v` are read at `[j][col0 + kk]` for j < sk: a narrower `k`/`v`
+// read past its row block here (the two wasm legs even disagreed on the
+// garbage) where native panicked; a `v` with fewer rows than `k` read past
+// the row-handle array. An EMPTY `k` reads nothing. Same order as native:
+// k width, v rows, v width.
+fn __mha_shape_guard(hk: Int, hv: Int, sk: Int, dm: Int) -> Int = if sk == 0 then 0
+else {
+  let _a = __mxa_shape_eq(prim.load32(prim.load64(hk + 12) + 4), dm)
+  let _b = __mxa_shape_eq(prim.load32(hv + 4), sk)
+  __mxa_shape_eq(prim.load32(prim.load64(hv + 12) + 4), dm)
+}
+
+// The ORDERED half: the causal offset `sk - sq` needs rows(q) <= rows(k).
+// Past it this body masked from a negative offset while native's usize
+// offset underflowed and masked nothing — two exit-0 answers that differed.
+fn __mxa_shape_le(a: Int, b: Int) -> Int = {
+  if a > b then prim.die(prim.handle("Error: matrix shape mismatch\n")) else ()
+  0
+}
+
 fn __mha_impl(q: List[List[Float]], k: List[List[Float]], v: List[List[Float]], n_heads: Int, causal: Bool) -> List[List[Float]] = {
   let hq = prim.handle(q)
   let sq = prim.load32(hq + 4)
   let sk = prim.load32(prim.handle(k) + 4)
   let dm = if sq == 0 then 0 else prim.load32(prim.load64(hq + 12) + 4)
   let nh = __mx_head_count(n_heads)
+  let _g = if sq == 0 then 0
+  else __mha_shape_guard(prim.handle(k), prim.handle(v), sk, dm)
+  let _c = if sq == 0 or not causal then 0 else __mxa_shape_le(sq, sk)
   let dh = dm / nh
   let scale = 1.0 / float.sqrt(int.to_float(dh))
   let out: List[List[Float]] = prim.alloc_list_str(sq)
@@ -588,12 +678,18 @@ else {
 // the form ALS-T6 forbids) while wasm read whatever linear memory held and
 // answered — `from_q1_0_bytes(bytes.new(18), 0, 4, 128)` was exit 101 against a
 // four-row answer (differential fuzz, a matrix_select_rows_oob mutation).
+// #2419: NO row-level bound here. The full loader's rule is per ELEMENT —
+// `__q10_val` answers 0.0 for any k whose 18-byte block lies past `limit`
+// (#1532) — so a `cols` far beyond the buffer still decodes the blocks that
+// ARE present, as native does. The row test (`base + r*row_bytes + row_bytes
+// > limit`) belongs to the SELECTOR (`__q10_sel_rows`, C-229 #1787); applied
+// here it skipped every row whole once `cols/128*18` exceeded the buffer and
+// answered all zeros where native decoded block 0 (the third copy of the
+// same mistake, after the structural leg's `lower_matrix_q1_0`).
 fn __q10_rows(ho: Int, base: Int, limit: Int, rows: Int, cols: Int, r: Int) -> Int = if r >= rows then 0
 else {
-  let row_bytes = cols / 128 * 18
   let row = prim.alloc_list_f64(cols)
-  let _c = if base + r * row_bytes + row_bytes > limit then __q8_zfill(prim.handle(row), cols, 0)
-  else __q10_row(prim.handle(row), base, limit, r * cols, cols, 0)
+  let _c = __q10_row(prim.handle(row), base, limit, r * cols, cols, 0)
   prim.store_str(ho + 12 + r * 8, row)
   __q10_rows(ho, base, limit, rows, cols, r + 1)
 }

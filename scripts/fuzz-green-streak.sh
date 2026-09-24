@@ -22,6 +22,23 @@
 # scores as failure (the aggregation itself died — that IS evidence).
 # A streak only measures correctness if the thing it counts is correctness.
 #
+# COVERAGE BAR (#2390, under #924's 2026-09-21 ruling): a green verdict over a
+# quarter of the planned fuzz-minutes is a weaker assurance than one over the
+# whole campaign, and the two used to be indistinguishable here. A run now
+# scores `success` only when its verdict concluded success AND the night's
+# `fuzz-night:` record line (read from the verdict job's log) shows >= 75% of
+# the planned fuzz-minutes delivered. Below that it is `partial`; a verdict
+# job whose log carries no record line is `no-record` — unknown is not clean.
+# Shards that did not report are named in the record line; their findings
+# are unknown, not zero, and at >= 75% delivered the night still counts.
+# The rule is scripts/lib/fuzz-night-line.sh (`fuzz_night_score`), shared
+# with scripts/fuzz-track-record.sh.
+#
+# RECLAIMED IS NOT UNRECORDED (#2513): a shard the runner took uploaded
+# nothing, but its job log still carries the seconds it fuzzed and the findings
+# it had by then, so every `missing=` shard is read back out of its log before
+# the night is scored. `FUZZ_NIGHT_RECOVER=0` scores the lines as written.
+#
 # With --update, the dated ledger at
 # research/benchmark/fuzz-green/README.md is refreshed (BENCHMARKS.md
 # discipline: measurements are dated, never overwritten silently).
@@ -32,6 +49,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LEDGER_DIR="$ROOT/research/benchmark/fuzz-green"
 LEDGER="$LEDGER_DIR/README.md"
 
+# shellcheck source=scripts/lib/fuzz-night-line.sh
+. "$ROOT/scripts/lib/fuzz-night-line.sh"
+
 REPO="almide/almide"
 VERDICT_JOB="Night verdict"
 LEGACY_JOB="Generative differential fuzz"
@@ -39,25 +59,35 @@ LEGACY_JOB="Generative differential fuzz"
 runs=$(gh api "repos/$REPO/actions/workflows/fuzz-nightly.yml/runs?per_page=60" \
   --jq '.workflow_runs[] | [.id, (.conclusion // .status // "unknown"), .created_at] | @tsv')
 
-# One JSON row per run: the verdict-job conclusion (sharded nights), the
-# single campaign job (legacy nights), else the run conclusion (no verdict
-# ever ran — a whole-run failure, scored as such).
+# One JSON row per run: the verdict-job conclusion qualified by the night's
+# delivered coverage (sharded nights), the single campaign job (legacy
+# nights), else the run conclusion (no verdict ever ran — a whole-run failure,
+# scored as such).
 json="["
 sep=""
 while IFS=$'\t' read -r id run_conc created; do
   [ -n "$id" ] || continue
   day="${created%%T*}"
   jobs=$(gh api "repos/$REPO/actions/runs/$id/jobs?per_page=100" \
-    --jq '[.jobs[] | {name, conclusion}]' 2>/dev/null || echo '[]')
-  v=$(printf '%s' "$jobs" | python3 -c '
-import json, sys
-jobs = json.load(sys.stdin)
-for want in ("'"$VERDICT_JOB"'", "'"$LEGACY_JOB"'"):
-    for j in jobs:
-        if j["name"] == want:
-            print(j["conclusion"] or "unknown"); raise SystemExit
-print("")')
-  [ -n "$v" ] || v="$run_conc"
+    --jq '[.jobs[] | {id, name, conclusion}]' 2>/dev/null || echo '[]')
+  vjob=$(jq -r "[.[] | select(.name == \"$VERDICT_JOB\")][0] // empty | \"\(.id)\t\(.conclusion // \"unknown\")\"" <<<"$jobs")
+  if [ -n "$vjob" ]; then
+    IFS=$'\t' read -r vid vconc <<<"$vjob"
+    log=$(gh api "repos/$REPO/actions/jobs/$vid/logs" 2>/dev/null || true)
+    line=$(fuzz_night_line <(printf '%s\n' "$log"))
+    # Same recovery the track record applies (#2513), so the two meters cannot
+    # disagree about what a night delivered. Only nights with a `missing=` list
+    # cost anything: one API call per shard that was reclaimed.
+    [ "${FUZZ_NIGHT_RECOVER:-1}" = "0" ] || line=$(fuzz_night_recover "$REPO" "$jobs" "$line" "$day run $id")
+    IFS=$'\t' read -r _full green _coverage _text <<<"$(fuzz_night_score "$vconc" "$line")"
+    if [ "$green" -eq 1 ]; then v="success"
+    elif [ "$vconc" != "success" ]; then v="$vconc"
+    elif [ -z "$line" ]; then v="no-record"
+    else v="partial"; fi
+  else
+    v=$(jq -r "[.[] | select(.name == \"$LEGACY_JOB\") | (.conclusion // \"unknown\")][0] // empty" <<<"$jobs")
+    [ -n "$v" ] || v="$run_conc"
+  fi
   json="$json$sep{\"c\": \"$v\", \"d\": \"$day\"}"
   sep=","
 done <<< "$runs"
@@ -99,7 +129,9 @@ if [ "${1:-}" = "--update" ]; then
         echo "The metric a mission-critical auditor reads: not \"how fast do they fix"
         echo "it\" but \"how long has it stayed unbroken\". A calendar day is CLEAN only"
         echo "when every Fuzz (nightly) run that day delivered a NIGHT VERDICT that"
-        echo "concluded success (findings fail it; a reclaimed shard does not); any"
+        echo "concluded success over at least 75% of the planned fuzz-minutes (findings"
+        echo "fail it; a reclaimed shard does not, until the night falls under the 75%"
+        echo "line — #924's ruling, read from the \`fuzz-night:\` record line); any"
         echo "failure breaks the streak; a day without a run neither grows nor resets it."
         echo "First milestone: **90 consecutive clean days**."
         echo

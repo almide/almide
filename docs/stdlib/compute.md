@@ -114,3 +114,35 @@ effect fn main() -> Unit = {
 `almide run --time-report` prints a program's deterministic time next to the
 measured wall clock (`time: 0.15ms deterministic (≈38.7ms wall here)`) — the
 two are different clocks and never claim to be the same quantity.
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (6 functions)
+
+```
+// n nanoseconds of deterministic compute time; negative n aborts.
+// @since 0.51.0 or earlier
+compute.ns(n: Int) -> Compute
+
+// n microseconds of deterministic compute time; negative n aborts.
+// @since 0.51.0 or earlier
+compute.us(n: Int) -> Compute
+
+// n milliseconds of deterministic compute time; negative n aborts.
+// @since 0.51.0 or earlier
+compute.ms(n: Int) -> Compute
+
+// n seconds of deterministic compute time; negative n aborts.
+// @since 0.51.0 or earlier
+compute.s(n: Int) -> Compute
+
+// n minutes of deterministic compute time; negative n aborts.
+// @since 0.51.0 or earlier
+compute.min(n: Int) -> Compute
+
+// n hours of deterministic compute time; negative n aborts.
+// @since 0.51.0 or earlier
+compute.h(n: Int) -> Compute
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

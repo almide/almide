@@ -22,3 +22,18 @@ test "stringify object with newline value" {
     err(_) => assert(false),
   }
 }
+
+// #2499 — a non-finite Float has no JSON spelling: it stringifies as `null`
+// (compact, pretty and value.stringify alike) and the text parses back.
+test "stringify writes null for NaN and infinities" {
+  let nan = 0.0 / 0.0
+  let inf = 1.0 / 0.0
+  let v = value.array([value.float(nan), value.float(inf), value.float(0.0 - inf), value.float(1.5)])
+  assert_eq(json.stringify(v), "[null,null,null,1.5]")
+  assert_eq(value.stringify(value.object([("a", value.float(nan))])), "{\"a\":null}")
+  assert_eq(json.stringify_pretty(value.float(inf)), "null")
+  match json.parse(json.stringify(v)) {
+    ok(back) => assert_eq(json.stringify(back), "[null,null,null,1.5]"),
+    err(e) => assert(false, "stringify output must parse: " + e),
+  }
+}

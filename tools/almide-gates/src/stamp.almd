@@ -20,7 +20,9 @@ effect fn sha16(path: String) -> String = {
   else string.slice(out, 0, 16)
 }
 
-effect fn which(cmd: String) -> String = run("command", ["-v", cmd])!
+// `command` is a shell builtin (macOS has a /usr/bin/command shim, Linux does not), so it
+// is asked through a shell — the bash original's `command -v` resolves the same way.
+effect fn which(cmd: String) -> String = run("sh", ["-c", "command -v \"$1\"", "_", cmd])!
 
 // `stat -f '%Sm'` (BSD) with the GNU `stat -c '%y'` fallback, as the bash does.
 effect fn mtime(path: String) -> String = {
@@ -57,6 +59,13 @@ effect fn identity(root: String) -> Stamp = {
   }
 }
 
+fn or_na(s: String) -> String = if s == "" then "n/a" else s
+
+test "a tool that is not installed prints n/a, as the callers' pipefail makes the bash do" {
+  assert_eq(or_na(""), "n/a")
+  assert_eq(or_na("rustc 1.96.1"), "rustc 1.96.1")
+}
+
 // The stamp, as the bash prints it. `ok = false` means the caller must abort — the PATH
 // binary and the workspace build disagree, so no measurement taken now would describe the
 // tree being tested, and the stamp stops at the FATAL block exactly as the bash does.
@@ -64,7 +73,12 @@ effect fn toolchain(root: String) -> Stamp = {
   let id = identity(root)!
   let head_lines = ["── toolchain stamp ──"] + id.lines
   if not id.ok then Stamp { ok: false, lines: head_lines } else {
-    // `coqc --version | head -1` — the Rocq banner is multi-line.
+    // `$(tool --version 2>/dev/null || echo n/a)`: a tool that is not installed prints `n/a`.
+    // The coqc line is a PIPELINE (`| head -1` — the Rocq banner is multi-line), so its `||`
+    // only fires under `set -o pipefail`, and every caller of the stamp sets it
+    // (proofs/*.sh) — so `n/a` is what the callers print. The #2163 output-parity diff found
+    // the twin printing an empty field there: the stamp parity test had been invoking the
+    // bash without pipefail, and the twin matched the test's invocation, not the callers'.
     let coq = run("coqc", ["--version"])!
     let head = run("git", ["-C", root, "rev-parse", "--short", "HEAD"])!
     let porcelain = string.trim(run("git", ["-C", root, "status", "--porcelain"])!)
@@ -72,9 +86,9 @@ effect fn toolchain(root: String) -> Stamp = {
     Stamp {
       ok: true,
       lines: head_lines + [
-        "  rustc:    " + run("rustc", ["--version"])!,
-        "  wasmtime: " + run("wasmtime", ["--version"])!,
-        "  coqc:     " + list.get_or(string.split(coq, "\n"), 0, "n/a"),
+        "  rustc:    " + or_na(run("rustc", ["--version"])!),
+        "  wasmtime: " + or_na(run("wasmtime", ["--version"])!),
+        "  coqc:     " + or_na(list.get_or(string.split(coq, "\n"), 0, "")),
         "  tree:     " + head + " " + int.to_string(dirty) + " dirty file(s)",
         "─────────────────────"
       ],

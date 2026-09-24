@@ -11,414 +11,550 @@
 // are SELF-HOSTED across `stdlib/bytes_*.almd`, registered in
 // `crates/almide-mir/src/render_wasm/registry.rs`. (v0 dispatched through
 // `emit_wasm/calls_bytes.rs`, retired in c71eff7b.)
+/// Appends val rounded to f32, BE.
 @intrinsic("almide_rt_bytes_append_f32_be")
-fn append_f32_be(b: Bytes, val: Float) -> Unit = _
+fn append_f32_be(mut b: Bytes, val: Float) -> Unit = _
 
+/// Appends val rounded to f32, LE.
 @intrinsic("almide_rt_bytes_append_f32_le")
-fn append_f32_le(b: Bytes, val: Float) -> Unit = _
+fn append_f32_le(mut b: Bytes, val: Float) -> Unit = _
 
+/// Appends val as 8-byte f64, BE.
 @intrinsic("almide_rt_bytes_append_f64_be")
-fn append_f64_be(b: Bytes, val: Float) -> Unit = _
+fn append_f64_be(mut b: Bytes, val: Float) -> Unit = _
 
+/// Appends val as 8-byte f64, LE.
 @intrinsic("almide_rt_bytes_append_f64_le")
-fn append_f64_le(b: Bytes, val: Float) -> Unit = _
+fn append_f64_le(mut b: Bytes, val: Float) -> Unit = _
 
+/// Appends val's low 16 bits, BE.
 @intrinsic("almide_rt_bytes_append_i16_be")
-fn append_i16_be(b: Bytes, val: Int) -> Unit = _
+fn append_i16_be(mut b: Bytes, val: Int) -> Unit = _
 
+/// Appends val's low 16 bits, LE.
 @intrinsic("almide_rt_bytes_append_i16_le")
-fn append_i16_le(b: Bytes, val: Int) -> Unit = _
+fn append_i16_le(mut b: Bytes, val: Int) -> Unit = _
 
+/// Appends val's low 32 bits, BE.
 @intrinsic("almide_rt_bytes_append_i32_be")
-fn append_i32_be(b: Bytes, val: Int) -> Unit = _
+fn append_i32_be(mut b: Bytes, val: Int) -> Unit = _
 
+/// Appends val's low 32 bits, LE.
 @intrinsic("almide_rt_bytes_append_i32_le")
-fn append_i32_le(b: Bytes, val: Int) -> Unit = _
+fn append_i32_le(mut b: Bytes, val: Int) -> Unit = _
 
+/// Appends val as 8 bytes, BE.
 @intrinsic("almide_rt_bytes_append_i64_be")
-fn append_i64_be(b: Bytes, val: Int) -> Unit = _
+fn append_i64_be(mut b: Bytes, val: Int) -> Unit = _
 
+/// Appends val as 8 bytes, LE.
 @intrinsic("almide_rt_bytes_append_i64_le")
-fn append_i64_le(b: Bytes, val: Int) -> Unit = _
+fn append_i64_le(mut b: Bytes, val: Int) -> Unit = _
 
+/// Appends val's low 16 bits, BE.
 @intrinsic("almide_rt_bytes_append_u16_be")
-fn append_u16_be(b: Bytes, val: Int) -> Unit = _
+fn append_u16_be(mut b: Bytes, val: Int) -> Unit = _
 
+/// Appends val's low 16 bits, LE.
 @intrinsic("almide_rt_bytes_append_u16_le")
-fn append_u16_le(b: Bytes, val: Int) -> Unit = _
+fn append_u16_le(mut b: Bytes, val: Int) -> Unit = _
 
+/// Appends val's low 32 bits, BE.
 @intrinsic("almide_rt_bytes_append_u32_be")
-fn append_u32_be(b: Bytes, val: Int) -> Unit = _
+fn append_u32_be(mut b: Bytes, val: Int) -> Unit = _
 
+/// Appends val's low 32 bits, LE.
 @intrinsic("almide_rt_bytes_append_u32_le")
-fn append_u32_le(b: Bytes, val: Int) -> Unit = _
+fn append_u32_le(mut b: Bytes, val: Int) -> Unit = _
 
+/// Appends val's low 8 bits; 256 becomes 0.
 @intrinsic("almide_rt_bytes_append_u8")
-fn append_u8(b: Bytes, val: Int) -> Unit = _
+fn append_u8(mut b: Bytes, val: Int) -> Unit = _
 
+/// Mutable address of the data; null if empty.
 @intrinsic("almide_rt_bytes_as_mut_ptr")
 @mutating
 fn as_mut_ptr(b: Bytes) -> RawPtr = _
 
+/// Address of the data; null if empty.
 @intrinsic("almide_rt_bytes_as_ptr")
 fn as_ptr(b: Bytes) -> RawPtr = _
 
+/// size-byte pieces, last may be short; [] if size <= 0.
 @intrinsic("almide_rt_bytes_chunks")
 fn chunks(b: Bytes, size: Int) -> List[Bytes] = _
 
+/// Truncates b to length 0 in place.
 @intrinsic("almide_rt_bytes_clear")
-fn clear(b: Bytes) -> Unit = _
+fn clear(mut b: Bytes) -> Unit = _
 
+/// Lexicographic -1, 0 or 1; a prefix sorts first.
 @intrinsic("almide_rt_bytes_cmp")
 fn cmp(a: Bytes, b: Bytes) -> Int = _
 
+/// New Bytes holding a then b.
 @intrinsic("almide_rt_bytes_concat")
 fn concat(a: Bytes, b: Bytes) -> Bytes = _
 
+/// True if pattern occurs in b, or pattern is empty.
 @intrinsic("almide_rt_bytes_contains")
 fn contains(b: Bytes, pattern: Bytes) -> Bool = _
 
+/// Copies len bytes of src into dst; clamped to fit.
 @intrinsic("almide_rt_bytes_copy_from")
-fn copy_from(dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit = _
+fn copy_from(mut dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit = _
 
+/// Writes up to cap bytes to ptr; count, 0 if null.
 @intrinsic("almide_rt_bytes_copy_to_ptr")
 fn copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = _
 
+/// Address of the data as an Int; target-specific.
 @intrinsic("almide_rt_bytes_data_ptr")
 fn data_ptr(b: Bytes) -> Int = _
 
+/// True if b ends with suffix, or suffix is empty.
 @intrinsic("almide_rt_bytes_ends_with")
 fn ends_with(b: Bytes, suffix: Bytes) -> Bool = _
 
+/// True if pos >= len or pos is negative.
 @intrinsic("almide_rt_bytes_eof")
 fn eof(b: Bytes, pos: Int) -> Bool = _
 
+/// Sets every byte to val's low 8 bits in place.
 @intrinsic("almide_rt_bytes_fill")
-fn fill(b: Bytes, val: Int) -> Unit = _
+fn fill(mut b: Bytes, val: Int) -> Unit = _
 
+/// xs as bytes, low 8 bits each; -1 becomes 255.
 @intrinsic("almide_rt_bytes_from_list")
 fn from_list(xs: List[Int]) -> Bytes = _
 
+/// Copy of len bytes at ptr; empty if null or len <= 0.
 @intrinsic("almide_rt_bytes_from_raw_ptr")
 fn from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes = _
 
+/// UTF-8 encoding of s.
 @intrinsic("almide_rt_bytes_from_string")
 fn from_string(s: String) -> Bytes = _
 
+/// Byte at index i, or none when out of range.
 @intrinsic("almide_rt_bytes_get")
 fn get(b: Bytes, i: Int) -> Int? = _
 
+/// Byte at index i, or default when out of range.
 @intrinsic("almide_rt_bytes_get_or")
 fn get_or(b: Bytes, i: Int, default: Int) -> Int = _
 
+/// First offset of pattern, or none; some(0) if empty.
 @intrinsic("almide_rt_bytes_index_of")
 fn index_of(b: Bytes, pattern: Bytes) -> Int? = _
 
+/// Copy with val's low byte at pos, clamped to 0..len.
 @intrinsic("almide_rt_bytes_insert")
 fn insert(b: Bytes, pos: Int, val: Int) -> Bytes = _
 
+/// True when b holds no bytes.
 @intrinsic("almide_rt_bytes_is_empty")
 fn is_empty(b: Bytes) -> Bool = _
 
+/// Whether b is valid UTF-8; true when empty.
 @intrinsic("almide_rt_bytes_is_valid_utf8")
 fn is_valid_utf8(b: Bytes) -> Bool = _
 
+/// Byte count; 0 for an empty buffer.
 @intrinsic("almide_rt_bytes_len")
 fn len(b: Bytes) -> Int = _
 
+/// Pieces split at LF; CR kept; a final LF adds no piece.
 @intrinsic("almide_rt_bytes_lines")
 fn lines(b: Bytes) -> List[Bytes] = _
 
+/// f applied per byte; results cut to low 8 bits.
 @intrinsic("almide_rt_bytes_map_each")
 fn map_each(b: Bytes, f: (Int) -> Int) -> Bytes = _
 
+/// len zero bytes; empty if len <= 0.
 @intrinsic("almide_rt_bytes_new")
 fn new(len: Int) -> Bytes = _
 
+/// Left-padded with val to target_len; as-is if longer.
 @intrinsic("almide_rt_bytes_pad_left")
 fn pad_left(b: Bytes, target_len: Int, val: Int) -> Bytes = _
 
+/// Right-padded with val to target_len; as-is if longer.
 @intrinsic("almide_rt_bytes_pad_right")
 fn pad_right(b: Bytes, target_len: Int, val: Int) -> Bytes = _
 
+/// Appends val's low 8 bits in place.
 @intrinsic("almide_rt_bytes_push")
 fn push(mut b: Bytes, val: Int) -> Unit = _
 
+/// Sets byte i to val's low 8 bits; no-op out of range.
 @intrinsic("almide_rt_bytes_set_at")
 fn set_at(mut b: Bytes, i: Int, val: Int) -> Unit = _
 
+/// Copies src_start..src_end to dst; no-op if it won't fit.
 @intrinsic("almide_rt_bytes_copy_within")
 fn copy_within(mut b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit = _
 
+/// Byte at pos != 0; false if out of range.
 @intrinsic("almide_rt_bytes_read_bool")
 fn read_bool(b: Bytes, pos: Int) -> Bool = _
 
+/// (pos+1, byte != 0); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_bool_at")
 fn read_bool_at(b: Bytes, pos: Int) -> (Int, Bool?) = _
 
+/// f16 LE at pos; 0.0 if out of range.
 @intrinsic("almide_rt_bytes_read_f16_le")
 fn read_f16_le(b: Bytes, pos: Int) -> Float = _
 
+/// (pos+2, f16 LE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_f16_le_at")
 fn read_f16_le_at(b: Bytes, pos: Int) -> (Int, Float?) = _
 
+/// count f16 LE from pos; 0.0 past the end.
 @intrinsic("almide_rt_bytes_read_f16_le_array")
 fn read_f16_le_array(b: Bytes, pos: Int, count: Int) -> List[Float] = _
 
+/// f32 BE at pos; 0.0 if out of range.
 @intrinsic("almide_rt_bytes_read_f32_be")
 fn read_f32_be(b: Bytes, pos: Int) -> Float = _
 
+/// count f32 BE from pos; 0.0 past the end.
 @intrinsic("almide_rt_bytes_read_f32_be_array")
 fn read_f32_be_array(b: Bytes, pos: Int, count: Int) -> List[Float] = _
 
+/// (pos+4, f32 BE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_f32_be_at")
 fn read_f32_be_at(b: Bytes, pos: Int) -> (Int, Float?) = _
 
+/// f32 LE at pos; 0.0 if out of range.
 @intrinsic("almide_rt_bytes_read_f32_le")
 fn read_f32_le(b: Bytes, pos: Int) -> Float = _
 
+/// count f32 LE from pos; 0.0 past the end.
 @intrinsic("almide_rt_bytes_read_f32_le_array")
 fn read_f32_le_array(b: Bytes, pos: Int, count: Int) -> List[Float] = _
 
+/// (pos+4, f32 LE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_f32_le_at")
 fn read_f32_le_at(b: Bytes, pos: Int) -> (Int, Float?) = _
 
+/// f64 BE at pos; 0.0 if out of range.
 @intrinsic("almide_rt_bytes_read_f64_be")
 fn read_f64_be(b: Bytes, pos: Int) -> Float = _
 
+/// count f64 BE from pos; 0.0 past the end.
 @intrinsic("almide_rt_bytes_read_f64_be_array")
 fn read_f64_be_array(b: Bytes, pos: Int, count: Int) -> List[Float] = _
 
+/// (pos+8, f64 BE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_f64_be_at")
 fn read_f64_be_at(b: Bytes, pos: Int) -> (Int, Float?) = _
 
+/// f64 LE at pos; 0.0 if out of range.
 @intrinsic("almide_rt_bytes_read_f64_le")
 fn read_f64_le(b: Bytes, pos: Int) -> Float = _
 
+/// count f64 LE from pos; 0.0 past the end.
 @intrinsic("almide_rt_bytes_read_f64_le_array")
 fn read_f64_le_array(b: Bytes, pos: Int, count: Int) -> List[Float] = _
 
+/// (pos+8, f64 LE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_f64_le_at")
 fn read_f64_le_at(b: Bytes, pos: Int) -> (Int, Float?) = _
 
+/// i16 BE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_i16_be")
 fn read_i16_be(b: Bytes, pos: Int) -> Int = _
 
+/// (pos+2, i16 BE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_i16_be_at")
 fn read_i16_be_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
+/// count i16 BE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_i16_be_array")
 fn read_i16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
+/// i16 LE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_i16_le")
 fn read_i16_le(b: Bytes, pos: Int) -> Int = _
 
+/// (pos+2, i16 LE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_i16_le_at")
 fn read_i16_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
+/// count i16 LE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_i16_le_array")
 fn read_i16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
+/// i32 BE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_i32_be")
 fn read_i32_be(b: Bytes, pos: Int) -> Int = _
 
+/// count i32 BE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_i32_be_array")
 fn read_i32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
+/// (pos+4, i32 BE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_i32_be_at")
 fn read_i32_be_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
+/// i32 LE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_i32_le")
 fn read_i32_le(b: Bytes, pos: Int) -> Int = _
 
+/// count i32 LE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_i32_le_array")
 fn read_i32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
+/// (pos+4, i32 LE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_i32_le_at")
 fn read_i32_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
+/// i64 BE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_i64_be")
 fn read_i64_be(b: Bytes, pos: Int) -> Int = _
 
+/// count i64 BE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_i64_be_array")
 fn read_i64_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
+/// (pos+8, i64 BE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_i64_be_at")
 fn read_i64_be_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
+/// i64 LE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_i64_le")
 fn read_i64_le(b: Bytes, pos: Int) -> Int = _
 
+/// count i64 LE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_i64_le_array")
 fn read_i64_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
+/// (pos+8, i64 LE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_i64_le_at")
 fn read_i64_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
+/// Up to count u32-LE-prefixed strings; stops if cut off.
 @intrinsic("almide_rt_bytes_read_length_prefixed_strings_le")
 fn read_length_prefixed_strings_le(b: Bytes, pos: Int, count: Int) -> List[String] = _
 
+/// len bytes at pos, lossy UTF-8; empty if out of range.
 @intrinsic("almide_rt_bytes_read_string_at")
 fn read_string_at(b: Bytes, pos: Int, len: Int) -> String = _
 
+/// String after a u32 BE length at pos; empty if cut off.
 @intrinsic("almide_rt_bytes_read_string_be")
 fn read_string_be(b: Bytes, pos: Int) -> String = _
 
+/// Cursor form of read_string_be; (pos, none) if cut off.
 @intrinsic("almide_rt_bytes_read_string_be_at")
 fn read_string_be_at(b: Bytes, pos: Int) -> (Int, String?) = _
 
+/// u16 BE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_u16_be")
 fn read_u16_be(b: Bytes, pos: Int) -> Int = _
 
+/// (pos+2, u16 BE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_u16_be_at")
 fn read_u16_be_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
+/// count u16 BE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_u16_be_array")
 fn read_u16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
+/// u16 LE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_u16_le")
 fn read_u16_le(b: Bytes, pos: Int) -> Int = _
 
+/// count u16 LE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_u16_le_array")
 fn read_u16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
+/// (pos+2, u16 LE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_u16_le_at")
 fn read_u16_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
+/// u32 BE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_u32_be")
 fn read_u32_be(b: Bytes, pos: Int) -> Int = _
 
+/// count u32 BE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_u32_be_array")
 fn read_u32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
+/// (pos+4, u32 BE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_u32_be_at")
 fn read_u32_be_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
+/// u32 LE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_u32_le")
 fn read_u32_le(b: Bytes, pos: Int) -> Int = _
 
+/// count u32 LE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_u32_le_array")
 fn read_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
+/// (pos+4, u32 LE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_u32_le_at")
 fn read_u32_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
+/// Byte at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_u8")
 fn read_u8(b: Bytes, pos: Int) -> Int = _
 
+/// (pos+1, byte); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_u8_at")
 fn read_u8_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
+/// Copy without the byte at pos; as-is if out of range.
 @intrinsic("almide_rt_bytes_remove_at")
 fn remove_at(b: Bytes, pos: Int) -> Bytes = _
 
+/// b concatenated n times; empty if n <= 0.
 @intrinsic("almide_rt_bytes_repeat")
 fn repeat(b: Bytes, n: Int) -> Bytes = _
 
+/// Copy with the byte order reversed.
 @intrinsic("almide_rt_bytes_reverse")
 fn reverse(b: Bytes) -> Bytes = _
 
+/// Copy with byte i set to val; as-is if out of range.
 @intrinsic("almide_rt_bytes_set")
 fn set(b: Bytes, i: Int, val: Int) -> Bytes = _
 
+/// Writes f32 BE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_f32_be")
-fn set_f32_be(b: Bytes, pos: Int, val: Float) -> Unit = _
+fn set_f32_be(mut b: Bytes, pos: Int, val: Float) -> Unit = _
 
+/// Writes f32 LE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_f32_le")
-fn set_f32_le(b: Bytes, pos: Int, val: Float) -> Unit = _
+fn set_f32_le(mut b: Bytes, pos: Int, val: Float) -> Unit = _
 
+/// Writes f64 BE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_f64_be")
-fn set_f64_be(b: Bytes, pos: Int, val: Float) -> Unit = _
+fn set_f64_be(mut b: Bytes, pos: Int, val: Float) -> Unit = _
 
+/// Writes f64 LE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_f64_le")
-fn set_f64_le(b: Bytes, pos: Int, val: Float) -> Unit = _
+fn set_f64_le(mut b: Bytes, pos: Int, val: Float) -> Unit = _
 
+/// Writes i16 BE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_i16_be")
-fn set_i16_be(b: Bytes, pos: Int, val: Int) -> Unit = _
+fn set_i16_be(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
+/// Writes i16 LE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_i16_le")
-fn set_i16_le(b: Bytes, pos: Int, val: Int) -> Unit = _
+fn set_i16_le(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
+/// Writes i32 BE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_i32_be")
-fn set_i32_be(b: Bytes, pos: Int, val: Int) -> Unit = _
+fn set_i32_be(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
+/// Writes i32 LE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_i32_le")
-fn set_i32_le(b: Bytes, pos: Int, val: Int) -> Unit = _
+fn set_i32_le(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
+/// Writes i64 BE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_i64_be")
-fn set_i64_be(b: Bytes, pos: Int, val: Int) -> Unit = _
+fn set_i64_be(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
+/// Writes i64 LE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_i64_le")
-fn set_i64_le(b: Bytes, pos: Int, val: Int) -> Unit = _
+fn set_i64_le(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
+/// Writes u16 BE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_u16_be")
-fn set_u16_be(b: Bytes, pos: Int, val: Int) -> Unit = _
+fn set_u16_be(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
+/// Writes u16 LE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_u16_le")
-fn set_u16_le(b: Bytes, pos: Int, val: Int) -> Unit = _
+fn set_u16_le(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
+/// Writes u32 BE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_u32_be")
-fn set_u32_be(b: Bytes, pos: Int, val: Int) -> Unit = _
+fn set_u32_be(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
+/// Writes u32 LE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_u32_le")
-fn set_u32_le(b: Bytes, pos: Int, val: Int) -> Unit = _
+fn set_u32_le(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
+/// Writes val's low byte at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_u8")
-fn set_u8(b: Bytes, pos: Int, val: Int) -> Unit = _
+fn set_u8(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
+/// pos + n, capped at len.
 @intrinsic("almide_rt_bytes_skip")
 fn skip(b: Bytes, pos: Int, n: Int) -> Int = _
 
+/// Offset past count u32-LE-prefixed records.
 @intrinsic("almide_rt_bytes_skip_length_prefixed_le")
 fn skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int = _
 
+/// Copy of start..end capped at len; empty if start >= end.
 @intrinsic("almide_rt_bytes_slice")
 fn slice(b: Bytes, start: Int, end: Int) -> Bytes = _
 
+/// Pieces between sep matches; [b] for an empty sep.
 @intrinsic("almide_rt_bytes_split")
 fn split(b: Bytes, sep: Bytes) -> List[Bytes] = _
 
+/// True if b begins with prefix, or prefix is empty.
 @intrinsic("almide_rt_bytes_starts_with")
 fn starts_with(b: Bytes, prefix: Bytes) -> Bool = _
 
+/// (pos+n, n-byte copy); (pos, none) if out of range.
 @intrinsic("almide_rt_bytes_take_at")
 fn take_at(b: Bytes, pos: Int, n: Int) -> (Int, Bytes?) = _
 
+/// Each byte as an Int in 0..255.
 @intrinsic("almide_rt_bytes_to_list")
 fn to_list(b: Bytes) -> List[Int] = _
 
+/// UTF-8 decode; err "invalid UTF-8: ..." if bad.
 @intrinsic("almide_rt_bytes_to_string")
 fn to_string(b: Bytes) -> Result[String, String] = _
 
+/// UTF-8 decode; invalid sequences become U+FFFD.
 @intrinsic("almide_rt_bytes_to_string_lossy")
 fn to_string_lossy(b: Bytes) -> String = _
 
+/// Appends 1 for true, 0 for false.
 @intrinsic("almide_rt_bytes_write_bool")
-fn write_bool(b: Bytes, val: Bool) -> Unit = _
+fn write_bool(mut b: Bytes, val: Bool) -> Unit = _
 
+/// Appends val as 8-byte f64, BE.
 @intrinsic("almide_rt_bytes_write_f64_be")
-fn write_f64_be(b: Bytes, val: Float) -> Unit = _
+fn write_f64_be(mut b: Bytes, val: Float) -> Unit = _
 
+/// Appends val as 8 bytes, BE.
 @intrinsic("almide_rt_bytes_write_i64_be")
-fn write_i64_be(b: Bytes, val: Int) -> Unit = _
+fn write_i64_be(mut b: Bytes, val: Int) -> Unit = _
 
+/// Appends s after a u32 BE byte-length prefix.
 @intrinsic("almide_rt_bytes_write_string_be")
-fn write_string_be(b: Bytes, s: String) -> Unit = _
+fn write_string_be(mut b: Bytes, s: String) -> Unit = _
 
+/// Appends val's low 32 bits, BE.
 @intrinsic("almide_rt_bytes_write_u32_be")
-fn write_u32_be(b: Bytes, val: Int) -> Unit = _
+fn write_u32_be(mut b: Bytes, val: Int) -> Unit = _
 
+/// Appends val's low 8 bits; 256 becomes 0.
 @intrinsic("almide_rt_bytes_write_u8")
-fn write_u8(b: Bytes, val: Int) -> Unit = _
+fn write_u8(mut b: Bytes, val: Int) -> Unit = _
 
+/// Bytewise XOR, as long as the shorter input.
 @intrinsic("almide_rt_bytes_xor")
 fn xor(a: Bytes, b: Bytes) -> Bytes = _
 
 // Arena memory management (WASM only — no-op on Rust target).
 // heap_save returns a checkpoint; heap_restore frees all allocations above it.
+/// Opaque arena checkpoint; currently always 0.
 @intrinsic("almide_rt_bytes_heap_save")
 fn heap_save() -> Int = _
 
+/// Restores a heap_save checkpoint; currently a no-op.
 @intrinsic("almide_rt_bytes_heap_restore")
 fn heap_restore(checkpoint: Int) -> Unit = _
 
@@ -440,40 +576,53 @@ fn heap_restore(checkpoint: Int) -> Unit = _
 //   - `set[T]` / `append[T]` typed families
 //   - `FixedWidthInteger` / `BinaryFloatingPoint` protocols once the
 //     generic-dispatch infrastructure lands
+/// Byte order: LittleEndian or BigEndian.
 type Endian = | LittleEndian | BigEndian
 
+/// UInt16 at offset; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_uint16")
 fn read_uint16(b: Bytes, offset: Int, endian: Endian) -> UInt16 = _
 
+/// UInt32 at offset; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_uint32")
 fn read_uint32(b: Bytes, offset: Int, endian: Endian) -> UInt32 = _
 
+/// Int32 at offset; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_int32")
 fn read_int32(b: Bytes, offset: Int, endian: Endian) -> Int32 = _
 
+/// Float32 at offset; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_float32")
 fn read_float32(b: Bytes, offset: Int, endian: Endian) -> Float32 = _
 
+/// Appends value as 2 bytes in endian order.
 @intrinsic("almide_rt_bytes_write_uint16")
-fn write_uint16(b: Bytes, value: UInt16, endian: Endian) -> Unit = _
+fn write_uint16(mut b: Bytes, value: UInt16, endian: Endian) -> Unit = _
 
+/// Appends value as 4 bytes in endian order.
 @intrinsic("almide_rt_bytes_write_uint32")
-fn write_uint32(b: Bytes, value: UInt32, endian: Endian) -> Unit = _
+fn write_uint32(mut b: Bytes, value: UInt32, endian: Endian) -> Unit = _
 
+/// Appends value as 4 bytes in endian order.
 @intrinsic("almide_rt_bytes_write_int32")
-fn write_int32(b: Bytes, value: Int32, endian: Endian) -> Unit = _
+fn write_int32(mut b: Bytes, value: Int32, endian: Endian) -> Unit = _
 
+/// Appends value as 4 bytes in endian order.
 @intrinsic("almide_rt_bytes_write_float32")
-fn write_float32(b: Bytes, value: Float32, endian: Endian) -> Unit = _
+fn write_float32(mut b: Bytes, value: Float32, endian: Endian) -> Unit = _
 
+/// Writes value at offset; no-op out of range.
 @intrinsic("almide_rt_bytes_set_uint16")
-fn set_uint16(b: Bytes, offset: Int, value: UInt16, endian: Endian) -> Unit = _
+fn set_uint16(mut b: Bytes, offset: Int, value: UInt16, endian: Endian) -> Unit = _
 
+/// Writes value at offset; no-op out of range.
 @intrinsic("almide_rt_bytes_set_uint32")
-fn set_uint32(b: Bytes, offset: Int, value: UInt32, endian: Endian) -> Unit = _
+fn set_uint32(mut b: Bytes, offset: Int, value: UInt32, endian: Endian) -> Unit = _
 
+/// Writes value at offset; no-op out of range.
 @intrinsic("almide_rt_bytes_set_int32")
-fn set_int32(b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit = _
+fn set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit = _
 
+/// Writes value at offset; no-op out of range.
 @intrinsic("almide_rt_bytes_set_float32")
-fn set_float32(b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit = _
+fn set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit = _

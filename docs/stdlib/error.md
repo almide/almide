@@ -53,8 +53,16 @@ caused by: file not found
 ## Signature index (3 functions)
 
 ```
+// outer + "\ncaused by: " + cause.
+// @since 0.6.0 or earlier
 error.chain(outer: String, cause: String) -> String
+
+// err(e) becomes err("msg: e"); ok unchanged.
+// @since 0.6.0 or earlier
 error.context(r: Result[T, String], msg: String) -> Result[T, String]
+
+// Error text of r; "" when r is ok.
+// @since 0.6.0 or earlier
 error.message(r: Result[T, String]) -> String
 ```
 

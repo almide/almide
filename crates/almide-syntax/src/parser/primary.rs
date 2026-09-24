@@ -107,6 +107,9 @@ impl Parser {
         if self.check(TokenType::Fan) {
             return Some(self.parse_fan_primary());
         }
+        if self.at_scoped_block_head() {
+            return Some(self.parse_scoped_block());
+        }
         Option::None
     }
 
@@ -378,7 +381,7 @@ impl Parser {
         let span = Some(self.current_span());
         self.advance(); // skip 'while'
         self.skip_newlines();
-        let cond = self.parse_expr()?;
+        let cond = self.parse_block_head(|p| p.parse_expr())?;
         self.skip_newlines();
         // Detect `while cond do ... done` (Pascal/Ruby). Almide uses `{ ... }`.
         // Match `do` whether on the same line as `cond` or the next line —
@@ -440,7 +443,7 @@ impl Parser {
             (self.expect_ident()?, None)
         };
         self.expect(TokenType::In)?;
-        let iterable = self.parse_expr()?;
+        let iterable = self.parse_block_head(|p| p.parse_expr())?;
         let open_for = self.current().clone();
         self.expect(TokenType::LBrace)?;
         let mut stmts = Vec::new();

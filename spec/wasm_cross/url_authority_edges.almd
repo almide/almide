@@ -1,0 +1,45 @@
+// @contract: C-361
+// url.parse validates the HOST, not the authority (#2490). `http://:8` used
+// to parse with `host = ""` because the empty-host check ran on the
+// authority `:8`, which is non-empty; the check now runs on the host after
+// the `host:port` split. The rest of the authority gets the same treatment:
+// a port must be ASCII digits (`+80`, `-0`, ` 80` were int.parse-accepted
+// before), userinfo and an IPv6 literal — both documented out of scope —
+// are refused by name instead of being read as a host, and a host outside
+// RFC 3986's reg-name characters (a space) is refused. Every accepted URL
+// still round-trips through to_string.
+import url
+
+fn show(s: String) -> String = match url.parse(s) {
+  ok(u) => "ok host='${u.host}' port=${u.port} path='${u.path}' back=${url.to_string(u) == s}",
+  err(e) => "err ${e}",
+}
+
+fn main() -> Unit = {
+  for s in [
+    "http://:8",
+    "http://:",
+    "http://h:",
+    "http://h:+80",
+    "http://h:-0",
+    "http://h: 80",
+    "http://h:08",
+    "http://h:80:90",
+    "http://h:65535",
+    "http://h:65536",
+    "http://user@host/p",
+    "http://u:p@host/p",
+    "http://[::1]:8080/",
+    "http://[fe80]/",
+    "http://a b/",
+    "http://ex-am.ple_~!$&'()*+,;=%41:80/p?q#f",
+    "http://?q",
+    "http://#f",
+    "http://",
+    "http:///path",
+    "://h",
+    "HTTP://H:0"
+  ] {
+    println("${s} => ${show(s)}")
+  }
+}

@@ -128,4 +128,7 @@ if ! git diff --quiet; then
   echo "FAIL: tree dirty after gate — a revert failed" >&2
   exit 2
 fi
+# The per-mutant `ok:` / `FAIL:` lines above are what scripts/gen-mutation-score.sh
+# reads to stamp proofs/mutation-score.toml (#2152 item 5); keep their shape.
+echo "mutation-gate: shard $SHARD/$SHARDS scope=$SCOPE done, exit $fail"
 exit $fail

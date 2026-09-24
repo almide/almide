@@ -1,0 +1,73 @@
+// @contract: C-226, C-033
+// `list.push(h.f, v)` and `list.clear(h.f)` where `h` is a record var or a
+// `mut` record parameter: the builder idiom — accumulate into a list field —
+// builds and runs on the wasm leg, and the caller's data is mutated through
+// the `mut` parameter exactly as on native (C-226).
+//
+// Before #2411 the structural leg's `push` arm accepted only a plain var
+// receiver and refused a field (`list-push-nonvar`); the incumbent brick
+// refused the enclosing loop for its own reason, so this shape — the one #2316
+// was found in, gramide's document builder — had NO wasm route at all. It now
+// routes through the copy-on-write field write the leg already owns:
+// `h.f = h.f + [v]`, so the record is copied, the replaced slot's credit is
+// released, the fresh list takes its own credit, and the var is rebound.
+// No second receiver mode; the credits ride the path `lower_field_assign`
+// pins under C-033.
+//
+// Rows, and what each is for:
+//   str/float/rec  the element's runtime shape — a heap element (String,
+//               a record) must take its credit in the concat, a scalar must
+//               not; Float crosses the push helper as a bit pattern
+//   mut param   a `mut` record parameter's field pushed from a callee — the
+//               caller's record carries the grown list (C-226)
+//   alias       C-033: an alias taken BEFORE the push keeps the old list —
+//               in-place mutation stays unobservable, the record was copied
+//
+// DECLARED OMISSIONS, three rows carried by tests/list_push_on_record_field_test.rs
+// (it builds and runs both legs directly): the #2316 builder verbatim (a
+// `mut` param, a `for` loop, an `if` branch, two pushes per iteration), a
+// 1000-push `for` loop, and `list.clear(h.f)` followed by a push. The
+// incumbent brick refuses a scalar `for`-in loop variable in an exported fn
+// ("outside the MIR-lowering subset") and has NO definition of `list.clear`
+// at all (an unlinked call is a wall), so any of those rows here would cost
+// the two determinism wall ceilings and the walled-real baseline — three
+// shrink-only ratchets — for coverage the test provides; the same trade
+// C-076's `EXTENDED (#2133)` and C-334's `EXTENDED (#2398)` clauses record.
+// The record row reads its element through a `let` because the incumbent
+// also refuses a `??`-bearing interpolation in call-argument position. A
+// nested receiver path (`h.i.xs`) is still refused (`list-push-nonvar`) and
+// is pinned as a wall by the same test.
+type Names = { names: List[String], n: Int }
+
+type Floats = { xs: List[Float] }
+
+type Ints = { xs: List[Int] }
+
+type B = { k: Int }
+
+type Boxes = { bs: List[B] }
+
+fn add_name(mut h: Names, s: String) -> Unit = {
+  list.push(h.names, s)
+  h.n = h.n + 1
+}
+
+fn main() -> Unit = {
+  var nm = Names { names: [], n: 0 }
+  add_name(nm, "a")
+  add_name(nm, "bb")
+  println("str     ${nm.names} ${nm.n}")
+  var fl = Floats { xs: [] }
+  list.push(fl.xs, 1.5)
+  list.push(fl.xs, 2.5)
+  println("float   ${fl.xs}")
+  var bx = Boxes { bs: [] }
+  list.push(bx.bs, B { k: 7 })
+  list.push(bx.bs, B { k: 8 })
+  let second = list.get(bx.bs, 1) ?? B { k: 0 }
+  println("rec     ${list.len(bx.bs)} ${second.k}")
+  var al = Ints { xs: [1] }
+  let before = al
+  list.push(al.xs, 2)
+  println("alias   ${before.xs} ${al.xs}")
+}

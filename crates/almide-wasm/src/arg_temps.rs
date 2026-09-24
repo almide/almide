@@ -110,6 +110,54 @@ impl Binder<'_> {
         self.tail = saved;
     }
 
+    /// #2515 — `let (a, b) = <subject>` reads each bound position out of the
+    /// subject as a VIEW (no `+1`, patterns.rs) and never releases the
+    /// subject: correct for a subject someone else holds, a leak of the
+    /// whole block and everything in it for one this frame owns (160 B per
+    /// `let (b, k) = mk(i)` with a 64 B buffer inside). The subject is named
+    /// first — `let t = <subject>; let (a, b) = t` — so the answer to "does
+    /// this frame own it" is the Bind route's (`rc_owned_result`: an owned
+    /// result is taken as is, a borrowed one takes `+1`) and the frame's
+    /// exit plan releases `t` like any other local. The binds stay views of
+    /// `t`'s fields, which live until `t` goes: the rewritten program is the
+    /// one a user writes by hand, and that shape already balances.
+    ///
+    /// The binds are NOT made owners (the other way to close the leak): a
+    /// pattern bind that owns its slot freed a returned value under its
+    /// reader once already (patterns.rs, the list-rest note); naming the
+    /// subject changes no pattern-bind rule. A subject that is already a
+    /// variable is left alone — it has its own owner.
+    fn name_destructure_subjects(&mut self, stmts: &mut Vec<IrStmt>) {
+        let named = |s: &IrStmt| {
+            matches!(&s.kind, IrStmtKind::BindDestructure { value, .. }
+                if droppable_ty(&value.ty) && !matches!(value.kind, IrExprKind::Var { .. }))
+        };
+        if !stmts.iter().any(named) {
+            return;
+        }
+        *self.changed = true;
+        let mut out = Vec::with_capacity(stmts.len() + 1);
+        for mut s in std::mem::take(stmts) {
+            if named(&s)
+                && let IrStmtKind::BindDestructure { value, .. } = &mut s.kind
+            {
+                let ty = value.ty.clone();
+                let span = value.span;
+                let id = self.vars.alloc(sym("__destructure_subject"), ty.clone(), Mutability::Let, span);
+                let subject = std::mem::replace(
+                    value,
+                    IrExpr { kind: IrExprKind::Var { id }, ty: ty.clone(), span, def_id: None },
+                );
+                out.push(IrStmt {
+                    kind: IrStmtKind::Bind { var: id, mutability: Mutability::Let, ty, value: subject },
+                    span: s.span,
+                });
+            }
+            out.push(s);
+        }
+        *stmts = out;
+    }
+
     fn walk_with_tail(&mut self, e: &mut IrExpr, tail: bool) {
         match &mut e.kind {
             IrExprKind::Lambda { body, .. } => self.visit_with_tail(body, true),
@@ -149,6 +197,25 @@ fn is_born_here(e: &IrExpr) -> bool {
     )
 }
 
+/// #2312: `"${int.to_string(x)}"` displays exactly as `"${x}"` (`x: Int`
+/// — the decimal digits either way), so the part becomes `x` BEFORE the
+/// operand scan: no String temporary is produced, bound or released, and
+/// the build appends the digits from the itoa scratch. Stdout is the same
+/// bytes; one allocation per such part is gone.
+fn fold_int_display_parts(parts: &mut [almide_ir::IrStringPart], changed: &mut bool) {
+    for p in parts.iter_mut() {
+        let almide_ir::IrStringPart::Expr { expr } = p else { continue };
+        let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &mut expr.kind else {
+            continue;
+        };
+        if module.as_str() == "int" && func.as_str() == "to_string" && args.len() == 1 && args[0].ty == Ty::Int {
+            let x = args.pop().expect("one arg");
+            *expr = x;
+            *changed = true;
+        }
+    }
+}
+
 impl IrMutVisitor for Binder<'_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
         let tail = self.tail;
@@ -159,6 +226,17 @@ impl IrMutVisitor for Binder<'_> {
         // its operand would hide the call and disable constant-stack TCO.
         if tail && matches!(e.kind, IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }) {
             return;
+        }
+        match &mut e.kind {
+            IrExprKind::Block { stmts, .. } | IrExprKind::While { body: stmts, .. } => {
+                self.name_destructure_subjects(stmts);
+                return;
+            }
+            IrExprKind::ForIn { body, .. } => self.name_destructure_subjects(body),
+            _ => {}
+        }
+        if let IrExprKind::StringInterp { parts } = &mut e.kind {
+            fold_int_display_parts(parts, self.changed);
         }
         let operands: Vec<&mut IrExpr> = match &mut e.kind {
             // A binary op over droppable operands — concatenation, or an

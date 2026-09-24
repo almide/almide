@@ -1,0 +1,10 @@
+// The fix: a protocol declared in this file is named bare.
+protocol Show {
+  fn show(self) -> String
+}
+
+type Tag: Show = { s: String }
+
+fn Tag.show(self) -> String = self.s
+
+fn main() -> Unit = println(Tag { s: "x" }.show())

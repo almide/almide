@@ -14,6 +14,18 @@ shared-fixture-serial = { max-threads = 1 }
 # family (one binary per corpus gate so the shard packer can spread them);
 # they all walk the same on-disk spec/wasm_cross and spec/wasm_fail fixtures,
 # so the whole family stays one-at-a-time when several land on one shard.
+#
+# EXCEPT the interp ledger (#2381). Its two gates read spec/wasm_cross/*.almd
+# and evaluate them in-process through the reference interpreter — no
+# `almide` spawn, no wasmtime, no build scratch, and the interpreter's fs
+# effects land in its VFS overlay (crates/almide-interp/src/vfs.rs: real
+# `std::fs` in read forms only); the ledgers are written only under
+# ALMIDE_UPDATE_INTERP_LEDGER, which CI never sets. Nothing it touches is a
+# shared fixture, so serializing it bought nothing and cost the whole
+# critical path: on develop run 35569545602 the two gates ran back to back
+# (1666 s, then 1586 s — the SLOW markers show the second starting the
+# second the first finished) and that 3252 s sum WAS shard 0's 60-minute
+# wall, the longest job in CI. Side by side they cost the longer one.
 [[profile.default.overrides]]
-filter = 'binary_id(almide::wasm_runtime_*)'
+filter = 'binary_id(almide::wasm_runtime_*) & !binary_id(almide::wasm_runtime_interp_ledger)'
 test-group = "shared-fixture-serial"

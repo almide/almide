@@ -19,6 +19,8 @@ fn build_ir_with_drops(
     // ADT brick 5b: GENERATE the recursive-drop fns (`__drop_<T>`) for nested-variant types and
     // re-lower with them in scope. v1-trust-spine-only — v0 manages its own memory. Two-pass.
     let anon_recs = crate::lower::collect_recursive_anon_records(&ir);
+    // #2520: the heap-tuple list elements the fixed pair drops cannot free.
+    let anon_tuples = crate::lower::collect_anon_tuple_drops(&ir);
     let mut all_type_decls = ir.type_decls.clone();
     for m in &ir.modules {
         all_type_decls.extend(m.type_decls.iter().cloned());
@@ -100,7 +102,10 @@ fn build_ir_with_drops(
     // either generator inline (two independent copies would be a duplicate-fn compile
     // error).
     let list_str_drop = gated(
-        usage.list_str_drop_field || usage.anon_list_str_record || uses_closures,
+        usage.list_str_drop_field
+            || usage.anon_list_str_record
+            || uses_closures
+            || crate::lower::anon_tuples_may_use_list_str(&anon_tuples),
         crate::lower::LIST_STR_DROP_SRC,
     );
     // `Result[List[Int], List[String]]` (result.collect) routes its drop to the
@@ -134,6 +139,7 @@ fn build_ir_with_drops(
         crate::lower::generate_record_drop_sources(
             &all_type_decls,
             &anon_recs,
+            &anon_tuples,
             uses_result_opt_str
         ),
         crate::lower::generate_variant_repr_sources(
@@ -223,3 +229,4 @@ include!("pipeline_b.rs");
 include!("pipeline_c.rs");
 include!("pipeline_link.rs");
 include!("pipeline_native_rungs.rs");
+include!("pipeline_witnesses.rs");

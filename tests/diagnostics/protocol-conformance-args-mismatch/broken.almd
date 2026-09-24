@@ -1,0 +1,16 @@
+// #1589: a type conforms to a generic protocol exactly once, with the
+// arguments its declaration names; no other implementation is searched for.
+protocol Repo[K, V] {
+  fn find(self, key: K) -> V?
+}
+
+type User = { id: Int, name: String }
+type Order = { id: Int, total: Int }
+type Users: Repo[Int, User] = { rows: List[User] }
+
+fn Users.find(self, key: Int) -> User? = self.rows |> list.find((u) => u.id == key)
+
+fn total_of[R: Repo[Int, Order]](r: R, id: Int) -> Int =
+  match r.find(id) { some(o) => o.total, none => 0 }
+
+fn main() -> Unit = println(int.to_string(total_of(Users { rows: [] }, 1)))

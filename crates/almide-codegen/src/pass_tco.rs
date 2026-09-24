@@ -44,8 +44,8 @@ impl NanoPass for TailCallOptPass {
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         // Collect: TCO'd function name → param positions whose borrow annotation
-        // was forced back to Own by the loop rewrite (i.e. NOT in the
-        // Bytes-borrow-preserved set). External call sites targeting these
+        // was forced back to Own by the loop rewrite (i.e. the slots
+        // [`loop_keeps_borrow`] refused). External call sites targeting these
         // functions need their Borrow wrappers stripped to match the new
         // signature — otherwise a &str arg is passed where String is expected.
         let mut reverted: HashMap<almide_base::intern::Sym, HashSet<usize>> = HashMap::new();
@@ -92,283 +92,13 @@ fn run_tco(functions: &mut [IrFunction], var_table: &mut VarTable, run: &mut Tco
             if !reverted_here.is_empty() {
                 run.reverted.insert(fn_name, reverted_here);
             }
-        } else if is_binary_rec_candidate(func) {
-            rewrite_binary_rec(func, var_table);
-        }
-    }
-}
-
-/// Check if function has the pattern: if cond then base else self(a) + self(b)
-/// where + is an associative/commutative binary op (Add, Mul, etc.)
-fn is_binary_rec_candidate(func: &IrFunction) -> bool {
-    if func.params.len() != 1 { return false; }
-    match &func.ret_ty {
-        Ty::Int | Ty::Float => {}
-        _ => return false,
-    }
-    match &func.body.kind {
-        IrExprKind::If { cond: _, then: _, else_ } => {
-            matches_binary_self_call(else_, func.name.as_str())
-        }
-        _ => false,
-    }
-}
-
-/// Check if expr is BinOp(Add/Mul, self_call(...), self_call(...))
-fn matches_binary_self_call(expr: &IrExpr, fn_name: &str) -> bool {
-    if let IrExprKind::BinOp { op, left, right } = &expr.kind {
-        use almide_ir::BinOp::*;
-        match op {
-            AddInt | AddFloat => {}
-            _ => return false,
-        }
-        is_self_call(left, fn_name) && is_self_call(right, fn_name)
-    } else {
-        false
-    }
-}
-
-fn is_self_call(expr: &IrExpr, fn_name: &str) -> bool {
-    matches!(&expr.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. } if name.as_str() == fn_name)
-}
-
-/// Rewrite binary recursion: f(n) = if n<=1 then n else f(n-1) + f(n-2)
-/// Into: f(n) = { var acc = 0; while n > 1 { acc += f(n-1); n -= step }; acc + base(n) }
-fn rewrite_binary_rec(func: &mut IrFunction, var_table: &mut VarTable) {
-    let _fn_name = func.name.clone();
-    let param = func.params[0].clone();
-    let ret_ty = func.ret_ty.clone();
-
-    let (cond, base_val, binop, left_call, right_call) = {
-        if let IrExprKind::If { cond, then, else_ } = std::mem::replace(
-            &mut func.body.kind,
-            IrExprKind::LitInt { value: 0 },
-        ) {
-            if let IrExprKind::BinOp { op, left, right } = else_.kind {
-                (*cond, *then, op, *left, *right)
-            } else {
-                // Restore and bail
-                func.body.kind = IrExprKind::If { cond, then, else_ };
-                return;
-            }
         } else {
-            return;
+            // #2577: `f(p) = if C then B else f(A) + f(p - k)` → one call plus
+            // an accumulator loop. Shared with the structural wasm leg; its
+            // preconditions (Int only — never Float — pure scalar body,
+            // provable termination) live in `almide_ir::accum_tre`.
+            almide_ir::accum_tre::rewrite(func, var_table);
         }
-    };
-
-    // Extract step from right_call: self(n - step) → step value
-    // left_call: self(n - 1), right_call: self(n - 2) typically
-    let Some(step_val) = extract_subtraction_const(&right_call, param.var) else {
-        // Restore original
-        func.body.kind = IrExprKind::If {
-            cond: Box::new(cond),
-            then: Box::new(base_val),
-            else_: Box::new(IrExpr {
-                kind: IrExprKind::BinOp { op: binop.clone(), left: Box::new(left_call), right: Box::new(right_call) },
-                ty: ret_ty.clone(), span: None, def_id: None,
-            }),
-        };
-        return;
-    };
-
-    // Create: var n_var = n; var acc = 0;
-    let n_var = var_table.alloc(
-        almide_base::intern::sym("__br_n"), ret_ty.clone(),
-        almide_ir::Mutability::Var, None,
-    );
-    let acc_var = var_table.alloc(
-        almide_base::intern::sym("__br_acc"), ret_ty.clone(),
-        almide_ir::Mutability::Var, None,
-    );
-
-    let span = func.body.span;
-    let zero = match &ret_ty {
-        Ty::Int => IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span, def_id: None },
-        Ty::Float => IrExpr { kind: IrExprKind::LitFloat { value: 0.0 }, ty: Ty::Float, span, def_id: None },
-        _ => return,
-    };
-
-    // Bind n_var = param
-    let bind_n = IrStmt {
-        kind: IrStmtKind::Bind {
-            var: n_var, mutability: almide_ir::Mutability::Var,
-            ty: ret_ty.clone(),
-            value: IrExpr { kind: IrExprKind::Var { id: param.var }, ty: ret_ty.clone(), span, def_id: None },
-        },
-        span,
-    };
-
-    // Bind acc = 0
-    let bind_acc = IrStmt {
-        kind: IrStmtKind::Bind {
-            var: acc_var, mutability: almide_ir::Mutability::Var,
-            ty: ret_ty.clone(),
-            value: zero.clone(),
-        },
-        span,
-    };
-
-    // Substitute param.var → n_var in cond
-    let mut loop_cond = cond.clone();
-    substitute_var(&mut loop_cond, param.var, n_var);
-    // Negate: while !(base_cond) → while n > 1
-    let negated_cond = IrExpr {
-        kind: IrExprKind::UnOp { op: almide_ir::UnOp::Not, operand: Box::new(loop_cond) },
-        ty: Ty::Bool, span, def_id: None,
-    };
-
-    // Loop body: acc = acc + self(n_var - 1); n_var = n_var - step
-    let mut call_expr = left_call.clone();
-    substitute_var(&mut call_expr, param.var, n_var);
-
-    let acc_update = IrStmt {
-        kind: IrStmtKind::Assign {
-            var: acc_var,
-            value: IrExpr {
-                kind: IrExprKind::BinOp {
-                    op: binop.clone(),
-                    left: Box::new(IrExpr { kind: IrExprKind::Var { id: acc_var }, ty: ret_ty.clone(), span, def_id: None }),
-                    right: Box::new(call_expr),
-                },
-                ty: ret_ty.clone(), span, def_id: None,
-            },
-        },
-        span,
-    };
-
-    let n_update = IrStmt {
-        kind: IrStmtKind::Assign {
-            var: n_var,
-            value: IrExpr {
-                kind: IrExprKind::BinOp {
-                    op: almide_ir::BinOp::SubInt,
-                    left: Box::new(IrExpr { kind: IrExprKind::Var { id: n_var }, ty: ret_ty.clone(), span, def_id: None }),
-                    right: Box::new(IrExpr { kind: IrExprKind::LitInt { value: step_val }, ty: Ty::Int, span, def_id: None }),
-                },
-                ty: ret_ty.clone(), span, def_id: None,
-            },
-        },
-        span,
-    };
-
-    // while loop
-    let while_expr = IrExpr {
-        kind: IrExprKind::While {
-            cond: Box::new(negated_cond),
-            body: vec![acc_update, n_update],
-        },
-        ty: Ty::Unit, span, def_id: None,
-    };
-
-    // Return: acc + base_val(n_var)
-    let mut final_base = base_val.clone();
-    substitute_var(&mut final_base, param.var, n_var);
-
-    let result = IrExpr {
-        kind: IrExprKind::BinOp {
-            op: binop,
-            left: Box::new(IrExpr { kind: IrExprKind::Var { id: acc_var }, ty: ret_ty.clone(), span, def_id: None }),
-            right: Box::new(final_base),
-        },
-        ty: ret_ty.clone(), span, def_id: None,
-    };
-
-    func.body = IrExpr {
-        kind: IrExprKind::Block {
-            stmts: vec![bind_n, bind_acc, IrStmt { kind: IrStmtKind::Expr { expr: while_expr }, span }],
-            expr: Some(Box::new(result)),
-        },
-        ty: ret_ty, span, def_id: None,
-    };
-}
-
-/// The `k` of a self-call `self(param - k)`; `None` for any other argument shape.
-fn extract_subtraction_const(call_expr: &IrExpr, param_var: VarId) -> Option<i64> {
-    let IrExprKind::Call { args, .. } = &call_expr.kind else { return None };
-    let IrExprKind::BinOp { op: almide_ir::BinOp::SubInt, left, right } = &args.first()?.kind
-    else {
-        return None;
-    };
-    let IrExprKind::Var { id } = &left.kind else { return None };
-    if *id != param_var {
-        return None;
-    }
-    let IrExprKind::LitInt { value: n } = &right.kind else { return None };
-    Some(*n)
-}
-
-fn substitute_var(expr: &mut IrExpr, from: VarId, to: VarId) {
-    match &mut expr.kind {
-        IrExprKind::Var { id } if *id == from => { *id = to; }
-        IrExprKind::BinOp { left, right, .. } => {
-            substitute_var(left, from, to);
-            substitute_var(right, from, to);
-        }
-        IrExprKind::UnOp { operand, .. } => substitute_var(operand, from, to),
-        IrExprKind::If { cond, then, else_ } => {
-            substitute_var(cond, from, to);
-            substitute_var(then, from, to);
-            substitute_var(else_, from, to);
-        }
-        IrExprKind::Call { args, .. } => {
-            for arg in args { substitute_var(arg, from, to); }
-        }
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts {
-                match &mut s.kind {
-                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => substitute_var(value, from, to),
-                    IrStmtKind::Expr { expr } => substitute_var(expr, from, to),
-                    // Explicit-preserve: substitute_var only descends into the
-                    // statement forms produced by the binary-rec rewrite
-                    // (Bind / Assign / Expr). Other statement kinds are never
-                    // traversed here — no-op, total-by-construction.
-                    IrStmtKind::BindDestructure { .. }
-                    | IrStmtKind::IndexAssign { .. }
-                    | IrStmtKind::MapInsert { .. }
-                    | IrStmtKind::FieldAssign { .. }
-                    | IrStmtKind::Guard { .. }
-                    | IrStmtKind::Comment { .. }
-                    | IrStmtKind::RcInc { .. }
-                    | IrStmtKind::RcDec { .. }
-                    | IrStmtKind::ListSwap { .. }
-                    | IrStmtKind::ListReverse { .. }
-                    | IrStmtKind::ListRotateLeft { .. }
-                    | IrStmtKind::ListCopySlice { .. } => {}
-                }
-            }
-            if let Some(e) = expr { substitute_var(e, from, to); }
-        }
-        // Explicit-preserve: substitute_var performs a surgical single-VarId
-        // replacement over only the forms the binary-rec rewrite constructs.
-        // Recursing more would risk double-processing. Leaves and every other
-        // variant are no-ops — total-by-construction.
-        IrExprKind::Var { .. }
-        | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
-        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
-        | IrExprKind::Unit | IrExprKind::FnRef { .. }
-        | IrExprKind::Match { .. } | IrExprKind::Fan { .. }
-        | IrExprKind::ForIn { .. } | IrExprKind::While { .. }
-        | IrExprKind::Break | IrExprKind::Continue
-        | IrExprKind::TailCall { .. } | IrExprKind::RuntimeCall { .. }
-        | IrExprKind::List { .. } | IrExprKind::MapLiteral { .. }
-        | IrExprKind::EmptyMap | IrExprKind::Record { .. }
-        | IrExprKind::SpreadRecord { .. } | IrExprKind::Tuple { .. }
-        | IrExprKind::Range { .. } | IrExprKind::Member { .. }
-        | IrExprKind::TupleIndex { .. } | IrExprKind::IndexAccess { .. }
-        | IrExprKind::MapAccess { .. } | IrExprKind::Lambda { .. }
-        | IrExprKind::StringInterp { .. }
-        | IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
-        | IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
-        | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
-        | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
-        | IrExprKind::OptionalChain { .. }
-        | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
-        | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
-        | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
-        | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. }
-        | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
-        | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
-        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
     }
 }
 
@@ -422,6 +152,7 @@ fn strip_borrows_at_tco_calls(
 /// - ALL self-recursive calls are in tail position
 /// - Not a test helper (name starts with `__test_`)
 /// - Return type can be default-initialized (primitives, tuples of primitives, etc.)
+/// - Every `mut` parameter is one the loop can keep borrowed
 ///
 /// `pub` so borrow inference can pre-bake the owned-param signature these
 /// functions will get (their params become loop state → owned), keeping callers'
@@ -434,7 +165,27 @@ pub fn is_tco_candidate(func: &IrFunction) -> bool {
         return false;
     }
     let (has_any, all_in_tail) = all_self_calls_in_tail_pos(&func.body, &func.name, func.is_effect);
-    has_any && all_in_tail
+    if !(has_any && all_in_tail) {
+        return false;
+    }
+    // Only a `mut` parameter can be refused below, and this runs on every
+    // function in every borrow-inference round, so decide the common case
+    // without a second walk of the body.
+    if !func.params.iter().any(|p| p.is_mut) {
+        return true;
+    }
+    // A `mut` parameter's borrow is not an optimisation: the language promises
+    // that the caller's `var` binding is what the callee writes into
+    // (`param_borrow` honours the keyword before any body policy). The loop
+    // form can keep that promise only for a slot [`loop_keeps_borrow`] admits;
+    // a `mut` param REBOUND by a self-tail-call would have to store a reference
+    // to a loop-local. Refuse the rewrite for such a function rather than reset
+    // its borrow to `Own` — plain recursion is correct on every target, where
+    // the reset printed a silently wrong answer (#2293: `count_down(seen, 3)`
+    // said the caller saw 0 of 3 pushes).
+    let identity = tco_identity_carried(func);
+    !func.params.iter().enumerate()
+        .any(|(i, p)| p.is_mut && !loop_keeps_borrow(p, identity.get(i).copied().unwrap_or(false)))
 }
 
 /// Scan an expression tree, returning (has_any_self_call, all_self_calls_in_tail_position).

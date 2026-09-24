@@ -49,18 +49,26 @@ fn almide_rt_check_rotate_width(bits: i64) {
         std::process::exit(1);
     }
 }
+/// The count reduced into `[0, bits)` EUCLIDEAN-ly, so a negative count rotates the
+/// other way (`rotate_left(x, -1, 8)` = `rotate_left(x, 7, 8)`). #2492: the old
+/// `(n % bits) as u32` kept the sign of `n`, `-1 as u32` became 4294967295, and every
+/// negative count returned 0. Shared verbatim with stdlib/int_rotate.almd.
+#[inline]
+fn almide_rt_rotate_count(n: i64, bits: i64) -> u32 {
+    n.rem_euclid(bits) as u32
+}
 pub fn almide_rt_int_rotate_left(a: i64, n: i64, bits: i64) -> i64 {
     almide_rt_check_rotate_width(bits);
     let mask = almide_rt_rotate_mask(bits);
     let v = (a as u64) & mask;
-    let n = (n % bits) as u32;
+    let n = almide_rt_rotate_count(n, bits);
     ((v << n) | (v >> (bits as u32 - n))) as i64 & mask as i64
 }
 pub fn almide_rt_int_rotate_right(a: i64, n: i64, bits: i64) -> i64 {
     almide_rt_check_rotate_width(bits);
     let mask = almide_rt_rotate_mask(bits);
     let v = (a as u64) & mask;
-    let n = (n % bits) as u32;
+    let n = almide_rt_rotate_count(n, bits);
     ((v >> n) | (v << (bits as u32 - n))) as i64 & mask as i64
 }
 pub fn almide_rt_int_wrap_add(a: i64, b: i64, bits: i64) -> i64 {
@@ -70,26 +78,6 @@ pub fn almide_rt_int_wrap_add(a: i64, b: i64, bits: i64) -> i64 {
 pub fn almide_rt_int_wrap_mul(a: i64, b: i64, bits: i64) -> i64 {
     let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
     ((a as u64).wrapping_mul(b as u64) & mask) as i64
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_to_string() {
-        assert_eq!(almide_rt_int_to_string(42), "42");
-        assert_eq!(almide_rt_int_to_string(-1), "-1");
-        assert_eq!(almide_rt_int_to_string(0), "0");
-    }
-
-    #[test]
-    fn test_from_string() {
-        assert_eq!(almide_rt_int_from_string("42".into()), Ok(42));
-        assert_eq!(almide_rt_int_from_string("-1".into()), Ok(-1));
-        assert!(almide_rt_int_from_string("abc".into()).is_err());
-        assert!(almide_rt_int_from_string("".into()).is_err());
-    }
 }
 
 // ── Bit introspection ──

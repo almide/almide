@@ -283,6 +283,12 @@ fn fmt_expr_blocklike(out: &mut String, expr: &Expr, depth: usize) -> bool {
         ExprKind::IfLet { .. } => fmt_expr_iflet(out, expr, depth),
         ExprKind::Match { .. } => fmt_expr_match(out, expr, depth),
         ExprKind::Block { .. } => fmt_expr_block(out, expr, depth),
+        // `scoped { … }` (#1997): the body is always a Block, which supplies
+        // its own braces and line breaking.
+        ExprKind::Scoped { body, .. } => {
+            out.push_str("scoped ");
+            fmt_expr(out, body, depth);
+        }
         ExprKind::Fan { .. } => fmt_expr_fan(out, expr, depth),
         ExprKind::FanBounded { .. } => fmt_expr_fan_bounded(out, expr, depth),
         ExprKind::FanRace { .. } => fmt_expr_fan_race(out, expr, depth),

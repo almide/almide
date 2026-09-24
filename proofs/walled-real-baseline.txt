@@ -124,9 +124,7 @@
 spec/gauntlet/cells/x09_tuple_list_of_record.almd :: f
 spec/gauntlet/cells/x13_bang_nested_in_field.almd :: f
 spec/wasm_cross/bytes_equality_call_operands.almd :: main
-spec/wasm_cross/codec_list_default.almd :: main
 spec/wasm_cross/codec_triple_list.almd :: T.__dec_list_list_list_int_go
-spec/wasm_cross/nested_payload_guard.almd :: pick_opt
 spec/wasm_cross/nested_three_level_literal.almd :: main
 # (2026-08-30, C-326/#1696) The gzip inflate joined the corpus lowering on the
 # STRUCTURAL leg (the phase-4 hoist); the incumbent's brick walls its loop-level
@@ -191,7 +189,10 @@ spec/wasm_cross/generic_record_fn_field.almd :: call_q
 # operand stack, and the `let _ =` Unit binding is outside its value subset.
 # The STRUCTURAL leg (the default) releases the mutated block after the
 # call and runs byte-identical to native. Prunes with #1696 4-5.
-spec/wasm_cross/bytes_temp_receiver.almd :: main
+# PRUNED 2026-09-22 (#2466, dialect epoch 5): the row above is gone because the
+# fixture no longer uses a call-result receiver. The bytes writers take `mut`
+# receivers now, so the fixture drives them through a `var` and the incumbent
+# renders it — the determinism ceilings fell 34 -> 33 in the same change.
 # 2026-09-03 (#1791, the http response family): the loopback round-trip test's
 # three fns (a retrying dial through `net` + `fan`, and the transport-err test
 # block) are network-effect shapes the incumbent MIR lowering walls; the native

@@ -494,6 +494,51 @@ impl LowerCtx {
     /// including a plain `var` module-level buffer where neither clause was true —
     /// so the one action it implied ("make it a `var`") did not lift the wall and the
     /// reader had nothing to act on.
+    /// #2503 / C-033: an argument in a `mut`-PARAMETER position of a PURE user
+    /// fn, read through THIS frame's copy-on-write. The callee writes the buffer
+    /// in place (`bytes.set_at(b, …)` on its param is a bare write-through —
+    /// [`Self::cow_inplace_receiver`]'s param arm) and the C-132 move-mode
+    /// rewrite hands it back for this site to store, so the site is a mutation
+    /// of the caller's var and takes the same rc-gated `MakeUnique` a direct
+    /// `bytes.set_at(b, …)` here would: a shared block copies and the var is
+    /// repointed at the unique copy, so an alias bound BEFORE the call keeps its
+    /// pre-write bytes; an unaliased buffer (rc == 1) is not copied at all, and
+    /// `alias_safety` elides the guard outright where the var provably never
+    /// escaped. Mirrors `lower_mut_param_arg` on the structural leg
+    /// (crates/almide-wasm/src/calls.rs). Only a LOCAL var that is not itself a
+    /// borrowed param takes the guard: a param forwarded into another
+    /// mut-param call is the callee's write-through chain (its caller judged
+    /// the copy), and a mutable module-level `var` keeps its slot discipline.
+    /// Bytes and SCALAR lists only, as on the structural leg: `MakeUnique`
+    /// renders to the flat `$list_copy`, which is the whole value for those two
+    /// and a shallow copy for anything else (a Map's or a `List[String]`'s
+    /// child blocks would be shared by two owners and released twice — measured
+    /// as an rc_dec trap on the map rows of `mut_param_alias_cow`). Strings
+    /// mutate functionally and maps carry their own in-place judge, so their
+    /// rows already agree without a call-site copy.
+    /// Not this shape (no `mut` position, a non-var argument) = no-op.
+    pub(crate) fn cow_mut_param_call_args(&mut self, name: &str, args: &[IrExpr]) {
+        let positions = crate::lower::MUT_PARAM_FNS.with(|s| s.borrow().get(name).cloned());
+        let Some(positions) = positions else { return };
+        for (a, is_mut) in args.iter().zip(positions) {
+            if !is_mut {
+                continue;
+            }
+            if !(matches!(a.ty, Ty::Bytes) || Self::is_scalar_list_ty(&a.ty)) {
+                continue;
+            }
+            let IrExprKind::Var { id } = &a.kind else { continue };
+            if crate::lower::mutable_global_info(*id).is_some() {
+                continue;
+            }
+            if let Ok(v) = self.value_for(*id) {
+                if !self.param_values.contains(&v) {
+                    self.ops.push(Op::MakeUnique { v });
+                }
+            }
+        }
+    }
+
     pub(crate) fn cow_inplace_receiver(
         &mut self,
         module: &str,
@@ -646,9 +691,14 @@ impl LowerCtx {
 
 /// The IN-PLACE `&mut` mutator surface: the bytes writers (set_*/write_*/fill/clear/
 /// copy_within/copy_from — their self-host bodies store through args[0]'s block) and
-/// the in-place `list.pop` (the same &mut protocol over a list receiver). Shared with
-/// `inline_pure_call_globals`, which must not substitute a global's initializer into a
-/// RECEIVER position: the write would land in a fresh temporary (#906).
+/// the in-place `list.pop` (the same &mut protocol over a list receiver), and
+/// `string.clear` (its self-host body stores the length header through args[0]'s
+/// block — #2465: it was missing here, so the released 0.62.0 route cleared the block
+/// an alias shared; a var / field receiver is now rewritten to its rebind before this
+/// predicate is consulted, and any receiver that still reaches the body gets the same
+/// COW-or-wall discipline as `bytes.clear`). Shared with `inline_pure_call_globals`,
+/// which must not substitute a global's initializer into a RECEIVER position: the write
+/// would land in a fresh temporary (#906).
 pub(crate) fn is_inplace_mutator(module: &str, func: &str) -> bool {
     (module == "bytes"
         && (func.starts_with("set_")
@@ -661,6 +711,7 @@ pub(crate) fn is_inplace_mutator(module: &str, func: &str) -> bool {
             || func.starts_with("append_")
             || matches!(func, "fill" | "clear" | "copy_within" | "copy_from")))
         || (module == "list" && func == "pop")
+        || (module == "string" && func == "clear")
 }
 
 /// Extracted from `LowerCtx::lower_pure_module_call_args` (codopsy8 complexity sweep): the

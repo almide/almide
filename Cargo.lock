@@ -35,6 +35,7 @@ version = "0.63.0"
 dependencies = [
  "almide-base",
  "almide-codegen",
+ "almide-corpus",
  "almide-dialect",
  "almide-driver",
  "almide-frontend",
@@ -45,6 +46,8 @@ dependencies = [
  "almide-optimize",
  "almide-tools",
  "almide-types",
+ "almide-verify",
+ "almide-wasi",
  "almide-wasm",
  "almide-wasm-run",
  "almide-wasm-vm",
@@ -94,6 +97,10 @@ dependencies = [
 [[package]]
 name = "almide-corpus"
 version = "0.12.2"
+dependencies = [
+ "almide-base",
+ "tempfile",
+]
 
 [[package]]
 name = "almide-dialect"
@@ -250,6 +257,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "almide-verify"
+version = "0.1.0"
+
+[[package]]
+name = "almide-wasi"
+version = "0.12.2"
+dependencies = [
+ "almide-wasm",
+ "anyhow",
+ "wasm-encoder 0.259.0",
+ "wasmparser 0.259.0",
+]
+
+[[package]]
 name = "almide-wasm"
 version = "0.12.2"
 dependencies = [
@@ -274,6 +295,7 @@ version = "0.12.2"
 dependencies = [
  "almide-base",
  "almide-rt-core",
+ "almide-wasi",
  "almide-wasm",
  "anyhow",
  "wasm-encoder 0.259.0",

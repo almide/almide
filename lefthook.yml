@@ -12,12 +12,18 @@ pre-commit:
     contracts:
       glob: "{docs/contracts/contracts.toml,docs/contracts/*.md,spec/wasm_cross/*.almd,scripts/check-contracts.sh,scripts/lib/contract-classes.txt,scripts/lib/dojo-families.txt,tests/diagnostics/*/meta.toml,docs/specs/als/*.md,scripts/gen-claims.sh,scripts/lib/ledger-counts.sh,proofs/ledger-counts.toml,README.md}"
       run: bash scripts/gen-claims.sh && git add README.md && scripts/check-contracts.sh && bash docs/contracts/generate-readme.sh > docs/contracts/README.md && git add docs/contracts/README.md
+    contract-citations:
+      # Every `C-NNN` spelled outside the ledger and the fixture headers must
+      # name a ledger contract (#2406). Cheap (one python walk, ~1s), so the
+      # glob is the whole citation surface rather than a guess at it.
+      glob: "{docs/contracts/contracts.toml,scripts/check-contract-citations.sh,stdlib/**/*.almd,crates/**/*.rs,src/**/*.rs,runtime/**/*.rs,docs/**/*.md,proofs/**/*.toml,spec/**/*.almd,llms.txt,README.md,CHANGELOG.md}"
+      run: bash scripts/check-contract-citations.sh
     readme-stats:
       # The README's derived-count blocks and the no-undated-count rule. The
       # Hello, world baseline (docs/benchmarks/wasm-size.txt) is re-stamped by
       # `--measure`, never by hand — CI rebuilds it and demands the same bytes.
-      glob: "{README.md,docs/stdlib/*.md,docs/benchmarks/wasm-size.txt,docs/contracts/contracts.toml,spec/**/*.almd,scripts/gen-readme-stats.sh,scripts/check-readme-numbers.sh,scripts/lib/ledger-counts.sh,proofs/ledger-counts.toml,docs/wasm/README.md,docs/project/BENCHMARKS.md}"
-      run: bash scripts/gen-readme-stats.sh && git add README.md && bash scripts/check-readme-numbers.sh
+      glob: "{README.md,docs/stdlib/*.md,docs/benchmarks/wasm-size.txt,docs/contracts/contracts.toml,spec/**/*.almd,scripts/gen-readme-stats.sh,scripts/gen-mutation-score.sh,proofs/mutation-score.toml,scripts/check-readme-numbers.sh,scripts/lib/ledger-counts.sh,proofs/ledger-counts.toml,docs/wasm/README.md,docs/project/BENCHMARKS.md}"
+      run: bash scripts/gen-readme-stats.sh && bash scripts/gen-mutation-score.sh --render && git add README.md && bash scripts/check-readme-numbers.sh
     release-seals:
       glob: "{proofs/releases/*.toml,scripts/release-seal.sh}"
       run: bash scripts/release-seal.sh check
@@ -60,12 +66,68 @@ pre-commit:
       # in the check script is the one place the module list lives.
       glob: "{docs/stdlib/semantics-manifest.toml,stdlib/*.almd,spec/stdlib/*_semantics_manifest_test.almd,scripts/check-semantics-manifest.sh}"
       run: scripts/check-semantics-manifest.sh
+    fold-seed-source:
+      # #2380: the census of `list.fold(xs, <seed that reads xs>, f)` sites
+      # (the #2377 shape) over stdlib/ spec/ examples/ tools/, held as a
+      # shrink-only floor. Fires on the corpus, the scanner and the floor;
+      # runs the PATH `almide` — the gate needs only stdlib, no compiler
+      # feature newer than the last release.
+      glob: "{stdlib/*.almd,spec/**/*.almd,examples/**/*.almd,tools/almide-gates/src/fold_seed_source.almd,proofs/fold-seed-source-baseline.txt}"
+      run: almide run tools/almide-gates/src/main.almd -- fold-seed-source .
+    stdlib-docs:
+      # A stdlib surface change (any stdlib/*.almd, including a `///` doc
+      # line), a doc page edit, the @since ledger, the clock table, or the
+      # generator itself re-arms the regenerate-and-diff (#1469). The block
+      # is derived from target/release/almide when it exists, else the PATH
+      # binary — the `///` docs come from its EMBEDDED stdlib, so a stale
+      # binary reads stale docs; CI reads the freshly built one.
+      glob: "{docs/stdlib/*.md,docs/stdlib/since.toml,stdlib/*.almd,crates/almide-types/src/time_units.rs,tools/gen-stdlib-doc-index.py,scripts/check-stdlib-docs.sh}"
+      run: bash scripts/check-stdlib-docs.sh
     layout-discipline:
       # Globbed over ALL compiler/CLI Rust, not over the ledger: #1316 exists
       # because the discipline has to bite at the moment a NEW long-lived
       # structure is written, without anyone remembering to ask. 0.2s scan.
       glob: "{crates/**/*.rs,crates/*/src/*.rs,src/**/*.rs,src/*.rs,proofs/layout-ledger.toml,scripts/check-layout-discipline.sh,scripts/lib/layout-enumerate.py}"
       run: bash scripts/check-layout-discipline.sh
+    impl-count:
+      # One stdlib operation, N implementations (#2397): a new `fn lower_<mod>_<fn>`
+      # arm, a new registry row or a new `= _` hole must change the ledger in
+      # the same commit, so the copy is a diff line and not a blocker later.
+      glob: "{stdlib/*.almd,crates/almide-wasm/src/*.rs,crates/almide-types/src/self_host_registry.rs,proofs/impl-count-ledger.toml,tools/almide-gates/src/impl_count.almd,scripts/lib/impl-count-enumerate.py}"
+      run: almide run tools/almide-gates/src/main.almd -- impl-count .
+
+# The two gates that cost a CI round each on 2026-09-21 and are cheap enough
+# to hold a PUSH (not a commit): the clippy ratchet (a collapsible `if` was
+# 1457 > 1456) and run_parity's shrink-only abstention ceiling (a fixture the
+# interpreter could not vote on was 19 > 18). Both read the whole tree, so
+# there is no glob — every push pays them, and a push that would have failed
+# CI fails here in minutes instead of in an hour. `LEFTHOOK=0 git push` skips.
+# CONDITIONAL, stated where the claim is: run_parity verdicts everywhere
+# (~90 s) and is the half that would have caught #2414. The clippy count is
+# toolchain-coupled, so it verdicts ONLY on the pinned 1.94.0; on any other
+# toolchain the stanza below prints NO VERDICT and skips — the push is still
+# green, and that green is not a clippy verdict. On this machine the toolchain
+# is qusp-managed (no rustup, no ~/.rustup), so the pin cannot be installed by
+# the usual route and the clippy half is CI's alone (measured 2026-09-21).
+pre-push:
+  parallel: true
+  commands:
+    clippy-ratchet:
+      # A VERDICT only on the pinned toolchain. Off-pin the count is not
+      # comparable to the baseline (clippy grows lints every release), so
+      # the hook says so LOUDLY and skips instead of spending minutes on a
+      # number that cannot fail: a green push is never a clippy verdict here.
+      # This machine's toolchain is qusp-managed (no rustup), so the pin is
+      # not installable by the usual route — CI's pinned run is the judge.
+      run: |
+        if rustup toolchain list 2>/dev/null | grep -q '^1\.94\.0'; then
+          bash scripts/check-clippy-warnings.sh
+        else
+          echo "clippy-ratchet: NO VERDICT — pinned 1.94.0 not installed (local: $(rustc --version 2>/dev/null || echo unknown)); CI judges the ratchet. Set CLIPPY_REQUIRE_PIN=1 to fail instead."
+          [ "${CLIPPY_REQUIRE_PIN:-}" != "1" ]
+        fi
+    run-parity:
+      run: cargo test --release -p almide-spine --test run_parity
 
 commit-msg:
   scripts:

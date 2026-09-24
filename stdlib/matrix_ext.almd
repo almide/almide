@@ -1,8 +1,8 @@
-// matrix_ext — SELF-HOSTED prim-level matrix extensions for v1 (silu_mul,
-// broadcast_add_row, row_dot, conv1d, byte codecs). Faithful
-// transcriptions of runtime/rs/src/matrix.rs + matrix_p2.rs over the sane domain;
-// silu_mul uses libm-exact exp (the kernel's fast-exp is within ~1e-7 — inside
-// every fixture tolerance). LAYOUT + OWNERSHIP: matrix_core's — outer DynListStr
+// matrix_ext — SELF-HOSTED prim-level matrix extensions for v1
+// (broadcast_add_row, row_dot, conv1d, byte codecs). Faithful
+// transcriptions of runtime/rs/src/matrix.rs + matrix_p2.rs over the sane domain
+// (silu_mul lives in matrix_activations.almd beside the canonical fast-exp it
+// shares with native's kernel path). LAYOUT + OWNERSHIP: matrix_core's — outer DynListStr
 // of row handles, rows flat f64 blocks; args BORROWED, results fresh OWNED, fresh
 // rows MOVED in via prim.store_str. This file is List-typed like matrix_core (the
 // v1 Matrix IS a List[List[Float]]), so it makes NO matrix.* module calls — the
@@ -26,40 +26,6 @@ else {
 fn __mxe_zeros(rows: Int, cols: Int) -> List[List[Float]] = {
   let out: List[List[Float]] = prim.alloc_list_str(rows)
   let _x = __mxe_zeros_rows(prim.handle(out), rows, cols, 0)
-  out
-}
-
-// ── silu_mul: out[i][j] = a * sigmoid(a) * b, cols zip-truncated per row ──
-fn __silu_row(dh: Int, ah: Int, bh: Int, n: Int, j: Int) -> Int = if j >= n then 0
-else {
-  let x = prim.ffrombits(prim.load64(ah + 12 + j * 8))
-  let y = prim.ffrombits(prim.load64(bh + 12 + j * 8))
-  let sig = 1.0 / (1.0 + math.exp(0.0 - x))
-  prim.store64(dh + 12 + j * 8, prim.fbits(x * sig * y))
-  __silu_row(dh, ah, bh, n, j + 1)
-}
-
-fn __silu_rows(ho: Int, ha: Int, hb: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let ar = prim.load64(ha + 12 + i * 8)
-  let br = prim.load64(hb + 12 + i * 8)
-  let ca = prim.load32(ar + 4)
-  let cb = prim.load32(br + 4)
-  let c = if ca < cb then ca else cb
-  let row = prim.alloc_list_f64(c)
-  let _f = __silu_row(prim.handle(row), ar, br, c, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __silu_rows(ho, ha, hb, n, i + 1)
-}
-
-fn matrix_silu_mul(a: List[List[Float]], b: List[List[Float]]) -> List[List[Float]] = {
-  let ha = prim.handle(a)
-  let hb = prim.handle(b)
-  let la = prim.load32(ha + 4)
-  let lb = prim.load32(hb + 4)
-  let n = if la < lb then la else lb
-  let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __silu_rows(prim.handle(out), ha, hb, n, 0)
   out
 }
 
@@ -151,6 +117,39 @@ else {
   __cv_rows(ho, hin, hw, hbias, t_in, in_ch, out_ch, k, s, p, t_out, t + 1)
 }
 
+// The count domain of conv1d, in the native order: stride is a STEP (below 1
+// aborts, C-198's class — 0 was the language's `division by zero` here and a
+// raw panic natively, a negative one answered no rows here and one row
+// natively), kernel and padding are widths (a negative one clamps to 0 like
+// every C-034/C-161 dimension), and the padding is bounded by the shared
+// ceiling BEFORE `t_in + 2 * p` is formed so a huge padding cannot wrap here
+// into "no rows" while native computed a length.
+fn __mxe_stride(stride: Int) -> Int = {
+  if stride < 1 then prim.die(prim.handle("Error: stride must be positive\n")) else ()
+  stride
+}
+
+fn __mxe_shape_eq(a: Int, b: Int) -> Int = {
+  if a != b then prim.die(prim.handle("Error: matrix shape mismatch\n")) else ()
+  0
+}
+
+// matrix_core's `__mx_dims_guard`, restated (the ext part cannot call core's
+// private helpers); the literal is the shared ceiling scripts/check-alloc-ceilings.sh rosters.
+fn __mxe_dims_guard(rows: Int, cols: Int) -> Int = {
+  if rows > 268435456 then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
+  if rows > 0 and cols > 268435456 / rows then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
+  0
+}
+
+// `in_ch * kernel` without wrapping: past i64 it can match no real width, so
+// the saturated value is one the shape guard rejects like native's
+// `checked_mul(..).unwrap_or(usize::MAX)`.
+fn __mxe_taps(in_ch: Int, k: Int) -> Int = if in_ch == 0 then 0
+else {
+  if k > 9223372036854775807 / in_ch then 9223372036854775807 else in_ch * k
+}
+
 fn matrix_conv1d(input: List[List[Float]], weight: List[List[Float]], bias: List[Float], kernel: Int, stride: Int, padding: Int) -> List[List[Float]] = {
   let hin = prim.handle(input)
   let hw = prim.handle(weight)
@@ -160,10 +159,20 @@ fn matrix_conv1d(input: List[List[Float]], weight: List[List[Float]], bias: List
   else {
     let irow0 = prim.load64(hin + 12)
     let in_ch = prim.load32(irow0 + 4)
-    let t_padded = t_in + 2 * padding
-    if t_padded < kernel then __mxe_zeros(0, 0)
+    let s = __mxe_stride(stride)
+    let k = if kernel < 0 then 0 else kernel
+    let p = if padding < 0 then 0 else padding
+    if p > 268435456 then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
+    // The weight row is `in_ch * kernel` taps wide and the bias has one entry
+    // per output channel: a short weight row or bias read past its block here
+    // and panicked natively.
+    let _w = __mxe_shape_eq(prim.load32(prim.load64(hw + 12) + 4), __mxe_taps(in_ch, k))
+    let _b = __mxe_shape_eq(prim.load32(prim.handle(bias) + 4), out_ch)
+    let t_padded = t_in + 2 * p
+    if t_padded < k then __mxe_zeros(0, 0)
     else {
-      let t_out = (t_padded - kernel) / stride + 1
+      let t_out = (t_padded - k) / s + 1
+      let _d = __mxe_dims_guard(t_out, out_ch)
       let out: List[List[Float]] = prim.alloc_list_str(t_out)
       let _x = __cv_rows(
         prim.handle(out),
@@ -173,9 +182,9 @@ fn matrix_conv1d(input: List[List[Float]], weight: List[List[Float]], bias: List
         t_in,
         in_ch,
         out_ch,
-        kernel,
-        stride,
-        padding,
+        k,
+        s,
+        p,
         t_out,
         0,
       )
@@ -264,7 +273,9 @@ fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
   // overflows for a huge count; keep in sync with `__mx_max_elems`.
   if r > 268435456 then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
   if r > 0 and c > 268435456 / r then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
-  if offset < 0 or offset + r * c * 8 > len then __mxe_zeros(r, c)
+  // C-341, SUBTRACTIVE (the f32/f16 twins in matrix_core carry the same
+  // rewrite): the additive test wrapped for an offset near i64::MAX.
+  if offset < 0 or offset > len or r * c * 8 > len - offset then __mxe_zeros(r, c)
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
     let _x = __fb64_rows(prim.handle(out), bh + 12 + offset, r, c, 0)

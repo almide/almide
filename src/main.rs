@@ -32,8 +32,16 @@ fn warnings_suppressed() -> bool {
 }
 use clap::{Parser, Subcommand};
 
+/// What `almide --version` prints: the version number AND which kind of build
+/// produced it (#2384). `version` alone prints `CARGO_PKG_VERSION`, which
+/// answers what Cargo.toml says rather than which compiler this is — see
+/// `build.rs`'s `emit_version_line` for why those are different questions and
+/// what it cost to learn. The second whitespace-separated field is still the
+/// bare version, which `Makefile`'s install assertion reads.
+const VERSION_LINE: &str = env!("ALMIDE_VERSION_LINE");
+
 #[derive(Parser)]
-#[command(name = "almide", version)]
+#[command(name = "almide", version = VERSION_LINE)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -206,6 +214,10 @@ enum Commands {
         /// Exit 0 instead of 5 when the run has no tests to execute
         #[arg(long)]
         allow_no_tests: bool,
+        /// Print what every test wrote to stdout/stderr, passing ones included
+        /// (a failing test's output is always shown under its failure)
+        #[arg(long)]
+        show_output: bool,
     },
     /// Type check only
     Check {
@@ -302,7 +314,7 @@ enum Commands {
         /// Dependency name (default: every non-tag-pinned dependency)
         dep: Option<String>,
     },
-    /// Clear dependency cache
+    /// Clear the dependency cache and the native build scratch dirs
     Clean,
     /// Add a dependency
     Add {
@@ -350,6 +362,16 @@ enum Commands {
     SelfUpdate {
         /// Target version (e.g., v0.13.0); defaults to latest
         version: Option<String>,
+    },
+    /// Re-check a program's flight-grade certificates with the independent
+    /// `almide-verify` binary (found next to almide, else on PATH; there is no
+    /// built-in fallback). `almide verify app.almd [--emit out.bundle]`
+    /// produces the certificate bundle and hands it over; any other arguments
+    /// go to almide-verify verbatim (e.g. `almide verify ownership w.cert`).
+    Verify {
+        /// `<file.almd> [--emit <bundle>]`, or arguments for almide-verify
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     /// Agent/LLM semantic queries (outline, doc, stdlib-snapshot)
     Ide {
@@ -658,11 +680,12 @@ struct TestArgs {
     update_snapshots: bool,
     ci: bool,
     allow_no_tests: bool,
+    show_output: bool,
 }
 
 /// `dispatch`'s `Commands::Test` arm. Extracted verbatim.
 fn dispatch_test(args: TestArgs) {
-    let TestArgs { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests } = args;
+    let TestArgs { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests, show_output } = args;
     let file_str = file.as_deref().unwrap_or("");
     // The accept step (#1314). CI mode never writes: snapshots are committed
     // and reviewed like code, so a new or drifted snapshot fails the run
@@ -676,15 +699,15 @@ fn dispatch_test(args: TestArgs) {
         return;
     }
     if target.as_deref() == Some("wasm") {
-        cli::cmd_test_wasm(file_str, run.as_deref(), allow_no_tests);
+        cli::cmd_test_wasm(file_str, run.as_deref(), allow_no_tests, show_output);
     } else if json {
         cli::cmd_test_json(file_str, run.as_deref(), allow_no_tests);
     } else if matches!(target.as_deref(), Some("rust" | "native")) {
         // Explicit pure-native run (e.g. CI's "Test Rust" job).
-        cli::cmd_test(file_str, no_check, run.as_deref(), allow_no_tests);
+        cli::cmd_test(file_str, no_check, run.as_deref(), allow_no_tests, show_output);
     } else {
         // Default: fast rustc-free WASM path, native fallback for gaps.
-        cli::cmd_test_fast(file_str, no_check, run.as_deref(), allow_no_tests);
+        cli::cmd_test_fast(file_str, no_check, run.as_deref(), allow_no_tests, show_output);
     }
 }
 
@@ -1000,6 +1023,7 @@ fn dispatch_rest(command: Commands) {
         Commands::SelfUpdate { version } => {
             cli::cmd_self_update(version.as_deref());
         }
+        Commands::Verify { args } => std::process::exit(cli::cmd_verify(&args)),
         Commands::Emit { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map } => {
             cli::cmd_emit(cli::EmitArgs { file: &file, target: &target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map });
         }
@@ -1010,6 +1034,36 @@ fn dispatch_rest(command: Commands) {
         // before ever calling this function, so this arm is genuinely
         // unreachable at runtime.
         _ => unreachable!("dispatch's match should have handled this Commands variant"),
+    }
+}
+
+/// Refuse a `./almide.toml` that declares a key twice (#2583) before any
+/// command runs. Most readers of the manifest treat a parse error as "no
+/// project" (`parse_toml(..).ok()`), which is right for a missing file but
+/// would turn this error into a silent run without dependencies; one gate
+/// here makes the refusal the same on every command. The commands that must
+/// keep working in a broken project are exempt: `init`, `clean`, the editor
+/// servers (an exit would kill the session; their manifest reads already
+/// fail closed), and the ones that never read the manifest.
+fn refuse_duplicate_manifest_keys(command: &Commands) {
+    if matches!(
+        command,
+        Commands::Init
+            | Commands::Clean
+            | Commands::Lsp
+            | Commands::Mcp
+            | Commands::SelfUpdate { .. }
+            | Commands::DocsGen { .. }
+            | Commands::Switches { .. }
+            | Commands::Explain { .. }
+    ) {
+        return;
+    }
+    let path = std::path::Path::new("almide.toml");
+    let Ok(content) = std::fs::read_to_string(path) else { return };
+    if let Err(e) = project::check_manifest_duplicates(path, &content) {
+        err(&format!("error: {}", e));
+        std::process::exit(1);
     }
 }
 
@@ -1028,6 +1082,7 @@ fn dispatch(cli: Cli) {
             return;
         }
     };
+    refuse_duplicate_manifest_keys(&command);
     match command {
         Commands::Init => cli::cmd_init(),
         Commands::Run { file, no_check, release, target, verified: _, no_verified, time_report, program_args } =>
@@ -1058,8 +1113,8 @@ fn dispatch(cli: Cli) {
                 host: host.as_deref(),
             });
         }
-        Commands::Test { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests } => {
-            dispatch_test(TestArgs { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests })
+        Commands::Test { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests, show_output } => {
+            dispatch_test(TestArgs { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests, show_output })
         }
         Commands::Check { file, deny_warnings, json, explain, effects, timings, stamp, profile, allow, target } => dispatch_check(file, deny_warnings, json, explain, effects, timings, stamp, profile, allow, target),
         Commands::Fix { file, dry_run, json } => {

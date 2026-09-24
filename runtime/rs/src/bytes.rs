@@ -96,11 +96,25 @@ pub fn almide_rt_bytes_new(len: i64) -> Vec<u8> {
 }
 pub fn almide_rt_bytes_push(b: &mut Vec<u8>, val: i64) { b.push(val as u8); }
 pub fn almide_rt_bytes_set_at(b: &mut Vec<u8>, i: i64, val: i64) { if (i as usize) < b.len() { b[i as usize] = val as u8; } }
+// C-213: `copy_within` moves only when the source range is non-empty AND the
+// destination window fits; a window that does not fit — past the end, or a
+// NEGATIVE offset — is a silent no-op. The guard used to cast `dst as usize`
+// and ADD: `-1` became `usize::MAX`, `usize::MAX + 2` wrapped to 1 (release
+// arithmetic), `1 <= 6` passed, and `Vec::copy_within` panicked `dest is out
+// of bounds` — exit 101, the form ALS-T6 forbids — where the incumbent wasm
+// leg answered the unchanged buffer and the structural leg, which had copied
+// this guard verbatim, stored one byte before the payload (#2474). The sign
+// test now runs BEFORE any cast, and the fit test is the same `window()` the
+// `set_*` writers use (#1408), so no offset can reach the move unless
+// `[d, d + (e - s))` lies inside `[0, len)`.
 pub fn almide_rt_bytes_copy_within(b: &mut Vec<u8>, src_start: i64, src_end: i64, dst: i64) {
-    let s = src_start as usize;
-    let e = (src_end as usize).min(b.len());
-    let d = dst as usize;
-    if s < e && d + (e - s) <= b.len() {
+    let len = b.len();
+    let Ok(s) = usize::try_from(src_start) else { return; };
+    // A negative `src_end` is enormous as `usize` and clamps to the length —
+    // the documented clamp, unchanged; only the OFFSETS carry a sign test.
+    let e = usize::try_from(src_end).map_or(len, |e| e.min(len));
+    if s >= e { return; }
+    if let Some(d) = window(dst, e - s, len) {
         b.copy_within(s..e, d);
     }
 }
@@ -509,14 +523,22 @@ pub fn almide_rt_bytes_eof(b: &Vec<u8>, pos: i64) -> bool {
 
 // Each cursor read returns (next_pos, Option<T>). On EOF the position is
 // unchanged so the caller can detect the end without losing track.
+//
+// The window is judged by `window()` — the #1408 fix reached the fourteen
+// hand-written `set_*` accessors and recorded the readers as already
+// `checked_add`-guarded, but these two macros (every `read_*_at` of width
+// 1/2/4/8, both endians) were not in that set: they cast `pos as usize` and
+// ADDED, so `read_u32_le_at(b, -2)` computed `usize::MAX - 1 + 4 = 2`, passed
+// `2 > 8` as false, and the slice index panicked `range start index
+// 18446744073709551614` (exit 101) where both wasm legs answered `(-2, none)`
+// (#2479). A negative pos is rejected before the cast now, and a pos near the
+// top of i64 cannot wrap the sum, so every width answers `(pos, none)` for any
+// window that leaves the buffer.
 
 macro_rules! cursor_read_int {
     ($name:ident, $width:expr, $convert:expr) => {
         pub fn $name(b: &Vec<u8>, pos: i64) -> (i64, Option<i64>) {
-            let p = pos as usize;
-            if p + $width > b.len() {
-                return (pos, None);
-            }
+            let Some(p) = window(pos, $width, b.len()) else { return (pos, None); };
             let bytes = &b[p..p + $width];
             (pos + $width, Some($convert(bytes)))
         }
@@ -526,10 +548,7 @@ macro_rules! cursor_read_int {
 macro_rules! cursor_read_float {
     ($name:ident, $width:expr, $convert:expr) => {
         pub fn $name(b: &Vec<u8>, pos: i64) -> (i64, Option<f64>) {
-            let p = pos as usize;
-            if p + $width > b.len() {
-                return (pos, None);
-            }
+            let Some(p) = window(pos, $width, b.len()) else { return (pos, None); };
             let bytes = &b[p..p + $width];
             (pos + $width, Some($convert(bytes)))
         }
@@ -555,8 +574,7 @@ cursor_read_float!(almide_rt_bytes_read_f32_be_at, 4, |b: &[u8]| f32::from_be_by
 cursor_read_float!(almide_rt_bytes_read_f64_be_at, 8, |b: &[u8]| f64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]));
 
 pub fn almide_rt_bytes_read_bool_at(b: &Vec<u8>, pos: i64) -> (i64, Option<bool>) {
-    let p = pos as usize;
-    if p >= b.len() { return (pos, None); }
+    let Some(p) = window(pos, 1, b.len()) else { return (pos, None); };
     (pos + 1, Some(b[p] != 0))
 }
 
@@ -571,12 +589,13 @@ pub fn almide_rt_bytes_read_string_be_at(b: &Vec<u8>, pos: i64) -> (i64, Option<
     (pos + 4 + slen as i64, Some(s))
 }
 
+// Same window rule as the cursor macros above. This one was already correct,
+// but only by accident of the cast (a negative `pos` or `n` became huge and the
+// `checked_add` then failed); the two sign tests are written out so the rule is
+// visible where it is applied (#2479).
 pub fn almide_rt_bytes_take_at(b: &Vec<u8>, pos: i64, n: i64) -> (i64, Option<Vec<u8>>) {
-    let p = pos as usize;
-    let nn = n as usize;
-    if p.checked_add(nn).is_none_or(|__e| __e > b.len()) {
-        return (pos, None);
-    }
+    let Ok(nn) = usize::try_from(n) else { return (pos, None); };
+    let Some(p) = window(pos, nn, b.len()) else { return (pos, None); };
     (pos + n, Some(b[p..p + nn].to_vec()))
 }
 

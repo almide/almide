@@ -1,8 +1,11 @@
 // matrix_fused — SELF-HOSTED fused/aliased matrix kernels for v1, written at the
 // stdlib `Matrix` signature (pure compositions of the registered matrix.* self-
-// hosts — no prim floor here). Native-side these ARE delegations (matrix_p2.rs:
-// mul_scaled = scale(mul), the f32 family aliases the f64 ops), so composition is
-// the oracle. Each intermediate binds owned and drops at scope end.
+// hosts; the only prim floor is the shared abort a precondition takes).
+// Native-side these ARE delegations (matrix_p2.rs: mul_scaled = scale(mul), the
+// f32 family aliases the f64 ops), so composition is the oracle. Each
+// intermediate binds owned and drops at scope end.
+import prim
+
 fn matrix_mul_scaled(a: Matrix, s: Float, b: Matrix) -> Matrix = {
   let p = matrix.mul(a, b)
   matrix.scale(p, s)
@@ -40,4 +43,76 @@ fn matrix_attention_weights(q: Matrix, kt: Matrix, s: Float) -> Matrix = {
 fn matrix_scaled_dot_product_attention(q: Matrix, kt: Matrix, v: Matrix, s: Float) -> Matrix = {
   let w = matrix_attention_weights(q, kt, s)
   matrix.mul(w, v)
+}
+
+// ── named compositions (#1423 stage 4) — each is native's own arithmetic,
+// so every leg that serves the leaves serves these ──
+// fma: native `x * ka + y * kb` per zipped cell — two rounded products and
+// one rounded sum, no fused step (Rust never contracts `a*b+c`) — IS
+// add(scale(a, ka), scale(b, kb)), the zip shape included.
+fn matrix_fma(a: Matrix, ka: Float, b: Matrix, kb: Float) -> Matrix = {
+  let sa = matrix.scale(a, ka)
+  let sb = matrix.scale(b, kb)
+  matrix.add(sa, sb)
+}
+
+// fma3: native `x * ka + y * kb + z * kc`, left to right.
+fn matrix_fma3(a: Matrix, ka: Float, b: Matrix, kb: Float, c: Matrix, kc: Float) -> Matrix = {
+  let ab = matrix_fma(a, ka, b, kb)
+  let sc = matrix.scale(c, kc)
+  matrix.add(ab, sc)
+}
+
+// native: gelu(scale(add(mul(a, b), bias), alpha)), spelled as those calls.
+fn matrix_fused_gemm_bias_scale_gelu(a: Matrix, b: Matrix, bias: Matrix, alpha: Float) -> Matrix = {
+  let p = matrix.mul(a, b)
+  let s = matrix.add(p, bias)
+  let t = matrix.scale(s, alpha)
+  matrix.gelu(t)
+}
+
+// native: gelu(linear_row(x, weight, bias)).
+fn matrix_linear_row_gelu(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix = {
+  let l = matrix.linear_row(x, weight, bias)
+  matrix.gelu(l)
+}
+
+// native: linear_row(layer_norm_rows(x, gamma, beta, eps), weight, bias).
+fn matrix_pre_norm_linear(x: Matrix, gamma: List[Float], beta: List[Float], eps: Float, weight: Matrix, bias: List[Float]) -> Matrix = {
+  let n = matrix.layer_norm_rows(x, gamma, beta, eps)
+  matrix.linear_row(n, weight, bias)
+}
+
+// append_rows: native — an operand with no rows yields (a copy of) the
+// other; else base's rows then extra's, the width read off base's first row
+// (from_lists' own rule).
+// C-353: two non-empty operands must be the same WIDTH, and the abort is the
+// family's own line — the composition below would otherwise surface it as
+// `from_lists`' ragged-row abort, a different line from the one native prints
+// for the same call.
+fn matrix_append_rows(base: Matrix, extra: Matrix) -> Matrix = {
+  let rb = matrix.rows(base)
+  let re = matrix.rows(extra)
+  if rb == 0 then extra
+  else if re == 0 then base
+  else {
+    if matrix.cols(base) != matrix.cols(extra) then prim.die(prim.handle("Error: matrix shape mismatch\n")) else ()
+    matrix.from_lists(matrix.to_lists(base) + matrix.to_lists(extra))
+  }
+}
+
+// linear_f32_row_no_bias: native (matrix_p2.rs) reads W's f32 rows straight
+// out of the byte buffer and runs the sequential widen-mul-add dot — exactly
+// linear_row_no_bias over from_bytes_f32_le's decode (f32 → f64 widening is
+// exact; both sums run k-ascending from 0.0, mul then add). Native's edges,
+// spelled here: an empty x or a zero out/in extent is the all-zero
+// rows(x) × w_rows matrix, and a negative offset reads from 0 (`max(0)`).
+fn matrix_linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix = {
+  let rows = matrix.rows(x)
+  if rows == 0 or w_rows <= 0 or w_cols <= 0 then matrix.zeros(rows, w_rows)
+  else {
+    let off = if w_offset < 0 then 0 else w_offset
+    let w = matrix.from_bytes_f32_le(w_bytes, off, w_rows, w_cols)
+    matrix.linear_row_no_bias(x, w)
+  }
 }

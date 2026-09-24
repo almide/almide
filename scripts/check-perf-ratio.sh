@@ -65,7 +65,7 @@ RUNS="${PERF_RATIO_RUNS:-9}"
 # README states for onebrc), and what is gated is the relation between them —
 # which is the property #1337 is about and which IS machine-stable: 1.018x on
 # the M4 Pro, 1.045x on the CI runner, from the same commit.
-PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta fft=rust:fft"
+PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta fft=rust:fft wordfreq=rust:wordfreq"
 # Rows measured for the record and printed, but not anchored (see above), as
 # `bench=rust-ref-variant`.
 #
@@ -99,11 +99,20 @@ PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta
 # `wordfreq` / `wordfreq-group` (#2150, #2157) are the keyed-aggregation row in
 # its imperative and its CHEATSHEET (`list.group_by`) spelling, both against
 # `rust:wordfreq` — a `HashMap<String, i64>` with an owned key per draw, the
-# ordinary Rust for the program. Reported like strchurn: the row compares the
-# native `AlmideMap` (compact-ordered-dict, insertion order kept) against
-# std's hashbrown + SipHash, an allocator-and-hasher reading first. The
-# relation between the two spellings is the T5 reading (recommended = fastest).
-REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-comb=rust:listbuild strchurn=rust:strchurn mandelbrot=rust:mandelbrot decode=rust:decode wordfreq=rust:wordfreq wordfreq-group=rust:wordfreq"
+# ordinary Rust for the program. `wordfreq` is ANCHORED in PAIRS since #2150:
+# the row compares the native `AlmideMap` (compact-ordered-dict, insertion
+# order kept) against std's hashbrown + SipHash, an allocator-and-hasher
+# reading first, and was reported for that reason until it had readings on two
+# machine classes — five green develop runs on the ubuntu runner read 1.661 /
+# 1.681 / 1.728 / 1.737 / 1.754 at 2M (2026-09-23, runs 35849745852,
+# 35857650106, 35864492749, 35868760167, 35872683812) against 1.77 on an M4
+# Pro, so unlike listbuild's 1.58/0.91 the ratio does travel. The workload moved
+# to 4M in the same change (bench.py QUICK_ARGS) because the reference read
+# 0.0715s once at 2M, under MIN_SECONDS. `wordfreq-group` stays reported: it
+# is the idiom spelling, and its relation to `wordfreq` is gated on the wasm
+# leg (below); natively it runs `list.group_by`'s grouping lists, a different
+# program from the reference's single `entry` per draw.
+REPORTED="listbuild=rust:listbuild listbuild-append=rust:listbuild listbuild-comb=rust:listbuild strchurn=rust:strchurn mandelbrot=rust:mandelbrot decode=rust:decode wordfreq-group=rust:wordfreq"
 # VICTORY rows (#1330): the workloads where Almide native is FASTER than the
 # ordinary Rust for the program, and the gate is the claim itself. Each entry
 # is `bench=rust-ref-variant:ABLATION_ENV` — the env knob that turns off the
@@ -176,7 +185,7 @@ trap 'rm -f "$out"' EXIT
 python3 research/benchmark/perf/bench.py \
   --quick --runs "$RUNS" --legs native,rust \
   --bench nbody,spectralnorm,fasta,fft,binarytrees,treealloc,listbuild,listbuild-append,listbuild-comb,strchurn,fannkuchredux,mandelbrot,decode,wordfreq,wordfreq-group \
-  --ablate ALMIDE_DISABLE_OPT --ablate-bench nbody,spectralnorm,fasta,fft \
+  --ablate ALMIDE_DISABLE_OPT --ablate-bench nbody,spectralnorm,fasta,fft,wordfreq \
   --label ratchet --out "$out"
 
 # VICTORY ABLATION LEG (#1330): each victory row rebuilt from the same source
@@ -470,3 +479,73 @@ if penalty > ceiling:
 print(f"perf-ratio: {key:16s} {penalty:.3f}x the push loop on wasm "
       f"(ceiling {ceiling:.2f}x, recorded {baseline[key]:.3f}x) ok")
 PYSB
+
+# WASM GROUP-BY RELATION (#2156). The wordfreq pair above is native/rust in
+# the main run; this is the same pair on the WASM leg, because the defect it
+# watches lived only there: `lower_list_group_by` copy-grew its accumulator
+# per new key (a fresh address per insert), which pinned the lookup to the
+# linear `$scan_str` — every element walked every group key, ~11 µs per
+# element over the 5,000-word vocabulary, 110x the imperative `m[w] = …`
+# spelling of the same program (2M draws: 22 s against 201 ms), while the
+# native relation read 1.25x. The accumulator now grows in place through
+# `$map_reserve` and takes the index lane (#1219 stage 2), and the relation
+# reads ~0.8x. Both rows print the same bytes (bench.py verifies), so their
+# ratio is the aggregation shape and nothing else.
+#
+# The ceiling is IDIOM_CEILING, the value the native listbuild relation is
+# held to: the completion condition of #2156 is the recommended spelling
+# under 1.15x the loop on this leg too. Wall time with the min of RUNS
+# interleaved rounds, as the strbuild relation: the defect is two orders of
+# magnitude and the measured relation sits ~30% under the ceiling, so the
+# 1.2-1.5x runner bimodality has room without an Ir lane (callgrind cannot
+# see inside wasmtime). Size 2M draws (QUICK_ARGS): ~0.11 s per row on an
+# M4 Pro — 1M read 0.055 s, under MIN_SECONDS — and a regressed
+# (linear-scan) idiomatic row finishes in ~12 s instead of hanging.
+wf_out=$(mktemp -t perf-ratio-wordfreq.XXXXXX.json)
+trap 'rm -f "$out" "$sb_out" "$wf_out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
+python3 research/benchmark/perf/bench.py \
+  --quick --runs "$RUNS" --legs wasm \
+  --bench wordfreq,wordfreq-group \
+  --label ratchet-wordfreq-wasm --out "$wf_out"
+python3 - "$wf_out" "$BASELINE_FILE" "$IDIOM_CEILING" "$MIN_SECONDS" <<'PYWF'
+import json, sys
+
+out_path, baseline_path, ceiling, min_s = sys.argv[1:5]
+ceiling, min_s = float(ceiling), float(min_s)
+data = json.load(open(out_path))["results"]
+baseline = {}
+for line in open(baseline_path):
+    line = line.split("#", 1)[0].strip()
+    if line:
+        k, v = line.split()
+        baseline[k] = float(v)
+
+key = "wordfreq-wasm-idiom"
+if key not in baseline:
+    sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — the wasm group_by relation was "
+             "added without its recorded value; add the line on purpose.")
+
+
+def wasm_min(bench):
+    return data[bench]["variants"][f"{bench}/wasm"]["min"]
+
+
+group, loop = wasm_min("wordfreq-group"), wasm_min("wordfreq")
+penalty = group / loop
+if loop < min_s:
+    print(f"perf-ratio: {key:16s} SKIPPED — the imperative row measured {loop:.3f}s, under the "
+          f"{min_s:.2f}s noise floor; raise wordfreq's quick size rather than trusting the ratio")
+    sys.exit(0)
+if penalty > ceiling:
+    print(f"::error::perf-ratio: the RECOMMENDED `list.group_by` idiom costs {penalty:.3f}x the "
+          f"imperative Map loop on the WASM leg (ceiling {ceiling:.2f}x, {group:.3f}s vs {loop:.3f}s, "
+          f"recorded {baseline[key]:.3f}x). The cheatsheet tells authors to write `group_by |> map.map` "
+          "for keyed aggregation; when its lowering leaves the index lane the cost is linear in the "
+          "KEY COUNT per element, which is how #2156 shipped as 110x. The usual cause is "
+          "collections_hof.rs's lower_list_group_by giving up the stable accumulator (the "
+          "`$map_reserve` growth + `keyed_find`/`keyed_append` pair) for a per-key copy. Restore "
+          "the lane, do not raise the ceiling.")
+    sys.exit(1)
+print(f"perf-ratio: {key:16s} {penalty:.3f}x the imperative loop on wasm "
+      f"(ceiling {ceiling:.2f}x, recorded {baseline[key]:.3f}x) ok")
+PYWF

@@ -1,0 +1,35 @@
+// @contract: C-260
+// #2537: a top-level `let` whose value HOLDS closures (a list of records with
+// a function field, a list of variants with a closure payload) is a
+// declaration form that must run identically on both targets. Native used to
+// put the value in a `static LazyLock`, and `Rc<dyn Fn>` is not `Sync`, so
+// rustc refused the generated Rust (E0277) while the wasm leg printed the
+// answer. The value now lives in a per-thread lazy slot, still evaluated
+// once, and every read site is unchanged.
+type Step = { name: String, run: (Int) -> Int }
+
+type Op = | Apply((Int) -> Int) | Skip
+
+let STEPS = [
+  Step { name: "inc", run: (x) => x + 1 },
+  Step { name: "dbl", run: (x) => x * 2 }
+]
+
+let OPS = [
+  Apply((x) => x + 100),
+  Skip
+]
+
+fn apply_op(o: Op, x: Int) -> Int = match o {
+  Apply(f) => f(x),
+  Skip => x,
+}
+
+fn names(steps: List[Step]) -> String = steps |> list.map((s) => s.name) |> list.join(",")
+
+effect fn main() -> Unit = {
+  println(int.to_string(list.fold(STEPS, 1, (acc, s) => s.run(acc))))
+  println(int.to_string(list.fold(OPS, 0, (acc, o) => apply_op(o, acc))))
+  println(names(STEPS))
+  println(int.to_string(list.len(STEPS)))
+}

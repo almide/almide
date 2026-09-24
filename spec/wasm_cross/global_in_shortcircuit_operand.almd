@@ -1,0 +1,67 @@
+// @contract: C-191
+// The short-circuit half of C-191 (#2521). `a and b` lowers to
+// `if a then b else false` on the v1 leg, so a module-level `let` first read in
+// `b` has its defining op inside the THEN block — and the memo then served that
+// ValueId to a reader on the path where `b` never ran, which wasm reads as 0.
+// `f(0)` returned 0 where native returned 3000, without a trap and under a
+// `verified` build (fizz-ws-reconnect's `delay_ms(0)` reconnected with no
+// backoff). `or` is the mirror image: its right side runs when the LEFT is
+// false, so the wrong path is the one where the left decided. Both polarities,
+// both the scalar and the heap global, a `while` condition (where it was found)
+// and a three-term chain are pinned here; the sibling-arm and zero-iteration
+// shapes live in global_in_both_arms.almd.
+let CAP = 3000
+
+let TAG = "alpha"
+
+// The reported shape: `n < CAP` is the `and`'s right side, `else CAP` the reader.
+fn gate(n: Int) -> Int = {
+  let live = n > 0 and n < CAP
+  if live then 1 else CAP
+}
+
+// The mirror: `or` skips its right side when the left is TRUE.
+fn gate_or(n: Int) -> Int = {
+  let live = n > 0 or n < CAP
+  if live then CAP else 1
+}
+
+// The heap twin: TAG's bytes are materialized on the `and`'s right side.
+fn pick(flag: Bool, s: String) -> String = if flag and s == TAG then "hit" else TAG
+
+// How it was found: a `while` condition whose right side reads the cap, and a
+// tail that reads it again after zero iterations.
+fn backoff(n: Int) -> Int = {
+  var d = 500
+  while n > 0 and d < CAP {
+    d = d * 2
+  }
+  if d > CAP then CAP else d
+}
+
+// A three-term chain: the innermost right side is nested two regions deep.
+fn chain(n: Int) -> Int = {
+  let live = n > 0 and n > 1 and n < CAP
+  if live then 1 else CAP
+}
+
+fn main() -> Unit = {
+  // `and`: the skipped-right-side path, then the path that ran it.
+  println(int.to_string(gate(0)))
+  println(int.to_string(gate(5)))
+  println(int.to_string(gate(4000)))
+  // `or`: the skipped-right-side path is the one where the left was true.
+  println(int.to_string(gate_or(5)))
+  println(int.to_string(gate_or(0)))
+  // The heap twin, on both sides of the guard.
+  println(pick(false, "alpha"))
+  println(pick(true, "alpha"))
+  println(pick(true, "beta"))
+  // The `while` condition: zero iterations, then a real walk.
+  println(int.to_string(backoff(0)))
+  println(int.to_string(backoff(3)))
+  // The chain, decided at each term.
+  println(int.to_string(chain(0)))
+  println(int.to_string(chain(1)))
+  println(int.to_string(chain(2)))
+}

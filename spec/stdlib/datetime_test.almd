@@ -145,3 +145,65 @@ test "datetime.to_iso contains Z" {
   let iso = datetime.to_iso(ts)
   assert_eq(string.contains(iso, "Z"), true)
 }
+
+test "pre-epoch timestamps floor to their own day (#2488)" {
+  assert_eq(datetime.to_iso(-1), "1969-12-31T23:59:59Z")
+  assert_eq(datetime.weekday(-1), "Wednesday")
+  assert_eq(datetime.year(-1), 1969)
+  assert_eq(datetime.month(-1), 12)
+  assert_eq(datetime.day(-1), 31)
+  assert_eq(datetime.to_iso(-86399), "1969-12-31T00:00:01Z")
+  assert_eq(datetime.to_iso(-86400), "1969-12-31T00:00:00Z")
+  assert_eq(datetime.to_iso(-86401), "1969-12-30T23:59:59Z")
+  assert_eq(datetime.weekday(-86401), "Tuesday")
+  assert_eq(datetime.format(-1, "%Y-%m-%d %H:%M:%S"), "1969-12-31 23:59:59")
+  // the inverse still agrees with the forward direction across the epoch
+  assert_eq(datetime.from_parts(1969, 12, 31, 23, 59, 59), -1)
+  assert_eq(datetime.to_iso(-62135596801), "0000-12-31T23:59:59Z")
+}
+
+test "datetime.format %Y is the variable-width year to_iso renders" {
+  assert_eq(datetime.format(9223372036854775807, "%Y"), "292277026596")
+  assert_eq(datetime.format(0 - 9223372036854775807 - 1, "%Y"), "-292277022657")
+  assert_eq(datetime.format(-62135596801, "%Y"), "0000")
+}
+
+test "datetime.parse_iso applies a UTC offset (#2489)" {
+  assert_eq(datetime.parse_iso("2024-01-15T10:30:00Z") ?? -1, 1705314600)
+  assert_eq(datetime.parse_iso("2024-01-15T10:30:00") ?? -1, 1705314600)
+  assert_eq(datetime.parse_iso("2024-01-15T10:30:00+00:00") ?? -1, 1705314600)
+  assert_eq(datetime.parse_iso("2024-01-15T10:30:00+09:00") ?? -1, 1705282200)
+  assert_eq(datetime.parse_iso("2024-01-15T10:30:00-05:30") ?? -1, 1705334400)
+  assert_eq(datetime.parse_iso("2024-1-5T1:2:3") ?? -1, 1704416523)
+  assert_eq(datetime.parse_iso(" 2024-01-15T10:30:00Z ") ?? -1, 1705314600)
+  assert_eq(datetime.parse_iso("1969-12-31T23:59:59Z") ?? 0, -1)
+}
+
+fn parse_err(s: String) -> String = match datetime.parse_iso(s) {
+  ok(n) => "ok(${n})",
+  err(e) => e,
+}
+
+test "datetime.parse_iso rejects out-of-range fields by name (#2489)" {
+  assert_eq(parse_err("2024-13-45T99:99:99Z"), "month out of range: 13")
+  assert_eq(parse_err("2024-00-15T10:30:00Z"), "month out of range: 0")
+  assert_eq(parse_err("2024-01-00T10:30:00Z"), "day out of range: 0")
+  assert_eq(parse_err("2024-04-31T00:00:00Z"), "day out of range: 31")
+  assert_eq(parse_err("2023-02-29T00:00:00Z"), "day out of range: 29")
+  assert_eq(parse_err("2100-02-29T00:00:00Z"), "day out of range: 29")
+  assert_eq(parse_err("2024-02-29T00:00:00Z"), "ok(1709164800)")
+  assert_eq(parse_err("2000-02-29T00:00:00Z"), "ok(951782400)")
+  assert_eq(parse_err("2024-01-15T24:00:00Z"), "hour out of range: 24")
+  assert_eq(parse_err("2024-01-15T10:60:00Z"), "minute out of range: 60")
+  assert_eq(parse_err("2024-12-31T23:59:60Z"), "second out of range: 60")
+  assert_eq(parse_err("2024-01-15T10:30:00+24:00"), "invalid offset: +24:00")
+  assert_eq(parse_err("2024-01-15T10:30:00+09:60"), "invalid offset: +09:60")
+  assert_eq(parse_err("2024-01-15T10:30:00+9"), "invalid offset: +9")
+  assert_eq(parse_err("2024-01-15T10:30:00Z+09:00"), "invalid datetime format")
+  assert_eq(parse_err("2024-01-15T10:30:00ZZ"), "invalid datetime format")
+  assert_eq(parse_err("2024-01-15-junkT10:30:00Z"), "invalid datetime format")
+  assert_eq(parse_err("2024-01-15T10:30:00:xx"), "invalid datetime format")
+  assert_eq(parse_err("+2024-01-15T10:30:00Z"), "invalid datetime format")
+  assert_eq(parse_err("2024-01-15T10:30"), "invalid datetime format")
+  assert_eq(parse_err("2024-01-15"), "expected YYYY-MM-DDTHH:MM:SSZ")
+}

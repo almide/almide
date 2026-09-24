@@ -1,0 +1,5 @@
+scoped fn steps(n: Int, acc: Int) -> Int = if n == 0 then acc else steps(n - 1, acc + 1)
+
+effect fn main() -> Unit = println(int.to_string(scoped {
+  steps(6, 0)
+}))

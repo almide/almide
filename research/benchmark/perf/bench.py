@@ -120,9 +120,12 @@ SUITE = [
     # i64>`, an OWNED key cloned out of the vocabulary per draw, one `entry`
     # per draw. REPORTED, not anchored — a hash-map row compares allocators and
     # hashers before it compares codegen; the relation between the two rows is
-    # the T5 reading. Native/rust: the wasm leg's `group_by` is #2156's 110×.
-    ("wordfreq",       "wordfreq/wordfreq.almd",       ["wordfreq.rs"], "2000000", "20000", "bytes", ["native", "rust"]),
-    ("wordfreq-group", "wordfreq/wordfreq_group.almd", ["wordfreq.rs"], "2000000", "20000", "bytes", ["native", "rust"]),
+    # the T5 reading. The wasm leg is on both rows since #2156: `group_by`'s
+    # accumulator grows in place and takes the index lane, so the idiomatic
+    # row reads ~0.8x the imperative one there (it read 110x before), and
+    # check-perf-ratio.sh gates that relation on the wasm leg.
+    ("wordfreq",       "wordfreq/wordfreq.almd",       ["wordfreq.rs"], "2000000", "20000", "bytes", ["native", "wasm", "rust"]),
+    ("wordfreq-group", "wordfreq/wordfreq_group.almd", ["wordfreq.rs"], "2000000", "20000", "bytes", ["native", "wasm", "rust"]),
 ]
 
 QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
@@ -159,10 +162,18 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # ~0.2s native / ~0.16s reference at 1M decodes on an M4 Pro — over the
     # 0.08s spawn-noise floor on both sides; the docs quote ns/op at this N.
     "decode": "1000000",
-    # ~0.09s native / ~0.05s reference at 1M draws on an M4 Pro (2026-09-14);
-    # 2M is the docs' number, 1M keeps the two rows polite on a runner.
-    "wordfreq": "1000000",
-    "wordfreq-group": "1000000",
+    # 2M, the docs' number: ~0.15s native / ~0.11s wasm / ~0.10s reference on
+    # an M4 Pro (2026-09-23). 1M read ~0.055s on the wasm leg, under the 0.08s
+    # spawn-noise floor check-perf-ratio.sh's `wordfreq-wasm-idiom` relation
+    # (#2156) refuses to judge on; a regressed idiomatic row (the linear scan)
+    # takes ~12s at 2M, which is a red run and not a hang.
+    # 4M since #2150 anchored `wordfreq` native/rust in check-perf-ratio.sh's
+    # PAIRS: at 2M the reference read 0.0715s on one runner (develop run
+    # 35868760167), under the 0.08s floor PAIRS enforces as a hard error.
+    # Both spellings move together so the wasm idiom relation still compares
+    # one workload.
+    "wordfreq": "4000000",
+    "wordfreq-group": "4000000",
 }
 
 RUSTC_FLAGS = ["-C", "opt-level=3", "-C", "lto=yes", "-C", "codegen-units=1",

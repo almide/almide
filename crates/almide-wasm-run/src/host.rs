@@ -26,6 +26,31 @@ pub struct RunResult {
     /// allocation-ledger observable (#1586). None if the module predates
     /// the export.
     pub heap_end: Option<u64>,
+    /// The allocation counters (#2407), read from the `__alloc_count` /
+    /// `__alloc_reused` / `__alloc_bytes` / `__free_count` globals a module
+    /// emitted under the `ALMIDE_WASM_ALLOC_COUNT` switch carries. None for
+    /// a shipped (unarmed) module — the counters are absent, not zero.
+    pub alloc_count: Option<AllocCount>,
+}
+
+/// What the structural leg's allocator did during one run (#2407): the
+/// churn the `__heap` watermark cannot show. `allocs` is every allocation
+/// (a `$alloc` call or a fixed-size constructor's inlined bump, #2318),
+/// `reused` the ones a size-class free-list pop served (the rest bumped
+/// the heap), `bytes` the payload bytes requested in total, and `frees`
+/// every `$free` call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AllocCount {
+    pub allocs: u64,
+    pub reused: u64,
+    pub bytes: u64,
+    pub frees: u64,
+}
+
+impl std::fmt::Display for AllocCount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "allocs={} reused={} bytes={} frees={}", self.allocs, self.reused, self.bytes, self.frees)
+    }
 }
 
 struct Host {
@@ -124,6 +149,8 @@ fn fs_op_name(op: i32) -> &'static str {
         23 => "fs.walk",
         24 => "fs.read_lines_if_exists",
         25 => "fs.read_bytes_if_exists",
+        38 => "fs.stat",
+        39 => "fs.glob",
         51 => "fs.fold_lines",
         52 => "fs.for_each_line",
         _ => "fs",
@@ -325,6 +352,26 @@ fn fs_dispatch_meta(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         21 => fs_temp_file(a),
         22 => (pack(0, usize::from(Path::new(a).is_symlink())), Vec::new()),
         23 => fs_walk_sorted(a),
+        // fs.stat (#1423 stage 4): the four FileStat fields as i64 LE —
+        // native's almide_rt_fs_stat field for field (modified = Unix
+        // seconds, 0 when the host cannot say).
+        38 => match std::fs::metadata(a) {
+            Ok(m) => {
+                let modified = m
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0);
+                let mut buf = Vec::with_capacity(32);
+                for v in [m.len() as i64, i64::from(m.is_dir()), i64::from(m.is_file()), modified] {
+                    buf.extend_from_slice(&v.to_le_bytes());
+                }
+                (pack(0, buf.len()), buf)
+            }
+            Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
+        },
+        39 => fs_glob(a),
         24 => fs_read_lines(a),
         25 => match std::fs::read(a) {
             Ok(bytes) => (pack(0, bytes.len()), bytes),
@@ -374,6 +421,96 @@ fn fs_temp_file(prefix: &str) -> (i64, Vec<u8>) {
 }
 
 /// op 23: recursive directory listing, sorted, framed.
+/// fs.glob (#1423 stage 4): the SEGMENT-WISE matcher of C-228, transcribed
+/// from runtime/rs/src/fs.rs (almide_rt_fs_glob / glob_walk /
+/// glob_segs_match / glob_star_match) so the embedded host answers the
+/// same list, in the same order, with the same walk errors as native.
+fn fs_glob(pattern: &str) -> (i64, Vec<u8>) {
+    use std::path::Path;
+    fn walk(dir: &Path, rel_prefix: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), String> {
+        for entry in
+            std::fs::read_dir(dir).map_err(|e| io_err("fs.glob", &q(&dir.to_string_lossy()), e))?
+        {
+            let entry = entry.map_err(|e| io_err("fs.glob", &q(&dir.to_string_lossy()), e))?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let rel = if rel_prefix.is_empty() { name } else { format!("{rel_prefix}/{name}") };
+            let path = entry.path();
+            let descend = depth != Some(1) && path.is_dir();
+            out.push(rel.clone());
+            if descend {
+                walk(&path, &rel, depth.map(|d| d - 1), out)?;
+            }
+        }
+        Ok(())
+    }
+    fn segs_match(pats: &[&str], segs: &[&str]) -> bool {
+        match pats.first() {
+            None => segs.is_empty(),
+            Some(&"**") => (0..=segs.len()).any(|i| segs_match(&pats[1..], &segs[i..])),
+            Some(pat) => {
+                !segs.is_empty() && star_match(pat, segs[0]) && segs_match(&pats[1..], &segs[1..])
+            }
+        }
+    }
+    fn star_match(pat: &str, seg: &str) -> bool {
+        let parts: Vec<&str> = pat.split('*').collect();
+        if parts.len() == 1 {
+            return pat == seg;
+        }
+        let (first, last) = (parts[0], parts[parts.len() - 1]);
+        if seg.len() < first.len() + last.len() || !seg.starts_with(first) || !seg.ends_with(last) {
+            return false;
+        }
+        let region = &seg[first.len()..seg.len() - last.len()];
+        let mut pos = 0;
+        for part in &parts[1..parts.len() - 1] {
+            if part.is_empty() {
+                continue;
+            }
+            match region[pos..].find(part) {
+                Some(i) => pos += i + part.len(),
+                None => return false,
+            }
+        }
+        true
+    }
+    let ok_list = |results: Vec<String>| {
+        let buf = frames(&results);
+        (pack(0, buf.len()), buf)
+    };
+    let absolute = pattern.starts_with('/');
+    let segs: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
+    let k = segs.iter().take_while(|s| !s.contains('*')).count();
+    let pats = &segs[k..];
+    let base = format!("{}{}", if absolute { "/" } else { "" }, segs[..k].join("/"));
+    if pats.is_empty() {
+        let hit = !base.is_empty() && Path::new(&base).exists();
+        return ok_list(if hit { vec![base] } else { Vec::new() });
+    }
+    if !base.is_empty() && !Path::new(&base).is_dir() {
+        return ok_list(Vec::new());
+    }
+    let root = if base.is_empty() { "." } else { base.as_str() };
+    let prefix = if base.is_empty() || base == "/" { base.clone() } else { format!("{base}/") };
+    let depth = if pats.contains(&"**") { None } else { Some(pats.len()) };
+    let mut results = Vec::new();
+    if !base.is_empty() && segs_match(pats, &[]) {
+        results.push(base.clone());
+    }
+    let mut rels = Vec::new();
+    if let Err(m) = walk(Path::new(root), "", depth, &mut rels) {
+        return (pack(1, m.len()), m.into_bytes());
+    }
+    for rel in rels {
+        let rsegs: Vec<&str> = rel.split('/').collect();
+        if segs_match(pats, &rsegs) {
+            results.push(format!("{prefix}{rel}"));
+        }
+    }
+    results.sort();
+    ok_list(results)
+}
+
 fn fs_walk_sorted(root: &str) -> (i64, Vec<u8>) {
     use std::path::Path;
     fn walk(dir: &Path, out: &mut Vec<String>) -> Result<(), String> {
@@ -616,7 +753,19 @@ pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<RunResult> {
 
 /// Run with a fixed stdin buffer (tests; piped byte streams).
 pub fn run_wasm_with(bytes: &[u8], stdin: &[u8]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::Buf(stdin.to_vec()), None, &[])
+    run_wasm_src(bytes, StdinSource::Buf(stdin.to_vec()), None, &[], true)
+}
+
+/// `run_wasm` WITHOUT the 30 s epoch watchdog — the timing runner
+/// (`almide bench --target wasm`, #2150). The watchdog is test-harness
+/// equipment, and it is not free: epoch interruption makes wasmtime check
+/// the epoch at every loop header and function entry, which measured 1.9x
+/// on mandelbrot's inner loop and 1.2x on fft (same module, `wasmtime run`
+/// with and without `-W timeout`, 2026-09-24). A bench must time the
+/// emitted program, as the native leg's bench does and as a stock runtime
+/// runs it. A bench of a diverging program hangs, exactly as it does natively.
+pub fn run_wasm_unbounded(bytes: &[u8]) -> anyhow::Result<RunResult> {
+    run_wasm_src(bytes, StdinSource::Buf(Vec::new()), None, &[], false)
 }
 
 /// Run under a hard linear-memory budget (bytes). Growth past the cap
@@ -624,19 +773,19 @@ pub fn run_wasm_with(bytes: &[u8], stdin: &[u8]) -> anyhow::Result<RunResult> {
 /// "Error: out of memory" + exit 1 (C-197) — the heap-budget
 /// acceptance-gate observable (W-8; the RC arc's floor).
 pub fn run_wasm_capped(bytes: &[u8], max_memory_bytes: usize) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::Buf(Vec::new()), Some(max_memory_bytes), &[])
+    run_wasm_src(bytes, StdinSource::Buf(Vec::new()), Some(max_memory_bytes), &[], true)
 }
 
 /// Run with the process's real stdin, read lazily on first guest read
 /// (the product runner — never blocks for programs that skip stdin).
 pub fn run_wasm_real_stdin(bytes: &[u8]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::RealOnce, None, &[])
+    run_wasm_src(bytes, StdinSource::RealOnce, None, &[], true)
 }
 
 /// The product runner with program args (#1716): op 29 answers
 /// [argv0, args...] and the guest's frame walk skips argv0.
 pub fn run_wasm_real_stdin_args(bytes: &[u8], args: &[String]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::RealOnce, None, args)
+    run_wasm_src(bytes, StdinSource::RealOnce, None, args, true)
 }
 
 fn run_wasm_src(
@@ -644,13 +793,14 @@ fn run_wasm_src(
     stdin: StdinSource,
     max_memory_bytes: Option<usize>,
     args: &[String],
+    deadline: bool,
 ) -> anyhow::Result<RunResult> {
     wasmparser::validate(bytes)?; // the wall: never instantiate an invalid module
     // Epoch deadline: a fixture (or a MUTANT under the gate) that
     // diverges must FAIL the run, never hang the suite. 30s of real time
     // is orders beyond any fixture; the deadline maps to a plain trap.
     let mut cfg = wasmtime::Config::new();
-    cfg.epoch_interruption(true);
+    cfg.epoch_interruption(deadline);
     let engine = wasmtime::Engine::new(&cfg)?;
     let module = wasmtime::Module::new(&engine, bytes)?;
     let out = Arc::new(Mutex::new(String::new()));
@@ -782,11 +932,13 @@ fn run_wasm_src(
             Ok(())
         },
     )?;
-    store.set_epoch_deadline(1);
-    let eng = engine.clone();
-    let ticker = std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(30));
-        eng.increment_epoch();
+    let ticker = deadline.then(|| {
+        store.set_epoch_deadline(1);
+        let eng = engine.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+            eng.increment_epoch();
+        })
     });
     let instance = linker.instantiate(&mut store, &module)?;
     let main = instance.get_typed_func::<(), ()>(&mut store, "main")?;
@@ -838,11 +990,25 @@ fn run_wasm_src(
         (Some(h), Some(hi)) => Some(h.max(hi)),
         (h, _) => h,
     };
+    // #2407: the counters ride four i64 globals an armed build exports;
+    // all four or none — a module missing any is a shipped one.
+    let alloc_count = match (
+        read_global(&mut store, "__alloc_count"),
+        read_global(&mut store, "__alloc_reused"),
+        read_global(&mut store, "__alloc_bytes"),
+        read_global(&mut store, "__free_count"),
+    ) {
+        (Some(allocs), Some(reused), Some(bytes), Some(frees)) => {
+            Some(AllocCount { allocs, reused, bytes, frees })
+        }
+        _ => None,
+    };
     Ok(RunResult {
         stdout: out.lock().expect("test harness invariant").clone(),
         stderr: err.lock().expect("test harness invariant").clone(),
         exit: exit_code,
         heap_end,
+        alloc_count,
     })
 }
 

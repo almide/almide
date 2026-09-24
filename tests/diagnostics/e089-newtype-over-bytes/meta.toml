@@ -1,0 +1,3 @@
+expects_code = "E089"
+expects_error = "`Blob` wraps Bytes"
+hint_substring = "bytes.to_list(b)"

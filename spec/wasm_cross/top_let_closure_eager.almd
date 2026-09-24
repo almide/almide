@@ -1,0 +1,18 @@
+// @contract: C-007
+// #2537: an ABORTABLE top-level `let` whose value holds a closure still
+// evaluates eagerly at startup on both targets, so no stdout is emitted.
+// Native keeps such a value in a per-thread lazy slot rather than a
+// `static LazyLock` (`Rc<dyn Fn>` is not `Sync`); main forces the slot at
+// entry exactly as it forces a LazyLock.
+type Step = { name: String, run: (Int) -> Int }
+
+let ZERO = 0
+
+let STEPS = [
+  Step { name: int.to_string(7 / ZERO), run: (x) => x + 1 }
+]
+
+effect fn main() -> Unit = {
+  println("before use")
+  println(int.to_string(list.fold(STEPS, 1, (acc, s) => s.run(acc))))
+}

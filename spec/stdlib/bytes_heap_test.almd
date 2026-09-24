@@ -2,7 +2,7 @@ import bytes
 
 test "heap_save and heap_restore free allocations" {
   let cp = bytes.heap_save()
-  let b1 = bytes.new(1024)
+  var b1 = bytes.new(1024)
   bytes.set_f32_le(b1, 0, 42.0)
   assert(bytes.read_f32_le(b1, 0) == 42.0)
   bytes.heap_restore(cp)
@@ -24,7 +24,7 @@ test "heap_save and restore are callable" {
 
 test "nested heap_save/restore" {
   let outer = bytes.heap_save()
-  let b1 = bytes.new(256)
+  var b1 = bytes.new(256)
   bytes.set_i32_le(b1, 0, 99)
   let inner = bytes.heap_save()
   let _b2 = bytes.new(256)

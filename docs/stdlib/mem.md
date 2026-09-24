@@ -1,17 +1,19 @@
 # mem
 
-Bump-allocator checkpoints for the wasm leg. `import mem`.
+Arena checkpoints — the C-041 contract surface, `bytes.heap_save` /
+`bytes.heap_restore`'s twin. `import mem`.
 
 Almide manages memory automatically — reference counting on the native leg, the
-Perceus-certified discipline on wasm. `mem` is an escape hatch for one narrow
-case: a hot loop that allocates a large number of short-lived values whose
-lifetimes nest perfectly. Take a mark before the batch, release back to it
-after, and the whole batch is reclaimed in one step.
+Perceus-certified discipline on wasm. `mem` is the scope-discipline spelling for
+one narrow case: a hot loop that allocates a large number of short-lived values
+whose lifetimes nest perfectly. Take a mark before the batch and release back to
+it after.
 
-**This is a raw scope discipline, not a garbage collector.** Restoring to a mark
-invalidates every allocation made after it. Anything that outlives the batch must
-be produced BEFORE the mark, or copied out before the restore. Reach for it only
-when a measurement says the allocator is the bottleneck.
+**This is a raw scope discipline, not a garbage collector.** The contract lets an
+implementation invalidate every allocation made after a mark on restore, so
+anything that outlives the batch must be produced BEFORE the mark, or copied out
+before the restore — a program that respects that rule produces identical results
+on every target, whatever the allocator underneath does.
 
 ### `mem.save() -> Int`
 
@@ -30,25 +32,29 @@ for row in rows {
 mem.restore(mark)
 ```
 
-On the native leg both calls are no-ops: reference counting already reclaims the
-same allocations, so a program using `mem` is meant to behave identically on both
-targets.
-
-Today, however, NO wasm leg builds it — measured by the target-availability
-sweep (#1827) and declared in `proofs/target-availability.toml`: the MIR lowering
-refuses the allocator-mark scalar ("scalar binding outside the value subset",
-even in the example above from `main`), `mem.restore` is not an admitted
-effectful call, and the structural leg has no arm; `almide build --target wasm`
-reports it as E081 at check time. What IS pinned is that the native symbols exist
-at all — they used to be declared and never defined, so any program calling them
-emitted invalid Rust.
+On every leg both calls are the trivial pair today: native's runtime returns `0`
+and ignores the mark (`runtime/rs/src/mem.rs`), and v1's wasm legs link the same
+pair from `stdlib/mem_checkpoint.almd` — reference counting already reclaims
+scratch deterministically at scope end, exactly what a restore would reclaim, so
+there is nothing left for the mark to do (v0's wasm leg reset a bump pointer here;
+that allocator is gone). The mark is opaque and never meaningful to print. A
+program using `mem` builds and runs on `--target wasm` (both the structural leg
+and the incumbent) and behaves byte-identically to native; the parity fixture is
+`spec/wasm_cross/mem_checkpoint.almd`. Before 0.63 no wasm leg built it (E081 at
+check time, #1423), and before that the native symbols were declared but never
+defined, so any program calling them emitted invalid Rust — both are pinned now.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
 ## Signature index (2 functions)
 
 ```
+// Opaque checkpoint for restore.
+// @since 0.23.5 or earlier
 mem.save() -> Int
+
+// Rewinds to mark; a no-op under RC today.
+// @since 0.23.5 or earlier
 mem.restore(mark: Int) -> Unit
 ```
 

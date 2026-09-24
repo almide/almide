@@ -296,19 +296,21 @@ impl<'a> Interpreter<'a> {
         for (i, (param, arg)) in func.params.iter().zip(args.iter()).enumerate() {
             // TWO ways a parameter copies out, and the second is why #1436
             // existed. BY DECLARATION: a `mut` param, the C-132 lowering.
-            // BY TYPE: a `Bytes` param. The byte-writer family
+            // BY TYPE: a `Bytes` param. Until #2466 the byte-writer family
             // (`set_*`/`append_*`/`write_*`, and `fill`/`copy_from`/
-            // `copy_within`) is `@intrinsic`s whose mutation lives in the
-            // native `&mut Vec<u8>` signature — invisible to the `.almd`
+            // `copy_within`) was `@intrinsic`s whose mutation lived only in
+            // the native `&mut Vec<u8>` signature — invisible to the `.almd`
             // declaration, so a user fn taking a PLAIN `Bytes` param and
-            // writing into it mutates the CALLER's buffer on both backends
+            // writing into it mutated the CALLER's buffer on both backends
             // while carrying no `mut` marker for this gate to see. The interp
             // wrote back into the callee's own frame, the effect died at the
             // frame boundary, and the third judge voted the UNMODIFIED buffer
-            // — a wrong vote where the module doc demands a skip. Copying a
-            // Bytes param out unconditionally is sound in the other direction
-            // too: a callee that never writes hands back the value it was
-            // given, so the copy-out is a no-op.
+            // — a wrong vote where the module doc demands a skip. #2466 put
+            // the `mut` on every writer's surface (E032 for a plain param),
+            // so the by-type route no longer carries a write; it stays
+            // because copying a Bytes param out unconditionally is sound: a
+            // callee that never writes hands back the value it was given, so
+            // the copy-out is a no-op.
             let by_decl = param.is_mut;
             let by_type = matches!(param.ty, almide_lang::types::Ty::Bytes);
             if !by_decl && !by_type {

@@ -158,6 +158,22 @@ pub(crate) enum Helper {
     /// `$copy_entries(block) -> block`: `$block_copy` plus the entry
     /// credits of the whole copy.
     CopyEntries { inc_entries: u32 },
+    /// #2312 shape 1 — the ROOM-FREE appends of a bounded build
+    /// (`runtime_line::BoundedBuild`): the same writes as `$append_copy` /
+    /// `$append_i64` / `$append_bool`, without the room check and so
+    /// without the `$line_grow` edge. Only a build whose written extent is
+    /// statically inside the fixed room may call them.
+    /// `$append_raw(cur, src, len) -> cur`.
+    AppendRaw,
+    /// `$append_i64_raw(cur, v: i64) -> cur`.
+    AppendI64Raw,
+    /// `$append_bool_raw(cur, b) -> cur` over the interned `"true"` /
+    /// `"false"` pool blocks.
+    AppendBoolRaw { true_base: u32, false_base: u32 },
+    /// `$print_i64(v: i64)`: a line that is ONE Int's display — itoa into
+    /// the scratch, hand `[ITOA_END - len, ITOA_END)` to the stream import
+    /// (`import` = println / eprintln). No block, no build.
+    PrintI64 { import: u32 },
 }
 
 /// The pretty printer's extra pooled fragments.
@@ -211,6 +227,13 @@ pub(crate) struct FnWork {
     /// F_FN_BASE + infos.len() + 1 (right after main) — known before
     /// lowering starts, so call sites take helper indices eagerly.
     pub(crate) helper_base: std::cell::Cell<u32>,
+    /// #2312 shape 1: this pass may emit the bounded-line rewrites
+    /// (line_bounded.rs — room-free outermost builds, the one-Int line,
+    /// the `${int.to_string(e)}` fold). Off = the checked emission.
+    pub(crate) bounded_lines: std::cell::Cell<bool>,
+    /// Set when a bounded-line rewrite was actually emitted: only then is
+    /// there a second emission to compare against.
+    pub(crate) bounded_fired: std::cell::Cell<bool>,
     /// DisplayNamed helper bodies, built in the display-helper phase
     /// right after the fn that first registered them (per-fn refusal
     /// granularity survives: a failing body refuses THAT fn, later

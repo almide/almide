@@ -1,0 +1,108 @@
+// @contract: C-323
+// #2473: or-pattern alternatives over HEAP-valued subjects, the matrix the
+// incumbent wasm lowering used to refuse — a String, a List[String], a record-shaped
+// variant case, an Option[String] / Result[String, String], and NESTED alternatives inside a
+// constructor (`some(Word("let")) | some(Word("fn"))`), with and without guards,
+// in value and in statement position. Every subject is read again after the
+// match, so an alternative that consumed or freed it would print a different
+// answer (or trap) instead of the second read.
+type Tok = | Word(String) | Num(Int) | Eof
+
+type Shape = | Circle { r: Int, tag: String } | Square(Int)
+
+fn cls(s: String) -> String = match s {
+  "let" | "fn" => "kw",
+  "" => "empty",
+  _ => "id",
+}
+
+fn head_kind(xs: List[String]) -> String = match xs {
+  [] => "empty",
+  ["a"] | ["a", _] => "a-led",
+  ["b", _, _] | ["c"] => "bc",
+  _ => "other",
+}
+
+fn opt_word(o: String?) -> Int = match o {
+  some("x") | some("y") => 1,
+  some(w) => string.len(w),
+  none => 0,
+}
+
+fn res_code(r: Result[String, String]) -> String = match r {
+  ok("a") | err("a") => "a",
+  ok(_) => "ok",
+  err(e) if string.len(e) > 3 => "long-err",
+  err(_) => "err",
+}
+
+fn nested(o: Tok?) -> String = match o {
+  some(Word("let")) | some(Word("fn")) => "keyword",
+  some(Num(0)) | none => "zero-or-none",
+  some(_) => "other",
+}
+
+fn shape_kind(p: Shape) -> String = match p {
+  Circle { r: _, tag: _ } | Square(0) => "round-or-empty",
+  Square(1) | Square(2) => "small-square",
+  Square(_) => "square",
+}
+
+fn guarded(o: Int?) -> String = match o {
+  some(1) | some(2) if false => "never",
+  some(_) | none if true => "taken",
+  _ => "fell",
+}
+
+effect fn main() -> Unit = {
+  let s = string.repeat("le", 1) + "t"
+  println(cls(s))
+  println(cls(""))
+  println(cls(s + "x"))
+  println(s)
+  let xs = ["a", string.repeat("z", 2)]
+  println(head_kind(xs))
+  println(head_kind(["a"]))
+  println(head_kind(["b", "1", "2"]))
+  println(head_kind(["c"]))
+  println(head_kind([]))
+  println(head_kind(["q"]))
+  println(list.join(xs, ","))
+  let w = some(string.repeat("y", 1))
+  println(int.to_string(opt_word(w)))
+  println(int.to_string(opt_word(some("hello"))))
+  println(int.to_string(opt_word(none)))
+  println(w ?? "-")
+  println(res_code(ok("a")))
+  println(res_code(err("a")))
+  println(res_code(ok("b")))
+  println(res_code(err("boom!")))
+  println(res_code(err("no")))
+  let t = Word(string.repeat("f", 1) + "n")
+  println(nested(some(t)))
+  println(nested(some(Word("let"))))
+  println(nested(some(Word("var"))))
+  println(nested(some(Num(0))))
+  println(nested(some(Num(3))))
+  println(nested(none))
+  println(nested(some(Eof)))
+  println(nested(some(t)))
+  let c = Circle { r: 3, tag: string.repeat("unit", 1) }
+  println(shape_kind(c))
+  println(shape_kind(Square(0)))
+  println(shape_kind(Square(2)))
+  println(shape_kind(Square(9)))
+  println(shape_kind(c))
+  println(guarded(some(1)))
+  println(guarded(none))
+  let r = match s {
+    "let" | "var" => "binding",
+    _ => "other",
+  }
+  println(r)
+  match xs {
+    ["a", _] | ["b"] => println("stmt a-led"),
+    _ => println("stmt other"),
+  }
+  println(s)
+}

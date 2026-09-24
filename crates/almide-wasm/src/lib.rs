@@ -57,7 +57,7 @@ use wasm_encoder::{Function, MemArg, ValType};
 /// The `to_wasi` transform parks op results in a fixed span between its data
 /// base and the env.set overlay page; this is that span, declared HERE because
 /// the emitter is what decides whether a call can be lowered at all, and
-/// `crates/almide-wasm-run/src/wasi.rs` asserts at compile time that its own
+/// `crates/almide-wasi/src/lib.rs` asserts at compile time that its own
 /// layout still denotes the same number. One limit, two readers, no comment
 /// asking anyone to keep them in sync.
 pub const WASI_STAGING_ROOM: i64 = 4 * 65536 - 1024;
@@ -105,6 +105,8 @@ mod param_borrow;
 mod bytes_rw;
 mod bytes_recv;
 mod bytes_split;
+pub mod alloc_count;
+mod alloc_inline;
 pub mod heap_cap;
 pub mod host_exports;
 pub mod witness;
@@ -129,6 +131,7 @@ mod prim;
 mod runtime;
 mod runtime_alloc;
 mod runtime_line;
+mod line_bounded;
 mod runtime_str;
 mod scalar_ext;
 mod data;
@@ -151,6 +154,7 @@ mod list_order;
 mod list_sort;
 mod string_scan;
 mod len_hoist;
+mod cow_hoist;
 mod stmts;
 mod stmts_index;
 mod stmts_append;
@@ -160,10 +164,14 @@ pub(crate) mod work;
 pub(crate) use work::*;
 mod display;
 mod matrix;
+mod matrix_elem;
 mod matrix_kernels;
 mod matrix_load;
+mod matrix_ops;
+mod matrix_prod;
 mod matrix_rope;
 mod matrix_scalars;
+mod matrix_shape;
 mod binop;
 mod fan;
 mod fs;
@@ -187,6 +195,7 @@ mod tco;
 mod types_table;
 mod value;
 mod utf8_helpers;
+mod json_helpers;
 mod value_helpers;
 mod whitelist;
 
@@ -545,10 +554,23 @@ struct FnInfo {
     /// releases) or only borrow it (neither) — param_borrow.rs (#2028).
     /// Both sides of every call edge read this one vector.
     param_owned: Vec<bool>,
+    /// Per param: was it declared `mut` (#2503)? The C-132 move-mode
+    /// rewrite clears `mutated_params` but keeps each parameter's marker,
+    /// so a CALL SITE can still tell which argument the callee writes into
+    /// and hands back. The site makes that argument's var unique first
+    /// (`emit_read_mut_var_cow`), exactly as a direct in-place write in
+    /// this frame would, so an alias bound before the call keeps its
+    /// pre-write value (C-033) and an unaliased buffer still costs nothing.
+    param_mut: Vec<bool>,
     /// `@extern(wasm, module, name)` (#2275): the slot is a declared import
     /// the host serves, not a body — its stub leaves the module in the
     /// `imports::declare` post-pass.
     import: Option<(String, String)>,
+    /// The outlined body of a `scoped { … }` block (#1997): every call to
+    /// it is a DECLARED region boundary — `region.rs` opens the window
+    /// there unconditionally, tail position and `ALMIDE_REGION_OFF`
+    /// notwithstanding, or reports a compiler defect.
+    scoped_entry: bool,
 }
 
 struct FnTable {

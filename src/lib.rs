@@ -35,6 +35,11 @@ pub use almide_frontend::lint_shebang;
 pub use almide_optimize::optimize;
 pub use almide_optimize::mono;
 
+// The stock-WASI transform of a structural module (#2554): what a library
+// consumer applies to `wasm_route`'s structural bytes before a p1 runtime
+// loads them (`RoutedWasm::stock_wasi` does it for you).
+pub use almide_wasi as wasi;
+
 // Reference interpreter (the third cross-target judge).
 pub use almide_interp as interp;
 
@@ -52,6 +57,7 @@ pub mod types {
 // ── CLI-only modules (remain in main crate) ──
 pub mod project;
 pub mod wasm_leg;
+pub mod wasm_route;
 pub mod project_fetch;
 pub mod resolve;
 

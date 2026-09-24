@@ -61,8 +61,8 @@ module_path: IDENT (DOT IDENT)*
          | test_where_def
 
 // ── fn ───────────────────────────────────────────────────────────
-// [@attr…] [pub] [local|mod] [effect] fn name[G](params) -> Ty[!] [= body]
-fn_decl: _o_attrs _o_pub _o_vis _o_effect FN fn_name _o_generics "(" param_list ")" ARROW type_expr _o_bang _o_fn_body
+// [@attr…] [pub] [local|mod] [scoped] [effect] fn name[G](params) -> Ty[!] [= body]
+fn_decl: _o_attrs _o_pub _o_vis _o_scoped _o_effect FN fn_name _o_generics "(" param_list ")" ARROW type_expr _o_bang _o_fn_body
 
 _o_fn_body: fn_body
           |
@@ -74,8 +74,8 @@ fn_body: EQ _nl braceless_block
 braceless_block: _braceless_head (_stmt_sep stmt)* _o_stmt_sep
 _braceless_head: let_stmt | var_stmt | guard_stmt
 
-fn_name: TYPENAME DOT IDENT
-       | IDENT
+fn_name: TYPENAME DOT _ident
+       | _ident
 
 param_list: _nl _o_params _nl
 // The first parameter may be BARE (no `: Type`) — that is the convention
@@ -85,13 +85,13 @@ param_list: _nl _o_params _nl
 _o_params: _bare_receiver (COMMA _nl param)* _comma
          | param (COMMA _nl param)* _comma
          |
-_bare_receiver: IDENT
+_bare_receiver: _o_mut _ident
 param: _o_attrs _o_mut _param_name COLON type_expr _o_default
-_param_name: IDENT | VAR
+_param_name: _ident | VAR
 
 // ── type ─────────────────────────────────────────────────────────
 type_decl: _o_vis TYPE_KW TYPENAME _o_generics _o_deriving _nl EQ _nl type_expr
-_o_deriving: COLON TYPENAME (COMMA TYPENAME)*
+_o_deriving: COLON protocol_ref (COMMA protocol_ref)*
            |
 
 // ── protocol ─────────────────────────────────────────────────────
@@ -189,8 +189,11 @@ variant_case: TYPENAME "(" _o_type_list ")"
 generic_params: "[" generic_param (COMMA generic_param)* "]"
 generic_param: TYPENAME _o_generic_bound
 _o_generic_bound: COLON record_type
-                | COLON TYPENAME (PLUS TYPENAME)*
+                | COLON protocol_ref (PLUS protocol_ref)*
                 |
+// A protocol reference in a bound or a conformance list (#1589): qualified by
+// module like a type, with the protocol's type arguments when it is generic.
+protocol_ref: qualified_type_name ("[" type_args "]")?
 
 // ═══════════════════════════════════════════════════════════════════
 // Statements
@@ -215,9 +218,9 @@ let_stmt: LET "{" name_tok (COMMA _nl name_tok)* _comma "}" EQ _nl expr   -> let
         | LET destructure_tuple EQ _nl expr                               -> let_tuple
         | LET _bind_name _o_ty_ann EQ _nl expr
 
-var_stmt: VAR IDENT _o_ty_ann EQ _nl expr
+var_stmt: VAR _ident _o_ty_ann EQ _nl expr
 
-guard_stmt: GUARD LET _nl IDENT _nl EQ _nl expr _nl ELSE _nl expr
+guard_stmt: GUARD LET _nl _ident _nl EQ _nl expr _nl ELSE _nl expr
           | GUARD expr ELSE _nl expr
 
 // Assignment targets accept TYPE_NAME too: module globals follow the
@@ -226,11 +229,11 @@ guard_stmt: GUARD LET _nl IDENT _nl EQ _nl expr _nl ELSE _nl expr
 assign_stmt: _assign_target EQ _nl expr
 index_assign_stmt: _assign_target "[" expr "]" EQ _nl expr
 field_assign_stmt: _assign_target DOT name_tok EQ _nl expr
-_assign_target: IDENT | TYPENAME
+_assign_target: _ident | TYPENAME
 
 destructure_tuple: "(" (_destructure_elem _comma _nl)* ")"
-_destructure_elem: destructure_tuple | UNDERSCORE | IDENT
-_bind_name: IDENT | UNDERSCORE
+_destructure_elem: destructure_tuple | UNDERSCORE | _ident
+_bind_name: _ident | UNDERSCORE
 
 // ═══════════════════════════════════════════════════════════════════
 // Expressions
@@ -291,7 +294,7 @@ call_args: _nl _o_call_arg_list _nl
 _o_call_arg_list: call_arg (COMMA _nl call_arg)* _comma
                 |
 ?call_arg: UNDERSCORE                              -> placeholder
-         | IDENT COLON _nl expr                    -> named_arg
+         | _ident COLON _nl expr                    -> named_arg
          | expr COLON type_expr                    -> ascribed_arg
          | expr
 
@@ -313,7 +316,8 @@ _o_call_arg_list: call_arg (COMMA _nl call_arg)* _comma
         | list_expr
         | paren_expr
         | typename_expr
-        | IDENT
+        | scoped_block
+        | _ident
 
 // The positions where the compiler demands TokenType::String specifically —
 // an INTERPOLATED string is a different token and is a parse error there.
@@ -337,7 +341,7 @@ ctor_expr: SOME "(" expr ")"
 
 // ── control flow ─────────────────────────────────────────────────
 
-if_expr: IF _nl LET _nl IDENT _nl EQ _nl expr _nl block _nl ELSE _nl block  -> if_let
+if_expr: IF _nl LET _nl _ident _nl EQ _nl expr _nl block _nl ELSE _nl block  -> if_let
        | IF _nl expr _nl THEN _nl _if_branch _o_else
 _o_else: _nl ELSE _nl _if_branch
        |
@@ -354,9 +358,9 @@ _o_guard: IF expr
 while_expr: WHILE _nl expr _nl block
 for_expr: FOR _for_binder IN expr block
 _for_binder: UNDERSCORE
-           | IDENT
+           | _ident
            | "(" _for_name (COMMA _for_name)* ")"
-_for_name: IDENT | UNDERSCORE
+_for_name: _ident | UNDERSCORE
 
 // `fan { … }`, `fan.<head> { … }`, `fan.<head>(arg) { … }`. The head NAME is
 // left open (any IDENT); the compiler restricts it to
@@ -375,6 +379,11 @@ _o_expr: expr
 block: "{" _nl (stmt _stmt_sep)* _o_stmt "}"
 _o_stmt: stmt
        |
+
+// `scoped { … }` (#1997, ALS-E31): the declared reclamation boundary. Always
+// a BLOCK body, never a record literal — `scoped { x: 1 }` is a block whose
+// first statement is malformed, which is how the compiler reads it too.
+scoped_block: SCOPED block
 
 record_lit: "{" _nl field_kv (_seps field_init)* _o_seps "}"
 spread_record: "{" _nl DOTDOTDOT expr (COMMA _nl field_init)* _o_seps "}"
@@ -425,8 +434,8 @@ _o_field_init: field_init
         | INTERP_STRING | HEREDOC_INTERP
         | TRUE | FALSE
         | ctor_pattern
-        | IDENT "@" pattern                     -> as_pat
-        | IDENT                                 -> bind_pat
+        | _ident "@" pattern                     -> as_pat
+        | _ident                                 -> bind_pat
 
 _ok_kw: OK | OK_UC
 _err_kw: ERR | ERR_UC
@@ -460,8 +469,16 @@ _o_field_pat: COLON pattern
 // Shared name positions and nullable helpers
 // ═══════════════════════════════════════════════════════════════════
 
+// Every plain-identifier position. `scoped` is CONTEXTUAL (#1997): the lexer
+// has no such keyword (it is matched by SPELLING, which is why it is absent
+// from the KEYWORDS block below), so a name spelled `scoped` reads as a name
+// wherever the two qualifier heads do not claim it. Earley carries the one
+// ambiguity: in `match scoped { … }` the subject is this identifier and the
+// brace opens the match body, exactly as the parser reads it.
+_ident: IDENT | SCOPED
+
 // `expect_any_name`: identifier, TypeName, or a SOFT KEYWORD used as a name.
-?name_tok: IDENT | TYPENAME | soft_keyword
+?name_tok: _ident | TYPENAME | soft_keyword
 !soft_keyword: OK | OK_UC | ERR | ERR_UC | SOME | SOME_UC | NONE | NONE_UC | TODO
 !keyword_as_name: EFFECT | TYPE_KW | TEST | FN | LET | VAR | MOD | IN | FOR | MATCH
 
@@ -481,6 +498,8 @@ _vis: LOCAL | MOD
 _o_vis: _vis
       |
 _o_effect: EFFECT
+         |
+_o_scoped: SCOPED
          |
 _o_mut: MUT
       |
@@ -558,6 +577,12 @@ FAN: "fan"
 AS: "as"
 WHERE: "where"
 FN_TYPENAME: "Fn"
+// `scoped` (#1997, ALS-E31) is contextual in BOTH of its positions: a block
+// qualifier only when `{` follows it directly, a declaration qualifier only
+// when `fn` / `effect` does. Everywhere else it is an ordinary identifier and
+// keeps its meaning, so `_ident` below admits it in every name position — a
+// reserved `scoped` would make `let scoped = 41` unsamplable.
+SCOPED: "scoped"
 
 // ── operators & delimiters (lexer.rs OPERATORS) ──── BEGIN-OPERATORS ──
 DOTDOTDOT: "..."

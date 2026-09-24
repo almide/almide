@@ -102,6 +102,9 @@ pub fn normalize_fallible_user_hofs(
         twins.push(Decl::Fn {
             name: twin_name(*hof),
             effect: *effect,
+            // A scoped fn cannot call its callback (an unknown indirect call
+            // is E087), so the fallible twin is never a scoped worker.
+            scoped: false,
             visibility: Visibility::Local,
             extern_attrs: vec![],
             export_attrs: vec![],

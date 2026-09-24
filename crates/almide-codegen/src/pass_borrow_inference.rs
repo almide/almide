@@ -59,21 +59,31 @@ fn seed_pending_user_fns(program: &IrProgram) -> HashSet<String> {
 /// Pre-bake the owned-param signature a TCO-bound function will end up with.
 ///
 /// `TailCallOptPass` (which runs after this) rewrites a tail-recursive function
-/// into a loop whose params are the mutable loop state, forcing them to owned —
-/// EXCEPT a `Bytes` param kept borrowed to avoid cloning a large buffer each
-/// iteration (same rule as `pass_tco::rewrite_to_loop`). Borrow inference runs
-/// before TCO, so without this it would infer those params as `Ref` and a caller
-/// forwarding a value into one would get a `Ref` param that clashes with the
-/// post-TCO owned signature → E0308. Bake the owned-ness in now so the whole
-/// call chain stays consistent.
+/// into a loop whose params are the mutable loop state, forcing to owned every
+/// slot the loop cannot keep a reference in (`pass_tco::loop_keeps_borrow`).
+/// Borrow inference runs before TCO, so without this it would infer those params
+/// as `Ref` and a caller forwarding a value into one would get a `Ref` param that
+/// clashes with the post-TCO owned signature → E0308. Bake the owned-ness in now
+/// so the whole call chain stays consistent.
+///
+/// The predicate is READ from `pass_tco`, not restated here: the two used to be
+/// two copies of one `Bytes | Fn` type test, which is the second place a rule
+/// has to be remembered.
 fn tco_owned_params(func: &IrFunction, mut borrows: Vec<ParamBorrow>) -> Vec<ParamBorrow> {
+    // Nothing to bake when every slot is already owned — and this runs on every
+    // function in every fixed-point round, so the walk behind `is_tco_candidate`
+    // is worth skipping.
+    if borrows.iter().all(|b| matches!(b, ParamBorrow::Own)) {
+        return borrows;
+    }
     if crate::pass_tco::is_tco_candidate(func) {
+        let identity = crate::pass_tco::tco_identity_carried(func);
         for (i, b) in borrows.iter_mut().enumerate() {
-            // `Bytes` and a borrowed callable (`&dyn Fn`, #2288) keep their
-            // borrow through the loop — the same rule as `pass_tco_loop_rewrite`.
-            let is_preserved_bytes = matches!(func.params.get(i).map(|p| &p.ty), Some(Ty::Bytes | Ty::Fn { .. }))
-                && !matches!(b, ParamBorrow::Own);
-            if !is_preserved_bytes {
+            if matches!(b, ParamBorrow::Own) { continue; }
+            let keep = func.params.get(i).is_some_and(|p| {
+                crate::pass_tco::loop_keeps_borrow(p, identity.get(i).copied().unwrap_or(false))
+            });
+            if !keep {
                 *b = ParamBorrow::Own;
             }
         }

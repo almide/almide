@@ -60,9 +60,19 @@ try {
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
     Copy-Item "$Tmp\extracted\almide-windows-x86_64\almide.exe" "$InstallDir\almide.exe" -Force
 
+    # The independent certificate verifier (#2152) goes next to almide.exe:
+    # `almide verify` execs it from there and has no built-in fallback.
+    $Verifier = "$Tmp\extracted\almide-windows-x86_64\almide-verify.exe"
+    if (Test-Path $Verifier) {
+        Copy-Item $Verifier "$InstallDir\almide-verify.exe" -Force
+    } else {
+        Write-Host "note: this release predates almide-verify; ``almide verify`` will report it missing"
+    }
+
     Write-Host ""
     Write-Host "Installed almide to $InstallDir\almide.exe"
     & "$InstallDir\almide.exe" --version
+    if (Test-Path "$InstallDir\almide-verify.exe") { & "$InstallDir\almide-verify.exe" --version }
 
     # --- PATH check ---
 

@@ -1,0 +1,50 @@
+running '/private/tmp/claude-501/-Users-o6lvl4-workspace-github-com-almide-almide/ad1bfb1f-617a-476e-996f-c0f2c4629087/scratchpad/ab2398/bisect-step.sh'
+[43fc91a29] BAD   native= r 5 = 2  wasm= r 5 = � ** ** 
+Bisecting: 13 revisions left to test after this (roughly 4 steps)
+[7ba1e3f61973b3e72e24fd04055bcd086b51a56a] A record parameter emitted as a reference spreads a clone into the struct update, so a mut param reassigned with a spread of itself builds on native
+running '/private/tmp/claude-501/-Users-o6lvl4-workspace-github-com-almide-almide/ad1bfb1f-617a-476e-996f-c0f2c4629087/scratchpad/ab2398/bisect-step.sh'
+[7ba1e3f61] GOOD  native= r 5 = 2  wasm= r 5 = 2 
+Bisecting: 6 revisions left to test after this (roughly 3 steps)
+[458437bb568213f59c4c48143457a17d6339a92f] Add the decode benchmark corpus and its reported perf-ratchet row
+running '/private/tmp/claude-501/-Users-o6lvl4-workspace-github-com-almide-almide/ad1bfb1f-617a-476e-996f-c0f2c4629087/scratchpad/ab2398/bisect-step.sh'
+[458437bb5] BAD   native= r 5 = 2  wasm= r 5 = � ** ** 
+Bisecting: 3 revisions left to test after this (roughly 2 steps)
+[95a9e9962534e00edfbf9fca1dcd0d2a2eaa9e07] Regenerate the run, ast, check, alloc and size ledgers and the contract index for the entry-drop fixtures
+running '/private/tmp/claude-501/-Users-o6lvl4-workspace-github-com-almide-almide/ad1bfb1f-617a-476e-996f-c0f2c4629087/scratchpad/ab2398/bisect-step.sh'
+[95a9e9962] BAD   native= r 5 = 2  wasm= r 5 = � ** ** 
+Bisecting: 0 revisions left to test after this (roughly 1 step)
+[092c40d05fb3d12554c602d106e11e65c30d5990] Release Map and Set entries through typed entry drop glue, with every store and copy site sharing exactly one credit
+running '/private/tmp/claude-501/-Users-o6lvl4-workspace-github-com-almide-almide/ad1bfb1f-617a-476e-996f-c0f2c4629087/scratchpad/ab2398/bisect-step.sh'
+[092c40d05] BAD   native= r 5 = 2  wasm= r 5 = � ** ** 
+Bisecting: 0 revisions left to test after this (roughly 0 steps)
+[166b9802183246721e9904425298865ef355ce69] The test report reads the snapshot header behind a glued libtest ok verdict, so the accept hint survives every stdout interleaving
+running '/private/tmp/claude-501/-Users-o6lvl4-workspace-github-com-almide-almide/ad1bfb1f-617a-476e-996f-c0f2c4629087/scratchpad/ab2398/bisect-step.sh'
+[166b98021] GOOD  native= r 5 = 2  wasm= r 5 = 2 
+092c40d05fb3d12554c602d106e11e65c30d5990 is the first bad commit
+commit 092c40d05fb3d12554c602d106e11e65c30d5990
+Author: O6lvl4 <motodera@phismize.com>
+Date:   Tue Sep 8 14:58:58 2026 +0900
+
+    Release Map and Set entries through typed entry drop glue, with every store and copy site sharing exactly one credit
+    
+    Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+
+ crates/almide-wasm/src/collections.rs          |  24 +++--
+ crates/almide-wasm/src/collections_hof.rs      | 130 +++++++++++++++++++------
+ crates/almide-wasm/src/collections_set.rs      |  74 ++++++++++----
+ crates/almide-wasm/src/func.rs                 |   1 +
+ crates/almide-wasm/src/map_inplace.rs          | 126 +++++++++++++-----------
+ crates/almide-wasm/src/rc_ownership.rs         |  70 +++++++++++--
+ crates/almide-wasm/src/runtime_alloc.rs        |  88 ++++++++++++++++-
+ crates/almide-wasm/src/stmts.rs                |  29 +++---
+ crates/almide-wasm/src/stmts_index.rs          |   1 -
+ crates/almide-wasm/src/value.rs                |  11 +++
+ crates/almide-wasm/src/work.rs                 |  25 ++++-
+ crates/almide-wasm/tests/call_result_credit.rs |  26 +++++
+ docs/contracts/contracts.toml                  |   2 +
+ spec/wasm_cross/map_entries_reclaim.almd       |  63 ++++++++++++
+ spec/wasm_cross/set_entries_reclaim.almd       |  35 +++++++
+ 15 files changed, 560 insertions(+), 145 deletions(-)
+ create mode 100644 spec/wasm_cross/map_entries_reclaim.almd
+ create mode 100644 spec/wasm_cross/set_entries_reclaim.almd
+bisect found first bad commit

@@ -94,11 +94,18 @@ pub(crate) struct Emitter<'a> {
     /// Match/unwrap subject scratch. Shared across nesting levels — safe
     /// because a subject is only read during its own tests, which finish
     /// before any nested match/unwrap in a SELECTED arm's body runs.
+    /// A GUARDED chain is the exception (a guard lowers between two
+    /// tests of one subject), so `lower_match_at` parks that subject in
+    /// a hold instead (#2464).
     pub(crate) scr_i32_local: u32,
     pub(crate) scr_i64_local: u32,
     /// Lowering `main`: a propagated `!` error ABORTS (the interp's
     /// main-level Flow::Return(Err) contract — "Error: {msg}" + exit 1).
     pub(crate) in_main: bool,
+    /// How many line-buffer builds this body is lexically inside while it
+    /// lowers (#2312): 0 = the next build opened here is OUTERMOST in its
+    /// function. `line_bounded.rs` reads it with `in_main`.
+    pub(crate) build_depth: u32,
     /// Function-value work: funcref-table entries, call_indirect types,
     /// lifted lambdas (W-1/W-2).
     pub(crate) work: &'a FnWork,
@@ -137,6 +144,10 @@ pub(crate) struct Emitter<'a> {
     /// count is cached — the block ADDRESS is re-read every time, so a COW
     /// copy under an element store stays correct.
     pub(crate) hoisted_counts: HashMap<VarId, u32>,
+    /// #2150: VarId → the i32 flag a loop cleared before entry for a list
+    /// it reaches only through element reads and stores (cow_hoist.rs). A
+    /// store judges copy-on-write only while the flag is clear, then sets it.
+    pub(crate) cow_flags: HashMap<VarId, u32>,
     /// One-shot tail-position marker: set by `lower_tail`, TAKEN at
     /// `lower`'s entry so it never leaks into operand lowering. A direct
     /// call in tail position with a matching return type emits

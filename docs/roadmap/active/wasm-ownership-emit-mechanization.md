@@ -189,3 +189,83 @@ IR レベルの `PerceusVerify` は emit 層の借用/所有権を見られな�
   解析をいくら厳しくしても emit 層の drift は検出できない。
 - **native 同様 Rust に丸投げ**: wasm は Rust を経由しないので不可。
   だからこそ所有権規律を「機械化された単一ヘルパー」に寄せる必要がある。
+
+## 2026-09-21 再測定: 段階 2〜4 は未実行のまま、同じ層から blocker が出続けている
+
+上の診断(2026-07-30)から 7 週間。段階 1(#643 の単発修正)だけが実行され、
+段階 2 の `emit_extract_owned` は grep 0 件、段階 3 の churn fixture・段階 4 の
+契約明文化も無い。その間に何が起きたかを数える。
+
+**blocker の出所(2026-08-22〜09-21 の I-unsound / I-divergence / I-miscompile /
+regression 51 件、機構別)**:
+
+| 機構 | 件数 | 例 |
+|---|---:|---|
+| **wasm emit 層の RC 規律**(消費サイトで inc / guard が抜ける) | **~12** | #1786 #1820 #2260 #2308 #2317 #2395 #2397 #2398 |
+| wasm の i32/u32 添字・幅の切り詰め | ~7 | #1907 #1909 #2385 #2396 |
+| wasm の固定長バッファ / park span | 5 | #1826 #2116 #2117 #2120 |
+| 名前キー衝突(一つの識別子空間に二種類) | 4 | #1726 #1828 #2369 |
+| native 借用推論のスペル漏れ | 3 | #1713 #2315 #2377 |
+| 再帰深さ | 3 | #2291 #2306 #2307 |
+
+最大バケットは本 roadmap が名指しした層で、**0.63.0-rc3 の soak が拾った 4 件のうち
+3 件**(#2395 / #2397 / #2398)がここ。3 件とも「同じ操作の別コピーに規則が写っていない」
+形だった:
+
+- #2398: `list.update` — 兄弟 `list.set` は `ArgMode::Retain` で自動的に正しく、
+  `update` は closure body を `self.lower(...)` で降ろすので mode が無い。
+- #2397: `list.fold` — staged コピー(`list.rs`)は 10fed0494 で規則を得たが、
+  `map`/`filter` 連鎖でだけ通る fused コピー(`list_fuse.rs`)はその**前に書かれ**、
+  受け取っていない。
+- #2395: `value.keys` — wasm 側と `value_core.almd` 側の**両方**にタグ検査が無く、
+  interp だけが(偶然の 0 で)棄権していた。
+
+### 診断の訂正: 穴は「ヘルパーの欠如」ではなく「一操作に実装が何個あるか」
+
+07-30 の提案は「payload 取り出しを単一ヘルパーに寄せる」だった。それは正しいが、
+今回の 3 件はヘルパーで防げる形ではない — **同じ操作が複数回実装されていて、
+規則が一つに入っても残りに写らない**ことが原因。数える:
+
+| 操作(list.almd の `= _` 穴) | native | structural emitter の arm | self-host の prim-floor コピー |
+|---|---:|---:|---:|
+| `fold` | 1 intrinsic | **3**(staged / fused / enumerate) | **6**(`list_fold*.almd`、shape 別) |
+| `sort` | 1 | 1 | 6 |
+| `get` | 1 | 2 | 4 |
+| `filter` | 1 | 2 | 4 |
+| `map` | 1 | 2 | 3 |
+
+`list.fold` は **10 個の実装**を持つ。self-host 側のコピーは shape ごとの単相化
+(`hrec` = heap acc × heap elem、`hsca`、`ols`、`str_hacc` …)で、prim floor に直接
+書かれた手書きメモリコードである — Koka/Lean/Roc のように「stdlib は言語内の一つの
+本体、Perceus が一様に処理」ではない。stdlib 3,877 関数のうち `= _` は **694**。
+
+**掃引が見逃す理由(#2397 で実証)**: ee の閉包性掃引は述語を「closure body を lower して
+heap slot に格納」とし、閉包性を **guard 綴り 4 種の件数**で立てた。accumulator の
+rebind は local への格納なので母集団に入らず、`list_fuse.rs` は guard 語彙を一つも
+持たないので「数えるものが無い」= 空として登録された。
+**マーカーの有無で数える掃引はマーカー以前のコピーを見ない。「このファイルに 0 一致」は
+clean の印ではなく未変換コピーの印である。**
+
+構文形で取り直した母集団: `self.lower(<body>, …)` 44 サイト。うち未ガードで残るのは
+`set.fold` / `map.fold`(`collections_set.rs:577` / `collections.rs:464`)だが、
+両者は accumulator を `Lowered::view` で返すので呼び手が解放せず、freed read ではなく
+leak 級(#2408)。view 返しが load-bearing であることは emitter のどこにも記録されていない。
+
+### 段階の書き直し(0.63.0 final の後)
+
+段階 2〜4 は据え置き、その前に **計数ゲート**を置く。順序は「測る → ratchet → 畳む」:
+
+1. **実装計数ゲート** — `= _` 穴ごとに (native intrinsic, emitter arm, self-host コピー)
+   の三つ組を数える台帳 `proofs/impl-count-ledger.toml` と shrink-only の ratchet。
+   新しいコピーは台帳に行を足さないと CI が落ちる。#2397 は「fold の emitter arm が
+   2→3 に増えた瞬間」に見えていたはずの事象。
+2. **`list.fold` を畳む** — 10 実装を、target ごとに **1 本体**へ。fused/staged の 2 arm
+   は 1 つの lowering + 融合を前段の pass で行う形に、self-host の 6 shape コピーは
+   type-erased 1 本体(`list_fold_hrec.almd` が既にその形)へ。畳むたびに台帳の数字が
+   下がり、alloc 台帳 / size ratchet / run parity が挙動不変を証する。
+3. `update` / `filter_map` / `sort` と続け、**list.almd の 62 穴**を同じ手順で回す。
+4. 07-30 の段階 2〜4 はこの後。畳んだ後なら「単一ヘルパー」が寄せる先は 1 本体だけになる。
+
+却下: 「fixture を増やして次のコピー漏れを捕まえる」— #2397 の fixture は連鎖が
+fuse する形でしか書けず、fuse しない fixture は全部緑だった。捕まえるのは計数であって
+挙動ではない。

@@ -174,6 +174,7 @@ fn render_program_top_lets(ctx: &RenderContext, program: &IrProgram, parts: &mut
             Tls::Const | Tls::Lazy { .. } => {
                 let construct = match info.storage {
                     Tls::Const => "top_let_const",
+                    _ if top_let_is_thread_local(ctx, &tl.ty) => "top_let_thread_lazy",
                     _ => "top_let_lazy",
                 };
                 ctx.templates.render_with(construct, None, &[], &[("name", name_upper), ("type", ty_str.as_str()), ("value", val_str.as_str())])

@@ -1,0 +1,112 @@
+// @contract: C-334
+// The RETURN half of the RC-3 callee-owned convention, at the same
+// `call_indirect` boundary C-334 already covers for arguments: a callback's
+// BORROWED result stored into a container takes the co-owning +1.
+//
+// `lower_list_update` lowered the callback body and stored the value into its
+// copy of the list with no guard, so a body that merely reads a captured
+// binding — `(t) => r5` — left the slot and the binding both believing they
+// owned one block. A later `list.filter` that DROPS that element released it,
+// and the binding read back freed memory: silently, exit 0 on both legs
+// (#2398). The sibling callback-then-store lowerings (`list_flat.rs`,
+// `collections_set.rs`, `collections_hof.rs`) took the guard already; this one
+// is the copy that had to remember and did not.
+//
+// COMPLETENESS RULE — the matrix is two-axis, and either axis alone passes for
+// the wrong reason:
+//
+//   axis 1, the element's RUNTIME shape. Not its type name: `ok(2)` holds no
+//   block and `err("boom")` does, and they share a type, so a table indexed by
+//   type name records "Result: clean" or "Result: diverges" depending only on
+//   which variant the author happened to write. Every payload-CARRYING shape
+//   gets a row.
+//
+//   axis 2, the callback's TAIL FORM. A body whose tail is in
+//   `rc_certainly_fresh` (`OptionSome`, `ResultErr`, `List`, `Tuple`,
+//   `StringInterp`, …) produces its own credit and correctly takes no +1. A
+//   fixture written entirely with constructor tails is GREEN AGAINST THE
+//   UNPATCHED COMPILER and pins nothing at all.
+//
+// So every heap row appears twice. The BORROWED cells are the regression pin —
+// each one printed freed memory before the guard. The FRESH cells are the
+// negative control and must be identical on BOTH sides of the fix: they are the
+// only evidence the guard is conditional rather than an unconditional inc,
+// which would be the leak `rc_certainly_fresh`'s own doc warns about ("over-inc
+// on a fresh value is a leak, never a dangle").
+//
+// The lead cell is the worst one. `err("boom")` came back as `ok(145)`: the
+// variant TAG flipped, so a `match` took the wrong branch and bound an integer
+// where a String was promised. No trap, no wrong-looking string.
+//
+// The `Int` row is the scalar control: no block, no guard, and the value must
+// be untouched — an unconditional inc would increment the user's integer read
+// as an address.
+//
+// DECLARED OMISSIONS, two cells, and they are in the borrowed column: the
+// incumbent brick refuses `list.update` with a `(String, Int)` or an
+// `Option[String]` element under a borrowed tail — "unliftable/closure-list
+// higher-order argument … walled, not mis-valued". Their FRESH twins render
+// and are present below, so the omission is exactly two of the fourteen cells.
+// Both are carried by tests/list_update_callback_result_ownership_test.rs,
+// which builds and runs both legs directly and is not subject to the brick's
+// subset. They are omitted here rather than bought by raising the two
+// determinism wall ceilings and the walled-real baseline — the same trade
+// C-076's `EXTENDED (#2133)` clause records for the same reason.
+fn main() -> Unit = {
+  // ---- axis 2 = BORROWED tail: `(t) => rN`. Each was freed before #2398. ----
+  // The lead cell: the tag itself flipped, err("boom") -> ok(145).
+  let r_res: Result[Int, String] = err("boom")
+  let d_res = list.filter(list.update([ok(9), err("e")], 0, ((t) => r_res)), ((y) => false))
+  println("borrow res    = ${r_res} / ${int.to_string(list.len(d_res))}")
+  let r_str: String = int.to_string(2)
+  let d_str = list.filter(list.update(["a", "b"], 0, ((t) => r_str)), ((y) => false))
+  println("borrow str    = ${r_str} / ${int.to_string(list.len(d_str))}")
+  let r_li: List[Int] = [1, 2]
+  let d_li = list.filter(list.update([
+    [9],
+    [8]
+  ], 0, ((t) => r_li)), ((y) => false))
+  println("borrow li     = ${r_li} / ${int.to_string(list.len(d_li))}")
+  let r_ls: List[String] = ["x", "y"]
+  let d_ls = list.filter(list.update([
+    ["p"],
+    ["q"]
+  ], 0, ((t) => r_ls)), ((y) => false))
+  println("borrow ls     = ${r_ls} / ${int.to_string(list.len(d_ls))}")
+  // (String,Int) and Option[String] BORROWED are the two declared omissions —
+  // see the COMPLETENESS RULE above. Their FRESH twins are below, and both
+  // borrowed cells are carried by the differential test.
+  // A scalar payload under a heap carrier diverged too: the Option BLOCK is
+  // the freed value, whatever it holds.
+  let r_oi: Int? = some(2)
+  let d_oi = list.filter(list.update([some(9), none], 0, ((t) => r_oi)), ((y) => false))
+  println("borrow opt_i  = ${r_oi} / ${int.to_string(list.len(d_oi))}")
+  // ---- axis 2 = FRESH tail: a constructor. Identical on BOTH sides. ----
+  let f_str: String = int.to_string(3)
+  let e_res = list.filter(list.update([ok(9), err("e")], 0, ((t) => err(f_str))), ((y) => false))
+  println("fresh res     = ${f_str} / ${int.to_string(list.len(e_res))}")
+  let f_interp: String = int.to_string(4)
+  let e_str = list.filter(list.update(["a", "b"], 0, ((t) => "${f_interp}!")), ((y) => false))
+  println("fresh str     = ${f_interp} / ${int.to_string(list.len(e_str))}")
+  let f_i: Int = 5
+  let e_li = list.filter(list.update([
+    [9],
+    [8]
+  ], 0, ((t) => [f_i])), ((y) => false))
+  println("fresh li      = ${int.to_string(f_i)} / ${int.to_string(list.len(e_li))}")
+  let f_tup: String = int.to_string(6)
+  let e_tup = list.filter(list.update([("a", 1), ("b", 2)], 0, ((t) => (f_tup, 1))), ((y) => false))
+  println("fresh tup     = ${f_tup} / ${int.to_string(list.len(e_tup))}")
+  let f_os: String = int.to_string(7)
+  let e_os = list.filter(list.update([some("p"), none], 0, ((t) => some(f_os))), ((y) => false))
+  println("fresh opt_s   = ${f_os} / ${int.to_string(list.len(e_os))}")
+  // ---- the scalar control: no block, no guard, value untouched ----
+  let r_int: Int = 7
+  let d_int = list.filter(list.update([1, 2], 0, ((t) => r_int)), ((y) => false))
+  println("scalar int    = ${int.to_string(r_int)} / ${int.to_string(list.len(d_int))}")
+  // The KEPT half of the same shape: `filter` retains the element instead of
+  // dropping it, so the guard's +1 must not leave the binding over-counted.
+  let k_str: String = int.to_string(8)
+  let k = list.filter(list.update(["a", "b"], 0, ((t) => k_str)), ((y) => true))
+  println("kept str      = ${k_str} / ${int.to_string(list.len(k))}")
+}

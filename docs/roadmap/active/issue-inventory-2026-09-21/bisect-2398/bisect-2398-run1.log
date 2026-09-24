@@ -1,0 +1,8 @@
+running '/private/tmp/claude-501/-Users-o6lvl4-workspace-github-com-almide-almide/ad1bfb1f-617a-476e-996f-c0f2c4629087/scratchpad/ab2398/bisect-step.sh'
+[43fc91a29] BAD   native= r 5 = 2  wasm= r 5 = � ** ** 
+error: Your local changes to the following files would be overwritten by checkout:
+	crates/almide-codegen/src/generated/rust_runtime.rs
+Please commit your changes or stash them before you switch branches.
+Aborting
+Bisecting: 13 revisions left to test after this (roughly 4 steps)
+error: bisect run failed: 'git bisect bad' exited with error code -1

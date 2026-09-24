@@ -1,5 +1,10 @@
 [workspace]
-members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-mir", "crates/almide-dialect", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-driver", "crates/almide-interp", "crates/almide-tools", "crates/almide-egg-lab", "crates/almide-layout", "crates/almide-corpus", "crates/almide-rt-core", "crates/almide-wasm", "crates/almide-wasm-run", "crates/almide-wasm-vm", "crates/almide-spine"]
+members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-mir", "crates/almide-dialect", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-driver", "crates/almide-interp", "crates/almide-tools", "crates/almide-egg-lab", "crates/almide-layout", "crates/almide-corpus", "crates/almide-rt-core", "crates/almide-wasm", "crates/almide-wasm-run", "crates/almide-wasi", "crates/almide-wasm-vm", "crates/almide-spine", "crates/almide-verify"]
+# `cargo build` at the root builds the compiler AND the independent verifier
+# binary (#2152): `almide verify` execs `almide-verify` from next to itself and
+# has no linked fallback, so a build that produced one without the other would
+# ship a command that can only fail.
+default-members = [".", "crates/almide-verify"]
 resolver = "3"
 exclude = ["crates/almide-kernel", "research/benchmark/stdlib/rust_wasm_compare", "tools/wasmgen-harness", "tools/wasmgen-harness-uu", "tools/xtarget-fuzz"]
 
@@ -44,6 +49,9 @@ almide-mir = { path = "crates/almide-mir" }
 # the embedded almide.* host + the WASI transform for stock-runtime artifacts.
 almide-types = { path = "crates/almide-types" }
 almide-wasm = { path = "crates/almide-wasm" }
+# The stock-WASI transform of a structural module (#2554): pure, so the
+# LIBRARY consumer below gets runnable bytes out of `wasm_route` too.
+almide-wasi = { path = "crates/almide-wasi" }
 # OPTIONAL: the embedded host carries wasmtime, which cannot be built for
 # wasm32-unknown-unknown. The CLI always has it (`default`); a LIBRARY consumer
 # that itself compiles to the browser (almide/playground) turns it off with
@@ -88,6 +96,13 @@ insta = "1"
 tempfile = "3"
 # The qualification-scoped VM (#865), run in-process by its corpus parity gate.
 almide-wasm-vm = { path = "crates/almide-wasm-vm" }
+# The corpus gates' fixture-range sharding (#2381): the switch is parsed in
+# one place, shared with almide-spine's run_parity.
+almide-corpus = { path = "crates/almide-corpus" }
+# DEV-ONLY (#2152): the shim test reads the certificate bundle `almide verify
+# --emit` writes with the verifier's own parser. The almide binary never links
+# it — `almide verify` execs the separate almide-verify binary, no fallback.
+almide-verify = { path = "crates/almide-verify" }
 
 # The root build.rs (docs/diagnostics) and almide-types (stdlib/) re-embed repo
 # content on any mtime bump — git pull/checkout triggers a full opt-3 recompile

@@ -12,6 +12,14 @@ impl LowerCtx {
         self.classify_elem_drop_heads(elem_ty)
             .or_else(|| self.classify_elem_drop_pairs(elem_ty))
             .or_else(|| self.classify_elem_drop_containers(elem_ty))
+            // The LAST rung (#2520): a heap tuple no dedicated drop above claims — 3+
+            // slots with a heap one (`(String, String, Int)`), or a slot that itself owns
+            // heap handles (`(Int, List[String])`). `collect_anon_tuple_drops` registers
+            // exactly these shapes, so the routed `$__drop_list_anontup_<hash>` exists.
+            .or_else(|| {
+                crate::lower::is_anon_tuple_list_elem(elem_ty)
+                    .then(|| ListElemDrop::AnonTuple(crate::lower::anon_tuple_drop_name(elem_ty)))
+            })
     }
 
     /// Rung 1 of the element-drop ladder: record / variant element heads.
@@ -685,7 +693,7 @@ impl LowerCtx {
 /// registered directly in `register_list_drop_kind`). Names verbatim.
 fn drop_route_name(kind: ListElemDrop) -> String {
     match kind {
-        ListElemDrop::Record(rname) => format!("list_{rname}"),
+        ListElemDrop::Record(rname) | ListElemDrop::AnonTuple(rname) => format!("list_{rname}"),
         ListElemDrop::StrInt => "list_str_int".to_string(),
         ListElemDrop::IntStr => "list_int_str".to_string(),
         ListElemDrop::StrMapStr => "list_str_mss".to_string(),

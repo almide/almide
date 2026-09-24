@@ -291,10 +291,11 @@
 
     #[test]
     fn self_hosted_float_checked_64bit() {
-        // The 64-bit variants: 2^63 / 2^64 bound built at runtime. to_uint64 of a value in
-        // [2^63, 2^64) is rejected by the ROUND-TRIP (i64-repr wraps negative ≠ n), not the range —
-        // matching v0. 1e19 (> 2^63, < 2^64) exercises both the int64 range reject and that uint64
-        // round-trip reject. The last line prints the actual Some value (1000000).
+        // The 64-bit variants: 2^63 / 2^64 bound built at runtime. to_uint64_checked accepts the
+        // whole uint64 range, so 1e19 (> 2^63, < 2^64) is `some` — it used to be rejected by a
+        // ROUND-TRIP through the i64 repr (the wrapped value reads back negative ≠ n), which
+        // rejected EVERY value at or above 2^63 (#2487). The same 1e19 is still `none` for
+        // to_int64_checked, where it really is out of range. The last line prints the Some value.
         let src = "fn main() -> Unit = {\n  \
             match float.to_int64_checked(2000000000.0) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
             match float.to_int64_checked(2000000000.5) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
@@ -305,7 +306,7 @@
         let prog = lower_source(src);
         assert!(prog.functions.iter().any(|f| f.name == "float.to_int64_checked"));
         if let Some(out) = build_and_run("self_hosted_float_checked_64bit", &render_wasm_program(&prog)) {
-            assert_eq!(out, "some\nnone\nnone\nnone\nnone\n1000000");
+            assert_eq!(out, "some\nnone\nnone\nnone\nsome\n1000000");
         }
     }
 

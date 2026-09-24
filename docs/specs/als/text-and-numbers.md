@@ -240,8 +240,10 @@ Fixture: `spec/wasm_cross/string_count_truncation.almd`、
 ゼロ埋めした暦フィールド（年 4 桁・他 2 桁）へ**逐次置換**する。native /
 v0-wasm / 自己ホストの 3 バックエンドが同一の逐次 `string.replace` 列を走らせる
 ため、出力はバイト一致。`%` は上記指定子の直前でのみ特別扱いされ、`%%` エス
-ケープは存在しない（認識されない `%X` はそのまま素通り）。SCOPE: 年 0..9999
-（5 桁年は 4 桁欄を超える — `to_iso` と同じ文書化済みの端）。Contracts: C-128。
+ケープは存在しない（認識されない `%X` はそのまま素通り）。`%Y` の欄幅は
+`to_iso` と同じ**可変幅**である — 最低 4 桁、ゼロ埋め、負の年は符号が 1 桁を
+占める（`-292277022657`、`0000`）。固定 4 桁欄は、桁あふれの年で下位 4 桁だけを、
+負の年で非 ASCII バイトを書いていた。Contracts: C-128、C-359。
 
 ## ALS-T18 assert の abort 形（非 test 位置）
 
@@ -474,3 +476,58 @@ NaN なら全要素 `1.0 / n`、それ以外は **reciprocal-multiply**
 `(0.5 * x) * (1.0 + t)` — 先に半分にする結合で、float 上端の `x` でも
 有限に留まる。Fixtures: `spec/wasm_cross/matrix_softmax_fastexp.almd`、
 `spec/wasm_cross/matrix_domain_edges.almd`。Contracts: C-223。
+
+## ALS-T26 datetime の暦フィールドと parse_iso の文法
+
+Unix 秒 `ts` から暦フィールドを取り出す `datetime.year` / `month` / `day` /
+`weekday`（および両者を通る `to_iso` / `format`）は、日番号を**床除算**で求める
+— `ts` が負で日境界上にないときも、その秒が属する日を答える:
+`to_iso(-1)` は `1969-12-31T23:59:59Z`、`weekday(-1)` は `Wednesday`。
+時刻側（`hour` / `minute` / `second`）は従来どおり床剰余であり、両者は同じ日を
+指す。`from_parts` は全域で逆関数である（`from_parts(1969, 12, 31, 23, 59, 59)`
+は `-1`）。
+
+`datetime.parse_iso(s)` は前後の空白を除去し、次の文法を読む:
+
+```ebnf
+datetime := date "T" time zone?
+date     := digit+ "-" digit+ "-" digit+
+time     := digit+ ":" digit+ ":" digit+
+zone     := "Z" | ("+" | "-") digit+ ":" digit+
+```
+
+各欄は ASCII 数字のみ（幅は任意 — `2024-1-5T1:2:3` は受理、符号・空白・英字は
+不可）。`Z` と数値オフセットは排他である。オフセットは**適用**され、結果は UTC
+の瞬間を指す: `2024-01-15T10:30:00+09:00` は 1705282200。値域は月 1..=12、
+日 1..=その月の日数（先発グレゴリオ暦の閏年規則）、時 0..=23、分・秒 0..=59
+（閏秒なし）、オフセットは時 0..=23・分 0..=59。
+
+err の文字列は次のとおり（先に違反した欄が勝つ）:
+
+| 入力 | err |
+|------|-----|
+| 月・日・時・分・秒が範囲外 | `<field> out of range: <value>`（`month` / `day` / `hour` / `minute` / `second`） |
+| オフセットが不正または範囲外 | `invalid offset: <符号以降の文字列>` |
+| その他の不正な綴り | `invalid datetime format` |
+| `T` が無い | `expected YYYY-MM-DDTHH:MM:SSZ` |
+
+テスト: `spec/wasm_cross/datetime_pre_epoch.almd`、
+`spec/wasm_cross/datetime_parse_iso_strict.almd`、
+`spec/stdlib/datetime_test.almd`。Contracts: C-359、C-360。
+
+## ALS-T27 url.parse の authority 規範
+
+`url.parse(s)` は `scheme://host[:port][/path][?query][#fragment]` を読み、
+**host** を（authority ではなく）検査する。host が空なら
+`url.parse: empty host` — `http://:8` のように port だけがある綴りも同じく空
+host である。port は ASCII 数字のみ・0..=65535 で、数字以外は
+`url.parse: invalid port: <text>`（`+80`・`-0`・` 80` を含む）、範囲外は
+`url.parse: port out of range: <text>`。scope 外と文書化されている二つの形は、
+host として読まずに名指しで拒否する: userinfo は
+`url.parse: userinfo is not supported: <authority>`、IPv6 リテラルは
+`url.parse: IPv6 hosts are not supported: <authority>`。RFC 3986 の reg-name
+文字集合（unreserved / sub-delims / `%`）外を含む host は
+`url.parse: invalid host: <host>`。受理された URL は `to_string` で往復する。
+
+テスト: `spec/wasm_cross/url_authority_edges.almd`、
+`spec/stdlib/url_test.almd`。Contracts: C-361。

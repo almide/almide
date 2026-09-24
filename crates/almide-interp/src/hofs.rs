@@ -45,6 +45,23 @@ impl<'a> Interpreter<'a> {
         for a in args {
             evaled.push(val!(self.eval_expr(a, scope)));
         }
+        // INSIDE the pool tier a heap value is its address (`pool_fns`), so
+        // a VALUE-level body — `matrix_softmax_rows` is `m |> list.map(..)`
+        // — handed a block a HEAP-level body built (`matrix.mul`'s, in the
+        // `matrix_fused` compositions) would iterate an Int. A HOF only
+        // reads its receiver, so it is read back under the receiver's STATIC
+        // type here, the same read-back the pool boundary performs; what the
+        // body then builds is a fresh value. A block no faithful read-back
+        // exists for abstains with the sync's own reason.
+        if self.pool_depth > 0
+            && let (Some(Value::Int(_)), Some(a0)) = (evaled.first(), args.first())
+        {
+            match self.sync_value(&evaled[0], &a0.ty) {
+                Ok(Some(rebuilt)) => evaled[0] = rebuilt,
+                Ok(None) => {}
+                Err(why) => return Flow::Unsupported(why),
+            }
+        }
 
         // Per-module dispatch — same behavior-preserving regrouping as
         // `eval_container_op`: every arm was already keyed by a unique

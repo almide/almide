@@ -832,71 +832,268 @@ When a callback that never errs leaves `E` unconstrained, annotate the result:
 ## Signature index (66 functions)
 
 ```
+// Element count; 0 for an empty list.
+// @since 0.5.0 or earlier
 list.len(xs: List[A]) -> Int
+
+// Element count; same as list.len.
+// @since 0.19.2 or earlier
 list.length(xs: List[A]) -> Int
+
+// Element at index i, or none when out of range.
+// @since 0.5.0 or earlier
 list.get(xs: List[A], i: Int) -> Option[A]
+
+// Element at i, or default when out of range.
+// @since 0.5.0 or earlier
 list.get_or(xs: List[A], i: Int, default: A) -> A
+
+// Copy with slot i = val; no-op if i out of range.
+// @since 0.5.0 or earlier
 list.set(xs: List[A], i: Int, val: A) -> List[A]
+
+// Copy with i and j swapped; no-op if either OOB.
+// @since 0.5.0 or earlier
 list.swap(xs: List[A], i: Int, j: Int) -> List[A]
+
+// Ascending copy; Floats in IEEE totalOrder.
+// @since 0.5.0 or earlier
 list.sort(xs: List[A]) -> List[A]
+
+// Elements in reverse order.
+// @since 0.5.0 or earlier
 list.reverse(xs: List[A]) -> List[A]
+
+// true if some element == x; NaN never matches.
+// @since 0.5.0 or earlier
 list.contains(xs: List[A], x: A) -> Bool
+
+// (index, element) pairs, index from 0.
+// @since 0.5.0 or earlier
 list.enumerate(xs: List[A]) -> List[(Int, A)]
+
+// Pairs by position; stops at the shorter list.
+// @since 0.5.0 or earlier
 list.zip(xs: List[A], ys: List[B]) -> List[(A, B)]
+
+// Inner lists concatenated in order.
+// @since 0.5.0 or earlier
 list.flatten(xss: List[List[T]]) -> List[T]
+
+// First n elements; all if n >= len or n < 0.
+// @since 0.5.0 or earlier
 list.take(xs: List[A], n: Int) -> List[A]
+
+// All but the first n; [] if n >= len or n < 0.
+// @since 0.5.0 or earlier
 list.drop(xs: List[A], n: Int) -> List[A]
+
+// All but the first element; [] when empty.
+// @since 0.16.5 or earlier
 list.tail(xs: List[A]) -> List[A]
+
+// Duplicates removed; first occurrences kept.
+// @since 0.5.0 or earlier
 list.unique(xs: List[A]) -> List[A]
+
+// Index of the first x, or none.
+// @since 0.5.0 or earlier
 list.index_of(xs: List[A], x: A) -> Option[Int]
+
+// Final element, or none when empty.
+// @since 0.5.0 or earlier
 list.last(xs: List[A]) -> Option[A]
+
+// Runs of n, last may be short; n = 0 aborts.
+// @since 0.5.0 or earlier
 list.chunk(xs: List[A], n: Int) -> List[List[A]]
+
+// Sum; 0 when empty; wraps on overflow.
+// @since 0.5.0 or earlier
 list.sum(xs: List[Int]) -> Int
+
+// Product; 1 when empty; wraps on overflow.
+// @since 0.5.0 or earlier
 list.product(xs: List[Int]) -> Int
+
+// Head element, or none when empty.
+// @since 0.5.0 or earlier
 list.first(xs: List[A]) -> Option[A]
+
+// true iff xs has no elements.
+// @since 0.6.0 or earlier
 list.is_empty(xs: List[A]) -> Bool
+
+// Least element, or none when empty.
+// @since 0.5.0 or earlier
 list.min(xs: List[A]) -> Option[A]
+
+// Greatest element, or none when empty.
+// @since 0.5.0 or earlier
 list.max(xs: List[A]) -> Option[A]
+
+// Strings joined by sep; empty string for [].
+// @since 0.5.0 or earlier
 list.join(xs: List[String], sep: String) -> String
+
+// f applied to each element, in order.
+// @since 0.5.0 or earlier
 list.map(xs: List[A], f: (A) -> B) -> List[B]
+
+// Elements where f is true, order kept.
+// @since 0.5.0 or earlier
 list.filter(xs: List[A], f: (A) -> Bool) -> List[A]
+
+// First element where f holds, or none.
+// @since 0.5.0 or earlier
 list.find(xs: List[A], f: (A) -> Bool) -> Option[A]
+
+// true if f holds for some x; false when empty.
+// @since 0.5.0 or earlier
 list.any(xs: List[A], f: (A) -> Bool) -> Bool
+
+// true if f holds for every x; true when empty.
+// @since 0.5.0 or earlier
 list.all(xs: List[A], f: (A) -> Bool) -> Bool
+
+// Number of elements where f holds.
+// @since 0.5.0 or earlier
 list.count(xs: List[A], f: (A) -> Bool) -> Int
+
+// f(x) lists concatenated in order.
+// @since 0.5.0 or earlier
 list.flat_map(xs: List[A], f: (A) -> List[B]) -> List[B]
+
+// The some values of f(x), in order.
+// @since 0.5.0 or earlier
 list.filter_map(xs: List[A], f: (A) -> Option[B]) -> List[B]
+
+// Left fold from init; init when empty.
+// @since 0.5.0 or earlier
 list.fold(xs: List[A], init: B, f: (B, A) -> B) -> B
+
+// Stable sort by key f(x); f runs once per x.
+// @since 0.5.0 or earlier
 list.sort_by(xs: List[A], f: (A) -> B) -> List[A]
+
+// Longest prefix where f holds.
+// @since 0.5.0 or earlier
 list.take_while(xs: List[A], f: (A) -> Bool) -> List[A]
+
+// Rest after the longest prefix where f holds.
+// @since 0.5.0 or earlier
 list.drop_while(xs: List[A], f: (A) -> Bool) -> List[A]
+
+// (where f holds, the rest), order kept.
+// @since 0.5.0 or earlier
 list.partition(xs: List[A], f: (A) -> Bool) -> (List[A], List[A])
+
+// Left fold seeded by xs[0]; none when empty.
+// @since 0.5.0 or earlier
 list.reduce(xs: List[A], f: (A, A) -> A) -> Option[A]
+
+// Key f(x) -> elements; keys in first-seen order.
+// @since 0.5.0 or earlier
 list.group_by(xs: List[A], f: (A) -> B) -> Map[B, List[A]]
+
+// Index of the first x where f holds, or none.
+// @since 0.5.0 or earlier
 list.find_index(xs: List[A], f: (A) -> Bool) -> Option[Int]
+
+// Copy with slot i = f(old); no-op if i out of range.
+// @since 0.5.0 or earlier
 list.update(xs: List[A], i: Int, f: (A) -> A) -> List[A]
+
+// Running fold values, init excluded.
+// @since 0.5.0 or earlier
 list.scan(xs: List[A], init: B, f: (B, A) -> B) -> List[B]
+
+// f over pairs; stops at the shorter list.
+// @since 0.5.0 or earlier
 list.zip_with(xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C]
+
+// First element per distinct key f(x).
+// @since 0.7.0 or earlier
 list.unique_by(xs: List[A], f: (A) -> K) -> List[A]
+
+// start up to end, exclusive; [] if end <= start.
+// @since 0.5.0 or earlier
 list.range(start: Int, end: Int) -> List[Int]
+
+// Indices start..<end, clamped; [] if start >= end.
+// @since 0.5.0 or earlier
 list.slice(xs: List[A], start: Int, end: Int) -> List[A]
+
+// Copy with val at i; i >= len or i < 0 appends.
+// @since 0.5.0 or earlier
 list.insert(xs: List[A], i: Int, val: A) -> List[A]
+
+// Copy without slot i; no-op if i out of range.
+// @since 0.5.0 or earlier
 list.remove_at(xs: List[A], i: Int) -> List[A]
+
+// n copies of val; [] for n <= 0.
+// @since 0.5.0 or earlier
 list.repeat(val: A, n: Int) -> List[A]
+
+// sep between adjacent elements.
+// @since 0.5.0 or earlier
 list.intersperse(xs: List[A], sep: A) -> List[A]
+
+// All n-long runs; [] if n > len; n = 0 aborts.
+// @since 0.5.0 or earlier
 list.windows(xs: List[A], n: Int) -> List[List[A]]
+
+// Adjacent equal runs collapsed; not global.
+// @since 0.5.0 or earlier
 list.dedup(xs: List[A]) -> List[A]
+
+// Last n elements; all if n >= len or n < 0.
+// @since 0.7.0 or earlier
 list.take_end(xs: List[A], n: Int) -> List[A]
+
+// All but the last n; [] if n >= len or n < 0.
+// @since 0.7.0 or earlier
 list.drop_end(xs: List[A], n: Int) -> List[A]
+
+// Random permutation; unseeded, differs per run.
+// @since 0.7.0 or earlier
 list.shuffle(xs: List[A]) -> List[A]
+
+// All n-long runs; [] if n > len; n = 0 aborts.
+// @since 0.7.0 or earlier
 list.window(xs: List[A], n: Int) -> List[List[A]]
+
+// Index of target in ascending xs, or none.
+// @since 0.14.6 or earlier
 list.binary_search(xs: List[Int], target: Int) -> Option[Int]
+
+// Appends x to xs in place.
+// @since 0.9.3 or earlier
 list.push(xs: List[A], x: A) -> Unit
+
+// Empty list; cap is only a preallocation hint.
+// @since 0.15.1 or earlier
 list.with_capacity(cap: Int) -> List[A]
+
+// Removes and yields the last element; none if empty.
+// @since 0.9.3 or earlier
 list.pop(xs: List[A]) -> Option[A]
+
+// Removes every element of xs in place.
+// @since 0.9.3 or earlier
 list.clear(xs: List[A]) -> Unit
+
+// n + 1; bundled-dispatch smoke fn.
+// @since 0.14.6 or earlier
 list.bundled_probe(n: Int) -> Int
+
+// (take n, drop n); n past the end gives (xs, []).
+// @since 0.14.6 or earlier
 list.split_at(xs: List[T], n: Int) -> (List[T], List[T])
+
+// [seed, f(seed), ...] of length n; [] if n <= 0.
+// @since 0.14.6 or earlier
 list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]
 ```
 

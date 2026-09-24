@@ -193,6 +193,10 @@ impl Emitter<'_> {
                 self.io_read_line()?;
                 Some(Lowered::owned(STR))
             }
+            ("io", "read_line_opt", []) => {
+                self.io_read_line_opt()?;
+                Some(Lowered::owned(SliceTy::Option(self.types.intern(STR))))
+            }
             ("io", "write", [b]) => {
                 self.lower_arg(b, Some(SliceTy::Scalar(Scalar::Bytes)), ArgMode::Borrow)?;
                 self.io_stdout_raw()?;

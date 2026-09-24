@@ -65,6 +65,19 @@ fn candidate(f: &IrFunction) -> bool {
         && !f.name.as_str().contains('.')
         && scalar(&f.ret_ty)
         && f.params.iter().all(|p| scalar(&p.ty))
+        // A `mut` parameter is the CALLER's variable (the keyword is
+        // authoritative — `pass_borrow_inference_ownership::param_borrow`).
+        // The merged dispatcher owns its frame slots by construction
+        // (`dispatcher_params` builds every slot `borrow: Own, is_mut: false`),
+        // so a member with a `mut` param loses the write-back: native failed to
+        // compile the dispatcher (E0425 on the substituted-away param) and the
+        // wasm leg printed the entry value instead of the mutated one. Leave
+        // such a group in plain mutual recursion, which answers correctly on
+        // both targets; the group merely keeps its stack frames (#2293's
+        // family, the mutual cell). Removing this clause turns
+        // `spec/lang/tco_test.almd` and
+        // `spec/wasm_cross/mut_param_tail_recursion.almd` red on every leg.
+        && f.params.iter().all(|p| !p.is_mut)
 }
 
 /// Collect fn names called in TAIL position (body root; If arms; Match arm

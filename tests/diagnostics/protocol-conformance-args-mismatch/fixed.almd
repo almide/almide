@@ -1,0 +1,19 @@
+// The fix: pass a value whose type conforms to Repo[Int, Order].
+protocol Repo[K, V] {
+  fn find(self, key: K) -> V?
+}
+
+type User = { id: Int, name: String }
+type Order = { id: Int, total: Int }
+type Users: Repo[Int, User] = { rows: List[User] }
+
+fn Users.find(self, key: Int) -> User? = self.rows |> list.find((u) => u.id == key)
+
+type Orders: Repo[Int, Order] = { rows: List[Order] }
+
+fn Orders.find(self, key: Int) -> Order? = self.rows |> list.find((o) => o.id == key)
+
+fn total_of[R: Repo[Int, Order]](r: R, id: Int) -> Int =
+  match r.find(id) { some(o) => o.total, none => 0 }
+
+fn main() -> Unit = println(int.to_string(total_of(Orders { rows: [] }, 1)))

@@ -64,19 +64,60 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 ## Signature index (14 functions)
 
 ```
+// Wraps to 8 bits; 255 becomes -1.
+// @since 0.15.0 or earlier
 uint8.to_int8(x: UInt8) -> Int8
+
+// Zero-extending widen; always exact.
+// @since 0.15.0 or earlier
 uint8.to_int16(x: UInt8) -> Int16
+
+// Zero-extending widen; always exact.
+// @since 0.15.0 or earlier
 uint8.to_int32(x: UInt8) -> Int32
+
+// Zero-extending widen; always exact.
+// @since 0.15.0 or earlier
 uint8.to_int64(x: UInt8) -> Int64
+
+// Zero-extending widen; always exact.
+// @since 0.15.0 or earlier
 uint8.to_uint16(x: UInt8) -> UInt16
+
+// Zero-extending widen; always exact.
+// @since 0.15.0 or earlier
 uint8.to_uint32(x: UInt8) -> UInt32
+
+// Zero-extending widen; always exact.
+// @since 0.15.0 or earlier
 uint8.to_uint64(x: UInt8) -> UInt64
+
+// Same value as Float32; always exact.
+// @since 0.15.0 or earlier
 uint8.to_float32(x: UInt8) -> Float32
+
+// Same value as Float64; always exact.
+// @since 0.15.0 or earlier
 uint8.to_float64(x: UInt8) -> Float64
+
+// Decimal digits; never a sign.
+// @since 0.15.0 or earlier
 uint8.to_string(x: UInt8) -> String
+
+// some(x), or none if x exceeds 127.
+// @since 0.38.0
 uint8.to_int8_checked(x: UInt8) -> Option[Int8]
+
+// Clamps x to at most 127.
+// @since 0.38.0
 uint8.to_int8_saturating(x: UInt8) -> Int8
+
+// Smallest UInt8: 0.
+// @since 0.38.0
 uint8.min_value() -> UInt8
+
+// Largest UInt8: 255.
+// @since 0.38.0
 uint8.max_value() -> UInt8
 ```
 

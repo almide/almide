@@ -33,6 +33,9 @@ enum CtorId {
     True,
     False,
     Tuple,
+    /// The one shape of a plain (non-variant) record type: its fields are the
+    /// sub-patterns, in declaration order.
+    Record,
     /// Literal values (used for Int/Float/String).
     /// Stored as display string for Eq/Hash compatibility.
     Lit(String),
@@ -42,7 +45,7 @@ enum CtorId {
 enum CtorSet {
     /// Finite enumerable constructors (variant, option, result, bool).
     Finite(Vec<CtorId>),
-    /// Single constructor — always present (tuple).
+    /// Single constructor — always present (tuple, plain record).
     Single(CtorId),
     /// Infinite domain (int, float, string) — wildcard always required.
     Infinite,
@@ -54,7 +57,16 @@ enum CtorSet {
 //  Lower AST patterns to internal representation
 // ────────────────────────────────────────────────
 
-fn lower(pat: &ast::Pattern) -> Pat {
+/// Lower one AST pattern at a position of type `ty`.
+///
+/// The type is what lets a record-variant pattern take part: its fields are
+/// written by name and in any order (or elided with `..`), so they can only be
+/// laid out as the constructor's positional sub-patterns once the declared
+/// field order is known. Positional payloads (`Square(0)`) and record payloads
+/// (`Circle { r: 0, .. }`) then go through the same specialize/usefulness path
+/// (#2553 — a record field's literal used to be dropped, reading the whole
+/// pattern as "every `Circle`").
+fn lower(pat: &ast::Pattern, ty: &Ty, env: &TypeEnv) -> Pat {
     match pat {
         ast::Pattern::Wildcard | ast::Pattern::Ident { .. } => Pat::Wild,
         // #1461: or-patterns are expanded at the ARM level (one row per
@@ -64,33 +76,85 @@ fn lower(pat: &ast::Pattern) -> Pat {
         // approximation — exhaustiveness stays sound, usefulness may
         // over-report if this path is ever reached).
         ast::Pattern::Or { alts } => {
-            alts.first().map(lower).unwrap_or(Pat::Wild)
+            alts.first().map(|a| lower(a, ty, env)).unwrap_or(Pat::Wild)
         }
         ast::Pattern::Constructor { name, args, .. } => {
-            // Normalize module-qualified names: "binary.Unreachable" → "Unreachable"
-            let bare = name.as_str().rsplit_once('.').map(|(_, b)| almide_base::intern::sym(b)).unwrap_or(*name);
-            Pat::Ctor(CtorId::Variant(bare), args.iter().map(lower).collect())
+            let ctor = CtorId::Variant(bare_ctor_name(*name));
+            let sub_tys = field_types(&ctor, ty, env);
+            let args = args.iter().enumerate().map(|(i, a)| lower(a, sub_tys.get(i).unwrap_or(&Ty::Unknown), env)).collect();
+            Pat::Ctor(ctor, args)
         }
-        // Record variant: constructor-level only (field depth deferred to Phase 4).
-        ast::Pattern::RecordPattern { name, .. } => {
-            let bare = name.as_str().rsplit_once('.').map(|(_, b)| almide_base::intern::sym(b)).unwrap_or(*name);
-            Pat::Ctor(CtorId::Variant(bare), vec![])
+        ast::Pattern::RecordPattern { name, fields, .. } => {
+            // A plain record type's pattern (`P { x: 0, y }`) names the type,
+            // not a case: its one shape is `CtorId::Record`.
+            let ctor = match env.resolve_named(ty) {
+                Ty::Record { .. } => CtorId::Record,
+                _ => CtorId::Variant(bare_ctor_name(*name)),
+            };
+            // Declared order. A field the pattern omits (`..`) or binds by
+            // shorthand (`{ r }`) is a wildcard at its position.
+            let args = match record_payload_fields(&ctor, ty, env) {
+                Some(decl) => decl
+                    .iter()
+                    .map(|(fname, fty)| {
+                        fields
+                            .iter()
+                            .find(|f| f.name == *fname)
+                            .and_then(|f| f.pattern.as_ref())
+                            .map_or(Pat::Wild, |p| lower(p, fty, env))
+                    })
+                    .collect(),
+                // The case is not a record payload of a known variant (an
+                // inference failure upstream, or a mismatched ctor the type
+                // checker already reports): constructor level only.
+                Option::None => vec![],
+            };
+            Pat::Ctor(ctor, args)
         }
-        ast::Pattern::Some { inner, .. } => Pat::Ctor(CtorId::Some, vec![lower(inner)]),
+        ast::Pattern::Some { inner, .. } => Pat::Ctor(CtorId::Some, vec![lower_sub(inner, &CtorId::Some, ty, env)]),
         ast::Pattern::None => Pat::Ctor(CtorId::None, vec![]),
-        ast::Pattern::Ok { inner, .. } => Pat::Ctor(CtorId::Ok, vec![lower(inner)]),
-        ast::Pattern::Err { inner, .. } => Pat::Ctor(CtorId::Err, vec![lower(inner)]),
+        ast::Pattern::Ok { inner, .. } => Pat::Ctor(CtorId::Ok, vec![lower_sub(inner, &CtorId::Ok, ty, env)]),
+        ast::Pattern::Err { inner, .. } => Pat::Ctor(CtorId::Err, vec![lower_sub(inner, &CtorId::Err, ty, env)]),
         ast::Pattern::Tuple { elements, .. } => {
-            Pat::Ctor(CtorId::Tuple, elements.iter().map(lower).collect())
+            let sub_tys = field_types(&CtorId::Tuple, ty, env);
+            Pat::Ctor(CtorId::Tuple, elements.iter().enumerate().map(|(i, e)| lower(e, sub_tys.get(i).unwrap_or(&Ty::Unknown), env)).collect())
         }
         // As-pattern: coverage is the INNER pattern's (the binder is
         // irrefutable decoration).
-        ast::Pattern::As { inner, .. } => lower(inner),
+        ast::Pattern::As { inner, .. } => lower(inner, ty, env),
         ast::Pattern::List { elements, .. } => {
-            Pat::Ctor(CtorId::Tuple, elements.iter().map(lower).collect())
+            let elem = env.resolve_named(ty).list_elem_ty().unwrap_or(Ty::Unknown);
+            Pat::Ctor(CtorId::Tuple, elements.iter().map(|e| lower(e, &elem, env)).collect())
         }
         ast::Pattern::Literal { value, .. } => lower_literal(value),
     }
+}
+
+/// The single sub-pattern of a one-field wrapper (`some` / `ok` / `err`).
+fn lower_sub(inner: &ast::Pattern, ctor: &CtorId, ty: &Ty, env: &TypeEnv) -> Pat {
+    let sub = field_types(ctor, ty, env).into_iter().next().unwrap_or(Ty::Unknown);
+    lower(inner, &sub, env)
+}
+
+/// Normalize module-qualified names: "binary.Unreachable" → "Unreachable".
+fn bare_ctor_name(name: Sym) -> Sym {
+    name.as_str().rsplit_once('.').map(|(_, b)| almide_base::intern::sym(b)).unwrap_or(name)
+}
+
+/// The declared `(name, type)` fields of a record-payload variant case (or of
+/// a plain record type, for `CtorId::Record`), in declaration order — `None`
+/// for anything else.
+fn record_payload_fields(ctor: &CtorId, ty: &Ty, env: &TypeEnv) -> Option<Vec<(Sym, Ty)>> {
+    if let CtorId::Record = ctor {
+        let Ty::Record { fields } = env.resolve_named(ty) else { return Option::None };
+        return Some(fields);
+    }
+    let CtorId::Variant(vname) = ctor else { return Option::None };
+    let Ty::Variant { cases, .. } = env.resolve_named(ty) else { return Option::None };
+    cases.iter().find(|c| c.name == *vname).and_then(|c| match &c.payload {
+        VariantPayload::Record(fields) => Some(fields.iter().map(|(n, t)| (*n, t.clone())).collect()),
+        _ => Option::None,
+    })
 }
 
 fn lower_literal(expr: &ast::Expr) -> Pat {
@@ -138,6 +202,7 @@ fn ctor_set(ty: &Ty, env: &TypeEnv) -> CtorSet {
         }
         Ty::Bool => CtorSet::Finite(vec![CtorId::True, CtorId::False]),
         Ty::Tuple(_) => CtorSet::Single(CtorId::Tuple),
+        Ty::Record { .. } => CtorSet::Single(CtorId::Record),
         Ty::Int | Ty::Float | Ty::String => CtorSet::Infinite,
         _ => CtorSet::Opaque,
     }
@@ -152,7 +217,7 @@ fn arity(ctor: &CtorId, ty: &Ty, env: &TypeEnv) -> usize {
                 cases.iter().find(|c| c.name == *name).map_or(0, |c| match &c.payload {
                     VariantPayload::Unit => 0,
                     VariantPayload::Tuple(tys) => tys.len(),
-                    VariantPayload::Record(_) => 0, // Phase 4
+                    VariantPayload::Record(fields) => fields.len(),
                 })
             }
             _ => 0,
@@ -161,6 +226,10 @@ fn arity(ctor: &CtorId, ty: &Ty, env: &TypeEnv) -> usize {
         CtorId::None | CtorId::True | CtorId::False | CtorId::Lit(_) => 0,
         CtorId::Tuple => match &resolved {
             Ty::Tuple(tys) => tys.len(),
+            _ => 0,
+        },
+        CtorId::Record => match &resolved {
+            Ty::Record { fields } => fields.len(),
             _ => 0,
         },
     }
@@ -176,7 +245,7 @@ fn variant_payload_types(name: &Sym, resolved: &Ty) -> Vec<Ty> {
     cases.iter().find(|c| c.name == *name).map_or(vec![], |c| match &c.payload {
         VariantPayload::Unit => vec![],
         VariantPayload::Tuple(tys) => tys.clone(),
-        VariantPayload::Record(_) => vec![],
+        VariantPayload::Record(fields) => fields.iter().map(|(_, t)| t.clone()).collect(),
     })
 }
 
@@ -194,6 +263,10 @@ fn field_types(ctor: &CtorId, ty: &Ty, env: &TypeEnv) -> Vec<Ty> {
         CtorId::Err => vec![resolved.result_err_ty().unwrap_or(Ty::Unknown)],
         CtorId::Tuple => match &resolved {
             Ty::Tuple(tys) => tys.clone(),
+            _ => vec![],
+        },
+        CtorId::Record => match &resolved {
+            Ty::Record { fields } => fields.iter().map(|(_, t)| t.clone()).collect(),
             _ => vec![],
         },
         CtorId::None | CtorId::True | CtorId::False | CtorId::Lit(_) => vec![],
@@ -340,29 +413,41 @@ fn find_witness(matrix: &[Vec<Pat>], types: &[Ty], env: &TypeEnv) -> Option<Vec<
 //  Formatting
 // ────────────────────────────────────────────────
 
-fn fmt_pat(pat: &Pat) -> String {
+/// Compact witness text at a position of type `ty`. A record-payload variant is
+/// written with its field names — the fields the witness pins, then `..` for
+/// the rest (`Circle { r: 0, .. }`, or `Circle { .. }` when nothing is pinned)
+/// — so the text is itself a pattern the user can write.
+fn fmt_pat(pat: &Pat, ty: &Ty, env: &TypeEnv) -> String {
     match pat {
         Pat::Wild => "_".into(),
         Pat::Ctor(ctor, args) => {
-            let name = match ctor {
-                CtorId::Variant(s) => s.to_string(),
-                CtorId::Some => "some".into(),
-                CtorId::None => "none".into(),
-                CtorId::Ok => "ok".into(),
-                CtorId::Err => "err".into(),
-                CtorId::True => "true".into(),
-                CtorId::False => "false".into(),
-                CtorId::Tuple => String::new(),
-                CtorId::Lit(v) => v.clone(),
-            };
+            let name = ctor_name(ctor, ty);
+            let sub_types = field_types(ctor, ty, env);
+            let sub = |i: usize, a: &Pat| fmt_pat(a, sub_types.get(i).unwrap_or(&Ty::Unknown), env);
+            if let Some(fields) = record_payload_fields(ctor, ty, env) {
+                let mut parts: Vec<String> = args
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, a)| !matches!(a, Pat::Wild))
+                    .map(|(i, a)| {
+                        let fname = fields.get(i).map_or_else(|| format!("_{i}"), |(n, _)| n.to_string());
+                        format!("{fname}: {}", sub(i, a))
+                    })
+                    .collect();
+                if parts.len() < fields.len() {
+                    parts.push("..".into());
+                }
+                return format!("{} {{ {} }}", name, parts.join(", "));
+            }
             if args.is_empty() {
                 name
-            } else if matches!(ctor, CtorId::Tuple) {
-                let inner: Vec<_> = args.iter().map(fmt_pat).collect();
-                format!("({})", inner.join(", "))
             } else {
-                let inner: Vec<_> = args.iter().map(fmt_pat).collect();
-                format!("{}({})", name, inner.join(", "))
+                let inner: Vec<_> = args.iter().enumerate().map(|(i, a)| sub(i, a)).collect();
+                if matches!(ctor, CtorId::Tuple) {
+                    format!("({})", inner.join(", "))
+                } else {
+                    format!("{}({})", name, inner.join(", "))
+                }
             }
         }
     }
@@ -382,9 +467,8 @@ fn fmt_pat(pat: &Pat) -> String {
 /// `Node(arg1, arg2) => _`. `argN` is a file-scope counter to keep
 /// bindings unique across the nesting.
 fn fmt_arm_template(pat: &Pat, subject_ty: &Ty, env: &TypeEnv) -> String {
-    let resolved = env.resolve_named(subject_ty);
     let mut counter = 1usize;
-    let head = fmt_arm_head(pat, &resolved, env, &mut counter);
+    let head = fmt_arm_head(pat, subject_ty, env, &mut counter);
     format!("{} => _", head)
 }
 
@@ -414,6 +498,15 @@ struct CtorSyntax {
     is_prefix_call: bool,
 }
 
+/// The name a constructor is written with at a position of type `ty`: a plain
+/// record's shape is written with the record type's own name.
+fn ctor_name(ctor: &CtorId, ty: &Ty) -> String {
+    match (ctor, ty) {
+        (CtorId::Record, Ty::Named(n, _)) => n.to_string(),
+        _ => ctor_syntax(ctor).name,
+    }
+}
+
 fn ctor_syntax(ctor: &CtorId) -> CtorSyntax {
     let (name, is_tuple, is_prefix_call) = match ctor {
         CtorId::Variant(s) => (s.to_string(), false, true),
@@ -424,6 +517,9 @@ fn ctor_syntax(ctor: &CtorId) -> CtorSyntax {
         CtorId::True => ("true".into(), false, false),
         CtorId::False => ("false".into(), false, false),
         CtorId::Tuple => (String::new(), true, false),
+        // The written name is the record TYPE's; callers that print a record
+        // shape substitute it (`record_type_name`).
+        CtorId::Record => (String::new(), false, true),
         CtorId::Lit(v) => (v.clone(), false, false),
     };
     CtorSyntax { name, is_tuple, is_prefix_call }
@@ -435,15 +531,7 @@ fn ctor_syntax(ctor: &CtorId) -> CtorSyntax {
 /// that is not a variant at all — because those bind positionally and have no
 /// names to offer.
 fn record_payload_field_names(ctor: &CtorId, ty: &Ty, env: &TypeEnv) -> Option<Vec<String>> {
-    let CtorId::Variant(vname) = ctor else { return Option::None };
-    if !is_record_payload(vname, ty, env) {
-        return Option::None;
-    }
-    let Ty::Variant { cases, .. } = env.resolve_named(ty) else { return Option::None };
-    cases.iter().find(|c| c.name == *vname).and_then(|c| match &c.payload {
-        VariantPayload::Record(fields) => Some(fields.iter().map(|(n, _)| n.to_string()).collect()),
-        _ => Option::None,
-    })
+    record_payload_fields(ctor, ty, env).map(|fs| fs.iter().map(|(n, _)| n.to_string()).collect())
 }
 
 /// The binding name for one wildcard sub-pattern of a constructor.
@@ -480,7 +568,8 @@ fn fmt_ctor_arm_head(
     env: &TypeEnv,
     counter: &mut usize,
 ) -> String {
-    let CtorSyntax { name, is_tuple, is_prefix_call } = ctor_syntax(ctor);
+    let CtorSyntax { is_tuple, is_prefix_call, .. } = ctor_syntax(ctor);
+    let name = ctor_name(ctor, ty);
     if args.is_empty() {
         return name;
     }
@@ -491,7 +580,13 @@ fn fmt_ctor_arm_head(
             Pat::Wild => wildcard_binding_name(ctor, args.len(), i, &record_fields, counter),
             Pat::Ctor(_, _) => {
                 let sub_ty = sub_types.get(i).cloned().unwrap_or(Ty::Unknown);
-                fmt_arm_head(arg, &sub_ty, env, counter)
+                let head = fmt_arm_head(arg, &sub_ty, env, counter);
+                // A record payload binds by name: a pinned field is
+                // `field: pattern`, never a bare positional pattern.
+                match record_fields.as_ref().and_then(|fs| fs.get(i)) {
+                    Some(fname) => format!("{fname}: {head}"),
+                    Option::None => head,
+                }
             }
         }
     }).collect();
@@ -507,15 +602,22 @@ fn fmt_ctor_arm_head(
     format!("{}({})", name, parts.join(", "))
 }
 
-fn is_record_payload(vname: &Sym, ty: &Ty, env: &TypeEnv) -> bool {
-    let resolved = env.resolve_named(ty);
-    match &resolved {
-        Ty::Variant { cases, .. } => cases
-            .iter()
-            .find(|c| c.name == *vname)
-            .map_or(false, |c| matches!(c.payload, VariantPayload::Record(_))),
-        _ => false,
-    }
+/// Whether every row's head constructor belongs to the subject type's
+/// constructor space. A foreign head (`ok(x)` over a record, `some(x)` over a
+/// variant) is a pattern/type mismatch the checker has already reported;
+/// coverage over it is meaningless, and reporting a missing arm on top of the
+/// mismatch is a cascade that points at the wrong fix.
+fn heads_fit(matrix: &[Vec<Pat>], ty: &Ty, env: &TypeEnv) -> bool {
+    let set = ctor_set(ty, env);
+    matrix.iter().all(|row| match row.first() {
+        Some(Pat::Ctor(c, _)) => match &set {
+            CtorSet::Finite(all) => all.contains(c),
+            CtorSet::Single(one) => c == one,
+            CtorSet::Infinite => matches!(c, CtorId::Lit(_)),
+            CtorSet::Opaque => true,
+        },
+        _ => true,
+    })
 }
 
 // ────────────────────────────────────────────────
@@ -556,12 +658,15 @@ pub fn check_exhaustiveness(
         .iter()
         .filter(|a| a.guard.is_none())
         .flat_map(|a| match &a.pattern {
-            ast::Pattern::Or { alts } => alts.iter().map(|p| vec![lower(p)]).collect::<Vec<_>>(),
-            p => vec![vec![lower(p)]],
+            ast::Pattern::Or { alts } => alts.iter().map(|p| vec![lower(p, &resolved, env)]).collect::<Vec<_>>(),
+            p => vec![vec![lower(p, &resolved, env)]],
         })
         .collect();
 
-    let types = vec![resolved];
+    if !heads_fit(&matrix, &resolved, env) {
+        return vec![];
+    }
+    let types = vec![resolved.clone()];
 
     // Iteratively find up to 3 witnesses.
     let mut witnesses = Vec::new();
@@ -582,7 +687,7 @@ pub fn check_exhaustiveness(
             debug_assert_eq!(w.len(), 1, "witness should have exactly 1 column");
             let pat = w.first().unwrap_or(&Pat::Wild);
             MissingArm {
-                pattern: fmt_pat(pat),
+                pattern: fmt_pat(pat, subject_ty, env),
                 arm_template: fmt_arm_template(pat, subject_ty, env),
             }
         })
@@ -610,7 +715,17 @@ pub fn find_unreachable_arms(
     if matches!(ctor_set(&resolved, env), CtorSet::Opaque) {
         return vec![];
     }
-    let types = vec![resolved];
+    let all_rows: Vec<Vec<Pat>> = arms
+        .iter()
+        .flat_map(|a| match &a.pattern {
+            ast::Pattern::Or { alts } => alts.iter().map(|p| vec![lower(p, &resolved, env)]).collect::<Vec<_>>(),
+            p => vec![vec![lower(p, &resolved, env)]],
+        })
+        .collect();
+    if !heads_fit(&all_rows, &resolved, env) {
+        return vec![];
+    }
+    let types = vec![resolved.clone()];
     let mut matrix: Vec<Vec<Pat>> = Vec::with_capacity(arms.len());
     let mut dead = Vec::new();
     for (idx, arm) in arms.iter().enumerate() {
@@ -618,8 +733,8 @@ pub fn find_unreachable_arms(
         // the arm covers their union, and it is dead only when EVERY
         // alternative is dead.
         let alt_rows: Vec<Vec<Pat>> = match &arm.pattern {
-            ast::Pattern::Or { alts } => alts.iter().map(|a| vec![lower(a)]).collect(),
-            p => vec![vec![lower(p)]],
+            ast::Pattern::Or { alts } => alts.iter().map(|a| vec![lower(a, &resolved, env)]).collect(),
+            p => vec![vec![lower(p, &resolved, env)]],
         };
         if arm.guard.is_some() {
             // Skip — guarded rows don't extend `matrix`. We don't

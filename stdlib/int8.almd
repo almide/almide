@@ -11,44 +11,64 @@
 // All fns are UFCS-dispatched: `x.to_int64()` on `x: Int8`
 // resolves to `int8.to_int64(x)` via `pass_stdlib_lowering::
 // resolve_module_from_ty`.
+/// Sign-extending widen; always exact.
 fn to_int16(x: Int8) -> Int16 = int.to_int16(int.from_int8(x))
 
+/// Sign-extending widen; always exact.
 fn to_int32(x: Int8) -> Int32 = int.to_int32(int.from_int8(x))
 
+/// Sign-extending widen; always exact.
 fn to_int64(x: Int8) -> Int64 = int.to_int64(int.from_int8(x))
 
+/// Wraps to 8 bits; -1 becomes 255.
 fn to_uint8(x: Int8) -> UInt8 = int.to_uint8(int.from_int8(x))
 
+/// Wraps to 16 bits; -1 becomes 65535.
 fn to_uint16(x: Int8) -> UInt16 = int.to_uint16(int.from_int8(x))
 
+/// Wraps to 32 bits; -1 becomes 2^32-1.
 fn to_uint32(x: Int8) -> UInt32 = int.to_uint32(int.from_int8(x))
 
+/// Wraps to 64 bits; -1 becomes 2^64-1.
 fn to_uint64(x: Int8) -> UInt64 = int.to_uint64(int.from_int8(x))
 
+/// Same value as Float32; always exact.
 fn to_float32(x: Int8) -> Float32 = int.to_float32(int.from_int8(x))
 
+/// Same value as Float64; always exact.
 fn to_float64(x: Int8) -> Float64 = int.to_float64(int.from_int8(x))
 
+/// Decimal digits, with - when negative.
 fn to_string(x: Int8) -> String = int.to_string(int.from_int8(x))
 
 // ── Range-checked / saturating narrowings (matrix rule: lossy ⇒ trio) ──
+/// some(x), or none if x is negative.
 fn to_uint8_checked(x: Int8) -> UInt8? = int.to_uint8_checked(int.from_int8(x))
 
+/// Negative x clamps to 0.
 fn to_uint8_saturating(x: Int8) -> UInt8 = int.to_uint8_saturating(int.from_int8(x))
 
+/// some(x), or none if x is negative.
 fn to_uint16_checked(x: Int8) -> UInt16? = int.to_uint16_checked(int.from_int8(x))
 
+/// Negative x clamps to 0.
 fn to_uint16_saturating(x: Int8) -> UInt16 = int.to_uint16_saturating(int.from_int8(x))
 
+/// some(x), or none if x is negative.
 fn to_uint32_checked(x: Int8) -> UInt32? = int.to_uint32_checked(int.from_int8(x))
 
+/// Negative x clamps to 0.
 fn to_uint32_saturating(x: Int8) -> UInt32 = int.to_uint32_saturating(int.from_int8(x))
 
+/// some(x), or none if x is negative.
 fn to_uint64_checked(x: Int8) -> UInt64? = int.to_uint64_checked(int.from_int8(x))
 
+/// Negative x clamps to 0.
 fn to_uint64_saturating(x: Int8) -> UInt64 = int.to_uint64_saturating(int.from_int8(x))
 
 // ── Bounds ──
+/// Smallest Int8: -128.
 fn min_value() -> Int8 = int.to_int8(-128)
 
+/// Largest Int8: 127.
 fn max_value() -> Int8 = int.to_int8(127)

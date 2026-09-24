@@ -141,3 +141,112 @@ pub(crate) fn emit_line_print(import: u32) -> Function {
         .end();
     f
 }
+
+// ---------------------------------------------------------------------
+// #2312 shape 1 — the ROOM-FREE appends of a bounded build.
+//
+// A build the emitter proves stays inside the FIXED room (the soundness
+// condition is stated where it is decided, `line_bounded.rs`) writes
+// through these instead of `$append_copy` / `$append_i64` /
+// `$append_bool`. They are the same writes — to `cur + G_LINE_DELTA`, so
+// a region an EARLIER build relocated is still addressed at its physical
+// home — minus the room check, and so minus the `$line_grow` edge: a
+// module whose every build is bounded never links `$line_grow`, and with
+// it `$alloc`'s C-197 out-of-memory abort and the stderr writer, unless
+// something else allocates.
+// ---------------------------------------------------------------------
+
+/// `$append_raw(cur: i32, src: i32, len: i32) -> i32`: `$append_copy`
+/// without the room check.
+fn emit_append_raw() -> Function {
+    let (cur, src, len) = (0u32, 1u32, 2u32);
+    let mut f = Function::new([]);
+    let mut i = f.instructions();
+    i.local_get(cur).global_get(G_LINE_DELTA).i32_add();
+    i.local_get(src).local_get(len).call(F_COPY);
+    i.local_get(cur).local_get(len).i32_add();
+    i.end();
+    f
+}
+
+/// `$append_i64_raw(cur: i32, v: i64) -> i32`: itoa into the scratch
+/// (at most `INT_DISPLAY_MAX` bytes), then `$append_raw` it.
+fn emit_append_i64_raw(raw: u32) -> Function {
+    let (cur, v, len) = (0u32, 1u32, 2u32);
+    let mut f = Function::new([(1, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(v).call(F_ITOA).local_set(len);
+    i.local_get(cur);
+    i.i32_const(ITOA_END as i32).local_get(len).i32_sub();
+    i.local_get(len);
+    i.call(raw);
+    i.end();
+    f
+}
+
+/// `$append_bool_raw(cur: i32, b: i32) -> i32`: `"true"` / `"false"`
+/// through `$append_raw`.
+fn emit_append_bool_raw(raw: u32, true_base: u32, false_base: u32) -> Function {
+    let payload = |base: u32| (base + almide_layout::PAYLOAD) as i32;
+    let mut f = Function::new([]);
+    f.instructions()
+        .local_get(0)
+        .i32_const(payload(true_base))
+        .i32_const(payload(false_base))
+        .local_get(1)
+        .select()
+        .i32_const("true".len() as i32)
+        .i32_const("false".len() as i32)
+        .local_get(1)
+        .select()
+        .call(raw)
+        .end();
+    f
+}
+
+/// `$print_i64(v: i64)`: print one Int as a whole line straight from the
+/// itoa scratch — the rendering is `[ITOA_END - len, ITOA_END)` and the
+/// stream import reads it before anything else can run.
+fn emit_print_i64(import: u32) -> Function {
+    let (v, len) = (0u32, 1u32);
+    let mut f = Function::new([(1, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(v).call(F_ITOA).local_set(len);
+    i.i32_const(ITOA_END as i32).local_get(len).i32_sub();
+    i.local_get(len);
+    i.call(import);
+    i.end();
+    f
+}
+
+/// Whether a line helper returns nothing (the rest return the cursor).
+pub(crate) fn helper_is_void(h: &Helper) -> bool {
+    matches!(h, Helper::PrintI64 { .. })
+}
+
+/// The wasm params of a room-free append helper (None = not one).
+pub(crate) fn helper_params(h: &Helper) -> Option<Vec<ValType>> {
+    match h {
+        Helper::AppendRaw => Some(vec![ValType::I32, ValType::I32, ValType::I32]),
+        Helper::AppendI64Raw => Some(vec![ValType::I32, ValType::I64]),
+        Helper::AppendBoolRaw { .. } => Some(vec![ValType::I32, ValType::I32]),
+        Helper::PrintI64 { .. } => Some(vec![ValType::I64]),
+        _ => None,
+    }
+}
+
+/// The body of a room-free append helper (None = not one). `raw` is
+/// `$append_raw`'s index — the two wrappers are only ever registered
+/// after it (`Emitter::raw_append_helper`).
+pub(crate) fn helper_body(h: &Helper, work: &FnWork) -> Option<Function> {
+    let raw = || work.helper(Helper::AppendRaw);
+    Some(match h {
+        Helper::AppendRaw => emit_append_raw(),
+        Helper::AppendI64Raw => emit_append_i64_raw(raw()),
+        Helper::AppendBoolRaw { true_base, false_base } => {
+            emit_append_bool_raw(raw(), *true_base, *false_base)
+        }
+        Helper::PrintI64 { import } => emit_print_i64(*import),
+        _ => return None,
+    })
+}

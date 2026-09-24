@@ -95,9 +95,22 @@ impl Emitter<'_> {
                 i.local_get(hb).local_get(hr).i32_wrap_i64().i32_store(slot_memarg(0));
                 i.local_get(hb).local_get(hc).i32_wrap_i64().i32_store(slot_memarg(4));
             }
+            if !ones {
+                // zeros FILLS: `$alloc` hands back freed blocks unzeroed
+                // (#2004 / #2010 made the frees real), so "fresh bump pages
+                // are zero" held only while nothing was freed — a zeros
+                // after a released matrix printed the dead block's cells
+                // (#1423 stage 4, found the day the structural leg took the
+                // matrix ops that free their temporaries). The mat_alloc_out64
+                // / bytes.new lesson, met a third time.
+                let mut i = self.f.instructions();
+                i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32 + 8).i32_add();
+                i.i32_const(0);
+                i.local_get(hr).local_get(hc).i64_mul().i64_const(8).i64_mul().i32_wrap_i64();
+                i.memory_fill(0);
+            }
             if ones {
-                // fill r*c f64 ones (fresh bump pages are zero, so
-                // zeros needs no loop; ones walks the payload).
+                // fill r*c f64 ones (ones walks the payload).
                 let cur = self.hold_i32()?;
                 let end = self.hold_i32()?;
                 let mut i = self.f.instructions();
@@ -233,6 +246,7 @@ impl Emitter<'_> {
             let hn = self.hold_i32()?;
             let hdst = self.hold_i32()?;
             let hj = self.hold_i32()?;
+            let ragged = self.pool.intern("matrix rows must have equal length");
             let mut i = self.f.instructions();
             i.local_tee(hl);
             // r = list count; c = the FIRST row's width if any (native
@@ -246,6 +260,35 @@ impl Emitter<'_> {
                 .i32_const(3)
                 .i32_shr_u()
                 .local_set(hc);
+            i.end();
+            // #2482: every row must have row 0's width — a ragged list of
+            // lists is not a matrix, and this arm's zero-fill/truncate
+            // reading answered a shape where native asserted (raw panic)
+            // and the incumbent kept the ragged value. Checked BEFORE the
+            // allocation, so no element copy below can outrun its row.
+            i.i32_const(0).local_set(hi);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hi).local_get(hr).i32_ge_u().br_if(1);
+            i.local_get(hl)
+                .local_get(hi)
+                .i32_const(2)
+                .i32_shl()
+                .i32_add()
+                .i32_load(slot_memarg(0))
+                .i32_load(len_memarg())
+                .i32_const(3)
+                .i32_shr_u()
+                .local_get(hc)
+                .i32_ne()
+                .if_(BlockType::Empty);
+            i.i32_const(ragged as i32);
+            let _ = i;
+            self.emit_error_frame_abort();
+            let mut i = self.f.instructions();
+            i.end();
+            i.local_get(hi).i32_const(1).i32_add().local_set(hi);
+            i.br(0);
+            i.end();
             i.end();
             // alloc 8 + r*c*8 (i64 math: the ragged-degenerate product
             // can exceed i32 even though well-formed inputs cannot)
@@ -263,11 +306,9 @@ impl Emitter<'_> {
                 .local_set(hb);
             i.local_get(hb).local_get(hr).i32_store(slot_memarg(0));
             i.local_get(hb).local_get(hc).i32_store(slot_memarg(4));
-            // Per row, copy min(width, c) elements; a SHORT row's tail
-            // stays zero from the fresh pages. (Native flattens ragged
-            // rows into misaligned data — self-inconsistent and pinned
-            // by no fixture; zero-fill/truncate is the deterministic
-            // reading of "cols comes from the first row".)
+            // Per row, copy its c elements (every row is c wide past the
+            // guard above; the `min` is kept so the copy can never outrun
+            // a row even if the guard is ever moved).
             i.local_get(hb)
                 .i32_const(almide_layout::PAYLOAD as i32 + 8)
                 .i32_add()
@@ -555,7 +596,7 @@ impl Emitter<'_> {
                 return self.lower_matrix_select_rows(m, ids).map(Some)
             }
             (
-                "from_bytes_f32_le" | "from_bytes_f16_le" | "select_rows_f32"
+                "from_bytes_f32_le" | "from_bytes_f16_le" | "from_bytes_f64_le" | "select_rows_f32"
                 | "from_q1_0_bytes" | "select_rows_q1_0" | "select_rows_q8_0_dq",
                 [a, b, c, d],
             ) => return self.lower_matrix_loader(func, a, b, c, d).map(Some),
@@ -570,7 +611,7 @@ impl Emitter<'_> {
                 let causal = func == "masked_multi_head_attention";
                 return self.lower_matrix_mha(causal, q, k, v, nh).map(Some)
             }
-            _ => return Ok(None),
+            _ => return self.lower_matrix_call_b(func, args),
         };
         Ok(Some(out))
     }

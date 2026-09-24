@@ -1,0 +1,5 @@
+// E085: the wasm-leg spelling of the attribute is held to the same authority.
+@wasm_intrinsic("almide_rt_math_abs")
+fn magnitude(n: Int) -> Int = _
+
+fn main() -> Unit = println(int.to_string(magnitude(-3)))

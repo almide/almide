@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-09-10
+> Last updated: 2026-09-23
 
 ## Overview
 
@@ -35,6 +35,25 @@ almide run app.almd -- arg1 arg2        # ファイル指定 + プログラム�
 `almide` 自身のフラグ（`--target` / `--no-check` / `--release`）は `--` の前で解釈され、`--` 以降はそのままプログラムに渡る（`cargo run` と同じ規約）。プログラム内で `env.args()` を呼ぶと `--` 以降の引数が `List[String]` で返る。
 
 テスト: `tests/run_target_flag_test.rs`
+
+**native のビルドキャッシュ**(#2500): native ターゲットは生成 Rust を共有スクラッチ dir
+（`ALMIDE_RUN_PROJECT_DIR`、既定 `<temp>/almide-run`）でビルドし、生成コードの内容ハッシュを名前にした
+`target/<profile>/almide-<hash>` にバイナリを置く。同じ生成コードは `almide run` / `almide build`
+のどちらから来てもこの 1 本を再利用し、cargo を呼ばない。dir 内の書き込み（ビルド・退避・掃除）は
+すべて `.almide-build.lock` の下で直列化され、キャッシュヒットだけがロック無しで走る。
+
+- **退避**: ヒットのたびにバイナリの mtime を更新し、7 日間使われなかった `almide-<hash>`
+  （と `deps/` に残る同じ世代の `almide_out-*` オブジェクト）を、次のミス時にロックの下で削除する。
+  この掃引は 1 日 1 回（`.almide-evict-stamp`）。incremental セッションには触れない。
+- **rustc ICE からの復旧**: 中断されたビルド（ENOSPC、kill）が rustc の incremental セッションを
+  壊すと、以後その形のビルドは `the compiler unexpectedly panicked` で毎回落ちる。失敗した
+  ビルドの出力にこの banner があれば、同じロックの下で `target/*/incremental` を消して 1 回だけ
+  再ビルドし、成功したら stderr に
+  `note: rustc crashed on a stale incremental session; cleared … and rebuilt successfully` を
+  1 行出す。再ビルドも失敗したら元のエラーをそのまま報告する（ループしない）。
+- **`almide clean`** がこの dir を空にする（下記）。
+
+テスト: `tests/run_cache_recovery_test.rs`
 
 **stdout のバッファリング**(#2245): native バイナリの `println` / `io.print` / `io.write` /
 `io.write_bytes` は 1 つの 64 KiB バッファを通る(順序はプログラム順)。stdout が端末なら書き込み
@@ -128,6 +147,7 @@ almide test --update-snapshots x_test.almd  # スナップショットの受理(
 | `--update-snapshots` | `testing.assert_snapshot` の不一致を受理し、呼び出し側の期待値リテラルをソース内で書き換える(`ALMIDE_UPDATE_SNAPSHOTS=1` でも同じ) |
 | `--ci` | CI モード: スナップショットを一切書かない(`CI=true` でも同じ)。新規・乖離はどちらも失敗 |
 | `--allow-no-tests` | 実行すべきテストが 0 件でも 0 で終了する(既定は 5) |
+| `--show-output` | 通ったテストも含め、全テストが stdout / stderr に書いたものを表示する |
 
 実行のたびに **実行テスト数**を報告する: `2 tests in 1 file`。`--run` が何かを除外した
 ときは `0 tests in 1 file (2 filtered out)` のように除外数も付く。`--json` は各行に
@@ -151,6 +171,38 @@ almide test --update-snapshots x_test.almd  # スナップショットの受理(
 
 テスト: `tests/test_zero_outcomes_test.rs`、両ターゲット一致は `tests/test_zero_exit_parity_test.rs`
 
+**失敗したテストの出力は失敗報告の下に付く**(#2538)。`println` / `eprintln` で途中の値を
+出したテストが落ちたとき、その出力が捨てられないようにするため:
+
+```
+FAILED: e.almd
+  test: eprintln inside a failing test
+  at:   e.almd:4
+  expected: 2
+  found:    1
+  stdout:
+    STDOUT: value is 42
+  stderr (whole file — stderr carries no per-test boundary):
+    DEBUG: value is 42
+```
+
+- **stdout はテスト単位**。native(libtest を `--test-threads=1` で実行)も wasm のランナーも
+  テストの前後を stdout に印字するので、その間がそのテストの出力になる。
+- **stderr はファイル単位**。どちらのハーネスも stderr にはテストの境目を書かないため分割
+  できず、同じファイルの通ったテストの stderr も含む。ラベルがそう言う。
+- 通ったテストの出力は既定で黙る。`--show-output` で全テスト分を表示する。
+- native・wasm・既定レーン(wasm 先行、失敗は native で再実行)のどれでも同じ。
+
+テスト: `tests/test_failure_shows_output_test.rs`
+
+**ファイルのテスト実行は、そのファイル自身の `test` だけを走らせる**(#2550)。import した
+モジュールの `test` は import 元のビルドには入らず、そのモジュールのファイル自身の実行で走る。
+したがってディレクトリを渡した `almide test` では、どのテストもちょうど 1 回走り、落ちた
+テストはそれを書いたファイルのパスとソース上の名前で報告される。native・wasm・既定レーンの
+どれでも同じ。
+
+テスト: `tests/imported_module_tests_not_rerun_test.rs`
+
 `--run <pattern>` は **生成された関数名に対する大文字小文字を区別する部分文字列一致**で、
 `test "…"` のラベルそのものではない。ラベルは `__test_almd_` を前置し、空白・記号を `_` に
 畳んだ綴りになる（`crates/almide-base/src/names.rs`）。したがって `test "beta fails"` は
@@ -169,7 +221,25 @@ almide test --update-snapshots x_test.almd  # スナップショットの受理(
 同名ファイルの並列実行や別ディレクトリの同名ファイルがパスを共有することはない（#1877）。
 ネイティブ fallback のビルドキャッシュは `$TMPDIR/almide-test/native/` に永続（同じく絶対パス鍵）。
 
-テスト: `tests/test_scratch_race_test.rs`
+この worker dir は**テストファイルの絶対パス 1 本につき 1 つ**で、それぞれが自分の `target/` を持つ。
+放置すると消えるものが無い（名前を変えたテスト、消した worktree、消えたブランチの分が残り続ける:
+2026-09-22 に 4,510 dir / 39 GB を実測）ので、`almide test` の開始時に**7 日間誰も使っていない
+worker dir を空にする**(#2504)。判定は「その dir 直下と `target/<profile>/` のファイルの mtime」
+— キャッシュヒットが実行するバイナリの mtime を更新する(#2500)ので、ビルドしていなくても
+「使った」dir は残る。掃引は 1 日 1 回（`native/.almide-evict-stamp`）、各 dir の
+`.almide-build.lock` を**待たずに**取り、取れなければ（他プロセスがビルド中）その dir は飛ばす。
+lockfile は残すので、掃引後の dir は lockfile だけの空ディレクトリになる（理由は
+[`almide clean`](#almide-clean) の節）。`ALMIDE_KEEP_SCRATCH=1` のときは掃引しない。
+`almide clean` は年齢に関係なく全 worker dir を空にする。
+
+同じ規則が**ランタイム rlib キャッシュ** `<temp>/almide-rtlib-<key>/` にも効く(#2504)。
+この dir はランタイムソース × rustc バージョン × opt レベルごとに 1 つ作られ、コンパイラを
+ビルドし直すたび・ツールチェーンを上げるたびに新しい鍵になって古い方は二度とリンクされない
+（2026-09-22 に 31 dir / 102 MB を実測）。リンクのたびに rlib の mtime を更新し、7 日リンク
+されなかった dir を（自分が今使っている dir を除いて）空にする。掃引は 1 日 1 回、
+stamp は `<temp>/.almide-evict-stamp`。
+
+テスト: `tests/test_scratch_race_test.rs`, `tests/run_cache_recovery_test.rs`
 
 失敗の報告は**構造化ブロック**（`FAILED: <file>` に続けて `test:` / `at:` /
 `hint:` / `diff:` または `expected:` `found:`）。複数行文字列・リスト・レコードは
@@ -549,7 +619,7 @@ almide deps
 
 ```bash
 almide dep-path bindgen
-# /Users/you/.almide/cache/bindgen/a629eded8d20/src
+# /Users/you/.almide/cache/bindgen/.src-2080cb5159116353/a629eded8d20/src
 ```
 
 用途: 依存パッケージの `.almd` ファイルを `process.exec("almide", ["run", path])` で実行する場合のパス取得。
@@ -558,11 +628,56 @@ almide dep-path bindgen
 
 ### `almide clean`
 
-依存キャッシュ (`~/.almide/cache/`) をクリア。
+キャッシュをクリアする。対象は 6 つ:
+
+| 対象 | 場所 |
+|---|---|
+| 依存キャッシュ | `~/.almide/cache/` |
+| インクリメンタルキャッシュ | `./.almide/cache/` |
+| コンパイルキャッシュ | `./target/compile/` |
+| native ビルドスクラッチ(#2500) | `ALMIDE_RUN_PROJECT_DIR`（既定 `<temp>/almide-run`）と `<temp>/almide-build-cdylib` |
+| `almide test` の worker dir(#2504) | `<temp>/almide-test/native/<key>/` を 1 つずつ |
+| ランタイム rlib(#2504) | `<temp>/almide-rtlib-<key>/` を 1 つずつ |
+
+**ビルドスクラッチの「空にする」は完了形の振る舞いであって、やり残しではない。** 各 dir の
+`.almide-build.lock` を取ってから中身を消す（進行中のビルドは完了してから消える）ので、
+dir は lockfile だけを持つ空ディレクトリとして残る。lockfile を消さないのは意図的で、消すと
+「その lockfile を開いて待っている builder」と「次に来て新しい lockfile を作る builder」が
+**別 inode をロックして排他が壊れる** — 同じ dir で 2 つのビルドが同時に走り、片方のバイナリが
+もう片方のものになる(#1877 と同じ壊れ方)。消えるのは容量（worker dir なら 1 本あたり数 MB）、
+残るのは 0 バイトのファイル 1 つ。
+
+空にした dir ごとに `Cleaned <path>` を stderr に 1 行出す（worker dir と rlib dir はそれぞれ
+`Cleaned <native> (N test worker dir(s))` / `Cleaned <temp>/almide-rtlib-* (N runtime rlib dir(s))`
+と 1 行にまとめる）。何も無ければ `No cache to clean`。
 
 ```bash
 almide clean
 ```
+
+テスト: `tests/run_cache_recovery_test.rs`
+
+---
+
+### `almide verify`
+
+プログラムの flight-grade 証明書（ownership / names / caps / call-modes の witness）を、**独立版数の別バイナリ `almide-verify`** に再検査させる (#2152)。`almide verify` 自身は検査器を持たない subprocess shim で、`almide-verify` を **almide 実行ファイルの隣 → PATH** の順に探して起動し、標準入出力と終了コードをそのまま返す。見つからなければ **linked fallback は無く**、名前付きエラー `error[verifier-missing]` で終了コード 127。
+
+```bash
+almide verify app.almd                    # 証明書 bundle を生成し almide-verify bundle に渡す
+almide verify app.almd --emit app.bundle  # bundle をファイルに残す（almide-verify が無くても書く）
+almide verify ownership w.cert            # .almd 以外の引数は almide-verify にそのまま渡る
+almide-verify --version                   # 検査器自身の版数（コンパイラとは独立）
+```
+
+- `almide` 側で走るのは **untrusted な producer** だけ（`almide_mir::pipeline::program_witnesses` がプログラムを MIR に下ろし、`crate::certificate` の witness を bundle に書く）。判定は常に `almide-verify`。
+- `almide-verify` はコンパイラの crate を一切リンクしない（`crates/almide-verify`、依存ゼロ）。各性質の判定は `proofs/` の Coq 検査器（`check_xc` / `check_names_cert` / `check_caps_cert` / `check_prog_cert` / `check_modes_cert`）の転写で、定理は持たない。抽出版検査器との一致は `proofs/gate.sh`（全行 + seeded ランダム差分）と `proofs/corpus-wall.sh`（コーパス全 witness）がゲートする。
+- lowering subset の外の関数は bundle に `uncertified` として名前つきで載る（黙って飛ばさない）。
+- `./almide.toml` の `[permissions].allow` があれば effect fn の宣言 capability をそれに絞る（caps witness が reject できるようになる）。
+
+`almide-verify` の終了コード: 0 = 全 witness ACCEPT（CERTIFIED）、1 = REJECT あり、または witness が 0 件、3 = 全 ACCEPT だが uncertified な関数あり（INCOMPLETE）、2 = 使い方の誤り・読めない入力・不正な bundle。
+
+テスト: `tests/verify_shim_test.rs`（shim の委譲・不在時の名前付きエラー・終了コード転送）、`crates/almide-verify/tests/coq_examples.rs`（Coq の全 `Example` と `build-checker.sh` の固定行）、`crates/almide-verify/tests/cli.rs`
 
 ---
 
@@ -585,6 +700,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 |---|---|
 | 0 | 成功 |
 | 1 | コンパイルエラー、テスト失敗、依存解決失敗 |
+| 127 | `almide verify`: 独立検査器 `almide-verify` が見つからない（`error[verifier-missing]`） |
 
 ---
 
@@ -621,12 +737,17 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_BIN=value` | harness | path of the `almide` binary the test harnesses, scripts and workflows drive (default: `target/release/almide`, then PATH) |
 | `ALMIDE_BORROW_OWN_ALL` | ablation | make BorrowInsertion own every borrow-eligible param, as before inference existed — the ablation the ownership certifier's C4 sensitivity test drives, and the borrow-inference perf knob |
 | `ALMIDE_BOUNDED_DEBUG` | debug | print why a bounded-loop bind declined (v1 lowering) |
+| `ALMIDE_BUILD_PROVENANCE=value` | ci | read by `build.rs` at BUILD time: `release` makes `almide --version` say `(release)`, anything else (including unset) says `(dev)`. Set only by `.github/workflows/release.yml`, the one thing that builds from a tag, so a binary claiming to be a release had to come from there (#2384) |
+| `ALMIDE_BUILD_SHA=value` | ci | read by `build.rs` at BUILD time: the commit `almide --version` names beside the build kind, truncated to 9 characters. Passed in by `make install` and the release workflow rather than read from git in the build script, which would rebuild the root crate after every commit (#2384) |
 | `ALMIDE_CAPTURE_MOVE_OFF` | ablation | make CaptureClone clone every capture again, as before #2231, instead of moving a value whose sole user is the closure — the ablation the ownership certifier's sensitivity test drives |
 | `ALMIDE_CERTIFY_OWNERSHIP=value` | debug | run the native ownership certifier after the pass pipeline (#2231): `report` prints every violation, `fail` aborts the build on one, `off` skips it; unset = `fail` in a debug build, `off` in a release build |
 | `ALMIDE_COMPILER_STACK=value` | tool | stack size in bytes of the compiler driver thread (default 256 MiB); a deep input that overflows it is the regression test's subject |
 | `ALMIDE_COMPONENT_ADAPTER` | route | route `--component` through the preview1 adapter instead of the direct component emission |
 | `ALMIDE_COMPONENT_P3` | route | emit a WASI 0.3 component (stdio over component-model streams, the async canonical ABI) under `--component`; needs a p3-capable wasmtime |
 | `ALMIDE_CORPUS_FILTER=value` | harness | substring filter over the fixture paths the 3-way oracle test evaluates |
+| `ALMIDE_CORPUS_SHARD=value` | harness | `k/N` (1-based) walks the k-th modulo slice of the SORTED spec/wasm_cross corpus in the six corpus giants (#2381), read after the sort; `merge/N` reads the N shards' partials from `ALMIDE_CORPUS_SHARD_DIR` and judges the whole-corpus ceilings and the name-keyed bridge ledger; unset = the unsharded gate |
+| `ALMIDE_CORPUS_SHARD_DIR=value` | harness | directory where a sharded corpus gate writes its walked-fixture list and its partial counts / bridge names, and where `merge/N` reads them; unset = a local slice that writes nothing |
+| `ALMIDE_CORPUS_WEIGHTS_DIR=value` | harness | directory where a corpus gate records the wall it measured per fixture (`weights/<column>.<gate>[.<k>-of-<N>].txt`, `stem<TAB>ms`) for scripts/gen-corpus-weights.sh to render into proofs/corpus-weights.txt, the table the balanced `k/N` slices read (#2457); CI points it at the shard-partials dir so the committed table is rendered from the runner's own ratios (#2502); unset = nothing recorded |
 | `ALMIDE_COVERAGE_CONDITION=value` | ci | the coverage ratchet's condition tag (which baseline row a push is judged against) |
 | `ALMIDE_CWD=value` | runtime | the writer's working directory, set by `almide run` for the wasm host so relative fs paths resolve as on native (C-137); never set by hand |
 | `ALMIDE_DBG_ANF` | debug | print why a lambda lift or statement inline declined (v1 lowering) |
@@ -638,6 +759,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_DBG_DESUGAR_RAW` | debug | with `ALMIDE_DBG_DESUGAR_FN`, print the raw pre-desugar body too (was `DBG_DESUGAR_RAW`) |
 | `ALMIDE_DBG_ELEM` | debug | print why a list-literal Block element declined (v1 lowering) |
 | `ALMIDE_DBG_FAN` | debug | print the fan lowering's prefetch and pattern decisions (structural leg) |
+| `ALMIDE_DBG_GINIT` | debug | print the eager top-let init runner's admission set and why an extended runner declined (v1 lowering, C-007) |
 | `ALMIDE_DBG_LINK` | debug | dump the wasm link demand set and what each key resolves to |
 | `ALMIDE_DBG_LOWER_FN=value` | debug | print the fully desugared body the v1 lowering actually lowers, for the fn named by the value (was `DBG_LOWER_FN`) |
 | `ALMIDE_DBG_NEMATCH` | debug | print the never-err match analysis per function (v1 lowering) |
@@ -671,10 +793,12 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_HEAP_TRACE` | debug | print the interpreter's heap-block allocations and frees |
 | `ALMIDE_HTTP_TIMEOUT_SECS=value` | runtime | the http client's request timeout in seconds, read by the compiled program (default 30) |
 | `ALMIDE_INSTALL=value` | tool | the directory `almide install` installs binaries into (overrides the default `~/.local/bin`) |
+| `ALMIDE_INTERP_SWEEP_THREADS=value` | harness | interp sweep thread count; 1 = serial (#2381) |
 | `ALMIDE_IR_FAULT=value` | harness | inject an IR violation after the named optimiser pass, so the per-pass verifier can be watched turning red in the release binary |
 | `ALMIDE_KEEP_SCRATCH` | tool | keep the `almide test` scratch build directory instead of deleting it |
 | `ALMIDE_LOCAL_REUSE_THRESHOLD=value` | route | the distinct-local count above which the v1 wasm render reuses locals (default 8000); a test knob that forces the transform on across the corpus |
 | `ALMIDE_LSP_TRACE` | debug | print every LSP request and response the language server handles |
+| `ALMIDE_MANIFEST_TREE_CHECK=value` | ci | the parity-manifest generators' stale-tree refusal (#2405, scripts/lib/oracle-header.sh): `strict` (default) refuses an ORACLE that is not `<Cargo.toml version> (dev…)`, is stamped with a commit other than HEAD, or is unstamped and older than the sources; a worktree behind its upstream; and an untracked spec/ fixture. `gate` keeps only the untracked-fixture check (scripts/check-parity-goldens.sh vouches for CI's artifact). `off` is the deliberate override |
 | `ALMIDE_MG_DEBUG` | debug | print the mutable-global slot assignment and cross-module name-bridge decisions (v1 lowering) |
 | `ALMIDE_MONO_DEBUG` | debug | print the monomorphisation discovery and instantiation decisions |
 | `ALMIDE_MP_PROBE` | debug | print the mut-param analysis decisions (IR) |
@@ -704,7 +828,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_REGION_TRAP_STALE` | trap | arm the native region prelude's stale-reference trap (#2200) |
 | `ALMIDE_RENDER=value` | ci | the render_program example binary the prelude audit re-renders fixtures with |
 | `ALMIDE_REPO=value` | ci | the repository slug a release script targets |
-| `ALMIDE_RUN_PROJECT_DIR=value` | tool | the project root `almide run` resolves dependencies from, when the file is run from outside it |
+| `ALMIDE_RUN_PROJECT_DIR=value` | tool | the scratch dir `almide run` / `almide build` compile native binaries in, instead of `<temp>/almide-run` (the content-keyed binary cache, its cargo target, its rustc incremental sessions); `almide clean` empties it |
 | `ALMIDE_SEMLAW_CASES=value` | harness | how many cases the semantic-laws property test draws |
 | `ALMIDE_SHUFFLE_PASSES=value` | gate | run the native passes in the seeded random order the declared dependency edges permit — a pass-dependency probe: the emitted Rust must not change (#2186) |
 | `ALMIDE_SIZE_ALONE=value` | harness | the one fixture a child process of the size ratchet measures alone, for its isolation check (#2309); the ratchet sets it on the processes it spawns |
@@ -725,12 +849,15 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_UPDATE_NATIVE_OWN` | harness | regenerate the native result-ownership ledger |
 | `ALMIDE_UPDATE_RC_SNAPSHOTS` | harness | regenerate the rc-placement snapshots |
 | `ALMIDE_UPDATE_SIZES` | harness | regenerate the structural leg's size baselines |
+| `ALMIDE_UPDATE_SIZE_LADDER` | harness | regenerate the stdlib-linking size ladder ledger (#2141) |
 | `ALMIDE_UPDATE_SNAPSHOTS` | tool | same as `almide test --update-snapshots` |
 | `ALMIDE_UPDATE_SURFACE` | harness | regenerate the exercised-surface golden |
 | `ALMIDE_UPDATE_WITNESS_FLOOR` | harness | regenerate the certificate witness floor |
 | `ALMIDE_VERBOSE` | debug | same as `almide -v`: surface the native wall-and-fallback notes that a quiet run hides |
 | `ALMIDE_VERIFIED_DEBUG` | debug | name the wasm leg that rendered, and why the other declined (the route oracle) |
+| `ALMIDE_VERSION_LINE=value` | ci | NOT read from the environment at run time: `build.rs` EMITS it as `cargo:rustc-env`, and `src/main.rs` reads it with `env!` at compile time. It is the string `almide --version` prints — `<version> (<kind>[, <sha>])` — assembled from ALMIDE_BUILD_PROVENANCE and ALMIDE_BUILD_SHA (#2384) |
 | `ALMIDE_WALL_REASON` | debug | make `almide test` say WHICH stage of the wasm leg declined a fallback file, not just `v1 wall` |
+| `ALMIDE_WASM_ALLOC_COUNT` | harness | emit the structural wasm leg's allocation counters (#2407: four i64 globals `$alloc`/`$free` bump, exported as `__alloc_count` / `__alloc_reused` / `__alloc_bytes` / `__free_count`) and make `almide run --target wasm` print `__ALMD_WASM_ALLOC allocs=N reused=N bytes=N frees=N heap_end=N` on stderr after the run; off, the module is byte-identical to a build without the switch (the wasm twin of `ALMIDE_ALLOC_COUNT`; the count ledger is crates/almide-wasm/tests/golden/alloc-count-baseline.txt) |
 | `ALMIDE_WASM_FREES` | ci | the frees-churn gate's switch; its compiler reader retired with the v0 emitter (#782), the gate that still sets it is #2207's |
 | `ALMIDE_WASM_INCUMBENT` | route | force the INCUMBENT wasm leg (the v1 MIR renderer) instead of the structural-first route |
 | `ALMIDE_WASM_STRUCTURAL` | route | force the STRUCTURAL wasm leg for a shape the router would send to the incumbent (the route-flip probe) |

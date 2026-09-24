@@ -385,12 +385,24 @@ pub fn almide_rt_value_tagged_variant(v: AlmideValue) -> Result<(String, AlmideV
 
 // ── Stringify ──
 
+/// A Float leaf of a Value in its JSON text: Rust's `{}` Display for a finite
+/// value (`3`, `-0`, `1e300`), and `null` for NaN and ±infinity (#2499, C-356):
+/// JSON has no spelling for them, `json.parse` refused the `NaN` / `inf` /
+/// `-inf` this used to write, and the two lineages (refuse: Go, Ruby; write
+/// `null`: JavaScript, serde_json) leave `null` as the only total answer for a
+/// `String`-returning stringify. Shared by every leg: the self-hosted
+/// `__vstr_float` (stdlib/value_core.almd), the structural wasm helper
+/// (crates/almide-wasm/src/value_helpers.rs), the pretty printer below in
+/// json.rs, and the interp oracle.
+pub fn almide_rt_value_float_json(f: f64) -> String {
+    if f.is_finite() { format!("{}", f) } else { "null".to_string() }
+}
 pub fn almide_rt_value_stringify(v: &AlmideValue) -> String {
     match v {
         AlmideValue::Null => "null".to_string(),
         AlmideValue::Bool(b) => if *b { "true".to_string() } else { "false".to_string() },
         AlmideValue::Int(n) => n.to_string(),
-        AlmideValue::Float(f) => format!("{}", f),
+        AlmideValue::Float(f) => almide_rt_value_float_json(*f),
         AlmideValue::Str(s) => format!("\"{}\"", s
             .replace('\\', "\\\\")
             .replace('"', "\\\"")

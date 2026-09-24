@@ -691,7 +691,39 @@ impl Checker {
         if self.reject_ctor_pattern_on_user_variant(ctor, resolved) {
             return;
         }
-        self.reject_ctor_pattern_on_scalar(ctor.spelling(), ctor.wants(), resolved);
+        self.reject_ctor_pattern_on_non_carrier(ctor.spelling(), ctor.wants(), resolved);
+    }
+
+    /// Whether `resolved` is a subject a builtin carrier pattern can never
+    /// destructure: structurally known, and neither an Option / Result nor an
+    /// alias of one. Unresolved subjects (`TypeVar`, `Unknown`, `Never`, a
+    /// `Named` that does not resolve, a const param) stay silent — that is
+    /// ordinary error recovery. A `Union` stays silent too: a member may be a
+    /// carrier. User variants are claimed earlier by
+    /// [`Self::reject_ctor_pattern_on_user_variant`].
+    fn is_known_non_carrier(&self, resolved: &Ty) -> bool {
+        let named = self.env.resolve_named(resolved);
+        match &named {
+            Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result, _) => false,
+            Ty::Applied(..)
+            | Ty::Record { .. }
+            | Ty::OpenRecord { .. }
+            | Ty::Tuple(_)
+            | Ty::Fn { .. }
+            | Ty::Int | Ty::Bool | Ty::Float | Ty::String
+            | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+            | Ty::Float32 | Ty::Float64
+            | Ty::Unit | Ty::Bytes | Ty::Matrix | Ty::RawPtr => true,
+            Ty::Variant { .. }
+            | Ty::Named(..)
+            | Ty::Union(_)
+            | Ty::TypeVar(_)
+            | Ty::Never
+            | Ty::ConstParam { .. }
+            | Ty::ConstValue { .. }
+            | Ty::Unknown => false,
+        }
     }
 
     /// A builtin carrier pattern (`some`/`none`/`ok`/`err`) over a USER variant.
@@ -723,33 +755,30 @@ impl Checker {
         true
     }
 
-    /// A Option/Result CONSTRUCTOR pattern over a plain scalar subject is a
-    /// type error, not a silent `Unknown` bind — silence here let the wrong
-    /// mental model (`fan.bounded` "returns an Option") sail through to a
-    /// backend wall (dojo budget-units, MSR round 3). The classic source is
-    /// an effect fn's auto-`?`: the bound value is ALREADY the payload.
-    fn reject_ctor_pattern_on_scalar(&mut self, ctor: &str, want: &str, resolved: &Ty) {
-        if matches!(
-            resolved,
-            Ty::Int | Ty::Bool | Ty::Float | Ty::String
-                | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
-                | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
-                | Ty::Float32 | Ty::Float64
-        ) {
-            self.emit(super::err(
-                format!(
-                    "pattern `{ctor}` cannot match {} — the subject is not {want}",
-                    resolved.display()
-                ),
-                format!(
-                    "the value is already a plain {}. If it comes from an effect-fn call, \
-                     auto-`?` has unwrapped it — use the value directly, or `?? <default>` \
-                     on the producing call for a fallback",
-                    resolved.display()
-                ),
-                "match pattern".to_string(),
-            ));
+    /// A Option/Result CONSTRUCTOR pattern over a subject that is structurally
+    /// neither is a type error, not a silent `Unknown` bind — silence here let
+    /// the wrong mental model (`fan.bounded` "returns an Option") sail through
+    /// to a backend wall (dojo budget-units, MSR round 3), and over a record or
+    /// list subject the `Unknown` binder reached `ConcretizeTypes` and panicked
+    /// (#2533). The classic source is an effect fn's `!`: the bound value is
+    /// ALREADY the payload.
+    fn reject_ctor_pattern_on_non_carrier(&mut self, ctor: &str, want: &str, resolved: &Ty) {
+        if !self.is_known_non_carrier(resolved) {
+            return;
         }
+        self.emit(super::err(
+            format!(
+                "pattern `{ctor}` cannot match {} — the subject is not {want}",
+                resolved.display()
+            ),
+            format!(
+                "the value is already a plain {}. If it comes from an effect-fn call, \
+                 its `!` already unwrapped it — use the value directly, or replace the \
+                 `!` with `?? <default>` on that call for a fallback",
+                resolved.display()
+            ),
+            "match pattern".to_string(),
+        ));
     }
 
     /// `ast::Pattern::Ok` arm of [`Self::bind_pattern`]. Verbatim text move.
