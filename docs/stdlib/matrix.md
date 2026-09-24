@@ -113,6 +113,16 @@ An **empty** operand is exempt: each of these answers its degenerate shape
 rather than aborting (`mul(m, zeros(0, 0))` is the `rows(m)×0` matrix,
 `concat_cols([m, zeros(0, 0)])` is `m`).
 
+**A matrix with no rows has no columns** (C-161). A Matrix is a list of
+equal-width rows, and its width is the width of row 0. So every 0-row matrix
+is 0 × 0: `shape` answers `(0, 0)` and `cols` answers `0`, whatever width
+produced it. `zeros(0, 3)`, `from_bytes_f32_le(b, 0, 0, 3)`,
+`select_rows_f32(b, 0, 3, [])` and `slice_rows(m, 5, 9)` are all 0 × 0 on both
+targets. This keeps `from_lists(to_lists(m))` shape-preserving: `to_lists` of
+a rowless matrix is `[]`, and `from_lists([])` is 0 × 0. It does not work the
+other way round: an r × 0 matrix keeps its r rows (`zeros(3, 0)` is `(3, 0)`
+and `to_lists` gives three empty rows).
+
 **Row ranges and counts clamp** (C-354), the way `list.slice` does:
 `slice_rows(m, start, end)` treats a negative `start` as the empty matrix and
 a negative or past-the-end `end` as `rows(m)`, so `start >= end` is empty;
