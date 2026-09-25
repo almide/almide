@@ -625,3 +625,61 @@ fn the_findings_aggregate_does_not_assume_a_per_artifact_directory() {
     assert!(wf.contains("echo \"fuzz-shard: ${{ matrix.shard }}\" > fuzz-output.txt"), "shard header");
     assert!(wf.contains("| tee -a fuzz-output.txt"), "the fuzzer output must APPEND after the header");
 }
+
+/// #2611: the in-CI half. Every job log carries ANSI colour codes, and the
+/// runner's gh (>= 2.10x) refuses to print such a response unless it is given
+/// `--allow-escape-sequences`: from #2513's landing on, every recovery in the
+/// verdict job failed ("could not read shard N's log") while the same fetch from
+/// a workstation's older gh succeeded. This forges that gh on PATH — it lists
+/// the run's jobs, and answers a log request only with the flag — and runs the
+/// verdict the way the workflow does, through the API path (no
+/// $FUZZ_SHARD_LOG_DIR). Its `api --help` is long enough that a `| grep -q`
+/// detection under `pipefail` would take the SIGPIPE and drop the flag.
+#[cfg(unix)]
+#[test]
+fn a_gh_that_refuses_escape_sequences_is_given_the_flag() {
+    if Command::new("jq").arg("--version").output().is_err() {
+        eprintln!("skipped: no jq on PATH");
+        return;
+    }
+    let dir = scratch("gh-escape");
+    let shards = dir.join("shards");
+    let bin = dir.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    for s in 1..=7 {
+        complete_shard(&shards, s, 1000, 300);
+    }
+    let log = "2026-09-25T11:45:50.0000000Z \x1b[36;1mMINUTES=\"5\"\x1b[0m\n\
+               2026-09-25T11:50:00.0000000Z   [  250s] generated=900 clean=890 rejects=10 findings=0 walls=0 skipped=0 | 216.0 prog/min\n\
+               2026-09-25T11:50:01.0000000Z ##[error]The runner has received a shutdown signal\n";
+    fs::write(dir.join("shard-8.log"), log).unwrap();
+    let gh = format!(
+        r#"#!/bin/bash
+case "$*" in
+  "api --help")
+    for i in $(seq 1 4000); do echo "  --some-flag-$i   filler"; done
+    echo "      --allow-escape-sequences   Output the response even if it contains escape sequences" ;;
+  *"/runs/424242/jobs"*)
+    echo '{{"jobs":[{{"id":9008,"name":"Generative differential fuzz (shard 8, aarch64)"}}]}}' ;;
+  *"/jobs/9008/logs --allow-escape-sequences"*)
+    cat '{log}' ;;
+  *"/jobs/9008/logs"*)
+    echo "the response contains terminal escape sequences; pass --allow-escape-sequences to output it anyway" >&2; exit 1 ;;
+  *) echo "fake gh: unexpected $*" >&2; exit 2 ;;
+esac
+"#,
+        log = dir.join("shard-8.log").display()
+    );
+    fs::write(bin.join("gh"), gh).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(bin.join("gh"), fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+    let r = bash(
+        &["scripts/fuzz-night-verdict.sh", shards.to_str().unwrap(), "5", "8", "0"],
+        &[("PATH", &path), ("GITHUB_REPOSITORY", "almide/almide"), ("GITHUB_RUN_ID", "424242")],
+    );
+    assert_eq!(r.code, Some(0), "{}{}", r.stdout, r.stderr);
+    let line = r.stderr.lines().find(|l| l.starts_with("fuzz-night: ")).unwrap();
+    assert_eq!(field(line, "recovered"), "8@250s", "{}", r.stderr);
+    assert_eq!(field(line, "missing"), "none", "{}", r.stderr);
+}
