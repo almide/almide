@@ -81,7 +81,24 @@ temp_dir は非空かつ posix ホストでは絶対パス）が証明対象と�
 存在しない実行ファイルは起動失敗であり、タイムアウトと報告してはならない。
 期限が発火した場合の err は従来どおり `exec timed out after <ms>ms` とする。
 テスト: `spec/stdlib/process_timeout_test.almd`
-Contracts: C-096, C-112, C-118, C-133, C-189, C-214。
+
+`http.start(method, url, body, headers, limits)` は、要求を始めてすぐに呼び出し
+ハンドル（`HttpCall`）を返す。上限は呼び出しごとに `limits = { total_ms,
+idle_ms }`（ミリ秒、0 は上限なし）で渡す。`total_ms` は `start` から測る壁時計で、
+接続・最初の 1 バイトまでの待ち・本文をすべて含む。`idle_ms` はバイトが届く間隔の
+上限で、最初の 1 バイトまでの待ちも含む。発火した上限は、自分の名前を示す err
+`request timeout: total_ms <n> exceeded` または
+`request timeout: idle_ms <n> exceeded` で呼び出しを終わらせる。
+`ALMIDE_HTTP_TIMEOUT_SECS` は上限を取らない呼び出しの既定値であり、上限を持つ
+呼び出しには効かない。`poll` と `read_new` は待たない。`wait` は呼び出しが終わる
+まで待つ。`cancel` と、ハンドルの最後の写しが捨てられることは、走っている呼び出しを
+err `request cancelled` で終わらせて接続を閉じる。以後 `read_new` は空文字列を
+返し、サーバーは接続が閉じたことを観測する。上限が発火するかどうかはホストの性質で
+ある（C-214 と同じ規律）。固定するのは、発火したときの err の形である。wasm
+ターゲットはこの族を提供せず、`almide check --target wasm` が拒否する。
+テスト: `spec/stdlib/http_call_test.almd`
+
+Contracts: C-096, C-112, C-118, C-133, C-189, C-214, C-366。
 
 ## ALS-R6 ファイルシステムのパス解決
 

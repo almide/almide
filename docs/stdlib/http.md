@@ -435,10 +435,15 @@ effect fn main() -> Unit = {
 
 #### Read timeout (`ALMIDE_HTTP_TIMEOUT_SECS`)
 
-Every client call waits at most **30 seconds** for the server to answer
-(the SSE streaming client: 120 s between events). The
-`ALMIDE_HTTP_TIMEOUT_SECS` environment variable overrides the limit for
-all clients; `0` means **no timeout** — block until the server responds.
+Every client call that takes no limits waits at most **30 seconds** for the
+server to answer (the SSE streaming client: 120 s between events). The
+`ALMIDE_HTTP_TIMEOUT_SECS` environment variable overrides that DEFAULT for
+all of them; `0` means **no timeout** — block until the server responds. It
+is the default only: a call that carries its own limits (`http.start`, the
+`*_with_limits` streaming clients) ignores it — see
+[Per-call limits and cancellation](#per-call-limits-and-cancellation). The
+limit is between bytes, not for the whole call, so a server that keeps
+talking never trips it.
 A slow endpoint (a local LLM evaluating a long prompt routinely needs
 30–120 s before the first byte) fails past the limit with:
 
@@ -640,9 +645,111 @@ effect fn main() -> Unit = {
 }
 ```
 
+## Per-call limits and cancellation
+
+A call can be held as a handle, `HttpCall`, instead of blocking until it
+ends. `http.start` returns at once; a runtime thread does the exchange while
+the program keeps running its own loop — reading keys, redrawing, starting a
+second request.
+
+| | |
+|---|---|
+| `http.start(method, url, body, headers, limits) -> Result[HttpCall, String]` | begins the request and returns at once |
+| `http.poll(c) -> Option[Result[HttpResponse, String]]` | never blocks: `none` while the call runs, then its result |
+| `http.read_new(c) -> String` | never blocks: the body text that arrived since the previous `read_new` |
+| `http.wait(c) -> Result[HttpResponse, String]` | blocks until the call ends — never past its limits |
+| `http.cancel(c) -> Unit` | closes the connection; the call ends as `err("request cancelled")` |
+
+**Limits are per call.** `HttpLimits = { total_ms: Int, idle_ms: Int }`, both
+in milliseconds, `0` = no limit:
+
+- `total_ms` is a wall clock that starts at `http.start`: dialing, the wait
+  for the first byte and the body all count. A server that keeps talking is
+  still stopped at it. It is checked by the runtime's thread and by every
+  `poll` / `read_new` / `wait`.
+- `idle_ms` is the longest gap between two arrivals of bytes; the wait for
+  the first byte counts as a gap.
+
+A limit that fires ends the call with an error that names it:
+
+```
+request timeout: total_ms 5000 exceeded
+request timeout: idle_ms 60000 exceeded
+```
+
+`ALMIDE_HTTP_TIMEOUT_SECS` does not apply to a call with limits — it stays the
+default of the calls that take none. So "this LLM call may take 30 minutes,
+this page fetch 10 seconds" is two `start` calls with two limits, in one
+process.
+
+**Ending a call closes the connection.** When the call ends — answered,
+failed, timed out, cancelled — the runtime shuts the socket down, so the
+server sees the close at once and nothing more arrives. After `cancel`,
+`read_new` returns `""` (bytes that arrived but were not read are dropped) and
+`poll` / `wait` answer `err("request cancelled")`. `cancel` on a call that
+already ended changes nothing, and calling it twice is fine. Dropping the last
+copy of the handle cancels the call too.
+
+**The answer is the whole response.** `wait` and `poll` answer like
+`http.request_response`: any complete response is `ok` — a 404 included —
+with its status, every header line and the whole body; `err` is a transport
+failure, a fired limit or a cancel. The body bytes `read_new` handed out are
+still in that response's body. A multibyte character split across two reads
+is held back until it is whole.
+
+```almd check
+import env
+import http
+import io
+
+// Print the stream as it arrives; stop after 3 s whatever the server does.
+effect fn follow(c: HttpCall, started: Int) -> Result[String, String] = {
+  io.print(http.read_new(c))
+  match http.poll(c) {
+    some(ok(resp)) => ok("done: ${http.status_code(resp)}"),
+    some(err(e)) => ok(e),
+    none => if env.millis() - started > 3000 then {
+      http.cancel(c)
+      ok("stopped")
+    } else {
+      env.sleep_ms(100)
+      follow(c, started)
+    },
+  }
+}
+
+effect fn main() -> Unit = {
+  let limits = { total_ms: 30 * 60 * 1000, idle_ms: 120 * 1000 }
+  let c = http.start("GET", "http://127.0.0.1:8080/events", "", [:], limits)!
+  println(follow(c, env.millis())!)
+}
+```
+
+### The streaming clients with limits
+
+`request_stream`, `openai_streaming_call` and `anthropic_streaming_call` each
+have a `_with_limits` twin: the same parameters with `limits: HttpLimits`
+before the callback, the same answer, built on the handle — so a stream that
+keeps talking ends at `total_ms`, and one that stalls ends at `idle_ms`, each
+with the error that names it. The forms without limits are unchanged.
+
+```almd check
+import http
+
+effect fn main() -> Unit = {
+  let limits = { total_ms: 10 * 60 * 1000, idle_ms: 2 * 60 * 1000 }
+  let body = """{"model": "m", "stream": true, "messages": []}"""
+  let answer = http.openai_streaming_call_with_limits("http://127.0.0.1:8080/v1", "key", body, limits, (delta) => eprintln(delta))!
+  println(answer)
+}
+```
+
+On the wasm target these functions are not available yet: `almide check
+--target wasm` refuses them, as it does the other streaming clients.
+
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (37 functions)
+## Signature index (45 functions)
 
 ```
 // Serves 0.0.0.0:port forever; handler err is a 500.
@@ -792,6 +899,46 @@ effect http.openai_streaming_call(base_url: String, api_key: String, body_json: 
 // Streams Anthropic Messages; LLM-response JSON.
 // @since 0.15.1 or earlier
 effect http.anthropic_streaming_call(api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> String
+
+// Begins a request; returns at once with a handle.
+// @since unreleased
+effect http.start(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits) -> HttpCall
+
+// Never blocks: none while running, then the result.
+// @since unreleased
+effect http.poll(c: HttpCall) -> Option[Result[HttpResponse, String]]
+
+// Body text since the last read_new; never blocks.
+// @since unreleased
+effect http.read_new(c: HttpCall) -> String
+
+// Blocks until the call ends; any status is ok.
+// @since unreleased
+effect http.wait(c: HttpCall) -> HttpResponse
+
+// Closes the connection; the call ends as err.
+// @since unreleased
+effect http.cancel(c: HttpCall) -> Unit
+
+// request_stream bounded by per-call limits.
+// @since unreleased
+effect http.request_stream_with_limits(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits, on_chunk: (String) -> Unit) -> Unit
+
+// openai_streaming_call bounded by per-call limits.
+// @since unreleased
+effect http.openai_streaming_call_with_limits(base_url: String, api_key: String, body_json: String, limits: HttpLimits, on_text_delta: (String) -> Unit) -> String
+
+// anthropic_streaming_call bounded by per-call limits.
+// @since unreleased
+effect http.anthropic_streaming_call_with_limits(api_key: String, body_json: String, limits: HttpLimits, on_text_delta: (String) -> Unit) -> String
+```
+
+## Type index (1 types)
+
+```
+// Per-call limits in ms; 0 = no limit.
+// @since unreleased
+type http.HttpLimits = { total_ms: Int, idle_ms: Int }
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
