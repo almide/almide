@@ -353,9 +353,27 @@ almide-timings {"lex_ns":1812250,"parse_ns":1644211,"check_ns":3851626,"total_ns
 `--timings` なしでは無出力）。ratchet 側は `scripts/check-edit-loop-scale.sh`。
 
 `--json` の 1 行は
-`{level, code, message, hint, here, try, try_replace, applicability, suggestions, context, file, line, col, end_col, secondary}`。
+`{level, code, message, hint, here, try, try_replace, applicability, suggestions, repair?, context, file, line, col, end_col, secondary}`。
 `try` は貼り付け可能な修正スニペット、`try_replace` はそれが置換するスパン、
 `suggestions[]` は `{line, col, end_col, replacement, applicability}` の構造化された同じ修正。
+
+**`repair`**(#2149): 修復の構造化フィールド。修正を持つ診断にだけ出る(持たない診断の
+バイト列は従来どおり)。形は
+`{"primary": Edit|null, "alternatives": [Edit], "example": "…"|null}`、
+`Edit` は `suggestions[]` の要素と同じ `{line, col, end_col, replacement, applicability}`。
+
+- `primary` — 診断が責任を持つ 1 つのスパン厳密な編集。`applicability` が
+  `"machine-applicable"` のものだけを `almide fix` は無人で適用する。
+  `docs/diagnostics/<CODE>.md` の `## Fix-it verdict` が **mechanical** のコードは、
+  必ずこれを machine-applicable で出す(`tests/diagnostic_coverage_test.rs` が
+  バイナリで判定し、`almide fix` 後に `almide check` が通ることまで確かめる)。逆に
+  mechanical でないコードが machine-applicable を出すのも失敗(`diagnostic_harness_test.rs`)。
+- `alternatives` — 別の読みに基づく編集。常に `"maybe-incorrect"`、決して自動適用しない。
+- `example` — スパン厳密な編集が無いときの表示専用スニペット(プレースホルダ可)。
+
+`suggestions[]` は `primary` と `alternatives` を順に並べたもの。`almide fix --json` の
+`suggestions` と LSP の quickfix も同じ `repair` から作られる(machine-applicable な
+`primary` は LSP で preferred になる)。
 
 **位置の単位**(#2250): `line` は 1 始まりの行、`col` / `end_col` は **1 始まりの文字数**
 (Unicode スカラー値の個数)。バイトでも表示幅でもない — CJK を含む 66 文字(98 バイト)の行の
