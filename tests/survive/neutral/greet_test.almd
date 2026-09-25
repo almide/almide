@@ -1,0 +1,5 @@
+import greet
+
+test "greets by name" {
+  assert_eq(greet.greet("ann"), "hello, ann")
+}

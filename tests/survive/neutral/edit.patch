@@ -1,0 +1,9 @@
+--- a/greet.almd
++++ b/greet.almd
+@@ -1,4 +1,6 @@
++// Greetings, in two directions.
++
+ fn greet(name: String) -> String = {
+   let unused = 0
+   "hello, ${name}"
+ }

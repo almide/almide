@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-09-24
+> Last updated: 2026-09-26
 
 ## Overview
 
@@ -548,7 +548,7 @@ almide mcp                              # stdio で JSON-RPC 2.0（改行区切�
 対応メソッド: `initialize` / `tools/list` / `tools/call` / `ping`。
 それ以外は JSON-RPC `-32601`（`capabilities` は `tools` のみを宣言する）。
 
-ツール（5 つ。すべて CLI の既存の機械可読出力を経由する）:
+ツール（6 つ。すべて CLI の既存の機械可読出力を経由する）:
 
 | ツール | 実体 | 返すもの |
 |---|---|---|
@@ -557,6 +557,7 @@ almide mcp                              # stdio で JSON-RPC 2.0（改行区切�
 | `almide_api` | `almide ide outline --json` / `stdlib-snapshot --json` | 公開宣言のシグネチャ一覧 |
 | `almide_explain` | `almide explain <CODE>` | 診断コードの解説（markdown） |
 | `almide_fmt_check` | `almide fmt --check --json` | 未整形ファイル一覧（書き込みなし） |
+| `almide_survive` | `almide survive --with - --json` | 編集を書き込む前の生存デルタ（下の `almide survive`） |
 
 設計上の制約:
 
@@ -567,13 +568,144 @@ almide mcp                              # stdio で JSON-RPC 2.0（改行区切�
 - **人間向けテキストは決してパースしない**。機械可読な形が無い箇所
   （テストの個別失敗詳細 = #1313）は `*_unstructured` という名前のフィールドに
   そのまま入れて返す
-- **書き込みツールは無い**。`fmt` は `--check` 形のみ。適用は CLI（`almide fmt` /
+- **書き込みツールは無い**。`fmt` は `--check` 形のみ。`almide_survive` は編集を
+  判定するだけで書かない。適用は CLI（`almide apply --if-survives` / `almide fmt` /
   `almide fix`）で行う — エージェント自身のトランスクリプトに編集が残る
 
 Claude Code プラグイン定義（MCP + LSP）: `tools/claude-plugin/`、
 マーケットプレイス: `.claude-plugin/marketplace.json`、導入手順: [../mcp.md](../mcp.md)
 
 テスト: `tests/mcp_test.rs`
+
+---
+
+### `almide survive`
+
+提案された編集を **書き込む前に** 判定する（#2147）。編集をメモリ上で当て、
+check・その編集に届くテスト・契約 fixture を編集の前後で走らせ、診断 / テスト /
+契約ごとに `{unchanged, newly_broken, newly_fixed, removed}` を返す。ファイルは
+決して書かない。
+
+```bash
+almide survive src/calc.almd --with fix.patch --json   # unified diff
+almide survive src/calc.almd --with new.txt  --json    # ファイル全文
+git diff src/calc.almd | almide survive src/calc.almd --with - --json
+```
+
+- `--with <PATH|->` — 編集。unified diff（`--- ` / `@@ ` で始まる）か、ファイルの
+  新しい全文。`--as auto|patch|text` で読み方を固定できる（既定 `auto`）。
+  diff の hunk は文脈行と削除行が完全一致しなければ適用しない（あいまい適用は
+  別の編集を判定することになるので、exit 2 で拒否）
+- **到達集合**: 編集したファイル自身と、プロジェクト根（`./almide.toml` があれば `.`、
+  無ければファイルのディレクトリ）以下の `.almd` のうち import の閉包がそれを読むもの。
+  check は全到達ファイル、テストは `test` ブロックを持つ到達ファイル、契約は
+  `// @contract: C-NNN` を持つ到達ファイル（native と `--target wasm` の stdout と
+  exit code のバイト一致）
+- **メモリ上で当てる仕組み**: 各レッグは子 `almide` プロセスで、編集後側だけ
+  `ALMIDE_SURVIVE_OVERLAY` / `ALMIDE_SURVIVE_OVERLAY_TEXT` を渡す。コンパイラの
+  `.almd` 読み取りはすべて `almide::source_overlay::read_to_string` を通り、対象
+  ファイルの読み取りだけが提案テキストを返す。提案テキストはツリーの外（システムの
+  一時ディレクトリ）に置く
+- `--timeout <秒>`（既定 600）— 子プロセス 1 本ごとの上限。超えたらプロセス
+  グループごと kill し、テストは `timeout`、契約は `timeout` と報告する
+- exit: `0` = 生き残る、`1` = 生き残らない、`2` = 判定できない（読めない / hunk が
+  当たらない）。`--json` 時は `2` も `{"schema_version":1,"error":"…"}` を stdout に出す
+
+**生き残る** = error の診断・テスト・契約のどれも `newly_broken` に無いこと。
+warning の `newly_broken` は報告するが判定には入れない（`almide check` 自体が
+warning で失敗しない。また未使用変数 lint は error の無いファイルでしか走らない
+ので、最後の error を直すと元からあった warning が表に出る — これで拒否すると
+直す編集ほど拒否される）。
+
+**診断の同一性**（編集で行がずれる — ここが要）: 編集ファイルの前後テキストの
+行 diff（LCS）で、変わらなかった行を編集前の行番号から編集後の行番号へ写す。
+編集された行はどこにも写らない。編集ファイル以外は恒等写像。
+
+1. `position` — 同じ check 対象・同じ `file`・同じ level / code / message で、
+   編集前の位置を写した先が編集後の位置（行も列も）と一致
+2. `position_renumbered` — 1 と同じだが、message は数字列を消すと一致
+   （「first defined at line 12」のように行番号を引用する message は、同じ挿入で
+   番号がずれる）
+3. `content` — 前後どちらかが編集された行の上にあるとき、同じ対象・file・
+   level / code / message なら同一（行を書き換えても error が残ったなら直っていない）
+
+対にならなかった編集前の診断は `newly_fixed`、編集後の診断は `newly_broken`。
+診断はそれ自体が悪い状態なので、check の `removed` は常に空。
+
+**テストと契約の分類**（同一性はファイル + テスト名 / fixture + 契約 ID）:
+
+| 編集前 | 編集後 | 分類 |
+|---|---|---|
+| あり | なし | `removed` |
+| なし または 不良 | 良 | `newly_fixed` |
+| なし または 良 | 不良 | `newly_broken` |
+| 良 | 良 | `unchanged` |
+| 不良 | 不良 | `unchanged` |
+
+テストの状態は `pass` / `fail` / `ignored` / `not_run`（バイナリがそこまで
+走らなかった）/ `compile_error` / `timeout`（良 = `pass` と `ignored`）。
+契約は `holds` / `diverges` / `timeout`（良 = `holds`）。
+
+**JSON（`schema_version: 1`）**:
+
+```json
+{
+  "schema_version": 1,
+  "file": "calc.almd",
+  "edit": { "kind": "patch", "lines_before": 3, "lines_after": 3 },
+  "written": false,
+  "survives": false,
+  "reach": { "root": ".", "checked": ["calc.almd", "calc_test.almd"], "tests": ["calc_test.almd"], "contracts": [] },
+  "summary": { "check": {"unchanged":0,"newly_broken":0,"newly_fixed":0,"removed":0}, "tests": {"…": 0}, "contracts": {"…": 0} },
+  "check": {
+    "unchanged":    [ { "checked": "…", "matched_by": "position", "before": {…}, "after": {…} } ],
+    "newly_broken": [ { "checked": "…", "before": null, "after": {…} } ],
+    "newly_fixed":  [ { "checked": "…", "before": {…}, "after": null } ],
+    "removed": []
+  },
+  "tests":     { "newly_broken": [ { "file": "calc_test.almd", "name": "add adds", "before": "pass", "after": "fail", "failure": {…} } ], "…": [] },
+  "contracts": { "unchanged": [ { "fixture": "…", "contract": "C-NNN", "before": "holds", "after": "holds", "detail": {…} } ], "…": [] }
+}
+```
+
+check の `before` / `after` は `almide check --json` が出した診断オブジェクトを
+**そのまま** 運ぶ（`almide check --json` に増えるフィールドは変更なしで届く）。
+`failure` は `almide test --json` の失敗レコードと同じ形。JSON 化されずに失敗した
+check 実行は `check.unstructured` に stderr ごと残す（黙って clean 扱いにしない）。
+形を変える（名前・型・分類規則の変更）ときは `schema_version` を上げる。
+
+LSP からは独自リクエスト `almide/survive`
+（params `{textDocument: {uri}, text?, patch?}`、どちらも無ければ開いているバッファを
+提案とみなす）、MCP からは `almide_survive` で同じ JSON が返る。どちらも CLI を
+子プロセスで走らせる。
+
+テスト: `tests/survive_test.rs`（`tests/survive/` の golden delta 3 本 — テストを
+壊す patch / 行挿入をまたいで残る error と直る error の全文編集 / 注釈だけの中立
+patch — と、書き込まないこと・apply の拒否と受理）、`tests/mcp_test.rs`、
+`tests/lsp_test.rs`
+
+---
+
+### `almide apply`
+
+`survive` の判定と書き込みを 1 手にする（verify-then-write）。
+
+```bash
+almide apply src/calc.almd --with fix.patch --if-survives        # 生き残るときだけ書く
+almide apply src/calc.almd --with fix.patch --force               # 判定に関わらず書く（判定は報告する）
+```
+
+- `--if-survives[=true|false]` — 値は `true` / `false` のみ。それ以外
+  （`maybe`、`1` など）は評価もせず書かずに exit 2（fail closed）。
+  `--if-survives=false` は `--force` と併用したときだけ意味を持つ
+- `--if-survives` も `--force` も無い `apply` は exit 2（書き込みには明示の門が要る）
+- `--force` は値を取らないフラグ（`--force=yes` は usage error）
+- 書き込みは原子的（同じディレクトリの一時ファイルに書いて fsync、元の権限を
+  写して rename）。判定中にファイルが変わっていたら書かずに exit 2
+- exit: `0` = 書いた、`1` = 生き残らないので書かなかった、`2` = 判定前に拒否
+- `--json` の出力は `survive` の JSON に `written` と `forced` を足したもの
+
+テスト: `tests/survive_test.rs`
 
 ---
 
@@ -870,6 +1002,8 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_SKIP_PASS=value` | ablation | skip the named optional passes (comma-separated) — a pass-dependency probe: output must not change |
 | `ALMIDE_SKIP_VERSION_CHECK` | gate | skip the project's `almide` version requirement check |
 | `ALMIDE_STREAM_FUSION_OFF` | ablation | turn the stream-fusion pass off |
+| `ALMIDE_SURVIVE_OVERLAY=value` | route | set by `almide survive` on its child runs (#2147): every compiler read of this `.almd` path returns the text in `ALMIDE_SURVIVE_OVERLAY_TEXT` instead of the disk bytes, so a proposed edit is judged without being written |
+| `ALMIDE_SURVIVE_OVERLAY_TEXT=value` | route | the file holding the proposed text for `ALMIDE_SURVIVE_OVERLAY`; set without it, the overlay refuses to run rather than read the disk file |
 | `ALMIDE_TCO_DEBUG` | debug | print the native tail-call loop rewrite decisions |
 | `ALMIDE_TEST_LAX_WASM` | gate | let the default `almide test` lane (wasm first, native fallback) PASS a file whose wasm leg diverged — trapped where the native re-run passed; without it a diverged leg fails the run |
 | `ALMIDE_TEST_VERBOSE` | tool | show the full cargo / rustc output of the `almide test` harness build |
