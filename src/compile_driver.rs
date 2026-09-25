@@ -10,7 +10,7 @@ use crate::{ast, canonicalize, check, codegen, diagnostic, diagnostic_render, er
 use crate::{cli, warnings_suppressed};
 
 pub(crate) fn parse_file(file: &str) -> (ast::Program, String, Vec<diagnostic::Diagnostic>) {
-    let input = std::fs::read_to_string(file)
+    let input = almide::source_overlay::read_to_string(file)
         .unwrap_or_else(|e| { err(&format!("Error reading {}: {}", file, e)); std::process::exit(1); });
 
     if file.ends_with(".json") {

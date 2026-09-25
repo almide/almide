@@ -1203,7 +1203,7 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>, allow_no_tests: bool)
             Ok(bin) => super::run::run_binary_captured(&bin, &program_args),
             Err(e) => (1, e),
         };
-        let source = std::fs::read_to_string(test_file).unwrap_or_default();
+        let source = almide::source_overlay::read_to_string(test_file).unwrap_or_default();
         let failures = super::test_report::parse(test_file, &source, &output);
         let file_counts = libtest_counts(&output).unwrap_or_default();
         counts.add(file_counts);
