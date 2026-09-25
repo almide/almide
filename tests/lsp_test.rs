@@ -803,3 +803,51 @@ fn lsp_machine_applicable_repair_is_the_preferred_quickfix() {
     assert_eq!(fix["edit"]["changes"][TEST_URI][0]["newText"].as_str(), Some("..<"), "{}", fix);
     c.shutdown();
 }
+
+/// `almide/survive` (#2147): the open buffer is the proposed edit when the
+/// request carries none; the answer is the CLI's survival delta; the file on
+/// disk is never written.
+#[test]
+fn lsp_survive_judges_the_unsaved_buffer_without_writing() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("label.almd");
+    let disk = "fn label(n: Int) -> String = n\n";
+    std::fs::write(&path, disk).unwrap();
+    let uri = file_uri(&path);
+    let mut c = LspClient::start();
+    c.open_file(&uri, "// labels\nfn label(n: Int) -> String = int.to_string(n)\n");
+    c.send(&json!({
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "almide/survive",
+        "params": { "textDocument": { "uri": uri } }
+    }));
+    let resp = c.recv_response(7);
+    let r = &resp["result"];
+    assert_eq!(r["schema_version"], 1, "{}", resp);
+    assert_eq!(r["survives"], true, "{}", resp);
+    assert_eq!(r["check"]["newly_fixed"].as_array().map(|a| a.len()), Some(1), "{}", resp);
+    // An explicit proposal wins over the buffer: this one breaks nothing new
+    // but keeps the error, so it is unchanged, matched across the shift.
+    c.send(&json!({
+        "jsonrpc": "2.0",
+        "id": 8,
+        "method": "almide/survive",
+        "params": { "textDocument": { "uri": uri }, "text": "\nfn label(n: Int) -> String = n\n" }
+    }));
+    let resp = c.recv_response(8);
+    let unchanged = resp["result"]["check"]["unchanged"].as_array().cloned().unwrap_or_default();
+    assert_eq!(unchanged.len(), 1, "{}", resp);
+    assert_eq!((unchanged[0]["before"]["line"].clone(), unchanged[0]["after"]["line"].clone()), (json!(1), json!(2)), "{}", resp);
+    // Both at once is a params error, answered as one.
+    c.send(&json!({
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "almide/survive",
+        "params": { "textDocument": { "uri": uri }, "text": "x", "patch": "y" }
+    }));
+    let resp = c.recv_response(9);
+    assert!(resp["error"]["message"].as_str().unwrap_or("").contains("not both"), "{}", resp);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), disk, "almide/survive wrote the file");
+    c.shutdown();
+}
