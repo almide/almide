@@ -107,6 +107,8 @@ NOMINAL = {
     "SafeHtml": ("html.empty()", "html.empty", "html"),
     "SafePath": ('path.trusted("x")', "path.trusted", "path"),
     "HttpResponse": ('http.response(200, "x")', "http.response", "http"),
+    # The call handle (#2631): only `http.start` makes one.
+    "HttpCall": ('http.start("GET", "http://127.0.0.1:1/", "", [:], { total_ms: 1, idle_ms: 0 })!', "http.start", "http"),
 }
 BYTES8 = "bytes.from_list([0, 0, 0, 0, 0, 0, 0, 0])"
 
