@@ -1,0 +1,5 @@
+// silent (E060 near-miss): an underscore-prefixed import states "unused on
+// purpose" and must not warn.
+import regex as _regex
+
+fn main() -> Unit = println("kept for a doc example")

@@ -1,0 +1,5 @@
+// silent: a user fn whose name is also a stdlib fn name resolves to the
+// user's fn when called bare.
+fn map(x: Int) -> Int = x * 2
+
+fn main() -> Unit = println(int.to_string(map(21)))

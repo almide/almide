@@ -1,0 +1,5 @@
+// silent (E045 near-miss): tuple indices within the tuple's arity.
+fn main() -> Unit = {
+  let t = (1, "two", 3.0)
+  println(int.to_string(t.0) + t.1)
+}

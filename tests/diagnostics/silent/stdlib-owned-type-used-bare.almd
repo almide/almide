@@ -1,0 +1,7 @@
+// silent (E060 / #1853): a type the imported module owns, spelled bare, is a
+// use of that import.
+import fs
+
+fn describe(s: FileStat) -> String = if s.is_dir then "dir" else "file"
+
+effect fn main() -> Unit = println(describe(fs.stat(".")!))

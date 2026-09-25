@@ -1,0 +1,9 @@
+// silent (#1837): a user type named like a stdlib-owned type is the user's own.
+type Endian = | Big | Little
+
+fn name(e: Endian) -> String = match e {
+  Big => "big",
+  Little => "little",
+}
+
+fn main() -> Unit = println(name(Little))

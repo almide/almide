@@ -1,0 +1,8 @@
+// silent (#2094): an explicitly imported non-auto module, used — no
+// "Add `import`" hint and no unused-import warning.
+import json
+
+effect fn main() -> Unit = {
+  let v = json.parse("[1, 2, 3]")!
+  println(json.stringify(v))
+}

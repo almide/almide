@@ -1,0 +1,7 @@
+// silent (E041 / E042 near-miss): a Result discarded on purpose with `let _`.
+import fs
+
+effect fn main() -> Unit = {
+  let _ = fs.read_text("does-not-matter.txt")
+  println("discarded")
+}

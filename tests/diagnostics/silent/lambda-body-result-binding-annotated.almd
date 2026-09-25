@@ -1,0 +1,10 @@
+// silent (#2254): the annotated form — the binding keeps the Result on purpose.
+import fs
+
+effect fn main() -> Unit = {
+  let rs = ["a.txt", "b.txt"] |> list.map((p) => {
+    let t: Result[String, String] = fs.read_text(p)
+    t
+  })
+  println(int.to_string(list.len(rs)))
+}

@@ -1,0 +1,9 @@
+// silent: a pipe chain through module functions, with a lambda that
+// destructures a tuple parameter.
+fn main() -> Unit = {
+  let s = ["a", "b"]
+    |> list.enumerate
+    |> list.map(((i, x)) => "${i}:${x}")
+    |> list.join(",")
+  println(s)
+}

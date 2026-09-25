@@ -1,0 +1,2 @@
+// silent (E044 near-miss): a pure `main` whose result is its output.
+fn main() -> Unit = println(int.to_string(list.sum([1, 2, 3])))
