@@ -28,6 +28,7 @@ impl<'a> Interpreter<'a> {
     pub fn run_main(self) -> RunOutcome {
         let program: &'a IrProgram = self.program;
         let fuel = self.fuel.get();
+        let wall_deadline = self.wall_deadline;
         std::thread::scope(|scope| {
             std::thread::Builder::new()
                 .name("almide-interp".to_string())
@@ -35,7 +36,9 @@ impl<'a> Interpreter<'a> {
                 // host thread's stack — is the binding recursion bound.
                 .stack_size(INTERP_STACK_SIZE)
                 .spawn_scoped(scope, move || {
-                    Interpreter::new(program).with_fuel(fuel).run_main_on_stack()
+                    let mut interp = Interpreter::new(program).with_fuel(fuel);
+                    interp.wall_deadline = wall_deadline;
+                    interp.run_main_on_stack()
                 })
                 .expect("failed to spawn almide-interp worker thread")
                 .join()
@@ -276,6 +279,13 @@ impl<'a> Interpreter<'a> {
             return Err(Flow::Fuel);
         }
         budget.set(f - 1);
+        if f & 0xFF == 0 {
+            if let Some(deadline) = self.wall_deadline {
+                if std::time::Instant::now() >= deadline {
+                    return Err(Flow::Unsupported("wall-clock deadline reached".into()));
+                }
+            }
+        }
         Ok(())
     }
 
