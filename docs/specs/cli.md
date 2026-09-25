@@ -324,7 +324,15 @@ almide check --timings                  # フロントエンドの phase 別内�
 |---|---|
 | `--deny-warnings` | 警告をエラー扱い |
 | `--json` | 診断を JSON で出力（1 行 1 診断、エディタ/エージェント統合用） |
-| `--explain <code>` | エラーコード (E001〜E030, E420) の説明 |
+| `--explain <code>` | エラーコードの説明(`almide explain <code>` と同じ) |
+
+`almide explain --list [--json]`(#2149)は全コードを 1 行ずつ出す:
+`{code, mnemonic, severity, since, verdict}`。`mnemonic` は `docs/diagnostics/<CODE>.md`
+の題、`verdict` はその `## Fix-it verdict`(mechanical / conditional / not-fixable)、
+`severity`(error / warning / error|warning)と `since`(そのコードを初めて出したリリース)は
+`docs/diagnostics/codes.toml`。行の集合はコンパイラが出すコードの集合と一致し
+(`with_code` の 77 + ビルド経路が `error[EXXX]` を直接出す E081–E083)、
+severity はフィクスチャ全件で実際の level と照合される(`tests/explain_list_test.rs`)。
 | `--effects` | 各関数のエフェクト/ケイパビリティ分析 |
 | `--timings` | lex / parse / check の phase 別 wall time（#1311） |
 
