@@ -21,6 +21,7 @@ mod mcp_tools;
 pub mod repl;
 mod ide;
 mod fix;
+pub mod explain;
 mod docs_gen;
 mod cargo_build;
 mod js_host;
