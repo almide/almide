@@ -762,6 +762,7 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
             let result = serde_json::to_value(actions).ok()?;
             Some(Response::new_ok(req.id.clone(), result))
         }
+        "almide/survive" => Some(handle_survive(req, documents)),
         _ => None,
     }
 }
@@ -769,3 +770,4 @@ fn handle_request(req: &Request, documents: &HashMap<Uri, String>, analyzed: &Ha
 include!("lsp_hover_definition.rs");
 include!("lsp_references.rs");
 include!("lsp_code_actions.rs");
+include!("lsp_survive.rs");
