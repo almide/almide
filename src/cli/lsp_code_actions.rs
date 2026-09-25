@@ -60,34 +60,47 @@ fn code_action_for_e006(diag: &Diagnostic, lines: &[&str], uri: &Uri) -> Option<
     None
 }
 
-/// Materialize the compiler's machine-applicable fix (`try_replace_span`,
-/// round-tripped through the diagnostic's `data` field — see
-/// `diag_from_almide`) as a quickfix edit. The stored columns are the
-/// compiler's 1-indexed char offsets; they convert to UTF-16 here, where the
-/// line text is at hand.
-fn code_action_for_try_fix(diag: &Diagnostic, lines: &[&str], uri: &Uri) -> Option<CodeActionOrCommand> {
-    let data = diag.data.as_ref()?;
-    let snippet = data.get("try")?.as_str()?;
-    let line = (data.get("line")?.as_u64()? as usize).checked_sub(1)? as u32;
-    let col = data.get("col")?.as_u64()? as usize;
-    let end_col = data.get("endCol")?.as_u64()? as usize;
-    let line_text = lines.get(line as usize)?;
-    Some(CodeActionOrCommand::CodeAction(CodeAction {
-        title: format!("Replace with `{}`", snippet),
-        kind: Some(CodeActionKind::QUICKFIX),
-        diagnostics: Some(vec![diag.clone()]),
-        edit: Some(WorkspaceEdit {
-            changes: Some(HashMap::from([(uri.clone(), vec![TextEdit {
-                range: Range {
-                    start: Position { line, character: char_col_to_utf16(line_text, col) },
-                    end: Position { line, character: char_col_to_utf16(line_text, end_col) },
-                },
-                new_text: snippet.to_string(),
-            }])])),
+/// Materialize the diagnostic's `repair` (#2149) — `primary` first, then
+/// each of `alternatives` — as quickfix edits, round-tripped through the
+/// diagnostic's `data` field (see `diag_from_almide`). A machine-applicable
+/// primary is marked preferred, which is what an editor's "fix all" / "apply
+/// preferred fix" binds to; everything else is offered, never preferred.
+/// The stored columns are the compiler's 1-indexed char offsets; they convert
+/// to UTF-16 here, where the line text is at hand.
+fn code_actions_for_repair(diag: &Diagnostic, lines: &[&str], uri: &Uri) -> Vec<CodeActionOrCommand> {
+    let Some(edits) = diag.data.as_ref().and_then(|d| d.get("repair")).and_then(|r| r.as_array()) else {
+        return Vec::new();
+    };
+    edits.iter().filter_map(|edit| {
+        let replacement = edit.get("replacement")?.as_str()?;
+        let line = (edit.get("line")?.as_u64()? as usize).checked_sub(1)? as u32;
+        let col = edit.get("col")?.as_u64()? as usize;
+        let end_col = edit.get("endCol")?.as_u64()? as usize;
+        let machine = edit.get("applicability").and_then(|a| a.as_str()) == Some("machine-applicable");
+        let line_text = lines.get(line as usize)?;
+        let title = if replacement.is_empty() {
+            "Delete the highlighted text".to_string()
+        } else {
+            format!("Replace with `{}`", replacement)
+        };
+        Some(CodeActionOrCommand::CodeAction(CodeAction {
+            title,
+            kind: Some(CodeActionKind::QUICKFIX),
+            diagnostics: Some(vec![diag.clone()]),
+            edit: Some(WorkspaceEdit {
+                changes: Some(HashMap::from([(uri.clone(), vec![TextEdit {
+                    range: Range {
+                        start: Position { line, character: char_col_to_utf16(line_text, col) },
+                        end: Position { line, character: char_col_to_utf16(line_text, end_col) },
+                    },
+                    new_text: replacement.to_string(),
+                }])])),
+                ..Default::default()
+            }),
+            is_preferred: machine.then_some(true),
             ..Default::default()
-        }),
-        ..Default::default()
-    }))
+        }))
+    }).collect()
 }
 
 fn compute_code_actions(source: &str, diagnostics: &[Diagnostic], uri: &Uri) -> Vec<CodeActionOrCommand> {
@@ -104,9 +117,7 @@ fn compute_code_actions(source: &str, diagnostics: &[Diagnostic], uri: &Uri) -> 
         if let Some(a) = action {
             actions.push(a);
         }
-        if let Some(a) = code_action_for_try_fix(diag, &lines, uri) {
-            actions.push(a);
-        }
+        actions.extend(code_actions_for_repair(diag, &lines, uri));
     }
     actions
 }
@@ -264,23 +275,26 @@ fn publish_diagnostics(connection: &Connection, uri: &Uri, diags: &[Diagnostic])
 
 /// Compiler diagnostic → LSP diagnostic. The compiler's line/col are
 /// 1-indexed char offsets; LSP wants 0-based lines and UTF-16 columns, so the
-/// conversion needs the source line text. A machine-applicable fix
-/// (`try_snippet` + `try_replace_span`) rides along in the `data` field —
-/// the client echoes `data` back on `textDocument/codeAction`, where
-/// `code_action_for_try_fix` materializes it as a quickfix edit. Before
-/// this, the already-computed fix-its were dropped here and never reached
-/// the client (#927).
+/// conversion needs the source line text. The span-exact edits of the
+/// diagnostic's `repair` (#2149: `primary`, then `alternatives`) ride along
+/// in the `data` field — the client echoes `data` back on
+/// `textDocument/codeAction`, where `code_actions_for_repair` materializes
+/// them as quickfix edits. Before #927 the already-computed fix-its were
+/// dropped here and never reached the client.
 fn diag_from_almide(d: &crate::diagnostic::Diagnostic, lines: &[&str]) -> Diagnostic {
     let line = d.line.unwrap_or(1).saturating_sub(1) as u32;
     let line_text = lines.get(line as usize).copied().unwrap_or("");
     let col = char_col_to_utf16(line_text, d.col.unwrap_or(1));
     let end_col = d.end_col.map(|c| char_col_to_utf16(line_text, c)).unwrap_or(col + 1);
-    let data = match (&d.try_snippet, d.try_replace_span) {
-        (Some(snippet), Some((l, c, ec))) => Some(serde_json::json!({
-            "try": snippet, "line": l, "col": c, "endCol": ec,
-        })),
-        _ => None,
-    };
+    let data = d.repair.as_ref().and_then(|r| {
+        let edits: Vec<serde_json::Value> = r.primary.iter().chain(r.alternatives.iter())
+            .map(|e| serde_json::json!({
+                "replacement": e.replacement, "line": e.line, "col": e.col, "endCol": e.end_col,
+                "applicability": e.applicability.as_str(),
+            }))
+            .collect();
+        (!edits.is_empty()).then(|| serde_json::json!({ "repair": edits }))
+    });
     Diagnostic {
         range: Range { start: Position { line, character: col }, end: Position { line, character: end_col } },
         severity: Some(if d.level == crate::diagnostic::Level::Error { DiagnosticSeverity::ERROR } else { DiagnosticSeverity::WARNING }),
