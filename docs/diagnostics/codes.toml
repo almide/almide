@@ -1,0 +1,336 @@
+# The diagnostic-code registry behind `almide explain --list` (#2149): the two
+# columns a code's doc cannot state in its own text. `mnemonic` (the doc's
+# title) and `verdict` (its `## Fix-it verdict`) are read from
+# docs/diagnostics/<CODE>.md; this file carries the rest.
+#
+# severity — what the diagnostic is emitted as: "error", "warning", or
+#            "error|warning" when one code has both forms (E053). Checked
+#            against the binary: tests/explain_list_test.rs runs every
+#            fixture and refuses a level this row does not name.
+# since    — the first release whose compiler source names the code
+#            (derived once, 2026-09-26, from `git log -S'"EXXX"' -- '*.rs'`
+#            and the earliest final tag containing that commit). A new code
+#            takes the version it will ship in.
+#
+# One row per documented code; tests/explain_list_test.rs keeps the rows equal
+# to the set of codes the compiler emits.
+
+[E001]
+severity = "error"
+since = "0.6.1"
+
+[E002]
+severity = "error"
+since = "0.6.1"
+
+[E003]
+severity = "error"
+since = "0.6.1"
+
+[E004]
+severity = "error"
+since = "0.6.1"
+
+[E005]
+severity = "error"
+since = "0.6.1"
+
+[E006]
+severity = "error"
+since = "0.6.1"
+
+[E007]
+severity = "error"
+since = "0.6.1"
+
+[E008]
+severity = "error"
+since = "0.6.1"
+
+[E009]
+severity = "error"
+since = "0.6.1"
+
+[E010]
+severity = "error"
+since = "0.6.1"
+
+[E011]
+severity = "error"
+since = "0.9.1"
+
+[E012]
+severity = "error"
+since = "0.14.4"
+
+[E013]
+severity = "error"
+since = "0.14.5"
+
+[E014]
+severity = "error"
+since = "0.15.0"
+
+[E015]
+severity = "warning"
+since = "0.15.0"
+
+[E016]
+severity = "error"
+since = "0.24.0"
+
+[E017]
+severity = "error"
+since = "0.25.0"
+
+[E018]
+severity = "error"
+since = "0.25.0"
+
+[E019]
+severity = "error"
+since = "0.26.0"
+
+[E020]
+severity = "error"
+since = "0.26.8"
+
+[E021]
+severity = "error"
+since = "0.26.20"
+
+[E022]
+severity = "error"
+since = "0.27.6"
+
+[E023]
+severity = "error"
+since = "0.27.6"
+
+[E024]
+severity = "error"
+since = "0.27.6"
+
+[E025]
+severity = "error"
+since = "0.27.6"
+
+[E026]
+severity = "error"
+since = "0.28.0"
+
+[E027]
+severity = "error"
+since = "0.29.0"
+
+[E028]
+severity = "error"
+since = "0.32.0"
+
+[E029]
+severity = "error"
+since = "0.32.0"
+
+[E030]
+severity = "error"
+since = "0.32.0"
+
+[E031]
+severity = "error"
+since = "0.39.0"
+
+[E032]
+severity = "error"
+since = "0.54.0"
+
+[E033]
+severity = "error"
+since = "0.54.0"
+
+[E034]
+severity = "error"
+since = "0.54.0"
+
+[E035]
+severity = "warning"
+since = "0.54.0"
+
+[E036]
+severity = "warning"
+since = "0.54.0"
+
+[E037]
+severity = "error"
+since = "0.54.0"
+
+[E038]
+severity = "error"
+since = "0.54.0"
+
+[E041]
+severity = "error"
+since = "0.54.0"
+
+[E042]
+severity = "error"
+since = "0.55.0"
+
+[E043]
+severity = "error"
+since = "0.55.0"
+
+[E044]
+severity = "error"
+since = "0.57.0"
+
+[E045]
+severity = "error"
+since = "0.57.1"
+
+[E046]
+severity = "error"
+since = "0.57.1"
+
+[E047]
+severity = "error"
+since = "0.57.1"
+
+[E048]
+severity = "error"
+since = "0.57.1"
+
+[E049]
+severity = "error"
+since = "0.57.1"
+
+[E050]
+severity = "error"
+since = "0.57.1"
+
+[E051]
+severity = "error"
+since = "0.57.1"
+
+[E052]
+severity = "warning"
+since = "0.57.1"
+
+[E053]
+severity = "error|warning"
+since = "0.57.1"
+
+[E054]
+severity = "error"
+since = "0.57.2"
+
+[E055]
+severity = "error"
+since = "0.57.2"
+
+[E056]
+severity = "warning"
+since = "0.57.2"
+
+[E057]
+severity = "error"
+since = "0.57.2"
+
+[E058]
+severity = "error"
+since = "0.58.0"
+
+[E059]
+severity = "error"
+since = "0.58.0"
+
+[E060]
+severity = "warning"
+since = "0.58.0"
+
+[E061]
+severity = "error"
+since = "0.60.0"
+
+[E062]
+severity = "warning"
+since = "0.63.0"
+
+[E070]
+severity = "error"
+since = "0.60.0"
+
+[E071]
+severity = "error"
+since = "0.60.0"
+
+[E072]
+severity = "error"
+since = "0.60.0"
+
+[E073]
+severity = "error"
+since = "0.60.0"
+
+[E074]
+severity = "error"
+since = "0.60.0"
+
+[E075]
+severity = "error"
+since = "0.60.0"
+
+[E076]
+severity = "error"
+since = "0.60.0"
+
+[E077]
+severity = "error"
+since = "0.60.0"
+
+[E078]
+severity = "error"
+since = "0.60.0"
+
+[E080]
+severity = "error"
+since = "0.60.0"
+
+[E081]
+severity = "error"
+since = "0.60.0"
+
+[E082]
+severity = "error"
+since = "0.62.0"
+
+[E083]
+severity = "error"
+since = "0.62.0"
+
+[E084]
+severity = "error"
+since = "0.63.0"
+
+[E085]
+severity = "error"
+since = "0.63.0"
+
+[E086]
+severity = "error"
+since = "0.63.0"
+
+[E087]
+severity = "error"
+since = "0.63.0"
+
+[E088]
+severity = "error"
+since = "0.63.0"
+
+[E089]
+severity = "error"
+since = "0.63.0"
+
+[E420]
+severity = "error"
+since = "0.13.3"
