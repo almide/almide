@@ -532,7 +532,7 @@ impl Checker {
                 );
                 // The placeholder `try` would tell them to pass the argument
                 // they already passed, producing this same error again.
-                diagnostic.try_snippet = None;
+                diagnostic.clear_try();
                 // Anchor at column 1 like E006's "declared as effect fn here":
                 // a secondary with no end column is underlined to the LABEL's
                 // width, so pointing at the value span runs the underline past
