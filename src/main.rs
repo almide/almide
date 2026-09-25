@@ -397,6 +397,60 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Judge a proposed edit BEFORE writing it: apply it in memory, run check,
+    /// the tests that reach the file and its contract fixtures on both sides,
+    /// and report each diagnostic / test / contract as unchanged, newly_broken,
+    /// newly_fixed or removed. Never writes. Exit 0 = survives, 1 = does not,
+    /// 2 = the edit could not be judged.
+    Survive {
+        /// The .almd file the edit is to
+        file: String,
+        /// The edit: a path (or `-` for stdin) holding a unified diff or the
+        /// file's full new text
+        #[arg(long)]
+        with: String,
+        /// How to read `--with`: auto (a diff if it starts `--- ` / `@@ `), patch, text
+        #[arg(long = "as", default_value = "auto")]
+        as_kind: String,
+        /// Emit the survival delta as JSON (schema_version 1)
+        #[arg(long)]
+        json: bool,
+        /// Per-run time limit in seconds for every child check / test / run
+        #[arg(long, default_value_t = 600)]
+        timeout: u64,
+    },
+    /// Verify-then-write: run `survive` on the edit and write it (atomically)
+    /// only if nothing is newly broken. `--force` writes whatever the verdict.
+    Apply {
+        /// The .almd file to edit
+        file: String,
+        /// The edit: a path (or `-` for stdin) holding a unified diff or the
+        /// file's full new text
+        #[arg(long)]
+        with: String,
+        /// How to read `--with`: auto, patch, text
+        #[arg(long = "as", default_value = "auto")]
+        as_kind: String,
+        /// Write only if the edit survives. `true` / `false` only — any other
+        /// value refuses without writing
+        #[arg(long = "if-survives", num_args = 0..=1, require_equals = true, default_missing_value = "true")]
+        if_survives: Option<String>,
+        /// Write even if the edit does not survive (the verdict is still reported)
+        #[arg(long)]
+        force: bool,
+        /// Emit the survival delta (plus `written`) as JSON
+        #[arg(long)]
+        json: bool,
+        /// Per-run time limit in seconds for every child check / test / run
+        #[arg(long, default_value_t = 600)]
+        timeout: u64,
+    },
+    /// Internal to `almide survive`: compile one file's test harness and run it
+    /// captured, printing `{compiled, exit_code, output}` as one JSON line.
+    #[command(name = "survive-test-leg", hide = true)]
+    SurviveTestLeg {
+        file: String,
+    },
     /// Check canonical docs (llms.txt, etc.) against source-of-truth inputs
     /// (Cargo version, diagnostic code inventory, stdlib auto-import list).
     /// Fails CI when drift is detected.
@@ -1032,6 +1086,13 @@ fn dispatch_rest(command: Commands) {
             cli::cmd_self_update(version.as_deref());
         }
         Commands::Verify { args } => std::process::exit(cli::cmd_verify(&args)),
+        Commands::Survive { file, with, as_kind, json, timeout } => {
+            cli::cmd_survive(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout });
+        }
+        Commands::Apply { file, with, as_kind, if_survives, force, json, timeout } => {
+            cli::cmd_apply(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout }, if_survives, force);
+        }
+        Commands::SurviveTestLeg { file } => cli::cmd_survive_test_leg(&file),
         Commands::Emit { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map } => {
             cli::cmd_emit(cli::EmitArgs { file: &file, target: &target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map });
         }
