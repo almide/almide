@@ -679,9 +679,10 @@ LSP からは独自リクエスト `almide/survive`
 提案とみなす）、MCP からは `almide_survive` で同じ JSON が返る。どちらも CLI を
 子プロセスで走らせる。
 
-テスト: `tests/survive_test.rs`（`tests/survive/` の golden delta 3 本 — テストを
+テスト: `tests/survive_test.rs`（`tests/survive/` の golden delta 4 本 — テストを
 壊す patch / 行挿入をまたいで残る error と直る error の全文編集 / 注釈だけの中立
-patch — と、書き込まないこと・apply の拒否と受理）、`tests/mcp_test.rs`、
+patch / `repair`（#2149）付きの E031 をそのまま `newly_broken` に運ぶ patch — と、
+書き込まないこと・apply の拒否と受理）、`tests/mcp_test.rs`、
 `tests/lsp_test.rs`
 
 ---
