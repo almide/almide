@@ -270,10 +270,17 @@ enum Commands {
     /// with JSON results — the same answers as the CLI, minus the step where a
     /// model has to parse human-formatted text.
     Mcp,
-    /// Explain a diagnostic code (e.g., almide explain E001)
+    /// Explain a diagnostic code (e.g., almide explain E001), or list every code
     Explain {
         /// Diagnostic code such as E001
-        code: String,
+        #[arg(required_unless_present = "list")]
+        code: Option<String>,
+        /// List every diagnostic code: code, severity, since, fix-it verdict, title
+        #[arg(long, conflicts_with = "code")]
+        list: bool,
+        /// With --list: one JSON array of {code, mnemonic, severity, since, verdict}
+        #[arg(long, requires = "list")]
+        json: bool,
     },
     /// Format source files
     Fmt {
@@ -997,9 +1004,10 @@ fn dispatch_rest(command: Commands) {
         Commands::Mcp => {
             cli::mcp::run_mcp();
         }
-        Commands::Explain { code } => {
-            print_error_explanation(&code);
-        }
+        Commands::Explain { code, list, json } => match code {
+            Some(code) if !list => print_error_explanation(&code),
+            _ => cli::explain::print_list(DIAGNOSTIC_DOCS, json),
+        },
         Commands::Ide { cmd } => dispatch_ide(cmd),
         Commands::Fmt { files, check, json, dry_run, no_import_edit } => dispatch_fmt(files, check, json, dry_run, no_import_edit),
         Commands::Compile { module, json, dry_run, output } => {
