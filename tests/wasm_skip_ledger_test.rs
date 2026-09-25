@@ -66,6 +66,10 @@ const GENUINE_SKIPS: &[(&str, SkipReason)] = &[
     // the incumbent brick, which has no http capability — retires with
     // the render_wasm switchover (#1584).
     ("spec/stdlib/http_status_test.almd", SkipReason::NativeOnlyApi),
+    // #2631: the http call handle has no wasm surface yet — `almide check
+    // --target wasm` refuses it (E081, proofs/target-availability.toml) until
+    // the wasi:http pollable port (#2633) — and the fixture's server is `net`.
+    ("spec/stdlib/http_call_test.almd", SkipReason::NativeOnlyApi),
     // `http.serve` binds a TCP listener.
     ("spec/lang/effect_intrinsic_tail_test.almd", SkipReason::NativeOnlyApi),
     // (zlib row RETIRED 2026-09-01: #1700 implemented DEFLATE in Almide —
