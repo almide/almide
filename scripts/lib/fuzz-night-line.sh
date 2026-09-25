@@ -128,10 +128,24 @@ fuzz_shard_log() {
   [ -n "$id" ] || { echo "fuzz_shard_log: shard $n: no job named 'shard $n' in this run's job list" >&2; return 1; }
   # Quote the URL: a bare `?` is a glob in the caller's shell. Retried: a
   # transient 5xx must not turn a shard's minutes into UNKNOWN.
-  local attempt err out
+  #
+  # `--allow-escape-sequences` is THE fix for #2611's in-CI half: every job log
+  # carries ANSI colour codes (the runner echoes each step's script in
+  # `\e[36;1m`), and gh >= 2.10x REFUSES to print such a response ("the
+  # response contains terminal escape sequences; pass --allow-escape-sequences
+  # to output it anyway", exit 1). The runner image ships that gh, so from
+  # #2513's landing on, every in-CI recovery failed, while the same fetch from
+  # a workstation's older gh (which has no such flag, and rejects it as
+  # unknown) succeeded. So the flag is passed exactly when this gh has it.
+  # The help text is captured before it is searched: `gh ... | grep -q` under
+  # the verdict's `pipefail` fails whenever grep exits early and gh takes the
+  # SIGPIPE, which would silently drop the flag again.
+  local attempt err out esc=() help
+  help=$(gh api --help 2>&1 || true)
+  case "$help" in *--allow-escape-sequences*) esc=(--allow-escape-sequences) ;; esac
   err=$(mktemp)
   for attempt in 1 2 3; do
-    if out=$(gh api "repos/$repo/actions/jobs/$id/logs" 2>"$err"); then
+    if out=$(gh api "repos/$repo/actions/jobs/$id/logs" "${esc[@]}" 2>"$err"); then
       rm -f "$err"
       printf '%s\n' "$out"
       return 0
