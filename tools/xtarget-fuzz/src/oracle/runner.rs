@@ -68,6 +68,36 @@ impl Toolchain {
         }
     }
 
+    /// Drop the per-program artifacts `almide build` leaves in this worker's
+    /// build dir (#2611). `almide build` keeps every program's binary as
+    /// `target/<profile>/almide-<hash>` (and, where rustc keeps them, its
+    /// `deps/almide_out-*` objects) as a content-keyed cache that only a
+    /// week-old sweep evicts. That cache pays off for a user's edit loop, but
+    /// every fuzzed program is distinct, so here it never hits and only
+    /// grows: one kept binary per program, for the whole campaign, on the
+    /// runner's disk. The ladder runs the `-o` copy, never the cached one.
+    ///
+    /// Called between programs, from the worker thread that owns this dir:
+    /// no build can be running in it. The lockfile, cargo's own metadata and
+    /// every directory (the dependency build cache, the incremental store)
+    /// stay, so the next build is exactly as warm as before.
+    pub fn prune_build_cache(&self) -> usize {
+        let mut removed = 0;
+        for profile in ["debug", "release"] {
+            let dir = self.scratch.join("target").join(profile);
+            for (sub, prefix) in [(dir.clone(), "almide-"), (dir.join("deps"), "almide_out-")] {
+                let Ok(entries) = std::fs::read_dir(&sub) else { continue };
+                for e in entries.flatten() {
+                    let is_file = e.file_type().map(|t| t.is_file()).unwrap_or(false);
+                    if is_file && e.file_name().to_string_lossy().starts_with(prefix) && std::fs::remove_file(e.path()).is_ok() {
+                        removed += 1;
+                    }
+                }
+            }
+        }
+        removed
+    }
+
     /// `almide check <file>` — type-check only.
     pub fn check(&self, file: &Path) -> ProcResult {
         self.run_almide(&["check", &file.to_string_lossy()])
