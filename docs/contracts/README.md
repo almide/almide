@@ -401,4 +401,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-363 | A `scoped fn` computes the same answer inside and outside a region | 0.64.0 | active | fixture | 1 |
 | C-364 | A shape outside the scoped fragment is refused at check time, identically on both targets | 0.64.0 | active | fixture | 0 |
 | C-365 | A generic protocol with explicit conformance dispatches to the one declared implementation, identically on both targets | 0.64.0 | active | fixture | 1 |
+| C-366 | http call handle: per-call limits name themselves when they fire, cancel closes the connection, poll never blocks | 0.64.0 | active | fixture | 0 |
 
