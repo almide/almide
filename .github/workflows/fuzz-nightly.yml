@@ -218,16 +218,14 @@ jobs:
       # a shutdown signal"): 0/0/3/0/2/2/2/4/3 shards per night since
       # 2026-08-29, both architectures, at independent minutes into the
       # campaign — the memory-knob step-down (jobs 3→2 / 4→3) did not stop
-      # them. A 20 s memory/load sampler in the job log turns the next kill
-      # into a number: the last sampled line before the shutdown says
-      # whether the VM was out of memory or something else went.
-      - name: Start the memory sampler
-        run: |
-          ( while true; do
-              echo "[mem] $(date -u +%H:%M:%S) $(free -m | awk 'NR==2{printf "used=%sMB avail=%sMB", $3, $7}') load=$(cut -d' ' -f1 /proc/loadavg) procs=$(ls /proc | grep -c '^[0-9]')"
-              sleep 20
-            done ) &
-          echo $! > /tmp/mem-sampler.pid
+      # them. A 20 s resource sampler in the job log turns the next kill into
+      # a number: the last sampled line before the shutdown says whether the
+      # VM was out of memory, out of disk, or neither.
+      #
+      # It runs INSIDE the campaign step (#2611). It used to be its own step
+      # that backgrounded the loop and exited, and output a background process
+      # writes after its step has finished never reaches the job log: not one
+      # `[mem]` line exists in any shard log since it landed.
       - name: Run fuzz campaign
         id: campaign
         run: |
@@ -243,6 +241,24 @@ jobs:
           # The fuzzer exits non-zero iff it recorded a finding; capture
           # that without failing the step so the verdict job can branch on the
           # NIGHT's total rather than on one shard's.
+          # The resource sampler (see above): memory, swap, disk, the fuzzer's
+          # scratch tree and the temp dir, every 20 s, into this step's log.
+          ( while true; do
+              echo "[res] $(date -u +%H:%M:%S)" \
+                "$(free -m | awk 'NR==2{printf "mem_used=%sMB mem_avail=%sMB", $3, $7} NR==3{printf " swap_used=%sMB", $3}')" \
+                "$(df -Pm / | awk 'NR==2{printf "root_free=%sMB", $4}')" \
+                "$(df -Pm "$PWD" | awk 'NR==2{printf "work_free=%sMB", $4}')" \
+                "scratch=$(du -sm tools/xtarget-fuzz/.scratch 2>/dev/null | cut -f1)MB" \
+                "tmp=$(du -sm "${TMPDIR:-/tmp}" 2>/dev/null | cut -f1)MB" \
+                "load=$(cut -d' ' -f1 /proc/loadavg) procs=$(ls /proc | grep -c '^[0-9]')" \
+                "psi_mem=$(awk '/^some/{print $2}' /proc/pressure/memory 2>/dev/null)"
+              sleep 20
+            done ) &
+          SAMPLER=$!
+          # The shard NUMBER travels inside its own output (#2611): when only
+          # one shard's artifact exists, `download-artifact` extracts it flat,
+          # with no `fuzz-shard-<run>-<n>` directory to read the number from.
+          echo "fuzz-shard: ${{ matrix.shard }}" > fuzz-output.txt
           set +e
           ./tools/xtarget-fuzz/target/release/xtarget-fuzz run \
             --minutes "$MINUTES" \
@@ -250,8 +266,9 @@ jobs:
             --repo "$PWD" \
             --almide "$PWD/target/release/almide" \
             --seed "$SEED" \
-            2>&1 | tee fuzz-output.txt
+            2>&1 | tee -a fuzz-output.txt
           STATUS=${PIPESTATUS[0]}
+          kill "$SAMPLER" 2>/dev/null
           set -e
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
 
@@ -335,13 +352,15 @@ jobs:
       - name: Aggregate findings
         id: agg
         run: |
+          # Any depth (#2611): when exactly ONE shard uploaded, its artifact is
+          # extracted flat (`shards/tools/...`, no per-artifact directory), and
+          # the old `shards/*/tools/...` glob found nothing there. Run
+          # 36051987508 (v0.63.1-rc2 gate) concluded success with a correctness
+          # finding sitting in its only artifact.
           mkdir -p night-findings
-          if compgen -G "shards/*/tools/xtarget-fuzz/findings/*" >/dev/null; then
-            for d in shards/*/tools/xtarget-fuzz/findings/*/; do
-              [ -d "$d" ] || continue
-              cp -R "$d" "night-findings/$(basename "$d")" 2>/dev/null || true
-            done
-          fi
+          find shards -type d -path '*/tools/xtarget-fuzz/findings/*' -prune -print | while IFS= read -r d; do
+            cp -R "$d" "night-findings/$(basename "$d")" 2>/dev/null || true
+          done
           COUNT=$(find night-findings -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
           SLOW=$(find night-findings -mindepth 1 -maxdepth 1 -type d -name 'Slow__*' | wc -l | tr -d ' ')
           echo "findings=$COUNT" >> "$GITHUB_OUTPUT"
