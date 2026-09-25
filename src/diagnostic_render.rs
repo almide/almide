@@ -170,14 +170,26 @@ pub fn to_json(d: &Diagnostic) -> String {
     // schema break, while `try` / `try_replace` keep serving the existing
     // single-fix consumers. `applicability` is the tag a fixer must branch on:
     // only "machine-applicable" may be applied unattended.
-    let suggestions = match (d.try_replace_span, &d.try_snippet) {
-        (Some((l, c, e)), Some(s)) => format!(
-            r#"[{{"line":{},"col":{},"end_col":{},"replacement":"{}","applicability":"{}"}}]"#,
-            l, c, e,
-            s.replace('\\', r"\\").replace('"', r#"\""#).replace('\n', "\\n"),
-            d.try_applicability.as_str(),
+    // #2149: every span-exact edit of `repair` — `primary` first, then the
+    // `alternatives` — in the element shape this array always had.
+    let suggestions = {
+        let edits: Vec<String> = d.repair.iter()
+            .flat_map(|r| r.primary.iter().chain(r.alternatives.iter()))
+            .map(repair_edit_json)
+            .collect();
+        format!("[{}]", edits.join(","))
+    };
+    // #2149: the structured repair — `{"primary":…|null,"alternatives":[…],
+    // "example":"…"|null}`. Emitted ONLY when the diagnostic carries one, for
+    // the byte-stability reason `notes` states below.
+    let repair = match &d.repair {
+        None => String::new(),
+        Some(r) => format!(
+            r#""repair":{{"primary":{},"alternatives":[{}],"example":{}}},"#,
+            r.primary.as_ref().map_or("null".to_string(), repair_edit_json),
+            r.alternatives.iter().map(repair_edit_json).collect::<Vec<_>>().join(","),
+            r.example.as_deref().map_or("null".to_string(), |e| format!("\"{}\"", json_escape(e))),
         ),
-        _ => "[]".to_string(),
     };
     // #1997: `notes` is emitted ONLY when the diagnostic carries one, so a
     // diagnostic without notes keeps the exact bytes it had before the field
@@ -196,17 +208,43 @@ pub fn to_json(d: &Diagnostic) -> String {
     };
     // Manual JSON to avoid serde dependency in this module
     format!(
-        r#"{{"level":"{}","code":"{}","message":"{}","hint":"{}",{}"here":{},"try":{},"try_replace":{},"applicability":"{}","suggestions":{},"context":"{}","file":"{}","line":{},"col":{},"end_col":{},"secondary":{}}}"#,
+        r#"{{"level":"{}","code":"{}","message":"{}","hint":"{}",{}"here":{},"try":{},"try_replace":{},"applicability":"{}","suggestions":{},{}"context":"{}","file":"{}","line":{},"col":{},"end_col":{},"secondary":{}}}"#,
         level, code,
         d.message.replace('"', r#"\""#).replace('\n', "\\n"),
         d.hint.replace('"', r#"\""#).replace('\n', "\\n"),
         notes,
         here_json, try_json, try_replace_json,
-        d.try_applicability.as_str(), suggestions,
+        d.try_applicability.as_str(), suggestions, repair,
         d.context.replace('"', r#"\""#),
         file.replace('"', r#"\""#),
         line, col, end_col, secondary,
     )
+}
+
+/// One `RepairEdit` as the JSON object `suggestions` and `repair` share.
+fn repair_edit_json(e: &almide_base::diagnostic::RepairEdit) -> String {
+    format!(
+        r#"{{"line":{},"col":{},"end_col":{},"replacement":"{}","applicability":"{}"}}"#,
+        e.line, e.col, e.end_col, json_escape(&e.replacement), e.applicability.as_str(),
+    )
+}
+
+/// JSON string-body escaping for the fields #2149 added (the older fields
+/// keep their historical escaping byte-for-byte).
+fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// `display_with_source`'s `here_snippet` auto-population step. Extracted
