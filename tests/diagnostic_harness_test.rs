@@ -482,3 +482,60 @@ fn machine_applicable_fixits_stay_populated() {
         machine.len(), MACHINE_APPLICABLE_FIXTURE_FLOOR, machine
     );
 }
+
+/// #2149, the loud half of the two-way repair ratchet (the silent half is
+/// `diagnostic_silent_test.rs`). A case may carry `repair.grep`: one needle
+/// per line (blank lines and `#` comments skipped), each of which must appear
+/// in what the case's diagnostic tells the writer to do — its message, hint,
+/// `try:` snippet, or any `repair` replacement. `hint_substring` pins one
+/// phrase of the prose; `repair.grep` pins the repair itself, so a hint that
+/// drifts away from naming the fix (the #2097 shape: "Fix the argument type")
+/// turns this red.
+///
+/// When `meta.toml` names `expects_code`, only that code's diagnostics are
+/// searched — a needle cannot be satisfied by a cascaded neighbour.
+const REPAIR_GREP_FLOOR: usize = 10;
+
+#[test]
+fn repair_grep_needles_appear_in_the_diagnostic() {
+    let mut checked = 0usize;
+    let mut misses: Vec<String> = Vec::new();
+    for case in &collect_cases() {
+        let Ok(grep) = std::fs::read_to_string(case.join("repair.grep")) else { continue };
+        checked += 1;
+        let meta = parse_meta(&case.join("meta.toml"));
+        let out = Command::new(almide())
+            .args(["check", "--json", case.join("broken.almd").to_str().unwrap()])
+            .output()
+            .expect("almide check --json");
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let said: String = stdout.lines()
+            .filter(|l| l.trim_start().starts_with('{'))
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter(|d| meta.expects_code.as_deref().is_none_or(|c| d["code"] == c))
+            .map(|d| {
+                let mut s = String::new();
+                for k in ["message", "hint", "try"] {
+                    if let Some(v) = d[k].as_str() { s.push_str(v); s.push('\n'); }
+                }
+                let r = &d["repair"];
+                for e in std::iter::once(&r["primary"]).chain(r["alternatives"].as_array().into_iter().flatten()) {
+                    if let Some(v) = e["replacement"].as_str() { s.push_str(v); s.push('\n'); }
+                }
+                if let Some(v) = r["example"].as_str() { s.push_str(v); s.push('\n'); }
+                s
+            })
+            .collect();
+        for needle in grep.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+            if !said.contains(needle) {
+                misses.push(format!("{}: `{}` not in:\n{}", case.display(), needle, said));
+            }
+        }
+    }
+    assert!(misses.is_empty(), "repair.grep needles missing:\n{}", misses.join("\n"));
+    assert!(
+        checked >= REPAIR_GREP_FLOOR,
+        "only {} case(s) carry repair.grep (floor {})",
+        checked, REPAIR_GREP_FLOOR
+    );
+}
