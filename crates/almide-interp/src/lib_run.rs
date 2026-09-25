@@ -279,12 +279,11 @@ impl<'a> Interpreter<'a> {
             return Err(Flow::Fuel);
         }
         budget.set(f - 1);
-        if f & 0xFF == 0 {
-            if let Some(deadline) = self.wall_deadline {
-                if std::time::Instant::now() >= deadline {
-                    return Err(Flow::Unsupported("wall-clock deadline reached".into()));
-                }
-            }
+        if f & 0xFF == 0
+            && let Some(deadline) = self.wall_deadline
+            && std::time::Instant::now() >= deadline
+        {
+            return Err(Flow::Unsupported("wall-clock deadline reached".into()));
         }
         Ok(())
     }
