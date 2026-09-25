@@ -4575,3 +4575,16 @@ evidence  = [
   { path = "spec/wasm_cross/generic_protocol_conformance.almd", class = "fixture" },
   { path = "spec/integration/generic_protocol_ports/src/shop_test.almd", class = "fixture" },
 ]
+[[contract]]
+id        = "C-366"
+spec      = "ALS-R5"
+title     = "http call handle: per-call limits name themselves when they fire, cancel closes the connection, poll never blocks"
+statement = "`http.start(method, url, body, headers, limits)` returns at once with an `HttpCall`; `poll` and `read_new` never block, `wait` blocks until the call ends, and `cancel` (or dropping the last copy of the handle) ends a running call as `err(\"request cancelled\")` and shuts its connection down, so the server observes the close and `read_new` answers `\"\"` from then on. The limits are per call, `{ total_ms, idle_ms }` in milliseconds with 0 = no limit: `total_ms` is a wall clock from `start` (dial, first byte and body all count) and `idle_ms` the longest gap between arrivals of bytes (the wait for the first byte included); a fired limit ends the call as exactly `err(\"request timeout: total_ms <n> exceeded\")` or `err(\"request timeout: idle_ms <n> exceeded\")`, the `_with_limits` twins of request_stream / openai_streaming_call / anthropic_streaming_call end the same way, and ALMIDE_HTTP_TIMEOUT_SECS stays the default of the calls without limits only. As with C-214, WHETHER a limit fires is the host's (the fixture uses wide margins) while the error shape is pinned, and the family is native-only until the wasi:http pollable port: `almide check --target wasm` refuses it."
+since     = "0.64.0"
+status    = "active"
+evidence  = [
+  { path = "spec/stdlib/http_call_test.almd", class = "fixture" },
+  { path = "tests/http_call_handle_test.rs", name = "call_handle_limits_cancel_poll_and_the_streaming_twins", class = "fixture" },
+  { path = "tests/http_call_handle_test.rs", name = "a_trickle_outlives_the_classic_stream_but_not_total_ms", class = "fixture" },
+  { path = "tests/http_call_family_gate_test.rs", name = "every_streaming_client_has_one_with_limits_twin", class = "fixture" },
+]
