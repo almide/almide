@@ -53,7 +53,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | almide mcp
 
 | Tool | Runs | Returns |
 |---|---|---|
-| `almide_check` | `almide check --json` | `{ok, errors, warnings, diagnostics[]}` — each diagnostic is `{level, code, message, hint, here, try, try_replace, context, file, line, col, end_col, secondary}` |
+| `almide_check` | `almide check --json` | `{ok, errors, warnings, diagnostics[]}` — each diagnostic is `{level, code, message, hint, here, try, try_replace, repair, context, file, line, col, end_col, secondary}` |
 | `almide_test` | `almide test --json` | `{ok, files_passed, files_failed, files[], runner_output_unstructured}` |
 | `almide_api` | `almide ide outline --json`, `almide ide stdlib-snapshot --json` | the public declarations of a file, of `@stdlib/<module>`, or of `@stdlib` (core snapshot), with exact signatures |
 | `almide_explain` | `almide explain <CODE>` | the diagnostic's reference page (markdown) |
@@ -61,6 +61,10 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | almide mcp
 
 `try` is a copy-pasteable fix snippet and `try_replace` is the span it
 replaces, so a fix can be applied mechanically rather than re-derived.
+`repair` (#2149, present only when the diagnostic has a fix) is the
+structured form: `{primary, alternatives, example}`, each edit
+`{line, col, end_col, replacement, applicability}` — apply `primary`
+unattended only when its `applicability` is `"machine-applicable"`.
 `line` is 1-based; `col` / `end_col` are 1-based **character** counts (not
 bytes, not display width), `end_col` exclusive — a harness that counts bytes
 corrupts UTF-8 (#2250).
@@ -87,9 +91,6 @@ reintroduce exactly the fragility this server exists to remove.
 - **Per-test failure detail** (#1313). `almide test --json` reports per-FILE
   pass/fail; the failing assertion's expected/found is the test runner's own
   text, returned as `runner_output_unstructured`.
-- **Fix-it applicability** (#1312). `try` / `try_replace` are present, but not
-  yet tagged machine-applicable vs. needs-review, so an agent should re-check
-  after applying one.
 - **Parse-error codes.** A syntax error now reaches `check --json` as JSON (it
   used to be text-only), but those diagnostics carry an empty `code`, so
   `almide_explain` has nothing to look up for them.
