@@ -17,6 +17,8 @@ pub struct InterpOracle {
     /// native/wasm rungs are wall-clock bounded, the interp is fuel
     /// bounded. Exhaustion = abstain, never a finding.
     fuel: u64,
+    /// Wall-clock bound beside the fuel (#2611; see `run_inner`).
+    wall: std::time::Duration,
 }
 
 impl InterpOracle {
@@ -25,7 +27,7 @@ impl InterpOracle {
         // that needs more than this is a loop the wall-clock rungs already
         // bound at seconds.
         const DEFAULT_FUEL: u64 = 50_000_000;
-        Self { fuel: DEFAULT_FUEL }
+        Self { fuel: DEFAULT_FUEL, wall: INTERP_WALL_BUDGET }
     }
 
     /// An oracle with an explicit budget. Only the tests use this — they
@@ -33,7 +35,13 @@ impl InterpOracle {
     /// `FuelExhausted` verdict does not depend on the budget's size.
     #[cfg(test)]
     pub fn with_fuel(fuel: u64) -> Self {
-        Self { fuel }
+        Self { fuel, wall: INTERP_WALL_BUDGET }
+    }
+
+    /// An oracle with an explicit wall-clock budget (tests only).
+    #[cfg(test)]
+    pub fn with_wall(fuel: u64, wall: std::time::Duration) -> Self {
+        Self { fuel, wall }
     }
 
     /// Run `source` to completion (or to fuel exhaustion) and hand back the
@@ -65,9 +73,24 @@ impl InterpOracle {
         almide::mono::monomorphize(&mut ir);
         almide::ir_link::ir_link(&mut ir);
 
-        Some(Interpreter::new(&ir).with_fuel(self.fuel).run_main())
+        // A wall-clock bound beside the fuel (#2611): this runs IN-PROCESS on
+        // the worker thread, where no child-process timeout reaches it. Fuel
+        // alone let `items = items + [x]` run quadratically for over an hour
+        // (seed 578090231174 index 6203) and wedged the shard past its budget
+        // until the job's 90-minute cancel. The deadline answers `Unsupported`,
+        // so the oracle abstains; it is not read as non-termination.
+        Some(
+            Interpreter::new(&ir)
+                .with_fuel(self.fuel)
+                .with_wall_deadline(std::time::Instant::now() + self.wall)
+                .run_main(),
+        )
     }
 }
+
+/// The interpreter's wall-clock budget per program: the native and wasm legs'
+/// own per-run timeout (`DEFAULT_TIMEOUT_SECS`).
+const INTERP_WALL_BUDGET: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl ReferenceOracle for InterpOracle {
     fn evaluate(&self, source: &str) -> Option<String> {
@@ -140,6 +163,32 @@ fn main() -> Unit = {
   println("loop=${seq}")
 }
 "#;
+
+    /// #2611: fuel counts eval steps, and `items = items + [x]` costs O(n) per
+    /// step, so a large fuel budget of it is quadratic work — this shape (seed
+    /// 578090231174 index 6203, a mutated range bound) held a fuzz worker for
+    /// over an hour, in-process, past the campaign deadline. The wall budget
+    /// stops it, and the answer is ABSTAIN on both questions: it is not
+    /// evidence that the program does not terminate.
+    #[test]
+    fn a_quadratic_run_stops_at_the_wall_budget_and_abstains() {
+        const QUADRATIC: &str = r#"
+fn main() -> Unit = {
+  var items: List[Int] = []
+  var i = 0
+  while i < 100000000 {
+    items = items + [i]
+    i = i + 1
+  }
+  println(int.to_string(list.len(items)))
+}
+"#;
+        let oracle = InterpOracle::with_wall(50_000_000, std::time::Duration::from_secs(1));
+        let t = std::time::Instant::now();
+        assert_eq!(oracle.evaluate(QUADRATIC), None);
+        assert!(!oracle.exhausts_fuel(QUADRATIC), "a deadline is not non-termination evidence");
+        assert!(t.elapsed() < std::time::Duration::from_secs(20), "took {:?}", t.elapsed());
+    }
 
     #[test]
     fn non_terminating_loop_exhausts_fuel() {
