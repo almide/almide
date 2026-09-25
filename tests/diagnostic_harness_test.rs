@@ -75,7 +75,9 @@ fn collect_cases() -> Vec<PathBuf> {
     let mut cases = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&root) {
         for entry in entries.flatten() {
-            if entry.file_type().map_or(false, |t| t.is_dir()) {
+            // `silent/` is not a case: it holds the programs that must
+            // check with NO diagnostic (#2149, `diagnostic_silent_test.rs`).
+            if entry.file_type().map_or(false, |t| t.is_dir()) && entry.file_name() != "silent" {
                 cases.push(entry.path());
             }
         }
@@ -456,6 +458,24 @@ fn machine_applicable_fixits_stay_populated() {
     }
     machine.sort();
     eprintln!("machine-applicable fix-its across fixtures: {}", machine.join(", "));
+    // #2149, the reverse half of the coverage test's mechanical-verdict gate:
+    // a code whose doc does NOT declare `**mechanical**` must not hand
+    // `almide fix` an unattended edit — the verdict is the promise the
+    // applicability tag is checked against, in both directions.
+    let docs = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/diagnostics");
+    let unpromised: Vec<&String> = machine.iter()
+        .filter(|entry| {
+            let code = entry.rsplit('[').next().unwrap_or("").trim_end_matches(']');
+            let doc = std::fs::read_to_string(docs.join(format!("{code}.md"))).unwrap_or_default();
+            !doc.split("## Fix-it verdict").nth(1).is_some_and(|v| v.contains("**mechanical**"))
+        })
+        .collect();
+    assert!(
+        unpromised.is_empty(),
+        "machine-applicable repairs on codes whose doc verdict is not `**mechanical**`: {:?} — \
+         either the edit is a decision (use `with_suggested_fix`) or the doc must say mechanical",
+        unpromised
+    );
     assert!(
         machine.len() >= MACHINE_APPLICABLE_FIXTURE_FLOOR,
         "machine-applicable fix-its dropped to {} (floor {}): {:?}",
