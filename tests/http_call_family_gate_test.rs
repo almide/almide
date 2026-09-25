@@ -28,13 +28,16 @@ fn params(s: &FnSig) -> Vec<(String, String)> {
     s.params.iter().map(|(n, t)| (n.to_string(), t.display())).collect()
 }
 
+/// A verb's expected shape: name, (param, type) list, return type.
+type VerbShape = (&'static str, &'static [(&'static str, &'static str)], &'static str);
+
 fn limits() -> (String, String) {
     ("limits".to_string(), "HttpLimits".to_string())
 }
 
 #[test]
 fn the_handle_has_exactly_its_five_verbs() {
-    let expected: &[(&str, &[(&str, &str)], &str)] = &[
+    let expected: &[VerbShape] = &[
         ("poll", &[("c", "HttpCall")], "Option[Result[HttpResponse, String]]"),
         ("read_new", &[("c", "HttpCall")], "String"),
         ("wait", &[("c", "HttpCall")], "Result[HttpResponse, String]"),
