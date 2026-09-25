@@ -172,7 +172,11 @@ schema = 3
 # composition), and the three qwen3_block_* layers (whole fused decoder layers
 # over those kernels plus repeat_kv / per-head norm — their own arc).
 pending_self_host_ceiling = 9
-pending_port_ceiling = 56
+# 2026-09-25 (#2631): 56 -> 64. NEW surface, not a regression: the http call
+# handle (start / poll / read_new / wait / cancel) and the three *_with_limits
+# streaming twins land native-first; each is refused at check time on the
+# wasm target (E081) until the wasi:http pollable port, #2633.
+pending_port_ceiling = 64
 
 # The unprobed class (#1827), per leg. Today: the five HttpRequest
 # accessors (http.query_params / req_body / req_header / req_method /
@@ -802,3 +806,75 @@ reason-stock-p1 = "a wasm trap is uncatchable in-guest, so the panic-catch asser
 reason-structural = "host-surface (native-only-forever)"
 alt = "match on the err arm and assert"
 issue = "#1423"
+
+[[unavailable]]
+fn = "http.anthropic_streaming_call_with_limits"
+legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
+reason-embedded = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-stock-p1 = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-structural = "host-surface"
+issue = "#2633"
+
+[[unavailable]]
+fn = "http.cancel"
+legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
+reason-embedded = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-stock-p1 = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-structural = "host-surface"
+issue = "#2633"
+
+[[unavailable]]
+fn = "http.openai_streaming_call_with_limits"
+legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
+reason-embedded = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-stock-p1 = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-structural = "host-surface"
+issue = "#2633"
+
+[[unavailable]]
+fn = "http.poll"
+legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
+reason-embedded = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-stock-p1 = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-structural = "host-surface"
+issue = "#2633"
+
+[[unavailable]]
+fn = "http.read_new"
+legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
+reason-embedded = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-stock-p1 = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-structural = "host-surface"
+issue = "#2633"
+
+[[unavailable]]
+fn = "http.request_stream_with_limits"
+legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
+reason-embedded = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-stock-p1 = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-structural = "host-surface"
+issue = "#2633"
+
+[[unavailable]]
+fn = "http.start"
+legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
+reason-embedded = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-stock-p1 = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-structural = "host-surface"
+issue = "#2633"
+
+[[unavailable]]
+fn = "http.wait"
+legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
+reason-embedded = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-stock-p1 = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-structural = "host-surface"
+issue = "#2633"
