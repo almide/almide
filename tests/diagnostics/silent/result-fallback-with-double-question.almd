@@ -1,0 +1,5 @@
+// silent (E041 near-miss): a Result given a fallback with `??`.
+fn main() -> Unit = {
+  let n = int.parse("12") ?? 0
+  println(int.to_string(n + 1))
+}

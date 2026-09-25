@@ -1,0 +1,10 @@
+// silent (E010 near-miss): every case of a user variant is matched.
+type Shape = | Circle(Int) | Square(Int) | Dot
+
+fn area(s: Shape) -> Int = match s {
+  Circle(r) => 3 * r * r,
+  Square(w) => w * w,
+  Dot => 0,
+}
+
+fn main() -> Unit = println(int.to_string(area(Square(2)) + area(Dot)))

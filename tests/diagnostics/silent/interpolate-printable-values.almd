@@ -1,0 +1,9 @@
+// silent (E089 near-miss): values with a defined string form interpolate.
+type P = { x: Int, y: Int }
+
+fn main() -> Unit = {
+  let xs = [1, 2]
+  let p = P { x: 1, y: 2 }
+  let o: Int? = some(3)
+  println("${xs} ${p} ${o} ${true} ${1.5}")
+}

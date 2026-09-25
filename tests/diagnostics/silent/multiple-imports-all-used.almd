@@ -1,0 +1,12 @@
+// silent (#2250): several imports, each used — single-file check resolves
+// every one, so there is nothing to report and no stray span.
+import json
+import regex
+import env
+
+effect fn main() -> Unit = {
+  let n = list.len(env.args())
+  let matched = regex.is_match("^a+$", "aaa")
+  let v = json.parse("[${n}]")!
+  println(json.stringify(v) + " " + (if matched then "y" else "n"))
+}

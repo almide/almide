@@ -1,0 +1,7 @@
+// silent (#2607 family): an Option operand under `!` in an Option fn.
+fn bump(m: Map[String, Int], k: String) -> Int? = {
+  let v = m[k]!
+  some(v + 1)
+}
+
+fn main() -> Unit = println(int.to_string(bump(["a": 1], "a") ?? 0))

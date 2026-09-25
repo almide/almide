@@ -1,0 +1,6 @@
+// silent (#2095 / #2093): correct module calls inside `${}` — no caret, no
+// fix-it, no containment suggestion.
+fn main() -> Unit = {
+  let xs = [3, 1, 2]
+  println("sorted: ${list.sort(xs)} len: ${list.len(xs)} up: ${string.to_upper("ab")}")
+}

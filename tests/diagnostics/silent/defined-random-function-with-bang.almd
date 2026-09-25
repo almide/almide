@@ -1,0 +1,8 @@
+// silent (#2096): a real `random` function under `!` — no E002, and no E025
+// cascade on the propagated value.
+import random
+
+effect fn main() -> Unit = {
+  let n = random.int(1, 6)!
+  println(if n >= 1 then "ok" else "no")
+}

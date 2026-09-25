@@ -1,0 +1,8 @@
+// silent (#2093): names that CONTAIN another real name are called by their
+// exact spelling — containment must not suggest the neighbour.
+fn main() -> Unit = {
+  let s = "  Hello  "
+  println(string.trim(s))
+  println(string.trim_start(s))
+  println(string.trim_end(s))
+}

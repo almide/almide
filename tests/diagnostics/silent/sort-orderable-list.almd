@@ -1,0 +1,6 @@
+// silent (E030 near-miss): sorting and max over an orderable element type.
+fn main() -> Unit = {
+  let xs = list.sort(["b", "a", "c"])
+  println(list.join(xs, ","))
+  println(int.to_string(list.max([3, 9, 4]) ?? 0))
+}

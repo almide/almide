@@ -1,0 +1,15 @@
+// silent (#2254): a Result binding inside a lambda body that says what it does
+// with failure (`!`) — the fallible callback instantiates the fallible map.
+import fs
+
+effect fn read_all(paths: List[String]) -> List[String] = {
+  paths |> list.map((p) => {
+    let t = fs.read_text(p)!
+    t
+  })!
+}
+
+effect fn main() -> Unit = {
+  let xs = read_all([])!
+  println(int.to_string(list.len(xs)))
+}

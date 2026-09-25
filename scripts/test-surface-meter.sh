@@ -11,7 +11,7 @@ cd "$ROOT"
 wasm_cross=$(ls spec/wasm_cross/*.almd | wc -l | tr -d ' ')
 other_almd=$(find spec -name '*.almd' | grep -vc wasm_cross)
 test_fns=$(grep -rc '#\[test\]' tests/ crates/ --include='*.rs' 2>/dev/null | awk -F: '{s+=$2} END {print s}')
-diag_pairs=$(ls -d tests/diagnostics/*/ | wc -l | tr -d ' ')
+diag_pairs=$(ls -d tests/diagnostics/*/ | grep -vc '/silent/$')
 walls=$(ls proofs/wall-corpus/*.almd | wc -l | tr -d ' ')
 
 echo "test-surface: wasm_cross=$wasm_cross other_almd=$other_almd test_fns=$test_fns diag_pairs=$diag_pairs walls=$walls"
