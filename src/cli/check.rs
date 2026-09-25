@@ -279,7 +279,7 @@ fn parse_for_json(file: &str) -> (Option<almide::ast::Program>, String, Vec<diag
         let (program, source, errors) = parse_file(file);
         return (Some(program), source, errors);
     }
-    let input = std::fs::read_to_string(file)
+    let input = almide::source_overlay::read_to_string(file)
         .unwrap_or_else(|e| { err(&format!("Error reading {}: {}", file, e)); std::process::exit(1); });
     let tokens = lexer::Lexer::tokenize(&input);
     let mut p = parser::Parser::new(tokens).with_file(file);

@@ -49,7 +49,7 @@ fn record_module_source(ctx: &mut ResolveCtx, name: &str, file_path: &Path, sour
 /// each call site's original wording); `display_label` is the name/path
 /// already formatted the way that call site formatted it.
 fn parse_module_source(kind: &str, display_label: &str, file_path: &Path) -> Result<(ast::Program, String), String> {
-    let source = std::fs::read_to_string(file_path)
+    let source = crate::source_overlay::read_to_string(file_path)
         .map_err(|e| format!("error reading {} '{}': {}", kind, display_label, e))?;
 
     let tokens = lexer::Lexer::tokenize(&source);

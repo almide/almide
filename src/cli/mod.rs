@@ -110,7 +110,7 @@ fn incremental_cache_dir() -> std::path::PathBuf {
 /// (`run.rs`), which had identical copies of this try/fallback logic gated
 /// behind their own (different) `native_verified` conditions.
 pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String) -> String {
-    let source_text = std::fs::read_to_string(file).unwrap_or_default();
+    let source_text = almide::source_overlay::read_to_string(file).unwrap_or_default();
     match almide_mir::pipeline::try_render_rust_source(&source_text) {
         Ok(v1_code) => {
             if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
@@ -226,7 +226,7 @@ fn collect_test_files_entry(path: &std::path::Path, files: &mut Vec<String>) {
         files.extend(collect_test_files(path));
     } else if path.extension().map(|e| e == "almd").unwrap_or(false) {
         // Check if file contains a test block
-        if let Ok(content) = std::fs::read_to_string(path) {
+        if let Ok(content) = almide::source_overlay::read_to_string(path) {
             if content.contains("\ntest ") || content.starts_with("test ") {
                 files.push(path.to_string_lossy().to_string());
             }

@@ -185,6 +185,8 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_SKIP_PASS", Value, Ablation, "skip the named optional passes (comma-separated) — a pass-dependency probe: output must not change"),
     sw("ALMIDE_SKIP_VERSION_CHECK", Flag, Gate, "skip the project's `almide` version requirement check"),
     sw("ALMIDE_STREAM_FUSION_OFF", Flag, Ablation, "turn the stream-fusion pass off"),
+    sw("ALMIDE_SURVIVE_OVERLAY", Value, Route, "set by `almide survive` on its child runs (#2147): every compiler read of this `.almd` path returns the text in `ALMIDE_SURVIVE_OVERLAY_TEXT` instead of the disk bytes, so a proposed edit is judged without being written"),
+    sw("ALMIDE_SURVIVE_OVERLAY_TEXT", Value, Route, "the file holding the proposed text for `ALMIDE_SURVIVE_OVERLAY`; set without it, the overlay refuses to run rather than read the disk file"),
     sw("ALMIDE_TCO_DEBUG", Flag, Dbg, "print the native tail-call loop rewrite decisions"),
     sw("ALMIDE_TEST_LAX_WASM", Flag, Gate, "let the default `almide test` lane (wasm first, native fallback) PASS a file whose wasm leg diverged — trapped where the native re-run passed; without it a diverged leg fails the run"),
     sw("ALMIDE_TEST_VERBOSE", Flag, Tool, "show the full cargo / rustc output of the `almide test` harness build"),
