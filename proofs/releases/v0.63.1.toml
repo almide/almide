@@ -1,0 +1,27 @@
+# Release evidence seal — v0.63.1. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.63.1"
+tag = "v0.63.1"
+tag_commit = "bc0294b4e846662ab1dc0e1ec2b9b9196e46570d"
+date = "2026-09-25"
+url = "https://github.com/almide/almide/releases/tag/v0.63.1"
+
+[derived]
+cargo_version = "0.63.1"
+contracts_sha256 = "0469cea4294d63d81c1802df08aae4eb346f1aee6fca4b426ce98de96fb4b09d"
+contracts_total = "365"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "c953796d0ce50c8afc764afe3e111606e03935378bbdb141948ddd963bbfd797"
+abstain_ledger_entries = "21"
+wasm_cross_fixtures = "781"
+rust_toolchain = "1.94.0"
+wasmtime = "v47.0.3"
+
+[recorded]
+release_gate = "Patch release through the rc channel (#1484): rc1 (f781e9b7d, #2623), rc2 (8ea96f5f3, #2626), rc3 (bc0294b4e, #2629). The final is tagged on the rc3 commit itself, tree-identical to develop 0eca44ffe. Carries the four wasm-leg defects the almide-dojo 400-task bank found on v0.63.0 (#2613 regression -> #2617, #2614 -> #2619, #2615 -> #2620, #2616 -> #2621), the two cross-target findings the rc soaks recorded (#2624 softmax non-finite rows + MHA exp -> #2625; #2627 zero-row matrix shape -> #2628; both pre-date 0.63.0), and the float printer work (#2590, #2602). Blocker gate at the tag: 0 (#1482). Interface diff v0.63.0 -> v0.63.1: identical (added=0 removed=0; #1488). Tag-tree CI: release PR #2629 — every required check green, full mutation sweep green on 0eca44ffe. Bank gate on this code (develop 3b32adcc9 before the soak fixes, which touch only matrix/softmax paths): 400 tasks, 400 rendered on wasm, 0 skipped, resource oracle armed — OK (v0.63.0 failed 3). Fuzz soaks on the candidate tags, summed from shard job logs: rc1 run 36013785690 60,663 programs (findings: #2624 + one Slow not-a-regression); rc2 run 36051987508 46,674 programs over 8/8 shards (finding: #2627); rc3 run 36073336030 23,405 programs over 7/8 readable shards, 0 findings (many shards preempted; one runner lost, #2611)."
+assets = "7: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256, almide-dossier-v0.63.1.md"
+known_problems = "None release-blocking. Standing: (1) #2599, #2600, #2601, #2606 — checker-accepts / rustc-rejects shapes present since 0.62 (both targets refuse, none miscomputes); #2607 diagnostic wording; (2) #2608 — almide test's native worker cache has no size bound; (3) #2611 — the fuzz-night verdict under-counts preempted shards, and hosted-runner shards die after a stall, so the rc3 soak is thinner than planned; (4) #2615 has no dedicated contract: 'no time limit on almide run' is pinned by tests/wasm_run_no_time_limit_test.rs only (a new contract must land in almide/als first); (5) C-223's statement names neither the non-finite softmax-row rule nor MHA's use of musl exp; they are pinned by fixture evidence and docs/stdlib/matrix.md."
