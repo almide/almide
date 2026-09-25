@@ -1,0 +1,102 @@
+{
+  "check": {
+    "newly_broken": [
+      {
+        "after": {
+          "applicability": "machine-applicable",
+          "code": "E031",
+          "col": 13,
+          "context": "range expression",
+          "end_col": 15,
+          "file": "sum.almd",
+          "here": null,
+          "hint": "run `almide fix` on this file to migrate every range mechanically",
+          "level": "error",
+          "line": 3,
+          "message": "'..' was retired: end-exclusive ranges are written '..<'",
+          "repair": {
+            "alternatives": [],
+            "example": null,
+            "primary": {
+              "applicability": "machine-applicable",
+              "col": 13,
+              "end_col": 15,
+              "line": 3,
+              "replacement": "..<"
+            }
+          },
+          "secondary": [],
+          "suggestions": [
+            {
+              "applicability": "machine-applicable",
+              "col": 13,
+              "end_col": 15,
+              "line": 3,
+              "replacement": "..<"
+            }
+          ],
+          "try": "..<",
+          "try_replace": {
+            "col": 13,
+            "end_col": 15,
+            "line": 3
+          }
+        },
+        "before": null,
+        "checked": "sum.almd"
+      }
+    ],
+    "newly_fixed": [],
+    "removed": [],
+    "unchanged": []
+  },
+  "contracts": {
+    "newly_broken": [],
+    "newly_fixed": [],
+    "removed": [],
+    "unchanged": []
+  },
+  "edit": {
+    "kind": "patch",
+    "lines_after": 7,
+    "lines_before": 7
+  },
+  "file": "sum.almd",
+  "reach": {
+    "checked": [
+      "sum.almd"
+    ],
+    "contracts": [],
+    "root": ".",
+    "tests": []
+  },
+  "schema_version": 1,
+  "summary": {
+    "check": {
+      "newly_broken": 1,
+      "newly_fixed": 0,
+      "removed": 0,
+      "unchanged": 0
+    },
+    "contracts": {
+      "newly_broken": 0,
+      "newly_fixed": 0,
+      "removed": 0,
+      "unchanged": 0
+    },
+    "tests": {
+      "newly_broken": 0,
+      "newly_fixed": 0,
+      "removed": 0,
+      "unchanged": 0
+    }
+  },
+  "survives": false,
+  "tests": {
+    "newly_broken": [],
+    "newly_fixed": [],
+    "removed": [],
+    "unchanged": []
+  },
+  "written": false
+}

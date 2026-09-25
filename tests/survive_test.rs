@@ -10,7 +10,10 @@
 //! - `fixes_diagnostic` — a full-text edit that fixes one error and inserts a
 //!   line above another, which must stay the SAME diagnostic (line 5 → 6);
 //! - `neutral`          — a patch that only inserts a comment: every
-//!   diagnostic and test is unchanged, the warning renumbered 2 → 4.
+//!   diagnostic and test is unchanged, the warning renumbered 2 → 4;
+//! - `breaks_diagnostic` — a patch that reintroduces the retired `..` range:
+//!   one `newly_broken` E031 whose `repair` (#2149) reaches the report
+//!   verbatim, because survive carries `check --json`'s object untouched.
 //!
 //! Every run happens in a scratch copy, so a regression that writes cannot
 //! dirty the repository — and the no-write test proves it does not.
@@ -24,8 +27,9 @@ fn almide() -> &'static str {
 }
 
 /// (fixture dir, edited file, edit file)
-const CASES: [(&str, &str, &str); 3] = [
+const CASES: [(&str, &str, &str); 4] = [
     ("breaks_test", "calc.almd", "edit.patch"),
+    ("breaks_diagnostic", "sum.almd", "edit.patch"),
     ("fixes_diagnostic", "shapes.almd", "edit.txt"),
     ("neutral", "greet.almd", "edit.patch"),
 ];
@@ -88,6 +92,23 @@ fn the_three_golden_deltas_match() {
         assert_eq!(code, want_code, "{case}: exit code follows the verdict\n{raw}");
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// The `repair` field of #2149 is not survive's: it is whatever `almide check
+/// --json` printed, carried through `newly_broken` untouched.
+#[test]
+fn a_newly_broken_diagnostic_carries_its_repair_verbatim() {
+    let dir = scratch_copy("breaks_diagnostic", "repair");
+    let (_, got, raw) = run(&dir, &["survive", "sum.almd", "--with", "edit.patch", "--json"]);
+    let broken = &got["check"]["newly_broken"][0]["after"];
+    assert_eq!(broken["code"], "E031", "{raw}");
+    assert_eq!(broken["repair"]["primary"]["replacement"], "..<", "{raw}");
+    let (_, check_row, raw2) = {
+        std::fs::write(dir.join("sum.almd"), std::fs::read_to_string(dir.join("sum.almd")).unwrap().replace("0..<k", "0..k")).unwrap();
+        run(&dir, &["check", "sum.almd", "--json"])
+    };
+    assert_eq!(&check_row, broken, "survive must carry check --json's object as-is\n{raw2}");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
