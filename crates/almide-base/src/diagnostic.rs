@@ -116,6 +116,90 @@ impl Applicability {
     }
 }
 
+/// One span-exact edit: `replacement` replaces the source range
+/// `[line:col..line:end_col)` verbatim (1-indexed chars, `end_col`
+/// exclusive — the `at_span` convention). An empty `replacement` is a
+/// deletion, `col == end_col` an insertion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepairEdit {
+    pub line: usize,
+    pub col: usize,
+    pub end_col: usize,
+    pub replacement: String,
+    /// Whether an unattended fixer may apply it. Only
+    /// `MachineApplicable` ever is (`Diagnostic::machine_fix`).
+    pub applicability: Applicability,
+}
+
+impl RepairEdit {
+    /// Splice this edit into `source`. `None` when the span does not name
+    /// real text in it (line or column out of bounds, inverted range) —
+    /// a fixer drops such an edit rather than forcing it.
+    pub fn apply_to(&self, source: &str) -> Option<String> {
+        let (line, col, end_col) = (self.line, self.col, self.end_col);
+        if line == 0 || col == 0 || end_col < col { return None; }
+        // Locate the byte range of `line` (1-indexed) within `source`.
+        let mut line_start = 0usize;
+        let mut cur_line = 1usize;
+        for (i, b) in source.bytes().enumerate() {
+            if cur_line == line { break; }
+            if b == b'\n' {
+                cur_line += 1;
+                line_start = i + 1;
+            }
+        }
+        if cur_line != line { return None; }
+        let line_tail = &source[line_start..];
+        let line_end = line_tail.find('\n').map(|i| line_start + i).unwrap_or(source.len());
+        let line_slice = &source[line_start..line_end];
+        // Byte offset of the `target`-th char within `line_slice`
+        // (1-indexed). Accepts `target = char_count + 1` as the
+        // exclusive end-of-line marker.
+        let col_to_byte = |target: usize| -> Option<usize> {
+            match line_slice.char_indices().nth(target - 1) {
+                Some((b, _)) => Some(b),
+                None => {
+                    let n = line_slice.chars().count();
+                    if target == n + 1 { Some(line_slice.len()) } else { None }
+                }
+            }
+        };
+        let start_off = line_start + col_to_byte(col)?;
+        let end_off = line_start + col_to_byte(end_col)?;
+        if end_off < start_off || end_off > line_end { return None; }
+        let mut out = String::with_capacity(source.len() + self.replacement.len());
+        out.push_str(&source[..start_off]);
+        out.push_str(&self.replacement);
+        out.push_str(&source[end_off..]);
+        Some(out)
+    }
+}
+
+/// The structured repair a diagnostic carries (#2149): the prose `hint`
+/// says WHY, this says WHAT TO WRITE, in a form a fixer, an editor or a
+/// model's retry loop can consume without parsing prose.
+///
+/// - `primary` — the one span-exact edit the diagnostic stands behind. Its
+///   `applicability` says whether `almide fix` applies it unattended: every
+///   code whose doc declares `## Fix-it verdict` **mechanical** must reach
+///   `MachineApplicable` here (`tests/diagnostic_coverage_test.rs` fails
+///   otherwise).
+/// - `alternatives` — further span-exact edits, each a different reading of
+///   the author's intent. Never machine-applicable: choosing among them is
+///   the decision a fixer must not make.
+/// - `example` — a display-only snippet (placeholders allowed) when no
+///   span-exact edit exists — the `try:` row with nothing to apply.
+///
+/// Written only through the builders (`with_machine_fix`,
+/// `with_suggested_fix`, `with_alternative`, `with_try`), which also keep
+/// the legacy flat `try_*` fields in step for the consumers that predate it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Repair {
+    pub primary: Option<RepairEdit>,
+    pub alternatives: Vec<RepairEdit>,
+    pub example: Option<String>,
+}
+
 /// A secondary source location with a label (e.g. "declared as Int here").
 #[derive(Debug, Clone)]
 pub struct SecondarySpan {
@@ -180,6 +264,13 @@ pub struct Diagnostic {
     /// error; the hint stays the one actionable line. Empty for every
     /// diagnostic that predates the field, so their rendering is unchanged.
     pub notes: Vec<String>,
+    /// The structured repair (#2149) — see [`Repair`]. The source of truth
+    /// for every fix-it: `machine_fix`, `apply_try_to`, `almide fix`, the LSP
+    /// code action and the `--json` `repair` object all read this field. The
+    /// three `try_*` fields above are its legacy flat mirror (kept because
+    /// almide/playground and the `try` / `try_replace` JSON keys read them),
+    /// written in the same builder call so the two cannot disagree.
+    pub repair: Option<Repair>,
 }
 
 impl Diagnostic {
@@ -190,7 +281,7 @@ impl Diagnostic {
             file: None, line: None, col: None, end_col: None, secondary: Vec::new(),
             try_snippet: None, here_snippet: None, try_replace_span: None,
             try_applicability: Applicability::Unspecified,
-            notes: Vec::new(),
+            notes: Vec::new(), repair: None,
         }
     }
 
@@ -201,7 +292,7 @@ impl Diagnostic {
             file: None, line: None, col: None, end_col: None, secondary: Vec::new(),
             try_snippet: None, here_snippet: None, try_replace_span: None,
             try_applicability: Applicability::Unspecified,
-            notes: Vec::new(),
+            notes: Vec::new(), repair: None,
         }
     }
 
@@ -220,7 +311,41 @@ impl Diagnostic {
     /// Applicability stays `Unspecified`: nothing applies a snippet that
     /// does not say which bytes it replaces.
     pub fn with_try(mut self, snippet: impl Into<String>) -> Self {
-        self.try_snippet = Some(snippet.into());
+        let s = snippet.into();
+        self.try_snippet = Some(s.clone());
+        self.repair.get_or_insert_with(Repair::default).example = Some(s);
+        self
+    }
+
+    /// Drop the `try:` row and its repair entirely — for a diagnostic whose
+    /// generic snippet would mislead in a shape the emitter recognised late.
+    pub fn clear_try(&mut self) {
+        self.try_snippet = None;
+        self.try_replace_span = None;
+        self.try_applicability = Applicability::Unspecified;
+        self.repair = None;
+    }
+
+    /// Attach a further span-exact edit that is a DIFFERENT reading of the
+    /// author's intent (#2149 `repair.alternatives`). Always
+    /// `MaybeIncorrect`: choosing among readings is the decision an
+    /// unattended fixer must not make. A guessed span (line/col 0, inverted
+    /// range) is refused, as in `with_fix_at`.
+    pub fn with_alternative(
+        mut self,
+        line: usize,
+        col: usize,
+        end_col: usize,
+        replacement: impl Into<String>,
+    ) -> Self {
+        if line == 0 || col == 0 || end_col < col {
+            return self;
+        }
+        self.repair.get_or_insert_with(Repair::default).alternatives.push(RepairEdit {
+            line, col, end_col,
+            replacement: replacement.into(),
+            applicability: Applicability::MaybeIncorrect,
+        });
         self
     }
 
@@ -275,12 +400,17 @@ impl Diagnostic {
         applicability: Applicability,
     ) -> Self {
         let s = snippet.into();
+        let repair = self.repair.get_or_insert_with(Repair::default);
         if line == 0 || col == 0 || end_col < col {
+            repair.primary = None;
+            repair.example = Some(s.clone());
             self.try_snippet = Some(s);
             self.try_replace_span = None;
             self.try_applicability = Applicability::Unspecified;
             return self;
         }
+        repair.primary = Some(RepairEdit { line, col, end_col, replacement: s.clone(), applicability });
+        repair.example = None;
         self.try_replace_span = Some((line, col, end_col));
         self.try_snippet = Some(s);
         self.try_applicability = applicability;
@@ -292,54 +422,24 @@ impl Diagnostic {
     /// at `try_replace_span` directly, so an untagged fix-it cannot leak
     /// into an unattended rewrite.
     pub fn machine_fix(&self) -> Option<(usize, usize, usize, &str)> {
-        if !self.try_applicability.is_machine_applicable() { return None; }
-        let (line, col, end_col) = self.try_replace_span?;
-        Some((line, col, end_col, self.try_snippet.as_deref()?))
+        let p = self.primary_edit()?;
+        if !p.applicability.is_machine_applicable() { return None; }
+        Some((p.line, p.col, p.end_col, p.replacement.as_str()))
     }
 
-    /// Apply `try_snippet` to `source` at `try_replace_span`, returning
-    /// the rewritten source. `None` when either field is missing or the
-    /// span can't be located (out-of-bounds line / col). Callers verify
+    /// `repair.primary`, or `None` when the diagnostic states no span-exact
+    /// edit.
+    pub fn primary_edit(&self) -> Option<&RepairEdit> {
+        self.repair.as_ref()?.primary.as_ref()
+    }
+
+    /// Apply `repair.primary` to `source`, returning the rewritten source.
+    /// `None` when there is no span-exact edit or its span can't be located
+    /// (out-of-bounds line / col). Callers verify
     /// the result compiles — the diagnostic author's job is to emit a
     /// range whose replacement produces valid Almide code.
     pub fn apply_try_to(&self, source: &str) -> Option<String> {
-        let snippet = self.try_snippet.as_ref()?;
-        let (line, col, end_col) = self.try_replace_span?;
-        if line == 0 || col == 0 || end_col < col { return None; }
-        // Locate the byte range of `line` (1-indexed) within `source`.
-        let mut line_start = 0usize;
-        let mut cur_line = 1usize;
-        for (i, b) in source.bytes().enumerate() {
-            if cur_line == line { break; }
-            if b == b'\n' {
-                cur_line += 1;
-                line_start = i + 1;
-            }
-        }
-        if cur_line != line { return None; }
-        let line_tail = &source[line_start..];
-        let line_end = line_tail.find('\n').map(|i| line_start + i).unwrap_or(source.len());
-        let line_slice = &source[line_start..line_end];
-        // Byte offset of the `target`-th char within `line_slice`
-        // (1-indexed). Accepts `target = char_count + 1` as the
-        // exclusive end-of-line marker.
-        let col_to_byte = |target: usize| -> Option<usize> {
-            match line_slice.char_indices().nth(target - 1) {
-                Some((b, _)) => Some(b),
-                None => {
-                    let n = line_slice.chars().count();
-                    if target == n + 1 { Some(line_slice.len()) } else { None }
-                }
-            }
-        };
-        let start_off = line_start + col_to_byte(col)?;
-        let end_off = line_start + col_to_byte(end_col)?;
-        if end_off < start_off || end_off > line_end { return None; }
-        let mut out = String::with_capacity(source.len() + snippet.len());
-        out.push_str(&source[..start_off]);
-        out.push_str(snippet);
-        out.push_str(&source[end_off..]);
-        Some(out)
+        self.primary_edit()?.apply_to(source)
     }
 
     /// Attach an inline source snippet — the `here:` line of the
@@ -551,6 +651,50 @@ mod apply_try_tests {
             assert!(d.machine_fix().is_none());
             assert_eq!(d.try_snippet.as_deref(), Some("boom"), "snippet must survive for display");
         }
+    }
+
+    // ── #2149: the structured repair ──────────────────────────────
+
+    #[test]
+    fn a_span_fix_is_the_repair_primary_and_mirrors_the_flat_fields() {
+        let d = Diagnostic::error("e", "h", "c").with_machine_fix(1, 4, 5, "not ");
+        let p = d.primary_edit().expect("primary");
+        assert_eq!((p.line, p.col, p.end_col, p.replacement.as_str()), (1, 4, 5, "not "));
+        assert_eq!(p.applicability, Applicability::MachineApplicable);
+        assert_eq!(d.repair.as_ref().unwrap().example, None);
+        // The legacy flat view says the same thing.
+        assert_eq!(d.try_replace_span, Some((1, 4, 5)));
+        assert_eq!(d.try_snippet.as_deref(), Some("not "));
+        assert_eq!(d.try_applicability, Applicability::MachineApplicable);
+    }
+
+    #[test]
+    fn a_display_only_try_is_an_example_with_no_primary() {
+        let d = Diagnostic::error("e", "h", "c").with_try("xs |> list.map(f)");
+        let r = d.repair.as_ref().expect("repair");
+        assert!(r.primary.is_none());
+        assert_eq!(r.example.as_deref(), Some("xs |> list.map(f)"));
+        assert!(d.machine_fix().is_none());
+    }
+
+    #[test]
+    fn alternatives_are_never_machine_applicable_and_never_applied() {
+        let d = Diagnostic::error("e", "h", "c")
+            .with_suggested_fix(1, 1, 4, "foo")
+            .with_alternative(1, 1, 4, "bar")
+            .with_alternative(0, 1, 4, "guessed");
+        let r = d.repair.as_ref().unwrap();
+        assert_eq!(r.alternatives.len(), 1, "a guessed span is refused");
+        assert_eq!(r.alternatives[0].applicability, Applicability::MaybeIncorrect);
+        assert!(d.machine_fix().is_none());
+    }
+
+    #[test]
+    fn clear_try_drops_the_repair_with_the_row() {
+        let mut d = Diagnostic::error("e", "h", "c").with_machine_fix(1, 4, 5, "not ");
+        d.clear_try();
+        assert!(d.repair.is_none() && d.try_snippet.is_none() && d.try_replace_span.is_none());
+        assert!(d.machine_fix().is_none());
     }
 
     #[test]
