@@ -4,7 +4,7 @@ Wires two servers that ship inside the `almide` binary into a Claude Code
 session:
 
 - **MCP** (`almide mcp`) — `almide_check`, `almide_test`, `almide_api`,
-  `almide_explain`, `almide_fmt_check`
+  `almide_explain`, `almide_fmt_check`, `almide_survive`
 - **LSP** (`almide lsp`) — code intelligence for `.almd`
 
 The plugin configures the servers; it does not install the binary. Put `almide`

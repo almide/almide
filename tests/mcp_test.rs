@@ -88,19 +88,43 @@ fn initialize_reports_tools_capability_and_server_identity() {
 }
 
 #[test]
-fn tools_list_is_the_five_named_tools_and_only_test_declares_a_side_effect() {
+fn tools_list_is_the_six_named_tools_and_only_the_test_runners_declare_a_side_effect() {
     let responses = mcp_session(&[init(), json!({"jsonrpc":"2.0","id":2,"method":"tools/list"})]);
     let tools = responses[1]["result"]["tools"].as_array().expect("tools");
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert_eq!(
         names,
-        vec!["almide_check", "almide_test", "almide_api", "almide_explain", "almide_fmt_check"]
+        vec!["almide_check", "almide_test", "almide_api", "almide_explain", "almide_fmt_check", "almide_survive"]
     );
     for t in tools {
         assert!(t["inputSchema"]["properties"].is_object(), "{}", t["name"]);
         let read_only = t["annotations"]["readOnlyHint"].as_bool().unwrap_or(false);
-        assert_eq!(read_only, t["name"] != "almide_test", "{}", t["name"]);
+        assert_eq!(read_only, t["name"] != "almide_test" && t["name"] != "almide_survive", "{}", t["name"]);
     }
+}
+
+/// `almide_survive` (#2147): the edit reaches the CLI over stdin, the report
+/// comes back verbatim, and the file on disk is untouched.
+#[test]
+fn survive_reports_the_delta_of_an_edit_without_writing_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let before = "fn label(n: Int) -> String = n\n";
+    let file = write_temp(dir.path(), "label.almd", before);
+    let responses = mcp_session(&[
+        init(),
+        call(2, "almide_survive", json!({
+            "file": file,
+            "edit": "fn label(n: Int) -> String = int.to_string(n)\n",
+        })),
+    ]);
+    let report = payload(&responses[1]);
+    assert_eq!(report["schema_version"], 1, "{}", report);
+    assert_eq!(report["survives"], true, "{}", report);
+    assert_eq!(report["edit"]["kind"], "full_text", "{}", report);
+    let fixed = report["check"]["newly_fixed"].as_array().expect("newly_fixed");
+    assert_eq!(fixed.len(), 1, "{}", report);
+    assert_eq!(fixed[0]["before"]["code"], "E001", "{}", report);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), before, "almide_survive wrote the file");
 }
 
 #[test]

@@ -16,8 +16,9 @@
 //! this server exists to remove.
 //!
 //! **Read-only.** No tool here writes a source file. `fmt` is exposed only in
-//! its `--check` form; the writing forms (`almide fmt`, `almide fix`) stay on
-//! the CLI, where the edit is visible in the agent's own transcript.
+//! its `--check` form; the writing forms (`almide fmt`, `almide fix`,
+//! `almide apply`) stay on the CLI, where the edit is visible in the agent's
+//! own transcript. `almide_survive` judges an edit without writing it.
 
 use serde_json::{json, Value};
 
@@ -35,15 +36,37 @@ struct CliRun {
 /// would get from the shell, and a compiler panic on a malformed input kills a
 /// subprocess instead of the session.
 fn run_cli(args: &[String], cwd: Option<&str>) -> Result<CliRun, String> {
+    run_cli_with_stdin(args, cwd, None)
+}
+
+/// [`run_cli`] with `stdin` fed to the child (the proposed edit of
+/// `almide_survive`, which the CLI reads from `--with -`).
+fn run_cli_with_stdin(args: &[String], cwd: Option<&str>, stdin: Option<&str>) -> Result<CliRun, String> {
+    use std::io::Write;
     let exe = std::env::current_exe()
         .map_err(|e| format!("cannot locate the almide binary: {}", e))?;
     let mut cmd = std::process::Command::new(exe);
-    cmd.args(args);
+    cmd.args(args)
+        .stdin(if stdin.is_some() { std::process::Stdio::piped() } else { std::process::Stdio::null() })
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
     }
-    let out = cmd
-        .output()
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("failed to run `almide {}`: {}", args.join(" "), e))?;
+    if let Some(text) = stdin {
+        // Written from a thread: a child that fills its stdout pipe before
+        // draining stdin would otherwise deadlock against this write.
+        let mut pipe = child.stdin.take().expect("piped stdin");
+        let text = text.to_string();
+        std::thread::spawn(move || {
+            let _ = pipe.write_all(text.as_bytes());
+        });
+    }
+    let out = child
+        .wait_with_output()
         .map_err(|e| format!("failed to run `almide {}`: {}", args.join(" "), e))?;
     Ok(CliRun {
         exit_code: out.status.code().unwrap_or(-1),
@@ -250,6 +273,29 @@ fn tool_fmt_check(args: &Value) -> Result<Value, String> {
     Ok(obj)
 }
 
+/// `almide survive <file> --with - --json` → the survival delta of a proposed
+/// edit, verbatim: the report `survive` prints (`schema_version`, `survives`,
+/// and `{unchanged, newly_broken, newly_fixed, removed}` per check / tests /
+/// contracts). The edit is handed over on stdin; the file is never written.
+fn tool_survive(args: &Value) -> Result<Value, String> {
+    let file = require_str(args, "file")?;
+    let edit = require_str(args, "edit")?;
+    let mut argv: Vec<String> = vec!["survive".into(), file.clone(), "--with".into(), "-".into(), "--json".into()];
+    if let Some(kind) = arg_str(args, "kind") {
+        argv.push("--as".into());
+        argv.push(kind);
+    }
+    let cwd = arg_str(args, "cwd");
+    let run = run_cli_with_stdin(&argv, cwd.as_deref(), Some(&edit))?;
+    let report: Value = serde_json::from_str(run.stdout.trim()).map_err(|_| {
+        format!("almide survive produced no JSON report (exit {}): {}", run.exit_code, run.stderr.trim())
+    })?;
+    if let Some(e) = report.get("error").and_then(|e| e.as_str()) {
+        return Err(e.to_string());
+    }
+    Ok(report)
+}
+
 /// Dispatch a `tools/call`. `Err` becomes an MCP tool error (`isError: true`),
 /// which is what an agent should see for "the compiler said no" — as opposed to
 /// a protocol error, which means the request itself was malformed.
@@ -260,6 +306,7 @@ pub fn call(name: &str, args: &Value) -> Result<Value, String> {
         "almide_api" => tool_api(args),
         "almide_explain" => tool_explain(args),
         "almide_fmt_check" => tool_fmt_check(args),
+        "almide_survive" => tool_survive(args),
         _ => Err(format!(
             "unknown tool `{}` — call tools/list for the catalog",
             name
@@ -360,7 +407,25 @@ fn tool_fmt_check_def() -> Value {
     })
 }
 
-/// The `tools/list` catalog. Five tools, each one a surface the CLI already
+fn tool_survive_def() -> Value {
+    json!({
+        "name": "almide_survive",
+        "title": "Judge an edit before writing it",
+        "description": "Apply a proposed edit IN MEMORY and report what it would change: check diagnostics, the tests that reach the file, and its contract fixtures, each bucketed {unchanged, newly_broken, newly_fixed, removed}, plus `survives` (no newly broken error, test or contract). `edit` is a unified diff or the file's full new text. The file is never written; like almide_test it compiles and runs tests (build artifacts under the system temp dir). Runs `almide survive --with - --json`.",
+        "inputSchema": obj_schema(
+            json!({
+                "file": { "type": "string", "description": "The .almd file the edit is to" },
+                "edit": { "type": "string", "description": "A unified diff against the file, or the file's complete new text" },
+                "kind": { "type": "string", "enum": ["auto", "patch", "text"], "description": "How to read `edit` (default auto: a diff if it starts `--- ` or `@@ `)" },
+                "cwd": cwd_prop(),
+            }),
+            json!(["file", "edit"]),
+        ),
+        "annotations": json!({ "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false }),
+    })
+}
+
+/// The `tools/list` catalog. Six tools, each one a surface the CLI already
 /// answers in a machine-readable form.
 pub fn catalog() -> Value {
     json!([
@@ -369,6 +434,7 @@ pub fn catalog() -> Value {
         tool_api_def(),
         tool_explain_def(),
         tool_fmt_check_def(),
+        tool_survive_def(),
     ])
 }
 
@@ -380,7 +446,7 @@ mod tests {
     fn catalog_entries_are_well_formed() {
         let tools = catalog();
         let tools = tools.as_array().expect("catalog is an array");
-        assert_eq!(tools.len(), 5, "keep the tool count small and deliberate");
+        assert_eq!(tools.len(), 6, "keep the tool count small and deliberate");
         for t in tools {
             let name = t["name"].as_str().expect("name");
             assert!(name.starts_with("almide_"), "{} is not namespaced", name);
@@ -392,11 +458,11 @@ mod tests {
     }
 
     #[test]
-    fn only_the_test_tool_declares_a_side_effect() {
+    fn only_the_tools_that_run_tests_declare_a_side_effect() {
         let tools = catalog();
         for t in tools.as_array().unwrap() {
             let read_only = t["annotations"]["readOnlyHint"].as_bool().unwrap_or(false);
-            let expect_read_only = t["name"] != "almide_test";
+            let expect_read_only = t["name"] != "almide_test" && t["name"] != "almide_survive";
             assert_eq!(read_only, expect_read_only, "{}", t["name"]);
         }
     }
