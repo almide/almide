@@ -38,9 +38,11 @@ structured results, so nothing has to be parsed out of rendered text.
 - almide_explain what a diagnostic code means and the sanctioned fix
 - almide_test    run the .almd test blocks (compiles and executes)
 - almide_fmt_check  which files are not formatted (never rewrites)
+- almide_survive would this edit survive? check/test/contract delta, BEFORE writing
 
-Write operations are deliberately absent: run `almide fmt` / `almide fix` in a \
-shell when you intend to change files.";
+Write operations are deliberately absent: judge an edit with almide_survive, then \
+run `almide apply --if-survives` / `almide fmt` / `almide fix` in a shell when you \
+intend to change files.";
 
 /// Read newline-delimited JSON-RPC from stdin until EOF, answering each
 /// request on stdout. Returns when the client closes the pipe.
