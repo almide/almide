@@ -249,3 +249,102 @@ effect fn openai_streaming_call(base_url: String, api_key: String, body_json: St
 /// Streams Anthropic Messages; LLM-response JSON.
 @intrinsic("almide_rt_sse_anthropic_messages")
 effect fn anthropic_streaming_call(api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> Result[String, String] = _
+
+// ── Call handle and per-call limits (#2631) ──
+//
+// `start` returns at once with an `HttpCall`; a runtime thread does the
+// exchange. `poll` and `read_new` never block, `wait` blocks until the call
+// ends (bounded by its limits), `cancel` closes the connection — and so does
+// dropping the last copy of the handle. Limits are per call, in ms, 0 = no
+// limit: `total_ms` is a wall clock from `start` (dial, first byte and body
+// all count), `idle_ms` the longest gap between bytes (the wait for the first
+// byte counts). A fired limit is `err("request timeout: total_ms <n>
+// exceeded")` / `err("request timeout: idle_ms <n> exceeded")`; a cancelled
+// call is `err("request cancelled")`. ALMIDE_HTTP_TIMEOUT_SECS stays the
+// default of the calls that take no limits.
+//
+// FAMILY RULE (machine-checked by tests/http_call_family_gate_test.rs): the
+// handle has exactly the five verbs start / poll / read_new / wait / cancel,
+// and every streaming client — request_stream, openai_streaming_call,
+// anthropic_streaming_call — has exactly one `<name>_with_limits` twin: the
+// same parameters with `limits: HttpLimits` inserted before the callback, the
+// same return type, built on the handle. Intentional omissions: the one-shot
+// clients (get / request / *_response / *_status / *_bytes) get no twin —
+// `start` + `wait` is their limited form, answering the `request_response`
+// record.
+/// Per-call limits in ms; 0 = no limit.
+type HttpLimits = { total_ms: Int, idle_ms: Int }
+
+/// Begins a request; returns at once with a handle.
+effect fn start(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits) -> Result[HttpCall, String] = __call_start(
+  method,
+  url,
+  body,
+  headers,
+  limits.total_ms,
+  limits.idle_ms,
+)
+
+@intrinsic("almide_rt_http___call_start")
+@borrow_ref(headers)
+effect fn __call_start(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = _
+
+/// Never blocks: none while running, then the result.
+@intrinsic("almide_http_call_poll")
+@borrow_ref(c)
+effect fn poll(c: HttpCall) -> Result[HttpResponse, String]? = _
+
+/// Body text since the last read_new; never blocks.
+@intrinsic("almide_http_call_read_new")
+@borrow_ref(c)
+effect fn read_new(c: HttpCall) -> String = _
+
+/// Blocks until the call ends; any status is ok.
+@intrinsic("almide_http_call_wait")
+@borrow_ref(c)
+effect fn wait(c: HttpCall) -> Result[HttpResponse, String] = _
+
+/// Closes the connection; the call ends as err.
+@intrinsic("almide_http_call_cancel")
+@borrow_ref(c)
+effect fn cancel(c: HttpCall) -> Unit = _
+
+/// request_stream bounded by per-call limits.
+effect fn request_stream_with_limits(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits, on_chunk: (String) -> Unit) -> Result[Unit, String] = __request_stream_limited(
+  method,
+  url,
+  body,
+  headers,
+  limits.total_ms,
+  limits.idle_ms,
+  on_chunk,
+)
+
+@intrinsic("almide_rt_http___request_stream_limited")
+@borrow_ref(headers)
+effect fn __request_stream_limited(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int, on_chunk: (String) -> Unit) -> Result[Unit, String] = _
+
+/// openai_streaming_call bounded by per-call limits.
+effect fn openai_streaming_call_with_limits(base_url: String, api_key: String, body_json: String, limits: HttpLimits, on_text_delta: (String) -> Unit) -> Result[String, String] = __openai_streaming_limited(
+  base_url,
+  api_key,
+  body_json,
+  limits.total_ms,
+  limits.idle_ms,
+  on_text_delta,
+)
+
+@intrinsic("almide_rt_http___openai_streaming_limited")
+effect fn __openai_streaming_limited(base_url: String, api_key: String, body_json: String, total_ms: Int, idle_ms: Int, on_text_delta: (String) -> Unit) -> Result[String, String] = _
+
+/// anthropic_streaming_call bounded by per-call limits.
+effect fn anthropic_streaming_call_with_limits(api_key: String, body_json: String, limits: HttpLimits, on_text_delta: (String) -> Unit) -> Result[String, String] = __anthropic_streaming_limited(
+  api_key,
+  body_json,
+  limits.total_ms,
+  limits.idle_ms,
+  on_text_delta,
+)
+
+@intrinsic("almide_rt_http___anthropic_streaming_limited")
+effect fn __anthropic_streaming_limited(api_key: String, body_json: String, total_ms: Int, idle_ms: Int, on_text_delta: (String) -> Unit) -> Result[String, String] = _

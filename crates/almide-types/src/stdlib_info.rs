@@ -78,6 +78,9 @@ pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
 pub const RUNTIME_BACKED_TYPES: &[(&str, &str)] = &[
     ("http", "HttpRequest"),
     ("http", "HttpResponse"),
+    // The in-flight call of `http.start` (#2631): a shared handle whose last
+    // copy going away cancels the call.
+    ("http", "HttpCall"),
     // The opaque path handle of `json.root()`/`json.field(...)` — self-hosted
     // as a `List[String]` newtype, still spelled `JsonPath` in signatures.
     ("json", "JsonPath"),
@@ -115,8 +118,10 @@ pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
     ("value", "Value"),
     ("http", "HttpRequest"),
     ("http", "HttpResponse"),
+    ("http", "HttpCall"),
     ("json", "JsonPath"),
     ("bytes", "Endian"),
+    ("http", "HttpLimits"),
     ("fs", "FileStat"),
     ("html", "SafeHtml"),
     ("net", "TcpListener"),
