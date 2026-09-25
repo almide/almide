@@ -1,7 +1,11 @@
 # Almide Diagnostic Codes
 
 Reference for `EXXX` codes emitted by the checker and canonicalizer.
-Use `almide explain <code>` to read these from the CLI.
+Use `almide explain <code>` to read these from the CLI, and
+`almide explain --list [--json]` for every code with its severity, first
+release and fix-it verdict. A new code adds its doc AND a row in
+[codes.toml](codes.toml) — `tests/explain_list_test.rs` keeps the listing
+equal to the set of codes the compiler emits.
 
 | Code | Title |
 |------|-------|

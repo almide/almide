@@ -67,6 +67,7 @@ almide test [pattern]        # run tests (*.almd with `test { }` blocks)
 almide fmt <file>            # format
 almide compile [module]      # emit .almdi module interface
 almide explain E001          # expand a diagnostic code
+almide explain --list --json # every code: {code, mnemonic, severity, since, verdict}
 almide ide outline <file>                 # one-line-per-decl summary
 almide ide outline @stdlib/string         # stdlib API listing
 almide ide doc string.to_upper            # signature + doc for a symbol
