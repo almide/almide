@@ -327,6 +327,10 @@ fn worker_loop(
             }
         }
 
+        // The previous program's kept binary is dead weight from here on
+        // (#2611): without this the build dir grew by one binary per program.
+        tc.prune_build_cache();
+
         let gen = engine.generate(cfg.seed, index);
         if std::fs::write(&file, &gen.source).is_err() {
             continue;
