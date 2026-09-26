@@ -6,6 +6,12 @@ fn $main
 fn $__drop_R
   (call $rc_dec (i32.wrap_i64 (local.get $v9)))
   (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_list_int_R
+  (call $__drop_list_int_R_loop (local.get $v1) (local.get $v9) (i64.const 0))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_list_int_R_loop
+  (call $__drop_R (local.get $v21))
+  (call $rc_dec (i32.wrap_i64 (local.get $v13)))
 fn $__drop_list_opt_R
   (call $__drop_list_opt_R_loop (local.get $v1) (local.get $v9) (i64.const 0))
   (call $rc_dec (i32.wrap_i64 (local.get $v1)))
