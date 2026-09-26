@@ -357,6 +357,11 @@ impl std::fmt::Display for AlmideJsonPath {
     }
 }
 
+// A record may hold a path, and a record's repr calls each field's (#2647).
+impl AlmideRepr for AlmideJsonPath {
+    fn almide_repr(&self) -> String { self.to_string() }
+}
+
 // Wrapper functions for stdlib codegen (json.root(), json.field(), json.index())
 pub fn almide_rt_json_root() -> AlmideJsonPath { AlmideJsonPath::JpRoot }
 pub fn almide_rt_json_field(path: AlmideJsonPath, name: &str) -> AlmideJsonPath { AlmideJsonPath::JpField(std::boxed::Box::new(path), name.to_string()) }
