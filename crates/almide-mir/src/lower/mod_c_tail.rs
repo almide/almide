@@ -140,7 +140,27 @@ pub fn auto_wrap_abi_body(func: &IrFunction) -> Option<IrExpr> {
         let wrap_under_probe =
             crate::lower::bang_return_probe() && crate::lower::is_heap_ty(&func.ret_ty);
         if opt_ret || !has_propagation_site(&body) || wrap_under_probe {
-            wrap_return_positions_in_ok(&mut body, &func.ret_ty, &result_ty);
+            // The wrap keys on each return position answering the DECLARED type, but the
+            // root retype above has already stamped the carrier on the root node. When the
+            // body is a single expression that node IS the return value
+            // (`effect fn call(h, t) -> String = show2(h(t)!)`), so the stamp hid its
+            // declared type from the wrap: the ok path returned the raw `show2` String
+            // while the lifted `!` built a real Err block — the #841 hybrid, read by the
+            // caller as a Result and dereferenced as a garbage pointer on wasm (#2658).
+            // Wrap the UNSTAMPED body instead; the wrap retypes every spine node it
+            // wraps under, root included, and an unwrapped body keeps the stamped form
+            // exactly as before. A root `X!` stays with the pass-through rule below.
+            let root_is_propagation =
+                matches!(&func.body.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. });
+            let mut unstamped = func.body.clone();
+            if !root_is_propagation
+                && wrap_return_positions_in_ok(&mut unstamped, &func.ret_ty, &result_ty)
+            {
+                unstamped.ty = result_ty.clone();
+                body = unstamped;
+            } else {
+                wrap_return_positions_in_ok(&mut body, &func.ret_ty, &result_ty);
+            }
         }
         // A SINGLE-EXPRESSION body `X!` (or auto-`?` `X?`) whose callee already
         // answers the carrier: the root retype above and the TAIL are the same
