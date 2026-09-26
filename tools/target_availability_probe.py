@@ -210,7 +210,13 @@ def dummy(t: dict, ctx: Ctx, types: dict) -> str:
         return "(" + ", ".join(dummy(e, ctx, types) for e in t["elements"]) + ")"
     if k == "fn":
         names = [f"_p{i}" for i in range(len(t.get("params", [])))]
-        return f"({', '.join(names)}) => {dummy(t['return'], ctx, types)}"
+        ret = t["return"]
+        # A Result the lambda RETURNS is built inline: the slot's declared
+        # type pins its error type, and a hoisted leaf would make the lambda
+        # capture a heap value — a capture the probe injected, not the fn
+        # under probe (#2588: `http.wrap`'s handler argument).
+        body = f"ok({dummy(ret['ok'], ctx, types)})" if ret.get("kind") == "result" else dummy(ret, ctx, types)
+        return f"({', '.join(names)}) => {body}"
     if k == "named":
         name = t["name"]
         if name in SIZED_INTS:
