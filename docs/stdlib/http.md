@@ -744,8 +744,16 @@ effect fn main() -> Unit = {
 }
 ```
 
-On the wasm target these functions are not available yet: `almide check
---target wasm` refuses them, as it does the other streaming clients.
+On the wasm target, `almide run --target wasm` serves `start`, `poll`,
+`read_new`, `wait`, `cancel` and `request_stream_with_limits` with the same
+behaviour as native — the embedded host runs the native call core, so the
+limit and cancel errors are the same text, and dropping the last copy of a
+handle cancels its call there too. A standalone `.wasm` built with
+`almide build --target wasm` cannot carry them yet (there is no stock WASI
+host for an in-flight call), so `almide check --target wasm`, which checks
+the build route, still refuses them. `openai_streaming_call_with_limits` and
+`anthropic_streaming_call_with_limits` stay native-only, like the streaming
+helpers they extend.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 

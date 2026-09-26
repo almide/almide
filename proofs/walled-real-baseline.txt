@@ -204,7 +204,8 @@ spec/stdlib/http_status_test.almd :: get_retry
 # 2026-09-25 (#2631, the http call handle): the fixture's `gather` — a read_new
 # loop over a live HttpCall — calls a network-effect fn the incumbent MIR
 # lowering walls (no declared capability for http, by design); the native lane
-# pins it and the family is E081 on wasm until #2633. Retire with #2633.
+# pins it. #2633 serves the handle on the structural leg (embedded lane) —
+# the incumbent still has no http, and the fixture's server is `net`.
 spec/stdlib/http_call_test.almd :: gather
 
 # (2026-09-03, C-132/#1576) a CAN-ERR effect fn with a `mut` param takes the
