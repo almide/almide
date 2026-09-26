@@ -603,7 +603,13 @@ impl LowerCtx {
                 self.ops.push(Op::Dup { dst: p, src });
                 p
             }
+            // `some(cut(string.drop(t, 1), ","))` — a user call whose ARGS materialize heap
+            // temps (the `string.drop` result, the `","` literal). Those temps free WITHIN the
+            // arm, after the call has read them — left to the function epilogue, the epilogue
+            // rc_dec'd the OTHER arm's never-assigned locals when this arm did not run (the
+            // same untaken-arm garbage rc_dec trap as the Module-call case below, #2655).
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                let arm_mark = self.live_heap_handles.len();
                 let lowered = self.lower_call_args(args).ok()?;
                 let pr = repr_of(&expr.ty).ok()?;
                 let p = self.fresh_value();
@@ -613,6 +619,7 @@ impl LowerCtx {
                     args: lowered,
                     result: Some(pr),
                 });
+                self.drop_arm_locals(arm_mark);
                 p
             }
             // `some(string.slice(s, …))` / `some(list.drop_end(stack, 1))` — a PURE
