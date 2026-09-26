@@ -34,7 +34,10 @@ read here is what the current compiler accepts.
   fn-type slots spell it `(A) -> B!`. In test blocks lambda-`!` stays unwrap. No `null`, no `throw`, no
   exceptions.
 - Effectful functions are written `effect fn f() -> T`. Pure functions
-  cannot call effect functions (checked, emits E006).
+  cannot call effect functions (checked, emits E006). A user-declared effect
+  fn is always fallible, so write `f()!` on every effect call — read the `!`
+  like Swift `await` (it marks where the world is touched); it is Swift `try`,
+  never `try!`. On a stdlib effect fn that cannot fail the `!` is a no-op.
 - Generics use `[T]` (not `<T>`). Variants use leading `|`.
 - `match` is exhaustive; missing arms emit a warning.
 - Multiple lets chain by newline (no `in`). No `let rec`, no `head :: tail`
