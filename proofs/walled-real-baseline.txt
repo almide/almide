@@ -145,6 +145,13 @@ spec/wasm_cross/env_sleep_pause.almd :: main
 # matrix. Retires when the p3 client leg ships the ops on stock artifacts
 # (#1710 increment 2 / #1716).
 spec/embedded_cross/http_client_errs.almd :: main
+# 2026-09-26 (#2633, the http call handle): the embedded_cross handle fixture's
+# `main` walls on the incumbent BUILD path by design, the http_client_errs shape
+# above — ops 53..=59 are served by the embedded host (`almide run --target
+# wasm`, the spec/embedded_cross gate), and the handle's rows keep stock-p1 in
+# the availability matrix. Retires when a stock host serves the call handle
+# (#1710).
+spec/embedded_cross/http_call_handle_errs.almd :: main
 # (2026-09-01, C-329/#1716) env.set has no seat in the incumbent brick; the
 # STRUCTURAL leg serves the overlay (embedded op 37/26, p1 shim overlay log +
 # real-environ fallthrough), so the env-overlay fixture lowers there and on
