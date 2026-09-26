@@ -22,6 +22,7 @@ mod retired_range;
 mod statements;
 mod test_attributes;
 mod test_expr_precedence;
+mod test_let_rec;
 mod test_multiline_tuple;
 mod types;
 mod variant_comments;
