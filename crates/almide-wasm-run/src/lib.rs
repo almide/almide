@@ -4,6 +4,7 @@
 
 mod host;
 mod http_call_host;
+mod host_serve;
 pub(crate) mod component_alloc;
 pub mod component_availability;
 /// The stock-WASI transform (`to_wasi`, `P1_SERVED_OPS`, …): its own crate
