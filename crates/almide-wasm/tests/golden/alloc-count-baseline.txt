@@ -543,6 +543,7 @@
 8	1	75	8	spec/wasm_cross/range_bind_walled_no_materialize.almd
 0	0	0	0	spec/wasm_cross/range_exclusive_end_at_min.almd
 0	0	0	0	spec/wasm_cross/range_first_class.almd
+0	0	0	0	spec/wasm_cross/range_inclusive_end_at_max.almd
 1	0	20	0	spec/wasm_cross/range_materialize_oom.almd
 5383	5284	353527	5382	spec/wasm_cross/rc_alloc_stress.almd
 150001	149996	1040006	150001	spec/wasm_cross/rc_reclaim_churn.almd
