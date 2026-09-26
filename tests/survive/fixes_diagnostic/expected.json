@@ -1,0 +1,118 @@
+{
+  "check": {
+    "newly_broken": [],
+    "newly_fixed": [
+      {
+        "after": null,
+        "before": {
+          "applicability": "unspecified",
+          "code": "E001",
+          "col": 30,
+          "context": "fn 'label'",
+          "end_col": 31,
+          "file": "shapes.almd",
+          "here": null,
+          "hint": "Fix the expression type or change the expected type. Or use `int.to_string(x)` to convert Int to String",
+          "level": "error",
+          "line": 3,
+          "message": "type mismatch in fn 'label': expected String but got Int",
+          "secondary": [],
+          "suggestions": [],
+          "try": null,
+          "try_replace": null
+        },
+        "checked": "shapes.almd"
+      }
+    ],
+    "removed": [],
+    "unchanged": [
+      {
+        "after": {
+          "applicability": "unspecified",
+          "code": "E001",
+          "col": 30,
+          "context": "fn 'shout'",
+          "end_col": 31,
+          "file": "shapes.almd",
+          "here": null,
+          "hint": "Fix the expression type or change the expected type. Or use `int.parse(s)` to convert String to Int (returns Result[Int, String])",
+          "level": "error",
+          "line": 6,
+          "message": "type mismatch in fn 'shout': expected Int but got String",
+          "secondary": [],
+          "suggestions": [],
+          "try": null,
+          "try_replace": null
+        },
+        "before": {
+          "applicability": "unspecified",
+          "code": "E001",
+          "col": 30,
+          "context": "fn 'shout'",
+          "end_col": 31,
+          "file": "shapes.almd",
+          "here": null,
+          "hint": "Fix the expression type or change the expected type. Or use `int.parse(s)` to convert String to Int (returns Result[Int, String])",
+          "level": "error",
+          "line": 5,
+          "message": "type mismatch in fn 'shout': expected Int but got String",
+          "secondary": [],
+          "suggestions": [],
+          "try": null,
+          "try_replace": null
+        },
+        "checked": "shapes.almd",
+        "matched_by": "position"
+      }
+    ]
+  },
+  "contracts": {
+    "newly_broken": [],
+    "newly_fixed": [],
+    "removed": [],
+    "unchanged": []
+  },
+  "edit": {
+    "kind": "full_text",
+    "lines_after": 10,
+    "lines_before": 9
+  },
+  "file": "shapes.almd",
+  "reach": {
+    "checked": [
+      "shapes.almd"
+    ],
+    "contracts": [],
+    "root": ".",
+    "tests": []
+  },
+  "schema_version": 1,
+  "summary": {
+    "check": {
+      "newly_broken": 0,
+      "newly_fixed": 1,
+      "removed": 0,
+      "unchanged": 1
+    },
+    "contracts": {
+      "newly_broken": 0,
+      "newly_fixed": 0,
+      "removed": 0,
+      "unchanged": 0
+    },
+    "tests": {
+      "newly_broken": 0,
+      "newly_fixed": 0,
+      "removed": 0,
+      "unchanged": 0
+    }
+  },
+  "survives": true,
+  "tests": {
+    "newly_broken": [],
+    "newly_fixed": [],
+    "removed": [],
+    "unchanged": []
+  },
+  "written": false
+}

@@ -81,6 +81,17 @@ impl Emitter<'_> {
         }
     }
 
+    /// The `HttpCall` block (#2633): the one record whose single field is
+    /// the unspellable `ty::HTTP_CALL_FIELD`.
+    pub(crate) fn is_http_call(&self, t: SliceTy) -> bool {
+        let SliceTy::Named(ti) = t else { return false };
+        matches!(
+            self.types.def(ti),
+            crate::types_table::NamedDef::Record(r)
+                if r.fields.len() == 1 && r.fields[0].name == crate::ty::HTTP_CALL_FIELD
+        )
+    }
+
     /// Does the type table hold a layout for this Named type (a record or
     /// a variant — `Excluded` names have slots but no layout)?
     fn named_has_layout(&self, ti: u32) -> bool {
@@ -180,6 +191,11 @@ impl Emitter<'_> {
     }
 
     pub(crate) fn dec_fn_of(&self, t: SliceTy) -> u32 {
+        if self.is_http_call(t) {
+            // #2633: the host call id's own drop — cancel and forget.
+            self.note_host_op(crate::fs_meta::OP_HTTP_CALL_DROP);
+            return self.work.helper(crate::work::Helper::DropHttpCall);
+        }
         match t {
             SliceTy::List(h) => {
                 let elem = self.types.el(h);
@@ -571,6 +587,14 @@ impl Emitter<'_> {
         // conservative +1 on every route — `if d == 0 then Leaf else
         // Node(…)` returned two credits and no tree node was ever freed.
         if self.is_variant_ctor(name, e) {
+            return true;
+        }
+        // The http call handle's host-op leaves (#2633, http_call.rs) build
+        // every answer fresh at rc 1 — the HttpCall block and its carrier
+        // included. Classed borrowed (they have no table entry), the +1 kept
+        // the carrier alive forever, so the handle it holds never reached its
+        // drop glue and dropping the last copy never cancelled the call.
+        if name.starts_with("__http_call_") {
             return true;
         }
         self.cur_module

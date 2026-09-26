@@ -1,0 +1,57 @@
+// @contract: C-367
+// A SERVER fixture: it never exits, so no generic runner executes it. The
+// driver (tests/http_serve_cross_test.rs in almide/almide) starts it with
+// `almide run` natively and with `almide run --target wasm`, waits for the
+// "ready" line on stderr, replays one request script against each and
+// compares the raw response bytes and the stderr transcript byte for byte.
+// Usage: almide run http_serve_replay.almd [--target wasm] -- <port>
+import env
+import http
+import random
+
+fn deny(path: String) -> Result[Unit, String] = err("denied ${path}")
+
+// Query parameters in key order: map iteration order is not the promise here.
+fn render_query(req: HttpRequest) -> String = {
+  let q = http.query_params(req)
+  map.keys(q) |> list.sort |> list.map((k) => "${k}=${map.get(q, k) ?? ""}") |> list.join("&")
+}
+
+effect fn handle(req: HttpRequest, boot: Int) -> HttpResponse = {
+  let method = http.req_method(req)
+  let path = http.req_path(req)
+  let route = string.split(path, "?") |> list.get(0) ?? path
+  eprintln("${method} ${path}")
+  match route {
+    "/hello" => http.response(200, "hello"),
+    "/echo" => http.with_headers(
+      201,
+      "${method} ${http.req_body(req)}",
+      [
+        "X-Echo": http.req_header(req, "x-token") ?? "none",
+        "Content-Type": "text/plain; charset=utf-8"
+      ],
+    ),
+    "/query" => http.json(200, "\"${render_query(req)}\""),
+    "/teapot" => http.response(200, "short and stout") |> http.status(418) |> http.set_header(
+      "x-kind",
+      "teapot",
+    ),
+    "/redirect" => http.redirect("/hello"),
+    "/boot" => http.response(200, "${boot}"),
+    "/fail" => {
+      deny(route)!
+      http.response(200, "unreachable")
+    },
+    _ => http.response(404, "not found: ${route}"),
+  }
+}
+
+effect fn main() -> Unit = {
+  let port = env.args() |> list.get(0) ?? "0"
+  // Drawn ONCE per process and captured by the handler: every request of
+  // one run must answer the same value (one instance for the whole run).
+  let boot = random.int(1, 1000000000)
+  eprintln("ready")
+  http.serve(int.parse(port) ?? 0, (req) => handle(req, boot)!)!
+}

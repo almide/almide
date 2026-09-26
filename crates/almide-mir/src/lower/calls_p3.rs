@@ -43,6 +43,25 @@ impl LowerCtx {
             && matches!(callee.ty, almide_lang::types::Ty::Fn { .. })
     }
 
+    /// PURE guard twin of [`Self::lower_closure_callee`]'s call arms: is the
+    /// callee a user / stdlib / curried CALL whose result is a function (#2588 —
+    /// `http.router(rs)(req)`, the use-site shape of a top-level route table)?
+    /// Is `var` a closure-typed global living in a storage slot?
+    pub(crate) fn is_slot_global_fn(var: almide_ir::VarId) -> bool {
+        crate::lower::mutable_global_info(var).is_some_and(|(_, ty)| matches!(ty, almide_lang::types::Ty::Fn { .. }))
+    }
+
+    pub(crate) fn is_fn_building_call(callee: &IrExpr) -> bool {
+        matches!(callee.ty, almide_lang::types::Ty::Fn { .. })
+            && matches!(
+                &callee.kind,
+                IrExprKind::Call {
+                    target: CallTarget::Named { .. } | CallTarget::Module { .. } | CallTarget::Computed { .. },
+                    ..
+                }
+            )
+    }
+
     pub(crate) fn closure_block_of_mut(&mut self, callee: &IrExpr) -> Option<ValueId> {
         if let Some(v) = self.closure_value_of(callee) {
             return Some(v);
@@ -95,6 +114,14 @@ impl LowerCtx {
         if let Some(v) = self.closure_block_of_mut(callee) {
             return Some(v);
         }
+        // A closure held in a mutable module `var` (`handler(req)` against
+        // `var handler = mk()`): the slot read yields a tracked closure block.
+        if let IrExprKind::Var { id } = &callee.kind {
+            if Self::is_slot_global_fn(*id) {
+                let v = self.value_or_global(*id).ok()?;
+                return self.closure_values.contains(&v).then_some(v);
+            }
+        }
         if !matches!(callee.ty, almide_lang::types::Ty::Fn { .. }) {
             return None;
         }
@@ -109,6 +136,20 @@ impl LowerCtx {
                     args: lowered,
                     result: Some(ptr),
                 });
+                self.live_heap_handles.push(dst);
+                self.closure_values.insert(dst);
+                Some(dst)
+            }
+            // A STDLIB call returning a `Fn` — `http.router([...])(req)`, the
+            // shape a top-level `let app = http.router(...)` reaches a use site
+            // as (#2588). Same contract as the Named arm: the self-host callee
+            // builds and moves out a closure block; an unfaithful call (an
+            // unlifted closure arg) is refused rather than dispatched.
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
+                self.check_call_module_faithful(module.as_str(), func.as_str(), args).ok()?;
+                let dst = self
+                    .lower_pure_module_value_call(module.as_str(), func.as_str(), args, &callee.ty)
+                    .ok()?;
                 self.live_heap_handles.push(dst);
                 self.closure_values.insert(dst);
                 Some(dst)

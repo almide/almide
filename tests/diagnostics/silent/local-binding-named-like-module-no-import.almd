@@ -1,0 +1,5 @@
+// silent (#2345): the same shape without the import — a plain record call.
+fn main() -> Unit = {
+  let process = { exit: (code: Int) => code + 1 }
+  println(int.to_string(process.exit(41)))
+}

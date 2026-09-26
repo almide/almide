@@ -29,6 +29,7 @@ mod solving;
 mod diagnostics;
 mod deprecation_warn;
 mod exit_literal;
+mod bang_error_channel;
 mod intrinsic_authority;
 mod exhaustiveness;
 
@@ -152,6 +153,17 @@ pub struct Checker {
     /// `effect (A) -> B` fn type — the body gets effect-fn ergonomics and the
     /// lambda types as the effect carrier `(A) -> Result[B, String]`.
     pub(crate) lambda_slot_effect: bool,
+    /// #2588: the declared return type of the lambda being inferred, when its
+    /// expected type is a `Fn` known from a declaration (a fn return type, a
+    /// call slot). A lambda BODY that is itself a lambda inherits it, so
+    /// `(next) => (req) => …` against `(Handler) -> Handler` checks the inner
+    /// lambda as an effect body.
+    pub(crate) lambda_ret_expect: Option<crate::types::Ty>,
+    /// #2588: the declared ELEMENT type of the list literal being inferred,
+    /// when it fills a `List[<fn type>]` call slot. Each lambda element is
+    /// checked against it — `http.wrap(app, [(next) => (req) => …])` types
+    /// every inline middleware as a `HttpMiddleware`.
+    pub(crate) list_elem_expect: Option<crate::types::Ty>,
     pub(crate) constraints: Vec<Constraint>,
     pub(crate) uf: UnionFind,
     /// Named-type pairs currently being unified structurally. Unifying two
@@ -263,6 +275,11 @@ pub struct Checker {
     /// insertion where the span is a plain call.
     /// (ty, span, position label, mechanical, must_use)
     pub(crate) deferred_implicit_prop_checks: Vec<(Ty, Option<ast::Span>, &'static str, bool, bool)>,
+    /// Spans `(line, col, end_col)` of calls whose resolved callee is an
+    /// `effect fn` declared `-> T` with a non-Result `T` (#2653) — read when an annotated `let` mismatch decides
+    /// whether its `!` repair is the spelling of the callee's own declared
+    /// type (machine-applicable) or a choice among consumptions.
+    pub(crate) effect_call_spans: std::collections::HashSet<(usize, usize, usize)>,
     /// ADR-0006 D1 (#1108 Phase 2a): fns DECLARED with the `-> T!` marker.
     /// Resolution erases the marker into Result[T, String], so the 1-bit
     /// fallibility of a NAMED callback argument (`list.map(xs, parse)`) is
@@ -565,6 +582,8 @@ impl Checker {
             named_arg_meta: None,
             lambda_arg_hint: None,
             lambda_slot_effect: false,
+            lambda_ret_expect: None,
+            list_elem_expect: None,
             constraints: Vec::new(), uf: UnionFind::new(),
             unify_named_in_progress: std::collections::HashSet::new(),
             current_module_prefix: None,
@@ -584,6 +603,7 @@ impl Checker {
             deferred_numeric_narrowing_checks: Vec::new(),
             deferred_unresolved_binding_checks: Vec::new(),
             deferred_implicit_prop_checks: Vec::new(),
+            effect_call_spans: std::collections::HashSet::new(),
             fallible_marker_fns: std::collections::HashSet::new(),
             hof_rewritten_calls: std::collections::HashSet::new(),
             deferred_unknown_type_checks: Vec::new(),

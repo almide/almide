@@ -63,6 +63,12 @@ test "every import form resolves" {
 ```
 
 - `import pkg.sub` は最後のセグメント名で参照可能: `sub.func()`
+- 最後のセグメント名は**そのファイルの中だけの束縛名**で、モジュールの同一性ではない。
+  モジュールの同一性は `src/` からのパス全体（`import self.a.util` は `src/a/util.almd`）なので、
+  `src/a/util.almd` と `src/b/util.almd` を別々のファイルから `import self.a.util` /
+  `import self.b.util` すればそれぞれ別のモジュールに解決される（#2654）。
+  同じファイルで両方を import すると束縛名 `util` が衝突してエラーになり、
+  片方に `import self.b.util as butil` の別名が要る
 - ワイルドカード `import pkg.*` は不可
 - 循環インポートはコンパイルエラー
 

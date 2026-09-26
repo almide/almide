@@ -1,0 +1,3 @@
+# #2149 / #2097: the hint names the same-stem sibling that returns the expected type
+fs.read_bytes_raw
+let b = fs.read_bytes_raw("Cargo.toml")!

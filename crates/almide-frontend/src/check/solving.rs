@@ -42,7 +42,11 @@ impl Checker {
         // generic "fix the expression type", which names neither the cause nor
         // a way out. Detect the SHAPE (a Result nested one level inside the
         // actual where the expected has it outside) and say what happened.
-        let hint = match fallible_callback_shape_hint(&exp, &act)
+        // #2653: `let x: T = f()` where `f()` yields `Result[T, _]` — the
+        // missing `!`, said the way E005 says it for `g(f())`.
+        let unwrap = let_call_unwrap(c.fix_hint.as_ref(), &exp, &act);
+        let hint = match unwrap.map(|_| unwrap_first_hint(&act))
+            .or_else(|| fallible_callback_shape_hint(&exp, &act))
             .or_else(|| arity_shape_hint(&exp, &act))
         {
             Some(h) => h,
@@ -65,8 +69,37 @@ impl Checker {
         if let Some(snippet) = try_snippet {
             diag = diag.with_try(snippet);
         }
+        if let Some((span, true)) = unwrap {
+            diag = self.attach_bang_repair(diag, span);
+        }
         self.emit(diag);
         self.current_span = saved_span;
+    }
+
+    /// The `!` insertion at the end of an annotated `let`'s call value
+    /// (#2653), in an effect fn body outside any lambda (`let_call_unwrap`
+    /// already required both).
+    ///
+    /// MACHINE-APPLICABLE when the callee is an `effect fn` declared with a
+    /// non-Result `-> T`: ADR-0002 §D6 reads `effect fn f() -> T` as `T!`,
+    /// and ADR-0008 spells every propagation, so `f()!` is the one spelling
+    /// of the type the author declared on both ends — the callee's `-> T`
+    /// and the binding's `: T`. A callee DECLARED `-> Result[T, E]` (pure,
+    /// or an effect fn like `fs.read_text`) returned a Result on purpose;
+    /// how to consume it (`!`, `??`, match) is the author's decision, so the
+    /// same edit is only a suggestion. Either way the span must really end
+    /// the expression (#2250: a multi-line call's span is its `(` alone).
+    fn attach_bang_repair(&self, diag: almide_base::diagnostic::Diagnostic, s: crate::ast::Span) -> almide_base::diagnostic::Diagnostic {
+        let anchored = s.end_col > s.col
+            && self.source_slice(s).is_some_and(|text| Self::fix_anchor_ends_expression(&text));
+        if !anchored {
+            return diag;
+        }
+        if self.effect_call_spans.contains(&(s.line, s.col, s.end_col)) {
+            diag.with_machine_fix(s.line, s.end_col, s.end_col, "!")
+        } else {
+            diag.with_suggested_fix(s.line, s.end_col, s.end_col, "!")
+        }
     }
 
     pub(crate) fn unify_infer(&mut self, a: &Ty, b: &Ty) -> bool {
@@ -370,6 +403,31 @@ fn same_head(a: &Ty, b: &Ty) -> bool {
         (Ty::Fn { .. }, Ty::Fn { .. }) => true,
         _ => a == b,
     }
+}
+
+/// #2653: `Some((call span, can_propagate))` when an annotated `let`'s call
+/// value is `Result[T, _]` and the annotation is exactly its `T` — the shape
+/// where the whole fix is a `!`. A different ok type is an unrelated mismatch
+/// that merely involves a Result, and keeps the generic hint.
+fn let_call_unwrap(fix_hint: Option<&FixHint>, exp: &Ty, act: &Ty) -> Option<(crate::ast::Span, bool)> {
+    let Some(FixHint::LetCallValue { span, can_propagate }) = fix_hint else { return None };
+    if exp.is_result() || exp.is_unresolved() {
+        return None;
+    }
+    let Ty::Applied(crate::types::TypeConstructorId::Result, args) = act else { return None };
+    let ok = args.first()?;
+    (ok == exp).then_some((*span, *can_propagate))
+}
+
+/// The E005 wording for a Result where a plain value is expected
+/// (`wrapped_into_plain_hint`), said of a binding's value.
+fn unwrap_first_hint(act: &Ty) -> String {
+    format!(
+        "the value is a {} — unwrap it first: `!` propagates the error \
+         (effect fn body), `?? fallback` supplies a default, or `match` \
+         handles ok/err",
+        act.display()
+    )
 }
 
 /// The actionable half of an E001 hint, chosen by the constraint's context.

@@ -1,0 +1,10 @@
+// silent (E006 near-miss): an effect fn called from an effect fn, with the
+// failure given a fallback.
+import fs
+
+effect fn size_of(p: String) -> Int = string.len(fs.read_text(p)!)
+
+effect fn main() -> Unit = {
+  let n = size_of("Cargo.toml") ?? 0
+  println(if n >= 0 then "ok" else "no")
+}

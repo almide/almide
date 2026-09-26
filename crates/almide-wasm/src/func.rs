@@ -528,6 +528,7 @@ pub(crate) fn lower_fn(
                         | crate::work::Helper::DropEntries { .. }
                         | crate::work::Helper::DropFn { .. }
                         | crate::work::Helper::DropCell { .. }
+                        | crate::work::Helper::DropHttpCall
                 )
             })
                 .map(|(p, _)| em.work.helper_base.get() + p as u32)

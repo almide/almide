@@ -1,7 +1,11 @@
 # Almide Diagnostic Codes
 
 Reference for `EXXX` codes emitted by the checker and canonicalizer.
-Use `almide explain <code>` to read these from the CLI.
+Use `almide explain <code>` to read these from the CLI, and
+`almide explain --list [--json]` for every code with its severity, first
+release and fix-it verdict. A new code adds its doc AND a row in
+[codes.toml](codes.toml) — `tests/explain_list_test.rs` keeps the listing
+equal to the set of codes the compiler emits.
 
 | Code | Title |
 |------|-------|
@@ -97,7 +101,13 @@ applicability:
 |---|---|---|
 | `.with_machine_fix(line, col, end_col, text)` | `machine-applicable` | `almide fix`, unattended |
 | `.with_suggested_fix(line, col, end_col, text)` | `maybe-incorrect` | a human or a model, after choosing |
+| `.with_alternative(line, col, end_col, text)` | `maybe-incorrect` | a human or a model — another reading, never preferred |
 | `.with_try(text)` (no span) | `unspecified` | nobody — display only |
+
+Every builder writes the diagnostic's `repair` field (#2149):
+`primary` (the span-exact edit), `alternatives`, and `example` (a display-only
+snippet). `almide fix`, the LSP quickfixes and `check --json` (`"repair"`) all
+read that one field.
 
 **Use `with_machine_fix` only for a re-spelling**: same value, same type,
 same evaluation, exactly one reading of what the author meant. Deleting a
@@ -117,3 +127,24 @@ degrades it to display-only rather than trust it.
 Both halves are gated: `tests/diagnostic_harness_test.rs` asserts that every
 span-anchored fix-it in the fixture corpus declares an applicability, applies
 cleanly, compiles, and reproduces `fixed.almd`.
+
+The `## Fix-it verdict` of each doc is checked against the binary in both
+directions (#2149). Every **mechanical** code must emit a machine-applicable
+`repair.primary` on at least one of its fixtures, and `almide fix` must turn
+that fixture into a program that checks
+(`tests/diagnostic_coverage_test.rs`). No other code may emit one
+(`tests/diagnostic_harness_test.rs`).
+
+## The two-way repair ratchet (#2149)
+
+- **Loud side** — `tests/diagnostics/<case>/repair.grep`: one needle per
+  line, each of which must appear in what the case's diagnostic tells the
+  writer to do (message, hint, `try:`, any `repair` replacement). It pins the
+  repair itself, so a hint that drifts back to "Fix the argument type" (#2097)
+  fails the build.
+- **Silent side** — `tests/diagnostics/silent/*.almd`: valid programs in the
+  shapes that drew a wrong or misdirecting diagnostic before (#2345, #2097,
+  #2254, #2096, #2607, #2093/#2095, and the near-miss of every mechanical
+  fix-it). Each must check with no diagnostic at all, warnings included
+  (`tests/diagnostic_silent_test.rs`). To add one, write the program with a
+  header comment naming the shape it guards, and raise `SILENT_FLOOR`.

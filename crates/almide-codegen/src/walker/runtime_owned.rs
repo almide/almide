@@ -14,7 +14,7 @@
 //! Three shapes, one table:
 //! * builtin — `Value` has no declaration anywhere (the checker's
 //!   `Ty::Named("Value")`).
-//! * runtime-backed — `HttpRequest` / `HttpResponse` / `JsonPath`
+//! * runtime-backed — `HttpRequest` / `HttpResponse` / `HttpCall` / `JsonPath`
 //!   (`stdlib_info::RUNTIME_BACKED_TYPES`): named by bundled signatures, no
 //!   declaration.
 //! * bundled twin — `Endian` / `FileStat` / `ProcessStatus` ARE declared, in
@@ -54,6 +54,7 @@ const TABLE: &[RuntimeOwned] = &[
     RuntimeOwned { almd: "Value", rust: "AlmideValue", module: "value", twin: None },
     RuntimeOwned { almd: "HttpRequest", rust: "AlmideHttpRequest", module: "http", twin: None },
     RuntimeOwned { almd: "HttpResponse", rust: "AlmideHttpResponse", module: "http", twin: None },
+    RuntimeOwned { almd: "HttpCall", rust: "AlmideHttpCall", module: "http", twin: None },
     RuntimeOwned { almd: "JsonPath", rust: "AlmideJsonPath", module: "json", twin: None },
     RuntimeOwned { almd: "Endian", rust: "AlmideEndian", module: "bytes", twin: Some(TwinShape::Variant(&["LittleEndian", "BigEndian"])) },
     RuntimeOwned { almd: "FileStat", rust: "AlmideFileStat", module: "fs", twin: Some(TwinShape::Record(&["size", "is_dir", "is_file", "modified"])) },
@@ -152,4 +153,22 @@ pub(crate) fn modules_spelled_in(user_code: &str) -> Vec<&'static str> {
 /// (`Value`, the http/json handles) keep their `Display` route untouched.
 pub(crate) fn has_runtime_repr(almd: &str) -> bool {
     TABLE.iter().any(|e| e.almd == almd && e.twin.is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TABLE;
+
+    /// Every runtime-owned type can sit in a user record, and a record's repr
+    /// calls `almide_repr` on each field — so each one's runtime module must
+    /// implement `AlmideRepr` for it, or the record fails at rustc (E0599, #2647).
+    #[test]
+    fn every_runtime_owned_type_has_a_repr() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime/rs/src");
+        for e in TABLE {
+            let text = std::fs::read_to_string(src.join(format!("{}.rs", e.module))).expect("runtime module");
+            assert!(text.contains(&format!("impl AlmideRepr for {} ", e.rust)) || text.contains(&format!("impl AlmideRepr for {}{{", e.rust)),
+                "{} ({}.rs) has no `impl AlmideRepr for {}`", e.almd, e.module, e.rust);
+        }
+    }
 }

@@ -238,7 +238,8 @@ fn build_import_table_process_import(
     let (canonical, is_self) = resolve_import_canonical(path, module_name, user_modules);
     let used_name = resolve_import_used_name(path, alias, is_self, &canonical);
 
-    if !check_import_collision(&used_name, &canonical, alias_to_canonical, diagnostics, span) {
+    let import_spelling = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
+    if !check_import_collision(&used_name, &canonical, &import_spelling, alias_to_canonical, diagnostics, span) {
         return;
     }
     check_import_duplicate(&used_name, &canonical, canonical_to_alias, diagnostics, span);
@@ -261,9 +262,9 @@ fn import_leaf_name(path: &[Sym]) -> String {
 /// Steps 1-2 of [`build_import_table_process_import`]: build the canonical
 /// module name from the import path, resolving `import self` (and
 /// `import self.a.b`) — the resolver's registration is asymmetric (the
-/// project's own self-loaded modules use leaf names, a dependency
-/// package's submodules use the FQN); prefer FQN when registered, fall
-/// back to leaf. Verbatim text move.
+/// project's own self-loaded modules use the path under `src/`, `a.b`
+/// (#2654); a dependency package's submodules use the FQN `<pkg>.a.b`);
+/// prefer the FQN when registered, then the path, then the bare leaf.
 fn resolve_import_canonical(path: &[Sym], module_name: Option<&str>, user_modules: &HashSet<Sym>) -> (String, bool) {
     let mut canonical = path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
     let is_self = path.first().map(|s| s.as_str()) == Some("self");
@@ -274,18 +275,16 @@ fn resolve_import_canonical(path: &[Sym], module_name: Option<&str>, user_module
                 canonical = mod_name.to_string();
             }
         } else {
-            // import self.a.b → prefer "<module>.a.b" if registered, else "b"
+            // import self.a.b → prefer "<module>.a.b" (a dependency's own
+            // submodule) if registered, else "a.b" (the project's module at
+            // src/a/b.almd, #2654), else the bare leaf "b".
             let leaf = import_leaf_name(path);
-            let fqn = if let Some(mod_name) = module_name {
-                let suffix = path[1..].iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
-                format!("{}.{}", mod_name, suffix)
-            } else {
-                leaf.clone()
-            };
-            canonical = if user_modules.contains(&sym(&fqn)) {
-                fqn
-            } else {
-                leaf
+            let suffix = path[1..].iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
+            let fqn = module_name.map(|mod_name| format!("{}.{}", mod_name, suffix));
+            canonical = match fqn {
+                Some(fqn) if user_modules.contains(&sym(&fqn)) => fqn,
+                _ if user_modules.contains(&sym(&suffix)) => suffix,
+                _ => leaf,
             };
         }
     }
@@ -313,14 +312,14 @@ fn resolve_import_used_name(path: &[Sym], alias: &Option<Sym>, is_self: bool, ca
 /// when the caller should stop processing this import (mirrors the
 /// original loop's `continue`). Verbatim text move.
 fn check_import_collision(
-    used_name: &str, canonical: &str, alias_to_canonical: &HashMap<String, String>,
+    used_name: &str, canonical: &str, import_spelling: &str, alias_to_canonical: &HashMap<String, String>,
     diagnostics: &mut Vec<Diagnostic>, span: &Option<ast::Span>,
 ) -> bool {
     if let Some(existing) = alias_to_canonical.get(used_name) {
         if existing != canonical {
             diagnostics.push(Diagnostic::error(
                 format!("ambiguous import: '{}' could refer to '{}' or '{}'", used_name, existing, canonical),
-                format!("Use `import {} as <alias>` to disambiguate", canonical),
+                format!("Give one of them its own name: `import {} as <alias>`", import_spelling),
                 format!("import at line {}", span.as_ref().map(|s| s.line).unwrap_or(0)),
             ));
             return false;

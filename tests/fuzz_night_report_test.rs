@@ -565,3 +565,121 @@ fn the_workflow_calls_the_renderers_by_their_committed_paths() {
         assert!(repo_root().join(p).is_file(), "{p} missing");
     }
 }
+
+/// #2611: when exactly ONE shard uploads, `download-artifact` (pattern mode)
+/// extracts that artifact FLAT into the target dir — `shards/fuzz-output.txt`,
+/// no `fuzz-shard-<run>-<n>/` directory. That is the night recovery exists for
+/// (7 of 8 reclaimed), and the verdict used to lose the shard number there,
+/// print `missing=unknown`, and recover nothing: runs 35955335655, 35961934193
+/// and 36051987508 all published 12% where their logs held 40-52%.
+///
+/// The number now also travels in the output's `fuzz-shard: N` header, and,
+/// for outputs written before the header existed, in the derived seed
+/// (`run_id * 16 + shard`).
+#[test]
+fn a_lone_shard_extracted_flat_still_names_itself_and_the_rest_are_recovered() {
+    for (label, header) in [("header", true), ("seed", false)] {
+        let dir = scratch(&format!("flat-{label}"));
+        let shards = dir.join("shards");
+        let logs = dir.join("logs");
+        fs::create_dir_all(&shards).unwrap();
+        let run_id: u64 = 424_242;
+        let seed = run_id * 16 + 7;
+        fs::write(
+            shards.join("fuzz-output.txt"),
+            format!(
+                "{}  seed     = {seed}\n  [  120s] generated=300 clean=290 rejects=10 findings=0 walls=0 skipped=0 | 150.0 prog/min\n\n=== campaign summary ===\n  elapsed          = 300.0s\n  generated        = 1000\n",
+                if header { "fuzz-shard: 7\n" } else { "" }
+            ),
+        )
+        .unwrap();
+        // Its findings dir is flat too: `shards/tools/xtarget-fuzz/findings/…`.
+        finding(&shards.join("tools/xtarget-fuzz/findings"), "OutputDivergence__x", "OutputDivergence", 3);
+        for s in [1, 2, 3, 4, 5, 6, 8] {
+            killed_shard_log(&logs, s, 240, 800, 0);
+        }
+        let r = bash(
+            &["scripts/fuzz-night-verdict.sh", shards.to_str().unwrap(), "5", "8", "0"],
+            &[("FUZZ_SHARD_LOG_DIR", logs.to_str().unwrap()), ("GITHUB_RUN_ID", "424242")],
+        );
+        assert_eq!(r.code, Some(0), "{label}: {}{}", r.stdout, r.stderr);
+        let line = r.stderr.lines().find(|l| l.starts_with("fuzz-night: ")).unwrap();
+        assert_eq!(field(line, "missing"), "none", "{label}: {line}");
+        assert_eq!(field(line, "recovered"), "1@240s,2@240s,3@240s,4@240s,5@240s,6@240s,8@240s", "{label}");
+        // 300 s uploaded + 7 * 240 s recovered = 1980 s = 33 of 40 minutes.
+        assert_eq!(field(line, "minutes_delivered"), "33.0", "{label}: {line}");
+        assert_eq!(field(line, "budget"), "full", "{label}: {line}");
+        assert!(r.stdout.contains("| 7 | "), "{label}: {}", r.stdout);
+    }
+}
+
+/// #2611: the workflow's findings aggregate must find a finding at ANY depth,
+/// because the lone-shard layout above puts it at `shards/tools/…` — the old
+/// `shards/*/tools/…` glob missed it, and the v0.63.1-rc2 gate (36051987508)
+/// concluded success with a correctness finding in its only artifact.
+#[test]
+fn the_findings_aggregate_does_not_assume_a_per_artifact_directory() {
+    let wf = fs::read_to_string(repo_root().join(".github/workflows/fuzz-nightly.yml")).unwrap();
+    assert!(!wf.contains("shards/*/tools/xtarget-fuzz/findings"), "the one-level glob is back");
+    assert!(wf.contains("find shards -type d -path '*/tools/xtarget-fuzz/findings/*' -prune"), "aggregate");
+    assert!(wf.contains("echo \"fuzz-shard: ${{ matrix.shard }}\" > fuzz-output.txt"), "shard header");
+    assert!(wf.contains("| tee -a fuzz-output.txt"), "the fuzzer output must APPEND after the header");
+}
+
+/// #2611: the in-CI half. Every job log carries ANSI colour codes, and the
+/// runner's gh (>= 2.10x) refuses to print such a response unless it is given
+/// `--allow-escape-sequences`: from #2513's landing on, every recovery in the
+/// verdict job failed ("could not read shard N's log") while the same fetch from
+/// a workstation's older gh succeeded. This forges that gh on PATH — it lists
+/// the run's jobs, and answers a log request only with the flag — and runs the
+/// verdict the way the workflow does, through the API path (no
+/// $FUZZ_SHARD_LOG_DIR). Its `api --help` is long enough that a `| grep -q`
+/// detection under `pipefail` would take the SIGPIPE and drop the flag.
+#[cfg(unix)]
+#[test]
+fn a_gh_that_refuses_escape_sequences_is_given_the_flag() {
+    if Command::new("jq").arg("--version").output().is_err() {
+        eprintln!("skipped: no jq on PATH");
+        return;
+    }
+    let dir = scratch("gh-escape");
+    let shards = dir.join("shards");
+    let bin = dir.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    for s in 1..=7 {
+        complete_shard(&shards, s, 1000, 300);
+    }
+    let log = "2026-09-25T11:45:50.0000000Z \x1b[36;1mMINUTES=\"5\"\x1b[0m\n\
+               2026-09-25T11:50:00.0000000Z   [  250s] generated=900 clean=890 rejects=10 findings=0 walls=0 skipped=0 | 216.0 prog/min\n\
+               2026-09-25T11:50:01.0000000Z ##[error]The runner has received a shutdown signal\n";
+    fs::write(dir.join("shard-8.log"), log).unwrap();
+    let gh = format!(
+        r#"#!/bin/bash
+case "$*" in
+  "api --help")
+    for i in $(seq 1 4000); do echo "  --some-flag-$i   filler"; done
+    echo "      --allow-escape-sequences   Output the response even if it contains escape sequences" ;;
+  *"/runs/424242/jobs"*)
+    echo '{{"jobs":[{{"id":9008,"name":"Generative differential fuzz (shard 8, aarch64)"}}]}}' ;;
+  *"/jobs/9008/logs --allow-escape-sequences"*)
+    cat '{log}' ;;
+  *"/jobs/9008/logs"*)
+    echo "the response contains terminal escape sequences; pass --allow-escape-sequences to output it anyway" >&2; exit 1 ;;
+  *) echo "fake gh: unexpected $*" >&2; exit 2 ;;
+esac
+"#,
+        log = dir.join("shard-8.log").display()
+    );
+    fs::write(bin.join("gh"), gh).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(bin.join("gh"), fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+    let r = bash(
+        &["scripts/fuzz-night-verdict.sh", shards.to_str().unwrap(), "5", "8", "0"],
+        &[("PATH", &path), ("GITHUB_REPOSITORY", "almide/almide"), ("GITHUB_RUN_ID", "424242")],
+    );
+    assert_eq!(r.code, Some(0), "{}{}", r.stdout, r.stderr);
+    let line = r.stderr.lines().find(|l| l.starts_with("fuzz-night: ")).unwrap();
+    assert_eq!(field(line, "recovered"), "8@250s", "{}", r.stderr);
+    assert_eq!(field(line, "missing"), "none", "{}", r.stderr);
+}

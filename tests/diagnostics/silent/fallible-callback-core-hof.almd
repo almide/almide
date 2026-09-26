@@ -1,0 +1,9 @@
+// silent (E043 near-miss): the blessed spelling of the old try_map — the
+// callback's `!` instantiates the fallible form.
+fn half(x: Int) -> Result[Int, String] =
+  if x % 2 == 0 then ok(x / 2) else err("odd")
+
+effect fn main() -> Unit = {
+  let ys = list.map([2, 4], (x) => half(x)!)!
+  println(int.to_string(list.len(ys)))
+}

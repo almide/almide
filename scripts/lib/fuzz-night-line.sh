@@ -115,14 +115,46 @@ fuzz_shard_log() {
     cat "$FUZZ_SHARD_LOG_DIR/shard-$n.log" 2>/dev/null
     return
   fi
-  [ -n "$repo" ] && [ -n "$jobs" ] || return 1
-  command -v gh >/dev/null 2>&1 || return 1
-  command -v jq >/dev/null 2>&1 || return 1
+  # Every early exit says WHY on stderr (#2611): the verdict job printed
+  # "could not read shard N's log" for every reclaimed shard of every night
+  # from #2513's landing on, while the same logs were readable from outside,
+  # and nothing in the job log said which of these steps had failed.
+  [ -n "$repo" ] || { echo "fuzz_shard_log: shard $n: no repository to read from" >&2; return 1; }
+  [ -n "$jobs" ] || { echo "fuzz_shard_log: shard $n: this run's job list could not be fetched" >&2; return 1; }
+  command -v gh >/dev/null 2>&1 || { echo "fuzz_shard_log: shard $n: no gh on PATH" >&2; return 1; }
+  command -v jq >/dev/null 2>&1 || { echo "fuzz_shard_log: shard $n: no jq on PATH" >&2; return 1; }
   id=$(printf '%s' "$jobs" \
-    | jq -r --arg n "$n" '[(.jobs // .)[] | select(.name | test("shard " + $n + "[,)]")) | .id][0] // empty' 2>/dev/null) || return 1
-  [ -n "$id" ] || return 1
-  # Quote the URL: a bare `?` is a glob in the caller's shell.
-  gh api "repos/$repo/actions/jobs/$id/logs" 2>/dev/null
+    | jq -r --arg n "$n" '[(.jobs // .)[] | select(.name | test("shard " + $n + "[,)]")) | .id][0] // empty' 2>/dev/null) || id=""
+  [ -n "$id" ] || { echo "fuzz_shard_log: shard $n: no job named 'shard $n' in this run's job list" >&2; return 1; }
+  # Quote the URL: a bare `?` is a glob in the caller's shell. Retried: a
+  # transient 5xx must not turn a shard's minutes into UNKNOWN.
+  #
+  # `--allow-escape-sequences` is THE fix for #2611's in-CI half: every job log
+  # carries ANSI colour codes (the runner echoes each step's script in
+  # `\e[36;1m`), and gh >= 2.10x REFUSES to print such a response ("the
+  # response contains terminal escape sequences; pass --allow-escape-sequences
+  # to output it anyway", exit 1). The runner image ships that gh, so from
+  # #2513's landing on, every in-CI recovery failed, while the same fetch from
+  # a workstation's older gh (which has no such flag, and rejects it as
+  # unknown) succeeded. So the flag is passed exactly when this gh has it.
+  # The help text is captured before it is searched: `gh ... | grep -q` under
+  # the verdict's `pipefail` fails whenever grep exits early and gh takes the
+  # SIGPIPE, which would silently drop the flag again.
+  local attempt err out esc=() help
+  help=$(gh api --help 2>&1 || true)
+  case "$help" in *--allow-escape-sequences*) esc=(--allow-escape-sequences) ;; esac
+  err=$(mktemp)
+  for attempt in 1 2 3; do
+    if out=$(gh api "repos/$repo/actions/jobs/$id/logs" "${esc[@]}" 2>"$err"); then
+      rm -f "$err"
+      printf '%s\n' "$out"
+      return 0
+    fi
+    [ "$attempt" -lt 3 ] && sleep $((attempt * 2))
+  done
+  echo "fuzz_shard_log: shard $n: job $id log fetch failed 3 times: $(tr '\n' ' ' <"$err" | cut -c1-300)" >&2
+  rm -f "$err"
+  return 1
 }
 
 # stdin: a job log. stdout: `<seconds> <generated> <findings>` from its LAST

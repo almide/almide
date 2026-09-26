@@ -1,0 +1,8 @@
+// src/a/util.almd — same leaf name as src/b/util.almd (#2654).
+let tag = "A"
+
+fn name() -> String = "a:" + tag
+
+fn scale(x: Int) -> Int = x * 2
+
+fn from_a() -> String = "only in a"

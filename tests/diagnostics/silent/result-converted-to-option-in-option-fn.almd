@@ -1,0 +1,8 @@
+// silent (#2607): a Result converted to Option with `?`, then propagated with
+// `!` inside an Option-returning fn — the spelling the E022 hint should lead to.
+fn first_num(s: String) -> Int? = {
+  let n = int.parse(s)?!
+  some(n)
+}
+
+effect fn main() -> Unit = println(int.to_string(first_num("3") ?? 0))

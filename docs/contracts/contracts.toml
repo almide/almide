@@ -210,6 +210,7 @@ evidence  = [
   { path = "spec/integration/modules/cross_module_repr_derive_test.almd", class = "fixture" },
   { path = "tests/module_type_repr_test.rs", name = "every_compiled_leg_prints_the_declared_name", class = "fixture" },
   { path = "tests/module_type_repr_test.rs", name = "interp_prints_the_declared_name", class = "fixture" },
+  { path = "spec/wasm_cross/record_field_rust_keyword.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-010"
@@ -522,6 +523,7 @@ evidence  = [
   { path = "spec/wasm_cross/bytes_set_on_record_field.almd", class = "fixture" },
   { path = "spec/wasm_cross/inplace_clear_alias.almd", class = "fixture" },
   { path = "spec/wasm_cross/inplace_clear_alias_field.almd", class = "fixture" },
+  { path = "spec/wasm_cross/record_scalar_field_assign_alias.almd", class = "fixture" },
 ]
 
 # ── LIST BOUNDS GRACEFULNESS ─────────────────────────────────────────
@@ -1465,6 +1467,8 @@ evidence  = [
   { path = "spec/wasm_cross/record_pair_result_return.almd", class = "fixture" },
   { path = "spec/wasm_cross/result_option_call_payload_return.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_rich_list_capture.almd", class = "fixture" },
+  { path = "spec/wasm_cross/heap_result_if_some_user_call_temps.almd", class = "fixture" },
+  { path = "tests/heap_arm_some_user_call_temps_test.rs", class = "fixture", name = "the_incumbent_test_lane_runs_the_test_block" },
 ]
 [[contract]]
 id        = "C-107"
@@ -1493,6 +1497,7 @@ evidence  = [
   { path = "spec/wasm_cross/unwrap_or_operand.almd", class = "fixture" },
   { path = "spec/wasm_cross/let_unwrap_propagation.almd", class = "fixture" },
   { path = "spec/wasm_cross/destructure_let_unwrap.almd", class = "fixture" },
+  { path = "spec/wasm_cross/unwrap_callarg_single_expr_effect_body.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-109"
@@ -3781,6 +3786,7 @@ evidence  = [
   { path = "spec/wasm_cross/codec_whitespace_tolerance.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_list_default.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_triple_list.almd", class = "fixture" },
+  { path = "spec/wasm_cross/record_field_rust_keyword.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-299"
@@ -4574,4 +4580,42 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/generic_protocol_conformance.almd", class = "fixture" },
   { path = "spec/integration/generic_protocol_ports/src/shop_test.almd", class = "fixture" },
+]
+[[contract]]
+id        = "C-366"
+spec      = "ALS-R5"
+title     = "http call handle: per-call limits name themselves when they fire, cancel closes the connection, poll never blocks"
+statement = "`http.start(method, url, body, headers, limits)` returns at once with an `HttpCall`; `poll` and `read_new` never block, `wait` blocks until the call ends, and `cancel` (or dropping the last copy of the handle) ends a running call as `err(\"request cancelled\")` and shuts its connection down, so the server observes the close and `read_new` answers `\"\"` from then on. The limits are per call, `{ total_ms, idle_ms }` in milliseconds with 0 = no limit: `total_ms` is a wall clock from `start` (dial, first byte and body all count) and `idle_ms` the longest gap between arrivals of bytes (the wait for the first byte included); a fired limit ends the call as exactly `err(\"request timeout: total_ms <n> exceeded\")` or `err(\"request timeout: idle_ms <n> exceeded\")`, the `_with_limits` twins of request_stream / openai_streaming_call / anthropic_streaming_call end the same way, and ALMIDE_HTTP_TIMEOUT_SECS stays the default of the calls without limits only. As with C-214, WHETHER a limit fires is the host's (the fixtures use wide margins) while the error shape is pinned. On the wasm target the embedded lane (`almide run --target wasm`) serves `start` / `poll` / `read_new` / `wait` / `cancel` and `request_stream_with_limits` with the same observables — the same error texts, the connection shut on cancel, and dropping the last copy of a handle cancelling its call — while the stock artifact (`almide build --target wasm`, the route `almide check --target wasm` checks) refuses the family with E081, and the openai / anthropic `_with_limits` twins stay native-only."
+since     = "0.64.0"
+status    = "active"
+evidence  = [
+  { path = "spec/stdlib/http_call_test.almd", class = "fixture" },
+  { path = "spec/embedded_cross/http_call_handle_errs.almd", class = "fixture" },
+  { path = "tests/http_call_handle_test.rs", name = "call_handle_limits_cancel_poll_and_the_streaming_twins", class = "fixture" },
+  { path = "tests/http_call_handle_test.rs", name = "native_only_default_timeout_and_the_sse_twin", class = "fixture" },
+  { path = "tests/http_call_handle_test.rs", name = "a_trickle_outlives_the_classic_stream_but_not_total_ms", class = "fixture" },
+  { path = "tests/http_call_handle_test.rs", name = "the_stock_route_and_the_sse_twin_keep_their_e081", class = "fixture" },
+  { path = "tests/http_call_family_gate_test.rs", name = "every_streaming_client_has_one_with_limits_twin", class = "fixture" },
+]
+[[contract]]
+id        = "C-367"
+spec      = "ALS-R5"
+title     = "http.serve runs on the embedded wasm lane with native's one-instance, sequential semantics and byte-identical responses"
+statement = "`http.serve(port, f)` serves on the EMBEDDED wasm lane (`almide run --target wasm`, almide/almide#2650) with native's semantics. ONE instance serves every request of the run, sequentially and in accept order: main runs once and calls `http.serve` exactly as it does natively, the host binds `0.0.0.0:<port>` and hands the guest one parsed request at a time, and the handler runs in the same instance and heap as main, so a value main computed before `serve` (a random draw, a clock read) and captured by the handler is the same on every request of the run, and main's effects before `serve` happen once — never the per-request instance of a `wasi:http` proxy host. The request is read and the response written by the SAME code on both legs: the request line's method and target, header lines split at the first colon and trimmed, in wire order, and a Content-Length body decoded as UTF-8 with replacement; the response is `HTTP/1.1 <status> <reason>` (the fixed reason table, `OK` for any status outside it), the response's headers in their order, `Content-Length`, the body, then the connection closes. So the status line, the headers and the body are byte-identical across the legs; `req_method` / `req_path` / `req_body` / `req_header` (first match, ASCII case-insensitive) / `query_params` (the target's text after the first `?`, split on `&`, each pair split at its first `=`, a pair without `=` skipped, `+` and `%XX` decoded, a later key winning) answer the same values; a handler `err(m)` is a `500` whose body is `Internal error: <m>` with `Content-Type: text/plain`; a bind failure ABORTS the run with `Error: bind failed: <os message>` on stderr and exit 1 wherever the call sits — `http.serve` is typed never-err, so a caller's `!` is a no-op, and before this contract the native runtime's returned err surfaced only when the call was a fn's tail (elsewhere the program silently went on without a server). The lane keeps native's stream rules while the server runs: stderr is unbuffered, so a run's stderr transcript matches native line for line, and stdout is flushed per write on a terminal and 64 KiB-buffered otherwise. NOT covered: the stock p1 artifact (`almide build --target wasm`) has no listening socket, so `http.serve` stays refused there at check time (E081 on the stock-p1 leg), and a `wasi:http/incoming-handler` component export is a different shape that this contract does not describe (both are almide/almide#2659). Evidence: spec/serve_cross/http_serve_replay.almd, a server fixture that no generic runner executes (it never exits); the implementation's driver starts it on both legs, replays one request script (GET, POST with a UTF-8 body and a header, a percent-encoded query, a status outside the reason table, a redirect, a 404, a handler err, another method) and compares the raw response bytes and the stderr transcript, asserts that the captured draw answers the same on two requests of one run, and starts it on an occupied port to compare the abort."
+since     = "0.64.0"
+status    = "active"
+evidence  = [
+  { path = "spec/serve_cross/http_serve_replay.almd", class = "fixture" },
+  { path = "tests/http_serve_cross_test.rs", name = "http_serve_answers_byte_identically_on_native_and_the_embedded_lane", class = "fixture" },
+  { path = "tests/http_serve_cross_test.rs", name = "a_bind_failure_aborts_identically_on_native_and_the_embedded_lane", class = "fixture" },
+]
+[[contract]]
+id        = "C-368"
+spec      = "ALS-R8"
+title     = "http router: a handler is a function, the most specific route answers, a broken table is refused, 404/405/400 come from the router, identically on both targets"
+statement = "A handler is a function `effect (HttpRequest) -> HttpResponse` and a router or a wrapped app is one too, so `http.new_request(method, target, body, headers)` builds a request with no socket and every reader (`req_method` / `req_path` (the target, query included) / `req_body` / `req_header` / `query_params` / `param`) answers it the same on native and wasm. `http.route(\"METHOD /path\", h)` (no method = every method) binds `{name}` to one segment and a last `{name...}` to the rest of the path (possibly empty), percent-decoded with `+` kept as `+`; matching uses the path without its query and ignores empty segments. Of the matching routes the MOST SPECIFIC answers whatever the registration order (A is at least as specific as B when every path A matches B matches too; a route with a method beats the same path without one). `http.router(routes)` is `err` naming every problem, never a half-served table: two routes some request matches with neither more specific (two spellings of one pattern included), a `{name...}` that is not last, a name bound twice, a method that is not upper-case letters, a path not starting with `/`. The router answers `404 Not Found` when no route matches the path, `405 Method Not Allowed` with `Allow` (the methods sorted and joined by `, `, HEAD added beside GET) when routes match the path under other methods only, HEAD through the GET route with the body emptied, and `400 Bad Request` for a target not starting with `/` or a `%` not followed by two hex digits in the path. `http.mount(prefix, sub)` hands the rest of the path and the query to `sub`, with the prefix's bindings still readable; `http.wrap(h, [a, b])` is `a(b(h))`, the first middleware outermost. `http.decode_json(req, decode)` parses the body as JSON through `decode`, its `err` a `400 Bad Request` response naming why; a handler's own `err` stays an `err`."
+since     = "0.64.0"
+status    = "active"
+evidence  = [
+  { path = "spec/stdlib/http_router_test.almd", class = "fixture" },
 ]

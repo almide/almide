@@ -37,6 +37,10 @@ pub(crate) fn scalar_of(ty: &Ty) -> Option<Scalar> {
 }
 
 
+/// The one field of the `HttpCall` block (#2633) — not an identifier, so
+/// only the stdlib type reaches it.
+pub(crate) const HTTP_CALL_FIELD: &str = "#http_call";
+
 /// A bare (unqualified, arg-free) Named type — split from `slice_ty_of`
 /// for the complexity budget. A user declaration wins; the builtin
 /// dynamic Value is the fallback for the undeclared opaque name; the
@@ -50,11 +54,16 @@ fn bare_named_of(name: &str, types: &TypeTable) -> Option<SliceTy> {
         .map(|&i| SliceTy::Named(i))
         .or_else(|| (name == "Value").then_some(SliceTy::Value))
         .or_else(|| match name {
-            // stdlib/http_response.almd / json_path.almd own these reps;
-            // the eraser publishes them as List[String].
-            "HttpResponse" | "JsonPath" => {
+            // stdlib/http_response.almd / http_request.almd / json_path.almd
+            // own these reps; the eraser publishes them as List[String].
+            "HttpResponse" | "HttpRequest" | "JsonPath" => {
                 Some(SliceTy::List(types.intern(SliceTy::Scalar(Scalar::Str))))
             }
+            // The http call handle (#2633): this emitter's own one-slot block
+            // holding the embedded host's call id. The field name cannot be
+            // spelled in source, so no user record shares the shape — and
+            // with it the drop glue that cancels the call (rc_ownership.rs).
+            "HttpCall" => types.anon_record(&[(almide_base::intern::sym(HTTP_CALL_FIELD), Ty::Int)]).map(SliceTy::Named),
             _ => None,
         })
         // A stdlib-owned bare name IS the stdlib's identity (#1828): a user

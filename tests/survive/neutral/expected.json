@@ -1,0 +1,106 @@
+{
+  "check": {
+    "newly_broken": [],
+    "newly_fixed": [],
+    "removed": [],
+    "unchanged": [
+      {
+        "after": {
+          "applicability": "unspecified",
+          "code": "",
+          "col": 0,
+          "context": "",
+          "end_col": null,
+          "file": "greet.almd",
+          "here": null,
+          "hint": "Prefix with '_' to suppress: _unused",
+          "level": "warning",
+          "line": 4,
+          "message": "unused variable 'unused'",
+          "secondary": [],
+          "suggestions": [],
+          "try": null,
+          "try_replace": null
+        },
+        "before": {
+          "applicability": "unspecified",
+          "code": "",
+          "col": 0,
+          "context": "",
+          "end_col": null,
+          "file": "greet.almd",
+          "here": null,
+          "hint": "Prefix with '_' to suppress: _unused",
+          "level": "warning",
+          "line": 2,
+          "message": "unused variable 'unused'",
+          "secondary": [],
+          "suggestions": [],
+          "try": null,
+          "try_replace": null
+        },
+        "checked": "greet.almd",
+        "matched_by": "position"
+      }
+    ]
+  },
+  "contracts": {
+    "newly_broken": [],
+    "newly_fixed": [],
+    "removed": [],
+    "unchanged": []
+  },
+  "edit": {
+    "kind": "patch",
+    "lines_after": 8,
+    "lines_before": 6
+  },
+  "file": "greet.almd",
+  "reach": {
+    "checked": [
+      "greet.almd",
+      "greet_test.almd"
+    ],
+    "contracts": [],
+    "root": ".",
+    "tests": [
+      "greet_test.almd"
+    ]
+  },
+  "schema_version": 1,
+  "summary": {
+    "check": {
+      "newly_broken": 0,
+      "newly_fixed": 0,
+      "removed": 0,
+      "unchanged": 1
+    },
+    "contracts": {
+      "newly_broken": 0,
+      "newly_fixed": 0,
+      "removed": 0,
+      "unchanged": 0
+    },
+    "tests": {
+      "newly_broken": 0,
+      "newly_fixed": 0,
+      "removed": 0,
+      "unchanged": 1
+    }
+  },
+  "survives": true,
+  "tests": {
+    "newly_broken": [],
+    "newly_fixed": [],
+    "removed": [],
+    "unchanged": [
+      {
+        "after": "pass",
+        "before": "pass",
+        "file": "greet_test.almd",
+        "name": "greets by name"
+      }
+    ]
+  },
+  "written": false
+}

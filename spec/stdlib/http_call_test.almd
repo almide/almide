@@ -1,0 +1,187 @@
+// wasm:skip — the server arm is `net`, which has no wasm host (#1628), and
+// the test runner builds the stock artifact, which refuses the handle (E081,
+// proofs/target-availability.toml). The handle itself runs on the embedded
+// wasm lane (#2633): tests/http_call_handle_test.rs drives these cases on
+// both legs against a Rust loopback server, byte-identical.
+// #2631 / C-366 — the http call handle. `http.start` returns at once; `poll`
+// and `read_new` never block; `wait` ends at the call's own limits; `cancel`
+// closes the connection. A fired limit names itself:
+// `request timeout: total_ms <n> exceeded` / `request timeout: idle_ms <n>
+// exceeded`; a cancelled call is `request cancelled`. WHETHER a limit fires
+// is the host's (the C-214 discipline), so the firing cases use wide margins:
+// a server that talks every 50 ms for up to 10 s against a 400 ms wall clock,
+// a server silent for 2 s against a 300 ms idle limit.
+//
+// The server arm is written with `net` and runs in its own `fan` arm (the net
+// handle tables are thread-local). It proves the close from ITS side: it
+// reads between events, and a read that answers end-of-stream or a reset is
+// the client having closed the connection. The client arm first dials a
+// throwaway connection until the listener is up, so `start` never races the
+// bind.
+import env
+import http
+import net
+
+effect fn ready(port: Int, left: Int) -> Result[Unit, String] = match net.tcp_connect(
+  "127.0.0.1",
+  port,
+) {
+  ok(probe) => {
+    net.tcp_close(probe)!
+    ok(())
+  },
+  err(e) => if left == 0 then err(e)
+  else {
+    env.sleep_ms(20)
+    ready(port, left - 1)
+  },
+}
+
+// Listen, answer the readiness probe, accept the real client and read its
+// request: the real client's stream.
+effect fn accept_real(port: Int) -> Result[(Int, Int), String] = {
+  let server = net.tcp_listen("127.0.0.1", port)!
+  let probe = net.tcp_accept(server)!
+  net.tcp_close(probe)!
+  let peer = net.tcp_accept(server)!
+  let _ = net.tcp_read(peer, 4096)!
+  ok((server, peer))
+}
+
+// Has the client closed the connection? A read that answers end-of-stream
+// says so. A read that errs is a quiet 50 ms or a reset (the answer to an
+// event written after the close); a second, short read tells them apart — a
+// live connection times out again, a reset one answers end-of-stream.
+effect fn peer_closed(peer: Int) -> Result[Bool, String] = match net.tcp_read_timeout(peer, 64, 50) {
+  ok(b) => ok(bytes.len(b) == 0),
+  err(_) => match net.tcp_read_timeout(peer, 64, 1) {
+    ok(b) => ok(bytes.len(b) == 0),
+    err(_) => ok(false),
+  },
+}
+
+// Talk every 50 ms until the client closes; the number of events it took.
+// A client that never closes ends the arm with an err after 200 events.
+effect fn trickle(peer: Int, i: Int) -> Result[Int, String] = if i >= 200 then err("the client never closed the connection")
+else if peer_closed(peer)! then ok(i)
+else {
+  net.tcp_write(peer, bytes.from_string("data: ${i}\n\n"))!
+  trickle(peer, i + 1)
+}
+
+effect fn trickle_server(port: Int) -> Result[Int, String] = {
+  let (server, peer) = accept_real(port)!
+  net.tcp_write(
+    peer,
+    bytes.from_string("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"),
+  )!
+  let n = trickle(peer, 0)!
+  net.tcp_close(peer)!
+  net.tcp_close_listener(server)!
+  ok(n)
+}
+
+effect fn silent_server(port: Int) -> Result[Unit, String] = {
+  let (server, peer) = accept_real(port)!
+  env.sleep_ms(2000)
+  net.tcp_close(peer)!
+  net.tcp_close_listener(server)!
+  ok(())
+}
+
+effect fn answer_server(port: Int, reply: String) -> Result[Unit, String] = {
+  let (server, peer) = accept_real(port)!
+  net.tcp_write(peer, bytes.from_string(reply))!
+  net.tcp_close(peer)!
+  net.tcp_close_listener(server)!
+  ok(())
+}
+
+fn outcome(r: Result[HttpResponse, String]) -> String = match r {
+  ok(resp) => "${http.status_code(resp)} ${http.body(resp)}",
+  err(e) => e,
+}
+
+fn polled(p: Result[HttpResponse, String]?) -> String = match p {
+  some(r) => outcome(r),
+  none => "pending",
+}
+
+effect fn wait_with(port: Int, total_ms: Int, idle_ms: Int) -> Result[String, String] = {
+  ready(port, 200)!
+  let c = http.start(
+    "GET",
+    "http://127.0.0.1:${port}/",
+    "",
+    [:],
+    { total_ms: total_ms, idle_ms: idle_ms },
+  )!
+  ok(outcome(http.wait(c)))
+}
+
+// Read for `rounds` turns of 100 ms without blocking; everything read.
+effect fn gather(c: HttpCall, rounds: Int, acc: String) -> Result[String, String] = {
+  let next = acc + http.read_new(c)
+  if rounds == 0 then ok(next)
+  else {
+    env.sleep_ms(100)
+    gather(c, rounds - 1, next)
+  }
+}
+
+effect fn cancel_client(port: Int) -> Result[(String, String, String, String), String] = {
+  ready(port, 200)!
+  let c = http.start("GET", "http://127.0.0.1:${port}/", "", [:], { total_ms: 0, idle_ms: 0 })!
+  let before = polled(http.poll(c))
+  let seen = gather(c, 5, "")!
+  http.cancel(c)
+  let after = gather(c, 3, "")!
+  http.cancel(c)
+  ok((before, seen, after, polled(http.poll(c))))
+}
+
+test "total_ms is a wall clock: a stream that keeps talking ends at it" {
+  let (served, answer) = fan {
+    trickle_server(39290)
+    wait_with(39290, 400, 0)
+  }
+  assert_eq(answer, "request timeout: total_ms 400 exceeded")
+  // The server saw the close long before its own 200-event cap.
+  assert(served < 150)
+}
+
+test "idle_ms bounds the wait for the first byte" {
+  let (_, answer) = fan {
+    silent_server(39291)
+    wait_with(39291, 0, 300)
+  }
+  assert_eq(answer, "request timeout: idle_ms 300 exceeded")
+}
+
+test "poll never blocks, cancel closes the connection and nothing arrives after it" {
+  let (served, (before, seen, after, final)) = fan {
+    trickle_server(39292)
+    cancel_client(39292)
+  }
+  assert_eq(before, "pending")
+  assert(string.starts_with(seen, "data: 0\n\n"))
+  assert_eq(after, "")
+  assert_eq(final, "request cancelled")
+  assert(served < 150)
+}
+
+test "wait answers the whole response, any status" {
+  let (_, answer) = fan {
+    answer_server(39293, "HTTP/1.1 404 Not Found\r\nContent-Length: 4\r\n\r\ngone")
+    wait_with(39293, 5000, 0)
+  }
+  assert_eq(answer, "404 gone")
+}
+
+test "a limit below zero is refused at start" {
+  let r = http.start("GET", "http://127.0.0.1:1/", "", [:], { total_ms: 0, idle_ms: -1 })
+  match r {
+    ok(_) => assert(false),
+    err(e) => assert(string.starts_with(e, "invalid limits: ")),
+  }
+}

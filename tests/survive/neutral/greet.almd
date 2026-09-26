@@ -1,0 +1,6 @@
+fn greet(name: String) -> String = {
+  let unused = 0
+  "hello, ${name}"
+}
+
+fn farewell(name: String) -> String = "bye, ${name}"

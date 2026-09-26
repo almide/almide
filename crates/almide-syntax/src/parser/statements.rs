@@ -56,7 +56,10 @@ impl Parser {
 
         // Detect `let rec name(args) = ...` (OCaml / SML / F#). Almide
         // doesn't need `rec` — top-level fns are recursive by default.
-        if self.check(TokenType::Ident) && self.current().value == "rec" {
+        // Only when a name follows: `let rec = …` / `let rec: T = …` bind a
+        // local called `rec` (#2643).
+        let names_after = self.peek_at(1).is_some_and(|t| t.token_type == TokenType::Ident);
+        if self.check(TokenType::Ident) && self.current().value == "rec" && names_after {
             let tok = self.current().clone();
             let diag = self.diag_error(
                 "`let rec` is OCaml/SML syntax; Almide functions are recursive by default",

@@ -60,6 +60,7 @@ pub mod wasm_leg;
 pub mod wasm_route;
 pub mod project_fetch;
 pub mod resolve;
+pub mod source_overlay;
 
 // ── Wall marker: the machine-readable line of a wasm wall's stderr ──
 //

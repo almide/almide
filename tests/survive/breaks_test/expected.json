@@ -1,0 +1,84 @@
+{
+  "check": {
+    "newly_broken": [],
+    "newly_fixed": [],
+    "removed": [],
+    "unchanged": []
+  },
+  "contracts": {
+    "newly_broken": [],
+    "newly_fixed": [],
+    "removed": [],
+    "unchanged": []
+  },
+  "edit": {
+    "kind": "patch",
+    "lines_after": 3,
+    "lines_before": 3
+  },
+  "file": "calc.almd",
+  "reach": {
+    "checked": [
+      "calc.almd",
+      "calc_test.almd"
+    ],
+    "contracts": [],
+    "root": ".",
+    "tests": [
+      "calc_test.almd"
+    ]
+  },
+  "schema_version": 1,
+  "summary": {
+    "check": {
+      "newly_broken": 0,
+      "newly_fixed": 0,
+      "removed": 0,
+      "unchanged": 0
+    },
+    "contracts": {
+      "newly_broken": 0,
+      "newly_fixed": 0,
+      "removed": 0,
+      "unchanged": 0
+    },
+    "tests": {
+      "newly_broken": 1,
+      "newly_fixed": 0,
+      "removed": 0,
+      "unchanged": 1
+    }
+  },
+  "survives": false,
+  "tests": {
+    "newly_broken": [
+      {
+        "after": "fail",
+        "before": "pass",
+        "failure": {
+          "diff": null,
+          "expected": "3",
+          "file": "calc_test.almd",
+          "found": "-1",
+          "line": 4,
+          "message": "assertion `left == right` failed: at line 4",
+          "name": "add adds",
+          "op": "assert_eq"
+        },
+        "file": "calc_test.almd",
+        "name": "add adds"
+      }
+    ],
+    "newly_fixed": [],
+    "removed": [],
+    "unchanged": [
+      {
+        "after": "pass",
+        "before": "pass",
+        "file": "calc_test.almd",
+        "name": "twice doubles"
+      }
+    ]
+  },
+  "written": false
+}

@@ -661,8 +661,8 @@ fn lsp_didchange_never_fetches_or_writes_lock() {
 #[test]
 fn lsp_try_fix_reaches_client_as_code_action() {
     let mut c = LspClient::start();
-    // E013 with a close-match suggestion emits a machine-applicable
-    // try_replace fix ("p.name") — it must survive into the published
+    // E013 with a close-match suggestion emits a span-exact (maybe-incorrect)
+    // repair ("p.name") — it must survive into the published
     // diagnostic's `data` and come back as a quickfix edit.
     let src = "type Person = { name: String, age: Int }\nfn get(p: Person) -> String = p.nam\n";
     c.open_file(TEST_URI, src);
@@ -679,6 +679,10 @@ fn lsp_try_fix_reaches_client_as_code_action() {
         .unwrap_or_else(|| panic!("expected a quickfix applying `p.name`, got {}", resp["result"]));
     let edits = &fix["edit"]["changes"][TEST_URI];
     assert_eq!(edits[0]["newText"].as_str(), Some("p.name"), "quickfix edit text: {}", fix);
+    // #2149: the edit comes from `repair.primary`. A field-name respelling
+    // from an edit distance is `maybe-incorrect`, so it is offered but NOT
+    // marked preferred — only a machine-applicable primary is.
+    assert_ne!(fix["isPreferred"].as_bool(), Some(true), "a maybe-incorrect edit must not be preferred: {}", fix);
     c.shutdown();
 }
 
@@ -776,5 +780,74 @@ fn lsp_rename_refuses_interpolated_occurrence() {
     // string wrong.
     let resp = c.rename(1, TEST_URI, 0, 9, "who");
     assert!(resp.get("error").is_some(), "in-hole occurrence must refuse: {resp}");
+    c.shutdown();
+}
+
+#[test]
+fn lsp_machine_applicable_repair_is_the_preferred_quickfix() {
+    let mut c = LspClient::start();
+    // E031 (#2149): the retired range spelling `0..3` has exactly one reading,
+    // `0..<3` — a machine-applicable `repair.primary`, so the quickfix is
+    // the preferred action.
+    let src = "fn f() -> Int = {\n  var n = 0\n  for i in 0..3 {\n    n = n + i\n  }\n  n\n}\n";
+    c.open_file(TEST_URI, src);
+    let msg = c.recv();
+    let diags = msg["params"]["diagnostics"].clone();
+    let e031 = diags.as_array().unwrap().iter()
+        .find(|d| d["code"].as_str() == Some("E031"))
+        .unwrap_or_else(|| panic!("expected an E031 diagnostic, got {}", diags));
+    let resp = c.code_action(1, TEST_URI, json!([e031]));
+    let actions = resp["result"].as_array().unwrap();
+    let fix = actions.iter().find(|a| a["isPreferred"].as_bool() == Some(true))
+        .unwrap_or_else(|| panic!("expected a preferred quickfix, got {}", resp["result"]));
+    assert_eq!(fix["edit"]["changes"][TEST_URI][0]["newText"].as_str(), Some("..<"), "{}", fix);
+    c.shutdown();
+}
+
+/// `almide/survive` (#2147): the open buffer is the proposed edit when the
+/// request carries none; the answer is the CLI's survival delta; the file on
+/// disk is never written.
+#[test]
+fn lsp_survive_judges_the_unsaved_buffer_without_writing() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("label.almd");
+    let disk = "fn label(n: Int) -> String = n\n";
+    std::fs::write(&path, disk).unwrap();
+    let uri = file_uri(&path);
+    let mut c = LspClient::start();
+    c.open_file(&uri, "// labels\nfn label(n: Int) -> String = int.to_string(n)\n");
+    c.send(&json!({
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "almide/survive",
+        "params": { "textDocument": { "uri": uri } }
+    }));
+    let resp = c.recv_response(7);
+    let r = &resp["result"];
+    assert_eq!(r["schema_version"], 1, "{}", resp);
+    assert_eq!(r["survives"], true, "{}", resp);
+    assert_eq!(r["check"]["newly_fixed"].as_array().map(|a| a.len()), Some(1), "{}", resp);
+    // An explicit proposal wins over the buffer: this one breaks nothing new
+    // but keeps the error, so it is unchanged, matched across the shift.
+    c.send(&json!({
+        "jsonrpc": "2.0",
+        "id": 8,
+        "method": "almide/survive",
+        "params": { "textDocument": { "uri": uri }, "text": "\nfn label(n: Int) -> String = n\n" }
+    }));
+    let resp = c.recv_response(8);
+    let unchanged = resp["result"]["check"]["unchanged"].as_array().cloned().unwrap_or_default();
+    assert_eq!(unchanged.len(), 1, "{}", resp);
+    assert_eq!((unchanged[0]["before"]["line"].clone(), unchanged[0]["after"]["line"].clone()), (json!(1), json!(2)), "{}", resp);
+    // Both at once is a params error, answered as one.
+    c.send(&json!({
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "almide/survive",
+        "params": { "textDocument": { "uri": uri }, "text": "x", "patch": "y" }
+    }));
+    let resp = c.recv_response(9);
+    assert!(resp["error"]["message"].as_str().unwrap_or("").contains("not both"), "{}", resp);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), disk, "almide/survive wrote the file");
     c.shutdown();
 }

@@ -1,0 +1,2 @@
+// silent (E047 near-miss): defined escapes, including a unicode scalar escape.
+fn main() -> Unit = println("tab:\tquote:\" smile:\u{1F600} done")

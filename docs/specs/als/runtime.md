@@ -1,6 +1,6 @@
 # ALS — 実行時規範（Runtime）
 
-> Last updated: 2026-09-19
+> Last updated: 2026-09-26
 
 プログラム実行の観測規範（エラー終了・文字列補間の表示形・並行コンビネータ）。
 参照方法は [strings.md](strings.md) 冒頭と同じ。
@@ -81,7 +81,30 @@ temp_dir は非空かつ posix ホストでは絶対パス）が証明対象と�
 存在しない実行ファイルは起動失敗であり、タイムアウトと報告してはならない。
 期限が発火した場合の err は従来どおり `exec timed out after <ms>ms` とする。
 テスト: `spec/stdlib/process_timeout_test.almd`
-Contracts: C-096, C-112, C-118, C-133, C-189, C-214。
+
+`http.start(method, url, body, headers, limits)` は、要求を始めてすぐに呼び出し
+ハンドル（`HttpCall`）を返す。上限は呼び出しごとに `limits = { total_ms,
+idle_ms }`（ミリ秒、0 は上限なし）で渡す。`total_ms` は `start` から測る壁時計で、
+接続・最初の 1 バイトまでの待ち・本文をすべて含む。`idle_ms` はバイトが届く間隔の
+上限で、最初の 1 バイトまでの待ちも含む。発火した上限は、自分の名前を示す err
+`request timeout: total_ms <n> exceeded` または
+`request timeout: idle_ms <n> exceeded` で呼び出しを終わらせる。
+`ALMIDE_HTTP_TIMEOUT_SECS` は上限を取らない呼び出しの既定値であり、上限を持つ
+呼び出しには効かない。`poll` と `read_new` は待たない。`wait` は呼び出しが終わる
+まで待つ。`cancel` と、ハンドルの最後の写しが捨てられることは、走っている呼び出しを
+err `request cancelled` で終わらせて接続を閉じる。以後 `read_new` は空文字列を
+返し、サーバーは接続が閉じたことを観測する。上限が発火するかどうかはホストの性質で
+ある（C-214 と同じ規律）。固定するのは、発火したときの err の形である。wasm
+ターゲットでは、埋め込みホスト（`almide run --target wasm`）が `start`・`poll`・
+`read_new`・`wait`・`cancel` と `request_stream_with_limits` を native と同じ
+観測で提供する。err の文字列、`cancel` で接続が閉じること、ハンドルの最後の写しを
+捨てると呼び出しが取り消されることも同じである。単体の成果物
+（`almide build --target wasm`）はこの族を持てず、`almide check --target wasm` は
+E081 で拒否する。`openai_streaming_call_with_limits` と
+`anthropic_streaming_call_with_limits` は native のみである。
+テスト: `spec/stdlib/http_call_test.almd`、`spec/embedded_cross/http_call_handle_errs.almd`
+
+Contracts: C-096, C-112, C-118, C-133, C-189, C-214, C-366。
 
 ## ALS-R6 ファイルシステムのパス解決
 

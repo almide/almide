@@ -161,6 +161,27 @@ impl Emitter<'_> {
                         self.fs_call_str2(&args[0], &args[1], crate::fs_meta::OP_HTTP_FRAMED_BYTES)?;
                         return Ok(Some(self.fs_result_bytes()?));
                     }
+                    // The http call handle's leaves (#2633, http_call.rs).
+                    n if n.starts_with("__http_call_") => {
+                        if let Some(t) = self.lower_http_call_leaf(n, args)? {
+                            return Ok(Some(t));
+                        }
+                    }
+                    // The http.serve loop's leaves (#2650): bind (port
+                    // text), next (the request as a List[String] of
+                    // frames), reply (the response's cells in a).
+                    "__http_serve_bind" => {
+                        self.fs_call_1(&args[0], crate::fs_meta::OP_HTTP_SERVE_BIND)?;
+                        return Ok(Some(self.fs_result_unit()?));
+                    }
+                    "__http_serve_next" => {
+                        self.fs_call_0(crate::fs_meta::OP_HTTP_SERVE_NEXT)?;
+                        return Ok(Some(self.fs_result_string_list()?));
+                    }
+                    "__http_serve_reply" => {
+                        self.fs_call_1(&args[0], crate::fs_meta::OP_HTTP_SERVE_REPLY)?;
+                        return Ok(Some(self.fs_result_unit()?));
+                    }
                     _ => {}
                 }
                 // Entry fns resolve by name; a miss falls back to the

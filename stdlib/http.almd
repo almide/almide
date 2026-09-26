@@ -23,6 +23,8 @@
 // A handler `Err` becomes the loop's 500 response; a pure handler is
 // Ok-wrapped by the checker's carrier typing, so both spellings arrive
 // uniform.
+import json
+
 /// Serves 0.0.0.0:port forever; handler err is a 500.
 @intrinsic("almide_rt_http_serve")
 effect fn serve(port: Int, f: effect (HttpRequest) -> HttpResponse) -> Unit = _
@@ -249,3 +251,385 @@ effect fn openai_streaming_call(base_url: String, api_key: String, body_json: St
 /// Streams Anthropic Messages; LLM-response JSON.
 @intrinsic("almide_rt_sse_anthropic_messages")
 effect fn anthropic_streaming_call(api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> Result[String, String] = _
+
+// ── Call handle and per-call limits (#2631) ──
+//
+// `start` returns at once with an `HttpCall`; a runtime thread does the
+// exchange. `poll` and `read_new` never block, `wait` blocks until the call
+// ends (bounded by its limits), `cancel` closes the connection — and so does
+// dropping the last copy of the handle. Limits are per call, in ms, 0 = no
+// limit: `total_ms` is a wall clock from `start` (dial, first byte and body
+// all count), `idle_ms` the longest gap between bytes (the wait for the first
+// byte counts). A fired limit is `err("request timeout: total_ms <n>
+// exceeded")` / `err("request timeout: idle_ms <n> exceeded")`; a cancelled
+// call is `err("request cancelled")`. ALMIDE_HTTP_TIMEOUT_SECS stays the
+// default of the calls that take no limits.
+//
+// FAMILY RULE (machine-checked by tests/http_call_family_gate_test.rs): the
+// handle has exactly the five verbs start / poll / read_new / wait / cancel,
+// and every streaming client — request_stream, openai_streaming_call,
+// anthropic_streaming_call — has exactly one `<name>_with_limits` twin: the
+// same parameters with `limits: HttpLimits` inserted before the callback, the
+// same return type, built on the handle. Intentional omissions: the one-shot
+// clients (get / request / *_response / *_status / *_bytes) get no twin —
+// `start` + `wait` is their limited form, answering the `request_response`
+// record.
+/// Per-call limits in ms; 0 = no limit.
+type HttpLimits = { total_ms: Int, idle_ms: Int }
+
+/// Begins a request; returns at once with a handle.
+effect fn start(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits) -> Result[HttpCall, String] = __call_start(
+  method,
+  url,
+  body,
+  headers,
+  limits.total_ms,
+  limits.idle_ms,
+)
+
+@intrinsic("almide_rt_http___call_start")
+@borrow_ref(headers)
+effect fn __call_start(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = _
+
+/// Never blocks: none while running, then the result.
+@intrinsic("almide_http_call_poll")
+@borrow_ref(c)
+effect fn poll(c: HttpCall) -> Result[HttpResponse, String]? = _
+
+/// Body text since the last read_new; never blocks.
+@intrinsic("almide_http_call_read_new")
+@borrow_ref(c)
+effect fn read_new(c: HttpCall) -> String = _
+
+/// Blocks until the call ends; any status is ok.
+@intrinsic("almide_http_call_wait")
+@borrow_ref(c)
+effect fn wait(c: HttpCall) -> Result[HttpResponse, String] = _
+
+/// Closes the connection; the call ends as err.
+@intrinsic("almide_http_call_cancel")
+@borrow_ref(c)
+effect fn cancel(c: HttpCall) -> Unit = _
+
+/// request_stream bounded by per-call limits.
+effect fn request_stream_with_limits(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits, on_chunk: (String) -> Unit) -> Result[Unit, String] = __request_stream_limited(
+  method,
+  url,
+  body,
+  headers,
+  limits.total_ms,
+  limits.idle_ms,
+  on_chunk,
+)
+
+@intrinsic("almide_rt_http___request_stream_limited")
+@borrow_ref(headers)
+effect fn __request_stream_limited(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int, on_chunk: (String) -> Unit) -> Result[Unit, String] = _
+
+/// openai_streaming_call bounded by per-call limits.
+effect fn openai_streaming_call_with_limits(base_url: String, api_key: String, body_json: String, limits: HttpLimits, on_text_delta: (String) -> Unit) -> Result[String, String] = __openai_streaming_limited(
+  base_url,
+  api_key,
+  body_json,
+  limits.total_ms,
+  limits.idle_ms,
+  on_text_delta,
+)
+
+@intrinsic("almide_rt_http___openai_streaming_limited")
+effect fn __openai_streaming_limited(base_url: String, api_key: String, body_json: String, total_ms: Int, idle_ms: Int, on_text_delta: (String) -> Unit) -> Result[String, String] = _
+
+/// anthropic_streaming_call bounded by per-call limits.
+effect fn anthropic_streaming_call_with_limits(api_key: String, body_json: String, limits: HttpLimits, on_text_delta: (String) -> Unit) -> Result[String, String] = __anthropic_streaming_limited(
+  api_key,
+  body_json,
+  limits.total_ms,
+  limits.idle_ms,
+  on_text_delta,
+)
+
+@intrinsic("almide_rt_http___anthropic_streaming_limited")
+effect fn __anthropic_streaming_limited(api_key: String, body_json: String, total_ms: Int, idle_ms: Int, on_text_delta: (String) -> Unit) -> Result[String, String] = _
+
+// ── Server: handlers, routes, middleware (#2588) ──
+//
+// A handler is a plain function from a request to a response, and so are a
+// router and a wrapped app: `serve` is one host's way of running a handler,
+// `new_request` is a test's way — an app is tested by calling it, with no
+// socket. Middleware is `(HttpHandler) -> HttpHandler`; per-request data is
+// passed as arguments, never through a mutable context.
+//
+// FAMILY RULE (#2588, gated by proofs/target-availability.toml): every
+// HttpRequest reader — req_method / req_path / req_body / req_header /
+// query_params / param — answers a request built by `new_request`, so the
+// availability probe builds its HttpRequest argument that way and no reader
+// is `unprobed` on any leg.
+/// Request to response; a router is one too.
+type HttpHandler = effect (HttpRequest) -> HttpResponse
+
+/// Wraps a handler: (next) => (req) => … next(req)! ….
+type HttpMiddleware = (HttpHandler) -> HttpHandler
+
+/// Route table row; build it with route or mount.
+type HttpRoute = { method: String, pattern: String, segments: List[String], handler: HttpHandler }
+
+/// Request built in code; target keeps its ?query.
+@intrinsic("almide_rt_http_new_request")
+@borrow_ref(headers)
+fn new_request(method: String, target: String, body: String, headers: Map[String, String]) -> HttpRequest = _
+
+/// Router-bound path parameter, decoded; none if unbound.
+@intrinsic("almide_http_param")
+@borrow_ref(req)
+fn param(req: HttpRequest, name: String) -> String? = _
+
+@intrinsic("almide_http_req_with_params")
+@consume(req)
+@borrow_ref(flat)
+fn __with_params(req: HttpRequest, flat: List[String]) -> HttpRequest = _
+
+@intrinsic("almide_http_req_with_path")
+@consume(req)
+fn __with_path(req: HttpRequest, target: String) -> HttpRequest = _
+
+@intrinsic("almide_http_set_body")
+@consume(resp)
+fn __set_body(resp: HttpResponse, body: String) -> HttpResponse = _
+
+fn __path_of(target: String) -> String = match string.index_of(target, "?") {
+  some(i) => string.take(target, i),
+  none => target,
+}
+
+fn __query_of(target: String) -> String = match string.index_of(target, "?") {
+  some(i) => string.drop(target, i + 1),
+  none => "",
+}
+
+// Empty segments do not count: `/users/` and `/users` are one path.
+fn __parts(path: String) -> List[String] = string.split(path, "/") |> list.filter((s) => s != "")
+
+// A path segment percent-decoded; `+` is a literal plus in a path.
+fn __decode_part(s: String) -> String = http.url_decode(string.replace(s, "+", "%2B"))
+
+fn __is_hex(c: String) -> Bool = c != "" and string.contains("0123456789abcdefABCDEF", c)
+
+// Some `%` is not followed by two hex digits: the path is not percent-encoded.
+fn __bad_escape(cs: List[String]) -> Bool = match list.first(cs) {
+  none => false,
+  some(c) => if c != "%" then __bad_escape(list.drop(cs, 1))
+  else if __is_hex(list.get(cs, 1) ?? "") and __is_hex(list.get(cs, 2) ?? "") then __bad_escape(list.drop(cs, 3)) else true,
+}
+
+fn __is_rest(s: String) -> Bool = string.starts_with(s, "{") and string.ends_with(s, "...}")
+
+fn __is_param(s: String) -> Bool = string.starts_with(s, "{") and string.ends_with(s, "}") and not __is_rest(s)
+
+fn __name_of(s: String) -> String = if __is_rest(s) then string.slice(s, 1, string.len(s) - 4)
+else string.slice(s, 1, string.len(s) - 1)
+
+// "end" past the last segment, else "lit", "param" (`{name}`) or "rest" (`{name...}`).
+fn __kind(s: String?) -> String = match s {
+  none => "end",
+  some(x) => if __is_rest(x) then "rest"
+  else if __is_param(x) then "param" else "lit",
+}
+
+fn __pattern_path(pattern: String) -> String = match string.index_of(pattern, " ") {
+  some(i) => string.trim(string.drop(pattern, i + 1)),
+  none => pattern,
+}
+
+/// "GET /users/{id}" to a route; no method = any.
+fn route(pattern: String, handler: HttpHandler) -> HttpRoute = {
+  let p = string.trim(pattern)
+  let method = match string.index_of(p, " ") {
+    some(i) => string.take(p, i),
+    none => "",
+  }
+  { method: method, pattern: p, segments: __parts(__pattern_path(p)), handler: handler }
+}
+
+/// Sub-app under prefix: /api/x reaches it as /x.
+fn mount(prefix: String, sub: HttpHandler) -> HttpRoute = {
+  let p = string.trim(prefix)
+  { method: "", pattern: p + "/{...}", segments: __parts(p) + ["{...}"], handler: __mounted(sub) }
+}
+
+// The anonymous `{...}` binds the rest of the path undecoded, so the sub-app
+// decodes each segment exactly once.
+fn __mounted(sub: HttpHandler) -> HttpHandler = (req) => {
+  let q = __query_of(http.req_path(req))
+  let rest = http.param(req, "") ?? ""
+  sub(http.__with_path(req, "/" + rest + (if q == "" then "" else "?" + q)))!
+}
+
+// The `[name, value, …]` bindings when a pattern matches the path's parts.
+fn __bind(segs: List[String], parts: List[String]) -> List[String]? = __bind_into(segs, parts, [])
+
+// Tail-recursive: `bound` carries the bindings made so far.
+fn __bind_into(segs: List[String], parts: List[String], bound: List[String]) -> List[String]? = match list.first(segs) {
+  none => if list.is_empty(parts) then some(bound) else none,
+  some(s) => if __is_rest(s) then {
+    let name = __name_of(s)
+    some(bound + [
+      name,
+      if name == "" then list.join(parts, "/")
+      else parts |> list.map(__decode_part) |> list.join("/")
+    ])
+  } else match list.first(parts) {
+    none => none,
+    some(part) => if __is_param(s) then __bind_into(
+      list.drop(segs, 1),
+      list.drop(parts, 1),
+      bound + [__name_of(s), __decode_part(part)],
+    )
+    else if __decode_part(part) == s then __bind_into(
+      list.drop(segs, 1),
+      list.drop(parts, 1),
+      bound,
+    )
+    else none,
+  },
+}
+
+// Every path `a` matches, `b` matches too: `a` is at least as specific.
+fn __covers(a: List[String], b: List[String]) -> Bool = {
+  let ka = __kind(list.first(a))
+  let kb = __kind(list.first(b))
+  if kb == "rest" then true
+  else if ka == "rest" then false
+  else if ka == "end" or kb == "end" then ka == kb
+  else if ka == "lit" and kb == "lit" and list.first(a) != list.first(b) then false
+  else if ka == "param" and kb == "lit" then false else __covers(list.drop(a, 1), list.drop(b, 1))
+}
+
+// Some path is matched by both.
+fn __overlaps(a: List[String], b: List[String]) -> Bool = {
+  let ka = __kind(list.first(a))
+  let kb = __kind(list.first(b))
+  if ka == "rest" or kb == "rest" then true
+  else if ka == "end" or kb == "end" then ka == kb
+  else if ka == "lit" and kb == "lit" and list.first(a) != list.first(b) then false else __overlaps(
+    list.drop(a, 1),
+    list.drop(b, 1),
+  )
+}
+
+fn __route_covers(a: HttpRoute, b: HttpRoute) -> Bool = (b.method == "" or a.method == b.method) and __covers(
+  a.segments,
+  b.segments,
+)
+
+// Go 1.22's rule: two routes some request matches, neither more specific
+// than the other (two spellings of one pattern included).
+fn __conflict(a: HttpRoute, b: HttpRoute) -> Bool = (a.method == "" or b.method == "" or a.method == b.method) and __overlaps(
+  a.segments,
+  b.segments,
+) and __route_covers(a, b) == __route_covers(b, a)
+
+fn __segment_ok(s: String, last: Bool) -> Bool = if __is_rest(s) then last and not string.contains(
+  __name_of(s),
+  "{",
+) and not string.contains(__name_of(s), "}")
+else if __is_param(s) then __name_of(s) != "" and not string.contains(__name_of(s), "{") and not string.contains(
+  __name_of(s),
+  "}",
+) else not string.contains(s, "{") and not string.contains(s, "}")
+
+fn __method_ok(m: String) -> Bool = string.chars(m) |> list.all((c) => string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c))
+
+fn __pattern_problems(r: HttpRoute) -> List[String] = {
+  let last = list.len(r.segments) - 1
+  let names = r.segments |> list.filter((s) => __is_param(s) or __is_rest(s)) |> list.map((s) => __name_of(s)) |> list.filter((n) => n != "")
+  let checks = [
+    (__method_ok(r.method), "the method must be upper-case letters"),
+    (string.starts_with(__pattern_path(r.pattern), "/"), "the path must start with /"),
+    (list.enumerate(r.segments) |> list.all(((i, s)) => __segment_ok(s, i == last)), "a segment is a literal, {name} or a last {name...}"),
+    (list.len(list.unique(names)) == list.len(names), "a name is bound twice")
+  ]
+  checks |> list.filter(((ok_, _)) => not ok_) |> list.map(((_, why)) => "\"${r.pattern}\": ${why}")
+}
+
+fn __problems(routes: List[HttpRoute]) -> List[String] = {
+  let own = routes |> list.flat_map((r) => __pattern_problems(r))
+  let conflicts = list.enumerate(routes) |> list.flat_map(((i, a)) => list.drop(routes, i + 1) |> list.filter((b) => __conflict(a, b)) |> list.map((b) => "\"${a.pattern}\" and \"${b.pattern}\" conflict"))
+  own + conflicts
+}
+
+fn __not_allowed(hits: List[(HttpRoute, List[String])]) -> HttpResponse = {
+  let methods = hits |> list.map(((r, _)) => r.method) |> list.filter((m) => m != "") |> list.unique
+  let allow = if list.contains(methods, "GET") and not list.contains(methods, "HEAD") then methods + ["HEAD"]
+  else methods
+  http.set_header(
+    http.response(405, "Method Not Allowed"),
+    "Allow",
+    allow |> list.sort |> list.join(", "),
+  )
+}
+
+effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) -> HttpResponse = {
+  let method = http.req_method(req)
+  let path = __path_of(http.req_path(req))
+  if not string.starts_with(path, "/") then http.response(
+    400,
+    "Bad Request: the request target must start with /",
+  )
+  else if __bad_escape(string.chars(path)) then http.response(
+    400,
+    "Bad Request: malformed percent-encoding in the path",
+  )
+  else {
+    let exact = hits |> list.filter(((r, _)) => r.method == method or r.method == "")
+    let via_get = method == "HEAD" and list.is_empty(exact)
+    let allowed = if via_get then hits |> list.filter(((r, _)) => r.method == "GET")
+    else exact
+    match allowed |> list.find(((a, _)) => list.all(allowed, ((b, _)) => __route_covers(a, b))) {
+      some((r, bound)) => {
+        let res = r.handler(http.__with_params(req, bound))!
+        if via_get then http.__set_body(res, "") else res
+      },
+      none => if list.is_empty(hits) then http.response(404, "Not Found") else __not_allowed(hits),
+    }
+  }
+}
+
+// The route table's lambda computes the matching routes itself: `routes` stays
+// a capture, never a param a callee would have to own.
+fn __table(routes: List[HttpRoute]) -> HttpHandler = (req) => {
+  let parts = __parts(__path_of(http.req_path(req)))
+  let hits = routes |> list.filter_map((r) => __bind(r.segments, parts) |> option.map((bound) => (r, bound)))
+  __dispatch(hits, req)!
+}
+
+/// Route table as a handler; err on conflicting routes.
+fn router(routes: List[HttpRoute]) -> Result[HttpHandler, String] = {
+  let problems = __problems(routes)
+  if list.is_empty(problems) then ok(__table(routes)) else err("http.router: " + list.join(
+    problems,
+    "; ",
+  ))
+}
+
+/// Applies middleware; the first is the outermost.
+fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler = if list.is_empty(middleware) then handler
+else wrap(
+  __apply(list.last(middleware) ?? __no_middleware, handler),
+  list.take(middleware, list.len(middleware) - 1),
+)
+
+// Named rather than inline `mw(inner)`: the wasm legs return a handler out
+// of an `if` only through a call they can resolve. `wrap` applies the LAST
+// middleware first, so the recursion is a tail call.
+fn __apply(mw: HttpMiddleware, inner: HttpHandler) -> HttpHandler = mw(inner)
+
+fn __no_middleware(next: HttpHandler) -> HttpHandler = next
+
+/// JSON body through decode; err is a 400 response.
+fn decode_json[T](req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse] = match json.parse(http.req_body(req)) {
+  ok(v) => match decode(v) {
+    ok(x) => ok(x),
+    err(e) => err(http.response(400, "Bad Request: " + e)),
+  },
+  err(e) => err(http.response(400, "Bad Request: the body is not JSON (" + e + ")")),
+}

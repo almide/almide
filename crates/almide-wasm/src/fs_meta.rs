@@ -54,12 +54,34 @@ pub(crate) const OP_HTTP_DELETE: i32 = 47;
 pub(crate) const OP_HTTP_FRAMED_TEXT: i32 = 48;
 pub(crate) const OP_HTTP_FRAMED_STATUS: i32 = 49;
 pub(crate) const OP_HTTP_FRAMED_BYTES: i32 = 50;
+/// http.serve (#2650, C-367): the guest-owned serve loop's three host
+/// ops, served by the embedded host through the native runtime's own
+/// server core. 70 binds (port in a), 71 answers the next request as
+/// frames [method, target, body, k1, v1, …], 72 writes the response (the
+/// http_framed cells in a: status, body, k1, v1, …) and closes the
+/// connection. 53..=59 belong to the http call handle (#2633).
+pub(crate) const OP_HTTP_SERVE_BIND: i32 = 70;
+pub(crate) const OP_HTTP_SERVE_NEXT: i32 = 71;
+pub(crate) const OP_HTTP_SERVE_REPLY: i32 = 72;
 /// fs.stat / fs.glob (#1423 stage 4): the two metadata surfaces the
 /// structural leg had no arm for. 38 answers the four FileStat fields as
 /// a 32-byte LE buffer (size, is_dir, is_file, modified — each an i64);
 /// 39 answers the sorted match list as frames, the walk/list_dir shape.
 /// The embedded host runs the native runtime's own algorithm for both
 /// (runtime/rs/src/fs.rs stat / segment-wise glob, C-137 / C-228).
+/// The http call handle (#2633): open (url in a, the start frame in b) answers
+/// the host call id in the len half; state / wait / read / cancel / step take
+/// the id in the a_len slot with a null a_ptr (the op-35 scalar discipline)
+/// and answer through the usual status/len packing; drop (the HttpCall drop
+/// glue) cancels and forgets the call. 51/52 are the fs line walks, so the
+/// family starts at 53. Stock artifacts refuse at check/build (E081).
+pub(crate) const OP_HTTP_CALL_OPEN: i32 = 53;
+pub(crate) const OP_HTTP_CALL_STATE: i32 = 54;
+pub(crate) const OP_HTTP_CALL_WAIT: i32 = 55;
+pub(crate) const OP_HTTP_CALL_READ: i32 = 56;
+pub(crate) const OP_HTTP_CALL_CANCEL: i32 = 57;
+pub(crate) const OP_HTTP_CALL_STEP: i32 = 58;
+pub(crate) const OP_HTTP_CALL_DROP: i32 = 59;
 pub(crate) const OP_STAT: i32 = 38;
 pub(crate) const OP_GLOB: i32 = 39;
 const OP_READ_BYTES: i32 = 14;

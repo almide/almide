@@ -210,6 +210,12 @@ pub struct Interpreter<'a> {
     pub(crate) stderr: String,
     /// Decremented per eval step; 0 → `FuelExhausted`.
     pub(crate) fuel: Cell<u64>,
+    /// Optional wall-clock bound (#2611), checked every 256 steps. Fuel
+    /// counts eval STEPS, and one step can cost O(n): `items = items + [x]`
+    /// copies the list, so 50M fuel of it is quadratic work — hours. Reaching
+    /// the deadline is `Unsupported` (the interpreter could not answer in
+    /// time), never `FuelExhausted`, which callers read as non-termination.
+    pub(crate) wall_deadline: Option<std::time::Instant>,
     /// The pool tier's own step budget (`POOL_FUEL`), charged while a
     /// self-hosted stdlib body is on the stack (`pool_depth > 0`).
     pub(crate) pool_fuel: Cell<u64>,
@@ -558,6 +564,7 @@ impl<'a> Interpreter<'a> {
             stdout: String::new(),
             stderr: String::new(),
             fuel: Cell::new(DEFAULT_FUEL),
+            wall_deadline: None,
             pool_fuel: Cell::new(POOL_FUEL),
             depth: Cell::new(0),
             det_fuel: Cell::new(i64::MAX),
@@ -712,6 +719,13 @@ impl<'a> Interpreter<'a> {
     /// Override the fuel budget (for tests / the fuzz oracle).
     pub fn with_fuel(mut self, fuel: u64) -> Self {
         self.fuel = Cell::new(fuel);
+        self
+    }
+
+    /// Stop the run at this wall-clock instant with `RunStatus::Unsupported`
+    /// (for the fuzz oracle, which runs in-process and cannot kill a slow run).
+    pub fn with_wall_deadline(mut self, deadline: std::time::Instant) -> Self {
+        self.wall_deadline = Some(deadline);
         self
     }
 

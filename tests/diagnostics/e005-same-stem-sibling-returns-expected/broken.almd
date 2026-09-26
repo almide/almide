@@ -1,0 +1,7 @@
+import fs
+import hex
+
+effect fn main() -> Unit = {
+  let b = fs.read_bytes("Cargo.toml")!
+  println(hex.encode(bytes.slice(b, 0, 16)))
+}

@@ -5,7 +5,7 @@
 // only has to hand off a `(text_delta) -> Unit` callback for live
 // rendering and consume the final LLMResponse-shaped JSON.
 //
-// `AlmideValue` and `almide_http_request_stream_impl` resolve via flat inlining
+// `AlmideValue` and `almide_http_stream_dispatch` resolve via flat inlining
 // into the user program (the runtime crate isn't a workspace member —
 // every module's source is concatenated into a single file at compile
 // time). No `use crate::...` imports here.
@@ -33,6 +33,29 @@ pub fn almide_rt_sse_openai_chat(
     body_json: &str,
     on_text_delta: std::rc::Rc<dyn Fn(String)>,
 ) -> Result<String, String> {
+    sse_openai_chat_run(base_url, api_key, body_json, None, on_text_delta)
+}
+
+/// `openai_streaming_call_with_limits` (#2631): the same helper streaming
+/// through the call handle, so `total_ms` / `idle_ms` bound it.
+pub fn almide_rt_http___openai_streaming_limited(
+    base_url: &str,
+    api_key: &str,
+    body_json: &str,
+    total_ms: i64,
+    idle_ms: i64,
+    on_text_delta: std::rc::Rc<dyn Fn(String)>,
+) -> Result<String, String> {
+    sse_openai_chat_run(base_url, api_key, body_json, Some((total_ms, idle_ms)), on_text_delta)
+}
+
+fn sse_openai_chat_run(
+    base_url: &str,
+    api_key: &str,
+    body_json: &str,
+    limits: Option<(i64, i64)>,
+    on_text_delta: std::rc::Rc<dyn Fn(String)>,
+) -> Result<String, String> {
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let mut headers: AlmideMap<String, String> = AlmideMap::new();
     headers.insert("Authorization".to_string(), format!("Bearer {}", api_key));
@@ -49,7 +72,7 @@ pub fn almide_rt_sse_openai_chat(
     let mut model_id = String::new();
     let mut done = false;
 
-    almide_http_request_stream_impl("POST", &url, body_json, &headers, |chunk: String| {
+    almide_http_stream_dispatch("POST", &url, body_json, &headers, limits, |chunk: String| {
         if done {
             return;
         }
@@ -265,6 +288,27 @@ pub fn almide_rt_sse_anthropic_messages(
     body_json: &str,
     on_text_delta: std::rc::Rc<dyn Fn(String)>,
 ) -> Result<String, String> {
+    sse_anthropic_messages_run(api_key, body_json, None, on_text_delta)
+}
+
+/// `anthropic_streaming_call_with_limits` (#2631): the same helper streaming
+/// through the call handle, so `total_ms` / `idle_ms` bound it.
+pub fn almide_rt_http___anthropic_streaming_limited(
+    api_key: &str,
+    body_json: &str,
+    total_ms: i64,
+    idle_ms: i64,
+    on_text_delta: std::rc::Rc<dyn Fn(String)>,
+) -> Result<String, String> {
+    sse_anthropic_messages_run(api_key, body_json, Some((total_ms, idle_ms)), on_text_delta)
+}
+
+fn sse_anthropic_messages_run(
+    api_key: &str,
+    body_json: &str,
+    limits: Option<(i64, i64)>,
+    on_text_delta: std::rc::Rc<dyn Fn(String)>,
+) -> Result<String, String> {
     let url = "https://api.anthropic.com/v1/messages".to_string();
     let mut headers: AlmideMap<String, String> = AlmideMap::new();
     headers.insert("x-api-key".to_string(), api_key.to_string());
@@ -281,7 +325,7 @@ pub fn almide_rt_sse_anthropic_messages(
     let mut finish_reason = String::new();
     let mut model_id = String::new();
 
-    almide_http_request_stream_impl("POST", &url, body_json, &headers, |chunk: String| {
+    almide_http_stream_dispatch("POST", &url, body_json, &headers, limits, |chunk: String| {
         sse_buffer.push_str(&chunk);
         while let Some(idx) = sse_buffer.find("\n\n") {
             let event_block: String = sse_buffer.drain(..idx + 2).collect();

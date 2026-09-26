@@ -1,0 +1,23 @@
+// #2645: two modules declare a same-NAME type and a top-level `let` holds
+// one of them. The let's type must pin to its own module's `mod.Step`, the
+// way a fn signature does — a bare `Step` reached codegen and the #433
+// name-pin gate refused the build. Declaration order must not matter:
+// `tletqa` writes its `let` and fn above `type Step`, which typed them
+// against `tletqb.Step` (E013 on a correct program).
+import tletqa
+import tletqb
+
+test "top-level let of a same-name type, read from the importer" {
+  assert_eq(list.len(tletqb.STEPS), 2)
+}
+
+test "top-level let of a same-name type, read inside its module" {
+  assert_eq(tletqb.names(), "x,yy")
+  assert_eq(tletqb.maybe_name(), "m")
+}
+
+test "a let and a fn declared above their module's type" {
+  assert_eq(tletqa.FIRST.n, 5)
+  assert_eq(tletqa.one().n, 1)
+  assert_eq(tletqa.total(), 8)
+}

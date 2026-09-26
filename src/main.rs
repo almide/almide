@@ -270,10 +270,17 @@ enum Commands {
     /// with JSON results — the same answers as the CLI, minus the step where a
     /// model has to parse human-formatted text.
     Mcp,
-    /// Explain a diagnostic code (e.g., almide explain E001)
+    /// Explain a diagnostic code (e.g., almide explain E001), or list every code
     Explain {
         /// Diagnostic code such as E001
-        code: String,
+        #[arg(required_unless_present = "list")]
+        code: Option<String>,
+        /// List every diagnostic code: code, severity, since, fix-it verdict, title
+        #[arg(long, conflicts_with = "code")]
+        list: bool,
+        /// With --list: one JSON array of {code, mnemonic, severity, since, verdict}
+        #[arg(long, requires = "list")]
+        json: bool,
     },
     /// Format source files
     Fmt {
@@ -389,6 +396,60 @@ enum Commands {
         /// Emit a machine-readable JSON report (for harness integration)
         #[arg(long)]
         json: bool,
+    },
+    /// Judge a proposed edit BEFORE writing it: apply it in memory, run check,
+    /// the tests that reach the file and its contract fixtures on both sides,
+    /// and report each diagnostic / test / contract as unchanged, newly_broken,
+    /// newly_fixed or removed. Never writes. Exit 0 = survives, 1 = does not,
+    /// 2 = the edit could not be judged.
+    Survive {
+        /// The .almd file the edit is to
+        file: String,
+        /// The edit: a path (or `-` for stdin) holding a unified diff or the
+        /// file's full new text
+        #[arg(long)]
+        with: String,
+        /// How to read `--with`: auto (a diff if it starts `--- ` / `@@ `), patch, text
+        #[arg(long = "as", default_value = "auto")]
+        as_kind: String,
+        /// Emit the survival delta as JSON (schema_version 1)
+        #[arg(long)]
+        json: bool,
+        /// Per-run time limit in seconds for every child check / test / run
+        #[arg(long, default_value_t = 600)]
+        timeout: u64,
+    },
+    /// Verify-then-write: run `survive` on the edit and write it (atomically)
+    /// only if nothing is newly broken. `--force` writes whatever the verdict.
+    Apply {
+        /// The .almd file to edit
+        file: String,
+        /// The edit: a path (or `-` for stdin) holding a unified diff or the
+        /// file's full new text
+        #[arg(long)]
+        with: String,
+        /// How to read `--with`: auto, patch, text
+        #[arg(long = "as", default_value = "auto")]
+        as_kind: String,
+        /// Write only if the edit survives. `true` / `false` only — any other
+        /// value refuses without writing
+        #[arg(long = "if-survives", num_args = 0..=1, require_equals = true, default_missing_value = "true")]
+        if_survives: Option<String>,
+        /// Write even if the edit does not survive (the verdict is still reported)
+        #[arg(long)]
+        force: bool,
+        /// Emit the survival delta (plus `written`) as JSON
+        #[arg(long)]
+        json: bool,
+        /// Per-run time limit in seconds for every child check / test / run
+        #[arg(long, default_value_t = 600)]
+        timeout: u64,
+    },
+    /// Internal to `almide survive`: compile one file's test harness and run it
+    /// captured, printing `{compiled, exit_code, output}` as one JSON line.
+    #[command(name = "survive-test-leg", hide = true)]
+    SurviveTestLeg {
+        file: String,
     },
     /// Check canonical docs (llms.txt, etc.) against source-of-truth inputs
     /// (Cargo version, diagnostic code inventory, stdlib auto-import list).
@@ -997,9 +1058,10 @@ fn dispatch_rest(command: Commands) {
         Commands::Mcp => {
             cli::mcp::run_mcp();
         }
-        Commands::Explain { code } => {
-            print_error_explanation(&code);
-        }
+        Commands::Explain { code, list, json } => match code {
+            Some(code) if !list => print_error_explanation(&code),
+            _ => cli::explain::print_list(DIAGNOSTIC_DOCS, json),
+        },
         Commands::Ide { cmd } => dispatch_ide(cmd),
         Commands::Fmt { files, check, json, dry_run, no_import_edit } => dispatch_fmt(files, check, json, dry_run, no_import_edit),
         Commands::Compile { module, json, dry_run, output } => {
@@ -1024,6 +1086,13 @@ fn dispatch_rest(command: Commands) {
             cli::cmd_self_update(version.as_deref());
         }
         Commands::Verify { args } => std::process::exit(cli::cmd_verify(&args)),
+        Commands::Survive { file, with, as_kind, json, timeout } => {
+            cli::cmd_survive(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout });
+        }
+        Commands::Apply { file, with, as_kind, if_survives, force, json, timeout } => {
+            cli::cmd_apply(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout }, if_survives, force);
+        }
+        Commands::SurviveTestLeg { file } => cli::cmd_survive_test_leg(&file),
         Commands::Emit { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map } => {
             cli::cmd_emit(cli::EmitArgs { file: &file, target: &target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map });
         }

@@ -273,6 +273,11 @@ impl LowerCtx {
             self.materialized_call_arg(dst, repr, ty);
             self.materialized_aggregates.insert(dst);
             self.materialized_lists.insert(dst);
+            // A slot holding a closure (`var handler = mk()`) is a real closure
+            // block: dispatchable, and dropped via the recursive `$__drop_closure`.
+            if matches!(ty, Ty::Fn { .. }) {
+                self.closure_values.insert(dst);
+            }
             return Ok(dst);
         }
         let dst = self.fresh_value();

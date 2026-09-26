@@ -68,8 +68,8 @@
 # (`missing=3,8` — their seeds are `run_id * 16 + shard`, replayable from the
 # run alone), and states the delivered fuzz-minutes as a percentage of the
 # plan (`delivered_pct`, `budget=full|partial` at the 75% line #924 ratified).
-# The shard number is read from the artifact directory name
-# (`fuzz-shard-<run_id>-<shard>`, the layout `download-artifact` produces).
+# The shard number is read by `shard_of` below: the artifact directory name
+# when the layout carries one, else the output's own header or seed (#2611).
 #
 # WHAT MAKES A NIGHT RED. Correctness findings, and only those. Coverage lost
 # to a reclaimed runner is reported, never fatal — otherwise the infra noise
@@ -141,13 +141,22 @@ emit_outputs() {
 # is still going, which is what makes this usable from the verdict job of the
 # same run. Failing to fetch it is not an error here — every shard then reads as
 # unreadable and is NAMED as such, which is the honest outcome.
+#
+# Fetched EAGERLY, here in the main shell, not lazily inside `shard_job_log`:
+# every caller reads that function through `$(...)`, a subshell, so a lazy
+# assignment never outlived the call and every shard re-fetched the list.
 JOBS_JSON=""
+if [ -z "${FUZZ_SHARD_LOG_DIR:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ] && [ -n "${GITHUB_RUN_ID:-}" ] \
+  && command -v gh >/dev/null 2>&1; then
+  JOBS_ERR=$(mktemp)
+  JOBS_JSON=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" 2>"$JOBS_ERR") || {
+    echo "could not list this run's jobs: $(tr '\n' ' ' <"$JOBS_ERR" | cut -c1-300)" >&2
+    JOBS_JSON=""
+  }
+  rm -f "$JOBS_ERR"
+fi
 shard_job_log() {
-  local repo="${GITHUB_REPOSITORY:-}" run="${GITHUB_RUN_ID:-}"
-  if [ -z "${FUZZ_SHARD_LOG_DIR:-}" ] && [ -z "$JOBS_JSON" ] && [ -n "$repo" ] && [ -n "$run" ]; then
-    JOBS_JSON=$(gh api "repos/$repo/actions/runs/$run/jobs?per_page=100" 2>/dev/null || true)
-  fi
-  fuzz_shard_log "$repo" "$JOBS_JSON" "$1"
+  fuzz_shard_log "${GITHUB_REPOSITORY:-}" "$JOBS_JSON" "$1"
 }
 
 # One shard = one fuzz-output.txt anywhere under DIR. A killed shard uploaded
@@ -155,15 +164,46 @@ shard_job_log() {
 mapfile -t OUTS < <(find "$DIR" -name fuzz-output.txt -type f 2>/dev/null | sort)
 REPORTING=${#OUTS[@]}
 
-# Which shard NUMBERS came back: the trailing `-<n>` of the artifact directory.
-# A layout that does not carry the number (a hand-built local exercise) leaves
-# the missing list `unknown` rather than guessing.
-SEEN=" "
-UNNUMBERED=0
-for out in "${OUTS[@]}"; do
+# Which shard NUMBER one output belongs to. Three sources, first hit wins:
+#
+#   1. the trailing `-<n>` of its directory (`fuzz-shard-<run>-<n>`, the layout
+#      `download-artifact` produces when SEVERAL artifacts match);
+#   2. the `fuzz-shard: <n>` header line the workflow writes as the output's
+#      first line;
+#   3. the seed: an undispatched-seed shard runs `run_id * 16 + shard`.
+#
+# Why not the directory alone (#2611): when exactly ONE artifact matches the
+# pattern, `download-artifact` extracts it straight into the target directory,
+# with no per-artifact subdirectory. That is the night where 7 of 8 shards were
+# reclaimed, which is exactly the night recovery exists for, and the directory
+# name was then `shards`. The number was lost, the missing list became
+# `unknown`, and recovery did not run for any of the 7 shards (runs
+# 35955335655, 35961934193, 36051987508).
+shard_of() {
+  local out="$1" d n seed
   d=$(basename "$(dirname "$out")")
   n="${d##*-}"
-  if [[ "$n" =~ ^[0-9]+$ ]]; then SEEN="$SEEN$n "; else UNNUMBERED=1; fi
+  if [[ "$n" =~ ^[0-9]+$ ]]; then echo "$n"; return; fi
+  n=$(grep -m1 -oE '^fuzz-shard: [0-9]+' "$out" 2>/dev/null | grep -oE '[0-9]+$' || true)
+  if [ -n "$n" ]; then echo "$n"; return; fi
+  seed=$(grep -oE "seed += +[0-9]+" "$out" 2>/dev/null | tr -s ' ' | cut -d' ' -f3 | head -1 || true)
+  if [ -n "$seed" ] && [ -n "${GITHUB_RUN_ID:-}" ]; then
+    n=$(awk -v s="$seed" -v r="$GITHUB_RUN_ID" 'BEGIN{d = s - r * 16; if (d >= 1 && d <= 15) printf "%d", d}')
+    if [ -n "$n" ] && [ "$n" -le "$PLANNED" ]; then echo "$n"; return; fi
+  fi
+  echo "?"
+}
+
+# Which shard NUMBERS came back. An output none of the three sources can place
+# (a hand-built local exercise) leaves the missing list `unknown` rather than
+# guessing.
+SEEN=" "
+UNNUMBERED=0
+declare -A SHARD_OF=()
+for out in "${OUTS[@]}"; do
+  n=$(shard_of "$out")
+  SHARD_OF["$out"]="$n"
+  if [ "$n" != "?" ]; then SEEN="$SEEN$n "; else UNNUMBERED=1; fi
 done
 MISSING=""
 if [ "$UNNUMBERED" -eq 1 ]; then
@@ -203,9 +243,7 @@ ELAPSED=0
 SEEDS=""
 ROWS=""
 for out in "${OUTS[@]}"; do
-  d=$(basename "$(dirname "$out")")
-  n="${d##*-}"
-  [[ "$n" =~ ^[0-9]+$ ]] || n="?"
+  n="${SHARD_OF[$out]}"
   seed=$(grep -oE "seed += +[0-9]+" "$out" | tr -s ' ' | cut -d' ' -f3 | head -1 || true)
   if grep -q "^=== campaign summary ===" "$out"; then
     COMPLETED=$((COMPLETED + 1))

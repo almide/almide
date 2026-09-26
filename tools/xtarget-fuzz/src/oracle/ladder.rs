@@ -240,6 +240,17 @@ pub fn run_ladder(
         };
     }
     let native = tc.run_native_bin(&native_bin);
+    if super::runner::native_hit_memory_cap(&native) {
+        // #2611: the program outgrew the native memory cap. That is a
+        // resource-unbounded program by construction, like a double hang:
+        // wasm stops at its own 4 GiB ceiling with a different failure form,
+        // so comparing the two would mint a phantom divergence.
+        return Outcome::Skipped {
+            reason: "native run hit the fuzz memory cap (a resource-unbounded program) — \
+                     no divergence oracle"
+                .into(),
+        };
+    }
     if native.timed_out {
         // A native hang is not, by itself, a cross-target finding: a mutation
         // can synthesize a genuinely non-terminating program (`pos + 0` in a
@@ -260,6 +271,11 @@ pub fn run_ladder(
                 // normal run (inheriting every skip rule and divergence
                 // class), with agreement mapping to Slow instead of Clean.
                 let native2 = tc_confirm.run_native_bin(&native_bin);
+                if super::runner::native_hit_memory_cap(&native2) {
+                    return Outcome::Skipped {
+                        reason: "native confirm re-run hit the fuzz memory cap — no divergence oracle".into(),
+                    };
+                }
                 if !native2.timed_out && !native2.spawn_failed {
                     return match compare_runs(source, &native2, &wasm_run, reference, expected) {
                         Outcome::Clean { .. } => Outcome::Finding(Finding {

@@ -1,0 +1,8 @@
+// silent (E043 near-miss): the fallible fold, spelled with the core name.
+fn step(acc: Int, x: Int) -> Result[Int, String] =
+  if x < 0 then err("negative") else ok(acc + x)
+
+effect fn main() -> Unit = {
+  let total = list.fold([1, 2, 3], 0, (a, x) => step(a, x)!)!
+  println(int.to_string(total))
+}

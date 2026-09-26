@@ -189,49 +189,144 @@ fn every_covered_code_has_at_least_three_fixture_families() {
 /// review), or `not-fixable`. The verdict is the third piece of the
 /// per-code checklist this gate already enforces (fixture + doc), so a new
 /// code cannot ship without stating where it sits on the applicability
-/// ladder. The soft report below it names the mechanical-verdict codes
-/// still lacking a `with_machine_fix` emitter — the backlog #1486 tracks.
+/// ladder.
 #[test]
 fn every_diagnostic_doc_declares_a_fix_it_verdict() {
-    let root = repo_root().join("docs/diagnostics");
-    let mut missing: Vec<String> = Vec::new();
-    let mut mechanical: Vec<String> = Vec::new();
-    for entry in std::fs::read_dir(&root).expect("read docs/diagnostics").flatten() {
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
-        if !name.starts_with('E') || !name.ends_with(".md") {
-            continue;
-        }
-        let text = std::fs::read_to_string(&path).unwrap_or_default();
-        if !text.contains("## Fix-it verdict") {
-            missing.push(name.to_string());
-            continue;
-        }
-        if text.contains("**mechanical**") {
-            mechanical.push(name.trim_end_matches(".md").to_string());
-        }
-    }
+    let (missing, _) = scan_fix_it_verdicts();
     assert!(
         missing.is_empty(),
         "diagnostic docs without a '## Fix-it verdict' section: {:?}",
         missing
     );
-    // Soft report: mechanical verdicts not yet wired to with_machine_fix.
-    let machine_coded = machine_fix_codes();
-    let backlog: Vec<&String> =
-        mechanical.iter().filter(|c| !machine_coded.contains(c.as_str())).collect();
-    eprintln!(
-        "fix-it backlog: {} mechanical-verdict code(s) without with_machine_fix: {:?}",
+}
+
+/// `(docs without a verdict section, codes whose verdict is **mechanical**)`.
+fn scan_fix_it_verdicts() -> (Vec<String>, BTreeSet<String>) {
+    let root = repo_root().join("docs/diagnostics");
+    let mut missing: Vec<String> = Vec::new();
+    let mut mechanical: BTreeSet<String> = BTreeSet::new();
+    for entry in std::fs::read_dir(&root).expect("read docs/diagnostics").flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+        if !name.starts_with('E') || !name.ends_with(".md") { continue; }
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let Some(verdict) = text.split("## Fix-it verdict").nth(1) else {
+            missing.push(name.to_string());
+            continue;
+        };
+        if verdict.contains("**mechanical**") {
+            mechanical.insert(name.trim_end_matches(".md").to_string());
+        }
+    }
+    (missing, mechanical)
+}
+
+/// #2149: a `**mechanical**` verdict is a promise that `almide fix` repairs
+/// the code unattended — so it is judged from the BINARY, not from a list.
+/// (The literal this replaced still named five codes after the engine
+/// learned all seven in c6f77330e, and only ever `eprintln!`ed the gap.)
+///
+/// For every mechanical code, over its own fixture families
+/// (`tests/diagnostics/<code>-*`):
+///
+/// 1. at least one family's diagnostic of that code carries a
+///    `repair.primary` tagged `machine-applicable` in `almide check --json`;
+/// 2. every such family ROUND-TRIPS: `almide fix` on a copy of `broken.almd`
+///    yields a program `almide check` accepts (judged by exit status —
+///    warnings print first and are not a verdict).
+///
+/// The reverse direction (no NON-mechanical code emits a machine-applicable
+/// repair) needs every fixture's JSON and lives beside the population floor
+/// in `diagnostic_harness_test.rs`.
+#[test]
+fn every_mechanical_verdict_emits_a_machine_applicable_repair_that_round_trips() {
+    let (_, mechanical) = scan_fix_it_verdicts();
+    assert!(!mechanical.is_empty(), "no mechanical verdicts found — the scan went vacuous");
+    let bin = env!("CARGO_BIN_EXE_almide");
+    let fixtures = repo_root().join("tests/diagnostics");
+    let mut backlog: Vec<String> = Vec::new();
+    let mut broken_round_trips: Vec<String> = Vec::new();
+    let mut proven: Vec<String> = Vec::new();
+    for code in &mechanical {
+        let prefix = format!("{}-", code.to_ascii_lowercase());
+        let mut families: Vec<PathBuf> = std::fs::read_dir(&fixtures).expect("read tests/diagnostics")
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(&prefix)))
+            .collect();
+        families.sort();
+        let mut machine_families = 0usize;
+        for family in &families {
+            let out = std::process::Command::new(bin)
+                .args(["check", "--json"])
+                .arg(family.join("broken.almd"))
+                .output()
+                .expect("almide check --json");
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let carries = stdout.lines()
+                .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+                .any(|d| {
+                    d["code"] == code.as_str()
+                        && d["repair"]["primary"]["applicability"] == "machine-applicable"
+                });
+            if !carries { continue; }
+            machine_families += 1;
+            // Round-trip on a scratch copy of the whole family (a fixture may
+            // carry almide.toml + src/ siblings the check resolves against).
+            let scratch = tempfile::tempdir().expect("tempdir");
+            copy_dir(family, scratch.path());
+            let fixed = std::process::Command::new(bin)
+                .args(["fix", "broken.almd"])
+                .current_dir(scratch.path())
+                .output()
+                .expect("almide fix");
+            let check = std::process::Command::new(bin)
+                .args(["check", "broken.almd"])
+                .current_dir(scratch.path())
+                .output()
+                .expect("almide check");
+            if !fixed.status.success() || !check.status.success() {
+                broken_round_trips.push(format!(
+                    "{}: after `almide fix` the program does not check:\n{}{}",
+                    family.display(),
+                    String::from_utf8_lossy(&check.stdout),
+                    String::from_utf8_lossy(&check.stderr),
+                ));
+            }
+        }
+        if machine_families == 0 {
+            backlog.push(code.clone());
+        } else {
+            proven.push(format!("{code}({machine_families})"));
+        }
+    }
+    eprintln!("mechanical verdicts with a machine-applicable repair: {}", proven.join(", "));
+    assert!(
+        backlog.is_empty(),
+        "fix-it backlog: {} mechanical-verdict code(s) emit no machine-applicable \
+         `repair.primary` on any of their fixtures: {:?} — attach one with \
+         `with_machine_fix`, or change the doc's verdict to `conditional`",
         backlog.len(),
         backlog
     );
+    assert!(
+        broken_round_trips.is_empty(),
+        "machine-applicable repairs that `almide fix` cannot round-trip:\n{}",
+        broken_round_trips.join("\n")
+    );
 }
 
-/// Codes with a `with_machine_fix` emitter under `crates/`.
-fn machine_fix_codes() -> std::collections::BTreeSet<&'static str> {
-    // Kept as a literal so the backlog report needs no source scan; update
-    // when converting a code (the conversion PR flips its entry here).
-    ["E013", "E031", "E049", "E052", "E062"].into_iter().collect()
+fn copy_dir(from: &Path, to: &Path) {
+    for entry in std::fs::read_dir(from).expect("read fixture dir").flatten() {
+        let src = entry.path();
+        let dst = to.join(entry.file_name());
+        if src.is_dir() {
+            std::fs::create_dir_all(&dst).expect("mkdir");
+            copy_dir(&src, &dst);
+        } else {
+            std::fs::copy(&src, &dst).expect("copy fixture file");
+        }
+    }
 }
 
 #[test]

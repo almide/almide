@@ -38,8 +38,8 @@ Output (stdout): one line per fn — `status<TAB>module.fn<TAB>detail`.
   unprobed  the leg walled on an ARGUMENT CONSTRUCTOR the probe injected
             (detail names it), so the fn under probe was never reached —
             the honesty bucket for values that only exist through another
-            fn (an HttpRequest inside an http.serve handler, a SafeHtml
-            from html.empty). Claimed neither way; the gate holds it under
+            fn (a SafeHtml from html.empty). Claimed neither way; the gate
+            holds it under
             a per-leg ceiling so it can never grow silently.
   error     the probe could not synthesize a well-typed minimal call
             (detail = why). Fails the probe (exit 1) and the gate: the
@@ -107,6 +107,11 @@ NOMINAL = {
     "SafeHtml": ("html.empty()", "html.empty", "html"),
     "SafePath": ('path.trusted("x")', "path.trusted", "path"),
     "HttpResponse": ('http.response(200, "x")', "http.response", "http"),
+    # The call handle (#2631): only `http.start` makes one.
+    "HttpCall": ('http.start("GET", "http://127.0.0.1:1/", "", [:], { total_ms: 1, idle_ms: 0 })!', "http.start", "http"),
+    # A route is built with `http.route` — its record fields are the parsed
+    # pattern, never written by hand (#2588).
+    "HttpRoute": ('http.route("/", (_r) => http.response(200, "x"))', "http.route", "http"),
 }
 BYTES8 = "bytes.from_list([0, 0, 0, 0, 0, 0, 0, 0])"
 
@@ -116,15 +121,13 @@ class Unsynth(Exception):
 
 
 class Ctx:
-    """Per-program synthesis state: imports, hoisted typed leaves, the
-    stdlib constructors the probe itself injected, and whether the call
-    needs an HttpRequest (reachable only inside an http.serve handler)."""
+    """Per-program synthesis state: imports, hoisted typed leaves, and the
+    stdlib constructors the probe itself injected."""
 
     def __init__(self):
         self.imports = set()
         self.hoists = []
         self.ctors = set()
-        self.needs_req = False
         self.n = 0
 
     def hoist(self, ty: str, expr: str) -> str:
@@ -207,7 +210,13 @@ def dummy(t: dict, ctx: Ctx, types: dict) -> str:
         return "(" + ", ".join(dummy(e, ctx, types) for e in t["elements"]) + ")"
     if k == "fn":
         names = [f"_p{i}" for i in range(len(t.get("params", [])))]
-        return f"({', '.join(names)}) => {dummy(t['return'], ctx, types)}"
+        ret = t["return"]
+        # A Result the lambda RETURNS is built inline: the slot's declared
+        # type pins its error type, and a hoisted leaf would make the lambda
+        # capture a heap value — a capture the probe injected, not the fn
+        # under probe (#2588: `http.wrap`'s handler argument).
+        body = f"ok({dummy(ret['ok'], ctx, types)})" if ret.get("kind") == "result" else dummy(ret, ctx, types)
+        return f"({', '.join(names)}) => {body}"
     if k == "named":
         name = t["name"]
         if name in SIZED_INTS:
@@ -221,12 +230,12 @@ def dummy(t: dict, ctx: Ctx, types: dict) -> str:
             ctx.ctors.add("bytes.as_ptr")
             return f"bytes.as_ptr({dummy({'kind': 'bytes'}, ctx, types)})"
         if name == "HttpRequest":
-            # No constructor exists: the value lives only inside an
-            # http.serve handler, so the probe body is wrapped in one.
-            ctx.needs_req = True
+            # #2588: a request is built in code — no http.serve handler (and
+            # no listener the legs cannot bind) stands between the probe and
+            # the accessor it measures.
             ctx.imports.add("http")
-            ctx.ctors.update({"http.serve", "http.response"})
-            return "req"
+            ctx.ctors.add("http.new_request")
+            return 'http.new_request("GET", "/", "", [:])'
         if name in NOMINAL:
             expr, ctor, imp = NOMINAL[name]
             ctx.ctors.add(ctor)
@@ -421,15 +430,6 @@ def synth(mod, f, params, ret, types, variant, shape=0):
         ctx.imports.add(mod)
     imp = "".join(f"import {m}\n" for m in sorted(ctx.imports))
     imp = imp + "\n" if imp else ""
-    if ctx.needs_req:
-        # The HttpRequest lives only inside a handler: the probe body is a
-        # handler-side fn, main installs it through http.serve.
-        return (
-            f"{imp}effect fn __probe(req: HttpRequest) -> Unit = {{\n{body}\n}}\n\n"
-            f"effect fn main() -> Unit = {{\n  println(\"pre\")\n"
-            f"  http.serve(0, (req) => {{ __probe(req)!\n    ok(http.response(200, \"x\")) }})!\n"
-            f"  println(\"p\")\n}}\n"
-        ), ctx
     return f"{imp}effect fn main() -> Unit = {{\n{body}\n}}\n", ctx
 
 
@@ -459,10 +459,52 @@ def names_injected_ctor(detail: str, ctors) -> str:
     return ""
 
 
+def run_serve_probe(prog: str, src: str, tmp: str, env: dict):
+    """The embedded leg SERVES `http.serve` (#2650): the probe program never
+    returns, so service is measured the way a client sees it — bind a free
+    port, send one request, and take an HTTP answer (any status: a handler
+    err is the host's 500 ANSWER) as ok. A process that ends first (a build
+    wall, a trap) is judged from its output as usual."""
+    import socket
+    import time
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    with open(src, "w") as fh:
+        fh.write(prog.replace("http.serve(0,", f"http.serve({port},"))
+    cmd = [ALMIDE, "run", src, "--target", "wasm"]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                         env=env, cwd=tmp, stdin=subprocess.DEVNULL, start_new_session=True)
+    deadline = time.monotonic() + 120
+    try:
+        while time.monotonic() < deadline:
+            if p.poll() is not None:
+                out, err = p.communicate()
+                return subprocess.CompletedProcess(cmd, p.returncode, out, err)
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=30) as c:
+                    c.sendall(b"GET /probe HTTP/1.1\r\nHost: probe\r\n\r\n")
+                    got = c.recv(64)
+            except OSError:
+                time.sleep(0.1)
+                continue
+            if got.startswith(b"HTTP/1.1 "):
+                return subprocess.CompletedProcess(cmd, 0, "pre\n", "")
+            time.sleep(0.1)
+        raise subprocess.TimeoutExpired(cmd, 120)
+    finally:
+        if p.poll() is None:
+            os.killpg(p.pid, 9)
+            p.communicate()
+
+
 def run_probe(prog: str, leg: str, tmp: str, env: dict):
     src = os.path.join(tmp, "probe.almd")
     with open(src, "w") as fh:
         fh.write(prog)
+    if leg == "embedded" and "http.serve(0," in prog:
+        return run_serve_probe(prog, src, tmp, env)
     if leg == "embedded":
         return subprocess.run(
             [ALMIDE, "run", src, "--target", "wasm"],

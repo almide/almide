@@ -1,0 +1,22 @@
+// #2654: `src/a/util.almd` and `src/b/util.almd` are two modules. Module
+// identity is the path under src/ (`a.util`, `b.util`); the last segment is
+// only the name an import binds in the importing file. Before the fix the
+// resolver keyed self-modules by the leaf, so whichever `util` loaded first
+// answered every later `import self.<dir>.util` and the other file's
+// functions were E002 undefined.
+import self.use_a
+import self.use_b
+import self.a.util
+import self.b.util as butil
+
+test "each file's import binds the util of its own directory" {
+  assert_eq(use_a.go(), "a:A 2 only in a")
+  assert_eq(use_b.go(), "b:B 20 only in b")
+}
+
+test "both modules are reachable from one file under distinct names" {
+  assert_eq(util.name(), "a:A")
+  assert_eq(butil.name(), "b:B")
+  assert_eq(util.scale(3) + butil.scale(3), 66)
+  assert_eq(butil.from_b(), "only in b")
+}

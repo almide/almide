@@ -61,6 +61,12 @@ let argstr = args
         CallArg::Handle(v) if reprs.get(v).map_or(true, |r| r.is_heap()) => {
             format!("(i64.extend_i32_u (local.get {}))", local(*v))
         }
+        // A closure passed ON to a closure (`(acc, mw) => mw(acc)` — the
+        // middleware fold, #2588) reaches here as a Scalar arg whose local is
+        // a narrowed i32 heap param. The ABI is still i64: widen it too.
+        CallArg::Scalar(v) if reprs.get(v).is_some_and(|r| r.is_heap()) => {
+            format!("(i64.extend_i32_u (local.get {}))", local(*v))
+        }
         other => render_arg_wasm(other, reprs, floats),
     })
     .collect::<Vec<_>>()

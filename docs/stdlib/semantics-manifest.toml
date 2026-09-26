@@ -2599,6 +2599,12 @@ platform-specific zero.
 #                 resource number, never a status. `serve(200, h)` would bind
 #                 port 200 and `response(8080, b)` would answer with status
 #                 8080; nothing but this declaration separates them
+#   millisecond — the Int is a per-call LIMIT in MILLISECONDS, 0 = no limit
+#                 (#2631): `total_ms` / `idle_ms` of HttpLimits, which the
+#                 public start / *_with_limits wrappers spread into the two
+#                 Ints of their private intrinsics below. Never seconds — the
+#                 process-wide ALMIDE_HTTP_TIMEOUT_SECS default is the one
+#                 seconds-denominated knob, and it is not this Int
 #
 # Every probe below verified on BOTH legs (native + wasm, 2026-08-13,
 # byte-identical). The with_headers probe deliberately reads only the CALLER's
@@ -2722,6 +2728,62 @@ generated file off the wasm leg. Measured out-of-band on the native leg
 (2026-08-13): serve(8791, handler) binds 0.0.0.0:8791 and answers a request
 to 127.0.0.1:8791, so the Int is a TCP PORT NUMBER, not a status and not a
 backlog size or a timeout.
+"""
+
+[[http.fn]]
+name = "__call_start"
+index_unit = "millisecond"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed: the private intrinsic behind http.start, whose two
+trailing Ints are HttpLimits.total_ms and .idle_ms, both MILLISECONDS, 0 = no
+limit. A calling probe would dial the network and push this generated file off
+the wasm leg. Measured by tests/http_call_handle_test.rs against a loopback
+server (2026-09-25): total_ms 1000 ends a call at ~1000 ms and idle_ms 500 a
+silent one at ~500 ms (C-366).
+"""
+
+[[http.fn]]
+name = "__request_stream_limited"
+index_unit = "millisecond"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed: the private intrinsic behind http.request_stream_with_limits, whose two
+trailing Ints are HttpLimits.total_ms and .idle_ms, both MILLISECONDS, 0 = no
+limit. A calling probe would dial the network and push this generated file off
+the wasm leg. Measured by tests/http_call_handle_test.rs against a loopback
+server (2026-09-25): total_ms 1000 ends a call at ~1000 ms and idle_ms 500 a
+silent one at ~500 ms (C-366).
+"""
+
+[[http.fn]]
+name = "__openai_streaming_limited"
+index_unit = "millisecond"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed: the private intrinsic behind http.openai_streaming_call_with_limits, whose two
+trailing Ints are HttpLimits.total_ms and .idle_ms, both MILLISECONDS, 0 = no
+limit. A calling probe would dial the network and push this generated file off
+the wasm leg. Measured by tests/http_call_handle_test.rs against a loopback
+server (2026-09-25): total_ms 1000 ends a call at ~1000 ms and idle_ms 500 a
+silent one at ~500 ms (C-366).
+"""
+
+[[http.fn]]
+name = "__anthropic_streaming_limited"
+index_unit = "millisecond"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed: the private intrinsic behind http.anthropic_streaming_call_with_limits, whose two
+trailing Ints are HttpLimits.total_ms and .idle_ms, both MILLISECONDS, 0 = no
+limit. A calling probe would dial the network and push this generated file off
+the wasm leg. Measured by tests/http_call_handle_test.rs against a loopback
+server (2026-09-25): total_ms 1000 ends a call at ~1000 ms and idle_ms 500 a
+silent one at ~500 ms (C-366).
 """
 
 # index_unit vocabulary — net (HOST_CAPABILITY on the wasm leg — net is an OS

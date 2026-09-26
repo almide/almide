@@ -1,0 +1,9 @@
+import calc
+
+test "add adds" {
+  assert_eq(calc.add(1, 2), 3)
+}
+
+test "twice doubles" {
+  assert_eq(calc.twice(4), 8)
+}

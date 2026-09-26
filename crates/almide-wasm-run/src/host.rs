@@ -67,6 +67,51 @@ struct Host {
     args: Vec<String>,
     /// Linear-memory budget (heap-budget gates); unlimited by default.
     limits: wasmtime::StoreLimits,
+    /// The run's live http calls (#2633) — cancelled when the run ends.
+    calls: Arc<Mutex<crate::http_call_host::HttpCalls>>,
+    /// `http.serve`'s listener and pending connection (ops 70..=72, #2650).
+    serve: Arc<Mutex<crate::host_serve::ServeState>>,
+    /// The product runner's LIVE streams (#2650): stdout through a 64 KiB
+    /// buffer flushed per write on a terminal — native's rule — and stderr
+    /// straight through, so a program that never returns (a server) shows
+    /// its output as it runs. None = the buffered harness capture.
+    live_out: Option<Arc<Mutex<std::io::BufWriter<std::io::Stdout>>>>,
+    /// The last stderr line written, in either mode: the die convention
+    /// (#1912) reads it after a trap.
+    err_last: Arc<Mutex<String>>,
+}
+
+/// Is the process's stdout a terminal (native flushes per write there).
+fn stdout_is_terminal() -> bool {
+    use std::io::IsTerminal as _;
+    std::io::stdout().is_terminal()
+}
+
+/// Append program output: into the capture buffer, or — live — to the
+/// real stream with native's buffering rule.
+fn emit_out(host: &Host, text: &str) {
+    match &host.live_out {
+        Some(w) => {
+            use std::io::Write as _;
+            let mut w = w.lock().expect("live stdout");
+            let _ = w.write_all(text.as_bytes());
+            if stdout_is_terminal() {
+                let _ = w.flush();
+            }
+        }
+        None => host.out.lock().expect("test harness invariant").push_str(text),
+    }
+}
+
+fn emit_err_line(host: &Host, line: &str) {
+    *host.err_last.lock().expect("err last") = line.to_string();
+    if host.live_out.is_some() {
+        eprintln!("{line}");
+    } else {
+        let mut o = host.err.lock().expect("test harness invariant");
+        o.push_str(line);
+        o.push('\n');
+    }
 }
 
 /// Where op 35 gets its bytes: a fixed buffer (tests, piped runs), or
@@ -742,9 +787,12 @@ fn append_line(
     if let Err(e) = mem.read(&caller, ptr as u32 as usize, &mut buf) {
         panic!("in-bounds read: {e:?} ptr={ptr} len={len} memsize={}", mem.data_size(&caller));
     }
-    let mut o = sink(caller.data()).lock().expect("test harness invariant");
-    o.push_str(&String::from_utf8_lossy(&buf));
-    o.push('\n');
+    let text = String::from_utf8_lossy(&buf);
+    if std::ptr::eq(sink(caller.data()), &caller.data().err) {
+        emit_err_line(caller.data(), &text);
+    } else {
+        emit_out(caller.data(), &format!("{text}\n"));
+    }
 }
 
 pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<RunResult> {
@@ -753,7 +801,7 @@ pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<RunResult> {
 
 /// Run with a fixed stdin buffer (tests; piped byte streams).
 pub fn run_wasm_with(bytes: &[u8], stdin: &[u8]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::Buf(stdin.to_vec()), None, &[], Some(harness_watchdog()))
+    run_wasm_src(bytes, StdinSource::Buf(stdin.to_vec()), None, &[], Some(harness_watchdog()), false)
 }
 
 /// The in-process TEST runner's epoch watchdog: a fixture (or a MUTANT under
@@ -779,7 +827,7 @@ fn harness_watchdog() -> std::time::Duration {
 /// emitted program, as the native leg's bench does and as a stock runtime
 /// runs it. A bench of a diverging program hangs, exactly as it does natively.
 pub fn run_wasm_unbounded(bytes: &[u8]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::Buf(Vec::new()), None, &[], None)
+    run_wasm_src(bytes, StdinSource::Buf(Vec::new()), None, &[], None, false)
 }
 
 /// Run under a hard linear-memory budget (bytes). Growth past the cap
@@ -787,24 +835,27 @@ pub fn run_wasm_unbounded(bytes: &[u8]) -> anyhow::Result<RunResult> {
 /// "Error: out of memory" + exit 1 (C-197) — the heap-budget
 /// acceptance-gate observable (W-8; the RC arc's floor).
 pub fn run_wasm_capped(bytes: &[u8], max_memory_bytes: usize) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::Buf(Vec::new()), Some(max_memory_bytes), &[], Some(harness_watchdog()))
+    run_wasm_src(bytes, StdinSource::Buf(Vec::new()), Some(max_memory_bytes), &[], Some(harness_watchdog()), false)
 }
 
 /// Run with the process's real stdin, read lazily on first guest read
 /// (the product runner — never blocks for programs that skip stdin). No
 /// time limit, as native has none (#2615).
 pub fn run_wasm_real_stdin(bytes: &[u8]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::RealOnce, None, &[], None)
+    run_wasm_src(bytes, StdinSource::RealOnce, None, &[], None, false)
 }
 
-/// The product runner with program args (#1716): op 29 answers
+/// The product runner with program args (#1716), streaming LIVE (#2650):
+/// output reaches the real stdout/stderr as the program runs, with native's
+/// buffering rule, so a program that never returns — an `http.serve`
+/// server — is observable while it runs. op 29 answers
 /// [argv0, args...] and the guest's frame walk skips argv0. No time limit:
 /// `almide run --target wasm` runs a program to completion exactly as the
 /// native binary does (#2615 — it used to arm the test harness's 30 s
 /// watchdog, so a program native finished in 36 s trapped with `interrupt`
 /// on wasm, and every loop header paid the epoch check).
 pub fn run_wasm_real_stdin_args(bytes: &[u8], args: &[String]) -> anyhow::Result<RunResult> {
-    run_wasm_src(bytes, StdinSource::RealOnce, None, args, None)
+    run_wasm_src(bytes, StdinSource::RealOnce, None, args, None, true)
 }
 
 fn run_wasm_src(
@@ -813,6 +864,7 @@ fn run_wasm_src(
     max_memory_bytes: Option<usize>,
     args: &[String],
     watchdog: Option<std::time::Duration>,
+    live: bool,
 ) -> anyhow::Result<RunResult> {
     wasmparser::validate(bytes)?; // the wall: never instantiate an invalid module
     // Epoch deadline (test harness only, see `harness_watchdog`): the
@@ -840,6 +892,10 @@ fn run_wasm_src(
             stdin: stdin_buf.clone(),
             args: args.to_vec(),
             limits,
+            calls: Arc::default(),
+            serve: Arc::new(Mutex::new(crate::host_serve::ServeState::default())),
+            live_out: live.then(|| Arc::new(Mutex::new(std::io::BufWriter::with_capacity(65536, std::io::stdout())))),
+            err_last: Arc::new(Mutex::new(String::new())),
         },
     );
     store.limiter(|h| &mut h.limits);
@@ -897,6 +953,14 @@ fn run_wasm_src(
                 std::thread::sleep(std::time::Duration::from_millis(ms));
                 return Ok(0);
             }
+            // ops 54..=59 = the http call handle on call `id` (#2633): the
+            // id rides a_len (scalar, null a_ptr — the op-35 discipline).
+            if (54..=59).contains(&op) {
+                let calls = caller.data().calls.clone();
+                let (ret, buf) = crate::http_call_host::by_id(&calls, op, a_len as u32);
+                *caller.data().fs_buf.lock().expect("fs buf") = buf;
+                return Ok(ret);
+            }
             // op 29 = args (#1716): argv0 + the run's program args; the
             // guest skips frame 0 (native argv[1..] semantics).
             if op == 29 {
@@ -928,11 +992,22 @@ fn run_wasm_src(
                 return Ok(now);
             }
             if op == 30 {
-                let mut o = caller.data().out.lock().expect("test harness invariant");
-                o.push_str(&String::from_utf8_lossy(&b));
+                emit_out(caller.data(), &String::from_utf8_lossy(&b));
                 return Ok(0);
             }
-            let (ret, buf) = fs_dispatch(op, &a, &b);
+            // http.serve (#2650): the listener and the held connection
+            // live in the run's own state — one per run, like native's.
+            if (crate::host_serve::OP_SERVE_BIND..=crate::host_serve::OP_SERVE_REPLY).contains(&op) {
+                let (ret, buf) = crate::host_serve::dispatch(&caller.data().serve, op, &a, frames, parse_http_frame);
+                *caller.data().fs_buf.lock().expect("fs buf") = buf;
+                return Ok(ret);
+            }
+            // op 53 = open an http call (#2633): url in a, the start frame in b.
+            let (ret, buf) = if op == 53 {
+                crate::http_call_host::open(&caller.data().calls.clone(), &a, &b)
+            } else {
+                fs_dispatch(op, &a, &b)
+            };
             *caller.data().fs_buf.lock().expect("fs buf") = buf;
             Ok(ret)
         },
@@ -981,11 +1056,10 @@ fn run_wasm_src(
             // wasmtime lane and native show that one line; adding
             // `Error: wasm trap: unreachable…` after it made the embedded
             // lane the odd one out.
-            let mut buf = err.lock().expect("test harness invariant");
             let named_die = is_unreachable_trap(e)
-                && buf.lines().last().is_some_and(|l| l.starts_with("Error: "));
+                && store.data().err_last.lock().expect("err last").starts_with("Error: ");
             if !named_die {
-                buf.push_str(&trap_line(e));
+                emit_err_line(store.data(), trap_line(e).trim_end_matches('\n'));
             }
             1
         }
@@ -994,6 +1068,10 @@ fn run_wasm_src(
         }
     };
     drop(ticker);
+    if let Some(w) = &store.data().live_out {
+        use std::io::Write as _;
+        let _ = w.lock().expect("live stdout").flush();
+    }
     let read_global = |store: &mut wasmtime::Store<_>, name: &str| {
         instance.get_global(&mut *store, name).map(|g| match g.get(&mut *store) {
             wasmtime::Val::I32(v) => v as u32 as u64,

@@ -49,7 +49,7 @@ fn record_module_source(ctx: &mut ResolveCtx, name: &str, file_path: &Path, sour
 /// each call site's original wording); `display_label` is the name/path
 /// already formatted the way that call site formatted it.
 fn parse_module_source(kind: &str, display_label: &str, file_path: &Path) -> Result<(ast::Program, String), String> {
-    let source = std::fs::read_to_string(file_path)
+    let source = crate::source_overlay::read_to_string(file_path)
         .map_err(|e| format!("error reading {} '{}': {}", kind, display_label, e))?;
 
     let tokens = lexer::Lexer::tokenize(&source);
@@ -139,9 +139,11 @@ fn resolve_self_import(
     } else {
         // self.xxx → local module within the project
         let mod_path = &path[1..]; // skip "self"
-        // Always use the canonical name (last path segment) — aliases are handled by import_aliases
-        let mod_name = mod_path.last().expect("guarded by path.len() >= 2").as_str();
-        let display_name = mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
+        // The canonical name is the whole path under src/ (#2654) — aliases
+        // are handled by the import table.
+        let mod_name_owned = self_module_canonical(mod_path);
+        let mod_name = mod_name_owned.as_str();
+        let display_name = mod_name;
 
         if ctx.loaded_names.contains(mod_name) {
             return Ok(());
@@ -289,10 +291,11 @@ fn load_self_module_import(path: &[crate::intern::Sym], src_dir: &Path, ctx: &mu
     if is_self {
         if path.len() >= 2 {
             let sub_mod_path = &path[1..];
-            // Always use canonical name (last path segment), not alias.
-            // Aliases are handled by import_table — module identity must be stable.
-            let sub_mod_name = sub_mod_path.last().expect("guarded by path.len() >= 2").as_str();
-            load_self_module(sub_mod_name, sub_mod_path, src_dir, ctx, false)?;
+            // Always the canonical name (the whole path under src/), not the
+            // alias — aliases are handled by import_table, and module identity
+            // must be stable (#2654).
+            let sub_mod_name = self_module_canonical(sub_mod_path);
+            load_self_module(&sub_mod_name, sub_mod_path, src_dir, ctx, false)?;
         }
     } else {
         // The SAME rule the entry program uses: `import pkg` loads the package,
@@ -306,6 +309,18 @@ fn load_self_module_import(path: &[crate::intern::Sym], src_dir: &Path, ctx: &mu
         resolve_named_import(path, ctx)?;
     }
     Ok(())
+}
+
+/// The canonical module name of the project's own `import self.<path>`: the
+/// path under `src/`, dot-joined — `self.util` is `util`, `self.a.util` is
+/// `a.util` (#2654). Keying by the LAST segment alone made `src/a/util.almd`
+/// and `src/b/util.almd` one module: whichever loaded first answered every
+/// later `import self.<dir>.util`, so the second import resolved to the wrong
+/// file (E002 on its functions). The leaf is only the default BINDING name in
+/// the importing file, which the import table derives from the path itself.
+/// A single-segment path keeps its bare name, so flat projects are unchanged.
+pub fn self_module_canonical(mod_path: &[crate::intern::Sym]) -> String {
+    mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")
 }
 
 /// Load a self-import module (import self.xxx).

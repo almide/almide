@@ -1,0 +1,42 @@
+// @contract: C-108
+// A single-expression effect fn body whose `!` sits in a call ARGUMENT
+// (`effect fn call(h, t) -> String = show(h(t)!)`), with a handler that reaches it
+// through a Result the caller unwrapped (#2658). The fn is lifted to the Result
+// carrier and its root node was retyped to it before the ok-wrap looked for return
+// positions answering the declared type — so the root, which IS the return value,
+// was never wrapped. The err path built a real Err block while the ok path returned
+// the raw String, and the caller read that String as a Result on wasm (out of bounds
+// memory access). Native printed the value. The scalar twin (`count`, a stdlib call
+// at the root) takes the same wrap; the failing handler exercises the err path
+// through both.
+effect fn up(s: String) -> List[String] = ["200", s + "!"]
+
+fn checked(s: String) -> Result[String, String] = if s == "zz" then err("bad input ${s}") else ok(s + s)
+
+effect fn parsed(s: String) -> List[String] = {
+  let d = checked(s)!
+  ["200", d]
+}
+
+fn pick(name: String) -> Result[effect (String) -> List[String], String] = if name == "up" then ok(up)
+else if name == "parsed" then ok(parsed) else err("no handler ${name}")
+
+fn show(r: List[String]) -> String = list.join(r, ",")
+
+effect fn call(h: effect (String) -> List[String], t: String) -> String = show(h(t)!)
+
+effect fn count(h: effect (String) -> List[String], t: String) -> Int = list.len(h(t)!)
+
+effect fn main() -> Unit = {
+  let u = pick("up")!
+  println(call(u, "x")!)
+  println(int.to_string(count(u, "y")!))
+  let p = pick("parsed")!
+  println(call(p, "21")!)
+  println(call(p, "zz") ?? "caught")
+  println(int.to_string(count(p, "zz") ?? -1))
+  match pick("none") {
+    ok(h) => println(call(h, "x")!),
+    err(e) => println("pick: ${e}"),
+  }
+}

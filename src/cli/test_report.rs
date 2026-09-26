@@ -154,7 +154,7 @@ pub fn harness_filter(program_args: &[String]) -> Option<&str> {
 /// failure this reporter does not understand must never be swallowed.
 pub fn report_test_failure(file: &str, output: &str) {
     err(&format!("FAILED: {}", file));
-    let source = std::fs::read_to_string(file).unwrap_or_default();
+    let source = almide::source_overlay::read_to_string(file).unwrap_or_default();
     let failures = parse(file, &source, output);
     if failures.is_empty() {
         if output.is_empty() || output.ends_with('\n') {
@@ -176,7 +176,7 @@ pub fn report_test_failure(file: &str, output: &str) {
 /// the passing tests' stdout.
 pub fn report_test_failure_io(file: &str, stdout: &str, stderr: &str, show_all: bool) {
     let output = format!("{stdout}{stderr}");
-    let source = std::fs::read_to_string(file).unwrap_or_default();
+    let source = almide::source_overlay::read_to_string(file).unwrap_or_default();
     let failures = parse(file, &source, &output);
     if failures.is_empty() {
         // The raw transcript already holds everything the program printed.
@@ -195,7 +195,7 @@ pub fn report_test_failure_io(file: &str, stdout: &str, stderr: &str, show_all: 
 
 /// `--show-output` for a native file that passed.
 pub fn report_passing_output(file: &str, stdout: &str, stderr: &str) {
-    let source = std::fs::read_to_string(file).unwrap_or_default();
+    let source = almide::source_overlay::read_to_string(file).unwrap_or_default();
     let printed = super::test_output::TestOutput::native(&test_name_map(&source), stdout, stderr);
     err_no_nl(&printed.render_passing(file));
 }

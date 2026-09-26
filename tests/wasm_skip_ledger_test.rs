@@ -66,6 +66,11 @@ const GENUINE_SKIPS: &[(&str, SkipReason)] = &[
     // the incumbent brick, which has no http capability — retires with
     // the render_wasm switchover (#1584).
     ("spec/stdlib/http_status_test.almd", SkipReason::NativeOnlyApi),
+    // #2631: the fixture's server arm is `net` (no wasm host, #1628) and the
+    // stock artifact refuses the handle (E081 on the stock-p1 leg). The
+    // handle runs on the embedded lane since #2633 — tests/
+    // http_call_handle_test.rs covers it on both legs.
+    ("spec/stdlib/http_call_test.almd", SkipReason::NativeOnlyApi),
     // `http.serve` binds a TCP listener.
     ("spec/lang/effect_intrinsic_tail_test.almd", SkipReason::NativeOnlyApi),
     // (zlib row RETIRED 2026-09-01: #1700 implemented DEFLATE in Almide —

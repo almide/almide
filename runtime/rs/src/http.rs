@@ -4,10 +4,9 @@
 // SSE streaming: almide_rt_sse_openai_chat, almide_rt_sse_anthropic_messages (in sse.rs)
 
 // HashMap already imported by prelude
-// Read/Write/TcpStream come from the inlined client core (#1715); this
-// file imports only its own remainder (server + SSE parsing).
-use std::io::{BufRead, BufReader};
-use std::net::TcpListener;
+// Read/Write/TcpStream come from the inlined client core (#1715); the
+// server core (#2650) writes its std paths fully qualified, so this file
+// imports nothing of its own.
 
 // ── HTTP response/request types ──
 // The user-facing `HttpRequest` / `HttpResponse` nominals are RUNTIME-BACKED
@@ -22,6 +21,14 @@ pub struct AlmideHttpResponse {
     pub status: i64,
     pub body: String,
     pub headers: Vec<(String, String)>,
+}
+
+// A record may hold any of the http types, and a record's repr calls each field's
+// (#2647). The body is shown; the headers are counted, not listed.
+impl AlmideRepr for AlmideHttpResponse {
+    fn almide_repr(&self) -> String {
+        format!("HttpResponse {{ status: {}, body: {}, headers: {} }}", self.status.almide_repr(), self.body.almide_repr(), self.headers.len())
+    }
 }
 
 impl AlmideHttpResponse {
@@ -139,6 +146,13 @@ pub fn almide_http_headers(resp: &AlmideHttpResponse) -> AlmideMap<String, Strin
     out
 }
 
+/// Router plumbing: HEAD answered by the GET route keeps the status and the
+/// headers and drops the body.
+pub fn almide_http_set_body(mut resp: AlmideHttpResponse, body: &str) -> AlmideHttpResponse {
+    resp.body = body.to_string();
+    resp
+}
+
 pub fn almide_http_set_cookie(mut resp: AlmideHttpResponse, name: &str, value: &str) -> AlmideHttpResponse {
     resp.headers.push(("Set-Cookie".into(), format!("{}={}", name, value)));
     resp
@@ -146,12 +160,57 @@ pub fn almide_http_set_cookie(mut resp: AlmideHttpResponse, name: &str, value: &
 
 // ── Request accessors ──
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct AlmideHttpRequest {
     pub method: String,
     pub path: String,
     pub body: String,
     pub headers: Vec<(String, String)>,
+    /// Path parameters bound by `http.router` (#2588): `{id}` in the route
+    /// pattern → `("id", "42")`. Empty for a request the listener parsed.
+    pub params: Vec<(String, String)>,
+}
+
+/// `http.new_request` (#2588): a request built in code, so a handler or a
+/// router can be exercised without a socket. `target` is the request-target
+/// as it appears on the wire — path plus any `?query`.
+pub fn almide_rt_http_new_request(method: &str, target: &str, body: &str, headers: &AlmideMap<String, String>) -> AlmideHttpRequest {
+    AlmideHttpRequest {
+        method: method.to_string(),
+        path: target.to_string(),
+        body: body.to_string(),
+        headers: header_pairs(headers),
+        params: Vec::new(),
+    }
+}
+
+pub fn almide_http_param(req: &AlmideHttpRequest, name: &str) -> Option<String> {
+    req.params.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone())
+}
+
+/// Router plumbing: bind path parameters, given flat `[k1, v1, k2, v2, …]`
+/// pairs (the shape the wasm rep stores them in). New bindings go IN FRONT of
+/// the ones an enclosing `mount` bound, so `param` finds the innermost first
+/// and `{org}` of `mount("/orgs/{org}", sub)` stays visible inside `sub`.
+pub fn almide_http_req_with_params(mut req: AlmideHttpRequest, flat: &[String]) -> AlmideHttpRequest {
+    let mut params: Vec<(String, String)> =
+        flat.chunks(2).filter(|c| c.len() == 2).map(|c| (c[0].clone(), c[1].clone())).collect();
+    params.append(&mut req.params);
+    req.params = params;
+    req
+}
+
+/// Router plumbing for `http.mount`: the sub-app sees the target with the
+/// mount prefix stripped.
+pub fn almide_http_req_with_path(mut req: AlmideHttpRequest, target: &str) -> AlmideHttpRequest {
+    req.path = target.to_string();
+    req
+}
+
+impl AlmideRepr for AlmideHttpRequest {
+    fn almide_repr(&self) -> String {
+        format!("HttpRequest {{ method: {}, path: {}, body: {}, headers: {} }}", self.method.almide_repr(), self.path.almide_repr(), self.body.almide_repr(), self.headers.len())
+    }
 }
 
 pub fn almide_http_req_method(req: &AlmideHttpRequest) -> String { req.method.clone() }
@@ -498,45 +557,190 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
     Ok(())
 }
 
-/// The length of an incomplete UTF-8 sequence at the END of `b` (0..=3):
-/// the bytes from the last lead byte on, when that lead byte announces more
-/// bytes than follow it. Splitting just before a lead byte never changes
-/// what `from_utf8_lossy` produces, so holding these back and decoding them
-/// with the next read gives the same text as decoding the whole body.
-fn http_stream_incomplete_utf8_tail(b: &[u8]) -> usize {
-    for back in 1..=b.len().min(4) {
-        let byte = b[b.len() - back];
-        if byte & 0xC0 == 0x80 {
-            continue; // continuation byte — keep looking for its lead
-        }
-        let want = match byte {
-            0xC0..=0xDF => 2,
-            0xE0..=0xEF => 3,
-            0xF0..=0xF7 => 4,
-            _ => 1,
-        };
-        return if want > back { back } else { 0 };
+// ── Call handle (#2631) ──
+//
+// The in-flight call itself — the worker thread, the limits, cancel, the
+// UTF-8-safe `read_new` split and the streaming step — is the shared core
+// crates/almide-rt-core/src/http_call_core.rs (inlined above with the client
+// core), the SAME text the embedded wasm host serves `--target wasm` with
+// (#2633). What stays here is the native handle's ownership: copies of an
+// `HttpCall` share one call, and dropping the last copy cancels it.
+
+/// The owner of a call: its drop (the last copy of the handle going away)
+/// cancels the call.
+pub struct AlmideHttpCallOwner {
+    shared: std::sync::Arc<AlmideHttpCallShared>,
+}
+
+impl Drop for AlmideHttpCallOwner {
+    fn drop(&mut self) {
+        self.shared.cancel();
     }
-    0
+}
+
+/// The Almide `HttpCall`. Copies share one call.
+#[derive(Clone)]
+pub struct AlmideHttpCall {
+    inner: std::sync::Arc<AlmideHttpCallOwner>,
+}
+
+impl std::fmt::Debug for AlmideHttpCall {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HttpCall")
+    }
+}
+
+// A call in flight has no value to show: it is the handle, as Debug says.
+impl AlmideRepr for AlmideHttpCall {
+    fn almide_repr(&self) -> String { "HttpCall".to_string() }
+}
+
+impl PartialEq for AlmideHttpCall {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.inner, &other.inner)
+    }
+}
+
+impl AlmideHttpCall {
+    fn shared(&self) -> &AlmideHttpCallShared {
+        &self.inner.shared
+    }
+}
+
+fn http_call_response(r: Result<HttpTextResponse, String>) -> Result<AlmideHttpResponse, String> {
+    r.map(|(status, headers, body)| AlmideHttpResponse { status, body, headers })
+}
+
+pub fn almide_http_call_start(
+    method: &str,
+    url: &str,
+    body: &str,
+    headers: &AlmideMap<String, String>,
+    total_ms: i64,
+    idle_ms: i64,
+) -> Result<AlmideHttpCall, String> {
+    let shared = http_call_spawn(method, url, body, header_pairs(headers), total_ms, idle_ms)?;
+    Ok(AlmideHttpCall { inner: std::sync::Arc::new(AlmideHttpCallOwner { shared }) })
+}
+
+/// `http.start` — the private `__call_start` its Almide wrapper calls with
+/// the limits record spread into two Ints (the sibling-call mangling names it).
+pub fn almide_rt_http___call_start(
+    method: &str,
+    url: &str,
+    body: &str,
+    headers: &AlmideMap<String, String>,
+    total_ms: i64,
+    idle_ms: i64,
+) -> Result<AlmideHttpCall, String> {
+    almide_http_call_start(method, url, body, headers, total_ms, idle_ms)
+}
+
+/// Never blocks: `None` while the call runs, the result once it ended.
+pub fn almide_http_call_poll(c: &AlmideHttpCall) -> Option<Result<AlmideHttpResponse, String>> {
+    http_call_poll(c.shared()).map(http_call_response)
+}
+
+/// Block until the call ends (bounded by its limits) and answer it: ANY
+/// complete response is `Ok`, as with `request_response`.
+pub fn almide_http_call_wait(c: &AlmideHttpCall) -> Result<AlmideHttpResponse, String> {
+    http_call_response(http_call_wait(c.shared()))
+}
+
+/// The body text received since the previous `read_new`; never blocks. A
+/// multibyte character split across reads is held back until it is whole.
+pub fn almide_http_call_read_new(c: &AlmideHttpCall) -> String {
+    http_call_read_new(c.shared())
+}
+
+pub fn almide_http_call_cancel(c: &AlmideHttpCall) {
+    c.shared().cancel();
+}
+
+/// The streaming client on the handle (`request_stream_with_limits` and the
+/// SSE twins): deliver each arrival to `on_chunk`, answer a non-2xx status
+/// the way `request_stream` does, and end with the call's own error — a
+/// fired limit names itself.
+pub fn almide_http_stream_limited_impl(
+    method: &str,
+    url: &str,
+    body: &str,
+    headers: &AlmideMap<String, String>,
+    total_ms: i64,
+    idle_ms: i64,
+    mut on_chunk: impl FnMut(String),
+) -> Result<(), String> {
+    let call = almide_http_call_start(method, url, body, headers, total_ms, idle_ms)?;
+    loop {
+        let (piece, ended) = http_call_stream_step(call.shared());
+        if !piece.is_empty() {
+            on_chunk(piece);
+        }
+        if let Some(outcome) = ended {
+            return outcome;
+        }
+    }
+}
+
+pub fn almide_rt_http___request_stream_limited(
+    method: &str,
+    url: &str,
+    body: &str,
+    headers: &AlmideMap<String, String>,
+    total_ms: i64,
+    idle_ms: i64,
+    on_chunk: std::rc::Rc<dyn Fn(String)>,
+) -> Result<(), String> {
+    almide_http_stream_limited_impl(method, url, body, headers, total_ms, idle_ms, |chunk| on_chunk(chunk))
+}
+
+/// The one entry the SSE helpers stream through: no limits = the classic
+/// `request_stream` path (ALMIDE_HTTP_TIMEOUT_SECS / 120 s), limits = the
+/// handle.
+pub fn almide_http_stream_dispatch(
+    method: &str,
+    url: &str,
+    body: &str,
+    headers: &AlmideMap<String, String>,
+    limits: Option<(i64, i64)>,
+    on_chunk: impl FnMut(String),
+) -> Result<(), String> {
+    match limits {
+        None => almide_http_request_stream_impl(method, url, body, headers, on_chunk),
+        Some((total_ms, idle_ms)) => almide_http_stream_limited_impl(method, url, body, headers, total_ms, idle_ms, on_chunk),
+    }
 }
 
 
 // ── HTTP Server ──
+//
+// The server core (bind / accept + parse / the response bytes) lives in
+// crates/almide-rt-core/src/http_server_core.rs and is inlined here at embed
+// time (#2650) — the SAME text the embedded wasm host links for the guest's
+// serve ops, so C-367's byte-identity holds by shared code.
+include!("../../../crates/almide-rt-core/src/http_server_core.rs");
 
 pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, String>>) -> Result<(), String> {
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
-        .map_err(|e| format!("bind failed: {}", e))?;
-
-    for stream in listener.incoming() {
-        let mut stream = match stream { Ok(s) => s, Err(_) => continue };
-        let req = match parse_request(&mut stream) { Ok(r) => r, Err(_) => continue };
-        let resp = match handler(req) {
+    // `http.serve` is typed never-err (`-> Unit`), so a caller's `!` is a
+    // no-op (#1049) and a returned Err only surfaced when the call happened
+    // to be a fn's tail — elsewhere the server silently never started. A
+    // bind failure ABORTS instead, the same line and exit code in every
+    // position and on the embedded wasm lane (C-367).
+    let listener = match http_server_bind(port) {
+        Ok(l) => l,
+        Err(m) => {
+            eprintln!("Error: {}", m);
+            std::process::exit(1);
+        }
+    };
+    loop {
+        let (stream, (method, path, body, headers)) = http_server_next(&listener);
+        let resp = match handler(AlmideHttpRequest { method, path, body, headers, params: Vec::new() }) {
             Ok(r) => r,
             Err(e) => AlmideHttpResponse::new(500, format!("Internal error: {}", e)),
         };
-        let _ = write_response(&mut stream, &resp);
+        let _ = http_server_write(stream, resp.status, &resp.headers, &resp.body);
     }
-    Ok(())
 }
 
 // Handler-as-closure wrapper for `@intrinsic` migration of `http.serve`.
@@ -584,51 +788,4 @@ fn percent_decode(s: &str) -> String {
         }
     }
     String::from_utf8_lossy(&out).into_owned()
-}
-
-fn parse_request(stream: &mut TcpStream) -> Result<AlmideHttpRequest, String> {
-    let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
-    let mut first_line = String::new();
-    reader.read_line(&mut first_line).map_err(|e| e.to_string())?;
-    let parts: Vec<&str> = first_line.trim().split_whitespace().collect();
-    if parts.len() < 2 { return Err("invalid request".into()); }
-    let method = parts[0].to_string();
-    let path = parts[1].to_string();
-
-    let mut headers = Vec::new();
-    let mut content_length = 0usize;
-    loop {
-        let mut line = String::new();
-        reader.read_line(&mut line).map_err(|e| e.to_string())?;
-        let trimmed = line.trim();
-        if trimmed.is_empty() { break; }
-        if let Some(idx) = trimmed.find(':') {
-            let key = trimmed[..idx].trim().to_string();
-            let val = trimmed[idx+1..].trim().to_string();
-            if key.eq_ignore_ascii_case("content-length") {
-                content_length = val.parse().unwrap_or(0);
-            }
-            headers.push((key, val));
-        }
-    }
-
-    let mut body = vec![0u8; content_length];
-    if content_length > 0 { reader.read_exact(&mut body).ok(); }
-
-    Ok(AlmideHttpRequest { method, path, body: String::from_utf8_lossy(&body).to_string(), headers })
-}
-
-fn write_response(stream: &mut TcpStream, resp: &AlmideHttpResponse) -> Result<(), String> {
-    let status_text = match resp.status {
-        200 => "OK", 201 => "Created", 204 => "No Content",
-        301 => "Moved Permanently", 302 => "Found", 304 => "Not Modified",
-        400 => "Bad Request", 401 => "Unauthorized", 403 => "Forbidden",
-        404 => "Not Found", 405 => "Method Not Allowed",
-        500 => "Internal Server Error", _ => "OK",
-    };
-    let mut out = format!("HTTP/1.1 {} {}\r\n", resp.status, status_text);
-    for (k, v) in &resp.headers { out.push_str(&format!("{}: {}\r\n", k, v)); }
-    out.push_str(&format!("Content-Length: {}\r\n\r\n", resp.body.len()));
-    out.push_str(&resp.body);
-    stream.write_all(out.as_bytes()).map_err(|e| e.to_string())
 }

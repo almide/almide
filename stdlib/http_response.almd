@@ -120,3 +120,6 @@ else {
   else map.set(acc, k, list.get(resp, i + 1) ?? "")
   __hr_map(resp, i + 2, next)
 }
+
+// Router plumbing (#2588): HEAD answered by the GET route drops the body.
+fn http_set_body(resp: List[String], body: String) -> List[String] = list.set(resp, 1, body)

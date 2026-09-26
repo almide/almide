@@ -1,0 +1,8 @@
+--- a/sum.almd
++++ b/sum.almd
+@@ -1,4 +1,4 @@
+ fn sum_to(k: Int) -> Int = {
+   var n = 0
+-  for i in 0..<k {
++  for i in 0..k {
+     n = n + i

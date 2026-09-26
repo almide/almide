@@ -650,11 +650,22 @@ impl LowerCtx {
         }
         self.ops.truncate(mark);
         self.live_heap_handles.truncate(lhh);
-        let blk = self.closure_block_of_mut(callee)?;
+        // `lower_closure_callee` also materializes a callee that is itself a
+        // call — `server_header(http.recover()(app()))`, a middleware applied
+        // in argument position (#2588).
+        let Some(blk) = self.lower_closure_callee(callee) else {
+            self.ops.truncate(mark);
+            self.live_heap_handles.truncate(lhh);
+            return None;
+        };
         if let (Ok(crepr), Ok(lowered)) = (repr_of(ty), self.lower_call_args(inner)) {
             let dst = self.fresh_value();
             self.emit_closure_call(blk, Some(dst), lowered, Some(crepr));
             self.live_heap_handles.push(dst);
+            // A closure-returning closure call yields a closure block.
+            if matches!(ty, Ty::Fn { .. }) {
+                self.closure_values.insert(dst);
+            }
             return Some(dst);
         }
         self.ops.truncate(mark);

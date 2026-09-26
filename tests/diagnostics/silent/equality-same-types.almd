@@ -1,0 +1,8 @@
+// silent (E037 near-miss): equality between values of one type.
+type P = { x: Int }
+
+fn main() -> Unit = {
+  let same = P { x: 1 } == P { x: 1 }
+  let s = "a" == "a"
+  println(if same and s then "eq" else "ne")
+}

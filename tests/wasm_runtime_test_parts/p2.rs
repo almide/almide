@@ -194,6 +194,45 @@ fn wasm_cross_module_global_init_order_through_call() {
     ]);
 }
 
+#[test]
+fn wasm_cross_module_same_name_type_top_let() {
+    // #2645: modules `a` and `b` both declare `type Step`, and `b` holds one
+    // in an annotated top-level `let`. The let's registered type stayed bare
+    // `Step` (the fn signatures were pinned to `mod.Step`, the let was not),
+    // so the #433 name-pin gate refused the build on BOTH targets. `a` also
+    // writes its let and fn ABOVE `type Step`, which typed them against
+    // `b.Step` (E013 on a correct program). `b.names()` reads the let inside
+    // its own module. Expected `1` `5` `2` `x,yy` `p` on both.
+    assert_cross_target_project(&[
+        ("almide.toml", MOD_PKG_TOML),
+        (
+            "src/a.almd",
+            "let FIRST: Step = Step { n: 5 }\n\
+             fn one() -> Step = Step { n: 1 }\n\
+             type Step = { n: Int }\n",
+        ),
+        (
+            "src/b.almd",
+            "type Step = { name: String }\n\
+             let STEPS: List[Step] = [Step { name: \"x\" }, Step { name: \"yy\" }]\n\
+             let PAIR: (Step, Int) = (Step { name: \"p\" }, 9)\n\
+             fn names() -> String = STEPS |> list.map((s) => s.name) |> list.join(\",\")\n",
+        ),
+        (
+            "main.almd",
+            "import self.a\n\
+             import self.b\n\
+             fn main() -> Unit = {\n\
+             \x20 println(int.to_string(a.one().n))\n\
+             \x20 println(int.to_string(a.FIRST.n))\n\
+             \x20 println(int.to_string(list.len(b.STEPS)))\n\
+             \x20 println(b.names())\n\
+             \x20 println(b.PAIR.0.name)\n\
+             }\n",
+        ),
+    ]);
+}
+
 /// Like `assert_cross_target`, but for programs whose `main` is an `effect fn`.
 /// Such a main returns `Result[Unit, _]`, and wasmtime's `_start` prints the
 /// wrapped return value (a heap pointer) as a trailing line. Compare only the

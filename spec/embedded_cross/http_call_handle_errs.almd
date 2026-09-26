@@ -1,0 +1,72 @@
+// @contract: C-366
+// The http call handle (#2633) on the embedded lane: every probe is
+// deterministic — a closed local port and malformed limits, no live network
+// — and the answers must match native byte-for-byte (the shared rt-core call
+// core guarantees it by construction; this net catches a drift in the start
+// frame, the leaf protocol or the response decode between the http_call
+// splice and the host). The loopback behaviour — limits firing, cancel, the
+// streaming twin, drop — is tests/http_call_handle_test.rs, on both legs.
+import http
+
+fn show(r: Result[HttpResponse, String]) -> String = match r {
+  ok(resp) => "${http.status_code(resp)} ${http.body(resp)}",
+  err(e) => e,
+}
+
+fn polled(p: Result[HttpResponse, String]?) -> String = match p {
+  some(r) => show(r),
+  none => "pending",
+}
+
+effect fn main() -> Unit = {
+  match http.start("GET", "http://127.0.0.1:1/", "", [:], { total_ms: 0, idle_ms: -1 }) {
+    ok(_) => println("idle:unexpected-ok"),
+    err(e) => println("idle:${e}"),
+  }
+  match http.start(
+    "POST",
+    "http://127.0.0.1:1/x",
+    "body",
+    ["K": "v", "X-Two": "2"],
+    { total_ms: -5, idle_ms: 0 },
+  ) {
+    ok(_) => println("total:unexpected-ok"),
+    err(e) => println("total:${e}"),
+  }
+  let c = http.start(
+    "POST",
+    "http://127.0.0.1:1/x",
+    "body",
+    ["K": "v"],
+    { total_ms: 2000, idle_ms: 500 },
+  )!
+  println("wait:${show(http.wait(c))}")
+  println("poll:${polled(http.poll(c))}")
+  println("read:[${http.read_new(c)}]")
+  http.cancel(c)
+  println("after-cancel:${polled(http.poll(c))}")
+  let r = http.request_stream_with_limits(
+    "GET",
+    "http://127.0.0.1:1/",
+    "",
+    [:],
+    { total_ms: 1000, idle_ms: 0 },
+    (_) => (),
+  )
+  println("stream:${match r {
+    ok(_) => "ok",
+    err(e) => e,
+  }}")
+  let bad = http.request_stream_with_limits(
+    "GET",
+    "http://127.0.0.1:1/",
+    "",
+    [:],
+    { total_ms: 0, idle_ms: -2 },
+    (_) => (),
+  )
+  println("stream-limits:${match bad {
+    ok(_) => "ok",
+    err(e) => e,
+  }}")
+}

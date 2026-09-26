@@ -1,0 +1,14 @@
+// silent (#2345): inside `record_exit` a local binding named like the
+// imported module wins for member access (`process.exit` is the record's
+// field); `main` still reaches the real module, so the import is used.
+import process
+
+fn record_exit() -> Int = {
+  let process = { exit: (code: Int) => code }
+  process.exit(200)
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(record_exit()))
+  process.exit(0)
+}

@@ -339,8 +339,9 @@ fn render_expr_record(ctx: &RenderContext, expr: &IrExpr) -> String {
         // box-by-default pass already boxed the field value, so no
         // field-side `Rc::new` — that double-boxed it (this site had no
         // `RcWrap` guard at all).
-        field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", k.as_str()), ("value", val_str.as_str())])
-            .unwrap_or_else(|| format!("{}: {}", k, val_str)));
+        let fname = ctx.field_ident(k.as_str());
+        field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", fname.as_str()), ("value", val_str.as_str())])
+            .unwrap_or_else(|| format!("{}: {}", fname, val_str)));
     }
     // Fill in default fields that were not explicitly provided.
     // default_fields is keyed by both bare name ("Msg") and module-qualified
@@ -366,8 +367,9 @@ fn render_expr_record(ctx: &RenderContext, expr: &IrExpr) -> String {
         let needs_box = name.as_ref()
             .map_or(false, |cn| ctx.ann.boxed_fields.contains(&(cn.to_string(), field_name.clone())));
         if needs_box { val_str = format!("std::boxed::Box::new({})", val_str); }
-        field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", field_name.as_str()), ("value", val_str.as_str())])
-            .unwrap_or_else(|| format!("{}: {}", field_name, val_str)));
+        let fname = ctx.field_ident(field_name.as_str());
+        field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", fname.as_str()), ("value", val_str.as_str())])
+            .unwrap_or_else(|| format!("{}: {}", fname, val_str)));
     }
     let fields_str = field_strs.join(", ");
     // Resolve type name: explicit name, or from expr.ty
@@ -420,7 +422,7 @@ fn render_expr_spread_record(ctx: &RenderContext, expr: &IrExpr) -> String {
     // in the `Clone` `BorrowLowering` spelled for it.
     let base_str = render_expr(ctx, base);
     let fields_str = fields.iter()
-        .map(|(k, v)| format!("{}: {}", k, render_expr(ctx, v)))
+        .map(|(k, v)| format!("{}: {}", ctx.field_ident(k.as_str()), render_expr(ctx, v)))
         .collect::<Vec<_>>()
         .join(", ");
     let type_name = match &expr.ty {

@@ -80,8 +80,6 @@ env:
 
 jobs:
   trust-spine:
-    # Skip on the Codeberg/Forgejo mirror; GitHub Actions is the capable CI.
-    if: github.server_url == 'https://github.com'
     name: Coq proofs + axiom audit + PCC gate
     runs-on: ubuntu-latest
     # A green run is ~17 min warm; ~80 min cold (OCaml + Rocq built from source on

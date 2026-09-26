@@ -277,7 +277,9 @@ impl LowerCtx {
             // deferred Opaque below.
             IrExprKind::Call { target: CallTarget::Computed { callee }, .. }
                 if self.closure_value_of(callee).is_some()
-                    || Self::is_fn_member_callee(callee) =>
+                    || Self::is_fn_member_callee(callee)
+                    || Self::is_fn_building_call(callee)
+                    || matches!(&callee.kind, IrExprKind::Var { id } if Self::is_slot_global_fn(*id)) =>
             {
                 self.lower_bind_heap_call_computed(var, ty, value)
             }

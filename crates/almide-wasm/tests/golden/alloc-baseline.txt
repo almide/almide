@@ -260,6 +260,7 @@
 66880	spec/wasm_cross/heap_result_if_match_arm_frame.almd
 66272	spec/wasm_cross/heap_result_if_option_aggregate.almd
 66032	spec/wasm_cross/heap_result_if_record_arm.almd
+66176	spec/wasm_cross/heap_result_if_some_user_call_temps.almd
 66048	spec/wasm_cross/heap_result_if_str_int.almd
 66464	spec/wasm_cross/heap_result_tuple_return.almd
 65920	spec/wasm_cross/hex_two_module_link.almd
@@ -544,9 +545,11 @@
 88608	spec/wasm_cross/rc_alloc_stress.almd
 65888	spec/wasm_cross/rc_reclaim_churn.almd
 66224	spec/wasm_cross/record_default_field_omitted.almd
+71824	spec/wasm_cross/record_field_rust_keyword.almd
 65840	spec/wasm_cross/record_forms.almd
 68048	spec/wasm_cross/record_option_none_cells.almd
 67296	spec/wasm_cross/record_pair_result_return.almd
+!	spec/wasm_cross/record_scalar_field_assign_alias.almd
 66336	spec/wasm_cross/record_variant_field_literal.almd
 66192	spec/wasm_cross/records_variants.almd
 65760	spec/wasm_cross/recursion_depth_within_limits.almd
@@ -738,6 +741,7 @@
 65904	spec/wasm_cross/unique_non_flat_element.almd
 65952	spec/wasm_cross/unit_effect_abi.almd
 66160	spec/wasm_cross/unsigned_literal_domain.almd
+!	spec/wasm_cross/unwrap_callarg_single_expr_effect_body.almd
 66032	spec/wasm_cross/unwrap_in_callarg.almd
 65984	spec/wasm_cross/unwrap_in_if_arm.almd
 66048	spec/wasm_cross/unwrap_in_recursion.almd

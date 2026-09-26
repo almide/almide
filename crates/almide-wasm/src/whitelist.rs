@@ -220,6 +220,11 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // The #1791 read side (audited 2026-09-03): the same list/string
     // surface plus int.parse / map.new / map.contains / map.set.
     "http_status_code", "http_headers", "http_header_values",
+    // http_request.almd (#2588): the request rep, the same List[String]
+    // discipline and list/string/map surfaces as http_response; req_header /
+    // param (Option ret) sit in the SUM tier below.
+    "http_new_request", "http_req_method", "http_req_path", "http_req_body",
+    "http_query_params", "http_req_with_params", "http_req_with_path", "http_set_body",
     // random_int.almd (audited 2026-08-25): prim.alloc_bytes scratch +
     // prim.random_get (the op-32 entropy boundary) + pure span math —
     // the VALUE is nondeterministic by contract (C-112 pins the range).
@@ -230,7 +235,7 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // are REJECTED: their pair walks read the incumbent's inline-pairs
     // Value layout (tag@h+4, count@h+8) — see PORT-MATRIX.
     "json_path_root", "json_path_field", "json_path_index", "json_path_get",
-    "http_get_header",
+    "http_get_header", "http_req_header", "http_param",
     // regex_engine.almd Option returners (same audit).
     "regex_find", "regex_captures",
     // zlib_inflate.almd / zlib_deflate.almd (#1700, audited 2026-09-01):
@@ -262,6 +267,30 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
 pub(crate) const HTTP_CLIENT_SUM: &[&str] = &[
     "__request_impl", "__request_status_impl", "__get_status_impl",
     "__request_bytes_impl", "__get_bytes_impl",
+];
+
+/// The http call handle (#2633, audited 2026-09-26): stdlib/http_call.almd
+/// — language surface only (string interpolation and slicing, list.map/fold,
+/// map.entries, int.parse, `??`, ok()/err()/some()/none ctors, a callback
+/// call); the only leaves are the op-53..=58 host calls this emitter lowers
+/// itself (calls.rs), and `HttpCall` is this emitter's own one-slot block.
+/// Result / Option returns and the Map headers param trip the coupled proxy;
+/// the bodies never touch a raw layout.
+pub(crate) const HTTP_CALL_SUM: &[&str] = &[
+    "__hc_start_impl", "__hc_stream_limited_impl", "__hc_poll_impl",
+    "__hc_read_new_impl", "__hc_wait_impl", "__hc_cancel_impl",
+];
+
+/// The http.serve family (#2650, audited 2026-09-26): stdlib/http_serve.almd —
+/// PURE language surface over the published List[String] HttpRequest /
+/// HttpResponse reps (list.get/drop/chunk/find, string.split/index_of/take/
+/// drop/chars, map.new/set, http.url_decode, option.flat_map, a `while`
+/// loop, the handler through call_indirect); the only leaves are the
+/// op-70/71/72 host calls the emitter lowers itself (calls.rs). Result /
+/// Option returns build through language-level constructors.
+pub(crate) const HTTP_SERVE_SUM: &[&str] = &[
+    "http_serve", "http_req_method", "http_req_path", "http_req_body", "http_req_header",
+    "http_query_params",
 ];
 
 pub(crate) const MATH_VERIFIED: &[&str] = &[
@@ -325,6 +354,8 @@ const TIERS: &[(&[&str], bool)] = &[
     (BYTES_FAMILY_VERIFIED, false),
     (BYTES_FAMILY_SUM, true),
     (HTTP_CLIENT_SUM, true),
+    (HTTP_CALL_SUM, true),
+    (HTTP_SERVE_SUM, true),
     (MATRIX_COMPOSITIONS, false),
 ];
 

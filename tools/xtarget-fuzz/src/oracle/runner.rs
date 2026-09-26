@@ -42,6 +42,18 @@ impl ProcResult {
     }
 }
 
+/// Address-space ceiling for a fuzzed program's NATIVE run: wasm32's own
+/// linear-memory ceiling, so both legs stop at the same size (#2611).
+pub const NATIVE_MEMORY_CAP_BYTES: u64 = 4 << 30;
+
+/// Did this native run stop because it hit [`NATIVE_MEMORY_CAP_BYTES`]? Rust's
+/// allocation-error handler prints `memory allocation of N bytes failed` and
+/// aborts; that line is how the cap is recognised.
+pub fn native_hit_memory_cap(run: &ProcResult) -> bool {
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    stderr.contains("memory allocation of ") && stderr.contains(" bytes failed")
+}
+
 /// Locations of the external tools the ladder drives, plus this worker's
 /// isolated scratch directory.
 #[derive(Clone)]
@@ -66,6 +78,36 @@ impl Toolchain {
             timeout,
             ..self.clone()
         }
+    }
+
+    /// Drop the per-program artifacts `almide build` leaves in this worker's
+    /// build dir (#2611). `almide build` keeps every program's binary as
+    /// `target/<profile>/almide-<hash>` (and, where rustc keeps them, its
+    /// `deps/almide_out-*` objects) as a content-keyed cache that only a
+    /// week-old sweep evicts. That cache pays off for a user's edit loop, but
+    /// every fuzzed program is distinct, so here it never hits and only
+    /// grows: one kept binary per program, for the whole campaign, on the
+    /// runner's disk. The ladder runs the `-o` copy, never the cached one.
+    ///
+    /// Called between programs, from the worker thread that owns this dir:
+    /// no build can be running in it. The lockfile, cargo's own metadata and
+    /// every directory (the dependency build cache, the incremental store)
+    /// stay, so the next build is exactly as warm as before.
+    pub fn prune_build_cache(&self) -> usize {
+        let mut removed = 0;
+        for profile in ["debug", "release"] {
+            let dir = self.scratch.join("target").join(profile);
+            for (sub, prefix) in [(dir.clone(), "almide-"), (dir.join("deps"), "almide_out-")] {
+                let Ok(entries) = std::fs::read_dir(&sub) else { continue };
+                for e in entries.flatten() {
+                    let is_file = e.file_type().map(|t| t.is_file()).unwrap_or(false);
+                    if is_file && e.file_name().to_string_lossy().starts_with(prefix) && std::fs::remove_file(e.path()).is_ok() {
+                        removed += 1;
+                    }
+                }
+            }
+        }
+        removed
     }
 
     /// `almide check <file>` — type-check only.
@@ -112,6 +154,32 @@ impl Toolchain {
     pub fn run_native_bin(&self, bin: &Path) -> ProcResult {
         let mut cmd = Command::new(bin);
         cmd.env("NO_COLOR", "1");
+        // The address-space cap (#2611). A corpus mutation can raise a loop
+        // bound to 4294967295 around an allocation (seed 578090231173 index
+        // 4323: a fresh Map pushed per iteration). Native then allocates at
+        // GB/s for the whole 30 s budget, well past the runner's 16 GB, and the
+        // hosted runner is shut down ("The runner has received a shutdown
+        // signal", exit 143) with the shard's campaign and upload lost. That
+        // was the shard-loss mechanism on the aarch64 runners, measured with
+        // the in-step sampler: mem_used went from ~1.3 GB to 13.5-15.6 GB with
+        // mem_avail at 297-343 MB in the last sample before every kill.
+        // The wasm leg already has this ceiling (wasm32's 4 GiB), so the cap
+        // gives native the same one, and a program that reaches it is skipped
+        // by the ladder (`native_hit_memory_cap`), never compared.
+        #[cfg(unix)]
+        unsafe {
+            use std::os::unix::process::CommandExt;
+            cmd.pre_exec(|| {
+                let lim = libc::rlimit {
+                    rlim_cur: NATIVE_MEMORY_CAP_BYTES as libc::rlim_t,
+                    rlim_max: NATIVE_MEMORY_CAP_BYTES as libc::rlim_t,
+                };
+                // Best effort: an OS that refuses the cap runs the program
+                // uncapped, exactly as before.
+                let _ = libc::setrlimit(libc::RLIMIT_AS, &lim);
+                Ok(())
+            });
+        }
         self.spawn_timed(cmd)
     }
 
@@ -237,3 +305,49 @@ impl Toolchain {
 /// Polling granularity while waiting on a child. Small enough that a
 /// hung program is killed promptly, large enough not to busy-spin.
 const POLL_INTERVAL_MS: u64 = 10;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tc() -> Toolchain {
+        Toolchain {
+            almide: PathBuf::from("almide"),
+            wasmtime: PathBuf::from("wasmtime"),
+            scratch: std::env::temp_dir(),
+            timeout: Duration::from_secs(10),
+        }
+    }
+
+    /// #2611: the native run carries the address-space cap. `ulimit -v`
+    /// reports RLIMIT_AS in KiB; Linux is where CI runs and where the cap is
+    /// enforced (macOS accepts RLIMIT_AS without enforcing it).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_native_run_is_capped_at_the_wasm32_ceiling() {
+        let dir = std::env::temp_dir().join(format!("xtarget-cap-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("show-limit.sh");
+        std::fs::write(&script, "#!/bin/sh\nulimit -v\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let r = tc().run_native_bin(&script);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(String::from_utf8_lossy(&r.stdout).trim(), (NATIVE_MEMORY_CAP_BYTES / 1024).to_string());
+    }
+
+    #[test]
+    fn the_cap_is_recognised_by_the_allocation_failure_line_only() {
+        let run = |stderr: &str| ProcResult {
+            stdout: Vec::new(),
+            stderr: stderr.as_bytes().to_vec(),
+            exit_code: None,
+            timed_out: false,
+            spawn_failed: false,
+            duration: Duration::ZERO,
+        };
+        assert!(native_hit_memory_cap(&run("memory allocation of 4294967296 bytes failed\n")));
+        assert!(!native_hit_memory_cap(&run("thread 'main' panicked at 'index out of bounds'\n")));
+        assert!(!native_hit_memory_cap(&run("")));
+    }
+}

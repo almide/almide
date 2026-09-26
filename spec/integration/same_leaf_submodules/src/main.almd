@@ -1,0 +1,13 @@
+// #2654: two submodules share the leaf name `util` in different directories.
+// Each file's `import self.<dir>.util` binds `util` to ITS file; the leaf is a
+// per-file binding name, not the module's identity. The same program as
+// same_leaf_test.almd, as a runnable entry (native and wasm print the same).
+import self.use_a
+import self.use_b
+import self.b.util as butil
+
+fn main() -> Unit = {
+  println(use_a.go())
+  println(use_b.go())
+  println(butil.name())
+}

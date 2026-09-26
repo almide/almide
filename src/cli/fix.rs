@@ -334,7 +334,7 @@ fn apply_batch(source: &str, diagnostics: &[Diagnostic]) -> (String, Vec<FixItJs
             code: d.code.unwrap_or("E???").to_string(),
             line, col, end_col,
             replacement,
-            applicability: d.try_applicability.as_str().to_string(),
+            applicability: almide_base::diagnostic::Applicability::MachineApplicable.as_str().to_string(),
         });
     }
     (working, applied)
@@ -704,7 +704,7 @@ fn collect_residual_fixes(file: &str, source: &str) -> (Vec<ManualDiag>, Vec<Fix
 
     let residual: Vec<&Diagnostic> = diagnostics.iter()
         .chain(parser.errors.iter())
-        .filter(|d| d.level == diagnostic::Level::Error && d.try_snippet.is_some())
+        .filter(|d| d.level == diagnostic::Level::Error && d.repair.is_some())
         // A machine-applicable fix-it that survived the engine (its batch
         // was discarded, or the round cap ran out) is not "manual" work —
         // re-running `almide fix` is what closes it.
@@ -716,16 +716,21 @@ fn collect_residual_fixes(file: &str, source: &str) -> (Vec<ManualDiag>, Vec<Fix
         line: d.line,
         col: d.col,
         message: d.message.clone(),
-        applicability: d.try_applicability.as_str().to_string(),
+        applicability: d.primary_edit()
+            .map_or(diagnostic::Applicability::Unspecified, |e| e.applicability)
+            .as_str().to_string(),
     }).collect();
 
-    let suggestions = residual.iter().filter_map(|d| {
-        let (line, col, end_col) = d.try_replace_span?;
-        Some(FixItJson {
+    // Every span-exact edit the diagnostic's `repair` states (#2149) —
+    // `primary` first, then its `alternatives` — each a reading a human or
+    // a model agrees to before applying.
+    let suggestions = residual.iter().flat_map(|d| {
+        let r = d.repair.as_ref().expect("filtered on repair above");
+        r.primary.iter().chain(r.alternatives.iter()).map(|e| FixItJson {
             code: d.code.unwrap_or("E???").to_string(),
-            line, col, end_col,
-            replacement: d.try_snippet.clone().unwrap_or_default(),
-            applicability: d.try_applicability.as_str().to_string(),
+            line: e.line, col: e.col, end_col: e.end_col,
+            replacement: e.replacement.clone(),
+            applicability: e.applicability.as_str().to_string(),
         })
     }).collect();
 

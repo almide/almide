@@ -1,0 +1,9 @@
+fn area(w: Int, h: Int) -> Int = w * h
+
+fn label(n: Int) -> String = n
+
+fn shout(s: String) -> Int = s
+
+fn main() -> Unit = {
+  println(label(area(2, 3)))
+}

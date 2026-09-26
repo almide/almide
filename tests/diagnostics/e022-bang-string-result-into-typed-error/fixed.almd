@@ -1,0 +1,15 @@
+type Failure = | Slow | Broken(String)
+
+fn digits(s: String) -> Result[Int, String] = int.parse(s)
+
+fn step(s: String) -> Result[Int, Failure] = match digits(s) {
+  ok(n) => ok(n + 1),
+  err(e) => err(Broken(e)),
+}
+
+effect fn main() -> Unit = {
+  match step("4") {
+    ok(n) => println("ok " + int.to_string(n)),
+    err(_) => println("err"),
+  }
+}

@@ -28,6 +28,106 @@ effect fn main() -> Unit = {
 }
 ```
 
+The server listens on `0.0.0.0:port` and handles one request at a time, in
+the order they arrive. The response goes out as `HTTP/1.1 <status> <reason>`,
+the response's headers in order, `Content-Length`, the body, and then the
+connection closes. A handler `err(m)` answers `500` with the body
+`Internal error: <m>`. If the port cannot be bound, the program stops with
+`Error: bind failed: <reason>` and exit code 1.
+
+**On wasm** (C-367): `almide run app.almd --target wasm` serves the same
+program on the embedded host. One instance handles every request, exactly as
+the native process does: `main` runs once, and a value it computed before
+`http.serve` is the same on every request. The status line, headers and body
+are byte-identical to native. A stock artifact from
+`almide build --target wasm` has no listening socket, so `almide build` and
+`almide check --target wasm` still refuse `http.serve` (E081, #2659).
+
+## Routing and middleware
+
+A handler is a plain function from a request to a response —
+`type HttpHandler = effect (HttpRequest) -> HttpResponse` — and so are a
+router and a wrapped app. `http.serve` is one way to run a handler;
+`http.new_request` is another: a test builds a request in code and calls the
+app directly, with no socket. Routing and request construction are pure and
+behave identically on native and wasm, and a router is served like any other
+handler.
+The example prints the lines below on both targets; on wasm the router is
+served by the incumbent leg today, which runs through the `wasmtime` CLI
+(#2664).
+
+```almd check
+import http
+
+type User: Codec = { name: String, age: Int }
+
+effect fn get_user(req: HttpRequest) -> HttpResponse = http.response(200, "user " + (http.param(req, "id") ?? ""))
+
+effect fn create_user(req: HttpRequest) -> HttpResponse = match http.decode_json(req, (v) => User.decode(v)) {
+  ok(u) => http.response(201, u.name),
+  err(bad) => bad,
+}
+
+fn server_header(next: HttpHandler) -> HttpHandler = (req) => http.set_header(next(req)!, "Server", "almide")
+
+effect fn show(app: HttpHandler, method: String, target: String, body: String) -> String = {
+  let res = app(http.new_request(method, target, body, [:]))!
+  "${http.status_code(res)} ${http.body(res)}"
+}
+
+effect fn main() -> Unit = {
+  let routes = http.router([
+    http.route("GET /users/{id}", get_user),
+    http.route("POST /users", create_user),
+  ])!
+  let app = http.wrap(routes, [server_header])
+  println(show(app, "GET", "/users/42?x=1", "")!)
+  println(show(app, "POST", "/users", "{\"name\":\"ann\",\"age\":3}")!)
+  println(show(app, "POST", "/users", "{}")!)
+  println(show(app, "DELETE", "/users/42", "")!)
+  println(show(app, "GET", "/nope", "")!)
+}
+```
+```text
+200 user 42
+201 ann
+400 Bad Request: missing field 'name'
+405 Method Not Allowed
+404 Not Found
+```
+
+- **Patterns** — `http.route("METHOD /path", handler)`; the method is
+  optional (`"/health"` answers every method). `{name}` binds one segment,
+  percent-decoded (`+` stays `+`), read with `http.param(req, name)`; a last
+  `{name...}` binds the rest of the path, possibly empty. Matching uses the
+  path without its query string; empty segments do not count, so `/users/`
+  is `/users`.
+- **Precedence** — the most specific matching route answers, whatever the
+  registration order: `GET /users/me` beats `GET /users/{id}`, and a route
+  with a method beats the same path without one.
+- **Refusal** — `http.router` returns `err` naming every problem, so a
+  broken table is never served: two routes some request matches with neither
+  more specific (Go 1.22's rule, two spellings of one pattern included), a
+  `{name...}` that is not last, a name bound twice, a method that is not
+  upper-case letters, a path not starting with `/`.
+- **Router answers** — no route matches the path: `404 Not Found`. Routes
+  match the path but not the method: `405 Method Not Allowed` with an
+  `Allow` header. `HEAD` falls back to the `GET` route and drops the body. A
+  request target not starting with `/`, or a `%` not followed by two hex
+  digits in the path: `400 Bad Request`. A handler's `err` stays an `err`
+  (`http.serve` turns it into its 500).
+- **Mounting** — `http.mount("/api", sub)` hands `/api/items?x=1` to `sub` as
+  `/items?x=1`; parameters the prefix bound (`/orgs/{org}`) stay visible to
+  `sub`.
+- **Middleware** — `type HttpMiddleware = (HttpHandler) -> HttpHandler`.
+  `http.wrap(app, [a, b])` is `a(b(app))`: the first in the list is the
+  outermost. A middleware may answer without calling the handler it wraps.
+  Per-request data travels as arguments; there is no mutable context.
+- **Bad input** — `http.decode_json(req, decode)` parses the body and runs a
+  Codec decoder; its `err` is a ready `400 Bad Request` response naming why.
+- **Out of scope** — built-in logger / CORS / sessions, streaming responses
+  and WebSocket are left to packages.
+
 ### `http.response(status: Int, body: String) -> HttpResponse`
 
 Create a plain text HTTP response with status code. Seeds
@@ -435,10 +535,15 @@ effect fn main() -> Unit = {
 
 #### Read timeout (`ALMIDE_HTTP_TIMEOUT_SECS`)
 
-Every client call waits at most **30 seconds** for the server to answer
-(the SSE streaming client: 120 s between events). The
-`ALMIDE_HTTP_TIMEOUT_SECS` environment variable overrides the limit for
-all clients; `0` means **no timeout** — block until the server responds.
+Every client call that takes no limits waits at most **30 seconds** for the
+server to answer (the SSE streaming client: 120 s between events). The
+`ALMIDE_HTTP_TIMEOUT_SECS` environment variable overrides that DEFAULT for
+all of them; `0` means **no timeout** — block until the server responds. It
+is the default only: a call that carries its own limits (`http.start`, the
+`*_with_limits` streaming clients) ignores it — see
+[Per-call limits and cancellation](#per-call-limits-and-cancellation). The
+limit is between bytes, not for the whole call, so a server that keeps
+talking never trips it.
 A slow endpoint (a local LLM evaluating a long prompt routinely needs
 30–120 s before the first byte) fails past the limit with:
 
@@ -640,9 +745,119 @@ effect fn main() -> Unit = {
 }
 ```
 
+## Per-call limits and cancellation
+
+A call can be held as a handle, `HttpCall`, instead of blocking until it
+ends. `http.start` returns at once; a runtime thread does the exchange while
+the program keeps running its own loop — reading keys, redrawing, starting a
+second request.
+
+| | |
+|---|---|
+| `http.start(method, url, body, headers, limits) -> Result[HttpCall, String]` | begins the request and returns at once |
+| `http.poll(c) -> Option[Result[HttpResponse, String]]` | never blocks: `none` while the call runs, then its result |
+| `http.read_new(c) -> String` | never blocks: the body text that arrived since the previous `read_new` |
+| `http.wait(c) -> Result[HttpResponse, String]` | blocks until the call ends — never past its limits |
+| `http.cancel(c) -> Unit` | closes the connection; the call ends as `err("request cancelled")` |
+
+**Limits are per call.** `HttpLimits = { total_ms: Int, idle_ms: Int }`, both
+in milliseconds, `0` = no limit:
+
+- `total_ms` is a wall clock that starts at `http.start`: dialing, the wait
+  for the first byte and the body all count. A server that keeps talking is
+  still stopped at it. It is checked by the runtime's thread and by every
+  `poll` / `read_new` / `wait`.
+- `idle_ms` is the longest gap between two arrivals of bytes; the wait for
+  the first byte counts as a gap.
+
+A limit that fires ends the call with an error that names it:
+
+```
+request timeout: total_ms 5000 exceeded
+request timeout: idle_ms 60000 exceeded
+```
+
+`ALMIDE_HTTP_TIMEOUT_SECS` does not apply to a call with limits — it stays the
+default of the calls that take none. So "this LLM call may take 30 minutes,
+this page fetch 10 seconds" is two `start` calls with two limits, in one
+process.
+
+**Ending a call closes the connection.** When the call ends — answered,
+failed, timed out, cancelled — the runtime shuts the socket down, so the
+server sees the close at once and nothing more arrives. After `cancel`,
+`read_new` returns `""` (bytes that arrived but were not read are dropped) and
+`poll` / `wait` answer `err("request cancelled")`. `cancel` on a call that
+already ended changes nothing, and calling it twice is fine. Dropping the last
+copy of the handle cancels the call too.
+
+**The answer is the whole response.** `wait` and `poll` answer like
+`http.request_response`: any complete response is `ok` — a 404 included —
+with its status, every header line and the whole body; `err` is a transport
+failure, a fired limit or a cancel. The body bytes `read_new` handed out are
+still in that response's body. A multibyte character split across two reads
+is held back until it is whole.
+
+```almd check
+import env
+import http
+import io
+
+// Print the stream as it arrives; stop after 3 s whatever the server does.
+effect fn follow(c: HttpCall, started: Int) -> Result[String, String] = {
+  io.print(http.read_new(c))
+  match http.poll(c) {
+    some(ok(resp)) => ok("done: ${http.status_code(resp)}"),
+    some(err(e)) => ok(e),
+    none => if env.millis() - started > 3000 then {
+      http.cancel(c)
+      ok("stopped")
+    } else {
+      env.sleep_ms(100)
+      follow(c, started)
+    },
+  }
+}
+
+effect fn main() -> Unit = {
+  let limits = { total_ms: 30 * 60 * 1000, idle_ms: 120 * 1000 }
+  let c = http.start("GET", "http://127.0.0.1:8080/events", "", [:], limits)!
+  println(follow(c, env.millis())!)
+}
+```
+
+### The streaming clients with limits
+
+`request_stream`, `openai_streaming_call` and `anthropic_streaming_call` each
+have a `_with_limits` twin: the same parameters with `limits: HttpLimits`
+before the callback, the same answer, built on the handle — so a stream that
+keeps talking ends at `total_ms`, and one that stalls ends at `idle_ms`, each
+with the error that names it. The forms without limits are unchanged.
+
+```almd check
+import http
+
+effect fn main() -> Unit = {
+  let limits = { total_ms: 10 * 60 * 1000, idle_ms: 2 * 60 * 1000 }
+  let body = """{"model": "m", "stream": true, "messages": []}"""
+  let answer = http.openai_streaming_call_with_limits("http://127.0.0.1:8080/v1", "key", body, limits, (delta) => eprintln(delta))!
+  println(answer)
+}
+```
+
+On the wasm target, `almide run --target wasm` serves `start`, `poll`,
+`read_new`, `wait`, `cancel` and `request_stream_with_limits` with the same
+behaviour as native — the embedded host runs the native call core, so the
+limit and cancel errors are the same text, and dropping the last copy of a
+handle cancels its call there too. A standalone `.wasm` built with
+`almide build --target wasm` cannot carry them yet (there is no stock WASI
+host for an in-flight call), so `almide check --target wasm`, which checks
+the build route, still refuses them. `openai_streaming_call_with_limits` and
+`anthropic_streaming_call_with_limits` stay native-only, like the streaming
+helpers they extend.
+
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (37 functions)
+## Signature index (52 functions)
 
 ```
 // Serves 0.0.0.0:port forever; handler err is a 500.
@@ -792,6 +1007,86 @@ effect http.openai_streaming_call(base_url: String, api_key: String, body_json: 
 // Streams Anthropic Messages; LLM-response JSON.
 // @since 0.15.1 or earlier
 effect http.anthropic_streaming_call(api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> String
+
+// Begins a request; returns at once with a handle.
+// @since unreleased
+effect http.start(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits) -> HttpCall
+
+// Never blocks: none while running, then the result.
+// @since unreleased
+effect http.poll(c: HttpCall) -> Option[Result[HttpResponse, String]]
+
+// Body text since the last read_new; never blocks.
+// @since unreleased
+effect http.read_new(c: HttpCall) -> String
+
+// Blocks until the call ends; any status is ok.
+// @since unreleased
+effect http.wait(c: HttpCall) -> HttpResponse
+
+// Closes the connection; the call ends as err.
+// @since unreleased
+effect http.cancel(c: HttpCall) -> Unit
+
+// request_stream bounded by per-call limits.
+// @since unreleased
+effect http.request_stream_with_limits(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits, on_chunk: (String) -> Unit) -> Unit
+
+// openai_streaming_call bounded by per-call limits.
+// @since unreleased
+effect http.openai_streaming_call_with_limits(base_url: String, api_key: String, body_json: String, limits: HttpLimits, on_text_delta: (String) -> Unit) -> String
+
+// anthropic_streaming_call bounded by per-call limits.
+// @since unreleased
+effect http.anthropic_streaming_call_with_limits(api_key: String, body_json: String, limits: HttpLimits, on_text_delta: (String) -> Unit) -> String
+
+// Request built in code; target keeps its ?query.
+// @since unreleased
+http.new_request(method: String, target: String, body: String, headers: Map[String, String]) -> HttpRequest
+
+// Router-bound path parameter, decoded; none if unbound.
+// @since unreleased
+http.param(req: HttpRequest, name: String) -> Option[String]
+
+// "GET /users/{id}" to a route; no method = any.
+// @since unreleased
+http.route(pattern: String, handler: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute
+
+// Sub-app under prefix: /api/x reaches it as /x.
+// @since unreleased
+http.mount(prefix: String, sub: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute
+
+// Route table as a handler; err on conflicting routes.
+// @since unreleased
+http.router(routes: List[HttpRoute]) -> Result[(HttpRequest) -> Result[HttpResponse, String], String]
+
+// Applies middleware; the first is the outermost.
+// @since unreleased
+http.wrap(handler: (HttpRequest) -> Result[HttpResponse, String], middleware: List[((HttpRequest) -> Result[HttpResponse, String]) -> (HttpRequest) -> Result[HttpResponse, String]]) -> (HttpRequest) -> Result[HttpResponse, String]
+
+// JSON body through decode; err is a 400 response.
+// @since unreleased
+http.decode_json(req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse]
+```
+
+## Type index (4 types)
+
+```
+// Per-call limits in ms; 0 = no limit.
+// @since unreleased
+type http.HttpLimits = { total_ms: Int, idle_ms: Int }
+
+// Request to response; a router is one too.
+// @since unreleased
+type http.HttpHandler = (HttpRequest) -> Result[HttpResponse, String]
+
+// Wraps a handler: (next) => (req) => … next(req)! ….
+// @since unreleased
+type http.HttpMiddleware = ((HttpRequest) -> Result[HttpResponse, String]) -> (HttpRequest) -> Result[HttpResponse, String]
+
+// Route table row; build it with route or mount.
+// @since unreleased
+type http.HttpRoute = { method: String, pattern: String, segments: List[String], handler: (HttpRequest) -> Result[HttpResponse, String] }
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

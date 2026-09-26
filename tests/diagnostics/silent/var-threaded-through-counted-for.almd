@@ -1,0 +1,11 @@
+// silent (E011 near-miss): a counted `for` threading a `var` — no closure
+// captures it.
+fn sum_to(n: Int) -> Int = {
+  var acc = 0
+  for i in 0..<n {
+    acc = acc + i
+  }
+  acc
+}
+
+fn main() -> Unit = println(int.to_string(sum_to(5)))

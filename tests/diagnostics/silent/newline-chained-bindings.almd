@@ -1,0 +1,8 @@
+// silent (E049 near-miss): bindings chain by newline inside a block.
+fn area(w: Int, h: Int) -> Int = {
+  let a = w * h
+  let b = a + 0
+  b
+}
+
+fn main() -> Unit = println(int.to_string(area(3, 4)))

@@ -171,18 +171,32 @@ schema = 3
 # activation row to Q8 and runs an integer dot — a transcription, not a
 # composition), and the three qwen3_block_* layers (whole fused decoder layers
 # over those kernels plus repeat_kv / per-head norm — their own arc).
-pending_self_host_ceiling = 9
-pending_port_ceiling = 56
+# 2026-09-26 (#2588): 9 -> 12. NEW surface, not a regression: http.router /
+# http.mount / http.wrap are served on wasm by the incumbent leg (the
+# spec/stdlib/http_router_test.almd fixture runs there), while the structural
+# leg refuses the effect fn values a handler is (#2664).
+pending_self_host_ceiling = 12
+# 2026-09-25 (#2631): 56 -> 64. NEW surface, not a regression: the http call
+# handle (start / poll / read_new / wait / cancel) and the three *_with_limits
+# streaming twins land native-first; each is refused at check time on the
+# wasm target (E081) until the wasi:http pollable port, #2633.
+# 2026-09-26 (#2650): 64 -> 59. http.serve runs on the embedded lane (the
+# guest-owned serve loop over host ops 70..=72, C-367) and builds on the
+# structural leg, so its structural and embedded legs go; the five
+# HttpRequest readers (req_method / req_path / req_body / req_header /
+# query_params) are self-hosted and their structural rows go. http.serve
+# keeps its stock-p1 leg (#2659). (#2588 retired the same five structural
+# rows through http.new_request and stdlib/http_request.almd.)
+pending_port_ceiling = 59
 
-# The unprobed class (#1827), per leg. Today: the five HttpRequest
-# accessors (http.query_params / req_body / req_header / req_method /
-# req_path) — the value exists only inside an http.serve handler, and on
-# these two legs http.serve itself walls at build, so the accessors are
-# never reached. The structural leg walls on the HttpRequest binding
-# itself (bind-ty:Named), which is that leg's own verdict — declared.
+# The unprobed class (#1827), per leg. Empty since #2588: the five
+# HttpRequest readers (http.query_params / req_body / req_header / req_method /
+# req_path) were unprobed while a request existed only inside an http.serve
+# handler; the probe now builds one with http.new_request, so every reader is
+# measured on every leg (the request-reader family rule in stdlib/http.almd).
 unprobed_ceiling_structural = 0
-unprobed_ceiling_stock_p1 = 5
-unprobed_ceiling_embedded = 5
+unprobed_ceiling_stock_p1 = 0
+unprobed_ceiling_embedded = 0
 
 [[unavailable]]
 fn = "datetime.monotonic_ns"
@@ -295,39 +309,25 @@ reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --t
 issue = "#1423"
 
 [[unavailable]]
-fn = "http.query_params"
+fn = "http.mount"
 legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1827"
+class = "pending-self-host"
+reason = "structural-leg-gap: the structural leg has no arm for a handler, an effect fn value flowing through a declared fn type (ty-mismatch:Fn); the incumbent leg serves it (spec/stdlib/http_router_test.almd)"
+issue = "#2664"
 
 [[unavailable]]
-fn = "http.req_body"
+fn = "http.router"
 legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1827"
+class = "pending-self-host"
+reason = "structural-leg-gap: the structural leg has no arm for a handler, an effect fn value flowing through a declared fn type (ty-mismatch:Fn); the incumbent leg serves it (spec/stdlib/http_router_test.almd)"
+issue = "#2664"
 
 [[unavailable]]
-fn = "http.req_header"
+fn = "http.wrap"
 legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1827"
-
-[[unavailable]]
-fn = "http.req_method"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1827"
-
-[[unavailable]]
-fn = "http.req_path"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1827"
+class = "pending-self-host"
+reason = "structural-leg-gap: the structural leg has no arm for a handler, an effect fn value flowing through a declared fn type (ty-mismatch:Fn); the incumbent leg serves it (spec/stdlib/http_router_test.almd)"
+issue = "#2664"
 
 [[unavailable]]
 fn = "http.request"
@@ -415,12 +415,10 @@ issue = "#1827"
 
 [[unavailable]]
 fn = "http.serve"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "no wasm host binding for the http server (http.serve is not an admitted effectful call on the incumbent) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-stock-p1 = "no wasm host binding for the http server (http.serve is not an admitted effectful call on the incumbent) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-structural = "host-surface"
-issue = "#1827"
+reason = "embedded-lane-served (#2650, C-367): `almide run --target wasm` serves it — one instance, sequential, byte-identical responses through the shared server core (host ops 70..=72); a stock p1 artifact has no listening socket, so `almide build --target wasm` refuses it — run it with `almide run --target wasm` or natively"
+issue = "#2659"
 
 [[unavailable]]
 fn = "http.url_decode"
@@ -802,3 +800,63 @@ reason-stock-p1 = "a wasm trap is uncatchable in-guest, so the panic-catch asser
 reason-structural = "host-surface (native-only-forever)"
 alt = "match on the err arm and assert"
 issue = "#1423"
+
+[[unavailable]]
+fn = "http.anthropic_streaming_call_with_limits"
+legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
+reason-embedded = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-stock-p1 = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-structural = "host-surface"
+issue = "#2633"
+
+[[unavailable]]
+fn = "http.cancel"
+legs = ["stock-p1"]
+class = "pending-port"
+reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
+issue = "#1710"
+
+[[unavailable]]
+fn = "http.openai_streaming_call_with_limits"
+legs = ["structural", "stock-p1", "embedded"]
+class = "pending-port"
+reason-embedded = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-stock-p1 = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
+reason-structural = "host-surface"
+issue = "#2633"
+
+[[unavailable]]
+fn = "http.poll"
+legs = ["stock-p1"]
+class = "pending-port"
+reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
+issue = "#1710"
+
+[[unavailable]]
+fn = "http.read_new"
+legs = ["stock-p1"]
+class = "pending-port"
+reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
+issue = "#1710"
+
+[[unavailable]]
+fn = "http.request_stream_with_limits"
+legs = ["stock-p1"]
+class = "pending-port"
+reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
+issue = "#1710"
+
+[[unavailable]]
+fn = "http.start"
+legs = ["stock-p1"]
+class = "pending-port"
+reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
+issue = "#1710"
+
+[[unavailable]]
+fn = "http.wait"
+legs = ["stock-p1"]
+class = "pending-port"
+reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
+issue = "#1710"

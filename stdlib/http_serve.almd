@@ -1,0 +1,55 @@
+// http_serve — the WASM lowering of `http.serve`
+// (#2650, C-367). Native keeps its direct intrinsics; this file only ever
+// links on the wasm legs through the self-host registry.
+//
+// The GUEST owns the serve loop: main calls http.serve exactly as natively,
+// the loop binds once and then pulls one request at a time from the host and
+// hands back one response — all inside the one instance main runs in, so the
+// handler sees native's state (what main computed and the handler captured,
+// the heap, the allocator), request after request, never a fresh instance.
+// The host moves bytes only, through the native runtime's own server core.
+//
+// HttpRequest's rep and its other readers live in stdlib/http_request.almd
+// (#2588): `[method, target, body, <header count>, k1, v1, …, p1, v1, …]`.
+// The host hands a request over as `[method, target, body, k1, v1, …]`, and
+// `__hs_request` inserts the header count.
+//
+// The three `__http_serve_*` leaves are host ops 70 / 71 / 72 served by the
+// embedded host (crates/almide-wasm-run/src/host_serve.rs). The response
+// crosses as http_framed cells `<char count>\n<payload>`: status, body, then
+// each header name and value.
+effect fn __http_serve_bind(port: String) -> Result[Unit, String] = _
+
+effect fn __http_serve_next() -> Result[List[String], String] = _
+
+effect fn __http_serve_reply(frame: String) -> Result[Unit, String] = _
+
+fn __hs_cell(s: String) -> String = "${string.len(s)}\n${s}"
+
+fn __hs_frame(resp: List[String]) -> String = resp |> list.map((c) => __hs_cell(c)) |> list.join("")
+
+fn __hs_request(raw: List[String]) -> List[String] = list.take(raw, 3) + [int.to_string((list.len(raw) - 3) / 2)] + list.drop(
+  raw,
+  3,
+)
+
+// A handler err is native's 500: `Internal error: <msg>` as text/plain.
+// `http.serve` is typed never-err (`-> Unit`), so its caller's `!` is a no-op
+// (#1049) and nothing could observe a returned err: a bind failure ABORTS,
+// `Error: bind failed: <os message>` and exit 1, as the native runtime does.
+// The loop itself never ends, as natively.
+effect fn http_serve(port: Int, f: effect (List[String]) -> List[String]) -> Unit = {
+  match __http_serve_bind(int.to_string(port)) {
+    ok(_) => (),
+    err(e) => prim.die(prim.handle("Error: ${e}\n")),
+  }
+  while true {
+    let raw = __http_serve_next()!
+    let req = __hs_request(raw)
+    let resp = match f(req) {
+      ok(r) => r,
+      err(e) => ["500", "Internal error: ${e}", "Content-Type", "text/plain"],
+    }
+    __http_serve_reply(__hs_frame(resp))!
+  }
+}

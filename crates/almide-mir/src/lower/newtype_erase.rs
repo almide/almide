@@ -35,6 +35,14 @@ fn seed_selfhost_newtype_reps(
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::String]),
         );
     }
+    // HttpRequest — the self-host rep is `[method, target, body, nh, k1, v1,
+    // …, p1, v1, …]` (stdlib/http_request.almd, #2588).
+    if !declared.contains("HttpRequest") {
+        map.insert(
+            "HttpRequest".to_string(),
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::String]),
+        );
+    }
     // FileStat — the fs.stat Ok payload. Its decl lives in the BUNDLED stdlib fs module,
     // which `source_to_ir` skips (defs come from the self-host registry), so the nominal
     // `Named(FileStat)` never reaches `record_layouts` and a `meta.size` member read walls.
@@ -411,6 +419,12 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
                     return;
                 }
                 match &e.kind {
+                    // Creating a closure runs nothing — only calling it does, and
+                    // that call is analyzed where it happens (its caps reach the
+                    // creator through the FuncRef edge). `http.route("…",
+                    // get_user)` names an effect handler; the table is still a
+                    // pure value (#2588).
+                    IrExprKind::Lambda { .. } | IrExprKind::ClosureCreate { .. } => return,
                     IrExprKind::RuntimeCall { .. } => self.ok = false,
                     IrExprKind::Call { target, .. } | IrExprKind::TailCall { target, .. } => {
                         match target {

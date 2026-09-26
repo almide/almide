@@ -1,0 +1,7 @@
+fn sum_to(k: Int) -> Int = {
+  var n = 0
+  for i in 0..<k {
+    n = n + i
+  }
+  n
+}

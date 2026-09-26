@@ -272,6 +272,28 @@ impl LowerCtx {
                 }
                 self.try_lower_heap_result_if(cond, then, else_, ty)
             });
+            // A VARIANT subject (`match string.index_of(p, " ") { some(i) => (…),
+            // none => (…) }` feeding a tuple destructure, #2588) has no literal
+            // chain for `desugar_match_to_if` to build. Run the SAME match-value
+            // routers the let-bound heap match executes through
+            // (`lower_bind_heap_match`): each arm materializes + consumes its
+            // value, the merge is the one owned block.
+            let lifted = lifted.or_else(|| {
+                if !is_variant_ty(&subject.ty) {
+                    return None;
+                }
+                let mark = self.ops.len();
+                let lhh_mark = self.live_heap_handles.len();
+                let dst = self.try_lower_custom_variant_match(subject, arms, ty)
+                    .or_else(|| self.try_lower_variant_value_match(subject, arms, ty))
+                    .or_else(|| self.try_lower_result_match_value(subject, arms, ty))
+                    .or_else(|| self.try_lower_option_match_value(subject, arms, ty));
+                if dst.is_none() {
+                    self.ops.truncate(mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                }
+                dst
+            });
             match lifted {
                 // Route through `materialized_call_arg` (not a bare `CallArg::Handle`):
                 // it tracks `dst` in `live_heap_handles` AND, for a Tuple/Record `a.ty`,

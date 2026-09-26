@@ -1,0 +1,12 @@
+// silent (E035 / E036 near-miss): branching on the Result's case, and a
+// map_err that keeps the error value.
+fn check(n: Int) -> Result[Int, String] =
+  if n > 0 then ok(n) else err("not positive: ${n}")
+
+fn main() -> Unit = {
+  let r = check(-1) |> result.map_err((e) => "check failed: ${e}")
+  match r {
+    ok(v) => println(int.to_string(v)),
+    err(e) => println(e),
+  }
+}

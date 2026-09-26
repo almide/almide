@@ -112,8 +112,9 @@ fn render_type_decl_record(ctx: &RenderContext, td: &IrTypeDecl, generics_str: &
             // when the closure is nested in a List/Map/Tuple field. Fn-free
             // field types fall through to the normal renderer.
             let type_s = render_type_field_fn(ctx, &f.ty);
-            ctx.templates.render_with("struct_field", None, &[], &[("name", f.name.as_str()), ("type", type_s.as_str())])
-                .unwrap_or_else(|| format!("    pub {}: {},", f.name, render_type(ctx, &f.ty)))
+            let fname = ctx.field_ident(f.name.as_str());
+            ctx.templates.render_with("struct_field", None, &[], &[("name", fname.as_str()), ("type", type_s.as_str())])
+                .unwrap_or_else(|| format!("    pub {}: {},", fname, render_type(ctx, &f.ty)))
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -184,12 +185,13 @@ fn render_type_decl_variant(ctx: &RenderContext, td: &IrTypeDecl, generics_str: 
                         } else {
                             rendered
                         };
-                        ctx.templates.render_with("fn_param", None, &[], &[("name", f.name.as_str()), ("type", boxed.as_str())])
-                            .unwrap_or_else(|| format!("{}: {}", f.name, boxed))
+                        let fname = ctx.field_ident(f.name.as_str());
+                        ctx.templates.render_with("fn_param", None, &[], &[("name", fname.as_str()), ("type", boxed.as_str())])
+                            .unwrap_or_else(|| format!("{}: {}", fname, boxed))
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
-                let field_names = fields.iter().map(|f| f.name.to_string()).collect::<Vec<_>>().join(", ");
+                let field_names = fields.iter().map(|f| ctx.field_ident(f.name.as_str())).collect::<Vec<_>>().join(", ");
                 ctx.templates.render_with("enum_variant_record", None, &[], &[("name", v.name.as_str()), ("fields", fields_str.as_str()), ("field_names", field_names.as_str())])
                     .unwrap_or_else(|| format!("{} {{ {} }}", v.name, fields_str))
             }
@@ -311,7 +313,7 @@ fn render_repr_impl(ctx: &RenderContext, td: &IrTypeDecl) -> Option<String> {
                 .map(|(i, f)| format!("{}{}: {{}}", if i > 0 { ", " } else { "" }, f.name))
                 .collect::<Vec<_>>().join("");
             let args = fields.iter()
-                .map(|f| format!("self.{}.almide_repr()", f.name))
+                .map(|f| format!("self.{}.almide_repr()", ctx.field_ident(f.name.as_str())))
                 .collect::<Vec<_>>().join(", ");
             // The flatten pass records the declared name of every qualified type
             // it mangles (#1836) — the entry program's stdlib-owned shadow
@@ -322,7 +324,7 @@ fn render_repr_impl(ctx: &RenderContext, td: &IrTypeDecl) -> Option<String> {
             format!("format!(\"{} {{{{ {} }}}}\", {})", shown, fmt, args)
         }
         IrTypeDeclKind::Variant { cases, .. } => {
-            let arms = cases.iter().map(|v| render_repr_variant_arm(&td.name, v))
+            let arms = cases.iter().map(|v| render_repr_variant_arm(ctx, &td.name, v))
                 .collect::<Vec<_>>().join("\n            ");
             format!("match self {{\n            {}\n        }}", arms)
         }
@@ -336,7 +338,7 @@ fn render_repr_impl(ctx: &RenderContext, td: &IrTypeDecl) -> Option<String> {
 }
 
 /// One match arm of a variant's `AlmideRepr` impl.
-fn render_repr_variant_arm(type_name: &str, v: &IrVariantDecl) -> String {
+fn render_repr_variant_arm(ctx: &RenderContext, type_name: &str, v: &IrVariantDecl) -> String {
     match &v.kind {
         IrVariantKind::Unit => {
             // Nullary constructor → bare name.
@@ -350,12 +352,15 @@ fn render_repr_variant_arm(type_name: &str, v: &IrVariantDecl) -> String {
             format!("{}::{}({}) => format!(\"{}({})\", {}),", type_name, v.name, binds, v.name, fmt, args)
         }
         IrVariantKind::Record { fields } => {
-            // `Scroll { dy: 5 }`: named bindings, field declaration order.
-            let binds = fields.iter().map(|f| f.name.to_string()).collect::<Vec<_>>().join(", ");
+            // `Scroll { dy: 5 }`: named bindings, field declaration order. The
+            // bindings are shorthand on the ESCAPED field name (`r#ref`,
+            // `almide_kw_self` — #2652); the format string keeps the Almide name.
+            let rust_names: Vec<String> = fields.iter().map(|f| ctx.field_ident(f.name.as_str())).collect();
+            let binds = rust_names.join(", ");
             let fmt = fields.iter().enumerate()
                 .map(|(i, f)| format!("{}{}: {{}}", if i > 0 { ", " } else { "" }, f.name))
                 .collect::<Vec<_>>().join("");
-            let args = fields.iter().map(|f| format!("{}.almide_repr()", f.name)).collect::<Vec<_>>().join(", ");
+            let args = rust_names.iter().map(|n| format!("{}.almide_repr()", n)).collect::<Vec<_>>().join(", ");
             format!("{}::{} {{ {} }} => format!(\"{} {{{{ {} }}}}\", {}),", type_name, v.name, binds, v.name, fmt, args)
         }
     }
@@ -601,7 +606,17 @@ fn collect_anon_from_stmt(stmt: &IrStmt, named: &HashSet<Vec<String>>, seen: &mu
             collect_anon_from_ty(ty, named, seen);
             collect_anon_from_expr(value, named, seen);
         }
-        IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
+        // A destructured value is often a record LITERAL that no other
+        // statement mentions (`let { a, c } = { a: 1, c: 3 }`): unless its
+        // shape registers here, neither the literal nor the pattern has an
+        // `AlmdRec_*` struct to name and both fall back to the joined field
+        // names (`a_c { .. }`), which rustc rejects (#2657).
+        IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. }
+        | IrStmtKind::BindDestructure { value, .. } => {
+            collect_anon_from_expr(value, named, seen);
+        }
+        IrStmtKind::MapInsert { key, value, .. } => {
+            collect_anon_from_expr(key, named, seen);
             collect_anon_from_expr(value, named, seen);
         }
         IrStmtKind::IndexAssign { index, value, .. } => {

@@ -42,7 +42,7 @@ ADR-0006 が既に解消)。
 ```almide
 (A) -> B            // pure ・総
 (A) -> B!           // pure ・可謬(ADR-0006)
-effect (A) -> B     // effect・総
+effect (A) -> B     // effect・総 — 2026-09-24 撤回(ADR-0002 §D6): effect は可謬を含意し、下の行と同義
 effect (A) -> B!    // effect・可謬
 ```
 

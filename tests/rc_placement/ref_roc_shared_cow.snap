@@ -187,6 +187,12 @@ fn $__drop_Person
   (call $rc_dec (i32.wrap_i64 (local.get $v9)))
   (call $rc_dec (i32.wrap_i64 (local.get $v12)))
   (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_list_int_Person
+  (call $__drop_list_int_Person_loop (local.get $v1) (local.get $v9) (i64.const 0))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_list_int_Person_loop
+  (call $__drop_Person (local.get $v21))
+  (call $rc_dec (i32.wrap_i64 (local.get $v13)))
 fn $__drop_list_opt_Person
   (call $__drop_list_opt_Person_loop (local.get $v1) (local.get $v9) (i64.const 0))
   (call $rc_dec (i32.wrap_i64 (local.get $v1)))

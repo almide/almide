@@ -33,3 +33,7 @@ spec/stdlib/process_timeout_test.almd :: HOST_CAPABILITY :: subprocess exec
 spec/stdlib/coverage_assert_throws_test.almd :: HARNESS_LIMITATION :: assert_throws needs panic catching; a wasm trap is uncatchable in-process
 spec/stdlib/testing_polarity_test.almd :: HARNESS_LIMITATION :: assert_throws needs panic catching; a wasm trap is uncatchable in-process
 spec/stdlib/http_status_test.almd :: HOST_CAPABILITY :: http client is an OS socket API
+# 2026-09-25 (#2631): the http call handle fixture — its server arm is `net`
+# (no wasm host) and the stock artifact refuses the handle (E081 on stock-p1;
+# the embedded lane serves it since #2633, tests/http_call_handle_test.rs).
+spec/stdlib/http_call_test.almd :: HOST_CAPABILITY :: http client is an OS socket API
