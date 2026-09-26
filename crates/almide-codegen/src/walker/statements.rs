@@ -581,6 +581,7 @@ fn render_stmt_field_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::FieldAssign { target, field, value } = &stmt.kind else { unreachable!() };
     let target_str = ctx.var_name(*target).to_string();
     let val_str = render_expr(ctx, value);
+    let field = ctx.field_ident(field.as_str());
     // Shared-mut non-Copy var (`AlmideSharedMut`, P6): assign the field through the cell.
     if ctx.ann.is_shared_mut(target) {
         return format!("{}.borrow_mut().{} = {};", target_str, field, val_str);
@@ -635,8 +636,8 @@ fn render_stmt_bind_destructure(ctx: &RenderContext, stmt: &IrStmt) -> String {
             };
             let fields_str = fields.iter()
                 .map(|f| match &f.pattern {
-                    Some(p) => format!("{}: {}", f.name, render_pattern(ctx, p)),
-                    None => f.name.clone(),
+                    Some(p) => format!("{}: {}", ctx.field_ident(f.name.as_str()), render_pattern(ctx, p)),
+                    None => ctx.field_ident(f.name.as_str()),
                 })
                 .collect::<Vec<_>>().join(", ");
             let needs_rest = *rest

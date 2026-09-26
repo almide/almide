@@ -317,8 +317,9 @@ fn render_anon_record_decls(ctx: &RenderContext, parts: &mut Vec<String>) {
         let fields: Vec<String> = field_names.iter().enumerate()
             .map(|(i, name)| {
                 let type_s = format!("T{}", i);
-                ctx.templates.render_with("struct_field", None, &[], &[("name", name.as_str()), ("type", type_s.as_str())])
-                    .unwrap_or_else(|| format!("    pub {}: T{}", name, i))
+                let fname = ctx.field_ident(name);
+                ctx.templates.render_with("struct_field", None, &[], &[("name", fname.as_str()), ("type", type_s.as_str())])
+                    .unwrap_or_else(|| format!("    pub {}: T{}", fname, i))
             })
             .collect();
         let fields_str = fields.join("\n");
@@ -362,7 +363,7 @@ fn render_anon_record_decls(ctx: &RenderContext, parts: &mut Vec<String>) {
                 .map(|(i, name)| format!("{}{}: {{}}", if i > 0 { ", " } else { "" }, name))
                 .collect::<Vec<_>>().join("");
             let args = field_names.iter()
-                .map(|name| format!("self.{}.almide_repr()", name))
+                .map(|name| format!("self.{}.almide_repr()", ctx.field_ident(name)))
                 .collect::<Vec<_>>().join(", ");
             parts.push(format!(
                 "impl<{}> AlmideRepr for {} {{ fn almide_repr(&self) -> String {{ format!(\"{{{{ {} }}}}\", {}) }} }}",

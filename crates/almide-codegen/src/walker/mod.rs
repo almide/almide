@@ -50,19 +50,37 @@ pub(crate) fn is_rust_keyword(name: &str) -> bool {
     )
 }
 
+/// Prefix that renames the four keywords rustc refuses to raw-escape.
+const UNRAWABLE_KEYWORD_PREFIX: &str = "almide_kw_";
+
 /// Escape `name` for use as a Rust identifier (definition or reference).
 /// Single source of truth for every emission site (`var_name`, fn param, fn
-/// DEFINITION, fn call site) — see `is_rust_keyword`.
+/// DEFINITION, fn call site, and every record / variant-payload FIELD name:
+/// struct decl, construction, access, pattern, spread, field assign, derived
+/// `AlmideRepr` — #2652) — see `is_rust_keyword`.
 ///
 /// `self`/`Self`/`super`/`crate` are Rust keywords rustc explicitly refuses
 /// to raw-escape ("`self` cannot be a raw identifier") — they're rejected as
 /// `r#self` too, unlike every other keyword here. Since every convention
 /// method (`fn Type.method(...)`) compiles to a plain free function, not a
 /// real Rust method, a literal `self`/bare-self-sugar param can't be a raw
-/// identifier; it's renamed outright instead.
+/// identifier; it's renamed outright instead, to `almide_kw_<name>`.
+///
+/// The mapping is INJECTIVE over Almide identifiers: an identifier that
+/// already starts with `almide_kw_` is prefixed once more, so a record that
+/// declares both `self` and `almide_kw_self` (both legal Almide field names)
+/// still gets two distinct Rust fields (`almide_kw_self` and
+/// `almide_kw_almide_kw_self`). Every output that starts with the prefix came
+/// from exactly one prefixed input; every other output is `name` or
+/// `r#name`, which never starts with it.
+///
+/// Only the Rust SPELLING changes: user-visible text that names a field (the
+/// derived `AlmideRepr` format string, Codec's JSON keys) keeps the original
+/// Almide name.
 pub(crate) fn escape_rust_ident(name: &str, templates: &TemplateSet) -> String {
     match name {
-        "self" | "Self" | "super" | "crate" => format!("almide_{}", name.to_lowercase()),
+        "self" | "Self" | "super" | "crate" => format!("{}{}", UNRAWABLE_KEYWORD_PREFIX, name),
+        _ if name.starts_with(UNRAWABLE_KEYWORD_PREFIX) => format!("{}{}", UNRAWABLE_KEYWORD_PREFIX, name),
         _ if is_rust_keyword(name) => templates
             .render_with("keyword_escape", None, &[], &[("name", name)])
             .unwrap_or_else(|| name.to_string()),
@@ -136,6 +154,13 @@ impl<'a> RenderContext<'a> {
     pub(crate) fn var_name(&self, id: VarId) -> String {
         let name = &self.var_table.get(id).name;
         escape_rust_ident(name.as_str(), self.templates)
+    }
+
+    /// The Rust spelling of a record / variant-payload field name (#2652).
+    /// Every site that writes a field name into Rust source goes through
+    /// here, so a declaration and each use escape identically.
+    pub(crate) fn field_ident(&self, name: &str) -> String {
+        escape_rust_ident(name, self.templates)
     }
 
 }

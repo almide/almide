@@ -236,8 +236,9 @@ fn render_expr_while(ctx: &RenderContext, cond: &IrExpr, body: &[IrStmt]) -> Str
 /// `Member { object, field }` case of `render_expr`.
 fn render_expr_member(ctx: &RenderContext, object: &IrExpr, field: &Sym) -> String {
     let expr_s = render_expr(ctx, object);
-    ctx.templates.render_with("field_access", None, &[], &[("expr", expr_s.as_str()), ("field", field.as_str())])
-        .unwrap_or_else(|| format!("{}.{}", render_expr(ctx, object), field))
+    let field_s = ctx.field_ident(field.as_str());
+    ctx.templates.render_with("field_access", None, &[], &[("expr", expr_s.as_str()), ("field", field_s.as_str())])
+        .unwrap_or_else(|| format!("{}.{}", expr_s, field_s))
 }
 
 /// `OptionSome { expr: inner }` case of `render_expr`.
@@ -510,8 +511,9 @@ fn render_expr_to_option(ctx: &RenderContext, inner: &IrExpr) -> String {
 /// `OptionalChain { expr: inner, field }` case of `render_expr`.
 fn render_expr_optional_chain(ctx: &RenderContext, inner: &IrExpr, field: &Sym) -> String {
     let s = render_expr(ctx, inner);
-    ctx.templates.render_with("optional_chain_expr", None, &[], &[("inner", s.as_str()), ("field", field)])
-        .unwrap_or_else(|| format!("{}.as_ref().map(|__v| __v.{}.clone())", s, field))
+    let field_s = ctx.field_ident(field.as_str());
+    ctx.templates.render_with("optional_chain_expr", None, &[], &[("inner", s.as_str()), ("field", field_s.as_str())])
+        .unwrap_or_else(|| format!("{}.as_ref().map(|__v| __v.{}.clone())", s, field_s))
 }
 
 
