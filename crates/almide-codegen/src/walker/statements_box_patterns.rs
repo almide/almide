@@ -118,10 +118,10 @@ fn guard_shape(ctx: &RenderContext, pat: &IrPattern, counter: &mut usize, subs: 
                     {
                         let g = fresh_box_var(counter);
                         subs.push(box_shape_guard(ctx, p, &format!("&**{}", g), counter));
-                        format!("{}: {}", fp.name, g)
+                        format!("{}: {}", ctx.field_ident(fp.name.as_str()), g)
                     }
-                    Some(p) => format!("{}: {}", fp.name, guard_shape(ctx, p, counter, subs)),
-                    None => format!("{}: _", fp.name),
+                    Some(p) => format!("{}: {}", ctx.field_ident(fp.name.as_str()), guard_shape(ctx, p, counter, subs)),
+                    None => format!("{}: _", ctx.field_ident(fp.name.as_str())),
                 })
                 .collect();
             format!("{} {{ {}, .. }}", qualified, shapes.join(", "))
@@ -185,11 +185,11 @@ fn box_extract_record(ctx: &RenderContext, name: &str, fields: &[IrFieldPattern]
                 && pattern_is_complex(p) =>
             {
                 let e = fresh_box_var(counter);
-                flat.push(format!("{}: {}", fp.name, e));
+                flat.push(format!("{}: {}", ctx.field_ident(fp.name.as_str()), e));
                 deeper.push((e, p));
             }
-            Some(p) => flat.push(format!("{}: {}", fp.name, render_pattern_hinted(ctx, p, None))),
-            None => flat.push(fp.name.to_string()),
+            Some(p) => flat.push(format!("{}: {}", ctx.field_ident(fp.name.as_str()), render_pattern_hinted(ctx, p, None))),
+            None => flat.push(ctx.field_ident(fp.name.as_str())),
         }
     }
     binds.push(format!("let {} {{ {}, .. }} = {} else {{ unreachable!() }};", qualified, flat.join(", "), move_expr));
@@ -253,10 +253,10 @@ fn unbox_record_pattern(ctx: &RenderContext, name: &str, fields: &[IrFieldPatter
                 let v = fresh_box_var(&mut st.counter);
                 st.guards.push(box_shape_guard(ctx, p, &st.through_box(&v), &mut st.counter));
                 box_extract(ctx, p, &st.out_of_box(&v), &mut st.binds, &mut st.counter, st.borrowed);
-                flat.push(format!("{}: {}", fp.name, v));
+                flat.push(format!("{}: {}", ctx.field_ident(fp.name.as_str()), v));
             }
-            Some(p) => flat.push(format!("{}: {}", fp.name, render_pattern_hinted(ctx, p, None))),
-            None => flat.push(fp.name.to_string()),
+            Some(p) => flat.push(format!("{}: {}", ctx.field_ident(fp.name.as_str()), render_pattern_hinted(ctx, p, None))),
+            None => flat.push(ctx.field_ident(fp.name.as_str())),
         }
     }
     format!("{} {{ {} }}", qualified, flat.join(", "))
@@ -432,8 +432,8 @@ fn render_pattern_record(ctx: &RenderContext, name: &str, fields: &[almide_ir::I
     };
     let fields_str = fields.iter()
         .map(|f| match &f.pattern {
-            Some(p) => format!("{}: {}", f.name, render_pattern(ctx, p)),
-            None => f.name.clone(),
+            Some(p) => format!("{}: {}", ctx.field_ident(f.name.as_str()), render_pattern(ctx, p)),
+            None => ctx.field_ident(f.name.as_str()),
         })
         .collect::<Vec<_>>()
         .join(", ");
