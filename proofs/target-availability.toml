@@ -171,7 +171,11 @@ schema = 3
 # activation row to Q8 and runs an integer dot — a transcription, not a
 # composition), and the three qwen3_block_* layers (whole fused decoder layers
 # over those kernels plus repeat_kv / per-head norm — their own arc).
-pending_self_host_ceiling = 9
+# 2026-09-26 (#2588): 9 -> 12. NEW surface, not a regression: http.router /
+# http.mount / http.wrap are served on wasm by the incumbent leg (the
+# spec/stdlib/http_router_test.almd fixture runs there), while the structural
+# leg refuses the effect fn values a handler is (#2664).
+pending_self_host_ceiling = 12
 # 2026-09-25 (#2631): 56 -> 64. NEW surface, not a regression: the http call
 # handle (start / poll / read_new / wait / cancel) and the three *_with_limits
 # streaming twins land native-first; each is refused at check time on the
@@ -180,19 +184,18 @@ pending_self_host_ceiling = 9
 # guest-owned serve loop over host ops 70..=72, C-367) and builds on the
 # structural leg, so its structural and embedded legs go; the five
 # HttpRequest readers (req_method / req_path / req_body / req_header /
-# query_params) are self-hosted (stdlib/http_serve.almd) and their
-# structural rows go. http.serve keeps its stock-p1 leg (#2659).
+# query_params) are self-hosted and their structural rows go. http.serve
+# keeps its stock-p1 leg (#2659). (#2588 retired the same five structural
+# rows through http.new_request and stdlib/http_request.almd.)
 pending_port_ceiling = 59
 
-# The unprobed class (#1827), per leg. Today: the five HttpRequest
-# accessors (http.query_params / req_body / req_header / req_method /
-# req_path) on the stock-p1 leg — the value exists only inside an
-# http.serve handler, and a stock artifact refuses http.serve, so the
-# accessors are never reached there. 2026-09-26 (#2650): embedded 5 -> 0 —
-# the embedded lane serves http.serve, so the probe sends its handler a
-# request and the accessors are MEASURED (served).
+# The unprobed class (#1827), per leg. Empty since #2588: the five
+# HttpRequest readers (http.query_params / req_body / req_header / req_method /
+# req_path) were unprobed while a request existed only inside an http.serve
+# handler; the probe now builds one with http.new_request, so every reader is
+# measured on every leg (the request-reader family rule in stdlib/http.almd).
 unprobed_ceiling_structural = 0
-unprobed_ceiling_stock_p1 = 5
+unprobed_ceiling_stock_p1 = 0
 unprobed_ceiling_embedded = 0
 
 [[unavailable]]
@@ -304,6 +307,27 @@ legs = ["stock-p1"]
 class = "pending-port"
 reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --target wasm` answers identically to native (C-328), and the ALMIDE_COMPONENT_P3 component serves the family over wasi:http@0.3 (#1710 PR B, `-S http=y`); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
+
+[[unavailable]]
+fn = "http.mount"
+legs = ["structural"]
+class = "pending-self-host"
+reason = "structural-leg-gap: the structural leg has no arm for a handler, an effect fn value flowing through a declared fn type (ty-mismatch:Fn); the incumbent leg serves it (spec/stdlib/http_router_test.almd)"
+issue = "#2664"
+
+[[unavailable]]
+fn = "http.router"
+legs = ["structural"]
+class = "pending-self-host"
+reason = "structural-leg-gap: the structural leg has no arm for a handler, an effect fn value flowing through a declared fn type (ty-mismatch:Fn); the incumbent leg serves it (spec/stdlib/http_router_test.almd)"
+issue = "#2664"
+
+[[unavailable]]
+fn = "http.wrap"
+legs = ["structural"]
+class = "pending-self-host"
+reason = "structural-leg-gap: the structural leg has no arm for a handler, an effect fn value flowing through a declared fn type (ty-mismatch:Fn); the incumbent leg serves it (spec/stdlib/http_router_test.almd)"
+issue = "#2664"
 
 [[unavailable]]
 fn = "http.request"
