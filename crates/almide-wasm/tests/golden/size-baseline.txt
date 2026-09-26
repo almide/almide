@@ -740,6 +740,7 @@
 2172	spec/wasm_cross/unique_non_flat_element.almd
 2103	spec/wasm_cross/unit_effect_abi.almd
 2879	spec/wasm_cross/unsigned_literal_domain.almd
+!	spec/wasm_cross/unwrap_callarg_single_expr_effect_body.almd
 2428	spec/wasm_cross/unwrap_in_callarg.almd
 2312	spec/wasm_cross/unwrap_in_if_arm.almd
 2942	spec/wasm_cross/unwrap_in_recursion.almd
