@@ -300,31 +300,41 @@ impl LowerCtx {
                 // with the Assign's drop-old into an rc-underflow trap: alias_cow
                 // test_6). On Err the whole fn WALLS (ctx discarded), so no rollback
                 // is needed.
-                if is_heap_ty(&value.ty) {
-                    if let Some(rec_ty) = self.var_decl_tys.get(&target).cloned() {
-                        if self.aggregate_field_tys(&rec_ty).is_some() {
-                            let base = IrExpr {
-                                kind: IrExprKind::Var { id: target },
-                                ty: rec_ty.clone(),
-                                span: None,
-                                def_id: None,
-                            };
-                            let spread = IrExpr {
-                                kind: IrExprKind::SpreadRecord {
-                                    base: Box::new(base),
-                                    fields: vec![(field, value.clone())],
-                                },
-                                ty: rec_ty,
-                                span: None,
-                                def_id: None,
-                            };
-                            let assign = IrStmt {
-                                kind: IrStmtKind::Assign { var: target, value: spread },
-                                span: None,
-                            };
-                            return self.lower_stmt(&assign);
-                        }
-                    }
+                //
+                // A SCALAR write into a record that HOLDS a heap field takes the same
+                // rebind (#2656): the in-place path below COW-guards with `MakeUnique`,
+                // whose `$list_copy` is a raw slot copy — on an aliased record
+                // (`var m = it; m.a = 41`) the copy and the original then share the
+                // heap child without co-owning it, and the two scope-end `__drop_Rec`s
+                // release it twice (rc_dec trap). The spread construct `Dup`s every heap
+                // slot it carries over, so each record owns its children. The in-place
+                // store stays for all-scalar records, where the raw copy IS the value.
+                let rebind_ty = self.var_decl_tys.get(&target).cloned().filter(|rec_ty| {
+                    self.aggregate_field_tys(rec_ty).is_some_and(|(_, tys)| {
+                        is_heap_ty(&value.ty) || tys.iter().any(is_heap_ty)
+                    })
+                });
+                if let Some(rec_ty) = rebind_ty {
+                    let base = IrExpr {
+                        kind: IrExprKind::Var { id: target },
+                        ty: rec_ty.clone(),
+                        span: None,
+                        def_id: None,
+                    };
+                    let spread = IrExpr {
+                        kind: IrExprKind::SpreadRecord {
+                            base: Box::new(base),
+                            fields: vec![(field, value.clone())],
+                        },
+                        ty: rec_ty,
+                        span: None,
+                        def_id: None,
+                    };
+                    let assign = IrStmt {
+                        kind: IrStmtKind::Assign { var: target, value: spread },
+                        span: None,
+                    };
+                    return self.lower_stmt(&assign);
                 }
                 // COW-guard the buffer, then ACTUALLY STORE the field: `r.f = v` →
                 // `ListSetScalar(block, slot(f), v)` on the uniform 8-byte-slot aggregate
