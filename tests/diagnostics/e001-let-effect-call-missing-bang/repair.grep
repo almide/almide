@@ -1,0 +1,3 @@
+# #2653: an effect fn declared `-> T` is `T!` at the call site (ADR-0002 §D6);
+# the annotated binding's mismatch names the `!` the E005 / E041 shapes name.
+`!` propagates the error
