@@ -143,21 +143,21 @@ pub fn to_json(d: &Diagnostic) -> String {
         };
         format!(
             r#"{{"line":{},"col":{},"label":"{}"}}"#,
-            s.line, s_col, s.label.replace('"', r#"\""#),
+            s.line, s_col, json_escape(&s.label),
         )
     }).collect();
     let secondary = format!("[{}]", secondary_items.join(","));
     let here_json = match &d.here_snippet {
         Some(s) => format!(
             "\"{}\"",
-            s.replace('"', r#"\""#).replace('\n', "\\n")
+            json_escape(s)
         ),
         None => "null".to_string(),
     };
     let try_json = match &d.try_snippet {
         Some(s) => format!(
             "\"{}\"",
-            s.replace('"', r#"\""#).replace('\n', "\\n")
+            json_escape(s)
         ),
         None => "null".to_string(),
     };
@@ -202,7 +202,7 @@ pub fn to_json(d: &Diagnostic) -> String {
         let items: Vec<String> = d
             .notes
             .iter()
-            .map(|n| format!("\"{}\"", n.replace('\\', r"\\").replace('"', r#"\""#).replace('\n', "\\n")))
+            .map(|n| format!("\"{}\"", json_escape(n)))
             .collect();
         format!(r#""notes":[{}],"#, items.join(","))
     };
@@ -210,13 +210,13 @@ pub fn to_json(d: &Diagnostic) -> String {
     format!(
         r#"{{"level":"{}","code":"{}","message":"{}","hint":"{}",{}"here":{},"try":{},"try_replace":{},"applicability":"{}","suggestions":{},{}"context":"{}","file":"{}","line":{},"col":{},"end_col":{},"secondary":{}}}"#,
         level, code,
-        d.message.replace('"', r#"\""#).replace('\n', "\\n"),
-        d.hint.replace('"', r#"\""#).replace('\n', "\\n"),
+        json_escape(&d.message),
+        json_escape(&d.hint),
         notes,
         here_json, try_json, try_replace_json,
         d.try_applicability.as_str(), suggestions, repair,
-        d.context.replace('"', r#"\""#),
-        file.replace('"', r#"\""#),
+        json_escape(&d.context),
+        json_escape(file),
         line, col, end_col, secondary,
     )
 }
@@ -229,8 +229,9 @@ fn repair_edit_json(e: &almide_base::diagnostic::RepairEdit) -> String {
     )
 }
 
-/// JSON string-body escaping for the fields #2149 added (the older fields
-/// keep their historical escaping byte-for-byte).
+/// JSON string-body escaping for every string field. The older fields used to
+/// escape only `"` and newlines, so a backslash — every Windows path in `file`,
+/// a `\n` quoted in a message — made the line invalid JSON.
 fn json_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -419,7 +420,7 @@ pub fn display_with_source(d: &Diagnostic, source: &str) -> String {
 
 #[cfg(test)]
 mod caret_tests {
-    use super::display_with_source;
+    use super::{display_with_source, to_json};
     use almide_base::diagnostic::Diagnostic;
 
     /// (1-based column the caret run starts at, its length) — everything the
@@ -468,5 +469,22 @@ mod caret_tests {
         d.col = Some(11);
         d.end_col = Some(20);
         assert_eq!(caret(&display_with_source(&d, src)), (11, 9));
+    }
+
+    /// Every string field is valid JSON whatever it holds. A Windows path in
+    /// `file` used to be written with bare backslashes, so every `--json`
+    /// line on Windows failed to parse.
+    #[test]
+    fn a_backslash_in_any_field_stays_valid_json() {
+        let mut d = Diagnostic::error("say \"a\\nb\"", "use \\ here", "ctx \\ \t");
+        d.file = Some(r"D:\a\almide\tests\broken.almd".to_string());
+        d.here_snippet = Some(r#"let s = "\n""#.to_string());
+        d.try_snippet = Some(r#"let s = "\t""#.to_string());
+        d.notes = vec![r"note \ one".to_string()];
+        let v: serde_json::Value = serde_json::from_str(&to_json(&d)).expect("valid JSON");
+        assert_eq!(v["file"], r"D:\a\almide\tests\broken.almd");
+        assert_eq!(v["message"], "say \"a\\nb\"");
+        assert_eq!(v["here"], r#"let s = "\n""#);
+        assert_eq!(v["context"], "ctx \\ \t");
     }
 }
