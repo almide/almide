@@ -1,0 +1,18 @@
+// #2635: a `Result[_, String]` cannot be `!`-ed inside a fn whose error type
+// is `Failure` — `!` converts nothing (a pure `-> Result` fn, same rule as an
+// effect fn body).
+type Failure = | Slow | Broken(String)
+
+fn digits(s: String) -> Result[Int, String] = int.parse(s)
+
+fn step(s: String) -> Result[Int, Failure] = {
+  let n = digits(s)!
+  ok(n + 1)
+}
+
+effect fn main() -> Unit = {
+  match step("4") {
+    ok(n) => println("ok " + int.to_string(n)),
+    err(_) => println("err"),
+  }
+}
