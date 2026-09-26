@@ -43,6 +43,91 @@ are byte-identical to native. A stock artifact from
 `almide build --target wasm` has no listening socket, so `almide build` and
 `almide check --target wasm` still refuse `http.serve` (E081, #2659).
 
+## Routing and middleware
+
+A handler is a plain function from a request to a response —
+`type HttpHandler = effect (HttpRequest) -> HttpResponse` — and so are a
+router and a wrapped app. `http.serve` is one way to run a handler;
+`http.new_request` is another: a test builds a request in code and calls the
+app directly, with no socket. Routing and request construction are pure and
+behave identically on native and wasm, and a router is served like any other
+handler.
+The example prints the lines below on both targets; on wasm the router is
+served by the incumbent leg today, which runs through the `wasmtime` CLI
+(#2664).
+
+```almd check
+import http
+
+type User: Codec = { name: String, age: Int }
+
+effect fn get_user(req: HttpRequest) -> HttpResponse = http.response(200, "user " + (http.param(req, "id") ?? ""))
+
+effect fn create_user(req: HttpRequest) -> HttpResponse = match http.decode_json(req, (v) => User.decode(v)) {
+  ok(u) => http.response(201, u.name),
+  err(bad) => bad,
+}
+
+fn server_header(next: HttpHandler) -> HttpHandler = (req) => http.set_header(next(req)!, "Server", "almide")
+
+effect fn show(app: HttpHandler, method: String, target: String, body: String) -> String = {
+  let res = app(http.new_request(method, target, body, [:]))!
+  "${http.status_code(res)} ${http.body(res)}"
+}
+
+effect fn main() -> Unit = {
+  let routes = http.router([
+    http.route("GET /users/{id}", get_user),
+    http.route("POST /users", create_user),
+  ])!
+  let app = http.wrap(routes, [server_header])
+  println(show(app, "GET", "/users/42?x=1", "")!)
+  println(show(app, "POST", "/users", "{\"name\":\"ann\",\"age\":3}")!)
+  println(show(app, "POST", "/users", "{}")!)
+  println(show(app, "DELETE", "/users/42", "")!)
+  println(show(app, "GET", "/nope", "")!)
+}
+```
+```text
+200 user 42
+201 ann
+400 Bad Request: missing field 'name'
+405 Method Not Allowed
+404 Not Found
+```
+
+- **Patterns** — `http.route("METHOD /path", handler)`; the method is
+  optional (`"/health"` answers every method). `{name}` binds one segment,
+  percent-decoded (`+` stays `+`), read with `http.param(req, name)`; a last
+  `{name...}` binds the rest of the path, possibly empty. Matching uses the
+  path without its query string; empty segments do not count, so `/users/`
+  is `/users`.
+- **Precedence** — the most specific matching route answers, whatever the
+  registration order: `GET /users/me` beats `GET /users/{id}`, and a route
+  with a method beats the same path without one.
+- **Refusal** — `http.router` returns `err` naming every problem, so a
+  broken table is never served: two routes some request matches with neither
+  more specific (Go 1.22's rule, two spellings of one pattern included), a
+  `{name...}` that is not last, a name bound twice, a method that is not
+  upper-case letters, a path not starting with `/`.
+- **Router answers** — no route matches the path: `404 Not Found`. Routes
+  match the path but not the method: `405 Method Not Allowed` with an
+  `Allow` header. `HEAD` falls back to the `GET` route and drops the body. A
+  request target not starting with `/`, or a `%` not followed by two hex
+  digits in the path: `400 Bad Request`. A handler's `err` stays an `err`
+  (`http.serve` turns it into its 500).
+- **Mounting** — `http.mount("/api", sub)` hands `/api/items?x=1` to `sub` as
+  `/items?x=1`; parameters the prefix bound (`/orgs/{org}`) stay visible to
+  `sub`.
+- **Middleware** — `type HttpMiddleware = (HttpHandler) -> HttpHandler`.
+  `http.wrap(app, [a, b])` is `a(b(app))`: the first in the list is the
+  outermost. A middleware may answer without calling the handler it wraps.
+  Per-request data travels as arguments; there is no mutable context.
+- **Bad input** — `http.decode_json(req, decode)` parses the body and runs a
+  Codec decoder; its `err` is a ready `400 Bad Request` response naming why.
+- **Out of scope** — built-in logger / CORS / sessions, streaming responses
+  and WebSocket are left to packages.
+
 ### `http.response(status: Int, body: String) -> HttpResponse`
 
 Create a plain text HTTP response with status code. Seeds
@@ -772,7 +857,7 @@ helpers they extend.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (45 functions)
+## Signature index (52 functions)
 
 ```
 // Serves 0.0.0.0:port forever; handler err is a 500.
@@ -954,14 +1039,54 @@ effect http.openai_streaming_call_with_limits(base_url: String, api_key: String,
 // anthropic_streaming_call bounded by per-call limits.
 // @since unreleased
 effect http.anthropic_streaming_call_with_limits(api_key: String, body_json: String, limits: HttpLimits, on_text_delta: (String) -> Unit) -> String
+
+// Request built in code; target keeps its ?query.
+// @since unreleased
+http.new_request(method: String, target: String, body: String, headers: Map[String, String]) -> HttpRequest
+
+// Router-bound path parameter, decoded; none if unbound.
+// @since unreleased
+http.param(req: HttpRequest, name: String) -> Option[String]
+
+// "GET /users/{id}" to a route; no method = any.
+// @since unreleased
+http.route(pattern: String, handler: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute
+
+// Sub-app under prefix: /api/x reaches it as /x.
+// @since unreleased
+http.mount(prefix: String, sub: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute
+
+// Route table as a handler; err on conflicting routes.
+// @since unreleased
+http.router(routes: List[HttpRoute]) -> Result[(HttpRequest) -> Result[HttpResponse, String], String]
+
+// Applies middleware; the first is the outermost.
+// @since unreleased
+http.wrap(handler: (HttpRequest) -> Result[HttpResponse, String], middleware: List[((HttpRequest) -> Result[HttpResponse, String]) -> (HttpRequest) -> Result[HttpResponse, String]]) -> (HttpRequest) -> Result[HttpResponse, String]
+
+// JSON body through decode; err is a 400 response.
+// @since unreleased
+http.decode_json(req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse]
 ```
 
-## Type index (1 types)
+## Type index (4 types)
 
 ```
 // Per-call limits in ms; 0 = no limit.
 // @since unreleased
 type http.HttpLimits = { total_ms: Int, idle_ms: Int }
+
+// Request to response; a router is one too.
+// @since unreleased
+type http.HttpHandler = (HttpRequest) -> Result[HttpResponse, String]
+
+// Wraps a handler: (next) => (req) => … next(req)! ….
+// @since unreleased
+type http.HttpMiddleware = ((HttpRequest) -> Result[HttpResponse, String]) -> (HttpRequest) -> Result[HttpResponse, String]
+
+// Route table row; build it with route or mount.
+// @since unreleased
+type http.HttpRoute = { method: String, pattern: String, segments: List[String], handler: (HttpRequest) -> Result[HttpResponse, String] }
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

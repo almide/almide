@@ -1467,8 +1467,6 @@ evidence  = [
   { path = "spec/wasm_cross/record_pair_result_return.almd", class = "fixture" },
   { path = "spec/wasm_cross/result_option_call_payload_return.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_rich_list_capture.almd", class = "fixture" },
-  { path = "spec/wasm_cross/heap_result_if_some_user_call_temps.almd", class = "fixture" },
-  { path = "tests/heap_arm_some_user_call_temps_test.rs", class = "fixture", name = "the_incumbent_test_lane_runs_the_test_block" },
 ]
 [[contract]]
 id        = "C-107"
@@ -4608,4 +4606,14 @@ evidence  = [
   { path = "spec/serve_cross/http_serve_replay.almd", class = "fixture" },
   { path = "tests/http_serve_cross_test.rs", name = "http_serve_answers_byte_identically_on_native_and_the_embedded_lane", class = "fixture" },
   { path = "tests/http_serve_cross_test.rs", name = "a_bind_failure_aborts_identically_on_native_and_the_embedded_lane", class = "fixture" },
+]
+[[contract]]
+id        = "C-368"
+spec      = "ALS-R8"
+title     = "http router: a handler is a function, the most specific route answers, a broken table is refused, 404/405/400 come from the router, identically on both targets"
+statement = "A handler is a function `effect (HttpRequest) -> HttpResponse` and a router or a wrapped app is one too, so `http.new_request(method, target, body, headers)` builds a request with no socket and every reader (`req_method` / `req_path` (the target, query included) / `req_body` / `req_header` / `query_params` / `param`) answers it the same on native and wasm. `http.route(\"METHOD /path\", h)` (no method = every method) binds `{name}` to one segment and a last `{name...}` to the rest of the path (possibly empty), percent-decoded with `+` kept as `+`; matching uses the path without its query and ignores empty segments. Of the matching routes the MOST SPECIFIC answers whatever the registration order (A is at least as specific as B when every path A matches B matches too; a route with a method beats the same path without one). `http.router(routes)` is `err` naming every problem, never a half-served table: two routes some request matches with neither more specific (two spellings of one pattern included), a `{name...}` that is not last, a name bound twice, a method that is not upper-case letters, a path not starting with `/`. The router answers `404 Not Found` when no route matches the path, `405 Method Not Allowed` with `Allow` (the methods sorted and joined by `, `, HEAD added beside GET) when routes match the path under other methods only, HEAD through the GET route with the body emptied, and `400 Bad Request` for a target not starting with `/` or a `%` not followed by two hex digits in the path. `http.mount(prefix, sub)` hands the rest of the path and the query to `sub`, with the prefix's bindings still readable; `http.wrap(h, [a, b])` is `a(b(h))`, the first middleware outermost. `http.decode_json(req, decode)` parses the body as JSON through `decode`, its `err` a `400 Bad Request` response naming why; a handler's own `err` stays an `err`."
+since     = "0.64.0"
+status    = "active"
+evidence  = [
+  { path = "spec/stdlib/http_router_test.almd", class = "fixture" },
 ]
