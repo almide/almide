@@ -1,6 +1,6 @@
 # ALS — 実行時規範（Runtime）
 
-> Last updated: 2026-09-19
+> Last updated: 2026-09-26
 
 プログラム実行の観測規範（エラー終了・文字列補間の表示形・並行コンビネータ）。
 参照方法は [strings.md](strings.md) 冒頭と同じ。
@@ -95,8 +95,14 @@ idle_ms }`（ミリ秒、0 は上限なし）で渡す。`total_ms` は `start` 
 err `request cancelled` で終わらせて接続を閉じる。以後 `read_new` は空文字列を
 返し、サーバーは接続が閉じたことを観測する。上限が発火するかどうかはホストの性質で
 ある（C-214 と同じ規律）。固定するのは、発火したときの err の形である。wasm
-ターゲットはこの族を提供せず、`almide check --target wasm` が拒否する。
-テスト: `spec/stdlib/http_call_test.almd`
+ターゲットでは、埋め込みホスト（`almide run --target wasm`）が `start`・`poll`・
+`read_new`・`wait`・`cancel` と `request_stream_with_limits` を native と同じ
+観測で提供する。err の文字列、`cancel` で接続が閉じること、ハンドルの最後の写しを
+捨てると呼び出しが取り消されることも同じである。単体の成果物
+（`almide build --target wasm`）はこの族を持てず、`almide check --target wasm` は
+E081 で拒否する。`openai_streaming_call_with_limits` と
+`anthropic_streaming_call_with_limits` は native のみである。
+テスト: `spec/stdlib/http_call_test.almd`、`spec/embedded_cross/http_call_handle_errs.almd`
 
 Contracts: C-096, C-112, C-118, C-133, C-189, C-214, C-366。
 
