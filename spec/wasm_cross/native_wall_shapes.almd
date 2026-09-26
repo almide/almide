@@ -11,10 +11,36 @@
 // pass now applies the call guard's rule to the interpolation: a place part's
 // root that a value part moves is cloned at the move; parts without the
 // conflict emit exactly what they did.
+//
+// The same rule, one level up again, in a FUSED iterator chain (#2686): a
+// step closure borrows what it captures until the chain's terminal runs, so
+// `list.fold(list.map(v, (n) => list.len(v)), v, f)` emitted
+// `v.iter().cloned().map(|n| len(&v)).fold(v, f)` — the fold's init moved `v`
+// under the live closure borrow (E0505). Unfused, `list.map` had finished
+// before the init was evaluated. A var a chain closure captures is now never
+// moved inside that chain.
 type Meta = { size: Int, name: String, is_dir: Bool }
 
 fn kind(m: Meta) -> String = match m {
   Meta { is_dir, .. } => if is_dir then "dir" else "file"
+}
+
+fn keep(xs: List[Int]) -> List[Int] = xs
+
+fn fold_init_captured(v: List[Int]) -> Int = {
+  let r = list.fold(list.map(v, (n) => list.len(v) + n), v, (a, y) => [y])
+  list.len(r)
+}
+
+fn filter_fold_init(v: List[String]) -> List[String] = list.fold(
+  list.filter(v, (s) => list.len(v) > 1),
+  v,
+  (acc, s) => acc + [s],
+)
+
+fn take_count_captured(v: List[Int]) -> Int = {
+  let t = list.take(list.map(v, (n) => n + list.len(v)), list.len(keep(v)))
+  list.fold(t, 0, (a, x) => a + x)
 }
 
 fn main() -> Unit = {
@@ -27,4 +53,20 @@ fn main() -> Unit = {
   // The move first, the borrow after: the order inside the list does not matter.
   let f = Meta { size: 1, name: "f", is_dir: false }
   println("${kind(f)} ${f.name}")
+  // A fused chain whose fold init moves a var the step closure captured.
+  println("fold_init=${fold_init_captured([1, 2, 3])} ${fold_init_captured([])}")
+  println("filter_fold=${filter_fold_init(["a", "b"])} ${filter_fold_init(["a"])}")
+  println("take_count=${take_count_captured([1, 2])}")
+  // The soak shape: flat_map, fold with the source as init, update, fold.
+  let v3: List[Bool] = []
+  let r10 = if list.fold(
+    list.update(
+      list.fold(list.flat_map(v3, (n4) => v3), v3, (y5, y6) => [y6]),
+      2,
+      (tmp7) => tmp7,
+    ),
+    false,
+    (n8, y9) => true,
+  ) then "Привет" else "hello"
+  println("r10 = ${r10}")
 }

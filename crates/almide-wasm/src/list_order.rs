@@ -65,16 +65,18 @@ impl Emitter<'_> {
                 let ho = self.hold_i32()?;
                 let mut i = self.f.instructions();
                 i.local_set(hn);
-                // keep_bytes = n < 0 || n*stride >= len ? 0 : len - n*stride
+                // keep_bytes = n < 0 || n >= len/stride ? 0 : len - n*stride
+                // (index-domain test — the byte product wraps for a huge n,
+                // #2685)
                 i.i32_const(0);
                 i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
                 i.local_get(hn).i64_const(stride as i64).i64_mul().i64_sub().i32_wrap_i64();
                 i.local_get(hn).i64_const(0).i64_lt_s();
                 i.local_get(hn)
-                    .i64_const(stride as i64)
-                    .i64_mul()
                     .local_get(hb)
                     .i32_load(len_memarg())
+                    .i32_const(stride)
+                    .i32_div_u()
                     .i64_extend_i32_u()
                     .i64_ge_s();
                 i.i32_or();
@@ -121,16 +123,18 @@ impl Emitter<'_> {
                 let mut i = self.f.instructions();
                 i.local_set(hv);
                 // off_bytes = min(i, len_elems)*stride; negative → len
+                // (index-domain test — the byte product wraps for a huge i,
+                // #2685)
                 i.local_get(hb).i32_load(len_memarg());
                 i.local_get(hn).i64_const(stride as i64).i64_mul().i32_wrap_i64();
                 i.local_get(hn)
                     .i64_const(0)
                     .i64_lt_s()
                     .local_get(hn)
-                    .i64_const(stride as i64)
-                    .i64_mul()
                     .local_get(hb)
                     .i32_load(len_memarg())
+                    .i32_const(stride)
+                    .i32_div_u()
                     .i64_extend_i32_u()
                     .i64_gt_s()
                     .i32_or();
@@ -523,20 +527,18 @@ impl Emitter<'_> {
                 let ho = self.hold_i32()?;
                 let mut i = self.f.instructions();
                 i.local_set(hn);
-                // bytes = n < 0 ? len : min(n*stride, len)
-                // select(v1, v2, cond) = cond ? v1 : v2 — the min form
-                // pushes LEN as v1 under cond (n*stride > len). The
-                // original operand order computed MAX and returned the
-                // whole list; no claimed fixture observed take's VALUE
-                // (fourth select inversion — the class now carries its
-                // own fixture, els PR pending).
+                // bytes = n < 0 || n >= len/stride ? len : n*stride
+                // select(v1, v2, cond) = cond ? v1 : v2 — LEN is v1. The
+                // test is in the INDEX domain: the byte product n*stride
+                // wraps for a huge n (n = i64::MAX gives -stride, which
+                // compared below len and allocated a wrapped byte count,
+                // #2685).
                 i.local_get(hb).i32_load(len_memarg());
-                i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
-                i.local_get(hn).i64_const(stride as i64).i64_mul();
-                i.local_get(hn).i64_const(stride as i64).i64_mul();
-                i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
-                i.i64_gt_s().select().i32_wrap_i64();
+                i.local_get(hn).i64_const(stride as i64).i64_mul().i32_wrap_i64();
                 i.local_get(hn).i64_const(0).i64_lt_s();
+                i.local_get(hn);
+                i.local_get(hb).i32_load(len_memarg()).i32_const(stride).i32_div_u().i64_extend_i32_u();
+                i.i64_ge_s().i32_or();
                 i.select().local_set(hc);
                 i.local_get(hc).call(F_ALLOC).local_set(ho);
                 i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
