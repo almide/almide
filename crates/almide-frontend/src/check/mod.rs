@@ -29,6 +29,7 @@ mod solving;
 mod diagnostics;
 mod deprecation_warn;
 mod exit_literal;
+mod bang_error_channel;
 mod intrinsic_authority;
 mod exhaustiveness;
 
