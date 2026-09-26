@@ -79,7 +79,35 @@ impl Checker {
     /// and the argument is a fn whose params match and whose return is the
     /// slot's return WRAPPED in the effect carrier `Result[B, String]`.
     /// (The unwrapped pure spelling already passed the structural check.)
+    ///
+    /// The acceptance holds INSIDE a container too (#2588): `[get_user, me]`
+    /// is a `List` of named effect fn values — each typed as its carrier — and
+    /// it fills a `List[effect (A) -> B]` slot, exactly as one of them fills an
+    /// `effect (A) -> B` slot. Only the carrier spelling is admitted there: a
+    /// PURE fn nested in a container has a different runtime shape, and no
+    /// adapter reaches inside a list to wrap it.
     fn effect_slot_accepts(&self, expected: &Ty, actual: &Ty) -> bool {
+        let fits = |e: &Ty, a: &Ty| {
+            let (e, a) = (self.env.resolve_named(e), self.env.resolve_named(a));
+            !types_mismatch(&e, &a) || self.effect_slot_accepts(&e, &a)
+        };
+        match (expected, actual) {
+            (Ty::Applied(ei, ea), Ty::Applied(ai, aa)) if ei == ai && ea.len() == aa.len() => {
+                return ea.iter().zip(aa.iter()).all(|(e, a)| fits(e, a));
+            }
+            (Ty::Tuple(ea), Ty::Tuple(aa)) if ea.len() == aa.len() => {
+                return ea.iter().zip(aa.iter()).all(|(e, a)| fits(e, a));
+            }
+            // A PURE fn whose params/return are effect fn types — a middleware,
+            // `(HttpHandler) -> HttpHandler` — accepts the lambda spelled with
+            // the carrier in those positions.
+            (Ty::Fn { params: ep, ret: er, is_effect: false }, Ty::Fn { params: ap, ret: ar, is_effect: false })
+                if ep.len() == ap.len() =>
+            {
+                return ep.iter().zip(ap.iter()).all(|(e, a)| fits(e, a)) && fits(er, ar);
+            }
+            _ => {}
+        }
         let Ty::Fn { params: ep, ret: er, is_effect: true } = expected else {
             return false;
         };

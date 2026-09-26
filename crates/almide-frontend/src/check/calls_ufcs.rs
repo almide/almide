@@ -136,7 +136,7 @@ impl Checker {
     /// Record field call: `h.run("hello")` where `run` is a Fn-typed field. Must be checked before UFCS so field-access + call takes priority. Verbatim text move out of [`Self::check_call_target_member`].
     fn check_call_target_record_field(&mut self, obj_concrete: &Ty, field: &Sym, arg_tys: &[Ty]) -> Option<Ty> {
         let field_ty = self.resolve_field_type(obj_concrete, field);
-        if let Ty::Fn { is_effect: _, params, ret } = &field_ty {
+        if let Ty::Fn { is_effect, params, ret } = &field_ty {
             // Validate argument count
             if arg_tys.len() != params.len() {
                 self.emit(super::err(
@@ -146,6 +146,19 @@ impl Checker {
             // Unify argument types with parameter types
             for (aty, pty) in arg_tys.iter().zip(params.iter()) {
                 self.constrain(pty.clone(), aty.clone(), format!("call to .{}()", field));
+            }
+            // #2588: an `effect (A) -> B` FIELD is called exactly like an
+            // effect fn value held in a local (#1055, `call_fn_typed_local`):
+            // it needs the effect permission and yields `Result[B, String]`.
+            // Ignoring the bit let a pure fn run a record's effect handler.
+            if *is_effect {
+                if !self.env.can_call_effect {
+                    self.emit(super::err(
+                        format!("cannot call effect function field `.{}` from a pure context", field),
+                        "Mark the enclosing function as `effect fn`".to_string(),
+                        format!("call to .{}()", field)).with_code("E006"));
+                }
+                return Some(Ty::result(ret.as_ref().clone(), Ty::String));
             }
             return Some(ret.as_ref().clone());
         }

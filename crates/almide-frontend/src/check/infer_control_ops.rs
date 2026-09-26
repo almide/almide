@@ -151,11 +151,18 @@ impl Checker {
                     // constrain order (each element still unifies with element 0 as it
                     // is inferred, since a later element's inference can read a var an
                     // earlier constraint bound); only the RESULT type is the join.
+                    let elem_expect = self.list_elem_expect.take();
+                    if let Some(t) = &elem_expect {
+                        self.expect_lambda(&elements[0], t);
+                    }
                     let first = self.infer_expr(&mut elements[0]);
                     let mut peers: Vec<(Ty, Option<ast::Span>, bool)> = vec![
                         (first.clone(), elements[0].span, super::is_literal_numeric_ast(&elements[0])),
                     ];
                     for elem in elements.iter_mut().skip(1) {
+                        if let Some(t) = &elem_expect {
+                            self.expect_lambda(elem, t);
+                        }
                         let et = self.infer_expr(elem);
                         peers.push((et.clone(), elem.span, super::is_literal_numeric_ast(elem)));
                         self.constrain(first.clone(), et, "list element");

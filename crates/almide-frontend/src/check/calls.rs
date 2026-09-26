@@ -166,6 +166,24 @@ impl Checker {
                 if let Some(ty) = self.report_uncallable_callee(callee, &ct) {
                     return ty;
                 }
+                // ADR-0009 D2 for a computed callee, now that its params are known.
+                if let Ty::Fn { params, .. } = resolve_ty(&ct, &self.uf) {
+                    self.check_effect_fn_args(args, Some(&params));
+                }
+                // #2588: `mw(next)(req)` — a computed callee of effect fn type
+                // is an effect call, exactly like a local holding one (#1055).
+                if let Ty::Fn { is_effect: true, params, ret } = resolve_ty(&ct, &self.uf) {
+                    if !self.env.can_call_effect {
+                        self.emit(super::err(
+                            "cannot call an effect function value from a pure context".to_string(),
+                            "Mark the enclosing function as `effect fn`".to_string(),
+                            "call to a computed function value".to_string()).with_code("E006"));
+                    }
+                    for (aty, pty) in arg_tys.iter().zip(params.iter()) {
+                        self.constrain(pty.clone(), aty.clone(), "function call");
+                    }
+                    return Ty::result(*ret, Ty::String);
+                }
                 let ret = self.fresh_var();
                 self.constrain(ct, Ty::Fn { is_effect: false, params: arg_tys.to_vec(), ret: Box::new(ret.clone()) }, "function call");
                 ret
@@ -199,7 +217,27 @@ impl Checker {
             } else {
                 false
             };
+            // #2588: a lambda slot typed `(A) -> effect (B) -> C` hands its
+            // declared ret on, so a returned inner lambda is an effect body.
+            let prev_ret_expect = self.lambda_ret_expect.take();
+            if is_lambda_arg(a) {
+                if let Some((_, Ty::Fn { ret, .. })) = call_sig.as_ref().and_then(|sig| sig.params.get(i)) {
+                    self.lambda_ret_expect = Some((**ret).clone());
+                }
+            }
+            let prev_list_expect = self.list_elem_expect.take();
+            if matches!(a.kind, ExprKind::List { .. }) {
+                if let Some((_, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e))) =
+                    call_sig.as_ref().and_then(|sig| sig.params.get(i))
+                {
+                    if matches!(e.first(), Some(Ty::Fn { .. })) {
+                        self.list_elem_expect = e.first().cloned();
+                    }
+                }
+            }
             let aty = self.infer_expr(a);
+            self.list_elem_expect = prev_list_expect;
+            self.lambda_ret_expect = prev_ret_expect;
             self.lambda_slot_effect = prev_slot_effect;
             self.lambda_arg_hint = prev_hint;
             self.enqueue_ctor_arg_unresolved(a, &aty);
@@ -881,7 +919,10 @@ impl Checker {
             let generic_args = self.instantiate_type_generics(type_name.as_str());
             return Some(Ty::Named(type_name, generic_args));
         }
-        let ty = self.env.lookup_var(name).cloned()?;
+        // #2588: a top-level `let` holding a closure is callable like a local
+        // one — `app(http.new_request(...))` against `let app = http.router(...)`.
+        let ty = self.env.lookup_var(name).cloned()
+            .or_else(|| self.env.top_lets.get(&sym(name)).cloned())?;
         if let Some(ret) = self.call_fn_typed_local(name, &ty, arg_tys) {
             return Some(ret);
         }

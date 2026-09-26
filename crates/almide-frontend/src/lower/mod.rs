@@ -305,6 +305,16 @@ fn normalize_effect_fn_types(program: &mut IrProgram) {
             if has_effect_fn(&expr.ty) {
                 expr.ty = norm(&expr.ty);
             }
+            // A lambda carries its param types inline: an eta-expanded
+            // middleware (`[server_header]`, a fn taking a handler) kept
+            // `_fn_arg0: effect (A) -> B` and rendered the non-carrier shape.
+            if let IrExprKind::Lambda { params, .. } = &mut expr.kind {
+                for (_, pt) in params.iter_mut() {
+                    if has_effect_fn(pt) {
+                        *pt = norm(pt);
+                    }
+                }
+            }
             walk_expr_mut(self, expr);
         }
     }
@@ -320,6 +330,48 @@ fn normalize_effect_fn_types(program: &mut IrProgram) {
             f.ret_ty = norm(&f.ret_ty);
         }
         v.visit_expr_mut(&mut f.body);
+    }
+    // #2588: a top-level `let app = http.router([...])` and a record field
+    // holding a handler (`Route.handler`) carry the same effect fn type —
+    // left in effect form, the native static and the struct field rendered
+    // `dyn Fn(A) -> B` while every value flowing in was the carrier.
+    for tl in program.top_lets.iter_mut() {
+        if has_effect_fn(&tl.ty) {
+            tl.ty = norm(&tl.ty);
+        }
+        v.visit_expr_mut(&mut tl.value);
+    }
+    fn norm_fields(fields: &mut [almide_ir::IrFieldDecl]) {
+        for fd in fields.iter_mut() {
+            if has_effect_fn(&fd.ty) {
+                fd.ty = norm(&fd.ty);
+            }
+        }
+    }
+    for td in program.type_decls.iter_mut() {
+        match &mut td.kind {
+            almide_ir::IrTypeDeclKind::Record { fields } => norm_fields(fields),
+            almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
+                for c in cases.iter_mut() {
+                    match &mut c.kind {
+                        almide_ir::IrVariantKind::Tuple { fields } => {
+                            for t in fields.iter_mut() {
+                                if has_effect_fn(t) {
+                                    *t = norm(t);
+                                }
+                            }
+                        }
+                        almide_ir::IrVariantKind::Record { fields } => norm_fields(fields),
+                        almide_ir::IrVariantKind::Unit => {}
+                    }
+                }
+            }
+            almide_ir::IrTypeDeclKind::Alias { target } => {
+                if has_effect_fn(target) {
+                    *target = norm(target);
+                }
+            }
+        }
     }
     for entry in program.var_table.entries.iter_mut() {
         if has_effect_fn(&entry.ty) {

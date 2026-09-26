@@ -153,6 +153,17 @@ pub struct Checker {
     /// `effect (A) -> B` fn type — the body gets effect-fn ergonomics and the
     /// lambda types as the effect carrier `(A) -> Result[B, String]`.
     pub(crate) lambda_slot_effect: bool,
+    /// #2588: the declared return type of the lambda being inferred, when its
+    /// expected type is a `Fn` known from a declaration (a fn return type, a
+    /// call slot). A lambda BODY that is itself a lambda inherits it, so
+    /// `(next) => (req) => …` against `(Handler) -> Handler` checks the inner
+    /// lambda as an effect body.
+    pub(crate) lambda_ret_expect: Option<crate::types::Ty>,
+    /// #2588: the declared ELEMENT type of the list literal being inferred,
+    /// when it fills a `List[<fn type>]` call slot. Each lambda element is
+    /// checked against it — `http.wrap(app, [(next) => (req) => …])` types
+    /// every inline middleware as a `HttpMiddleware`.
+    pub(crate) list_elem_expect: Option<crate::types::Ty>,
     pub(crate) constraints: Vec<Constraint>,
     pub(crate) uf: UnionFind,
     /// Named-type pairs currently being unified structurally. Unifying two
@@ -571,6 +582,8 @@ impl Checker {
             named_arg_meta: None,
             lambda_arg_hint: None,
             lambda_slot_effect: false,
+            lambda_ret_expect: None,
+            list_elem_expect: None,
             constraints: Vec::new(), uf: UnionFind::new(),
             unify_named_in_progress: std::collections::HashSet::new(),
             current_module_prefix: None,

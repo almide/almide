@@ -441,6 +441,7 @@ impl Checker {
             self.fn_decl_key(name),
             generics.as_ref().map(|gs| gs.iter().map(|g| sym(&g.name)).collect()).unwrap_or_default(),
         ));
+        self.expect_lambda(body, &ret_ty);
         let body_ity = self.infer_expr(body);
         self.current_fn = prev_fn;
         self.check_return_width(name, &ret_ty, &body_ity, body, is_effect);
