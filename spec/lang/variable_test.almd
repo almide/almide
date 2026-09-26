@@ -142,6 +142,19 @@ test "let record destructure" {
   assert_eq(y, 20)
 }
 
+// #2657: a record LITERAL destructured on the spot is the only mention of its
+// shape, so the native emitter never registered an `AlmdRec_*` struct for it
+// and spelled both sides `a_c { .. }` (rustc E0422).
+test "let record destructure of a literal" {
+  let { a, c } = { a: 1, c: 3 }
+  let { name, tags } = { name: "x", tags: ["p", "q"] }
+  let { lo, hi } = if a < c then { lo: a, hi: c } else { lo: c, hi: a }
+  assert_eq(a + c, 4)
+  assert_eq(name, "x")
+  assert_eq(tags, ["p", "q"])
+  assert_eq(hi - lo, 2)
+}
+
 test "var list build in for" {
   var xs: List[String] = []
   for i in 0..<5 {
