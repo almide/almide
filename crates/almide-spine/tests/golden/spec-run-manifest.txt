@@ -1,4 +1,4 @@
-# oracle: almide 0.64.0 (dev) at e14a31099 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.64.0 (dev) at 1d79a6439 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -544,6 +544,7 @@ f76b38bab5bd91cd0bcae6d397187b631c1a513e911a0fd3d6b4d6b8ba1f4007	0	spec/wasm_cro
 9b2ce9647637067e6bff8d20b9b7ccdf44e5d7934d3f5ea070bbe6ecdd3b2a6b	0	spec/wasm_cross/range_bind_walled_no_materialize.almd
 329f6cc13cdfaf53c686fb35de76555ce91100e7054bf0bd67eb0d7448dd4210	0	spec/wasm_cross/range_exclusive_end_at_min.almd
 e7c8f7cadfc723353629704b04a7af8dcbb687a01db2a0604e70054488264838	0	spec/wasm_cross/range_first_class.almd
+40d3e3420d9e9752a582db6a6ad2c3a86e2a30ec658ad952f764289e0a67b142	0	spec/wasm_cross/range_inclusive_end_at_max.almd
 9160d4be34c8695bd172a76c7c7966587ea5a4d991ad22c87b2b91af54aa9ebb	1	spec/wasm_cross/range_materialize_oom.almd
 789177e6f550242db99f92f9625b3e65d82257168d917aa214b564ccacb58cd5	0	spec/wasm_cross/rc_alloc_stress.almd
 aefaa405fb27fe9586cf9fcc4e44d2d8f58916922c05c66fee6319f9161bdbd4	0	spec/wasm_cross/rc_reclaim_churn.almd
