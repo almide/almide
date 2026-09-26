@@ -1,0 +1,79 @@
+// @contract: C-009, C-298
+// Record and variant-payload FIELD names that are Rust keywords (#2652). They
+// are legal Almide identifiers, so `almide check` accepts them and wasm has no
+// conflict; the native emitter used to write them bare (`pub box: i64`,
+// `x.box`, `Crate { ref, .. }`) and rustc refused the program. Every place a
+// field name becomes a Rust identifier now goes through the one sanitizer
+// #659 introduced for fn names (`escape_rust_ident`): raw-escapable keywords
+// become `r#box`, and the four rustc refuses to raw-escape (`self`, `Self`,
+// `super`, `crate`) become `almide_kw_<name>` — injectively, so a record that
+// also declares `almide_kw_self` keeps two distinct fields. Only the Rust
+// spelling changes: the Repr text and the Codec JSON keys keep the Almide
+// name. Covers declaration, construction, access, field assign, spread,
+// defaults, patterns (match, recursive boxed payloads), anonymous records,
+// optional chaining, closures, derived Eq / Repr / Codec. Byte-identical
+// native == wasm.
+import json
+
+type Item: Codec = { box: Int, dyn: String, self: Int, move: Bool, crate: Int, super: Int, Self: Int, almide_kw_self: Int }
+
+type Node = | Leaf { ref: Int } | Pair { loop: Node, self: Node }
+
+type Shape: Codec = | Crate { ref: Int, loop: String, self: Int } | Plain
+
+type Opt = { impl: Int, unsafe: Int = 9 }
+
+fn sum(n: Node) -> Int = match n {
+  Leaf { ref } => ref,
+  Pair { loop, self } => sum(loop) + sum(self),
+}
+
+fn main() -> Unit = {
+  let it = Item {
+    box: 1,
+    dyn: "t",
+    self: 7,
+    move: true,
+    crate: 2,
+    super: 3,
+    Self: 5,
+    almide_kw_self: 11,
+  }
+  var m = Item {
+    box: 1,
+    dyn: "t",
+    self: 7,
+    move: true,
+    crate: 2,
+    super: 3,
+    Self: 5,
+    almide_kw_self: 11,
+  }
+  m.box = m.box + 40
+  m.self = m.self + m.almide_kw_self
+  println("${m}")
+  let enc = json.stringify(Item.encode(m))
+  println(enc)
+  match Item.decode(json.parse(enc) ?? value.null()) {
+    ok(back) => println("${back == m} ${back.self} ${back.almide_kw_self}"),
+    err(e) => println("err ${e}"),
+  }
+  let s = Crate { ref: 3, loop: "f", self: 9 }
+  let senc = json.stringify(Shape.encode(s))
+  println(senc)
+  match Shape.decode(json.parse(senc) ?? value.null()) {
+    ok(sb) => println("${sb}"),
+    err(e) => println("err ${e}"),
+  }
+  println(int.to_string(sum(Pair { loop: Leaf { ref: 2 }, self: Pair { loop: Leaf { ref: 3 }, self: Leaf { ref: 4 } } })))
+  let anon = { box: 1, self: 2, crate: 3 }
+  println("${anon} ${anon.self + anon.crate}")
+  let o = Opt { impl: 1 }
+  println("${o} ${o.unsafe}")
+  let bump = (x: Int) => x + it.super + it.Self
+  println(int.to_string(bump(1)))
+  let maybe: Item? = some(it)
+  println("${maybe?.box} ${maybe?.self}")
+  let items = [it, m] |> list.filter((x) => x.move) |> list.map((x) => { ...x, crate: x.crate * 10 })
+  println("${items |> list.map((x) => x.crate)}")
+}
