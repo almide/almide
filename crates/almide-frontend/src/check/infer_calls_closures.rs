@@ -650,6 +650,28 @@ impl Checker {
     }
 
     /// `ExprKind::Lambda` arm of [`Self::infer_expr_inner_g3`]. Verbatim text move.
+    /// #2588: arm the #1055 effect-slot ergonomics for a lambda whose expected
+    /// type is DECLARED rather than a call slot — a fn's return type, or the
+    /// return type of an enclosing lambda. `fn server_header(next: Handler)
+    /// -> Handler = (req) => … next(req)! …` is a middleware: the lambda it
+    /// returns runs as a handler, so its body gets the same effect-fn
+    /// ergonomics a lambda passed straight to `http.serve` gets. Only a
+    /// lambda IS the expression is armed; the flags are consumed by the very
+    /// next lambda inference, so arming anything else would leak them.
+    pub(crate) fn expect_lambda(&mut self, expr: &ast::Expr, expected: &Ty) {
+        if !matches!(expr.kind, ExprKind::Lambda { .. }) {
+            return;
+        }
+        if let Ty::Fn { is_effect, params, ret } = resolve_ty(expected, &self.uf) {
+            self.lambda_slot_effect = is_effect;
+            self.lambda_ret_expect = Some(*ret);
+            // The declared param types pin the unannotated params (#653's
+            // hint) — `(next) => …` against `(Handler) -> Handler` gives `next`
+            // the handler's effect type, so `next(req)` is the carrier call.
+            self.lambda_arg_hint = Some(params.into_iter().map(Some).collect());
+        }
+    }
+
     fn infer_expr_g3_lambda(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::Lambda { params, body, .. } = &mut expr.kind else { unreachable!() };
         self.env.push_scope();
@@ -677,6 +699,7 @@ impl Checker {
         // `(A) -> Result[B, String]`, so a pure value tail gets the same
         // ok(...) wrap the fallible machinery already emits (Phase 1b).
         let slot_effect = std::mem::take(&mut self.lambda_slot_effect);
+        let ret_expect = self.lambda_ret_expect.take();
         let saved_can_call_effect = self.env.can_call_effect;
         if slot_effect {
             self.env.can_call_effect = true;
@@ -729,6 +752,9 @@ impl Checker {
             }
             ty
         }).collect();
+        if let Some(r) = &ret_expect {
+            self.expect_lambda(body, r);
+        }
         let ret_ty = self.infer_expr(body);
         self.env.can_call_effect = saved_can_call_effect;
         // Single-condition decisions (MC/DC ledger): || as if/else.
@@ -978,26 +1004,18 @@ impl Checker {
         }
     }
 
-    fn infer_call(
-        &mut self,
-        callee: &mut Box<ast::Expr>,
-        args: &mut Vec<ast::Expr>,
-        named_args: &mut Vec<(almide_base::intern::Sym, ast::Expr)>,
-        type_args: &Option<Vec<ast::TypeExpr>>,
-    ) -> Ty {
-        // ADR-0006 D1 (#1108 Phase 2a): the 1-bit fallibility rule for the
-        // core list HOFs, applied as a pre-inference normalization.
-        self.normalize_fallible_hof_callback(callee, args);
-        // ADR-0009 D2 (#1055 / #1135 cluster 1): an EFFECT fn passed as a
-        // callback VALUE carries its effect bit to this call site.
-        // `check_effect_isolation` fires on a CALL, so a bare reference
-        // laundered the capability: `fn pure_caller(xs) = list.map(xs, eff)`
-        // — `eff` an effect fn declared `-> Result[T, E]` — passed check from
-        // a PURE fn and ran its effects, while `list.map(xs, (x) => eff(x))`
-        // was correctly E006. Same program, same effects, opposite verdicts,
-        // decided by the callback's SPELLING.
-        for a in args.iter() {
+    /// ADR-0009 D2's argument walk (see `infer_call`): each bare identifier
+    /// argument that RESOLVES to an effect fn is an effect use unless the
+    /// parameter slot it fills is itself effect-typed. `slot_params` is the
+    /// callee's parameter list when known.
+    pub(crate) fn check_effect_fn_args(&mut self, args: &[ast::Expr], slot_params: Option<&[Ty]>) {
+        for (i, a) in args.iter().enumerate() {
             let ExprKind::Ident { name, .. } = &a.kind else { continue };
+            let effect_slot = slot_params.and_then(|ps| ps.get(i))
+                .is_some_and(|pty| matches!(resolve_ty(pty, &self.uf), Ty::Fn { is_effect: true, .. }));
+            if effect_slot {
+                continue;
+            }
             // SHADOWING FIRST. `infer_expr_g2_ident` resolves an identifier
             // local → top-level `let` → const param → FUNCTION, so a name that
             // any of those bind is NOT a reference to the fn of that name.
@@ -1024,6 +1042,40 @@ impl Checker {
             if sig.is_effect {
                 self.check_effect_isolation(name, &sig);
             }
+        }
+    }
+
+    fn infer_call(
+        &mut self,
+        callee: &mut Box<ast::Expr>,
+        args: &mut Vec<ast::Expr>,
+        named_args: &mut Vec<(almide_base::intern::Sym, ast::Expr)>,
+        type_args: &Option<Vec<ast::TypeExpr>>,
+    ) -> Ty {
+        // ADR-0006 D1 (#1108 Phase 2a): the 1-bit fallibility rule for the
+        // core list HOFs, applied as a pre-inference normalization.
+        self.normalize_fallible_hof_callback(callee, args);
+        // ADR-0009 D2 (#1055 / #1135 cluster 1): an EFFECT fn passed as a
+        // callback VALUE carries its effect bit to this call site.
+        // `check_effect_isolation` fires on a CALL, so a bare reference
+        // laundered the capability: `fn pure_caller(xs) = list.map(xs, eff)`
+        // — `eff` an effect fn declared `-> Result[T, E]` — passed check from
+        // a PURE fn and ran its effects, while `list.map(xs, (x) => eff(x))`
+        // was correctly E006. Same program, same effects, opposite verdicts,
+        // decided by the callback's SPELLING.
+        //
+        // An `effect (A) -> B` SLOT launders nothing (#2588): the callee can
+        // only invoke that param as an effect call, so the effect bit stays in
+        // the value's type and every eventual call is checked where it
+        // happens. That is what lets a route table name its effect handlers
+        // from a pure context — `http.route("GET /users/{id}", get_user)`.
+        //
+        // A COMPUTED callee (`inc()(base)`) has no signature to look up
+        // before inference; its check runs once its type is known
+        // (`check_call_with_type_args`'s value-callee arm).
+        if matches!(callee.kind, ExprKind::Ident { .. } | ExprKind::Member { .. }) {
+            let slot_params: Option<Vec<Ty>> = self.lookup_call_sig(callee).map(|s| s.params.into_iter().map(|(_, t)| t).collect());
+            self.check_effect_fn_args(args, slot_params.as_deref());
         }
         // Save named arg names, then flatten into positional args temporarily.
         let named_names: Vec<almide_base::intern::Sym> = named_args.iter().map(|(n, _)| *n).collect();
