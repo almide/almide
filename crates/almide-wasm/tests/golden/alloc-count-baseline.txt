@@ -339,6 +339,7 @@
 2	0	58	0	spec/wasm_cross/list_chunk_zero.almd
 90	22	1483	87	spec/wasm_cross/list_comprehensive.almd
 291	236	3276	291	spec/wasm_cross/list_count_index_truncation.almd
+108	76	1082	108	spec/wasm_cross/list_count_stride_product_wrap.almd
 9	2	102	9	spec/wasm_cross/list_cross_module_variant.almd
 7	1	112	7	spec/wasm_cross/list_element_hof_chain.almd
 9	0	70	9	spec/wasm_cross/list_enumerate_find.almd
@@ -474,7 +475,7 @@
 0	0	0	0	spec/wasm_cross/mutual_tail_recursion.almd
 3	0	20	3	spec/wasm_cross/nan_canonical_bytes_write.almd
 0	0	0	0	spec/wasm_cross/nan_canonical_observation.almd
-6	1	111	6	spec/wasm_cross/native_wall_shapes.almd
+24	13	293	24	spec/wasm_cross/native_wall_shapes.almd
 7	5	29	7	spec/wasm_cross/negative_float_literal_sized.almd
 52	27	546	52	spec/wasm_cross/negative_offset_and_width_totality.almd
 15	11	152	15	spec/wasm_cross/nested_ctor_pattern.almd
