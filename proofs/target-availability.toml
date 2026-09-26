@@ -176,17 +176,24 @@ pending_self_host_ceiling = 9
 # handle (start / poll / read_new / wait / cancel) and the three *_with_limits
 # streaming twins land native-first; each is refused at check time on the
 # wasm target (E081) until the wasi:http pollable port, #2633.
-pending_port_ceiling = 64
+# 2026-09-26 (#2650): 64 -> 59. http.serve runs on the embedded lane (the
+# guest-owned serve loop over host ops 70..=72, C-367) and builds on the
+# structural leg, so its structural and embedded legs go; the five
+# HttpRequest readers (req_method / req_path / req_body / req_header /
+# query_params) are self-hosted (stdlib/http_serve.almd) and their
+# structural rows go. http.serve keeps its stock-p1 leg (#2659).
+pending_port_ceiling = 59
 
 # The unprobed class (#1827), per leg. Today: the five HttpRequest
 # accessors (http.query_params / req_body / req_header / req_method /
-# req_path) — the value exists only inside an http.serve handler, and on
-# these two legs http.serve itself walls at build, so the accessors are
-# never reached. The structural leg walls on the HttpRequest binding
-# itself (bind-ty:Named), which is that leg's own verdict — declared.
+# req_path) on the stock-p1 leg — the value exists only inside an
+# http.serve handler, and a stock artifact refuses http.serve, so the
+# accessors are never reached there. 2026-09-26 (#2650): embedded 5 -> 0 —
+# the embedded lane serves http.serve, so the probe sends its handler a
+# request and the accessors are MEASURED (served).
 unprobed_ceiling_structural = 0
 unprobed_ceiling_stock_p1 = 5
-unprobed_ceiling_embedded = 5
+unprobed_ceiling_embedded = 0
 
 [[unavailable]]
 fn = "datetime.monotonic_ns"
@@ -299,41 +306,6 @@ reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --t
 issue = "#1423"
 
 [[unavailable]]
-fn = "http.query_params"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1827"
-
-[[unavailable]]
-fn = "http.req_body"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1827"
-
-[[unavailable]]
-fn = "http.req_header"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1827"
-
-[[unavailable]]
-fn = "http.req_method"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1827"
-
-[[unavailable]]
-fn = "http.req_path"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1827"
-
-[[unavailable]]
 fn = "http.request"
 legs = ["stock-p1"]
 class = "pending-port"
@@ -419,12 +391,10 @@ issue = "#1827"
 
 [[unavailable]]
 fn = "http.serve"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "no wasm host binding for the http server (http.serve is not an admitted effectful call on the incumbent) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-stock-p1 = "no wasm host binding for the http server (http.serve is not an admitted effectful call on the incumbent) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-structural = "host-surface"
-issue = "#1827"
+reason = "embedded-lane-served (#2650, C-367): `almide run --target wasm` serves it — one instance, sequential, byte-identical responses through the shared server core (host ops 70..=72); a stock p1 artifact has no listening socket, so `almide build --target wasm` refuses it — run it with `almide run --target wasm` or natively"
+issue = "#2659"
 
 [[unavailable]]
 fn = "http.url_decode"

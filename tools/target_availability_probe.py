@@ -461,10 +461,52 @@ def names_injected_ctor(detail: str, ctors) -> str:
     return ""
 
 
+def run_serve_probe(prog: str, src: str, tmp: str, env: dict):
+    """The embedded leg SERVES `http.serve` (#2650): the probe program never
+    returns, so service is measured the way a client sees it — bind a free
+    port, send one request, and take an HTTP answer (any status: a handler
+    err is the host's 500 ANSWER) as ok. A process that ends first (a build
+    wall, a trap) is judged from its output as usual."""
+    import socket
+    import time
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    with open(src, "w") as fh:
+        fh.write(prog.replace("http.serve(0,", f"http.serve({port},"))
+    cmd = [ALMIDE, "run", src, "--target", "wasm"]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                         env=env, cwd=tmp, stdin=subprocess.DEVNULL, start_new_session=True)
+    deadline = time.monotonic() + 120
+    try:
+        while time.monotonic() < deadline:
+            if p.poll() is not None:
+                out, err = p.communicate()
+                return subprocess.CompletedProcess(cmd, p.returncode, out, err)
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=30) as c:
+                    c.sendall(b"GET /probe HTTP/1.1\r\nHost: probe\r\n\r\n")
+                    got = c.recv(64)
+            except OSError:
+                time.sleep(0.1)
+                continue
+            if got.startswith(b"HTTP/1.1 "):
+                return subprocess.CompletedProcess(cmd, 0, "pre\n", "")
+            time.sleep(0.1)
+        raise subprocess.TimeoutExpired(cmd, 120)
+    finally:
+        if p.poll() is None:
+            os.killpg(p.pid, 9)
+            p.communicate()
+
+
 def run_probe(prog: str, leg: str, tmp: str, env: dict):
     src = os.path.join(tmp, "probe.almd")
     with open(src, "w") as fh:
         fh.write(prog)
+    if leg == "embedded" and "http.serve(0," in prog:
+        return run_serve_probe(prog, src, tmp, env)
     if leg == "embedded":
         return subprocess.run(
             [ALMIDE, "run", src, "--target", "wasm"],
