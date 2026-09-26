@@ -377,6 +377,23 @@ impl Emitter<'_> {
         }
     }
 
+    /// Push an i32 "leave the counting loop" for a Range head: `var >= stop`
+    /// (exclusive) / `var > stop` (inclusive). The inclusive test also leaves
+    /// when `var < floor` (the range's start): a range ending at i64::MAX
+    /// steps its index past the last element to i64::MIN, which `var > stop`
+    /// alone never catches (#2679). An exclusive loop cannot wrap.
+    fn range_exit_test(&mut self, var_idx: u32, floor: u32, stop: u32, inclusive: bool) {
+        let mut i = self.f.instructions();
+        i.local_get(var_idx).local_get(stop);
+        if inclusive {
+            i.i64_gt_s();
+            i.local_get(var_idx).local_get(floor).i64_lt_s();
+            i.i32_or();
+        } else {
+            i.i64_ge_s();
+        }
+    }
+
     /// A call in any position. Returns the callee's slice return type
     /// (None = Unit). `println`/`eprintln` are the special forms.
     /// `for` loops: a Range iterates Int directly; a List walks its
@@ -402,15 +419,13 @@ impl Emitter<'_> {
                     self.lower(end, Some(INT))?;
                     let stop = self.hold_i64()?;
                     self.f.instructions().local_set(stop);
+                    // The inclusive loop's no-wrap floor (#2679): `start`.
+                    let floor = self.hold_i64()?;
+                    self.f.instructions().local_get(var_idx).local_set(floor);
                     let flags = self.hoist_cow_flags(None, body)?;
                     self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                     self.emit_det_charge_const(1);
-                    self.f.instructions().local_get(var_idx).local_get(stop);
-                    if *inclusive {
-                        self.f.instructions().i64_gt_s();
-                    } else {
-                        self.f.instructions().i64_ge_s();
-                    }
+                    self.range_exit_test(var_idx, floor, stop, *inclusive);
                     self.f.instructions().br_if(1);
                     self.lower_loop_body(body, true)?;
                     self.f
@@ -423,6 +438,7 @@ impl Emitter<'_> {
                         .end()
                         .end();
                     self.drop_cow_flags(flags);
+                    self.release_i64();
                     self.release_i64();
                     return Ok(());
                 }
@@ -439,12 +455,7 @@ impl Emitter<'_> {
                         let flags = self.hoist_cow_flags(None, body)?;
                         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                         self.emit_det_charge_const(1);
-                        self.f.instructions().local_get(var_idx).local_get(el);
-                        if inclusive {
-                            self.f.instructions().i64_gt_s();
-                        } else {
-                            self.f.instructions().i64_ge_s();
-                        }
+                        self.range_exit_test(var_idx, sl, el, inclusive);
                         self.f.instructions().br_if(1);
                         self.lower_loop_body(body, true)?;
                         self.f
