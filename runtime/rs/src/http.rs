@@ -24,6 +24,14 @@ pub struct AlmideHttpResponse {
     pub headers: Vec<(String, String)>,
 }
 
+// A record may hold any of the http types, and a record's repr calls each field's
+// (#2647). The body is shown; the headers are counted, not listed.
+impl AlmideRepr for AlmideHttpResponse {
+    fn almide_repr(&self) -> String {
+        format!("HttpResponse {{ status: {}, body: {}, headers: {} }}", self.status.almide_repr(), self.body.almide_repr(), self.headers.len())
+    }
+}
+
 impl AlmideHttpResponse {
     pub fn new(status: i64, body: String) -> Self {
         Self { status, body, headers: vec![("Content-Type".into(), "text/plain".into())] }
@@ -152,6 +160,12 @@ pub struct AlmideHttpRequest {
     pub path: String,
     pub body: String,
     pub headers: Vec<(String, String)>,
+}
+
+impl AlmideRepr for AlmideHttpRequest {
+    fn almide_repr(&self) -> String {
+        format!("HttpRequest {{ method: {}, path: {}, body: {}, headers: {} }}", self.method.almide_repr(), self.path.almide_repr(), self.body.almide_repr(), self.headers.len())
+    }
 }
 
 pub fn almide_http_req_method(req: &AlmideHttpRequest) -> String { req.method.clone() }
@@ -669,6 +683,11 @@ impl std::fmt::Debug for AlmideHttpCall {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("HttpCall")
     }
+}
+
+// A call in flight has no value to show: it is the handle, as Debug says.
+impl AlmideRepr for AlmideHttpCall {
+    fn almide_repr(&self) -> String { "HttpCall".to_string() }
 }
 
 impl PartialEq for AlmideHttpCall {

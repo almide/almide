@@ -154,3 +154,21 @@ pub(crate) fn modules_spelled_in(user_code: &str) -> Vec<&'static str> {
 pub(crate) fn has_runtime_repr(almd: &str) -> bool {
     TABLE.iter().any(|e| e.almd == almd && e.twin.is_some())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::TABLE;
+
+    /// Every runtime-owned type can sit in a user record, and a record's repr
+    /// calls `almide_repr` on each field — so each one's runtime module must
+    /// implement `AlmideRepr` for it, or the record fails at rustc (E0599, #2647).
+    #[test]
+    fn every_runtime_owned_type_has_a_repr() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime/rs/src");
+        for e in TABLE {
+            let text = std::fs::read_to_string(src.join(format!("{}.rs", e.module))).expect("runtime module");
+            assert!(text.contains(&format!("impl AlmideRepr for {} ", e.rust)) || text.contains(&format!("impl AlmideRepr for {}{{", e.rust)),
+                "{} ({}.rs) has no `impl AlmideRepr for {}`", e.almd, e.module, e.rust);
+        }
+    }
+}
