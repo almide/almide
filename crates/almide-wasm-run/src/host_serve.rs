@@ -39,6 +39,9 @@ fn err_s(m: String) -> (i64, Vec<u8>) {
     (pack(1, m.len()), m.into_bytes())
 }
 
+/// The host's http_framed cell parser: (first cell, second cell, pairs).
+type ParseCells = fn(&str) -> Result<(String, String, Vec<(String, String)>), String>;
+
 /// Serve one of the ops 70..=72; `frames` is the host's list encoding and
 /// `parse_cells` its http_framed cell parser (both live in host.rs).
 pub(crate) fn dispatch(
@@ -46,7 +49,7 @@ pub(crate) fn dispatch(
     op: i32,
     a: &str,
     frames: fn(&[String]) -> Vec<u8>,
-    parse_cells: fn(&str) -> Result<(String, String, Vec<(String, String)>), String>,
+    parse_cells: ParseCells,
 ) -> (i64, Vec<u8>) {
     let mut st = state.lock().expect("serve state");
     match op {

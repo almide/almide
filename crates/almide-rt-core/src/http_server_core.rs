@@ -40,7 +40,7 @@ fn http_server_read_request(stream: &mut std::net::TcpStream) -> Result<HttpServ
     let mut reader = std::io::BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
     let mut first_line = String::new();
     std::io::BufRead::read_line(&mut reader, &mut first_line).map_err(|e| e.to_string())?;
-    let parts: Vec<&str> = first_line.trim().split_whitespace().collect();
+    let parts: Vec<&str> = first_line.split_whitespace().collect();
     if parts.len() < 2 {
         return Err("invalid request".into());
     }
