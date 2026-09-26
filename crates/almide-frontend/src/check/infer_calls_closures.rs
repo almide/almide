@@ -765,7 +765,8 @@ impl Checker {
         self.record_postfix_inner(outer_span, inner.span);
         let t = self.infer_expr(inner);
         let resolved = resolve_ty(&t, &self.uf);
-        self.check_unwrap_propagation_context(&resolved);
+        let plain_is_effect_call = self.is_effect_call_expr(inner);
+        self.check_unwrap_propagation_context(&resolved, plain_is_effect_call);
         if let Some(inner_ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
             inner_ty
         } else if matches!(&resolved, Ty::Unknown) {
@@ -812,6 +813,15 @@ impl Checker {
     fn is_effect_call_expr(&self, expr: &ast::Expr) -> bool {
         let ExprKind::Call { callee, .. } = &expr.kind else { return false };
         self.lookup_call_sig(callee).is_some_and(|sig| sig.is_effect)
+    }
+
+    /// The pipe spelling of [`Self::is_effect_call_expr`]: `xs |> f!` names the
+    /// callee bare (`f`, `m.f`) or as a partial call (`f(a)`).
+    fn is_effect_pipe_target(&self, expr: &ast::Expr) -> bool {
+        match &expr.kind {
+            ExprKind::Call { callee, .. } => self.lookup_call_sig(callee).is_some_and(|sig| sig.is_effect),
+            _ => self.lookup_call_sig(expr).is_some_and(|sig| sig.is_effect),
+        }
     }
 
     /// `expr ?? fallback` — unwrap with default (Option[T] → T, Result[T,E]
@@ -1042,13 +1052,17 @@ impl Checker {
     /// fn body, outside any lambda) or inside a `test` block; reject everywhere
     /// else at type-check time so the failure is a clear diagnostic, not a
     /// codegen ICE (#608).
-    fn check_unwrap_propagation_context(&mut self, operand: &Ty) {
+    ///
+    /// Where propagation is possible, the error must also fit the fn's error
+    /// type (#2635, [`Self::check_bang_error_channel`]).
+    fn check_unwrap_propagation_context(&mut self, operand: &Ty, plain_is_effect_call: bool) {
         // Single-condition decisions (MC/DC ledger): each || arm is its
         // own return guard.
-        if self.env.auto_unwrap {
+        if self.env.in_test_block {
             return;
         }
-        if self.env.in_test_block {
+        if self.env.auto_unwrap {
+            self.check_bang_error_channel(operand, plain_is_effect_call);
             return;
         }
         let accepted = if self.env.lambda_depth == 0 {
@@ -1057,6 +1071,9 @@ impl Checker {
             self.accept_lambda_channel_prop(operand)
         };
         if accepted {
+            if self.env.lambda_depth == 0 {
+                self.check_bang_error_channel(operand, plain_is_effect_call);
+            }
             return;
         }
         // Off-type operands (and a missing channel) still reject.
@@ -1151,7 +1168,8 @@ impl Checker {
             ExprKind::UnwrapOr { expr: inner, fallback, .. } => self.infer_pipe_unwrap_or(left, inner, fallback),
             ExprKind::Unwrap { expr: inner, .. } => {
                 let inner_ty = self.infer_pipe(left, inner);
-                self.check_unwrap_propagation_context(&inner_ty);
+                let plain_is_effect_call = self.is_effect_pipe_target(inner);
+                self.check_unwrap_propagation_context(&inner_ty, plain_is_effect_call);
                 // Annotate the inner expression with its resolved type so the lowering
                 // can construct the correct IR type (e.g., Result[List[T], List[E]] for
                 // result.collect rather than hardcoding Result[T, String]).
