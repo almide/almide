@@ -4584,7 +4584,10 @@ since     = "0.64.0"
 status    = "active"
 evidence  = [
   { path = "spec/stdlib/http_call_test.almd", class = "fixture" },
+  { path = "spec/embedded_cross/http_call_handle_errs.almd", class = "fixture" },
   { path = "tests/http_call_handle_test.rs", name = "call_handle_limits_cancel_poll_and_the_streaming_twins", class = "fixture" },
+  { path = "tests/http_call_handle_test.rs", name = "native_only_default_timeout_and_the_sse_twin", class = "fixture" },
   { path = "tests/http_call_handle_test.rs", name = "a_trickle_outlives_the_classic_stream_but_not_total_ms", class = "fixture" },
+  { path = "tests/http_call_handle_test.rs", name = "the_stock_route_and_the_sse_twin_keep_their_e081", class = "fixture" },
   { path = "tests/http_call_family_gate_test.rs", name = "every_streaming_client_has_one_with_limits_twin", class = "fixture" },
 ]
