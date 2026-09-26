@@ -214,9 +214,14 @@ fn emit_program_pass(
         let vt = if space == 0 { &ir.var_table } else { &ir.modules.get(space as usize - 1)?.var_table };
         vt.entries.get(id.0 as usize).map(|v| v.name.as_str().to_string())
     };
+    // The lifted lambdas each function body created (`fn_lambdas[i]`, a range
+    // into `work.lifted`): a lambda is reachable only through its owner.
+    let mut fn_lambdas: Vec<std::ops::Range<usize>> = Vec::new();
     for (i, (f, qual, space)) in program_fns.iter().enumerate() {
+        let lifted_before = work.lifted.borrow().len();
         if let Some(r) = &table.infos[i].refuse {
             lowered.push(Err(r.clone()));
+            fn_lambdas.push(lifted_before..lifted_before);
             continue;
         }
         if table.infos[i].import.is_some() {
@@ -294,6 +299,7 @@ fn emit_program_pass(
             // reachable-or-not leak is still a defect, never a wall.
             Err(e @ EmitError::OwnershipLowering(_)) => return Err(e),
         }
+        fn_lambdas.push(lifted_before..work.lifted.borrow().len());
     }
 
     // `main`: top-lets as the eager prelude, then the body. Failure here is
@@ -315,13 +321,22 @@ fn emit_program_pass(
         self_index: None,
         param_owned: None,
     };
+    let main_lambdas_from = work.lifted.borrow().len();
     let (main_fn, main_calls) =
         lower_fn(&[], main_plan, main_body, &init_lets, &ctx, &mut pool)?;
+    let main_lambdas = main_lambdas_from..work.lifted.borrow().len();
     display_helper_calls.extend(display::build_display_helpers(&table, &types, &work, &mut pool)?);
 
     // Lift lambdas to extra functions (they may register further lambdas
     // or table entries — iterate to the fixed point).
     let mut lifted_fns: Vec<LoweredLifted> = Vec::new();
+    // Per lifted lambda: the lambdas ITS body lifted, and — when the body did
+    // not lower — why. A failed lambda ships as an `unreachable` stub and
+    // refuses the program only if a reachable owner created it (#2588: the
+    // router's closures inside `http` must not wall a program that only
+    // calls `http.get`).
+    let mut lambda_children: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut lambda_errs: Vec<Option<String>> = Vec::new();
     loop {
         let pending: Vec<LiftedLambda> = {
             let all = work.lifted.borrow();
@@ -351,7 +366,18 @@ fn emit_program_pass(
                 self_index: None,
         param_owned: None,
             };
-            let (f, calls) = lower_fn(&ll.params, plan, &ll.body, &[], &ctx, &mut pool)?;
+            let children_from = work.lifted.borrow().len();
+            let (f, calls, err) = match lower_fn(&ll.params, plan, &ll.body, &[], &ctx, &mut pool) {
+                Ok((f, calls)) => (f, calls, None),
+                Err(EmitError::Unsupported(r)) => {
+                    let mut stub = Function::new([]);
+                    stub.instructions().unreachable().end();
+                    (stub, HashSet::new(), Some(r))
+                }
+                Err(e) => return Err(e),
+            };
+            lambda_children.push(children_from..work.lifted.borrow().len());
+            lambda_errs.push(err);
             display_helper_calls
                 .extend(display::build_display_helpers(&table, &types, &work, &mut pool)?);
             // Uniform convention: env i32 leads every table signature.
@@ -362,39 +388,57 @@ fn emit_program_pass(
     }
 
     // Reachability: refuse the program iff a call chain from `main` lands
-    // on a function whose body did not lower (its stub would trap).
-    let mut queue: Vec<usize> = main_calls.iter().copied().collect();
-    queue.extend(display_helper_calls.iter().copied());
-    for (_, _, _, calls) in &lifted_fns {
-        queue.extend(calls.iter().copied());
-    }
+    // on a function — or a lambda — whose body did not lower (its stub would
+    // trap). A lambda is reached through the function or lambda that
+    // created it; its calls count only then.
+    // The walk reports the reachable failure with the SMALLEST index
+    // (program order), never whichever the walk happened to step on first
+    // (the gauntlet's functional_port refused with three different reasons
+    // across twelve runs before this pick was made deterministic).
+    let reach = |fn_roots: Vec<usize>, lambda_roots: Vec<usize>| {
+        let (mut fq, mut lq) = (fn_roots, lambda_roots);
+        let (mut fns, mut lams): (HashSet<usize>, HashSet<usize>) = (HashSet::new(), HashSet::new());
+        let (mut fn_err, mut lam_err): (Option<usize>, Option<usize>) = (None, None);
+        while !fq.is_empty() || !lq.is_empty() {
+            while let Some(k) = lq.pop() {
+                if !lams.insert(k) {
+                    continue;
+                }
+                if lambda_errs[k].is_some() {
+                    lam_err = Some(lam_err.map_or(k, |p| p.min(k)));
+                }
+                fq.extend(lifted_fns[k].3.iter().copied());
+                lq.extend(lambda_children[k].clone());
+            }
+            while let Some(i) = fq.pop() {
+                if !fns.insert(i) {
+                    continue;
+                }
+                match &lowered[i] {
+                    Err(_) => fn_err = Some(fn_err.map_or(i, |p| p.min(i))),
+                    Ok((_, calls)) => fq.extend(calls.iter().copied()),
+                }
+                if let Some(r) = fn_lambdas.get(i) {
+                    lq.extend(r.clone());
+                }
+            }
+        }
+        let err = fn_err
+            .and_then(|i| lowered[i].as_ref().err().cloned())
+            .or_else(|| lam_err.and_then(|k| lambda_errs[k].clone()));
+        (fns, err)
+    };
+    let mut roots: Vec<usize> = main_calls.iter().copied().collect();
+    roots.extend(display_helper_calls.iter().copied());
     for e in work.entries.borrow().iter() {
         match e {
-            TableEntry::Fn(i) | TableEntry::Adapter { target: i, .. } => queue.push(*i),
+            TableEntry::Fn(i) | TableEntry::Adapter { target: i, .. } => roots.push(*i),
             TableEntry::Lambda(_) | TableEntry::Direct(_) => {}
         }
     }
-    let mut visited: HashSet<usize> = HashSet::new();
-    // The per-fn call sets are HashSets, so traversal order is
-    // process-seeded — complete the walk and report the reachable
-    // failure with the SMALLEST function index (program order), never
-    // whichever the walk happened to step on first (the gauntlet's
-    // functional_port refused with three different reasons across
-    // twelve runs before this pick was made deterministic).
-    let mut first_err: Option<usize> = None;
-    while let Some(i) = queue.pop() {
-        if !visited.insert(i) {
-            continue;
-        }
-        match &lowered[i] {
-            Err(_) => first_err = Some(first_err.map_or(i, |p| p.min(i))),
-            Ok((_, calls)) => queue.extend(calls.iter().copied()),
-        }
-    }
-    if let Some(i) = first_err
-        && let Err(reason) = &lowered[i]
-    {
-        return unsup(reason);
+    let (mut visited, err) = reach(roots, main_lambdas.clone().collect());
+    if let Some(reason) = err {
+        return unsup(&reason);
     }
 
     // #457: exported pub fns are DCE ROOTS — the host calls them without
@@ -414,25 +458,13 @@ fn emit_program_pass(
         {
             continue;
         }
-        let mut sub: HashSet<usize> = HashSet::new();
-        let mut q = vec![i];
-        let mut clean = true;
-        while let Some(j) = q.pop() {
-            if !sub.insert(j) {
-                continue;
-            }
-            match &lowered[j] {
-                Err(reason) => {
-                    if library {
-                        return unsup(&format!("exported function `{name}` cannot be lowered: {reason}"));
-                    }
-                    clean = false;
-                    break;
-                }
-                Ok((_, calls)) => q.extend(calls.iter().copied()),
+        let (sub, err) = reach(vec![i], Vec::new());
+        if let Some(reason) = &err {
+            if library {
+                return unsup(&format!("exported function `{name}` cannot be lowered: {reason}"));
             }
         }
-        if clean {
+        if err.is_none() {
             visited.extend(sub);
             export_fns.push((name.to_string(), table.infos[i].wasm_index));
             crate::host_exports::note_export(name, table.infos[i].param_owned.clone());

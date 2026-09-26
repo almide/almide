@@ -364,11 +364,14 @@ impl LowerCtx {
             return false;
         };
         let [elem] = &a[..] else { return false };
+        // A recursive-drop RECORD element shares the same rc discipline (#2588);
+        // its result drops through the generated `$__drop_list_int_<R>`.
         self.variant_layouts
             .is_rich_variant_ty(elem, &|rn| {
                 crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
             })
             .is_some()
+            || self.record_capture_name(elem).is_some()
     }
 
     /// Is the Map KEY type an ALL-Int/Bool-field record (`Color { r, g, b }`)?

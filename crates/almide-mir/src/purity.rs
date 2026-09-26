@@ -96,6 +96,7 @@ pub const PURE_MODULES: &[&str] = &[
     "hex",
     "hex_encode",
     "html",
+    "http_request",
     "http_response",
     "http_url_decode",
     "int",
@@ -392,9 +393,34 @@ fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
         ),
         // Pure data codecs on the blanket-impure http module (the network fns stay
         // walled): url_decode is a percent-decoder (stdlib/http_url_decode.almd).
+        //
+        // #2588: the request rep (stdlib/http_request.almd — List[String]
+        // data, like the response rep) and the router layer over it
+        // (stdlib/http.almd). The router's construction and dispatch are
+        // pure; a HANDLER's own capabilities are counted transitively through
+        // the closure it holds, exactly like a list.map callback. `serve`
+        // (the listener) stays walled.
         "http" => matches!(
             func,
-            "url_decode"
+            "new_request"
+                | "req_method"
+                | "req_path"
+                | "req_body"
+                | "req_header"
+                | "query_params"
+                | "param"
+                | "query"
+                | "queries"
+                | "route"
+                | "router"
+                | "mount"
+                | "wrap"
+                | "recover"
+                | "logger"
+                | "__with_params"
+                | "__with_path"
+                | "__set_body"
+                | "url_decode"
                 | "response"
                 | "json"
                 | "redirect"

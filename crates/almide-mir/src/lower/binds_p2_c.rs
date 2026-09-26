@@ -22,7 +22,7 @@ impl LowerCtx {
     /// reduction): the HOF-faithfulness guard, verbatim. Returns whether the call is
     /// FAITHFULLY executable (every closure arg lifted, no un-representable fn-typed data
     /// arg); an unfaithful higher-order call still WALLS via `Err`, exactly as before.
-    fn check_call_module_faithful(
+    pub(crate) fn check_call_module_faithful(
         &mut self,
         module: &str,
         func: &str,
@@ -392,8 +392,10 @@ impl LowerCtx {
     fn lower_bind_heap_call_computed(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
         let IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. } = &value.kind else { unreachable!() };
         // A tracked closure VAR — or a RECORD-SLOT closure (`h.run("hello")` —
-        // B8's Computed(Member); `closure_block_of_mut` loads the slot borrow).
-        let blk = match self.closure_block_of_mut(callee) {
+        // B8's Computed(Member); `closure_block_of_mut` loads the slot borrow) —
+        // or a CALL that builds the closure (`http.router(rs)(req)`, `mk()(x)`:
+        // `lower_closure_callee` materializes the block, #2588).
+        let blk = match self.lower_closure_callee(callee) {
             Some(b) => b,
             None => {
                 return Err(LowerError::Unsupported(

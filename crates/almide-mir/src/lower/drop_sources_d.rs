@@ -592,7 +592,8 @@ pub fn generate_closure_env_rich_sources(
         let all_tags = entries
             .iter()
             .map(|(n, _)| n.to_string())
-            .chain(cell_entries.iter().map(|(sfx, _)| format!("cell:{sfx}")));
+            .chain(cell_entries.iter().map(|(sfx, _)| format!("cell:{sfx}")))
+            .chain(rec_records.iter().map(|n| format!("one:{n}")));
         for n in all_tags {
             if let Some(prev) = seen.insert(rich_env_tag(&n), n.clone()) {
                 panic!(
@@ -604,7 +605,7 @@ pub fn generate_closure_env_rich_sources(
     }
 
     let mut out = String::new();
-    if entries.is_empty() && cell_entries.is_empty() {
+    if entries.is_empty() && cell_entries.is_empty() && rec_records.is_empty() {
         out.push_str("fn __drop_env_rich(wh: Int) -> Unit = prim.rc_dec(wh)\n");
         return out;
     }
@@ -639,6 +640,17 @@ pub fn generate_closure_env_rich_sources(
                  __drop_{sfx}(m{k})\n      }} else ()\n      \
                prim.rc_dec(ch{k})\n    }}\n    ",
             rich_env_tag(&format!("cell:{sfx}"))
+        ));
+    }
+    // The single-record arms (#2588): wrapper @20 holds ONE co-owned record,
+    // released through its own recursive `$__drop_<R>` — the element step of
+    // the `__drop_caplist_<R>` loop below, applied once.
+    for (k, n) in rec_records.iter().enumerate() {
+        let kw = if entries.is_empty() && cell_entries.is_empty() && k == 0 { "if" } else { "else if" };
+        out.push_str(&format!(
+            "{kw} tag == {} then {{ let r{k}: {n} = prim.load_handle(wh + 20)\n      __drop_{}(r{k}) }}\n    ",
+            rich_env_tag(&format!("one:{n}")),
+            drop_fn_ident(n)
         ));
     }
     out.push_str("else ()\n  } else ()\n  prim.rc_dec(wh)\n}\n");

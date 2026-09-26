@@ -35,8 +35,8 @@ fn seed_selfhost_newtype_reps(
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::String]),
         );
     }
-    // HttpRequest — `[method, target, body, k1, v1, …]`
-    // (stdlib/http_serve.almd, #2650; the HttpResponse discipline).
+    // HttpRequest — the self-host rep is `[method, target, body, nh, k1, v1,
+    // …, p1, v1, …]` (stdlib/http_request.almd, #2588).
     if !declared.contains("HttpRequest") {
         map.insert(
             "HttpRequest".to_string(),
@@ -419,6 +419,12 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
                     return;
                 }
                 match &e.kind {
+                    // Creating a closure runs nothing — only calling it does, and
+                    // that call is analyzed where it happens (its caps reach the
+                    // creator through the FuncRef edge). `http.route("…",
+                    // get_user)` names an effect handler; the table is still a
+                    // pure value (#2588).
+                    IrExprKind::Lambda { .. } | IrExprKind::ClosureCreate { .. } => return,
                     IrExprKind::RuntimeCall { .. } => self.ok = false,
                     IrExprKind::Call { target, .. } | IrExprKind::TailCall { target, .. } => {
                         match target {

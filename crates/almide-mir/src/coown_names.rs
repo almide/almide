@@ -81,6 +81,7 @@ pub const COOWN_PRODUCERS: &[&str] = &[
     "__zip_fill_rcb",   // list.zip_sh — rc_inc the heap RIGHT element only
     "__zip_fill_rca",   // list.zip_hs — rc_inc the heap LEFT element only
     "__take_h_fill",    // list.take_hshare — rc_inc each shared element slot
+    "__rev_h_fill",     // list.reverse_hshare — rc_inc each shared element into its mirrored slot
     "__uh_acquire",     // list.unique_hshare / dedup_hshare — rc_inc each KEPT shared element
     "__skv_entries_fill", // map.entries_skv — rc_inc each key into its (k, v) pair
     "__vu_fill",        // value.pick/omit — rc_inc each kept key+value into the fresh Object
