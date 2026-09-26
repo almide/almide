@@ -264,6 +264,18 @@ pub(crate) const HTTP_CLIENT_SUM: &[&str] = &[
     "__request_bytes_impl", "__get_bytes_impl",
 ];
 
+/// The http call handle (#2633, audited 2026-09-26): stdlib/http_call.almd
+/// — language surface only (string interpolation and slicing, list.map/fold,
+/// map.entries, int.parse, `??`, ok()/err()/some()/none ctors, a callback
+/// call); the only leaves are the op-53..=58 host calls this emitter lowers
+/// itself (calls.rs), and `HttpCall` is this emitter's own one-slot block.
+/// Result / Option returns and the Map headers param trip the coupled proxy;
+/// the bodies never touch a raw layout.
+pub(crate) const HTTP_CALL_SUM: &[&str] = &[
+    "__hc_start_impl", "__hc_stream_limited_impl", "__hc_poll_impl",
+    "__hc_read_new_impl", "__hc_wait_impl", "__hc_cancel_impl",
+];
+
 pub(crate) const MATH_VERIFIED: &[&str] = &[
     "math_abs", "math_atan", "math_choose", "math_cos", "math_e", "math_exp",
     "math_factorial", "math_fmax", "math_fmin", "math_fpow", "math_log", "math_log10",
@@ -325,6 +337,7 @@ const TIERS: &[(&[&str], bool)] = &[
     (BYTES_FAMILY_VERIFIED, false),
     (BYTES_FAMILY_SUM, true),
     (HTTP_CLIENT_SUM, true),
+    (HTTP_CALL_SUM, true),
     (MATRIX_COMPOSITIONS, false),
 ];
 
