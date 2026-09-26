@@ -167,6 +167,12 @@ fn $main
 fn $__drop_Pt
   (call $rc_dec (i32.wrap_i64 (local.get $v9)))
   (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_list_int_Pt
+  (call $__drop_list_int_Pt_loop (local.get $v1) (local.get $v9) (i64.const 0))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_list_int_Pt_loop
+  (call $__drop_Pt (local.get $v21))
+  (call $rc_dec (i32.wrap_i64 (local.get $v13)))
 fn $__drop_list_opt_Pt
   (call $__drop_list_opt_Pt_loop (local.get $v1) (local.get $v9) (i64.const 0))
   (call $rc_dec (i32.wrap_i64 (local.get $v1)))
@@ -234,6 +240,7 @@ fn $__drop_cellmap
   (call $rc_dec (i32.wrap_i64 (local.get $v0)))
 fn $__drop_env_rich
   (call $__drop_caplist_Pt (local.get $v13))
+  (call $__drop_Pt (local.get $v18))
   (call $rc_dec (i32.wrap_i64 (local.get $v0)))
 fn $__drop_caplist_Pt
   (call $__drop_caplist_Pt_loop (local.get $v1) (local.get $v9) (i64.const 0))

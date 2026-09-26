@@ -123,6 +123,12 @@ fn $main
 fn $__drop_P
   (call $rc_dec (i32.wrap_i64 (local.get $v9)))
   (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_list_int_P
+  (call $__drop_list_int_P_loop (local.get $v1) (local.get $v9) (i64.const 0))
+  (call $rc_dec (i32.wrap_i64 (local.get $v1)))
+fn $__drop_list_int_P_loop
+  (call $__drop_P (local.get $v21))
+  (call $rc_dec (i32.wrap_i64 (local.get $v13)))
 fn $__drop_list_opt_P
   (call $__drop_list_opt_P_loop (local.get $v1) (local.get $v9) (i64.const 0))
   (call $rc_dec (i32.wrap_i64 (local.get $v1)))
