@@ -1,4 +1,4 @@
-// http_serve — the WASM lowering of `http.serve` and the HttpRequest readers
+// http_serve — the WASM lowering of `http.serve`
 // (#2650, C-367). Native keeps its direct intrinsics; this file only ever
 // links on the wasm legs through the self-host registry.
 //
@@ -9,10 +9,10 @@
 // the heap, the allocator), request after request, never a fresh instance.
 // The host moves bytes only, through the native runtime's own server core.
 //
-// HttpRequest's rep is a List[String] `[method, target, body, k1, v1, …]` —
-// header pairs flat from slot 3 in wire order, the HttpResponse discipline
-// (stdlib/http_response.almd). The newtype eraser publishes
-// Named("HttpRequest") → List[String].
+// HttpRequest's rep and its other readers live in stdlib/http_request.almd
+// (#2588): `[method, target, body, <header count>, k1, v1, …, p1, v1, …]`.
+// The host hands a request over as `[method, target, body, k1, v1, …]`, and
+// `__hs_request` inserts the header count.
 //
 // The three `__http_serve_*` leaves are host ops 70 / 71 / 72 served by the
 // embedded host (crates/almide-wasm-run/src/host_serve.rs). The response
@@ -28,6 +28,11 @@ fn __hs_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
 fn __hs_frame(resp: List[String]) -> String = resp |> list.map((c) => __hs_cell(c)) |> list.join("")
 
+fn __hs_request(raw: List[String]) -> List[String] = list.take(raw, 3) + [int.to_string((list.len(raw) - 3) / 2)] + list.drop(
+  raw,
+  3,
+)
+
 // A handler err is native's 500: `Internal error: <msg>` as text/plain.
 // `http.serve` is typed never-err (`-> Unit`), so its caller's `!` is a no-op
 // (#1049) and nothing could observe a returned err: a bind failure ABORTS,
@@ -39,85 +44,12 @@ effect fn http_serve(port: Int, f: effect (List[String]) -> List[String]) -> Uni
     err(e) => prim.die(prim.handle("Error: ${e}\n")),
   }
   while true {
-    let req = __http_serve_next()!
+    let raw = __http_serve_next()!
+    let req = __hs_request(raw)
     let resp = match f(req) {
       ok(r) => r,
       err(e) => ["500", "Internal error: ${e}", "Content-Type", "text/plain"],
     }
     __http_serve_reply(__hs_frame(resp))!
   }
-}
-
-fn http_req_method(req: List[String]) -> String = list.get(req, 0) ?? ""
-
-fn http_req_path(req: List[String]) -> String = list.get(req, 1) ?? ""
-
-fn http_req_body(req: List[String]) -> String = list.get(req, 2) ?? ""
-
-// ASCII-only case fold of ONE character — the http_response.almd rule
-// (native compares field names with `eq_ignore_ascii_case`).
-fn __hs_fold(c: String) -> String = match string.index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) {
-  some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
-  none => c,
-}
-
-fn __hs_lower(s: String) -> String = string.chars(s) |> list.map((c) => __hs_fold(c)) |> list.join("")
-
-// The FIRST header whose name matches, ASCII case-insensitively.
-fn http_req_header(req: List[String], key: String) -> String? = {
-  let want = __hs_lower(key)
-  list.drop(req, 3) |> list.chunk(2) |> list.find((kv) => __hs_lower(list.get(kv, 0) ?? "") == want) |> option.flat_map((kv) => list.get(kv, 1))
-}
-
-// ASCII hex digit -> 0..15, else -1 (native's `to_digit(16)`).
-fn __hs_hex(b: Int) -> Int = if b >= 48 and b <= 57 then b - 48
-else if b >= 97 and b <= 102 then b - 87
-else if b >= 65 and b <= 70 then b - 55 else -1
-
-// Native's percent_decode: `+` → space; `%` with two valid hex digits
-// STRICTLY before the end (`i + 2 < n`, native's bound) → that byte; any
-// other `%` passes through; the bytes decode as UTF-8 with replacement.
-// A byte walk over the public bytes surface (the zlib self-host pattern).
-fn __hs_decode(s: String) -> String = {
-  let src = bytes.from_string(s)
-  let n = bytes.len(src)
-  var out = bytes.new(0)
-  var i = 0
-  while i < n {
-    let b = bytes.get_or(src, i, 0)
-    let hi = if i + 2 < n then __hs_hex(bytes.get_or(src, i + 1, 0))
-    else -1
-    let lo = if i + 2 < n then __hs_hex(bytes.get_or(src, i + 2, 0))
-    else -1
-    if b == 43 then {
-      bytes.push(out, 32)
-      i = i + 1
-    } else if b == 37 and hi >= 0 and lo >= 0 then {
-      bytes.push(out, hi * 16 + lo)
-      i = i + 3
-    } else {
-      bytes.push(out, b)
-      i = i + 1
-    }
-  }
-  bytes.to_string_lossy(out)
-}
-
-// Native's rule: the target's text after the FIRST `?` (up to a second one),
-// split on `&`, each pair split at its first `=`; a pair without `=` is
-// skipped; both sides percent-decoded (`+` → space); a later key wins.
-fn http_query_params(req: List[String]) -> Map[String, String] = {
-  let q = string.split(http_req_path(req), "?") |> list.get(1) ?? ""
-  let empty: Map[String, String] = map.new()
-  string.split(q, "&") |> list.fold(
-    empty,
-    (acc, pair) => match string.index_of(pair, "=") {
-      some(i) => map.set(
-        acc,
-        __hs_decode(string.take(pair, i)),
-        __hs_decode(string.drop(pair, i + 1)),
-      ),
-      none => acc,
-    },
-  )
 }
