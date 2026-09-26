@@ -730,10 +730,7 @@ pub(crate) fn insert_clones_live(mut expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr
         // binders that only borrow are marked (`LoopMarks::borrowed`).
         IrExprKind::IterChain { source, consume, steps, collector } => {
             let chain = IrExpr { kind: IrExprKind::IterChain { source, consume, steps, collector }, ty: ty.clone(), span, def_id: None };
-            super::pass_clone_loops::note_chain_element_binders(&chain, ctx.loops);
-            let mut chain = chain.map_children(&mut |child| insert_clones_live(child, ctx));
-            super::pass_clone_loops::mark_chain_element_binders(&mut chain, ctx.loops);
-            return chain;
+            return calls::insert_clones_iter_chain(chain, ctx);
         }
         // Default: recurse into every child through the exhaustive `map_children`
         // chokepoint. Every node whose clone insertion is just "recurse into the
