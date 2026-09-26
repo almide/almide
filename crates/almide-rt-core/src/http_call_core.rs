@@ -125,7 +125,7 @@ impl AlmideHttpCallShared {
     }
 
     fn past_deadline(&self) -> bool {
-        self.deadline.map_or(false, |d| std::time::Instant::now() >= d)
+        self.deadline.is_some_and(|d| std::time::Instant::now() >= d)
     }
 
     /// The wall clock, checked from the caller's side.
