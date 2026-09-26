@@ -545,6 +545,7 @@
 7584	spec/wasm_cross/rc_alloc_stress.almd
 3004	spec/wasm_cross/rc_reclaim_churn.almd
 2787	spec/wasm_cross/record_default_field_omitted.almd
+36874	spec/wasm_cross/record_field_rust_keyword.almd
 2128	spec/wasm_cross/record_forms.almd
 11026	spec/wasm_cross/record_option_none_cells.almd
 7916	spec/wasm_cross/record_pair_result_return.almd
