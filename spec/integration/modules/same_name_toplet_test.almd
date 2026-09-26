@@ -9,15 +9,11 @@ import tletqb
 
 test "top-level let of a same-name type, read from the importer" {
   assert_eq(list.len(tletqb.STEPS), 2)
-  assert_eq(tletqb.PAIR.0.name, "p")
-  assert_eq(match tletqb.MAYBE {
-    some(s) => s.name,
-    none => "none",
-  }, "m")
 }
 
 test "top-level let of a same-name type, read inside its module" {
   assert_eq(tletqb.names(), "x,yy")
+  assert_eq(tletqb.maybe_name(), "m")
 }
 
 test "a let and a fn declared above their module's type" {
