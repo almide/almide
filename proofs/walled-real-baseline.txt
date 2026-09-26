@@ -219,8 +219,9 @@ spec/stdlib/http_call_test.almd :: gather
 # network-effect call the incumbent MIR lowering walls by design. The STRUCTURAL
 # leg serves the fixture on the embedded lane (tests/http_serve_cross_test.rs);
 # stock artifacts refuse http.serve (E081). Retires with #2659 or #1696.
+# 2026-09-26 (#2588): render_query pruned — query_params now links to the
+# self-host copy in stdlib/http_url_decode.almd, which the incumbent lowers.
 spec/serve_cross/http_serve_replay.almd :: handle
-spec/serve_cross/http_serve_replay.almd :: render_query
 
 # (2026-09-03, C-132/#1576) a CAN-ERR effect fn with a `mut` param takes the
 # move-mode tuple rewrite (`(T, Buf)` on the ok payload only); the incumbent
