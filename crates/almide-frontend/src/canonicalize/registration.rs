@@ -864,14 +864,27 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
     let mut seen_fn: HashMap<String, Option<ast::Span>> = HashMap::new();
     let mut seen_test: HashMap<String, Option<ast::Span>> = HashMap::new();
 
+    // Types and protocols first, then everything that REFERS to a type (#2645).
+    // A signature or top-level `let` annotation pins a bare `Step` to its own
+    // module's `mod.Step` only when that key already exists; registered in
+    // source order, `fn one() -> Step` above `type Step` found no `a.Step`
+    // yet, fell through to whichever module's bare alias was registered last,
+    // and typed the fn against ANOTHER module's same-named type — E013 on a
+    // correct program, or a bare name at the #433 codegen gate. Declaration
+    // order is not meaningful in Almide, so the result must not depend on it.
     for decl in decls {
         match decl {
-            ast::Decl::Fn { .. } => register_decl_fn(env, diagnostics, &mut seen_fn, decl, prefix),
-            ast::Decl::Test { .. } => register_decl_test(diagnostics, &mut seen_test, decl),
             ast::Decl::Type { .. } => register_decl_type(env, diagnostics, decl, prefix),
             ast::Decl::Protocol { name, generics, methods, .. } => {
                 register_protocol_decl(env, name, generics, methods, prefix);
             }
+            _ => {}
+        }
+    }
+    for decl in decls {
+        match decl {
+            ast::Decl::Fn { .. } => register_decl_fn(env, diagnostics, &mut seen_fn, decl, prefix),
+            ast::Decl::Test { .. } => register_decl_test(diagnostics, &mut seen_test, decl),
             ast::Decl::TopLet { .. } => register_decl_top_let(env, decl, prefix),
             _ => {}
         }
@@ -1055,8 +1068,16 @@ fn display_protocol_ref(env: &TypeEnv, name: Sym, r: Option<&ast::ProtocolRef>, 
 /// `ast::Decl::TopLet` arm of [`register_decls`] — top-level `let` type seeding (or reuse of a fully-inferred prior entry) and DefTable registration. Verbatim text move out of [`register_decls`].
 fn register_decl_top_let(env: &mut TypeEnv, decl: &ast::Decl, prefix: Option<&str>) {
     let ast::Decl::TopLet { name, ty, value, .. } = decl else { unreachable!() };
-    let rt = ty.as_ref().map(|te| resolve(env, te))
-        .unwrap_or_else(|| infer_top_let_seed(env, prefix, value));
+    // #2645: the annotation pins to `mod.Type` exactly as a fn signature does
+    // (`register_fn_sig`). With the plain `resolve` a module's
+    // `let STEPS: List[Step]` stayed bare `Step`; that seed is concrete, so
+    // the checker never upgraded it, and every reader — the module's own
+    // lowering and `b.STEPS` from another file — carried a bare name that two
+    // modules own into codegen (#433 gate). The seed of an annotation-less
+    // record initializer takes the same owner for the same reason.
+    let tcm = type_cur_mod(env, prefix);
+    let rt = ty.as_ref().map(|te| resolve_in(env, te, tcm))
+        .unwrap_or_else(|| infer_top_let_seed(env, tcm, value));
     let key = prefixed_key(prefix, name);
     // A PREFIXED key names exactly one decl program-wide, and registration re-runs per driver leg over a persistent env — re-seeding must not downgrade a fully inferred entry (the post-solve flush's `Option[Cfg]`) back to the seed's partial `Option[Unknown]`. Unprefixed keys stay unconditional: they are scoped aliases (main program / intra-module temp) where an entry may legitimately describe a DIFFERENT decl.
     let keep_existing = prefix.is_some()
