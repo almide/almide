@@ -293,12 +293,22 @@ fn collect_module_generics(program: &IrProgram) -> Vec<ModuleGeneric> {
         .collect()
 }
 
+/// The flatten spelling of a module fn: `almide_rt_<module>_<fn>`, a dotted
+/// module name (`pkg.sub`, or a project module under a directory, `a.util` —
+/// #2654) with its dots as underscores, exactly as the module-fn flattening
+/// (`pass_ir_link_flatten`) and the MIR pipeline's call resolution spell it.
+/// Spelling the module raw (`almide_rt_a.util_f`) matched no call site, so a
+/// cross-module generic in a dotted module was never specialized.
+fn flat_fn_name(module: &str, func: &str) -> String {
+    format!("almide_rt_{}_{}", module.replace('.', "_"), func)
+}
+
 /// The interned flatten spelling (`almide_rt_<module>_<fn>`) per generic,
 /// computed once per round and shared by `Discover` / `Rewriter`.
 fn flatten_spellings(generics: &[ModuleGeneric], module_names: &[String]) -> Vec<Sym> {
     generics
         .iter()
-        .map(|g| sym(&format!("almide_rt_{}_{}", module_names[g.mi], g.name)))
+        .map(|g| sym(&flat_fn_name(&module_names[g.mi], &g.name)))
         .collect()
 }
 
@@ -476,7 +486,7 @@ impl Rewriter<'_> {
             }
             let m = &self.module_names[g.mi];
             if let Some(new_name) = self.specialized_name(gi, m, args) {
-                *name = sym(&format!("almide_rt_{}_{}", m, new_name));
+                *name = sym(&flat_fn_name(m, new_name));
             }
             break;
         }
