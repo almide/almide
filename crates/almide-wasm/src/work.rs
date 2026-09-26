@@ -181,6 +181,12 @@ pub(crate) enum Helper {
     /// the cell's credit down; at zero its occupant released through
     /// `elem_dec` (none for a flat occupant), then the cell freed.
     DropCell { elem_dec: Option<u32> },
+    /// `$drop_http_call(block)` — the release of an `HttpCall` (#2633): the
+    /// block's credit down; at zero the embedded host is told to cancel and
+    /// forget the call (op 59, the id in the a_len slot), then the block
+    /// freed — the native handle's `Drop`, so dropping the last copy of the
+    /// handle closes the connection on this leg too.
+    DropHttpCall,
     /// #2312 shape 1 — the ROOM-FREE appends of a bounded build
     /// (`runtime_line::BoundedBuild`): the same writes as `$append_copy` /
     /// `$append_i64` / `$append_bool`, without the room check and so

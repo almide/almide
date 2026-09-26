@@ -161,6 +161,12 @@ impl Emitter<'_> {
                         self.fs_call_str2(&args[0], &args[1], crate::fs_meta::OP_HTTP_FRAMED_BYTES)?;
                         return Ok(Some(self.fs_result_bytes()?));
                     }
+                    // The http call handle's leaves (#2633, http_call.rs).
+                    n if n.starts_with("__http_call_") => {
+                        if let Some(t) = self.lower_http_call_leaf(n, args)? {
+                            return Ok(Some(t));
+                        }
+                    }
                     _ => {}
                 }
                 // Entry fns resolve by name; a miss falls back to the

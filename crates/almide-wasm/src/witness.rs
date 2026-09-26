@@ -373,7 +373,7 @@ fn call_subset(e: &IrExpr) -> Option<String> {
             }
             // The http_framed host-op leaves (calls.rs) intercept before
             // resolution and lower their args outside every hook.
-            if name.as_str().starts_with("__http_framed_") {
+            if name.as_str().starts_with("__http_framed_") || name.as_str().starts_with("__http_call_") {
                 return Some("call:host-splice".into());
             }
         }

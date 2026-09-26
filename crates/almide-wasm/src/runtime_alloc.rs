@@ -347,6 +347,38 @@ pub(crate) fn emit_drop_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u3
     f
 }
 
+/// `$drop_http_call(block)` (#2633): `$dec_flat`'s guard and trap knob; at
+/// rc 0 the call id (the block's one i64 slot) goes to the host as op 59 —
+/// cancel and forget, the native handle's `Drop` — before the block is
+/// freed. The op's i64 answer carries nothing and is dropped.
+pub(crate) fn emit_drop_http_call() -> Function {
+    let (block, rc) = (0u32, 1u32);
+    let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let dword = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
+    let mut f = Function::new([(1, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(block).global_get(G_LINE_END).i32_lt_u().if_(BlockType::Empty);
+    i.return_();
+    i.end();
+    i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
+    if almide_base::env::flag("ALMIDE_RC_TRAP_DOUBLE_FREE") {
+        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+        i.unreachable();
+        i.end();
+    }
+    i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
+    i.local_get(rc).i32_eqz().if_(BlockType::Empty);
+    i.i32_const(crate::fs_meta::OP_HTTP_CALL_DROP);
+    i.i32_const(0);
+    i.local_get(block).i64_load(dword(almide_layout::PAYLOAD)).i32_wrap_i64();
+    i.i32_const(0).i32_const(0);
+    i.call(F_FS_CALL).drop();
+    i.local_get(block).call(F_FREE);
+    i.end();
+    i.end();
+    f
+}
+
 /// `$drop_map(block)` — `$dec_flat` for a Map: at rc 0 the index
 /// side-table entry for this address is cleared (a stale index on a
 /// reused address would answer for the wrong map), then the entries
@@ -560,6 +592,7 @@ pub(crate) fn helper_params(h: &Helper) -> Option<Vec<ValType>> {
             | Helper::DropEnv { .. }
             | Helper::DropFn { .. }
             | Helper::DropCell { .. }
+            | Helper::DropHttpCall
     )
     .then(|| vec![ValType::I32])
 }
@@ -578,7 +611,8 @@ pub(crate) fn helper_result(h: &Helper) -> Option<ValType> {
         | Helper::IncEntries { .. }
         | Helper::DropEnv { .. }
         | Helper::DropFn { .. }
-        | Helper::DropCell { .. } => None,
+        | Helper::DropCell { .. }
+        | Helper::DropHttpCall => None,
         _ => Some(ValType::I32),
     }
 }
@@ -597,6 +631,7 @@ pub(crate) fn helper_body(h: &Helper, work: &crate::work::FnWork) -> Option<Func
         Helper::CopyEntries { inc_entries } => emit_copy_entries(*inc_entries),
         Helper::DropEnv { slots } => emit_drop_shape(slots, None),
         Helper::DropFn { ti } => emit_drop_fn(*ti),
+        Helper::DropHttpCall => emit_drop_http_call(),
         Helper::DropCell { elem_dec } => emit_drop_shape(&elem_dec.map(|d| (0, d)).into_iter().collect::<Vec<_>>(), None),
         Helper::DropShape { .. } | Helper::IncShape { .. } => {
             let mut bodies = work.drop_bodies.borrow_mut();

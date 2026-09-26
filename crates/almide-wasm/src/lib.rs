@@ -112,6 +112,7 @@ pub mod host_exports;
 pub mod witness;
 mod witness_hooks;
 mod calls;
+mod http_call;
 mod calls_modules;
 mod cells;
 mod unroll;
