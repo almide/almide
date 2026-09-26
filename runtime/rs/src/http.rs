@@ -146,6 +146,13 @@ pub fn almide_http_headers(resp: &AlmideHttpResponse) -> AlmideMap<String, Strin
     out
 }
 
+/// Router plumbing: HEAD answered by the GET route keeps the status and the
+/// headers and drops the body.
+pub fn almide_http_set_body(mut resp: AlmideHttpResponse, body: &str) -> AlmideHttpResponse {
+    resp.body = body.to_string();
+    resp
+}
+
 pub fn almide_http_set_cookie(mut resp: AlmideHttpResponse, name: &str, value: &str) -> AlmideHttpResponse {
     resp.headers.push(("Set-Cookie".into(), format!("{}={}", name, value)));
     resp
@@ -153,12 +160,51 @@ pub fn almide_http_set_cookie(mut resp: AlmideHttpResponse, name: &str, value: &
 
 // ── Request accessors ──
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct AlmideHttpRequest {
     pub method: String,
     pub path: String,
     pub body: String,
     pub headers: Vec<(String, String)>,
+    /// Path parameters bound by `http.router` (#2588): `{id}` in the route
+    /// pattern → `("id", "42")`. Empty for a request the listener parsed.
+    pub params: Vec<(String, String)>,
+}
+
+/// `http.new_request` (#2588): a request built in code, so a handler or a
+/// router can be exercised without a socket. `target` is the request-target
+/// as it appears on the wire — path plus any `?query`.
+pub fn almide_rt_http_new_request(method: &str, target: &str, body: &str, headers: &AlmideMap<String, String>) -> AlmideHttpRequest {
+    AlmideHttpRequest {
+        method: method.to_string(),
+        path: target.to_string(),
+        body: body.to_string(),
+        headers: header_pairs(headers),
+        params: Vec::new(),
+    }
+}
+
+pub fn almide_http_param(req: &AlmideHttpRequest, name: &str) -> Option<String> {
+    req.params.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone())
+}
+
+/// Router plumbing: bind path parameters, given flat `[k1, v1, k2, v2, …]`
+/// pairs (the shape the wasm rep stores them in). New bindings go IN FRONT of
+/// the ones an enclosing `mount` bound, so `param` finds the innermost first
+/// and `{org}` of `mount("/orgs/{org}", sub)` stays visible inside `sub`.
+pub fn almide_http_req_with_params(mut req: AlmideHttpRequest, flat: &[String]) -> AlmideHttpRequest {
+    let mut params: Vec<(String, String)> =
+        flat.chunks(2).filter(|c| c.len() == 2).map(|c| (c[0].clone(), c[1].clone())).collect();
+    params.append(&mut req.params);
+    req.params = params;
+    req
+}
+
+/// Router plumbing for `http.mount`: the sub-app sees the target with the
+/// mount prefix stripped.
+pub fn almide_http_req_with_path(mut req: AlmideHttpRequest, target: &str) -> AlmideHttpRequest {
+    req.path = target.to_string();
+    req
 }
 
 impl AlmideRepr for AlmideHttpRequest {
@@ -689,7 +735,7 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
     };
     loop {
         let (stream, (method, path, body, headers)) = http_server_next(&listener);
-        let resp = match handler(AlmideHttpRequest { method, path, body, headers }) {
+        let resp = match handler(AlmideHttpRequest { method, path, body, headers, params: Vec::new() }) {
             Ok(r) => r,
             Err(e) => AlmideHttpResponse::new(500, format!("Internal error: {}", e)),
         };
