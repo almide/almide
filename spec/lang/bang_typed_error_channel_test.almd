@@ -3,7 +3,7 @@
 // `String`-failing operands (an effect call of any non-Result return, a
 // `Result[_, String]`, an `Option`) are handled in place instead — these are
 // the spellings the E022 hint names, and they must run on both targets.
-type Failure: Eq, Repr = | Slow | Broken(String)
+type Failure: Eq, Repr = | Slow | Broken(Int)
 
 effect fn flag(b: Bool) -> Bool = b
 
@@ -18,25 +18,26 @@ fn digits(s: String) -> Result[Int, String] = match int.parse(s) {
   err(_) => err("not a number: " + s),
 }
 
-fn as_failure(r: Result[Int, String]) -> Result[Int, Failure] = match r {
-  ok(v) => ok(v),
-  err(e) => err(Broken(e)),
-}
-
-fn same(n: Int) -> Result[Int, Failure] = if n > 0 then ok(n) else err(Slow)
-
-effect fn step(b: Bool, s: String) -> Result[Int, Failure] = {
+effect fn extra() -> Int = {
   let _ = tidy()
-  let n = as_failure(digits(s))!
-  let m = same(n)!
-  let first = list.first([m]) ?? 0
-  if flag(b) ?? false then ok(first + (count(1) ?? 0) + string.len(name("ab") ?? ""))
-  else err(Slow)
+  let first = list.first([2]) ?? 0
+  first + (count(1) ?? 0) + string.len(name("ab") ?? "")
 }
+
+// A `Result[_, String]` handled by `match`: its error becomes a `Failure` case.
+fn code(open: Bool, r: Result[Int, String], more: Int) -> Int = match r {
+  ok(n) => if open then n + more else -1,
+  err(e) => -2 - string.len(e),
+}
+
+fn to_result(c: Int) -> Result[Int, Failure] = if c > 0 then ok(c)
+else if c == -1 or c == 0 then err(Slow) else err(Broken(-2 - c))
+
+effect fn step(b: Bool, s: String) -> Result[Int, Failure] = to_result(code(flag(b) ?? false, digits(s), extra() ?? 0))
 
 test "typed error fn handles String-failing calls in place" {
-  assert_eq(step(true, "4"), ok(7))
+  assert_eq(step(true, "4"), ok(9))
   assert_eq(step(false, "4"), err(Slow))
-  assert_eq(step(true, "x"), err(Broken("not a number: x")))
-  assert_eq(step(true, "0"), err(Slow))
+  assert_eq(step(true, "x"), err(Broken(15)))
+  assert_eq(step(true, "-5"), err(Slow))
 }
