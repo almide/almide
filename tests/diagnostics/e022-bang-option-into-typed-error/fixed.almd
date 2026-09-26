@@ -1,0 +1,13 @@
+type Failure = | Empty | Broken(String)
+
+effect fn head(xs: List[Int]) -> Result[Int, Failure] = match list.first(xs) {
+  some(first) => ok(first),
+  none => err(Empty),
+}
+
+effect fn main() -> Unit = {
+  match head([3]) {
+    ok(n) => println("ok " + int.to_string(n)),
+    err(_) => println("err"),
+  }
+}

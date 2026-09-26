@@ -1,0 +1,22 @@
+// #2635: a `-> Bool` / `-> Unit` effect fn fails with `String` (the effect
+// channel), so `!` cannot carry its error into a fn whose error type is
+// `Failure`. It used to pass check and die in rustc with E0277.
+import env
+
+type Failure = | Slow | Broken(String)
+
+effect fn ready() -> Bool = env.millis() > 0
+
+effect fn tidy() -> Unit = ()
+
+effect fn step() -> Result[Int, Failure] = {
+  tidy()!
+  if ready()! then ok(1) else err(Slow)
+}
+
+effect fn main() -> Unit = {
+  match step() {
+    ok(n) => println("ok " + int.to_string(n)),
+    err(_) => println("err"),
+  }
+}

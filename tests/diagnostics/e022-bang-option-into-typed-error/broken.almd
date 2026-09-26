@@ -1,0 +1,15 @@
+// #2635: an `Option`'s `none` has no `Failure` value, so `!` on it cannot
+// propagate inside a fn whose error type is `Failure`.
+type Failure = | Empty | Broken(String)
+
+effect fn head(xs: List[Int]) -> Result[Int, Failure] = {
+  let first = list.first(xs)!
+  ok(first)
+}
+
+effect fn main() -> Unit = {
+  match head([3]) {
+    ok(n) => println("ok " + int.to_string(n)),
+    err(_) => println("err"),
+  }
+}
