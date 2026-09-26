@@ -328,7 +328,11 @@ fn http_call_run(
         (None, Some(e)) => return Err(http_call_io_error(sh, &e, "connection")),
         (None, None) => return Err(format!("connection failed: no address for {}", host)),
     };
-    // The control copy sets the timeouts and is what `cancel` shuts down.
+    // The control copy is what `cancel` shuts down. The timeouts go on the
+    // socket that is READ (`AlmideHttpCallSock::tcp`), never on this copy: on
+    // Windows `try_clone` is WSADuplicateSocket, and SO_RCVTIMEO set through
+    // the duplicate does not govern reads on the original handle, so an idle
+    // server outlived `idle_ms` there.
     let ctl = stream.try_clone().map_err(|e| format!("connection failed: {}", e))?;
     {
         let mut st = sh.lock();
@@ -342,7 +346,7 @@ fn http_call_run(
         #[cfg(not(target_arch = "wasm32"))]
         {
             let mut tls = make_tls_stream(&host, stream)?;
-            http_call_pump(sh, &mut tls, &ctl, method, &host, &path, body, headers)
+            http_call_pump(sh, &mut tls, method, &host, &path, body, headers)
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -350,22 +354,40 @@ fn http_call_run(
         }
     } else {
         let mut s = stream;
-        http_call_pump(sh, &mut s, &ctl, method, &host, &path, body, headers)
+        http_call_pump(sh, &mut s, method, &host, &path, body, headers)
+    }
+}
+
+/// The stream a call reads and writes, and the TCP socket under it — the one
+/// the per-step timeouts must be set on (see `http_call_run`).
+trait AlmideHttpCallSock: Read + Write {
+    fn tcp(&self) -> &TcpStream;
+}
+
+impl AlmideHttpCallSock for TcpStream {
+    fn tcp(&self) -> &TcpStream {
+        self
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl AlmideHttpCallSock for rustls::StreamOwned<rustls::ClientConnection, TcpStream> {
+    fn tcp(&self) -> &TcpStream {
+        &self.sock
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn http_call_pump<S: Read + Write>(
+fn http_call_pump<S: AlmideHttpCallSock>(
     sh: &AlmideHttpCallShared,
     s: &mut S,
-    ctl: &TcpStream,
     method: &str,
     host: &str,
     path: &str,
     body: &str,
     headers: &[(String, String)],
 ) -> Result<(), String> {
-    ctl.set_write_timeout(http_call_step_timeout(sh, false)?).ok();
+    s.tcp().set_write_timeout(http_call_step_timeout(sh, false)?).ok();
     if let Err(e) = http_write_request(s, method, host, path, body, headers) {
         return Err(if sh.past_deadline() { http_call_total_msg(sh.total_ms) } else { e });
     }
@@ -373,7 +395,7 @@ fn http_call_pump<S: Read + Write>(
     let mut framing: Option<HttpCallFraming> = None;
     let mut buf = vec![0u8; 8192];
     loop {
-        ctl.set_read_timeout(http_call_step_timeout(sh, true)?).ok();
+        s.tcp().set_read_timeout(http_call_step_timeout(sh, true)?).ok();
         let n = match s.read(&mut buf) {
             Ok(n) => n,
             Err(e) => {
