@@ -722,6 +722,18 @@ fn matrix_from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> Lis
   out
 }
 
+// Does selected row rid's window `rid·rb ..+ rb` fit in the `avail` bytes past
+// the offset? Divided, never multiplied: `rid·rb` wraps for an rid near
+// i64::MAX to just below the offset, passed the old `base + rid·rb + rb >
+// limit` test and read the bytes BEFORE the buffer (wasm) / sliced from a
+// wrapped start (native panic) — #2676, fuzz seed 579914833587 index 9386.
+// A zero-width row (rb = 0) carries no bytes; its elements are zeros either way.
+fn __q_row_fits(avail: Int, rid: Int, rb: Int) -> Bool = rb <= avail and (rb == 0 or rid <= (avail - rb) / rb)
+
+// A selector's offset clamps to [0, len]: past the buffer every row is the
+// all-zero row already, and the clamp keeps `hd + 12 + off` from wrapping.
+fn __q_sel_off(offset: Int, len: Int) -> Int = if offset < 0 then 0 else if offset > len then len else offset
+
 // select_rows_q1_0(data, offset, cols, row_ids) — the ROW-SUBSET twin of
 // from_q1_0_bytes: each selected row rid (clamped to 0 like native's
 // `rid.max(0)`) decodes its whole blocks through the SAME `__q10_row` on the
@@ -741,7 +753,7 @@ else {
   let row_bytes = cols / 128 * 18
   let cr = cols / 128 * 128
   let row = prim.alloc_list_f64(cols)
-  let _c = if base + rid * row_bytes + row_bytes > limit then __q8_zfill(prim.handle(row), cols, 0)
+  let _c = if not __q_row_fits(limit - base, rid, row_bytes) then __q8_zfill(prim.handle(row), cols, 0)
   else {
     let _d = __q10_row(prim.handle(row), base, limit, rid * cr, cr, 0)
     __q8_zfill(prim.handle(row), cols, cr)
@@ -752,7 +764,7 @@ else {
 
 fn matrix_select_rows_q1_0(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> List[List[Float]] = {
   let hd = prim.handle(data)
-  let off = if offset < 0 then 0 else offset
+  let off = __q_sel_off(offset, prim.load32(hd + 4))
   let base = hd + 12 + off
   let limit = hd + 12 + prim.load32(hd + 4)
   // #1503: negative cols clamps to 0 like the loader family.
@@ -796,7 +808,7 @@ else {
   let rid0 = list.get(ids, i) ?? 0
   let rid = if rid0 < 0 then 0 else rid0
   let row = prim.alloc_list_f64(cols)
-  let _c = if base + rid * row_bytes + row_bytes > limit then __q8_zfill(prim.handle(row), cols, 0)
+  let _c = if not __q_row_fits(limit - base, rid, row_bytes) then __q8_zfill(prim.handle(row), cols, 0)
   else __q8_row(prim.handle(row), base, rid * row_bytes, cols, 0)
   prim.store_str(ho + 12 + i * 8, row)
   __q8_sel_rows(ho, base, limit, ids, cols, row_bytes, i + 1)
@@ -804,7 +816,7 @@ else {
 
 fn matrix_select_rows_q8_0_dq(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> List[List[Float]] = {
   let hd = prim.handle(data)
-  let off = if offset < 0 then 0 else offset
+  let off = __q_sel_off(offset, prim.load32(hd + 4))
   let base = hd + 12 + off
   let limit = hd + 12 + prim.load32(hd + 4)
   let n = list.len(row_ids)
