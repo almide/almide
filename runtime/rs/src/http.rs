@@ -4,10 +4,9 @@
 // SSE streaming: almide_rt_sse_openai_chat, almide_rt_sse_anthropic_messages (in sse.rs)
 
 // HashMap already imported by prelude
-// Read/Write/TcpStream come from the inlined client core (#1715); this
-// file imports only its own remainder (server + SSE parsing).
-use std::io::{BufRead, BufReader};
-use std::net::TcpListener;
+// Read/Write/TcpStream come from the inlined client core (#1715); the
+// server core (#2650) writes its std paths fully qualified, so this file
+// imports nothing of its own.
 
 // ── HTTP response/request types ──
 // The user-facing `HttpRequest` / `HttpResponse` nominals are RUNTIME-BACKED
@@ -668,21 +667,34 @@ pub fn almide_http_stream_dispatch(
 
 
 // ── HTTP Server ──
+//
+// The server core (bind / accept + parse / the response bytes) lives in
+// crates/almide-rt-core/src/http_server_core.rs and is inlined here at embed
+// time (#2650) — the SAME text the embedded wasm host links for the guest's
+// serve ops, so C-367's byte-identity holds by shared code.
+include!("../../../crates/almide-rt-core/src/http_server_core.rs");
 
 pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, String>>) -> Result<(), String> {
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
-        .map_err(|e| format!("bind failed: {}", e))?;
-
-    for stream in listener.incoming() {
-        let mut stream = match stream { Ok(s) => s, Err(_) => continue };
-        let req = match parse_request(&mut stream) { Ok(r) => r, Err(_) => continue };
-        let resp = match handler(req) {
+    // `http.serve` is typed never-err (`-> Unit`), so a caller's `!` is a
+    // no-op (#1049) and a returned Err only surfaced when the call happened
+    // to be a fn's tail — elsewhere the server silently never started. A
+    // bind failure ABORTS instead, the same line and exit code in every
+    // position and on the embedded wasm lane (C-367).
+    let listener = match http_server_bind(port) {
+        Ok(l) => l,
+        Err(m) => {
+            eprintln!("Error: {}", m);
+            std::process::exit(1);
+        }
+    };
+    loop {
+        let (stream, (method, path, body, headers)) = http_server_next(&listener);
+        let resp = match handler(AlmideHttpRequest { method, path, body, headers }) {
             Ok(r) => r,
             Err(e) => AlmideHttpResponse::new(500, format!("Internal error: {}", e)),
         };
-        let _ = write_response(&mut stream, &resp);
+        let _ = http_server_write(stream, resp.status, &resp.headers, &resp.body);
     }
-    Ok(())
 }
 
 // Handler-as-closure wrapper for `@intrinsic` migration of `http.serve`.
@@ -730,51 +742,4 @@ fn percent_decode(s: &str) -> String {
         }
     }
     String::from_utf8_lossy(&out).into_owned()
-}
-
-fn parse_request(stream: &mut TcpStream) -> Result<AlmideHttpRequest, String> {
-    let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
-    let mut first_line = String::new();
-    reader.read_line(&mut first_line).map_err(|e| e.to_string())?;
-    let parts: Vec<&str> = first_line.trim().split_whitespace().collect();
-    if parts.len() < 2 { return Err("invalid request".into()); }
-    let method = parts[0].to_string();
-    let path = parts[1].to_string();
-
-    let mut headers = Vec::new();
-    let mut content_length = 0usize;
-    loop {
-        let mut line = String::new();
-        reader.read_line(&mut line).map_err(|e| e.to_string())?;
-        let trimmed = line.trim();
-        if trimmed.is_empty() { break; }
-        if let Some(idx) = trimmed.find(':') {
-            let key = trimmed[..idx].trim().to_string();
-            let val = trimmed[idx+1..].trim().to_string();
-            if key.eq_ignore_ascii_case("content-length") {
-                content_length = val.parse().unwrap_or(0);
-            }
-            headers.push((key, val));
-        }
-    }
-
-    let mut body = vec![0u8; content_length];
-    if content_length > 0 { reader.read_exact(&mut body).ok(); }
-
-    Ok(AlmideHttpRequest { method, path, body: String::from_utf8_lossy(&body).to_string(), headers })
-}
-
-fn write_response(stream: &mut TcpStream, resp: &AlmideHttpResponse) -> Result<(), String> {
-    let status_text = match resp.status {
-        200 => "OK", 201 => "Created", 204 => "No Content",
-        301 => "Moved Permanently", 302 => "Found", 304 => "Not Modified",
-        400 => "Bad Request", 401 => "Unauthorized", 403 => "Forbidden",
-        404 => "Not Found", 405 => "Method Not Allowed",
-        500 => "Internal Server Error", _ => "OK",
-    };
-    let mut out = format!("HTTP/1.1 {} {}\r\n", resp.status, status_text);
-    for (k, v) in &resp.headers { out.push_str(&format!("{}: {}\r\n", k, v)); }
-    out.push_str(&format!("Content-Length: {}\r\n\r\n", resp.body.len()));
-    out.push_str(&resp.body);
-    stream.write_all(out.as_bytes()).map_err(|e| e.to_string())
 }
