@@ -397,3 +397,8 @@ pub fn request_bytes(
         http_exchange_bytes(&mut stream, method, &host, &path, body, headers)
     }
 }
+
+// The call-handle core (#2631 / #2633) rides the same include chain: inlined
+// into http.rs's flat module at embed time, compiled into this module for the
+// embedded host.
+include!("http_call_core.rs");
