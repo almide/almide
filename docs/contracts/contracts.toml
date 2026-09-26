@@ -1466,6 +1466,8 @@ evidence  = [
   { path = "spec/wasm_cross/record_pair_result_return.almd", class = "fixture" },
   { path = "spec/wasm_cross/result_option_call_payload_return.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_rich_list_capture.almd", class = "fixture" },
+  { path = "spec/wasm_cross/heap_result_if_some_user_call_temps.almd", class = "fixture" },
+  { path = "tests/heap_arm_some_user_call_temps_test.rs", class = "fixture", name = "the_incumbent_test_lane_runs_the_test_block" },
 ]
 [[contract]]
 id        = "C-107"

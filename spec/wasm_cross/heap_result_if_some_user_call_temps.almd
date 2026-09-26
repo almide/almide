@@ -1,0 +1,40 @@
+// @contract: C-106
+// An `if` whose arms are both `some(<user call>(<stdlib call>, <literal>))` (#2655): the
+// user call's argument temps — the `string.drop` result and the literal — are materialized
+// inside the arm and must be freed WITHIN it. The incumbent leg left them to the function
+// epilogue, which then rc_dec'd the untaken arm's never-assigned locals: a trap on whichever
+// arm did not run. Before #2179 the test lane rendered every file on that leg, so the
+// `test` block below trapped under `almide test --target wasm` while `main` passed.
+fn cut(s: String, sep: String) -> String = s + sep
+
+fn f(t: String) -> String? = if string.starts_with(t, "a") then some(cut(string.drop(t, 1), ",")) else some(cut(
+  string.drop(t, 1),
+  " ",
+))
+
+fn cut_at(s: String, sep: String) -> String = match string.index_of(s, sep) {
+  some(i) => string.trim(string.slice(s, 0, i)),
+  none => string.trim(s),
+}
+
+fn py_import(t: String) -> String? = if string.starts_with(t, "import ") then some(cut_at(
+  cut_at(string.drop(t, 7), ","),
+  " ",
+))
+else if string.starts_with(t, "from ") then some(cut_at(string.drop(t, 5), " ")) else none
+
+fn main() -> Unit = {
+  println(f("ax") ?? "-")
+  println(f("bx") ?? "-")
+  println(py_import("from pkg.vocab import x") ?? "-")
+  println(py_import("import os, sys") ?? "-")
+  println(py_import("def g():") ?? "-")
+}
+
+test "both arms free their own call-argument temps" {
+  assert_eq(f("ax") ?? "-", "x,")
+  assert_eq(f("bx") ?? "-", "x ")
+  assert_eq(py_import("from pkg.vocab import x") ?? "-", "pkg.vocab")
+  assert_eq(py_import("import os, sys") ?? "-", "os")
+  assert_eq(py_import("def g():") ?? "-", "-")
+}
