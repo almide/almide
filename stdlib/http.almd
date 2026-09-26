@@ -465,20 +465,31 @@ fn __mounted(sub: HttpHandler) -> HttpHandler = (req) => {
 }
 
 // The `[name, value, …]` bindings when a pattern matches the path's parts.
-fn __bind(segs: List[String], parts: List[String]) -> List[String]? = match list.first(segs) {
-  none => if list.is_empty(parts) then some([])
-  else none,
+fn __bind(segs: List[String], parts: List[String]) -> List[String]? = __bind_into(segs, parts, [])
+
+// Tail-recursive: `bound` carries the bindings made so far.
+fn __bind_into(segs: List[String], parts: List[String], bound: List[String]) -> List[String]? = match list.first(segs) {
+  none => if list.is_empty(parts) then some(bound) else none,
   some(s) => if __is_rest(s) then {
     let name = __name_of(s)
-    some([
+    some(bound + [
       name,
       if name == "" then list.join(parts, "/")
       else parts |> list.map(__decode_part) |> list.join("/")
     ])
   } else match list.first(parts) {
     none => none,
-    some(part) => if __is_param(s) then __bind(list.drop(segs, 1), list.drop(parts, 1)) |> option.map((bound) => [__name_of(s), __decode_part(part)] + bound)
-    else if __decode_part(part) == s then __bind(list.drop(segs, 1), list.drop(parts, 1)) else none,
+    some(part) => if __is_param(s) then __bind_into(
+      list.drop(segs, 1),
+      list.drop(parts, 1),
+      bound + [__name_of(s), __decode_part(part)],
+    )
+    else if __decode_part(part) == s then __bind_into(
+      list.drop(segs, 1),
+      list.drop(parts, 1),
+      bound,
+    )
+    else none,
   },
 }
 
@@ -489,10 +500,7 @@ fn __covers(a: List[String], b: List[String]) -> Bool = {
   if kb == "rest" then true
   else if ka == "rest" then false
   else if ka == "end" or kb == "end" then ka == kb
-  else if ka == "lit" and kb == "lit" then list.first(a) == list.first(b) and __covers(
-    list.drop(a, 1),
-    list.drop(b, 1),
-  )
+  else if ka == "lit" and kb == "lit" and list.first(a) != list.first(b) then false
   else if ka == "param" and kb == "lit" then false else __covers(list.drop(a, 1), list.drop(b, 1))
 }
 
@@ -502,10 +510,10 @@ fn __overlaps(a: List[String], b: List[String]) -> Bool = {
   let kb = __kind(list.first(b))
   if ka == "rest" or kb == "rest" then true
   else if ka == "end" or kb == "end" then ka == kb
-  else if ka == "lit" and kb == "lit" then list.first(a) == list.first(b) and __overlaps(
+  else if ka == "lit" and kb == "lit" and list.first(a) != list.first(b) then false else __overlaps(
     list.drop(a, 1),
     list.drop(b, 1),
-  ) else __overlaps(list.drop(a, 1), list.drop(b, 1))
+  )
 }
 
 fn __route_covers(a: HttpRoute, b: HttpRoute) -> Bool = (b.method == "" or a.method == b.method) and __covers(
@@ -601,10 +609,14 @@ fn router(routes: List[HttpRoute]) -> Result[HttpHandler, String] = {
 
 /// Applies middleware; the first is the outermost.
 fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler = if list.is_empty(middleware) then handler
-else __apply(list.first(middleware) ?? __no_middleware, wrap(handler, list.drop(middleware, 1)))
+else wrap(
+  __apply(list.last(middleware) ?? __no_middleware, handler),
+  list.take(middleware, list.len(middleware) - 1),
+)
 
 // Named rather than inline `mw(inner)`: the wasm legs return a handler out
-// of an `if` only through a call they can resolve.
+// of an `if` only through a call they can resolve. `wrap` applies the LAST
+// middleware first, so the recursion is a tail call.
 fn __apply(mw: HttpMiddleware, inner: HttpHandler) -> HttpHandler = mw(inner)
 
 fn __no_middleware(next: HttpHandler) -> HttpHandler = next
