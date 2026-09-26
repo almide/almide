@@ -41,6 +41,12 @@ pub enum FixHint {
     /// Both if-arms are statement-only (assignments or bare `let`). Report
     /// the names so the snippet can show a rebinding on the combined result.
     IfArmsAssign { then_var: Option<String>, else_var: Option<String> },
+    /// The value of an ANNOTATED `let x: T = <call>` (#2653). When the call
+    /// yields `Result[T, _]` against a plain `T`, the mismatch is the missing
+    /// `!` — the same shape E005 (`f(g())`) and E041 (`let x = g()`) name.
+    /// `span` is the call's; `can_propagate` is whether a `!` at its end is a
+    /// one-place edit here (an effect fn body, outside any lambda).
+    LetCallValue { span: crate::ast::Span, can_propagate: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

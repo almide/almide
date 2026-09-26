@@ -263,6 +263,11 @@ pub struct Checker {
     /// insertion where the span is a plain call.
     /// (ty, span, position label, mechanical, must_use)
     pub(crate) deferred_implicit_prop_checks: Vec<(Ty, Option<ast::Span>, &'static str, bool, bool)>,
+    /// Spans `(line, col, end_col)` of calls whose resolved callee is an
+    /// `effect fn` declared `-> T` with a non-Result `T` (#2653) — read when an annotated `let` mismatch decides
+    /// whether its `!` repair is the spelling of the callee's own declared
+    /// type (machine-applicable) or a choice among consumptions.
+    pub(crate) effect_call_spans: std::collections::HashSet<(usize, usize, usize)>,
     /// ADR-0006 D1 (#1108 Phase 2a): fns DECLARED with the `-> T!` marker.
     /// Resolution erases the marker into Result[T, String], so the 1-bit
     /// fallibility of a NAMED callback argument (`list.map(xs, parse)`) is
@@ -584,6 +589,7 @@ impl Checker {
             deferred_numeric_narrowing_checks: Vec::new(),
             deferred_unresolved_binding_checks: Vec::new(),
             deferred_implicit_prop_checks: Vec::new(),
+            effect_call_spans: std::collections::HashSet::new(),
             fallible_marker_fns: std::collections::HashSet::new(),
             hof_rewritten_calls: std::collections::HashSet::new(),
             deferred_unknown_type_checks: Vec::new(),
