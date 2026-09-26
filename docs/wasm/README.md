@@ -27,6 +27,27 @@ its walls into hard errors (the frontier-development probe).
 | Equivalence | Observable output (stdout, stderr, exit code) is byte-identical to the native leg, contract by contract |
 | Walls | Outside the lowering subset ⇒ `Unsupported(...)`, surfaced to the user; `ALMIDE_WALL_REASON=1` names which stage declined |
 
+## Running a server on wasm
+
+`almide run app.almd --target wasm` runs structural-leg modules on the
+**embedded host** (wasmtime inside the `almide` binary), and that host serves
+`http.serve` (C-367, #2650). The guest owns the serve loop: `main` runs once,
+calls `http.serve`, and then takes one request at a time from the host and
+hands back one response, all in the same instance. So a value `main` computed
+before `http.serve` is the same on every request, as it is natively. The host
+only moves bytes (fs_call ops 70..=72), through the server code the native
+runtime uses (`crates/almide-rt-core/src/http_server_core.rs`), so the
+response bytes are identical to native. While the program runs, its stderr
+is unbuffered and its stdout follows native's rule (flushed on every write to
+a terminal, 64 KiB-buffered otherwise), so a server's output shows up while it
+runs.
+
+`wasmtime serve` is not used: it creates a new instance per request (p2) or
+reuses one only for a bounded number of requests (p3), and its own HTTP stack
+writes the response head. A stock artifact from `almide build --target wasm`
+has no listening socket, so `build` and `check --target wasm` still refuse
+`http.serve` (E081); #2659 tracks that.
+
 The authoritative references are:
 
 - **Architecture** — [docs/ARCHITECTURE.md](../ARCHITECTURE.md) (compiler pipeline,
