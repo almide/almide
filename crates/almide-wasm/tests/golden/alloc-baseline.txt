@@ -441,6 +441,7 @@
 69456	spec/wasm_cross/matrix_select_rows.almd
 89520	spec/wasm_cross/matrix_select_rows_oob.almd
 84352	spec/wasm_cross/matrix_select_rows_q1_partial_block.almd
+74640	spec/wasm_cross/matrix_select_rows_wrapped_rid.almd
 69872	spec/wasm_cross/matrix_shape_family.almd
 69104	spec/wasm_cross/matrix_shape_precondition_activations.almd
 69776	spec/wasm_cross/matrix_shape_precondition_family.almd
@@ -540,6 +541,7 @@
 65872	spec/wasm_cross/range_bind_huge.almd
 66736	spec/wasm_cross/range_bind_no_materialize.almd
 66096	spec/wasm_cross/range_bind_walled_no_materialize.almd
+65792	spec/wasm_cross/range_exclusive_end_at_min.almd
 65760	spec/wasm_cross/range_first_class.almd
 65936	spec/wasm_cross/range_materialize_oom.almd
 88608	spec/wasm_cross/rc_alloc_stress.almd
