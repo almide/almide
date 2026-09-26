@@ -38,8 +38,8 @@ Output (stdout): one line per fn — `status<TAB>module.fn<TAB>detail`.
   unprobed  the leg walled on an ARGUMENT CONSTRUCTOR the probe injected
             (detail names it), so the fn under probe was never reached —
             the honesty bucket for values that only exist through another
-            fn (an HttpRequest inside an http.serve handler, a SafeHtml
-            from html.empty). Claimed neither way; the gate holds it under
+            fn (a SafeHtml from html.empty). Claimed neither way; the gate
+            holds it under
             a per-leg ceiling so it can never grow silently.
   error     the probe could not synthesize a well-typed minimal call
             (detail = why). Fails the probe (exit 1) and the gate: the
@@ -109,6 +109,9 @@ NOMINAL = {
     "HttpResponse": ('http.response(200, "x")', "http.response", "http"),
     # The call handle (#2631): only `http.start` makes one.
     "HttpCall": ('http.start("GET", "http://127.0.0.1:1/", "", [:], { total_ms: 1, idle_ms: 0 })!', "http.start", "http"),
+    # A route is built with `http.route` — its record fields are the parsed
+    # pattern, never written by hand (#2588).
+    "HttpRoute": ('http.route("/", (_r) => http.response(200, "x"))', "http.route", "http"),
 }
 BYTES8 = "bytes.from_list([0, 0, 0, 0, 0, 0, 0, 0])"
 
@@ -118,15 +121,13 @@ class Unsynth(Exception):
 
 
 class Ctx:
-    """Per-program synthesis state: imports, hoisted typed leaves, the
-    stdlib constructors the probe itself injected, and whether the call
-    needs an HttpRequest (reachable only inside an http.serve handler)."""
+    """Per-program synthesis state: imports, hoisted typed leaves, and the
+    stdlib constructors the probe itself injected."""
 
     def __init__(self):
         self.imports = set()
         self.hoists = []
         self.ctors = set()
-        self.needs_req = False
         self.n = 0
 
     def hoist(self, ty: str, expr: str) -> str:
@@ -223,12 +224,12 @@ def dummy(t: dict, ctx: Ctx, types: dict) -> str:
             ctx.ctors.add("bytes.as_ptr")
             return f"bytes.as_ptr({dummy({'kind': 'bytes'}, ctx, types)})"
         if name == "HttpRequest":
-            # No constructor exists: the value lives only inside an
-            # http.serve handler, so the probe body is wrapped in one.
-            ctx.needs_req = True
+            # #2588: a request is built in code — no http.serve handler (and
+            # no listener the legs cannot bind) stands between the probe and
+            # the accessor it measures.
             ctx.imports.add("http")
-            ctx.ctors.update({"http.serve", "http.response"})
-            return "req"
+            ctx.ctors.add("http.new_request")
+            return 'http.new_request("GET", "/", "", [:])'
         if name in NOMINAL:
             expr, ctor, imp = NOMINAL[name]
             ctx.ctors.add(ctor)
@@ -423,15 +424,6 @@ def synth(mod, f, params, ret, types, variant, shape=0):
         ctx.imports.add(mod)
     imp = "".join(f"import {m}\n" for m in sorted(ctx.imports))
     imp = imp + "\n" if imp else ""
-    if ctx.needs_req:
-        # The HttpRequest lives only inside a handler: the probe body is a
-        # handler-side fn, main installs it through http.serve.
-        return (
-            f"{imp}effect fn __probe(req: HttpRequest) -> Unit = {{\n{body}\n}}\n\n"
-            f"effect fn main() -> Unit = {{\n  println(\"pre\")\n"
-            f"  http.serve(0, (req) => {{ __probe(req)!\n    ok(http.response(200, \"x\")) }})!\n"
-            f"  println(\"p\")\n}}\n"
-        ), ctx
     return f"{imp}effect fn main() -> Unit = {{\n{body}\n}}\n", ctx
 
 

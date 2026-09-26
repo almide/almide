@@ -141,7 +141,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-103 | Self-hosted dynamic Value model (merge, array/as_array roundtrip, tuple TCO) byte-matches native and is leak-free in a loop | 0.27.6 | active | fixture | 6 |
 | C-104 | Tail-recursive accumulator shapes lower to bounded-stack loops byte-matching native | 0.27.6 | active | fixture | 6 |
 | C-105 | var/append accumulator loops (scalar, owned-handle, cross-dep, mutual-recursion) byte-match native on wasm | 0.27.6 | active | fixture | 6 |
-| C-106 | Heap value bound from an if/match arm byte-matches native on the v1 wasm path | 0.27.6 | active | fixture | 17 |
+| C-106 | Heap value bound from an if/match arm byte-matches native on the v1 wasm path | 0.27.6 | active | fixture | 16 |
 | C-107 | heap Result-of-tuple / Result-of-list Ok payloads round-trip and byte-match native | 0.27.6 | active | fixture | 4 |
 | C-108 | Unwrap `!` and let-unwrap desugaring byte-match native in every position | 0.27.6 | active | fixture | 7 |
 | C-109 | Self-hosted base64 encode byte-matches canonical / native on the v1 wasm path | 0.27.6 | active | fixture | 1 |
@@ -403,4 +403,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-365 | A generic protocol with explicit conformance dispatches to the one declared implementation, identically on both targets | 0.64.0 | active | fixture | 1 |
 | C-366 | http call handle: per-call limits name themselves when they fire, cancel closes the connection, poll never blocks | 0.64.0 | active | fixture | 0 |
 | C-367 | http.serve runs on the embedded wasm lane with native's one-instance, sequential semantics and byte-identical responses | 0.64.0 | active | fixture | 0 |
+| C-368 | http router: a handler is a function, the most specific route answers, a broken table is refused, 404/405/400 come from the router, identically on both targets | 0.64.0 | active | fixture | 0 |
 
