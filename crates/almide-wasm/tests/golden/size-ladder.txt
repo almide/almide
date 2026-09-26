@@ -3,16 +3,16 @@
 # shipped<TAB>rung<TAB>program; the last row is the ladder's total.
 1330	T0 nothing	research/benchmark/perf/wasm-size/hello.almd
 1499	T1 Int print	research/benchmark/perf/wasm-size/fibonacci.almd
-7677	T1 Int print	research/benchmark/perf/binarytrees/binarytrees.almd
-10000	T2 Float print	research/benchmark/perf/spectralnorm/spectralnorm.almd
+7681	T1 Int print	research/benchmark/perf/binarytrees/binarytrees.almd
+10032	T2 Float print	research/benchmark/perf/spectralnorm/spectralnorm.almd
 7331	T3 String	research/benchmark/perf/strchurn/strchurn.almd
 6662	T3 String	research/benchmark/perf/strbuild/strbuild_append.almd
-19304	T4 List	research/benchmark/perf/listbuild/listbuild_append.almd
-19697	T4 List	research/benchmark/perf/listbuild/listbuild_combinator.almd
-9353	T5 Map	research/benchmark/perf/mapbuild/mapbuild.almd
+19312	T4 List	research/benchmark/perf/listbuild/listbuild_append.almd
+19701	T4 List	research/benchmark/perf/listbuild/listbuild_combinator.almd
+9369	T5 Map	research/benchmark/perf/mapbuild/mapbuild.almd
 11475	T5 Map	research/benchmark/perf/wordfreq/wordfreq.almd
 11498	T5 Map	research/benchmark/perf/wordfreq/wordfreq_group.almd
-32338	T6 JSON	research/benchmark/perf/decode/decode.almd
+32342	T6 JSON	research/benchmark/perf/decode/decode.almd
 27156	T6 JSON	spec/wasm_cross/json_gltf_walk.almd
 20120	T7 regex	spec/wasm_cross/regex_engine.almd
-185440	Σ	total
+185508	Σ	total

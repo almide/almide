@@ -42,6 +42,29 @@ impl Emitter<'_> {
         }
     }
 
+    /// Push an i32: does selected row `rid`'s byte window `off + rid·rb ..+ rb`
+    /// lie inside the Bytes at `hd`? All three i64 holds are already clamped
+    /// to >= 0. Divided, never multiplied: `off + rid·rb + rb <= len` wrapped
+    /// for an rid near i64::MAX to just below `off`, passed, and read the bytes
+    /// before the buffer while native panicked on the same wrap (#2676, fuzz
+    /// seed 579914833587 index 9386). A zero-width row (rb = 0) carries no
+    /// bytes, so its answer is immaterial; the divisor is max(rb, 1) so the
+    /// eager `i64.div_s` never traps.
+    ///   fits = rb <= len - off  &&  (rb == 0 || rid <= (len - off - rb) / max(rb, 1))
+    fn row_fits(&mut self, hd: u32, hoff: u32, hrid: u32, hrb: u32) {
+        let mut i = self.f.instructions();
+        i.local_get(hrb);
+        i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u().local_get(hoff).i64_sub();
+        i.i64_le_s();
+        i.local_get(hrb).i64_eqz();
+        i.local_get(hrid);
+        i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u().local_get(hoff).i64_sub();
+        i.local_get(hrb).i64_sub();
+        i.local_get(hrb).i64_const(1).local_get(hrb).i64_const(1).i64_gt_s().select();
+        i.i64_div_s().i64_le_s();
+        i.i32_or().i32_and();
+    }
+
     /// Clamp an i64 hold to `max(v, 0)` in place.
     fn clamp0(&mut self, h: u32) {
         let mut i = self.f.instructions();
@@ -241,7 +264,9 @@ impl Emitter<'_> {
         let hi = self.hold_i32()?;
         let hrid = self.hold_i64()?;
         let hj = self.hold_i32()?;
+        let hrb = self.hold_i64()?; // row bytes = c*4
         let mut i = self.f.instructions();
+        i.local_get(hc).i64_const(4).i64_mul().local_set(hrb);
         i.i32_const(0).local_set(hi);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hi).local_get(hn).i32_wrap_i64().i32_ge_u().br_if(1);
@@ -250,19 +275,11 @@ impl Emitter<'_> {
         i.i64_load(slot_memarg(0)).local_set(hrid);
         let _ = i;
         self.clamp0(hrid);
+        self.row_fits(hd, hoff, hrid, hrb);
         let mut i = self.f.instructions();
-        // base = off + rid*c*4; fits? base + c*4 <= len
-        i.local_get(hoff)
-            .local_get(hrid)
-            .local_get(hc)
-            .i64_mul()
-            .i64_const(4)
-            .i64_mul()
-            .i64_add()
-            .local_set(hrid); // reuse: base
-        i.local_get(hrid).local_get(hc).i64_const(4).i64_mul().i64_add();
-        i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u();
-        i.i64_le_s().if_(BlockType::Empty);
+        i.if_(BlockType::Empty);
+        // base = off + rid*c*4 (in range: the window fits)
+        i.local_get(hoff).local_get(hrid).local_get(hrb).i64_mul().i64_add().local_set(hrid); // reuse: base
         i.i32_const(0).local_set(hj);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hj).local_get(hc).i32_wrap_i64().i32_ge_u().br_if(1);
@@ -293,6 +310,7 @@ impl Emitter<'_> {
         i.br(0).end().end();
         i.local_get(ho);
         let _ = i;
+        self.release_i64();
         self.release_i32();
         self.release_i64();
         self.release_i32();
@@ -381,16 +399,11 @@ impl Emitter<'_> {
         if select {
             // Selector: a selected row is `cols / 128` whole blocks on native's
             // ROW schedule (#1787); a row whose blocks leave the buffer stays
-            // all-zero — in bounds? off + rid*row_bytes + row_bytes <= len.
-            i.local_get(hoff)
-                .local_get(hrow)
-                .local_get(hrb)
-                .i64_mul()
-                .i64_add()
-                .local_get(hrb)
-                .i64_add();
-            i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u();
-            i.i64_le_s();
+            // all-zero — in bounds? off + rid*row_bytes + row_bytes <= len,
+            // overflow-free (#2676).
+            let _ = i;
+            self.row_fits(hd, hoff, hrow, hrb);
+            i = self.f.instructions();
         } else {
             // Full loader: NO row-level bound — native has none. Its rule is
             // per ELEMENT on the global-k schedule (`$q10_val`, #1532): a k
@@ -508,12 +521,12 @@ impl Emitter<'_> {
         i.i64_load(slot_memarg(0)).local_set(hrow);
         let _ = i;
         self.clamp0(hrow);
+        // fits? off + rid*row_bytes + row_bytes <= len, overflow-free (#2676)
+        self.row_fits(hd, hoff, hrow, hrb);
         let mut i = self.f.instructions();
-        // row_off = rid * row_bytes; fits? off + row_off + row_bytes <= len
+        i.if_(BlockType::Empty);
+        // row_off = rid * row_bytes (in range: the window fits)
         i.local_get(hrow).local_get(hrb).i64_mul().local_set(hrow);
-        i.local_get(hoff).local_get(hrow).i64_add().local_get(hrb).i64_add();
-        i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u();
-        i.i64_le_s().if_(BlockType::Empty);
         i.i32_const(0).local_set(hj);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hj).local_get(hc).i32_wrap_i64().i32_ge_u().br_if(1);

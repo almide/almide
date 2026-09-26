@@ -64,12 +64,35 @@ impl LowerCtx {
         };
         let one_v = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: one_v, value: 1 });
+        // The inclusive loop's no-wrap floor (#2679, below): `start` itself.
+        let start_floor = match (*inclusive, &start.kind) {
+            (true, IrExprKind::LitInt { value }) => {
+                let v = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: v, value: *value });
+                Some(v)
+            }
+            _ => None,
+        };
 
         self.ops.push(Op::LoopStart);
         // The bound test, re-read each iteration: `i < end` (exclusive) / `i <= end` (incl).
         let cond_v = self.fresh_value();
         let cmp = if *inclusive { IntOp::Le } else { IntOp::Lt };
         self.ops.push(Op::IntBinOp { dst: cond_v, op: cmp, a: i_v, b: end_v });
+        // #2679: an inclusive range ending at i64::MAX steps its index past the
+        // last element to i64::MIN, and `i64::MIN <= end` holds forever. The
+        // index never goes below `start` otherwise, so `i >= start` is exactly
+        // the "has not wrapped" test. (An exclusive loop cannot wrap: `i < end`
+        // fails before the step could leave the Int range.)
+        let cond_v = if let Some(start_v) = start_floor {
+            let in_v = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: in_v, op: IntOp::Ge, a: i_v, b: start_v });
+            let both_v = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: both_v, op: IntOp::And, a: cond_v, b: in_v });
+            both_v
+        } else {
+            cond_v
+        };
         self.ops.push(Op::LoopBreakUnless { cond: cond_v });
 
         let body_mark = self.live_heap_handles.len();

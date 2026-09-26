@@ -1,0 +1,23 @@
+// @contract: C-238
+// An exclusive range whose end is i64::MIN is EMPTY, inline or `let`-bound,
+// on both targets and the interp. The interp computed the last element as
+// `end - 1`, which wraps to i64::MAX, so it walked `0..<i64::MIN` upward and
+// voted 3 / huge=6 against two correct targets (#2678, fuzz-nightly run
+// 36244677099 on v0.64.0-rc1: seed 579914833589, indices 10397 and 4117).
+effect fn main() -> Unit = {
+  var last = 0
+  for k in 0..<-9223372036854775808 {
+    if k > 3 then break
+    else ()
+    last = k
+  }
+  println("inline=${last}")
+  let huge = 0..<-9223372036854775808
+  var hs = 0
+  for i in huge {
+    if i > 3 then break
+    else ()
+    hs = hs + i
+  }
+  println("bound=${hs}")
+}

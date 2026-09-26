@@ -670,9 +670,12 @@ else {
   let rid0 = list.get(ids, i) ?? 0
   let rid = if rid0 < 0 then 0 else rid0
   let row = prim.alloc_list_f64(c)
-  let base = offset + rid * c * 4
-  let _f = if base + c * 4 > len then __mx_zero_row(prim.handle(row), c, 0)
-  else __mx_f32_row(prim.handle(row), hd, base, c, 0)
+  // Divided, never multiplied (#2676): `rid·c·4` wraps for an rid near
+  // i64::MAX to just below the offset and passed `base + c·4 > len`.
+  let rb = c * 4
+  let fits = offset <= len and rb <= len - offset and (rb == 0 or rid <= (len - offset - rb) / rb)
+  let _f = if not fits then __mx_zero_row(prim.handle(row), c, 0)
+  else __mx_f32_row(prim.handle(row), hd, offset + rid * rb, c, 0)
   prim.store_str(ho + 12 + i * 8, row)
   __mx_f32_sel_rows(ho, hd, offset, len, ids, c, i + 1)
 }

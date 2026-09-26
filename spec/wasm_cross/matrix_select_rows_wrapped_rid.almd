@@ -1,0 +1,37 @@
+// @contract: C-229
+// A selected row id near i64::MAX is past the buffer, so it is the all-zero row
+// on all three selectors. Every leg tested the window as
+// `off + rid·row_bytes + row_bytes > len`, and `rid·row_bytes` wrapped to
+// `-row_bytes`: with `offset = row_bytes` the window landed on row 0, passed,
+// and BOTH targets answered row 0's values for an out-of-range row (#2677).
+// With `offset = 0`, native sliced from a wrapped start and panicked while wasm
+// read the bytes before the buffer (fuzz-nightly run 36244677099 on
+// v0.64.0-rc1, seed 579914833587 index 9386). Row 0 is nonzero here, so a
+// window that wraps onto it prints its values instead of zeros.
+import matrix
+import bytes
+
+effect fn main() -> Unit = {
+  var f32d = bytes.new(8)
+  bytes.set_f32_le(f32d, 0, 1.5)
+  bytes.set_f32_le(f32d, 4, 2.5)
+  let mf = matrix.select_rows_f32(f32d, 4, 1, [9223372036854775807, 0])
+  println("f32=${matrix.to_lists(mf)}")
+  var q8 = bytes.new(68)
+  bytes.set_at(q8, 1, 56)
+  bytes.set_at(q8, 2, 10)
+  let r8 = matrix.to_lists(matrix.select_rows_q8_0_dq(q8, 34, 32, [9223372036854775807, 0]))
+  let q8w = list.get(r8, 0) ?? []
+  let q8z = list.get(r8, 1) ?? []
+  println("q8_wrap=${list.get(q8w, 0) ?? 9.9} q8_at34_row0=${list.get(q8z, 0) ?? 9.9}")
+  let r8b = matrix.to_lists(matrix.select_rows_q8_0_dq(q8, 0, 32, [9223372036854775807, 0]))
+  let q8b = list.get(r8b, 0) ?? []
+  let q8r = list.get(r8b, 1) ?? []
+  println("q8_wrap_at0=${list.get(q8b, 0) ?? 9.9} q8_row0=${list.get(q8r, 0) ?? 9.9}")
+  var q1 = bytes.new(36)
+  bytes.set_at(q1, 1, 56)
+  bytes.set_at(q1, 2, 1)
+  let r1 = matrix.to_lists(matrix.select_rows_q1_0(q1, 18, 128, [9223372036854775807]))
+  let q1w = list.get(r1, 0) ?? []
+  println("q1=${list.get(q1w, 0) ?? 9.9},${list.get(q1w, 1) ?? 9.9}")
+}
