@@ -30,7 +30,7 @@
 2584	spec/wasm_cross/bounded_kernel.almd
 2584	spec/wasm_cross/bounded_kernel_plain.almd
 2449	spec/wasm_cross/branch_lift_in_loop.almd
-7584	spec/wasm_cross/bundled_pure_modules.almd
+7578	spec/wasm_cross/bundled_pure_modules.almd
 3784	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
 2750	spec/wasm_cross/bytes_array_count_domain.almd
 4558	spec/wasm_cross/bytes_clear_mut_param.almd
@@ -254,7 +254,7 @@
 3191	spec/wasm_cross/heap_arena.almd
 2714	spec/wasm_cross/heap_result_err_interp.almd
 3184	spec/wasm_cross/heap_result_if_append.almd
-26326	spec/wasm_cross/heap_result_if_bind.almd
+26320	spec/wasm_cross/heap_result_if_bind.almd
 2746	spec/wasm_cross/heap_result_if_bind_chain.almd
 25783	spec/wasm_cross/heap_result_if_eq_cond.almd
 9206	spec/wasm_cross/heap_result_if_match_arm_frame.almd
@@ -337,8 +337,9 @@
 2801	spec/wasm_cross/list_call_element.almd
 3810	spec/wasm_cross/list_chunk_windows.almd
 2463	spec/wasm_cross/list_chunk_zero.almd
-7186	spec/wasm_cross/list_comprehensive.almd
-9749	spec/wasm_cross/list_count_index_truncation.almd
+7180	spec/wasm_cross/list_comprehensive.almd
+9713	spec/wasm_cross/list_count_index_truncation.almd
+5924	spec/wasm_cross/list_count_stride_product_wrap.almd
 5581	spec/wasm_cross/list_cross_module_variant.almd
 3256	spec/wasm_cross/list_element_hof_chain.almd
 2871	spec/wasm_cross/list_enumerate_find.almd
@@ -394,7 +395,7 @@
 4706	spec/wasm_cross/map_fold_heap_acc_skv.almd
 4262	spec/wasm_cross/map_fold_heap_accumulator.almd
 7788	spec/wasm_cross/map_index_order.almd
-6546	spec/wasm_cross/map_index_released_with_block.almd
+6540	spec/wasm_cross/map_index_released_with_block.almd
 7457	spec/wasm_cross/map_index_string_key_shapes.almd
 14028	spec/wasm_cross/map_insertion_order.almd
 10786	spec/wasm_cross/map_interp_string_value.almd
@@ -403,7 +404,7 @@
 3006	spec/wasm_cross/map_rich_variant_key.almd
 10738	spec/wasm_cross/map_set_eq.almd
 14442	spec/wasm_cross/map_set_in_place.almd
-20185	spec/wasm_cross/map_set_index_threshold.almd
+20157	spec/wasm_cross/map_set_index_threshold.almd
 6584	spec/wasm_cross/map_set_ops.almd
 12708	spec/wasm_cross/map_set_typechange.almd
 6573	spec/wasm_cross/map_upsert_str.almd
@@ -463,7 +464,7 @@
 2893	spec/wasm_cross/mut_param_effect_never_err.almd
 2549	spec/wasm_cross/mut_param_spread_reassign.almd
 5381	spec/wasm_cross/mut_param_tail_recursion.almd
-3313	spec/wasm_cross/mut_param_writeback_growth.almd
+3307	spec/wasm_cross/mut_param_writeback_growth.almd
 5445	spec/wasm_cross/mut_scalar_param_reassign.almd
 6001	spec/wasm_cross/mutable_global_bytes_arena.almd
 3472	spec/wasm_cross/mutable_global_bytes_copy_from.almd
@@ -474,7 +475,7 @@
 2097	spec/wasm_cross/mutual_tail_recursion.almd
 2730	spec/wasm_cross/nan_canonical_bytes_write.almd
 2298	spec/wasm_cross/nan_canonical_observation.almd
-3292	spec/wasm_cross/native_wall_shapes.almd
+5431	spec/wasm_cross/native_wall_shapes.almd
 4876	spec/wasm_cross/negative_float_literal_sized.almd
 9062	spec/wasm_cross/negative_offset_and_width_totality.almd
 3021	spec/wasm_cross/nested_ctor_pattern.almd
@@ -513,7 +514,7 @@
 6090	spec/wasm_cross/or_pattern_heap_subject_matrix.almd
 13781	spec/wasm_cross/ord_record_variant.almd
 13141	spec/wasm_cross/ord_recursive.almd
-4460	spec/wasm_cross/path_extension_hidden.almd
+4454	spec/wasm_cross/path_extension_hidden.almd
 2105	spec/wasm_cross/phantom_type_param.almd
 1592	spec/wasm_cross/pipe_chain_scalar_bind.almd
 2267	spec/wasm_cross/pipe_compose_forms.almd
