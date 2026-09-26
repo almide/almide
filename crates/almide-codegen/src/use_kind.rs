@@ -571,6 +571,10 @@ impl<'a> Walk<'a> {
                 }
             }
             IrExprKind::IterChain { source, consume, steps, collector } => {
+                // The clone pass's chain guard (#2686, `insert_clones_iter_chain`):
+                // a var a step or collector closure captures is cloned at every
+                // occurrence inside the chain, so none of them is a move.
+                self.guarded.push(chain_captured(steps, collector));
                 let outer = std::mem::replace(&mut self.in_chain, true);
                 let consumed = *consume && chain_elements_consumed(&source.ty, steps, collector, self.oracle);
                 self.expr(source, Site::Iterable { consumed });
@@ -596,6 +600,7 @@ impl<'a> Walk<'a> {
                     }
                 }
                 self.in_chain = outer;
+                self.guarded.pop();
             }
         }
     }
@@ -851,4 +856,17 @@ fn borrow_root(e: &IrExpr) -> Option<VarId> {
         IrExprKind::Borrow { expr, .. } => place_root(expr),
         _ => None,
     }
+}
+
+/// The vars a chain's step or collector closures capture (their free vars) —
+/// the set the clone pass's chain guard force-clones inside the chain (#2686).
+fn chain_captured(steps: &[IterStep], collector: &IterCollector) -> HashSet<VarId> {
+    let mut out = HashSet::new();
+    for lam in steps.iter().filter_map(IterStep::lambda).chain(collector.lambda()) {
+        if let IrExprKind::Lambda { params, body, .. } = &lam.kind {
+            let bound: HashSet<VarId> = params.iter().map(|(v, _)| *v).collect();
+            out.extend(almide_ir::free_vars::free_vars(body, &bound));
+        }
+    }
+    out
 }
