@@ -1,0 +1,49 @@
+// @contract: C-033
+// A SCALAR field write into a record that holds a heap field, on an aliased
+// record (#2656): `var m = it; m.a = 41` leaves `it` unchanged and both records
+// keep their String. The record destructure `let { a, c } = ...` in each fn is
+// what routes the fn to the incumbent leg (the structural leg declines it), whose
+// in-place field store COW-guarded with a raw slot copy: the copy and the
+// original shared `d` without co-owning it, and the two scope-end drops released
+// it twice (an rc_dec trap on 0.62.0, and an empty `d` read back through the
+// `mut` parameter). The write now takes the spread rebind, which Dups each heap
+// slot it carries over.
+type Item = { a: Int, d: String }
+
+type P = { a: Int, c: Int }
+
+fn bump(mut r: Item, by: Int) -> Unit = {
+  r.a = r.a + by
+  let { a, c } = P { a: 1, c: 3 }
+  println("bump ${r.a} ${r.d} ${a} ${c}")
+}
+
+fn shifted(it: Item, by: Int) -> Item = {
+  var m = it
+  m.a = m.a + by
+  let { a, c } = P { a: 2, c: 4 }
+  { ...m, a: m.a + a + c }
+}
+
+fn main() -> Unit = {
+  let it = Item { a: 1, d: "t" }
+  var m = it
+  m.a = 41
+  m.a = m.a + 1
+  let { a, c } = P { a: 1, c: 3 }
+  println("${m.a} ${m.d} ${it.a} ${it.d} ${a} ${c}")
+  var acc = Item { a: 0, d: "x" }
+  let keep = acc
+  var i = 0
+  while i < 3 {
+    acc.a = acc.a + i
+    i = i + 1
+  }
+  println("${acc.a} ${acc.d} ${keep.a} ${keep.d}")
+  var p = Item { a: 1, d: "p" }
+  let q = p
+  bump(p, 5)
+  println("${p.a} ${p.d} ${q.a} ${q.d}")
+  let s = shifted(it, 10)
+  println("${s.a} ${s.d} ${it.a} ${it.d}")
+}
