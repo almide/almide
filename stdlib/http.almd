@@ -568,7 +568,7 @@ fn __not_allowed(hits: List[(HttpRoute, List[String])]) -> HttpResponse = {
   )
 }
 
-effect fn __dispatch(routes: List[HttpRoute], req: HttpRequest) -> HttpResponse = {
+effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) -> HttpResponse = {
   let method = http.req_method(req)
   let path = __path_of(http.req_path(req))
   if not string.starts_with(path, "/") then http.response(
@@ -580,8 +580,6 @@ effect fn __dispatch(routes: List[HttpRoute], req: HttpRequest) -> HttpResponse 
     "Bad Request: malformed percent-encoding in the path",
   )
   else {
-    let parts = __parts(path)
-    let hits = routes |> list.filter_map((r) => __bind(r.segments, parts) |> option.map((bound) => (r, bound)))
     let exact = hits |> list.filter(((r, _)) => r.method == method or r.method == "")
     let via_get = method == "HEAD" and list.is_empty(exact)
     let allowed = if via_get then hits |> list.filter(((r, _)) => r.method == "GET")
@@ -596,7 +594,13 @@ effect fn __dispatch(routes: List[HttpRoute], req: HttpRequest) -> HttpResponse 
   }
 }
 
-fn __table(routes: List[HttpRoute]) -> HttpHandler = (req) => __dispatch(routes, req)!
+// The route table's lambda computes the matching routes itself: `routes` stays
+// a capture, never a param a callee would have to own.
+fn __table(routes: List[HttpRoute]) -> HttpHandler = (req) => {
+  let parts = __parts(__path_of(http.req_path(req)))
+  let hits = routes |> list.filter_map((r) => __bind(r.segments, parts) |> option.map((bound) => (r, bound)))
+  __dispatch(hits, req)!
+}
 
 /// Route table as a handler; err on conflicting routes.
 fn router(routes: List[HttpRoute]) -> Result[HttpHandler, String] = {
