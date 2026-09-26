@@ -218,7 +218,6 @@ jobs:
   # ═══════════════════════════════════════════════
 
   build:
-    if: github.server_url == 'https://github.com'
     name: Build (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -972,7 +971,7 @@ jobs:
   wasm-host-determinism:
     name: WASM host-arch determinism
     needs: changes
-    if: github.server_url == 'https://github.com' && needs.changes.outputs.docs_only != 'true'
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1066,7 +1065,7 @@ jobs:
     # in the same change.
     name: WASM browser-ABI determinism
     needs: changes
-    if: github.server_url == 'https://github.com' && needs.changes.outputs.docs_only != 'true'
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -1152,7 +1151,6 @@ jobs:
   # ═══════════════════════════════════════════════
 
   lean-proofs:
-    if: github.server_url == 'https://github.com'
     name: Lean Proofs (0 sorry)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1285,7 +1283,7 @@ jobs:
     # minutes of start delay against the 6 the compile cost, so the job
     # still finishes earlier, and a whole workspace build leaves the bill.
     needs: [changes, build]
-    if: github.server_url == 'https://github.com' && needs.changes.outputs.docs_only != 'true'
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -1729,7 +1727,7 @@ jobs:
 
   build-cross:
     name: Build (${{ matrix.os }})
-    if: github.server_url == 'https://github.com' && github.event_name == 'pull_request' && github.base_ref == 'main'
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
     strategy:
       matrix:
         include:
@@ -1858,7 +1856,7 @@ jobs:
   # table, inside the same 60-minute hang budget.
   corpus-cross:
     name: Corpus gate (macos-latest, ${{ matrix.gate }})
-    if: github.server_url == 'https://github.com' && github.event_name == 'pull_request' && github.base_ref == 'main'
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
     strategy:
       fail-fast: false
       matrix:

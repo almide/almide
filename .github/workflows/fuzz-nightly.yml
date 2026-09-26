@@ -67,7 +67,6 @@ jobs:
   # independent lifetimes, and the fuzz job's non-campaign overhead is an
   # artifact download instead of a compile.
   build:
-    if: github.server_url == 'https://github.com'
     name: Build compiler + fuzzer (${{ matrix.arch }})
     # HOST POLARITY (#1411 stage 2). The night runs on BOTH arches because a
     # whole defect class is arch-conditional: #1403's raw-NaN byte write reads
@@ -122,7 +121,6 @@ jobs:
           retention-days: 1
 
   fuzz:
-    if: github.server_url == 'https://github.com'
     name: Generative differential fuzz (shard ${{ matrix.shard }}, ${{ matrix.arch }})
     needs: build
     runs-on: ${{ matrix.os }}
@@ -292,7 +290,7 @@ jobs:
   # a SEPARATE job so a reclaimed shard cannot take the verdict down with it:
   # `if: always()` runs it even when some shard job failed or was killed.
   verdict:
-    if: always() && github.server_url == 'https://github.com'
+    if: always()
     name: Night verdict
     needs: fuzz
     # ALWAYS, even when a shard was killed. A runner shutdown (exit 143, the

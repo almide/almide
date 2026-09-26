@@ -43,7 +43,6 @@ env:
 
 jobs:
   build-cli:
-    if: github.server_url == 'https://github.com'
     name: Build the compiler under test
     runs-on: ubuntu-latest
     timeout-minutes: 30
