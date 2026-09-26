@@ -260,6 +260,7 @@
 66880	spec/wasm_cross/heap_result_if_match_arm_frame.almd
 66272	spec/wasm_cross/heap_result_if_option_aggregate.almd
 66032	spec/wasm_cross/heap_result_if_record_arm.almd
+66176	spec/wasm_cross/heap_result_if_some_user_call_temps.almd
 66048	spec/wasm_cross/heap_result_if_str_int.almd
 66464	spec/wasm_cross/heap_result_tuple_return.almd
 65920	spec/wasm_cross/hex_two_module_link.almd
