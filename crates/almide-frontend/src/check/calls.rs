@@ -220,20 +220,18 @@ impl Checker {
             // #2588: a lambda slot typed `(A) -> effect (B) -> C` hands its
             // declared ret on, so a returned inner lambda is an effect body.
             let prev_ret_expect = self.lambda_ret_expect.take();
-            if is_lambda_arg(a) {
-                if let Some((_, Ty::Fn { ret, .. })) = call_sig.as_ref().and_then(|sig| sig.params.get(i)) {
-                    self.lambda_ret_expect = Some((**ret).clone());
-                }
+            if is_lambda_arg(a)
+                && let Some((_, Ty::Fn { ret, .. })) = call_sig.as_ref().and_then(|sig| sig.params.get(i))
+            {
+                self.lambda_ret_expect = Some((**ret).clone());
             }
             let prev_list_expect = self.list_elem_expect.take();
-            if matches!(a.kind, ExprKind::List { .. }) {
-                if let Some((_, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e))) =
+            if matches!(a.kind, ExprKind::List { .. })
+                && let Some((_, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e))) =
                     call_sig.as_ref().and_then(|sig| sig.params.get(i))
-                {
-                    if matches!(e.first(), Some(Ty::Fn { .. })) {
-                        self.list_elem_expect = e.first().cloned();
-                    }
-                }
+                && matches!(e.first(), Some(Ty::Fn { .. }))
+            {
+                self.list_elem_expect = e.first().cloned();
             }
             let aty = self.infer_expr(a);
             self.list_elem_expect = prev_list_expect;

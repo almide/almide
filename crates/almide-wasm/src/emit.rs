@@ -459,10 +459,10 @@ fn emit_program_pass(
             continue;
         }
         let (sub, err) = reach(vec![i], Vec::new());
-        if let Some(reason) = &err {
-            if library {
-                return unsup(&format!("exported function `{name}` cannot be lowered: {reason}"));
-            }
+        if let Some(reason) = &err
+            && library
+        {
+            return unsup(&format!("exported function `{name}` cannot be lowered: {reason}"));
         }
         if err.is_none() {
             visited.extend(sub);
