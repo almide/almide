@@ -210,6 +210,7 @@ evidence  = [
   { path = "spec/integration/modules/cross_module_repr_derive_test.almd", class = "fixture" },
   { path = "tests/module_type_repr_test.rs", name = "every_compiled_leg_prints_the_declared_name", class = "fixture" },
   { path = "tests/module_type_repr_test.rs", name = "interp_prints_the_declared_name", class = "fixture" },
+  { path = "spec/wasm_cross/record_field_rust_keyword.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-010"
@@ -3785,6 +3786,7 @@ evidence  = [
   { path = "spec/wasm_cross/codec_whitespace_tolerance.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_list_default.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_triple_list.almd", class = "fixture" },
+  { path = "spec/wasm_cross/record_field_rust_keyword.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-299"

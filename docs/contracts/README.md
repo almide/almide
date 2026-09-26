@@ -44,7 +44,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-006 | [fan.timeout does not exist — wall-clock deadlines live at the host boundary](C-006-fan-timeout-removed.md) | 0.29.0 | active | fixture | 0 |
 | C-007 | Abortable top-level lets evaluate eagerly at startup | 0.24.0 | active | fixture | 3 |
 | C-008 | [Compound interpolation renders the Almide-literal repr (containers)](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 3 |
-| C-009 | [Record / variant / anonymous-record interpolation repr (field sorting)](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 2 |
+| C-009 | [Record / variant / anonymous-record interpolation repr (field sorting)](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 3 |
 | C-010 | [Recursive / generic ADT interpolation repr keyed by instantiation](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 2 |
 | C-011 | Bare-float interpolation Display drops .0; float.to_string keeps it | 0.24.0 | active | fuzz(100000) | 5 |
 | C-012 | Const-folded non-finite floats emit named constants | 0.24.0 | active | fixture | 1 |
@@ -333,7 +333,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-295 | A checker-exhaustive match of guard-lowered box patterns still builds on native | 0.57.2 | active | fixture | 1 |
 | C-296 | The generated type x operation matrix runs byte-identical across targets | 0.57.2 | active | fixture | 70 |
 | C-297 | flat_map whose closure returns an aliased list field is drop-balanced on both targets | 0.57.2 | active | fixture | 1 |
-| C-298 | The Codec conformance corpus round-trips byte-identical across targets | 0.57.2 | active | fixture | 15 |
+| C-298 | The Codec conformance corpus round-trips byte-identical across targets | 0.57.2 | active | fixture | 16 |
 | C-299 | hash digests are byte-identical across targets | 0.58.0 | active | fixture | 1 |
 | C-300 | map literals with Option-scalar values cross targets, leak-free | 0.59.0 | active | fixture | 2 |
 | C-301 | map.upsert on the all-String map crosses targets | 0.59.0 | active | fixture | 1 |
