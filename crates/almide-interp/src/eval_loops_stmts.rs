@@ -140,9 +140,14 @@ impl<'a> Interpreter<'a> {
     ) -> Flow {
         let ForInBinder { var, var_tuple } = binder;
         let RangeSpec { start, end, inclusive } = range;
-        let last = if inclusive { end } else { end - 1 };
+        // `None` = the empty range; stepping stops AT `last` rather than past
+        // it, so a range ending at i64::MAX never increments out of range.
+        let Some(last) = crate::value::range_last(start, end, inclusive) else {
+            self.det_charge();
+            return Flow::val(Value::Unit);
+        };
         let mut i = start;
-        while i <= last {
+        loop {
             if let Err(f) = self.step() {
                 return f;
             }
@@ -163,6 +168,9 @@ impl<'a> Interpreter<'a> {
                 LoopStep::Next => {}
                 LoopStep::Break => return Flow::val(Value::Unit),
                 LoopStep::Signal(f) => return f,
+            }
+            if i == last {
+                break;
             }
             i += 1;
         }

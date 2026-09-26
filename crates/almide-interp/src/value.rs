@@ -34,6 +34,15 @@ pub struct Closure {
     pub ret_ty: Option<almide_lang::types::Ty>,
 }
 
+/// The last element of the integer range `start..end` / `start..=end`, or
+/// `None` when it is empty. `end - 1` is never computed on an exclusive
+/// `..<i64::MIN` bound: wrapped, it read as `i64::MAX` and the empty range
+/// iterated upward (#2676, fuzz seed 579914833589 index 10397).
+pub(crate) fn range_last(start: i64, end: i64, inclusive: bool) -> Option<i64> {
+    let last = if inclusive { end } else { end.checked_sub(1)? };
+    (start <= last).then_some(last)
+}
+
 impl std::fmt::Debug for Closure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<closure/{}>", self.params.len())
@@ -190,19 +199,14 @@ impl Value {
                 // (xtarget-fuzz seed=20260819 index=2963 — `0..<i64::MAX`
                 // forced to materialize by list.len/indexing).
                 const MAX_RANGE_MATERIALIZE: i64 = 16 * 1024 * 1024;
-                let last = if *inclusive { *end } else { *end - 1 };
-                let count = (last.saturating_sub(*start)).saturating_add(1).max(0);
+                let Some(last) = range_last(*start, *end, *inclusive) else {
+                    return Some(Vec::new());
+                };
+                let count = (last.saturating_sub(*start)).saturating_add(1);
                 if count > MAX_RANGE_MATERIALIZE {
                     return None;
                 }
-                let mut out = Vec::with_capacity(count as usize);
-                let mut i = *start;
-                let stop = *start + count;
-                while i < stop {
-                    out.push(Value::Int(i));
-                    i += 1;
-                }
-                Some(out)
+                Some((*start..=last).map(Value::Int).collect())
             }
             // Map iterates as (k, v) tuples (matches native `for (k,v) in m`).
             Value::Map(entries) => Some(
@@ -680,5 +684,28 @@ pub fn float_to_string(n: f64) -> String {
         format!("{}.0", s)
     } else {
         s
+    }
+}
+
+#[cfg(test)]
+mod range_last_tests {
+    use super::{range_last, Value};
+
+    #[test]
+    fn exclusive_end_at_i64_min_is_empty() {
+        // #2676/#2678: `end - 1` wrapped to i64::MAX and the range iterated.
+        assert_eq!(range_last(0, i64::MIN, false), None);
+        let empty = Value::Range { start: 0, end: i64::MIN, inclusive: false };
+        assert_eq!(empty.as_iter_items(), Some(Vec::new()));
+    }
+
+    #[test]
+    fn bounds_at_the_extremes() {
+        assert_eq!(range_last(0, 3, false), Some(2));
+        assert_eq!(range_last(3, 3, false), None);
+        assert_eq!(range_last(3, 3, true), Some(3));
+        assert_eq!(range_last(i64::MAX - 2, i64::MAX, true), Some(i64::MAX));
+        let top = Value::Range { start: i64::MAX - 2, end: i64::MAX, inclusive: true };
+        assert_eq!(top.as_iter_items().map(|v| v.len()), Some(3));
     }
 }

@@ -2903,6 +2903,7 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_domain_edges.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_q1_full_loader_cols_beyond_buffer.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_shape_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_select_rows_wrapped_rid.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-230"
@@ -2998,6 +2999,7 @@ evidence  = [
   { path = "spec/wasm_cross/range_bind_huge.almd", class = "fixture" },
   { path = "spec/wasm_cross/range_bind_walled_no_materialize.almd", class = "fixture" },
   { path = "spec/wasm_cross/range_materialize_oom.almd", class = "fixture" },
+  { path = "spec/wasm_cross/range_exclusive_end_at_min.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-239"
