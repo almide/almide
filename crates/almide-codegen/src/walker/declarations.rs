@@ -606,7 +606,17 @@ fn collect_anon_from_stmt(stmt: &IrStmt, named: &HashSet<Vec<String>>, seen: &mu
             collect_anon_from_ty(ty, named, seen);
             collect_anon_from_expr(value, named, seen);
         }
-        IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
+        // A destructured value is often a record LITERAL that no other
+        // statement mentions (`let { a, c } = { a: 1, c: 3 }`): unless its
+        // shape registers here, neither the literal nor the pattern has an
+        // `AlmdRec_*` struct to name and both fall back to the joined field
+        // names (`a_c { .. }`), which rustc rejects (#2657).
+        IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. }
+        | IrStmtKind::BindDestructure { value, .. } => {
+            collect_anon_from_expr(value, named, seen);
+        }
+        IrStmtKind::MapInsert { key, value, .. } => {
+            collect_anon_from_expr(key, named, seen);
             collect_anon_from_expr(value, named, seen);
         }
         IrStmtKind::IndexAssign { index, value, .. } => {
