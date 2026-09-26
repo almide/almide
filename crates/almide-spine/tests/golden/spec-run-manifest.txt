@@ -1,4 +1,4 @@
-# oracle: almide 0.64.0 (dev) at 67546a97d — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.64.0 (dev) at 1d955f9d5 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -741,6 +741,7 @@ da65a0cb2e53960b94395c8213c048ffbd7581512c0ed08262c4828f6376788b	0	spec/wasm_cro
 53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3	0	spec/wasm_cross/unique_non_flat_element.almd
 8717aa8f1b412fde54aa4faa48b0b3105ba85d0602dff35107a52513772a23ae	0	spec/wasm_cross/unit_effect_abi.almd
 3c96e5c30243d6969345a050fe7f68ee6a92514ba0edd0120b34b01ad47131eb	0	spec/wasm_cross/unsigned_literal_domain.almd
+1ccbd2819f16db50801b4b0b8677ea8133a1ca31268fa421e5edd2f77ea5ee13	0	spec/wasm_cross/unwrap_callarg_single_expr_effect_body.almd
 4f734f96c2b7f54a2c40a2f1dd5219b5fd5fb29de24432f25026f62079bac177	0	spec/wasm_cross/unwrap_in_callarg.almd
 398ee7459ea50ac20bf38e828b6394340aeefde2533790c9caf8e16aa172b8af	0	spec/wasm_cross/unwrap_in_if_arm.almd
 7f463a3bf26cb181b384009cf27abef0f5352c8c385cb629c6fc081e9705dc2f	0	spec/wasm_cross/unwrap_in_recursion.almd
