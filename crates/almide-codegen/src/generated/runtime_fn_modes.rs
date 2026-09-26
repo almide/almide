@@ -305,6 +305,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_http___openai_streaming_limited" => &[false, false, false, false, false, false],
         "almide_rt_http___request_stream_limited" => &[false, false, false, false, false, false, false],
         "almide_rt_http_json" => &[false, false],
+        "almide_rt_http_new_request" => &[false, false, false, false],
         "almide_rt_http_not_found" => &[false],
         "almide_rt_http_redirect" => &[false],
         "almide_rt_http_response" => &[false, false],

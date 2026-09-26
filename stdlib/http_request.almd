@@ -1,0 +1,74 @@
+// http_request — SELF-HOSTED HttpRequest rep for the wasm legs (#2588). v0's
+// AlmideHttpRequest { method, path, body, headers, params } is opaque nominal;
+// here it is a List[String] (the http_response / JsonPath precedent):
+//
+//   [method, target, body, <header count>, k1, v1, …, kn, vn, p1, v1, …]
+//
+// header pairs in insertion order after slot 3, then the router's bound path
+// parameters to the end. The newtype eraser publishes Named("HttpRequest") →
+// List[String]. Native keeps its intrinsics; this file only links on the wasm
+// legs through the self-host registry.
+//
+// Header names compare case-insensitively (RFC 9110 §5.1) through the same
+// ASCII-only per-char fold http_response uses, so native and wasm agree on a
+// non-ASCII name too.
+fn __hq_fold(c: String) -> String = match string.index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) {
+  some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
+  none => c,
+}
+
+fn __hq_ci_at(a: List[String], b: List[String], i: Int) -> Bool = if i >= list.len(a) then true
+else if __hq_fold(list.get(a, i) ?? "") != __hq_fold(list.get(b, i) ?? "") then false
+else __hq_ci_at(a, b, i + 1)
+
+fn __hq_ci_eq(x: String, y: String) -> Bool = {
+  let a = string.chars(x)
+  let b = string.chars(y)
+  if list.len(a) != list.len(b) then false
+  else __hq_ci_at(a, b, 0)
+}
+
+fn __hq_nh(req: List[String]) -> Int = int.parse(list.get(req, 3) ?? "0") ?? 0
+
+// First slot past the header pairs — where the bound params start.
+fn __hq_params_at(req: List[String]) -> Int = 4 + 2 * __hq_nh(req)
+
+fn http_new_request(method: String, target: String, body: String, headers: Map[String, String]) -> List[String] = {
+  let pairs = map.entries(headers) |> list.flat_map(((k, v)) => [k, v])
+  [method, target, body, int.to_string(map.len(headers))] + pairs
+}
+
+fn http_req_method(req: List[String]) -> String = list.get(req, 0) ?? ""
+
+fn http_req_path(req: List[String]) -> String = list.get(req, 1) ?? ""
+
+fn http_req_body(req: List[String]) -> String = list.get(req, 2) ?? ""
+
+fn __hq_find(req: List[String], i: Int, end: Int, key: String) -> String? = if i >= end then none
+else if __hq_ci_eq(list.get(req, i) ?? "", key) then list.get(req, i + 1)
+else __hq_find(req, i + 2, end, key)
+
+fn http_req_header(req: List[String], key: String) -> String? = __hq_find(
+  req,
+  4,
+  __hq_params_at(req),
+  key,
+)
+
+fn __hq_param(req: List[String], i: Int, name: String) -> String? = if i >= list.len(req) then none
+else if (list.get(req, i) ?? "") == name then list.get(req, i + 1)
+else __hq_param(req, i + 2, name)
+
+fn http_param(req: List[String], name: String) -> String? = __hq_param(
+  req,
+  __hq_params_at(req),
+  name,
+)
+
+// New bindings in front of the ones an enclosing mount bound (the native rule).
+fn http_req_with_params(req: List[String], flat: List[String]) -> List[String] = {
+  let at = __hq_params_at(req)
+  list.take(req, at) + flat + list.drop(req, at)
+}
+
+fn http_req_with_path(req: List[String], target: String) -> List[String] = list.set(req, 1, target)

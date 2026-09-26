@@ -40,3 +40,29 @@ fn http_url_decode(s: String) -> String = {
   let _x = __ud_fill(prim.handle(buf), h + 12, n, 0, 0)
   string.from_bytes(buf)
 }
+
+// http.query_params on the wasm legs (#2588), beside the decoder it calls.
+// The native rule: split the query at `&`, keep pairs that HAVE an `=`,
+// percent-decode both sides, a repeated key keeps its LAST value. Index
+// recursion, no closures — the self-host dialect's shape.
+fn __qp_fill(pairs: List[String], i: Int, acc: Map[String, String]) -> Map[String, String] = if i >= list.len(pairs) then acc
+else {
+  let p = list.get(pairs, i) ?? ""
+  match string.index_of(p, "=") {
+    some(at) => __qp_fill(
+      pairs,
+      i + 1,
+      map.set(acc, http_url_decode(string.take(p, at)), http_url_decode(string.drop(p, at + 1))),
+    ),
+    none => __qp_fill(pairs, i + 1, acc),
+  }
+}
+
+fn http_query_params(req: List[String]) -> Map[String, String] = {
+  let target = list.get(req, 1) ?? ""
+  let q = match string.index_of(target, "?") {
+    some(at) => string.drop(target, at + 1),
+    none => "",
+  }
+  __qp_fill(string.split(q, "&"), 0, map.new())
+}
