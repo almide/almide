@@ -202,7 +202,7 @@ fn wasm_cross_module_same_name_type_top_let() {
     // so the #433 name-pin gate refused the build on BOTH targets. `a` also
     // writes its let and fn ABOVE `type Step`, which typed them against
     // `b.Step` (E013 on a correct program). `b.names()` reads the let inside
-    // its own module. Expected `1` `5` `2` `x,yy` on both.
+    // its own module. Expected `1` `5` `2` `x,yy` `p` on both.
     assert_cross_target_project(&[
         ("almide.toml", MOD_PKG_TOML),
         (
@@ -215,6 +215,7 @@ fn wasm_cross_module_same_name_type_top_let() {
             "src/b.almd",
             "type Step = { name: String }\n\
              let STEPS: List[Step] = [Step { name: \"x\" }, Step { name: \"yy\" }]\n\
+             let PAIR: (Step, Int) = (Step { name: \"p\" }, 9)\n\
              fn names() -> String = STEPS |> list.map((s) => s.name) |> list.join(\",\")\n",
         ),
         (
@@ -226,6 +227,7 @@ fn wasm_cross_module_same_name_type_top_let() {
              \x20 println(int.to_string(a.FIRST.n))\n\
              \x20 println(int.to_string(list.len(b.STEPS)))\n\
              \x20 println(b.names())\n\
+             \x20 println(b.PAIR.0.name)\n\
              }\n",
         ),
     ]);
