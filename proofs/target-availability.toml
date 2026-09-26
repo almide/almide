@@ -818,12 +818,10 @@ issue = "#2633"
 
 [[unavailable]]
 fn = "http.cancel"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
-reason-stock-p1 = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
-reason-structural = "host-surface"
-issue = "#2633"
+reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
+issue = "#1710"
 
 [[unavailable]]
 fn = "http.openai_streaming_call_with_limits"
@@ -836,45 +834,35 @@ issue = "#2633"
 
 [[unavailable]]
 fn = "http.poll"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
-reason-stock-p1 = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
-reason-structural = "host-surface"
-issue = "#2633"
+reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
+issue = "#1710"
 
 [[unavailable]]
 fn = "http.read_new"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
-reason-stock-p1 = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
-reason-structural = "host-surface"
-issue = "#2633"
+reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
+issue = "#1710"
 
 [[unavailable]]
 fn = "http.request_stream_with_limits"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
-reason-stock-p1 = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
-reason-structural = "host-surface"
-issue = "#2633"
+reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
+issue = "#1710"
 
 [[unavailable]]
 fn = "http.start"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
-reason-stock-p1 = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
-reason-structural = "host-surface"
-issue = "#2633"
+reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
+issue = "#1710"
 
 [[unavailable]]
 fn = "http.wait"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
-reason-stock-p1 = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
-reason-structural = "host-surface"
-issue = "#2633"
+reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
+issue = "#1710"

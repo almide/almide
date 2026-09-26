@@ -1,7 +1,8 @@
-// wasm:skip — the http call handle has no wasm surface yet: `almide check
-// --target wasm` refuses it (proofs/target-availability.toml, pending the
-// wasi:http pollable port), so this is a target-availability refusal, not a
-// leg gap.
+// wasm:skip — the server arm is `net`, which has no wasm host (#1628), and
+// the test runner builds the stock artifact, which refuses the handle (E081,
+// proofs/target-availability.toml). The handle itself runs on the embedded
+// wasm lane (#2633): tests/http_call_handle_test.rs drives these cases on
+// both legs against a Rust loopback server, byte-identical.
 // #2631 / C-366 — the http call handle. `http.start` returns at once; `poll`
 // and `read_new` never block; `wait` ends at the call's own limits; `cancel`
 // closes the connection. A fired limit names itself:
