@@ -70,7 +70,13 @@ fn start(wasm: bool, port: u16) -> Child {
 }
 
 fn kill_group(child: &mut Child) {
-    let _ = Command::new("kill").args(["-9", &format!("-{}", child.id())]).status();
+    // `-9 -- -<pgid>`, the one spelling both kills agree on (measured in
+    // ubuntu:24.04): procps `kill -9 -<pgid>` exits 0 and kills NOTHING, and
+    // `-s KILL -- -<pgid>` is a usage error there — either left the server
+    // running and the wait below hung the CI job until its timeout.
+    let group = Command::new("kill").args(["-9", "--", &format!("-{}", child.id())]).status();
+    assert!(group.as_ref().is_ok_and(|s| s.success()), "could not kill the server's process group: {group:?}");
+    let _ = child.kill();
     let _ = child.wait();
 }
 
