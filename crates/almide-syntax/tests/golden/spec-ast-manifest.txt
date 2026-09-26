@@ -1,4 +1,4 @@
-# oracle: almide 0.64.0 (dev) at 20ab670f8 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.64.0 (dev) at 0b0ca27ec — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -182,6 +182,7 @@ bfd5eb3c00cbbb4990991c3264384106f8cc49298d0e2b8b522385fc5858e45b	spec/integratio
 33033006407e6128ad22f43912dc0afc759399e5a5a6ad0ed4cda4a77d2209ca	spec/lang/alias_cow_test.almd
 976484fe3d1232bb1f4d34220a17ccf2025bfadb6eb519f1fd9a1a24fe26687f	spec/lang/as_pattern_test.almd
 faca35899e2feb714ddfd013785fa11177b1eb90ea9a0536b6285ac51f826107	spec/lang/auto_derive_test.almd
+84d932623ac5e50b5a786bb06a6ece4b390f07c418cb6b705ce00f3a3274c7a6	spec/lang/bang_typed_error_channel_test.almd
 bb2fb68205154e33e7c99909052acb354fb88c20798a0df0fe354afe91352223	spec/lang/bare_self_test.almd
 6f2d0ee6d25b445436d659ef8d47fe4d6dfa95784b014dd1182df9de8c458b85	spec/lang/bidirectional_type_test.almd
 154480edab7c33615f3f9d1b0ead7a4fc5e299e9919d6757ff93bd1ea11dc5b1	spec/lang/block_comment_raw_string_test.almd
