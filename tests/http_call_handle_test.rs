@@ -1,18 +1,25 @@
-//! #2631: the HTTP call handle — per-call `total_ms` / `idle_ms`, `cancel`,
-//! a `poll` that never blocks, `read_new`, and the `_with_limits` streaming
-//! twins — against a loopback server this test runs. The server records, per
-//! connection, when it accepted and when its next write FAILED: that failure
-//! is the server seeing the client close the connection, so every "the
-//! connection is closed" claim below is measured on the server's side, not
-//! inferred from the client's answer (C-366).
+//! #2631 / #2633: the HTTP call handle — per-call `total_ms` / `idle_ms`,
+//! `cancel`, a `poll` that never blocks, `read_new`, and the `_with_limits`
+//! streaming twins — against a loopback server this test runs, on BOTH legs:
+//! the native binary and `almide run --target wasm` (the embedded host, which
+//! serves the handle with the same call core, crates/almide-rt-core). The
+//! server records, per connection, when it accepted and when it saw the
+//! client close the connection (a write that fails, or a read that answers
+//! end-of-stream while it waits), so every "the connection is closed" and
+//! every "the limit fired at ~N ms" claim below is measured on the server's
+//! side, the same way for both legs (C-366). The handle program prints no
+//! timings, so its stdout must be byte-identical across the legs.
 //!
 //! The issue's numbers (a 40 s first byte, a 5 s deadline, a cancel after 3 s)
 //! are scaled down through the limits: a 2 s first byte, 1 s deadlines, a
 //! cancel after about 1 s. The server's paths:
 //!   /trickle?<tag>          200, `text/event-stream`, no length, one
 //!                           `data: <i>` event every 100 ms until the write fails
-//!   /slow?<tag>             2 s of silence, then a complete 5-byte answer
+//!   /slow?<tag>             2 s of silence (watching for the close), then a
+//!                           complete 5-byte answer
 //!   /missing?<tag>          a complete 404 with a repeated header
+//!   /utf8?<tag>             `caf` + the first byte of `é`, 400 ms later the
+//!                           rest and `!`, then the close (no length)
 //!   /v1/chat/completions    an OpenAI-shaped SSE trickle (POST)
 
 use std::collections::HashMap;
@@ -63,6 +70,12 @@ impl Server {
             std::thread::sleep(Duration::from_millis(20));
         }
     }
+
+    /// How long after accepting `target` the server saw the client close it.
+    fn closed_after(&self, target: &str) -> Duration {
+        let c = self.conn(target);
+        c.closed.unwrap_or_else(|| panic!("the server never saw {target} closed")).duration_since(c.accepted)
+    }
 }
 
 fn read_head(sock: &mut TcpStream) -> Option<(String, String, Vec<u8>)> {
@@ -98,25 +111,42 @@ fn read_head(sock: &mut TcpStream) -> Option<(String, String, Vec<u8>)> {
     Some((method, target, body))
 }
 
+/// Wait up to `total` for the client to close the connection: `true` (and
+/// at once) when a read answers end-of-stream or a reset.
+fn watch_close(sock: &mut TcpStream, total: Duration) -> bool {
+    let until = Instant::now() + total;
+    let mut buf = [0u8; 64];
+    sock.set_read_timeout(Some(Duration::from_millis(20))).ok();
+    while Instant::now() < until {
+        match sock.read(&mut buf) {
+            Ok(0) => return true,
+            Ok(_) => {}
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+            Err(_) => return true,
+        }
+    }
+    false
+}
+
 fn serve(mut sock: TcpStream, log: Arc<Mutex<HashMap<String, Conn>>>) {
     let accepted = Instant::now();
     let Some((_method, target, _body)) = read_head(&mut sock) else { return };
     log.lock().unwrap().insert(target.clone(), Conn { accepted, closed: None });
     let path = target.split('?').next().unwrap_or("").to_string();
-    let trickle = |sock: &mut TcpStream, head: &str, event: &dyn Fn(usize) -> String| {
+    let trickle = |sock: &mut TcpStream, head: &str, event: &dyn Fn(usize) -> String| -> bool {
         if sock.write_all(head.as_bytes()).is_err() {
-            return 0;
+            return true;
         }
         // At most 60 s, so a client that never closes cannot pin the thread.
         for i in 0..600 {
             if sock.write_all(event(i).as_bytes()).and_then(|_| sock.flush()).is_err() {
-                return i;
+                return true;
             }
             std::thread::sleep(Duration::from_millis(100));
         }
-        600
+        false
     };
-    match path.as_str() {
+    let closed = match path.as_str() {
         "/trickle" => trickle(
             &mut sock,
             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n",
@@ -128,21 +158,29 @@ fn serve(mut sock: TcpStream, log: Arc<Mutex<HashMap<String, Conn>>>) {
             &|i| format!("data: {{\"choices\":[{{\"delta\":{{\"content\":\"t{i} \"}}}}]}}\n\n"),
         ),
         "/slow" => {
-            std::thread::sleep(Duration::from_secs(2));
-            let _ = sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello");
-            0
+            if watch_close(&mut sock, Duration::from_secs(2)) {
+                true
+            } else {
+                let _ = sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello");
+                false
+            }
         }
         "/missing" => {
             let _ = sock.write_all(
                 b"HTTP/1.1 404 Not Found\r\nX-Kind: a\r\nX-Kind: b\r\nContent-Length: 4\r\n\r\ngone",
             );
-            0
+            false
         }
-        _ => 0,
+        "/utf8" => {
+            let _ = sock.write_all(b"HTTP/1.1 200 OK\r\n\r\ncaf\xC3").and_then(|_| sock.flush());
+            std::thread::sleep(Duration::from_millis(400));
+            let _ = sock.write_all(b"\xA9!");
+            false
+        }
+        _ => false,
     };
-    let closed = matches!(path.as_str(), "/trickle" | "/v1/chat/completions").then(Instant::now);
-    if let Some(c) = log.lock().unwrap().get_mut(&target) {
-        c.closed = closed;
+    if closed && let Some(c) = log.lock().unwrap().get_mut(&target) {
+        c.closed = Some(Instant::now());
     }
 }
 
@@ -150,18 +188,46 @@ fn almide() -> String {
     std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").into())
 }
 
-/// Build `src` into a native binary in `dir`; the binary's path.
-fn build(dir: &std::path::Path, name: &str, src: &str) -> std::path::PathBuf {
-    let source = dir.join(format!("{name}.almd"));
-    let app = dir.join(name);
-    std::fs::write(&source, src).unwrap();
-    let built = Command::new(almide()).arg("build").arg(&source).arg("-o").arg(&app).output().unwrap();
-    assert!(built.status.success(), "build {name}:\n{}", String::from_utf8_lossy(&built.stderr));
-    app
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Leg {
+    Native,
+    Wasm,
 }
 
-fn run(app: &std::path::Path, env: &[(&str, &str)]) -> Output {
-    let mut cmd = Command::new(app);
+/// A program ready to run on one leg: the native binary, or the source the
+/// embedded host runs through `almide run --target wasm`.
+struct Prepared {
+    leg: Leg,
+    path: std::path::PathBuf,
+}
+
+fn prepare(dir: &std::path::Path, name: &str, src: &str, leg: Leg) -> Prepared {
+    let source = dir.join(format!("{name}.almd"));
+    std::fs::write(&source, src).unwrap();
+    match leg {
+        Leg::Native => {
+            let app = dir.join(name);
+            let built = Command::new(almide()).arg("build").arg(&source).arg("-o").arg(&app).output().unwrap();
+            assert!(built.status.success(), "build {name}:\n{}", String::from_utf8_lossy(&built.stderr));
+            Prepared { leg, path: app }
+        }
+        Leg::Wasm => Prepared { leg, path: source },
+    }
+}
+
+fn command(p: &Prepared) -> Command {
+    match p.leg {
+        Leg::Native => Command::new(&p.path),
+        Leg::Wasm => {
+            let mut c = Command::new(almide());
+            c.arg("run").arg(&p.path).arg("--target").arg("wasm");
+            c
+        }
+    }
+}
+
+fn run(p: &Prepared, env: &[(&str, &str)]) -> Output {
+    let mut cmd = command(p);
     for (k, v) in env {
         cmd.env(k, v);
     }
@@ -193,6 +259,13 @@ fn show(r: Result[HttpResponse, String]) -> String = match r {
   err(e) => e,
 }
 
+fn polled(p: Result[HttpResponse, String]?) -> String = match p {
+  some(r) => show(r),
+  none => "pending",
+}
+
+fn first_event(s: String) -> String = string.split(s, "\n\n") |> list.first ?? ""
+
 effect fn drain(c: HttpCall, rounds: Int, acc: String) -> String = {
   let acc2 = acc + http.read_new(c)
   if rounds == 0 then acc2
@@ -216,151 +289,190 @@ effect fn spin(c: HttpCall, turns: Int, got: String) -> (Int, String) = match ht
 effect fn start_and_drop(url: String) -> Unit = {
   let c = http.start("GET", url, "", [:], { total_ms: 0, idle_ms: 0 })!
   env.sleep_ms(300)
-  println("dropping: " + int.to_string(string.len(http.read_new(c))))
+  println("dropping: " + (if string.len(http.read_new(c)) > 0 then "read" else "nothing"))
 }
 
 effect fn main() -> Unit = {
   let b = base()!
   // 1. total_ms is a wall clock: a stream that talks every 100 ms ends at it.
-  let t1 = env.millis()
   let c1 = http.start("GET", b + "/trickle?total", "", [:], { total_ms: 1000, idle_ms: 0 })!
   let r1: Result[HttpResponse, String] = http.wait(c1)
-  println("total: " + int.to_string(env.millis() - t1) + " " + show(r1))
-  println("total-body: " + http.read_new(c1))
+  println("total: " + show(r1))
+  println("total-body: " + first_event(http.read_new(c1)))
 
   // 2. poll never blocks; cancel after ~1 s closes the stream for good.
-  let t2 = env.millis()
   let c2 = http.start("GET", b + "/trickle?cancel", "", [:], { total_ms: 0, idle_ms: 0 })!
+  println("cancel-before: " + polled(http.poll(c2)))
   let (turns, got) = spin(c2, 0, "")!
   http.cancel(c2)
-  println("cancel: " + int.to_string(env.millis() - t2) + " turns=" + int.to_string(turns) + " events=" + int.to_string(list.len(string.split(got, "\n\n")) - 1))
-  println("cancel-first: " + (string.split(got, "\n\n") |> list.first ?? ""))
+  println("cancel: turns=" + int.to_string(turns) + " delivered=" + (if list.len(string.split(got, "\n\n")) > 3 then "several" else "few"))
+  println("cancel-first: " + first_event(got))
   println("after-cancel: [" + drain(c2, 5, "")! + "]")
-  println("after-cancel-poll: " + (match http.poll(c2) { some(r) => show(r), none => "pending" }))
+  println("after-cancel-poll: " + polled(http.poll(c2)))
   http.cancel(c2)
-  println("cancel-twice: " + (match http.poll(c2) { some(r) => show(r), none => "pending" }))
+  println("cancel-twice: " + polled(http.poll(c2)))
 
-  // 3. per-call limits beat a slow first byte; the process-wide default does
-  //    not apply to a call that carries limits.
-  let t3 = env.millis()
+  // 3. per-call limits beat a slow first byte; the process-wide default
+  //    (ALMIDE_HTTP_TIMEOUT_SECS=1 here) does not apply to a call with limits.
   let r3: Result[HttpResponse, String] = http.wait(http.start("GET", b + "/slow?roomy", "", [:], { total_ms: 4000, idle_ms: 4000 })!)
-  println("slow-roomy: " + int.to_string(env.millis() - t3) + " " + show(r3))
-  let t4 = env.millis()
+  println("slow-roomy: " + show(r3))
   let r4: Result[HttpResponse, String] = http.wait(http.start("GET", b + "/slow?total", "", [:], { total_ms: 1000, idle_ms: 0 })!)
-  println("slow-total: " + int.to_string(env.millis() - t4) + " " + show(r4))
-  let t5 = env.millis()
+  println("slow-total: " + show(r4))
   let r5: Result[HttpResponse, String] = http.wait(http.start("GET", b + "/slow?idle", "", [:], { total_ms: 0, idle_ms: 500 })!)
-  println("slow-idle: " + int.to_string(env.millis() - t5) + " " + show(r5))
-  let t6 = env.millis()
-  let r6: Result[HttpResponse, String] = http.request_response("GET", b + "/slow?default", "", [:])
-  println("slow-default: " + int.to_string(env.millis() - t6) + " " + show(r6))
+  println("slow-idle: " + show(r5))
 
   // 4. the whole response record, any status: the request_response answer.
   let r7: Result[HttpResponse, String] = http.wait(http.start("GET", b + "/missing?record", "", [:], { total_ms: 2000, idle_ms: 0 })!)
   println("record: " + show(r7) + " " + (match r7 { ok(resp) => string.join(http.header_values(resp, "x-kind"), ","), err(_) => "-" }))
 
-  // 5. the streaming twins end at their limit, with the chunks delivered.
+  // 5. read_new holds a split character back until it is whole.
+  let c8 = http.start("GET", b + "/utf8?split", "", [:], { total_ms: 5000, idle_ms: 0 })!
+  env.sleep_ms(200)
+  let early = http.read_new(c8)
+  let r8: Result[HttpResponse, String] = http.wait(c8)
+  println("utf8: " + early + "|" + http.read_new(c8) + "|" + show(r8))
+
+  // 6. the streaming twin ends at its limit, with the chunks delivered; a
+  //    non-2xx is refused the request_stream way; a complete body is ok.
   var chunks: List[String] = []
-  let t8 = env.millis()
-  let r8: Result[Unit, String] = http.request_stream_with_limits("GET", b + "/trickle?stream", "", [:], { total_ms: 700, idle_ms: 0 }, (chunk: String) => list.push(chunks, chunk))
-  println("stream: " + int.to_string(env.millis() - t8) + " " + (match r8 { ok(_) => "ok", err(e) => e }))
-  println("stream-first: " + (string.split(string.join(chunks, ""), "\n\n") |> list.first ?? ""))
+  let r9: Result[Unit, String] = http.request_stream_with_limits("GET", b + "/trickle?stream", "", [:], { total_ms: 700, idle_ms: 0 }, (chunk: String) => list.push(chunks, chunk))
+  println("stream: " + (match r9 { ok(_) => "ok", err(e) => e }))
+  println("stream-first: " + first_event(string.join(chunks, "")))
+  let r10: Result[Unit, String] = http.request_stream_with_limits("GET", b + "/missing?stream", "", [:], { total_ms: 2000, idle_ms: 0 }, (_) => ())
+  println("stream-refused: " + (match r10 { ok(_) => "ok", err(e) => e }))
+  var whole: List[String] = []
+  let r11: Result[Unit, String] = http.request_stream_with_limits("GET", b + "/slow?stream", "", [:], { total_ms: 4000, idle_ms: 0 }, (chunk: String) => list.push(whole, chunk))
+  println("stream-whole: " + (match r11 { ok(_) => "ok", err(e) => e }) + " " + string.join(whole, ""))
+
+  // 7. dropping the last copy of the handle cancels the call.
+  start_and_drop(b + "/trickle?drop")!
+  env.sleep_ms(1500)
+  println("dropped: done")
+
+  // 8. limits are validated; a transport failure is the call's err.
+  println("invalid: " + (match http.start("GET", b + "/missing?never", "", [:], { total_ms: -1, idle_ms: 0 }) { ok(_) => "ok", err(e) => e }))
+  println("refused: " + show(http.wait(http.start("GET", "http://127.0.0.1:1/", "", [:], { total_ms: 0, idle_ms: 0 })!)))
+}
+"#;
+
+/// The server-side and textual assertions every leg must meet.
+fn check_handle_leg(leg: Leg, out: &Output, server: &Server) -> String {
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(out.status.success(), "[{leg:?}] {stdout}\n{}", String::from_utf8_lossy(&out.stderr));
+    let l = lines(out);
+    let get = |k: &str| l.get(k).unwrap_or_else(|| panic!("[{leg:?}] no `{k}:` line in\n{stdout}")).clone();
+    let within = |target: &str, lo: u64, hi: u64| {
+        let ms = server.closed_after(target).as_millis() as u64;
+        assert!((lo..hi).contains(&ms), "[{leg:?}] the server saw {target} closed {ms} ms after accept, want [{lo}, {hi})");
+    };
+
+    // 1. the wall clock fires at ~1 s, says which limit it was, and closes
+    assert_eq!(get("total"), "request timeout: total_ms 1000 exceeded", "[{leg:?}]");
+    assert_eq!(get("total-body"), "data: 0", "[{leg:?}] bytes that arrived before the limit stay readable");
+    within("/trickle?total", 900, 2500);
+
+    // 2. poll did not block (the loop turned every 100 ms while the stream
+    //    ran), and after cancel nothing more arrived
+    assert_eq!(get("cancel-before"), "pending", "[{leg:?}]");
+    assert_eq!(get("cancel"), "turns=10 delivered=several", "[{leg:?}] the poll loop turned every 100 ms");
+    assert_eq!(get("cancel-first"), "data: 0", "[{leg:?}]");
+    assert_eq!(get("after-cancel"), "[]", "[{leg:?}] nothing arrives after cancel");
+    assert_eq!(get("after-cancel-poll"), "request cancelled", "[{leg:?}]");
+    assert_eq!(get("cancel-twice"), "request cancelled", "[{leg:?}] cancel is idempotent");
+    within("/trickle?cancel", 800, 3500);
+
+    // 3. the slow first byte: roomy limits succeed although the process-wide
+    //    default (1 s here) would have failed; a tight total or idle fires,
+    //    naming its limit, and closes the connection at it
+    assert_eq!(get("slow-roomy"), "200 hello", "[{leg:?}]");
+    assert!(server.conn("/slow?roomy").closed.is_none(), "[{leg:?}] the roomy call waited for its answer");
+    assert_eq!(get("slow-total"), "request timeout: total_ms 1000 exceeded", "[{leg:?}]");
+    within("/slow?total", 900, 1900);
+    assert_eq!(get("slow-idle"), "request timeout: idle_ms 500 exceeded", "[{leg:?}]");
+    within("/slow?idle", 400, 1900);
+
+    // 4. wait answers the full record; a 404 is ok
+    assert_eq!(get("record"), "404 gone a,b", "[{leg:?}]");
+
+    // 5. a character split across arrivals is held back until whole
+    assert_eq!(get("utf8"), "caf|é!|200 café!", "[{leg:?}]");
+
+    // 6. the streaming twin
+    assert_eq!(get("stream"), "request timeout: total_ms 700 exceeded", "[{leg:?}]");
+    assert_eq!(get("stream-first"), "data: 0", "[{leg:?}]");
+    within("/trickle?stream", 600, 2500);
+    assert_eq!(get("stream-refused"), "HTTP 404: Not Found: gone", "[{leg:?}]");
+    assert_eq!(get("stream-whole"), "ok hello", "[{leg:?}]");
+
+    // 7. drop = cancel: the server saw the close long before the program's
+    //    1.5 s sleep after the drop ended
+    assert_eq!(get("dropping"), "read", "[{leg:?}]");
+    assert_eq!(get("dropped"), "done", "[{leg:?}]");
+    within("/trickle?drop", 0, 1400);
+
+    // 8.
+    assert!(get("invalid").starts_with("invalid limits: "), "[{leg:?}] {}", get("invalid"));
+    assert!(get("refused").starts_with("connection failed: "), "[{leg:?}] {}", get("refused"));
+    stdout
+}
+
+#[test]
+fn call_handle_limits_cancel_poll_and_the_streaming_twins() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut seen: Vec<(Leg, String)> = Vec::new();
+    for leg in [Leg::Native, Leg::Wasm] {
+        // A fresh server per leg: its connection log is keyed by target.
+        let server = Server::start();
+        let app = prepare(dir.path(), &format!("handle_{leg:?}"), HANDLE_PROGRAM, leg);
+        // ALMIDE_HTTP_TIMEOUT_SECS=1 scales the 30 s default of the calls that
+        // take no limits down to 1 s — the calls that DO take limits ignore it.
+        let port = server.port.to_string();
+        let out = run(&app, &[("PORT", &port), ("ALMIDE_HTTP_TIMEOUT_SECS", "1")]);
+        seen.push((leg, check_handle_leg(leg, &out, &server)));
+    }
+    // The program prints no timings: the two legs answer byte-identically.
+    assert_eq!(seen[0].1, seen[1].1, "native vs --target wasm stdout differ");
+}
+
+/// What only the native leg serves: the SSE twin (its accumulator has no wasm
+/// body — `openai_streaming_call` itself is native-only) and the one-shot
+/// full-response client that shows the process-wide default still applies to
+/// a call WITHOUT limits.
+const NATIVE_ONLY_PROGRAM: &str = r#"
+import http
+import env
+
+effect fn main() -> Unit = {
+  let b = "http://127.0.0.1:" + (env.get("PORT") ?? "0")
+  let t6 = env.millis()
+  let r6: Result[HttpResponse, String] = http.request_response("GET", b + "/slow?default", "", [:])
+  println("slow-default: " + int.to_string(env.millis() - t6) + " " + (match r6 { ok(_) => "ok", err(e) => e }))
   var deltas: List[String] = []
   let t9 = env.millis()
   let r9: Result[String, String] = http.openai_streaming_call_with_limits(b + "/v1", "k", "{}", { total_ms: 700, idle_ms: 0 }, (d: String) => list.push(deltas, d))
   println("openai: " + int.to_string(env.millis() - t9) + " " + (match r9 { ok(_) => "ok", err(e) => e }))
   println("openai-first: " + (deltas |> list.first ?? ""))
-
-  // 6. dropping the last copy of the handle cancels the call.
-  start_and_drop(b + "/trickle?drop")!
-  env.sleep_ms(1500)
-  println("dropped: done")
-
-  // 7. limits are validated.
-  println("invalid: " + (match http.start("GET", b + "/missing?never", "", [:], { total_ms: -1, idle_ms: 0 }) { ok(_) => "ok", err(e) => e }))
 }
 "#;
 
 #[test]
-fn call_handle_limits_cancel_poll_and_the_streaming_twins() {
+fn native_only_default_timeout_and_the_sse_twin() {
     let server = Server::start();
     let dir = tempfile::tempdir().unwrap();
-    let app = build(dir.path(), "handle", HANDLE_PROGRAM);
-    // ALMIDE_HTTP_TIMEOUT_SECS=1 scales the 30 s default of the calls that take
-    // no limits down to 1 s — and the calls that DO take limits must ignore it.
+    let app = prepare(dir.path(), "native_only", NATIVE_ONLY_PROGRAM, Leg::Native);
     let port = server.port.to_string();
     let out = run(&app, &[("PORT", &port), ("ALMIDE_HTTP_TIMEOUT_SECS", "1")]);
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(out.status.success(), "{stdout}\n{}", String::from_utf8_lossy(&out.stderr));
     let l = lines(&out);
     let get = |k: &str| l.get(k).unwrap_or_else(|| panic!("no `{k}:` line in\n{stdout}")).clone();
-
-    // 1. the wall clock fires at ~1 s and says which limit it was
-    let (ms, rest) = timed(&get("total"));
-    assert_eq!(rest, "request timeout: total_ms 1000 exceeded", "{stdout}");
-    assert!((900..3000).contains(&ms), "total_ms 1000 fired after {ms} ms");
-    assert!(get("total-body").starts_with("data: 0"), "bytes that arrived before the limit stay readable: {stdout}");
-    let c = server.conn("/trickle?total");
-    let closed = c.closed.expect("the server saw the close").duration_since(c.accepted);
-    assert!(closed < Duration::from_millis(2500), "server saw the close {closed:?} after accept");
-
-    // 2. poll did not block (the loop turned ~10 times while the stream ran),
-    //    and after cancel nothing more arrived
-    let cancel = get("cancel");
-    let (ms, rest) = timed(&cancel);
-    assert!((800..3000).contains(&ms), "{cancel}");
-    assert!(rest.starts_with("turns=10 "), "the poll loop turned every 100 ms: {cancel}");
-    let events: usize = rest.rsplit('=').next().unwrap().parse().unwrap();
-    assert!(events >= 3, "read_new delivered the stream while it ran: {cancel}");
-    assert_eq!(get("cancel-first"), "data: 0");
-    assert_eq!(get("after-cancel"), "[]", "nothing arrives after cancel");
-    assert_eq!(get("after-cancel-poll"), "request cancelled");
-    assert_eq!(get("cancel-twice"), "request cancelled", "cancel is idempotent");
-    let c = server.conn("/trickle?cancel");
-    let closed = c.closed.expect("the server saw the close").duration_since(c.accepted);
-    assert!(
-        (Duration::from_millis(800)..Duration::from_millis(3500)).contains(&closed),
-        "the server saw the close {closed:?} after accept (cancel ran at ~1 s)"
-    );
-
-    // 3. the slow first byte: roomy limits succeed although the process-wide
-    //    default (1 s here) would have failed; a tight total or idle fires,
-    //    naming its limit; the unlimited call keeps the process-wide default
-    let (ms, rest) = timed(&get("slow-roomy"));
-    assert_eq!(rest, "200 hello");
-    assert!(ms >= 1900, "{ms}");
-    let (ms, rest) = timed(&get("slow-total"));
-    assert_eq!(rest, "request timeout: total_ms 1000 exceeded");
-    assert!((900..1900).contains(&ms), "{ms}");
-    let (ms, rest) = timed(&get("slow-idle"));
-    assert_eq!(rest, "request timeout: idle_ms 500 exceeded");
-    assert!((400..1900).contains(&ms), "{ms}");
     let (_, rest) = timed(&get("slow-default"));
     assert!(rest.starts_with("read timed out waiting for the server"), "{rest}");
-
-    // 4. wait answers the full record; a 404 is ok
-    assert_eq!(get("record"), "404 gone a,b");
-
-    // 5. the streaming twins
-    let (ms, rest) = timed(&get("stream"));
-    assert_eq!(rest, "request timeout: total_ms 700 exceeded");
-    assert!((600..2500).contains(&ms), "{ms}");
-    assert_eq!(get("stream-first"), "data: 0");
-    assert!(server.conn("/trickle?stream").closed.is_some());
     let (ms, rest) = timed(&get("openai"));
     assert_eq!(rest, "request timeout: total_ms 700 exceeded");
     assert!((600..2500).contains(&ms), "{ms}");
     assert_eq!(get("openai-first"), "t0 ");
-
-    // 6. drop = cancel: the server saw the close long before the program's
-    //    1.5 s sleep after the drop ended
-    assert_eq!(get("dropped"), "done");
-    let c = server.conn("/trickle?drop");
-    let closed = c.closed.expect("the server saw the close").duration_since(c.accepted);
-    assert!(closed < Duration::from_millis(1400), "dropping the handle closed the connection only after {closed:?}");
-
-    // 7.
-    assert!(get("invalid").starts_with("invalid limits: "), "{}", get("invalid"));
+    assert!(server.conn("/v1/chat/completions").closed.is_some());
 }
 
 const OLD_STREAM_PROGRAM: &str = r#"
@@ -390,10 +502,10 @@ effect fn main() -> Unit = {
 fn a_trickle_outlives_the_classic_stream_but_not_total_ms() {
     let server = Server::start();
     let dir = tempfile::tempdir().unwrap();
-    let app = build(dir.path(), "old_stream", OLD_STREAM_PROGRAM);
+    let app = prepare(dir.path(), "old_stream", OLD_STREAM_PROGRAM, Leg::Native);
     let port = server.port.to_string();
 
-    let mut child = Command::new(&app)
+    let mut child = command(&app)
         .env("PORT", &port)
         .env("TAG", "classic")
         .env("ALMIDE_HTTP_TIMEOUT_SECS", "1")
@@ -411,4 +523,31 @@ fn a_trickle_outlives_the_classic_stream_but_not_total_ms() {
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "request timeout: total_ms 1000 exceeded");
     assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
     assert!(server.conn("/trickle?limited").closed.is_some());
+}
+
+/// The E081 verdict names what is and is not served: the stock artifact
+/// (`almide check --target wasm`, the build route) still refuses the handle
+/// — stock WASI has no host for it — while the run route admits it, and the
+/// SSE twin stays refused on every wasm leg.
+#[test]
+fn the_stock_route_and_the_sse_twin_keep_their_e081() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("stock.almd");
+    std::fs::write(
+        &src,
+        "import http\n\neffect fn main() -> Unit = {\n  let c = http.start(\"GET\", \"http://127.0.0.1:1/\", \"\", [:], { total_ms: 0, idle_ms: 0 })!\n  http.cancel(c)\n}\n",
+    )
+    .unwrap();
+    let checked = Command::new(almide()).arg("check").arg(&src).arg("--target").arg("wasm").output().unwrap();
+    let stderr = String::from_utf8_lossy(&checked.stderr);
+    assert!(!checked.status.success() && stderr.contains("error[E081]: `http.start`"), "{stderr}");
+    let sse = dir.path().join("sse.almd");
+    std::fs::write(
+        &sse,
+        "import http\n\neffect fn main() -> Unit = {\n  let r = http.openai_streaming_call_with_limits(\"http://127.0.0.1:1\", \"k\", \"{}\", { total_ms: 1, idle_ms: 0 }, (_) => ())\n  println(match r { ok(_) => \"ok\", err(e) => e })\n}\n",
+    )
+    .unwrap();
+    let ran = Command::new(almide()).arg("run").arg(&sse).arg("--target").arg("wasm").output().unwrap();
+    let stderr = String::from_utf8_lossy(&ran.stderr);
+    assert!(!ran.status.success() && stderr.contains("error[E081]: `http.openai_streaming_call_with_limits`"), "{stderr}");
 }
