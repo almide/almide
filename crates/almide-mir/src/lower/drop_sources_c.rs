@@ -228,6 +228,28 @@ pub fn generate_record_drop_sources(
         out.push_str("  } else ()\n");
         out.push_str("  prim.rc_dec(h)\n");
         out.push_str("}\n");
+        // `List[(Int, R)]` — the `list.enumerate_h` result over a recursive-drop
+        // record (#2588, a route table's `list.enumerate`): the rich-variant
+        // `$__drop_list_int_<V>` shape with the record's own `$__drop_<R>` in
+        // slot 1. Emitted for every such record, like the variant twin, so the
+        // classifier (`list_int_variant_drop`) can name it unconditionally.
+        out.push_str(&format!(
+            "fn __drop_list_int_{fname}(xs: List[(Int, {tname})]) -> Unit = {{\n  \
+               let h = prim.handle(xs)\n  \
+               if prim.load32(h + 0) == 1 then __drop_list_int_{fname}_loop(h, prim.load32(h + 4), 0) else ()\n  \
+               prim.rc_dec(h)\n}}\n\
+             fn __drop_list_int_{fname}_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
+               if i >= n then ()\n  \
+               else {{\n    \
+                 let th = prim.load64(h + 12 + i * 8)\n    \
+                 if prim.load32(th + 0) == 1 then {{\n      \
+                   let v: {tname} = prim.load_handle(th + 20)\n      \
+                   __drop_{fname}(v)\n    \
+                 }} else ()\n    \
+                 prim.rc_dec(th)\n    \
+                 __drop_list_int_{fname}_loop(h, n, i + 1)\n  \
+               }}\n"
+        ));
     }
     emit_record_wrapper_drops(&mut out, type_decls, &rec_names, uses_result_opt_str);
     // SYNTHESIZED recursive drops for the ANONYMOUS record return/binding shapes the corpus uses

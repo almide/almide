@@ -42,9 +42,12 @@ impl LowerCtx {
         if is_heap_ty(k) {
             return None;
         }
-        let vn = self.variant_layouts.is_rich_variant_ty(v, &|rn| {
-            crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
-        })?;
+        let vn = self
+            .variant_layouts
+            .is_rich_variant_ty(v, &|rn| {
+                crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
+            })
+            .or_else(|| self.record_capture_name(v))?;
         Some(format!("list_int_{}", crate::lower::drop_fn_ident(&vn)))
     }
 
