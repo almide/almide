@@ -547,6 +547,7 @@
 65840	spec/wasm_cross/record_forms.almd
 68048	spec/wasm_cross/record_option_none_cells.almd
 67296	spec/wasm_cross/record_pair_result_return.almd
+!	spec/wasm_cross/record_scalar_field_assign_alias.almd
 66336	spec/wasm_cross/record_variant_field_literal.almd
 66192	spec/wasm_cross/records_variants.almd
 65760	spec/wasm_cross/recursion_depth_within_limits.almd

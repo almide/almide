@@ -1,4 +1,4 @@
-# oracle: almide 0.64.0 (dev) at f662aafa6 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.64.0 (dev) at 20ab670f8 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -548,6 +548,7 @@ aefaa405fb27fe9586cf9fcc4e44d2d8f58916922c05c66fee6319f9161bdbd4	0	spec/wasm_cro
 dfb9a53039ccdd5ead3c501a5a35ef6fad366b2dbda14df6328313da6e641fb5	0	spec/wasm_cross/record_forms.almd
 271abe6fa4da842729967f2816941114cc39125d99387f649de7c5d2ba5c182a	0	spec/wasm_cross/record_option_none_cells.almd
 44816fbbd4a26295cb15fb5301a0dcb3d35cc063b56271e2a818d92270c246fa	0	spec/wasm_cross/record_pair_result_return.almd
+d77e7c1c344388ac8e4be04f5af94d0295b83a3684f3a52e42b8ad105940c4ad	0	spec/wasm_cross/record_scalar_field_assign_alias.almd
 09787912c982d1bbeac00f0b7011d4c918c3f1a1edb373730ca36fce0abdf92a	0	spec/wasm_cross/record_variant_field_literal.almd
 e26b1fb1a8b846e0917c292b583529013b4e2a5a4a8c504c0e5420b6aaea93e5	0	spec/wasm_cross/records_variants.almd
 83c02ac2d48c863dab2ccf6870455aadfc2cec073b8db269b517c879d76aa6d9	0	spec/wasm_cross/recursion_depth_within_limits.almd
