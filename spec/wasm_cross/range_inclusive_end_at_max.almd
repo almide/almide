@@ -1,0 +1,46 @@
+// @contract: C-238
+// An inclusive range ending at i64::MAX iterates through its last element and
+// stops, on both targets and the interp. The counting loops stepped the index
+// past the last element to i64::MIN, which still passed `i <= end`, so
+// `a...9223372036854775807` never terminated on native or wasm (#2679). The
+// inline head, a `let`-bound range, a guarded `continue`, a non-literal start,
+// the empty inclusive range, the i64::MIN end of the line, and the exclusive
+// twin (which cannot wrap) are pinned together.
+fn top_from(a: Int) -> Int = {
+  var n = 0
+  for _k in a...9223372036854775807 {
+    n = n + 1
+  }
+  n
+}
+
+effect fn main() -> Unit = {
+  var n = 0
+  for _j in 9223372036854775805...9223372036854775807 {
+    n = n + 1
+  }
+  let r = 9223372036854775806...9223372036854775807
+  var m = 0
+  for i in r {
+    m = m + (i - 9223372036854775800)
+  }
+  var c = 0
+  for i in 9223372036854775803...9223372036854775807 {
+    if i % 2 == 0 then continue
+    else ()
+    c = c + 1
+  }
+  var e = 0
+  for _i in 5...4 {
+    e = e + 1
+  }
+  var lo = 0
+  for i in -9223372036854775808...-9223372036854775806 {
+    lo = lo + (i + 9223372036854775807)
+  }
+  var x = 0
+  for _i in 9223372036854775805..<9223372036854775807 {
+    x = x + 1
+  }
+  println("n=${n} m=${m} c=${c} e=${e} lo=${lo} x=${x} t=${top_from(9223372036854775804)}")
+}
