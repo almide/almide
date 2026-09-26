@@ -1,0 +1,6 @@
+effect fn count() -> Int = 3
+
+effect fn main() -> Unit = {
+  let n: Int = count()!
+  println(int.to_string(n * 2))
+}
