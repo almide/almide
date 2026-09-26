@@ -1,0 +1,15 @@
+// #2645: the top-level `let` and the fn are written ABOVE the type they
+// name, and module `tletqb` declares a different `Step`. Both must pin to
+// `tletqa.Step` whatever the declaration order.
+let FIRST: Step = Step { n: 5 }
+
+fn one() -> Step = Step { n: 1 }
+
+type Step = { n: Int }
+
+let ALL = [
+  Step { n: 1 },
+  Step { n: 2 }
+]
+
+fn total() -> Int = ALL |> list.fold(FIRST.n, (acc, s) => acc + s.n)

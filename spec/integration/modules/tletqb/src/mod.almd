@@ -1,0 +1,14 @@
+// #2645: a same-named `Step` (different shape from `tletqa.Step`) held by
+// annotated top-level `let`s, read inside this module and from the importer.
+type Step = { name: String }
+
+let STEPS: List[Step] = [
+  Step { name: "x" },
+  Step { name: "yy" }
+]
+
+let MAYBE: Step? = some(Step { name: "m" })
+
+let PAIR: (Step, Int) = (Step { name: "p" }, 9)
+
+fn names() -> String = STEPS |> list.map((s) => s.name) |> list.join(",")
