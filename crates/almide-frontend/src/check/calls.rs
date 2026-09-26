@@ -405,6 +405,11 @@ impl Checker {
         self.last_mut_params = sig.mut_params.clone();
 
         self.check_effect_isolation(name, &sig);
+        // #2653: an effect fn DECLARED `-> T` (not `-> Result[..]`) — its
+        // call is `T!` (ADR-0002 §D6), the case whose `!` repair is exact.
+        if sig.is_effect && !sig.ret.is_result() && let Some(s) = self.current_span {
+            self.effect_call_spans.insert((s.line, s.col, s.end_col));
+        }
         self.check_arg_count(name, &sig, arg_tys);
 
         let (mut bindings, concrete_args, aligned_raw) = self.build_call_bindings(&sig, arg_tys, type_args);

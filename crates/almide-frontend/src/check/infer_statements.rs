@@ -100,6 +100,17 @@ impl Checker {
     }
 
     /// `ast::Stmt::Let` arm of [`Self::check_stmt`]. Verbatim text move.
+    /// #2653: an annotated binding whose value is a CALL carries the call's
+    /// span, so a `Result[T, _]` vs `T` mismatch can name the missing `!` and
+    /// place it — the guidance E005 gives `f(g())` and E041 gives `let x = g()`.
+    fn let_call_fix_hint(&self, value: &ast::Expr) -> Option<super::types::FixHint> {
+        let ast::ExprKind::Call { .. } = &value.kind else { return None };
+        Some(super::types::FixHint::LetCallValue {
+            span: value.span?,
+            can_propagate: self.env.auto_unwrap && self.env.lambda_depth == 0,
+        })
+    }
+
     fn check_stmt_let(&mut self, stmt: &mut ast::Stmt) {
         let ast::Stmt::Let { name, ty, value, span } = stmt else { unreachable!() };
         let val_ty = self.infer_expr(value);
@@ -117,7 +128,8 @@ impl Checker {
                 expected: declared.clone(), actual: val_ty.clone(),
                 context: format!("let '{}'", name), span: value.span,
             });
-            self.constrain(declared.clone(), val_ty, format!("let {}", name));
+            let call_hint = self.let_call_fix_hint(value);
+            self.constrain_with_hint(declared.clone(), val_ty, format!("let {}", name), call_hint);
             declared
         } else {
             let t = resolve_ty(&val_ty, &self.uf);
@@ -165,7 +177,8 @@ impl Checker {
                 expected: declared.clone(), actual: val_ty.clone(),
                 context: format!("var '{}'", name), span: value.span,
             });
-            self.constrain(declared.clone(), val_ty, format!("let {}", name));
+            let call_hint = self.let_call_fix_hint(value);
+            self.constrain_with_hint(declared.clone(), val_ty, format!("let {}", name), call_hint);
             declared
         } else {
             let t = resolve_ty(&val_ty, &self.uf);
