@@ -17,3 +17,4 @@
 //! declarations inside the shared sources, `use` lines at top level only
 //! (the splice assembler hoists and dedups them).
 pub mod http_client_core;
+pub mod http_server_core;
