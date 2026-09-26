@@ -1,4 +1,4 @@
-# oracle: almide 0.64.0 (dev) at 0b0ca27ec — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.64.0 (dev) at 67546a97d — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -890,6 +890,7 @@ fafcc912dd007063c56c465ab8fb6f5a039116956908d594d41875d39e9b8dca	spec/wasm_cross
 03fda579507490c40467c3458745c87d64942f2cede98e808be705aaf776c554	spec/wasm_cross/heap_result_if_match_arm_frame.almd
 237ee81f6c554359ec12cdb2fae13fb2210463aad169abca3b01d21c5a2338aa	spec/wasm_cross/heap_result_if_option_aggregate.almd
 ff1a18d2288f9410bbe694ee6c8ab3126e45de8a9357d47e6da9cc0ad2b26042	spec/wasm_cross/heap_result_if_record_arm.almd
+53ba1d8b1e72743ca09c5f1370362b1e0841615e4d8b9f4bceb95d68abc4fe84	spec/wasm_cross/heap_result_if_some_user_call_temps.almd
 792d9b71dcce5c41b785ebaad36a3398b09ee35168f09938726ae0e28333a1b2	spec/wasm_cross/heap_result_if_str_int.almd
 7910efd39dd32df79c848e82b72854d78a717b240be6a534f5146f3873e2243c	spec/wasm_cross/heap_result_tuple_return.almd
 09e23f80eab08aea2ba9c2cda382d133bc3805e0ebd1ad05c4e36b5eaa749334	spec/wasm_cross/hex_two_module_link.almd
