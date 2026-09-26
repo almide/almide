@@ -54,9 +54,9 @@ fn bare_named_of(name: &str, types: &TypeTable) -> Option<SliceTy> {
         .map(|&i| SliceTy::Named(i))
         .or_else(|| (name == "Value").then_some(SliceTy::Value))
         .or_else(|| match name {
-            // stdlib/http_response.almd / json_path.almd own these reps;
-            // the eraser publishes them as List[String].
-            "HttpResponse" | "JsonPath" => {
+            // stdlib/http_response.almd / http_serve.almd / json_path.almd
+            // own these reps; the eraser publishes them as List[String].
+            "HttpResponse" | "HttpRequest" | "JsonPath" => {
                 Some(SliceTy::List(types.intern(SliceTy::Scalar(Scalar::Str))))
             }
             // The http call handle (#2633): this emitter's own one-slot block

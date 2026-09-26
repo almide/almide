@@ -35,6 +35,14 @@ fn seed_selfhost_newtype_reps(
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::String]),
         );
     }
+    // HttpRequest — `[method, target, body, k1, v1, …]`
+    // (stdlib/http_serve.almd, #2650; the HttpResponse discipline).
+    if !declared.contains("HttpRequest") {
+        map.insert(
+            "HttpRequest".to_string(),
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::String]),
+        );
+    }
     // FileStat — the fs.stat Ok payload. Its decl lives in the BUNDLED stdlib fs module,
     // which `source_to_ir` skips (defs come from the self-host registry), so the nominal
     // `Named(FileStat)` never reaches `record_layouts` and a `meta.size` member read walls.

@@ -54,6 +54,15 @@ pub(crate) const OP_HTTP_DELETE: i32 = 47;
 pub(crate) const OP_HTTP_FRAMED_TEXT: i32 = 48;
 pub(crate) const OP_HTTP_FRAMED_STATUS: i32 = 49;
 pub(crate) const OP_HTTP_FRAMED_BYTES: i32 = 50;
+/// http.serve (#2650, C-367): the guest-owned serve loop's three host
+/// ops, served by the embedded host through the native runtime's own
+/// server core. 70 binds (port in a), 71 answers the next request as
+/// frames [method, target, body, k1, v1, …], 72 writes the response (the
+/// http_framed cells in a: status, body, k1, v1, …) and closes the
+/// connection. 53..=59 belong to the http call handle (#2633).
+pub(crate) const OP_HTTP_SERVE_BIND: i32 = 70;
+pub(crate) const OP_HTTP_SERVE_NEXT: i32 = 71;
+pub(crate) const OP_HTTP_SERVE_REPLY: i32 = 72;
 /// fs.stat / fs.glob (#1423 stage 4): the two metadata surfaces the
 /// structural leg had no arm for. 38 answers the four FileStat fields as
 /// a 32-byte LE buffer (size, is_dir, is_file, modified — each an i64);

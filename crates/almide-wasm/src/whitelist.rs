@@ -276,6 +276,18 @@ pub(crate) const HTTP_CALL_SUM: &[&str] = &[
     "__hc_read_new_impl", "__hc_wait_impl", "__hc_cancel_impl",
 ];
 
+/// The http.serve family (#2650, audited 2026-09-26): stdlib/http_serve.almd —
+/// PURE language surface over the published List[String] HttpRequest /
+/// HttpResponse reps (list.get/drop/chunk/find, string.split/index_of/take/
+/// drop/chars, map.new/set, http.url_decode, option.flat_map, a `while`
+/// loop, the handler through call_indirect); the only leaves are the
+/// op-70/71/72 host calls the emitter lowers itself (calls.rs). Result /
+/// Option returns build through language-level constructors.
+pub(crate) const HTTP_SERVE_SUM: &[&str] = &[
+    "http_serve", "http_req_method", "http_req_path", "http_req_body", "http_req_header",
+    "http_query_params",
+];
+
 pub(crate) const MATH_VERIFIED: &[&str] = &[
     "math_abs", "math_atan", "math_choose", "math_cos", "math_e", "math_exp",
     "math_factorial", "math_fmax", "math_fmin", "math_fpow", "math_log", "math_log10",
@@ -338,6 +350,7 @@ const TIERS: &[(&[&str], bool)] = &[
     (BYTES_FAMILY_SUM, true),
     (HTTP_CLIENT_SUM, true),
     (HTTP_CALL_SUM, true),
+    (HTTP_SERVE_SUM, true),
     (MATRIX_COMPOSITIONS, false),
 ];
 
