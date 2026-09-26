@@ -1,0 +1,107 @@
+// http_call — the WASM lowering of the http call handle (#2633; native #2631,
+// C-366). The embedded host runs the SAME call core native runs
+// (crates/almide-rt-core/src/http_call_core.rs: the worker thread, the
+// total_ms / idle_ms clock, cancel, the UTF-8-safe read_new split), keyed by a
+// host call id; this splice is the guest half. Native keeps its direct
+// intrinsics; this file only ever links on the wasm legs through the
+// self-host registry.
+//
+// `HttpCall` is a one-slot block holding the host id. The emitter owns its
+// layout AND its drop glue: when the last copy of the handle is released the
+// glue sends the host op that cancels and forgets the call — the native
+// `Drop`, so "dropping the last handle cancels" holds on this leg too.
+//
+// The leaves below are host ops the structural emitter lowers itself
+// (http_call.rs): open 53 / state 54 / wait and result 55 / read 56 /
+// cancel 57 / step 58 (the drop glue's 59 has no leaf). The start frame
+// reuses http_framed's decimal CHAR-length cells — method, body, total_ms, idle_ms, then each
+// header key and value in map order — parsed by the host with the same char
+// arithmetic.
+import http
+
+fn __hc_cell(s: String) -> String = "${string.len(s)}\n${s}"
+
+fn __hc_frame(method: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int) -> String = map.entries(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
+  "${__hc_cell(method)}${__hc_cell(body)}${__hc_cell(int.to_string(total_ms))}${__hc_cell(int.to_string(idle_ms))}",
+  (acc, cell) => acc + cell,
+)
+
+effect fn __http_call_open(url: String, frame: String) -> Result[HttpCall, String] = _
+
+// The two non-blocking leaves are declared WITHOUT `effect`: the surfaces
+// they serve (`poll` answers an Option, `read_new` a String) are called with
+// their raw type at the site, so their impls must return exactly that — an
+// effect impl would hand back the Result carrier. The work is still the
+// host's; nothing folds a bodyless leaf.
+fn __http_call_state(c: HttpCall) -> Result[String, String] = _
+
+fn __http_call_result_raw(c: HttpCall) -> Result[List[String], String] = _
+
+effect fn __http_call_wait_raw(c: HttpCall) -> Result[List[String], String] = _
+
+fn __http_call_read_raw(c: HttpCall) -> Result[String, String] = _
+
+effect fn __http_call_cancel_raw(c: HttpCall) -> Result[String, String] = _
+
+effect fn __http_call_step_raw(c: HttpCall) -> Result[String, String] = _
+
+// `http.start`'s private `__call_start` (the limits record already spread).
+effect fn __hc_start_impl(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = __http_call_open(
+  url,
+  __hc_frame(method, body, headers, total_ms, idle_ms),
+)
+
+// The response rides as `[status, body, k1, v1, …]` — HttpResponse's own
+// self-host representation (stdlib/http_response.almd), header lines in wire
+// order with repeats kept.
+effect fn __hc_wait_impl(c: HttpCall) -> Result[List[String], String] = __http_call_wait_raw(c)
+
+// Never blocks: the state op checks the wall clock and answers "1" once the
+// call ended; an ended call's outcome never changes, so the result op (the
+// wait op 55, which returns at once on an ended call) answers it.
+fn __hc_poll_impl(c: HttpCall) -> Result[List[String], String]? = match __http_call_state(c) {
+  ok("1") => some(__http_call_result_raw(c)),
+  _ => none,
+}
+
+fn __hc_read_new_impl(c: HttpCall) -> String = __http_call_read_raw(c) ?? ""
+
+effect fn __hc_cancel_impl(c: HttpCall) -> Unit = {
+  let _ = __http_call_cancel_raw(c)
+  ()
+}
+
+// One streaming turn, answered by the host as `<tag><cell piece>[<err>]`:
+// tag `c` = more to come, `o` = ended ok, `x` = ended with the error text
+// that follows the piece. The piece is delivered before the ending, as
+// native delivers it.
+fn __hc_step_piece(s: String) -> String = {
+  let rest = string.drop(s, 1)
+  let cut = string.index_of(rest, "\n") ?? 0
+  let n = int.parse(string.take(rest, cut)) ?? 0
+  string.slice(rest, cut + 1, cut + 1 + n)
+}
+
+fn __hc_step_error(s: String) -> String = {
+  let rest = string.drop(s, 1)
+  let cut = string.index_of(rest, "\n") ?? 0
+  let n = int.parse(string.take(rest, cut)) ?? 0
+  string.drop(rest, cut + 1 + n)
+}
+
+effect fn __hc_pump(c: HttpCall, on_chunk: (String) -> Unit) -> Result[Unit, String] = {
+  let s = __http_call_step_raw(c) ?? "o0\n"
+  let piece = __hc_step_piece(s)
+  if string.len(piece) > 0 then on_chunk(piece) else ()
+  match string.take(s, 1) {
+    "c" => __hc_pump(c, on_chunk),
+    "x" => err(__hc_step_error(s)),
+    _ => ok(()),
+  }
+}
+
+// `request_stream_with_limits`'s private `__request_stream_limited`.
+effect fn __hc_stream_limited_impl(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int, on_chunk: (String) -> Unit) -> Result[Unit, String] = {
+  let c = __hc_start_impl(method, url, body, headers, total_ms, idle_ms)!
+  __hc_pump(c, on_chunk)
+}

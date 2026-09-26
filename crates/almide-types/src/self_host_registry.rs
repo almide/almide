@@ -304,6 +304,10 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (crate::embedded::SRC_VALUE_UTILS, &[("value_pick", "value.pick"), ("value_omit", "value.omit"), ("value_to_camel_case", "value.to_camel_case"), ("value_to_snake_case", "value.to_snake_case")]),
         (crate::embedded::SRC_HTTP_URL_DECODE, &[("http_url_decode", "http.url_decode")]),
         (crate::embedded::SRC_HTTP_FRAMED, &[("__request_impl", "http.request"), ("__request_status_impl", "http.request_status"), ("__get_status_impl", "http.get_status"), ("__request_bytes_impl", "http.request_bytes"), ("__get_bytes_impl", "http.get_bytes")]),
+        // The http call handle (#2633): `__call_start` / `__request_stream_limited` are
+        // http.almd's private leaves (bare dunder demand keys, the codec-splice
+        // convention); poll / read_new / wait / cancel are its public intrinsics.
+        (crate::embedded::SRC_HTTP_CALL, &[("__hc_start_impl", "__call_start"), ("__hc_stream_limited_impl", "__request_stream_limited"), ("__hc_poll_impl", "http.poll"), ("__hc_read_new_impl", "http.read_new"), ("__hc_wait_impl", "http.wait"), ("__hc_cancel_impl", "http.cancel")]),
         (crate::embedded::SRC_DATETIME_PARSE_ISO, &[("datetime_parse_iso", "datetime.parse_iso")]),
         (crate::embedded::SRC_HTTP_RESPONSE, &[("http_response", "http.response"), ("http_json", "http.json"), ("http_redirect", "http.redirect"), ("http_with_headers", "http.with_headers"), ("http_status", "http.status"), ("http_body", "http.body"), ("http_set_header", "http.set_header"), ("http_get_header", "http.get_header"), ("http_status_code", "http.status_code"), ("http_headers", "http.headers"), ("http_header_values", "http.header_values")]),
         (crate::embedded::SRC_STRING_CAPITALIZE, &[("string_capitalize", "string.capitalize")]),
