@@ -214,6 +214,13 @@ spec/stdlib/http_status_test.almd :: get_retry
 # pins it. #2633 serves the handle on the structural leg (embedded lane) —
 # the incumbent still has no http, and the fixture's server is `net`.
 spec/stdlib/http_call_test.almd :: gather
+# 2026-09-26 (#2650, C-367): the http.serve server fixture's handler and its
+# query renderer take an HttpRequest, which exists only inside http.serve — a
+# network-effect call the incumbent MIR lowering walls by design. The STRUCTURAL
+# leg serves the fixture on the embedded lane (tests/http_serve_cross_test.rs);
+# stock artifacts refuse http.serve (E081). Retires with #2659 or #1696.
+spec/serve_cross/http_serve_replay.almd :: handle
+spec/serve_cross/http_serve_replay.almd :: render_query
 
 # (2026-09-03, C-132/#1576) a CAN-ERR effect fn with a `mut` param takes the
 # move-mode tuple rewrite (`(T, Buf)` on the ok payload only); the incumbent
