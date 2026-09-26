@@ -11,9 +11,11 @@
 // through both.
 effect fn up(s: String) -> List[String] = ["200", s + "!"]
 
+fn checked(s: String) -> Result[String, String] = if s == "zz" then err("bad input ${s}") else ok(s + s)
+
 effect fn parsed(s: String) -> List[String] = {
-  let n = int.parse(s)!
-  ["200", int.to_string(n * 2)]
+  let d = checked(s)!
+  ["200", d]
 }
 
 fn pick(name: String) -> Result[effect (String) -> List[String], String] = if name == "up" then ok(up)
