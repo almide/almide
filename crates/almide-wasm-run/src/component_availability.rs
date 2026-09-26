@@ -38,6 +38,7 @@ fn operation_name(op: i32) -> &'static str {
             43 => "http.get", 44 => "http.post", 45 => "http.put",
             46 => "http.patch", 47 => "http.delete",
             48..=50 => "http.request framed response",
+            53..=59 => "the http call handle (http.start / poll / read_new / wait / cancel)",
             _ => "unknown operation",
         })
 }

@@ -67,6 +67,8 @@ struct Host {
     args: Vec<String>,
     /// Linear-memory budget (heap-budget gates); unlimited by default.
     limits: wasmtime::StoreLimits,
+    /// The run's live http calls (#2633) — cancelled when the run ends.
+    calls: Arc<Mutex<crate::http_call_host::HttpCalls>>,
 }
 
 /// Where op 35 gets its bytes: a fixed buffer (tests, piped runs), or
@@ -840,6 +842,7 @@ fn run_wasm_src(
             stdin: stdin_buf.clone(),
             args: args.to_vec(),
             limits,
+            calls: Arc::default(),
         },
     );
     store.limiter(|h| &mut h.limits);
@@ -897,6 +900,14 @@ fn run_wasm_src(
                 std::thread::sleep(std::time::Duration::from_millis(ms));
                 return Ok(0);
             }
+            // ops 54..=59 = the http call handle on call `id` (#2633): the
+            // id rides a_len (scalar, null a_ptr — the op-35 discipline).
+            if (54..=59).contains(&op) {
+                let calls = caller.data().calls.clone();
+                let (ret, buf) = crate::http_call_host::by_id(&calls, op, a_len as u32);
+                *caller.data().fs_buf.lock().expect("fs buf") = buf;
+                return Ok(ret);
+            }
             // op 29 = args (#1716): argv0 + the run's program args; the
             // guest skips frame 0 (native argv[1..] semantics).
             if op == 29 {
@@ -932,7 +943,12 @@ fn run_wasm_src(
                 o.push_str(&String::from_utf8_lossy(&b));
                 return Ok(0);
             }
-            let (ret, buf) = fs_dispatch(op, &a, &b);
+            // op 53 = open an http call (#2633): url in a, the start frame in b.
+            let (ret, buf) = if op == 53 {
+                crate::http_call_host::open(&caller.data().calls.clone(), &a, &b)
+            } else {
+                fs_dispatch(op, &a, &b)
+            };
             *caller.data().fs_buf.lock().expect("fs buf") = buf;
             Ok(ret)
         },
