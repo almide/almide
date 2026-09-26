@@ -1496,6 +1496,7 @@ evidence  = [
   { path = "spec/wasm_cross/unwrap_or_operand.almd", class = "fixture" },
   { path = "spec/wasm_cross/let_unwrap_propagation.almd", class = "fixture" },
   { path = "spec/wasm_cross/destructure_let_unwrap.almd", class = "fixture" },
+  { path = "spec/wasm_cross/unwrap_callarg_single_expr_effect_body.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-109"
