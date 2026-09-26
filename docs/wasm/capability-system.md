@@ -150,6 +150,10 @@ Networking is not part of WASI snapshot preview 1. Almide uses a host-provided `
 | `almide_host_listen` | `almide_host` module | Bind port and accept connections |
 
 Like `Net.fetch`, server binding is a host-provided capability outside WASI preview 1.
+What ships today (#2650, C-367): the embedded host of `almide run --target wasm`
+serves it through `almide.fs_call` ops 70 (bind), 71 (next request) and 72
+(reply), not through the `almide_host_listen` import sketched above; stock p1
+artifacts refuse it at build time (#2659).
 
 **Real-world example:** An agent that exposes an HTTP API for tool-use integration -- other agents or systems call it to trigger actions.
 

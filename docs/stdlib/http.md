@@ -28,6 +28,21 @@ effect fn main() -> Unit = {
 }
 ```
 
+The server listens on `0.0.0.0:port` and handles one request at a time, in
+the order they arrive. The response goes out as `HTTP/1.1 <status> <reason>`,
+the response's headers in order, `Content-Length`, the body, and then the
+connection closes. A handler `err(m)` answers `500` with the body
+`Internal error: <m>`. If the port cannot be bound, the program stops with
+`Error: bind failed: <reason>` and exit code 1.
+
+**On wasm** (C-367): `almide run app.almd --target wasm` serves the same
+program on the embedded host. One instance handles every request, exactly as
+the native process does: `main` runs once, and a value it computed before
+`http.serve` is the same on every request. The status line, headers and body
+are byte-identical to native. A stock artifact from
+`almide build --target wasm` has no listening socket, so `almide build` and
+`almide check --target wasm` still refuse `http.serve` (E081, #2659).
+
 ### `http.response(status: Int, body: String) -> HttpResponse`
 
 Create a plain text HTTP response with status code. Seeds
