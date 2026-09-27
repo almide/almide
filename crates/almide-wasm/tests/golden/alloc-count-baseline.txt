@@ -332,6 +332,7 @@
 58	39	450	58	spec/wasm_cross/koka_reuse1_unzip.almd
 31	16	266	31	spec/wasm_cross/koka_reuse4_map_rebuild.almd
 10	4	111	10	spec/wasm_cross/koka_unicode_combining.almd
+153	97	2206	106	spec/wasm_cross/lambda_failure_channel.almd
 7	2	111	7	spec/wasm_cross/let_unwrap_propagation.almd
 2	0	32	2	spec/wasm_cross/let_wildcard_discard.almd
 8	5	73	8	spec/wasm_cross/letbound_variant_match.almd
