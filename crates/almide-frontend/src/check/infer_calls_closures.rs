@@ -1147,11 +1147,6 @@ impl Checker {
         ).with_code("E022"));
     }
 
-    /// #1067: a PURE fn that DECLARES a `Result`/`Option` return propagates
-    /// `!` exactly like an effect fn body — Result propagation is pure control
-    /// flow (the derived Codec decoders have always lowered this way; every
-    /// peer with hand-written codecs has the same operator: Rust `?`, Zig
-    /// `try`). Returns whether the declared return type accepts this operand.
     /// E022 for a `!` in a fn that returns a carrier (Result or Option) the
     /// operand cannot propagate into, naming the actual mismatch (#2607):
     ///   - a Result operand in an Option fn: the err has nowhere to go. `?`
@@ -1159,6 +1154,7 @@ impl Checker {
     ///     fn returns Result;
     ///   - an operand that is neither Result nor Option on the direct path:
     ///     E034 reports it at the operator, so no E022 is added.
+    ///
     /// Returns whether the case is handled; `false` leaves the generic E022.
     fn report_bang_carrier_mismatch(&mut self, operand: &Ty, operand_span: Option<ast::Span>, plain_is_effect_call: bool) -> bool {
         let Some(ret) = self.env.current_ret.clone() else { return false };
@@ -1199,6 +1195,11 @@ impl Checker {
         true
     }
 
+    /// #1067: a PURE fn that DECLARES a `Result`/`Option` return propagates
+    /// `!` exactly like an effect fn body — Result propagation is pure control
+    /// flow (the derived Codec decoders have always lowered this way; every
+    /// peer with hand-written codecs has the same operator: Rust `?`, Zig
+    /// `try`). Returns whether the declared return type accepts this operand.
     fn accept_declared_channel_prop(&mut self, operand: &Ty) -> bool {
         let Some(ret) = self.env.current_ret.clone() else { return false };
         let ret = resolve_ty(&ret, &self.uf);
