@@ -188,10 +188,10 @@ impl Checker {
         if self.env.lambda_depth == 0 || else_is_ok {
             return;
         }
-        if let Ty::Applied(TypeConstructorId::Result, args) = resolve_ty(else_ty, &self.uf) {
-            if args.len() == 2 {
-                self.record_lambda_operand(OperandErr::Returned(args[1].clone()), span);
-            }
+        if let Ty::Applied(TypeConstructorId::Result, args) = resolve_ty(else_ty, &self.uf)
+            && args.len() == 2
+        {
+            self.record_lambda_operand(OperandErr::Returned(args[1].clone()), span);
         }
     }
 
