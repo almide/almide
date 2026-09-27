@@ -640,7 +640,7 @@
 17	12	71	17	spec/wasm_cross/string_passthrough_share.almd
 37	8	11600400	37	spec/wasm_cross/string_position_large_offset.almd
 400	387	9572	400	spec/wasm_cross/string_predicates.almd
-17	6	45	17	spec/wasm_cross/string_repeat_empty.almd
+25	10	56	25	spec/wasm_cross/string_repeat_empty.almd
 89	71	490	89	spec/wasm_cross/string_rle.almd
 37	7	306	37	spec/wasm_cross/string_split_rle_codepoint.almd
 6	2	92	6	spec/wasm_cross/string_to_upper.almd
