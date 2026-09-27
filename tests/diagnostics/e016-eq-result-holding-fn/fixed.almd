@@ -1,0 +1,6 @@
+fn make(n: Int) -> Result[(Int) -> Int, String] = if n > 0 then ok((x) => x + n)
+else err("neg")
+
+test "a Result holding a function" {
+  assert_eq(result.to_err_option(make(-1)), some("neg"))
+}

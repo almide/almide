@@ -1,0 +1,3 @@
+expects_code = "E016"
+expects_error = "operator '==' cannot compare it"
+hint_substring = "Function values have no equality"

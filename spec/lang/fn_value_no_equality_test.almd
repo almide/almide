@@ -1,0 +1,24 @@
+// #2606: function types are never Eq (docs/specs/type-system.md), so `==` /
+// `!=` / `assert_eq` on a type that holds a function anywhere — a Result, an
+// Option, a list, a tuple, a record field, a variant payload — is E016 at
+// check time (tests/diagnostics/e016-eq-*). Before, check accepted it and
+// rustc refused the generated `==` (E0369). What a program compares instead
+// is the observable part of the value, which these tests pin.
+type Handler = { name: String, run: (Int) -> Int }
+
+fn make(n: Int) -> Result[(Int) -> Int, String] = if n > 0 then ok((x) => x + n)
+else err("neg")
+
+test "a Result holding a function compares by its error and its tag" {
+  assert_eq(result.to_err_option(make(-1)), some("neg"))
+  assert_eq(result.to_err_option(make(2)), none)
+  assert(result.is_ok(make(2)))
+  assert(result.is_err(make(0)))
+}
+
+test "a record with a function field compares by its other fields" {
+  let a = Handler { name: "inc", run: (x) => x + 1 }
+  let b = Handler { name: "inc", run: (x) => x + 2 }
+  assert_eq(a.name, b.name)
+  assert(a.run(1) != b.run(1))
+}

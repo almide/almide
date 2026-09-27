@@ -1,0 +1,8 @@
+type Handler = { name: String, run: (Int) -> Int }
+
+fn same(a: Handler, b: Handler) -> Bool = a == b
+
+effect fn main() -> Unit = {
+  let h = Handler { name: "inc", run: (x) => x + 1 }
+  println(if same(h, h) then "same" else "different")
+}
