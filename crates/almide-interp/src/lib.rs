@@ -268,6 +268,9 @@ pub struct Interpreter<'a> {
     /// order). The body is consulted first; this is the measured residue the
     /// bridge still serves, audited by `interp_bridge_fallback_ledger`.
     pub(crate) bridge_fallbacks: std::cell::RefCell<Vec<(String, String)>>,
+    /// Set when the abort in flight came from `panic` (#2769): it renders as
+    /// `PANIC: <msg>` with no trailing newline (C-219), not the `Error:` line.
+    pub(crate) panicked: Cell<bool>,
     /// T5-1 wall-deadline mirror (fan.timeout): absolute deadline (ns since
     /// interp start; i64::MAX = none), hit flag, persisted verdict, and the
     /// wall-check ordinal (the ω of T5-2). Replay/record ride the same env
@@ -582,6 +585,7 @@ impl<'a> Interpreter<'a> {
             user_fn_names,
             det_exempt: std::cell::RefCell::new(None),
             bridge_fallbacks: std::cell::RefCell::new(Vec::new()),
+            panicked: Cell::new(false),
             t_deadline: Cell::new(i64::MAX),
             t_hit: Cell::new(false),
             t_verdict: Cell::new(0),

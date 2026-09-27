@@ -463,6 +463,7 @@ impl<'a> Interpreter<'a> {
                     Some(a) => val_opt!(self.eval_expr(a, scope)).display_bare(),
                     None => "explicit panic".to_string(),
                 };
+                self.panicked.set(true);
                 Some(Flow::Abort(msg))
             }
             _ => None,
