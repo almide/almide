@@ -1,4 +1,4 @@
-> Last updated: 2026-03-28
+> Last updated: 2026-09-27
 
 # Effect System
 
@@ -17,7 +17,7 @@ effect fn read_config(path: String) -> Result[String, String] =
   fs.read_text(path)
 ```
 
-A pure `fn` guarantees no I/O, no concurrency, no environment access. An `effect fn` may perform any of these.
+A pure `fn` guarantees no I/O, no concurrency and no environment access, with one exception: it may write to stdout/stderr or abort through the six builtins of §2.1. An `effect fn` may perform any of these.
 
 The checker sets `can_call_effect = true` when entering an `effect fn` body and `can_call_effect = false` for plain `fn`. This flag gates all effect-related operations.
 
@@ -41,6 +41,79 @@ The diagnostic includes a secondary span pointing to the effect function's decla
 This rule applies uniformly to user-defined functions, stdlib effect functions (e.g., `fs.read_text`, `http.get`), and cross-module effect function calls.
 
 Test: `spec/integration/modules/vis_effect_test.almd`
+
+### 2.1 Output and abort builtins are admissible in a pure fn
+
+*Added 2026-09-27 ([ADR-0022](../adr/0022-output-and-abort-builtins-are-admissible-in-a-pure-fn.md)). This writes down behaviour the checker has always had. It changes nothing.*
+
+Six builtins may be called from a pure `fn`: **`println`, `eprintln`,
+`panic`, `assert`, `assert_eq`, `assert_ne`**. The set is closed. Every other
+output path is a stdlib effect fn and stays E006 from a pure fn, including
+`io.print`, `io.write`, `io.write_bytes` and the `log` module.
+
+1. **They write, or they abort. They never read.** `println` appends to stdout
+   and `eprintln` to stderr. `panic` and a failing assert end the process
+   (stderr block, exit 1; for the assert family the form is C-153). None of
+   them returns information from outside the program, so a pure fn's result is
+   still a function of its arguments.
+2. **They do not make the caller effectful, and they do not propagate.** They
+   return `Unit` (`println`, `eprintln`, the assert family) or `Never`
+   (`panic`), never a `Result`. `println(s)!` is E034 in every context, a
+   pure fn that prints keeps a pure signature in its module interface, and an
+   effect fn calls it as a plain value, with no `!`.
+3. **Served handlers (ADR-0020 §5.5 / §7.2).** Output from a pure helper that a
+   handler calls follows the handler rule: each call's bytes reach their
+   stream contiguously (a line is atomic), lines from one request keep program
+   order, and the order of lines from different in-flight requests is
+   unspecified.
+4. **`fan` bodies.** A pure fn called from a `fan` arm prints as part of that
+   arm. The exemption adds no ordering promise beyond §5's determinism
+   contract: C-004 fixes list/arm order for `fan.any` and `fan.map`, while the
+   interleaving of `fan.settle` thunks' side effects on native is outside the
+   contract. `fan` itself still requires an effect context (E007).
+5. **Reference evaluators.** The in-process interpreter and the judge's
+   reference evaluator treat these six names as prelude builtins with no effect
+   context. They evaluate them the same way wherever they are called, so the
+   three-way oracle compares a pure fn's output the same way it compares an
+   effect fn's. Only the checker enforces the pure/effect distinction.
+6. **Buffering (C-162, and the stream statement in C-367).** A pure fn's output
+   uses the same streams as an effect fn's. Native stdout is one buffer,
+   flushed on every write when stdout is a terminal and 64 KiB-buffered
+   otherwise; stderr is unbuffered. The cross-target promise is **per
+   stream**: stdout bytes, stderr bytes and the exit code are byte-identical
+   between native and wasm. How the two streams interleave when both go to one
+   file is not promised. An abort flushes the stdout written before it.
+7. **`scoped` is stricter.** `println` inside a `scoped fn` stays E087. A
+   `@bounded` fn admits the output builtins (C-316).
+
+```almide check
+fn show(label: String, n: Int) -> Unit = println("${label}=${n}")
+
+fn half(n: Int) -> Int = {
+  assert_eq(n % 2, 0)
+  eprintln("halving ${n}")
+  n / 2
+}
+
+fn main() -> Unit = show("half", half(8))
+```
+
+A read from the same place is still E006:
+
+```almide check-fail=E006
+import fs
+
+fn load(p: String) -> String = fs.read_text(p) ?? ""
+```
+
+`main` follows the same rule: a plain `fn main() -> Unit` is correct when
+`main` performs no real effect. Write `effect fn main()` only when it reads,
+writes a file, uses the network, uses `fan`, or propagates with `!`.
+
+Tests: `tests/checker_test.rs` (`pure_fn_admits_output_and_abort_builtins`,
+`pure_fn_still_rejects_a_real_read_with_e006`),
+`spec/lang/pure_fn_output_builtins_test.almd`,
+`spec/wasm_cross/pure_fn_output_and_assert_abort.almd` (C-153).
 
 ## 3. Return Type Wrapping
 
