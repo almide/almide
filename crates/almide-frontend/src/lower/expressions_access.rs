@@ -542,7 +542,7 @@ fn lower_expr_record(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
             // `M { a: 5i64 }` (E0308) and WASM writes the wrong byte width into
             // the field, corrupting the next field. Mirrors the let/var path
             // in `override_record_literal_ty`.
-            if let Some(decl) = name.and_then(|n| super::statements::declared_record_ty(ctx.env, n)) {
+            if let Some(decl) = name.and_then(|n| super::statements::declared_record_ty(ctx.env, n, ctx.current_module.map(|m| m.as_str()))) {
                 super::statements::coerce_literal_to_sized(&mut rec, &decl, ctx.env);
             }
             rec

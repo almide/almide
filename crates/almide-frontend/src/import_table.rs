@@ -35,6 +35,13 @@ pub struct ImportTable {
     /// Consumers (checker, lowering) rewrite a bare call `from_string(x)` to
     /// the qualified form `json.from_string(x)`.
     pub direct: HashMap<Sym, Sym>,
+
+    /// Bare names of the types THIS file declares (`type Stop = { .. }`).
+    /// A bare name the file declares as a type is the file's own: another
+    /// module's variant case of the same spelling never overrides it
+    /// (#2636). Read by `TypeEnv::lookup_ctor_in`, which the checker and
+    /// lowering share, so both resolve the name the same way.
+    pub declared_types: HashSet<Sym>,
 }
 
 /// Tier-1 modules every file can reach without writing an `import`, held as a
@@ -58,6 +65,7 @@ impl ImportTable {
             stdlib,
             used: HashSet::new(),
             direct: HashMap::new(),
+            declared_types: HashSet::new(),
         }
     }
 
@@ -85,6 +93,18 @@ impl ImportTable {
         } else {
             None
         }
+    }
+
+    /// The name this file writes for the canonical module `canonical`: its
+    /// import alias (`import self.finish as fin` → `fin`), else the canonical
+    /// name itself. For a diagnostic that tells the writer what to type.
+    pub fn written_name_of(&self, canonical: Sym) -> Sym {
+        let mut aliases: Vec<Sym> = self.aliases.iter()
+            .filter(|(alias, c)| **c == canonical && **alias != canonical)
+            .map(|(alias, _)| *alias)
+            .collect();
+        aliases.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        aliases.first().copied().unwrap_or(canonical)
     }
 
     /// Mark a module as used (by its short/display name as written in code).
@@ -162,6 +182,12 @@ pub fn build_import_table(
     // Also register Tier 1 auto-imports from bundled modules
     for m in crate::stdlib::AUTO_IMPORT_BUNDLED {
         table.accessible.insert(sym(m));
+    }
+
+    for decl in &prog.decls {
+        if let ast::Decl::Type { name, .. } = decl {
+            table.declared_types.insert(*name);
+        }
     }
 
     // E050: a selectively-imported name (`import json.{parse}`) and a local

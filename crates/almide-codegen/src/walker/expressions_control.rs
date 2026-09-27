@@ -401,8 +401,14 @@ fn render_expr_record(ctx: &RenderContext, expr: &IrExpr) -> String {
     if let Some(reserved) = ctx.ann.runtime_owned_types.get(&type_name) {
         type_name = reserved.clone();
     }
-    // Qualify enum variant constructors via template
-    if let Some(enum_name) = ctx.ann.ctor_to_enum.get(&type_name) {
+    // Qualify enum variant constructors via template. A literal of a struct
+    // the program declares under this bare name is that struct, not another
+    // module's same-spelled case (`type Stop = { .. }` beside a dependency's
+    // `| Stop`, #2636): `ctor_to_enum` is keyed by the bare case name
+    // program-wide, so it answers only when the literal is not the struct.
+    if let Some(enum_name) = ctx.ann.ctor_to_enum.get(&type_name)
+        .filter(|_| !super::literal_is_declared_struct(ctx, &type_name, &expr.ty))
+    {
         // Try ctor_record template first (TS: function call), fallback to record_literal
         if let Some(rendered) = ctx.templates.render_with("ctor_record", None, &[], &[("enum_name", enum_name.as_str()), ("ctor_name", type_name.as_str()), ("fields", fields_str.as_str())]) {
             return rendered;

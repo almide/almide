@@ -1,0 +1,6 @@
+type Finish = | Stop | Length
+
+fn name(f: Finish) -> String = match f {
+  Stop => "stop",
+  Length => "length",
+}
