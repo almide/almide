@@ -1,0 +1,27 @@
+# Release evidence seal — v0.64.0. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.64.0"
+tag = "v0.64.0"
+tag_commit = "a9650baf6ff6230de9e165b2e4484ab10ebbae57"
+date = "2026-09-27"
+url = "https://github.com/almide/almide/releases/tag/v0.64.0"
+
+[derived]
+cargo_version = "0.64.0"
+contracts_sha256 = "6f5f57b8580ec1ee2295577265e7d933bd71f02603ffe39880d080a146913060"
+contracts_total = "368"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "c953796d0ce50c8afc764afe3e111606e03935378bbdb141948ddd963bbfd797"
+abstain_ledger_entries = "21"
+wasm_cross_fixtures = "789"
+rust_toolchain = "1.94.0"
+wasmtime = "v47.0.3"
+
+[recorded]
+release_gate = "Minor release through the rc channel (#1484): rc1 (ee0d68895, #2673), rc2 (a9f57c1b2, #2682), rc3 (5555cb251, #2688), rc4 (a9650baf6, #2694). The final is tagged on the rc4 commit itself, tree-identical to develop 40d48cbe8. Blocker gate at the tag: 0 (#1482). Interface diff v0.63.1 -> v0.64.0: additive (added=15 removed=0; #1488). Tag-tree CI: release PR #2694 — every required check green including Windows Build and Test Rust, full mutation sweep green on 40d48cbe8; trust spine on the tag green (run 36298226774, dossier attested and attached). The rc1 PR's Windows jobs found two Windows-only defects, fixed before rc1 was tagged: #2674 (check --json path escaping), #2675 (http call idle_ms on a try_clone'd socket). Fuzz soaks on the candidate tags, read from the night verdict and the shard logs: rc1 run 36244677099, 3 findings (#2677 matrix select_rows rid wrap -> #2680; #2678 reference-interpreter range end, product correct -> #2680; #2679 found in triage, inclusive range to i64::MAX -> #2681); rc2 run 36265815840, 2 findings (#2685 wasm take/drop/insert count wrap, #2686 fused chain move E0505 -> #2687); rc3 run 36281811745, 1 finding (#2690 repeat of an empty base loops n times -> #2691); rc4 run 36293603889: shards 8/8, 480.5 of 480 minutes delivered, 115,427 programs, 0 findings. None of the soak findings is a regression against v0.63.1."
+assets = "7: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256, almide-dossier-v0.64.0.md"
+known_problems = "None release-blocking. Open at the tag: (1) checker-accepts / rustc-rejects or wrong-diagnostic shapes, none miscomputes: #2599, #2600, #2601, #2606, #2607, #2632, #2704; (2) module name resolution: #2636 and #2715 (a case or type of an unimported module resolves by bare name); (3) serving: native http.serve is sequential (#2665), a stock wasm artifact cannot serve (#2659), a killed serve loses buffered stdout (#2692), a clock read in a serving program is E082 on the embedded lane (#2703) — the design that resolves them is ADR-0020 (#2705); (4) #2608 — the native build caches have no size bound; (5) the nightly condition-coverage ratchet was red on the rc tags (56.36% < 56.55%, #2707), fixed after the tag by #2708 (57.28%)."
