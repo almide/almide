@@ -58,6 +58,9 @@ impl Checker {
         if exp == Ty::Unknown || act == Ty::Unknown {
             return;
         }
+        if self.report_erased_err_arm(c, &exp) {
+            return;
+        }
         // #1108 Phase 2b-iii: a fallible callback handed to a container HOF the
         // name-keyed normalization does not cover. `list.map(xs, (x) => f(x)!)`
         // is rewritten to the `__fallible_*` twin before inference; `set.map`,
@@ -99,6 +102,41 @@ impl Checker {
         }
         self.emit(diag);
         self.current_span = saved_span;
+    }
+
+    /// #2722: an `err(..)` arm re-wraps a `String` into a typed error `E`, and a
+    /// callback in the same fn erased an `E` into its `String` channel with a
+    /// `!`. "Expected `E`, got `String`" is true and points away from the
+    /// cause, so name the callback's `!` the way #2601's `)!` form does.
+    fn report_erased_err_arm(&mut self, c: &super::types::Constraint, exp: &Ty) -> bool {
+        let Some(FixHint::ErrArmErased { erased, at }) = &c.fix_hint else { return false };
+        let erased = resolve_ty(erased, &self.uf);
+        let Some((_, slot)) = exp.inner2() else { return false };
+        if *slot != erased {
+            return false;
+        }
+        let erased = erased.display();
+        let at = at.map(|s| format!(" (line {}, col {})", s.line, s.col)).unwrap_or_default();
+        let saved_span = self.current_span;
+        if c.span.is_some() {
+            self.current_span = c.span;
+        }
+        self.emit(err(
+            format!(
+                "this `err(..)` arm passes a `String` where the match's error type is `{erased}`: the callback's `!`{at} \
+                 turned its `{erased}` error into `String` — a `!` inside a lambda propagates into the lambda's own \
+                 failure channel, which is always `String`"
+            ),
+            format!(
+                "Only a callback whose WHOLE body is one `call(..)!` keeps that call's error type: \
+                 `(x) => f(x)!` makes the call that takes it fail with `{erased}`. \
+                 Move the branch into the called fn so the callback is a single `call(..)!`, \
+                 or convert the `String` in this arm: `err(s) => err(SomeCase(s))`."
+            ),
+            c.context.clone(),
+        ).with_code("E022"));
+        self.current_span = saved_span;
+        true
     }
 
     /// The `!` insertion at the end of an annotated `let`'s call value
