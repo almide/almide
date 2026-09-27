@@ -11,7 +11,7 @@ type ProcessStatus = { code: Int, stdout: String, stderr: String }
 @intrinsic("almide_rt_process_exec")
 effect fn exec(cmd: String, args: List[String]) -> Result[String, String] = _
 
-/// Ends with code 0..=125; others abort, exit 1.
+/// Ends with code 0..=255; others abort, exit 1.
 @intrinsic("almide_rt_process_exit")
 effect fn exit(code: Int) -> Never = _
 

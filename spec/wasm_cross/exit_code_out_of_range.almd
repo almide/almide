@@ -1,11 +1,11 @@
 // @contract: C-350
-// An exit code outside 0..=125 is a defined abort, not a per-target answer.
+// An exit code outside the exit status 0..=255 is a defined abort, not a
+// per-target answer.
 //
-// Before C-350 this program exited 200 natively and on the embedded host, and
-// 1 with a runtime error on a stock WASI runtime — `proc_exit` is specified
-// over [0, 126) and a stock runtime turns anything else into a host trap that
-// carries no exit request at all. `almide build --target wasm` ships that
-// preview-1 artifact, so 126 and above were never deliverable by it (#2303).
+// POSIX keeps only the low 8 bits of a status, so before C-350 this program
+// exited 0 natively: a failure reported as success. Rust, Go, Python and Node
+// all do that. Almide refuses the code instead, with the same line and exit 1
+// on every target, including the stock WASI runtime.
 //
 // TWO THINGS THIS FIXTURE HAS TO GET RIGHT:
 //
@@ -19,7 +19,7 @@
 //      on every leg, so the fixture pins the rule on all of them.
 import process
 
-effect fn chosen(k: Int) -> Int = k * 100
+effect fn chosen(k: Int) -> Int = k * 128
 
 effect fn main() -> Unit = {
   println("before-exit")
