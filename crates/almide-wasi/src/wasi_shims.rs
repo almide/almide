@@ -94,6 +94,7 @@ fn shim_fs_call(
     f_env_get: Option<u32>,
     f_env_set: Option<u32>,
     f_args: Option<u32>,
+    mono: bool,
 ) -> Function {
     // params: 0=op 1=a_ptr 2=a_len 3=b_ptr 4=b_len; locals: 5=nread
     // 6=deadline (i64, op 36)
@@ -179,11 +180,14 @@ fn shim_fs_call(
     i.end();
 
     // op 60: the monotonic clock (clock id 1), raw nanos — the clock the
-    // op-36 spin below already reads, so it adds no import.
-    i.local_get(op).i32_const(60).i32_eq().if_(BlockType::Empty);
-    i.i32_const(1).i64_const(1).i32_const(park as i32).call(3).drop();
-    i.i32_const(park as i32).i64_load(mem(0)).return_();
-    i.end();
+    // op-36 spin below already reads, so it adds no import. Emitted only
+    // when the module reaches the op, so no other artifact grows.
+    if mono {
+        i.local_get(op).i32_const(60).i32_eq().if_(BlockType::Empty);
+        i.i32_const(1).i64_const(1).i32_const(park as i32).call(3).drop();
+        i.i32_const(park as i32).i64_load(mem(0)).return_();
+        i.end();
+    }
 
     // op 36: env.sleep_ms — a MONOTONIC busy-wait over clock_time_get
     // (the ms count rides a_len, the op-35 scalar convention). WASI p1
