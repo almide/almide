@@ -1,4 +1,4 @@
-# oracle: almide 0.64.1 (dev) at 354a51004 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.64.1 (dev) at 3d56260ce — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/churn/closure_env_churn.almd
 44c083433349ffafa9cefe935628110b83a3774af436938fa5001df6f63bd421	0	spec/churn/construct_from_temp_churn.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/churn/enumerate_rich_churn.almd
@@ -375,6 +375,7 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/pro
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/protocol_generics_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/protocol_stress_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/protocol_test.almd
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/pure_fn_output_builtins_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/pure_result_bang_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/radix_literal_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/lang/range_test.almd
@@ -1181,6 +1182,7 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cro
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/process_args.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/protocol_ufcs_inferred_lambda.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/pure_bang_propagation.almd
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/pure_fn_output_and_assert_abort.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/qq_record_fallback.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/r5_lowmisc_param_try_err.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/r5_mod_global_init_order.almd
