@@ -433,7 +433,7 @@ fn find_witness(matrix: &[Vec<Pat>], types: &[Ty], env: &TypeEnv) -> Option<Vec<
 
     if is_complete(&head, ty, env) {
         // Every constructor is mentioned — check each one for gaps.
-        let Some(all) = enumerable_ctors(matrix, Option::None, ty, env) else { return Option::None };
+        let all = enumerable_ctors(matrix, Option::None, ty, env)?;
         for ctor in &all {
             let ar = arity(ctor, ty, env);
             let ftys = field_types(ctor, ty, env);
@@ -857,7 +857,7 @@ fn is_useful(matrix: &[Vec<Pat>], row: &[Pat], types: &[Ty], env: &TypeEnv) -> b
             let classes = enumerable_ctors(matrix, Some(&row[0]), ty, env).unwrap_or_default();
             classes.iter().filter(|class| ctor_matches(c, class)).any(|class| {
                 let ar = arity(class, ty, env);
-                let mut sub_row: Vec<Pat> = args.iter().cloned().collect();
+                let mut sub_row: Vec<Pat> = args.to_vec();
                 sub_row.resize(ar, Pat::Wild);
                 sub_row.extend_from_slice(&row[1..]);
                 let mut sub_types = field_types(class, ty, env);
