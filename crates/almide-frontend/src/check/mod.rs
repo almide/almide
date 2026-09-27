@@ -1116,6 +1116,7 @@ impl Checker {
         // real pass right after re-checks them and owns all reporting.
         self.refresh_module_top_lets(program, "__entry");
         self.validate_protocol_refs(program);
+        self.validate_bare_type_visibility(program);
         for decl in program.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();
@@ -1647,6 +1648,19 @@ impl Checker {
                 None => {
                     if let Some(o) = proto.origin.filter(|o| Some(*o) != here) {
                         let alias = self.alias_for_module(o);
+                        // A protocol of a module this file never imports is
+                        // out of scope, as a type is (#2715): the bare name
+                        // resolved only because the protocol table is
+                        // program-wide.
+                        if alias.is_none() {
+                            let leaf = o.as_str().rsplit('.').next().unwrap_or(o.as_str()).to_string();
+                            self.emit(err(
+                                format!("protocol '{}' is not in scope here: it is declared in module '{}', which this file does not import", w.name, o),
+                                format!("Import the module that declares it and write the qualified name, e.g. `{}.{}`", leaf, w.name),
+                                w.owner.clone(),
+                            ).with_code("E029"));
+                            continue;
+                        }
                         let hint = match &alias {
                             Some(a) => format!("Write `{}.{}`: a protocol from another module is named with its module, the same way a type is (`{}.SomeType`). The bare name still resolves for now", a, w.name, a),
                             None => format!("Import the declaring module and qualify the name (`import self.<module>` then `<module>.{}`): a protocol from another module is named with its module, the same way a type is", w.name),
@@ -1679,6 +1693,88 @@ impl Checker {
                         w.owner.clone(),
                     ));
                 }
+            }
+        }
+        self.current_span = saved;
+    }
+
+    /// A bare type name the file spells must name a type the file can see:
+    /// its own, one of a module it imports, or the stdlib's (#2715). A type
+    /// only a module the file never imports declares used to resolve anyway —
+    /// through the program-wide bare key (the last module to register that
+    /// name) or the "unique owner" fallback — so the answer depended on which
+    /// other modules were in the program, and adding a same-named type
+    /// anywhere changed or broke a file that never mentioned it. Now it is
+    /// E029 naming the module to import and the qualified spelling.
+    pub(crate) fn validate_bare_type_visibility(&mut self, program: &ast::Program) {
+        let here = self.current_module_prefix.clone();
+        // name -> the user modules that declare it (sorted, so the message is
+        // deterministic).
+        let mut owners: std::collections::HashMap<Sym, Vec<Sym>> = std::collections::HashMap::new();
+        for k in self.env.types.keys() {
+            if let Some((m, base)) = k.as_str().rsplit_once('.')
+                && self.env.user_modules.contains(&sym(m))
+                && !almide_lang::stdlib_info::is_bundled_module(m)
+            {
+                owners.entry(sym(base)).or_default().push(sym(m));
+            }
+        }
+        if owners.is_empty() {
+            return;
+        }
+        let mut visible_set: std::collections::HashSet<Sym> = self.env.import_table.accessible.clone();
+        visible_set.extend(self.env.import_table.aliases.values().copied());
+        if let Some(h) = here.as_deref() { visible_set.insert(sym(h)); }
+        let visible = |m: &Sym| -> bool { visible_set.contains(m) };
+        let own: std::collections::HashSet<Sym> = program.decls.iter()
+            .filter_map(|d| match d { ast::Decl::Type { name, .. } => Some(*name), _ => None })
+            .collect();
+        let mut shell = program.clone();
+        shell.decls.clear();
+        let saved = self.current_span;
+        let mut reported: std::collections::HashSet<Sym> = std::collections::HashSet::new();
+        for decl in &program.decls {
+            let (span, generics) = match decl {
+                ast::Decl::Fn { span, generics, .. } | ast::Decl::Type { span, generics, .. }
+                | ast::Decl::Protocol { span, generics, .. } => (*span, generics.clone()),
+                ast::Decl::TopLet { span, .. } | ast::Decl::Test { span, .. }
+                | ast::Decl::TestWhereDef { span, .. } => (*span, None),
+                ast::Decl::Module { .. } | ast::Decl::Import { .. } => continue,
+            };
+            let letters: std::collections::HashSet<Sym> = generics.iter().flatten().map(|g| sym(&g.name)).collect();
+            shell.decls = vec![decl.clone()];
+            let spelled = import_spellings(&mut shell);
+            let mut names: Vec<Sym> = spelled.bare_types.into_iter()
+                .filter(|n| !letters.contains(n) && !own.contains(n))
+                .collect();
+            names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+            for name in names {
+                let Some(decl_owners) = owners.get(&name) else { continue };
+                if decl_owners.iter().any(visible) || reported.contains(&name) {
+                    continue;
+                }
+                // A stdlib type of the same name is what the bare spelling
+                // means here (the auto-import); only a user-module-only name
+                // is out of scope.
+                if almide_lang::stdlib_info::stdlib_owned_type_owner(name.as_str()).is_some()
+                    || crate::bundled_sigs::bundled_type_owner(name.as_str()).is_some()
+                {
+                    continue;
+                }
+                reported.insert(name);
+                let mut mods: Vec<&str> = decl_owners.iter().map(|m| m.as_str()).collect();
+                mods.sort();
+                mods.dedup();
+                let spellings = mods.iter()
+                    .map(|m| format!("`{}.{}`", m.rsplit('.').next().unwrap_or(m), name))
+                    .collect::<Vec<_>>().join(" or ");
+                let modules = mods.iter().map(|m| format!("'{}'", m)).collect::<Vec<_>>().join(" and ");
+                self.current_span = span;
+                self.emit(err(
+                    format!("type '{}' is not in scope here: it is declared in {} {}, which this file does not import", name, if mods.len() == 1 { "module" } else { "modules" }, modules),
+                    format!("Import the module that declares it and write the qualified name, e.g. {}. A type is visible from the file that declares it and from the files that import that file, never through another import", spellings),
+                    format!("type {}", name),
+                ).with_code("E029"));
             }
         }
         self.current_span = saved;
