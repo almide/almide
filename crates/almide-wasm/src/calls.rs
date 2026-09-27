@@ -108,6 +108,35 @@ impl Emitter<'_> {
                 self.lower_print(&args[0], F_EPRINTLN_IMPORT, F_EPRINTLN_BLOCK)?;
                 Ok(None)
             }
+            // `panic(msg)` (#2769): `PANIC: <msg>` on stderr with NO trailing
+            // newline, then exit 1 — the bytes the native and incumbent legs
+            // print (their `prim.die`). The message is evaluated first, as
+            // part of the concat, so an abort inside it wins over the prefix.
+            // The trailing `unreachable` keeps the stack polymorphic, which is
+            // what lets `panic` stand in a value-producing arm.
+            CallTarget::Named { name } if name.as_str() == "panic" && args.len() == 1 => {
+                let line = IrExpr {
+                    kind: IrExprKind::BinOp {
+                        op: almide_ir::BinOp::ConcatStr,
+                        left: Box::new(IrExpr {
+                            kind: IrExprKind::LitStr { value: "PANIC: ".to_string() },
+                            ty: args[0].ty.clone(),
+                            span: None,
+                            def_id: None,
+                        }),
+                        right: Box::new(args[0].clone()),
+                    },
+                    ty: args[0].ty.clone(),
+                    span: args[0].span,
+                    def_id: None,
+                };
+                self.arm_scope(|em| {
+                    em.lower_arg(&line, Some(STR), ArgMode::Borrow)?;
+                    em.io_raw(crate::fs_meta::OP_STDERR_RAW)
+                })?;
+                self.f.instructions().i32_const(1).call(F_EXIT_IMPORT).unreachable();
+                Ok(None)
+            }
             // codec_decode's ONE layout-reading helper gets a NATIVE
             // twin: the incumbent's __is_null reads its tag at h+4 (the
             // len-as-tag convention); OUR tag lives at PAYLOAD+SUM_TAG —

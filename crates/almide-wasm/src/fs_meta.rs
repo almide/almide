@@ -23,6 +23,12 @@ pub(crate) const OP_ENV_OS: i32 = 27;
 pub(crate) const OP_TEMP_DIR: i32 = 28;
 pub(crate) const OP_ARGS: i32 = 29;
 pub(crate) const OP_STDOUT_RAW: i32 = 30;
+/// Raw stderr append (#2769): op 30's twin on the error stream, with no
+/// newline added. `panic(msg)` writes `PANIC: <msg>` through it before its
+/// exit 1, because that is the byte shape the incumbent and native legs
+/// print; the `eprintln` import always appends a newline. 73 is the first
+/// code past the serve family (70..=72).
+pub(crate) const OP_STDERR_RAW: i32 = 73;
 pub(crate) const OP_STDIN_TAKE: i32 = 35;
 pub(crate) const OP_RANDOM_GET: i32 = 32;
 pub(crate) const OP_CWD: i32 = 33;

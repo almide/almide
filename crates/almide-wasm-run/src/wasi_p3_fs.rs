@@ -187,12 +187,19 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>) -> 
         i.end();
     }
 
-    // op 30: raw stdout append (no newline) — b carries the bytes.
-    i.local_get(op).i32_const(30).i32_eq().if_(BlockType::Empty);
-    open_stream(&mut i, g_out_tx, g_out_fut, I_OUT_CALL, I_OUT_NEW, s64);
-    write_all(&mut i, g_out_tx, I_OUT_WRITE, b_ptr, b_len, n);
-    i.i64_const(0).return_();
-    i.end();
+    // op 30: raw stdout append (no newline) — b carries the bytes; op 73:
+    // the same on stderr (`panic`'s line, #2769).
+    let ports = [
+        (30, g_out_tx, g_out_fut, I_OUT_CALL, I_OUT_NEW, I_OUT_WRITE),
+        (73, g_err_tx, g_err_fut, I_ERR_CALL, I_ERR_NEW, I_ERR_WRITE),
+    ];
+    for (code, g_tx, g_fut, call, new, write) in ports {
+        i.local_get(op).i32_const(code).i32_eq().if_(BlockType::Empty);
+        open_stream(&mut i, g_tx, g_fut, call, new, s64);
+        write_all(&mut i, g_tx, write, b_ptr, b_len, n);
+        i.i64_const(0).return_();
+        i.end();
+    }
 
     // op 35: stdin take up to a_len bytes — ONE sync read, straight into
     // the park data span; a DROPPED status (writer closed) answers 0.

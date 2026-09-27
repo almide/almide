@@ -114,6 +114,17 @@ fn emit_err_line(host: &Host, line: &str) {
     }
 }
 
+/// Append to stderr verbatim — op 73, the newline-free twin of
+/// [`emit_err_line`].
+fn emit_err_raw(host: &Host, text: &str) {
+    *host.err_last.lock().expect("err last") = text.to_string();
+    if host.live_out.is_some() {
+        eprint!("{text}");
+    } else {
+        host.err.lock().expect("test harness invariant").push_str(text);
+    }
+}
+
 /// Where op 35 gets its bytes: a fixed buffer (tests, piped runs), or
 /// the process's real stdin read at the FIRST guest read — so a program
 /// that never touches stdin never blocks on an open terminal.
@@ -972,6 +983,11 @@ fn run_wasm_src(
             }
             if op == 30 {
                 emit_out(caller.data(), &String::from_utf8_lossy(&b));
+                return Ok(0);
+            }
+            // op 73 = raw stderr append (`panic`'s line, #2769): no newline.
+            if op == 73 {
+                emit_err_raw(caller.data(), &String::from_utf8_lossy(&b));
                 return Ok(0);
             }
             // http.serve (#2650): the listener and the held connection

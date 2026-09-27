@@ -358,27 +358,30 @@ fn shim_fs_call(
     let mut f = Function::new([(2, ValType::I32)]);
     let mut i = f.instructions();
 
-    // op 30: raw stdout append (no newline) — b carries the bytes.
-    i.local_get(op).i32_const(30).i32_eq().if_(BlockType::Empty);
-    // Chunked write, inline (mirrors shim_print's loop without \n).
-    i.block(BlockType::Empty).loop_(BlockType::Empty);
-    i.local_get(b_len).i32_eqz().br_if(1);
-    i.local_get(b_len).i32_const(4096).i32_lt_u();
-    i.if_(BlockType::Result(ValType::I32));
-    i.local_get(b_len);
-    i.else_();
-    i.i32_const(4096);
-    i.end();
-    i.local_set(n);
-    load_handle(&mut i, g_stdout, I_GET_STDOUT);
-    i.local_get(b_ptr).local_get(n);
-    i.i32_const((park + RET) as i32);
-    i.call(I_WRITE_FLUSH);
-    i.local_get(b_ptr).local_get(n).i32_add().local_set(b_ptr);
-    i.local_get(b_len).local_get(n).i32_sub().local_set(b_len);
-    i.br(0).end().end();
-    i.i64_const(0).return_();
-    i.end();
+    // op 30: raw stdout append (no newline) — b carries the bytes; op 73:
+    // the same on stderr (`panic`'s line, #2769).
+    for (code, g_stream, get_stream) in [(30, g_stdout, I_GET_STDOUT), (73, g_stderr, I_GET_STDERR)] {
+        i.local_get(op).i32_const(code).i32_eq().if_(BlockType::Empty);
+        // Chunked write, inline (mirrors shim_print's loop without \n).
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(b_len).i32_eqz().br_if(1);
+        i.local_get(b_len).i32_const(4096).i32_lt_u();
+        i.if_(BlockType::Result(ValType::I32));
+        i.local_get(b_len);
+        i.else_();
+        i.i32_const(4096);
+        i.end();
+        i.local_set(n);
+        load_handle(&mut i, g_stream, get_stream);
+        i.local_get(b_ptr).local_get(n);
+        i.i32_const((park + RET) as i32);
+        i.call(I_WRITE_FLUSH);
+        i.local_get(b_ptr).local_get(n).i32_add().local_set(b_ptr);
+        i.local_get(b_len).local_get(n).i32_sub().local_set(b_len);
+        i.br(0).end().end();
+        i.i64_const(0).return_();
+        i.end();
+    }
 
     // op 35: stdin take up to a_len bytes — ONE blocking-read; the list
     // lands via cabi_realloc; EOF (err) answers 0 bytes. The host answers
