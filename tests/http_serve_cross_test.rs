@@ -361,3 +361,155 @@ fn the_response_comparator_rejects_what_c367_observes_and_accepts_what_it_does_n
     assert_eq!(line_multiset("ready\nGET /a\nGET /b\n"), line_multiset("ready\nGET /b\nGET /a\n"));
     assert_ne!(line_multiset("ready\nGET /a\nGET /a\n"), line_multiset("ready\nGET /a\n"));
 }
+
+// ── Shutdown (ADR-0020 §5.6, #2692, C-367) ──
+//
+// `spec/serve_cross/http_serve_shutdown.almd` runs with stdout redirected to
+// a FILE, where stdout is 64 KiB-buffered: before #2692 a SIGTERM lost every
+// line. Natively the driver runs the BUILT binary: `almide run` spawns the
+// program as a child, and a signal to the launcher is the launcher's.
+
+fn shutdown_fixture() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/serve_cross/http_serve_shutdown.almd")
+}
+
+fn scratch(what: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("almide-serve-shutdown-{}-{what}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    dir
+}
+
+/// The native binary of the shutdown fixture, built once per test process.
+fn shutdown_binary() -> PathBuf {
+    static BIN: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BIN.get_or_init(|| {
+        let bin = scratch("bin").join("http_serve_shutdown");
+        let out = Command::new(almide_bin())
+            .arg("build")
+            .arg(shutdown_fixture())
+            .arg("-o")
+            .arg(&bin)
+            .stdin(Stdio::null())
+            .output()
+            .expect("almide build runs");
+        assert!(out.status.success(), "almide build failed: {}", String::from_utf8_lossy(&out.stderr));
+        bin
+    })
+    .clone()
+}
+
+/// A shutdown run: the server, its stdout file, its port.
+struct Served {
+    child: Child,
+    out: PathBuf,
+    port: u16,
+}
+
+/// Start the fixture with stdout to a file, wait for its ready line, and
+/// answer one request — which proves `http.serve` armed its signal handling,
+/// so the signals below never meet the default disposition.
+fn serve_to_file(wasm: bool, what: &str) -> Served {
+    let port = free_port();
+    let out = scratch(what).join(if wasm { "wasm.out" } else { "native.out" });
+    let mut c = if wasm {
+        let mut c = Command::new(almide_bin());
+        c.arg("run").arg(shutdown_fixture()).args(["--target", "wasm", "--"]);
+        c
+    } else {
+        Command::new(shutdown_binary())
+    };
+    c.arg(port.to_string());
+    c.process_group(0)
+        .stdin(Stdio::null())
+        .stdout(std::fs::File::create(&out).expect("stdout file"))
+        .stderr(Stdio::piped());
+    let mut child = c.spawn().expect("the server starts");
+    let mut err = BufReader::new(child.stderr.take().expect("stderr piped"));
+    let mut first = String::new();
+    err.read_line(&mut first).expect("read the ready line");
+    if first != "ready\n" {
+        kill_group(&mut child);
+        panic!("wasm={wasm}: expected the ready line, got {first:?}");
+    }
+    let hello = ask(port, b"GET /hello HTTP/1.1\r\n\r\n");
+    assert!(hello.ends_with(b"\r\n\r\nok /hello"), "wasm={wasm}: {:?}", String::from_utf8_lossy(&hello));
+    Served { child, out, port }
+}
+
+fn sigterm(child: &Child) {
+    let st = Command::new("kill").args(["-TERM", &child.id().to_string()]).status();
+    assert!(st.as_ref().is_ok_and(|s| s.success()), "could not signal the server: {st:?}");
+}
+
+/// Send `raw` on a fresh connection from a thread; the answer is whatever
+/// arrived before the close (empty when the server exits without answering).
+fn ask_in_background(port: u16, raw: &'static [u8]) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut out = Vec::new();
+        if let Ok(mut conn) = TcpStream::connect(("127.0.0.1", port)) {
+            let _ = conn.set_read_timeout(Some(Duration::from_secs(90)));
+            let _ = conn.write_all(raw);
+            let _ = conn.read_to_end(&mut out);
+        }
+        out
+    })
+}
+
+/// Wait for the server to exit on its own; a server still running after the
+/// deadline is killed and the test fails (it did not stop on the signal).
+fn exit_code_within(served: &mut Served, secs: u64) -> Option<i32> {
+    let deadline = Instant::now() + Duration::from_secs(secs);
+    loop {
+        if let Some(status) = served.child.try_wait().expect("poll the server") {
+            return status.code();
+        }
+        if Instant::now() >= deadline {
+            kill_group(&mut served.child);
+            panic!("the server was still running {secs} s after the signal");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_sigterm_drains_the_request_in_flight_flushes_stdout_and_returns_from_serve_on_native_and_the_embedded_lane() {
+    for wasm in [false, true] {
+        let mut served = serve_to_file(wasm, "drain");
+        // `/nap` sleeps 1 s in the handler; the signal lands inside it.
+        let nap = ask_in_background(served.port, b"GET /nap HTTP/1.1\r\n\r\n");
+        std::thread::sleep(Duration::from_millis(300));
+        sigterm(&served.child);
+        let code = exit_code_within(&mut served, 20);
+        let answer = nap.join().expect("the client thread");
+        let out = std::fs::read_to_string(&served.out).expect("read the stdout file");
+        assert!(answer.ends_with(b"\r\n\r\nok /nap"), "wasm={wasm}: the request in flight was not answered: {:?}", String::from_utf8_lossy(&answer));
+        // Every line, in order, and "stopped": `http.serve` returned and main went on.
+        assert_eq!(out, "listening\nhit /hello\nhit /nap\nstopped\n", "wasm={wasm}");
+        assert_eq!(code, Some(0), "wasm={wasm}: main's exit code");
+        // The listener is gone: nothing accepts on the port any more.
+        assert!(TcpStream::connect(("127.0.0.1", served.port)).is_err(), "wasm={wasm}: still accepting");
+    }
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_second_sigterm_during_the_drain_flushes_stdout_and_exits_1_on_native_and_the_embedded_lane() {
+    for wasm in [false, true] {
+        let mut served = serve_to_file(wasm, "force");
+        // `/stall` sleeps 60 s: only the second signal ends the run.
+        let stall = ask_in_background(served.port, b"GET /stall HTTP/1.1\r\n\r\n");
+        std::thread::sleep(Duration::from_millis(300));
+        sigterm(&served.child);
+        std::thread::sleep(Duration::from_millis(300));
+        sigterm(&served.child);
+        let code = exit_code_within(&mut served, 20);
+        let answer = stall.join().expect("the client thread");
+        let out = std::fs::read_to_string(&served.out).expect("read the stdout file");
+        assert_eq!(code, Some(1), "wasm={wasm}: a forced stop exits 1, never 128+signal (C-350)");
+        // Every line written before the stop — including the one the stalled
+        // handler printed — and no "stopped": `http.serve` did not return.
+        assert_eq!(out, "listening\nhit /hello\nhit /stall\n", "wasm={wasm}");
+        assert!(answer.is_empty(), "wasm={wasm}: the stalled request was answered: {:?}", String::from_utf8_lossy(&answer));
+    }
+}

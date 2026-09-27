@@ -37,19 +37,26 @@ fn __hs_request(raw: List[String]) -> List[String] = list.take(raw, 3) + [int.to
 // `http.serve` is typed never-err (`-> Unit`), so its caller's `!` is a no-op
 // (#1049) and nothing could observe a returned err: a bind failure ABORTS,
 // `Error: bind failed: <os message>` and exit 1, as the native runtime does.
-// The loop itself never ends, as natively.
+// The loop ends only on a shutdown signal (ADR-0020 §5.6, #2692): the host
+// answers `next` with no request once the one in flight has been answered,
+// and `http.serve` returns, as natively.
 effect fn http_serve(port: Int, f: effect (List[String]) -> List[String]) -> Unit = {
   match __http_serve_bind(int.to_string(port)) {
     ok(_) => (),
     err(e) => prim.die(prim.handle("Error: ${e}\n")),
   }
-  while true {
+  var serving = true
+  while serving {
     let raw = __http_serve_next()!
-    let req = __hs_request(raw)
-    let resp = match f(req) {
-      ok(r) => r,
-      err(e) => ["500", "Internal error: ${e}", "Content-Type", "text/plain"],
+    if list.len(raw) == 0 then {
+      serving = false
+    } else {
+      let req = __hs_request(raw)
+      let resp = match f(req) {
+        ok(r) => r,
+        err(e) => ["500", "Internal error: ${e}", "Content-Type", "text/plain"],
+      }
+      __http_serve_reply(__hs_frame(resp))!
     }
-    __http_serve_reply(__hs_frame(resp))!
   }
 }

@@ -21,6 +21,10 @@ almide-wasi = { path = "../almide-wasi" }
 almide-rt-core = { path = "../almide-rt-core" }
 # The embedded host's http client (#1710 increment 1): a verbatim copy of
 anyhow = "1"
+# http.serve's shutdown on the embedded lane (ADR-0020 §5.6, #2692): SIGTERM
+# and SIGINT (Ctrl-C / Ctrl-Break on Windows) start the drain. The crate's
+# handler thread keeps the host free of `unsafe` (the workspace forbids it).
+ctrlc = { version = "3.5", features = ["termination"] }
 wasmparser = "0.259"
 wasm-encoder = "0.259"
 wasmtime = "47"
