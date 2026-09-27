@@ -491,14 +491,14 @@ fn desugar_diverging_value_branches(body: &IrExpr) -> Option<IrExpr> {
     }
     /// `{ <branch as a Unit statement>; value }`.
     fn split(branch: IrExprKind, value: IrExpr, e: &IrExpr) -> IrExpr {
-        let stmt = IrExpr { kind: branch, ty: Ty::Unit, span: e.span.clone(), def_id: None };
+        let stmt = IrExpr { kind: branch, ty: Ty::Unit, span: e.span, def_id: None };
         IrExpr {
             kind: IrExprKind::Block {
-                stmts: vec![IrStmt { kind: IrStmtKind::Expr { expr: stmt }, span: e.span.clone() }],
+                stmts: vec![IrStmt { kind: IrStmtKind::Expr { expr: stmt }, span: e.span }],
                 expr: Some(Box::new(value)),
             },
             ty: e.ty.clone(),
-            span: e.span.clone(),
+            span: e.span,
             def_id: e.def_id,
         }
     }
@@ -516,7 +516,11 @@ fn desugar_diverging_value_branches(body: &IrExpr) -> Option<IrExpr> {
                 let branch = IrExprKind::If { cond: cond.clone(), then: Box::new(then), else_: Box::new(else_) };
                 Some(split(branch, value, e))
             }
-            IrExprKind::Match { subject, arms } => {
+            // At least one arm must diverge: a match with no `panic` arm (a
+            // single catch-all `(_, _) => 0`) is an ordinary value match and
+            // stays one — rewriting it put a Block in a call argument, which
+            // the incumbent walls (gleam_multi_subject).
+            IrExprKind::Match { subject, arms } if arms.iter().any(|a| diverges(&a.body)) => {
                 let mut values = arms.iter().enumerate().filter(|(_, a)| !diverges(&a.body));
                 let (vi, va) = values.next()?;
                 if values.next().is_some() || va.guard.is_some() || binds(&va.pattern) {
