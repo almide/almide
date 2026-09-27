@@ -571,17 +571,34 @@ fn build_list_if_chain_tuple_pattern(
                 }).unwrap()
             };
 
+    let else_body = build_list_if_chain(subject, rest, result_ty, vt, covered_next, rest_from_next);
+            // A guard runs AFTER the binds and falls through to the remaining
+            // arms, exactly as on the plain-list path. It used to be dropped
+            // here: `([x, ..], _) if x > 5 => 1` matched every non-empty
+            // first list on native while the wasm leg honoured the guard
+            // (#2600's class scan).
+            let guarded_body = match &arm.guard {
+                Some(guard) => IrExpr {
+                    kind: IrExprKind::If {
+                        cond: Box::new(guard.clone()),
+                        then: Box::new(arm.body.clone()),
+                        else_: Box::new(else_body.clone()),
+                    },
+                    ty: result_ty.clone(),
+                    span: None, def_id: None,
+                },
+                None => arm.body.clone(),
+            };
             let body = if stmts.is_empty() {
-                arm.body.clone()
+                guarded_body
             } else {
                 IrExpr {
-                    kind: IrExprKind::Block { stmts, expr: Some(Box::new(arm.body.clone())) },
+                    kind: IrExprKind::Block { stmts, expr: Some(Box::new(guarded_body)) },
                     ty: result_ty.clone(),
                     span: None, def_id: None,
                 }
             };
 
-    let else_body = build_list_if_chain(subject, rest, result_ty, vt, covered_next, rest_from_next);
     IrExpr {
         kind: IrExprKind::If {
             cond: Box::new(combined_cond),
@@ -653,7 +670,7 @@ fn terminal_rest_binds(
 
 fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mut VarTable, covered_below: usize, rest_from: usize) -> IrExpr {
     if arms.is_empty() {
-        return IrExpr { kind: IrExprKind::Unit, ty: result_ty.clone(), span: None, def_id: None };
+        return fell_through_every_arm(result_ty);
     }
 
     let arm = &arms[0];
@@ -718,7 +735,7 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                 .filter(|a| !matches!(&a.pattern, IrPattern::List { .. }))
                 .collect();
             if remaining_arms.is_empty() {
-                IrExpr { kind: IrExprKind::Unit, ty: result_ty.clone(), span: None, def_id: None }
+                fell_through_every_arm(result_ty)
             } else {
                 IrExpr {
                     kind: IrExprKind::Match {
@@ -731,6 +748,21 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
             }
         }
     }
+}
+
+/// The value of a desugared chain past its last arm. The checker proves every
+/// list match exhaustive (#2600), so this is reached only when the last arm's
+/// length test is one the chain cannot see is always true — a tuple of lists
+/// whose rows cover every length together. A `Unit` there was ill-typed for
+/// any non-`Unit` match (rustc E0308 on an exhaustive program); an abort is
+/// the honest value of a branch no input takes.
+fn fell_through_every_arm(result_ty: &Ty) -> IrExpr {
+    let kind = if matches!(result_ty, Ty::Unit) {
+        IrExprKind::Unit
+    } else {
+        IrExprKind::Todo { message: "internal: a list match fell through every arm".into() }
+    };
+    IrExpr { kind, ty: result_ty.clone(), span: None, def_id: None }
 }
 
 /// An element sub-pattern that can never fail: a bind, a wildcard, or a

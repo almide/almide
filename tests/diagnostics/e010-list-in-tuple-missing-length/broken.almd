@@ -1,0 +1,10 @@
+// #2600: list patterns under a tuple. `([], [5])` reaches no arm; before the
+// fix check accepted this and rustc (native) / an `unreachable` trap (wasm)
+// found the hole instead.
+fn f(xs: List[Int], ys: List[Int]) -> Int =
+  match (xs, ys) {
+    ([], []) => 0,
+    ([x, ..xt], _) => 1,
+  }
+
+effect fn main() -> Unit = println(int.to_string(f([], [5])))
