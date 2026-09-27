@@ -87,7 +87,8 @@ effect fn run_experiment() -> Result[Unit, String] = {
   let trials = int.parse(parse_cli_string(args, "--trials", "")) ?? (json.get_int(config, "trials") ?? 5)
   let repair_rounds = json.get_int(config, "repair_rounds") ?? 0
   let model_filter = parse_cli_string(args, "--model", "")
-  let task_names = json.get_array(config, "tasks") ?? [] |> list.map((t) => value.as_string(t) ?? "")
+  let task_filter = parse_cli_string(args, "--task", "")
+  let task_names = json.get_array(config, "tasks") ?? [] |> list.map((t) => value.as_string(t) ?? "") |> list.filter((t) => task_filter == "" or t == task_filter)
   let runtime_path = jstr(config, "runtime_file")
   let runtime = if runtime_path == "" then "" else strip_blocks(fs.read_text("${dir}/${runtime_path}")!)
   let layer1 = fs.read_text("prompts/layer1_rules.md")!
@@ -119,7 +120,8 @@ effect fn run_experiment() -> Result[Unit, String] = {
     }
   }
   fs.mkdir_p("results")!
-  let results_path = "results/${experiment}_${stamp}.json"
+  let suffix = if task_filter == "" then "" else "_${task_filter}"
+  let results_path = "results/${experiment}_${stamp}${suffix}.json"
   fs.write(results_path, json.stringify_pretty(value.array(all_results)))!
   println("")
   println("Results written to ${results_path}")
