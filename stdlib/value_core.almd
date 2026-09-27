@@ -653,8 +653,10 @@ fn list_drop_end_value(xs: List[Value], n: Int) -> List[Value] = {
 // value.merge — the SHALLOW Object merge v0 does (almide_rt_value_merge): when BOTH a and b are tag-6
 // Objects, the result keeps a's keys IN A'S POSITIONS with b's value overriding where b has the same
 // key, then APPENDS b's keys not in a (b's order) — exactly v0's `pa[pos] = (k, v)` else `pa.push`.
-// Otherwise → b. set_nested supplies the recursion (it merges a freshly-built single-key nested object
-// into root), so this stays one level. LEAK-FREE by the value_object/__vobj_fill discipline: the result
+// Otherwise → b. With a DUPLICATE key (value.object keeps them) the fold is v0's too (#2735): only the
+// FIRST of a's repeats is overridden, a key b repeats takes b's LAST value, and a new key b repeats is
+// appended once, at its first position. set_nested supplies the recursion (it merges a freshly-built
+// single-key nested object into root), so this stays one level. LEAK-FREE by the value_object/__vobj_fill discipline: the result
 // Object block is built DIRECTLY (prim.alloc_value) and every key/value handle written in is acquired
 // with EXACTLY ONE prim.rc_inc — never the over-counting tuple+list-concat+value.object chain (which
 // rc_inc'd a second time). a and b stay BORROWED; the result owns one fresh ref per slot, freed once by
@@ -672,7 +674,7 @@ fn __vmerge_bnew(a: Value, b: Value, j: Int, nb: Int, na: Int, acc: Int) -> Int 
 else {
   let bh = prim.handle(b)
   let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
-  let inc = if __vobj_find(a, bk, 0, na) < 0 then 1 else 0
+  let inc = if __vobj_find(a, bk, 0, na) < 0 and __vobj_find(b, bk, 0, j) < 0 then 1 else 0
   __vmerge_bnew(a, b, j + 1, nb, na, acc + inc)
 }
 
@@ -682,7 +684,7 @@ else {
   let dh = prim.handle(dst)
   let key = prim.load64(ah + 12 + (2 * i) * 8)
   let ak: String = prim.load_handle(ah + 12 + (2 * i) * 8)
-  let bidx = __vobj_find(b, ak, 0, nb)
+  let bidx = if __vobj_find(a, ak, 0, i) < 0 then __vobj_find_last(b, ak, nb) else 0 - 1
   let val = if bidx < 0 then prim.load64(ah + 12 + (2 * i + 1) * 8) else prim.load64(prim.handle(b) + 12 + (2 * bidx + 1) * 8)
   prim.rc_inc(key)
   prim.rc_inc(val)
@@ -695,10 +697,10 @@ fn __vmerge_app_b(a: Value, b: Value, dst: Value, j: Int, nb: Int, na: Int, w: I
 else {
   let bh = prim.handle(b)
   let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
-  if __vobj_find(a, bk, 0, na) < 0 then {
+  if __vobj_find(a, bk, 0, na) < 0 and __vobj_find(b, bk, 0, j) < 0 then {
     let dh = prim.handle(dst)
     let kh = prim.load64(bh + 12 + (2 * j) * 8)
-    let vh = prim.load64(bh + 12 + (2 * j + 1) * 8)
+    let vh = prim.load64(bh + 12 + (2 * __vobj_find_last(b, bk, nb) + 1) * 8)
     prim.rc_inc(kh)
     prim.rc_inc(vh)
     prim.store64(dh + 12 + (2 * w) * 8, kh)
@@ -736,6 +738,16 @@ else {
   let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
   if k == key then i
   else __vobj_find(v, key, i + 1, n)
+}
+
+// The LAST slot in [0, n) holding `key`, or -1. value.merge folds b's pairs in order, so for a key b
+// repeats the value that wins is the last one (#2735).
+fn __vobj_find_last(v: Value, key: String, n: Int) -> Int = if n <= 0 then 0 - 1
+else {
+  let h = prim.handle(v)
+  let k: String = prim.load_handle(h + 12 + (2 * (n - 1)) * 8)
+  if k == key then n - 1
+  else __vobj_find_last(v, key, n - 1)
 }
 
 // The Value-payload `??` (`value.get(o,k) ?? value.null()`): a Result[Value,String] unwrap, routed

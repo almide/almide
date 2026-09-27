@@ -1,0 +1,22 @@
+// @contract: C-103
+// value.merge over objects that repeat a key (value.object keeps duplicates). The merge is a fold of
+// b's pairs into a — replace the FIRST pair with that key, else append — so: a key b repeats takes
+// b's LAST value, a new key b repeats is appended once at its first position, and only the first of
+// a's repeats is overridden. The wasm legs had assumed unique keys and appended every repeat of a
+// new b key, overrode with b's FIRST value, and overrode every repeat in a (#2735).
+effect fn main() -> Unit = {
+  let a = value.object([("k", value.int(1)), ("x", value.str("old"))])
+  let b = value.object([("y", value.str("new")), ("y", value.bool(true))])
+  println(value.stringify(value.merge(a, b)))
+  println(value.stringify(value.merge(value.object([("y", value.int(0))]), b)))
+  println(value.stringify(value.merge(
+    value.object([("y", value.int(1)), ("y", value.int(2))]),
+    value.object([("y", value.int(3))]),
+  )))
+  println(value.stringify(value.merge(
+    value.object([("a", value.int(1))]),
+    value.object([("n", value.int(1)), ("m", value.int(2)), ("n", value.int(3))]),
+  )))
+  println(value.stringify(value.merge(value.object([]), b)))
+  println(value.stringify(value.merge(b, a)))
+}
