@@ -46,7 +46,17 @@ ratio 4.403
 # the front-end lexes all of it — CI measured 0.1514 green, then 0.1606/0.1633
 # red against the old ceiling of 0.1594. The share is pinned to the observed
 # mid, not padded: the gate should still catch the NEXT real lex regression.
-share_lex 0.1550
+# share_lex moved 0.1550 -> 0.1340 (2026-09-27), re-anchored on CI data rather
+# than the M4 Pro: across the last 34 ubuntu Perf ratchet jobs the lex throughput
+# of the runner itself swung 1.07M-1.90M lines/s and share_lex with it — 0.129 to
+# 0.150 before 7e854a919, median 0.134, so the 0.1550 mid already sat above every
+# CI reading. The floor 0.1240 then fired on a PR whose frontend/stdlib/src were
+# byte-identical to 7e854a919 (3cbf300c1, 0.1237), and on the #2733 merge
+# (0.1209-0.1231), whose real check cost was measured by a local A/B of
+# 7e854a919 vs c6e979542 on the gate's top rung at +0.5% (median) / +0.8% (min):
+# worth ~0.001 of share_lex. Pinned to the CI median; the +/-20% band keeps a
+# ~15% check slowdown and a ~12% lex slowdown as the detection thresholds.
+share_lex 0.1340
 #     share_parse  0.1334 0.1339 0.1341 0.1347 0.1363 0.1369 0.1371 0.1378
 #                  median 0.1355, 3.2% spread
 share_parse 0.1355
