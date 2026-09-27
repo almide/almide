@@ -345,10 +345,8 @@ impl Checker {
             if self.env.is_eq(&resolved) {
                 continue;
             }
-            if let Some(s) = span {
-                if !reported.insert((s.line, s.col)) {
-                    continue;
-                }
+            if span.is_some_and(|s| !reported.insert((s.line, s.col))) {
+                continue;
             }
             let ty_name = resolved.display();
             let mut diag = err(
