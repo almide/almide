@@ -113,9 +113,12 @@ template = "Err(format!(\"{:?}\", {inner}))"
 when_attr = "map_err_join"
 template = "({inner}).map_err(|errs| errs.join(\", \"))?"
 
+# A typed error `!`-ed into a String channel carries its repr text — the
+# `"${e}"` rendering, which both wasm legs and the interp share (ADR-0021,
+# #2725). Rust `Debug` differed on Option/Float/control-char payloads.
 [[unwrap_expr]]
 when_attr = "map_err_debug"
-template = "({inner}).map_err(|e| format!(\"{:?}\", e))?"
+template = "({inner}).map_err(|e| almide_repr(&e))?"
 
 [[unwrap_expr]]
 template = "({inner})?"
