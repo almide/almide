@@ -303,6 +303,16 @@ pub struct Checker {
     /// `list.try_map`, keyed by the module Ident's ExprId): the try_
     /// deprecation warning (E043) must fire only on USER-SPELLED try_*.
     pub(crate) hof_rewritten_calls: std::collections::HashSet<almide_lang::ast::ExprId>,
+    /// #2601: every `!` inside a lambda whose operand's error type is not
+    /// `String` — the lambda's failure channel is always `String` (ADR-0012
+    /// D4 / ADR-0009 L3), so that `!` erases the typed error into its
+    /// Debug text. Recorded (erased type, `!` span) so a LATER `!` that
+    /// propagates the erased `String` into a fn with a typed error can name
+    /// the callback as the cause instead of only "fails with `String`".
+    pub(crate) lambda_err_erasures: Vec<(Ty, Option<crate::ast::Span>)>,
+    /// Set while a `!` is judged: the `lambda_err_erasures` length before its
+    /// operand was inferred, so the erasures inside THAT operand are known.
+    pub(crate) bang_erasure_mark: Option<usize>,
     /// Annotated `let`/`var` bindings, re-checked post-solve for the numeric
     /// narrowing direction (#867). The solver joins numeric widths
     /// symmetrically — peer sites like list elements and `assert_eq` args
@@ -621,6 +631,8 @@ impl Checker {
             effect_call_spans: std::collections::HashSet::new(),
             fallible_marker_fns: std::collections::HashSet::new(),
             hof_rewritten_calls: std::collections::HashSet::new(),
+            lambda_err_erasures: Vec::new(),
+            bang_erasure_mark: None,
             deferred_unknown_type_checks: Vec::new(),
             pending_toplet_tys: Vec::new(),
         }
