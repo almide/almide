@@ -175,7 +175,16 @@ schema = 3
 # http.mount / http.wrap are served on wasm by the incumbent leg (the
 # spec/stdlib/http_router_test.almd fixture runs there), while the structural
 # leg refuses the effect fn values a handler is (#2664).
-pending_self_host_ceiling = 12
+# 2026-09-27 (#2664): 12 -> 9. The structural leg serves all three: a `let`'s
+# declared type and a pattern binder's type now normalize to the effect
+# carrier at lower exit like every other type position (the effect form there
+# interned a second fn signature for one value, `ty-mismatch:Fn`), and a
+# closure lifted from a module fn resolves bare calls in that module (the
+# route table's lambda calls `http`'s private `__parts` / `__dispatch`).
+# Parity evidence: spec/wasm_cross/effect_fn_value_slot_family.almd,
+# spec/stdlib/http_router_test.almd on the structural test lane, and
+# tests/effect_fn_type_carrier_test.rs (a top-level `let app = http.wrap(...)`).
+pending_self_host_ceiling = 9
 # 2026-09-25 (#2631): 56 -> 64. NEW surface, not a regression: the http call
 # handle (start / poll / read_new / wait / cancel) and the three *_with_limits
 # streaming twins land native-first; each is refused at check time on the
@@ -187,7 +196,11 @@ pending_self_host_ceiling = 12
 # query_params) are self-hosted and their structural rows go. http.serve
 # keeps its stock-p1 leg (#2659). (#2588 retired the same five structural
 # rows through http.new_request and stdlib/http_request.almd.)
-pending_port_ceiling = 59
+# 2026-09-27 (#2664): 59 -> 58. http.url_decode's structural row goes: the
+# self-hosted decoder http.query_params already ran on this leg joins the
+# audited http_request tier under its public name (the router decodes a
+# `{name}` binding through it). Evidence: effect_fn_value_slot_family.almd.
+pending_port_ceiling = 58
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
 # HttpRequest readers (http.query_params / req_body / req_header / req_method /
@@ -309,27 +322,6 @@ reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --t
 issue = "#1423"
 
 [[unavailable]]
-fn = "http.mount"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "structural-leg-gap: the structural leg has no arm for a handler, an effect fn value flowing through a declared fn type (ty-mismatch:Fn); the incumbent leg serves it (spec/stdlib/http_router_test.almd)"
-issue = "#2664"
-
-[[unavailable]]
-fn = "http.router"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "structural-leg-gap: the structural leg has no arm for a handler, an effect fn value flowing through a declared fn type (ty-mismatch:Fn); the incumbent leg serves it (spec/stdlib/http_router_test.almd)"
-issue = "#2664"
-
-[[unavailable]]
-fn = "http.wrap"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "structural-leg-gap: the structural leg has no arm for a handler, an effect fn value flowing through a declared fn type (ty-mismatch:Fn); the incumbent leg serves it (spec/stdlib/http_router_test.almd)"
-issue = "#2664"
-
-[[unavailable]]
 fn = "http.request"
 legs = ["stock-p1"]
 class = "pending-port"
@@ -419,13 +411,6 @@ legs = ["stock-p1"]
 class = "pending-port"
 reason = "embedded-lane-served (#2650, C-367): `almide run --target wasm` serves it — one instance, sequential, byte-identical responses through the shared server core (host ops 70..=72); a stock p1 artifact has no listening socket, so `almide build --target wasm` refuses it — run it with `almide run --target wasm` or natively"
 issue = "#2659"
-
-[[unavailable]]
-fn = "http.url_decode"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1423"
 
 [[unavailable]]
 fn = "list.partition"

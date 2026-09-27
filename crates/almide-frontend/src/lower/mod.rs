@@ -315,7 +315,37 @@ fn normalize_effect_fn_types(program: &mut IrProgram) {
                     }
                 }
             }
+            if let IrExprKind::Call { type_args, .. } = &mut expr.kind {
+                for t in type_args.iter_mut() {
+                    if has_effect_fn(t) {
+                        *t = norm(t);
+                    }
+                }
+            }
             walk_expr_mut(self, expr);
+        }
+        // #2664: a `let` carries its declared type on the STATEMENT, not on
+        // an expression. `let h = mk("t:")` with `mk -> Handler` (an alias of
+        // `effect (A) -> B`) kept the effect form there while the value was
+        // the carrier, and the structural wasm leg interned two fn signatures
+        // for one value (ty-mismatch:Fn).
+        fn visit_stmt_mut(&mut self, stmt: &mut IrStmt) {
+            if let IrStmtKind::Bind { ty, .. } = &mut stmt.kind
+                && has_effect_fn(ty)
+            {
+                *ty = norm(ty);
+            }
+            almide_ir::visit_mut::walk_stmt_mut(self, stmt);
+        }
+        // A pattern binder names its type too (`some(h) => h(x)!` over a
+        // `List[Handler]` element, a destructured handler field).
+        fn visit_pattern_mut(&mut self, pat: &mut IrPattern) {
+            if let IrPattern::Bind { ty, .. } | IrPattern::As { ty, .. } = pat
+                && has_effect_fn(ty)
+            {
+                *ty = norm(ty);
+            }
+            almide_ir::visit_mut::walk_pattern_mut(self, pat);
         }
     }
 

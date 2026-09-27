@@ -256,7 +256,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-218 | a heap-payload ?? returned as the fn tail yields the same value on both targets | 0.56.0 | active | fixture | 2 |
 | C-219 | a Never-typed call in a branch arm runs on both targets and sets the exit code | 0.56.0 | active | fixture | 1 |
 | C-220 | fs streaming line walkers fold/each with read_lines line semantics | 0.56.1 | active | fixture | 0 |
-| C-221 | An effect fn-typed slot admits pure and fallible lambdas with one carrier semantics | 0.56.1 | active | fixture | 2 |
+| C-221 | An effect fn-typed slot admits pure and fallible lambdas with one carrier semantics | 0.56.1 | active | fixture | 3 |
 | C-222 | An expression-nested scalar unwrap propagates the err identically on both legs | 0.56.1 | active | fixture | 1 |
 | C-223 | Matrix transcendentals compute through the vendored musl-libm, not the platform one | 0.56.1 | active | fixture | 7 |
 | C-224 | if let / guard let bind and release heap payloads identically on both targets | 0.56.1 | active | fixture | 1 |
@@ -403,5 +403,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-365 | A generic protocol with explicit conformance dispatches to the one declared implementation, identically on both targets | 0.64.0 | active | fixture | 1 |
 | C-366 | http call handle: per-call limits name themselves when they fire, cancel closes the connection, poll never blocks | 0.64.0 | active | fixture | 0 |
 | C-367 | http.serve runs on the embedded wasm lane with native's one-instance, sequential semantics and byte-identical responses | 0.64.0 | active | fixture | 0 |
-| C-368 | http router: a handler is a function, the most specific route answers, a broken table is refused, 404/405/400 come from the router, identically on both targets | 0.64.0 | active | fixture | 0 |
+| C-368 | http router: a handler is a function, the most specific route answers, a broken table is refused, 404/405/400 come from the router, identically on both targets | 0.64.0 | active | fixture | 1 |
 
