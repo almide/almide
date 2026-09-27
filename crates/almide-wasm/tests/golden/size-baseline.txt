@@ -122,6 +122,7 @@
 5029	spec/wasm_cross/edge_map_order.almd
 57064	spec/wasm_cross/edge_string_unicode.almd
 2750	spec/wasm_cross/effect_assign_unwrap.almd
+3172	spec/wasm_cross/effect_branch_keeps_result.almd
 6210	spec/wasm_cross/effect_call_arg_credit.almd
 5648	spec/wasm_cross/effect_fn_value.almd
 31511	spec/wasm_cross/effect_fn_value_slot_family.almd
