@@ -3,7 +3,6 @@
 // does. It used to be pinned up front, so inside a `-> String!` fn a non-tail
 // `err("neg")` was typed `Result[String, String]` and every if/else below
 // was E001 ("expected Result[Int, String] but got Result[String, String]").
-
 fn annotated(c: Int) -> String! = {
   let r: Result[Int, String] = if c > 0 then ok(c) else err("neg")
   let n = r!
@@ -37,10 +36,14 @@ fn err_first(c: Int) -> Int! = {
 // The default still fills a slot nothing else decides: the seed's err type
 // comes from the fn's declared Result.
 fn fold_seed(xs: List[Int]) -> Result[Int, String] = {
-  let total = list.fold(xs, ok(0), (acc, x) => match acc {
-    ok(t) => ok(t + x),
-    err(e) => err(e),
-  })
+  let total = list.fold(
+    xs,
+    ok(0),
+    (acc, x) => match acc {
+      ok(t) => ok(t + x),
+      err(e) => err(e),
+    },
+  )
   total
 }
 
