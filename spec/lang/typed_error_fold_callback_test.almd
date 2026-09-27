@@ -1,0 +1,34 @@
+// #2601: a `!` inside a lambda propagates into the lambda's own failure
+// channel, which is always `String` (ADR-0012 D4 / ADR-0009 L3). Only the
+// canonical callback, whose WHOLE body is one `call(..)!`, keeps the call's
+// error type (ADR-0006 D1), so a typed-error fold spells its branch inside
+// the called fn. The branch-in-the-lambda spelling is E022 at check time
+// (tests/diagnostics/e022-lambda-bang-erases-typed-error); before #2660 it
+// passed check and failed in rustc with E0277.
+type E: Eq, Repr = | Neg(Int)
+
+fn step(acc: Int, x: Int) -> Int!E = {
+  guard x >= 0 else err(Neg(x))
+  acc + x
+}
+
+fn step_or_skip(acc: Int, x: Int) -> Int!E = if x == 100 then acc
+else step(acc, x)!
+
+fn total(xs: List[Int]) -> Int!E = xs |> list.fold(0, (acc, x) => step_or_skip(acc, x)!)!
+
+fn total_rec(xs: List[Int], acc: Int) -> Int!E = match xs {
+  [] => acc,
+  [x, ..rest] => total_rec(rest, if x == 100 then acc
+  else step(acc, x)!)!,
+}
+
+test "the canonical callback keeps the typed error" {
+  assert_eq(total([1, 100, 2]), ok(3))
+  assert_eq(total([1, -2, 5]), err(Neg(-2)))
+}
+
+test "explicit recursion keeps the typed error" {
+  assert_eq(total_rec([1, 100, 2], 0), ok(3))
+  assert_eq(total_rec([1, -2, 5], 0), err(Neg(-2)))
+}

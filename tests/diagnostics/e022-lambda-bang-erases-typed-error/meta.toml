@@ -1,0 +1,3 @@
+expects_code = "E022"
+expects_error = "a `!` inside a lambda propagates into the lambda's own failure channel"
+hint_substring = "Only a callback whose WHOLE body is one `call(..)!` keeps that call's error type"
