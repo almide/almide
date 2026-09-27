@@ -804,10 +804,18 @@ impl Checker {
         let outer_span = expr.span;
         let ExprKind::Unwrap { expr: inner, .. } = &mut expr.kind else { unreachable!() };
         self.record_postfix_inner(outer_span, inner.span);
+        let erasure_mark = self.lambda_err_erasures.len();
         let t = self.infer_expr(inner);
         let resolved = resolve_ty(&t, &self.uf);
         let plain_is_effect_call = self.is_effect_call_expr(inner);
+        let judged = self.lambda_err_erasures.len();
+        self.bang_erasure_mark = Some(erasure_mark);
         self.check_unwrap_propagation_context(&resolved, plain_is_effect_call, inner.span);
+        self.bang_erasure_mark = None;
+        // An erasure this very `!` made (inside a lambda) is located here.
+        for e in &mut self.lambda_err_erasures[judged..] {
+            e.1 = outer_span;
+        }
         if let Some(inner_ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
             inner_ty
         } else if matches!(&resolved, Ty::Unknown) {
@@ -1295,8 +1303,16 @@ impl Checker {
                 Ty::Applied(TypeConstructorId::Result, oa),
             ) if both_result_arity_two(ra, oa) => {
                 // E is String by the channel's construction (ADR-0002 D2, L3):
-                // a custom-E operand fails this unification.
-                self.unify_infer(&ra[1], &oa[1]);
+                // a custom-E operand fails this unification, and the lowering
+                // renders its error as Debug text into the String channel.
+                // Recorded (#2601) for the `!` that later tries to propagate
+                // the erased String into a typed-error fn.
+                if !self.unify_infer(&ra[1], &oa[1]) {
+                    let erased = resolve_ty(&oa[1], &self.uf);
+                    if !matches!(erased, Ty::Unknown | Ty::TypeVar(_)) {
+                        self.lambda_err_erasures.push((erased, None));
+                    }
+                }
                 true
             }
             // Option operand: none maps to err("none") (L4).
@@ -1318,9 +1334,12 @@ impl Checker {
         match &mut right.kind {
             ExprKind::UnwrapOr { expr: inner, fallback, .. } => self.infer_pipe_unwrap_or(left, inner, fallback),
             ExprKind::Unwrap { expr: inner, .. } => {
+                let erasure_mark = self.lambda_err_erasures.len();
                 let inner_ty = self.infer_pipe(left, inner);
                 let plain_is_effect_call = self.is_effect_pipe_target(inner);
+                self.bang_erasure_mark = Some(erasure_mark);
                 self.check_unwrap_propagation_context(&inner_ty, plain_is_effect_call, None);
+                self.bang_erasure_mark = None;
                 // Annotate the inner expression with its resolved type so the lowering
                 // can construct the correct IR type (e.g., Result[List[T], List[E]] for
                 // result.collect rather than hardcoding Result[T, String]).
