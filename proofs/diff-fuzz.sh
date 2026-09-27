@@ -6,13 +6,23 @@
 # exercised "init a mutable var from another var, then reassign it in a loop". This gate closes that
 # blind spot GENERATIVELY: it synthesizes random programs over the v1-renderable subset (var/let
 # binds + reassignment, scalar/string/list accumulators, for-loops, if/match, recursion, the sha1
-# rotation shape) and byte-diffs v0 (native) vs v1 (wasm). A new lowering brick is auto-covered the
+# rotation shape) and byte-diffs native vs wasm. A new lowering brick is auto-covered the
 # moment its shape appears in a generated program — no hand-written fixture required.
 #
-#   v0 oracle : almide run <f>                                   (native)
-#   v1        : examples/render_program <f> -> wat -> wasmtime   (trust-spine path)
-# Per program: MATCH (v0==v1) / WALL (v1 Unsupported — fine) / v0fail (skip) / MISMATCH (FAIL — a
-# silent miscompile) / RUNERR (v1 renders but traps — FAIL). Any MISMATCH/RUNERR fails the gate.
+#   native oracle : almide run <f>
+#   wasm          : ALMIDE_WASM_STRUCTURAL=1 almide build <f> --target wasm -> wasmtime
+#                   (the STRUCTURAL leg — the renderer `--target wasm` ships by default — forced,
+#                   so a structural decline is a WALL here and never an incumbent module standing
+#                   in for it; #2753. The artifact is the stock-WASI build a user ships.)
+# Per program: MATCH (native==wasm) / WALL (structural leg declines) / v0fail (skip) / MISMATCH
+# (FAIL — a silent miscompile) / RUNERR (wasm builds but traps — FAIL). Any MISMATCH/RUNERR fails
+# the gate, and so does ANY WALL: every template is inside the structural leg's subset (measured
+# 0 walls when the gate moved off the incumbent, #2753), so a wall is lost coverage, not a skip.
+# So does ANY v0fail: six of the eleven templates wrote the retired `0..n` range, so every
+# program they generated failed to compile natively and was counted as a quiet skip (SEED=12345,
+# N=300: 165 skips, the gate compared 135 programs from five templates). With the ranges
+# migrated to `..<` the same seed compares all 300 (match=300), and a template that stops
+# compiling now fails the gate instead of disappearing from it.
 #
 #   bash proofs/diff-fuzz.sh [N] [SEED]    # default N=120, SEED from $EPOCHSECONDS
 # Deterministic: the SEED is printed; a failing case prints its generated source for exact repro.
@@ -27,7 +37,7 @@ N="${1:-120}"
 SEED="${2:-${EPOCHSECONDS:-$(date +%s)}}"
 
 command -v wasmtime >/dev/null || { echo "diff-fuzz: wasmtime not found — SKIP"; exit 0; }
-# v0 and v1 MUST come from the SAME, FRESH build of THIS tree, or the diff is meaningless. ALWAYS
+# Both legs MUST come from the SAME, FRESH build of THIS tree, or the diff is meaningless. ALWAYS
 # rebuild (cargo is incremental — a no-op if current) rather than trust an existing binary, which may
 # be stale and produce a phantom mismatch. Build the variant matching the tree (release if a release
 # tree exists — CI builds --release; else debug). Never a PATH `almide`.
@@ -36,10 +46,10 @@ if [ -d "$ROOT/target/release/.fingerprint" ]; then
 else
   PROF=debug; FLAG=
 fi
-( cd "$ROOT" && cargo build -q $FLAG --bin almide 2>/dev/null && cargo build -q $FLAG -p almide-mir --example render_program 2>/dev/null ) \
+( cd "$ROOT" && cargo build -q $FLAG --bin almide 2>/dev/null ) \
   || { echo "diff-fuzz: build failed"; exit 1; }
-ALM="$ROOT/target/$PROF/almide"; RP="$ROOT/target/$PROF/examples/render_program"
-{ [ -x "$ALM" ] && [ -x "$RP" ]; } || { echo "diff-fuzz: almide / render_program not built — SKIP"; exit 0; }
+ALM="$ROOT/target/$PROF/almide"
+[ -x "$ALM" ] || { echo "diff-fuzz: almide not built — SKIP"; exit 0; }
 
 TMP="${TMPDIR:-/tmp}/almide-diff-fuzz.$$"; mkdir -p "$TMP"; trap 'rm -rf "$TMP"' EXIT
 RANDOM=$SEED
@@ -58,7 +68,7 @@ gen() {  # echo a self-contained program for template id $1
 fn f() -> Int = {
   var h = $a
   var a = h
-  for i in 0..$n { a = a $op (i + 1) }
+  for i in 0..<$n { a = a $op (i + 1) }
   h * 100000 + a
 }
 fn main() -> Unit = println(int.to_string(f()))
@@ -71,7 +81,7 @@ fn f() -> Int = {
   var a = $a
   var b = $b
   var c = $c
-  for i in 0..$n {
+  for i in 0..<$n {
     let t = a + b + c + i
     c = b
     b = a
@@ -85,7 +95,7 @@ EOF
     2) # SCALAR for-accumulator (used OR unused loop var).
        a=$((1+$(ri 9))); n=$((1+$(ri 20))); op="$(pick + - '*')"; b="$(pick 'i' '1')"
        cat <<EOF
-fn f() -> Int = { var s = $a; for i in 0..$n { s = s $op $b }; s }
+fn f() -> Int = { var s = $a; for i in 0..<$n { s = s $op $b }; s }
 fn main() -> Unit = println(int.to_string(f()))
 EOF
        ;;
@@ -93,14 +103,14 @@ EOF
        n=$((1+$(ri 12))); c="$(pick x ab Q '-')"
        if [ $(( RANDOM % 2 )) = 0 ]; then body="s = s + \"$c\""; else body="s = \"\${s}$c\""; fi
        cat <<EOF
-fn f() -> String = { var s = ""; for i in 0..$n { $body }; s }
+fn f() -> String = { var s = ""; for i in 0..<$n { $body }; s }
 fn main() -> Unit = println(f())
 EOF
        ;;
     4) # LIST[Int] accumulator + length.
        n=$((1+$(ri 15)))
        cat <<EOF
-fn f() -> Int = { var xs: List[Int] = []; for i in 0..$n { xs = xs + [i * 2] }; list.len(xs) + list.sum(xs) }
+fn f() -> Int = { var xs: List[Int] = []; for i in 0..<$n { xs = xs + [i * 2] }; list.len(xs) + list.sum(xs) }
 fn main() -> Unit = println(int.to_string(f()))
 EOF
        ;;
@@ -120,9 +130,9 @@ EOF
        cat <<EOF
 fn f() -> Int = {
   var acc = 0
-  for blk in 0..$n {
+  for blk in 0..<$n {
     var w = bytes.new(8)
-    for i in 0..8 { w = bytes.set(w, i, blk $op (i + 1)) }
+    for i in 0..<8 { w = bytes.set(w, i, blk $op (i + 1)) }
     acc = acc + bytes.read_u8(w, 3) + bytes.read_u8(w, 7)
   }
   acc
@@ -236,17 +246,19 @@ mismatch=0; match=0; wall=0; skip=0; runerr=0
 for k in $(seq 1 "$N"); do
   t=$(( RANDOM % 11 ))
   src="$TMP/p$k.almd"; gen "$t" > "$src"
-  o0="$("$ALM" run "$src" 2>/dev/null)" || { skip=$((skip+1)); continue; }   # v0 must run (else skip)
-  if ! "$RP" "$src" > "$src.wat" 2>/dev/null; then wall=$((wall+1)); continue; fi   # v1 walls = fine
-  if ! o1="$(wasmtime "$src.wat" 2>/dev/null)"; then
-    runerr=$((runerr+1)); echo "RUNERR (v1 traps) — tmpl $t:"; cat "$src"; continue
+  o0="$("$ALM" run "$src" 2>/dev/null)" || { skip=$((skip+1)); echo "v0fail (native does not run) — tmpl $t:"; cat "$src"; continue; }
+  if ! ALMIDE_WASM_STRUCTURAL=1 "$ALM" build "$src" --target wasm -o "$src.wasm" >"$src.build" 2>&1; then
+    wall=$((wall+1)); echo "WALL (structural leg declines) — tmpl $t:"; cat "$src"; sed -n '1,8p' "$src.build"; continue
+  fi
+  if ! o1="$(wasmtime "$src.wasm" 2>/dev/null)"; then
+    runerr=$((runerr+1)); echo "RUNERR (wasm traps) — tmpl $t:"; cat "$src"; continue
   fi
   if [ "$o0" = "$o1" ]; then match=$((match+1)); else
     mismatch=$((mismatch+1))
-    echo "MISMATCH — tmpl $t  v0=[$o0]  v1=[$o1]"; echo "--- source ---"; cat "$src"; echo "--------------"
+    echo "MISMATCH — tmpl $t  native=[$o0]  wasm=[$o1]"; echo "--- source ---"; cat "$src"; echo "--------------"
   fi
 done
 
 echo "diff-fuzz: match=$match wall=$wall skip=$skip mismatch=$mismatch runerr=$runerr (SEED=$SEED)"
-[ "$mismatch" = 0 ] && [ "$runerr" = 0 ] || { echo "diff-fuzz: FAIL — re-run with SEED=$SEED to reproduce"; exit 1; }
+[ "$mismatch" = 0 ] && [ "$runerr" = 0 ] && [ "$wall" = 0 ] && [ "$skip" = 0 ] || { echo "diff-fuzz: FAIL — re-run with SEED=$SEED to reproduce"; exit 1; }
 echo "diff-fuzz: OK"
