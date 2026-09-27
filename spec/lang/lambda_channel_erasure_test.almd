@@ -1,0 +1,46 @@
+// ADR-0021 D2 (#2725): a failure channel that falls to `String` — a `-> T!`
+// fn, or a lambda whose `!`s disagree on the error type — carries each typed
+// error as its repr text, the text `"${e}"` shows. The conversion happens at
+// the `!`, so the lambda's own channel and the fn around it print the same
+// bytes whichever `!` does it.
+type Pt = { x: Int, y: Float }
+
+type ShapeErr: Eq, Repr = | Neg(Int) | Bad(String) | At(Pt) | Wrap(ShapeErr) | Opt(Float?) | Gone
+
+fn check(n: Int) -> Int!ShapeErr = if n < 0 then err(Neg(n)) else ok(n)
+
+fn fail(e: ShapeErr) -> Int!ShapeErr = err(e)
+
+fn erased(e: ShapeErr) -> Int! = fail(e)! + 1
+
+fn fn_level(n: Int) -> Int! = check(n)! * 2
+
+fn disagree(xs: List[String]) -> List[Int]! = xs |> list.map((s) => {
+  let n = int.parse(s)!
+  check(n)!
+})!
+
+fn erased_fold(xs: List[Int]) -> Int! = xs |> list.fold(
+  0,
+  (acc, x) => if x == 0 then int.parse("z")!
+  else acc + check(x)!,
+)!
+
+test "a -> T! fn carries a typed error as its repr text" {
+  assert_eq(fn_level(3), ok(6))
+  assert_eq(fn_level(-3), err("Neg(-3)"))
+  assert_eq(erased(Bad("q\"u\n")), err("Bad(\"q\\\"u\\n\")"))
+  assert_eq(erased(At({ x: 1, y: 2.5 })), err("At(Pt { x: 1, y: 2.5 })"))
+  assert_eq(erased(Wrap(Gone)), err("Wrap(Gone)"))
+  assert_eq(erased(Opt(some(2.0))), err("Opt(some(2))"))
+  assert_eq(erased(Opt(none)), err("Opt(none)"))
+}
+
+test "a lambda whose bangs disagree has a String channel" {
+  assert_eq(disagree(["1", "2"]), ok([1, 2]))
+  assert_eq(disagree(["1", "-2"]), err("Neg(-2)"))
+  assert_eq(disagree(["x"]), err("invalid digit found in string"))
+  assert_eq(erased_fold([1, 2]), ok(3))
+  assert_eq(erased_fold([1, -5]), err("Neg(-5)"))
+  assert_eq(erased_fold([0]), err("invalid digit found in string"))
+}
