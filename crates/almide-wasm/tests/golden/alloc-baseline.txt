@@ -518,6 +518,7 @@
 66720	spec/wasm_cross/or_pattern_heap_subject_matrix.almd
 68512	spec/wasm_cross/ord_record_variant.almd
 69440	spec/wasm_cross/ord_recursive.almd
+65968	spec/wasm_cross/panic_value_arm.almd
 66480	spec/wasm_cross/path_extension_hidden.almd
 65840	spec/wasm_cross/phantom_type_param.almd
 65776	spec/wasm_cross/pipe_chain_scalar_bind.almd
