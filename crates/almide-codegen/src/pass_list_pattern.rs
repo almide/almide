@@ -271,6 +271,7 @@ fn build_list_if_chain_list_pattern(
 
             let mut stmts = Vec::new();
             let mut extra_conds: Vec<IrExpr> = Vec::new();
+            let mut residual = Residual::default();
             for (i, elem_pat) in elements.iter().enumerate() {
                 let index_expr = IrExpr {
                     kind: IrExprKind::IndexAccess {
@@ -300,8 +301,8 @@ fn build_list_if_chain_list_pattern(
                     });
                 }
                 match elem_pat {
-                    IrPattern::Bind { .. } | IrPattern::Tuple { .. } => {
-                        bind_irrefutable_elem(elem_pat, index_expr, &elem_ty, &mut stmts);
+                    p if elem_is_irrefutable(p) => {
+                        bind_irrefutable_elem(p, index_expr, &elem_ty, &mut stmts);
                     }
                     IrPattern::Literal { expr: lit_expr } => {
                         // Add equality check: subject[i] == literal
@@ -315,7 +316,12 @@ fn build_list_if_chain_list_pattern(
                             span: None, def_id: None,
                         });
                     }
-                    _ => {} // Wildcard: no binding or check needed
+                    // A refutable element (`some(a)`, a ctor, a tuple holding a
+                    // literal, a nested list) was read as a wildcard here: the
+                    // arm matched every list of the right length and its
+                    // binders were never bound (#2600's class scan). It is
+                    // tested by a residual match after the length test.
+                    p => residual.push(index_expr, p.clone()),
                 }
             }
 
@@ -364,7 +370,19 @@ fn build_list_if_chain_list_pattern(
             }
 
             // Apply guard if present — guard must be evaluated AFTER let bindings
-            let then_body = if let Some(ref guard) = arm.guard {
+            let then_body = if !residual.is_empty() {
+                let fallthrough = build_list_if_chain(subject, rest, result_ty, vt, covered_next, rest_from_next);
+                let tested = residual.into_match(arm, fallthrough, result_ty, vt);
+                if stmts.is_empty() {
+                    tested
+                } else {
+                    IrExpr {
+                        kind: IrExprKind::Block { stmts, expr: Some(Box::new(tested)) },
+                        ty: result_ty.clone(),
+                        span: None, def_id: None,
+                    }
+                }
+            } else if let Some(ref guard) = arm.guard {
                 let else_body = build_list_if_chain(subject, rest, result_ty, vt, covered_next, rest_from_next);
                 // { let bindings; if guard then body else fallthrough }
                 let guarded = IrExpr {
@@ -430,6 +448,7 @@ fn process_tuple_element_pattern(
     tuple_tys: &[Ty],
     conds: &mut Vec<IrExpr>,
     stmts: &mut Vec<IrStmt>,
+    residual: &mut Residual,
 ) {
     let elem_access = IrExpr {
         kind: IrExprKind::TupleIndex {
@@ -470,27 +489,25 @@ fn process_tuple_element_pattern(
                 _ => Ty::Unknown,
             };
             for (j, lp) in list_elems.iter().enumerate() {
-                if let IrPattern::Bind { var, .. } = lp {
-                    stmts.push(IrStmt {
-                        kind: IrStmtKind::Bind {
-                            var: *var,
-                            mutability: Mutability::Let,
-                            ty: inner_elem_ty.clone(),
-                            value: IrExpr {
-                                kind: IrExprKind::IndexAccess {
-                                    object: Box::new(elem_access.clone()),
-                                    index: Box::new(IrExpr {
-                                        kind: IrExprKind::LitInt { value: j as i64 },
-                                        ty: Ty::Int,
-                                        span: None, def_id: None,
-                                    }),
-                                },
-                                ty: inner_elem_ty.clone(),
-                                span: None, def_id: None,
-                            },
-                        },
-                        span: None,
-                    });
+                let item = IrExpr {
+                    kind: IrExprKind::IndexAccess {
+                        object: Box::new(elem_access.clone()),
+                        index: Box::new(IrExpr {
+                            kind: IrExprKind::LitInt { value: j as i64 },
+                            ty: Ty::Int,
+                            span: None, def_id: None,
+                        }),
+                    },
+                    ty: inner_elem_ty.clone(),
+                    span: None, def_id: None,
+                };
+                // Only a plain bind was handled here: every other element
+                // pattern — a literal, `some(a)`, a tuple — was read as a
+                // wildcard (#2600's class scan).
+                if elem_is_irrefutable(lp) {
+                    bind_irrefutable_elem(lp, item, &inner_elem_ty, stmts);
+                } else {
+                    residual.push(item, lp.clone());
                 }
             }
             // #1461 list-rest inside a tuple position: same drop bind as
@@ -535,7 +552,59 @@ fn process_tuple_element_pattern(
                 span: None,
             });
         }
-        _ => {} // Wildcard — no action
+        IrPattern::Wildcard => {}
+        // Any other tuple component (`some(x)`, a literal, a ctor, a nested
+        // tuple) was read as a wildcard (#2600's class scan): it is tested by
+        // the residual match.
+        other => residual.push(elem_access, other.clone()),
+    }
+}
+
+/// The sub-patterns of a desugared arm that the length tests and binds cannot
+/// express: refutable element patterns (`some(a)`, a literal inside a tuple,
+/// a ctor, a nested list). The arm's body runs under a MATCH on them, with the
+/// arm's guard on that match's arm, and anything they reject falls through to
+/// the remaining arms.
+#[derive(Default)]
+struct Residual {
+    exprs: Vec<IrExpr>,
+    pats: Vec<IrPattern>,
+}
+
+impl Residual {
+    fn push(&mut self, expr: IrExpr, pat: IrPattern) {
+        self.exprs.push(expr);
+        self.pats.push(pat);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.exprs.is_empty()
+    }
+
+    /// `match (e1, .., en) { (p1, .., pn) [if guard] => body, _ => fallthrough }`,
+    /// itself desugared again when a residual pattern holds a list.
+    fn into_match(mut self, arm: &IrMatchArm, fallthrough: IrExpr, result_ty: &Ty, vt: &mut VarTable) -> IrExpr {
+        let (subject, pattern) = if self.exprs.len() == 1 {
+            (self.exprs.remove(0), self.pats.remove(0))
+        } else {
+            let tys = self.exprs.iter().map(|e| e.ty.clone()).collect();
+            (
+                IrExpr { kind: IrExprKind::Tuple { elements: self.exprs }, ty: Ty::Tuple(tys), span: None, def_id: None },
+                IrPattern::Tuple { elements: self.pats },
+            )
+        };
+        let tested = IrExpr {
+            kind: IrExprKind::Match {
+                subject: Box::new(subject),
+                arms: vec![
+                    IrMatchArm { pattern, guard: arm.guard.clone(), body: arm.body.clone() },
+                    IrMatchArm { pattern: IrPattern::Wildcard, guard: None, body: fallthrough },
+                ],
+            },
+            ty: result_ty.clone(),
+            span: None, def_id: None,
+        };
+        rewrite_expr(tested, vt).0
     }
 }
 
@@ -555,9 +624,10 @@ fn build_list_if_chain_tuple_pattern(
             };
             let mut conds: Vec<IrExpr> = Vec::new();
             let mut stmts: Vec<IrStmt> = Vec::new();
+            let mut residual = Residual::default();
 
             for (i, elem_pat) in elements.iter().enumerate() {
-                process_tuple_element_pattern(subject, elem_pat, i, &tuple_tys, &mut conds, &mut stmts);
+                process_tuple_element_pattern(subject, elem_pat, i, &tuple_tys, &mut conds, &mut stmts, &mut residual);
             }
 
             // Combine conditions
@@ -571,17 +641,35 @@ fn build_list_if_chain_tuple_pattern(
                 }).unwrap()
             };
 
+    let else_body = build_list_if_chain(subject, rest, result_ty, vt, covered_next, rest_from_next);
+            // A guard runs AFTER the binds and falls through to the remaining
+            // arms, exactly as on the plain-list path. It used to be dropped
+            // here: `([x, ..], _) if x > 5 => 1` matched every non-empty
+            // first list on native while the wasm leg honoured the guard
+            // (#2600's class scan).
+            let guarded_body = match &arm.guard {
+                _ if !residual.is_empty() => residual.into_match(arm, else_body.clone(), result_ty, vt),
+                Some(guard) => IrExpr {
+                    kind: IrExprKind::If {
+                        cond: Box::new(guard.clone()),
+                        then: Box::new(arm.body.clone()),
+                        else_: Box::new(else_body.clone()),
+                    },
+                    ty: result_ty.clone(),
+                    span: None, def_id: None,
+                },
+                None => arm.body.clone(),
+            };
             let body = if stmts.is_empty() {
-                arm.body.clone()
+                guarded_body
             } else {
                 IrExpr {
-                    kind: IrExprKind::Block { stmts, expr: Some(Box::new(arm.body.clone())) },
+                    kind: IrExprKind::Block { stmts, expr: Some(Box::new(guarded_body)) },
                     ty: result_ty.clone(),
                     span: None, def_id: None,
                 }
             };
 
-    let else_body = build_list_if_chain(subject, rest, result_ty, vt, covered_next, rest_from_next);
     IrExpr {
         kind: IrExprKind::If {
             cond: Box::new(combined_cond),
@@ -653,7 +741,7 @@ fn terminal_rest_binds(
 
 fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mut VarTable, covered_below: usize, rest_from: usize) -> IrExpr {
     if arms.is_empty() {
-        return IrExpr { kind: IrExprKind::Unit, ty: result_ty.clone(), span: None, def_id: None };
+        return fell_through_every_arm(result_ty);
     }
 
     let arm = &arms[0];
@@ -718,7 +806,7 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
                 .filter(|a| !matches!(&a.pattern, IrPattern::List { .. }))
                 .collect();
             if remaining_arms.is_empty() {
-                IrExpr { kind: IrExprKind::Unit, ty: result_ty.clone(), span: None, def_id: None }
+                fell_through_every_arm(result_ty)
             } else {
                 IrExpr {
                     kind: IrExprKind::Match {
@@ -731,6 +819,21 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
             }
         }
     }
+}
+
+/// The value of a desugared chain past its last arm. The checker proves every
+/// list match exhaustive (#2600), so this is reached only when the last arm's
+/// length test is one the chain cannot see is always true — a tuple of lists
+/// whose rows cover every length together. A `Unit` there was ill-typed for
+/// any non-`Unit` match (rustc E0308 on an exhaustive program); an abort is
+/// the honest value of a branch no input takes.
+fn fell_through_every_arm(result_ty: &Ty) -> IrExpr {
+    let kind = if matches!(result_ty, Ty::Unit) {
+        IrExprKind::Unit
+    } else {
+        IrExprKind::Todo { message: "internal: a list match fell through every arm".into() }
+    };
+    IrExpr { kind, ty: result_ty.clone(), span: None, def_id: None }
 }
 
 /// An element sub-pattern that can never fail: a bind, a wildcard, or a

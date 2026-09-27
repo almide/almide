@@ -122,13 +122,16 @@
 5029	spec/wasm_cross/edge_map_order.almd
 57064	spec/wasm_cross/edge_string_unicode.almd
 2750	spec/wasm_cross/effect_assign_unwrap.almd
+3172	spec/wasm_cross/effect_branch_keeps_result.almd
 6210	spec/wasm_cross/effect_call_arg_credit.almd
 5648	spec/wasm_cross/effect_fn_value.almd
+31511	spec/wasm_cross/effect_fn_value_slot_family.almd
 1519	spec/wasm_cross/effect_main_guard_err.almd
 4616	spec/wasm_cross/effect_main_guard_ok.almd
 3191	spec/wasm_cross/effect_mut_generic_port.almd
 5855	spec/wasm_cross/effect_option_explicit_bang.almd
 4682	spec/wasm_cross/effect_slot_carrier.almd
+5001	spec/wasm_cross/effect_slot_never_err_bang.almd
 5424	spec/wasm_cross/effect_tail_carrier_family.almd
 2402	spec/wasm_cross/effect_tco.almd
 2712	spec/wasm_cross/effect_tco_err_rewrap.almd
@@ -411,6 +414,7 @@
 3329	spec/wasm_cross/map_wide_int_key.almd
 1658	spec/wasm_cross/match_box_pattern_backstop.almd
 3185	spec/wasm_cross/match_container_literal.almd
+6051	spec/wasm_cross/match_err_arm_typed_payload.almd
 2331	spec/wasm_cross/match_forms.almd
 6812	spec/wasm_cross/match_guard_eq_borrows_binding.almd
 5933	spec/wasm_cross/match_payload_string_literal.almd
@@ -553,7 +557,7 @@
 1657	spec/wasm_cross/record_forms.almd
 10515	spec/wasm_cross/record_option_none_cells.almd
 7357	spec/wasm_cross/record_pair_result_return.almd
-!	spec/wasm_cross/record_scalar_field_assign_alias.almd
+3077	spec/wasm_cross/record_scalar_field_assign_alias.almd
 3953	spec/wasm_cross/record_variant_field_literal.almd
 2337	spec/wasm_cross/records_variants.almd
 976	spec/wasm_cross/recursion_depth_within_limits.almd
@@ -745,7 +749,7 @@
 2172	spec/wasm_cross/unique_non_flat_element.almd
 2103	spec/wasm_cross/unit_effect_abi.almd
 2879	spec/wasm_cross/unsigned_literal_domain.almd
-!	spec/wasm_cross/unwrap_callarg_single_expr_effect_body.almd
+4117	spec/wasm_cross/unwrap_callarg_single_expr_effect_body.almd
 2428	spec/wasm_cross/unwrap_in_callarg.almd
 2312	spec/wasm_cross/unwrap_in_if_arm.almd
 2942	spec/wasm_cross/unwrap_in_recursion.almd
@@ -770,10 +774,11 @@
 20481	spec/wasm_cross/value_deep_eq.almd
 5797	spec/wasm_cross/value_domain_arith.almd
 3223	spec/wasm_cross/value_eq.almd
-27032	spec/wasm_cross/value_keys_non_object.almd
-6880	spec/wasm_cross/value_merge.almd
+27296	spec/wasm_cross/value_keys_non_object.almd
+7144	spec/wasm_cross/value_merge.almd
+7711	spec/wasm_cross/value_merge_duplicate_keys.almd
 3995	spec/wasm_cross/value_object_leak_loop.almd
-11303	spec/wasm_cross/value_object_ops_share.almd
+11567	spec/wasm_cross/value_object_ops_share.almd
 7781	spec/wasm_cross/value_repr.almd
 5361	spec/wasm_cross/variant_pair_result_return.almd
 1878	spec/wasm_cross/variant_record_literal_equality.almd

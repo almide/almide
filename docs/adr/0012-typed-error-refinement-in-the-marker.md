@@ -342,3 +342,12 @@ D3 の「正規化は意味保存」という前提は、#1194 の実装ロー�
 綴り替えは、マーカー/明示の**挙動等価がコンパイラ全域で成立してから**
 (上記 1〜3 の統一が前提条件)。凍結(A0-1)に対する正準規則は
 「両綴りとも合法、fmt は collapse のみ行う」で確定とする。
+
+## Amendment (2026-09-27): D4-4 は ADR-0021 で置き換え
+
+D4-4「lambda の失敗チャネルは String のまま」は [ADR-0021](./0021-lambda-failure-channel-is-the-join-of-its-bangs.md)
+で置き換えた。チャネルの E は、期待型があればそれ、なければ本体の `!` operand の E の join
+(順序 E ≤ String 上の最小上界、全域)、既定は String である。懸念した「Koka 型の推論エラー難」は
+row 変数を持たない全域の join では生じない。「typed E の lambda は明示注釈の Result で綴る」
+という代替の道は、実測で存在しなかった(型付き slot は E005、型付き `let` は E001)。
+なお、D4-4 が引く「ADR-0009 L3」は `docs/specs/result-option-effect.md` の L3 を指す。

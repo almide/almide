@@ -329,6 +329,45 @@ impl Checker {
         }
     }
 
+    /// E016 (#2606): `==` / `!=` / `assert_eq` / `assert_ne` need an operand
+    /// type with EQUALITY, and "Function types are never Eq"
+    /// (docs/specs/type-system.md) — through any Result / Option / List /
+    /// tuple / record field / variant payload. The checker used to accept the
+    /// comparison and leave it to rustc (E0369 on `Rc<dyn Fn>`, plus E0277 for
+    /// the missing `Debug` in `assert_eq`); E016 is the class that already
+    /// rejects a function in a Set element or Map key for the same reason.
+    fn validate_eq_operand_types(&mut self) {
+        use std::collections::HashSet;
+        let mut reported: HashSet<(usize, usize)> = HashSet::new();
+        let checks = std::mem::take(&mut self.deferred_eq_checks);
+        for (ty, span, what) in checks {
+            let resolved = resolve_ty(&ty, &self.uf);
+            if self.env.is_eq(&resolved) {
+                continue;
+            }
+            if span.is_some_and(|s| !reported.insert((s.line, s.col))) {
+                continue;
+            }
+            let ty_name = resolved.display();
+            let mut diag = err(
+                format!("type '{}' has no equality — {} cannot compare it (it contains a function)", ty_name, what),
+                concat!(
+                    "Function values have no equality, so neither does a Result, Option, list, tuple, ",
+                    "record or variant that holds one. Compare what you can observe instead: the tag ",
+                    "(`result.is_err(r)`, `option.is_some(o)`), the error (`result.to_err_option(r) == some(e)`), ",
+                    "or the function's output on a sample input.",
+                )
+                .to_string(),
+                what.clone(),
+            ).with_code("E016");
+            if let Some(s) = span {
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+            }
+            self.diagnostics.push(diag);
+        }
+    }
+
     /// E029: every `Ty::Named` mentioned in an ANNOTATION must be a declared
     /// type. An undeclared name flowed through unification unconstrained
     /// (`let xs: List[Inner] = []`) and compiled to a nonexistent Rust type

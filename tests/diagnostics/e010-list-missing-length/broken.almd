@@ -1,0 +1,8 @@
+// #2600: a top-level list match with no arm for lists of two or more
+// elements. List patterns used to be outside the exhaustiveness check.
+fn first_two(xs: List[Int]) -> Int = match xs {
+  [] => 0,
+  [a] => a,
+}
+
+effect fn main() -> Unit = println(int.to_string(first_two([1, 2])))

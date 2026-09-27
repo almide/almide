@@ -222,6 +222,13 @@ spec/stdlib/http_call_test.almd :: gather
 # 2026-09-26 (#2588): render_query pruned — query_params now links to the
 # self-host copy in stdlib/http_url_decode.almd, which the incumbent lowers.
 spec/serve_cross/http_serve_replay.almd :: handle
+# 2026-09-27 (#2696, ADR-0020 pillar 3): the router fixture's app bound as a
+# top-level VALUE (`let site = http.router(...)`, then `let h = site!` and a
+# call). The incumbent MIR lowering walls the heap-result `match` the router
+# value reaches; the STRUCTURAL leg (the test lane's default, and
+# ALMIDE_WASM_STRUCTURAL=1) runs the test byte-for-byte with native. No
+# incumbent work by design (#1696 retires it); prunes with #1696.
+spec/stdlib/http_router_test.almd :: __test_almd_an app bound at the top level is tested by calling it
 
 # (2026-09-03, C-132/#1576) a CAN-ERR effect fn with a `mut` param takes the
 # move-mode tuple rewrite (`(T, Buf)` on the ok payload only); the incumbent
@@ -242,3 +249,9 @@ spec/gauntlet/pkg/mut_port/src/main.almd :: main
 spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_3
 spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_4
 spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_7
+# 2026-09-27 (#2722, the err-arm payload fixtures): `bump` re-wraps a typed-error
+# Result through `match r { ok(v) => ok(v + 1), err(e) => err(e) }`; the incumbent
+# MIR lowering walls it, the structural leg serves both files byte-identically to
+# native, and the incumbent is retiring under #1696 (recorded, not ported).
+spec/lang/match_err_arm_payload_test.almd :: bump
+spec/wasm_cross/match_err_arm_typed_payload.almd :: bump

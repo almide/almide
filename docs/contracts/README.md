@@ -30,8 +30,8 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-<!-- counts:generated:start (as of 2026-09-25) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
-365 contracts
+<!-- counts:generated:start (as of 2026-09-27) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
+368 contracts
 <!-- counts:generated:end -->
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
@@ -79,7 +79,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-041 | Heap / RC primitives honour the Lean-certified Perceus discipline | 0.24.0 | active | lean | 6 |
 | C-042 | fs preopen-dir scan + path resolution is observable-equivalent | 0.24.0 | active | fixture | 1 |
 | C-043 | A user type named Box coexists with recursive-enum heap indirection | 0.24.0 | active | fixture | 1 |
-| C-044 | Result/Option construction and matching are byte-identical | 0.24.0 | active | fixture | 4 |
+| C-044 | Result/Option construction and matching are byte-identical | 0.24.0 | active | fixture | 5 |
 | C-045 | A List[String] param works across join / len / index / iteration | 0.24.0 | active | fixture | 3 |
 | C-046 | Record spread-update and cross-module monomorphization are byte-identical | 0.24.0 | active | fixture | 1 |
 | C-047 | math.pow negative exponent and rotate non-positive width are total — they abort, never trap/wrap | 0.24.0 | active | fixture | 3 |
@@ -103,7 +103,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-065 | The string position API is codepoint-indexed end-to-end on both targets | 0.26.20 | active | fixture | 3 |
 | C-066 | WASM heap is reclaimed by default (true Perceus) | 0.27.0 | active | fixture | 13 |
 | C-067 | The xs[i] index syntax aborts on out-of-bounds (read and write) | 0.27.4 | active | fixture | 5 |
-| C-068 | Auto-? is target-directed in construction positions | 0.27.4 | active | fixture | 2 |
+| C-068 | Auto-? is target-directed in construction positions | 0.27.4 | active | fixture | 3 |
 | C-069 | Effect-fn tail self-recursion loop-converts to O(1) stack on both targets | 0.27.4 | active | fixture | 3 |
 | C-070 | Nested constructor patterns match and bind identically on both targets | 0.27.6 | active | fixture | 6 |
 | C-071 | Single-part interpolation RC balance | 0.27.6 | active | fixture | 1 |
@@ -138,7 +138,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-100 | Self-hosted String classification/transform ops byte-match native on wasm | 0.27.6 | active | fixture | 4 |
 | C-101 | List ops over heap elements (String/Value) byte-match native and are leak/double-free free | 0.27.6 | active | fixture | 16 |
 | C-102 | List iteration, call-result element materialization, and tail-recursive list traversal byte-match native | 0.27.6 | active | fixture | 4 |
-| C-103 | Self-hosted dynamic Value model (merge, array/as_array roundtrip, tuple TCO) byte-matches native and is leak-free in a loop | 0.27.6 | active | fixture | 6 |
+| C-103 | Self-hosted dynamic Value model (merge, array/as_array roundtrip, tuple TCO) byte-matches native and is leak-free in a loop | 0.27.6 | active | fixture | 7 |
 | C-104 | Tail-recursive accumulator shapes lower to bounded-stack loops byte-matching native | 0.27.6 | active | fixture | 6 |
 | C-105 | var/append accumulator loops (scalar, owned-handle, cross-dep, mutual-recursion) byte-match native on wasm | 0.27.6 | active | fixture | 6 |
 | C-106 | Heap value bound from an if/match arm byte-matches native on the v1 wasm path | 0.27.6 | active | fixture | 17 |
@@ -256,7 +256,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-218 | a heap-payload ?? returned as the fn tail yields the same value on both targets | 0.56.0 | active | fixture | 2 |
 | C-219 | a Never-typed call in a branch arm runs on both targets and sets the exit code | 0.56.0 | active | fixture | 1 |
 | C-220 | fs streaming line walkers fold/each with read_lines line semantics | 0.56.1 | active | fixture | 0 |
-| C-221 | An effect fn-typed slot admits pure and fallible lambdas with one carrier semantics | 0.56.1 | active | fixture | 2 |
+| C-221 | An effect fn-typed slot admits pure and fallible lambdas with one carrier semantics | 0.56.1 | active | fixture | 4 |
 | C-222 | An expression-nested scalar unwrap propagates the err identically on both legs | 0.56.1 | active | fixture | 1 |
 | C-223 | Matrix transcendentals compute through the vendored musl-libm, not the platform one | 0.56.1 | active | fixture | 7 |
 | C-224 | if let / guard let bind and release heap payloads identically on both targets | 0.56.1 | active | fixture | 1 |

@@ -95,24 +95,33 @@ impl Checker {
             ExprKind::Range { start, end, .. } => { let st = self.infer_expr(start); self.infer_expr(end); Ty::list(st) }
 
             ExprKind::Some { expr, .. } => { let inner = self.infer_expr(expr); Ty::option(inner) }
+            // The slot the argument leaves open is fresh; the enclosing fn's
+            // declared Result only fills it when nothing else does (#2599).
             ExprKind::Ok { expr, .. } => {
                 let ok_ty = self.infer_expr(expr);
-                let err_ty = match &self.env.current_ret {
-                    Some(Ty::Applied(TypeConstructorId::Result, args)) if args.len() == 2 => args[1].clone(),
-                    _ => self.fresh_var(),
-                };
+                let err_ty = self.open_result_slot(1);
                 Ty::result(ok_ty, err_ty)
             }
             ExprKind::Err { expr, .. } => {
                 let err_ty = self.infer_expr(expr);
-                let ok_ty = match &self.env.current_ret {
-                    Some(Ty::Applied(TypeConstructorId::Result, args)) if args.len() == 2 => args[0].clone(),
-                    _ => self.fresh_var(),
-                };
+                let ok_ty = self.open_result_slot(0);
                 Ty::result(ok_ty, err_ty)
             }
             _ => return None,
         })
+    }
+
+    /// A fresh var for slot `index` (0 = ok, 1 = err) of an `ok`/`err`
+    /// constructor, defaulted to the enclosing fn's declared Result argument
+    /// for that slot when the program leaves it unconstrained.
+    fn open_result_slot(&mut self, index: usize) -> Ty {
+        let slot = self.fresh_var();
+        if let Some(Ty::Applied(TypeConstructorId::Result, args)) = &self.env.current_ret
+            && let Some(declared) = args.get(index).filter(|_| args.len() == 2)
+        {
+            self.result_slot_defaults.push((slot.clone(), declared.clone()));
+        }
+        slot
     }
 
     /// `?`, parenthesised expressions, `break`, and the typed hole.
@@ -530,6 +539,10 @@ impl Checker {
                 super::is_literal_numeric_ast(a),
             )).collect();
             self.join_sized_peers(&peers, "assert argument");
+            // #2606: the comparison needs an Eq operand type (post-solve E016).
+            if let ExprKind::Ident { name, .. } = &callee.kind {
+                self.deferred_eq_checks.push((peers[0].0.clone(), span, format!("{}()", name)));
+            }
         }
         ty
     }
@@ -704,6 +717,7 @@ impl Checker {
         if slot_effect {
             self.env.can_call_effect = true;
         }
+        let saved_in_slot = std::mem::replace(&mut self.env.in_effect_slot_lambda, slot_effect);
         // Expected-type hint from the enclosing call (#653): when this
         // lambda is an argument whose parameter slot is a `Fn`, the
         // caller pins each UNANNOTATED param to the expected element
@@ -757,6 +771,7 @@ impl Checker {
         }
         let ret_ty = self.infer_expr(body);
         self.env.can_call_effect = saved_can_call_effect;
+        self.env.in_effect_slot_lambda = saved_in_slot;
         // Single-condition decisions (MC/DC ledger): || as if/else.
         let became_fallible = if self.env.lambda_prop_used { true } else { slot_effect };
         let channel = self.env.lambda_ret.take();
@@ -789,10 +804,18 @@ impl Checker {
         let outer_span = expr.span;
         let ExprKind::Unwrap { expr: inner, .. } = &mut expr.kind else { unreachable!() };
         self.record_postfix_inner(outer_span, inner.span);
+        let erasure_mark = self.lambda_err_erasures.len();
         let t = self.infer_expr(inner);
         let resolved = resolve_ty(&t, &self.uf);
         let plain_is_effect_call = self.is_effect_call_expr(inner);
-        self.check_unwrap_propagation_context(&resolved, plain_is_effect_call);
+        let judged = self.lambda_err_erasures.len();
+        self.bang_erasure_mark = Some(erasure_mark);
+        self.check_unwrap_propagation_context(&resolved, plain_is_effect_call, inner.span);
+        self.bang_erasure_mark = None;
+        // An erasure this very `!` made (inside a lambda) is located here.
+        for e in &mut self.lambda_err_erasures[judged..] {
+            e.1 = outer_span;
+        }
         if let Some(inner_ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
             inner_ty
         } else if matches!(&resolved, Ty::Unknown) {
@@ -1107,7 +1130,7 @@ impl Checker {
     ///
     /// Where propagation is possible, the error must also fit the fn's error
     /// type (#2635, [`Self::check_bang_error_channel`]).
-    fn check_unwrap_propagation_context(&mut self, operand: &Ty, plain_is_effect_call: bool) {
+    fn check_unwrap_propagation_context(&mut self, operand: &Ty, plain_is_effect_call: bool, operand_span: Option<ast::Span>) {
         // Single-condition decisions (MC/DC ledger): each || arm is its
         // own return guard.
         if self.env.in_test_block {
@@ -1115,6 +1138,9 @@ impl Checker {
         }
         if self.env.auto_unwrap {
             self.check_bang_error_channel(operand, plain_is_effect_call);
+            return;
+        }
+        if self.never_err_bang_is_noop(operand, plain_is_effect_call) {
             return;
         }
         let accepted = if self.env.lambda_depth == 0 {
@@ -1128,7 +1154,13 @@ impl Checker {
             }
             return;
         }
-        // Off-type operands (and a missing channel) still reject.
+        // Off-type operands (and a missing channel) still reject. Inside a
+        // fn that DOES return a carrier, the generic message below blames the
+        // fn's return type, which is not the problem: say which mismatch it is
+        // (#2607).
+        if self.env.lambda_depth == 0 && self.report_bang_carrier_mismatch(operand, operand_span, plain_is_effect_call) {
+            return;
+        }
         let hint = if self.env.lambda_depth > 0 {
             "`!` cannot propagate an error out of a lambda; use `??` for a fallback value or move the call out of the closure"
         } else {
@@ -1139,6 +1171,81 @@ impl Checker {
             hint,
             "operator !",
         ).with_code("E022"));
+    }
+
+    /// E022 for a `!` in a fn that returns a carrier (Result or Option) the
+    /// operand cannot propagate into, naming the actual mismatch (#2607):
+    ///   - a Result operand in an Option fn: the err has nowhere to go. `?`
+    ///     turns the Result into an Option first (`int.parse(s)?!`), or the
+    ///     fn returns Result;
+    ///   - an operand that is neither Result nor Option on the direct path:
+    ///     E034 reports it at the operator, so no E022 is added.
+    ///
+    /// Returns whether the case is handled; `false` leaves the generic E022.
+    fn report_bang_carrier_mismatch(&mut self, operand: &Ty, operand_span: Option<ast::Span>, plain_is_effect_call: bool) -> bool {
+        let Some(ret) = self.env.current_ret.clone() else { return false };
+        let ret = resolve_ty(&ret, &self.uf);
+        let op = resolve_ty(operand, &self.uf);
+        let ret_is_option = matches!(ret, Ty::Applied(TypeConstructorId::Option, _));
+        if !ret_is_option && !matches!(ret, Ty::Applied(TypeConstructorId::Result, _)) {
+            return false;
+        }
+        let fn_name = self.current_fn.as_ref().map_or_else(|| "this fn".to_string(), |(n, _)| format!("`{}`", n));
+        let text = operand_span.and_then(|s| self.source_slice(s)).filter(|t| !t.is_empty() && !t.contains('\n'));
+        let named = text.as_deref().map_or_else(|| "the operand".to_string(), |t| format!("`{}`", t));
+        let diag = match &op {
+            Ty::Applied(TypeConstructorId::Result, _) if ret_is_option => {
+                let convert = text.as_deref().map_or_else(|| "`expr?!`".to_string(), |t| format!("`{}?!`", t));
+                let diag = super::err(
+                    format!("operator '!' cannot propagate a Result's error out of a fn returning Option: {} is a {} but {} returns {}", named, op.display(), fn_name, ret.display()),
+                    format!("Convert it to an Option first with `?` — {} propagates `none` and drops the error — or declare {} to return a Result so the error propagates", convert, fn_name),
+                    "operator !",
+                ).with_code("E022");
+                // Insert the `?` right after the operand, before its `!`.
+                match (operand_span, &text) {
+                    (Some(s), Some(_)) if s.end_col > s.col => diag.with_suggested_fix(s.line, s.end_col, s.end_col, "?"),
+                    _ => diag,
+                }
+            }
+            Ty::Applied(TypeConstructorId::Result | TypeConstructorId::Option, _) | Ty::Unknown | Ty::TypeVar(_) => return false,
+            _ if super::types::is_inference_var(&op).is_some() => return false,
+            // A concrete operand that cannot fail, on the direct `expr!` path:
+            // E034 at the operator names that (`infer_expr_g3_unwrap`), and an
+            // E022 beside it would blame the fn's return type, which already
+            // is a carrier. The pipe path and an effect call get no E034, so
+            // they keep the generic E022.
+            _ if operand_span.is_some() && !plain_is_effect_call => return true,
+            _ => return false,
+        };
+        self.emit(diag);
+        true
+    }
+
+    /// #2704: `!` on a NEVER-ERR effect call (a stdlib `@intrinsic` effect fn
+    /// whose declared return is not a `Result`, e.g. `random.int`,
+    /// `env.millis`) is the silent no-op of #1049 in every effect-fn body:
+    /// an `effect fn` body (where `auto_unwrap` already accepts it) and an
+    /// `effect (…) -> …` slot lambda such as an `http.serve` handler, which
+    /// #1055 gives effect-fn body ergonomics. ADR-0002 §D6: a stdlib
+    /// never-err effect fn returns a bare value and `!` on it passes as a
+    /// no-op, so the writer can follow "an effect call takes `!`" without
+    /// knowing which stdlib fns never fail. The `!` propagates nothing, so
+    /// it neither marks the lambda fallible nor touches its channel. A plain
+    /// closure keeps its own channel rules (ADR-0006: a `!` in a `list.map`
+    /// callback selects the fallible form).
+    fn never_err_bang_is_noop(&self, operand: &Ty, plain_is_effect_call: bool) -> bool {
+        // Single-condition decisions (MC/DC ledger): one guard each.
+        if !plain_is_effect_call {
+            return false;
+        }
+        if !self.env.in_effect_slot_lambda {
+            return false;
+        }
+        let op = resolve_ty(operand, &self.uf);
+        !matches!(
+            op,
+            Ty::Applied(TypeConstructorId::Result | TypeConstructorId::Option, _) | Ty::Unknown | Ty::TypeVar(_)
+        )
     }
 
     /// #1067: a PURE fn that DECLARES a `Result`/`Option` return propagates
@@ -1196,8 +1303,16 @@ impl Checker {
                 Ty::Applied(TypeConstructorId::Result, oa),
             ) if both_result_arity_two(ra, oa) => {
                 // E is String by the channel's construction (ADR-0002 D2, L3):
-                // a custom-E operand fails this unification.
-                self.unify_infer(&ra[1], &oa[1]);
+                // a custom-E operand fails this unification, and the lowering
+                // renders its error as Debug text into the String channel.
+                // Recorded (#2601) for the `!` that later tries to propagate
+                // the erased String into a typed-error fn.
+                if !self.unify_infer(&ra[1], &oa[1]) {
+                    let erased = resolve_ty(&oa[1], &self.uf);
+                    if !matches!(erased, Ty::Unknown | Ty::TypeVar(_)) {
+                        self.lambda_err_erasures.push((erased, None, self.current_fn.as_ref().map(|f| f.0)));
+                    }
+                }
                 true
             }
             // Option operand: none maps to err("none") (L4).
@@ -1219,9 +1334,12 @@ impl Checker {
         match &mut right.kind {
             ExprKind::UnwrapOr { expr: inner, fallback, .. } => self.infer_pipe_unwrap_or(left, inner, fallback),
             ExprKind::Unwrap { expr: inner, .. } => {
+                let erasure_mark = self.lambda_err_erasures.len();
                 let inner_ty = self.infer_pipe(left, inner);
                 let plain_is_effect_call = self.is_effect_pipe_target(inner);
-                self.check_unwrap_propagation_context(&inner_ty, plain_is_effect_call);
+                self.bang_erasure_mark = Some(erasure_mark);
+                self.check_unwrap_propagation_context(&inner_ty, plain_is_effect_call, None);
+                self.bang_erasure_mark = None;
                 // Annotate the inner expression with its resolved type so the lowering
                 // can construct the correct IR type (e.g., Result[List[T], List[E]] for
                 // result.collect rather than hardcoding Result[T, String]).

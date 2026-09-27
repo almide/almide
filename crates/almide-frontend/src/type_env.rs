@@ -116,6 +116,10 @@ pub struct TypeEnv {
     /// Whether the innermost lambda's channel was actually used — the
     /// usage-driven fallibility bit (L2).
     pub lambda_prop_used: bool,
+    /// Whether the INNERMOST lambda is checked against an `effect (…) -> …`
+    /// slot (#1055) — an effect-fn body, where `!` on a never-err effect
+    /// call is the same no-op it is in an effect fn body (#2704).
+    pub in_effect_slot_lambda: bool,
     /// Whether auto-unwrapping of Result is enabled (effect fn bodies)
     pub auto_unwrap: bool,
     /// Whether effect functions may be called from this context
@@ -277,6 +281,7 @@ impl TypeEnv {
             current_ret: None,
             lambda_ret: None,
             lambda_prop_used: false,
+            in_effect_slot_lambda: false,
             auto_unwrap: false,
             can_call_effect: false,
             metered_region: None,
@@ -721,11 +726,22 @@ impl TypeEnv {
     /// packages, prefer the candidate declared in `cur_mod` (#413) and return its
     /// type name QUALIFIED with that owner (`mod.Type`) so the construction's `.ty`
     /// is the namespaced enum. A module's own bare `Active` means *its* `Active`.
+    ///
+    /// Only candidates VISIBLE from the current file take part (#2636): the
+    /// file's own, a bundled module's, or one owned by a module this file
+    /// imports. A case declared by a module the file never imports — a
+    /// transitive dependency — does not resolve here, and a type the file
+    /// declares itself under the same bare name is never overridden by
+    /// another module's case (`type Stop = { .. }` beside a dependency's
+    /// `| Stop`); that case stays reachable qualified, `finish.Stop`.
     pub fn lookup_ctor_in(&self, name: &Sym, cur_mod: Option<&str>) -> Option<(Sym, VariantCase)> {
         let cands = self.constructors.get(name)?;
-        let pick = cur_mod
-            .and_then(|m| cands.iter().find(|(_, owner, _)| owner.map_or(false, |o| o.as_str() == m)))
-            .or_else(|| cands.first())?;
+        let owned = cands.iter().find(|(_, owner, _)| Self::ctor_owner_is_file(*owner, cur_mod));
+        let pick = match owned {
+            Some(p) => p,
+            None if self.import_table.declared_types.contains(name) => return None,
+            None => cands.iter().find(|(_, owner, _)| self.ctor_owner_visible(*owner, cur_mod))?,
+        };
         let (t, owner, c) = pick;
         // Qualify with the owner so the resolved `.ty` carries the namespaced enum
         // (`mod.Type`) — unless already qualified or owned by stdlib.
@@ -735,6 +751,41 @@ impl TypeEnv {
             _ => *t,
         };
         Some((qual, c.clone()))
+    }
+
+    /// Can a bare constructor owned by `owner` be named from the file being
+    /// checked or lowered (`cur_mod`, `None` for the entry program)? Its own
+    /// module, a bundled module, or a module in the file's import table —
+    /// never a module it reaches only through another import (#2636). An
+    /// unowned candidate is the entry program's, visible only there.
+    fn ctor_owner_visible(&self, owner: Option<Sym>, cur_mod: Option<&str>) -> bool {
+        Self::ctor_owner_is_file(owner, cur_mod)
+            || owner.is_some_and(|o| {
+                almide_lang::stdlib_info::is_bundled_module(o.as_str())
+                    || self.import_table.accessible.contains(&o)
+            })
+    }
+
+    /// Is a constructor owned by `owner` the file's OWN (`cur_mod`, `None`
+    /// for the entry program)? A module's cases register under its name. The
+    /// entry program's register unowned — or under the root scope `self` when
+    /// the type shadows a stdlib-owned name (#1828: `type HttpRequest = | ..`).
+    fn ctor_owner_is_file(owner: Option<Sym>, cur_mod: Option<&str>) -> bool {
+        match (owner, cur_mod) {
+            (None, None) => true,
+            (Some(o), None) => o.as_str() == crate::canonicalize::resolve::ROOT_TYPE_SCOPE,
+            (Some(o), Some(m)) => o.as_str() == m,
+            (None, Some(_)) => false,
+        }
+    }
+
+    /// The candidates of a bare constructor name visible from `cur_mod`, as
+    /// `(type, owner)` — the ones `lookup_ctor_in` chooses among, so an
+    /// ambiguity is judged over the same set the resolution uses (#2636).
+    pub fn visible_ctor_candidates(&self, name: &Sym, cur_mod: Option<&str>) -> Vec<(Sym, Option<Sym>)> {
+        self.constructors.get(name).map_or_else(Vec::new, |c| {
+            c.iter().filter(|(_, owner, _)| self.ctor_owner_visible(*owner, cur_mod)).map(|(t, m, _c)| (*t, *m)).collect()
+        })
     }
 
     /// Does `cur_mod` itself declare this constructor? When it does,

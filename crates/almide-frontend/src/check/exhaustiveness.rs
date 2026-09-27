@@ -39,6 +39,12 @@ enum CtorId {
     /// Literal values (used for Int/Float/String).
     /// Stored as display string for Eq/Hash compatibility.
     Lit(String),
+    /// A list of `len` elements (#2600). As a PATTERN, `open` is the rest
+    /// form: `[p1, .., pk, ..t]` is `List { len: k, open: true }` and matches
+    /// every list of length >= k. As a constructor of a list COLUMN it is one
+    /// length class (`list_classes`): the exact lengths the column's patterns
+    /// name, and one `open` class standing for every longer list.
+    List { len: usize, open: bool },
 }
 
 /// Describes the constructor space for a type.
@@ -49,6 +55,9 @@ enum CtorSet {
     Single(CtorId),
     /// Infinite domain (int, float, string) — wildcard always required.
     Infinite,
+    /// A list: its constructors are length classes read off the column's
+    /// patterns (`list_classes`), not off the type.
+    List,
     /// Unknown or unanalyzable type — skip check.
     Opaque,
 }
@@ -122,9 +131,16 @@ fn lower(pat: &ast::Pattern, ty: &Ty, env: &TypeEnv) -> Pat {
         // As-pattern: coverage is the INNER pattern's (the binder is
         // irrefutable decoration).
         ast::Pattern::As { inner, .. } => lower(inner, ty, env),
-        ast::Pattern::List { elements, .. } => {
+        // A list pattern is a length constructor, the rest form an open one
+        // (#2600). It used to lower as a TUPLE, whose arity a list type does
+        // not have: every list pattern specialized to zero columns, so `[]`
+        // read as covered by `[x, ..xt]` and a missing length went unseen.
+        ast::Pattern::List { elements, rest } => {
             let elem = env.resolve_named(ty).list_elem_ty().unwrap_or(Ty::Unknown);
-            Pat::Ctor(CtorId::Tuple, elements.iter().map(|e| lower(e, &elem, env)).collect())
+            Pat::Ctor(
+                CtorId::List { len: elements.len(), open: rest.is_some() },
+                elements.iter().map(|e| lower(e, &elem, env)).collect(),
+            )
         }
         ast::Pattern::Literal { value, .. } => lower_literal(value),
     }
@@ -204,7 +220,51 @@ fn ctor_set(ty: &Ty, env: &TypeEnv) -> CtorSet {
         Ty::Tuple(_) => CtorSet::Single(CtorId::Tuple),
         Ty::Record { .. } => CtorSet::Single(CtorId::Record),
         Ty::Int | Ty::Float | Ty::String => CtorSet::Infinite,
+        Ty::Applied(TypeConstructorId::List, _) => CtorSet::List,
         _ => CtorSet::Opaque,
+    }
+}
+
+/// The length classes of a list column (#2600): every exact length up to the
+/// longest length any head pattern names, plus one open class for all longer
+/// lists. Past that bound every pattern of the column agrees on every list —
+/// an exact pattern matches none of them, a rest pattern all — so the open
+/// class is one representative, and the classes enumerate the whole domain.
+fn list_classes<'a>(heads: impl Iterator<Item = &'a Pat>) -> Vec<CtorId> {
+    let bound = heads
+        .filter_map(|p| match p {
+            Pat::Ctor(CtorId::List { len, .. }, _) => Some(*len),
+            _ => Option::None,
+        })
+        .max()
+        .unwrap_or(0);
+    (0..=bound)
+        .map(|len| CtorId::List { len, open: false })
+        .chain(std::iter::once(CtorId::List { len: bound + 1, open: true }))
+        .collect()
+}
+
+/// Does a row whose head is constructor `pat` match the column constructor
+/// `class`? Equality, except for list lengths: an open (rest) pattern of
+/// prefix `k` matches every length class of at least `k`.
+fn ctor_matches(pat: &CtorId, class: &CtorId) -> bool {
+    match (pat, class) {
+        (CtorId::List { len: k, open: true }, CtorId::List { len, .. }) => k <= len,
+        (CtorId::List { len: n, open: false }, CtorId::List { len, .. }) => n == len,
+        _ => pat == class,
+    }
+}
+
+/// Every constructor of the first column when it can be enumerated
+/// completely: the type's own set when the head mentions all of it, a list
+/// column's length classes always (`extra` is a pattern outside the matrix
+/// — the row whose usefulness is asked — that the classes must also cover).
+fn enumerable_ctors(matrix: &[Vec<Pat>], extra: Option<&Pat>, ty: &Ty, env: &TypeEnv) -> Option<Vec<CtorId>> {
+    match ctor_set(ty, env) {
+        CtorSet::List => Some(list_classes(matrix.iter().filter_map(|r| r.first()).chain(extra))),
+        CtorSet::Finite(all) if all.iter().all(|c| head_ctors(matrix).contains(c)) => Some(all),
+        CtorSet::Single(c) if head_ctors(matrix).contains(&c) => Some(vec![c]),
+        _ => Option::None,
     }
 }
 
@@ -232,6 +292,7 @@ fn arity(ctor: &CtorId, ty: &Ty, env: &TypeEnv) -> usize {
             Ty::Record { fields } => fields.len(),
             _ => 0,
         },
+        CtorId::List { len, .. } => *len,
     }
 }
 
@@ -270,6 +331,7 @@ fn field_types(ctor: &CtorId, ty: &Ty, env: &TypeEnv) -> Vec<Ty> {
             _ => vec![],
         },
         CtorId::None | CtorId::True | CtorId::False | CtorId::Lit(_) => vec![],
+        CtorId::List { len, .. } => vec![resolved.list_elem_ty().unwrap_or(Ty::Unknown); *len],
     }
 }
 
@@ -300,7 +362,7 @@ fn specialize(matrix: &[Vec<Pat>], ctor: &CtorId, ar: usize) -> Vec<Vec<Pat>> {
     for row in matrix {
         if row.is_empty() { continue; }
         match &row[0] {
-            Pat::Ctor(c, args) if c == ctor => {
+            Pat::Ctor(c, args) if ctor_matches(c, ctor) => {
                 let mut new_row = Vec::with_capacity(ar + row.len() - 1);
                 new_row.extend(args.iter().cloned());
                 // Pad or truncate to match expected arity (defensive).
@@ -336,6 +398,8 @@ fn is_complete(head: &[CtorId], ty: &Ty, env: &TypeEnv) -> bool {
         CtorSet::Finite(all) => all.iter().all(|c| head.contains(c)),
         CtorSet::Single(c) => head.contains(&c),
         CtorSet::Infinite => false,
+        // Always enumerable by its length classes (`enumerable_ctors`).
+        CtorSet::List => true,
         CtorSet::Opaque => true,
     }
 }
@@ -344,7 +408,7 @@ fn missing_ctors(head: &[CtorId], ty: &Ty, env: &TypeEnv) -> Vec<CtorId> {
     match ctor_set(ty, env) {
         CtorSet::Finite(all) => all.into_iter().filter(|c| !head.contains(c)).collect(),
         CtorSet::Single(c) => if head.contains(&c) { vec![] } else { vec![c] },
-        CtorSet::Infinite | CtorSet::Opaque => vec![],
+        CtorSet::Infinite | CtorSet::List | CtorSet::Opaque => vec![],
     }
 }
 
@@ -369,11 +433,7 @@ fn find_witness(matrix: &[Vec<Pat>], types: &[Ty], env: &TypeEnv) -> Option<Vec<
 
     if is_complete(&head, ty, env) {
         // Every constructor is mentioned — check each one for gaps.
-        let all = match ctor_set(ty, env) {
-            CtorSet::Finite(all) => all,
-            CtorSet::Single(c) => vec![c],
-            _ => return Option::None,
-        };
+        let all = enumerable_ctors(matrix, Option::None, ty, env)?;
         for ctor in &all {
             let ar = arity(ctor, ty, env);
             let ftys = field_types(ctor, ty, env);
@@ -443,6 +503,9 @@ fn fmt_pat(pat: &Pat, ty: &Ty, env: &TypeEnv) -> String {
                 name
             } else {
                 let inner: Vec<_> = args.iter().enumerate().map(|(i, a)| sub(i, a)).collect();
+                if let CtorId::List { open, .. } = ctor {
+                    return list_text(inner, *open);
+                }
                 if matches!(ctor, CtorId::Tuple) {
                     format!("({})", inner.join(", "))
                 } else {
@@ -451,6 +514,14 @@ fn fmt_pat(pat: &Pat, ty: &Ty, env: &TypeEnv) -> String {
             }
         }
     }
+}
+
+/// A list pattern's text: `[a, b]`, or `[a, b, ..]` for the open (rest) form.
+fn list_text(mut parts: Vec<String>, open: bool) -> String {
+    if open {
+        parts.push("..".into());
+    }
+    format!("[{}]", parts.join(", "))
 }
 
 /// Paste-ready arm template for a witness pattern. Unlike `fmt_pat`
@@ -521,6 +592,8 @@ fn ctor_syntax(ctor: &CtorId) -> CtorSyntax {
         // shape substitute it (`record_type_name`).
         CtorId::Record => (String::new(), false, true),
         CtorId::Lit(v) => (v.clone(), false, false),
+        // Written by `list_text`; the name is the empty list's.
+        CtorId::List { open, .. } => (list_text(vec![], *open), false, false),
     };
     CtorSyntax { name, is_tuple, is_prefix_call }
 }
@@ -590,6 +663,9 @@ fn fmt_ctor_arm_head(
             }
         }
     }).collect();
+    if let CtorId::List { open, .. } = ctor {
+        return list_text(parts, *open);
+    }
     if is_tuple {
         return format!("({})", parts.join(", "));
     }
@@ -614,6 +690,7 @@ fn heads_fit(matrix: &[Vec<Pat>], ty: &Ty, env: &TypeEnv) -> bool {
             CtorSet::Finite(all) => all.contains(c),
             CtorSet::Single(one) => c == one,
             CtorSet::Infinite => matches!(c, CtorId::Lit(_)),
+            CtorSet::List => matches!(c, CtorId::List { .. }),
             CtorSet::Opaque => true,
         },
         _ => true,
@@ -774,6 +851,20 @@ fn is_useful(matrix: &[Vec<Pat>], row: &[Pat], types: &[Ty], env: &TypeEnv) -> b
     let ty = &types[0];
     let rest_types = &types[1..];
     match &row[0] {
+        // A rest pattern covers every length class from its prefix up: it
+        // is useful when it is useful for any of them (#2600).
+        Pat::Ctor(c @ CtorId::List { open: true, .. }, args) => {
+            let classes = enumerable_ctors(matrix, Some(&row[0]), ty, env).unwrap_or_default();
+            classes.iter().filter(|class| ctor_matches(c, class)).any(|class| {
+                let ar = arity(class, ty, env);
+                let mut sub_row: Vec<Pat> = args.to_vec();
+                sub_row.resize(ar, Pat::Wild);
+                sub_row.extend_from_slice(&row[1..]);
+                let mut sub_types = field_types(class, ty, env);
+                sub_types.extend_from_slice(rest_types);
+                is_useful(&specialize(matrix, class, ar), &sub_row, &sub_types, env)
+            })
+        }
         Pat::Ctor(c, args) => {
             let ar = arity(c, ty, env);
             let mut sub_row: Vec<Pat> = args.iter().cloned().collect();
@@ -785,7 +876,6 @@ fn is_useful(matrix: &[Vec<Pat>], row: &[Pat], types: &[Ty], env: &TypeEnv) -> b
             is_useful(&sub_matrix, &sub_row, &sub_types, env)
         }
         Pat::Wild => {
-            let head = head_ctors(matrix);
             // For Opaque / Infinite constructor spaces (TypeVars, Int,
             // Float, String) we can't enumerate. The only thing the
             // wildcard adds is "values not covered by prior rows" —
@@ -794,17 +884,8 @@ fn is_useful(matrix: &[Vec<Pat>], row: &[Pat], types: &[Ty], env: &TypeEnv) -> b
             // cover `row[1..]`. Fall through to that branch rather
             // than the ctor iteration, which would iterate an empty
             // `all` list and wrongly report "not useful".
-            let enumerable = matches!(
-                ctor_set(ty, env),
-                CtorSet::Finite(_) | CtorSet::Single(_)
-            );
-            if enumerable && is_complete(&head, ty, env) {
+            if let Some(all) = enumerable_ctors(matrix, Option::None, ty, env) {
                 // Cover every constructor; useful if any sub-problem is.
-                let all = match ctor_set(ty, env) {
-                    CtorSet::Finite(all) => all,
-                    CtorSet::Single(c) => vec![c],
-                    _ => return false,
-                };
                 for ctor in &all {
                     let ar = arity(ctor, ty, env);
                     let ftys = field_types(ctor, ty, env);

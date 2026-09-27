@@ -142,3 +142,11 @@ ADR-0004(String 終着・variant E は自作ドメイン内)と整合する意�
 - Gleam — [gleam/list.try_map](https://hexdocs.pm/gleam_stdlib/gleam/list.html#try_map)
 - 内部: ADR-0002 / 0004 / 0005、使用量実測(本文)、#1103(Phase 1)、
   `tests/list_try_family_gate_test.rs`(凍結の番人)
+
+## Amendment (2026-09-27): E は callback の失敗チャネルから流れる — ADR-0021
+
+D1 の「E は ADR-0002 D2 に従い String 固定」は [ADR-0021](./0021-lambda-failure-channel-is-the-join-of-its-bangs.md)
+で改訂した。HOF の E は、callback の失敗チャネル ε(期待型 → `!` operand の join → 既定 String)から
+流れる。D4(E ジェネリック traverse の意図的非サポート)は撤回する。`__fallible_*` carrier は
+正準形の経路で既に E ジェネリックに動いていた。Falsifier 3(実需要 ≥3)は dojo bank の人手 baseline
+3 本と bank pilot の生成物 37 attempt で発火している(#2601)。

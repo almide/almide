@@ -45,6 +45,9 @@ impl Checker {
                 if self.unify_infer(&channel, &op_err) {
                     return;
                 }
+                if self.report_lambda_erasure(&channel, &op_err) {
+                    return;
+                }
                 let what = if plain_is_effect_call { "this effect call" } else { "this `Result`" };
                 format!("{what} fails with `{}`", resolve_ty(&op_err, &self.uf).display())
             }
@@ -61,10 +64,45 @@ impl Checker {
         ).with_code("E022"));
     }
 
+    /// #2601: the operand fails with `String` because a callback inside it
+    /// erased a typed error — a `!` in a lambda propagates into the lambda's
+    /// own failure channel, which is always `String` (ADR-0012 D4 / ADR-0009
+    /// L3); only the canonical `(x) => f(x)!` callback, whose whole body is
+    /// one `!`, keeps `f`'s error type (ADR-0006 D1). "Fails with `String`"
+    /// was true and pointed away from the cause, so name the callback's `!`.
+    fn report_lambda_erasure(&mut self, channel: &Ty, op_err: &Ty) -> bool {
+        if resolve_ty(op_err, &self.uf) != Ty::String {
+            return false;
+        }
+        let Some(mark) = self.bang_erasure_mark else { return false };
+        let Some((erased, at, _)) = self.lambda_err_erasures.get(mark..).and_then(|es| es.first()).cloned() else {
+            return false;
+        };
+        let fn_err = channel.display();
+        let erased = erased.display();
+        let at = at.map(|s| format!(" (line {}, col {})", s.line, s.col)).unwrap_or_default();
+        self.emit(err(
+            format!(
+                "operator '!' cannot propagate this error: the fn's error type is `{fn_err}`, but the callback's `!`{at} \
+                 turned its `{erased}` error into `String` — a `!` inside a lambda propagates into the lambda's own \
+                 failure channel, which is always `String`"
+            ),
+            format!(
+                "Only a callback whose WHOLE body is one `call(..)!` keeps that call's error type: \
+                 `(x) => f(x)!` makes the call that takes it fail with `{erased}`, while \
+                 `(x) => if c then v else f(x)!` makes it fail with `String`. \
+                 Move the branch into the called fn so the callback is a single `call(..)!`, \
+                 or write the traversal as explicit recursion in this fn."
+            ),
+            "operator !",
+        ).with_code("E022"));
+        true
+    }
+
     /// The error type a `!` in the current fn body propagates into: a
     /// `Result`-returning fn's `E`, or `String` for an effect fn with any other
     /// return (its lowered channel). `None` when there is no error channel.
-    fn bang_channel_err_ty(&self) -> Option<Ty> {
+    pub(super) fn bang_channel_err_ty(&self) -> Option<Ty> {
         let ret = self.env.current_ret.as_ref().map(|r| resolve_ty(r, &self.uf));
         match ret {
             Some(Ty::Applied(TypeConstructorId::Result, args)) if args.len() == 2 => {

@@ -225,6 +225,14 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // param (Option ret) sit in the SUM tier below.
     "http_new_request", "http_req_method", "http_req_path", "http_req_body",
     "http_query_params", "http_req_with_params", "http_req_with_path", "http_set_body",
+    // http_url_decode.almd (#2664): the decoder http_query_params already
+    // runs on this leg — read-only load8/load32 on the digest-shared string
+    // payload, a prim-MEDIATED alloc_list of 8-byte Int slots (the
+    // list_repeat class), string.from_bytes lowered by THIS emitter. The
+    // router's path-parameter decode reaches it through the public name.
+    // Parity evidence: spec/stdlib/http_url_decode_test.almd and
+    // http_router_test.almd, both now rendered by the structural test lane.
+    "http_url_decode",
     // random_int.almd (audited 2026-08-25): prim.alloc_bytes scratch +
     // prim.random_get (the op-32 entropy boundary) + pure span math —
     // the VALUE is nondeterministic by contract (C-112 pins the range).

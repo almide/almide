@@ -71,7 +71,9 @@ impl Checker {
         if self.effect_slot_accepts(&expected_resolved, &arg_resolved) {
             return false;
         }
-        self.emit_call_arg_mismatch(site, &expected, arg_ty, &expected_resolved, &arg_resolved);
+        let arg_shown = self.with_slot_defaults(&super::types::resolve_ty(arg_ty, &self.uf));
+        let arg_resolved = self.with_slot_defaults(&arg_resolved);
+        self.emit_call_arg_mismatch(site, &expected, &arg_shown, &expected_resolved, &arg_resolved);
         true
     }
 

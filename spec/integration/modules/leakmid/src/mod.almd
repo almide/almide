@@ -1,0 +1,3 @@
+import leakfin
+
+fn describe() -> String = leakfin.name(leakfin.Stop)

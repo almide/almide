@@ -1,0 +1,65 @@
+// #2599: `ok(x)` leaves its err type open and `err(e)` its ok type. The
+// enclosing fn's declared Result fills that slot only when nothing else
+// does. It used to be pinned up front, so inside a `-> String!` fn a non-tail
+// `err("neg")` was typed `Result[String, String]` and every if/else below
+// was E001 ("expected Result[Int, String] but got Result[String, String]").
+fn annotated(c: Int) -> String! = {
+  let r: Result[Int, String] = if c > 0 then ok(c) else err("neg")
+  let n = r!
+  "got ${int.to_string(n)}"
+}
+
+fn unannotated(c: Int) -> String! = {
+  let r = if c > 0 then ok(c) else err("neg")
+  let n = r!
+  "got ${int.to_string(n)}"
+}
+
+fn inline_bang(c: Int) -> String! = {
+  let n = (if c > 0 then ok(c) else err("neg"))!
+  "got ${int.to_string(n)}"
+}
+
+fn in_match_arm(s: String) -> String! = {
+  let n = match int.parse(s) {
+    ok(c) => if c > 0 then ok(c) else err("neg"),
+    err(_) => err("bad"),
+  }!
+  "got ${int.to_string(n)}"
+}
+
+fn err_first(c: Int) -> Int! = {
+  let r: Result[Int, String] = if c > 0 then err("pos") else ok(c)
+  r!
+}
+
+// The default still fills a slot nothing else decides: the seed's err type
+// comes from the fn's declared Result.
+fn fold_seed(xs: List[Int]) -> Result[Int, String] = {
+  let total = list.fold(
+    xs,
+    ok(0),
+    (acc, x) => match acc {
+      ok(t) => ok(t + x),
+      err(e) => err(e),
+    },
+  )
+  total
+}
+
+test "an if of ok/err inside a Result fn takes its own type" {
+  assert_eq(annotated(3) ?? "e", "got 3")
+  assert_eq(annotated(-3) ?? "e", "e")
+  assert_eq(unannotated(4) ?? "e", "got 4")
+  assert_eq(inline_bang(5) ?? "e", "got 5")
+  assert_eq(inline_bang(-5) ?? "e", "e")
+  assert_eq(in_match_arm("6") ?? "e", "got 6")
+  assert_eq(in_match_arm("-6") ?? "neg", "neg")
+  assert_eq(in_match_arm("x") ?? "bad", "bad")
+  assert_eq(err_first(-1) ?? 99, -1)
+  assert_eq(err_first(1) ?? 99, 99)
+}
+
+test "an unconstrained slot still takes the fn's declared type" {
+  assert_eq(fold_seed([1, 2, 3]), ok(6))
+}

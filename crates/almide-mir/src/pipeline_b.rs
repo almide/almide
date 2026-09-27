@@ -298,6 +298,7 @@ fn collect_pipeline_variant_layouts(ir: &almide_ir::IrProgram) -> crate::lower::
         variant_layouts.ctor_to_type.extend(m_vl.ctor_to_type);
         variant_layouts.ctor_field_defaults.extend(m_vl.ctor_field_defaults);
     }
+    variant_layouts.forget_ctors_shadowed_by_entry_records(&ir.type_decls);
     let mut owners: std::collections::HashMap<String, Vec<String>> = Default::default();
     for k in variant_layouts.by_type.keys() {
         if let Some((_, base)) = k.rsplit_once('.') {

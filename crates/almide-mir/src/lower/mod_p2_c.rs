@@ -108,6 +108,22 @@ pub struct VariantLayouts {
 }
 
 impl VariantLayouts {
+    /// Forget every constructor whose bare name is also the name of a RECORD type the
+    /// entry program declares (`type Stop = { .. }` beside a module's `| Stop`, #2636).
+    /// The checker resolves that bare name to the entry's own struct, but this table is
+    /// keyed by the bare case name program-wide, so a `Stop { .. }` literal or pattern
+    /// would otherwise lower as the module's case. Without an entry the case cannot be
+    /// resolved by name at all, which walls honestly instead of reading the wrong layout.
+    pub fn forget_ctors_shadowed_by_entry_records(&mut self, entry_decls: &[almide_ir::IrTypeDecl]) {
+        for d in entry_decls {
+            if matches!(d.kind, almide_ir::IrTypeDeclKind::Record { .. })
+                && self.ctor_to_type.get(d.name.as_str()).is_some_and(|t| t != d.name.as_str())
+            {
+                self.ctor_to_type.remove(d.name.as_str());
+            }
+        }
+    }
+
     /// Resolve a constructor name to its owning type's name + layout + the specific case.
     pub fn lookup_ctor(&self, ctor: &str) -> Option<(&str, &VariantLayout, &VariantCaseLayout)> {
         let ty = self.ctor_to_type.get(ctor)?;

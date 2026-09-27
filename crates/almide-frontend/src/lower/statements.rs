@@ -436,11 +436,11 @@ fn coerce_record_fields(ir_val: &mut IrExpr, decl_fields: &[(almide_base::intern
 ///     `env.constructors`, whose `VariantPayload::Record` carries the fields.
 /// Returns `None` for anonymous records, tuple/unit cases, or unknown names
 /// (nothing to coerce against).
-pub(crate) fn declared_record_ty(env: &TypeEnv, name: almide_base::intern::Sym) -> Option<Ty> {
-    // Variant case with a record payload takes priority: a case name and a
-    // type name never collide (constructors are registered separately), but
-    // checking constructors first matches the checker's resolution order.
-    if let Some((_, case)) = env.lookup_ctor(&name) {
+pub(crate) fn declared_record_ty(env: &TypeEnv, name: almide_base::intern::Sym, cur_mod: Option<&str>) -> Option<Ty> {
+    // Variant case with a record payload takes priority, resolved the way the
+    // checker resolves it (`lookup_ctor_in`): only a case visible from this
+    // file, and never over the file's own same-named type (#2636).
+    if let Some((_, case)) = env.lookup_ctor_in(&name, cur_mod) {
         if let crate::types::VariantPayload::Record(fields) = &case.payload {
             return Some(Ty::Record { fields: fields.clone() });
         }

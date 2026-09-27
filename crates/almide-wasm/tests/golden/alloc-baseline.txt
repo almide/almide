@@ -122,13 +122,16 @@
 66160	spec/wasm_cross/edge_map_order.almd
 112864	spec/wasm_cross/edge_string_unicode.almd
 66336	spec/wasm_cross/effect_assign_unwrap.almd
+66208	spec/wasm_cross/effect_branch_keeps_result.almd
 70160	spec/wasm_cross/effect_call_arg_credit.almd
 66400	spec/wasm_cross/effect_fn_value.almd
+88560	spec/wasm_cross/effect_fn_value_slot_family.almd
 65920	spec/wasm_cross/effect_main_guard_err.almd
 66192	spec/wasm_cross/effect_main_guard_ok.almd
 66256	spec/wasm_cross/effect_mut_generic_port.almd
 66688	spec/wasm_cross/effect_option_explicit_bang.almd
 66192	spec/wasm_cross/effect_slot_carrier.almd
+66240	spec/wasm_cross/effect_slot_never_err_bang.almd
 66544	spec/wasm_cross/effect_tail_carrier_family.almd
 65904	spec/wasm_cross/effect_tco.almd
 ~	spec/wasm_cross/effect_tco_err_rewrap.almd
@@ -411,6 +414,7 @@
 66032	spec/wasm_cross/map_wide_int_key.almd
 65872	spec/wasm_cross/match_box_pattern_backstop.almd
 66432	spec/wasm_cross/match_container_literal.almd
+66416	spec/wasm_cross/match_err_arm_typed_payload.almd
 66048	spec/wasm_cross/match_forms.almd
 66768	spec/wasm_cross/match_guard_eq_borrows_binding.almd
 67808	spec/wasm_cross/match_payload_string_literal.almd
@@ -553,7 +557,7 @@
 65840	spec/wasm_cross/record_forms.almd
 68048	spec/wasm_cross/record_option_none_cells.almd
 67296	spec/wasm_cross/record_pair_result_return.almd
-!	spec/wasm_cross/record_scalar_field_assign_alias.almd
+66272	spec/wasm_cross/record_scalar_field_assign_alias.almd
 66336	spec/wasm_cross/record_variant_field_literal.almd
 66192	spec/wasm_cross/records_variants.almd
 65760	spec/wasm_cross/recursion_depth_within_limits.almd
@@ -745,7 +749,7 @@
 65904	spec/wasm_cross/unique_non_flat_element.almd
 65952	spec/wasm_cross/unit_effect_abi.almd
 66160	spec/wasm_cross/unsigned_literal_domain.almd
-!	spec/wasm_cross/unwrap_callarg_single_expr_effect_body.almd
+66464	spec/wasm_cross/unwrap_callarg_single_expr_effect_body.almd
 66032	spec/wasm_cross/unwrap_in_callarg.almd
 65984	spec/wasm_cross/unwrap_in_if_arm.almd
 66048	spec/wasm_cross/unwrap_in_recursion.almd
@@ -772,6 +776,7 @@
 66176	spec/wasm_cross/value_eq.almd
 70304	spec/wasm_cross/value_keys_non_object.almd
 67360	spec/wasm_cross/value_merge.almd
+67552	spec/wasm_cross/value_merge_duplicate_keys.almd
 66560	spec/wasm_cross/value_object_leak_loop.almd
 69248	spec/wasm_cross/value_object_ops_share.almd
 68256	spec/wasm_cross/value_repr.almd

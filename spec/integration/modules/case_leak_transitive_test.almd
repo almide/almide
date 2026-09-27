@@ -1,0 +1,25 @@
+// #2636: a variant case of a module this file never imports (`leakfin`,
+// reached only through `leakmid`) is not visible here, and never overrides
+// the file's own type of the same name. Before the fix `leakfin`'s `| Stop`
+// resolved the bare `Stop` below and the record literal was E021.
+import leakmid
+
+type Stop = { message: String, code: Int8 }
+
+fn show(s: Stop) -> String = match s {
+  Stop { message, code } => "${message}/${int8.to_string(code)}"
+}
+
+test "a transitive module's case does not override this file's own record" {
+  let s = Stop { message: "halt", code: 7 }
+  assert_eq(s.message + " " + leakmid.describe(), "halt stop")
+  assert_eq(show(s), "halt/7")
+}
+
+test "a list of the own record keeps its shape" {
+  let xs = [
+    Stop { message: "a", code: 1 },
+    Stop { message: "b", code: 2 }
+  ]
+  assert_eq(xs |> list.map((x) => x.message) |> list.join(","), "a,b")
+}

@@ -1,0 +1,77 @@
+// #2632: a `let` whose value is an `if` / `match` / block with a
+// Result-typed effect call on one of its value leaves, where the binding is
+// then consumed AS a Result (`match r { ok/err }`). The checker keeps the
+// Result on every leaf — no `!` is written, so nothing propagates — but the
+// lowering stripped only the top-level `?` it had inserted and left
+// `(load(n))?` on the branch: E0308 at rustc natively, and on wasm the fn
+// returned early with the error instead of reaching the `match`. (auto-?
+// runs in effect fns, not `test` blocks, so the shapes live in effect fns the
+// tests call.)
+effect fn load(n: Int) -> String = {
+  guard n >= 0 else err("negative ${n}")
+  "loaded ${n}"
+}
+
+effect fn via_if(n: Int) -> String = {
+  let r = if n > 10 then load(n)
+  else match load(n) {
+    ok(_) => err("small"),
+    err(e) => err(e),
+  }
+  match r {
+    ok(v) => v,
+    err(e) => "err: ${e}",
+  }
+}
+
+effect fn via_if_both(n: Int) -> String = {
+  let r = if n > 10 then load(n) else load(0 - n)
+  match r {
+    ok(v) => v,
+    err(e) => "err: ${e}",
+  }
+}
+
+effect fn via_match(n: Int) -> String = {
+  let r = match n {
+    0 => err("zero"),
+    _ => load(n),
+  }
+  match r {
+    ok(v) => v,
+    err(e) => "err: ${e}",
+  }
+}
+
+effect fn via_block(n: Int) -> String = {
+  let r = {
+    let m = n * 2
+    load(m)
+  }
+  match r {
+    ok(v) => v,
+    err(e) => "err: ${e}",
+  }
+}
+
+test "an if branch keeps its Result when the binding is matched on ok/err" {
+  assert_eq(via_if(12), ok("loaded 12"))
+  assert_eq(via_if(3), ok("err: small"))
+  assert_eq(via_if(-1), ok("err: negative -1"))
+}
+
+test "both if branches keep their Results" {
+  assert_eq(via_if_both(12), ok("loaded 12"))
+  assert_eq(via_if_both(3), ok("err: negative -3"))
+}
+
+test "a match arm keeps its Result" {
+  assert_eq(via_match(0), ok("err: zero"))
+  assert_eq(via_match(5), ok("loaded 5"))
+  assert_eq(via_match(-5), ok("err: negative -5"))
+}
+
+test "a block tail keeps its Result" {
+  assert_eq(via_block(4), ok("loaded 8"))
+  assert_eq(via_block(-4), ok("err: negative -8"))
+}

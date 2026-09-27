@@ -5,6 +5,9 @@
 mod host;
 mod http_call_host;
 mod host_serve;
+#[cfg(test)]
+#[path = "tests/http_host_test.rs"]
+mod http_host_test;
 pub(crate) mod component_alloc;
 pub mod component_availability;
 /// The stock-WASI transform (`to_wasi`, `P1_SERVED_OPS`, …): its own crate

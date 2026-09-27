@@ -60,6 +60,7 @@ fn witness_layouts(ir: &almide_ir::IrProgram) -> (crate::lower::RecordLayouts, c
         variants.ctor_to_type.extend(vl.ctor_to_type);
         variants.ctor_field_defaults.extend(vl.ctor_field_defaults);
     }
+    variants.forget_ctors_shadowed_by_entry_records(&ir.type_decls);
     (records, variants)
 }
 

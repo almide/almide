@@ -1,0 +1,10 @@
+type E: Eq, Repr = | Neg(Int)
+
+fn parse_neg(s: String) -> Int!E = match int.parse(s) {
+  ok(n) => ok(n),
+  err(e) => err(e),
+}
+
+test "t" {
+  assert_eq(parse_neg("3"), ok(3))
+}

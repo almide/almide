@@ -19,6 +19,31 @@ impl Checker {
                 self.report_constraint_mismatch(c);
             }
         }
+        // An `ok`/`err` slot nothing constrained takes the enclosing fn's
+        // declared type (#2599). Applied after every program constraint, so a
+        // default can only fill a hole, never contradict what the code says.
+        for (slot, declared) in std::mem::take(&mut self.result_slot_defaults) {
+            if is_inference_var(&resolve_ty(&slot, &self.uf)).is_some() {
+                self.unify_infer(&slot, &declared);
+            }
+        }
+    }
+
+    /// `t` with every still-open `ok`/`err` slot shown as the type its
+    /// default gives it (#2599). A diagnostic raised before the defaults are
+    /// applied would otherwise print the slot as `?N` where the program means
+    /// the enclosing fn's declared type.
+    pub(super) fn with_slot_defaults(&self, t: &Ty) -> Ty {
+        if self.result_slot_defaults.is_empty() {
+            return t.clone();
+        }
+        let bindings: std::collections::HashMap<_, _> = self.result_slot_defaults.iter()
+            .filter_map(|(slot, declared)| match resolve_ty(slot, &self.uf) {
+                Ty::TypeVar(v) if is_inference_var(&Ty::TypeVar(v)).is_some() => Some((v, declared.clone())),
+                _ => None,
+            })
+            .collect();
+        if bindings.is_empty() { t.clone() } else { crate::types::substitute(t, &bindings) }
     }
 
     /// Emit the E001 for one constraint that could not be satisfied.
@@ -28,9 +53,12 @@ impl Checker {
     /// emitted where inference failed and reporting the derived mismatch would
     /// be a cascade.
     fn report_constraint_mismatch(&mut self, c: &super::types::Constraint) {
-        let exp = resolve_ty(&c.expected, &self.uf);
-        let act = resolve_ty(&c.actual, &self.uf);
+        let exp = self.with_slot_defaults(&resolve_ty(&c.expected, &self.uf));
+        let act = self.with_slot_defaults(&resolve_ty(&c.actual, &self.uf));
         if exp == Ty::Unknown || act == Ty::Unknown {
+            return;
+        }
+        if self.report_erased_err_arm(c, &exp) {
             return;
         }
         // #1108 Phase 2b-iii: a fallible callback handed to a container HOF the
@@ -74,6 +102,41 @@ impl Checker {
         }
         self.emit(diag);
         self.current_span = saved_span;
+    }
+
+    /// #2722: an `err(..)` arm re-wraps a `String` into a typed error `E`, and a
+    /// callback in the same fn erased an `E` into its `String` channel with a
+    /// `!`. "Expected `E`, got `String`" is true and points away from the
+    /// cause, so name the callback's `!` the way #2601's `)!` form does.
+    fn report_erased_err_arm(&mut self, c: &super::types::Constraint, exp: &Ty) -> bool {
+        let Some(FixHint::ErrArmErased { erased, at }) = &c.fix_hint else { return false };
+        let erased = resolve_ty(erased, &self.uf);
+        let Some((_, slot)) = exp.inner2() else { return false };
+        if *slot != erased {
+            return false;
+        }
+        let erased = erased.display();
+        let at = at.map(|s| format!(" (line {}, col {})", s.line, s.col)).unwrap_or_default();
+        let saved_span = self.current_span;
+        if c.span.is_some() {
+            self.current_span = c.span;
+        }
+        self.emit(err(
+            format!(
+                "this `err(..)` arm passes a `String` where the match's error type is `{erased}`: the callback's `!`{at} \
+                 turned its `{erased}` error into `String` — a `!` inside a lambda propagates into the lambda's own \
+                 failure channel, which is always `String`"
+            ),
+            format!(
+                "Only a callback whose WHOLE body is one `call(..)!` keeps that call's error type: \
+                 `(x) => f(x)!` makes the call that takes it fail with `{erased}`. \
+                 Move the branch into the called fn so the callback is a single `call(..)!`, \
+                 or convert the `String` in this arm: `err(s) => err(SomeCase(s))`."
+            ),
+            c.context.clone(),
+        ).with_code("E022"));
+        self.current_span = saved_span;
+        true
     }
 
     /// The `!` insertion at the end of an annotated `let`'s call value

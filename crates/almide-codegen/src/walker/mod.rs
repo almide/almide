@@ -50,6 +50,18 @@ pub(crate) fn is_rust_keyword(name: &str) -> bool {
     )
 }
 
+/// Is a record literal (or destructure) whose bare name is `name` and whose
+/// type is `ty` a literal of the STRUCT the program declares under that
+/// name, rather than a variant case of the same spelling? `ctor_to_enum` is
+/// keyed by the bare case name program-wide, so an entry program's own
+/// `type Stop = { .. }` shares its key with a dependency's `| Stop` (#2636).
+/// It is the struct when the program declares one under that name and the
+/// value's type does not name an enum (a case's value has its enum's type).
+pub(crate) fn literal_is_declared_struct(ctx: &RenderContext, name: &str, ty: &Ty) -> bool {
+    ctx.ann.record_field_counts.contains_key(name)
+        && !matches!(ty, Ty::Named(n, _) if ctx.ann.ctor_to_enum.values().any(|e| e.as_str() == n.as_str()))
+}
+
 /// Prefix that renames the four keywords rustc refuses to raw-escape.
 const UNRAWABLE_KEYWORD_PREFIX: &str = "almide_kw_";
 
@@ -572,6 +584,28 @@ fn fn_render_context<'a>(ctx: &RenderContext<'a>, func: &IrFunction) -> RenderCo
         target: ctx.target,
         auto_unwrap: func.is_effect && !func.is_test,
         is_test: func.is_test,
+        ann: ctx.ann.clone(),
+        type_aliases: ctx.type_aliases.clone(),
+        generic_types: ctx.generic_types.clone(),
+        minimal_generic_bounds: ctx.minimal_generic_bounds,
+        repr_c: ctx.repr_c,
+        trace: ctx.trace,
+        repr_named_types: ctx.repr_named_types.clone(),
+        newtype_ctors: ctx.newtype_ctors.clone(),
+        fn_err_ty,
+    }
+}
+
+/// The same context with `fn_err_ty` replaced — a closure body propagates its
+/// `!` into the CLOSURE's own error channel, not the enclosing fn's (#2722).
+pub(crate) fn with_fn_err_ty<'a>(ctx: &RenderContext<'a>, fn_err_ty: Option<almide_lang::types::Ty>) -> RenderContext<'a> {
+    RenderContext {
+        templates: ctx.templates,
+        var_table: ctx.var_table,
+        indent: ctx.indent,
+        target: ctx.target,
+        auto_unwrap: ctx.auto_unwrap,
+        is_test: ctx.is_test,
         ann: ctx.ann.clone(),
         type_aliases: ctx.type_aliases.clone(),
         generic_types: ctx.generic_types.clone(),

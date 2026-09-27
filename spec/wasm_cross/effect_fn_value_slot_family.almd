@@ -1,0 +1,73 @@
+// @contract: C-221
+// #2664: an `effect` fn VALUE flowing through a DECLARED fn type (a named
+// alias of `effect (A) -> B`) is the carrier `(A) -> Result[B, String]` in
+// every position the type is written: a returned closure, a `let`, a list of
+// handlers, a record field, a HOF parameter, and a middleware chain of
+// `(Handler) -> Handler`. The structural wasm leg refused all of them
+// (`ty-mismatch:Fn`): a `let` kept the effect form on its statement while its
+// value was the carrier, so one value interned two fn signatures. The http
+// router is the stdlib user of the same shapes; it is held on the structural
+// leg by spec/stdlib/http_router_test.almd and tests/effect_fn_type_carrier_test.rs
+// (a top-level `let app = http.wrap(...)`), outside this fixture so the
+// reference interpreter, which has no http body, still evaluates it.
+type Handler = effect (String) -> String
+
+type Middleware = (Handler) -> Handler
+
+type Svc = { name: String, run: Handler }
+
+effect fn inner(s: String) -> String = "in " + s
+
+effect fn strict(s: String) -> String = {
+  let n = int.parse(s)!
+  "n=${n + 1}"
+}
+
+// A returned closure capturing a String, calling an effect fn.
+fn mk(tag: String) -> Handler = (s) => tag + inner(s)!
+
+// A higher-order parameter typed by the alias.
+effect fn apply(h: Handler, s: String) -> String = h(s)!
+
+fn shout(next: Handler) -> Handler = (s) => string.to_upper(next(s)!)
+
+fn bracket(next: Handler) -> Handler = (s) => "[" + next(s)! + "]"
+
+fn keep(next: Handler) -> Handler = next
+
+fn apply_mw(mw: Middleware, h: Handler) -> Handler = mw(h)
+
+// A middleware chain: the first is the outermost.
+fn chain(h: Handler, mws: List[Middleware]) -> Handler = if list.is_empty(mws) then h
+else apply_mw(list.first(mws) ?? keep, chain(h, list.drop(mws, 1)))
+
+fn pick(hs: List[Handler], i: Int) -> Handler = list.get(hs, i) ?? inner
+
+effect fn main() -> Unit = {
+  // returned closure through a `let`
+  let h = mk("t:")
+  println(h("x")!)
+  // a list of handlers, named and closure
+  let hs: List[Handler] = [inner, mk("L:"), strict]
+  let first = list.first(hs) ?? inner
+  println(first("y")!)
+  println(hs |> list.map((g) => g("41") ?? "err") |> list.join(" | "))
+  println(pick(hs, 1)("z")!)
+  // a record field
+  let svc = Svc { name: "svc", run: mk("R:") }
+  println(svc.name + " " + svc.run("w")!)
+  let run = svc.run
+  println(run("v")!)
+  // a higher-order parameter: named, closure, lambda, and the err path
+  println(apply(inner, "a")!)
+  println(apply(mk("A:"), "b")!)
+  println(apply((s) => s + "!", "c")!)
+  println(apply(strict, "nope") ?? "strict failed")
+  // a middleware chain
+  let wrapped = chain(inner, [shout, bracket])
+  println(wrapped("m")!)
+  let piped = chain(mk("p:"), [bracket, shout])
+  println(piped("q")!)
+  println(chain(strict, [bracket])("7")!)
+  println(chain(strict, [bracket])("x7") ?? "chain failed")
+}

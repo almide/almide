@@ -108,7 +108,7 @@ impl Emitter<'_> {
                     .map(|(&(v, t), &off)| (v, t, off, self.cells.contains(&v)))
                     .collect();
                 let j = self.work.register_closure_lambda(
-                    ps, def.ret, effect_raw, body.clone(), captures.clone(), self.var_space,
+                    ps, def.ret, effect_raw, body.clone(), captures.clone(), (self.var_space, self.cur_module),
                 );
                 let slot = self.work.slot(TableEntry::Lambda(j));
                 if captures.is_empty() {

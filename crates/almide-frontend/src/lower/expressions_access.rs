@@ -523,6 +523,18 @@ fn lower_expr_record(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
                         return sym(&qual);
                     }
                 }
+                // A bare literal of an IMPORTED module's struct pins to that
+                // module's canonical key, resolved the way the checker typed
+                // it (#2715): left bare it named no struct in the flat
+                // program (rustc E0422) whenever the name was declared by
+                // more than one module.
+                let cur_mod = ctx.current_module.map(|cm| cm.as_str());
+                if let Some(key) = crate::canonicalize::resolve::canonical_user_type_sym(s, &ctx.env.types, cur_mod)
+                    && key.as_str().contains('.')
+                    && is_struct(key.as_str())
+                {
+                    return key;
+                }
                 // The entry program's struct shadowing a stdlib-owned name is
                 // `self.Type` (#1828), pinned like a module's own struct.
                 if let Some(qual) = crate::canonicalize::resolve::stdlib_shadow_key(s, ctx.current_module.map(|m| m.as_str())) {
@@ -542,7 +554,7 @@ fn lower_expr_record(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
             // `M { a: 5i64 }` (E0308) and WASM writes the wrong byte width into
             // the field, corrupting the next field. Mirrors the let/var path
             // in `override_record_literal_ty`.
-            if let Some(decl) = name.and_then(|n| super::statements::declared_record_ty(ctx.env, n)) {
+            if let Some(decl) = name.and_then(|n| super::statements::declared_record_ty(ctx.env, n, ctx.current_module.map(|m| m.as_str()))) {
                 super::statements::coerce_literal_to_sized(&mut rec, &decl, ctx.env);
             }
             rec

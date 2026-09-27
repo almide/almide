@@ -628,7 +628,9 @@ fn render_stmt_bind_destructure(ctx: &RenderContext, stmt: &IrStmt) -> String {
                 }
                 _ => "_".into(),
             };
-            let qualified = if let Some(enum_name) = ctx.ann.ctor_to_enum.get(&type_name) {
+            let qualified = if let Some(enum_name) = ctx.ann.ctor_to_enum.get(&type_name)
+                .filter(|_| !super::literal_is_declared_struct(ctx, &type_name, &value.ty))
+            {
                 ctx.templates.render_with("ctor_qualify", None, &[], &[("enum_name", enum_name.as_str()), ("ctor_name", type_name.as_str())])
                     .unwrap_or_else(|| format!("{}::{}", enum_name, type_name))
             } else {

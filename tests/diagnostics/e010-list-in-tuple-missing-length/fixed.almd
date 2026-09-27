@@ -1,0 +1,8 @@
+fn f(xs: List[Int], ys: List[Int]) -> Int =
+  match (xs, ys) {
+    ([], []) => 0,
+    ([], [y, ..yt]) => y,
+    ([x, ..xt], _) => 1,
+  }
+
+effect fn main() -> Unit = println(int.to_string(f([], [5])))

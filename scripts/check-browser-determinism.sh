@@ -159,7 +159,12 @@ fail=0; n=0
 # nested_payload_guard (`OCons(some(x), _) if x == y`) render and byte-match
 # native; the positional twin the change adds
 # (positional_variant_field_literal) emits on both legs.
-MAX_WALLED=28
+# 29 as of 2026-09-27 (#2722): UP from 28 by match_err_arm_typed_payload.almd,
+# whose `bump` (a typed-error `match` re-wrap, `err(e) => err(e)`) the incumbent
+# MIR lowering walls on both hosts (proofs/walled-real-baseline.txt); the
+# structural leg renders it byte-identically to native. Recorded, not ported:
+# the incumbent is retiring under #1696.
+MAX_WALLED=29
 walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue

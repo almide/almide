@@ -22,6 +22,7 @@ impl Checker {
         self.validate_result_interpolations();
         self.validate_interp_instantiations();
         self.validate_ord_elem_types();
+        self.validate_eq_operand_types();
         self.validate_unknown_named_types();
         self.validate_empty_collection_elements();
         self.validate_int_overflow_literals();
@@ -44,6 +45,7 @@ impl Checker {
         let _phase = almide_base::profile::phase_scope(almide_base::profile::Phase::Check);
         // Isolate module's constraint solving and type map from the main program
         let saved_constraints = std::mem::take(&mut self.constraints);
+        let saved_slot_defaults = std::mem::take(&mut self.result_slot_defaults);
         let saved_uf = std::mem::replace(&mut self.uf, UnionFind::new());
         self.type_map.clear();
 
@@ -54,6 +56,9 @@ impl Checker {
         let (mod_table, diags) = build_import_table(prog, Some(import_table_name), &self.env.user_modules);
         self.env.import_table = mod_table;
         self.diagnostics.extend(diags);
+        // Recorded before the snapshot so it outlives this inference: the
+        // module's lowering resolves its bare type names the same way (#2715).
+        crate::canonicalize::resolve::register_scoped_bare_type_keys(&mut self.env, Some(module_name));
 
         // Temporarily register unprefixed declarations for intra-module resolution.
         // `alias_owner_module` marks them as belonging to THIS module, so the
@@ -76,6 +81,7 @@ impl Checker {
             Some(module_name.to_string()),
         );
         self.validate_protocol_refs(prog);
+        self.validate_bare_type_visibility(prog);
         for decl in prog.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();
@@ -86,6 +92,7 @@ impl Checker {
 
         // Restore
         self.constraints = saved_constraints;
+        self.result_slot_defaults = saved_slot_defaults;
         self.uf = saved_uf;
         self.env.import_table = saved_import_table;
         self.env.restore_keys(snapshot);
@@ -104,6 +111,7 @@ impl Checker {
             return;
         }
         let saved_constraints = std::mem::take(&mut self.constraints);
+        let saved_slot_defaults = std::mem::take(&mut self.result_slot_defaults);
         let saved_uf = std::mem::replace(&mut self.uf, UnionFind::new());
         let saved_type_map = std::mem::take(&mut self.type_map);
         // This is a TYPE-EXTRACTION pre-pass, not the module's real check —
@@ -132,6 +140,7 @@ impl Checker {
             self.deferred_implicit_prop_checks.len(),
             self.deferred_result_interp_checks.len(),
             self.deferred_generic_calls.len(),
+            self.deferred_eq_checks.len(),
         );
 
         let self_name = self.env.self_module_name.map(|s| s.to_string());
@@ -165,6 +174,7 @@ impl Checker {
         self.current_module_prefix = saved_prefix;
 
         self.constraints = saved_constraints;
+        self.result_slot_defaults = saved_slot_defaults;
         self.uf = saved_uf;
         self.type_map = saved_type_map;
         self.env.import_table = saved_import_table;
@@ -183,6 +193,7 @@ impl Checker {
         self.deferred_implicit_prop_checks.truncate(saved_deferred_lens.10);
         self.deferred_result_interp_checks.truncate(saved_deferred_lens.11);
         self.deferred_generic_calls.truncate(saved_deferred_lens.12);
+        self.deferred_eq_checks.truncate(saved_deferred_lens.13);
     }
 
     /// Upgrade `env.top_lets` entries from the POST-solve resolution of their

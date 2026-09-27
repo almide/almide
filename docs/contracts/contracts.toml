@@ -709,6 +709,7 @@ evidence  = [
   { path = "spec/wasm_cross/option_result.almd", class = "fixture" },
   { path = "spec/wasm_cross/control_flow.almd", class = "fixture" },
   { path = "spec/wasm_cross/unwrap_or_value_fn_named_parse.almd", class = "fixture" },
+  { path = "spec/wasm_cross/match_err_arm_typed_payload.almd", class = "fixture" },
 ]
 
 # ── LIST[STRING] PARAM CODEGEN ───────────────────────────────────────
@@ -1007,6 +1008,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/autotry_construction.almd", class = "fixture" },
   { path = "spec/wasm_cross/autotry_result_first_arg.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_branch_keeps_result.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-069"
@@ -1411,6 +1413,7 @@ evidence  = [
   { path = "spec/wasm_cross/value_as_array_roundtrip.almd", class = "fixture" },
   { path = "spec/wasm_cross/value_borrowed_constructors.almd", class = "fixture" },
   { path = "spec/wasm_cross/value_array_tuple_tco.almd", class = "fixture" },
+  { path = "spec/wasm_cross/value_merge_duplicate_keys.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-104"
@@ -2802,6 +2805,8 @@ evidence  = [
   { path = "spec/wasm_cross/effect_slot_carrier.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_fn_value.almd", class = "fixture" },
   { path = "spec/lang/fallible_user_hof_test.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_fn_value_slot_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_slot_never_err_bang.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-222"
@@ -4176,6 +4181,8 @@ evidence  = [
   { path = "spec/wasm_cross/list_rest_pattern.almd", class = "fixture" },
   { path = "spec/lang/list_rest_pattern_test.almd", class = "fixture" },
   { path = "tests/diagnostics/list-rest-not-last/broken.almd", class = "fixture" },
+  { path = "tests/list_pattern_tuple_test.rs", class = "fixture", name = "a_guarded_tuple_arm_with_a_list_pattern_honours_its_guard" },
+  { path = "tests/list_pattern_tuple_test.rs", class = "fixture", name = "refutable_element_patterns_are_tested_on_both_legs" },
 ]
 [[contract]]
 id        = "C-333"

@@ -1,0 +1,3 @@
+expects_code = "E022"
+expects_error = "`int.parse(s)` is a Result[Int, String] but `first_num` returns Option[Int]"
+hint_substring = "`int.parse(s)?!`"

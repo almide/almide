@@ -139,7 +139,9 @@ pub(crate) fn collect_binds_stmt(
         }
         IrStmtKind::Assign { value, .. } => collect_binds(value, out, seen, types),
         IrStmtKind::BindDestructure { pattern, value } => {
-            collect_pattern_binds(pattern, out, seen, types)?;
+            if !collect_record_destructure_binds(pattern, value, out, seen, types) {
+                collect_pattern_binds(pattern, out, seen, types)?;
+            }
             collect_binds(value, out, seen, types)
         }
         IrStmtKind::Expr { expr } => collect_binds(expr, out, seen, types),
@@ -163,6 +165,47 @@ pub(crate) fn collect_binds_stmt(
         }
         _ => Ok(()), // lowering unsups these before any local is needed
     }
+}
+
+/// A record destructure's binders take their slot types from the SUBJECT's
+/// layout — the field each one reads — not from the binder's own IR type. An
+/// anonymous destructure (`let { a, b } = r`) names no type, so the frontend
+/// types its binders from the pattern's (empty) name, and a later pass could
+/// guess them wrong by name: an entry record `Stop` beside a module's `| Stop`
+/// case typed them from the case (`Unit`), and the leg walled with
+/// `ty-mismatch:Unit-vs-Scalar(Str)` while native ran the program. The load
+/// (`emit_record_pattern_binds`) already reads each field at its layout type;
+/// this makes the local agree with it. Returns whether it handled the pattern.
+fn collect_record_destructure_binds(
+    pattern: &IrPattern,
+    value: &almide_ir::IrExpr,
+    out: &mut Vec<(VarId, SliceTy)>,
+    seen: &mut HashSet<VarId>,
+    types: &TypeTable,
+) -> bool {
+    let IrPattern::RecordPattern { name, fields, .. } = pattern else { return false };
+    let Some(SliceTy::Named(ti)) = slice_ty_of(&value.ty, types) else { return false };
+    let layout: Vec<(String, SliceTy)> = match types.def(ti) {
+        crate::types_table::NamedDef::Record(r) => r.fields.iter().map(|f| (f.name.clone(), f.ty)).collect(),
+        crate::types_table::NamedDef::Variant(v) => match v.cases.iter().find(|c| c.name == name.as_str()) {
+            Some(c) => c.fields.iter().map(|f| (f.name.clone(), f.ty)).collect(),
+            None => return false,
+        },
+        crate::types_table::NamedDef::Excluded => return false,
+    };
+    for fp in fields {
+        match &fp.pattern {
+            Some(IrPattern::Bind { var, .. }) => {
+                let Some((_, fty)) = layout.iter().find(|(n, _)| n.as_str() == fp.name.as_str()) else { return false };
+                if seen.insert(*var) {
+                    out.push((*var, *fty));
+                }
+            }
+            Some(other) if collect_pattern_binds(other, out, seen, types).is_err() => return false,
+            Some(_) | None => {}
+        }
+    }
+    true
 }
 
 pub(crate) fn collect_pattern_binds(

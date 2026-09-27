@@ -425,7 +425,10 @@ fn render_pattern_record(ctx: &RenderContext, name: &str, fields: &[almide_ir::I
     // Qualify enum variant record patterns: Circle → Shape::Circle. A plain
     // record pattern on a runtime-owned struct (`FileStat`, #1821) spells the
     // runtime's reserved name.
-    let qualified_name = if let Some(enum_name) = resolve_pattern_enum_name(ctx, enum_hint, name) {
+    // With no enum subject, a name the program declares as a struct is that
+    // struct's pattern, not a same-spelled case of another module (#2636).
+    let struct_pattern = enum_hint.is_none() && ctx.ann.record_field_counts.contains_key(name);
+    let qualified_name = if let Some(enum_name) = resolve_pattern_enum_name(ctx, enum_hint, name).filter(|_| !struct_pattern) {
         format!("{}::{}", enum_name, name)
     } else {
         ctx.ann.runtime_owned_types.get(name).cloned().unwrap_or_else(|| name.to_string())

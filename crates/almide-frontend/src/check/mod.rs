@@ -165,6 +165,15 @@ pub struct Checker {
     /// every inline middleware as a `HttpMiddleware`.
     pub(crate) list_elem_expect: Option<crate::types::Ty>,
     pub(crate) constraints: Vec<Constraint>,
+    /// A slot of an `ok(..)` / `err(..)` its argument leaves open — the ERR type
+    /// of `ok(x)`, the OK type of `err(e)` — paired with the enclosing fn's
+    /// declared Result argument for that slot. The slot is a FRESH var the
+    /// program's own constraints decide; the declared type fills it only if
+    /// nothing did (`solve_constraints`). Pinning it up front typed a non-tail
+    /// `err("neg")` in a `-> String!` fn as `Result[String, String]`, so
+    /// `let r: Result[Int, String] = if c then ok(c) else err("neg")` was E001
+    /// (#2599).
+    pub(crate) result_slot_defaults: Vec<(Ty, Ty)>,
     pub(crate) uf: UnionFind,
     /// Named-type pairs currently being unified structurally. Unifying two
     /// DIFFERENT-named nominal types expands both to their record forms and
@@ -229,6 +238,11 @@ pub struct Checker {
     /// Order-sensitive combinator subjects/keys (list.sort/min/max, sort_by's
     /// key) awaiting the post-solve ORDERABLE-element check (E030).
     pub(crate) deferred_ord_elem_checks: Vec<(Ty, Option<crate::ast::Span>, String)>,
+    /// Operand types of `==` / `!=` / `assert_eq` / `assert_ne` awaiting the
+    /// post-solve EQUALITY check (E016, #2606): a function anywhere in the
+    /// type has no equality ("Function types are never Eq",
+    /// docs/specs/type-system.md).
+    pub(crate) deferred_eq_checks: Vec<(Ty, Option<crate::ast::Span>, String)>,
     /// Annotation-resolved types awaiting the post-solve UNKNOWN-NAME check
     /// (E029): a `Ty::Named` whose sym is not a declared type compiles to a
     /// nonexistent Rust type (E0412/E0422/E0425) after `check` accepted — the
@@ -289,6 +303,18 @@ pub struct Checker {
     /// `list.try_map`, keyed by the module Ident's ExprId): the try_
     /// deprecation warning (E043) must fire only on USER-SPELLED try_*.
     pub(crate) hof_rewritten_calls: std::collections::HashSet<almide_lang::ast::ExprId>,
+    /// #2601: every `!` inside a lambda whose operand's error type is not
+    /// `String` — the lambda's failure channel is always `String` (ADR-0012
+    /// D4 / ADR-0009 L3), so that `!` erases the typed error into its
+    /// Debug text. Recorded (erased type, `!` span) so a LATER `!` that
+    /// propagates the erased `String` into a fn with a typed error can name
+    /// the callback as the cause instead of only "fails with `String`".
+    /// The third field is the enclosing fn (`current_fn`), so a value-consumed
+    /// erasure is named only inside the fn that made it (#2722).
+    pub(crate) lambda_err_erasures: Vec<(Ty, Option<crate::ast::Span>, Option<Sym>)>,
+    /// Set while a `!` is judged: the `lambda_err_erasures` length before its
+    /// operand was inferred, so the erasures inside THAT operand are known.
+    pub(crate) bang_erasure_mark: Option<usize>,
     /// Annotated `let`/`var` bindings, re-checked post-solve for the numeric
     /// narrowing direction (#867). The solver joins numeric widths
     /// symmetrically — peer sites like list elements and `assert_eq` args
@@ -584,7 +610,7 @@ impl Checker {
             lambda_slot_effect: false,
             lambda_ret_expect: None,
             list_elem_expect: None,
-            constraints: Vec::new(), uf: UnionFind::new(),
+            constraints: Vec::new(), result_slot_defaults: Vec::new(), uf: UnionFind::new(),
             unify_named_in_progress: std::collections::HashSet::new(),
             current_module_prefix: None,
             deferred_tuple_indices: Vec::new(),
@@ -597,6 +623,7 @@ impl Checker {
             generic_calls: Vec::new(),
             interp_reported: std::collections::HashSet::new(),
             deferred_ord_elem_checks: Vec::new(),
+            deferred_eq_checks: Vec::new(),
             deferred_empty_collection_checks: Vec::new(),
             deferred_int_overflow_checks: Vec::new(),
             deferred_float_overflow_checks: Vec::new(),
@@ -606,6 +633,8 @@ impl Checker {
             effect_call_spans: std::collections::HashSet::new(),
             fallible_marker_fns: std::collections::HashSet::new(),
             hof_rewritten_calls: std::collections::HashSet::new(),
+            lambda_err_erasures: Vec::new(),
+            bang_erasure_mark: None,
             deferred_unknown_type_checks: Vec::new(),
             pending_toplet_tys: Vec::new(),
         }
@@ -1101,6 +1130,7 @@ impl Checker {
         // real pass right after re-checks them and owns all reporting.
         self.refresh_module_top_lets(program, "__entry");
         self.validate_protocol_refs(program);
+        self.validate_bare_type_visibility(program);
         for decl in program.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();
@@ -1632,6 +1662,19 @@ impl Checker {
                 None => {
                     if let Some(o) = proto.origin.filter(|o| Some(*o) != here) {
                         let alias = self.alias_for_module(o);
+                        // A protocol of a module this file never imports is
+                        // out of scope, as a type is (#2715): the bare name
+                        // resolved only because the protocol table is
+                        // program-wide.
+                        if alias.is_none() {
+                            let leaf = o.as_str().rsplit('.').next().unwrap_or(o.as_str()).to_string();
+                            self.emit(err(
+                                format!("protocol '{}' is not in scope here: it is declared in module '{}', which this file does not import", w.name, o),
+                                format!("Import the module that declares it and write the qualified name, e.g. `{}.{}`", leaf, w.name),
+                                w.owner.clone(),
+                            ).with_code("E029"));
+                            continue;
+                        }
                         let hint = match &alias {
                             Some(a) => format!("Write `{}.{}`: a protocol from another module is named with its module, the same way a type is (`{}.SomeType`). The bare name still resolves for now", a, w.name, a),
                             None => format!("Import the declaring module and qualify the name (`import self.<module>` then `<module>.{}`): a protocol from another module is named with its module, the same way a type is", w.name),
@@ -1664,6 +1707,101 @@ impl Checker {
                         w.owner.clone(),
                     ));
                 }
+            }
+        }
+        self.current_span = saved;
+    }
+
+    /// A bare type name the file spells must name a type the file can see:
+    /// its own, one of a module it imports, or the stdlib's (#2715). A type
+    /// only a module the file never imports declares used to resolve anyway —
+    /// through the program-wide bare key (the last module to register that
+    /// name) or the "unique owner" fallback — so the answer depended on which
+    /// other modules were in the program, and adding a same-named type
+    /// anywhere changed or broke a file that never mentioned it. Now it is
+    /// E029 naming the module to import and the qualified spelling.
+    pub(crate) fn validate_bare_type_visibility(&mut self, program: &mut ast::Program) {
+        let here = self.current_module_prefix.clone();
+        let own: std::collections::HashSet<Sym> = program.decls.iter()
+            .filter_map(|d| match d { ast::Decl::Type { name, .. } => Some(*name), _ => None })
+            .collect();
+        // One walk of the whole file (in place, no copy) finds the bare type
+        // names it spells; the per-declaration walk below, which only supplies
+        // each error's span, runs only when one of them is actually out of
+        // scope. A clean file costs one walk and one scan of the type table.
+        let candidates: std::collections::HashSet<&str> = import_spellings(program).bare_types
+            .into_iter()
+            .filter(|n| !own.contains(n))
+            .map(|n| n.as_str())
+            .collect();
+        if candidates.is_empty() {
+            return;
+        }
+        // name -> the user modules that declare it (sorted at report time, so
+        // the message is deterministic).
+        let user_modules: std::collections::HashSet<&str> = self.env.user_modules.iter().map(|m| m.as_str()).collect();
+        let mut owners: std::collections::HashMap<Sym, Vec<Sym>> = std::collections::HashMap::new();
+        for k in self.env.types.keys() {
+            if let Some((m, base)) = k.as_str().rsplit_once('.')
+                && candidates.contains(base)
+                && user_modules.contains(m)
+                && !almide_lang::stdlib_info::is_bundled_module(m)
+            {
+                owners.entry(sym(base)).or_default().push(sym(m));
+            }
+        }
+        let mut visible_set: std::collections::HashSet<Sym> = self.env.import_table.accessible.clone();
+        visible_set.extend(self.env.import_table.aliases.values().copied());
+        if let Some(h) = here.as_deref() { visible_set.insert(sym(h)); }
+        let visible = |m: &Sym| -> bool { visible_set.contains(m) };
+        // A stdlib type of the same name is what the bare spelling means here
+        // (the auto-import); only a user-module-only name is out of scope.
+        owners.retain(|name, decl_owners| {
+            !decl_owners.iter().any(visible)
+                && almide_lang::stdlib_info::stdlib_owned_type_owner(name.as_str()).is_none()
+                && crate::bundled_sigs::bundled_type_owner(name.as_str()).is_none()
+        });
+        if owners.is_empty() {
+            return;
+        }
+        let mut shell = program.clone();
+        shell.decls.clear();
+        let saved = self.current_span;
+        let mut reported: std::collections::HashSet<Sym> = std::collections::HashSet::new();
+        for decl in &program.decls {
+            let (span, generics) = match decl {
+                ast::Decl::Fn { span, generics, .. } | ast::Decl::Type { span, generics, .. }
+                | ast::Decl::Protocol { span, generics, .. } => (*span, generics.clone()),
+                ast::Decl::TopLet { span, .. } | ast::Decl::Test { span, .. }
+                | ast::Decl::TestWhereDef { span, .. } => (*span, None),
+                ast::Decl::Module { .. } | ast::Decl::Import { .. } => continue,
+            };
+            let letters: std::collections::HashSet<Sym> = generics.iter().flatten().map(|g| sym(&g.name)).collect();
+            shell.decls = vec![decl.clone()];
+            let spelled = import_spellings(&mut shell);
+            let mut names: Vec<Sym> = spelled.bare_types.into_iter()
+                .filter(|n| !letters.contains(n) && !own.contains(n))
+                .collect();
+            names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+            for name in names {
+                let Some(decl_owners) = owners.get(&name) else { continue };
+                if reported.contains(&name) {
+                    continue;
+                }
+                reported.insert(name);
+                let mut mods: Vec<&str> = decl_owners.iter().map(|m| m.as_str()).collect();
+                mods.sort();
+                mods.dedup();
+                let spellings = mods.iter()
+                    .map(|m| format!("`{}.{}`", m.rsplit('.').next().unwrap_or(m), name))
+                    .collect::<Vec<_>>().join(" or ");
+                let modules = mods.iter().map(|m| format!("'{}'", m)).collect::<Vec<_>>().join(" and ");
+                self.current_span = span;
+                self.emit(err(
+                    format!("type '{}' is not in scope here: it is declared in {} {}, which this file does not import", name, if mods.len() == 1 { "module" } else { "modules" }, modules),
+                    format!("Import the module that declares it and write the qualified name, e.g. {}. A type is visible from the file that declares it and from the files that import that file, never through another import", spellings),
+                    format!("type {}", name),
+                ).with_code("E029"));
             }
         }
         self.current_span = saved;
