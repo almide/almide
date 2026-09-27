@@ -1,0 +1,27 @@
+# Release evidence seal — v0.65.0. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.65.0"
+tag = "v0.65.0"
+tag_commit = "dbde826d11afdc4ce7de6da30597fc14ed27c173"
+date = "2026-09-28"
+url = "https://github.com/almide/almide/releases/tag/v0.65.0"
+
+[derived]
+cargo_version = "0.65.0"
+contracts_sha256 = "03e46795e6be8bbc7aa1905ce6fae7c7b728b303b4e48d44cf5a1eb3962b7d80"
+contracts_total = "369"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "c953796d0ce50c8afc764afe3e111606e03935378bbdb141948ddd963bbfd797"
+abstain_ledger_entries = "21"
+wasm_cross_fixtures = "802"
+rust_toolchain = "1.94.0"
+wasmtime = "v47.0.3"
+
+[recorded]
+release_gate = "Minor release through the rc channel (#1484). The v0.64.1 patch train was tagged as v0.64.1-rc1 (7384056de, release PR #2773) and never finalised: its soak (fuzz-nightly run 36321007234: shards 8/8, 480.1 of 480 minutes, 117,645 programs) found 2 cross-target divergences, #2782 (wasm bytes.repeat wrapped len * n past the C-197 ceiling check) and #2783 (native matrix.linear_f32_row_no_bias skipped the C-161 ceiling), neither a regression against v0.64.0, both fixed with a third instance found by the family sweep (select_rows_f32) in #2787 (batch of #2786). The fixes could only land on a develop that already carried ADR-0021 and ADR-0022 (#2774), so the train became v0.65.0. v0.65.0-rc1 (dbde826d1, release PR #2790: every required check green including Windows Build and Test Rust, 129 pass, full mutation sweep green on 76e48de5b, tree-identical to develop 76e48de5b). The final is tagged on the rc1 commit itself. Blocker gate at the tag: 0 (#1482); #2780 (process.exit refused 126..=255 since 0.64, a regression) was fixed before the rc via als#107 and #2785 in #2787. Interface diff v0.64.0 -> v0.65.0: identical (added=0 removed=0; #1488). Trust spine on the tag green (run 36347050745, dossier attested and attached). Fuzz soak on v0.65.0-rc1 (fuzz-nightly run 36341532613): shards 8/8, 480.4 of 480 minutes delivered, 115,804 programs, 1 finding: #2795 -> #2796, a checker-accepts / rustc-rejects case (a shadowed Result let borrowed the consumer of the let that shadows it) that also fails on v0.64.0 and v0.62.0, so not a regression; fix in review as #2797."
+assets = "7: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256, almide-dossier-v0.65.0.md"
+known_problems = "None release-blocking. Open at the tag: (1) #2796 — a shadowed Result let is exempted from E041 by name, so check accepts a program rustc rejects (pre-existing since at least v0.62.0; fix #2797 in review); (2) #2692 — a killed http.serve loses its buffered stdout; (3) serving is still sequential on native and a stock wasm artifact cannot serve (#2665, #2659) — ADR-0020 is the accepted design; (4) a WASI preview-1 build refuses exit codes 126..=255 by design (C-350) and the p2/p3 component builds still turn every non-zero exit into 1 (pre-existing)."
