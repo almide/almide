@@ -7,7 +7,7 @@ fn show(label: String, n: Int) -> Unit = println("${label}=${n}")
 
 fn warn(msg: String) -> Unit = eprintln("warn: ${msg}")
 
-fn fail(msg: String) -> Unit = panic(msg)
+fn fail(n: Int) -> Unit = panic("negative: ${n}")
 
 fn half(n: Int) -> Int = {
   assert(n >= 0)
@@ -22,7 +22,7 @@ fn traced_double(xs: List[Int]) -> List[Int] = xs |> list.map((x) => {
 })
 
 fn safe_half(n: Int) -> Int = {
-  if n < 0 then fail("negative") else ()
+  if n < 0 then fail(n) else ()
   half(n)
 }
 
