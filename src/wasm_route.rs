@@ -262,7 +262,9 @@ pub fn route_wasm(
             && let Ok(ir) = front.lower()
             && let Ok((bytes, host_ops)) = almide_wasm::emit_program_with_ops(ir)
             && wasmparser::validate(&bytes).is_ok()
-            && (!library_ok || host_ops.iter().all(|op| almide_wasi::P1_SERVED_OPS.contains(op)))
+            && (!library_ok
+                || almide_wasi::serves(host_ops.iter().copied())
+                || host_ops.iter().all(|op| almide_wasi::P1_SERVED_OPS.contains(op)))
         {
             if opts.debug {
                 trace(&format!("[almide] incumbent walled — structural leg took the build ({} bytes)", bytes.len()));
@@ -317,10 +319,12 @@ pub fn route_wasm(
             // ships. Not under component_p3 either: the p3-requested build
             // ships through `to_p3`, whose shim carries the fs surface the
             // p1 set does not — an op the p3 transform cannot map still
-            // fails loudly there.
+            // fails loudly there. Nor for an `http.serve` program (#2659):
+            // it always ships as that p3 component.
             if library_ok
                 && !opts.force_structural
                 && !opts.component_p3
+                && !almide_wasi::serves(host_ops.iter().copied())
                 && let Some(op) = host_ops.iter().find(|op| !almide_wasi::P1_SERVED_OPS.contains(op))
             {
                 return reroute(

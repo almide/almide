@@ -48,6 +48,17 @@ use wasmparser::{Parser, Payload};
 /// ran — the env.set lesson): extend the shim and this list TOGETHER.
 pub const P1_SERVED_OPS: &[i32] = &[26, 29, 30, 32, 34, 35, 36, 37];
 
+/// `http.serve`'s host ops (#2659): bind, accept, recv, send. No p1 module
+/// can serve them (a p1 module has no listening socket); a program that
+/// reaches them builds as the WASI 0.3 component instead, whose wasi:sockets
+/// carry the guest's accept loop (almide-wasm-run's `to_p3`).
+pub const SERVE_OPS: &[i32] = &[70, 73, 74, 75];
+
+/// Does the op set reach `http.serve` — the build ships the p3 component.
+pub fn serves(host_ops: impl IntoIterator<Item = i32>) -> bool {
+    host_ops.into_iter().any(|op| SERVE_OPS.contains(&op))
+}
+
 pub const UNSUPPORTED_MSG: &[u8] = b"Error: host op unsupported in the WASI build\n";
 /// The env.set overlay log's own refusal. It used to borrow the line above,
 /// which names an operation the build supports and had just performed — the

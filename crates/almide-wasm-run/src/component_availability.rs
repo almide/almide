@@ -1,12 +1,20 @@
 //! Validate emitted operations against the selected direct component shim.
 //! Preview1 availability does not imply availability in a component world.
 
+/// Does the op set reach `http.serve` (#2659): bind / accept / recv / send.
+/// Such a program builds as the WASI 0.3 component — a p1 module has no
+/// listening socket.
+pub fn serves(host_ops: &[i32]) -> bool {
+    crate::wasi::serves(host_ops.iter().copied())
+}
+
 /// Reject an artifact before writing it when its direct shim cannot serve it.
-/// P3 HTTP imports are selected separately whenever an HTTP operation is emitted.
+/// P3 HTTP imports are selected separately whenever an HTTP operation is emitted;
+/// so are the sockets (http.serve) and environment (env.args) imports (#2659).
 pub fn check(host_ops: &[i32], p3: bool) -> Result<(), String> {
     let unsupported = host_ops.iter().copied().find(|op| {
         let common = matches!(op, 30..=32 | 34..=35);
-        let extra = p3 && matches!(op, 1..=9 | 13..=16 | 40..=50);
+        let extra = p3 && matches!(op, 1..=9 | 13..=16 | 29 | 40..=50 | 70 | 73..=75);
         !(common || extra)
     });
     match unsupported {
@@ -39,6 +47,7 @@ fn operation_name(op: i32) -> &'static str {
             46 => "http.patch", 47 => "http.delete",
             48..=50 => "http.request framed response",
             53..=59 => "the http call handle (http.start / poll / read_new / wait / cancel)",
+            70 | 73..=75 => "http.serve",
             _ => "unknown operation",
         })
 }

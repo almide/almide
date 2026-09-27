@@ -151,6 +151,9 @@ const I_HTTP_RESP_DROP: u32 = 65; // [resource-drop]response
 const I_HTTP_FIELDS_DROP: u32 = 66; // [resource-drop]fields
 const I_HTTP_FIELDS_APPEND: u32 = 67; // [method]fields.append (the framed family's headers, #1710)
 const IMPORTS_HTTP: u32 = 68;
+// The serve block (#2659): appended after the fs table and the optional http
+// block (its indices are assigned at emit time), then op 29's get-arguments.
+const SERVE_IMPORT_COUNT: u32 = 16;
 
 // Park offsets past the shared ones: retptr / future-payload scratch.
 const RET: u64 = 32;
@@ -458,6 +461,17 @@ fn http_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<HttpAbi> {
 /// 8-byte MemArg.
 fn mem64(offset: u64) -> MemArg {
     MemArg { offset, align: 3, memory_index: 0 }
+}
+
+// The stock http.serve block and op 29 (#2659): wasi_p3_serve.rs.
+include!("wasi_p3_serve.rs");
+
+/// Where shim_fs_call forwards the ops a separate shim serves.
+#[derive(Clone, Copy)]
+struct FsForward {
+    http: Option<u32>,
+    serve: Option<u32>,
+    args: Option<u32>,
 }
 
 // The p3 transform itself (`to_p3`): wasi_p3_emit.rs.

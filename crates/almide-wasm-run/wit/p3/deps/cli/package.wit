@@ -23,6 +23,12 @@ interface stderr {
   write-via-stream: func(data: stream<u8>) -> future<result<_, error-code>>;
 }
 
+// get-arguments (#2659): `env.args` on the p3 component — argv as the
+// runner passes it, the program's name first.
+interface environment {
+  get-arguments: func() -> list<string>;
+}
+
 interface exit {
   exit: func(status: result);
 }

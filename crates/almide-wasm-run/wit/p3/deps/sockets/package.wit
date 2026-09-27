@@ -1,0 +1,60 @@
+package wasi:sockets@0.3.0;
+
+// Trimmed from wasmtime-wasi 47's vendored wasi:sockets@0.3.0 (#2659): the
+// types the stock http.serve component names — a TCP socket that is created,
+// bound, listened on, and whose accepted connections are received from and
+// sent to. Every declaration kept is verbatim; the rest of the interface
+// (connect, the keep-alive/buffer knobs and the duration they take, UDP,
+// name lookup) is left out.
+interface types {
+  variant error-code {
+    access-denied,
+    not-supported,
+    invalid-argument,
+    out-of-memory,
+    timeout,
+    invalid-state,
+    address-not-bindable,
+    address-in-use,
+    remote-unreachable,
+    connection-refused,
+    connection-broken,
+    connection-reset,
+    connection-aborted,
+    datagram-too-large,
+    other(option<string>),
+  }
+
+  enum ip-address-family {
+    ipv4,
+    ipv6,
+  }
+
+  type ipv4-address = tuple<u8, u8, u8, u8>;
+  type ipv6-address = tuple<u16, u16, u16, u16, u16, u16, u16, u16>;
+
+  record ipv4-socket-address {
+    port: u16,
+    address: ipv4-address,
+  }
+
+  record ipv6-socket-address {
+    port: u16,
+    flow-info: u32,
+    address: ipv6-address,
+    scope-id: u32,
+  }
+
+  variant ip-socket-address {
+    ipv4(ipv4-socket-address),
+    ipv6(ipv6-socket-address),
+  }
+
+  resource tcp-socket {
+    create: static func(address-family: ip-address-family) -> result<tcp-socket, error-code>;
+    bind: func(local-address: ip-socket-address) -> result<_, error-code>;
+    listen: func() -> result<stream<tcp-socket>, error-code>;
+    send: func(data: stream<u8>) -> future<result<_, error-code>>;
+    receive: func() -> tuple<stream<u8>, future<result<_, error-code>>>;
+  }
+}

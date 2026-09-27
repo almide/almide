@@ -42,3 +42,16 @@ world p3-command-http {
 
   export wasi:cli/run@0.3.0;
 }
+
+// The optional import blocks (#2659). The emitter composes a per-artifact
+// world from p3-command / p3-command-http plus these, so a component imports
+// an interface only when its op set reaches it: `env.args` (op 29) brings
+// wasi:cli/environment, `http.serve` (ops 70 / 73..=75) brings
+// wasi:sockets/types — the server loop's listen / accept / receive / send.
+world p3-args {
+  import wasi:cli/environment@0.3.0;
+}
+
+world p3-serve {
+  import wasi:sockets/types@0.3.0;
+}

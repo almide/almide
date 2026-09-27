@@ -1,7 +1,14 @@
 // `include!`d part of wasi_p3.rs (codopsy max-lines split, mechanical text move —
 // shares the parent module's imports and items; nothing here is pub beyond the parent).
 
-pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
+/// The p3 transform. The optional import blocks follow the module's op set:
+/// the http client family (43..=50) brings wasi:http, `http.serve` (70,
+/// 73..=75) wasi:sockets, `env.args` (29) wasi:cli/environment — a component
+/// imports an interface only when its program reaches it.
+pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
+    let wants_http = host_ops.iter().any(|op| (43..=50).contains(op));
+    let wants_serve = host_ops.iter().any(|op| matches!(op, 70 | 73..=75));
+    let wants_args = host_ops.contains(&29);
     // The vendored WIT first: the fs shim's layout facts derive from it,
     // so a WIT/shim drift refuses to emit instead of corrupting stores.
     let mut resolve = wit_parser::Resolve::default();
@@ -11,6 +18,7 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
         ("cli.wit", include_str!("../wit/p3/deps/cli/package.wit")),
         ("filesystem.wit", include_str!("../wit/p3/deps/filesystem/package.wit")),
         ("http.wit", include_str!("../wit/p3/deps/http/package.wit")),
+        ("sockets.wit", include_str!("../wit/p3/deps/sockets/package.wit")),
     ] {
         resolve
             .push_str(name, text)
@@ -21,12 +29,34 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
         .map_err(|e| anyhow::anyhow!("wit world: {e}"))?;
     // The http-importing world only when the module's op set reaches the
     // http family — a non-http component must not demand `-S http=y`.
-    let world_name = if wants_http { "p3-command-http" } else { "p3-command" };
+    let base_world = if wants_http { "p3-command-http" } else { "p3-command" };
+    // The serve / args blocks (#2659) compose onto the base world through a
+    // generated `include` world, so the two base worlds (and every artifact
+    // built from them) stay exactly as they were.
+    let (world_pkg, world_name) = if wants_serve || wants_args {
+        let mut text = format!(
+            "package almide:runtime-p3-selected@0.1.0;\n\nworld selected {{\n  include almide:runtime-p3/{base_world}@0.1.0;\n"
+        );
+        if wants_args {
+            text.push_str("  include almide:runtime-p3/p3-args@0.1.0;\n");
+        }
+        if wants_serve {
+            text.push_str("  include almide:runtime-p3/p3-serve@0.1.0;\n");
+        }
+        text.push_str("}\n");
+        let sel = resolve
+            .push_str("selected.wit", &text)
+            .map_err(|e| anyhow::anyhow!("wit selected world: {e}"))?;
+        (sel, "selected")
+    } else {
+        (pkg, base_world)
+    };
     let world = resolve
-        .select_world(&[pkg], Some(world_name))
+        .select_world(&[world_pkg], Some(world_name))
         .map_err(|e| anyhow::anyhow!("world: {e}"))?;
     let abi = fs_abi(&resolve)?;
     let habi = if wants_http { Some(http_abi(&resolve)?) } else { None };
+    let sabi = if wants_serve { Some(sock_abi(&resolve)?) } else { None };
     // The stat result's WIT-derived footprint must fit its park slot.
     assert!(STATRET + abi.stat_size <= MSG_NOENT, "STATRET reaches the messages");
 
@@ -50,7 +80,10 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
     let main_index = main_index.ok_or_else(|| anyhow::anyhow!("no main export"))?;
     let heap_global = heap_global.ok_or_else(|| anyhow::anyhow!("no __heap export"))?;
     let n_funcs = func_types.len() as u32;
-    let n_imports = if wants_http { IMPORTS_HTTP } else { IMPORTS };
+    let base_imports = if wants_http { IMPORTS_HTTP } else { IMPORTS };
+    let n_serve_imports = if wants_serve { SERVE_IMPORT_COUNT } else { 0 };
+    let n_args_imports = u32::from(wants_args);
+    let n_imports = base_imports + n_serve_imports + n_args_imports;
     let shift = n_imports - 5;
     let shim_base = n_imports + n_funcs;
     // Shim order mirrors the almide.* import order (println, eprintln,
@@ -98,6 +131,22 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
     }
     globals.global(mutable_i32, &ConstExpr::i32_const(0)); // g_slots
     globals.global(mutable_i32, &ConstExpr::i32_const(0)); // g_slotn
+    // The serve shim's state (#2659): listening socket, its stream, the
+    // connection, its receive stream + future (-1 = none), its EOF flag.
+    let sg = ServeGlobals {
+        lsock: global_count + 12,
+        lst: global_count + 13,
+        conn: global_count + 14,
+        crx: global_count + 15,
+        crxf: global_count + 16,
+        ceof: global_count + 17,
+    };
+    if wants_serve {
+        for _ in 0..5 {
+            globals.global(mutable_i32, &ConstExpr::i32_const(-1));
+        }
+        globals.global(mutable_i32, &ConstExpr::i32_const(0)); // ceof
+    }
 
     // Canonical-ABI core types.
     let t_exit = type_index(&mut types, &[ValType::I32], &[]);
@@ -149,6 +198,62 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
     // [method]fields.append(self, name ptr/len, value ptr/len, retptr) —
     // `result<_, header-error>` carries a payload, so it lands via retptr.
     let t_append = type_index(&mut types, &[ValType::I32; 6], &[]);
+    // The serve / args blocks (#2659): WIT-derived method signatures, the
+    // stream/future builtins on the shapes the fs/stdio blocks already use.
+    let serve_sig = |name: &str| wit_import_sig(&resolve, "wasi:sockets", "types", name);
+    let serve_import_list: Vec<(&str, String, u32)> = if wants_serve {
+        let sock = "wasi:sockets/types@0.3.0";
+        let mut v = Vec::new();
+        for m in ["[static]tcp-socket.create", "[method]tcp-socket.bind", "[method]tcp-socket.listen"] {
+            let (p, r) = serve_sig(m)?;
+            v.push((sock, m.to_string(), type_index(&mut types, &p, &r)));
+        }
+        v.push((sock, "[stream-read-0][method]tcp-socket.listen".to_string(), t_rw));
+        let (p, r) = serve_sig("[method]tcp-socket.receive")?;
+        v.push((sock, "[method]tcp-socket.receive".to_string(), type_index(&mut types, &p, &r)));
+        v.push((sock, "[stream-read-0][method]tcp-socket.receive".to_string(), t_rw));
+        v.push((sock, "[stream-drop-readable-0][method]tcp-socket.receive".to_string(), t_drop));
+        v.push((sock, "[future-read-1][method]tcp-socket.receive".to_string(), t_fut_read));
+        v.push((sock, "[future-drop-readable-1][method]tcp-socket.receive".to_string(), t_drop));
+        let (p, r) = serve_sig("[method]tcp-socket.send")?;
+        v.push((sock, "[method]tcp-socket.send".to_string(), type_index(&mut types, &p, &r)));
+        v.push((sock, "[stream-new-0][method]tcp-socket.send".to_string(), t_new));
+        v.push((sock, "[stream-write-0][method]tcp-socket.send".to_string(), t_rw));
+        v.push((sock, "[stream-drop-writable-0][method]tcp-socket.send".to_string(), t_drop));
+        v.push((sock, "[future-read-1][method]tcp-socket.send".to_string(), t_fut_read));
+        v.push((sock, "[future-drop-readable-1][method]tcp-socket.send".to_string(), t_drop));
+        v.push((sock, "[resource-drop]tcp-socket".to_string(), t_drop));
+        assert_eq!(v.len() as u32, SERVE_IMPORT_COUNT, "serve import count drift");
+        v
+    } else {
+        Vec::new()
+    };
+    let args_import: Option<(&str, String, u32)> = if wants_args {
+        let (p, r) = wit_import_sig(&resolve, "wasi:cli", "environment", "get-arguments")?;
+        Some(("wasi:cli/environment@0.3.0", "get-arguments".to_string(), type_index(&mut types, &p, &r)))
+    } else {
+        None
+    };
+    let si = |k: u32| base_imports + k;
+    let serve_imports = ServeImports {
+        create: si(0),
+        bind: si(1),
+        listen: si(2),
+        lst_read: si(3),
+        receive: si(4),
+        rx_read: si(5),
+        rx_drop: si(6),
+        rxf_read: si(7),
+        rxf_drop: si(8),
+        send: si(9),
+        tx_new: si(10),
+        tx_write: si(11),
+        tx_drop: si(12),
+        txf_read: si(13),
+        txf_drop: si(14),
+        sock_drop: si(15),
+    };
+    let i_args = base_imports + n_serve_imports;
 
     let mut type_sec = TypeSection::new();
     for (p, r) in &types {
@@ -253,7 +358,10 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
         IMPORTS_HTTP,
         "IMPORTS_HTTP count drift"
     );
-    let imports = build_import_section(import_list, wants_http.then_some(http_import_list));
+    let mut imports = build_import_section(import_list, wants_http.then_some(http_import_list));
+    for (m, n, t) in serve_import_list.iter().chain(args_import.iter()) {
+        imports.import(m, n, EntityType::Function(*t));
+    }
 
     let mut functions = FunctionSection::new();
     for ti in &func_types {
@@ -266,8 +374,21 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
     {
         functions.function(ti);
     }
-    if wants_http {
-        functions.function(t_fs); // shim_http (the almide fs_call ABI)
+    // The optional shims, in this order after the fixed ten: http, serve,
+    // args — each on the almide fs_call ABI.
+    let mut next_shim = shim_base + 10;
+    let mut take_shim = |on: bool| {
+        on.then(|| {
+            let k = next_shim;
+            next_shim += 1;
+            k
+        })
+    };
+    let f_http = take_shim(wants_http);
+    let f_serve = take_shim(wants_serve);
+    let f_args = take_shim(wants_args);
+    for _ in [f_http, f_serve, f_args].iter().flatten() {
+        functions.function(t_fs);
     }
 
     let mut memories = MemorySection::new();
@@ -308,8 +429,7 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
     code.function(&shim_print(err_port, park, true));
     code.function(&shim_exit());
     let f_fs_self = shim_base + 3;
-    let f_http = wants_http.then_some(shim_base + 10);
-    code.function(&shim_fs_call(g, &abi, f_fs_self, f_http));
+    code.function(&shim_fs_call(g, &abi, f_fs_self, FsForward { http: f_http, serve: f_serve, args: f_args }));
     code.function(&shim_host_read(g_plen, g_ppos));
     code.function(&shim_cabi_realloc(heap_global));
     code.function(&shim_run(main_index + shift, g));
@@ -324,6 +444,12 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
     code.function(&shim_realloc_checked(f_reserve, f_realloc));
     if let Some(h) = habi.as_ref() {
         code.function(&shim_http(park, g_plen, g_ppos, f_alloc, h));
+    }
+    if let Some(sa) = sabi.as_ref() {
+        code.function(&shim_serve(g, &serve_imports, sg, sa));
+    }
+    if wants_args {
+        code.function(&shim_args(g, i_args));
     }
 
     // Elements re-encode through the Remap (#1716): the import shift must
@@ -348,6 +474,9 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
         (MSG_NOPRE, E_NOPRE),
     ] {
         data.active(0, &ConstExpr::i32_const((park + off) as i32), msg.iter().copied());
+    }
+    if let Some(sa) = sabi.as_ref() {
+        serve_data(&mut data, park, sa);
     }
     if wants_http {
         data.active(0, &ConstExpr::i32_const((park + MSG_HTTP) as i32), E_HTTP.iter().copied());

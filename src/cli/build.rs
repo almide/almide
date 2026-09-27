@@ -534,10 +534,15 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };
-    // The p3 component earns its http import block only when the emitted
-    // op set reaches the http family (#1710 PR B) — a non-http component
-    // must not demand `-S http=y` from its runtime.
-    let wants_http = host_ops.iter().any(|op| (43..=50).contains(op));
+    // `http.serve` (#2659): a WASI p1 module has no listening socket, so a
+    // server ships as the WASI 0.3 component, whose wasi:sockets carry the
+    // guest's accept loop — with or without `--component`.
+    let serves = almide_wasm_run::component_availability::serves(&host_ops);
+    if serves && js_host {
+        err("error: --host js writes a core-module host; an `http.serve` program builds as a WASI 0.3 component (run it with `wasmtime run -S p3 -S inherit-network`)");
+        std::process::exit(2);
+    }
+    let component = component || serves;
     // The structural leg's module imports `almide.*` (the embedded host's
     // surface). A BUILD artifact must run on stock runtimes, so it ships in
     // the WASI form — same index space, shimmed imports, proc_exit on trap
@@ -552,13 +557,13 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // p1-shaped).
     let direct_p2 = component
         && structural
-        && !almide_base::env::flag("ALMIDE_COMPONENT_ADAPTER");
+        && (serves || !almide_base::env::flag("ALMIDE_COMPONENT_ADAPTER"));
     // `ALMIDE_COMPONENT_P3=1` (#1628 stage 2, experimental): the WASI 0.3
     // component — stdio over component-model streams on the async
     // canonical ABI. Needs a p3-capable runtime (wasmtime 46+); stays an
     // env opt-in until the fan lowering lands on the same plumbing and
     // the corpus gates cover it.
-    let direct_p3 = direct_p2 && almide_base::env::flag("ALMIDE_COMPONENT_P3");
+    let direct_p3 = direct_p2 && (serves || almide_base::env::flag("ALMIDE_COMPONENT_P3"));
     if direct_p2
         && let Err(message) = almide_wasm_run::component_availability::check(&host_ops, direct_p3)
     {
@@ -566,7 +571,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
         std::process::exit(1);
     }
     let bytes = if direct_p3 {
-        match almide_wasm_run::wasi_p3::to_p3(&bytes, wants_http) {
+        match almide_wasm_run::wasi_p3::to_p3(&bytes, &host_ops) {
             Ok(c) => c,
             Err(e) => {
                 err(&format!("error: p3 component transform failed — this is an Almide bug: {e}"));
@@ -653,6 +658,9 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
             "Built {}{} ({} bytes, {}, {} — wasm-opt skipped; pass --wasm-opt for a smaller build rewritten outside the renderer)",
             output, host_note, pre_size, leg, trust
         ));
+        if serves {
+            err(&format!("  serve it: wasmtime run -W component-model-more-async-builtins -S p3 -S inherit-network {output} [args...]"));
+        }
         return;
     }
 

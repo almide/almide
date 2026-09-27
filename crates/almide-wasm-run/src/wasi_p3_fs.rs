@@ -161,7 +161,7 @@ fn fs_read_tail(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, l: Read
 /// The five-op host contract over p3 (op codes shared with the embedded
 /// host): 30 raw stdout, 31 stdin read-to-end, 35 stdin take-n, 32
 /// entropy, 34 wall clock; anything else = the defined refusal.
-fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>) -> Function {
+fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, fwd: FsForward) -> Function {
     let P3Globals { park, g_plen, g_ppos, g_in_rx, g_in_fut, g_out_tx, g_out_fut, g_err_tx, g_err_fut, g_pre, f_alloc, g_wset, g_slots, g_slotn, f_reserve } = g;
     let (op, a_ptr, a_len, b_ptr, b_len) = (0u32, 1u32, 2u32, 3u32, 4u32);
     let total = 5u32;
@@ -175,7 +175,7 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>) -> 
     // ops 43..=47 (the string client) and 48..=50 (the framed family) —
     // forwarded whole to the http shim when the module's op set earned the
     // imports (#1710 PR B).
-    if let Some(h) = f_http {
+    if let Some(h) = fwd.http {
         i.local_get(op).i32_const(43).i32_ge_s();
         i.local_get(op).i32_const(50).i32_le_s();
         i.i32_and().if_(BlockType::Empty);
@@ -183,6 +183,27 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>) -> 
             i.local_get(pidx);
         }
         i.call(h).return_();
+        i.end();
+    }
+    // ops 70 / 73..=75 (http.serve over wasi:sockets) and 29 (env.args),
+    // when the module's op set earned their imports (#2659).
+    if let Some(sv) = fwd.serve {
+        i.local_get(op).i32_const(70).i32_eq();
+        i.local_get(op).i32_const(73).i32_ge_s();
+        i.local_get(op).i32_const(75).i32_le_s();
+        i.i32_and().i32_or().if_(BlockType::Empty);
+        for pidx in 0..5u32 {
+            i.local_get(pidx);
+        }
+        i.call(sv).return_();
+        i.end();
+    }
+    if let Some(ar) = fwd.args {
+        i.local_get(op).i32_const(29).i32_eq().if_(BlockType::Empty);
+        for pidx in 0..5u32 {
+            i.local_get(pidx);
+        }
+        i.call(ar).return_();
         i.end();
     }
 
