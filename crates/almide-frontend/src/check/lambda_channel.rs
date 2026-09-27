@@ -2,7 +2,7 @@
 //!
 //! A `!` inside a lambda propagates into the lambda's OWN channel
 //! `Result[T, ε]` (#489, ADR-0009 D5). ε used to be fixed at `String`, so a
-//! typed `!` operand erased its error into Debug text and the HOF call that
+//! typed `!` operand erased its error into its text and the HOF call that
 //! took the callback failed with `String` — the type then depended on how the
 //! callback was spelled (#2601). ε is now decided like this:
 //!
@@ -11,7 +11,7 @@
 //!    `let` annotation, a fn's declared return, the `)!` of a `-> T!E` fn, an
 //!    `err(e) => err(e)` arm, or a consumer that reads the error as a
 //!    `String`. A consumer that needs `String` still gets it — every typed
-//!    error converts to `String` (Debug text), so nothing accepted with the
+//!    error converts to `String` (its repr text), so nothing accepted with the
 //!    fixed `String` channel stops being accepted.
 //! 2. **Then the join.** A channel no context decided takes the join of the
 //!    operands' error types over `E ≤ String`: their common `E` when every
