@@ -42,13 +42,12 @@ impl ErrorSurfaceLint {
     fn walk_expr(&mut self, expr: &ast::Expr, err_binds: &[Sym]) {
         use ast::ExprKind as EK;
         // E036: any call whose callee is a `.map_err` member with a lambda arg.
-        if let EK::Call { callee, args, .. } = &expr.kind {
-            if let EK::Member { field, .. } = &callee.kind {
-                if field.as_str() == "map_err" {
-                    for arg in args {
-                        self.check_maperr_lambda(arg);
-                    }
-                }
+        if let EK::Call { callee, args, .. } = &expr.kind
+            && let EK::Member { field, .. } = &callee.kind
+            && field.as_str() == "map_err"
+        {
+            for arg in args {
+                self.check_maperr_lambda(arg);
             }
         }
         match &expr.kind {
@@ -415,7 +414,7 @@ fn expr_uses_ident_nested(expr: &ast::Expr, name: Sym) -> bool {
         EK::Match { subject, arms } => {
             uses(subject)
                 || arms.iter().any(|a| {
-                    a.guard.as_ref().is_some_and(|g| uses(g)) || uses(&a.body)
+                    a.guard.as_ref().is_some_and(uses) || uses(&a.body)
                 })
         }
         EK::Block { stmts, expr } => {
