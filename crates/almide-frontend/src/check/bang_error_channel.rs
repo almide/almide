@@ -102,7 +102,7 @@ impl Checker {
     /// The error type a `!` in the current fn body propagates into: a
     /// `Result`-returning fn's `E`, or `String` for an effect fn with any other
     /// return (its lowered channel). `None` when there is no error channel.
-    fn bang_channel_err_ty(&self) -> Option<Ty> {
+    pub(super) fn bang_channel_err_ty(&self) -> Option<Ty> {
         let ret = self.env.current_ret.as_ref().map(|r| resolve_ty(r, &self.uf));
         match ret {
             Some(Ty::Applied(TypeConstructorId::Result, args)) if args.len() == 2 => {
