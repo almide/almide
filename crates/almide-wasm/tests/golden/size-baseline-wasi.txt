@@ -533,6 +533,7 @@
 3397	spec/wasm_cross/process_args.almd
 2741	spec/wasm_cross/protocol_ufcs_inferred_lambda.almd
 5918	spec/wasm_cross/pure_bang_propagation.almd
+2550	spec/wasm_cross/pure_fn_output_and_assert_abort.almd
 3203	spec/wasm_cross/qq_record_fallback.almd
 4723	spec/wasm_cross/r5_lowmisc_param_try_err.almd
 2268	spec/wasm_cross/r5_mod_global_init_order.almd
