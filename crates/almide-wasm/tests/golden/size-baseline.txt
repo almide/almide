@@ -124,7 +124,7 @@
 2750	spec/wasm_cross/effect_assign_unwrap.almd
 6210	spec/wasm_cross/effect_call_arg_credit.almd
 5648	spec/wasm_cross/effect_fn_value.almd
-52305	spec/wasm_cross/effect_fn_value_slot_family.almd
+31511	spec/wasm_cross/effect_fn_value_slot_family.almd
 1519	spec/wasm_cross/effect_main_guard_err.almd
 4616	spec/wasm_cross/effect_main_guard_ok.almd
 3191	spec/wasm_cross/effect_mut_generic_port.almd
