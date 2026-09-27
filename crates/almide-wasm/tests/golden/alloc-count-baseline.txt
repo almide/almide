@@ -108,6 +108,7 @@
 9	7	44	9	spec/wasm_cross/ctor_turbofish_family.almd
 5	0	53	5	spec/wasm_cross/ctor_var_copy_semantics.almd
 72	54	678	72	spec/wasm_cross/datetime_format.almd
+~	spec/wasm_cross/datetime_monotonic_ns.almd
 1828	1626	16658	1645	spec/wasm_cross/datetime_parse_iso_strict.almd
 183	159	3198	183	spec/wasm_cross/datetime_pre_epoch.almd
 21	9	220	21	spec/wasm_cross/declaration_forms.almd
@@ -332,6 +333,7 @@
 58	39	450	58	spec/wasm_cross/koka_reuse1_unzip.almd
 31	16	266	31	spec/wasm_cross/koka_reuse4_map_rebuild.almd
 10	4	111	10	spec/wasm_cross/koka_unicode_combining.almd
+153	97	2206	106	spec/wasm_cross/lambda_failure_channel.almd
 7	2	111	7	spec/wasm_cross/let_unwrap_propagation.almd
 2	0	32	2	spec/wasm_cross/let_wildcard_discard.almd
 8	5	73	8	spec/wasm_cross/letbound_variant_match.almd
@@ -534,6 +536,7 @@
 ~	spec/wasm_cross/process_args.almd
 12	5	55	12	spec/wasm_cross/protocol_ufcs_inferred_lambda.almd
 21	14	185	21	spec/wasm_cross/pure_bang_propagation.almd
+0	0	0	0	spec/wasm_cross/pure_fn_output_and_assert_abort.almd
 10	2	112	9	spec/wasm_cross/qq_record_fallback.almd
 20	10	226	20	spec/wasm_cross/r5_lowmisc_param_try_err.almd
 3	0	58	0	spec/wasm_cross/r5_mod_global_init_order.almd
