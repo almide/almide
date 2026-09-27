@@ -335,8 +335,11 @@ impl FnWork {
         i
     }
 
-    /// A REAL closure lift: no module of its own, hop-charged. The #1627
-    /// synthetic module initializers are the one other construction site
+    /// A REAL closure lift, hop-charged. It resolves bare Named calls in the
+    /// module of the fn that created it (#2664: `http.__table`'s handler
+    /// lambda calls the private `__parts` / `__dispatch` — with no module the
+    /// lookup missed and walled `call:__parts`). The #1627 synthetic module
+    /// initializers are the one other construction site
     /// (crate::func::emit_modinit_call) and spell their fields directly.
     pub(crate) fn register_closure_lambda(
         &self,
@@ -346,6 +349,7 @@ impl FnWork {
         body: almide_ir::IrExpr,
         captures: Vec<(almide_ir::VarId, crate::SliceTy, u32, bool)>,
         var_space: u32,
+        cur_module: Option<&str>,
     ) -> u32 {
         self.register_lambda(crate::LiftedLambda {
             params,
@@ -354,7 +358,7 @@ impl FnWork {
             body,
             captures,
             var_space,
-            cur_module: None,
+            cur_module: cur_module.map(str::to_string),
             charge_hop: true,
         })
     }

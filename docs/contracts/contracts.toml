@@ -2802,6 +2802,7 @@ evidence  = [
   { path = "spec/wasm_cross/effect_slot_carrier.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_fn_value.almd", class = "fixture" },
   { path = "spec/lang/fallible_user_hof_test.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_fn_value_slot_family.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-222"
@@ -4622,4 +4623,5 @@ since     = "0.64.0"
 status    = "active"
 evidence  = [
   { path = "spec/stdlib/http_router_test.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_fn_value_slot_family.almd", class = "fixture" },
 ]
