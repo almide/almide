@@ -1,0 +1,40 @@
+// @contract: C-219
+// `panic(msg)` in a VALUE-producing branch arm builds and runs on both targets,
+// and the abort it takes is the statement form's: `PANIC: <msg>` on stderr, no
+// trailing newline, exit 1 (#2769).
+//
+// `panic` is typed `Never`. Before the fix three things went wrong:
+//
+//   1. The checker typed `if c then panic(..) else v` as its THEN arm, so the
+//      whole `if` was `Never`. The native lowering dropped the value arm and
+//      returned nothing: rustc rejected `let v0: i64 = check(3)` (found `()`).
+//   2. The incumbent lowering took the both-arms linearization for a value
+//      branch, which walls on a call-bearing arm — for `if` and `match` alike.
+//   3. The structural wasm leg had no lowering for `panic` at all, in any
+//      position (`call:panic`).
+//
+// The untaken arms below are the build half; the last `check(300)` is the
+// abort half — a panic taken from a value position, the process exits 1.
+// `die` is the one-line wrapper that used to own its `msg` (the ownership
+// certifier's C4): `panic` only formats its argument, so `msg` is borrowed.
+fn check(n: Int) -> Int = if n > 100 then panic("too big: ${int.to_string(n)}") else n * 2
+
+fn half(n: Int) -> Int = match n % 2 == 0 {
+  true => n / 2,
+  false => panic("odd"),
+}
+
+fn label(n: Int) -> String = if n < 0 then panic("negative") else "n=${int.to_string(n)}"
+
+fn die(msg: String) -> Unit = panic(msg)
+
+fn guard_small(n: Int) -> Unit = if n > 1000 then die("huge") else ()
+
+fn main() -> Unit = {
+  println(int.to_string(check(3)))
+  println(int.to_string(half(10)))
+  println(label(7))
+  guard_small(5)
+  println(int.to_string(check(300)))
+  println("unreachable")
+}
