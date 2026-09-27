@@ -4,8 +4,8 @@
 // as the top. Every spelling of #2601 and its comment types the same way:
 // canonical, braces, pipe, a branch, a mid-block `let`, a guard's `err(..)`,
 // a value consumer (`match` re-wrap), a typed slot, a typed `let`. The
-// String-join case (disagreeing `!`s, a typed error as Debug text) is pinned
-// with ADR-0021 step 4 (#2725), once both wasm legs render it.
+// String-join case (disagreeing `!`s, a typed error as its repr text) is
+// pinned in lambda_channel_erasure_test.almd (ADR-0021 step 4, #2725).
 type StepErr: Eq, Repr = | Neg(Int) | Bad(String)
 
 fn step(acc: Int, x: Int) -> Int!StepErr = {
