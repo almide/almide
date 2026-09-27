@@ -100,6 +100,7 @@ fn name(x: Type, y: Type) -> RetType = expr
 fn name(x: Type) -> Int!                             // pure-fallible: sugar for Result[Int, String]
 effect fn name(x: Type) -> Result[T, E] = expr       // has side effects
 ```
+A pure `fn` may still call `println`, `eprintln`, `panic` and `assert` / `assert_eq` / `assert_ne`: they write or abort, never read, and do not make the fn `effect` (ADR-0022). Every other effect (`fs`, `env`, `io.*`, `http`, `fan`, …) from a pure fn is E006.
 
 ### Pure-fallible marker `-> T!` (ADR-0002 Phase 1)
 
@@ -260,7 +261,7 @@ fn rename[R: Repository[Int, User]](mut repo: R, id: Int, name: String) -> Unit 
 
 fn lookup[K, V, R: Repository[K, V]](repo: R, key: K) -> V? = repo.find(key)
 
-effect fn main() -> Unit = {
+fn main() -> Unit = {
   var users = Users { rows: [] }
   rename(users, 1, "ada")
   println(lookup(users, 1).map((u) => u.name) ?? "-")
@@ -694,7 +695,7 @@ scoped fn total(c: Chain, acc: Int) -> Int =
 
 fn sum_to(n: Int) -> Int = scoped { total(build(n, Nil), 0) }
 
-effect fn main() -> Unit = println(int.to_string(sum_to(100)))
+fn main() -> Unit = println(int.to_string(sum_to(100)))
 ```
 
 - Admitted inside: scalars (`Int`/`Float`/`Bool`/`Unit`), variant types over
@@ -740,8 +741,10 @@ eprintln(s)                // print line to stderr
 assert_eq(a, b)            // assert equal
 assert_ne(a, b)            // assert not equal
 assert(cond)               // assert true
+panic(msg)                 // abort: message on stderr, exit 1
 ```
 **There is no `print` function.** Use `println` for all output (including error messages to user).
+All six are callable from a pure `fn` — output and aborts do not need `effect`.
 `eprintln` is for debug/internal errors only — user-facing messages MUST use `println`.
 
 ### Stdin & parsing
@@ -767,6 +770,7 @@ effect fn main() -> Unit = {
 }
 ```
 `effect fn main()` is auto-wrapped to return `Result<(), String>`. No need to write `ok(())` or `-> Result[...]`.
+Write `effect fn main()` only when `main` does a real effect (reads, files, network, `fan`, `!`); a `main` that only computes and prints is `fn main() -> Unit`.
 
 **Temp files**: never hardcode `/tmp` — it does not exist on Windows. Use
 `fs.temp_dir()` (platform-correct: `%TMP%` on Windows native; on wasm the
