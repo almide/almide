@@ -17,7 +17,19 @@ impl<'a> Interpreter<'a> {
     /// the identity there — pass the Option through, do NOT unwrap some/none.
     fn eval_try_unwrap(&mut self, expr: &IrExpr, node_ty: &Ty, scope: &Scope) -> Flow {
         let v = val!(self.eval_expr(expr, scope));
-        self.try_unwrap_value(v, node_ty)
+        let mark = self.try_mark(node_ty, &expr.ty);
+        self.try_unwrap_value_flag(v, mark)
+    }
+
+    /// The two facts `!` normalization reads off the marker node and its
+    /// operand, decided where the enclosing channel is known (the running
+    /// callable's) — small and `Copy`, so the trampoline carries the mark
+    /// instead of cloning a `Ty` per hop (#1232, the last quick-win row).
+    pub(crate) fn try_mark(&self, node_ty: &Ty, operand_ty: &Ty) -> TryMark {
+        TryMark {
+            opt_identity: marker_is_option_identity(node_ty),
+            conv: if self.chan_str.get() { err_conv_into_string(operand_ty) } else { ErrConv::Keep },
+        }
     }
 
     /// The value half of [`Self::eval_try_unwrap`] — the `!`/`?` marker's
@@ -25,23 +37,15 @@ impl<'a> Interpreter<'a> {
     /// tail-call trampoline can fold the same normalization over a chain's
     /// final value (`run_callable`'s pending list) instead of re-implementing
     /// it: one instrument, two call sites.
-    pub(crate) fn try_unwrap_value(&mut self, v: Value, node_ty: &Ty) -> Flow {
-        self.try_unwrap_value_flag(v, marker_is_option_identity(node_ty))
-    }
-
-    /// The flag form: the only fact `!` normalization reads off the marker
-    /// node's type is "is it the C-216 Option identity" — one bit, so the
-    /// trampoline carries the bit instead of cloning a `Ty` per hop
-    /// (#1232, the last quick-win row).
-    pub(crate) fn try_unwrap_value_flag(&mut self, v: Value, opt_identity: bool) -> Flow {
-        if opt_identity {
+    pub(crate) fn try_unwrap_value_flag(&mut self, v: Value, mark: TryMark) -> Flow {
+        if mark.opt_identity {
             if let Value::Option(_) = v {
                 return Flow::val(v);
             }
         }
         match v {
             Value::Result(Ok(inner)) => Flow::val(*inner),
-            Value::Result(Err(e)) => Flow::Return(Value::Result(Err(e))),
+            Value::Result(Err(e)) => Flow::Return(Value::Result(Err(mark.conv.apply(e)))),
             Value::Option(Some(inner)) => Flow::val(*inner),
             // #556: `expr!` on a None propagates an Err whose message is
             // "none" on BOTH backends (the codegen lowers Option `!` to

@@ -375,6 +375,7 @@ impl<'a> Interpreter<'a> {
         self.depth.set(d + 1);
         let det_was_user = self.det_in_user.get();
         let space_was = self.cur_space.get();
+        let chan_was = self.chan_str.get();
         // C-320: the meter's region depth at call entry — if the callee
         // leaves it HIGHER, a det cut skipped a region's budget_exit and
         // the exit bookkeeping runs here (exhausted ⇒ Err, never stale).
@@ -383,9 +384,9 @@ impl<'a> Interpreter<'a> {
         // First hop's frame — what mut-param copy-out reads. Meaningful only
         // when no transfer happened, and a transfer implies no mut params.
         let mut first_frame: Option<env::Scope> = None;
-        // (marker Option-identity bit, run length) — pending `Try`
+        // (marker normalization, run length) — pending `Try`
         // normalizations (the bit is the only fact the fold reads, #1232).
-        let mut pending: Vec<(bool, u32)> = Vec::new();
+        let mut pending: Vec<(crate::eval::TryMark, u32)> = Vec::new();
 
         let result = 'tramp: loop {
             if let Some(cut) = self.charge_hop_entry(&callee) {
@@ -393,6 +394,7 @@ impl<'a> Interpreter<'a> {
             }
 
             let fn_base = self.hop_base_scope(&callee, base);
+            self.chan_str.set(callee_channel_is_string(&callee));
             let (frame, fn_body, clo_body) = bind_hop_frame(&callee, &mut args, &fn_base);
             if first_frame.is_none() {
                 first_frame = Some(frame.clone());
@@ -436,6 +438,7 @@ impl<'a> Interpreter<'a> {
         let result = self.fold_pending_try(result, &pending);
         self.det_in_user.set(det_was_user);
         self.cur_space.set(space_was);
+        self.chan_str.set(chan_was);
         self.depth.set(self.depth.get() - 1);
         (result, first_frame.unwrap_or_else(|| base.child()))
     }
@@ -512,7 +515,7 @@ impl<'a> Interpreter<'a> {
     /// boundary first — and at each level, a `Return(x)` means "that level's fn
     /// returns x", which is the next level's call VALUE. Anything that is not a
     /// value (an abort, a fuel cut) stops the fold where it is.
-    fn fold_pending_try(&mut self, result: Flow, pending: &[(bool, u32)]) -> Flow {
+    fn fold_pending_try(&mut self, result: Flow, pending: &[(crate::eval::TryMark, u32)]) -> Flow {
         let mut result = match result {
             Flow::Return(v) | Flow::Value(v) => Flow::Value(v),
             other => other,
@@ -587,6 +590,19 @@ fn bind_hop_frame<'a>(
     }
 }
 
+/// ADR-0021 D2 (#2725): does this callee's failure channel carry `String`?
+/// A named fn's declared return, a closure's own type's return — the channel
+/// its body's `!`s convert a typed error into (repr text, `List[String]`
+/// joined), exactly where native's `map_err` does.
+fn callee_channel_is_string(callee: &TailCallee<'_>) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId as C;
+    let ret = match callee {
+        TailCallee::Fn(f) => Some(&f.ret_ty),
+        TailCallee::Clo(c) => c.ret_ty.as_ref(),
+    };
+    matches!(ret, Some(Ty::Applied(C::Result, a)) if matches!(a.get(1), Some(Ty::String)))
+}
+
 /// A tail-transferable callee: a lowered named function (program-lifetime
 /// borrow) or a closure value (owned Rc). What [`Interpreter::run_callable`]
 /// loops over.
@@ -628,7 +644,7 @@ pub(crate) enum SpineOutcome<'a> {
     /// `try_marker` carries the `Try`/`Unwrap` marker node's type when the
     /// tail was the effect wrapper `Try{Call}`, so the engine can fold the
     /// normalization over the final value.
-    Transfer { next: TailCallee<'a>, next_args: Vec<Value>, try_marker: Option<bool> },
+    Transfer { next: TailCallee<'a>, next_args: Vec<Value>, try_marker: Option<crate::eval::TryMark> },
 }
 
 /// If `main`'s result value is an unhandled error, return the message that the
