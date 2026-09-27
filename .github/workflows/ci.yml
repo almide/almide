@@ -713,7 +713,15 @@ jobs:
           $ALMIDE test examples/
 
       - name: WASM coverage ratchet (the native-fallback set only shrinks — wasm is a first-class target)
-        run: ALMIDE_BIN=/tmp/almide-bin/almide bash proofs/check-wasm-fallback.sh
+        run: ALMIDE_BIN=/tmp/almide-bin/almide ALMIDE_TEST_LOG=/tmp/almide-test-lane.log bash proofs/check-wasm-fallback.sh
+
+      # #2741: every program the router hands to the INCUMBENT renderer, with its
+      # structural decline, is a row in proofs/incumbent-route-baseline.txt —
+      # shrink-only to 0 as the incumbent is retired (#2739). The test lane is the
+      # suite run above (its log); the build lane is `check --target wasm` over
+      # every program with a `main`.
+      - name: Incumbent-route census (the programs the incumbent serves only shrink — #2741)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide TEST_LOG=/tmp/almide-test-lane.log bash scripts/check-incumbent-route.sh
 
       - name: Wall corpus (#1481 — refused shapes stay refused, with their reasons)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash proofs/check-wall-corpus.sh

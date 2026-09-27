@@ -717,6 +717,15 @@ measures = "the set of documented E-codes (docs/diagnostics/E*.md) with zero fix
 varies = "landing (2026-08-18, A1-3): three no-fixture codes read as the exempt set; a documented code with its fixture dir removed reads as a finding"
 
 [[gate]]
+path = "scripts/check-incumbent-route.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#2741 landing drills (2026-09-27, dc832c1b9 release build): a ledger row removed (test lane spec/lang/panic_test.almd; build lane examples/md2html.almd) => exit 1 naming it as NEW; a forged row => exit 1 as STALE; a changed reason => exit 0 with the change printed; --prune on forged+changed restored the ledger byte-for-byte and never re-added a removed row."
+measures = "symmetric difference, keyed on lane :: file, between the programs the wasm router hands to the incumbent renderer (ALMIDE_VERIFIED_DEBUG narration of `check --target wasm` over every program with a main; ALMIDE_WALL_REASON `[wall] … structural` lines of the root `almide test` run with no incumbent wall) and proofs/incumbent-route-baseline.txt"
+varies = "#2741 landing drills (2026-09-27): the difference read 0 on the committed 91-row ledger and 1 with a row removed or forged, on both lanes"
+
+[[gate]]
 path = "scripts/check-intrinsic-boundary.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"
