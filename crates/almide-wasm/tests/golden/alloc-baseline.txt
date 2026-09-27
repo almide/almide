@@ -108,6 +108,7 @@
 65904	spec/wasm_cross/ctor_turbofish_family.almd
 66224	spec/wasm_cross/ctor_var_copy_semantics.almd
 66672	spec/wasm_cross/datetime_format.almd
+~	spec/wasm_cross/datetime_monotonic_ns.almd
 75104	spec/wasm_cross/datetime_parse_iso_strict.almd
 67168	spec/wasm_cross/datetime_pre_epoch.almd
 67424	spec/wasm_cross/declaration_forms.almd
