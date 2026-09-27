@@ -1064,10 +1064,12 @@ jobs:
             ~/.cargo/git
             tools/wasmgen-harness/target
             tools/wasmgen-harness-uu/target
-          # Keyed on the LIVE wasm emitter (almide-mir's v1 renderer) — the old
-          # key hashed crates/almide-codegen/src/emit_wasm/**, deleted with the
-          # v0 retirement, so that component silently hashed nothing (#992).
-          key: wasmgen-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-mir/src/**', 'crates/almide-codegen/src/lib.rs', 'crates/almide-codegen/src/pass.rs') }}
+          # Keyed on the LIVE wasm emitter — the structural leg the harnesses
+          # drive since #2753 (crates/almide-wasm, almide-wasi, the route and
+          # front in src/wasm_*.rs) plus almide-mir, whose
+          # bundled_self_modules they still call. A key that hashes a retired
+          # emitter silently hashes nothing (#992: the v0 emit_wasm/** key).
+          key: wasmgen-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-wasm/src/**', 'crates/almide-wasi/src/**', 'src/wasm_route.rs', 'src/wasm_leg.rs', 'crates/almide-mir/src/**', 'crates/almide-codegen/src/lib.rs', 'crates/almide-codegen/src/pass.rs') }}
           restore-keys: wasmgen-${{ env.RUST_TOOLCHAIN }}-
 
       - name: Cache wasmtime tarball
@@ -1150,14 +1152,16 @@ jobs:
             ~/.cargo/git
             tools/wasmgen-harness/target
             tools/wasmgen-harness-uu/target
-          # Keyed on the LIVE wasm emitter (almide-mir's v1 renderer) — the old
-          # key hashed crates/almide-codegen/src/emit_wasm/**, deleted with the
-          # v0 retirement, so that component silently hashed nothing (#992).
+          # Keyed on the LIVE wasm emitter — the structural leg the harnesses
+          # drive since #2753 (crates/almide-wasm, almide-wasi, the route and
+          # front in src/wasm_*.rs) plus almide-mir, whose
+          # bundled_self_modules they still call. A key that hashes a retired
+          # emitter silently hashes nothing (#992: the v0 emit_wasm/** key).
           # DISTINCT from the host job's key: both jobs cache the same paths, and
           # two jobs saving one key makes the second save fail as a duplicate. The
           # browser leg is also the only one that populates wasmgen-harness-uu, so a
           # shared entry would be written by whichever job finished first.
-          key: wasmgen-uu-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-mir/src/**', 'crates/almide-codegen/src/lib.rs', 'crates/almide-codegen/src/pass.rs') }}
+          key: wasmgen-uu-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-wasm/src/**', 'crates/almide-wasi/src/**', 'src/wasm_route.rs', 'src/wasm_leg.rs', 'crates/almide-mir/src/**', 'crates/almide-codegen/src/lib.rs', 'crates/almide-codegen/src/pass.rs') }}
           restore-keys: wasmgen-uu-${{ env.RUST_TOOLCHAIN }}-
 
       - name: Cache wasmtime tarball
