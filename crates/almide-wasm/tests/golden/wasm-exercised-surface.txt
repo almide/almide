@@ -164,6 +164,7 @@ call:datetime.format
 call:datetime.from_parts
 call:datetime.hour
 call:datetime.minute
+call:datetime.monotonic_ns
 call:datetime.month
 call:datetime.parse_iso
 call:datetime.second
