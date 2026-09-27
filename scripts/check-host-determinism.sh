@@ -206,7 +206,13 @@ fi
 # MIR lowering walls on both hosts (proofs/walled-real-baseline.txt); the
 # structural leg renders it byte-identically to native. Recorded, not ported:
 # the incumbent is retiring under #1696.
-MAX_WALLED=29
+# 30 as of 2026-09-27 (#2725, C-369): UP from 29 by lambda_failure_channel.almd,
+# whose typed-error erasure into a String channel and non-liftable fallible
+# fold/map callbacks the incumbent MIR lowering walls on both hosts
+# (proofs/walled-real-baseline.txt); the structural leg renders it
+# byte-identically to native. Recorded, not ported: the incumbent is retiring
+# under #1696.
+MAX_WALLED=30
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"
