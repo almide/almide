@@ -1138,6 +1138,9 @@ impl Checker {
         if self.env.in_test_block {
             return;
         }
+        if self.env.lambda_depth == 0 {
+            self.note_fn_bang_channel_source(operand);
+        }
         if self.env.auto_unwrap {
             self.check_bang_error_channel(operand, plain_is_effect_call);
             return;

@@ -1,0 +1,3 @@
+# ADR-0021 D3-2 (#2726): the odd `!` is converted in place, with the one
+# String-carrying case of `E` filled in.
+int.parse(s) |> result.map_err((e) => Bad(e))

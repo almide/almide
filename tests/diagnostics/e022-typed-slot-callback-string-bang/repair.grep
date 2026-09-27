@@ -1,0 +1,3 @@
+# ADR-0021 D3-1 (#2726): the slot decides the callback's error type, and the
+# conversion names the one String-carrying case.
+int.parse("${n}") |> result.map_err((e) => Bad(e))
