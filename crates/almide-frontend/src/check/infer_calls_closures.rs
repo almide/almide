@@ -958,7 +958,8 @@ impl Checker {
     /// closure-boundary E022 (#489 stays intact for every other `!`-in-lambda),
     /// and everything downstream — types, lowering, both backends, the interp
     /// — sees a plain try_* call. A COMPOUND fallible body (`(x) => g(f(x)!)!`)
-    /// is Phase 2b and keeps today's E022.
+    /// keeps its lambda and infers its own channel (ADR-0021: the join of its
+    /// `!` operands), so both forms reach the same twin with the same `E`.
     fn normalize_fallible_hof_callback(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr]) {
         // L9 (2026-08-07): inside a TEST block a lambda's `!` is plain
         // unwrap — no fallibility bit, no first-err dispatch. The test world
@@ -998,6 +999,18 @@ impl Checker {
             match &mut a.kind {
                 // CANONICAL tail form `(x) => f(x)!`: strip the marker — the
                 // residue IS the twin's Result-returning callback (proven path).
+                //
+                // ADR-0021 D4 / #2727: a LOWERING optimization only. Typing does
+                // not depend on it — without the strip the lambda's channel is
+                // the join of its one `!` operand, the same `E` the residue
+                // carries, and every `almide check` verdict over the 4,057-file
+                // corpus is identical either way. It stays because the unwrap +
+                // re-wrap it avoids is real work on the structural wasm leg,
+                // measured 2026-09-27 against the alloc ledger and size
+                // ratchet: fallible_hof_large_input 150,073 → 1,850,073
+                // allocations (58.3 MB → 85.5 MB), 5 more fixtures' allocation
+                // counts and 6 fixtures' module sizes up 1–9%, and its wasm run
+                // ~30% slower; output identical, native unchanged.
                 ExprKind::Lambda { body, .. }
                     if matches!(body.kind, ExprKind::Unwrap { .. }) =>
                 {
@@ -1008,7 +1021,7 @@ impl Checker {
                 }
                 // COMPOUND fallible body (`(x) => g(f(x)!)!` etc., 2b-i): no
                 // surgery — the lambda infers as a real fallible closure
-                // `(A) -> Result[B, String]` (its own channel + value-tail
+                // `(A) -> Result[B, ε]` (its own channel, ADR-0021, + value-tail
                 // lift), which is exactly the twin's callback type.
                 ExprKind::Lambda { body, .. } => {
                     if contains_unwrap(body) {
