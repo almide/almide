@@ -1,0 +1,4 @@
+@extern(rs, "host", "answer")
+fn answer() -> String
+
+effect fn main() -> Unit = println(answer())

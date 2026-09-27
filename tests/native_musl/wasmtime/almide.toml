@@ -1,0 +1,11 @@
+[package]
+name = "musl_wasmtime"
+version = "0.1.0"
+
+# porta's embedded host, as porta declares it: wasmtime with its default
+# features (cranelift, the wat parser, the component model) and wasmtime-wasi
+# with WASIp3. A musl build of this is minutes, not seconds, so it runs in the
+# weekly native-musl workflow and never per PR (#2777).
+[native-deps]
+wasmtime = "47.0.3"
+wasmtime-wasi = { version = "47.0.3", features = ["p3"] }

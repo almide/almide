@@ -1,0 +1,4 @@
+@extern(rs, "tls", "client_ready")
+fn client_ready() -> String
+
+effect fn main() -> Unit = println(client_ready())

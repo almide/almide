@@ -820,6 +820,29 @@ jobs:
           fi
           grep -q 'unknown build target' err.txt
 
+      # #2777: the program above compiles no C. What porta and comide ship on
+      # musl pulls a `[native-deps]` crate that does — reqwest over rustls,
+      # whose ring needs musl-gcc. tests/native_musl/tls builds that shape for
+      # x86_64-unknown-linux-musl, checks the binary is static and runs it. The
+      # generated cargo project's target/ is cached, so a PR relinks only the
+      # program. wasmtime on musl is minutes, not seconds: it runs weekly in
+      # native-musl.yml, with this gate's --selftest.
+      - name: Cache the native-deps musl project (tests/native_musl/tls)
+        uses: actions/cache@v6
+        with:
+          path: /tmp/native-musl-tls/target
+          key: native-musl-tls-${{ runner.os }}-${{ hashFiles('tests/native_musl/tls/almide.toml') }}
+      - name: Native-deps crate builds for musl (reqwest + rustls/ring, static — #2777)
+        env:
+          ALMIDE_BIN: /tmp/almide-bin/almide
+          ALMIDE_RUN_PROJECT_DIR: /tmp/native-musl-tls
+        run: |
+          start=$(date +%s)
+          sudo apt-get install -y --no-install-recommends musl-tools
+          echo "musl-tools install: $(( $(date +%s) - start ))s"
+          bash scripts/check-native-musl.sh tests/native_musl/tls
+          echo "step wall time: $(( $(date +%s) - start ))s"
+
   test-arm:
     name: Test ARM (NEON, Apple Silicon)
     needs: changes
