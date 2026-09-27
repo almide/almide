@@ -17,6 +17,10 @@ struct MatchArmTypes {
     types: Vec<Ty>,
     real_types: Vec<Ty>,
     peers: Vec<(Ty, Option<ast::Span>, bool)>,
+    /// Every `err(..)` arm's payload type and body span. The join reads such
+    /// an arm as `Never`, so its payload is judged separately against the
+    /// error type the match produces (#2722).
+    err_payloads: Vec<(Ty, Option<ast::Span>)>,
 }
 
 /// The two operands of a time-typed binop as the S3 matrix reads them: each
@@ -212,8 +216,40 @@ impl Checker {
         let sc = resolve_ty(&subject_ty, &self.uf);
         self.queue_match_implicit_prop(subject, &subject_ty, arms);
         self.check_match_exhaustiveness(&sc, arms);
-        let inferred = self.infer_match_arms(&subject_ty, arms);
-        self.join_match_arms(inferred)
+        let mut inferred = self.infer_match_arms(&subject_ty, arms);
+        let err_payloads = std::mem::take(&mut inferred.err_payloads);
+        let joined = self.join_match_arms(inferred);
+        self.check_err_arm_payloads(&joined, err_payloads);
+        joined
+    }
+
+    /// #2722: an `err(..)` arm joins as `Never`, so nothing checked its payload
+    /// against the error type the match produces. `match r { ok(v) => ok(v),
+    /// err(e) => err(e) }` with `e: String` in a `-> T!E` fn passed check and
+    /// died in rustc (E0308) — while the same two ctors as `if` branches were
+    /// already E001. The payload flows into the joined `Result`'s error slot;
+    /// when the arms join to a plain value, the `err(..)` arm returns from the
+    /// fn, so it flows into the fn's own error channel.
+    fn check_err_arm_payloads(&mut self, joined: &Ty, err_payloads: Vec<(Ty, Option<ast::Span>)>) {
+        if err_payloads.is_empty() {
+            return;
+        }
+        let target = match resolve_ty(joined, &self.uf) {
+            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => Some(args),
+            Ty::Never | Ty::Unknown | Ty::TypeVar(_) => None,
+            value => self.bang_channel_err_ty().map(|e| vec![value, e]),
+        };
+        let Some(target) = target else { return };
+        let saved = self.current_span;
+        for (payload, span) in err_payloads {
+            if span.is_some() {
+                self.current_span = span;
+            }
+            let expected = Ty::result(target[0].clone(), target[1].clone());
+            let actual = Ty::result(target[0].clone(), payload);
+            self.constrain(expected, actual, "match arm");
+        }
+        self.current_span = saved;
     }
 
     /// #1123: a match over an effect call whose arms are VALUE patterns takes
@@ -267,6 +303,11 @@ impl Checker {
             }
             let arm_ty = self.infer_expr(&mut arm.body);
             out.real_types.push(arm_ty.clone());
+            if matches!(&arm.body.kind, ExprKind::Err { .. }) {
+                if let Some((_, payload)) = resolve_ty(&arm_ty, &self.uf).inner2() {
+                    out.err_payloads.push((payload.clone(), arm.body.span));
+                }
+            }
             let arm_ty = self.match_arm_join_ty(arm, arm_ty, arms_have_result_ctor);
             out.peers.push((arm_ty.clone(), arm.body.span, super::is_literal_numeric_ast(&arm.body)));
             out.types.push(arm_ty);
@@ -304,7 +345,7 @@ impl Checker {
     /// Unify the arm types with each other (not with a shared result var that
     /// external constraints could contaminate) and pick the match's own type.
     fn join_match_arms(&mut self, inferred: MatchArmTypes) -> Ty {
-        let MatchArmTypes { types, real_types, peers } = inferred;
+        let MatchArmTypes { types, real_types, peers, .. } = inferred;
         let Some(first) = types.first().cloned() else { return Ty::Unit };
         for aty in &types[1..] {
             self.constrain(first.clone(), aty.clone(), "match arm");

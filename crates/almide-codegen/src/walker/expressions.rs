@@ -101,6 +101,17 @@ pub(super) fn render_lambda_with(ctx: &RenderContext, params: &[(VarId, Ty)], bo
         })
         .collect::<Vec<_>>()
         .join(", ");
+    // #2722: a `!` in the body propagates into the closure's own channel. A
+    // fallible closure returns `Result[_, E]`; its `!`s coerce against THAT
+    // `E`, not the enclosing fn's — `?` on a typed error inside a `String`
+    // channel needs the Debug `map_err` even in a fn whose error is the same
+    // typed `E` (the E0277 "`?` couldn't convert the error to `String`").
+    let lambda_ctx = match &body.ty {
+        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 && ctx.fn_err_ty.as_ref() != Some(&args[1]) =>
+            Some(super::with_fn_err_ty(ctx, Some(args[1].clone()))),
+        _ => None,
+    };
+    let ctx = lambda_ctx.as_ref().unwrap_or(ctx);
     let mut body_str = if let IrExprKind::Var { id } = &body.kind {
         if ctx.ann.is_rc_cow(id) {
             format!("(*{}).clone()", ctx.var_name(*id))

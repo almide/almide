@@ -596,6 +596,28 @@ fn fn_render_context<'a>(ctx: &RenderContext<'a>, func: &IrFunction) -> RenderCo
     }
 }
 
+/// The same context with `fn_err_ty` replaced — a closure body propagates its
+/// `!` into the CLOSURE's own error channel, not the enclosing fn's (#2722).
+pub(crate) fn with_fn_err_ty<'a>(ctx: &RenderContext<'a>, fn_err_ty: Option<almide_lang::types::Ty>) -> RenderContext<'a> {
+    RenderContext {
+        templates: ctx.templates,
+        var_table: ctx.var_table,
+        indent: ctx.indent,
+        target: ctx.target,
+        auto_unwrap: ctx.auto_unwrap,
+        is_test: ctx.is_test,
+        ann: ctx.ann.clone(),
+        type_aliases: ctx.type_aliases.clone(),
+        generic_types: ctx.generic_types.clone(),
+        minimal_generic_bounds: ctx.minimal_generic_bounds,
+        repr_c: ctx.repr_c,
+        trace: ctx.trace,
+        repr_named_types: ctx.repr_named_types.clone(),
+        newtype_ctors: ctx.newtype_ctors.clone(),
+        fn_err_ty,
+    }
+}
+
 /// The renderings an ATTRIBUTE decides outright, before any body is walked:
 ///
 /// * Dispatch-only fns (body is Hole): `@inline_rust` / `@intrinsic` templates
