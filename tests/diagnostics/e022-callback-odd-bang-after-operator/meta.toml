@@ -1,0 +1,3 @@
+expects_code = "E022"
+expects_error = "the callback's `!`s fail with different types — `ShiftErr` (line 10, col 17) and `String` (line 10, col 34)"
+hint_substring = "Convert the odd one at its `!`"
