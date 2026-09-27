@@ -4623,5 +4623,4 @@ since     = "0.64.0"
 status    = "active"
 evidence  = [
   { path = "spec/stdlib/http_router_test.almd", class = "fixture" },
-  { path = "spec/wasm_cross/effect_fn_value_slot_family.almd", class = "fixture" },
 ]

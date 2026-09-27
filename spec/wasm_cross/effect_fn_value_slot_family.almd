@@ -1,4 +1,4 @@
-// @contract: C-221, C-368
+// @contract: C-221
 // #2664: an `effect` fn VALUE flowing through a DECLARED fn type (a named
 // alias of `effect (A) -> B`) is the carrier `(A) -> Result[B, String]` in
 // every position the type is written: a returned closure, a `let`, a list of
@@ -6,11 +6,10 @@
 // `(Handler) -> Handler`. The structural wasm leg refused all of them
 // (`ty-mismatch:Fn`): a `let` kept the effect form on its statement while its
 // value was the carrier, so one value interned two fn signatures. The http
-// router is the stdlib user of the same shapes: `http.wrap` over
-// `http.router`, whose route table is a closure inside `http` that calls the
-// module's private helpers, with a `{name}` binding percent-decoded.
-import http
-
+// router is the stdlib user of the same shapes; it is held on the structural
+// leg by spec/stdlib/http_router_test.almd and tests/effect_fn_type_carrier_test.rs
+// (a top-level `let app = http.wrap(...)`), outside this fixture so the
+// reference interpreter, which has no http body, still evaluates it.
 type Handler = effect (String) -> String
 
 type Middleware = (Handler) -> Handler
@@ -44,21 +43,6 @@ else apply_mw(list.first(mws) ?? keep, chain(h, list.drop(mws, 1)))
 
 fn pick(hs: List[Handler], i: Int) -> Handler = list.get(hs, i) ?? inner
 
-effect fn get_user(req: HttpRequest) -> HttpResponse = http.response(
-  200,
-  "user " + (http.param(req, "id") ?? "-"),
-)
-
-fn tag_mw(next: HttpHandler) -> HttpHandler = (req) => {
-  let res = next(req)!
-  http.set_header(res, "X-Tag", "t1")
-}
-
-effect fn visit(h: HttpHandler, target: String) -> String = {
-  let res = h(http.new_request("GET", target, "", [:]))!
-  "${http.status_code(res)} ${http.body(res)} ${http.get_header(res, "X-Tag") ?? "-"}"
-}
-
 effect fn main() -> Unit = {
   // returned closure through a `let`
   let h = mk("t:")
@@ -79,17 +63,11 @@ effect fn main() -> Unit = {
   println(apply(mk("A:"), "b")!)
   println(apply((s) => s + "!", "c")!)
   println(apply(strict, "nope") ?? "strict failed")
-  // a middleware chain, local and top-level
+  // a middleware chain
   let wrapped = chain(inner, [shout, bracket])
   println(wrapped("m")!)
   let piped = chain(mk("p:"), [bracket, shout])
   println(piped("q")!)
   println(chain(strict, [bracket])("7")!)
   println(chain(strict, [bracket])("x7") ?? "chain failed")
-  // the http router served through a wrapped app
-  let app = http.wrap(http.router([http.route("GET /users/{id}", get_user)])!, [tag_mw])
-  println(visit(app, "/users/42")!)
-  println(visit(app, "/users/a%20b")!)
-  println(visit(app, "/users/x+y%2Fz")!)
-  println(visit(app, "/nope")!)
 }
