@@ -979,6 +979,14 @@ fn run_wasm_src(
             mem.read(&caller, a_ptr as u32 as usize, &mut a)?;
             let mut b = vec![0u8; b_len as u32 as usize];
             mem.read(&caller, b_ptr as u32 as usize, &mut b)?;
+            // http.serve (#2650 / #2659): the listener and the connection
+            // live in the run's own state — one per run, like native's. The
+            // response bytes go out raw, before the lossy text view below.
+            if crate::host_serve::is_serve_op(op) {
+                let (ret, buf) = crate::host_serve::dispatch(&caller.data().serve, op, &a);
+                *caller.data().fs_buf.lock().expect("fs buf") = buf;
+                return Ok(ret);
+            }
             let a = String::from_utf8_lossy(&a).to_string();
             // op 30 = raw stdout append (io.write / io.write_bytes):
             // PROGRAM order with println is the C-contract, so it goes
@@ -994,13 +1002,6 @@ fn run_wasm_src(
             if op == 30 {
                 emit_out(caller.data(), &String::from_utf8_lossy(&b));
                 return Ok(0);
-            }
-            // http.serve (#2650): the listener and the held connection
-            // live in the run's own state — one per run, like native's.
-            if (crate::host_serve::OP_SERVE_BIND..=crate::host_serve::OP_SERVE_REPLY).contains(&op) {
-                let (ret, buf) = crate::host_serve::dispatch(&caller.data().serve, op, &a, frames, parse_http_frame);
-                *caller.data().fs_buf.lock().expect("fs buf") = buf;
-                return Ok(ret);
             }
             // op 53 = open an http call (#2633): url in a, the start frame in b.
             let (ret, buf) = if op == 53 {

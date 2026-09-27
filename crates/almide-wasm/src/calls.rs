@@ -167,19 +167,23 @@ impl Emitter<'_> {
                             return Ok(Some(t));
                         }
                     }
-                    // The http.serve loop's leaves (#2650): bind (port
-                    // text), next (the request as a List[String] of
-                    // frames), reply (the response's cells in a).
+                    // The http.serve loop's leaves (#2650 / #2659): bind
+                    // (port text), accept, recv (the next chunk as Bytes),
+                    // send (the response bytes in a, then close).
                     "__http_serve_bind" => {
                         self.fs_call_1(&args[0], crate::fs_meta::OP_HTTP_SERVE_BIND)?;
                         return Ok(Some(self.fs_result_unit()?));
                     }
-                    "__http_serve_next" => {
-                        self.fs_call_0(crate::fs_meta::OP_HTTP_SERVE_NEXT)?;
-                        return Ok(Some(self.fs_result_string_list()?));
+                    "__http_serve_accept" => {
+                        self.fs_call_0(crate::fs_meta::OP_HTTP_SERVE_ACCEPT)?;
+                        return Ok(Some(self.fs_result_unit()?));
                     }
-                    "__http_serve_reply" => {
-                        self.fs_call_1(&args[0], crate::fs_meta::OP_HTTP_SERVE_REPLY)?;
+                    "__http_serve_recv" => {
+                        self.fs_call_0(crate::fs_meta::OP_HTTP_SERVE_RECV)?;
+                        return Ok(Some(self.fs_result_bytes()?));
+                    }
+                    "__http_serve_send" => {
+                        self.fs_call_1(&args[0], crate::fs_meta::OP_HTTP_SERVE_SEND)?;
                         return Ok(Some(self.fs_result_unit()?));
                     }
                     _ => {}

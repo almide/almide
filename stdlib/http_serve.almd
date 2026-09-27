@@ -1,55 +1,211 @@
 // http_serve — the WASM lowering of `http.serve`
-// (#2650, C-367). Native keeps its direct intrinsics; this file only ever
-// links on the wasm legs through the self-host registry.
+// (#2650 / #2659, C-367). Native keeps its direct intrinsics; this file only
+// ever links on the wasm legs through the self-host registry.
 //
 // The GUEST owns the serve loop: main calls http.serve exactly as natively,
-// the loop binds once and then pulls one request at a time from the host and
-// hands back one response — all inside the one instance main runs in, so the
-// handler sees native's state (what main computed and the handler captured,
-// the heap, the allocator), request after request, never a fresh instance.
-// The host moves bytes only, through the native runtime's own server core.
+// the loop binds once and then takes one connection at a time, reads the
+// request, calls the handler and writes the response — all inside the one
+// instance main runs in, so the handler sees native's state (what main
+// computed and the handler captured, the heap, the allocator), request after
+// request, never a fresh instance.
 //
-// HttpRequest's rep and its other readers live in stdlib/http_request.almd
-// (#2588): `[method, target, body, <header count>, k1, v1, …, p1, v1, …]`.
-// The host hands a request over as `[method, target, body, k1, v1, …]`, and
-// `__hs_request` inserts the header count.
+// The hosts only move bytes (#2659): the embedded host
+// (crates/almide-wasm-run/src/host_serve.rs) over std::net, and the stock
+// artifact's WASI 0.3 component over wasi:sockets (wasi_p3_serve.rs). The
+// request parse and the response bytes are therefore THIS file, one
+// transcription of native's server core (almide-rt-core's http_server_core.rs)
+// shared by both wasm legs, held byte-identical to native by the replay in
+// tests/http_serve_cross_test.rs. Change one side and the replay fails.
 //
-// The three `__http_serve_*` leaves are host ops 70 / 71 / 72 served by the
-// embedded host (crates/almide-wasm-run/src/host_serve.rs). The response
-// crosses as http_framed cells `<char count>\n<payload>`: status, body, then
-// each header name and value.
+// HttpRequest's rep and its readers live in stdlib/http_request.almd (#2588):
+// `[method, target, body, <header count>, k1, v1, …]`.
+//
+// The four `__http_serve_*` leaves are host ops 70 / 73 / 74 / 75: bind the
+// port, accept the next connection, receive its next chunk (empty = the peer
+// closed), send the response and close the connection.
 effect fn __http_serve_bind(port: String) -> Result[Unit, String] = _
 
-effect fn __http_serve_next() -> Result[List[String], String] = _
+effect fn __http_serve_accept() -> Result[Unit, String] = _
 
-effect fn __http_serve_reply(frame: String) -> Result[Unit, String] = _
+effect fn __http_serve_recv() -> Result[Bytes, String] = _
 
-fn __hs_cell(s: String) -> String = "${string.len(s)}\n${s}"
+effect fn __http_serve_send(raw: String) -> Result[Unit, String] = _
 
-fn __hs_frame(resp: List[String]) -> String = resp |> list.map((c) => __hs_cell(c)) |> list.join("")
+// One more chunk off the connection: (buffer, at EOF). none = a read error,
+// which native's read_line answers by dropping the request.
+effect fn __hs_more(buf: Bytes) -> Option[(Bytes, Bool)] = match __http_serve_recv() {
+  ok(chunk) => if bytes.is_empty(chunk) then some((buf, true)) else some((bytes.concat(buf, chunk), false)),
+  err(_) => none,
+}
 
-fn __hs_request(raw: List[String]) -> List[String] = list.take(raw, 3) + [int.to_string((list.len(raw) - 3) / 2)] + list.drop(
-  raw,
-  3,
+fn __hs_text(b: Bytes) -> Option[String] = match bytes.to_string(b) {
+  ok(s) => some(s),
+  err(_) => none,
+}
+
+// BufRead::read_line: the bytes through the next `\n`, or to EOF (empty at
+// EOF). none = a read error or a line that is not UTF-8 — native's read_line
+// errs on both and the request is dropped. Answers (line, buffer, next pos, eof).
+effect fn __hs_line(buf: Bytes, pos: Int, eof: Bool) -> Option[(String, Bytes, Int, Bool)] = {
+  let rest = bytes.slice(buf, pos, bytes.len(buf))
+  match bytes.index_of(rest, bytes.from_string("\n")) {
+    some(i) => match __hs_text(bytes.slice(rest, 0, i + 1)) {
+      some(line) => some((line, buf, pos + i + 1, eof)),
+      none => none,
+    },
+    none => if eof then match __hs_text(rest) {
+      some(line) => some((line, buf, bytes.len(buf), eof)),
+      none => none,
+    }
+    else match __hs_more(buf)! {
+      some((more, at_end)) => __hs_line(more, pos, at_end)!,
+      none => none,
+    },
+  }
+}
+
+// read_exact into `vec![0; n]` with its error ignored: the bytes that came,
+// zero-filled to n when the peer stopped short.
+effect fn __hs_body(buf: Bytes, pos: Int, eof: Bool, n: Int) -> Bytes = if bytes.len(buf) - pos >= n then bytes.slice(
+  buf,
+  pos,
+  pos + n,
 )
+else if eof then {
+  let got = bytes.slice(buf, pos, bytes.len(buf))
+  bytes.concat(got, bytes.new(n - bytes.len(got)))
+}
+else match __hs_more(buf)! {
+  some((more, at_end)) => __hs_body(more, pos, at_end, n)!,
+  none => __hs_body(buf, pos, true, n)!,
+}
+
+// str::split_whitespace.
+fn __hs_words(s: String) -> List[String] = {
+  var words: List[String] = []
+  var cur = ""
+  for c in string.chars(s) {
+    if string.is_whitespace(c) then {
+      if cur != "" then {
+        words = words + [cur]
+        cur = ""
+      }
+    }
+    else cur = cur + c
+  }
+  if cur != "" then words + [cur] else words
+}
+
+// ASCII-only fold, as `eq_ignore_ascii_case` compares.
+fn __hs_fold(c: String) -> String = match string.index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) {
+  some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
+  none => c,
+}
+
+fn __hs_is_content_length(key: String) -> Bool = (string.chars(key) |> list.map((c) => __hs_fold(c)) |> list.join(
+  "",
+)) == "content-length"
+
+// `val.parse::<usize>().unwrap_or(0)`: an optional `+`, then ASCII digits.
+fn __hs_usize(v: String) -> Int = {
+  let digits = string.strip_prefix(v, "+") ?? v
+  let all_digits = string.chars(digits) |> list.all((c) => string.contains("0123456789", c))
+  if digits == "" or not all_digits then 0 else int.parse(digits) ?? 0
+}
+
+// The header lines until the first blank one (or EOF): (pairs, content
+// length, buffer, next pos, eof). A line without a colon is skipped; the last
+// Content-Length wins.
+effect fn __hs_headers(
+  buf: Bytes,
+  pos: Int,
+  eof: Bool,
+  acc: List[String],
+  clen: Int,
+) -> Option[(List[String], Int, Bytes, Int, Bool)] = match __hs_line(buf, pos, eof)! {
+  none => none,
+  some((line, b, p, e)) => {
+    let t = string.trim(line)
+    if t == "" then some((acc, clen, b, p, e))
+    else match string.split_once(t, ":") {
+      some((k0, v0)) => {
+        let k = string.trim(k0)
+        let v = string.trim(v0)
+        __hs_headers(b, p, e, acc + [k, v], if __hs_is_content_length(k) then __hs_usize(v) else clen)!
+      },
+      none => __hs_headers(b, p, e, acc, clen)!,
+    }
+  },
+}
+
+// One request off the accepted connection as the HttpRequest rep, or none
+// when native would drop the connection unanswered.
+effect fn __hs_read_request() -> Option[List[String]] = match __hs_line(bytes.new(0), 0, false)! {
+  none => none,
+  some((first, buf, pos, eof)) => {
+    let parts = __hs_words(first)
+    if list.len(parts) < 2 then none
+    else match __hs_headers(buf, pos, eof, [], 0)! {
+      none => none,
+      some((pairs, clen, b, p, e)) => {
+        let body = if clen > 0 then bytes.to_string_lossy(__hs_body(b, p, e, clen)!) else ""
+        some([list.get(parts, 0) ?? "", list.get(parts, 1) ?? "", body, int.to_string(list.len(pairs) / 2)] + pairs)
+      },
+    }
+  },
+}
+
+fn __hs_reason(status: Int) -> String = match status {
+  200 => "OK",
+  201 => "Created",
+  204 => "No Content",
+  301 => "Moved Permanently",
+  302 => "Found",
+  304 => "Not Modified",
+  400 => "Bad Request",
+  401 => "Unauthorized",
+  403 => "Forbidden",
+  404 => "Not Found",
+  405 => "Method Not Allowed",
+  500 => "Internal Server Error",
+  _ => "OK",
+}
+
+// The response bytes: status line (the fixed reason table, `OK` outside it),
+// the response's headers in order, Content-Length (in bytes), the body.
+fn __hs_response(resp: List[String]) -> String = {
+  let status = int.parse(list.get(resp, 0) ?? "0") ?? 0
+  let body = list.get(resp, 1) ?? ""
+  let head = list.drop(resp, 2) |> list.chunk(2) |> list.map(
+    (kv) => "${list.get(kv, 0) ?? ""}: ${list.get(kv, 1) ?? ""}\r\n",
+  ) |> list.join("")
+  "HTTP/1.1 ${status} ${__hs_reason(status)}\r\n${head}Content-Length: ${bytes.len(bytes.from_string(body))}\r\n\r\n${body}"
+}
 
 // A handler err is native's 500: `Internal error: <msg>` as text/plain.
 // `http.serve` is typed never-err (`-> Unit`), so its caller's `!` is a no-op
 // (#1049) and nothing could observe a returned err: a bind failure ABORTS,
-// `Error: bind failed: <os message>` and exit 1, as the native runtime does.
+// `Error: bind failed: <message>` and exit 1, as the native runtime does.
 // The loop itself never ends, as natively.
 effect fn http_serve(port: Int, f: effect (List[String]) -> List[String]) -> Unit = {
   match __http_serve_bind(int.to_string(port)) {
     ok(_) => (),
     err(e) => prim.die(prim.handle("Error: ${e}\n")),
   }
+  // Accept, read, answer. A request native would drop (unreadable, not
+  // UTF-8, fewer than two words on its request line) is left unanswered: the
+  // next accept closes its connection and the loop waits for another.
   while true {
-    let raw = __http_serve_next()!
-    let req = __hs_request(raw)
-    let resp = match f(req) {
-      ok(r) => r,
-      err(e) => ["500", "Internal error: ${e}", "Content-Type", "text/plain"],
+    __http_serve_accept()!
+    match __hs_read_request()! {
+      some(req) => {
+        let resp = match f(req) {
+          ok(r) => r,
+          err(e) => ["500", "Internal error: ${e}", "Content-Type", "text/plain"],
+        }
+        __http_serve_send(__hs_response(resp))!
+      },
+      none => (),
     }
-    __http_serve_reply(__hs_frame(resp))!
   }
 }
