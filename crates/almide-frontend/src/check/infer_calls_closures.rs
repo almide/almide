@@ -530,6 +530,10 @@ impl Checker {
                 super::is_literal_numeric_ast(a),
             )).collect();
             self.join_sized_peers(&peers, "assert argument");
+            // #2606: the comparison needs an Eq operand type (post-solve E016).
+            if let ExprKind::Ident { name, .. } = &callee.kind {
+                self.deferred_eq_checks.push((peers[0].0.clone(), span, format!("{}()", name)));
+            }
         }
         ty
     }

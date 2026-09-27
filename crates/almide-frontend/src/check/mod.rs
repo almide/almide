@@ -229,6 +229,11 @@ pub struct Checker {
     /// Order-sensitive combinator subjects/keys (list.sort/min/max, sort_by's
     /// key) awaiting the post-solve ORDERABLE-element check (E030).
     pub(crate) deferred_ord_elem_checks: Vec<(Ty, Option<crate::ast::Span>, String)>,
+    /// Operand types of `==` / `!=` / `assert_eq` / `assert_ne` awaiting the
+    /// post-solve EQUALITY check (E016, #2606): a function anywhere in the
+    /// type has no equality ("Function types are never Eq",
+    /// docs/specs/type-system.md).
+    pub(crate) deferred_eq_checks: Vec<(Ty, Option<crate::ast::Span>, String)>,
     /// Annotation-resolved types awaiting the post-solve UNKNOWN-NAME check
     /// (E029): a `Ty::Named` whose sym is not a declared type compiles to a
     /// nonexistent Rust type (E0412/E0422/E0425) after `check` accepted — the
@@ -597,6 +602,7 @@ impl Checker {
             generic_calls: Vec::new(),
             interp_reported: std::collections::HashSet::new(),
             deferred_ord_elem_checks: Vec::new(),
+            deferred_eq_checks: Vec::new(),
             deferred_empty_collection_checks: Vec::new(),
             deferred_int_overflow_checks: Vec::new(),
             deferred_float_overflow_checks: Vec::new(),

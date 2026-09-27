@@ -871,6 +871,9 @@ impl Checker {
             self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {
                 ty: lt.clone(), name: None, span: left.span,
             });
+            // #2606: and for the post-solve Eq check — a function anywhere in
+            // the operand type has no equality.
+            self.deferred_eq_checks.push((lt.clone(), left.span, format!("operator '{}'", op)));
         }
         // Ordering (< <= > >=) is defined ONLY on scalar orderable
         // types. On a compound operand (Tuple/Option/Result/List/
