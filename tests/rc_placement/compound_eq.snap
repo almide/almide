@@ -311,4 +311,4 @@ fn $set.insert_srec
 fn $set.contains_srec
   (call $rc_dec (local.get $v2))
 fn $string.repeat
-  (call $rc_dec (local.get $v17))
+  (call $rc_dec (local.get $v21))
