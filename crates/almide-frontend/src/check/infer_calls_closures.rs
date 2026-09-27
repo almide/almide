@@ -116,10 +116,10 @@ impl Checker {
     /// for that slot when the program leaves it unconstrained.
     fn open_result_slot(&mut self, index: usize) -> Ty {
         let slot = self.fresh_var();
-        if let Some(Ty::Applied(TypeConstructorId::Result, args)) = &self.env.current_ret {
-            if let Some(declared) = args.get(index).filter(|_| args.len() == 2) {
-                self.result_slot_defaults.push((slot.clone(), declared.clone()));
-            }
+        if let Some(Ty::Applied(TypeConstructorId::Result, args)) = &self.env.current_ret
+            && let Some(declared) = args.get(index).filter(|_| args.len() == 2)
+        {
+            self.result_slot_defaults.push((slot.clone(), declared.clone()));
         }
         slot
     }
