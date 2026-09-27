@@ -20,10 +20,6 @@
 
 許容ライセンスは apache-2.0, bsd-2-clause, bsd-3-clause, cc0-1.0, isc, mit, mpl-2.0, ncsa, permissive, unlicense, wtfpl, zlib。
 
-> **要確認**: `almide/almide` の `LICENSE-MIT` の著作権表記は `Copyright (c) 2026 mizchi` になっている。
-> `almide/almide-dojo` は `Almide contributors`。新しく置いた 2 つの LICENSE は後者に合わせたが、
-> 本体の表記が意図どおりかは持ち主の判断。テンプレート由来の残りであれば直した方がよい。
-
 **早出しは逆効果**。2026 年に Linguist へ出された言語追加 PR は約 240 本、マージは 31 本で、
 残りは利用実績不足で閉じられている。閉じられた PR は記録に残る。
 
