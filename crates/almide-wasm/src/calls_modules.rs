@@ -313,6 +313,16 @@ impl Emitter<'_> {
                 }
                 unsup(&format!("call:{module}.{func}"))
             }
+            // datetime.now (#2703) is the one host read in the module; the
+            // rest of it is self-host and keeps the generic route.
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "datetime" && func.as_str() == "now" =>
+            {
+                if let Some(out) = self.lower_host_call("datetime", "now", args)? {
+                    return Ok(out);
+                }
+                unsup(&format!("call:{module}.{func}"))
+            }
             // http (#1710): the ported client fns take the host route; the
             // REST of the family keeps its pre-port path (self-host /
             // honest wall) — walling here regressed the pure constructors

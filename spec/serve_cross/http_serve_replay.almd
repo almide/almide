@@ -17,7 +17,7 @@ fn render_query(req: HttpRequest) -> String = {
   map.keys(q) |> list.sort |> list.map((k) => "${k}=${map.get(q, k) ?? ""}") |> list.join("&")
 }
 
-effect fn handle(req: HttpRequest, boot: Int) -> HttpResponse = {
+effect fn handle(req: HttpRequest, boot: Int, started: Int) -> HttpResponse = {
   let method = http.req_method(req)
   let path = http.req_path(req)
   let route = string.split(path, "?") |> list.get(0) ?? path
@@ -39,6 +39,9 @@ effect fn handle(req: HttpRequest, boot: Int) -> HttpResponse = {
     ),
     "/redirect" => http.redirect("/hello"),
     "/boot" => http.response(200, "${boot}"),
+    // A clock read in main before serve and another in the handler (#2703):
+    // the values differ per run, the answer does not.
+    "/clock" => http.response(200, "${env.millis() >= started} ${datetime.now() >= started / 1000}"),
     "/fail" => {
       deny(route)!
       http.response(200, "unreachable")
@@ -52,6 +55,7 @@ effect fn main() -> Unit = {
   // Drawn ONCE per process and captured by the handler: every request of
   // one run must answer the same value (one instance for the whole run).
   let boot = random.int(1, 1000000000)
+  let started = env.millis()
   eprintln("ready")
-  http.serve(int.parse(port) ?? 0, (req) => handle(req, boot)!)!
+  http.serve(int.parse(port) ?? 0, (req) => handle(req, boot, started)!)!
 }

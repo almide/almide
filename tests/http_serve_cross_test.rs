@@ -39,7 +39,9 @@ fn fixture() -> PathBuf {
 /// The request script: GET, POST with a UTF-8 body and a header, a header
 /// read that misses, a percent-encoded query (a pair without `=`, a value
 /// holding `=`, `+`), a status outside the reason table plus a lowercase
-/// header name, a redirect, a 404, a handler err (500), another method.
+/// header name, a redirect, a 404, a handler err (500), another method, and
+/// a clock read in main and in the handler (#2703: a serving program walled
+/// its clock reads on the embedded lane).
 const SCRIPT: &[&[u8]] = &[
     b"GET /hello HTTP/1.1\r\nHost: t\r\n\r\n",
     "POST /echo HTTP/1.1\r\nHost: t\r\nX-Token: abc\r\nContent-Length: 12\r\n\r\n日本語 ok".as_bytes(),
@@ -50,6 +52,7 @@ const SCRIPT: &[&[u8]] = &[
     b"GET /missing HTTP/1.1\r\n\r\n",
     b"GET /fail HTTP/1.1\r\n\r\n",
     b"DELETE /hello HTTP/1.1\r\n\r\n",
+    b"GET /clock HTTP/1.1\r\n\r\n",
 ];
 
 fn free_port() -> u16 {
@@ -146,6 +149,7 @@ fn http_serve_answers_byte_identically_on_native_and_the_embedded_lane() {
         "{:?}",
         String::from_utf8_lossy(&native.responses[7])
     );
+    assert!(native.responses[9].ends_with(b"\r\n\r\ntrue true"), "{:?}", String::from_utf8_lossy(&native.responses[9]));
     for (i, (n, w)) in native.responses.iter().zip(&wasm.responses).enumerate() {
         assert_eq!(
             String::from_utf8_lossy(n),
