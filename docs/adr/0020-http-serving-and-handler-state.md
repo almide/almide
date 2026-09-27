@@ -722,10 +722,13 @@ lands.
 Each step is one PR with its gate, in this order. Steps 1 and 2 must land
 before step 4 (§3.5). Step 0 items are prerequisites already found.
 
+Issues, one per step: 0a #2664, 0b #2696, 1 #2697, 2 #2698, 3 #2699,
+4 #2665, 5 #2692, 6 #2700, 7 #2659, 8 #2701, 9 #2702. Tracking issue: #2705.
+
 | # | Step | Gate | Closes / relates |
 |---|---|---|---|
 | 0a | Serve effect fn values through a declared fn type on the structural wasm leg | the router rows of `proofs/target-availability.toml` lose their structural wall | #2664 (in flight: PR #2693) |
-| 0b | Make `http.router` plus a handler call run on wasm: today it is E082 on **both** legs even without `serve` (incumbent: "match over an UNTRACKED subject …"; structural: `ty-mismatch:Fn`, and `call:__parts` in the #2659 prototype, `stdlib/http.almd:410`). Fix it on the **structural** leg only | `h(http.new_request(...))!` (with `let h = app!`) runs byte-identically on native and `--target wasm` in `spec/stdlib/http_router_test.almd` | new issue; needed by 7 and by "an app is tested by calling it" on wasm |
+| 0b | Make `http.router` plus a handler call run on wasm: today it is E082 on **both** legs even without `serve` (incumbent: "match over an UNTRACKED subject …"; structural: `ty-mismatch:Fn`, and `call:__parts` in the #2659 prototype, `stdlib/http.almd:410`). Fix it on the **structural** leg only | `h(http.new_request(...))!` (with `let h = app!`) runs byte-identically on native and `--target wasm` in `spec/stdlib/http_router_test.almd` | #2696; needed by 7 and by "an app is tested by calling it" on wasm |
 | 1 | The generalized E008 (§3): the concurrent-slot attribute, slot inference, the executable-closure pass, the escape and snapshot clauses, witness paths, interface summaries; dialect epoch 6 with `CURRENT_DIALECT = 6` | a `tests/diagnostics/` broken/fixed pair per §3.3 shape (captured, top-level, through a fn, through a local `let`, through a top-level `let`, through a record/list, factory escape, inferred wrapper slot, `fan.map`, `fan.settle`), a fixed pair for the folded `list.map` case, `scripts/check-dialect-epochs.sh`, and reach.py over `spec/` staying at 0 | closes the `fan.map` silent-sequential hole; unblocks #2594 (effect callbacks may then run in parallel, a separate decision) |
 | 2 | The instance-closure rule (§5.2) with its code; migrate `spec/serve_cross/http_serve_replay.almd` off `boot`. **Before it:** the als PR for the new C-367 wording (§7.1) and a pin advance | a diagnostics pair; the replay fixture green on both legs under the header-set comparison | prerequisite of 4 and 7 |
 | 3 | `kv` module (§4.2), native backing, the per-test fresh store, the interp bridge (3-way oracle), embedded-lane host ops, and E081 rows for stock legs. **Before it:** the als store contract | the 64-writer fixture on native and embedded, the per-test isolation fixture, the availability ratchet | pillar 2 |
@@ -747,7 +750,7 @@ adds incumbent code:
 
 Every new row in `proofs/target-availability.toml` names the structural leg.
 
-**Side findings, filed as bugs** (verified on 0.64.0, 2026-09-27):
+**Side findings, filed as bugs #2703 and #2704** (verified on 0.64.0, 2026-09-27):
 
 - **The clock on the embedded lane.** A clock read (`datetime.now()` or
   `env.millis()`) in **any** program that calls `http.serve` is E082 on
