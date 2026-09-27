@@ -797,3 +797,112 @@ fn a_function_where_its_result_is_expected_names_the_missing_half() {
         "expected the missing-call hint, got: {hints:?}"
     );
 }
+
+// ---- ADR-0022: output and abort builtins in a pure fn ----
+//
+// `println`, `eprintln`, `panic` and the assert family are admissible in a
+// pure `fn` (docs/specs/effect-system.md §2.1). They write or abort, never
+// read, and they do not make the caller effectful. A real read from the same
+// place stays E006. These tests pin the rule; they do not change it.
+
+#[test]
+fn pure_fn_admits_output_and_abort_builtins() {
+    has_no_errors(
+        r#"
+fn show(n: Int) -> Unit = println("n=${n}")
+fn warn(msg: String) -> Unit = eprintln(msg)
+fn die(msg: String) -> Unit = panic(msg)
+fn half(n: Int) -> Int = {
+  assert(n >= 0)
+  assert_eq(n % 2, 0)
+  assert_ne(n, 7)
+  n / 2
+}
+fn trace_all(xs: List[Int]) -> List[Int] = xs |> list.map((x) => {
+  println("${x}")
+  x
+})
+fn main() -> Unit = {
+  show(half(8))
+  warn("w")
+  let _ = trace_all([1, 2])
+}
+"#,
+    );
+}
+
+#[test]
+fn a_pure_fn_that_prints_is_called_from_an_effect_fn_without_a_bang() {
+    // The builtins return Unit / Never, never a Result: a pure fn that prints
+    // keeps a pure signature, so there is nothing to propagate.
+    has_no_errors(
+        "fn show(n: Int) -> Unit = println(\"${n}\")\neffect fn main() -> Unit = show(1)",
+    );
+    let errs = errors("fn show(n: Int) -> Unit = println(\"${n}\")!");
+    assert!(
+        errs.iter().any(|e| e.contains("requires Option or Result type but got Unit")),
+        "`println(..)!` must be E034, got: {errs:?}"
+    );
+}
+
+#[test]
+fn pure_fn_still_rejects_a_real_read_with_e006() {
+    let errs = errors("import fs\nfn load(p: String) -> String = fs.read_text(p) ?? \"\"");
+    assert!(
+        errs.iter().any(|e| e.contains("cannot call effect function 'fs.read_text'")),
+        "fs.read_text from a pure fn must stay E006, got: {errs:?}"
+    );
+    // `io.print` is a stdlib effect fn, not one of the exempt builtins.
+    let errs = errors("import io\nfn say() -> Unit = io.print(\"x\")");
+    assert!(
+        errs.iter().any(|e| e.contains("cannot call effect function 'io.print'")),
+        "io.print from a pure fn must stay E006, got: {errs:?}"
+    );
+}
+
+// ---- #2771: an unknown annotation type is ONE error, reported first ----
+
+fn check_located(input: &str) -> Vec<almide::diagnostic::Diagnostic> {
+    let tokens = Lexer::tokenize(input);
+    let mut parser = Parser::new(tokens);
+    let mut prog = parser.parse().expect("parse failed");
+    let canon = canonicalize::canonicalize_program(&prog, std::iter::empty());
+    let mut checker = Checker::from_env(canon.env);
+    checker.set_source("u.almd", input);
+    checker.diagnostics = canon.diagnostics;
+    checker
+        .infer_program(&mut prog)
+        .into_iter()
+        .filter(|d| d.level == Level::Error)
+        .collect()
+}
+
+#[test]
+fn unknown_param_type_suppresses_field_and_method_cascade() {
+    let src = "type Entry = { name: String, count: Int }\n\
+               fn f(e: Entyr) -> Int = e.count\n\
+               fn g(e: Entyr) -> String = e.name\n\
+               fn h(es: List[Entyr]) -> Int = es |> list.map((e) => e.count) |> list.fold(0, (a, b) => a + b)\n\
+               fn k(e: Entyr) -> Int = e.frob()\n\
+               fn main() -> Unit = println(\"x\")\n";
+    let errs = check_located(src);
+    let codes: Vec<_> = errs.iter().map(|d| d.code.unwrap_or_default()).collect();
+    assert_eq!(codes, vec!["E029"], "one root-cause error, no cascade: {:#?}", errs);
+    let d = &errs[0];
+    assert_eq!(d.message, "unknown type 'Entyr'");
+    // Located at the annotation, not span-less.
+    assert_eq!((d.line, d.col, d.end_col), (Some(2), Some(9), Some(14)));
+    assert!(d.hint.contains("did you mean `Entry`?"), "near-miss suggestion: {}", d.hint);
+}
+
+#[test]
+fn unknown_type_error_sorts_before_unrelated_body_errors() {
+    // A genuine error elsewhere stays, but the root cause comes first.
+    let src = "fn f(e: Gizmo) -> Int = e.n\n\
+               fn g() -> Int = \"no\"\n\
+               fn main() -> Unit = println(\"x\")\n";
+    let errs = check_located(src);
+    assert_eq!(errs.first().and_then(|d| d.code), Some("E029"), "{:#?}", errs);
+    assert!(errs.iter().all(|d| d.code != Some("E013")), "{:#?}", errs);
+    assert!(errs.len() >= 2, "the unrelated error survives: {:#?}", errs);
+}

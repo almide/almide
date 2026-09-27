@@ -206,6 +206,7 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
         (I_FS_MKDIR, fs_types, "[method]descriptor.create-directory-at", t_pathop),
         (I_FS_UNLINK, fs_types, "[method]descriptor.unlink-file-at", t_pathop),
         (I_FS_RMDIR, fs_types, "[method]descriptor.remove-directory-at", t_pathop),
+        (I_MONO_NOW, "wasi:clocks/monotonic-clock@0.3.0", "now", t_new),
     ];
     assert_eq!(import_list.len() as u32, IMPORTS, "IMPORTS count drift");
     let http_types = "wasi:http/types@0.3.0";

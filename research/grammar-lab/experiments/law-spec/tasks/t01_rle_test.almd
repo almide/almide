@@ -1,0 +1,7 @@
+test "encode groups runs" {
+  assert_eq(encode("aaab"), "3a1b")
+}
+
+test "decode expands runs" {
+  assert_eq(decode("3a1b"), "aaab")
+}

@@ -255,3 +255,28 @@ spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_7
 # native, and the incumbent is retiring under #1696 (recorded, not ported).
 spec/lang/match_err_arm_payload_test.almd :: bump
 spec/wasm_cross/match_err_arm_typed_payload.almd :: bump
+# 2026-09-27 (#2723, found while recording #2725): the typed-error callback channel
+# spec test's `fold_mid_block` / `sum_with` (a `__fallible_fold` whose callback is
+# not liftable) and `typed_slot` (a lambda passed to a typed slot) wall on the
+# incumbent MIR lowering; the structural leg runs the file via WASM. Recorded, not
+# ported (#1696).
+spec/lang/typed_error_callback_channel_test.almd :: fold_mid_block
+spec/lang/typed_error_callback_channel_test.almd :: sum_with
+spec/lang/typed_error_callback_channel_test.almd :: typed_slot
+# 2026-09-27 (#2725, ADR-0021 step 4, C-369): the lambda failure-channel files.
+# The incumbent MIR lowering walls a `!` bound under an operator whose typed error
+# erases into a String channel (`erased`, `fn_level`: "unwrap `!` bound to a
+# let/var"), a `__fallible_fold`/`__fallible_map` whose callback is not liftable
+# (`disagree`, `erased_fold`, `fold_mid_block`, `sum_with`), and a lambda passed to
+# a typed slot (`typed_slot`). The structural leg serves every one byte-identically
+# to native (3-way oracle agrees); the incumbent is retiring under #1696 (recorded,
+# not ported).
+spec/lang/lambda_channel_erasure_test.almd :: disagree
+spec/lang/lambda_channel_erasure_test.almd :: erased
+spec/lang/lambda_channel_erasure_test.almd :: erased_fold
+spec/lang/lambda_channel_erasure_test.almd :: fn_level
+spec/wasm_cross/lambda_failure_channel.almd :: disagree
+spec/wasm_cross/lambda_failure_channel.almd :: erased
+spec/wasm_cross/lambda_failure_channel.almd :: fold_mid_block
+spec/wasm_cross/lambda_failure_channel.almd :: sum_with
+spec/wasm_cross/lambda_failure_channel.almd :: typed_slot

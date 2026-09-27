@@ -451,3 +451,103 @@ fn desugar_map_access_calls(body: &IrExpr) -> Option<IrExpr> {
     s.visit_expr_mut(&mut out);
     s.changed.then_some(out)
 }
+
+/// #2769: a VALUE-producing branch with a diverging-call arm — `if c then
+/// panic(m) else v`, or `match s { p => panic(m), q => v }` with exactly one
+/// value arm — becomes the statement-position branch it already is, followed by
+/// the value: `{ if c then panic(m) else (); v }`. The diverging arm yields no
+/// value, so the only value the branch can produce is the other arm's, and the
+/// statement-position Unit branch is the shape both the abort desugar
+/// (`desugar_assert_calls`, which turns the `panic` into `prim.die`) and the
+/// real-branch lowering already serve. Without it the value branch took the
+/// both-arms linearization, which walls on a call-bearing arm.
+///
+/// The match form fires only when the value arm has no guard and its pattern
+/// binds nothing (the value moves out of the arm's scope). Runs FIRST in the
+/// desugar chain, while the arm is still a `Never`-typed call.
+fn desugar_diverging_value_branches(body: &IrExpr) -> Option<IrExpr> {
+    use almide_ir::{walk_expr_mut, IrMutVisitor};
+    fn diverges(e: &IrExpr) -> bool {
+        matches!(e.ty, Ty::Never) && matches!(e.kind, IrExprKind::Call { .. })
+    }
+    fn binds(p: &almide_ir::IrPattern) -> bool {
+        use almide_ir::IrPattern as P;
+        match p {
+            P::Wildcard | P::None | P::Literal { .. } => false,
+            P::Some { inner } | P::Ok { inner } | P::Err { inner } => binds(inner),
+            P::Constructor { args, .. } => args.iter().any(binds),
+            P::Tuple { elements } => elements.iter().any(binds),
+            P::List { elements, rest } => {
+                elements.iter().any(binds) || rest.as_ref().is_some_and(|r| binds(r))
+            }
+            P::RecordPattern { fields, .. } => {
+                fields.iter().any(|f| f.pattern.as_ref().map(binds).unwrap_or(true))
+            }
+            P::Bind { .. } | P::As { .. } => true,
+        }
+    }
+    fn unit() -> IrExpr {
+        IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None }
+    }
+    /// `{ <branch as a Unit statement>; value }`.
+    fn split(branch: IrExprKind, value: IrExpr, e: &IrExpr) -> IrExpr {
+        let stmt = IrExpr { kind: branch, ty: Ty::Unit, span: e.span, def_id: None };
+        IrExpr {
+            kind: IrExprKind::Block {
+                stmts: vec![IrStmt { kind: IrStmtKind::Expr { expr: stmt }, span: e.span }],
+                expr: Some(Box::new(value)),
+            },
+            ty: e.ty.clone(),
+            span: e.span,
+            def_id: e.def_id,
+        }
+    }
+    fn rewrite(e: &IrExpr) -> Option<IrExpr> {
+        if matches!(e.ty, Ty::Unit | Ty::Never) {
+            return None;
+        }
+        match &e.kind {
+            IrExprKind::If { cond, then, else_ } if diverges(then) != diverges(else_) => {
+                let (then, else_, value) = if diverges(then) {
+                    ((**then).clone(), unit(), (**else_).clone())
+                } else {
+                    (unit(), (**else_).clone(), (**then).clone())
+                };
+                let branch = IrExprKind::If { cond: cond.clone(), then: Box::new(then), else_: Box::new(else_) };
+                Some(split(branch, value, e))
+            }
+            // At least one arm must diverge: a match with no `panic` arm (a
+            // single catch-all `(_, _) => 0`) is an ordinary value match and
+            // stays one — rewriting it put a Block in a call argument, which
+            // the incumbent walls (gleam_multi_subject).
+            IrExprKind::Match { subject, arms } if arms.iter().any(|a| diverges(&a.body)) => {
+                let mut values = arms.iter().enumerate().filter(|(_, a)| !diverges(&a.body));
+                let (vi, va) = values.next()?;
+                if values.next().is_some() || va.guard.is_some() || binds(&va.pattern) {
+                    return None;
+                }
+                let value = va.body.clone();
+                let mut arms = arms.clone();
+                arms[vi].body = unit();
+                Some(split(IrExprKind::Match { subject: subject.clone(), arms }, value, e))
+            }
+            _ => None,
+        }
+    }
+    struct S {
+        changed: bool,
+    }
+    impl IrMutVisitor for S {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e);
+            if let Some(out) = rewrite(e) {
+                *e = out;
+                self.changed = true;
+            }
+        }
+    }
+    let mut s = S { changed: false };
+    let mut out = body.clone();
+    s.visit_expr_mut(&mut out);
+    s.changed.then_some(out)
+}

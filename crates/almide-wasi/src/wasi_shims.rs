@@ -76,14 +76,27 @@ fn shim_print(fd: i32, park: u64) -> Function {
     f
 }
 
-/// `(code) -> ()`: proc_exit never returns.
-fn shim_exit() -> Function {
+/// `(code) -> ()`: proc_exit never returns. 126..=255 takes C-350's
+/// preview-1 wall instead (#2780): a stock runtime traps on those codes with
+/// no exit request, so the shim prints [`EXIT_WALL_MSG`] and exits 1. The
+/// guest has already refused everything outside 0..=255 (the IR guard), and
+/// the embedded host, which runs the same module before this transform,
+/// delivers the whole band. `wall` is false when no exit call in the module
+/// can carry such a code, and then the shim is the bare `proc_exit`.
+fn shim_exit(park: u64, wall: bool) -> Function {
     let mut f = Function::new([]);
-    f.instructions().local_get(0).call(1).unreachable().end();
+    let mut i = f.instructions();
+    if wall {
+        i.local_get(0).i32_const(EXIT_WALL_FROM).i32_ge_u();
+        i.if_(BlockType::Empty);
+        refuse(&mut i, park, MSG4, EXIT_WALL_MSG.len());
+        i.end();
+    }
+    i.local_get(0).call(1).unreachable().end();
     f
 }
 
-/// The almide `fs_call` contract over WASI: ops 26/29/30/31/32/34/35/36/37
+/// The almide `fs_call` contract over WASI: ops 26/29/30/31/32/34/35/36/37/60/73
 /// supported (the environ/args trio routes to its own shims when they
 /// ship, #1716/#1841), everything else takes the defined refusal
 /// (stderr + exit 1).
@@ -91,9 +104,9 @@ fn shim_fs_call(
     park: u64,
     g_plen: u32,
     g_ppos: Option<u32>,
-    f_env_get: Option<u32>,
-    f_env_set: Option<u32>,
-    f_args: Option<u32>,
+    forward: &[(i32, u32)],
+    mono: bool,
+    raw_stderr: bool,
 ) -> Function {
     // params: 0=op 1=a_ptr 2=a_len 3=b_ptr 4=b_len; locals: 5=nread
     // 6=deadline (i64, op 36)
@@ -108,9 +121,9 @@ fn shim_fs_call(
 
     // ops 26/37/29: env.get / env.set / args — forwarded whole to the
     // service shim, when the op set shipped one (an absent service falls
-    // through to the refusal, which the build-time op audit forecloses).
-    let forwarded = [(26, f_env_get), (37, f_env_set), (29, f_args)];
-    for (code, target) in forwarded.into_iter().filter_map(|(c, t)| t.map(|t| (c, t))) {
+    // through to the refusal, which the build-time op audit forecloses);
+    // the fs ops (#2742) forward the same way, to the spliced fs service.
+    for &(code, target) in forward {
         i.local_get(op).i32_const(code).i32_eq().if_(BlockType::Empty);
         for p in 0..5u32 {
             i.local_get(p);
@@ -119,17 +132,22 @@ fn shim_fs_call(
         i.end();
     }
 
-    // op 30: raw stdout append.
-    i.local_get(op).i32_const(30).i32_eq().if_(BlockType::Empty);
-    i.i32_const(park as i32).local_get(b_ptr).i32_store(mem(IOV));
-    i.i32_const(park as i32).local_get(b_len).i32_store(mem(IOV + 4));
-    i.i32_const(1);
-    i.i32_const((park + IOV) as i32);
-    i.i32_const(1);
-    i.i32_const((park + NREAD) as i32);
-    i.call(0).drop();
-    i.i64_const(0).return_();
-    i.end();
+    // op 30: raw stdout append; op 73: raw stderr append (#2769) — the
+    // same fd_write on fd 1 / fd 2. The op-73 arm ships only when the
+    // module's op set names it (`panic`), so no other artifact grows.
+    let raw_ops: &[(i32, i32)] = if raw_stderr { &[(30, 1), (73, 2)] } else { &[(30, 1)] };
+    for &(code, fd) in raw_ops {
+        i.local_get(op).i32_const(code).i32_eq().if_(BlockType::Empty);
+        i.i32_const(park as i32).local_get(b_ptr).i32_store(mem(IOV));
+        i.i32_const(park as i32).local_get(b_len).i32_store(mem(IOV + 4));
+        i.i32_const(fd);
+        i.i32_const((park + IOV) as i32);
+        i.i32_const(1);
+        i.i32_const((park + NREAD) as i32);
+        i.call(0).drop();
+        i.i64_const(0).return_();
+        i.end();
+    }
 
     // op 35: incremental stdin — ONE fd_read of up to min(a_len, 4096)
     // bytes into the park data region (the count rides in a_len, op 32's
@@ -177,6 +195,16 @@ fn shim_fs_call(
     i.i32_const(0).i64_const(1).i32_const(park as i32).call(3).drop();
     i.i32_const(park as i32).i64_load(mem(0)).return_();
     i.end();
+
+    // op 60: the monotonic clock (clock id 1), raw nanos — the clock the
+    // op-36 spin below already reads, so it adds no import. Emitted only
+    // when the module reaches the op, so no other artifact grows.
+    if mono {
+        i.local_get(op).i32_const(60).i32_eq().if_(BlockType::Empty);
+        i.i32_const(1).i64_const(1).i32_const(park as i32).call(3).drop();
+        i.i32_const(park as i32).i64_load(mem(0)).return_();
+        i.end();
+    }
 
     // op 36: env.sleep_ms — a MONOTONIC busy-wait over clock_time_get
     // (the ms count rides a_len, the op-35 scalar convention). WASI p1

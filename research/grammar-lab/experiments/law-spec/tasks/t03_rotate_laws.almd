@@ -1,0 +1,11 @@
+law "rotation keeps the length" for (xs: List[Int], k: Int) {
+  list.len(rotate(xs, k)) == list.len(xs)
+}
+
+law "rotating back undoes a rotation" for (xs: List[Int], k: Int) {
+  rotate(rotate(xs, k), 0 - k) == xs
+}
+
+law "a full turn is the identity" for (xs: List[Int]) {
+  rotate(xs, list.len(xs)) == xs
+}

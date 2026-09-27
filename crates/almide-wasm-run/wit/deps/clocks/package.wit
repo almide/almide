@@ -8,3 +8,10 @@ interface wall-clock {
 
   now: func() -> datetime;
 }
+
+// The monotonic clock, `now` only: datetime.monotonic_ns (fs_call op 60).
+interface monotonic-clock {
+  type instant = u64;
+
+  now: func() -> instant;
+}

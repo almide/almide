@@ -1,0 +1,10 @@
+test "hidden: tie by name" {
+  let es = [{ name: "b", count: 2 }, { name: "a", count: 2 }, { name: "c", count: 9 }]
+  assert_eq(top_k(es, 3) |> list.map((e) => e.name), ["c", "a", "b"])
+}
+test "hidden: tie cut by k" {
+  let es = [{ name: "z", count: 1 }, { name: "m", count: 1 }, { name: "a", count: 1 }]
+  assert_eq(top_k(es, 2) |> list.map((e) => e.name), ["a", "m"])
+}
+test "hidden: k zero" { assert_eq(top_k([{ name: "a", count: 1 }], 0) |> list.len, 0) }
+test "hidden: k larger than list" { assert_eq(top_k([{ name: "a", count: 1 }], 5) |> list.len, 1) }

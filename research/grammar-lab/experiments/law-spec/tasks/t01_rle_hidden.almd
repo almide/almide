@@ -1,0 +1,6 @@
+test "hidden: twelve" { assert_eq(encode(string.repeat("a", 12)), "9a3a") }
+test "hidden: nine" { assert_eq(encode(string.repeat("a", 9)), "9a") }
+test "hidden: ten then b" { assert_eq(encode(string.repeat("a", 10) + "b"), "9a1a1b") }
+test "hidden: eighteen" { assert_eq(encode(string.repeat("a", 18)), "9a9a") }
+test "hidden: empty" { assert_eq(encode(""), "") }
+test "hidden: roundtrip long" { assert_eq(decode(encode(string.repeat("z", 27) + "yy")), string.repeat("z", 27) + "yy") }

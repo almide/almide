@@ -1,0 +1,7 @@
+// Pagination over a list. Pages are numbered from 0.
+
+fn page[T](items: List[T], n: Int, size: Int) -> List[T] =
+  items |> list.drop(n * size) |> list.take(size)
+
+fn page_count[T](items: List[T], size: Int) -> Int =
+  (list.len(items) + size - 1) / size

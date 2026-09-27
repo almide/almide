@@ -1,10 +1,10 @@
 // @contract: C-350
-// The inclusive upper bound exits with its own value on every target.
+// The last code every leg delivers exits with its own value on every target.
 //
-// The twin of `exit_code_out_of_range.almd`: 125 is the last code the shipped
+// The twin of `exit_code_passthrough.almd`: 125 is the last code the shipped
 // preview-1 artifact can deliver, so it must arrive as itself rather than
-// being swept into the abort with 126. Runtime-valued, and in a `guard … else`
-// arm, for the two reasons that fixture's header gives.
+// being swept into that build's 126..=255 wall. Runtime-valued, and in a
+// `guard … else` arm, for the two reasons `exit_code_out_of_range.almd` gives.
 import process
 
 effect fn chosen(k: Int) -> Int = k * 25

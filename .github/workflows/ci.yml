@@ -713,7 +713,15 @@ jobs:
           $ALMIDE test examples/
 
       - name: WASM coverage ratchet (the native-fallback set only shrinks — wasm is a first-class target)
-        run: ALMIDE_BIN=/tmp/almide-bin/almide bash proofs/check-wasm-fallback.sh
+        run: ALMIDE_BIN=/tmp/almide-bin/almide FALLBACK_TEST_LOG=/tmp/almide-test-lane.log bash proofs/check-wasm-fallback.sh
+
+      # #2741: every program the router hands to the INCUMBENT renderer, with its
+      # structural decline, is a row in proofs/incumbent-route-baseline.txt —
+      # shrink-only to 0 as the incumbent is retired (#2739). The test lane is the
+      # suite run above (its log); the build lane is `check --target wasm` over
+      # every program with a `main`.
+      - name: Incumbent-route census (the programs the incumbent serves only shrink — #2741)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide TEST_LOG=/tmp/almide-test-lane.log bash scripts/check-incumbent-route.sh
 
       - name: Wall corpus (#1481 — refused shapes stay refused, with their reasons)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash proofs/check-wall-corpus.sh
@@ -780,6 +788,37 @@ jobs:
         env:
           ALMIDE_BIN: /tmp/almide-bin/almide
         run: bash scripts/check-frees-churn.sh
+
+      # #2772: `almide build --target <triple>` produces a static musl binary,
+      # and an inherited CARGO_BUILD_TARGET never hands back the previous host
+      # binary (the reported shape: host build first, then the env var, and the
+      # old driver copied the stale glibc binary out). A dependency-free program
+      # links against rustc's self-contained musl crt, so no musl-tools; ~20 s.
+      - name: Native cross target (musl static build, CARGO_BUILD_TARGET honoured — #2772)
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          ALMIDE=/tmp/almide-bin/almide
+          T=x86_64-unknown-linux-musl
+          work=$(mktemp -d); cd "$work"
+          export ALMIDE_RUN_PROJECT_DIR="$work/scratch"
+          printf 'effect fn main() -> Unit = println("hello")\n' > hello.almd
+          is_static() { file "$1" | grep -Eq 'statically linked|static-pie linked'; }
+          $ALMIDE build hello.almd -o hello-host
+          [ "$(./hello-host)" = hello ]
+          ! is_static hello-host || { echo "::error::host build is static: $(file hello-host)"; exit 1; }
+          $ALMIDE build hello.almd --target $T -o hello-musl
+          file hello-musl
+          is_static hello-musl || { echo "::error::--target $T is not static: $(file hello-musl)"; exit 1; }
+          [ "$(./hello-musl)" = hello ]
+          $ALMIDE build hello.almd --target linux-musl -o hello-short
+          cmp hello-musl hello-short
+          CARGO_BUILD_TARGET=$T $ALMIDE build hello.almd -o hello-env
+          ! cmp -s hello-host hello-env || { echo "::error::CARGO_BUILD_TARGET returned the stale host binary"; exit 1; }
+          is_static hello-env || { echo "::error::CARGO_BUILD_TARGET build is not static: $(file hello-env)"; exit 1; }
+          if $ALMIDE build hello.almd --target not_a_target -o bogus 2>err.txt; then
+            echo "::error::--target not_a_target was accepted"; exit 1
+          fi
+          grep -q 'unknown build target' err.txt
 
   test-arm:
     name: Test ARM (NEON, Apple Silicon)

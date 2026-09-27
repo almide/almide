@@ -29,6 +29,7 @@ mod survive_edit;
 mod survive_legs;
 mod docs_gen;
 mod cargo_build;
+mod native_target;
 mod js_host;
 
 // `cargo_build_cdylib`/`cargo_build_generated`/`cargo_build_generated_with_native`/

@@ -1,0 +1,131 @@
+// law — the runtime half of the `law` block spike.
+//
+// A law is a property that must hold for every input. This module checks it
+// the way a machine can without a prover: deterministic random cases, and on
+// the first failure a greedy shrink to a small counterexample. The verdict a
+// reader sees is the counterexample, never "unsolved goals".
+//
+// Determinism: the case stream is a pure function of the seed, so a law that
+// fails fails the same way on every run and every target.
+
+type LawGen[T] = {
+  make: (Int, Int) -> T,
+  shrink: (T) -> List[T],
+  show: (T) -> String,
+}
+
+let law_cases = 200
+let law_seed = 42
+
+// ── random stream (31-bit LCG; stays inside Int on every target) ──
+
+fn law_next(s: Int) -> Int = (s * 1103515245 + 12345) % 2147483648
+
+fn law_mix(seed: Int, i: Int) -> Int = law_next(law_next(seed + i * 7919))
+
+fn law_pick(s: Int, lo: Int, hi: Int) -> Int = lo + law_next(s) % (hi - lo + 1)
+
+// ── generators ──
+
+fn law_shrink_int(v: Int) -> List[Int] =
+  if v == 0 then [] else [0, v / 2, if v > 0 then v - 1 else v + 1] |> list.filter((c) => c != v) |> list.unique
+
+let law_int: LawGen[Int] = {
+  make: (s, size) => law_pick(s, 0 - size, size),
+  shrink: law_shrink_int,
+  show: (v) => int.to_string(v),
+}
+
+let law_pos_int: LawGen[Int] = {
+  make: (s, size) => law_pick(s, 1, size + 1),
+  shrink: (v) => law_shrink_int(v) |> list.filter((c) => c >= 1),
+  show: (v) => int.to_string(v),
+}
+
+let law_bool: LawGen[Bool] = {
+  make: (s, _size) => law_next(s) % 2 == 0,
+  shrink: (v) => if v then [false] else [],
+  show: (v) => if v then "true" else "false",
+}
+
+let law_string: LawGen[String] = {
+  make: (s, size) =>
+    list.range(0, law_pick(s, 0, size))
+      |> list.map((i) => ["a", "b", "c", " ", "z"][law_pick(law_mix(s, i), 0, 4)])
+      |> string.join(""),
+  shrink: (v) => {
+    let n = string.len(v)
+    list.range(0, n) |> list.map((i) => string.slice(v, 0, i) + string.slice(v, i + 1, n))
+  },
+  show: (v) => "\"${v}\"",
+}
+
+fn law_without[T](xs: List[T], i: Int) -> List[T] =
+  list.take(xs, i) + list.drop(xs, i + 1)
+
+fn law_list[T](g: LawGen[T]) -> LawGen[List[T]] = {
+  make: (s, size) => list.range(0, law_pick(s, 0, size)) |> list.map((i) => g.make(law_mix(s, i), size)),
+  shrink: (xs) => {
+    let removals = list.range(0, list.len(xs)) |> list.map((i) => law_without(xs, i))
+    let smaller = list.range(0, list.len(xs)) |> list.flat_map((i) =>
+      g.shrink(xs[i]) |> list.take(1) |> list.map((c) => list.set(xs, i, c)))
+    let together = xs |> list.map((x) => list.first(g.shrink(x)) ?? x)
+    let half = list.len(xs) / 2
+    ([[], list.take(xs, half), list.drop(xs, half), together] + removals + smaller) |> list.filter((c) => c != xs)
+  },
+  show: (xs) => "[" + (xs |> list.map((x) => g.show(x)) |> string.join(", ")) + "]",
+}
+
+// `law_named` makes a counterexample read as bindings: `xs = [0, 1]`.
+fn law_named[T](name: String, g: LawGen[T]) -> LawGen[T] = {
+  make: g.make,
+  shrink: g.shrink,
+  show: (v) => "${name} = ${g.show(v)}",
+}
+
+fn law_pair[A, B](ga: LawGen[A], gb: LawGen[B]) -> LawGen[(A, B)] = {
+  make: (s, size) => (ga.make(law_mix(s, 1), size), gb.make(law_mix(s, 2), size)),
+  shrink: ((a, b)) =>
+    (ga.shrink(a) |> list.map((c) => (c, b))) + (gb.shrink(b) |> list.map((c) => (a, c))),
+  show: ((a, b)) => ga.show(a) + "\n    " + gb.show(b),
+}
+
+// ── the law_check ──
+
+fn law_minimize[T](g: LawGen[T], holds: (T) -> Bool, v: T, steps: Int) -> (T, Int) =
+  match g.shrink(v) |> list.find((c) => not holds(c)) {
+    some(c) => law_minimize(g, holds, c, steps + 1),
+    none => (v, steps),
+  }
+
+fn law_first_failure[T](g: LawGen[T], holds: (T) -> Bool, seed: Int, i: Int, cases: Int) -> (Int, T)? =
+  if i >= cases then none
+  else {
+    let v = g.make(law_mix(seed, i), 1 + i / 4)
+    if holds(v) then law_first_failure(g, holds, seed, i + 1, cases) else some((i, v))
+  }
+
+/// Checks `holds` on `law_cases` generated inputs; panics with a shrunk counterexample.
+fn law_check[T](name: String, g: LawGen[T], holds: (T) -> Bool) -> Unit =
+  match law_first_failure(g, holds, law_seed, 0, law_cases) {
+    none => (),
+    some((i, v)) => {
+      let (small, steps) = law_minimize(g, holds, v, 0)
+      panic("law \"${name}\" falsified after ${i + 1} cases (seed ${law_seed})\n  counterexample (shrunk in ${steps} steps):\n    ${g.show(small)}")
+    },
+  }
+
+// ── demo: one law that holds, one that does not ──
+
+test "law holds: reverse twice" {
+  law_check("reverse twice", law_named("xs", law_list(law_int)), (xs) => list.reverse(list.reverse(xs)) == xs)
+}
+
+test "law holds: append length" {
+  law_check("append length", law_pair(law_named("xs", law_list(law_int)), law_named("ys", law_list(law_int))),
+    ((xs, ys)) => list.len(xs + ys) == list.len(xs) + list.len(ys))
+}
+
+test "law fails: sort keeps length after unique" {
+  law_check("unique keeps length", law_named("xs", law_list(law_int)), (xs) => list.len(list.unique(xs)) == list.len(xs))
+}

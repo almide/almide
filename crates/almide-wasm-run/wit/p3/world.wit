@@ -16,6 +16,7 @@ world p3-command {
   import wasi:cli/stderr@0.3.0;
   import wasi:cli/exit@0.3.0;
   import wasi:clocks/system-clock@0.3.0;
+  import wasi:clocks/monotonic-clock@0.3.0;
   import wasi:random/random@0.3.0;
   import wasi:filesystem/types@0.3.0;
   import wasi:filesystem/preopens@0.3.0;
@@ -34,6 +35,7 @@ world p3-command-http {
   import wasi:cli/stderr@0.3.0;
   import wasi:cli/exit@0.3.0;
   import wasi:clocks/system-clock@0.3.0;
+  import wasi:clocks/monotonic-clock@0.3.0;
   import wasi:random/random@0.3.0;
   import wasi:filesystem/types@0.3.0;
   import wasi:filesystem/preopens@0.3.0;

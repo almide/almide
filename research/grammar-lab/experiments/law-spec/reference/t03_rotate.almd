@@ -1,0 +1,10 @@
+// Rotate a list left by k positions: rotate([1, 2, 3, 4], 1) == [2, 3, 4, 1].
+
+fn rotate[T](xs: List[T], k: Int) -> List[T] = {
+  let n = list.len(xs)
+  if n == 0 then xs
+  else {
+    let s = ((k % n) + n) % n
+    list.drop(xs, s) + list.take(xs, s)
+  }
+}

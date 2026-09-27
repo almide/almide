@@ -239,6 +239,10 @@ pub struct Interpreter<'a> {
     /// stdlib pool bodies are unmetered on every leg (both backends meter
     /// user functions only), so a pool fn's internal loops must not charge.
     pub(crate) det_in_user: Cell<bool>,
+    /// The running callable's failure channel is `String` (ADR-0021 D2,
+    /// #2725): a `!` whose operand fails with a typed error converts it to
+    /// its repr text there, as native's `map_err` does.
+    pub(crate) chan_str: Cell<bool>,
     /// Open metered regions (budget_enter +1 / budget_exit -1): the strict
     /// cut (T1-1) fires only inside a region — outside one, fuel below zero
     /// is impossible in budget mode and irrelevant in probe mode.
@@ -264,6 +268,9 @@ pub struct Interpreter<'a> {
     /// order). The body is consulted first; this is the measured residue the
     /// bridge still serves, audited by `interp_bridge_fallback_ledger`.
     pub(crate) bridge_fallbacks: std::cell::RefCell<Vec<(String, String)>>,
+    /// Set when the abort in flight came from `panic` (#2769): it renders as
+    /// `PANIC: <msg>` with no trailing newline (C-219), not the `Error:` line.
+    pub(crate) panicked: Cell<bool>,
     /// T5-1 wall-deadline mirror (fan.timeout): absolute deadline (ns since
     /// interp start; i64::MAX = none), hit flag, persisted verdict, and the
     /// wall-check ordinal (the ω of T5-2). Replay/record ride the same env
@@ -572,11 +579,13 @@ impl<'a> Interpreter<'a> {
             det_verdict: Cell::new(0),
             det_spend: Cell::new(0),
             det_in_user: Cell::new(false),
+            chan_str: Cell::new(false),
             det_region_depth: Cell::new(0),
             det_saved: Cell::new(0),
             user_fn_names,
             det_exempt: std::cell::RefCell::new(None),
             bridge_fallbacks: std::cell::RefCell::new(Vec::new()),
+            panicked: Cell::new(false),
             t_deadline: Cell::new(i64::MAX),
             t_hit: Cell::new(false),
             t_verdict: Cell::new(0),

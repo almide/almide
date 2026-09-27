@@ -1,0 +1,15 @@
+type ParseErr: Eq, Repr = | BadNumber(String) | BadName(String) | Negative(Int)
+
+fn check_sign(n: Int) -> Int!ParseErr = if n < 0 then err(Negative(n)) else ok(n)
+
+fn total(lines: List[String]) -> Int!ParseErr = lines |> list.fold(
+  0,
+  (acc, raw) => {
+    let n = int.parse(raw) |> result.map_err((e) => BadNumber(e))!
+    acc + check_sign(n)!
+  },
+)!
+
+test "t" {
+  assert_eq(total(["1", "2"]), ok(3))
+}

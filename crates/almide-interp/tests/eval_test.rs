@@ -621,14 +621,15 @@ fn main() -> Unit = {
 // ── Unhandled abort termination contract ────────────────────────
 
 #[test]
-fn panic_terminates_with_error_line() {
+fn panic_terminates_with_panic_line() {
     let src = r#"
 fn main() -> Unit = {
   panic("kaboom")
 }"#;
     let (exit, _o, stderr) = run(src);
     assert_eq!(exit, 1);
-    assert!(stderr.contains("Error: kaboom"), "got <{}>", stderr);
+    // C-219: `PANIC: <msg>` with no trailing newline, as both backends print it.
+    assert_eq!(stderr, "PANIC: kaboom", "got <{}>", stderr);
 }
 
 #[test]

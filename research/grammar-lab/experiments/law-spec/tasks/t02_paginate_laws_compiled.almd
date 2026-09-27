@@ -1,0 +1,11 @@
+test "law: pages 1..page_count rebuild the list" {
+  law_check("pages 1..page_count rebuild the list", law_pair(law_named("xs", law_list(law_int)), law_named("size", law_pos_int)), ((xs, size)) =>
+    list.range(1, page_count(xs, size) + 1) |> list.flat_map((p) => page(xs, p, size)) == xs)
+}
+
+test "law: a page below 1 is empty" {
+  law_check("a page below 1 is empty", law_pair(law_named("xs", law_list(law_int)), law_pair(law_named("size", law_pos_int), law_named("p", law_int))), ((xs, sp)) => {
+    let (size, p) = sp
+    p >= 1 or list.len(page(xs, p, size)) == 0
+  })
+}

@@ -313,12 +313,13 @@ impl Emitter<'_> {
                 }
                 unsup(&format!("call:{module}.{func}"))
             }
-            // datetime.now (#2703) is the one host read in the module; the
-            // rest of it is self-host and keeps the generic route.
+            // datetime.now (#2703) and datetime.monotonic_ns are the two host
+            // reads in the module; the rest of it is self-host and keeps the
+            // generic route.
             CallTarget::Module { module, func, .. }
-                if module.as_str() == "datetime" && func.as_str() == "now" =>
+                if module.as_str() == "datetime" && matches!(func.as_str(), "now" | "monotonic_ns") =>
             {
-                if let Some(out) = self.lower_host_call("datetime", "now", args)? {
+                if let Some(out) = self.lower_host_call("datetime", func.as_str(), args)? {
                     return Ok(out);
                 }
                 unsup(&format!("call:{module}.{func}"))

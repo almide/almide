@@ -704,14 +704,19 @@ impl Checker {
         let saved_lambda_ret = self.env.lambda_ret.take();
         let saved_prop_used = self.env.lambda_prop_used;
         let channel_ok = self.fresh_var();
-        self.env.lambda_ret = Some(Ty::result(channel_ok.clone(), Ty::String));
-        self.env.lambda_prop_used = false;
         // #1055: a lambda in an `effect (…) -> …` slot is an effect-fn body —
         // effect calls are permitted (the slot's owner runs the handler under
         // its own effect context) and the lambda ALWAYS types as the carrier
         // `(A) -> Result[B, String]`, so a pure value tail gets the same
         // ok(...) wrap the fallible machinery already emits (Phase 1b).
         let slot_effect = std::mem::take(&mut self.lambda_slot_effect);
+        // ADR-0021 D1: the channel's error type ε is decided by the context the
+        // lambda flows into, else by the join of its `!` operands
+        // (`lambda_channel.rs`). The effect carrier stays `String`.
+        let eps = if slot_effect { Ty::String } else { self.fresh_var() };
+        self.env.lambda_ret = Some(Ty::result(channel_ok.clone(), eps.clone()));
+        self.env.lambda_prop_used = false;
+        self.open_lambda_channel(eps);
         let ret_expect = self.lambda_ret_expect.take();
         let saved_can_call_effect = self.env.can_call_effect;
         if slot_effect {
@@ -793,8 +798,10 @@ impl Checker {
             } else if body_resolved != Ty::Never {
                 self.constrain(channel_ok, ret_ty, "fallible lambda body");
             }
+            self.close_lambda_channel(true);
             return Ty::Fn { params: param_tys, ret: Box::new(chan_ty), is_effect: false };
         }
+        self.close_lambda_channel(false);
         Ty::Fn { params: param_tys, ret: Box::new(ret_ty), is_effect: false }
     }
 
@@ -808,14 +815,9 @@ impl Checker {
         let t = self.infer_expr(inner);
         let resolved = resolve_ty(&t, &self.uf);
         let plain_is_effect_call = self.is_effect_call_expr(inner);
-        let judged = self.lambda_err_erasures.len();
         self.bang_erasure_mark = Some(erasure_mark);
         self.check_unwrap_propagation_context(&resolved, plain_is_effect_call, inner.span);
         self.bang_erasure_mark = None;
-        // An erasure this very `!` made (inside a lambda) is located here.
-        for e in &mut self.lambda_err_erasures[judged..] {
-            e.1 = outer_span;
-        }
         if let Some(inner_ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
             inner_ty
         } else if matches!(&resolved, Ty::Unknown) {
@@ -956,7 +958,8 @@ impl Checker {
     /// closure-boundary E022 (#489 stays intact for every other `!`-in-lambda),
     /// and everything downstream — types, lowering, both backends, the interp
     /// — sees a plain try_* call. A COMPOUND fallible body (`(x) => g(f(x)!)!`)
-    /// is Phase 2b and keeps today's E022.
+    /// keeps its lambda and infers its own channel (ADR-0021: the join of its
+    /// `!` operands), so both forms reach the same twin with the same `E`.
     fn normalize_fallible_hof_callback(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr]) {
         // L9 (2026-08-07): inside a TEST block a lambda's `!` is plain
         // unwrap — no fallibility bit, no first-err dispatch. The test world
@@ -996,6 +999,18 @@ impl Checker {
             match &mut a.kind {
                 // CANONICAL tail form `(x) => f(x)!`: strip the marker — the
                 // residue IS the twin's Result-returning callback (proven path).
+                //
+                // ADR-0021 D4 / #2727: a LOWERING optimization only. Typing does
+                // not depend on it — without the strip the lambda's channel is
+                // the join of its one `!` operand, the same `E` the residue
+                // carries, and every `almide check` verdict over the 4,057-file
+                // corpus is identical either way. It stays because the unwrap +
+                // re-wrap it avoids is real work on the structural wasm leg,
+                // measured 2026-09-27 against the alloc ledger and size
+                // ratchet: fallible_hof_large_input 150,073 → 1,850,073
+                // allocations (58.3 MB → 85.5 MB), 5 more fixtures' allocation
+                // counts and 6 fixtures' module sizes up 1–9%, and its wasm run
+                // ~30% slower; output identical, native unchanged.
                 ExprKind::Lambda { body, .. }
                     if matches!(body.kind, ExprKind::Unwrap { .. }) =>
                 {
@@ -1006,7 +1021,7 @@ impl Checker {
                 }
                 // COMPOUND fallible body (`(x) => g(f(x)!)!` etc., 2b-i): no
                 // surgery — the lambda infers as a real fallible closure
-                // `(A) -> Result[B, String]` (its own channel + value-tail
+                // `(A) -> Result[B, ε]` (its own channel, ADR-0021, + value-tail
                 // lift), which is exactly the twin's callback type.
                 ExprKind::Lambda { body, .. } => {
                     if contains_unwrap(body) {
@@ -1136,6 +1151,9 @@ impl Checker {
         if self.env.in_test_block {
             return;
         }
+        if self.env.lambda_depth == 0 {
+            self.note_fn_bang_channel_source(operand);
+        }
         if self.env.auto_unwrap {
             self.check_bang_error_channel(operand, plain_is_effect_call);
             return;
@@ -1146,7 +1164,7 @@ impl Checker {
         let accepted = if self.env.lambda_depth == 0 {
             self.accept_declared_channel_prop(operand)
         } else {
-            self.accept_lambda_channel_prop(operand)
+            self.accept_lambda_channel_prop(operand, plain_is_effect_call, operand_span)
         };
         if accepted {
             if self.env.lambda_depth == 0 {
@@ -1294,27 +1312,14 @@ impl Checker {
     /// across the closure boundary (#489 unchanged). Accepting here marks the
     /// lambda fallible (usage-driven, L2); the lambda then infers as
     /// `(A) -> Result[T, String]`.
-    fn accept_lambda_channel_prop(&mut self, operand: &Ty) -> bool {
+    fn accept_lambda_channel_prop(&mut self, operand: &Ty, plain_is_effect_call: bool, operand_span: Option<ast::Span>) -> bool {
         let Some(chan) = self.env.lambda_ret.clone() else { return false };
         let op = resolve_ty(operand, &self.uf);
         let accepted = match (&chan, &op) {
             (
                 Ty::Applied(TypeConstructorId::Result, ra),
                 Ty::Applied(TypeConstructorId::Result, oa),
-            ) if both_result_arity_two(ra, oa) => {
-                // E is String by the channel's construction (ADR-0002 D2, L3):
-                // a custom-E operand fails this unification, and the lowering
-                // renders its error as Debug text into the String channel.
-                // Recorded (#2601) for the `!` that later tries to propagate
-                // the erased String into a typed-error fn.
-                if !self.unify_infer(&ra[1], &oa[1]) {
-                    let erased = resolve_ty(&oa[1], &self.uf);
-                    if !matches!(erased, Ty::Unknown | Ty::TypeVar(_)) {
-                        self.lambda_err_erasures.push((erased, None, self.current_fn.as_ref().map(|f| f.0)));
-                    }
-                }
-                true
-            }
+            ) if both_result_arity_two(ra, oa) => true,
             // Option operand: none maps to err("none") (L4).
             (
                 Ty::Applied(TypeConstructorId::Result, _),
@@ -1324,6 +1329,11 @@ impl Checker {
         };
         if accepted {
             self.env.lambda_prop_used = true;
+            // ADR-0021: the operand's error joins the channel's ε; it is judged
+            // once ε is decided (`lambda_channel.rs`).
+            if let Some(err) = super::lambda_channel::classify_lambda_operand(&op, plain_is_effect_call) {
+                self.record_lambda_operand(err, operand_span);
+            }
         }
         accepted
     }

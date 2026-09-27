@@ -18,6 +18,10 @@ wasmparser = "0.259"
 almide-corpus = { path = "../almide-corpus" }
 anyhow = "1"
 almide-spine = { path = "../almide-spine" }
+# The portable re-checker (#2152), dependency-free: witness_floor counts a
+# fixture certified only when it ACCEPTS every frame (#2754). Its agreement
+# with the extracted kernel-proven checker is gated in proofs/gate.sh.
+almide-verify = { path = "../almide-verify" }
 almide-wasm-run = { path = "../almide-wasm-run" }
 almide = { path = "../.." }
 wasmparser = "0.259"

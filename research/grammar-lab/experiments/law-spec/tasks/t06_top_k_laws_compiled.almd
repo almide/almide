@@ -1,0 +1,31 @@
+let law_entry: LawGen[Entry] = {
+  make: (s, _size) => { name: law_string.make(law_mix(s, 1), 2), count: law_pick(s, 0, 3) },
+  shrink: (e) => law_shrink_int(e.count) |> list.filter((c) => c >= 0) |> list.map((c) => { name: e.name, count: c }),
+  show: (e) => "{ name: \"${e.name}\", count: ${e.count} }",
+}
+
+let law_nat: LawGen[Int] = {
+  make: (s, size) => law_pick(s, 0, size),
+  shrink: (v) => law_shrink_int(v) |> list.filter((c) => c >= 0),
+  show: (v) => int.to_string(v),
+}
+
+test "law: at most k entries" {
+  law_check("at most k entries", law_pair(law_named("es", law_list(law_entry)), law_named("k", law_nat)), ((es, k)) =>
+    list.len(top_k(es, k)) <= k)
+}
+
+test "law: ordered by count, then name" {
+  law_check("ordered by count, then name", law_pair(law_named("es", law_list(law_entry)), law_named("k", law_nat)), ((es, k)) => {
+    let r = top_k(es, k)
+    list.range(1, list.len(r)) |> list.all((i) =>
+      r[i - 1].count > r[i].count or (r[i - 1].count == r[i].count and r[i - 1].name <= r[i].name))
+  })
+}
+
+test "law: nothing better is left out" {
+  law_check("nothing better is left out", law_pair(law_named("es", law_list(law_entry)), law_named("k", law_nat)), ((es, k)) => {
+    let r = top_k(es, k)
+    list.len(r) == 0 or es |> list.all((e) => list.contains(r, e) or e.count <= r[list.len(r) - 1].count)
+  })
+}

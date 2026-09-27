@@ -48,6 +48,7 @@
 21	2	261849	21	spec/wasm_cross/bytes_push_growth.almd
 1	0	0	1	spec/wasm_cross/bytes_push_inplace.almd
 42	23	236	42	spec/wasm_cross/bytes_rawptr.almd
+13	7	76	9	spec/wasm_cross/bytes_repeat_product_wrap_oom.almd
 651	620	8508	651	spec/wasm_cross/bytes_search_edit_family.almd
 105	65	1081	105	spec/wasm_cross/bytes_set_on_record_field.almd
 48	32	377	48	spec/wasm_cross/bytes_set_value_semantics.almd
@@ -108,6 +109,7 @@
 9	7	44	9	spec/wasm_cross/ctor_turbofish_family.almd
 5	0	53	5	spec/wasm_cross/ctor_var_copy_semantics.almd
 72	54	678	72	spec/wasm_cross/datetime_format.almd
+~	spec/wasm_cross/datetime_monotonic_ns.almd
 1828	1626	16658	1645	spec/wasm_cross/datetime_parse_iso_strict.almd
 183	159	3198	183	spec/wasm_cross/datetime_pre_epoch.almd
 21	9	220	21	spec/wasm_cross/declaration_forms.almd
@@ -332,6 +334,7 @@
 58	39	450	58	spec/wasm_cross/koka_reuse1_unzip.almd
 31	16	266	31	spec/wasm_cross/koka_reuse4_map_rebuild.almd
 10	4	111	10	spec/wasm_cross/koka_unicode_combining.almd
+153	97	2206	106	spec/wasm_cross/lambda_failure_channel.almd
 7	2	111	7	spec/wasm_cross/let_unwrap_propagation.almd
 2	0	32	2	spec/wasm_cross/let_wildcard_discard.almd
 8	5	73	8	spec/wasm_cross/letbound_variant_match.almd
@@ -437,6 +440,7 @@
 31	8	346	21	spec/wasm_cross/matrix_from_bytes_offset_domain.almd
 52	15	3765	48	spec/wasm_cross/matrix_head_count_domain.almd
 26	12	447	26	spec/wasm_cross/matrix_index_domain_family.almd
+30	19	357	24	spec/wasm_cross/matrix_linear_f32_empty_extent_ceiling.almd
 32	10	557	24	spec/wasm_cross/matrix_neg_signed_zero.almd
 50	8	1704	23	spec/wasm_cross/matrix_pow_libm.almd
 132	84	2217	91	spec/wasm_cross/matrix_product_family.almd
@@ -444,6 +448,7 @@
 32	9	2580	10	spec/wasm_cross/matrix_q_dims_guard.almd
 232	183	44345	232	spec/wasm_cross/matrix_q_fp16_scale_domain.almd
 30	2	1385	20	spec/wasm_cross/matrix_select_rows.almd
+20	10	258	15	spec/wasm_cross/matrix_select_rows_f32_dims_ceiling.almd
 110	19	11333	89	spec/wasm_cross/matrix_select_rows_oob.almd
 88	47	19548	88	spec/wasm_cross/matrix_select_rows_q1_partial_block.almd
 42	6	4450	34	spec/wasm_cross/matrix_select_rows_wrapped_rid.almd
@@ -518,6 +523,7 @@
 39	27	315	39	spec/wasm_cross/or_pattern_heap_subject_matrix.almd
 84	28	1122	84	spec/wasm_cross/ord_record_variant.almd
 244	124	1652	244	spec/wasm_cross/ord_recursive.almd
+3	0	34	2	spec/wasm_cross/panic_value_arm.almd
 106	91	633	104	spec/wasm_cross/path_extension_hidden.almd
 2	0	16	2	spec/wasm_cross/phantom_type_param.almd
 0	0	0	0	spec/wasm_cross/pipe_chain_scalar_bind.almd
@@ -534,6 +540,7 @@
 ~	spec/wasm_cross/process_args.almd
 12	5	55	12	spec/wasm_cross/protocol_ufcs_inferred_lambda.almd
 21	14	185	21	spec/wasm_cross/pure_bang_propagation.almd
+0	0	0	0	spec/wasm_cross/pure_fn_output_and_assert_abort.almd
 10	2	112	9	spec/wasm_cross/qq_record_fallback.almd
 20	10	226	20	spec/wasm_cross/r5_lowmisc_param_try_err.almd
 3	0	58	0	spec/wasm_cross/r5_mod_global_init_order.almd

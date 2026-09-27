@@ -23,10 +23,21 @@ pub(crate) const OP_ENV_OS: i32 = 27;
 pub(crate) const OP_TEMP_DIR: i32 = 28;
 pub(crate) const OP_ARGS: i32 = 29;
 pub(crate) const OP_STDOUT_RAW: i32 = 30;
+/// Raw stderr append (#2769): op 30's twin on the error stream, with no
+/// newline added. `panic(msg)` writes `PANIC: <msg>` through it before its
+/// exit 1, because that is the byte shape the incumbent and native legs
+/// print; the `eprintln` import always appends a newline. 73 is the first
+/// code past the serve family (70..=72).
+pub(crate) const OP_STDERR_RAW: i32 = 73;
 pub(crate) const OP_STDIN_TAKE: i32 = 35;
 pub(crate) const OP_RANDOM_GET: i32 = 32;
 pub(crate) const OP_CWD: i32 = 33;
 pub(crate) const OP_WALL_NOW: i32 = 34;
+/// datetime.monotonic_ns: the MONOTONIC clock, raw nanos from the host's
+/// own unspecified origin (no status packing, no args). Only differences
+/// are meaningful, as native's first-call origin; op 34 is the wall clock
+/// and cannot stand in (it follows clock adjustments backwards).
+pub(crate) const OP_MONO_NOW: i32 = 60;
 /// env.sleep_ms (#1423 bucket A): the millisecond count rides the a_len
 /// slot with a null a_ptr (the op-35 scalar discipline — never a guest
 /// buffer), handled by the host BEFORE its buffer reads. No observable

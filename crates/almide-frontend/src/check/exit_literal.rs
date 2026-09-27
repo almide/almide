@@ -1,4 +1,6 @@
-//! Check the portable exit-code domain when the argument is a literal.
+//! Check the exit-status domain 0..=255 when the argument is a literal (C-351).
+//! The WASI preview-1 build's narrower 126..=255 wall is C-350's runtime line,
+//! not a check-time error: the checker does not know the build's target.
 use super::{Checker, err, int_literal_chain};
 use crate::ast::{Expr, ExprKind};
 use almide_base::intern::sym;
@@ -17,13 +19,13 @@ impl Checker {
             // E024 owns integer magnitudes too large to represent.
             return;
         };
-        if magnitude <= 125 && (!negated || magnitude == 0) {
+        if magnitude <= 255 && (!negated || magnitude == 0) {
             return;
         }
         let shown = if negated { format!("-{raw}") } else { raw };
         let mut diagnostic = err(
-            format!("exit code {shown} is outside the portable range 0..=125"),
-            "Use 0 for success or a code from 1 through 125 for failure",
+            format!("exit code {shown} is outside the exit-status range 0..=255"),
+            "Use 0 for success or a code from 1 through 255 for failure (a WASI preview-1 build delivers only 0..=125)",
             "process.exit argument",
         )
         .with_code("E084");

@@ -1,0 +1,7 @@
+test "merge interleaves" {
+  assert_eq(merge([1, 4], [2, 3]), [1, 2, 3, 4])
+}
+
+test "shared value appears once" {
+  assert_eq(merge([1, 2], [2, 3]), [1, 2, 3])
+}

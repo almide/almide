@@ -51,13 +51,21 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     // gets from TailCallOpt, from the same shared precondition check.
     let accumulated = accumulate_binary_recursion(ir);
     let ir = accumulated.as_ref().unwrap_or(ir);
+    // Witness sweeps (#2754) see the pass boundaries and which pass shipped
+    // (no-ops unless a sweep collects).
+    use crate::witness::{mark_pass as mark, mark_shipped as ship};
+    mark(1);
     let first = emit_program_pass(ir, None, library, true)?;
     let keep = (first.visited.len() < first.total).then_some(&first.visited);
-    let bounded = match keep {
-        Some(k) => emit_program_pass(ir, Some(k), library, true)?,
-        None => first.clone(),
+    let (bounded, bounded_pass) = match keep {
+        Some(k) => {
+            mark(2);
+            (emit_program_pass(ir, Some(k), library, true)?, 2)
+        }
+        None => (first.clone(), 1),
     };
     if !bounded.bounded_fired {
+        ship(bounded_pass);
         return Ok((bounded.bytes, bounded.ops));
     }
     // #2312: the bounded-line rewrites (line_bounded.rs) usually shrink a
@@ -65,8 +73,15 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     // out of it — but their helpers cost bytes when the checked machinery
     // ships anyway. Emit both and ship the smaller: never larger than the
     // checked emission, and the choice is deterministic.
+    mark(3);
     let checked = emit_program_pass(ir, keep, library, false)?;
-    let best = if bounded.bytes.len() < checked.bytes.len() { bounded } else { checked };
+    let best = if bounded.bytes.len() < checked.bytes.len() {
+        ship(bounded_pass);
+        bounded
+    } else {
+        ship(3);
+        checked
+    };
     Ok((best.bytes, best.ops))
 }
 
@@ -346,6 +361,8 @@ fn emit_program_pass(
             break;
         }
         for ll in pending {
+            // No witness recorder (`witness_name: None`): a counted decline (#2754).
+            crate::witness::decline_unrecorded(&format!("<lambda#{}>", lifted_fns.len()), "lambda");
             let plan = FnPlan {
                 ret: ll.ret,
                 cur_module: ll.cur_module.clone(),

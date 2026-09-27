@@ -260,6 +260,10 @@ impl Emitter<'_> {
             .i32_div_u()
             .i64_extend_i32_u()
             .local_set(hn);
+        // The shared C-161 ceiling on (row count, cols) BEFORE the product
+        // `mat_alloc_out64` forms — native ceilings the same pair first. A
+        // huge `cols` wrapped `n*c*8` past the OOM bound into a tiny block.
+        self.q_dims_guard(hn, hc);
         let ho = self.mat_alloc_out64(hn, hc)?;
         let hi = self.hold_i32()?;
         let hrid = self.hold_i64()?;

@@ -12,7 +12,8 @@
 //! arbitrary user type, so the mismatch is a check-time E022.
 //!
 //! A variant error flowing into a `String` fn stays accepted: the lowering
-//! renders it with its `Debug` text (`map_err`), which is a real conversion.
+//! renders it with its repr text (`map_err` to `almide_repr`, the text
+//! `"${e}"` shows — #2725), which is a real conversion.
 use super::{Checker, err};
 use super::types::resolve_ty;
 use crate::types::{Ty, TypeConstructorId};
@@ -66,10 +67,10 @@ impl Checker {
 
     /// #2601: the operand fails with `String` because a callback inside it
     /// erased a typed error — a `!` in a lambda propagates into the lambda's
-    /// own failure channel, which is always `String` (ADR-0012 D4 / ADR-0009
-    /// L3); only the canonical `(x) => f(x)!` callback, whose whole body is
-    /// one `!`, keeps `f`'s error type (ADR-0006 D1). "Fails with `String`"
-    /// was true and pointed away from the cause, so name the callback's `!`.
+    /// own failure channel, and that channel is `String` when the callback's
+    /// `!`s (or its `Result` result) do not all fail with one type (ADR-0021
+    /// D1). "Fails with `String`" was true and pointed away from the cause, so
+    /// name the callback's `!`.
     fn report_lambda_erasure(&mut self, channel: &Ty, op_err: &Ty) -> bool {
         if resolve_ty(op_err, &self.uf) != Ty::String {
             return false;
@@ -85,14 +86,13 @@ impl Checker {
             format!(
                 "operator '!' cannot propagate this error: the fn's error type is `{fn_err}`, but the callback's `!`{at} \
                  turned its `{erased}` error into `String` — a `!` inside a lambda propagates into the lambda's own \
-                 failure channel, which is always `String`"
+                 failure channel, which is `String` here because not everything in the callback fails with `{erased}`"
             ),
             format!(
-                "Only a callback whose WHOLE body is one `call(..)!` keeps that call's error type: \
-                 `(x) => f(x)!` makes the call that takes it fail with `{erased}`, while \
-                 `(x) => if c then v else f(x)!` makes it fail with `String`. \
-                 Move the branch into the called fn so the callback is a single `call(..)!`, \
-                 or write the traversal as explicit recursion in this fn."
+                "A callback fails with `{erased}` when every `!` in it, and its `Result` result if it has one, fails \
+                 with `{erased}`. Convert the odd one where it happens — `result.map_err((e) => SomeCase(e))` before \
+                 its `!`, or a `{erased}` case in place of a `String` `err(..)` — so the call that takes the callback \
+                 fails with `{erased}`."
             ),
             "operator !",
         ).with_code("E022"));

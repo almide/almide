@@ -114,6 +114,17 @@ fn emit_err_line(host: &Host, line: &str) {
     }
 }
 
+/// Append to stderr verbatim — op 73, the newline-free twin of
+/// [`emit_err_line`].
+fn emit_err_raw(host: &Host, text: &str) {
+    *host.err_last.lock().expect("err last") = text.to_string();
+    if host.live_out.is_some() {
+        eprint!("{text}");
+    } else {
+        host.err.lock().expect("test harness invariant").push_str(text);
+    }
+}
+
 /// Where op 35 gets its bytes: a fixed buffer (tests, piped runs), or
 /// the process's real stdin read at the FIRST guest read — so a program
 /// that never touches stdin never blocks on an open terminal.
@@ -168,39 +179,10 @@ fn io_err(call: &str, args: &str, e: impl std::fmt::Display) -> String {
 fn q(s: &str) -> String {
     format!("\"{s}\"")
 }
-/// The Almide call an fs op came from, so the message names what the WRITER
-/// wrote rather than the host primitive that served it. `fold_lines` /
-/// `for_each_line` have their own ops for exactly this reason (#2090).
-fn fs_op_name(op: i32) -> &'static str {
-    match op {
-        1 => "fs.read_text",
-        2 => "fs.write",
-        3 => "fs.write_bytes",
-        7 => "fs.mkdir_p",
-        8 => "fs.remove",
-        9 => "fs.remove_all",
-        10 => "fs.create_temp_dir",
-        11 => "fs.list_dir",
-        12 => "fs.read_lines",
-        13 => "fs.read_text_if_exists",
-        14 => "fs.read_bytes",
-        15 => "fs.write_bytes_raw",
-        16 => "fs.append",
-        17 => "fs.file_size",
-        18 => "fs.modified_at",
-        19 => "fs.copy",
-        20 => "fs.rename",
-        21 => "fs.create_temp_file",
-        23 => "fs.walk",
-        24 => "fs.read_lines_if_exists",
-        25 => "fs.read_bytes_if_exists",
-        38 => "fs.stat",
-        39 => "fs.glob",
-        51 => "fs.fold_lines",
-        52 => "fs.for_each_line",
-        _ => "fs",
-    }
-}
+/// The Almide call an fs op came from — ONE table with the p1 fs service
+/// (`almide_wasi::fs_op_name`), so the stock-runtime artifact and this host
+/// cannot spell a call two ways (#2090, #2742).
+use crate::wasi::fs_op_name;
 
 /// Length-prefixed string frames (u32 LE + bytes) — the list-of-strings
 /// result encoding the guest decoder walks.
@@ -953,6 +935,14 @@ fn run_wasm_src(
                 std::thread::sleep(std::time::Duration::from_millis(ms));
                 return Ok(0);
             }
+            // op 60 = the monotonic clock (datetime.monotonic_ns): raw
+            // nanos since the run's first read, native's own origin rule
+            // (a process-wide OnceLock<Instant>). No args, no buffer.
+            if op == 60 {
+                static ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+                let start = ORIGIN.get_or_init(std::time::Instant::now);
+                return Ok(start.elapsed().as_nanos() as i64);
+            }
             // ops 54..=59 = the http call handle on call `id` (#2633): the
             // id rides a_len (scalar, null a_ptr — the op-35 discipline).
             if (54..=59).contains(&op) {
@@ -993,6 +983,11 @@ fn run_wasm_src(
             }
             if op == 30 {
                 emit_out(caller.data(), &String::from_utf8_lossy(&b));
+                return Ok(0);
+            }
+            // op 73 = raw stderr append (`panic`'s line, #2769): no newline.
+            if op == 73 {
+                emit_err_raw(caller.data(), &String::from_utf8_lossy(&b));
                 return Ok(0);
             }
             // http.serve (#2650): the listener and the held connection

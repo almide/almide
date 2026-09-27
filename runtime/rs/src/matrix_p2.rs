@@ -395,7 +395,7 @@ pub fn almide_rt_matrix_linear_q1_0_row_no_bias(
     // the raw capacity-overflow form at the `out` allocation below.
     let (out_cols, n_in) = almide_rt_matrix_dims(w_rows, w_cols);
     if x_rows == 0 || out_cols == 0 || n_in == 0 {
-        return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
+        return linear_empty_out(x_rows, w_rows);
     }
     // The activation row is read `n_in` wide out of the flat store: a wider
     // `x` was silently mis-strided, a narrower one a raw slice panic.
@@ -678,6 +678,15 @@ fn par_out_rows(out: &mut [f64], f: impl Fn(usize, &mut f64) + Sync) {
     }
 }
 
+/// The empty-extent answer of the `linear_*_row_no_bias` family: the all-zero
+/// `rows(x) × w_rows` matrix, i.e. `zeros(rows(x), w_rows)` — so its shape
+/// clamps and ceilings through `almide_rt_matrix_dims` like every constructor
+/// (C-161) instead of reaching `vec!` unchecked (#2783).
+fn linear_empty_out(x_rows: usize, w_rows: i64) -> AlmideMatrix {
+    let (r, c) = almide_rt_matrix_dims(x_rows as i64, w_rows);
+    mk(r, c, vec![0.0f64; r * c])
+}
+
 /// `y = x @ Wᵀ` where W is f32 row-major (out, in) still sitting in the
 /// source byte buffer at `w_offset`.
 pub fn almide_rt_matrix_linear_f32_row_no_bias(
@@ -688,12 +697,17 @@ pub fn almide_rt_matrix_linear_f32_row_no_bias(
     w_cols: i64,
 ) -> AlmideMatrix {
     let x_rows = x.rows;
-    let n_in = w_cols.max(0) as usize;
-    let out_cols = w_rows.max(0) as usize;
     let off = w_offset.max(0) as usize;
-    if x_rows == 0 || out_cols == 0 || n_in == 0 {
-        return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
+    // #2783: the empty-extent answer is `zeros(rows(x), w_rows)`, so its shape
+    // goes through the shared C-161 ceiling; a huge `w_rows` took the raw
+    // `capacity overflow` panic here (exit 101) or returned an over-ceiling
+    // matrix, where wasm aborts with `matrix dimensions too large`.
+    if x_rows == 0 || w_rows <= 0 || w_cols <= 0 {
+        return linear_empty_out(x_rows, w_rows);
     }
+    // The weight shape is a constructor's (`from_bytes_f32_le(.., w_rows,
+    // w_cols)` in the self-hosted definition): ceilinged before the width check.
+    let (out_cols, n_in) = almide_rt_matrix_dims(w_rows, w_cols);
     almide_rt_matrix_shape_eq(x.cols, n_in);
     // The weight window must be IN the buffer. Out of it, the answer is the
     // all-zero output — the same edge the unfused composition takes, because
@@ -994,12 +1008,13 @@ pub fn almide_rt_matrix_linear_q8_0_row_no_bias(
     w_cols: i64,
 ) -> AlmideMatrix {
     let x_rows = x.rows;
-    let n_in = w_cols.max(0) as usize;
-    let out_cols = w_rows.max(0) as usize;
     let off = w_offset.max(0) as usize;
-    if x_rows == 0 || out_cols == 0 || n_in == 0 || n_in % ALMIDE_Q8_BLOCK != 0 {
-        return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
+    // #2783: the same C-161 ceiling as the f32 twin, on the empty-extent
+    // answer and on the weight shape.
+    if x_rows == 0 || w_rows <= 0 || w_cols <= 0 || (w_cols as usize) % ALMIDE_Q8_BLOCK != 0 {
+        return linear_empty_out(x_rows, w_rows);
     }
+    let (out_cols, n_in) = almide_rt_matrix_dims(w_rows, w_cols);
     almide_rt_matrix_shape_eq(x.cols, n_in);
     let row_bytes = n_in / ALMIDE_Q8_BLOCK * ALMIDE_Q8_BLOCK_BYTES;
     // Out-of-buffer weights are the all-zero output, as in the f32 twin.

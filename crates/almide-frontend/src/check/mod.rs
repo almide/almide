@@ -30,6 +30,7 @@ mod diagnostics;
 mod deprecation_warn;
 mod exit_literal;
 mod bang_error_channel;
+mod lambda_channel;
 mod intrinsic_authority;
 mod exhaustiveness;
 
@@ -71,6 +72,9 @@ pub(crate) struct FnToCheck<'a> {
     pub body: &'a mut ast::Expr,
     pub effect: &'a Option<bool>,
     pub generics: &'a mut Option<Vec<ast::GenericParam>>,
+    /// The declaration's span: where the E029 search for an unknown
+    /// parameter / return type starts (#2771).
+    pub span: Option<ast::Span>,
 }
 
 pub(crate) fn err(msg: impl Into<String>, hint: impl Into<String>, ctx: impl Into<String>) -> Diagnostic {
@@ -251,6 +255,17 @@ pub struct Checker {
     /// construction: resolve_type_expr turns an in-scope generic into
     /// `Ty::TypeVar` at annotation time, never `Named`.
     pub(crate) deferred_unknown_type_checks: Vec<(Ty, Option<crate::ast::Span>, String)>,
+    /// Diagnostics about a value whose type is an UNDECLARED name (#2771):
+    /// `e.count` on `e: Entyr` is a consequence of the unknown type, not a
+    /// second error, and its hint ("values outside records have no fields")
+    /// sends the reader toward the wrong fix. Held here keyed by the name;
+    /// post-solve, the E029 walk drops every entry whose name it reported
+    /// and emits the rest, so a suppressed site never loses its only error.
+    pub(crate) deferred_cascade_diags: Vec<(Sym, Diagnostic)>,
+    /// Where the current pass's declaration-body diagnostics begin: the
+    /// root-cause E029s are spliced in here, ahead of anything their unknown
+    /// type caused, so a reader of the first N diagnostics sees the cause.
+    pub(crate) body_diag_start: usize,
     /// Empty-collection producers whose element type must be inferable from
     /// context. Each entry is the producer's result `Ty` (carrying the fresh
     /// element type var), the construct kind (for the diagnostic's wording), and
@@ -304,7 +319,7 @@ pub struct Checker {
     /// deprecation warning (E043) must fire only on USER-SPELLED try_*.
     pub(crate) hof_rewritten_calls: std::collections::HashSet<almide_lang::ast::ExprId>,
     /// #2601: every `!` inside a lambda whose operand's error type is not
-    /// `String` — the lambda's failure channel is always `String` (ADR-0012
+    /// `String` — the lambda's failure channel is `String` when its `!`s disagree (ADR-0021; formerly always, ADR-0012
     /// D4 / ADR-0009 L3), so that `!` erases the typed error into its
     /// Debug text. Recorded (erased type, `!` span) so a LATER `!` that
     /// propagates the erased `String` into a fn with a typed error can name
@@ -312,6 +327,9 @@ pub struct Checker {
     /// The third field is the enclosing fn (`current_fn`), so a value-consumed
     /// erasure is named only inside the fn that made it (#2722).
     pub(crate) lambda_err_erasures: Vec<(Ty, Option<crate::ast::Span>, Option<Sym>)>,
+    /// ADR-0021: every lambda's failure channel ε — open while its body is
+    /// inferred, defaulted to the join of its `!` operands, then judged.
+    pub(crate) lambda_channels: lambda_channel::LambdaChannels,
     /// Set while a `!` is judged: the `lambda_err_erasures` length before its
     /// operand was inferred, so the erasures inside THAT operand are known.
     pub(crate) bang_erasure_mark: Option<usize>,
@@ -634,8 +652,11 @@ impl Checker {
             fallible_marker_fns: std::collections::HashSet::new(),
             hof_rewritten_calls: std::collections::HashSet::new(),
             lambda_err_erasures: Vec::new(),
+            lambda_channels: Default::default(),
             bang_erasure_mark: None,
             deferred_unknown_type_checks: Vec::new(),
+            deferred_cascade_diags: Vec::new(),
+            body_diag_start: 0,
             pending_toplet_tys: Vec::new(),
         }
     }
@@ -1131,6 +1152,7 @@ impl Checker {
         self.refresh_module_top_lets(program, "__entry");
         self.validate_protocol_refs(program);
         self.validate_bare_type_visibility(program);
+        self.body_diag_start = self.diagnostics.len();
         for decl in program.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();
@@ -1361,6 +1383,7 @@ pub(crate) fn is_literal_numeric_ast(e: &ast::Expr) -> bool {
 }
 
 include!("post_solve_validation.rs");
+include!("unknown_type_root.rs");
 include!("interp_string_form.rs");
 include!("lint_error_surface.rs");
 include!("bounded.rs");

@@ -262,11 +262,18 @@ impl Emitter<'_> {
         i.local_get(hn).i64_const(0).i64_gt_s();
         i.local_get(bh).i32_load(len_memarg()).i32_const(0).i32_ne().i32_and();
         i.select().local_set(hn);
-        // total = len * n, judged in i64 BEFORE the i32 wrap —
-        // past the structural bound is the C-197 die.
+        // total = len * n past the structural bound is the C-197 die —
+        // judged by DIVISION, `n > 0x7FFF_0000 / len`, never on the
+        // product: `len * n` wraps i64 for a huge n (`[1, 2, 3]` ×
+        // 6148914691236517206 wraps to 2), passed the bound, sized a tiny
+        // block and the copy loop wrote past it into an out-of-bounds trap
+        // (#2782). n is clamped to 0 when len is 0, so the divisor is
+        // max(len, 1) — the eager `i64.div_u` never sees zero.
+        i.local_get(hn).i64_const(0x7FFF_0000);
         i.local_get(bh).i32_load(len_memarg()).i64_extend_i32_u();
-        i.local_get(hn).i64_mul();
-        i.i64_const(0x7FFF_0000).i64_gt_s().if_(BlockType::Empty);
+        i.local_get(bh).i32_load(len_memarg()).i32_eqz().i64_extend_i32_u();
+        i.i64_add().i64_div_u();
+        i.i64_gt_s().if_(BlockType::Empty);
         i.i32_const(oom as i32).call(F_EPRINTLN_BLOCK);
         i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
         i.end();

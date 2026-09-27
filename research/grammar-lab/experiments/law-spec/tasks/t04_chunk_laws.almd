@@ -1,0 +1,11 @@
+law "chunks rebuild the list" for (xs: List[Int], n: Int where it >= 1) {
+  list.flatten(chunk(xs, n)) == xs
+}
+
+law "no chunk is empty" for (xs: List[Int], n: Int where it >= 1) {
+  chunk(xs, n) |> list.all((c) => list.len(c) > 0)
+}
+
+law "only the first chunk may be short" for (xs: List[Int], n: Int where it >= 1) {
+  chunk(xs, n) |> list.drop(1) |> list.all((c) => list.len(c) == n)
+}

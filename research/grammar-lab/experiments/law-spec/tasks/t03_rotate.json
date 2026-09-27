@@ -1,0 +1,8 @@
+{
+  "source_dir": "source",
+  "instruction": "Make `rotate` work for any `k`: a negative `k` rotates right, and a `k` larger than the length wraps around.",
+  "test_file": "t03_rotate_test.almd",
+  "hidden_file": "t03_rotate_hidden.almd",
+  "laws_file": "t03_rotate_laws.almd",
+  "laws_compiled_file": "t03_rotate_laws_compiled.almd"
+}

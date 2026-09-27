@@ -75,7 +75,7 @@ impl<'a> Interpreter<'a> {
                             SpineOutcome::Transfer {
                                 next,
                                 next_args,
-                                try_marker: Some(marker_is_option_identity(&cur.ty)),
+                                try_marker: Some(self.try_mark(&cur.ty, &inner.ty)),
                             }
                         }
                         Some(out) => out,

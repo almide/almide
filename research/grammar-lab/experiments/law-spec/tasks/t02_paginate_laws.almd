@@ -1,0 +1,7 @@
+law "pages 1..page_count rebuild the list" for (xs: List[Int], size: Int where it >= 1) {
+  list.range(1, page_count(xs, size) + 1) |> list.flat_map((p) => page(xs, p, size)) == xs
+}
+
+law "a page below 1 is empty" for (xs: List[Int], size: Int where it >= 1, p: Int) {
+  p >= 1 or list.len(page(xs, p, size)) == 0
+}

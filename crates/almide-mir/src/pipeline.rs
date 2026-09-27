@@ -686,6 +686,11 @@ fn try_render_wasm_source_impl(
     if mode == RenderMode::Library {
         synthesize_library_main(&mut ir);
     }
+    // C-350's preview-1 wall (#2780): this renderer's artifact always calls
+    // `proc_exit` directly, which a stock runtime traps on for 126..=255, so
+    // the band prints its defined line and exits 1 here. Wasm-only by
+    // position — `source_to_ir_with` also feeds the native trust-spine render.
+    almide_ir::exit_code::wall_preview1_exit_codes(&mut ir);
     try_render_wasm_source_impl_rest(&mut ir, verbose)
 }
 

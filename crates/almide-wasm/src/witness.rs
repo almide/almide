@@ -448,8 +448,53 @@ pub fn start_collecting() {
     *sink().lock().expect("witness sink") = Some(Vec::new());
 }
 
+/// Every frame the sweep collected, over EVERY emission pass (the pass
+/// markers are stripped).
 pub fn take() -> Vec<(String, String)> {
-    sink().lock().expect("witness sink").take().unwrap_or_default()
+    take_with_shipped().0
+}
+
+/// The sink's pass boundaries (#2754). `emit_program` emits in up to three
+/// passes — the first over the WHOLE linked registry graph, the next over
+/// the reachable set, a third when the bounded-line rewrites fired — and
+/// ships one of them. A frame only an earlier pass emitted (a dead linked
+/// stdlib body) is not in the artifact, so a per-program verdict reads the
+/// SHIPPED pass. The markers use a name no function can spell.
+const PASS_MARK: &str = "\u{0}pass";
+const SHIPPED_MARK: &str = "\u{0}shipped";
+
+/// Both markers go through `push`, a no-op unless a sweep collects.
+pub(crate) fn mark_pass(pass: usize) {
+    push(PASS_MARK, pass.to_string());
+}
+
+pub(crate) fn mark_shipped(pass: usize) {
+    push(SHIPPED_MARK, pass.to_string());
+}
+
+/// `(function name, certificate)` pairs, in emission order.
+pub type Frames = Vec<(String, String)>;
+
+/// `(every frame of every pass, the frames of the pass that shipped)`. The
+/// second is empty when no pass was marked as shipped (a refused program).
+pub fn take_with_shipped() -> (Frames, Frames) {
+    let raw = sink().lock().expect("witness sink").take().unwrap_or_default();
+    let shipped = raw.iter().rev().find(|(n, _)| n == SHIPPED_MARK).map(|(_, p)| p.clone());
+    let mut all = Vec::new();
+    let mut in_shipped = Vec::new();
+    let mut current: Option<String> = None;
+    for (name, cert) in raw {
+        if name == PASS_MARK {
+            current = Some(cert);
+        } else if name == SHIPPED_MARK {
+        } else {
+            if shipped.is_some() && current == shipped {
+                in_shipped.push((name.clone(), cert.clone()));
+            }
+            all.push((name, cert));
+        }
+    }
+    (all, in_shipped)
 }
 
 pub(crate) fn collecting() -> bool {
@@ -472,6 +517,16 @@ pub const DECLINE_PREFIX: &str = "!decline:";
 /// names the next shape to admit.
 pub(crate) fn push_decline(name: &str, reason: &str) {
     push(name, format!("{DECLINE_PREFIX}{reason}\n"));
+}
+
+/// A frame the emitter builds WITHOUT a recorder — a lifted lambda, a
+/// display / equality / scan helper — counted as a decline while a sweep
+/// collects (#2754), so a program whose such frames went unrecorded never
+/// reads as fully certified. A no-op otherwise.
+pub(crate) fn decline_unrecorded(name: &str, reason: &str) {
+    if collecting() {
+        push_decline(name, reason);
+    }
 }
 
 // The Emitter-side hooks live in witness_hooks.rs.

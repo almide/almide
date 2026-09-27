@@ -1,0 +1,12 @@
+// Split a list into chunks of n elements; the first chunk may be shorter.
+
+fn chunk[T](xs: List[T], n: Int) -> List[List[T]] = {
+  let head = list.len(xs) % n
+  if list.len(xs) == 0 then []
+  else if head == 0 then rest_chunks(xs, n)
+  else [list.take(xs, head)] + rest_chunks(list.drop(xs, head), n)
+}
+
+fn rest_chunks[T](xs: List[T], n: Int) -> List[List[T]] =
+  if list.len(xs) == 0 then []
+  else [list.take(xs, n)] + rest_chunks(list.drop(xs, n), n)

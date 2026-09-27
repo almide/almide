@@ -1,0 +1,8 @@
+{
+  "source_dir": "source",
+  "instruction": "Put the short chunk first instead of last: `chunk([1, 2, 3, 4, 5], 2)` should be `[[1], [2, 3], [4, 5]]`.",
+  "test_file": "t04_chunk_test.almd",
+  "hidden_file": "t04_chunk_hidden.almd",
+  "laws_file": "t04_chunk_laws.almd",
+  "laws_compiled_file": "t04_chunk_laws_compiled.almd"
+}

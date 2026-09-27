@@ -164,6 +164,7 @@ call:datetime.format
 call:datetime.from_parts
 call:datetime.hour
 call:datetime.minute
+call:datetime.monotonic_ns
 call:datetime.month
 call:datetime.parse_iso
 call:datetime.second
@@ -173,6 +174,7 @@ call:datetime.year
 call:env.args
 call:env.cwd
 call:env.get
+call:env.millis
 call:env.os
 call:env.set
 call:env.sleep_ms
@@ -345,6 +347,7 @@ call:list.__fallible_filter_map__Int_String_String
 call:list.__fallible_find__Int_String
 call:list.__fallible_flat_map__Int_Int_String
 call:list.__fallible_flat_map__Int_String_String
+call:list.__fallible_fold__Int_Int_E
 call:list.__fallible_fold__Int_Int_String
 call:list.__fallible_map__Int_Int_String
 call:list.__fallible_map__Int_Option_Int_String

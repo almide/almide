@@ -164,7 +164,13 @@ fail=0; n=0
 # MIR lowering walls on both hosts (proofs/walled-real-baseline.txt); the
 # structural leg renders it byte-identically to native. Recorded, not ported:
 # the incumbent is retiring under #1696.
-MAX_WALLED=29
+# 30 as of 2026-09-27 (#2725, C-369): UP from 29 by lambda_failure_channel.almd,
+# whose typed-error erasure into a String channel and non-liftable fallible
+# fold/map callbacks the incumbent MIR lowering walls on both hosts
+# (proofs/walled-real-baseline.txt); the structural leg renders it
+# byte-identically to native. Recorded, not ported: the incumbent is retiring
+# under #1696.
+MAX_WALLED=30
 walled=0
 for fix in "$FIXTURE_DIR"/*.almd; do
   [ -e "$fix" ] || continue

@@ -242,6 +242,14 @@ impl Checker {
         let target = match resolve_ty(joined, &self.uf) {
             Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => Some(args),
             Ty::Never | Ty::Unknown | Ty::TypeVar(_) => None,
+            // ADR-0021: inside a lambda a value-join `err(..)` arm returns into
+            // the lambda's own channel — its error type joins ε.
+            _ if self.env.lambda_depth > 0 => {
+                for (payload, span) in &err_payloads {
+                    self.record_lambda_returned_err(&Ty::result(Ty::Unit, payload.clone()), false, *span);
+                }
+                None
+            }
             value => self.bang_channel_err_ty().map(|e| vec![value, e]),
         };
         let Some(target) = target else { return };
@@ -429,7 +437,11 @@ impl Checker {
                 let then_ty = self.infer_expr(then);
                 self.env.pop_scope();
                 let else_ty = self.infer_expr(else_);
-                self.constrain_with_hint(then_ty.clone(), else_ty, "if let branches", None);
+                self.constrain_with_hint(then_ty.clone(), else_ty.clone(), "if let branches", None);
+                // #2769: a diverging `then` arm types the if as its `else` arm.
+                if matches!(resolve_ty(&then_ty, &self.uf), Ty::Never) {
+                    return else_ty;
+                }
                 then_ty
     }
 
@@ -509,6 +521,14 @@ impl Checker {
                 // `Result[T, E]`, and the paragraph above requires the if's type to
                 // keep that wrapper for the wasm emitter — handing back the
                 // unwrapped width there would retype the whole expression.
+                // #2769: a diverging `then` arm (`panic(..)`, `Never`) produces no
+                // value, so the if types as its `else` arm — the rule the match
+                // join already follows (the first non-`Never` arm). Typing the
+                // if `Never` made the value-producing `else` arm unreachable to
+                // every lowering: MIR dropped it and returned nothing.
+                if matches!(resolve_ty(&then_ty, &self.uf), Ty::Never) {
+                    return else_ty;
+                }
                 match joined {
                     Some(t) if super::solving::is_numeric_scalar(&resolve_ty(&then_ty, &self.uf)) => t,
                     _ => then_ty,

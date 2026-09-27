@@ -102,6 +102,15 @@ fn bytes_repeat(b: Bytes, count: Int) -> Bytes = {
   let blen = prim.load32(prim.handle(b) + 4)
   // An EMPTY base is empty at ANY count (#2690) — the copy recursion runs n times.
   let n = if count > 0 and blen > 0 then count else 0
+  // `blen * n` must not WRAP (#2782): `[1, 2, 3]` × 6148914691236517206 is 2
+  // in i64, sized a 2-byte block and the copy recursion wrote past it into an
+  // out-of-bounds trap. A product past i64 is unsatisfiable, so it is the
+  // floor's own `Error: out of memory` (C-197) — tested by division, never on
+  // the wrapped product; below that the floor judges the size as before.
+  // `wrap_bound` is the largest count whose product fits i64 — an overflow
+  // bound, not an allocation ceiling (the floor still owns that).
+  let wrap_bound = if blen > 0 then 9223372036854775807 / blen else 0
+  if n > wrap_bound then prim.die(prim.handle("Error: out of memory\n")) else ()
   let out = prim.alloc_bytes(blen * n)
   let _x = __repcopy(prim.handle(out) + 12, prim.handle(b) + 12, blen, n, 0)
   out

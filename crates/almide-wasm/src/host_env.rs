@@ -202,6 +202,14 @@ impl Emitter<'_> {
                 self.wall_now_div(1_000_000);
                 Some(Lowered::scalar(INT))
             }
+            // The monotonic clock (op 60): raw nanos from the host's own
+            // origin, no division — native's `monotonic_ns` counts from its
+            // first call, so only differences agree across legs, which is the
+            // whole documented contract. Never-err, a bare Int like op 34.
+            ("datetime", "monotonic_ns", []) => {
+                self.fs_call_0(crate::fs_meta::OP_MONO_NOW)?;
+                Some(Lowered::scalar(INT))
+            }
             ("io", "read_line", []) => {
                 self.io_read_line()?;
                 Some(Lowered::owned(STR))
@@ -399,12 +407,18 @@ impl Emitter<'_> {
 
     /// Bytes handle on the stack → op 30 (raw stdout append).
     fn io_stdout_raw(&mut self) -> Result<(), EmitError> {
+        self.io_raw(OP_STDOUT_RAW)
+    }
+
+    /// A String/Bytes handle on the stack → `op` (op 30 raw stdout, op 73
+    /// raw stderr): the payload bytes verbatim, no newline added.
+    pub(crate) fn io_raw(&mut self, op: i32) -> Result<(), EmitError> {
         let hb = self.hold_i32()?;
         let mut i = self.f.instructions();
         i.local_set(hb);
-        self.note_host_op(OP_STDOUT_RAW);
+        self.note_host_op(op);
         let mut i = self.f.instructions();
-        i.i32_const(OP_STDOUT_RAW);
+        i.i32_const(op);
         i.i32_const(0).i32_const(0);
         i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
         i.local_get(hb).i32_load(len_memarg());

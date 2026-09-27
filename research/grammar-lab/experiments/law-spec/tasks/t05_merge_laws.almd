@@ -1,0 +1,13 @@
+law "result is strictly ascending" for (a: List[Int], b: List[Int]) {
+  let r = merge(list.sort(a), list.sort(b))
+  list.range(1, list.len(r)) |> list.all((i) => r[i - 1] < r[i])
+}
+
+law "nothing is lost" for (a: List[Int], b: List[Int]) {
+  let r = merge(list.sort(a), list.sort(b))
+  (a + b) |> list.all((x) => list.contains(r, x))
+}
+
+law "nothing is invented" for (a: List[Int], b: List[Int]) {
+  merge(list.sort(a), list.sort(b)) |> list.all((x) => list.contains(a + b, x))
+}
