@@ -131,6 +131,7 @@
 13	3	106	9	spec/wasm_cross/effect_mut_generic_port.almd
 28	11	261	28	spec/wasm_cross/effect_option_explicit_bang.almd
 12	6	158	11	spec/wasm_cross/effect_slot_carrier.almd
+13	7	164	12	spec/wasm_cross/effect_slot_never_err_bang.almd
 12	6	143	12	spec/wasm_cross/effect_tail_carrier_family.almd
 3	0	48	3	spec/wasm_cross/effect_tco.almd
 ~	spec/wasm_cross/effect_tco_err_rewrap.almd
