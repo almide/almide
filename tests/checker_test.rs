@@ -886,8 +886,8 @@ fn unknown_param_type_suppresses_field_and_method_cascade() {
                fn k(e: Entyr) -> Int = e.frob()\n\
                fn main() -> Unit = println(\"x\")\n";
     let errs = check_located(src);
-    let codes: Vec<_> = errs.iter().map(|d| d.code.clone().unwrap_or_default()).collect();
-    assert_eq!(codes, vec!["E029".to_string()], "one root-cause error, no cascade: {:#?}", errs);
+    let codes: Vec<_> = errs.iter().map(|d| d.code.unwrap_or_default()).collect();
+    assert_eq!(codes, vec!["E029"], "one root-cause error, no cascade: {:#?}", errs);
     let d = &errs[0];
     assert_eq!(d.message, "unknown type 'Entyr'");
     // Located at the annotation, not span-less.
@@ -902,7 +902,7 @@ fn unknown_type_error_sorts_before_unrelated_body_errors() {
                fn g() -> Int = \"no\"\n\
                fn main() -> Unit = println(\"x\")\n";
     let errs = check_located(src);
-    assert_eq!(errs.first().and_then(|d| d.code.clone()).as_deref(), Some("E029"), "{:#?}", errs);
-    assert!(errs.iter().all(|d| d.code.as_deref() != Some("E013")), "{:#?}", errs);
+    assert_eq!(errs.first().and_then(|d| d.code), Some("E029"), "{:#?}", errs);
+    assert!(errs.iter().all(|d| d.code != Some("E013")), "{:#?}", errs);
     assert!(errs.len() >= 2, "the unrelated error survives: {:#?}", errs);
 }
