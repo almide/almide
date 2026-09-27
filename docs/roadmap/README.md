@@ -108,7 +108,7 @@
 
 ## On Hold
 
-31 items
+32 items
 
 | Item | Description |
 |------|-------------|
@@ -122,6 +122,7 @@
 | [Flow[T] — User Specification (Draft)](on-hold/flow-spec-draft.md) | Draft user-facing spec for Flow[T] — to be promoted to docs/specs/flow.md after Phase 1 |
 | [GPU Compute — Matrix Type and Compiler-Driven GPU Execution](on-hold/gpu-compute.md) | Matrix primitive type with compiler-driven CPU/GPU execution |
 | [IR Optimization Tier 2](on-hold/ir-optimization-tier2.md) | CSE and inlining passes for cross-target IR optimization |
+| [law ブロック実験 — C-ASSERTED を測ってみた記録 (2026-09-27)](on-hold/law-blocks-experiment.md) | C-ASSERTED の最初の実地測定。law ブロック(全入力で成り立つ性質)を LLM に読ませた MSR 実験と、同じ law を Lean の自動タクティクだけで何本閉じられるかの実験。数字・発見・Lean 相当に足りないもの・次の一手。 |
 | [LLM Integration](on-hold/llm-integration.md) | Built-in LLM commands for library generation, auto-fix, and code explanation |
 | [LSP Code Actions](on-hold/lsp-code-actions.md) | LSP code actions for auto-fix, refactoring, and import management |
 | [Tiny ML Inference Runtime](on-hold/ml-inference.md) | Tiny ML inference runtime using compile-time model specialization |

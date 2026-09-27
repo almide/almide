@@ -13,6 +13,8 @@
 > **兄弟文書**: [v1-proof-architecture](v1-proof-architecture.md)(着地形)、
 > [receipt-logic](receipt-logic.md)(受領書形式)、[trust-layer](trust-layer.md)
 > (L0–L4 信頼軸)。
+> **実測**: [law-blocks-experiment](../on-hold/law-blocks-experiment.md)(C-ASSERTED を
+> MSR と Lean 自動証明で一度叩いた記録、2026-09-27)。
 
 ---
 
