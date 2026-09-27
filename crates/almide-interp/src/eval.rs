@@ -581,3 +581,52 @@ pub(crate) fn marker_is_option_identity(node_ty: &Ty) -> bool {
     matches!(node_ty,
         Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) if a.len() == 1)
 }
+
+/// How a `!` hands its operand's error to a `String` failure channel
+/// (ADR-0021 D2, #2725) — the native `unwrap_expr` template's variants
+/// (codegen/templates/rust.toml): a typed `E` becomes its repr text
+/// (`map_err_debug`, `almide_repr`), a `List[String]` joins with `", "`
+/// (`map_err_join`), a `String` passes through.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ErrConv {
+    Keep,
+    Repr,
+    Join,
+}
+
+impl ErrConv {
+    pub(crate) fn apply(self, e: Box<Value>) -> Box<Value> {
+        match self {
+            ErrConv::Keep => e,
+            ErrConv::Repr => Box::new(Value::str(e.almide_repr())),
+            ErrConv::Join => match &*e {
+                Value::List(xs) => Box::new(Value::str(
+                    xs.iter().map(|x| x.display_bare()).collect::<Vec<_>>().join(", "),
+                )),
+                _ => e,
+            },
+        }
+    }
+}
+
+/// A `Try`/`Unwrap` marker's normalization: the C-216 Option identity bit
+/// and the error conversion into the enclosing channel.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct TryMark {
+    pub(crate) opt_identity: bool,
+    pub(crate) conv: ErrConv,
+}
+
+/// The conversion a `!` on an operand of type `operand_ty` makes into a
+/// `String` channel: none for a String error (or a non-Result operand — an
+/// Option's none is the `"none"` message already), the join for
+/// `List[String]`, the repr for any other concrete error type.
+pub(crate) fn err_conv_into_string(operand_ty: &Ty) -> ErrConv {
+    use almide_lang::types::constructor::TypeConstructorId as C;
+    let Ty::Applied(C::Result, a) = operand_ty else { return ErrConv::Keep };
+    match a.get(1) {
+        None | Some(Ty::String) | Some(Ty::Unknown) | Some(Ty::TypeVar(_)) => ErrConv::Keep,
+        Some(Ty::Applied(C::List, e)) if matches!(e.first(), Some(Ty::String)) => ErrConv::Join,
+        Some(_) => ErrConv::Repr,
+    }
+}
