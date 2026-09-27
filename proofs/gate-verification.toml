@@ -1076,7 +1076,7 @@ varies = "#2163 (2026-09-21): the twin parity test read this twin DIVERGED from 
 [[gate]]
 path = "scripts/check-native-musl.sh"
 reads = "scalar"
-wired_by = ".github/workflows/ci.yml"
+wired_by = ".github/workflows/ci.yml, .github/workflows/native-musl.yml"
 class = "NEGATIVE_TESTED"
 evidence = "#2777 landing (2026-09-28): locally, tests/native_musl/tls built for aarch64-apple-darwin (NATIVE_MUSL_TARGET forged to a dynamic target) went red naming `not a static binary: Mach-O 64-bit executable arm64`. The weekly native-musl.yml runs the gate with --selftest, which re-measures three forged runs every week and fails unless each is refused: CC_x86_64_unknown_linux_musl=musl-gcc-absent (the runner without musl-tools: ring's build fails), a x86_64-unknown-linux-gnu build (dynamic binary: static check fails), a forged expected.txt (output check fails)."
 measures = "per-fixture: almide build --target x86_64-unknown-linux-musl success, `file` reporting the binary statically linked, and byte equality of its stdout with tests/native_musl/<fixture>/expected.txt"
