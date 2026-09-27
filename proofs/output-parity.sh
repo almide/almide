@@ -8,7 +8,12 @@
 # `fn main` through both pipelines and byte-diffs stdout.
 #
 #   v0 oracle : `almide run <f>`                                  (native)
-#   v1        : examples/render_program <f> -> wat -> `wasmtime`  (the trust-spine path)
+#   v1        : `ALMIDE_WASM_STRUCTURAL=1 almide build <f> --target wasm` -> `wasmtime`
+#               (the STRUCTURAL leg — the renderer `--target wasm` ships by default —
+#               forced, so a structural decline is a WALL here and never an incumbent
+#               module standing in for it. Until #2793 this leg was the incumbent's
+#               `render_program`, which #1696/#2739 retire; the artifact is now the
+#               stock-WASI build a user ships, the move diff-fuzz.sh made in #2753.)
 #
 # Categories: MATCH / WALL (clean Unsupported — expected for unlinked stdlib) /
 # MISMATCH (renders but wrong bytes = silent miscompile) / RUNERR (renders but
@@ -20,6 +25,15 @@
 # RATCHET: proofs/output-parity-baseline.txt lists the files that MUST byte-match.
 # The gate FAILS if any baseline file stops matching (a regression). As fixes land,
 # re-run with `--update` to ADD newly-matching files (the baseline only grows).
+#
+# WALL LEDGER (#2793): proofs/output-parity-walled-baseline.txt names every file the
+# incumbent baseline held that the STRUCTURAL leg declines, each with its decline and
+# cause issue. It is EQUALITY-PINNED over the claim (baseline ∪ ledger), through the
+# helper the determinism gates share (scripts/lib/determinism-walled.sh):
+#   - a claimed file that walls with no row fails (coverage shrank);
+#   - a row whose file no longer walls fails as STALE (move it into the baseline);
+#   - MAX_WALLED below must equal the row count.
+# A ledger row is not in the baseline, and a baseline row may never wall.
 #
 #   bash proofs/output-parity.sh            # gate: fail on regression vs baseline
 #   bash proofs/output-parity.sh --update   # ratchet: regenerate the baseline
@@ -44,6 +58,11 @@ stamp_toolchain "$ROOT" || exit 1
 # baseline and demands identical bytes. The defaults are the gate.
 SPEC="${OUTPUT_PARITY_SPEC:-spec}"
 BASELINE="${OUTPUT_PARITY_BASELINE:-$ROOT/proofs/output-parity-baseline.txt}"
+WALLED="${OUTPUT_PARITY_WALLED:-$ROOT/proofs/output-parity-walled-baseline.txt}"
+# The structural walls of the claim. Equal to the ledger's row count, or the gate
+# fails — the number here and the names in the ledger cannot drift apart.
+MAX_WALLED=0
+source "$ROOT/scripts/lib/determinism-walled.sh"
 TMP="${TMPDIR:-/tmp}/almide-output-parity.$$"
 mkdir -p "$TMP"
 to() { perl -e 'alarm shift @ARGV; exec @ARGV' "$@"; }   # macOS has no `timeout`
@@ -70,10 +89,9 @@ if [ ! -x "$ALM" ]; then
 fi
 
 cd "$ROOT"
-cargo build -q -p almide-mir --example render_program 2>/dev/null || { echo "output-parity: render_program build failed"; exit 1; }
-RP="$ROOT/target/debug/examples/render_program"
 
 : > "$TMP/matches.txt"
+: > "$TMP/walls.txt"
 match=0; wall=0; mismatch=0; runerr=0; hang=0; v0fail=0; skip=0; xfail=0
 # F4 (flight-evidence-gaps): a NON-DETERMINISTIC verification result is not a
 # result. Under full-gate machine load the 20s alarm occasionally fires on files
@@ -108,11 +126,12 @@ run_one() { # $1=file -> sets VERDICT to match|mismatch|wall|runerr|hang|v0fail
   local f="$1" t="$2"
   to "$t" "$ALM" run "$f" > "$TMP/v0" 2>"$TMP/v0e" < /dev/null
   local v0rc=$?
-  "$RP" "$f" > "$TMP/wat" 2>/dev/null || {
+  rm -f "$TMP/m.wasm"
+  ALMIDE_WASM_STRUCTURAL=1 to "$t" "$ALM" build "$f" --target wasm -o "$TMP/m.wasm" > /dev/null 2>&1 < /dev/null || {
     if [ "$v0rc" -ne 0 ]; then VERDICT=v0fail; else VERDICT=wall; fi
     return
   }
-  to "$t" wasmtime "$TMP/wat" > "$TMP/v1" 2>"$TMP/v1e" < /dev/null
+  to "$t" wasmtime "$TMP/m.wasm" > "$TMP/v1" 2>"$TMP/v1e" < /dev/null
   local v1rc=$?
   # The alarm fired on the wasm leg (142 = 128 + SIGALRM from the perl wrapper;
   # 124 is what a `timeout`-style wrapper reports): the module never finished.
@@ -125,7 +144,7 @@ run_one() { # $1=file -> sets VERDICT to match|mismatch|wall|runerr|hang|v0fail
   if [ "$v0rc" -eq 0 ]; then VERDICT=match; return; fi
   # v0 FAILED (a trap/abort fixture): the full observable must agree —
   # exit code AND stderr (v1's normalized: strip the wasmtime module preamble).
-  sed -e "s|$TMP/wat|<module>|g" -e '/^Error: failed to run main module/d' \
+  sed -e "s|$TMP/m.wasm|<module>|g" -e '/^Error: failed to run main module/d' \
       -e '/^$/d' -e '/^Caused by:/d' -e 's/^ *[0-9]*: *//' "$TMP/v1e" > "$TMP/v1en"
   # v0's stderr is normalized symmetrically: `almide run` interleaves COMPILE
   # notes with the program's runtime stderr, and #931 made the native-fallback
@@ -197,7 +216,7 @@ for sv in "${suspects[@]:-}"; do
   case "$VERDICT" in
     match)    match=$((match+1)); echo "$f" >> "$TMP/matches.txt" ;;
     v0fail)   v0fail=$((v0fail+1)) ;;
-    wall)     wall=$((wall+1)) ;;
+    wall)     wall=$((wall+1)); echo "$f" >> "$TMP/walls.txt" ;;
     runerr)   runerr=$((runerr+1)); echo "$f" >> "$TMP/runerr.txt" ;;
     hang)     hang=$((hang+1)); echo "$f" >> "$TMP/hang.txt" ;;
     xfail)    xfail=$((xfail+1)); echo "$f" >> "$TMP/xfail.txt" ;;
@@ -251,6 +270,35 @@ if [ "$hang" -gt 0 ]; then
   echo "::error::output-parity: $hang fixture(s) HUNG on the v1 leg — a hang is never a baseline verdict; fix the renderer or wall the shape (#2567)"
   rm -rf "$TMP"; exit 1
 fi
+
+# THE WALL LEDGER (#2793). The claim is every file the baseline must match plus
+# every file the ledger excuses; the structural walls inside that claim must be
+# exactly the ledger's rows. Checked in both modes: `--update` ratchets the
+# matches, never the walls — a ledger row changes only by hand, with its cause.
+ledger_ok=1
+committed_rows="$(walled_ledger_rows "$ROOT/proofs/output-parity-walled-baseline.txt")"
+if [ "$committed_rows" -ne "$MAX_WALLED" ]; then
+  echo "::error::output-parity: MAX_WALLED=$MAX_WALLED but proofs/output-parity-walled-baseline.txt has $committed_rows row(s) — move both in the same change"
+  ledger_ok=0
+fi
+if [ -f "$WALLED" ]; then
+  grep -v '^[[:space:]]*#' "$WALLED" | grep -v '^[[:space:]]*$' | sed 's/[[:space:]]*::.*$//' | LC_ALL=C sort -u > "$TMP/ledger_rows.txt"
+else
+  : > "$TMP/ledger_rows.txt"
+fi
+{ if [ -f "$BASELINE" ]; then cat "$BASELINE"; fi; cat "$TMP/ledger_rows.txt"; } | grep -v '^[[:space:]]*$' | LC_ALL=C sort -u > "$TMP/claim.txt"
+LC_ALL=C sort -u "$TMP/walls.txt" | LC_ALL=C comm -12 - "$TMP/claim.txt" > "$TMP/claim_walls.txt"
+check_walled_ledger "$WALLED" "$TMP/claim_walls.txt" "output-parity" || ledger_ok=0
+if [ -f "$BASELINE" ]; then
+  both="$(LC_ALL=C sort -u "$BASELINE" | LC_ALL=C comm -12 - "$TMP/ledger_rows.txt")"
+  if [ -n "$both" ]; then
+    echo "::error::output-parity: these files are both a must-match baseline row and a wall-ledger row — a file is one or the other:"
+    echo "$both" | sed 's/^/  = /'
+    ledger_ok=0
+  fi
+fi
+if [ "$ledger_ok" -ne 1 ]; then rm -rf "$TMP"; exit 1; fi
+echo "output-parity: wall ledger OK — $(wc -l < "$TMP/claim_walls.txt" | tr -d ' ') claimed file(s) wall on the structural leg, each with its row."
 
 # The retry loop appends AFTER the first sort — comm(1) requires sorted input,
 # so re-sort before any baseline comparison (the unsorted tail made comm report
