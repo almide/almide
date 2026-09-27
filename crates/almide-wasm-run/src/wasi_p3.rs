@@ -116,7 +116,8 @@ const I_FS_WFUT: u32 = 38; // [future-read-1] of write-via-stream
 const I_FS_MKDIR: u32 = 39; // [method]descriptor.create-directory-at
 const I_FS_UNLINK: u32 = 40; // [method]descriptor.unlink-file-at
 const I_FS_RMDIR: u32 = 41; // [method]descriptor.remove-directory-at
-const IMPORTS: u32 = 42;
+const I_MONO_NOW: u32 = 42; // monotonic-clock.now (datetime.monotonic_ns, op 60)
+const IMPORTS: u32 = 43;
 
 // ── The p3 http client import block (#1710 PR B) ────────────────────────
 // Appended AFTER the fs table and included only when the module's op set
@@ -124,33 +125,33 @@ const IMPORTS: u32 = 42;
 // `-S http=y` from its runtime. Builtin names follow wit-parser's mangling
 // (`[stream-new-0][static]request.new`): the component encode validates
 // them against the world, so a drifted name fails loudly at emit.
-const I_HTTP_FIELDS_NEW: u32 = 42; // [constructor]fields () -> own<fields>
-const I_HTTP_REQ_NEW: u32 = 43; // [static]request.new (retptr: request + sent-future)
-const I_HTTP_REQ_SNEW: u32 = 44; // [stream-new-0] of request.new (contents)
-const I_HTTP_REQ_SWRITE: u32 = 45; // [stream-write-0] of request.new
-const I_HTTP_REQ_SDROPW: u32 = 46; // [stream-drop-writable-0] of request.new
-const I_HTTP_REQ_FNEW: u32 = 47; // [future-new-1] of request.new (trailers)
-const I_HTTP_REQ_FWRITE: u32 = 48; // [future-write-1] of request.new
-const I_HTTP_REQ_FDROPW: u32 = 49; // [future-drop-writable-1] of request.new
-const I_HTTP_REQ_SENTDROP: u32 = 50; // [future-drop-readable-2] of request.new
-const I_HTTP_SET_METHOD: u32 = 51; // [method]request.set-method
-const I_HTTP_SET_SCHEME: u32 = 52; // [method]request.set-scheme
-const I_HTTP_SET_AUTH: u32 = 53; // [method]request.set-authority
-const I_HTTP_SET_PATH: u32 = 54; // [method]request.set-path-with-query
-const I_HTTP_SEND: u32 = 55; // client.send (sync lower, retptr)
-const I_HTTP_STATUS: u32 = 56; // [method]response.get-status-code
-const I_HTTP_CONSUME: u32 = 57; // [static]response.consume-body (retptr)
-const I_HTTP_CB_FNEW: u32 = 58; // [future-new-0] of consume-body (handling result)
-const I_HTTP_CB_FWRITE: u32 = 59; // [future-write-0] of consume-body
-const I_HTTP_CB_FDROPW: u32 = 60; // [future-drop-writable-0] of consume-body
-const I_HTTP_BODY_READ: u32 = 61; // [stream-read-1] of consume-body (the body)
-const I_HTTP_BODY_DROPR: u32 = 62; // [stream-drop-readable-1] of consume-body
-const I_HTTP_TRL_DROPR: u32 = 63; // [future-drop-readable-2] of consume-body
-const I_HTTP_REQ_DROP: u32 = 64; // [resource-drop]request
-const I_HTTP_RESP_DROP: u32 = 65; // [resource-drop]response
-const I_HTTP_FIELDS_DROP: u32 = 66; // [resource-drop]fields
-const I_HTTP_FIELDS_APPEND: u32 = 67; // [method]fields.append (the framed family's headers, #1710)
-const IMPORTS_HTTP: u32 = 68;
+const I_HTTP_FIELDS_NEW: u32 = 43; // [constructor]fields () -> own<fields>
+const I_HTTP_REQ_NEW: u32 = 44; // [static]request.new (retptr: request + sent-future)
+const I_HTTP_REQ_SNEW: u32 = 45; // [stream-new-0] of request.new (contents)
+const I_HTTP_REQ_SWRITE: u32 = 46; // [stream-write-0] of request.new
+const I_HTTP_REQ_SDROPW: u32 = 47; // [stream-drop-writable-0] of request.new
+const I_HTTP_REQ_FNEW: u32 = 48; // [future-new-1] of request.new (trailers)
+const I_HTTP_REQ_FWRITE: u32 = 49; // [future-write-1] of request.new
+const I_HTTP_REQ_FDROPW: u32 = 50; // [future-drop-writable-1] of request.new
+const I_HTTP_REQ_SENTDROP: u32 = 51; // [future-drop-readable-2] of request.new
+const I_HTTP_SET_METHOD: u32 = 52; // [method]request.set-method
+const I_HTTP_SET_SCHEME: u32 = 53; // [method]request.set-scheme
+const I_HTTP_SET_AUTH: u32 = 54; // [method]request.set-authority
+const I_HTTP_SET_PATH: u32 = 55; // [method]request.set-path-with-query
+const I_HTTP_SEND: u32 = 56; // client.send (sync lower, retptr)
+const I_HTTP_STATUS: u32 = 57; // [method]response.get-status-code
+const I_HTTP_CONSUME: u32 = 58; // [static]response.consume-body (retptr)
+const I_HTTP_CB_FNEW: u32 = 59; // [future-new-0] of consume-body (handling result)
+const I_HTTP_CB_FWRITE: u32 = 60; // [future-write-0] of consume-body
+const I_HTTP_CB_FDROPW: u32 = 61; // [future-drop-writable-0] of consume-body
+const I_HTTP_BODY_READ: u32 = 62; // [stream-read-1] of consume-body (the body)
+const I_HTTP_BODY_DROPR: u32 = 63; // [stream-drop-readable-1] of consume-body
+const I_HTTP_TRL_DROPR: u32 = 64; // [future-drop-readable-2] of consume-body
+const I_HTTP_REQ_DROP: u32 = 65; // [resource-drop]request
+const I_HTTP_RESP_DROP: u32 = 66; // [resource-drop]response
+const I_HTTP_FIELDS_DROP: u32 = 67; // [resource-drop]fields
+const I_HTTP_FIELDS_APPEND: u32 = 68; // [method]fields.append (the framed family's headers, #1710)
+const IMPORTS_HTTP: u32 = 69;
 
 // Park offsets past the shared ones: retptr / future-payload scratch.
 const RET: u64 = 32;

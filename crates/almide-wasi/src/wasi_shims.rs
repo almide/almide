@@ -83,7 +83,7 @@ fn shim_exit() -> Function {
     f
 }
 
-/// The almide `fs_call` contract over WASI: ops 26/29/30/31/32/34/35/36/37
+/// The almide `fs_call` contract over WASI: ops 26/29/30/31/32/34/35/36/37/60
 /// supported (the environ/args trio routes to its own shims when they
 /// ship, #1716/#1841), everything else takes the defined refusal
 /// (stderr + exit 1).
@@ -175,6 +175,13 @@ fn shim_fs_call(
     // op 34: the wall clock, raw nanos.
     i.local_get(op).i32_const(34).i32_eq().if_(BlockType::Empty);
     i.i32_const(0).i64_const(1).i32_const(park as i32).call(3).drop();
+    i.i32_const(park as i32).i64_load(mem(0)).return_();
+    i.end();
+
+    // op 60: the monotonic clock (clock id 1), raw nanos — the clock the
+    // op-36 spin below already reads, so it adds no import.
+    i.local_get(op).i32_const(60).i32_eq().if_(BlockType::Empty);
+    i.i32_const(1).i64_const(1).i32_const(park as i32).call(3).drop();
     i.i32_const(park as i32).i64_load(mem(0)).return_();
     i.end();
 

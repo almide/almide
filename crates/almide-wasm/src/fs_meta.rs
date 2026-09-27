@@ -27,6 +27,11 @@ pub(crate) const OP_STDIN_TAKE: i32 = 35;
 pub(crate) const OP_RANDOM_GET: i32 = 32;
 pub(crate) const OP_CWD: i32 = 33;
 pub(crate) const OP_WALL_NOW: i32 = 34;
+/// datetime.monotonic_ns: the MONOTONIC clock, raw nanos from the host's
+/// own unspecified origin (no status packing, no args). Only differences
+/// are meaningful, as native's first-call origin; op 34 is the wall clock
+/// and cannot stand in (it follows clock adjustments backwards).
+pub(crate) const OP_MONO_NOW: i32 = 60;
 /// env.sleep_ms (#1423 bucket A): the millisecond count rides the a_len
 /// slot with a null a_ptr (the op-35 scalar discipline — never a guest
 /// buffer), handled by the host BEFORE its buffer reads. No observable

@@ -953,6 +953,14 @@ fn run_wasm_src(
                 std::thread::sleep(std::time::Duration::from_millis(ms));
                 return Ok(0);
             }
+            // op 60 = the monotonic clock (datetime.monotonic_ns): raw
+            // nanos since the run's first read, native's own origin rule
+            // (a process-wide OnceLock<Instant>). No args, no buffer.
+            if op == 60 {
+                static ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+                let start = ORIGIN.get_or_init(std::time::Instant::now);
+                return Ok(start.elapsed().as_nanos() as i64);
+            }
             // ops 54..=59 = the http call handle on call `id` (#2633): the
             // id rides a_len (scalar, null a_ptr — the op-35 discipline).
             if (54..=59).contains(&op) {
