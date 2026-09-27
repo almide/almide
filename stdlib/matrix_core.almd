@@ -688,6 +688,9 @@ fn matrix_select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int
   // alloc took the raw negative otherwise.
   let c = if cols < 0 then 0 else cols
   let n = list.len(row_ids)
+  // The output shape through the shared C-161 ceiling, as native's
+  // `almide_rt_matrix_dims(row_ids.len(), cols)` does first.
+  let _g = __mx_dims_guard(n, c)
   let out: List[List[Float]] = prim.alloc_list_str(n)
   let _x = __mx_f32_sel_rows(prim.handle(out), hd, off, len, row_ids, c, 0)
   out
