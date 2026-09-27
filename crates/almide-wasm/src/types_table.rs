@@ -77,9 +77,12 @@ pub(crate) struct TypeTable {
     /// member access, equality and patterns all reuse the Named machinery.
     anon_ids: RefCell<HashMap<Vec<(String, SliceTy)>, u32>>,
     /// Function-VALUE signatures (`SliceTy::Fn`), interned — handle
-    /// equality is carrier-signature equality. `effect` records the
-    /// carrier flag: an effect slot's body yields the RAW ok value and
-    /// wraps; a pure Result-typed slot's body yields the Result itself.
+    /// equality is CARRIER-signature equality (#2664): an `effect (A) -> B`
+    /// slot and a `(A) -> Result[B, String]` value are one type, since the
+    /// closure block and the call through it are the same either way.
+    /// Whether a lambda's body yields the raw ok value (and wraps) is the
+    /// LAMBDA's own fact, read at construction (emitter_values.rs), not the
+    /// slot's.
     fn_sigs: RefCell<Vec<FnSig>>,
     fn_sig_ids: RefCell<HashMap<FnSig, u32>>,
     /// Display name per def index ("" = anonymous record shape).
@@ -90,7 +93,6 @@ pub(crate) struct TypeTable {
 pub(crate) struct FnSig {
     pub(crate) params: Vec<SliceTy>,
     pub(crate) ret: Option<SliceTy>,
-    pub(crate) effect: bool,
 }
 
 impl TypeTable {

@@ -119,11 +119,7 @@ pub(crate) fn slice_ty_of(ty: &Ty, types: &TypeTable) -> Option<SliceTy> {
                     })
                 }
             };
-            Some(SliceTy::Fn(types.fn_sig(crate::types_table::FnSig {
-                params: ps,
-                ret: r,
-                effect: *is_effect,
-            })))
+            Some(SliceTy::Fn(types.fn_sig(crate::types_table::FnSig { params: ps, ret: r })))
         }
         Ty::Named(name, args) if args.is_empty() => bare_named_of(name.as_str(), types),
         Ty::Named(name, args) => types.instance(name.as_str(), args).map(SliceTy::Named),

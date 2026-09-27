@@ -39,10 +39,11 @@ impl Emitter<'_> {
                     TableEntry::Fn(idx)
                 } else {
                     match (info.ret, def.ret) {
+                        // A fn answering the raw value, in a slot whose
+                        // carrier is Result[raw, String]: only an effect slot
+                        // types that way (#2664 — the sig no longer says).
                         (Some(raw), Some(SliceTy::Result(o, er)))
-                            if def.effect
-                                && self.types.el(o) == raw
-                                && self.types.el(er) == STR =>
+                            if self.types.el(o) == raw && self.types.el(er) == STR =>
                         {
                             TableEntry::Adapter { target: idx, raw }
                         }
@@ -83,13 +84,22 @@ impl Emitter<'_> {
                     .map(|(v, _)| *v)
                     .zip(def.params.iter().copied())
                     .collect();
-                let effect_raw = if def.effect {
-                    match def.ret {
-                        Some(SliceTy::Result(o, _)) => Some(self.types.el(o)),
-                        _ => None,
+                // Does the body yield the RAW ok value, to be wrapped? The
+                // lambda's own fact (#2664): its body's type against the
+                // slot's carrier — a body typed as the Result yields it
+                // (the declared-Result single layer), a body typed as the
+                // ok value wraps. An untyped body falls back to the
+                // lambda's own effect flag.
+                let effect_raw = match def.ret {
+                    Some(SliceTy::Result(o, _)) => {
+                        let raw = self.types.el(o);
+                        match crate::ty::slice_ty_of(&body.ty, self.types) {
+                            Some(SliceTy::Result(..)) => None,
+                            Some(b) if b == raw => Some(raw),
+                            _ => matches!(e.ty, almide_types::types::Ty::Fn { is_effect: true, .. }).then_some(raw),
+                        }
                     }
-                } else {
-                    None
+                    _ => None,
                 };
                 // Closure block layout: [slot:i32][drop:i32][captures
                 // packed...] (`ENV_DROP_OFF`, #2010 ruling B). A C-319 cell
