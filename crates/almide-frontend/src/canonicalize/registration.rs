@@ -859,6 +859,44 @@ fn register_type_decl_finalize(env: &mut TypeEnv, name: &str, ty: &ast::TypeExpr
     }
 }
 /// Walk all declarations and register them into the type environment.
+/// The placeholder a reserved key holds until its declaration registers: an
+/// empty record or variant carrying a name no source can spell.
+const RESERVATION: &str = "<reserved>";
+
+fn is_reservation(t: &Ty) -> bool {
+    match t {
+        Ty::Record { fields } => fields.len() == 1 && fields[0].0.as_str() == RESERVATION,
+        Ty::Variant { name, cases } => cases.is_empty() && name.as_str() == RESERVATION,
+        _ => false,
+    }
+}
+
+/// Reserve `mod.Name` for every record and variant type a user module
+/// declares (see `register_decls`). Aliases and open-record shapes are
+/// transparent — resolution expands them — so they are not reserved. Returns
+/// the keys reserved.
+fn reserve_own_nominal_types(env: &mut TypeEnv, decls: &[ast::Decl], prefix: Option<&str>) -> Vec<Sym> {
+    let Some(m) = type_cur_mod(env, prefix) else { return Vec::new() };
+    if almide_lang::stdlib_info::is_bundled_module(m) {
+        return Vec::new();
+    }
+    let mut keys = Vec::new();
+    for decl in decls {
+        let ast::Decl::Type { name, ty, .. } = decl else { continue };
+        let placeholder = match ty {
+            ast::TypeExpr::Record { .. } => Ty::Record { fields: vec![(sym(RESERVATION), Ty::Unknown)] },
+            ast::TypeExpr::Variant { .. } => Ty::Variant { name: sym(RESERVATION), cases: vec![] },
+            _ => continue,
+        };
+        let key = sym(&format!("{}.{}", m, name));
+        if !env.types.contains_key(&key) {
+            env.types.insert(key, placeholder);
+            keys.push(key);
+        }
+    }
+    keys
+}
+
 pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decls: &[ast::Decl], prefix: Option<&str>) {
     // Catch duplicate `fn <name>` / `test "<name>"` at the Almide stage so that rustc's E0428 "defined multiple times" never leaks to the user with a src/main.rs span. Tracked per (kind, name), remembering the first span.
     let mut seen_fn: HashMap<String, Option<ast::Span>> = HashMap::new();
@@ -872,9 +910,27 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
     // and typed the fn against ANOTHER module's same-named type — E013 on a
     // correct program, or a bare name at the #433 codegen gate. Declaration
     // order is not meaningful in Almide, so the result must not depend on it.
+    // Every nominal type the module declares is reserved under its qualified
+    // key BEFORE any declaration body is resolved, so a type that names a
+    // sibling declared further down (`type R = { u: U }` above `type U`)
+    // pins to its own `mod.U`. Without the reservation the own-module lookup
+    // missed, the reference stayed a bare `U`, and the bare key belongs to
+    // whichever module registered its `U` last — an order (import order,
+    // directory order) that differs between machines, so the same program
+    // checked on one OS and failed on another with E013 against a foreign
+    // `U`. Each reservation is dropped right before its declaration
+    // registers, so the E020 duplicate check never sees it.
+    let reserved = reserve_own_nominal_types(env, decls, prefix);
     for decl in decls {
         match decl {
-            ast::Decl::Type { .. } => register_decl_type(env, diagnostics, decl, prefix),
+            ast::Decl::Type { name, .. } => {
+                if let Some(key) = reserved.iter().find(|k| k.as_str().rsplit_once('.').is_some_and(|(_, b)| b == name.as_str())) {
+                    if env.types.get(key).is_some_and(is_reservation) {
+                        env.types.remove(key);
+                    }
+                }
+                register_decl_type(env, diagnostics, decl, prefix)
+            }
             ast::Decl::Protocol { name, generics, methods, .. } => {
                 register_protocol_decl(env, name, generics, methods, prefix);
             }
