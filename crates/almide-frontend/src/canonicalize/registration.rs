@@ -889,8 +889,8 @@ fn reserve_own_nominal_types(env: &mut TypeEnv, decls: &[ast::Decl], prefix: Opt
             _ => continue,
         };
         let key = sym(&format!("{}.{}", m, name));
-        if !env.types.contains_key(&key) {
-            env.types.insert(key, placeholder);
+        if let std::collections::hash_map::Entry::Vacant(slot) = env.types.entry(key) {
+            slot.insert(placeholder);
             keys.push(key);
         }
     }
@@ -924,10 +924,10 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
     for decl in decls {
         match decl {
             ast::Decl::Type { name, .. } => {
-                if let Some(key) = reserved.iter().find(|k| k.as_str().rsplit_once('.').is_some_and(|(_, b)| b == name.as_str())) {
-                    if env.types.get(key).is_some_and(is_reservation) {
-                        env.types.remove(key);
-                    }
+                if let Some(key) = reserved.iter().find(|k| k.as_str().rsplit_once('.').is_some_and(|(_, b)| b == name.as_str()))
+                    && env.types.get(key).is_some_and(is_reservation)
+                {
+                    env.types.remove(key);
                 }
                 register_decl_type(env, diagnostics, decl, prefix)
             }
