@@ -24,16 +24,123 @@ pub fn http_server_bind(port: i64) -> Result<std::net::TcpListener, String> {
 
 /// The next request: accept, then parse. A failed accept or an unparsable
 /// request drops that connection unanswered and waits for the next one.
-pub fn http_server_next(listener: &std::net::TcpListener) -> (std::net::TcpStream, HttpServerRequest) {
+/// `None` once a shutdown signal has arrived (ADR-0020 §5.6): the server
+/// stops accepting, and a connection accepted after the signal — the
+/// watcher's wake-up or a late client — is closed unanswered.
+pub fn http_server_next(listener: &std::net::TcpListener) -> Option<(std::net::TcpStream, HttpServerRequest)> {
     loop {
-        let mut stream = match listener.accept() {
+        if http_server_stopping() {
+            return None;
+        }
+        let accepted = listener.accept();
+        if http_server_stopping() {
+            return None;
+        }
+        let mut stream = match accepted {
             Ok((s, _)) => s,
             Err(_) => continue,
         };
         if let Ok(req) = http_server_read_request(&mut stream) {
-            return (stream, req);
+            return Some((stream, req));
         }
     }
+}
+
+// ── Shutdown (ADR-0020 §5.6, #2692, C-367) ──
+//
+// On the first SIGTERM or SIGINT (Ctrl-C / Ctrl-Break on Windows) a socket
+// host stops accepting, lets the request in flight finish, flushes stdout and
+// returns from `http.serve`. A second signal, or a drain that outlasts the
+// request timeout, flushes and exits 1 — never a 128+signal code (C-350).
+//
+// This core holds the part both lanes share and that needs no `unsafe`: the
+// signal count, the accept loop's stop test (above), and the WATCHER thread.
+// Installing the handler is each host's own: the native runtime calls the C
+// `signal` / `SetConsoleCtrlHandler` directly (runtime/rs/src/http.rs), the
+// embedded host uses the `ctrlc` crate (almide-wasm-run/src/host_serve.rs).
+// Either handler only calls `http_server_signal`, which is async-signal-safe
+// (one atomic add).
+//
+// The serve loop is sequential today, so "in flight" is at most the one
+// request the serving thread is handling; the watcher never touches it. When
+// the worker pool lands (§5.5, #2665) the drain waits for every worker's
+// request instead, and the forced path gets a process-global stdout buffer to
+// flush from any thread.
+
+/// Shutdown signals received since the server armed (see
+/// [`http_server_watch`]).
+pub static HTTP_SERVER_SIGNALS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// The drain bound: `request_timeout_ms`'s default (ADR-0020 §5.7). A
+/// request still in flight this long after the first signal is abandoned and
+/// the run ends as a forced stop.
+pub const HTTP_SERVER_DRAIN_MS: u64 = 30_000;
+
+/// Count one shutdown signal; answers the count so far. The one thing a
+/// signal handler does, so it stays async-signal-safe.
+pub fn http_server_signal() -> usize {
+    HTTP_SERVER_SIGNALS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+}
+
+/// A first signal arrived: stop accepting and drain.
+pub fn http_server_stopping() -> bool {
+    HTTP_SERVER_SIGNALS.load(std::sync::atomic::Ordering::SeqCst) >= 1
+}
+
+/// A second signal arrived: skip the drain, flush and exit 1.
+pub fn http_server_forced() -> bool {
+    HTTP_SERVER_SIGNALS.load(std::sync::atomic::Ordering::SeqCst) >= 2
+}
+
+/// The watcher of one `http.serve` run; dropping it stops the thread.
+pub struct HttpServerWatch {
+    done: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for HttpServerWatch {
+    fn drop(&mut self) {
+        self.done.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+/// Arm shutdown for `listener`: reset the count and start the watcher. On the
+/// first signal the watcher wakes the blocking `accept` with a loopback
+/// connection (a blocking accept restarts after a signal), so the serve loop
+/// sees [`http_server_stopping`]. On a second signal, or once the drain has
+/// run [`HTTP_SERVER_DRAIN_MS`], it calls `force`, every tick until the
+/// process ends: `force` flushes stdout and exits 1, or — natively, where the
+/// buffer belongs to the serving thread — makes that thread do so.
+pub fn http_server_watch(listener: &std::net::TcpListener, force: Box<dyn Fn() + Send>) -> HttpServerWatch {
+    HTTP_SERVER_SIGNALS.store(0, std::sync::atomic::Ordering::SeqCst);
+    let port = listener.local_addr().map(|a| a.port()).ok();
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = done.clone();
+    let thread = std::thread::Builder::new()
+        .name("almide-serve-watch".into())
+        .spawn(move || {
+            let mut drain_from: Option<std::time::Instant> = None;
+            while !seen.load(std::sync::atomic::Ordering::SeqCst) {
+                if http_server_stopping() {
+                    let from = *drain_from.get_or_insert_with(|| {
+                        if let Some(p) = port {
+                            let wake = std::net::SocketAddr::from(([127, 0, 0, 1], p));
+                            let _ = std::net::TcpStream::connect_timeout(&wake, std::time::Duration::from_secs(1));
+                        }
+                        std::time::Instant::now()
+                    });
+                    if http_server_forced() || from.elapsed() >= std::time::Duration::from_millis(HTTP_SERVER_DRAIN_MS) {
+                        force();
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+        })
+        .ok();
+    HttpServerWatch { done, thread }
 }
 
 fn http_server_read_request(stream: &mut std::net::TcpStream) -> Result<HttpServerRequest, String> {

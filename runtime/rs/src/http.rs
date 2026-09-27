@@ -733,15 +733,191 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
             std::process::exit(1);
         }
     };
-    loop {
-        let (stream, (method, path, body, headers)) = http_server_next(&listener);
+    // Shutdown (ADR-0020 §5.6, #2692): a signal ends the loop below; the
+    // request in flight is answered first.
+    let signals = almide_http_signals_arm();
+    let watch = http_server_watch(&listener, Box::new(almide_http_force_from_watcher));
+    while let Some((stream, (method, path, body, headers))) = http_server_next(&listener) {
         let resp = match handler(AlmideHttpRequest { method, path, body, headers, params: Vec::new() }) {
             Ok(r) => r,
             Err(e) => AlmideHttpResponse::new(500, format!("Internal error: {}", e)),
         };
         let _ = http_server_write(stream, resp.status, &resp.headers, &resp.body);
     }
+    drop(watch);
+    drop(listener);
+    almide_http_signals_disarm(signals);
+    // A second signal that raced the last response: the forced stop.
+    if http_server_forced() {
+        almide_stdout_flush();
+        std::process::exit(1);
+    }
+    // The drained stop: stdout reaches its file/pipe now, and `http.serve`
+    // returns, so main's statements after it run and main's code is the
+    // exit code.
+    almide_stdout_flush();
+    Ok(())
 }
+
+// ── Shutdown signals (native; the shared part is in http_server_core) ──
+//
+// stdout is today ONE thread-local 64 KiB buffer (ALMIDE_STDOUT_BUF), and the
+// serve loop runs on the thread that called `http.serve` — the only thread
+// that ever writes it while serving, because the loop is sequential. So
+// flushing THAT thread's buffer is enough, and the forced path makes the
+// serving thread do it: the watcher re-raises the signal at that thread, and
+// the handler, running there, flushes and `_exit(1)`s. It cannot flush while
+// the interrupted code holds the buffer (a print in progress), so it then
+// returns and the watcher raises again on its next tick. ADR-0020 §5.5 moves
+// stdout into one process-global buffer behind a lock (the worker pool's
+// threads all write it); the forced path then flushes that buffer from the
+// watcher itself and the re-raise goes away.
+//
+// Windows has no SIGTERM: Ctrl-C and Ctrl-Break start the drain, and the
+// console handler runs on a thread of its own. A forced stop there exits 1
+// from the watcher WITHOUT flushing, since no other thread can reach the
+// serving thread's buffer — until §5.5's shared buffer.
+
+#[cfg(unix)]
+mod almide_http_signal_ffi {
+    extern "C" {
+        pub fn signal(sig: i32, handler: usize) -> usize;
+        pub fn pthread_self() -> usize;
+        pub fn pthread_kill(thread: usize, sig: i32) -> i32;
+        pub fn _exit(code: i32) -> !;
+    }
+    // POSIX values, identical on Linux and macOS / BSD.
+    pub const SIGINT: i32 = 2;
+    pub const SIGTERM: i32 = 15;
+    pub const SIG_IGN: usize = 1;
+}
+
+/// The thread serving (pthread_t), where the forced stop must run.
+#[cfg(unix)]
+static ALMIDE_HTTP_SERVE_THREAD: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// A signal is counted on the serving thread: one delivered to another
+/// thread (the watcher, a `fan` worker) is passed on to it, so the forced
+/// stop always runs where the buffer is.
+#[cfg(unix)]
+extern "C" fn almide_http_on_signal(sig: i32) {
+    use almide_http_signal_ffi as ffi;
+    let serving = ALMIDE_HTTP_SERVE_THREAD.load(std::sync::atomic::Ordering::SeqCst);
+    if unsafe { ffi::pthread_self() } != serving {
+        unsafe { ffi::pthread_kill(serving, sig) };
+        return;
+    }
+    if http_server_signal() >= 2 {
+        almide_http_force_here();
+    }
+}
+
+/// The forced stop, from inside the signal handler on the serving thread.
+/// It cannot flush while the interrupted code holds the buffer (a print in
+/// progress): then it returns, and the watcher raises again.
+#[cfg(unix)]
+fn almide_http_force_here() {
+    let flushed = ALMIDE_STDOUT_BUF
+        .try_with(|buf| match buf.try_borrow_mut() {
+            Ok(mut w) => {
+                let _ = std::io::Write::flush(&mut *w);
+                true
+            }
+            Err(_) => false,
+        })
+        .unwrap_or(true);
+    if flushed {
+        unsafe { almide_http_signal_ffi::_exit(1) }
+    }
+}
+
+#[cfg(unix)]
+fn almide_http_force_from_watcher() {
+    let serving = ALMIDE_HTTP_SERVE_THREAD.load(std::sync::atomic::Ordering::SeqCst);
+    unsafe {
+        almide_http_signal_ffi::pthread_kill(serving, almide_http_signal_ffi::SIGTERM);
+    }
+}
+
+/// Install the handler for SIGTERM and SIGINT; answers the dispositions to
+/// restore. A signal the process was started with IGNORED (SIGINT under a
+/// non-interactive shell's `&`, a `nohup`) stays ignored.
+#[cfg(unix)]
+fn almide_http_signals_arm() -> [(i32, usize); 2] {
+    use almide_http_signal_ffi as ffi;
+    // Touch the buffer here, so the handler never runs its lazy init.
+    ALMIDE_STDOUT_BUF.with(|_| ());
+    ALMIDE_HTTP_SERVE_THREAD.store(unsafe { ffi::pthread_self() }, std::sync::atomic::Ordering::SeqCst);
+    let handler = almide_http_on_signal as extern "C" fn(i32) as usize;
+    [ffi::SIGTERM, ffi::SIGINT].map(|sig| {
+        let prev = unsafe { ffi::signal(sig, handler) };
+        if prev == ffi::SIG_IGN {
+            unsafe { ffi::signal(sig, ffi::SIG_IGN) };
+        }
+        (sig, prev)
+    })
+}
+
+/// After `http.serve` returned, a signal still ends the run as a forced
+/// stop (flush, exit 1) while main goes on — the handler stays. A serve that
+/// ran on another thread (a `fan` arm) cannot keep it, since that thread
+/// ends and the handler passes signals to it: there the signals do again
+/// what they did before `serve`.
+#[cfg(unix)]
+fn almide_http_signals_disarm(prev: [(i32, usize); 2]) {
+    if std::thread::current().name() == Some("main") {
+        return;
+    }
+    for (sig, disposition) in prev {
+        unsafe { almide_http_signal_ffi::signal(sig, disposition) };
+    }
+}
+
+#[cfg(windows)]
+mod almide_http_signal_ffi {
+    pub type Handler = unsafe extern "system" fn(u32) -> i32;
+    #[link(name = "kernel32")]
+    extern "system" {
+        pub fn SetConsoleCtrlHandler(handler: Option<Handler>, add: i32) -> i32;
+    }
+    pub const CTRL_C_EVENT: u32 = 0;
+    pub const CTRL_BREAK_EVENT: u32 = 1;
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn almide_http_on_ctrl(event: u32) -> i32 {
+    match event {
+        almide_http_signal_ffi::CTRL_C_EVENT | almide_http_signal_ffi::CTRL_BREAK_EVENT => {
+            http_server_signal();
+            1
+        }
+        _ => 0,
+    }
+}
+
+#[cfg(windows)]
+fn almide_http_force_from_watcher() {
+    std::process::exit(1);
+}
+
+#[cfg(windows)]
+fn almide_http_signals_arm() {
+    unsafe { almide_http_signal_ffi::SetConsoleCtrlHandler(Some(almide_http_on_ctrl), 1) };
+}
+
+#[cfg(windows)]
+fn almide_http_signals_disarm(_: ()) {
+    unsafe { almide_http_signal_ffi::SetConsoleCtrlHandler(Some(almide_http_on_ctrl), 0) };
+}
+
+#[cfg(not(any(unix, windows)))]
+fn almide_http_force_from_watcher() {}
+
+#[cfg(not(any(unix, windows)))]
+fn almide_http_signals_arm() {}
+
+#[cfg(not(any(unix, windows)))]
+fn almide_http_signals_disarm(_: ()) {}
 
 // Handler-as-closure wrapper for `@intrinsic` migration of `http.serve`.
 // The Almide side passes a `(Request) -> Response` closure; this wrapper

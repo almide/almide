@@ -993,7 +993,7 @@ fn run_wasm_src(
             // http.serve (#2650): the listener and the held connection
             // live in the run's own state — one per run, like native's.
             if (crate::host_serve::OP_SERVE_BIND..=crate::host_serve::OP_SERVE_REPLY).contains(&op) {
-                let (ret, buf) = crate::host_serve::dispatch(&caller.data().serve, op, &a, frames, parse_http_frame);
+                let (ret, buf) = crate::host_serve::dispatch(&caller.data().serve, caller.data().live_out.as_ref(), op, &a, frames, parse_http_frame);
                 *caller.data().fs_buf.lock().expect("fs buf") = buf;
                 return Ok(ret);
             }
