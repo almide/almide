@@ -1,3 +1,3 @@
 expects_code = "E022"
-expects_error = "operator '!' cannot propagate this error: the callback's error type is `E`, but this `Result` fails with `String`"
-hint_substring = "every `!` in it must fail with the channel's error type `E`"
+expects_error = "the callback's `!`s fail with different types — `E` (line 12, col 5) and `String` (line 11, col 13)"
+hint_substring = "Convert the odd one at its `!` so every `!` in the callback fails with `E`"
