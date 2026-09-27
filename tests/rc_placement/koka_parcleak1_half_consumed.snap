@@ -23,4 +23,4 @@ fn $__get_str_some
   (call $rc_inc (local.get $v8))
   (call $rc_dec (local.get $v8))
 fn $string.repeat
-  (call $rc_dec (local.get $v17))
+  (call $rc_dec (local.get $v21))

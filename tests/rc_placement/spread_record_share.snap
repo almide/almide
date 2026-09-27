@@ -157,4 +157,4 @@ fn $__ment_build
 fn $__lc_copy_rc
   (call $rc_inc (i32.wrap_i64 (local.get $v12)))
 fn $string.repeat
-  (call $rc_dec (local.get $v17))
+  (call $rc_dec (local.get $v21))
