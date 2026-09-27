@@ -165,6 +165,15 @@ pub struct Checker {
     /// every inline middleware as a `HttpMiddleware`.
     pub(crate) list_elem_expect: Option<crate::types::Ty>,
     pub(crate) constraints: Vec<Constraint>,
+    /// A slot of an `ok(..)` / `err(..)` its argument leaves open — the ERR type
+    /// of `ok(x)`, the OK type of `err(e)` — paired with the enclosing fn's
+    /// declared Result argument for that slot. The slot is a FRESH var the
+    /// program's own constraints decide; the declared type fills it only if
+    /// nothing did (`solve_constraints`). Pinning it up front typed a non-tail
+    /// `err("neg")` in a `-> String!` fn as `Result[String, String]`, so
+    /// `let r: Result[Int, String] = if c then ok(c) else err("neg")` was E001
+    /// (#2599).
+    pub(crate) result_slot_defaults: Vec<(Ty, Ty)>,
     pub(crate) uf: UnionFind,
     /// Named-type pairs currently being unified structurally. Unifying two
     /// DIFFERENT-named nominal types expands both to their record forms and
@@ -589,7 +598,7 @@ impl Checker {
             lambda_slot_effect: false,
             lambda_ret_expect: None,
             list_elem_expect: None,
-            constraints: Vec::new(), uf: UnionFind::new(),
+            constraints: Vec::new(), result_slot_defaults: Vec::new(), uf: UnionFind::new(),
             unify_named_in_progress: std::collections::HashSet::new(),
             current_module_prefix: None,
             deferred_tuple_indices: Vec::new(),
