@@ -1,10 +1,12 @@
 //! #2206 (C-215): the fs error text is ONE table (`almide_base::fs_errno`),
 //! rendered by every leg — native's `std::io::Error` `Display`, the embedded
-//! host, and the incumbent WAT's static data — so the message a program
-//! observes is byte-identical across them. This runs the issue's own probe
-//! (a file, a directory, a missing path; read/write/mkdir_p through and onto
-//! each) on the three legs the CLI can drive from one binary and differs the
-//! outputs; the p3 component lane is `component_p3_test.rs`'s.
+//! host, the incumbent WAT's static data and the p1 fs service's statics
+//! (#2742) — so the message a program observes is byte-identical across them.
+//! This runs the issue's own probe (a file, a directory, a missing path;
+//! read/write/mkdir_p through and onto each) on the three legs the CLI can
+//! drive from one binary, plus the stock-p1 artifact `almide build` writes
+//! under wasmtime, and differs the outputs; the p3 component lane is
+//! `component_p3_test.rs`'s.
 //!
 //! The EEXIST line is printed TWICE on purpose: the incumbent laid the table's
 //! rows over the self-host's newline scratch once, and only the SECOND print
@@ -60,6 +62,30 @@ fn run_leg(dir: &Path, args: &[&str], env: &[(&str, &str)]) -> String {
     String::from_utf8(o.stdout).expect("utf8")
 }
 
+/// The shipped form: `almide build --target wasm` (the structural module
+/// through `to_wasi` and its p1 fs service) run by a stock wasmtime, the cwd
+/// handed over as `PWD` the way an inheriting shell does. `None` without
+/// wasmtime.
+fn run_stock_p1(dir: &Path) -> Option<String> {
+    let wasm = dir.join("probe.wasm");
+    let o = Command::new(almide_bin())
+        .args(["build", "probe.almd", "--target", "wasm", "-o"])
+        .arg(&wasm)
+        .current_dir(dir)
+        .output()
+        .expect("spawn almide");
+    assert!(o.status.success(), "stock build failed:\n{}", String::from_utf8_lossy(&o.stderr));
+    let o = Command::new("wasmtime")
+        .args(["run", "--dir=/"])
+        .arg(format!("--env=PWD={}", dir.display()))
+        .arg(&wasm)
+        .current_dir(dir)
+        .output()
+        .ok()?;
+    assert!(o.status.success(), "stock run failed:\n{}", String::from_utf8_lossy(&o.stderr));
+    Some(String::from_utf8(o.stdout).expect("utf8"))
+}
+
 #[test]
 fn every_leg_spells_the_table_byte_for_byte() {
     if Command::new(almide_bin()).arg("--version").output().is_err() {
@@ -85,5 +111,8 @@ fn every_leg_spells_the_table_byte_for_byte() {
     assert_eq!(wasm, expected, "the embedded host leg");
     let incumbent = run_leg(&dir, &["--target", "wasm"], &[("ALMIDE_WASM_INCUMBENT", "1")]);
     assert_eq!(incumbent, expected, "the incumbent WAT leg (static data rendered from the table)");
+    if let Some(stock) = run_stock_p1(&dir) {
+        assert_eq!(stock, expected, "the stock-p1 artifact (the p1 fs service's statics, #2742)");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
