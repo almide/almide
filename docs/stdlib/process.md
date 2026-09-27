@@ -17,13 +17,19 @@ effect fn main() -> Unit = {
 
 ### `process.exit(code: Int) -> Unit`
 
-Exit the process with the given status code. The code is **0 to 125** on every
-target; any other code is a domain error — one stderr line
-`Error: exit code must be in 0..=125` and exit 1, identically everywhere
-(C-350). 126, 127 and 128+n are values a shell generates itself, POSIX carries
-only the low 8 bits of a status to its parent, and the shipped wasm artifact's
-`proc_exit` is specified over the same range — so 0..=125 is what a build can
-actually deliver.
+Exit the process with the given status code, the POSIX exit status **0 to
+255**. The code passes through unchanged on native and on
+`almide run --target wasm`, so a wrapper can exit with its child's status,
+including 126, 127 and 128+n (#2780). Any other code is a domain error with one
+stderr line, `Error: exit code must be in 0..=255`, and exit 1, identically on
+every target (C-350). Rust, Go, Python and Node truncate such a code to its low
+8 bits instead, so `exit(256)` would report success.
+
+A WASI preview-1 build (`almide build --target wasm`, run on a stock runtime
+such as `wasmtime`) delivers only 0..=125. A stock runtime traps on
+`proc_exit(126)` and above, so that build refuses 126..=255 itself with
+`Error: a WASI preview-1 build cannot exit with a code in 126..=255` and exit 1.
+It never exits with a silent 1.
 
 ```almd check
 import process
@@ -227,7 +233,7 @@ effect fn main() -> Unit = {
 // @since 0.5.0 or earlier
 effect process.exec(cmd: String, args: List[String]) -> String
 
-// Ends with code 0..=125; others abort, exit 1.
+// Ends with code 0..=255; others abort, exit 1.
 // @since 0.5.0 or earlier
 effect process.exit(code: Int) -> Never
 
