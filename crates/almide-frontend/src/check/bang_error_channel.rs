@@ -12,7 +12,8 @@
 //! arbitrary user type, so the mismatch is a check-time E022.
 //!
 //! A variant error flowing into a `String` fn stays accepted: the lowering
-//! renders it with its `Debug` text (`map_err`), which is a real conversion.
+//! renders it with its repr text (`map_err` to `almide_repr`, the text
+//! `"${e}"` shows — #2725), which is a real conversion.
 use super::{Checker, err};
 use super::types::resolve_ty;
 use crate::types::{Ty, TypeConstructorId};

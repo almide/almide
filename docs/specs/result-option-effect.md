@@ -254,7 +254,7 @@ test "fallible lambdas (in fn bodies — test bodies keep unwrap semantics, L9)"
   (型付き slot `(A) -> B!E`・型付き `let`・結果を伝搬する fn・`err(e) => err(e)`
   などの消費)が決め、文脈が決めなければ本体の `!` operand(と guard / 値 join の
   `err(..)`)の E の join — 全部同じ E ならその E、食い違えば String。String が top
-  (どの E も Debug 文字列で String に入る)なので join は常に答えを持つ。ε が型付き
+  (どの E も repr 文字列 — `"${e}"` の印字 — で String に入る、#2725)なので join は常に答えを持つ。ε が型付き
   E に決まったとき、E でない `!` はその位置で E022。Option operand の none は
   err("none")(L4)・値 tail は ok(...) に lift(L5)
 - **test ブロック内は例外**: lambda の `!` は unwrap のまま、HOF dispatch も
