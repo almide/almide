@@ -392,7 +392,7 @@ issue = "#1827"
 fn = "http.serve"
 legs = ["stock-p1"]
 class = "pending-port"
-reason = "embedded-lane-served (#2650, C-367): `almide run --target wasm` serves it — one instance, sequential, byte-identical responses through the shared server core (host ops 70..=72); a stock p1 artifact has no listening socket, so `almide build --target wasm` refuses it — run it with `almide run --target wasm` or natively"
+reason = "embedded-lane-served (#2650, C-367): `almide run --target wasm` serves it — one instance, sequential, the same status, header set and body through the shared server core (host ops 70..=72); a stock p1 artifact has no listening socket, so `almide build --target wasm` refuses it — run it with `almide run --target wasm` or natively"
 issue = "#2659"
 
 [[unavailable]]
