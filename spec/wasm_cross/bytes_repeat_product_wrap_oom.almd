@@ -1,0 +1,20 @@
+// @contract: C-197
+// The product cell of `bytes.repeat`: `len * n` past the allocator's bound is
+// C-197's single abort form, `Error: out of memory` + exit 1, on every leg,
+// including a product that WRAPS i64. `[1, 2, 3]` x 6148914691236517206 is 2 in
+// i64, so the wasm legs compared the wrapped product against their bound, sized
+// a 2-byte block and the copy loop wrote past it into an out-of-bounds trap
+// (exit 134) where native aborts in the defined form (#2782, nightly fuzz
+// #2781). The bound is now tested by division, never on the product. The
+// in-range, empty and negative cells come first; the fixture ends at the abort.
+import bytes
+
+fn main() -> Unit = {
+  let b = bytes.from_list([1, 2, 3])
+  println("rep_ok=" + int.to_string(bytes.len(bytes.repeat(b, 4))))
+  // An empty base is empty at any count, and a negative count is empty.
+  println("rep_empty_max=" + int.to_string(bytes.len(bytes.repeat(bytes.from_list([]), 9223372036854775807))))
+  println("rep_neg=" + int.to_string(bytes.len(bytes.repeat(b, 0 - 9223372036854775807))))
+  println("rep_wrap=" + int.to_string(bytes.len(bytes.repeat(b, 6148914691236517206))))
+  println("unreachable")
+}

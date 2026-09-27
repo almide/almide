@@ -1,0 +1,30 @@
+// @contract: C-161
+// The empty-extent edge of `linear_f32_row_no_bias` is `zeros(rows(x), w_rows)`
+// (see matrix_composition_family.almd), so its shape takes the shared 2^28
+// element ceiling like every constructor. Native built that zero matrix without
+// the ceiling: `w_rows = 2^27 + 1` (2^28 + 2 elements) succeeded and printed a
+// shape, and `w_rows = i64::MAX` took a raw `capacity overflow` panic (exit 101),
+// where wasm aborts with `Error: matrix dimensions too large` + exit 1 (#2783,
+// nightly fuzz #2781). The guard fires before either allocator is asked for
+// anything, so the over-ceiling cell costs no memory. The in-range and clamped
+// cells come first; the fixture ends at the abort.
+fn show(m: Matrix) -> String = {
+  let (r, c) = matrix.shape(m)
+  int.to_string(r) + " x " + int.to_string(c)
+}
+
+fn main() -> Unit = {
+  let x = matrix.from_lists([
+    [1.0, 2.0, 3.0],
+    [4.0, 5.0, 6.0]
+  ])
+  let w = bytes.from_list([0, 0, 0, 0])
+  // No rows: zero elements at any width, so a huge w_rows is not over the ceiling.
+  println("empty_x_max=" + show(matrix.linear_f32_row_no_bias(matrix.from_lists([]), w, 0, 9223372036854775807, 3)))
+  // A negative w_rows clamps to 0 (C-161).
+  println("neg_rows=" + show(matrix.linear_f32_row_no_bias(x, w, 0, 0 - 9223372036854775807, 3)))
+  println("zero_cols=" + show(matrix.linear_f32_row_no_bias(x, w, 0, 1, 0)))
+  // 2 x (2^27 + 1) is just over the 2^28 ceiling.
+  println("over=" + show(matrix.linear_f32_row_no_bias(x, w, 0, 134217729, 0)))
+  println("unreachable")
+}
