@@ -511,6 +511,11 @@ pub(crate) fn build_native_cached(
     // relieved before rustc needs the space (#2500). Under the lock: no
     // build is writing here, and the removal never touches a directory.
     evict_stale_artifacts(&project_dir);
+    // And by total size (#2608): the age rule never fires inside a burst of
+    // distinct programs. Same lock, oldest artifacts first.
+    if let Some(cap) = super::cache_bound::cache_max_bytes() {
+        super::cache_bound::bound_build_artifacts(&project_dir, cap);
+    }
 
     // One rustc ICE on a stale incremental session clears the session store
     // (under this same lock) and rebuilds once; see `build_recovering_from_ice`.

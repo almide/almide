@@ -9,6 +9,7 @@ mod check;
 mod dialect_stamp;
 mod commands;
 mod test_scratch;
+mod cache_bound;
 pub mod test_report;
 mod test_output;
 pub mod snapshot;

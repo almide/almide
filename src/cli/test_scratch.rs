@@ -44,6 +44,7 @@ impl TestScratch {
     pub(crate) fn new() -> Self {
         let scratch = Self::unswept();
         scratch.evict_stale_workers();
+        scratch.bound_worker_bytes();
         scratch
     }
 
@@ -106,6 +107,19 @@ impl TestScratch {
             super::run::clear_build_dir_if_idle(&dir, || !super::run::used_since(&dir, cutoff));
         }
         super::run::stamp_sweep(&self.native_cache);
+    }
+
+    /// Bound the worker cache's TOTAL size (#2608): the age sweep above never
+    /// fires inside a burst of distinct test files, which grew the cache to
+    /// 7,144 dirs / 84.9 GB in two hours. LRU by bytes, rate-limited to one
+    /// walk a minute, same per-dir lock protocol — see `cache_bound`.
+    fn bound_worker_bytes(&self) {
+        if self.keep {
+            return;
+        }
+        if let Some(cap) = super::cache_bound::cache_max_bytes() {
+            super::cache_bound::bound_worker_cache(&self.native_cache, cap);
+        }
     }
 
     /// A worker dir an earlier sweep already emptied: only its lockfile is left.
