@@ -588,6 +588,39 @@ impl<'a> Interpreter<'a> {
                 }
                 Some(Flow::val(Value::Int(0)))
             }
+            // The WASI clock exit (stdlib/clock_now.almd), served with the
+            // REAL host clocks for the same reason as random_get: a fixture
+            // that passes the 2-way byte-compare can only print relations
+            // between reads, so an honest clock is a faithful third vote.
+            // Clock 0 is the wall clock (epoch nanos), clock 1 the monotonic
+            // one (nanos from this run's first read, native's own origin).
+            "clock_time_get" => {
+                let (Some(Value::Int(id)), Some(a)) = (args.first(), heap_addr(args.get(2))) else {
+                    return Some(Flow::Unsupported("prim.clock_time_get with a non-address".into()));
+                };
+                let ns = match id {
+                    0 => std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos() as i64,
+                    1 => {
+                        static ORIGIN: std::sync::OnceLock<std::time::Instant> =
+                            std::sync::OnceLock::new();
+                        ORIGIN.get_or_init(std::time::Instant::now).elapsed().as_nanos() as i64
+                    }
+                    _ => {
+                        return Some(Flow::Unsupported(format!(
+                            "prim.clock_time_get of clock {id}"
+                        )));
+                    }
+                };
+                if self.heap.store(a, 8, ns).is_none() {
+                    return Some(Flow::Unsupported(
+                        "prim.clock_time_get outside this heap's arena".into(),
+                    ));
+                }
+                Some(Flow::val(Value::Int(0)))
+            }
             // Raw refcount adjust on a block base. The arena never FREES —
             // `keepalive` is its whole liveness model and an address must stay
             // valid for the run — so `rc_dec` to zero leaks by design: a leak
