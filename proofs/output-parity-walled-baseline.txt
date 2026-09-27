@@ -1,0 +1,27 @@
+# OUTPUT-PARITY WALL LEDGER (#2793): the files proofs/output-parity.sh CLAIMS
+# (the must-match rows of proofs/output-parity-baseline.txt plus the rows here)
+# that the STRUCTURAL wasm leg declines. The gate drives that leg forced
+# (`ALMIDE_WASM_STRUCTURAL=1 almide build --target wasm`, the renderer
+# `--target wasm` ships by default), so a row here is a file whose native ⇄ wasm
+# stdout comparison is NOT made today.
+#
+#   spec/path/file.almd :: structural decline :: cause issue
+#
+# EQUALITY-PINNED, shrink-only to 0, through scripts/lib/determinism-walled.sh:
+#   - a claimed file that walls without a row fails (coverage shrank — fix the
+#     decline, or add the row consciously in the same change);
+#   - a row whose file no longer walls fails as STALE (move the file back into
+#     the baseline and delete the row in the same change);
+#   - a file may not be both a baseline row and a ledger row;
+#   - MAX_WALLED in proofs/output-parity.sh (and max_walled() in its Almide twin,
+#     tools/almide-gates/src/parity_sweep.almd) must equal the row count.
+#
+# Measured 2026-09-28 on origin/develop 063496844 with a release build, over
+# all 426 rows the incumbent baseline held: 389 match on stdout, the 37 trap
+# fixtures agree on stdout (their exit code and normalised stderr are the
+# gate's own trap comparison), 0 walls, 0 mismatches, 0 runerrs. The 51 rows
+# no other structural gate compared (#2793: spec/lang 36, spec/programs 10,
+# spec/integration 3, spec/stdlib 1, spec/wasm_cross_pkg 1) are among the
+# matches. So the ledger starts EMPTY and MAX_WALLED=0. The same run over all of
+# spec/ matched 463 files the incumbent baseline did not hold; they were ratcheted
+# in, so the baseline went 426 -> 889 rows on the structural measurement.
