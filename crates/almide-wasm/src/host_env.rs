@@ -202,6 +202,14 @@ impl Emitter<'_> {
                 self.wall_now_div(1_000_000);
                 Some(Lowered::scalar(INT))
             }
+            // The monotonic clock (op 60): raw nanos from the host's own
+            // origin, no division — native's `monotonic_ns` counts from its
+            // first call, so only differences agree across legs, which is the
+            // whole documented contract. Never-err, a bare Int like op 34.
+            ("datetime", "monotonic_ns", []) => {
+                self.fs_call_0(crate::fs_meta::OP_MONO_NOW)?;
+                Some(Lowered::scalar(INT))
+            }
             ("io", "read_line", []) => {
                 self.io_read_line()?;
                 Some(Lowered::owned(STR))

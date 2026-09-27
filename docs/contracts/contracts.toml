@@ -4122,6 +4122,7 @@ since     = "0.60.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_sleep_pause.almd", class = "fixture" },
+  { path = "spec/wasm_cross/datetime_monotonic_ns.almd", class = "fixture" },
   { path = "spec/wasm_cross/availability_pure_batch.almd", class = "fixture" },
 ]
 [[contract]]

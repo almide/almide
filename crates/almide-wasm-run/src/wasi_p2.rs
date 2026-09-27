@@ -43,8 +43,8 @@ use crate::wasi::{
     PARK_SPAN, UNSUPPORTED_MSG,
 };
 
-// Import indices (8 imports replace the 5 almide.* ones; original
-// non-import indices shift by +3).
+// Import indices (9 imports replace the 5 almide.* ones; original
+// non-import indices shift by +4).
 const I_GET_STDIN: u32 = 0;
 const I_GET_STDOUT: u32 = 1;
 const I_GET_STDERR: u32 = 2;
@@ -53,7 +53,8 @@ const I_BLOCKING_READ: u32 = 4;
 const I_WRITE_FLUSH: u32 = 5;
 const I_CLOCK_NOW: u32 = 6;
 const I_RANDOM: u32 = 7;
-const IMPORTS: u32 = 8;
+const I_MONO_NOW: u32 = 8;
+const IMPORTS: u32 = 9;
 const SHIFT: u32 = IMPORTS - 5;
 
 // Park offsets past the shared ones: retptr scratch (8-aligned).
@@ -134,6 +135,7 @@ pub fn to_p2(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     );
     let t_now = type_index(&mut types, &[ValType::I32], &[]);
     let t_random = type_index(&mut types, &[ValType::I64, ValType::I32], &[]);
+    let t_mono = type_index(&mut types, &[], &[ValType::I64]);
     // Shim types (the almide.* signatures) + realloc + run.
     let t_print = type_index(&mut types, &[ValType::I32, ValType::I32], &[]);
     let t_fs = type_index(&mut types, &[ValType::I32; 5], &[ValType::I64]);
@@ -163,6 +165,7 @@ pub fn to_p2(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     );
     imports.import("wasi:clocks/wall-clock@0.2.3", "now", EntityType::Function(t_now));
     imports.import("wasi:random/random@0.2.3", "get-random-bytes", EntityType::Function(t_random));
+    imports.import("wasi:clocks/monotonic-clock@0.2.3", "now", EntityType::Function(t_mono));
 
     let mut functions = FunctionSection::new();
     for ti in &func_types {
@@ -217,9 +220,9 @@ pub fn to_p2(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         OOM_MSG.len() - 1,
     ));
 
-    // Elements re-encode through the Remap (#1716): the +3 import shift
+    // Elements re-encode through the Remap (#1716): the import shift
     // must move funcref table entries too, or every closure retargets
-    // three functions early — the #1688 silent class, live here until
+    // SHIFT functions early — the #1688 silent class, live here until
     // this line.
     let mut element_sec = wasm_encoder::ElementSection::new();
     for e in elements {
@@ -338,9 +341,9 @@ fn shim_exit() -> Function {
     f
 }
 
-/// The five-op host contract over p2 (op codes shared with the embedded
-/// host): 30 raw stdout, 31 stdin read-to-end, 35 stdin take-n, 32
-/// entropy, 34 wall clock; anything else = the defined refusal.
+/// The host contract over p2 (op codes shared with the embedded host): 30
+/// raw stdout, 31 stdin read-to-end, 35 stdin take-n, 32 entropy, 34 wall
+/// clock, 60 monotonic clock; anything else = the defined refusal.
 fn shim_fs_call(
     park: u64,
     g_plen: u32,
@@ -419,6 +422,12 @@ fn shim_fs_call(
     i.i64_const(1_000_000_000).i64_mul();
     i.i32_const((park + RET) as i32).i64_load32_u(mem(8));
     i.i64_add().return_();
+    i.end();
+
+    // op 60: the monotonic clock — `monotonic-clock.now() -> instant`
+    // (u64 nanos) lowers to a bare `() -> i64`, answered as is.
+    i.local_get(op).i32_const(60).i32_eq().if_(BlockType::Empty);
+    i.call(I_MONO_NOW).return_();
     i.end();
 
     // Everything else: the defined refusal — the message on stderr, exit 1.
