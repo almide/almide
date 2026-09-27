@@ -119,17 +119,20 @@ fn shim_fs_call(
         i.end();
     }
 
-    // op 30: raw stdout append.
-    i.local_get(op).i32_const(30).i32_eq().if_(BlockType::Empty);
-    i.i32_const(park as i32).local_get(b_ptr).i32_store(mem(IOV));
-    i.i32_const(park as i32).local_get(b_len).i32_store(mem(IOV + 4));
-    i.i32_const(1);
-    i.i32_const((park + IOV) as i32);
-    i.i32_const(1);
-    i.i32_const((park + NREAD) as i32);
-    i.call(0).drop();
-    i.i64_const(0).return_();
-    i.end();
+    // op 30: raw stdout append; op 73: raw stderr append (#2769) — the
+    // same fd_write on fd 1 / fd 2.
+    for (code, fd) in [(30, 1), (73, 2)] {
+        i.local_get(op).i32_const(code).i32_eq().if_(BlockType::Empty);
+        i.i32_const(park as i32).local_get(b_ptr).i32_store(mem(IOV));
+        i.i32_const(park as i32).local_get(b_len).i32_store(mem(IOV + 4));
+        i.i32_const(fd);
+        i.i32_const((park + IOV) as i32);
+        i.i32_const(1);
+        i.i32_const((park + NREAD) as i32);
+        i.call(0).drop();
+        i.i64_const(0).return_();
+        i.end();
+    }
 
     // op 35: incremental stdin — ONE fd_read of up to min(a_len, 4096)
     // bytes into the park data region (the count rides in a_len, op 32's
