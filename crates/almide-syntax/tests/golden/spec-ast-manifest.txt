@@ -1,4 +1,4 @@
-# oracle: almide 0.64.1 (dev) at 354a51004 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.64.1 (dev) at 6df96446f — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -754,6 +754,7 @@ b40ef0acbbf711e148a40da6256c63970fb0a0137d30662f1dda61b2fe5d1350	spec/wasm_cross
 91d604470b276a321faf4e366280d8d9d9a709b219a9a36ddb713d96e95691af	spec/wasm_cross/ctor_turbofish_family.almd
 5edd60edf0a9e9a69e1a1695ab0ba325ddd93ed539822a75ace9f6d49972b35e	spec/wasm_cross/ctor_var_copy_semantics.almd
 c375db8494b9a214b9320e87f7fbcdf84a8db1a0474fc6d28fda393b7ea6c22f	spec/wasm_cross/datetime_format.almd
+88b14306163bfbe1442cf9918c5a41b211696bd5c49eaf00c30f9ad1c84103e4	spec/wasm_cross/datetime_monotonic_ns.almd
 75b242d0f5700b3fdc80eda5edd775e3fc0ca9970a5607c7d6c0210db7be5a6e	spec/wasm_cross/datetime_parse_iso_strict.almd
 8096556c20520f70604c105af5e991b49f2cf43ec2cb7fa3be65a7852c3f0369	spec/wasm_cross/datetime_pre_epoch.almd
 9eb161bf2574cd15c24242e987e254a2590a5bb22f36423dae34714dbc44e7a2	spec/wasm_cross/declaration_forms.almd
