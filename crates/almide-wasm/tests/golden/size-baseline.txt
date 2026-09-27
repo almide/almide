@@ -131,6 +131,7 @@
 3191	spec/wasm_cross/effect_mut_generic_port.almd
 5855	spec/wasm_cross/effect_option_explicit_bang.almd
 4682	spec/wasm_cross/effect_slot_carrier.almd
+5001	spec/wasm_cross/effect_slot_never_err_bang.almd
 5424	spec/wasm_cross/effect_tail_carrier_family.almd
 2402	spec/wasm_cross/effect_tco.almd
 2712	spec/wasm_cross/effect_tco_err_rewrap.almd
@@ -555,7 +556,7 @@
 1657	spec/wasm_cross/record_forms.almd
 10515	spec/wasm_cross/record_option_none_cells.almd
 7357	spec/wasm_cross/record_pair_result_return.almd
-!	spec/wasm_cross/record_scalar_field_assign_alias.almd
+3077	spec/wasm_cross/record_scalar_field_assign_alias.almd
 3953	spec/wasm_cross/record_variant_field_literal.almd
 2337	spec/wasm_cross/records_variants.almd
 976	spec/wasm_cross/recursion_depth_within_limits.almd
