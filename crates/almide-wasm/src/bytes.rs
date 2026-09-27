@@ -254,9 +254,13 @@ impl Emitter<'_> {
         let oom = self.pool.intern("Error: out of memory");
         let mut i = self.f.instructions();
         i.local_set(hn);
-        // n = max(n, 0)  (select: v1 first)
+        // n = (n > 0 && len > 0) ? n : 0  (select: v1 first). An EMPTY
+        // base is empty at ANY count (#2690): the copy loop runs `n`
+        // times whatever the length, so `repeat(empty, i64::MAX)` never
+        // returned.
         i.local_get(hn).i64_const(0);
         i.local_get(hn).i64_const(0).i64_gt_s();
+        i.local_get(bh).i32_load(len_memarg()).i32_const(0).i32_ne().i32_and();
         i.select().local_set(hn);
         // total = len * n, judged in i64 BEFORE the i32 wrap —
         // past the structural bound is the C-197 die.

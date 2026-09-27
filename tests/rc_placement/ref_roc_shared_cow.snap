@@ -235,7 +235,7 @@ fn $__drop_opt_str_str
   (call $rc_dec (i32.wrap_i64 (local.get $v14)))
   (call $rc_dec (i32.wrap_i64 (local.get $v1)))
 fn $string.repeat
-  (call $rc_dec (local.get $v17))
+  (call $rc_dec (local.get $v21))
 fn $__lc_copy_rc
   (call $rc_inc (i32.wrap_i64 (local.get $v12)))
 fn $__list_append1_rc

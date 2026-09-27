@@ -82,6 +82,10 @@ fn alloc_bytes_or_oom(n: usize) -> Vec<u8> {
     v
 }
 pub fn almide_rt_bytes_repeat(b: &Vec<u8>, n: i64) -> Vec<u8> {
+    // An EMPTY base is empty at ANY count (#2690): the extend loop below
+    // runs `n` times whatever `b.len()` is, so `repeat(empty, i64::MAX)`
+    // never returned.
+    if b.is_empty() { return Vec::new(); }
     let n = n.max(0) as usize;
     let total = b.len().checked_mul(n).unwrap_or(usize::MAX);
     let mut v = alloc_bytes_or_oom(total);
