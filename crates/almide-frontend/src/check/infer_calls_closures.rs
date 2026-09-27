@@ -717,6 +717,7 @@ impl Checker {
         if slot_effect {
             self.env.can_call_effect = true;
         }
+        let saved_in_slot = std::mem::replace(&mut self.env.in_effect_slot_lambda, slot_effect);
         // Expected-type hint from the enclosing call (#653): when this
         // lambda is an argument whose parameter slot is a `Fn`, the
         // caller pins each UNANNOTATED param to the expected element
@@ -770,6 +771,7 @@ impl Checker {
         }
         let ret_ty = self.infer_expr(body);
         self.env.can_call_effect = saved_can_call_effect;
+        self.env.in_effect_slot_lambda = saved_in_slot;
         // Single-condition decisions (MC/DC ledger): || as if/else.
         let became_fallible = if self.env.lambda_prop_used { true } else { slot_effect };
         let channel = self.env.lambda_ret.take();
@@ -1130,6 +1132,9 @@ impl Checker {
             self.check_bang_error_channel(operand, plain_is_effect_call);
             return;
         }
+        if self.never_err_bang_is_noop(operand, plain_is_effect_call) {
+            return;
+        }
         let accepted = if self.env.lambda_depth == 0 {
             self.accept_declared_channel_prop(operand)
         } else {
@@ -1206,6 +1211,33 @@ impl Checker {
         };
         self.emit(diag);
         true
+    }
+
+    /// #2704: `!` on a NEVER-ERR effect call (a stdlib `@intrinsic` effect fn
+    /// whose declared return is not a `Result`, e.g. `random.int`,
+    /// `env.millis`) is the silent no-op of #1049 in every effect-fn body:
+    /// an `effect fn` body (where `auto_unwrap` already accepts it) and an
+    /// `effect (…) -> …` slot lambda such as an `http.serve` handler, which
+    /// #1055 gives effect-fn body ergonomics. ADR-0002 §D6: a stdlib
+    /// never-err effect fn returns a bare value and `!` on it passes as a
+    /// no-op, so the writer can follow "an effect call takes `!`" without
+    /// knowing which stdlib fns never fail. The `!` propagates nothing, so
+    /// it neither marks the lambda fallible nor touches its channel. A plain
+    /// closure keeps its own channel rules (ADR-0006: a `!` in a `list.map`
+    /// callback selects the fallible form).
+    fn never_err_bang_is_noop(&self, operand: &Ty, plain_is_effect_call: bool) -> bool {
+        // Single-condition decisions (MC/DC ledger): one guard each.
+        if !plain_is_effect_call {
+            return false;
+        }
+        if !self.env.in_effect_slot_lambda {
+            return false;
+        }
+        let op = resolve_ty(operand, &self.uf);
+        !matches!(
+            op,
+            Ty::Applied(TypeConstructorId::Result | TypeConstructorId::Option, _) | Ty::Unknown | Ty::TypeVar(_)
+        )
     }
 
     /// #1067: a PURE fn that DECLARES a `Result`/`Option` return propagates

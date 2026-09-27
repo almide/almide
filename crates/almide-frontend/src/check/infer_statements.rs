@@ -113,6 +113,16 @@ impl Checker {
 
     fn check_stmt_let(&mut self, stmt: &mut ast::Stmt) {
         let ast::Stmt::Let { name, ty, value, span } = stmt else { unreachable!() };
+        // #2704: `let f: effect (A) -> B = (x) => …` is an effect slot like a
+        // call argument or a declared return (#1055 / #2588): the lambda gets
+        // effect-fn body ergonomics. Only the effect form is armed, so a
+        // pure annotated lambda infers exactly as before.
+        if let Some(te) = ty.as_ref() {
+            let declared = self.resolve_type_expr(te);
+            if matches!(resolve_ty(&declared, &self.uf), Ty::Fn { is_effect: true, .. }) {
+                self.expect_lambda(value, &declared);
+            }
+        }
         let val_ty = self.infer_expr(value);
         let final_ty = if let Some(te) = ty {
             let declared = self.resolve_type_expr(te);
