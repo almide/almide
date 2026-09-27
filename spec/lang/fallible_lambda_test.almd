@@ -1,7 +1,8 @@
 // ADR-0006 D1 / ADR-0009 (#1108 Phase 2b): lambdas are fallibility-inferred
 // "mini fallible fns". The ratified rules (2026-08-07, L1–L9):
 //   L1 first-class everywhere (not HOF-arg-only)   L2 usage-driven (a `!` in
-//   the body marks it)   L3 E = String   L4 none → err("none")   L5 value
+//   the body marks it)   L3 E = the context's, else the join of the `!`s,
+//   String as the top (ADR-0021; pinned in typed_error_callback_channel_test)   L4 none → err("none")   L5 value
 //   tails lift into ok(...)   L6 any `!` in a core-HOF callback = first-err
 //   L7/L8 `(A) -> B!` fn-type slots; an explicit slot's user HOF composes
 //   L9 test-block lambdas keep unwrap semantics (asserted directly below;
