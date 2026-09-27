@@ -361,7 +361,7 @@ fn the_server_skips_an_unparsable_request_and_answers_the_next() {
         ok.read_to_string(&mut resp).unwrap();
         resp
     });
-    let (stream, (method, target, body, headers)) = server::http_server_next(&listener);
+    let (stream, (method, target, body, headers)) = server::http_server_next(&listener).expect("no shutdown signal in this test");
     assert_eq!((method.as_str(), target.as_str(), body.as_str()), ("POST", "/echo?x=1", "ping"));
     assert_eq!(
         headers,
@@ -386,7 +386,7 @@ fn a_request_without_a_body_reads_as_empty() {
         s.read_to_string(&mut resp).unwrap();
         resp
     });
-    let (stream, (method, target, body, _)) = server::http_server_next(&listener);
+    let (stream, (method, target, body, _)) = server::http_server_next(&listener).expect("no shutdown signal in this test");
     assert_eq!((method.as_str(), target.as_str(), body.as_str()), ("GET", "/", ""));
     server::http_server_write(stream, 200, &[], "").unwrap();
     assert_eq!(client.join().unwrap(), "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
