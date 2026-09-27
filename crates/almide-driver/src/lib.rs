@@ -70,7 +70,8 @@ pub fn optimize_half(ir: &mut IrProgram) {
     // folded and DCE'd like any other branch (a literal out-of-range code
     // collapses to the abort arm). Here rather than in a consumer because every
     // leg must see the SAME rule: four hand-written checks would be four rules
-    // that agree today. See `almide_ir::exit_code` for why 0..=125 (#2303).
+    // that agree today. See `almide_ir::exit_code` for why 0..=255, and where the
+    // preview-1 build's 126..=255 wall lives instead (#2303, #2780).
     almide_ir::exit_code::guard_exit_codes(ir);
     almide_optimize::optimize::optimize_program(ir);
     almide_ir::reclassify_top_lets(ir);

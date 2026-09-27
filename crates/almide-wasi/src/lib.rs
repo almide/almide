@@ -67,6 +67,14 @@ pub const ENV_FULL_MSG: &[u8] = b"Error: env.set log full (64 KiB of names and v
 /// C-197's line, for the shim-side stagings that ask the machine for pages
 /// (#2120). The guest allocator prints the same words from its own path.
 pub const OOM_MSG: &[u8] = b"Error: out of memory\n";
+/// C-350's preview-1 wall (#2780): `proc_exit` on a stock runtime traps on
+/// 126 and above, so the exit shim refuses that band with this line. The IR
+/// rewrite the incumbent renderer takes prints the same words
+/// (`almide_ir::exit_code::PREVIEW1_WALL_MSG`, held equal by
+/// `tests/exit_code_range_test.rs`).
+pub const EXIT_WALL_MSG: &[u8] = b"Error: a WASI preview-1 build cannot exit with a code in 126..=255\n";
+/// The first code the wall refuses.
+pub const EXIT_WALL_FROM: i32 = 126;
 // Park-page layout (offsets from park base).
 pub const IOV: u64 = 0; // two iovec entries (16 bytes)
 pub const NREAD: u64 = 16;
@@ -76,6 +84,9 @@ pub const MSG: u64 = 64;
 pub const MSG2: u64 = 256;
 /// The third: the shim-side out-of-memory line.
 pub const MSG3: u64 = 384;
+/// The fourth: the exit shim's preview-1 wall line.
+pub const MSG4: u64 = 512;
+const _: () = assert!(MSG3 + OOM_MSG.len() as u64 <= MSG4 && MSG4 + EXIT_WALL_MSG.len() as u64 <= DATA);
 pub const DATA: u64 = 1024; // stdin/entropy bytes + op result staging
 /// The env.set overlay log (#1716): [klen u32][vlen u32][key][val] entries,
 /// append-only, scanned last-write-wins by op 26. Its page sits above the
@@ -530,7 +541,7 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     // env_get, env_set, args the op set reached.
     code.function(&shim_print(1, park));
     code.function(&shim_print(2, park));
-    code.function(&shim_exit());
+    code.function(&shim_exit(park));
     // #1962: a module whose emitted op set is EMPTY never calls `fs_call`
     // (and `host_read` only copies an op's result out), so both shims ship
     // as index-stable `unreachable` stubs — the fs_call dispatcher alone is
@@ -587,6 +598,8 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     if f_env_get.is_some() || f_args.is_some() {
         data.active(0, &ConstExpr::i32_const((park + MSG3) as i32), OOM_MSG.iter().copied());
     }
+
+    data.active(0, &ConstExpr::i32_const((park + MSG4) as i32), EXIT_WALL_MSG.iter().copied());
 
     let mut m = Module::new();
     m.section(&type_sec)

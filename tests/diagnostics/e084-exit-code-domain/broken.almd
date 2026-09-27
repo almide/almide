@@ -1,2 +1,2 @@
 import process
-effect fn main() -> Unit = process.exit(200)
+effect fn main() -> Unit = process.exit(256)

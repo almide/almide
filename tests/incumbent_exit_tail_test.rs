@@ -35,7 +35,7 @@ fn dynamic_exit_codes_execute_in_every_tail_position() {
             } else {
                 tail.to_string()
             };
-            for code in [-1, 0, 1, 125, 126, 256] {
+            for code in [-1, 0, 1, 125, 126, 255, 256] {
                 let file = dir.path().join(format!("{position}_{code}_{inline}.almd"));
                 let binding = if inline {
                     code.to_string()
@@ -76,26 +76,22 @@ fn dynamic_exit_codes_execute_in_every_tail_position() {
                         .join("\n");
                     let context =
                         format!("{position}, code {code}, inline {inline}, {leg}: {stderr}");
-                    let valid = (0..=125).contains(&code);
-                    assert_eq!(
-                        out.status.code(),
-                        Some(if valid { code } else { 1 }),
-                        "{context}"
-                    );
+                    // C-350: the exit status 0..=255 passes through; the
+                    // incumbent's preview-1 artifact walls 126..=255 (#2780).
+                    let (want_code, want_err) = if !(0..=255).contains(&code) {
+                        (1, "Error: exit code must be in 0..=255")
+                    } else if code > 125 && leg == "incumbent" {
+                        (1, "Error: a WASI preview-1 build cannot exit with a code in 126..=255")
+                    } else {
+                        (code, "")
+                    };
+                    assert_eq!(out.status.code(), Some(want_code), "{context}");
                     assert_eq!(
                         String::from_utf8(out.stdout).unwrap(),
                         "before-exit\nchosen\n",
                         "{context}"
                     );
-                    assert_eq!(
-                        stderr,
-                        if valid {
-                            ""
-                        } else {
-                            "Error: exit code must be in 0..=125"
-                        },
-                        "{context}"
-                    );
+                    assert_eq!(stderr, want_err, "{context}");
                 }
             }
         }
