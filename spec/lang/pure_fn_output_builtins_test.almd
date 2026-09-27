@@ -1,13 +1,11 @@
 // A pure fn may call the output and abort builtins: `println`, `eprintln`,
-// `panic`, `assert`, `assert_eq`, `assert_ne` (ADR-0022,
+// `assert`, `assert_eq`, `assert_ne` (ADR-0022,
 // docs/specs/effect-system.md §2.1). They write or abort and never read, so a
 // pure fn that uses them keeps a pure signature: callers use its value
-// directly, with no `!`.
+// directly, with no `!`. The `panic` case lives in panic_test.almd.
 fn show(label: String, n: Int) -> Unit = println("${label}=${n}")
 
 fn warn(msg: String) -> Unit = eprintln("warn: ${msg}")
-
-fn fail(n: Int) -> Unit = panic("negative: ${n}")
 
 fn half(n: Int) -> Int = {
   assert(n >= 0)
@@ -22,7 +20,7 @@ fn traced_double(xs: List[Int]) -> List[Int] = xs |> list.map((x) => {
 })
 
 fn safe_half(n: Int) -> Int = {
-  if n < 0 then fail(n) else ()
+  assert(n >= 0)
   half(n)
 }
 
