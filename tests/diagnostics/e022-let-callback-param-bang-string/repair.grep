@@ -1,0 +1,4 @@
+# ADR-0021 (#2726): an operand whose type was still open at its `!` (a
+# let-bound lambda's unannotated parameter) is judged once the program
+# decides it — it used to pass check and fail rustc with E0277.
+r |> result.map_err((e) => BadNumber(e))

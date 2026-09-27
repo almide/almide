@@ -1,0 +1,10 @@
+type ShiftErr: Eq, Repr = | BadNumber(String) | Negative(Int)
+
+fn bump(x: Result[Int, String]) -> Int!ShiftErr = {
+  let cb = (r) => r! + 1
+  cb(x)!
+}
+
+test "t" {
+  assert_eq(bump(ok(1)), ok(2))
+}
