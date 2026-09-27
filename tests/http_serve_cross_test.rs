@@ -3,8 +3,19 @@
 //! runner executes it: this driver starts it with `almide run` natively and
 //! with `almide run --target wasm` (the embedded almide.* host), waits for
 //! its "ready" line on stderr, replays ONE request script against each and
-//! requires the raw response bytes and the stderr transcript to be
-//! byte-identical. Two more properties ride along:
+//! compares what C-367 promises (ADR-0020 §7.1, #2700), not the raw bytes:
+//!
+//! - each response's status code, header set and de-framed body. The header
+//!   set is the (name, value) pairs with names ASCII-case-insensitive, fields
+//!   of different names unordered and fields of one name in their relative
+//!   order (RFC 9110 §5.3); the host-managed fields `date`, `connection`,
+//!   `keep-alive`, `transfer-encoding` and `content-length` are left out, and
+//!   the reason phrase is not compared (hyper writes `418 I'm a teapot` where
+//!   the native core writes `418 OK`, measured by the #2659 prototype);
+//! - the stderr transcripts as multisets of lines: the order of lines across
+//!   requests is not promised.
+//!
+//! Two more properties ride along:
 //!
 //! - one instance per run: `/boot` answers a random draw main made once and
 //!   the handler captured — two requests of one run must see the same value
@@ -14,6 +25,7 @@
 
 #![cfg(unix)]
 
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::process::CommandExt;
@@ -104,6 +116,97 @@ fn ask(port: u16, raw: &[u8]) -> Vec<u8> {
     out
 }
 
+/// A response as C-367 observes it. Two responses answer the same exactly
+/// when their `Observed` values are equal.
+#[derive(Debug, PartialEq, Eq)]
+struct Observed {
+    status: u16,
+    /// Lowercased name → values in wire order. The map drops the order
+    /// between different names; the Vec keeps the order within one name.
+    headers: BTreeMap<String, Vec<String>>,
+    body: Vec<u8>,
+}
+
+/// The fields a host manages: the framing and the connection's lifetime.
+const HOST_FIELDS: &[&str] = &["date", "connection", "keep-alive", "transfer-encoding", "content-length"];
+
+/// Parses one HTTP/1.1 response read to the connection's close.
+fn observe(raw: &[u8]) -> Result<Observed, String> {
+    let cut = raw.windows(4).position(|w| w == b"\r\n\r\n").ok_or("no end of the response head")?;
+    let head = std::str::from_utf8(&raw[..cut]).map_err(|e| format!("the head is not UTF-8: {e}"))?;
+    let rest = &raw[cut + 4..];
+    let mut lines = head.split("\r\n");
+    let status_line = lines.next().unwrap_or_default();
+    // `HTTP/1.1 <status> <reason>`: the reason phrase is the host's.
+    let mut parts = status_line.splitn(3, ' ');
+    let version = parts.next().unwrap_or_default();
+    if !version.starts_with("HTTP/") {
+        return Err(format!("not a status line: {status_line:?}"));
+    }
+    let status = parts
+        .next()
+        .and_then(|c| (c.len() == 3).then_some(c).and_then(|c| c.parse::<u16>().ok()))
+        .ok_or_else(|| format!("no status code in {status_line:?}"))?;
+    let mut headers: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut length = None;
+    let mut chunked = false;
+    for line in lines {
+        let (name, value) = line.split_once(':').ok_or_else(|| format!("a header line without a colon: {line:?}"))?;
+        let name = name.to_ascii_lowercase();
+        let value = value.trim_matches([' ', '\t']).to_string();
+        match name.as_str() {
+            "content-length" => length = Some(value.parse::<usize>().map_err(|e| format!("content-length {value:?}: {e}"))?),
+            "transfer-encoding" => chunked |= value.to_ascii_lowercase().split(',').any(|c| c.trim() == "chunked"),
+            _ => {}
+        }
+        if !HOST_FIELDS.contains(&name.as_str()) {
+            headers.entry(name).or_default().push(value);
+        }
+    }
+    let body = if chunked {
+        dechunk(rest)?
+    } else if let Some(n) = length {
+        rest.get(..n).ok_or_else(|| format!("content-length {n} but {} body bytes", rest.len()))?.to_vec()
+    } else {
+        rest.to_vec()
+    };
+    Ok(Observed { status, headers, body })
+}
+
+/// Decodes a chunked body (RFC 9112 §7.1); trailers are ignored.
+fn dechunk(mut rest: &[u8]) -> Result<Vec<u8>, String> {
+    let mut body = Vec::new();
+    loop {
+        let eol = rest.windows(2).position(|w| w == b"\r\n").ok_or("a chunk size line without CRLF")?;
+        let line = std::str::from_utf8(&rest[..eol]).map_err(|e| format!("chunk size: {e}"))?;
+        let size = line.split(';').next().unwrap_or_default().trim();
+        let n = usize::from_str_radix(size, 16).map_err(|e| format!("chunk size {size:?}: {e}"))?;
+        rest = &rest[eol + 2..];
+        if n == 0 {
+            return Ok(body);
+        }
+        body.extend_from_slice(rest.get(..n).ok_or("a chunk shorter than its size")?);
+        rest = rest.get(n..).and_then(|r| r.strip_prefix(b"\r\n")).ok_or("a chunk without its CRLF")?;
+    }
+}
+
+/// C-367's response comparison: `Ok` when the two answer the same.
+fn same_answer(a: &[u8], b: &[u8]) -> Result<(), String> {
+    let (a, b) = (observe(a)?, observe(b)?);
+    if a == b {
+        Ok(())
+    } else {
+        Err(format!("{a:?}\n  vs\n{b:?}"))
+    }
+}
+
+/// The stderr transcript as a multiset of lines.
+fn line_multiset(s: &str) -> Vec<&str> {
+    let mut lines: Vec<&str> = s.lines().collect();
+    lines.sort_unstable();
+    lines
+}
+
 struct Run {
     responses: Vec<Vec<u8>>,
     boots: Vec<Vec<u8>>,
@@ -138,7 +241,7 @@ fn replay(wasm: bool) -> Run {
 
 #[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
 #[test]
-fn http_serve_answers_byte_identically_on_native_and_the_embedded_lane() {
+fn http_serve_answers_the_same_status_headers_and_body_on_native_and_the_embedded_lane() {
     let native = replay(false);
     let wasm = replay(true);
     // The script's own shape, so an empty answer on both legs cannot pass.
@@ -150,16 +253,20 @@ fn http_serve_answers_byte_identically_on_native_and_the_embedded_lane() {
         String::from_utf8_lossy(&native.responses[7])
     );
     assert!(native.responses[9].ends_with(b"\r\n\r\ntrue true"), "{:?}", String::from_utf8_lossy(&native.responses[9]));
+    assert_eq!(native.responses.len(), wasm.responses.len());
     for (i, (n, w)) in native.responses.iter().zip(&wasm.responses).enumerate() {
-        assert_eq!(
-            String::from_utf8_lossy(n),
-            String::from_utf8_lossy(w),
-            "request {i} ({:?}) answered differently",
-            String::from_utf8_lossy(&SCRIPT[i][..SCRIPT[i].len().min(40)])
-        );
-        assert_eq!(n, w, "request {i}: bytes differ");
+        if let Err(diff) = same_answer(n, w) {
+            panic!(
+                "request {i} ({:?}) answered differently:\n{diff}\nnative: {:?}\nwasm:   {:?}",
+                String::from_utf8_lossy(&SCRIPT[i][..SCRIPT[i].len().min(40)]),
+                String::from_utf8_lossy(n),
+                String::from_utf8_lossy(w)
+            );
+        }
     }
-    assert_eq!(native.stderr, wasm.stderr, "the stderr transcripts differ");
+    // Every request left its line: an empty transcript on both legs cannot pass.
+    assert_eq!(native.stderr.lines().filter(|l| l.starts_with("GET ") || l.starts_with("POST ") || l.starts_with("DELETE ")).count(), SCRIPT.len() + 2, "{:?}", native.stderr);
+    assert_eq!(line_multiset(&native.stderr), line_multiset(&wasm.stderr), "the stderr transcripts hold different lines");
     for run in [&native, &wasm] {
         assert_eq!(run.boots[0], run.boots[1], "one run answered two different draws: not one instance");
         assert!(!run.boots[0].is_empty());
@@ -221,4 +328,36 @@ fn a_bind_failure_aborts_identically_on_native_and_the_embedded_lane() {
     }
     let _ = std::fs::remove_dir_all(&dir);
     drop(held);
+}
+
+/// The comparator itself, on constructed responses: it must reject every
+/// change C-367 observes and accept every change it leaves to the host.
+#[test]
+fn the_response_comparator_rejects_what_c367_observes_and_accepts_what_it_does_not() {
+    let base = b"HTTP/1.1 418 OK\r\nX-Kind: teapot\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello";
+    assert!(same_answer(base, base).is_ok());
+    let rejected: &[(&str, &[u8])] = &[
+        ("a changed status", b"HTTP/1.1 419 OK\r\nX-Kind: teapot\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello"),
+        ("a changed header value", b"HTTP/1.1 418 OK\r\nX-Kind: kettle\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello"),
+        ("a reordered same-name header", b"HTTP/1.1 418 OK\r\nX-Kind: teapot\r\nSet-Cookie: b=2\r\nSet-Cookie: a=1\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello"),
+        ("a missing header", b"HTTP/1.1 418 OK\r\nX-Kind: teapot\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Length: 5\r\n\r\nhello"),
+        ("a changed body", b"HTTP/1.1 418 OK\r\nX-Kind: teapot\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhellO"),
+    ];
+    for (what, other) in rejected {
+        assert!(same_answer(base, other).is_err(), "{what} was accepted");
+        assert!(same_answer(other, base).is_err(), "{what} was accepted (reversed)");
+    }
+    let accepted: &[(&str, &[u8])] = &[
+        ("a reordered header with a different name", b"HTTP/1.1 418 OK\r\nContent-Type: text/plain\r\nSet-Cookie: a=1\r\nX-Kind: teapot\r\nSet-Cookie: b=2\r\nContent-Length: 5\r\n\r\nhello"),
+        ("a different reason phrase", b"HTTP/1.1 418 I'm a teapot\r\nX-Kind: teapot\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello"),
+        ("a different case in a header name", b"HTTP/1.1 418 OK\r\nx-kind: teapot\r\nset-cookie: a=1\r\nSET-COOKIE: b=2\r\ncontent-type: text/plain\r\ncontent-length: 5\r\n\r\nhello"),
+        ("host-managed fields and chunked framing", b"HTTP/1.1 418 OK\r\nDate: Mon, 28 Sep 2026 00:00:00 GMT\r\nX-Kind: teapot\r\nConnection: close\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nhel\r\n2\r\nlo\r\n0\r\n\r\n"),
+    ];
+    for (what, other) in accepted {
+        assert!(same_answer(base, other).is_ok(), "{what} was rejected: {:?}", same_answer(base, other));
+        assert!(same_answer(other, base).is_ok(), "{what} was rejected (reversed)");
+    }
+    // The stderr multiset: order across requests is free, the lines are not.
+    assert_eq!(line_multiset("ready\nGET /a\nGET /b\n"), line_multiset("ready\nGET /b\nGET /a\n"));
+    assert_ne!(line_multiset("ready\nGET /a\nGET /a\n"), line_multiset("ready\nGET /a\n"));
 }

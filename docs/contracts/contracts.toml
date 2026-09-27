@@ -4625,7 +4625,7 @@ since     = "0.64.0"
 status    = "active"
 evidence  = [
   { path = "spec/serve_cross/http_serve_replay.almd", class = "fixture" },
-  { path = "tests/http_serve_cross_test.rs", name = "http_serve_answers_byte_identically_on_native_and_the_embedded_lane", class = "fixture" },
+  { path = "tests/http_serve_cross_test.rs", name = "http_serve_answers_the_same_status_headers_and_body_on_native_and_the_embedded_lane", class = "fixture" },
   { path = "tests/http_serve_cross_test.rs", name = "a_bind_failure_aborts_identically_on_native_and_the_embedded_lane", class = "fixture" },
 ]
 [[contract]]

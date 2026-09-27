@@ -3,7 +3,9 @@
 // driver (tests/http_serve_cross_test.rs in almide/almide) starts it with
 // `almide run` natively and with `almide run --target wasm`, waits for the
 // "ready" line on stderr, replays one request script against each and
-// compares the raw response bytes and the stderr transcript byte for byte.
+// compares each response's status code, header set and de-framed body (the
+// reason phrase and the framing fields are the host's) and the stderr
+// transcripts as multisets of lines.
 // Usage: almide run http_serve_replay.almd [--target wasm] -- <port>
 import env
 import http
