@@ -2804,6 +2804,7 @@ evidence  = [
   { path = "spec/wasm_cross/effect_fn_value.almd", class = "fixture" },
   { path = "spec/lang/fallible_user_hof_test.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_fn_value_slot_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_slot_never_err_bang.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-222"
