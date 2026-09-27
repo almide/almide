@@ -1706,29 +1706,50 @@ impl Checker {
     /// other modules were in the program, and adding a same-named type
     /// anywhere changed or broke a file that never mentioned it. Now it is
     /// E029 naming the module to import and the qualified spelling.
-    pub(crate) fn validate_bare_type_visibility(&mut self, program: &ast::Program) {
+    pub(crate) fn validate_bare_type_visibility(&mut self, program: &mut ast::Program) {
         let here = self.current_module_prefix.clone();
-        // name -> the user modules that declare it (sorted, so the message is
-        // deterministic).
+        let own: std::collections::HashSet<Sym> = program.decls.iter()
+            .filter_map(|d| match d { ast::Decl::Type { name, .. } => Some(*name), _ => None })
+            .collect();
+        // One walk of the whole file (in place, no copy) finds the bare type
+        // names it spells; the per-declaration walk below, which only supplies
+        // each error's span, runs only when one of them is actually out of
+        // scope. A clean file costs one walk and one scan of the type table.
+        let candidates: std::collections::HashSet<&str> = import_spellings(program).bare_types
+            .into_iter()
+            .filter(|n| !own.contains(n))
+            .map(|n| n.as_str())
+            .collect();
+        if candidates.is_empty() {
+            return;
+        }
+        // name -> the user modules that declare it (sorted at report time, so
+        // the message is deterministic).
+        let user_modules: std::collections::HashSet<&str> = self.env.user_modules.iter().map(|m| m.as_str()).collect();
         let mut owners: std::collections::HashMap<Sym, Vec<Sym>> = std::collections::HashMap::new();
         for k in self.env.types.keys() {
             if let Some((m, base)) = k.as_str().rsplit_once('.')
-                && self.env.user_modules.contains(&sym(m))
+                && candidates.contains(base)
+                && user_modules.contains(m)
                 && !almide_lang::stdlib_info::is_bundled_module(m)
             {
                 owners.entry(sym(base)).or_default().push(sym(m));
             }
         }
-        if owners.is_empty() {
-            return;
-        }
         let mut visible_set: std::collections::HashSet<Sym> = self.env.import_table.accessible.clone();
         visible_set.extend(self.env.import_table.aliases.values().copied());
         if let Some(h) = here.as_deref() { visible_set.insert(sym(h)); }
         let visible = |m: &Sym| -> bool { visible_set.contains(m) };
-        let own: std::collections::HashSet<Sym> = program.decls.iter()
-            .filter_map(|d| match d { ast::Decl::Type { name, .. } => Some(*name), _ => None })
-            .collect();
+        // A stdlib type of the same name is what the bare spelling means here
+        // (the auto-import); only a user-module-only name is out of scope.
+        owners.retain(|name, decl_owners| {
+            !decl_owners.iter().any(visible)
+                && almide_lang::stdlib_info::stdlib_owned_type_owner(name.as_str()).is_none()
+                && crate::bundled_sigs::bundled_type_owner(name.as_str()).is_none()
+        });
+        if owners.is_empty() {
+            return;
+        }
         let mut shell = program.clone();
         shell.decls.clear();
         let saved = self.current_span;
@@ -1750,15 +1771,7 @@ impl Checker {
             names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
             for name in names {
                 let Some(decl_owners) = owners.get(&name) else { continue };
-                if decl_owners.iter().any(visible) || reported.contains(&name) {
-                    continue;
-                }
-                // A stdlib type of the same name is what the bare spelling
-                // means here (the auto-import); only a user-module-only name
-                // is out of scope.
-                if almide_lang::stdlib_info::stdlib_owned_type_owner(name.as_str()).is_some()
-                    || crate::bundled_sigs::bundled_type_owner(name.as_str()).is_some()
-                {
+                if reported.contains(&name) {
                     continue;
                 }
                 reported.insert(name);

@@ -34,23 +34,24 @@ pub fn scoped_bare_type_key(scope: Option<&str>, name: &str) -> Sym {
 /// and persist, so registration, the checker and lowering all read the same
 /// answer for the same file.
 pub fn register_scoped_bare_type_keys(env: &mut crate::types::TypeEnv, scope: Option<&str>) {
-    let mut visible: Vec<Sym> = env.import_table.accessible.iter().copied()
-        .chain(env.import_table.aliases.values().copied())
-        .filter(|m| !almide_lang::stdlib_info::is_bundled_module(m.as_str()) && Some(m.as_str()) != scope)
+    let visible: std::collections::HashSet<&str> = env.import_table.accessible.iter()
+        .chain(env.import_table.aliases.values())
+        .map(|m| m.as_str())
+        .filter(|m| !almide_lang::stdlib_info::is_bundled_module(m) && Some(*m) != scope)
         .collect();
-    visible.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-    visible.dedup();
+    if visible.is_empty() {
+        return;
+    }
+    // One scan of the type table, not one per imported module: a key
+    // `m.Name` belongs to module `m` exactly when `m` is its prefix before
+    // the LAST dot.
     let mut owners: HashMap<String, Vec<Sym>> = HashMap::new();
-    for m in &visible {
-        let prefix = format!("{}.", m.as_str());
-        for (k, v) in &env.types {
-            if !matches!(v, Ty::Record { .. } | Ty::Variant { .. }) {
-                continue;
-            }
-            let Some(rest) = k.as_str().strip_prefix(&prefix) else { continue };
-            if rest.contains('.') {
-                continue;
-            }
+    for (k, v) in &env.types {
+        if !matches!(v, Ty::Record { .. } | Ty::Variant { .. }) {
+            continue;
+        }
+        let Some((m, rest)) = k.as_str().rsplit_once('.') else { continue };
+        if visible.contains(m) {
             owners.entry(rest.to_string()).or_default().push(*k);
         }
     }
