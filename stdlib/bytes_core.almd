@@ -107,7 +107,10 @@ fn bytes_repeat(b: Bytes, count: Int) -> Bytes = {
   // out-of-bounds trap. A product past i64 is unsatisfiable, so it is the
   // floor's own `Error: out of memory` (C-197) — tested by division, never on
   // the wrapped product; below that the floor judges the size as before.
-  if n > 0 and n > 9223372036854775807 / blen then prim.die(prim.handle("Error: out of memory\n")) else ()
+  // `wrap_bound` is the largest count whose product fits i64 — an overflow
+  // bound, not an allocation ceiling (the floor still owns that).
+  let wrap_bound = if blen > 0 then 9223372036854775807 / blen else 0
+  if n > wrap_bound then prim.die(prim.handle("Error: out of memory\n")) else ()
   let out = prim.alloc_bytes(blen * n)
   let _x = __repcopy(prim.handle(out) + 12, prim.handle(b) + 12, blen, n, 0)
   out
