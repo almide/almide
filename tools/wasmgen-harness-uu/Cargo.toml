@@ -1,4 +1,5 @@
-# Browser-ABI determinism harness: the SAME compile_to_wasm the playground uses,
+# Browser-ABI determinism harness: the SAME structural route the playground's
+# library entry uses (`almide::wasm_route`, forced structural, #2753),
 # built to wasm32-unknown-unknown (the actual browser target) via wasm-bindgen.
 # Run by scripts/check-browser-determinism.sh under node, it (1) must not panic
 # (wasm32-unknown-unknown lacks std::time etc.) and (2) must emit byte-identical
@@ -15,8 +16,13 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
+# The structural leg through the library route (#2753): `almide::wasm_route`
+# without the embedded host (wasmtime cannot build for wasm32) — the exact
+# dependency shape almide/playground consumes.
+almide = { path = "../..", default-features = false }
+# Only for `pipeline::bundled_self_modules` (the pre-parsed bundled imports a
+# single entry needs when no filesystem resolver runs); no renderer from it.
 almide-mir = { path = "../../crates/almide-mir" }
-wat = "1"
 wasm-bindgen = "0.2"
 
 [profile.release]
