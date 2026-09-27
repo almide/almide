@@ -63,6 +63,7 @@ almide check <file>          # type-check only
 almide run <file>            # compile + execute
 almide build <file> -o app   # build binary (default: Rust target)
 almide build <file> --target wasm
+almide build <file> --target linux-musl   # static musl binary (or any rustc triple)
 almide test [pattern]        # run tests (*.almd with `test { }` blocks)
 almide fmt <file>            # format
 almide compile [module]      # emit .almdi module interface
