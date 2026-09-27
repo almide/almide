@@ -1,0 +1,3 @@
+expects_code = "E016"
+expects_error = "has no equality"
+hint_substring = "result.to_err_option"
