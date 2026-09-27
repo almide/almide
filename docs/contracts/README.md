@@ -31,7 +31,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 ≥1 evidence of class ≥ `fixture`.
 
 <!-- counts:generated:start (as of 2026-09-27) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
-368 contracts
+369 contracts
 <!-- counts:generated:end -->
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
