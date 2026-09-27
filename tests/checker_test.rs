@@ -859,3 +859,50 @@ fn pure_fn_still_rejects_a_real_read_with_e006() {
         "io.print from a pure fn must stay E006, got: {errs:?}"
     );
 }
+
+// ---- #2771: an unknown annotation type is ONE error, reported first ----
+
+fn check_located(input: &str) -> Vec<almide::diagnostic::Diagnostic> {
+    let tokens = Lexer::tokenize(input);
+    let mut parser = Parser::new(tokens);
+    let mut prog = parser.parse().expect("parse failed");
+    let canon = canonicalize::canonicalize_program(&prog, std::iter::empty());
+    let mut checker = Checker::from_env(canon.env);
+    checker.set_source("u.almd", input);
+    checker.diagnostics = canon.diagnostics;
+    checker
+        .infer_program(&mut prog)
+        .into_iter()
+        .filter(|d| d.level == Level::Error)
+        .collect()
+}
+
+#[test]
+fn unknown_param_type_suppresses_field_and_method_cascade() {
+    let src = "type Entry = { name: String, count: Int }\n\
+               fn f(e: Entyr) -> Int = e.count\n\
+               fn g(e: Entyr) -> String = e.name\n\
+               fn h(es: List[Entyr]) -> Int = es |> list.map((e) => e.count) |> list.fold(0, (a, b) => a + b)\n\
+               fn k(e: Entyr) -> Int = e.frob()\n\
+               fn main() -> Unit = println(\"x\")\n";
+    let errs = check_located(src);
+    let codes: Vec<_> = errs.iter().map(|d| d.code.clone().unwrap_or_default()).collect();
+    assert_eq!(codes, vec!["E029".to_string()], "one root-cause error, no cascade: {:#?}", errs);
+    let d = &errs[0];
+    assert_eq!(d.message, "unknown type 'Entyr'");
+    // Located at the annotation, not span-less.
+    assert_eq!((d.line, d.col, d.end_col), (Some(2), Some(9), Some(14)));
+    assert!(d.hint.contains("did you mean `Entry`?"), "near-miss suggestion: {}", d.hint);
+}
+
+#[test]
+fn unknown_type_error_sorts_before_unrelated_body_errors() {
+    // A genuine error elsewhere stays, but the root cause comes first.
+    let src = "fn f(e: Gizmo) -> Int = e.n\n\
+               fn g() -> Int = \"no\"\n\
+               fn main() -> Unit = println(\"x\")\n";
+    let errs = check_located(src);
+    assert_eq!(errs.first().and_then(|d| d.code.clone()).as_deref(), Some("E029"), "{:#?}", errs);
+    assert!(errs.iter().all(|d| d.code.as_deref() != Some("E013")), "{:#?}", errs);
+    assert!(errs.len() >= 2, "the unrelated error survives: {:#?}", errs);
+}

@@ -591,14 +591,17 @@ impl Checker {
         || matches!(&concrete, Ty::Unknown | Ty::Never)
         || matches!(&record_shape, Ty::OpenRecord { .. });
     if !handled_elsewhere && !opaque {
-        self.emit(super::err(
+        // #2771: on an UNDECLARED type this is a consequence of the E029 —
+        // held, and dropped once the E029 names the root cause.
+        let diag = super::err(
             format!("no field '{}' on {} — the type has no fields", field, concrete.display()),
             format!(
                 "Almide values outside records have no fields. Use the type's stdlib module functions instead.{}",
                 self.stdlib_shadow_note(concrete).unwrap_or_default()
             ),
             format!("field access .{}", field),
-        ).with_code("E013"));
+        ).with_code("E013");
+        self.emit_unless_unknown_type(concrete, diag);
     }
     }
 

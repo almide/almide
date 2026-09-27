@@ -82,6 +82,7 @@ impl Checker {
         );
         self.validate_protocol_refs(prog);
         self.validate_bare_type_visibility(prog);
+        self.body_diag_start = self.diagnostics.len();
         for decl in prog.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();
@@ -141,6 +142,7 @@ impl Checker {
             self.deferred_result_interp_checks.len(),
             self.deferred_generic_calls.len(),
             self.deferred_eq_checks.len(),
+            self.deferred_cascade_diags.len(),
         );
 
         let self_name = self.env.self_module_name.map(|s| s.to_string());
@@ -194,6 +196,7 @@ impl Checker {
         self.deferred_result_interp_checks.truncate(saved_deferred_lens.11);
         self.deferred_generic_calls.truncate(saved_deferred_lens.12);
         self.deferred_eq_checks.truncate(saved_deferred_lens.13);
+        self.deferred_cascade_diags.truncate(saved_deferred_lens.14);
     }
 
     /// Upgrade `env.top_lets` entries from the POST-solve resolution of their
@@ -398,7 +401,7 @@ impl Checker {
     }
 
     fn check_fn_decl(&mut self, name: &str, decl: FnToCheck<'_>) {
-        let FnToCheck { params, return_type, body, effect, generics } = decl;
+        let FnToCheck { params, return_type, body, effect, generics, span: decl_span } = decl;
         self.env.push_scope();
         // `mutable_vars` is keyed by NAME, so a `var` in one body must not
         // outlive it: the fan capture check (E008) refused a `let arms` in
@@ -426,7 +429,7 @@ impl Checker {
                 self.resolve_type_expr(&p.ty)
             };
             self.deferred_unknown_type_checks.push((
-                ty.clone(), self.current_span, format!("parameter '{}'", p.name),
+                ty.clone(), decl_span.or(self.current_span), format!("parameter '{}'", p.name),
             ));
             self.env.define_var(&p.name, ty.clone());
             self.env.param_vars.insert(sym(&p.name));
@@ -438,7 +441,7 @@ impl Checker {
         }
         let ret_ty = self.resolve_type_expr(return_type);
         self.deferred_unknown_type_checks.push((
-            ret_ty.clone(), self.current_span, format!("return type of '{}'", name),
+            ret_ty.clone(), decl_span.or(self.current_span), format!("return type of '{}'", name),
         ));
         let prev = (self.env.current_ret.take(), self.env.can_call_effect, self.env.auto_unwrap, self.env.lambda_depth);
         let is_effect = effect.unwrap_or(false);
@@ -508,7 +511,7 @@ impl Checker {
             ast::Decl::Fn { name, params, return_type, body: Some(body), effect, generics, attrs, span, .. } => {
                 self.reject_user_intrinsic(name.as_str(), attrs, *span);
                 self.check_fn_decl(name, FnToCheck {
-                    params, return_type, body, effect, generics,
+                    params, return_type, body, effect, generics, span: *span,
                 });
             }
             ast::Decl::Test { body, where_clauses, .. } => {
