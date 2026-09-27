@@ -210,7 +210,8 @@ fn parse_cells(a: &str) -> Result<Cells, String> {
 }
 
 fn serve(st: &Mutex<ServeState>, op: i32, a: &str) -> (i64, Vec<u8>) {
-    host_serve::dispatch(st, op, a, frames, parse_cells)
+    // No live stdout: the harness never arms shutdown signals.
+    host_serve::dispatch(st, None, op, a, frames, parse_cells)
 }
 
 #[test]
