@@ -5,7 +5,8 @@
 //! `!`-consumed `fan.map` built on neither leg. Now the structural leg
 //! lowers the program; on the BUILD path its emitted host ops are audited
 //! against the p1 shim's served set and an unserved op reroutes the module
-//! to the incumbent's WASI rendering.
+//! to the incumbent's WASI rendering. Since #2742 the p1 shim serves the fs
+//! ops itself, so an fs program BUILDS on the structural leg too.
 
 use std::process::Command;
 
@@ -56,11 +57,11 @@ fn fs_program_runs_on_the_structural_leg() {
     assert_eq!(stdout.trim(), "read=hello exists=true");
 }
 
-/// The build path: the p1 `to_wasi` shim carries no fs ops, so the
-/// structural module is audited by its emitted op set and rerouted to the
-/// incumbent's WASI rendering — by OP, naming the op, not by import name.
+/// The build path: the p1 `to_wasi` shim serves the fs ops (#2742), so the
+/// audit passes and the structural module ships — no reroute — and the stock
+/// artifact answers what the embedded host answers.
 #[test]
-fn fs_program_build_reroutes_by_emitted_op() {
+fn fs_program_builds_on_the_structural_leg() {
     let dir = tempfile::tempdir().expect("tempdir");
     let src = dir.path().join("fs_probe.almd");
     let wasm = dir.path().join("fs_probe.wasm");
@@ -73,14 +74,21 @@ fn fs_program_build_reroutes_by_emitted_op() {
         "-o",
         wasm.to_str().unwrap(),
     ]);
-    assert!(ok, "build must succeed via the incumbent; stderr:\n{stderr}");
+    assert!(ok, "build must succeed; stderr:\n{stderr}");
     assert!(
-        stderr.contains("has no stock-WASI service"),
-        "the reroute must be decided by the emitted host op (#1921); stderr:\n{stderr}"
+        stderr.contains("structural leg emitted the module"),
+        "the fs program must build on the structural leg (#2742); stderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("incumbent renderer"),
-        "the build must hand the fs module to the incumbent; stderr:\n{stderr}"
+        !stderr.contains("has no stock-WASI service") && !stderr.contains("incumbent renderer"),
+        "no fs op may reroute the build to the incumbent (#2742); stderr:\n{stderr}"
     );
-    assert!(wasm.exists(), "the incumbent's WASI module must be written");
+    let Ok(out) = Command::new("wasmtime")
+        .args(["run", "--dir=/", "-S", "inherit-env=y", wasm.to_str().unwrap()])
+        .output()
+    else {
+        return; // no wasmtime here: the route assertion above is the test
+    };
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "read=hello exists=true");
 }

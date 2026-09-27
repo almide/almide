@@ -19,21 +19,32 @@ fn almide_bin() -> String {
     "almide".to_string()
 }
 
-/// The issue's program: the CHEATSHEET's fallible-map idiom over `fan.*`
-/// with an fs op inside — the incumbent walls the shape, the structural
-/// leg's emitted fs op has no stock-WASI service.
+/// The issue's program shape — the CHEATSHEET's fallible-map idiom over
+/// `fan.*` with an fs op inside, which the incumbent walls — plus shapes the
+/// structural leg still declines. Its original structural reason (the fs op
+/// had no stock-WASI service) is gone since the p1 fs service (#2742), so the
+/// structural decline now comes from the retirement bill's open rows
+/// (`random.shuffle`, #2749; `continue`, #2745): two, so one landing does not
+/// silently turn this test into a pass of a different program.
 const BOTH_LEGS_WALL: &str = r#"import fs
+import random
 
 effect fn read_one(p: String) -> String = { let t = fs.read_text(p)!; string.trim(t) }
 
 effect fn main() -> Unit = {
+  var n = 0
+  for i in 0..<4 {
+    if i == 2 then continue
+    n = n + i
+  }
+  let xs = random.shuffle([n, 2, 3])
   let texts = fan.map(["a.txt"], (p) => read_one(p)!)!
-  println(texts |> list.join(","))
+  println("${list.len(xs)} " + (texts |> list.join(",")))
 }
 "#;
 
-/// One ingredient alone: a plain fs program takes the incumbent's WASI
-/// rendering and builds.
+/// One ingredient alone: a plain fs program builds (on the structural leg,
+/// through the p1 fs service, since #2742).
 const ONE_LEG_SERVES: &str = r#"import fs
 
 effect fn main() -> Unit = {
@@ -67,7 +78,7 @@ fn check_target_wasm_reports_the_both_legs_wall_as_e082() {
     let log = String::from_utf8_lossy(&o.stderr).to_string();
     assert!(!o.status.success(), "check --target wasm must refuse the both-legs wall:\n{log}");
     assert!(log.contains("error[E082]"), "must carry the E082 code:\n{log}");
-    assert!(log.contains("wall (structural leg, the default): host op"), "must name the structural leg's reason:\n{log}");
+    assert!(log.contains("wall (structural leg, the default): "), "must name the structural leg's reason:\n{log}");
     assert!(log.contains("fan.map consumed by"), "must name the incumbent's shape reason:\n{log}");
     assert!(!log.contains("No errors found"), "a refused route is not a clean check:\n{log}");
 
