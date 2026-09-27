@@ -348,8 +348,8 @@ impl FnWork {
         effect_raw: Option<crate::SliceTy>,
         body: almide_ir::IrExpr,
         captures: Vec<(almide_ir::VarId, crate::SliceTy, u32, bool)>,
-        var_space: u32,
-        cur_module: Option<&str>,
+        // The creating fn's scope: its variable space and its module.
+        (var_space, cur_module): (u32, Option<&str>),
     ) -> u32 {
         self.register_lambda(crate::LiftedLambda {
             params,
