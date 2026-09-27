@@ -235,7 +235,11 @@ impl<'a> Interpreter<'a> {
                 // The unhandled-error / abort termination contract: a single
                 // `Error: <msg>` line on stderr, exit 1 (matches both backends'
                 // main-error termination).
-                stderr.push_str(&format!("Error: {}\n", msg));
+                if self.panicked.get() {
+                    stderr.push_str(&format!("PANIC: {}", msg));
+                } else {
+                    stderr.push_str(&format!("Error: {}\n", msg));
+                }
                 RunOutcome {
                 bridge_fallbacks: self.bridge_fallbacks.borrow().clone(),
                     status: RunStatus::Aborted,
