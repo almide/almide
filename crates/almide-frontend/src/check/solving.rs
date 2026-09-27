@@ -29,6 +29,23 @@ impl Checker {
         }
     }
 
+    /// `t` with every still-open `ok`/`err` slot shown as the type its
+    /// default gives it (#2599). A diagnostic raised before the defaults are
+    /// applied would otherwise print the slot as `?N` where the program means
+    /// the enclosing fn's declared type.
+    pub(super) fn with_slot_defaults(&self, t: &Ty) -> Ty {
+        if self.result_slot_defaults.is_empty() {
+            return t.clone();
+        }
+        let bindings: std::collections::HashMap<_, _> = self.result_slot_defaults.iter()
+            .filter_map(|(slot, declared)| match resolve_ty(slot, &self.uf) {
+                Ty::TypeVar(v) if is_inference_var(&Ty::TypeVar(v)).is_some() => Some((v, declared.clone())),
+                _ => None,
+            })
+            .collect();
+        if bindings.is_empty() { t.clone() } else { crate::types::substitute(t, &bindings) }
+    }
+
     /// Emit the E001 for one constraint that could not be satisfied.
     ///
     /// A side that resolves to `Unknown` is suppressed: `Unknown` is the
@@ -36,8 +53,8 @@ impl Checker {
     /// emitted where inference failed and reporting the derived mismatch would
     /// be a cascade.
     fn report_constraint_mismatch(&mut self, c: &super::types::Constraint) {
-        let exp = resolve_ty(&c.expected, &self.uf);
-        let act = resolve_ty(&c.actual, &self.uf);
+        let exp = self.with_slot_defaults(&resolve_ty(&c.expected, &self.uf));
+        let act = self.with_slot_defaults(&resolve_ty(&c.actual, &self.uf));
         if exp == Ty::Unknown || act == Ty::Unknown {
             return;
         }
