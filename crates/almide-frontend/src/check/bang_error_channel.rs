@@ -75,7 +75,7 @@ impl Checker {
             return false;
         }
         let Some(mark) = self.bang_erasure_mark else { return false };
-        let Some((erased, at)) = self.lambda_err_erasures.get(mark..).and_then(|es| es.first()).cloned() else {
+        let Some((erased, at, _)) = self.lambda_err_erasures.get(mark..).and_then(|es| es.first()).cloned() else {
             return false;
         };
         let fn_err = channel.display();

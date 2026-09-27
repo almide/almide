@@ -309,7 +309,9 @@ pub struct Checker {
     /// Debug text. Recorded (erased type, `!` span) so a LATER `!` that
     /// propagates the erased `String` into a fn with a typed error can name
     /// the callback as the cause instead of only "fails with `String`".
-    pub(crate) lambda_err_erasures: Vec<(Ty, Option<crate::ast::Span>)>,
+    /// The third field is the enclosing fn (`current_fn`), so a value-consumed
+    /// erasure is named only inside the fn that made it (#2722).
+    pub(crate) lambda_err_erasures: Vec<(Ty, Option<crate::ast::Span>, Option<Sym>)>,
     /// Set while a `!` is judged: the `lambda_err_erasures` length before its
     /// operand was inferred, so the erasures inside THAT operand are known.
     pub(crate) bang_erasure_mark: Option<usize>,

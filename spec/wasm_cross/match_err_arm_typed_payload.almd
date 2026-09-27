@@ -1,0 +1,39 @@
+// @contract: C-044
+// Cross-target coverage (#2722): a `match` whose `err(..)` arms carry a TYPED
+// error into a `-> T!E` fn — converted from a String, re-wrapped unchanged,
+// and returned from a value join. The err arm's payload is judged against the
+// error type the match produces; native == wasm byte-for-byte on stdout.
+type E: Eq, Repr = | Missing | Bad(String) | Neg(Int)
+
+fn parse(s: String) -> Int!E = match int.parse(s) {
+  ok(n) => ok(n),
+  err(_) => err(Bad(s)),
+}
+
+fn checked(n: Int) -> Int!E = if n < 0 then err(Neg(n)) else ok(n)
+
+fn bump(r: Result[Int, E]) -> Int!E = match r {
+  ok(v) => ok(v + 1),
+  err(e) => err(e),
+}
+
+fn lookup(o: Int?) -> Int!E = match o {
+  some(v) => v,
+  none => err(Missing),
+}
+
+fn show(r: Result[Int, E]) -> String = match r {
+  ok(v) => "ok ${v}",
+  err(Missing) => "missing",
+  err(Bad(s)) => "bad ${s}",
+  err(Neg(n)) => "neg ${n}",
+}
+
+fn main() -> Unit = {
+  println(show(parse("7")))
+  println(show(parse("x")))
+  println(show(bump(checked(2))))
+  println(show(bump(checked(-2))))
+  println(show(lookup(some(4))))
+  println(show(lookup(none)))
+}

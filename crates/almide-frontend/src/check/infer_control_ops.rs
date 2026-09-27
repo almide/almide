@@ -245,11 +245,55 @@ impl Checker {
             if span.is_some() {
                 self.current_span = span;
             }
+            if self.report_erased_err_arm(&target[1], &payload) {
+                continue;
+            }
             let expected = Ty::result(target[0].clone(), target[1].clone());
             let actual = Ty::result(target[0].clone(), payload);
             self.constrain(expected, actual, "match arm");
         }
         self.current_span = saved;
+    }
+
+    /// The `err(..)` arm carries `String` into a typed error `E`, and a callback
+    /// in this fn erased an `E` into its `String` channel with a `!` — the
+    /// value-consumed form of #2601 (`let r = xs |> list.map((x) => ... f(x)! ...)`
+    /// then `match r { ..., err(e) => err(e) }`). "Expected `E`, got `String`"
+    /// is true and points away from the cause, so name the callback's `!`.
+    fn report_erased_err_arm(&mut self, target_err: &Ty, payload: &Ty) -> bool {
+        if resolve_ty(payload, &self.uf) != Ty::String {
+            return false;
+        }
+        let target_err = resolve_ty(target_err, &self.uf);
+        if matches!(target_err, Ty::String | Ty::Unknown | Ty::TypeVar(_)) {
+            return false;
+        }
+        let here = self.current_fn.as_ref().map(|f| f.0);
+        let Some((erased, at, _)) = self
+            .lambda_err_erasures
+            .iter()
+            .find(|(erased, _, owner)| *owner == here && resolve_ty(erased, &self.uf) == target_err)
+            .cloned()
+        else {
+            return false;
+        };
+        let erased = resolve_ty(&erased, &self.uf).display();
+        let at = at.map(|s| format!(" (line {}, col {})", s.line, s.col)).unwrap_or_default();
+        self.emit(super::err(
+            format!(
+                "this `err(..)` arm passes a `String` where the match's error type is `{erased}`: the callback's `!`{at} \
+                 turned its `{erased}` error into `String` — a `!` inside a lambda propagates into the lambda's own \
+                 failure channel, which is always `String`"
+            ),
+            format!(
+                "Only a callback whose WHOLE body is one `call(..)!` keeps that call's error type: \
+                 `(x) => f(x)!` makes the call that takes it fail with `{erased}`. \
+                 Move the branch into the called fn so the callback is a single `call(..)!`, \
+                 or convert the `String` in this arm: `err(s) => err(SomeCase(s))`."
+            ),
+            "match arm",
+        ).with_code("E022"));
+        true
     }
 
     /// #1123: a match over an effect call whose arms are VALUE patterns takes
