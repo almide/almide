@@ -20,11 +20,11 @@
 const STREAMING_MATRIX: &[(&str, Option<&str>)] = &[
     (
         "fn fold_lines[A](path: String, init: A, f: (A, String) -> A) -> Result[A, String]",
-        Some("fn __fallible_fold_lines[A, E](path: String, init: A, f: (A, String) -> Result[A, E]) -> Result[A, E]"),
+        Some("fn __fallible_fold_lines[A](path: String, init: A, f: (A, String) -> Result[A, String]) -> Result[A, String]"),
     ),
     (
         "fn for_each_line(path: String, f: (String) -> Unit) -> Result[Unit, String]",
-        Some("fn __fallible_for_each_line[E](path: String, f: (String) -> Result[Unit, E]) -> Result[Unit, E]"),
+        Some("fn __fallible_for_each_line(path: String, f: (String) -> Result[Unit, String]) -> Result[Unit, String]"),
     ),
     (
         "fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> Result[A, String]",
