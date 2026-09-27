@@ -66,6 +66,12 @@ breaks = [
   "a direct call to stdlib process.exit with an integer literal outside 0..=125 is E084, including signed/parenthesized literals and pipe calls — choose an exit code within that range; computed arguments retain the runtime domain check",
 ]
 
+# Note on epoch 4 (#2780): the entry stays as it shipped, because entries are
+# append-only. After 0.64.0, E084's range went back up to the exit status
+# 0..=255. A literal from 126 through 255 is accepted again; one below 0 or
+# above 255 is still E084. That change only accepts more programs, so it is not
+# an epoch.
+
 [[epoch]]
 n = 5
 since = "0.63.0"

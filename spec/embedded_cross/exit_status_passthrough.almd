@@ -1,0 +1,18 @@
+// @contract: C-350
+// A wrapper hands on its child's exit status: 130 (killed by SIGINT) exits as
+// 130 natively and on the embedded host, byte for byte (#2780).
+//
+// This is the lane C-350's pass-through runs on. The stock preview-1 artifact
+// walls 126..=255 instead; `spec/wasm_cross/exit_code_passthrough.almd` pins
+// that wall as a tracked allow. The code is runtime-valued and the call sits in
+// a `guard … else` arm, for the reasons `exit_code_out_of_range.almd` gives.
+import process
+
+effect fn child_status(signal: Int) -> Int = 128 + signal
+
+effect fn main() -> Unit = {
+  println("before-exit")
+  let code = child_status(2)!
+  guard code < 0 else process.exit(code)
+  println("unreachable")
+}

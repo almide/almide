@@ -1,0 +1,24 @@
+// @contract: C-350
+// @xt-allow: a WASI preview-1 build cannot deliver 126..=255 and walls the band with a defined line (C-350, #2780)
+// A wrapper exits with its child's status, and 130 (killed by SIGINT) is one
+// of the codes a child hands back.
+//
+// Native and the embedded host exit 130, as Rust, Go, Python and Node do. The
+// cross gate runs the preview-1 artifact on a stock runtime, whose `proc_exit`
+// traps on 126 and above; that build prints
+// `Error: a WASI preview-1 build cannot exit with a code in 126..=255` and
+// exits 1 instead. The allow line above records that wall. It goes stale, and
+// the gate says so, the day the shipped artifact can carry a whole byte.
+//
+// The code is runtime-valued and the call sits in a `guard … else` arm, for
+// the reasons `exit_code_out_of_range.almd` gives.
+import process
+
+effect fn child_status(signal: Int) -> Int = 128 + signal
+
+effect fn main() -> Unit = {
+  println("before-exit")
+  let code = child_status(2)!
+  guard code < 0 else process.exit(code)
+  println("unreachable")
+}

@@ -180,29 +180,58 @@ Contracts: C-275。
 
 ## ALS-R9 プロセス終了コードの値域
 
-`process.exit(code)` が受理する code は **0..=125** である。この範囲の値は
-native・埋め込みホスト・stock WASI ランタイムのいずれでも**その値で**終了する。
-範囲外の code は定義済みの領域エラーであり、stderr に
-`Error: exit code must be in 0..=125` を1行出力して **exit 1** で終了する
-（全ターゲットで同一バイト）。
+`process.exit(code)` が受理する code は、POSIX の終了ステータスである
+**0..=255** である。この範囲の値は native と埋め込みホスト
+（`almide run --target wasm`）で**その値のまま**終了する。
+子プロセスの 126・127・128+n をそのまま返すラッパーが書けることが、この値域の
+目的である（#2780）。Rust の `std::process::exit`、Go の `os.Exit`、Python の
+`sys.exit`、Node の `process.exit` も同じ値を通す。
 
-上限は恣意的な切り方ではなく、**出荷される成果物が届けられる値の共通部分**である:
+計算された引数が 0..=255 の外なら、定義済みの領域エラーになる。stderr に
+`Error: exit code must be in 0..=255` を1行出力して **exit 1** で終了する
+（全ターゲットで同一バイト）。上に挙げた言語は下位 8 bit を OS に任せるため、
+`exit(256)` は成功（0）を、`exit(-1)` は 255 を報告する。呼び出し元はこの
+切り詰めを検出できないので、Almide はここだけそれらの言語と違う扱いにする。
 
 | 層 | 運べる値 | 範囲外に何が起きるか |
 |---|---|---|
 | POSIX `exit(status)` | 下位 8 bit のみ | 親プロセスは `256` を `0` として観測する（黙った切り詰め） |
-| シェルの規約 | 0..125 | 126（実行不可）・127（未検出）・128+n（シグナル n）は**シェル自身が生成する**値 |
-| WASI preview-1 `proc_exit` | `[0, 126)` | stock ランタイムはホスト trap にする。exit 要求としての情報は残らず、実行時の本物の障害と区別できない |
+| WASI preview-1 `proc_exit`（stock ランタイム） | `[0, 126)` | ホスト trap。wasmtime 47 は `exit with invalid exit status outside of [0..126)` を出して exit 1 になり、exit 要求としての情報は残らない |
 | component model `wasi:cli/exit#exit-with-code(u8)` | 0..255 | trap しない |
 
-`almide build --target wasm` が出力するのは preview-1 の成果物であり、126 以上は
-その成果物では届けられない。したがって 0..=125 は**言語が保証できる範囲**であって、
-実装の都合ではない。
+**WASI preview-1 のビルドは 126..=255 を届けられない。** `almide build --target
+wasm` が出力する preview-1 の成果物を stock ランタイムで動かすと、その値の
+`proc_exit` は trap になる（#2303）。そのためこのビルドは、その帯の値を自分で
+拒否する。stderr に `Error: a WASI preview-1 build cannot exit with a code in
+126..=255` を1行出力して **exit 1** で終了する。これは preview-1 の降下が持つ
+診断付きの壁であり（wasm 上の `env.cwd` と同じ種類）、黙った 1 でも、原因の
+分からないホスト trap でもない。0..=125 はどのレッグでもその値で終了する。
 
-この上限は**床であって永続的な切り詰めではない**。既定の成果物が `proc_exit` を
-経由しなくなれば 0..=255 が届けられるようになり、範囲は広げられる（拡大は
-後方互換であり、逆向きは破壊的である）。
+この壁は wasm の性質ではなく preview-1 の降下の性質である。終了コードとして
+1 バイト全体を運べる成果物（component model の `exit-with-code(u8)`）が既定に
+なれば、壁は外せる。外すことは後方互換な拡大である。
+
+直接呼び出す `process.exit` の引数が範囲外の整数リテラルなら、checker は
+引数を指す **E084** で拒否する。括弧・単項マイナス・各基数のリテラルを含み、
+モジュールの別名・選択的 import・パイプ経由でも同じ規則を適用する。
+`-0` は 0、二重の単項マイナスは正の値として判定する。
+
+```almide check-fail=E084
+import process
+effect fn main() -> Unit = process.exit(256)
+```
+
+変数や算術式などの計算された引数は、このリテラル診断では拒否しない。
+関数値を格納した変数への呼び出しも、この診断では追跡しない。
+実行時の範囲チェックは引き続き適用される。
+同名のユーザ関数やローカル関数値は標準ライブラリの `process.exit` ではなく、
+この診断の対象外である。
 
 テスト: `spec/wasm_cross/exit_code_out_of_range.almd`,
-`spec/wasm_cross/exit_code_upper_bound.almd`。
-Contracts: C-350。
+`spec/wasm_cross/exit_code_upper_bound.almd`,
+`spec/wasm_cross/exit_code_passthrough.almd`,
+`spec/embedded_cross/exit_status_passthrough.almd`,
+`tests/diagnostics/e084-exit-code-domain/broken.almd`,
+`tests/diagnostics/e084-exit-code-domain/fixed.almd`,
+`tests/exit_literal_check_test.rs`。
+Contracts: C-350, C-351。
