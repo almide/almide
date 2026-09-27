@@ -17,6 +17,50 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
     resolve_type_expr_in(te, known_types, None)
 }
 
+/// The key under which a file's bare spelling of an IMPORTED module's type is
+/// recorded (#2715): `<in-scope:m>|Name` for module `m`, `<in-scope:>|Name`
+/// for the entry program. No source can spell it, and it has no `.Name`
+/// suffix, so no scan for a module's `m.Name` key ever matches it.
+pub fn scoped_bare_type_key(scope: Option<&str>, name: &str) -> Sym {
+    sym(&format!("<in-scope:{}>|{}", scope.unwrap_or(""), name))
+}
+
+/// Record, for the file `scope` whose import table is `env.import_table`,
+/// which module's type each bare type name means when exactly ONE module the
+/// file imports declares it (#2715). The bare-name fallback consults this
+/// before its program-wide "unique owner" scan, so the answer is the
+/// imported module's type however many other modules — imported by someone
+/// else, registered in any order — declare the same name. Keys are per file
+/// and persist, so registration, the checker and lowering all read the same
+/// answer for the same file.
+pub fn register_scoped_bare_type_keys(env: &mut crate::types::TypeEnv, scope: Option<&str>) {
+    let mut visible: Vec<Sym> = env.import_table.accessible.iter().copied()
+        .chain(env.import_table.aliases.values().copied())
+        .filter(|m| !almide_lang::stdlib_info::is_bundled_module(m.as_str()) && Some(m.as_str()) != scope)
+        .collect();
+    visible.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    visible.dedup();
+    let mut owners: HashMap<String, Vec<Sym>> = HashMap::new();
+    for m in &visible {
+        let prefix = format!("{}.", m.as_str());
+        for (k, v) in &env.types {
+            if !matches!(v, Ty::Record { .. } | Ty::Variant { .. }) {
+                continue;
+            }
+            let Some(rest) = k.as_str().strip_prefix(&prefix) else { continue };
+            if rest.contains('.') {
+                continue;
+            }
+            owners.entry(rest.to_string()).or_default().push(*k);
+        }
+    }
+    for (name, ks) in owners {
+        if let [only] = ks.as_slice() {
+            env.types.insert(scoped_bare_type_key(scope, &name), Ty::Named(*only, vec![]));
+        }
+    }
+}
+
 /// Mirror a dependency module's nominal type keys under every import-ALIAS
 /// spelling the current file can write for it (#1955): `import dep.shape as
 /// sh` (and the implicit last-segment alias `shape`) gets `sh.Box` /
@@ -221,6 +265,12 @@ fn canonical_user_type_sym_bare(name: &str, types: &HashMap<Sym, Ty>, cur_mod: O
     // hand it a user module's same-named type.
     if cur_mod.is_some_and(almide_lang::stdlib_info::is_bundled_module) {
         return None;
+    }
+    // The one module THIS file imports that declares the name (#2715), when
+    // the file's scope has been recorded — never another module's type that
+    // happens to be unique program-wide or to have registered last.
+    if let Some(Ty::Named(k, _)) = types.get(&scoped_bare_type_key(cur_mod, name)) {
+        return Some(*k);
     }
     let mut owners = types.iter().filter(|(k, v)| {
         user_module_owner(k) && matches!(v, Ty::Record { .. } | Ty::Variant { .. })
