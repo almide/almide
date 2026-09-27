@@ -4630,3 +4630,13 @@ status    = "active"
 evidence  = [
   { path = "spec/stdlib/http_router_test.almd", class = "fixture" },
 ]
+[[contract]]
+id        = "C-369"
+spec      = "ALS-M11"
+title     = "a lambda's failure channel carries the error type its ! operands agree on; a String channel carries a typed error as its interpolation text, identically on both targets"
+statement = "A `!` inside a lambda fails into the lambda's own channel, whose error type is the one its `!` operands agree on (ADR-0021): a callback whose `!`s all fail with the same typed error `E` (braced, branched, after a mid-block `let`, or checked against a typed slot) makes the fallible HOF fail with that `E` value unchanged. A channel that falls to `String` (operands that disagree, or a `-> T!` fn) carries a typed error as its interpolation text, the text `\"${e}\"` shows (`Neg(-2)`, `Bad(\"x\")` with the string quoted and escaped, `At(Pt { x: 1, y: 2.5 })`, `Opt(some(2))`), and a `String` operand's message unchanged. stdout is byte-identical on native and wasm."
+since     = "0.65.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/lambda_failure_channel.almd", class = "fixture" },
+]
