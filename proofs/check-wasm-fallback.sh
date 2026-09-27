@@ -13,7 +13,13 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BASELINE="$ROOT/proofs/wasm-fallback-baseline.txt"
 BIN="${ALMIDE_BIN:-almide}"
 
-observed=$(cd "$ROOT" && ALMIDE_FALLBACK_NAMES=1 "$BIN" test 2>&1 | sed -n 's/^FALLBACK //p' | sort)
+# ALMIDE_TEST_LOG=<file> keeps the run's full output (with the per-file wall
+# reasons) for scripts/check-incumbent-route.sh, so CI walks the suite once.
+if [ -n "${ALMIDE_TEST_LOG:-}" ]; then
+  observed=$(cd "$ROOT" && ALMIDE_FALLBACK_NAMES=1 ALMIDE_WALL_REASON=1 "$BIN" test 2>&1 | tee "$ALMIDE_TEST_LOG" | sed -n 's/^FALLBACK //p' | sort)
+else
+  observed=$(cd "$ROOT" && ALMIDE_FALLBACK_NAMES=1 "$BIN" test 2>&1 | sed -n 's/^FALLBACK //p' | sort)
+fi
 listed=$(grep -v '^#' "$BASELINE" | awk -F' :: ' 'NF>=2 {print $1}' | sort)
 
 new=$(comm -23 <(echo "$observed") <(echo "$listed") | sed '/^$/d' || true)
