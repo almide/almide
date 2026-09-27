@@ -42,6 +42,10 @@ pub(crate) enum OperandErr {
     /// `guard … else err(..)`, a `guard let`'s else, or a value-join match's
     /// `err(..)` arm — the `E` of that `Result`.
     Returned(Ty),
+    /// An operand whose type was still a bare variable at its `!` (a `let`-bound
+    /// lambda's unannotated parameter): classified once the program has
+    /// decided it. Its error type is unresolved when the lambda closes (D1-3).
+    Deferred(Ty),
 }
 
 #[derive(Clone, Debug)]
@@ -111,6 +115,7 @@ impl Checker {
                     }
                 }
                 OperandErr::ImplicitString(_) => errs.push(Ty::String),
+                OperandErr::Deferred(_) => unresolved = true,
             }
         }
         let join = match errs.split_first() {
@@ -164,14 +169,23 @@ impl Checker {
                 continue;
             }
             for op in &ch.operands {
-                let shown = match &op.err {
+                let err = match &op.err {
+                    OperandErr::Deferred(t) => match resolve_ty(t, &self.uf) {
+                        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => OperandErr::Declared(args[1].clone()),
+                        Ty::Applied(TypeConstructorId::Option, _) => OperandErr::ImplicitString("an `Option`'s `none`"),
+                        _ => continue,
+                    },
+                    other => other.clone(),
+                };
+                let shown = match &err {
                     OperandErr::ImplicitString(what) => format!("{what} fails with `String`"),
+                    OperandErr::Deferred(_) => continue,
                     OperandErr::Declared(e) | OperandErr::Returned(e) => {
                         let r = resolve_ty(e, &self.uf);
                         if matches!(r, Ty::Unknown) || self.unify_infer(&eps, &r) {
                             continue;
                         }
-                        let what = if matches!(op.err, OperandErr::Returned(_)) { "this `err(..)`" } else { "this `Result`" };
+                        let what = if matches!(err, OperandErr::Returned(_)) { "this `err(..)`" } else { "this `Result`" };
                         format!("{what} fails with `{}`", self.with_slot_defaults(&r).display())
                     }
                 };
@@ -226,7 +240,7 @@ pub(super) fn classify_lambda_operand(op: &Ty, plain_is_effect_call: bool) -> Op
         Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => Some(OperandErr::Declared(args[1].clone())),
         Ty::Applied(TypeConstructorId::Option, _) => Some(OperandErr::ImplicitString("an `Option`'s `none`")),
         Ty::Unknown => None,
-        Ty::TypeVar(_) => Some(OperandErr::Declared(Ty::Unknown)),
+        Ty::TypeVar(_) => Some(OperandErr::Deferred(op.clone())),
         _ if plain_is_effect_call => Some(OperandErr::ImplicitString("an effect fn that does not return `Result`")),
         _ => None,
     }

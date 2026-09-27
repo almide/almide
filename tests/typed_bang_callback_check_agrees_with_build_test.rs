@@ -207,3 +207,30 @@ effect fn main() -> Unit = {{
     assert_eq!(check_then_run("fs-typed", &body("E", "E")), None, "a typed-error fn cannot take the walker's String channel");
     assert_eq!(check_then_run("fs-string", &body("", "String")).as_deref(), Some("err(\"Neg(-2)\")"));
 }
+
+/// An operand still a bare variable at its `!` (a `let`-bound lambda's
+/// unannotated parameter) is judged once solving decides it: a `String` error
+/// into a callback whose channel the typed fn pins is a check error, not the
+/// rustc E0277 it was when the operand's link to the channel was dropped.
+#[test]
+fn a_let_bound_callback_param_operand_is_judged_once_decided() {
+    if !tools_available() {
+        eprintln!("skip: almide binary or cargo unavailable");
+        return;
+    }
+    let src = |e: &str| format!(
+        "type ShiftErr: Eq, Repr = | Bad(String)
+
+fn bump(x: Result[Int, {e}]) -> Int!ShiftErr = {{
+  let cb = (r) => r! + 1
+  cb(x)!
+}}
+
+fn main() -> Unit = {{
+  println(\"${{bump(ok(1))}}\")
+}}
+"
+    );
+    assert_eq!(check_then_run("param-string", &src("String")), None);
+    assert_eq!(check_then_run("param-typed", &src("ShiftErr")).as_deref(), Some("ok(2)"));
+}
