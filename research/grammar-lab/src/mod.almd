@@ -183,7 +183,7 @@ fn gate_source(ctx: Ctx, variant: Variant, task: Task, code: String) -> String =
   else "${code}\n\n${task.tests}"
 
 fn build_system_prompt(layer1: String, layer2: String, layer3: String) -> String =
-  "You are modifying code written in Almide (.almd files). Return ONLY the modified code in one ```almide block, no explanation.\n\n${layer1}\n\n${layer2}\n\n${layer3}"
+  "You are modifying code written in Almide (.almd files). Return the WHOLE modified file (every type and function, changed or not) in one ```almide block, no explanation.\n\n${layer1}\n\n${layer2}\n\n${layer3}"
 
 fn build_user_prompt(task: Task, with_laws: Bool) -> String = {
   let laws = if with_laws then "\n\n## Laws (must hold for every input; the checker generates inputs and reports a counterexample)\n\n```almide\n${task.laws}\n```" else ""
@@ -392,8 +392,16 @@ fn extract_code(response: String) -> String = {
 // ── Evaluation ──
 type EvalResult = { compiled: Bool, passed: Bool, output: String }
 
+// `almide test` keeps a ~12 MB native worker per ABSOLUTE test-file path and evicts only
+// after 7 days (#2608), so a path per attempt fills the disk. The attempt is kept under its
+// tag for the record, but it is checked from one fixed path per lane and kind.
 effect fn evaluate(code: String, tag: String) -> Result[EvalResult, String] = {
-  let path = "${tag}.almd"
+  fs.write("${tag}.almd", code)!
+  let lane = env.get("GRAMMAR_LAB_LANE") ?? "main"
+  let kind = if string.ends_with(tag, "_hidden") then "hidden" else "gate"
+  let dir = "/tmp/grammar-lab-eval"
+  fs.mkdir_p(dir)!
+  let path = "${dir}/${lane}_${kind}.almd"
   fs.write(path, code)!
   let bin = get_almide_bin()!
   let check_r = process.exec_status(bin, ["check", path])!
