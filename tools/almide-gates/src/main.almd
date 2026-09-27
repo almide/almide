@@ -15,7 +15,6 @@ import contracts
 import conformance
 import counts
 import stamp
-import parity
 import parity_sweep
 import track_record
 import ledger_gate
@@ -221,7 +220,8 @@ effect fn main() -> Unit = {
       let st = stamp.toolchain(root)!
       println(list.join(st.lines, "\n"))
       if st.ok then () else process.exit(1)
-      // Args after the root: the oracle, the render_program binary, and `--update` anywhere.
+      // Args after the root: the oracle and `--update` anywhere. The wasm leg is
+      // the structural build of that same oracle binary (#2793), so there is nothing else to name.
       // The oracle resolves like the bash does — `ALMIDE_BIN`, else the workspace release
       // build — never a PATH `almide` (#978).
       let update = list.contains(args, "--update")
@@ -237,28 +237,7 @@ effect fn main() -> Unit = {
         println(list.join(tools.lines, "\n"))
         if tools.ok then process.exit(0) else process.exit(1)
       } else ()
-      // The render binary is BUILT when the caller did not name one, as the bash does; a
-      // caller that passes it (the twin parity test) has built it already.
-      let rp = list.get_or(pos, 3, root + "/target/debug/examples/render_program")
-      if list.len(pos) < 4 then {
-        let built = parity.exit_ok(
-          "cargo",
-          [
-            "build",
-            "-q",
-            "-p",
-            "almide-mir",
-            "--example",
-            "render_program"
-          ],
-        )!
-        if built then ()
-        else {
-          println("output-parity: render_program build failed")
-          process.exit(1)
-        }
-      } else ()
-      let sw = parity_sweep.sweep(root, alm, rp, parity_sweep.baseline_path_of(root)!, update)!
+      let sw = parity_sweep.sweep(root, alm, parity_sweep.baseline_path_of(root)!, update)!
       println(list.join(sw.lines, "\n"))
       if sw.ok then process.exit(0) else process.exit(1)
     },
