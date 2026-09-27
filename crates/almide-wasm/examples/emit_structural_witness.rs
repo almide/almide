@@ -30,11 +30,14 @@ fn main() {
     almide_wasm::witness::start_collecting();
     let _ = almide_wasm::emit_program(&ir);
     for (name, cert) in almide_wasm::witness::take() {
-        if name == fn_name {
+        // A `!decline:` / `!poison` line is not a certificate: it falls
+        // through to the exit-2 refusal below instead of reaching a checker
+        // whose parser would skip it (#2754).
+        if name == fn_name && !cert.starts_with('!') {
             print!("{cert}");
             return;
         }
     }
-    eprintln!("fn {fn_name} was not witnessed in {rel} — the straightline gate declined it (a phase-A coverage regression)");
+    eprintln!("fn {fn_name} has no certificate in {rel} — not witnessed, or declined / poisoned (a phase-A coverage regression)");
     std::process::exit(2);
 }

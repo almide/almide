@@ -496,6 +496,8 @@ impl Shell {
 /// fresh Emitter, and the closed function comes back with the call set it
 /// accumulated. ONE scaffold for every Emitter-built helper in this
 /// module.
+/// A helper body carries no witness recorder: each builder below counts
+/// its frame as a decline while a witness sweep collects (#2754).
 fn build_helper_body(
     table: &FnTable,
     types: &TypeTable,
@@ -590,6 +592,7 @@ fn build_one_scan_helper(
     key: crate::ETy,
 ) -> Result<(wasm_encoder::Function, std::collections::HashSet<usize>), EmitError> {
     use wasm_encoder::BlockType;
+    crate::witness::decline_unrecorded(&format!("<scan:{key:?}>"), "scan");
     build_helper_body(table, types, work, pool, Shell::SCAN, |em| {
         // params: 0=block, 1=stride, 2=off, 3=needle; locals 4=p, 5=end
         let (blk, stride, off, needle, p_, end_) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32);
@@ -639,6 +642,7 @@ fn build_one_named_helper(
     op: crate::work::NamedOp,
     ti: u32,
 ) -> Result<(wasm_encoder::Function, std::collections::HashSet<usize>), EmitError> {
+    crate::witness::decline_unrecorded(&format!("<named-op:{op:?}:{ti}>"), "named-op");
     build_helper_body(table, types, work, pool, Shell::PAIR, |em| {
         em.f.instructions().local_get(0).local_get(1);
         match op {
@@ -659,6 +663,7 @@ fn build_one_display_helper(
     pool: &mut Pool,
     ti: u32,
 ) -> Result<(wasm_encoder::Function, std::collections::HashSet<usize>), EmitError> {
+    crate::witness::decline_unrecorded(&format!("<display:{ti}>"), "display");
     build_helper_body(table, types, work, pool, Shell::PAIR, |em| {
         em.f.instructions().local_get(1).local_set(2);
         em.f.instructions().local_get(0);
