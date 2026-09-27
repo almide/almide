@@ -114,6 +114,8 @@ shebang は先頭（任意のUTF-8 BOMの直後を含む）だけで認識され
 almide build                            # src/main.almd → パッケージ名のバイナリ
 almide build app.almd -o myapp          # 出力ファイル名指定
 almide build app.almd --target wasm     # WASM バイナリ（直接 emit、rustc 不要）
+almide build app.almd --target linux-musl -o app  # Linux の静的 musl バイナリ（#2772）
+almide build app.almd --target x86_64-unknown-linux-musl  # 任意の rustc ターゲット三つ組
 almide build app.almd --target wasm --host js -o dist/app.wasm  # + dist/app.js, dist/app.d.ts (JS ホスト、#2265)
 almide build --release                  # 最適化ビルド (opt-level=2)
 almide build --fast                     # 最大性能 (opt-level=3, LTO, native CPU)
@@ -123,12 +125,22 @@ almide build --fast                     # 最大性能 (opt-level=3, LTO, native
 |---|---|
 | `-o <name>` | 出力ファイル名 |
 | `--target wasm` | WASM バイナリを生成（直接 emit） |
+| `--target <triple>` | ネイティブバイナリのターゲット（#2772）。`rust` / `native`（既定、このホスト）、`linux-musl`（ホストのアーキテクチャの `<arch>-unknown-linux-musl`。x86_64 と aarch64）、または rustc のターゲット三つ組。cargo に `--target` を渡し、`target/<triple>/<profile>/` から成果物を拾う。ターゲットの標準ライブラリは `rustup target add <triple>` で入れる。musl ターゲットは Rust の既定（`crt-static`）で**静的リンク**になり、almide は追加のリンクフラグを付けない（glibc ターゲットは従来どおり動的）。依存の無いプログラムは rustc 同梱の musl crt で x86_64 ホスト上なら追加ツール無しにリンクできる。別アーキテクチャ向けや C を含む `[native-deps]` には、そのターゲットのリンカ / C コンパイラ（`musl-tools` 等）が要る。未知の値（三つ組の形をしていないもの）と `wasm32-*` は、ホスト向けに黙ってビルドせず終了コード 2 で拒否する |
 | `--host js` | `--target wasm` 専用: モジュールの隣に JS ホスト `<mod>.js`（依存なしの ES module）と `<mod>.d.ts` を書く（#2265）。`init(source?, hooks?)` がインスタンス化、`run()` が `main`、`pub fn` ごとに 1 つのラッパ。`@extern(wasm, "js", "name")` は `init({ js: { name } })` で結線。マーシャルは Int（`number`、±2^53 の範囲検査）/ Float / Bool / String / Unit — それ以外の型を境界に持つ `pub fn` はビルド時に型名を挙げて拒否。出荷物はプログラムが使う分だけ（#2276）: `__alloc`/`__release` の export と glue の String ヘルパは境界に `String` がある時だけ、WASI shim は出荷モジュール（`--wasm-opt` 後）が import する名前だけ。ゲート: `scripts/check-js-host.sh`（`spec/wasm_host_js/` を node で実行し、期待出力と native 出力に一致させ、モジュールのバイト同一性・shim 集合・`glue-ceiling.txt` の上限を検査）。仕様: docs/wasm/WASM-OUTPUT.md「JS host」節 |
 | `--release` | 最適化ビルド |
 | `--fast` | 最大性能（`--release` を含む + LTO + native CPU） |
 | `--unchecked-index` | 配列の境界チェックを無効化（unsafe） |
 | `--no-check` | 型チェックをスキップ |
 | `--repr-c` | struct/enum に `#[repr(C)]` を付与（C ABI 互換） |
+
+**`CARGO_BUILD_TARGET`**(#2772): `--target` が無いとき、環境変数 `CARGO_BUILD_TARGET` はターゲットの指定として
+`--target <triple>` と同じに扱う（`--target rust` はそれを打ち消してホスト向けにする）。どちらの場合も almide は cargo に
+ターゲットを明示し、子プロセスの環境からは `CARGO_BUILD_TARGET` を除く。以前はこの変数が cargo に漏れて成果物が
+`target/<triple>/` に出る一方、almide は `target/<profile>/almide-out` を拾っていたため、前回のホスト向けバイナリを
+黙って出力するか `expected binary not found` で落ちていた。ビルド前にその場所の古い成果物を消すので、cargo 設定の
+`build.target` などで出力先がずれても古いバイナリは出ず、`expected binary not found` で止まる。ビルドキャッシュの鍵には
+三つ組が入る。`almide run` / `almide test` はバイナリをこのマシンで実行するので、常にホスト向けにビルドする
+（`CARGO_BUILD_TARGET` は子の cargo に渡さない）。
 
 出力ファイル名のデフォルト:
 - `almide.toml` があれば `[package] name`

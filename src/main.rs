@@ -115,7 +115,9 @@ enum Commands {
         /// Output file name
         #[arg(short)]
         o: Option<String>,
-        /// Build target (wasm)
+        /// Build target: rust (default, this host), wasm, linux-musl
+        /// (<host arch>-unknown-linux-musl), or a rustc target triple.
+        /// Without it, an inherited CARGO_BUILD_TARGET is honoured.
         #[arg(long)]
         target: Option<String>,
         /// Optimize for performance (opt-level=2)

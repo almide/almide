@@ -35,7 +35,7 @@ fn reject_removed_target(target: Option<&str>) {
         err(&format!(
             "error: the npm/JavaScript build target has been removed\n  \
              in `almide build --target {t}`\n  \
-             supported targets: rust (default, native binary), wasm\n  \
+             supported targets: rust (default, native binary), wasm, linux-musl, or a rustc target triple\n  \
              hint: use `--target wasm` for a portable build"
         ));
         std::process::exit(2);
@@ -178,6 +178,21 @@ pub fn cmd_build(args: BuildArgs) {
         err("error: --host is a wasm option: `almide build app.almd --target wasm --host js`");
         std::process::exit(2);
     }
+
+    // #2772: resolve the native target BEFORE compiling — an unknown `--target`
+    // used to fall through to a host build, and an inherited
+    // `CARGO_BUILD_TARGET` handed back the previous host binary. The triple is
+    // scoped to this build; see `native_target`.
+    let _cross = (!is_wasm).then(|| {
+        let env_target = std::env::var("CARGO_BUILD_TARGET").ok();
+        match super::native_target::resolve_native_target(target, env_target.as_deref(), std::env::consts::ARCH) {
+            Ok(triple) => super::native_target::CrossTargetGuard::set(triple),
+            Err(e) => {
+                err(&e);
+                std::process::exit(2);
+            }
+        }
+    });
 
     let output = compute_output_path(file, output, is_wasm);
 
