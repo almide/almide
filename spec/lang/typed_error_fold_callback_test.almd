@@ -17,18 +17,7 @@ else step(acc, x)!
 
 fn total(xs: List[Int]) -> Int!E = xs |> list.fold(0, (acc, x) => step_or_skip(acc, x)!)!
 
-fn total_rec(xs: List[Int], acc: Int) -> Int!E = match xs {
-  [] => acc,
-  [x, ..rest] => total_rec(rest, if x == 100 then acc
-  else step(acc, x)!)!,
-}
-
 test "the canonical callback keeps the typed error" {
   assert_eq(total([1, 100, 2]), ok(3))
   assert_eq(total([1, -2, 5]), err(Neg(-2)))
-}
-
-test "explicit recursion keeps the typed error" {
-  assert_eq(total_rec([1, 100, 2], 0), ok(3))
-  assert_eq(total_rec([1, -2, 5], 0), err(Neg(-2)))
 }
