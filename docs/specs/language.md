@@ -1,4 +1,4 @@
-> Last updated: 2026-08-13
+> Last updated: 2026-09-27
 
 # Almide Language Specification
 
@@ -708,7 +708,33 @@ test "pipe-match" {
 }
 ```
 
-テスト: `spec/lang/pattern_test.almd`, `spec/lang/match_edge_test.almd`
+### 7.4 Exhaustiveness of list patterns
+
+A match must cover every value (E010 names a missing case), and an arm an
+earlier arm already covers is E014. A list pattern counts by LENGTH: `[]` and
+`[p1, p2]` cover exactly one length, `[p1, ..]` every length from one up. The
+same holds wherever the list pattern sits, including inside a tuple (#2600):
+
+```almide
+fn f(xs: List[Int], ys: List[Int]) -> Int =
+  match (xs, ys) {
+    ([x, ..xt], [y, ..yt]) => x + y,
+    ([], []) => 0,       // reachable: both lists empty
+    ([], _) => 1,
+    (_, []) => 2,
+  }
+
+test "list patterns under a tuple" {
+  assert_eq(f([1], [2]), 3)
+  assert_eq(f([], []), 0)
+}
+```
+
+Dropping the `(_, [])` arm is E010, naming the uncovered `([_], [])`.
+
+テスト: `spec/lang/pattern_test.almd`, `spec/lang/match_edge_test.almd`,
+`spec/lang/list_pattern_in_tuple_test.almd`, `tests/diagnostics/e010-list-*`,
+`tests/list_pattern_tuple_test.rs`
 
 ### 5.10 Lambda
 
@@ -1169,6 +1195,8 @@ Patterns appear in `match` arms, `let` destructuring, and `for` loop variables.
 | `none` | `none` | Matches `Option` none case |
 | `ok(p)` | `ok(inner)` | Matches `Result` ok case |
 | `err(p)` | `err(inner)` | Matches `Result` err case |
+| List | `[p1, p2]` | Matches a list of exactly that many elements |
+| List (rest) | `[p1, ..t]`, `[p1, ..]` | Matches a list of at least that many elements; `t` binds the tail |
 
 ### 7.2 Examples
 

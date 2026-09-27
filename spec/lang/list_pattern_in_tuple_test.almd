@@ -1,0 +1,57 @@
+// #2600: exhaustiveness reads a list pattern under a tuple by its length.
+// Each match below is exhaustive with every arm reachable; before the fix
+// the first arm after a rest pattern was a false E014.
+
+fn rest_first(xs: List[Int], ys: List[Int]) -> Int =
+  match (xs, ys) {
+    ([x, ..xt], [y, ..yt]) => x + y,
+    ([], []) => 0,
+    ([], _) => 1,
+    (_, []) => 2,
+  }
+
+fn rest_last(xs: List[Int], ys: List[Int]) -> Int =
+  match (xs, ys) {
+    ([], []) => 0,
+    ([], _) => 1,
+    (_, []) => 2,
+    ([x, ..xt], [y, ..yt]) => x + y,
+  }
+
+fn by_length(xs: List[Int]) -> String = match xs {
+  [] => "empty",
+  [a] => "one ${int.to_string(a)}",
+  [a, b] => "two ${int.to_string(a + b)}",
+  [a, b, c, ..] => "many ${int.to_string(a + b + c)}",
+}
+
+fn head_option(xs: List[Option[Int]]) -> Int = match xs {
+  [] => 0,
+  [some(a), ..] => a,
+  [none, ..] => -1,
+}
+
+test "a rest pattern before the empty cases leaves them reachable" {
+  assert_eq(rest_first([1], [2]), 3)
+  assert_eq(rest_first([], []), 0)
+  assert_eq(rest_first([], [7]), 1)
+  assert_eq(rest_first([7], []), 2)
+}
+
+test "a rest pattern after the empty cases is reachable" {
+  assert_eq(rest_last([1], [2]), 3)
+  assert_eq(rest_last([], [7]), 1)
+}
+
+test "exact lengths and a rest pattern together cover every list" {
+  assert_eq(by_length([]), "empty")
+  assert_eq(by_length([4]), "one 4")
+  assert_eq(by_length([1, 2]), "two 3")
+  assert_eq(by_length([1, 2, 3, 4]), "many 6")
+}
+
+test "a rest pattern with a refutable element" {
+  assert_eq(head_option([some(5), none]), 5)
+  assert_eq(head_option([none]), -1)
+  assert_eq(head_option([]), 0)
+}

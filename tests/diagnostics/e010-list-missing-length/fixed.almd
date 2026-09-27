@@ -1,0 +1,7 @@
+fn first_two(xs: List[Int]) -> Int = match xs {
+  [] => 0,
+  [a] => a,
+  [a, b, ..] => a + b,
+}
+
+effect fn main() -> Unit = println(int.to_string(first_two([1, 2])))
