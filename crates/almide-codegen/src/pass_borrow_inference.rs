@@ -277,9 +277,11 @@ fn seed_codec_helper_sigs(sigs: &mut HashMap<String, Vec<ParamBorrow>>) {
 /// and consumed their argument — a `fn say(name: String) = println(name)`
 /// owned `name` for a value the `println!` arm only formats by reference
 /// (#2231, the certifier's C4 on `say` / `show` / `report` / `flag`). They
-/// borrow.
+/// borrow. `panic` is the same shape — `panic!("{}", msg)` only formats its
+/// argument — so `fn die(msg: String) -> Unit = panic(msg)` borrows `msg`
+/// (#2769: owning it tripped C4 on every such wrapper).
 fn seed_builtin_output_sigs(sigs: &mut HashMap<String, Vec<ParamBorrow>>) {
-    for name in ["println", "print", "eprintln", "eprint"] {
+    for name in ["println", "print", "eprintln", "eprint", "panic"] {
         sigs.entry(name.to_string()).or_insert_with(|| vec![ParamBorrow::Ref]);
     }
 }
