@@ -414,6 +414,7 @@
 3329	spec/wasm_cross/map_wide_int_key.almd
 1658	spec/wasm_cross/match_box_pattern_backstop.almd
 3185	spec/wasm_cross/match_container_literal.almd
+6051	spec/wasm_cross/match_err_arm_typed_payload.almd
 2331	spec/wasm_cross/match_forms.almd
 6812	spec/wasm_cross/match_guard_eq_borrows_binding.almd
 5933	spec/wasm_cross/match_payload_string_literal.almd
