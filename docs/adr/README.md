@@ -50,13 +50,13 @@ ADR はその**決定に至る過程**（調査した証拠、比較した代替
 | [0003](./0003-error-type-conversion-at-propagation.md) | Error-type conversion at propagation points — lossy conversion must be spelled | Accepted | 2026-08-05 |
 | [0004](./0004-error-branchability-doctrine.md) | Error branchability — String stays terminal; doctrine, lint, and context instead of tags | Accepted | 2026-08-05 |
 | [0005](./0005-operators-desugar-to-stdlib.md) | Value-level operators are desugarings of named stdlib functions | Accepted | 2026-08-05 |
-| [0006](./0006-fallibility-polymorphic-hofs.md) | One-bit fallibility polymorphism for HOFs; the try_* family is dissolved | Accepted | 2026-08-05 |
+| [0006](./0006-fallibility-polymorphic-hofs.md) | One-bit fallibility polymorphism for HOFs; the try_* family is dissolved | Accepted (amended 2026-09-27: E flows from the callback, D4 withdrawn — ADR-0021) | 2026-08-05 |
 | [0007](./0007-partition-replaces-collect.md) | result.collect is removed; partition is the substance for all-errors collection | Accepted | 2026-08-05 |
 | [0008](./0008-explicit-propagation-only.md) | Propagation is always explicit — auto-? abolished, `!` only, Result is must-use | Accepted | 2026-08-05 |
 | [0009](./0009-fn-type-quadrant-transparency.md) | Function types complete the capability quadrant; fn params are transparent by default | Accepted | 2026-08-06 |
 | [0010](./0010-option-type-shorthand.md) | T? is general Option shorthand — every type position, atom-tight binding, fmt-normalized | Accepted | 2026-08-06 |
 | [0011](./0011-execution-substrate-is-a-free-variable.md) | The execution substrate is a free variable — and one arm's output is the last hole in the determinism claim | Proposed | 2026-08-07 |
-| [0012](./0012-typed-error-refinement-in-the-marker.md) | Error-surface end state — refinement stays in the marker (`T!E`), erasure stays the default | Accepted | 2026-08-11 |
+| [0012](./0012-typed-error-refinement-in-the-marker.md) | Error-surface end state — refinement stays in the marker (`T!E`), erasure stays the default | Accepted (D4-4 replaced by ADR-0021) | 2026-08-11 |
 | [0013](./0013-corpus-stays-id-keyed.md) | The conformance corpus stays contract-ID-keyed; semantic reorganization rejected, naming discipline gated | Accepted | 2026-08-20 |
 | [0014](./0014-expectations-are-derived.md) | Pinned expectations are machine-derived or absent — never hand-maintained | Accepted | 2026-08-20 |
 | [0015](./0015-reference-evaluator-is-fresh-source-level-python.md) | The reference evaluator is a fresh, source-level, judge-owned evaluator behind a black-box protocol — seeded by λ_almd, ratcheted by an abstain ledger (amended: Rust) | Accepted | 2026-08-21 |
@@ -64,3 +64,4 @@ ADR はその**決定に至る過程**（調査した証拠、比較した代替
 | [0017](./0017-flight-profile-is-a-normative-subset.md) | The bounded profile (née flight profile) is a normative subset of the language, specified here before any checker enforces it (amended at adjudication: `@bounded`, chapter `bounded.md`, prefix `B`) | Accepted | 2026-08-21 |
 | [0019](./0019-suppression-is-announced-dated-reasoned-acknowledged.md) | Suppression is announced, dated, reasoned and acknowledged — its shape is fixed before the construct exists | Accepted | 2026-09-22 |
 | [0020](./0020-http-serving-and-handler-state.md) | A served handler cannot reach a `var`; state lives in a host-independent KV store; the app is a value and every host is a thin shell | Accepted | 2026-09-27 |
+| [0021](./0021-lambda-failure-channel-is-the-join-of-its-bangs.md) | A lambda's failure channel carries the error type its `!`s agree on — contextual type first, then the join, String as the top | Accepted | 2026-09-27 |
