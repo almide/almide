@@ -94,7 +94,30 @@ fn emitter_set() -> BTreeSet<String> {
     for f in &files {
         scan(&std::fs::read_to_string(f).expect("readable source"), &mut set);
     }
+    // the p1 fs service (#2742): WAT text spliced into every artifact whose
+    // op set reaches an fs op, so its instructions are shipped ones too
+    let wat = std::fs::read_to_string(crates.join("almide-wasi/src/fs_service.wat")).expect("readable source");
+    scan_wat(&wat, &mut set);
     set
+}
+
+/// Every instruction a WAT text writes, as its sink-method name: the word
+/// after each `(`, minus the module-structure keywords and comments.
+fn scan_wat(text: &str, into: &mut BTreeSet<String>) {
+    const STRUCTURE: &[&str] =
+        &["module", "import", "func", "param", "result", "local", "global", "memory", "data", "export", "then", "mut", "type"];
+    for line in text.lines() {
+        let code = line.split(";;").next().unwrap_or("");
+        for piece in code.split('(').skip(1) {
+            let word: String =
+                piece.chars().take_while(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '_' || *c == '.').collect();
+            if !word.is_empty() && !STRUCTURE.contains(&word.as_str()) {
+                let method = sink_method(&word);
+                // `(else ...)` is the folded form's arm, the sink's `else_`
+                into.insert(method);
+            }
+        }
+    }
 }
 
 #[test]

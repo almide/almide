@@ -110,7 +110,7 @@ fn base_shims(wasm_bytes_before: &[u8]) -> usize {
 #[test]
 fn hello_ships_no_environ_or_args_service() {
     let (wasm, host_ops) = artifact("hello.almd", HELLO);
-    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: false, env_set: false, args: false });
+    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: false, env_set: false, args: false, fs: false });
     let (imports, defined) = shape(&wasm);
     expect_imports(&imports, &BASE);
     assert!(
@@ -127,7 +127,7 @@ fn hello_ships_no_environ_or_args_service() {
 #[test]
 fn args_program_ships_the_args_pair_only() {
     let (wasm, host_ops) = artifact("args.almd", ARGS);
-    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: false, env_set: false, args: true });
+    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: false, env_set: false, args: true, fs: false });
     let (imports, defined) = shape(&wasm);
     let want: Vec<&str> = BASE.iter().chain(ARGS_PAIR.iter()).copied().collect();
     expect_imports(&imports, &want);
@@ -139,7 +139,7 @@ fn args_program_ships_the_args_pair_only() {
 #[test]
 fn env_get_program_ships_the_environ_pair_only() {
     let (wasm, host_ops) = artifact("env_get.almd", ENV_GET);
-    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: true, env_set: false, args: false });
+    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: true, env_set: false, args: false, fs: false });
     let (imports, defined) = shape(&wasm);
     let want: Vec<&str> = BASE.iter().chain(ENVIRON_PAIR.iter()).copied().collect();
     expect_imports(&imports, &want);
@@ -151,7 +151,7 @@ fn env_get_program_ships_the_environ_pair_only() {
 #[test]
 fn env_set_program_ships_the_overlay_shim_and_no_import() {
     let (wasm, host_ops) = artifact("env_set.almd", ENV_SET);
-    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: false, env_set: true, args: false });
+    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: false, env_set: true, args: false, fs: false });
     let (imports, defined) = shape(&wasm);
     expect_imports(&imports, &BASE);
     let ir = almide_spine::s5::lower_to_ir("env_set.almd", ENV_SET).expect("lowers");
@@ -162,7 +162,7 @@ fn env_set_program_ships_the_overlay_shim_and_no_import() {
 #[test]
 fn full_env_surface_ships_the_whole_quartet() {
     let (wasm, host_ops) = artifact("env_round_trip.almd", ENV_ROUND_TRIP);
-    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: true, env_set: true, args: true });
+    assert_eq!(P1Services::from_ops(&host_ops), P1Services { env_get: true, env_set: true, args: true, fs: false });
     let (imports, defined) = shape(&wasm);
     let want: Vec<&str> = BASE.iter().chain(ENVIRON_PAIR.iter()).chain(ARGS_PAIR.iter()).copied().collect();
     expect_imports(&imports, &want);
@@ -190,4 +190,30 @@ fn the_gate_selects_from_the_op_table() {
     // Both artifacts run: the shim selection never breaks validation.
     wasmparser::validate(&bare).expect("bare validates");
     wasmparser::validate(&full).expect("full validates");
+}
+
+const FS_EXISTS: &str = r#"import fs
+
+effect fn main() -> Unit = {
+  println("${fs.exists("/")}")
+}
+"#;
+
+/// The p1 fs service (#2742) is gated the same way: an fs op ships it, and
+/// only the WASI calls the ops present reach — `fs.exists` is a stat after
+/// the cwd join and the preopen lookup, so it earns neither `path_open` nor
+/// any write or directory call.
+#[test]
+fn an_fs_op_ships_the_fs_service_with_only_the_imports_it_reaches() {
+    let (wasm, host_ops) = artifact("fs_exists.almd", FS_EXISTS);
+    assert!(P1Services::from_ops(&host_ops).fs, "fs.exists reaches the fs service: {host_ops:?}");
+    let (imports, _) = shape(&wasm);
+    let mut want = BASE.to_vec();
+    want.extend(ENVIRON_PAIR);
+    want.extend(["fd_prestat_get", "fd_prestat_dir_name", "path_filestat_get"]);
+    expect_imports(&imports, &want);
+
+    let (hello, host_ops) = artifact("hello.almd", HELLO);
+    assert!(!P1Services::from_ops(&host_ops).fs);
+    expect_imports(&shape(&hello).0, &BASE);
 }
