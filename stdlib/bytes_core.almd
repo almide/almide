@@ -100,7 +100,8 @@ else {
 // bytes.repeat(b, count) -> b repeated max(0, count) times.
 fn bytes_repeat(b: Bytes, count: Int) -> Bytes = {
   let blen = prim.load32(prim.handle(b) + 4)
-  let n = if count > 0 then count else 0
+  // An EMPTY base is empty at ANY count (#2690) — the copy recursion runs n times.
+  let n = if count > 0 and blen > 0 then count else 0
   let out = prim.alloc_bytes(blen * n)
   let _x = __repcopy(prim.handle(out) + 12, prim.handle(b) + 12, blen, n, 0)
   out

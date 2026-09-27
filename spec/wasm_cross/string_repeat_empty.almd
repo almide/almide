@@ -6,6 +6,10 @@
 // ran for an empty string and trapped on the zero divisor (three nightly
 // findings, 2026-09-06: `string.repeat("", 3)`, a repeat of an empty slice,
 // `string.is_whitespace(string.repeat("", 3))`). The guard nests now.
+// An empty base is empty at ANY count, and returns at once: every repeat
+// ran its copy loop `n` times whatever the length, so
+// `string.repeat("", i64::MAX)` hung on wasm while native printed `""`,
+// and `bytes.repeat` of empty bytes hung on both (#2690, v0.64.0-rc3 soak).
 fn main() -> Unit = {
   println("[" + string.repeat("", 3) + "]")
   println("[" + string.repeat("", 0) + "]")
@@ -13,4 +17,8 @@ fn main() -> Unit = {
   println(if string.is_whitespace(string.repeat("", 3)) then "ws" else "not-ws")
   println("[" + string.repeat("ab", 3) + "]")
   println("[" + string.repeat("é", 2) + "]")
+  println("[" + string.repeat("", 9223372036854775807) + "]")
+  println(if string.is_whitespace(string.repeat("", 9223372036854775807)) then "ws" else "not-ws")
+  println(int.to_string(bytes.len(bytes.repeat(bytes.from_string(""), 9223372036854775807))))
+  println(int.to_string(bytes.len(bytes.repeat(bytes.from_string("ab"), 3))))
 }
