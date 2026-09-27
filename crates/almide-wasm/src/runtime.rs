@@ -272,10 +272,15 @@ pub(crate) fn emit_str_repeat(repeat_msg: u32) -> Function {
     let mut f =
         Function::new([(1, ValType::I32), (1, ValType::I64), (1, ValType::I32), (1, ValType::I64)]);
     let mut i = f.instructions();
-    i.local_get(n).i64_const(0).i64_le_s().if_(BlockType::Empty);
+    i.local_get(bbase).i32_load(len_memarg()).local_set(len);
+    // An EMPTY base is the empty result at ANY count (#2690): the copy
+    // loop below runs `n` times whatever `len` is, so `repeat("",
+    // i64::MAX)` spun ~2^63 zero-byte copies and never returned while
+    // native printed `""` (nightly soak finding, v0.64.0-rc3).
+    i.local_get(n).i64_const(0).i64_le_s();
+    i.local_get(len).i32_eqz().i32_or().if_(BlockType::Empty);
     i.i32_const(0).call(F_ALLOC).return_();
     i.end();
-    i.local_get(bbase).i32_load(len_memarg()).local_set(len);
     // The C-161 ceiling, tested by DIVISION (`n > 2^31 / len`, the
     // stdlib/string_repeat.almd guard verbatim): `len * n` is the very
     // multiplication that overflows for a huge n, and a guard computed

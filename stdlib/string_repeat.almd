@@ -23,7 +23,9 @@ fn string_repeat(s: String, n: Int) -> String = {
   let h = prim.handle(s)
   let slen = prim.load32(h + 4)
   // byte length at LIST_LEN_OFFSET(4)
-  let count = if n > 0 then n else 0
+  // An EMPTY base is empty at ANY count (#2690): the copy recursion runs
+  // `count` times whatever `slen` is, so a huge count never returned.
+  let count = if n > 0 and slen > 0 then n else 0
   // C-054 clamp (negative → empty; the
   // bytes/list repeats already clamp)
   // A result larger than the shared 2^31 ceiling ABORTS in the T6 form on both
