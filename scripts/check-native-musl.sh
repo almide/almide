@@ -43,15 +43,17 @@ done
 if [ "$selftest" = 1 ]; then
   self="$PWD/scripts/check-native-musl.sh"
   fails=0
-  # expect <want-exit: pass|fail> <label> [env assignments...]
+  # expect <pass|fail> <label> <reason-regex> [env assignments...]
+  # A refusal counts only when the run's log carries the reason it was forged
+  # for — a forged build that fails for some other cause proves nothing.
   expect() {
-    local want="$1" label="$2"; shift 2
+    local want="$1" label="$2" reason="$3"; shift 3
     local proj; proj="$(mktemp -d)"
     if env "$@" ALMIDE_RUN_PROJECT_DIR="$proj" bash "$self" "$FIXTURE" >"$proj.log" 2>&1; then got=pass; else got=fail; fi
-    if [ "$got" = "$want" ]; then
-      echo "ok   $label: $got ($(grep -m1 -E '^(PASS|FAIL)' "$proj.log" || tail -1 "$proj.log"))"
+    if [ "$got" = "$want" ] && grep -Eq -- "$reason" "$proj.log"; then
+      echo "ok   $label: $got ($(grep -m1 -E '^(PASS|FAIL)' "$proj.log" || tail -1 "$proj.log")) [reason: $(grep -m1 -Eo -- "$reason" "$proj.log")]"
     else
-      echo "::error::native-musl selftest: $label expected $want, got $got"; sed 's/^/    /' "$proj.log" | tail -30
+      echo "::error::native-musl selftest: $label expected $want matching /$reason/, got $got"; sed 's/^/    /' "$proj.log" | tail -30
       fails=$((fails + 1))
     fi
     rm -rf "$proj" "$proj.log"
@@ -59,11 +61,11 @@ if [ "$selftest" = 1 ]; then
   cc_var="CC_$(echo "$TARGET" | tr '-' '_')"
   gnu_target="${TARGET%-musl}-gnu"
   forged="$(mktemp -d)"; cp -R "$FIXTURE/." "$forged/"; echo "forged line" > "$forged/expected.txt"
-  expect pass "genuine $TARGET build"
-  expect fail "no C compiler for $TARGET ($cc_var=musl-gcc-absent)" "$cc_var=musl-gcc-absent"
-  expect fail "glibc target $gnu_target (dynamic binary)" "NATIVE_MUSL_TARGET=$gnu_target"
+  expect pass "genuine $TARGET build" '^PASS native-musl'
+  expect fail "no C compiler for $TARGET ($cc_var=musl-gcc-absent)" 'musl-gcc-absent' "$cc_var=musl-gcc-absent"
+  expect fail "glibc target $gnu_target (dynamic binary)" 'not a static binary: .*dynamically linked' "NATIVE_MUSL_TARGET=$gnu_target"
   FIXTURE_SAVE="$FIXTURE"; FIXTURE="$forged"
-  expect fail "forged expected.txt"
+  expect fail "forged expected.txt" 'expected \[forged line\]'
   FIXTURE="$FIXTURE_SAVE"; rm -rf "$forged"
   [ "$fails" = 0 ] && { echo "PASS native-musl selftest: the gate refused 3/3 forged runs and accepted the genuine one"; exit 0; }
   echo "FAIL native-musl selftest: $fails case(s) gave the wrong verdict"; exit 1
