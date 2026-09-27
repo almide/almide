@@ -542,7 +542,7 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         code.function(&stub);
         code.function(&stub);
     } else {
-        code.function(&shim_fs_call(park, g_plen, g_ppos, &forward, host_ops.contains(&60)));
+        code.function(&shim_fs_call(park, g_plen, g_ppos, &forward, host_ops.contains(&60), host_ops.contains(&73)));
         code.function(&shim_host_read(park, g_plen, g_ppos));
     }
     if f_env_get.is_some() {

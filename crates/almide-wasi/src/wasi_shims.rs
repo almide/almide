@@ -83,7 +83,7 @@ fn shim_exit() -> Function {
     f
 }
 
-/// The almide `fs_call` contract over WASI: ops 26/29/30/31/32/34/35/36/37/60
+/// The almide `fs_call` contract over WASI: ops 26/29/30/31/32/34/35/36/37/60/73
 /// supported (the environ/args trio routes to its own shims when they
 /// ship, #1716/#1841), everything else takes the defined refusal
 /// (stderr + exit 1).
@@ -93,6 +93,7 @@ fn shim_fs_call(
     g_ppos: Option<u32>,
     forward: &[(i32, u32)],
     mono: bool,
+    raw_stderr: bool,
 ) -> Function {
     // params: 0=op 1=a_ptr 2=a_len 3=b_ptr 4=b_len; locals: 5=nread
     // 6=deadline (i64, op 36)
@@ -119,8 +120,10 @@ fn shim_fs_call(
     }
 
     // op 30: raw stdout append; op 73: raw stderr append (#2769) — the
-    // same fd_write on fd 1 / fd 2.
-    for (code, fd) in [(30, 1), (73, 2)] {
+    // same fd_write on fd 1 / fd 2. The op-73 arm ships only when the
+    // module's op set names it (`panic`), so no other artifact grows.
+    let raw_ops: &[(i32, i32)] = if raw_stderr { &[(30, 1), (73, 2)] } else { &[(30, 1)] };
+    for &(code, fd) in raw_ops {
         i.local_get(op).i32_const(code).i32_eq().if_(BlockType::Empty);
         i.i32_const(park as i32).local_get(b_ptr).i32_store(mem(IOV));
         i.i32_const(park as i32).local_get(b_len).i32_store(mem(IOV + 4));
