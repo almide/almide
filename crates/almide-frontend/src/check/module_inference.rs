@@ -22,6 +22,7 @@ impl Checker {
         self.validate_result_interpolations();
         self.validate_interp_instantiations();
         self.validate_ord_elem_types();
+        self.validate_eq_operand_types();
         self.validate_unknown_named_types();
         self.validate_empty_collection_elements();
         self.validate_int_overflow_literals();
@@ -132,6 +133,7 @@ impl Checker {
             self.deferred_implicit_prop_checks.len(),
             self.deferred_result_interp_checks.len(),
             self.deferred_generic_calls.len(),
+            self.deferred_eq_checks.len(),
         );
 
         let self_name = self.env.self_module_name.map(|s| s.to_string());
@@ -183,6 +185,7 @@ impl Checker {
         self.deferred_implicit_prop_checks.truncate(saved_deferred_lens.10);
         self.deferred_result_interp_checks.truncate(saved_deferred_lens.11);
         self.deferred_generic_calls.truncate(saved_deferred_lens.12);
+        self.deferred_eq_checks.truncate(saved_deferred_lens.13);
     }
 
     /// Upgrade `env.top_lets` entries from the POST-solve resolution of their
