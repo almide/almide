@@ -1,0 +1,8 @@
+{
+  "source_dir": "source",
+  "instruction": "Number pages from 1 instead of 0: `page(items, 1, size)` is the first page. A page number below 1 returns an empty list. Update `page_count` if it needs to change.",
+  "test_file": "t02_paginate_test.almd",
+  "hidden_file": "t02_paginate_hidden.almd",
+  "laws_file": "t02_paginate_laws.almd",
+  "laws_compiled_file": "t02_paginate_laws_compiled.almd"
+}

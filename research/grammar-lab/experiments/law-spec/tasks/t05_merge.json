@@ -1,0 +1,8 @@
+{
+  "source_dir": "source",
+  "instruction": "Make the result contain each value at most once. The inputs are ascending but may themselves contain repeated values.",
+  "test_file": "t05_merge_test.almd",
+  "hidden_file": "t05_merge_hidden.almd",
+  "laws_file": "t05_merge_laws.almd",
+  "laws_compiled_file": "t05_merge_laws_compiled.almd"
+}

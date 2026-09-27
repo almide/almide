@@ -1,0 +1,18 @@
+test "law: result is strictly ascending" {
+  law_check("result is strictly ascending", law_pair(law_named("a", law_list(law_int)), law_named("b", law_list(law_int))), ((a, b)) => {
+    let r = merge(list.sort(a), list.sort(b))
+    list.range(1, list.len(r)) |> list.all((i) => r[i - 1] < r[i])
+  })
+}
+
+test "law: nothing is lost" {
+  law_check("nothing is lost", law_pair(law_named("a", law_list(law_int)), law_named("b", law_list(law_int))), ((a, b)) => {
+    let r = merge(list.sort(a), list.sort(b))
+    (a + b) |> list.all((x) => list.contains(r, x))
+  })
+}
+
+test "law: nothing is invented" {
+  law_check("nothing is invented", law_pair(law_named("a", law_list(law_int)), law_named("b", law_list(law_int))), ((a, b)) =>
+    merge(list.sort(a), list.sort(b)) |> list.all((x) => list.contains(a + b, x)))
+}

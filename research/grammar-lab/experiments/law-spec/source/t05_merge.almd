@@ -1,0 +1,10 @@
+// Merge two ascending lists into one ascending list.
+
+fn merge(a: List[Int], b: List[Int]) -> List[Int] =
+  match a {
+    [] => b,
+    [x, ..xs] => match b {
+      [] => a,
+      [y, ..ys] => if x <= y then [x] + merge(xs, b) else [y] + merge(a, ys),
+    },
+  }

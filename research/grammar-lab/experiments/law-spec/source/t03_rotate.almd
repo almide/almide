@@ -1,0 +1,4 @@
+// Rotate a list left by k positions: rotate([1, 2, 3, 4], 1) == [2, 3, 4, 1].
+
+fn rotate[T](xs: List[T], k: Int) -> List[T] =
+  list.drop(xs, k) + list.take(xs, k)

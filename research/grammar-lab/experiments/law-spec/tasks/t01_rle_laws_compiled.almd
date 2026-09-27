@@ -1,0 +1,14 @@
+test "law: decode inverts encode" {
+  law_check("decode inverts encode", law_pair(law_named("n", law_pos_int), law_named("m", law_pos_int)), ((n, m)) => {
+    let s = string.repeat("a", n) + string.repeat("b", m)
+    decode(encode(s)) == s
+  })
+}
+
+test "law: every count is a single digit" {
+  law_check("every count is a single digit", law_named("n", law_pos_int), (n) => {
+    let cs = string.chars(encode(string.repeat("a", n)))
+    let digit = (c: String) => result.is_ok(int.parse(c))
+    list.range(1, list.len(cs)) |> list.all((i) => not (digit(cs[i - 1]) and digit(cs[i])))
+  })
+}

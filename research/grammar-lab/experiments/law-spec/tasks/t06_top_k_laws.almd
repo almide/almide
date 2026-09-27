@@ -1,0 +1,14 @@
+law "at most k entries" for (es: List[Entry], k: Int where it >= 0) {
+  list.len(top_k(es, k)) <= k
+}
+
+law "ordered by count, then name" for (es: List[Entry], k: Int where it >= 0) {
+  let r = top_k(es, k)
+  list.range(1, list.len(r)) |> list.all((i) =>
+    r[i - 1].count > r[i].count or (r[i - 1].count == r[i].count and r[i - 1].name <= r[i].name))
+}
+
+law "nothing better is left out" for (es: List[Entry], k: Int where it >= 0) {
+  let r = top_k(es, k)
+  list.len(r) == 0 or es |> list.all((e) => list.contains(r, e) or e.count <= r[list.len(r) - 1].count)
+}

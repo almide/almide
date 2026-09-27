@@ -1,0 +1,14 @@
+test "law: rotation keeps the length" {
+  law_check("rotation keeps the length", law_pair(law_named("xs", law_list(law_int)), law_named("k", law_int)), ((xs, k)) =>
+    list.len(rotate(xs, k)) == list.len(xs))
+}
+
+test "law: rotating back undoes a rotation" {
+  law_check("rotating back undoes a rotation", law_pair(law_named("xs", law_list(law_int)), law_named("k", law_int)), ((xs, k)) =>
+    rotate(rotate(xs, k), 0 - k) == xs)
+}
+
+test "law: a full turn is the identity" {
+  law_check("a full turn is the identity", law_named("xs", law_list(law_int)), (xs) =>
+    rotate(xs, list.len(xs)) == xs)
+}
