@@ -470,9 +470,13 @@ pub(crate) fn build_native_cached(
     // `almide build` reported success while shipping the previous binary —
     // exit 0 even with syntactically invalid Rust in the module.
     let native_key = source_root.map(native_sources_key).unwrap_or_default();
+    // The target triple (#2772) is part of the identity too: a musl build of
+    // the same code is a different binary, and keyed without it `almide build
+    // --target x86_64-unknown-linux-musl` would be a hit on the host binary.
+    let triple = super::native_target::cross_target().unwrap_or_default();
     let hash_input = format!(
-        "{}:test={}:release={}:deps={}:root={:?}:native={}",
-        &rs_code, use_test_harness, release, dep_key, source_root, native_key
+        "{}:test={}:release={}:deps={}:root={:?}:native={}:target={}",
+        &rs_code, use_test_harness, release, dep_key, source_root, native_key, triple
     );
     let code_hash = format!("{:016x}", hash64(hash_input.as_bytes()));
     let profile_dir = if release { "release" } else { "debug" };

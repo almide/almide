@@ -320,16 +320,21 @@ codegen-units = 1
     // "expected library not found" (the bin path's twin of #2230's fix).
     cmd.arg("--target-dir").arg(project_dir.join("target"));
     if release { cmd.arg("--release"); }
+    // #2772: the requested target (or the host) is stated, never inherited.
+    let triple = super::native_target::cross_target();
+    super::native_target::pin_cargo_target(&mut cmd, triple.as_deref());
+    let profile = if release { "release" } else { "debug" };
+    let lib_filename = super::native_target::cdylib_file_name(&lib_name.replace('-', "_"), triple.as_deref());
+    let lib_path = super::native_target::artifact_dir(project_dir, triple.as_deref(), profile).join(&lib_filename);
+    // A library left by an earlier build must not stand in for this one.
+    let _ = std::fs::remove_file(&lib_path);
     let output = cmd.output().map_err(|e| format!("failed to run cargo: {}", e))?;
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(triple.as_deref()
+            .and_then(|t| super::native_target::cross_toolchain_error(&stderr, t))
+            .unwrap_or(stderr));
     }
-
-    let profile = if release { "release" } else { "debug" };
-    let prefix = if cfg!(target_os = "macos") || cfg!(target_os = "linux") { "lib" } else { "" };
-    let ext = if cfg!(target_os = "macos") { "dylib" } else if cfg!(target_os = "windows") { "dll" } else { "so" };
-    let lib_filename = format!("{}{}.{}", prefix, lib_name.replace('-', "_"), ext);
-    let lib_path = project_dir.join("target").join(profile).join(&lib_filename);
     if !lib_path.exists() {
         return Err(format!("expected library not found at {}", lib_path.display()));
     }
@@ -486,6 +491,17 @@ fn write_generated_cargo_project(
 /// Run `cargo build` in `project_dir` and locate the resulting binary.
 /// Extracted verbatim from `cargo_build_generated_with_native`'s tail.
 fn run_cargo_build_and_locate_binary(project_dir: &std::path::Path, release: bool) -> Result<std::path::PathBuf, String> {
+    let triple = super::native_target::cross_target();
+    let profile = if release { "release" } else { "debug" };
+    let exe = super::native_target::exe_file_name("almide-out", triple.as_deref());
+    let bin_path = super::native_target::artifact_dir(project_dir, triple.as_deref(), profile).join(exe);
+    // #2772: remove the previous build's binary first. Cargo re-links it into
+    // place on every successful build (fresh or not), so this costs nothing —
+    // and if anything ever sends the output elsewhere, the result is a loud
+    // "expected binary not found" instead of the stale binary copied out as
+    // though it were this build's.
+    let _ = std::fs::remove_file(&bin_path);
+
     let mut cmd = std::process::Command::new("cargo");
     inject_almide_par_if_rayon(&mut cmd, project_dir);
     cmd.arg("build").current_dir(project_dir);
@@ -499,18 +515,26 @@ fn run_cargo_build_and_locate_binary(project_dir: &std::path::Path, release: boo
     }
     // Suppress cargo's chatty output
     cmd.arg("--quiet");
+    // #2772: the target is stated (`--target` for a cross build) and an
+    // inherited `CARGO_BUILD_TARGET` removed, so the binary lands at
+    // `bin_path` and nowhere else.
+    super::native_target::pin_cargo_target(&mut cmd, triple.as_deref());
 
     let output = cmd.output().map_err(|e| format!("failed to run cargo: {}", e))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        if let Some(e) = triple.as_deref().and_then(|t| super::native_target::cross_toolchain_error(&stderr, t)) {
+            return Err(e);
+        }
         return Err(wrap_codegen_leak(stderr));
     }
 
-    let profile = if release { "release" } else { "debug" };
-    let exe = if cfg!(windows) { "almide-out.exe" } else { "almide-out" };
-    let bin_path = project_dir.join("target").join(profile).join(exe);
     if !bin_path.exists() {
-        return Err(format!("expected binary not found at {}", bin_path.display()));
+        return Err(format!(
+            "expected binary not found at {}\n  \
+             hint: a cargo config `build.target` redirects the output; use `almide build --target <triple>` instead",
+            bin_path.display()
+        ));
     }
     Ok(bin_path)
 }
@@ -526,7 +550,10 @@ pub(super) fn cargo_build_generated_with_native(
     let uses_http = rs_code.contains("almide_rt_http_") || rs_code.contains("use rustls");
     let uses_zlib = rs_code.contains("almide_rt_zlib_") || rs_code.contains("use flate2");
 
+    // The rlib fast path links a HOST-built runtime with a bare host rustc, so a
+    // cross build (#2772) always takes the cargo path.
     if !almide_base::env::flag("ALMIDE_NO_RTLIB")
+        && super::native_target::cross_target().is_none()
         && !uses_matrix && !uses_http && !uses_zlib
         && native_deps.is_empty() && source_root.is_none()
     {
@@ -762,6 +789,8 @@ fn run_cargo_test_no_run_and_locate_binary(project_dir: &std::path::Path) -> Res
     inject_almide_par_if_rayon(&mut cmd, project_dir);
     cmd.arg("test").arg("--no-run").arg("--quiet").arg("--message-format=json")
         .current_dir(project_dir);
+    // A test binary must run on this machine: never inherit a cross target.
+    super::native_target::pin_cargo_target(&mut cmd, None);
 
     let output = cmd.output().map_err(|e| format!("failed to run cargo: {}", e))?;
     if !output.status.success() {
@@ -843,11 +872,20 @@ pub(super) fn is_rustc_ice(stderr: &str) -> bool {
 pub(super) fn clear_incremental_sessions(project_dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     let Ok(profiles) = std::fs::read_dir(project_dir.join("target")) else { return Vec::new() };
     let mut cleared = Vec::new();
-    for entry in profiles.flatten() {
-        let inc = entry.path().join("incremental");
+    let mut clear = |inc: std::path::PathBuf| {
         let holds_a_session = std::fs::read_dir(&inc).map(|mut rd| rd.next().is_some()).unwrap_or(false);
         if holds_a_session && std::fs::remove_dir_all(&inc).is_ok() {
             cleared.push(inc);
+        }
+    };
+    for entry in profiles.flatten() {
+        clear(entry.path().join("incremental"));
+        // A cross build (#2772) keeps its profiles one level down:
+        // `target/<triple>/<profile>/incremental`.
+        if let Ok(nested) = std::fs::read_dir(entry.path()) {
+            for sub in nested.flatten() {
+                clear(sub.path().join("incremental"));
+            }
         }
     }
     cleared.sort();
