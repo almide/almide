@@ -1,0 +1,44 @@
+// @contract: C-054
+// A COUNT or INDEX so large that `n * stride` wraps i64 clamps like any other
+// out-of-range count (#2685). The wasm `list.take` / `list.drop` /
+// `list.insert` tested `n * stride` against the byte length, and the product
+// wraps: `take(xs, i64::MAX)` gives `-8` bytes for an Int list, which passed
+// the `> len` test, allocated a wrapped count and trapped (exit 134);
+// `take(xs, 2^61)` gave 0 bytes and returned `[]`; `drop(xs, i64::MAX)` kept
+// MORE elements than the list has; `insert(xs, 2^61 + 1, v)` inserted at
+// index 1 instead of appending. The test is now in the INDEX domain
+// (`n >= len / stride`), as `take_end` / `drop_end` / `remove_at` already were.
+//
+// The C-054 fixtures probe the 2^32 narrowing boundary, where the product does
+// not wrap; this one probes the products that do, for both element strides
+// (8 bytes for Int, 4 for a String handle): 2^61 and 2^62 wrap to 0, 2^61+1
+// and 2^62+1 wrap to one element, i64::MAX wraps negative.
+fn fmt(xs: List[Int]) -> String = list.join(list.map(xs, (x) => int.to_string(x)), ",")
+
+fn main() -> Unit = {
+  let xs = [10, 20, 30]
+  let ss = ["a", "b", "c"]
+  let max = 9223372036854775807
+  let p61 = 2305843009213693952
+  let p62 = 4611686018427387904
+  println("take max:    " + fmt(list.take(xs, max)))
+  println("take 2^61:   " + fmt(list.take(xs, p61)))
+  println("take 2^61+1: " + fmt(list.take(xs, p61 + 1)))
+  println("take 2^62:   " + fmt(list.take(xs, p62)))
+  println("drop max:    " + fmt(list.drop(xs, max)))
+  println("drop 2^61:   " + fmt(list.drop(xs, p61)))
+  println("drop 2^61+1: " + fmt(list.drop(xs, p61 + 1)))
+  println("insert max:    " + fmt(list.insert(xs, max, 99)))
+  println("insert 2^61:   " + fmt(list.insert(xs, p61, 99)))
+  println("insert 2^61+1: " + fmt(list.insert(xs, p61 + 1, 99)))
+  println("str take max:    " + list.join(list.take(ss, max), ","))
+  println("str take 2^62:   " + list.join(list.take(ss, p62), ","))
+  println("str take 2^62+1: " + list.join(list.take(ss, p62 + 1), ","))
+  println("str drop 2^62+1: " + list.join(list.drop(ss, p62 + 1), ","))
+  println("str insert 2^62+1: " + list.join(list.insert(ss, p62 + 1, "z"), ","))
+  // The soak shape: an empty Bytes list, taken whole, then mapped and joined.
+  let out = bytes.new(0)
+  println("head=${out |> bytes.to_list |> list.take(max) |> list.map((x) => int.to_string(x)) |> list.join(",")}")
+  // In-range counts are unchanged.
+  println("take 2: " + fmt(list.take(xs, 2)) + " drop 2: " + fmt(list.drop(xs, 2)) + " insert 1: " + fmt(list.insert(xs, 1, 99)))
+}

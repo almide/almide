@@ -845,6 +845,7 @@ evidence  = [
   { path = "spec/wasm_cross/bytes_array_count_domain.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_string_window_domain.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_pad_ceiling_oom.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_count_stride_product_wrap.almd", class = "fixture" },
 ]
 
 # ── FLOAT LIST ORDERING = IEEE-754 totalOrder (Cluster-B) ────────────
