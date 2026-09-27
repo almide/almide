@@ -1,3 +1,4 @@
 spec/integration/modules/dmod_b/src/mod.almd	module 'dmod_d' not found
 spec/integration/modules/dmod_c/src/mod.almd	module 'dmod_d' not found
+spec/integration/modules/leakmid/src/mod.almd	module 'leakfin' not found
 spec/integration/modules/mylib/src/utils.almd	module 'extlib' not found
