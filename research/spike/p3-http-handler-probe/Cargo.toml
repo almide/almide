@@ -1,0 +1,12 @@
+[package]
+name = "p3handler"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wasm-encoder = "0.259"
+wit-parser = "0.259"
+wit-component = "0.259"
+anyhow = "1"
+
+[workspace]
