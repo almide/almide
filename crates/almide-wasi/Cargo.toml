@@ -16,6 +16,8 @@ almide-wasm = { path = "../almide-wasm" }
 wasm-encoder = { version = "0.259", features = ["wasmparser"] }
 wasmparser = "0.259"
 anyhow = "1"
+wat = "1"
+almide-base = { path = "../almide-base" }
 
 [lints]
 workspace = true

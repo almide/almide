@@ -20,9 +20,11 @@
 //!
 //! Supported host surface (the non-host-variant corpus): console
 //! output (println/eprintln/io.print/io.write), exit codes, stdin
-//! read-to-end, entropy, the wall clock. fs/process ops take the
-//! DEFINED refusal: a named message on stderr + exit 1 — never a
-//! silent wrong answer (the target-availability doctrine, #1423).
+//! read-to-end, entropy, the wall clock, and — through the spliced fs
+//! service (`fs_service.rs`, #2742) — the fs ops with `env.os` /
+//! `env.temp_dir` / `env.cwd`. Other ops (process, http) take the
+//! DEFINED refusal: a named message on stderr + exit 1 — never a silent
+//! wrong answer (the target-availability doctrine, #1423).
 //!
 //! The env/args SERVICES are reachability-gated (#1841, the #1712
 //! discipline applied to the transform): `env.get` (op 26) ships the
@@ -33,6 +35,9 @@
 //! (five imports, five shims), and an op that never reached the module
 //! cannot be called, so the gate is a selection over the op table the
 //! build path already audits against `P1_SERVED_OPS`, not an analysis.
+//! The fs service rides the same gate: it ships when an fs op is in the
+//! set, with its own page past the park and only the functions and WASI
+//! imports the ops present reach.
 
 use wasm_encoder::reencode::{Reencode, RoundtripReencoder};
 use wasm_encoder::{
@@ -46,7 +51,13 @@ use wasmparser::{Parser, Payload};
 /// path audits an artifact's emitted op set against this before shipping
 /// (an unserved op = a runtime refusal on a runtime the developer never
 /// ran — the env.set lesson): extend the shim and this list TOGETHER.
-pub const P1_SERVED_OPS: &[i32] = &[26, 29, 30, 32, 34, 35, 36, 37];
+pub const P1_SERVED_OPS: &[i32] = &[
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
+    29, 30, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 51, 52,
+];
+
+mod fs_service;
+pub use fs_service::{fs_op_name, FS_SERVICE_OPS};
 
 pub const UNSUPPORTED_MSG: &[u8] = b"Error: host op unsupported in the WASI build\n";
 /// The env.set overlay log's own refusal. It used to borrow the line above,
@@ -290,6 +301,9 @@ pub struct P1Services {
     /// op 29 (`env.args` / `process.args`): args_sizes_get + args_get,
     /// the frames shim.
     pub args: bool,
+    /// any op of [`FS_SERVICE_OPS`] (#2742): the spliced fs service, its
+    /// own page past the park, and the WASI imports it reaches.
+    pub fs: bool,
 }
 
 impl P1Services {
@@ -299,10 +313,12 @@ impl P1Services {
             env_get: host_ops.contains(&26),
             env_set: host_ops.contains(&37),
             args: host_ops.contains(&29),
+            fs: host_ops.iter().any(|op| fs_service::serves(*op)),
         }
     }
 
-    /// The WASI imports this selection adds past the base five.
+    /// The WASI imports this selection adds past the base five (the fs
+    /// service's own count on top, which depends on the ops it reaches).
     pub fn extra_imports(self) -> u32 {
         2 * u32::from(self.env_get) + 2 * u32::from(self.args)
     }
@@ -339,9 +355,6 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     // number of pairs shipped (0, 2 or 4). The program's own imports
     // (#2275) follow the WASI ones in their original order, so they move
     // by the same delta as every defined function.
-    let shift: u32 = services.extra_imports();
-    let imports_count: u32 = 5 + shift + foreign_imports.len() as u32;
-    let shim_base = imports_count + func_types.len() as u32;
     // The park CANNOT live past the current memory end — the bump heap
     // grows there. It takes over the ORIGINAL heap base instead, and
     // the heap's initial pointer moves up by the span: nothing else
@@ -351,10 +364,17 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         .1
         .ok_or_else(|| anyhow::anyhow!("__heap init not i32"))? as u32 as u64;
     let park: u64 = heap_init;
+    // The fs service (#2742): its page sits right past the park, so the heap
+    // moves up by one more page when it ships.
+    let fs = fs_service::FsSplice::plan(host_ops, (park + PARK_SPAN) as u32, services.env_get)?;
+    let fs_span: u64 = fs.as_ref().map_or(0, |_| fs_service::FS_PAGE);
+    let shift: u32 = services.extra_imports() + fs.as_ref().map_or(0, fs_service::FsSplice::fresh_imports);
+    let imports_count: u32 = 5 + shift + foreign_imports.len() as u32;
+    let shim_base = imports_count + func_types.len() as u32;
     let g_plen = global_count;
     // g_ppos exists only for the services that can stage outside the park
     // (#2120); a module without them keeps the fixed source and its bytes.
-    let g_ppos = (services.env_get || services.args).then_some(global_count + 1);
+    let g_ppos = (services.env_get || services.args || services.fs).then_some(global_count + 1);
     // g_ovl (the overlay log length) exists only when an env service
     // ships — nothing else reads or writes the log.
     let g_ovl = (services.env_get || services.env_set)
@@ -362,7 +382,7 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     let mut globals = GlobalSection::new();
     for (idx, (gt, i32v, i64v, f64v)) in parsed_globals.iter().enumerate() {
         let init = if idx as u32 == heap_global {
-            ConstExpr::i32_const((heap_init + PARK_SPAN) as i32)
+            ConstExpr::i32_const((heap_init + PARK_SPAN + fs_span) as i32)
         } else if let Some(v) = i32v {
             ConstExpr::i32_const(*v)
         } else if let Some(v) = i64v {
@@ -387,6 +407,7 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     let t_print = type_index(&mut types, &[ValType::I32, ValType::I32], &[]);
     let t_fs = type_index(&mut types, &[ValType::I32; 5], &[ValType::I64]);
     let t_read = type_index(&mut types, &[ValType::I32], &[]);
+    let fs_types = fs.as_ref().map(|f| f.register_types(&mut types));
 
     let mut type_sec = TypeSection::new();
     for (p, r) in &types {
@@ -417,6 +438,8 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         next_import += 2;
         (next_import - 2, next_import - 1)
     });
+    // The fs service's WASI imports the artifact did not already have.
+    let fs_import_at = fs.as_ref().zip(fs_types.as_ref()).map(|(f, t)| f.import(&mut imports, t, &mut next_import, environ_imports));
     for (module, name, ti) in &foreign_imports {
         imports.import(module, name, EntityType::Function(*ti));
         next_import += 1;
@@ -443,14 +466,24 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     let f_env_get = service_slot(services.env_get);
     let f_env_set = service_slot(services.env_set);
     let f_args = service_slot(services.args);
+    // The fs service's shipped functions follow the service shims; the
+    // dispatcher among them is what shim_fs_call forwards the fs ops to.
+    let fs_first = next_shim;
+    let f_fs = fs.as_ref().zip(fs_types.as_ref()).map(|(f, t)| f.declare(&mut functions, t, fs_first));
+    // shim_fs_call's forwarding rows: the env/args services, then the fs ops.
+    let forward: Vec<(i32, u32)> = [(26, f_env_get), (37, f_env_set), (29, f_args)]
+        .into_iter()
+        .filter_map(|(c, t)| t.map(|t| (c, t)))
+        .chain(fs.as_ref().zip(f_fs).map(|(f, d)| f.forward(d)).unwrap_or_default())
+        .collect();
 
     let mut memories = MemorySection::new();
     memories.memory(MemoryType {
-        minimum: old_mem_min + PARK_SPAN / 65536,
+        minimum: old_mem_min + (PARK_SPAN + fs_span) / 65536,
         // Preserve the heap-cap maximum (#1729), shifted by the same span
         // the minimum gained — dropping it silently un-capped every
         // `--heap-cap` structural artifact.
-        maximum: old_mem_max.map(|m| m.max(old_mem_min) + PARK_SPAN / 65536),
+        maximum: old_mem_max.map(|m| m.max(old_mem_min) + (PARK_SPAN + fs_span) / 65536),
         memory64: false,
         shared: false,
         page_size_log2: None,
@@ -476,6 +509,9 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
             &ConstExpr::i32_const(0),
         );
     }
+    // The fs service's own globals come last.
+    let fs_first_global = global_count + 1 + u32::from(g_ppos.is_some()) + u32::from(g_ovl.is_some());
+    fs.iter().for_each(|f| f.emit_globals(&mut globals));
 
     let mut exports = ExportSection::new();
     for (name, kind, idx) in &export_rows {
@@ -506,7 +542,7 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         code.function(&stub);
         code.function(&stub);
     } else {
-        code.function(&shim_fs_call(park, g_plen, g_ppos, f_env_get, f_env_set, f_args));
+        code.function(&shim_fs_call(park, g_plen, g_ppos, &forward));
         code.function(&shim_host_read(park, g_plen, g_ppos));
     }
     if f_env_get.is_some() {
@@ -519,6 +555,17 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     if f_args.is_some() {
         let (i_sizes, i_get) = args_imports.expect("args service imports its pair");
         code.function(&shim_args(park, g_plen, g_ppos.expect("args stages"), i_sizes, i_get));
+    }
+    if let (Some(f), Some(t), Some(import_at)) = (&fs, &fs_types, fs_import_at) {
+        let to = fs_service::SpliceTargets {
+            import_at,
+            g_plen,
+            g_ppos: g_ppos.expect("the fs service stages"),
+            heap: heap_global,
+            first_global: fs_first_global,
+            first_func: fs_first,
+        };
+        f.emit(&mut code, &mut data, t, &to)?;
     }
 
     let mut element_sec = ElementSection::new();

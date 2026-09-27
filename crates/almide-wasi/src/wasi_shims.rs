@@ -91,9 +91,7 @@ fn shim_fs_call(
     park: u64,
     g_plen: u32,
     g_ppos: Option<u32>,
-    f_env_get: Option<u32>,
-    f_env_set: Option<u32>,
-    f_args: Option<u32>,
+    forward: &[(i32, u32)],
 ) -> Function {
     // params: 0=op 1=a_ptr 2=a_len 3=b_ptr 4=b_len; locals: 5=nread
     // 6=deadline (i64, op 36)
@@ -108,9 +106,9 @@ fn shim_fs_call(
 
     // ops 26/37/29: env.get / env.set / args — forwarded whole to the
     // service shim, when the op set shipped one (an absent service falls
-    // through to the refusal, which the build-time op audit forecloses).
-    let forwarded = [(26, f_env_get), (37, f_env_set), (29, f_args)];
-    for (code, target) in forwarded.into_iter().filter_map(|(c, t)| t.map(|t| (c, t))) {
+    // through to the refusal, which the build-time op audit forecloses);
+    // the fs ops (#2742) forward the same way, to the spliced fs service.
+    for &(code, target) in forward {
         i.local_get(op).i32_const(code).i32_eq().if_(BlockType::Empty);
         for p in 0..5u32 {
             i.local_get(p);

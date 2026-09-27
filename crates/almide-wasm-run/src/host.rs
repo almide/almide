@@ -168,39 +168,10 @@ fn io_err(call: &str, args: &str, e: impl std::fmt::Display) -> String {
 fn q(s: &str) -> String {
     format!("\"{s}\"")
 }
-/// The Almide call an fs op came from, so the message names what the WRITER
-/// wrote rather than the host primitive that served it. `fold_lines` /
-/// `for_each_line` have their own ops for exactly this reason (#2090).
-fn fs_op_name(op: i32) -> &'static str {
-    match op {
-        1 => "fs.read_text",
-        2 => "fs.write",
-        3 => "fs.write_bytes",
-        7 => "fs.mkdir_p",
-        8 => "fs.remove",
-        9 => "fs.remove_all",
-        10 => "fs.create_temp_dir",
-        11 => "fs.list_dir",
-        12 => "fs.read_lines",
-        13 => "fs.read_text_if_exists",
-        14 => "fs.read_bytes",
-        15 => "fs.write_bytes_raw",
-        16 => "fs.append",
-        17 => "fs.file_size",
-        18 => "fs.modified_at",
-        19 => "fs.copy",
-        20 => "fs.rename",
-        21 => "fs.create_temp_file",
-        23 => "fs.walk",
-        24 => "fs.read_lines_if_exists",
-        25 => "fs.read_bytes_if_exists",
-        38 => "fs.stat",
-        39 => "fs.glob",
-        51 => "fs.fold_lines",
-        52 => "fs.for_each_line",
-        _ => "fs",
-    }
-}
+/// The Almide call an fs op came from — ONE table with the p1 fs service
+/// (`almide_wasi::fs_op_name`), so the stock-runtime artifact and this host
+/// cannot spell a call two ways (#2090, #2742).
+use crate::wasi::fs_op_name;
 
 /// Length-prefixed string frames (u32 LE + bytes) — the list-of-strings
 /// result encoding the guest decoder walks.
