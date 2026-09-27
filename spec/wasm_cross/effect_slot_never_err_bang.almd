@@ -1,0 +1,24 @@
+// @contract: C-221
+// `!` on a NEVER-ERR stdlib effect call (`random.int`: an effect fn whose
+// declared return is not a Result) inside a lambda checked against an
+// `effect (A) -> B` slot is the same no-op it is in an `effect fn` body
+// (#2704, ADR-0002 §D6): the slot grants effect-fn body ergonomics. Both slot
+// spellings are pinned, a call argument and a `let`-annotated binding, next to
+// a user effect fn's `!` (which does propagate) and a failing Result `!` whose
+// err still reaches the caller. `random.int(x, x)` is `x` on every leg.
+import random
+
+effect fn run_h(h: effect (Int) -> Int, x: Int) -> Int = h(x)!
+
+effect fn bump(x: Int) -> Int = x + 1
+
+effect fn main() -> Unit = {
+  println(int.to_string(run_h((x) => random.int(x, x)! + bump(x)!, 20)!))
+  let f: effect (Int) -> Int = (x) => {
+    let r = random.int(3, 3)!
+    x * r
+  }
+  println(int.to_string(f(14)!))
+  let bad = run_h((x) => random.int(x, x)! + int.parse("nope")!, 1) ?? -1
+  println(int.to_string(bad))
+}
