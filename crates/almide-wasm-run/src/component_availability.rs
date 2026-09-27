@@ -5,7 +5,7 @@
 /// P3 HTTP imports are selected separately whenever an HTTP operation is emitted.
 pub fn check(host_ops: &[i32], p3: bool) -> Result<(), String> {
     let unsupported = host_ops.iter().copied().find(|op| {
-        let common = matches!(op, 30..=32 | 34..=35);
+        let common = matches!(op, 30..=32 | 34..=35 | 73);
         let extra = p3 && matches!(op, 1..=9 | 13..=16 | 40..=50);
         !(common || extra)
     });
@@ -39,6 +39,7 @@ fn operation_name(op: i32) -> &'static str {
             46 => "http.patch", 47 => "http.delete",
             48..=50 => "http.request framed response",
             53..=59 => "the http call handle (http.start / poll / read_new / wait / cancel)",
+            73 => "panic",
             _ => "unknown operation",
         })
 }
