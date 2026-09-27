@@ -559,6 +559,19 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // env opt-in until the fan lowering lands on the same plumbing and
     // the corpus gates cover it.
     let direct_p3 = direct_p2 && almide_base::env::flag("ALMIDE_COMPONENT_P3");
+    // #2742: a WASI 0.2 component that reaches the p1 fs service keeps the
+    // stage-0 adapter route whenever the p1 shim serves its whole op set.
+    // Those programs used to reach that route through the incumbent (the
+    // p1 op audit rerouted every fs op there); the fs service plus the
+    // preview1 adapter now serve them from the structural module, so the
+    // direct shim's E081 must not claim a program that built before. An op
+    // set without an fs op keeps the direct shim's verdict (#2113).
+    let fs_via_adapter = direct_p2
+        && !direct_p3
+        && almide_wasm_run::component_availability::check(&host_ops, false).is_err()
+        && host_ops.iter().any(|op| almide_wasm_run::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| o == op))
+        && host_ops.iter().all(|op| almide_wasm_run::wasi::P1_SERVED_OPS.contains(op));
+    let direct_p2 = direct_p2 && !fs_via_adapter;
     if direct_p2
         && let Err(message) = almide_wasm_run::component_availability::check(&host_ops, direct_p3)
     {
