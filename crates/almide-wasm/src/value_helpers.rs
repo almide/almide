@@ -101,18 +101,57 @@ pub(crate) fn emit_value_eq_helper(self_idx: u32, key_off: u32, val_off: u32) ->
     f
 }
 
-/// `$value_merge(a, b) -> i32` — object merge (the oracle value_merge):
-/// A's pairs in order (a shared key takes B's VALUE, keeping A's key
-/// object), then B's pairs whose keys are new, in B order; a fresh pair
-/// tuple only where overridden (immutable sharing elsewhere). Any
-/// non-Object operand yields b itself.
+/// `res` := the byte offset of the FIRST pair in `p[0..hi)` whose key
+/// equals `ka`, or -1. `idx` is scratch.
+fn scan_first(ins: &mut wasm_encoder::InstructionSink, key_off: u32, s: [u32; 5]) {
+    let [p, hi, ka, idx, res] = s;
+    ins.i32_const(-1).local_set(res);
+    ins.i32_const(0).local_set(idx);
+    ins.block(BlockType::Empty).loop_(BlockType::Empty);
+    ins.local_get(idx).local_get(hi).i32_ge_u().br_if(1);
+    ins.local_get(p).local_get(idx).i32_add().i32_load(slot_memarg(0));
+    ins.i32_load(slot_memarg(key_off));
+    ins.local_get(ka).call(F_STR_EQ).if_(BlockType::Empty);
+    ins.local_get(idx).local_set(res);
+    ins.br(2);
+    ins.end();
+    ins.local_get(idx).i32_const(4).i32_add().local_set(idx);
+    ins.br(0).end().end();
+}
+
+/// `res` := the byte offset of the LAST pair in `p[0..hi)` whose key
+/// equals `ka`, or -1. `idx` is scratch.
+fn scan_last(ins: &mut wasm_encoder::InstructionSink, key_off: u32, s: [u32; 5]) {
+    let [p, hi, ka, idx, res] = s;
+    ins.i32_const(-1).local_set(res);
+    ins.local_get(hi).local_set(idx);
+    ins.block(BlockType::Empty).loop_(BlockType::Empty);
+    ins.local_get(idx).i32_eqz().br_if(1);
+    ins.local_get(idx).i32_const(4).i32_sub().local_set(idx);
+    ins.local_get(p).local_get(idx).i32_add().i32_load(slot_memarg(0));
+    ins.i32_load(slot_memarg(key_off));
+    ins.local_get(ka).call(F_STR_EQ).if_(BlockType::Empty);
+    ins.local_get(idx).local_set(res);
+    ins.br(2);
+    ins.end();
+    ins.br(0).end().end();
+}
+
+/// `$value_merge(a, b) -> i32` — object merge (the oracle value_merge,
+/// a fold of B's pairs into A: replace the first pair with that key, else
+/// append): A's pairs in order (the first pair of a key B has takes B's
+/// LAST value for it, keeping A's key object), then B's pairs whose keys
+/// are new, once each at the first position, carrying the last value; a
+/// fresh pair tuple only where overridden (immutable sharing elsewhere).
+/// Duplicate keys (`value.object` keeps them) follow the fold (#2735).
+/// Any non-Object operand yields b itself.
 pub(crate) fn emit_value_merge_helper(key_off: u32, val_off: u32) -> Function {
     let (a, b, pa, pb, la, lb, out, w, i, j, ka, fd) =
         (0u32, 1u32, 2u32, 3u32, 4u32, 5u32, 6u32, 7u32, 8u32, 9u32, 10u32, 11u32);
-    let fv = 12u32;
+    let (fv, idx, res) = (12u32, 13u32, 14u32);
     let m_tag = slot_memarg(almide_layout::SUM_TAG);
     let m_pay = slot_memarg(almide_layout::SUM_FIELD);
-    let mut f = Function::new([(11, ValType::I32)]);
+    let mut f = Function::new([(13, ValType::I32)]);
     let mut ins = f.instructions();
     ins.local_get(a).i32_load(m_tag).i32_const(VT_OBJECT).i32_ne();
     ins.local_get(b).i32_load(m_tag).i32_const(VT_OBJECT).i32_ne();
@@ -126,47 +165,41 @@ pub(crate) fn emit_value_merge_helper(key_off: u32, val_off: u32) -> Function {
     ins.local_get(b).i32_load(m_pay).local_set(pb);
     ins.local_get(pa).i32_load(len_memarg()).local_set(la);
     ins.local_get(pb).i32_load(len_memarg()).local_set(lb);
+    // `fd` := 1 when B's pair at `j` carries a NEW key — in neither A nor
+    // earlier in B (the pair the fold appends).
+    let new_b_key = |ins: &mut wasm_encoder::InstructionSink| {
+        ins.local_get(pb).local_get(j).i32_add().i32_load(slot_memarg(0));
+        ins.i32_load(slot_memarg(key_off)).local_set(ka);
+        scan_first(ins, key_off, [pa, la, ka, idx, res]);
+        ins.local_get(res).i32_const(0).i32_lt_s().local_set(fd);
+        scan_first(ins, key_off, [pb, j, ka, idx, res]);
+        ins.local_get(res).i32_const(0).i32_lt_s().local_get(fd).i32_and().local_set(fd);
+    };
     // count B's NEW keys (bytes) into w
     ins.i32_const(0).local_set(w);
     ins.i32_const(0).local_set(j);
     ins.block(BlockType::Empty).loop_(BlockType::Empty);
     ins.local_get(j).local_get(lb).i32_ge_u().br_if(1);
-    ins.local_get(pb).local_get(j).i32_add().i32_load(slot_memarg(0));
-    ins.i32_load(slot_memarg(key_off)).local_set(ka);
-    ins.i32_const(0).local_set(fd);
-    ins.i32_const(0).local_set(i);
-    ins.block(BlockType::Empty).loop_(BlockType::Empty);
-    ins.local_get(i).local_get(la).i32_ge_u().br_if(1);
-    ins.local_get(pa).local_get(i).i32_add().i32_load(slot_memarg(0));
-    ins.i32_load(slot_memarg(key_off));
-    ins.local_get(ka).call(F_STR_EQ).if_(BlockType::Empty);
-    ins.i32_const(1).local_set(fd);
-    ins.br(2);
-    ins.end();
-    ins.local_get(i).i32_const(4).i32_add().local_set(i);
-    ins.br(0).end().end();
-    ins.local_get(fd).i32_eqz().if_(BlockType::Empty);
+    new_b_key(&mut ins);
+    ins.local_get(fd).if_(BlockType::Empty);
     ins.local_get(w).i32_const(4).i32_add().local_set(w);
     ins.end();
     ins.local_get(j).i32_const(4).i32_add().local_set(j);
     ins.br(0).end().end();
     ins.local_get(la).local_get(w).i32_add().call(F_ALLOC).local_set(out);
-    // pass A: value overridden where B has the key
+    // pass A: value overridden where B has the key (first A pair of it only)
     ins.i32_const(0).local_set(i);
     ins.block(BlockType::Empty).loop_(BlockType::Empty);
     ins.local_get(i).local_get(la).i32_ge_u().br_if(1);
     ins.local_get(pa).local_get(i).i32_add().i32_load(slot_memarg(0)).local_set(fd);
     ins.local_get(fd).i32_load(slot_memarg(key_off)).local_set(ka);
-    // scan B
     ins.i32_const(0).local_set(fv);
-    ins.i32_const(0).local_set(j);
-    ins.block(BlockType::Empty).loop_(BlockType::Empty);
-    ins.local_get(j).local_get(lb).i32_ge_u().br_if(1);
-    ins.local_get(pb).local_get(j).i32_add().i32_load(slot_memarg(0));
-    ins.i32_load(slot_memarg(key_off));
-    ins.local_get(ka).call(F_STR_EQ).if_(BlockType::Empty);
+    scan_first(&mut ins, key_off, [pa, i, ka, idx, res]);
+    ins.local_get(res).i32_const(0).i32_lt_s().if_(BlockType::Empty);
+    scan_last(&mut ins, key_off, [pb, lb, ka, idx, res]);
+    ins.local_get(res).i32_const(0).i32_ge_s().if_(BlockType::Empty);
     ins.local_get(pb)
-        .local_get(j)
+        .local_get(res)
         .i32_add()
         .i32_load(slot_memarg(0))
         .i32_load(slot_memarg(val_off))
@@ -178,10 +211,8 @@ pub(crate) fn emit_value_merge_helper(key_off: u32, val_off: u32) -> Function {
     ins.local_get(ka).call(F_INC);
     ins.local_get(fv).call(F_INC);
     ins.local_get(w).local_set(fd);
-    ins.br(2);
     ins.end();
-    ins.local_get(j).i32_const(4).i32_add().local_set(j);
-    ins.br(0).end().end();
+    ins.end();
     // an A pair B did not override is shared: +1 (fv stays 0 on a miss)
     ins.local_get(fv).i32_eqz().if_(BlockType::Empty);
     ins.local_get(fd).call(F_INC);
@@ -189,31 +220,18 @@ pub(crate) fn emit_value_merge_helper(key_off: u32, val_off: u32) -> Function {
     ins.local_get(out).local_get(i).i32_add().local_get(fd).i32_store(slot_memarg(0));
     ins.local_get(i).i32_const(4).i32_add().local_set(i);
     ins.br(0).end().end();
-    // pass B: append the new keys (shared pair tuples), cursor after A
-    ins.local_get(la).local_set(w);
+    // pass B: append the new keys (the shared pair tuple holding each
+    // key's LAST value), cursor after A
+    ins.local_get(la).local_set(i);
     ins.i32_const(0).local_set(j);
     ins.block(BlockType::Empty).loop_(BlockType::Empty);
     ins.local_get(j).local_get(lb).i32_ge_u().br_if(1);
-    ins.local_get(pb).local_get(j).i32_add().i32_load(slot_memarg(0));
-    ins.i32_load(slot_memarg(key_off)).local_set(ka);
-    ins.i32_const(0).local_set(fd);
-    ins.i32_const(0).local_set(i);
-    ins.block(BlockType::Empty).loop_(BlockType::Empty);
-    ins.local_get(i).local_get(la).i32_ge_u().br_if(1);
-    ins.local_get(pa).local_get(i).i32_add().i32_load(slot_memarg(0));
-    ins.i32_load(slot_memarg(key_off));
-    ins.local_get(ka).call(F_STR_EQ).if_(BlockType::Empty);
-    ins.i32_const(1).local_set(fd);
-    ins.br(2);
-    ins.end();
+    new_b_key(&mut ins);
+    ins.local_get(fd).if_(BlockType::Empty);
+    scan_last(&mut ins, key_off, [pb, lb, ka, idx, res]);
+    ins.local_get(pb).local_get(res).i32_add().i32_load(slot_memarg(0)).local_tee(fd).call(F_INC);
+    ins.local_get(out).local_get(i).i32_add().local_get(fd).i32_store(slot_memarg(0));
     ins.local_get(i).i32_const(4).i32_add().local_set(i);
-    ins.br(0).end().end();
-    ins.local_get(fd).i32_eqz().if_(BlockType::Empty);
-    ins.local_get(pb).local_get(j).i32_add().i32_load(slot_memarg(0)).call(F_INC);
-    ins.local_get(out).local_get(w).i32_add();
-    ins.local_get(pb).local_get(j).i32_add().i32_load(slot_memarg(0));
-    ins.i32_store(slot_memarg(0));
-    ins.local_get(w).i32_const(4).i32_add().local_set(w);
     ins.end();
     ins.local_get(j).i32_const(4).i32_add().local_set(j);
     ins.br(0).end().end();

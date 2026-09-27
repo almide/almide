@@ -1412,6 +1412,7 @@ evidence  = [
   { path = "spec/wasm_cross/value_as_array_roundtrip.almd", class = "fixture" },
   { path = "spec/wasm_cross/value_borrowed_constructors.almd", class = "fixture" },
   { path = "spec/wasm_cross/value_array_tuple_tco.almd", class = "fixture" },
+  { path = "spec/wasm_cross/value_merge_duplicate_keys.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-104"
