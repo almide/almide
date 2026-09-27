@@ -48,6 +48,7 @@
 328048	spec/wasm_cross/bytes_push_growth.almd
 65776	spec/wasm_cross/bytes_push_inplace.almd
 66336	spec/wasm_cross/bytes_rawptr.almd
+66032	spec/wasm_cross/bytes_repeat_product_wrap_oom.almd
 67952	spec/wasm_cross/bytes_search_edit_family.almd
 67904	spec/wasm_cross/bytes_set_on_record_field.almd
 66160	spec/wasm_cross/bytes_set_value_semantics.almd
@@ -439,6 +440,7 @@
 67120	spec/wasm_cross/matrix_from_bytes_offset_domain.almd
 73184	spec/wasm_cross/matrix_head_count_domain.almd
 67104	spec/wasm_cross/matrix_index_domain_family.almd
+66464	spec/wasm_cross/matrix_linear_f32_empty_extent_ceiling.almd
 67456	spec/wasm_cross/matrix_neg_signed_zero.almd
 68560	spec/wasm_cross/matrix_pow_libm.almd
 68784	spec/wasm_cross/matrix_product_family.almd
@@ -446,6 +448,7 @@
 71120	spec/wasm_cross/matrix_q_dims_guard.almd
 76064	spec/wasm_cross/matrix_q_fp16_scale_domain.almd
 69456	spec/wasm_cross/matrix_select_rows.almd
+66320	spec/wasm_cross/matrix_select_rows_f32_dims_ceiling.almd
 89520	spec/wasm_cross/matrix_select_rows_oob.almd
 84352	spec/wasm_cross/matrix_select_rows_q1_partial_block.almd
 74640	spec/wasm_cross/matrix_select_rows_wrapped_rid.almd

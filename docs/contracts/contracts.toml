@@ -2080,6 +2080,8 @@ evidence  = [
   { path = "spec/wasm_cross/string_repeat_empty.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_elementwise_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_composition_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_linear_f32_empty_extent_ceiling.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_select_rows_f32_dims_ceiling.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-162"
@@ -2496,6 +2498,7 @@ evidence  = [
   { path = "spec/wasm_cross/bytes_pad_ceiling_oom.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_pad_ceiling_oom.almd", class = "fixture" },
   { path = "spec/wasm_cross/prim_alloc_count_domain.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_repeat_product_wrap_oom.almd", class = "fixture" },
   { path = "tests/alloc_bump_wrap_test.rs", class = "fixture", name = "bump_head_wrap_is_the_defined_oom_abort" },
   { path = "tests/component_realloc_oom_test.rs", class = "fixture", name = "host_driven_exhaustion_in_the_component_is_the_defined_abort" },
 ]
