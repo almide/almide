@@ -206,7 +206,13 @@ pending_self_host_ceiling = 9
 # that serves (which only the structural leg lowers) can read the clock.
 # datetime.monotonic_ns stays: a monotonic clock is a host surface no op
 # carries yet.
-pending_port_ceiling = 55
+# 2026-09-27: 55 -> 54. datetime.monotonic_ns loses its structural leg: the
+# leg reads the monotonic clock over host op 60 (raw nanos from the host's own
+# origin), served on the embedded host (Instant), the stock p1 shim
+# (clock_time_get with clock id 1, the import op 36 already uses) and the
+# p2/p3 components (wasi:clocks/monotonic-clock). Evidence:
+# spec/wasm_cross/datetime_monotonic_ns.almd.
+pending_port_ceiling = 54
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
 # HttpRequest readers (http.query_params / req_body / req_header / req_method /
@@ -216,13 +222,6 @@ pending_port_ceiling = 55
 unprobed_ceiling_structural = 0
 unprobed_ceiling_stock_p1 = 0
 unprobed_ceiling_embedded = 0
-
-[[unavailable]]
-fn = "datetime.monotonic_ns"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1827"
 
 [[unavailable]]
 fn = "fs.fold_lines_chunked"

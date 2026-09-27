@@ -1,0 +1,22 @@
+// @contract: C-327
+// datetime.monotonic_ns on every leg: the structural leg reads the host's
+// MONOTONIC clock over fs_call op 60 (the embedded host's Instant, the stock
+// p1 shim's clock_time_get(1, ...), p2/p3's wasi:clocks/monotonic-clock).
+// The absolute value is never printed: native counts from its first call and
+// every wasm host from its own origin, so only the relation between reads is
+// a promise. Two reads around a 20 ms env.sleep_ms pin the order (never
+// backwards) and the unit: 20 ms is 20_000_000 in nanoseconds, a count a
+// microsecond or millisecond clock cannot reach, and the 10 s ceiling is one
+// a finer unit would pass around a single short pause.
+import env
+
+effect fn main() -> Unit = {
+  let a = datetime.monotonic_ns()
+  env.sleep_ms(20)!
+  let b = datetime.monotonic_ns()
+  let c = datetime.monotonic_ns()
+  let d = b - a
+  println("never backwards: ${b >= a and c >= b}")
+  println("covers the sleep in ns: ${d >= 20000000}")
+  println("ns, not a finer unit: ${d < 10000000000}")
+}

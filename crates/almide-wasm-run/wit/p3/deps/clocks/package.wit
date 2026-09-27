@@ -6,6 +6,12 @@ interface types {
   type duration = u64;
 }
 
+// The monotonic clock, `now` only: datetime.monotonic_ns (fs_call op 60).
+interface monotonic-clock {
+  type mark = u64;
+  now: func() -> mark;
+}
+
 interface system-clock {
   record instant {
     seconds: s64,

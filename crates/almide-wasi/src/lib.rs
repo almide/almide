@@ -46,7 +46,7 @@ use wasmparser::{Parser, Payload};
 /// path audits an artifact's emitted op set against this before shipping
 /// (an unserved op = a runtime refusal on a runtime the developer never
 /// ran — the env.set lesson): extend the shim and this list TOGETHER.
-pub const P1_SERVED_OPS: &[i32] = &[26, 29, 30, 32, 34, 35, 36, 37];
+pub const P1_SERVED_OPS: &[i32] = &[26, 29, 30, 32, 34, 35, 36, 37, 60];
 
 pub const UNSUPPORTED_MSG: &[u8] = b"Error: host op unsupported in the WASI build\n";
 /// The env.set overlay log's own refusal. It used to borrow the line above,
