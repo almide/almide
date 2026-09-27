@@ -773,10 +773,11 @@
 20481	spec/wasm_cross/value_deep_eq.almd
 5797	spec/wasm_cross/value_domain_arith.almd
 3223	spec/wasm_cross/value_eq.almd
-27032	spec/wasm_cross/value_keys_non_object.almd
-6880	spec/wasm_cross/value_merge.almd
+27296	spec/wasm_cross/value_keys_non_object.almd
+7144	spec/wasm_cross/value_merge.almd
+7711	spec/wasm_cross/value_merge_duplicate_keys.almd
 3995	spec/wasm_cross/value_object_leak_loop.almd
-11303	spec/wasm_cross/value_object_ops_share.almd
+11567	spec/wasm_cross/value_object_ops_share.almd
 7781	spec/wasm_cross/value_repr.almd
 5361	spec/wasm_cross/variant_pair_result_return.almd
 1878	spec/wasm_cross/variant_record_literal_equality.almd

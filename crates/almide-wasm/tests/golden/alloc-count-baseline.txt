@@ -775,6 +775,7 @@
 40	28	492	40	spec/wasm_cross/value_eq.almd
 170	110	2127	166	spec/wasm_cross/value_keys_non_object.almd
 30	6	387	30	spec/wasm_cross/value_merge.almd
+60	32	746	60	spec/wasm_cross/value_merge_duplicate_keys.almd
 55000	54978	700000	55000	spec/wasm_cross/value_object_leak_loop.almd
 141	80	1597	138	spec/wasm_cross/value_object_ops_share.almd
 38	0	565	14	spec/wasm_cross/value_repr.almd
