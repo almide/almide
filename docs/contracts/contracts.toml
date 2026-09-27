@@ -1859,6 +1859,7 @@ evidence  = [
   { path = "spec/wasm_cross/assert_abort_ne.almd", class = "fixture" },
   { path = "spec/wasm_cross/assert_abort_msg.almd", class = "fixture" },
   { path = "spec/wasm_cross/assert_abort_multiline.almd", class = "fixture" },
+  { path = "spec/wasm_cross/pure_fn_output_and_assert_abort.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-147"

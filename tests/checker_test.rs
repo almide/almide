@@ -797,3 +797,65 @@ fn a_function_where_its_result_is_expected_names_the_missing_half() {
         "expected the missing-call hint, got: {hints:?}"
     );
 }
+
+// ---- ADR-0022: output and abort builtins in a pure fn ----
+//
+// `println`, `eprintln`, `panic` and the assert family are admissible in a
+// pure `fn` (docs/specs/effect-system.md §2.1). They write or abort, never
+// read, and they do not make the caller effectful. A real read from the same
+// place stays E006. These tests pin the rule; they do not change it.
+
+#[test]
+fn pure_fn_admits_output_and_abort_builtins() {
+    has_no_errors(
+        r#"
+fn show(n: Int) -> Unit = println("n=${n}")
+fn warn(msg: String) -> Unit = eprintln(msg)
+fn die(msg: String) -> Unit = panic(msg)
+fn half(n: Int) -> Int = {
+  assert(n >= 0)
+  assert_eq(n % 2, 0)
+  assert_ne(n, 7)
+  n / 2
+}
+fn trace_all(xs: List[Int]) -> List[Int] = xs |> list.map((x) => {
+  println("${x}")
+  x
+})
+fn main() -> Unit = {
+  show(half(8))
+  warn("w")
+  let _ = trace_all([1, 2])
+}
+"#,
+    );
+}
+
+#[test]
+fn a_pure_fn_that_prints_is_called_from_an_effect_fn_without_a_bang() {
+    // The builtins return Unit / Never, never a Result: a pure fn that prints
+    // keeps a pure signature, so there is nothing to propagate.
+    has_no_errors(
+        "fn show(n: Int) -> Unit = println(\"${n}\")\neffect fn main() -> Unit = show(1)",
+    );
+    let errs = errors("fn show(n: Int) -> Unit = println(\"${n}\")!");
+    assert!(
+        errs.iter().any(|e| e.contains("requires Option or Result type but got Unit")),
+        "`println(..)!` must be E034, got: {errs:?}"
+    );
+}
+
+#[test]
+fn pure_fn_still_rejects_a_real_read_with_e006() {
+    let errs = errors("import fs\nfn load(p: String) -> String = fs.read_text(p) ?? \"\"");
+    assert!(
+        errs.iter().any(|e| e.contains("cannot call effect function 'fs.read_text'")),
+        "fs.read_text from a pure fn must stay E006, got: {errs:?}"
+    );
+    // `io.print` is a stdlib effect fn, not one of the exempt builtins.
+    let errs = errors("import io\nfn say() -> Unit = io.print(\"x\")");
+    assert!(
+        errs.iter().any(|e| e.contains("cannot call effect function 'io.print'")),
+        "io.print from a pure fn must stay E006, got: {errs:?}"
+    );
+}
