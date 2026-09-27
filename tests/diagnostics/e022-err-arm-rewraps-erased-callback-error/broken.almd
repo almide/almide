@@ -1,0 +1,21 @@
+type E: Eq, Repr = | Neg(Int)
+
+fn step(acc: Int, x: Int) -> Int!E = {
+  guard x >= 0 else err(Neg(x))
+  acc + x
+}
+
+fn b(xs: List[Int]) -> List[Int]!E = {
+  let r = xs |> list.map((x) => match x {
+    0 => 0,
+    _ => step(0, x)!,
+  })
+  match r {
+    ok(v) => ok(v),
+    err(e) => err(e),
+  }
+}
+
+test "t" {
+  assert_eq(b([1, 0]), ok([1, 0]))
+}

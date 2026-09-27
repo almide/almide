@@ -1310,7 +1310,7 @@ impl Checker {
                 if !self.unify_infer(&ra[1], &oa[1]) {
                     let erased = resolve_ty(&oa[1], &self.uf);
                     if !matches!(erased, Ty::Unknown | Ty::TypeVar(_)) {
-                        self.lambda_err_erasures.push((erased, None));
+                        self.lambda_err_erasures.push((erased, None, self.current_fn.as_ref().map(|f| f.0)));
                     }
                 }
                 true

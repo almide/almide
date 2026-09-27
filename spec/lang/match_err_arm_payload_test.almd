@@ -1,0 +1,51 @@
+// #2722: an `err(..)` match arm joins as `Never`, so its payload used to go
+// unjudged — `err(e)` with `e: String` in a `-> T!E` fn passed check and died
+// in rustc (E0308). The payload now flows into the error type the match
+// produces (tests/diagnostics/e001-err-arm-payload-mismatch). These are the
+// well-typed spellings of the same shapes.
+type E: Eq, Repr = | Missing | Bad(String) | Neg(Int)
+
+fn parse(s: String) -> Int!E = match int.parse(s) {
+  ok(n) => ok(n),
+  err(msg) => err(Bad(msg)),
+}
+
+fn checked(n: Int) -> Int!E = if n < 0 then err(Neg(n)) else ok(n)
+
+fn bump(r: Result[Int, E]) -> Int!E = match r {
+  ok(v) => ok(v + 1),
+  err(e) => err(e),
+}
+
+fn lookup(o: Int?) -> Int!E = match o {
+  some(v) => v,
+  none => err(Missing),
+}
+
+fn staged(s: String) -> Int!E = {
+  let r = match int.parse(s) {
+    ok(n) => ok(n * 2),
+    err(msg) => err(Bad(msg)),
+  }
+  bump(r)
+}
+
+test "a converted err arm carries the typed error" {
+  assert_eq(parse("7"), ok(7))
+  assert_eq(parse("x"), err(Bad("invalid digit found in string")))
+}
+
+test "an err arm re-wraps a typed error unchanged" {
+  assert_eq(bump(checked(2)), ok(3))
+  assert_eq(bump(checked(-2)), err(Neg(-2)))
+}
+
+test "an err arm in a value join returns from the fn" {
+  assert_eq(lookup(some(4)), ok(4))
+  assert_eq(lookup(none), err(Missing))
+}
+
+test "a let-bound result match keeps its payload type" {
+  assert_eq(staged("5"), ok(11))
+  assert_eq(staged("q"), err(Bad("invalid digit found in string")))
+}
