@@ -19,7 +19,8 @@
 //     first sorted, and the baseline comparison is a sorted-set difference — an unsorted tail
 //     once reported three phantom regressions.
 //
-// The corpus and the baseline are overridable (OUTPUT_PARITY_SPEC / OUTPUT_PARITY_BASELINE)
+// The corpus, the baseline and the wall ledger are overridable (OUTPUT_PARITY_SPEC /
+// OUTPUT_PARITY_BASELINE / OUTPUT_PARITY_WALLED)
 // for ONE consumer: the twin parity test (#2163) runs this and the bash over the same small
 // purpose-built corpus with the same forged baseline and demands identical bytes. The
 // defaults are the gate. That diff found, on its first run, that this half had no `--update`
@@ -46,22 +47,32 @@ effect fn run_capped(secs: Int, cmd: String, args: List[String]) -> process.Proc
   }
 }
 
-// One fixture through both pipelines. `render_program` writes WAT to stdout, so the WAT lands
-// in a per-file temp the wasmtime leg then reads — which is also why the module path has to be
-// masked out of the compared stderr (see `parity.normalize_wasm_err`).
-effect fn run_one(root: String, alm: String, rp: String, file: String, secs: Int) -> String = {
-  let wat = root + "/target/almide-gates-parity.wat"
+// One fixture through both pipelines. The wasm leg is the STRUCTURAL build forced
+// (`ALMIDE_WASM_STRUCTURAL=1 almide build --target wasm`, #2793 — it was the incumbent's
+// `render_program` before), so a structural decline is a WALL and never an incumbent module
+// standing in for it. `process.exec_status` takes no environment, so the variable rides on
+// `env(1)`. The module path is masked out of the compared stderr (`parity.normalize_wasm_err`).
+effect fn run_one(root: String, alm: String, file: String, secs: Int) -> String = {
+  let wasm = root + "/target/almide-gates-parity.wasm"
   let v0 = run_capped(secs, alm, ["run", file])!
-  let render = process.exec_status(rp, [file]) ?? process.ProcessStatus {
-    code: 1,
-    stdout: "",
-    stderr: "",
-  }
-  if render.code != 0 then {
+  let build = run_capped(
+    secs,
+    "env",
+    [
+      "ALMIDE_WASM_STRUCTURAL=1",
+      alm,
+      "build",
+      file,
+      "--target",
+      "wasm",
+      "-o",
+      wasm
+    ],
+  )!
+  if build.code != 0 then {
     if v0.code == 0 then "wall" else "v0fail"
   } else {
-    fs.write(wat, render.stdout)!
-    let v1 = run_capped(secs, "wasmtime", [wat])!
+    let v1 = run_capped(secs, "wasmtime", [wasm])!
     // The deadline fired on the wasm leg: the module never finished. HANG, never
     // runerr — the byte compare cannot see a non-termination, and a sweep with no
     // per-run limit simply stopped on it (#2567).
@@ -76,7 +87,7 @@ effect fn run_one(root: String, alm: String, rp: String, file: String, secs: Int
       v1.code,
       v0.stderr,
       v1.stderr,
-      wat,
+      wasm,
     )
   }
 }
@@ -120,18 +131,18 @@ effect fn candidates(root: String) -> Candidates = {
   Candidates { files: out, skipped: skipped }
 }
 
-effect fn classify_all(root: String, alm: String, rp: String, files: List[String]) -> List[(String, String)] = {
+effect fn classify_all(root: String, alm: String, files: List[String]) -> List[(String, String)] = {
   var out: List[(String, String)] = []
   for f in files {
     out = out + [
-      (f, run_one(root, alm, rp, f, 20)!)
+      (f, run_one(root, alm, f, 20)!)
     ]
   }
   out
 }
 
 // The solo retry: only the quiet re-run's verdict counts (see the header).
-effect fn retry_suspects(root: String, alm: String, rp: String, first: List[(String, String)]) -> List[(String, String)] = {
+effect fn retry_suspects(root: String, alm: String, first: List[(String, String)]) -> List[(String, String)] = {
   var out: List[(String, String)] = []
   for cell in first {
     let (f, v) = cell
@@ -139,7 +150,7 @@ effect fn retry_suspects(root: String, alm: String, rp: String, first: List[(Str
       out = out + [(f, v)]
     } else {
       out = out + [
-        (f, run_one(root, alm, rp, f, 60)!)
+        (f, run_one(root, alm, f, 60)!)
       ]
     }
   }
@@ -225,9 +236,67 @@ effect fn baseline_path_of(root: String) -> String = {
   if over != "" then over else root + "/proofs/output-parity-baseline.txt"
 }
 
-effect fn sweep(root: String, alm: String, rp: String, baseline_path: String, update: Bool) -> Sweep = {
+// THE WALL LEDGER (#2793) — the twin of the block in the bash and of
+// `scripts/lib/determinism-walled.sh`. The claim is every must-match baseline row plus every
+// row the ledger excuses; the structural walls inside it must be exactly the ledger's rows. A
+// wall without a row fails (coverage shrank), a row that no longer walls fails as STALE, a
+// file in both lists fails, and `max_walled` must equal the COMMITTED ledger's row count.
+fn max_walled() -> Int = 0
+
+type Ledger = { lines: List[String], ok: Bool }
+
+effect fn walled_path_of(root: String) -> String = {
+  let over = env.get("OUTPUT_PARITY_WALLED") ?? ""
+  if over != "" then over
+  else root + "/proofs/output-parity-walled-baseline.txt"
+}
+
+// `grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$'` — the data rows of a ledger.
+fn ledger_data_rows(text: String) -> List[String] = parity.lines_of(text) |> list.filter((l) => not string.starts_with(string.trim_start(l), "#")) |> list.filter((l) => string.trim(l) != "")
+
+// `sed 's/[[:space:]]*::.*$//'` — the file a row names: everything before the first `::`,
+// trailing whitespace dropped.
+fn row_name(row: String) -> String = match string.index_of(row, "::") {
+  some(i) => string.trim_end(string.slice(row, 0, i)),
+  none => row,
+}
+
+fn sorted_unique(xs: List[String]) -> List[String] = xs |> list.sort |> list.dedup
+
+effect fn wall_ledger(root: String, baseline_path: String, walls: List[String]) -> Ledger = {
+  let walled_path = walled_path_of(root)!
+  let committed = ledger_data_rows(fs.read_text(root + "/proofs/output-parity-walled-baseline.txt") ?? "") |> list.len
+  let max_line = if committed != max_walled() then [
+    "::error::output-parity: MAX_WALLED=" + int.to_string(max_walled()) + " but proofs/output-parity-walled-baseline.txt has " + int.to_string(committed) + " row(s) — move both in the same change"
+  ]
+  else []
+  let have_ledger = fs.is_file(walled_path)!
+  let rows = if have_ledger then sorted_unique(ledger_data_rows(fs.read_text(walled_path) ?? "") |> list.map(row_name))
+  else []
+  let baseline = if fs.is_file(baseline_path)! then (fs.read_lines(baseline_path) ?? []) |> list.filter((l) => string.trim(l) != "")
+  else []
+  let claim = sorted_unique(baseline + rows)
+  let got = sorted_unique(walls) |> list.filter((f) => list.contains(claim, f))
+  let helper = if not have_ledger then ["::error::output-parity: wall ledger " + walled_path + " missing"]
+  else (got |> list.filter((f) => not list.contains(rows, f)) |> list.map((f) => "::error::output-parity: " + f + " walls on the structural leg with no row in " + walled_path + " — coverage shrank; fix the decline or add the row (and raise MAX_WALLED) consciously in the same change")) + (rows |> list.filter((f) => not list.contains(got, f)) |> list.map((f) => "::error::output-parity: " + f + " has a row in " + walled_path + " but no longer walls — STALE; delete the row and lower MAX_WALLED in the same change"))
+  let helper_ok = have_ledger and list.len(helper) == 0
+  let both = sorted_unique(baseline) |> list.filter((f) => list.contains(rows, f))
+  let both_lines = if list.len(both) == 0 then []
+  else [
+    "::error::output-parity: these files are both a must-match baseline row and a wall-ledger row — a file is one or the other:"
+  ] + (both |> list.map((f) => "  = " + f))
+  let clean = list.len(max_line) == 0 and helper_ok and list.len(both) == 0
+  if clean then Ledger {
+    lines: [
+      "output-parity: wall ledger OK — " + int.to_string(list.len(got)) + " claimed file(s) wall on the structural leg, each with its row."
+    ],
+    ok: true,
+  } else Ledger { lines: max_line + helper + both_lines, ok: false }
+}
+
+effect fn sweep(root: String, alm: String, baseline_path: String, update: Bool) -> Sweep = {
   let cand = candidates(root)!
-  let cells = retry_suspects(root, alm, rp, classify_all(root, alm, rp, cand.files)!)!
+  let cells = retry_suspects(root, alm, classify_all(root, alm, cand.files)!)!
   let matches = files_of(cells, "match") |> list.sort
   let summary = "output-parity: match=" + int.to_string(count_of(cells, "match")) + " wall=" + int.to_string(count_of(cells, "wall")) + " MISMATCH=" + int.to_string(count_of(cells, "mismatch")) + " RUNERR=" + int.to_string(count_of(cells, "runerr")) + " HANG=" + int.to_string(count_of(cells, "hang")) + " XFAIL=" + int.to_string(count_of(cells, "xfail")) + " v0fail=" + int.to_string(count_of(cells, "v0fail")) + " skip=" + int.to_string(cand.skipped)
   let classes = class_report(
@@ -260,22 +329,27 @@ effect fn sweep(root: String, alm: String, rp: String, baseline_path: String, up
   // the match list, sorted, one path per line — and an EMPTY list writes an empty file, as
   // `cp` of an empty matches.txt does, not a lone newline.
   let hung = count_of(cells, "hang")
+  let ledger = wall_ledger(root, baseline_path, files_of(cells, "wall"))!
   if hung > 0 then Sweep {
     lines: [summary] + classes + [
       "::error::output-parity: " + int.to_string(hung) + " fixture(s) HUNG on the v1 leg — a hang is never a baseline verdict; fix the renderer or wall the shape (#2567)"
     ],
     matches: matches,
     ok: false,
+  } else if not ledger.ok then Sweep {
+    lines: [summary] + classes + ledger.lines,
+    matches: matches,
+    ok: false,
   } else if update then {
     let text = if list.len(matches) == 0 then "" else list.join(matches, "\n") + "\n"
     fs.write(baseline_path, text)!
     Sweep {
-      lines: [summary] + classes + ["output-parity: baseline updated -> " + baseline_path + " (" + int.to_string(list.len(matches)) + " files)"],
+      lines: [summary] + classes + ledger.lines + ["output-parity: baseline updated -> " + baseline_path + " (" + int.to_string(list.len(matches)) + " files)"],
       matches: matches,
       ok: true,
     }
   } else if not fs.is_file(baseline_path)! then Sweep {
-    lines: [summary] + classes + ["output-parity: no baseline (" + baseline_path + ") — run with --update first"],
+    lines: [summary] + classes + ledger.lines + ["output-parity: no baseline (" + baseline_path + ") — run with --update first"],
     matches: matches,
     ok: true,
   } else {
@@ -291,7 +365,7 @@ effect fn sweep(root: String, alm: String, rp: String, baseline_path: String, up
     ] + (regressions |> list.map((f) => "  - " + f))
     else ["output-parity: OK — all " + int.to_string(list.len(baseline)) + " baseline files still byte-match v0."]
     Sweep {
-      lines: [summary] + classes + gained_lines + tail,
+      lines: [summary] + classes + ledger.lines + gained_lines + tail,
       matches: matches,
       ok: list.len(regressions) == 0,
     }
@@ -345,4 +419,13 @@ test "a hang names its file under its own heading, apart from the runerr row" {
   let cells: List[(String, String)] = [("x.almd", "hang"), ("y.almd", "runerr")]
   assert_eq(class_report(cells, "hang", "h", "H"), ["H", "    h x.almd"])
   assert_eq(class_report(cells, "runerr", "r", "R"), ["R", "    r y.almd"])
+}
+
+test "a ledger row names its file the way the bash's sed does" {
+  // `grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$' | sed 's/[[:space:]]*::.*$//'`: comments
+  // and blank lines are not rows, and a row is its file up to the first `::`.
+  let text = "# header\n\n  # indented comment\nspec/a.almd :: decline :: #1\nspec/b.almd\n"
+  assert_eq(ledger_data_rows(text), ["spec/a.almd :: decline :: #1", "spec/b.almd"])
+  assert_eq(row_name("spec/a.almd :: decline :: #1"), "spec/a.almd")
+  assert_eq(row_name("spec/b.almd"), "spec/b.almd")
 }

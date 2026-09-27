@@ -1,8 +1,10 @@
 // The verdict rule of `proofs/output-parity.sh` — the v1 trust-spine output-parity gate.
 //
-// Per fixture: run it through the v0 oracle (`almide run`), render it with `render_program`,
-// run the WAT under wasmtime, and compare. The six verdicts and the ORDER of the tests are
-// the whole content — the bash gets them right and the order is load-bearing:
+// Per fixture: run it through the v0 oracle (`almide run`), build it on the structural wasm
+// leg (`ALMIDE_WASM_STRUCTURAL=1 almide build --target wasm`, #2793 — the incumbent's
+// `render_program` before), run the module under wasmtime, and compare. The six verdicts and
+// the ORDER of the tests are the whole content — the bash gets them right and the order is
+// load-bearing:
 //
 //   render fails + oracle also failed  → v0fail   (the fixture itself is broken, not v1)
 //   render fails + oracle succeeded    → wall     (v1 declines a program v0 runs — honest)
@@ -21,8 +23,6 @@
 // cross-target (C-001 / C-035). Comparing stdout alone put every one of them in `v0fail`,
 // which is the "the fixture is broken" bucket — so the trap contracts were being counted as
 // broken fixtures rather than checked (flight-evidence-gaps item 6).
-import process
-
 type Outcome = { verdict: String, stdout: String }
 
 // `run_one`'s decision, given what the three commands did. Pure on purpose: the verdict rule
@@ -133,14 +133,6 @@ fn scan_class(s: String, p: Int, cls: String) -> Int = if p < string.len(s) and 
   string.slice(s, p, p + 1),
 ) then scan_class(s, p + 1, cls)
 else p
-
-effect fn exit_ok(cmd: String, args: List[String]) -> Bool = {
-  let st = process.exec_status(cmd, args)
-  match st {
-    ok(s) => s.code == 0,
-    err(_) => false,
-  }
-}
 
 test "render failure with a working oracle is a wall, not a v0 failure" {
   assert_eq(verdict_of(true, false, false, "", ""), "wall")

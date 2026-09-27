@@ -43,11 +43,12 @@
 //!   network nor changes as nights are added.
 //! * `output-parity/spec/` — nine purpose-built fixtures, one per verdict row
 //!   the gate can produce without a miscompile: match, the trap-row match,
-//!   the #1123 warning-block match, the unbracketed-warning XFAIL, a wall, a
-//!   v0fail, and the two skip shapes. MISMATCH and RUNERR need a real v1 bug
-//!   to exist and are covered by the pure verdict-rule tests in
-//!   `tools/almide-gates/src/parity.almd`, not here. The corpus and baseline
-//!   are selected through `OUTPUT_PARITY_SPEC` / `OUTPUT_PARITY_BASELINE`,
+//!   the #1123 warning-block match, the unbracketed-warning XFAIL, a
+//!   structural wall, a v0fail, and the two skip shapes. MISMATCH and RUNERR
+//!   need a real wasm-leg bug to exist and are covered by the pure verdict-rule
+//!   tests in `tools/almide-gates/src/parity.almd`, not here. The corpus, the
+//!   baseline and the wall ledger (#2793) are selected through
+//!   `OUTPUT_PARITY_SPEC` / `OUTPUT_PARITY_BASELINE` / `OUTPUT_PARITY_WALLED`,
 //!   which both sides honour; the defaults are the gate.
 //!
 //! The invocations, for the reader (and for the ledger's `wired_by` check):
@@ -59,8 +60,8 @@
 //! almide run tools/almide-gates/src/main.almd -- stamp .
 //! PATH=tests/gate-twin-parity/fuzz-track-record:$PATH bash scripts/fuzz-track-record.sh 8
 //! PATH=tests/gate-twin-parity/fuzz-track-record:$PATH almide run tools/almide-gates/src/main.almd -- fuzz-track-record . 8
-//! OUTPUT_PARITY_SPEC=… OUTPUT_PARITY_BASELINE=… bash proofs/output-parity.sh [--update]
-//! OUTPUT_PARITY_SPEC=… OUTPUT_PARITY_BASELINE=… almide run tools/almide-gates/src/main.almd -- output-parity . <oracle> <render_program> [--update]
+//! OUTPUT_PARITY_SPEC=… OUTPUT_PARITY_BASELINE=… OUTPUT_PARITY_WALLED=… bash proofs/output-parity.sh [--update]
+//! OUTPUT_PARITY_SPEC=… OUTPUT_PARITY_BASELINE=… OUTPUT_PARITY_WALLED=… almide run tools/almide-gates/src/main.almd -- output-parity . <oracle> [--update]
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -286,32 +287,6 @@ fn oracle() -> String {
         .unwrap_or_else(|| almide().to_string())
 }
 
-/// The v1 render leg. `ALMIDE_RENDER` when the caller built one (the WAT prelude
-/// audit's spelling); else built once here — the bash builds it too, and that
-/// second build is a no-op after this one.
-fn render_program() -> PathBuf {
-    if let Some(p) = std::env::var_os("ALMIDE_RENDER")
-        .map(PathBuf::from)
-        .filter(|p| p.is_file())
-    {
-        return p;
-    }
-    let st = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
-        .args([
-            "build",
-            "-q",
-            "-p",
-            "almide-mir",
-            "--example",
-            "render_program",
-        ])
-        .current_dir(repo_root())
-        .status()
-        .expect("spawn cargo");
-    assert!(st.success(), "cargo build --example render_program failed");
-    repo_root().join("target/debug/examples/render_program")
-}
-
 fn scratch(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("almide-gate-twin-{}-{name}", std::process::id()))
 }
@@ -325,8 +300,15 @@ fn scratch(name: &str) -> PathBuf {
 ///    phantom as a REGRESSION, the omitted pair as NEW matches, the unbracketed
 ///    warning fixture under XFAIL, and exit 1 — the gate's negative, and the
 ///    offenders are named on both sides.
-/// 2. `--update` into a scratch baseline: the ratchet's write, compared as the
+/// 2. A FORGED wall ledger (#2793): the baseline claims the structural-wall
+///    fixture with no ledger row, the ledger carries a row for a file that
+///    matches, and that file is also a baseline row. The original must name
+///    all three offences and exit 1 before any baseline comparison.
+/// 3. `--update` into a scratch baseline: the ratchet's write, compared as the
 ///    bytes written and the message printed.
+///
+/// The wasm leg is the STRUCTURAL build of the oracle binary on both sides
+/// (#2793), so there is no second binary to hand either of them.
 ///
 /// Tool-gated the way the wasm suites are (#983): without `wasmtime` the two
 /// SKIP branches are compared and that is all; with `ALMIDE_EXPECT_TOOLS=1` the
@@ -335,9 +317,15 @@ fn scratch(name: &str) -> PathBuf {
 fn the_output_parity_twin_answers_what_the_shell_gate_answers() {
     let corpus = "tests/gate-twin-parity/output-parity/spec";
     let oracle = oracle();
-    let render = render_program();
-    let render = render.to_str().expect("path").to_string();
     let have_tools = on_path("wasmtime");
+    let ledger = scratch("walled-ledger.txt");
+    std::fs::write(
+        &ledger,
+        format!(
+            "# forged\n{corpus}/walled_string_clear_field.almd :: string-clear-nonvar :: #2747\n"
+        ),
+    )
+    .expect("write forged wall ledger");
 
     let forged = scratch("forged-baseline.txt");
     std::fs::write(
@@ -347,7 +335,7 @@ fn the_output_parity_twin_answers_what_the_shell_gate_answers() {
         ),
     )
     .expect("write forged baseline");
-    let env_for = |baseline: &Path| {
+    let env_with = |baseline: &Path, walled: &Path| {
         vec![
             ("ALMIDE_BIN", oracle.clone()),
             ("OUTPUT_PARITY_SPEC", corpus.to_string()),
@@ -355,8 +343,13 @@ fn the_output_parity_twin_answers_what_the_shell_gate_answers() {
                 "OUTPUT_PARITY_BASELINE",
                 baseline.to_string_lossy().into_owned(),
             ),
+            (
+                "OUTPUT_PARITY_WALLED",
+                walled.to_string_lossy().into_owned(),
+            ),
         ]
     };
+    let env_for = |baseline: &Path| env_with(baseline, &ledger);
 
     let env = env_for(&forged);
     let original = run_env("bash", &["proofs/output-parity.sh"], &env);
@@ -364,6 +357,7 @@ fn the_output_parity_twin_answers_what_the_shell_gate_answers() {
         for needle in [
             "output-parity: match=",
             " XFAIL=1 ",
+            "output-parity: wall ledger OK — 1 claimed file(s) wall on the structural leg",
             "    x tests/gate-twin-parity/output-parity/spec/trap_with_plain_warning.almd",
             "output-parity: NEW matches not yet in baseline",
             "  + tests/gate-twin-parity/output-parity/spec/trap_with_bracket_warning.almd",
@@ -396,13 +390,60 @@ fn the_output_parity_twin_answers_what_the_shell_gate_answers() {
     assert_same(
         "output-parity (forged baseline)",
         mask_dirty_count(original),
-        mask_dirty_count(twin_env(&["output-parity", ".", &oracle, &render], &env)),
+        mask_dirty_count(twin_env(&["output-parity", ".", &oracle], &env)),
     );
     let _ = std::fs::remove_file(&forged);
 
     if !have_tools {
+        let _ = std::fs::remove_file(&ledger);
         return;
     }
+
+    // 2. The forged LEDGER: every offence the equality pin exists for.
+    let bad_base = scratch("ledger-forged-baseline.txt");
+    let bad_ledger = scratch("ledger-forged-walled.txt");
+    std::fs::write(
+        &bad_base,
+        format!("{corpus}/hello_match.almd\n{corpus}/walled_string_clear_field.almd\n"),
+    )
+    .expect("write ledger-forged baseline");
+    std::fs::write(
+        &bad_ledger,
+        format!("{corpus}/hello_match.almd :: phantom :: #0\n"),
+    )
+    .expect("write ledger-forged wall ledger");
+    let env = env_with(&bad_base, &bad_ledger);
+    let original = run_env("bash", &["proofs/output-parity.sh"], &env);
+    for needle in [
+        "walled_string_clear_field.almd walls on the structural leg with no row in",
+        "hello_match.almd has a row in",
+        "but no longer walls — STALE",
+        "both a must-match baseline row and a wall-ledger row",
+    ] {
+        assert!(
+            original.text.contains(needle),
+            "output-parity: the forged ledger no longer produces {needle:?}\n{}",
+            original.text
+        );
+    }
+    assert!(
+        !original.text.contains("output-parity: REGRESSION"),
+        "a ledger failure must stop the gate before the baseline comparison\n{}",
+        original.text
+    );
+    assert_eq!(
+        original.code,
+        Some(1),
+        "the forged ledger must fail the gate\n{}",
+        original.text
+    );
+    assert_same(
+        "output-parity (forged ledger)",
+        mask_dirty_count(original),
+        mask_dirty_count(twin_env(&["output-parity", ".", &oracle], &env)),
+    );
+    let _ = std::fs::remove_file(&bad_base);
+    let _ = std::fs::remove_file(&bad_ledger);
     let base_a = scratch("update-original.txt");
     let base_b = scratch("update-port.txt");
     let original = run_env(
@@ -418,7 +459,7 @@ fn the_output_parity_twin_answers_what_the_shell_gate_answers() {
         original.text
     );
     let port = twin_env(
-        &["output-parity", ".", &oracle, &render, "--update"],
+        &["output-parity", ".", &oracle, "--update"],
         &env_for(&base_b),
     );
     let (wrote_a, wrote_b) = (
@@ -427,6 +468,7 @@ fn the_output_parity_twin_answers_what_the_shell_gate_answers() {
     );
     let _ = std::fs::remove_file(&base_a);
     let _ = std::fs::remove_file(&base_b);
+    let _ = std::fs::remove_file(&ledger);
     // The message names the path it wrote, and the two paths differ by design;
     // compare the message with the path masked, and the written bytes as-is.
     let mask = |a: &Answer, p: &Path| {
