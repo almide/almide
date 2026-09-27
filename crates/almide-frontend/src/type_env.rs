@@ -116,6 +116,10 @@ pub struct TypeEnv {
     /// Whether the innermost lambda's channel was actually used — the
     /// usage-driven fallibility bit (L2).
     pub lambda_prop_used: bool,
+    /// Whether the INNERMOST lambda is checked against an `effect (…) -> …`
+    /// slot (#1055) — an effect-fn body, where `!` on a never-err effect
+    /// call is the same no-op it is in an effect fn body (#2704).
+    pub in_effect_slot_lambda: bool,
     /// Whether auto-unwrapping of Result is enabled (effect fn bodies)
     pub auto_unwrap: bool,
     /// Whether effect functions may be called from this context
@@ -277,6 +281,7 @@ impl TypeEnv {
             current_ret: None,
             lambda_ret: None,
             lambda_prop_used: false,
+            in_effect_slot_lambda: false,
             auto_unwrap: false,
             can_call_effect: false,
             metered_region: None,
