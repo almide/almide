@@ -1,8 +1,8 @@
 diff --git a/crates/almide-wasm/src/value_helpers.rs b/crates/almide-wasm/src/value_helpers.rs
-index 6b2a0efaf..d666b6d78 100644
+index 6952322aa..9c6b51d79 100644
 --- a/crates/almide-wasm/src/value_helpers.rs
 +++ b/crates/almide-wasm/src/value_helpers.rs
-@@ -448,6 +448,7 @@ pub(crate) fn emit_string_split_helper() -> Function {
+@@ -442,6 +442,7 @@ pub(crate) fn emit_string_split_helper() -> Function {
      i.end();
      i.end();
      // final piece [start, slen)
