@@ -1,0 +1,118 @@
+name: Native-deps musl builds (weekly)
+
+# #2777: `almide build --target x86_64-unknown-linux-musl` with a
+# `[native-deps]` crate, in the shapes porta and comide release with
+# (scripts/check-native-musl.sh, fixtures under tests/native_musl/).
+#
+# - tls: reqwest over rustls/ring. Per PR it runs in ci.yml's gates job from a
+#   cached target/; here it runs COLD under --selftest, which also proves the
+#   gate refuses a build without a musl C compiler, a dynamic (glibc) binary
+#   and a forged expected line.
+# - wasmtime: porta's embedded host (wasmtime + wasmtime-wasi p3). Minutes of
+#   build on musl, so it lives here and never in the per-PR run.
+#
+# A red here is delivered to ONE open `A-ci` issue (opened on the first red
+# week, commented on each following one, closed by the next green run) — a
+# scheduled red that only turns a job summary red is read by nobody (#2391).
+# Pull requests that touch this gate run it too, without the issue routing.
+
+on:
+  schedule:
+    # 05:20 UTC Saturday — clear of the Sunday domain-edges and the Monday
+    # shard-balance / ledger windows.
+    - cron: "20 5 * * 6"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/native-musl.yml
+      - scripts/check-native-musl.sh
+      - tests/native_musl/**
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.94.0"  # runner-class MSRV, as domain-edges.yml
+  MUSL_TARGET: x86_64-unknown-linux-musl
+
+permissions:
+  contents: read
+
+jobs:
+  musl:
+    name: ${{ matrix.fixture }} for x86_64-unknown-linux-musl
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - fixture: tls
+            mode: --selftest
+          - fixture: wasmtime
+            mode: ""
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: ${{ env.MUSL_TARGET }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+
+      - name: Build the compiler (release)
+        run: cargo build --release
+
+      - name: Install musl-tools (musl-gcc for C in the crates)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+
+      - name: Build tests/native_musl/${{ matrix.fixture }} for musl and run it ${{ matrix.mode }}
+        env:
+          ALMIDE_BIN: target/release/almide
+          NATIVE_MUSL_TARGET: ${{ env.MUSL_TARGET }}
+        run: |
+          start=$(date +%s)
+          bash scripts/check-native-musl.sh ${{ matrix.mode }} tests/native_musl/${{ matrix.fixture }} | tee /tmp/verdict.txt
+          rc=${PIPESTATUS[0]}
+          { echo "### native-musl ${{ matrix.fixture }} ${{ matrix.mode }}"; echo '```'; cat /tmp/verdict.txt; echo "wall: $(( $(date +%s) - start ))s"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+
+  report:
+    name: Deliver the verdict to the A-ci issue
+    needs: musl
+    if: ${{ !cancelled() && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      ISSUE_TITLE: "native-musl: a [native-deps] program no longer builds as a static musl binary"
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open, comment or close
+        run: |
+          set -euo pipefail
+          existing=$(gh issue list --label A-ci --state open --search "\"$ISSUE_TITLE\" in:title" --json number,title \
+            --jq "map(select(.title == \"$ISSUE_TITLE\")) | .[0].number // empty" || echo "")
+          if [ "${{ needs.musl.result }}" = "success" ]; then
+            if [ -n "$existing" ]; then
+              gh issue close "$existing" --comment "native-musl is green again at \`${GITHUB_SHA::9}\` ($RUN_URL)."
+            fi
+            exit 0
+          fi
+          {
+            echo "native-musl.yml was **${{ needs.musl.result }}** at \`${GITHUB_SHA::9}\` ($GITHUB_EVENT_NAME): $RUN_URL"
+            echo
+            echo "A \`[native-deps]\` fixture under \`tests/native_musl/\` did not build, was not static, or did not print its expected line for \`$MUSL_TARGET\` — or the gate's --selftest stopped refusing a forged run. The job summary names which."
+            echo
+            echo "Reproduce on Linux x86_64 with musl-tools and \`rustup target add $MUSL_TARGET\`: \`ALMIDE_BIN=target/release/almide bash scripts/check-native-musl.sh tests/native_musl/<fixture>\`."
+          } > /tmp/body.md
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file /tmp/body.md
+          else
+            gh label create A-ci --color C2E0C6 --description ".github/workflows, scripts/*.sh gates, ledgers and ratchets" 2>/dev/null || true
+            gh issue create --title "$ISSUE_TITLE" --body-file /tmp/body.md --label A-ci
+          fi
