@@ -55,6 +55,10 @@ effect fn app() -> HttpHandler = http.router([
   http.route("GET /boom", boom)
 ])!
 
+// ADR-0020 pillar 3: the app is a top-level VALUE. `http.serve(port, site!)`
+// is the host shell; a test is a plain call on the same value (#2696).
+let site = http.router([http.route("GET /users/{id}", get_user), http.route("POST /users", create_user)])
+
 fn req(method: String, target: String) -> HttpRequest = http.new_request(method, target, "", [:])
 
 fn show(res: HttpResponse) -> String = "${http.status_code(res)} ${http.body(res)}"
@@ -115,6 +119,15 @@ test "a request built in code answers every reader" {
   assert_eq(map.get(http.query_params(r), "k"), some("w"))
   assert_eq(map.get(http.query_params(r), "e"), some(" x"))
   assert_eq(http.param(r, "id"), none)
+}
+
+test "an app bound at the top level is tested by calling it" {
+  let h = site!
+  let res = h(http.new_request("GET", "/users/42", "", [:]))!
+  assert_eq(show(res), "200 user 42")
+  let made = h(http.new_request("POST", "/users", "{\"name\":\"ann\",\"age\":3}", [:]))!
+  assert_eq(show(made), "201 ann:3")
+  assert_eq(show(h(req("GET", "/nope"))!), "404 Not Found")
 }
 
 test "a {name} segment binds its percent-decoded value, a plus stays a plus" {
