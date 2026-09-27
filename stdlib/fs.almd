@@ -77,11 +77,15 @@ effect fn for_each_line(path: String, f: (String) -> Unit) -> Result[Unit, Strin
 // `fs.fold_lines`/`fs.for_each_line` to these when the callback is fallible
 // (`infer_calls_closures.rs::normalize_fallible_hof_callback`), exactly as
 // `list.map` becomes `list.__fallible_map`; naming one in source is E043.
+// The error is `String`, not generic: the walk's own read error (a missing
+// file) shares the callback's channel, and a read error has no value of a
+// user error type — so a callback here is checked against a `String` channel
+// (ADR-0021 D1-1) and a typed `!` in it erases to its Debug text.
 @intrinsic("almide_rt_fs_fold_lines_effect")
-effect fn __fallible_fold_lines[A, E](path: String, init: A, f: (A, String) -> Result[A, E]) -> Result[A, E] = _
+effect fn __fallible_fold_lines[A](path: String, init: A, f: (A, String) -> Result[A, String]) -> Result[A, String] = _
 
 @intrinsic("almide_rt_fs_for_each_line_effect")
-effect fn __fallible_for_each_line[E](path: String, f: (String) -> Result[Unit, E]) -> Result[Unit, E] = _
+effect fn __fallible_for_each_line(path: String, f: (String) -> Result[Unit, String]) -> Result[Unit, String] = _
 
 // The chunk worker's walker: fold exactly the lines owned by the byte range
 // [start, end) — a line belongs to the chunk containing the byte before its

@@ -174,3 +174,36 @@ fn an_unchanged_rewrap_never_passes_check_and_fails_the_build() {
         }
     }
 }
+
+/// ADR-0021: the fs streaming walkers' fallible carriers share one channel
+/// with the walk's own read error, which is a `String` — a typed callback
+/// there erases, and propagating it into a typed-error fn must be a check
+/// error, not the rustc E0277 an `E`-generic declaration led to.
+#[test]
+fn an_fs_walker_callback_channel_is_string() {
+    if !tools_available() {
+        eprintln!("skip: almide binary or cargo unavailable");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("almide-2723-fs-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    let data = dir.join("lines.txt");
+    std::fs::write(&data, "1\n-2\n").expect("write data");
+    let body = |ret: &str, err: &str| format!(
+        "import fs
+{PRELUDE}
+effect fn tot(p: String) -> Int!{ret} = fs.fold_lines(p, 0, (a, l) => {{
+  let v = step(a, int.parse(l) ?? 0)!
+  v
+}})!
+
+effect fn main() -> Unit = {{
+  let r: Result[Int, {err}] = tot(\"{}\")
+  println(\"${{r}}\")
+}}
+",
+        data.display()
+    );
+    assert_eq!(check_then_run("fs-typed", &body("E", "E")), None, "a typed-error fn cannot take the walker's String channel");
+    assert_eq!(check_then_run("fs-string", &body("", "String")).as_deref(), Some("err(\"Neg(-2)\")"));
+}
