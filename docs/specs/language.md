@@ -733,7 +733,7 @@ test "list patterns under a tuple" {
 Dropping the `(_, [])` arm is E010, naming the uncovered `([_], [])`.
 
 テスト: `spec/lang/pattern_test.almd`, `spec/lang/match_edge_test.almd`,
-`spec/lang/list_pattern_in_tuple_test.almd`, `tests/diagnostics/e010-list-*`,
+`tests/diagnostics/e010-list-*`,
 `tests/list_pattern_tuple_test.rs`
 
 ### 5.10 Lambda
