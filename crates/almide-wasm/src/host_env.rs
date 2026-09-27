@@ -189,6 +189,19 @@ impl Emitter<'_> {
                 self.release_i64();
                 Some(Lowered::scalar(INT))
             }
+            // The wall-clock trio (#2703): op 34 answers RAW epoch nanos
+            // (no status packing; a pre-epoch host clock reads 0, native's
+            // `unwrap_or_default`), truncated to the unit native's
+            // `as_secs` / `as_millis` truncate to. A bare Int, like
+            // io.read_byte: never-err, so the frontend absorbs a `!`.
+            ("env", "unix_timestamp", []) | ("datetime", "now", []) => {
+                self.wall_now_div(1_000_000_000);
+                Some(Lowered::scalar(INT))
+            }
+            ("env", "millis", []) => {
+                self.wall_now_div(1_000_000);
+                Some(Lowered::scalar(INT))
+            }
             ("io", "read_line", []) => {
                 self.io_read_line()?;
                 Some(Lowered::owned(STR))
@@ -371,6 +384,17 @@ impl Emitter<'_> {
             _ => return Ok(None),
         };
         Ok(Some(out))
+    }
+
+    /// Op 34 (the wall clock, raw epoch nanos) divided down to `per_unit`
+    /// nanos — an i64 on the stack.
+    fn wall_now_div(&mut self, per_unit: i64) {
+        self.note_host_op(crate::fs_meta::OP_WALL_NOW);
+        let mut i = self.f.instructions();
+        i.i32_const(crate::fs_meta::OP_WALL_NOW);
+        i.i32_const(0).i32_const(0).i32_const(0).i32_const(0);
+        i.call(F_FS_CALL);
+        i.i64_const(per_unit).i64_div_s();
     }
 
     /// Bytes handle on the stack → op 30 (raw stdout append).
