@@ -63,13 +63,30 @@ impl Checker {
         if self.env.ctor_owned_by(&key, self.current_module_prefix.as_deref()) {
             return false;
         }
-        if self.env.ctor_candidate_count(&key) > 1 {
-            let types = self.env.ctor_candidate_types(&key).iter()
-                .map(|t| t.as_str().to_string())
+        // A type this file declares under the name is the name's meaning here,
+        // whatever the imports declare (#2636).
+        if self.env.import_table.declared_types.contains(&key) {
+            return false;
+        }
+        // Only the candidates this file can see compete: a case of a module
+        // it never imports is not a second meaning of the name (#2636).
+        let visible = self.env.visible_ctor_candidates(&key, self.current_module_prefix.as_deref());
+        if visible.len() > 1 {
+            let types = visible.iter()
+                .map(|(t, _)| t.as_str().to_string())
                 .collect::<Vec<_>>().join(" and ");
+            // Every candidate imported from a module: the qualified spelling
+            // `mod.Ctor` already names exactly one of them (#1426).
+            let qualified: Option<Vec<String>> = visible.iter()
+                .map(|(_, owner)| owner.map(|o| format!("`{}.{}`", self.env.import_table.written_name_of(o).as_str(), name)))
+                .collect();
+            let hint = match qualified {
+                Some(q) => format!("Write it qualified with its module: {}", q.join(" or ")),
+                None => format!("Rename the constructor in one of them so its name is unique (a qualified `Type.{}` is not yet supported)", name),
+            };
             self.emit(super::err(
                 format!("ambiguous constructor '{}': declared in {}", name, types),
-                format!("Rename the constructor in one of them so its name is unique (a qualified `Type.{}` is not yet supported)", name),
+                hint,
                 format!("constructor {}", name),
             ).with_code("E019"));
             true

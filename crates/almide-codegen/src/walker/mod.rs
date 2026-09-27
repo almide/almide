@@ -50,6 +50,18 @@ pub(crate) fn is_rust_keyword(name: &str) -> bool {
     )
 }
 
+/// Is a record literal (or destructure) whose bare name is `name` and whose
+/// type is `ty` a literal of the STRUCT the program declares under that
+/// name, rather than a variant case of the same spelling? `ctor_to_enum` is
+/// keyed by the bare case name program-wide, so an entry program's own
+/// `type Stop = { .. }` shares its key with a dependency's `| Stop` (#2636).
+/// It is the struct when the program declares one under that name and the
+/// value's type does not name an enum (a case's value has its enum's type).
+pub(crate) fn literal_is_declared_struct(ctx: &RenderContext, name: &str, ty: &Ty) -> bool {
+    ctx.ann.record_field_counts.contains_key(name)
+        && !matches!(ty, Ty::Named(n, _) if ctx.ann.ctor_to_enum.values().any(|e| e.as_str() == n.as_str()))
+}
+
 /// Prefix that renames the four keywords rustc refuses to raw-escape.
 const UNRAWABLE_KEYWORD_PREFIX: &str = "almide_kw_";
 

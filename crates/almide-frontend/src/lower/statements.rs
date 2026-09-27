@@ -436,11 +436,11 @@ fn coerce_record_fields(ir_val: &mut IrExpr, decl_fields: &[(almide_base::intern
 ///     `env.constructors`, whose `VariantPayload::Record` carries the fields.
 /// Returns `None` for anonymous records, tuple/unit cases, or unknown names
 /// (nothing to coerce against).
-pub(crate) fn declared_record_ty(env: &TypeEnv, name: almide_base::intern::Sym) -> Option<Ty> {
-    // Variant case with a record payload takes priority: a case name and a
-    // type name never collide (constructors are registered separately), but
-    // checking constructors first matches the checker's resolution order.
-    if let Some((_, case)) = env.lookup_ctor(&name) {
+pub(crate) fn declared_record_ty(env: &TypeEnv, name: almide_base::intern::Sym, cur_mod: Option<&str>) -> Option<Ty> {
+    // Variant case with a record payload takes priority, resolved the way the
+    // checker resolves it (`lookup_ctor_in`): only a case visible from this
+    // file, and never over the file's own same-named type (#2636).
+    if let Some((_, case)) = env.lookup_ctor_in(&name, cur_mod) {
         if let crate::types::VariantPayload::Record(fields) = &case.payload {
             return Some(Ty::Record { fields: fields.clone() });
         }
@@ -514,7 +514,7 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             IrPattern::Constructor { name: ctor_pattern_name(ctx, &bare_name, ty), args: ir_args }
         }
         ast::Pattern::RecordPattern { name, fields, rest } =>
-            lower_pattern_record(ctx, name, fields, *rest),
+            lower_pattern_record(ctx, name, fields, *rest, ty),
         ast::Pattern::Tuple { elements } => {
             let elem_tys = match ty {
                 Ty::Tuple(tys) => tys.clone(),
@@ -608,10 +608,27 @@ fn lower_pattern_record(
     name: &almide_base::intern::Sym,
     fields: &[ast::FieldPattern],
     rest: bool,
+    subject_ty: &Ty,
 ) -> IrPattern {
     let pat_name = struct_pattern_name(ctx, name);
+    // An anonymous destructure (`let { a, b } = r`) names no type: its fields
+    // are the SUBJECT's. Resolving them by the empty name left every binder
+    // `Unknown`, for a later pass to guess by name — which, with a module's
+    // same-spelled case in the program, guessed the case (#2636).
+    let field_ty_of = |ctx: &LowerCtx, field: &str| -> Ty {
+        match resolve_record_field_ty(ctx, &pat_name, field) {
+            Ty::Unknown if name.as_str().is_empty() => match ctx.env.resolve_named(subject_ty) {
+                Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter()
+                    .find(|(n, _)| n.as_str() == field)
+                    .map(|(_, t)| t.clone())
+                    .unwrap_or(Ty::Unknown),
+                _ => Ty::Unknown,
+            },
+            t => t,
+        }
+    };
     let mut ir_fields: Vec<IrFieldPattern> = fields.iter().map(|f| {
-        let field_ty = resolve_record_field_ty(ctx, &pat_name, &f.name);
+        let field_ty = field_ty_of(ctx, &f.name);
         IrFieldPattern {
             name: f.name.to_string(),
             pattern: f.pattern.as_ref().map(|p| lower_pattern(ctx, p, &field_ty)),
@@ -619,7 +636,7 @@ fn lower_pattern_record(
     }).collect();
     for (i, f) in fields.iter().enumerate() {
         if f.pattern.is_none() {
-            let field_ty = resolve_record_field_ty(ctx, &pat_name, &f.name);
+            let field_ty = field_ty_of(ctx, &f.name);
             let var = ctx.define_var(&f.name, field_ty.clone(), Mutability::Let, None);
             ir_fields[i].pattern = Some(IrPattern::Bind { var, ty: field_ty });
         }

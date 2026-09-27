@@ -1,0 +1,13 @@
+// #2636: a file that DOES import the module declaring `| Stop` and also
+// declares its own `type Stop` means its own type by the bare name; the
+// module's case stays reachable qualified, `leakfin.Stop`.
+import leakfin
+
+type Stop = { message: String }
+
+test "the file's own type wins over an imported case of the same name" {
+  let s = Stop { message: "halt" }
+  assert_eq(s.message, "halt")
+  assert_eq(leakfin.name(leakfin.Stop), "stop")
+  assert_eq(leakfin.name(leakfin.Length), "length")
+}

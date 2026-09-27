@@ -1,6 +1,6 @@
 # Module System Specification
 
-> Last updated: 2026-09-20. Verified by `spec/integration/modules/` (25 tests + 4 error tests), `spec/wasm_cross/stdlib_type_shadow.almd` and `tests/module_shadow_member_test.rs`.
+> Last updated: 2026-09-27. Verified by `spec/integration/modules/` (25 tests + 4 error tests), `spec/wasm_cross/stdlib_type_shadow.almd` and `tests/module_shadow_member_test.rs`.
 
 ---
 
@@ -284,6 +284,39 @@ fn main() -> Unit = {
 | 覆っていないモジュール呼び出し | 影響なし |
 
 テスト: `tests/module_shadow_member_test.rs`(8 セル)
+
+### 4.4 variant ケース名の見え方 (#2636)
+
+**裸のケース名が見えるのは、そのファイル自身・直接 import したモジュール・同梱 stdlib
+のケースだけ。推移的依存のケースは見えない。** ファイル自身が同じ名前の型を宣言して
+いれば、裸の名前は**常にその型**を指す。
+
+```almide
+// file: finish/mod.almd
+type Finish = | Stop | Length
+// file: middle/mod.almd
+import finish
+fn describe() -> String = finish.name(finish.Stop)
+// file: main.almd
+import middle            // finish は import していない
+type Stop = { message: String }
+
+let s = Stop { message: "halt" }   // ✓ main 自身の Stop(レコード)
+```
+
+| 形 | 結果 |
+|---|---|
+| 推移的依存(import していないモジュール)のケースと同名 | 見えない。自分の型・自分の import 先だけで解決する |
+| 直接 import したモジュールのケースと、自分で宣言した型が同名 | **自分の型が勝つ**。import 先のケースは修飾して `finish.Stop` と書く |
+| 直接 import した 2 つのモジュールが同じケース名を宣言 | 裸の名前は **E019**(曖昧)。hint が `a.Stop` / `b.Stop` の修飾形を示す |
+| 直接 import した 1 つのモジュールだけが宣言 | 裸でも修飾でも書ける(従来どおり) |
+
+以前はケース名がプログラム全体で 1 つの表に載っていたため、依存ライブラリが `Stop`
+のようなありふれたケース名を足すだけで、それを import していない利用側のレコード型
+`Stop { .. }` が E021 になった。
+
+テスト: `spec/integration/modules/case_leak_transitive_test.almd`,
+`spec/integration/modules/case_leak_direct_test.almd`, `tests/ctor_ambiguity_test.rs`
 
 ---
 
