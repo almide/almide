@@ -1,0 +1,82 @@
+[
+ [
+  "t01_rle",
+  "decode inverts encode",
+  "human"
+ ],
+ [
+  "t01_rle",
+  "every count is a single digit",
+  "human"
+ ],
+ [
+  "t02_paginate",
+  "pages 1..page_count rebuild the list",
+  "human"
+ ],
+ [
+  "t02_paginate",
+  "a page below 1 is empty",
+  "T0"
+ ],
+ [
+  "t03_rotate",
+  "rotation keeps the length",
+  "T0"
+ ],
+ [
+  "t03_rotate",
+  "rotating back undoes a rotation",
+  "human"
+ ],
+ [
+  "t03_rotate",
+  "a full turn is the identity",
+  "T0"
+ ],
+ [
+  "t04_chunk",
+  "chunks rebuild the list",
+  "human"
+ ],
+ [
+  "t04_chunk",
+  "no chunk is empty",
+  "human"
+ ],
+ [
+  "t04_chunk",
+  "only the first chunk may be short",
+  "human"
+ ],
+ [
+  "t05_merge",
+  "result is strictly ascending",
+  "human"
+ ],
+ [
+  "t05_merge",
+  "nothing is lost",
+  "human"
+ ],
+ [
+  "t05_merge",
+  "nothing is invented",
+  "human"
+ ],
+ [
+  "t06_top_k",
+  "at most k entries",
+  "T0"
+ ],
+ [
+  "t06_top_k",
+  "ordered by count, then name",
+  "human"
+ ],
+ [
+  "t06_top_k",
+  "nothing better is left out",
+  "human"
+ ]
+]
