@@ -1,9 +1,10 @@
 # Result, Option, Effect — 完全仕様
 
-> Last updated: 2026-08-13
+> Last updated: 2026-09-27
 > 2026-08-05 の 287 セル実測 matrix(#1122)に基づき全面改訂。設計判断の出典は
 > ADR-0002〜0009。本文はすべて「動くコード」の記述であり、各節に検証テストを明記する。
 > 2026-08-13: §8.0(二層モデル)と §9(非目標)を ADR-0012 D1/D4 から本文へ昇格。
+> 2026-09-27: L3 を ADR-0021 に改訂(lambda の失敗チャネルの E)、§9 の非目標 4 を撤回。
 
 ## 1. 型
 
@@ -249,14 +250,21 @@ test "fallible lambdas (in fn bodies — test bodies keep unwrap semantics, L9)"
 }
 ```
 
-- E は String 固定(L3)・Option operand の none は err("none")(L4)・値 tail は
-  ok(...) に lift(L5)
+- チャネルの E(ε)は ADR-0021 で決まる(L3): lambda が流れ込む先の文脈
+  (型付き slot `(A) -> B!E`・型付き `let`・結果を伝搬する fn・`err(e) => err(e)`
+  などの消費)が決め、文脈が決めなければ本体の `!` operand(と guard / 値 join の
+  `err(..)`)の E の join — 全部同じ E ならその E、食い違えば String。String が top
+  (どの E も Debug 文字列で String に入る)なので join は常に答えを持つ。ε が型付き
+  E に決まったとき、E でない `!` はその位置で E022。Option operand の none は
+  err("none")(L4)・値 tail は ok(...) に lift(L5)
 - **test ブロック内は例外**: lambda の `!` は unwrap のまま、HOF dispatch も
   総形のまま(L9 — test 世界は pre-#1108 意味論を丸ごと保持)
 - 素の `(A) -> B` slot への bit 透過(user HOF)は未実装 — E005 が
   2 つの解決綴りを名指しする targeted hint を運ぶ(Phase 2b-iii)
 
-テスト: `spec/lang/fallible_lambda_test.almd`(L1〜L9 のピン)
+テスト: `spec/lang/fallible_lambda_test.almd`(L1〜L9 のピン)、
+`spec/lang/typed_error_callback_channel_test.almd`(L3 — #2601 の全綴り・型付き slot・型付き `let`)、
+`tests/diagnostics/e022-callback-bangs-disagree/`、`tests/diagnostics/e022-typed-slot-callback-string-bang/`
 
 ## 4. fn main
 
@@ -395,8 +403,8 @@ References)。ここに列挙するのは、同じ提案が周期的に戻って
    下線で補った —「IDE が throw しうる関数を自動で*下線*する」。その補償は
    **生テキストには存在しない**。生テキストは LLM と diff レビュアが持つ唯一の
    インタフェースである。
-4. **ラムダの失敗チャネルは String のまま**(ADR-0009 L3)。使用箇所から `E` を
-   推論すると Koka 級の「推論由来のエラーメッセージ」問題を輸入することになる。
+4. ~~ラムダの失敗チャネルは String のまま~~ — **ADR-0021 で撤回**(L3 を参照)。
+   文脈 → operand の join → String の 2 段順序で決め、row 変数も汎化も持たない。
 5. **`main` の `E` は String のまま**。境界での降格 `map_err` が可視化点であり、
    そこを消すと降格が見えなくなる。
 

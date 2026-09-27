@@ -1,10 +1,9 @@
 // #2601: a `!` inside a lambda propagates into the lambda's own failure
-// channel, which is always `String` (ADR-0012 D4 / ADR-0009 L3). Only the
-// canonical callback, whose WHOLE body is one `call(..)!`, keeps the call's
-// error type (ADR-0006 D1), so a typed-error fold spells its branch inside
-// the called fn. The branch-in-the-lambda spelling is E022 at check time
-// (tests/diagnostics/e022-lambda-bang-erases-typed-error); before #2660 it
-// passed check and failed in rustc with E0277.
+// channel. Before ADR-0021 that channel was always `String`, and only the
+// canonical callback (whose WHOLE body is one `call(..)!`) kept the call's
+// error type. This spelling moves the branch into the called fn and is still
+// canonical. Since ADR-0021 the branch-in-the-lambda spelling types the same
+// (spec/lang/typed_error_callback_channel_test.almd).
 type E: Eq, Repr = | Neg(Int)
 
 fn step(acc: Int, x: Int) -> Int!E = {

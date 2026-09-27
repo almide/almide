@@ -19,6 +19,10 @@ impl Checker {
                 self.report_constraint_mismatch(c);
             }
         }
+        // ADR-0021: a lambda channel nothing constrained takes the join of its
+        // `!` operands — before the slot defaults, which only fill what is
+        // still open after the program and the callbacks have spoken.
+        self.apply_lambda_channel_defaults();
         // An `ok`/`err` slot nothing constrained takes the enclosing fn's
         // declared type (#2599). Applied after every program constraint, so a
         // default can only fill a hole, never contradict what the code says.
@@ -27,6 +31,7 @@ impl Checker {
                 self.unify_infer(&slot, &declared);
             }
         }
+        self.judge_lambda_channels();
     }
 
     /// `t` with every still-open `ok`/`err` slot shown as the type its
@@ -34,10 +39,13 @@ impl Checker {
     /// applied would otherwise print the slot as `?N` where the program means
     /// the enclosing fn's declared type.
     pub(super) fn with_slot_defaults(&self, t: &Ty) -> Ty {
-        if self.result_slot_defaults.is_empty() {
+        let lambda_defaults = self.lambda_channel_defaults();
+        if self.result_slot_defaults.is_empty() && lambda_defaults.is_empty() {
             return t.clone();
         }
-        let bindings: std::collections::HashMap<_, _> = self.result_slot_defaults.iter()
+        // ADR-0021: an open lambda channel shows as the join it will take (the
+        // lambda defaults are applied first, so they win a shared variable).
+        let bindings: std::collections::HashMap<_, _> = self.result_slot_defaults.iter().chain(lambda_defaults.iter())
             .filter_map(|(slot, declared)| match resolve_ty(slot, &self.uf) {
                 Ty::TypeVar(v) if is_inference_var(&Ty::TypeVar(v)).is_some() => Some((v, declared.clone())),
                 _ => None,
@@ -125,13 +133,12 @@ impl Checker {
             format!(
                 "this `err(..)` arm passes a `String` where the match's error type is `{erased}`: the callback's `!`{at} \
                  turned its `{erased}` error into `String` — a `!` inside a lambda propagates into the lambda's own \
-                 failure channel, which is always `String`"
+                 failure channel, which is `String` here because not everything in the callback fails with `{erased}`"
             ),
             format!(
-                "Only a callback whose WHOLE body is one `call(..)!` keeps that call's error type: \
-                 `(x) => f(x)!` makes the call that takes it fail with `{erased}`. \
-                 Move the branch into the called fn so the callback is a single `call(..)!`, \
-                 or convert the `String` in this arm: `err(s) => err(SomeCase(s))`."
+                "A callback fails with `{erased}` when every `!` in it, and its `Result` result if it has one, fails \
+                 with `{erased}`. Convert the odd one inside the callback (`result.map_err((e) => SomeCase(e))` before \
+                 its `!`), or convert the `String` in this arm: `err(s) => err(SomeCase(s))`."
             ),
             c.context.clone(),
         ).with_code("E022"));
