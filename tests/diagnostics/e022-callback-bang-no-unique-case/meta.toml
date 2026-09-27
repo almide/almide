@@ -1,0 +1,3 @@
+expects_code = "E022"
+expects_error = "the callback's `!`s fail with different types — `ParseErr` (line 9, col 11) and `String` (line 8, col 13)"
+hint_substring = "result.map_err((e) => SomeCase(e))"

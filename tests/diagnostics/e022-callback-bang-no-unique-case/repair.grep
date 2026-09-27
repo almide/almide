@@ -1,0 +1,3 @@
+# ADR-0021 D3-2 (#2726): two cases of `ParseErr` carry a `String`, so the
+# conversion names no case and is not offered as a fix-it.
+int.parse(raw) |> result.map_err((e) => SomeCase(e))!

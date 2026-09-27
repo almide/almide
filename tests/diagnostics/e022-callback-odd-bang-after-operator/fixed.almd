@@ -1,0 +1,15 @@
+type ShiftErr: Eq, Repr = | BadNumber(String) | Negative(Int)
+
+fn shift(acc: Int, n: Int) -> Int!ShiftErr = {
+  guard n >= 0 else err(Negative(n))
+  acc + n
+}
+
+fn total(lines: List[String]) -> Int!ShiftErr = lines |> list.fold(
+  0,
+  (acc, raw) => shift(acc, 1)! + (int.parse(raw) |> result.map_err((e) => BadNumber(e)))!,
+)!
+
+test "t" {
+  assert_eq(total(["1", "2"]), ok(5))
+}

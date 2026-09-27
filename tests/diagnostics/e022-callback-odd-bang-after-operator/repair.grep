@@ -1,0 +1,3 @@
+# ADR-0021 D3-2 (#2726): `|>` binds looser than `+`, so the conversion of an
+# operand behind an arithmetic operator is parenthesised.
+(int.parse(raw) |> result.map_err((e) => BadNumber(e)))

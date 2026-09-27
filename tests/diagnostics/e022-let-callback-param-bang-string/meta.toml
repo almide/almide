@@ -1,0 +1,3 @@
+expects_code = "E022"
+expects_error = "the callback's error type is `ShiftErr` (from the enclosing fn's error type, which the call's `!` propagates into), but this `Result` fails with `String`"
+hint_substring = "Convert this one at its `!`"
