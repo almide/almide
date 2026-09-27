@@ -200,7 +200,13 @@ pending_self_host_ceiling = 9
 # self-hosted decoder http.query_params already ran on this leg joins the
 # audited http_request tier under its public name (the router decodes a
 # `{name}` binding through it). Evidence: spec/stdlib/http_router_test.almd.
-pending_port_ceiling = 58
+# 2026-09-27 (#2703): 58 -> 55. The structural leg reads the wall clock over
+# host op 34 (raw epoch nanos, served on every host), so env.millis,
+# env.unix_timestamp and datetime.now lose their structural legs: a program
+# that serves (which only the structural leg lowers) can read the clock.
+# datetime.monotonic_ns stays: a monotonic clock is a host surface no op
+# carries yet.
+pending_port_ceiling = 55
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
 # HttpRequest readers (http.query_params / req_body / req_header / req_method /
@@ -217,28 +223,6 @@ legs = ["structural"]
 class = "pending-port"
 reason = "host-surface"
 issue = "#1827"
-
-[[unavailable]]
-fn = "datetime.now"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1827"
-
-
-[[unavailable]]
-fn = "env.millis"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1423"
-
-[[unavailable]]
-fn = "env.unix_timestamp"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1423"
 
 [[unavailable]]
 fn = "fs.fold_lines_chunked"
