@@ -47,6 +47,10 @@ pub enum FixHint {
     /// `span` is the call's; `can_propagate` is whether a `!` at its end is a
     /// one-place edit here (an effect fn body, outside any lambda).
     LetCallValue { span: crate::ast::Span, can_propagate: bool },
+    /// An `err(..)` match arm whose `String` payload may be a typed error a
+    /// callback's `!` erased into its `String` channel (#2722): the erased
+    /// type and that `!`'s span, reported when the arm's slot is that type.
+    ErrArmErased { erased: Ty, at: Option<crate::ast::Span> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

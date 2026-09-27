@@ -230,6 +230,11 @@ impl Checker {
     /// already E001. The payload flows into the joined `Result`'s error slot;
     /// when the arms join to a plain value, the `err(..)` arm returns from the
     /// fn, so it flows into the fn's own error channel.
+    ///
+    /// The constraint is DEFERRED (solved with the rest, not unified here): the
+    /// joined slot is often still open (#2599 leaves `ok(v)`'s error slot
+    /// fresh), and the payload must not pin it before the fn's declared return
+    /// does — the arm then reports at itself, not at the fn.
     fn check_err_arm_payloads(&mut self, joined: &Ty, err_payloads: Vec<(Ty, Option<ast::Span>)>) {
         if err_payloads.is_empty() {
             return;
@@ -240,60 +245,32 @@ impl Checker {
             value => self.bang_channel_err_ty().map(|e| vec![value, e]),
         };
         let Some(target) = target else { return };
-        let saved = self.current_span;
         for (payload, span) in err_payloads {
-            if span.is_some() {
-                self.current_span = span;
-            }
-            if self.report_erased_err_arm(&target[1], &payload) {
-                continue;
-            }
-            let expected = Ty::result(target[0].clone(), target[1].clone());
-            let actual = Ty::result(target[0].clone(), payload);
-            self.constrain(expected, actual, "match arm");
+            let fix_hint = self.erased_callback_behind(&payload);
+            self.constraints.push(super::types::Constraint {
+                expected: Ty::result(target[0].clone(), target[1].clone()),
+                actual: Ty::result(target[0].clone(), payload),
+                context: "match arm".into(),
+                span: span.or(self.current_span),
+                fix_hint,
+            });
         }
-        self.current_span = saved;
     }
 
-    /// The `err(..)` arm carries `String` into a typed error `E`, and a callback
-    /// in this fn erased an `E` into its `String` channel with a `!` — the
-    /// value-consumed form of #2601 (`let r = xs |> list.map((x) => ... f(x)! ...)`
-    /// then `match r { ..., err(e) => err(e) }`). "Expected `E`, got `String`"
-    /// is true and points away from the cause, so name the callback's `!`.
-    fn report_erased_err_arm(&mut self, target_err: &Ty, payload: &Ty) -> bool {
+    /// The `err(..)` arm carries `String`, and a callback in this fn erased a
+    /// typed error into its `String` channel with a `!` — the value-consumed
+    /// form of #2601 (`let r = xs |> list.map((x) => ... f(x)! ...)` then
+    /// `match r { ..., err(e) => err(e) }`). Carried to the report, which names
+    /// the callback's `!` when the arm's error slot really is that typed error.
+    fn erased_callback_behind(&self, payload: &Ty) -> Option<super::types::FixHint> {
         if resolve_ty(payload, &self.uf) != Ty::String {
-            return false;
-        }
-        let target_err = resolve_ty(target_err, &self.uf);
-        if matches!(target_err, Ty::String | Ty::Unknown | Ty::TypeVar(_)) {
-            return false;
+            return None;
         }
         let here = self.current_fn.as_ref().map(|f| f.0);
-        let Some((erased, at, _)) = self
-            .lambda_err_erasures
+        self.lambda_err_erasures
             .iter()
-            .find(|(erased, _, owner)| *owner == here && resolve_ty(erased, &self.uf) == target_err)
-            .cloned()
-        else {
-            return false;
-        };
-        let erased = resolve_ty(&erased, &self.uf).display();
-        let at = at.map(|s| format!(" (line {}, col {})", s.line, s.col)).unwrap_or_default();
-        self.emit(super::err(
-            format!(
-                "this `err(..)` arm passes a `String` where the match's error type is `{erased}`: the callback's `!`{at} \
-                 turned its `{erased}` error into `String` — a `!` inside a lambda propagates into the lambda's own \
-                 failure channel, which is always `String`"
-            ),
-            format!(
-                "Only a callback whose WHOLE body is one `call(..)!` keeps that call's error type: \
-                 `(x) => f(x)!` makes the call that takes it fail with `{erased}`. \
-                 Move the branch into the called fn so the callback is a single `call(..)!`, \
-                 or convert the `String` in this arm: `err(s) => err(SomeCase(s))`."
-            ),
-            "match arm",
-        ).with_code("E022"));
-        true
+            .find(|(_, _, owner)| *owner == here)
+            .map(|(erased, at, _)| super::types::FixHint::ErrArmErased { erased: erased.clone(), at: *at })
     }
 
     /// #1123: a match over an effect call whose arms are VALUE patterns takes
