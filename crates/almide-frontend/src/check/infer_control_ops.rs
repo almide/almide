@@ -437,7 +437,11 @@ impl Checker {
                 let then_ty = self.infer_expr(then);
                 self.env.pop_scope();
                 let else_ty = self.infer_expr(else_);
-                self.constrain_with_hint(then_ty.clone(), else_ty, "if let branches", None);
+                self.constrain_with_hint(then_ty.clone(), else_ty.clone(), "if let branches", None);
+                // #2769: a diverging `then` arm types the if as its `else` arm.
+                if matches!(resolve_ty(&then_ty, &self.uf), Ty::Never) {
+                    return else_ty;
+                }
                 then_ty
     }
 
@@ -517,6 +521,14 @@ impl Checker {
                 // `Result[T, E]`, and the paragraph above requires the if's type to
                 // keep that wrapper for the wasm emitter — handing back the
                 // unwrapped width there would retype the whole expression.
+                // #2769: a diverging `then` arm (`panic(..)`, `Never`) produces no
+                // value, so the if types as its `else` arm — the rule the match
+                // join already follows (the first non-`Never` arm). Typing the
+                // if `Never` made the value-producing `else` arm unreachable to
+                // every lowering: MIR dropped it and returned nothing.
+                if matches!(resolve_ty(&then_ty, &self.uf), Ty::Never) {
+                    return else_ty;
+                }
                 match joined {
                     Some(t) if super::solving::is_numeric_scalar(&resolve_ty(&then_ty, &self.uf)) => t,
                     _ => then_ty,
