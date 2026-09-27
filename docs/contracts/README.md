@@ -103,7 +103,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-065 | The string position API is codepoint-indexed end-to-end on both targets | 0.26.20 | active | fixture | 3 |
 | C-066 | WASM heap is reclaimed by default (true Perceus) | 0.27.0 | active | fixture | 13 |
 | C-067 | The xs[i] index syntax aborts on out-of-bounds (read and write) | 0.27.4 | active | fixture | 5 |
-| C-068 | Auto-? is target-directed in construction positions | 0.27.4 | active | fixture | 2 |
+| C-068 | Auto-? is target-directed in construction positions | 0.27.4 | active | fixture | 3 |
 | C-069 | Effect-fn tail self-recursion loop-converts to O(1) stack on both targets | 0.27.4 | active | fixture | 3 |
 | C-070 | Nested constructor patterns match and bind identically on both targets | 0.27.6 | active | fixture | 6 |
 | C-071 | Single-part interpolation RC balance | 0.27.6 | active | fixture | 1 |

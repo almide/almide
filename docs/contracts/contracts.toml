@@ -1007,6 +1007,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/autotry_construction.almd", class = "fixture" },
   { path = "spec/wasm_cross/autotry_result_first_arg.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_branch_keeps_result.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-069"
