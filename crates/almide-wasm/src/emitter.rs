@@ -526,6 +526,14 @@ impl Emitter<'_> {
                         self.f.instructions().i32_const(0);
                         SliceTy::Unit
                     }
+                    // A diverging call in a value-producing arm (#2769:
+                    // `if c then panic(m) else v`): its lowering ends in
+                    // `unreachable`, so the stack is polymorphic and the arm
+                    // types as whatever its branch expects.
+                    None if is_diverging_call(target) => match want {
+                        Some(t) => t,
+                        None => return unsup("diverging-call-untyped"),
+                    },
                     None => return unsup("call-unit-in-value"),
                 }
             }
@@ -748,3 +756,15 @@ fn is_sum_shape(k: &IrExprKind) -> bool {
     )
 }
 
+
+/// The calls whose lowering ends in `unreachable` (control never returns):
+/// `panic(msg)` and `process.exit(code)`.
+fn is_diverging_call(target: &almide_ir::CallTarget) -> bool {
+    match target {
+        almide_ir::CallTarget::Named { name } => name.as_str() == "panic",
+        almide_ir::CallTarget::Module { module, func, .. } => {
+            module.as_str() == "process" && func.as_str() == "exit"
+        }
+        _ => false,
+    }
+}
