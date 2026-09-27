@@ -54,6 +54,11 @@ patterns = [
   # env.set (#1423 bucket C): the overlay is state glue at the argv/env
   # tier, same class as random_get/read_n_bytes — bounded, not architectural.
   "capability: env.set",
+  # The host clocks (env.millis, datetime.now, datetime.monotonic_ns reach
+  # prim.clock_time_get through stdlib/clock_now.almd): a read of the host's
+  # own clock is the same bounded glue as random_get, and the fixtures that
+  # read one print only relations between reads, never a value.
+  "capability: prim.clock_time_get",
   "capability: HOF map.fold",
   # SURFACED BY the #1844 Result-handle block (`prim.handle` of a Result is
   # now the cap-as-tag slot the fs floors hand back), not introduced by it:
