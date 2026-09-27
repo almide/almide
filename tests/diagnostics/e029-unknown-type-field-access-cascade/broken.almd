@@ -1,0 +1,11 @@
+// #2771: a misspelled annotation type used to report every field access on
+// the value first (E013 "values outside records have no fields", a hint that
+// points away from the fix) and the E029 last, without a location. Now: ONE
+// error at the annotation, naming the declared type within edit distance.
+type Entry = { name: String, count: Int }
+
+fn total(es: List[Entyr]) -> Int = es |> list.map((e) => e.count) |> list.fold(0, (a, b) => a + b)
+
+fn main() -> Unit = println(int.to_string(total([
+  Entry { name: "a", count: 1 }
+])))
