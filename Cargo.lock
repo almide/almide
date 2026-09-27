@@ -281,6 +281,7 @@ dependencies = [
  "almide-layout",
  "almide-spine",
  "almide-types",
+ "almide-verify",
  "almide-wasm-run",
  "anyhow",
  "sha2 0.11.0",
