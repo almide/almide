@@ -222,6 +222,13 @@ spec/stdlib/http_call_test.almd :: gather
 # 2026-09-26 (#2588): render_query pruned — query_params now links to the
 # self-host copy in stdlib/http_url_decode.almd, which the incumbent lowers.
 spec/serve_cross/http_serve_replay.almd :: handle
+# 2026-09-28 (#2692, C-367 shutdown): the shutdown server fixture's handler
+# takes an HttpRequest (it exists only inside http.serve) and matches its path
+# with arms that sleep — the incumbent walls the untracked-subject match. The
+# STRUCTURAL leg serves the fixture on the embedded lane
+# (tests/http_serve_cross_test.rs); stock artifacts refuse http.serve (E081).
+# Retires with #2659 or #1696, like the replay fixture's row above.
+spec/serve_cross/http_serve_shutdown.almd :: handle
 # 2026-09-27 (#2696, ADR-0020 pillar 3): the router fixture's app bound as a
 # top-level VALUE (`let site = http.router(...)`, then `let h = site!` and a
 # call). The incumbent MIR lowering walls the heap-result `match` the router
