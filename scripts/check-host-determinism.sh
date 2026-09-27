@@ -201,7 +201,12 @@ fi
 # nested_payload_guard (`OCons(some(x), _) if x == y`) render and byte-match
 # native; the positional twin the change adds
 # (positional_variant_field_literal) emits on both legs.
-MAX_WALLED=28
+# 29 as of 2026-09-27 (#2722): UP from 28 by match_err_arm_typed_payload.almd,
+# whose `bump` (a typed-error `match` re-wrap, `err(e) => err(e)`) the incumbent
+# MIR lowering walls on both hosts (proofs/walled-real-baseline.txt); the
+# structural leg renders it byte-identically to native. Recorded, not ported:
+# the incumbent is retiring under #1696.
+MAX_WALLED=29
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"

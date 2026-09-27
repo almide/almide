@@ -249,3 +249,9 @@ spec/gauntlet/pkg/mut_port/src/main.almd :: main
 spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_3
 spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_4
 spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_7
+# 2026-09-27 (#2722, the err-arm payload fixtures): `bump` re-wraps a typed-error
+# Result through `match r { ok(v) => ok(v + 1), err(e) => err(e) }`; the incumbent
+# MIR lowering walls it, the structural leg serves both files byte-identically to
+# native, and the incumbent is retiring under #1696 (recorded, not ported).
+spec/lang/match_err_arm_payload_test.almd :: bump
+spec/wasm_cross/match_err_arm_typed_payload.almd :: bump
