@@ -53,6 +53,10 @@ native バイナリに時間制限が無いのと同じく、`--target wasm` の
 - **退避**: ヒットのたびにバイナリの mtime を更新し、7 日間使われなかった `almide-<hash>`
   （と `deps/` に残る同じ世代の `almide_out-*` オブジェクト）を、次のミス時にロックの下で削除する。
   この掃引は 1 日 1 回（`.almide-evict-stamp`）。incremental セッションには触れない。
+- **サイズ上限**(#2608): 同じ `almide-<hash>` と `almide_out-*` の合計が `ALMIDE_CACHE_MAX_BYTES`
+  （既定 `4G`、`0`/`off` で無効）を超えたら、mtime の古い順に同じロックの下で削除する。直近 2 分以内に
+  使われたものは残す。この掃引は 1 分に 1 回（`.almide-size-stamp`）。依存 crate の rlib と
+  incremental セッションは対象外。既定値は開発機での実測（プログラムごとの成果物 2.0 GB）の 2 倍。
 - **rustc ICE からの復旧**: 中断されたビルド（ENOSPC、kill）が rustc の incremental セッションを
   壊すと、以後その形のビルドは `the compiler unexpectedly panicked` で毎回落ちる。失敗した
   ビルドの出力にこの banner があれば、同じロックの下で `target/*/incremental` を消して 1 回だけ
@@ -239,6 +243,15 @@ worker dir を空にする**(#2504)。判定は「その dir 直下と `target/<
 lockfile は残すので、掃引後の dir は lockfile だけの空ディレクトリになる（理由は
 [`almide clean`](#almide-clean) の節）。`ALMIDE_KEEP_SCRATCH=1` のときは掃引しない。
 `almide clean` は年齢に関係なく全 worker dir を空にする。
+
+年齢の規則は**別々のファイルを大量にテストする突発負荷**の中では発火しない（2026-09-24 に 2 時間で
+7,144 dir / 84.9 GB に達してディスクを埋めた、#2608）。そこで worker キャッシュ全体に**サイズ上限**を
+置く: 合計が `ALMIDE_CACHE_MAX_BYTES`（既定 `4G`、`0`/`off` で無効）を超えたら、最後に使われたのが
+最も古い worker dir から順に、上と同じ手順（各 dir の lock を待たずに取る・lockfile は残す・
+lock の下で「最後の使用が変わっていない」ことを再確認）で空にする。直近 2 分以内に使われた dir は
+上限を超えていても空にしない（ロック無しのキャッシュヒットが存在確認から exec するまでの窓を守る）。
+この掃引は 1 分に 1 回（`native/.almide-size-stamp`）。既定の 4 GiB は、worktree 複数と並走
+エージェント 5 本の開発機で実測した 1 週間分の作業集合（worker 65 dir / 2.0 GB）の 2 倍。
 
 同じ規則が**ランタイム rlib キャッシュ** `<temp>/almide-rtlib-<key>/` にも効く(#2504)。
 この dir はランタイムソース × rustc バージョン × opt レベルごとに 1 つ作られ、コンパイラを
@@ -906,6 +919,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_BOUNDED_DEBUG` | debug | print why a bounded-loop bind declined (v1 lowering) |
 | `ALMIDE_BUILD_PROVENANCE=value` | ci | read by `build.rs` at BUILD time: `release` makes `almide --version` say `(release)`, anything else (including unset) says `(dev)`. Set only by `.github/workflows/release.yml`, the one thing that builds from a tag, so a binary claiming to be a release had to come from there (#2384) |
 | `ALMIDE_BUILD_SHA=value` | ci | read by `build.rs` at BUILD time: the commit `almide --version` names beside the build kind, truncated to 9 characters. Passed in by `make install` and the release workflow rather than read from git in the build script, which would rebuild the root crate after every commit (#2384) |
+| `ALMIDE_CACHE_MAX_BYTES=value` | tool | the size bound of each native build cache — the `almide test` worker cache (`<temp>/almide-test/native`, least recently used worker dirs emptied first) and a build scratch dir's per-program binaries and objects (`<temp>/almide-run`): `4G` (default), `512M`, a byte count, or `0`/`off` for no bound (#2608) |
 | `ALMIDE_CAPTURE_MOVE_OFF` | ablation | make CaptureClone clone every capture again, as before #2231, instead of moving a value whose sole user is the closure — the ablation the ownership certifier's sensitivity test drives |
 | `ALMIDE_CERTIFY_OWNERSHIP=value` | debug | run the native ownership certifier after the pass pipeline (#2231): `report` prints every violation, `fail` aborts the build on one, `off` skips it; unset = `fail` in a debug build, `off` in a release build |
 | `ALMIDE_COMPILER_STACK=value` | tool | stack size in bytes of the compiler driver thread (default 256 MiB); a deep input that overflows it is the regression test's subject |
