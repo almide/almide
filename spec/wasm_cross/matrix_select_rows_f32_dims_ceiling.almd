@@ -1,0 +1,32 @@
+// @contract: C-161
+// `select_rows_f32(data, offset, cols, ids)` builds a `len(ids) x cols` matrix,
+// so that shape takes the shared 2^28 element ceiling before anything is
+// allocated, as native's constructor does. The structural wasm leg formed the
+// byte size `n * cols * 8` first: `cols = 2^62` wrapped it to 0, passed the
+// out-of-memory bound and answered `(1, 0)` with exit 0, and `cols = 2^28 + 1`
+// died as `Error: out of memory`, where native aborts with `Error: matrix
+// dimensions too large` + exit 1 (found in the #2783 sweep). The in-range cells
+// come first; the fixture ends at the abort.
+fn show(m: Matrix) -> String = {
+  let (r, c) = matrix.shape(m)
+  int.to_string(r) + " x " + int.to_string(c)
+}
+
+fn main() -> Unit = {
+  let data = bytes.from_list([
+    0,
+    0,
+    128,
+    63,
+    0,
+    0,
+    0,
+    64
+  ])
+  println("in_range=" + show(matrix.select_rows_f32(data, 0, 2, [0, 5])))
+  // No ids: zero rows, so a huge cols is not over the ceiling.
+  println("no_ids=" + show(matrix.select_rows_f32(data, 0, 9223372036854775807, [])))
+  // One row of 2^62 columns: the byte size wraps i64 to 0.
+  println("wrap=" + show(matrix.select_rows_f32(data, 0, 4611686018427387904, [0])))
+  println("unreachable")
+}
