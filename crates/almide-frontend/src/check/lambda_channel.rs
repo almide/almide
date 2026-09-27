@@ -25,10 +25,17 @@
 //!
 //! The join always has an answer (`String` is the top), so the rule adds no
 //! inference failure. An effect-slot lambda keeps its `String` carrier.
+//!
+//! The E022 of step 3 (ADR-0021 D3) says where ε came from when a typed slot
+//! or the enclosing fn's `)!` decided it, names the operand that DOES agree
+//! when the callback's operands disagree among themselves (D3-2), and shows
+//! the conversion at the odd `!` — `op |> result.map_err((e) => Case(e))!`,
+//! with the case filled in (and offered as a fix-it) when exactly one case of
+//! ε carries the odd operand's error type.
 use super::{Checker, err};
 use super::types::resolve_ty;
 use crate::ast::Span;
-use crate::types::{Ty, TypeConstructorId};
+use crate::types::{Ty, TypeConstructorId, VariantPayload};
 use almide_base::intern::Sym;
 
 /// What one `!` inside the lambda fails with.
@@ -52,6 +59,9 @@ pub(crate) enum OperandErr {
 pub(crate) struct Operand {
     pub err: OperandErr,
     pub span: Option<Span>,
+    /// `span` is the operand's own span (not the enclosing statement's), so
+    /// a fix-it may rewrite it.
+    pub exact: bool,
 }
 
 /// One lambda's channel while its body is inferred, and after it closes.
@@ -60,6 +70,9 @@ pub(crate) struct Channel {
     pub eps: Ty,
     pub operands: Vec<Operand>,
     pub owner: Option<Sym>,
+    /// Where a typed ε came from, when the checker saw it cheaply: the typed
+    /// slot the lambda was passed to, or the enclosing fn's `)!` (D3-1).
+    pub source: Option<String>,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -72,20 +85,60 @@ pub(crate) struct LambdaChannels {
     defaults: Vec<(Ty, Ty)>,
     /// Closed fallible lambdas, judged once ε is decided.
     closed: Vec<Channel>,
+    /// The typed slot the next lambda argument lands in (set by the call's
+    /// argument loop, taken by the lambda when its channel opens).
+    pending_source: Option<String>,
+}
+
+/// An operand as the program has decided it by now.
+enum Now {
+    /// Fails with this error type (`returned`: an `err(..)` the body returns).
+    Err { ty: Ty, returned: bool },
+    /// An `Option`'s `none` / a non-`Result` effect call: `String`.
+    Implicit(&'static str),
+    /// Nothing can be said (still open, or error recovery).
+    Open,
 }
 
 impl Checker {
     /// A lambda starts inferring its body: its channel's ε is `eps`.
     pub(super) fn open_lambda_channel(&mut self, eps: Ty) {
         let owner = self.current_fn.as_ref().map(|f| f.0);
-        self.lambda_channels.open.push(Channel { eps, operands: Vec::new(), owner });
+        let source = self.lambda_channels.pending_source.take();
+        self.lambda_channels.open.push(Channel { eps, operands: Vec::new(), owner, source });
+    }
+
+    /// The call's argument loop: the lambda argument about to be inferred lands
+    /// in `slot`. Returns the previous value, for the loop to restore.
+    pub(super) fn swap_pending_lambda_source(&mut self, slot: Option<String>) -> Option<String> {
+        std::mem::replace(&mut self.lambda_channels.pending_source, slot)
     }
 
     /// A `!` in the innermost lambda's body propagates `err` into its channel.
     pub(super) fn record_lambda_operand(&mut self, err: OperandErr, span: Option<Span>) {
+        let exact = span.is_some();
         let span = span.or(self.current_span);
         if let Some(ch) = self.lambda_channels.open.last_mut() {
-            ch.operands.push(Operand { err, span });
+            ch.operands.push(Operand { err, span, exact });
+        }
+    }
+
+    /// A fn body's `!` whose operand fails with a closed lambda's still-open
+    /// ε pins it to the fn's error type: remember that as ε's source (D3-1).
+    pub(super) fn note_fn_bang_channel_source(&mut self, operand: &Ty) {
+        let Some(fn_err) = self.bang_channel_err_ty() else { return };
+        if matches!(fn_err, Ty::String | Ty::Unknown) || super::types::is_inference_var(&fn_err).is_some() {
+            return;
+        }
+        let Ty::Applied(TypeConstructorId::Result, args) = resolve_ty(operand, &self.uf) else { return };
+        let Some(e) = args.get(1).map(|e| resolve_ty(e, &self.uf)) else { return };
+        if super::types::is_inference_var(&e).is_none() {
+            return;
+        }
+        for ch in &mut self.lambda_channels.closed {
+            if ch.source.is_none() && resolve_ty(&ch.eps, &self.uf) == e {
+                ch.source = Some("the enclosing fn's error type, which the call's `!` propagates into".to_string());
+            }
         }
     }
 
@@ -102,20 +155,15 @@ impl Checker {
         let mut unresolved = false;
         let mut errs: Vec<Ty> = Vec::new();
         for op in &ch.operands {
-            match &op.err {
-                OperandErr::Declared(e) | OperandErr::Returned(e) => {
-                    let r = resolve_ty(e, &self.uf);
-                    if matches!(r, Ty::Unknown) {
-                        unresolved = true;
-                    } else if super::types::is_inference_var(&r).is_some() {
-                        unresolved = true;
-                        self.unify_infer(&r, &ch.eps);
-                    } else {
-                        errs.push(r);
-                    }
+            match self.operand_now(&op.err) {
+                Now::Err { ty, .. } if matches!(ty, Ty::Unknown) => unresolved = true,
+                Now::Err { ty, .. } if super::types::is_inference_var(&ty).is_some() => {
+                    unresolved = true;
+                    self.unify_infer(&ty, &ch.eps);
                 }
-                OperandErr::ImplicitString(_) => errs.push(Ty::String),
-                OperandErr::Deferred(_) => unresolved = true,
+                Now::Err { ty, .. } => errs.push(ty),
+                Now::Implicit(_) => errs.push(Ty::String),
+                Now::Open => unresolved = true,
             }
         }
         let join = match errs.split_first() {
@@ -127,6 +175,22 @@ impl Checker {
         }
         self.record_decided_erasures(&ch);
         self.lambda_channels.closed.push(ch);
+    }
+
+    /// What `err` fails with, as far as the program has decided it now.
+    fn operand_now(&self, err: &OperandErr) -> Now {
+        match err {
+            OperandErr::Declared(e) => Now::Err { ty: resolve_ty(e, &self.uf), returned: false },
+            OperandErr::Returned(e) => Now::Err { ty: resolve_ty(e, &self.uf), returned: true },
+            OperandErr::ImplicitString(what) => Now::Implicit(what),
+            OperandErr::Deferred(op) => match resolve_ty(op, &self.uf) {
+                Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
+                    Now::Err { ty: resolve_ty(&args[1], &self.uf), returned: false }
+                }
+                Ty::Applied(TypeConstructorId::Option, _) => Now::Implicit("an `Option`'s `none`"),
+                _ => Now::Open,
+            },
+        }
     }
 
     /// #2601's E022 names the callback whose `!` erased a typed error: record
@@ -162,34 +226,36 @@ impl Checker {
     }
 
     /// Judge every `!` of every closed lambda against its decided ε (D1-1).
+    ///
+    /// One E022 per odd operand, at that operand: each is its own place to
+    /// convert, with its own fix-it. When some operand of the same callback
+    /// DOES fail with ε, the message names both — the agreeing one and the odd
+    /// one, with line and column (D3-2); a callback with several odd operands
+    /// gets one E022 at each, every one naming the same agreeing operand.
     pub(super) fn judge_lambda_channels(&mut self) {
         for ch in std::mem::take(&mut self.lambda_channels.closed) {
             let eps = resolve_ty(&ch.eps, &self.uf);
             if matches!(eps, Ty::String | Ty::Unknown) || super::types::is_inference_var(&eps).is_some() {
                 continue;
             }
+            let mut agreeing: Option<Span> = None;
+            let mut odd: Vec<(&Operand, Now)> = Vec::new();
             for op in &ch.operands {
-                let err = match &op.err {
-                    OperandErr::Deferred(t) => match resolve_ty(t, &self.uf) {
-                        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => OperandErr::Declared(args[1].clone()),
-                        Ty::Applied(TypeConstructorId::Option, _) => OperandErr::ImplicitString("an `Option`'s `none`"),
-                        _ => continue,
-                    },
-                    other => other.clone(),
-                };
-                let shown = match &err {
-                    OperandErr::ImplicitString(what) => format!("{what} fails with `String`"),
-                    OperandErr::Deferred(_) => continue,
-                    OperandErr::Declared(e) | OperandErr::Returned(e) => {
-                        let r = resolve_ty(e, &self.uf);
-                        if matches!(r, Ty::Unknown) || self.unify_infer(&eps, &r) {
-                            continue;
+                match self.operand_now(&op.err) {
+                    Now::Err { ty, .. } if matches!(ty, Ty::Unknown) => {}
+                    Now::Err { ty, returned } => {
+                        if self.unify_infer(&eps, &ty) {
+                            agreeing = agreeing.or(op.span);
+                        } else {
+                            odd.push((op, Now::Err { ty, returned }));
                         }
-                        let what = if matches!(err, OperandErr::Returned(_)) { "this `err(..)`" } else { "this `Result`" };
-                        format!("{what} fails with `{}`", self.with_slot_defaults(&r).display())
                     }
-                };
-                self.report_lambda_channel_mismatch(&eps, &shown, op.span);
+                    Now::Implicit(what) => odd.push((op, Now::Implicit(what))),
+                    Now::Open => {}
+                }
+            }
+            for (op, now) in odd {
+                self.report_lambda_channel_mismatch(&eps, &ch, op, &now, agreeing);
             }
         }
     }
@@ -209,28 +275,132 @@ impl Checker {
         }
     }
 
-    fn report_lambda_channel_mismatch(&mut self, eps: &Ty, shown: &str, span: Option<Span>) {
-        let eps = eps.display();
-        let saved = self.current_span;
-        if span.is_some() {
-            self.current_span = span;
-        }
-        self.emit(err(
-            if shown.starts_with("this `err(..)`") {
-                format!("this error cannot leave the callback: the callback's error type is `{eps}`, but {shown}")
-            } else {
-                format!("operator '!' cannot propagate this error: the callback's error type is `{eps}`, but {shown}")
-            },
+    fn report_lambda_channel_mismatch(&mut self, eps: &Ty, ch: &Channel, op: &Operand, now: &Now, agreeing: Option<Span>) {
+        let eps_shown = eps.display();
+        let (odd_ty, returned, implicit) = match now {
+            Now::Err { ty, returned } => (self.with_slot_defaults(ty), *returned, None),
+            Now::Implicit(what) => (Ty::String, false, Some(*what)),
+            Now::Open => return,
+        };
+        let odd_shown = odd_ty.display();
+        let source = ch.source.as_ref().map(|s| format!(" (from {s})")).unwrap_or_default();
+        let at = |s: Option<Span>| s.map(|s| format!(" (line {}, col {})", s.line, s.col)).unwrap_or_default();
+        let subject = format!("the callback's error type is `{eps_shown}`{source}");
+        let head = if returned {
+            "this error cannot leave the callback"
+        } else {
+            "operator '!' cannot propagate this error"
+        };
+        let message = match agreeing {
+            // D3-2: the callback's own operands disagree — name both.
+            Some(ok_at) => format!(
+                "{head}: {subject}, but the callback's {} fail with different types — `{eps_shown}`{} and `{odd_shown}`{}",
+                if returned { "`!`s and `err(..)`s" } else { "`!`s" },
+                at(Some(ok_at)),
+                at(op.span),
+            ),
+            None => {
+                let what = match (implicit, returned) {
+                    (Some(what), _) => what.to_string(),
+                    (None, true) => "this `err(..)`".to_string(),
+                    (None, false) => "this `Result`".to_string(),
+                };
+                format!("{head}: {subject}, but {what} fails with `{odd_shown}`")
+            }
+        };
+        // The direction-specific conversion (ADR-0003 D2) at the odd operand.
+        let case = self.unique_case_carrying(eps, &odd_ty);
+        let case_shown = case.map(|c| c.to_string()).unwrap_or_else(|| "SomeCase".to_string());
+        let op_text = op.span.filter(|_| op.exact && implicit.is_none() && !returned).and_then(|s| self.operand_text(s));
+        let example = match &op_text {
+            Some((text, wrap)) => {
+                let converted = format!("{text} |> result.map_err((e) => {case_shown}(e))");
+                if *wrap { format!("({converted})!") } else { format!("{converted}!") }
+            }
+            None => format!("result.map_err((e) => {case_shown}(e))"),
+        };
+        let fix = if agreeing.is_some() {
+            format!("Convert the odd one at its `!` so every `!` in the callback fails with `{eps_shown}`")
+        } else {
+            "Convert this one at its `!`".to_string()
+        };
+        let hint = if returned {
+            format!(
+                "A callback's `err(..)` leaves through the callback's own failure channel, whose error type is \
+                 `{eps_shown}`: return a `{eps_shown}` case here instead, e.g. `err({case_shown}(...))`"
+            )
+        } else if implicit.is_some() {
             format!(
                 "A `!` inside a lambda propagates into the lambda's own failure channel, and every `!` in it must fail \
-                 with the channel's error type `{eps}` (`!` converts nothing into a typed error). Convert this one at \
-                 its `!` — e.g. `result.map_err((e) => SomeCase(e))` before the `!` — or handle it here with `match` \
-                 or `?? default`"
-            ),
-            if shown.starts_with("this `err(..)`") { "callback error" } else { "operator !" },
-        ).with_code("E022"));
+                 with the channel's error type `{eps_shown}` (`!` converts nothing into a typed error). {fix} — turn it \
+                 into a `Result[_, {eps_shown}]` first — or handle it here with `match` or `?? default`"
+            )
+        } else {
+            format!(
+                "A `!` inside a lambda propagates into the lambda's own failure channel, and every `!` in it must fail \
+                 with the channel's error type `{eps_shown}` (`!` converts nothing into a typed error). {fix}: \
+                 `{example}` — or handle it here with `match` or `?? default`"
+            )
+        };
+        let saved = self.current_span;
+        if op.span.is_some() {
+            self.current_span = op.span;
+        }
+        let mut diag = err(message, hint, if returned { "callback error" } else { "operator !" }).with_code("E022");
+        if let (Some(s), Some((text, wrap)), Some(case)) = (op.span.filter(|_| op_text.is_some()), &op_text, case) {
+            let converted = format!("{text} |> result.map_err((e) => {case}(e))");
+            let replacement = if *wrap { format!("({converted})") } else { converted };
+            diag = diag.with_suggested_fix(s.line, s.col, s.end_col, replacement);
+        } else if op_text.is_some() {
+            diag = diag.with_try(example);
+        }
+        self.emit(diag);
         self.current_span = saved;
     }
+
+    /// The one case of `eps` (a variant) whose payload is exactly `(err)`, so
+    /// `(e) => Case(e)` converts `err` into `eps`. `None` when there is no
+    /// such case or more than one.
+    fn unique_case_carrying(&self, eps: &Ty, err: &Ty) -> Option<Sym> {
+        let Ty::Variant { cases, .. } = self.env.resolve_named(eps) else { return None };
+        let mut hits = cases.iter().filter(|c| matches!(&c.payload, VariantPayload::Tuple(ts) if ts.len() == 1 && &ts[0] == err));
+        let first = hits.next()?;
+        if hits.next().is_some() { None } else { Some(first.name) }
+    }
+
+    /// The operand's source text, and whether the conversion must be wrapped
+    /// in parentheses: `|>` binds looser than arithmetic, so `1 + op |> f` would
+    /// pipe the sum. `None` when the span does not name one line of source.
+    fn operand_text(&self, s: Span) -> Option<(String, bool)> {
+        if s.end_col <= s.col {
+            return None;
+        }
+        let text = self.source_slice(s)?;
+        let balanced = |open: char, close: char| text.matches(open).count() == text.matches(close).count();
+        if text.trim().is_empty() || !balanced('(', ')') || !balanced('[', ']') || !balanced('{', '}') {
+            return None;
+        }
+        let before = self.source_slice(Span { line: s.line, col: 1, end_col: s.col }).unwrap_or_default();
+        let before = before.trim_end();
+        let wrap = before.ends_with(['+', '-', '*', '/', '%', '^', '<', '.'])
+            || before.ends_with(" not")
+            || before == "not";
+        Some((text, wrap))
+    }
+}
+
+/// `the slot `f: (Int) -> Int!E`` — the D3-1 source of a lambda argument whose
+/// slot `(name, ty)` declares a typed error; `None` for any other slot (no
+/// `Result` return, a generic or `String` error), which does not decide ε.
+pub(super) fn slot_source(name: &Sym, ty: &Ty) -> Option<String> {
+    let Ty::Fn { params, ret, is_effect: false } = ty else { return None };
+    let Ty::Applied(TypeConstructorId::Result, args) = ret.as_ref() else { return None };
+    let [ok, e] = args.as_slice() else { return None };
+    if matches!(e, Ty::String | Ty::Unknown | Ty::TypeVar(_)) || e.has_unresolved_deep() {
+        return None;
+    }
+    let ps: Vec<String> = params.iter().map(|p| p.display()).collect();
+    Some(format!("the slot `{name}: ({}) -> {}!{}`", ps.join(", "), ok.display(), e.display()))
 }
 
 /// The operand classification a lambda's `!` records (mirrors

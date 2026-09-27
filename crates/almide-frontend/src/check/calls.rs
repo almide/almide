@@ -242,6 +242,12 @@ impl Checker {
             {
                 self.lambda_ret_expect = Some((**ret).clone());
             }
+            // ADR-0021 D3-1: a typed slot decides the lambda's ε — say so in its E022.
+            let slot_source = if is_lambda_arg(a) {
+                call_sig.as_ref().and_then(|sig| sig.params.get(i))
+                    .and_then(|(name, pty)| super::lambda_channel::slot_source(name, pty))
+            } else { None };
+            let prev_slot_source = self.swap_pending_lambda_source(slot_source);
             let prev_list_expect = self.list_elem_expect.take();
             if matches!(a.kind, ExprKind::List { .. })
                 && let Some((_, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e))) =
@@ -252,6 +258,7 @@ impl Checker {
             }
             let aty = self.infer_expr(a);
             self.list_elem_expect = prev_list_expect;
+            self.swap_pending_lambda_source(prev_slot_source);
             self.lambda_ret_expect = prev_ret_expect;
             self.lambda_slot_effect = prev_slot_effect;
             self.lambda_arg_hint = prev_hint;
