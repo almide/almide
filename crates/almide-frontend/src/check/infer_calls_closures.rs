@@ -95,24 +95,33 @@ impl Checker {
             ExprKind::Range { start, end, .. } => { let st = self.infer_expr(start); self.infer_expr(end); Ty::list(st) }
 
             ExprKind::Some { expr, .. } => { let inner = self.infer_expr(expr); Ty::option(inner) }
+            // The slot the argument leaves open is fresh; the enclosing fn's
+            // declared Result only fills it when nothing else does (#2599).
             ExprKind::Ok { expr, .. } => {
                 let ok_ty = self.infer_expr(expr);
-                let err_ty = match &self.env.current_ret {
-                    Some(Ty::Applied(TypeConstructorId::Result, args)) if args.len() == 2 => args[1].clone(),
-                    _ => self.fresh_var(),
-                };
+                let err_ty = self.open_result_slot(1);
                 Ty::result(ok_ty, err_ty)
             }
             ExprKind::Err { expr, .. } => {
                 let err_ty = self.infer_expr(expr);
-                let ok_ty = match &self.env.current_ret {
-                    Some(Ty::Applied(TypeConstructorId::Result, args)) if args.len() == 2 => args[0].clone(),
-                    _ => self.fresh_var(),
-                };
+                let ok_ty = self.open_result_slot(0);
                 Ty::result(ok_ty, err_ty)
             }
             _ => return None,
         })
+    }
+
+    /// A fresh var for slot `index` (0 = ok, 1 = err) of an `ok`/`err`
+    /// constructor, defaulted to the enclosing fn's declared Result argument
+    /// for that slot when the program leaves it unconstrained.
+    fn open_result_slot(&mut self, index: usize) -> Ty {
+        let slot = self.fresh_var();
+        if let Some(Ty::Applied(TypeConstructorId::Result, args)) = &self.env.current_ret {
+            if let Some(declared) = args.get(index).filter(|_| args.len() == 2) {
+                self.result_slot_defaults.push((slot.clone(), declared.clone()));
+            }
+        }
+        slot
     }
 
     /// `?`, parenthesised expressions, `break`, and the typed hole.

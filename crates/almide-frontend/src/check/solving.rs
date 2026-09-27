@@ -19,6 +19,14 @@ impl Checker {
                 self.report_constraint_mismatch(c);
             }
         }
+        // An `ok`/`err` slot nothing constrained takes the enclosing fn's
+        // declared type (#2599). Applied after every program constraint, so a
+        // default can only fill a hole, never contradict what the code says.
+        for (slot, declared) in std::mem::take(&mut self.result_slot_defaults) {
+            if is_inference_var(&resolve_ty(&slot, &self.uf)).is_some() {
+                self.unify_infer(&slot, &declared);
+            }
+        }
     }
 
     /// Emit the E001 for one constraint that could not be satisfied.

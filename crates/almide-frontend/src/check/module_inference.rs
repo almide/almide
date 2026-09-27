@@ -44,6 +44,7 @@ impl Checker {
         let _phase = almide_base::profile::phase_scope(almide_base::profile::Phase::Check);
         // Isolate module's constraint solving and type map from the main program
         let saved_constraints = std::mem::take(&mut self.constraints);
+        let saved_slot_defaults = std::mem::take(&mut self.result_slot_defaults);
         let saved_uf = std::mem::replace(&mut self.uf, UnionFind::new());
         self.type_map.clear();
 
@@ -86,6 +87,7 @@ impl Checker {
 
         // Restore
         self.constraints = saved_constraints;
+        self.result_slot_defaults = saved_slot_defaults;
         self.uf = saved_uf;
         self.env.import_table = saved_import_table;
         self.env.restore_keys(snapshot);
@@ -104,6 +106,7 @@ impl Checker {
             return;
         }
         let saved_constraints = std::mem::take(&mut self.constraints);
+        let saved_slot_defaults = std::mem::take(&mut self.result_slot_defaults);
         let saved_uf = std::mem::replace(&mut self.uf, UnionFind::new());
         let saved_type_map = std::mem::take(&mut self.type_map);
         // This is a TYPE-EXTRACTION pre-pass, not the module's real check —
@@ -165,6 +168,7 @@ impl Checker {
         self.current_module_prefix = saved_prefix;
 
         self.constraints = saved_constraints;
+        self.result_slot_defaults = saved_slot_defaults;
         self.uf = saved_uf;
         self.type_map = saved_type_map;
         self.env.import_table = saved_import_table;
