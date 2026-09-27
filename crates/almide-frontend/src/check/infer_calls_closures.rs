@@ -792,7 +792,7 @@ impl Checker {
         let t = self.infer_expr(inner);
         let resolved = resolve_ty(&t, &self.uf);
         let plain_is_effect_call = self.is_effect_call_expr(inner);
-        self.check_unwrap_propagation_context(&resolved, plain_is_effect_call);
+        self.check_unwrap_propagation_context(&resolved, plain_is_effect_call, inner.span);
         if let Some(inner_ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
             inner_ty
         } else if matches!(&resolved, Ty::Unknown) {
@@ -1107,7 +1107,7 @@ impl Checker {
     ///
     /// Where propagation is possible, the error must also fit the fn's error
     /// type (#2635, [`Self::check_bang_error_channel`]).
-    fn check_unwrap_propagation_context(&mut self, operand: &Ty, plain_is_effect_call: bool) {
+    fn check_unwrap_propagation_context(&mut self, operand: &Ty, plain_is_effect_call: bool, operand_span: Option<ast::Span>) {
         // Single-condition decisions (MC/DC ledger): each || arm is its
         // own return guard.
         if self.env.in_test_block {
@@ -1128,7 +1128,13 @@ impl Checker {
             }
             return;
         }
-        // Off-type operands (and a missing channel) still reject.
+        // Off-type operands (and a missing channel) still reject. Inside a
+        // fn that DOES return a carrier, the generic message below blames the
+        // fn's return type, which is not the problem: say which mismatch it is
+        // (#2607).
+        if self.env.lambda_depth == 0 && self.report_bang_carrier_mismatch(operand, operand_span, plain_is_effect_call) {
+            return;
+        }
         let hint = if self.env.lambda_depth > 0 {
             "`!` cannot propagate an error out of a lambda; use `??` for a fallback value or move the call out of the closure"
         } else {
@@ -1146,6 +1152,53 @@ impl Checker {
     /// flow (the derived Codec decoders have always lowered this way; every
     /// peer with hand-written codecs has the same operator: Rust `?`, Zig
     /// `try`). Returns whether the declared return type accepts this operand.
+    /// E022 for a `!` in a fn that returns a carrier (Result or Option) the
+    /// operand cannot propagate into, naming the actual mismatch (#2607):
+    ///   - a Result operand in an Option fn: the err has nowhere to go. `?`
+    ///     turns the Result into an Option first (`int.parse(s)?!`), or the
+    ///     fn returns Result;
+    ///   - an operand that is neither Result nor Option on the direct path:
+    ///     E034 reports it at the operator, so no E022 is added.
+    /// Returns whether the case is handled; `false` leaves the generic E022.
+    fn report_bang_carrier_mismatch(&mut self, operand: &Ty, operand_span: Option<ast::Span>, plain_is_effect_call: bool) -> bool {
+        let Some(ret) = self.env.current_ret.clone() else { return false };
+        let ret = resolve_ty(&ret, &self.uf);
+        let op = resolve_ty(operand, &self.uf);
+        let ret_is_option = matches!(ret, Ty::Applied(TypeConstructorId::Option, _));
+        if !ret_is_option && !matches!(ret, Ty::Applied(TypeConstructorId::Result, _)) {
+            return false;
+        }
+        let fn_name = self.current_fn.as_ref().map_or_else(|| "this fn".to_string(), |(n, _)| format!("`{}`", n));
+        let text = operand_span.and_then(|s| self.source_slice(s)).filter(|t| !t.is_empty() && !t.contains('\n'));
+        let named = text.as_deref().map_or_else(|| "the operand".to_string(), |t| format!("`{}`", t));
+        let diag = match &op {
+            Ty::Applied(TypeConstructorId::Result, _) if ret_is_option => {
+                let convert = text.as_deref().map_or_else(|| "`expr?!`".to_string(), |t| format!("`{}?!`", t));
+                let diag = super::err(
+                    format!("operator '!' cannot propagate a Result's error out of a fn returning Option: {} is a {} but {} returns {}", named, op.display(), fn_name, ret.display()),
+                    format!("Convert it to an Option first with `?` — {} propagates `none` and drops the error — or declare {} to return a Result so the error propagates", convert, fn_name),
+                    "operator !",
+                ).with_code("E022");
+                // Insert the `?` right after the operand, before its `!`.
+                match (operand_span, &text) {
+                    (Some(s), Some(_)) if s.end_col > s.col => diag.with_suggested_fix(s.line, s.end_col, s.end_col, "?"),
+                    _ => diag,
+                }
+            }
+            Ty::Applied(TypeConstructorId::Result | TypeConstructorId::Option, _) | Ty::Unknown | Ty::TypeVar(_) => return false,
+            _ if super::types::is_inference_var(&op).is_some() => return false,
+            // A concrete operand that cannot fail, on the direct `expr!` path:
+            // E034 at the operator names that (`infer_expr_g3_unwrap`), and an
+            // E022 beside it would blame the fn's return type, which already
+            // is a carrier. The pipe path and an effect call get no E034, so
+            // they keep the generic E022.
+            _ if operand_span.is_some() && !plain_is_effect_call => return true,
+            _ => return false,
+        };
+        self.emit(diag);
+        true
+    }
+
     fn accept_declared_channel_prop(&mut self, operand: &Ty) -> bool {
         let Some(ret) = self.env.current_ret.clone() else { return false };
         let ret = resolve_ty(&ret, &self.uf);
@@ -1221,7 +1274,7 @@ impl Checker {
             ExprKind::Unwrap { expr: inner, .. } => {
                 let inner_ty = self.infer_pipe(left, inner);
                 let plain_is_effect_call = self.is_effect_pipe_target(inner);
-                self.check_unwrap_propagation_context(&inner_ty, plain_is_effect_call);
+                self.check_unwrap_propagation_context(&inner_ty, plain_is_effect_call, None);
                 // Annotate the inner expression with its resolved type so the lowering
                 // can construct the correct IR type (e.g., Result[List[T], List[E]] for
                 // result.collect rather than hardcoding Result[T, String]).
