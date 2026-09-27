@@ -42,7 +42,7 @@ impl Checker {
             }
         };
         self.bind_for_in_var(var, var_tuple, elem_ty);
-        for stmt in body.iter_mut() { self.check_stmt(stmt); }
+        self.check_stmts_scoped(body, None);
         self.env.pop_scope();
         Ty::Unit
     }

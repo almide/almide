@@ -64,7 +64,7 @@ impl Checker {
                 let cond_ty = self.infer_expr(cond);
                 self.constrain_condition(cond, cond_ty, "while");
                 self.env.push_scope();
-                for stmt in body.iter_mut() { self.check_stmt(stmt); }
+                self.check_stmts_scoped(body, None);
                 self.env.pop_scope();
                 Ty::Unit
             }
@@ -204,18 +204,24 @@ impl Checker {
     fn infer_expr_g3_block(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::Block { stmts, expr, .. } = &mut expr.kind else { unreachable!() };
         self.env.push_scope();
-        // Pre-scan for vars used as match subjects with Ok/Err
-        // patterns — those bindings must keep their Result type.
-        let saved_skip = std::mem::take(&mut self.env.skip_auto_unwrap_for);
-        let result_match_vars = collect_block_result_match_vars(stmts, expr.as_deref());
-        for n in &result_match_vars {
-            self.env.skip_auto_unwrap_for.insert(*n);
-        }
-        for stmt in stmts.iter_mut() { self.check_stmt(stmt); }
+        self.check_stmts_scoped(stmts, expr.as_deref());
         let ty = if let Some(e) = expr { self.infer_expr(e) } else { Ty::Unit };
         self.env.pop_scope();
-        self.env.skip_auto_unwrap_for = saved_skip;
         ty
+    }
+
+    /// Check a statement list whose `let`s keep their Result when a later
+    /// `match { ok/err }` consumes them — each statement under the set of
+    /// names consumed after it that still refer to it (#2795: a shadowed
+    /// binding does not inherit its successor's consumer).
+    fn check_stmts_scoped(&mut self, stmts: &mut [ast::Stmt], tail: Option<&ast::Expr>) {
+        let (per_stmt, _) = collect_block_result_match_vars(stmts, tail);
+        let saved_skip = std::mem::take(&mut self.env.skip_auto_unwrap_for);
+        for (stmt, skip) in stmts.iter_mut().zip(per_stmt) {
+            self.env.skip_auto_unwrap_for = skip;
+            self.check_stmt(stmt);
+        }
+        self.env.skip_auto_unwrap_for = saved_skip;
     }
 
     /// `ExprKind::Fan` arm of [`Self::infer_expr_inner_g3`]: effect-fn
