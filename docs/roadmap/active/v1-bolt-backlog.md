@@ -215,11 +215,12 @@ Bolt を1つ取る(優先 = 既定 leg の証明被覆を最も上げる / relea
 
 - 最新: **v0.64.0**(2026-09-27、「check an edit before applying it, repairs in diagnostics, and an http layer」)。
   v0.64.1-rc1 が同日 pre-release。
-- open issue 87 件(enhancement 52 / A-wasm 29 / A-codegen 12 / A-stdlib 12 / proof 10 / mob 8 / bug 5 …)。
-- **release blocker 1 件**: #2780(regression、0.64 から `process.exit` が 126..255 を拒否し、wrapper が
-  子プロセスの exit status を返せない)。
-- ⚠ [ROAD_TO_1_0](../ROAD_TO_1_0.md) の台帳は 0.65 = cranelift DWARF(#1005)だが、実際の 0.6x の仕事は
-  wasm structural / http / survive 側に寄っていて、台帳と乖離している。ヘッダも「現在 0.40.2」のまま。
+- open issue 88 件(enhancement 52 / A-wasm 29 / A-codegen 12 / A-stdlib 12 / proof 10 / mob 8 / bug 5 …)。
+- **release blocker 3 件**(`scripts/count-release-blockers.sh`): #2780(regression、0.64 から `process.exit` が
+  126..255 を拒否し、wrapper が子プロセスの exit status を返せない)/ #2782(I-divergence、wasm `bytes.repeat` が
+  C-197 の上限検査をすり抜けて trap)/ #2783(I-divergence、native `matrix.linear_f32_row_no_bias` が C-161 を飛ばして panic)。
+- バージョン順の計画は [ROAD_TO_1_0](../ROAD_TO_1_0.md)(2026-09-27 に 0.65 以降を引き直した)。本書の N-B1 / N-B2 が
+  その 0.6x 残り、C2 系が 0.8x に当たる。
 
 ---
 
