@@ -610,8 +610,9 @@ effect fn main() -> Unit = {
         log.contains("structural leg, WASI 0.3 component (direct, async ABI)"),
         "the p3-requested fs build must route structurally by default:\n{log}"
     );
-    // Without the p3 request the incumbent keeps the route (the p1/p2
-    // transforms carry no fs ops).
+    // Without the p3 request the structural leg takes it too, through the
+    // p1 fs service and the preview1 adapter (#2742) — the incumbent no
+    // longer carries fs components.
     let o = Command::new(almide_bin())
         .args(["build", src.to_str().unwrap(), "--target", "wasm", "--component", "-o",
                d.join("flip_ad.wasm").to_str().unwrap()])
@@ -620,8 +621,8 @@ effect fn main() -> Unit = {
     let log = String::from_utf8_lossy(&o.stderr).to_string();
     assert!(o.status.success(), "build failed:\n{log}");
     assert!(
-        log.contains("incumbent v1 leg"),
-        "the non-p3 fs build must keep the incumbent route:\n{log}"
+        log.contains("structural leg, WASI 0.2 component (adapter)"),
+        "the non-p3 fs build must take the structural leg's adapter route:\n{log}"
     );
 }
 
