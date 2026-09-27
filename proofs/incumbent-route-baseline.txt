@@ -1,0 +1,108 @@
+# INCUMBENT-ROUTE CENSUS (#2741, tracking #2739): one row per program the wasm
+# router hands to the incumbent renderer, with the structural leg's decline.
+#
+#   lane :: file :: reason
+#
+#   build — `almide check --target wasm` (the build route) over every tracked
+#           program with a `main` in spec/, examples/, research/benchmark/, demo/
+#   test  — `almide test` at the repo root (ALMIDE_WALL_REASON=1); the FIRST
+#           structural decline per file, and only files the incumbent then served
+#
+# SHRINK-ONLY, to 0. Gate: scripts/check-incumbent-route.sh (CI almide-gates).
+#   - a new row fails: it is a regression onto the leg being deleted;
+#   - a row that lowers structurally is STALE and is pruned in the PR that fixed it
+#     (`bash scripts/check-incumbent-route.sh --prune`);
+#   - a changed reason is allowed: the test lane names the first decline only, so a
+#     fix can expose a second one in the same file (the row keeps its file).
+# Files NEITHER leg serves are proofs/wasm-fallback-baseline.txt's, not this ledger's.
+build :: examples/almd-outline/src/main.almd :: host-op:1 (p1)
+build :: examples/csv-to-json.almd :: host-op:1 (p1)
+build :: examples/dotenv-check.almd :: expr:Continue
+build :: examples/md2html.almd :: host-op:1 (p1)
+build :: research/benchmark/perf/fannkuchredux/fannkuchredux.almd :: bind:unmapped
+build :: research/benchmark/perf/hot-issues-2026-09-10/fanblock.almd :: bind:unmapped
+build :: spec/embedded_cross/fs_stat_glob_structural.almd :: host-op:2 (p1)
+build :: spec/wasm_cross/effect_tco_err_rewrap.almd :: host-op:1 (p1)
+build :: spec/wasm_cross/env_platform_reporting.almd :: host-op:27 (p1)
+build :: spec/wasm_cross/fan_arm_unwrap_or.almd :: bind:unmapped
+build :: spec/wasm_cross/fan_effect_mapper_capability.almd :: host-op:1 (p1)
+build :: spec/wasm_cross/fan_map_nested_combinators.almd :: bind:unmapped
+build :: spec/wasm_cross/fan_map_parallel_scalar.almd :: bind:unmapped
+build :: spec/wasm_cross/fan_prefetch_fs.almd :: host-op:2 (p1)
+build :: spec/wasm_cross/fan_settle_tuple.almd :: host-op:1 (p1)
+build :: spec/wasm_cross/fs_call_head_family.almd :: call:fs.fold_lines_range
+build :: spec/wasm_cross/fs_composition_family.almd :: host-op:1 (p1)
+build :: spec/wasm_cross/fs_fallible_stream_callback.almd :: host-op:1 (p1)
+build :: spec/wasm_cross/fs_glob_segments.almd :: host-op:2 (p1)
+build :: spec/wasm_cross/fs_list_dir_multipass.almd :: host-op:2 (p1)
+build :: spec/wasm_cross/fs_metadata_family.almd :: host-op:1 (p1)
+build :: spec/wasm_cross/fs_preopen_resolve.almd :: host-op:1 (p1)
+build :: spec/wasm_cross/fs_read_directory_errno.almd :: host-op:1 (p1)
+build :: spec/wasm_cross/fs_read_lines.almd :: host-op:2 (p1)
+build :: spec/wasm_cross/fs_read_text_utf8.almd :: host-op:1 (p1)
+build :: spec/wasm_cross/fs_relative_path.almd :: host-op:1 (p1)
+build :: spec/wasm_cross/fs_write_errno.almd :: host-op:1 (p1)
+build :: spec/wasm_cross/host_floor_string_alloc.almd :: host-op:1 (p1)
+build :: spec/wasm_cross/inplace_clear_alias_field.almd :: string-clear-nonvar
+build :: spec/wasm_cross/record_scalar_field_assign_alias.almd :: interp-part:Unit
+test :: spec/integration/codegen_functional_test.almd :: list-hof-nonlambda
+test :: spec/integration/codegen_loop_guard_test.almd :: expr:Continue
+test :: spec/integration/codegen_patterns_test.almd :: call:list.partition
+test :: spec/integration/codegen_pipes_test.almd :: call:list.partition
+test :: spec/integration/modules/cross_module_cell_update_test.almd :: assign:unmapped
+test :: spec/integration/modules/cross_module_global_state_loop_test.almd :: assign:unmapped
+test :: spec/integration/modules/qualified_ctor_test.almd :: ty-mismatch:Scalar(Int)-vs-Scalar(Str)
+test :: spec/integration/modules/same_name_ctor_test.almd :: ty-mismatch:Named(1)-vs-Named(0)
+test :: spec/lang/borrow_hoist_test.almd :: index-of:Scalar(Bytes)
+test :: spec/lang/control_flow_test.almd :: expr:Continue
+test :: spec/lang/edge_cases_test.almd :: call:list.partition
+test :: spec/lang/fallible_hof_test.almd :: call:testing.assert_contains
+test :: spec/lang/fallible_lambda_test.almd :: call:testing.assert_contains
+test :: spec/lang/fallible_marker_test.almd :: call:testing.assert_contains
+test :: spec/lang/fan_arm_unwrap_or_test.almd :: bind:unmapped
+test :: spec/lang/fan_let_capture_scope_test.almd :: bind:unmapped
+test :: spec/lang/fan_mapper_matrix_test.almd :: host-op:1 (p1)
+test :: spec/lang/fan_value_regression_test.almd :: list-hof-nonlambda
+test :: spec/lang/for_in_head_unwrap_test.almd :: call:testing.assert_contains
+test :: spec/lang/for_test.almd :: expr:Continue
+test :: spec/lang/guard_else_err_unwrap_test.almd :: interp-part:Unit
+test :: spec/lang/guard_test.almd :: expr:Continue
+test :: spec/lang/index_access_test.almd :: index-of:Scalar(Bytes)
+test :: spec/lang/intrinsic_readonly_borrow_test.almd :: index-of:Scalar(Bytes)
+test :: spec/lang/lambda_effect_symmetry_test.almd :: host-op:1 (p1)
+test :: spec/lang/map_literal_test.almd :: forin-map-nontuple
+test :: spec/lang/matrix_test.almd :: binop:MulMatrix
+test :: spec/lang/option_marker_test.almd :: list-hof-nonlambda
+test :: spec/lang/panic_test.almd :: call:panic
+test :: spec/lang/pattern_test.almd :: ty-mismatch:Unit-vs-Scalar(Str)
+test :: spec/lang/regression_v0_11_test.almd :: ty-mismatch:Unit-vs-Scalar(Int)
+test :: spec/lang/result_option_matrix_test.almd :: ty-mismatch:Scalar(Int)-vs-Result(ETy(0), ETy(1))
+test :: spec/lang/unwrap_never_err_test.almd :: host-op:1 (p1)
+test :: spec/lang/unwrap_operators_test.almd :: expr:OptionalChain
+test :: spec/lang/variable_test.almd :: ty-mismatch:Unit-vs-Scalar(Int)
+test :: spec/lang/while_loop_test.almd :: expr:Continue
+test :: spec/lang/while_test.almd :: expr:Break
+test :: spec/stdlib/bytes_typed_test.almd :: expr:Hole
+test :: spec/stdlib/coverage_datetime_test.almd :: call:datetime.now
+test :: spec/stdlib/coverage_testing_test.almd :: call:testing.assert_contains
+test :: spec/stdlib/datetime_semantics_manifest_test.almd :: call:datetime.monotonic_ns
+test :: spec/stdlib/env_extra_test.almd :: call:env.unix_timestamp
+test :: spec/stdlib/env_semantics_manifest_test.almd :: call:env.unix_timestamp
+test :: spec/stdlib/fs_fold_lines_chunked_test.almd :: call:fs.fold_lines_chunked
+test :: spec/stdlib/fs_fold_lines_int_acc_test.almd :: call:fs.fold_lines_chunked
+test :: spec/stdlib/fs_fold_lines_range_test.almd :: call:fs.fold_lines_range
+test :: spec/stdlib/fs_if_exists_test.almd :: call:testing.assert_none
+test :: spec/stdlib/fs_semantics_manifest_test.almd :: call:env.unix_timestamp
+test :: spec/stdlib/fs_stat_test.almd :: host-op:38 (p1)
+test :: spec/stdlib/fs_streaming_test.almd :: call:testing.assert_err
+test :: spec/stdlib/list_completeness_test.almd :: call:list.partition
+test :: spec/stdlib/list_completion_test.almd :: call:list.shuffle
+test :: spec/stdlib/option_test.almd :: list-hof-nonlambda
+test :: spec/stdlib/option_to_result_generic_test.almd :: call:testing.assert_contains
+test :: spec/stdlib/pipe_chain_test.almd :: call:list.partition
+test :: spec/stdlib/random_choice_pair_test.almd :: call:random.choice
+test :: spec/stdlib/random_shuffle_pair_test.almd :: call:random.shuffle
+test :: spec/stdlib/random_test.almd :: call:random.float
+test :: spec/stdlib/result_errjoin_effect_test.almd :: unwrap-err-ty-mismatch
+test :: spec/stdlib/testing_result_layout_test.almd :: call:testing.assert_ok
+test :: spec/stdlib/testing_semantics_manifest_test.almd :: call:testing.assert_gt
