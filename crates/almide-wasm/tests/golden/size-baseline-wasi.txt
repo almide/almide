@@ -124,6 +124,7 @@
 3229	spec/wasm_cross/effect_assign_unwrap.almd
 6865	spec/wasm_cross/effect_call_arg_credit.almd
 6144	spec/wasm_cross/effect_fn_value.almd
+52846	spec/wasm_cross/effect_fn_value_slot_family.almd
 2010	spec/wasm_cross/effect_main_guard_err.almd
 5099	spec/wasm_cross/effect_main_guard_ok.almd
 3650	spec/wasm_cross/effect_mut_generic_port.almd
@@ -745,7 +746,7 @@
 2647	spec/wasm_cross/unique_non_flat_element.almd
 2595	spec/wasm_cross/unit_effect_abi.almd
 3339	spec/wasm_cross/unsigned_literal_domain.almd
-!	spec/wasm_cross/unwrap_callarg_single_expr_effect_body.almd
+4589	spec/wasm_cross/unwrap_callarg_single_expr_effect_body.almd
 2908	spec/wasm_cross/unwrap_in_callarg.almd
 2792	spec/wasm_cross/unwrap_in_if_arm.almd
 3390	spec/wasm_cross/unwrap_in_recursion.almd
