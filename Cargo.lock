@@ -264,10 +264,12 @@ version = "0.1.0"
 name = "almide-wasi"
 version = "0.12.2"
 dependencies = [
+ "almide-base",
  "almide-wasm",
  "anyhow",
  "wasm-encoder 0.259.0",
  "wasmparser 0.259.0",
+ "wat",
 ]
 
 [[package]]
