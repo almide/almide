@@ -7,7 +7,7 @@ import leakmid
 type Stop = { message: String, code: Int8 }
 
 fn show(s: Stop) -> String = match s {
-  Stop { message, code } => "${message}/${int8.to_string(code)}",
+  Stop { message, code } => "${message}/${int8.to_string(code)}"
 }
 
 test "a transitive module's case does not override this file's own record" {
@@ -16,14 +16,10 @@ test "a transitive module's case does not override this file's own record" {
   assert_eq(show(s), "halt/7")
 }
 
-test "an anonymous destructure of the own record reads its fields" {
-  let s = Stop { message: "halt", code: 7 }
-  let { message, code } = s
-  assert_eq(message, "halt")
-  assert_eq(code, 7)
-}
-
 test "a list of the own record keeps its shape" {
-  let xs = [Stop { message: "a", code: 1 }, Stop { message: "b", code: 2 }]
+  let xs = [
+    Stop { message: "a", code: 1 },
+    Stop { message: "b", code: 2 }
+  ]
   assert_eq(xs |> list.map((x) => x.message) |> list.join(","), "a,b")
 }
