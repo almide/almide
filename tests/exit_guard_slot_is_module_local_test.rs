@@ -127,14 +127,14 @@ fn the_range_rule_still_holds_from_a_module() {
     assert!(ok, "build failed:\n{out}");
 
     for (arg, want_code, want_msg) in
-        [("0", 0, false), ("3", 3, false), ("125", 125, false), ("126", 1, true), ("200", 1, true)]
+        [("0", 0, false), ("3", 3, false), ("125", 125, false), ("126", 126, false), ("200", 200, false), ("256", 1, true), ("-1", 1, true)]
     {
         let run = Command::new(&out_bin).arg(arg).output().expect("failed to run");
         let code = run.status.code().unwrap_or(-1);
         let stderr = String::from_utf8_lossy(&run.stderr).to_string();
         assert_eq!(code, want_code, "exit({arg}) from a module gave {code}\nstderr: {stderr}");
         assert_eq!(
-            stderr.contains("exit code must be in 0..=125"),
+            stderr.contains("exit code must be in 0..=255"),
             want_msg,
             "exit({arg}) stderr was: {stderr}"
         );
@@ -154,7 +154,7 @@ fn the_range_rule_still_holds_from_a_module() {
             "exit({arg}) gave {code} natively and {wasm_code} on wasm\nwasm stderr: {wasm_stderr}"
         );
         assert_eq!(
-            wasm_stderr.contains("exit code must be in 0..=125"),
+            wasm_stderr.contains("exit code must be in 0..=255"),
             want_msg,
             "exit({arg}) wasm stderr was: {wasm_stderr}"
         );

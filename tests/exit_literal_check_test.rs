@@ -1,4 +1,5 @@
-//! #2328: the checker rejects literal exit codes outside the portable domain.
+//! #2328, #2780: the checker rejects literal exit codes outside the exit-status
+//! domain 0..=255 (C-351).
 use std::process::Command;
 
 #[test]
@@ -18,23 +19,26 @@ fn literal_exit_codes_follow_the_portable_domain() {
         ("0", true),
         ("1", true),
         ("125", true),
+        ("126", true),
+        ("130", true),
+        ("255", true),
         ("-0", true),
-        ("-(-125)", true),
-        ("0x7d", true),
-        ("0b1111101", true),
-        ("0o175", true),
-        ("1_25", true),
+        ("-(-255)", true),
+        ("0xff", true),
+        ("0b11111111", true),
+        ("0o377", true),
+        ("2_55", true),
+        ("(200)", true),
         ("-1", false),
-        ("126", false),
-        ("200", false),
         ("256", false),
-        ("0x7e", false),
-        ("0b1111110", false),
-        ("0o176", false),
-        ("1_26", false),
-        ("(200)", false),
+        ("1000", false),
+        ("0x100", false),
+        ("0b100000000", false),
+        ("0o400", false),
+        ("2_56", false),
+        ("(256)", false),
         ("-(1)", false),
-        ("-(-126)", false),
+        ("-(-256)", false),
     ];
     for (imports, call) in forms {
         for (literal, accepted) in literals {
@@ -56,7 +60,7 @@ fn literal_exit_codes_follow_the_portable_domain() {
             );
             if !accepted {
                 assert!(diagnostics.contains("E084"), "{program}\n{diagnostics}");
-                assert!(diagnostics.contains("0..=125"), "{diagnostics}");
+                assert!(diagnostics.contains("0..=255"), "{diagnostics}");
             }
         }
     }
@@ -69,10 +73,10 @@ fn computed_codes_and_local_functions_remain_checkable() {
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("computed.almd");
     for program in [
-        "import process\neffect fn main() -> Unit = { let code = 200\n process.exit(code) }",
-        "import process\neffect fn main() -> Unit = process.exit(100 + 100)",
-        "fn exit(code: Int) -> Int = code\nfn main() -> Unit = { let _ = exit(200) }",
-        "import process.{exit}\nfn main() -> Unit = { let exit = (code: Int) => code\n let _ = exit(200) }",
+        "import process\neffect fn main() -> Unit = { let code = 300\n process.exit(code) }",
+        "import process\neffect fn main() -> Unit = process.exit(200 + 100)",
+        "fn exit(code: Int) -> Int = code\nfn main() -> Unit = { let _ = exit(300) }",
+        "import process.{exit}\nfn main() -> Unit = { let exit = (code: Int) => code\n let _ = exit(300) }",
     ] {
         std::fs::write(&source, program).unwrap();
         let output = Command::new(&bin)
@@ -107,7 +111,7 @@ fn a_user_module_named_process_has_no_exit_domain_restriction() {
     .unwrap();
     std::fs::write(
         root.join("src/main.almd"),
-        "import self.process\nfn main() -> Unit = { let _ = process.exit(200) }\n",
+        "import self.process\nfn main() -> Unit = { let _ = process.exit(300) }\n",
     )
     .unwrap();
     let output = Command::new(&bin)
@@ -128,7 +132,7 @@ fn the_diagnostic_points_to_the_argument_without_choosing_a_replacement() {
         std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").to_string());
     let directory = tempfile::tempdir().unwrap();
     let source = directory.path().join("span.almd");
-    let line = "effect fn main() -> Unit = process.exit(200)";
+    let line = "effect fn main() -> Unit = process.exit(256)";
     std::fs::write(&source, format!("import process\n{line}\n")).unwrap();
     let output = Command::new(&bin)
         .args(["check", "--json"])
@@ -146,8 +150,8 @@ fn the_diagnostic_points_to_the_argument_without_choosing_a_replacement() {
         .find(|value| value["code"] == "E084")
         .expect("E084 JSON diagnostic");
     assert_eq!(diagnostic["line"], 2);
-    assert_eq!(diagnostic["col"], line.find("200").unwrap() + 1);
-    assert_eq!(diagnostic["end_col"], line.find("200").unwrap() + 4);
+    assert_eq!(diagnostic["col"], line.find("256").unwrap() + 1);
+    assert_eq!(diagnostic["end_col"], line.find("256").unwrap() + 4);
     assert!(diagnostic["try_replace"].is_null());
 }
 
@@ -164,7 +168,7 @@ fn a_local_binding_shadowing_the_module_is_not_judged() {
     let bin =
         std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").to_string());
     let directory = tempfile::tempdir().unwrap();
-    let body = "fn main() -> Unit = { let process = { exit: (code: Int) => code }\n let _ = process.exit(200) }\n";
+    let body = "fn main() -> Unit = { let process = { exit: (code: Int) => code }\n let _ = process.exit(300) }\n";
 
     let clean = directory.path().join("shadow_no_import.almd");
     std::fs::write(&clean, body).unwrap();

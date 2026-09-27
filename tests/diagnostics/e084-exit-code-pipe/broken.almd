@@ -1,2 +1,2 @@
 import process as p
-effect fn main() -> Unit = 0x7e |> p.exit
+effect fn main() -> Unit = 0x100 |> p.exit
