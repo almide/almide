@@ -6,11 +6,45 @@
 /// patterns inside a block. Used to suppress auto-unwrap of Result on
 /// the corresponding `let` bindings — the user wants to inspect the
 /// Result, so the Bind must keep its Result type.
-pub(crate) fn collect_block_result_match_vars(stmts: &[ast::Stmt], tail: Option<&ast::Expr>) -> std::collections::HashSet<Sym> {
-    let mut out = std::collections::HashSet::new();
-    for s in stmts { collect_in_stmt(s, &mut out); }
-    if let Some(e) = tail { collect_in_expr(e, &mut out); }
-    out
+///
+/// Scoped (#2795): a `match m { ok/err }` names the NEAREST preceding `let m`
+/// of this block, not every binding spelled `m`. A shadowed `let m = <Result>`
+/// that nothing consumes must not borrow the skip of the `let m` after it —
+/// the lowering decides per `VarId`, so it auto-?'d the first binding while
+/// the checker had let it through without E041, and rustc rejected the result.
+/// Returns, per statement, the names consumed AFTER it that still refer to a
+/// binding at or before it (so a `let n` there keeps its Result iff `n` is in
+/// its set), and the names the whole list consumes from the scope outside it.
+/// Nested statement lists (blocks, loop bodies) are checked under their own
+/// sets, so a statement's set need not carry the names consumed inside it.
+pub(crate) fn collect_block_result_match_vars(
+    stmts: &[ast::Stmt],
+    tail: Option<&ast::Expr>,
+) -> (Vec<std::collections::HashSet<Sym>>, std::collections::HashSet<Sym>) {
+    let mut live = std::collections::HashSet::new();
+    if let Some(e) = tail { collect_in_expr(e, &mut live); }
+    let mut per_stmt = vec![std::collections::HashSet::new(); stmts.len()];
+    for (i, s) in stmts.iter().enumerate().rev() {
+        per_stmt[i] = live.clone();
+        // The binding at `i` shadows every name consumed after it; the
+        // statement's own value still refers to the bindings before it.
+        if let Some(n) = stmt_bound_name(s) { live.remove(&n); }
+        collect_in_stmt(s, &mut live);
+    }
+    (per_stmt, live)
+}
+
+/// The name a statement binds in its block's scope (`let` / `var`).
+fn stmt_bound_name(stmt: &ast::Stmt) -> Option<Sym> {
+    match stmt {
+        ast::Stmt::Let { name, .. } | ast::Stmt::Var { name, .. } => Some(*name),
+        _ => None,
+    }
+}
+
+/// The names a nested statement list consumes from its enclosing scope.
+fn collect_in_block(stmts: &[ast::Stmt], tail: Option<&ast::Expr>, out: &mut std::collections::HashSet<Sym>) {
+    out.extend(collect_block_result_match_vars(stmts, tail).1);
 }
 
 fn collect_in_stmt(stmt: &ast::Stmt, out: &mut std::collections::HashSet<Sym>) {
@@ -73,8 +107,7 @@ fn collect_in_expr_control(expr: &ast::Expr, out: &mut std::collections::HashSet
     match &expr.kind {
         ExprKind::Match { subject, arms, .. } => { collect_in_match_expr(subject, arms, out); true }
         ExprKind::Block { stmts, expr: tail, .. } => {
-            for s in stmts { collect_in_stmt(s, out); }
-            if let Some(t) = tail { collect_in_expr(t, out); }
+            collect_in_block(stmts, tail.as_deref(), out);
             true
         }
         ExprKind::If { cond, then, else_, .. } => {
@@ -91,12 +124,12 @@ fn collect_in_expr_control(expr: &ast::Expr, out: &mut std::collections::HashSet
         }
         ExprKind::ForIn { iterable, body, .. } => {
             collect_in_expr(iterable, out);
-            for s in body { collect_in_stmt(s, out); }
+            collect_in_block(body, None, out);
             true
         }
         ExprKind::While { cond, body, .. } => {
             collect_in_expr(cond, out);
-            for s in body { collect_in_stmt(s, out); }
+            collect_in_block(body, None, out);
             true
         }
         _ => false,

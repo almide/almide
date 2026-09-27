@@ -1,0 +1,57 @@
+// #2796: a `match m { ok/err }` keeps the Result of the NEAREST `let m` before
+// it, not of every binding spelled `m`. These shapes keep their Result and
+// must reach native rustc and run; the shadowed-and-unconsumed shape is the
+// E041 diagnostics fixture `e041-shadowed-let-borrows-consumer`.
+effect fn load(n: Int) -> String = "loaded ${n}"
+
+effect fn rewrap(n: Int) -> String = {
+  let m = match n {
+    0 => err("zero"),
+    _ => load(n),
+  }
+  let m = match m {
+    ok(v) => ok("again ${v}"),
+    err(e) => err(e),
+  }
+  match m {
+    ok(v) => v,
+    err(e) => "err: ${e}",
+  }
+}
+
+effect fn loops(n: Int) -> List[String] = {
+  var out: List[String] = []
+  for i in [n, 0] {
+    let r = if i > 0 then load(i) else err("none")
+    out = out + [
+      match r {
+        ok(v) => v,
+        err(e) => e,
+      }
+    ]
+  }
+  var k = 0
+  while k < 1 {
+    let r = match k {
+      0 => load(n),
+      _ => err("late"),
+    }
+    out = out + [
+      match r {
+        ok(v) => v,
+        err(e) => e,
+      }
+    ]
+    k = k + 1
+  }
+  out
+}
+
+test "a match consumer keeps the Result of the let it names through a shadow" {
+  assert_eq(rewrap(0)!, "err: zero")
+  assert_eq(rewrap(3)!, "again loaded 3")
+}
+
+test "a let in a loop body keeps its Result for the match after it" {
+  assert_eq(loops(2)!, ["loaded 2", "none", "loaded 2"])
+}

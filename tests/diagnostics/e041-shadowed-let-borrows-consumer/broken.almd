@@ -1,0 +1,22 @@
+// E041: a shadowed un-annotated Result binding that nothing consumes (#2796).
+// The `match m { ok/err }` below names the SECOND `m`; the first one used to
+// borrow that consumer by name, pass the checker, and get an auto-? that
+// rustc rejected (E0308).
+effect fn load(n: Int) -> String = "loaded ${n}"
+
+effect fn show(n: Int) -> String = {
+  let m = match n {
+    0 => err("zero"),
+    _ => load(n),
+  }
+  let m = match n {
+    0 => err("zero"),
+    _ => load(n),
+  }
+  match m {
+    ok(v) => v,
+    err(e) => "err: ${e}",
+  }
+}
+
+effect fn main() -> Unit = println(show(1)!)
