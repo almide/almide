@@ -1,0 +1,24 @@
+// @contract: C-153
+// The output and abort builtins called from PURE fns (ADR-0022,
+// docs/specs/effect-system.md §2.1), byte-identical on both targets: a pure
+// `main` calls pure helpers that write to stdout and stderr, then a pure
+// helper's `assert_eq` fails. Expected: stdout carries the three lines, stderr
+// carries the `warn:` line and then the C-153 block (`Error: assertion failed`,
+// `  at:`, `  expected: 0`, `  found: 1`), and the exit code is 1. The stdout
+// written before the abort is flushed, and the line after it never runs.
+fn show(label: String, n: Int) -> Unit = println("${label}=${n}")
+
+fn warn(msg: String) -> Unit = eprintln("warn: ${msg}")
+
+fn half(n: Int) -> Int = {
+  assert_eq(n % 2, 0)
+  n / 2
+}
+
+fn main() -> Unit = {
+  show("half", half(8))
+  warn("odd input next")
+  show("double", 2 * half(6))
+  show("before", 3)
+  show("never", half(3))
+}

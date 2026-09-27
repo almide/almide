@@ -1,0 +1,48 @@
+// A pure fn may call the output and abort builtins: `println`, `eprintln`,
+// `panic`, `assert`, `assert_eq`, `assert_ne` (ADR-0022,
+// docs/specs/effect-system.md §2.1). They write or abort and never read, so a
+// pure fn that uses them keeps a pure signature: callers use its value
+// directly, with no `!`.
+fn show(label: String, n: Int) -> Unit = println("${label}=${n}")
+
+fn warn(msg: String) -> Unit = eprintln("warn: ${msg}")
+
+fn fail(msg: String) -> Unit = panic(msg)
+
+fn half(n: Int) -> Int = {
+  assert(n >= 0)
+  assert_eq(n % 2, 0)
+  assert_ne(n, 7)
+  n / 2
+}
+
+fn traced_double(xs: List[Int]) -> List[Int] = xs |> list.map((x) => {
+  println("x=${x}")
+  x * 2
+})
+
+fn safe_half(n: Int) -> Int = {
+  if n < 0 then fail("negative") else ()
+  half(n)
+}
+
+effect fn report(n: Int) -> Int = {
+  show("n", n)
+  warn("reporting")
+  safe_half(n)
+}
+
+test "a pure fn that prints returns its value unchanged" {
+  show("start", 1)
+  assert_eq(half(8), 4)
+  assert_eq(traced_double([1, 2, 3]), [2, 4, 6])
+}
+
+test "a pure fn's asserts pass through when they hold" {
+  assert_eq(safe_half(10), 5)
+  assert_eq(half(0), 0)
+}
+
+test "an effect fn calls a printing pure fn without a bang" {
+  assert_eq(report(6), ok(3))
+}
