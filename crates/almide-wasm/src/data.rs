@@ -347,6 +347,77 @@ impl Emitter<'_> {
         self.owned_call_marks.insert(e as *const IrExpr as usize);
     }
 
+    /// `List[String]` — the error type native `!` JOINS into a String
+    /// channel (`map_err_join`) instead of rendering its repr; still walled.
+    fn is_str_list(&self, t: SliceTy) -> bool {
+        matches!(t, SliceTy::List(h) if self.types.el(h) == STR)
+    }
+
+    /// ADR-0021 D2 (#2725): `expr!` whose operand fails with a typed `E`
+    /// inside a String channel (a `-> T!` fn, or a lambda whose `!`s did
+    /// not agree on one `E`). Native converts at the `!` with
+    /// `almide_repr` — the text `"${e}"` shows — so the propagated block is
+    /// a FRESH `err(<repr of e>)`, not the operand's. The carrier (in
+    /// `scr_i32_local`, tag already known non-zero) is read, never moved:
+    /// an owned temporary is released here, a borrowed one stays with the
+    /// route that owns it. Emits the propagation's `return`.
+    fn propagate_err_as_repr(
+        &mut self,
+        carrier_ty: SliceTy,
+        ert: SliceTy,
+        owned_carrier: bool,
+    ) -> Result<(), EmitError> {
+        let car = self.hold_i32()?;
+        self.f.instructions().local_get(self.scr_i32_local).local_set(car);
+        // A one-part `"${e}"` build (the StringInterp capture, emitter.rs):
+        // start at the published cursor, append the display, capture.
+        let start = self.hold_i32()?;
+        self.f
+            .instructions()
+            .global_get(G_LINE_CURSOR)
+            .local_tee(start)
+            .local_set(self.cursor_local)
+            .local_get(car);
+        self.load_ty_slot(ert, almide_layout::SUM_FIELD);
+        self.build_depth += 1;
+        let shown = self.emit_display_value(ert, false);
+        self.build_depth -= 1;
+        shown?;
+        let msg = self.hold_i32()?;
+        self.f
+            .instructions()
+            .local_get(start)
+            .local_get(self.cursor_local)
+            .call(F_BUF_TO_BLOCK)
+            .local_set(msg)
+            .local_get(start)
+            .global_set(G_LINE_CURSOR)
+            .local_get(start)
+            .local_set(self.cursor_local);
+        // err(msg): the same 16-byte String-channel err block `none` builds.
+        self.f
+            .instructions()
+            .i32_const(16)
+            .call(F_ALLOC)
+            .local_tee(start)
+            .i32_const(1)
+            .i32_store(slot_memarg(almide_layout::SUM_TAG))
+            .local_get(start)
+            .local_get(msg)
+            .i32_store(slot_memarg(almide_layout::SUM_FIELD));
+        if owned_carrier {
+            let dec = self.dec_fn_of(carrier_ty);
+            self.f.instructions().local_get(car).call(dec);
+        }
+        let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
+        self.emit_exit(&plan);
+        self.f.instructions().local_get(start).return_();
+        self.release_i32();
+        self.release_i32();
+        self.release_i32();
+        Ok(())
+    }
+
     pub(crate) fn lower_try_unwrap(
         &mut self,
         e: &IrExpr,
@@ -458,7 +529,11 @@ impl Emitter<'_> {
                             .i32_const(0)
                             .i32_ne()
                             .if_(BlockType::Empty);
-                        if in_effect {
+                        if in_effect && fn_err == Some(STR) && ert != STR && !self.is_str_list(ert) {
+                            // ADR-0021 D2 / #2725: a typed error `!`-ed into a
+                            // String channel — the channel carries its repr text.
+                            self.propagate_err_as_repr(SliceTy::Result(o, er), ert, owned_carrier)?;
+                        } else if in_effect {
                             if fn_err != Some(ert) {
                                 return unsup("unwrap-err-ty-mismatch");
                             }
