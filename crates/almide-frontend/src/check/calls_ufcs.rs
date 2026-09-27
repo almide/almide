@@ -103,15 +103,13 @@ impl Checker {
         if let Some(ty) = self.check_call_target_e002_hint(builtin_module, &field, object) {
             return ty;
         }
-        // #1590: a PROTOCOL name used as a value type — the lookup fails
-        // because the ANNOTATION is invalid, not because the method is
-        // missing. Stay quiet here (the Unknown-recovery doctrine); the
-        // post-solve E029 names the root cause at the annotation with the
-        // protocol-specific message. One root-cause error beats a derived
+        // #1590 / #2771: a PROTOCOL name used as a value type, or a name no
+        // declaration registered — the lookup fails because the ANNOTATION
+        // is invalid, not because the method is missing. Stay quiet here
+        // (the Unknown-recovery doctrine); the post-solve E029 names the
+        // root cause at the annotation. One root-cause error beats a derived
         // E002 the writer reads first and fixes wrongly.
-        if let Ty::Named(n, _) = &obj_concrete
-            && self.env.protocols.contains_key(n)
-        {
+        if self.undeclared_type_name(&obj_concrete).is_some() {
             return Ty::Unknown;
         }
         // #1521: an unknown method on a CONCRETE user type used to fall into
