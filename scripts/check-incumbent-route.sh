@@ -41,7 +41,7 @@
 #   ... --prune     rewrite the ledger: drop STALE rows, refresh changed reasons.
 #                   It never ADDS a row — a new one is a regression, not a re-anchor.
 #   TEST_LOG=<file> reuse the stderr of an `ALMIDE_WALL_REASON=1 almide test` run at
-#                   the root (CI: written by check-wasm-fallback.sh via ALMIDE_TEST_LOG)
+#                   the root (CI: written by check-wasm-fallback.sh via FALLBACK_TEST_LOG)
 #                   instead of running the suite again.
 #   LANES="build"   measure one lane only (the other lane's rows are left alone).
 set -uo pipefail
