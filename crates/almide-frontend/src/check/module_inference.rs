@@ -56,6 +56,9 @@ impl Checker {
         let (mod_table, diags) = build_import_table(prog, Some(import_table_name), &self.env.user_modules);
         self.env.import_table = mod_table;
         self.diagnostics.extend(diags);
+        // Recorded before the snapshot so it outlives this inference: the
+        // module's lowering resolves its bare type names the same way (#2715).
+        crate::canonicalize::resolve::register_scoped_bare_type_keys(&mut self.env, Some(module_name));
 
         // Temporarily register unprefixed declarations for intra-module resolution.
         // `alias_owner_module` marks them as belonging to THIS module, so the
@@ -78,6 +81,7 @@ impl Checker {
             Some(module_name.to_string()),
         );
         self.validate_protocol_refs(prog);
+        self.validate_bare_type_visibility(prog);
         for decl in prog.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();

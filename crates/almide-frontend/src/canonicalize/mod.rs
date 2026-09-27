@@ -35,6 +35,13 @@ pub fn register_module(
     if is_self {
         env.self_module_name = Some(sym(name));
     }
+    // The module's own import scope for its bare type names (#2715). Its
+    // imports registered before it (the resolver loads leaves first).
+    let package = name.split('.').next().unwrap_or(name);
+    let (table, _) = build_import_table(prog, Some(package), &env.user_modules);
+    let saved = std::mem::replace(&mut env.import_table, table);
+    resolve::register_scoped_bare_type_keys(env, Some(name));
+    env.import_table = saved;
     registration::register_decls(env, diagnostics, &prog.decls, Some(name));
 }
 
@@ -116,6 +123,7 @@ pub fn canonicalize_program_in<'a>(
     // Every alias spelling of a dependency type (`sh.Box`, `shape.Box`)
     // resolves to its canonical key from here on (#1955).
     resolve::register_alias_type_keys(&mut env);
+    resolve::register_scoped_bare_type_keys(&mut env, None);
 
     // 4. Register main program declarations
     registration::register_decls(&mut env, &mut diagnostics, &program.decls, None);
@@ -197,6 +205,7 @@ pub fn canonicalize_entry_onto(
     // Every alias spelling of a dependency type (`sh.Box`, `shape.Box`)
     // resolves to its canonical key from here on (#1955).
     resolve::register_alias_type_keys(env);
+    resolve::register_scoped_bare_type_keys(env, None);
     registration::register_decls(env, diagnostics, &program.decls, None);
     env.failed_fn_names.extend(program.failed_fn_names.iter().cloned());
     diagnostics.extend(std::mem::take(&mut env.attr_diagnostics));

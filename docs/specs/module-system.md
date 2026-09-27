@@ -318,6 +318,26 @@ let s = Stop { message: "halt" }   // ✓ main 自身の Stop(レコード)
 テスト: `spec/integration/modules/case_leak_transitive_test.almd`,
 `spec/integration/modules/case_leak_direct_test.almd`, `tests/ctor_ambiguity_test.rs`
 
+### 4.5 型名・プロトコル名の見え方 (#2715)
+
+**裸の型名・プロトコル名が見えるのは、そのファイル自身・直接 import したモジュール・
+stdlib の宣言だけ。** import していないモジュール(推移的依存を含む)の型は裸では
+解決されず **E029**(`type 'X' is not in scope here`)になり、hint が import すべき
+モジュールと修飾形(`b.X`)を示す。プロトコルも同じ(`type T: P` / `[S: P]`)。
+
+| 形 | 結果 |
+|---|---|
+| 自分で宣言した型 | 自分の型(宣言順は問わない) |
+| 直接 import したモジュールのうち 1 つだけが宣言 | そのモジュールの型。import していない別モジュールが同名を宣言していても変わらない |
+| import していないモジュールだけが宣言 | **E029**。修飾して書くには、そのモジュールを import する |
+| 直接 import した 2 つ以上のモジュールが宣言 | 修飾して書く(`a.X` / `b.X`) |
+
+以前は裸の名前がプログラム全体で解決され、同名の型がいくつあるかと、モジュールの
+登録順(import 順・ディレクトリ順)で意味が変わった。触っていないファイルが、別の
+モジュールに同名の型が増えただけで壊れたり、OS によって結果が変わったりした。
+
+テスト: `tests/bare_type_visibility_test.rs`, `tests/own_type_forward_reference_test.rs`
+
 ---
 
 ## 5. ダイヤモンド依存
