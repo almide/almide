@@ -119,9 +119,11 @@ jobs:
 
           echo "::notice::Cross-target: Rust $rust_pass, WASM $wasm_pass, agree $agree / $total (both pass $both_pass, both empty $empty)"
 
-      - name: v1 trust-spine differential fuzz (render_program v0==v1)
+      - name: Structural wasm differential fuzz (native == structural build)
         run: |
-          # PER-PR generative byte-match of the V1 TRUST-SPINE path (render_program -> wasm). The
+          # PER-PR generative byte-match of the STRUCTURAL wasm leg (`ALMIDE_WASM_STRUCTURAL=1
+          # almide build --target wasm` -> wasmtime, #2753 — it drove the incumbent's
+          # render_program before). The
           # cross-target step above compares the two `almide test` lanes' VERDICTS per file, not
           # the bytes either lane produced, and the
           # nightly xtarget-fuzz emits only `let`-bound expressions — so the imperative
@@ -129,8 +131,9 @@ jobs:
           # shipped. This synthesizes that class (var reassignment, loops, accumulators, the sha1
           # rotation) PLUS the COMPARISON matrix (==/!=/</<=/>/>= over Int/String/Bool/Float + lists,
           # in if-condition AND value position — the class that shipped the handle-compare / both-arms
-          # silent miscompiles) and byte-diffs v0 native vs v1 wasm. N is high enough that every
-          # template (now 11) is exercised each run. Any divergence fails the build.
+          # silent miscompiles) and byte-diffs native vs wasm. N is high enough that every
+          # template (now 11) is exercised each run. Any divergence, structural wall or program
+          # that does not run natively fails the build.
           bash proofs/diff-fuzz.sh 150
 
       - name: v1 trust-spine output parity (fixtures, ratcheting baseline)
