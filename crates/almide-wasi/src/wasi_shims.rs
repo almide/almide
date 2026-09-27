@@ -81,14 +81,17 @@ fn shim_print(fd: i32, park: u64) -> Function {
 /// no exit request, so the shim prints [`EXIT_WALL_MSG`] and exits 1. The
 /// guest has already refused everything outside 0..=255 (the IR guard), and
 /// the embedded host, which runs the same module before this transform,
-/// delivers the whole band.
-fn shim_exit(park: u64) -> Function {
+/// delivers the whole band. `wall` is false when no exit call in the module
+/// can carry such a code, and then the shim is the bare `proc_exit`.
+fn shim_exit(park: u64, wall: bool) -> Function {
     let mut f = Function::new([]);
     let mut i = f.instructions();
-    i.local_get(0).i32_const(EXIT_WALL_FROM).i32_ge_u();
-    i.if_(BlockType::Empty);
-    refuse(&mut i, park, MSG4, EXIT_WALL_MSG.len());
-    i.end();
+    if wall {
+        i.local_get(0).i32_const(EXIT_WALL_FROM).i32_ge_u();
+        i.if_(BlockType::Empty);
+        refuse(&mut i, park, MSG4, EXIT_WALL_MSG.len());
+        i.end();
+    }
     i.local_get(0).call(1).unreachable().end();
     f
 }

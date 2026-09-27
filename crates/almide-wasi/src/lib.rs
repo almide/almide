@@ -339,6 +339,38 @@ impl P1Services {
 /// `host_ops` is the emitter's op set for the module (the second half of
 /// `almide_wasm::emit_program_with_ops`): the env/args services ship only
 /// for the ops it names (#1841).
+/// Whether any call to the original `almide.exit` import (function index 2)
+/// can pass a code the preview-1 `proc_exit` does not deliver: every call not
+/// immediately preceded by a constant in 0..=125 — an `i32.const`, or the
+/// emitter's `i64.const` + `i32.wrap_i64` form of one.
+fn exit_can_exceed_preview1(bodies: &[wasmparser::FunctionBody<'_>]) -> anyhow::Result<bool> {
+    use wasmparser::Operator as Op;
+    const ALMIDE_EXIT: u32 = 2;
+    let in_range = |c: i64| (0..i64::from(EXIT_WALL_FROM)).contains(&c);
+    for b in bodies {
+        // The constant on top of the stack, and whether it is still an i64.
+        let mut top: Option<(i64, bool)> = None;
+        for op in b.get_operators_reader()? {
+            top = match op? {
+                Op::Call { function_index } if function_index == ALMIDE_EXIT => {
+                    if !matches!(top, Some((c, false)) if in_range(c)) {
+                        return Ok(true);
+                    }
+                    None
+                }
+                Op::I32Const { value } => Some((i64::from(value), false)),
+                Op::I64Const { value } => Some((value, true)),
+                Op::I32WrapI64 => match top {
+                    Some((c, true)) if in_range(c) => Some((c, false)),
+                    _ => None,
+                },
+                _ => None,
+            };
+        }
+    }
+    Ok(false)
+}
+
 pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     let services = P1Services::from_ops(host_ops);
     let parsed = parse_module(bytes)?;
@@ -533,6 +565,10 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
 
     let mut code = CodeSection::new();
     let mut remap = Remap { shim_base, shift };
+    // C-350's wall ships only when some `almide.exit` call can carry a code
+    // outside 0..=125 (#2780); a module whose exits are all in-range
+    // constants — the abort tails, most programs — keeps its old bytes.
+    let exit_wall = exit_can_exceed_preview1(&bodies)?;
     for b in bodies {
         code.function(&reencode_body(&b, &mut remap, 1)?);
     }
@@ -541,7 +577,7 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     // env_get, env_set, args the op set reached.
     code.function(&shim_print(1, park));
     code.function(&shim_print(2, park));
-    code.function(&shim_exit(park));
+    code.function(&shim_exit(park, exit_wall));
     // #1962: a module whose emitted op set is EMPTY never calls `fs_call`
     // (and `host_read` only copies an op's result out), so both shims ship
     // as index-stable `unreachable` stubs — the fs_call dispatcher alone is
@@ -599,7 +635,9 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         data.active(0, &ConstExpr::i32_const((park + MSG3) as i32), OOM_MSG.iter().copied());
     }
 
-    data.active(0, &ConstExpr::i32_const((park + MSG4) as i32), EXIT_WALL_MSG.iter().copied());
+    if exit_wall {
+        data.active(0, &ConstExpr::i32_const((park + MSG4) as i32), EXIT_WALL_MSG.iter().copied());
+    }
 
     let mut m = Module::new();
     m.section(&type_sec)
