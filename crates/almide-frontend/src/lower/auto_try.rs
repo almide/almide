@@ -339,24 +339,6 @@ fn value_ok_is_result(value: &IrExpr) -> bool {
     }
 }
 
-/// Strip one inserted top-level Try, restoring the Result-typed value.
-/// Used wherever the TARGET keeps the Result (skip-set binding, declared
-/// Result annotation, Result-typed assign target).
-fn strip_top_try(expr: IrExpr) -> IrExpr {
-    match expr.kind {
-        IrExprKind::Try { expr: inner } if inner.ty.is_result() => *inner,
-        _ => expr,
-    }
-}
-
-/// Target-directed coercion: a Result-typed target keeps the Result (strip
-/// the auto-inserted `?`); any other target keeps the Try that `insert_try`
-/// added. `None` target type (unresolvable field) leaves the value as-is,
-/// which means the common non-Result target behaves correctly.
-fn coerce_to_target(value: IrExpr, target_is_result: bool) -> IrExpr {
-    if target_is_result { strip_top_try(value) } else { value }
-}
-
 fn strip_tail_try(expr: IrExpr) -> IrExpr {
     match expr.kind {
         IrExprKind::Try { expr: inner } if inner.ty.is_result() => *inner,
@@ -383,12 +365,26 @@ fn strip_tail_try(expr: IrExpr) -> IrExpr {
     }
 }
 
-fn insert_try(expr: IrExpr, in_match_subject: bool, ctx: &mut TryCtx) -> IrExpr {
+/// `keeps_result`: the position consumes this value AS a Result — a match
+/// subject with ok/err arms, the operand of `!` / `?` / `??`, a Result-typed
+/// parameter, or a binding / element / field whose target keeps the Result. No
+/// `?` goes on a Result call there, and (#2632) none goes on the Result-typed
+/// VALUE LEAVES of an `if` / `match` / block either: their value IS this
+/// position's value, so `let r = if c then fs.read_text(p) else err(..)`
+/// consumed by `match r { ok/err }` keeps both branches Results. Only
+/// stripping the top-level `?` after the fact left `(fs.read_text(p))?` in the
+/// then-branch — an implicit propagation the checker never accepted, and
+/// E0308 at rustc against the Result-typed else branch.
+fn insert_try(expr: IrExpr, keeps_result: bool, ctx: &mut TryCtx) -> IrExpr {
     let ty = expr.ty.clone();
     let span = expr.span;
-    let should_wrap = !in_match_subject && is_result_call(&expr);
+    let should_wrap = !keeps_result && is_result_call(&expr);
+    // A branching node passes the keep on to its value leaves only while it
+    // is itself Result-typed: a non-Result `if` / `match` under a keeping
+    // position yields a payload, and its branches keep their own rule.
+    let keep_leaves = keeps_result && ty.is_result();
 
-    let kind = insert_try_control(expr.kind, &ty, ctx)
+    let kind = insert_try_control(expr.kind, &ty, keep_leaves, ctx)
         .or_else(|k| insert_try_construct(k, &ty, ctx))
         .or_else(|k| insert_try_iterate(k, &ty, ctx))
         .or_else(|k| insert_try_wrapper(k, &ty, ctx))
@@ -434,16 +430,16 @@ fn insert_try(expr: IrExpr, in_match_subject: bool, ctx: &mut TryCtx) -> IrExpr 
 /// order. `kind` is moved in, so a group that does not own the variant
 /// hands it back as `Err` and the router tries the next group — the
 /// dispatch order is exactly the original table's.
-fn insert_try_control(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<IrExprKind, IrExprKind> {
+fn insert_try_control(kind: IrExprKind, ty: &Ty, keep_leaves: bool, ctx: &mut TryCtx) -> Result<IrExprKind, IrExprKind> {
     Ok(match kind {
         IrExprKind::Block { stmts, expr: e } => IrExprKind::Block {
             stmts: stmts.into_iter().map(|s| insert_try_stmt(s, ctx)).collect(),
-            expr: e.map(|e| Box::new(insert_try(*e, false, ctx))),
+            expr: e.map(|e| Box::new(insert_try(*e, keep_leaves, ctx))),
         },
         IrExprKind::If { cond, then, else_ } => IrExprKind::If {
             cond: Box::new(insert_try(*cond, false, ctx)),
-            then: Box::new(insert_try(*then, false, ctx)),
-            else_: Box::new(insert_try(*else_, false, ctx)),
+            then: Box::new(insert_try(*then, keep_leaves, ctx)),
+            else_: Box::new(insert_try(*else_, keep_leaves, ctx)),
         },
         IrExprKind::Match { subject, arms } => {
             let arms_match_result = arms.iter().any(|a|
@@ -453,7 +449,7 @@ fn insert_try_control(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<IrE
                 arms: arms.into_iter().map(|arm| IrMatchArm {
                     pattern: arm.pattern,
                     guard: arm.guard.map(|g| insert_try(g, false, ctx)),
-                    body: insert_try(arm.body, false, ctx),
+                    body: insert_try(arm.body, keep_leaves, ctx),
                 }).collect(),
             }
         },
@@ -566,7 +562,7 @@ fn insert_try_construct(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<I
             };
             IrExprKind::List {
                 elements: elements.into_iter()
-                    .map(|e| coerce_to_target(insert_try(e, false, ctx), elem_is_result))
+                    .map(|e| insert_try(e, elem_is_result, ctx))
                     .collect(),
             }
         }
@@ -586,7 +582,7 @@ fn insert_try_construct(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<I
                 fields: fields.into_iter()
                     .map(|(k, v)| {
                         let tgt = field_tys.get(&k).copied().unwrap_or(false);
-                        (k, coerce_to_target(insert_try(v, false, ctx), tgt))
+                        (k, insert_try(v, tgt, ctx))
                     })
                     .collect(),
             }
@@ -647,7 +643,7 @@ fn insert_try_iterate(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<IrE
             };
             IrExprKind::Tuple {
                 elements: elements.into_iter().enumerate()
-                    .map(|(i, e)| coerce_to_target(insert_try(e, false, ctx), elem_results.get(i).copied().unwrap_or(false)))
+                    .map(|(i, e)| insert_try(e, elem_results.get(i).copied().unwrap_or(false), ctx))
                     .collect(),
             }
         }
@@ -689,7 +685,7 @@ fn insert_try_wrapper(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<IrE
             };
             IrExprKind::MapLiteral {
                 entries: entries.into_iter()
-                    .map(|(k, v)| (insert_try(k, false, ctx), coerce_to_target(insert_try(v, false, ctx), val_is_result)))
+                    .map(|(k, v)| (insert_try(k, false, ctx), insert_try(v, val_is_result, ctx)))
                     .collect(),
             }
         }
@@ -733,7 +729,7 @@ fn insert_try_stmt_bind(kind: IrStmtKind, ctx: &mut TryCtx) -> Result<IrStmtKind
             // strips it so the Result is stored intact.
             let target_is_result = ctx.var_table.get(var).ty.is_result();
             IrStmtKind::Assign {
-                var, value: coerce_to_target(insert_try(value, false, ctx), target_is_result),
+                var, value: insert_try(value, target_is_result, ctx),
             }
         }
         IrStmtKind::IndexAssign { target, index, value } => {
@@ -745,7 +741,7 @@ fn insert_try_stmt_bind(kind: IrStmtKind, ctx: &mut TryCtx) -> Result<IrStmtKind
             IrStmtKind::IndexAssign {
                 target,
                 index: insert_try(index, false, ctx),
-                value: coerce_to_target(insert_try(value, false, ctx), elem_is_result),
+                value: insert_try(value, elem_is_result, ctx),
             }
         }
         IrStmtKind::MapInsert { target, key, value } => {
@@ -757,7 +753,7 @@ fn insert_try_stmt_bind(kind: IrStmtKind, ctx: &mut TryCtx) -> Result<IrStmtKind
             IrStmtKind::MapInsert {
                 target,
                 key: insert_try(key, false, ctx),
-                value: coerce_to_target(insert_try(value, false, ctx), val_is_result),
+                value: insert_try(value, val_is_result, ctx),
             }
         }
         other => return Err(other),
@@ -801,9 +797,8 @@ fn insert_try_bind(
         || (ctx.skip_unwrap.contains(&var.0)
             && (ctx.annotated_result_vars.contains(&var) || value_ok_is_result(&value)))
     {
-        let new_value = insert_try(value, false, ctx);
-        let unwrapped = strip_top_try(new_value);
-        IrStmtKind::Bind { var, mutability, ty, value: unwrapped }
+        let kept = insert_try(value, true, ctx);
+        IrStmtKind::Bind { var, mutability, ty, value: kept }
     }
     // An ANNOTATED-Result binding (`let r: Result[T, E] = step()`)
     // keeps the Result: strip the Try that `insert_try` wrapped
@@ -812,7 +807,7 @@ fn insert_try_bind(
     // carries the identical Result Bind.ty but must auto-unwrap, so
     // the lowering records the annotated VarIds explicitly.
     else if ctx.annotated_result_vars.contains(&var) {
-        let new_value = coerce_to_target(insert_try(value, false, ctx), true);
+        let new_value = insert_try(value, true, ctx);
         IrStmtKind::Bind { var, mutability, ty, value: new_value }
     } else {
         let mut new_value = insert_try(value, false, ctx);
@@ -874,7 +869,7 @@ fn insert_try_stmt_assign(kind: IrStmtKind, ctx: &mut TryCtx) -> Result<IrStmtKi
             };
             IrStmtKind::FieldAssign {
                 target, field,
-                value: coerce_to_target(insert_try(value, false, ctx), field_is_result),
+                value: insert_try(value, field_is_result, ctx),
             }
         }
         IrStmtKind::Expr { expr } => IrStmtKind::Expr {
