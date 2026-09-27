@@ -793,22 +793,18 @@ fn insert_try_bind(
     // value_ok_is_result gate wrongly stripped it to List[Int], so the v1 MIR saw a
     // non-Result `match` and walled / native emitted invalid Rust). A `??`-only
     // consumer (skip, not force) keeps the #629 effect-Result[Option,_] strip rule.
-    if ctx.force_skip.contains(&var.0)
-        || (ctx.skip_unwrap.contains(&var.0)
-            && (ctx.annotated_result_vars.contains(&var) || value_ok_is_result(&value)))
-    {
+    // An ANNOTATED-Result binding (`let r: Result[T, E] = step()`) keeps the
+    // Result too. Bind.ty alone cannot decide this — an un-annotated
+    // `let v = boom()` where boom DECLARES `-> Result` carries the identical
+    // Result Bind.ty but must auto-unwrap, so the lowering records the
+    // annotated VarIds explicitly. Either way the value is lowered as kept:
+    // no `?` at its top, nor on its branch leaves (#2632).
+    let keeps = ctx.force_skip.contains(&var.0)
+        || ctx.annotated_result_vars.contains(&var)
+        || (ctx.skip_unwrap.contains(&var.0) && value_ok_is_result(&value));
+    if keeps {
         let kept = insert_try(value, true, ctx);
         IrStmtKind::Bind { var, mutability, ty, value: kept }
-    }
-    // An ANNOTATED-Result binding (`let r: Result[T, E] = step()`)
-    // keeps the Result: strip the Try that `insert_try` wrapped
-    // around the call. Bind.ty alone cannot decide this — an
-    // un-annotated `let v = boom()` where boom DECLARES `-> Result`
-    // carries the identical Result Bind.ty but must auto-unwrap, so
-    // the lowering records the annotated VarIds explicitly.
-    else if ctx.annotated_result_vars.contains(&var) {
-        let new_value = insert_try(value, true, ctx);
-        IrStmtKind::Bind { var, mutability, ty, value: new_value }
     } else {
         let mut new_value = insert_try(value, false, ctx);
         // NOTE: a binding USED as a Result (`r ?? d`, `r == ok(v)`, `match r {
