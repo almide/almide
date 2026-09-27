@@ -514,7 +514,7 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             IrPattern::Constructor { name: ctor_pattern_name(ctx, &bare_name, ty), args: ir_args }
         }
         ast::Pattern::RecordPattern { name, fields, rest } =>
-            lower_pattern_record(ctx, name, fields, *rest, ty),
+            lower_pattern_record(ctx, name, fields, *rest),
         ast::Pattern::Tuple { elements } => {
             let elem_tys = match ty {
                 Ty::Tuple(tys) => tys.clone(),
@@ -608,27 +608,10 @@ fn lower_pattern_record(
     name: &almide_base::intern::Sym,
     fields: &[ast::FieldPattern],
     rest: bool,
-    subject_ty: &Ty,
 ) -> IrPattern {
     let pat_name = struct_pattern_name(ctx, name);
-    // An anonymous destructure (`let { a, b } = r`) names no type: its fields
-    // are the SUBJECT's. Resolving them by the empty name left every binder
-    // `Unknown`, for a later pass to guess by name — which, with a module's
-    // same-spelled case in the program, guessed the case (#2636).
-    let field_ty_of = |ctx: &LowerCtx, field: &str| -> Ty {
-        match resolve_record_field_ty(ctx, &pat_name, field) {
-            Ty::Unknown if name.as_str().is_empty() => match ctx.env.resolve_named(subject_ty) {
-                Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter()
-                    .find(|(n, _)| n.as_str() == field)
-                    .map(|(_, t)| t.clone())
-                    .unwrap_or(Ty::Unknown),
-                _ => Ty::Unknown,
-            },
-            t => t,
-        }
-    };
     let mut ir_fields: Vec<IrFieldPattern> = fields.iter().map(|f| {
-        let field_ty = field_ty_of(ctx, &f.name);
+        let field_ty = resolve_record_field_ty(ctx, &pat_name, &f.name);
         IrFieldPattern {
             name: f.name.to_string(),
             pattern: f.pattern.as_ref().map(|p| lower_pattern(ctx, p, &field_ty)),
@@ -636,7 +619,7 @@ fn lower_pattern_record(
     }).collect();
     for (i, f) in fields.iter().enumerate() {
         if f.pattern.is_none() {
-            let field_ty = field_ty_of(ctx, &f.name);
+            let field_ty = resolve_record_field_ty(ctx, &pat_name, &f.name);
             let var = ctx.define_var(&f.name, field_ty.clone(), Mutability::Let, None);
             ir_fields[i].pattern = Some(IrPattern::Bind { var, ty: field_ty });
         }
