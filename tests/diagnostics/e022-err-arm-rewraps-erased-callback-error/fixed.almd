@@ -1,20 +1,16 @@
-type E: Eq, Repr = | Neg(Int)
+type E: Eq, Repr = | Neg(Int) | Bad(String)
 
 fn step(acc: Int, x: Int) -> Int!E = {
   guard x >= 0 else err(Neg(x))
   acc + x
 }
 
-fn step_or_zero(x: Int) -> Int!E = match x {
-  0 => ok(0),
-  _ => step(0, x),
-}
-
 fn b(xs: List[Int]) -> List[Int]!E = {
-  let r = xs |> list.map((x) => step_or_zero(x)!)
+  let r = xs |> list.map((x) => if x == 0 then int.parse("0")
+  else ok(step(0, x)!))
   match r {
     ok(v) => ok(v),
-    err(e) => err(e),
+    err(e) => err(Bad(e)),
   }
 }
 

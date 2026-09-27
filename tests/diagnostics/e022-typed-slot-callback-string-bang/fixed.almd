@@ -1,0 +1,12 @@
+type E: Eq, Repr = | Neg(Int) | Bad(String)
+
+fn apply_all(xs: List[Int], f: (Int) -> Int!E) -> List[Int]!E = xs |> list.map((x) => f(x)!)!
+
+fn parsed(xs: List[Int]) -> List[Int]!E = apply_all(
+  xs,
+  (n) => int.parse("${n}") |> result.map_err((e) => Bad(e))! + 1,
+)
+
+test "t" {
+  assert_eq(parsed([1, 2]), ok([2, 3]))
+}

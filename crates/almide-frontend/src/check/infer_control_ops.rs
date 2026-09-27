@@ -242,6 +242,14 @@ impl Checker {
         let target = match resolve_ty(joined, &self.uf) {
             Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => Some(args),
             Ty::Never | Ty::Unknown | Ty::TypeVar(_) => None,
+            // ADR-0021: inside a lambda a value-join `err(..)` arm returns into
+            // the lambda's own channel — its error type joins ε.
+            _ if self.env.lambda_depth > 0 => {
+                for (payload, span) in &err_payloads {
+                    self.record_lambda_returned_err(&Ty::result(Ty::Unit, payload.clone()), false, *span);
+                }
+                None
+            }
             value => self.bang_channel_err_ty().map(|e| vec![value, e]),
         };
         let Some(target) = target else { return };

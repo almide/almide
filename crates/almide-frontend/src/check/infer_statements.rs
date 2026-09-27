@@ -50,6 +50,8 @@ impl Checker {
         let cty = self.infer_expr(cond);
         self.constrain(Ty::Bool, cty, "guard condition");
         let ety = self.infer_expr(else_);
+        // ADR-0021: inside a lambda the else returns into the lambda's channel.
+        self.record_lambda_returned_err(&ety, matches!(else_.kind, ast::ExprKind::Ok { .. }), else_.span);
         // #1118: the else type used to be unconstrained, and
         // `guard x > 0 else "nope"` in a `-> Int` fn passed check then died as
         // rustc E0308 behind the codegen wall. Exempt: loop control
@@ -437,7 +439,9 @@ impl Checker {
                 Ty::Unknown
             }
         };
-        self.infer_expr(else_);
+        let ety = self.infer_expr(else_);
+        // ADR-0021: inside a lambda the else returns into the lambda's channel.
+        self.record_lambda_returned_err(&ety, matches!(else_.kind, ast::ExprKind::Ok { .. }), else_.span);
         self.env.define_var(name, bound_ty);
     }
 

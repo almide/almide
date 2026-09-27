@@ -30,6 +30,7 @@ mod diagnostics;
 mod deprecation_warn;
 mod exit_literal;
 mod bang_error_channel;
+mod lambda_channel;
 mod intrinsic_authority;
 mod exhaustiveness;
 
@@ -304,7 +305,7 @@ pub struct Checker {
     /// deprecation warning (E043) must fire only on USER-SPELLED try_*.
     pub(crate) hof_rewritten_calls: std::collections::HashSet<almide_lang::ast::ExprId>,
     /// #2601: every `!` inside a lambda whose operand's error type is not
-    /// `String` — the lambda's failure channel is always `String` (ADR-0012
+    /// `String` — the lambda's failure channel is `String` when its `!`s disagree (ADR-0021; formerly always, ADR-0012
     /// D4 / ADR-0009 L3), so that `!` erases the typed error into its
     /// Debug text. Recorded (erased type, `!` span) so a LATER `!` that
     /// propagates the erased `String` into a fn with a typed error can name
@@ -312,6 +313,9 @@ pub struct Checker {
     /// The third field is the enclosing fn (`current_fn`), so a value-consumed
     /// erasure is named only inside the fn that made it (#2722).
     pub(crate) lambda_err_erasures: Vec<(Ty, Option<crate::ast::Span>, Option<Sym>)>,
+    /// ADR-0021: every lambda's failure channel ε — open while its body is
+    /// inferred, defaulted to the join of its `!` operands, then judged.
+    pub(crate) lambda_channels: lambda_channel::LambdaChannels,
     /// Set while a `!` is judged: the `lambda_err_erasures` length before its
     /// operand was inferred, so the erasures inside THAT operand are known.
     pub(crate) bang_erasure_mark: Option<usize>,
@@ -634,6 +638,7 @@ impl Checker {
             fallible_marker_fns: std::collections::HashSet::new(),
             hof_rewritten_calls: std::collections::HashSet::new(),
             lambda_err_erasures: Vec::new(),
+            lambda_channels: Default::default(),
             bang_erasure_mark: None,
             deferred_unknown_type_checks: Vec::new(),
             pending_toplet_tys: Vec::new(),
