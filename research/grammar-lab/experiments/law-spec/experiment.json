@@ -1,0 +1,16 @@
+{
+  "name": "law-spec",
+  "hypothesis": "Showing laws (properties checked on generated inputs) next to example tests raises the rate of correct modifications, and more so when the counterexample is fed back once",
+  "runtime_file": "../../../spike/law-blocks/law.almd",
+  "repair_rounds": 1,
+  "variants": [
+    { "name": "tests", "with_laws": false },
+    { "name": "laws", "with_laws": true }
+  ],
+  "tasks": ["t01_rle", "t02_paginate", "t03_rotate", "t04_chunk", "t05_merge", "t06_top_k"],
+  "trials": 3,
+  "models": [
+    { "name": "claude-haiku-4-5", "provider": "claude-code", "model_id": "claude-haiku-4-5" },
+    { "name": "claude-sonnet-5", "provider": "claude-code", "model_id": "claude-sonnet-5" }
+  ]
+}

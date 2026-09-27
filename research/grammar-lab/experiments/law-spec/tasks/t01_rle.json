@@ -1,0 +1,8 @@
+{
+  "source_dir": "source",
+  "instruction": "Change `encode` so that no count is larger than 9: a longer run is written as several groups, e.g. twelve `a`s encode as `9a3a`. `decode` must still invert `encode`.",
+  "test_file": "t01_rle_test.almd",
+  "hidden_file": "t01_rle_hidden.almd",
+  "laws_file": "t01_rle_laws.almd",
+  "laws_compiled_file": "t01_rle_laws_compiled.almd"
+}

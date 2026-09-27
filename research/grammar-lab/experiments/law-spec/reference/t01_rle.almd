@@ -1,0 +1,24 @@
+// Run-length encoding: "aaab" encodes as "3a1b".
+
+fn encode(s: String) -> String =
+  group(string.chars(s)) |> list.flat_map(((c, n)) => split_run(c, n)) |> string.join("")
+
+fn split_run(c: String, n: Int) -> List[String] =
+  if n <= 9 then ["${n}${c}"] else ["9${c}"] + split_run(c, n - 9)
+
+fn group(cs: List[String]) -> List[(String, Int)] =
+  cs |> list.fold([], (acc, c) => match list.last(acc) {
+    some((prev, n)) if prev == c => list.take(acc, list.len(acc) - 1) + [(c, n + 1)],
+    _ => acc + [(c, 1)],
+  })
+
+fn decode(s: String) -> String = decode_from(string.chars(s), 0, "")
+
+fn decode_from(cs: List[String], count: Int, out: String) -> String =
+  match cs {
+    [] => out,
+    [c, ..rest] => match int.parse(c) {
+      ok(d) => decode_from(rest, count * 10 + d, out),
+      err(_) => decode_from(rest, 0, out + string.repeat(c, count)),
+    },
+  }

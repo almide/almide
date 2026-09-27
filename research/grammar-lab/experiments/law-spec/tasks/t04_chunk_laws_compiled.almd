@@ -1,0 +1,14 @@
+test "law: chunks rebuild the list" {
+  law_check("chunks rebuild the list", law_pair(law_named("xs", law_list(law_int)), law_named("n", law_pos_int)), ((xs, n)) =>
+    list.flatten(chunk(xs, n)) == xs)
+}
+
+test "law: no chunk is empty" {
+  law_check("no chunk is empty", law_pair(law_named("xs", law_list(law_int)), law_named("n", law_pos_int)), ((xs, n)) =>
+    chunk(xs, n) |> list.all((c) => list.len(c) > 0))
+}
+
+test "law: only the first chunk may be short" {
+  law_check("only the first chunk may be short", law_pair(law_named("xs", law_list(law_int)), law_named("n", law_pos_int)), ((xs, n)) =>
+    chunk(xs, n) |> list.drop(1) |> list.all((c) => list.len(c) == n))
+}

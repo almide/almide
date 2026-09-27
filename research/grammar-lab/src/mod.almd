@@ -1,5 +1,12 @@
 // Grammar Lab — A/B test runner for Almide syntax variants
-// Usage: almide run src/mod.almd -- <experiment-dir> [--model <name>] [--trials <n>]
+// Usage: almide run src/mod.almd -- <experiment-dir> [--model <name>]
+//
+// Per trial: the model modifies the task source (attempt 1). The gate is the
+// visible tests, plus the variant's compiled laws when it has them. When the
+// gate fails and the experiment allows a repair round, the gate's output goes
+// back to the model once (attempt 2). Every attempt is also judged by the
+// task's hidden tests, which the model never sees: a gate pass with a hidden
+// fail is "survived but wrong".
 import json
 import fs
 import process
@@ -7,216 +14,204 @@ import env
 import io
 
 // ── Config ──
-effect fn resolve_bin(env_var: String, name: String, fallback: String) -> String = {
-  // 1. Environment variable
+effect fn resolve_bin(env_var: String, name: String, fallback: String) -> String =
   match env.get(env_var) {
     some(p) => p,
     none => {
-      // 2. Try `which` to find in PATH
-      let r = process.exec_status("which", [name])
-      if r.code == 0 then {
-        string.trim(r.stdout)
-      } else {
-        // 3. Fallback (relative path)
-        fallback
-      }
+      let r = process.exec_status("which", [name]) ?? process.ProcessStatus { code: 1, stdout: "", stderr: "" }
+      if r.code == 0 then string.trim(r.stdout) else fallback
     },
   }
-}
 
-effect fn get_almide_bin() -> String = resolve_bin("ALMIDE_BIN", "almide", "../../target/release/almide")
+effect fn get_almide_bin() -> String = resolve_bin("ALMIDE_BIN", "almide", "../../target/release/almide")!
 
 // ── Helpers ──
 effect fn println(s: String) -> Unit = io.print(s + "\n")
 
+fn jstr(v: Value, key: String) -> String = json.get_string(v, key) ?? ""
+
+fn truncate(s: String, n: Int) -> String =
+  if string.len(s) <= n then s else string.slice(s, 0, n) + "\n… (truncated)"
+
 // ── Entry Point ──
-effect fn main() -> Result[Unit, String] = {
+effect fn main() -> Unit =
   match run_experiment() {
-    ok(_) => ok(()),
+    ok(_) => (),
     err(e) => {
       println("Error: ${e}")
       process.exit(1)
-      ok(())
     },
   }
+
+type Variant = { name: String, transpile_mode: String, with_laws: Bool, layer2: String }
+
+type Task = {
+  name: String,
+  source: String,
+  instruction: String,
+  layer3: String,
+  tests: String,
+  hidden: String,
+  laws: String,
+  laws_compiled: String,
+}
+
+type Ctx = { experiment: String, model_name: String, model_id: String, layer1: String, runtime: String, repair_rounds: Int, out_root: String }
+
+effect fn read_opt(path: String) -> String = if path != "" and fs.exists(path) then fs.read_text(path)! else ""
+
+effect fn load_task(dir: String, name: String) -> Result[Task, String] = {
+  let cfg = json.parse(fs.read_text("${dir}/tasks/${name}.json")!)!
+  let rel = (key: String) => {
+    let f = jstr(cfg, key)
+    if f == "" then "" else "${dir}/tasks/${f}"
+  }
+  ok({
+    name: name,
+    source: fs.read_text("${dir}/${jstr(cfg, "source_dir")}/${name}.almd")!,
+    instruction: jstr(cfg, "instruction"),
+    layer3: jstr(cfg, "layer3_hint"),
+    tests: fs.read_text(rel("test_file"))!,
+    hidden: read_opt(rel("hidden_file"))!,
+    laws: read_opt(rel("laws_file"))!,
+    laws_compiled: read_opt(rel("laws_compiled_file"))!,
+  })
 }
 
 effect fn run_experiment() -> Result[Unit, String] = {
-  let raw_args = env.args()
-  // Skip argv[0] (binary path)
-  let args_list = list.drop(raw_args, 1)
-  guard list.len(args_list) >= 1 else err("Usage: grammar-lab <experiment-dir> [--model <name>] [--trials <n>]")
-  let experiment_dir = match list.get(args_list, 0) {
-    some(d) => d,
-    none => "",
-  }
-  // Load experiment config
-  let config_path = "${experiment_dir}/experiment.json"
-  let config_text = fs.read_text(config_path)
-  let config = json.parse(config_text)
-  let experiment_name = json.get_string(config, "name").unwrap_or("unknown")
-  let trials = json.get_int(config, "trials").unwrap_or(5)
-  // trials is from experiment.json (CLI override removed for now)
-  // Load models
-  let models = json.get_array(config, "models").unwrap_or([])
-  // Filter model from CLI
-  let model_filter = parse_cli_string(args_list, "--model", "")
-  // Load task names
-  let task_names = json.get_array(config, "tasks").unwrap_or([])
-  // Load variants
-  let variants = json.get_array(config, "variants").unwrap_or([])
-  // Load prompt layers
-  let layer1 = fs.read_text("prompts/layer1_rules.md")
+  let args = env.args()
+  guard list.len(args) >= 1 else err("Usage: grammar-lab <experiment-dir> [--model <name>]")
+  let dir = args[0]
+  let config = json.parse(fs.read_text("${dir}/experiment.json")!)!
+  let experiment = jstr(config, "name")
+  let trials = int.parse(parse_cli_string(args, "--trials", "")) ?? (json.get_int(config, "trials") ?? 5)
+  let repair_rounds = json.get_int(config, "repair_rounds") ?? 0
+  let model_filter = parse_cli_string(args, "--model", "")
+  let task_names = json.get_array(config, "tasks") ?? [] |> list.map((t) => value.as_string(t) ?? "")
+  let runtime_path = jstr(config, "runtime_file")
+  let runtime = if runtime_path == "" then "" else strip_blocks(fs.read_text("${dir}/${runtime_path}")!)
+  let layer1 = fs.read_text("prompts/layer1_rules.md")!
+  let variants = json.get_array(config, "variants") ?? [] |> list.map((v) => {
+    let name = jstr(v, "name")
+    let layer2_path = "prompts/layer2_${name}.md"
+    { name: name, transpile_mode: jstr(v, "transpile_regex"), with_laws: json.get_bool(v, "with_laws") ?? false, layer2: layer2_path }
+  })
+  let tasks = task_names |> list.map((t) => load_task(dir, t)!)!
+  let stamp = int.to_string(env.unix_timestamp())
+  let out_root = "outputs/${experiment}/${stamp}"
   println("=== Grammar Lab ===")
-  println("Experiment: ${experiment_name}")
-  println("Trials: ${int.to_string(trials)}")
-  println("")
-  // Results accumulator
+  println("Experiment: ${experiment}  trials: ${trials}  repair rounds: ${repair_rounds}  outputs: ${out_root}")
   var all_results: List[Value] = []
-  for model_json in models {
-    let model_name = json.get_string(model_json, "name").unwrap_or("")
-    let provider = json.get_string(model_json, "provider").unwrap_or("")
-    let model_id = json.get_string(model_json, "model_id").unwrap_or("")
-    // Skip if model filter is set and doesn't match
-    if model_filter != "" and model_filter != model_name then {
-      continue
-    } else { () }
+  for model_json in json.get_array(config, "models") ?? [] {
+    let model_name = jstr(model_json, "name")
+    if model_filter != "" and model_filter != model_name then continue
     println("Model: ${model_name}")
-    for variant_json in variants {
-      let variant_name = json.get_string(variant_json, "name").unwrap_or("")
-      let variant_dir = json.get_string(variant_json, "dir").unwrap_or("")
-      let transpile_mode = json.get_string(variant_json, "transpile_regex").unwrap_or("")
-      // Load layer2 for this variant
-      let layer2_path = "prompts/layer2_${variant_name}.md"
-      let layer2 = if fs.exists(layer2_path) then {
-        let t = fs.read_text(layer2_path)
-        t
-      } else { "" }
-      println("  Variant: ${variant_name}")
-      for task_name_json in task_names {
-        let task_name = json.as_string(task_name_json).unwrap_or("")
-        // Load task config
-        let task_config_text = fs.read_text("${experiment_dir}/tasks/${task_name}.json")
-        let task_config = json.parse(task_config_text)
-        let instruction = json.get_string(task_config, "instruction").unwrap_or("")
-        let layer3 = json.get_string(task_config, "layer3_hint").unwrap_or("")
-        let test_file_name = json.get_string(task_config, "test_file").unwrap_or("")
-        // Load source code for this variant
-        let source_code = fs.read_text("${experiment_dir}/${variant_dir}/${task_name}.almd")
-        // Load test code
-        let test_code = fs.read_text("${experiment_dir}/tasks/${test_file_name}")
-        for trial_num in 1...trials {
-          println("    Task: ${task_name} trial ${int.to_string(trial_num)}/${int.to_string(trials)}")
-          // Build prompt
-          let system_prompt = build_system_prompt(layer1, layer2, layer3)
-          let user_prompt = build_user_prompt(source_code, test_code, instruction)
-          // Call LLM
-          let llm_response = call_llm(provider, model_id, system_prompt, user_prompt)
-          // Extract code from response, strip any test blocks LLM may have included
-          let modified_code = strip_test_blocks(extract_code(llm_response))
-          // Save raw LLM output for debugging/analysis
-          let output_dir = "outputs/${experiment_name}/${model_name}/${variant_name}"
-          fs.mkdir_p(output_dir)
-          fs.write("${output_dir}/${task_name}_${int.to_string(trial_num)}_raw.almd", modified_code)
-          // Transpile if needed (convert experimental syntax to current syntax for compilation)
-          let compilable_code = transpile(modified_code, transpile_mode)
-          fs.write("${output_dir}/${task_name}_${int.to_string(trial_num)}_compiled.almd", compilable_code)
-          // Evaluate: write to temp file, compile, test
-          let eval_result = evaluate(compilable_code, test_code, task_name)
-          let result = make_result_json(experiment_name, variant_name, model_name, task_name, trial_num, eval_result)
-          all_results = all_results + [result]
-          let status = if eval_result.tests_passed then "PASS"
-          else if eval_result.compiled then "FAIL (test)" else "FAIL (compile)"
-          println("      ${status}")
+    let ctx = { experiment: experiment, model_name: model_name, model_id: jstr(model_json, "model_id"), layer1: layer1, runtime: runtime, repair_rounds: repair_rounds, out_root: out_root }
+    for trial in 1...trials {
+      for task in tasks {
+        for variant in variants {
+          let layer2 = read_opt(variant.layer2)!
+          let r = run_trial(ctx, { name: variant.name, transpile_mode: variant.transpile_mode, with_laws: variant.with_laws, layer2: layer2 }, task, trial)!
+          all_results = all_results + [r]
+          println("  ${task.name} [${variant.name}] trial ${trial}: ${trial_line(r)}")
         }
       }
     }
   }
-  // Write results
-  let results_text = json.stringify_pretty(json.array(all_results))
-  let timestamp = int.to_string(env.unix_timestamp())
-  let results_path = "results/${experiment_name}_${timestamp}.json"
-  fs.mkdir_p("results")
-  fs.write(results_path, results_text)
+  fs.mkdir_p("results")!
+  let results_path = "results/${experiment}_${stamp}.json"
+  fs.write(results_path, json.stringify_pretty(value.array(all_results)))!
   println("")
   println("Results written to ${results_path}")
-  // Re-read results for summary (avoids move issue)
-  let summary_text = fs.read_text(results_path)
-  let summary_results = json.parse(summary_text)
-  let summary_list = json.as_array(summary_results).unwrap_or([])
-  print_summary(summary_list)
+  print_summary(all_results)!
   ok(())
 }
 
-// ── Prompt Building ──
-fn build_system_prompt(layer1: String, layer2: String, layer3: String) -> String = "You are modifying code written in Almide (.almd files). Return ONLY the modified code, no explanation.\n\n${layer1}\n\n${layer2}\n\n${layer3}"
+fn flag(r: Value, key: String) -> Bool = json.get_bool(r, key) ?? false
 
-fn build_user_prompt(source: String, tests: String, instruction: String) -> String = "## Current Code\n\n```almide\n${source}\n```\n\n## Tests (must pass after modification)\n\n```almide\n${tests}\n```\n\n## Task\n\n${instruction}\n\nReturn ONLY the modified source code (the Current Code section above, with your changes applied). Do NOT include the test blocks — tests will be appended automatically. Wrap your code in ```almide ... ```."
+fn mark(b: Bool) -> String = if b then "pass" else "FAIL"
 
-// ── LLM API ──
-effect fn call_llm(provider: String, model_id: String, system: String, user: String) -> Result[String, String] = call_claude_code(model_id, system, user)
-
-effect fn call_claude_code(model_id: String, system: String, user: String) -> Result[String, String] = {
-  let claude_bin = resolve_bin("CLAUDE_BIN", "claude", "claude")
-  let r = process.exec_status(claude_bin, [
-    "-p",
-    "--model",
-    model_id,
-    "--append-system-prompt",
-    system,
-    "--output-format",
-    "text",
-    "--max-turns",
-    "1",
-    user
-  ])
-  if r.code != 0 then {
-    err("claude-code failed: ${r.stderr}")
-  } else {
-    ok(r.stdout)
-  }
+fn trial_line(r: Value) -> String = {
+  let first = "gate ${mark(flag(r, "gate_1"))} hidden ${mark(flag(r, "hidden_1"))}"
+  if flag(r, "repaired") then "${first} → repair: gate ${mark(flag(r, "gate_2"))} hidden ${mark(flag(r, "hidden_2"))}" else first
 }
 
-effect fn call_anthropic(model_id: String, system: String, user: String) -> Result[String, String] = err("anthropic provider not implemented — use claude-code")
+// ── One trial ──
+effect fn run_trial(ctx: Ctx, variant: Variant, task: Task, trial: Int) -> Result[Value, String] = {
+  let system = build_system_prompt(ctx.layer1, variant.layer2, task.layer3)
+  let user = build_user_prompt(task, variant.with_laws)
+  let out_dir = "${ctx.out_root}/${ctx.model_name}/${variant.name}"
+  fs.mkdir_p(out_dir)!
+  let tag = "${out_dir}/${task.name}_${trial}"
+  let code_1 = attempt(ctx, variant, system, user, "${tag}_1")!
+  let gate_1 = evaluate(gate_source(ctx, variant, task, code_1), "${tag}_1_gate")!
+  let hidden_1 = evaluate("${code_1}\n\n${task.hidden}", "${tag}_1_hidden")!
+  let repaired = not gate_1.passed and ctx.repair_rounds > 0
+  let (gate_2, hidden_2) = if repaired then {
+    let repair = "${user}\n\n## Your previous answer\n\n```almide\n${code_1}\n```\n\n## Result of checking it\n\n```\n${truncate(gate_1.output, 2500)}\n```\n\nFix the code so every check passes. Return the whole modified file."
+    let code_2 = attempt(ctx, variant, system, repair, "${tag}_2")!
+    (evaluate(gate_source(ctx, variant, task, code_2), "${tag}_2_gate")!, evaluate("${code_2}\n\n${task.hidden}", "${tag}_2_hidden")!)
+  } else (gate_1, hidden_1)
+  ok(value.object([
+    ("experiment", value.str(ctx.experiment)),
+    ("model", value.str(ctx.model_name)),
+    ("variant", value.str(variant.name)),
+    ("task", value.str(task.name)),
+    ("trial", value.int(trial)),
+    ("compiled_1", value.bool(gate_1.compiled)),
+    ("gate_1", value.bool(gate_1.passed)),
+    ("hidden_1", value.bool(hidden_1.passed)),
+    ("repaired", value.bool(repaired)),
+    ("gate_2", value.bool(gate_2.passed)),
+    ("hidden_2", value.bool(hidden_2.passed)),
+  ]))
+}
 
-effect fn call_openai(model_id: String, system: String, user: String) -> Result[String, String] = err("openai provider not implemented — use claude-code")
+effect fn attempt(ctx: Ctx, variant: Variant, system: String, user: String, tag: String) -> Result[String, String] = {
+  let response = call_claude_code(ctx.model_id, system, user)!
+  let code = strip_blocks(extract_code(response))
+  fs.write("${tag}_raw.almd", code)!
+  let compilable = transpile(code, variant.transpile_mode)
+  fs.write("${tag}_compiled.almd", compilable)!
+  ok(compilable)
+}
 
-// ── Strip Test Blocks ──
-fn strip_test_blocks(code: String) -> String = {
-  // Remove test "..." { ... } blocks from LLM output
-  // Tests are appended by the runner, so duplicates cause compile errors
+fn gate_source(ctx: Ctx, variant: Variant, task: Task, code: String) -> String =
+  if variant.with_laws then "${code}\n\n${ctx.runtime}\n\n${task.tests}\n\n${task.laws_compiled}"
+  else "${code}\n\n${task.tests}"
+
+fn build_system_prompt(layer1: String, layer2: String, layer3: String) -> String =
+  "You are modifying code written in Almide (.almd files). Return ONLY the modified code in one ```almide block, no explanation.\n\n${layer1}\n\n${layer2}\n\n${layer3}"
+
+fn build_user_prompt(task: Task, with_laws: Bool) -> String = {
+  let laws = if with_laws then "\n\n## Laws (must hold for every input; the checker generates inputs and reports a counterexample)\n\n```almide\n${task.laws}\n```" else ""
+  "## Current Code\n\n```almide\n${task.source}\n```\n\n## Tests (must pass after modification)\n\n```almide\n${task.tests}\n```${laws}\n\n## Instruction\n\n${task.instruction}"
+}
+
+// ── LLM ──
+// The model runs from a neutral directory so the repository's CLAUDE.md is not in its context.
+effect fn call_claude_code(model_id: String, system: String, user: String) -> Result[String, String] = {
+  let claude_bin = resolve_bin("CLAUDE_BIN", "claude", "claude")!
+  let neutral = env.get("GRAMMAR_LAB_NEUTRAL_DIR") ?? "/tmp/grammar-lab-neutral"
+  fs.mkdir_p(neutral)!
+  let r = process.exec_status("/bin/sh", ["-c", "cd \"$0\" && exec \"$@\"", neutral, claude_bin, "-p", "--model", model_id, "--append-system-prompt", system, "--output-format", "text", "--max-turns", "1", user])!
+  if r.code != 0 then err("claude-code failed: ${r.stderr}") else ok(r.stdout)
+}
+
+// ── Strip test / law blocks the model echoed back (the runner appends its own) ──
+fn strip_blocks(code: String) -> String = {
   let lines = string.split(code, "\n")
   var result: List[String] = []
-  var in_test = false
-  var brace_depth = 0
+  var depth = 0
+  var skipping = false
   for line in lines {
-    if not in_test and string.starts_with(string.trim(line), "test ") then {
-      in_test = true
-      brace_depth = 0
-      // Count opening braces on this line
-      for c in string.chars(line) {
-        if c == "{" then {
-          brace_depth = brace_depth + 1
-        } else { () }
-        if c == "}" then {
-          brace_depth = brace_depth - 1
-        } else { () }
-      }
-      if brace_depth <= 0 then {
-        in_test = false
-      } else { () }
-    } else if in_test then {
-      for c in string.chars(line) {
-        if c == "{" then {
-          brace_depth = brace_depth + 1
-        } else { () }
-        if c == "}" then {
-          brace_depth = brace_depth - 1
-        } else { () }
-      }
-      if brace_depth <= 0 then {
-        in_test = false
-      } else { () }
+    let t = string.trim(line)
+    let starts = not skipping and (string.starts_with(t, "test ") or string.starts_with(t, "law "))
+    if starts or skipping then {
+      let opens = string.chars(line) |> list.filter((c) => c == "{") |> list.len
+      let closes = string.chars(line) |> list.filter((c) => c == "}") |> list.len
+      depth = (if starts then 0 else depth) + opens - closes
+      skipping = depth > 0
     } else {
       result = result + [line]
     }
@@ -225,23 +220,12 @@ fn strip_test_blocks(code: String) -> String = {
 }
 
 // ── Transpile ──
-fn transpile(code: String, mode: String) -> String = if mode == "" then {
-  code
-} else if mode == "paren-to-fn-lambda" then {
-  // Transform (params) => to (params) =>
-  // Strategy: find ") =>" and look backwards for matching "("
-  // If not preceded by "fn", insert "fn"
-  let lines = string.split(code, "\n")
-  let converted = list.map(lines, (line) => transpile_line_paren_to_(line))
-  string.join(converted, "\n")
-} else if mode == "combinator-to-match" then {
-  // Transform option.map/flat_map/unwrap_or to match expressions
-  let lines = string.split(code, "\n")
-  let converted = list.map(lines, (line) => transpile_line_combinator(line))
-  string.join(converted, "\n")
-} else {
-  code
-}
+fn transpile(code: String, mode: String) -> String =
+  match mode {
+    "paren-to-fn-lambda" => string.split(code, "\n") |> list.map((line) => transpile_line_paren_to_(line)) |> string.join("\n"),
+    "combinator-to-match" => string.split(code, "\n") |> list.map((line) => transpile_line_combinator(line)) |> string.join("\n"),
+    _ => code,
+  }
 
 fn transpile_line_paren_to_(line: String) -> String = {
   // Generic approach: find ") =>" and look backwards for matching "("
@@ -391,150 +375,79 @@ fn transpile_pipe_option(line: String, call_name: String, wrap_some: Bool) -> St
 
 // ── Code Extraction ──
 fn extract_code(response: String) -> String = {
-  // Find ```almide ... ``` block
   let lines = string.split(response, "\n")
   var in_block = false
   var code_lines: List[String] = []
   for line in lines {
-    if string.starts_with(line, "```almide") then {
-      in_block = true
-    } else if in_block and string.starts_with(line, "```") then {
-      in_block = false
-    } else if in_block then {
-      code_lines = code_lines + [line]
-    } else { () }
+    if string.starts_with(line, "```almide") then in_block = true
+    else if in_block and string.starts_with(line, "```") then in_block = false
+    else if in_block then code_lines = code_lines + [line]
+    else ()
   }
-  // If no code block found, assume entire response is code
-  if list.len(code_lines) == 0 then { response } else { string.join(code_lines, "\n") }
+  if list.len(code_lines) == 0 then response else string.join(code_lines, "\n")
 }
 
 // ── Evaluation ──
-type EvalResult = { compiled: Bool, tests_passed: Bool, error: String }
+type EvalResult = { compiled: Bool, passed: Bool, output: String }
 
-effect fn evaluate(code: String, test_code: String, task_name: String) -> EvalResult = {
-  // Write modified code to temp file
-  let tmp_dir = "/tmp/grammar-lab"
-  let code_path = "${tmp_dir}/${task_name}.almd"
-  let combined = "${code}\n\n${test_code}"
-  fs.mkdir_p(tmp_dir)
-  fs.write(code_path, combined)
-  // Run almide check
-  let check_r = process.exec_status(get_almide_bin()!, ["check", code_path])
-  if check_r.code != 0 then {
-    EvalResult { compiled: false, tests_passed: false, error: check_r.stderr }
-  } else {
-    // Run almide test
-    let test_r = process.exec_status(get_almide_bin()!, ["test", code_path])
-    if test_r.code != 0 then {
-      EvalResult { compiled: true, tests_passed: false, error: test_r.stderr }
-    } else {
-      EvalResult { compiled: true, tests_passed: true, error: "" }
-    }
+effect fn evaluate(code: String, tag: String) -> Result[EvalResult, String] = {
+  let path = "${tag}.almd"
+  fs.write(path, code)!
+  let bin = get_almide_bin()!
+  let check_r = process.exec_status(bin, ["check", path])!
+  if check_r.code != 0 then ok({ compiled: false, passed: false, output: check_r.stdout + check_r.stderr })
+  else {
+    let test_r = process.exec_status("perl", ["-e", "alarm shift; exec @ARGV", "120", bin, "test", path])!
+    ok({ compiled: true, passed: test_r.code == 0, output: test_r.stdout + test_r.stderr })
   }
 }
 
 // ── Summary ──
-fn count_passed(results: List[Value], model_name: String, variant_name: String) -> (Int, Int) = {
-  let matching = results |> list.filter((r) => {
-    let m = json.get_string(r, "model").unwrap_or("")
-    let v = json.get_string(r, "variant").unwrap_or("")
-    m == model_name and v == variant_name
-  })
-  let total = list.len(matching)
-  let passed = matching |> list.filter((r) => json.get_bool(r, "tests_passed").unwrap_or(false)) |> list.len()
-  (passed, total)
+fn count(results: List[Value], model: String, variant: String, key: String) -> (Int, Int) = {
+  let rows = results |> list.filter((r) => jstr(r, "model") == model and jstr(r, "variant") == variant)
+  (rows |> list.filter((r) => flag(r, key)) |> list.len, list.len(rows))
 }
 
-fn format_cell(passed: Int, total: Int) -> String = {
-  let pct = if total > 0 then int.to_string(passed * 100 / total) else "0"
-  "${pct}% (${int.to_string(passed)}/${int.to_string(total)})"
-}
+fn wrong_survivors(results: List[Value], model: String, variant: String, gate: String, hidden: String) -> Int =
+  results |> list.filter((r) => jstr(r, "model") == model and jstr(r, "variant") == variant and flag(r, gate) and not flag(r, hidden)) |> list.len
 
-fn build_row(results: List[Value], model_name: String, variants: List[String]) -> String = {
-  // Build cells first to avoid ownership issues with model_name
-  let cells = list.map(variants, (v) => {
-    let (passed, total) = count_passed(results, model_name, v)
-    string.pad_end(format_cell(passed, total), 20, " ")
-  })
-  let row = string.pad_end(model_name, 20, " ")
-  row + string.join(cells, "")
-}
-
-fn count_passed_task(results: List[Value], model_name: String, variant_name: String, task_name: String) -> (Int, Int) = {
-  let matching = results |> list.filter((r) => {
-    let m = json.get_string(r, "model").unwrap_or("")
-    let v = json.get_string(r, "variant").unwrap_or("")
-    let t = json.get_string(r, "task").unwrap_or("")
-    m == model_name and v == variant_name and t == task_name
-  })
-  let total = list.len(matching)
-  let passed = matching |> list.filter((r) => json.get_bool(r, "tests_passed").unwrap_or(false)) |> list.len()
-  (passed, total)
-}
-
-fn build_task_row(results: List[Value], model_name: String, task_name: String, variants: List[String]) -> String = {
-  let cells = list.map(variants, (v) => {
-    let (passed, total) = count_passed_task(results, model_name, v, task_name)
-    string.pad_end(format_cell(passed, total), 20, " ")
-  })
-  let row = string.pad_end("  " + task_name, 24, " ")
-  row + string.join(cells, "")
+fn cell(p: (Int, Int)) -> String = {
+  let (passed, total) = p
+  let pct = if total > 0 then passed * 100 / total else 0
+  string.pad_end("${pct}% (${passed}/${total})", 16, " ")
 }
 
 effect fn print_summary(results: List[Value]) -> Unit = {
   println("=== Summary ===")
-  println("")
-  let models = results |> list.map((r) => json.get_string(r, "model").unwrap_or("")) |> list.unique()
-  let variants = results |> list.map((r) => json.get_string(r, "variant").unwrap_or("")) |> list.unique()
-  let tasks = results |> list.map((r) => json.get_string(r, "task").unwrap_or("")) |> list.unique()
-  let variant_names = variants
-  let task_names = tasks
-  for model_name in models {
-    // Model header
-    println("Model: ${model_name}")
-    // Variant header
-    var header = string.pad_end("", 24, " ")
-    for v in variant_names {
-      header = header + string.pad_end(v, 20, " ")
-    }
-    println(header)
-    // Total row
-    let total_cells = list.map(variant_names, (v) => {
-      let (passed, total) = count_passed(results, model_name, v)
-      string.pad_end(format_cell(passed, total), 20, " ")
-    })
-    println(string.pad_end("  TOTAL", 24, " ") + string.join(total_cells, ""))
-    // Per-task rows
-    for task_name in task_names {
-      println(build_task_row(results, model_name, task_name, variant_names))
-    }
-    // Fisher's exact test (if exactly 2 variants)
-    if list.len(variant_names) == 2 then {
-      let v1 = match list.get(variant_names, 0) {
-        some(v) => v,
-        none => "",
-      }
-      let v2 = match list.get(variant_names, 1) {
-        some(v) => v,
-        none => "",
-      }
-      let (p1, t1) = count_passed(results, model_name, v1)
-      let (p2, t2) = count_passed(results, model_name, v2)
-      let a = p1
-      // variant 1 pass
-      let b = t1 - p1
-      // variant 1 fail
-      let c = p2
-      // variant 2 pass
-      let d = t2 - p2
-      // variant 2 fail
-      let p = fishers_exact_p(a, b, c, d)
-      let p_str = float.to_fixed(p, 4)
-      let sig = if p < 0.05 then " *"
-      else if p < 0.1 then " ." else ""
-      println("  Fisher's exact test: p = ${p_str}${sig}")
-    } else { () }
+  let models = results |> list.map((r) => jstr(r, "model")) |> list.unique
+  let variants = results |> list.map((r) => jstr(r, "variant")) |> list.unique
+  let tasks = results |> list.map((r) => jstr(r, "task")) |> list.unique
+  let metrics = [("gate_1", "gate, 1st"), ("hidden_1", "hidden, 1st"), ("gate_2", "gate, final"), ("hidden_2", "hidden, final")]
+  for model in models {
     println("")
+    println("Model: ${model}")
+    println(string.pad_end("", 26, " ") + (variants |> list.map((v) => string.pad_end(v, 16, " ")) |> string.join("")))
+    for (key, label) in metrics {
+      println(string.pad_end("  ${label}", 26, " ") + (variants |> list.map((v) => cell(count(results, model, v, key))) |> string.join("")))
+    }
+    println(string.pad_end("  survived but wrong, 1st", 26, " ") + (variants |> list.map((v) => string.pad_end(int.to_string(wrong_survivors(results, model, v, "gate_1", "hidden_1")), 16, " ")) |> string.join("")))
+    println(string.pad_end("  survived but wrong, fin", 26, " ") + (variants |> list.map((v) => string.pad_end(int.to_string(wrong_survivors(results, model, v, "gate_2", "hidden_2")), 16, " ")) |> string.join("")))
+    println("  hidden, final by task:")
+    for task in tasks {
+      let cells = variants |> list.map((v) => {
+        let rows = results |> list.filter((r) => jstr(r, "model") == model and jstr(r, "variant") == v and jstr(r, "task") == task)
+        cell((rows |> list.filter((r) => flag(r, "hidden_2")) |> list.len, list.len(rows)))
+      })
+      println(string.pad_end("    ${task}", 26, " ") + string.join(cells, ""))
+    }
+    if list.len(variants) == 2 then {
+      for (key, label) in metrics {
+        let (p1, t1) = count(results, model, variants[0], key)
+        let (p2, t2) = count(results, model, variants[1], key)
+        let p = fishers_exact_p(p1, t1 - p1, p2, t2 - p2)
+        println("  Fisher (${label}): p = ${float.to_fixed(p, 4)}")
+      }
+    } else ()
   }
 }
 
@@ -580,17 +493,9 @@ fn fishers_exact_p(a: Int, b: Int, c: Int, d: Int) -> Float = {
   math.fmin(1.0, p_value)
 }
 
-// ── Result JSON Builder ──
-fn make_result_json(experiment: String, variant: String, model: String, task: String, trial: Int, eval: EvalResult) -> Value = json.object([
-  ("experiment", json.from_string(experiment)),
-  ("variant", json.from_string(variant)),
-  ("model", json.from_string(model)),
-  ("task", json.from_string(task)),
-  ("trial", json.from_int(trial)),
-  ("compiled", json.from_bool(eval.compiled)),
-  ("tests_passed", json.from_bool(eval.tests_passed)),
-  ("error", json.from_string(eval.error))
-])
-
 // ── CLI Helpers ──
-fn parse_cli_string(args: List[String], flag: String, fb: String) -> String = fb
+fn parse_cli_string(args: List[String], flag_name: String, fb: String) -> String =
+  match list.index_of(args, flag_name) {
+    some(i) => list.get(args, i + 1) ?? fb,
+    none => fb,
+  }

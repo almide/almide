@@ -1,0 +1,6 @@
+// The k entries with the highest count, highest first.
+
+type Entry = { name: String, count: Int }
+
+fn top_k(entries: List[Entry], k: Int) -> List[Entry] =
+  entries |> list.sort_by((e) => 0 - e.count) |> list.take(k)

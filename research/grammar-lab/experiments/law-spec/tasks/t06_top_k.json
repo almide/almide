@@ -1,0 +1,8 @@
+{
+  "source_dir": "source",
+  "instruction": "When two entries have the same count, order them by name ascending.",
+  "test_file": "t06_top_k_test.almd",
+  "hidden_file": "t06_top_k_hidden.almd",
+  "laws_file": "t06_top_k_laws.almd",
+  "laws_compiled_file": "t06_top_k_laws_compiled.almd"
+}
