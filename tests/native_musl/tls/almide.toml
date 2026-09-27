@@ -1,0 +1,11 @@
+[package]
+name = "musl_tls"
+version = "0.1.0"
+
+# The shape porta and comide release with: reqwest over rustls, whose crypto
+# provider is ring. ring compiles C and assembly, so a musl build of this
+# crate needs musl-gcc (`musl-tools`) — the part a dependency-free program
+# never exercises (#2777). `default-features = false` keeps native-tls
+# (OpenSSL) out, which is the point of a static musl binary.
+[native-deps]
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
