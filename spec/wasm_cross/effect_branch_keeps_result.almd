@@ -1,0 +1,48 @@
+// @contract: C-068
+// #2632: target-directed auto-? reaches the VALUE LEAVES of a branching
+// binding. `let r = if c then load(n) else <Result>` consumed by
+// `match r { ok/err }` keeps the Result on every branch — the source writes
+// no `!`, so nothing propagates. Before, the lowering stripped only the
+// top-level `?` it had inserted: native emitted `(load(n))?` in the branch
+// (E0308 at rustc) and wasm RAN it, returning early from `main` with the
+// error instead of printing the `err:` line and the lines after it.
+effect fn load(n: Int) -> String = {
+  guard n >= 0 else err("negative ${n}")
+  "loaded ${n}"
+}
+
+effect fn show(n: Int) -> Unit = {
+  let r = if n > 10 then load(n)
+  else match load(n) {
+    ok(_) => err("small"),
+    err(e) => err(e),
+  }
+  println(match r {
+    ok(v) => v,
+    err(e) => "err: ${e}",
+  })
+  let m = match n {
+    0 => err("zero"),
+    _ => load(n),
+  }
+  println(match m {
+    ok(v) => v,
+    err(e) => "err: ${e}",
+  })
+  let b = {
+    let k = n * 2
+    load(k)
+  }
+  println(match b {
+    ok(v) => v,
+    err(e) => "err: ${e}",
+  })
+}
+
+effect fn main() -> Unit = {
+  show(12)!
+  show(3)!
+  show(0)!
+  show(-1)!
+  println("done")
+}
