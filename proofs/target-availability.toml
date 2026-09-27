@@ -199,7 +199,7 @@ pending_self_host_ceiling = 9
 # 2026-09-27 (#2664): 59 -> 58. http.url_decode's structural row goes: the
 # self-hosted decoder http.query_params already ran on this leg joins the
 # audited http_request tier under its public name (the router decodes a
-# `{name}` binding through it). Evidence: effect_fn_value_slot_family.almd.
+# `{name}` binding through it). Evidence: spec/stdlib/http_router_test.almd.
 pending_port_ceiling = 58
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five

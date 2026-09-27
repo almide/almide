@@ -230,7 +230,8 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // payload, a prim-MEDIATED alloc_list of 8-byte Int slots (the
     // list_repeat class), string.from_bytes lowered by THIS emitter. The
     // router's path-parameter decode reaches it through the public name.
-    // Parity evidence: spec/wasm_cross/effect_fn_value_slot_family.almd.
+    // Parity evidence: spec/stdlib/http_url_decode_test.almd and
+    // http_router_test.almd, both now rendered by the structural test lane.
     "http_url_decode",
     // random_int.almd (audited 2026-08-25): prim.alloc_bytes scratch +
     // prim.random_get (the op-32 entropy boundary) + pure span math —
