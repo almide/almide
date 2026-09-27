@@ -18,7 +18,7 @@ call:target:Computed	18
 display	10
 effect	131
 lambda	188
-list-elem	126
+list-elem	127
 module-arm:unaudited:bytes.push	2
 module-arm:unaudited:bytes.set_at	1
 module-arm:unaudited:list.clear	2
@@ -52,7 +52,7 @@ rhs:Unwrap	2
 rhs:UnwrapOr	2
 scan	3
 stmt:Assign	11
-stmt:BindDestructure	14
+stmt:BindDestructure	16
 stmt:Comment	160
 stmt:Expr:Block	69
 stmt:Expr:ForIn	52
@@ -60,8 +60,8 @@ stmt:Expr:If	23
 stmt:Expr:Match	2
 stmt:Expr:While	149
 stmt:Expr:call-arg:BinOp	90
-stmt:Expr:call-arg:Block	43
-stmt:Expr:call-arg:Call	135
+stmt:Expr:call-arg:Block	45
+stmt:Expr:call-arg:Call	136
 stmt:Expr:call-arg:If	5
 stmt:Expr:call-arg:Lambda	1
 stmt:Expr:call-arg:Match	1
@@ -72,10 +72,10 @@ stmt:Guard	9
 stmt:IndexAssign	6
 tail:BinOp	699
 tail:Block	17
-tail:If	4622
+tail:If	4626
 tail:Lambda	10
 tail:MapAccess	5
-tail:Match	453
+tail:Match	454
 tail:Member	4
 tail:OptionNone	11
 tail:OptionSome	14

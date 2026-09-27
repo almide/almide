@@ -49,7 +49,6 @@ test :: spec/lang/intrinsic_readonly_borrow_test.almd :: index-of:Scalar(Bytes)
 test :: spec/lang/map_literal_test.almd :: forin-map-nontuple
 test :: spec/lang/matrix_test.almd :: binop:MulMatrix
 test :: spec/lang/option_marker_test.almd :: list-hof-nonlambda
-test :: spec/lang/panic_test.almd :: call:panic
 test :: spec/lang/regression_v0_11_test.almd :: ty-mismatch:Unit-vs-Scalar(Int)
 test :: spec/lang/result_option_matrix_test.almd :: ty-mismatch:Scalar(Int)-vs-Result(ETy(0), ETy(1))
 test :: spec/lang/unwrap_operators_test.almd :: expr:OptionalChain
