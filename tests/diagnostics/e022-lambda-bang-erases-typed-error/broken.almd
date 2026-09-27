@@ -1,0 +1,16 @@
+type E: Eq, Repr = | Neg(Int)
+
+fn step(acc: Int, x: Int) -> Int!E = {
+  guard x >= 0 else err(Neg(x))
+  acc + x
+}
+
+fn total(xs: List[Int]) -> Int!E = xs |> list.fold(
+  0,
+  (acc, x) => if x == 100 then acc
+  else step(acc, x)!,
+)!
+
+test "t" {
+  assert_eq(total([1, 100, 2]), ok(3))
+}
