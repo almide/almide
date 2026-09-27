@@ -713,7 +713,7 @@ jobs:
           $ALMIDE test examples/
 
       - name: WASM coverage ratchet (the native-fallback set only shrinks — wasm is a first-class target)
-        run: ALMIDE_BIN=/tmp/almide-bin/almide ALMIDE_TEST_LOG=/tmp/almide-test-lane.log bash proofs/check-wasm-fallback.sh
+        run: ALMIDE_BIN=/tmp/almide-bin/almide FALLBACK_TEST_LOG=/tmp/almide-test-lane.log bash proofs/check-wasm-fallback.sh
 
       # #2741: every program the router hands to the INCUMBENT renderer, with its
       # structural decline, is a row in proofs/incumbent-route-baseline.txt —
