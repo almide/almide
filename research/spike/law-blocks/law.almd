@@ -1,0 +1,123 @@
+// law — the runtime half of the `law` block spike.
+//
+// A law is a property that must hold for every input. This module checks it
+// the way a machine can without a prover: deterministic random cases, and on
+// the first failure a greedy shrink to a small counterexample. The verdict a
+// reader sees is the counterexample, never "unsolved goals".
+//
+// Determinism: the case stream is a pure function of the seed, so a law that
+// fails fails the same way on every run and every target.
+
+type Gen[T] = {
+  make: (Int, Int) -> T,
+  shrink: (T) -> List[T],
+  show: (T) -> String,
+}
+
+let default_cases = 200
+let default_seed = 42
+
+// ── random stream (31-bit LCG; stays inside Int on every target) ──
+
+fn next_seed(s: Int) -> Int = (s * 1103515245 + 12345) % 2147483648
+
+fn mix(seed: Int, i: Int) -> Int = next_seed(next_seed(seed + i * 7919))
+
+fn pick(s: Int, lo: Int, hi: Int) -> Int = lo + next_seed(s) % (hi - lo + 1)
+
+// ── generators ──
+
+fn shrink_int(v: Int) -> List[Int] =
+  [0, v / 2, if v > 0 then v - 1 else v + 1] |> list.filter((c) => c != v) |> list.unique
+
+let int_gen: Gen[Int] = {
+  make: (s, size) => pick(s, 0 - size, size),
+  shrink: shrink_int,
+  show: (v) => int.to_string(v),
+}
+
+let bool_gen: Gen[Bool] = {
+  make: (s, _size) => next_seed(s) % 2 == 0,
+  shrink: (v) => if v then [false] else [],
+  show: (v) => if v then "true" else "false",
+}
+
+let string_gen: Gen[String] = {
+  make: (s, size) =>
+    list.range(0, pick(s, 0, size))
+      |> list.map((i) => ["a", "b", "c", " ", "z"][pick(mix(s, i), 0, 4)])
+      |> string.join(""),
+  shrink: (v) => {
+    let n = string.len(v)
+    list.range(0, n) |> list.map((i) => string.slice(v, 0, i) + string.slice(v, i + 1, n))
+  },
+  show: (v) => "\"${v}\"",
+}
+
+fn without_index[T](xs: List[T], i: Int) -> List[T] =
+  list.take(xs, i) + list.drop(xs, i + 1)
+
+fn list_of[T](g: Gen[T]) -> Gen[List[T]] = {
+  make: (s, size) => list.range(0, pick(s, 0, size)) |> list.map((i) => g.make(mix(s, i), size)),
+  shrink: (xs) => {
+    let removals = list.range(0, list.len(xs)) |> list.map((i) => without_index(xs, i))
+    let smaller = list.range(0, list.len(xs)) |> list.flat_map((i) =>
+      g.shrink(xs[i]) |> list.take(1) |> list.map((c) => list.set(xs, i, c)))
+    [[]] + removals + smaller |> list.filter((c) => list.len(c) < list.len(xs) or c != xs)
+  },
+  show: (xs) => "[" + (xs |> list.map((x) => g.show(x)) |> string.join(", ")) + "]",
+}
+
+// `named` makes a counterexample read as bindings: `xs = [0, 1]`.
+fn named[T](name: String, g: Gen[T]) -> Gen[T] = {
+  make: g.make,
+  shrink: g.shrink,
+  show: (v) => "${name} = ${g.show(v)}",
+}
+
+fn pair[A, B](ga: Gen[A], gb: Gen[B]) -> Gen[(A, B)] = {
+  make: (s, size) => (ga.make(mix(s, 1), size), gb.make(mix(s, 2), size)),
+  shrink: ((a, b)) =>
+    (ga.shrink(a) |> list.map((c) => (c, b))) + (gb.shrink(b) |> list.map((c) => (a, c))),
+  show: ((a, b)) => ga.show(a) + "\n    " + gb.show(b),
+}
+
+// ── the check ──
+
+fn minimize[T](g: Gen[T], holds: (T) -> Bool, v: T, steps: Int) -> (T, Int) =
+  match g.shrink(v) |> list.find((c) => not holds(c)) {
+    some(c) => minimize(g, holds, c, steps + 1),
+    none => (v, steps),
+  }
+
+fn first_failure[T](g: Gen[T], holds: (T) -> Bool, seed: Int, i: Int, cases: Int) -> (Int, T)? =
+  if i >= cases then none
+  else {
+    let v = g.make(mix(seed, i), 1 + i / 4)
+    if holds(v) then first_failure(g, holds, seed, i + 1, cases) else some((i, v))
+  }
+
+/// Checks `holds` on `default_cases` generated inputs; panics with a shrunk counterexample.
+fn check[T](name: String, g: Gen[T], holds: (T) -> Bool) -> Unit =
+  match first_failure(g, holds, default_seed, 0, default_cases) {
+    none => (),
+    some((i, v)) => {
+      let (small, steps) = minimize(g, holds, v, 0)
+      panic("law \"${name}\" falsified after ${i + 1} cases (seed ${default_seed})\n  counterexample (shrunk in ${steps} steps):\n    ${g.show(small)}")
+    },
+  }
+
+// ── demo: one law that holds, one that does not ──
+
+test "law holds: reverse twice" {
+  check("reverse twice", named("xs", list_of(int_gen)), (xs) => list.reverse(list.reverse(xs)) == xs)
+}
+
+test "law holds: append length" {
+  check("append length", pair(named("xs", list_of(int_gen)), named("ys", list_of(int_gen))),
+    ((xs, ys)) => list.len(xs + ys) == list.len(xs) + list.len(ys))
+}
+
+test "law fails: sort keeps length after unique" {
+  check("unique keeps length", named("xs", list_of(int_gen)), (xs) => list.len(list.unique(xs)) == list.len(xs))
+}
