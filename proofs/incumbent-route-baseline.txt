@@ -23,7 +23,6 @@ build :: spec/wasm_cross/fan_map_nested_combinators.almd :: bind:unmapped
 build :: spec/wasm_cross/fan_map_parallel_scalar.almd :: bind:unmapped
 build :: spec/wasm_cross/fs_call_head_family.almd :: call:fs.fold_lines_range
 build :: spec/wasm_cross/inplace_clear_alias_field.almd :: string-clear-nonvar
-test :: spec/integration/codegen_functional_test.almd :: list-hof-nonlambda
 test :: spec/integration/codegen_loop_guard_test.almd :: expr:Continue
 test :: spec/integration/codegen_patterns_test.almd :: call:list.partition
 test :: spec/integration/codegen_pipes_test.almd :: call:list.partition
@@ -39,7 +38,6 @@ test :: spec/lang/fallible_lambda_test.almd :: call:testing.assert_contains
 test :: spec/lang/fallible_marker_test.almd :: call:testing.assert_contains
 test :: spec/lang/fan_arm_unwrap_or_test.almd :: bind:unmapped
 test :: spec/lang/fan_let_capture_scope_test.almd :: bind:unmapped
-test :: spec/lang/fan_value_regression_test.almd :: list-hof-nonlambda
 test :: spec/lang/for_in_head_unwrap_test.almd :: call:testing.assert_contains
 test :: spec/lang/for_test.almd :: expr:Continue
 test :: spec/lang/guard_else_err_unwrap_test.almd :: interp-part:Unit
@@ -48,7 +46,7 @@ test :: spec/lang/index_access_test.almd :: index-of:Scalar(Bytes)
 test :: spec/lang/intrinsic_readonly_borrow_test.almd :: index-of:Scalar(Bytes)
 test :: spec/lang/map_literal_test.almd :: forin-map-nontuple
 test :: spec/lang/matrix_test.almd :: binop:MulMatrix
-test :: spec/lang/option_marker_test.almd :: list-hof-nonlambda
+test :: spec/lang/option_marker_test.almd :: call:testing.assert_contains
 test :: spec/lang/regression_v0_11_test.almd :: ty-mismatch:Unit-vs-Scalar(Int)
 test :: spec/lang/result_option_matrix_test.almd :: ty-mismatch:Scalar(Int)-vs-Result(ETy(0), ETy(1))
 test :: spec/lang/unwrap_operators_test.almd :: expr:OptionalChain
@@ -63,7 +61,6 @@ test :: spec/stdlib/fs_if_exists_test.almd :: call:testing.assert_none
 test :: spec/stdlib/fs_streaming_test.almd :: call:testing.assert_err
 test :: spec/stdlib/list_completeness_test.almd :: call:list.partition
 test :: spec/stdlib/list_completion_test.almd :: call:list.shuffle
-test :: spec/stdlib/option_test.almd :: list-hof-nonlambda
 test :: spec/stdlib/option_to_result_generic_test.almd :: call:testing.assert_contains
 test :: spec/stdlib/pipe_chain_test.almd :: call:list.partition
 test :: spec/stdlib/random_choice_pair_test.almd :: call:random.choice
