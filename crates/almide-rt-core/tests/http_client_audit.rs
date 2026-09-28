@@ -83,6 +83,141 @@ fn get(url: &str) -> Result<client::HttpTextResponse, String> {
     client::request_response("GET", url, "", &[])
 }
 
+fn head_of(rx: &mpsc::Receiver<String>) -> String {
+    rx.recv_timeout(Duration::from_secs(10)).expect("the origin was reached")
+}
+
+fn request_line(head: &str) -> &str {
+    head.lines().next().unwrap_or("")
+}
+
+/// A listener nobody should reach: `true` if something connected within
+/// `wait`.
+fn untouched_listener() -> (u16, impl FnOnce(Duration) -> bool) {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    l.set_nonblocking(true).unwrap();
+    (port, move |wait: Duration| {
+        let deadline = Instant::now() + wait;
+        while Instant::now() < deadline {
+            if l.accept().is_ok() {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        false
+    })
+}
+
+// ── #2821: the URL ──
+
+#[test]
+fn the_host_header_carries_a_non_default_port() {
+    let (port, rx) = origin(OK);
+    let r = get(&format!("http://127.0.0.1:{port}/echo")).unwrap();
+    assert_eq!(r.0, 200);
+    let head = head_of(&rx);
+    assert!(head.contains(&format!("\r\nHost: 127.0.0.1:{port}\r\n")), "{head}");
+}
+
+#[test]
+fn userinfo_becomes_basic_auth_and_never_the_host() {
+    let (port, rx) = origin(OK);
+    let r = get(&format!("http://user:p%40ss@127.0.0.1:{port}/echo")).unwrap();
+    assert_eq!(r.0, 200);
+    let head = head_of(&rx);
+    assert_eq!(request_line(&head), "GET /echo HTTP/1.1");
+    // base64("user:p@ss")
+    assert!(head.contains("\r\nAuthorization: Basic dXNlcjpwQHNz\r\n"), "{head}");
+    assert!(!head.contains("user:"), "{head}");
+}
+
+#[test]
+fn a_callers_authorization_header_wins_over_userinfo() {
+    let (port, rx) = origin(OK);
+    let hs = vec![("Authorization".to_string(), "Bearer t".to_string())];
+    client::request_response("GET", &format!("http://u:p@127.0.0.1:{port}/"), "", &hs).unwrap();
+    let head = head_of(&rx);
+    assert!(head.contains("Authorization: Bearer t\r\n") && !head.contains("Basic"), "{head}");
+}
+
+#[test]
+fn an_ipv6_literal_is_dialled_and_bracketed_in_host() {
+    let Ok(l) = TcpListener::bind("[::1]:0") else {
+        eprintln!("no IPv6 loopback on this host; skipped");
+        return;
+    };
+    let port = l.local_addr().unwrap().port();
+    let rx = origin_on(l, OK.to_vec());
+    let r = get(&format!("http://[::1]:{port}/echo")).unwrap();
+    assert_eq!(r.0, 200);
+    assert!(head_of(&rx).contains(&format!("\r\nHost: [::1]:{port}\r\n")));
+}
+
+#[test]
+fn a_query_without_a_path_keeps_the_port() {
+    let (port, rx) = origin(OK);
+    let r = get(&format!("http://127.0.0.1:{port}?x=1")).unwrap();
+    assert_eq!(r.0, 200);
+    assert_eq!(request_line(&head_of(&rx)), "GET /?x=1 HTTP/1.1");
+}
+
+#[test]
+fn the_fragment_is_never_sent_and_unsafe_bytes_are_percent_encoded() {
+    let (port, rx) = origin(OK);
+    get(&format!("http://127.0.0.1:{port}/a b/café?q=a b#frag")).unwrap();
+    assert_eq!(request_line(&head_of(&rx)), "GET /a%20b/caf%C3%A9?q=a%20b HTTP/1.1");
+}
+
+#[test]
+fn the_scheme_is_case_insensitive() {
+    let (port, rx) = origin(OK);
+    let r = get(&format!("HTTP://127.0.0.1:{port}/echo")).unwrap();
+    assert_eq!(r.0, 200);
+    assert_eq!(request_line(&head_of(&rx)), "GET /echo HTTP/1.1");
+}
+
+#[test]
+fn bad_urls_are_refused_before_any_connection() {
+    let (port, touched) = untouched_listener();
+    let cases = [
+        ("http://127.0.0.1:99999/echo".to_string(), "invalid port"),
+        (format!("http://127.0.0.1:{port}x/echo"), "invalid port"),
+        ("http://127.0.0.1:0/".to_string(), "invalid port"),
+        (format!("ftp://127.0.0.1:{port}/"), "unsupported scheme \"ftp\""),
+        (format!("127.0.0.1:{port}/echo"), "missing scheme"),
+        (format!("localhost:{port}/echo"), "missing scheme"),
+        ("http:///echo".to_string(), "empty host"),
+        ("http://[::1/".to_string(), "IPv6"),
+        (format!("http://::1:{port}/"), "IPv6"),
+        ("http://exa mple.com/".to_string(), "invalid character"),
+    ];
+    for (url, want) in &cases {
+        let e = get(url).expect_err(url);
+        assert!(e.starts_with("invalid URL "), "{url}: {e}");
+        assert!(e.contains(want), "{url}: want {want:?} in {e:?}");
+        // The call handle refuses the same URL synchronously.
+        let e2 = client::http_call_spawn("GET", url, "", vec![], 0, 0).err().expect("start refuses");
+        assert_eq!(&e2, &e, "{url}");
+    }
+    assert!(!touched(Duration::from_millis(200)), "a refused URL still dialled");
+}
+
+#[test]
+fn an_empty_port_means_the_default_one() {
+    let u = client::http_parse_url("https://example.com:/x").unwrap();
+    assert_eq!((u.port, u.authority.as_str(), u.target.as_str()), (443, "example.com", "/x"));
+}
+
+#[test]
+fn an_idn_host_goes_out_as_punycode() {
+    let u = client::http_parse_url("https://Bücher.example/").unwrap();
+    assert_eq!(u.host, "xn--bcher-kva.example");
+    assert_eq!(u.authority, "xn--bcher-kva.example");
+    let u = client::http_parse_url("http://例え.テスト:8080/").unwrap();
+    assert_eq!(u.authority, "xn--r8jz45g.xn--zckzah:8080");
+}
+
 // ── #2824: chunk extensions and 1xx ──
 
 #[test]

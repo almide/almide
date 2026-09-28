@@ -304,8 +304,8 @@ fn http_call_run(
     body: &str,
     headers: &[(String, String)],
 ) -> Result<(), String> {
-    let (is_https, host, port, path) = parse_url(url)?;
-    let addrs: Vec<std::net::SocketAddr> = std::net::ToSocketAddrs::to_socket_addrs(&(host.as_str(), port))
+    let u = http_parse_url(url)?;
+    let addrs: Vec<std::net::SocketAddr> = std::net::ToSocketAddrs::to_socket_addrs(&(u.host.as_str(), u.port))
         .map_err(|e| http_call_io_error(sh, &e, "connection"))?
         .collect();
     let mut last_err: Option<std::io::Error> = None;
@@ -326,8 +326,10 @@ fn http_call_run(
     let stream = match (stream, last_err) {
         (Some(s), _) => s,
         (None, Some(e)) => return Err(http_call_io_error(sh, &e, "connection")),
-        (None, None) => return Err(format!("connection failed: no address for {}", host)),
+        (None, None) => return Err(format!("connection failed: no address for {}", u.host)),
     };
+    let route = AlmideHttpRoute { target: u.target.clone() };
+    let request = http_request_bytes(method, &u, &route, body, headers);
     // The control copy is what `cancel` shuts down. The timeouts go on the
     // socket that is READ (`AlmideHttpCallSock::tcp`), never on this copy: on
     // Windows `try_clone` is WSADuplicateSocket, and SO_RCVTIMEO set through
@@ -342,19 +344,20 @@ fn http_call_run(
         }
         st.socket = Some(ctl.try_clone().map_err(|e| format!("connection failed: {}", e))?);
     }
-    if is_https {
+    if u.https {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let mut tls = make_tls_stream(&host, stream)?;
-            http_call_pump(sh, &mut tls, method, &host, &path, body, headers)
+            let mut tls = make_tls_stream(&u.host, stream)?;
+            http_call_pump(sh, &mut tls, &request)
         }
         #[cfg(target_arch = "wasm32")]
         {
+            let _ = (stream, request);
             Err("HTTPS is not supported on WASM target".to_string())
         }
     } else {
         let mut s = stream;
-        http_call_pump(sh, &mut s, method, &host, &path, body, headers)
+        http_call_pump(sh, &mut s, &request)
     }
 }
 
@@ -377,19 +380,10 @@ impl AlmideHttpCallSock for rustls::StreamOwned<rustls::ClientConnection, TcpStr
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn http_call_pump<S: AlmideHttpCallSock>(
-    sh: &AlmideHttpCallShared,
-    s: &mut S,
-    method: &str,
-    host: &str,
-    path: &str,
-    body: &str,
-    headers: &[(String, String)],
-) -> Result<(), String> {
+fn http_call_pump<S: AlmideHttpCallSock>(sh: &AlmideHttpCallShared, s: &mut S, request: &[u8]) -> Result<(), String> {
     s.tcp().set_write_timeout(http_call_step_timeout(sh, false)?).ok();
-    if let Err(e) = http_write_request(s, method, host, path, body, headers) {
-        return Err(if sh.past_deadline() { http_call_total_msg(sh.total_ms) } else { e });
+    if let Err(e) = s.write_all(request) {
+        return Err(if sh.past_deadline() { http_call_total_msg(sh.total_ms) } else { format!("write failed: {}", e) });
     }
     let mut raw: Vec<u8> = Vec::new();
     let mut framing: Option<HttpCallFraming> = None;
@@ -462,7 +456,7 @@ pub fn http_call_spawn(
             total_ms, idle_ms
         ));
     }
-    parse_url(url)?;
+    http_parse_url(url)?;
     let shared = std::sync::Arc::new(AlmideHttpCallShared {
         state: std::sync::Mutex::new(AlmideHttpCallState {
             head: None,

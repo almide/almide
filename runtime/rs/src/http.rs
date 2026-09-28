@@ -383,51 +383,40 @@ pub fn almide_http_request_stream_impl(
     headers: &AlmideMap<String, String>,
     mut on_chunk: impl FnMut(String),
 ) -> Result<(), String> {
-    let (is_https, host, port, path) = parse_url(url)?;
-    let stream = TcpStream::connect(format!("{}:{}", host, port))
-        .map_err(|e| format!("connection failed: {}", e))?;
+    // The shared core parses the URL and writes the request, so the
+    // streaming client cannot drift from the buffered ones (#2828).
+    let pairs = header_pairs(headers);
+    let u = http_parse_url(url)?;
     // Long read timeout — SSE responses can be quiet between events.
+    let stream = TcpStream::connect((u.host.as_str(), u.port)).map_err(|e| format!("connection failed: {}", e))?;
     stream.set_read_timeout(client_read_timeout(120)).ok();
+    let route = AlmideHttpRoute { target: u.target.clone() };
+    let request = http_request_bytes(method, &u, &route, body, &pairs);
 
     let mut wrap = |s: &str| on_chunk(s.to_string());
-    if is_https {
+    if u.https {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let mut tls = make_tls_stream(&host, stream)?;
-            http_exchange_stream(&mut tls, method, &host, &path, body, headers, &mut wrap)
+            let mut tls = make_tls_stream(&u.host, stream)?;
+            http_exchange_stream(&mut tls, &request, &mut wrap)
         }
         #[cfg(target_arch = "wasm32")]
         {
+            let _ = (stream, request);
             Err("HTTPS streaming not supported on WASM target".to_string())
         }
     } else {
         let mut s = stream;
-        http_exchange_stream(&mut s, method, &host, &path, body, headers, &mut wrap)
+        http_exchange_stream(&mut s, &request, &mut wrap)
     }
 }
 
 fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
     stream: &mut S,
-    method: &str,
-    host: &str,
-    path: &str,
-    body: &str,
-    headers: &AlmideMap<String, String>,
+    request: &[u8],
     on_chunk: &mut F,
 ) -> Result<(), String> {
-    let mut req = format!("{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n", method, path, host);
-    if !body.is_empty() {
-        req.push_str(&format!("Content-Length: {}\r\n", body.len()));
-        if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")) {
-            req.push_str("Content-Type: application/json\r\n");
-        }
-    }
-    for (k, v) in headers.iter() {
-        req.push_str(&format!("{}: {}\r\n", k, v));
-    }
-    req.push_str("\r\n");
-    req.push_str(body);
-    stream.write_all(req.as_bytes()).map_err(|e| format!("write failed: {}", e))?;
+    stream.write_all(request).map_err(|e| format!("write failed: {}", e))?;
 
     let mut buf = vec![0u8; 8192];
     let mut acc: Vec<u8> = Vec::new();

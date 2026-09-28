@@ -19,25 +19,9 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
 
-pub fn parse_url(url: &str) -> Result<(bool, String, u16, String), String> {
-    let (is_https, url) = if let Some(rest) = url.strip_prefix("https://") {
-        (true, rest)
-    } else if let Some(rest) = url.strip_prefix("http://") {
-        (false, rest)
-    } else {
-        (false, url)
-    };
-    let default_port: u16 = if is_https { 443 } else { 80 };
-    let (host_port, path) = match url.find('/') {
-        Some(i) => (&url[..i], &url[i..]),
-        None => (url, "/"),
-    };
-    let (host, port) = match host_port.find(':') {
-        Some(i) => (&host_port[..i], host_port[i + 1..].parse::<u16>().unwrap_or(default_port)),
-        None => (host_port, default_port),
-    };
-    Ok((is_https, host.to_string(), port, path.to_string()))
-}
+// URL, request head, proxies, dial limits and TLS trust: one include, so
+// this file stays under the 1000-line limit.
+include!("http_route_core.rs");
 
 /// The client read timeout: `default_secs` unless `ALMIDE_HTTP_TIMEOUT_SECS`
 /// overrides it; `0` means NO timeout (block until the server answers). A
@@ -233,33 +217,6 @@ pub fn make_tls_stream(
     Ok(rustls::StreamOwned::new(conn, stream))
 }
 
-/// Write the request head + body: `Connection: close`, a `Content-Length`
-/// whenever a body rides along (plus a default JSON `Content-Type` unless the
-/// caller named one), then the caller's headers in map order. ONE writer for
-/// every client shape, so the wire request cannot drift between the twins.
-pub fn http_write_request(
-    stream: &mut impl Write,
-    method: &str,
-    host: &str,
-    path: &str,
-    body: &str,
-    headers: &[(String, String)],
-) -> Result<(), String> {
-    let mut req = format!("{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n", method, path, host);
-    if !body.is_empty() {
-        req.push_str(&format!("Content-Length: {}\r\n", body.len()));
-        if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")) {
-            req.push_str("Content-Type: application/json\r\n");
-        }
-    }
-    for (k, v) in headers.iter() {
-        req.push_str(&format!("{}: {}\r\n", k, v));
-    }
-    req.push_str("\r\n");
-    req.push_str(body);
-    stream.write_all(req.as_bytes()).map_err(|e| format!("write failed: {}", e))
-}
-
 /// A parsed text response: `(status_code, headers, body)`. The header list
 /// is EVERY field line in wire order — names keep their wire spelling, and a
 /// repeated field (`Set-Cookie`) keeps every occurrence (#1791); the
@@ -268,100 +225,67 @@ pub fn http_write_request(
 /// then the body — the same tolerance the body-only client always had).
 pub type HttpTextResponse = (i64, Vec<(String, String)>, String);
 
-/// The full-response exchange (#1791): status line, header block and the
-/// transfer-decoded body of ANY complete response. The body-only and
-/// status-only exchanges below are thin projections of this one, so the
-/// three shapes cannot disagree on framing or error texts.
-pub fn http_exchange_response(
-    stream: &mut (impl Read + Write),
-    method: &str,
-    host: &str,
-    path: &str,
-    body: &str,
-    headers: &[(String, String)],
-) -> Result<HttpTextResponse, String> {
-    http_write_request(stream, method, host, path, body, headers)?;
+/// A parsed response with its body still bytes: `(status_code, headers,
+/// transfer-decoded body)`.
+pub type HttpRawResponse = (i64, Vec<(String, String)>, Vec<u8>);
 
-    let response = read_response_tolerant(stream)?;
-
-    // The framing is removed on BYTES; only the decoded body is then turned
-    // into text (#2536). The header block is ASCII by protocol, so reading
-    // it lossily is harmless.
-    // Past any 1xx interim heads (#2824): `(start, idx)` is the final head.
-    let Some((start, idx)) = http_final_head(&response) else {
-        return Ok((0, Vec::new(), String::from_utf8_lossy(&response).into_owned()));
+/// Split a whole response into status, fields and the transfer-decoded body
+/// bytes, past any 1xx interim heads. The framing is removed on BYTES; only
+/// a text caller then decodes the body (#2536). The head is ASCII by
+/// protocol, so reading it lossily is harmless.
+pub fn http_parse_response(response: &[u8]) -> Result<HttpRawResponse, String> {
+    let Some((start, idx)) = http_final_head(response) else {
+        return Ok((0, Vec::new(), response.to_vec()));
     };
-    let header_section = String::from_utf8_lossy(&response[start..idx]);
-    let resp_body = &response[idx + 4..];
+    let head = String::from_utf8_lossy(&response[start..idx]);
     let code = http_status_of(&response[start..idx]);
-    let resp_headers = http_head_fields(&header_section);
-    let body_out = if http_fields_chunked(&resp_headers) {
-        String::from_utf8_lossy(&decode_chunked_bytes(resp_body)?).into_owned()
-    } else {
-        String::from_utf8_lossy(resp_body).into_owned()
-    };
-    Ok((code, resp_headers, body_out))
+    let fields = http_head_fields(&head);
+    let body = &response[idx + 4..];
+    let body = if http_fields_chunked(&fields) { decode_chunked_bytes(body)? } else { body.to_vec() };
+    Ok((code, fields, body))
 }
 
-/// Perform an HTTP request/response exchange over any Read+Write stream and
-/// return the body — the body projection of `http_exchange_response`.
-pub fn http_exchange(
-    stream: &mut (impl Read + Write),
-    method: &str,
-    host: &str,
-    path: &str,
-    body: &str,
-    headers: &[(String, String)],
-) -> Result<String, String> {
-    http_exchange_response(stream, method, host, path, body, headers).map(|(_, _, b)| b)
+/// Write the prepared request and read the whole response.
+pub fn http_exchange_raw(stream: &mut (impl Read + Write), request: &[u8]) -> Result<Vec<u8>, String> {
+    stream.write_all(request).map_err(|e| format!("write failed: {}", e))?;
+    read_response_tolerant(stream)
 }
 
-/// Like `http_exchange`, but also parses the status line and returns
-/// `(status_code, body)` — the status projection of `http_exchange_response`.
-/// A missing/unparseable status line yields code 0.
-pub fn http_exchange_status(
-    stream: &mut (impl Read + Write),
+/// The one buffered client every shape projects: prepare (URL, method,
+/// headers — refused before any dial), open (proxy, timeouts), TLS, exchange,
+/// parse.
+fn http_request_raw(
     method: &str,
-    host: &str,
-    path: &str,
+    url: &str,
     body: &str,
     headers: &[(String, String)],
-) -> Result<(i64, String), String> {
-    http_exchange_response(stream, method, host, path, body, headers).map(|(c, _, b)| (c, b))
-}
-
-/// Like `http_exchange` but returns the raw response body bytes — binary
-/// payloads are never run through `from_utf8_lossy`.
-pub fn http_exchange_bytes(
-    stream: &mut (impl Read + Write),
-    method: &str,
-    host: &str,
-    path: &str,
-    body: &str,
-    headers: &[(String, String)],
-) -> Result<Vec<u8>, String> {
-    http_write_request(stream, method, host, path, body, headers)?;
-
-    let response = read_response_tolerant(stream)?;
-
-    if let Some((start, idx)) = http_final_head(&response) {
-        let fields = http_head_fields(&String::from_utf8_lossy(&response[start..idx]));
-        let resp_body = &response[idx + 4..];
-        if http_fields_chunked(&fields) {
-            decode_chunked_bytes(resp_body)
-        } else {
-            Ok(resp_body.to_vec())
+) -> Result<HttpRawResponse, String> {
+    let u = http_parse_url(url)?;
+    let stream = http_client_connect(&u.host, u.port)?;
+    let route = AlmideHttpRoute { target: u.target.clone() };
+    let request = http_request_bytes(method, &u, &route, body, headers);
+    let response = if u.https {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut tls = make_tls_stream(&u.host, stream)?;
+            http_exchange_raw(&mut tls, &request)?
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = stream;
+            return Err("HTTPS is not supported on WASM target".to_string());
         }
     } else {
-        Ok(response)
-    }
+        let mut stream = stream;
+        http_exchange_raw(&mut stream, &request)?
+    };
+    http_parse_response(&response)
 }
 
 /// Connect (with the 30 s default read timeout) — the one dial every
 /// client shape shares.
 fn http_client_connect(host: &str, port: u16) -> Result<TcpStream, String> {
-    let stream = TcpStream::connect(format!("{}:{}", host, port))
-        .map_err(|e| format!("connection failed: {}", e))?;
+    let stream = TcpStream::connect((host, port)).map_err(|e| format!("connection failed: {}", e))?;
     stream.set_read_timeout(client_read_timeout(30)).ok();
     Ok(stream)
 }
@@ -370,30 +294,15 @@ fn http_client_connect(host: &str, port: u16) -> Result<TcpStream, String> {
 /// complete response — a 404 or a 3xx is `Ok`, with its `Location` in the
 /// header list. Redirects are NEVER followed: the 3xx and its `Location` are
 /// the answer, so the final URL is always the URL the caller passed. `Err`
-/// is a transport failure (connection / TLS / timeout).
+/// is a refused request (URL, method, header) or a transport failure
+/// (connection / proxy / TLS / timeout / size cap / framing).
 pub fn request_response(
     method: &str,
     url: &str,
     body: &str,
     headers: &[(String, String)],
 ) -> Result<HttpTextResponse, String> {
-    let (is_https, host, port, path) = parse_url(url)?;
-    let stream = http_client_connect(&host, port)?;
-
-    if is_https {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let mut tls_stream = make_tls_stream(&host, stream)?;
-            http_exchange_response(&mut tls_stream, method, &host, &path, body, headers)
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            Err("HTTPS is not supported on WASM target".to_string())
-        }
-    } else {
-        let mut stream = stream;
-        http_exchange_response(&mut stream, method, &host, &path, body, headers)
-    }
+    http_request_raw(method, url, body, headers).map(|(c, h, b)| (c, h, String::from_utf8_lossy(&b).into_owned()))
 }
 
 /// The String client: `Ok(body)` for any complete response, `Err` for
@@ -420,30 +329,15 @@ pub fn request_status(
     request_response(method, url, body, headers).map(|(c, _, b)| (c, b))
 }
 
-/// The binary client: the raw response body as `Vec<u8>`.
+/// The binary client: the raw response body as `Vec<u8>` — binary payloads
+/// are never run through `from_utf8_lossy`.
 pub fn request_bytes(
     method: &str,
     url: &str,
     body: &str,
     headers: &[(String, String)],
 ) -> Result<Vec<u8>, String> {
-    let (is_https, host, port, path) = parse_url(url)?;
-    let stream = http_client_connect(&host, port)?;
-
-    if is_https {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let mut tls_stream = make_tls_stream(&host, stream)?;
-            http_exchange_bytes(&mut tls_stream, method, &host, &path, body, headers)
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            Err("HTTPS is not supported on WASM target".to_string())
-        }
-    } else {
-        let mut stream = stream;
-        http_exchange_bytes(&mut stream, method, &host, &path, body, headers)
-    }
+    http_request_raw(method, url, body, headers).map(|(_, _, b)| b)
 }
 
 // The call-handle core (#2631 / #2633) rides the same include chain: inlined
