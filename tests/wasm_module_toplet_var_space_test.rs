@@ -142,15 +142,19 @@ effect fn main() -> Unit = {
     assert_same_on_both(dir.path(), true);
 }
 
-/// A declined shape (`guard … else continue`, `expr:Continue` today; swap in
-/// any other decline if it starts lowering: the assertion is the location).
+/// A declined shape (a `continue` in a VALUE-position block, `expr:Continue`
+/// today — the statement-position forms lower since #2745; swap in any other
+/// decline if it starts lowering: the assertion is the location).
 const DECLINES: &str = "// line 1
 
 let COUNT: Int = {
   var n = 0
   for x in [1, 0, 2] {
-    guard x > 0 else continue
-    n = n + 1
+    let k = {
+      if x <= 0 then continue
+      1
+    }
+    n = n + k
   }
   n
 }
@@ -158,8 +162,11 @@ let COUNT: Int = {
 fn keep(xs: List[Int]) -> Int = {
   var n = 0
   for x in xs {
-    guard x > 0 else continue
-    n = n + 1
+    let k = {
+      if x <= 0 then continue
+      1
+    }
+    n = n + k
   }
   n
 }
@@ -189,5 +196,5 @@ fn a_wall_in_a_module_fn_names_that_fn_and_module() {
     let site = structural_wall_site(
         "import self.fixes\n\neffect fn main() -> Unit = println(int.to_string(fixes.keep([1, 0])))\n",
     );
-    assert_eq!(site, "--> in fn `fixes.keep` (module `fixes`, line 15)");
+    assert_eq!(site, "--> in fn `fixes.keep` (module `fixes`, line 18)");
 }
