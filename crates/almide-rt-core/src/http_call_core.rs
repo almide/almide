@@ -185,25 +185,25 @@ enum HttpCallFraming {
     UntilClose,
 }
 
-/// Move the decoded body bytes out of `raw` into `out`; `true` once the body
-/// is complete by its own framing.
-fn http_call_decode(f: &mut HttpCallFraming, raw: &mut Vec<u8>, out: &mut Vec<u8>) -> bool {
+/// Move the decoded body bytes out of `raw` into `out`; `Ok(true)` once the
+/// body is complete by its own framing, `Err` on a malformed chunk size.
+fn http_call_decode(f: &mut HttpCallFraming, raw: &mut Vec<u8>, out: &mut Vec<u8>) -> Result<bool, String> {
     match f {
         HttpCallFraming::Length(left) => {
             let take = (*left).min(raw.len());
             out.extend(raw.drain(..take));
             *left -= take;
-            *left == 0
+            Ok(*left == 0)
         }
         HttpCallFraming::UntilClose => {
             out.append(raw);
-            false
+            Ok(false)
         }
         HttpCallFraming::Chunked { remaining, awaiting_size } => loop {
             if !*awaiting_size && *remaining == 0 {
                 // The CRLF that closes a chunk's data.
                 if raw.len() < 2 {
-                    return false;
+                    return Ok(false);
                 }
                 if raw.starts_with(b"\r\n") {
                     raw.drain(..2);
@@ -212,13 +212,12 @@ fn http_call_decode(f: &mut HttpCallFraming, raw: &mut Vec<u8>, out: &mut Vec<u8
             }
             if *awaiting_size {
                 let Some(nl) = raw.windows(2).position(|w| w == b"\r\n") else {
-                    return false;
+                    return Ok(false);
                 };
-                let size_line = String::from_utf8_lossy(&raw[..nl]).into_owned();
-                let size = usize::from_str_radix(size_line.split(';').next().unwrap_or("").trim(), 16).unwrap_or(0);
+                let size = http_chunk_size(&raw[..nl])?;
                 raw.drain(..nl + 2);
                 if size == 0 {
-                    return true;
+                    return Ok(true);
                 }
                 *remaining = size;
                 *awaiting_size = false;
@@ -227,31 +226,32 @@ fn http_call_decode(f: &mut HttpCallFraming, raw: &mut Vec<u8>, out: &mut Vec<u8
             out.extend(raw.drain(..take));
             *remaining -= take;
             if *remaining > 0 {
-                return false;
+                return Ok(false);
             }
         },
     }
 }
 
 /// Split the head off `raw` once it is whole: status, reason, header lines
-/// (wire order, repeats kept — the `request_response` rule) and framing.
-fn http_call_parse_head(raw: &mut Vec<u8>) -> Option<(AlmideHttpCallHead, HttpCallFraming)> {
-    let idx = raw.windows(4).position(|w| w == b"\r\n\r\n")?;
-    let section = String::from_utf8_lossy(&raw[..idx]).into_owned();
-    raw.drain(..idx + 4);
-    let mut lines = section.lines();
-    let status_line = lines.next().unwrap_or("");
-    let status: i64 = status_line.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+/// (wire order, repeats kept — the `request_response` rule) and framing. A
+/// 1xx interim head (`100 Continue`) is dropped and the next one awaited
+/// (#2824).
+fn http_call_parse_head(raw: &mut Vec<u8>) -> Result<Option<(AlmideHttpCallHead, HttpCallFraming)>, String> {
+    let (section, status) = loop {
+        let Some(idx) = raw.windows(4).position(|w| w == b"\r\n\r\n") else {
+            return Ok(None);
+        };
+        let status = http_status_of(&raw[..idx]);
+        let section = String::from_utf8_lossy(&raw[..idx]).into_owned();
+        raw.drain(..idx + 4);
+        if !http_is_interim(status) {
+            break (section, status);
+        }
+    };
+    let status_line = section.lines().next().unwrap_or("");
     let reason = status_line.splitn(3, ' ').nth(2).unwrap_or("").to_string();
-    let headers: Vec<(String, String)> = lines
-        .filter_map(|line| {
-            let (k, v) = line.split_once(':')?;
-            Some((k.trim().to_string(), v.trim().to_string()))
-        })
-        .collect();
-    let chunked = headers
-        .iter()
-        .any(|(k, v)| k.eq_ignore_ascii_case("transfer-encoding") && v.to_ascii_lowercase().contains("chunked"));
+    let headers = http_head_fields(&section);
+    let chunked = http_fields_chunked(&headers);
     let length = headers
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
@@ -261,7 +261,7 @@ fn http_call_parse_head(raw: &mut Vec<u8>) -> Option<(AlmideHttpCallHead, HttpCa
         (false, Some(n)) => HttpCallFraming::Length(n),
         (false, None) => HttpCallFraming::UntilClose,
     };
-    Some((AlmideHttpCallHead { status, reason, headers }, framing))
+    Ok(Some((AlmideHttpCallHead { status, reason, headers }, framing)))
 }
 
 /// The socket timeout for the next blocking step: the idle limit (reads
@@ -418,7 +418,7 @@ fn http_call_pump<S: AlmideHttpCallSock>(
         }
         raw.extend_from_slice(&buf[..n]);
         if framing.is_none() {
-            let Some((head, f)) = http_call_parse_head(&mut raw) else {
+            let Some((head, f)) = http_call_parse_head(&mut raw)? else {
                 continue;
             };
             let mut st = sh.lock();
@@ -429,7 +429,7 @@ fn http_call_pump<S: AlmideHttpCallSock>(
             framing = Some(f);
         }
         let mut decoded = Vec::new();
-        let complete = http_call_decode(framing.as_mut().expect("framing is set"), &mut raw, &mut decoded);
+        let complete = http_call_decode(framing.as_mut().expect("framing is set"), &mut raw, &mut decoded)?;
         {
             let mut st = sh.lock();
             if st.outcome.is_some() {
