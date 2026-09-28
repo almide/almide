@@ -1109,6 +1109,8 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/r5_mod_global_init_order.almd", class = "fixture" },
+  { path = "tests/wasm_module_toplet_var_space_test.rs", class = "fixture", name = "a_module_initializer_reads_its_own_global_not_a_main_local" },
+  { path = "tests/wasm_module_toplet_var_space_test.rs", class = "fixture", name = "a_module_record_catalog_naming_a_constant_builds_on_the_structural_leg" },
 ]
 [[contract]]
 id        = "C-078"
