@@ -24,8 +24,6 @@ build :: spec/wasm_cross/fs_call_head_family.almd :: call:fs.fold_lines_range
 build :: spec/wasm_cross/inplace_clear_alias_field.almd :: string-clear-nonvar
 test :: spec/integration/codegen_patterns_test.almd :: call:list.partition
 test :: spec/integration/codegen_pipes_test.almd :: call:list.partition
-test :: spec/integration/modules/qualified_ctor_test.almd :: ty-mismatch:Scalar(Int)-vs-Scalar(Str)
-test :: spec/integration/modules/same_name_ctor_test.almd :: ty-mismatch:Named(1)-vs-Named(0)
 test :: spec/lang/edge_cases_test.almd :: call:list.partition
 test :: spec/lang/fallible_hof_test.almd :: call:testing.assert_contains
 test :: spec/lang/fallible_lambda_test.almd :: call:testing.assert_contains
@@ -37,7 +35,6 @@ test :: spec/lang/guard_else_err_unwrap_test.almd :: interp-part:Unit
 test :: spec/lang/map_literal_test.almd :: forin-map-nontuple
 test :: spec/lang/matrix_test.almd :: binop:MulMatrix
 test :: spec/lang/option_marker_test.almd :: call:testing.assert_contains
-test :: spec/lang/regression_v0_11_test.almd :: ty-mismatch:Unit-vs-Scalar(Int)
 test :: spec/lang/result_option_matrix_test.almd :: ty-mismatch:Scalar(Int)-vs-Result(ETy(0), ETy(1))
 test :: spec/lang/unwrap_operators_test.almd :: expr:OptionalChain
 test :: spec/stdlib/bytes_typed_test.almd :: expr:Hole
@@ -54,6 +51,5 @@ test :: spec/stdlib/pipe_chain_test.almd :: call:list.partition
 test :: spec/stdlib/random_choice_pair_test.almd :: call:random.choice
 test :: spec/stdlib/random_shuffle_pair_test.almd :: call:random.shuffle
 test :: spec/stdlib/random_test.almd :: call:random.float
-test :: spec/stdlib/result_errjoin_effect_test.almd :: unwrap-err-ty-mismatch
 test :: spec/stdlib/testing_result_layout_test.almd :: call:testing.assert_ok
 test :: spec/stdlib/testing_semantics_manifest_test.almd :: call:testing.assert_gt
