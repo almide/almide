@@ -134,7 +134,8 @@ fn desugar_matrix_binops(body: &IrExpr) -> Option<IrExpr> {
 }
 
 /// `buf[i] = v` over `Bytes` — the WRITE-side twin of `desugar_bytes_index_calls` —
-/// → statement `bytes.set_at(buf, i, v)`, the CHECKED packed-byte store self-host
+/// → `{ let i' = i; let v' = v; bytes.index(buf, i'); bytes.set_at(buf, i', v') }`:
+/// the checked read aborts out of range (#2893), then the packed-byte store self-host
 /// (whose receiver rides the #794 COW discipline: local var → MakeUnique, mut param
 /// → write-through). Without this rewrite `IndexAssign` lowers as a uniform 8-byte
 /// SLOT store (`+12+i*8` — never where `bytes.index` reads `+12+i`, and past a
@@ -162,27 +163,57 @@ fn desugar_bytes_index_assign(body: &IrExpr, params: &[IrParam]) -> Option<IrExp
             if !self.bytes_vars.contains(target) {
                 return;
             }
-            let recv = IrExpr {
+            // #2893: `set_at` is C-229's TOTAL store (an out-of-range write is a
+            // no-op), but the index syntax is C-067's CHECKED form — native's
+            // `almide_index_set!` aborts `Error: index out of bounds`, exit 1.
+            // So the index and the value are bound first (index, then value:
+            // the list store's order), the checked read `bytes.index` judges the
+            // bound index — it aborts exactly as the read syntax does — and only
+            // then does `set_at` store, always in range.
+            let span = index.span.clone();
+            let seed = crate::lower::desugar_var_seed();
+            let (ti, tv, tc) = (VarId(seed), VarId(seed + 1), VarId(seed + 2));
+            let at = |kind| IrExpr { kind, ty: Ty::Int, span: span.clone(), def_id: None };
+            let recv = || IrExpr {
                 kind: IrExprKind::Var { id: *target },
                 ty: Ty::Bytes,
-                span: index.span.clone(),
+                span: span.clone(),
                 def_id: None,
             };
-            let call = IrExpr {
+            let bytes_call = |func: &str, args: Vec<IrExpr>, ty: Ty| IrExpr {
                 kind: IrExprKind::Call {
-                    target: CallTarget::Module {
-                        module: sym("bytes"),
-                        func: sym("set_at"),
-                        def_id: None,
-                    },
-                    args: vec![recv, index.clone(), value.clone()],
+                    target: CallTarget::Module { module: sym("bytes"), func: sym(func), def_id: None },
+                    args,
                     type_args: Vec::new(),
                 },
-                ty: Ty::Unit,
-                span: index.span.clone(),
+                ty,
+                span: span.clone(),
                 def_id: None,
             };
-            stmt.kind = IrStmtKind::Expr { expr: call };
+            let bind = |var, value: &IrExpr| IrStmt {
+                kind: IrStmtKind::Bind { var, mutability: almide_ir::Mutability::Let, ty: Ty::Int, value: value.clone() },
+                span: span.clone(),
+            };
+            let check = bytes_call("index", vec![recv(), at(IrExprKind::Var { id: ti })], Ty::Int);
+            let store = bytes_call(
+                "set_at",
+                vec![recv(), at(IrExprKind::Var { id: ti }), at(IrExprKind::Var { id: tv })],
+                Ty::Unit,
+            );
+            let stmts = vec![
+                bind(ti, index),
+                bind(tv, value),
+                // Bound, not a bare statement: the byte it reads is discarded.
+                bind(tc, &check),
+                IrStmt { kind: IrStmtKind::Expr { expr: store }, span: span.clone() },
+            ];
+            let block = IrExpr {
+                kind: IrExprKind::Block { stmts, expr: None },
+                ty: Ty::Unit,
+                span: span.clone(),
+                def_id: None,
+            };
+            stmt.kind = IrStmtKind::Expr { expr: block };
             self.changed = true;
         }
     }
