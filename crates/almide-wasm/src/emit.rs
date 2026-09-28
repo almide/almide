@@ -14,6 +14,11 @@ use crate::*;
 #[path = "package_keys.rs"]
 pub mod package_keys;
 
+/// #2750: fn-value HOF callbacks eta-expanded to literal lambdas (a pre-pass
+/// of the leg's front, split out for the file budget).
+#[path = "eta.rs"]
+mod eta;
+
 /// Emit a core wasm module for `ir`, or say precisely why not yet.
 /// Two passes: the first loads the WHOLE linked registry graph (so
 /// resolution and the refusal BFS see everything) and reports which
@@ -51,7 +56,7 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     let ir = erased.as_ref().unwrap_or(ir);
     // #2750: a fn VALUE as a HOF callback becomes the literal lambda the
     // arms inline (eta.rs) — one HOF lowering, never a second call path.
-    let expanded = crate::eta::eta_expand_callbacks(ir);
+    let expanded = eta::eta_expand_callbacks(ir);
     let ir = expanded.as_ref().unwrap_or(ir);
     // #2004: a call result consumed by a module op's argument gets an
     // owner — bound first, released by the frame's exit plan.
