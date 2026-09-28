@@ -11,6 +11,8 @@
 #   CANARY_COMMANDS  newline-separated almide argument lists (e.g. "check\ntest")
 #   CANARY_REF     optional ref to check out (default: the default branch HEAD)
 #   CANARY_TIMEOUT per-command seconds (default 900)
+#   CANARY_BASELINE_TAG  the baseline's release tag, stamped into the result
+#                  so `downstream-canary.py record` knows which release passed
 #
 # Writes <out-dir>/result.tsv (read by scripts/downstream-canary.py report)
 # and one log per command per side. The leg itself exits 0 whenever it
@@ -65,6 +67,7 @@ if [ -z "$fetched" ]; then
 fi
 sha=$(git -C "$work/src" rev-parse HEAD)
 emit project "$repo" "$sha" "fetched" ""
+[ -n "${CANARY_BASELINE_TAG:-}" ] && emit meta baseline "$CANARY_BASELINE_TAG" "-" ""
 
 cp -a "$work/src" "$work/baseline"
 cp -a "$work/src" "$work/candidate"

@@ -68,7 +68,12 @@ Correct flow:
      (`scripts/downstream-canary.toml`). **Any REGRESSION row blocks the tag
      until triaged**: file an issue labeled `regression`, or — when the break
      is intended — record it as a `proofs/dialect-epochs.toml` entry. An
-     `infra` row is not a verdict; re-run that leg.
+     `infra` row is not a verdict; re-run that leg. A command that fails on
+     both sides but passed on an earlier release (the known-good ledger,
+     `proofs/downstream-canary-known-good.toml`) is also a REGRESSION
+     (`good/FAIL`) — a break that already shipped is still a break. After a
+     CLEAN canary, advance the ledger and commit it:
+     `bash scripts/downstream-canary-record.sh <run-id>`. Nothing else moves it.
    - **Interface diff** (#1488): before the final tag, run
      `bash scripts/check-interface-diff.sh vPREV vX.Y.Z` — it classifies the
      public stdlib surface as identical / additive / breaking from the

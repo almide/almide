@@ -14,7 +14,9 @@
 #
 # Roster: scripts/downstream-canary.toml (public repos only — Aid-On/teastia
 # stays out). Leg driver: scripts/downstream-canary.sh. Report:
-# scripts/downstream-canary.py. Release Procedure (CLAUDE.md): dispatch on the
+# scripts/downstream-canary.py. Known-good ledger (read by the report, moved
+# only by scripts/downstream-canary-record.sh, never by a run):
+# proofs/downstream-canary-known-good.toml. Release Procedure (CLAUDE.md): dispatch on the
 # candidate commit before tagging vX.Y.Z-rc1 and before the final; a
 # REGRESSION row blocks the tag until triaged.
 name: Downstream Canary
@@ -165,6 +167,7 @@ jobs:
           CANARY_COMMANDS: ${{ matrix.commands }}
           CANARY_REF: ${{ matrix.ref }}
           CANARY_TIMEOUT: ${{ matrix.timeout }}
+          CANARY_BASELINE_TAG: ${{ needs.plan.outputs.baseline_tag }}
         run: bash canary/scripts/downstream-canary.sh "${{ matrix.repo }}" "results/${{ matrix.slug }}"
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
