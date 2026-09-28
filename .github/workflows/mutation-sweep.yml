@@ -13,7 +13,10 @@ name: Mutation sweep (full net)
 #   - nightly, beside conformance-mutations;
 #   - manual dispatch.
 # PRs run the INCREMENTAL scope inside ci.yml (only mutants intersecting
-# the change set) — see scripts/check-mutation-gate.sh for the scope rule.
+# the change set, under a 28-min budget that names what it deferred to this
+# sweep, #2814) — see scripts/check-mutation-gate.sh for the scope rule.
+# This sweep sets no budget: it runs every mutant, and it is the only run
+# whose verdicts stamp proofs/mutation-score.toml.
 #
 # 4-way positional shard (mutant index mod 4): every mutant costs one
 # release rebuild + one net run, so modulo is the balanced split. ~10 shard
