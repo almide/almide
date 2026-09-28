@@ -149,6 +149,7 @@
 3242	spec/wasm_cross/empty_from_list_mono.almd
 5337	spec/wasm_cross/encoding_base64.almd
 9242	spec/wasm_cross/endian_auto_import.almd
+7142	spec/wasm_cross/endian_explicit_import.almd
 1767	spec/wasm_cross/enumerate_unnameable_element.almd
 1904	spec/wasm_cross/env_args.almd
 2304	spec/wasm_cross/env_get.almd
@@ -287,7 +288,7 @@
 2180	spec/wasm_cross/index_bounds_write_heap.almd
 2104	spec/wasm_cross/index_bounds_write_only_var.almd
 5830	spec/wasm_cross/inplace_clear_alias.almd
-!	spec/wasm_cross/inplace_clear_alias_field.almd
+4996	spec/wasm_cross/inplace_clear_alias_field.almd
 8292	spec/wasm_cross/inplace_clear_family.almd
 4563	spec/wasm_cross/inplace_mutator_statement.almd
 1162	spec/wasm_cross/int8_div_overflow.almd
@@ -402,6 +403,7 @@
 1786	spec/wasm_cross/loop_push_trailing_increment.almd
 5039	spec/wasm_cross/map_core_trio.almd
 8978	spec/wasm_cross/map_entries_reclaim.almd
+6676	spec/wasm_cross/map_entry_loop.almd
 4628	spec/wasm_cross/map_filter.almd
 8539	spec/wasm_cross/map_fold.almd
 7185	spec/wasm_cross/map_fold_heap_acc.almd
