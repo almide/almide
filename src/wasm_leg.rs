@@ -190,7 +190,9 @@ pub(crate) fn lower_resolved(
         // The structural leg's in-test assert lowering (the frontend's
         // non-test abort form), then the shared runner synthesis.
         almide_driver::test_runner::desugar_test_asserts(&mut ir);
-        almide_driver::test_runner::synthesize_test_runner_main(&mut ir, run_filter)
+        // Spaced (#2751): this leg keeps per-module VarTables, so a module's
+        // re-inits run in a fn of its own space.
+        almide_driver::test_runner::synthesize_test_runner_main_spaced(&mut ir, run_filter)
             .map_err(|e| format!("tests: {e}"))?;
     }
     link_self_host(&mut ir, &mut checker, &sources);
