@@ -1,0 +1,11 @@
+// @contract: C-067
+// A Bytes index READ at an index >= len aborts `Error: index out of bounds`,
+// exit 1, on every leg (#2893) — never `bytes.get`'s none nor `read_u8`'s 0.
+effect fn main() -> Unit = {
+  let buf: Bytes = bytes.from_list([1, 2, 3])
+  let last = 2
+  println("${buf[last]}")
+  let at = 3
+  println("${buf[at]}")
+  println("unreachable")
+}

@@ -1,0 +1,11 @@
+// @contract: C-067
+// A NEGATIVE index in a Bytes index write aborts `Error: index out of bounds`,
+// exit 1, on every leg (#2893) — never a no-op, never a wrapped store.
+effect fn main() -> Unit = {
+  var buf: Bytes = bytes.from_list([7, 8])
+  buf[1] = 9
+  println("${bytes.to_list(buf)}")
+  let at = 0 - 1
+  buf[at] = 1
+  println("unreachable")
+}
