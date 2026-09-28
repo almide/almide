@@ -1,6 +1,18 @@
 // `include!`d part of wasi_p3.rs (codopsy max-lines split, mechanical text move —
 // shares the parent module's imports and items; nothing here is pub beyond the parent).
 
+/// Retire the response body: drop its readable and the trailers future,
+/// and write the handling result `ok` into the kept writable, then drop it.
+fn http_body_retire(i: &mut wasm_encoder::InstructionSink<'_>, park: u64, (body_rx, trlfut, cb_tx): (u32, u32, u32), f_await: u32) {
+    i.local_get(body_rx).call(I_HTTP_BODY_DROPR);
+    i.local_get(trlfut).call(I_HTTP_TRL_DROPR);
+    i.i32_const((park + RET) as i32).i64_const(0).i64_store(mem64(16));
+    i.local_get(cb_tx);
+    i.local_get(cb_tx).i32_const((park + RET + 16) as i32).call(I_HTTP_CB_FWRITE);
+    i.call(f_await).drop();
+    i.local_get(cb_tx).call(I_HTTP_CB_FDROPW);
+}
+
 /// Feed the request body (#1710 PR B): issue async stream-writes until the
 /// write blocks (join the writable end to the exchange's waitable set and
 /// mark pending) or the body is fully accepted, at which point the writable
@@ -83,7 +95,7 @@ fn http_frame_cell(
 /// `pack(1, len)` with the static E_HTTP text (host-specific wording is
 /// bounded by contract — fixtures assert err-ness). The p3 stream delivers
 /// the DECODED body, so no chunked handling exists here by design.
-fn shim_http(g: P3Globals, h: &HttpAbi) -> Function {
+fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Function {
     let P3Globals { park, g_plen, g_ppos, f_alloc, f_await, .. } = g;
     // Emit-time bisect knob (#1710 PR B bring-up): ALMIDE_P3_HTTP_STOP=N
     // makes the shim answer the static err right after stage N, so a hang
@@ -106,7 +118,17 @@ fn shim_http(g: P3Globals, h: &HttpAbi) -> Function {
     let (m_ptr, m_len, cur, cell_len, frame_end, hdr_ptr, digit, tmp) =
         (33u32, 34u32, 35u32, 36u32, 37u32, 38u32, 39u32, 40u32);
     let (key_ptr, key_len) = (41u32, 42u32);
-    let mut f = Function::new([(23, ValType::I32), (1, ValType::I64), (14, ValType::I32)]);
+    // ADR-0023 step 2: the scheme check, the request options, the error
+    // entry and the body limit.
+    let (colon, valid, opts_some, pre, ent) = (43u32, 44u32, 45u32, 46u32, 47u32);
+    let (secs, lim) = (48u32, 49u32);
+    let mut f = Function::new([
+        (23, ValType::I32),
+        (1, ValType::I64),
+        (14, ValType::I32),
+        (5, ValType::I32),
+        (2, ValType::I64),
+    ]);
     let mut i = f.instructions();
     // ── ops 48..=50: parse the http_framed cell frame in `b` ──
     // `<len>\n<payload>` cells with CHAR-count lengths (string.len
@@ -133,34 +155,10 @@ fn shim_http(g: P3Globals, h: &HttpAbi) -> Function {
     i.local_get(cur).local_set(hdr_ptr);
     i.end();
 
-    // ── URL parse: scheme by prefix, authority to '/', path = rest ──
-    i.i32_const(h.sch_http).local_set(sch);
-    i.i32_const(0).local_set(rest);
-    i.local_get(a_len).i32_const(8).i32_ge_u().if_(BlockType::Empty);
-    for (kb, ch) in b"https://".iter().enumerate() {
-        i.local_get(a_ptr).i32_load8_u(mem8(kb as u64)).i32_const(*ch as i32).i32_eq();
-        if kb > 0 {
-            i.i32_and();
-        }
-    }
-    i.if_(BlockType::Empty);
-    i.i32_const(h.sch_https).local_set(sch);
-    i.i32_const(8).local_set(rest);
-    i.end();
-    i.end();
-    i.local_get(rest).i32_eqz();
-    i.local_get(a_len).i32_const(7).i32_ge_u();
-    i.i32_and().if_(BlockType::Empty);
-    for (kb, ch) in b"http://".iter().enumerate() {
-        i.local_get(a_ptr).i32_load8_u(mem8(kb as u64)).i32_const(*ch as i32).i32_eq();
-        if kb > 0 {
-            i.i32_and();
-        }
-    }
-    i.if_(BlockType::Empty);
-    i.i32_const(7).local_set(rest);
-    i.end();
-    i.end();
+    // ── URL parse: the scheme as rt-core reads it (its three reasons are
+    // answered here), authority to '/', path = rest ──
+    let url_locals = UrlLocals { sch, rest, colon, valid, b: n, k, low: key_ptr };
+    http_url_scheme(&mut i, h, t, fns, f_alloc, url_locals);
     i.local_get(a_ptr).local_get(rest).i32_add().local_set(auth_ptr);
     i.local_get(rest).local_set(k);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
@@ -184,12 +182,16 @@ fn shim_http(g: P3Globals, h: &HttpAbi) -> Function {
     i.i32_const(1).local_set(path_len);
     i.end();
 
+    // ── the framed family's headers, refused before anything exists ──
+    http_check_headers(&mut i, t, fns, (hdr_ptr, frame_end), (cur, cell_len, tmp, digit), (key_ptr, key_len), n);
+
     // ── empty fields; trailers future written ok(none) up front ──
     i.call(I_HTTP_FIELDS_NEW).local_set(headers);
     // The framed family's headers: key/value cells appended in frame order
     // (the host lane's parse_http_frame order, so the wire carries the
-    // same header sequence on both lanes). A rejected name/value
-    // (header-error) is ignored, as the rt-core client's builder does.
+    // same header sequence on both lanes). The checks above passed every
+    // pair, so a header-error here is the host refusing a name it manages
+    // beyond the nine: answered as the forbidden text, the fields dropped.
     i.local_get(op).i32_const(48).i32_ge_s().if_(BlockType::Empty);
     i.local_get(hdr_ptr).local_set(cur);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
@@ -209,6 +211,10 @@ fn shim_http(g: P3Globals, h: &HttpAbi) -> Function {
     i.local_get(cur).local_get(tmp).i32_sub();
     i.i32_const((park + RET) as i32);
     i.call(I_HTTP_FIELDS_APPEND);
+    i.i32_const((park + RET) as i32).i32_load8_u(mem8(0)).if_(BlockType::Empty);
+    i.local_get(headers).call(I_HTTP_FIELDS_DROP);
+    http_err_call(&mut i, fns, (key_ptr, key_len), t.hdr[2][0], t.hdr[2][1], None, Piece::default());
+    i.end();
     i.br(0).end().end();
     i.end();
     // content-length for a non-empty body (decimal, back to front —
@@ -285,7 +291,27 @@ fn shim_http(g: P3Globals, h: &HttpAbi) -> Function {
     i.local_get(s64).i32_wrap_i64().local_set(str_rx);
     i.end();
 
-    // ── request.new(headers, contents?, trailers_rx, options none, retptr) ──
+    // ── request options: ALMIDE_HTTP_TIMEOUT_SECS (default 30, 0 = none)
+    // as the connect, first-byte and between-bytes timeouts — rt-core's
+    // connect and read timeouts. Each setter's result lands in SENDRET,
+    // which is free until send. ──
+    i.i32_const(t.key_timeout.at).i32_const(t.key_timeout.len).i64_const(30).call(fns.num).local_set(secs);
+    i.i32_const(0).local_set(opts_some);
+    i.i32_const(0).local_set(ent);
+    i.local_get(secs).i64_const(0).i64_gt_s().if_(BlockType::Empty);
+    i.local_get(secs).i64_const(18_000_000_000).i64_gt_s().if_(BlockType::Empty);
+    i.i64_const(18_000_000_000).local_set(secs);
+    i.end();
+    i.call(I_HTTP_OPT_NEW).local_set(ent);
+    for setter in [I_HTTP_OPT_CONNECT, I_HTTP_OPT_FIRST, I_HTTP_OPT_BETWEEN] {
+        i.local_get(ent).i32_const(1);
+        i.local_get(secs).i64_const(1_000_000_000).i64_mul();
+        i.i32_const((park + SENDRET) as i32).call(setter);
+    }
+    i.i32_const(1).local_set(opts_some);
+    i.end();
+
+    // ── request.new(headers, contents?, trailers_rx, options, retptr) ──
     i.local_get(headers);
     i.local_get(str_tx).i32_const(0).i32_ge_s().if_(BlockType::Result(ValType::I32));
     i.i32_const(1);
@@ -294,8 +320,8 @@ fn shim_http(g: P3Globals, h: &HttpAbi) -> Function {
     i.end();
     i.local_get(str_rx);
     i.local_get(trl_rx);
-    i.i32_const(0);
-    i.i32_const(0);
+    i.local_get(opts_some);
+    i.local_get(ent);
     i.i32_const((park + RET) as i32);
     i.call(I_HTTP_REQ_NEW);
     i.i32_const((park + RET) as i32).i32_load(mem(0)).local_set(request);
@@ -389,7 +415,10 @@ fn shim_http(g: P3Globals, h: &HttpAbi) -> Function {
     i.if_(BlockType::Empty);
     i.local_get(request).call(I_HTTP_REQ_DROP);
     i.local_get(sentfut).call(I_HTTP_REQ_SENTDROP);
-    fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
+    // A request line the host will not take: the unclassified text naming
+    // HTTP-request-URI-invalid (the reasons are rt-core's, ADR-0023 step 6).
+    i.i32_const(t.ec_uri_invalid).local_set(ent);
+    http_err_entry(&mut i, fns, (a_ptr, a_len), ent);
     i.end();
     if stop == 3 {
         fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
@@ -462,7 +491,7 @@ fn shim_http(g: P3Globals, h: &HttpAbi) -> Function {
     i.end();
     i.i32_const((park + SENDRET) as i32).i32_load8_u(mem8(0));
     i.if_(BlockType::Empty);
-    fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
+    http_send_err(&mut i, park, h, t, fns, ent);
     i.end();
     i.i32_const((park + SENDRET) as i32).i32_load(mem(h.send_payload)).local_set(response);
     // op 49 reads the status HERE: consume-body below takes `this:
@@ -507,6 +536,11 @@ fn shim_http(g: P3Globals, h: &HttpAbi) -> Function {
     i.local_get(buf).local_get(digit).i32_add().i32_const(10).i32_store8(mem8(0));
     i.local_get(digit).i32_const(1).i32_add().local_set(total);
     i.end();
+    // The response limit (ALMIDE_HTTP_MAX_RESPONSE_BYTES, default 1 GiB, 0 =
+    // none), counted on the body as it arrives — past it, the exchange is
+    // abandoned and answers the too-large text.
+    i.local_get(total).local_set(pre);
+    i.i32_const(t.key_max.at).i32_const(t.key_max.len).i64_const(1 << 30).call(fns.num).local_set(lim);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(total).local_get(cap).i32_ge_u();
     i.if_(BlockType::Empty);
@@ -524,15 +558,17 @@ fn shim_http(g: P3Globals, h: &HttpAbi) -> Function {
     i.i32_const(4).i32_shr_u().local_set(n);
     i.local_get(n).i32_eqz().br_if(1);
     i.local_get(total).local_get(n).i32_add().local_set(total);
+    i.local_get(lim).i64_const(0).i64_gt_s();
+    i.local_get(total).local_get(pre).i32_sub().i64_extend_i32_u().local_get(lim).i64_gt_s();
+    i.i32_and().if_(BlockType::Empty);
+    http_body_retire(&mut i, park, (body_rx, trlfut, cb_tx), f_await);
+    http_decimal_i64(&mut i, (park + CLEN_BUF) as i32, lim, secs, key_len, cur);
+    i.i32_const((park + CLEN_BUF) as i32).local_set(key_ptr);
+    let [tl0, tl1, tl2] = t.too_large;
+    http_err_call(&mut i, fns, (a_ptr, a_len), tl0, tl1, Some((key_ptr, key_len)), tl2);
+    i.end();
     i.br(0).end().end();
-    i.local_get(body_rx).call(I_HTTP_BODY_DROPR);
-    i.local_get(trlfut).call(I_HTTP_TRL_DROPR);
-    // handling result: ok written into the kept writable, then dropped.
-    i.i32_const((park + RET) as i32).i64_const(0).i64_store(mem64(16));
-    i.local_get(cb_tx);
-    i.local_get(cb_tx).i32_const((park + RET + 16) as i32).call(I_HTTP_CB_FWRITE);
-    i.call(f_await).drop();
-    i.local_get(cb_tx).call(I_HTTP_CB_FDROPW);
+    http_body_retire(&mut i, park, (body_rx, trlfut, cb_tx), f_await);
 
     i.local_get(buf).global_set(g_ppos);
     i.local_get(total).global_set(g_plen);

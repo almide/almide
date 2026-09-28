@@ -166,7 +166,13 @@ const I_HTTP_REQ_DROP: u32 = 65; // [resource-drop]request
 const I_HTTP_RESP_DROP: u32 = 66; // [resource-drop]response
 const I_HTTP_FIELDS_DROP: u32 = 67; // [resource-drop]fields
 const I_HTTP_FIELDS_APPEND: u32 = 68; // [method]fields.append (the framed family's headers, #1710)
-const IMPORTS_HTTP: u32 = 69;
+// The request options (ADR-0023 step 2): ALMIDE_HTTP_TIMEOUT_SECS as the
+// connect / first-byte / between-bytes timeouts.
+const I_HTTP_OPT_NEW: u32 = 69; // [constructor]request-options
+const I_HTTP_OPT_CONNECT: u32 = 70; // [method]request-options.set-connect-timeout (retptr)
+const I_HTTP_OPT_FIRST: u32 = 71; // [method]request-options.set-first-byte-timeout (retptr)
+const I_HTTP_OPT_BETWEEN: u32 = 72; // [method]request-options.set-between-bytes-timeout (retptr)
+const IMPORTS_HTTP: u32 = 73;
 
 // Park offsets past the shared ones: retptr / future-payload scratch.
 const RET: u64 = 32;
@@ -201,9 +207,9 @@ const E_NOTDIR: &[u8] = almide_base::fs_errno::ENOTDIR.text.as_bytes();
 const E_EXIST: &[u8] = almide_base::fs_errno::EEXIST.text.as_bytes();
 const E_GEN: &[u8] = b"filesystem operation failed";
 const E_NOPRE: &[u8] = b"no filesystem preopen (run with --dir)";
-// The p3 http transport-error static (#1710 PR B): transport-error TEXT is
-// host-specific by contract — the cross-lane fixtures assert err-ness, not
-// the wording (the native legs' per-OS errno suffixes already force that).
+// The p3 http bring-up static (#1710 PR B): only the ALMIDE_P3_HTTP_STOP
+// bisect knob answers it now — every real failure is classified and
+// rendered from rt-core's texts (ADR-0023 step 2, wasi_p3_http_err.rs).
 const MSG_HTTP: u64 = 576;
 const E_HTTP: &[u8] = b"http request failed (p3 transport)";
 // The `content-length` header name (#1924 B) and the decimal scratch its
@@ -405,6 +411,9 @@ struct ReadLocals {
 // The http shim (shim_http + its frame/body helpers): wasi_p3_http.rs.
 include!("wasi_p3_http.rs");
 
+// Its error classes, texts and helper functions (ADR-0023 step 2).
+include!("wasi_p3_http_err.rs");
+
 /// Canonical-ABI facts the http shim stores through (#1710 PR B) — DERIVED
 /// from the vendored WIT at emit time, never hand-counted (the fs_abi
 /// doctrine: a case index or payload offset written as a literal drifts
@@ -425,6 +434,15 @@ struct HttpAbi {
     sch_https: i32,
     /// result<response, error-code> payload offset (send's retptr layout).
     send_payload: u64,
+    /// error-code's case names in discriminant order (ADR-0023 step 2: the
+    /// shim classifies by NAME, and names an unclassified case by it).
+    ec_names: Vec<String>,
+    /// Offset of an error-code case's payload from the discriminant.
+    ec_payload: u64,
+    /// `internal-error(option<string>)`: its case index, and the offset of
+    /// the string's (ptr, len) within the option.
+    ec_internal: i32,
+    ec_opt_str: u64,
 }
 
 fn http_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<HttpAbi> {
@@ -463,6 +481,13 @@ fn http_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<HttpAbi> {
     let mut sa = wit_parser::SizeAlign::default();
     sa.fill(resolve)?;
     let ec_align = sa.align(&Type::Id(ec)).align_wasm32() as u64;
+    let TypeDefKind::Variant(ecv) = &resolve.types[ec].kind else {
+        anyhow::bail!("wasi:http error-code is not a variant");
+    };
+    let ec_names: Vec<String> = ecv.cases.iter().map(|c| c.name.clone()).collect();
+    let ec_payload = sa.payload_offset(ecv.tag(), ecv.cases.iter().map(|c| c.ty.as_ref())).size_wasm32() as u64;
+    let ec_opt_str =
+        sa.payload_offset(wit_parser::Int::U8, [None, Some(&Type::String)]).size_wasm32() as u64;
     Ok(HttpAbi {
         m_get: case(method, "get")?,
         m_post: case(method, "post")?,
@@ -479,6 +504,10 @@ fn http_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<HttpAbi> {
         // own<response> aligns 4; the discriminant byte rounds up to the
         // larger of that and error-code's alignment.
         send_payload: 4u64.max(ec_align),
+        ec_internal: case(ec, "internal-error")?,
+        ec_names,
+        ec_payload,
+        ec_opt_str,
     })
 }
 
