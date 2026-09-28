@@ -35,7 +35,6 @@ test :: spec/lang/guard_else_err_unwrap_test.almd :: interp-part:Unit
 test :: spec/lang/map_literal_test.almd :: forin-map-nontuple
 test :: spec/lang/matrix_test.almd :: binop:MulMatrix
 test :: spec/lang/option_marker_test.almd :: call:testing.assert_contains
-test :: spec/lang/result_option_matrix_test.almd :: ty-mismatch:Scalar(Int)-vs-Result(ETy(0), ETy(1))
 test :: spec/lang/unwrap_operators_test.almd :: expr:OptionalChain
 test :: spec/stdlib/bytes_typed_test.almd :: expr:Hole
 test :: spec/stdlib/coverage_testing_test.almd :: call:testing.assert_contains
