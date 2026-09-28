@@ -8,11 +8,11 @@
 fn collect_type_aliases_and_generics(program: &IrProgram) -> (
     std::collections::HashMap<almide_base::intern::Sym, Ty>,
     std::collections::HashSet<almide_base::intern::Sym>,
-    std::collections::HashSet<almide_base::intern::Sym>,
+    std::collections::HashMap<almide_base::intern::Sym, Ty>,
 ) {
     let mut type_aliases = std::collections::HashMap::new();
     let mut generic_types = std::collections::HashSet::new();
-    let mut newtype_ctors = std::collections::HashSet::new();
+    let mut newtype_ctors = std::collections::HashMap::new();
     let all_type_decls = program.type_decls.iter()
         .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()));
     for td in all_type_decls {
@@ -23,7 +23,7 @@ fn collect_type_aliases_and_generics(program: &IrProgram) -> (
             } else if !matches!(target, Ty::Fn { .. }) {
                 // The struct `render_type_decl_alias` emits; its ctor call is
                 // spelled by this (post-flatten) name (#1835).
-                newtype_ctors.insert(td.name);
+                newtype_ctors.insert(td.name, target.clone());
             }
         }
         // Track types with generic parameters

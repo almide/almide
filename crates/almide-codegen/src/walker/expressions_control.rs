@@ -24,6 +24,12 @@ fn render_string_interp(ctx: &RenderContext, parts: &[IrStringPart]) -> String {
                 // whether the part renders to an owned value or an existing borrow.
                 if ty_needs_repr(ctx, &expr.ty) {
                     arg_parts.push(format!("almide_repr(&({}))", render_expr(ctx, expr)));
+                } else if let (depth @ 1.., _) = peel_newtypes(ctx, &expr.ty) {
+                    // An opaque newtype over a Display type (`mod type Id =
+                    // Int`) prints its payload, as the wasm leg and the interp
+                    // do (#2860): the struct has no `Display`, so read the
+                    // tuple field, once per layer.
+                    arg_parts.push(format!("({}){}", render_expr(ctx, expr), ".0".repeat(depth)));
                 } else {
                     arg_parts.push(render_expr(ctx, expr));
                 }
