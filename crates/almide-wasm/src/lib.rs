@@ -668,12 +668,6 @@ fn registry_impl_names() -> &'static std::collections::HashSet<&'static str> {
     })
 }
 
-
-// ── entry ───────────────────────────────────────────────────────────────
-
-
-
-
 // ── reason-string helpers ───────────────────────────────────────────────
 
 fn pattern_irrefutable(p: &IrPattern) -> bool {
