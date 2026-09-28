@@ -1,0 +1,22 @@
+// @contract: C-213
+// `b[i] = v` on Bytes stores v's LOW BYTE on every leg (#2899), the index
+// syntax's cell of the truncating byte-writer rule: 300 stores 44, 511 stores
+// 255, 256 stores 0, -1 stores 255, -256 stores 0 — through a var, a `mut`
+// parameter, and a read-modify-write that overflows the byte. The interpreter
+// used to keep the untruncated Int.
+fn poke(mut b: Bytes, i: Int, v: Int) -> Unit = {
+  b[i] = v
+}
+
+effect fn main() -> Unit = {
+  var buf: Bytes = bytes.new(6)
+  buf[0] = 300
+  buf[1] = 511
+  buf[2] = 256
+  buf[3] = -1
+  buf[4] = -256
+  poke(buf, 5, 1000)
+  println("${bytes.to_list(buf)}")
+  buf[3] = buf[3] + 2
+  println("${buf[3]} ${bytes.to_list(buf)}")
+}

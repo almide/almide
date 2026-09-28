@@ -2727,6 +2727,7 @@ evidence  = [
   { path = "spec/wasm_cross/endian_auto_import.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_copy_within_offset_domain.almd", class = "fixture" },
   { path = "crates/almide-interp/src/inplace.rs", name = "bytes_write_op", class = "by-construction" },
+  { path = "spec/wasm_cross/bytes_index_write_truncates.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-214"
