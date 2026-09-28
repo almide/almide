@@ -79,9 +79,7 @@ pub(crate) fn infer(
             if all_owned[i] {
                 continue;
             }
-            let module = qual
-                .as_deref()
-                .and_then(|q| q.rsplit_once('.').map(|(m, _)| m.to_string()));
+            let module = crate::emit::fn_module(qual.as_deref(), f).map(str::to_string);
             let params: HashMap<VarId, usize> = f
                 .params
                 .iter()

@@ -267,7 +267,7 @@ fn emit_program_pass(
         let params: Vec<(VarId, SliceTy)> =
             f.params.iter().zip(&table.infos[i].params).map(|(p, &t)| (p.var, t)).collect();
         let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map, var_name: &var_name };
-        let cur_module = qual.as_ref().and_then(|q| q.split('.').next());
+        let cur_module = fn_module(qual.as_deref(), f);
         let effect_raw = if f.is_effect {
             match slice_ty_of(&f.ret_ty, &types) {
                 Some(SliceTy::Unit) => Some(SliceTy::Unit),
@@ -564,6 +564,15 @@ fn emit_program_pass(
     let bytes = imports::declare(&bytes, &declared).map_err(|e| EmitError::Unsupported(format!("extern-import:{e}")))?;
     let host_ops = work.host_ops.borrow().clone();
 Ok(Pass { bytes, visited, total, ops: host_ops, bounded_fired: work.bounded_fired.get() })
+}
+
+/// The module a program fn belongs to: its qualified key minus `.<fn name>`
+/// (`collect_program_fns` keys a module fn `"{module}.{fn}"`). A module name
+/// can itself be dotted (`gramide.lex`, a dependency's submodule), and a fn
+/// name can be too (`Cfg.get`), so neither the first nor the last dot splits
+/// it (#2904: `gramide.lex`'s own calls resolved against `gramide`).
+pub(crate) fn fn_module<'a>(qual: Option<&'a str>, f: &IrFunction) -> Option<&'a str> {
+    qual?.strip_suffix(f.name.as_str())?.strip_suffix('.')
 }
 
 /// Where a program function's wall points (#2807): its qualified name, its
