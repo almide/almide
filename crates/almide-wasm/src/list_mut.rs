@@ -12,7 +12,7 @@ use crate::*;
 /// (`push`, `clear`) route through the copy-on-write field write (#2411).
 /// A deeper path (`h.a.b`, `xs[i].f`) is still refused by the var-only
 /// arms below, honestly.
-fn record_field_receiver(xs: &IrExpr) -> Option<(almide_ir::VarId, almide_base::intern::Sym)> {
+pub(crate) fn record_field_receiver(xs: &IrExpr) -> Option<(almide_ir::VarId, almide_base::intern::Sym)> {
     let IrExprKind::Member { object, field } = &xs.kind else {
         return None;
     };
@@ -23,6 +23,35 @@ fn record_field_receiver(xs: &IrExpr) -> Option<(almide_ir::VarId, almide_base::
 }
 
 impl Emitter<'_> {
+    /// `<m>.clear(h.f)` on a record var's FIELD — list, string, bytes and
+    /// map alike — is the field write `h.f = <empty>` through
+    /// `lower_field_assign`'s copy-on-write rebind (#2411, #2747): a record
+    /// alias bound before the clear keeps its field. `false` = not a field
+    /// receiver (the caller's var arm, or its honest wall).
+    pub(crate) fn lower_field_clear(&mut self, v: &IrExpr) -> Result<bool, EmitError> {
+        let Some((id, field)) = record_field_receiver(v) else {
+            return Ok(false);
+        };
+        use almide_types::types::{constructor::TypeConstructorId as C, Ty};
+        let kind = match &v.ty {
+            Ty::Applied(C::List, _) => IrExprKind::List { elements: vec![] },
+            Ty::Applied(C::Map, _) => IrExprKind::EmptyMap,
+            Ty::String => IrExprKind::LitStr { value: String::new() },
+            Ty::Bytes => IrExprKind::Call {
+                target: almide_ir::CallTarget::Module {
+                    module: almide_base::intern::sym("bytes"),
+                    func: almide_base::intern::sym("new"),
+                    def_id: None,
+                },
+                args: vec![IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None, def_id: None }],
+                type_args: vec![],
+            },
+            _ => return Ok(false),
+        };
+        let empty = IrExpr { kind, ty: v.ty.clone(), span: None, def_id: None };
+        self.lower_field_assign(&id, &field, &empty)?;
+        Ok(true)
+    }
 
     /// mut pop: some(last) + shrunken-copy write-back.
     fn lower_list_pop(&mut self, xs: &IrExpr) -> ArmResult {
@@ -99,16 +128,7 @@ impl Emitter<'_> {
             ("pop", [xs]) => self.lower_list_pop(xs),
             // mut form (native xs.clear()): rebind to the empty list.
             ("clear", [xs]) => {
-                // A record var's field: `h.f = []` through the field-write
-                // path (see the `push` arm, #2411).
-                if let Some((id, field)) = record_field_receiver(xs) {
-                    let empty = IrExpr {
-                        kind: IrExprKind::List { elements: vec![] },
-                        ty: xs.ty.clone(),
-                        span: None,
-                        def_id: None,
-                    };
-                    self.lower_field_assign(&id, &field, &empty)?;
+                if self.lower_field_clear(xs)? {
                     return Ok(Some(None));
                 }
                 let IrExprKind::Var { id } = &xs.kind else {

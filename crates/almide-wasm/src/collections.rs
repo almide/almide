@@ -266,6 +266,9 @@ impl Emitter<'_> {
             // mut clear (native m.clear()): rebind the var to the empty
             // map — the `list.clear` shape (list_mut.rs).
             ("clear", [m]) => {
+                if self.lower_field_clear(m)? {
+                    return Ok(None);
+                }
                 let IrExprKind::Var { id } = &m.kind else {
                     return unsup("map-clear-nonvar");
                 };
