@@ -1,0 +1,44 @@
+// @contract: C-036
+// A variant whose record case carries the type's own name (#2859):
+// `type Opt = | Opt { n: Int } | Empty`. The pattern `Opt { n }` asked the
+// type table for `Opt` first, found the VARIANT (which has no field `n`) and
+// lowered the binder as `Unknown`. Native let rustc infer it; both wasm legs
+// refused the match (`expected i64, found i32` on the incumbent,
+// `ty-mismatch:Unit-vs-Scalar(Int)` on the structural leg). The case of that
+// name now types the binders, as it does for a differently named case.
+//
+// Cells, each byte-identical native == wasm: the reported shape, a
+// two-field case with a String field, a renamed binder with a rest pattern,
+// a generic variant with a self-named case, and the repr of the case.
+type Opt = | Opt { n: Int, s: String } | Empty
+
+type Box[T] = | Box { v: T } | NoBox
+
+type One = | One { k: Int } | Zero
+
+fn only(o: One) -> Int = match o {
+  One { k } => k,
+  Zero => 0,
+}
+
+fn get(o: Opt) -> String = match o {
+  Opt { n, s } => "${s}${n}",
+  Empty => "e",
+}
+
+fn twice(o: Opt) -> Int = match o {
+  Opt { n: k, .. } => k * 2,
+  Empty => 0,
+}
+
+fn un(b: Box[String]) -> String = match b {
+  Box { v } => v,
+  NoBox => "-",
+}
+
+effect fn main() -> Unit = {
+  let o = Opt { n: 3, s: "x" }
+  println("${only(One { k: 3 })} ${only(Zero)}")
+  println("${get(o)} ${get(Empty)} ${twice(o)} ${twice(Empty)}")
+  println("${un(Box { v: "b" })} ${un(NoBox)} ${o}")
+}
