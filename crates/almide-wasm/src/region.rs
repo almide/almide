@@ -114,7 +114,7 @@ pub(crate) fn region_pure_fns(
         let snapshot = pure.clone();
         pure.retain(|&i| {
             let (f, qual, _) = &program_fns[i];
-            let cur_module = qual.as_deref().and_then(|q| q.split('.').next());
+            let cur_module = crate::emit::fn_module(qual.as_deref(), f);
             let cx = PureCx { table, cur_module, pure: &snapshot, globals: &globals, ctors: &ctors };
             expr_pure(&f.body, &cx)
         });
