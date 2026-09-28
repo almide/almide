@@ -349,10 +349,7 @@ fn emit_program_pass(
     let main_lambdas_from = work.lifted.borrow().len();
     crate::decline_site::reset_pending();
     let (main_fn, main_calls) = lower_fn(&[], main_plan, main_body, &init_lets, &ctx, &mut pool)
-        .inspect_err(|_| {
-            let line = crate::decline_site::take_pending().map(|s| s.line);
-            crate::decline_site::set(Some(DeclineSite { function: "main".into(), module: None, line }));
-        })?;
+        .inspect_err(|_| crate::decline_site::set(Some(crate::decline_site::take_main_site())))?;
     let main_lambdas = main_lambdas_from..work.lifted.borrow().len();
     display_helper_calls.extend(display::build_display_helpers(&table, &types, &work, &mut pool)?);
 
@@ -411,9 +408,10 @@ fn emit_program_pass(
             };
             lambda_children.push(children_from..work.lifted.borrow().len());
             lambda_sites.push(err.as_ref().map(|_| DeclineSite {
-                function: "<lambda>".into(),
+                function: ll.site_name.clone().unwrap_or_else(|| "<lambda>".into()),
                 module: ll.cur_module.clone(),
                 line: crate::decline_site::take_pending().map(|s| s.line),
+                top_let: ll.site_name.is_some(),
             }));
             lambda_errs.push(err);
             display_helper_calls
@@ -561,7 +559,7 @@ fn fn_site(entry: &(&IrFunction, Option<String>, u32), refused_at: Option<usize>
     let (f, qual, _) = entry;
     let function = qual.clone().unwrap_or_else(|| f.name.as_str().to_string());
     let module = qual.as_ref().and_then(|q| q.rsplit_once('.').map(|(m, _)| m.to_string()));
-    DeclineSite { function, module, line: refused_at.or(f.body.span.map(|s| s.line)) }
+    DeclineSite { function, module, line: refused_at.or(f.body.span.map(|s| s.line)), top_let: false }
 }
 
 /// The `@extern(wasm, module, name)` import a body-less fn declares (#2275):

@@ -28,7 +28,7 @@ fn a_structural_wall_names_its_function_and_line() {
     assert!(matches!(err, almide_wasm::EmitError::Unsupported(_)), "{err:?}");
     assert_eq!(
         decline_site::last(),
-        Some(DeclineSite { function: "keep".into(), module: None, line: Some(4) }),
+        Some(DeclineSite { function: "keep".into(), module: None, line: Some(4), top_let: false }),
         "the wall must point at `keep`, line 4 (the `guard … else continue`)"
     );
 }
@@ -45,6 +45,14 @@ fn a_successful_emit_clears_the_last_site() {
 
 #[test]
 fn the_site_renders_module_and_line() {
-    let s = DeclineSite { function: "cli.dispatch_ok".into(), module: Some("cli".into()), line: Some(42) };
+    let s = DeclineSite { function: "cli.dispatch_ok".into(), module: Some("cli".into()), line: Some(42), top_let: false };
     assert_eq!(s.to_string(), "fn `cli.dispatch_ok` (module `cli`, line 42)");
+}
+
+#[test]
+fn a_top_let_site_renders_as_a_top_let() {
+    // #2807: `main` lowers every module's top-let initializers; a wall there is
+    // the top-let's, in ITS module — never an entry-file line of `main`.
+    let s = DeclineSite { function: "rules.BINDS".into(), module: Some("rules".into()), line: Some(1167), top_let: true };
+    assert_eq!(s.to_string(), "top-level let `rules.BINDS` (module `rules`, line 1167)");
 }
