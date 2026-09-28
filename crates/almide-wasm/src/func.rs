@@ -518,12 +518,17 @@ pub(crate) fn lower_fn(
                 // but `f(…)!` in tail position with a MATCHING Result
                 // type sees through Try/Unwrap and return_calls — the
                 // effect-TCO contract (#557 / C-069, O(1) stack).
-                if raw == SliceTy::Unit {
+                if raw == SliceTy::Unit && !matches!(slice_ty_of(&body.ty, ctx.types), Some(SliceTy::Result(..))) {
                     // A Unit-effect body is statement-shaped; the ok
                     // payload materializes after it runs.
                     em.lower_stmt_expr(body)?;
                     em.f.instructions().i32_const(0);
                 } else {
+                    // A Unit-effect body that YIELDS its Result (`if c then
+                    // err(e) else ok(())`) lowers at the raw Unit like any
+                    // other raw type: `ok(())` is the transparent spot and
+                    // `err(e)` raises (lower_err_raise). As a statement its
+                    // err was built and dropped, and the fn answered ok.
                     em.lower_tail(body, Some(raw))?;
                     // RC-3: the raw payload rides inside the ok carrier
                     // past the epilogue — same borrow rule as the pure
