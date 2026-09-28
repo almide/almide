@@ -1,9 +1,9 @@
 # Structural witness decline histogram (#2754): reason<TAB>declined frames of the
 # SHIPPED emission pass (fixture x fn, over the spec/wasm_cross rows of the run manifest). SHRINK-ONLY per reason; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-call-arg:BinOp	1240
+call-arg:BinOp	1255
 call-arg:Block	28
-call-arg:Call	493
+call-arg:Call	497
 call-arg:EmptyMap	1
 call-arg:If	3
 call-arg:Lambda	45
@@ -16,7 +16,7 @@ call-arg:TupleIndex	1
 call:ctor	42
 call:target:Computed	18
 display	10
-effect	154
+effect	155
 lambda	193
 list-elem	128
 module-arm:unaudited:bytes.push	2
@@ -29,11 +29,11 @@ module-arm:unaudited:string.clear	2
 module-arm:unaudited:string.push	1
 module-result:view:list.get_or	2
 named-op	11
-rhs:BinOp	787
-rhs:Block	155
+rhs:BinOp	793
+rhs:Block	158
 rhs:EmptyMap	2
 rhs:Fan	2
-rhs:If	649
+rhs:If	655
 rhs:IndexAccess	1
 rhs:Lambda	4
 rhs:MapAccess	1
@@ -55,12 +55,12 @@ stmt:Assign	11
 stmt:BindDestructure	16
 stmt:Comment	160
 stmt:Expr:Block	70
-stmt:Expr:ForIn	52
-stmt:Expr:If	23
+stmt:Expr:ForIn	53
+stmt:Expr:If	24
 stmt:Expr:Match	2
-stmt:Expr:While	149
-stmt:Expr:call-arg:BinOp	90
-stmt:Expr:call-arg:Block	45
+stmt:Expr:While	151
+stmt:Expr:call-arg:BinOp	91
+stmt:Expr:call-arg:Block	46
 stmt:Expr:call-arg:Call	136
 stmt:Expr:call-arg:If	5
 stmt:Expr:call-arg:Lambda	1
@@ -70,9 +70,9 @@ stmt:Expr:call:target:Computed	1
 stmt:FieldAssign	1
 stmt:Guard	9
 stmt:IndexAssign	6
-tail:BinOp	701
+tail:BinOp	709
 tail:Block	17
-tail:If	4626
+tail:If	4682
 tail:Lambda	10
 tail:MapAccess	5
 tail:Match	454
@@ -81,7 +81,7 @@ tail:OptionNone	11
 tail:OptionSome	14
 tail:Record	12
 tail:ResultErr	11
-tail:ResultOk	56
+tail:ResultOk	57
 tail:SpreadRecord	2
 tail:StringInterp	25
 tail:Tuple	6

@@ -211,12 +211,14 @@ call:float.to_uint64_checked
 call:float.to_uint8_checked
 call:float32.to_string
 call:fs.__fallible_fold_lines
+call:fs.__fallible_for_each_line
 call:fs.append
 call:fs.copy
 call:fs.create_temp_dir
 call:fs.create_temp_file
 call:fs.exists
 call:fs.file_size
+call:fs.fold_lines
 call:fs.glob
 call:fs.is_dir
 call:fs.is_file
