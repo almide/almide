@@ -2745,6 +2745,7 @@ evidence  = [
   { path = "spec/stdlib/fs_if_exists_test.almd", class = "fixture" },
   { path = "spec/wasm_cross/fs_read_directory_errno.almd", class = "fixture" },
   { path = "spec/wasm_cross/fs_call_head_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fs_read_bytes_raw_call_head.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-216"
