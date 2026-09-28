@@ -24,7 +24,14 @@
 #                 counts as service; a refusal before the program's first
 #                 line, or an unknown-op host reply, does not).
 #   p3-component  ALMIDE_COMPONENT_P3 — the sweep joins with the
-#                 wasi:http@0.3 port (#1710); no rows declare it yet.
+#                 wasi:http@0.3 port (#1710, ADR-0023 step 9); no rows
+#                 declare it yet. Until then its served op set is
+#                 `component_availability::check` (p3): stdio, clocks,
+#                 entropy, the fs family, http ops 43..=50 and — since
+#                 ADR-0023 step 3 — env.get / env.args / process.args /
+#                 env.sleep_ms (ops 26 / 29 / 36, over wasi:cli/environment
+#                 and monotonic-clock.wait-for). The artifact runs on a
+#                 stock wasmtime 46+ with no feature flag (step 1).
 #
 # Row discipline (per leg, the rustc tier-check rule): every measured
 # wall MUST have its leg in a row, every declared leg MUST still measure
