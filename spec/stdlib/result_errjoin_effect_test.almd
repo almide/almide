@@ -29,6 +29,13 @@ test "errjoin! failure in effect fn joins every error" {
   }
 }
 
+test "errjoin! joins the errors with a comma and a space" {
+  assert_eq(
+    parse_all(["1", "abc", "", "3"]),
+    err("invalid digit found in string, cannot parse integer from empty string"),
+  )
+}
+
 // The polymorphic first-err replacement for the removed collect_map (E=String
 // directly — no join involved).
 effect fn parse_all_firsterr(strs: List[String]) -> Result[List[Int], String] = {
