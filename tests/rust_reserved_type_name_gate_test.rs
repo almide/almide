@@ -196,3 +196,49 @@ fn the_entry_program_may_declare_every_rust_reserved_type_name() {
         assert!(missing.is_empty() && out.contains("15"), "{target}: no output for {missing:?}:\n{out}");
     }
 }
+
+/// Each declaration shape under a reserved name, beside the shapes that spell
+/// the same name as a CONSTRUCTOR: a variant whose case shares the type's name
+/// (`type Box[T] = | Box(T)`, the case's ctor passed as a fn value and matched
+/// — the case must keep its name), an opaque newtype (its ctor IS the type), a
+/// record (literal and pattern), a variant with a record case.
+#[test]
+fn every_declaration_shape_under_a_reserved_name_builds_on_both_targets() {
+    let program = "\
+type Box[T] = | Box(T) | NoBox
+
+type Option = | Full { n: Int } | Empty
+
+mod type Result = Int
+
+type Vec = { n: Int }
+
+fn unbox(b: Box[Int]) -> Int = match b {
+  Box(n) => n,
+  NoBox => 0,
+}
+
+fn opt(o: Option) -> Int = match o {
+  Full { n } => n,
+  Empty => 0,
+}
+
+effect fn main() -> Unit = {
+  let xs = [1, 2, 3] |> list.map(Box)
+  println(int.to_string(xs |> list.map(unbox) |> list.sum))
+  println(int.to_string(opt(Full { n: 4 }) + opt(Empty)))
+  let r = Result(5)
+  match r { Result(k) => println(int.to_string(k)) }
+  let v = Vec { n: 6 }
+  match v { Vec { n } => println(int.to_string(n)) }
+  println(\"${xs} ${Full { n: 1 }} ${v}\")
+}
+";
+    let root = tempfile::tempdir().expect("tempdir");
+    write(&root.path().join("t.almd"), program);
+    let want = "6\n4\n5\n6\n[Box(1), Box(2), Box(3)] Full { n: 1 } Vec { n: 6 }\n";
+    for (target, args) in [("native", &["run", "t.almd"][..]), ("wasm", &["run", "t.almd", "--target", "wasm"][..])] {
+        let (ok, out) = almide_in(root.path(), args);
+        assert!(ok && out.ends_with(want), "{target}: expected\n{want}got:\n{out}");
+    }
+}
