@@ -582,6 +582,16 @@ with code 1. The embedded lane does the same in the host, where the guest's
 serve loop returns. The exit codes stay inside C-350's `0..=125`, so there is
 no 128+signal code.
 
+`almide run` delivers these signals to the program exactly once (#2809). On
+Unix the native launcher `exec`s the compiled program, so the pid a
+supervisor holds is the program's, a SIGTERM to it alone starts the drain,
+and a Ctrl-C to the terminal's group is not doubled into a forced stop by a
+forwarding parent. The status `almide run` exits with is the program's own —
+its exit code, or a death by signal reported as one — and the launcher adds
+no 128+n of its own, which C-350 reserves for `process.exit`. On Windows the
+launcher waits: Ctrl-C reaches every process of the console, so it forwards
+nothing and ignores the event itself until the program has exited.
+
 ### 5.7 Limits
 
 ```almide
