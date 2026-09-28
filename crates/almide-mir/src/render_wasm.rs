@@ -561,15 +561,11 @@ pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower
     // pruning is, by construction, on a REAL path from main — a genuine wall,
     // never a dangling `(call $…)` for a function nothing would have run.
     let pruned = prune_unreachable_functions(prog);
-    let missing = unlinked_call_names(&pruned);
+    let missing = unlinked_call_sites(&pruned);
     if !missing.is_empty() {
-        let names = missing.into_iter().collect::<Vec<_>>().join(", ");
-        return Err(crate::lower::LowerError::Unsupported(format!(
-            "unlinked stdlib/runtime call(s) with no wasm definition: {names} — \
-             rendering them would emit a dangling `(call $…)` (invalid wasm). \
-             Add the callee to the self-host registry or wall the using function."
-        )));
+        return Err(unlinked_call_wall(&missing));
     }
+    void_result_call_wall(&pruned)?;
     // The wasm validator caps a function at 50_000 locals, and the renderer
     // allocates locals SSA-style (one per defined value, no reuse), so a
     // large-but-ordinary function can genuinely exceed it (#1554: a Markdown
@@ -940,6 +936,7 @@ include!("render_wasm_dce.rs");
 include!("render_wasm_peephole.rs");
 include!("render_wasm_local_reuse.rs");
 include!("render_wasm_switch.rs");
+include!("render_wasm_link_gate.rs");
 
 /// The self-hosted stdlib runtime registry: `(call name, impl fn name, Almide source)`.
 /// The v1 linker auto-includes an entry when its `call name` is invoked but undefined,
