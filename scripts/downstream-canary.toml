@@ -105,7 +105,8 @@ commands = ["check", "test"]
 
 [[project]]
 repo = "almide/vscode-almide"
-commands = ["check"]
+commands = ["check generator/main.almd"]
+note = "the Almide code is the grammar generator; the repo root is the VS Code extension"
 
 [[project]]
 repo = "almide/yaml"
