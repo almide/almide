@@ -376,6 +376,9 @@ fn repair_ty(ty: &Ty, map: &std::collections::HashMap<Sym, Sym>) -> Ty {
 /// ceangal's layout module.)
 struct RepairVisitor<'a> {
     map: &'a std::collections::HashMap<Sym, Sym>,
+    /// Every VARIANT type's declared name: a record literal of one of these
+    /// is a CASE construction, whose name is the case's, never a type's.
+    variants: &'a HashSet<Sym>,
 }
 
 impl almide_ir::visit_mut::IrMutVisitor for RepairVisitor<'_> {
@@ -384,7 +387,14 @@ impl almide_ir::visit_mut::IrMutVisitor for RepairVisitor<'_> {
         match &mut e.kind {
             // Record literals carry their type name as the ctor; a bare ctor
             // would render a bare (post-mangle nonexistent) struct name.
-            IrExprKind::Record { name: Some(n), .. } => {
+            //
+            // A record CASE of a variant spells the case, not a type, even
+            // when the case shares the type's name (`type Opt = | Opt { n:
+            // Int }`, #2863): qualified as the type, the literal rendered as
+            // a struct literal of the enum (rustc E0574).
+            IrExprKind::Record { name: Some(n), .. }
+                if !matches!(&e.ty, Ty::Named(t, _) if self.variants.contains(t)) =>
+            {
                 if let Some(q) = self.map.get(n) {
                     *n = *q;
                 }
@@ -427,17 +437,17 @@ impl almide_ir::visit_mut::IrMutVisitor for RepairVisitor<'_> {
     }
 }
 
-fn repair_expr_in_place(e: &mut IrExpr, map: &std::collections::HashMap<Sym, Sym>) {
+fn repair_expr_in_place(e: &mut IrExpr, map: &std::collections::HashMap<Sym, Sym>, variants: &HashSet<Sym>) {
     use almide_ir::visit_mut::IrMutVisitor;
-    RepairVisitor { map }.visit_expr_mut(e);
+    RepairVisitor { map, variants }.visit_expr_mut(e);
 }
 
-fn repair_fn(f: &mut IrFunction, map: &std::collections::HashMap<Sym, Sym>) {
+fn repair_fn(f: &mut IrFunction, map: &std::collections::HashMap<Sym, Sym>, variants: &HashSet<Sym>) {
     for p in &mut f.params {
         p.ty = repair_ty(&p.ty, map);
     }
     f.ret_ty = repair_ty(&f.ret_ty, map);
-    repair_expr_in_place(&mut f.body, map);
+    repair_expr_in_place(&mut f.body, map, variants);
 }
 
 fn repair_decl_kind(kind: &mut IrTypeDeclKind, map: &std::collections::HashMap<Sym, Sym>) {
@@ -486,16 +496,17 @@ fn repair_scope(
     top_lets: &mut [IrTopLet],
     var_table: &mut VarTable,
     map: &std::collections::HashMap<Sym, Sym>,
+    variants: &HashSet<Sym>,
 ) {
     for td in type_decls {
         repair_decl_kind(&mut td.kind, map);
     }
     for f in functions {
-        repair_fn(f, map);
+        repair_fn(f, map, variants);
     }
     for tl in top_lets {
         tl.ty = repair_ty(&tl.ty, map);
-        repair_expr_in_place(&mut tl.value, map);
+        repair_expr_in_place(&mut tl.value, map, variants);
     }
     for v in &mut var_table.entries {
         v.ty = repair_ty(&v.ty, map);
@@ -544,12 +555,17 @@ fn augment_map_for_scope(
 pub fn repair_bare_type_names(program: &mut IrProgram) {
     let decls = index_decls(program);
     let map = build_repair_map(&decls);
+    let variants: HashSet<Sym> = program.type_decls.iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+        .filter(|td| matches!(td.kind, IrTypeDeclKind::Variant { .. }))
+        .map(|td| td.name)
+        .collect();
     if almide_base::env::flag("ALMIDE_NAMES_DEBUG") {
         eprintln!("[names-debug] repair: bare decls = {:?}", decls.bare.iter().map(|s| s.as_str()).collect::<Vec<_>>());
         eprintln!("[names-debug] repair: qualified = {:?}", decls.qualified);
         eprintln!("[names-debug] repair: map = {:?}", map.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect::<Vec<_>>());
     }
-    repair_scope(&mut program.type_decls, &mut program.functions, &mut program.top_lets, &mut program.var_table, &map);
+    repair_scope(&mut program.type_decls, &mut program.functions, &mut program.top_lets, &mut program.var_table, &map, &variants);
     for d in &mut program.def_table.entries {
         d.ty = repair_ty(&d.ty, &map);
     }
@@ -564,7 +580,7 @@ pub fn repair_bare_type_names(program: &mut IrProgram) {
                 scoped.iter().filter(|(k, _)| !map.contains_key(*k)).map(|(k, v)| (k.as_str(), v.as_str())).collect::<Vec<_>>()
             );
         }
-        repair_scope(&mut m.type_decls, &mut m.functions, &mut m.top_lets, &mut m.var_table, &scoped);
+        repair_scope(&mut m.type_decls, &mut m.functions, &mut m.top_lets, &mut m.var_table, &scoped, &variants);
     }
 }
 
