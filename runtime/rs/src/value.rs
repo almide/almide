@@ -397,26 +397,58 @@ pub fn almide_rt_value_tagged_variant(v: AlmideValue) -> Result<(String, AlmideV
 pub fn almide_rt_value_float_json(f: f64) -> String {
     if f.is_finite() { format!("{}", f) } else { "null".to_string() }
 }
+/// The ONE JSON string-escaping rule (RFC 8259 §7, #2802), shared by every
+/// serializer in this runtime — compact `almide_rt_value_stringify` (values
+/// and keys), the pretty printer in json.rs, and the SSE response builder:
+/// `\` → `\\`, `"` → `\"`, U+000A / U+000D / U+0009 → `\n` / `\r` / `\t`,
+/// every OTHER U+0000..U+001F → `\u00xx` (lowercase hex, no `\b` / `\f` short
+/// forms), and everything else — U+007F and all non-ASCII included — raw
+/// UTF-8. The self-hosted `__json_quote` (stdlib/value_core.almd), the
+/// structural wasm `$vjson_quote` (crates/almide-wasm/src/json_helpers.rs) and
+/// the interp's `DynNode::to_json` are the other copies; the three-way byte
+/// identity over all 32 control characters plus `"` and `\` is gated by
+/// tests/json_quote_matrix_test.rs.
+pub fn almide_rt_value_json_escape_into(out: &mut String, s: &str) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                let b = c as u32 as usize;
+                out.push_str("\\u00");
+                out.push(HEX[b >> 4] as char);
+                out.push(HEX[b & 15] as char);
+            }
+            c => out.push(c),
+        }
+    }
+}
+/// `almide_rt_value_json_escape_into` wrapped in the surrounding quotes.
+pub fn almide_rt_value_json_quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    almide_rt_value_json_escape_into(&mut out, s);
+    out.push('"');
+    out
+}
 pub fn almide_rt_value_stringify(v: &AlmideValue) -> String {
     match v {
         AlmideValue::Null => "null".to_string(),
         AlmideValue::Bool(b) => if *b { "true".to_string() } else { "false".to_string() },
         AlmideValue::Int(n) => n.to_string(),
         AlmideValue::Float(f) => almide_rt_value_float_json(*f),
-        AlmideValue::Str(s) => format!("\"{}\"", s
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\n', "\\n")
-            .replace('\r', "\\r")
-            .replace('\t', "\\t")),
+        AlmideValue::Str(s) => almide_rt_value_json_quote(s),
         AlmideValue::Array(items) => {
             let inner: Vec<String> = items.iter().map(almide_rt_value_stringify).collect();
             format!("[{}]", inner.join(","))
         }
         AlmideValue::Object(pairs) => {
             let inner: Vec<String> = pairs.iter().map(|(k, v)| {
-                let ek = k.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t");
-                format!("\"{}\":{}", ek, almide_rt_value_stringify(v))
+                format!("{}:{}", almide_rt_value_json_quote(k), almide_rt_value_stringify(v))
             }).collect();
             format!("{{{}}}", inner.join(","))
         }

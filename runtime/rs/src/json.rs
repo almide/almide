@@ -298,21 +298,12 @@ pub fn almide_json_stringify_pretty(j: &AlmideValue) -> String {
     stringify_value(j, 0)
 }
 
-/// The canonical 5-escape JSON string quoting — the SAME rule the compact
-/// `almide_rt_value_stringify` and the self-hosted wasm `__json_quote` use.
-/// Everything else stays raw UTF-8 (valid JSON). The previous `{:?}` (Rust
-/// `escape_debug`) additionally escaped combining marks as `\u{301}` — not
-/// valid JSON escaping, and a byte divergence against the wasm leg
-/// (differential-fuzz: `"cafe\u{301}"` vs the raw combining char).
+/// JSON string quoting is `almide_rt_value_json_quote` (value.rs) — the one
+/// RFC 8259 §7 rule every serializer shares (#2802). The previous `{:?}`
+/// (Rust `escape_debug`) escaped combining marks as `\u{301}` — not valid
+/// JSON escaping, and a byte divergence against the wasm leg.
 fn json_quote(s: &str) -> String {
-    format!(
-        "\"{}\"",
-        s.replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\n', "\\n")
-            .replace('\r', "\\r")
-            .replace('\t', "\\t")
-    )
+    almide_rt_value_json_quote(s)
 }
 
 fn stringify_value(v: &AlmideValue, depth: usize) -> String {

@@ -91,9 +91,10 @@ impl Emitter<'_> {
             }
             STR => {
                 if nested {
-                    // Rust-Debug quoting shares the 5-escape walker.
+                    // Rust-Debug quoting: the 5-escape repr walker (not
+                    // JSON's — #2802 gave only JSON the control escapes).
                     let frags = self.json_frags();
-                    let q = self.work.helper(Helper::JsonQuote { frags });
+                    let q = self.work.helper(Helper::ReprQuote { frags });
                     self.f.instructions().local_set(self.tmp_i32_local);
                     self.f
                         .instructions()
@@ -265,7 +266,8 @@ impl Emitter<'_> {
                 let float_idx = info.wasm_index;
                 self.calls.insert(fi);
                 let frags = self.json_frags();
-                let _ = self.work.helper(Helper::JsonQuote { frags });
+                let ctrl = self.json_ctrl_frags();
+                let _ = self.work.helper(Helper::JsonQuote { frags, ctrl });
                 let vj = self.work.helper(Helper::JsonValue { float_to_string: float_idx, frags });
                 let hv = self.hold_i32()?;
                 self.f.instructions().local_set(hv);

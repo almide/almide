@@ -423,7 +423,8 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
         *float_to_string,
         *frags,
     ),
-    Helper::JsonQuote { frags } => json_helpers::emit_json_quote_helper(*frags),
+    Helper::JsonQuote { frags, ctrl } => json_helpers::emit_json_quote_helper(*frags, Some(*ctrl)),
+    Helper::ReprQuote { frags } => json_helpers::emit_json_quote_helper(*frags, None),
     Helper::JsonValuePretty { float_to_string, frags, pfrags } => {
         json_helpers::emit_json_value_pretty_helper(
             work.helper_base.get(),
