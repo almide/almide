@@ -199,12 +199,13 @@
 2396	spec/wasm_cross/fold_heap_acc.almd
 1891	spec/wasm_cross/for_in_forms.almd
 !	spec/wasm_cross/fs_call_head_family.almd
-13393	spec/wasm_cross/fs_composition_family.almd
+13395	spec/wasm_cross/fs_composition_family.almd
 8906	spec/wasm_cross/fs_fallible_stream_callback.almd
 6987	spec/wasm_cross/fs_glob_segments.almd
 5784	spec/wasm_cross/fs_list_dir_multipass.almd
 6114	spec/wasm_cross/fs_metadata_family.almd
 2979	spec/wasm_cross/fs_preopen_resolve.almd
+5320	spec/wasm_cross/fs_read_bytes_raw_call_head.almd
 9269	spec/wasm_cross/fs_read_directory_errno.almd
 5410	spec/wasm_cross/fs_read_lines.almd
 8223	spec/wasm_cross/fs_read_text_utf8.almd

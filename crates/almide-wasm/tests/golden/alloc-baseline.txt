@@ -205,6 +205,7 @@
 ~	spec/wasm_cross/fs_list_dir_multipass.almd
 ~	spec/wasm_cross/fs_metadata_family.almd
 ~	spec/wasm_cross/fs_preopen_resolve.almd
+~	spec/wasm_cross/fs_read_bytes_raw_call_head.almd
 ~	spec/wasm_cross/fs_read_directory_errno.almd
 ~	spec/wasm_cross/fs_read_lines.almd
 ~	spec/wasm_cross/fs_read_text_utf8.almd

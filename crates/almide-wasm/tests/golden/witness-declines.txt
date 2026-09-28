@@ -7,6 +7,7 @@ call-arg:Call	498
 call-arg:EmptyMap	1
 call-arg:If	3
 call-arg:Lambda	45
+call-arg:Match	2
 call-arg:Member	7
 call-arg:OptionSome	1
 call-arg:Record	2
@@ -30,7 +31,7 @@ module-arm:unaudited:string.push	1
 module-result:view:list.get_or	2
 named-op	11
 rhs:BinOp	796
-rhs:Block	158
+rhs:Block	159
 rhs:EmptyMap	2
 rhs:Fan	2
 rhs:If	658
