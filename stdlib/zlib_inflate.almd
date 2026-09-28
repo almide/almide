@@ -46,6 +46,32 @@ fn zli_construct(lengths: List[Int], n: Int) -> List[Int] = {
   count + symbol
 }
 
+// Whether `lengths[0..n)` is a code the native decoder accepts (#2853; the
+// rule zlib's inftrees.c and miniz_oxide share). An over-subscribed code is
+// always corrupt. An incomplete code is corrupt unless `sparse` allows it (the
+// literal/length and distance tables may be incomplete when their longest
+// code is at most 1 bit: an unused table or a lone 1-bit symbol). The
+// code-length table must be complete. Without this check, a corrupted
+// length table decoded to `ok` with garbage bytes where native reports
+// `corrupt deflate stream`.
+fn zli_code_ok(lengths: List[Int], n: Int, sparse: Bool) -> Bool = {
+  var count = list.repeat(0, 16)
+  var i = 0
+  while i < n {
+    count[lengths[i]] = count[lengths[i]] + 1
+    i = i + 1
+  }
+  var left = 1
+  var max_len = 0
+  var len = 1
+  while len < 16 {
+    left = left * 2 - count[len]
+    max_len = if count[len] > 0 then len else max_len
+    len = len + 1
+  }
+  left == 0 or (left > 0 and sparse and max_len <= 1)
+}
+
 // (symbol or -1, pos, buf, cnt)
 fn zli_decode(pos: Int, buf: Int, cnt: Int, inp: Bytes, h: List[Int]) -> (Int, Int, Int, Int) = {
   var p = pos
@@ -231,7 +257,9 @@ fn zli_codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, lencode: 
     p = p2
     b = b2
     c = c2
-    let sk = zli_sym_kind(sym)
+    // A symbol decoded from bits past the end of the input stops the block;
+    // zli_inflate_stream reports it as truncation (#2853), not as a symbol.
+    let sk = if p > bytes.len(inp) then 0 else zli_sym_kind(sym)
     var clen = 0
     var dist = 1
     match int.band(sk, 3) {
@@ -362,18 +390,24 @@ fn zli_dynamic(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes) -> (Int
     cl[order[i]] = v
     i = i + 1
   }
-  let lencode = zli_construct(cl, 19)
-  let (status, p5, b5, c5, lengths) = zli_read_lengths(p, b, c, inp, lencode, nlen + ndis)
-  let (s2, p6, b6, c6) = zli_codes(
-    p5,
-    b5,
-    c5,
-    inp,
-    out,
-    zli_construct(lengths, nlen),
-    zli_construct(list.slice(lengths, nlen, nlen + ndis), ndis),
-  )
-  (if status != 0 then status else s2, p6, b6, c6)
+  // Each table is checked where native checks it and the block stops at the
+  // first bad one (#2853): more than 286 length or 30 distance codes, an
+  // incomplete code-length code, a malformed literal/length or distance code.
+  if nlen > 286 or ndis > 30 or not zli_code_ok(cl, 19, false) then (0 - 1, p, b, c)
+  else {
+    let (status, p5, b5, c5, lengths) = zli_read_lengths(
+      p,
+      b,
+      c,
+      inp,
+      zli_construct(cl, 19),
+      nlen + ndis,
+    )
+    let dlens = list.slice(lengths, nlen, nlen + ndis)
+    if status != 0 then (status, p5, b5, c5)
+    else if not zli_code_ok(lengths, nlen, true) or not zli_code_ok(dlens, ndis, true) then (0 - 1, p5, b5, c5)
+    else zli_codes(p5, b5, c5, inp, out, zli_construct(lengths, nlen), zli_construct(dlens, ndis))
+  }
 }
 
 // (status, pos, 0, 0) — stored blocks are byte-aligned
@@ -381,20 +415,26 @@ fn zli_stored(pos: Int, inp: Bytes, mut out: Bytes) -> (Int, Int, Int, Int) = {
   let len = int.bor(bytes.get_or(inp, pos, 0), int.bshl(bytes.get_or(inp, pos + 1, 0), 8))
   let nlen = int.bor(bytes.get_or(inp, pos + 2, 0), int.bshl(bytes.get_or(inp, pos + 3, 0), 8))
   let start = pos + 4
-  let bad = if int.bxor(len, nlen) != 65535 or start + len > bytes.len(inp) then 1 else 0
-  let n = if bad == 1 then 0 else len
+  // A length that fails its complement is corrupt; a payload that runs past
+  // the input is truncation (#2853) — native says `incomplete`, not `corrupt`.
+  let status = if int.bxor(len, nlen) != 65535 then 0 - 1
+  else if start + len > bytes.len(inp) then 0 - 2 else 0
+  let n = if status != 0 then 0 else len
   var k = 0
   while k < n {
     bytes.push(out, bytes.get_or(inp, start + k, 0))
     k = k + 1
   }
-  (0 - bad, start + n, 0, 0)
+  (status, start + n, 0, 0)
 }
 
 // Inflate one DEFLATE stream starting at byte `pos`; returns (status, pos of the first byte after it).
 fn zli_inflate_stream(pos: Int, inp: Bytes, mut out: Bytes) -> (Int, Int) = {
   let flit = zli_fixed_lit()
-  let fdist = zli_construct(list.repeat(5, 30), 30)
+  // All 32 fixed distance codes, 30 and 31 included: they are valid 5-bit
+  // codes for invalid symbols (corrupt), not a code the decoder cannot finish
+  // — with 30 entries, a 30/31 read on past the end and looked truncated.
+  let fdist = zli_construct(list.repeat(5, 32), 32)
   var p = pos
   var b = 0
   var c = 0
@@ -415,7 +455,11 @@ fn zli_inflate_stream(pos: Int, inp: Bytes, mut out: Bytes) -> (Int, Int) = {
     b = b3
     c = c3
   }
-  (status, p)
+  // zli_bits reads past the end as zero bytes; a stream that needed any of
+  // them — to finish, or to reach the point where it failed — is truncated
+  // (-2), the way native stops for more input and reports `incomplete deflate
+  // stream` (#2853). Checked after the loop, it also covers every block kind.
+  (if p > bytes.len(inp) then 0 - 2 else status, p)
 }
 
 fn zli_crc_table() -> List[Int] = {
@@ -491,7 +535,8 @@ fn zli_header_end(inp: Bytes, pos: Int) -> Int = {
 }
 
 // gzip members back to back; returns 0 on success, else 1=not gzip,
-// 2=corrupt deflate, 3=crc mismatch, 4=size mismatch, 5=empty input. A gzip
+// 2=corrupt deflate, 3=crc mismatch, 4=size mismatch, 5=empty input or a
+// cut-off trailer, 6=truncated deflate stream (#2853). A gzip
 // file has at least one member, so zero bytes is an error (#2478): the loop
 // below never runs on empty input and used to leave `code` at 0 — ok(empty) —
 // where native's decoder reports "unexpected end of file".
@@ -507,7 +552,9 @@ fn zli_gunzip_members(inp: Bytes, mut out: Bytes) -> Int = {
     let isize = zli_u32_le(inp, after + 4)
     pos = after + 8
     code = if start < 0 then 1
+    else if status == 0 - 2 then 6
     else if status != 0 then 2
+    else if after + 8 > bytes.len(inp) then 5
     else if zli_crc32_from(t, out, member_start) != stored_crc then 3
     else if int.band(bytes.len(out) - member_start, 4294967295) != isize then 4 else 0
   }
@@ -517,7 +564,8 @@ fn zli_gunzip_members(inp: Bytes, mut out: Bytes) -> Int = {
 fn zli_gunzip_error(code: Int) -> String = if code == 1 then "not gzip"
 else if code == 2 then "corrupt deflate stream"
 else if code == 3 then "crc mismatch"
-else if code == 5 then "unexpected end of file" else "size mismatch"
+else if code == 5 then "unexpected end of file"
+else if code == 6 then "incomplete deflate stream" else "size mismatch"
 
 // ── The stdlib entry points ──
 effect fn zlib_gunzip(data: Bytes) -> Result[Bytes, String] = {
@@ -530,7 +578,8 @@ effect fn zlib_gunzip(data: Bytes) -> Result[Bytes, String] = {
 effect fn zlib_inflate(data: Bytes) -> Result[Bytes, String] = {
   var out = bytes.new(0)
   let (status, _after) = zli_inflate_stream(0, data, out)
-  if status == 0 then ok(out) else err("zlib.inflate: corrupt deflate stream")
+  if status == 0 then ok(out)
+  else if status == 0 - 2 then err("zlib.inflate: incomplete deflate stream") else err("zlib.inflate: corrupt deflate stream")
 }
 
 effect fn zlib_decompress(data: Bytes) -> Result[Bytes, String] = {
@@ -548,7 +597,8 @@ effect fn zlib_decompress(data: Bytes) -> Result[Bytes, String] = {
         int.bor(int.bshl(bytes.get_or(data, after + 2, 0), 8), bytes.get_or(data, after + 3, 0)),
       ),
     )
-    if status != 0 then err("zlib.decompress: corrupt deflate stream")
+    if status == 0 - 2 or (status == 0 and after + 4 > bytes.len(data)) then err("zlib.decompress: incomplete deflate stream")
+    else if status != 0 then err("zlib.decompress: corrupt deflate stream")
     else if zli_adler32_from(out, 0) != stored then err("zlib.decompress: adler32 mismatch") else ok(out)
   }
 }
