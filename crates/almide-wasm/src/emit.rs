@@ -9,6 +9,11 @@ use crate::decline_site::DeclineSite;
 use crate::types_table::TypeTable;
 use crate::*;
 
+/// #2865: package modules keyed like a compiler namespace (a pre-pass of the
+/// leg's front; its display half is read by [`fn_site`] below).
+#[path = "package_keys.rs"]
+pub mod package_keys;
+
 /// Emit a core wasm module for `ir`, or say precisely why not yet.
 /// Two passes: the first loads the WHOLE linked registry graph (so
 /// resolution and the refusal BFS see everything) and reports which
@@ -557,8 +562,14 @@ Ok(Pass { bytes, visited, total, ops: host_ops, bounded_fired: work.bounded_fire
 /// line when the refusing node carried no span (a signature-level refusal).
 fn fn_site(entry: &(&IrFunction, Option<String>, u32), refused_at: Option<usize>) -> DeclineSite {
     let (f, qual, _) = entry;
-    let function = qual.clone().unwrap_or_else(|| f.name.as_str().to_string());
-    let module = qual.as_ref().and_then(|q| q.rsplit_once('.').map(|(m, _)| m.to_string()));
+    // A re-keyed package module (#2865) is shown under the key its source wrote.
+    let module = qual
+        .as_ref()
+        .and_then(|q| q.rsplit_once('.').map(|(m, _)| package_keys::display_key(m).to_string()));
+    let function = match &module {
+        Some(m) => format!("{m}.{}", f.name.as_str()),
+        None => qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
+    };
     DeclineSite { function, module, line: refused_at.or(f.body.span.map(|s| s.line)), top_let: false }
 }
 

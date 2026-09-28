@@ -12,7 +12,18 @@
 // (#2478): a gzip file has at least one member, and the self-hosted member
 // loop used to run zero times and answer `ok` with 0 bytes where native's
 // decoder reports `unexpected end of file`.
+// CORRUPT and TRUNCATED input is `err` on every leg (#2853): the self-hosted
+// decoder accepted a Huffman table that is not a prefix code (one flipped
+// byte of the raw vector — native rejects it, the self-hosted decoder
+// answered `ok` with garbage), read past the end of the input as zero bytes,
+// and took a gzip member whose trailer is cut off as whole. Only the err/ok
+// split is printed: the texts are not part of C-331.
 import zlib
+
+fn split(r: Result[Bytes, String]) -> String = match r {
+  ok(b) => "ok ${bytes.to_list(b)}",
+  err(_) => "err",
+}
 
 effect fn main() -> Unit = {
   let text = "the almide zlib self-host: one decoder, every leg, byte-identical. the almide zlib self-host: one decoder, every leg, byte-identical."
@@ -271,4 +282,10 @@ effect fn main() -> Unit = {
     ok(b) => println("gunzip-empty-ok len=${bytes.len(b)}"),
     err(e) => println("gunzip-empty-err " + e),
   }
+  println("inflate-bad-table " + split(zlib.inflate(bytes.set(d, 15, 1))))
+  println("inflate-truncated " + split(zlib.inflate(bytes.slice(d, 0, 40))))
+  println("inflate-fixed-dist30 " + split(zlib.inflate(bytes.from_list([75, 4, 62, 0]))))
+  println("decompress-bad-table " + split(zlib.decompress(bytes.set(z, 17, 1))))
+  println("decompress-truncated-adler " + split(zlib.decompress(bytes.slice(z, 0, bytes.len(z) - 2))))
+  println("gunzip-truncated-trailer " + split(zlib.gunzip(bytes.slice(g, 0, bytes.len(g) - 3))))
 }

@@ -509,6 +509,7 @@
 66288	spec/wasm_cross/nested_variant_match_bind.almd
 66064	spec/wasm_cross/nested_variant_tag_box.almd
 66320	spec/wasm_cross/nested_variant_tree.almd
+67184	spec/wasm_cross/newtype_string_form.almd
 66368	spec/wasm_cross/num_edge_to_string.almd
 66048	spec/wasm_cross/opt_ctor_over_call_payload.almd
 66192	spec/wasm_cross/opt_str_str_ctor.almd
@@ -791,6 +792,7 @@
 66560	spec/wasm_cross/value_object_leak_loop.almd
 69296	spec/wasm_cross/value_object_ops_share.almd
 68304	spec/wasm_cross/value_repr.almd
+66256	spec/wasm_cross/variant_case_named_like_its_type.almd
 66816	spec/wasm_cross/variant_pair_result_return.almd
 66064	spec/wasm_cross/variant_record_literal_equality.almd
 68688	spec/wasm_cross/variant_result_credit_shapes.almd
@@ -800,7 +802,7 @@
 69616	spec/wasm_cross/wide_function_body.almd
 86768	spec/wasm_cross/witness_straightline.almd
 67680	spec/wasm_cross/zip_view_shape.almd
-101232	spec/wasm_cross/zlib_selfhost.almd
+104256	spec/wasm_cross/zlib_selfhost.almd
 66128	spec/wasm_fail/effect_err_aborts_both_legs.almd
 66128	spec/wasm_fail/int_parse_err_propagates.almd
 66144	spec/wasm_fail/matrix_concat_cols_rows_aborts.almd

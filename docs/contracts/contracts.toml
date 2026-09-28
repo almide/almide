@@ -211,6 +211,7 @@ evidence  = [
   { path = "tests/module_type_repr_test.rs", name = "every_compiled_leg_prints_the_declared_name", class = "fixture" },
   { path = "tests/module_type_repr_test.rs", name = "interp_prints_the_declared_name", class = "fixture" },
   { path = "spec/wasm_cross/record_field_rust_keyword.almd", class = "fixture" },
+  { path = "spec/wasm_cross/newtype_string_form.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-010"
@@ -578,6 +579,7 @@ evidence  = [
   { path = "spec/wasm_cross/match_container_literal.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_payload_string_literal.almd", class = "fixture" },
   { path = "spec/wasm_cross/record_default_field_omitted.almd", class = "fixture" },
+  { path = "spec/wasm_cross/variant_case_named_like_its_type.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-037"
@@ -1099,6 +1101,7 @@ evidence  = [
   { path = "spec/wasm_cross/stdlib_type_shadow.almd", class = "fixture" },
   { path = "spec/wasm_cross/stdlib_opaque_shadow.almd", class = "fixture" },
   { path = "tests/variant_case_payload_ownership_test.rs", class = "fixture", name = "a_let_bound_list_moved_into_a_case_payload_survives_the_producer_frame" },
+  { path = "tests/wasm_runtime_test_parts/p2.rs", class = "fixture", name = "wasm_cross_module_self_named_record_case_ctor" },
 ]
 [[contract]]
 id        = "C-077"

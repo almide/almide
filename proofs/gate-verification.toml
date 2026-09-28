@@ -708,6 +708,15 @@ measures = "count of `_str`-suffixed stdlib twins, against scripts/str-twin-base
 varies = "2026-08-16 measured 119, 2026-08-17 120 (the creep the ratchet froze); 2026-08-20 eb6529a45 raised the baseline 119 -> 120 on purpose for map_upsert_str (C-301)"
 
 [[gate]]
+path = "scripts/check-dep-shaped-skips.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "dependency-shaped leg landing (2026-09-28, #2839): `--self-test` builds a scratch repository with a one-entry base list and requires a grown list (a second id) to exit 1 while an unchanged, a shrunk, a reworded and a bootstrap (base without the file) list exit 0; CI runs the self-test before every real check. The other direction (an entry that no longer diverges or names no case) is refused by tests/dep_shaped_leg_test.rs itself as STALE SKIP."
+measures = "the set of case ids in scripts/lib/dep-shaped-skips.txt at HEAD minus the set at the base commit"
+varies = "the self-test's forged second id (a one-id base against a two-id list) reads a non-empty difference; the landing commit reads the bootstrap (no list at the base) with 4 ids"
+
+[[gate]]
 path = "scripts/check-diagnostic-code-coverage.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"

@@ -202,33 +202,73 @@ pub fn fetch_dep_with_lock(dep: &Dependency, locked_commit: Option<&str>) -> Res
     fetch_dep_at_ref(dep, dep_ref_name(dep))
 }
 
-/// Update almide.lock after fetching all dependencies.
-/// `resolved` is what the walk actually fetched, one entry per dependency it
-/// visited; this picks out the DIRECT ones, which are what the lock carries.
+/// One fetch the walk made: the request as the lock would name it, the
+/// `PkgId` MVS files it under, and the checkout it produced.
 ///
-/// The pairing is by the dependency's own identity — name, source and ref, the
-/// same triple the lock records and the lock lookup matches on (#2522). It used
-/// to be `deps.iter().zip(resolved.iter())`, but `deps` is the direct list while
-/// the walk is the flattened graph, so the indexes only coincided when nothing
-/// had transitive dependencies. Once one did, every later direct dependency was
-/// shifted and got another package's commit written under its own url — and the
-/// next build could not fetch it (#2529). A positional pairing that happens to
-/// be right is exactly what produced that, so there is no second index here to
-/// keep in step.
-pub fn update_lock_file(project_root: &Path, deps: &[Dependency], resolved: &[LockedDep]) -> Result<(), String> {
+/// `update_lock_file` needs all three. The request identifies WHICH direct
+/// dependency this was (the lookup key the lock is matched on); the `PkgId`
+/// and the checkout say which fetch MVS finally SELECTED for that package, and
+/// the selected fetch is what the lock records (#2532).
+#[derive(Debug, Clone)]
+pub struct Resolution {
+    pub lock: LockedDep,
+    pub pkg_id: PkgId,
+    pub source_dir: PathBuf,
+}
+
+/// Update almide.lock after fetching all dependencies.
+///
+/// The lock records the RESOLVED result, not the request: for each direct
+/// dependency, the `(git, ref, commit)` of the fetch Minimal Version Selection
+/// chose for its package — the checkout that was actually built (#2532). When
+/// nothing raises the dependency that is its own request. When a transitive
+/// requirement raises it (the manifest asks `foo@v1.0.0`, a dependency asks
+/// `foo@v1.1.0`, v1.1.0 is built), the entry names v1.1.0 and v1.1.0's commit.
+/// The request lives only in `almide.toml`. This is the Cargo.lock reading:
+/// the lock answers "what was built", which is what readers ask it.
+///
+/// `resolved` is every fetch the walk made, in walk order; `fetched` is the
+/// selection. The direct dependency's own fetch is found by its identity —
+/// name, source and ref, the key the lock lookup also uses (#2522). It used
+/// to be `deps.iter().zip(resolved.iter())`, but `deps` is the direct list
+/// while the walk is the flattened graph, so the indexes only coincided when
+/// nothing had transitive dependencies (#2529). The selected fetch is then the
+/// one whose checkout MVS kept for that `PkgId` — matched on the checkout
+/// itself, so every entry is one fetch's own triple, never a ref from one
+/// fetch beside another's commit.
+pub fn update_lock_file(
+    project_root: &Path,
+    deps: &[Dependency],
+    resolved: &[Resolution],
+    fetched: &[FetchedDep],
+) -> Result<(), String> {
     let lock_path = project_root.join("almide.lock");
     let lock_path = lock_path.as_path();
     let mut locked = Vec::new();
     for dep in deps {
         let ref_name = dep_ref_name(dep);
-        let entry = resolved
+        let Some(request) = resolved.iter().find(|r| {
+            r.lock.name == dep.name && r.lock.git == dep.git && r.lock.ref_name == ref_name
+        }) else {
+            // Nothing was resolved for it (a path dependency, or a checkout
+            // with no git metadata) — a lock entry invented for it here
+            // would be a false record.
+            continue;
+        };
+        let selected = fetched
             .iter()
-            .find(|r| r.name == dep.name && r.git == dep.git && r.ref_name == ref_name);
-        // No entry means nothing was resolved for it (a path dependency, or a
-        // checkout with no git metadata) — it was skipped before, and a lock
-        // entry invented for it here would be the same false record.
-        if let Some(entry) = entry {
-            locked.push(entry.clone());
+            .find(|f| f.pkg_id == request.pkg_id)
+            .and_then(|f| resolved.iter().find(|r| r.pkg_id == f.pkg_id && r.source_dir == f.source_dir));
+        // `None` means MVS selected a checkout with no git identity (a path
+        // dependency raised this one): what was built is not a commit, so
+        // there is nothing true to pin.
+        if let Some(selected) = selected {
+            locked.push(LockedDep {
+                name: dep.name.clone(),
+                git: selected.lock.git.clone(),
+                ref_name: selected.lock.ref_name.clone(),
+                commit: selected.lock.commit.clone(),
+            });
         }
     }
     if !locked.is_empty() {
@@ -279,12 +319,12 @@ pub fn fetch_all_deps(project: &Project) -> Result<Vec<FetchedDep>, String> {
     // `fetched` cannot answer this: it is the flattened graph, its entries
     // carry the package's own declared name rather than the manifest key,
     // and nothing in them names a source or a ref (#2529).
-    let mut resolved: Vec<LockedDep> = Vec::new();
+    let mut resolved: Vec<Resolution> = Vec::new();
     fetch_deps_recursive(&project.dependencies, &locked, &mut fetched, &mut visited, &mut resolved)?;
 
     // Update lock file if it doesn't exist or deps changed
     if !project.dependencies.is_empty() {
-        let _ = update_lock_file(&project.root, &project.dependencies, &resolved);
+        let _ = update_lock_file(&project.root, &project.dependencies, &resolved, &fetched);
     }
 
     Ok(fetched)
@@ -331,7 +371,7 @@ fn fetch_one_dep_recursive(
     locked: &[LockedDep],
     fetched: &mut Vec<FetchedDep>,
     visited: &mut std::collections::HashSet<String>,
-    resolved: &mut Vec<LockedDep>,
+    resolved: &mut Vec<Resolution>,
 ) -> Result<(), String> {
     let version_str = resolve_dep_version(dep);
     let pkg_id = PkgId::from_version_str(&dep.name, &version_str);
@@ -367,9 +407,19 @@ fn fetch_one_dep_recursive(
     // has always emitted one) is a mismatch too. Reusing its commit would
     // relabel it with the manifest's ref on the way out — the same false
     // record by another route.
+    //
+    // The match is on the SOURCE (git, ref), not on the manifest key. The
+    // lock records what MVS selected (#2532), so an entry raised by a
+    // transitive requirement names the ref that requirement asked for, and
+    // that request is spelled in ANOTHER package's manifest, under whatever
+    // key that manifest chose. The pin is a fact about a repository at a ref;
+    // who asked for it does not change which commit it is. The direct
+    // request below the raise (`foo@v1.0.0` when `v1.1.0` is locked) simply
+    // finds no pin and resolves its ref, exactly as a transitive dependency
+    // always has — it is walked for its requirements, not built.
     let want_ref = dep_ref_name(dep);
     let locked_commit = locked.iter()
-        .find(|l| l.name == dep.name && l.git == dep.git && l.ref_name == want_ref)
+        .find(|l| l.git == dep.git && l.ref_name == want_ref)
         .map(|l| l.commit.as_str());
     let path = fetch_dep_with_lock(dep, locked_commit)?;
 
@@ -378,18 +428,23 @@ fn fetch_one_dep_recursive(
     // the flattened graph, by position or by a reconstructed key — is what
     // #2529 was. A dependency with no git metadata (a path dependency) records
     // nothing and is simply absent from the lock, as it was before.
-    if let Ok(commit) = git_head_hash(&path) {
-        resolved.push(LockedDep {
-            name: dep.name.clone(),
-            git: dep.git.clone(),
-            ref_name: want_ref.to_string(),
-            commit,
-        });
-    }
+    let git_commit = git_head_hash(&path).ok();
 
     let (module_name, source_dir, transitive_deps) = resolve_fetched_dep_manifest(&path, &dep.name);
 
     let actual_pkg_id = PkgId::from_version_str(&module_name, &version_str);
+    if let Some(commit) = git_commit {
+        resolved.push(Resolution {
+            lock: LockedDep {
+                name: dep.name.clone(),
+                git: dep.git.clone(),
+                ref_name: want_ref.to_string(),
+                commit,
+            },
+            pkg_id: actual_pkg_id.clone(),
+            source_dir: source_dir.clone(),
+        });
+    }
     match fetched.iter_mut().find(|f| f.pkg_id == actual_pkg_id) {
         Some(existing) => {
             // MVS: a later, higher request replaces the selection in place —
@@ -417,7 +472,7 @@ fn fetch_deps_recursive(
     locked: &[LockedDep],
     fetched: &mut Vec<FetchedDep>,
     visited: &mut std::collections::HashSet<String>,
-    resolved: &mut Vec<LockedDep>,
+    resolved: &mut Vec<Resolution>,
 ) -> Result<(), String> {
     for dep in deps {
         fetch_one_dep_recursive(dep, locked, fetched, visited, resolved)?;

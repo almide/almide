@@ -243,7 +243,7 @@ fn render_generic_call_named(ctx: &RenderContext, name: almide_base::intern::Sym
     // for a module's own (#1835). The reserved prefix is the STRUCT's (the
     // #433 mangle), not a runtime helper's, so it is decided before the
     // invariant below.
-    if ctx.newtype_ctors.contains(&name) {
+    if ctx.newtype_ctors.contains_key(&name) {
         return render_call_expr(ctx, name.as_str(), args);
     }
     // Invariant: NormalizeRuntimeCallsPass collapses every
@@ -869,6 +869,23 @@ fn render_map_type_arg(ctx: &RenderContext, ty: &Ty) -> String {
     render_type(ctx, &ty)
 }
 
+/// The opaque-newtype layers around `ty` (`mod type Id = Int` is the struct
+/// `Id(i64)`): how many there are and the type under the last one. The wasm
+/// leg and the interp erase a newtype to its payload, so its string form is
+/// the payload's (#2860). Bounded, so a malformed self-wrapping alias cannot
+/// spin the renderer.
+fn peel_newtypes(ctx: &RenderContext, ty: &Ty) -> (usize, Ty) {
+    let mut depth = 0;
+    let mut cur = ty.clone();
+    while depth < 64 {
+        let Ty::Named(name, _) = &cur else { break };
+        let Some(target) = ctx.newtype_ctors.get(name) else { break };
+        cur = target.clone();
+        depth += 1;
+    }
+    (depth, cur)
+}
+
 fn ty_needs_repr(ctx: &RenderContext, ty: &Ty) -> bool {
     use TypeConstructorId::{List, Map, Set, Option as OptionId, Result as ResultId};
     match ty {
@@ -890,6 +907,11 @@ fn ty_needs_repr(ctx: &RenderContext, ty: &Ty) -> bool {
         // — so the qualified spelling fell to the `Display` path and rustc
         // met `AlmideEndian` with no `Display` (E0277), while the bare
         // `BigEndian` spelling of the same value printed fine.
+        // An opaque newtype renders as its WRAPPED type (#2496, #2860): a
+        // repr-backed target takes the newtype's delegating `AlmideRepr`
+        // impl, anything else the Display path through `.0`
+        // (`render_string_interp`).
+        Ty::Named(..) if peel_newtypes(ctx, ty).0 > 0 => ty_needs_repr(ctx, &peel_newtypes(ctx, ty).1),
         Ty::Named(name, _) => {
             let bare = name.as_str().rsplit('.').next().unwrap_or(name.as_str());
             ctx.repr_named_types.contains(name)

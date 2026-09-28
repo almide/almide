@@ -26,8 +26,21 @@ impl NanoPass for IrLinkFlattenPass {
     fn barrier(&self) -> bool { true }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        // The entry program's own declarations are reached first: a bare
+        // Rust-reserved name there (`type Option`) is scoped to the entry
+        // program's type scope (`self`), the scope #1828 gives an entry
+        // declaration of a stdlib-owned name — one flat `almide_rt_self_<Name>`.
+        let mut reserved_origins: HashMap<String, String> = HashMap::new();
+        for td in &program.type_decls {
+            note_rust_reserved_type_name(td, almide_lang::stdlib_info::ROOT_TYPE_SCOPE, &mut reserved_origins);
+        }
+
         if program.modules.is_empty() {
-            return PassResult { program, changed: false };
+            let renamed = qualify_rust_reserved_type_names(&mut program, &reserved_origins);
+            if renamed {
+                mangle_qualified_type_names(&mut program);
+            }
+            return PassResult { program, changed: renamed };
         }
 
         let modules = std::mem::take(&mut program.modules);
@@ -45,6 +58,7 @@ impl NanoPass for IrLinkFlattenPass {
             // If both an alias and a non-alias exist for the same name,
             // keep the alias (so type_aliases expansion works).
             for td in module.type_decls {
+                note_rust_reserved_type_name(&td, &mod_ident, &mut reserved_origins);
                 merge_module_type_decl(td, &mut emitted_types, &mut program.type_decls);
             }
 
@@ -61,6 +75,12 @@ impl NanoPass for IrLinkFlattenPass {
             }
         }
 
+        // #2842: a declaration that arrived under a BARE name the generated
+        // crate already uses (`Option`, `Result`, `String`, …) is scoped to its
+        // origin first, so the mangle below treats it like every other module
+        // type instead of emitting a top-level item that shadows std.
+        qualify_rust_reserved_type_names(&mut program, &reserved_origins);
+
         // #433: user-module types arrived under their qualified canonical name
         // `mod.Type` (lowering pinned them so two packages' same-name types stay
         // distinct). A `.` is not a valid Rust/WASM identifier, so flatten each to
@@ -70,6 +90,110 @@ impl NanoPass for IrLinkFlattenPass {
 
         PassResult { program, changed: true }
     }
+}
+
+/// Type names the generated Rust crate already binds at its top level, which a
+/// user declaration of the same bare name would shadow for the whole crate:
+/// every type and trait in the Rust 2024 prelude, and the collections the
+/// generated preamble imports (`use std::collections::{HashMap, HashSet}`).
+/// The runtime's own items all carry the `Almide` / `almide_` prefix, which
+/// [`is_rust_reserved_type_name`] reserves as a family.
+///
+/// A user type normally never reaches Rust under a bare name that could clash:
+/// a module's types are mangled `almide_rt_<mod>_<Type>`. Two kinds arrive
+/// bare — the entry program's own types, and the types of a package module
+/// whose key coincides with a stdlib module name (`src/option.almd`), whose
+/// declarations the frontend keeps bare like the stdlib module's own. Either
+/// one declaring `type Option` emitted `pub struct Option`, and every runtime
+/// `Option<A>` then named the user's struct (rustc E0107, #2842).
+pub const RUST_RESERVED_TYPE_NAMES: &[&str] = &[
+    // std::prelude::rust_2024 — types, traits and their variants.
+    "Option", "Some", "None", "Result", "Ok", "Err", "String", "Vec", "Box",
+    "ToOwned", "ToString", "Clone", "Copy", "Send", "Sized", "Sync", "Unpin",
+    "Drop", "Fn", "FnMut", "FnOnce", "AsyncFn", "AsyncFnMut", "AsyncFnOnce",
+    "AsRef", "AsMut", "Into", "From", "TryFrom", "TryInto", "Default",
+    "Iterator", "IntoIterator", "DoubleEndedIterator", "ExactSizeIterator",
+    "Extend", "FromIterator", "PartialEq", "PartialOrd", "Eq", "Ord",
+    "Future", "IntoFuture",
+    // The generated preamble's crate-level imports.
+    "HashMap", "HashSet",
+    // The spliced runtime modules' crate-level imports (`use std::path::Path`
+    // in fs, `std::time::Duration`, …): a user `type Path` in a package's
+    // `src/path.almd` shadowed `std::path::Path` for the runtime (#2858).
+    "Path", "Duration", "TcpStream", "Read", "Write", "Cell", "RefCell",
+];
+
+/// Would a top-level Rust item with this name shadow one the generated crate
+/// relies on? See [`RUST_RESERVED_TYPE_NAMES`].
+pub fn is_rust_reserved_type_name(name: &str) -> bool {
+    RUST_RESERVED_TYPE_NAMES.contains(&name) || name.starts_with("Almide") || name.starts_with("almide_")
+}
+
+/// Record `td`'s origin when it is declared under a bare reserved name. The
+/// first origin wins, as the first declaration does in the merge.
+fn note_rust_reserved_type_name(td: &IrTypeDecl, origin: &str, out: &mut HashMap<String, String>) {
+    let name = td.name.as_str();
+    if !name.contains('.') && is_rust_reserved_type_name(name) {
+        out.entry(name.to_string()).or_insert_with(|| origin.to_string());
+    }
+}
+
+/// Rename every bare reserved-name declaration to `<origin>.<Name>` and every
+/// reference to it, so [`mangle_qualified_type_names`] gives it the flat
+/// `almide_rt_<origin>_<Name>` it gives any module type, and the repr keeps the
+/// declared spelling. A builtin `Option[T]` / `Result[T, E]` is
+/// `Ty::Applied`, never `Ty::Named`, so a `Named` reference to the bare name is
+/// the user's type. Returns whether anything was renamed.
+fn qualify_rust_reserved_type_names(program: &mut IrProgram, origins: &HashMap<String, String>) -> bool {
+    if origins.is_empty() {
+        return false;
+    }
+    // A variant case may share the reserved name (`type Box[T] = | Box(T)`):
+    // its ctor call and pattern spell the CASE, never the type, so only a
+    // record's literal/pattern and an opaque newtype's ctor are renamed. A
+    // record or newtype whose name some variant case also spells is left as it
+    // was — a ctor spelling it could not tell apart is worse than the clash.
+    let case_names: HashSet<&str> = program.type_decls.iter()
+        .filter_map(|td| match &td.kind {
+            IrTypeDeclKind::Variant { cases, .. } => Some(cases.iter().map(|c| c.name.as_str())),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    let mut types: HashMap<String, Sym> = HashMap::new();
+    let mut ctors: HashMap<String, Sym> = HashMap::new();
+    for (name, origin) in origins {
+        let Some(td) = program.type_decls.iter().find(|td| td.name.as_str() == name) else { continue };
+        let spells_its_ctor = match &td.kind {
+            IrTypeDeclKind::Record { .. } => true,
+            IrTypeDeclKind::Alias { .. } => matches!(td.visibility, IrVisibility::Mod | IrVisibility::Private),
+            IrTypeDeclKind::Variant { .. } => false,
+        };
+        if spells_its_ctor && case_names.contains(name.as_str()) {
+            continue;
+        }
+        let qualified = sym(&format!("{}.{}", origin, name));
+        types.insert(name.clone(), qualified);
+        if spells_its_ctor {
+            ctors.insert(name.clone(), qualified);
+        }
+    }
+    if types.is_empty() {
+        return false;
+    }
+    rename_program_types(program, &TypeRename { types: &types, ctors: &ctors });
+    true
+}
+
+/// A rename of type names, split by the position a name occurs in. `types`
+/// renames the declarations and every `Ty` reference; `ctors` renames the
+/// positions that spell a CONSTRUCTOR — a record literal or pattern, an opaque
+/// newtype's ctor call or pattern, the ctor-keyed annotations. The flatten
+/// mangle's keys are dotted and so never a variant case's name, and there the
+/// two maps are the same map; a bare reserved name can be a case's too.
+struct TypeRename<'a> {
+    types: &'a HashMap<String, Sym>,
+    ctors: &'a HashMap<String, Sym>,
 }
 
 /// Per-`td` body of `IrLinkFlattenPass::run`'s type-decl merge loop,
@@ -104,36 +228,46 @@ fn mangle_qualified_type_names(program: &mut IrProgram) {
             // (#1836, C-009).
             program.codegen_annotations.repr_names
                 .insert(nn.as_str().to_string(), td.declared_name().to_string());
-            td.name = *nn;
         }
-        rename_type_decl_kind(&mut td.kind, &map);
     }
+    rename_program_types(program, &TypeRename { types: &map, ctors: &map });
     // Twin decls now share one canonical name — keep the first, drop the rest
     // (identical shapes; a second `pub struct Msg` would be E0428).
-    {
-        let mut seen: std::collections::HashSet<Sym> = std::collections::HashSet::new();
-        program.type_decls.retain(|td| seen.insert(td.name));
+    let mut seen: std::collections::HashSet<Sym> = std::collections::HashSet::new();
+    program.type_decls.retain(|td| seen.insert(td.name));
+}
+
+/// Rename every declaration named in `r`, and every carrier of a type name
+/// that can reference one: decl bodies, fn signatures and bodies, top-lets,
+/// the var and def tables, and the name-keyed codegen annotations.
+fn rename_program_types(program: &mut IrProgram, r: &TypeRename) {
+    let map = r.types;
+    for td in &mut program.type_decls {
+        if let Some(nn) = map.get(td.name.as_str()) {
+            td.name = *nn;
+        }
+        rename_type_decl_kind(&mut td.kind, map);
     }
     for f in &mut program.functions {
         for p in &mut f.params {
-            p.ty = rename_ty(&p.ty, &map);
+            p.ty = rename_ty(&p.ty, map);
         }
-        f.ret_ty = rename_ty(&f.ret_ty, &map);
+        f.ret_ty = rename_ty(&f.ret_ty, map);
         let body = std::mem::replace(&mut f.body, IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None });
-        f.body = rename_expr(body, &map);
+        f.body = rename_expr(body, r);
     }
     for tl in &mut program.top_lets {
-        tl.ty = rename_ty(&tl.ty, &map);
+        tl.ty = rename_ty(&tl.ty, map);
         let v = std::mem::replace(&mut tl.value, IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None });
-        tl.value = rename_expr(v, &map);
+        tl.value = rename_expr(v, r);
     }
     for v in &mut program.var_table.entries {
-        v.ty = rename_ty(&v.ty, &map);
+        v.ty = rename_ty(&v.ty, map);
     }
     for d in &mut program.def_table.entries {
-        d.ty = rename_ty(&d.ty, &map);
+        d.ty = rename_ty(&d.ty, map);
     }
-    remap_codegen_annotations(&mut program.codegen_annotations, &map);
+    remap_codegen_annotations(&mut program.codegen_annotations, r);
 }
 
 /// Reference-graph "type name → its group's canonical name" map-building
@@ -187,18 +321,22 @@ fn build_type_rename_map(type_decls: &[IrTypeDecl]) -> HashMap<String, Sym> {
 /// pre-flatten `mod.Type` — so a flattened module type's field DEFAULTS
 /// were silently skipped (almai: `Message { role, content }` missing its
 /// defaulted `tool_calls` → generated-Rust E0063).
-fn remap_codegen_annotations(ann: &mut CodegenAnnotations, map: &HashMap<String, Sym>) {
-    let remap = |n: &str| map.get(n).map(|s| s.as_str().to_string()).unwrap_or_else(|| n.to_string());
+fn remap_codegen_annotations(ann: &mut CodegenAnnotations, r: &TypeRename) {
+    let remap_in = |m: &HashMap<String, Sym>, n: &str| m.get(n).map(|s| s.as_str().to_string()).unwrap_or_else(|| n.to_string());
+    // Type-named keys follow `types`; ctor-named keys (a record's literal name,
+    // a variant case's name) follow `ctors`.
+    let remap = |n: &str| remap_in(r.types, n);
+    let remap_ctor = |n: &str| remap_in(r.ctors, n);
     // The default EXPRESSION is spliced into every construction site, so the
     // type names inside it need the same mangle as a fn body (#2518: a
     // `Sampling {}` default from another module rendered as a bare
     // `Sampling` against the flat `almide_rt_mod_Sampling` → E0422).
     ann.default_fields = std::mem::take(&mut ann.default_fields).into_iter()
-        .map(|((c, f), e)| ((remap(&c), f), rename_expr(e, map))).collect();
+        .map(|((c, f), e)| ((remap_ctor(&c), f), rename_expr(e, r))).collect();
     ann.boxed_fields = std::mem::take(&mut ann.boxed_fields).into_iter()
-        .map(|(c, f)| (remap(&c), f)).collect();
+        .map(|(c, f)| (remap_ctor(&c), f)).collect();
     ann.ctor_to_enum = std::mem::take(&mut ann.ctor_to_enum).into_iter()
-        .map(|(c, e)| (remap(&c), remap(&e))).collect();
+        .map(|(c, e)| (remap_ctor(&c), remap(&e))).collect();
     // #844: recursive_enums is keyed by the PRE-flatten qualified name
     // (`mod.Type`). Without remapping it, the enum DECL renderer (which checks
     // the post-flatten `almide_rt_mod_Type` name) stops seeing the type as
@@ -274,11 +412,11 @@ fn rename_ty(ty: &Ty, map: &HashMap<String, Sym>) -> Ty {
 /// a `while`/`for` keeps the unmangled type name and the walker emits
 /// `let p: P` against the flat struct `almide_rt_mod_P` → E0425
 /// (cross-module record bound in a loop).
-fn rename_bind_tys_in_stmts(stmts: &mut [IrStmt], map: &HashMap<String, Sym>) {
+fn rename_bind_tys_in_stmts(stmts: &mut [IrStmt], r: &TypeRename) {
     for s in stmts.iter_mut() {
         match &mut s.kind {
-            IrStmtKind::Bind { ty, .. } => *ty = rename_ty(ty, map),
-            IrStmtKind::BindDestructure { pattern, .. } => rename_pattern(pattern, map),
+            IrStmtKind::Bind { ty, .. } => *ty = rename_ty(ty, r.types),
+            IrStmtKind::BindDestructure { pattern, .. } => rename_pattern(pattern, r),
             _ => {}
         }
     }
@@ -318,8 +456,11 @@ fn rename_call_type_args(type_args: &mut [Ty], map: &HashMap<String, Sym>) {
 /// keys first so `m.Cfg` never clips `m.CfgSet`.
 fn rename_inline_rust_template(template: &mut String, map: &HashMap<String, Sym>) {
     if template.contains('.') {
+        // Only a dotted key is replaced textually: a bare one (`Option`, from
+        // the reserved-name qualification) is also the spelling of the Rust
+        // type every runtime template names.
         let mut keys: Vec<&String> = map.keys()
-            .filter(|k| template.contains(k.as_str()))
+            .filter(|k| k.contains('.') && template.contains(k.as_str()))
             .collect();
         keys.sort_by_key(|k| std::cmp::Reverse(k.len()));
         for k in keys {
@@ -332,17 +473,18 @@ fn rename_inline_rust_template(template: &mut String, map: &HashMap<String, Sym>
 /// plus the type-bearing fields `map_children` does NOT reach: a `Bind`
 /// statement's declared type, and a struct `Record { … }` literal's ctor name
 /// (re-pinned from the expr's now-mangled struct type).
-fn rename_expr(e: IrExpr, map: &HashMap<String, Sym>) -> IrExpr {
-    let mut e = e.map_children(&mut |c| rename_expr(c, map));
+fn rename_expr(e: IrExpr, r: &TypeRename) -> IrExpr {
+    let map = r.types;
+    let mut e = e.map_children(&mut |c| rename_expr(c, r));
     e.ty = rename_ty(&e.ty, map);
     match &mut e.kind {
-        IrExprKind::Block { stmts, .. } => rename_bind_tys_in_stmts(stmts, map),
-        IrExprKind::While { body, .. } => rename_bind_tys_in_stmts(body, map),
-        IrExprKind::ForIn { body, .. } => rename_bind_tys_in_stmts(body, map),
+        IrExprKind::Block { stmts, .. } => rename_bind_tys_in_stmts(stmts, r),
+        IrExprKind::While { body, .. } => rename_bind_tys_in_stmts(body, r),
+        IrExprKind::ForIn { body, .. } => rename_bind_tys_in_stmts(body, r),
         IrExprKind::Record { name: Some(n), .. } => {
             // A struct literal carries its (now-qualified) type name as the ctor
             // (`mod.Type`, pinned by lowering); mangle it to the flat struct name.
-            if let Some(nn) = map.get(n.as_str()) {
+            if let Some(nn) = r.ctors.get(n.as_str()) {
                 *n = *nn;
             }
         }
@@ -353,13 +495,13 @@ fn rename_expr(e: IrExpr, map: &HashMap<String, Sym>) -> IrExpr {
         // as the struct literal's ctor name is above. In tail position the
         // call is a `TailCall` (TailCallMarkPass) — the same target.
         IrExprKind::Call { target: CallTarget::Named { name }, type_args, .. } => {
-            if let Some(nn) = map.get(name.as_str()) {
+            if let Some(nn) = r.ctors.get(name.as_str()) {
                 *name = *nn;
             }
             rename_call_type_args(type_args, map)
         }
         IrExprKind::TailCall { target: CallTarget::Named { name }, .. } => {
-            if let Some(nn) = map.get(name.as_str()) {
+            if let Some(nn) = r.ctors.get(name.as_str()) {
                 *name = *nn;
             }
         }
@@ -374,7 +516,7 @@ fn rename_expr(e: IrExpr, map: &HashMap<String, Sym>) -> IrExpr {
         // E0308 (#1828's family).
         IrExprKind::Match { arms, .. } => {
             for arm in arms.iter_mut() {
-                rename_pattern(&mut arm.pattern, map);
+                rename_pattern(&mut arm.pattern, r);
             }
         }
         _ => {}
@@ -384,44 +526,44 @@ fn rename_expr(e: IrExpr, map: &HashMap<String, Sym>) -> IrExpr {
 
 /// Rename the struct name of every record pattern and opaque-newtype ctor
 /// pattern under `p` (nested positions included) through the flatten map.
-fn rename_pattern(p: &mut IrPattern, map: &HashMap<String, Sym>) {
+fn rename_pattern(p: &mut IrPattern, r: &TypeRename) {
     match p {
         IrPattern::RecordPattern { name, fields, .. } => {
-            if let Some(nn) = map.get(name.as_str()) {
+            if let Some(nn) = r.ctors.get(name.as_str()) {
                 *name = nn.as_str().to_string();
             }
             for f in fields.iter_mut() {
                 if let Some(inner) = &mut f.pattern {
-                    rename_pattern(inner, map);
+                    rename_pattern(inner, r);
                 }
             }
         }
         // An opaque newtype's ctor pattern names its struct the way its ctor
-        // call does (`self.Value(s)`, #1835); a variant case's bare name is
-        // never a map key.
+        // call does (`self.Value(s)`, #1835); a variant case's name is never
+        // a `ctors` key.
         IrPattern::Constructor { name, args } => {
-            if let Some(nn) = map.get(name.as_str()) {
+            if let Some(nn) = r.ctors.get(name.as_str()) {
                 *name = nn.as_str().to_string();
             }
             for e in args.iter_mut() {
-                rename_pattern(e, map);
+                rename_pattern(e, r);
             }
         }
         IrPattern::Tuple { elements } => {
             for e in elements.iter_mut() {
-                rename_pattern(e, map);
+                rename_pattern(e, r);
             }
         }
         IrPattern::List { elements, rest } => {
             for e in elements.iter_mut() {
-                rename_pattern(e, map);
+                rename_pattern(e, r);
             }
-            if let Some(r) = rest {
-                rename_pattern(r, map);
+            if let Some(rest) = rest {
+                rename_pattern(rest, r);
             }
         }
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner }
-        | IrPattern::As { inner, .. } => rename_pattern(inner, map),
+        | IrPattern::As { inner, .. } => rename_pattern(inner, r),
         IrPattern::Wildcard | IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::None => {}
     }
 }

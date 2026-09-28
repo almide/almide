@@ -307,8 +307,12 @@ fn resolve_import_canonical(path: &[Sym], module_name: Option<&str>, user_module
             let leaf = import_leaf_name(path);
             let suffix = path[1..].iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
             let fqn = module_name.map(|mod_name| format!("{}.{}", mod_name, suffix));
+            // A project module whose path is a stdlib module's name keeps
+            // its written `self.` key (#2864, `self_module_canonical`).
+            let spelled = format!("self.{}", suffix);
             canonical = match fqn {
                 Some(fqn) if user_modules.contains(&sym(&fqn)) => fqn,
+                _ if user_modules.contains(&sym(&spelled)) => spelled,
                 _ if user_modules.contains(&sym(&suffix)) => suffix,
                 _ => leaf,
             };

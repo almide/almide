@@ -136,8 +136,9 @@ pub struct RenderContext<'a> {
     /// tuple-struct construction, spelled by the struct's name — which after
     /// the #433 mangle is `almide_rt_self_Value` / `almide_rt_m_Token`
     /// (#1835), a spelling the reserved-prefix invariant on runtime calls
-    /// must not mistake for a helper.
-    pub newtype_ctors: std::rc::Rc<std::collections::HashSet<almide_base::intern::Sym>>,
+    /// must not mistake for a helper. Keyed to the WRAPPED type, which is the
+    /// newtype's string form in `${…}` (#2860).
+    pub newtype_ctors: std::rc::Rc<std::collections::HashMap<almide_base::intern::Sym, almide_lang::types::Ty>>,
     /// Error type `E` of the enclosing fn's declared return `Result[_, E]`,
     /// or `None` if the fn does not return a `Result`. The `!` (Unwrap)
     /// renderer compares a propagated source error against this: when they
@@ -148,7 +149,7 @@ pub struct RenderContext<'a> {
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, trace: false, ann: std::rc::Rc::new(CodegenAnnotations::default()), type_aliases: std::rc::Rc::new(std::collections::HashMap::new()), generic_types: std::rc::Rc::new(std::collections::HashSet::new()), minimal_generic_bounds: false, repr_c: false, repr_named_types: std::rc::Rc::new(std::collections::HashSet::new()), newtype_ctors: std::rc::Rc::new(std::collections::HashSet::new()), fn_err_ty: None }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, trace: false, ann: std::rc::Rc::new(CodegenAnnotations::default()), type_aliases: std::rc::Rc::new(std::collections::HashMap::new()), generic_types: std::rc::Rc::new(std::collections::HashSet::new()), minimal_generic_bounds: false, repr_c: false, repr_named_types: std::rc::Rc::new(std::collections::HashSet::new()), newtype_ctors: std::rc::Rc::new(std::collections::HashMap::new()), fn_err_ty: None }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
