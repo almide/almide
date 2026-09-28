@@ -54,7 +54,7 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
 /// Extracted from `render_binop`'s BinOp::{Mul,Add,Sub,Scale}Matrix arms
 /// (cog>30 decomposition, pattern 2, uniform-shaped arms grouped by a
 /// shared theme). Only ever called for those four ops.
-fn render_binop_matrix(ctx: &RenderContext, op: BinOp, left: &IrExpr, l: &str, r: &str) -> String {
+fn render_binop_matrix(ctx: &RenderContext, op: BinOp, (left, right): (&IrExpr, &IrExpr), l: &str, r: &str) -> String {
     match op {
         BinOp::MulMatrix => rc_cow_result_glue(
             ctx.templates.render_with("matrix_mul", None, &[], &[("left", l), ("right", r)])
@@ -73,11 +73,17 @@ fn render_binop_matrix(ctx: &RenderContext, op: BinOp, left: &IrExpr, l: &str, r
         ),
         BinOp::ScaleMatrix => {
             // Ensure matrix is first arg, scalar is second
-            let (mat, scalar) = if matches!(&left.ty, Ty::Matrix) {
-                (l, r)
+            let (mat, scalar, scalar_ty) = if matches!(&left.ty, Ty::Matrix) {
+                (l, r, &right.ty)
             } else {
-                (r, l)
+                (r, l, &left.ty)
             };
+            // `m * k` admits an `Int` scalar (the frontend's ScaleMatrix
+            // dispatch); the runtime scales by an f64. Convert it the way
+            // the wasm legs do (`int.to_float`), or rustc refuses the i64
+            // the checker accepted (#2894).
+            let scalar = if matches!(scalar_ty, Ty::Int) { format!("(({scalar}) as f64)") } else { scalar.to_string() };
+            let scalar = scalar.as_str();
             rc_cow_result_glue(
                 ctx.templates.render_with("matrix_scale", None, &[], &[("left", mat), ("right", scalar)])
                     .unwrap_or_else(|| format!("almide_rt_matrix_scale(&{}, {})", mat, scalar)),
@@ -159,7 +165,7 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
     // Type-dispatched operators
     match op {
         BinOp::MulMatrix | BinOp::AddMatrix | BinOp::SubMatrix | BinOp::ScaleMatrix =>
-            render_binop_matrix(ctx, op, left, l.as_str(), r.as_str()),
+            render_binop_matrix(ctx, op, (left, right), l.as_str(), r.as_str()),
         BinOp::Eq => {
             ctx.templates.render_with("eq_expr", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("_ == _"))
