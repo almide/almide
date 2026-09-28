@@ -389,9 +389,7 @@ pub fn almide_http_request_stream_impl(
     let pairs = header_pairs(headers);
     let u = http_prepare(method, url, &pairs)?;
     // Long read timeout — SSE responses can be quiet between events.
-    let stream = TcpStream::connect((u.host.as_str(), u.port)).map_err(|e| format!("connection failed: {}", e))?;
-    stream.set_read_timeout(client_read_timeout(120)).ok();
-    let route = AlmideHttpRoute { target: u.target.clone() };
+    let (stream, route) = http_client_open(&u, 120)?;
     let request = http_request_bytes(method, &u, &route, body, &pairs);
 
     let mut wrap = |s: &str| on_chunk(s.to_string());
@@ -481,6 +479,8 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
                 chunked = http_fields_chunked(&http_head_fields(&header_section));
                 acc.drain(..idx + 4);
                 headers_done = true;
+            } else if acc.len() > HTTP_MAX_HEAD_BYTES {
+                return Err(http_head_too_large());
             } else {
                 continue;
             }

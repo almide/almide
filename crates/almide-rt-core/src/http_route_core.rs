@@ -362,3 +362,76 @@ pub fn http_request_bytes(
     req.push_str(body);
     req.into_bytes()
 }
+
+// ── Limits (#2825) ──
+//
+// The calls that take no limits (get / request / *_status / *_bytes /
+// *_response / request_stream) bound the dial by the same
+// ALMIDE_HTTP_TIMEOUT_SECS that bounds their reads (default 30 s, Go's
+// Dialer default; 0 = none), and the buffered ones stop reading past
+// ALMIDE_HTTP_MAX_RESPONSE_BYTES (default 1 GiB of response as received;
+// 0 = no cap). A response head (every path, the call handle included) is
+// capped at 1 MiB, Go's MaxResponseHeaderBytes. There is no default total
+// deadline — none of curl, Go, Python, Node or reqwest sets one — `http.start`
+// with `total_ms` is the way to ask for one.
+
+/// The largest response head (status line + fields) any path accepts.
+pub const HTTP_MAX_HEAD_BYTES: usize = 1 << 20;
+
+/// The response size cap: 1 GiB unless ALMIDE_HTTP_MAX_RESPONSE_BYTES
+/// overrides it; `0` means no cap.
+pub fn client_max_response_bytes() -> Option<usize> {
+    match std::env::var("ALMIDE_HTTP_MAX_RESPONSE_BYTES").ok().and_then(|v| v.trim().parse::<usize>().ok()) {
+        Some(0) => None,
+        Some(n) => Some(n),
+        None => Some(1 << 30),
+    }
+}
+
+fn http_head_too_large() -> String {
+    format!("response head too large: more than {} bytes before the blank line", HTTP_MAX_HEAD_BYTES)
+}
+
+/// Resolve and dial `host:port`, each address in turn, every attempt bounded
+/// by `timeout()` (asked afresh per address, so a wall clock can clip it).
+fn http_dial(
+    host: &str,
+    port: u16,
+    timeout: &dyn Fn() -> Option<std::time::Duration>,
+) -> Result<TcpStream, std::io::Error> {
+    let addrs = std::net::ToSocketAddrs::to_socket_addrs(&(host, port))?;
+    let mut last: Option<std::io::Error> = None;
+    for addr in addrs {
+        let dialed = match timeout() {
+            Some(t) => TcpStream::connect_timeout(&addr, t),
+            None => TcpStream::connect(addr),
+        };
+        match dialed {
+            Ok(s) => return Ok(s),
+            Err(e) => last = Some(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, format!("no address for {}", host))))
+}
+
+/// The dial of every call that takes no limits: a connect timeout, and the read (and write) timeout `read_default_secs`, both
+/// overridable by ALMIDE_HTTP_TIMEOUT_SECS.
+fn http_client_open(u: &AlmideHttpUrl, read_default_secs: u64) -> Result<(TcpStream, AlmideHttpRoute), String> {
+    let connect_timeout = client_read_timeout(30);
+    let io_timeout = client_read_timeout(read_default_secs);
+    let (host, port) = (u.host.as_str(), u.port);
+    let s = http_dial(host, port, &|| connect_timeout).map_err(|e| {
+            match (e.kind(), connect_timeout) {
+                (std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock, Some(t)) => format!(
+                    "connection failed: timed out after {}s connecting to {}:{} (raise ALMIDE_HTTP_TIMEOUT_SECS; 0 = no timeout)",
+                    t.as_secs(),
+                    host,
+                    port
+                ),
+                _ => format!("connection failed: {}", e),
+            }
+        })?;
+    s.set_read_timeout(io_timeout).ok();
+    s.set_write_timeout(io_timeout).ok();
+    Ok((s, AlmideHttpRoute { target: u.target.clone() }))
+}
