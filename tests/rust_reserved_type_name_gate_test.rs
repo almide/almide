@@ -232,8 +232,12 @@ fn the_incumbent_leg_reprs_an_entry_record_named_like_every_builtin() {
         // The payload is a builtin the cell does not declare: `type Bool`
         // carries an Int, every other cell a Bool.
         let (field, ty, value) = if *name == "Bool" { ("n", "Int", "7") } else { ("ok", "Bool", "true") };
+        // `main`'s `-> Unit` names the cell's record when the cell declares
+        // `Unit` (§4.5, #2880), so that main returns the record; an effect
+        // main may declare any Ok type and the payload is discarded.
+        let tail = if *name == "Unit" { "  f\n" } else { "" };
         let program = format!(
-            "type {name} = {{ {field}: {ty} }}\n\neffect fn main() -> Unit = {{\n  let f = {name} {{ {field}: {value} }}\n  println(\"${{f}}\")\n}}\n"
+            "type {name} = {{ {field}: {ty} }}\n\neffect fn main() -> Unit = {{\n  let f = {name} {{ {field}: {value} }}\n  println(\"${{f}}\")\n{tail}}}\n"
         );
         let want = format!("{name} {{ {field}: {value} }}\n");
         let root = tempfile::tempdir().expect("tempdir");
@@ -244,11 +248,6 @@ fn the_incumbent_leg_reprs_an_entry_record_named_like_every_builtin() {
             ("native", &["run", "t.almd"], false),
         ];
         for (leg, args, incumbent) in legs {
-            // #2880: `main`'s own `-> Unit` names the cell's record there, and
-            // native codegen emits it as main's Ok type.
-            if leg == "native" && *name == "Unit" {
-                continue;
-            }
             let mut cmd = Command::new(almide());
             cmd.current_dir(root.path()).args(args);
             if incumbent {
