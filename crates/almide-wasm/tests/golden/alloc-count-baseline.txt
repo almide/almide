@@ -126,6 +126,7 @@
 23	8	247	23	spec/wasm_cross/effect_assign_unwrap.almd
 36	26	481	36	spec/wasm_cross/effect_branch_keeps_result.almd
 10001	9995	2160064	10001	spec/wasm_cross/effect_call_arg_credit.almd
+271	240	2898	271	spec/wasm_cross/effect_dispatcher_many_arms.almd
 19	14	253	15	spec/wasm_cross/effect_fn_value.almd
 102	65	1038	90	spec/wasm_cross/effect_fn_value_slot_family.almd
 2	0	36	0	spec/wasm_cross/effect_main_guard_err.almd

@@ -225,6 +225,7 @@ spec/wasm_cross/edge_string_unicode.almd
 spec/wasm_cross/effect_assign_unwrap.almd
 spec/wasm_cross/effect_branch_keeps_result.almd
 spec/wasm_cross/effect_call_arg_credit.almd
+spec/wasm_cross/effect_dispatcher_many_arms.almd
 spec/wasm_cross/effect_fn_value.almd
 spec/wasm_cross/effect_fn_value_slot_family.almd
 spec/wasm_cross/effect_main_guard_err.almd
