@@ -144,11 +144,52 @@ fn qualify_rust_reserved_type_names(program: &mut IrProgram, origins: &HashMap<S
     if origins.is_empty() {
         return false;
     }
-    let map: HashMap<String, Sym> = origins.iter()
-        .map(|(name, origin)| (name.clone(), sym(&format!("{}.{}", origin, name))))
+    // A variant case may share the reserved name (`type Box[T] = | Box(T)`):
+    // its ctor call and pattern spell the CASE, never the type, so only a
+    // record's literal/pattern and an opaque newtype's ctor are renamed. A
+    // record or newtype whose name some variant case also spells is left as it
+    // was — a ctor spelling it could not tell apart is worse than the clash.
+    let case_names: HashSet<&str> = program.type_decls.iter()
+        .filter_map(|td| match &td.kind {
+            IrTypeDeclKind::Variant { cases, .. } => Some(cases.iter().map(|c| c.name.as_str())),
+            _ => None,
+        })
+        .flatten()
         .collect();
-    rename_program_types(program, &map);
+    let mut types: HashMap<String, Sym> = HashMap::new();
+    let mut ctors: HashMap<String, Sym> = HashMap::new();
+    for (name, origin) in origins {
+        let Some(td) = program.type_decls.iter().find(|td| td.name.as_str() == name) else { continue };
+        let spells_its_ctor = match &td.kind {
+            IrTypeDeclKind::Record { .. } => true,
+            IrTypeDeclKind::Alias { .. } => matches!(td.visibility, IrVisibility::Mod | IrVisibility::Private),
+            IrTypeDeclKind::Variant { .. } => false,
+        };
+        if spells_its_ctor && case_names.contains(name.as_str()) {
+            continue;
+        }
+        let qualified = sym(&format!("{}.{}", origin, name));
+        types.insert(name.clone(), qualified);
+        if spells_its_ctor {
+            ctors.insert(name.clone(), qualified);
+        }
+    }
+    if types.is_empty() {
+        return false;
+    }
+    rename_program_types(program, &TypeRename { types: &types, ctors: &ctors });
     true
+}
+
+/// A rename of type names, split by the position a name occurs in. `types`
+/// renames the declarations and every `Ty` reference; `ctors` renames the
+/// positions that spell a CONSTRUCTOR — a record literal or pattern, an opaque
+/// newtype's ctor call or pattern, the ctor-keyed annotations. The flatten
+/// mangle's keys are dotted and so never a variant case's name, and there the
+/// two maps are the same map; a bare reserved name can be a case's too.
+struct TypeRename<'a> {
+    types: &'a HashMap<String, Sym>,
+    ctors: &'a HashMap<String, Sym>,
 }
 
 /// Per-`td` body of `IrLinkFlattenPass::run`'s type-decl merge loop,
@@ -185,17 +226,18 @@ fn mangle_qualified_type_names(program: &mut IrProgram) {
                 .insert(nn.as_str().to_string(), td.declared_name().to_string());
         }
     }
-    rename_program_types(program, &map);
+    rename_program_types(program, &TypeRename { types: &map, ctors: &map });
     // Twin decls now share one canonical name — keep the first, drop the rest
     // (identical shapes; a second `pub struct Msg` would be E0428).
     let mut seen: std::collections::HashSet<Sym> = std::collections::HashSet::new();
     program.type_decls.retain(|td| seen.insert(td.name));
 }
 
-/// Rename every declaration named in `map`, and every carrier of a type name
+/// Rename every declaration named in `r`, and every carrier of a type name
 /// that can reference one: decl bodies, fn signatures and bodies, top-lets,
 /// the var and def tables, and the name-keyed codegen annotations.
-fn rename_program_types(program: &mut IrProgram, map: &HashMap<String, Sym>) {
+fn rename_program_types(program: &mut IrProgram, r: &TypeRename) {
+    let map = r.types;
     for td in &mut program.type_decls {
         if let Some(nn) = map.get(td.name.as_str()) {
             td.name = *nn;
@@ -208,12 +250,12 @@ fn rename_program_types(program: &mut IrProgram, map: &HashMap<String, Sym>) {
         }
         f.ret_ty = rename_ty(&f.ret_ty, map);
         let body = std::mem::replace(&mut f.body, IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None });
-        f.body = rename_expr(body, map);
+        f.body = rename_expr(body, r);
     }
     for tl in &mut program.top_lets {
         tl.ty = rename_ty(&tl.ty, map);
         let v = std::mem::replace(&mut tl.value, IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None });
-        tl.value = rename_expr(v, map);
+        tl.value = rename_expr(v, r);
     }
     for v in &mut program.var_table.entries {
         v.ty = rename_ty(&v.ty, map);
@@ -221,7 +263,7 @@ fn rename_program_types(program: &mut IrProgram, map: &HashMap<String, Sym>) {
     for d in &mut program.def_table.entries {
         d.ty = rename_ty(&d.ty, map);
     }
-    remap_codegen_annotations(&mut program.codegen_annotations, map);
+    remap_codegen_annotations(&mut program.codegen_annotations, r);
 }
 
 /// Reference-graph "type name → its group's canonical name" map-building
@@ -275,18 +317,22 @@ fn build_type_rename_map(type_decls: &[IrTypeDecl]) -> HashMap<String, Sym> {
 /// pre-flatten `mod.Type` — so a flattened module type's field DEFAULTS
 /// were silently skipped (almai: `Message { role, content }` missing its
 /// defaulted `tool_calls` → generated-Rust E0063).
-fn remap_codegen_annotations(ann: &mut CodegenAnnotations, map: &HashMap<String, Sym>) {
-    let remap = |n: &str| map.get(n).map(|s| s.as_str().to_string()).unwrap_or_else(|| n.to_string());
+fn remap_codegen_annotations(ann: &mut CodegenAnnotations, r: &TypeRename) {
+    let remap_in = |m: &HashMap<String, Sym>, n: &str| m.get(n).map(|s| s.as_str().to_string()).unwrap_or_else(|| n.to_string());
+    // Type-named keys follow `types`; ctor-named keys (a record's literal name,
+    // a variant case's name) follow `ctors`.
+    let remap = |n: &str| remap_in(r.types, n);
+    let remap_ctor = |n: &str| remap_in(r.ctors, n);
     // The default EXPRESSION is spliced into every construction site, so the
     // type names inside it need the same mangle as a fn body (#2518: a
     // `Sampling {}` default from another module rendered as a bare
     // `Sampling` against the flat `almide_rt_mod_Sampling` → E0422).
     ann.default_fields = std::mem::take(&mut ann.default_fields).into_iter()
-        .map(|((c, f), e)| ((remap(&c), f), rename_expr(e, map))).collect();
+        .map(|((c, f), e)| ((remap_ctor(&c), f), rename_expr(e, r))).collect();
     ann.boxed_fields = std::mem::take(&mut ann.boxed_fields).into_iter()
-        .map(|(c, f)| (remap(&c), f)).collect();
+        .map(|(c, f)| (remap_ctor(&c), f)).collect();
     ann.ctor_to_enum = std::mem::take(&mut ann.ctor_to_enum).into_iter()
-        .map(|(c, e)| (remap(&c), remap(&e))).collect();
+        .map(|(c, e)| (remap_ctor(&c), remap(&e))).collect();
     // #844: recursive_enums is keyed by the PRE-flatten qualified name
     // (`mod.Type`). Without remapping it, the enum DECL renderer (which checks
     // the post-flatten `almide_rt_mod_Type` name) stops seeing the type as
@@ -362,11 +408,11 @@ fn rename_ty(ty: &Ty, map: &HashMap<String, Sym>) -> Ty {
 /// a `while`/`for` keeps the unmangled type name and the walker emits
 /// `let p: P` against the flat struct `almide_rt_mod_P` → E0425
 /// (cross-module record bound in a loop).
-fn rename_bind_tys_in_stmts(stmts: &mut [IrStmt], map: &HashMap<String, Sym>) {
+fn rename_bind_tys_in_stmts(stmts: &mut [IrStmt], r: &TypeRename) {
     for s in stmts.iter_mut() {
         match &mut s.kind {
-            IrStmtKind::Bind { ty, .. } => *ty = rename_ty(ty, map),
-            IrStmtKind::BindDestructure { pattern, .. } => rename_pattern(pattern, map),
+            IrStmtKind::Bind { ty, .. } => *ty = rename_ty(ty, r.types),
+            IrStmtKind::BindDestructure { pattern, .. } => rename_pattern(pattern, r),
             _ => {}
         }
     }
@@ -423,17 +469,18 @@ fn rename_inline_rust_template(template: &mut String, map: &HashMap<String, Sym>
 /// plus the type-bearing fields `map_children` does NOT reach: a `Bind`
 /// statement's declared type, and a struct `Record { … }` literal's ctor name
 /// (re-pinned from the expr's now-mangled struct type).
-fn rename_expr(e: IrExpr, map: &HashMap<String, Sym>) -> IrExpr {
-    let mut e = e.map_children(&mut |c| rename_expr(c, map));
+fn rename_expr(e: IrExpr, r: &TypeRename) -> IrExpr {
+    let map = r.types;
+    let mut e = e.map_children(&mut |c| rename_expr(c, r));
     e.ty = rename_ty(&e.ty, map);
     match &mut e.kind {
-        IrExprKind::Block { stmts, .. } => rename_bind_tys_in_stmts(stmts, map),
-        IrExprKind::While { body, .. } => rename_bind_tys_in_stmts(body, map),
-        IrExprKind::ForIn { body, .. } => rename_bind_tys_in_stmts(body, map),
+        IrExprKind::Block { stmts, .. } => rename_bind_tys_in_stmts(stmts, r),
+        IrExprKind::While { body, .. } => rename_bind_tys_in_stmts(body, r),
+        IrExprKind::ForIn { body, .. } => rename_bind_tys_in_stmts(body, r),
         IrExprKind::Record { name: Some(n), .. } => {
             // A struct literal carries its (now-qualified) type name as the ctor
             // (`mod.Type`, pinned by lowering); mangle it to the flat struct name.
-            if let Some(nn) = map.get(n.as_str()) {
+            if let Some(nn) = r.ctors.get(n.as_str()) {
                 *n = *nn;
             }
         }
@@ -444,13 +491,13 @@ fn rename_expr(e: IrExpr, map: &HashMap<String, Sym>) -> IrExpr {
         // as the struct literal's ctor name is above. In tail position the
         // call is a `TailCall` (TailCallMarkPass) — the same target.
         IrExprKind::Call { target: CallTarget::Named { name }, type_args, .. } => {
-            if let Some(nn) = map.get(name.as_str()) {
+            if let Some(nn) = r.ctors.get(name.as_str()) {
                 *name = *nn;
             }
             rename_call_type_args(type_args, map)
         }
         IrExprKind::TailCall { target: CallTarget::Named { name }, .. } => {
-            if let Some(nn) = map.get(name.as_str()) {
+            if let Some(nn) = r.ctors.get(name.as_str()) {
                 *name = *nn;
             }
         }
@@ -465,7 +512,7 @@ fn rename_expr(e: IrExpr, map: &HashMap<String, Sym>) -> IrExpr {
         // E0308 (#1828's family).
         IrExprKind::Match { arms, .. } => {
             for arm in arms.iter_mut() {
-                rename_pattern(&mut arm.pattern, map);
+                rename_pattern(&mut arm.pattern, r);
             }
         }
         _ => {}
@@ -475,44 +522,44 @@ fn rename_expr(e: IrExpr, map: &HashMap<String, Sym>) -> IrExpr {
 
 /// Rename the struct name of every record pattern and opaque-newtype ctor
 /// pattern under `p` (nested positions included) through the flatten map.
-fn rename_pattern(p: &mut IrPattern, map: &HashMap<String, Sym>) {
+fn rename_pattern(p: &mut IrPattern, r: &TypeRename) {
     match p {
         IrPattern::RecordPattern { name, fields, .. } => {
-            if let Some(nn) = map.get(name.as_str()) {
+            if let Some(nn) = r.ctors.get(name.as_str()) {
                 *name = nn.as_str().to_string();
             }
             for f in fields.iter_mut() {
                 if let Some(inner) = &mut f.pattern {
-                    rename_pattern(inner, map);
+                    rename_pattern(inner, r);
                 }
             }
         }
         // An opaque newtype's ctor pattern names its struct the way its ctor
-        // call does (`self.Value(s)`, #1835); a variant case's bare name is
-        // never a map key.
+        // call does (`self.Value(s)`, #1835); a variant case's name is never
+        // a `ctors` key.
         IrPattern::Constructor { name, args } => {
-            if let Some(nn) = map.get(name.as_str()) {
+            if let Some(nn) = r.ctors.get(name.as_str()) {
                 *name = nn.as_str().to_string();
             }
             for e in args.iter_mut() {
-                rename_pattern(e, map);
+                rename_pattern(e, r);
             }
         }
         IrPattern::Tuple { elements } => {
             for e in elements.iter_mut() {
-                rename_pattern(e, map);
+                rename_pattern(e, r);
             }
         }
         IrPattern::List { elements, rest } => {
             for e in elements.iter_mut() {
-                rename_pattern(e, map);
+                rename_pattern(e, r);
             }
-            if let Some(r) = rest {
-                rename_pattern(r, map);
+            if let Some(rest) = rest {
+                rename_pattern(rest, r);
             }
         }
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner }
-        | IrPattern::As { inner, .. } => rename_pattern(inner, map),
+        | IrPattern::As { inner, .. } => rename_pattern(inner, r),
         IrPattern::Wildcard | IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::None => {}
     }
 }
