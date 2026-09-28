@@ -170,6 +170,13 @@ spec/wasm_cross/list_rest_pattern.almd :: main
 spec/wasm_cross/list_rest_pattern.almd :: shape
 spec/wasm_cross/list_rest_pattern.almd :: tail_of
 spec/wasm_cross/list_rest_pattern.almd :: total
+# (2026-09-29, C-332/#2748) the same division for the generic list-rest binds
+# instanced at Int and String: the incumbent brick walls the list-rest bind,
+# the STRUCTURAL leg (the default) lowers the instances.
+spec/wasm_cross/generic_pattern_binds_instanced.almd :: first__Int
+spec/wasm_cross/generic_pattern_binds_instanced.almd :: first__String
+spec/wasm_cross/generic_pattern_binds_instanced.almd :: tail_len__Int
+spec/wasm_cross/generic_pattern_binds_instanced.almd :: tail_len__String
 # (2026-09-02, C-333/#1461) as-patterns: the same incumbent division as the
 # list-rest rows above.
 spec/lang/as_pattern_test.almd :: __test_almd_as over option carriers
