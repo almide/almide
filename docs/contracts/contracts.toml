@@ -2801,6 +2801,7 @@ evidence  = [
   { path = "spec/stdlib/fs_streaming_test.almd", class = "fixture" },
   { path = "spec/stdlib/fs_fold_lines_range_test.almd", class = "fixture" },
   { path = "spec/stdlib/fs_fold_lines_chunked_test.almd", class = "fixture" },
+  { path = "spec/wasm_cross/line_endings_bare_cr.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-221"
@@ -2861,6 +2862,7 @@ since     = "0.56.2"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_read_lines.almd", class = "fixture" },
+  { path = "spec/wasm_cross/line_endings_bare_cr.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-226"
