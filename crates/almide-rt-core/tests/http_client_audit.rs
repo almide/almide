@@ -109,6 +109,62 @@ fn untouched_listener() -> (u16, impl FnOnce(Duration) -> bool) {
     })
 }
 
+// ── child processes (environment-dependent cases) ──
+
+/// Run `child_request` in a fresh process with `env` (and every proxy /
+/// trust variable of the parent removed). `spec` = `kind|method|url[|Header: value]`.
+fn in_child(spec: &str, env: &[(&str, &str)]) -> String {
+    let mut cmd = Command::new(std::env::current_exe().unwrap());
+    cmd.args(["--exact", "child_request", "--nocapture", "--test-threads=1"]);
+    for v in [
+        "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy", "NO_PROXY",
+        "no_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR", "ALMIDE_HTTP_TIMEOUT_SECS", "ALMIDE_HTTP_MAX_RESPONSE_BYTES",
+        "REQUEST_METHOD",
+    ] {
+        cmd.env_remove(v);
+    }
+    cmd.env("ALMIDE_AUDIT_CHILD", spec);
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let out = cmd.output().expect("run child");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    stdout
+        .lines()
+        .find_map(|l| l.split_once("RESULT:").map(|(_, r)| r))
+        .map(str::to_string)
+        .unwrap_or_else(|| panic!("child printed no RESULT line\nstdout:\n{stdout}\nstderr:\n{}", String::from_utf8_lossy(&out.stderr)))
+}
+
+/// The child side: perform the request `ALMIDE_AUDIT_CHILD` describes and
+/// print `RESULT:ok <status> <body>` or `RESULT:err <message>`. A no-op in
+/// an ordinary test run.
+#[test]
+fn child_request() {
+    let Ok(spec) = std::env::var("ALMIDE_AUDIT_CHILD") else { return };
+    let parts: Vec<&str> = spec.splitn(4, '|').collect();
+    let (kind, method, url) = (parts[0], parts[1], parts[2]);
+    let headers: Vec<(String, String)> = parts
+        .get(3)
+        .and_then(|h| h.split_once(": "))
+        .map(|(k, v)| vec![(k.to_string(), v.to_string())])
+        .unwrap_or_default();
+    let started = Instant::now();
+    let result = match kind {
+        "response" => client::request_response(method, url, "", &headers).map(|(c, _, b)| format!("{c} {b}")),
+        "bytes" => client::request_bytes(method, url, "", &headers).map(|b| format!("0 {}", String::from_utf8_lossy(&b))),
+        "start" => client::http_call_spawn(method, url, "", headers, 10_000, 0)
+            .and_then(|sh| client::http_call_wait(&sh))
+            .map(|(c, _, b)| format!("{c} {b}")),
+        other => panic!("unknown child kind {other}"),
+    };
+    let secs = started.elapsed().as_secs_f64();
+    match result {
+        Ok(s) => println!("RESULT:ok {s}"),
+        Err(e) => println!("RESULT:err {e} [after {secs:.1}s]"),
+    }
+}
+
 // ── #2821: the URL ──
 
 #[test]
@@ -295,4 +351,37 @@ fn a_100_continue_is_skipped_for_the_final_response() {
     let sh = client::http_call_spawn("GET", &format!("http://127.0.0.1:{port}/"), "", vec![], 5000, 0).unwrap();
     let r = client::http_call_wait(&sh).unwrap();
     assert_eq!((r.0, r.2.as_str()), (200, "ok"));
+}
+
+// ── #2825: limits ──
+
+#[test]
+fn the_connect_timeout_follows_almide_http_timeout_secs() {
+    // 10.255.255.1 is non-routable: the SYN goes unanswered, so only a
+    // connect timeout ends the dial (reqwest's connect_timeout test uses the
+    // same address). A network that answers "unreachable" at once proves
+    // nothing either way, so that outcome is reported and not judged.
+    let t = Instant::now();
+    let out = in_child("response|GET|http://10.255.255.1:81/", &[("ALMIDE_HTTP_TIMEOUT_SECS", "2")]);
+    let secs = t.elapsed().as_secs_f64();
+    if out.starts_with("err") && !out.contains("timed out") && secs < 1.5 {
+        eprintln!("the network refused 10.255.255.1 at once ({out}); the timeout is not observable here");
+        return;
+    }
+    assert!(secs < 15.0, "the dial ran {secs:.1}s past a 2 s connect timeout: {out}");
+    assert!(out.contains("connection failed: timed out after 2s connecting to 10.255.255.1:81"), "{out}");
+    assert!(out.contains("ALMIDE_HTTP_TIMEOUT_SECS"), "{out}");
+}
+
+#[test]
+fn the_response_size_is_capped() {
+    let big = format!("HTTP/1.1 200 OK\r\nContent-Length: 5000\r\n\r\n{}", "x".repeat(5000));
+    let (port, _rx) = origin(big.as_bytes());
+    let out = in_child(&format!("response|GET|http://127.0.0.1:{port}/"), &[("ALMIDE_HTTP_MAX_RESPONSE_BYTES", "1000")]);
+    assert!(out.starts_with("err response too large: more than 1000 bytes"), "{out}");
+    assert!(out.contains("ALMIDE_HTTP_MAX_RESPONSE_BYTES"), "{out}");
+    // Under the cap it is answered whole.
+    let (port, _rx) = origin(big.as_bytes());
+    let out = in_child(&format!("bytes|GET|http://127.0.0.1:{port}/"), &[("ALMIDE_HTTP_MAX_RESPONSE_BYTES", "10000")]);
+    assert_eq!(out, format!("ok 0 {}", "x".repeat(5000)));
 }

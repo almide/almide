@@ -49,14 +49,23 @@ pub fn read_error_msg(e: &std::io::Error) -> String {
 /// Read a full `Connection: close` HTTP response, tolerating a peer that
 /// closes without TLS close_notify (#1592). A read error after a
 /// SYNTACTICALLY COMPLETE response keeps the data; before completeness it
-/// still propagates — a truncated body is never silently returned.
-pub fn read_response_tolerant(stream: &mut impl Read) -> Result<Vec<u8>, String> {
+/// still propagates — a truncated body is never silently returned. More than
+/// `max` bytes is an error naming the cap (#2825).
+pub fn read_response_tolerant(stream: &mut impl Read, max: Option<usize>) -> Result<Vec<u8>, String> {
     let mut response = Vec::new();
     let mut buf = [0u8; 8192];
     loop {
         match stream.read(&mut buf) {
             Ok(0) => break,
-            Ok(n) => response.extend_from_slice(&buf[..n]),
+            Ok(n) => {
+                response.extend_from_slice(&buf[..n]);
+                if let Some(max) = max.filter(|m| response.len() > *m) {
+                    return Err(format!(
+                        "response too large: more than {} bytes (raise ALMIDE_HTTP_MAX_RESPONSE_BYTES; 0 = no limit)",
+                        max
+                    ));
+                }
+            }
             Err(e) => {
                 if response_is_complete(&response) {
                     break;
@@ -248,7 +257,7 @@ pub fn http_parse_response(response: &[u8]) -> Result<HttpRawResponse, String> {
 /// Write the prepared request and read the whole response.
 pub fn http_exchange_raw(stream: &mut (impl Read + Write), request: &[u8]) -> Result<Vec<u8>, String> {
     stream.write_all(request).map_err(|e| format!("write failed: {}", e))?;
-    read_response_tolerant(stream)
+    read_response_tolerant(stream, client_max_response_bytes())
 }
 
 /// The one buffered client every shape projects: prepare (URL, method,
@@ -261,8 +270,7 @@ fn http_request_raw(
     headers: &[(String, String)],
 ) -> Result<HttpRawResponse, String> {
     let u = http_prepare(method, url, headers)?;
-    let stream = http_client_connect(&u.host, u.port)?;
-    let route = AlmideHttpRoute { target: u.target.clone() };
+    let (stream, route) = http_client_open(&u, 30)?;
     let request = http_request_bytes(method, &u, &route, body, headers);
     let response = if u.https {
         #[cfg(not(target_arch = "wasm32"))]
@@ -280,14 +288,6 @@ fn http_request_raw(
         http_exchange_raw(&mut stream, &request)?
     };
     http_parse_response(&response)
-}
-
-/// Connect (with the 30 s default read timeout) — the one dial every
-/// client shape shares.
-fn http_client_connect(host: &str, port: u16) -> Result<TcpStream, String> {
-    let stream = TcpStream::connect((host, port)).map_err(|e| format!("connection failed: {}", e))?;
-    stream.set_read_timeout(client_read_timeout(30)).ok();
-    Ok(stream)
 }
 
 /// The full-response client (#1791): `(status_code, headers, body)` for ANY
