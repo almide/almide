@@ -81,7 +81,9 @@ impl Checker {
         // #2653: `let x: T = f()` where `f()` yields `Result[T, _]` — the
         // missing `!`, said the way E005 says it for `g(f())`.
         let unwrap = let_call_unwrap(c.fix_hint.as_ref(), &exp, &act);
+        let clash = builtin_named_decl_clash(&exp, &act);
         let hint = match unwrap.map(|_| unwrap_first_hint(&act))
+            .or_else(|| clash.as_deref().map(builtin_named_decl_hint))
             .or_else(|| fallible_callback_shape_hint(&exp, &act))
             .or_else(|| arity_shape_hint(&exp, &act))
         {
@@ -92,7 +94,9 @@ impl Checker {
         // statement (assignment / lone `let`) slips into a position expected to
         // produce a value. dojo data shows this is the top E001 pattern for both
         // 70b and 8b.
-        let try_snippet = unit_leak_snippet(&c.context, &exp, &act, c.fix_hint.as_ref());
+        // Not when the two sides only share a name: the body is no leak, the
+        // declared type is the file's own.
+        let try_snippet = unit_leak_snippet(&c.context, &exp, &act, c.fix_hint.as_ref()).filter(|_| clash.is_none());
         // Temporarily swap in the constraint's own span so the error is reported
         // at the call site where the constraint was introduced, not at wherever
         // checking happened to end up.
@@ -524,7 +528,44 @@ fn mismatch_message(context: &str, exp: &Ty, act: &Ty) -> String {
                 thunks auto-wrap pure values; map mappers are \
                 effectful by contract and do not.)".to_string();
     }
+    if builtin_named_decl_clash(exp, act).is_some() {
+        let side = |t: &Ty| match declared_builtin_named(t) {
+            Some(n) => format!("{n} (the declared `type {n}`)"),
+            None => format!("{} (the builtin)", t.display()),
+        };
+        return format!("type mismatch in {}: expected {} but got {}", context, side(exp), side(act));
+    }
     format!("type mismatch in {}: expected {} but got {}", context, exp.display(), act.display())
+}
+
+/// The name of a type declared under a builtin's bare name (`type Unit = { .. }`
+/// is `Ty::Named("Unit")`, a module's `m.Unit`), or `None`.
+pub(super) fn declared_builtin_named(t: &Ty) -> Option<String> {
+    use crate::canonicalize::resolve::{builtin_type_head, TypeSpelling};
+    let Ty::Named(n, args) = t else { return None };
+    let base = n.as_str().rsplit('.').next().unwrap_or(n.as_str());
+    (args.is_empty() && builtin_type_head(base, TypeSpelling::Bare).is_some()).then(|| base.to_string())
+}
+
+/// #2880: the two sides of a mismatch print alike because one is a type the
+/// file declares under a builtin's bare name and the other is that builtin
+/// (`expected Unit but got Unit`). `Some(name)` for that shape.
+fn builtin_named_decl_clash(exp: &Ty, act: &Ty) -> Option<String> {
+    match (declared_builtin_named(exp), declared_builtin_named(act)) {
+        (Some(n), None) if act.display() == n => Some(n),
+        (None, Some(n)) if exp.display() == n => Some(n),
+        _ => None,
+    }
+}
+
+/// The hint for [`builtin_named_decl_clash`]: where the builtin went.
+pub(super) fn builtin_named_decl_hint(name: &str) -> String {
+    format!(
+        "`{name}` here is a type declared under the builtin's name, not the builtin `{name}`. \
+         In the file that declares it, the bare `{name}` names that type in every position, \
+         signatures included (module-system §4.5), so the builtin cannot be written there: \
+         rename the declared type, or declare it in its own module and write it qualified"
+    )
 }
 
 /// Produce a `try:` snippet for the "Unit leak" E001 pattern — the top
