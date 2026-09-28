@@ -13,6 +13,7 @@
 >
 > **状態**: 実験は完了、次の一手は未着手(§7)。成果物は develop の `research/` 配下(PR #2775)、
 > 生の実行データはリポジトリ外 `almide-docs-archive/law-spec-runs-2026-09-27/`。
+> **設計**: [law-proofs-design](law-proofs-design.md)(この実測を受けた証明層の設計)。
 > **兄弟文書**: [behavioral-contract](../active/behavioral-contract.md)(上位の設計)、
 > [compile-time-contracts](compile-time-contracts.md)(`where` 事前条件、決定不能なら実行時検査へ落とす)。
 
