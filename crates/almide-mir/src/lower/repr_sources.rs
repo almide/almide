@@ -436,8 +436,8 @@ fn emit_variant_repr_field(
                 }
                 Ty::Named(rn, _) if scalar_rec_names.contains(rn.as_str()) => {
                     // A scalar-record ctor field — compose the record's own generated repr.
-                    let rn_s = rn.as_str();
-                    let rn_fn = drop_fn_ident(rn_s);
+                    let rn_fn = drop_fn_ident(rn.as_str());
+                    let rn_s = generated_type_spelling(rn.as_str());
                     out.push_str(&format!(
                         "    let v{i}: {rn_s} = prim.load_handle(h + {off})\n    let f{i} = __repr_rec_{rn_fn}(v{i})\n"
                     ));
@@ -471,7 +471,7 @@ fn emit_variant_repr_field(
                     let key = repr_inst_ident(n.as_str(), args);
                     let spell = format!(
                         "{}[{}]",
-                        n.as_str(),
+                        generated_type_spelling(n.as_str()),
                         args.iter()
                             .map(|a| repr_ty_spelling(a).unwrap_or_else(|| "Int".to_string()))
                             .collect::<Vec<_>>()
@@ -485,6 +485,7 @@ fn emit_variant_repr_field(
                     // an emittable nested variant (the fixpoint admitted it)
                     let fv = variant_field_name(ty, names).expect("fixpoint-admitted");
                     let fv_fn = drop_fn_ident(&fv);
+                    let fv = generated_type_spelling(&fv);
                     out.push_str(&format!(
                         "    let v{i}: {fv} = prim.load_handle(h + {off})\n    let f{i} = __repr_{fv_fn}(v{i})\n"
                     ));

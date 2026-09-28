@@ -366,6 +366,20 @@ pub fn drop_fn_ident(type_name: &str) -> String {
     type_name.replace('.', "_")
 }
 
+/// How generated helper source SPELLS a declared type in a type position — `drop_fn_ident`'s
+/// twin for the annotation, which keeps the IR name for the fn identifier. In generated source
+/// every bare builtin type name is the builtin (#2870, `parse_with_generated_or_wall`), so an
+/// entry-program type declared under a builtin's name (`type Int = { .. }`, IR name `Int`) is
+/// spelled through the entry program's scope, `self.Int`, which only that declaration answers.
+/// Every other name is its IR name: a module's type is already qualified (`self.float.Float`),
+/// and no other bare name is a builtin's.
+pub fn generated_type_spelling(type_name: &str) -> String {
+    match almide_frontend::canonicalize::resolve::generated_builtin_spelling(type_name) {
+        Some(_) => format!("{}.{type_name}", almide_lang::stdlib_info::ROOT_TYPE_SCOPE),
+        None => type_name.to_string(),
+    }
+}
+
 /// [`lower_function_all`] WITH the program's record-layout registry threaded in —
 /// the entry the real pipeline (render_program) uses so a `Ty::Named` record
 /// resolves its fields (and `r.x` materializes). The plain [`lower_function_all`]

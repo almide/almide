@@ -487,8 +487,9 @@ pub fn generate_variant_pair_result_sources(
                 );
             }
             if rich.contains(name) || rich_recs.contains(name) {
+                let spelled = generated_type_spelling(name);
                 format!(
-                    "    let s{off}: {name} = prim.load_handle(h + {off})\n    __drop_{ident}(s{off})\n"
+                    "    let s{off}: {spelled} = prim.load_handle(h + {off})\n    __drop_{ident}(s{off})\n"
                 )
             } else {
                 format!("    prim.rc_dec(prim.load32(h + {off}))\n")
@@ -622,8 +623,9 @@ pub fn generate_closure_env_rich_sources(
             format!("__drop_caplist_{fnid}")
         };
         let kw = if k == 0 { "if" } else { "else if" };
+        let spelled = generated_type_spelling(n);
         out.push_str(&format!(
-            "{kw} tag == {} then {{ let l{k}: List[{n}] = prim.load_handle(wh + 20)\n      {callee}(l{k}) }}\n    ",
+            "{kw} tag == {} then {{ let l{k}: List[{spelled}] = prim.load_handle(wh + 20)\n      {callee}(l{k}) }}\n    ",
             rich_env_tag(n)
         ));
     }
@@ -632,11 +634,12 @@ pub fn generate_closure_env_rich_sources(
     // the cell block.
     for (k, (sfx, n)) in cell_entries.iter().enumerate() {
         let kw = if entries.is_empty() && k == 0 { "if" } else { "else if" };
+        let spelled = generated_type_spelling(n);
         out.push_str(&format!(
             "{kw} tag == {} then {{\n      \
                let ch{k} = prim.load64(wh + 20)\n      \
                if prim.load32(ch{k} + 0) == 1 then {{\n        \
-                 let m{k}: Map[String, {n}] = prim.load_handle(ch{k} + 12)\n        \
+                 let m{k}: Map[String, {spelled}] = prim.load_handle(ch{k} + 12)\n        \
                  __drop_{sfx}(m{k})\n      }} else ()\n      \
                prim.rc_dec(ch{k})\n    }}\n    ",
             rich_env_tag(&format!("cell:{sfx}"))
@@ -647,8 +650,9 @@ pub fn generate_closure_env_rich_sources(
     // the `__drop_caplist_<R>` loop below, applied once.
     for (k, n) in rec_records.iter().enumerate() {
         let kw = if entries.is_empty() && cell_entries.is_empty() && k == 0 { "if" } else { "else if" };
+        let spelled = generated_type_spelling(n);
         out.push_str(&format!(
-            "{kw} tag == {} then {{ let r{k}: {n} = prim.load_handle(wh + 20)\n      __drop_{}(r{k}) }}\n    ",
+            "{kw} tag == {} then {{ let r{k}: {spelled} = prim.load_handle(wh + 20)\n      __drop_{}(r{k}) }}\n    ",
             rich_env_tag(&format!("one:{n}")),
             drop_fn_ident(n)
         ));
@@ -656,6 +660,7 @@ pub fn generate_closure_env_rich_sources(
     out.push_str("else ()\n  } else ()\n  prim.rc_dec(wh)\n}\n");
     for n in rec_records.iter().filter(|n| !rich_variants.contains(*n)) {
         let fr = drop_fn_ident(n);
+        let n = &generated_type_spelling(n);
         out.push_str(&format!(
             "fn __drop_caplist_{fr}(xs: List[{n}]) -> Unit = {{\n  \
                let h = prim.handle(xs)\n  \
