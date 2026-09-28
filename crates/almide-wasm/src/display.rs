@@ -279,6 +279,12 @@ impl Emitter<'_> {
                     .local_set(self.cursor_local);
                 self.release_i32();
             }
+            // `${()}` / `ok(())`: the unit value (an i32 0) shows as `()`,
+            // native's Debug of the unit (#2747).
+            SliceTy::Unit => {
+                self.f.instructions().drop();
+                self.append_lit("()");
+            }
             other => return unsup(&format!("interp-part:{other:?}")),
         }
         Ok(())
