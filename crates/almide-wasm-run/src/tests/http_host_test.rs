@@ -245,7 +245,7 @@ fn serve_ops_bind_take_a_request_and_reply() {
     assert_eq!(unframe(&payload), ["PUT", "/x", "hi", "X-K", "v", "Content-Length", "2"]);
     let reply = [cell("201"), cell("made"), cell("X-R"), cell("1")].concat();
     assert_eq!(serve(&st, OP_SERVE_REPLY, &reply), (0, Vec::new()));
-    assert_eq!(client.join().unwrap(), "HTTP/1.1 201 Created\r\nX-R: 1\r\nContent-Length: 4\r\n\r\nmade");
+    assert_eq!(client.join().unwrap(), "HTTP/1.1 201 Created\r\nX-R: 1\r\nConnection: close\r\nContent-Length: 4\r\n\r\nmade");
     let (ret, _) = serve(&st, OP_SERVE_NEXT, "");
     assert_eq!(status(ret), 0);
     assert_eq!(text(serve(&st, OP_SERVE_REPLY, "nonsense")), (1, "bad cells".to_string()));
