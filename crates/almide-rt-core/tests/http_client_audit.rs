@@ -468,3 +468,221 @@ fn an_unreadable_ssl_cert_file_is_named() {
     let out = in_child(&format!("response|GET|https://localhost:{port}/"), &[("SSL_CERT_FILE", "/nonexistent/ca.pem")]);
     assert!(out.starts_with("err TLS error: ") && out.contains("SSL_CERT_FILE"), "{out}");
 }
+
+// ── #2819: proxies ──
+
+/// A forward proxy that answers every request itself with its own request
+/// line as the body, and a CONNECT proxy that tunnels to `tunnel_to`. Each
+/// accepted request head is sent over the channel. Handles `n` connections.
+fn proxy(n: usize, tunnel_to: Option<u16>) -> (u16, mpsc::Receiver<String>) {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        for _ in 0..n {
+            let Ok((mut s, _)) = l.accept() else { return };
+            s.set_read_timeout(Some(Duration::from_secs(10))).ok();
+            let head = read_head(&s);
+            let line = request_line(&head).to_string();
+            let _ = tx.send(head.clone());
+            if line.starts_with("CONNECT ") {
+                let Some(dest) = tunnel_to else {
+                    let _ = s.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
+                    continue;
+                };
+                let _ = s.write_all(b"HTTP/1.1 200 Connection established\r\n\r\n");
+                let up = TcpStream::connect(("127.0.0.1", dest)).unwrap();
+                let (mut a, mut b) = (s.try_clone().unwrap(), up.try_clone().unwrap());
+                let (mut c, mut d) = (s, up);
+                let t = thread::spawn(move || {
+                    let _ = std::io::copy(&mut a, &mut b);
+                    let _ = b.shutdown(std::net::Shutdown::Write);
+                });
+                let _ = std::io::copy(&mut d, &mut c);
+                let _ = c.shutdown(std::net::Shutdown::Write);
+                let _ = t.join();
+            } else {
+                let body = format!("via proxy: {line}");
+                let _ = s.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}", body.len()).as_bytes());
+            }
+        }
+    });
+    (port, rx)
+}
+
+#[test]
+fn http_proxy_gets_the_absolute_form_with_proxy_authorization() {
+    let (pp, rx) = proxy(1, None);
+    let proxy_url = format!("http://pu:pw@127.0.0.1:{pp}");
+    let out = in_child("response|GET|http://origin.invalid:8080/x?y=1", &[("HTTP_PROXY", &proxy_url)]);
+    assert_eq!(out, "ok 200 via proxy: GET http://origin.invalid:8080/x?y=1 HTTP/1.1");
+    let head = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(head.contains("\r\nHost: origin.invalid:8080\r\n"), "{head}");
+    assert!(head.contains("\r\nProxy-Authorization: Basic cHU6cHc=\r\n"), "{head}");
+}
+
+#[test]
+fn lowercase_http_proxy_and_all_proxy_are_read_and_start_uses_them() {
+    let (pp, _rx) = proxy(3, None);
+    let proxy_url = format!("127.0.0.1:{pp}"); // no scheme = http://, as curl and reqwest read it
+    let out = in_child("response|GET|http://a.invalid/", &[("http_proxy", &proxy_url)]);
+    assert_eq!(out, "ok 200 via proxy: GET http://a.invalid/ HTTP/1.1");
+    let out = in_child("bytes|GET|http://b.invalid/", &[("ALL_PROXY", &proxy_url)]);
+    assert_eq!(out, "ok 0 via proxy: GET http://b.invalid/ HTTP/1.1");
+    let out = in_child("start|GET|http://c.invalid/", &[("HTTP_PROXY", &proxy_url)]);
+    assert_eq!(out, "ok 200 via proxy: GET http://c.invalid/ HTTP/1.1");
+}
+
+#[test]
+fn https_proxy_tunnels_with_connect_on_every_path() {
+    let (tls_port, ca) = tls_origin(&["secure.invalid"], 2);
+    let (pp, rx) = proxy(2, Some(tls_port));
+    let env = [("HTTPS_PROXY", format!("http://127.0.0.1:{pp}")), ("SSL_CERT_FILE", ca.to_str().unwrap().to_string())];
+    let env: Vec<(&str, &str)> = env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let out = in_child("response|GET|https://secure.invalid/", &env);
+    assert_eq!(out, "ok 200 ok");
+    assert_eq!(request_line(&rx.recv_timeout(Duration::from_secs(5)).unwrap()), "CONNECT secure.invalid:443 HTTP/1.1");
+    let out = in_child("start|GET|https://secure.invalid/", &env);
+    assert_eq!(out, "ok 200 ok");
+    assert_eq!(request_line(&rx.recv_timeout(Duration::from_secs(5)).unwrap()), "CONNECT secure.invalid:443 HTTP/1.1");
+}
+
+#[test]
+fn a_refused_connect_names_the_proxy_answer() {
+    let (pp, _rx) = proxy(1, None);
+    let out = in_child("response|GET|https://secure.invalid/", &[("HTTPS_PROXY", &format!("http://127.0.0.1:{pp}"))]);
+    assert!(out.starts_with("err proxy 127.0.0.1:") && out.contains("refused CONNECT secure.invalid:443: HTTP/1.1 403 Forbidden"), "{out}");
+}
+
+#[test]
+fn no_proxy_bypasses_by_suffix_ip_cidr_and_star() {
+    for no_proxy in ["127.0.0.1", "localhost,127.0.0.0/8", "*", ".0.0.1", "example.com, 127.0.0.1"] {
+        let (pp, rx) = proxy(1, None);
+        let (port, _orx) = origin(OK);
+        let out = in_child(
+            &format!("response|GET|http://127.0.0.1:{port}/"),
+            &[("HTTP_PROXY", &format!("http://127.0.0.1:{pp}")), ("NO_PROXY", no_proxy)],
+        );
+        if no_proxy == ".0.0.1" {
+            // A suffix entry matches host NAMES, never the digits of an address.
+            assert!(out.starts_with("ok 200 via proxy"), "NO_PROXY={no_proxy}: {out}");
+            continue;
+        }
+        assert_eq!(out, "ok 200 ok", "NO_PROXY={no_proxy}");
+        assert!(rx.recv_timeout(Duration::from_millis(200)).is_err(), "NO_PROXY={no_proxy} still used the proxy");
+    }
+}
+
+#[test]
+fn no_proxy_matches_a_domain_and_its_subdomains_only() {
+    for (host, bypass) in [("example.invalid", true), ("api.example.invalid", true), ("notexample.invalid", false)] {
+        let (pp, _rx) = proxy(1, None);
+        let out = in_child(
+            &format!("response|GET|http://{host}:1/"),
+            &[("HTTP_PROXY", &format!("http://127.0.0.1:{pp}")), ("no_proxy", "example.invalid")],
+        );
+        // Bypassed = dialled directly, which fails (`.invalid` never resolves).
+        assert_eq!(out.starts_with("err connection failed"), bypass, "{host}: {out}");
+    }
+}
+
+#[test]
+fn http_proxy_is_ignored_under_cgi_but_lowercase_is_not() {
+    // httpoxy (CVE-2016-5385): a CGI request's `Proxy:` header arrives as
+    // HTTP_PROXY. Go and reqwest skip the variable when REQUEST_METHOD is set.
+    let (port, _orx) = origin(OK);
+    let (pp, rx) = proxy(1, None);
+    let out = in_child(
+        &format!("response|GET|http://127.0.0.1:{port}/"),
+        &[("HTTP_PROXY", &format!("http://127.0.0.1:{pp}")), ("REQUEST_METHOD", "GET")],
+    );
+    assert_eq!(out, "ok 200 ok");
+    assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());
+}
+
+/// A SOCKS5 proxy (RFC 1928, username/password per RFC 1929) that records
+/// the requested destination and relays to the origin on `dest`.
+fn socks5(dest: u16) -> (u16, mpsc::Receiver<String>) {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let Ok((mut s, _)) = l.accept() else { return };
+        s.set_read_timeout(Some(Duration::from_secs(10))).ok();
+        let mut b = [0u8; 2];
+        s.read_exact(&mut b).unwrap();
+        let mut methods = vec![0u8; b[1] as usize];
+        s.read_exact(&mut methods).unwrap();
+        let auth = methods.contains(&2);
+        s.write_all(&[5, if auth { 2 } else { 0 }]).unwrap();
+        let mut who = String::new();
+        if auth {
+            let mut v = [0u8; 2];
+            s.read_exact(&mut v).unwrap();
+            let mut u = vec![0u8; v[1] as usize];
+            s.read_exact(&mut u).unwrap();
+            let mut pl = [0u8; 1];
+            s.read_exact(&mut pl).unwrap();
+            let mut p = vec![0u8; pl[0] as usize];
+            s.read_exact(&mut p).unwrap();
+            who = format!("{}:{}@", String::from_utf8_lossy(&u), String::from_utf8_lossy(&p));
+            s.write_all(&[1, 0]).unwrap();
+        }
+        let mut req = [0u8; 4];
+        s.read_exact(&mut req).unwrap();
+        let target = match req[3] {
+            1 => {
+                let mut a = [0u8; 4];
+                s.read_exact(&mut a).unwrap();
+                std::net::Ipv4Addr::from(a).to_string()
+            }
+            3 => {
+                let mut n = [0u8; 1];
+                s.read_exact(&mut n).unwrap();
+                let mut d = vec![0u8; n[0] as usize];
+                s.read_exact(&mut d).unwrap();
+                String::from_utf8_lossy(&d).into_owned()
+            }
+            _ => panic!("atyp"),
+        };
+        let mut p = [0u8; 2];
+        s.read_exact(&mut p).unwrap();
+        let _ = tx.send(format!("{who}{target}:{}", u16::from_be_bytes(p)));
+        s.write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0]).unwrap();
+        let up = TcpStream::connect(("127.0.0.1", dest)).unwrap();
+        let (mut a, mut b2) = (s.try_clone().unwrap(), up.try_clone().unwrap());
+        let (mut c, mut d) = (s, up);
+        let t = thread::spawn(move || {
+            let _ = std::io::copy(&mut a, &mut b2);
+        });
+        let _ = std::io::copy(&mut d, &mut c);
+        let _ = c.shutdown(std::net::Shutdown::Write);
+        drop(t);
+    });
+    (port, rx)
+}
+
+#[test]
+fn all_proxy_socks5h_resolves_at_the_proxy() {
+    let (port, orx) = origin(OK);
+    let (sp, rx) = socks5(port);
+    let out = in_child("response|GET|http://far.invalid:8080/p", &[("ALL_PROXY", &format!("socks5h://u:p@127.0.0.1:{sp}"))]);
+    assert_eq!(out, "ok 200 ok");
+    assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), "u:p@far.invalid:8080");
+    // Through SOCKS the origin sees an ordinary origin-form request.
+    let head = head_of(&orx);
+    assert_eq!(request_line(&head), "GET /p HTTP/1.1");
+    assert!(head.contains("\r\nHost: far.invalid:8080\r\n"));
+}
+
+#[test]
+fn an_unsupported_proxy_scheme_is_an_error_not_a_direct_connection() {
+    let (port, touched) = untouched_listener();
+    let out = in_child(
+        &format!("response|GET|http://127.0.0.1:{port}/"),
+        &[("HTTP_PROXY", "https://secret:pw@127.0.0.1:9")],
+    );
+    assert!(out.starts_with("err HTTP_PROXY names a proxy with the scheme \"https\""), "{out}");
+    assert!(!out.contains("secret"), "the proxy credentials leaked into the error: {out}");
+    assert!(!touched(Duration::from_millis(200)));
+}
