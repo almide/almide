@@ -355,6 +355,140 @@ fn a_bind_failure_names_itself() {
     assert!(e.starts_with("bind failed: "), "{e}");
 }
 
+/// One raw exchange against `http_server_next_with`: the client sends `raw`
+/// (then half-closes when `half_close`), the server either answers the
+/// request itself or hands it over, and `serve` gets what was handed over.
+fn exchange(
+    raw: &'static [u8],
+    half_close: bool,
+    limits: server::HttpServerLimits,
+    serve: impl FnOnce(server::HttpServerConn, server::HttpServerRequest),
+) -> String {
+    let listener = server::http_server_bind(0).expect("bind");
+    let port = listener.local_addr().unwrap().port();
+    let client = thread::spawn(move || {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s.write_all(raw).unwrap();
+        if half_close {
+            s.shutdown(std::net::Shutdown::Write).unwrap();
+        }
+        let mut resp = Vec::new();
+        let _ = s.read_to_end(&mut resp);
+        // The core answered: a second connection proves it keeps serving.
+        let mut next = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        next.write_all(b"GET /next HTTP/1.1\r\n\r\n").unwrap();
+        let mut second = String::new();
+        next.read_to_string(&mut second).unwrap();
+        (String::from_utf8_lossy(&resp).into_owned(), second)
+    });
+    let (conn, req) = server::http_server_next_with(&listener, &limits).expect("no shutdown signal in this test");
+    let mut out = String::new();
+    if req.1 == "/next" {
+        server::http_server_write(conn, 200, &[], "next").unwrap();
+    } else {
+        serve(conn, req);
+        let (conn, req) = server::http_server_next_with(&listener, &limits).expect("second");
+        assert_eq!(req.1, "/next");
+        server::http_server_write(conn, 200, &[], "next").unwrap();
+    }
+    let (first, second) = client.join().unwrap();
+    assert!(second.ends_with("\r\n\r\nnext"), "the server stopped answering: {second:?}");
+    out.push_str(&first);
+    out
+}
+
+fn status_line(resp: &str) -> &str {
+    resp.split("\r\n").next().unwrap_or_default()
+}
+
+#[test]
+fn a_huge_content_length_is_413_without_allocating_it() {
+    let resp = exchange(
+        b"POST /x HTTP/1.1\r\nHost: a\r\nContent-Length: 99999999999\r\n\r\nabc",
+        false,
+        server::HTTP_SERVER_DEFAULT_LIMITS,
+        |_, r| panic!("the handler saw {r:?}"),
+    );
+    assert_eq!(status_line(&resp), "HTTP/1.1 413 Content Too Large");
+    let past_u64 = exchange(
+        b"POST /x HTTP/1.1\r\nContent-Length: 999999999999999999999999\r\n\r\n",
+        false,
+        server::HTTP_SERVER_DEFAULT_LIMITS,
+        |_, r| panic!("the handler saw {r:?}"),
+    );
+    assert_eq!(status_line(&past_u64), "HTTP/1.1 413 Content Too Large");
+}
+
+#[test]
+fn a_short_body_is_400_and_a_stalled_one_is_503() {
+    let cut = exchange(
+        b"POST /x HTTP/1.1\r\nContent-Length: 10\r\n\r\nabc",
+        true,
+        server::HTTP_SERVER_DEFAULT_LIMITS,
+        |_, r| panic!("the handler saw {r:?}"),
+    );
+    assert_eq!(status_line(&cut), "HTTP/1.1 400 Bad Request");
+    let limits = server::HttpServerLimits { max_body_bytes: 1 << 20, request_timeout_ms: 300 };
+    let stalled = exchange(b"POST /x HTTP/1.1\r\nContent-Length: 10\r\n\r\nabc", false, limits, |_, r| panic!("the handler saw {r:?}"));
+    assert_eq!(status_line(&stalled), "HTTP/1.1 503 Service Unavailable");
+}
+
+#[test]
+fn a_response_after_the_request_timeout_is_503() {
+    let limits = server::HttpServerLimits { max_body_bytes: 1 << 20, request_timeout_ms: 200 };
+    let resp = exchange(b"GET /slow HTTP/1.1\r\n\r\n", false, limits, |conn, _| {
+        thread::sleep(Duration::from_millis(400));
+        server::http_server_write(conn, 200, &[], "late").unwrap();
+    });
+    assert_eq!(status_line(&resp), "HTTP/1.1 503 Service Unavailable");
+    assert!(!resp.ends_with("late"), "{resp:?}");
+}
+
+#[test]
+fn a_chunked_body_is_decoded_and_bounded() {
+    let resp = exchange(
+        b"POST /x HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n2;ext=1\r\nhe\r\n3\r\nllo\r\n0\r\nX-Trailer: t\r\n\r\n",
+        false,
+        server::HTTP_SERVER_DEFAULT_LIMITS,
+        |conn, (method, _, body, _)| server::http_server_write(conn, 200, &[], &format!("{method} {body}")).unwrap(),
+    );
+    assert!(resp.ends_with("\r\n\r\nPOST hello"), "{resp:?}");
+    let limits = server::HttpServerLimits { max_body_bytes: 4, request_timeout_ms: 30_000 };
+    let over = exchange(
+        b"POST /x HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n3\r\ndef\r\n0\r\n\r\n",
+        false,
+        limits,
+        |_, r| panic!("the handler saw {r:?}"),
+    );
+    assert_eq!(status_line(&over), "HTTP/1.1 413 Content Too Large");
+    let gzip = exchange(
+        b"POST /x HTTP/1.1\r\nTransfer-Encoding: gzip, chunked\r\n\r\n0\r\n\r\n",
+        false,
+        server::HTTP_SERVER_DEFAULT_LIMITS,
+        |_, r| panic!("the handler saw {r:?}"),
+    );
+    assert_eq!(status_line(&gzip), "HTTP/1.1 501 Not Implemented");
+    let both = exchange(
+        b"POST /x HTTP/1.1\r\nContent-Length: 3\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+        false,
+        server::HTTP_SERVER_DEFAULT_LIMITS,
+        |_, r| panic!("the handler saw {r:?}"),
+    );
+    assert_eq!(status_line(&both), "HTTP/1.1 400 Bad Request");
+}
+
+#[test]
+fn header_lines_are_bounded_in_length_and_count() {
+    static LONG: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    let long = LONG.get_or_init(|| format!("GET /x HTTP/1.1\r\nX-Long: {}\r\n\r\n", "a".repeat(10_000)).into_bytes());
+    let resp = exchange(long, false, server::HTTP_SERVER_DEFAULT_LIMITS, |_, r| panic!("the handler saw {r:?}"));
+    assert_eq!(status_line(&resp), "HTTP/1.1 431 Request Header Fields Too Large");
+    static MANY: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    let many = MANY.get_or_init(|| format!("GET /x HTTP/1.1\r\n{}\r\n", "X-H: 1\r\n".repeat(101)).into_bytes());
+    let resp = exchange(many, false, server::HTTP_SERVER_DEFAULT_LIMITS, |_, r| panic!("the handler saw {r:?}"));
+    assert_eq!(status_line(&resp), "HTTP/1.1 431 Request Header Fields Too Large");
+}
+
 #[test]
 fn the_server_skips_an_unparsable_request_and_answers_the_next() {
     let listener = server::http_server_bind(0).expect("bind");
@@ -388,18 +522,14 @@ fn the_server_skips_an_unparsable_request_and_answers_the_next() {
 }
 
 #[test]
-fn a_request_without_a_body_reads_as_empty() {
-    let listener = server::http_server_bind(0).expect("bind");
-    let port = listener.local_addr().unwrap().port();
-    let client = thread::spawn(move || {
-        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        s.write_all(b"GET / HTTP/1.1\r\nContent-Length: nan\r\n\r\n").unwrap();
-        let mut resp = String::new();
-        s.read_to_string(&mut resp).unwrap();
-        resp
+fn a_request_without_a_body_reads_as_empty_and_a_garbled_length_is_400() {
+    let resp = exchange(b"GET / HTTP/1.1\r\n\r\n", false, server::HTTP_SERVER_DEFAULT_LIMITS, |conn, (method, target, body, _)| {
+        assert_eq!((method.as_str(), target.as_str(), body.as_str()), ("GET", "/", ""));
+        server::http_server_write(conn, 200, &[], "").unwrap();
     });
-    let (stream, (method, target, body, _)) = server::http_server_next(&listener).expect("no shutdown signal in this test");
-    assert_eq!((method.as_str(), target.as_str(), body.as_str()), ("GET", "/", ""));
-    server::http_server_write(stream, 200, &[], "").unwrap();
-    assert_eq!(client.join().unwrap(), "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+    assert_eq!(resp, "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+    let nan = exchange(b"GET / HTTP/1.1\r\nContent-Length: nan\r\n\r\n", false, server::HTTP_SERVER_DEFAULT_LIMITS, |_, r| {
+        panic!("the handler saw {r:?}")
+    });
+    assert_eq!(status_line(&nan), "HTTP/1.1 400 Bad Request");
 }

@@ -613,6 +613,18 @@ The export host's limits are host configuration (for example `wasmtime serve
 --max-concurrent-requests`). This is timing and admission, not an answer to an
 admitted request.
 
+**Status (2026-09-28, #2823).** The defaults are enforced in the shared server
+core (`crates/almide-rt-core/src/http_server_core.rs`) before the record
+exists, so native and the embedded lane both refuse the #2823 attack: a body
+over 1 MiB, declared by `Content-Length` or arriving chunked, is `413` without
+allocating the declared size, and the handler is not called. A body cut short
+of its `Content-Length` is `400`. A request not read within 30 s of accept is
+`503`, and a handler response later than that is replaced by `503`. The core
+also bounds a request or header line (8 KiB: `414` / `431`) and the header count
+(100: `431`), decodes a chunked request body, and answers `501` to any other
+transfer coding. `ServeLimits` and `serve_with_limits` land with the worker
+pool (#2665) and pass their values to `http_server_next_with`.
+
 **The listening address (#2826, #2829).** `http.serve` keeps binding
 `0.0.0.0:<port>`. C-367 states that address, and a server deployed in a
 container or on a VM is reached from outside its host. A silent switch to

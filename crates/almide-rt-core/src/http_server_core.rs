@@ -8,7 +8,8 @@
 //
 // EVERY byte written here is a cross-lane observable (C-367): the status
 // line and its reason table, the header order, the Content-Length line, the
-// close after one response. Change it here and both lanes change together.
+// close after one response, the limits' answers (413 / 400 / 503, #2823).
+// Change it here and both lanes change together.
 
 // Splice discipline (see http_client_core.rs): NO `use` lines — every std
 // path is written fully qualified, so this text imports nothing that could
@@ -26,19 +27,57 @@ pub fn http_server_bind(port: i64) -> Result<std::net::TcpListener, String> {
     std::net::TcpListener::bind(format!("0.0.0.0:{}", port)).map_err(|e| format!("bind failed: {}", e))
 }
 
+/// The server's limits (ADR-0020 §5.7). `http.serve` runs with
+/// [`HTTP_SERVER_DEFAULT_LIMITS`]; `serve_with_limits` will pass its record's
+/// values here.
+#[derive(Clone, Copy, Debug)]
+pub struct HttpServerLimits {
+    /// A larger body (declared or chunked) is `413`, and the handler is not
+    /// called (#2823).
+    pub max_body_bytes: usize,
+    /// From accept: a request not read by then is `503`; a handler that
+    /// answers after it has its response replaced by `503`.
+    pub request_timeout_ms: u64,
+}
+
+/// `http.serve`'s limits: 1 MiB of body, a 30 s request timeout (ADR-0020 §5.7).
+pub const HTTP_SERVER_DEFAULT_LIMITS: HttpServerLimits = HttpServerLimits { max_body_bytes: 1 << 20, request_timeout_ms: HTTP_SERVER_DRAIN_MS };
+
+/// The longest request line and header line (`414` / `431` beyond), and the
+/// most header lines (`431` beyond).
+const HTTP_SERVER_MAX_LINE: usize = 8 * 1024;
+const HTTP_SERVER_MAX_HEADERS: usize = 100;
+
 /// A connection whose request has been read: the response goes back on it.
-/// It remembers what shapes that response — a HEAD gets no body (#2826).
+/// It remembers what shapes that response — a HEAD gets no body (#2826) —
+/// and when the request arrived, for the request timeout.
 pub struct HttpServerConn {
     stream: std::net::TcpStream,
     head: bool,
+    deadline: std::time::Instant,
+}
+
+/// Why a request was not handed to the handler: a connection closed or
+/// silent before its first byte is dropped unanswered; anything else is
+/// answered by the core with a status and the connection closes.
+enum HttpServerReject {
+    Drop,
+    Status(i64),
 }
 
 /// The next request: accept, then parse. A failed accept or an unparsable
-/// request drops that connection unanswered and waits for the next one.
+/// request line drops that connection unanswered and waits for the next one;
+/// a request the limits refuse (#2823) is answered here — `413`, `400`,
+/// `503`, … — and the handler never sees it.
 /// `None` once a shutdown signal has arrived (ADR-0020 §5.6): the server
 /// stops accepting, and a connection accepted after the signal — the
 /// watcher's wake-up or a late client — is closed unanswered.
 pub fn http_server_next(listener: &std::net::TcpListener) -> Option<(HttpServerConn, HttpServerRequest)> {
+    http_server_next_with(listener, &HTTP_SERVER_DEFAULT_LIMITS)
+}
+
+/// [`http_server_next`] under explicit limits.
+pub fn http_server_next_with(listener: &std::net::TcpListener, limits: &HttpServerLimits) -> Option<(HttpServerConn, HttpServerRequest)> {
     loop {
         if http_server_stopping() {
             return None;
@@ -47,13 +86,22 @@ pub fn http_server_next(listener: &std::net::TcpListener) -> Option<(HttpServerC
         if http_server_stopping() {
             return None;
         }
-        let mut stream = match accepted {
+        let stream = match accepted {
             Ok((s, _)) => s,
             Err(_) => continue,
         };
-        if let Ok(req) = http_server_read_request(&mut stream) {
-            let head = req.0 == "HEAD";
-            return Some((HttpServerConn { stream, head }, req));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(limits.request_timeout_ms);
+        let mut conn = HttpServerConn { stream, head: false, deadline };
+        match http_server_read_request(&conn.stream, deadline, limits.max_body_bytes) {
+            Ok(req) => {
+                conn.head = req.0 == "HEAD";
+                return Some((conn, req));
+            }
+            Err(HttpServerReject::Drop) => {}
+            Err(HttpServerReject::Status(status)) => {
+                let headers = [("Content-Type".to_string(), "text/plain".to_string())];
+                let _ = http_server_send(conn, status, &headers, http_server_reason(status));
+            }
         }
     }
 }
@@ -155,51 +203,213 @@ pub fn http_server_watch(listener: &std::net::TcpListener, force: Box<dyn Fn() +
     HttpServerWatch { done, thread }
 }
 
-fn http_server_read_request(stream: &mut std::net::TcpStream) -> Result<HttpServerRequest, String> {
-    let mut reader = std::io::BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
-    let mut first_line = String::new();
-    std::io::BufRead::read_line(&mut reader, &mut first_line).map_err(|e| e.to_string())?;
-    let parts: Vec<&str> = first_line.split_whitespace().collect();
-    if parts.len() < 2 {
-        return Err("invalid request".into());
-    }
-    let method = parts[0].to_string();
-    let path = parts[1].to_string();
-
-    let mut headers = Vec::new();
-    let mut content_length = 0usize;
-    loop {
-        let mut line = String::new();
-        std::io::BufRead::read_line(&mut reader, &mut line).map_err(|e| e.to_string())?;
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            break;
-        }
-        if let Some(idx) = trimmed.find(':') {
-            let key = trimmed[..idx].trim().to_string();
-            let val = trimmed[idx + 1..].trim().to_string();
-            if key.eq_ignore_ascii_case("content-length") {
-                content_length = val.parse().unwrap_or(0);
-            }
-            headers.push((key, val));
-        }
-    }
-
-    let mut body = vec![0u8; content_length];
-    if content_length > 0 {
-        std::io::Read::read_exact(&mut reader, &mut body).ok();
-    }
-
-    Ok((method, path, String::from_utf8_lossy(&body).to_string(), headers))
-}
-
-// ── Writing a response ──
+// ── Reading a request (#2823) ──
+//
+// Every read is bounded: by the request's deadline (the socket's read timeout
+// is set to what is left before each read, so a client trickling bytes cannot
+// stretch it), by the line length, the header count and the body limit. The
+// body is allocated only up to the limit, never from the declared length.
 
 fn http_server_timeout(deadline: std::time::Instant) -> Option<std::time::Duration> {
     let left = deadline.saturating_duration_since(std::time::Instant::now());
     (!left.is_zero()).then_some(left)
 }
 
+/// Buffered bytes, refilled under the deadline. `Ok(&[])` is the peer's EOF.
+fn http_server_fill<'a>(
+    reader: &'a mut std::io::BufReader<std::net::TcpStream>,
+    deadline: std::time::Instant,
+    started: bool,
+) -> Result<&'a [u8], HttpServerReject> {
+    // Nothing read yet: a silent or vanished connection is dropped. Past the
+    // first byte, running out of time is the request timeout's 503.
+    let late = if started { HttpServerReject::Status(503) } else { HttpServerReject::Drop };
+    let Some(left) = http_server_timeout(deadline) else {
+        return Err(late);
+    };
+    if reader.get_ref().set_read_timeout(Some(left)).is_err() {
+        return Err(HttpServerReject::Drop);
+    }
+    match std::io::BufRead::fill_buf(reader) {
+        Ok(b) => Ok(b),
+        Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => Err(late),
+        Err(_) => Err(HttpServerReject::Drop),
+    }
+}
+
+/// One line without its line ending; `too_long` answers a line over the limit.
+fn http_server_line(
+    reader: &mut std::io::BufReader<std::net::TcpStream>,
+    deadline: std::time::Instant,
+    started: bool,
+    too_long: HttpServerReject,
+) -> Result<String, HttpServerReject> {
+    let mut line: Vec<u8> = Vec::new();
+    loop {
+        let buf = http_server_fill(reader, deadline, started || !line.is_empty())?;
+        if buf.is_empty() {
+            // EOF: before the first byte the peer just left; mid-request the
+            // request is cut short.
+            return Err(if started || !line.is_empty() { HttpServerReject::Status(400) } else { HttpServerReject::Drop });
+        }
+        let (take, done) = match buf.iter().position(|&b| b == b'\n') {
+            Some(i) => (i + 1, true),
+            None => (buf.len(), false),
+        };
+        line.extend_from_slice(&buf[..take]);
+        std::io::BufRead::consume(reader, take);
+        if line.len() > HTTP_SERVER_MAX_LINE {
+            return Err(too_long);
+        }
+        if done {
+            while matches!(line.last(), Some(b'\n' | b'\r')) {
+                line.pop();
+            }
+            return Ok(String::from_utf8_lossy(&line).into_owned());
+        }
+    }
+}
+
+/// Exactly `n` bytes of body (`n` is already within the limit).
+fn http_server_exact(
+    reader: &mut std::io::BufReader<std::net::TcpStream>,
+    deadline: std::time::Instant,
+    n: usize,
+    out: &mut Vec<u8>,
+) -> Result<(), HttpServerReject> {
+    let mut left = n;
+    while left > 0 {
+        let buf = http_server_fill(reader, deadline, true)?;
+        if buf.is_empty() {
+            // Fewer bytes than Content-Length, then EOF: the handler never
+            // sees a zero-filled tail (#2823).
+            return Err(HttpServerReject::Status(400));
+        }
+        let take = buf.len().min(left);
+        out.extend_from_slice(&buf[..take]);
+        std::io::BufRead::consume(reader, take);
+        left -= take;
+    }
+    Ok(())
+}
+
+/// A chunked request body (RFC 9112 §7.1), chunk extensions and trailers
+/// skipped, bounded by `max_body` as it arrives.
+fn http_server_chunked(
+    reader: &mut std::io::BufReader<std::net::TcpStream>,
+    deadline: std::time::Instant,
+    max_body: usize,
+) -> Result<Vec<u8>, HttpServerReject> {
+    let bad = || HttpServerReject::Status(400);
+    let mut body = Vec::new();
+    loop {
+        let line = http_server_line(reader, deadline, true, bad())?;
+        let size = line.split(';').next().unwrap_or_default().trim();
+        if size.is_empty() || !size.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(bad());
+        }
+        let n = match usize::from_str_radix(size, 16) {
+            Ok(n) => n,
+            Err(_) => return Err(HttpServerReject::Status(413)),
+        };
+        if n == 0 {
+            break;
+        }
+        if n > max_body.saturating_sub(body.len()) {
+            return Err(HttpServerReject::Status(413));
+        }
+        http_server_exact(reader, deadline, n, &mut body)?;
+        if !http_server_line(reader, deadline, true, bad())?.is_empty() {
+            return Err(bad());
+        }
+    }
+    // Trailer fields up to the empty line; their count shares the header cap.
+    for _ in 0..=HTTP_SERVER_MAX_HEADERS {
+        if http_server_line(reader, deadline, true, HttpServerReject::Status(431))?.is_empty() {
+            return Ok(body);
+        }
+    }
+    Err(HttpServerReject::Status(431))
+}
+
+fn http_server_read_request(
+    stream: &std::net::TcpStream,
+    deadline: std::time::Instant,
+    max_body: usize,
+) -> Result<HttpServerRequest, HttpServerReject> {
+    let clone = stream.try_clone().map_err(|_| HttpServerReject::Drop)?;
+    let mut reader = std::io::BufReader::new(clone);
+    let first_line = http_server_line(&mut reader, deadline, false, HttpServerReject::Status(414))?;
+    let parts: Vec<&str> = first_line.split_whitespace().collect();
+    if parts.len() < 2 {
+        return Err(HttpServerReject::Drop);
+    }
+    let method = parts[0].to_string();
+    let path = parts[1].to_string();
+
+    let bad = || HttpServerReject::Status(400);
+    let too_many = || HttpServerReject::Status(431);
+    let mut headers = Vec::new();
+    let mut content_length: Option<u64> = None;
+    let mut chunked = false;
+    let mut lines = 0usize;
+    loop {
+        let line = http_server_line(&mut reader, deadline, true, too_many())?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            break;
+        }
+        lines += 1;
+        if lines > HTTP_SERVER_MAX_HEADERS {
+            return Err(too_many());
+        }
+        if let Some(idx) = trimmed.find(':') {
+            let key = trimmed[..idx].trim().to_string();
+            let val = trimmed[idx + 1..].trim().to_string();
+            if key.eq_ignore_ascii_case("content-length") {
+                // Digits only; a length past u64 is too large, not garbage.
+                if val.is_empty() || !val.bytes().all(|b| b.is_ascii_digit()) {
+                    return Err(bad());
+                }
+                let n = val.parse::<u64>().unwrap_or(u64::MAX);
+                if content_length.is_some_and(|m| m != n) {
+                    return Err(bad());
+                }
+                content_length = Some(n);
+            } else if key.eq_ignore_ascii_case("transfer-encoding") {
+                // Only `chunked` is decoded; any other coding is 501.
+                for coding in val.split(',').map(|c| c.trim()).filter(|c| !c.is_empty()) {
+                    if coding.eq_ignore_ascii_case("chunked") && !chunked {
+                        chunked = true;
+                    } else {
+                        return Err(HttpServerReject::Status(501));
+                    }
+                }
+            }
+            headers.push((key, val));
+        }
+    }
+
+    let body = if chunked {
+        // Both framings at once is a smuggling shape (RFC 9112 §6.3): refused.
+        if content_length.is_some() {
+            return Err(bad());
+        }
+        http_server_chunked(&mut reader, deadline, max_body)?
+    } else {
+        let n = content_length.unwrap_or(0);
+        if n > max_body as u64 {
+            return Err(HttpServerReject::Status(413));
+        }
+        let mut body = Vec::with_capacity(n as usize);
+        http_server_exact(&mut reader, deadline, n as usize, &mut body)?;
+        body
+    };
+
+    Ok((method, path, String::from_utf8_lossy(&body).to_string(), headers))
+}
+
+// ── Writing a response ──
 
 /// The reason phrase: the IANA HTTP Status Code Registry (RFC 9110 §15 and
 /// the codes registered since); a code outside it gets an empty reason, which
@@ -304,13 +514,19 @@ pub fn http_server_response_bytes_for(head: bool, status: i64, headers: &[(Strin
     out.into_bytes()
 }
 
-/// Write the handler's response and close the connection.
+/// Write the handler's response and close the connection. A response that
+/// arrives after the request timeout (ADR-0020 §5.7) is replaced by a `503`.
 pub fn http_server_write(conn: HttpServerConn, status: i64, headers: &[(String, String)], body: &str) -> Result<(), String> {
+    let plain = [("Content-Type".to_string(), "text/plain".to_string())];
+    if std::time::Instant::now() >= conn.deadline {
+        return http_server_send(conn, 503, &plain, http_server_reason(503));
+    }
     http_server_send(conn, status, headers, body)
 }
 
 /// Send, then close without resetting: the write side is shut first and
-/// whatever the client still sends (a pipelined request) is read and dropped for a moment, so the close does not turn
+/// whatever the client still sends (a body the core refused, a pipelined
+/// request) is read and dropped for a moment, so the close does not turn
 /// into a TCP reset that could discard the response before the client read
 /// it.
 fn http_server_send(conn: HttpServerConn, status: i64, headers: &[(String, String)], body: &str) -> Result<(), String> {

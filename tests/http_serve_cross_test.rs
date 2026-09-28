@@ -381,6 +381,17 @@ impl Leg {
     }
 }
 
+/// Sends `raw`, half-closes, and reads the answer to the server's close.
+fn ask_then_close(port: u16, raw: &[u8]) -> Vec<u8> {
+    let mut conn = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+    conn.set_read_timeout(Some(Duration::from_secs(60))).expect("timeout");
+    conn.write_all(raw).expect("send request");
+    conn.shutdown(std::net::Shutdown::Write).expect("half-close");
+    let mut out = Vec::new();
+    conn.read_to_end(&mut out).expect("read response to close");
+    out
+}
+
 fn head_of(resp: &[u8]) -> String {
     let cut = resp.windows(4).position(|w| w == b"\r\n\r\n").map_or(resp.len(), |c| c + 4);
     String::from_utf8_lossy(&resp[..cut]).into_owned()
@@ -413,6 +424,34 @@ fn on_both_legs(heads: &[usize], script: impl Fn(&Leg) -> Vec<Vec<u8>>) -> (Vec<
         }
     }
     (n, w, n_err, w_err)
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_huge_or_cut_content_length_is_refused_before_the_handler_and_a_chunked_body_is_read_on_native_and_the_embedded_lane() {
+    let (native, wasm, n_err, w_err) = on_both_legs(&[], |leg| {
+        let started = Instant::now();
+        // The #2823 attack: a declared length of ~100 GB and three bytes.
+        let huge = ask(leg.port, b"POST /x HTTP/1.1\r\nHost: a\r\nContent-Length: 99999999999\r\n\r\nabc");
+        assert!(started.elapsed() < Duration::from_secs(10), "wasm={}: the 413 took {:?}", leg.wasm, started.elapsed());
+        // The server keeps answering after it.
+        let after = ask(leg.port, b"GET /after HTTP/1.1\r\n\r\n");
+        // Fewer bytes than Content-Length, then the client's close.
+        let cut = ask_then_close(leg.port, b"POST /cut HTTP/1.1\r\nContent-Length: 10\r\n\r\nabc");
+        // A chunked request body, with a chunk extension and a trailer.
+        let chunked = ask(leg.port, b"POST /chunked HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n2;x=y\r\nhe\r\n3\r\nllo\r\n0\r\nX-T: 1\r\n\r\n");
+        vec![huge, after, cut, chunked]
+    });
+    for (leg, answers) in [("native", &native), ("wasm", &wasm)] {
+        assert!(head_of(&answers[0]).starts_with("HTTP/1.1 413 "), "{leg}: {:?}", head_of(&answers[0]));
+        assert!(answers[1].ends_with(b"\r\n\r\nGET /after "), "{leg}: {:?}", String::from_utf8_lossy(&answers[1]));
+        assert!(head_of(&answers[2]).starts_with("HTTP/1.1 400 "), "{leg}: {:?}", head_of(&answers[2]));
+        assert!(answers[3].ends_with(b"\r\n\r\nPOST /chunked hello"), "{leg}: {:?}", String::from_utf8_lossy(&answers[3]));
+    }
+    // The handler saw only the two requests the core admitted.
+    for err in [&n_err, &w_err] {
+        assert_eq!(line_multiset(err), vec!["GET /after", "POST /chunked"], "{err:?}");
+    }
 }
 
 #[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
