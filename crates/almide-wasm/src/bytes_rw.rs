@@ -220,6 +220,28 @@ impl Emitter<'_> {
         self.release_i64();
         Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(BYTES)))))
     }
+    /// `b[i]` on Bytes (#2747), the Bytes block already on the stack: the
+    /// byte as an Int, and out of range the list index's abort frame
+    /// (`Error: index out of bounds`, exit 1) — native's checked index into
+    /// the same buffer. Not C-229's defaulting read: the index syntax traps
+    /// on every leg.
+    pub(crate) fn lower_bytes_index(&mut self, index: &IrExpr) -> Result<SliceTy, EmitError> {
+        let bh = self.hold_i32()?;
+        self.f.instructions().local_set(bh);
+        self.lower(index, Some(INT))?;
+        let ih = self.hold_i64()?;
+        self.f.instructions().local_set(ih);
+        self.bytes_room(bh, ih, 1);
+        let msg = self.pool.intern("index out of bounds");
+        self.f.instructions().i32_eqz().if_(BlockType::Empty).i32_const(msg as i32);
+        self.emit_error_frame_abort();
+        let mut i = self.f.instructions();
+        i.end();
+        i.local_get(bh).local_get(ih).i32_wrap_i64().i32_add().i64_load8_u(byte_k(0));
+        self.release_i64();
+        self.release_i32();
+        Ok(INT)
+    }
     /// C-229 totality: a read DEFAULTS and a write NO-OPS when the window
     /// [pos, pos+width) leaves the buffer — negative pos included, never a
     /// trap. The room test SUBTRACTS (`pos <= len - width`): the
