@@ -352,6 +352,7 @@ impl FnWork {
         (var_space, cur_module): (u32, Option<&str>),
     ) -> u32 {
         self.register_lambda(crate::LiftedLambda {
+            site_name: None,
             params,
             ret,
             effect_raw,

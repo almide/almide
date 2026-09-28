@@ -120,8 +120,14 @@ fn initializer_needs_own_frame(il: &crate::InitLet, ctx: &Ctx) -> Result<bool, E
 /// with the module's space and name — and call_indirect it exactly as a
 /// closure would (env 0: nothing to capture; no hop charge: native
 /// charges nothing for reaching a top-let's value).
-fn emit_modinit_call(em: &mut crate::emitter::Emitter<'_>, il: &crate::InitLet, declared: SliceTy) {
+fn emit_modinit_call(
+    em: &mut crate::emitter::Emitter<'_>,
+    il: &crate::InitLet,
+    declared: SliceTy,
+    site_name: String,
+) {
     let j = em.work.register_lambda(crate::LiftedLambda {
+        site_name: Some(site_name),
         params: Vec::new(),
         ret: Some(declared),
         effect_raw: None,
@@ -136,6 +142,16 @@ fn emit_modinit_call(em: &mut crate::emitter::Emitter<'_>, il: &crate::InitLet, 
     em.f.instructions().i32_const(0); // env: unused
     em.f.instructions().i32_const(slot as i32);
     em.f.instructions().call_indirect(0, ti);
+}
+
+/// The name a wall in top-let `il`'s initializer is reported under
+/// (decline_site.rs): module-qualified, as program functions are.
+fn top_let_site_name(il: &crate::InitLet, ctx: &Ctx) -> String {
+    let name = (ctx.var_name)(il.space, il.tl.var).unwrap_or_else(|| "<top-let>".to_string());
+    match &il.module {
+        Some(m) => format!("{m}.{name}"),
+        None => name,
+    }
 }
 
 /// Lower one function body (used for `main` and every program function):
@@ -319,6 +335,11 @@ pub(crate) fn lower_fn(
         }
     }
 
+    // What a module-space initializer sees in place of this frame's
+    // VarId-keyed tables (the prelude loop below).
+    let no_locals: HashMap<VarId, (u32, SliceTy)> = HashMap::new();
+    let no_cells: HashSet<VarId> = HashSet::new();
+    let no_ranges: HashMap<VarId, (u32, u32, bool)> = HashMap::new();
     let mut f = Function::new(local_decls);
     let mut calls: HashSet<usize> = HashSet::new();
     {
@@ -430,19 +451,32 @@ pub(crate) fn lower_fn(
             // VarTable, not this frame's locals map) — it becomes a
             // synthetic entry in its own frame instead.
             if initializer_needs_own_frame(il, ctx)? {
-                emit_modinit_call(&mut em, il, declared);
+                emit_modinit_call(&mut em, il, declared, top_let_site_name(il, ctx));
+            } else if il.space == var_space {
+                em.lower(&tl.value, Some(declared)).inspect_err(|_| {
+                    crate::decline_site::note_top_let(top_let_site_name(il, ctx), il.module.clone());
+                })?;
             } else {
                 // A module initializer lowers in ITS OWN space: its Var
                 // reads index that module's table and its bare Named calls
-                // resolve module-qualified first (#1596).
-                let saved_space = em.var_space;
-                let saved_module = em.cur_module;
+                // resolve module-qualified first (#1596). This frame's
+                // locals, cells and deferred ranges are keyed by THIS
+                // frame's VarIds, which a module's VarIds collide with (every
+                // table restarts at 0): a bind-free initializer reads only
+                // globals, so they are hidden while it lowers (#2807: the
+                // module's `DEV` read main's `argv` local, a List, and the
+                // String slot walled `ty-mismatch:List-vs-Scalar(Str)`).
+                let saved = (em.var_space, em.cur_module, em.locals, em.cells, em.deferred_ranges);
                 em.var_space = il.space;
                 em.cur_module = il.module.as_deref();
+                em.locals = &no_locals;
+                em.cells = &no_cells;
+                em.deferred_ranges = &no_ranges;
                 let lowered = em.lower(&tl.value, Some(declared));
-                em.var_space = saved_space;
-                em.cur_module = saved_module;
-                lowered?;
+                (em.var_space, em.cur_module, em.locals, em.cells, em.deferred_ranges) = saved;
+                lowered.inspect_err(|_| {
+                    crate::decline_site::note_top_let(top_let_site_name(il, ctx), il.module.clone());
+                })?;
             }
             if matches!(
                 declared,
