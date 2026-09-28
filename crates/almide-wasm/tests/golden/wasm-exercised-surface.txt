@@ -219,6 +219,9 @@ call:fs.create_temp_file
 call:fs.exists
 call:fs.file_size
 call:fs.fold_lines
+call:fs.fold_lines_chunked
+call:fs.fold_lines_range
+call:fs.for_each_line
 call:fs.glob
 call:fs.is_dir
 call:fs.is_file
