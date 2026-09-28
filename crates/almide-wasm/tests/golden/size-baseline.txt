@@ -509,6 +509,7 @@
 3989	spec/wasm_cross/nested_variant_match_bind.almd
 2530	spec/wasm_cross/nested_variant_tag_box.almd
 2205	spec/wasm_cross/nested_variant_tree.almd
+6642	spec/wasm_cross/newtype_string_form.almd
 4323	spec/wasm_cross/num_edge_to_string.almd
 2465	spec/wasm_cross/opt_ctor_over_call_payload.almd
 2590	spec/wasm_cross/opt_str_str_ctor.almd
