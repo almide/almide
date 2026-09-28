@@ -176,6 +176,16 @@ pub(crate) fn lower_resolved(
         checker.env.self_module_name = saved_self;
         ir.modules.push(mod_ir_module);
     }
+    // #2865: a module read off disk is the package's own, whatever its key
+    // spells — a `src/prim.almd` must not reach the emitter's `prim.*` floor.
+    // Bundled stdlib modules are absent from `sources`.
+    let package: std::collections::HashSet<String> = resolved
+        .modules
+        .iter()
+        .map(|(name, ..)| name.clone())
+        .filter(|name| sources.contains_key(name))
+        .collect();
+    almide_wasm::package_keys::rekey_package_modules(&mut ir, &package);
     if let Some(run_filter) = tests {
         // The structural leg's in-test assert lowering (the frontend's
         // non-test abort form), then the shared runner synthesis.
