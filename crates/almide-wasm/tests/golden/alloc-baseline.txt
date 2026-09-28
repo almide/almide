@@ -271,6 +271,7 @@
 66464	spec/wasm_cross/heap_result_tuple_return.almd
 65920	spec/wasm_cross/hex_two_module_link.almd
 66544	spec/wasm_cross/hof_closure_string_tail.almd
+87376	spec/wasm_cross/hof_fn_value_callbacks.almd
 ~	spec/wasm_cross/host_floor_string_alloc.almd
 67456	spec/wasm_cross/http_response_headers.almd
 65760	spec/wasm_cross/i64_min_literal.almd
