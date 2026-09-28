@@ -312,7 +312,8 @@
 227	212	3004	227	spec/wasm_cross/json_parse_lenient_edges.almd
 795	701	6594	795	spec/wasm_cross/json_path_edges.almd
 1909	1837	21117	1896	spec/wasm_cross/json_path_index_domain.almd
-330	306	4177	330	spec/wasm_cross/json_string_span.almd
+330	306	4187	330	spec/wasm_cross/json_string_span.almd
+1593	1536	20687	1593	spec/wasm_cross/json_stringify_control_chars.almd
 132	62	1881	129	spec/wasm_cross/json_stringify_nonfinite.almd
 43	6	725	42	spec/wasm_cross/json_stringify_pretty.almd
 122	73	1463	121	spec/wasm_cross/json_value.almd
