@@ -1126,16 +1126,20 @@ impl Checker {
             if name.as_str() != "main" || effect.unwrap_or(false) {
                 continue;
             }
-            if matches!(return_type, ast::TypeExpr::Simple { name: t } if t.as_str() == "Unit") {
+            // The RESOLVED type, not the spelling (#2880): in a file that
+            // declares `type Unit`, `-> Unit` names that record (§4.5).
+            let ret = self.resolve_type_expr(return_type);
+            if ret == Ty::Unit {
                 continue;
             }
-            let mut diag = err(
-                "main() returns Unit",
-                "a program's result is its output, not a return value — print it, \
-                 or set the exit code with `process.exit(n)` (import process). \
-                 Declare the entry `fn main() -> Unit` (or `effect fn main() -> Unit`)",
-                "fn main",
-            )
+            let hint = match solving::declared_builtin_named(&ret) {
+                Some(n) => solving::builtin_named_decl_hint(&n),
+                None => "a program's result is its output, not a return value — print it, \
+                         or set the exit code with `process.exit(n)` (import process). \
+                         Declare the entry `fn main() -> Unit` (or `effect fn main() -> Unit`)"
+                    .to_string(),
+            };
+            let mut diag = err("main() returns Unit", hint, "fn main")
             .with_code("E044");
             if let Some(s) = span {
                 diag.file = self.source_file.clone();
