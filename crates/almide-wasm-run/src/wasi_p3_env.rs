@@ -45,16 +45,22 @@ struct EnvImports {
 
 impl EnvImports {
     /// Assign indices from `base` in the fixed order env, args, sleep,
-    /// taking only the ops `host_ops` names.
-    fn plan(host_ops: &[i32], base: u32) -> (Self, u32) {
+    /// taking only the ops `host_ops` names — and `get-environment` for an
+    /// http program too, whose timeout and size limit are read from it
+    /// (ADR-0023 step 2).
+    fn plan(host_ops: &[i32], base: u32, wants_http: bool) -> (Self, u32) {
         let mut next = base;
-        let mut take = |op: i32| {
-            host_ops.contains(&op).then(|| {
+        let mut take = |wanted: bool| {
+            wanted.then(|| {
                 next += 1;
                 next - 1
             })
         };
-        let e = EnvImports { get_env: take(26), get_args: take(29), wait_for: take(36) };
+        let e = EnvImports {
+            get_env: take(wants_http || host_ops.contains(&26)),
+            get_args: take(host_ops.contains(&29)),
+            wait_for: take(host_ops.contains(&36)),
+        };
         (e, next)
     }
 

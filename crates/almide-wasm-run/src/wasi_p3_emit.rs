@@ -55,7 +55,7 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     let heap_global = heap_global.ok_or_else(|| anyhow::anyhow!("no __heap export"))?;
     let n_funcs = func_types.len() as u32;
     let (env, n_imports) =
-        EnvImports::plan(host_ops, if wants_http { IMPORTS_HTTP } else { IMPORTS });
+        EnvImports::plan(host_ops, if wants_http { IMPORTS_HTTP } else { IMPORTS }, wants_http);
     let shift = n_imports - 5;
     let shim_base = n_imports + n_funcs;
     // Shim order mirrors the almide.* import order (println, eprintln,
@@ -71,6 +71,14 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     let f_await = shim_base + 10;
     let f_http = wants_http.then_some(shim_base + 11);
     let f_env = env.any().then_some(shim_base + 11 + u32::from(wants_http));
+    // The http error helpers (ADR-0023 step 2) follow the env service,
+    // which an http program always ships (its limits are read from it).
+    let http_fns = f_env.filter(|_| wants_http).map(|fe| HttpErrFns {
+        quote: fe + 1,
+        err: fe + 2,
+        check: fe + 3,
+        num: fe + 4,
+    });
 
     let heap_init = parsed_globals[heap_global as usize]
         .1
@@ -163,6 +171,13 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     let t_append = type_index(&mut types, &[ValType::I32; 6], &[]);
     // monotonic-clock.wait-for(duration) — a sync lower of the async func.
     let t_wait = type_index(&mut types, &[ValType::I64], &[]);
+    // request-options setters: (self, option<duration> as (disc, u64), retptr).
+    let t_opt_set = type_index(&mut types, &[ValType::I32, ValType::I32, ValType::I64, ValType::I32], &[]);
+    // The http error helpers: $http_quote, $http_err, $http_hdr_check, $http_env_num.
+    let t_quote = type_index(&mut types, &[ValType::I32; 3], &[ValType::I32]);
+    let t_herr = type_index(&mut types, &[ValType::I32; 10], &[ValType::I64]);
+    let t_hcheck = type_index(&mut types, &[ValType::I32; 4], &[ValType::I32]);
+    let t_hnum = type_index(&mut types, &[ValType::I32, ValType::I32, ValType::I64], &[ValType::I64]);
 
     let mut type_sec = TypeSection::new();
     for (p, r) in &types {
@@ -262,6 +277,10 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         (I_HTTP_RESP_DROP, http_types, "[resource-drop]response", t_drop),
         (I_HTTP_FIELDS_DROP, http_types, "[resource-drop]fields", t_drop),
         (I_HTTP_FIELDS_APPEND, http_types, "[method]fields.append", t_append),
+        (I_HTTP_OPT_NEW, http_types, "[constructor]request-options", t_ws_new),
+        (I_HTTP_OPT_CONNECT, http_types, "[method]request-options.set-connect-timeout", t_opt_set),
+        (I_HTTP_OPT_FIRST, http_types, "[method]request-options.set-first-byte-timeout", t_opt_set),
+        (I_HTTP_OPT_BETWEEN, http_types, "[method]request-options.set-between-bytes-timeout", t_opt_set),
     ];
     assert_eq!(
         IMPORTS + http_import_list.len() as u32,
@@ -297,6 +316,11 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     // shim_http, then shim_env — both on the almide fs_call ABI.
     for _ in 0..(u32::from(wants_http) + u32::from(env.any())) {
         functions.function(t_fs);
+    }
+    if http_fns.is_some() {
+        for ti in [t_quote, t_herr, t_hcheck, t_hnum] {
+            functions.function(ti);
+        }
     }
 
     let mut memories = MemorySection::new();
@@ -351,7 +375,8 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     ));
     code.function(&shim_realloc_checked(f_reserve, f_realloc));
     code.function(&shim_await(park));
-    push_optional_shims(&mut code, g, habi.as_ref(), env);
+    let texts = habi.as_ref().map(|h| HttpErrTexts::new(park, h));
+    push_optional_shims(&mut code, g, habi.as_ref().zip(texts.as_ref()).zip(http_fns), env, f_env);
 
     // Elements re-encode through the Remap (#1716): the import shift must
     // move funcref table entries too (#1688's silent class).
@@ -379,6 +404,9 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     if wants_http {
         data.active(0, &ConstExpr::i32_const((park + MSG_HTTP) as i32), E_HTTP.iter().copied());
         data.active(0, &ConstExpr::i32_const((park + MSG_CLEN) as i32), E_CLEN.iter().copied());
+    }
+    if let Some(t) = &texts {
+        data.active(0, &ConstExpr::i32_const(t.base as i32), t.blob.iter().copied());
     }
 
     let mut m = Module::new();
@@ -412,13 +440,26 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
 }
 
 /// The optional shims after `$await`, in function-index order: the http
-/// client (when the op set reaches 43..=50), then the env service.
-fn push_optional_shims(code: &mut CodeSection, g: P3Globals, habi: Option<&HttpAbi>, env: EnvImports) {
-    if let Some(h) = habi {
-        code.function(&shim_http(g, h));
+/// client (when the op set reaches 43..=50), the env service, then the
+/// http error helpers.
+fn push_optional_shims(
+    code: &mut CodeSection,
+    g: P3Globals,
+    http: Option<((&HttpAbi, &HttpErrTexts), HttpErrFns)>,
+    env: EnvImports,
+    f_env: Option<u32>,
+) {
+    if let Some(((h, t), fns)) = http {
+        code.function(&shim_http(g, h, t, fns));
     }
     if env.any() {
         code.function(&shim_env(g, env));
+    }
+    if let (Some(((_, t), fns)), Some(fe)) = (http, f_env) {
+        code.function(&shim_http_quote());
+        code.function(&shim_http_err(g, fns.quote));
+        code.function(&shim_http_hdr_check(t));
+        code.function(&shim_http_env_num(g, fe));
     }
 }
 
