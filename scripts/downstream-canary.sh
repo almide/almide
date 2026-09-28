@@ -72,24 +72,22 @@ mkdir -p "$work/tmp-baseline" "$work/tmp-candidate"
 
 # Warm the dependency source cache with the baseline compiler, so a
 # network failure shows up here as infra instead of as a compile verdict
-# later. `dep-path` fetches every dependency before it looks the name up.
-first_dep=$(cd "$work/src" && python3 - <<'PY'
-import tomllib
-with open("almide.toml", "rb") as f:
-    deps = tomllib.load(f).get("dependencies", {})
-print(next(iter(deps), ""))
-PY
-)
-if [ -n "$first_dep" ]; then
+# later. `dep-path` fetches EVERY dependency before it looks the name up, so
+# asking for a name no project has turns "fetch ok" into one exact message
+# (a real dependency name would not do: the almide.toml key and the package
+# name may differ, and the lookup then fails after a successful fetch).
+if (cd "$work/src" && python3 -c 'import sys,tomllib; sys.exit(0 if tomllib.load(open("almide.toml","rb")).get("dependencies") else 1)'); then
+  probe=__downstream_canary_probe__
   deps_ok=""
   for i in 1 2 3; do
-    if (cd "$work/baseline" && TMPDIR="$work/tmp-baseline" "$BASELINE_BIN" dep-path "$first_dep") >"$out/deps.log" 2>&1; then
+    (cd "$work/baseline" && TMPDIR="$work/tmp-baseline" "$BASELINE_BIN" dep-path "$probe") >"$out/deps.log" 2>&1
+    if grep -q "Dependency '$probe' not found" "$out/deps.log"; then
       deps_ok=yes; break
     fi
     sleep $((i * 10))
   done
   if [ -z "$deps_ok" ]; then
-    emit deps "-" "-" "infra" "dependency fetch failed: $(grep -m1 -i 'fail' "$out/deps.log" | cut -c1-200)"
+    emit deps "-" "-" "infra" "dependency fetch failed: $(grep -v '^[[:space:]]*$' "$out/deps.log" | tail -1 | cut -c1-200)"
     exit 0
   fi
 fi
