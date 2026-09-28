@@ -483,6 +483,23 @@ fn head_has_no_body_429_and_503_carry_their_reasons_and_a_pipelined_request_meet
     }
 }
 
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_response_header_holding_crlf_is_refused_with_500_on_native_and_the_embedded_lane() {
+    let (native, wasm, n_err, w_err) = on_both_legs(&[], |leg| vec![ask(leg.port, b"GET /split HTTP/1.1\r\n\r\n"), ask(leg.port, b"GET /fine HTTP/1.1\r\n\r\n")]);
+    for (leg, a, err) in [("native", &native, &n_err), ("wasm", &wasm, &w_err)] {
+        let resp = String::from_utf8_lossy(&a[0]);
+        assert!(resp.starts_with("HTTP/1.1 500 Internal Server Error\r\n"), "{leg}: {resp:?}");
+        assert!(!resp.contains("\r\nSet-Cookie"), "{leg}: the split reached the wire: {resp:?}");
+        assert!(a[1].ends_with(b"\r\n\r\nGET /fine "), "{leg}: {:?}", String::from_utf8_lossy(&a[1]));
+        assert!(
+            err.lines().any(|l| l.starts_with("http.serve: refused the response: response header X-A has a CR, LF or NUL")),
+            "{leg}: no stderr line: {err:?}"
+        );
+    }
+    assert_eq!(line_multiset(&n_err), line_multiset(&w_err));
+}
+
 /// The comparator itself, on constructed responses: it must reject every
 /// change C-367 observes and accept every change it leaves to the host.
 #[test]
