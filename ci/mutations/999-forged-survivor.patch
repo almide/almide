@@ -1,0 +1,10 @@
+diff --git a/crates/almide-wasm/src/fan.rs b/crates/almide-wasm/src/fan.rs
+index 7208f05c3..eb098b3ee 100644
+--- a/crates/almide-wasm/src/fan.rs
++++ b/crates/almide-wasm/src/fan.rs
+@@ -1,4 +1,4 @@
+-//! The deterministic fan combinators (C-004/C-005): sequential, LIST
++//! The deterministic fan combinators (C-004/C-005): sequential, LIST [FORGED SURVIVOR #2814]
+ //! ORDER, never wall-clock — semantics verbatim from the self-hosted
+ //! stdlib bodies (fan_map.almd / fan_any.almd) and the interp's
+ //! eval_fan_any / eval_fan:
