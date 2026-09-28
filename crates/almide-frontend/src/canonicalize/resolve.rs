@@ -25,6 +25,36 @@ pub fn scoped_bare_type_key(scope: Option<&str>, name: &str) -> Sym {
     sym(&format!("<in-scope:{}>|{}", scope.unwrap_or(""), name))
 }
 
+/// The key recording that the file `scope` (`None` = the entry program)
+/// declares a type under the bare name of a builtin (#2858): `type Int = ..`
+/// in a package's `src/int.almd`, `type Path = ..` in `main.almd`. A file's
+/// own declaration answers its bare spelling (module-system §4.5, "自分で
+/// 宣言した型"), so inside that file `Int` is the declared type in every
+/// position — a signature, a field, a record literal alike. Every OTHER file
+/// keeps the builtin for the bare spelling and reaches the type qualified
+/// (`int.Int`). Only a bare spelling is claimed: `Map[K, V]` applied to the
+/// builtin's arity stays the builtin (#2839). No source can spell the key.
+pub fn builtin_named_type_key(scope: Option<&str>, name: &str) -> Sym {
+    sym(&format!("<builtin-named-decl:{}>|{}", scope.unwrap_or(""), name))
+}
+
+/// Record [`builtin_named_type_key`] for each type `decls` declares under a
+/// builtin's bare name, before any declaration body or signature resolves —
+/// declaration order is not meaningful (#2645).
+pub fn register_builtin_named_type_keys(env: &mut crate::types::TypeEnv, decls: &[ast::Decl], scope: Option<&str>) {
+    for decl in decls {
+        if let ast::Decl::Type { name, .. } = decl
+            && builtin_type_head(name.as_str(), TypeSpelling::Bare).is_some()
+        {
+            env.types.insert(builtin_named_type_key(scope, name.as_str()), Ty::Named(*name, vec![]));
+        }
+    }
+}
+
+fn declares_builtin_named_type(known_types: Option<&HashMap<Sym, Ty>>, cur_mod: Option<&str>, name: &str) -> bool {
+    known_types.is_some_and(|types| types.contains_key(&builtin_named_type_key(cur_mod, name)))
+}
+
 /// Record, for the file `scope` whose import table is `env.import_table`,
 /// which module's type each bare type name means when exactly ONE module the
 /// file imports declares it (#2715). The bare-name fallback consults this
@@ -292,6 +322,11 @@ fn canonical_user_type_sym_bare(name: &str, types: &HashMap<Sym, Ty>, cur_mod: O
 pub fn resolve_type_expr_in(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, Ty>>, cur_mod: Option<&str>) -> Ty {
     match te {
         ast::TypeExpr::Simple { name } => match builtin_type_head(name.as_str(), TypeSpelling::Bare) {
+            // The file declares a type under this builtin's bare name: in
+            // that file the bare spelling is its own type (#2858).
+            Some(_) if declares_builtin_named_type(known_types, cur_mod, name.as_str()) => {
+                resolve_simple_type_other(name.as_str(), known_types, cur_mod)
+            }
             Some(head) => (head.build)(&[]),
             None => resolve_simple_type_other(name.as_str(), known_types, cur_mod),
         },
@@ -526,6 +561,11 @@ impl FileTypeScope {
 
     /// Where `name`, spelled as `spelling`, goes in this file.
     pub fn locate(&self, name: Sym, spelling: TypeSpelling) -> TypeNameOrigin {
+        // The file's own declaration answers a bare spelling before the
+        // builtin of the same name, as `resolve_type_expr_in` does (#2858).
+        if spelling == TypeSpelling::Bare && self.own.contains(&name) {
+            return TypeNameOrigin::OwnDecl;
+        }
         if builtin_type_head(name.as_str(), spelling).is_some() {
             return TypeNameOrigin::Builtin;
         }

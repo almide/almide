@@ -1,6 +1,6 @@
 # Module System Specification
 
-> Last updated: 2026-09-27. Verified by `spec/integration/modules/` (25 tests + 4 error tests), `spec/wasm_cross/stdlib_type_shadow.almd` and `tests/module_shadow_member_test.rs`.
+> Last updated: 2026-09-28. Verified by `spec/integration/modules/` (25 tests + 4 error tests), `spec/wasm_cross/stdlib_type_shadow.almd` and `tests/module_shadow_member_test.rs`.
 
 ---
 
@@ -332,12 +332,13 @@ stdlib の宣言だけ。** import していないモジュール(推移的依�
 | import していないモジュールだけが宣言 | **E029**。修飾して書くには、そのモジュールを import する |
 | 直接 import した 2 つ以上のモジュールが宣言 | 修飾して書く(`a.X` / `b.X`) |
 | 組み込みの型(`Int` `String` `List[T]` `Map[K, V]` など)・組み込みのプロトコル(`Eq` `Hash` `Codec` など)と同名 | 組み込みのまま。import していないモジュールが同名(`type Map` など)を宣言していても E029 にならない (#2839) |
+| 自分のファイルが組み込みの型と同名の型を宣言(`src/int.almd` の `type Int`、`main.almd` の `type Path` など) | そのファイルの中では、裸の `Int` はどの位置(シグネチャ・フィールド・レコードリテラル)でも自分の型。組み込みの `Int` はそのファイルでは書けないので、フィールドに `Int` を使う型は `type Int = { v: Int }` と書くと自己参照になる。他のファイルでは裸の `Int` は組み込みのままで、宣言した型は修飾して書く(`int.Int`)。引数つきの綴り(`Map[K, V]`)は組み込みのまま (#2858) |
 
 以前は裸の名前がプログラム全体で解決され、同名の型がいくつあるかと、モジュールの
 登録順(import 順・ディレクトリ順)で意味が変わった。触っていないファイルが、別の
 モジュールに同名の型が増えただけで壊れたり、OS によって結果が変わったりした。
 
-テスト: `tests/bare_type_visibility_test.rs`, `tests/own_type_forward_reference_test.rs`
+テスト: `tests/bare_type_visibility_test.rs`, `tests/own_type_forward_reference_test.rs`, `tests/rust_reserved_type_name_gate_test.rs`
 
 ---
 

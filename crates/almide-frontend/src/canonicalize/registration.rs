@@ -926,6 +926,7 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
     // `U`. Each reservation is dropped right before its declaration
     // registers, so the E020 duplicate check never sees it.
     let reserved = reserve_own_nominal_types(env, decls, prefix);
+    super::resolve::register_builtin_named_type_keys(env, decls, type_cur_mod(env, prefix));
     for decl in decls {
         match decl {
             ast::Decl::Type { name, .. } => {
