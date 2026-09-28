@@ -237,7 +237,14 @@ pending_self_host_ceiling = 5
 # element type, with the native runtime's draw constructions. Evidence:
 # spec/stdlib/random_test.almd and random_shuffle_pair_test.almd on the
 # structural test lane.
-pending_port_ceiling = 51
+# 2026-09-29 (#2743): 51 -> 43. The eight testing.assert_* rows (approx,
+# contains, err, gt, lt, none, ok, some) lose their structural legs: the leg
+# lowers them as native arms (crates/almide-wasm/src/testing.rs) — the
+# comparison or tag read through its own layout, then the self-host body's
+# `prim.die` line verbatim and exit 1. testing.assert_throws stays
+# native-only-forever. Evidence: the ten spec test files that rode the
+# incumbent for these asserts now run on the structural test lane.
+pending_port_ceiling = 43
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
 # HttpRequest readers (http.query_params / req_body / req_header / req_method /
@@ -677,62 +684,6 @@ reason-stock-p1 = "no wasm host binding for the module — run natively, or wait
 reason-structural = "host-surface"
 issue = "#1423"
 
-
-[[unavailable]]
-fn = "testing.assert_approx"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1423"
-
-[[unavailable]]
-fn = "testing.assert_contains"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1423"
-
-[[unavailable]]
-fn = "testing.assert_err"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1827"
-
-[[unavailable]]
-fn = "testing.assert_gt"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1423"
-
-[[unavailable]]
-fn = "testing.assert_lt"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1423"
-
-[[unavailable]]
-fn = "testing.assert_none"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1827"
-
-[[unavailable]]
-fn = "testing.assert_ok"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1827"
-
-[[unavailable]]
-fn = "testing.assert_some"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1423"
 
 [[unavailable]]
 fn = "testing.assert_throws"

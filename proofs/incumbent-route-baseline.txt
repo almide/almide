@@ -16,22 +16,9 @@
 #     fix can expose a second one in the same file (the row keeps its file).
 # Files NEITHER leg serves are proofs/wasm-fallback-baseline.txt's, not this ledger's.
 build :: spec/wasm_cross/inplace_clear_alias_field.almd :: string-clear-nonvar
-test :: spec/lang/fallible_hof_test.almd :: call:testing.assert_contains
-test :: spec/lang/fallible_lambda_test.almd :: call:testing.assert_contains
-test :: spec/lang/fallible_marker_test.almd :: call:testing.assert_contains
-test :: spec/lang/for_in_head_unwrap_test.almd :: call:testing.assert_contains
 test :: spec/lang/guard_else_err_unwrap_test.almd :: interp-part:Unit
 test :: spec/lang/map_literal_test.almd :: forin-map-nontuple
 test :: spec/lang/matrix_test.almd :: binop:MulMatrix
 test :: spec/lang/option_marker_test.almd :: call:testing.assert_contains
 test :: spec/lang/unwrap_operators_test.almd :: expr:OptionalChain
 test :: spec/stdlib/bytes_typed_test.almd :: expr:Hole
-test :: spec/stdlib/coverage_testing_test.almd :: call:testing.assert_contains
-test :: spec/stdlib/fs_fold_lines_chunked_test.almd :: call:testing.assert_err
-test :: spec/stdlib/fs_fold_lines_int_acc_test.almd :: call:testing.assert_err
-test :: spec/stdlib/fs_if_exists_test.almd :: call:testing.assert_none
-test :: spec/stdlib/fs_streaming_test.almd :: call:testing.assert_err
-test :: spec/stdlib/option_to_result_generic_test.almd :: call:testing.assert_contains
-test :: spec/stdlib/random_choice_pair_test.almd :: call:testing.assert_contains
-test :: spec/stdlib/testing_result_layout_test.almd :: call:testing.assert_ok
-test :: spec/stdlib/testing_semantics_manifest_test.almd :: call:testing.assert_gt
