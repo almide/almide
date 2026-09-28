@@ -635,7 +635,7 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
     (i32.eqz (local.get $errno)))
 
   ;; io.read_line() — the WASI stdin-line floor. Reads fd 0 BYTE-BY-BYTE into a scratch buffer
-  ;; until a '\n' (EXCLUDED from the result) or EOF, strips a trailing '\r', then copies the bytes
+  ;; until a '\n' (EXCLUDED from the result) or EOF, strips every trailing '\r', then copies the bytes
   ;; into a fresh OWNED canonical String via $rtf_str — matching native
   ;; read_line().trim_end_matches('\n').trim_end_matches('\r'). The SEVENTH sandbox exit
   ;; (Capability::Stdin). EOF with no bytes yields the empty String. Byte-at-a-time so it never
@@ -662,11 +662,14 @@ pub(crate) fn preamble_wasi_fs_wat() -> String {
       (br_if $done (i32.eq (local.get $b) (i32.const 10)))
       (local.set $n (i32.add (local.get $n) (i32.const 1)))
       (br $l)))
-    ;; strip a trailing '\r' (CRLF line endings).
-    (if (i32.and (i32.gt_u (local.get $n) (i32.const 0))
-                 (i32.eq (i32.load8_u (i32.add (local.get $buf) (i32.sub (local.get $n) (i32.const 1))))
-                         (i32.const 13)))
-      (then (local.set $n (i32.sub (local.get $n) (i32.const 1)))))
+    ;; strip EVERY trailing '\r' — native's `trim_end_matches('\r')` is a loop, so
+    ;; "ab\r\r\n" reads "ab", not "ab\r" (#2813).
+    (block $crdone (loop $cr
+      (br_if $crdone (i32.eqz (local.get $n)))
+      (br_if $crdone (i32.ne (i32.load8_u (i32.add (local.get $buf) (i32.sub (local.get $n) (i32.const 1))))
+                             (i32.const 13)))
+      (local.set $n (i32.sub (local.get $n) (i32.const 1)))
+      (br $cr)))
     (call $rtf_str (local.get $buf) (local.get $n)))
 
   ;; io.read_n_bytes(n) -> List[Int] — the WASI stdin-N-bytes floor. Reads UP TO $want bytes from fd 0
