@@ -161,7 +161,7 @@
 3287	spec/wasm_cross/fallible_tuple_value_tail.almd
 2480	spec/wasm_cross/fan_any_allfail.almd
 3720	spec/wasm_cross/fan_any_early_winner.almd
-!	spec/wasm_cross/fan_arm_unwrap_or.almd
+3731	spec/wasm_cross/fan_arm_unwrap_or.almd
 2486	spec/wasm_cross/fan_block_err_list_order.almd
 5569	spec/wasm_cross/fan_deterministic.almd
 4116	spec/wasm_cross/fan_effect_mapper.almd
@@ -169,8 +169,8 @@
 2748	spec/wasm_cross/fan_map_err.almd
 2713	spec/wasm_cross/fan_map_inline_err.almd
 5375	spec/wasm_cross/fan_map_inline_lambda.almd
-!	spec/wasm_cross/fan_map_nested_combinators.almd
-!	spec/wasm_cross/fan_map_parallel_scalar.almd
+6516	spec/wasm_cross/fan_map_nested_combinators.almd
+8595	spec/wasm_cross/fan_map_parallel_scalar.almd
 11133	spec/wasm_cross/fan_prefetch_fs.almd
 3615	spec/wasm_cross/fan_pure_thunks.almd
 6559	spec/wasm_cross/fan_race_mapper.almd

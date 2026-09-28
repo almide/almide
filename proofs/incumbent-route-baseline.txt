@@ -16,11 +16,6 @@
 #     fix can expose a second one in the same file (the row keeps its file).
 # Files NEITHER leg serves are proofs/wasm-fallback-baseline.txt's, not this ledger's.
 build :: examples/dotenv-check.almd :: expr:Continue
-build :: research/benchmark/perf/fannkuchredux/fannkuchredux.almd :: bind:unmapped
-build :: research/benchmark/perf/hot-issues-2026-09-10/fanblock.almd :: bind:unmapped
-build :: spec/wasm_cross/fan_arm_unwrap_or.almd :: bind:unmapped
-build :: spec/wasm_cross/fan_map_nested_combinators.almd :: bind:unmapped
-build :: spec/wasm_cross/fan_map_parallel_scalar.almd :: bind:unmapped
 build :: spec/wasm_cross/fs_call_head_family.almd :: call:fs.fold_lines_range
 build :: spec/wasm_cross/inplace_clear_alias_field.almd :: string-clear-nonvar
 test :: spec/integration/codegen_functional_test.almd :: list-hof-nonlambda
@@ -35,8 +30,6 @@ test :: spec/lang/edge_cases_test.almd :: call:list.partition
 test :: spec/lang/fallible_hof_test.almd :: call:testing.assert_contains
 test :: spec/lang/fallible_lambda_test.almd :: call:testing.assert_contains
 test :: spec/lang/fallible_marker_test.almd :: call:testing.assert_contains
-test :: spec/lang/fan_arm_unwrap_or_test.almd :: bind:unmapped
-test :: spec/lang/fan_let_capture_scope_test.almd :: bind:unmapped
 test :: spec/lang/fan_value_regression_test.almd :: list-hof-nonlambda
 test :: spec/lang/for_in_head_unwrap_test.almd :: call:testing.assert_contains
 test :: spec/lang/for_test.almd :: expr:Continue
