@@ -18,6 +18,10 @@ pub mod package_keys;
 /// of the leg's front, split out for the file budget).
 #[path = "eta.rs"]
 mod eta;
+/// #2747: surface forms rewritten to ones the arms lower (map-pair
+/// loops, `?.`).
+#[path = "front_desugar.rs"]
+mod front_desugar;
 
 /// Emit a core wasm module for `ir`, or say precisely why not yet.
 /// Two passes: the first loads the WHOLE linked registry graph (so
@@ -54,6 +58,8 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     // (#1423 stage 4: the html/path SafeHtml/SafePath rows).
     let erased = crate::newtype::erase_transparent_aliases(ir);
     let ir = erased.as_ref().unwrap_or(ir);
+    let desugared = front_desugar::desugar(ir);
+    let ir = desugared.as_ref().unwrap_or(ir);
     // #2750: a fn VALUE as a HOF callback becomes the literal lambda the
     // arms inline (eta.rs) — one HOF lowering, never a second call path.
     let expanded = eta::eta_expand_callbacks(ir);
