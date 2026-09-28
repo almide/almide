@@ -54,7 +54,7 @@ scan	3
 stmt:Assign	11
 stmt:BindDestructure	16
 stmt:Comment	160
-stmt:Expr:Block	70
+stmt:Expr:Block	71
 stmt:Expr:ForIn	53
 stmt:Expr:If	24
 stmt:Expr:Match	2
@@ -69,7 +69,7 @@ stmt:Expr:call-arg:StringInterp	21
 stmt:Expr:call:target:Computed	1
 stmt:FieldAssign	1
 stmt:Guard	9
-stmt:IndexAssign	8
+stmt:IndexAssign	9
 tail:BinOp	710
 tail:Block	17
 tail:If	4690

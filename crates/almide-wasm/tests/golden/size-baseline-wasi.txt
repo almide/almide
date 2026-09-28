@@ -45,6 +45,7 @@
 2308	spec/wasm_cross/bytes_index_bounds_read_past_end.almd
 2839	spec/wasm_cross/bytes_index_bounds_write_negative.almd
 2892	spec/wasm_cross/bytes_index_bounds_write_past_end.almd
+3672	spec/wasm_cross/bytes_index_write_truncates.almd
 9672	spec/wasm_cross/bytes_negative_offset_family.almd
 2233	spec/wasm_cross/bytes_new_exhaustion.almd
 2557	spec/wasm_cross/bytes_pad_ceiling_oom.almd
