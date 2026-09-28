@@ -41,6 +41,11 @@
 6418	spec/wasm_cross/bytes_f16.almd
 22843	spec/wasm_cross/bytes_f16_offset_overflow.almd
 1589	spec/wasm_cross/bytes_from_list_param.almd
+1821	spec/wasm_cross/bytes_index_bounds_read_negative.almd
+1821	spec/wasm_cross/bytes_index_bounds_read_past_end.almd
+2380	spec/wasm_cross/bytes_index_bounds_write_negative.almd
+2425	spec/wasm_cross/bytes_index_bounds_write_past_end.almd
+3185	spec/wasm_cross/bytes_index_write_truncates.almd
 9205	spec/wasm_cross/bytes_negative_offset_family.almd
 1750	spec/wasm_cross/bytes_new_exhaustion.almd
 2082	spec/wasm_cross/bytes_pad_ceiling_oom.almd
@@ -199,12 +204,13 @@
 2396	spec/wasm_cross/fold_heap_acc.almd
 1891	spec/wasm_cross/for_in_forms.almd
 !	spec/wasm_cross/fs_call_head_family.almd
-13393	spec/wasm_cross/fs_composition_family.almd
+13395	spec/wasm_cross/fs_composition_family.almd
 8906	spec/wasm_cross/fs_fallible_stream_callback.almd
 6987	spec/wasm_cross/fs_glob_segments.almd
 5784	spec/wasm_cross/fs_list_dir_multipass.almd
 6114	spec/wasm_cross/fs_metadata_family.almd
 2979	spec/wasm_cross/fs_preopen_resolve.almd
+5320	spec/wasm_cross/fs_read_bytes_raw_call_head.almd
 9269	spec/wasm_cross/fs_read_directory_errno.almd
 5410	spec/wasm_cross/fs_read_lines.almd
 8223	spec/wasm_cross/fs_read_text_utf8.almd
@@ -228,6 +234,7 @@
 2154	spec/wasm_cross/generic_chain_unwrap_or.almd
 2184	spec/wasm_cross/generic_concat.almd
 2635	spec/wasm_cross/generic_fn_in_inferred_lambda.almd
+5456	spec/wasm_cross/generic_pattern_binds_instanced.almd
 4953	spec/wasm_cross/generic_protocol_conformance.almd
 3168	spec/wasm_cross/generic_record_anon_field.almd
 2525	spec/wasm_cross/generic_record_field_size.almd
@@ -272,6 +279,7 @@
 3551	spec/wasm_cross/heap_result_tuple_return.almd
 3070	spec/wasm_cross/hex_two_module_link.almd
 2879	spec/wasm_cross/hof_closure_string_tail.almd
+28288	spec/wasm_cross/hof_fn_value_callbacks.almd
 4536	spec/wasm_cross/host_floor_string_alloc.almd
 10053	spec/wasm_cross/http_response_headers.almd
 972	spec/wasm_cross/i64_min_literal.almd
@@ -543,7 +551,7 @@
 3871	spec/wasm_cross/positional_variant_field_literal.almd
 2301	spec/wasm_cross/prim_alloc_count_domain.almd
 2163	spec/wasm_cross/process_args.almd
-2277	spec/wasm_cross/protocol_ufcs_inferred_lambda.almd
+2279	spec/wasm_cross/protocol_ufcs_inferred_lambda.almd
 5431	spec/wasm_cross/pure_bang_propagation.almd
 2079	spec/wasm_cross/pure_fn_output_and_assert_abort.almd
 2740	spec/wasm_cross/qq_record_fallback.almd

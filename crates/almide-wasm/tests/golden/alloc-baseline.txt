@@ -41,6 +41,11 @@
 66800	spec/wasm_cross/bytes_f16.almd
 67648	spec/wasm_cross/bytes_f16_offset_overflow.almd
 65840	spec/wasm_cross/bytes_from_list_param.almd
+65920	spec/wasm_cross/bytes_index_bounds_read_negative.almd
+65920	spec/wasm_cross/bytes_index_bounds_read_past_end.almd
+66016	spec/wasm_cross/bytes_index_bounds_write_negative.almd
+66048	spec/wasm_cross/bytes_index_bounds_write_past_end.almd
+66128	spec/wasm_cross/bytes_index_write_truncates.almd
 66656	spec/wasm_cross/bytes_negative_offset_family.almd
 65888	spec/wasm_cross/bytes_new_exhaustion.almd
 65888	spec/wasm_cross/bytes_pad_ceiling_oom.almd
@@ -205,6 +210,7 @@
 ~	spec/wasm_cross/fs_list_dir_multipass.almd
 ~	spec/wasm_cross/fs_metadata_family.almd
 ~	spec/wasm_cross/fs_preopen_resolve.almd
+~	spec/wasm_cross/fs_read_bytes_raw_call_head.almd
 ~	spec/wasm_cross/fs_read_directory_errno.almd
 ~	spec/wasm_cross/fs_read_lines.almd
 ~	spec/wasm_cross/fs_read_text_utf8.almd
@@ -228,6 +234,7 @@
 66064	spec/wasm_cross/generic_chain_unwrap_or.almd
 65984	spec/wasm_cross/generic_concat.almd
 66176	spec/wasm_cross/generic_fn_in_inferred_lambda.almd
+66496	spec/wasm_cross/generic_pattern_binds_instanced.almd
 66496	spec/wasm_cross/generic_protocol_conformance.almd
 66224	spec/wasm_cross/generic_record_anon_field.almd
 66064	spec/wasm_cross/generic_record_field_size.almd
@@ -272,6 +279,7 @@
 66464	spec/wasm_cross/heap_result_tuple_return.almd
 65920	spec/wasm_cross/hex_two_module_link.almd
 66544	spec/wasm_cross/hof_closure_string_tail.almd
+87376	spec/wasm_cross/hof_fn_value_callbacks.almd
 ~	spec/wasm_cross/host_floor_string_alloc.almd
 67456	spec/wasm_cross/http_response_headers.almd
 65760	spec/wasm_cross/i64_min_literal.almd
