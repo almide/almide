@@ -698,7 +698,13 @@ fn get_constructor_payload_tys_from_subject(ctx: &LowerCtx, ctor_name: &str, sub
 }
 
 fn resolve_record_field_ty(ctx: &LowerCtx, record_name: &str, field_name: &str) -> Ty {
-    if let Some(type_def) = ctx.env.types.get(&sym(record_name)) {
+    // The type keyed by the pattern's name answers only when it is not a
+    // VARIANT: in `type Opt = | Opt { n: Int } | Empty` the key `Opt` is the
+    // variant itself, which has no field `n`, so the binder lowered as
+    // `Unknown` and both wasm legs refused the match while native let rustc
+    // infer it (#2859). The case of that name is the ctor lookup below.
+    let type_def = ctx.env.types.get(&sym(record_name)).filter(|td| !matches!(td, Ty::Variant { .. }));
+    if let Some(type_def) = type_def {
         ctx.resolve_field_ty(type_def, field_name)
     } else if let Some((_, case)) = ctx.env.lookup_ctor_in(&sym(record_name), ctx.current_module.map(|s| s.as_str())) {
         if let crate::types::VariantPayload::Record(fs) = &case.payload {
