@@ -304,7 +304,7 @@ fn http_call_run(
     body: &str,
     headers: &[(String, String)],
 ) -> Result<(), String> {
-    let u = http_parse_url(url)?;
+    let u = http_prepare(method, url, headers)?;
     let addrs: Vec<std::net::SocketAddr> = std::net::ToSocketAddrs::to_socket_addrs(&(u.host.as_str(), u.port))
         .map_err(|e| http_call_io_error(sh, &e, "connection"))?
         .collect();
@@ -456,7 +456,7 @@ pub fn http_call_spawn(
             total_ms, idle_ms
         ));
     }
-    http_parse_url(url)?;
+    http_prepare(method, url, &headers)?;
     let shared = std::sync::Arc::new(AlmideHttpCallShared {
         state: std::sync::Mutex::new(AlmideHttpCallState {
             head: None,

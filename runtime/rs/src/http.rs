@@ -383,10 +383,11 @@ pub fn almide_http_request_stream_impl(
     headers: &AlmideMap<String, String>,
     mut on_chunk: impl FnMut(String),
 ) -> Result<(), String> {
-    // The shared core parses the URL and writes the request, so the
-    // streaming client cannot drift from the buffered ones (#2828).
+    // The shared core prepares (URL, method and headers refused before any
+    // dial), routes (proxies, connect timeout) and writes the request, so
+    // the streaming client cannot drift from the buffered ones (#2828).
     let pairs = header_pairs(headers);
-    let u = http_parse_url(url)?;
+    let u = http_prepare(method, url, &pairs)?;
     // Long read timeout — SSE responses can be quiet between events.
     let stream = TcpStream::connect((u.host.as_str(), u.port)).map_err(|e| format!("connection failed: {}", e))?;
     stream.set_read_timeout(client_read_timeout(120)).ok();
