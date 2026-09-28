@@ -207,6 +207,66 @@ fn the_incumbent_leg_reprs_a_module_record_named_like_a_builtin() {
     );
 }
 
+/// #2870: the incumbent leg's generated helpers (`fn __repr_quote(s: String)`,
+/// `fn __repr_rec_<R>(e: <R>)`, the drop sweeps) are appended to the ENTRY
+/// program and checked in its scope, where the file's own `type String`
+/// answers a bare `String` (#2858). Generated source now spells each builtin
+/// so that only the builtin answers it, and the entry program's own type as
+/// `self.<R>`. Every declarable bare builtin head is a cell, enumerated from
+/// the resolver's `BUILTIN_TYPE_HEADS`: the entry program declares a record
+/// under that name and prints it, and the incumbent leg must print what the
+/// structural leg and native print.
+#[test]
+fn the_incumbent_leg_reprs_an_entry_record_named_like_every_builtin() {
+    use almide_frontend::canonicalize::resolve::{BUILTIN_TYPE_HEADS, TypeSpelling};
+    let mut names: Vec<&str> = BUILTIN_TYPE_HEADS
+        .iter()
+        .filter(|h| h.arity.sample() == TypeSpelling::Bare)
+        .map(|h| h.name)
+        .filter(|n| n.chars().all(|c| c.is_ascii_alphanumeric()) && n.starts_with(|c: char| c.is_ascii_uppercase()))
+        .collect();
+    names.dedup();
+    assert!(names.len() >= 18 && names.contains(&"String") && names.contains(&"Int"), "the builtin table looks truncated: {names:?}");
+    let mut failures = Vec::new();
+    for name in &names {
+        // The payload is a builtin the cell does not declare: `type Bool`
+        // carries an Int, every other cell a Bool.
+        let (field, ty, value) = if *name == "Bool" { ("n", "Int", "7") } else { ("ok", "Bool", "true") };
+        let program = format!(
+            "type {name} = {{ {field}: {ty} }}\n\neffect fn main() -> Unit = {{\n  let f = {name} {{ {field}: {value} }}\n  println(\"${{f}}\")\n}}\n"
+        );
+        let want = format!("{name} {{ {field}: {value} }}\n");
+        let root = tempfile::tempdir().expect("tempdir");
+        write(&root.path().join("t.almd"), &program);
+        let legs: [(&str, &[&str], bool); 3] = [
+            ("incumbent", &["run", "t.almd", "--target", "wasm"], true),
+            ("structural", &["run", "t.almd", "--target", "wasm"], false),
+            ("native", &["run", "t.almd"], false),
+        ];
+        for (leg, args, incumbent) in legs {
+            // #2880: `main`'s own `-> Unit` names the cell's record there, and
+            // native codegen emits it as main's Ok type.
+            if leg == "native" && *name == "Unit" {
+                continue;
+            }
+            let mut cmd = Command::new(almide());
+            cmd.current_dir(root.path()).args(args);
+            if incumbent {
+                cmd.env("ALMIDE_WASM_INCUMBENT", "1");
+            }
+            let out = cmd.output().expect("run almide");
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            if !out.status.success() || stdout != want {
+                failures.push(format!(
+                    "`type {name}` on the {leg} leg: {stdout:?}\n{}",
+                    String::from_utf8_lossy(&out.stderr).lines().filter(|l| !l.starts_with("[almide]")).take(4).collect::<Vec<_>>().join("\n")
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} cell(s) failed:\n{}", failures.len(), failures.join("\n\n"));
+}
+
 /// The issue's reported cell, alone and end to end, repr included: the
 /// printed type name is the declared one, not the mangle.
 #[test]
