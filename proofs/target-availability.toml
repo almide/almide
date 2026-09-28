@@ -219,7 +219,14 @@ pending_self_host_ceiling = 9
 # (clock_time_get with clock id 1, the import op 36 already uses) and the
 # p2/p3 components (wasi:clocks/monotonic-clock). Evidence:
 # spec/wasm_cross/datetime_monotonic_ns.almd.
-pending_port_ceiling = 54
+# 2026-09-29 (#2743): 54 -> 46. The eight testing.assert_* rows (approx,
+# contains, err, gt, lt, none, ok, some) lose their structural legs: the leg
+# lowers them as native arms (crates/almide-wasm/src/testing.rs) — the
+# comparison or tag read through its own layout, then the self-host body's
+# `prim.die` line verbatim and exit 1. testing.assert_throws stays
+# native-only-forever. Evidence: the ten spec test files that rode the
+# incumbent for these asserts now run on the structural test lane.
+pending_port_ceiling = 46
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
 # HttpRequest readers (http.query_params / req_body / req_header / req_method /
@@ -708,62 +715,6 @@ class = "pending-port"
 reason = "host-surface"
 issue = "#1423"
 
-
-[[unavailable]]
-fn = "testing.assert_approx"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1423"
-
-[[unavailable]]
-fn = "testing.assert_contains"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1423"
-
-[[unavailable]]
-fn = "testing.assert_err"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1827"
-
-[[unavailable]]
-fn = "testing.assert_gt"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1423"
-
-[[unavailable]]
-fn = "testing.assert_lt"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1423"
-
-[[unavailable]]
-fn = "testing.assert_none"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1827"
-
-[[unavailable]]
-fn = "testing.assert_ok"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1827"
-
-[[unavailable]]
-fn = "testing.assert_some"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1423"
 
 [[unavailable]]
 fn = "testing.assert_throws"
