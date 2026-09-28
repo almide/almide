@@ -212,6 +212,13 @@ pub struct TypeEnv {
     /// bare alias instead of colliding with it (#433): unqualified use resolves
     /// to the local type, the dependency's stays reachable via its qualified key.
     pub prefixed_bare_aliases: std::collections::HashSet<Sym>,
+    /// `module.Type` keys written by the bundled-stdlib PRE-registration
+    /// (`register_bundled_types`) and not yet re-declared by the module that
+    /// holds that key in this program (#2843). A package's own `src/url.almd`
+    /// is the module keyed `url` — the stdlib `url` module is then not
+    /// loaded — so its `type Url` replaces the pre-registered `url.Url`
+    /// instead of being a second declaration of it (E020).
+    pub stdlib_preregistered_types: std::collections::HashSet<Sym>,
     /// Types that implement the Eq protocol (via `deriving Eq`)
     pub eq_types: std::collections::HashSet<Sym>,
     /// Structural bounds for generic type parameters: TypeVar name → OpenRecord constraint
@@ -305,6 +312,7 @@ impl TypeEnv {
             var_decl_locs: std::collections::HashMap::new(),
             top_lets: std::collections::HashMap::new(),
             prefixed_bare_aliases: std::collections::HashSet::new(),
+            stdlib_preregistered_types: std::collections::HashSet::new(),
             eq_types: std::collections::HashSet::new(),
             structural_bounds: std::collections::HashMap::new(),
             generic_protocol_bounds: std::collections::HashMap::new(),

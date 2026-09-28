@@ -211,6 +211,7 @@ pub fn register_bundled_types(module: &str, env: &mut crate::types::TypeEnv) {
                     name, ty, deriving, generics, prefix: Some(module), visibility: *visibility,
                 },
             );
+            env.stdlib_preregistered_types.insert(sym(&crate::canonicalize::registration::prefixed_key(Some(module), name)));
         }
     }
 }
