@@ -412,6 +412,16 @@ impl TypeTable {
             .iter()
             .chain(ir.modules.iter().flat_map(|m| m.type_decls.iter()))
             .collect();
+        // STRUCTURAL TWINS (#2888): two concrete decls with the same declared
+        // name and the same shape are ONE type to the checker — a `recpkg.Msg`
+        // flows into a `List[wire.Msg]` parameter and `check` accepts. The
+        // criterion is the IR's own (`IrTypeDecl::structural_fingerprint`),
+        // the one the native flatten pass merges twins by, so every twin
+        // shares ONE table index: the index is the type's identity here, and
+        // a second index for the same type was a `ty-mismatch` wall on a
+        // program both native and the checker accept. Genuinely distinct
+        // same-name types (different shapes) keep their own index.
+        let mut twin_of: HashMap<(String, String), u32> = HashMap::new();
         for decl in &all_decls {
             if matches!(decl.kind, IrTypeDeclKind::Alias { .. }) {
                 continue;
@@ -420,7 +430,13 @@ impl TypeTable {
                 table.generic_decls.insert(decl.name.as_str().to_string(), (*decl).clone());
                 continue;
             }
+            let twin_key = (decl.declared_name().to_string(), decl.structural_fingerprint());
+            if let Some(&idx) = twin_of.get(&twin_key) {
+                table.by_name.insert(decl.name.as_str().to_string(), idx);
+                continue;
+            }
             let idx = table.defs.borrow().len() as u32;
+            twin_of.insert(twin_key, idx);
             table.defs.borrow_mut().push(NamedDef::Excluded);
             table.names.borrow_mut().push(decl.name.as_str().to_string());
             table.by_name.insert(decl.name.as_str().to_string(), idx);
