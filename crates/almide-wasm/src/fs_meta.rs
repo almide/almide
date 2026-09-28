@@ -313,7 +313,7 @@ impl Emitter<'_> {
     }
 
     /// ret on stack → Result[Int, String]: ok rides an 8-byte LE buffer.
-    fn fs_result_i64(&mut self) -> Result<SliceTy, EmitError> {
+    pub(crate) fn fs_result_i64(&mut self) -> Result<SliceTy, EmitError> {
         let hret = self.hold_i64()?;
         let hb = self.hold_i32()?;
         let mut i = self.f.instructions();

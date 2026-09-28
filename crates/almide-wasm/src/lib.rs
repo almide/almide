@@ -194,6 +194,7 @@ mod rc_ownership;
 mod region;
 mod sums;
 mod random;
+mod fs_range;
 mod tco;
 mod types_table;
 mod value;

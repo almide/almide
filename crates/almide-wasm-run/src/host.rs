@@ -355,7 +355,9 @@ fn fs_dispatch_meta(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         Err(m) => err_s(m),
     };
     match op {
-        17 => match std::fs::metadata(a) {
+        // 62 is fold_lines_chunked's size probe: op 17's body under the
+        // chunked call's name (#2744), native's `metadata` before the workers.
+        17 | 62 => match std::fs::metadata(a) {
             Ok(m) => ok_i64(m.len() as i64),
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
@@ -741,13 +743,16 @@ fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     if matches!(op, 10..=14 | 51 | 52 | 63) {
         return fs_dispatch_r2(op, a);
     }
-    if op >= 17 {
+    if op >= 17 && op != 61 {
         return fs_dispatch_meta(op, a, b);
     }
     let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
     let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
     match op {
-        1 => match std::fs::read_to_string(a) {
+        // 61 is fold_lines_range (and fold_lines_chunked's worker read): op
+        // 1's body under the range's name (#2744) — the guest walks the text's
+        // byte ranges.
+        1 | 61 => match std::fs::read_to_string(a) {
             Ok(t) => ok_text(t),
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },

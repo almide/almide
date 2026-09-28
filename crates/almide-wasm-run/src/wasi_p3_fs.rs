@@ -307,9 +307,12 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>, f_e
     // open-at(read) then a sync stream-read loop into a cabi_realloc'd
     // buffer (grown by doubling; the bump never frees). DROPPED (n=0)
     // is EOF: stream bytes arrive in order, so total is the whole file.
+    // 61 (fold_lines_range, and fold_lines_chunked's worker read) is op 1
+    // under the range's call name (#2744): the same read.
     i.local_get(op).i32_const(1).i32_eq();
     i.local_get(op).i32_const(13).i32_eq().i32_or();
     i.local_get(op).i32_const(14).i32_eq().i32_or();
+    i.local_get(op).i32_const(61).i32_eq().i32_or();
     // 63 (read_bytes_raw) is op 14 under the writer's call name (#2890).
     i.local_get(op).i32_const(63).i32_eq().i32_or();
     i.if_(BlockType::Empty);
