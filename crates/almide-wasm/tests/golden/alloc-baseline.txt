@@ -339,6 +339,7 @@
 65856	spec/wasm_cross/let_wildcard_discard.almd
 65904	spec/wasm_cross/letbound_variant_match.almd
 65920	spec/wasm_cross/licm_zero_trip_hoist.almd
+~	spec/wasm_cross/line_endings_bare_cr.almd
 152288	spec/wasm_cross/list_arg_map_view.almd
 65952	spec/wasm_cross/list_call_element.almd
 66112	spec/wasm_cross/list_chunk_windows.almd
