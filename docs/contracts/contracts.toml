@@ -1099,6 +1099,7 @@ evidence  = [
   { path = "spec/wasm_cross/stdlib_type_shadow.almd", class = "fixture" },
   { path = "spec/wasm_cross/stdlib_opaque_shadow.almd", class = "fixture" },
   { path = "tests/variant_case_payload_ownership_test.rs", class = "fixture", name = "a_let_bound_list_moved_into_a_case_payload_survives_the_producer_frame" },
+  { path = "tests/wasm_runtime_test_parts/p2.rs", class = "fixture", name = "wasm_cross_module_self_named_record_case_ctor" },
 ]
 [[contract]]
 id        = "C-077"
