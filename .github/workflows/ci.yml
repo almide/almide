@@ -2275,15 +2275,28 @@ jobs:
   # surviving mutant or a no-longer-applying patch is red (refresh, never
   # retire).
   #
-  # #1619: PR runs are INCREMENTAL — only mutants whose patched files (or
-  # patch file, or the shared killer infrastructure) intersect the PR's
-  # change set run, so most PRs finish in seconds instead of ~45 min. The
-  # FULL 40-mutant sweep lives in mutation-sweep.yml (develop pushes in an
-  # uncancelable concurrency group + nightly), where it actually completes —
-  # under ci.yml's cancel-in-progress group the develop sweep was routinely
-  # canceled mid-run, which is standing evidence that never lands. Push
-  # events therefore skip this job entirely (skipped = success for the
-  # required-check, and the sweep workflow owns the push-side evidence).
+  # The PR / develop split (#1619, #2814):
+  #   PR (this job) — INCREMENTAL scope: only mutants whose patched files (or
+  #     patch file, or the killer suites' own inputs — see the script's INFRA
+  #     rule) intersect the PR's change set. Within that scope the mutants
+  #     inside a function the diff changed run first, each net run tries the
+  #     recorded killer suite first, and a 28-min budget stops STARTING
+  #     mutants before the job cap. A budget stop is not a pass and not a
+  #     cancellation: the log, a ::warning:: and the step summary say
+  #     "PARTIAL: ran N of M in-scope mutants; the rest are judged by
+  #     mutation-sweep on develop", naming each deferred mutant.
+  #   develop (mutation-sweep.yml) — the FULL sweep, no budget, 4 shards, in
+  #     an uncancelable concurrency group + nightly. That is the standing
+  #     evidence and the only run that stamps proofs/mutation-score.toml —
+  #     under ci.yml's cancel-in-progress group the develop sweep was
+  #     routinely canceled mid-run, which is standing evidence that never
+  #     lands. Push events therefore skip this job entirely (skipped =
+  #     success for the required-check).
+  # #2814 measured the gap this closes: every wasm PR regenerates the golden
+  # baselines under crates/almide-wasm/tests/golden/, which the old rule read
+  # as killer infrastructure, so #2805 / #2806 ran all 41 mutants (~80 s
+  # each after a ~7-min cold build) and were cancelled at the 45-min cap
+  # with 31 / 32 caught and none survived.
   commissioned-mutation-gate:
     name: Commissioned mutation gate (the net keeps its teeth)
     needs: changes
@@ -2309,9 +2322,10 @@ jobs:
         with:
           shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
           save-if: false
-      - name: in-scope mutants must be caught (full sweep lives in mutation-sweep.yml)
+      - name: in-scope mutants must be caught (budgeted; full sweep lives in mutation-sweep.yml)
         run: |
           git fetch -q origin "${{ github.base_ref }}"
           ALMIDE_MUTATION_SCOPE=incremental \
           ALMIDE_MUTATION_BASE="origin/${{ github.base_ref }}" \
+          ALMIDE_MUTATION_BUDGET_SECS=1680 \
             bash scripts/check-mutation-gate.sh

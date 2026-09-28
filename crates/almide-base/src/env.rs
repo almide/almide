@@ -154,6 +154,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_MONO_DEBUG", Flag, Dbg, "print the monomorphisation discovery and instantiation decisions"),
     sw("ALMIDE_MP_PROBE", Flag, Dbg, "print the mut-param analysis decisions (IR)"),
     sw("ALMIDE_MUTATION_BASE", Value, Ci, "the base ref the mutation gate diffs against"),
+    sw("ALMIDE_MUTATION_BUDGET_SECS", Value, Ci, "the mutation gate's time budget in seconds: past it no new mutant starts and the rest are named as deferred (0 / unset = none)"),
     sw("ALMIDE_MUTATION_SCOPE", Value, Ci, "which mutation set the mutation gate runs"),
     sw("ALMIDE_MUTATION_SHARD", Value, Ci, "this job's shard index of the mutation gate"),
     sw("ALMIDE_MUTATION_SHARDS", Value, Ci, "how many shards the mutation gate is split into"),

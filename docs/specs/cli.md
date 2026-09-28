@@ -997,6 +997,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_MONO_DEBUG` | debug | print the monomorphisation discovery and instantiation decisions |
 | `ALMIDE_MP_PROBE` | debug | print the mut-param analysis decisions (IR) |
 | `ALMIDE_MUTATION_BASE=value` | ci | the base ref the mutation gate diffs against |
+| `ALMIDE_MUTATION_BUDGET_SECS=value` | ci | the mutation gate's time budget in seconds: past it no new mutant starts and the rest are named as deferred (0 / unset = none) |
 | `ALMIDE_MUTATION_SCOPE=value` | ci | which mutation set the mutation gate runs |
 | `ALMIDE_MUTATION_SHARD=value` | ci | this job's shard index of the mutation gate |
 | `ALMIDE_MUTATION_SHARDS=value` | ci | how many shards the mutation gate is split into |

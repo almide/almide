@@ -28,7 +28,9 @@
   check is green (its method reads MERGE against the REBASE queue; GitHub
   normalises that field and it is harmless) — the script is the earlier
   moment. A mutation-gate red on a PR is still read, after the fact, as a
-  develop sweep finding.
+  develop sweep finding. A green gate that printed `PARTIAL: ran N of M
+  in-scope mutants` ran only N (a 28-min budget, #2814): the named deferred
+  ones are judged by the sweep on develop, not by the PR.
 
 ## Git Commit Rules
 
