@@ -269,6 +269,7 @@ evidence  = [
   { path = "spec/wasm_cross/map_fold_heap_accumulator.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_of_maps_value.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_set_index_threshold.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_entry_loop.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-014"
@@ -2730,6 +2731,7 @@ evidence  = [
   { path = "spec/wasm_cross/bytes_copy_within_offset_domain.almd", class = "fixture" },
   { path = "crates/almide-interp/src/inplace.rs", name = "bytes_write_op", class = "by-construction" },
   { path = "spec/wasm_cross/bytes_index_write_truncates.almd", class = "fixture" },
+  { path = "spec/wasm_cross/endian_explicit_import.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-214"
