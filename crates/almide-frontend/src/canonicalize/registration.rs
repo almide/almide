@@ -804,7 +804,11 @@ fn register_type_decl_check_duplicate(env: &TypeEnv, diagnostics: &mut Vec<Diagn
         let canonical_key = prefixed_key(prefix, name);
         // A LOCAL type (main program, no prefix) is allowed to SHADOW a dependency's bare-name dual-registration rather than collide with it (#433): the existing bare `Persona` mirrors some `dep.Persona`, and a local `type Persona` should win for unqualified use (the dep stays reachable via `dep.Persona`). Only flag E020 for a genuine duplicate — another type registered under the SAME canonical key that is NOT just a dependency's bare alias being shadowed by a local.
         let shadows_dep_alias = prefix.is_none() && env.prefixed_bare_aliases.contains(&sym(&canonical_key));
-        if !shadows_dep_alias {
+        // The stdlib's pre-registration of this key is not a declaration of
+        // the module being registered: a package module keyed like a stdlib
+        // module (`url`) replaces it (#2843).
+        let replaces_stdlib_preregistration = env.stdlib_preregistered_types.contains(&sym(&canonical_key));
+        if !shadows_dep_alias && !replaces_stdlib_preregistration {
             if let Some(existing) = env.types.get(&sym(&canonical_key)) {
                 if existing != resolved
                     && matches!(existing, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. })
@@ -849,6 +853,7 @@ fn register_type_decl_finalize(env: &mut TypeEnv, name: &str, ty: &ast::TypeExpr
         }
     }
     env.types.insert(sym(&key), resolved.clone());
+    env.stdlib_preregistered_types.remove(&sym(&key));
     if dual_register_bare {
         // Bare-name dual-registration of a prefixed type, for unqualified access. Record it so a local same-name type may shadow it (#433).
         env.types.insert(sym(name), resolved);
