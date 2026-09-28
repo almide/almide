@@ -282,11 +282,20 @@ fn has_mut_in_inline_rust(attrs: &[almide_lang::ast::Attribute]) -> bool {
 /// round. Both reach the same greatest fixpoint: a function is only ever
 /// removed when its body is impure against the current set, and every
 /// function left at the end has been re-checked after its last callee left.
+///
+/// An `@extern` function never enters the set. Its body is the `_` hole — the
+/// implementation lives in the host — so walking it finds nothing impure,
+/// while the host function is typically stateful: snaidhm's `gpu.push_u32(0)`
+/// appends to a staging buffer, and hoisting the three in a loop body ran them
+/// once instead of once per element, shifting every record after the first.
+/// Unknowable purity is impurity; a caller of an extern is judged against
+/// that like any other impure callee.
 fn analyze_pure_functions(program: &IrProgram) -> HashSet<Sym> {
     let fn_bodies: Vec<(Sym, &IrExpr)> = program
         .functions
         .iter()
         .chain(program.modules.iter().flat_map(|m| m.functions.iter()))
+        .filter(|f| f.extern_attrs.is_empty())
         .map(|f| (f.name, &f.body))
         .collect();
 

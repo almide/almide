@@ -73,8 +73,12 @@ fn collect_pure_stdlib_module_fns(program: &IrProgram, pure_fns: &mut HashSet<Sy
             // fixpoint over every module fn under its bare name, so require
             // that verdict too — otherwise a stateful cross-module call in a
             // loop gets hoisted and N calls collapse into one (ceangal's
-            // scroll physics; almide#846).
+            // scroll physics; almide#846). The verdict is keyed by bare name, so
+            // an `@extern` module fn sharing its name with a pure fn elsewhere
+            // would pass it — externs are excluded here too, not only from the
+            // fixpoint (see `analyze_pure_functions`).
             if !func.is_effect
+                && func.extern_attrs.is_empty()
                 && func.mutated_params.is_empty()
                 && !has_mut_in_inline_rust(&func.attrs)
                 && pure_fns.contains(&func.name)
