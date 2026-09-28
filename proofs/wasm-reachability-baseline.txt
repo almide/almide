@@ -99,7 +99,6 @@ json.set_path :: UNPROBEABLE :: parameter type outside the synthesizer
 json.stringify :: UNPROBEABLE :: no candidate shape builds natively
 json.stringify_pretty :: UNPROBEABLE :: no candidate shape builds natively
 json.to_map :: UNPROBEABLE :: no candidate shape builds natively
-list.group_by :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: list.group_by_x — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the callee to th
 list.with_capacity :: UNPROBEABLE :: no candidate shape builds natively
 map.new :: UNPROBEABLE :: no candidate shape builds natively
 matrix.linear_q1_0_row_no_bias :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.linear_q1_0_row_no_bias — rendering them would emit a dangling `(call $…)` (invalid wasm). Add t
