@@ -531,6 +531,9 @@ impl Emitter<'_> {
                 self.release_i32();
                 SliceTy::Result(self.types.intern(SliceTy::Unit), self.types.intern(STR))
             }
+            // #2744: the byte-range walkers (fs_range.rs).
+            ("fold_lines_range", [p, s, e, init, cb]) => self.lower_fs_fold_lines_range(p, s, e, init, cb)?,
+            ("fold_lines_chunked", [p, w, init, cb]) => self.lower_fs_fold_lines_chunked(p, w, init, cb)?,
             _ => return self.lower_fs_meta_call(func, args),
         };
         Ok(Some(Some(Lowered::owned(out))))
