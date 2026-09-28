@@ -148,6 +148,36 @@ fn wasm_cross_module_producer_side_variant_ctor() {
 }
 
 #[test]
+fn wasm_cross_module_self_named_record_case_ctor() {
+    // #2863: a module's variant whose RECORD case carries the type's own name
+    // (`type Opt = | Opt { n: Int, s: String } | Empty`). The codegen's
+    // bare-name repair read the literal's ctor `Opt` as the TYPE and
+    // qualified it to `shape.Opt`, so native emitted a struct literal of the
+    // enum (rustc E0574) while wasm ran. A struct literal in the same module
+    // (`Cfg { k }`) must keep its qualification.
+    assert_cross_target_project(&[
+        ("almide.toml", MOD_PKG_TOML),
+        (
+            "src/shape.almd",
+            "type Opt = | Opt { n: Int, s: String } | Empty\n\
+             type Cfg = { k: Int }\n\
+             fn mk(n: Int) -> Opt = Opt { n: n, s: \"m\" }\n\
+             fn empty() -> Opt = Empty\n\
+             fn cfg(k: Int) -> Cfg = Cfg { k: k }\n",
+        ),
+        (
+            "main.almd",
+            "import self.shape\n\
+             fn main() -> Unit = {\n\
+             \x20 let o = shape.mk(4)\n\
+             \x20 println(\"${o} ${shape.empty()} ${o == shape.mk(4)} ${o == shape.empty()}\")\n\
+             \x20 println(\"${shape.cfg(2)}\")\n\
+             }\n",
+        ),
+    ]);
+}
+
+#[test]
 fn wasm_cross_module_global_init_order_direct() {
     // #632: an importing module's top-let reads an imported module's heap
     // global DIRECTLY. On wasm the eager init order must place `cfg.APP_NAME`
