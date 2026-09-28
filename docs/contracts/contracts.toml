@@ -1311,6 +1311,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/process_args.almd", class = "fixture" },
+  { path = "tests/component_p3_test.rs", class = "fixture", name = "p3_component_serves_env_args_and_sleep_like_native" },
 ]
 [[contract]]
 id        = "C-097"
@@ -1609,6 +1610,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_args.almd", class = "fixture" },
   { path = "tests/env_args_verbatim_test.rs", name = "a_program_argument_spelled_double_dash_reaches_env_args_on_every_leg", class = "fixture" },
+  { path = "tests/component_p3_test.rs", class = "fixture", name = "p3_component_serves_env_args_and_sleep_like_native" },
 ]
 [[contract]]
 id        = "C-119"
@@ -1774,6 +1776,7 @@ since     = "0.29.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_get.almd", class = "fixture" },
+  { path = "tests/component_p3_test.rs", class = "fixture", name = "p3_component_serves_env_args_and_sleep_like_native" },
 ]
 [[contract]]
 id        = "C-136"
@@ -4138,6 +4141,7 @@ evidence  = [
   { path = "spec/wasm_cross/env_sleep_pause.almd", class = "fixture" },
   { path = "spec/wasm_cross/datetime_monotonic_ns.almd", class = "fixture" },
   { path = "spec/wasm_cross/availability_pure_batch.almd", class = "fixture" },
+  { path = "tests/component_p3_test.rs", class = "fixture", name = "p3_component_serves_env_args_and_sleep_like_native" },
 ]
 [[contract]]
 id        = "C-330"
@@ -4150,6 +4154,7 @@ evidence  = [
   { path = "tests/component_p3_test.rs", class = "fixture", name = "p3_component_speaks_http" },
   { path = "tests/component_p3_test.rs", class = "fixture", name = "p3_component_speaks_framed_http" },
   { path = "tests/component_p3_test.rs", class = "fixture", name = "p3_http_transport_error_leaves_the_next_exchange_intact" },
+  { path = "tests/component_p3_test.rs", class = "fixture", name = "p3_components_need_no_feature_flag" },
 ]
 [[contract]]
 id        = "C-328"
