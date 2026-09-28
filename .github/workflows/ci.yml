@@ -208,6 +208,22 @@ jobs:
             PROTECTED=origin/develop
           fi
           RATCHET_PROTECTED="$PROTECTED" bash scripts/check-ratchet-separation.sh "$BASE" HEAD
+      - name: Dependency-shaped leg skip list is shrink-only (#2839 — no case the base did not skip)
+        # tests/dep_shaped_leg_test.rs refuses a stale entry (the list goes
+        # down); this refuses a new one (it never goes up). Same base as above.
+        run: |
+          set -euo pipefail
+          bash scripts/check-dep-shaped-skips.sh --self-test
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            BASE="$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
+          elif [ "${{ github.event_name }}" = merge_group ]; then
+            BASE="${{ github.event.merge_group.base_sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          case "$BASE" in ""|0000000000000000000000000000000000000000) BASE="$(git rev-parse HEAD~1)";; esac
+          git cat-file -e "$BASE^{commit}" 2>/dev/null || BASE="$(git rev-parse HEAD~1)"
+          bash scripts/check-dep-shaped-skips.sh "$BASE"
       - name: The gate judges each commit by the law at its parent (negative controls)
         # Needs the full history this job checks out: the old law it replays
         # is the gate's real July version.
