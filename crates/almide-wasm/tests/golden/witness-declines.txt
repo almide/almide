@@ -65,11 +65,11 @@ stmt:Expr:call-arg:Call	136
 stmt:Expr:call-arg:If	5
 stmt:Expr:call-arg:Lambda	1
 stmt:Expr:call-arg:Match	1
-stmt:Expr:call-arg:StringInterp	19
+stmt:Expr:call-arg:StringInterp	21
 stmt:Expr:call:target:Computed	1
 stmt:FieldAssign	1
 stmt:Guard	9
-stmt:IndexAssign	6
+stmt:IndexAssign	8
 tail:BinOp	710
 tail:Block	17
 tail:If	4690
