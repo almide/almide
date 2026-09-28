@@ -565,6 +565,118 @@ ALMIDE_HTTP_TIMEOUT_SECS=300 ./app   # five minutes
 ALMIDE_HTTP_TIMEOUT_SECS=0 ./app     # wait forever
 ```
 
+The same variable bounds **connecting** (#2825): a dial that gets no answer
+gives up after 30 s (Go's dialer default) instead of the OS default (75 s on
+macOS, longer on Linux):
+
+```
+connection failed: timed out after 30s connecting to 10.255.255.1:80 (raise ALMIDE_HTTP_TIMEOUT_SECS; 0 = no timeout)
+```
+
+#### Client limits, per path
+
+| | connect | between reads | whole call | response size |
+|---|---|---|---|---|
+| `get` / `request` / `*_status` / `*_bytes` / `*_response` | 30 s | 30 s | none | 1 GiB |
+| `request_stream`, the SSE helpers | 30 s | 120 s | none | none (streamed) |
+| `http.start`, the `*_with_limits` twins | `total_ms` | `idle_ms` | `total_ms` | none |
+
+- The 30 s / 120 s defaults are `ALMIDE_HTTP_TIMEOUT_SECS` (`0` = none).
+- The size cap counts the response as received (head and framed body):
+  `ALMIDE_HTTP_MAX_RESPONSE_BYTES` overrides it, `0` = no cap. Past it the
+  call is `err("response too large: more than N bytes (raise ALMIDE_HTTP_MAX_RESPONSE_BYTES; 0 = no limit)")`.
+- Every path refuses a response HEAD over 1 MiB (Go's default).
+- There is no default whole-call deadline — none of curl, Go, Python, Node
+  or reqwest has one. Ask for one with `http.start` and `total_ms`.
+
+#### URLs (#2821)
+
+URLs are split the way curl, Go and the WHATWG URL standard split them:
+
+- The scheme is case-insensitive and must be `http://` or `https://`. A URL
+  without one, or with another scheme, is an error: it is never sent as
+  plain HTTP by guesswork.
+- `user:password@` becomes `Authorization: Basic …`, unless you pass your
+  own `Authorization` header. The userinfo is never taken for the host.
+- IPv6 hosts are bracketed: `http://[::1]:8080/`.
+- A port is 1–65535. An unreadable port is an error, never a silent 80.
+- An internationalised host is sent as punycode (`bücher.example` →
+  `xn--bcher-kva.example`).
+- `http://host:8080?x=1` is `GET /?x=1` on port 8080.
+- The `#fragment` is not sent.
+- Spaces, controls and non-ASCII in the path and query are percent-encoded.
+- `Host` carries the port when it is not the scheme's default.
+
+A refused URL is an `err` reading `invalid URL "…": <what is wrong>`, returned
+before anything is dialled. `http.start` returns it synchronously.
+
+#### Header injection (#2822)
+
+A header name must be a token (RFC 9110). A header value may not contain CR,
+LF, NUL or another control character (HTAB is fine). The method must be a
+token too. Otherwise the request is refused before anything is sent: the call
+is an `err` starting `invalid header value for "X-A": …`,
+`invalid header name …` or `invalid HTTP method …`. The request
+is never cleaned up and sent anyway. Python, Go and Node refuse the same
+input.
+
+#### Proxies (#2819)
+
+Every client path (`get` … `request_bytes`, `*_response`, `request_stream`,
+the SSE helpers, `http.start`) reads the proxy variables the way curl and
+reqwest read them:
+
+- `https://` URLs use `HTTPS_PROXY` / `https_proxy`.
+- `http://` URLs use `HTTP_PROXY` / `http_proxy`. `HTTP_PROXY` is ignored
+  when `REQUEST_METHOD` is set (CGI, httpoxy), as in Go and reqwest.
+- Both then fall back to `ALL_PROXY` / `all_proxy`.
+- `NO_PROXY` / `no_proxy` is a comma-separated list. `*` bypasses the proxy
+  for every host. An IP or CIDR block (`10.0.0.0/8`) matches address hosts.
+  A name (`example.com`, `.example.com`) matches itself and its subdomains.
+  Nothing is exempt by default, `localhost` included (as in curl and
+  reqwest).
+
+Proxy schemes:
+
+- `http://` proxies. A proxy without a scheme counts as `http://`.
+  `https://` targets are tunnelled with `CONNECT host:port`, and TLS to the
+  origin runs inside the tunnel. `http://` targets are sent to the proxy in
+  absolute form.
+- `socks5://` (names resolved locally) and `socks5h://` (the proxy resolves
+  them). The default port is 1080.
+
+`user:password@` in the proxy URL is the proxy login: `Proxy-Authorization:
+Basic` for an HTTP proxy, RFC 1929 for SOCKS5. Any other proxy scheme is an
+error naming the variable. It is never a silent direct connection. Errors
+name the proxy (`proxy 127.0.0.1:3128 (from HTTPS_PROXY) refused CONNECT
+api.example.com:443: HTTP/1.1 407 …`) and never repeat its credentials.
+
+#### TLS trust (#2820)
+
+HTTPS trusts two sets of roots:
+
+- the bundled webpki (Mozilla) roots;
+- the platform trust store (the macOS keychain, the Windows store, or the
+  OpenSSL bundle/directory on Linux), read through `rustls-native-certs`.
+  When `SSL_CERT_FILE` or `SSL_CERT_DIR` is set, the PEM certificates they
+  name are used instead of the platform store.
+
+So a corporate CA, a test CA or a TLS-inspecting proxy's CA can be trusted
+the way curl, Python and Go allow. If a variable names no loadable
+certificate, the error says so. A certificate or handshake failure reads as
+a TLS error, not as a failed write:
+
+```
+TLS error: invalid peer certificate: UnknownIssuer
+```
+
+#### Interim responses and chunk extensions (#2824)
+
+- `1xx` responses before the final one (`100 Continue`, `103 Early Hints`)
+  are skipped, on every path. `101` is final.
+- A chunk-size line's `;extension` is ignored. A size line that is not hex
+  is an error (`malformed chunked body: …`), not an empty body.
+
 ### `http.get_status(url: String) -> Result[(Int, String), String]`
 
 Send a GET and return `(status_code, body)`. Unlike `http.get`, a non-2xx
