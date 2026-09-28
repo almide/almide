@@ -192,6 +192,36 @@ fn project_root_from_toml_path(path: &Path) -> PathBuf {
     }
 }
 
+/// A relative `path` dependency is relative to the directory of the
+/// `almide.toml` that declares it (the Cargo rule), never to the process
+/// working directory. Anchoring it here, where the manifest's own directory is
+/// in hand, means every consumer of `Dependency::path` (the fetch walk, native
+/// dep injection, `dep-path`) sees one resolved spelling. A dependency's own
+/// relative path dependency used to be looked up from wherever `almide` was
+/// started, so `b = { path = "../deps/b" }` whose manifest said
+/// `d = { path = "../d" }` looked for `d` beside the app (#2844). A manifest
+/// in the working directory (root `.`) keeps its paths as written.
+fn anchor_relative_dep_paths(deps: Vec<Dependency>, root: &Path) -> Vec<Dependency> {
+    if root == Path::new(".") {
+        return deps;
+    }
+    deps.into_iter()
+        .map(|mut dep| {
+            if let Some(p) = dep.path.as_deref()
+                && Path::new(p).is_relative()
+            {
+                // Canonical when it exists, so two dependencies naming the
+                // same directory by different relative spellings (a diamond:
+                // `deps/b/../d`, `deps/c/../d`) visit it once.
+                let joined = root.join(p);
+                let anchored = std::fs::canonicalize(&joined).unwrap_or(joined);
+                dep.path = Some(anchored.to_string_lossy().into_owned());
+            }
+            dep
+        })
+        .collect()
+}
+
 /// The bare or quoted key a `key = value` line assigns, or `None` for any
 /// other line (blank, comment, header, or the continuation of a multi-line
 /// value). Only keys spelled the way TOML spells a key are answered, so a
@@ -336,9 +366,10 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
     validate_package_name(&acc.name)?;
 
     let root = project_root_from_toml_path(path);
+    let dependencies = anchor_relative_dep_paths(acc.deps, &root);
     Ok(Project {
         package: Package { name: acc.name, version: acc.version, almide_min: acc.almide_min },
-        dependencies: acc.deps,
+        dependencies,
         permissions: acc.permissions,
         native_deps: acc.native_deps,
         root,
