@@ -1016,6 +1016,10 @@ fn dispatch_deps() {
             out(&format!("No dependencies"));
         } else {
             for dep in &proj.dependencies {
+                if let Some(ref path) = dep.path {
+                    out(&format!("{} = path {}", dep.name, path));
+                    continue;
+                }
                 let ref_name = dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main");
                 out(&format!("{} = {} ({})", dep.name, dep.git, ref_name));
             }
