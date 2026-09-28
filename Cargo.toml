@@ -90,6 +90,11 @@ embedded-host = ["dep:almide-wasm-run"]
 [target.'cfg(any(unix, windows))'.dependencies]
 fs2 = "0.4"
 
+# `almide run` on Windows waits for the program and ignores the console's
+# Ctrl-C itself, which the program also receives (#2809). Unix execs instead.
+[target.'cfg(windows)'.dependencies]
+ctrlc = "3.5"
+
 [dev-dependencies]
 proptest = "1"
 insta = "1"

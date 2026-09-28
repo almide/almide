@@ -53,6 +53,7 @@ dependencies = [
  "almide-wasm-vm",
  "clap",
  "crossbeam-channel",
+ "ctrlc",
  "fs2",
  "insta",
  "lasso",
