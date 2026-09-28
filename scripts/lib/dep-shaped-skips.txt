@@ -6,5 +6,3 @@
 # it), and scripts/check-dep-shaped-skips.sh refuses an entry the base branch
 # did not have: a new divergence is a bug to fix, not a line to add.
 
-cell:stdlib-module:option/src/main.almd  #2842 in-package module `option` declaring `type Option` emits invalid Rust; the dependency shape builds
-cell:stdlib-module:result/src/main.almd  #2842 in-package module `result` declaring `type Result` emits invalid Rust; the dependency shape builds
