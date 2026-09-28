@@ -14,7 +14,27 @@
 
 ---
 
-## 1. 目標と非目標
+## 0. 先行例との関係と、主張の範囲
+
+この設計の中核 ――「利用者は補題(law)の **文** を足し、証明は機械が帰納法と書き換えで探す」――
+は新しい考え方ではない。
+
+- **Boyer–Moore の証明器 / ACL2**(1970 年代〜): 利用者の仕事は、証明器が詰まったところに補題の文を
+  足すこと、証明の探索は機械が帰納法と書き換えで行う ―― という方法論そのもの。実験 3(関数ごとの
+  law で 7/16)は、これを Almide の文脈で追試した結果にあたる。
+- **関数ごとの契約を呼び出し関係に沿って組み上げる** 形は、Dafny / Why3 / Liquid Haskell の標準。
+- **証明 = プログラム、帰納法 = 再帰** は、カリー=ハワード対応(型理論の基礎)。
+- **LLM に仕様・補題を書かせて証明器で確かめる** 研究も、2024〜25 年に Dafny / Verus を対象に複数ある。
+
+この設計が新しく持ち込むのは、(1) 書き手が **LLM** である前提で、law の文だけを書かせ、判定レベルを
+算出し、反例を先に出すことを **言語の表面** に組み込むこと、(2) それを **MSR** で測ることの二点で、
+どちらもまだ小さな実験(6 課題・1 モデル)の段階にある。
+
+**範囲の限定**: 「証明はプログラムと同じ形をしている」という見方が効くのは、リストや自然数のように
+**帰納的に作られるデータについてのプログラムの証明** に限る。排中律・選択公理に頼る証明(対応する
+プログラムがない)や、実数・連続性のような無限の対象についての証明は、この層の対象外であり、
+数学全般についての主張ではない。
+
 
 「Lean 相当」には三つの意味があり、この層が狙うのは一つだけ([law-blocks-experiment](law-blocks-experiment.md) §5)。
 
@@ -329,7 +349,9 @@ API family の網羅と同じく、**行列で網羅を検査するゲート** �
 - 上位設計: [behavioral-contract](../active/behavioral-contract.md)(C-ASSERTED)
 - 事前条件: [compile-time-contracts](compile-time-contracts.md)
 - 所有権断片の意味論と翻訳検証: `proofs/ALS.v`
-- 先行例: Aeneas(Rust → Lean)、hs-to-coq(Haskell → Coq)、CLN2INV(連続緩和した論理によるループ不変条件の学習)
+- 先行例: Boyer–Moore / ACL2(補題の文を足し、証明は機械が探す方法論)、Dafny / Why3 / Liquid Haskell
+  (関数ごとの契約のモジュール検証)、Aeneas(Rust → Lean)、hs-to-coq(Haskell → Coq)、
+  CLN2INV(連続緩和した論理によるループ不変条件の学習)
 - Lean: [LICENSE](https://github.com/leanprover/lean4/blob/master/LICENSE)、
   [LICENSES](https://github.com/leanprover/lean4/blob/master/LICENSES)、
   [Trademark Policy](https://lean-lang.org/trademark-policy/)
