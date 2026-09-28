@@ -1,3 +1,4 @@
+// PROBE #2814: no-op comment, removed before merge.
 //! Synthesized JSON serializer helper FUNCTION BODIES (`$vjson`,
 //! `$vjson_pretty`, `$vjson_quote`) — split from value_helpers.rs for the
 //! file budget, the same way utf8_helpers.rs was. The Value layout contract

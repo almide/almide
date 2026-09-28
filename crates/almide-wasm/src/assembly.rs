@@ -1,3 +1,4 @@
+// PROBE #2814: no-op comment, removed before merge.
 //! Structural module assembly (sections, tables, globals, code, data) —
 //! split from emit_program for the complexity budget.
 

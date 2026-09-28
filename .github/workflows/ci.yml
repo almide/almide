@@ -2326,6 +2326,6 @@ jobs:
         run: |
           git fetch -q origin "${{ github.base_ref }}"
           ALMIDE_MUTATION_SCOPE=incremental \
-          ALMIDE_MUTATION_BASE="origin/${{ github.base_ref }}" \
+          ALMIDE_MUTATION_BASE="da6952a0cb5ce6b4c4ed37919ce7665923d7c507" \
           ALMIDE_MUTATION_BUDGET_SECS=1680 \
             bash scripts/check-mutation-gate.sh

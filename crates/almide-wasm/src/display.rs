@@ -40,6 +40,7 @@ impl Emitter<'_> {
         nested: bool,
         path: &mut Vec<u32>,
     ) -> Result<(), EmitError> {
+        // PROBE #2814: no-op comment, removed before merge.
         // Emit-time recursion follows the TYPE SHAPE: a non-recursive
         // shape is a finite DAG and inlines fully; a CYCLE (recursive
         // Named type) is cut at the Named arm below with a call to the

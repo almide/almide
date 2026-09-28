@@ -1,3 +1,4 @@
+// PROBE #2814: no-op comment, removed before merge.
 //! The dynamic `Value` model (Codec/json's data carrier), NATIVE to this
 //! backend's ratified layout (2026-08-20 ○: rebuild, do not adopt the
 //! incumbent's len-as-tag convention). A Value is a 16-byte block:

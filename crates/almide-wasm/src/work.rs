@@ -1,3 +1,4 @@
+// PROBE #2814: no-op comment, removed before merge.
 //! Function-VALUE work shared across one program's lowering: funcref-
 //! table entries, per-program emitted helpers, call_indirect type
 //! interning, lifted lambdas. Split from lib.rs for the complexity
