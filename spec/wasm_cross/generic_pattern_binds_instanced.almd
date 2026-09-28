@@ -1,0 +1,51 @@
+// @contract: C-332, C-265
+// A generic fn's pattern binds take the instance's types (#2748): a list-rest
+// prefix bind `[x, ..]`, a rest tail `[h, ..t]` and a tuple destructure
+// `let (a, b) = p` inside a generic body, instantiated at Int and at String,
+// print identically on every leg. Before, mono left the binds at `A`, and
+// the structural wasm leg refused the instance (`ty-mismatch:Unit-vs-...`).
+// Also: a guard whose raise is braced (`else { err(m)! }`) is the same early
+// exit as the bare spelling.
+fn first[A](xs: List[A], d: A) -> A = match xs {
+  [] => d,
+  [x, ..] => x,
+}
+
+fn tail_len[A](xs: List[A]) -> Int = match xs {
+  [_, ..t] => list.len(t),
+  [] => -1,
+}
+
+fn swap_all[A, B](ps: List[(A, B)]) -> List[(B, A)] = ps |> list.map((p) => {
+  let (a, b) = p
+  (b, a)
+})
+
+fn pair_with[A, B, C](xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C] = list.zip(xs, ys) |> list.map((p) => {
+  let (a, b) = p
+  f(a, b)
+})
+
+effect fn doubled(x: Int) -> Int = {
+  guard x > 0 else {
+    err("negative")!
+  }
+  x * 2
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(first([7, 8], 0)))
+  println(int.to_string(first([], 5)))
+  println(first(["a", "b"], "none"))
+  println(first([], "none"))
+  println("${tail_len([1, 2, 3])} ${tail_len(["x"])} ${tail_len(([]: List[Int]))}")
+  let swapped = swap_all([(1, "one"), (2, "two")])
+  println(swapped |> list.map(((s, n)) => "${s}=${n}") |> list.join(","))
+  println(pair_with([1, 2], ["a", "b"], (n, s) => int.to_string(n) + s) |> list.join(","))
+  println(pair_with(["p", "q"], ["r", "s"], (a, b) => a + b) |> list.join(","))
+  println(int.to_string(doubled(5)!))
+  match doubled(-1) {
+    ok(v) => println(int.to_string(v)),
+    err(e) => println("err ${e}"),
+  }
+}

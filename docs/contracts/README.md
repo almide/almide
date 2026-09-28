@@ -300,7 +300,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-262 | The fmt-stable string escapes and the empty string evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-263 | Recovery nodes never appear in accepted programs; a broken file still reports past its first error | 0.57.1 | active | fixture | 1 |
 | C-264 | Scalar-field optional chains yield some/none identically on both targets | 0.57.1 | active | fixture | 1 |
-| C-265 | The guard statement's pass and raise paths behave identically on both targets | 0.57.1 | active | fixture | 1 |
+| C-265 | The guard statement's pass and raise paths behave identically on both targets | 0.57.1 | active | fixture | 2 |
 | C-266 | guard let binds the success payload and raises on the failing polarity, identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-267 | The binary operator surface evaluates identically on both targets, including the signed division rulings | 0.57.1 | active | fixture | 1 |
 | C-268 | A `_` in call-argument position is a check-time E046, identically on both targets | 0.57.1 | active | fixture | 0 |
@@ -367,7 +367,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-329 | env.set is observed by env.get identically on every leg, and the p1 shim serves the environ/args ops | 0.62.0 | active | fixture | 1 |
 | C-330 | The http string family answers on the stock runtime through the p3 component's async-lowered exchange | 0.62.0 | active | fixture | 0 |
 | C-331 | zlib is self-hosted on wasm: decoding is byte-identical, encoding is round-trip-exact with leg-dependent bytes | 0.62.0 | active | fixture | 1 |
-| C-332 | List-rest patterns: the tail past the prefix binds as a list, identically on every leg | 0.62.0 | active | fixture | 1 |
+| C-332 | List-rest patterns: the tail past the prefix binds as a list, identically on every leg | 0.62.0 | active | fixture | 2 |
 | C-333 | As-patterns: the whole value binds beside its own destructuring, identically on every leg | 0.62.0 | active | fixture | 1 |
 | C-334 | A closure call takes +1 on a borrowed heap argument: the RC-3 callee-owned convention holds through call_indirect | 0.62.0 | active | fixture | 3 |
 | C-335 | path.extension treats a leading dot as a hidden-file marker, not an extension, on both targets | 0.62.0 | active | fixture | 1 |

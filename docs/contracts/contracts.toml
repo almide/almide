@@ -3311,6 +3311,7 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/guard_statement.almd", class = "fixture" },
+  { path = "spec/wasm_cross/generic_pattern_binds_instanced.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-266"
@@ -4212,6 +4213,7 @@ since     = "0.62.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_rest_pattern.almd", class = "fixture" },
+  { path = "spec/wasm_cross/generic_pattern_binds_instanced.almd", class = "fixture" },
   { path = "spec/lang/list_rest_pattern_test.almd", class = "fixture" },
   { path = "tests/diagnostics/list-rest-not-last/broken.almd", class = "fixture" },
   { path = "tests/list_pattern_tuple_test.rs", class = "fixture", name = "a_guarded_tuple_arm_with_a_list_pattern_honours_its_guard" },
