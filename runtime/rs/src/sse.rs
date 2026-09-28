@@ -255,20 +255,9 @@ fn get_int(v: &AlmideValue, key: &str) -> Option<i64> {
 }
 
 fn json_escape(s: &str) -> String {
+    // The runtime's one JSON escaping rule (value.rs, #2802).
     let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{0008}' => out.push_str("\\b"),
-            '\u{000c}' => out.push_str("\\f"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
+    almide_rt_value_json_escape_into(&mut out, s);
     out
 }
 
