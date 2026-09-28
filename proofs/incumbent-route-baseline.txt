@@ -27,7 +27,6 @@ test :: spec/integration/codegen_patterns_test.almd :: call:list.partition
 test :: spec/integration/codegen_pipes_test.almd :: call:list.partition
 test :: spec/integration/modules/qualified_ctor_test.almd :: ty-mismatch:Scalar(Int)-vs-Scalar(Str)
 test :: spec/integration/modules/same_name_ctor_test.almd :: ty-mismatch:Named(1)-vs-Named(0)
-test :: spec/lang/borrow_hoist_test.almd :: index-of:Scalar(Bytes)
 test :: spec/lang/edge_cases_test.almd :: call:list.partition
 test :: spec/lang/fallible_hof_test.almd :: call:testing.assert_contains
 test :: spec/lang/fallible_lambda_test.almd :: call:testing.assert_contains
@@ -37,8 +36,6 @@ test :: spec/lang/fan_let_capture_scope_test.almd :: bind:unmapped
 test :: spec/lang/fan_value_regression_test.almd :: list-hof-nonlambda
 test :: spec/lang/for_in_head_unwrap_test.almd :: call:testing.assert_contains
 test :: spec/lang/guard_else_err_unwrap_test.almd :: interp-part:Unit
-test :: spec/lang/index_access_test.almd :: index-of:Scalar(Bytes)
-test :: spec/lang/intrinsic_readonly_borrow_test.almd :: index-of:Scalar(Bytes)
 test :: spec/lang/map_literal_test.almd :: forin-map-nontuple
 test :: spec/lang/matrix_test.almd :: binop:MulMatrix
 test :: spec/lang/option_marker_test.almd :: list-hof-nonlambda
