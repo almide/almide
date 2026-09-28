@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use almide_ir::IrProgram;
 
+use crate::decline_site::DeclineSite;
 use crate::types_table::TypeTable;
 use crate::*;
 
@@ -54,6 +55,7 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     // Witness sweeps (#2754) see the pass boundaries and which pass shipped
     // (no-ops unless a sweep collects).
     use crate::witness::{mark_pass as mark, mark_shipped as ship};
+    crate::decline_site::set(None);
     mark(1);
     let first = emit_program_pass(ir, None, library, true)?;
     let keep = (first.visited.len() < first.total).then_some(&first.visited);
@@ -232,6 +234,8 @@ fn emit_program_pass(
     // The lifted lambdas each function body created (`fn_lambdas[i]`, a range
     // into `work.lifted`): a lambda is reachable only through its owner.
     let mut fn_lambdas: Vec<std::ops::Range<usize>> = Vec::new();
+    // #2807: the source line each failed body refused at (decline_site.rs).
+    let mut fail_lines: HashMap<usize, usize> = HashMap::new();
     for (i, (f, qual, space)) in program_fns.iter().enumerate() {
         let lifted_before = work.lifted.borrow().len();
         if let Some(r) = &table.infos[i].refuse {
@@ -281,6 +285,7 @@ fn emit_program_pass(
             self_index: Some(table.infos[i].wasm_index),
             param_owned: Some(table.infos[i].param_owned.clone()),
         };
+        crate::decline_site::reset_pending();
         match lower_fn(&params, plan, &f.body, &[], &ctx, &mut pool) {
             Ok(ok) => {
                 // Any display helpers this fn registered build NOW — a
@@ -309,7 +314,12 @@ fn emit_program_pass(
             Err(e @ EmitError::OwnershipLowering(_)) => return Err(e),
                 }
             }
-            Err(EmitError::Unsupported(r)) => lowered.push(Err(r)),
+            Err(EmitError::Unsupported(r)) => {
+                if let Some(sp) = crate::decline_site::take_pending() {
+                    fail_lines.insert(i, sp.line);
+                }
+                lowered.push(Err(r))
+            }
             // E083: a compiler defect is fatal for the whole program — a
             // reachable-or-not leak is still a defect, never a wall.
             Err(e @ EmitError::OwnershipLowering(_)) => return Err(e),
@@ -337,8 +347,12 @@ fn emit_program_pass(
         param_owned: None,
     };
     let main_lambdas_from = work.lifted.borrow().len();
-    let (main_fn, main_calls) =
-        lower_fn(&[], main_plan, main_body, &init_lets, &ctx, &mut pool)?;
+    crate::decline_site::reset_pending();
+    let (main_fn, main_calls) = lower_fn(&[], main_plan, main_body, &init_lets, &ctx, &mut pool)
+        .inspect_err(|_| {
+            let line = crate::decline_site::take_pending().map(|s| s.line);
+            crate::decline_site::set(Some(DeclineSite { function: "main".into(), module: None, line }));
+        })?;
     let main_lambdas = main_lambdas_from..work.lifted.borrow().len();
     display_helper_calls.extend(display::build_display_helpers(&table, &types, &work, &mut pool)?);
 
@@ -352,6 +366,7 @@ fn emit_program_pass(
     // calls `http.get`).
     let mut lambda_children: Vec<std::ops::Range<usize>> = Vec::new();
     let mut lambda_errs: Vec<Option<String>> = Vec::new();
+    let mut lambda_sites: Vec<Option<DeclineSite>> = Vec::new();
     loop {
         let pending: Vec<LiftedLambda> = {
             let all = work.lifted.borrow();
@@ -384,6 +399,7 @@ fn emit_program_pass(
         param_owned: None,
             };
             let children_from = work.lifted.borrow().len();
+            crate::decline_site::reset_pending();
             let (f, calls, err) = match lower_fn(&ll.params, plan, &ll.body, &[], &ctx, &mut pool) {
                 Ok((f, calls)) => (f, calls, None),
                 Err(EmitError::Unsupported(r)) => {
@@ -394,6 +410,11 @@ fn emit_program_pass(
                 Err(e) => return Err(e),
             };
             lambda_children.push(children_from..work.lifted.borrow().len());
+            lambda_sites.push(err.as_ref().map(|_| DeclineSite {
+                function: "<lambda>".into(),
+                module: ll.cur_module.clone(),
+                line: crate::decline_site::take_pending().map(|s| s.line),
+            }));
             lambda_errs.push(err);
             display_helper_calls
                 .extend(display::build_display_helpers(&table, &types, &work, &mut pool)?);
@@ -443,7 +464,11 @@ fn emit_program_pass(
         let err = fn_err
             .and_then(|i| lowered[i].as_ref().err().cloned())
             .or_else(|| lam_err.and_then(|k| lambda_errs[k].clone()));
-        (fns, err)
+        let site = match fn_err {
+            Some(i) => Some(fn_site(&program_fns[i], fail_lines.get(&i).copied())),
+            None => lam_err.and_then(|k| lambda_sites[k].clone()),
+        };
+        (fns, err, site)
     };
     let mut roots: Vec<usize> = main_calls.iter().copied().collect();
     roots.extend(display_helper_calls.iter().copied());
@@ -453,8 +478,9 @@ fn emit_program_pass(
             TableEntry::Lambda(_) | TableEntry::Direct(_) => {}
         }
     }
-    let (mut visited, err) = reach(roots, main_lambdas.clone().collect());
+    let (mut visited, err, site) = reach(roots, main_lambdas.clone().collect());
     if let Some(reason) = err {
+        crate::decline_site::set(site);
         return unsup(&reason);
     }
 
@@ -475,10 +501,11 @@ fn emit_program_pass(
         {
             continue;
         }
-        let (sub, err) = reach(vec![i], Vec::new());
+        let (sub, err, site) = reach(vec![i], Vec::new());
         if let Some(reason) = &err
             && library
         {
+            crate::decline_site::set(site);
             return unsup(&format!("exported function `{name}` cannot be lowered: {reason}"));
         }
         if err.is_none() {
@@ -525,6 +552,16 @@ fn emit_program_pass(
     let bytes = imports::declare(&bytes, &declared).map_err(|e| EmitError::Unsupported(format!("extern-import:{e}")))?;
     let host_ops = work.host_ops.borrow().clone();
 Ok(Pass { bytes, visited, total, ops: host_ops, bounded_fired: work.bounded_fired.get() })
+}
+
+/// Where a program function's wall points (#2807): its qualified name, its
+/// module, and the line of the expression that refused — the body's first
+/// line when the refusing node carried no span (a signature-level refusal).
+fn fn_site(entry: &(&IrFunction, Option<String>, u32), refused_at: Option<usize>) -> DeclineSite {
+    let (f, qual, _) = entry;
+    let function = qual.clone().unwrap_or_else(|| f.name.as_str().to_string());
+    let module = qual.as_ref().and_then(|q| q.rsplit_once('.').map(|(m, _)| m.to_string()));
+    DeclineSite { function, module, line: refused_at.or(f.body.span.map(|s| s.line)) }
 }
 
 /// The `@extern(wasm, module, name)` import a body-less fn declares (#2275):
