@@ -141,7 +141,7 @@ HDR
       w_out=$(bench_wasm "$name")
       w=$(median_of "$w_out")
       fan_suffix=""
-      case "$name" in binarytrees|mandelbrot) fan_suffix=" ab_band=100" ;; esac
+      case "$name" in binarytrees|mandelbrot|fannkuchredux) fan_suffix=" ab_band=100" ;; esac
       if [ -n "$w" ] && [ -n "$n" ]; then
         ratio=$(python3 -c "print(f'{$w/$n:.2f}')")
         printf '%-21s | measured         | %-5s | %-4s | %s%s\n' "$name" "$n" "$w" "$ratio" "$fan_suffix"
