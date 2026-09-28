@@ -999,6 +999,10 @@ evidence  = [
   { path = "spec/wasm_cross/index_bounds_i64.almd", class = "fixture" },
   { path = "spec/wasm_cross/index_bounds_write_only_var.almd", class = "fixture" },
   { path = "spec/wasm_cross/index_bounds_loop_invariant.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_index_bounds_write_past_end.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_index_bounds_write_negative.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_index_bounds_read_past_end.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_index_bounds_read_negative.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-068"
