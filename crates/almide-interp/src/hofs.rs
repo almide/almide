@@ -85,7 +85,7 @@ impl<'a> Interpreter<'a> {
     /// callback to (#1844). Lines come from the sandboxed overlay (then the
     /// read-only real fs) with exactly `BufRead::read_line`'s split — the
     /// native `almide_rt_fs_fold_lines_effect` and the wasm self-host walk:
-    /// `\n` stripped, a preceding `\r` too, a final unterminated line still
+    /// `\n` stripped, a preceding `\r` too (a bare final `\r` kept), a final unterminated line still
     /// yielded, no trailing empty line. A read error is the native `io_err`
     /// Display as the whole call's `err`, before any callback runs; the
     /// first callback `err` short-circuits like every `__fallible_*`.
@@ -116,11 +116,15 @@ impl<'a> Interpreter<'a> {
         };
         let mut rest = text.as_str();
         while !rest.is_empty() {
+            // Only a TERMINATED line loses its '\r' — native pops a '\n' first and
+            // only then a '\r', so a final bare '\r' survives (#2813).
             let (line, tail) = match rest.find('\n') {
-                Some(i) => (&rest[..i], &rest[i + 1..]),
+                Some(i) => {
+                    let l = &rest[..i];
+                    (l.strip_suffix('\r').unwrap_or(l), &rest[i + 1..])
+                }
                 None => (rest, ""),
             };
-            let line = line.strip_suffix('\r').unwrap_or(line);
             match self.try_step(&clo, vec![acc.clone(), Value::str(line.to_string())]) {
                 Ok(v) => acc = v,
                 Err(f) => return f,
