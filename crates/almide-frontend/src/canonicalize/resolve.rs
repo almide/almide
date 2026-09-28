@@ -493,8 +493,28 @@ pub const BUILTIN_TYPE_HEADS: &[BuiltinTypeHead] = &[
 
 /// The builtin head a spelling resolves to, if any — the first thing the
 /// resolver asks of every type name, before any declaration is consulted.
+/// The generated-source spelling ([`generated_builtin_spelling`]) answers the
+/// same head as the bare name.
 pub fn builtin_type_head(name: &str, spelling: TypeSpelling) -> Option<&'static BuiltinTypeHead> {
+    let name = name.strip_prefix(GENERATED_BUILTIN_MARK).unwrap_or(name);
     BUILTIN_TYPE_HEADS.iter().find(|h| h.name == name && h.arity.accepts(spelling))
+}
+
+/// The mark that makes a builtin's name the generated-source spelling. The
+/// lexer never puts it in a name, backticks included, so no declaration can
+/// take the spelling.
+const GENERATED_BUILTIN_MARK: char = '%';
+
+/// How compiler-GENERATED source names a builtin type (#2870): the same head
+/// as the bare `name`, under a spelling no file can declare. A file's own
+/// declaration answers its bare spelling of a builtin's name (#2858), and
+/// generated helpers appended to the entry program are read in that file's
+/// scope, so `fn __repr_quote(s: String)` read the user's `type String`. A
+/// generated `String` is always the builtin: the source generator's
+/// token stream carries this spelling, never the bare one, and the key
+/// [`builtin_named_type_key`] records is never consulted for it.
+pub fn generated_builtin_spelling(name: &str) -> Option<String> {
+    builtin_type_head(name, TypeSpelling::Bare).map(|h| format!("{GENERATED_BUILTIN_MARK}{}", h.name))
 }
 
 /// Where one bare type spelling of a file goes (#2715, #2839), in the order
