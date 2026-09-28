@@ -4257,6 +4257,7 @@ status    = "active"
 evidence  = [
   { path = "spec/integration/modules/cross_module_global_state_loop_test.almd", class = "fixture" },
   { path = "spec/integration/modules/cross_module_cell_update_test.almd", class = "fixture" },
+  { path = "spec/integration/modules/cross_module_reinit_entry_collision_test.almd", class = "fixture" },
 ]
 
 # ── BYTES SEARCH / EDIT / PREDICATE FAMILY ────────────────────────────
