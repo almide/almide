@@ -452,6 +452,25 @@ fn resolve_simple_type_other(other: &str, known_types: Option<&HashMap<Sym, Ty>>
 
 // `TypeExpr::Generic { name, args }` resolution, given the already-resolved
 // argument types `ra`.
+/// Whether a bare type spelling with `arity` type arguments names a BUILTIN
+/// type (#2839): `Int`, `String`, `List[T]`, `Map[K, V]`, ... resolve to the
+/// builtin before any module's declaration is consulted (the order of
+/// `resolve_type_expr_in` / `resolve_generic_type_expr`), so no module's
+/// same-named type can put such a spelling out of scope. Mirrors those two
+/// functions arm for arm.
+pub fn is_builtin_type_spelling(name: &str, arity: usize) -> bool {
+    if arity == 0 {
+        return primitive_type_expr_name(name).is_some();
+    }
+    match name {
+        "!" => arity <= 2,
+        "?" => arity == 1,
+        "List" | "Option" | "Set" | "Matrix" => true,
+        "Result" | "Map" => arity >= 2,
+        _ => false,
+    }
+}
+
 fn resolve_generic_type_expr(name: &Sym, ra: Vec<Ty>, known_types: Option<&HashMap<Sym, Ty>>, cur_mod: Option<&str>) -> Ty {
     match name.as_str() {
         "List" => Ty::list(ra.first().cloned().unwrap_or(Ty::Unknown)),

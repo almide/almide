@@ -189,3 +189,10 @@ pub fn register_builtin_protocols(env: &mut TypeEnv) {
             .insert(sym("Hash"));
     }
 }
+
+/// Whether `name` is one of the built-in protocols registered above (#2839).
+/// A bare spelling of one in a file that imports no module redeclaring it
+/// means the built-in, never an unimported module's same-named protocol.
+pub fn is_builtin_protocol_name(name: &str) -> bool {
+    matches!(name, "Eq" | "Repr" | "Ord" | "Hash" | "Codec" | "Encode" | "Decode" | "Numeric")
+}
