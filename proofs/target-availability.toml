@@ -556,6 +556,126 @@ reason-stock-p1 = "no wasm host binding for the module — run natively, or wait
 reason-structural = "host-surface"
 issue = "#1827"
 
+
+[[unavailable]]
+fn = "net.shm_create"
+legs = ["embedded", "stock-p1", "structural"]
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a shared-memory file is passed as a descriptor over a Unix socket — the IPC floor of Wayland and PipeWire, which only exists natively"
+reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-structural = "host-surface (native-only-forever)"
+issue = "#1423"
+
+[[unavailable]]
+fn = "net.shm_read"
+legs = ["embedded", "stock-p1", "structural"]
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a shared-memory file is passed as a descriptor over a Unix socket — the IPC floor of Wayland and PipeWire, which only exists natively"
+reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-structural = "host-surface (native-only-forever)"
+issue = "#1423"
+
+[[unavailable]]
+fn = "net.shm_resize"
+legs = ["embedded", "stock-p1", "structural"]
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a shared-memory file is passed as a descriptor over a Unix socket — the IPC floor of Wayland and PipeWire, which only exists natively"
+reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-structural = "host-surface (native-only-forever)"
+issue = "#1423"
+
+[[unavailable]]
+fn = "net.shm_write"
+legs = ["embedded", "stock-p1", "structural"]
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a shared-memory file is passed as a descriptor over a Unix socket — the IPC floor of Wayland and PipeWire, which only exists natively"
+reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-structural = "host-surface (native-only-forever)"
+issue = "#1423"
+
+[[unavailable]]
+fn = "net.unix_accept"
+legs = ["embedded", "stock-p1", "structural"]
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a Unix-domain socket that carries file descriptors — the IPC floor of Wayland and PipeWire, which only exists natively"
+reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-structural = "host-surface (native-only-forever)"
+issue = "#1423"
+
+[[unavailable]]
+fn = "net.unix_close"
+legs = ["embedded", "stock-p1", "structural"]
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a Unix-domain socket that carries file descriptors — the IPC floor of Wayland and PipeWire, which only exists natively"
+reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-structural = "host-surface (native-only-forever)"
+issue = "#1423"
+
+[[unavailable]]
+fn = "net.unix_connect"
+legs = ["embedded", "stock-p1", "structural"]
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a Unix-domain socket that carries file descriptors — the IPC floor of Wayland and PipeWire, which only exists natively"
+reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-structural = "host-surface (native-only-forever)"
+issue = "#1423"
+
+[[unavailable]]
+fn = "net.unix_listen"
+legs = ["embedded", "stock-p1", "structural"]
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a Unix-domain socket that carries file descriptors — the IPC floor of Wayland and PipeWire, which only exists natively"
+reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-structural = "host-surface (native-only-forever)"
+issue = "#1423"
+
+[[unavailable]]
+fn = "net.unix_poll"
+legs = ["embedded", "stock-p1", "structural"]
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a Unix-domain socket that carries file descriptors — the IPC floor of Wayland and PipeWire, which only exists natively"
+reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-structural = "host-surface (native-only-forever)"
+issue = "#1423"
+
+[[unavailable]]
+fn = "net.unix_recv"
+legs = ["embedded", "stock-p1", "structural"]
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a Unix-domain socket that carries file descriptors — the IPC floor of Wayland and PipeWire, which only exists natively"
+reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-structural = "host-surface (native-only-forever)"
+issue = "#1423"
+
+[[unavailable]]
+fn = "net.unix_send"
+legs = ["embedded", "stock-p1", "structural"]
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a Unix-domain socket that carries file descriptors — the IPC floor of Wayland and PipeWire, which only exists natively"
+reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-structural = "host-surface (native-only-forever)"
+issue = "#1423"
+
+[[unavailable]]
+fn = "net.unix_take_fds"
+legs = ["embedded", "stock-p1", "structural"]
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a Unix-domain socket that carries file descriptors — the IPC floor of Wayland and PipeWire, which only exists natively"
+reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-structural = "host-surface (native-only-forever)"
+issue = "#1423"
 [[unavailable]]
 fn = "process.env"
 legs = ["embedded", "stock-p1", "structural"]

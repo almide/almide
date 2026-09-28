@@ -2802,6 +2802,13 @@ silent one at ~500 ms (C-366).
 #                 (tcp_connect), 0–65535 — the same unit as http.serve's
 #   byte-count  — the Int counts BYTES: a read budget, or the number pending
 #   millisecond — the Int is a timeout in MILLISECONDS, never seconds
+#   file-descriptor — the Int is a raw OS FILE DESCRIPTOR (unix_* and shm_*),
+#                 NOT a handle: measured natively (2026-09-29, a self-connecting
+#                 unix_listen/unix_connect/unix_accept program on macOS and on
+#                 Linux) the descriptors were small integers above the three
+#                 standard ones, and one that crossed a socket (unix_send ->
+#                 unix_take_fds) arrived as a DIFFERENT number naming the same
+#                 open file — a write through one was read through the other.
 [net]
 
 [[net.fn]]
@@ -2940,6 +2947,114 @@ note = """
 Declared, not probed (host-capability). The listener-table counterpart of
 tcp_close; the split spelling exists precisely because the handle number alone
 cannot say which table it belongs to.
+"""
+
+[[net.fn]]
+name = "unix_connect"
+index_unit = "file-descriptor"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). The Ok Int is the connected socket's file descriptor. Measured natively against a unix_listen socket: a descriptor above the standard three, usable by unix_send, unix_recv, unix_poll and unix_close alike.
+"""
+
+[[net.fn]]
+name = "unix_listen"
+index_unit = "file-descriptor"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). The Ok Int is the listening socket's file descriptor; the path must not exist yet (a second unix_listen on the same path fails with the OS's address-in-use error).
+"""
+
+[[net.fn]]
+name = "unix_accept"
+index_unit = "file-descriptor"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). The argument is the LISTENER's descriptor and the Ok Int the accepted connection's — both raw descriptors in one namespace, unlike tcp_accept's two handle tables.
+"""
+
+[[net.fn]]
+name = "unix_send"
+index_unit = "file-descriptor"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). sock is a descriptor and so is every element of fds: measured, a descriptor sent with the first byte arrived at the peer (unix_take_fds) as a different number naming the same file.
+"""
+
+[[net.fn]]
+name = "unix_recv"
+index_unit = "byte-count"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). max is a BYTE budget and the read is UP TO that many: measured natively, "hello" (5 bytes) sent, unix_recv(s, 100) returned exactly those 5; after the peer closed, it returned 0 bytes.
+"""
+
+[[net.fn]]
+name = "unix_take_fds"
+index_unit = "file-descriptor"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). The result is the descriptors received on sock, oldest first, each once: measured, 2 descriptors sent with one message were both returned, and a second call returned none.
+"""
+
+[[net.fn]]
+name = "unix_poll"
+index_unit = "millisecond"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). timeout_ms is MILLISECONDS; 0 checks without waiting, < 0 waits forever. Measured natively: unix_poll(s, 0) with nothing queued returned false, and unix_poll(s, 1000) after the peer closed returned true at once.
+"""
+
+[[net.fn]]
+name = "unix_close"
+index_unit = "file-descriptor"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). fd is a raw descriptor from any unix_* or shm_* fn or from unix_take_fds; closing a socket also drops descriptors still queued for it.
+"""
+
+[[net.fn]]
+name = "shm_create"
+index_unit = "byte-count"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). size is the file's length in BYTES, zero-filled: measured, shm_create(64) then shm_read(fd, 0, 10000) returned exactly 64 bytes.
+"""
+
+[[net.fn]]
+name = "shm_resize"
+index_unit = "byte-count"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). size is the new length in BYTES: measured, after shm_resize(fd, 4096) a read through ANOTHER descriptor of the same file returned 4096 bytes.
+"""
+
+[[net.fn]]
+name = "shm_write"
+index_unit = "byte-offset"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). offset is a BYTE offset into the file (not a cursor; writes move nothing): measured, shm_write(fd, 10, "shared") then shm_read(fd, 10, 6) returned "shared".
+"""
+
+[[net.fn]]
+name = "shm_read"
+index_unit = "byte-offset"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). offset is a BYTE offset and len a byte count; fewer bytes come back at the file's end.
 """
 
 # Zero-Int modules, ratcheted for the FUTURE: map, set, option, result, error,
