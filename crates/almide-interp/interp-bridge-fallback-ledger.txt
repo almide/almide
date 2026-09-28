@@ -16,6 +16,7 @@
 bytes.len  bytes_string_window_domain  floor: consumed inside a self-hosted body
 bytes.new  zlib_selfhost  floor: consumed inside a self-hosted body
 bytes.to_list  fs_composition_family  floor: consumed inside a self-hosted body
+float.from_float32  endian_explicit_import  floor: consumed inside a self-hosted body
 float.from_int  fan_map_parallel_scalar  floor: consumed inside a self-hosted body
 float.is_infinite  availability_pure_batch  floor: consumed inside a self-hosted body
 float.is_nan  availability_pure_batch  floor: consumed inside a self-hosted body
@@ -33,8 +34,8 @@ int.from_int16  int_bit_family  floor: consumed inside a self-hosted body
 int.from_int32  checked_conversion_value_match  floor: consumed inside a self-hosted body
 int.from_int64  checked_conversion_value_match  floor: consumed inside a self-hosted body
 int.from_int8  checked_conversion_value_match  floor: consumed inside a self-hosted body
-int.from_uint16  int_bit_family  floor: consumed inside a self-hosted body
-int.from_uint32  int_bit_family  floor: consumed inside a self-hosted body
+int.from_uint16  endian_explicit_import  floor: consumed inside a self-hosted body
+int.from_uint32  endian_explicit_import  floor: consumed inside a self-hosted body
 int.from_uint64  checked_conversion_exact_bounds  floor: consumed inside a self-hosted body
 int.from_uint8  checked_conversion_value_match  floor: consumed inside a self-hosted body
 int.parse  datetime_parse_iso_strict  floor: consumed inside a self-hosted body
