@@ -1,0 +1,115 @@
+//! Loop statements and their `break` / `continue` wiring (#2745) — split
+//! from stmts.rs for the file budget.
+//!
+//! `loop_ctl` counts the labels a statement-position `if` / `guard` / match
+//! arm opens between a jump and its loop's continue target. Ownership needs
+//! nothing on the jump edge: the body's heap locals are FRAME credits (the
+//! next pass's rebind releases the previous occupant, the epilogue the last),
+//! so leaving the body early leaves them exactly where a fall-through pass
+//! does.
+
+use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind};
+use wasm_encoder::BlockType;
+
+use crate::emitter::Emitter;
+use crate::*;
+
+impl Emitter<'_> {
+    /// `while`: block { loop { !cond → br out; body; br loop } }.
+    /// `continue` brs to the loop head (the next cond CHECK, which
+    /// charges — the interp's per-check meter), `break` to the block.
+    pub(crate) fn lower_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> Result<(), EmitError> {
+        // #2150: one copy-on-write judge per loop entry for a list the loop
+        // reaches only element-wise — cleared before the unrolled lane too,
+        // which runs copies of this same condition and body.
+        let flags = self.hoist_cow_flags(Some(cond), body)?;
+        // Counted-shape fast lane (unroll.rs): on `true` the rolled loop
+        // below drains the remainder iterations.
+        let _ = self.try_unroll_while(cond, body)?;
+        // #2319: element counts this loop cannot change are loaded once,
+        // before the loop — the bounds checks inside read the local.
+        let hoisted = self.hoist_invariant_counts(Some(cond), body)?;
+        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
+        // Deterministic meter: one loop-head charge per condition
+        // CHECK (n iterations = n+1 checks), ALS-DT2.
+        self.emit_det_charge_const(1);
+        self.lower(cond, Some(BOOL))?;
+        self.f.instructions().i32_eqz().br_if(1);
+        self.lower_loop_body(body, false)?;
+        self.f.instructions().br(0).end().end();
+        self.drop_hoisted_counts(hoisted);
+        self.drop_cow_flags(flags);
+        Ok(())
+    }
+
+    /// A loop body with break/continue wired. For-in bodies sit in an
+    /// extra block so `continue` still reaches the STEP code after it;
+    /// a while `continue` brs straight to the loop head (the next cond
+    /// check). break_delta = labels from the continue target up to the
+    /// exit block (while: 1; for-in: 2 — the inner block adds one).
+    pub(crate) fn lower_loop_body(&mut self, body: &[IrStmt], for_in: bool) -> Result<(), EmitError> {
+        let saved = self.loop_ctl.take();
+        if for_in {
+            self.f.instructions().block(BlockType::Empty);
+            self.loop_ctl = Some((0, 2));
+        } else {
+            self.loop_ctl = Some((0, 1));
+        }
+        for st in body {
+            self.lower_stmt(st)?;
+        }
+        if for_in {
+            self.f.instructions().end();
+        }
+        self.loop_ctl = saved;
+        Ok(())
+    }
+
+    /// A statement body inside one freshly opened label (an `if_` the
+    /// caller wrote): break/continue targets shift one deeper for it.
+    pub(crate) fn lower_stmt_in_label(&mut self, e: &IrExpr) -> Result<(), EmitError> {
+        self.shift_loop_labels(1);
+        self.branch_depth += 1;
+        let r = self.lower_stmt_expr(e);
+        self.branch_depth -= 1;
+        self.shift_loop_labels(-1);
+        r
+    }
+
+    /// Labels opened (+) or closed (-) between the loop's continue target
+    /// and the statement being lowered. No-op outside a loop body.
+    pub(crate) fn shift_loop_labels(&mut self, by: i32) {
+        if let Some((extra, _)) = self.loop_ctl.as_mut() {
+            *extra = extra.checked_add_signed(by).expect("loop label depth underflow");
+        }
+    }
+
+    /// `guard c else break` / `else continue` (#2745): the else leaves
+    /// the loop body, not the frame — no return, no exit plan. Returns
+    /// false (nothing emitted) for any other guard.
+    pub(crate) fn try_lower_guard_loop_ctl(&mut self, cond: &IrExpr, else_: &IrExpr) -> Result<bool, EmitError> {
+        if self.loop_ctl.is_none() || !ends_in_loop_ctl(else_) {
+            return Ok(false);
+        }
+        self.lower(cond, Some(BOOL))?;
+        self.f.instructions().i32_eqz().if_(BlockType::Empty);
+        self.lower_stmt_in_label(else_)?;
+        self.f.instructions().end();
+        Ok(true)
+    }
+}
+
+/// Does this guard else leave the enclosing LOOP body (`break` /
+/// `continue`, possibly after statements in a block) rather than the
+/// frame? Such an else is not the function's return (#2745).
+fn ends_in_loop_ctl(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::Break | IrExprKind::Continue => true,
+        IrExprKind::Block { expr: Some(tail), .. } => ends_in_loop_ctl(tail),
+        IrExprKind::Block { stmts, expr: None } => matches!(
+            stmts.last().map(|s| &s.kind),
+            Some(IrStmtKind::Expr { expr }) if ends_in_loop_ctl(expr)
+        ),
+        _ => false,
+    }
+}
