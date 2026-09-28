@@ -410,6 +410,12 @@ impl Emitter<'_> {
     }
 
     pub(crate) fn lower(&mut self, e: &IrExpr, want: Option<SliceTy>) -> Result<SliceTy, EmitError> {
+        let r = self.lower_node(e, want);
+        crate::decline_site::note(&r, e.span);
+        r
+    }
+
+    fn lower_node(&mut self, e: &IrExpr, want: Option<SliceTy>) -> Result<SliceTy, EmitError> {
         let tail = std::mem::take(&mut self.in_tail);
         let got = match &e.kind {
             IrExprKind::LitInt { value } => {

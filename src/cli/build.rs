@@ -1092,6 +1092,7 @@ fn report_route_error(e: almide::wasm_route::RouteError, source_text: &str, libr
         }
         RouteError::StructuralForcedWall { why } => {
             err(&format!("error: structural leg walled under ALMIDE_WASM_STRUCTURAL ({why})"));
+            report_structural_wall_site();
         }
         RouteError::Incumbent { error, structural_wall } => {
             report_incumbent_error(error, source_text);
@@ -1101,6 +1102,7 @@ fn report_route_error(e: almide::wasm_route::RouteError, source_text: &str, libr
                 // and the reader bisects a function the structural leg lowers fine
                 // for a reason that belongs to the other engine.
                 err(&format!("wall (structural leg, the default): {why}"));
+                report_structural_wall_site();
                 // #1922: the both-legs refusal is a named diagnostic. `almide check
                 // --target wasm` runs this same routing and surfaces it at check
                 // time; the build path stays the backstop.
@@ -1114,6 +1116,15 @@ fn report_route_error(e: almide::wasm_route::RouteError, source_text: &str, libr
         // the incumbent would ship a program the checked plan says leaks,
         // and the message must never tell the writer to change valid code.
         RouteError::OwnershipLowering(d) => err(&d.to_string()),
+    }
+}
+
+/// #2807: the function (and source line) the structural leg's wall came from.
+/// The reason string is a census key and stays location-free; without this
+/// line a `ty-mismatch:…` wall in a 77-file package could not be acted on.
+fn report_structural_wall_site() {
+    if let Some(site) = almide_wasm::decline_site::last() {
+        err(&format!("  --> in {site}"));
     }
 }
 
