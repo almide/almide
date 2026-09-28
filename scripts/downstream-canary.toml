@@ -176,7 +176,7 @@ commands = ["check", "test"]
 [[project]]
 repo = "O6lvl4/gramide-cli"
 commands = ["check", "test", "build"]
-note = "#2839: 0.65.1-rc1 broke it (E029 on builtin Map beside a dependency's `type Map`)"
+note = "#2839: E029 on builtin Map beside a dependency's module named map — broken in v0.65.0 and v0.65.1-rc1"
 
 [[project]]
 repo = "O6lvl4/gramide-go"
