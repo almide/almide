@@ -297,7 +297,7 @@ impl Checker {
     }
 
     /// Constrain an effect fn body against its return type signature.
-    /// Effect fns accept: Unit body (control-flow returns), unwrapped T, or full Result[T, E].
+    /// Effect fns accept: unwrapped T, or full Result[T, E].
     fn constrain_effect_body(&mut self, name: &str, ret_ty: &Ty, body_ty: Ty, body: &ast::Expr) {
         let body_resolved = resolve_ty(&body_ty, &self.uf);
         // ADR-0008 / #2182: a Result-typed tail leaf of a fn declared `-> T`
@@ -321,7 +321,14 @@ impl Checker {
                 self.queue_implicit_prop_leaves(body, "of this fn's tail value", must_use);
             }
         }
-        if body_resolved == Ty::Unit { return; } // while loops, guard patterns return via control flow
+        // A Unit body is held to the declared Ok type like any other (#2880).
+        // It used to be accepted whatever the fn declared ("while loops, guard
+        // patterns return via control flow"), which no leg compiles: native
+        // emitted `Ok(())` for a `Result<T, String>` and failed rustc, so
+        // `check` passed a program no build could produce. No corpus program
+        // relied on it. Since #2866 it also passed the ordinary-looking
+        // `effect fn main() -> Unit` of a file that declares `type Unit`,
+        // whose `Unit` is that record there (module-system §4.5).
         if let Ty::Applied(crate::types::TypeConstructorId::Result, args) = ret_ty {
             // ret_ty is Result[T, E]: body can be Result[T, E] or unwrapped T
             if args.len() >= 1 {
