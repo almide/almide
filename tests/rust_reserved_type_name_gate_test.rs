@@ -137,6 +137,76 @@ fn a_package_module_named_after_a_stdlib_module_builds_its_types_in_both_shapes(
     }
 }
 
+/// The first public top-level fn a bundled module's own source declares.
+fn first_public_fn(module: &str) -> Option<String> {
+    let src = almide_lang::stdlib_info::bundled_source(module)?;
+    src.lines().find_map(|l| {
+        let rest = l.strip_prefix("fn ").or_else(|| l.strip_prefix("effect fn "))?;
+        let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+        (!name.is_empty() && !name.starts_with('_') && rest[name.len()..].starts_with(['(', '['])).then_some(name)
+    })
+}
+
+/// #2867: a package module keyed like a stdlib module may declare a fn the
+/// stdlib module also declares. In-package the module shared the stdlib's key,
+/// so the native leg bound the package's `regex.is_match(41)` to the stdlib's
+/// signature and body (E0614 / E0061) while wasm printed `42`. Every bundled
+/// module with a public fn is a cell, in one package, native and wasm.
+#[test]
+fn a_package_module_named_after_a_stdlib_module_may_reuse_its_fn_names() {
+    let cells: Vec<(String, String)> =
+        stdlib_module_names().into_iter().filter_map(|m| first_public_fn(&m).map(|f| (m, f))).collect();
+    assert!(cells.len() >= 30, "only {} modules with a public fn: {cells:?}", cells.len());
+    assert!(cells.iter().any(|(m, _)| m == "regex") && cells.iter().any(|(m, _)| m == "int8"), "the reported cells must run: {cells:?}");
+    let root = tempfile::tempdir().expect("tempdir");
+    let pkg = root.path();
+    write(&pkg.join("almide.toml"), PKG_TOML);
+    for (m, f) in &cells {
+        write(&pkg.join(format!("src/{m}.almd")), &format!("fn {f}(n: Int) -> Int = n + 1\n"));
+    }
+    let imports: String = cells.iter().map(|(m, _)| format!("import self.{m}\n")).collect();
+    let body: String = cells
+        .iter()
+        .map(|(m, f)| format!("  println(if {m}.{f}(41) == 42 then \"ok-{m}\" else \"lost-{m}\")\n"))
+        .collect();
+    write(&pkg.join("src/main.almd"), &format!("{imports}\neffect fn main() -> Unit = {{\n{body}}}\n"));
+    let modules: Vec<String> = cells.iter().map(|(m, _)| m.clone()).collect();
+    for (target, extra) in [("native", &[][..]), ("wasm", &["--target", "wasm"][..])] {
+        let args: Vec<&str> = ["run", "src/main.almd"].into_iter().chain(extra.iter().copied()).collect();
+        assert_prints_every_cell(&format!("in-package {target}"), almide_in(pkg, &args), &modules);
+    }
+}
+
+/// #2865 (b): the incumbent wasm leg (the structural leg's fallback) spells
+/// each record's repr helper by the declared name, `fn __repr_rec_Float(e:
+/// Float)`, inside the entry program's scope. A package module's `type Float`
+/// then read as the builtin `Float` there (wasm validation `expected i32,
+/// found i64`). Keyed `self.float`, the helper names `self.float.Float`.
+#[test]
+fn the_incumbent_leg_reprs_a_module_record_named_like_a_builtin() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let pkg = root.path();
+    write(&pkg.join("almide.toml"), PKG_TOML);
+    for m in ["float", "int", "bytes"] {
+        write(&pkg.join(format!("src/{m}.almd")), &cell_module(&pascal(m)));
+    }
+    write(
+        &pkg.join("src/main.almd"),
+        "import self.float\nimport self.int\nimport self.bytes\n\neffect fn main() -> Unit = {\n  println(\"${float.build(true)} ${int.build(true)} ${bytes.build(false)}\")\n}\n",
+    );
+    let out = Command::new(almide())
+        .current_dir(pkg)
+        .env("ALMIDE_WASM_INCUMBENT", "1")
+        .args(["run", "src/main.almd", "--target", "wasm"])
+        .output()
+        .expect("run almide");
+    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success() && text.contains("Float { ok: true } Int { ok: true } Bytes { ok: false }"),
+        "incumbent leg:\n{text}"
+    );
+}
+
 /// The issue's reported cell, alone and end to end, repr included: the
 /// printed type name is the declared one, not the mangle.
 #[test]
