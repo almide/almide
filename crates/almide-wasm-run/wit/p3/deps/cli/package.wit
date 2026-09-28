@@ -8,6 +8,15 @@ interface types {
   }
 }
 
+// get-environment / get-arguments: env.get (fs_call op 26) and the
+// program arguments (op 29), ADR-0023 step 3. Transcribed from the
+// runtime's tree (wasmtime-wasi 47 src/p3/wit/deps/cli.wit).
+interface environment {
+  get-environment: func() -> list<tuple<string, string>>;
+  get-arguments: func() -> list<string>;
+  get-initial-cwd: func() -> option<string>;
+}
+
 interface stdin {
   use types.{error-code};
   read-via-stream: func() -> tuple<stream<u8>, future<result<_, error-code>>>;

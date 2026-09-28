@@ -71,19 +71,20 @@ fn http_frame_cell(
 }
 
 /// The p3 http string client (#1710 PR B): serve fs_call ops 43..=47 over
-/// `wasi:http/client@0.3.0`'s sync-lowered `send`. Sequence (the recorded
+/// `wasi:http/client@0.3.0`'s async-lowered `send`. Sequence (the recorded
 /// blueprint): url parse in-shim (scheme prefix, authority to '/', path
 /// rest); empty `fields`; the trailers future written `ok(none)` up front;
-/// an optional contents stream fed and its writable end dropped BEFORE the
-/// sync send (the rendezvous-ordering probe the blueprint demands — a body
-/// past the host's buffer (`-S http-outgoing-body-buffer-chunks`) is the
-/// empirical fixture); the sent-future's readable dropped; on `ok`, the
-/// response body drains through the same realloc'd sync-read loop the fs
-/// shim uses, into the parked-result convention. Transport errors answer
+/// an optional contents stream fed by async writes while send is in flight
+/// (the guest scheduler below — a body past the host's buffer
+/// (`-S http-outgoing-body-buffer-chunks`) is the empirical fixture); the
+/// sent-future's readable dropped; on `ok`, the response body drains
+/// through the same realloc'd read loop the fs shim uses (each read
+/// through `$await`), into the parked-result convention. Transport errors answer
 /// `pack(1, len)` with the static E_HTTP text (host-specific wording is
 /// bounded by contract — fixtures assert err-ness). The p3 stream delivers
 /// the DECODED body, so no chunked handling exists here by design.
-fn shim_http(park: u64, g_plen: u32, g_ppos: u32, f_alloc: u32, h: &HttpAbi) -> Function {
+fn shim_http(g: P3Globals, h: &HttpAbi) -> Function {
+    let P3Globals { park, g_plen, g_ppos, f_alloc, f_await, .. } = g;
     // Emit-time bisect knob (#1710 PR B bring-up): ALMIDE_P3_HTTP_STOP=N
     // makes the shim answer the static err right after stage N, so a hang
     // localizes to the first stage whose stop-build still hangs. Stages:
@@ -515,9 +516,11 @@ fn shim_http(park: u64, g_plen: u32, g_ppos: u32, f_alloc: u32, h: &HttpAbi) -> 
     i.local_get(cap).i32_const(1).i32_shl().local_set(cap);
     i.end();
     i.local_get(body_rx);
+    i.local_get(body_rx);
     i.local_get(buf).local_get(total).i32_add();
     i.local_get(cap).local_get(total).i32_sub();
     i.call(I_HTTP_BODY_READ);
+    i.call(f_await);
     i.i32_const(4).i32_shr_u().local_set(n);
     i.local_get(n).i32_eqz().br_if(1);
     i.local_get(total).local_get(n).i32_add().local_set(total);
@@ -526,7 +529,9 @@ fn shim_http(park: u64, g_plen: u32, g_ppos: u32, f_alloc: u32, h: &HttpAbi) -> 
     i.local_get(trlfut).call(I_HTTP_TRL_DROPR);
     // handling result: ok written into the kept writable, then dropped.
     i.i32_const((park + RET) as i32).i64_const(0).i64_store(mem64(16));
-    i.local_get(cb_tx).i32_const((park + RET + 16) as i32).call(I_HTTP_CB_FWRITE).drop();
+    i.local_get(cb_tx);
+    i.local_get(cb_tx).i32_const((park + RET + 16) as i32).call(I_HTTP_CB_FWRITE);
+    i.call(f_await).drop();
     i.local_get(cb_tx).call(I_HTTP_CB_FDROPW);
 
     i.local_get(buf).global_set(g_ppos);

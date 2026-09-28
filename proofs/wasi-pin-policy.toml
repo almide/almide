@@ -32,11 +32,16 @@ minor = "0.3.0"
 floor = 46
 crate_major = 47
 ci = "v47.0.3"
-# The flag surface the p3 execution legs pass (47.x): -S p3=y alone
-# refuses sync stream builtins — the 🚝 more-async-builtins gate is
-# load-bearing. -S http=y mounts wasi:http@0.3 for the client leg
-# (#1710 PR B); components that import it refuse to link without it.
-flags = "-W component-model-async=y,component-model-more-async-builtins=y -S p3=y -S http=y"
+# The flag surface the p3 execution legs pass (47.x): NO feature flag
+# (ADR-0023 step 1). The shim uses only the baseline async builtins
+# (`waitable-set.*`, the `[async-lower]` stream/future copies), which
+# need `component-model-async` alone — on by default since 46, as is p3
+# itself, so neither `-W component-model-more-async-builtins` nor
+# `-S p3=y` is passed; the component validates with the 🚝 feature off
+# (`wasi_p3::validate_baseline`, run on every emit). -S http=y is the
+# capability grant, not a feature: it mounts wasi:http@0.3 for the client
+# leg (#1710 PR B); components that import it refuse to link without it.
+flags = "-S http=y"
 
 [wasm-tools]
 # The lockstep family version (workspace Cargo pins). 0.259 is the

@@ -1,8 +1,8 @@
 // `include!`d part of wasi_p3.rs (codopsy max-lines split, mechanical text move —
 // shares the parent module's imports and items; nothing here is pub beyond the parent).
 
-/// `(ptr, len) -> ()`: open-once, sync-write-all, then the newline.
-fn shim_print(port: PrintPort, park: u64, newline: bool) -> Function {
+/// `(ptr, len) -> ()`: open-once, write-all, then the newline.
+fn shim_print(port: PrintPort, park: u64, f_await: u32, newline: bool) -> Function {
     let PrintPort { g_tx, g_fut, call_import, new_import, write_import } = port;
     let (ptr, len) = (0u32, 1u32);
     let n = 2u32;
@@ -11,12 +11,12 @@ fn shim_print(port: PrintPort, park: u64, newline: bool) -> Function {
     // locals: 0 ptr, 1 len (params), 2 n (i32), 3 scratch (i64)
     let mut i = f.instructions();
     open_stream(&mut i, g_tx, g_fut, call_import, new_import, s64);
-    write_all(&mut i, g_tx, write_import, ptr, len, n);
+    write_all(&mut i, g_tx, write_import, f_await, (ptr, len, n));
     if newline {
         i.i32_const(park as i32).i32_const(0x0A).i32_store8(mem8(0));
         i.i32_const(park as i32).local_set(ptr);
         i.i32_const(1).local_set(len);
-        write_all(&mut i, g_tx, write_import, ptr, len, n);
+        write_all(&mut i, g_tx, write_import, f_await, (ptr, len, n));
     }
     i.end();
     f
@@ -122,11 +122,11 @@ fn fs_open_err_map(
     fs_err(i, g_ppos, g_plen, park, MSG_GEN, E_GEN.len());
 }
 
-/// Open descriptor in local `d` -> read-via-stream, the doubling sync
-/// read loop (DROPPED = EOF), handle drops, payload park, and the
-/// `pack(0, total)` return.
+/// Open descriptor in local `d` -> read-via-stream, the doubling
+/// read loop (DROPPED = EOF, each read through `$await`), handle drops,
+/// payload park, and the `pack(0, total)` return.
 fn fs_read_tail(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, l: ReadLocals) {
-    let P3Globals { park, f_alloc, g_ppos, g_plen, .. } = g;
+    let P3Globals { park, f_alloc, g_ppos, g_plen, f_await, .. } = g;
     let ReadLocals { d, rx, fut, buf, cap, total, n } = l;
     i.local_get(d).i64_const(0).i32_const((park + RET) as i32).call(I_FS_RVS);
     i.i32_const((park + RET) as i32).i32_load(mem(0)).local_set(rx);
@@ -143,9 +143,11 @@ fn fs_read_tail(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, l: Read
     i.local_get(cap).i32_const(1).i32_shl().local_set(cap);
     i.end();
     i.local_get(rx);
+    i.local_get(rx);
     i.local_get(buf).local_get(total).i32_add();
     i.local_get(cap).local_get(total).i32_sub();
     i.call(I_FS_SREAD);
+    i.call(f_await);
     i.i32_const(4).i32_shr_u().local_set(n);
     i.local_get(n).i32_eqz().br_if(1);
     i.local_get(total).local_get(n).i32_add().local_set(total);
@@ -160,10 +162,10 @@ fn fs_read_tail(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, l: Read
 
 /// The host contract over p3 (op codes shared with the embedded host): 30
 /// raw stdout, 31 stdin read-to-end, 35 stdin take-n, 32 entropy, 34 wall
-/// clock, 60 monotonic clock, plus the fs and http families; anything else
-/// = the defined refusal.
-fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>) -> Function {
-    let P3Globals { park, g_plen, g_ppos, g_in_rx, g_in_fut, g_out_tx, g_out_fut, g_err_tx, g_err_fut, g_pre, f_alloc, g_wset, g_slots, g_slotn, f_reserve } = g;
+/// clock, 60 monotonic clock, plus the fs, http and env (26 / 29 / 36)
+/// families; anything else = the defined refusal.
+fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>, f_env: Option<u32>) -> Function {
+    let P3Globals { park, g_plen, g_ppos, g_in_rx, g_in_fut, g_out_tx, g_out_fut, g_err_tx, g_err_fut, g_pre, f_alloc, g_wset, g_slots, g_slotn, f_reserve, f_await, .. } = g;
     let (op, a_ptr, a_len, b_ptr, b_len) = (0u32, 1u32, 2u32, 3u32, 4u32);
     let total = 5u32;
     let n = 6u32;
@@ -187,6 +189,21 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>) -> 
         i.end();
     }
 
+    // ops 26 / 29 / 36 (env.get, the program arguments, env.sleep_ms) —
+    // forwarded whole to the env service when the op set earned its
+    // imports (ADR-0023 step 3).
+    if let Some(e) = f_env {
+        i.local_get(op).i32_const(26).i32_eq();
+        i.local_get(op).i32_const(29).i32_eq().i32_or();
+        i.local_get(op).i32_const(36).i32_eq().i32_or();
+        i.if_(BlockType::Empty);
+        for pidx in 0..5u32 {
+            i.local_get(pidx);
+        }
+        i.call(e).return_();
+        i.end();
+    }
+
     // op 30: raw stdout append (no newline) — b carries the bytes; op 73:
     // the same on stderr (`panic`'s line, #2769).
     let ports = [
@@ -196,19 +213,22 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>) -> 
     for (code, g_tx, g_fut, call, new, write) in ports {
         i.local_get(op).i32_const(code).i32_eq().if_(BlockType::Empty);
         open_stream(&mut i, g_tx, g_fut, call, new, s64);
-        write_all(&mut i, g_tx, write, b_ptr, b_len, n);
+        write_all(&mut i, g_tx, write, f_await, (b_ptr, b_len, n));
         i.i64_const(0).return_();
         i.end();
     }
 
-    // op 35: stdin take up to a_len bytes — ONE sync read, straight into
-    // the park data span; a DROPPED status (writer closed) answers 0.
+    // op 35: stdin take up to a_len bytes — ONE read (through `$await`),
+    // straight into the park data span; a DROPPED status (writer closed)
+    // answers 0.
     i.local_get(op).i32_const(35).i32_eq().if_(BlockType::Empty);
     open_stdin(&mut i, g_in_rx, g_in_fut, park);
+    i.global_get(g_in_rx);
     i.global_get(g_in_rx);
     i.i32_const((park + DATA) as i32);
     i.local_get(a_len);
     i.call(I_STDIN_READ);
+    i.call(f_await);
     i.i32_const(4).i32_shr_u().global_set(g_plen);
     i.i32_const((park + DATA) as i32).global_set(g_ppos);
     i.global_get(g_plen).i64_extend_i32_u().return_();
@@ -494,19 +514,23 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>) -> 
     i.local_get(d).local_get(s64).i32_wrap_i64().i64_const(0).call(I_FS_WVS);
     i.end();
     i.local_set(fut);
-    // sync write loop on the LOCAL writable end.
+    // write loop on the LOCAL writable end (each write through `$await`).
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(b_len).i32_eqz().br_if(1);
     i.local_get(rx);
+    i.local_get(rx);
     i.local_get(b_ptr).local_get(b_len);
     i.call(I_FS_WWRITE);
+    i.call(f_await);
     i.i32_const(4).i32_shr_u().local_set(n);
     i.local_get(n).i32_eqz().br_if(1);
     i.local_get(b_ptr).local_get(n).i32_add().local_set(b_ptr);
     i.local_get(b_len).local_get(n).i32_sub().local_set(b_len);
     i.br(0).end().end();
     i.local_get(rx).call(I_FS_WDROP);
-    i.local_get(fut).i32_const((park + RET) as i32).call(I_FS_WFUT).drop();
+    i.local_get(fut);
+    i.local_get(fut).i32_const((park + RET) as i32).call(I_FS_WFUT);
+    i.call(f_await).drop();
     i.local_get(d).call(I_FS_RESDROP);
     i.i64_const(0).return_();
     i.end();
@@ -648,7 +672,7 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>) -> 
     open_stream(&mut i, g_err_tx, g_err_fut, I_ERR_CALL, I_ERR_NEW, s64);
     i.i32_const((park + MSG) as i32).local_set(b_ptr);
     i.i32_const(UNSUPPORTED_MSG.len() as i32).local_set(b_len);
-    write_all(&mut i, g_err_tx, I_ERR_WRITE, b_ptr, b_len, n);
+    write_all(&mut i, g_err_tx, I_ERR_WRITE, f_await, (b_ptr, b_len, n));
     i.i32_const(1).call(I_EXIT);
     i.unreachable();
     i.end();

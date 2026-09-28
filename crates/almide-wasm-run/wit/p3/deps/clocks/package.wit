@@ -6,10 +6,13 @@ interface types {
   type duration = u64;
 }
 
-// The monotonic clock, `now` only: datetime.monotonic_ns (fs_call op 60).
+// The monotonic clock: `now` for datetime.monotonic_ns (fs_call op 60),
+// `wait-for` for env.sleep_ms (op 36, ADR-0023 step 3).
 interface monotonic-clock {
+  use types.{duration};
   type mark = u64;
   now: func() -> mark;
+  wait-for: async func(how-long: duration);
 }
 
 interface system-clock {
