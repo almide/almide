@@ -195,6 +195,7 @@ mod region;
 mod sums;
 mod random;
 mod fs_range;
+mod testing;
 mod tco;
 mod types_table;
 mod value;
