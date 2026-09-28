@@ -37,7 +37,9 @@ handler is not called for any of them. A chunked request body is decoded.
 The response goes out as `HTTP/1.1 <status> <reason>` (the registered reason,
 empty for an unregistered code), the response's headers in order,
 `Connection: close`, `Content-Length`, the body, and then the connection
-closes. A HEAD request, a `204` and a `304` get no body. A response later than 30 s is
+closes. A HEAD request, a `204` and a `304` get no body. A response header
+whose name is not a token, or whose value holds CR, LF or NUL, is refused: the
+answer is a `500` and one line goes to stderr. A response later than 30 s is
 replaced by `503`. A handler `err(m)` answers `500` with the body
 `Internal error: <m>`. If the port cannot be bound, the program stops with
 `Error: bind failed: <reason>` and exit code 1.

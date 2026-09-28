@@ -350,6 +350,18 @@ fn head_204_and_304_carry_no_body() {
 }
 
 #[test]
+fn a_header_that_would_split_the_response_is_named() {
+    assert_eq!(server::http_server_bad_header("X-A", "1"), None);
+    assert_eq!(server::http_server_bad_header("X-A", "a b\t\"c\""), None);
+    assert!(server::http_server_bad_header("X-A", "1\r\nSet-Cookie: evil=1").is_some());
+    assert!(server::http_server_bad_header("X-A", "1\nx").is_some());
+    assert!(server::http_server_bad_header("X-A", "1\0").is_some());
+    assert!(server::http_server_bad_header("X-A\r\nSet-Cookie", "1").is_some());
+    assert!(server::http_server_bad_header("X A", "1").is_some());
+    assert!(server::http_server_bad_header("", "1").is_some());
+}
+
+#[test]
 fn a_bind_failure_names_itself() {
     let e = server::http_server_bind(99_999).err().unwrap();
     assert!(e.starts_with("bind failed: "), "{e}");
@@ -487,6 +499,16 @@ fn header_lines_are_bounded_in_length_and_count() {
     let many = MANY.get_or_init(|| format!("GET /x HTTP/1.1\r\n{}\r\n", "X-H: 1\r\n".repeat(101)).into_bytes());
     let resp = exchange(many, false, server::HTTP_SERVER_DEFAULT_LIMITS, |_, r| panic!("the handler saw {r:?}"));
     assert_eq!(status_line(&resp), "HTTP/1.1 431 Request Header Fields Too Large");
+}
+
+#[test]
+fn a_crlf_header_is_refused_with_500() {
+    let resp = exchange(b"GET /x HTTP/1.1\r\n\r\n", false, server::HTTP_SERVER_DEFAULT_LIMITS, |conn, _| {
+        let evil = [("X-A".to_string(), "1\r\nSet-Cookie: evil=1".to_string())];
+        server::http_server_write(conn, 200, &evil, "x").unwrap();
+    });
+    assert_eq!(status_line(&resp), "HTTP/1.1 500 Internal Server Error");
+    assert!(!resp.contains("Set-Cookie"), "{resp:?}");
 }
 
 #[test]

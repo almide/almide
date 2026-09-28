@@ -4636,6 +4636,7 @@ evidence  = [
   { path = "spec/serve_cross/http_serve_limits.almd", class = "fixture" },
   { path = "tests/http_serve_cross_test.rs", name = "a_huge_or_cut_content_length_is_refused_before_the_handler_and_a_chunked_body_is_read_on_native_and_the_embedded_lane", class = "fixture" },
   { path = "tests/http_serve_cross_test.rs", name = "head_has_no_body_429_and_503_carry_their_reasons_and_a_pipelined_request_meets_connection_close_on_native_and_the_embedded_lane", class = "fixture" },
+  { path = "tests/http_serve_cross_test.rs", name = "a_response_header_holding_crlf_is_refused_with_500_on_native_and_the_embedded_lane", class = "fixture" },
 ]
 [[contract]]
 id        = "C-368"

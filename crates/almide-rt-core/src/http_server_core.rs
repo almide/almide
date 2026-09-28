@@ -482,6 +482,21 @@ pub fn http_server_reason(status: i64) -> &'static str {
     }
 }
 
+/// A header the response may not carry as written (#2822): a name that is
+/// not an RFC 9110 token, or a value holding CR, LF or NUL — either would
+/// let the handler's text end the field and start another (response
+/// splitting). `None` for a well-formed field.
+pub fn http_server_bad_header(name: &str, value: &str) -> Option<String> {
+    let tchar = |b: u8| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b);
+    if name.is_empty() || !name.bytes().all(tchar) {
+        return Some(format!("response header name {:?} is not a token", name));
+    }
+    if value.bytes().any(|b| matches!(b, b'\r' | b'\n' | 0)) {
+        return Some(format!("response header {} has a CR, LF or NUL in its value", name));
+    }
+    None
+}
+
 /// The response bytes for a request of any method but HEAD: see
 /// [`http_server_response_bytes_for`].
 pub fn http_server_response_bytes(status: i64, headers: &[(String, String)], body: &str) -> Vec<u8> {
@@ -493,7 +508,7 @@ pub fn http_server_response_bytes(status: i64, headers: &[(String, String)], bod
 /// `Connection: close` (one response per connection; keep-alive is #2665),
 /// Content-Length, the body. A HEAD request, a 1xx, a 204 and a 304 get no
 /// body (RFC 9110 §6.4.1); 1xx and 204 get no Content-Length either
-/// (§8.6).
+/// (§8.6). The headers must already have passed [`http_server_bad_header`].
 pub fn http_server_response_bytes_for(head: bool, status: i64, headers: &[(String, String)], body: &str) -> Vec<u8> {
     let mut out = format!("HTTP/1.1 {} {}\r\n", status, http_server_reason(status));
     for (k, v) in headers {
@@ -514,10 +529,16 @@ pub fn http_server_response_bytes_for(head: bool, status: i64, headers: &[(Strin
     out.into_bytes()
 }
 
-/// Write the handler's response and close the connection. A response that
-/// arrives after the request timeout (ADR-0020 §5.7) is replaced by a `503`.
+/// Write the handler's response and close the connection. Two answers
+/// replace it: a header that would split the response (#2822) is a `500`
+/// plus one stderr line, and a response that arrives after the request
+/// timeout (ADR-0020 §5.7) is a `503`.
 pub fn http_server_write(conn: HttpServerConn, status: i64, headers: &[(String, String)], body: &str) -> Result<(), String> {
     let plain = [("Content-Type".to_string(), "text/plain".to_string())];
+    if let Some(why) = headers.iter().find_map(|(k, v)| http_server_bad_header(k, v)) {
+        eprintln!("http.serve: refused the response: {}", why.escape_debug());
+        return http_server_send(conn, 500, &plain, &format!("Internal error: {}", why.escape_debug()));
+    }
     if std::time::Instant::now() >= conn.deadline {
         return http_server_send(conn, 503, &plain, http_server_reason(503));
     }
