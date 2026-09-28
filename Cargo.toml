@@ -76,7 +76,7 @@ lsp-server = "0.10"
 crossbeam-channel = "0.5"
 lsp-types = "0.97"
 wit-component = "0.259"
-wasi-preview1-component-adapter-provider = "48.0.1"
+wasi-preview1-component-adapter-provider = "49.0.1"
 
 [features]
 default = ["embedded-host"]
