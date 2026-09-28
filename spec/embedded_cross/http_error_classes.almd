@@ -1,0 +1,27 @@
+// @contract: C-328
+// The client's error classes (ADR-0023 §4.2) that need no server: the three
+// scheme reasons of invalid-url (a URL with a tab and a quote shows the
+// operand's escapes) and connect, on a closed local port. Every text names
+// the URL the program passed and carries no OS errno, so native, the
+// embedded lane and the stock p3 component read the same;
+// tests/http_error_class_cross_test.rs runs this file on all three and
+// adds the classes that need a local server (timeout, tls, too-large).
+import http
+
+fn show(tag: String, r: Result[String, String]) -> Unit = {
+  match r {
+    ok(_) => println("${tag}: unexpected ok"),
+    err(e) => println("${tag}: ${e}"),
+  }
+}
+
+effect fn main() -> Unit = {
+  show("unsupported", http.get("ftp://example.com/x"))
+  show("unsupported-upper", http.get("FTP://example.com/x"))
+  show("no-scheme", http.get("example.com/x"))
+  show("slashes", http.get("HTTP:/x"))
+  show("escaped", http.get("x\ty\"z"))
+  show("connect-get", http.get("http://127.0.0.1:9/"))
+  show("connect-post", http.post("http://127.0.0.1:9/x", "{}"))
+  show("connect-framed", http.request("PUT", "http://127.0.0.1:9/x", "y", ["X-Ok": "fine"]))
+}
