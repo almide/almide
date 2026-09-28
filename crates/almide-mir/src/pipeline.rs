@@ -504,6 +504,8 @@ fn source_to_ir_with(
     // Guard → if restructure at the fn-body tail chain (conditional early return
     // expressed without early-return control flow — see desugar_guard.rs; shared
     // with classify: desugar-before-both).
+    // #2885: an effect main's declared Ok payload is discarded (the E044 rule).
+    crate::lower::discard_effect_main_payload(&mut ir);
     crate::lower::desugar_fn_body_guards(&mut ir);
     // Tail err-raise ifs normalize to the proven bind-position `!` shape (fed by the
     // guard restructure above; shared with classify: desugar-before-both).
