@@ -1,0 +1,202 @@
+# Downstream canary (#2839): before an rc is cut, build a wide set of REAL
+# public downstream projects with the candidate compiler AND with the previous
+# release, and report every project that worked on the previous release but
+# fails on the candidate. #2839 is why: v0.65.1-rc1 was tagged, and only
+# afterwards a user found a real project no longer built.
+#
+# The acceptance ring (acceptance-ring.yml) gates every push on three PINNED
+# projects; this canary is its wide, pre-release counterpart and differs on
+# purpose:
+#   - projects track their default-branch HEAD ("does real current code still
+#     build"), and verdicts are relative — baseline and candidate run on the
+#     same checkout, so downstream churn shows up as fail/fail, not as red;
+#   - it runs only on workflow_dispatch (≈45 legs; far too costly per push).
+#
+# Roster: scripts/downstream-canary.toml (public repos only — Aid-On/teastia
+# stays out). Leg driver: scripts/downstream-canary.sh. Report:
+# scripts/downstream-canary.py. Release Procedure (CLAUDE.md): dispatch on the
+# candidate commit before tagging vX.Y.Z-rc1 and before the final; a
+# REGRESSION row blocks the tag until triaged.
+name: Downstream Canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_ref:
+        description: "Compiler ref to test (branch, tag, or sha)"
+        default: develop
+        required: true
+      baseline_tag:
+        description: "Release tag to compare against (empty = the latest non-rc release)"
+        default: ""
+        required: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.candidate_ref }}-${{ inputs.baseline_tag }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.94.0"  # same runner-class toolchain as acceptance-ring.yml
+  CARGO_INCREMENTAL: "0"
+  GIT_TERMINAL_PROMPT: "0"
+
+jobs:
+  plan:
+    name: Resolve refs and roster
+    runs-on: ubuntu-latest
+    outputs:
+      baseline_tag: ${{ steps.refs.outputs.baseline_tag }}
+      candidate_sha: ${{ steps.refs.outputs.candidate_sha }}
+      matrix: ${{ steps.roster.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_REF: ${{ inputs.candidate_ref }}
+          BASELINE_TAG: ${{ inputs.baseline_tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BASELINE_TAG" ]; then
+            # /releases/latest never returns a prerelease or a draft.
+            BASELINE_TAG=$(gh api "repos/${{ github.repository }}/releases/latest" -q .tag_name)
+          fi
+          git rev-parse --verify -q "refs/tags/$BASELINE_TAG^{commit}" >/dev/null \
+            || { echo "::error::baseline tag $BASELINE_TAG does not exist"; exit 1; }
+          git fetch -q origin "$CANDIDATE_REF" 2>/dev/null || true
+          sha=$(git rev-parse --verify -q "origin/$CANDIDATE_REF^{commit}" \
+                || git rev-parse --verify -q "$CANDIDATE_REF^{commit}" \
+                || git rev-parse --verify -q FETCH_HEAD)
+          echo "baseline_tag=$BASELINE_TAG" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "baseline: $BASELINE_TAG ($(git rev-parse "$BASELINE_TAG^{commit}")); candidate: $CANDIDATE_REF ($sha)"
+      - id: roster
+        run: echo "matrix=$(python3 scripts/downstream-canary.py matrix)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build the ${{ matrix.side }} compiler
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - side: baseline
+            ref: ${{ needs.plan.outputs.baseline_tag }}
+          - side: candidate
+            ref: ${{ needs.plan.outputs.candidate_sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      # Read-only: dependencies from the ring's develop-written cache.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ring-build-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+      - run: cargo build --release
+      - name: Identify the binary
+        run: |
+          echo "${{ matrix.side }}: $(git rev-parse HEAD) — $(target/release/almide --version)" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: almide-${{ matrix.side }}
+          path: target/release/almide
+          retention-days: 3
+
+  leg:
+    name: ${{ matrix.repo }}
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: canary
+      # `almide build` compiles through Rust; `almide test` runs its wasm leg
+      # on the wasmtime CLI (same pins as the ring).
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: canary-${{ matrix.slug }}-${{ env.RUST_TOOLCHAIN }}-${{ github.run_id }}
+          restore-keys: canary-${{ matrix.slug }}-${{ env.RUST_TOOLCHAIN }}-
+      - name: Cache wasmtime tarball
+        uses: actions/cache@v6
+        with:
+          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
+          key: wasmtime-v47.0.3-x86_64-linux
+      - name: Install wasmtime
+        run: |
+          VERSION=v47.0.3
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          if [ ! -s "$TARBALL" ]; then
+            for i in 1 2 3 4 5; do
+              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+            done
+          fi
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: almide-*
+          path: bin
+      - run: chmod +x bin/almide-baseline/almide bin/almide-candidate/almide
+      - name: Baseline vs candidate
+        env:
+          BASELINE_BIN: ${{ github.workspace }}/bin/almide-baseline/almide
+          CANDIDATE_BIN: ${{ github.workspace }}/bin/almide-candidate/almide
+          CANARY_COMMANDS: ${{ matrix.commands }}
+          CANARY_REF: ${{ matrix.ref }}
+          CANARY_TIMEOUT: ${{ matrix.timeout }}
+        run: bash canary/scripts/downstream-canary.sh "${{ matrix.repo }}" "results/${{ matrix.slug }}"
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: canary-${{ matrix.slug }}
+          path: results/
+          retention-days: 14
+
+  report:
+    name: Report
+    needs: [plan, leg]
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: canary-*
+          path: results
+          merge-multiple: true
+      - name: Classify
+        run: |
+          {
+            echo "## Downstream canary"
+            echo
+            echo "baseline \`${{ needs.plan.outputs.baseline_tag }}\` → candidate \`${{ inputs.candidate_ref }}\` (\`${{ needs.plan.outputs.candidate_sha }}\`)"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          set +e
+          python3 scripts/downstream-canary.py report results > report.md
+          status=$?
+          set -e
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          cat report.md
+          exit $status

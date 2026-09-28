@@ -60,6 +60,15 @@ Correct flow:
      GitHub PRERELEASE (excluded from "latest"; the blocker gate prints but
      does not fail) and buys a soak window. Tag the final `vX.Y.Z` once the
      soak is clean; the length is a per-release human call.
+   - **Downstream canary** (#2839): before tagging `vX.Y.Z-rc1` AND before the
+     final, dispatch it on the candidate commit —
+     `gh workflow run downstream-canary.yml -f candidate_ref=<sha>` (baseline
+     defaults to the latest non-rc release). It builds ~45 real public
+     downstream projects at HEAD with both compilers
+     (`scripts/downstream-canary.toml`). **Any REGRESSION row blocks the tag
+     until triaged**: file an issue labeled `regression`, or — when the break
+     is intended — record it as a `proofs/dialect-epochs.toml` entry. An
+     `infra` row is not a verdict; re-run that leg.
    - **Interface diff** (#1488): before the final tag, run
      `bash scripts/check-interface-diff.sh vPREV vX.Y.Z` — it classifies the
      public stdlib surface as identical / additive / breaking from the
