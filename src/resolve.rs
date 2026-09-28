@@ -319,8 +319,19 @@ fn load_self_module_import(path: &[crate::intern::Sym], src_dir: &Path, ctx: &mu
 /// file (E002 on its functions). The leaf is only the default BINDING name in
 /// the importing file, which the import table derives from the path itself.
 /// A single-segment path keeps its bare name, so flat projects are unchanged.
+///
+/// A path that IS a stdlib module's name (`src/int.almd`) keeps the `self.`
+/// it was written with (`self.int`), so the project's module and the stdlib
+/// module never share one key (#2864). Under the bare key the project's `int`
+/// replaced the stdlib's, and the stdlib bodies that call `int.*` (the
+/// sized-int modules) lost their callees on the native leg.
 pub fn self_module_canonical(mod_path: &[crate::intern::Sym]) -> String {
-    mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")
+    let joined = mod_path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".");
+    if stdlib::is_stdlib_module(&joined) || stdlib::get_bundled_source(&joined).is_some() {
+        format!("self.{joined}")
+    } else {
+        joined
+    }
 }
 
 /// Load a self-import module (import self.xxx).
