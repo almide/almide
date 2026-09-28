@@ -84,25 +84,81 @@ pub fn read_response_tolerant(stream: &mut impl Read) -> Result<Vec<u8>, String>
     Ok(response)
 }
 
+/// The status code of a head's status line (0 when it has none).
+fn http_status_of(head: &[u8]) -> i64 {
+    let end = head.windows(2).position(|w| w == b"\r\n").unwrap_or(head.len());
+    String::from_utf8_lossy(&head[..end]).split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0)
+}
+
+/// Is this status an interim (1xx) answer the final one follows? `101
+/// Switching Protocols` is final — the connection is no longer HTTP after it.
+fn http_is_interim(status: i64) -> bool {
+    (100..200).contains(&status) && status != 101
+}
+
+/// The FINAL response head in `resp`, skipping any complete 1xx interim
+/// heads before it (`100 Continue`, `103 Early Hints` — RFC 9110 §15.2, what
+/// curl, Go and Python do; #2824): `(start, end)` with `end` at its blank
+/// line. `None` while no final head is whole.
+pub fn http_final_head(resp: &[u8]) -> Option<(usize, usize)> {
+    let mut start = 0;
+    loop {
+        let end = start + resp[start..].windows(4).position(|w| w == b"\r\n\r\n")?;
+        if http_is_interim(http_status_of(&resp[start..end])) {
+            start = end + 4;
+            continue;
+        }
+        return Some((start, end));
+    }
+}
+
+/// The field lines of a head (after its status line): wire order, repeats
+/// kept, names in their wire spelling.
+fn http_head_fields(head: &str) -> Vec<(String, String)> {
+    head.lines()
+        .skip(1)
+        .filter_map(|line| {
+            let (k, v) = line.split_once(':')?;
+            Some((k.trim().to_string(), v.trim().to_string()))
+        })
+        .collect()
+}
+
+fn http_fields_chunked(fields: &[(String, String)]) -> bool {
+    fields.iter().any(|(k, v)| k.eq_ignore_ascii_case("transfer-encoding") && v.to_ascii_lowercase().contains("chunked"))
+}
+
 /// Is this response whole by ITS OWN framing? Chunked completeness is judged
 /// by the same size-walk the decoder performs, never a substring probe.
 pub fn response_is_complete(resp: &[u8]) -> bool {
-    let Some(idx) = resp.windows(4).position(|w| w == b"\r\n\r\n") else {
+    let Some((start, idx)) = http_final_head(resp) else {
         return false;
     };
-    let headers = String::from_utf8_lossy(&resp[..idx]).to_lowercase();
+    let fields = http_head_fields(&String::from_utf8_lossy(&resp[start..idx]));
     let body = &resp[idx + 4..];
-    if headers.contains("transfer-encoding: chunked") {
+    if http_fields_chunked(&fields) {
         return chunked_body_terminated(body);
     }
-    if let Some(cl) = headers
-        .lines()
-        .find_map(|l| l.strip_prefix("content-length:"))
-        .and_then(|v| v.trim().parse::<usize>().ok())
+    if let Some(cl) = fields
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+        .and_then(|(_, v)| v.trim().parse::<usize>().ok())
     {
         return body.len() >= cl;
     }
     true
+}
+
+/// The size of a chunk from its size line (RFC 9112 §7.1): the hex digits
+/// before any `;` chunk extension, which is ignored (#2824). Anything else is
+/// an error — never a silent 0 that would end the body early.
+pub fn http_chunk_size(line: &[u8]) -> Result<usize, String> {
+    let text = String::from_utf8_lossy(line);
+    let size = text.split(';').next().unwrap_or("").trim_matches([' ', '\t']);
+    if size.is_empty() || !size.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(format!("malformed chunked body: bad chunk-size line {:?}", text));
+    }
+    usize::from_str_radix(size, 16).map_err(|_| format!("malformed chunked body: chunk size {:?} is too large", size))
 }
 
 /// Walk the chunk sizes exactly as `decode_chunked_bytes` does and report
@@ -113,17 +169,16 @@ pub fn chunked_body_terminated(body: &[u8]) -> bool {
         let Some(line_end) = body[pos..].windows(2).position(|w| w == b"\r\n") else {
             return false;
         };
-        let size_str = String::from_utf8_lossy(&body[pos..pos + line_end]);
-        let Ok(size) = usize::from_str_radix(size_str.trim(), 16) else {
+        let Ok(size) = http_chunk_size(&body[pos..pos + line_end]) else {
             return false;
         };
         if size == 0 {
             return true;
         }
-        pos += line_end + 2 + size;
-        if pos > body.len() {
-            return false;
-        }
+        pos = match (pos + line_end + 2).checked_add(size) {
+            Some(p) if p <= body.len() => p,
+            _ => return false,
+        };
         if body[pos..].starts_with(b"\r\n") {
             pos += 2;
         }
@@ -133,8 +188,8 @@ pub fn chunked_body_terminated(body: &[u8]) -> bool {
 /// Chunked transfer-decoding. It runs on BYTES, before any text decoding:
 /// chunk sizes count bytes, and a multibyte character may straddle two
 /// chunks (#2536), so lossily decoding the framed body first would change
-/// its length under the size walk.
-pub fn decode_chunked_bytes(body: &[u8]) -> Vec<u8> {
+/// its length under the size walk. A malformed size line is an error.
+pub fn decode_chunked_bytes(body: &[u8]) -> Result<Vec<u8>, String> {
     let mut result = Vec::new();
     let mut pos = 0usize;
     while pos < body.len() {
@@ -142,23 +197,23 @@ pub fn decode_chunked_bytes(body: &[u8]) -> Vec<u8> {
             Some(i) => pos + i,
             None => break,
         };
-        let size_str = String::from_utf8_lossy(&body[pos..line_end]);
-        let size = usize::from_str_radix(size_str.trim(), 16).unwrap_or(0);
+        let size = http_chunk_size(&body[pos..line_end])?;
         if size == 0 {
             break;
         }
         let data_start = line_end + 2;
-        if data_start + size <= body.len() {
-            result.extend_from_slice(&body[data_start..data_start + size]);
-            pos = data_start + size;
-            if pos + 2 <= body.len() && &body[pos..pos + 2] == b"\r\n" {
-                pos += 2;
+        match data_start.checked_add(size) {
+            Some(data_end) if data_end <= body.len() => {
+                result.extend_from_slice(&body[data_start..data_end]);
+                pos = data_end;
+                if pos + 2 <= body.len() && &body[pos..pos + 2] == b"\r\n" {
+                    pos += 2;
+                }
             }
-        } else {
-            break;
+            _ => break,
         }
     }
-    result
+    Ok(result)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -232,23 +287,16 @@ pub fn http_exchange_response(
     // The framing is removed on BYTES; only the decoded body is then turned
     // into text (#2536). The header block is ASCII by protocol, so reading
     // it lossily is harmless.
-    let Some(idx) = response.windows(4).position(|w| w == b"\r\n\r\n") else {
+    // Past any 1xx interim heads (#2824): `(start, idx)` is the final head.
+    let Some((start, idx)) = http_final_head(&response) else {
         return Ok((0, Vec::new(), String::from_utf8_lossy(&response).into_owned()));
     };
-    let header_section = String::from_utf8_lossy(&response[..idx]);
+    let header_section = String::from_utf8_lossy(&response[start..idx]);
     let resp_body = &response[idx + 4..];
-    let mut lines = header_section.lines();
-    let status_line = lines.next().unwrap_or("");
-    let code: i64 =
-        status_line.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
-    let resp_headers: Vec<(String, String)> = lines
-        .filter_map(|line| {
-            let (k, v) = line.split_once(':')?;
-            Some((k.trim().to_string(), v.trim().to_string()))
-        })
-        .collect();
-    let body_out = if header_section.to_lowercase().contains("transfer-encoding: chunked") {
-        String::from_utf8_lossy(&decode_chunked_bytes(resp_body)).into_owned()
+    let code = http_status_of(&response[start..idx]);
+    let resp_headers = http_head_fields(&header_section);
+    let body_out = if http_fields_chunked(&resp_headers) {
+        String::from_utf8_lossy(&decode_chunked_bytes(resp_body)?).into_owned()
     } else {
         String::from_utf8_lossy(resp_body).into_owned()
     };
@@ -296,11 +344,11 @@ pub fn http_exchange_bytes(
 
     let response = read_response_tolerant(stream)?;
 
-    if let Some(idx) = response.windows(4).position(|w| w == b"\r\n\r\n") {
-        let header_section = String::from_utf8_lossy(&response[..idx]).to_lowercase();
+    if let Some((start, idx)) = http_final_head(&response) {
+        let fields = http_head_fields(&String::from_utf8_lossy(&response[start..idx]));
         let resp_body = &response[idx + 4..];
-        if header_section.contains("transfer-encoding: chunked") {
-            Ok(decode_chunked_bytes(resp_body))
+        if http_fields_chunked(&fields) {
+            decode_chunked_bytes(resp_body)
         } else {
             Ok(resp_body.to_vec())
         }

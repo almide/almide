@@ -465,6 +465,14 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
         acc.extend_from_slice(&buf[..n]);
 
         if !headers_done {
+            // A 1xx interim head (`100 Continue`) is dropped and the final
+            // one awaited (#2824) — several may arrive in one read.
+            while let Some(idx) = acc.windows(4).position(|w| w == b"\r\n\r\n") {
+                if !http_is_interim(http_status_of(&acc[..idx])) {
+                    break;
+                }
+                acc.drain(..idx + 4);
+            }
             if let Some(idx) = acc.windows(4).position(|w| w == b"\r\n\r\n") {
                 let header_section = String::from_utf8_lossy(&acc[..idx]).to_string();
                 let status_line = header_section.lines().next().unwrap_or("");
@@ -480,9 +488,7 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
                         status_line.splitn(3, ' ').nth(2).unwrap_or("")
                     ));
                 }
-                chunked = header_section
-                    .to_lowercase()
-                    .contains("transfer-encoding: chunked");
+                chunked = http_fields_chunked(&http_head_fields(&header_section));
                 acc.drain(..idx + 4);
                 headers_done = true;
             } else {
@@ -511,9 +517,7 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
                         Some(i) => i,
                         None => break 'outer, // need more bytes
                     };
-                    let size_line = String::from_utf8_lossy(&acc[..nl]);
-                    let size_str = size_line.split(';').next().unwrap_or("").trim();
-                    let size = usize::from_str_radix(size_str, 16).unwrap_or(0);
+                    let size = http_chunk_size(&acc[..nl])?;
                     acc.drain(..nl + 2);
                     if size == 0 {
                         deliver(&[], true, on_chunk);
