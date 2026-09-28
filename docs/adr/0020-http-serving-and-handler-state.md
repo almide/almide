@@ -613,6 +613,13 @@ The export host's limits are host configuration (for example `wasmtime serve
 --max-concurrent-requests`). This is timing and admission, not an answer to an
 admitted request.
 
+**The listening address (#2826, #2829).** `http.serve` keeps binding
+`0.0.0.0:<port>`. C-367 states that address, and a server deployed in a
+container or on a VM is reached from outside its host. A silent switch to
+loopback would make those servers unreachable without an error. The address
+becomes an explicit option: a `host: String` field of `ServeLimits`, default
+`"0.0.0.0"`, added with `serve_with_limits` (#2829).
+
 ## 6. Migration: measured impact
 
 `research/spike/concurrent-var-reach/reach.py` implements §3.1–3.3 (including

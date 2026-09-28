@@ -330,6 +330,120 @@ fn a_bind_failure_aborts_identically_on_native_and_the_embedded_lane() {
     drop(held);
 }
 
+// ── What the core answers itself (#2823, #2826, #2822) ──
+//
+// `spec/serve_cross/http_serve_limits.almd` is started on both legs and sent
+// requests the shared server core must refuse before the handler, decode, or
+// reshape. Each leg's answer is checked against the issue and the two legs
+// are compared with C-367's comparator.
+
+fn limits_fixture() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/serve_cross/http_serve_limits.almd")
+}
+
+/// A running leg of the limits fixture.
+struct Leg {
+    child: Child,
+    port: u16,
+    err: BufReader<std::process::ChildStderr>,
+    wasm: bool,
+}
+
+fn boot_limits(wasm: bool) -> Leg {
+    let port = free_port();
+    let mut c = Command::new(almide_bin());
+    c.arg("run").arg(limits_fixture());
+    if wasm {
+        c.args(["--target", "wasm"]);
+    }
+    c.arg("--").arg(port.to_string());
+    c.process_group(0).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    let mut child = c.spawn().expect("almide runs");
+    let mut err = BufReader::new(child.stderr.take().expect("stderr piped"));
+    let mut first = String::new();
+    err.read_line(&mut first).expect("read the ready line");
+    if first != "ready\n" {
+        let mut rest = String::new();
+        let _ = err.read_to_string(&mut rest);
+        kill_group(&mut child);
+        panic!("wasm={wasm}: expected the ready line, got {first:?}{rest}");
+    }
+    Leg { child, port, err, wasm }
+}
+
+impl Leg {
+    /// Stops the leg; answers its stderr after the ready line.
+    fn stop(mut self) -> String {
+        kill_group(&mut self.child);
+        let mut rest = String::new();
+        let _ = self.err.read_to_string(&mut rest);
+        rest
+    }
+}
+
+fn head_of(resp: &[u8]) -> String {
+    let cut = resp.windows(4).position(|w| w == b"\r\n\r\n").map_or(resp.len(), |c| c + 4);
+    String::from_utf8_lossy(&resp[..cut]).into_owned()
+}
+
+fn after_head(resp: &[u8]) -> &[u8] {
+    resp.windows(4).position(|w| w == b"\r\n\r\n").map_or(&[][..], |c| &resp[c + 4..])
+}
+
+/// Runs `script` against each leg; every answer must match across the legs
+/// (C-367's comparator; the answers at `heads` answer a HEAD, which has no
+/// body to de-frame, so their heads are compared byte for byte). Answers
+/// (native answers, wasm answers, native stderr, wasm stderr).
+fn on_both_legs(heads: &[usize], script: impl Fn(&Leg) -> Vec<Vec<u8>>) -> (Vec<Vec<u8>>, Vec<Vec<u8>>, String, String) {
+    let native = boot_limits(false);
+    let n = script(&native);
+    let n_err = native.stop();
+    let wasm = boot_limits(true);
+    assert!(wasm.wasm);
+    let w = script(&wasm);
+    let w_err = wasm.stop();
+    assert_eq!(n.len(), w.len());
+    for (i, (a, b)) in n.iter().zip(&w).enumerate() {
+        if heads.contains(&i) {
+            assert_eq!(a, b, "HEAD answer {i} differs across the legs");
+            continue;
+        }
+        if let Err(diff) = same_answer(a, b) {
+            panic!("answer {i} differs across the legs:\n{diff}");
+        }
+    }
+    (n, w, n_err, w_err)
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn head_has_no_body_429_and_503_carry_their_reasons_and_a_pipelined_request_meets_connection_close_on_native_and_the_embedded_lane() {
+    let (native, wasm, _, _) = on_both_legs(&[0], |leg| {
+        vec![
+            ask(leg.port, b"HEAD /x HTTP/1.1\r\nHost: a\r\n\r\n"),
+            ask(leg.port, b"GET /429 HTTP/1.1\r\n\r\n"),
+            ask(leg.port, b"GET /503 HTTP/1.1\r\n\r\n"),
+            ask(leg.port, b"GET /a HTTP/1.1\r\nHost: a\r\n\r\nGET /b HTTP/1.1\r\nHost: a\r\n\r\n"),
+        ]
+    });
+    for (leg, a) in [("native", &native), ("wasm", &wasm)] {
+        let head = head_of(&a[0]);
+        assert!(head.starts_with("HTTP/1.1 200 OK\r\n"), "{leg}: {head:?}");
+        assert!(head.contains("\r\nContent-Length: 8\r\n"), "{leg}: HEAD keeps the GET's length: {head:?}");
+        assert!(after_head(&a[0]).is_empty(), "{leg}: HEAD got a body: {:?}", String::from_utf8_lossy(&a[0]));
+        assert!(head_of(&a[1]).starts_with("HTTP/1.1 429 Too Many Requests\r\n"), "{leg}: {:?}", head_of(&a[1]));
+        assert!(head_of(&a[2]).starts_with("HTTP/1.1 503 Service Unavailable\r\n"), "{leg}: {:?}", head_of(&a[2]));
+        // One response per connection, and it says so: the pipelined second
+        // request is not silently dropped behind a keep-alive-looking answer.
+        let piped = String::from_utf8_lossy(&a[3]);
+        assert_eq!(piped.matches("HTTP/1.1 ").count(), 1, "{leg}: {piped:?}");
+        assert!(piped.contains("\r\nConnection: close\r\n") && piped.ends_with("GET /a "), "{leg}: {piped:?}");
+        for r in a {
+            assert!(head_of(r).contains("\r\nConnection: close\r\n"), "{leg}: {:?}", head_of(r));
+        }
+    }
+}
+
 /// The comparator itself, on constructed responses: it must reject every
 /// change C-367 observes and accept every change it leaves to the host.
 #[test]

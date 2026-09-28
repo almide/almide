@@ -4633,6 +4633,8 @@ evidence  = [
   { path = "tests/http_serve_cross_test.rs", name = "a_second_sigterm_during_the_drain_flushes_stdout_and_exits_1_on_native_and_the_embedded_lane", class = "fixture" },
   { path = "tests/http_serve_cross_test.rs", name = "a_sigterm_to_the_almide_run_pid_alone_drains_the_program_and_leaves_no_process_behind", class = "fixture" },
   { path = "tests/http_serve_cross_test.rs", name = "a_sigint_to_the_almide_run_group_drains_once_and_is_not_a_forced_stop", class = "fixture" },
+  { path = "spec/serve_cross/http_serve_limits.almd", class = "fixture" },
+  { path = "tests/http_serve_cross_test.rs", name = "head_has_no_body_429_and_503_carry_their_reasons_and_a_pipelined_request_meets_connection_close_on_native_and_the_embedded_lane", class = "fixture" },
 ]
 [[contract]]
 id        = "C-368"

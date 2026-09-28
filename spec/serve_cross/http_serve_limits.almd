@@ -1,0 +1,28 @@
+// @contract: C-367
+// A SERVER fixture for what the shared server core answers ITSELF and how it
+// shapes a handler's answer (almide/almide#2823, #2826, #2822): no generic
+// runner executes it. The driver (tests/http_serve_cross_test.rs in
+// almide/almide) starts it natively and on the embedded lane, waits for the
+// "ready" line on stderr, and sends what the core must refuse before the
+// handler (a Content-Length over the body limit, a body cut short) or decode
+// (a chunked body), a HEAD, statuses outside the old reason table, and two
+// pipelined requests. Each leg must answer the same.
+// Usage: almide run http_serve_limits.almd [--target wasm] -- <port>
+import env
+import http
+
+effect fn handle(req: HttpRequest) -> HttpResponse = {
+  let path = http.req_path(req)
+  eprintln("${http.req_method(req)} ${path}")
+  match path {
+    "/429" => http.response(429, "slow down"),
+    "/503" => http.response(503, "later"),
+    _ => http.response(200, "${http.req_method(req)} ${path} ${http.req_body(req)}"),
+  }
+}
+
+effect fn main() -> Unit = {
+  let port = env.args() |> list.get(0) ?? "0"
+  eprintln("ready")
+  http.serve(int.parse(port) ?? 0, (req) => handle(req)!)!
+}
