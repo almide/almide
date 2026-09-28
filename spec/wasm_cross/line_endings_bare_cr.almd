@@ -1,0 +1,52 @@
+// @contract: C-225, C-220
+// #2813: a line ending is "\n" or "\r\n" — a BARE '\r' is line CONTENT, the
+// `str::lines` rule every line surface shares: `string.lines`, `fs.read_lines`
+// (its composition) and the streaming walkers `fs.fold_lines` / `for_each_line`
+// (native pops a '\n', and only then a '\r'). The incumbent wasm leg's self-host
+// walkers stripped a '\r' from the FINAL line even when no '\n' followed it
+// ("abc\r" read as "abc"); the structural leg and native kept it.
+//
+// The inputs are chosen off the degenerate line: the CR ends the input, ends it
+// twice, ends the last of two lines, sits mid-line, precedes a CRLF, and stands
+// alone — each line is printed with its CRs spelled out, so a stripped or a
+// kept '\r' is a visible byte, not a length that happens to match.
+//
+// SELF-CONTAINED: creates its own temp dir (never printed), removes it at the end.
+import fs
+
+fn spell(l: String) -> String = "'" + string.replace(l, "\r", "<CR>") + "'"
+
+fn show(ls: List[String]) -> String = ls |> list.map((l) => spell(l)) |> list.join(" ")
+
+effect fn step(acc: Int, l: String) -> Result[Int, String] = ok(acc * 100 + string.len(l) + 1)
+
+effect fn visit(l: String) -> Result[Unit, String] = {
+  println("  each    ${spell(l)}")
+  ok(())
+}
+
+effect fn probe(dir: String, name: String, s: String) -> Unit = {
+  let p = dir + "/probe.txt"
+  fs.write(p, s)!
+  println(name)
+  println("  lines   ${show(string.lines(s))}")
+  println("  read    ${show(fs.read_lines(p)!)}")
+  println("  fold    ${fs.fold_lines(p, "", (acc, l) => acc + spell(l))!}")
+  println("  fold_i  ${int.to_string(fs.fold_lines(p, 0, (acc, l) => acc * 100 + string.len(l) + 1)!)}")
+  println("  fold_!  ${int.to_string(fs.fold_lines(p, 0, (acc, l) => step(acc, l)!)!)}")
+  fs.for_each_line(p, (l) => visit(l)!)!
+}
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("xt_bare_cr")!
+  probe(dir, "cr-end", "abc\r")!
+  probe(dir, "cr-cr-end", "abc\r\r")!
+  probe(dir, "cr-ends-last-line", "a\nbc\r")!
+  probe(dir, "crlf-end", "abc\r\n")!
+  probe(dir, "lf-end", "abc\n")!
+  probe(dir, "empty", "")!
+  probe(dir, "lone-cr", "\r")!
+  probe(dir, "crlf-then-cr", "\r\n\r")!
+  probe(dir, "cr-mid-and-doubled", "a\rb\r\r\n\rc\r")!
+  fs.remove_all(dir)!
+}
