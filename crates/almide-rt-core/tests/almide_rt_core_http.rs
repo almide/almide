@@ -113,13 +113,14 @@ fn a_refused_connection_is_a_connection_error() {
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
         l.local_addr().unwrap().port()
     };
+    let want = format!("could not connect to \"http://127.0.0.1:{port}/\" (connection refused or unreachable)");
     let sh = start(&format!("http://127.0.0.1:{port}/"), 0, 0);
     let e = client::http_call_wait(&sh).err().unwrap();
-    assert!(e.starts_with("connection failed"), "{e}");
+    assert_eq!(e, want);
     // The same with a wall clock set: the dial is bounded by it.
     let sh = start(&format!("http://127.0.0.1:{port}/"), 5_000, 0);
     let e = client::http_call_wait(&sh).err().unwrap();
-    assert!(e.starts_with("connection failed"), "{e}");
+    assert_eq!(e, want);
 }
 
 // ── framings ──
@@ -184,7 +185,7 @@ fn a_body_framed_by_the_close_ends_with_the_close() {
 fn a_close_before_the_head_is_an_error() {
     let (url, h) = pieces_peer(vec![b"HTTP/1.1 200 OK\r\nX-Partial".to_vec()]);
     let sh = start(&url, 0, 0);
-    assert_eq!(client::http_call_wait(&sh).err().unwrap(), "connection closed before headers received");
+    assert_eq!(client::http_call_wait(&sh).err().unwrap(), format!("malformed or incomplete response from \"{url}\""));
     h.join().unwrap();
 }
 

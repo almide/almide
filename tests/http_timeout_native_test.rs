@@ -3,7 +3,8 @@
 //! answers). The old hardcoded 30 s killed any call to a slow endpoint
 //! (a local-LLM server routinely needs 30-120 s before the first byte)
 //! with the unactionable `read failed: Resource temporarily unavailable
-//! (os error 35)`; the timeout case now names the env var.
+//! (os error 35)`; the timeout case now names the env var (and, since
+//! ADR-0023 step 2, reads as the timeout class naming the URL).
 //!
 //! Pins BOTH directions fast (no 30 s wait in CI): a 3 s in-test server
 //! against a 1 s timeout must fail with the actionable message, and the
@@ -89,8 +90,8 @@ fn http_read_timeout_is_env_configurable() {
         .expect("failed to run app (timeout leg)");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("read timed out waiting for the server")
-            && stdout.contains("ALMIDE_HTTP_TIMEOUT_SECS"),
+        stdout.contains("timed out waiting for \"http://127.0.0.1:")
+            && stdout.contains("(raise ALMIDE_HTTP_TIMEOUT_SECS; 0 = no timeout)"),
         "timeout leg must surface the actionable message, got:\n{stdout}"
     );
 

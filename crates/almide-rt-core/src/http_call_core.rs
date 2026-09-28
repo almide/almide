@@ -239,7 +239,7 @@ fn http_call_decode(f: &mut HttpCallFraming, raw: &mut Vec<u8>, out: &mut Vec<u8
 fn http_call_parse_head(raw: &mut Vec<u8>) -> Result<Option<(AlmideHttpCallHead, HttpCallFraming)>, String> {
     let (section, status) = loop {
         let Some(idx) = raw.windows(4).position(|w| w == b"\r\n\r\n") else {
-            return if raw.len() > HTTP_MAX_HEAD_BYTES { Err(http_head_too_large()) } else { Ok(None) };
+            return if raw.len() > HTTP_MAX_HEAD_BYTES { Err("head too large".to_string()) } else { Ok(None) };
         };
         let status = http_status_of(&raw[..idx]);
         let section = String::from_utf8_lossy(&raw[..idx]).into_owned();
@@ -286,15 +286,16 @@ fn http_call_step_timeout(sh: &AlmideHttpCallShared, idle: bool) -> Result<Optio
     Ok(t.map(|d| d.max(std::time::Duration::from_millis(1))))
 }
 
-/// Name the limit an io error ran into; a non-timeout error keeps its detail.
-fn http_call_io_error(sh: &AlmideHttpCallShared, e: &std::io::Error, what: &str) -> String {
+/// Name the limit a read error ran into; any other error is `url`'s
+/// classified text.
+fn http_call_io_error(sh: &AlmideHttpCallShared, url: &str, e: &std::io::Error) -> String {
     if sh.past_deadline() {
         return http_call_total_msg(sh.total_ms);
     }
-    if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) && sh.idle_ms > 0 && what == "read" {
+    if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) && sh.idle_ms > 0 {
         return http_call_idle_msg(sh.idle_ms);
     }
-    format!("{} failed: {}", what, e)
+    http_io_error_text(url, e)
 }
 
 fn http_call_run(
@@ -310,7 +311,9 @@ fn http_call_run(
     // the same clipped timeout.
     let (stream, route) = http_open_route(&u, &mut |host, port| {
         let left = || http_call_step_timeout(sh, false).unwrap_or(Some(std::time::Duration::from_millis(1)));
-        let s = http_dial(host, port, &left).map_err(|e| http_call_io_error(sh, &e, "connection"))?;
+        let s = http_dial(host, port, &left).map_err(|e| {
+            if sh.past_deadline() { http_call_total_msg(sh.total_ms) } else { http_dial_error_text(&u.url, &e) }
+        })?;
         let t = http_call_step_timeout(sh, false)?;
         s.set_read_timeout(t).ok();
         s.set_write_timeout(t).ok();
@@ -337,9 +340,9 @@ fn http_call_run(
         {
             // The handshake reads under the idle limit, clipped to the clock.
             stream.set_read_timeout(http_call_step_timeout(sh, true)?).ok();
-            let mut tls = make_tls_stream(&u.host, stream)
+            let mut tls = make_tls_stream(&u.host, url, stream)
                 .map_err(|e| if sh.past_deadline() { http_call_total_msg(sh.total_ms) } else { e })?;
-            http_call_pump(sh, &mut tls, &request)
+            http_call_pump(sh, url, &mut tls, &request)
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -348,7 +351,7 @@ fn http_call_run(
         }
     } else {
         let mut s = stream;
-        http_call_pump(sh, &mut s, &request)
+        http_call_pump(sh, url, &mut s, &request)
     }
 }
 
@@ -371,10 +374,16 @@ impl AlmideHttpCallSock for rustls::StreamOwned<rustls::ClientConnection, TcpStr
     }
 }
 
-fn http_call_pump<S: AlmideHttpCallSock>(sh: &AlmideHttpCallShared, s: &mut S, request: &[u8]) -> Result<(), String> {
+fn http_call_pump<S: AlmideHttpCallSock>(
+    sh: &AlmideHttpCallShared,
+    url: &str,
+    s: &mut S,
+    request: &[u8],
+) -> Result<(), String> {
+    let malformed = |_: String| http_error_text(HttpErrorClass::Protocol, url);
     s.tcp().set_write_timeout(http_call_step_timeout(sh, false)?).ok();
     if let Err(e) = s.write_all(request) {
-        return Err(if sh.past_deadline() { http_call_total_msg(sh.total_ms) } else { format!("write failed: {}", e) });
+        return Err(if sh.past_deadline() { http_call_total_msg(sh.total_ms) } else { http_io_error_text(url, &e) });
     }
     let mut raw: Vec<u8> = Vec::new();
     let mut framing: Option<HttpCallFraming> = None;
@@ -392,18 +401,18 @@ fn http_call_pump<S: AlmideHttpCallSock>(sh: &AlmideHttpCallShared, s: &mut S, r
                 if e.kind() == std::io::ErrorKind::UnexpectedEof && matches!(framing, Some(HttpCallFraming::UntilClose)) {
                     return Ok(());
                 }
-                return Err(http_call_io_error(sh, &e, "read"));
+                return Err(http_call_io_error(sh, url, &e));
             }
         };
         if n == 0 {
             return match framing {
-                None => Err("connection closed before headers received".to_string()),
+                None => Err(http_error_text(HttpErrorClass::Protocol, url)),
                 Some(_) => Ok(()),
             };
         }
         raw.extend_from_slice(&buf[..n]);
         if framing.is_none() {
-            let Some((head, f)) = http_call_parse_head(&mut raw)? else {
+            let Some((head, f)) = http_call_parse_head(&mut raw).map_err(malformed)? else {
                 continue;
             };
             let mut st = sh.lock();
@@ -414,7 +423,7 @@ fn http_call_pump<S: AlmideHttpCallSock>(sh: &AlmideHttpCallShared, s: &mut S, r
             framing = Some(f);
         }
         let mut decoded = Vec::new();
-        let complete = http_call_decode(framing.as_mut().expect("framing is set"), &mut raw, &mut decoded)?;
+        let complete = http_call_decode(framing.as_mut().expect("framing is set"), &mut raw, &mut decoded).map_err(malformed)?;
         {
             let mut st = sh.lock();
             if st.outcome.is_some() {
