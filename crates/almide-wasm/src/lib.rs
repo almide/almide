@@ -126,7 +126,6 @@ mod map_index;
 mod emit;
 pub use emit::{emit_library_with_ops, emit_program, emit_program_with_ops, package_keys};
 mod emitter;
-mod eta;
 mod emitter_values;
 mod emitter_vars;
 mod patterns;
