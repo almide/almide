@@ -1,0 +1,215 @@
+# Downstream canary roster (#2839). Read by scripts/downstream-canary.py,
+# run by .github/workflows/downstream-canary.yml (workflow_dispatch only).
+#
+# The question the canary answers, before an rc is cut: "does real CURRENT
+# downstream code that built on the previous release still build on the
+# candidate?" Every project is therefore checked out at its DEFAULT-BRANCH
+# HEAD — unlike the acceptance ring (acceptance-ring.yml), which pins a commit
+# so downstream churn can never turn push CI red. The canary is not push CI;
+# its verdicts are relative (baseline vs candidate on the same checkout), so
+# churn cannot fake a regression.
+#
+# Policy: PUBLIC repositories only. CI must never depend on a private company
+# repository, so Aid-On/teastia stays out permanently (the same decision as
+# the ring, 2026-08-20). Every entry was verified public and to carry a root
+# almide.toml when it was added.
+#
+# Fields
+#   repo      owner/name on github.com
+#   commands  almide sub-commands run in the project root, each with the
+#             baseline and the candidate compiler (the string is split on
+#             whitespace and passed as `almide <args>`). Convention:
+#               check  every project
+#               test   every project with test blocks
+#               build  every project with src/main.almd (an application)
+#   ref       optional pin — only for a project whose HEAD cannot be built by
+#             any release; leave unset to track HEAD
+#   timeout   optional per-command seconds (default 900)
+#   note      optional, shown in the report
+#
+# Left out, with the reason:
+#   almide/almide-lander, almide/bonsai-almide  depend on file:///Users/... paths
+#   O6lvl4/almide-examples                      no almide.toml (loose files)
+#   almide/almide, almide/als, playground, ...  not Almide packages
+
+# ── almide org ─────────────────────────────────────────────────────────────
+[[project]]
+repo = "almide/aes"
+commands = ["check", "test"]
+
+[[project]]
+repo = "almide/almide-bindgen"
+commands = ["check", "test"]
+
+[[project]]
+repo = "almide/almide-dojo"
+commands = ["check"]
+note = "check only: the 851 test files are bank tasks, some deliberately broken"
+
+[[project]]
+repo = "almide/almide-grammar"
+commands = ["check", "test", "build"]
+
+[[project]]
+repo = "almide/almide-sqlite"
+commands = ["check", "test"]
+
+[[project]]
+repo = "almide/almide-wasm-bindgen"
+commands = ["check", "test"]
+
+[[project]]
+repo = "almide/almide-web"
+commands = ["check"]
+
+[[project]]
+repo = "almide/base64"
+commands = ["check", "test"]
+
+[[project]]
+repo = "almide/bigint"
+commands = ["check", "test"]
+
+[[project]]
+repo = "almide/csv"
+commands = ["check", "test"]
+
+[[project]]
+repo = "almide/dfa"
+commands = ["check", "test"]
+
+[[project]]
+repo = "almide/parsegen"
+commands = ["check", "test"]
+
+[[project]]
+repo = "almide/porta"
+commands = ["check", "test", "build"]
+timeout = 1800
+
+[[project]]
+repo = "almide/rsa"
+commands = ["check", "test"]
+
+[[project]]
+repo = "almide/sha1"
+commands = ["check", "test"]
+
+[[project]]
+repo = "almide/svg"
+commands = ["check", "test"]
+
+[[project]]
+repo = "almide/toml"
+commands = ["check", "test"]
+
+[[project]]
+repo = "almide/vscode-almide"
+commands = ["check"]
+
+[[project]]
+repo = "almide/yaml"
+commands = ["check", "test"]
+
+# ── almide-ai org ──────────────────────────────────────────────────────────
+[[project]]
+repo = "almide-ai/almai"
+commands = ["check", "test"]
+
+[[project]]
+repo = "almide-ai/homullus"
+commands = ["check", "test", "build"]
+
+[[project]]
+repo = "almide-ai/manus"
+commands = ["check", "test", "build"]
+
+# ── O6lvl4 (public) ────────────────────────────────────────────────────────
+[[project]]
+repo = "O6lvl4/agent-bench-matrix"
+commands = ["check", "test"]
+
+[[project]]
+repo = "O6lvl4/almide-audio-poc"
+commands = ["check", "build src/main.almd --target wasm -o synth.wasm"]
+
+[[project]]
+repo = "O6lvl4/almide-headset-eq"
+commands = ["check", "test", "build src/eq.almd --target wasm --release -o headset_eq.wasm"]
+
+[[project]]
+repo = "O6lvl4/almide-otel-demo"
+commands = ["check", "test"]
+
+[[project]]
+repo = "O6lvl4/assay"
+commands = ["check", "test"]
+
+[[project]]
+repo = "O6lvl4/awen"
+commands = ["check", "build"]
+
+[[project]]
+repo = "O6lvl4/codopsy-almd"
+commands = ["check", "test", "build"]
+
+[[project]]
+repo = "O6lvl4/comide"
+commands = ["check", "test", "build"]
+
+[[project]]
+repo = "O6lvl4/ctxgate"
+commands = ["check", "test", "build"]
+
+[[project]]
+repo = "O6lvl4/golemide"
+commands = ["check", "test", "build"]
+
+[[project]]
+repo = "O6lvl4/gramide"
+commands = ["check", "test"]
+
+[[project]]
+repo = "O6lvl4/gramide-almide"
+commands = ["check", "test"]
+
+[[project]]
+repo = "O6lvl4/gramide-cli"
+commands = ["check", "test", "build"]
+note = "#2839: 0.65.1-rc1 broke it (E029 on builtin Map beside a dependency's `type Map`)"
+
+[[project]]
+repo = "O6lvl4/gramide-go"
+commands = ["check", "test"]
+
+[[project]]
+repo = "O6lvl4/gramide-javascript"
+commands = ["check", "test"]
+
+[[project]]
+repo = "O6lvl4/gramide-python"
+commands = ["check", "test"]
+
+[[project]]
+repo = "O6lvl4/gramide-rust"
+commands = ["check", "test"]
+
+[[project]]
+repo = "O6lvl4/gramide-typescript"
+commands = ["check", "test"]
+
+[[project]]
+repo = "O6lvl4/hew"
+commands = ["check", "test", "build"]
+
+[[project]]
+repo = "O6lvl4/ogumatic-module-design"
+commands = ["check", "test", "build"]
+
+[[project]]
+repo = "O6lvl4/onogoro"
+commands = ["check", "test", "build"]
+
+[[project]]
+repo = "O6lvl4/tocsin-almd"
+commands = ["check", "test"]
