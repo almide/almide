@@ -392,6 +392,7 @@
 65776	spec/wasm_cross/literal_int_forms.almd
 65776	spec/wasm_cross/literal_unit.almd
 65760	spec/wasm_cross/loop_break_continue.almd
+87680	spec/wasm_cross/loop_break_continue_heap.almd
 3211492	spec/wasm_cross/loop_buffer_churn.almd
 66016	spec/wasm_cross/loop_effect_match_stmt.almd
 66000	spec/wasm_cross/loop_outer_inplace_mutate_rc.almd
