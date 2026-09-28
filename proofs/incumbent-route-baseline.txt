@@ -45,11 +45,8 @@ test :: spec/stdlib/fs_fold_lines_range_test.almd :: call:fs.fold_lines_range
 test :: spec/stdlib/fs_if_exists_test.almd :: call:testing.assert_none
 test :: spec/stdlib/fs_streaming_test.almd :: call:testing.assert_err
 test :: spec/stdlib/list_completeness_test.almd :: call:list.partition
-test :: spec/stdlib/list_completion_test.almd :: call:list.shuffle
 test :: spec/stdlib/option_to_result_generic_test.almd :: call:testing.assert_contains
 test :: spec/stdlib/pipe_chain_test.almd :: call:list.partition
-test :: spec/stdlib/random_choice_pair_test.almd :: call:random.choice
-test :: spec/stdlib/random_shuffle_pair_test.almd :: call:random.shuffle
-test :: spec/stdlib/random_test.almd :: call:random.float
+test :: spec/stdlib/random_choice_pair_test.almd :: call:testing.assert_contains
 test :: spec/stdlib/testing_result_layout_test.almd :: call:testing.assert_ok
 test :: spec/stdlib/testing_semantics_manifest_test.almd :: call:testing.assert_gt
