@@ -16,7 +16,7 @@ call-arg:TupleIndex	1
 call:ctor	42
 call:target:Computed	18
 display	10
-effect	155
+effect	164
 lambda	193
 list-elem	128
 module-arm:unaudited:bytes.push	2
@@ -54,7 +54,7 @@ scan	3
 stmt:Assign	11
 stmt:BindDestructure	16
 stmt:Comment	160
-stmt:Expr:Block	70
+stmt:Expr:Block	71
 stmt:Expr:ForIn	53
 stmt:Expr:If	24
 stmt:Expr:Match	2
@@ -75,7 +75,7 @@ tail:Block	17
 tail:If	4690
 tail:Lambda	10
 tail:MapAccess	5
-tail:Match	459
+tail:Match	460
 tail:Member	4
 tail:OptionNone	11
 tail:OptionSome	14

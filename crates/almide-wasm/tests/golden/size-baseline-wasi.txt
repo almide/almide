@@ -139,6 +139,7 @@
 2885	spec/wasm_cross/effect_tco.almd
 8079	spec/wasm_cross/effect_tco_err_rewrap.almd
 4203	spec/wasm_cross/effect_tuple_result_tco.almd
+5017	spec/wasm_cross/effect_unit_yields_result.almd
 5739	spec/wasm_cross/effect_unwrap_in_loop.almd
 4065	spec/wasm_cross/empty_collection_annotated.almd
 6885	spec/wasm_cross/empty_collection_fold.almd
