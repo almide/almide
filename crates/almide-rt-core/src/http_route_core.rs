@@ -435,3 +435,48 @@ fn http_client_open(u: &AlmideHttpUrl, read_default_secs: u64) -> Result<(TcpStr
     s.set_write_timeout(io_timeout).ok();
     Ok((s, AlmideHttpRoute { target: u.target.clone() }))
 }
+
+// ── TLS trust (#2820) ──
+//
+// The roots are the bundled webpki set PLUS the platform's trust store, read
+// by rustls-native-certs — the crate reqwest's `rustls-tls-native-roots`,
+// hyper-rustls and ureq use: the macOS keychain, the Windows store, the
+// OpenSSL bundle / directory on Linux (openssl-probe) — or, when
+// SSL_CERT_FILE / SSL_CERT_DIR is set, the certificates those name instead
+// of the platform store (curl, Python and Go read the same variables). Read
+// once per process. A certificate or handshake failure is reported as
+// `TLS error: …`, not as the write it used to surface through.
+
+#[cfg(not(target_arch = "wasm32"))]
+fn http_tls_config() -> Result<std::sync::Arc<rustls::ClientConfig>, String> {
+    static CONFIG: std::sync::OnceLock<Result<std::sync::Arc<rustls::ClientConfig>, String>> = std::sync::OnceLock::new();
+    CONFIG
+        .get_or_init(|| {
+            let mut roots = rustls::RootCertStore::empty();
+            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            let native = rustls_native_certs::load_native_certs();
+            let named = ["SSL_CERT_FILE", "SSL_CERT_DIR"].into_iter().filter(|v| std::env::var_os(v).is_some()).collect::<Vec<_>>();
+            if !named.is_empty() && native.certs.is_empty() {
+                let why = native.errors.first().map(|e| e.to_string()).unwrap_or_else(|| "no certificates found".to_string());
+                return Err(format!("TLS error: could not load the CA certificates {} names: {}", named.join(" / "), why));
+            }
+            roots.add_parsable_certificates(native.certs);
+            Ok(std::sync::Arc::new(
+                rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth(),
+            ))
+        })
+        .clone()
+}
+
+/// `TLS error: …` for a failed handshake — the rustls reason when there is
+/// one (`invalid peer certificate: UnknownIssuer`).
+#[cfg(not(target_arch = "wasm32"))]
+fn http_tls_error(e: &std::io::Error) -> String {
+    if let Some(inner) = e.get_ref().and_then(|i| i.downcast_ref::<rustls::Error>()) {
+        return format!("TLS error: {}", inner);
+    }
+    if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) {
+        return "TLS error: handshake timed out (raise ALMIDE_HTTP_TIMEOUT_SECS; 0 = no timeout)".to_string();
+    }
+    format!("TLS error: {}", e)
+}
