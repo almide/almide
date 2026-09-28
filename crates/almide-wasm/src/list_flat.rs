@@ -1,5 +1,6 @@
 //! `list.flat_map` / `list.filter_map` — split from list.rs for the
-//! 800-line file discipline (the arms are unchanged).
+//! 800-line file discipline (the arms are unchanged) — and `list.partition`
+//! (#2744), the two-sided filter.
 
 use almide_ir::IrExpr;
 use wasm_encoder::{BlockType, ValType};
@@ -103,5 +104,77 @@ impl Emitter<'_> {
             self.release_i32();
         }
         Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(b)))))
+    }
+
+    /// `list.partition(xs, f)` (#2744): ONE predicate call per element, in
+    /// order (native's `Iterator::partition`), each element copied into the
+    /// yes or the no side. The filter doctrine on both sides: one
+    /// upper-bound allocation each, a kept counter, and a final LEN rewrite
+    /// (CAP stays what `$alloc` wrote); the kept slots are copies of the
+    /// source's handles, so each spine takes its own element credits once
+    /// LEN is final. The result is the `(yes, no)` tuple of two owned lists
+    /// (the result.partition shape).
+    pub(crate) fn lower_list_partition(&mut self, xs: &IrExpr, cb: &IrExpr) -> ArmResult {
+        let (params, body) = self.hof_lambda(cb, 1)?;
+        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+        let stride = elem.slot_size() as i32;
+        let hy = self.hold_i32()?;
+        let hn = self.hold_i32()?;
+        let hwy = self.hold_i32()?;
+        let hwn = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_get(ch).i32_const(stride).i32_mul().call(F_ALLOC).local_set(hy);
+            i.local_get(ch).i32_const(stride).i32_mul().call(F_ALLOC).local_set(hn);
+            i.i32_const(0).local_set(hwy);
+            i.i32_const(0).local_set(hwn);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+        }
+        self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        self.lower(body, Some(BOOL))?;
+        self.f.instructions().if_(BlockType::Empty);
+        for (side, w) in [(hy, hwy), (hn, hwn)] {
+            self.f
+                .instructions()
+                .local_get(side)
+                .local_get(w)
+                .i32_const(stride)
+                .i32_mul()
+                .i32_add()
+                .local_get(params[0]);
+            self.store_ty_slot(elem, 0);
+            self.f.instructions().local_get(w).i32_const(1).i32_add().local_set(w);
+            if side == hy {
+                self.f.instructions().else_();
+            }
+        }
+        self.f.instructions().end();
+        self.hof_step(ih);
+        for (side, w) in [(hy, hwy), (hn, hwn)] {
+            self.f
+                .instructions()
+                .local_get(side)
+                .local_get(w)
+                .i32_const(stride)
+                .i32_mul()
+                .i32_store(len_memarg());
+            self.emit_inc_elems(side, elem);
+        }
+        let el = self.types.intern(elem);
+        let ti = self.types.tuple(vec![SliceTy::List(el), SliceTy::List(el)]);
+        let def = self.types.tuple_def(ti);
+        let (off_y, off_n, size) = (def.fields[0].1, def.fields[1].1, def.size);
+        {
+            let hr = self.tmp_i32_local;
+            let mut i = self.f.instructions();
+            i.i32_const(size as i32).call(F_ALLOC).local_set(hr);
+            i.local_get(hr).local_get(hy).i32_store(slot_memarg(off_y));
+            i.local_get(hr).local_get(hn).i32_store(slot_memarg(off_n));
+            i.local_get(hr);
+        }
+        for _ in 0..7 {
+            self.release_i32();
+        }
+        Ok(Some(Lowered::owned(SliceTy::Tuple(ti))))
     }
 }
