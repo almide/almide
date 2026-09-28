@@ -80,7 +80,7 @@
 | ALS-E23 | C-255 | `spec/wasm_cross/record_forms.almd` (byte-compare)<br>`spec/wasm_cross/record_option_none_cells.almd` (byte-compare) |
 | ALS-E24 | C-256 | `spec/wasm_cross/loop_break_continue.almd` (byte-compare) |
 | ALS-E25 | C-257, C-271 | `spec/wasm_cross/error_operators.almd` (byte-compare)<br>`spec/wasm_cross/unwrap_or_unwrap_fallback.almd` (byte-compare) |
-| ALS-E26 | C-258 | `spec/wasm_cross/call_lambda_ctor.almd` (byte-compare) |
+| ALS-E26 | C-258 | `spec/wasm_cross/call_lambda_ctor.almd` (byte-compare)<br>`spec/wasm_cross/hof_fn_value_callbacks.almd` (byte-compare) |
 | ALS-E27 | C-259, C-322 | `spec/wasm_cross/call_lambda_ctor.almd` (byte-compare)<br>`spec/wasm_cross/ctor_fn_value.almd` (byte-compare)<br>`spec/lang/ctor_fn_value_test.almd` (both-target test) |
 | ALS-E28 | C-264 | `spec/wasm_cross/optional_chain_scalar.almd` (byte-compare) |
 | ALS-E29 | C-267 | `spec/wasm_cross/binary_operators.almd` (byte-compare) |
