@@ -15,9 +15,3 @@
 #   - a changed reason is allowed: the test lane names the first decline only, so a
 #     fix can expose a second one in the same file (the row keeps its file).
 # Files NEITHER leg serves are proofs/wasm-fallback-baseline.txt's, not this ledger's.
-build :: spec/wasm_cross/inplace_clear_alias_field.almd :: string-clear-nonvar
-test :: spec/lang/guard_else_err_unwrap_test.almd :: interp-part:Unit
-test :: spec/lang/map_literal_test.almd :: forin-map-nontuple
-test :: spec/lang/matrix_test.almd :: binop:MulMatrix
-test :: spec/lang/unwrap_operators_test.almd :: expr:OptionalChain
-test :: spec/stdlib/bytes_typed_test.almd :: expr:Hole
