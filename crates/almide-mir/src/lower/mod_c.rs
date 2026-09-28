@@ -170,14 +170,14 @@ fn desugar_bytes_index_assign(body: &IrExpr, params: &[IrParam]) -> Option<IrExp
             // the list store's order), the checked read `bytes.index` judges the
             // bound index — it aborts exactly as the read syntax does — and only
             // then does `set_at` store, always in range.
-            let span = index.span.clone();
+            let span = index.span;
             let seed = crate::lower::desugar_var_seed();
             let (ti, tv, tc) = (VarId(seed), VarId(seed + 1), VarId(seed + 2));
-            let at = |kind| IrExpr { kind, ty: Ty::Int, span: span.clone(), def_id: None };
+            let at = |kind| IrExpr { kind, ty: Ty::Int, span, def_id: None };
             let recv = || IrExpr {
                 kind: IrExprKind::Var { id: *target },
                 ty: Ty::Bytes,
-                span: span.clone(),
+                span,
                 def_id: None,
             };
             let bytes_call = |func: &str, args: Vec<IrExpr>, ty: Ty| IrExpr {
@@ -187,12 +187,12 @@ fn desugar_bytes_index_assign(body: &IrExpr, params: &[IrParam]) -> Option<IrExp
                     type_args: Vec::new(),
                 },
                 ty,
-                span: span.clone(),
+                span,
                 def_id: None,
             };
             let bind = |var, value: &IrExpr| IrStmt {
                 kind: IrStmtKind::Bind { var, mutability: almide_ir::Mutability::Let, ty: Ty::Int, value: value.clone() },
-                span: span.clone(),
+                span,
             };
             let check = bytes_call("index", vec![recv(), at(IrExprKind::Var { id: ti })], Ty::Int);
             let store = bytes_call(
@@ -205,12 +205,12 @@ fn desugar_bytes_index_assign(body: &IrExpr, params: &[IrParam]) -> Option<IrExp
                 bind(tv, value),
                 // Bound, not a bare statement: the byte it reads is discarded.
                 bind(tc, &check),
-                IrStmt { kind: IrStmtKind::Expr { expr: store }, span: span.clone() },
+                IrStmt { kind: IrStmtKind::Expr { expr: store }, span },
             ];
             let block = IrExpr {
                 kind: IrExprKind::Block { stmts, expr: None },
                 ty: Ty::Unit,
-                span: span.clone(),
+                span,
                 def_id: None,
             };
             stmt.kind = IrStmtKind::Expr { expr: block };
