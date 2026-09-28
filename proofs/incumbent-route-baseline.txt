@@ -27,8 +27,6 @@ test :: spec/integration/codegen_functional_test.almd :: list-hof-nonlambda
 test :: spec/integration/codegen_loop_guard_test.almd :: expr:Continue
 test :: spec/integration/codegen_patterns_test.almd :: call:list.partition
 test :: spec/integration/codegen_pipes_test.almd :: call:list.partition
-test :: spec/integration/modules/cross_module_cell_update_test.almd :: assign:unmapped
-test :: spec/integration/modules/cross_module_global_state_loop_test.almd :: assign:unmapped
 test :: spec/integration/modules/qualified_ctor_test.almd :: ty-mismatch:Scalar(Int)-vs-Scalar(Str)
 test :: spec/integration/modules/same_name_ctor_test.almd :: ty-mismatch:Named(1)-vs-Named(0)
 test :: spec/lang/borrow_hoist_test.almd :: index-of:Scalar(Bytes)
