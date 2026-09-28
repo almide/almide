@@ -792,7 +792,7 @@
 55000	54978	700000	55000	spec/wasm_cross/value_object_leak_loop.almd
 141	80	1597	138	spec/wasm_cross/value_object_ops_share.almd
 38	0	565	14	spec/wasm_cross/value_repr.almd
-!	spec/wasm_cross/variant_case_named_like_its_type.almd
+6	2	82	6	spec/wasm_cross/variant_case_named_like_its_type.almd
 14019	13995	176214	14019	spec/wasm_cross/variant_pair_result_return.almd
 4	0	96	1	spec/wasm_cross/variant_record_literal_equality.almd
 25750	25659	405100	25750	spec/wasm_cross/variant_result_credit_shapes.almd

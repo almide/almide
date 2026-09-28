@@ -43,7 +43,7 @@ rhs:Member	2
 rhs:OptionNone	26
 rhs:OptionSome	15
 rhs:Range	3
-rhs:Record	40
+rhs:Record	41
 rhs:ResultErr	3
 rhs:ResultOk	16
 rhs:RuntimeCall	66
@@ -75,7 +75,7 @@ tail:Block	17
 tail:If	4690
 tail:Lambda	10
 tail:MapAccess	5
-tail:Match	455
+tail:Match	459
 tail:Member	4
 tail:OptionNone	11
 tail:OptionSome	14
