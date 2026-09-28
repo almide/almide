@@ -412,7 +412,7 @@ fn check_handle_leg(leg: Leg, out: &Output, server: &Server) -> String {
 
     // 8.
     assert!(get("invalid").starts_with("invalid limits: "), "[{leg:?}] {}", get("invalid"));
-    assert!(get("refused").starts_with("connection failed: "), "[{leg:?}] {}", get("refused"));
+    assert!(get("refused").starts_with("could not connect to \"http://127.0.0.1:"), "[{leg:?}] {}", get("refused"));
     stdout
 }
 
@@ -467,7 +467,7 @@ fn native_only_default_timeout_and_the_sse_twin() {
     let l = lines(&out);
     let get = |k: &str| l.get(k).unwrap_or_else(|| panic!("no `{k}:` line in\n{stdout}")).clone();
     let (_, rest) = timed(&get("slow-default"));
-    assert!(rest.starts_with("read timed out waiting for the server"), "{rest}");
+    assert!(rest.starts_with("timed out waiting for \"http://127.0.0.1:"), "{rest}");
     let (ms, rest) = timed(&get("openai"));
     assert_eq!(rest, "request timeout: total_ms 700 exceeded");
     assert!((600..2500).contains(&ms), "{ms}");

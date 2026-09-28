@@ -33,6 +33,8 @@ pub struct AlmideHttpUrl {
     pub target: String,
     /// The percent-decoded `user` and `password` of the userinfo, if any.
     pub userinfo: Option<(Vec<u8>, Vec<u8>)>,
+    /// The URL as the program passed it: the operand every error names.
+    pub url: String,
 }
 
 impl AlmideHttpUrl {
@@ -47,7 +49,7 @@ impl AlmideHttpUrl {
 }
 
 fn http_url_error(url: &str, why: &str) -> String {
-    format!("invalid URL {:?}: {}", url, why)
+    format!("{}{}: {}", HTTP_ERR_URL_HEAD, http_quote(url), why)
 }
 
 /// Parse an http / https URL (#2821). `Err` names the URL and the problem.
@@ -62,14 +64,18 @@ pub fn http_parse_url(url: &str) -> Result<AlmideHttpUrl, String> {
             (url[..i].to_ascii_lowercase(), &url[i + 3..])
         }
         Some(i) if url[..i].eq_ignore_ascii_case("http") || url[..i].eq_ignore_ascii_case("https") => {
-            return Err(bad(format!("expected \"//\" after \"{}:\"", &url[..i])));
+            let [head, tail] = HTTP_ERR_URL_SLASHES;
+            return Err(bad(format!("{}{}{}", head, &url[..i], tail)));
         }
-        _ => return Err(bad("missing scheme (expected http:// or https://)".to_string())),
+        _ => return Err(bad(HTTP_ERR_URL_NO_SCHEME.to_string())),
     };
     let https = match scheme.as_str() {
         "http" => false,
         "https" => true,
-        other => return Err(bad(format!("unsupported scheme {:?} (only http:// and https:// are supported)", other))),
+        other => {
+            let [head, tail] = HTTP_ERR_URL_SCHEME;
+            return Err(bad(format!("{}{}{}", head, other, tail)));
+        }
     };
     let default_port: u16 = if https { 443 } else { 80 };
     let auth_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
@@ -81,12 +87,12 @@ pub fn http_parse_url(url: &str) -> Result<AlmideHttpUrl, String> {
     let (host, port_text) = if let Some(v6) = hostport.strip_prefix('[') {
         let close = v6.find(']').ok_or_else(|| bad("unterminated IPv6 address (missing \"]\")".to_string()))?;
         let addr: std::net::Ipv6Addr =
-            v6[..close].parse().map_err(|_| bad(format!("invalid IPv6 address {:?}", &v6[..close])))?;
+            v6[..close].parse().map_err(|_| bad(format!("invalid IPv6 address {}", http_quote(&v6[..close]))))?;
         let after = &v6[close + 1..];
         let port = match after.strip_prefix(':') {
             Some(p) => Some(p),
             None if after.is_empty() => None,
-            None => return Err(bad(format!("unexpected {:?} after the IPv6 address", after))),
+            None => return Err(bad(format!("unexpected {} after the IPv6 address", http_quote(after)))),
         };
         (addr.to_string(), port)
     } else {
@@ -102,7 +108,7 @@ pub fn http_parse_url(url: &str) -> Result<AlmideHttpUrl, String> {
         None | Some("") => default_port,
         Some(p) => match p.parse::<u16>() {
             Ok(n) if n > 0 && p.bytes().all(|b| b.is_ascii_digit()) => n,
-            _ => return Err(bad(format!("invalid port {:?} (expected a number from 1 to 65535)", p))),
+            _ => return Err(bad(format!("invalid port {} (expected a number from 1 to 65535)", http_quote(p)))),
         },
     };
     let bracketed = if host.contains(':') { format!("[{}]", host) } else { host.clone() };
@@ -121,7 +127,7 @@ pub fn http_parse_url(url: &str) -> Result<AlmideHttpUrl, String> {
         target.push('?');
         target.push_str(&http_percent_encode(q, true));
     }
-    Ok(AlmideHttpUrl { https, host, port, authority, target, userinfo })
+    Ok(AlmideHttpUrl { https, host, port, authority, target, userinfo, url: url.to_string() })
 }
 
 /// A registered host name, lowercased; a non-ASCII label becomes its
@@ -139,16 +145,16 @@ fn http_normalize_host(host: &str) -> Result<String, String> {
                 out.push(String::new()); // the trailing dot of a fully-qualified name
                 continue;
             }
-            return Err(format!("empty label in host {:?}", host));
+            return Err(format!("empty label in host {}", http_quote(host)));
         }
         let lower: Vec<char> = label.chars().flat_map(char::to_lowercase).collect();
         if let Some(c) = lower.iter().find(|c| c.is_ascii() && !(c.is_ascii_alphanumeric() || **c == '-' || **c == '_')) {
-            return Err(format!("invalid character {:?} in host {:?}", c, host));
+            return Err(format!("invalid character {} in host {}", http_quote(&c.to_string()), http_quote(host)));
         }
         if lower.iter().all(char::is_ascii) {
             out.push(lower.into_iter().collect());
         } else {
-            let encoded = http_punycode(&lower).ok_or_else(|| format!("host {:?} cannot be punycoded", host))?;
+            let encoded = http_punycode(&lower).ok_or_else(|| format!("host {} cannot be punycoded", http_quote(host)))?;
             out.push(format!("xn--{}", encoded));
         }
     }
@@ -288,23 +294,26 @@ fn http_is_tchar(b: u8) -> bool {
 }
 
 /// Refuse a method or header that would let the caller's text split the
-/// request.
+/// request, or a header the client manages (C-370): per header, the name,
+/// then the value, then the name against `HTTP_FORBIDDEN_HEADERS` — the
+/// order the p3 shim checks in, so the first refusal is the same text.
 pub fn http_check_request(method: &str, headers: &[(String, String)]) -> Result<(), String> {
     if method.is_empty() || !method.bytes().all(http_is_tchar) {
-        return Err(format!("invalid HTTP method {:?}: a method is a token (RFC 9110) — no spaces, controls or line breaks", method));
+        return Err(format!(
+            "invalid HTTP method {}: a method is a token (RFC 9110) — no spaces, controls or line breaks",
+            http_quote(method)
+        ));
     }
     for (k, v) in headers {
+        let refuse = |(head, tail): (&str, &str)| format!("{}{}{}", head, http_quote(k), tail);
         if k.is_empty() || !k.bytes().all(http_is_tchar) {
-            return Err(format!(
-                "invalid header name {:?}: a field name is a token (RFC 9110) — no spaces, colons, controls or line breaks",
-                k
-            ));
+            return Err(refuse(HTTP_ERR_HEADER_NAME));
         }
         if v.bytes().any(|b| (b < 0x20 && b != b'\t') || b == 0x7f) {
-            return Err(format!(
-                "invalid header value for {:?}: it contains CR, LF, NUL or another control character, which would split the request",
-                k
-            ));
+            return Err(refuse(HTTP_ERR_HEADER_VALUE));
+        }
+        if HTTP_FORBIDDEN_HEADERS.iter().any(|f| f.eq_ignore_ascii_case(k)) {
+            return Err(refuse(HTTP_ERR_HEADER_FORBIDDEN));
         }
     }
     Ok(())
@@ -603,10 +612,10 @@ fn http_socks5_connect(s: &mut TcpStream, u: &AlmideHttpUrl, p: &AlmideHttpProxy
         u.host.parse().ok()
     } else {
         let addrs = std::net::ToSocketAddrs::to_socket_addrs(&(u.host.as_str(), u.port))
-            .map_err(|e| format!("connection failed: {}", e))?;
+            .map_err(|_| http_error_text(HttpErrorClass::Dns, &u.url))?;
         let mut addrs: Vec<std::net::SocketAddr> = addrs.collect();
         addrs.sort_by_key(|a| a.is_ipv6());
-        Some(addrs.first().ok_or_else(|| format!("connection failed: no address for {}", u.host))?.ip())
+        Some(addrs.first().ok_or_else(|| http_error_text(HttpErrorClass::Dns, &u.url))?.ip())
     };
     match ip {
         Some(std::net::IpAddr::V4(a)) => {
@@ -684,18 +693,24 @@ pub fn client_max_response_bytes() -> Option<usize> {
     }
 }
 
-fn http_head_too_large() -> String {
-    format!("response head too large: more than {} bytes before the blank line", HTTP_MAX_HEAD_BYTES)
+/// A response head past `HTTP_MAX_HEAD_BYTES` is the protocol class: no
+/// server that means to be read sends one. Called by the splice's streaming
+/// client (runtime/rs/src/http.rs), which this crate does not compile.
+#[allow(dead_code)]
+fn http_head_too_large(url: &str) -> String {
+    http_error_text(HttpErrorClass::Protocol, url)
 }
 
 /// Resolve and dial `host:port`, each address in turn, every attempt bounded
 /// by `timeout()` (asked afresh per address, so a wall clock can clip it).
+/// A name that resolves to nothing is `Resolve`; otherwise the last
+/// address's error.
 fn http_dial(
     host: &str,
     port: u16,
     timeout: &dyn Fn() -> Option<std::time::Duration>,
-) -> Result<TcpStream, std::io::Error> {
-    let addrs = std::net::ToSocketAddrs::to_socket_addrs(&(host, port))?;
+) -> Result<TcpStream, HttpDialError> {
+    let addrs = std::net::ToSocketAddrs::to_socket_addrs(&(host, port)).map_err(|_| HttpDialError::Resolve)?;
     let mut last: Option<std::io::Error> = None;
     for addr in addrs {
         let dialed = match timeout() {
@@ -707,27 +722,18 @@ fn http_dial(
             Err(e) => last = Some(e),
         }
     }
-    Err(last.unwrap_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, format!("no address for {}", host))))
+    Err(last.map(HttpDialError::Connect).unwrap_or(HttpDialError::Resolve))
 }
 
 /// The dial of every call that takes no limits: the proxy route, a connect
 /// timeout, and the read (and write) timeout `read_default_secs`, both
-/// overridable by ALMIDE_HTTP_TIMEOUT_SECS.
+/// overridable by ALMIDE_HTTP_TIMEOUT_SECS. A failed dial is `u`'s dns,
+/// timeout or connect text (a proxy's dial adds which proxy).
 fn http_client_open(u: &AlmideHttpUrl, read_default_secs: u64) -> Result<(TcpStream, AlmideHttpRoute), String> {
     let connect_timeout = client_read_timeout(30);
     let io_timeout = client_read_timeout(read_default_secs);
     http_open_route(u, &mut |host, port| {
-        let s = http_dial(host, port, &|| connect_timeout).map_err(|e| {
-            match (e.kind(), connect_timeout) {
-                (std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock, Some(t)) => format!(
-                    "connection failed: timed out after {}s connecting to {}:{} (raise ALMIDE_HTTP_TIMEOUT_SECS; 0 = no timeout)",
-                    t.as_secs(),
-                    host,
-                    port
-                ),
-                _ => format!("connection failed: {}", e),
-            }
-        })?;
+        let s = http_dial(host, port, &|| connect_timeout).map_err(|e| http_dial_error_text(&u.url, &e))?;
         s.set_read_timeout(io_timeout).ok();
         s.set_write_timeout(io_timeout).ok();
         Ok(s)
@@ -742,8 +748,9 @@ fn http_client_open(u: &AlmideHttpUrl, read_default_secs: u64) -> Result<(TcpStr
 // OpenSSL bundle / directory on Linux (openssl-probe) — or, when
 // SSL_CERT_FILE / SSL_CERT_DIR is set, the certificates those name instead
 // of the platform store (curl, Python and Go read the same variables). Read
-// once per process. A certificate or handshake failure is reported as
-// `TLS error: …`, not as the write it used to surface through.
+// once per process. A certificate or handshake failure is reported as the
+// tls class, not as the write it used to surface through; a trust store the
+// variables name but that does not load keeps its own `TLS error: …` text.
 
 #[cfg(not(target_arch = "wasm32"))]
 fn http_tls_config() -> Result<std::sync::Arc<rustls::ClientConfig>, String> {
@@ -766,15 +773,16 @@ fn http_tls_config() -> Result<std::sync::Arc<rustls::ClientConfig>, String> {
         .clone()
 }
 
-/// `TLS error: …` for a failed handshake — the rustls reason when there is
-/// one (`invalid peer certificate: UnknownIssuer`).
+/// A failed handshake: the timeout class when the server went quiet, the
+/// tls class otherwise — a certificate the roots do not vouch for, a peer
+/// that does not speak TLS. A stock p3 host reports every such failure as
+/// one `TLS-protocol-error`, so the rustls reason is not part of the text.
 #[cfg(not(target_arch = "wasm32"))]
-fn http_tls_error(e: &std::io::Error) -> String {
-    if let Some(inner) = e.get_ref().and_then(|i| i.downcast_ref::<rustls::Error>()) {
-        return format!("TLS error: {}", inner);
+fn http_tls_error(url: &str, e: &std::io::Error) -> String {
+    if e.get_ref().is_none_or(|i| i.downcast_ref::<rustls::Error>().is_none())
+        && matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)
+    {
+        return http_error_text(HttpErrorClass::Timeout, url);
     }
-    if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) {
-        return "TLS error: handshake timed out (raise ALMIDE_HTTP_TIMEOUT_SECS; 0 = no timeout)".to_string();
-    }
-    format!("TLS error: {}", e)
+    http_error_text(HttpErrorClass::Tls, url)
 }

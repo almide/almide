@@ -23,6 +23,9 @@ use std::net::TcpStream;
 // this file stays under the 1000-line limit.
 include!("http_route_core.rs");
 
+// The error classes and their one renderer (ADR-0023 §4.2).
+include!("http_error_core.rs");
+
 /// The client read timeout: `default_secs` unless `ALMIDE_HTTP_TIMEOUT_SECS`
 /// overrides it; `0` means NO timeout (block until the server answers). A
 /// local-LLM endpoint routinely needs 30-120 s before the first byte (#1561).
@@ -35,23 +38,13 @@ pub fn client_read_timeout(default_secs: u64) -> Option<std::time::Duration> {
     }
 }
 
-/// A read error message the caller can ACT on: the timeout case names the
-/// env var; everything else keeps the original detail.
-pub fn read_error_msg(e: &std::io::Error) -> String {
-    if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) {
-        "read timed out waiting for the server (raise ALMIDE_HTTP_TIMEOUT_SECS; 0 = no timeout)"
-            .to_string()
-    } else {
-        format!("read failed: {}", e)
-    }
-}
-
 /// Read a full `Connection: close` HTTP response, tolerating a peer that
 /// closes without TLS close_notify (#1592). A read error after a
 /// SYNTACTICALLY COMPLETE response keeps the data; before completeness it
 /// still propagates — a truncated body is never silently returned. More than
-/// `max` bytes is an error naming the cap (#2825).
-pub fn read_response_tolerant(stream: &mut impl Read, max: Option<usize>) -> Result<Vec<u8>, String> {
+/// `max` bytes is an error naming the cap (#2825). Errors are `url`'s
+/// classified texts.
+pub fn read_response_tolerant(stream: &mut impl Read, url: &str, max: Option<usize>) -> Result<Vec<u8>, String> {
     let mut response = Vec::new();
     let mut buf = [0u8; 8192];
     loop {
@@ -60,17 +53,14 @@ pub fn read_response_tolerant(stream: &mut impl Read, max: Option<usize>) -> Res
             Ok(n) => {
                 response.extend_from_slice(&buf[..n]);
                 if let Some(max) = max.filter(|m| response.len() > *m) {
-                    return Err(format!(
-                        "response too large: more than {} bytes (raise ALMIDE_HTTP_MAX_RESPONSE_BYTES; 0 = no limit)",
-                        max
-                    ));
+                    return Err(http_too_large_text(url, max));
                 }
             }
             Err(e) => {
                 if response_is_complete(&response) {
                     break;
                 }
-                return Err(read_error_msg(&e));
+                return Err(http_io_error_text(url, &e));
             }
         }
     }
@@ -210,19 +200,21 @@ pub fn decode_chunked_bytes(body: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 /// Start TLS on `stream` and finish the handshake here, so a certificate or
-/// handshake failure is reported as the TLS error it is (#2820).
+/// handshake failure is reported as the TLS error it is (#2820), in the tls
+/// class's one text for `url`.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn make_tls_stream(
     host: &str,
+    url: &str,
     mut stream: TcpStream,
 ) -> Result<rustls::StreamOwned<rustls::ClientConnection, TcpStream>, String> {
     let config = http_tls_config()?;
     let server_name = rustls::pki_types::ServerName::try_from(host.to_string())
-        .map_err(|e| format!("invalid DNS name: {}", e))?;
+        .map_err(|_| http_error_text(HttpErrorClass::Tls, url))?;
     let mut conn = rustls::ClientConnection::new(config, server_name)
-        .map_err(|e| format!("TLS error: {}", e))?;
+        .map_err(|_| http_error_text(HttpErrorClass::Tls, url))?;
     while conn.is_handshaking() {
-        conn.complete_io(&mut stream).map_err(|e| http_tls_error(&e))?;
+        conn.complete_io(&mut stream).map_err(|e| http_tls_error(url, &e))?;
     }
     Ok(rustls::StreamOwned::new(conn, stream))
 }
@@ -256,9 +248,9 @@ pub fn http_parse_response(response: &[u8]) -> Result<HttpRawResponse, String> {
 }
 
 /// Write the prepared request and read the whole response.
-pub fn http_exchange_raw(stream: &mut (impl Read + Write), request: &[u8]) -> Result<Vec<u8>, String> {
-    stream.write_all(request).map_err(|e| format!("write failed: {}", e))?;
-    read_response_tolerant(stream, client_max_response_bytes())
+pub fn http_exchange_raw(stream: &mut (impl Read + Write), url: &str, request: &[u8]) -> Result<Vec<u8>, String> {
+    stream.write_all(request).map_err(|e| http_io_error_text(url, &e))?;
+    read_response_tolerant(stream, url, client_max_response_bytes())
 }
 
 /// The one buffered client every shape projects: prepare (URL, method,
@@ -276,8 +268,8 @@ fn http_request_raw(
     let response = if u.https {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let mut tls = make_tls_stream(&u.host, stream)?;
-            http_exchange_raw(&mut tls, &request)?
+            let mut tls = make_tls_stream(&u.host, url, stream)?;
+            http_exchange_raw(&mut tls, url, &request)?
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -286,9 +278,10 @@ fn http_request_raw(
         }
     } else {
         let mut stream = stream;
-        http_exchange_raw(&mut stream, &request)?
+        http_exchange_raw(&mut stream, url, &request)?
     };
-    http_parse_response(&response)
+    // A framing the decoder cannot walk is the protocol class.
+    http_parse_response(&response).map_err(|_| http_error_text(HttpErrorClass::Protocol, url))
 }
 
 /// The full-response client (#1791): `(status_code, headers, body)` for ANY
