@@ -19,6 +19,10 @@ impl Emitter<'_> {
         if let Some(out) = self.lower_list_order_call(func, args)? {
             return Ok(out);
         }
+        // #2749: list.shuffle shares random.shuffle's arm (random.rs).
+        if let Some(out) = self.lower_random_call("list", func, args)? {
+            return Ok(out);
+        }
         if let Some(out) = self.lower_list_mut_call(func, args, ret_hint)? {
             return Ok(out);
         }
