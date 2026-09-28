@@ -209,20 +209,21 @@ pub fn decode_chunked_bytes(body: &[u8]) -> Result<Vec<u8>, String> {
     Ok(result)
 }
 
+/// Start TLS on `stream` and finish the handshake here, so a certificate or
+/// handshake failure is reported as the TLS error it is (#2820).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn make_tls_stream(
     host: &str,
-    stream: TcpStream,
+    mut stream: TcpStream,
 ) -> Result<rustls::StreamOwned<rustls::ClientConnection, TcpStream>, String> {
-    let mut root_store = rustls::RootCertStore::empty();
-    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    let config = std::sync::Arc::new(
-        rustls::ClientConfig::builder().with_root_certificates(root_store).with_no_client_auth(),
-    );
+    let config = http_tls_config()?;
     let server_name = rustls::pki_types::ServerName::try_from(host.to_string())
         .map_err(|e| format!("invalid DNS name: {}", e))?;
-    let conn = rustls::ClientConnection::new(config, server_name)
+    let mut conn = rustls::ClientConnection::new(config, server_name)
         .map_err(|e| format!("TLS error: {}", e))?;
+    while conn.is_handshaking() {
+        conn.complete_io(&mut stream).map_err(|e| http_tls_error(&e))?;
+    }
     Ok(rustls::StreamOwned::new(conn, stream))
 }
 
