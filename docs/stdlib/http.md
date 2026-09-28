@@ -28,10 +28,11 @@ effect fn main() -> Unit = {
 }
 ```
 
-The server listens on `0.0.0.0:port` and handles one request at a time, in
-the order they arrive. The response goes out as `HTTP/1.1 <status> <reason>`,
-the response's headers in order, `Content-Length`, the body, and then the
-connection closes. A handler `err(m)` answers `500` with the body
+The server listens on `0.0.0.0:port` (every interface; ADR-0020 §5.7) and
+handles one request at a time, in the order they arrive. The response goes out as `HTTP/1.1 <status> <reason>` (the registered reason,
+empty for an unregistered code), the response's headers in order,
+`Connection: close`, `Content-Length`, the body, and then the connection
+closes. A HEAD request, a `204` and a `304` get no body. A handler `err(m)` answers `500` with the body
 `Internal error: <m>`. If the port cannot be bound, the program stops with
 `Error: bind failed: <reason>` and exit code 1.
 

@@ -20,10 +20,10 @@
 //!             connection, which then closes
 
 use std::io::{BufWriter, Stdout, Write as _};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use almide_rt_core::http_server_core::{HttpServerWatch, http_server_signal, http_server_watch};
+use almide_rt_core::http_server_core::{HttpServerConn, HttpServerWatch, http_server_signal, http_server_watch};
 
 pub(crate) const OP_SERVE_BIND: i32 = 70;
 pub(crate) const OP_SERVE_NEXT: i32 = 71;
@@ -33,7 +33,7 @@ pub(crate) const OP_SERVE_REPLY: i32 = 72;
 #[derive(Default)]
 pub(crate) struct ServeState {
     listener: Option<TcpListener>,
-    pending: Option<TcpStream>,
+    pending: Option<HttpServerConn>,
     /// The shutdown watcher while the guest serves.
     watch: Option<HttpServerWatch>,
 }

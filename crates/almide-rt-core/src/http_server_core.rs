@@ -17,9 +17,20 @@
 /// A parsed request: (method, target, body, headers in wire order).
 pub type HttpServerRequest = (String, String, String, Vec<(String, String)>);
 
-/// Bind the listener `http.serve(port, _)` accepts on: every interface.
+/// Bind the listener `http.serve(port, _)` accepts on: every interface
+/// (`0.0.0.0`), as C-367 states. A loopback-only default would break every
+/// deployed server that is reached from outside its host, so the default
+/// stays; choosing the address is an explicit option that rides on
+/// `serve_with_limits` (ADR-0020 §5.7, #2826).
 pub fn http_server_bind(port: i64) -> Result<std::net::TcpListener, String> {
     std::net::TcpListener::bind(format!("0.0.0.0:{}", port)).map_err(|e| format!("bind failed: {}", e))
+}
+
+/// A connection whose request has been read: the response goes back on it.
+/// It remembers what shapes that response — a HEAD gets no body (#2826).
+pub struct HttpServerConn {
+    stream: std::net::TcpStream,
+    head: bool,
 }
 
 /// The next request: accept, then parse. A failed accept or an unparsable
@@ -27,7 +38,7 @@ pub fn http_server_bind(port: i64) -> Result<std::net::TcpListener, String> {
 /// `None` once a shutdown signal has arrived (ADR-0020 §5.6): the server
 /// stops accepting, and a connection accepted after the signal — the
 /// watcher's wake-up or a late client — is closed unanswered.
-pub fn http_server_next(listener: &std::net::TcpListener) -> Option<(std::net::TcpStream, HttpServerRequest)> {
+pub fn http_server_next(listener: &std::net::TcpListener) -> Option<(HttpServerConn, HttpServerRequest)> {
     loop {
         if http_server_stopping() {
             return None;
@@ -41,7 +52,8 @@ pub fn http_server_next(listener: &std::net::TcpListener) -> Option<(std::net::T
             Err(_) => continue,
         };
         if let Ok(req) = http_server_read_request(&mut stream) {
-            return Some((stream, req));
+            let head = req.0 == "HEAD";
+            return Some((HttpServerConn { stream, head }, req));
         }
     }
 }
@@ -181,34 +193,143 @@ fn http_server_read_request(stream: &mut std::net::TcpStream) -> Result<HttpServ
     Ok((method, path, String::from_utf8_lossy(&body).to_string(), headers))
 }
 
-/// The response bytes: status line (fixed reason table, `OK` outside it),
-/// the response's headers in order, Content-Length, the body.
-pub fn http_server_response_bytes(status: i64, headers: &[(String, String)], body: &str) -> Vec<u8> {
-    let status_text = match status {
+// ── Writing a response ──
+
+fn http_server_timeout(deadline: std::time::Instant) -> Option<std::time::Duration> {
+    let left = deadline.saturating_duration_since(std::time::Instant::now());
+    (!left.is_zero()).then_some(left)
+}
+
+
+/// The reason phrase: the IANA HTTP Status Code Registry (RFC 9110 §15 and
+/// the codes registered since); a code outside it gets an empty reason, which
+/// the status line allows (RFC 9112 §4). C-367 does not compare it.
+pub fn http_server_reason(status: i64) -> &'static str {
+    match status {
+        100 => "Continue",
+        101 => "Switching Protocols",
+        102 => "Processing",
+        103 => "Early Hints",
         200 => "OK",
         201 => "Created",
+        202 => "Accepted",
+        203 => "Non-Authoritative Information",
         204 => "No Content",
+        205 => "Reset Content",
+        206 => "Partial Content",
+        207 => "Multi-Status",
+        208 => "Already Reported",
+        226 => "IM Used",
+        300 => "Multiple Choices",
         301 => "Moved Permanently",
         302 => "Found",
+        303 => "See Other",
         304 => "Not Modified",
+        305 => "Use Proxy",
+        307 => "Temporary Redirect",
+        308 => "Permanent Redirect",
         400 => "Bad Request",
         401 => "Unauthorized",
+        402 => "Payment Required",
         403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        406 => "Not Acceptable",
+        407 => "Proxy Authentication Required",
+        408 => "Request Timeout",
+        409 => "Conflict",
+        410 => "Gone",
+        411 => "Length Required",
+        412 => "Precondition Failed",
+        413 => "Content Too Large",
+        414 => "URI Too Long",
+        415 => "Unsupported Media Type",
+        416 => "Range Not Satisfiable",
+        417 => "Expectation Failed",
+        418 => "I'm a teapot",
+        421 => "Misdirected Request",
+        422 => "Unprocessable Content",
+        423 => "Locked",
+        424 => "Failed Dependency",
+        425 => "Too Early",
+        426 => "Upgrade Required",
+        428 => "Precondition Required",
+        429 => "Too Many Requests",
+        431 => "Request Header Fields Too Large",
+        451 => "Unavailable For Legal Reasons",
         500 => "Internal Server Error",
-        _ => "OK",
-    };
-    let mut out = format!("HTTP/1.1 {} {}\r\n", status, status_text);
+        501 => "Not Implemented",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        504 => "Gateway Timeout",
+        505 => "HTTP Version Not Supported",
+        506 => "Variant Also Negotiates",
+        507 => "Insufficient Storage",
+        508 => "Loop Detected",
+        510 => "Not Extended",
+        511 => "Network Authentication Required",
+        _ => "",
+    }
+}
+
+/// The response bytes for a request of any method but HEAD: see
+/// [`http_server_response_bytes_for`].
+pub fn http_server_response_bytes(status: i64, headers: &[(String, String)], body: &str) -> Vec<u8> {
+    http_server_response_bytes_for(false, status, headers, body)
+}
+
+/// The response bytes: status line, the response's headers in order (a
+/// handler's `Connection` field dropped — the core owns the connection),
+/// `Connection: close` (one response per connection; keep-alive is #2665),
+/// Content-Length, the body. A HEAD request, a 1xx, a 204 and a 304 get no
+/// body (RFC 9110 §6.4.1); 1xx and 204 get no Content-Length either
+/// (§8.6).
+pub fn http_server_response_bytes_for(head: bool, status: i64, headers: &[(String, String)], body: &str) -> Vec<u8> {
+    let mut out = format!("HTTP/1.1 {} {}\r\n", status, http_server_reason(status));
     for (k, v) in headers {
+        if k.eq_ignore_ascii_case("connection") {
+            continue;
+        }
         out.push_str(&format!("{}: {}\r\n", k, v));
     }
-    out.push_str(&format!("Content-Length: {}\r\n\r\n", body.len()));
-    out.push_str(body);
+    out.push_str("Connection: close\r\n");
+    let informational = (100..200).contains(&status);
+    if !(informational || status == 204) {
+        out.push_str(&format!("Content-Length: {}\r\n", body.len()));
+    }
+    out.push_str("\r\n");
+    if !(head || informational || status == 204 || status == 304) {
+        out.push_str(body);
+    }
     out.into_bytes()
 }
 
-/// Write one response and close the connection (the stream drops here).
-pub fn http_server_write(mut stream: std::net::TcpStream, status: i64, headers: &[(String, String)], body: &str) -> Result<(), String> {
-    std::io::Write::write_all(&mut stream, &http_server_response_bytes(status, headers, body)).map_err(|e| e.to_string())
+/// Write the handler's response and close the connection.
+pub fn http_server_write(conn: HttpServerConn, status: i64, headers: &[(String, String)], body: &str) -> Result<(), String> {
+    http_server_send(conn, status, headers, body)
+}
+
+/// Send, then close without resetting: the write side is shut first and
+/// whatever the client still sends (a pipelined request) is read and dropped for a moment, so the close does not turn
+/// into a TCP reset that could discard the response before the client read
+/// it.
+fn http_server_send(conn: HttpServerConn, status: i64, headers: &[(String, String)], body: &str) -> Result<(), String> {
+    let mut stream = conn.stream;
+    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(HTTP_SERVER_DRAIN_MS)));
+    let sent = std::io::Write::write_all(&mut stream, &http_server_response_bytes_for(conn.head, status, headers, body)).map_err(|e| e.to_string());
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+    let until = std::time::Instant::now() + std::time::Duration::from_millis(250);
+    let mut sink = [0u8; 16 * 1024];
+    let mut drained = 0usize;
+    while drained < 1 << 20 {
+        let Some(left) = http_server_timeout(until) else { break };
+        if stream.set_read_timeout(Some(left)).is_err() {
+            break;
+        }
+        match std::io::Read::read(&mut stream, &mut sink) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => drained += n,
+        }
+    }
+    sent
 }

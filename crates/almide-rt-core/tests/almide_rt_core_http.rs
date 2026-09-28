@@ -312,29 +312,41 @@ fn cancel_before_the_head_arrives() {
 // ── the server core ──
 
 #[test]
-fn the_response_bytes_carry_the_reason_table() {
+fn the_response_bytes_carry_the_registered_reason_and_close_the_connection() {
     let table = [
         (200, "OK"),
         (201, "Created"),
-        (204, "No Content"),
         (301, "Moved Permanently"),
-        (302, "Found"),
-        (304, "Not Modified"),
         (400, "Bad Request"),
-        (401, "Unauthorized"),
-        (403, "Forbidden"),
         (404, "Not Found"),
-        (405, "Method Not Allowed"),
+        (413, "Content Too Large"),
+        (418, "I'm a teapot"),
+        (429, "Too Many Requests"),
         (500, "Internal Server Error"),
-        (418, "OK"),
+        (503, "Service Unavailable"),
+        (599, ""),
     ];
     for (status, reason) in table {
         let out = String::from_utf8(server::http_server_response_bytes(status, &[], "")).unwrap();
-        assert_eq!(out, format!("HTTP/1.1 {status} {reason}\r\nContent-Length: 0\r\n\r\n"));
+        assert_eq!(out, format!("HTTP/1.1 {status} {reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"));
     }
-    let headers = vec![("Content-Type".to_string(), "text/plain".to_string()), ("X-B".to_string(), "2".to_string())];
+    let headers = vec![
+        ("Content-Type".to_string(), "text/plain".to_string()),
+        ("connection".to_string(), "keep-alive".to_string()),
+        ("X-B".to_string(), "2".to_string()),
+    ];
     let out = String::from_utf8(server::http_server_response_bytes(200, &headers, "héllo")).unwrap();
-    assert_eq!(out, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nX-B: 2\r\nContent-Length: 6\r\n\r\nhéllo");
+    assert_eq!(out, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nX-B: 2\r\nConnection: close\r\nContent-Length: 6\r\n\r\nhéllo");
+}
+
+#[test]
+fn head_204_and_304_carry_no_body() {
+    let head = String::from_utf8(server::http_server_response_bytes_for(true, 200, &[], "hello")).unwrap();
+    assert_eq!(head, "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 5\r\n\r\n");
+    let no_content = String::from_utf8(server::http_server_response_bytes(204, &[], "x")).unwrap();
+    assert_eq!(no_content, "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
+    let not_modified = String::from_utf8(server::http_server_response_bytes(304, &[], "x")).unwrap();
+    assert_eq!(not_modified, "HTTP/1.1 304 Not Modified\r\nConnection: close\r\nContent-Length: 1\r\n\r\n");
 }
 
 #[test]
@@ -372,7 +384,7 @@ fn the_server_skips_an_unparsable_request_and_answers_the_next() {
         ]
     );
     server::http_server_write(stream, 404, &[("X-R".to_string(), "1".to_string())], "nope").expect("written");
-    assert_eq!(client.join().unwrap(), "HTTP/1.1 404 Not Found\r\nX-R: 1\r\nContent-Length: 4\r\n\r\nnope");
+    assert_eq!(client.join().unwrap(), "HTTP/1.1 404 Not Found\r\nX-R: 1\r\nConnection: close\r\nContent-Length: 4\r\n\r\nnope");
 }
 
 #[test]
@@ -389,5 +401,5 @@ fn a_request_without_a_body_reads_as_empty() {
     let (stream, (method, target, body, _)) = server::http_server_next(&listener).expect("no shutdown signal in this test");
     assert_eq!((method.as_str(), target.as_str(), body.as_str()), ("GET", "/", ""));
     server::http_server_write(stream, 200, &[], "").unwrap();
-    assert_eq!(client.join().unwrap(), "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+    assert_eq!(client.join().unwrap(), "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
 }
