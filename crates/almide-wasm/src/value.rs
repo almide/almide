@@ -273,6 +273,13 @@ impl Emitter<'_> {
         Ok(SliceTy::Value)
     }
 
+    pub(crate) fn json_ctrl_frags(&mut self) -> crate::work::CtrlFrags {
+        crate::work::CtrlFrags {
+            esc_u00: self.pool.intern("\\u00"),
+            hex_digits: self.pool.intern("0123456789abcdef"),
+        }
+    }
+
     pub(crate) fn json_frags(&mut self) -> JsonFrags {
         JsonFrags {
             null_: self.pool.intern("null"),
@@ -306,7 +313,8 @@ impl Emitter<'_> {
         let float_idx = info.wasm_index;
         self.calls.insert(fi);
         let frags = self.json_frags();
-        let _ = self.work.helper(Helper::JsonQuote { frags });
+        let ctrl = self.json_ctrl_frags();
+        let _ = self.work.helper(Helper::JsonQuote { frags, ctrl });
         let vj = self.work.helper(Helper::JsonValue { float_to_string: float_idx, frags });
         let hv = self.hold_i32()?;
         let start = self.hold_i32()?;
@@ -349,7 +357,8 @@ impl Emitter<'_> {
             empty_arr: self.pool.intern("[]"),
             empty_obj: self.pool.intern("{}"),
         };
-        let _ = self.work.helper(Helper::JsonQuote { frags });
+        let ctrl = self.json_ctrl_frags();
+        let _ = self.work.helper(Helper::JsonQuote { frags, ctrl });
         let vp = self.work.helper(Helper::JsonValuePretty {
             float_to_string: float_idx,
             frags,
