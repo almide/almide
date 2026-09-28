@@ -1,0 +1,47 @@
+// @contract: C-009
+// An opaque newtype interpolates as the value it wraps (#2860). The wasm leg
+// and the interp erase `mod type Id = Int` to its payload, so `${Id(7)}`
+// printed `7` there, while native emitted `format!("{}", id)` over a tuple
+// struct with no `Display` and rustc refused the build (E0277). A container
+// of the newtype already rendered through the struct's delegating repr
+// (#2496); this pins the bare segment beside it.
+//
+// Cells, each byte-identical native == wasm: a newtype over each Display
+// type (Int, Float, String, Bool, a sized int), a newtype over a newtype, a
+// newtype over a repr-backed type (record, variant, list, tuple) bare and in a
+// container, and a newtype segment inside a helper fn's interpolation.
+type P = { x: Int }
+
+type C = | On | Off(Int)
+
+mod type Id = Int
+
+mod type Score = Float
+
+local type Name = String
+
+mod type Flag = Bool
+
+mod type Byte = Int8
+
+mod type Outer = Score
+
+mod type Rec = P
+
+mod type Case = C
+
+mod type Ids = List[Int]
+
+mod type Pair = (Int, String)
+
+fn tag(n: Name) -> String = "name=${n}"
+
+effect fn main() -> Unit = {
+  let id = Id(7)
+  let s = Score(2.5)
+  println("${id} ${s} ${Name("a\"b")} ${Flag(true)} ${Byte(int.to_int8(3))} ${Outer(Score(3.0))}")
+  println("${Rec(P { x: 1 })} ${Case(Off(2))} ${Ids([1, 2])} ${Pair((1, "a"))}")
+  let r4 = Rec(P { x: 4 })
+  println("${[id]} ${some(Name("n"))} ${[r4]} ${[Outer(s)]}")
+  println(tag(Name("z")))
+}
