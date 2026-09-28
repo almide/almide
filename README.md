@@ -132,7 +132,7 @@ This claim is not prose. Every observable promise is a named contract in the [be
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
 > <!-- counts:generated:start (as of 2026-09-27) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
-> **Ledger: 368 contracts — 368 active, 0 flagged-for-revision.**
+> **Ledger: 369 contracts — 369 active, 0 flagged-for-revision.**
 > <!-- counts:generated:end -->
 >
 > **Divergences awaiting a fix: none.** Every contract in the ledger is
@@ -259,7 +259,7 @@ The Perceus proof above proves one compiler pass, once. v1 generalizes that prin
 | Derived count | Value |
 |---|---|
 | Stdlib | 1015 functions across 45 modules — self-hosted `.almd`, signature indexes regenerated from the compiler by `tools/gen-stdlib-doc-index.py` |
-| Tests | 457 `.almd` test files under `spec/` (`almide test spec/`) + the 368-contract cross-target ledger |
+| Tests | 467 `.almd` test files under `spec/` (`almide test spec/`) + the 369-contract cross-target ledger |
 <!-- counts:generated:end -->
 <!-- stats:generated:end -->
 

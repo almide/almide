@@ -5,6 +5,13 @@
   evidence, and gives the implementation order. None of it is implemented yet.
   Refinements that the evidence forced are marked **[refined]** where they
   appear, and are listed together in §9.
+- **Amended 2026-09-28**: §5.3 "Which export shape" (P2 `incoming-handler@0.2`)
+  and the order of steps 7 and 9 are superseded by
+  [ADR-0023](./0023-wasm-http-over-wasi-http.md): the stock server exports
+  `wasi:http/handler@0.3.0`. The P2 premise, that P3 needs
+  `-W component-model-more-async-builtins`, came from the probe's synchronous
+  stream builtins. An async-builtin P3 handler serves on wasmtime 47 with no
+  flags (ADR-0023 §2.1, §3.3).
 - **Date**: 2026-09-27
 - **Scope**: `http.serve` and the `http` router family, `fan` bodies, a new `kv`
   stdlib module, the `almide build --target wasm` shape of a server, and the
@@ -582,6 +589,16 @@ with code 1. The embedded lane does the same in the host, where the guest's
 serve loop returns. The exit codes stay inside C-350's `0..=125`, so there is
 no 128+signal code.
 
+`almide run` delivers these signals to the program exactly once (#2809). On
+Unix the native launcher `exec`s the compiled program, so the pid a
+supervisor holds is the program's, a SIGTERM to it alone starts the drain,
+and a Ctrl-C to the terminal's group is not doubled into a forced stop by a
+forwarding parent. The status `almide run` exits with is the program's own —
+its exit code, or a death by signal reported as one — and the launcher adds
+no 128+n of its own, which C-350 reserves for `process.exit`. On Windows the
+launcher waits: Ctrl-C reaches every process of the console, so it forwards
+nothing and ignores the event itself until the program has exited.
+
 ### 5.7 Limits
 
 ```almide
@@ -602,6 +619,25 @@ request timeout, 1 MiB of body.
 The export host's limits are host configuration (for example `wasmtime serve
 --max-concurrent-requests`). This is timing and admission, not an answer to an
 admitted request.
+
+**Status (2026-09-28, #2823).** The defaults are enforced in the shared server
+core (`crates/almide-rt-core/src/http_server_core.rs`) before the record
+exists, so native and the embedded lane both refuse the #2823 attack: a body
+over 1 MiB, declared by `Content-Length` or arriving chunked, is `413` without
+allocating the declared size, and the handler is not called. A body cut short
+of its `Content-Length` is `400`. A request not read within 30 s of accept is
+`503`, and a handler response later than that is replaced by `503`. The core
+also bounds a request or header line (8 KiB: `414` / `431`) and the header count
+(100: `431`), decodes a chunked request body, and answers `501` to any other
+transfer coding. `ServeLimits` and `serve_with_limits` land with the worker
+pool (#2665) and pass their values to `http_server_next_with`.
+
+**The listening address (#2826, #2829).** `http.serve` keeps binding
+`0.0.0.0:<port>`. C-367 states that address, and a server deployed in a
+container or on a VM is reached from outside its host. A silent switch to
+loopback would make those servers unreachable without an error. The address
+becomes an explicit option: a `host: String` field of `ServeLimits`, default
+`"0.0.0.0"`, added with `serve_with_limits` (#2829).
 
 ## 6. Migration: measured impact
 

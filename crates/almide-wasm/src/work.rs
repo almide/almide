@@ -27,8 +27,13 @@ pub(crate) enum Helper {
     /// (recursive; floats through the LINKED float.to_string minus any
     /// trailing ".0" — the incumbent's `{}` form).
     JsonValue { float_to_string: u32, frags: JsonFrags },
-    /// `$vjson_quote(cursor, str) -> cursor` — the 5-escape quoted form.
-    JsonQuote { frags: JsonFrags },
+    /// `$vjson_quote(cursor, str) -> cursor` — the RFC 8259 quoted form (#2802).
+    JsonQuote { frags: JsonFrags, ctrl: CtrlFrags },
+    /// `$vrepr_quote(cursor, str) -> cursor` — the nested-String REPR form
+    /// (`almide_repr_str`: the five short escapes, every other byte raw). It
+    /// shared `$vjson_quote` until #2802 gave JSON the control escapes, which
+    /// Almide's repr does not have on any leg.
+    ReprQuote { frags: JsonFrags },
     /// `$vjson_pretty(cursor, v, depth) -> cursor` — the two-space
     /// indented form (json.stringify_pretty), same leaves as JsonValue.
     JsonValuePretty { float_to_string: u32, frags: JsonFrags, pfrags: PrettyFrags },
@@ -216,6 +221,16 @@ pub(crate) struct PrettyFrags {
     pub(crate) empty_obj: u32,
 }
 
+/// The two extra fragments only JSON quoting needs (#2802), pooled only by a
+/// program that serializes JSON — the repr walker never interns them.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct CtrlFrags {
+    /// `\u00` — the prefix of every other control byte's escape.
+    pub(crate) esc_u00: u32,
+    /// `0123456789abcdef` — the nibble table the control escape indexes.
+    pub(crate) hex_digits: u32,
+}
+
 /// Pooled fragment addresses the JSON helpers append from.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) struct JsonFrags {
@@ -352,6 +367,7 @@ impl FnWork {
         (var_space, cur_module): (u32, Option<&str>),
     ) -> u32 {
         self.register_lambda(crate::LiftedLambda {
+            site_name: None,
             params,
             ret,
             effect_raw,

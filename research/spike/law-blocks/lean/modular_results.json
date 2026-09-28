@@ -1,0 +1,275 @@
+[
+ {
+  "law": "rc_flatten",
+  "target": false,
+  "verdict": "closed",
+  "recipe": "fun_induction restChunks <;> grind",
+  "restated": ""
+ },
+ {
+  "law": "rc_nonempty",
+  "target": false,
+  "verdict": "closed",
+  "recipe": "fun_induction restChunks <;> grind",
+  "restated": ""
+ },
+ {
+  "law": "rc_full",
+  "target": false,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": ""
+ },
+ {
+  "law": "t04 chunks rebuild the list",
+  "target": true,
+  "verdict": "closed",
+  "recipe": "grind",
+  "restated": ""
+ },
+ {
+  "law": "t04 no chunk is empty",
+  "target": true,
+  "verdict": "closed",
+  "recipe": "grind",
+  "restated": ""
+ },
+ {
+  "law": "t04 only the first chunk may be short",
+  "target": true,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": ""
+ },
+ {
+  "law": "ma_mem",
+  "target": false,
+  "verdict": "closed",
+  "recipe": "fun_induction mergeAll <;> grind",
+  "restated": ""
+ },
+ {
+  "law": "ma_sorted",
+  "target": false,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": ""
+ },
+ {
+  "law": "dd_mem",
+  "target": false,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": ""
+ },
+ {
+  "law": "dd_strict",
+  "target": false,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": ""
+ },
+ {
+  "law": "so_mem",
+  "target": false,
+  "verdict": "closed",
+  "recipe": "grind",
+  "restated": ""
+ },
+ {
+  "law": "so_sorted",
+  "target": false,
+  "verdict": "closed",
+  "recipe": "grind",
+  "restated": ""
+ },
+ {
+  "law": "t05 result is strictly ascending",
+  "target": true,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": "was: adjacent pairs by index with getD; now List.Pairwise (<)"
+ },
+ {
+  "law": "t05 nothing is lost",
+  "target": true,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": ""
+ },
+ {
+  "law": "t05 nothing is invented",
+  "target": true,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": ""
+ },
+ {
+  "law": "kl_total",
+  "target": false,
+  "verdict": "closed",
+  "recipe": "grind",
+  "restated": ""
+ },
+ {
+  "law": "kl_trans",
+  "target": false,
+  "verdict": "closed",
+  "recipe": "grind",
+  "restated": ""
+ },
+ {
+  "law": "tk_sorted",
+  "target": false,
+  "verdict": "closed",
+  "recipe": "grind",
+  "restated": ""
+ },
+ {
+  "law": "t06 at most k entries",
+  "target": true,
+  "verdict": "closed",
+  "recipe": "grind",
+  "restated": ""
+ },
+ {
+  "law": "t06 ordered by count, then name",
+  "target": true,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": "was: adjacent pairs by index; now List.Pairwise of the same relation"
+ },
+ {
+  "law": "t06 nothing better is left out",
+  "target": true,
+  "verdict": "closed",
+  "recipe": "grind",
+  "restated": ""
+ },
+ {
+  "law": "ro_def",
+  "target": false,
+  "verdict": "closed",
+  "recipe": "grind",
+  "restated": ""
+ },
+ {
+  "law": "rl_len",
+  "target": false,
+  "verdict": "closed",
+  "recipe": "grind",
+  "restated": ""
+ },
+ {
+  "law": "rl_zero",
+  "target": false,
+  "verdict": "closed",
+  "recipe": "grind",
+  "restated": ""
+ },
+ {
+  "law": "rl_back",
+  "target": false,
+  "verdict": "closed",
+  "recipe": "grind",
+  "restated": ""
+ },
+ {
+  "law": "sh_lt",
+  "target": false,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": ""
+ },
+ {
+  "law": "sh_neg",
+  "target": false,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": ""
+ },
+ {
+  "law": "t03 rotation keeps the length",
+  "target": true,
+  "verdict": "closed",
+  "recipe": "grind",
+  "restated": ""
+ },
+ {
+  "law": "t03 rotating back undoes a rotation",
+  "target": true,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": ""
+ },
+ {
+  "law": "t03 a full turn is the identity",
+  "target": true,
+  "verdict": "closed",
+  "recipe": "(simp_all",
+  "restated": ""
+ },
+ {
+  "law": "pg_slice",
+  "target": false,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": ""
+ },
+ {
+  "law": "pc_cover",
+  "target": false,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": ""
+ },
+ {
+  "law": "t02 pages 1..page_count rebuild the list",
+  "target": true,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": ""
+ },
+ {
+  "law": "t02 a page below 1 is empty",
+  "target": true,
+  "verdict": "closed",
+  "recipe": "grind",
+  "restated": ""
+ },
+ {
+  "law": "gr_rep",
+  "target": false,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": ""
+ },
+ {
+  "law": "gr_two",
+  "target": false,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": ""
+ },
+ {
+  "law": "df_split",
+  "target": false,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": ""
+ },
+ {
+  "law": "t01 decode inverts encode",
+  "target": true,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": ""
+ },
+ {
+  "law": "t01 every count is a single digit",
+  "target": true,
+  "verdict": "not closed",
+  "recipe": "",
+  "restated": ""
+ }
+]

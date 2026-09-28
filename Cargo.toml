@@ -22,7 +22,7 @@ unsafe_code = "forbid"
 
 [package]
 name = "almide"
-version = "0.65.0"
+version = "0.65.1"
 edition = "2024"
 # Runner-class MSRV: the binary embeds the wasmtime 47 host (the commissioned
 # wasm leg). Compiler crates keep their own 1.89 claim via workspace.package.
@@ -89,6 +89,11 @@ embedded-host = ["dep:almide-wasm-run"]
 # no backing OS lock and the compiler never spawns build subprocesses.
 [target.'cfg(any(unix, windows))'.dependencies]
 fs2 = "0.4"
+
+# `almide run` on Windows waits for the program and ignores the console's
+# Ctrl-C itself, which the program also receives (#2809). Unix execs instead.
+[target.'cfg(windows)'.dependencies]
+ctrlc = "3.5"
 
 [dev-dependencies]
 proptest = "1"

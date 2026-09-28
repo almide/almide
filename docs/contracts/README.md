@@ -31,7 +31,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 ≥1 evidence of class ≥ `fixture`.
 
 <!-- counts:generated:start (as of 2026-09-27) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
-368 contracts
+369 contracts
 <!-- counts:generated:end -->
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
@@ -130,7 +130,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-092 | A generic record field is sized by its instantiated type at construction | 0.27.6 | active | fixture | 3 |
 | C-093 | Mutually-recursive variant types compile on both targets | 0.27.6 | active | fixture | 1 |
 | C-094 | A protocol-method UFCS call on an inferred lambda param resolves the element type | 0.27.6 | active | fixture | 1 |
-| C-095 | json.stringify_pretty is byte-identical indented output across targets | 0.27.6 | active | fixture | 1 |
+| C-095 | json.stringify_pretty is byte-identical indented output across targets | 0.27.6 | active | fixture | 2 |
 | C-096 | process.args works on WASM and matches native | 0.27.6 | active | fixture | 1 |
 | C-097 | generic + on a type parameter concatenates strings/lists identically across targets | 0.27.6 | active | fixture | 1 |
 | C-098 | cross-module derived Codec methods dispatch on WASM and match native | 0.27.6 | active | fixture | 0 |
@@ -146,7 +146,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-108 | Unwrap `!` and let-unwrap desugaring byte-match native in every position | 0.27.6 | active | fixture | 7 |
 | C-109 | Self-hosted base64 encode byte-matches canonical / native on the v1 wasm path | 0.27.6 | active | fixture | 1 |
 | C-110 | In-place bytes.push mutation accumulator byte-matches native on v1 wasm | 0.27.6 | active | fixture | 1 |
-| C-111 | Module-level const heap globals initialize and read identically on v1 wasm and native | 0.27.6 | active | fixture | 1 |
+| C-111 | Module-level const heap globals initialize and read identically on v1 wasm and native | 0.27.6 | active | fixture | 2 |
 | C-112 | random.int draws stay in-range identically under the WASI entropy floor on v1 wasm | 0.27.6 | active | fixture | 1 |
 | C-113 | Let-bound ADT/Result variant matched by tag byte-matches native on v1 wasm | 0.27.6 | active | fixture | 1 |
 | C-114 | Matching an Option with a heap payload byte-matches native on v1 wasm | 0.27.6 | active | fixture | 1 |
@@ -170,7 +170,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-132 | mut parameters of reallocating containers persist to the caller at every call position | 0.28.6 | active | fixture | 7 |
 | C-133 | env.get observes the host environment identically on native and wasm | 0.29.0 | active | fixture | 1 |
 | C-134 | Vendored-libm atan / tanh are byte-identical cross-target | 0.30.0 | active | fuzz(3000) | 1 |
-| C-135 | Declared-Unit effect fn ABI agrees between def and every call site | 0.30.0 | active | fixture | 1 |
+| C-135 | Declared-Unit effect fn ABI agrees between def and every call site | 0.30.0 | active | fixture | 2 |
 | C-136 | In-place place mutations persist to the subsequent read on both targets | 0.30.0 | active | fixture | 1 |
 | C-137 | Relative fs paths resolve against the host CWD on wasm | 0.31.0 | active | fixture | 1 |
 | C-138 | ok/err ctor with a stdlib-call payload materializes the real value | 0.31.0 | active | fixture | 1 |
@@ -255,12 +255,12 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-217 | let _ = f() discards the Result — the err does not propagate | 0.55.0 | active | fixture | 1 |
 | C-218 | a heap-payload ?? returned as the fn tail yields the same value on both targets | 0.56.0 | active | fixture | 2 |
 | C-219 | a Never-typed call in a branch arm runs on both targets and sets the exit code | 0.56.0 | active | fixture | 2 |
-| C-220 | fs streaming line walkers fold/each with read_lines line semantics | 0.56.1 | active | fixture | 0 |
+| C-220 | fs streaming line walkers fold/each with read_lines line semantics | 0.56.1 | active | fixture | 1 |
 | C-221 | An effect fn-typed slot admits pure and fallible lambdas with one carrier semantics | 0.56.1 | active | fixture | 4 |
 | C-222 | An expression-nested scalar unwrap propagates the err identically on both legs | 0.56.1 | active | fixture | 1 |
 | C-223 | Matrix transcendentals compute through the vendored musl-libm, not the platform one | 0.56.1 | active | fixture | 7 |
 | C-224 | if let / guard let bind and release heap payloads identically on both targets | 0.56.1 | active | fixture | 1 |
-| C-225 | fs.read_lines materializes a file's lines identically on both targets | 0.56.2 | active | fixture | 1 |
+| C-225 | fs.read_lines materializes a file's lines identically on both targets | 0.56.2 | active | fixture | 2 |
 | C-226 | A mut parameter crossing a call boundary mutates the caller's data on both targets | 0.56.2 | active | fixture | 7 |
 | C-227 | The fs metadata and composition family answers identically on both targets | 0.56.2 | active | fixture | 1 |
 | C-228 | The fs composition family and the matrix row selectors answer identically on both targets | 0.56.2 | active | fixture | 4 |
@@ -402,7 +402,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-364 | A shape outside the scoped fragment is refused at check time, identically on both targets | 0.64.0 | active | fixture | 0 |
 | C-365 | A generic protocol with explicit conformance dispatches to the one declared implementation, identically on both targets | 0.64.0 | active | fixture | 1 |
 | C-366 | http call handle: per-call limits name themselves when they fire, cancel closes the connection, poll never blocks | 0.64.0 | active | fixture | 0 |
-| C-367 | http.serve runs on the embedded wasm lane with native's one-instance, sequential semantics and byte-identical responses | 0.64.0 | active | fixture | 0 |
+| C-367 | http.serve runs on the embedded wasm lane with native's one-instance, sequential semantics and the same status, header set and body | 0.64.0 | active | fixture | 0 |
 | C-368 | http router: a handler is a function, the most specific route answers, a broken table is refused, 404/405/400 come from the router, identically on both targets | 0.64.0 | active | fixture | 0 |
 | C-369 | a lambda's failure channel carries the error type its ! operands agree on; a String channel carries a typed error as its interpolation text, identically on both targets | 0.65.0 | active | fixture | 1 |
 

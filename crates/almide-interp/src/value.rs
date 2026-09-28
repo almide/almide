@@ -118,8 +118,9 @@ impl DynNode {
     /// `value_stringify` byte-for-byte (stdlib/value_core.almd): scalars
     /// rendered directly, Float via Rust's raw `{}` (the native oracle) and
     /// `null` when it is not finite (#2499, C-356),
-    /// strings JSON-quoted with the exact escape set/order (`\` first, then
-    /// quote, newline, CR, tab), arrays/objects comma-joined, no spaces.
+    /// strings JSON-quoted by the one RFC 8259 §7 rule (`\\`, `\"`, `\n`,
+    /// `\r`, `\t`, every other U+0000..U+001F as `\u00xx`; #2802),
+    /// arrays/objects comma-joined, no spaces.
     pub fn to_json(&self) -> String {
         fn quote(s: &str) -> String {
             let mut out = String::with_capacity(s.len() + 2);
@@ -131,6 +132,11 @@ impl DynNode {
                     '\n' => out.push_str("\\n"),
                     '\r' => out.push_str("\\r"),
                     '\t' => out.push_str("\\t"),
+                    // Every other U+0000..U+001F as `\u00xx` (RFC 8259 §7,
+                    // #2802) — runtime value.rs almide_rt_value_json_escape_into.
+                    c if (c as u32) < 0x20 => {
+                        out.push_str(&format!("\\u{:04x}", c as u32));
+                    }
                     other => out.push(other),
                 }
             }
@@ -707,5 +713,32 @@ mod range_last_tests {
         assert_eq!(range_last(i64::MAX - 2, i64::MAX, true), Some(i64::MAX));
         let top = Value::Range { start: i64::MAX - 2, end: i64::MAX, inclusive: true };
         assert_eq!(top.as_iter_items().map(|v| v.len()), Some(3));
+    }
+}
+
+#[cfg(test)]
+mod json_quote_tests {
+    use super::DynNode;
+
+    /// #2802: the interp's JSON quoting is the one RFC 8259 §7 rule — the
+    /// interp cell of the family matrix in tests/json_quote_matrix_test.rs.
+    #[test]
+    fn every_control_character_is_escaped_by_the_one_rule() {
+        for c in (0u32..32).chain([34, 92, 127]) {
+            let ch = char::from_u32(c).expect("scalar");
+            let esc = match c {
+                0x5c => "\\\\".to_string(),
+                0x22 => "\\\"".to_string(),
+                0x0a => "\\n".to_string(),
+                0x0d => "\\r".to_string(),
+                0x09 => "\\t".to_string(),
+                c if c < 0x20 => format!("\\u{c:04x}"),
+                _ => ch.to_string(),
+            };
+            let s = ch.to_string();
+            assert_eq!(DynNode::Str(s.clone()).to_json(), format!("\"{esc}\""), "value {c}");
+            let obj = DynNode::Obj(vec![(s, DynNode::Int(1))]);
+            assert_eq!(obj.to_json(), format!("{{\"{esc}\":1}}"), "key {c}");
+        }
     }
 }

@@ -1,7 +1,7 @@
 # Host-architecture codegen determinism harness (NOT a workspace member — see
-# the root Cargo.toml `exclude`). Compiles one .almd source to WASM bytes using
-# the exact pipeline the browser playground uses (parse → check → lower → mono →
-# codegen(Target::Wasm)). Built BOTH natively and to wasm32-wasip1 by
+# the root Cargo.toml `exclude`). Compiles one .almd source to WASM bytes on the
+# STRUCTURAL leg (`almide::wasm_route`, forced structural — the default
+# `--target wasm` renderer, #2753). Built BOTH natively and to wasm32-wasip1 by
 # scripts/check-host-determinism.sh; the two outputs must be byte-identical.
 #
 # Empty [workspace] makes this its own workspace root so the parent workspace
@@ -19,8 +19,13 @@ name = "wasmgen-harness"
 path = "src/main.rs"
 
 [dependencies]
+# The structural leg through the library route (#2753): `almide::wasm_route`
+# without the embedded host (wasmtime cannot build for wasm32) — the exact
+# dependency shape almide/playground consumes.
+almide = { path = "../..", default-features = false }
+# Only for `pipeline::bundled_self_modules` (the pre-parsed bundled imports a
+# single entry needs when no filesystem resolver runs); no renderer from it.
 almide-mir = { path = "../../crates/almide-mir" }
-wat = "1"
 
 [profile.release]
 opt-level = 2

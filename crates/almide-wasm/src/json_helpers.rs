@@ -25,9 +25,14 @@ fn emit_nonfinite_test(i: &mut wasm_encoder::InstructionSink, v: u32, m_pay: was
     i.i32_or();
 }
 
-/// `$vjson_quote(cursor, str) -> cursor`: '"', the incumbent's exact
-/// 5-escape set (\\ \" \n \r \t — no control-char \u escapes), '"'.
-pub(crate) fn emit_json_quote_helper(frags: JsonFrags) -> Function {
+/// `$vjson_quote(cursor, str) -> cursor` (`ctrl` = Some): '"', the one RFC
+/// 8259 §7 rule every leg shares (#2802; runtime value.rs
+/// almide_rt_value_json_escape_into): \\ \" \n \r \t short escapes, every
+/// OTHER byte < 0x20 as `\u00xx` (lowercase hex), everything else raw, '"'.
+/// `$vrepr_quote` (`ctrl` = None): the same walker without the control
+/// branch — the nested-String repr (`almide_repr_str`), which keeps the
+/// other control bytes raw on every leg.
+pub(crate) fn emit_json_quote_helper(frags: JsonFrags, ctrl: Option<crate::work::CtrlFrags>) -> Function {
     let (cursor, sb, p, end, b) = (0u32, 1u32, 2u32, 3u32, 4u32);
     let mut f = Function::new([(3, ValType::I32)]);
     let mut i = f.instructions();
@@ -48,6 +53,23 @@ pub(crate) fn emit_json_quote_helper(frags: JsonFrags) -> Function {
         frag(&mut i, cursor, fr, 2);
         i.else_();
     }
+    // any other control byte (JSON only): "\u00" + two lowercase hex digits,
+    // each one byte copied out of the pooled "0123456789abcdef" at its nibble.
+    if let Some(ctrl) = ctrl {
+        i.local_get(b).i32_const(0x20).i32_lt_u().if_(BlockType::Empty);
+        frag(&mut i, cursor, ctrl.esc_u00, 4);
+        for shift_or_mask in [None, Some(15)] {
+            i.local_get(cursor)
+                .i32_const(ctrl.hex_digits as i32 + almide_layout::PAYLOAD as i32)
+                .local_get(b);
+            match shift_or_mask {
+                None => i.i32_const(4).i32_shr_u(),
+                Some(m) => i.i32_const(m).i32_and(),
+            };
+            i.i32_add().i32_const(1).call(F_APPEND_COPY).local_set(cursor);
+        }
+        i.else_();
+    }
     // plain byte — a direct store at the PHYSICAL cursor, the room grown
     // first when the byte would leave it (#1826; the guard used to trap).
     i.local_get(cursor).global_get(G_LINE_ROOM).i32_ge_u().if_(BlockType::Empty);
@@ -55,7 +77,7 @@ pub(crate) fn emit_json_quote_helper(frags: JsonFrags) -> Function {
     i.end();
     i.local_get(cursor).global_get(G_LINE_DELTA).i32_add().local_get(b).i32_store8(raw8());
     i.local_get(cursor).i32_const(1).i32_add().local_set(cursor);
-    for _ in 0..5 {
+    for _ in 0..(5 + usize::from(ctrl.is_some())) {
         i.end();
     }
     i.local_get(p).i32_const(1).i32_add().local_set(p);

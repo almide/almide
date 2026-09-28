@@ -820,6 +820,29 @@ jobs:
           fi
           grep -q 'unknown build target' err.txt
 
+      # #2777: the program above compiles no C. What porta and comide ship on
+      # musl pulls a `[native-deps]` crate that does — reqwest over rustls,
+      # whose ring needs musl-gcc. tests/native_musl/tls builds that shape for
+      # x86_64-unknown-linux-musl, checks the binary is static and runs it. The
+      # generated cargo project's target/ is cached, so a PR relinks only the
+      # program. wasmtime on musl is minutes, not seconds: it runs weekly in
+      # native-musl.yml, with this gate's --selftest.
+      - name: Cache the native-deps musl project (tests/native_musl/tls)
+        uses: actions/cache@v6
+        with:
+          path: /tmp/native-musl-tls/target
+          key: native-musl-tls-${{ runner.os }}-${{ hashFiles('tests/native_musl/tls/almide.toml') }}
+      - name: Native-deps crate builds for musl (reqwest + rustls/ring, static — #2777)
+        env:
+          ALMIDE_BIN: /tmp/almide-bin/almide
+          ALMIDE_RUN_PROJECT_DIR: /tmp/native-musl-tls
+        run: |
+          start=$(date +%s)
+          sudo apt-get install -y --no-install-recommends musl-tools
+          echo "musl-tools install: $(( $(date +%s) - start ))s"
+          bash scripts/check-native-musl.sh tests/native_musl/tls
+          echo "step wall time: $(( $(date +%s) - start ))s"
+
   test-arm:
     name: Test ARM (NEON, Apple Silicon)
     needs: changes
@@ -1064,10 +1087,12 @@ jobs:
             ~/.cargo/git
             tools/wasmgen-harness/target
             tools/wasmgen-harness-uu/target
-          # Keyed on the LIVE wasm emitter (almide-mir's v1 renderer) — the old
-          # key hashed crates/almide-codegen/src/emit_wasm/**, deleted with the
-          # v0 retirement, so that component silently hashed nothing (#992).
-          key: wasmgen-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-mir/src/**', 'crates/almide-codegen/src/lib.rs', 'crates/almide-codegen/src/pass.rs') }}
+          # Keyed on the LIVE wasm emitter — the structural leg the harnesses
+          # drive since #2753 (crates/almide-wasm, almide-wasi, the route and
+          # front in src/wasm_*.rs) plus almide-mir, whose
+          # bundled_self_modules they still call. A key that hashes a retired
+          # emitter silently hashes nothing (#992: the v0 emit_wasm/** key).
+          key: wasmgen-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-wasm/src/**', 'crates/almide-wasi/src/**', 'src/wasm_route.rs', 'src/wasm_leg.rs', 'crates/almide-mir/src/**', 'crates/almide-codegen/src/lib.rs', 'crates/almide-codegen/src/pass.rs') }}
           restore-keys: wasmgen-${{ env.RUST_TOOLCHAIN }}-
 
       - name: Cache wasmtime tarball
@@ -1150,14 +1175,16 @@ jobs:
             ~/.cargo/git
             tools/wasmgen-harness/target
             tools/wasmgen-harness-uu/target
-          # Keyed on the LIVE wasm emitter (almide-mir's v1 renderer) — the old
-          # key hashed crates/almide-codegen/src/emit_wasm/**, deleted with the
-          # v0 retirement, so that component silently hashed nothing (#992).
+          # Keyed on the LIVE wasm emitter — the structural leg the harnesses
+          # drive since #2753 (crates/almide-wasm, almide-wasi, the route and
+          # front in src/wasm_*.rs) plus almide-mir, whose
+          # bundled_self_modules they still call. A key that hashes a retired
+          # emitter silently hashes nothing (#992: the v0 emit_wasm/** key).
           # DISTINCT from the host job's key: both jobs cache the same paths, and
           # two jobs saving one key makes the second save fail as a duplicate. The
           # browser leg is also the only one that populates wasmgen-harness-uu, so a
           # shared entry would be written by whichever job finished first.
-          key: wasmgen-uu-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-mir/src/**', 'crates/almide-codegen/src/lib.rs', 'crates/almide-codegen/src/pass.rs') }}
+          key: wasmgen-uu-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-wasm/src/**', 'crates/almide-wasi/src/**', 'src/wasm_route.rs', 'src/wasm_leg.rs', 'crates/almide-mir/src/**', 'crates/almide-codegen/src/lib.rs', 'crates/almide-codegen/src/pass.rs') }}
           restore-keys: wasmgen-uu-${{ env.RUST_TOOLCHAIN }}-
 
       - name: Cache wasmtime tarball
@@ -2248,15 +2275,30 @@ jobs:
   # surviving mutant or a no-longer-applying patch is red (refresh, never
   # retire).
   #
-  # #1619: PR runs are INCREMENTAL — only mutants whose patched files (or
-  # patch file, or the shared killer infrastructure) intersect the PR's
-  # change set run, so most PRs finish in seconds instead of ~45 min. The
-  # FULL 40-mutant sweep lives in mutation-sweep.yml (develop pushes in an
-  # uncancelable concurrency group + nightly), where it actually completes —
-  # under ci.yml's cancel-in-progress group the develop sweep was routinely
-  # canceled mid-run, which is standing evidence that never lands. Push
-  # events therefore skip this job entirely (skipped = success for the
-  # required-check, and the sweep workflow owns the push-side evidence).
+  # The PR / develop split (#1619, #2814):
+  #   PR (this job) — INCREMENTAL scope: only mutants whose patched files (or
+  #     patch file, or the killer suites' own inputs — see the script's INFRA
+  #     rule) intersect the PR's change set. Within that scope the mutants
+  #     inside a function the diff changed run first, each net run tries the
+  #     recorded killer suite first, and a 28-min budget stops STARTING
+  #     mutants before the job cap. A budget stop is not a pass and not a
+  #     cancellation: the log, a ::warning:: and the step summary say
+  #     "PARTIAL: ran N of M in-scope mutants; the rest are judged by
+  #     mutation-sweep on develop", naming each deferred mutant.
+  #   develop (mutation-sweep.yml) — the FULL sweep, no budget, 4 shards, in
+  #     an uncancelable concurrency group + nightly. That is the standing
+  #     evidence and the only run that stamps proofs/mutation-score.toml —
+  #     under ci.yml's cancel-in-progress group the develop sweep was
+  #     routinely canceled mid-run, which is standing evidence that never
+  #     lands. Push events therefore skip this job entirely (skipped =
+  #     success for the required-check).
+  # #2814 measured the gap this closes: every wasm PR regenerates the golden
+  # baselines under crates/almide-wasm/tests/golden/, which the old rule read
+  # as killer infrastructure, so #2805 / #2806 ran all 41 mutants (~80 s
+  # each after a ~7-min cold build) and were cancelled at the 45-min cap
+  # with 31 / 32 caught and none survived. Measured after the fix, on a probe
+  # with #2805's file set: 5 in scope, 5 caught, 12m44s. A full-scope run (a
+  # change to the runner itself) stopped at "PARTIAL: ran 14 of 41" in 26m42s.
   commissioned-mutation-gate:
     name: Commissioned mutation gate (the net keeps its teeth)
     needs: changes
@@ -2282,9 +2324,10 @@ jobs:
         with:
           shared-key: ci-build-${{ env.RUST_TOOLCHAIN }}
           save-if: false
-      - name: in-scope mutants must be caught (full sweep lives in mutation-sweep.yml)
+      - name: in-scope mutants must be caught (budgeted; full sweep lives in mutation-sweep.yml)
         run: |
           git fetch -q origin "${{ github.base_ref }}"
           ALMIDE_MUTATION_SCOPE=incremental \
           ALMIDE_MUTATION_BASE="origin/${{ github.base_ref }}" \
+          ALMIDE_MUTATION_BUDGET_SECS=1680 \
             bash scripts/check-mutation-gate.sh

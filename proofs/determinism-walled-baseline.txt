@@ -1,0 +1,27 @@
+# DETERMINISM WALL LEDGER (#2753): the spec/wasm_cross fixtures the STRUCTURAL
+# leg declines, shared by scripts/check-host-determinism.sh and
+# scripts/check-browser-determinism.sh. Both gates drive the structural leg
+# forced (`almide::wasm_route::render_wasm_routed` with force_structural, the
+# renderer `--target wasm` ships by default), so a row here is a fixture whose
+# host-/browser-ABI reproducibility is NOT measured today.
+#
+#   fixture :: structural decline :: cause issue
+#
+# EQUALITY-PINNED, shrink-only to 0:
+#   - a fixture that walls without a row fails (coverage shrank — fix the
+#     decline, or add the row consciously in the same change);
+#   - a row whose fixture now emits fails as STALE (delete the row in the PR
+#     that fixed the decline, and lower MAX_WALLED in both scripts with it).
+#
+# Measured 2026-09-28 on origin/develop 76e48de5b with the native harness:
+# 797 emitted + 5 walled of 802. Every row is a fixture the INCUMBENT renders
+# and the determinism gates byte-compared until they moved off it: these five
+# lost their reproducibility measurement in the move. Each is also a
+# proofs/incumbent-route-baseline.txt build row, and closes with its cause
+# issue under #2739. (The incumbent's own ceiling was MAX_WALLED=30 — 30
+# fixtures IT refused, which the structural leg now all measures.)
+fan_arm_unwrap_or.almd :: bind:unmapped :: #2746
+fan_map_nested_combinators.almd :: bind:unmapped :: #2746
+fan_map_parallel_scalar.almd :: bind:unmapped :: #2746
+fs_call_head_family.almd :: call:fs.fold_lines_range :: #2744
+inplace_clear_alias_field.almd :: string-clear-nonvar :: #2747

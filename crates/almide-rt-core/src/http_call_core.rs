@@ -185,25 +185,25 @@ enum HttpCallFraming {
     UntilClose,
 }
 
-/// Move the decoded body bytes out of `raw` into `out`; `true` once the body
-/// is complete by its own framing.
-fn http_call_decode(f: &mut HttpCallFraming, raw: &mut Vec<u8>, out: &mut Vec<u8>) -> bool {
+/// Move the decoded body bytes out of `raw` into `out`; `Ok(true)` once the
+/// body is complete by its own framing, `Err` on a malformed chunk size.
+fn http_call_decode(f: &mut HttpCallFraming, raw: &mut Vec<u8>, out: &mut Vec<u8>) -> Result<bool, String> {
     match f {
         HttpCallFraming::Length(left) => {
             let take = (*left).min(raw.len());
             out.extend(raw.drain(..take));
             *left -= take;
-            *left == 0
+            Ok(*left == 0)
         }
         HttpCallFraming::UntilClose => {
             out.append(raw);
-            false
+            Ok(false)
         }
         HttpCallFraming::Chunked { remaining, awaiting_size } => loop {
             if !*awaiting_size && *remaining == 0 {
                 // The CRLF that closes a chunk's data.
                 if raw.len() < 2 {
-                    return false;
+                    return Ok(false);
                 }
                 if raw.starts_with(b"\r\n") {
                     raw.drain(..2);
@@ -212,13 +212,12 @@ fn http_call_decode(f: &mut HttpCallFraming, raw: &mut Vec<u8>, out: &mut Vec<u8
             }
             if *awaiting_size {
                 let Some(nl) = raw.windows(2).position(|w| w == b"\r\n") else {
-                    return false;
+                    return Ok(false);
                 };
-                let size_line = String::from_utf8_lossy(&raw[..nl]).into_owned();
-                let size = usize::from_str_radix(size_line.split(';').next().unwrap_or("").trim(), 16).unwrap_or(0);
+                let size = http_chunk_size(&raw[..nl])?;
                 raw.drain(..nl + 2);
                 if size == 0 {
-                    return true;
+                    return Ok(true);
                 }
                 *remaining = size;
                 *awaiting_size = false;
@@ -227,31 +226,32 @@ fn http_call_decode(f: &mut HttpCallFraming, raw: &mut Vec<u8>, out: &mut Vec<u8
             out.extend(raw.drain(..take));
             *remaining -= take;
             if *remaining > 0 {
-                return false;
+                return Ok(false);
             }
         },
     }
 }
 
 /// Split the head off `raw` once it is whole: status, reason, header lines
-/// (wire order, repeats kept — the `request_response` rule) and framing.
-fn http_call_parse_head(raw: &mut Vec<u8>) -> Option<(AlmideHttpCallHead, HttpCallFraming)> {
-    let idx = raw.windows(4).position(|w| w == b"\r\n\r\n")?;
-    let section = String::from_utf8_lossy(&raw[..idx]).into_owned();
-    raw.drain(..idx + 4);
-    let mut lines = section.lines();
-    let status_line = lines.next().unwrap_or("");
-    let status: i64 = status_line.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+/// (wire order, repeats kept — the `request_response` rule) and framing. A
+/// 1xx interim head (`100 Continue`) is dropped and the next one awaited
+/// (#2824); a head past `HTTP_MAX_HEAD_BYTES` is an error.
+fn http_call_parse_head(raw: &mut Vec<u8>) -> Result<Option<(AlmideHttpCallHead, HttpCallFraming)>, String> {
+    let (section, status) = loop {
+        let Some(idx) = raw.windows(4).position(|w| w == b"\r\n\r\n") else {
+            return if raw.len() > HTTP_MAX_HEAD_BYTES { Err(http_head_too_large()) } else { Ok(None) };
+        };
+        let status = http_status_of(&raw[..idx]);
+        let section = String::from_utf8_lossy(&raw[..idx]).into_owned();
+        raw.drain(..idx + 4);
+        if !http_is_interim(status) {
+            break (section, status);
+        }
+    };
+    let status_line = section.lines().next().unwrap_or("");
     let reason = status_line.splitn(3, ' ').nth(2).unwrap_or("").to_string();
-    let headers: Vec<(String, String)> = lines
-        .filter_map(|line| {
-            let (k, v) = line.split_once(':')?;
-            Some((k.trim().to_string(), v.trim().to_string()))
-        })
-        .collect();
-    let chunked = headers
-        .iter()
-        .any(|(k, v)| k.eq_ignore_ascii_case("transfer-encoding") && v.to_ascii_lowercase().contains("chunked"));
+    let headers = http_head_fields(&section);
+    let chunked = http_fields_chunked(&headers);
     let length = headers
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
@@ -261,7 +261,7 @@ fn http_call_parse_head(raw: &mut Vec<u8>) -> Option<(AlmideHttpCallHead, HttpCa
         (false, Some(n)) => HttpCallFraming::Length(n),
         (false, None) => HttpCallFraming::UntilClose,
     };
-    Some((AlmideHttpCallHead { status, reason, headers }, framing))
+    Ok(Some((AlmideHttpCallHead { status, reason, headers }, framing)))
 }
 
 /// The socket timeout for the next blocking step: the idle limit (reads
@@ -304,30 +304,20 @@ fn http_call_run(
     body: &str,
     headers: &[(String, String)],
 ) -> Result<(), String> {
-    let (is_https, host, port, path) = parse_url(url)?;
-    let addrs: Vec<std::net::SocketAddr> = std::net::ToSocketAddrs::to_socket_addrs(&(host.as_str(), port))
-        .map_err(|e| http_call_io_error(sh, &e, "connection"))?
-        .collect();
-    let mut last_err: Option<std::io::Error> = None;
-    let mut stream: Option<TcpStream> = None;
-    for addr in addrs {
-        let dialed = match http_call_step_timeout(sh, false)? {
-            Some(t) => TcpStream::connect_timeout(&addr, t),
-            None => TcpStream::connect(addr),
-        };
-        match dialed {
-            Ok(s) => {
-                stream = Some(s);
-                break;
-            }
-            Err(e) => last_err = Some(e),
-        }
-    }
-    let stream = match (stream, last_err) {
-        (Some(s), _) => s,
-        (None, Some(e)) => return Err(http_call_io_error(sh, &e, "connection")),
-        (None, None) => return Err(format!("connection failed: no address for {}", host)),
-    };
+    let u = http_prepare(method, url, headers)?;
+    // The dial (origin or proxy, #2819) is bounded by the wall clock: each
+    // address gets what is left of it, and the proxy handshakes read under
+    // the same clipped timeout.
+    let (stream, route) = http_open_route(&u, &mut |host, port| {
+        let left = || http_call_step_timeout(sh, false).unwrap_or(Some(std::time::Duration::from_millis(1)));
+        let s = http_dial(host, port, &left).map_err(|e| http_call_io_error(sh, &e, "connection"))?;
+        let t = http_call_step_timeout(sh, false)?;
+        s.set_read_timeout(t).ok();
+        s.set_write_timeout(t).ok();
+        Ok(s)
+    })
+    .map_err(|e| if sh.past_deadline() { http_call_total_msg(sh.total_ms) } else { e })?;
+    let request = http_request_bytes(method, &u, &route, body, headers);
     // The control copy is what `cancel` shuts down. The timeouts go on the
     // socket that is READ (`AlmideHttpCallSock::tcp`), never on this copy: on
     // Windows `try_clone` is WSADuplicateSocket, and SO_RCVTIMEO set through
@@ -342,19 +332,23 @@ fn http_call_run(
         }
         st.socket = Some(ctl.try_clone().map_err(|e| format!("connection failed: {}", e))?);
     }
-    if is_https {
+    if u.https {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let mut tls = make_tls_stream(&host, stream)?;
-            http_call_pump(sh, &mut tls, method, &host, &path, body, headers)
+            // The handshake reads under the idle limit, clipped to the clock.
+            stream.set_read_timeout(http_call_step_timeout(sh, true)?).ok();
+            let mut tls = make_tls_stream(&u.host, stream)
+                .map_err(|e| if sh.past_deadline() { http_call_total_msg(sh.total_ms) } else { e })?;
+            http_call_pump(sh, &mut tls, &request)
         }
         #[cfg(target_arch = "wasm32")]
         {
+            let _ = (stream, request);
             Err("HTTPS is not supported on WASM target".to_string())
         }
     } else {
         let mut s = stream;
-        http_call_pump(sh, &mut s, method, &host, &path, body, headers)
+        http_call_pump(sh, &mut s, &request)
     }
 }
 
@@ -377,19 +371,10 @@ impl AlmideHttpCallSock for rustls::StreamOwned<rustls::ClientConnection, TcpStr
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn http_call_pump<S: AlmideHttpCallSock>(
-    sh: &AlmideHttpCallShared,
-    s: &mut S,
-    method: &str,
-    host: &str,
-    path: &str,
-    body: &str,
-    headers: &[(String, String)],
-) -> Result<(), String> {
+fn http_call_pump<S: AlmideHttpCallSock>(sh: &AlmideHttpCallShared, s: &mut S, request: &[u8]) -> Result<(), String> {
     s.tcp().set_write_timeout(http_call_step_timeout(sh, false)?).ok();
-    if let Err(e) = http_write_request(s, method, host, path, body, headers) {
-        return Err(if sh.past_deadline() { http_call_total_msg(sh.total_ms) } else { e });
+    if let Err(e) = s.write_all(request) {
+        return Err(if sh.past_deadline() { http_call_total_msg(sh.total_ms) } else { format!("write failed: {}", e) });
     }
     let mut raw: Vec<u8> = Vec::new();
     let mut framing: Option<HttpCallFraming> = None;
@@ -418,7 +403,7 @@ fn http_call_pump<S: AlmideHttpCallSock>(
         }
         raw.extend_from_slice(&buf[..n]);
         if framing.is_none() {
-            let Some((head, f)) = http_call_parse_head(&mut raw) else {
+            let Some((head, f)) = http_call_parse_head(&mut raw)? else {
                 continue;
             };
             let mut st = sh.lock();
@@ -429,7 +414,7 @@ fn http_call_pump<S: AlmideHttpCallSock>(
             framing = Some(f);
         }
         let mut decoded = Vec::new();
-        let complete = http_call_decode(framing.as_mut().expect("framing is set"), &mut raw, &mut decoded);
+        let complete = http_call_decode(framing.as_mut().expect("framing is set"), &mut raw, &mut decoded)?;
         {
             let mut st = sh.lock();
             if st.outcome.is_some() {
@@ -462,7 +447,7 @@ pub fn http_call_spawn(
             total_ms, idle_ms
         ));
     }
-    parse_url(url)?;
+    http_prepare(method, url, &headers)?;
     let shared = std::sync::Arc::new(AlmideHttpCallShared {
         state: std::sync::Mutex::new(AlmideHttpCallState {
             head: None,

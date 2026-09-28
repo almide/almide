@@ -1,0 +1,1 @@
+wasm answer 42

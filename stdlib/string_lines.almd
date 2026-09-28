@@ -1,5 +1,5 @@
 // string_lines — SELF-HOSTED `string.lines` for v1 over the prim floor + Machinery 2. Rust
-// `s.lines()`: split on '\n', strip a trailing '\r' from each line, and DROP a final empty
+// `s.lines()`: split on '\n', strip the '\r' of each "\r\n" pair (a bare '\r' is kept), and DROP a final empty
 // line if `s` ends with '\n' ("a\nb\n" and "a\nb" yield the SAME ["a","b"]; ""→[], "\n"→[""]).
 // Line count = #'\n' + (1 if s is non-empty and its last byte is NOT '\n'). Source borrowed.
 fn __count_nl(sh: Int, slen: Int, i: Int, acc: Int) -> Int = if i >= slen then acc
@@ -25,8 +25,10 @@ else {
   else __find_nl(sh, slen, from + 1)
 }
 
-// The line's end byte index: the '\n' position, less one if a '\r' precedes it.
-fn __strip_cr(sh: Int, from: Int, nl: Int) -> Int = if nl <= from then nl
+// The line's end byte index: the '\n' position, less one if a '\r' precedes it. Only a
+// TERMINATED line loses its '\r' — `str::lines` strips "\r\n", never a bare '\r': the final
+// unterminated line (nl == slen) keeps a trailing '\r' ("abc\r" → ["abc\r"], #2813).
+fn __strip_cr(sh: Int, slen: Int, from: Int, nl: Int) -> Int = if nl <= from or nl >= slen then nl
 else {
   let pb = prim.load8(sh + 12 + nl - 1)
   if pb == 13 then nl - 1 else nl
@@ -48,7 +50,7 @@ fn __lntake(sh: Int, start: Int, n: Int) -> String = {
 fn __lines_fill(lh: Int, sh: Int, slen: Int, from: Int, idx: Int, total: Int) -> Int = if idx >= total then idx
 else {
   let nl = __find_nl(sh, slen, from)
-  let endp = __strip_cr(sh, from, nl)
+  let endp = __strip_cr(sh, slen, from, nl)
   let piece = __lntake(sh, from, endp - from)
   prim.store_str(lh + 12 + idx * 8, piece)
   __lines_fill(lh, sh, slen, nl + 1, idx + 1, total)

@@ -985,7 +985,8 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_FUZZ_HOST_ORACLE` | harness | run the differential fuzz in host-oracle mode (arm selection is deterministic per seed and mode) |
 | `ALMIDE_FUZZ_ITERS=value` | harness | how many seeds the differential fuzz's fixed range covers (default 200) |
 | `ALMIDE_HEAP_TRACE` | debug | print the interpreter's heap-block allocations and frees |
-| `ALMIDE_HTTP_TIMEOUT_SECS=value` | runtime | the http client's request timeout in seconds, read by the compiled program (default 30) |
+| `ALMIDE_HTTP_MAX_RESPONSE_BYTES=value` | runtime | the http client's cap on a buffered response in bytes, read by the compiled program (default 1 GiB; 0 = no cap, #2825) |
+| `ALMIDE_HTTP_TIMEOUT_SECS=value` | runtime | the http client's connect and read timeout in seconds, read by the compiled program (default 30; 0 = none) |
 | `ALMIDE_INSTALL=value` | tool | the directory `almide install` installs binaries into (overrides the default `~/.local/bin`) |
 | `ALMIDE_INTERP_SWEEP_THREADS=value` | harness | interp sweep thread count; 1 = serial (#2381) |
 | `ALMIDE_IR_FAULT=value` | harness | inject an IR violation after the named optimiser pass, so the per-pass verifier can be watched turning red in the release binary |
@@ -997,6 +998,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_MONO_DEBUG` | debug | print the monomorphisation discovery and instantiation decisions |
 | `ALMIDE_MP_PROBE` | debug | print the mut-param analysis decisions (IR) |
 | `ALMIDE_MUTATION_BASE=value` | ci | the base ref the mutation gate diffs against |
+| `ALMIDE_MUTATION_BUDGET_SECS=value` | ci | the mutation gate's time budget in seconds: past it no new mutant starts and the rest are named as deferred (0 / unset = none) |
 | `ALMIDE_MUTATION_SCOPE=value` | ci | which mutation set the mutation gate runs |
 | `ALMIDE_MUTATION_SHARD=value` | ci | this job's shard index of the mutation gate |
 | `ALMIDE_MUTATION_SHARDS=value` | ci | how many shards the mutation gate is split into |

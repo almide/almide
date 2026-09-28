@@ -100,6 +100,7 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
 }
 
 mod bytes;
+pub mod decline_site;
 mod imports;
 mod param_borrow;
 mod bytes_rw;
@@ -618,20 +619,20 @@ pub(crate) enum TableEntry {
 
 #[derive(Clone)]
 pub(crate) struct LiftedLambda {
+    /// A #1627 synthetic initializer's top-let: the name its walls report.
+    pub(crate) site_name: Option<String>,
     pub(crate) params: Vec<(VarId, SliceTy)>,
     pub(crate) ret: Option<SliceTy>,
     pub(crate) effect_raw: Option<SliceTy>,
     pub(crate) body: IrExpr,
-    /// Captured outer locals: (var, type, closure-block payload offset).
-    /// The lifted fn's prelude loads each from the env param (raw param
-    /// slot 0) into a fresh local — by-value snapshot semantics.
+    /// Captured outer locals: (var, type, closure-block payload offset). The lifted
+    /// fn's prelude loads each from env (raw param 0) into a fresh local — a snapshot.
     pub(crate) captures: Vec<(VarId, SliceTy, u32, bool)>,
     /// The variable space the body's VarIds index (the lifting fn's own
     /// space — a lambda inside a module fn reads module-space globals).
     pub(crate) var_space: u32,
-    /// The module whose bare Named calls the body resolves first: the
-    /// creating fn's module for a real lambda (`None` from an entry fn),
-    /// and the owning module for the #1627 synthetic initializer entries.
+    /// The module whose bare Named calls the body resolves first: the creating fn's
+    /// (`None` from an entry fn), or the owning module for #1627 initializer entries.
     pub(crate) cur_module: Option<String>,
     /// Closure hops charge one meter unit at entry; a #1627 synthetic
     /// initializer does NOT — its call is a lowering artifact, and native

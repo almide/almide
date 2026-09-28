@@ -31,4 +31,19 @@ effect fn main() -> Unit = {
     ok(_) => println("badurl:unexpected-ok"),
     err(e) => println("badurl:${e}"),
   }
+  // #2821 / #2822: an unsupported scheme, an out-of-range port and a CR/LF
+  // in a header value are refused before any dial, with the same text on
+  // both lanes (the frame carries the CR/LF to the host intact).
+  match http.get_bytes("ftp://127.0.0.1:1/") {
+    ok(_) => println("scheme:unexpected-ok"),
+    err(e) => println("scheme:${e}"),
+  }
+  match http.get_status("http://127.0.0.1:99999/") {
+    ok(_) => println("port:unexpected-ok"),
+    err(e) => println("port:${e}"),
+  }
+  match http.request("GET", "http://127.0.0.1:1/x", "", ["X-A": "1\r\nX-B: 2"]) {
+    ok(_) => println("inject:unexpected-ok"),
+    err(e) => println("inject:${e}"),
+  }
 }

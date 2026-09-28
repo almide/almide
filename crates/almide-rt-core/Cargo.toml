@@ -11,6 +11,18 @@ description = "Prelude-independent native runtime cores shared between the splic
 # projects and the embedded host carry.
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 webpki-roots = "1.0"
+# The platform trust store and SSL_CERT_FILE / SSL_CERT_DIR (#2820), added to
+# the webpki roots. rustls-org crate, the one reqwest (rustls-tls-native-roots),
+# hyper-rustls and ureq use; its only deps are pki-types (already here) plus
+# openssl-probe (Linux/BSD), security-framework (macOS) or schannel (Windows) —
+# pure Rust on musl.
+rustls-native-certs = "0.8"
+
+[dev-dependencies]
+# Test-only: the audit tests (tests/http_client_audit.rs) mint a throwaway CA
+# and leaf so SSL_CERT_FILE / SSL_CERT_DIR are exercised against a CA that
+# exists nowhere else (#2820). Same ring backend the client uses.
+rcgen = { version = "0.13", default-features = false, features = ["crypto", "pem", "ring"] }
 
 [lints]
 workspace = true

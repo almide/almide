@@ -3,8 +3,19 @@
 //! runner executes it: this driver starts it with `almide run` natively and
 //! with `almide run --target wasm` (the embedded almide.* host), waits for
 //! its "ready" line on stderr, replays ONE request script against each and
-//! requires the raw response bytes and the stderr transcript to be
-//! byte-identical. Two more properties ride along:
+//! compares what C-367 promises (ADR-0020 §7.1, #2700), not the raw bytes:
+//!
+//! - each response's status code, header set and de-framed body. The header
+//!   set is the (name, value) pairs with names ASCII-case-insensitive, fields
+//!   of different names unordered and fields of one name in their relative
+//!   order (RFC 9110 §5.3); the host-managed fields `date`, `connection`,
+//!   `keep-alive`, `transfer-encoding` and `content-length` are left out, and
+//!   the reason phrase is not compared (hyper writes `418 I'm a teapot` where
+//!   the native core writes `418 OK`, measured by the #2659 prototype);
+//! - the stderr transcripts as multisets of lines: the order of lines across
+//!   requests is not promised.
+//!
+//! Two more properties ride along:
 //!
 //! - one instance per run: `/boot` answers a random draw main made once and
 //!   the handler captured — two requests of one run must see the same value
@@ -14,6 +25,7 @@
 
 #![cfg(unix)]
 
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::process::CommandExt;
@@ -66,8 +78,8 @@ fn start(wasm: bool, port: u16) -> Child {
         c.args(["--target", "wasm"]);
     }
     c.arg("--").arg(port.to_string());
-    // Own process group: `almide run` spawns the native binary as a child,
-    // and the kill below must take the whole tree.
+    // Own process group: the kill below must take the whole tree (the wasm
+    // lane and a Windows-style launcher are not one process with the program).
     c.process_group(0).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     c.spawn().expect("almide runs")
 }
@@ -104,6 +116,97 @@ fn ask(port: u16, raw: &[u8]) -> Vec<u8> {
     out
 }
 
+/// A response as C-367 observes it. Two responses answer the same exactly
+/// when their `Observed` values are equal.
+#[derive(Debug, PartialEq, Eq)]
+struct Observed {
+    status: u16,
+    /// Lowercased name → values in wire order. The map drops the order
+    /// between different names; the Vec keeps the order within one name.
+    headers: BTreeMap<String, Vec<String>>,
+    body: Vec<u8>,
+}
+
+/// The fields a host manages: the framing and the connection's lifetime.
+const HOST_FIELDS: &[&str] = &["date", "connection", "keep-alive", "transfer-encoding", "content-length"];
+
+/// Parses one HTTP/1.1 response read to the connection's close.
+fn observe(raw: &[u8]) -> Result<Observed, String> {
+    let cut = raw.windows(4).position(|w| w == b"\r\n\r\n").ok_or("no end of the response head")?;
+    let head = std::str::from_utf8(&raw[..cut]).map_err(|e| format!("the head is not UTF-8: {e}"))?;
+    let rest = &raw[cut + 4..];
+    let mut lines = head.split("\r\n");
+    let status_line = lines.next().unwrap_or_default();
+    // `HTTP/1.1 <status> <reason>`: the reason phrase is the host's.
+    let mut parts = status_line.splitn(3, ' ');
+    let version = parts.next().unwrap_or_default();
+    if !version.starts_with("HTTP/") {
+        return Err(format!("not a status line: {status_line:?}"));
+    }
+    let status = parts
+        .next()
+        .and_then(|c| (c.len() == 3).then_some(c).and_then(|c| c.parse::<u16>().ok()))
+        .ok_or_else(|| format!("no status code in {status_line:?}"))?;
+    let mut headers: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut length = None;
+    let mut chunked = false;
+    for line in lines {
+        let (name, value) = line.split_once(':').ok_or_else(|| format!("a header line without a colon: {line:?}"))?;
+        let name = name.to_ascii_lowercase();
+        let value = value.trim_matches([' ', '\t']).to_string();
+        match name.as_str() {
+            "content-length" => length = Some(value.parse::<usize>().map_err(|e| format!("content-length {value:?}: {e}"))?),
+            "transfer-encoding" => chunked |= value.to_ascii_lowercase().split(',').any(|c| c.trim() == "chunked"),
+            _ => {}
+        }
+        if !HOST_FIELDS.contains(&name.as_str()) {
+            headers.entry(name).or_default().push(value);
+        }
+    }
+    let body = if chunked {
+        dechunk(rest)?
+    } else if let Some(n) = length {
+        rest.get(..n).ok_or_else(|| format!("content-length {n} but {} body bytes", rest.len()))?.to_vec()
+    } else {
+        rest.to_vec()
+    };
+    Ok(Observed { status, headers, body })
+}
+
+/// Decodes a chunked body (RFC 9112 §7.1); trailers are ignored.
+fn dechunk(mut rest: &[u8]) -> Result<Vec<u8>, String> {
+    let mut body = Vec::new();
+    loop {
+        let eol = rest.windows(2).position(|w| w == b"\r\n").ok_or("a chunk size line without CRLF")?;
+        let line = std::str::from_utf8(&rest[..eol]).map_err(|e| format!("chunk size: {e}"))?;
+        let size = line.split(';').next().unwrap_or_default().trim();
+        let n = usize::from_str_radix(size, 16).map_err(|e| format!("chunk size {size:?}: {e}"))?;
+        rest = &rest[eol + 2..];
+        if n == 0 {
+            return Ok(body);
+        }
+        body.extend_from_slice(rest.get(..n).ok_or("a chunk shorter than its size")?);
+        rest = rest.get(n..).and_then(|r| r.strip_prefix(b"\r\n")).ok_or("a chunk without its CRLF")?;
+    }
+}
+
+/// C-367's response comparison: `Ok` when the two answer the same.
+fn same_answer(a: &[u8], b: &[u8]) -> Result<(), String> {
+    let (a, b) = (observe(a)?, observe(b)?);
+    if a == b {
+        Ok(())
+    } else {
+        Err(format!("{a:?}\n  vs\n{b:?}"))
+    }
+}
+
+/// The stderr transcript as a multiset of lines.
+fn line_multiset(s: &str) -> Vec<&str> {
+    let mut lines: Vec<&str> = s.lines().collect();
+    lines.sort_unstable();
+    lines
+}
+
 struct Run {
     responses: Vec<Vec<u8>>,
     boots: Vec<Vec<u8>>,
@@ -138,7 +241,7 @@ fn replay(wasm: bool) -> Run {
 
 #[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
 #[test]
-fn http_serve_answers_byte_identically_on_native_and_the_embedded_lane() {
+fn http_serve_answers_the_same_status_headers_and_body_on_native_and_the_embedded_lane() {
     let native = replay(false);
     let wasm = replay(true);
     // The script's own shape, so an empty answer on both legs cannot pass.
@@ -150,16 +253,20 @@ fn http_serve_answers_byte_identically_on_native_and_the_embedded_lane() {
         String::from_utf8_lossy(&native.responses[7])
     );
     assert!(native.responses[9].ends_with(b"\r\n\r\ntrue true"), "{:?}", String::from_utf8_lossy(&native.responses[9]));
+    assert_eq!(native.responses.len(), wasm.responses.len());
     for (i, (n, w)) in native.responses.iter().zip(&wasm.responses).enumerate() {
-        assert_eq!(
-            String::from_utf8_lossy(n),
-            String::from_utf8_lossy(w),
-            "request {i} ({:?}) answered differently",
-            String::from_utf8_lossy(&SCRIPT[i][..SCRIPT[i].len().min(40)])
-        );
-        assert_eq!(n, w, "request {i}: bytes differ");
+        if let Err(diff) = same_answer(n, w) {
+            panic!(
+                "request {i} ({:?}) answered differently:\n{diff}\nnative: {:?}\nwasm:   {:?}",
+                String::from_utf8_lossy(&SCRIPT[i][..SCRIPT[i].len().min(40)]),
+                String::from_utf8_lossy(n),
+                String::from_utf8_lossy(w)
+            );
+        }
     }
-    assert_eq!(native.stderr, wasm.stderr, "the stderr transcripts differ");
+    // Every request left its line: an empty transcript on both legs cannot pass.
+    assert_eq!(native.stderr.lines().filter(|l| l.starts_with("GET ") || l.starts_with("POST ") || l.starts_with("DELETE ")).count(), SCRIPT.len() + 2, "{:?}", native.stderr);
+    assert_eq!(line_multiset(&native.stderr), line_multiset(&wasm.stderr), "the stderr transcripts hold different lines");
     for run in [&native, &wasm] {
         assert_eq!(run.boots[0], run.boots[1], "one run answered two different draws: not one instance");
         assert!(!run.boots[0].is_empty());
@@ -221,4 +328,428 @@ fn a_bind_failure_aborts_identically_on_native_and_the_embedded_lane() {
     }
     let _ = std::fs::remove_dir_all(&dir);
     drop(held);
+}
+
+// ── What the core answers itself (#2823, #2826, #2822) ──
+//
+// `spec/serve_cross/http_serve_limits.almd` is started on both legs and sent
+// requests the shared server core must refuse before the handler, decode, or
+// reshape. Each leg's answer is checked against the issue and the two legs
+// are compared with C-367's comparator.
+
+fn limits_fixture() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/serve_cross/http_serve_limits.almd")
+}
+
+/// A running leg of the limits fixture.
+struct Leg {
+    child: Child,
+    port: u16,
+    err: BufReader<std::process::ChildStderr>,
+    wasm: bool,
+}
+
+fn boot_limits(wasm: bool) -> Leg {
+    let port = free_port();
+    let mut c = Command::new(almide_bin());
+    c.arg("run").arg(limits_fixture());
+    if wasm {
+        c.args(["--target", "wasm"]);
+    }
+    c.arg("--").arg(port.to_string());
+    c.process_group(0).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    let mut child = c.spawn().expect("almide runs");
+    let mut err = BufReader::new(child.stderr.take().expect("stderr piped"));
+    let mut first = String::new();
+    err.read_line(&mut first).expect("read the ready line");
+    if first != "ready\n" {
+        let mut rest = String::new();
+        let _ = err.read_to_string(&mut rest);
+        kill_group(&mut child);
+        panic!("wasm={wasm}: expected the ready line, got {first:?}{rest}");
+    }
+    Leg { child, port, err, wasm }
+}
+
+impl Leg {
+    /// Stops the leg; answers its stderr after the ready line.
+    fn stop(mut self) -> String {
+        kill_group(&mut self.child);
+        let mut rest = String::new();
+        let _ = self.err.read_to_string(&mut rest);
+        rest
+    }
+}
+
+/// Sends `raw`, half-closes, and reads the answer to the server's close.
+fn ask_then_close(port: u16, raw: &[u8]) -> Vec<u8> {
+    let mut conn = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+    conn.set_read_timeout(Some(Duration::from_secs(60))).expect("timeout");
+    conn.write_all(raw).expect("send request");
+    conn.shutdown(std::net::Shutdown::Write).expect("half-close");
+    let mut out = Vec::new();
+    conn.read_to_end(&mut out).expect("read response to close");
+    out
+}
+
+fn head_of(resp: &[u8]) -> String {
+    let cut = resp.windows(4).position(|w| w == b"\r\n\r\n").map_or(resp.len(), |c| c + 4);
+    String::from_utf8_lossy(&resp[..cut]).into_owned()
+}
+
+fn after_head(resp: &[u8]) -> &[u8] {
+    resp.windows(4).position(|w| w == b"\r\n\r\n").map_or(&[][..], |c| &resp[c + 4..])
+}
+
+/// Runs `script` against each leg; every answer must match across the legs
+/// (C-367's comparator; the answers at `heads` answer a HEAD, which has no
+/// body to de-frame, so their heads are compared byte for byte). Answers
+/// (native answers, wasm answers, native stderr, wasm stderr).
+fn on_both_legs(heads: &[usize], script: impl Fn(&Leg) -> Vec<Vec<u8>>) -> (Vec<Vec<u8>>, Vec<Vec<u8>>, String, String) {
+    let native = boot_limits(false);
+    let n = script(&native);
+    let n_err = native.stop();
+    let wasm = boot_limits(true);
+    assert!(wasm.wasm);
+    let w = script(&wasm);
+    let w_err = wasm.stop();
+    assert_eq!(n.len(), w.len());
+    for (i, (a, b)) in n.iter().zip(&w).enumerate() {
+        if heads.contains(&i) {
+            assert_eq!(a, b, "HEAD answer {i} differs across the legs");
+            continue;
+        }
+        if let Err(diff) = same_answer(a, b) {
+            panic!("answer {i} differs across the legs:\n{diff}");
+        }
+    }
+    (n, w, n_err, w_err)
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_huge_or_cut_content_length_is_refused_before_the_handler_and_a_chunked_body_is_read_on_native_and_the_embedded_lane() {
+    let (native, wasm, n_err, w_err) = on_both_legs(&[], |leg| {
+        let started = Instant::now();
+        // The #2823 attack: a declared length of ~100 GB and three bytes.
+        let huge = ask(leg.port, b"POST /x HTTP/1.1\r\nHost: a\r\nContent-Length: 99999999999\r\n\r\nabc");
+        assert!(started.elapsed() < Duration::from_secs(10), "wasm={}: the 413 took {:?}", leg.wasm, started.elapsed());
+        // The server keeps answering after it.
+        let after = ask(leg.port, b"GET /after HTTP/1.1\r\n\r\n");
+        // Fewer bytes than Content-Length, then the client's close.
+        let cut = ask_then_close(leg.port, b"POST /cut HTTP/1.1\r\nContent-Length: 10\r\n\r\nabc");
+        // A chunked request body, with a chunk extension and a trailer.
+        let chunked = ask(leg.port, b"POST /chunked HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n2;x=y\r\nhe\r\n3\r\nllo\r\n0\r\nX-T: 1\r\n\r\n");
+        vec![huge, after, cut, chunked]
+    });
+    for (leg, answers) in [("native", &native), ("wasm", &wasm)] {
+        assert!(head_of(&answers[0]).starts_with("HTTP/1.1 413 "), "{leg}: {:?}", head_of(&answers[0]));
+        assert!(answers[1].ends_with(b"\r\n\r\nGET /after "), "{leg}: {:?}", String::from_utf8_lossy(&answers[1]));
+        assert!(head_of(&answers[2]).starts_with("HTTP/1.1 400 "), "{leg}: {:?}", head_of(&answers[2]));
+        assert!(answers[3].ends_with(b"\r\n\r\nPOST /chunked hello"), "{leg}: {:?}", String::from_utf8_lossy(&answers[3]));
+    }
+    // The handler saw only the two requests the core admitted.
+    for err in [&n_err, &w_err] {
+        assert_eq!(line_multiset(err), vec!["GET /after", "POST /chunked"], "{err:?}");
+    }
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn head_has_no_body_429_and_503_carry_their_reasons_and_a_pipelined_request_meets_connection_close_on_native_and_the_embedded_lane() {
+    let (native, wasm, _, _) = on_both_legs(&[0], |leg| {
+        vec![
+            ask(leg.port, b"HEAD /x HTTP/1.1\r\nHost: a\r\n\r\n"),
+            ask(leg.port, b"GET /429 HTTP/1.1\r\n\r\n"),
+            ask(leg.port, b"GET /503 HTTP/1.1\r\n\r\n"),
+            ask(leg.port, b"GET /a HTTP/1.1\r\nHost: a\r\n\r\nGET /b HTTP/1.1\r\nHost: a\r\n\r\n"),
+        ]
+    });
+    for (leg, a) in [("native", &native), ("wasm", &wasm)] {
+        let head = head_of(&a[0]);
+        assert!(head.starts_with("HTTP/1.1 200 OK\r\n"), "{leg}: {head:?}");
+        assert!(head.contains("\r\nContent-Length: 8\r\n"), "{leg}: HEAD keeps the GET's length: {head:?}");
+        assert!(after_head(&a[0]).is_empty(), "{leg}: HEAD got a body: {:?}", String::from_utf8_lossy(&a[0]));
+        assert!(head_of(&a[1]).starts_with("HTTP/1.1 429 Too Many Requests\r\n"), "{leg}: {:?}", head_of(&a[1]));
+        assert!(head_of(&a[2]).starts_with("HTTP/1.1 503 Service Unavailable\r\n"), "{leg}: {:?}", head_of(&a[2]));
+        // One response per connection, and it says so: the pipelined second
+        // request is not silently dropped behind a keep-alive-looking answer.
+        let piped = String::from_utf8_lossy(&a[3]);
+        assert_eq!(piped.matches("HTTP/1.1 ").count(), 1, "{leg}: {piped:?}");
+        assert!(piped.contains("\r\nConnection: close\r\n") && piped.ends_with("GET /a "), "{leg}: {piped:?}");
+        for r in a {
+            assert!(head_of(r).contains("\r\nConnection: close\r\n"), "{leg}: {:?}", head_of(r));
+        }
+    }
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_response_header_holding_crlf_is_refused_with_500_on_native_and_the_embedded_lane() {
+    let (native, wasm, n_err, w_err) = on_both_legs(&[], |leg| vec![ask(leg.port, b"GET /split HTTP/1.1\r\n\r\n"), ask(leg.port, b"GET /fine HTTP/1.1\r\n\r\n")]);
+    for (leg, a, err) in [("native", &native, &n_err), ("wasm", &wasm, &w_err)] {
+        let resp = String::from_utf8_lossy(&a[0]);
+        assert!(resp.starts_with("HTTP/1.1 500 Internal Server Error\r\n"), "{leg}: {resp:?}");
+        assert!(!resp.contains("\r\nSet-Cookie"), "{leg}: the split reached the wire: {resp:?}");
+        assert!(a[1].ends_with(b"\r\n\r\nGET /fine "), "{leg}: {:?}", String::from_utf8_lossy(&a[1]));
+        assert!(
+            err.lines().any(|l| l.starts_with("http.serve: refused the response: response header X-A has a CR, LF or NUL")),
+            "{leg}: no stderr line: {err:?}"
+        );
+    }
+    assert_eq!(line_multiset(&n_err), line_multiset(&w_err));
+}
+
+/// The comparator itself, on constructed responses: it must reject every
+/// change C-367 observes and accept every change it leaves to the host.
+#[test]
+fn the_response_comparator_rejects_what_c367_observes_and_accepts_what_it_does_not() {
+    let base = b"HTTP/1.1 418 OK\r\nX-Kind: teapot\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello";
+    assert!(same_answer(base, base).is_ok());
+    let rejected: &[(&str, &[u8])] = &[
+        ("a changed status", b"HTTP/1.1 419 OK\r\nX-Kind: teapot\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello"),
+        ("a changed header value", b"HTTP/1.1 418 OK\r\nX-Kind: kettle\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello"),
+        ("a reordered same-name header", b"HTTP/1.1 418 OK\r\nX-Kind: teapot\r\nSet-Cookie: b=2\r\nSet-Cookie: a=1\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello"),
+        ("a missing header", b"HTTP/1.1 418 OK\r\nX-Kind: teapot\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Length: 5\r\n\r\nhello"),
+        ("a changed body", b"HTTP/1.1 418 OK\r\nX-Kind: teapot\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhellO"),
+    ];
+    for (what, other) in rejected {
+        assert!(same_answer(base, other).is_err(), "{what} was accepted");
+        assert!(same_answer(other, base).is_err(), "{what} was accepted (reversed)");
+    }
+    let accepted: &[(&str, &[u8])] = &[
+        ("a reordered header with a different name", b"HTTP/1.1 418 OK\r\nContent-Type: text/plain\r\nSet-Cookie: a=1\r\nX-Kind: teapot\r\nSet-Cookie: b=2\r\nContent-Length: 5\r\n\r\nhello"),
+        ("a different reason phrase", b"HTTP/1.1 418 I'm a teapot\r\nX-Kind: teapot\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello"),
+        ("a different case in a header name", b"HTTP/1.1 418 OK\r\nx-kind: teapot\r\nset-cookie: a=1\r\nSET-COOKIE: b=2\r\ncontent-type: text/plain\r\ncontent-length: 5\r\n\r\nhello"),
+        ("host-managed fields and chunked framing", b"HTTP/1.1 418 OK\r\nDate: Mon, 28 Sep 2026 00:00:00 GMT\r\nX-Kind: teapot\r\nConnection: close\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nhel\r\n2\r\nlo\r\n0\r\n\r\n"),
+    ];
+    for (what, other) in accepted {
+        assert!(same_answer(base, other).is_ok(), "{what} was rejected: {:?}", same_answer(base, other));
+        assert!(same_answer(other, base).is_ok(), "{what} was rejected (reversed)");
+    }
+    // The stderr multiset: order across requests is free, the lines are not.
+    assert_eq!(line_multiset("ready\nGET /a\nGET /b\n"), line_multiset("ready\nGET /b\nGET /a\n"));
+    assert_ne!(line_multiset("ready\nGET /a\nGET /a\n"), line_multiset("ready\nGET /a\n"));
+}
+
+// ── Shutdown (ADR-0020 §5.6, #2692, C-367) ──
+//
+// `spec/serve_cross/http_serve_shutdown.almd` runs with stdout redirected to
+// a FILE, where stdout is 64 KiB-buffered: before #2692 a SIGTERM lost every
+// line. Natively the two tests below run the BUILT binary; the launcher
+// tests after them run the same fixture through `almide run` (#2809).
+
+fn shutdown_fixture() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/serve_cross/http_serve_shutdown.almd")
+}
+
+fn scratch(what: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("almide-serve-shutdown-{}-{what}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("scratch dir");
+    dir
+}
+
+/// The native binary of the shutdown fixture, built once per test process.
+fn shutdown_binary() -> PathBuf {
+    static BIN: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BIN.get_or_init(|| {
+        let bin = scratch("bin").join("http_serve_shutdown");
+        let out = Command::new(almide_bin())
+            .arg("build")
+            .arg(shutdown_fixture())
+            .arg("-o")
+            .arg(&bin)
+            .stdin(Stdio::null())
+            .output()
+            .expect("almide build runs");
+        assert!(out.status.success(), "almide build failed: {}", String::from_utf8_lossy(&out.stderr));
+        bin
+    })
+    .clone()
+}
+
+/// A shutdown run: the server, its stdout file, its port.
+struct Served {
+    child: Child,
+    out: PathBuf,
+    port: u16,
+}
+
+/// Start the fixture with stdout to a file, wait for its ready line, and
+/// answer one request — which proves `http.serve` armed its signal handling,
+/// so the signals below never meet the default disposition.
+fn serve_to_file(wasm: bool, what: &str) -> Served {
+    let c = if wasm {
+        let mut c = Command::new(almide_bin());
+        c.arg("run").arg(shutdown_fixture()).args(["--target", "wasm", "--"]);
+        c
+    } else {
+        Command::new(shutdown_binary())
+    };
+    serve_cmd_to_file(c, wasm, what)
+}
+
+/// [`serve_to_file`] natively through the launcher: `almide run <fixture>`.
+fn launch_to_file(what: &str) -> Served {
+    let mut c = Command::new(almide_bin());
+    c.arg("run").arg(shutdown_fixture()).arg("--");
+    serve_cmd_to_file(c, false, what)
+}
+
+fn serve_cmd_to_file(mut c: Command, wasm: bool, what: &str) -> Served {
+    let port = free_port();
+    let out = scratch(what).join(if wasm { "wasm.out" } else { "native.out" });
+    c.arg(port.to_string());
+    c.process_group(0)
+        .stdin(Stdio::null())
+        .stdout(std::fs::File::create(&out).expect("stdout file"))
+        .stderr(Stdio::piped());
+    let mut child = c.spawn().expect("the server starts");
+    let mut err = BufReader::new(child.stderr.take().expect("stderr piped"));
+    let mut first = String::new();
+    err.read_line(&mut first).expect("read the ready line");
+    if first != "ready\n" {
+        kill_group(&mut child);
+        panic!("wasm={wasm}: expected the ready line, got {first:?}");
+    }
+    let hello = ask(port, b"GET /hello HTTP/1.1\r\n\r\n");
+    assert!(hello.ends_with(b"\r\n\r\nok /hello"), "wasm={wasm}: {:?}", String::from_utf8_lossy(&hello));
+    Served { child, out, port }
+}
+
+fn sigterm(child: &Child) {
+    let st = Command::new("kill").args(["-TERM", &child.id().to_string()]).status();
+    assert!(st.as_ref().is_ok_and(|s| s.success()), "could not signal the server: {st:?}");
+}
+
+/// Send `raw` on a fresh connection from a thread; the answer is whatever
+/// arrived before the close (empty when the server exits without answering).
+fn ask_in_background(port: u16, raw: &'static [u8]) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut out = Vec::new();
+        if let Ok(mut conn) = TcpStream::connect(("127.0.0.1", port)) {
+            let _ = conn.set_read_timeout(Some(Duration::from_secs(90)));
+            let _ = conn.write_all(raw);
+            let _ = conn.read_to_end(&mut out);
+        }
+        out
+    })
+}
+
+/// Wait for the server to exit on its own; a server still running after the
+/// deadline is killed and the test fails (it did not stop on the signal).
+fn exit_code_within(served: &mut Served, secs: u64) -> Option<i32> {
+    let deadline = Instant::now() + Duration::from_secs(secs);
+    loop {
+        if let Some(status) = served.child.try_wait().expect("poll the server") {
+            return status.code();
+        }
+        if Instant::now() >= deadline {
+            kill_group(&mut served.child);
+            panic!("the server was still running {secs} s after the signal");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_sigterm_drains_the_request_in_flight_flushes_stdout_and_returns_from_serve_on_native_and_the_embedded_lane() {
+    for wasm in [false, true] {
+        let mut served = serve_to_file(wasm, "drain");
+        // `/nap` sleeps 1 s in the handler; the signal lands inside it.
+        let nap = ask_in_background(served.port, b"GET /nap HTTP/1.1\r\n\r\n");
+        std::thread::sleep(Duration::from_millis(300));
+        sigterm(&served.child);
+        let code = exit_code_within(&mut served, 20);
+        let answer = nap.join().expect("the client thread");
+        let out = std::fs::read_to_string(&served.out).expect("read the stdout file");
+        assert!(answer.ends_with(b"\r\n\r\nok /nap"), "wasm={wasm}: the request in flight was not answered: {:?}", String::from_utf8_lossy(&answer));
+        // Every line, in order, and "stopped": `http.serve` returned and main went on.
+        assert_eq!(out, "listening\nhit /hello\nhit /nap\nstopped\n", "wasm={wasm}");
+        assert_eq!(code, Some(0), "wasm={wasm}: main's exit code");
+        // The listener is gone: nothing accepts on the port any more.
+        assert!(TcpStream::connect(("127.0.0.1", served.port)).is_err(), "wasm={wasm}: still accepting");
+    }
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_second_sigterm_during_the_drain_flushes_stdout_and_exits_1_on_native_and_the_embedded_lane() {
+    for wasm in [false, true] {
+        let mut served = serve_to_file(wasm, "force");
+        // `/stall` sleeps 60 s: only the second signal ends the run.
+        let stall = ask_in_background(served.port, b"GET /stall HTTP/1.1\r\n\r\n");
+        std::thread::sleep(Duration::from_millis(300));
+        sigterm(&served.child);
+        std::thread::sleep(Duration::from_millis(300));
+        sigterm(&served.child);
+        let code = exit_code_within(&mut served, 20);
+        let answer = stall.join().expect("the client thread");
+        let out = std::fs::read_to_string(&served.out).expect("read the stdout file");
+        assert_eq!(code, Some(1), "wasm={wasm}: a forced stop exits 1, never 128+signal (C-350)");
+        // Every line written before the stop — including the one the stalled
+        // handler printed — and no "stopped": `http.serve` did not return.
+        assert_eq!(out, "listening\nhit /hello\nhit /stall\n", "wasm={wasm}");
+        assert!(answer.is_empty(), "wasm={wasm}: the stalled request was answered: {:?}", String::from_utf8_lossy(&answer));
+    }
+}
+
+// ── The launcher (#2809) ──
+//
+// `almide run` used to spawn the program and wait: a SIGTERM to the launcher's
+// pid alone killed the launcher and left the server running, undrained. The
+// launcher now execs the program (Unix), so the pid a supervisor holds IS the
+// program's. Both runs below start in a process group of their own.
+
+fn signal(target: &str, sig: &str) -> bool {
+    Command::new("kill").args([sig, "--", target]).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
+}
+
+/// Some process of the group `pgid` still exists (a zombie is reaped by now).
+fn group_alive(pgid: u32) -> bool {
+    signal(&format!("-{pgid}"), "-0")
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_sigterm_to_the_almide_run_pid_alone_drains_the_program_and_leaves_no_process_behind() {
+    let mut served = launch_to_file("launcher-term");
+    let pgid = served.child.id();
+    // The control: the orphan probe below sees a live group.
+    assert!(group_alive(pgid), "the orphan probe does not see the running server's group");
+    let nap = ask_in_background(served.port, b"GET /nap HTTP/1.1\r\n\r\n");
+    std::thread::sleep(Duration::from_millis(300));
+    // The launcher's pid ONLY, as a supervisor holding it sends it.
+    assert!(signal(&pgid.to_string(), "-TERM"), "could not signal the launcher");
+    let code = exit_code_within(&mut served, 20);
+    let answer = nap.join().expect("the client thread");
+    let out = std::fs::read_to_string(&served.out).expect("read the stdout file");
+    assert!(answer.ends_with(b"\r\n\r\nok /nap"), "the request in flight was not answered: {:?}", String::from_utf8_lossy(&answer));
+    // The PROGRAM drained: its stdout is whole, "stopped" included.
+    assert_eq!(out, "listening\nhit /hello\nhit /nap\nstopped\n");
+    // The status `almide run` exits with is the program's: main returned, 0.
+    assert_eq!(code, Some(0), "almide run's exit code");
+    assert!(!group_alive(pgid), "a process of the run outlived `almide run` (orphaned program)");
+    assert!(TcpStream::connect(("127.0.0.1", served.port)).is_err(), "still accepting");
+}
+
+/// A terminal's Ctrl-C signals the whole foreground group. The program must
+/// see it ONCE: a launcher that also forwarded it would deliver a second
+/// signal, which is the forced stop (exit 1, no "stopped").
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_sigint_to_the_almide_run_group_drains_once_and_is_not_a_forced_stop() {
+    let mut served = launch_to_file("launcher-int");
+    let pgid = served.child.id();
+    let nap = ask_in_background(served.port, b"GET /nap HTTP/1.1\r\n\r\n");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(signal(&format!("-{pgid}"), "-INT"), "could not signal the run's group");
+    let code = exit_code_within(&mut served, 20);
+    let answer = nap.join().expect("the client thread");
+    let out = std::fs::read_to_string(&served.out).expect("read the stdout file");
+    assert!(answer.ends_with(b"\r\n\r\nok /nap"), "the request in flight was not answered: {:?}", String::from_utf8_lossy(&answer));
+    assert_eq!(out, "listening\nhit /hello\nhit /nap\nstopped\n");
+    assert_eq!(code, Some(0), "almide run's exit code");
+    assert!(!group_alive(pgid), "a process of the run outlived `almide run`");
 }

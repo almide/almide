@@ -610,10 +610,53 @@ fn with_exec_retry<T>(mut attempt: impl FnMut() -> std::io::Result<T>) -> Option
     None
 }
 
-/// Run a compiled binary with the given args, returning exit code.
+/// Run a compiled binary with the given args, returning exit code. Unix
+/// execs instead ([`exec_binary`]).
+#[cfg(not(unix))]
 pub fn run_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
     with_exec_retry(|| binary_command(bin, program_args).status())
         .map_or(1, |s| s.code().unwrap_or(1))
+}
+
+/// `almide run`'s native launch (#2809): the program REPLACES the launcher.
+///
+/// A launcher that spawned the program and waited kept a pid of its own, and a
+/// signal sent to that pid alone — a supervisor's SIGTERM, a `kill <pid>` —
+/// ended the launcher and left the program running, so the shutdown drain
+/// `http.serve` does on SIGTERM/SIGINT (#2692) never started. Forwarding the
+/// signal from a waiting launcher was the other design, and it is wrong the
+/// moment the signal also reaches the program directly: a terminal Ctrl-C and
+/// a `kill -- -<pgid>` or cgroup-wide stop signal the whole group, so the
+/// program would see each signal TWICE — and a second signal is the forced
+/// stop (exit 1, no drain). `exec` has no such double: the launcher's pid is
+/// the program's, every signal (SIGTERM, SIGINT, SIGHUP, …) arrives once with
+/// the program's own disposition, and the status the caller reaps is the
+/// program's own — an exit code as C-350 passes it, or a death by signal
+/// reported as a death by signal, never folded into a 128+n that C-350 lets
+/// `process.exit` produce on purpose.
+///
+/// Only a failed exec returns: then the ETXTBSY back-off retries it, and any
+/// other failure is reported and exits 1 as before.
+#[cfg(unix)]
+fn exec_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
+    use std::io::Write as _;
+    use std::os::unix::process::CommandExt as _;
+    // exec discards the launcher's unflushed buffers.
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+    let _: Option<()> = with_exec_retry(|| Err(binary_command(bin, program_args).exec()));
+    1
+}
+
+/// Windows has no exec: the launcher waits for the program. A console Ctrl-C
+/// or Ctrl-Break reaches every process attached to the console, the program
+/// included, so nothing is forwarded; the launcher only ignores it, so that it
+/// does not exit before the program has drained and exited (#2809).
+#[cfg(not(unix))]
+fn exec_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
+    #[cfg(windows)]
+    let _ = ctrlc::set_handler(|| {});
+    run_binary(bin, program_args)
 }
 
 /// [`run_binary`], capturing stdout+stderr instead of inheriting them.
@@ -654,7 +697,7 @@ fn cmd_run_inner_report(file: &str, program_args: &[String], no_check: bool, tes
                 cmd.args(program_args);
                 run_with_time_report(cmd)
             } else {
-                run_binary(&bin, program_args)
+                exec_binary(&bin, program_args)
             }
         }
         Err(e) => {

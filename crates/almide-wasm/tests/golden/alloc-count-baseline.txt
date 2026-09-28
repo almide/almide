@@ -126,6 +126,7 @@
 23	8	247	23	spec/wasm_cross/effect_assign_unwrap.almd
 36	26	481	36	spec/wasm_cross/effect_branch_keeps_result.almd
 10001	9995	2160064	10001	spec/wasm_cross/effect_call_arg_credit.almd
+271	240	2898	271	spec/wasm_cross/effect_dispatcher_many_arms.almd
 19	14	253	15	spec/wasm_cross/effect_fn_value.almd
 102	65	1038	90	spec/wasm_cross/effect_fn_value_slot_family.almd
 2	0	36	0	spec/wasm_cross/effect_main_guard_err.almd
@@ -312,7 +313,8 @@
 227	212	3004	227	spec/wasm_cross/json_parse_lenient_edges.almd
 795	701	6594	795	spec/wasm_cross/json_path_edges.almd
 1909	1837	21117	1896	spec/wasm_cross/json_path_index_domain.almd
-330	306	4177	330	spec/wasm_cross/json_string_span.almd
+330	306	4187	330	spec/wasm_cross/json_string_span.almd
+1593	1536	20687	1593	spec/wasm_cross/json_stringify_control_chars.almd
 132	62	1881	129	spec/wasm_cross/json_stringify_nonfinite.almd
 43	6	725	42	spec/wasm_cross/json_stringify_pretty.almd
 122	73	1463	121	spec/wasm_cross/json_value.almd
@@ -339,6 +341,7 @@
 2	0	32	2	spec/wasm_cross/let_wildcard_discard.almd
 8	5	73	8	spec/wasm_cross/letbound_variant_match.almd
 1	0	0	1	spec/wasm_cross/licm_zero_trip_hoist.almd
+~	spec/wasm_cross/line_endings_bare_cr.almd
 27393	24030	141800	24048	spec/wasm_cross/list_arg_map_view.almd
 10	5	52	10	spec/wasm_cross/list_call_element.almd
 17	10	168	17	spec/wasm_cross/list_chunk_windows.almd
@@ -746,6 +749,7 @@
 9	0	75	2	spec/wasm_cross/top_let_closure_record.almd
 0	0	0	0	spec/wasm_cross/top_let_div_eager.almd
 0	0	0	0	spec/wasm_cross/top_let_div_used.almd
+77	54	578	68	spec/wasm_cross/top_let_stored_in_container.almd
 0	0	0	0	spec/wasm_cross/toplevel_const_wrapping.almd
 369	358	64169	369	spec/wasm_cross/trig_libm.almd
 10	0	184	10	spec/wasm_cross/tuple_eq.almd

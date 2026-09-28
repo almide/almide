@@ -1,0 +1,31 @@
+// @contract: C-367
+// A SERVER fixture for the shutdown rule (almide/almide#2692): no generic
+// runner executes it. The driver (tests/http_serve_cross_test.rs in
+// almide/almide) starts it natively and on the embedded lane with stdout
+// redirected to a file, waits for the "ready" line on stderr, sends requests,
+// and signals it. One SIGTERM while `/nap` is in flight: `/nap` is answered,
+// `http.serve` returns, "stopped" prints and the run exits 0 with every
+// stdout line in the file. Two SIGTERMs while `/stall` sleeps: the run exits
+// 1 with every line written so far in the file and without "stopped".
+// Usage: almide run http_serve_shutdown.almd [--target wasm] -- <port>
+import env
+import http
+
+effect fn handle(req: HttpRequest) -> HttpResponse = {
+  let path = http.req_path(req)
+  println("hit ${path}")
+  match path {
+    "/nap" => env.sleep_ms(1000),
+    "/stall" => env.sleep_ms(60000),
+    _ => (),
+  }
+  http.response(200, "ok ${path}")
+}
+
+effect fn main() -> Unit = {
+  let port = env.args() |> list.get(0) ?? "0"
+  println("listening")
+  eprintln("ready")
+  http.serve(int.parse(port) ?? 0, (req) => handle(req)!)!
+  println("stopped")
+}

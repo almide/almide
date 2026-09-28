@@ -1,0 +1,128 @@
+// @contract: C-135
+// #2807: a many-arm effect dispatcher spelled with `!` (ADR-0008 made the
+// explicit spelling mandatory in 0.63.0). Every arm is a single effect call:
+// most callees are NEVER-ERR declared-Unit effect fns (the raw/void ABI), and
+// the fallback arm calls a CAN-ERR one, so the dispatcher itself carries the
+// lifted Result ABI. Some arms print inline instead of calling out.
+//
+// The incumbent leg rendered `run_x()!` in that position as a call binding a
+// Result handle from a void callee and emitted a module that failed
+// validation ("callee returns []"); it now refuses the shape before a byte is
+// written. The structural leg (the default) lowers it; this fixture pins that
+// it prints exactly what native prints.
+effect fn run_help(target: String) -> Unit = println("help target=${target}")
+
+effect fn run_scan(target: String, flag: String) -> Unit = println("scan target=${target} flag=${flag}")
+
+effect fn run_secrets(target: String) -> Unit = println("secrets target=${target}")
+
+effect fn run_egress(target: String) -> Unit = println("egress target=${target}")
+
+effect fn run_providers(target: String) -> Unit = println("providers target=${target}")
+
+effect fn run_deps(target: String, flag: String) -> Unit = println("deps target=${target} flag=${flag}")
+
+effect fn run_sbom(target: String) -> Unit = println("sbom target=${target}")
+
+effect fn run_diff(target: String) -> Unit = println("diff target=${target}")
+
+effect fn run_radar(target: String) -> Unit = println("radar target=${target}")
+
+effect fn run_workflow(target: String, flag: String) -> Unit = println("workflow target=${target} flag=${flag}")
+
+effect fn run_ir(target: String) -> Unit = println("ir target=${target}")
+
+effect fn run_rules(target: String) -> Unit = println("rules target=${target}")
+
+effect fn run_interview(target: String) -> Unit = println("interview target=${target}")
+
+effect fn run_html(target: String, flag: String) -> Unit = println("html target=${target} flag=${flag}")
+
+effect fn run_deliver(target: String) -> Unit = println("deliver target=${target}")
+
+effect fn run_tools(target: String) -> Unit = println("tools target=${target}")
+
+effect fn run_effects(target: String) -> Unit = println("effects target=${target}")
+
+effect fn run_propose(target: String, flag: String) -> Unit = println("propose target=${target} flag=${flag}")
+
+effect fn run_report(target: String) -> Unit = println("report target=${target}")
+
+effect fn run_map(target: String) -> Unit = println("map target=${target}")
+
+effect fn run_version(target: String) -> Unit = println("version target=${target}")
+
+effect fn reject_usage(cmd: String) -> Unit = {
+  println("usage: unknown command `${cmd}`")
+  err("usage")!
+}
+
+// Positional argument `n` (0-based) after the command, skipping `--flag value`.
+fn pos(argv: List[String], n: Int) -> String = {
+  let rest = list.drop(argv, 2)
+  let plain = rest |> list.enumerate |> list.filter(((i, a)) => not string.starts_with(a, "--") and (i == 0 or not string.starts_with(
+    list.get(rest, i - 1) ?? "",
+    "--",
+  )))
+  match list.get(plain, n) {
+    some((_, a)) => a,
+    none => "",
+  }
+}
+
+fn flag_value(argv: List[String], name: String) -> String = {
+  let i = list.index_of(argv, name) ?? -1
+  if i < 0 then ""
+  else list.get(argv, i + 1) ?? ""
+}
+
+effect fn dispatch_ok(argv: List[String]) -> Unit = {
+  let cmd = list.get(argv, 1) ?? ""
+  if cmd == "help" or cmd == "--help" then println("help: 21 commands")
+  else if cmd == "scan" then run_scan(pos(argv, 0), flag_value(argv, "--osv"))!
+  else if cmd == "secrets" then run_secrets(pos(argv, 0))!
+  else if cmd == "egress" then run_egress(pos(argv, 0))!
+  else if cmd == "providers" then { println("inline providers ${pos(argv, 0)}") } else if cmd == "deps" then run_deps(
+    pos(argv, 0),
+    flag_value(argv, "--osv"),
+  )!
+  else if cmd == "sbom" then run_sbom(pos(argv, 0))!
+  else if cmd == "diff" then run_diff(pos(argv, 0))!
+  else if cmd == "radar" then run_radar(pos(argv, 0))!
+  else if cmd == "workflow" then { println("inline workflow ${pos(argv, 0)}") } else if cmd == "ir" then run_ir(pos(argv, 0))!
+  else if cmd == "rules" then run_rules(pos(argv, 0))!
+  else if cmd == "interview" then run_interview(pos(argv, 0))!
+  else if cmd == "html" then run_html(pos(argv, 0), flag_value(argv, "--osv"))!
+  else if cmd == "deliver" then { println("inline deliver ${pos(argv, 0)}") } else if cmd == "tools" then run_tools(pos(argv, 0))!
+  else if cmd == "effects" then run_effects(pos(argv, 0))!
+  else if cmd == "propose" then run_propose(pos(argv, 0), flag_value(argv, "--osv"))!
+  else if cmd == "report" then run_report(pos(argv, 0))!
+  else if cmd == "map" then { println("inline map ${pos(argv, 0)}") } else if cmd == "--version" then println("version 1.0.0")
+  else reject_usage(cmd)!
+}
+
+effect fn main() -> Unit = {
+  dispatch_ok(["prog", "help", "--osv", "o.json", "app/help"])!
+  dispatch_ok(["prog", "scan", "--osv", "o.json", "app/scan"])!
+  dispatch_ok(["prog", "secrets", "--osv", "o.json", "app/secrets"])!
+  dispatch_ok(["prog", "egress", "--osv", "o.json", "app/egress"])!
+  dispatch_ok(["prog", "providers", "--osv", "o.json", "app/providers"])!
+  dispatch_ok(["prog", "deps", "--osv", "o.json", "app/deps"])!
+  dispatch_ok(["prog", "sbom", "--osv", "o.json", "app/sbom"])!
+  dispatch_ok(["prog", "diff", "--osv", "o.json", "app/diff"])!
+  dispatch_ok(["prog", "radar", "--osv", "o.json", "app/radar"])!
+  dispatch_ok(["prog", "workflow", "--osv", "o.json", "app/workflow"])!
+  dispatch_ok(["prog", "ir", "--osv", "o.json", "app/ir"])!
+  dispatch_ok(["prog", "rules", "--osv", "o.json", "app/rules"])!
+  dispatch_ok(["prog", "interview", "--osv", "o.json", "app/interview"])!
+  dispatch_ok(["prog", "html", "--osv", "o.json", "app/html"])!
+  dispatch_ok(["prog", "deliver", "--osv", "o.json", "app/deliver"])!
+  dispatch_ok(["prog", "tools", "--osv", "o.json", "app/tools"])!
+  dispatch_ok(["prog", "effects", "--osv", "o.json", "app/effects"])!
+  dispatch_ok(["prog", "propose", "--osv", "o.json", "app/propose"])!
+  dispatch_ok(["prog", "report", "--osv", "o.json", "app/report"])!
+  dispatch_ok(["prog", "map", "--osv", "o.json", "app/map"])!
+  dispatch_ok(["prog", "--version", "--osv", "o.json", "app/version"])!
+  dispatch_ok(["prog", "help"])!
+  dispatch_ok(["prog", "scan"])!
+}

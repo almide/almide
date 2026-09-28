@@ -149,7 +149,7 @@ Cross-cutting facts that matter for almide:
 | build-cross / corpus-cross / test-rust-cross | PRs to main only | macOS/Windows |
 | commissioned-wasm-gates | changes, build | two `cargo test --release` compiles + three script gates, sequential (27.8) |
 | commissioned-aviation-quality | changes | codopsy A + 800-line cap (7.4) |
-| commissioned-mutation-gate | changes | PR only (0.5) |
+| commissioned-mutation-gate | changes | PR only: incremental scope, function-overlap mutants first, recorded killer suite first, 28-min budget that names its deferred remainder (#2814); 0.5 when no mutant is in scope. The full sweep is `mutation-sweep.yml` on develop |
 | trigger-playground | main push only | |
 
 Runner-slot count per full run: 4 shards + 6 solos + 15 other jobs ≈ **25 jobs**.

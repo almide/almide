@@ -962,13 +962,57 @@ fn list_drop_liststr(xs: List[List[String]], n: Int) -> List[List[String]] = {
 // The "," separator before element `i` — "" for the first, "," for the rest. A SCALAR `if` picks
 // the repeat count (k), so the separator is `string.repeat(",", k)` — a call result, not a
 // heap-result `if` (which the scalar-while loop body cannot yet bind; see v1-parser-tco-lever.md).
+// JSON string quoting — the one RFC 8259 §7 rule every serializer shares (#2802;
+// native mirror: runtime value.rs almide_rt_value_json_escape_into): `\` `"` `\n`
+// `\r` `\t` by their short escapes, every OTHER U+0000..U+001F as `\u00xx`
+// (lowercase hex, no `\b`/`\f`), everything else (U+007F included) raw UTF-8.
 fn __json_quote(s: String) -> String = {
   let e1 = string.replace(s, "\\", "\\\\")
   let e2 = string.replace(e1, '"', '\\"')
   let e3 = string.replace(e2, "\n", "\\n")
   let e4 = string.replace(e3, "\r", "\\r")
   let e5 = string.replace(e4, "\t", "\\t")
-  '"' + e5 + '"'
+  '"' + __jq_ctrl_escape(e5) + '"'
+}
+
+// The remaining control characters: a byte scan (no allocation) decides, and only a
+// string that holds one pays the per-code replace pass.
+fn __jq_ctrl_escape(s: String) -> String = {
+  let h = prim.handle(s)
+  if __jq_has_ctrl(h + 12, prim.load32(h + 4), 0) then __jq_ctrl(s, 0) else s
+}
+
+fn __jq_has_ctrl(p: Int, n: Int, k: Int) -> Bool = if k >= n then false
+else {
+  let b = prim.load8(p + k)
+  if b < 32 and b != 9 and b != 10 and b != 13 then true
+  else __jq_has_ctrl(p, n, k + 1)
+}
+
+fn __jq_ctrl(s: String, c: Int) -> String = if c >= 32 then s
+else if c == 9 or c == 10 or c == 13 then __jq_ctrl(s, c + 1)
+else __jq_ctrl(
+  string.replace(s, string.from_codepoint(c), "\\u00" + __jq_hex(c / 16) + __jq_hex(c % 16)),
+  c + 1,
+)
+
+fn __jq_hex(d: Int) -> String = match d {
+  0 => "0",
+  1 => "1",
+  2 => "2",
+  3 => "3",
+  4 => "4",
+  5 => "5",
+  6 => "6",
+  7 => "7",
+  8 => "8",
+  9 => "9",
+  10 => "a",
+  11 => "b",
+  12 => "c",
+  13 => "d",
+  14 => "e",
+  _ => "f",
 }
 
 // Array elements joined by "," — a String ACCUMULATOR recursion (base returns the carried `acc`,
@@ -1259,8 +1303,8 @@ fn __get_or_value_elem(h: Int, i: Int) -> Value = {
 
 // ── json.stringify_pretty ── 2-space indent, native stringify_value's exact shape:
 // empty [] / {} inline; else one element per line at depth+1, closer at depth.
-// Strings quote via __json_quote — the canonical 5-escape rule both targets
-// share (native json.rs json_quote is the mirror; C-095).
+// Strings quote via __json_quote — the one RFC 8259 §7 rule every leg
+// shares (native value.rs almide_rt_value_json_quote is the mirror; C-095).
 fn list_get_or_value(xs: List[Value], i: Int, default: Value) -> Value = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)

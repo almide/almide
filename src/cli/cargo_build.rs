@@ -56,6 +56,7 @@ edition = "2021"
 [dependencies]
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 webpki-roots = "0.26"
+rustls-native-certs = "0.8"
 
 # `opt-level = 1` is LOAD-BEARING FOR CORRECTNESS, not a speed choice. Do not lower it.
 #
