@@ -117,6 +117,10 @@ pub const RUST_RESERVED_TYPE_NAMES: &[&str] = &[
     "Future", "IntoFuture",
     // The generated preamble's crate-level imports.
     "HashMap", "HashSet",
+    // The spliced runtime modules' crate-level imports (`use std::path::Path`
+    // in fs, `std::time::Duration`, …): a user `type Path` in a package's
+    // `src/path.almd` shadowed `std::path::Path` for the runtime (#2858).
+    "Path", "Duration", "TcpStream", "Read", "Write", "Cell", "RefCell",
 ];
 
 /// Would a top-level Rust item with this name shadow one the generated crate
