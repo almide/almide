@@ -30,6 +30,10 @@ on:
         description: "Release tag to compare against (empty = the latest non-rc release)"
         default: ""
         required: false
+  # TEMPORARY (removed before merge): registers the workflow so it can be
+  # dispatched from this branch before it exists on the default branch.
+  push:
+    branches: [downstream-canary]
 
 concurrency:
   group: ${{ github.workflow }}-${{ inputs.candidate_ref }}-${{ inputs.baseline_tag }}
@@ -56,7 +60,7 @@ jobs:
       - id: refs
         env:
           GH_TOKEN: ${{ github.token }}
-          CANDIDATE_REF: ${{ inputs.candidate_ref }}
+          CANDIDATE_REF: ${{ inputs.candidate_ref || 'develop' }}
           BASELINE_TAG: ${{ inputs.baseline_tag }}
         run: |
           set -euo pipefail
@@ -190,7 +194,7 @@ jobs:
           {
             echo "## Downstream canary"
             echo
-            echo "baseline \`${{ needs.plan.outputs.baseline_tag }}\` → candidate \`${{ inputs.candidate_ref }}\` (\`${{ needs.plan.outputs.candidate_sha }}\`)"
+            echo "baseline \`${{ needs.plan.outputs.baseline_tag }}\` → candidate \`${{ inputs.candidate_ref || 'develop' }}\` (\`${{ needs.plan.outputs.candidate_sha }}\`)"
             echo
           } >> "$GITHUB_STEP_SUMMARY"
           set +e
