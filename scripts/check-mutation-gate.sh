@@ -102,10 +102,12 @@ BUDGET="${ALMIDE_MUTATION_BUDGET_SECS:-0}"
 # first (#2814): the suites named in proofs/mutation-score.toml's
 # `killers` field — the sweep's own measured tally, re-checked against
 # every sweep by its score job, not a hand-maintained map — by kill count,
-# then the rest. With the record at "backend_parity 40, lib 1" that stops
-# paying a --cfg test rebuild of the crate (~30 s) before the suite that
-# kills 40 of 41 mutants. The killer is still rediscovered and PRINTED on
-# every run, so the evidence stays live.
+# then the rest. With the record at "backend_parity 40, lib 1" the suite
+# that kills 40 of 41 mutants runs first. Measured on a PR runner (#2814):
+# 75-78 s per caught mutant against ~80 s lib-first. The saving is small
+# because the backend_parity rebuild and run dominate. The ordering is
+# kept because it costs nothing. The killer is still rediscovered and
+# PRINTED on every run, so the evidence stays live.
 SUITES_ALL="lib backend_parity fuzz_differential alias_semantics tail_calls"
 recorded=""
 if [ -f proofs/mutation-score.toml ]; then

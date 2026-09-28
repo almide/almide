@@ -2296,7 +2296,9 @@ jobs:
   # baselines under crates/almide-wasm/tests/golden/, which the old rule read
   # as killer infrastructure, so #2805 / #2806 ran all 41 mutants (~80 s
   # each after a ~7-min cold build) and were cancelled at the 45-min cap
-  # with 31 / 32 caught and none survived.
+  # with 31 / 32 caught and none survived. Measured after the fix, on a probe
+  # with #2805's file set: 5 in scope, 5 caught, 12m44s. A full-scope run (a
+  # change to the runner itself) stopped at "PARTIAL: ran 14 of 41" in 26m42s.
   commissioned-mutation-gate:
     name: Commissioned mutation gate (the net keeps its teeth)
     needs: changes
