@@ -936,7 +936,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_CERTIFY_OWNERSHIP=value` | debug | run the native ownership certifier after the pass pipeline (#2231): `report` prints every violation, `fail` aborts the build on one, `off` skips it; unset = `fail` in a debug build, `off` in a release build |
 | `ALMIDE_COMPILER_STACK=value` | tool | stack size in bytes of the compiler driver thread (default 256 MiB); a deep input that overflows it is the regression test's subject |
 | `ALMIDE_COMPONENT_ADAPTER` | route | route `--component` through the preview1 adapter instead of the direct component emission |
-| `ALMIDE_COMPONENT_P3` | route | emit a WASI 0.3 component (stdio over component-model streams, the async canonical ABI) under `--component`; needs a p3-capable wasmtime |
+| `ALMIDE_COMPONENT_P3` | route | emit a WASI 0.3 component (stdio over component-model streams, the async canonical ABI) under `--component`; runs on a stock wasmtime 46+ with no feature flag (`wasmtime run app.wasm`, `-S http` for an http client — ADR-0023 step 1) |
 | `ALMIDE_CORPUS_FILTER=value` | harness | substring filter over the fixture paths the 3-way oracle test evaluates |
 | `ALMIDE_CORPUS_SHARD=value` | harness | `k/N` (1-based) walks the k-th modulo slice of the SORTED spec/wasm_cross corpus in the six corpus giants (#2381), read after the sort; `merge/N` reads the N shards' partials from `ALMIDE_CORPUS_SHARD_DIR` and judges the whole-corpus ceilings and the name-keyed bridge ledger; unset = the unsharded gate |
 | `ALMIDE_CORPUS_SHARD_DIR=value` | harness | directory where a sharded corpus gate writes its walked-fixture list and its partial counts / bridge names, and where `merge/N` reads them; unset = a local slice that writes nothing |
