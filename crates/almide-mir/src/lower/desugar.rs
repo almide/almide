@@ -463,8 +463,8 @@ fn desugar_all_try_call_access_passes(
         .or_else(|| desugar_bytes_index_calls(cur))
         // Matrix BinOps → matrix.mul/add/sub — same contract.
         .or_else(|| desugar_matrix_binops(cur))
-        // `buf[i] = v` over Bytes → `bytes.set_at(buf, i, v)` — same contract
-        // (the rewrite adds ONE counted Module call matching the lowering's CallFn).
+        // `buf[i] = v` over Bytes → the checked `bytes.index` then `bytes.set_at`
+        // (#2893) — same contract (both counted Module calls match the lowering's).
         .or_else(|| desugar_bytes_index_assign(cur, params))
         // `xs[a..b]` slice RuntimeCall → `list.slice(xs, a, b)` — same contract
         // (an elided RuntimeCall becomes ONE counted pure Module call, both sides).
