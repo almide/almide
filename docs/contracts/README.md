@@ -170,7 +170,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-132 | mut parameters of reallocating containers persist to the caller at every call position | 0.28.6 | active | fixture | 7 |
 | C-133 | env.get observes the host environment identically on native and wasm | 0.29.0 | active | fixture | 1 |
 | C-134 | Vendored-libm atan / tanh are byte-identical cross-target | 0.30.0 | active | fuzz(3000) | 1 |
-| C-135 | Declared-Unit effect fn ABI agrees between def and every call site | 0.30.0 | active | fixture | 1 |
+| C-135 | Declared-Unit effect fn ABI agrees between def and every call site | 0.30.0 | active | fixture | 2 |
 | C-136 | In-place place mutations persist to the subsequent read on both targets | 0.30.0 | active | fixture | 1 |
 | C-137 | Relative fs paths resolve against the host CWD on wasm | 0.31.0 | active | fixture | 1 |
 | C-138 | ok/err ctor with a stdlib-call payload materializes the real value | 0.31.0 | active | fixture | 1 |
