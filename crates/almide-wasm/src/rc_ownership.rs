@@ -447,8 +447,19 @@ impl Emitter<'_> {
             // (#2010) — so a container storing the read co-owns it exactly
             // as it would a plain local's block. (The cell skip this
             // replaced dated from when an occupant was never released.)
+            // A top-let GLOBAL (#2803) is a holder too: the module keeps its
+            // one credit for the program's life and never releases it, but
+            // the container DOES release what it stores — without the +1 the
+            // container's drop freed the global's block while the global
+            // still named it, and the next allocation reused it.
             almide_ir::IrExprKind::Var { id } => {
-                let Some(&(_, vt)) = self.locals.get(id) else { return };
+                let vt = match self.locals.get(id) {
+                    Some(&(_, vt)) => vt,
+                    None => match self.globals.get(&(self.var_space, *id)) {
+                        Some(&(_, gt)) => gt,
+                        None => return,
+                    },
+                };
                 self.share_handle_top(vt);
             }
             // A control funnel can RETURN a var borrow through its arm
