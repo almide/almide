@@ -13,7 +13,7 @@
 //! - #2825 the connect timeout and the response size cap.
 //!
 //! Environment-dependent cases run in a CHILD process (this test binary
-//! re-executed on `child_request` with the request in `ALMIDE_AUDIT_CHILD`):
+//! re-executed on `child_request` with the request in `HTTP_AUDIT_CHILD_SPEC`):
 //! the proxy and trust variables are read from the process environment, and
 //! setting them in-process would race the other tests (and needs `unsafe`,
 //! which the workspace forbids). Every peer, proxy and TLS server is a thread
@@ -123,7 +123,7 @@ fn in_child(spec: &str, env: &[(&str, &str)]) -> String {
     ] {
         cmd.env_remove(v);
     }
-    cmd.env("ALMIDE_AUDIT_CHILD", spec);
+    cmd.env("HTTP_AUDIT_CHILD_SPEC", spec);
     for (k, v) in env {
         cmd.env(k, v);
     }
@@ -136,12 +136,12 @@ fn in_child(spec: &str, env: &[(&str, &str)]) -> String {
         .unwrap_or_else(|| panic!("child printed no RESULT line\nstdout:\n{stdout}\nstderr:\n{}", String::from_utf8_lossy(&out.stderr)))
 }
 
-/// The child side: perform the request `ALMIDE_AUDIT_CHILD` describes and
+/// The child side: perform the request `HTTP_AUDIT_CHILD_SPEC` describes and
 /// print `RESULT:ok <status> <body>` or `RESULT:err <message>`. A no-op in
 /// an ordinary test run.
 #[test]
 fn child_request() {
-    let Ok(spec) = std::env::var("ALMIDE_AUDIT_CHILD") else { return };
+    let Ok(spec) = std::env::var("HTTP_AUDIT_CHILD_SPEC") else { return };
     let parts: Vec<&str> = spec.splitn(4, '|').collect();
     let (kind, method, url) = (parts[0], parts[1], parts[2]);
     let headers: Vec<(String, String)> = parts
