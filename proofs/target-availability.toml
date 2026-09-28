@@ -195,7 +195,15 @@ schema = 3
 # leg lowers it as a native arm over the entropy host op (random.rs), the
 # same arm as random.shuffle. Evidence: spec/stdlib/list_completion_test.almd
 # on the structural test lane.
-pending_self_host_ceiling = 8
+# 2026-09-29 (#2744): 8 -> 5. list.partition, fs.fold_lines_range and
+# fs.fold_lines_chunked lose their structural legs: the leg lowers them as
+# native arms (crates/almide-wasm/src/list_flat.rs, fs_range.rs) — the
+# partition over any element type, the range walkers generic over the
+# accumulator, reading the file through host ops 61 / 62 (op 1's body under
+# the writer's call name). Evidence: spec/wasm_cross/fs_call_head_family.almd
+# on the structural build lane, spec/stdlib/fs_fold_lines_range_test.almd and
+# the five list.partition spec files on the structural test lane.
+pending_self_host_ceiling = 5
 # 2026-09-25 (#2631): 56 -> 64. NEW surface, not a regression: the http call
 # handle (start / poll / read_new / wait / cancel) and the three *_with_limits
 # streaming twins land native-first; each is refused at check time on the
@@ -239,20 +247,6 @@ pending_port_ceiling = 51
 unprobed_ceiling_structural = 0
 unprobed_ceiling_stock_p1 = 0
 unprobed_ceiling_embedded = 0
-
-[[unavailable]]
-fn = "fs.fold_lines_chunked"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1423"
-
-[[unavailable]]
-fn = "fs.fold_lines_range"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "structural-leg-gap: the incumbent links the four self-host twins (#1423 bucket A) and the default route BUILDS; the structural leg has no fold_lines_range arm yet and declines under ALMIDE_WASM_STRUCTURAL=1"
-issue = "#1423"
 
 [[unavailable]]
 fn = "http.anthropic_streaming_call"
@@ -411,13 +405,6 @@ legs = ["stock-p1"]
 class = "pending-port"
 reason = "embedded-lane-served (#2650, C-367): `almide run --target wasm` serves it — one instance, sequential, the same status, header set and body through the shared server core (host ops 70..=72); a stock p1 artifact has no listening socket, so `almide build --target wasm` refuses it — run it with `almide run --target wasm` or natively"
 issue = "#2659"
-
-[[unavailable]]
-fn = "list.partition"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1827"
 
 [[unavailable]]
 fn = "matrix.linear_q1_0_row_no_bias"
