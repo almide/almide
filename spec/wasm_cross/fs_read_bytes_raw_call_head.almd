@@ -1,0 +1,36 @@
+// @contract: C-215
+// #2890 — the Bytes-typed readers name THEMSELVES in an error. The structural
+// wasm leg served `fs.read_bytes_raw` / `fs.read_bytes_raw_if_exists` through
+// the host ops of `fs.read_bytes` / `fs.read_bytes_if_exists`, and the host
+// spells a message from the op's call name (#2090), so the wasm build said
+// `fs.read_bytes(...)` where native says `fs.read_bytes_raw(...)`. Each call
+// now has its own op (63 / 64). Both failure kinds per call — a missing path
+// and a directory — plus the success cells, temp dir redacted.
+import fs
+
+fn redact(msg: String, dir: String) -> String = string.replace(msg, dir, "<TMP>")
+
+fn raw(name: String, r: Result[Bytes, String], d: String) -> Unit = println(match r {
+  ok(b) => "${name}=OK(${bytes.len(b)})",
+  err(m) => "${name}=ERR[${redact(m, d)}]",
+})
+
+fn raw_opt(name: String, r: Result[Bytes?, String], d: String) -> Unit = println(match r {
+  ok(some(b)) => "${name}=SOME(${bytes.len(b)})",
+  ok(none) => "${name}=NONE",
+  err(m) => "${name}=ERR[${redact(m, d)}]",
+})
+
+effect fn main() -> Unit = {
+  let d = fs.create_temp_dir("rawhead")!
+  let f = d + "/f.bin"
+  fs.write(f, "abc")!
+  fs.mkdir_p(d + "/sub")!
+  raw("read_bytes_raw(file)", fs.read_bytes_raw(f), d)
+  raw("read_bytes_raw(missing)", fs.read_bytes_raw(d + "/nope"), d)
+  raw("read_bytes_raw(dir)", fs.read_bytes_raw(d + "/sub"), d)
+  raw_opt("read_bytes_raw_if_exists(file)", fs.read_bytes_raw_if_exists(f), d)
+  raw_opt("read_bytes_raw_if_exists(missing)", fs.read_bytes_raw_if_exists(d + "/nope"), d)
+  raw_opt("read_bytes_raw_if_exists(dir)", fs.read_bytes_raw_if_exists(d + "/sub"), d)
+  fs.remove_all(d)!
+}
