@@ -387,6 +387,15 @@ fn collect_binds_data_b(
             collect_binds(expr, out, seen, types)?;
             collect_binds(fallback, out, seen, types)
         }
+        // `fan { a, b }` lowers its arms inline in this frame
+        // (`lower_fan_block`), so a binder an arm carries — the `!` arm's
+        // hoisted `let t = call` — is a local of THIS frame (#2746).
+        IrExprKind::Fan { exprs } => {
+            for x in exprs {
+                collect_binds(x, out, seen, types)?;
+            }
+            Ok(())
+        }
         IrExprKind::StringInterp { parts } => {
             for p in parts {
                 if let IrStringPart::Expr { expr } = p {
