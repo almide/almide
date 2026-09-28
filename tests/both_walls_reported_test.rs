@@ -60,6 +60,13 @@ fn both_leg_walls_are_reported_with_their_leg() {
         stderr.contains("both wasm legs refused"),
         "the both-legs note is missing; stderr:\n{stderr}"
     );
+    // #2807: the structural wall says where it came from — the reason string
+    // alone (`call-fn:two:mut-param`, `ty-mismatch:…`) names no location, and
+    // in a 77-file package that could not be acted on.
+    assert!(
+        stderr.contains("\n  --> in fn `main` (entry file, line 10)"),
+        "the structural wall's site line is missing (#2807); stderr:\n{stderr}"
+    );
 }
 
 /// The added lines must NOT appear when the reroute succeeds: a shape the
