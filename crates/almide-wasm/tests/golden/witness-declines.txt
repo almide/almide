@@ -13,12 +13,12 @@ call-arg:Record	2
 call-arg:StringInterp	8
 call-arg:Tuple	2
 call-arg:TupleIndex	1
-call:ctor	41
+call:ctor	42
 call:target:Computed	18
 display	10
 effect	131
-lambda	188
-list-elem	127
+lambda	193
+list-elem	128
 module-arm:unaudited:bytes.push	2
 module-arm:unaudited:bytes.set_at	1
 module-arm:unaudited:list.clear	2
@@ -33,7 +33,7 @@ rhs:BinOp	787
 rhs:Block	154
 rhs:EmptyMap	2
 rhs:Fan	2
-rhs:If	648
+rhs:If	649
 rhs:IndexAccess	1
 rhs:Lambda	4
 rhs:MapAccess	1
@@ -41,13 +41,13 @@ rhs:MapLiteral	6
 rhs:Match	5
 rhs:Member	2
 rhs:OptionNone	26
-rhs:OptionSome	14
+rhs:OptionSome	15
 rhs:Range	3
-rhs:Record	39
+rhs:Record	40
 rhs:ResultErr	3
 rhs:ResultOk	16
 rhs:RuntimeCall	66
-rhs:Tuple	10
+rhs:Tuple	12
 rhs:Unwrap	2
 rhs:UnwrapOr	2
 scan	3
@@ -70,7 +70,7 @@ stmt:Expr:call:target:Computed	1
 stmt:FieldAssign	1
 stmt:Guard	9
 stmt:IndexAssign	6
-tail:BinOp	699
+tail:BinOp	701
 tail:Block	17
 tail:If	4626
 tail:Lambda	10
@@ -89,4 +89,4 @@ tail:TupleIndex	4
 tail:UnOp	1
 tail:UnwrapOr	14
 tail:While	4
-top-lets	27
+top-lets	28
