@@ -145,8 +145,16 @@ pub(crate) fn lower_resolved(
         // inside a linked stub returned the codepoint). Only fully
         // self-contained modules (every fn has a real body — url, html) are
         // lowered and linked; everything else stays bridge-resolved.
-        let has_bodyless = mod_prog.decls.iter().any(|d| matches!(d, crate::ast::Decl::Fn { body: None, .. }));
-        if has_bodyless {
+        // A bodyless `@extern(...)` decl is not a surface (#2878): it is the
+        // spec's other spelling of `fn f(...) -> T = _` with an extern
+        // binding, lowered to the same Hole body, and the emitter turns it
+        // into a declared import (or an `extern-native` wall). Skipping its
+        // module sent every call into that module's ORDINARY fns to a
+        // `call:` wall.
+        let has_bridge_surface = mod_prog.decls.iter().any(|d| {
+            matches!(d, crate::ast::Decl::Fn { body: None, extern_attrs, .. } if extern_attrs.is_empty())
+        });
+        if has_bridge_surface {
             continue;
         }
         let saved_self = checker.env.self_module_name;

@@ -779,7 +779,10 @@ fn collect_program_fns(ir: &IrProgram) -> Vec<(&IrFunction, Option<String>, u32)
             // boundary, not an implementation. Registering it would
             // shadow the self-host registry's real implementation with
             // an unlowersble stub (found by the burn-up: expr:Hole ×70).
-            let is_surface = matches!(f.body.kind, IrExprKind::Hole);
+            // An `@extern` Hole is NOT a surface (#2876): it is the module's
+            // host binding, registered like the entry program's so a call
+            // from anywhere reaches the declared import (`extern_import`).
+            let is_surface = matches!(f.body.kind, IrExprKind::Hole) && f.extern_attrs.is_empty();
             if !f.is_test && !is_surface {
                 program_fns.push((
                     f,
