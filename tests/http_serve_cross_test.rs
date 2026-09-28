@@ -78,8 +78,8 @@ fn start(wasm: bool, port: u16) -> Child {
         c.args(["--target", "wasm"]);
     }
     c.arg("--").arg(port.to_string());
-    // Own process group: `almide run` spawns the native binary as a child,
-    // and the kill below must take the whole tree.
+    // Own process group: the kill below must take the whole tree (the wasm
+    // lane and a Windows-style launcher are not one process with the program).
     c.process_group(0).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     c.spawn().expect("almide runs")
 }
@@ -366,8 +366,8 @@ fn the_response_comparator_rejects_what_c367_observes_and_accepts_what_it_does_n
 //
 // `spec/serve_cross/http_serve_shutdown.almd` runs with stdout redirected to
 // a FILE, where stdout is 64 KiB-buffered: before #2692 a SIGTERM lost every
-// line. Natively the driver runs the BUILT binary: `almide run` spawns the
-// program as a child, and a signal to the launcher is the launcher's.
+// line. Natively the two tests below run the BUILT binary; the launcher
+// tests after them run the same fixture through `almide run` (#2809).
 
 fn shutdown_fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/serve_cross/http_serve_shutdown.almd")
@@ -409,15 +409,26 @@ struct Served {
 /// answer one request — which proves `http.serve` armed its signal handling,
 /// so the signals below never meet the default disposition.
 fn serve_to_file(wasm: bool, what: &str) -> Served {
-    let port = free_port();
-    let out = scratch(what).join(if wasm { "wasm.out" } else { "native.out" });
-    let mut c = if wasm {
+    let c = if wasm {
         let mut c = Command::new(almide_bin());
         c.arg("run").arg(shutdown_fixture()).args(["--target", "wasm", "--"]);
         c
     } else {
         Command::new(shutdown_binary())
     };
+    serve_cmd_to_file(c, wasm, what)
+}
+
+/// [`serve_to_file`] natively through the launcher: `almide run <fixture>`.
+fn launch_to_file(what: &str) -> Served {
+    let mut c = Command::new(almide_bin());
+    c.arg("run").arg(shutdown_fixture()).arg("--");
+    serve_cmd_to_file(c, false, what)
+}
+
+fn serve_cmd_to_file(mut c: Command, wasm: bool, what: &str) -> Served {
+    let port = free_port();
+    let out = scratch(what).join(if wasm { "wasm.out" } else { "native.out" });
     c.arg(port.to_string());
     c.process_group(0)
         .stdin(Stdio::null())
@@ -512,4 +523,63 @@ fn a_second_sigterm_during_the_drain_flushes_stdout_and_exits_1_on_native_and_th
         assert_eq!(out, "listening\nhit /hello\nhit /stall\n", "wasm={wasm}");
         assert!(answer.is_empty(), "wasm={wasm}: the stalled request was answered: {:?}", String::from_utf8_lossy(&answer));
     }
+}
+
+// ── The launcher (#2809) ──
+//
+// `almide run` used to spawn the program and wait: a SIGTERM to the launcher's
+// pid alone killed the launcher and left the server running, undrained. The
+// launcher now execs the program (Unix), so the pid a supervisor holds IS the
+// program's. Both runs below start in a process group of their own.
+
+fn signal(target: &str, sig: &str) -> bool {
+    Command::new("kill").args([sig, "--", target]).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
+}
+
+/// Some process of the group `pgid` still exists (a zombie is reaped by now).
+fn group_alive(pgid: u32) -> bool {
+    signal(&format!("-{pgid}"), "-0")
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_sigterm_to_the_almide_run_pid_alone_drains_the_program_and_leaves_no_process_behind() {
+    let mut served = launch_to_file("launcher-term");
+    let pgid = served.child.id();
+    // The control: the orphan probe below sees a live group.
+    assert!(group_alive(pgid), "the orphan probe does not see the running server's group");
+    let nap = ask_in_background(served.port, b"GET /nap HTTP/1.1\r\n\r\n");
+    std::thread::sleep(Duration::from_millis(300));
+    // The launcher's pid ONLY, as a supervisor holding it sends it.
+    assert!(signal(&pgid.to_string(), "-TERM"), "could not signal the launcher");
+    let code = exit_code_within(&mut served, 20);
+    let answer = nap.join().expect("the client thread");
+    let out = std::fs::read_to_string(&served.out).expect("read the stdout file");
+    assert!(answer.ends_with(b"\r\n\r\nok /nap"), "the request in flight was not answered: {:?}", String::from_utf8_lossy(&answer));
+    // The PROGRAM drained: its stdout is whole, "stopped" included.
+    assert_eq!(out, "listening\nhit /hello\nhit /nap\nstopped\n");
+    // The status `almide run` exits with is the program's: main returned, 0.
+    assert_eq!(code, Some(0), "almide run's exit code");
+    assert!(!group_alive(pgid), "a process of the run outlived `almide run` (orphaned program)");
+    assert!(TcpStream::connect(("127.0.0.1", served.port)).is_err(), "still accepting");
+}
+
+/// A terminal's Ctrl-C signals the whole foreground group. The program must
+/// see it ONCE: a launcher that also forwarded it would deliver a second
+/// signal, which is the forced stop (exit 1, no "stopped").
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_sigint_to_the_almide_run_group_drains_once_and_is_not_a_forced_stop() {
+    let mut served = launch_to_file("launcher-int");
+    let pgid = served.child.id();
+    let nap = ask_in_background(served.port, b"GET /nap HTTP/1.1\r\n\r\n");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(signal(&format!("-{pgid}"), "-INT"), "could not signal the run's group");
+    let code = exit_code_within(&mut served, 20);
+    let answer = nap.join().expect("the client thread");
+    let out = std::fs::read_to_string(&served.out).expect("read the stdout file");
+    assert!(answer.ends_with(b"\r\n\r\nok /nap"), "the request in flight was not answered: {:?}", String::from_utf8_lossy(&answer));
+    assert_eq!(out, "listening\nhit /hello\nhit /nap\nstopped\n");
+    assert_eq!(code, Some(0), "almide run's exit code");
+    assert!(!group_alive(pgid), "a process of the run outlived `almide run`");
 }
