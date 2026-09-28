@@ -55,6 +55,27 @@ fn lower_to_ir_impl(
     lower_resolved(path, source_text, program, resolved, tests)
 }
 
+/// An explicitly imported stdlib module (`import bytes`) lowers its `= _`
+/// intrinsic declarations as `Hole` bodies. Where the self-host registry
+/// implements that surface, the declaration is dropped so the call links the
+/// registry's body exactly as it does when the module is auto-imported and
+/// never lowered (#2747: `bytes.write_uint16` walled `expr:Hole` behind an
+/// `import bytes` and lowered without one).
+fn drop_registered_intrinsic_stubs(name: &str, module: &mut crate::ir::IrModule) {
+    if !crate::stdlib::is_stdlib_module(name) && !crate::stdlib::is_bundled_module(name) {
+        return;
+    }
+    let registered = |f: &crate::ir::IrFunction| {
+        let surface = format!("{name}.{}", f.name.as_str());
+        almide_types::self_host_registry::self_host_runtime()
+            .iter()
+            .any(|(_, maps)| maps.iter().any(|(_, s)| *s == surface))
+    };
+    module
+        .functions
+        .retain(|f| !(matches!(f.body.kind, crate::ir::IrExprKind::Hole) && registered(f)));
+}
+
 /// Where the modules an entry program imports come from (#2554).
 ///
 /// The CLI reads them off disk through the project resolver; a consumer
@@ -179,9 +200,10 @@ pub(crate) fn lower_resolved(
         let import_table_name = self_name.as_deref().unwrap_or(name);
         let (mod_table, _) = crate::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
         let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-        let mod_ir_module = crate::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+        let mut mod_ir_module = crate::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
         checker.env.import_table = saved_table;
         checker.env.self_module_name = saved_self;
+        drop_registered_intrinsic_stubs(name, &mut mod_ir_module);
         ir.modules.push(mod_ir_module);
     }
     // #2865: a module read off disk is the package's own, whatever its key
