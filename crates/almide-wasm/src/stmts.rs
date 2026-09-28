@@ -154,15 +154,7 @@ impl Emitter<'_> {
                 // Result` (#1968), routing a correct program to the
                 // incumbent (#1967). The native walker strips the same
                 // wrapper (#1926).
-                // A braced else (`else { err(m)! }`) is the same propagation
-                // inside an empty block (#2748): the block adds no scope, so
-                // it is seen through.
-                let mut bare = else_;
-                while let IrExprKind::Block { stmts, expr: Some(inner) } = &bare.kind
-                    && stmts.is_empty()
-                {
-                    bare = inner;
-                }
+                let bare = crate::data::err_channel::through_empty_blocks(else_);
                 let ret_direct = match &bare.kind {
                     IrExprKind::Unwrap { expr } | IrExprKind::Try { expr }
                         if matches!(want, SliceTy::Result(..))
