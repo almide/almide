@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 707  implementations = 1730
+# holes = 707  implementations = 1731
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -2395,9 +2395,9 @@ total    = 4
 module   = "list"
 name     = "partition"
 native   = 1
-emitter  = 0
+emitter  = 1
 selfhost = 2
-total    = 3
+total    = 4
 [[hole]]
 module   = "list"
 name     = "reduce"
