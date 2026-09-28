@@ -26,8 +26,21 @@ impl NanoPass for IrLinkFlattenPass {
     fn barrier(&self) -> bool { true }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        // The entry program's own declarations are reached first: a bare
+        // Rust-reserved name there (`type Option`) is scoped to the entry
+        // program's type scope (`self`), the scope #1828 gives an entry
+        // declaration of a stdlib-owned name — one flat `almide_rt_self_<Name>`.
+        let mut reserved_origins: HashMap<String, String> = HashMap::new();
+        for td in &program.type_decls {
+            note_rust_reserved_type_name(td, almide_lang::stdlib_info::ROOT_TYPE_SCOPE, &mut reserved_origins);
+        }
+
         if program.modules.is_empty() {
-            return PassResult { program, changed: false };
+            let renamed = qualify_rust_reserved_type_names(&mut program, &reserved_origins);
+            if renamed {
+                mangle_qualified_type_names(&mut program);
+            }
+            return PassResult { program, changed: renamed };
         }
 
         let modules = std::mem::take(&mut program.modules);
@@ -45,6 +58,7 @@ impl NanoPass for IrLinkFlattenPass {
             // If both an alias and a non-alias exist for the same name,
             // keep the alias (so type_aliases expansion works).
             for td in module.type_decls {
+                note_rust_reserved_type_name(&td, &mod_ident, &mut reserved_origins);
                 merge_module_type_decl(td, &mut emitted_types, &mut program.type_decls);
             }
 
@@ -61,6 +75,12 @@ impl NanoPass for IrLinkFlattenPass {
             }
         }
 
+        // #2842: a declaration that arrived under a BARE name the generated
+        // crate already uses (`Option`, `Result`, `String`, …) is scoped to its
+        // origin first, so the mangle below treats it like every other module
+        // type instead of emitting a top-level item that shadows std.
+        qualify_rust_reserved_type_names(&mut program, &reserved_origins);
+
         // #433: user-module types arrived under their qualified canonical name
         // `mod.Type` (lowering pinned them so two packages' same-name types stay
         // distinct). A `.` is not a valid Rust/WASM identifier, so flatten each to
@@ -70,6 +90,65 @@ impl NanoPass for IrLinkFlattenPass {
 
         PassResult { program, changed: true }
     }
+}
+
+/// Type names the generated Rust crate already binds at its top level, which a
+/// user declaration of the same bare name would shadow for the whole crate:
+/// every type and trait in the Rust 2024 prelude, and the collections the
+/// generated preamble imports (`use std::collections::{HashMap, HashSet}`).
+/// The runtime's own items all carry the `Almide` / `almide_` prefix, which
+/// [`is_rust_reserved_type_name`] reserves as a family.
+///
+/// A user type normally never reaches Rust under a bare name that could clash:
+/// a module's types are mangled `almide_rt_<mod>_<Type>`. Two kinds arrive
+/// bare — the entry program's own types, and the types of a package module
+/// whose key coincides with a stdlib module name (`src/option.almd`), whose
+/// declarations the frontend keeps bare like the stdlib module's own. Either
+/// one declaring `type Option` emitted `pub struct Option`, and every runtime
+/// `Option<A>` then named the user's struct (rustc E0107, #2842).
+pub const RUST_RESERVED_TYPE_NAMES: &[&str] = &[
+    // std::prelude::rust_2024 — types, traits and their variants.
+    "Option", "Some", "None", "Result", "Ok", "Err", "String", "Vec", "Box",
+    "ToOwned", "ToString", "Clone", "Copy", "Send", "Sized", "Sync", "Unpin",
+    "Drop", "Fn", "FnMut", "FnOnce", "AsyncFn", "AsyncFnMut", "AsyncFnOnce",
+    "AsRef", "AsMut", "Into", "From", "TryFrom", "TryInto", "Default",
+    "Iterator", "IntoIterator", "DoubleEndedIterator", "ExactSizeIterator",
+    "Extend", "FromIterator", "PartialEq", "PartialOrd", "Eq", "Ord",
+    "Future", "IntoFuture",
+    // The generated preamble's crate-level imports.
+    "HashMap", "HashSet",
+];
+
+/// Would a top-level Rust item with this name shadow one the generated crate
+/// relies on? See [`RUST_RESERVED_TYPE_NAMES`].
+pub fn is_rust_reserved_type_name(name: &str) -> bool {
+    RUST_RESERVED_TYPE_NAMES.contains(&name) || name.starts_with("Almide") || name.starts_with("almide_")
+}
+
+/// Record `td`'s origin when it is declared under a bare reserved name. The
+/// first origin wins, as the first declaration does in the merge.
+fn note_rust_reserved_type_name(td: &IrTypeDecl, origin: &str, out: &mut HashMap<String, String>) {
+    let name = td.name.as_str();
+    if !name.contains('.') && is_rust_reserved_type_name(name) {
+        out.entry(name.to_string()).or_insert_with(|| origin.to_string());
+    }
+}
+
+/// Rename every bare reserved-name declaration to `<origin>.<Name>` and every
+/// reference to it, so [`mangle_qualified_type_names`] gives it the flat
+/// `almide_rt_<origin>_<Name>` it gives any module type, and the repr keeps the
+/// declared spelling. A builtin `Option[T]` / `Result[T, E]` is
+/// `Ty::Applied`, never `Ty::Named`, so a `Named` reference to the bare name is
+/// the user's type. Returns whether anything was renamed.
+fn qualify_rust_reserved_type_names(program: &mut IrProgram, origins: &HashMap<String, String>) -> bool {
+    if origins.is_empty() {
+        return false;
+    }
+    let map: HashMap<String, Sym> = origins.iter()
+        .map(|(name, origin)| (name.clone(), sym(&format!("{}.{}", origin, name))))
+        .collect();
+    rename_program_types(program, &map);
+    true
 }
 
 /// Per-`td` body of `IrLinkFlattenPass::run`'s type-decl merge loop,
@@ -104,36 +183,45 @@ fn mangle_qualified_type_names(program: &mut IrProgram) {
             // (#1836, C-009).
             program.codegen_annotations.repr_names
                 .insert(nn.as_str().to_string(), td.declared_name().to_string());
-            td.name = *nn;
         }
-        rename_type_decl_kind(&mut td.kind, &map);
     }
+    rename_program_types(program, &map);
     // Twin decls now share one canonical name — keep the first, drop the rest
     // (identical shapes; a second `pub struct Msg` would be E0428).
-    {
-        let mut seen: std::collections::HashSet<Sym> = std::collections::HashSet::new();
-        program.type_decls.retain(|td| seen.insert(td.name));
+    let mut seen: std::collections::HashSet<Sym> = std::collections::HashSet::new();
+    program.type_decls.retain(|td| seen.insert(td.name));
+}
+
+/// Rename every declaration named in `map`, and every carrier of a type name
+/// that can reference one: decl bodies, fn signatures and bodies, top-lets,
+/// the var and def tables, and the name-keyed codegen annotations.
+fn rename_program_types(program: &mut IrProgram, map: &HashMap<String, Sym>) {
+    for td in &mut program.type_decls {
+        if let Some(nn) = map.get(td.name.as_str()) {
+            td.name = *nn;
+        }
+        rename_type_decl_kind(&mut td.kind, map);
     }
     for f in &mut program.functions {
         for p in &mut f.params {
-            p.ty = rename_ty(&p.ty, &map);
+            p.ty = rename_ty(&p.ty, map);
         }
-        f.ret_ty = rename_ty(&f.ret_ty, &map);
+        f.ret_ty = rename_ty(&f.ret_ty, map);
         let body = std::mem::replace(&mut f.body, IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None });
-        f.body = rename_expr(body, &map);
+        f.body = rename_expr(body, map);
     }
     for tl in &mut program.top_lets {
-        tl.ty = rename_ty(&tl.ty, &map);
+        tl.ty = rename_ty(&tl.ty, map);
         let v = std::mem::replace(&mut tl.value, IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None });
-        tl.value = rename_expr(v, &map);
+        tl.value = rename_expr(v, map);
     }
     for v in &mut program.var_table.entries {
-        v.ty = rename_ty(&v.ty, &map);
+        v.ty = rename_ty(&v.ty, map);
     }
     for d in &mut program.def_table.entries {
-        d.ty = rename_ty(&d.ty, &map);
+        d.ty = rename_ty(&d.ty, map);
     }
-    remap_codegen_annotations(&mut program.codegen_annotations, &map);
+    remap_codegen_annotations(&mut program.codegen_annotations, map);
 }
 
 /// Reference-graph "type name → its group's canonical name" map-building
@@ -318,8 +406,11 @@ fn rename_call_type_args(type_args: &mut [Ty], map: &HashMap<String, Sym>) {
 /// keys first so `m.Cfg` never clips `m.CfgSet`.
 fn rename_inline_rust_template(template: &mut String, map: &HashMap<String, Sym>) {
     if template.contains('.') {
+        // Only a dotted key is replaced textually: a bare one (`Option`, from
+        // the reserved-name qualification) is also the spelling of the Rust
+        // type every runtime template names.
         let mut keys: Vec<&String> = map.keys()
-            .filter(|k| template.contains(k.as_str()))
+            .filter(|k| k.contains('.') && template.contains(k.as_str()))
             .collect();
         keys.sort_by_key(|k| std::cmp::Reverse(k.len()));
         for k in keys {
