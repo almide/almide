@@ -168,3 +168,154 @@ fn a_direct_dep_after_one_with_transitive_deps_records_its_own_commit() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+// ── #2532: the lock records what MVS selected, not what the manifest asked ──
+//
+// The root asks for `raise_foo@v1.0.0`; `raise_mid@v1.0.0` asks for
+// `raise_foo@v1.1.0`. MVS builds v1.1.0. The lock used to record the root's
+// REQUEST (`ref = "v1.0.0"` and v1.0.0's commit): a true triple, but not the
+// one that was built, so reading the lock could not say what was compiled.
+// Decision (2026-09-28): the lock records the resolved result — the selected
+// version's ref and that version's commit, as Cargo.lock does. The request
+// lives only in almide.toml.
+
+/// `raise_foo` with one commit per version, each tagged `v<ver>`. Version
+/// 1.1.0 and later export `since_1_1`, so a build that type-checks against it
+/// proves the raised version is the one compiled. Answers each tag's commit.
+fn commit_versioned_foo(root: &Path, versions: &[&str]) -> (PathBuf, Vec<String>) {
+    let repo = root.join("raise_foo");
+    std::fs::create_dir_all(repo.join("src")).expect("mkdir");
+    git(&repo, &["init", "-q", "-b", "main"]);
+    let mut commits = Vec::new();
+    for ver in versions {
+        std::fs::write(
+            repo.join("almide.toml"),
+            format!("[package]\nname = \"raise_foo\"\nversion = \"{ver}\"\n"),
+        )
+        .expect("write manifest");
+        let extra = if *ver == "1.0.0" { "" } else { "fn since_1_1() -> String = \"raised\"\n" };
+        std::fs::write(
+            repo.join("src").join("mod.almd"),
+            format!("fn foo_version() -> String = \"{ver}\"\n{extra}"),
+        )
+        .expect("write module");
+        git(&repo, &["add", "-A"]);
+        git(&repo, &["commit", "-q", "-m", ver]);
+        git(&repo, &["tag", &format!("v{ver}")]);
+        commits.push(git(&repo, &["rev-parse", "HEAD"]));
+    }
+    (repo, commits)
+}
+
+fn tagged(name: &str, repo: &Path, tag: &str) -> String {
+    format!("{name} = {{ git = \"file://{}\", tag = \"{tag}\" }}", repo.display())
+}
+
+fn write_consumer(proj: &Path, foo_line: &str, mid_line: &str) {
+    std::fs::write(
+        proj.join("almide.toml"),
+        format!("[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n\n[dependencies]\n{foo_line}\n{mid_line}\n"),
+    )
+    .expect("write manifest");
+}
+
+fn entry<'a>(entries: &'a [almide::project::LockedDep], name: &str) -> &'a almide::project::LockedDep {
+    entries
+        .iter()
+        .find(|l| l.name == name)
+        .unwrap_or_else(|| panic!("no '{name}' entry in the lock: {entries:?}"))
+}
+
+#[test]
+fn a_dependency_raised_by_mvs_is_locked_at_the_version_that_was_built() {
+    if !tools_available() {
+        eprintln!("skipping: almide or git not available");
+        return;
+    }
+    let root = std::env::temp_dir().join(format!("almide-issue2532-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let home = root.join("home");
+    std::fs::create_dir_all(&home).expect("mkdir");
+
+    let (foo, commits) = commit_versioned_foo(&root, &["1.0.0", "1.1.0", "1.2.0"]);
+    let (c10, c11, c12) = (commits[0].clone(), commits[1].clone(), commits[2].clone());
+    let (mid, mid_commit) =
+        commit_package(&root, "raise_mid", &[tagged("raise_foo", &foo, "v1.1.0")]);
+
+    let proj = root.join("proj");
+    std::fs::create_dir_all(proj.join("src")).expect("mkdir");
+    // `since_1_1` exists only from 1.1.0: the check passing is itself the
+    // proof that the raised version is what gets compiled.
+    std::fs::write(
+        proj.join("src").join("main.almd"),
+        "import io\nimport raise_foo\nimport raise_mid\n\n\
+         effect fn main() -> Unit = {\n  io.print(raise_foo.since_1_1() + raise_mid.raise_mid_fn())\n}\n",
+    )
+    .expect("write entry");
+    write_consumer(&proj, &tagged("raise_foo", &foo, "v1.0.0"), &dep_line("raise_mid", &mid));
+
+    // 1. The raise: the lock names v1.1.0 and v1.1.0's commit.
+    let (ok, stderr) = check(&proj, &home);
+    assert!(ok, "the first check should succeed:\n{stderr}");
+    let entries = lock_entries(&proj);
+    let foo_entry = entry(&entries, "raise_foo");
+    assert_eq!(
+        (foo_entry.ref_name.as_str(), foo_entry.commit.as_str()),
+        ("v1.1.0", c11.as_str()),
+        "the lock must record the version MVS built (v1.1.0 = {c11}), not the root's \
+         request (v1.0.0 = {c10}) — #2532"
+    );
+    assert_eq!(foo_entry.git, format!("file://{}", foo.display()));
+    // An unraised dependency is locked at its own request, as before.
+    let mid_entry = entry(&entries, "raise_mid");
+    assert_eq!((mid_entry.ref_name.as_str(), mid_entry.commit.as_str()), ("v1.0.0", mid_commit.as_str()));
+    assert_eq!(entries.len(), 2, "the lock carries the direct deps only: {entries:?}");
+    let first = std::fs::read(proj.join("almide.lock")).expect("read lock");
+
+    // 2. A lock whose ref is ABOVE the manifest's request is not drift: a warm
+    //    re-run accepts it and leaves it byte-identical…
+    let (ok, stderr) = check(&proj, &home);
+    assert!(ok, "a warm re-run must accept the resolved lock:\n{stderr}");
+    assert_eq!(std::fs::read(proj.join("almide.lock")).expect("read lock"), first, "warm re-run changed the lock");
+    //    …and so does a cold cache, which must fetch the locked commit.
+    let cold = root.join("home-cold");
+    std::fs::create_dir_all(&cold).expect("mkdir");
+    let (ok, stderr) = check(&proj, &cold);
+    assert!(ok, "a cold-cache re-run must resolve the lock it was given:\n{stderr}");
+    assert_eq!(std::fs::read(proj.join("almide.lock")).expect("read lock"), first, "cold re-run changed the lock");
+
+    // 3. A lock written before #2532 recorded the request. It still reads
+    //    (the entry simply does not pin the fetch that is built) and the next
+    //    run rewrites it to the resolved record.
+    std::fs::write(
+        proj.join("almide.lock"),
+        format!(
+            "# almide.lock — auto-generated, do not edit\n\n\
+             raise_foo = {{ git = \"file://{}\", ref = \"v1.0.0\", commit = \"{c10}\" }}\n\
+             raise_mid = {{ git = \"file://{}\", ref = \"v1.0.0\", commit = \"{mid_commit}\" }}\n",
+            foo.display(),
+            mid.display()
+        ),
+    )
+    .expect("write old lock");
+    let (ok, stderr) = check(&proj, &home);
+    assert!(ok, "a pre-#2532 lock must still be accepted:\n{stderr}");
+    assert_eq!(std::fs::read(proj.join("almide.lock")).expect("read lock"), first, "the old lock was not rewritten to the resolved record");
+
+    // 4. Changing the manifest's request re-resolves. Above the transitive
+    //    requirement there is no raise, and the lock names the request itself.
+    write_consumer(&proj, &tagged("raise_foo", &foo, "v1.2.0"), &dep_line("raise_mid", &mid));
+    let (ok, stderr) = check(&proj, &home);
+    assert!(ok, "the check after raising the request should succeed:\n{stderr}");
+    let entries = lock_entries(&proj);
+    let foo_entry = entry(&entries, "raise_foo");
+    assert_eq!((foo_entry.ref_name.as_str(), foo_entry.commit.as_str()), ("v1.2.0", c12.as_str()));
+    //    And back down: the request drops below the transitive one, so MVS
+    //    raises it again and the lock returns to the resolved v1.1.0 record.
+    write_consumer(&proj, &tagged("raise_foo", &foo, "v1.0.0"), &dep_line("raise_mid", &mid));
+    let (ok, stderr) = check(&proj, &home);
+    assert!(ok, "the check after lowering the request should succeed:\n{stderr}");
+    assert_eq!(std::fs::read(proj.join("almide.lock")).expect("read lock"), first);
+
+    let _ = std::fs::remove_dir_all(&root);
+}

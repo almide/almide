@@ -156,21 +156,44 @@ from a manifest that declared the dependency twice) is refused with the two
 lines and the way out — delete one of them, keeping the one whose `git`
 matches `almide.toml`, or delete the lock and let the next run rewrite it.
 
-Test: `tests/manifest_duplicate_key_test.rs`, `tests/lock_roundtrip_test.rs`.
+**The lock records the resolved result, not the request** (#2532). Each entry's
+`ref` and `commit` are those of the version Minimal Version Selection chose for
+that dependency's package — the checkout that was actually built — as
+`Cargo.lock` does. The request lives only in `almide.toml`. When nothing raises
+a dependency the two coincide. When a transitive requirement raises it (the
+manifest asks `foo@v1.0.0`, a dependency asks `foo@v1.1.0`), the entry reads
+`ref = "v1.1.0"` with v1.1.0's commit, even though `almide.toml` still says
+`v1.0.0`; that is not drift and does not re-resolve. Every entry is one fetch's
+own `(git, ref, commit)`, so it is always a triple that was true together.
+
+A pin applies to any request for the same source at the same ref, whoever in
+the graph makes it, so the locked commit is exactly what the next build
+compiles. A request that was walked but not selected (the `v1.0.0` above) is
+resolved from its ref — MVS reads its manifest for requirements, it does not
+build it. Changing a request in `almide.toml` re-resolves as before, and the
+lock is rewritten from the new selection. A lock written before #2532, which
+recorded the root's request, still reads; the next run rewrites the raised
+entries to the resolved record.
+
+Test: `tests/manifest_duplicate_key_test.rs`, `tests/lock_roundtrip_test.rs`,
+`tests/dep_lock_pairing_test.rs`
+(`a_dependency_raised_by_mvs_is_locked_at_the_version_that_was_built`).
 
 ## 8. Resolution Algorithm
 
 ```text
 1. Parse almide.toml → direct dependencies
 2. For each dep:
-   a. If almide.lock has commit → use exact commit (reproducible)
-   b. Else fetch tag/branch → record commit in lock
+   a. If almide.lock has an entry for this (git, ref) → use its exact commit
+   b. Else fetch tag/branch
 3. Parse dep's almide.toml → transitive dependencies
 4. Recurse (depth-first, leaves first)
 5. Dedup by PkgId(name, major):
    - Same (name, major): keep maximum requested version (MVS)
    - Different major: both coexist with versioned names
 6. Detect impossible constraints → error with explanation
+7. Write almide.lock: per direct dependency, the (git, ref, commit) of the
+   version step 5 selected for its package
 ```
 
 ## 9. Error Messages
