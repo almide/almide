@@ -191,7 +191,11 @@ schema = 3
 # Parity evidence: spec/wasm_cross/effect_fn_value_slot_family.almd,
 # spec/stdlib/http_router_test.almd on the structural test lane, and
 # tests/effect_fn_type_carrier_test.rs (a top-level `let app = http.wrap(...)`).
-pending_self_host_ceiling = 9
+# 2026-09-29 (#2749): 9 -> 8. list.shuffle loses its structural leg: the
+# leg lowers it as a native arm over the entropy host op (random.rs), the
+# same arm as random.shuffle. Evidence: spec/stdlib/list_completion_test.almd
+# on the structural test lane.
+pending_self_host_ceiling = 8
 # 2026-09-25 (#2631): 56 -> 64. NEW surface, not a regression: the http call
 # handle (start / poll / read_new / wait / cancel) and the three *_with_limits
 # streaming twins land native-first; each is refused at check time on the
@@ -219,7 +223,13 @@ pending_self_host_ceiling = 9
 # (clock_time_get with clock id 1, the import op 36 already uses) and the
 # p2/p3 components (wasi:clocks/monotonic-clock). Evidence:
 # spec/wasm_cross/datetime_monotonic_ns.almd.
-pending_port_ceiling = 54
+# 2026-09-29 (#2749): 54 -> 51. random.float, random.choice and
+# random.shuffle lose their structural legs: native arms over host op 32
+# (the entropy op random.int's linked body already reaches), generic over the
+# element type, with the native runtime's draw constructions. Evidence:
+# spec/stdlib/random_test.almd and random_shuffle_pair_test.almd on the
+# structural test lane.
+pending_port_ceiling = 51
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
 # HttpRequest readers (http.query_params / req_body / req_header / req_method /
@@ -408,13 +418,6 @@ legs = ["structural"]
 class = "pending-self-host"
 reason = "pending-self-host"
 issue = "#1827"
-
-[[unavailable]]
-fn = "list.shuffle"
-legs = ["structural"]
-class = "pending-self-host"
-reason = "pending-self-host"
-issue = "#1423"
 
 [[unavailable]]
 fn = "matrix.linear_q1_0_row_no_bias"
@@ -685,27 +688,6 @@ class = "pending-port"
 reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
 reason-structural = "host-surface"
-issue = "#1423"
-
-[[unavailable]]
-fn = "random.choice"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1423"
-
-[[unavailable]]
-fn = "random.float"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
-issue = "#1423"
-
-[[unavailable]]
-fn = "random.shuffle"
-legs = ["structural"]
-class = "pending-port"
-reason = "host-surface"
 issue = "#1423"
 
 
