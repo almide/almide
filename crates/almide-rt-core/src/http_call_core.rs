@@ -305,30 +305,18 @@ fn http_call_run(
     headers: &[(String, String)],
 ) -> Result<(), String> {
     let u = http_prepare(method, url, headers)?;
-    let addrs: Vec<std::net::SocketAddr> = std::net::ToSocketAddrs::to_socket_addrs(&(u.host.as_str(), u.port))
-        .map_err(|e| http_call_io_error(sh, &e, "connection"))?
-        .collect();
-    let mut last_err: Option<std::io::Error> = None;
-    let mut stream: Option<TcpStream> = None;
-    for addr in addrs {
-        let dialed = match http_call_step_timeout(sh, false)? {
-            Some(t) => TcpStream::connect_timeout(&addr, t),
-            None => TcpStream::connect(addr),
-        };
-        match dialed {
-            Ok(s) => {
-                stream = Some(s);
-                break;
-            }
-            Err(e) => last_err = Some(e),
-        }
-    }
-    let stream = match (stream, last_err) {
-        (Some(s), _) => s,
-        (None, Some(e)) => return Err(http_call_io_error(sh, &e, "connection")),
-        (None, None) => return Err(format!("connection failed: no address for {}", u.host)),
-    };
-    let route = AlmideHttpRoute { target: u.target.clone() };
+    // The dial (origin or proxy, #2819) is bounded by the wall clock: each
+    // address gets what is left of it, and the proxy handshakes read under
+    // the same clipped timeout.
+    let (stream, route) = http_open_route(&u, &mut |host, port| {
+        let left = || http_call_step_timeout(sh, false).unwrap_or(Some(std::time::Duration::from_millis(1)));
+        let s = http_dial(host, port, &left).map_err(|e| http_call_io_error(sh, &e, "connection"))?;
+        let t = http_call_step_timeout(sh, false)?;
+        s.set_read_timeout(t).ok();
+        s.set_write_timeout(t).ok();
+        Ok(s)
+    })
+    .map_err(|e| if sh.past_deadline() { http_call_total_msg(sh.total_ms) } else { e })?;
     let request = http_request_bytes(method, &u, &route, body, headers);
     // The control copy is what `cancel` shuts down. The timeouts go on the
     // socket that is READ (`AlmideHttpCallSock::tcp`), never on this copy: on
