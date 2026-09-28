@@ -1,0 +1,35 @@
+// @contract: C-370
+// Header refusal (C-370): before anything is dialled, a header name that is
+// not a token, a value holding a control, and a name the client manages
+// (any case) answer err with the name quoted — the same text on native,
+// the embedded lane and the stock p3 component, where the shim checks the
+// frame itself (tests/http_error_class_cross_test.rs runs all three). The
+// port is closed, so a header that passes reads as the connect class.
+import http
+
+fn show(tag: String, r: Result[String, String]) -> Unit = {
+  match r {
+    ok(_) => println("${tag}: unexpected ok"),
+    err(e) => println("${tag}: ${e}"),
+  }
+}
+
+effect fn main() -> Unit = {
+  let url = "http://127.0.0.1:9/"
+  show("name-space", http.request("GET", url, "", ["x bad": "v"]))
+  show("name-colon", http.request("GET", url, "", ["x:y": "v"]))
+  show("value-crlf", http.request("GET", url, "", ["X-A": "a\r\nInjected: 1"]))
+  show("value-nul", http.request("GET", url, "", ["X-A": "a\u{0}b"]))
+  show("host", http.request("GET", url, "", ["Host": "evil.example"]))
+  show("connection", http.request("GET", url, "", ["connection": "keep-alive"]))
+  show("transfer-encoding", http.request("POST", url, "b", ["Transfer-Encoding": "chunked"]))
+  show(
+    "upgrade",
+    http.request_status("GET", url, "", ["UPGRADE": "h2c"]) |> result.map(((c, b)) => b),
+  )
+  show(
+    "proxy-authorization",
+    http.request_bytes("GET", url, "", ["Proxy-Authorization": "x"]) |> result.map((b) => "bytes"),
+  )
+  show("sendable", http.request("GET", url, "", ["X-Ok": "fine"]))
+}
