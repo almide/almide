@@ -423,7 +423,7 @@ impl Emitter<'_> {
     /// leaves (#1675).
     fn intern_kind_msgs(&mut self, prefix: &str) -> [u32; 7] {
         ["Null", "Bool", "Int", "Float", "Str", "Array", "Object"]
-            .map(|k| self.pool.intern(&format!("{prefix}, received {k}")) as u32)
+            .map(|k| self.pool.intern(&format!("{prefix}, received {k}")))
     }
 
     /// Leaves the tag-selected message from `msgs` on the stack: a

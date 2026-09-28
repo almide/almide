@@ -225,8 +225,11 @@ fn probe_dir(tag: &str, src: &str) -> PathBuf {
     d
 }
 
-/// The three legs: (label, extra args, env).
-const LEGS: [(&str, &[&str], &[(&str, &str)]); 3] = [
+/// One leg: (label, extra args, env).
+type Leg = (&'static str, &'static [&'static str], &'static [(&'static str, &'static str)]);
+
+/// The three legs.
+const LEGS: [Leg; 3] = [
     ("native", &[], &[]),
     ("wasm (default route)", &["--target", "wasm"], &[]),
     ("wasm (forced incumbent)", &["--target", "wasm"], &[("ALMIDE_WASM_INCUMBENT", "1")]),
