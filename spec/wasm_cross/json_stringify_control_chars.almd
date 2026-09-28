@@ -1,0 +1,36 @@
+// @contract: C-095
+// JSON string quoting follows RFC 8259 §7 on every serializer and every leg
+// (#2802): `\` and `"` as `\\` and `\"`, U+000A / U+000D / U+0009 as `\n` /
+// `\r` / `\t`, every OTHER U+0000..U+001F as `\u00xx` (lowercase hex, no
+// `\b` / `\f` short forms), and everything else raw UTF-8 — U+007F included.
+// Before, only the five short escapes existed and the rest of the control
+// range came out raw, which a strict parser (Python `json.loads`) refuses.
+// Each control character is stringified as a value AND as a key, through the
+// compact and the pretty form, and parsed back with `json.parse`.
+import json
+
+fn probe(c: Int) -> String = {
+  let s = "a" + string.from_codepoint(c) + "b"
+  let doc = value.object([(s, value.str(s))])
+  let text = json.stringify(doc)
+  let pretty = json.stringify_pretty(doc)
+  let back = json.parse(text) ?? value.null()
+  let back_pretty = json.parse(pretty) ?? value.null()
+  "${c} ${text} ${value.stringify(value.str(s))} ${back == doc} ${back_pretty == doc}"
+}
+
+fn main() -> Unit = {
+  for c in 0..<32 {
+    println(probe(c))
+  }
+  println(probe(34))
+  println(probe(92))
+  println(probe(127))
+  // the whole range in one string, compact and pretty
+  let all = list.range(0, 32) |> list.map((c) => string.from_codepoint(c)) |> list.join("")
+  let doc = value.array([value.str(all)])
+  println(json.stringify(doc))
+  println(json.stringify_pretty(doc))
+  let round = (json.parse(json.stringify(doc)) ?? value.null()) == doc
+  println("round ${round}")
+}
