@@ -8,4 +8,3 @@
 
 cell:stdlib-module:option/src/main.almd  #2842 in-package module `option` declaring `type Option` emits invalid Rust; the dependency shape builds
 cell:stdlib-module:result/src/main.almd  #2842 in-package module `result` declaring `type Result` emits invalid Rust; the dependency shape builds
-spec/integration/modules/diamond_test.almd#relative-transitive-path  #2844 a dependency's relative path dependency resolves against the working directory
