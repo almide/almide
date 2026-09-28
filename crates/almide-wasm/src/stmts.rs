@@ -8,6 +8,10 @@ use wasm_encoder::BlockType;
 use crate::emitter::Emitter;
 use crate::*;
 
+// Loop statements and break/continue (#2745), split for the file budget.
+#[path = "stmts_loop.rs"]
+mod stmts_loop;
+
 impl Emitter<'_> {
     /// Statement position: Unit-typed shapes only (blocks, calls, control).
     pub(crate) fn lower_stmt_expr(&mut self, e: &IrExpr) -> Result<(), EmitError> {
@@ -39,15 +43,10 @@ impl Emitter<'_> {
             }
             IrExprKind::If { cond, then, else_ } => self.lower_stmt_if(cond, then, else_),
             IrExprKind::While { cond, body } => self.lower_while(cond, body),
-            // Match opens labels the walker does not track — suspend the
-            // loop context so a Continue inside an arm walls honestly
-            // instead of branching to the wrong depth.
-            IrExprKind::Match { subject, arms } => {
-                let saved = self.loop_ctl.take();
-                let r = self.lower_match(subject, arms, None).map(|_| ());
-                self.loop_ctl = saved;
-                r
-            }
+            // A statement-position match: the arm chain counts its own
+            // if_ labels into the loop context (#2745), so a `break` /
+            // `continue` in an arm reaches the right depth.
+            IrExprKind::Match { subject, arms } => self.lower_match(subject, arms, None).map(|_| ()),
             IrExprKind::Continue => match self.loop_ctl {
                 Some((extra, _)) => {
                     self.f.instructions().br(extra);
@@ -104,56 +103,6 @@ impl Emitter<'_> {
         }
     }
 
-    /// `while`: block { loop { !cond → br out; body; br loop } }.
-    /// `continue` brs to the loop head (the next cond CHECK, which
-    /// charges — the interp's per-check meter), `break` to the block.
-    fn lower_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> Result<(), EmitError> {
-        // #2150: one copy-on-write judge per loop entry for a list the loop
-        // reaches only element-wise — cleared before the unrolled lane too,
-        // which runs copies of this same condition and body.
-        let flags = self.hoist_cow_flags(Some(cond), body)?;
-        // Counted-shape fast lane (unroll.rs): on `true` the rolled loop
-        // below drains the remainder iterations.
-        let _ = self.try_unroll_while(cond, body)?;
-        // #2319: element counts this loop cannot change are loaded once,
-        // before the loop — the bounds checks inside read the local.
-        let hoisted = self.hoist_invariant_counts(Some(cond), body)?;
-        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
-        // Deterministic meter: one loop-head charge per condition
-        // CHECK (n iterations = n+1 checks), ALS-DT2.
-        self.emit_det_charge_const(1);
-        self.lower(cond, Some(BOOL))?;
-        self.f.instructions().i32_eqz().br_if(1);
-        self.lower_loop_body(body, false)?;
-        self.f.instructions().br(0).end().end();
-        self.drop_hoisted_counts(hoisted);
-        self.drop_cow_flags(flags);
-        Ok(())
-    }
-
-    /// A loop body with break/continue wired. For-in bodies sit in an
-    /// extra block so `continue` still reaches the STEP code after it;
-    /// a while `continue` brs straight to the loop head (the next cond
-    /// check). break_delta = labels from the continue target up to the
-    /// exit block (while: 1; for-in: 2 — the inner block adds one).
-    fn lower_loop_body(&mut self, body: &[IrStmt], for_in: bool) -> Result<(), EmitError> {
-        let saved = self.loop_ctl.take();
-        if for_in {
-            self.f.instructions().block(BlockType::Empty);
-            self.loop_ctl = Some((0, 2));
-        } else {
-            self.loop_ctl = Some((0, 1));
-        }
-        for st in body {
-            self.lower_stmt(st)?;
-        }
-        if for_in {
-            self.f.instructions().end();
-        }
-        self.loop_ctl = saved;
-        Ok(())
-    }
-
     /// Unit-position `if`: both arms are statement bodies. The if_
     /// label shifts break/continue targets one deeper.
     fn lower_stmt_if(
@@ -187,6 +136,9 @@ impl Emitter<'_> {
     /// would skip their exit bookkeeping on this early return, and
     /// main's raise-abort frame is a different shape — both wall.
     fn lower_stmt_guard(&mut self, cond: &IrExpr, else_: &IrExpr) -> Result<(), EmitError> {
+        if self.try_lower_guard_loop_ctl(cond, else_)? {
+            return Ok(());
+        }
         if self.region_repair.is_some() {
             return unsup("guard-in-region-arm");
         }
@@ -796,3 +748,4 @@ impl Emitter<'_> {
                 Ok(())
     }
 }
+

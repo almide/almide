@@ -3,17 +3,21 @@
 //! The wall's reason string (`ty-mismatch:…`, `expr:Continue`) is a census key
 //! and carries no location; `almide_wasm::decline_site::last()` is the side
 //! channel the CLI prints as `--> in fn `name` (…, line N)`. The shape used
-//! here is `guard … else continue`, a decline the structural leg records as
-//! `expr:Continue` today. If that shape starts lowering, swap in any other
-//! declined expression: the assertion is about the location, not the reason.
+//! here is a `continue` inside a VALUE-position block, a decline the structural
+//! leg records as `expr:Continue` today (the statement-position forms lower
+//! since #2745). If that shape starts lowering, swap in any other declined
+//! expression: the assertion is about the location, not the reason.
 
 use almide_wasm::decline_site::{self, DeclineSite};
 
 const SRC: &str = "fn keep(xs: List[String]) -> Int = {
   var n = 0
   for x in xs {
-    guard string.len(x) > 0 else continue
-    n = n + 1
+    let k = {
+      if string.len(x) == 0 then continue
+      1
+    }
+    n = n + k
   }
   n
 }
@@ -29,7 +33,7 @@ fn a_structural_wall_names_its_function_and_line() {
     assert_eq!(
         decline_site::last(),
         Some(DeclineSite { function: "keep".into(), module: None, line: Some(4), top_let: false }),
-        "the wall must point at `keep`, line 4 (the `guard … else continue`)"
+        "the wall must point at `keep`, line 4 (the value-position block holding the `continue`)"
     );
 }
 
