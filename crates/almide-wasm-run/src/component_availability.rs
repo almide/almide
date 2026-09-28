@@ -6,7 +6,10 @@
 pub fn check(host_ops: &[i32], p3: bool) -> Result<(), String> {
     let unsupported = host_ops.iter().copied().find(|op| {
         let common = matches!(op, 30..=32 | 34..=35 | 60 | 73);
-        let extra = p3 && matches!(op, 1..=9 | 13..=16 | 40..=50);
+        // p3 also serves env.get (26), the program arguments (29) and
+        // env.sleep_ms (36) over wasi:cli/environment and
+        // monotonic-clock.wait-for (ADR-0023 step 3).
+        let extra = p3 && matches!(op, 1..=9 | 13..=16 | 26 | 29 | 36 | 40..=50);
         !(common || extra)
     });
     match unsupported {

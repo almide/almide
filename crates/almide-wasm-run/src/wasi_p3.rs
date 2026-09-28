@@ -1,19 +1,22 @@
 //! `to_p3` (#1628 stage 2, increment 1): rewrite an emitted almide module
 //! into a WASI 0.3 COMPONENT — stdio over component-model streams. This
 //! is the plumbing keystone for the fan lowering: guest-held streams,
-//! sync stream/future builtins, and an async-lifted entry are exactly the
+//! async stream/future builtins, and an async-lifted entry are exactly the
 //! vocabulary fan arms will schedule on.
 //!
 //! Same doctrine as `to_p2` (#1588/#1628 stage 1) with the five-op host
 //! surface (console out, exit codes, stdin, entropy, wall clock) PLUS the
 //! filesystem READ surface (increment 2a: exists/is-dir/is-file via
-//! stat-at, read_text/read_bytes via open-at + sync stream reads) AND
+//! stat-at, read_text/read_bytes via open-at + stream reads) AND
 //! the WRITE surface (increment 2d: write/append/write_bytes through
 //! write-via-stream with the completion-future durability handshake,
 //! recursive mkdir_p, remove/remove_all via stat-then-unlink-or-rmdir —
 //! a NON-EMPTY remove_all answers the honest not-empty error until the
 //! recursive walk lands). Guest paths resolve against the FIRST preopen
-//! (`wasmtime run --dir=.`).
+//! (`wasmtime run --dir=.`). `env.get`, the program arguments and
+//! `env.sleep_ms` ride `wasi:cli/environment` and
+//! `monotonic-clock.wait-for` (ADR-0023 step 3, `wasi_p3_env.rs`), each
+//! import shipped only when the op set names its op.
 //! Canonical-ABI facts (variant discriminants, payload offsets) are
 //! DERIVED from the vendored WIT at emit time (`FsAbi`), never
 //! hand-counted. Requested p3 filesystem programs route here without an
@@ -27,29 +30,39 @@
 //!   - stdout/stderr `write-via-stream: func(stream<u8>) ->
 //!     future<result<_, error-code>>` — a SYNC call handing the host the
 //!     readable end and answering a completion future. The guest opens
-//!     the stream ONCE, keeps the writable end, and feeds it with SYNC
-//!     `stream.write` (each write rendezvous-blocks until the host
-//!     consumed the bytes — program order per stream by construction);
+//!     the stream ONCE, keeps the writable end, and feeds it with
+//!     `stream.write` (each write completes before the next is issued —
+//!     program order per stream by construction);
 //!   - stdin `read-via-stream: func() -> tuple<stream<u8>, future<...>>`
-//!     — sync with a retptr; SYNC `stream.read` lands bytes straight in
+//!     — sync with a retptr; `stream.read` lands bytes straight in
 //!     guest memory (no cabi_realloc hop, unlike p2's blocking-read);
 //!   - the run export (`run: async func() -> result`) is lifted `async`
 //!     with a CALLBACK, but the body runs to completion in the initial
-//!     call — sync builtins may block inside a callback-lifted task (the
-//!     sync-streams doctrine), so the callback itself is unreachable:
-//!     main → close streams → read each completion future → task.return
-//!     (ok) → EXIT;
+//!     call — it blocks in `waitable-set.wait` instead of yielding, so the
+//!     callback itself is unreachable: main → close streams → read each
+//!     completion future → task.return (ok) → EXIT;
 //!   - `wasi:clocks/system-clock.now() -> instant` (s64 seconds, u32
 //!     nanos) and `get-random-bytes` are plain sync lowers, as on p2.
 //!
 //! The finale's `future.read` on each output stream's completion future
-//! is the DETERMINISTIC drain handshake: it blocks until the host
+//! is the DETERMINISTIC drain handshake: it completes only once the host
 //! acknowledges the whole stream, so "the program exited" implies "every
 //! byte reached the host" — the property the cross-target byte-identity
-//! contract stands on. Sync `stream.write`/`stream.read`/`future.read`
-//! are the 🚝 builtins: the runtime needs
-//! `component-model-more-async-builtins` (wasmtime: `-W ...`, on by
-//! default in current releases' `-S p3` stacks).
+//! contract stands on.
+//!
+//! NO SYNCHRONOUS stream/future builtin (ADR-0023 step 1). The sync
+//! `stream.read/write` / `future.read/write` are the 🚝
+//! `component-model-more-async-builtins` builtins: wasmtime 47 refuses a
+//! component that uses them unless `-W component-model-more-async-builtins`
+//! is passed, and they are outside the WASI 0.3 baseline. Every stream and
+//! future copy here is the `[async-lower]` form; a BLOCKED answer goes
+//! through `$await` (`wasi_p3_env.rs`), which joins the one end to a fresh
+//! waitable set, waits for its copy event and answers the event's payload
+//! — the same `count<<4 | status` word the sync form returns, so every
+//! loop over it is unchanged. The baseline builtins (`waitable-set.*`,
+//! `waitable.join`, `subtask.*`, the async copies) need only
+//! `component-model-async`, on by default since wasmtime 46: an artifact
+//! runs as `wasmtime run app.wasm` (`-S http` for an http client).
 
 use wasm_encoder::{
     BlockType, CodeSection, ConstExpr, EntityType, ExportKind, Function,
@@ -67,29 +80,31 @@ use crate::wasi::{
 const I_EXIT: u32 = 0;
 const I_OUT_CALL: u32 = 1; // write-via-stream (stdout): (rx) -> future
 const I_OUT_NEW: u32 = 2;
-const I_OUT_WRITE: u32 = 3;
+const I_OUT_WRITE: u32 = 3; // [async-lower][stream-write-0], via $await
 const I_OUT_DROP_TX: u32 = 4;
-const I_OUT_FUT_READ: u32 = 5;
+const I_OUT_FUT_READ: u32 = 5; // [async-lower][future-read-1], via $await
 const I_ERR_CALL: u32 = 6;
 const I_ERR_NEW: u32 = 7;
-const I_ERR_WRITE: u32 = 8;
+const I_ERR_WRITE: u32 = 8; // async, as I_OUT_WRITE
 const I_ERR_DROP_TX: u32 = 9;
-const I_ERR_FUT_READ: u32 = 10;
+const I_ERR_FUT_READ: u32 = 10; // async, as I_OUT_FUT_READ
 const I_STDIN_OPEN: u32 = 11; // read-via-stream (sync, retptr)
-const I_STDIN_READ: u32 = 12;
+const I_STDIN_READ: u32 = 12; // [async-lower][stream-read-0], via $await
 const I_STDIN_DROP_RX: u32 = 13;
 const I_STDIN_DROP_FUT: u32 = 14;
 const I_CLOCK_NOW: u32 = 15;
 const I_RANDOM: u32 = 16;
 const I_TASK_RETURN: u32 = 17;
 // The filesystem READ surface (#1628 increment 2a): preopens + stat-at +
-// open-at + read-via-stream, all SYNC lowers (an async-declared func may
-// be lowered sync — the fiber blocks, same doctrine as the 🚝 builtins).
+// open-at + read-via-stream, all SYNC lowers of the funcs (an
+// async-declared func may be lowered sync — the task blocks; that is
+// baseline `component-model-async`, not the 🚝 gate). The stream READ is
+// the async builtin behind `$await`.
 const I_FS_PRE: u32 = 18; // preopens.get-directories (retptr)
 const I_FS_OPEN: u32 = 19; // [method]descriptor.open-at
 const I_FS_STAT: u32 = 20; // [method]descriptor.stat-at
 const I_FS_RVS: u32 = 21; // [method]descriptor.read-via-stream
-const I_FS_SREAD: u32 = 22; // [stream-read-0] of read-via-stream
+const I_FS_SREAD: u32 = 22; // [async-lower][stream-read-0] of read-via-stream
 const I_FS_SDROP: u32 = 23; // [stream-drop-readable-0] of read-via-stream
 const I_FS_FDROP: u32 = 24; // [future-drop-readable-1] of read-via-stream
 const I_FS_RESDROP: u32 = 25; // [resource-drop]descriptor
@@ -104,15 +119,15 @@ const I_SUBTASK_DROP: u32 = 30; // [subtask-drop]
 const I_WS_DROP: u32 = 31; // [waitable-set-drop]
 const I_SUBTASK_CANCEL: u32 = 32; // [subtask-cancel] — the loser-arm abandonment
 // The filesystem WRITE surface (#1628 increment 2d): write/append streams
-// (the guest keeps the writable end, sync stream.write feeds it, and the
-// completion future.read is the durability handshake), plus the three
-// path ops. All sync lowers, as the read surface.
+// (the guest keeps the writable end, stream.write feeds it, and the
+// completion future.read is the durability handshake — both the async
+// builtins behind `$await`), plus the three path ops (sync lowers).
 const I_FS_WVS: u32 = 33; // [method]descriptor.write-via-stream
 const I_FS_AVS: u32 = 34; // [method]descriptor.append-via-stream
 const I_FS_WNEW: u32 = 35; // [stream-new-0] of write-via-stream
-const I_FS_WWRITE: u32 = 36; // [stream-write-0] of write-via-stream
+const I_FS_WWRITE: u32 = 36; // [async-lower][stream-write-0] of write-via-stream
 const I_FS_WDROP: u32 = 37; // [stream-drop-writable-0] of write-via-stream
-const I_FS_WFUT: u32 = 38; // [future-read-1] of write-via-stream
+const I_FS_WFUT: u32 = 38; // [async-lower][future-read-1] of write-via-stream
 const I_FS_MKDIR: u32 = 39; // [method]descriptor.create-directory-at
 const I_FS_UNLINK: u32 = 40; // [method]descriptor.unlink-file-at
 const I_FS_RMDIR: u32 = 41; // [method]descriptor.remove-directory-at
@@ -138,20 +153,26 @@ const I_HTTP_SET_METHOD: u32 = 52; // [method]request.set-method
 const I_HTTP_SET_SCHEME: u32 = 53; // [method]request.set-scheme
 const I_HTTP_SET_AUTH: u32 = 54; // [method]request.set-authority
 const I_HTTP_SET_PATH: u32 = 55; // [method]request.set-path-with-query
-const I_HTTP_SEND: u32 = 56; // client.send (sync lower, retptr)
+const I_HTTP_SEND: u32 = 56; // [async-lower] client.send (request, retptr)
 const I_HTTP_STATUS: u32 = 57; // [method]response.get-status-code
 const I_HTTP_CONSUME: u32 = 58; // [static]response.consume-body (retptr)
 const I_HTTP_CB_FNEW: u32 = 59; // [future-new-0] of consume-body (handling result)
-const I_HTTP_CB_FWRITE: u32 = 60; // [future-write-0] of consume-body
+const I_HTTP_CB_FWRITE: u32 = 60; // [async-lower][future-write-0] of consume-body
 const I_HTTP_CB_FDROPW: u32 = 61; // [future-drop-writable-0] of consume-body
-const I_HTTP_BODY_READ: u32 = 62; // [stream-read-1] of consume-body (the body)
+const I_HTTP_BODY_READ: u32 = 62; // [async-lower][stream-read-1] of consume-body (the body)
 const I_HTTP_BODY_DROPR: u32 = 63; // [stream-drop-readable-1] of consume-body
 const I_HTTP_TRL_DROPR: u32 = 64; // [future-drop-readable-2] of consume-body
 const I_HTTP_REQ_DROP: u32 = 65; // [resource-drop]request
 const I_HTTP_RESP_DROP: u32 = 66; // [resource-drop]response
 const I_HTTP_FIELDS_DROP: u32 = 67; // [resource-drop]fields
 const I_HTTP_FIELDS_APPEND: u32 = 68; // [method]fields.append (the framed family's headers, #1710)
-const IMPORTS_HTTP: u32 = 69;
+// The request options (ADR-0023 step 2): ALMIDE_HTTP_TIMEOUT_SECS as the
+// connect / first-byte / between-bytes timeouts.
+const I_HTTP_OPT_NEW: u32 = 69; // [constructor]request-options
+const I_HTTP_OPT_CONNECT: u32 = 70; // [method]request-options.set-connect-timeout (retptr)
+const I_HTTP_OPT_FIRST: u32 = 71; // [method]request-options.set-first-byte-timeout (retptr)
+const I_HTTP_OPT_BETWEEN: u32 = 72; // [method]request-options.set-between-bytes-timeout (retptr)
+const IMPORTS_HTTP: u32 = 73;
 
 // Park offsets past the shared ones: retptr / future-payload scratch.
 const RET: u64 = 32;
@@ -186,9 +207,9 @@ const E_NOTDIR: &[u8] = almide_base::fs_errno::ENOTDIR.text.as_bytes();
 const E_EXIST: &[u8] = almide_base::fs_errno::EEXIST.text.as_bytes();
 const E_GEN: &[u8] = b"filesystem operation failed";
 const E_NOPRE: &[u8] = b"no filesystem preopen (run with --dir)";
-// The p3 http transport-error static (#1710 PR B): transport-error TEXT is
-// host-specific by contract — the cross-lane fixtures assert err-ness, not
-// the wording (the native legs' per-OS errno suffixes already force that).
+// The p3 http bring-up static (#1710 PR B): only the ALMIDE_P3_HTTP_STOP
+// bisect knob answers it now — every real failure is classified and
+// rendered from rt-core's texts (ADR-0023 step 2, wasi_p3_http_err.rs).
 const MSG_HTTP: u64 = 576;
 const E_HTTP: &[u8] = b"http request failed (p3 transport)";
 // The `content-length` header name (#1924 B) and the decimal scratch its
@@ -203,6 +224,10 @@ const E_CLEN: &[u8] = b"content-length";
 const CLEN_BUF: u64 = 704;
 // C-197's line, written by `$reserve` when a grow is refused (#2119).
 const MSG_OOM: u64 = 768;
+// `$await`'s waitable-set event record (waitable @0, payload @4): its own
+// slot, because the copy it waits on may be a future.read whose payload
+// lands at RET, or the trailers future's parked value at RET+16.
+const AWAIT_EV: u64 = 800;
 
 // Park layout, checked at COMPILE time: retptr spans and the message
 // statics must not collide with each other or the stdin/entropy DATA
@@ -221,7 +246,8 @@ const _: () = {
     assert!(MSG_HTTP + E_HTTP.len() as u64 <= MSG_CLEN);
     assert!(MSG_CLEN + E_CLEN.len() as u64 <= CLEN_BUF);
     assert!(CLEN_BUF + 20 <= MSG_OOM);
-    assert!(MSG_OOM + OOM_MSG.len() as u64 <= DATA);
+    assert!(MSG_OOM + OOM_MSG.len() as u64 <= AWAIT_EV);
+    assert!(AWAIT_EV + 8 <= DATA);
 };
 
 // The fan prefetch slot table: SLOT_CAP slots of SLOT_STRIDE bytes on
@@ -350,6 +376,12 @@ struct P3Globals {
     g_slots: u32,
     g_slotn: u32,
     f_reserve: u32,
+    /// `$await` (ADR-0023 step 1): every async stream/future copy answers
+    /// through it, so no synchronous builtin is ever imported.
+    f_await: u32,
+    /// The cached `get-environment` list (ptr, -1 = not fetched; count).
+    g_env: u32,
+    g_envn: u32,
 }
 
 /// One output port for `shim_print`: the stream/future globals and the
@@ -379,6 +411,9 @@ struct ReadLocals {
 // The http shim (shim_http + its frame/body helpers): wasi_p3_http.rs.
 include!("wasi_p3_http.rs");
 
+// Its error classes, texts and helper functions (ADR-0023 step 2).
+include!("wasi_p3_http_err.rs");
+
 /// Canonical-ABI facts the http shim stores through (#1710 PR B) — DERIVED
 /// from the vendored WIT at emit time, never hand-counted (the fs_abi
 /// doctrine: a case index or payload offset written as a literal drifts
@@ -399,6 +434,15 @@ struct HttpAbi {
     sch_https: i32,
     /// result<response, error-code> payload offset (send's retptr layout).
     send_payload: u64,
+    /// error-code's case names in discriminant order (ADR-0023 step 2: the
+    /// shim classifies by NAME, and names an unclassified case by it).
+    ec_names: Vec<String>,
+    /// Offset of an error-code case's payload from the discriminant.
+    ec_payload: u64,
+    /// `internal-error(option<string>)`: its case index, and the offset of
+    /// the string's (ptr, len) within the option.
+    ec_internal: i32,
+    ec_opt_str: u64,
 }
 
 fn http_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<HttpAbi> {
@@ -437,6 +481,13 @@ fn http_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<HttpAbi> {
     let mut sa = wit_parser::SizeAlign::default();
     sa.fill(resolve)?;
     let ec_align = sa.align(&Type::Id(ec)).align_wasm32() as u64;
+    let TypeDefKind::Variant(ecv) = &resolve.types[ec].kind else {
+        anyhow::bail!("wasi:http error-code is not a variant");
+    };
+    let ec_names: Vec<String> = ecv.cases.iter().map(|c| c.name.clone()).collect();
+    let ec_payload = sa.payload_offset(ecv.tag(), ecv.cases.iter().map(|c| c.ty.as_ref())).size_wasm32() as u64;
+    let ec_opt_str =
+        sa.payload_offset(wit_parser::Int::U8, [None, Some(&Type::String)]).size_wasm32() as u64;
     Ok(HttpAbi {
         m_get: case(method, "get")?,
         m_post: case(method, "post")?,
@@ -453,6 +504,10 @@ fn http_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<HttpAbi> {
         // own<response> aligns 4; the discriminant byte rounds up to the
         // larger of that and error-code's alignment.
         send_payload: 4u64.max(ec_align),
+        ec_internal: case(ec, "internal-error")?,
+        ec_names,
+        ec_payload,
+        ec_opt_str,
     })
 }
 
@@ -466,7 +521,7 @@ include!("wasi_p3_emit.rs");
 
 /// Lazy stream open: `if g_tx < 0 { (rx,tx) = stream.new; g_tx = tx;
 /// g_fut = write-via-stream(rx) }`. The host's read side starts
-/// concurrently; every later sync write rendezvous-blocks against it.
+/// concurrently; every later write completes (through `$await`) against it.
 fn open_stream(
     i: &mut wasm_encoder::InstructionSink<'_>,
     g_tx: u32,
@@ -485,22 +540,25 @@ fn open_stream(
     i.end();
 }
 
-/// Sync write loop: `while len > 0 { r = stream.write(tx, ptr, len);
+/// Write loop: `while len > 0 { r = await(tx, stream.write(tx, ptr, len));
 /// n = r >> 4; if n == 0 { break } ptr += n; len -= n }` — a DROPPED
 /// status answers n=0 and the loop exits (output sunk, as p2/POSIX).
+/// `l` = the (ptr, len, n) locals.
 fn write_all(
     i: &mut wasm_encoder::InstructionSink<'_>,
     g_tx: u32,
     write_import: u32,
-    ptr: u32,
-    len: u32,
-    n: u32,
+    f_await: u32,
+    l: (u32, u32, u32),
 ) {
+    let (ptr, len, n) = l;
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(len).i32_eqz().br_if(1);
     i.global_get(g_tx);
+    i.global_get(g_tx);
     i.local_get(ptr).local_get(len);
     i.call(write_import);
+    i.call(f_await);
     i.i32_const(4).i32_shr_u().local_set(n);
     i.local_get(n).i32_eqz().br_if(1);
     i.local_get(ptr).local_get(n).i32_add().local_set(ptr);
@@ -510,6 +568,9 @@ fn write_all(
 
 // The print/exit/stdin/fs shims: wasi_p3_fs.rs.
 include!("wasi_p3_fs.rs");
+
+// `$await` and the env/args/sleep service: wasi_p3_env.rs.
+include!("wasi_p3_env.rs");
 
 /// `(dst) -> ()`: copy the parked payload to guest memory.
 fn shim_host_read(g_plen: u32, g_ppos: u32) -> Function {
@@ -529,13 +590,13 @@ fn shim_host_read(g_plen: u32, g_ppos: u32) -> Function {
 /// (ok), answer EXIT (0). The callback is never reached: everything
 /// happened in the initial call.
 fn shim_run(main_index: u32, g: P3Globals) -> Function {
-    let P3Globals { park, g_out_tx, g_out_fut, g_err_tx, g_err_fut, g_in_rx, g_in_fut, g_wset, .. } = g;
+    let P3Globals { park, g_out_tx, g_out_fut, g_err_tx, g_err_fut, g_in_rx, g_in_fut, g_wset, f_await, .. } = g;
     let mut f = Function::new([]);
     let mut i = f.instructions();
     i.call(main_index);
 
     // End both streams, then wait for the host's completion future: the
-    // future.read blocks until every byte is drained host-side.
+    // future.read completes only once every byte is drained host-side.
     for (g_tx, g_fut, drop_import, read_import) in [
         (g_out_tx, g_out_fut, I_OUT_DROP_TX, I_OUT_FUT_READ),
         (g_err_tx, g_err_fut, I_ERR_DROP_TX, I_ERR_FUT_READ),
@@ -543,8 +604,9 @@ fn shim_run(main_index: u32, g: P3Globals) -> Function {
         i.global_get(g_tx).i32_const(0).i32_ge_s();
         i.if_(BlockType::Empty);
         i.global_get(g_tx).call(drop_import);
+        i.global_get(g_fut);
         i.global_get(g_fut).i32_const((park + RET) as i32).call(read_import);
-        i.drop();
+        i.call(f_await).drop();
         i.end();
     }
 
@@ -570,7 +632,7 @@ fn shim_run(main_index: u32, g: P3Globals) -> Function {
 }
 
 /// `(event, p1, p2) -> status`: never reached — the initial call runs to
-/// completion (sync builtins block inside the task instead of yielding).
+/// completion (`$await` blocks inside the task instead of yielding).
 fn shim_callback() -> Function {
     let mut f = Function::new([]);
     let mut i = f.instructions();

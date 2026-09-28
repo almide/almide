@@ -2,12 +2,16 @@
 // p2 world (console out, exit, stdin, entropy, wall clock) spelled as
 // WASI 0.3 interfaces — stdio rides component-model streams and the
 // async canonical ABI (write-via-stream is a sync import returning a
-// completion future; the guest drives sync stream builtins and drains
+// completion future; the guest drives the async stream builtins through
+// waitable-set.wait — no 🚝 sync builtin, ADR-0023 step 1 — and drains
 // the future before task-return) — PLUS the filesystem READ surface (increment 2a:
 // exists/is-dir/is-file via stat-at, read_text/read_bytes via open-at +
 // read-via-stream against the first preopen) and WRITE surface
 // (increment 2d: write/append/write_bytes/mkdir_p/remove/remove_all).
-// env and process keep the defined refusal inside the shims.
+// env.get / the program arguments / env.sleep_ms ride wasi:cli/environment
+// and monotonic-clock.wait-for (ADR-0023 step 3); the rest of env and
+// process keep the defined refusal inside the shims. An import the module
+// does not use is left out of the component by wit-component.
 package almide:runtime-p3@0.1.0;
 
 world p3-command {
@@ -15,6 +19,7 @@ world p3-command {
   import wasi:cli/stdout@0.3.0;
   import wasi:cli/stderr@0.3.0;
   import wasi:cli/exit@0.3.0;
+  import wasi:cli/environment@0.3.0;
   import wasi:clocks/system-clock@0.3.0;
   import wasi:clocks/monotonic-clock@0.3.0;
   import wasi:random/random@0.3.0;
@@ -34,6 +39,7 @@ world p3-command-http {
   import wasi:cli/stdout@0.3.0;
   import wasi:cli/stderr@0.3.0;
   import wasi:cli/exit@0.3.0;
+  import wasi:cli/environment@0.3.0;
   import wasi:clocks/system-clock@0.3.0;
   import wasi:clocks/monotonic-clock@0.3.0;
   import wasi:random/random@0.3.0;

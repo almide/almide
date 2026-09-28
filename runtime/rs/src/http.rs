@@ -396,8 +396,8 @@ pub fn almide_http_request_stream_impl(
     if u.https {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let mut tls = make_tls_stream(&u.host, stream)?;
-            http_exchange_stream(&mut tls, &request, &mut wrap)
+            let mut tls = make_tls_stream(&u.host, url, stream)?;
+            http_exchange_stream(&mut tls, url, &request, &mut wrap)
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -406,16 +406,17 @@ pub fn almide_http_request_stream_impl(
         }
     } else {
         let mut s = stream;
-        http_exchange_stream(&mut s, &request, &mut wrap)
+        http_exchange_stream(&mut s, url, &request, &mut wrap)
     }
 }
 
 fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
     stream: &mut S,
+    url: &str,
     request: &[u8],
     on_chunk: &mut F,
 ) -> Result<(), String> {
-    stream.write_all(request).map_err(|e| format!("write failed: {}", e))?;
+    stream.write_all(request).map_err(|e| http_io_error_text(url, &e))?;
 
     let mut buf = vec![0u8; 8192];
     let mut acc: Vec<u8> = Vec::new();
@@ -442,7 +443,7 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
             Ok(n) => n,
             Err(e) => {
                 if acc.is_empty() && !headers_done {
-                    return Err(read_error_msg(&e));
+                    return Err(http_io_error_text(url, &e));
                 }
                 break;
             }
@@ -480,7 +481,7 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
                 acc.drain(..idx + 4);
                 headers_done = true;
             } else if acc.len() > HTTP_MAX_HEAD_BYTES {
-                return Err(http_head_too_large());
+                return Err(http_head_too_large(url));
             } else {
                 continue;
             }
@@ -507,7 +508,7 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
                         Some(i) => i,
                         None => break 'outer, // need more bytes
                     };
-                    let size = http_chunk_size(&acc[..nl])?;
+                    let size = http_chunk_size(&acc[..nl]).map_err(|_| http_error_text(HttpErrorClass::Protocol, url))?;
                     acc.drain(..nl + 2);
                     if size == 0 {
                         deliver(&[], true, on_chunk);
@@ -545,7 +546,7 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
     }
 
     if !headers_done {
-        return Err("connection closed before headers received".to_string());
+        return Err(http_error_text(HttpErrorClass::Protocol, url));
     }
     deliver(&[], true, on_chunk);
     Ok(())

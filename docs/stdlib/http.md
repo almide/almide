@@ -557,7 +557,7 @@ A slow endpoint (a local LLM evaluating a long prompt routinely needs
 30–120 s before the first byte) fails past the limit with:
 
 ```
-read timed out waiting for the server (raise ALMIDE_HTTP_TIMEOUT_SECS; 0 = no timeout)
+timed out waiting for "http://localhost:8080/v1/chat" (raise ALMIDE_HTTP_TIMEOUT_SECS; 0 = no timeout)
 ```
 
 ```sh
@@ -567,11 +567,7 @@ ALMIDE_HTTP_TIMEOUT_SECS=0 ./app     # wait forever
 
 The same variable bounds **connecting** (#2825): a dial that gets no answer
 gives up after 30 s (Go's dialer default) instead of the OS default (75 s on
-macOS, longer on Linux):
-
-```
-connection failed: timed out after 30s connecting to 10.255.255.1:80 (raise ALMIDE_HTTP_TIMEOUT_SECS; 0 = no timeout)
-```
+macOS, longer on Linux), with the same text.
 
 #### Client limits, per path
 
@@ -584,10 +580,39 @@ connection failed: timed out after 30s connecting to 10.255.255.1:80 (raise ALMI
 - The 30 s / 120 s defaults are `ALMIDE_HTTP_TIMEOUT_SECS` (`0` = none).
 - The size cap counts the response as received (head and framed body):
   `ALMIDE_HTTP_MAX_RESPONSE_BYTES` overrides it, `0` = no cap. Past it the
-  call is `err("response too large: more than N bytes (raise ALMIDE_HTTP_MAX_RESPONSE_BYTES; 0 = no limit)")`.
+  call is `err("response from \"<url>\" is larger than N bytes (raise ALMIDE_HTTP_MAX_RESPONSE_BYTES; 0 = no limit)")`.
 - Every path refuses a response HEAD over 1 MiB (Go's default).
 - There is no default whole-call deadline — none of curl, Go, Python, Node
   or reqwest has one. Ask for one with `http.start` and `total_ms`.
+
+#### Error texts (ADR-0023 §4.2)
+
+Every client failure is put in a class, and each class has one text. The
+text names the URL the program passed (quoted, with `\"`, `\\`, `\t`, `\r`,
+`\n`, `\0` and `\u{..}` escapes) and never an OS error number, so the same
+failure reads the same natively, on `almide run --target wasm`, and in a
+WASI 0.3 component on a stock runtime (`wasmtime run -S http=y`):
+
+| class | text |
+|---|---|
+| invalid-url | `invalid URL "<url>": <what is wrong>` |
+| refused-header | `invalid header name "<name>": …` / `invalid header value for "<name>": …` / `forbidden header name "<name>": …` |
+| dns | `cannot resolve the host of "<url>"` |
+| connect | `could not connect to "<url>" (connection refused or unreachable)` |
+| timeout | `timed out waiting for "<url>" (raise ALMIDE_HTTP_TIMEOUT_SECS; 0 = no timeout)` |
+| tls | `TLS handshake with "<url>" failed` |
+| too-large | `response from "<url>" is larger than <n> bytes (raise ALMIDE_HTTP_MAX_RESPONSE_BYTES; 0 = no limit)` |
+| protocol | `malformed or incomplete response from "<url>"` |
+
+A proxy's own failures and a trust store that does not load keep their own
+texts (they name the proxy or the variable). In a component, a host error
+outside these classes reads `http request to "<url>" failed (<wasi:http case>)`,
+and a host's `internal-error` text is passed through. The component reads
+`ALMIDE_HTTP_TIMEOUT_SECS` and `ALMIDE_HTTP_MAX_RESPONSE_BYTES` from its own
+environment (`wasmtime run --env …`); there, `0` timeout leaves the host's
+default. Of the URL reasons, the component finds the scheme's three
+(missing, unsupported, `expected "//"`) itself; a bad host or port is refused
+by the runtime and reads as the unclassified text.
 
 #### URLs (#2821)
 
@@ -614,11 +639,15 @@ before anything is dialled. `http.start` returns it synchronously.
 
 A header name must be a token (RFC 9110). A header value may not contain CR,
 LF, NUL or another control character (HTAB is fine). The method must be a
-token too. Otherwise the request is refused before anything is sent: the call
-is an `err` starting `invalid header value for "X-A": …`,
-`invalid header name …` or `invalid HTTP method …`. The request
-is never cleaned up and sent anyway. Python, Go and Node refuse the same
-input.
+token too. The fields the client or the runtime manages — `connection`,
+`keep-alive`, `proxy-authenticate`, `proxy-authorization`,
+`proxy-connection`, `transfer-encoding`, `upgrade`, `host`, `http2-settings`,
+in any case — cannot be set (C-370; a stock WASI runtime refuses the same
+nine). Otherwise the request is refused before anything is sent: the call is
+an `err` starting `invalid header value for "X-A": …`,
+`invalid header name …`, `forbidden header name "Host": …` or
+`invalid HTTP method …`. The request is never cleaned up and sent anyway.
+Python, Go and Node refuse the same input.
 
 #### Proxies (#2819)
 
@@ -663,11 +692,12 @@ HTTPS trusts two sets of roots:
 
 So a corporate CA, a test CA or a TLS-inspecting proxy's CA can be trusted
 the way curl, Python and Go allow. If a variable names no loadable
-certificate, the error says so. A certificate or handshake failure reads as
-a TLS error, not as a failed write:
+certificate, the error says so (`TLS error: could not load the CA
+certificates SSL_CERT_FILE names: …`). A certificate or handshake failure
+reads as the tls class, not as a failed write:
 
 ```
-TLS error: invalid peer certificate: UnknownIssuer
+TLS handshake with "https://internal.example/" failed
 ```
 
 #### Interim responses and chunk extensions (#2824)
@@ -675,7 +705,8 @@ TLS error: invalid peer certificate: UnknownIssuer
 - `1xx` responses before the final one (`100 Continue`, `103 Early Hints`)
   are skipped, on every path. `101` is final.
 - A chunk-size line's `;extension` is ignored. A size line that is not hex
-  is an error (`malformed chunked body: …`), not an empty body.
+  is an error (the protocol class, `malformed or incomplete response from
+  "<url>"`), not an empty body.
 
 ### `http.get_status(url: String) -> Result[(Int, String), String]`
 

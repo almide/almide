@@ -6,7 +6,8 @@
 //! - #2822 (client half) CR/LF and other controls in header names / values
 //!   and the method are refused before anything is sent.
 //! - #2820 the trust store: `SSL_CERT_FILE` names a CA generated here, and a
-//!   certificate failure reads as `TLS error: …`, not `write failed: …`.
+//!   certificate failure reads as the tls class (ADR-0023 §4.2), not as a
+//!   failed write.
 //! - #2819 proxies: `HTTP_PROXY` (absolute-form), `HTTPS_PROXY` (CONNECT),
 //!   `ALL_PROXY` (SOCKS5), `NO_PROXY`, and the `http.start` handle.
 //! - #2824 chunk extensions and `100 Continue`.
@@ -303,6 +304,34 @@ fn a_crlf_in_a_header_value_is_refused_before_sending() {
 }
 
 #[test]
+fn a_header_the_client_manages_is_refused_by_name_in_any_case() {
+    // C-370: the nine names a stock p3 host forbids are refused on native
+    // and the embedded lane too, before anything is dialled.
+    let (port, touched) = untouched_listener();
+    let url = format!("http://127.0.0.1:{port}/echo");
+    for k in ["Host", "connection", "Keep-Alive", "TRANSFER-ENCODING", "upgrade", "Proxy-Authorization", "http2-settings"] {
+        let hs = vec![(k.to_string(), "x".to_string())];
+        let e = client::request_response("GET", &url, "", &hs).expect_err(k);
+        assert_eq!(e, format!("forbidden header name \"{k}\": the HTTP client manages this field"));
+        let e2 = client::http_call_spawn("GET", &url, "", hs, 0, 0).err().expect("start refuses");
+        assert_eq!(e2, e);
+    }
+    // The name is checked before the value, the value before the managed set.
+    let hs = vec![("Host".to_string(), "a\nb".to_string())];
+    let e = client::request_response("GET", &url, "", &hs).unwrap_err();
+    assert!(e.starts_with("invalid header value for \"Host\""), "{e}");
+    assert!(!touched(Duration::from_millis(200)), "a managed header still dialled");
+}
+
+#[test]
+fn the_error_quote_escapes_what_rust_debug_escapes_in_ascii() {
+    for s in ["plain", "q\"uote", "back\\slash", "t\tr\rn\n0\0", "\u{1b}[m", "del\u{7f}", "héllo"] {
+        let want = if s.is_ascii() { format!("{s:?}") } else { format!("\"{s}\"") };
+        assert_eq!(client::http_quote(s), want, "{s:?}");
+    }
+}
+
+#[test]
 fn ordinary_headers_still_go_out() {
     let (port, rx) = origin(OK);
     let hs = vec![("X-Test".to_string(), "a\tb: c; d=\"e\"".to_string())];
@@ -331,11 +360,11 @@ fn a_malformed_chunk_size_is_an_error_not_an_empty_body() {
     let reply = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nhello\r\n0\r\n\r\n";
     let (port, _rx) = origin(reply);
     let e = get(&format!("http://127.0.0.1:{port}/")).unwrap_err();
-    assert!(e.contains("malformed chunked body"), "{e}");
+    assert_eq!(e, format!("malformed or incomplete response from \"http://127.0.0.1:{port}/\""));
     let (port, _rx) = origin(reply);
     let sh = client::http_call_spawn("GET", &format!("http://127.0.0.1:{port}/"), "", vec![], 5000, 0).unwrap();
     let e = client::http_call_wait(&sh).unwrap_err();
-    assert!(e.contains("malformed chunked body"), "{e}");
+    assert_eq!(e, format!("malformed or incomplete response from \"http://127.0.0.1:{port}/\""));
 }
 
 #[test]
@@ -369,8 +398,8 @@ fn the_connect_timeout_follows_almide_http_timeout_secs() {
         return;
     }
     assert!(secs < 15.0, "the dial ran {secs:.1}s past a 2 s connect timeout: {out}");
-    assert!(out.contains("connection failed: timed out after 2s connecting to 10.255.255.1:81"), "{out}");
-    assert!(out.contains("ALMIDE_HTTP_TIMEOUT_SECS"), "{out}");
+    let want = "err timed out waiting for \"http://10.255.255.1:81/\" (raise ALMIDE_HTTP_TIMEOUT_SECS; 0 = no timeout)";
+    assert!(out.starts_with(want), "{out}");
 }
 
 #[test]
@@ -378,8 +407,10 @@ fn the_response_size_is_capped() {
     let big = format!("HTTP/1.1 200 OK\r\nContent-Length: 5000\r\n\r\n{}", "x".repeat(5000));
     let (port, _rx) = origin(big.as_bytes());
     let out = in_child(&format!("response|GET|http://127.0.0.1:{port}/"), &[("ALMIDE_HTTP_MAX_RESPONSE_BYTES", "1000")]);
-    assert!(out.starts_with("err response too large: more than 1000 bytes"), "{out}");
-    assert!(out.contains("ALMIDE_HTTP_MAX_RESPONSE_BYTES"), "{out}");
+    let want = format!(
+        "err response from \"http://127.0.0.1:{port}/\" is larger than 1000 bytes (raise ALMIDE_HTTP_MAX_RESPONSE_BYTES; 0 = no limit)"
+    );
+    assert!(out.starts_with(&want), "{out}");
     // Under the cap it is answered whole.
     let (port, _rx) = origin(big.as_bytes());
     let out = in_child(&format!("bytes|GET|http://127.0.0.1:{port}/"), &[("ALMIDE_HTTP_MAX_RESPONSE_BYTES", "10000")]);
@@ -449,9 +480,9 @@ fn ssl_cert_file_is_trusted_and_a_certificate_failure_reads_as_tls() {
     assert_eq!(out, "ok 200 ok");
     let out = in_child(&format!("start|GET|{url}"), &[("SSL_CERT_FILE", ca.to_str().unwrap())]);
     assert_eq!(out, "ok 200 ok");
-    // Without it the test CA is unknown — and that is a TLS error.
+    // Without it the test CA is unknown — and that is the tls class.
     let out = in_child(&format!("response|GET|{url}"), &[]);
-    assert!(out.starts_with("err TLS error: invalid peer certificate: UnknownIssuer"), "{out}");
+    assert!(out.starts_with(&format!("err TLS handshake with \"{url}\" failed")), "{out}");
 }
 
 #[test]
@@ -582,7 +613,7 @@ fn no_proxy_matches_a_domain_and_its_subdomains_only() {
             &[("HTTP_PROXY", &format!("http://127.0.0.1:{pp}")), ("no_proxy", "example.invalid")],
         );
         // Bypassed = dialled directly, which fails (`.invalid` never resolves).
-        assert_eq!(out.starts_with("err connection failed"), bypass, "{host}: {out}");
+        assert_eq!(out.starts_with("err cannot resolve the host of"), bypass, "{host}: {out}");
     }
 }
 

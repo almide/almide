@@ -1,15 +1,18 @@
 //! #1628 stage 2, increment 1: `ALMIDE_COMPONENT_P3=1` + `--component`
 //! emits a WASI 0.3 component — stdio over component-model streams on the
-//! async canonical ABI (sync stream/future builtins inside an async-lifted
-//! `run`). The observable contract is the same as every other leg: stdout,
-//! stderr and the exit code are byte-identical to the plain wasm artifact
-//! (and thereby to native, which the run-manifest already pins for the
-//! fixture programs).
+//! async canonical ABI (async stream/future builtins completed through
+//! `waitable-set.wait` inside an async-lifted `run`). The observable
+//! contract is the same as every other leg: stdout, stderr and the exit
+//! code are byte-identical to the plain wasm artifact (and thereby to
+//! native, which the run-manifest already pins for the fixture programs).
 //!
-//! The runtime needs wasmtime 46+ with `component-model-async` +
-//! `component-model-more-async-builtins` (the 🚝 sync builtins) and
-//! `-S p3=y`; CI installs 47.x. An environment whose wasmtime lacks the
-//! features skips the execution half (the emission half always runs).
+//! The runtime is a STOCK wasmtime 46+ with NO feature flag (ADR-0023
+//! step 1): `wasmtime run app.wasm`, plus `-S http` — the capability grant,
+//! like `--dir` — for an http client. No harness here passes `-W` or
+//! `-S p3`, so a shim that reintroduces a 🚝 synchronous builtin fails the
+//! execution tests instead of being carried by a flag; CI installs 47.x.
+//! A wasmtime older than the p3 floor (46) skips the execution half (the
+//! emission half always runs); a refusal from a 46+ wasmtime is a failure.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -28,6 +31,34 @@ fn almide_bin() -> String {
 
 fn wasmtime_available() -> bool {
     Command::new("wasmtime").arg("--version").output().is_ok_and(|o| o.status.success())
+}
+
+/// The installed wasmtime runs p3 components by default (the pin policy's
+/// floor, `proofs/wasi-pin-policy.toml` [runtime].floor = 46). Below it the
+/// execution half is an environment gap and skips; at or above it every
+/// refusal is a product failure — the old substring skip ("requires the
+/// component model", "unknown") would have read a 🚝 regression as a gap.
+fn wasmtime_runs_p3() -> bool {
+    let Ok(o) = Command::new("wasmtime").arg("--version").output() else {
+        return false;
+    };
+    let v = String::from_utf8_lossy(&o.stdout).to_string();
+    let major = v
+        .split_whitespace()
+        .nth(1)
+        .and_then(|ver| ver.split('.').next())
+        .and_then(|m| m.parse::<u32>().ok())
+        .unwrap_or(0);
+    if major < 46 {
+        assert!(
+            std::env::var_os("ALMIDE_EXPECT_TOOLS").is_none(),
+            "ALMIDE_EXPECT_TOOLS: {} is below the p3 floor (46)",
+            v.trim()
+        );
+        eprintln!("skipping p3 execution: {} is below the p3 floor (46)", v.trim());
+        return false;
+    }
+    true
 }
 
 fn build_p3(src: &Path, out: &Path) -> String {
@@ -68,15 +99,11 @@ fn build_core(src: &Path, out: &Path) {
 /// `None` = this wasmtime cannot host the p3 feature set (skip);
 /// `Some((stdout, stderr, code))` otherwise.
 fn run_p3(module: &Path, stdin: &str) -> Option<(String, String, i32)> {
+    if !wasmtime_runs_p3() {
+        return None;
+    }
     let mut child = Command::new("wasmtime")
-        .args([
-            "run",
-            "-W",
-            "component-model-async=y,component-model-more-async-builtins=y",
-            "-S",
-            "p3=y",
-            module.to_str().unwrap(),
-        ])
+        .args(["run", module.to_str().unwrap()])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -92,14 +119,6 @@ fn run_p3(module: &Path, stdin: &str) -> Option<(String, String, i32)> {
     let stderr = String::from_utf8_lossy(&out.stderr).to_string();
     // A wasmtime without the flags/feature refuses at the CLI or the
     // validator — that is an environment gap, not a product failure.
-    if !out.status.success()
-        && (stderr.contains("unexpected argument")
-            || stderr.contains("unknown")
-            || stderr.contains("requires the component model"))
-    {
-        eprintln!("skipping p3 execution: this wasmtime lacks the p3 async feature set");
-        return None;
-    }
     Some((
         String::from_utf8_lossy(&out.stdout).to_string(),
         stderr,
@@ -315,30 +334,16 @@ fn build_p3_structural(src: &Path, out: &Path) -> String {
 
 /// Run under wasmtime with the p3 feature set AND `--dir .` from `cwd`.
 fn run_p3_dir(module: &Path, cwd: &Path) -> Option<(String, String, i32)> {
+    if !wasmtime_runs_p3() {
+        return None;
+    }
     let out = Command::new("wasmtime")
-        .args([
-            "run",
-            "-W",
-            "component-model-async=y,component-model-more-async-builtins=y",
-            "-S",
-            "p3=y",
-            "--dir",
-            ".",
-            module.to_str().unwrap(),
-        ])
+        .args(["run", "--dir", ".", module.to_str().unwrap()])
         .current_dir(cwd)
         .stdin(Stdio::null())
         .output()
         .expect("spawn wasmtime");
     let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-    if !out.status.success()
-        && (stderr.contains("unexpected argument")
-            || stderr.contains("unknown")
-            || stderr.contains("requires the component model"))
-    {
-        eprintln!("skipping p3 execution: this wasmtime lacks the p3 async feature set");
-        return None;
-    }
     Some((
         String::from_utf8_lossy(&out.stdout).to_string(),
         stderr,
@@ -754,17 +759,11 @@ fn spawn_http_echo() -> std::net::SocketAddr {
 /// a scheduler regression is a deadlock, and it must fail the test in
 /// two minutes, not hang the suite.
 fn run_p3_http(module: &Path) -> Option<(String, String, i32)> {
+    if !wasmtime_runs_p3() {
+        return None;
+    }
     let mut child = Command::new("wasmtime")
-        .args([
-            "run",
-            "-W",
-            "component-model-async=y,component-model-more-async-builtins=y",
-            "-S",
-            "p3=y",
-            "-S",
-            "http=y",
-            module.to_str().unwrap(),
-        ])
+        .args(["run", "-S", "http=y", module.to_str().unwrap()])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -784,14 +783,6 @@ fn run_p3_http(module: &Path) -> Option<(String, String, i32)> {
     }
     let out = child.wait_with_output().expect("wait wasmtime");
     let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-    if !out.status.success()
-        && (stderr.contains("unexpected argument")
-            || stderr.contains("unknown")
-            || stderr.contains("requires the component model"))
-    {
-        eprintln!("skipping p3 http execution: this wasmtime lacks the p3 http feature set");
-        return None;
-    }
     Some((
         String::from_utf8_lossy(&out.stdout).to_string(),
         stderr,
@@ -1015,4 +1006,190 @@ fn p3_component_spells_the_fs_errno_table() {
         + "\n";
     assert_eq!(out, expected, "the p3 lane's errno texts are the table's (stderr: {err})");
     assert_eq!(code, 0);
+}
+
+/// Count the component's stream/future copy builtins by form: (async,
+/// sync). ADR-0023 step 1: the sync `stream.read/write` /
+/// `future.read/write` are the 🚝 `component-model-more-async-builtins`
+/// builtins, so a p3 artifact must carry none. The async count is the
+/// reader's own control: a scan that sees no copy at all would pass the
+/// "no sync" half for free.
+fn copy_builtins(component: &[u8]) -> (usize, usize) {
+    use wasmparser::{CanonicalFunction, CanonicalOption, Parser, Payload};
+    let (mut asy, mut sync) = (0, 0);
+    for payload in Parser::new(0).parse_all(component) {
+        let Payload::ComponentCanonicalSection(section) = payload.expect("parse component") else {
+            continue;
+        };
+        for func in section {
+            let options = match func.expect("canonical function") {
+                CanonicalFunction::StreamRead { options, .. }
+                | CanonicalFunction::StreamWrite { options, .. }
+                | CanonicalFunction::FutureRead { options, .. }
+                | CanonicalFunction::FutureWrite { options, .. } => options,
+                _ => continue,
+            };
+            if options.iter().any(|o| matches!(o, CanonicalOption::Async)) {
+                asy += 1;
+            } else {
+                sync += 1;
+            }
+        }
+    }
+    (asy, sync)
+}
+
+/// ADR-0023 step 1's gate: a p3 artifact needs NO wasmtime feature flag.
+/// Every shim surface — stdio, the fs read and write streams, the http
+/// exchange, the env service — is built, scanned for synchronous copy
+/// builtins, validated with the 🚝 feature OFF, and run with the bare
+/// command line a user types: `wasmtime run app.wasm` (`--dir .` for the
+/// fs program, the capability grant; `-S http` for the http client).
+#[test]
+fn p3_components_need_no_feature_flag() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() {
+        return;
+    }
+    let addr = spawn_http_echo();
+    let d = dir().join("no-flag");
+    std::fs::create_dir_all(&d).expect("mkdir");
+    std::fs::write(d.join("in.txt"), "fs line").expect("fixture file");
+    let programs: [(&str, String); 4] = [
+        ("hello", "effect fn main() -> Unit = println(\"hello\")\n".to_string()),
+        (
+            "fs",
+            r#"import fs
+
+effect fn main() -> Unit = {
+  fs.write("out.txt", fs.read_text("in.txt")! + " copied")!
+  println(fs.read_text("out.txt")!)
+}
+"#
+            .to_string(),
+        ),
+        (
+            "http",
+            format!(
+                "import http\n\neffect fn main() -> Unit = println(http.get(\"http://{addr}/hello\")!)\n"
+            ),
+        ),
+        (
+            "env",
+            "import env\n\neffect fn main() -> Unit = {\n  env.sleep_ms(1)\n  println(\"${list.len(env.args())} ${env.get(\"P3_NO_FLAG\") ?? \"none\"}\")\n}\n"
+                .to_string(),
+        ),
+    ];
+    let mut features = wasmparser::WasmFeatures::default();
+    features.remove(wasmparser::WasmFeatures::CM_MORE_ASYNC_BUILTINS);
+    for (name, src) in &programs {
+        let source = d.join(format!("{name}.almd"));
+        std::fs::write(&source, src).expect("write program");
+        let wasm = d.join(format!("{name}.p3.wasm"));
+        build_p3(&source, &wasm);
+        let bytes = std::fs::read(&wasm).expect("read component");
+        let (asy, sync) = copy_builtins(&bytes);
+        assert_eq!(sync, 0, "{name}: {sync} synchronous stream/future builtin(s) — the 🚝 gate");
+        assert!(asy > 0, "{name}: the scan found no copy builtin at all (the reader is blind)");
+        wasmparser::Validator::new_with_features(features)
+            .validate_all(&bytes)
+            .unwrap_or_else(|e| panic!("{name}: invalid without component-model-more-async-builtins: {e}"));
+    }
+    if !wasmtime_available() || !wasmtime_runs_p3() {
+        return;
+    }
+    let runs: [(&str, &[&str], &str); 4] = [
+        ("hello", &[], "hello\n"),
+        ("fs", &["--dir", "."], "fs line copied\n"),
+        ("http", &["-S", "http=y"], "hello from p3\n"),
+        ("env", &[], "0 none\n"),
+    ];
+    for (name, flags, want) in runs {
+        let out = Command::new("wasmtime")
+            .arg("run")
+            .args(flags)
+            .arg(d.join(format!("{name}.p3.wasm")))
+            .current_dir(&d)
+            .stdin(Stdio::null())
+            .output()
+            .expect("spawn wasmtime");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "{name}: `wasmtime run {}` refused it:\n{stderr}", flags.join(" "));
+        assert_eq!(String::from_utf8_lossy(&out.stdout), want, "{name}: stdout (stderr: {stderr})");
+    }
+}
+
+// ADR-0023 step 3: env.get, the program arguments and env.sleep_ms on the
+// p3 component, against native. Presence, absence, an empty value, a name
+// that is a strict PREFIX of a present one (the scan compares lengths
+// first), non-ASCII value bytes with a `=` inside, a repeated read (the
+// cached list), argv[0] skipped with an empty and a spaced argument, and
+// a sleep that is observed on the monotonic clock.
+const ENV_PROBE: &str = r#"import env
+import process
+
+effect fn main() -> Unit = {
+  println(env.get("P3_PROBE_KEY") ?? "<none>")
+  println(env.get("P3_PROBE") ?? "<none>")
+  println(env.get("P3_PROBE_EMPTY") ?? "<none>")
+  println(env.get("P3_PROBE_ABSENT") ?? "<none>")
+  println(env.get("P3_PROBE_KEY") ?? "<none>")
+  let a = env.args()
+  println("argc=${list.len(a)}")
+  for x in a {
+    println("arg=[${x}]")
+  }
+  let pa = process.args()
+  println("process argc=${list.len(pa)}")
+  let t0 = datetime.monotonic_ns()
+  env.sleep_ms(120)
+  let dt = datetime.monotonic_ns() - t0
+  println(if dt >= 120000000 then "slept" else "short: ${dt}")
+  env.sleep_ms(-5)
+  println("done")
+}
+"#;
+
+#[test]
+fn p3_component_serves_env_args_and_sleep_like_native() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() {
+        return;
+    }
+    let d = dir().join("env-probe");
+    std::fs::create_dir_all(&d).expect("mkdir");
+    let src = d.join("env_probe.almd");
+    std::fs::write(&src, ENV_PROBE).expect("write probe");
+    let p3 = d.join("env_probe.p3.wasm");
+    build_p3(&src, &p3);
+    let vars = [("P3_PROBE_KEY", "välue ✓=x"), ("P3_PROBE_KEY_LONGER", "no"), ("P3_PROBE_EMPTY", "")];
+    let args = ["one", "two words", ""];
+    let native = Command::new(almide_bin())
+        .arg("run")
+        .arg(&src)
+        .arg("--")
+        .args(args)
+        .envs(vars)
+        .env_remove("P3_PROBE")
+        .env_remove("P3_PROBE_ABSENT")
+        .output()
+        .expect("spawn almide run");
+    let native_out = String::from_utf8_lossy(&native.stdout).to_string();
+    assert!(native.status.success(), "native: {}", String::from_utf8_lossy(&native.stderr));
+    assert_eq!(
+        native_out,
+        "välue ✓=x\n<none>\n\n<none>\nvälue ✓=x\nargc=3\narg=[one]\narg=[two words]\narg=[]\nprocess argc=4\nslept\ndone\n",
+        "the native oracle moved"
+    );
+    if !wasmtime_available() || !wasmtime_runs_p3() {
+        return;
+    }
+    let mut run = Command::new("wasmtime");
+    run.arg("run");
+    for (k, v) in vars {
+        run.arg("--env").arg(format!("{k}={v}"));
+    }
+    let out = run.arg(&p3).args(args).stdin(Stdio::null()).output().expect("spawn wasmtime");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), native.status.code(), "exit code (stderr: {stderr})");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), native_out, "p3 stdout diverged from native (stderr: {stderr})");
+    assert_eq!(stderr, String::from_utf8_lossy(&native.stderr), "p3 stderr diverged from native");
 }

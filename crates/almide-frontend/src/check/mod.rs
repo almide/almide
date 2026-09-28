@@ -1441,9 +1441,19 @@ impl ImportSpellings {
 fn import_spellings(program: &mut ast::Program) -> ImportSpellings {
     fn walk_ty(te: &ast::TypeExpr, s: &mut ImportSpellings) {
         match te {
-            ast::TypeExpr::Simple { name } => s.ty_name(*name),
+            // A builtin spelling (`Int`, `Map[K, V]`) resolves to the builtin
+            // before any module is consulted, so it is never a module's type
+            // name — not even in a package with a module that declares its
+            // own `type Map` (#2839).
+            ast::TypeExpr::Simple { name } => {
+                if !crate::canonicalize::resolve::is_builtin_type_spelling(name.as_str(), 0) {
+                    s.ty_name(*name);
+                }
+            }
             ast::TypeExpr::Generic { name, args } => {
-                s.ty_name(*name);
+                if !crate::canonicalize::resolve::is_builtin_type_spelling(name.as_str(), args.len()) {
+                    s.ty_name(*name);
+                }
                 for a in args { walk_ty(a, s); }
             }
             ast::TypeExpr::Record { fields } | ast::TypeExpr::OpenRecord { fields } => {
@@ -1690,6 +1700,12 @@ impl Checker {
                         // resolved only because the protocol table is
                         // program-wide.
                         if alias.is_none() {
+                            // A built-in protocol's name is in scope in every
+                            // file: an unimported module that redeclares it
+                            // does not take the bare spelling away (#2839).
+                            if crate::canonicalize::protocols::is_builtin_protocol_name(w.name.as_str()) {
+                                continue;
+                            }
                             let leaf = o.as_str().rsplit('.').next().unwrap_or(o.as_str()).to_string();
                             self.emit(err(
                                 format!("protocol '{}' is not in scope here: it is declared in module '{}', which this file does not import", w.name, o),

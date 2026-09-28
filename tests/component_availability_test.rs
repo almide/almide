@@ -7,7 +7,12 @@ fn unsupported_component_args_are_named_before_writing_an_artifact() {
     let source = dir.path().join("args.almd");
     let artifact = dir.path().join("args.wasm");
     std::fs::write(&source, "import args\neffect fn main() -> Unit = println(args.option(\"x\") ?? \"-\")\n").expect("source");
-    for p3 in [false, true] {
+    // The p2 component refuses argv; the p3 one serves it over
+    // wasi:cli/environment (ADR-0023 step 3) and refuses env.temp_dir
+    // (host op 28) instead, which no component shim serves.
+    let temp_dir_source = dir.path().join("temp_dir.almd");
+    std::fs::write(&temp_dir_source, "import env\neffect fn main() -> Unit = println(env.temp_dir())\n").expect("source");
+    let component = |source: &std::path::Path, p3: bool| {
         std::fs::write(&artifact, b"existing artifact").expect("sentinel");
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
         cmd.args(["build", source.to_str().expect("path"), "--target", "wasm", "--component", "-o", artifact.to_str().expect("path")])
@@ -16,14 +21,21 @@ fn unsupported_component_args_are_named_before_writing_an_artifact() {
             .env_remove("ALMIDE_FUEL_PROBE")
             .env_remove("ALMIDE_COMPONENT_P3");
         if p3 { cmd.env("ALMIDE_COMPONENT_P3", "1"); }
-        let out = cmd.output().expect("build");
+        cmd.output().expect("build")
+    };
+    for (src, p3, op, name) in [(&source, false, 29, "args.option"), (&temp_dir_source, true, 28, "env.temp_dir")] {
+        let out = component(src, p3);
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(!out.status.success(), "{stderr}");
-        for expected in ["E081", "args.option", "host op 29", if p3 { "WASI 0.3" } else { "WASI 0.2" }] {
+        let host_op = format!("host op {op}");
+        for expected in ["E081", name, host_op.as_str(), if p3 { "WASI 0.3" } else { "WASI 0.2" }] {
             assert!(stderr.contains(expected), "missing {expected}: {stderr}");
         }
         assert_eq!(std::fs::read(&artifact).expect("artifact"), b"existing artifact");
     }
+    let out = component(&source, true);
+    assert!(out.status.success(), "the p3 component serves argv: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(&std::fs::read(&artifact).expect("artifact")[..4], b"\0asm");
 
     // Preview1 serves argv: the component-specific refusal must not leak here.
     let out = Command::new(env!("CARGO_BIN_EXE_almide"))

@@ -31,10 +31,11 @@ while IFS= read -r v; do
   [ "$v" = "$minor" ] || err "vendored WIT at wasi:*@$v, policy says $minor"
 done < <(grep -rhoE "^package wasi:[a-z-]+@[0-9.]+" crates/almide-wasm-run/wit/p3/deps/*/package.wit | sed -E 's/.*@//' | sort -u)
 
-# 2. the p3 shim's import interface versions.
+# 2. the p3 shim's import interface versions (every wasi_p3*.rs part: the
+#    import tables live in the emit and env parts).
 while IFS= read -r v; do
-  [ "$v" = "$minor" ] || err "wasi_p3.rs imports wasi:*@$v, policy says $minor"
-done < <(grep -ohE "wasi:[a-z/-]+@[0-9.]+" crates/almide-wasm-run/src/wasi_p3.rs | sed -E 's/.*@//' | sort -u)
+  [ "$v" = "$minor" ] || err "wasi_p3*.rs imports wasi:*@$v, policy says $minor"
+done < <(grep -ohE "wasi:[a-z/-]+@[0-9.]+" crates/almide-wasm-run/src/wasi_p3*.rs | sed -E 's/.*@//' | sort -u)
 
 # 3. the embedded host's wasmtime pin.
 got="$(grep -E '^wasmtime *= *' crates/almide-wasm-run/Cargo.toml | sed -E 's/[^0-9]*([0-9]+).*/\1/')"
@@ -44,17 +45,23 @@ got="$(grep -E '^wasmtime *= *' crates/almide-wasm-run/Cargo.toml | sed -E 's/[^
 grep -q "wasmtime-${ci_ver}-" .github/workflows/ci.yml \
   || err "ci.yml does not install wasmtime ${ci_ver} (policy [runtime].ci)"
 
-# 5. the p3 harness flag surface.
+# 5. the p3 harness flag surface (ADR-0023 step 1): the policy passes no
+#    feature flag, and neither may the harness — a `-W` / `more-async` /
+#    `p3=y` token anywhere in it would let a 🚝 regression pass by flag.
+#    Every `-S` value it passes must be one the policy grants.
 python3 - "$flags" <<'PY'
 import re, sys
 flags = sys.argv[1]
 src = open("tests/component_p3_test.rs").read()
-# The harness passes the same flags as one -W value and -S p3=y args.
-w = re.search(r'"-W",\s*\n?\s*"([^"]+)"', src)
-ok = w and w.group(1) in flags and '"-S"' in src and '"p3=y"' in src
+bad = [t for t in ('"-W"', "more-async-builtins=", '"p3=y"', "component-model-async=") if t in src]
+bad += [t for t in ("-W", "p3=y", "more-async") if t in flags]
+s_vals = set(re.findall(r'"-S",\s*\n?\s*"([^"]+)"', src))
+ok = not bad and bool(s_vals) and all(("-S " + v) in flags for v in s_vals)
+if not ok:
+    print("  offending: %s; harness -S values %s; policy %r" % (bad, sorted(s_vals), flags), file=sys.stderr)
 sys.exit(0 if ok else 1)
 PY
-[ $? -eq 0 ] || err "component_p3_test.rs flag surface drifted from policy [runtime].flags"
+[ $? -eq 0 ] || err "component_p3_test.rs flag surface drifted from policy [runtime].flags (no feature flag may be passed)"
 
 # 6. wasm-tools family lockstep.
 for dep in wasmparser wit-component; do
