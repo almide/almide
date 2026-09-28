@@ -278,6 +278,11 @@ fn link_self_host(
                         if module.as_str() == "string" && func.as_str() == "from_bytes" {
                             out.insert("bytes.to_string_lossy".to_string());
                         }
+                        // testing.assert_contains lowers as a native arm
+                        // over the linked string.contains (#2743).
+                        if module.as_str() == "testing" && func.as_str() == "assert_contains" {
+                            out.insert("string.contains".to_string());
+                        }
                         out.insert(format!("{}.{}", module.as_str(), func.as_str()));
                     }
                     // Bare println/print display their argument — the
