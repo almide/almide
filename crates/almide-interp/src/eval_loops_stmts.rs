@@ -216,9 +216,13 @@ impl<'a> Interpreter<'a> {
             return Err(f);
         }
         match &stmt.kind {
-            IrStmtKind::Bind { var, value, .. } => {
+            IrStmtKind::Bind { var, value, ty, .. } => {
                 let v = self.eval_value(value, scope)?;
-                scope.bind(*var, v);
+                if matches!(ty, almide_lang::types::Ty::Bytes) {
+                    scope.bind_bytes(*var, v);
+                } else {
+                    scope.bind(*var, v);
+                }
                 Ok(())
             }
             IrStmtKind::BindDestructure { pattern, value } => {
@@ -378,12 +382,19 @@ impl<'a> Interpreter<'a> {
                 .store(base + almide_layout::PAYLOAD + (i as u32) * 8, 8, v)
                 .ok_or_else(|| Flow::Abort("index-assign outside this heap's arena".into()));
         }
+        let is_bytes = scope.is_bytes(target);
         scope
             .with_slot(target, |slot| match slot {
                 Value::List(xs) => {
                     if i < 0 || (i as usize) >= xs.len() {
                         return Err(Flow::Abort("index out of bounds".into()));
                     }
+                    // A Bytes element is a byte (#2899): native stores `v as u8`
+                    // (300 → 44, -1 → 255), and so do both wasm legs.
+                    let vv = match vv {
+                        Value::Int(n) if is_bytes => Value::Int(n & 0xFF),
+                        other => other,
+                    };
                     Rc::make_mut(xs)[i as usize] = vv;
                     Ok(())
                 }

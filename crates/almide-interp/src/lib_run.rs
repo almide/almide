@@ -580,7 +580,11 @@ fn bind_hop_frame<'a>(
         TailCallee::Fn(f) => {
             let frame = base.child();
             for (param, arg) in f.params.iter().zip(args.drain(..)) {
-                frame.bind(param.var, arg);
+                if matches!(param.ty, almide_lang::types::Ty::Bytes) {
+                    frame.bind_bytes(param.var, arg);
+                } else {
+                    frame.bind(param.var, arg);
+                }
             }
             (frame, Some(&f.body), None)
         }
