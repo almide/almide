@@ -4,26 +4,36 @@
 // p1 shim's clock_time_get(1, ...), p2/p3's wasi:clocks/monotonic-clock).
 // The absolute value is never printed: native counts from its first call and
 // every wasm host from its own origin, so only the relation between reads is
-// a promise. Two reads around a known 20 ms pause pin the order (never
-// backwards) and the unit: 20 ms is 20_000_000 in nanoseconds, a count a
-// microsecond or millisecond clock cannot reach, and the 10 s ceiling is one
-// a finer unit would pass around a single short pause.
-// The pause spins on the wall clock (env.millis) rather than env.sleep_ms,
-// so the incumbent leg renders the fixture too (it walls env.sleep_ms); +21
-// because a millisecond read truncates, so 21 ticks are at least 20 ms.
+// a promise.
+// The pause is timed on the clock under test, never on a second clock (#2874:
+// a wall-clock step or slew once made 21 env.millis ticks shorter than 20 ms
+// of monotonic time on a macOS runner). The spin runs until the monotonic
+// clock has advanced 20_000_000 — 20 ms in nanoseconds — and every read in it
+// must be >= the one before (never backwards). The wall clock (env.millis)
+// only bounds the spin: after 5 s it gives up, so a stopped clock still
+// terminates and prints a false line. That escape is also what pins the unit
+// without comparing the two clocks' readings: 20_000_000 microseconds is 20 s
+// and 20_000_000 milliseconds is over 5 hours, so a coarser clock can only
+// reach the mark after the 5 s escape has fired.
+// The spin reads clocks rather than calling env.sleep_ms, so the incumbent
+// leg renders the fixture too (it walls env.sleep_ms).
 import env
 
 effect fn main() -> Unit = {
   let a = datetime.monotonic_ns()
-  let deadline = env.millis() + 21
-  var now = env.millis()
-  while now < deadline {
-    now = env.millis()
+  let escape = env.millis() + 5000
+  var prev = a
+  var ordered = true
+  var reached = false
+  var gave_up = false
+  while not reached and not gave_up {
+    let now = datetime.monotonic_ns()
+    ordered = ordered and now >= prev
+    prev = now
+    reached = now - a >= 20000000
+    gave_up = env.millis() >= escape
   }
   let b = datetime.monotonic_ns()
-  let c = datetime.monotonic_ns()
-  let d = b - a
-  println("never backwards: ${b >= a and c >= b}")
-  println("covers the pause in ns: ${d >= 20000000}")
-  println("ns, not a finer unit: ${d < 10000000000}")
+  println("never backwards: ${ordered and b >= prev}")
+  println("advances 20_000_000 ns before a 5 s escape: ${reached}")
 }
