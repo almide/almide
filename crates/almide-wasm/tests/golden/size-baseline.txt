@@ -800,7 +800,7 @@
 5576	spec/wasm_cross/wide_function_body.almd
 25042	spec/wasm_cross/witness_straightline.almd
 6932	spec/wasm_cross/zip_view_shape.almd
-22375	spec/wasm_cross/zlib_selfhost.almd
+24700	spec/wasm_cross/zlib_selfhost.almd
 4218	spec/wasm_fail/effect_err_aborts_both_legs.almd
 4374	spec/wasm_fail/int_parse_err_propagates.almd
 3081	spec/wasm_fail/matrix_concat_cols_rows_aborts.almd
