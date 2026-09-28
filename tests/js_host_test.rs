@@ -171,3 +171,60 @@ fn host_is_a_wasm_option() {
     let (ok, stderr) = build(dir.path(), PROGRAM, &["--target", "wasm", "--host", "wasi"]);
     assert!(!ok && stderr.contains("accepts only `js`"), "{stderr}");
 }
+
+/// The host bindings of a package in a module of their own (#2876, #2878):
+/// `host.almd` declares one extern BODYLESS and one `= _`, a sibling fn that
+/// calls the extern, and a plain fn. Every call from the entry — to either
+/// extern, to the sibling, to the plain fn — lowers on the structural leg
+/// (a bodyless decl used to hide the whole module; a module's extern used to
+/// be no fn at all), both externs are declared imports of the module, and
+/// the JS host serves them from `init({ js })`.
+const HOST_MODULE: &str = "@extern(wasm, \"js\", \"js_twice\")\nfn js_twice(x: Int) -> Int\n\n@extern(wasm, \"js\", \"js_inc\")\nfn js_inc(x: Int) -> Int = _\n\nfn quad(x: Int) -> Int = js_twice(js_twice(x))\n\nfn probe() -> Int = 40\n";
+const HOST_ENTRY: &str = "import self.host as host\n\nfn main() -> Unit = {\n  println(int.to_string(host.quad(3)))\n  println(int.to_string(host.js_inc(host.probe())))\n  println(int.to_string(host.js_twice(host.probe())))\n}\n";
+
+#[test]
+fn an_extern_declared_in_another_module_is_an_import_of_the_structural_module() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir(root.join("src")).unwrap();
+    std::fs::write(root.join("almide.toml"), "[package]\nname = \"hostpkg\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(root.join("src/host.almd"), HOST_MODULE).unwrap();
+    std::fs::write(root.join("src/main.almd"), HOST_ENTRY).unwrap();
+    // The route-flip probe: a structural decline is the build's error, not a reroute.
+    let out = Command::new(almide())
+        .current_dir(root)
+        .env("ALMIDE_WASM_STRUCTURAL", "1")
+        .args(["build", "src/main.almd", "--target", "wasm", "--host", "js", "-o", "app.wasm"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success() && stderr.contains("structural leg"), "{stderr}");
+    let wasm = std::fs::read(root.join("app.wasm")).unwrap();
+    let mut imports: Vec<(String, String)> = Vec::new();
+    for payload in wasmparser::Parser::new(0).parse_all(&wasm) {
+        if let wasmparser::Payload::ImportSection(r) = payload.unwrap() {
+            for i in r.into_imports() {
+                let i = i.unwrap();
+                imports.push((i.module.to_string(), i.name.to_string()));
+            }
+        }
+    }
+    for name in ["js_twice", "js_inc"] {
+        assert!(imports.contains(&("js".to_string(), name.to_string())), "{name}: {imports:?}");
+    }
+    let dts = std::fs::read_to_string(root.join("app.d.ts")).unwrap();
+    assert!(dts.contains("js_twice: (x: number) => number;") && dts.contains("js_inc: (x: number) => number;"), "{dts}");
+    // Run the glue when node is on PATH (scripts/check-js-host.sh's CI job
+    // installs it; locally its absence only skips the run).
+    if Command::new("node").arg("--version").output().is_err() {
+        return;
+    }
+    std::fs::write(
+        root.join("run.mjs"),
+        "import { pathToFileURL } from \"node:url\";\nconst mod = await import(pathToFileURL(process.argv[2]).href);\nawait mod.init(undefined, { js: { js_twice: (x) => x * 2, js_inc: (x) => x + 1 } });\nmod.run();\n",
+    )
+    .unwrap();
+    let run = Command::new("node").current_dir(root).args(["run.mjs", "app.js"]).output().unwrap();
+    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "12\n41\n80\n");
+}
