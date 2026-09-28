@@ -1,6 +1,8 @@
-// net — TCP networking module.
+// net — TCP networking, Unix-domain sockets and shared-memory files.
 //
-// TcpStream and TcpListener are opaque Int handles.
+// TcpStream and TcpListener are opaque Int handles. The unix_* and shm_*
+// functions speak raw file descriptors instead: a descriptor is what crosses
+// to a peer (unix_send) and what arrives from one (unix_take_fds).
 // Requires `import net`.
 /// Opaque Int handle to a TCP connection.
 type TcpStream = Int
@@ -62,3 +64,53 @@ effect fn tcp_accept(listener: Int) -> Result[Int, String] = _
 /// Stops listening; closing twice is ok.
 @intrinsic("almide_rt_net_tcp_close_listener")
 effect fn tcp_close_listener(listener: Int) -> Result[Unit, String] = _
+
+// ── Unix-domain sockets ──
+/// Stream socket connected to the listener at path; its descriptor.
+@intrinsic("almide_rt_net_unix_connect")
+effect fn unix_connect(path: String) -> Result[Int, String] = _
+
+/// Listener bound at path, which must not exist yet.
+@intrinsic("almide_rt_net_unix_listen")
+effect fn unix_listen(path: String) -> Result[Int, String] = _
+
+/// Blocks for the next connection; its descriptor.
+@intrinsic("almide_rt_net_unix_accept")
+effect fn unix_accept(listener: Int) -> Result[Int, String] = _
+
+/// Sends all of data, the descriptors fds riding with its first byte.
+@intrinsic("almide_rt_net_unix_send")
+effect fn unix_send(sock: Int, data: Bytes, fds: List[Int]) -> Result[Unit, String] = _
+
+/// Up to max bytes, blocking; empty once the peer closed.
+@intrinsic("almide_rt_net_unix_recv")
+effect fn unix_recv(sock: Int, max: Int) -> Result[Bytes, String] = _
+
+/// Descriptors received on sock and not yet taken, oldest first.
+@intrinsic("almide_rt_net_unix_take_fds")
+effect fn unix_take_fds(sock: Int) -> List[Int] = _
+
+/// True if fd is readable within timeout_ms; < 0 waits forever.
+@intrinsic("almide_rt_net_unix_poll")
+effect fn unix_poll(fd: Int, timeout_ms: Int) -> Result[Bool, String] = _
+
+/// Closes a socket, listener or received descriptor.
+@intrinsic("almide_rt_net_unix_close")
+effect fn unix_close(fd: Int) -> Result[Unit, String] = _
+
+// ── Shared-memory files ──
+/// New zero-filled unnamed file of size bytes; its descriptor.
+@intrinsic("almide_rt_net_shm_create")
+effect fn shm_create(size: Int) -> Result[Int, String] = _
+
+/// Grows or shrinks the file fd to size bytes.
+@intrinsic("almide_rt_net_shm_resize")
+effect fn shm_resize(fd: Int, size: Int) -> Result[Unit, String] = _
+
+/// Writes data into fd at byte offset.
+@intrinsic("almide_rt_net_shm_write")
+effect fn shm_write(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] = _
+
+/// Up to len bytes of fd from offset; fewer at its end.
+@intrinsic("almide_rt_net_shm_read")
+effect fn shm_read(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = _
