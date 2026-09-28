@@ -260,7 +260,7 @@ fn http_request_raw(
     body: &str,
     headers: &[(String, String)],
 ) -> Result<HttpRawResponse, String> {
-    let u = http_parse_url(url)?;
+    let u = http_prepare(method, url, headers)?;
     let stream = http_client_connect(&u.host, u.port)?;
     let route = AlmideHttpRoute { target: u.target.clone() };
     let request = http_request_bytes(method, &u, &route, body, headers);

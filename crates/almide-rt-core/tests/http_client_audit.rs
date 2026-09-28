@@ -218,6 +218,42 @@ fn an_idn_host_goes_out_as_punycode() {
     assert_eq!(u.authority, "xn--r8jz45g.xn--zckzah:8080");
 }
 
+// ── #2822 (client half): header injection ──
+
+#[test]
+fn a_crlf_in_a_header_value_is_refused_before_sending() {
+    let (port, touched) = untouched_listener();
+    let url = format!("http://127.0.0.1:{port}/echo");
+    let bad_values = ["a\r\nX-Injected: yes", "a\nb", "a\rb", "a\0b"];
+    for v in bad_values {
+        let hs = vec![("X-Test".to_string(), v.to_string())];
+        let e = client::request_response("GET", &url, "", &hs).expect_err(v);
+        assert!(e.starts_with("invalid header value for \"X-Test\""), "{e}");
+        let e2 = client::request_bytes("GET", &url, "", &hs).expect_err(v);
+        assert_eq!(e2, e);
+        let e3 = client::http_call_spawn("GET", &url, "", hs, 0, 0).err().expect("start refuses");
+        assert_eq!(e3, e);
+    }
+    for k in ["X-Test\r\nX-Injected", "X Test", "X:Test", ""] {
+        let hs = vec![(k.to_string(), "v".to_string())];
+        let e = client::request_response("GET", &url, "", &hs).expect_err(k);
+        assert!(e.starts_with("invalid header name"), "{e}");
+    }
+    for m in ["GET /x HTTP/1.1\r\nX: y\r\n\r\nGET", "GE T", ""] {
+        let e = client::request_response(m, &url, "", &[]).expect_err(m);
+        assert!(e.starts_with("invalid HTTP method"), "{e}");
+    }
+    assert!(!touched(Duration::from_millis(200)), "an injected request still dialled");
+}
+
+#[test]
+fn ordinary_headers_still_go_out() {
+    let (port, rx) = origin(OK);
+    let hs = vec![("X-Test".to_string(), "a\tb: c; d=\"e\"".to_string())];
+    client::request_response("GET", &format!("http://127.0.0.1:{port}/"), "", &hs).unwrap();
+    assert!(head_of(&rx).contains("\r\nX-Test: a\tb: c; d=\"e\"\r\n"));
+}
+
 // ── #2824: chunk extensions and 1xx ──
 
 #[test]

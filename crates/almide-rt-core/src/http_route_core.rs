@@ -275,7 +275,49 @@ fn http_basic_credentials(user: &[u8], pass: &[u8]) -> String {
     format!("Basic {}", http_base64(&cred))
 }
 
-// ── The request head ──
+// ── The request head (#2822, client half) ──
+//
+// A header name must be an RFC 9110 token and a value may not hold CR, LF,
+// NUL or any other control but HTAB — what Go (httpguts), Node
+// (`ERR_INVALID_CHAR`) and Python (`Invalid header value`) refuse. The
+// method must be a token too. A refused request is an `Err` naming the part,
+// returned before anything is dialled: never sanitised and sent.
+
+fn http_is_tchar(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b)
+}
+
+/// Refuse a method or header that would let the caller's text split the
+/// request.
+pub fn http_check_request(method: &str, headers: &[(String, String)]) -> Result<(), String> {
+    if method.is_empty() || !method.bytes().all(http_is_tchar) {
+        return Err(format!("invalid HTTP method {:?}: a method is a token (RFC 9110) — no spaces, controls or line breaks", method));
+    }
+    for (k, v) in headers {
+        if k.is_empty() || !k.bytes().all(http_is_tchar) {
+            return Err(format!(
+                "invalid header name {:?}: a field name is a token (RFC 9110) — no spaces, colons, controls or line breaks",
+                k
+            ));
+        }
+        if v.bytes().any(|b| (b < 0x20 && b != b'\t') || b == 0x7f) {
+            return Err(format!(
+                "invalid header value for {:?}: it contains CR, LF, NUL or another control character, which would split the request",
+                k
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Everything a request needs before it is dialled: the URL, parsed, and the
+/// method and headers, checked. `http.start` answers the same `Err` here,
+/// synchronously.
+pub fn http_prepare(method: &str, url: &str, headers: &[(String, String)]) -> Result<AlmideHttpUrl, String> {
+    let u = http_parse_url(url)?;
+    http_check_request(method, headers)?;
+    Ok(u)
+}
 
 /// How the request reaches the origin once the connection is open: the
 /// request-target to write.
@@ -290,7 +332,7 @@ pub struct AlmideHttpRoute {
 /// default JSON `Content-Type` unless the caller named one), then the
 /// caller's headers in map order. A caller's `Host` replaces ours, as in
 /// curl. ONE writer for every client shape, so the wire request cannot drift
-/// between them.
+/// between them. The headers must have passed `http_check_request`.
 pub fn http_request_bytes(
     method: &str,
     u: &AlmideHttpUrl,
