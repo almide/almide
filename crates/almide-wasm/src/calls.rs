@@ -159,16 +159,20 @@ impl Emitter<'_> {
             }
             CallTarget::Named { name } => {
                 let name = name.as_str();
-                // Variant constructor? Concrete ctors resolve by the global
-                // map; GENERIC instances resolve by name within the call's
-                // annotated type (the ret hint) — ctor names are ambiguous
-                // across instances, the type context is not.
-                let ctor = self.types.ctors.get(name).copied().or_else(|| {
-                    let SliceTy::Named(ti) = ret_hint? else { return None };
+                // Variant constructor? The call's own type names the variant
+                // (the ret hint is the node's checker type first): a ctor
+                // name is ambiguous across generic instances AND across
+                // modules that each declare a same-named case (#413/#2748 —
+                // `colca.start() = Active` beside colcb's `Active`), the
+                // type is not. The global name map is the fallback for a
+                // call whose type does not resolve.
+                let by_type = ret_hint.and_then(|h| {
+                    let SliceTy::Named(ti) = h else { return None };
                     let NamedDef::Variant(v) = self.types.def(ti) else { return None };
                     let ci = v.cases.iter().position(|c| c.name == name)?;
                     Some((ti, ci as u32))
                 });
+                let ctor = by_type.or_else(|| self.types.ctors.get(name).copied());
                 if let Some((ti, ci)) = ctor {
                     return self.lower_variant_ctor(name, ti, ci, args);
                 }
