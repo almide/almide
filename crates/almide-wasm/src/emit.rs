@@ -49,6 +49,10 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     // (#1423 stage 4: the html/path SafeHtml/SafePath rows).
     let erased = crate::newtype::erase_transparent_aliases(ir);
     let ir = erased.as_ref().unwrap_or(ir);
+    // #2750: a fn VALUE as a HOF callback becomes the literal lambda the
+    // arms inline (eta.rs) — one HOF lowering, never a second call path.
+    let expanded = crate::eta::eta_expand_callbacks(ir);
+    let ir = expanded.as_ref().unwrap_or(ir);
     // #2004: a call result consumed by a module op's argument gets an
     // owner — bound first, released by the frame's exit plan.
     let bound = crate::arg_temps::bind_native_temporaries(ir);
