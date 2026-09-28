@@ -5,6 +5,13 @@
   evidence, and gives the implementation order. None of it is implemented yet.
   Refinements that the evidence forced are marked **[refined]** where they
   appear, and are listed together in §9.
+- **Amended 2026-09-28**: §5.3 "Which export shape" (P2 `incoming-handler@0.2`)
+  and the order of steps 7 and 9 are superseded by
+  [ADR-0023](./0023-wasm-http-over-wasi-http.md): the stock server exports
+  `wasi:http/handler@0.3.0`. The P2 premise, that P3 needs
+  `-W component-model-more-async-builtins`, came from the probe's synchronous
+  stream builtins. An async-builtin P3 handler serves on wasmtime 47 with no
+  flags (ADR-0023 §2.1, §3.3).
 - **Date**: 2026-09-27
 - **Scope**: `http.serve` and the `http` router family, `fan` bodies, a new `kv`
   stdlib module, the `almide build --target wasm` shape of a server, and the
