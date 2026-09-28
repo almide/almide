@@ -1792,6 +1792,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/unit_effect_abi.almd", class = "fixture" },
   { path = "spec/integration/modules/cross_module_unit_effect_test.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_dispatcher_many_arms.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-134"
