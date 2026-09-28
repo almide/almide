@@ -16,10 +16,12 @@
 //!   * every name in the codegen's `RUST_RESERVED_TYPE_NAMES`, declared by the
 //!     entry program, native and wasm.
 //!
-//! A cell the checker rejects is a frontend matter, not this gate's: it is
-//! filtered out by `almide check` in the reference shape and printed, and a
-//! floor on the surviving count keeps a green run from coming from cells that
-//! never ran.
+//! Every cell must check and run: none is filtered out. A file's own
+//! declaration answers its bare spelling, so `type Int` in `src/int.almd` or
+//! `type String` in the entry program is that file's type in every position
+//! (#2858, module-system §4.5). The cells therefore carry a `Bool` payload,
+//! the one builtin no cell declares, instead of spelling the builtin their
+//! own declaration takes over.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -59,8 +61,16 @@ fn stdlib_module_names() -> BTreeSet<String> {
     names
 }
 
+/// One cell's module: `type <ty>` built by `build`. The payload is a `Bool`,
+/// never the declared name, so the signature and the literal both name the
+/// declared type whatever builtin it shares a name with.
 fn cell_module(ty: &str) -> String {
-    format!("type {ty} = {{ text: String }}\n\nfn build(t: String) -> {ty} = {ty} {{ text: t }}\n")
+    format!("type {ty} = {{ ok: Bool }}\n\nfn build(b: Bool) -> {ty} = {ty} {{ ok: b }}\n")
+}
+
+/// The line a cell prints when its value came back through its own type.
+fn cell_line(call: &str, tag: &str) -> String {
+    format!("if {call}.ok then \"ok-{tag}\" else \"lost-{tag}\"")
 }
 
 const PKG_TOML: &str = "[package]\nname = \"cellpkg\"\nversion = \"0.1.0\"\n";
@@ -77,7 +87,7 @@ fn stdlib_named_package(root: &Path, modules: &[String], as_dependency: bool) ->
         write(&pkg.join(format!("src/{m}.almd")), &cell_module(&pascal(m)));
     }
     let imports: String = modules.iter().map(|m| format!("import self.{m}\n")).collect();
-    let parts: Vec<String> = modules.iter().map(|m| format!("{m}.build(\"ok-{m}\").text")).collect();
+    let parts: Vec<String> = modules.iter().map(|m| cell_line(&format!("{m}.build(true)"), m)).collect();
     if as_dependency {
         write(&pkg.join("src/mod.almd"), &format!("{imports}\nfn run() -> List[String] = [{}]\n", parts.join(", ")));
         let app = root.join("app");
@@ -94,24 +104,17 @@ fn stdlib_named_package(root: &Path, modules: &[String], as_dependency: bool) ->
     }
 }
 
-/// The stdlib-name cells the checker accepts as a DEPENDENCY — the shape that
-/// always mangled, so the reference for what the codegen must also build
-/// in-package.
+/// Every stdlib-name cell, each of which must check as a dependency on its
+/// own — the reference shape, so a failure names its module.
 fn applicable_stdlib_named_cells() -> Vec<String> {
-    let mut ok = Vec::new();
-    let mut rejected = Vec::new();
-    for m in stdlib_module_names() {
+    let cells: Vec<String> = stdlib_module_names().into_iter().collect();
+    for m in &cells {
         let root = tempfile::tempdir().expect("tempdir");
-        let app = stdlib_named_package(root.path(), std::slice::from_ref(&m), true);
-        match almide_in(&app, &["check", "src/main.almd"]) {
-            (true, _) => ok.push(m),
-            (false, _) => rejected.push(m),
-        }
+        let app = stdlib_named_package(root.path(), std::slice::from_ref(m), true);
+        let (ok, out) = almide_in(&app, &["check", "src/main.almd"]);
+        assert!(ok, "cell `{m}` (`type {}` in src/{m}.almd) does not check as a dependency:\n{out}", pascal(m));
     }
-    eprintln!("stdlib-name cells rejected by the checker as a dependency (not this gate's): {rejected:?}");
-    assert!(ok.len() >= 20, "only {} stdlib-name cells check as a dependency: {ok:?}", ok.len());
-    assert!(ok.iter().any(|m| m == "option") && ok.iter().any(|m| m == "result"), "the reported cells must run: {ok:?}");
-    ok
+    cells
 }
 
 fn assert_prints_every_cell(shape: &str, (ok, out): (bool, String), modules: &[String]) {
@@ -125,14 +128,12 @@ fn a_package_module_named_after_a_stdlib_module_builds_its_types_in_both_shapes(
     let modules = applicable_stdlib_named_cells();
     for as_dependency in [false, true] {
         let shape = if as_dependency { "dependency" } else { "in-package" };
-        let root = tempfile::tempdir().expect("tempdir");
-        let dir = stdlib_named_package(root.path(), &modules, as_dependency);
-        assert_prints_every_cell(&format!("{shape} native"), almide_in(&dir, &["run", "src/main.almd"]), &modules);
-        assert_prints_every_cell(
-            &format!("{shape} wasm"),
-            almide_in(&dir, &["run", "src/main.almd", "--target", "wasm"]),
-            &modules,
-        );
+        for (target, extra) in [("native", &[][..]), ("wasm", &["--target", "wasm"][..])] {
+            let root = tempfile::tempdir().expect("tempdir");
+            let dir = stdlib_named_package(root.path(), &modules, as_dependency);
+            let args: Vec<&str> = ["run", "src/main.almd"].into_iter().chain(extra.iter().copied()).collect();
+            assert_prints_every_cell(&format!("{shape} {target}"), almide_in(&dir, &args), &modules);
+        }
     }
 }
 
@@ -146,11 +147,11 @@ fn a_package_module_option_declaring_option_runs_in_package() {
     write(&pkg.join("src/option.almd"), &cell_module("Option"));
     write(
         &pkg.join("src/main.almd"),
-        "import self.option\n\neffect fn main() -> Unit = {\n  let o = option.build(\"ok\")\n  println(o.text)\n  println(\"${o}\")\n}\n",
+        "import self.option\n\neffect fn main() -> Unit = {\n  let o = option.build(true)\n  println(if o.ok then \"ok\" else \"lost\")\n  println(\"${o}\")\n}\n",
     );
     for (target, args) in [("native", &["run", "src/main.almd"][..]), ("wasm", &["run", "src/main.almd", "--target", "wasm"][..])] {
         let (ok, out) = almide_in(pkg, args);
-        assert!(ok && out.contains("ok\nOption { text: \"ok\" }"), "{target}:\n{out}");
+        assert!(ok && out.contains("ok\nOption { ok: true }"), "{target}:\n{out}");
     }
 }
 
@@ -158,31 +159,38 @@ fn a_package_module_option_declaring_option_runs_in_package() {
 /// also uses the builtin `Option` / `Result` the runtime is written in.
 #[test]
 fn the_entry_program_may_declare_every_rust_reserved_type_name() {
-    let reserved = almide_codegen::pass_ir_link_flatten::RUST_RESERVED_TYPE_NAMES;
-    let mut names = Vec::new();
-    let mut rejected = Vec::new();
-    for name in reserved {
+    // `Some` / `None` / `Ok` / `Err` are keyword tokens, not type names: the
+    // parser refuses them as a declaration, which is asserted, not skipped.
+    let keywords = ["Some", "None", "Ok", "Err"];
+    let names: Vec<String> = almide_codegen::pass_ir_link_flatten::RUST_RESERVED_TYPE_NAMES
+        .iter()
+        .filter(|n| !keywords.contains(n))
+        .map(|n| n.to_string())
+        .collect();
+    for kw in keywords {
         let root = tempfile::tempdir().expect("tempdir");
-        write(&root.path().join("t.almd"), &format!("{}\neffect fn main() -> Unit = println(build(\"x\").text)\n", cell_module(name)));
-        match almide_in(root.path(), &["check", "t.almd"]) {
-            (true, _) => names.push(name.to_string()),
-            (false, _) => rejected.push(name.to_string()),
-        }
+        write(&root.path().join("t.almd"), &format!("{}\neffect fn main() -> Unit = ()\n", cell_module(kw)));
+        let (ok, out) = almide_in(root.path(), &["check", "t.almd"]);
+        assert!(!ok && out.contains("Expected type name"), "`type {kw}` should be a parse error:\n{out}");
     }
-    eprintln!("reserved names the checker rejects as a declaration (not this gate's): {rejected:?}");
-    assert!(names.len() >= 30, "only {} reserved names check: {names:?}", names.len());
-    assert!(names.iter().any(|n| n == "Option") && names.iter().any(|n| n == "Result"), "{names:?}");
+    for name in &names {
+        let root = tempfile::tempdir().expect("tempdir");
+        let main = format!("{}\neffect fn main() -> Unit = println({})\n", cell_module(name), cell_line("build(true)", name));
+        write(&root.path().join("t.almd"), &main);
+        let (ok, out) = almide_in(root.path(), &["check", "t.almd"]);
+        assert!(ok, "the entry program declaring `type {name}` does not check:\n{out}");
+    }
 
     let decls: String = names
         .iter()
-        .map(|n| format!("type {n} = {{ text_{}: String }}\n", n.to_ascii_lowercase()))
+        .map(|n| format!("type {n} = {{ ok_{}: Bool }}\n", n.to_ascii_lowercase()))
         .collect();
     let body: String = names
         .iter()
-        .map(|n| format!("  println(\"${{{n} {{ text_{}: \"ok-{n}\" }}}}\")\n", n.to_ascii_lowercase()))
+        .map(|n| format!("  println(\"${{{n} {{ ok_{}: true }}}}\")\n", n.to_ascii_lowercase()))
         .collect();
     let program = format!(
-        "{decls}\neffect fn main() -> Unit = {{\n{body}  let first: Option[Int] = list.first([7])\n  let parsed: Result[Int, String] = int.parse(\"8\")\n  println(int.to_string((first ?? 0) + (parsed ?? 0)))\n}}\n"
+        "{decls}\neffect fn main() -> Unit = {{\n{body}  let first: Option[Int] = list.first([7])\n  println(int.to_string((first ?? 0) + (int.parse(\"8\") ?? 0)))\n}}\n"
     );
     let root = tempfile::tempdir().expect("tempdir");
     write(&root.path().join("t.almd"), &program);
@@ -191,7 +199,7 @@ fn the_entry_program_may_declare_every_rust_reserved_type_name() {
         assert!(ok, "{target}: the build failed:\n{out}");
         let missing: Vec<&String> = names
             .iter()
-            .filter(|n| !out.contains(&format!("{n} {{ text_{}: \"ok-{n}\" }}", n.to_ascii_lowercase())))
+            .filter(|n| !out.contains(&format!("{n} {{ ok_{}: true }}", n.to_ascii_lowercase())))
             .collect();
         assert!(missing.is_empty() && out.contains("15"), "{target}: no output for {missing:?}:\n{out}");
     }
