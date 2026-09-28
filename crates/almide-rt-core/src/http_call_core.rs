@@ -235,11 +235,11 @@ fn http_call_decode(f: &mut HttpCallFraming, raw: &mut Vec<u8>, out: &mut Vec<u8
 /// Split the head off `raw` once it is whole: status, reason, header lines
 /// (wire order, repeats kept — the `request_response` rule) and framing. A
 /// 1xx interim head (`100 Continue`) is dropped and the next one awaited
-/// (#2824).
+/// (#2824); a head past `HTTP_MAX_HEAD_BYTES` is an error.
 fn http_call_parse_head(raw: &mut Vec<u8>) -> Result<Option<(AlmideHttpCallHead, HttpCallFraming)>, String> {
     let (section, status) = loop {
         let Some(idx) = raw.windows(4).position(|w| w == b"\r\n\r\n") else {
-            return Ok(None);
+            return if raw.len() > HTTP_MAX_HEAD_BYTES { Err(http_head_too_large()) } else { Ok(None) };
         };
         let status = http_status_of(&raw[..idx]);
         let section = String::from_utf8_lossy(&raw[..idx]).into_owned();
