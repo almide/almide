@@ -514,7 +514,7 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             IrPattern::Constructor { name: ctor_pattern_name(ctx, &bare_name, ty), args: ir_args }
         }
         ast::Pattern::RecordPattern { name, fields, rest } =>
-            lower_pattern_record(ctx, name, fields, *rest),
+            lower_pattern_record(ctx, name, fields, *rest, ty),
         ast::Pattern::Tuple { elements } => {
             let elem_tys = match ty {
                 Ty::Tuple(tys) => tys.clone(),
@@ -608,10 +608,15 @@ fn lower_pattern_record(
     name: &almide_base::intern::Sym,
     fields: &[ast::FieldPattern],
     rest: bool,
+    subject_ty: &Ty,
 ) -> IrPattern {
     let pat_name = struct_pattern_name(ctx, name);
+    let field_ty_of = |ctx: &LowerCtx, field: &str| {
+        record_case_field_ty_from_subject(ctx, name, field, subject_ty)
+            .unwrap_or_else(|| resolve_record_field_ty(ctx, &pat_name, field))
+    };
     let mut ir_fields: Vec<IrFieldPattern> = fields.iter().map(|f| {
-        let field_ty = resolve_record_field_ty(ctx, &pat_name, &f.name);
+        let field_ty = field_ty_of(ctx, &f.name);
         IrFieldPattern {
             name: f.name.to_string(),
             pattern: f.pattern.as_ref().map(|p| lower_pattern(ctx, p, &field_ty)),
@@ -619,7 +624,7 @@ fn lower_pattern_record(
     }).collect();
     for (i, f) in fields.iter().enumerate() {
         if f.pattern.is_none() {
-            let field_ty = resolve_record_field_ty(ctx, &pat_name, &f.name);
+            let field_ty = field_ty_of(ctx, &f.name);
             let var = ctx.define_var(&f.name, field_ty.clone(), Mutability::Let, None);
             ir_fields[i].pattern = Some(IrPattern::Bind { var, ty: field_ty });
         }
@@ -695,6 +700,18 @@ fn get_constructor_payload_tys_from_subject(ctx: &LowerCtx, ctor_name: &str, sub
     } else {
         vec![]
     }
+}
+
+/// A record-case field's type read off the match SUBJECT, whose generics are
+/// instantiated (`Box[String]`'s `v` is `String`, not the declaration's `T`),
+/// the way `get_constructor_payload_tys_from_subject` reads a tuple case's.
+/// `None` when the subject is not a variant with a record case of that name.
+fn record_case_field_ty_from_subject(ctx: &LowerCtx, written: &almide_base::intern::Sym, field: &str, subject_ty: &Ty) -> Option<Ty> {
+    let case_name = bare_ctor_name(written);
+    let Ty::Variant { cases, .. } = ctx.env.resolve_named(subject_ty) else { return None };
+    let case = cases.into_iter().find(|c| c.name == case_name)?;
+    let crate::types::VariantPayload::Record(fs) = case.payload else { return None };
+    fs.into_iter().find(|(n, _)| n == field).map(|(_, t)| t)
 }
 
 fn resolve_record_field_ty(ctx: &LowerCtx, record_name: &str, field_name: &str) -> Ty {
