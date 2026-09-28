@@ -892,7 +892,11 @@ fn verify_wasm_ir(ir_program: &almide::ir::IrProgram) -> Result<(), ()> {
 /// scripts/check-target-availability.sh) turns the late render wall into
 /// an E081 at check time, naming the reason and — where one exists — the
 /// portable alternative. The render wall stays as the backstop.
-fn check_wasm_availability(ir_program: &almide::ir::IrProgram, embedded_leg: bool) -> Result<(), ()> {
+fn check_wasm_availability(
+    ir_program: &almide::ir::IrProgram,
+    package: &std::collections::HashSet<String>,
+    embedded_leg: bool,
+) -> Result<(), ()> {
     // The measurement escape: the availability PROBE builds through this
     // binary to measure the ground truth the table declares — with the
     // check armed it would measure its own declaration (circular).
@@ -938,8 +942,18 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram, embedded_leg: boo
     let leg_lit = if embedded_leg { "\"embedded\"" } else { "\"stock-p1\"" };
     let mut hits: BTreeMap<String, &Row> = BTreeMap::new();
     use almide::ir::visit::IrVisitor;
+    // #2865: a call into a module the package's own source declares is the
+    // package's fn, whatever its key spells — `src/process.almd`'s `exec` is
+    // not the stdlib's `process.exec`, so the stdlib's row does not bar it.
+    let own: std::collections::HashSet<String> = ir_program
+        .modules
+        .iter()
+        .filter(|m| package.contains(m.name.as_str()))
+        .flat_map(|m| m.functions.iter().map(move |f| format!("{}.{}", m.name.as_str(), f.name.as_str())))
+        .collect();
     struct Scan<'a> {
         table: &'a BTreeMap<String, Row>,
+        own: &'a std::collections::HashSet<String>,
         leg_lit: &'static str,
         hits: BTreeMap<String, &'a Row>,
     }
@@ -952,6 +966,7 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram, embedded_leg: boo
                 let key = format!("{}.{}", module.as_str(), func.as_str());
                 if let Some(row) = self.table.get(&key)
                     && row.0.contains(self.leg_lit)
+                    && !self.own.contains(&key)
                 {
                     self.hits.entry(key).or_insert(row);
                 }
@@ -959,7 +974,7 @@ fn check_wasm_availability(ir_program: &almide::ir::IrProgram, embedded_leg: boo
             almide::ir::visit::walk_expr(self, e);
         }
     }
-    let mut scan = Scan { table, leg_lit, hits: BTreeMap::new() };
+    let mut scan = Scan { table, own: &own, leg_lit, hits: BTreeMap::new() };
     // Only REACHABLE bodies are scanned — the same reachability the wasm
     // emitter prunes by (`reachability::reachable_fn_names`), so the
     // check-time diagnostic and the emit agree: a call the emitter never
@@ -1245,7 +1260,13 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     let mut ir_program = lower_and_link_wasm_ir(&program, &mut checker, &mut resolved)?;
     verify_wasm_ir(&ir_program)?;
     check_no_native_only_matrix(&ir_program)?;
-    check_wasm_availability(&ir_program, embedded_leg)?;
+    let package: std::collections::HashSet<String> = resolved
+        .modules
+        .iter()
+        .map(|(name, ..)| name.clone())
+        .filter(|name| resolved.sources.contains_key(name))
+        .collect();
+    check_wasm_availability(&ir_program, &package, embedded_leg)?;
 
     // Routing inputs (`RouteInputs::of_ir`, the one rule): project shape,
     // decided from what the v0 gates already computed — never from a
