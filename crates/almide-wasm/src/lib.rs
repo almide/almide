@@ -193,6 +193,7 @@ mod ranges;
 mod rc_ownership;
 mod region;
 mod sums;
+mod testing;
 mod tco;
 mod types_table;
 mod value;
