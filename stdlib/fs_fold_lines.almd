@@ -1,7 +1,8 @@
 // fs_fold_lines — SELF-HOSTED `fs.fold_lines` for the wasm leg over the WASI
 // file-read floor (prim.read_text_file) + a byte-level line walk with EXACTLY
 // `BufRead::read_line`'s semantics (the native oracle, runtime/rs/src/fs.rs):
-// lines split at '\n' (the terminator is stripped, a preceding '\r' too); a
+// lines split at '\n' (the terminator is stripped, a preceding '\r' too — a bare
+// '\r' ending the file is kept); a
 // final UNTERMINATED line is still yielded; a file ending WITH '\n' yields no
 // trailing empty line; the empty file folds ZERO lines (init returned as-is).
 // The whole file is read up front — C-220's observables (stdout/stderr/exit)
@@ -25,9 +26,11 @@ else {
   __ffl_copy(dst, src, n, i + 1)
 }
 
-// The line text[start .. endp], with a trailing '\r' stripped (the CRLF rule).
+// The line text[start .. endp], with a trailing '\r' stripped (the CRLF rule). `endp` is the
+// '\n' index, or slen for a final UNTERMINATED line — which keeps a trailing '\r': native
+// strips it only after popping a '\n' (`read_line` + `ends_with('\n')`, #2813).
 fn __ffl_line(sh: Int, start: Int, endp: Int) -> String = {
-  let e2 = if endp > start then {
+  let e2 = if endp > start and endp < prim.load32(sh + 4) then {
     if prim.load8(sh + 12 + endp - 1) == 13 then endp - 1 else endp
   } else endp
   let n = e2 - start

@@ -371,7 +371,7 @@ fn rename(src: String, dst: String) -> Result[Unit, String] = _
 // The fd_read-from-stdin line-read WASI host call, packaged as ONE high-level HEAP-RESULT prim —
 // the STANDARD-INPUT sandbox exit (reaches Capability::Stdin, a DISTINCT capability: reading the
 // operator's input stream is neither a write, a filesystem, an entropy, nor a clock effect).
-// Reads fd 0 byte-by-byte until a '\n' (excluded) or EOF, strips a trailing '\r', and returns a
+// Reads fd 0 byte-by-byte until a '\n' (excluded) or EOF, strips every trailing '\r', and returns a
 // fresh OWNED canonical `String` of that one line (matching native read_line trimmed). Reached
 // only by the self-hosted `io.read_line` (io_read_line.almd) in the v1 trust-spine wasm backend;
 // the render emits the WASI fd_read host loop. No native runtime impl — the native target uses

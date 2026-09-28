@@ -3,7 +3,7 @@
 // self-hosted `string.lines` splitter. The
 // native oracle (runtime/rs/src/fs.rs) is `read_to_string(path).map(|s| s.lines()...)` —
 // exactly this composition, so line semantics byte-match by construction (string_lines.almd
-// implements `str::lines()`: split on '\n', strip one trailing '\r' per line, no phantom
+// implements `str::lines()`: split on '\n', strip the '\r' of a "\r\n", keep a bare '\r', no phantom
 // empty line after a trailing newline, a final unterminated line still yielded).
 //
 // The prim's `Result[String, String]` is consumed WITHOUT `!` — the tag is read at rh+16
