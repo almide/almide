@@ -1,0 +1,24 @@
+// @contract: C-013
+// `for e in m` over a Map binds each entry as a `(key, value)` tuple, in
+// insertion order, on every leg (#2747): printed whole, destructured with a
+// `let`, pushed into a list that outlives the loop, and over String keys and
+// values built at run time. The map itself is unchanged after the loops.
+effect fn main() -> Unit = {
+  let m = ["x": 10, "y": 20, "a": 5]
+  for e in m {
+    println("${e}")
+  }
+  var ms: Map[String, String] = map.new()
+  map.insert(ms, "k" + int.to_string(1), "v" + int.to_string(1))
+  map.insert(ms, "b", "c")
+  var kept: List[(String, String)] = []
+  for e in ms {
+    kept = kept + [e]
+  }
+  var total = 0
+  for e in m {
+    let (k, v) = e
+    total = total + v * string.len(k)
+  }
+  println("${kept} ${total} ${ms} ${m}")
+}
