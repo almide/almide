@@ -14,6 +14,11 @@ use crate::*;
 #[path = "package_keys.rs"]
 pub mod package_keys;
 
+/// #2747: surface forms rewritten to ones the arms lower (map-pair
+/// loops, `?.`).
+#[path = "front_desugar.rs"]
+mod front_desugar;
+
 /// Emit a core wasm module for `ir`, or say precisely why not yet.
 /// Two passes: the first loads the WHOLE linked registry graph (so
 /// resolution and the refusal BFS see everything) and reports which
@@ -49,6 +54,8 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     // (#1423 stage 4: the html/path SafeHtml/SafePath rows).
     let erased = crate::newtype::erase_transparent_aliases(ir);
     let ir = erased.as_ref().unwrap_or(ir);
+    let desugared = front_desugar::desugar(ir);
+    let ir = desugared.as_ref().unwrap_or(ir);
     // #2004: a call result consumed by a module op's argument gets an
     // owner — bound first, released by the frame's exit plan.
     let bound = crate::arg_temps::bind_native_temporaries(ir);
