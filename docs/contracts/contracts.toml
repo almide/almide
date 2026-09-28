@@ -3491,6 +3491,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/result_default_and_passthrough.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_tail_carrier_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_unit_yields_result.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-282"

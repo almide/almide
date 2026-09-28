@@ -1,0 +1,67 @@
+// @contract: C-281
+// A declared-Unit effect fn whose body YIELDS its Result (#2879): the tail is
+// `err(e)` / `ok(())` itself, not a statement. The structural wasm leg lowered
+// such a body as a statement, dropped the err it built, and answered ok(()) —
+// silently, with no wall. `a` is the scalar twin, which always answered
+// correctly; `b` / `c` are the issue's cells, and the rest sweep the other
+// shapes a Result-yielding Unit body takes (nested `if`, a match arm that is a
+// block, a guard, and a `!` over such a callee inside a loop).
+effect fn a(x: Int) -> Int = if x == 0 then err("boom") else ok(1)
+
+effect fn b(x: Int) -> Unit = if x == 0 then err("boom") else ok(())
+
+effect fn c(x: Int) -> Unit = err("boom")
+
+effect fn nested_if(x: Int) -> Unit = if x > 5 then ok(())
+else if x == 0 then err("nested") else ok(())
+
+effect fn block_tail(x: Int) -> Unit = {
+  println("block_tail runs ${x}")
+  if x == 0 then err("block") else ok(())
+}
+
+effect fn match_block(x: Int) -> Unit = match x {
+  0 => {
+    println("arm0")
+    err("match-block")
+  },
+  _ => ok(()),
+}
+
+effect fn guarded(x: Int) -> Unit = {
+  guard x != 0 else err("guard")
+  ok(())
+}
+
+effect fn step(x: Int) -> Unit = if x == 2 then err("step ${x}") else ok(())
+
+effect fn walk(xs: List[Int]) -> Unit = {
+  for x in xs {
+    println("visit ${x}")
+    step(x)!
+  }
+}
+
+fn show(r: Result[Unit, String]) -> String = match r {
+  ok(_) => "ok",
+  err(e) => "err ${e}",
+}
+
+effect fn main() -> Unit = {
+  match a(0) {
+    ok(v) => println("a(0) ok ${v}"),
+    err(e) => println("a(0) err ${e}"),
+  }
+  println("b(0) ${show(b(0))}")
+  println("b(1) ${show(b(1))}")
+  println("c(0) ${show(c(0))}")
+  println("nested_if(0) ${show(nested_if(0))}")
+  println("nested_if(9) ${show(nested_if(9))}")
+  println("block_tail(0) ${show(block_tail(0))}")
+  println("block_tail(1) ${show(block_tail(1))}")
+  println("match_block(0) ${show(match_block(0))}")
+  println("match_block(1) ${show(match_block(1))}")
+  println("guarded(0) ${show(guarded(0))}")
+  println("guarded(1) ${show(guarded(1))}")
+  println("walk ${show(walk([1, 2, 3]))}")
+}
