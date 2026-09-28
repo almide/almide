@@ -348,9 +348,52 @@ impl Emitter<'_> {
     }
 
     /// `List[String]` — the error type native `!` JOINS into a String
-    /// channel (`map_err_join`) instead of rendering its repr; still walled.
+    /// channel (`map_err_join`) instead of rendering its repr
+    /// ([`Self::propagate_err_joined`]).
     fn is_str_list(&self, t: SliceTy) -> bool {
         matches!(t, SliceTy::List(h) if self.types.el(h) == STR)
+    }
+
+    /// `expr!` whose operand fails with a `List[String]` inside a String
+    /// channel (#2748): native's `map_err_join` — the propagated block is a
+    /// FRESH `err(errs.join(", "))`. Read, never moved, exactly as
+    /// [`Self::propagate_err_as_repr`] reads its carrier. Emits the
+    /// propagation's `return`.
+    fn propagate_err_joined(
+        &mut self,
+        carrier_ty: SliceTy,
+        ert: SliceTy,
+        owned_carrier: bool,
+    ) -> Result<(), EmitError> {
+        let car = self.hold_i32()?;
+        let blk = self.hold_i32()?;
+        let sep = self.pool.intern(", ");
+        self.f.instructions().local_get(self.scr_i32_local).local_tee(car);
+        self.load_ty_slot(ert, almide_layout::SUM_FIELD);
+        // $list_join borrows both and hands back a fresh String.
+        self.f
+            .instructions()
+            .i32_const(sep as i32)
+            .call(F_LIST_JOIN)
+            .local_set(self.tmp_i32_local)
+            .i32_const(16)
+            .call(F_ALLOC)
+            .local_tee(blk)
+            .i32_const(1)
+            .i32_store(slot_memarg(almide_layout::SUM_TAG))
+            .local_get(blk)
+            .local_get(self.tmp_i32_local)
+            .i32_store(slot_memarg(almide_layout::SUM_FIELD));
+        if owned_carrier {
+            let dec = self.dec_fn_of(carrier_ty);
+            self.f.instructions().local_get(car).call(dec);
+        }
+        let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
+        self.emit_exit(&plan);
+        self.f.instructions().local_get(blk).return_();
+        self.release_i32();
+        self.release_i32();
+        Ok(())
     }
 
     /// ADR-0021 D2 (#2725): `expr!` whose operand fails with a typed `E`
@@ -533,6 +576,8 @@ impl Emitter<'_> {
                             // ADR-0021 D2 / #2725: a typed error `!`-ed into a
                             // String channel — the channel carries its repr text.
                             self.propagate_err_as_repr(SliceTy::Result(o, er), ert, owned_carrier)?;
+                        } else if in_effect && fn_err == Some(STR) && self.is_str_list(ert) {
+                            self.propagate_err_joined(SliceTy::Result(o, er), ert, owned_carrier)?;
                         } else if in_effect {
                             if fn_err != Some(ert) {
                                 return unsup("unwrap-err-ty-mismatch");
