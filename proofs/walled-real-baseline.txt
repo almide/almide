@@ -170,6 +170,10 @@ spec/wasm_cross/list_rest_pattern.almd :: main
 spec/wasm_cross/list_rest_pattern.almd :: shape
 spec/wasm_cross/list_rest_pattern.almd :: tail_of
 spec/wasm_cross/list_rest_pattern.almd :: total
+# (2026-09-29, C-213/#2747) the Endian IO fixture behind an explicit
+# `import bytes` interpolates sized-int reads the incumbent brick does not
+# execute; the STRUCTURAL leg (the default) lowers it.
+spec/wasm_cross/endian_explicit_import.almd :: main
 # (2026-09-02, C-333/#1461) as-patterns: the same incumbent division as the
 # list-rest rows above.
 spec/lang/as_pattern_test.almd :: __test_almd_as over option carriers
