@@ -549,10 +549,6 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };
-    // The p3 component earns its http import block only when the emitted
-    // op set reaches the http family (#1710 PR B) — a non-http component
-    // must not demand `-S http=y` from its runtime.
-    let wants_http = host_ops.iter().any(|op| (43..=50).contains(op));
     // The structural leg's module imports `almide.*` (the embedded host's
     // surface). A BUILD artifact must run on stock runtimes, so it ships in
     // the WASI form — same index space, shimmed imports, proc_exit on trap
@@ -594,7 +590,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
         std::process::exit(1);
     }
     let bytes = if direct_p3 {
-        match almide_wasm_run::wasi_p3::to_p3(&bytes, wants_http) {
+        match almide_wasm_run::wasi_p3::to_p3(&bytes, &host_ops) {
             Ok(c) => c,
             Err(e) => {
                 err(&format!("error: p3 component transform failed — this is an Almide bug: {e}"));

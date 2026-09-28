@@ -1,7 +1,11 @@
 // `include!`d part of wasi_p3.rs (codopsy max-lines split, mechanical text move —
 // shares the parent module's imports and items; nothing here is pub beyond the parent).
 
-pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
+/// `host_ops` is the emitted module's op set (the build path's audit
+/// input): the http block ships when it reaches ops 43..=50, and each env
+/// service import when it names op 26 / 29 / 36.
+pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
+    let wants_http = host_ops.iter().any(|op| (43..=50).contains(op));
     // The vendored WIT first: the fs shim's layout facts derive from it,
     // so a WIT/shim drift refuses to emit instead of corrupting stores.
     let mut resolve = wit_parser::Resolve::default();
@@ -50,18 +54,23 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
     let main_index = main_index.ok_or_else(|| anyhow::anyhow!("no main export"))?;
     let heap_global = heap_global.ok_or_else(|| anyhow::anyhow!("no __heap export"))?;
     let n_funcs = func_types.len() as u32;
-    let n_imports = if wants_http { IMPORTS_HTTP } else { IMPORTS };
+    let (env, n_imports) =
+        EnvImports::plan(host_ops, if wants_http { IMPORTS_HTTP } else { IMPORTS });
     let shift = n_imports - 5;
     let shim_base = n_imports + n_funcs;
     // Shim order mirrors the almide.* import order (println, eprintln,
     // exit, fs_call, host_read), then cabi_realloc, run, callback, the
-    // #2119 reservation pair, and the optional http shim.
+    // #2119 reservation pair, `$await`, and the optional http and env
+    // shims.
     let f_realloc = shim_base + 5;
     let f_run = shim_base + 6;
     let f_callback = shim_base + 7;
     let f_reserve = shim_base + 8;
     let f_alloc = shim_base + 9;
     let f_eprintln = shim_base + 1;
+    let f_await = shim_base + 10;
+    let f_http = wants_http.then_some(shim_base + 11);
+    let f_env = env.any().then_some(shim_base + 11 + u32::from(wants_http));
 
     let heap_init = parsed_globals[heap_global as usize]
         .1
@@ -77,6 +86,7 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
     let g_wset = global_count + 9; // the ONE waitable set (lazy, -1)
     let g_slots = global_count + 10; // fan slot-table base (0 = unallocated)
     let g_slotn = global_count + 11; // slot high-water mark
+    let (g_env, g_envn) = (global_count + 12, global_count + 13); // cached environment list
     let mut globals = GlobalSection::new();
     for (idx, (gt, i32v, i64v, f64v)) in parsed_globals.iter().enumerate() {
         let init = if idx as u32 == heap_global {
@@ -98,6 +108,8 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
     }
     globals.global(mutable_i32, &ConstExpr::i32_const(0)); // g_slots
     globals.global(mutable_i32, &ConstExpr::i32_const(0)); // g_slotn
+    globals.global(mutable_i32, &ConstExpr::i32_const(-1)); // g_env (unfetched)
+    globals.global(mutable_i32, &ConstExpr::i32_const(0)); // g_envn
 
     // Canonical-ABI core types.
     let t_exit = type_index(&mut types, &[ValType::I32], &[]);
@@ -149,6 +161,8 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
     // [method]fields.append(self, name ptr/len, value ptr/len, retptr) —
     // `result<_, header-error>` carries a payload, so it lands via retptr.
     let t_append = type_index(&mut types, &[ValType::I32; 6], &[]);
+    // monotonic-clock.wait-for(duration) — a sync lower of the async func.
+    let t_wait = type_index(&mut types, &[ValType::I64], &[]);
 
     let mut type_sec = TypeSection::new();
     for (p, r) in &types {
@@ -167,16 +181,16 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
         (I_EXIT, "wasi:cli/exit@0.3.0", "exit", t_exit),
         (I_OUT_CALL, cli_out, "write-via-stream", t_call),
         (I_OUT_NEW, cli_out, "[stream-new-0]write-via-stream", t_new),
-        (I_OUT_WRITE, cli_out, "[stream-write-0]write-via-stream", t_rw),
+        (I_OUT_WRITE, cli_out, "[async-lower][stream-write-0]write-via-stream", t_rw),
         (I_OUT_DROP_TX, cli_out, "[stream-drop-writable-0]write-via-stream", t_drop),
-        (I_OUT_FUT_READ, cli_out, "[future-read-1]write-via-stream", t_fut_read),
+        (I_OUT_FUT_READ, cli_out, "[async-lower][future-read-1]write-via-stream", t_fut_read),
         (I_ERR_CALL, cli_err, "write-via-stream", t_call),
         (I_ERR_NEW, cli_err, "[stream-new-0]write-via-stream", t_new),
-        (I_ERR_WRITE, cli_err, "[stream-write-0]write-via-stream", t_rw),
+        (I_ERR_WRITE, cli_err, "[async-lower][stream-write-0]write-via-stream", t_rw),
         (I_ERR_DROP_TX, cli_err, "[stream-drop-writable-0]write-via-stream", t_drop),
-        (I_ERR_FUT_READ, cli_err, "[future-read-1]write-via-stream", t_fut_read),
+        (I_ERR_FUT_READ, cli_err, "[async-lower][future-read-1]write-via-stream", t_fut_read),
         (I_STDIN_OPEN, cli_in, "read-via-stream", t_retptr),
-        (I_STDIN_READ, cli_in, "[stream-read-0]read-via-stream", t_rw),
+        (I_STDIN_READ, cli_in, "[async-lower][stream-read-0]read-via-stream", t_rw),
         (I_STDIN_DROP_RX, cli_in, "[stream-drop-readable-0]read-via-stream", t_drop),
         (I_STDIN_DROP_FUT, cli_in, "[future-drop-readable-1]read-via-stream", t_drop),
         (I_CLOCK_NOW, "wasi:clocks/system-clock@0.3.0", "now", t_retptr),
@@ -186,7 +200,7 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
         (I_FS_OPEN, fs_types, "[method]descriptor.open-at", t_open),
         (I_FS_STAT, fs_types, "[method]descriptor.stat-at", t_stat),
         (I_FS_RVS, fs_types, "[method]descriptor.read-via-stream", t_rvs),
-        (I_FS_SREAD, fs_types, "[stream-read-0][method]descriptor.read-via-stream", t_rw),
+        (I_FS_SREAD, fs_types, "[async-lower][stream-read-0][method]descriptor.read-via-stream", t_rw),
         (I_FS_SDROP, fs_types, "[stream-drop-readable-0][method]descriptor.read-via-stream", t_drop),
         (I_FS_FDROP, fs_types, "[future-drop-readable-1][method]descriptor.read-via-stream", t_drop),
         (I_FS_RESDROP, fs_types, "[resource-drop]descriptor", t_drop),
@@ -200,9 +214,9 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
         (I_FS_WVS, fs_types, "[method]descriptor.write-via-stream", t_wvs),
         (I_FS_AVS, fs_types, "[method]descriptor.append-via-stream", t_avs),
         (I_FS_WNEW, fs_types, "[stream-new-0][method]descriptor.write-via-stream", t_new),
-        (I_FS_WWRITE, fs_types, "[stream-write-0][method]descriptor.write-via-stream", t_rw),
+        (I_FS_WWRITE, fs_types, "[async-lower][stream-write-0][method]descriptor.write-via-stream", t_rw),
         (I_FS_WDROP, fs_types, "[stream-drop-writable-0][method]descriptor.write-via-stream", t_drop),
-        (I_FS_WFUT, fs_types, "[future-read-1][method]descriptor.write-via-stream", t_fut_read),
+        (I_FS_WFUT, fs_types, "[async-lower][future-read-1][method]descriptor.write-via-stream", t_fut_read),
         (I_FS_MKDIR, fs_types, "[method]descriptor.create-directory-at", t_pathop),
         (I_FS_UNLINK, fs_types, "[method]descriptor.unlink-file-at", t_pathop),
         (I_FS_RMDIR, fs_types, "[method]descriptor.remove-directory-at", t_pathop),
@@ -239,9 +253,9 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
         (I_HTTP_STATUS, http_types, "[method]response.get-status-code", t_call),
         (I_HTTP_CONSUME, http_types, "[static]response.consume-body", t_consume),
         (I_HTTP_CB_FNEW, http_types, "[future-new-0][static]response.consume-body", t_new),
-        (I_HTTP_CB_FWRITE, http_types, "[future-write-0][static]response.consume-body", t_fut_read),
+        (I_HTTP_CB_FWRITE, http_types, "[async-lower][future-write-0][static]response.consume-body", t_fut_read),
         (I_HTTP_CB_FDROPW, http_types, "[future-drop-writable-0][static]response.consume-body", t_drop),
-        (I_HTTP_BODY_READ, http_types, "[stream-read-1][static]response.consume-body", t_rw),
+        (I_HTTP_BODY_READ, http_types, "[async-lower][stream-read-1][static]response.consume-body", t_rw),
         (I_HTTP_BODY_DROPR, http_types, "[stream-drop-readable-1][static]response.consume-body", t_drop),
         (I_HTTP_TRL_DROPR, http_types, "[future-drop-readable-2][static]response.consume-body", t_drop),
         (I_HTTP_REQ_DROP, http_types, "[resource-drop]request", t_drop),
@@ -254,7 +268,18 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
         IMPORTS_HTTP,
         "IMPORTS_HTTP count drift"
     );
-    let imports = build_import_section(import_list, wants_http.then_some(http_import_list));
+    let env_import_list = env.import_list(t_retptr, t_wait);
+    let mut blocks: Vec<&[(u32, &str, &str, u32)]> = vec![import_list];
+    if wants_http {
+        blocks.push(http_import_list);
+    }
+    blocks.push(&env_import_list);
+    let imports = build_import_section(&blocks);
+    assert_eq!(
+        blocks.iter().map(|b| b.len() as u32).sum::<u32>(),
+        n_imports,
+        "import count drift"
+    );
 
     let mut functions = FunctionSection::new();
     for ti in &func_types {
@@ -262,13 +287,16 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
     }
     // `$reserve` shares `exit`'s `(i32) -> ()` shape and `$alloc` shares
     // `cabi_realloc`'s, so the pair adds no type-section entry.
-    for ti in
-        [t_print, t_print, t_exit, t_fs, t_hread, t_realloc, t_status, t_callback, t_exit, t_realloc]
-    {
+    // `$await` shares `future.read`'s `(i32, i32) -> i32` shape.
+    for ti in [
+        t_print, t_print, t_exit, t_fs, t_hread, t_realloc, t_status, t_callback, t_exit, t_realloc,
+        t_fut_read,
+    ] {
         functions.function(ti);
     }
-    if wants_http {
-        functions.function(t_fs); // shim_http (the almide fs_call ABI)
+    // shim_http, then shim_env — both on the almide fs_call ABI.
+    for _ in 0..(u32::from(wants_http) + u32::from(env.any())) {
+        functions.function(t_fs);
     }
 
     let mut memories = MemorySection::new();
@@ -301,16 +329,15 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
     }
     let g = P3Globals {
         park, f_alloc, g_plen, g_ppos, g_in_rx, g_in_fut, g_out_tx, g_out_fut,
-        g_err_tx, g_err_fut, g_pre, g_wset, g_slots, g_slotn, f_reserve,
+        g_err_tx, g_err_fut, g_pre, g_wset, g_slots, g_slotn, f_reserve, f_await, g_env, g_envn,
     };
     let out_port = PrintPort { g_tx: g_out_tx, g_fut: g_out_fut, call_import: I_OUT_CALL, new_import: I_OUT_NEW, write_import: I_OUT_WRITE };
     let err_port = PrintPort { g_tx: g_err_tx, g_fut: g_err_fut, call_import: I_ERR_CALL, new_import: I_ERR_NEW, write_import: I_ERR_WRITE };
-    code.function(&shim_print(out_port, park, true));
-    code.function(&shim_print(err_port, park, true));
+    code.function(&shim_print(out_port, park, f_await, true));
+    code.function(&shim_print(err_port, park, f_await, true));
     code.function(&shim_exit());
     let f_fs_self = shim_base + 3;
-    let f_http = wants_http.then_some(shim_base + 10);
-    code.function(&shim_fs_call(g, &abi, f_fs_self, f_http));
+    code.function(&shim_fs_call(g, &abi, f_fs_self, f_http, f_env));
     code.function(&shim_host_read(g_plen, g_ppos));
     code.function(&shim_cabi_realloc(heap_global));
     code.function(&shim_run(main_index + shift, g));
@@ -323,9 +350,8 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
         OOM_MSG.len() - 1,
     ));
     code.function(&shim_realloc_checked(f_reserve, f_realloc));
-    if let Some(h) = habi.as_ref() {
-        code.function(&shim_http(park, g_plen, g_ppos, f_alloc, h));
-    }
+    code.function(&shim_await(park));
+    push_optional_shims(&mut code, g, habi.as_ref(), env);
 
     // Elements re-encode through the Remap (#1716): the import shift must
     // move funcref table entries too (#1688's silent class).
@@ -381,26 +407,44 @@ pub fn to_p3(bytes: &[u8], wants_http: bool) -> anyhow::Result<Vec<u8>> {
         .map_err(|e| anyhow::anyhow!("module: {e}"))?
         .encode()
         .map_err(|e| anyhow::anyhow!("encode: {e}"))?;
+    validate_baseline(&component)?;
     Ok(component)
 }
 
-/// The import section in declaration order, each entry asserted against the
-/// index constant it must land on (an `I_*` drift fails loudly here rather
-/// than as a mis-wired call). Extracted from `to_p3` (codopsy cc 22).
-fn build_import_section(
-    import_list: &[(u32, &str, &str, u32)],
-    http_import_list: Option<&[(u32, &str, &str, u32)]>,
-) -> ImportSection {
+/// The optional shims after `$await`, in function-index order: the http
+/// client (when the op set reaches 43..=50), then the env service.
+fn push_optional_shims(code: &mut CodeSection, g: P3Globals, habi: Option<&HttpAbi>, env: EnvImports) {
+    if let Some(h) = habi {
+        code.function(&shim_http(g, h));
+    }
+    if env.any() {
+        code.function(&shim_env(g, env));
+    }
+}
+
+/// ADR-0023 step 1: the component must validate with the 🚝
+/// `component-model-more-async-builtins` feature OFF — the synchronous
+/// stream/future builtins it gates are what made every p3 artifact need
+/// `wasmtime run -W component-model-more-async-builtins`. A shim change
+/// that reintroduces one fails the build here, before any runtime sees it.
+pub fn validate_baseline(component: &[u8]) -> anyhow::Result<()> {
+    let mut features = wasmparser::WasmFeatures::default();
+    features.remove(wasmparser::WasmFeatures::CM_MORE_ASYNC_BUILTINS);
+    wasmparser::Validator::new_with_features(features)
+        .validate_all(component)
+        .map(|_| ())
+        .map_err(|e| anyhow::anyhow!("the p3 component needs a builtin outside the WASI 0.3 baseline: {e}"))
+}
+
+/// The import section in declaration order — the base table, then the
+/// optional http and env blocks — each entry asserted against the index
+/// it must land on (an `I_*` drift fails loudly here rather than as a
+/// mis-wired call). Extracted from `to_p3` (codopsy cc 22).
+fn build_import_section(blocks: &[&[(u32, &str, &str, u32)]]) -> ImportSection {
     let mut imports = ImportSection::new();
-    for (k, (want, m, n, t)) in import_list.iter().enumerate() {
+    for (k, (want, m, n, t)) in blocks.iter().flat_map(|b| b.iter()).enumerate() {
         assert_eq!(k as u32, *want, "import order drift at {m}#{n}");
         imports.import(m, n, EntityType::Function(*t));
-    }
-    if let Some(http) = http_import_list {
-        for (k, (want, m, n, t)) in http.iter().enumerate() {
-            assert_eq!(IMPORTS + k as u32, *want, "http import order drift at {m}#{n}");
-            imports.import(m, n, EntityType::Function(*t));
-        }
     }
     imports
 }
