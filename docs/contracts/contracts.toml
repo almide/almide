@@ -211,6 +211,7 @@ evidence  = [
   { path = "tests/module_type_repr_test.rs", name = "every_compiled_leg_prints_the_declared_name", class = "fixture" },
   { path = "tests/module_type_repr_test.rs", name = "interp_prints_the_declared_name", class = "fixture" },
   { path = "spec/wasm_cross/record_field_rust_keyword.almd", class = "fixture" },
+  { path = "spec/wasm_cross/newtype_string_form.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-010"
