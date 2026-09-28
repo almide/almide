@@ -66,7 +66,7 @@ fail=0; n=0
 # emit and are compared; the five structural walls are fixtures the incumbent
 # rendered, so their browser-ABI reproducibility stopped being measured in the
 # move. The ledger names them with their cause issues (#2744, #2746, #2747).
-MAX_WALLED=5
+MAX_WALLED=4
 walled=0
 : > "$WORK/walled.txt"
 for fix in "$FIXTURE_DIR"/*.almd; do

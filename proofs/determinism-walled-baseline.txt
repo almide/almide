@@ -23,5 +23,4 @@
 fan_arm_unwrap_or.almd :: bind:unmapped :: #2746
 fan_map_nested_combinators.almd :: bind:unmapped :: #2746
 fan_map_parallel_scalar.almd :: bind:unmapped :: #2746
-fs_call_head_family.almd :: call:fs.fold_lines_range :: #2744
 inplace_clear_alias_field.almd :: string-clear-nonvar :: #2747
