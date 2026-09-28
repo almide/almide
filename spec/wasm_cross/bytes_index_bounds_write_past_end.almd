@@ -1,0 +1,14 @@
+// @contract: C-067
+// `b[i] = v` on Bytes is the CHECKED store on every leg (#2893): in range it
+// stores the byte; at an index >= len it aborts `Error: index out of bounds`,
+// exit 1 — native's checked store — where the incumbent wasm leg used to lower
+// it as C-229's total `bytes.set_at` and run on as if the write had not happened.
+effect fn main() -> Unit = {
+  var buf: Bytes = bytes.new(3)
+  buf[0] = 200
+  buf[1] = 7
+  println("${bytes.to_list(buf)}")
+  let at = 3
+  buf[at] = 1
+  println("unreachable")
+}

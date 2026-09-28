@@ -1,0 +1,10 @@
+// @contract: C-067
+// A NEGATIVE index in a Bytes index READ aborts `Error: index out of bounds`,
+// exit 1, on every leg (#2893).
+effect fn main() -> Unit = {
+  let buf: Bytes = bytes.from_list([1, 2, 3])
+  println("${buf[0]}")
+  let at = 0 - 1
+  println("${buf[at]}")
+  println("unreachable")
+}
