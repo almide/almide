@@ -1,0 +1,146 @@
+// @contract: C-256
+// #2745: `break` / `continue` in the statement positions the structural wasm
+// leg now lowers — `guard … else break|continue`, a statement-position
+// `match` arm, nested under `if` — in every loop form (for over a list, a
+// range, a map; while; nested loops), each with a heap local bound in the
+// body BEFORE the jump. The body's heap locals are frame credits: the jump
+// leaves them where they are and the next pass's rebind (or the epilogue)
+// releases them, exactly as a fall-through iteration does — the churn loop
+// at the end runs 3000 passes so a per-edge leak would move the heap
+// watermark the alloc ledger pins.
+type Shape = | Circle(Int) | Square(Int) | Empty
+
+fn first_long(xs: List[String]) -> String = {
+  var found = "none"
+  for x in xs {
+    let up = string.to_upper(x) + "!"
+    guard string.len(up) > 3 else continue
+    found = up
+    break
+  }
+  found
+}
+
+fn area(ss: List[Shape]) -> Int = {
+  var total = 0
+  for s in ss {
+    let tag = "shape:" + int.to_string(total)
+    match s {
+      Circle(r) => {
+        if r > 100 then break
+        else ()
+        total = total + r * 3
+      },
+      Square(w) => {
+        total = total + w * w
+      },
+      Empty => continue,
+    }
+    total = total + string.len(tag) - string.len(tag) + 1
+  }
+  total
+}
+
+fn opt_sum(xs: List[Int?]) -> Int = {
+  var t = 0
+  for o in xs {
+    let label = "o" + int.to_string(t)
+    match o {
+      none => continue,
+      some(v) => {
+        guard v >= 0 else break
+        t = t + v + string.len(label) - string.len(label)
+      },
+    }
+  }
+  t
+}
+
+fn grid(n: Int) -> List[String] = {
+  var out: List[String] = []
+  for i in 0..<n {
+    let row = "r" + int.to_string(i)
+    var j = 0
+    while true {
+      j = j + 1
+      let cell = row + ":" + int.to_string(j)
+      if j > i then break
+      else ()
+      if j % 2 == 0 then continue
+      else ()
+      out = out + [cell]
+    }
+    guard i < 4 else break
+  }
+  out
+}
+
+fn map_walk(m: Map[String, Int]) -> Int = {
+  var s = 0
+  for (k, v) in m {
+    let kk = k + "!"
+    guard v != 2 else continue
+    guard v != 4 else break
+    s = s + v * string.len(kk)
+  }
+  s
+}
+
+fn per_item(xs: List[Int]) -> List[Int] = xs |> list.map((x) => {
+  var acc = 0
+  for i in 0...x {
+    let s = int.to_string(i)
+    guard i != 2 else continue
+    guard string.len(s) < 2 else break
+    acc = acc + i
+  }
+  acc
+})
+
+fn churn(n: Int) -> Int = {
+  var kept = 0
+  var i = 0
+  while i < n {
+    i = i + 1
+    let s = "item-" + int.to_string(i)
+    let parts = [s, s + "?"]
+    guard i % 3 != 0 else continue
+    match list.get(parts, 1) {
+      none => continue,
+      some(p) => {
+        if string.len(p) > 1000 then break
+        else ()
+        kept = kept + 1
+      },
+    }
+  }
+  kept
+}
+
+effect fn main() -> Unit = {
+  println(first_long(["a", "bb", "ccc", "dddd"]))
+  println(first_long(["a"]))
+  println(int.to_string(area([Circle(2), Empty, Square(3), Circle(200), Square(9)])))
+  println(int.to_string(opt_sum([some(1), none, some(5), some(-1), some(100)])))
+  println(grid(7) |> list.join(","))
+  println(int.to_string(map_walk([
+    "a": 1,
+    "bb": 2,
+    "ccc": 3,
+    "d": 4,
+    "e": 5
+  ])))
+  println(per_item([0, 3, 12]) |> list.map((x) => int.to_string(x)) |> list.join(" "))
+  var k = 0
+  var log: List[String] = []
+  while k < 10 {
+    k = k + 1
+    let msg = "k=" + int.to_string(k)
+    guard k % 3 != 0 else continue
+    if k == 8 then break
+    else ()
+    log = log + [msg]
+  }
+  println(log |> list.join(";"))
+  println(int.to_string(churn(3000)))
+}
