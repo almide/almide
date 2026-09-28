@@ -69,6 +69,23 @@ fn desugar_matrix_binops(body: &IrExpr) -> Option<IrExpr> {
         } else {
             (right.clone(), left.clone())
         };
+        // The frontend admits an `Int` scalar; `matrix.scale` takes a Float.
+        // Handing it the i64 unconverted scaled by its bit pattern read as an
+        // f64 (#2894): convert it the way native does.
+        let k = if matches!(k.ty, Ty::Int) {
+            IrExpr {
+                span: k.span,
+                kind: IrExprKind::Call {
+                    target: CallTarget::Module { module: sym("int"), func: sym("to_float"), def_id: None },
+                    args: vec![k],
+                    type_args: Vec::new(),
+                },
+                ty: Ty::Float,
+                def_id: None,
+            }
+        } else {
+            k
+        };
         Some(IrExprKind::Call {
             target: CallTarget::Module { module: sym("matrix"), func: sym("scale"), def_id: None },
             args: vec![m, k],
