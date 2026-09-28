@@ -3,7 +3,7 @@
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
 call-arg:BinOp	1240
 call-arg:Block	28
-call-arg:Call	492
+call-arg:Call	493
 call-arg:EmptyMap	1
 call-arg:If	3
 call-arg:Lambda	45
@@ -16,7 +16,7 @@ call-arg:TupleIndex	1
 call:ctor	42
 call:target:Computed	18
 display	10
-effect	131
+effect	154
 lambda	193
 list-elem	128
 module-arm:unaudited:bytes.push	2
@@ -30,7 +30,7 @@ module-arm:unaudited:string.push	1
 module-result:view:list.get_or	2
 named-op	11
 rhs:BinOp	787
-rhs:Block	154
+rhs:Block	155
 rhs:EmptyMap	2
 rhs:Fan	2
 rhs:If	649
@@ -54,7 +54,7 @@ scan	3
 stmt:Assign	11
 stmt:BindDestructure	16
 stmt:Comment	160
-stmt:Expr:Block	69
+stmt:Expr:Block	70
 stmt:Expr:ForIn	52
 stmt:Expr:If	23
 stmt:Expr:Match	2
