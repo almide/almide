@@ -275,14 +275,7 @@ impl Emitter<'_> {
             // mut clear (native m.clear()): rebind the var to the empty
             // map — the `list.clear` shape (list_mut.rs).
             ("clear", [m]) => {
-                if let Some((id, field)) = crate::list_mut::record_field_receiver(m) {
-                    let empty = IrExpr {
-                        kind: IrExprKind::EmptyMap,
-                        ty: m.ty.clone(),
-                        span: None,
-                        def_id: None,
-                    };
-                    self.lower_field_assign(&id, &field, &empty)?;
+                if self.lower_field_clear(m)? {
                     return Ok(None);
                 }
                 let IrExprKind::Var { id } = &m.kind else {

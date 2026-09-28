@@ -194,6 +194,9 @@ impl Emitter<'_> {
     /// is still evaluated (a temporary's construction is observable), and
     /// an alias bound before the clear keeps its bytes (value semantics).
     fn lower_bytes_clear(&mut self, b: &IrExpr) -> ArmResult {
+        if self.lower_field_clear(b)? {
+            return Ok(None);
+        }
         let recv = self.bytes_recv("clear", b)?;
         self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         self.f.instructions().drop().i32_const(0).call(F_ALLOC);
