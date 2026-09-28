@@ -746,6 +746,7 @@
 66160	spec/wasm_cross/top_let_closure_record.almd
 65856	spec/wasm_cross/top_let_div_eager.almd
 65856	spec/wasm_cross/top_let_div_used.almd
+66592	spec/wasm_cross/top_let_stored_in_container.almd
 65760	spec/wasm_cross/toplevel_const_wrapping.almd
 69808	spec/wasm_cross/trig_libm.almd
 66224	spec/wasm_cross/tuple_eq.almd

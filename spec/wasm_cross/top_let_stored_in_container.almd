@@ -1,0 +1,81 @@
+// @contract: C-111
+// A top-level heap `let` stored into a container the frame later releases — a
+// tuple (bound or destructured), a record, a variant case, an Option, a list
+// literal — is CO-OWNED by the container (#2803). The structural
+// wasm leg's share guard only knew locals, so the container's release freed the
+// global's block while the global still named it: the next allocation reused
+// it, and a later read of the global (or of a record built after it) printed
+// another value's bytes. The key-table shape is the one comide's editor hit:
+// `let (table, name) = if … then (CTRL, k) else (KEYS, k)` on every key press.
+type Pair = { words: List[String], tag: String }
+
+type Holder = | Has(List[String]) | Empty
+
+fn inc(n: Int) -> Int = n + 1
+
+fn dec(n: Int) -> Int = n - 1
+
+let KEYS = [("up", inc), ("down", dec)]
+
+let CTRL = [("a", inc)]
+
+let WORDS = ["p", "q"]
+
+let NAME = "global-name"
+
+fn lookup(kind: String, n: Int) -> Int = {
+  let (table, name) = if kind == "ctrl" then (CTRL, kind) else (KEYS, kind)
+  match list.find(table, (row) => row.0 == name) {
+    some(row) => row.1(n),
+    none => n,
+  }
+}
+
+fn via_tuple(k: String) -> Int = {
+  let t = (WORDS, k)
+  list.len(t.0) + string.len(t.1)
+}
+
+fn via_record(k: String) -> Int = {
+  let r = Pair { words: WORDS, tag: k }
+  list.len(r.words)
+}
+
+fn via_variant() -> Int = {
+  let h = Has(WORDS)
+  match h {
+    Has(xs) => list.len(xs),
+    Empty => 0,
+  }
+}
+
+fn via_option() -> Int = {
+  let o = some(WORDS)
+  list.len(o ?? [])
+}
+
+fn via_list() -> Int = {
+  let l = [WORDS, WORDS]
+  list.len(l)
+}
+
+fn via_string() -> Int = {
+  let (s, n) = (NAME, 1)
+  string.len(s) + n
+}
+
+fn main() -> Unit = {
+  var total = 0
+  for i in 0..<4 {
+    total = total + lookup("enter", i) + lookup("up", i) + lookup("ctrl", i)
+    total = total + via_tuple("k") + via_record("k") + via_variant()
+    total = total + via_option() + via_list() + via_string()
+    // Fresh allocations between rounds: a freed global's block is reused here.
+    let noise = ["x", "y", "z"] + [int.to_string(i)]
+    total = total + list.len(noise)
+  }
+  println(int.to_string(total))
+  println(string.join(WORDS, ",") + " " + NAME)
+  println(int.to_string(list.len(KEYS)) + " " + (list.first(KEYS) ?? ("?", inc)).0)
+  println(int.to_string(list.len(CTRL)) + " " + (list.first(CTRL) ?? ("?", inc)).0)
+}

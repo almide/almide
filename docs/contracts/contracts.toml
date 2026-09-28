@@ -1532,6 +1532,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/module_global_const.almd", class = "fixture" },
+  { path = "spec/wasm_cross/top_let_stored_in_container.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-112"
