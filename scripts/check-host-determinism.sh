@@ -100,7 +100,7 @@ fi
 # walls are fixtures the incumbent rendered, so their reproducibility stopped
 # being measured in the move. They are named in the ledger with their cause
 # issues (#2744, #2746, #2747); each fix deletes a row and lowers this number.
-MAX_WALLED=5
+MAX_WALLED=2
 corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ $((n + walled)) -ne "$corpus" ]; then
   echo "::error::host-determinism: compared $n + walled $walled != corpus $corpus in $FIXTURE_DIR — the scan went blind (#985)"
