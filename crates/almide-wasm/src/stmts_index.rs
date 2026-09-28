@@ -66,6 +66,9 @@ impl Emitter<'_> {
                         None => return unsup("index-assign:unmapped"),
                     },
                 };
+                if declared == crate::bytes::BYTES {
+                    return self.lower_bytes_index_assign(target, is_local, index, value);
+                }
                 let SliceTy::List(h) = declared else {
                     return unsup(&format!("index-assign-ty:{declared:?}"));
                 };
@@ -147,5 +150,49 @@ impl Emitter<'_> {
                 self.release_val(el);
                 self.release_i64();
                 Ok(())
+    }
+
+    /// `b[i] = v` on a Bytes var (#2747): native's checked store of `v as
+    /// u8` — the low byte, so 300 stores 44 and -1 stores 255 — and out of
+    /// range the list store's abort frame, never C-229's no-op `bytes.set`.
+    /// Same order as the list route (index, value, bounds, then the COW
+    /// judge), so a buffer an alias still holds is copied before the store.
+    fn lower_bytes_index_assign(
+        &mut self,
+        target: &VarId,
+        is_local: bool,
+        index: &IrExpr,
+        value: &IrExpr,
+    ) -> Result<(), EmitError> {
+        self.lower(index, Some(INT))?;
+        let hi = self.hold_i64()?;
+        self.f.instructions().local_set(hi);
+        self.lower(value, Some(INT))?;
+        let hv = self.hold_i64()?;
+        let hb = self.hold_i32()?;
+        self.f.instructions().local_set(hv);
+        let slot = if is_local { None } else { Some(self.globals[&(self.var_space, *target)].0) };
+        match slot {
+            None => self.f.instructions().local_get(self.locals[target].0).local_set(hb),
+            Some(g) => self.f.instructions().global_get(g).local_set(hb),
+        };
+        self.bytes_room(hb, hi, 1);
+        let msg = self.pool.intern("index out of bounds");
+        self.f.instructions().i32_eqz().if_(BlockType::Empty).i32_const(msg as i32);
+        self.emit_error_frame_abort();
+        self.f.instructions().end();
+        match slot {
+            None => self.emit_local_cow(*target, F_COW, hb),
+            Some(g) => {
+                self.f.instructions().global_get(g).call(F_COW).local_tee(hb).global_set(g);
+            }
+        }
+        let mut i = self.f.instructions();
+        i.local_get(hb).local_get(hi).i32_wrap_i64().i32_add().local_get(hv);
+        i.i64_store8(crate::bytes::byte_k(0));
+        self.release_i32();
+        self.release_i64();
+        self.release_i64();
+        Ok(())
     }
 }

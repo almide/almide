@@ -251,6 +251,7 @@ impl Emitter<'_> {
         };
         let elem = match self.lower(object, None)? {
             SliceTy::List(h) => self.types.el(h),
+            crate::bytes::BYTES => return self.lower_bytes_index(index),
             other => return Err(EmitError::Unsupported(format!("index-of:{other:?}"))),
         };
         let stride = elem.slot_size();
