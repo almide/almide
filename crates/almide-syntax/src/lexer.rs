@@ -306,6 +306,19 @@ fn lex_raw_string(chars: &[char], start: usize, line: usize, col: usize) -> (Tok
 
 // ── String lexing ───────────────────────────────────────────────
 
+/// The (line, col) just past `chars[start..end]`, for a token that opened at
+/// (`line`, `col`). The single source of truth for where a multi-line token
+/// leaves the cursor: a literal body may contain raw newlines (plain `"…"`,
+/// `'…'`, heredoc, a line-spanning `${...}` hole), and every token after it
+/// inherits the line this returns. Counting only the characters and keeping
+/// the opening line put every later diagnostic, LSP position and AST span
+/// short by the literal's newline count (#2804).
+fn advance_line_col(chars: &[char], start: usize, end: usize, line: usize, col: usize) -> (usize, usize) {
+    chars[start..end].iter().fold((line, col), |(ln, cl), &c| {
+        if c == '\n' { (ln + 1, 1) } else { (ln, cl + 1) }
+    })
+}
+
 fn lex_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize, usize, usize) {
     // Check for triple-quote heredoc: """..."""
     if start + 2 < chars.len() && chars[start + 1] == '"' && chars[start + 2] == '"' {
@@ -324,10 +337,9 @@ fn lex_string(chars: &[char], start: usize, line: usize, col: usize) -> (Token, 
 
     let value = if has_interpolation { value } else { strip_escape_pairs(value, &pair_starts) };
     let tt = if has_interpolation { TokenType::InterpolatedString } else { TokenType::String };
-    let len = pos - start;
-    let end_col = col + len;
+    let (end_line, end_col) = advance_line_col(chars, start, pos, line, col);
     let raw = Some(chars[start..pos].iter().collect::<String>());
-    (Token { token_type: tt, value, line, col, end_col, raw }, pos, line, end_col)
+    (Token { token_type: tt, value, line, col, end_col, raw }, pos, end_line, end_col)
 }
 
 /// Single-quote string: `'...'` — no interpolation.
@@ -359,10 +371,9 @@ fn lex_single_quote_string(chars: &[char], start: usize, line: usize, col: usize
     }
     if pos < chars.len() { pos += 1; } // skip closing '
 
-    let len = pos - start;
-    let end_col = col + len;
+    let (end_line, end_col) = advance_line_col(chars, start, pos, line, col);
     let raw = Some(chars[start..pos].iter().collect::<String>());
-    (Token { token_type: TokenType::String, value, line, col, end_col, raw }, pos, line, end_col)
+    (Token { token_type: TokenType::String, value, line, col, end_col, raw }, pos, end_line, end_col)
 }
 
 fn lex_heredoc(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize, usize, usize) {
@@ -370,23 +381,18 @@ fn lex_heredoc(chars: &[char], start: usize, line: usize, col: usize) -> (Token,
     let mut body = String::new();
     let mut has_interpolation = false;
     let mut pair_starts: Vec<usize> = Vec::new();
-    let mut cur_line = line;
-    let mut cur_col = col + 3;
 
     // Consume until closing """
     while pos + 2 < chars.len() && !(chars[pos] == '"' && chars[pos + 1] == '"' && chars[pos + 2] == '"') {
-        if chars[pos] == '\n' {
-            cur_line += 1;
-            cur_col = 1;
-        } else {
-            cur_col += 1;
-        }
         pos = lex_string_char(chars, pos, &mut body, &mut has_interpolation, &mut pair_starts);
     }
     if pos + 2 < chars.len() {
-        cur_col += 3; // closing """
-        pos += 3;
+        pos += 3; // closing """
     }
+    // Line/col are derived from the consumed source span, not counted per
+    // `lex_string_char` step: one step can swallow several characters
+    // (an escape, a whole `${...}` hole) and a newline among them (#2804).
+    let (cur_line, cur_col) = advance_line_col(chars, start, pos, line, col);
 
     let body = if has_interpolation { body } else { strip_escape_pairs(body, &pair_starts) };
     let value = strip_heredoc_indent(&body);
@@ -1277,5 +1283,43 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].line_offset, 2);
         assert_eq!(found[0].col_offset, 4);
+    }
+
+    // #2804: every multi-line token kind must leave the cursor on the line
+    // its closing delimiter sits on. A plain `"…"` literal kept its OPENING
+    // line, so every token after it (and every diagnostic, LSP position and
+    // AST span built from those tokens) was short by the literal's newline
+    // count. The sweep places `after` on the closing line and `zz` on the
+    // next one, and pins both positions for each kind.
+    #[test]
+    fn multi_line_tokens_advance_the_line_counter() {
+        let cases: &[(&str, &str)] = &[
+            ("plain string", "\"a\nb\nc\""),
+            ("plain string, backslash-newline", "\"a\\\nb\nc\""),
+            ("interpolated string", "\"${x}\nb\nc\""),
+            ("interpolation hole spanning lines", "\"a${\nx\n}c\""),
+            ("single-quote string", "'a\nb\nc'"),
+            ("heredoc", "\"\"\"\na\nc\"\"\""),
+            ("heredoc, backslash-newline", "\"\"\"\na\\\nc\"\"\""),
+            ("heredoc, hole spanning lines", "\"\"\"\n${\nx}c\"\"\""),
+            ("raw string", "r\"a\nb\nc\""),
+            ("raw heredoc", "r\"\"\"\na\nc\"\"\""),
+            ("block comment", "/* a\nb\nc */"),
+            ("nested block comment", "/* a /* b\n*/\nc */"),
+        ];
+        for (kind, lit) in cases {
+            let src = format!("let a = {lit} after\nlet zz = 1");
+            let newlines = lit.matches('\n').count();
+            let last_line_len = lit.rsplit('\n').next().unwrap().chars().count();
+            let tokens = Lexer::tokenize(&src);
+            let after = tokens.iter().find(|t| t.value == "after")
+                .unwrap_or_else(|| panic!("{kind}: no `after` token"));
+            assert_eq!((after.line, after.col), (1 + newlines, last_line_len + 2),
+                "{kind}: token after the literal on its closing line");
+            let zz = tokens.iter().find(|t| t.value == "zz")
+                .unwrap_or_else(|| panic!("{kind}: no `zz` token"));
+            assert_eq!((zz.line, zz.col), (2 + newlines, 5),
+                "{kind}: token on the line after the literal");
+        }
     }
 }

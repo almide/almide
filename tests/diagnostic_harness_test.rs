@@ -38,6 +38,9 @@ struct Meta {
     expects_error: Option<String>,
     expects_code: Option<String>,
     hint_substring: Option<String>,
+    /// #2804: `"LINE:COL"` of the first diagnostic, asserted against both the
+    /// rendered `broken.almd:LINE:COL` header and the `--json` primary span.
+    expects_line_col: Option<String>,
 }
 
 fn parse_meta(path: &Path) -> Meta {
@@ -54,6 +57,7 @@ fn parse_meta(path: &Path) -> Meta {
                 "expects_error" => "expects_error",
                 "expects_code" => "expects_code",
                 "hint_substring" => "hint_substring",
+                "expects_line_col" => "expects_line_col",
                 _ => continue,
             },
             value,
@@ -63,6 +67,7 @@ fn parse_meta(path: &Path) -> Meta {
         expects_error: fields.remove("expects_error"),
         expects_code: fields.remove("expects_code"),
         hint_substring: fields.remove("hint_substring"),
+        expects_line_col: fields.remove("expects_line_col"),
     }
 }
 
@@ -143,6 +148,21 @@ fn broken_files_produce_expected_diagnostics() {
                 combined.contains(err),
                 "expected error substring {:?} not in diagnostic for {}:\n{}",
                 err, case.display(), combined
+            );
+        }
+        if let Some(lc) = &meta.expects_line_col {
+            let rendered = format!("broken.almd:{lc}");
+            assert!(
+                combined.contains(&rendered),
+                "expected location {rendered:?} not in diagnostic for {}:\n{}",
+                case.display(), combined
+            );
+            let json_lc = run_check_json(&broken).first().and_then(|d| d.span)
+                .map(|(l, c, _)| format!("{l}:{c}"));
+            assert_eq!(
+                json_lc.as_deref(), Some(lc.as_str()),
+                "`check --json` primary span disagrees with expects_line_col for {}",
+                case.display()
             );
         }
         if let Some(hint) = &meta.hint_substring {

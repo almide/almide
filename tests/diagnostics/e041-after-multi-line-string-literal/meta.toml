@@ -1,0 +1,4 @@
+expects_code = "E041"
+expects_error = "implicit propagation of this binding's value was removed"
+expects_line_col = "28:11"
+hint_substring = "Write `expr!` to propagate"

@@ -1,0 +1,30 @@
+// #2804: a diagnostic after multi-line string literals must name its real
+// line. Newlines inside a plain, a single-quote and an interpolated literal
+// used to go uncounted, so E041 below was reported
+// 13 lines early, on a line inside `doc()`'s text.
+fn doc() -> String = "line 1
+line 2
+line 3
+line 4
+line 5
+line 6
+line 7
+line 8
+line 9
+line 10"
+
+fn quoted() -> String = 'a
+b'
+
+fn holes(n: Int) -> String = "n = ${n}
+and ${n + 1}
+
+done"
+
+effect fn readit(p: String) -> Result[String, String] = ok(p)
+
+effect fn main() -> Unit = {
+  println(doc() + quoted() + holes(1))
+  let t = readit("x")
+  println(t)
+}
