@@ -385,3 +385,86 @@ fn the_response_size_is_capped() {
     let out = in_child(&format!("bytes|GET|http://127.0.0.1:{port}/"), &[("ALMIDE_HTTP_MAX_RESPONSE_BYTES", "10000")]);
     assert_eq!(out, format!("ok 0 {}", "x".repeat(5000)));
 }
+
+// ── #2820: the trust store ──
+
+/// A CA and a leaf for `names` signed by it; the TLS server answers one
+/// request with `ok` per connection. Returns (port, CA PEM path).
+fn tls_origin(names: &[&str], connections: usize) -> (u16, std::path::PathBuf) {
+    use rcgen::{BasicConstraints, CertificateParams, IsCa, KeyPair};
+    let ca_key = KeyPair::generate().unwrap();
+    let mut ca_params = CertificateParams::new(Vec::<String>::new()).unwrap();
+    ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    ca_params.distinguished_name.push(rcgen::DnType::CommonName, "almide audit test CA");
+    let ca = ca_params.self_signed(&ca_key).unwrap();
+    let leaf_key = KeyPair::generate().unwrap();
+    let leaf_params = CertificateParams::new(names.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap();
+    let leaf = leaf_params.signed_by(&leaf_key, &ca, &ca_key).unwrap();
+
+    // One directory per CA: SSL_CERT_DIR reads every file in it, and the
+    // tests run in parallel.
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("almide-audit-{}-{n}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let ca_path = dir.join("ca.pem");
+    std::fs::write(&ca_path, ca.pem()).unwrap();
+
+    let chain = vec![leaf.der().clone()];
+    let key = rustls::pki_types::PrivateKeyDer::Pkcs8(leaf_key.serialize_der().into());
+    let cfg = std::sync::Arc::new(
+        rustls::ServerConfig::builder().with_no_client_auth().with_single_cert(chain, key).unwrap(),
+    );
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    thread::spawn(move || {
+        for _ in 0..connections {
+            let Ok((mut tcp, _)) = l.accept() else { return };
+            tcp.set_read_timeout(Some(Duration::from_secs(10))).ok();
+            let mut conn = rustls::ServerConnection::new(cfg.clone()).unwrap();
+            let mut tls = rustls::Stream::new(&mut conn, &mut tcp);
+            let mut buf = Vec::new();
+            let mut b = [0u8; 1024];
+            while !buf.ends_with(b"\r\n\r\n") {
+                match tls.read(&mut b) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => buf.extend_from_slice(&b[..n]),
+                }
+            }
+            if buf.ends_with(b"\r\n\r\n") {
+                let _ = tls.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
+                tls.conn.send_close_notify();
+                let _ = tls.flush();
+            }
+        }
+    });
+    (port, ca_path)
+}
+
+#[test]
+fn ssl_cert_file_is_trusted_and_a_certificate_failure_reads_as_tls() {
+    let (port, ca) = tls_origin(&["localhost"], 3);
+    let url = format!("https://localhost:{port}/");
+    let out = in_child(&format!("response|GET|{url}"), &[("SSL_CERT_FILE", ca.to_str().unwrap())]);
+    assert_eq!(out, "ok 200 ok");
+    let out = in_child(&format!("start|GET|{url}"), &[("SSL_CERT_FILE", ca.to_str().unwrap())]);
+    assert_eq!(out, "ok 200 ok");
+    // Without it the test CA is unknown — and that is a TLS error.
+    let out = in_child(&format!("response|GET|{url}"), &[]);
+    assert!(out.starts_with("err TLS error: invalid peer certificate: UnknownIssuer"), "{out}");
+}
+
+#[test]
+fn ssl_cert_dir_is_trusted() {
+    let (port, ca) = tls_origin(&["localhost"], 1);
+    let dir = ca.parent().unwrap().to_str().unwrap().to_string();
+    let out = in_child(&format!("response|GET|https://localhost:{port}/"), &[("SSL_CERT_DIR", &dir)]);
+    assert_eq!(out, "ok 200 ok");
+}
+
+#[test]
+fn an_unreadable_ssl_cert_file_is_named() {
+    let (port, _ca) = tls_origin(&["localhost"], 1);
+    let out = in_child(&format!("response|GET|https://localhost:{port}/"), &[("SSL_CERT_FILE", "/nonexistent/ca.pem")]);
+    assert!(out.starts_with("err TLS error: ") && out.contains("SSL_CERT_FILE"), "{out}");
+}

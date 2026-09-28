@@ -347,7 +347,10 @@ fn http_call_run(
     if u.https {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let mut tls = make_tls_stream(&u.host, stream)?;
+            // The handshake reads under the idle limit, clipped to the clock.
+            stream.set_read_timeout(http_call_step_timeout(sh, true)?).ok();
+            let mut tls = make_tls_stream(&u.host, stream)
+                .map_err(|e| if sh.past_deadline() { http_call_total_msg(sh.total_ms) } else { e })?;
             http_call_pump(sh, &mut tls, &request)
         }
         #[cfg(target_arch = "wasm32")]
