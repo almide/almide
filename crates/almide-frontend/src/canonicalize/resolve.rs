@@ -291,39 +291,16 @@ fn canonical_user_type_sym_bare(name: &str, types: &HashMap<Sym, Ty>, cur_mod: O
 /// are exempt — their types stay bare to match the bare-named Rust runtime.
 pub fn resolve_type_expr_in(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, Ty>>, cur_mod: Option<&str>) -> Ty {
     match te {
-        ast::TypeExpr::Simple { name } => {
-            if let Some(ty) = primitive_type_expr_name(name.as_str()) {
-                ty
-            } else {
-                resolve_simple_type_other(name.as_str(), known_types, cur_mod)
-            }
+        ast::TypeExpr::Simple { name } => match builtin_type_head(name.as_str(), TypeSpelling::Bare) {
+            Some(head) => (head.build)(&[]),
+            None => resolve_simple_type_other(name.as_str(), known_types, cur_mod),
         },
         ast::TypeExpr::Generic { name, args } => {
-            // ADR-0002 Phase 1 (#1103): the pseudo-generic `!` is the
-            // pure-fallible return marker — `-> T!` ≡ `-> Result[T, String]`.
-            if name.as_str() == "!" && args.len() == 1 {
-                let inner = resolve_type_expr_in(&args[0], known_types, cur_mod);
-                return Ty::result(inner, Ty::String);
-            }
-            // ADR-0012 D2 (#1193): the 2-arg marker carries a TYPED error —
-            // `T!E` ≡ `Result[T, E]`. The 1-arg default above is untouched,
-            // so `T!` keeps meaning `T!String` and every existing program is
-            // unaffected.
-            if name.as_str() == "!" && args.len() == 2 {
-                let inner = resolve_type_expr_in(&args[0], known_types, cur_mod);
-                let err = resolve_type_expr_in(&args[1], known_types, cur_mod);
-                return Ty::result(inner, err);
-            }
-            // ADR-0010: the pseudo-generic `?` is the Option marker —
-            // `T?` ≡ `Option[T]` in EVERY type position (unlike `!`, which
-            // is a return-position marker: `?` is a property of the value,
-            // `!` of the arrow).
-            if name.as_str() == "?" && args.len() == 1 {
-                let inner = resolve_type_expr_in(&args[0], known_types, cur_mod);
-                return Ty::option(inner);
-            }
             let ra: Vec<Ty> = args.iter().map(|a| resolve_type_expr_in(a, known_types, cur_mod)).collect();
-            resolve_generic_type_expr(name, ra, known_types, cur_mod)
+            match builtin_type_head(name.as_str(), TypeSpelling::Applied(args.len())) {
+                Some(head) => (head.build)(&ra),
+                None => resolve_nominal_generic_type_expr(name, ra, known_types, cur_mod),
+            }
         },
         ast::TypeExpr::Record { fields } => Ty::Record {
             fields: fields.iter().map(|f| (sym(&f.name), resolve_type_expr_in(&f.ty, known_types, cur_mod))).collect(),
@@ -347,55 +324,230 @@ pub fn resolve_type_expr_in(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym
     }
 }
 
-// The fixed-name scalar/primitive types of `TypeExpr::Simple` — anything not
-// in this table falls through to `resolve_simple_type_other`.
-fn primitive_type_expr_name(name: &str) -> Option<Ty> {
-    primitive_numeric_type_expr_name(name).or_else(|| primitive_other_type_expr_name(name))
+/// How a type name is spelled at one position, which decides whether the
+/// builtin table can answer it: `Int` is written bare, `Map[K, V]` applied to
+/// two arguments, and `Point { .. }` / `Point { x, .. } =>` is a record head,
+/// which only ever names a nominal record — no builtin is constructed that way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum TypeSpelling {
+    /// `TypeExpr::Simple`: `Int`, `Point`.
+    Bare,
+    /// `TypeExpr::Generic` with this many arguments: `List[T]`, `T!E`.
+    Applied(usize),
+    /// The head of a record literal or record pattern.
+    RecordHead,
 }
 
-// Sized numeric types (Stage 1a of the sized-numeric-types arc). `Int64` /
-// `Float64` alias to `Ty::Int` / `Ty::Float` — writing either form is
-// indistinguishable at the type checker layer, so existing code that uses
-// `Int` keeps compiling while new code can use the precise width name.
-fn primitive_numeric_type_expr_name(name: &str) -> Option<Ty> {
-    match name {
-        "Int" => Some(Ty::Int),
-        "Float" => Some(Ty::Float),
-        "Int64" => Some(Ty::Int64),
-        "Float64" => Some(Ty::Float64),
-        "Int8" => Some(Ty::Int8),
-        "Int16" => Some(Ty::Int16),
-        "Int32" => Some(Ty::Int32),
-        "UInt8" => Some(Ty::UInt8),
-        "UInt16" => Some(Ty::UInt16),
-        "UInt32" => Some(Ty::UInt32),
-        "UInt64" => Some(Ty::UInt64),
-        "Float32" => Some(Ty::Float32),
-        _ => None,
+/// Which spellings of a builtin head the resolver answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinArity {
+    /// Only the bare spelling (`Int`, and `Matrix` without arguments).
+    Bare,
+    /// Applied to any number of arguments (`List[T]`; a missing element type
+    /// resolves to `Unknown`).
+    Any,
+    /// Applied to at least this many (`Map[K, V]`; fewer is a nominal name).
+    AtLeast(usize),
+    /// Applied to between `lo` and `hi` arguments inclusive (`T!`, `T!E`).
+    Between(usize, usize),
+}
+
+impl BuiltinArity {
+    fn accepts(self, spelling: TypeSpelling) -> bool {
+        match (self, spelling) {
+            (BuiltinArity::Bare, TypeSpelling::Bare) => true,
+            (BuiltinArity::Any, TypeSpelling::Applied(_)) => true,
+            (BuiltinArity::AtLeast(lo), TypeSpelling::Applied(n)) => n >= lo,
+            (BuiltinArity::Between(lo, hi), TypeSpelling::Applied(n)) => lo <= n && n <= hi,
+            _ => false,
+        }
+    }
+
+    /// One spelling this arity accepts — what a test writes to exercise the
+    /// head (`Map[Int, Int]` for `AtLeast(2)`).
+    pub fn sample(self) -> TypeSpelling {
+        match self {
+            BuiltinArity::Bare => TypeSpelling::Bare,
+            BuiltinArity::Any => TypeSpelling::Applied(1),
+            BuiltinArity::AtLeast(n) | BuiltinArity::Between(n, _) => TypeSpelling::Applied(n),
+        }
     }
 }
 
-fn primitive_other_type_expr_name(name: &str) -> Option<Ty> {
-    match name {
-        "String" => Some(Ty::String),
-        "Bool" => Some(Ty::Bool),
-        "Unit" => Some(Ty::Unit),
-        "Bytes" => Some(Ty::Bytes),
-        "Matrix" => Some(Ty::Matrix),
-        "RawPtr" => Some(Ty::RawPtr),
-        "Path" => Some(Ty::String),
-        // `Never` is the bottom type — used by `process.exit` and
-        // similar diverging fns. The resolver has to surface it as
-        // `Ty::Never` (not `Ty::Named("Never", [])`); without this,
-        // bundled sigs that spell `-> Never` would be unifiable only
-        // with another nominal `Never` type, which doesn't exist.
-        "Never" => Some(Ty::Never),
-        _ => None,
+/// One builtin type head: the name, the spellings it answers, and the type
+/// it builds from the already-resolved arguments.
+pub struct BuiltinTypeHead {
+    pub name: &'static str,
+    pub arity: BuiltinArity,
+    pub build: fn(&[Ty]) -> Ty,
+}
+
+fn first_or_unknown(ra: &[Ty]) -> Ty {
+    ra.first().cloned().unwrap_or(Ty::Unknown)
+}
+
+/// EVERY type name the resolver answers without consulting a declaration,
+/// and the ONLY place those answers live (#2839). `resolve_type_expr_in`
+/// dispatches through it before any module's type is looked up, so a
+/// module's own `type Map` never takes `Map[K, V]` away; the scope check
+/// (`FileTypeScope::locate`) asks the same table, so the two cannot disagree
+/// about which spellings are builtin. A new builtin is added here or nowhere.
+pub const BUILTIN_TYPE_HEADS: &[BuiltinTypeHead] = &[
+    // Sized numeric types (Stage 1a of the sized-numeric-types arc). `Int64`
+    // / `Float64` alias to `Ty::Int` / `Ty::Float` — writing either form is
+    // indistinguishable at the type checker layer, so existing code that
+    // uses `Int` keeps compiling while new code can use the precise width.
+    BuiltinTypeHead { name: "Int", arity: BuiltinArity::Bare, build: |_| Ty::Int },
+    BuiltinTypeHead { name: "Float", arity: BuiltinArity::Bare, build: |_| Ty::Float },
+    BuiltinTypeHead { name: "Int64", arity: BuiltinArity::Bare, build: |_| Ty::Int64 },
+    BuiltinTypeHead { name: "Float64", arity: BuiltinArity::Bare, build: |_| Ty::Float64 },
+    BuiltinTypeHead { name: "Int8", arity: BuiltinArity::Bare, build: |_| Ty::Int8 },
+    BuiltinTypeHead { name: "Int16", arity: BuiltinArity::Bare, build: |_| Ty::Int16 },
+    BuiltinTypeHead { name: "Int32", arity: BuiltinArity::Bare, build: |_| Ty::Int32 },
+    BuiltinTypeHead { name: "UInt8", arity: BuiltinArity::Bare, build: |_| Ty::UInt8 },
+    BuiltinTypeHead { name: "UInt16", arity: BuiltinArity::Bare, build: |_| Ty::UInt16 },
+    BuiltinTypeHead { name: "UInt32", arity: BuiltinArity::Bare, build: |_| Ty::UInt32 },
+    BuiltinTypeHead { name: "UInt64", arity: BuiltinArity::Bare, build: |_| Ty::UInt64 },
+    BuiltinTypeHead { name: "Float32", arity: BuiltinArity::Bare, build: |_| Ty::Float32 },
+    BuiltinTypeHead { name: "String", arity: BuiltinArity::Bare, build: |_| Ty::String },
+    BuiltinTypeHead { name: "Bool", arity: BuiltinArity::Bare, build: |_| Ty::Bool },
+    BuiltinTypeHead { name: "Unit", arity: BuiltinArity::Bare, build: |_| Ty::Unit },
+    BuiltinTypeHead { name: "Bytes", arity: BuiltinArity::Bare, build: |_| Ty::Bytes },
+    // Bare `Matrix` (no args) stays `Ty::Matrix` — the compat rule in
+    // `types/mod.rs` bridges bare `Matrix` ↔ `Matrix[Float]`.
+    BuiltinTypeHead { name: "Matrix", arity: BuiltinArity::Bare, build: |_| Ty::Matrix },
+    BuiltinTypeHead { name: "RawPtr", arity: BuiltinArity::Bare, build: |_| Ty::RawPtr },
+    BuiltinTypeHead { name: "Path", arity: BuiltinArity::Bare, build: |_| Ty::String },
+    // `Never` is the bottom type — used by `process.exit` and similar
+    // diverging fns. It has to surface as `Ty::Never` (not
+    // `Ty::Named("Never", [])`); otherwise bundled sigs that spell
+    // `-> Never` would be unifiable only with another nominal `Never` type,
+    // which doesn't exist.
+    BuiltinTypeHead { name: "Never", arity: BuiltinArity::Bare, build: |_| Ty::Never },
+    // ADR-0002 Phase 1 (#1103): the pseudo-generic `!` is the pure-fallible
+    // return marker — `-> T!` ≡ `-> Result[T, String]`. ADR-0012 D2 (#1193):
+    // the 2-arg marker carries a TYPED error — `T!E` ≡ `Result[T, E]`.
+    BuiltinTypeHead {
+        name: "!", arity: BuiltinArity::Between(1, 2),
+        build: |ra| Ty::result(ra[0].clone(), ra.get(1).cloned().unwrap_or(Ty::String)),
+    },
+    // ADR-0010: the pseudo-generic `?` is the Option marker — `T?` ≡
+    // `Option[T]` in EVERY type position (unlike `!`, which is a
+    // return-position marker: `?` is a property of the value, `!` of the
+    // arrow).
+    BuiltinTypeHead { name: "?", arity: BuiltinArity::Between(1, 1), build: |ra| Ty::option(ra[0].clone()) },
+    BuiltinTypeHead { name: "List", arity: BuiltinArity::Any, build: |ra| Ty::list(first_or_unknown(ra)) },
+    BuiltinTypeHead { name: "Option", arity: BuiltinArity::Any, build: |ra| Ty::option(first_or_unknown(ra)) },
+    BuiltinTypeHead {
+        name: "Result", arity: BuiltinArity::AtLeast(2),
+        build: |ra| Ty::result(ra[0].clone(), ra[1].clone()),
+    },
+    BuiltinTypeHead {
+        name: "Map", arity: BuiltinArity::AtLeast(2),
+        build: |ra| Ty::map_of(ra[0].clone(), ra[1].clone()),
+    },
+    BuiltinTypeHead { name: "Set", arity: BuiltinArity::Any, build: |ra| Ty::set_of(first_or_unknown(ra)) },
+    // Sized Numeric Types P4 kickoff: `Matrix[T]` resolves to
+    // `Applied(Matrix, [T])` so the checker can discriminate
+    // `Matrix[Float32]` / `Matrix[Float64]`.
+    BuiltinTypeHead {
+        name: "Matrix", arity: BuiltinArity::Any,
+        build: |ra| Ty::Applied(TypeConstructorId::Matrix, ra.to_vec()),
+    },
+];
+
+/// The builtin head a spelling resolves to, if any — the first thing the
+/// resolver asks of every type name, before any declaration is consulted.
+pub fn builtin_type_head(name: &str, spelling: TypeSpelling) -> Option<&'static BuiltinTypeHead> {
+    BUILTIN_TYPE_HEADS.iter().find(|h| h.name == name && h.arity.accepts(spelling))
+}
+
+/// Where one bare type spelling of a file goes (#2715, #2839), in the order
+/// the resolver consults them. Only `OutOfScope` is an error (E029).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeNameOrigin {
+    /// A `BUILTIN_TYPE_HEADS` entry answers the spelling before any
+    /// declaration is consulted.
+    Builtin,
+    /// The file declares the name itself.
+    OwnDecl,
+    /// The stdlib owns the name (the auto-import).
+    Stdlib,
+    /// A user module the file can see declares it: the file's own module or
+    /// one it imports.
+    InScope,
+    /// Only user modules this file never imports declare it — sorted and
+    /// deduplicated canonical module names.
+    OutOfScope(Vec<Sym>),
+    /// No user module declares it; left to the ordinary unknown-type path.
+    Undeclared,
+}
+
+/// One file's view of the program's type declarations: which user modules
+/// declare which bare names, and which of those modules the file can see.
+/// Built with one scan of the type table for the names the file spells.
+pub struct FileTypeScope {
+    own: std::collections::HashSet<Sym>,
+    visible: std::collections::HashSet<Sym>,
+    owners: HashMap<Sym, Vec<Sym>>,
+}
+
+impl FileTypeScope {
+    /// `scope` is the file's canonical module (`None` for the entry file),
+    /// `own` the type names it declares, `names` the bare names it spells.
+    pub fn new(
+        env: &crate::types::TypeEnv,
+        scope: Option<&str>,
+        own: std::collections::HashSet<Sym>,
+        names: &std::collections::HashSet<Sym>,
+    ) -> Self {
+        let user_modules: std::collections::HashSet<&str> = env.user_modules.iter().map(|m| m.as_str()).collect();
+        let mut owners: HashMap<Sym, Vec<Sym>> = HashMap::new();
+        for k in env.types.keys() {
+            if let Some((m, base)) = k.as_str().rsplit_once('.')
+                && user_modules.contains(m)
+                && !almide_lang::stdlib_info::is_bundled_module(m)
+            {
+                let base = sym(base);
+                if names.contains(&base) {
+                    owners.entry(base).or_default().push(sym(m));
+                }
+            }
+        }
+        for mods in owners.values_mut() {
+            mods.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+            mods.dedup();
+        }
+        let mut visible: std::collections::HashSet<Sym> = env.import_table.accessible.clone();
+        visible.extend(env.import_table.aliases.values().copied());
+        if let Some(h) = scope { visible.insert(sym(h)); }
+        FileTypeScope { own, visible, owners }
+    }
+
+    /// Where `name`, spelled as `spelling`, goes in this file.
+    pub fn locate(&self, name: Sym, spelling: TypeSpelling) -> TypeNameOrigin {
+        if builtin_type_head(name.as_str(), spelling).is_some() {
+            return TypeNameOrigin::Builtin;
+        }
+        if self.own.contains(&name) {
+            return TypeNameOrigin::OwnDecl;
+        }
+        let Some(mods) = self.owners.get(&name) else { return TypeNameOrigin::Undeclared };
+        if mods.iter().any(|m| self.visible.contains(m)) {
+            return TypeNameOrigin::InScope;
+        }
+        // A stdlib type of the same name is what the bare spelling means
+        // here (the auto-import); only a user-module-only name is out of scope.
+        if almide_lang::stdlib_info::stdlib_owned_type_owner(name.as_str()).is_some()
+            || crate::bundled_sigs::bundled_type_owner(name.as_str()).is_some()
+        {
+            return TypeNameOrigin::Stdlib;
+        }
+        TypeNameOrigin::OutOfScope(mods.clone())
     }
 }
 
-// The `other` (non-primitive) arm of `TypeExpr::Simple` resolution: a
-// nominal type name that isn't a built-in scalar.
+// The nominal (non-builtin) arm of `TypeExpr::Simple` resolution.
 fn resolve_simple_type_other(other: &str, known_types: Option<&HashMap<Sym, Ty>>, cur_mod: Option<&str>) -> Ty {
     // #433: a user module's (qualified) reference to a namespaced
     // type resolves to its canonical `mod.Type` name; falls through
@@ -450,51 +602,17 @@ fn resolve_simple_type_other(other: &str, known_types: Option<&HashMap<Sym, Ty>>
     }
 }
 
-// `TypeExpr::Generic { name, args }` resolution, given the already-resolved
-// argument types `ra`.
-/// Whether a bare type spelling with `arity` type arguments names a BUILTIN
-/// type (#2839): `Int`, `String`, `List[T]`, `Map[K, V]`, ... resolve to the
-/// builtin before any module's declaration is consulted (the order of
-/// `resolve_type_expr_in` / `resolve_generic_type_expr`), so no module's
-/// same-named type can put such a spelling out of scope. Mirrors those two
-/// functions arm for arm.
-pub fn is_builtin_type_spelling(name: &str, arity: usize) -> bool {
-    if arity == 0 {
-        return primitive_type_expr_name(name).is_some();
-    }
-    match name {
-        "!" => arity <= 2,
-        "?" => arity == 1,
-        "List" | "Option" | "Set" | "Matrix" => true,
-        "Result" | "Map" => arity >= 2,
-        _ => false,
-    }
-}
-
-fn resolve_generic_type_expr(name: &Sym, ra: Vec<Ty>, known_types: Option<&HashMap<Sym, Ty>>, cur_mod: Option<&str>) -> Ty {
-    match name.as_str() {
-        "List" => Ty::list(ra.first().cloned().unwrap_or(Ty::Unknown)),
-        "Option" => Ty::option(ra.first().cloned().unwrap_or(Ty::Unknown)),
-        "Result" if ra.len() >= 2 => Ty::result(ra[0].clone(), ra[1].clone()),
-        "Map" if ra.len() >= 2 => Ty::map_of(ra[0].clone(), ra[1].clone()),
-        "Set" => Ty::set_of(ra.first().cloned().unwrap_or(Ty::Unknown)),
-        // Sized Numeric Types P4 kickoff: `Matrix[T]` resolves
-        // to `Applied(Matrix, [T])` so the checker can discriminate
-        // `Matrix[Float32]` / `Matrix[Float64]`. Bare `Matrix`
-        // (no args) stays as `Ty::Matrix` — the compat rule in
-        // `types/mod.rs` bridges bare `Matrix` ↔ `Matrix[Float]`.
-        "Matrix" => Ty::Applied(TypeConstructorId::Matrix, ra),
-        _ => {
-            // #433: qualify a user module's generic type to its canonical
-            // `mod.Type` name; stdlib / local generics stay bare.
-            let qualified = known_types.and_then(|types| canonical_user_type_sym(name.as_str(), types, cur_mod));
-            if let Some(qn) = qualified {
-                Ty::Named(qn, ra)
-            } else {
-                let resolved_name = name.as_str().rsplit_once('.').map(|(_, bare)| sym(bare)).unwrap_or(*name);
-                Ty::Named(resolved_name, ra)
-            }
-        },
+// The nominal (non-builtin) arm of `TypeExpr::Generic` resolution, given the
+// already-resolved argument types `ra`.
+fn resolve_nominal_generic_type_expr(name: &Sym, ra: Vec<Ty>, known_types: Option<&HashMap<Sym, Ty>>, cur_mod: Option<&str>) -> Ty {
+    // #433: qualify a user module's generic type to its canonical `mod.Type`
+    // name; stdlib / local generics stay bare.
+    let qualified = known_types.and_then(|types| canonical_user_type_sym(name.as_str(), types, cur_mod));
+    if let Some(qn) = qualified {
+        Ty::Named(qn, ra)
+    } else {
+        let resolved_name = name.as_str().rsplit_once('.').map(|(_, bare)| sym(bare)).unwrap_or(*name);
+        Ty::Named(resolved_name, ra)
     }
 }
 

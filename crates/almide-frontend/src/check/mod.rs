@@ -39,6 +39,7 @@ use almide_base::diagnostic::Diagnostic;
 use crate::import_table::{ImportTable, build_import_table};
 use almide_base::intern::{Sym, sym};
 use crate::types::{Ty, TypeEnv};
+use crate::canonicalize::resolve::TypeSpelling;
 use types::{Constraint, FixHint, UnionFind, resolve_ty};
 
 /// Print a compiler trace line when the named debug channel is switched on.
@@ -1213,7 +1214,7 @@ impl Checker {
         };
         let bound_origins: std::collections::HashSet<Sym> = bare_protocol_refs(program).iter()
             .filter_map(|p| self.env.protocols.get(p).and_then(|d| d.origin))
-            .chain(spelled.bare_types.iter().filter_map(owned_origin))
+            .chain(spelled.bare_types.iter().map(|(n, _)| n).filter_map(owned_origin))
             .chain(spelled.bare_ctors.iter().filter_map(ctor_origin))
             .collect();
         // The verdict needs a fully parsed file: recovery drops the text that
@@ -1404,8 +1405,9 @@ struct ImportSpellings {
     /// Every BARE name in a type position or at a record head (`e: Endian`,
     /// `List[FileStat]`, `FileStat { .. }`). A stdlib module OWNS some of
     /// these (`STDLIB_OWNED_TYPES`), and spelling one uses that module's
-    /// import (#1853).
-    bare_types: std::collections::HashSet<Sym>,
+    /// import (#1853). Each carries how it was spelled, which decides
+    /// whether the resolver's builtin table answers it (#2839).
+    bare_types: std::collections::HashSet<(Sym, TypeSpelling)>,
     /// Every BARE capitalised value or pattern spelling — a variant
     /// constructor's (`LittleEndian`, `LittleEndian => ..`). The E060 pass
     /// maps each to its declaring type through the constructor table.
@@ -1418,10 +1420,10 @@ struct ImportSpellings {
 
 impl ImportSpellings {
     /// `h.x` marks the alias `h`; a bare `X` is a type-position spelling.
-    fn ty_name(&mut self, name: Sym) {
+    fn ty_name(&mut self, name: Sym, spelling: TypeSpelling) {
         match name.as_str().split_once('.') {
             Some((h, _)) => { self.heads.insert(sym(h)); }
-            None => { self.bare_types.insert(name); }
+            None => { self.bare_types.insert((name, spelling)); }
         }
     }
     /// `c.Red` marks the alias `c`; a bare `Red` is a constructor spelling.
@@ -1441,19 +1443,9 @@ impl ImportSpellings {
 fn import_spellings(program: &mut ast::Program) -> ImportSpellings {
     fn walk_ty(te: &ast::TypeExpr, s: &mut ImportSpellings) {
         match te {
-            // A builtin spelling (`Int`, `Map[K, V]`) resolves to the builtin
-            // before any module is consulted, so it is never a module's type
-            // name — not even in a package with a module that declares its
-            // own `type Map` (#2839).
-            ast::TypeExpr::Simple { name } => {
-                if !crate::canonicalize::resolve::is_builtin_type_spelling(name.as_str(), 0) {
-                    s.ty_name(*name);
-                }
-            }
+            ast::TypeExpr::Simple { name } => s.ty_name(*name, TypeSpelling::Bare),
             ast::TypeExpr::Generic { name, args } => {
-                if !crate::canonicalize::resolve::is_builtin_type_spelling(name.as_str(), args.len()) {
-                    s.ty_name(*name);
-                }
+                s.ty_name(*name, TypeSpelling::Applied(args.len()));
                 for a in args { walk_ty(a, s); }
             }
             ast::TypeExpr::Record { fields } | ast::TypeExpr::OpenRecord { fields } => {
@@ -1485,7 +1477,7 @@ fn import_spellings(program: &mut ast::Program) -> ImportSpellings {
                 for a in args { walk_pat(a, s); }
             }
             ast::Pattern::RecordPattern { name, fields, .. } => {
-                s.ty_name(*name);
+                s.ty_name(*name, TypeSpelling::RecordHead);
                 for f in fields { if let Some(fp) = &f.pattern { walk_pat(fp, s); } }
             }
             ast::Pattern::Tuple { elements } | ast::Pattern::List { elements, .. } => {
@@ -1558,7 +1550,7 @@ fn import_spellings(program: &mut ast::Program) -> ImportSpellings {
     ast::visit_exprs_mut(program, &mut |e: &mut ast::Expr| {
         match &e.kind {
             ast::ExprKind::Ident { name } | ast::ExprKind::TypeName { name } => s.value_name(*name),
-            ast::ExprKind::Record { name: Some(n), .. } => s.ty_name(*n),
+            ast::ExprKind::Record { name: Some(n), .. } => s.ty_name(*n, TypeSpelling::RecordHead),
             ast::ExprKind::Call { type_args: Some(tas), .. } => {
                 for t in tas { walk_ty(t, &mut s); }
             }
@@ -1606,6 +1598,19 @@ fn bare_protocol_refs(program: &ast::Program) -> std::collections::HashSet<Sym> 
         }
     }
     refs
+}
+
+/// Where a bare protocol reference goes in one file (#2715, #2839).
+enum BareProtocolOrigin {
+    /// Declared by this file (or the entry file), or built in and not
+    /// redeclared.
+    Here,
+    /// Built in, redeclared only by a module this file does not import.
+    Builtin,
+    /// Declared by a module this file imports under `alias`.
+    Imported { module: Sym, alias: Sym },
+    /// Declared only by a module this file never imports: E029.
+    OutOfScope(Sym),
 }
 
 /// One protocol reference as written in a bound or a conformance list
@@ -1692,44 +1697,38 @@ impl Checker {
                         self.emit(err(msg, format!("{} — a qualified protocol name names the module that declares it, as a qualified type does", fix), w.owner.clone()));
                     }
                 }
-                None => {
-                    if let Some(o) = proto.origin.filter(|o| Some(*o) != here) {
-                        let alias = self.alias_for_module(o);
-                        // A protocol of a module this file never imports is
-                        // out of scope, as a type is (#2715): the bare name
-                        // resolved only because the protocol table is
-                        // program-wide.
-                        if alias.is_none() {
-                            // A built-in protocol's name is in scope in every
-                            // file: an unimported module that redeclares it
-                            // does not take the bare spelling away (#2839).
-                            if crate::canonicalize::protocols::is_builtin_protocol_name(w.name.as_str()) {
-                                continue;
-                            }
-                            let leaf = o.as_str().rsplit('.').next().unwrap_or(o.as_str()).to_string();
-                            self.emit(err(
-                                format!("protocol '{}' is not in scope here: it is declared in module '{}', which this file does not import", w.name, o),
-                                format!("Import the module that declares it and write the qualified name, e.g. `{}.{}`", leaf, w.name),
-                                w.owner.clone(),
-                            ).with_code("E029"));
-                            continue;
-                        }
-                        let hint = match &alias {
-                            Some(a) => format!("Write `{}.{}`: a protocol from another module is named with its module, the same way a type is (`{}.SomeType`). The bare name still resolves for now", a, w.name, a),
-                            None => format!("Import the declaring module and qualify the name (`import self.<module>` then `<module>.{}`): a protocol from another module is named with its module, the same way a type is", w.name),
-                        };
+                None => match self.locate_bare_protocol(w.name, proto.origin) {
+                    BareProtocolOrigin::Here => {}
+                    // A built-in protocol's name is in scope in every file:
+                    // an unimported module that redeclares it does not take
+                    // the bare spelling away (#2839).
+                    BareProtocolOrigin::Builtin => continue,
+                    // A protocol of a module this file never imports is out
+                    // of scope, as a type is (#2715): the bare name resolved
+                    // only because the protocol table is program-wide.
+                    BareProtocolOrigin::OutOfScope(o) => {
+                        let leaf = o.as_str().rsplit('.').next().unwrap_or(o.as_str()).to_string();
+                        self.emit(err(
+                            format!("protocol '{}' is not in scope here: it is declared in module '{}', which this file does not import", w.name, o),
+                            format!("Import the module that declares it and write the qualified name, e.g. `{}.{}`", leaf, w.name),
+                            w.owner.clone(),
+                        ).with_code("E029"));
+                        continue;
+                    }
+                    BareProtocolOrigin::Imported { module: o, alias: a } => {
+                        let hint = format!("Write `{}.{}`: a protocol from another module is named with its module, the same way a type is (`{}.SomeType`). The bare name still resolves for now", a, w.name, a);
                         let mut diag = almide_base::diagnostic::Diagnostic::warning(
                             format!("protocol '{}' from module '{}' is referenced by its bare name", w.name, o),
                             hint,
                             w.owner.clone(),
                         );
-                        if let (Some(a), Some(sp)) = (alias, w.span) {
+                        if let Some(sp) = w.span {
                             let end = sp.col + w.name.as_str().chars().count();
                             diag = diag.with_machine_fix(sp.line, sp.col, end, format!("{}.{}", a, w.name));
                         }
                         self.emit(diag);
                     }
-                }
+                },
             }
             let given = w.r.map_or(0, |r| r.args.len());
             if w.is_bound && given != proto.generics.len() {
@@ -1760,7 +1759,7 @@ impl Checker {
     /// anywhere changed or broke a file that never mentioned it. Now it is
     /// E029 naming the module to import and the qualified spelling.
     pub(crate) fn validate_bare_type_visibility(&mut self, program: &mut ast::Program) {
-        let here = self.current_module_prefix.clone();
+        use crate::canonicalize::resolve::{FileTypeScope, TypeNameOrigin};
         let own: std::collections::HashSet<Sym> = program.decls.iter()
             .filter_map(|d| match d { ast::Decl::Type { name, .. } => Some(*name), _ => None })
             .collect();
@@ -1768,39 +1767,13 @@ impl Checker {
         // names it spells; the per-declaration walk below, which only supplies
         // each error's span, runs only when one of them is actually out of
         // scope. A clean file costs one walk and one scan of the type table.
-        let candidates: std::collections::HashSet<&str> = import_spellings(program).bare_types
-            .into_iter()
-            .filter(|n| !own.contains(n))
-            .map(|n| n.as_str())
-            .collect();
-        if candidates.is_empty() {
-            return;
-        }
-        // name -> the user modules that declare it (sorted at report time, so
-        // the message is deterministic).
-        let user_modules: std::collections::HashSet<&str> = self.env.user_modules.iter().map(|m| m.as_str()).collect();
-        let mut owners: std::collections::HashMap<Sym, Vec<Sym>> = std::collections::HashMap::new();
-        for k in self.env.types.keys() {
-            if let Some((m, base)) = k.as_str().rsplit_once('.')
-                && candidates.contains(base)
-                && user_modules.contains(m)
-                && !almide_lang::stdlib_info::is_bundled_module(m)
-            {
-                owners.entry(sym(base)).or_default().push(sym(m));
-            }
-        }
-        let mut visible_set: std::collections::HashSet<Sym> = self.env.import_table.accessible.clone();
-        visible_set.extend(self.env.import_table.aliases.values().copied());
-        if let Some(h) = here.as_deref() { visible_set.insert(sym(h)); }
-        let visible = |m: &Sym| -> bool { visible_set.contains(m) };
-        // A stdlib type of the same name is what the bare spelling means here
-        // (the auto-import); only a user-module-only name is out of scope.
-        owners.retain(|name, decl_owners| {
-            !decl_owners.iter().any(visible)
-                && almide_lang::stdlib_info::stdlib_owned_type_owner(name.as_str()).is_none()
-                && crate::bundled_sigs::bundled_type_owner(name.as_str()).is_none()
-        });
-        if owners.is_empty() {
+        let spelled = import_spellings(program).bare_types;
+        let names: std::collections::HashSet<Sym> = spelled.iter().map(|(n, _)| *n).collect();
+        let scope = FileTypeScope::new(&self.env, self.current_module_prefix.as_deref(), own, &names);
+        // The one decision: the resolver's answer for each spelling. E029 is
+        // `OutOfScope` and nothing else — a builtin, the file's own type, an
+        // imported module's or the stdlib's never reaches it (#2839).
+        if !spelled.iter().any(|(n, sp)| matches!(scope.locate(*n, *sp), TypeNameOrigin::OutOfScope(_))) {
             return;
         }
         let mut shell = program.clone();
@@ -1817,22 +1790,18 @@ impl Checker {
             };
             let letters: std::collections::HashSet<Sym> = generics.iter().flatten().map(|g| sym(&g.name)).collect();
             shell.decls = vec![decl.clone()];
-            let spelled = import_spellings(&mut shell);
-            let mut names: Vec<Sym> = spelled.bare_types.into_iter()
-                .filter(|n| !letters.contains(n) && !own.contains(n))
+            let mut here: Vec<(Sym, TypeSpelling)> = import_spellings(&mut shell).bare_types
+                .into_iter()
+                .filter(|(n, _)| !letters.contains(n))
                 .collect();
-            names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-            for name in names {
-                let Some(decl_owners) = owners.get(&name) else { continue };
-                if reported.contains(&name) {
+            here.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()).then(a.1.cmp(&b.1)));
+            for (name, spelling) in here {
+                let TypeNameOrigin::OutOfScope(mods) = scope.locate(name, spelling) else { continue };
+                if !reported.insert(name) {
                     continue;
                 }
-                reported.insert(name);
-                let mut mods: Vec<&str> = decl_owners.iter().map(|m| m.as_str()).collect();
-                mods.sort();
-                mods.dedup();
                 let spellings = mods.iter()
-                    .map(|m| format!("`{}.{}`", m.rsplit('.').next().unwrap_or(m), name))
+                    .map(|m| format!("`{}.{}`", m.as_str().rsplit('.').next().unwrap_or(m.as_str()), name))
                     .collect::<Vec<_>>().join(" or ");
                 let modules = mods.iter().map(|m| format!("'{}'", m)).collect::<Vec<_>>().join(" and ");
                 self.current_span = span;
@@ -1844,6 +1813,19 @@ impl Checker {
             }
         }
         self.current_span = saved;
+    }
+
+    /// Where a BARE protocol reference goes in this file, given the origin
+    /// of the protocol the program-wide table holds under that name — the
+    /// one decision the protocol checks read (#2715, #2839).
+    fn locate_bare_protocol(&self, name: Sym, origin: Option<Sym>) -> BareProtocolOrigin {
+        let here = self.current_module_prefix.as_deref().map(sym);
+        let Some(o) = origin.filter(|o| Some(*o) != here) else { return BareProtocolOrigin::Here };
+        match self.alias_for_module(o) {
+            Some(alias) => BareProtocolOrigin::Imported { module: o, alias },
+            None if crate::canonicalize::protocols::builtin_protocol(name.as_str()).is_some() => BareProtocolOrigin::Builtin,
+            None => BareProtocolOrigin::OutOfScope(o),
+        }
     }
 
     /// The alias this file imports canonical module `m` under, if any.
