@@ -15,7 +15,7 @@ re-measured 2026-08-12) and `proofs/TOR.md` (the operational contract).
 <!-- stages:generated:start — derived from the proofs/ ledgers by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
 <!-- counts:generated:start (as of 2026-09-29) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
 > **Stage 1 (accept-and-wrong extinction): audits COMPLETE and gated** —
-> scalar-read 64 arms / 0 UNGUARDED; WAT prelude 63 fns classified;
+> scalar-read 64 arms / 0 UNGUARDED;
 > platform-libm 5 sites classified. New entries cannot land unclassified.
 >
 > **Stage 2 (translation validation): 801/822 fixtures cast a real 3-way vote (97%)** —
