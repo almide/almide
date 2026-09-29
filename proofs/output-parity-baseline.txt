@@ -280,6 +280,7 @@ spec/wasm_cross/fan_map_inline_err.almd
 spec/wasm_cross/fan_map_inline_lambda.almd
 spec/wasm_cross/fan_map_nested_combinators.almd
 spec/wasm_cross/fan_map_parallel_scalar.almd
+spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd
 spec/wasm_cross/fan_pure_thunks.almd
 spec/wasm_cross/fan_settle_tuple.almd
 spec/wasm_cross/fan_sibling_trap.almd
