@@ -426,6 +426,11 @@ spec/wasm_cross/scalar_if_arm_effects.almd :: main
 spec/wasm_cross/unwrap_callarg_single_expr_effect_body.almd :: count
 spec/wasm_cross_pkg/main.almd :: init
 spec/wasm_cross_pkg/src/rec.almd :: create
+# The same #2950 classifier change, on a fixture that landed after the list above
+# was measured (the fallible-HOF release pin): its effect-fn helpers wall without the
+# ABI registries the deleted passes filled. The structural leg serves it.
+spec/wasm_cross/fallible_hof_release_matrix.almd :: big
+spec/wasm_cross/fallible_hof_release_matrix.almd :: num
 # #2945: an effect fn's `mut`-record call unwrapped with `!` from a Unit-result
 # callee, and never-err calls no `!` reaches (`let _ =`, a bound Result, a
 # `match`, `??` inside an interpolation). The MIR lowering refuses the
