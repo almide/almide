@@ -19,7 +19,7 @@
 5721	spec/wasm_cross/assign_self_call_release.almd
 2463	spec/wasm_cross/autotry_construction.almd
 1964	spec/wasm_cross/autotry_result_first_arg.almd
-14347	spec/wasm_cross/availability_pure_batch.almd
+14419	spec/wasm_cross/availability_pure_batch.almd
 5234	spec/wasm_cross/bang_in_record_literal_field.almd
 3156	spec/wasm_cross/base64_encode.almd
 5203	spec/wasm_cross/binary_operators.almd
@@ -231,6 +231,7 @@
 1998	spec/wasm_cross/fuel_trap_window.almd
 2876	spec/wasm_cross/fuel_var_budget.almd
 2519	spec/wasm_cross/fuel_zero_budget_inline.almd
+2354	spec/wasm_cross/fusion_two_aborting_stages_staged.almd
 2406	spec/wasm_cross/fuzz_found_nested_interp_capture.almd
 2669	spec/wasm_cross/general_recursion_tail.almd
 2154	spec/wasm_cross/generic_chain_unwrap_or.almd
