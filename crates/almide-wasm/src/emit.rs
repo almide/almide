@@ -72,6 +72,10 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     // gets from TailCallOpt, from the same shared precondition check.
     let accumulated = accumulate_binary_recursion(ir);
     let ir = accumulated.as_ref().unwrap_or(ir);
+    // #2980: small scalar fns inline at their call sites, bound rather
+    // than substituted (inline_calls.rs) — the stdlib's own kernels too.
+    let inlined = crate::inline_calls::inline_small_scalar_calls(ir);
+    let ir = inlined.as_ref().unwrap_or(ir);
     // Witness sweeps (#2754) see the pass boundaries and which pass shipped
     // (no-ops unless a sweep collects).
     use crate::witness::{mark_pass as mark, mark_shipped as ship};
