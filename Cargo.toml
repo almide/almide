@@ -22,7 +22,7 @@ unsafe_code = "forbid"
 
 [package]
 name = "almide"
-version = "0.65.1"
+version = "0.66.0"
 edition = "2024"
 # Runner-class MSRV: the binary embeds the wasmtime 49 host (the commissioned
 # wasm leg). Compiler crates keep their own 1.89 claim via workspace.package.
