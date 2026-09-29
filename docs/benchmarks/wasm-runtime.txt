@@ -9,9 +9,23 @@
 #             leg against the latest release's, interleaved, min-of-runs,
 #             tree/release above 1 + ab_band fails.
 #
-# Rows: name | status | native_ms | wasm_ms | ratio (wasm/native) [ab_band=NN]
-#   measured          — `almide bench --target wasm` (embedded host, verify-
-#                       then-time, median of 5 + warmup) and the native twin
+# Rows: name | status | native_ms | wasm_ms | ratio | cold_native_ms | cold_wasm_ms | cold_ratio [args=N] [ab_band=NN]
+#   native_ms / wasm_ms / ratio — THE BOUNDARY (#2980): `main` alone, entry to
+#       return, on both legs (native timed in-process, wasm around the host's
+#       `main` call). Spawn / compile / instantiate are outside it: the ratio
+#       is steady-state code speed, the quantity the gates judge.
+#   cold_* — the whole run as a user pays it: native spawn + run, wasm
+#       compile + instantiate + run (embedded host). Recorded so startup is
+#       visible, not gated.
+#   args=N — the workload size passed to BOTH legs, so `main` runs long
+#       enough to time (native ~10-30 ms); absent = the program's default.
+#   Every figure is the MIN over 2 interleaved rounds (native, wasm, native,
+#   wasm) x 5 runs + warmup, output verified identical. Min removes load, NOT
+#   code-placement luck: Cranelift does not align loop headers, and on this
+#   machine a tight loop moved 22 -> 9 ms from dead code above it (#2987),
+#   so a sub-1.3x move on a row with a few-instruction hot loop is not
+#   evidence alone.
+#   measured          — `almide bench` benches both legs
 #   walled            — the wasm build path walls the program (E082; the
 #                       incumbent fallback and its `routed-incumbent` status
 #                       are gone since #2752)
@@ -27,17 +41,17 @@ date    = 2026-09-29
 machine = arm64 Darwin (local stamp; ratios are the gated quantity)
 ab_band = 30
 
-nbody                 | measured         | 1.31  | 2.58 | 1.97
-spectralnorm          | measured         | 1.65  | 2.42 | 1.47
-binarytrees           | measured         | 1.74  | 2.29 | 1.32 ab_band=100
-treealloc             | measured         | 42.21 | 42.81 | 1.01
-fasta                 | measured         | 1.46  | 2.31 | 1.58
-fannkuchredux         | measured         | 1.48  | 2.75 | 1.86 ab_band=100
-mandelbrot            | measured         | 2.81  | 3.54 | 1.26 ab_band=100
-onebrc                | measured         | 2.14  | 4.01 | 1.87
-fft                   | measured         | 44.12 | 121.57 | 2.76
-strchurn              | measured         | 59.97 | 50.56 | 0.84
-listbuild_append      | measured         | 22.54 | 67.32 | 2.99
-listbuild_combinator  | measured         | 22.62 | 70.04 | 3.10
-listbuild_prealloc    | measured         | 21.86 | 61.64 | 2.82
-mapbuild              | measured         | 5.58  | 4.57 | 0.82
+nbody                 | measured         | 12.93 | 14.27 | 1.10 | 14.80 | 16.86 | 1.14 args=500000
+spectralnorm          | measured         | 25.54 | 33.00 | 1.29 | 27.51 | 35.40 | 1.29 args=1000
+binarytrees           | measured         | 19.31 | 20.70 | 1.07 | 21.45 | 22.66 | 1.06 args=15 ab_band=100
+treealloc             | measured         | 39.72 | 41.43 | 1.04 | 42.41 | 43.91 | 1.04
+fasta                 | measured         | 14.88 | 26.10 | 1.75 | 16.72 | 28.46 | 1.70 args=150000
+fannkuchredux         | measured         | 20.20 | 190.10| 9.41 | 21.92 | 192.74| 8.79 args=10 ab_band=100
+mandelbrot            | measured         | 22.55 | 24.95 | 1.11 | 24.24 | 26.75 | 1.10 args=800 ab_band=100
+onebrc                | measured         | 10.69 | 13.48 | 1.26 | 12.65 | 16.86 | 1.33 args=30000
+fft                   | measured         | 40.81 | 113.73| 2.79 | 43.10 | 117.30| 2.72
+strchurn              | measured         | 52.88 | 44.71 | 0.85 | 55.65 | 47.48 | 0.85
+listbuild_append      | measured         | 19.79 | 61.78 | 3.12 | 21.95 | 65.63 | 2.99
+listbuild_combinator  | measured         | 19.70 | 64.78 | 3.29 | 21.95 | 68.47 | 3.12
+listbuild_prealloc    | measured         | 19.57 | 56.27 | 2.88 | 21.82 | 60.01 | 2.75
+mapbuild              | measured         | 18.61 | 12.53 | 0.67 | 20.64 | 14.78 | 0.72 args=100000
