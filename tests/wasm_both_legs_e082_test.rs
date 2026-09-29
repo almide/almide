@@ -22,42 +22,50 @@ fn almide_bin() -> String {
 /// The issue's program shape — the CHEATSHEET's fallible-map idiom over
 /// `fan.*` with an fs op inside, which the incumbent walls (the retirement
 /// arc never lowers it there: the structural leg serves it) — plus ONE shape
-/// the structural leg declines. The structural ingredient is not chosen by
-/// hand from whatever is open today: it is the one named by
-/// `STRUCTURAL_DECLINE`, and `the_structural_ingredient_is_still_a_census_row`
-/// asserts the incumbent-route census still carries a row with that reason.
-/// The day the structural leg lowers it, the census prune drops the row and
-/// that test fails with a pointer to pick a new reason from the census —
-/// instead of this test turning, silently, into the pass of another program
-/// (it did twice: `random.shuffle` #2749 + `continue` #2745, then
-/// `list.partition` #2744).
+/// the structural leg refuses ON PURPOSE, not one it merely has not reached
+/// yet. The retirement bill (#2739) drives the incumbent-route census to
+/// zero, so every "not lowered yet" ingredient is temporary: this test
+/// turned into the pass of another program three times (`random.shuffle`
+/// #2749 + `continue` #2745, `list.partition` #2744, matrix `*` #2747).
+/// The ingredient is a mut op through a DEEPER field path (`o.inner.xs`),
+/// which the var-only arms refuse honestly (list_mut.rs: only `h.f` routes
+/// through the copy-on-write field write). `the_structural_ingredient_is_
+/// still_refused_in_the_emitter` pins that refusal's spelling in the
+/// emitter source, so the day it is lowered this test fails with a pointer
+/// instead of passing silently.
 const BOTH_LEGS_WALL: &str = r#"import fs
+
+type Inner = { xs: List[Int] }
+type Outer = { inner: Inner }
 
 effect fn read_one(p: String) -> String = { let t = fs.read_text(p)!; string.trim(t) }
 
 effect fn main() -> Unit = {
-  let m = matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])
-  let sq = m * m
+  var o = Outer { inner: Inner { xs: [1] } }
+  list.push(o.inner.xs, 2)
   let texts = fan.map(["a.txt"], (p) => read_one(p)!)!
-  println("${matrix.rows(sq)} " + (texts |> list.join(",")))
+  println("${list.len(o.inner.xs)} " + (texts |> list.join(",")))
 }
 "#;
 
-/// The structural leg's decline reason for `BOTH_LEGS_WALL`'s `m * m`, as
-/// the census spells it.
-const STRUCTURAL_DECLINE: &str = "binop:MulMatrix";
+/// The structural leg's decline reason for `BOTH_LEGS_WALL`'s
+/// `list.push(o.inner.xs, ..)`, as the emitter spells it.
+const STRUCTURAL_DECLINE: &str = "list-push-nonvar";
 
 #[test]
-fn the_structural_ingredient_is_still_a_census_row() {
-    let census = Path::new(env!("CARGO_MANIFEST_DIR")).join("proofs/incumbent-route-baseline.txt");
-    let text = std::fs::read_to_string(&census).expect("read the incumbent-route census");
-    let suffix = format!(":: {STRUCTURAL_DECLINE}");
+fn the_structural_ingredient_is_still_refused_in_the_emitter() {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/almide-wasm/src");
+    let needle = format!("unsup(\"{STRUCTURAL_DECLINE}\")");
+    let found = std::fs::read_dir(&src).expect("read crates/almide-wasm/src").any(|e| {
+        let p = e.expect("dir entry").path();
+        p.extension().is_some_and(|x| x == "rs") && std::fs::read_to_string(&p).is_ok_and(|t| t.contains(&needle))
+    });
     assert!(
-        text.lines().any(|l| l.trim_end().ends_with(&suffix)),
-        "proofs/incumbent-route-baseline.txt no longer lists a `{STRUCTURAL_DECLINE}` row: the structural \
-         leg now lowers BOTH_LEGS_WALL's structural ingredient, so the program is no longer a both-legs \
-         wall. Replace that ingredient (and STRUCTURAL_DECLINE) with a shape whose reason is still a \
-         census row, and check it alone gives E082."
+        found,
+        "crates/almide-wasm/src no longer refuses with `{needle}`: the structural leg now lowers \
+         BOTH_LEGS_WALL's structural ingredient, so the program is no longer a both-legs wall. \
+         Replace that ingredient (and STRUCTURAL_DECLINE) with a shape the structural leg still \
+         refuses on purpose, and check it alone gives E082."
     );
 }
 
