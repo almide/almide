@@ -15,9 +15,11 @@
 //! bare, so the leaf fallback happened to be right. That is exactly the A/B in
 //! the report — identical source, local ✅ / dependency ❌.
 //!
-//! These drive `try_render_wasm_source` directly with the tuples the resolver
-//! produces (dotted names, `is_self = false`), which is the code path the fix
-//! is in — no package on disk, no CLI.
+//! These drive the wasm route (`render_wasm_routed`, `ModuleSource::Provided`)
+//! with the tuples the resolver produces (dotted names, `is_self = false`) —
+//! no package on disk, no CLI — and run the module. (The fix itself was in the
+//! retired incumbent pipeline; the structural leg keys packages its own way,
+//! #2865, and these hold it to the same A/B.)
 
 use almide::lexer::Lexer;
 use almide::parser::Parser;
@@ -64,8 +66,20 @@ fn dependency_modules() -> Vec<(String, almide::ast::Program, bool)> {
     ]
 }
 
+/// Build `root` on the wasm leg with the resolver's module tuples (plus the
+/// bundled stdlib modules the entry imports) and run it on the embedded
+/// host; the program's stdout.
 fn render(root: &str, modules: Vec<(String, almide::ast::Program, bool)>) -> Result<String, String> {
-    almide_mir::pipeline::try_render_wasm_source(root, &modules, false).map_err(|e| format!("{e:?}"))
+    use almide::wasm_route::{render_wasm_routed, ModuleSource, RouteOptions};
+    let mut all = almide_mir::pipeline::bundled_self_modules(root);
+    all.extend(modules);
+    let routed = render_wasm_routed("main.almd", root, ModuleSource::Provided(&all), RouteOptions::default())
+        .map_err(|e| format!("{e:?}"))?;
+    let run = almide_wasm_run::run_wasm(&routed.bytes).map_err(|e| e.to_string())?;
+    if run.exit != 0 {
+        return Err(format!("exit {}: {}", run.exit, run.stderr));
+    }
+    Ok(run.stdout)
 }
 
 #[test]
@@ -75,11 +89,8 @@ import depp.shape as shape
 
 fn main() -> Unit = println(int.to_string(shape.count(3)))
 "#;
-    let wat = render(root, dependency_modules()).expect("dependency call lowers");
-    assert!(
-        wat.contains("almide_rt_depp_shape_count"),
-        "the sibling-calling dependency fn must be DEFINED, not walled into an unlinked call"
-    );
+    let out = render(root, dependency_modules()).expect("dependency call lowers");
+    assert_eq!(out, "3\n", "the sibling-calling dependency fn must be defined and run");
 }
 
 #[test]
@@ -92,8 +103,8 @@ import depp.shape as shape
 
 fn main() -> Unit = println(shape.described(v.text("hi"), 2))
 "#;
-    let wat = render(root, dependency_modules()).expect("cross-sibling types lower");
-    assert!(wat.contains("almide_rt_depp_shape_described"));
+    let out = render(root, dependency_modules()).expect("cross-sibling types lower");
+    assert!(!out.is_empty(), "the program must run and print");
 }
 
 /// #943's remaining half: a LIST LITERAL in a sibling-call argument position —
@@ -131,13 +142,10 @@ fn app() -> String =
 
 fn main() -> Unit = println(app())
 "#;
-    let wat = render(root, modules).expect(
+    let out = render(root, modules).expect(
         "a list literal (nested, call-result elements) as a sibling-call argument lowers",
     );
-    assert!(
-        wat.contains("almide_rt_tree_render") || wat.contains("almide_rt_self_tree_render"),
-        "the sibling must be DEFINED, not walled into an unlinked call"
-    );
+    assert!(!out.is_empty(), "the program must run and print");
 }
 
 #[test]
@@ -166,6 +174,6 @@ import self.shape as shape
 
 fn main() -> Unit = println(int.to_string(shape.count(3)))
 "#;
-    let wat = render(root, local).expect("local modules lower");
-    assert!(wat.contains("almide_rt_shape_count"));
+    let out = render(root, local).expect("local modules lower");
+    assert_eq!(out, "3\n");
 }

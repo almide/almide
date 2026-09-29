@@ -5,10 +5,8 @@
 //!      native-only since #2752 — its wasm twin was the retired incumbent
 //!      renderer's instrumentation, and a probed wasm run is refused by name)
 //!      and compare stdout with the plain wasm run.
-//!   2. STATIC: render both legs in-process and compare the FIRST-OCCURRENCE
-//!      charge-site sequences extracted from the artifacts (the certificate
-//!      form — survives legitimate BCE body duplication, catches drops and
-//!      reorders at emit time, before anything runs).
+//!   2. STATIC: retired with the incumbent wasm renderer (#2761) — it compared
+//!      the incumbent WAT's first-occurrence charge sites with native's.
 //!   3. WALL HONESTY: a fixture whose native leg walls must FAIL LOUDLY under
 //!      the probe (the silent v0-fallback miss the spike discovered), never
 //!      silently report nothing.
@@ -106,7 +104,6 @@ fn charge_probe_gate() {
     unsafe { std::env::set_var("ALMIDE_FUEL_PROBE", "1") };
     cm1_divisor_single_sourced_in_both_artifacts();
     cm1_calibration_within_declared_band();
-    static_certificate_first_occurrence_equality();
     native_wall_fails_loudly_under_probe();
     dynamic_three_point_comparison();
     bounded_deterministic_across_targets();
@@ -176,7 +173,7 @@ fn timeout_deterministic_ends_and_replay() {
     assert_eq!((c1, &n1), (c3, &w1), "cross-target replay diverged (claim 4)");
 }
 
-/// T1-2: in BUDGET-ONLY mode (no probe), every charge in BOTH artifacts sits
+/// T1-2: in BUDGET-ONLY mode (no probe), every charge in the native artifact sits
 /// inside a region fn (`__almd_bounded_*`) or a `__fuel` clone — the
 /// non-region paths of a budget-using program pay ZERO metering.
 fn metered_clones_keep_nonregion_paths_charge_free() {
@@ -199,23 +196,6 @@ fn metered_clones_keep_nonregion_paths_charge_free() {
             assert!(
                 metered_fn(name),
                 "native: non-region fn `{name}` carries a charge in budget-only mode"
-            );
-        }
-    }
-
-    let self_modules = almide_mir::pipeline::bundled_self_modules(&source);
-    let wat = almide_mir::pipeline::try_render_wasm_source(&source, &self_modules, false)
-        .expect("bounded: wasm render failed");
-    assert!(
-        wat.contains("global.set $__fuel (i64.sub (global.get $__fuel)"),
-        "wasm: budget-only mode emitted no charges at all (vacuous check)"
-    );
-    for block in wat.split("(func $").skip(1) {
-        let name = block.split([' ', '\n', '(']).next().unwrap_or("");
-        if block.contains("global.set $__fuel (i64.sub (global.get $__fuel)") {
-            assert!(
-                metered_fn(name),
-                "wasm: non-region fn `{name}` carries a charge in budget-only mode"
             );
         }
     }
@@ -410,24 +390,16 @@ fn time_ctor_guard_cross_target() {
     }
 }
 
-/// CM-1 consistency (T3-6): both rendered artifacts must divide the budget by
-/// the ONE exported constant. The renderers now interpolate
-/// `charge_probe::CM1_NS_PER_CHARGE` (wasm) / inject it into the shim template
-/// (native), so a drift can only mean someone reintroduced a literal — this
-/// asserts the artifacts, not the source.
+/// CM-1 consistency (T3-6): the native artifact divides the budget by the ONE
+/// exported constant (`charge_probe::CM1_NS_PER_CHARGE`, injected into the shim
+/// template), so a drift can only mean someone reintroduced a literal — this
+/// asserts the artifact, not the source. (The wasm leg's meter mirrors the
+/// interp's, crates/almide-wasm/src/fuel.rs.)
 fn cm1_divisor_single_sourced_in_both_artifacts() {
     let cm1 = almide_mir::charge_probe::CM1_NS_PER_CHARGE;
     let source = std::fs::read_to_string(fixtures_dir().join("bounded.almd")).unwrap();
-    let self_modules = almide_mir::pipeline::bundled_self_modules(&source);
-    let wat = almide_mir::pipeline::try_render_wasm_source(&source, &self_modules, false)
-        .expect("bounded: wasm render failed");
     let rs = almide_mir::pipeline::try_render_rust_source(&source)
         .expect("bounded: native render failed");
-    assert!(
-        wat.contains(&format!("(i64.div_s (local.get $l0) (i64.const {cm1}))"))
-            || wat.contains(&format!("(i64.const {cm1})")),
-        "wasm BudgetEnter does not divide by CM1_NS_PER_CHARGE={cm1}"
-    );
     assert!(
         rs.contains(&format!("budget_ns / {cm1}")),
         "native BUDGET_SHIM does not divide by CM1_NS_PER_CHARGE={cm1}"
@@ -642,32 +614,5 @@ fn native_wall_fails_loudly_under_probe() {
              (a silent unmeasured run is the exact miss the probe exists to prevent)"
         );
         assert!(probe.is_none(), "{name}: a walled run must not emit a probe line");
-    }
-}
-
-fn static_certificate_first_occurrence_equality() {
-    for name in COMPARABLE {
-        let source = std::fs::read_to_string(fixture_path(name)).unwrap();
-        let self_modules = almide_mir::pipeline::bundled_self_modules(&source);
-        let wat = almide_mir::pipeline::try_render_wasm_source(&source, &self_modules, false)
-            .unwrap_or_else(|e| panic!("{name}: wasm render failed: {e:?}"));
-        let rs = almide_mir::pipeline::try_render_rust_source(&source)
-            .unwrap_or_else(|e| panic!("{name}: native render failed: {e:?}"));
-        let w_sites =
-            almide_mir::charge_probe::first_occurrences(&almide_mir::charge_probe::wasm_charge_sites(&wat));
-        let n_sites = almide_mir::charge_probe::first_occurrences(
-            &almide_mir::charge_probe::native_charge_sites(&rs),
-        );
-        assert!(!w_sites.is_empty(), "{name}: no charges reached the wasm artifact");
-        // The wasm leg links self-hosted runtime fns lowered THROUGH the same
-        // charge-bearing path only for user fns; native meters user fns only.
-        // The preserved claim is over the COMMON (user-fn) sites: every native
-        // site must appear in wasm in the same first-occurrence order.
-        let w_common: Vec<u32> =
-            w_sites.iter().copied().filter(|s| n_sites.contains(s)).collect();
-        assert_eq!(
-            n_sites, w_common,
-            "{name}: static charge certificate FALSIFIED — user-fn site order diverged"
-        );
     }
 }
