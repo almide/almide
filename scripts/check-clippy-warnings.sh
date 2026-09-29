@@ -48,7 +48,7 @@ UNIT_FLOOR=40
 # real verdict; a local run on any other toolchain prints its count for
 # information and exits 0 — a number measured in the wrong environment
 # must not be able to fail (or greenwash) the gate.
-PINNED_TOOLCHAIN="1.94.0"
+PINNED_TOOLCHAIN="1.96.0"
 VERDICT=1
 if rustup toolchain list 2>/dev/null | grep -q "^${PINNED_TOOLCHAIN}"; then
   CARGO="rustup run ${PINNED_TOOLCHAIN} cargo"
