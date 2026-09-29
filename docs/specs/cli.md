@@ -959,18 +959,14 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_DBG_NESTED_MATCH` | debug | print why a nested-match chain was refused (v1 lowering) |
 | `ALMIDE_DBG_QQ` | debug | print which path lowered each `??` (match-first vs route fallback, v1 lowering) |
 | `ALMIDE_DBG_ROUTER` | debug | print a stdlib call name refused for its registered signature, with the mismatch and the argument types (v1 lowering) |
-| `ALMIDE_DBG_SWITCH` | debug | print the `br_table` switch rendering decisions (v1 wasm render) |
 | `ALMIDE_DBG_TCO` | debug | print the tail-call-to-loop admission decisions (v1 lowering) |
 | `ALMIDE_DBG_TRAP` | debug | print the wasm trap's backtrace and host state when the embedded host catches one |
-| `ALMIDE_DBG_UNLINKED` | debug | print wasm references with no resolvable definition |
-| `ALMIDE_DBG_WAT=value` | debug | print the rendered WAT of every function whose name contains the value (v1 wasm render) |
 | `ALMIDE_DBG_WHILE` | debug | print the while-loop lowering decisions (v1 lowering) |
 | `ALMIDE_DEBUG_CALL_OPS` | harness | print the call ops of every lowered fn (the classify_corpus example) |
 | `ALMIDE_DEBUG_EFFECTS` | debug | print the effect inference pass's per-function results (native codegen) |
 | `ALMIDE_DEBUG_MIR_OPS` | harness | print every MIR op with its index (the classify_corpus example — the certificate-bisection instrument) |
 | `ALMIDE_DEFAULTS_DEBUG` | debug | print the record-default resolution when no default keys were found (native codegen) |
 | `ALMIDE_DISABLE_OPT` | ablation | run the optimiser pipeline with every optional pass off (ablation; the always-on enabler passes still run) |
-| `ALMIDE_DUMP_DROPS` | debug | print the computed drop set (v1 lowering) |
 | `ALMIDE_DUMP_IR=value` | debug | dump the IR after the named passes (comma-separated, or `all`) on the native pipeline, and the post-chain body of every fn whose name contains the value on the v1 pipeline |
 | `ALMIDE_DUMP_MIR` | debug | print every lowered fn's op stream before the native render runs |
 | `ALMIDE_DUMP_VERIFY` | debug | print the native render's verification transcript |
@@ -991,7 +987,6 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_INTERP_SWEEP_THREADS=value` | harness | interp sweep thread count; 1 = serial (#2381) |
 | `ALMIDE_IR_FAULT=value` | harness | inject an IR violation after the named optimiser pass, so the per-pass verifier can be watched turning red in the release binary |
 | `ALMIDE_KEEP_SCRATCH` | tool | keep the `almide test` scratch build directory instead of deleting it |
-| `ALMIDE_LOCAL_REUSE_THRESHOLD=value` | route | the distinct-local count above which the v1 wasm render reuses locals (default 8000); a test knob that forces the transform on across the corpus |
 | `ALMIDE_LSP_TRACE` | debug | print every LSP request and response the language server handles |
 | `ALMIDE_MANIFEST_TREE_CHECK=value` | ci | the parity-manifest generators' stale-tree refusal (#2405, scripts/lib/oracle-header.sh): `strict` (default) refuses an ORACLE that is not `<Cargo.toml version> (dev…)`, is stamped with a commit other than HEAD, or is unstamped and older than the sources; a worktree behind its upstream; and an untracked spec/ fixture. `gate` keeps only the untracked-fixture check (scripts/check-parity-goldens.sh vouches for CI's artifact). `off` is the deliberate override |
 | `ALMIDE_MG_DEBUG` | debug | print the mutable-global slot assignment and cross-module name-bridge decisions (v1 lowering) |
@@ -1004,7 +999,6 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_MUTATION_SHARDS=value` | ci | how many shards the mutation gate is split into |
 | `ALMIDE_NAMES_DEBUG` | debug | print the native name-verification map and its scoped shadowing decisions |
 | `ALMIDE_NO_AVAIL_CHECK` | gate | bypass the E081 stdlib availability check (the measurement escape the availability probe builds through) |
-| `ALMIDE_NO_BR_TABLE` | route | render every switch as an if-chain instead of `br_table` (v1 wasm render) |
 | `ALMIDE_NO_RTLIB` | route | build the native runtime inline instead of linking the prebuilt runtime crate (the self-contained cargo path; `almide test` sets it for the harness build) |
 | `ALMIDE_NO_VERIFIED_OK` | gate | re-enable the retired `--no-verified` legs (the v0 fallback) instead of refusing the flag |
 | `ALMIDE_OMEGA=value` | route | the baked ω ordinal for deterministic wall-deadline replay: the artifact cuts at the n-th wall check without reading the clock (`-1` / unset = live) |
@@ -1022,7 +1016,6 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_REGION_DEBUG` | debug | print the region-window pass's decisions (native and structural leg) |
 | `ALMIDE_REGION_OFF` | ablation | turn the region-window allocation pass off (native and structural leg) |
 | `ALMIDE_REGION_TRAP_STALE` | trap | arm the native region prelude's stale-reference trap (#2200) |
-| `ALMIDE_RENDER=value` | ci | the render_program example binary the prelude audit re-renders fixtures with |
 | `ALMIDE_REPO=value` | ci | the repository slug a release script targets |
 | `ALMIDE_RUN_PROJECT_DIR=value` | tool | the scratch dir `almide run` / `almide build` compile native binaries in, instead of `<temp>/almide-run` (the content-keyed binary cache, its cargo target, its rustc incremental sessions); `almide clean` empties it |
 | `ALMIDE_SEMLAW_CASES=value` | harness | how many cases the semantic-laws property test draws |
@@ -1045,7 +1038,6 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_UPDATE_GAUNTLET` | harness | regenerate the gauntlet manifest |
 | `ALMIDE_UPDATE_INTERP_LEDGER` | harness | regenerate the interpreter abstain and bridge-fallback ledgers |
 | `ALMIDE_UPDATE_NATIVE_OWN` | harness | regenerate the native result-ownership ledger |
-| `ALMIDE_UPDATE_RC_SNAPSHOTS` | harness | regenerate the rc-placement snapshots |
 | `ALMIDE_UPDATE_SIZES` | harness | regenerate the structural leg's size baselines |
 | `ALMIDE_UPDATE_SIZE_LADDER` | harness | regenerate the stdlib-linking size ladder ledger (#2141) |
 | `ALMIDE_UPDATE_SNAPSHOTS` | tool | same as `almide test --update-snapshots` |
@@ -1059,7 +1051,6 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_WASM_FREES` | ci | the frees-churn gate's switch; its compiler reader retired with the v0 emitter (#782), the gate that still sets it is #2207's |
 | `ALMIDE_WASM_STRUCTURAL` | route | skip the stock-WASI host-op audit on `almide build --target wasm` (the emitter-frontier probe); the route has one leg since #2752 |
 | `ALMIDE_WASM_WATCHDOG_SECS=value` | harness | the wall-time seconds the IN-PROCESS test runner's epoch watchdog (`run_wasm` / `run_wasm_with` / `run_wasm_capped` in almide-wasm-run) lets a module run before it traps with `interrupt` (default 30); `almide run --target wasm` and `almide bench --target wasm` arm no watchdog on any setting, as native has none (#2615) |
-| `ALMIDE_WAT_PRELUDE_REACH` | ci | make the prelude audit re-render every named fixture to measure reachability (CI sets it) |
 | `ALMIDE_WITNESS_DUMP` | harness | print every fixture's certificate witness in the witness-floor test |
 | `ALMIDE_WRITE_FUZZ_CORPUS` | harness | write the generated fuzz programs to disk |
 <!-- almide switches --md: end -->
