@@ -393,14 +393,16 @@ fn emit_program_pass(
             break;
         }
         for ll in pending {
-            // No witness recorder (`witness_name: None`): a counted decline (#2754).
-            crate::witness::decline_unrecorded(&format!("<lambda#{}>", lifted_fns.len()), "lambda");
+            // #2758: a lambda body is a frame like any other — its params
+            // callee-owned (the closure convention), its captures views of
+            // the env block the closure holds.
+            let lambda_name = format!("<lambda#{}>", lifted_fns.len());
             let plan = FnPlan {
                 ret: ll.ret,
                 cur_module: ll.cur_module.clone(),
                 var_space: ll.var_space,
                 name: "<lambda>".to_string(),
-                witness_name: None,
+                witness_name: Some(lambda_name.clone()),
                 effect_raw: ll.effect_raw,
                 in_main: false,
                 env_captures: Some(ll.captures.clone()),
@@ -420,6 +422,8 @@ fn emit_program_pass(
             let (f, calls, err) = match lower_fn(&ll.params, plan, &ll.body, &[], &ctx, &mut pool) {
                 Ok((f, calls)) => (f, calls, None),
                 Err(EmitError::Unsupported(r)) => {
+                    // The stub ships unrecorded: counted, never certified.
+                    crate::witness::decline_unrecorded(&lambda_name, "lambda:unlowered");
                     let mut stub = Function::new([]);
                     stub.instructions().unreachable().end();
                     (stub, HashSet::new(), Some(r))
