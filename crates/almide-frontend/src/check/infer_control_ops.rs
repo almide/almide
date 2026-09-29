@@ -629,7 +629,7 @@ impl Checker {
         self.emit(super::err(
             format!("operator 'not' requires Bool but got {}", t.display()),
             "Use `not` on a Bool; compare first (e.g. `not (x == 0)`)",
-            "operator not"));
+            "operator not").with_code("E001"));
     }
 
     /// The operand rule of prefix `-`: a SIGNED numeric type. Negation has
@@ -651,13 +651,13 @@ impl Checker {
                         "Negate the signed value before converting — `(-128).to_{}()` — \
                          or subtract from zero in the unsigned type (`0.to_{}() - x`)",
                         name.to_lowercase(), name.to_lowercase()),
-                    "operator -"));
+                    "operator -").with_code("E001"));
             }
             _ => {
                 self.emit(super::err(
                     format!("operator '-' requires a signed numeric type but got {}", t.display()),
                     "Use numeric types (Int or Float)",
-                    "operator -"));
+                    "operator -").with_code("E001"));
             }
         }
     }
