@@ -2,11 +2,11 @@
 # SHIPPED emission pass (fixture x fn, over the spec/wasm_cross rows of the run manifest). SHRINK-ONLY per reason; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
 arm-value:borrowed-temp	2
-branch-paths:3	3
-branch-paths:born-in-arm	1
+branch-paths:3	6
+branch-paths:born-in-arm	3
 call-arg:EmptyMap	1
 call-arg:IndexAccess	78
-call-arg:Lambda	186
+call-arg:Lambda	187
 call-arg:MapLiteral	1
 call-arg:Member	20
 call-arg:Range	1
@@ -16,7 +16,7 @@ call-arg:Try	31
 call-arg:Tuple	7
 call-arg:TupleIndex	3
 call-arg:Unwrap	13
-call-arg:UnwrapOr	51
+call-arg:UnwrapOr	65
 call-arg:borrowed-temp	1
 call:panic-arg	1
 call:target:Computed	35
@@ -39,6 +39,7 @@ list-elem:Lambda	5
 list-elem:Record	8
 list-elem:Tuple	79
 list-elem:UnwrapOr	1
+loop-back:raw-param-kept	3
 match-guard	10
 match-subject:Member	15
 match-subject:Tuple	9
@@ -85,7 +86,7 @@ rhs:Unwrap	53
 rhs:UnwrapOr	49
 scan	3
 stmt:Assign	25
-stmt:BindDestructure	154
+stmt:BindDestructure	209
 stmt:Expr:Block	95
 stmt:Expr:ForIn	98
 stmt:Expr:While	173
@@ -105,6 +106,5 @@ tail:Tuple	132
 tail:TupleIndex	3
 tail:UnwrapOr	16
 tail:While	4
-tail:self-call-loop	2951
 tail:view-result	2
 top-lets	30
