@@ -8,6 +8,49 @@ use crate::emitter::Emitter;
 use crate::*;
 
 impl Emitter<'_> {
+    /// `list.flat_map(xs, (x) => { ...; [a, b] })` with Int / Float
+    /// elements (#2980): push each literal element straight into the
+    /// accumulator instead of building the chunk list, walking it into the
+    /// accumulator and freeing it — per source element that was an
+    /// allocation, a free and an inner loop, and the recommended combinator
+    /// form of the listbuild row paid them 2^20 times. The block's
+    /// statements lower exactly as the Block arm lowers them (statements,
+    /// then the tail); only the tail's list literal is replaced, and its
+    /// elements are scalars, so there is no ownership event to move. The
+    /// elements still evaluate in order; the only difference is that the
+    /// pushes interleave with them, which no program can observe (the
+    /// accumulator is not reachable from the callback, and an abort ends the
+    /// run). Returns the result list's type when it took the body.
+    fn try_flat_map_literal_tail(&mut self, body: &IrExpr, hacc: u32) -> Result<Option<ETy>, EmitError> {
+        let (stmts, tail): (&[almide_ir::IrStmt], &IrExpr) = match &body.kind {
+            almide_ir::IrExprKind::Block { stmts, expr: Some(t) } => (stmts, t),
+            almide_ir::IrExprKind::List { .. } => (&[], body),
+            _ => return Ok(None),
+        };
+        let almide_ir::IrExprKind::List { elements } = &tail.kind else {
+            return Ok(None);
+        };
+        let SliceTy::List(bi) = self.infer(tail)? else {
+            return Ok(None);
+        };
+        let el = self.types.el(bi);
+        if !matches!(el, SliceTy::Scalar(Scalar::Int | Scalar::Float)) {
+            return Ok(None);
+        }
+        for s in stmts {
+            self.lower_stmt(s)?;
+        }
+        for e in elements {
+            self.f.instructions().local_get(hacc);
+            self.lower(e, Some(el))?;
+            if el == FLOAT {
+                self.f.instructions().i64_reinterpret_f64();
+            }
+            self.f.instructions().call(F_LIST_PUSH_8).local_set(hacc);
+        }
+        Ok(Some(bi))
+    }
+
     pub(crate) fn lower_list_flat_map(&mut self, xs: &IrExpr, cb: &IrExpr) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
@@ -16,6 +59,14 @@ impl Emitter<'_> {
         self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        if let Some(bi) = self.try_flat_map_literal_tail(body, hacc)? {
+            self.hof_step(ih);
+            self.f.instructions().local_get(hacc);
+            for _ in 0..5 {
+                self.release_i32();
+            }
+            return Ok(Some(Lowered::owned(SliceTy::List(bi))));
+        }
         let got = self.lower(body, None)?;
         let SliceTy::List(bi) = got else {
             return unsup(&format!("flat-map-body:{got:?}"));
