@@ -178,12 +178,15 @@ ALMIDE_WASM_ALLOC_COUNT=1 almide run app.almd --target wasm
 | `reused` | the `$alloc` calls a size-class free-list pop served (the rest advanced the bump head) |
 | `bytes` | the sum of the payload lengths requested |
 | `frees` | every `$free` call (filed into a free list, or abandoned as too small / too large) |
+| `reclaimed` | blocks a region window's restore took back wholesale, without a `$free` (#1961) |
+| `live` | `allocs − frees − reclaimed`: the heap blocks never released (see below) |
 | `heap_end` | the watermark, on the same line, so the pair can be read together |
 
-Under the switch the emitter appends four `i64` globals **after** the top-let
+Under the switch the emitter appends five `i64` globals **after** the top-let
 globals (no existing index moves, no byte of the heap layout changes) and
-`$alloc` / `$free` bump them; the host reads them as `__alloc_count`,
-`__alloc_reused`, `__alloc_bytes`, `__free_count`. **Off — the default — none
+`$alloc` / `$free` / a region window's restore bump them; the host reads them
+as `__alloc_count`, `__alloc_reused`, `__alloc_bytes`, `__free_count`,
+`__region_reclaimed`. **Off — the default — none
 of it is emitted**: the module is byte-identical to a build that never heard
 of the switch, so neither the size ratchet nor the alloc ledger moves, and the
 proof-transcribed runtime trees (`proofs/StructuralRuntime.v`) stay the
@@ -196,6 +199,20 @@ The counter is ledgered beside the watermark: the same
 bytes frees` per fixture, `~` calibrated out, `!` refused), and the check run
 also holds the armed module to the unarmed one — same stdout, same watermark
 — so the instrument is proven not to perturb what it measures.
+
+**Live at exit.** Native drops every value when it goes out of scope; the
+wasm leg releases by hand, so a missing release is a wasm-only defect that
+output parity cannot see (#2932, #2944). `live` is the number of blocks never
+released. A top-let global is live *by design* until exit, so the armed `main`
+releases every droppable top-let right before its epilogue — a shipped module
+never does — and `live` after a normal exit is exactly the leaked blocks. The
+same update run writes `crates/almide-wasm/tests/golden/live-at-exit-baseline.txt`:
+only the fixtures whose `live` is not 0, each naming the issue that owns its
+mechanism, shrink-only (an unlisted fixture must read 0; a row may only go down
+and must be lowered when it does; a new row carries `#?` until an issue is
+named, which the check refuses). Runs that do not exit 0 are not judged. The
+generative fuzzer applies the same measurement to every clean program (the
+`LeakAtExit` finding kind, its own nightly class under the `fuzz-leak` label).
 
 **Reading the pair.** When a watermark row moves, the count row says which
 half moved: more `allocs` / `bytes` is *allocation*, the same counts with a
