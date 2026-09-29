@@ -1,7 +1,7 @@
 // @contract: C-178
 // The INDIRECT twin of mutual_tail_recursion: `step`'s `next(k - 1)` is a
 // function-tail CallIndirect and renders as `return_call_indirect` (pinned
-// at the instruction level by crates/almide-mir/tests/tail_call_indirect_test.rs);
+// at the instruction level on the retired incumbent renderer, #2761);
 // the lifted lambda's `spin(j)` tail renders as `return_call`. The cycle
 // still costs ONE frame per hop — `spin` allocates the closure and must
 // drop it after `step` returns, so ITS call correctly declines the

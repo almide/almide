@@ -61,9 +61,8 @@ and serves as the cross-target oracle / executable spec.
   (src/wasm_route.rs, #2554): the CLI reads the probe switches off the
   environment into its `RouteOptions` and renders its `RouteError`s; a
   wasm32 consumer (the playground) calls `render_wasm_routed` with its
-  pre-parsed tabs (`ModuleSource::Provided`) and gets the same leg choice —
-  `tests/wasm_route_parity_test.rs` holds the two equal on every
-  wasm_cross fixture (leg and bytes):
+  pre-parsed tabs (`ModuleSource::Provided`) and gets the same leg
+  (`tests/wasm_route_playground_test.rs` exercises that form):
   - the **commissioned structural leg** (default): `almide::wasm_leg`
     (parse→check→lower→self-host link→`link_ir`) feeds
     `almide-wasm::emit_program`, which emits wasm bytes structurally

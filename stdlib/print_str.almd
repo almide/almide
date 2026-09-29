@@ -9,10 +9,10 @@
 // iovec `fd_write` (zero-copy — the OS gathers; no byte-copy loop). Addresses match
 // the preamble layout: NWRITTEN@0, IOVEC@8 (two {ptr,len} pairs), and the "\n"
 // scratch byte at 768 — `PRINT_NL_SCRATCH` in the preamble's static-data map
-// (crates/almide-mir/src/render_wasm.rs). The map, not this comment, keeps every
+// (the retired incumbent renderer's preamble, #2761). That map kept every
 // other static byte away from it: the derived rows (the fs errno table, #2206)
 // are laid out ABOVE every registered region, and the layout gate
-// (tests/wasm_static_data_layout_test.rs) pins this literal against the map.
+// pinned this literal against it; both retired with that renderer.
 fn print_str(s: String) -> Unit = {
   let h = prim.handle(s)
   // i64 address of the [rc][len][cap][bytes] block
