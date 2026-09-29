@@ -135,9 +135,9 @@ impl Emitter<'_> {
     }
 
     /// `float.round` inline (#2980) — stdlib/float_round.almd's exact
-    /// algorithm, op for op, without its two calls: `t = trunc(x)` (the
-    /// self-hosted `x >= 0 ? floor(x) : ceil(x)` is trunc on every input,
-    /// -0.0 and NaN included), the fraction `|x - t|` is exact, a half or
+    /// algorithm, op for op, without its two calls: `t = x >= 0 ? floor(x)
+    /// : ceil(x)` (a select; NaN compares false and takes ceil, as the
+    /// self-hosted `if` does), the fraction `|x - t|` is exact, a half or
     /// more steps `t` one unit away from zero, and the result carries
     /// `x`'s sign (round(-0.4) = -0.0, as `f64::round`). ±inf and NaN fall
     /// through unchanged: `inf - inf` is NaN and a NaN compare is false.
@@ -146,7 +146,13 @@ impl Emitter<'_> {
         let hx = self.hold_f64()?;
         let ht = self.hold_f64()?;
         let mut i = self.f.instructions();
-        i.local_tee(hx).f64_trunc().local_set(ht);
+        // t = x >= 0 ? floor(x) : ceil(x), as a select — f64.trunc would be
+        // one op, but it is outside the closed set the wasm VM accepts
+        // (#865), and floor/ceil are what the self-hosted body runs.
+        i.local_tee(hx).f64_floor();
+        i.local_get(hx).f64_ceil();
+        i.local_get(hx).f64_const(0.0.into()).f64_ge();
+        i.select().local_set(ht);
         // select(t + copysign(1, x), t, |x - t| >= 0.5)
         i.local_get(ht).f64_const(1.0.into()).local_get(hx).f64_copysign().f64_add();
         i.local_get(ht);
