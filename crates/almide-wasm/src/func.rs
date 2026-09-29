@@ -11,6 +11,12 @@ use crate::emitter::Emitter;
 use crate::types_table::TypeTable;
 use crate::*;
 
+/// The top-let prelude's store, gate and measurement release (split for
+/// the file budget).
+#[path = "func_toplets.rs"]
+mod toplets;
+use toplets::{release_top_lets_for_measurement, store_top_let, top_lets_gate};
+
 /// String literals placed in linear memory as REAL layout blocks.
 ///
 /// TWO MAPS, NOT ONE (#2369). Strings and block payloads are different
@@ -142,23 +148,6 @@ fn emit_modinit_call(
     em.f.instructions().i32_const(0); // env: unused
     em.f.instructions().i32_const(slot as i32);
     em.f.instructions().call_indirect(0, ti);
-}
-
-/// The live-heap measurement (`alloc_count`, armed builds only): drop every
-/// droppable top-let global at the end of `main`, so a value that is live by
-/// design until exit is not counted as a leak. A no-op for a shipped module.
-fn release_top_lets_for_measurement(em: &mut Emitter<'_>, in_main: bool, top_lets: &[crate::InitLet], ctx: &Ctx) {
-    if !in_main || !crate::alloc_count::releases_top_lets() {
-        return;
-    }
-    for il in top_lets {
-        if let Some(&(gidx, declared)) = ctx.globals.get(&(il.space, il.tl.var))
-            && em.rc_droppable(declared)
-        {
-            let dec = em.dec_fn_of(declared);
-            em.f.instructions().global_get(gidx).call(dec);
-        }
-    }
 }
 
 /// The name a wall in top-let `il`'s initializer is reported under
@@ -425,10 +414,8 @@ pub(crate) fn lower_fn(
             // share, below) — except a C-319 cell, whose address travels.
             let pre_gate = if env_captures.as_ref().is_some_and(|c| c.iter().any(|&(_, _, _, cell)| cell)) {
                 Some("captures:cell".to_string())
-            } else if !top_lets.is_empty() {
-                Some("top-lets".to_string())
             } else {
-                None
+                top_lets_gate(top_lets, ctx)
             };
             let verdict = pre_gate.or_else(|| match effect_raw {
                 // #2758: an effect frame is certified at its raw ok type.
@@ -476,7 +463,10 @@ pub(crate) fn lower_fn(
             // binds cannot lower inline (its binds index the module's
             // VarTable, not this frame's locals map) — it becomes a
             // synthetic entry in its own frame instead.
-            if initializer_needs_own_frame(il, ctx)? {
+            // A synthetic initializer frame hands its result over like any
+            // closure call: owned.
+            let own_frame = initializer_needs_own_frame(il, ctx)?;
+            if own_frame {
                 emit_modinit_call(&mut em, il, declared, top_let_site_name(il, ctx));
             } else if il.space == var_space {
                 em.lower(&tl.value, Some(declared)).inspect_err(|_| {
@@ -504,22 +494,10 @@ pub(crate) fn lower_fn(
                     crate::decline_site::note_top_let(top_let_site_name(il, ctx), il.module.clone());
                 })?;
             }
-            if matches!(
-                declared,
-                SliceTy::List(_)
-                    | SliceTy::Map(..)
-                    | SliceTy::Set(_)
-                    | SliceTy::Scalar(Scalar::Bytes)
-            ) {
-                let copy = em.copy_fn_of(declared);
-                em.f.instructions().call(copy);
-            } else if em.rc_droppable(declared) && !em.rc_owned_result(&tl.value) {
-                // #2992: the global owns its occupant (a reassign releases
-                // it), so an initializer that BORROWS — another global, a
-                // pool static — takes the credit here, as a Bind would.
-                em.rc_inc_top();
-            }
-            em.f.instructions().global_set(gidx);
+            // Read after lowering: a module call's ownership is the mark its
+            // dispatch left on the node.
+            let owned = own_frame || em.rc_owned_result(&tl.value);
+            store_top_let(&mut em, owned, declared, gidx)?;
         }
         if charge_entry {
             em.emit_det_charge_const(1);

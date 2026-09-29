@@ -462,6 +462,24 @@ tamper_structural '<lambda#0>' '1s/^id$/i/' "#2758 lambda param"
 run_structural spec/wasm_cross/witness_straightline.almd apply_len 0
 tamper_structural apply_len 's/^am$/a/' "#2758 closure call argument"
 
+# ── #2758: MODULE-SPACE LETS. main's prologue stores each top-let into its
+# global: `ALPHA`'s literal moves in (`im`); `TBL`'s initializer (a
+# `bytes.from_list` result, line 3) is copied into the global (`im`) and
+# itself released (`id` — it stayed live until exit before #2758, #2967).
+# Drill: that release is dropped.
+echo
+echo "== structural leg, module-space lets  ⊳  proven checker (#2758) =="
+run_structural spec/wasm_cross/module_global_const.almd main 0
+emit_structural spec/wasm_cross/module_global_const.almd main | sed '3s/^id$/i/' > /tmp/structural.tamper
+if cmp -s /tmp/structural.tamper <(emit_structural spec/wasm_cross/module_global_const.almd main); then
+  echo "FAIL structural-tamper(#2758 top-let): the drill changed nothing"; exit 1
+fi
+set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
+if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper(#2758 top-let): an unreleased initializer was accepted"; exit 1; fi
+kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper(#2758 top-let): the kernel accepted the leak"; exit 1; }
+portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper(#2758 top-let): almide-verify accepted the leak"; exit 1; }
+echo "ok   structural-tamper(#2758 top-let): an initializer the copy left behind is rejected by the binary AND the kernel"
+
 # ── #2758: the CALL-MODE witness of the structural leg. Per-frame
 # certificates compose only if every call site hands each heap argument over
 # as its callee's frame assumed (a move into a borrowed param leaks, a lend to
