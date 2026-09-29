@@ -848,6 +848,42 @@ pub fn run_wasm_real_stdin_args(bytes: &[u8], args: &[String]) -> anyhow::Result
     run_wasm_src(bytes, StdinSource::RealOnce, None, args, None, true)
 }
 
+/// A module validated and JIT-compiled once, run any number of times — the
+/// timing runner's split (#2980): `almide bench --target wasm` compiles
+/// OUTSIDE the timer and times instantiate + run, the same boundary the
+/// native leg's bench draws (it times a prebuilt binary, not rustc). Before
+/// the split every timed run re-ran Cranelift over the whole module, 2-3 ms
+/// a run on the corpus (measured 2026-09-29): most of a 2.5 ms nbody row, so
+/// the ratio on the small rows was compile time over process-spawn time.
+/// Unbounded (no epoch watchdog), like [`run_wasm_unbounded`].
+pub struct CompiledWasm {
+    engine: wasmtime::Engine,
+    module: wasmtime::Module,
+}
+
+fn compile_wasm(bytes: &[u8], watchdog: bool) -> anyhow::Result<CompiledWasm> {
+    wasmparser::validate(bytes)?; // the wall: never instantiate an invalid module
+    // Epoch deadline (test harness only, see `harness_watchdog`): the
+    // deadline maps to a plain trap.
+    let mut cfg = wasmtime::Config::new();
+    cfg.epoch_interruption(watchdog);
+    let engine = wasmtime::Engine::new(&cfg)?;
+    let module = wasmtime::Module::new(&engine, bytes)?;
+    Ok(CompiledWasm { engine, module })
+}
+
+/// Validate and compile once for [`run_compiled_unbounded`].
+pub fn compile_wasm_unbounded(bytes: &[u8]) -> anyhow::Result<CompiledWasm> {
+    compile_wasm(bytes, false)
+}
+
+/// [`run_wasm_unbounded`] over an already-compiled module: a fresh store,
+/// instance and linear memory per call, so every run starts from the same
+/// state a fresh `run_wasm_unbounded` would.
+pub fn run_compiled_unbounded(compiled: &CompiledWasm) -> anyhow::Result<RunResult> {
+    run_compiled(compiled, StdinSource::Buf(Vec::new()), None, &[], None, false)
+}
+
 fn run_wasm_src(
     bytes: &[u8],
     stdin: StdinSource,
@@ -856,13 +892,19 @@ fn run_wasm_src(
     watchdog: Option<std::time::Duration>,
     live: bool,
 ) -> anyhow::Result<RunResult> {
-    wasmparser::validate(bytes)?; // the wall: never instantiate an invalid module
-    // Epoch deadline (test harness only, see `harness_watchdog`): the
-    // deadline maps to a plain trap.
-    let mut cfg = wasmtime::Config::new();
-    cfg.epoch_interruption(watchdog.is_some());
-    let engine = wasmtime::Engine::new(&cfg)?;
-    let module = wasmtime::Module::new(&engine, bytes)?;
+    let compiled = compile_wasm(bytes, watchdog.is_some())?;
+    run_compiled(&compiled, stdin, max_memory_bytes, args, watchdog, live)
+}
+
+fn run_compiled(
+    compiled: &CompiledWasm,
+    stdin: StdinSource,
+    max_memory_bytes: Option<usize>,
+    args: &[String],
+    watchdog: Option<std::time::Duration>,
+    live: bool,
+) -> anyhow::Result<RunResult> {
+    let (engine, module) = (&compiled.engine, &compiled.module);
     let out = Arc::new(Mutex::new(String::new()));
     let err = Arc::new(Mutex::new(String::new()));
     let exit = Arc::new(Mutex::new(None));
@@ -873,7 +915,7 @@ fn run_wasm_src(
         None => wasmtime::StoreLimits::default(),
     };
     let mut store = wasmtime::Store::new(
-        &engine,
+        engine,
         Host {
             out: out.clone(),
             err: err.clone(),
@@ -889,7 +931,7 @@ fn run_wasm_src(
         },
     );
     store.limiter(|h| &mut h.limits);
-    let mut linker = wasmtime::Linker::new(&engine);
+    let mut linker = wasmtime::Linker::new(engine);
     linker.func_wrap(
         "almide",
         "println",
@@ -1036,7 +1078,7 @@ fn run_wasm_src(
             eng.increment_epoch();
         })
     });
-    let instance = linker.instantiate(&mut store, &module)?;
+    let instance = linker.instantiate(&mut store, module)?;
     let main = instance.get_typed_func::<(), ()>(&mut store, "main")?;
     let call = main.call(&mut store, ());
     let recorded = exit.lock().expect("test harness invariant").take();
