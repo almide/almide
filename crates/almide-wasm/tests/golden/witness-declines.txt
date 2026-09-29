@@ -18,13 +18,13 @@ call:ctor	42
 call:target:Computed	18
 display	10
 effect	169
-lambda	200
+lambda	204
 list-elem	129
 module-arm:unaudited:bytes.push	2
 module-arm:unaudited:bytes.set_at	1
 module-arm:unaudited:list.clear	2
 module-arm:unaudited:list.pop	1
-module-arm:unaudited:list.push	5
+module-arm:unaudited:list.push	6
 module-arm:unaudited:map.clear	3
 module-arm:unaudited:string.clear	2
 module-arm:unaudited:string.push	1
@@ -36,7 +36,7 @@ rhs:EmptyMap	3
 rhs:Fan	2
 rhs:If	665
 rhs:IndexAccess	1
-rhs:Lambda	5
+rhs:Lambda	6
 rhs:MapAccess	1
 rhs:MapLiteral	7
 rhs:Match	5
