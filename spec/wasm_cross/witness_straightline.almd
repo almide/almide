@@ -65,9 +65,22 @@ fn greet(name: String) -> String = "hi " + name + tag("!")
 
 fn wrap(xs: List[Int]) -> List[Int]? = some(xs)
 
+// #2756 — BRANCH FRAMES. `pick` hands its list to `take` on one arm only:
+// the param's two paths are `iamd` and `id`, rendered as one `{…|…}` line
+// the checker runs arm by arm. `label` keeps a string alive across a
+// match: one arm concatenates it (a read, no credit), the other returns it
+// (its share moves out, `am`), and each arm hands the join one credit.
+fn pick(xs: List[Int], c: Bool) -> Int = if c then take(xs) + 1 else 0
+
+fn label(o: Option[Int], name: String) -> String = match o {
+  some(_) => name + "!",
+  none => name,
+}
+
 fn main() -> Unit = {
   println("${list.len(shed())} ${tag("w")} ${pass([1])} ${bind_then_pass()}")
   println("${discard([1, 2])} ${stamp(7)} ${shout("w")}")
   say("hi")
   println("${nest()} ${greet("w")} ${list.len(wrap([1, 2]) ?? [])}")
+  println("${pick([1], true)} ${pick([2], false)} ${label(some(1), "a")} ${label(none, "b")}")
 }

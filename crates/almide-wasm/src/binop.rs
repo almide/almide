@@ -76,17 +76,27 @@ impl Emitter<'_> {
             // SHORT-CIRCUIT: the right operand must not evaluate (and
             // possibly trap) when the left already decides — an `if`
             // yielding i32, never a strict bitop.
+            // The right operand runs on ONE arm: a branch site for the
+            // witness (#2756), whose other arm is empty.
             And => {
                 self.lower(left, Some(BOOL))?;
                 self.f.instructions().if_(BlockType::Result(ValType::I32));
+                self.witness_branch_open();
+                self.witness_branch_arm();
                 self.lower(right, Some(BOOL))?;
+                self.witness_branch_arm();
+                self.witness_branch_close();
                 self.f.instructions().else_().i32_const(0).end();
                 Ok(BOOL)
             }
             Or => {
                 self.lower(left, Some(BOOL))?;
                 self.f.instructions().if_(BlockType::Result(ValType::I32)).i32_const(1).else_();
+                self.witness_branch_open();
+                self.witness_branch_arm();
                 self.lower(right, Some(BOOL))?;
+                self.witness_branch_arm();
+                self.witness_branch_close();
                 self.f.instructions().end();
                 Ok(BOOL)
             }
