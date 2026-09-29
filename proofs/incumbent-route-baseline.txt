@@ -19,6 +19,5 @@ build :: spec/wasm_cross/inplace_clear_alias_field.almd :: string-clear-nonvar
 test :: spec/lang/guard_else_err_unwrap_test.almd :: interp-part:Unit
 test :: spec/lang/map_literal_test.almd :: forin-map-nontuple
 test :: spec/lang/matrix_test.almd :: binop:MulMatrix
-test :: spec/lang/option_marker_test.almd :: call:testing.assert_contains
 test :: spec/lang/unwrap_operators_test.almd :: expr:OptionalChain
 test :: spec/stdlib/bytes_typed_test.almd :: expr:Hole
