@@ -196,6 +196,11 @@ impl Emitter<'_> {
                 let hd = self.hold_for(v)?;
                 self.lower_arg(default, Some(v), ArgMode::Retain)?;
                 self.f.instructions().local_set(hd);
+                // The result is OWNED either way (#2932): a miss hands the
+                // default's Retain credit over; a hit shares the entry's
+                // value (+1, the map keeps its own credit) and releases the
+                // unused default. Declaring it a view leaked the default's
+                // credit on every call with a heap default.
                 self.f
                     .instructions()
                     .local_get(eh)
@@ -205,12 +210,14 @@ impl Emitter<'_> {
                 self.f.instructions().else_();
                 self.f.instructions().local_get(eh).i32_const(lay.1 as i32).i32_add();
                 self.load_ty_slot_at(v); // eh is ABSOLUTE (inside payload)
+                self.share_handle_top(v);
+                self.emit_release_hold(hd, v);
                 self.f.instructions().end();
                 self.release_for(v);
                 self.release_i32();
                 self.release_for(k);
                 self.release_i32();
-                Ok(Some(Lowered::view(v)))
+                Ok(Some(self.selected_default_result(v)))
             }
             // The functional set: a copy with the entry overwritten or
             // appended (map_inplace.rs holds the core; the in-place
