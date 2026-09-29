@@ -260,8 +260,8 @@ The Perceus proof above proves one compiler pass, once. v1 generalizes that prin
 <!-- counts:generated:start (as of 2026-09-29) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
 | Derived count | Value |
 |---|---|
-| Stdlib | 1015 functions across 45 modules — self-hosted `.almd`, signature indexes regenerated from the compiler by `tools/gen-stdlib-doc-index.py` |
-| Tests | 470 `.almd` test files under `spec/` (`almide test spec/`) + the 370-contract cross-target ledger |
+| Stdlib | 1028 functions across 45 modules — self-hosted `.almd`, signature indexes regenerated from the compiler by `tools/gen-stdlib-doc-index.py` |
+| Tests | 471 `.almd` test files under `spec/` (`almide test spec/`) + the 370-contract cross-target ledger |
 <!-- counts:generated:end -->
 <!-- stats:generated:end -->
 
