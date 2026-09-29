@@ -370,6 +370,7 @@
 7909	spec/wasm_cross/list_modify_heap.almd
 3862	spec/wasm_cross/list_of_maps_loop_build.almd
 2198	spec/wasm_cross/list_of_tuples_equality.almd
+9209	spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 2872	spec/wasm_cross/list_product_overflow.almd
 7526	spec/wasm_cross/list_push_on_record_field.almd
 2427	spec/wasm_cross/list_remove_at_oob.almd

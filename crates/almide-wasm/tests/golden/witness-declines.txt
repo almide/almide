@@ -30,7 +30,7 @@ module-arm:unaudited:string.push	1
 module-result:view:list.get_or	2
 named-op	11
 rhs:BinOp	796
-rhs:Block	158
+rhs:Block	160
 rhs:EmptyMap	2
 rhs:Fan	2
 rhs:If	658
@@ -43,7 +43,7 @@ rhs:Member	2
 rhs:OptionNone	26
 rhs:OptionSome	15
 rhs:Range	3
-rhs:Record	41
+rhs:Record	42
 rhs:ResultErr	3
 rhs:ResultOk	16
 rhs:RuntimeCall	66
