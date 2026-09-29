@@ -190,3 +190,28 @@ branch total. Most: `lower/defunc_tuple_fold_b.rs` 34 → 0 of 78,
 of 70, `lower/result_ctors.rs` 74 → 62 of 116, `lower/mod_p5_b.rs` 119 → 108
 of 146, `lower/calls_p4_c.rs` 55 → 45 of 96. #3007 tracks restoring them with
 a workload the product legs run, rather than only re-anchoring.
+
+## Condition floor raised — 2026-09-30 (#3007)
+
+`crates/almide-mir/tests/lower_witness_live_shapes.rs` drives the still-live
+lowerings #3007 lists through the witness producer (`almide verify`'s
+`program_witnesses`, the only product path that still reaches them). Measured
+as the nightly condition job, verbatim, on two throwaway branches off
+batch-074 (7b0e8a93f):
+
+| run | branches | missed | TOTAL |
+|---|---|---|---|
+| batch-074 (probe run 36642157804) | 36255 | 16217 | 55.27% |
+| batch-074 + the test (probe run 36642433391) | 36255 | 16123 | **55.53%** |
+
+The floor rises to it (`coverage-baseline-condition.txt` → 5553). Covered
+branches per file, before → after: `defunc_tuple_fold_b.rs` 0 → 34 of 78,
+`defunc_tuple_fold.rs` 16 → 35 of 70, `result_ctors.rs` 62 → 73 of 116,
+`mod_p5_b.rs` 108 → 113 of 146, `defunc_hof_inner.rs` 89 → 93 of 128.
+`calls_p4_b_tail.rs` (21 of 61), `calls_p4_c.rs` (45 of 96) and `calls.rs`
+(89 of 120) did not move: their cold branches are the `prim.*` floor arms, which only
+the incumbent's lowering of self-hosted stdlib bodies reached. Whether they are
+tested or deleted depends on whether `prim` is user surface (#3025).
+
+This floor includes #2950's deletion, which reaches develop with batch-074;
+measured on a tree without it, the TOTAL is about two points lower.
