@@ -22,22 +22,22 @@ fn almide_bin() -> String {
 /// The issue's program shape — the CHEATSHEET's fallible-map idiom over
 /// `fan.*` with an fs op inside, which the incumbent walls — plus shapes the
 /// structural leg still declines. Its original structural reason (the fs op
-/// had no stock-WASI service) is gone since the p1 fs service (#2742), so the
-/// structural decline now comes from the retirement bill's open rows
-/// (`random.shuffle`, #2749; `continue`, #2745): two, so one landing does not
-/// silently turn this test into a pass of a different program.
+/// had no stock-WASI service) is gone since the p1 fs service (#2742), and the
+/// later stand-ins (`random.shuffle`, #2749; a `continue`, which the leg now
+/// lowers in this shape) fell too; the structural decline now comes from two
+/// OTHER open rows of the retirement bill (a `Bytes` index, #2747; a named fn
+/// as a HOF callback, #2750), so one landing does not silently turn this test
+/// into a pass of a different program.
 const BOTH_LEGS_WALL: &str = r#"import fs
-import random
 
 effect fn read_one(p: String) -> String = { let t = fs.read_text(p)!; string.trim(t) }
 
+fn double(x: Int) -> Int = x * 2
+
 effect fn main() -> Unit = {
-  var n = 0
-  for i in 0..<4 {
-    if i == 2 then continue
-    n = n + i
-  }
-  let xs = random.shuffle([n, 2, 3])
+  let b = bytes.from_list([1, 2, 3])
+  let first = b[0]
+  let xs = list.map([first, 2, 3], double)
   let texts = fan.map(["a.txt"], (p) => read_one(p)!)!
   println("${list.len(xs)} " + (texts |> list.join(",")))
 }
