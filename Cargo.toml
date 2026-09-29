@@ -40,9 +40,9 @@ almide-driver = { path = "crates/almide-driver" }
 almide-interp = { path = "crates/almide-interp" }
 almide-frontend = { path = "crates/almide-frontend" }
 almide-dialect = { path = "crates/almide-dialect" }
-# v1 MIR trust-spine — the sole wasm codegen path (pipeline::try_render_wasm_source; the v0
-# emitter was retired in #782, a wall is a hard error) and the native Rust render (which still
-# falls back to v0 codegen source on a wall). Acyclic:
+# v1 MIR trust-spine — MIR lowering, the witness producer and the native Rust render (which
+# still falls back to v0 codegen source on a wall). Its incumbent WAT renderer was deleted in
+# #2761; `--target wasm` is almide-wasm. Acyclic:
 # almide-mir keeps `almide` only as a DEV-dependency, so this edge does not cycle.
 almide-mir = { path = "crates/almide-mir" }
 # The commissioned structural-wasm leg (Stage 2): typed IR -> wasm bytes, and
