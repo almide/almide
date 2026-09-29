@@ -315,3 +315,9 @@ spec/wasm_cross/branch_lift_stdlib_mut_arg.almd :: arm_writes
 # assign). The incumbent refuses the field-assign to a mutable global ("not in
 # this brick"); the structural leg serves it byte-identically to native.
 spec/wasm_cross/mutable_global_field_mut_arg.almd :: main
+# #2945: an effect fn's `mut`-record call unwrapped with `!` from a Unit-result
+# callee, and never-err calls no `!` reaches (`let _ =`, a bound Result, a
+# `match`, `??` inside an interpolation). The MIR lowering refuses the
+# move-mode block in call-argument position ("call argument Block not in this
+# brick"); the structural leg serves it byte-identically to native.
+spec/wasm_cross/mut_param_effect_unpropagated.almd :: main
