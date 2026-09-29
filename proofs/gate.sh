@@ -444,6 +444,18 @@ run_structural spec/wasm_cross/witness_straightline.almd stash_both 0
 tamper_structural stash_len 's/^{iadm|id}$/{iad|id}/' "#2758 propagated carrier"
 tamper_structural stash_both 's/^i{admx|}d$/i{adx|}d/' "#2758 folded exit"
 
+# ── #2758: CLOSURES. `adder` shares its param into the new env (`am`: the
+# env's drop glue releases it) and the env block moves out (`im`). The
+# lambda body (`<lambda#0>`, the fixture's only lambda) is a frame of its
+# own: its param callee-owned (`id`), its capture a view of the env (an
+# empty line). Drills: the env never leaves, and the lambda keeps its param.
+echo
+echo "== structural leg, closures  ⊳  proven checker (#2758) =="
+run_structural spec/wasm_cross/witness_straightline.almd adder 0
+run_structural spec/wasm_cross/witness_straightline.almd '<lambda#0>' 0
+tamper_structural adder '2s/^im$/i/' "#2758 closure env"
+tamper_structural '<lambda#0>' '1s/^id$/i/' "#2758 lambda param"
+
 # ── #2152: almide-verify against the extracted checker on witnesses NO
 # producer wrote. The rows above only reach the shapes the emitters produce;
 # the transcription must agree on the whole input space, malformed bytes

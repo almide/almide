@@ -131,6 +131,12 @@ effect fn stash_both(a: String, b: String) -> Int = {
   string.len(x) + string.len(y)
 }
 
+// #2758: a CLOSURE. `adder` shares its param into the new env (`am`: the
+// env's drop glue releases it) and the env block moves out (`im`); the
+// lambda body is a frame of its own — its param callee-owned, its capture
+// a view of the env.
+fn adder(xs: List[Int]) -> (List[Int]) -> Int = (ys) => list.len(ys) + list.len(xs)
+
 effect fn main() -> Unit = {
   println("${list.len(shed())} ${tag("w")} ${pass([1])} ${bind_then_pass()}")
   println("${discard([1, 2])} ${stamp(7)} ${shout("w")}")
@@ -140,4 +146,6 @@ effect fn main() -> Unit = {
   println("${count_down([1, 2, 3], 4)} ${tally([1], ["a", "bb"])} ${drain(3)}")
   println(stash("e")!)
   println("${stash_len("ab")!} ${stash_both("a", "bc")!}")
+  let plus = adder([1, 2])
+  println("${plus([3])}")
 }
