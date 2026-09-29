@@ -1,0 +1,29 @@
+// @contract: C-007
+// #2954: a top-level `let` whose initializer prints or aborts THROUGH A CALL is
+// evaluated at startup, in init order, on both legs. Wasm evaluates every
+// initializer before main; native forces a lazy at main entry only when the
+// initializer may do something observable. That decision read its own shallow
+// rule, a DIRECT integer `/` or `%`, so `noisy(..)` ran lazily on first read
+// (its line printed after "main") and `half(0)`, never read, never aborted:
+// native printed "main" and exited 0 where wasm printed the inits and aborted.
+// The decision is now almide_ir::speculation, the rule the inliner and native
+// LICM read: an initializer that is not speculation-safe is forced.
+fn noisy(tag: String, n: Int) -> Int = {
+  println("init " + tag)
+  n
+}
+
+fn half(n: Int) -> Int = 10 / n
+
+fn den(x: Int) -> Int = x - x
+
+let A = noisy("a", 1)
+
+let B = noisy("b", 2) + A
+
+let H = half(den(7))
+
+fn main() -> Unit = {
+  println("main")
+  println(int.to_string(B))
+}
