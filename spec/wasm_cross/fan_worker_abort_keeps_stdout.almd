@@ -1,0 +1,16 @@
+// @contract: C-197
+// Output printed BEFORE a `fan` survives when the defined abort fires inside
+// it. Native stdout is a thread-local buffer and a `fan` sibling runs on a
+// worker thread: `list.range`'s `Error: out of memory` + exit 1 ran
+// `process::exit` on the worker, which never reached the main thread's
+// buffer, so native printed nothing while the sequential wasm leg printed
+// `a` (#3016; fuzz seed 585689703894 index 4740). The spawning thread now
+// flushes before its workers start. The span is the full i64 range so the
+// abort is the same on every machine, not a function of free memory.
+effect fn main() -> Unit = {
+  println("a")
+  let s = fan {
+    list.map(list.range(-9223372036854775807, 16), (c) => c + 1)
+  }
+  println("unreachable ${list.len(s)}")
+}
