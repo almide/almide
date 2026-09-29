@@ -201,7 +201,7 @@ build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; t
 | fannkuchredux | **1.86×** |
 | mandelbrot | **1.26×** |
 | onebrc | **1.87×** |
-| fft | **2.76×** |
+| fft | **2.11×** |
 | strchurn | **0.84×** |
 | listbuild_append | **2.99×** |
 | listbuild_combinator | **3.10×** |

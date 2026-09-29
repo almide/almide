@@ -35,7 +35,7 @@ fasta                 | measured         | 1.46  | 2.31 | 1.58
 fannkuchredux         | measured         | 1.48  | 2.75 | 1.86 ab_band=100
 mandelbrot            | measured         | 2.81  | 3.54 | 1.26 ab_band=100
 onebrc                | measured         | 2.14  | 4.01 | 1.87
-fft                   | measured         | 44.12 | 121.57 | 2.76
+fft                   | measured         | 43.31 | 91.27 | 2.11
 strchurn              | measured         | 59.97 | 50.56 | 0.84
 listbuild_append      | measured         | 22.54 | 67.32 | 2.99
 listbuild_combinator  | measured         | 22.62 | 70.04 | 3.10
