@@ -113,12 +113,40 @@ fn stmts_subset(stmts: &[almide_ir::IrStmt]) -> Option<String> {
             }
             // #2756: a statement-position branch; its arms are statement
             // bodies.
-            IrStmtKind::Expr { expr } if matches!(expr.kind, IrExprKind::If { .. } | IrExprKind::Match { .. }) => {
+            // #2757: loops and their jumps — also statement bodies.
+            IrStmtKind::Expr { expr }
+                if matches!(
+                    expr.kind,
+                    IrExprKind::If { .. }
+                        | IrExprKind::Match { .. }
+                        | IrExprKind::While { .. }
+                        | IrExprKind::ForIn { .. }
+                        | IrExprKind::Break
+                        | IrExprKind::Continue
+                ) =>
+            {
                 if let Some(w) = stmt_body_subset(expr) {
                     return Some(w.at("stmt:Expr"));
                 }
             }
             IrStmtKind::Expr { expr } => return Some(format!("stmt:Expr:{}", expr_tag(expr))),
+            // #2757: an assignment — the old occupant's release and the new
+            // one's binding are the Assign hook's (a var bound outside the
+            // loop it is assigned in declines at emission).
+            IrStmtKind::Assign { value, .. } => {
+                if let Some(w) = value_subset(value) {
+                    return Some(w.at("assign"));
+                }
+            }
+            // `guard c else break` / `else continue`: a one-arm branch that
+            // leaves the iteration (the loop-control form only; a guard that
+            // returns is an exit edge, not recorded yet).
+            IrStmtKind::Guard { cond, else_ } if ends_in_loop_ctl(else_) => {
+                if let Some(w) = value_subset(cond).map(|w| w.inside("guard-cond")).or_else(|| stmt_body_subset(else_))
+                {
+                    return Some(w.at("stmt:Guard"));
+                }
+            }
             // A source comment emits nothing.
             IrStmtKind::Comment { .. } => {}
             other => return Some(format!("stmt:{}", tag(other))),
@@ -293,11 +321,33 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
 
 
 
-/// A statement body of a branch arm (#2756): a call, a block of admitted
-/// statements, a nested branch, or nothing.
+/// A statement body of a branch arm (#2756) or a loop (#2757): a call, a
+/// block of admitted statements, a nested branch or loop, a jump, or nothing.
 fn stmt_body_subset(e: &IrExpr) -> Option<Why> {
     match &e.kind {
-        IrExprKind::Unit => None,
+        IrExprKind::Unit | IrExprKind::Break | IrExprKind::Continue => None,
+        // A while condition runs at the head of every iteration, the last
+        // one being a check that leaves (lower_while records it as such).
+        IrExprKind::While { cond, body } => value_subset(cond)
+            .map(|w| w.inside("while-cond"))
+            .or_else(|| stmts_subset(body).map(Why::Deep)),
+        // A map walk shares its subject for the cursor and releases it
+        // after the loop — sites the recorder does not hook yet.
+        IrExprKind::ForIn { iterable, .. }
+            if matches!(
+                &iterable.ty,
+                almide_types::types::Ty::Applied(almide_types::types::constructor::TypeConstructorId::Map, _)
+            ) =>
+        {
+            Some(Why::Deep("forin-map".into()))
+        }
+        // A range head is a counting loop over its bounds — no list.
+        IrExprKind::ForIn { iterable, body, .. } => match &iterable.kind {
+            IrExprKind::Range { start, end, .. } => value_subset(start).or_else(|| value_subset(end)),
+            _ => value_subset(iterable),
+        }
+        .map(|w| w.inside("forin-iter"))
+        .or_else(|| stmts_subset(body).map(Why::Deep)),
         IrExprKind::Call { .. } => call_subset(e),
         IrExprKind::Block { stmts, expr } => stmts_subset(stmts)
             .map(Why::Deep)
@@ -343,5 +393,19 @@ fn pattern_has_named_rest(p: &almide_ir::IrPattern) -> bool {
         P::Constructor { args: ps, .. } | P::Tuple { elements: ps } => ps.iter().any(pattern_has_named_rest),
         P::RecordPattern { fields, .. } => fields.iter().filter_map(|f| f.pattern.as_ref()).any(pattern_has_named_rest),
         P::Bind { .. } | P::Wildcard | P::Literal { .. } | P::None => false,
+    }
+}
+
+/// Does this guard else leave the enclosing LOOP body (`break` / `continue`,
+/// possibly after statements)? The mirror of stmts_loop.rs's predicate.
+fn ends_in_loop_ctl(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::Break | IrExprKind::Continue => true,
+        IrExprKind::Block { expr: Some(tail), .. } => ends_in_loop_ctl(tail),
+        IrExprKind::Block { stmts, expr: None } => matches!(
+            stmts.last().map(|s| &s.kind),
+            Some(IrStmtKind::Expr { expr }) if ends_in_loop_ctl(expr)
+        ),
+        _ => false,
     }
 }

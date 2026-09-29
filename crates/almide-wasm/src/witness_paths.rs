@@ -1,66 +1,89 @@
-//! Branch frames in the structural witness (#2756, #1696 step 4).
+//! Branch and loop frames in the structural witness (#2756 / #2757, #1696
+//! step 4).
 //!
-//! The recorder (witness.rs) logs every RC event in EMISSION order together
-//! with the branch structure the emitter walked: `Open` at an `if` / `match`,
-//! `Arm` at each arm boundary, `Close` at the join, `Exit` where an arm leaves
-//! the frame (a `return_call`). Emission order is program order within an
-//! arm, so the log is the frame's control-flow tree with the events on it.
+//! The recorder (witness.rs) logs every RC event in EMISSION order, together
+//! with the control structure the emitter walked:
+//! - `Open` / `Arm` / `Close` for an `if` / `match` / short-circuit site;
+//! - `LoopOpen` / `LoopClose` for a `for` / `while` body;
+//! - `Jump` for a `break` / `continue`;
+//! - `Exit` where a path leaves the frame (a `return_call`).
 //!
-//! One certificate line per object is rendered from that tree:
+//! Emission order is program order within an arm or body, so the log is the
+//! frame's control-flow tree with the events on it.
 //!
-//! - **The object's path set.** Every path through the frame is enumerated,
-//!   keeping only this object's events. An event on a path where the object
-//!   was never born is a release of the NULL slot the local still holds (the
-//!   epilogue releases every owner local, and a local bound in the other arm
-//!   is zero here), which `$dec_flat` no-ops on, so it is skipped. An `Exit`
-//!   ends a path: nothing after it runs on that path. One distinct path
-//!   renders flat. Two render as the whole-line branch `{p|q}`. The checker
-//!   runs each arm from rc 0, requires the two to agree, and requires the
-//!   line to end at 0, so every path must balance on its own. That is exactly
-//!   the claim, and it needs no exit marker.
-//! - **Per branch site**, when the object has more than two distinct paths
-//!   (it lives across several sequential branches) and was born outside all
-//!   of them: its top-level sequence is rendered item by item, and each site
-//!   becomes `{a|b}` (law 6: every arm consumes the same), or the v5
-//!   `{a x|b}` when one arm exits (the exiting arm must reach 0 on its own).
-//!   Nested branches inside a site are flattened into the site's arm paths.
+//! Events name either an OBJECT directly (`Op`, for a temporary) or a LOCAL
+//! (`LOp`). A local event is resolved per path to the object the local holds
+//! on that path (`Bind` / `Alias` set it), so an `if` that rebinds a var in
+//! one arm is followed exactly after the join. There is no phi to guess.
 //!
-//! Anything the grammar cannot carry, such as a site with three distinct
-//! arm paths, withdraws the certificate with a counted reason. It never
-//! approximates.
+//! Each object gets a FRAME line and, for every loop whose body touches it,
+//! one ACTIVATION line per loop.
+//!
+//! - **The frame line** is the object's path set through the frame, with loop
+//!   bodies skipped. One distinct path renders flat. Two render as the
+//!   whole-line branch `{p|q}`: the checker runs each arm from rc 0 and both
+//!   must end at 0, so every path must balance on its own. An `Exit` ends a
+//!   path. A release through a local that holds nothing on this path (a
+//!   local bound in the other arm) is a `$dec_flat` of NULL: a no-op,
+//!   skipped.
+//! - **An activation line** is the path set of ONE iteration of a loop body,
+//!   from rc 0. The loop is a holder of its own: every credit it takes on an
+//!   object must be given back (or moved on) within the iteration. An object
+//!   born in the body lives one iteration. The owner local that holds it
+//!   keeps it until the next rebind (the Bind route's dec-old) or the
+//!   epilogue releases it, so that release is recorded at the iteration's
+//!   end, and the dec-old of a rebind is recorded only when it releases a
+//!   block bound earlier in the SAME iteration (the unrolled lane).
+//!
+//! This decomposition is sound because each line is one holder's account of
+//! one block. The block's count is the sum of its holders' counts, and every
+//! line is checked never to release what it does not hold and to end at 0.
+//! The recorder declines what the decomposition cannot carry:
+//! - a var bound outside a loop and rebound inside it (`loop-carried-assign`);
+//! - an exit from inside a loop body (`loop-exit`);
+//! - more than two distinct paths (`branch-paths:N`).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// One logged event.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Ev {
     Birth(u32),
     Op(u32, char),
+    /// `local` now holds `obj` (`owner`: its release is the local's).
+    Bind { local: u32, obj: u32, owner: bool },
+    /// `local` now holds whatever `src` holds on this path.
+    Alias { local: u32, src: u32, owner: bool },
+    /// An RC op on the block `local` holds on this path.
+    LOp(u32, char),
+    /// An owner rebind's dec-old of `local`.
+    DecOld(u32),
     Open,
     Arm,
     Close,
+    LoopOpen,
+    LoopClose,
+    Jump,
     Exit,
 }
 
-/// An open branch site while the emitter is inside it.
 #[derive(Default)]
 struct Site {
-    /// The `Open` was logged (the site is not in dead code).
+    /// The opening event was logged (the site is not in dead code).
     logged: bool,
-    /// An arm has begun.
     started: bool,
     arms: u32,
     exited: u32,
-    /// The current arm has left the frame: what follows in it is dead.
+    /// Branch: the current arm has left. Loop: the rest of the body is dead
+    /// (a `break` / `continue` / exit).
     cur_exited: bool,
 }
 
-/// The branch state of one frame's recording.
+/// The control state of one frame's recording.
 #[derive(Default)]
 pub(crate) struct Branches {
     stack: Vec<Site>,
-    /// The whole frame has left (a top-level exit, or every arm of a
-    /// top-level site exited): nothing emitted after runs.
+    /// The whole frame has left: nothing emitted after runs.
     frame_dead: bool,
 }
 
@@ -70,12 +93,16 @@ impl Branches {
         self.frame_dead || self.stack.iter().any(|s| s.cur_exited)
     }
 
-    pub(crate) fn open(&mut self, log: &mut Vec<Ev>) {
+    fn push(&mut self, log: &mut Vec<Ev>, ev: Ev) {
         let logged = !self.dead();
         if logged {
-            log.push(Ev::Open);
+            log.push(ev);
         }
         self.stack.push(Site { logged, ..Site::default() });
+    }
+
+    pub(crate) fn open(&mut self, log: &mut Vec<Ev>) {
+        self.push(log, Ev::Open);
     }
 
     /// The next arm begins (the first call after `open` starts arm one).
@@ -94,8 +121,8 @@ impl Branches {
         }
     }
 
-    /// The join. A site whose EVERY arm exited leaves the enclosing arm
-    /// (or the frame) too.
+    /// The join. A site whose EVERY arm left leaves the enclosing arm, loop
+    /// body or frame too.
     pub(crate) fn close(&mut self, log: &mut Vec<Ev>) {
         let Some(mut s) = self.stack.pop() else { return };
         s.exited += u32::from(s.cur_exited);
@@ -105,6 +132,27 @@ impl Branches {
         if s.started && s.exited == s.arms {
             self.left();
         }
+    }
+
+    pub(crate) fn loop_open(&mut self, log: &mut Vec<Ev>) {
+        self.push(log, Ev::LoopOpen);
+    }
+
+    /// The loop is left: code after it is live again (a dead body is one
+    /// path of the loop, not the frame's).
+    pub(crate) fn loop_close(&mut self, log: &mut Vec<Ev>) {
+        let Some(s) = self.stack.pop() else { return };
+        if s.logged {
+            log.push(Ev::LoopClose);
+        }
+    }
+
+    /// A `break` / `continue`: the iteration ends here.
+    pub(crate) fn jump(&mut self, log: &mut Vec<Ev>) {
+        if !self.dead() {
+            log.push(Ev::Jump);
+        }
+        self.left();
     }
 
     /// A frame-ending edge was emitted here (its releases already logged).
@@ -132,10 +180,9 @@ impl Branches {
 /// The log as a tree.
 #[derive(Clone, Debug)]
 enum Node {
-    Birth(u32),
-    Op(u32, char),
-    Exit,
+    Ev(Ev),
     Branch(Vec<Vec<Node>>),
+    Loop(Vec<Node>),
 }
 
 fn parse(log: &[Ev]) -> Option<Vec<Node>> {
@@ -148,10 +195,7 @@ fn parse_seq(log: &[Ev], pos: &mut usize) -> Option<Vec<Node>> {
     let mut seq = Vec::new();
     while let Some(ev) = log.get(*pos) {
         match ev {
-            Ev::Arm | Ev::Close => return Some(seq),
-            Ev::Birth(o) => seq.push(Node::Birth(*o)),
-            Ev::Op(o, c) => seq.push(Node::Op(*o, *c)),
-            Ev::Exit => seq.push(Node::Exit),
+            Ev::Arm | Ev::Close | Ev::LoopClose => return Some(seq),
             Ev::Open => {
                 *pos += 1;
                 let mut arms = vec![parse_seq(log, pos)?];
@@ -167,47 +211,130 @@ fn parse_seq(log: &[Ev], pos: &mut usize) -> Option<Vec<Node>> {
                 }
                 seq.push(Node::Branch(arms));
             }
+            Ev::LoopOpen => {
+                *pos += 1;
+                let body = parse_seq(log, pos)?;
+                if log.get(*pos)? != &Ev::LoopClose {
+                    return None;
+                }
+                seq.push(Node::Loop(body));
+            }
+            other => seq.push(Node::Ev(other.clone())),
         }
         *pos += 1;
     }
     Some(seq)
 }
 
-/// A path through the frame, as one object sees it. Two paths in the same
-/// state are interchangeable from here on, so each step keeps one of each
-/// (an object untouched by ten sequential branches is one path, not 1024).
+/// A holder of the object: an owner local (its release is the local's)
+/// or a view; `fresh` = bound in THIS walk (this frame, or this iteration
+/// of the loop whose activation is being walked).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Holder {
+    owner: bool,
+    fresh: bool,
+}
+
+/// A path through the frame or one iteration, as one object sees it. Two
+/// paths in the same state are interchangeable from here on, so each step
+/// keeps one of each.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 struct Path {
     events: String,
-    exists: bool,
-    exited: bool,
+    born: bool,
+    holders: BTreeMap<u32, Holder>,
+    ended: bool,
 }
 
 /// The cap on enumerated paths per object: beyond it the frame declines.
 const PATH_CAP: usize = 64;
 
+/// Where a walk runs: the frame, or one loop iteration.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Scope {
+    Frame,
+    Iteration,
+}
+
+/// The loops a walk passed, with the object's state at each entry.
+type LoopEntries<'t> = Vec<(&'t [Node], Path)>;
+
+fn step(ev: &Ev, o: u32, p: &mut Path) {
+    match ev {
+        Ev::Birth(b) if *b == o => p.born = true,
+        Ev::Op(b, c) if *b == o && p.born => p.events.push(*c),
+        Ev::Bind { local, obj, owner } => {
+            if *obj == o {
+                p.holders.insert(*local, Holder { owner: *owner, fresh: true });
+            } else {
+                p.holders.remove(local);
+            }
+        }
+        Ev::Alias { local, src, owner } => {
+            if p.holders.contains_key(src) {
+                p.holders.insert(*local, Holder { owner: *owner, fresh: true });
+            } else {
+                p.holders.remove(local);
+            }
+        }
+        // A release through a local that holds nothing on this path is a
+        // release of NULL (a no-op) — skipped with every other op.
+        Ev::LOp(l, c) if p.holders.contains_key(l) => p.events.push(*c),
+        Ev::DecOld(l) => {
+            if p.holders.get(l).is_some_and(|h| h.owner && h.fresh) {
+                p.events.push('d');
+            }
+            p.holders.remove(l);
+        }
+        Ev::Exit => p.ended = true,
+        _ => {}
+    }
+}
+
+/// The end of one iteration (natural, `break` or `continue`): each owner
+/// local bound in it keeps its block until its next rebind or the epilogue
+/// releases it — that release, recorded here.
+fn end_iteration(p: &mut Path) {
+    for h in p.holders.values() {
+        if h.owner && h.fresh {
+            p.events.push('d');
+        }
+    }
+    p.ended = true;
+}
+
 /// Extend each live path through `seq`, for object `o`.
-fn walk(seq: &[Node], o: u32, paths: Vec<Path>) -> Result<Vec<Path>, String> {
+fn walk<'t>(
+    seq: &'t [Node],
+    o: u32,
+    scope: Scope,
+    paths: Vec<Path>,
+    loops: &mut LoopEntries<'t>,
+) -> Result<Vec<Path>, String> {
     let mut paths = paths;
     for node in seq {
         let mut next = Vec::with_capacity(paths.len());
         for mut p in paths {
-            if p.exited {
+            if p.ended {
                 next.push(p);
                 continue;
             }
             match node {
-                Node::Birth(b) if *b == o => p.exists = true,
-                // An event on the null slot of an unborn object is a no-op.
-                Node::Op(b, c) if *b == o && p.exists => p.events.push(*c),
-                Node::Exit => p.exited = true,
+                Node::Ev(Ev::Jump) => match scope {
+                    Scope::Iteration => end_iteration(&mut p),
+                    Scope::Frame => return Err("loop-jump-outside-loop".into()),
+                },
+                Node::Ev(Ev::Exit) if scope == Scope::Iteration => return Err("loop-exit".into()),
+                Node::Ev(ev) => step(ev, o, &mut p),
                 Node::Branch(arms) => {
                     for arm in arms {
-                        next.extend(walk(arm, o, vec![p.clone()])?);
+                        next.extend(walk(arm, o, scope, vec![p.clone()], loops)?);
                     }
                     continue;
                 }
-                _ => {}
+                // A loop is its own activation: skipped here, walked later
+                // from the state it was entered with.
+                Node::Loop(body) => loops.push((body.as_slice(), p.clone())),
             }
             next.push(p);
         }
@@ -221,65 +348,57 @@ fn walk(seq: &[Node], o: u32, paths: Vec<Path>) -> Result<Vec<Path>, String> {
     Ok(paths)
 }
 
-fn distinct(paths: &[Path]) -> BTreeSet<(String, bool)> {
-    paths.iter().map(|p| (p.events.clone(), p.exited)).collect()
-}
-
-/// One object's line.
-fn render_object(tree: &[Node], o: u32) -> Result<String, String> {
-    let paths = walk(tree, o, vec![Path::default()])?;
-    let whole: BTreeSet<String> = paths.iter().map(|p| p.events.clone()).collect();
-    let v: Vec<&String> = whole.iter().collect();
+/// Two or fewer distinct paths as one certificate line.
+fn line(paths: &[Path]) -> Result<String, String> {
+    let set: BTreeSet<&str> = paths.iter().map(|p| p.events.as_str()).collect();
+    let v: Vec<&str> = set.into_iter().collect();
     match v.as_slice() {
-        [one] => return Ok((*one).clone()),
-        [a, b] => return Ok(format!("{{{a}|{b}}}")),
-        _ => {}
+        [one] => Ok((*one).to_string()),
+        [a, b] => Ok(format!("{{{a}|{b}}}")),
+        more => Err(format!("branch-paths:{}", more.len())),
     }
-    render_by_site(tree, o)
 }
 
-/// The per-site rendering of an object born at the top level.
-fn render_by_site(tree: &[Node], o: u32) -> Result<String, String> {
-    let Some(born) = tree.iter().position(|n| matches!(n, Node::Birth(b) if *b == o)) else {
-        return Err("branch-paths:born-in-arm".into());
-    };
-    let mut line = String::new();
-    for node in &tree[born + 1..] {
-        match node {
-            Node::Op(b, c) if *b == o => line.push(*c),
-            Node::Exit => break,
-            Node::Branch(arms) => {
-                let mut site = Vec::new();
-                for arm in arms {
-                    site.extend(walk(arm, o, vec![Path { exists: true, ..Path::default() }])?);
-                }
-                let d: Vec<(String, bool)> = distinct(&site).into_iter().collect();
-                let all_exit = d.iter().all(|(_, x)| *x);
-                match d.as_slice() {
-                    [(a, _)] if all_exit => {
-                        line.push_str(a);
-                        break;
-                    }
-                    [(a, _)] => line.push_str(a),
-                    [(a, _), (b, _)] if all_exit => {
-                        line.push_str(&format!("{{{a}|{b}}}"));
-                        break;
-                    }
-                    [(a, false), (b, false)] => line.push_str(&format!("{{{a}|{b}}}")),
-                    [(a, xa), (b, _)] => {
-                        let (ex, sv) = if *xa { (a, b) } else { (b, a) };
-                        line.push_str(&format!("{{{ex}x|{sv}}}"));
-                    }
-                    _ => return Err(format!("branch-paths:{}", d.len())),
-                }
-            }
-            _ => {}
+/// One object's lines: the frame line, then one line per loop activation
+/// that touches it.
+fn render_object(tree: &[Node], o: u32, out: &mut String) -> Result<(), String> {
+    let mut loops: LoopEntries = Vec::new();
+    let frame = walk(tree, o, Scope::Frame, vec![Path::default()], &mut loops)?;
+    out.push_str(&line(&frame)?);
+    out.push('\n');
+    // Each loop reached, walked from each entry state; loops nested in a
+    // body are reached by that body's walk (appended as it runs).
+    let mut k = 0;
+    let mut by_loop: Vec<(&[Node], Vec<Path>)> = Vec::new();
+    while k < loops.len() {
+        let (body, entry) = loops[k].clone();
+        k += 1;
+        let start = Path {
+            events: String::new(),
+            born: entry.born,
+            holders: entry.holders.iter().map(|(&l, h)| (l, Holder { fresh: false, ..*h })).collect(),
+            ended: false,
+        };
+        let mut iter = walk(body, o, Scope::Iteration, vec![start], &mut loops)?;
+        iter.iter_mut().filter(|p| !p.ended).for_each(end_iteration);
+        match by_loop.iter_mut().find(|(b, _)| std::ptr::eq(*b, body)) {
+            Some((_, ps)) => ps.extend(iter),
+            None => by_loop.push((body, iter)),
+        }
+        if loops.len() > PATH_CAP {
+            return Err("branch-paths:cap".into());
         }
     }
-    Ok(line)
+    for (_, iter) in by_loop {
+        if iter.iter().any(|p| !p.events.is_empty()) {
+            out.push_str(&line(&iter)?);
+            out.push('\n');
+        }
+    }
+    Ok(())
 }
 
-/// Render every object's line, in object order; `Err(reason)` withdraws
+/// Render every object's lines, in object order; `Err(reason)` withdraws
 /// the certificate.
 pub(crate) fn render(log: &[Ev], objects: u32) -> Result<String, String> {
     let Some(tree) = parse(log) else {
@@ -287,8 +406,7 @@ pub(crate) fn render(log: &[Ev], objects: u32) -> Result<String, String> {
     };
     let mut s = String::new();
     for o in 0..objects {
-        s.push_str(&render_object(&tree, o)?);
-        s.push('\n');
+        render_object(&tree, o, &mut s)?;
     }
     Ok(s)
 }
@@ -302,64 +420,96 @@ mod tests {
         render(log, n).expect("renders")
     }
 
+    fn bind(local: u32, obj: u32) -> Ev {
+        Bind { local, obj, owner: true }
+    }
+
     #[test]
     fn a_straight_line_renders_flat() {
-        assert_eq!(cert(&[Birth(0), Op(0, 'i'), Op(0, 'd')], 1), "id\n");
+        assert_eq!(cert(&[Birth(0), Op(0, 'i'), bind(3, 0), LOp(3, 'd')], 1), "id\n");
     }
 
     #[test]
     fn a_param_shared_in_one_arm_renders_as_a_whole_line_branch() {
         // i ; if { a m } else { } ; d
-        let log = [Birth(0), Op(0, 'i'), Open, Op(0, 'a'), Op(0, 'm'), Arm, Close, Op(0, 'd')];
+        let log = [Birth(0), Op(0, 'i'), bind(3, 0), Open, LOp(3, 'a'), LOp(3, 'm'), Arm, Close, LOp(3, 'd')];
         assert_eq!(cert(&log, 1), "{iamd|id}\n");
     }
 
     #[test]
     fn a_local_bound_in_one_arm_is_released_at_the_epilogue_on_that_path_only() {
-        // if { let t = …(born) } else { } ; epilogue dec t (null on else)
-        let log = [Open, Birth(0), Op(0, 'i'), Arm, Close, Op(0, 'd')];
+        let log = [Open, Birth(0), Op(0, 'i'), bind(4, 0), Arm, Close, LOp(4, 'd')];
         assert_eq!(cert(&log, 1), "{|id}\n");
     }
 
     #[test]
+    fn a_var_reassigned_in_one_arm_is_followed_across_the_join() {
+        // var x = a; if { x = b (release a) } else { } ; epilogue releases x
+        let log = [
+            Birth(0), Op(0, 'i'), bind(3, 0),
+            Open, LOp(3, 'd'), Birth(1), Op(1, 'i'), bind(3, 1), Arm, Close,
+            LOp(3, 'd'),
+        ];
+        assert_eq!(cert(&log, 2), "id\n{|id}\n");
+    }
+
+    #[test]
     fn an_exit_ends_its_path() {
-        // i ; if { d exit } else { } ; d
-        let log = [Birth(0), Op(0, 'i'), Open, Op(0, 'd'), Exit, Arm, Close, Op(0, 'd')];
+        let log = [Birth(0), Op(0, 'i'), bind(3, 0), Open, LOp(3, 'd'), Exit, Arm, Close, LOp(3, 'd')];
         assert_eq!(cert(&log, 1), "id\n");
-        // A missing release on the exiting arm is two distinct paths, one
-        // of which leaks (the checker rejects `{i|id}`: the arms disagree).
-        let leak = [Birth(0), Op(0, 'i'), Open, Exit, Arm, Close, Op(0, 'd')];
+        // A missing release on the exiting arm: two paths, one leaking.
+        let leak = [Birth(0), Op(0, 'i'), bind(3, 0), Open, Exit, Arm, Close, LOp(3, 'd')];
         assert_eq!(cert(&leak, 1), "{i|id}\n");
     }
 
     #[test]
-    fn three_sequential_sites_render_per_site() {
+    fn a_loop_body_is_an_activation_and_its_locals_live_one_iteration() {
+        // xs (param, owned); for .. { let t = f(); g(xs) } ; epilogue d xs, d t
         let log = [
-            Birth(0), Op(0, 'i'),
-            Open, Op(0, 'a'), Op(0, 'm'), Arm, Close,
-            Open, Op(0, 'a'), Op(0, 'm'), Arm, Close,
-            Op(0, 'd'),
+            Birth(0), Op(0, 'i'), bind(3, 0),
+            LoopOpen,
+            DecOld(4), Birth(1), Op(1, 'i'), bind(4, 1),
+            LOp(3, 'a'), LOp(3, 'm'),
+            LoopClose,
+            LOp(3, 'd'), LOp(4, 'd'),
         ];
-        assert_eq!(cert(&log, 1), "i{|am}{|am}d\n");
+        // xs: frame line `id`, activation line `am`; t: its iteration `id`.
+        assert_eq!(cert(&log, 2), "id\nam\n\nid\n");
     }
 
     #[test]
-    fn a_site_whose_every_arm_exits_ends_the_line() {
+    fn a_rebind_in_the_same_iteration_releases_the_earlier_block() {
+        // The unrolled lane: two copies of `let t = f()` in one iteration.
         let log = [
-            Birth(0), Op(0, 'i'),
-            Open, Op(0, 'a'), Op(0, 'm'), Arm, Close,
-            Open, Op(0, 'd'), Exit, Arm, Op(0, 'a'), Op(0, 'm'), Op(0, 'd'), Exit, Close,
+            LoopOpen,
+            DecOld(4), Birth(0), Op(0, 'i'), bind(4, 0),
+            DecOld(4), Birth(1), Op(1, 'i'), bind(4, 1),
+            LoopClose,
+            LOp(4, 'd'),
         ];
-        assert_eq!(cert(&log, 1), "i{|am}{amd|d}\n");
+        assert_eq!(cert(&log, 2), "\nid\n\nid\n");
+    }
+
+    #[test]
+    fn a_break_ends_the_iteration() {
+        let log = [LoopOpen, DecOld(4), Birth(0), Op(0, 'i'), bind(4, 0), Open, Jump, Arm, Close, LoopClose];
+        assert_eq!(cert(&log, 1), "\nid\n");
+    }
+
+    #[test]
+    fn an_exit_inside_a_loop_body_withdraws() {
+        let log = [Birth(0), Op(0, 'i'), bind(3, 0), LoopOpen, LOp(3, 'a'), Exit, LoopClose, LOp(3, 'd')];
+        assert_eq!(render(&log, 1), Err("loop-exit".into()));
     }
 
     #[test]
     fn an_unbalanced_log_withdraws() {
         assert!(render(&[Open, Birth(0)], 1).is_err());
+        assert!(render(&[LoopOpen, Birth(0)], 1).is_err());
     }
 
     #[test]
-    fn the_branch_state_marks_dead_code_after_an_exit() {
+    fn the_control_state_marks_dead_code_after_an_exit_and_a_jump() {
         let mut b = Branches::default();
         let mut log = Vec::new();
         b.open(&mut log);
@@ -371,7 +521,12 @@ mod tests {
         b.exit(&mut log);
         b.close(&mut log);
         assert!(b.dead(), "every arm exited: the frame is dead after the join");
+        let mut b = Branches::default();
+        b.loop_open(&mut log);
+        b.jump(&mut log);
+        assert!(b.dead());
+        b.loop_close(&mut log);
+        assert!(!b.dead(), "the code after a loop is live");
         assert!(b.settled());
     }
-
 }

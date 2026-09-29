@@ -33,9 +33,18 @@ impl Emitter<'_> {
         // Deterministic meter: one loop-head charge per condition
         // CHECK (n iterations = n+1 checks), ALS-DT2.
         self.emit_det_charge_const(1);
+        // The witness (#2757): an iteration runs the condition, then either
+        // leaves (the failing check) or runs the body.
+        self.witness_loop_open();
         self.lower(cond, Some(BOOL))?;
         self.f.instructions().i32_eqz().br_if(1);
+        self.witness_branch_open();
+        self.witness_branch_arm();
+        self.witness_loop_jump();
+        self.witness_branch_arm();
         self.lower_loop_body(body, false)?;
+        self.witness_branch_close();
+        self.witness_loop_close();
         self.f.instructions().br(0).end().end();
         self.drop_hoisted_counts(hoisted);
         self.drop_cow_flags(flags);
@@ -93,7 +102,12 @@ impl Emitter<'_> {
         }
         self.lower(cond, Some(BOOL))?;
         self.f.instructions().i32_eqz().if_(BlockType::Empty);
+        // The witness (#2757): a one-arm site whose arm leaves the iteration.
+        self.witness_branch_open();
+        self.witness_branch_arm();
         self.lower_stmt_in_label(else_)?;
+        self.witness_branch_arm();
+        self.witness_branch_close();
         self.f.instructions().end();
         Ok(true)
     }

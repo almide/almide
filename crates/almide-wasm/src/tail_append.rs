@@ -50,7 +50,10 @@ impl Emitter<'_> {
         }
         self.f.instructions().local_get(idx);
         self.lower(right, Some(STR))?;
+        // An owned operand is borrowed by `$str_append`: released after it.
+        let release = self.hold_owned_operand(right)?;
         self.f.instructions().call(F_STR_APPEND);
+        self.release_owned_operand(release);
         // The credit MOVES through the helper — one in, one out — which is
         // what a moved param records, not a freshly born block.
         self.witness_arg_moved(left, want);
@@ -101,6 +104,7 @@ impl Emitter<'_> {
         // The assign window's discipline, verbatim (#2310): a handle element
         // borrowed into the spine takes its +1, an owned one moves in.
         self.rc_share_guard(elem, el);
+        self.witness_store(elem, el);
         let push = if el.slot_size() == 8 { F_LIST_PUSH_8 } else { F_LIST_PUSH_4 };
         self.f.instructions().call(push);
         self.witness_arg_moved(left, want);
