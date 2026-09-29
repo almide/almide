@@ -1,4 +1,4 @@
-# oracle: almide 0.65.1 (dev) at 7250312b7 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.65.1 (dev) at 794c1c139 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -603,7 +603,7 @@ bd6dcc472c9f1841a782d42c3d81ba98949aba6f746c26e2de05b3b2455ead3b	spec/stdlib/mat
 f7a4f86c8d19c5ddc1dd9ee539613d0ad8a6afa6e9d694409501ece88e578c47	spec/stdlib/matrix_to_bytes_test.almd
 059807e1d7931296c08cd6733f04c30d793a2c27a1b115f8bdb2743ca63e2f26	spec/stdlib/matrix_transformer_test.almd
 1ba1d7b98a1caea3aa354849d6dc2fee4dd7e239ddf60074155d6cc85816e2fa	spec/stdlib/mem_semantics_manifest_test.almd
-69b76409216d9d276ef64a618c488ae452db1d0c583899d8c6876e5e3f31d374	spec/stdlib/net_semantics_manifest_test.almd
+8222c45f59b9b12fd48e41a88aa9b857ece7780daedb7a172ccf04ff42d7057c	spec/stdlib/net_semantics_manifest_test.almd
 3ffbe608f994ed64bebb93e8c5e36f0b9d57382a45b9bc95dc906872f91295e6	spec/stdlib/net_test.almd
 ef2e516beea0c0c5149283164db523c190cc410b89f35f39a0bc83c808090926	spec/stdlib/option_completeness_test.almd
 b26b5c53765c201d7ad8cd702a35437610c2f747161dc4820f4f155f8b23a180	spec/stdlib/option_extra_test.almd
