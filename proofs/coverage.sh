@@ -171,18 +171,25 @@ CLI="$COVDIR/t/release/almide"
 #     exits 127 after writing the bundle; the producer has already run.
 # The profile names are per-workload so a single workload's contribution can
 # be isolated from the profraw set (the #2753 mutation evidence did that).
-n=0; nw=0
-for f in $(find spec -name '*.almd' | LC_ALL=C sort); do
-    grep -q 'fn main' "$f" || continue
-    if ALMIDE_WASM_STRUCTURAL=1 LLVM_PROFILE_FILE="$COVDIR/wasm-%m-%p.profraw" \
-         "$CLI" build "$f" --target wasm -o "$COVDIR/sweep.wasm" >/dev/null 2>&1; then
-        nw=$((nw+1))
-    fi
-    LLVM_PROFILE_FILE="$COVDIR/verify-%m-%p.profraw" \
-      "$CLI" verify "$f" --emit "$COVDIR/sweep.bundle" >/dev/null 2>&1 || true
-    n=$((n+1))
-done
-echo "  runnable spec programs: $n (structural wasm build emitted $nw; witness producer ran on all)"
+# `%4m`, not `%p`: a per-process file made ~1,900 raw profiles (tens of GB,
+# and 3 minutes of step 4/4 merging them) — the `%Nm` pool merges online
+# across processes, which is also what makes the parallel sweep safe.
+SWEEP_JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+mkdir -p "$COVDIR/sweep"
+find spec -name '*.almd' | LC_ALL=C sort | while read -r f; do
+    if grep -q 'fn main' "$f"; then printf '%s\n' "$f"; fi
+done > "$COVDIR/sweep.list"
+n="$(wc -l < "$COVDIR/sweep.list" | tr -d ' ')"
+nw="$(tr '\n' '\0' < "$COVDIR/sweep.list" | COVDIR="$COVDIR" CLI="$CLI" xargs -0 -n 1 -P "$SWEEP_JOBS" sh -c '
+    out="$COVDIR/sweep/$$"
+    if ALMIDE_WASM_STRUCTURAL=1 LLVM_PROFILE_FILE="$COVDIR/wasm-%4m.profraw" \
+         "$CLI" build "$1" --target wasm -o "$out.wasm" >/dev/null 2>&1; then echo emitted; fi
+    LLVM_PROFILE_FILE="$COVDIR/verify-%4m.profraw" \
+      "$CLI" verify "$1" --emit "$out.bundle" >/dev/null 2>&1
+    rm -f "$out.wasm" "$out.bundle"
+    exit 0
+' sh | grep -c emitted || true)"
+echo "  runnable spec programs: $n (structural wasm build emitted $nw; witness producer ran on all; $SWEEP_JOBS jobs)"
 # No vacuous sweep: a CLI that emits nothing (a broken build, a renamed flag)
 # would still leave profraw from the other workloads.
 [ "$nw" -gt 0 ] || { echo "coverage: the structural wasm sweep emitted NOTHING — the workload went blind"; exit 1; }
