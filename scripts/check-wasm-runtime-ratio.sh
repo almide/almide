@@ -64,6 +64,23 @@
 #   unless WASM_RUNTIME_AB=off is set on the step — the gate cannot degrade
 #   to informational without the workflow saying so.
 #
+# THE BOUNDARY (#2980). Every figure times the program's own run, entering
+#   `main` to its return, the same on both legs (`almide bench` times it
+#   in-process natively and around the host's `main` call on wasm): process
+#   spawn and module compile/instantiate are outside it, so the ratio is
+#   steady-state code speed. Startup is recorded, not hidden: the cold_*
+#   columns are the whole run as a user pays it (native spawn + run, wasm
+#   compile + instantiate + run). A row whose default workload finishes
+#   `main` in well under a millisecond measures timer noise, so its row
+#   carries `args=N` (a workload size passed on both legs) chosen to put
+#   native `main` around 10-30 ms.
+# NOISE. Each stamped figure is the MIN over 2 interleaved rounds (native,
+#   wasm, native, wasm) of 5 runs each: load can only add time. It does NOT
+#   remove code-placement luck — Cranelift does not align loop headers, and
+#   on the stamping M-series a tight loop moved 22 -> 9 ms from dead code
+#   added above it (#2987) — so a ratio move under ~1.3x on a row whose hot
+#   loop is a few instructions is not evidence by itself.
+#
 # Regenerate the ledger (rows + stamp): --measure. Never hand-edit numbers.
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -86,16 +103,29 @@ src_of() { # benchmark name -> source path (listbuild variants share a dir)
   esac
 }
 
-median_of() { # "<bench output tail>" -> median ms or empty
+median_of() { # "<bench output tail>" -> median ms (the main() headline) or empty
   grep -oE 'median [0-9.]+ ms' <<<"$1" | grep -oE '[0-9.]+' | head -1
 }
-min_of() { # "<bench output tail>" -> min ms or empty
+min_of() { # "<bench output tail>" -> min ms (the main() headline) or empty
   grep -oE 'min [0-9.]+' <<<"$1" | grep -oE '[0-9.]+' | head -1
 }
-
-bench_native() { "$BIN" bench "$(src_of "$1")" 2>&1 | tail -1; }
-bench_wasm()   { "$BIN" bench "$(src_of "$1")" --target wasm 2>&1 | tail -2; }
-bench_wasm_with() { "$1" bench "$(src_of "$2")" --target wasm --runs "$AB_RUNS" </dev/null 2>&1 | tail -2; }
+cold_min_of() { # "<bench output tail>" -> the cold-start column's min ms or empty
+  grep -oE 'cold start median [0-9.]+ ms \(min [0-9.]+' <<<"$1" | grep -oE '[0-9.]+$' | head -1
+}
+args_of() { # benchmark name -> its workload-size args (the row's args=, a policy
+  # line like ab_band): set once here, carried on the row by --measure.
+  case "$1" in
+    nbody) echo 500000 ;; spectralnorm) echo 1000 ;; binarytrees) echo 15 ;;
+    fasta) echo 150000 ;; fannkuchredux) echo 10 ;; mandelbrot) echo 800 ;;
+    onebrc) echo 30000 ;; mapbuild) echo 100000 ;; *) echo "" ;;
+  esac
+}
+row_args() { grep -oE 'args=[0-9]+' <<<"$1" | cut -d= -f2; }
+# bench_* NAME [ARGS]: an empty ARGS runs the program's default workload.
+bench_native() { "$BIN" bench "$(src_of "$1")" ${2:+-- $2} 2>&1 | tail -1; }
+bench_wasm()   { "$BIN" bench "$(src_of "$1")" --target wasm ${2:+-- $2} 2>&1 | tail -2; }
+bench_wasm_with() { "$1" bench "$(src_of "$2")" --target wasm --runs "$AB_RUNS" ${3:+-- $3} </dev/null 2>&1 | tail -2; }
+pymin() { python3 -c "import sys; v=[float(x) for x in sys.argv[1:] if x]; print(min(v) if v else '')" "$@"; }
 
 if [ "${1:-}" = "--measure" ]; then
   ver=$("$BIN" --version)
@@ -113,9 +143,23 @@ if [ "${1:-}" = "--measure" ]; then
 #             leg against the latest release's, interleaved, min-of-runs,
 #             tree/release above 1 + ab_band fails.
 #
-# Rows: name | status | native_ms | wasm_ms | ratio (wasm/native) [ab_band=NN]
-#   measured          — `almide bench --target wasm` (embedded host, verify-
-#                       then-time, median of 5 + warmup) and the native twin
+# Rows: name | status | native_ms | wasm_ms | ratio | cold_native_ms | cold_wasm_ms | cold_ratio [args=N] [ab_band=NN]
+#   native_ms / wasm_ms / ratio — THE BOUNDARY (#2980): `main` alone, entry to
+#       return, on both legs (native timed in-process, wasm around the host's
+#       `main` call). Spawn / compile / instantiate are outside it: the ratio
+#       is steady-state code speed, the quantity the gates judge.
+#   cold_* — the whole run as a user pays it: native spawn + run, wasm
+#       compile + instantiate + run (embedded host). Recorded so startup is
+#       visible, not gated.
+#   args=N — the workload size passed to BOTH legs, so `main` runs long
+#       enough to time (native ~10-30 ms); absent = the program's default.
+#   Every figure is the MIN over 2 interleaved rounds (native, wasm, native,
+#   wasm) x 5 runs + warmup, output verified identical. Min removes load, NOT
+#   code-placement luck: Cranelift does not align loop headers, and on this
+#   machine a tight loop moved 22 -> 9 ms from dead code above it (#2987),
+#   so a sub-1.3x move on a row with a few-instruction hot loop is not
+#   evidence alone.
+#   measured          — `almide bench` benches both legs
 #   walled            — the wasm build path walls the program (E082; the
 #                       incumbent fallback and its `routed-incumbent` status
 #                       are gone since #2752)
@@ -133,20 +177,26 @@ HDR
     echo "ab_band = ${ab_band_keep:-$AB_BAND_DEFAULT}"
     echo
     for name in nbody spectralnorm binarytrees treealloc fasta fannkuchredux mandelbrot onebrc fft strchurn listbuild_append listbuild_combinator listbuild_prealloc mapbuild; do
-      n=$(median_of "$(bench_native "$name")")
-      w_out=$(bench_wasm "$name")
-      w=$(median_of "$w_out")
-      fan_suffix=""
-      case "$name" in binarytrees|mandelbrot|fannkuchredux) fan_suffix=" ab_band=100" ;; esac
-      if [ -n "$w" ] && [ -n "$n" ]; then
-        ratio=$(python3 -c "print(f'{$w/$n:.2f}')")
-        printf '%-21s | measured         | %-5s | %-4s | %s%s\n' "$name" "$n" "$w" "$ratio" "$fan_suffix"
+      a=$(args_of "$name")
+      n=""; w=""; nc=""; wc=""; w_out=""
+      for _round in 1 2; do # interleaved: native, wasm, native, wasm
+        n_out=$(bench_native "$name" "$a"); w_out=$(bench_wasm "$name" "$a")
+        n=$(pymin "$n" "$(min_of "$n_out")"); nc=$(pymin "$nc" "$(cold_min_of "$n_out")")
+        w=$(pymin "$w" "$(min_of "$w_out")"); wc=$(pymin "$wc" "$(cold_min_of "$w_out")")
+      done
+      suffix="${a:+ args=$a}"
+      case "$name" in binarytrees|mandelbrot|fannkuchredux) suffix="$suffix ab_band=100" ;; esac
+      if [ -n "$w" ] && [ -n "$n" ] && [ -n "$wc" ] && [ -n "$nc" ]; then
+        fmt=$(python3 -c "
+n,w,nc,wc=$n,$w,$nc,$wc
+print(f'{n:<6.2f}| {w:<6.2f}| {w/n:.2f} | {nc:<6.2f}| {wc:<6.2f}| {wc/nc:.2f}')")
+        printf '%-21s | measured         | %s%s\n' "$name" "$fmt" "$suffix"
       elif grep -q "out of memory" <<<"$w_out"; then
-        printf '%-21s | oom-embedded     | %-5s | -    | -\n' "$name" "${n:--}"
+        printf '%-21s | oom-embedded     | %-6s| -     | -    | -     | -     | -%s\n' "$name" "${n:--}" "$suffix"
       elif grep -q '^wall: ' <<<"$w_out"; then
-        printf '%-21s | walled           | %-5s | -    | -\n' "$name" "${n:--}"
+        printf '%-21s | walled           | %-6s| -     | -    | -     | -     | -%s\n' "$name" "${n:--}" "$suffix"
       else
-        printf '%-21s | UNCLASSIFIED     | %-5s | -    | -\n' "$name" "${n:--}"
+        printf '%-21s | UNCLASSIFIED     | %-6s| -     | -    | -     | -     | -%s\n' "$name" "${n:--}" "$suffix"
       fi
     done
   } > "$LEDGER.tmp" && mv "$LEDGER.tmp" "$LEDGER"
@@ -188,6 +238,7 @@ while IFS= read -r raw; do
   ratio=$(echo "$raw" | cut -d'|' -f5 | xargs | cut -d' ' -f1)
   row_budget=$(echo "$raw" | grep -oE 'budget=[0-9]+' | cut -d= -f2)
   row_ab_band=$(echo "$raw" | grep -oE 'ab_band=[0-9]+' | cut -d= -f2)
+  a=$(row_args "$raw")
   # The fan-parallel benches ride thread scheduling: their wasm/native ratio
   # legitimately swings 2-3x run to run (binarytrees measured 0.52..0.89 in
   # back-to-back stamps). A tight budget would flake, and a flaking gate
@@ -200,8 +251,8 @@ while IFS= read -r raw; do
   [ -z "$name" ] && continue
   case "$status" in
     measured)
-      n=$(median_of "$(bench_native "$name")")
-      w=$(median_of "$(bench_wasm "$name")")
+      n=$(min_of "$(bench_native "$name" "$a")")
+      w=$(min_of "$(bench_wasm "$name" "$a")")
       if [ -z "$n" ] || [ -z "$w" ]; then
         echo "::error::wasm-runtime[$name]: a measured row stopped benching (native='$n' wasm='$w') — a leg or the routing regressed"
         fail=1; continue
@@ -223,10 +274,19 @@ print('HIGH' if now > hi else 'LOW' if now < lo else 'OK', f'{now:.2f}')")
       [ "$AB_VERDICT" = "1" ] || continue
       # Same-runner A/B (#2143): interleaved rounds, min over every run.
       b_min=""; t_min=""; base_out=""
+      # A baseline from before #2980 takes no program args: judge that pair
+      # at the default workload (both sides), so the row is not blind until
+      # the next release.
+      ab_a="$a"
+      if [ -n "$a" ] && [ -z "$(min_of "$(bench_wasm_with "$BASE_BIN" "$name" "$a")")" ]; then ab_a=""; fi
       for _round in $(seq "$AB_ROUNDS"); do
-        base_out=$(bench_wasm_with "$BASE_BIN" "$name"); bm=$(min_of "$base_out")
+        base_out=$(bench_wasm_with "$BASE_BIN" "$name" "$ab_a"); bm=$(min_of "$base_out")
         [ -n "$bm" ] || break
-        tm=$(min_of "$(bench_wasm_with "$BIN" "$name")")
+        t_out=$(bench_wasm_with "$BIN" "$name" "$ab_a")
+        # A baseline from before #2980 times compile + instantiate + run as
+        # its headline: judge it against this tree's cold column, the same
+        # boundary, never against main() alone (that would read as a win).
+        if grep -q 'main() only' <<<"$base_out"; then tm=$(min_of "$t_out"); else tm=$(cold_min_of "$t_out"); fi
         [ -n "$tm" ] || break
         b_min=$(python3 -c "print(min($bm, ${b_min:-$bm}))")
         t_min=$(python3 -c "print(min($tm, ${t_min:-$tm}))")
@@ -250,7 +310,7 @@ print('HIGH' if r > 1 + $ab_band/100 else 'OK', f'{r:.2f}')")
       esac
       ;;
     oom-embedded)
-      out=$(bench_wasm "$name")
+      out=$(bench_wasm "$name" "$a")
       if median=$(median_of "$out") && [ -n "$median" ]; then
         echo "::error::wasm-runtime[$name]: oom-embedded row now COMPLETES (${median} ms) — #1729 progressed; flip the row to measured (--measure) in this change"
         fail=1
@@ -262,7 +322,7 @@ print('HIGH' if r > 1 + $ab_band/100 else 'OK', f'{r:.2f}')")
       fi
       ;;
     walled)
-      out=$(bench_wasm "$name")
+      out=$(bench_wasm "$name" "$a")
       if median=$(median_of "$out") && [ -n "$median" ]; then
         echo "::error::wasm-runtime[$name]: walled row now BENCHES (${median} ms) — flip the row to measured (--measure) in this change"
         fail=1
