@@ -662,6 +662,18 @@ fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
         {
             return format!("&*({})", render_expr(ctx, value));
         }
+        // #617: a module global stores the RAW Bytes/Matrix shape, and a bare
+        // read of it stays raw — which a runtime callee's `&Vec<u8>` takes,
+        // but a USER fn's parameter is `&AlmideRcCow<Vec<u8>>` (rustc E0308
+        // on `f(global_bytes)`). Borrow the glued value instead: it derefs
+        // to the raw shape for runtime callees, so it serves both.
+        if let IrExprKind::Var { id } = &inner.kind
+            && ctx.ann.global(*id).is_some()
+            && rc_cow_needs_glue(&inner.ty)
+        {
+            let glued = rc_cow_result_glue(render_expr(ctx, inner), &inner.ty);
+            return format!("&{}", glued);
+        }
         format!("&{}", render_expr(ctx, inner))
     }
 }
