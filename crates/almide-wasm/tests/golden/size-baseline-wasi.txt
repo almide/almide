@@ -441,10 +441,10 @@
 7235	spec/wasm_cross/math_atan_tanh.almd
 3403	spec/wasm_cross/math_choose_exact.almd
 8459	spec/wasm_cross/math_explog.almd
-19656	spec/wasm_cross/math_log_gamma.almd
-16025	spec/wasm_cross/math_log_gamma_negative.almd
+19983	spec/wasm_cross/math_log_gamma.almd
+16339	spec/wasm_cross/math_log_gamma_negative.almd
 9712	spec/wasm_cross/math_pow.almd
-21542	spec/wasm_cross/math_transcendental_bits.almd
+20747	spec/wasm_cross/math_transcendental_bits.almd
 22558	spec/wasm_cross/matrix_composition_family.almd
 3928	spec/wasm_cross/matrix_dims_guard.almd
 2824	spec/wasm_cross/matrix_dims_guard_overflow.almd
@@ -454,7 +454,7 @@
 16718	spec/wasm_cross/matrix_elementwise_family.almd
 8334	spec/wasm_cross/matrix_from_bytes_count_domain.almd
 9232	spec/wasm_cross/matrix_from_bytes_offset_domain.almd
-21919	spec/wasm_cross/matrix_head_count_domain.almd
+22046	spec/wasm_cross/matrix_head_count_domain.almd
 8134	spec/wasm_cross/matrix_index_domain_family.almd
 4594	spec/wasm_cross/matrix_linear_f32_empty_extent_ceiling.almd
 8906	spec/wasm_cross/matrix_neg_signed_zero.almd
@@ -628,8 +628,8 @@
 5259	spec/wasm_cross/result_uoe_float.almd
 7100	spec/wasm_cross/result_value_int_tuple.almd
 11918	spec/wasm_cross/result_wall_escalations.almd
-24197	spec/wasm_cross/rope_at_family.almd
-22791	spec/wasm_cross/rope_geometry_family.almd
+24324	spec/wasm_cross/rope_at_family.almd
+22918	spec/wasm_cross/rope_geometry_family.almd
 2392	spec/wasm_cross/scalar_if_arm_effects.almd
 3546	spec/wasm_cross/scan_heap_acc.almd
 3380	spec/wasm_cross/scoped_region_value.almd
@@ -766,7 +766,7 @@
 1605	spec/wasm_cross/top_let_div_used.almd
 5413	spec/wasm_cross/top_let_stored_in_container.almd
 1559	spec/wasm_cross/toplevel_const_wrapping.almd
-15506	spec/wasm_cross/trig_libm.almd
+14711	spec/wasm_cross/trig_libm.almd
 2599	spec/wasm_cross/tuple_eq.almd
 2323	spec/wasm_cross/tuple_ops.almd
 1842	spec/wasm_cross/tuple_single.almd
@@ -825,4 +825,4 @@
 3612	spec/wasm_fail/matrix_linear_row_bias_aborts.almd
 2717	spec/wasm_fail/matrix_ragged_from_lists_aborts.almd
 3546	spec/wasm_fail/matrix_shape_mismatch_aborts.almd
-16921	spec/wasm_fail/rope_geometry_exceeds_aborts.almd
+17048	spec/wasm_fail/rope_geometry_exceeds_aborts.almd

@@ -442,9 +442,9 @@
 25	0	480	25	spec/wasm_cross/math_choose_exact.almd
 49	45	2456	49	spec/wasm_cross/math_explog.almd
 4	3	70	4	spec/wasm_cross/math_log_gamma.almd
-123	112	2119	123	spec/wasm_cross/math_log_gamma_negative.almd
+113	102	1879	113	spec/wasm_cross/math_log_gamma_negative.almd
 29	26	795	29	spec/wasm_cross/math_pow.almd
-6	5	144	6	spec/wasm_cross/math_transcendental_bits.almd
+0	0	0	0	spec/wasm_cross/math_transcendental_bits.almd
 265	155	5615	175	spec/wasm_cross/matrix_composition_family.almd
 29	3	416	29	spec/wasm_cross/matrix_dims_guard.almd
 8	0	210	1	spec/wasm_cross/matrix_dims_guard_overflow.almd
@@ -454,7 +454,7 @@
 240	139	3664	151	spec/wasm_cross/matrix_elementwise_family.almd
 30	4	408	6	spec/wasm_cross/matrix_from_bytes_count_domain.almd
 31	8	346	21	spec/wasm_cross/matrix_from_bytes_offset_domain.almd
-52	15	3765	48	spec/wasm_cross/matrix_head_count_domain.almd
+40	4	3477	36	spec/wasm_cross/matrix_head_count_domain.almd
 26	12	447	26	spec/wasm_cross/matrix_index_domain_family.almd
 30	19	357	24	spec/wasm_cross/matrix_linear_f32_empty_extent_ceiling.almd
 32	10	557	24	spec/wasm_cross/matrix_neg_signed_zero.almd
@@ -628,8 +628,8 @@
 7	2	83	5	spec/wasm_cross/result_uoe_float.almd
 12	1	138	12	spec/wasm_cross/result_value_int_tuple.almd
 6	0	83	5	spec/wasm_cross/result_wall_escalations.almd
-96	72	3024	96	spec/wasm_cross/rope_at_family.almd
-64	41	1730	64	spec/wasm_cross/rope_geometry_family.almd
+68	44	2352	68	spec/wasm_cross/rope_at_family.almd
+54	31	1490	54	spec/wasm_cross/rope_geometry_family.almd
 4	0	28	2	spec/wasm_cross/scalar_if_arm_effects.almd
 9	1	93	9	spec/wasm_cross/scan_heap_acc.almd
 2070	30	41604	2070	spec/wasm_cross/scoped_region_value.almd
@@ -766,7 +766,7 @@
 0	0	0	0	spec/wasm_cross/top_let_div_used.almd
 77	54	578	68	spec/wasm_cross/top_let_stored_in_container.almd
 0	0	0	0	spec/wasm_cross/toplevel_const_wrapping.almd
-369	358	64169	369	spec/wasm_cross/trig_libm.almd
+312	302	62801	312	spec/wasm_cross/trig_libm.almd
 10	0	184	10	spec/wasm_cross/tuple_eq.almd
 7	1	108	5	spec/wasm_cross/tuple_ops.almd
 1	0	8	1	spec/wasm_cross/tuple_single.almd

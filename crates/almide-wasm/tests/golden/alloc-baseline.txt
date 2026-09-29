@@ -444,7 +444,7 @@
 66400	spec/wasm_cross/math_log_gamma.almd
 67264	spec/wasm_cross/math_log_gamma_negative.almd
 66928	spec/wasm_cross/math_pow.almd
-66224	spec/wasm_cross/math_transcendental_bits.almd
+66160	spec/wasm_cross/math_transcendental_bits.almd
 70832	spec/wasm_cross/matrix_composition_family.almd
 66976	spec/wasm_cross/matrix_dims_guard.almd
 66352	spec/wasm_cross/matrix_dims_guard_overflow.almd
@@ -454,7 +454,7 @@
 69648	spec/wasm_cross/matrix_elementwise_family.almd
 67392	spec/wasm_cross/matrix_from_bytes_count_domain.almd
 67120	spec/wasm_cross/matrix_from_bytes_offset_domain.almd
-73184	spec/wasm_cross/matrix_head_count_domain.almd
+73120	spec/wasm_cross/matrix_head_count_domain.almd
 67104	spec/wasm_cross/matrix_index_domain_family.almd
 66464	spec/wasm_cross/matrix_linear_f32_empty_extent_ceiling.almd
 67456	spec/wasm_cross/matrix_neg_signed_zero.almd
@@ -766,7 +766,7 @@
 65856	spec/wasm_cross/top_let_div_used.almd
 66592	spec/wasm_cross/top_let_stored_in_container.almd
 65760	spec/wasm_cross/toplevel_const_wrapping.almd
-69808	spec/wasm_cross/trig_libm.almd
+69744	spec/wasm_cross/trig_libm.almd
 66224	spec/wasm_cross/tuple_eq.almd
 66000	spec/wasm_cross/tuple_ops.almd
 65792	spec/wasm_cross/tuple_single.almd
