@@ -204,7 +204,7 @@ build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; t
 | fft | **2.76×** |
 | strchurn | **0.84×** |
 | listbuild_append | **2.99×** |
-| listbuild_combinator | **3.10×** |
+| listbuild_combinator | **2.95×** |
 | listbuild_prealloc | **2.82×** |
 | mapbuild | **0.82×** |
 

@@ -38,6 +38,6 @@ onebrc                | measured         | 2.14  | 4.01 | 1.87
 fft                   | measured         | 44.12 | 121.57 | 2.76
 strchurn              | measured         | 59.97 | 50.56 | 0.84
 listbuild_append      | measured         | 22.54 | 67.32 | 2.99
-listbuild_combinator  | measured         | 22.62 | 70.04 | 3.10
+listbuild_combinator  | measured         | 22.15 | 65.44 | 2.95
 listbuild_prealloc    | measured         | 21.86 | 61.64 | 2.82
 mapbuild              | measured         | 5.58  | 4.57 | 0.82
