@@ -519,6 +519,7 @@ evidence  = [
   { path = "spec/wasm_cross/module_var_alias_cow.almd", class = "fixture" },
   { path = "spec/wasm_cross/witness_straightline.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_set_in_place.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_writer_mut_from_declaration.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_push_on_record_field.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_pop_map_insert_on_record_field.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_alias_cow.almd", class = "fixture" },
@@ -3874,6 +3875,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/closure_captured_list_mutation.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_captured_map_records.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_writer_mut_from_declaration.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-320"
