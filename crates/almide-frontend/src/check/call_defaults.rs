@@ -1,0 +1,88 @@
+//! A call into another module that leaves out defaulted parameters gets those
+//! defaults written into the call, as named arguments, before the call is
+//! checked — so they are type-checked where they are filled, in the caller.
+//!
+//! A default is written in the callee's module. Filled only at lowering, its
+//! expression was a clone of the callee's parse: its node ids index the
+//! callee's program, and every type lowering read for it was whatever node of
+//! THIS program shared the id. `retype_filled_default` could correct the
+//! default's outermost type from the declared parameter, never what is inside
+//! it: `fallback: Wrapper = Wrap(7)` lowered its `7` as a `String`. The native
+//! leg rendered it regardless; the MIR lowering, which trusts the types, could
+//! not, and walled the calling function.
+//!
+//! Filled here, the default is the expression the caller would have written —
+//! the callee's own names qualified by the caller's import alias
+//! (`surface.Top`), an earlier parameter's reference replaced by that
+//! parameter's argument (#664) — with fresh ids from the checker's own range,
+//! so the checker types every node of it in the caller's type map. Lowering
+//! then finds every parameter given and fills nothing.
+//!
+//! Calls into the bundled stdlib keep the lowering fill: its defaults are
+//! checked with the stdlib, and its calls are everywhere.
+
+use std::collections::HashMap;
+
+use almide_base::intern::{Sym, sym};
+use almide_lang::ast::{self, ExprKind};
+
+use super::Checker;
+
+impl Checker {
+    pub(crate) fn fill_cross_module_defaults(
+        &mut self,
+        callee: &ast::Expr,
+        args: &[ast::Expr],
+        named_args: &mut Vec<(Sym, ast::Expr)>,
+    ) {
+        let ExprKind::Member { object, field, .. } = &callee.kind else { return };
+        let ExprKind::Ident { name: alias, .. } = &object.kind else { return };
+        // `record.method(...)` on a value is a field call, not a module's fn.
+        if self.env.lookup_var(alias).is_some() {
+            return;
+        }
+        let Some(module) = self.env.import_table.resolve(alias.as_str()) else { return };
+        if almide_lang::stdlib_info::is_bundled_module(module.as_str()) {
+            return;
+        }
+        let key = sym(&format!("{}.{}", module, field));
+        let Some(defaults) = self.env.fn_defaults.get(&key).cloned() else { return };
+        let Some(sig) = self.env.functions.get(&key).cloned() else { return };
+        let params: Vec<Sym> = sig.params.iter().map(|(n, _)| sym(&n.to_string())).collect();
+        if args.len() > params.len() {
+            return;
+        }
+        // What each parameter is given at this call, for a default that names
+        // an earlier one (`fn rect(w: Int, h: Int = w)`).
+        let mut given: HashMap<Sym, ast::Expr> = args.iter().zip(&params).map(|(a, p)| (*p, a.clone())).collect();
+        given.extend(named_args.iter().map(|(n, e)| (*n, e.clone())));
+        for (j, param) in params.iter().enumerate().skip(args.len()) {
+            if named_args.iter().any(|(n, _)| n == param) {
+                continue;
+            }
+            // No default: the missing argument is the arity check's to report.
+            let Some(Some(default)) = defaults.get(j) else { continue };
+            let mut filled = default.clone();
+            crate::lower::qualify_callee_module_idents(&mut filled, module, &self.env);
+            crate::lower::substitute_call_params(&mut filled, &given);
+            self.renumber_synthesized(&mut filled);
+            given.insert(*param, filled.clone());
+            named_args.push((*param, filled));
+        }
+        // In parameter order, the order lowering places and evaluates them in:
+        // the named-argument check lines the appended slots up with the
+        // parameters they name, and a filled default must not land between a
+        // written argument and its own slot.
+        named_args.sort_by_key(|(n, _)| params.iter().position(|p| p == n).unwrap_or(usize::MAX));
+    }
+
+    /// Give every node of `expr` a fresh id from the checker's own range.
+    fn renumber_synthesized(&mut self, expr: &mut ast::Expr) {
+        let mut next = self.next_synth_expr_id;
+        ast::visit_expr_mut(expr, &mut |e| {
+            e.id = ast::ExprId(next);
+            next += 1;
+        });
+        self.next_synth_expr_id = next;
+    }
+}

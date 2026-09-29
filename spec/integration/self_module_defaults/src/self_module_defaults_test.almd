@@ -23,6 +23,13 @@ test "named options, the rest from defaults" {
   )
 }
 
+test "named options out of parameter order" {
+  assert_eq(
+    surface.describe("panel", margin: 4, keyboard: surface.OnDemand, layer: surface.Bottom),
+    "panel bottom on-demand h30 m4",
+  )
+}
+
 test "positional options, the rest from defaults" {
   assert_eq(
     surface.describe("wallpaper", surface.Background),

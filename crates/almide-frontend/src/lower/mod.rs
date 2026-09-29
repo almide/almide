@@ -32,6 +32,7 @@ mod derive_codec;
 mod auto_try;
 
 use expressions::lower_expr;
+pub(crate) use calls::{qualify_callee_module_idents, substitute_call_params};
 use types::resolve_type_expr;
 use derive::generate_auto_derives;
 
