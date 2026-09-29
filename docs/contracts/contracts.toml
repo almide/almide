@@ -180,6 +180,7 @@ evidence  = [
   { path = "spec/wasm_cross/top_let_div_eager.almd", class = "fixture" },
   { path = "spec/wasm_cross/top_let_div_used.almd", class = "fixture" },
   { path = "spec/wasm_cross/top_let_closure_eager.almd", class = "fixture" },
+  { path = "spec/wasm_cross/top_let_eager_through_call.almd", class = "fixture" },
 ]
 
 # ── COMPOUND / RECORD / RECURSIVE REPR INTERPOLATION (PR #379) ───────
