@@ -3013,6 +3013,19 @@ Declared, not probed (host-capability). timeout_ms is MILLISECONDS; 0 checks wit
 """
 
 [[net.fn]]
+name = "unix_wait"
+index_unit = "millisecond"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). timeout_ms is MILLISECONDS and the
+result the READY subset of fds (raw descriptors), in the order given. Measured
+natively: with two connected sockets and data on the second only,
+unix_wait([a, b], 1000) returned [b] at once, and unix_wait([a, b], 0) with
+nothing queued returned [].
+"""
+
+[[net.fn]]
 name = "unix_close"
 index_unit = "file-descriptor"
 probe = "1"

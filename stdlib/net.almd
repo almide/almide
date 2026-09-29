@@ -94,6 +94,10 @@ effect fn unix_take_fds(sock: Int) -> List[Int] = _
 @intrinsic("almide_rt_net_unix_poll")
 effect fn unix_poll(fd: Int, timeout_ms: Int) -> Result[Bool, String] = _
 
+/// The fds readable within timeout_ms, in order; < 0 waits for one.
+@intrinsic("almide_rt_net_unix_wait")
+effect fn unix_wait(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String] = _
+
 /// Closes a socket, listener or received descriptor.
 @intrinsic("almide_rt_net_unix_close")
 effect fn unix_close(fd: Int) -> Result[Unit, String] = _

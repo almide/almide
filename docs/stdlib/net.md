@@ -123,6 +123,12 @@ Whether `fd` has something to read (data, a connection, or the peer's close)
 within `timeout_ms` — `0` checks without waiting, a negative timeout waits as long
 as it takes. This is what an event loop needs to pump without blocking.
 
+### `effect net.unix_wait(fds: List[Int], timeout_ms: Int) -> List[Int]`
+
+The descriptors among `fds` that are readable within `timeout_ms`, in the order
+given — one wait for several sources (a Wayland socket and a compositor's event
+socket), where `unix_poll` waits for one. Empty when none became readable.
+
 ### `effect net.unix_close(fd: Int) -> Unit`
 
 Close a socket, a listener, a shared-memory file or a received descriptor.
@@ -157,7 +163,7 @@ effect fn share() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (24 functions)
+## Signature index (25 functions)
 
 ```
 // Connected stream handle; err if refused.
@@ -235,6 +241,10 @@ effect net.unix_take_fds(sock: Int) -> List[Int]
 // True if fd is readable within timeout_ms; < 0 waits forever.
 // @since unreleased
 effect net.unix_poll(fd: Int, timeout_ms: Int) -> Bool
+
+// The fds readable within timeout_ms, in order; < 0 waits for one.
+// @since unreleased
+effect net.unix_wait(fds: List[Int], timeout_ms: Int) -> List[Int]
 
 // Closes a socket, listener or received descriptor.
 // @since unreleased

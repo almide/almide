@@ -608,6 +608,16 @@ reason-structural = "host-surface (native-only-forever)"
 issue = "#1423"
 
 [[unavailable]]
+fn = "net.unix_wait"
+legs = ["embedded", "stock-p1", "structural"]
+class = "native-only-forever"
+justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a Unix-domain socket that carries file descriptors — the IPC floor of Wayland and PipeWire, which only exists natively"
+reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
+reason-structural = "host-surface (native-only-forever)"
+issue = "#1423"
+
+[[unavailable]]
 fn = "net.unix_close"
 legs = ["embedded", "stock-p1", "structural"]
 class = "native-only-forever"
