@@ -310,3 +310,7 @@ spec/wasm_cross/lambda_failure_channel.almd :: typed_slot
 # on native), so the incumbent walls honestly. The structural leg serves it
 # byte-identically to native.
 spec/wasm_cross/branch_lift_stdlib_mut_arg.almd :: arm_writes
+# #2948: the same shape with the arms calling USER fns named like stdlib
+# mutators (`insert(tag, mut m)`, `push(label, mut xs)`); the lift declines on
+# every leg now, so the incumbent walls honestly on it too.
+spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd :: arm_writes
