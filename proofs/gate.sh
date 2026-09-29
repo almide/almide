@@ -462,6 +462,29 @@ tamper_structural '<lambda#0>' '1s/^id$/i/' "#2758 lambda param"
 run_structural spec/wasm_cross/witness_straightline.almd apply_len 0
 tamper_structural apply_len 's/^am$/a/' "#2758 closure call argument"
 
+# ── #2758: the CALL-MODE witness of the structural leg. Per-frame
+# certificates compose only if every call site hands each heap argument over
+# as its callee's frame assumed (a move into a borrowed param leaks, a lend to
+# an owned param frees twice). The emitter records each table fn's frame
+# convention and each Named / linked site's actual hand-over; the stream is
+# judged by CallModes.check_modes_cert. Drill: one site's move becomes a
+# borrow against its callee's signature.
+echo
+echo "== structural leg, call modes  ⊳  proven checker (#2758) =="
+(cd "$ROOT" && cargo run -q -p almide-wasm --example emit_call_modes -- spec/wasm_cross/witness_straightline.almd) > /tmp/structural.modes
+set +e; "$ROOT/proofs/checker" call-modes /tmp/structural.modes >/tmp/gate.out 2>&1; src_rc=$?; set -e
+if [ "$src_rc" -ne 0 ]; then echo "FAIL [structural] call-modes: rejected ($(cat /tmp/gate.out))"; exit 1; fi
+kernel_verify call-modes /tmp/structural.modes 0   || { echo "FAIL [structural] call-modes: KERNEL oracle disagrees"; exit 1; }
+portable_agrees call-modes /tmp/structural.modes 0 || { echo "FAIL [structural] call-modes: almide-verify disagrees"; exit 1; }
+echo "ok   [structural] call-modes: every site of witness_straightline agrees with its callee (kernel + almide-verify agree)"
+sed -E 's/\|([0-9]+) 1/|\1 0/' /tmp/structural.modes > /tmp/structural.modes.tamper
+if cmp -s /tmp/structural.modes /tmp/structural.modes.tamper; then echo "FAIL structural-tamper(#2758 call modes): the drill changed nothing"; exit 1; fi
+set +e; "$ROOT/proofs/checker" call-modes /tmp/structural.modes.tamper >/dev/null 2>&1; src_rc=$?; set -e
+if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper(#2758 call modes): a mode mismatch was accepted"; exit 1; fi
+kernel_verify call-modes /tmp/structural.modes.tamper 1   || { echo "FAIL structural-tamper(#2758 call modes): the kernel accepted the mismatch"; exit 1; }
+portable_agrees call-modes /tmp/structural.modes.tamper 1 || { echo "FAIL structural-tamper(#2758 call modes): almide-verify accepted the mismatch"; exit 1; }
+echo "ok   structural-tamper(#2758 call modes): a site that lends where its callee takes a credit is rejected by the binary AND the kernel"
+
 # ── #2152: almide-verify against the extracted checker on witnesses NO
 # producer wrote. The rows above only reach the shapes the emitters produce;
 # the transcription must agree on the whole input space, malformed bytes

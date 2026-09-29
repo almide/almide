@@ -225,6 +225,19 @@ fn per_fixture_ratchets(pf: &PerFixture, update: bool) {
     );
 }
 
+/// #2758: judge every emission pass's call-mode witness of the program just
+/// emitted; returns how many were judged, pushing each rejection.
+fn judge_call_modes(rel: &str, rejected: &mut Vec<(String, String)>) -> usize {
+    let passes = almide_wasm::witness::take_modes();
+    let n = passes.len();
+    for (pass, w) in passes {
+        if !almide_verify::check(almide_verify::Property::CallModes, w.as_bytes()) {
+            rejected.push((format!("{rel} [pass {pass}]"), w));
+        }
+    }
+    n
+}
+
 #[cfg_attr(debug_assertions, ignore = "corpus sweep is release-only (CI: release-shape job)")]
 #[test]
 fn structural_witnesses_balance_and_hold_the_floor() {
@@ -243,6 +256,9 @@ fn structural_witnesses_balance_and_hold_the_floor() {
     let mut poisoned: Vec<String> = Vec::new();
     let mut unbalanced: Vec<(String, String)> = Vec::new();
     let mut nondet: Vec<String> = Vec::new();
+    // #2758: the program-level call-mode witness of every pass.
+    let mut modes_rejected: Vec<(String, String)> = Vec::new();
+    let mut modes_checked = 0usize;
     let dump = std::env::var("ALMIDE_WITNESS_DUMP").is_ok();
     let mut per_fixture = PerFixture::default();
     for line in almide_corpus::manifest_rows(&manifest) {
@@ -253,6 +269,7 @@ fn structural_witnesses_balance_and_hold_the_floor() {
         almide_wasm::witness::start_collecting();
         let emitted = almide_wasm::emit_program(&ir).is_ok();
         let (frames, shipped) = almide_wasm::witness::take_by_pass();
+        modes_checked += judge_call_modes(rel, &mut modes_rejected);
         per_fixture.record(rel, emitted, &shipped);
         for (pass, name, cert) in frames {
             // The checked pass (no bounded-line rewrites) emits different
@@ -302,10 +319,17 @@ fn structural_witnesses_balance_and_hold_the_floor() {
     }
     eprintln!(
         "[witness-floor] admitted {admitted} function(s), {witnessed} with RC events, {} declined; \
-         {} of {} spec/wasm_cross fixture(s) fully certified",
+         {} of {} spec/wasm_cross fixture(s) fully certified; {modes_checked} call-mode witness(es), {} rejected",
         declined.keys().filter(|k| bounded(k)).count(),
         per_fixture.certified().len(),
-        per_fixture.manifest.len()
+        per_fixture.manifest.len(),
+        modes_rejected.len()
+    );
+    assert!(
+        modes_rejected.is_empty(),
+        "{} call-mode witness(es) rejected — a site hands an argument over unlike its callee's frame assumes:\n{}",
+        modes_rejected.len(),
+        modes_rejected.iter().map(|(k, w)| format!("{k}: {w}")).collect::<Vec<_>>().join("\n")
     );
     assert!(
         nondet.is_empty(),

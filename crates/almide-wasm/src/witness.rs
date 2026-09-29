@@ -480,7 +480,16 @@ fn sink() -> &'static Sink {
 
 pub fn start_collecting() {
     *sink().lock().expect("witness sink") = Some(Vec::new());
+    crate::witness::modes::start();
 }
+
+/// The call-mode witness of every emission pass (#2758, witness_modes.rs):
+/// `(pass, "<signatures>|<sites>")`, for `almide-verify call-modes`.
+pub use modes::take as take_modes;
+
+/// The call-mode witness sink (split for the file budget).
+#[path = "witness_modes.rs"]
+pub(crate) mod modes;
 
 /// Every frame the sweep collected, over EVERY emission pass (the pass
 /// markers are stripped).
@@ -499,6 +508,7 @@ const SHIPPED_MARK: &str = "\u{0}shipped";
 
 /// Both markers go through `push`, a no-op unless a sweep collects.
 pub(crate) fn mark_pass(pass: usize) {
+    crate::witness::modes::begin_pass(pass);
     push(PASS_MARK, pass.to_string());
 }
 
