@@ -60,8 +60,11 @@ pub fn lower_mut_params_move_mode(program: &mut IrProgram) -> bool {
     if mut_fns.is_empty() {
         return false;
     }
+    // Read before `rewrite_signatures` strips a declared-Result body's ok layer.
+    let never_err = crate::mut_param_unpropagated::never_err_effect_keys(program, |k| mut_fns.contains_key(k));
     rewrite_signatures(program, &mut_fns);
     rewrite_call_sites(program, &mut_fns);
+    crate::mut_param_unpropagated::settle(program, &never_err);
     fold_tail_writebacks(program, &mut_fns);
     hoist_branch_writebacks(program);
     true
@@ -573,7 +576,7 @@ fn fold_if_arms(e: &mut IrExpr, p: VarId, mut_ty: &Ty, scope: &str, mut_fns: &Mu
 /// This is what makes a user `fn replace` immune to stdlib/string.almd's
 /// unrelated `replace` (#1558: the old GLOBAL bare count silently excluded the
 /// user fn from the rewrite and the wall message never said why).
-fn scope_key(scope: &str, name: &str) -> String {
+pub(crate) fn scope_key(scope: &str, name: &str) -> String {
     format!("{scope}\u{1}{name}")
 }
 
@@ -585,7 +588,7 @@ fn scope_key(scope: &str, name: &str) -> String {
 /// entry points were collected (the dotted key existed) but their call
 /// sites never rewrote, and the callee's tuple met the caller's record
 /// (structural `ty-mismatch:Tuple-vs-Named`).
-fn call_spelling(target: &CallTarget) -> Option<String> {
+pub(crate) fn call_spelling(target: &CallTarget) -> Option<String> {
     match target {
         CallTarget::Named { name } => Some(name.to_string()),
         // A STDLIB module call (`list.clear(xs)`, `string.push(s, c)`) is
