@@ -139,11 +139,15 @@ impl Emitter<'_> {
             let mut i = self.f.instructions();
             i.local_get(iidx).i64_const(guard).i64_lt_s().i32_eqz().br_if(1);
         }
+        // One iteration of the fast lane is K copies of the body: one
+        // activation for the witness (#2757).
+        self.witness_loop_open();
         for _ in 0..UNROLL {
             for st in body {
                 self.lower_stmt(st)?;
             }
         }
+        self.witness_loop_close();
         self.f.instructions().br(0).end().end();
         Ok(true)
     }

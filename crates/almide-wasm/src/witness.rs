@@ -65,12 +65,16 @@ use crate::witness_paths::{Branches, Ev};
 
 pub struct WitnessRecorder {
     next_obj: u32,
-    obj_of_local: HashMap<u32, u32>,
+    /// Every local some hook bound, with the loop depth it was bound at
+    /// (#2757: a rebind from a deeper loop is a loop-carried assign).
+    bound: HashMap<u32, u32>,
     /// Every event in emission order, with the branch structure it was
     /// emitted under (#2756); rendered per object by witness_paths.rs.
     log: Vec<Ev>,
-    /// The open branch sites and what is dead code right now.
+    /// The open branch sites and loops, and what is dead code right now.
     branches: Branches,
+    /// How many loop bodies the emitter is inside (#2757).
+    loop_depth: u32,
     /// A hook saw an event it could not attribute — the gate and the
     /// hooks disagree. The certificate becomes the loud `!poison`
     /// sentinel the floor test FAILS on, never a silent under-count.
@@ -101,9 +105,10 @@ impl WitnessRecorder {
     pub fn new() -> Self {
         Self {
             next_obj: 0,
-            obj_of_local: HashMap::new(),
+            bound: HashMap::new(),
             log: Vec::new(),
             branches: Branches::default(),
+            loop_depth: 0,
             poisoned: false,
             declined: None,
             hooked: Vec::new(),
@@ -144,39 +149,54 @@ impl WitnessRecorder {
         o
     }
 
-    fn fresh_obj(&mut self, local: u32) -> u32 {
-        let o = self.new_obj();
-        self.obj_of_local.insert(local, o);
-        o
-    }
-
-    /// Record `ops` on object `o`, unless this is dead code (after an exit
-    /// on this path — the instructions are emitted but never run).
-    fn ops(&mut self, o: u32, ops: &str) {
+    /// Log `ev` unless this is dead code (after an exit or a jump on this
+    /// path — the instructions are emitted but never run).
+    fn log(&mut self, ev: Ev) {
         if !self.branches.dead() {
-            self.log.extend(ops.chars().map(|c| Ev::Op(o, c)));
+            self.log.push(ev);
         }
     }
 
+    /// `local` now holds a new object (`owner`: the local releases it).
+    fn fresh_obj(&mut self, local: u32, owner: bool) -> u32 {
+        let o = self.new_obj();
+        self.log(Ev::Bind { local, obj: o, owner });
+        let d = self.loop_depth;
+        self.bound.insert(local, d);
+        o
+    }
+
+    /// Record `ops` on object `o`.
+    fn ops(&mut self, o: u32, ops: &str) {
+        for c in ops.chars() {
+            self.log(Ev::Op(o, c));
+        }
+    }
+
+    /// Record `ops` on the block `local` holds (resolved per path).
     fn held_ops(&mut self, local: u32, ops: &str) -> bool {
-        let Some(&o) = self.obj_of_local.get(&local) else { return false };
-        self.ops(o, ops);
+        if !self.bound.contains_key(&local) {
+            return false;
+        }
+        for c in ops.chars() {
+            self.log(Ev::LOp(local, c));
+        }
         true
     }
 
     /// A droppable param: callee-owned (+1 pre-paid by the call site's
     /// rc_arg_guard) — the object is born owned in this frame.
     pub fn param_owned(&mut self, local: u32) {
-        let o = self.fresh_obj(local);
+        let o = self.fresh_obj(local, true);
         self.ops(o, "i");
     }
 
     /// A droppable param this frame only BORROWS (param_borrow.rs, #2028):
     /// the object is known, no credit of it is held here — a share or a
     /// ret-move on it balances against nothing this frame owns. A pattern
-    /// bind (a view of the subject's payload, #2756) is the same.
+    /// bind or a loop variable (a view, #2756 / #2757) is the same.
     pub fn param_borrowed(&mut self, local: u32) {
-        self.fresh_obj(local);
+        self.fresh_obj(local, false);
     }
 
     /// A fresh temporary lent to a borrowed param: born at the site,
@@ -187,19 +207,78 @@ impl WitnessRecorder {
     }
 
     /// Bind of a certainly-fresh rhs (heap literal, block copy): a new
-    /// object, one ownership.
+    /// object, one ownership. The Bind route released the local's previous
+    /// occupant first (dec-old): a real release only when that block was
+    /// bound earlier in the same iteration (#2757, witness_paths.rs).
     pub fn bind_fresh(&mut self, local: u32) {
-        let o = self.fresh_obj(local);
+        self.log(Ev::DecOld(local));
+        let o = self.new_obj();
         self.ops(o, "i");
+        self.log(Ev::Bind { local, obj: o, owner: true });
+        let d = self.loop_depth;
+        self.bound.insert(local, d);
     }
 
     /// Bind of a borrowed Var rhs: the SOURCE local's object gains a
     /// share (`rc_inc_top` at the bind), and the new local aliases it.
     pub fn bind_alias(&mut self, local: u32, src_local: u32) -> bool {
-        let Some(&o) = self.obj_of_local.get(&src_local) else { return false };
-        self.obj_of_local.insert(local, o);
-        self.ops(o, "a");
+        if !self.held_ops(src_local, "a") {
+            return false;
+        }
+        self.log(Ev::DecOld(local));
+        self.log(Ev::Alias { local, src: src_local, owner: true });
+        let d = self.loop_depth;
+        self.bound.insert(local, d);
         true
+    }
+
+    /// An `Assign` (#2757): the old occupant was released by the route
+    /// (`released_old`), and the local now holds the rhs — a new object
+    /// (`src = None`) or a share of `src`'s. A var bound outside the loop
+    /// being assigned declines: its block at the loop head differs per
+    /// iteration, which one activation line cannot carry.
+    pub fn assign(&mut self, local: u32, released_old: bool, src: Option<u32>) -> bool {
+        match self.bound.get(&local) {
+            None => return false,
+            Some(&d) if d < self.loop_depth => {
+                self.decline("loop-carried-assign");
+                return true;
+            }
+            Some(_) => {}
+        }
+        if released_old {
+            self.held_ops(local, "d");
+        }
+        match src {
+            None => {
+                let o = self.new_obj();
+                self.ops(o, "i");
+                self.log(Ev::Bind { local, obj: o, owner: true });
+            }
+            Some(s) => {
+                if !self.held_ops(s, "a") {
+                    return false;
+                }
+                self.log(Ev::Alias { local, src: s, owner: true });
+            }
+        }
+        true
+    }
+
+    /// A `for` / `while` body opens / closes (#2757), and a `break` /
+    /// `continue` ends an iteration.
+    pub fn loop_open(&mut self) {
+        self.branches.loop_open(&mut self.log);
+        self.loop_depth += 1;
+    }
+
+    pub fn loop_close(&mut self) {
+        self.branches.loop_close(&mut self.log);
+        self.loop_depth = self.loop_depth.saturating_sub(1);
+    }
+
+    pub fn loop_jump(&mut self) {
+        self.branches.jump(&mut self.log);
     }
 
     /// The heap return of a bound Var: the ret-inc instruction is the

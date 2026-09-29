@@ -36,9 +36,38 @@ impl Emitter<'_> {
         }
         self.f.instructions().local_get(idx);
         self.lower(right, Some(STR))?;
+        // `$str_append` BORROWS its operand: an owned one (the call result
+        // `concat_operands` unwrapped from arg_temps' `{ let t = …; s + t }`)
+        // is released right after, or `s = s + int.to_string(i)` leaked one
+        // block per append (#2757: the witness found the unrecorded object).
+        let release = self.hold_owned_operand(right)?;
         self.f.instructions().call(F_STR_APPEND).local_set(idx);
+        self.release_owned_operand(release);
         self.rc_own(idx, STR);
         Ok(true)
+    }
+
+    /// An OWNED string operand on the stack that a borrowing helper is about
+    /// to read: parked (teed) in a hold so the site releases it after the
+    /// helper; `None` for a borrowed or pool-static operand (nothing to
+    /// release). The witness records the pair (`id`).
+    pub(crate) fn hold_owned_operand(&mut self, e: &IrExpr) -> Result<Option<u32>, EmitError> {
+        if matches!(e.kind, IrExprKind::LitStr { .. }) || !self.rc_owned_result(e) {
+            return Ok(None);
+        }
+        let h = self.hold_i32()?;
+        self.f.instructions().local_tee(h);
+        self.witness_discard();
+        Ok(Some(h))
+    }
+
+    /// Release what `hold_owned_operand` parked (stack-neutral).
+    pub(crate) fn release_owned_operand(&mut self, held: Option<u32>) {
+        if let Some(h) = held {
+            let dec = self.dec_fn_of(STR);
+            self.f.instructions().local_get(h).call(dec);
+            self.release_i32();
+        }
     }
 
     /// The list twin of [`Self::try_str_append_assign`] (#1729):
@@ -90,6 +119,7 @@ impl Emitter<'_> {
         // `$list_push`'s grow path frees the outgrown SPINE untyped, so the
         // elements it memcpy'd keep exactly one credit each.
         self.rc_share_guard(elem, el);
+        self.witness_store(elem, el);
         let push = if el.slot_size() == 8 { F_LIST_PUSH_8 } else { F_LIST_PUSH_4 };
         self.f.instructions().call(push).local_set(idx);
         self.rc_own(idx, SliceTy::List(h));

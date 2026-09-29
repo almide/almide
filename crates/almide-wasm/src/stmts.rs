@@ -50,6 +50,7 @@ impl Emitter<'_> {
             IrExprKind::Continue => match self.loop_ctl {
                 Some((extra, _)) => {
                     self.f.instructions().br(extra);
+                    self.witness_loop_jump();
                     Ok(())
                 }
                 None => unsup("expr:Continue"),
@@ -57,6 +58,7 @@ impl Emitter<'_> {
             IrExprKind::Break => match self.loop_ctl {
                 Some((extra, delta)) => {
                     self.f.instructions().br(extra + delta);
+                    self.witness_loop_jump();
                     Ok(())
                 }
                 None => unsup("expr:Break"),
@@ -386,7 +388,9 @@ impl Emitter<'_> {
                     self.emit_det_charge_const(1);
                     self.range_exit_test(var_idx, floor, stop, *inclusive);
                     self.f.instructions().br_if(1);
+                    self.witness_loop_open();
                     self.lower_loop_body(body, true)?;
+                    self.witness_loop_close();
                     self.f
                         .instructions()
                         .local_get(var_idx)
@@ -421,7 +425,9 @@ impl Emitter<'_> {
                         self.emit_det_charge_const(1);
                         self.range_exit_test(var_idx, sl, el, inclusive);
                         self.f.instructions().br_if(1);
+                        self.witness_loop_open();
                         self.lower_loop_body(body, true)?;
+                        self.witness_loop_close();
                         self.f
                             .instructions()
                             .local_get(var_idx)
@@ -460,6 +466,9 @@ impl Emitter<'_> {
                         if !self.rc_owned_result(iterable) {
                             self.rc_inc_top();
                         }
+                        // The cursor's share and its release after the loop
+                        // are not recorded yet (#2757).
+                        self.witness_decline("forin-map");
                         let drop_map = self.dec_fn_of(SliceTy::Map(kh, vh));
                         let bh = self.hold_i32()?;
                         let cur = self.hold_i32()?;
@@ -532,8 +541,10 @@ impl Emitter<'_> {
                     .i32_const(stride as i32)
                     .i32_mul()
                     .i32_add();
+                self.witness_loop_open();
                 self.load_ty_slot(elem, 0);
                 self.f.instructions().local_set(var_idx);
+                self.witness_view_local(var_idx, elem);
                 // for (a, b) in pairs — the loop var holds the tuple base;
                 // load each position into its destructured local.
                 if let Some(tvars) = var_tuple {
@@ -551,9 +562,11 @@ impl Emitter<'_> {
                         self.f.instructions().local_get(var_idx);
                         self.load_ty_slot(fty, off);
                         self.f.instructions().local_set(tidx);
+                        self.witness_view_local(tidx, fty);
                     }
                 }
                 self.lower_loop_body(body, true)?;
+                self.witness_loop_close();
                 self.f
                     .instructions()
                     .local_get(cur)
@@ -628,6 +641,15 @@ impl Emitter<'_> {
                     let dec = self.dec_fn_of(declared);
                     self.f.instructions().local_get(idx).call(dec);
                     self.rc_own(idx, declared);
+                }
+                // The witness (#2757): a droppable local's occupant changes
+                // here; a global or a cell is not a frame local's to record.
+                match local {
+                    Some(idx) if self.rc_droppable(declared) && !self.cells.contains(var) => {
+                        self.witness_assign(idx, !rhs_spends_var, rhs_spends_var, value);
+                    }
+                    Some(_) if !self.rc_droppable(declared) => {}
+                    _ => self.witness_decline("assign:global-or-cell"),
                 }
                 // #2010: a C-319 cell's occupant is released as it is
                 // replaced (the cell holds exactly one credit on it) — the
