@@ -30,7 +30,7 @@ module-arm:unaudited:string.clear	2
 module-arm:unaudited:string.push	1
 module-result:view:list.get_or	2
 named-op	11
-rhs:BinOp	802
+rhs:BinOp	803
 rhs:Block	168
 rhs:EmptyMap	3
 rhs:Fan	2
@@ -71,9 +71,9 @@ stmt:Expr:call:target:Computed	1
 stmt:FieldAssign	1
 stmt:Guard	9
 stmt:IndexAssign	9
-tail:BinOp	716
+tail:BinOp	717
 tail:Block	17
-tail:If	4722
+tail:If	4723
 tail:Lambda	10
 tail:MapAccess	5
 tail:Match	479
