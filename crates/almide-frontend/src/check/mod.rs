@@ -34,6 +34,7 @@ mod bang_error_channel;
 mod lambda_channel;
 mod intrinsic_authority;
 mod exhaustiveness;
+mod call_defaults;
 
 use almide_lang::ast;
 use almide_base::diagnostic::Diagnostic;
@@ -145,6 +146,10 @@ pub struct Checker {
     /// `check_named_call` uses this to validate each value against the param it
     /// NAMES (lowering binds by name), not the positional slot it landed in.
     pub(crate) named_arg_meta: Option<(usize, Vec<almide_base::intern::Sym>)>,
+    /// Ids for expressions the checker writes into the tree itself (a
+    /// cross-module call's filled defaults): from the top of the id space,
+    /// which no parse reaches, so they never alias a parsed node's type.
+    pub(crate) next_synth_expr_id: u32,
     /// Expected-type hint for the NEXT lambda argument's parameters (#653).
     /// Set by `check_call_with_type_args` immediately before inferring a lambda
     /// arg whose call-parameter slot is a `Fn`; consumed (taken) by the
@@ -631,6 +636,7 @@ impl Checker {
             arg_spans: Vec::new(),
             shadowed_receiver: None,
             named_arg_meta: None,
+            next_synth_expr_id: 0xC000_0000,
             lambda_arg_hint: None,
             lambda_slot_effect: false,
             lambda_ret_expect: None,
