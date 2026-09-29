@@ -66,6 +66,12 @@ impl Emitter<'_> {
                 self.lower_forin(*var, var_tuple.as_deref(), iterable, body)
             }
             IrExprKind::Unit => Ok(()),
+            // A Unit var read in statement position does nothing. Its local
+            // holds an i32 placeholder that `lower` pushes and types Unit, so
+            // the catch-all below would leave it on the stack (#2945: the tail
+            // of C-132's `{ let (__mp_res, __mp_buf) = f(r)!; r = __mp_buf;
+            // __mp_res }` for a `-> Result[Unit, String]` callee).
+            IrExprKind::Var { id } if matches!(self.locals.get(id), Some(&(_, SliceTy::Unit))) => Ok(()),
             // Statement-position `f()!` / `f()?`: the marker machinery
             // runs (propagation/abort), the ok payload is discarded — and
             // RELEASED when the extraction handed this frame its credit
