@@ -42,7 +42,8 @@ impl Emitter<'_> {
         }
         for e in elements {
             self.f.instructions().local_get(hacc);
-            self.lower(e, Some(el))?;
+            // A scalar carries no ownership event: Borrow is exact.
+            self.lower_arg(e, Some(el), ArgMode::Borrow)?;
             if el == FLOAT {
                 self.f.instructions().i64_reinterpret_f64();
             }
