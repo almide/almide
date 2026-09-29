@@ -420,17 +420,17 @@ pub(crate) fn lower_fn(
         if let Some(name) = &witness_name
             && crate::witness::collecting()
         {
-            let pre_gate = if effect_raw.is_some() {
-                Some("effect".to_string())
-            } else if env_captures.is_some() {
+            let pre_gate = if env_captures.is_some() {
                 Some("captures".to_string())
             } else if !top_lets.is_empty() {
                 Some("top-lets".to_string())
             } else {
                 None
             };
-            let verdict = pre_gate.or_else(|| {
-                crate::witness::straightline_subset(body, ret.is_some_and(crate::witness::heapish_ret))
+            let verdict = pre_gate.or_else(|| match effect_raw {
+                // #2758: an effect frame is certified at its raw ok type.
+                Some(raw) => crate::witness::effect_subset(body, crate::witness::heapish_ret(raw)),
+                None => crate::witness::straightline_subset(body, ret.is_some_and(crate::witness::heapish_ret)),
             });
             match verdict {
                 Some(reason) => crate::witness::push_decline(name, &reason),
@@ -547,11 +547,21 @@ pub(crate) fn lower_fn(
                     // RC-3: the raw payload rides inside the ok carrier
                     // past the epilogue — same borrow rule as the pure
                     // arm, and the +1 must precede the wrap.
-                    if em.rc_droppable(raw) && !em.rc_owned_result(crate::rc_ownership::rc_tail(body)) {
+                    let owned_tail = em.rc_owned_result(crate::rc_ownership::rc_tail(body));
+                    if em.rc_droppable(raw) && owned_tail {
+                        // #2758: the owned payload's credit moves into the slot.
+                        em.witness_tail_owned();
+                    }
+                    if em.rc_droppable(raw) && !owned_tail {
                         em.rc_inc_top();
+                        if em.witness.is_some() {
+                            em.witness_tail_var(crate::rc_ownership::rc_tail(body));
+                        }
                     }
                 }
                 em.wrap_ok(raw, want)?;
+                // #2758: the ok carrier is born here and moves out.
+                em.witness_tail_owned();
             }
         }
         // RC-3 epilogue: the fall-through exit releases every local the
