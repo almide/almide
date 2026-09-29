@@ -1,0 +1,4 @@
+effect fn main() -> Unit = {
+  let x: UInt16 = -128.to_uint16()
+  println("${x.to_int64()}")
+}

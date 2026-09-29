@@ -1,0 +1,2 @@
+expects_error = "operator '-' cannot negate the unsigned type UInt16"
+hint_substring = "(-128).to_uint16()"

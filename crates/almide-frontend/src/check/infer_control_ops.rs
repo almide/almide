@@ -606,7 +606,60 @@ impl Checker {
                 // #2196: `-f()` / `not g()` on an effect call — the same
                 // operand rule as a binary operand, reported at the call.
                 let t = self.operand_effect_unwrap(operand, t);
-                match op.as_str() { "not" => Ty::Bool, _ => t }
+                let resolved = resolve_ty(&t, &self.uf);
+                match op.as_str() {
+                    "not" => {
+                        self.check_unary_not_operand(&resolved);
+                        Ty::Bool
+                    }
+                    _ => {
+                        self.check_unary_neg_operand(&resolved);
+                        t
+                    }
+                }
+    }
+
+    /// The operand rule of prefix `not`: a Bool. Before this the checker
+    /// accepted any operand and `not 5` reached the IR verifier as an
+    /// internal compiler error on both targets.
+    fn check_unary_not_operand(&mut self, t: &Ty) {
+        if matches!(t, Ty::Bool | Ty::Unknown | Ty::TypeVar(_)) {
+            return;
+        }
+        self.emit(super::err(
+            format!("operator 'not' requires Bool but got {}", t.display()),
+            "Use `not` on a Bool; compare first (e.g. `not (x == 0)`)",
+            "operator not"));
+    }
+
+    /// The operand rule of prefix `-`: a SIGNED numeric type. Negation has
+    /// no value in an unsigned domain, and `-128.to_uint16()` (which parses
+    /// as `-(128.to_uint16())`) passed check and then failed the native
+    /// build (`cannot apply unary operator '-' to type u16`) while the wasm
+    /// leg printed a UInt16 of -128 (fuzz seed 585689703896 index 7506).
+    fn check_unary_neg_operand(&mut self, t: &Ty) {
+        match t {
+            Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_)
+            | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+            | Ty::Float32 | Ty::Float64
+            | Ty::Matrix | Ty::Named(..) => {}
+            Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 => {
+                let name = t.display();
+                self.emit(super::err(
+                    format!("operator '-' cannot negate the unsigned type {}", name),
+                    format!(
+                        "Negate the signed value before converting — `(-128).to_{}()` — \
+                         or subtract from zero in the unsigned type (`0.to_{}() - x`)",
+                        name.to_lowercase(), name.to_lowercase()),
+                    "operator -"));
+            }
+            _ => {
+                self.emit(super::err(
+                    format!("operator '-' requires a signed numeric type but got {}", t.display()),
+                    "Use numeric types (Int or Float)",
+                    "operator -"));
+            }
+        }
     }
 
     fn infer_expr_g2_binary(&mut self, expr: &mut ast::Expr) -> Ty {
