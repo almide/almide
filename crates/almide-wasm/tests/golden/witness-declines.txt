@@ -31,8 +31,8 @@ module-arm:unaudited:string.push	1
 module-result:view:list.get_or	2
 named-op	11
 rhs:BinOp	802
-rhs:Block	167
-rhs:EmptyMap	2
+rhs:Block	168
+rhs:EmptyMap	3
 rhs:Fan	2
 rhs:If	665
 rhs:IndexAccess	1
@@ -54,8 +54,8 @@ rhs:UnwrapOr	2
 scan	3
 stmt:Assign	11
 stmt:BindDestructure	16
-stmt:Comment	163
-stmt:Expr:Block	76
+stmt:Comment	164
+stmt:Expr:Block	77
 stmt:Expr:ForIn	53
 stmt:Expr:If	25
 stmt:Expr:Match	2
