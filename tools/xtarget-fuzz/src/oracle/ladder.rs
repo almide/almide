@@ -99,6 +99,14 @@ pub enum FindingKind {
     /// even when native and wasm agree — the shared-lowering blind spot
     /// the 2-way vote cannot see.
     SelfCheckFailure,
+    /// Both legs agreed and exited 0, but the wasm leg ended with heap
+    /// blocks still live: native drops every value, the wasm leg releases
+    /// by hand, so a missing release is invisible to output parity (#2932,
+    /// #2944). Measured by the embedded host's allocation counters
+    /// (`allocs − frees − region_reclaimed`, top-lets released). Its own
+    /// nightly class, like Slow: the corpus live-at-exit ledger is the
+    /// red gate, the fuzzer finds the programs the corpus does not have.
+    LeakAtExit,
 }
 
 /// Captured observable behaviour of one execution.
@@ -420,7 +428,15 @@ pub fn run_ladder(
         });
     }
 
-    compare_runs(source, &native, &wasm, reference, expected)
+    match compare_runs(source, &native, &wasm, reference, expected) {
+        // ── Rung (f): live heap at exit (wasm leg) — only a clean program
+        // that exited 0 is re-run with the allocation counters armed.
+        Outcome::Clean { native } if tc.leak_check && wasm.exit_code == Some(0) => match leak_at_exit(tc, file) {
+            Some(finding) => Outcome::Finding(finding),
+            None => Outcome::Clean { native },
+        },
+        other => other,
+    }
 }
 
 /// The differential comparison of two COMPLETED runs — every rule between
@@ -571,6 +587,40 @@ fn compare_runs(
     }
 
     Outcome::Clean { native: nat_ev }
+}
+
+/// The live-heap rung: re-run on the embedded host with the allocation
+/// counters armed. A run that does not reproduce the clean exit, or whose
+/// report line is missing, is not judged (the rung only convicts on a
+/// measured `live=N > 0`).
+pub fn leak_at_exit(tc: &Toolchain, file: &Path) -> Option<Finding> {
+    let run = tc.run_wasm_counted(file);
+    if run.timed_out || run.spawn_failed || run.exit_code != Some(0) {
+        return None;
+    }
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    let live = parse_live(&stderr)?;
+    (live > 0).then(|| Finding {
+        rung: Rung::Run,
+        kind: FindingKind::LeakAtExit,
+        // Constant: one finding per night per mechanism class is enough to
+        // route, and the minimizer shrinks toward the smallest leaking
+        // program. The count is in the evidence, not the dedup key.
+        summary: "wasm leg exits with heap blocks still live (native drops them)".into(),
+        native: None,
+        wasm: Some(RunEvidence::from(&run)),
+    })
+}
+
+/// `live=N` from the `__ALMD_WASM_ALLOC …` report line.
+fn parse_live(stderr: &str) -> Option<i64> {
+    stderr
+        .lines()
+        .find(|l| l.starts_with("__ALMD_WASM_ALLOC "))?
+        .split_whitespace()
+        .find_map(|w| w.strip_prefix("live="))?
+        .parse()
+        .ok()
 }
 
 /// fmt round-trip: `parse → fmt → parse → fmt` must be a fixed point.
@@ -1284,5 +1334,22 @@ mod hang_classification_tests {
     #[test]
     fn wasm_build_failure_is_a_skip() {
         assert!(!native_hang_is_finding(false, false, false));
+    }
+}
+
+#[cfg(test)]
+mod leak_rung_tests {
+    use super::parse_live;
+
+    #[test]
+    fn the_live_count_is_read_from_the_report_line() {
+        let err = "some warning\n__ALMD_WASM_ALLOC allocs=12 reused=3 bytes=96 frees=9 reclaimed=1 live=2 heap_end=4096\n";
+        assert_eq!(parse_live(err), Some(2));
+    }
+
+    #[test]
+    fn no_report_line_is_not_a_verdict() {
+        assert_eq!(parse_live("__ALMD_WASM_ALLOC absent (the module carries no counters)\n"), None);
+        assert_eq!(parse_live(""), None);
     }
 }

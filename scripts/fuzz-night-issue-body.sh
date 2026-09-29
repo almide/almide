@@ -3,8 +3,9 @@
 # ========================================
 #
 # Renders the body the verdict job posts to the tracking issue for one class
-# of finding — `correctness` (everything but `Slow__*`, the `fuzz-findings`
-# label) or `slow` (perf-class, the `fuzz-perf` label, #1235).
+# of finding — `correctness` (everything but `Slow__*` and `LeakAtExit__*`,
+# the `fuzz-findings` label), `slow` (perf-class, the `fuzz-perf` label,
+# #1235) or `leak` (wasm heap blocks live at exit, the `fuzz-leak` label).
 #
 # Two silent under-counts lived in the workflow YAML this replaces:
 #
@@ -18,7 +19,7 @@
 #      unaccounted for rather than as truncated. The cap is now counted in
 #      FINDINGS, and when it bites the body says "showing 20 of 23".
 #
-# Usage: fuzz-night-issue-body.sh <night-findings> <correctness|slow> <run-url>
+# Usage: fuzz-night-issue-body.sh <night-findings> <correctness|slow|leak> <run-url>
 #                                 <reporting> <planned> <missing> [<cap>]
 #   <night-findings>  the aggregated findings dir: one subdirectory per unique
 #                     finding, each holding the fuzzer's meta.txt
@@ -33,7 +34,7 @@ set -euo pipefail
 export LC_ALL=C
 
 DIR="${1:?night-findings dir}"
-CLASS="${2:?correctness|slow}"
+CLASS="${2:?correctness|slow|leak}"
 RUN_URL="${3:?run url}"
 REPORTING="${4:?reporting}"
 PLANNED="${5:?planned}"
@@ -41,9 +42,10 @@ MISSING="${6:?missing}"
 CAP="${7:-20}"
 
 case "$CLASS" in
-  correctness) mapfile -t DIRS < <(find "$DIR" -mindepth 1 -maxdepth 1 -type d ! -name 'Slow__*' | sort) ;;
+  correctness) mapfile -t DIRS < <(find "$DIR" -mindepth 1 -maxdepth 1 -type d ! -name 'Slow__*' ! -name 'LeakAtExit__*' | sort) ;;
   slow)        mapfile -t DIRS < <(find "$DIR" -mindepth 1 -maxdepth 1 -type d -name 'Slow__*' | sort) ;;
-  *) echo "fuzz-night-issue-body.sh: class must be correctness or slow, got '$CLASS'" >&2; exit 2 ;;
+  leak)        mapfile -t DIRS < <(find "$DIR" -mindepth 1 -maxdepth 1 -type d -name 'LeakAtExit__*' | sort) ;;
+  *) echo "fuzz-night-issue-body.sh: class must be correctness, slow or leak, got '$CLASS'" >&2; exit 2 ;;
 esac
 COUNT=${#DIRS[@]}
 SHOWN=$COUNT
@@ -69,6 +71,14 @@ case "$CLASS" in
     echo "outran the per-program budget but completed byte-identical at the 10x"
     echo "confirm re-run. Not correctness — the night stays green — but each is a"
     echo "real order-of-magnitude perf gap (the #1229 class). Collected from"
+    echo "$FROM."
+    ;;
+  leak)
+    echo "The nightly fuzzer recorded **$COUNT** LeakAtExit finding(s): both legs agreed"
+    echo "and exited 0, but the wasm leg ended with heap blocks still live (native drops"
+    echo "them; the wasm leg releases by hand). Measured with ALMIDE_WASM_ALLOC_COUNT=1 on"
+    echo "the embedded host. Not fatal to the night — the corpus live-at-exit ledger is the"
+    echo "red gate — but each repro is a leak the corpus does not cover. Collected from"
     echo "$FROM."
     ;;
 esac

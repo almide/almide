@@ -361,9 +361,15 @@ jobs:
           done
           COUNT=$(find night-findings -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
           SLOW=$(find night-findings -mindepth 1 -maxdepth 1 -type d -name 'Slow__*' | wc -l | tr -d ' ')
+          # LeakAtExit (the live-heap rung): wasm heap blocks live at exit.
+          # Its own class like Slow — tracked, not fatal; the corpus
+          # live-at-exit ledger (crates/almide-wasm/tests/alloc_ledger.rs)
+          # is the red gate for leaks.
+          LEAK=$(find night-findings -mindepth 1 -maxdepth 1 -type d -name 'LeakAtExit__*' | wc -l | tr -d ' ')
           echo "findings=$COUNT" >> "$GITHUB_OUTPUT"
           echo "slow=$SLOW" >> "$GITHUB_OUTPUT"
-          echo "correctness=$((COUNT - SLOW))" >> "$GITHUB_OUTPUT"
+          echo "leak=$LEAK" >> "$GITHUB_OUTPUT"
+          echo "correctness=$((COUNT - SLOW - LEAK))" >> "$GITHUB_OUTPUT"
 
       # A night where NO shard uploaded output has no evidence, and green
       # would be vacuous (the #976 class — with `continue-on-error` on the
@@ -394,6 +400,7 @@ jobs:
             "${{ env.FUZZ_SHARDS }}" \
             "${{ steps.agg.outputs.findings }}" \
             "${{ steps.agg.outputs.slow }}" \
+            "${{ steps.agg.outputs.leak }}" \
             >> "$GITHUB_STEP_SUMMARY" || true
           exit 0
 
@@ -468,6 +475,31 @@ jobs:
           else
             gh label create fuzz-perf --color D93F0B --description "Perf-class (Slow) findings from the nightly fuzzer" 2>/dev/null || true
             gh issue create --title "$TITLE" --body "$BODY" --label fuzz-perf
+          fi
+
+      # LeakAtExit findings (the live-heap rung) route to their own issue
+      # under their own label, the Slow shape: a leak the corpus ledger does
+      # not cover is real, but the known mechanisms stay open until fixed,
+      # and folding them into the correctness issue would keep the night red
+      # on debt the ledger already owns.
+      - name: Open / update leak tracking issue
+        if: steps.agg.outputs.leak != '0'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COUNT="${{ steps.agg.outputs.leak }}"
+          TITLE="Nightly fuzz: $COUNT wasm leak-at-exit finding(s)"
+          BODY=$(bash scripts/fuzz-night-issue-body.sh night-findings leak \
+            "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            "${{ steps.verdict.outputs.reporting || '?' }}" \
+            "${{ steps.verdict.outputs.shards_planned || env.FUZZ_SHARDS }}" \
+            "${{ steps.verdict.outputs.missing || 'unknown' }}")
+          EXISTING=$(gh issue list --label fuzz-leak --state open --json number --jq '.[0].number' || echo "")
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "$BODY"
+          else
+            gh label create fuzz-leak --color 5319E7 --description "Wasm heap blocks live at exit, from the nightly fuzzer's live-heap rung" 2>/dev/null || true
+            gh issue create --title "$TITLE" --body "$BODY" --label fuzz-leak
           fi
 
       # CORRECTNESS findings, and only those, make the night red. Coverage lost

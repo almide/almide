@@ -33,7 +33,7 @@ use std::time::{Duration, Instant};
 
 use findings::FindingSink;
 use generator::{Engine, Family};
-use oracle::{run_ladder, FindingKind, Outcome, Rung, Toolchain};
+use oracle::{leak_at_exit, run_ladder, FindingKind, Outcome, Rung, Toolchain};
 
 /// Default per-program timeout. Generated programs are tiny and finite;
 /// outrunning this budget makes a leg a SUSPECT, which one confirm re-run
@@ -68,7 +68,7 @@ fn print_usage() {
     eprintln!(
         "xtarget-fuzz — Almide generative fuzzer\n\n\
          USAGE:\n\
-         \x20 xtarget-fuzz run    [--seed N] [--minutes M | --count N] [--jobs J] [--timeout S] [--family F] [--dump-walls DIR]\n\
+         \x20 xtarget-fuzz run    [--seed N] [--minutes M | --count N] [--jobs J] [--timeout S] [--family F] [--dump-walls DIR] [--no-leak-check]\n\
          \x20 xtarget-fuzz replay --seed N --index I [--family F]\n\
          \x20 xtarget-fuzz ladder <file.almd> [--timeout S]\n\
          \x20 xtarget-fuzz gen    --seed N --index I [--family F]\n\
@@ -82,6 +82,9 @@ fn print_usage() {
          \x20 two backends SHARE is still convicted. It is part of the `all` mix too.\n\
          \x20 A (seed, index) pair only reproduces under the same --family, which is\n\
          \x20 why every finding's meta.txt records it.\n\n\
+         --no-leak-check  skip the live-heap rung: by default a clean program is re-run\n\
+         \x20 on the embedded wasm host with ALMIDE_WASM_ALLOC_COUNT=1, and heap blocks\n\
+         \x20 still live at exit are a LeakAtExit finding (its own nightly class).\n\n\
          The repo root is autodetected from the binary location; override with --repo PATH.\n\
          Findings are written under <repo>/tools/xtarget-fuzz/findings/ (override with --out DIR)."
     );
@@ -152,6 +155,7 @@ fn cmd_run(args: &[String]) {
     sweep_stale_scratch(&repo);
     let almide = resolve_almide(&repo, args);
     let wasmtime = resolve_wasmtime();
+    let leak_check = leak_check_on(args);
 
     let seed: u64 = flag_value(args, "--seed")
         .and_then(|s| s.parse().ok())
@@ -241,6 +245,7 @@ fn cmd_run(args: &[String]) {
             wasmtime: wasmtime.clone(),
             scratch,
             timeout,
+            leak_check,
         };
         let work_dir = worker_work_dir(&repo, worker_id);
         let _ = std::fs::create_dir_all(&work_dir);
@@ -308,6 +313,9 @@ fn worker_loop(
     let wasm = work_dir.join("prog.wasm");
     // The third judge (#516): per-worker, abstains on anything it can't run.
     let reference = crate::oracle::InterpOracle::new();
+    // The ladder runs without the live-heap rung; the worker applies it to
+    // clean programs itself (see below).
+    let tc_ladder = Toolchain { leak_check: false, ..tc.clone() };
 
     loop {
         if stop.load(Ordering::Relaxed) {
@@ -340,8 +348,12 @@ fn worker_loop(
         if gen.expected_stdout.is_some() {
             stats.self_checked.fetch_add(1, Ordering::Relaxed);
         }
+        // The live-heap rung runs AFTER the ladder, on a clean program only
+        // (below): inside the ladder a leak would replace the Clean outcome,
+        // and every Clean-only post-rung (the metamorphic one) would skip the
+        // ~half of generated programs that leak today.
         let outcome = run_ladder(
-            &tc,
+            &tc_ladder,
             &gen.source,
             &file,
             &wasm,
@@ -356,7 +368,7 @@ fn worker_loop(
                 // SYNTHESIZED programs must be accepted and byte-identical.
                 if matches!(gen.origin, crate::generator::Origin::Synthesis) {
                     if let Some(finding) =
-                        run_metamorphic(&tc, &gen.source, &native, &work_dir)
+                        run_metamorphic(&tc_ladder, &gen.source, &native, &work_dir)
                     {
                         stats.findings.fetch_add(1, Ordering::Relaxed);
                         let was_new = sink.record(
@@ -371,6 +383,26 @@ fn worker_loop(
                             eprintln!(
                                 "  ** FINDING [{:?}] seed={} index={} — {}",
                                 finding.kind, cfg.seed, index, finding.summary
+                            );
+                        }
+                    }
+                }
+                // The live-heap rung. Its summary is constant, so a
+                // re-discovery dedups whatever the minimizer would produce:
+                // only the first leak of the campaign pays for minimizing
+                // (with the rung armed, so the ladder reproduces the kind).
+                if let Some(leak) = if tc.leak_check { leak_at_exit(&tc, &file) } else { None } {
+                    stats.findings.fetch_add(1, Ordering::Relaxed);
+                    if !sink.is_known(&leak) {
+                        let minimized = match &gen.plan {
+                            Some(plan) => minimize::minimize_plan(&tc, plan, leak.kind, &work_dir, Some(&reference)),
+                            None => minimize::minimize(&tc, &gen.source, leak.kind, &work_dir, Some(&reference)),
+                        };
+                        let evidence = minimized.finding.as_ref().unwrap_or(&leak);
+                        if sink.record(cfg.seed, index, &gen.origin, &gen.source, &minimized.source, evidence) {
+                            eprintln!(
+                                "  ** FINDING [{:?}] seed={} index={} — {}",
+                                leak.kind, cfg.seed, index, leak.summary
                             );
                         }
                     }
@@ -426,9 +458,9 @@ fn worker_loop(
                 let minimized = if matches!(finding.kind, FindingKind::Hang | FindingKind::Slow) {
                     minimize::Minimized { source: gen.source.clone(), finding: None }
                 } else if let Some(plan) = &gen.plan {
-                    minimize::minimize_plan(&tc, plan, finding.kind, &work_dir, Some(&reference))
+                    minimize::minimize_plan(&tc_ladder, plan, finding.kind, &work_dir, Some(&reference))
                 } else {
-                    minimize::minimize(&tc, &gen.source, finding.kind, &work_dir, Some(&reference))
+                    minimize::minimize(&tc_ladder, &gen.source, finding.kind, &work_dir, Some(&reference))
                 };
                 let evidence = minimized.finding.as_ref().unwrap_or(&finding);
                 let was_new = sink.record(
@@ -586,6 +618,7 @@ fn cmd_replay(args: &[String]) {
         wasmtime: resolve_wasmtime(),
         scratch: scratch_root(&repo).join("replay-build"),
         timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+        leak_check: leak_check_on(args),
     };
     let outcome = run_ladder(
         &tc,
@@ -638,6 +671,7 @@ fn cmd_ladder(args: &[String]) {
         wasmtime: resolve_wasmtime(),
         scratch: scratch_root(&repo).join("ladder-build"),
         timeout: Duration::from_secs(timeout),
+        leak_check: leak_check_on(args),
     };
     // An identity-family repro carries its own oracle in `// @expect`
     // header lines, so `ladder <repro.almd>` re-judges it exactly as the
@@ -848,6 +882,11 @@ fn print_outcome(outcome: &Outcome) {
 // ── small arg helpers ──
 
 /// Read `--flag value` from args.
+/// The live-heap rung is on unless `--no-leak-check` is given.
+fn leak_check_on(args: &[String]) -> bool {
+    !args.iter().any(|a| a == "--no-leak-check")
+}
+
 fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
     args.iter()
         .position(|a| a == flag)

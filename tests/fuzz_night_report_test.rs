@@ -425,6 +425,38 @@ fn a_night_over_the_cap_says_it_is_showing_twenty_of_n() {
     assert_eq!(r.stdout.matches("reproduce   = ").count(), 1);
 }
 
+/// The live-heap rung's class: `LeakAtExit__*` is listed under `leak` and
+/// only there — never in the correctness body the night fails on.
+#[test]
+fn a_leak_finding_is_its_own_class() {
+    let dir = scratch("leak");
+    let findings = dir.join("night-findings");
+    finding(&findings, "OutputDivergence__one", "OutputDivergence", 1);
+    finding(&findings, "LeakAtExit__wasm_leg_exits_with_heap_blocks_still_live", "LeakAtExit", 2);
+    let body = |class: &str| {
+        let r = bash(
+            &[
+                "scripts/fuzz-night-issue-body.sh",
+                findings.to_str().unwrap(),
+                class,
+                "https://example.invalid/run/1",
+                "8",
+                "8",
+                "none",
+            ],
+            &[],
+        );
+        assert_eq!(r.code, Some(0), "{}{}", r.stdout, r.stderr);
+        r.stdout
+    };
+    let correctness = body("correctness");
+    assert!(correctness.contains("recorded **1** unique finding(s)"), "{correctness}");
+    assert!(!correctness.contains("LeakAtExit"), "{correctness}");
+    let leak = body("leak");
+    assert!(leak.contains("recorded **1** LeakAtExit finding(s)"), "{leak}");
+    assert!(leak.contains("Finding summaries (1)"), "{leak}");
+}
+
 #[test]
 fn a_body_with_no_shard_count_says_unknown_rather_than_the_plan() {
     let dir = scratch("unknown");
@@ -558,7 +590,8 @@ fn a_recovered_night_counts_and_a_recovered_finding_is_never_a_green_night() {
 fn the_workflow_calls_the_renderers_by_their_committed_paths() {
     let wf = fs::read_to_string(repo_root().join(".github/workflows/fuzz-nightly.yml")).unwrap();
     assert!(wf.contains("bash scripts/fuzz-night-verdict.sh shards"), "verdict call");
-    assert_eq!(wf.matches("bash scripts/fuzz-night-issue-body.sh night-findings").count(), 2, "one call per class");
+    // correctness, slow (perf-class), leak (LeakAtExit)
+    assert_eq!(wf.matches("bash scripts/fuzz-night-issue-body.sh night-findings").count(), 3, "one call per class");
     assert!(!wf.contains("head -60"), "the silent 20-finding cap is back");
     assert!(!wf.contains("across ${{ env.FUZZ_SHARDS }} shard(s)"), "the unconditional denominator is back");
     for p in ["scripts/fuzz-night-verdict.sh", "scripts/fuzz-night-issue-body.sh", "scripts/lib/fuzz-night-line.sh"] {

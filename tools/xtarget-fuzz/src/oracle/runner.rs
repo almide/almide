@@ -68,6 +68,11 @@ pub struct Toolchain {
     /// Per-program wall-clock timeout. A program that outruns it is a
     /// hang finding.
     pub timeout: Duration,
+    /// The live-heap rung: after a clean run, re-run the program on the
+    /// embedded wasm host with the allocation counters armed and report
+    /// the blocks still live at exit (`FindingKind::LeakAtExit`). On by
+    /// default; `--no-leak-check` turns it off.
+    pub leak_check: bool,
 }
 
 impl Toolchain {
@@ -180,6 +185,18 @@ impl Toolchain {
                 Ok(())
             });
         }
+        self.spawn_timed(cmd)
+    }
+
+    /// `ALMIDE_WASM_ALLOC_COUNT=1 almide run <file> --target wasm` — the
+    /// structural leg on the embedded host with the allocation counters
+    /// armed; the `__ALMD_WASM_ALLOC … live=N` line lands on stderr.
+    pub fn run_wasm_counted(&self, file: &Path) -> ProcResult {
+        let mut cmd = Command::new(&self.almide);
+        cmd.args(["run", &file.to_string_lossy(), "--target", "wasm"]);
+        cmd.env("ALMIDE_RUN_PROJECT_DIR", &self.scratch);
+        cmd.env("NO_COLOR", "1");
+        cmd.env("ALMIDE_WASM_ALLOC_COUNT", "1");
         self.spawn_timed(cmd)
     }
 
@@ -316,6 +333,7 @@ mod tests {
             wasmtime: PathBuf::from("wasmtime"),
             scratch: std::env::temp_dir(),
             timeout: Duration::from_secs(10),
+            leak_check: false,
         }
     }
 
