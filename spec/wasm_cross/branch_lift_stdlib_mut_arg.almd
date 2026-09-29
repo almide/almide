@@ -1,0 +1,69 @@
+// @contract: C-117
+// #2931: a let-bound heap branch whose body WRITES an enclosing var through a
+// stdlib `mut` parameter (`list.pop`, `list.push`, `map.insert`,
+// `string.push`, `bytes.push`) is not outlined into a branch_lift helper — the
+// helper takes its captures by value, so the write landed in a copy and was
+// dropped. The wasm leg does not lower the bundled modules those surfaces live
+// in (their bodies are bridge-resolved), so the lift could not see their `mut`
+// markers and fired where native declined: `list.pop` inside the match popped
+// a copy, the caller's list never shrank, and gramide's left fold looped until
+// the heap ran out. Byte-identical native == wasm.
+type Node = { kind: Int, kids: List[Node] }
+
+// The gramide shape: a `mut` param popped from inside a let-bound match whose
+// arm hands the payload out.
+fn drain(mut out: List[Node], mark: Int) -> List[Node] = {
+  var rev: List[Node] = []
+  var idx = list.len(out)
+  while idx > mark {
+    let n = match list.pop(out) {
+      some(x) => x,
+      none => Node { kind: -1, kids: [] },
+    }
+    idx = idx - 1
+    list.push(rev, n)
+  }
+  rev
+}
+
+fn fold(mut out: List[Node], mark: Int) -> Unit = {
+  let kids = drain(out, mark)
+  list.push(out, Node { kind: 9, kids: kids })
+}
+
+effect fn main() -> Unit = {
+  // Straight-line: the popped String is the value, the list must shrink.
+  var names: List[String] = ["a", "b", "c"]
+  let last = match list.pop(names) {
+    some(x) => x,
+    none => "",
+  }
+  println("pop: ${last} left=${list.len(names)}")
+  // A drain loop through a mut param, then a push on the drained list.
+  var out: List[Node] = [
+    Node { kind: 1, kids: [] },
+    Node { kind: 2, kids: [] },
+    Node { kind: 3, kids: [] }
+  ]
+  fold(out, 1)
+  let top = list.get(out, 1) ?? Node { kind: -1, kids: [] }
+  println("fold: len=${list.len(out)} top=${top.kind} kids=${list.len(top.kids)}")
+  // In a loop: each arm writes an outer list / map / string / bytes buffer.
+  var acc: List[String] = []
+  var seen: Map[String, Int] = [:]
+  var buf = ""
+  var raw = bytes.new(0)
+  for i in 0..<4 {
+    let label = if i % 2 == 0 then {
+      list.push(acc, "e${i}")
+      map.insert(seen, "k${i}", i)
+      "even"
+    } else {
+      string.push(buf, "o${i}")
+      bytes.push(raw, i)
+      "odd"
+    }
+    println("${i}: ${label}")
+  }
+  println("acc=${list.join(acc, ",")} seen=${map.len(seen)} buf=${buf} raw=${bytes.len(raw)}")
+}
