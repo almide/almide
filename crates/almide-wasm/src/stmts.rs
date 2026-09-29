@@ -740,59 +740,18 @@ impl Emitter<'_> {
 impl Emitter<'_> {
     /// `p.field = v` on a record var: copy-on-write write-back — fresh
     /// block, one slot replaced, rebound. Split from `lower_stmt` for the
-    /// complexity budget. Also the path `list.push` / `list.clear` on a
-    /// record field desugar into (`list_mut.rs`, #2411).
+    /// complexity budget; the core is `field_assign_with` (list_mut.rs),
+    /// which the record-field forms of the mut list/map ops share (#2411).
     pub(crate) fn lower_field_assign(
         &mut self,
         target: &almide_ir::VarId,
         field: &almide_base::intern::Sym,
         value: &IrExpr,
     ) -> Result<(), EmitError> {
-                // C-319 residual: only the Assign form writes THROUGH a
-                // shared cell — a field write against a cell var would land
-                // in the raw local and silently diverge. Refuse honestly.
-                if self.cells.contains(target) {
-                    return unsup("cell-write:field-assign");
-                }
-                let (slot, declared) = match self.locals.get(target) {
-                    Some(&(idx, d)) => (Ok(idx), d),
-                    None => match self.globals.get(&(self.var_space, *target)) {
-                        Some(&(gidx, d)) => (Err(gidx), d),
-                        None => return unsup("field-assign:unmapped"),
-                    },
-                };
-                let SliceTy::Named(ti) = declared else {
-                    return unsup(&format!("field-assign-of:{declared:?}"));
-                };
-                let (fty, off) = {
-                    let crate::types_table::NamedDef::Record(r) = self.types.def(ti) else {
-                        return unsup("field-assign-nonrecord");
-                    };
-                    let Some(fi) = r.fields.iter().find(|f| f.name == field.as_str()) else {
-                        return unsup(&format!("field-assign-unknown:{field}"));
-                    };
-                    (fi.ty, fi.offset)
-                };
-                let hb = self.hold_i32()?;
-                match slot {
-                    Ok(idx) => self.f.instructions().local_get(idx),
-                    Err(gidx) => self.f.instructions().global_get(gidx),
-                };
-                let copy = self.copy_fn_of(SliceTy::Named(ti));
-                self.f.instructions().call(copy).local_tee(hb);
-                // The replaced field's credit goes with it (stage 2c-ii).
-                if let Some(dec) = self.elem_is_handle(fty).then(|| self.dec_fn_of(fty)) {
-                    self.f.instructions().local_get(hb).i32_load(slot_memarg(off)).call(dec);
-                }
-                self.lower(value, Some(fty))?;
-                self.rc_share_guard(value, fty);
-                self.store_ty_slot(fty, off);
-                self.f.instructions().local_get(hb);
-                match slot {
-                    Ok(idx) => self.f.instructions().local_set(idx),
-                    Err(gidx) => self.f.instructions().global_set(gidx),
-                };
-                self.release_i32();
-                Ok(())
+        self.field_assign_with(target, field, |s, fty| {
+            s.lower(value, Some(fty))?;
+            s.rc_share_guard(value, fty);
+            Ok(())
+        })
     }
 }
