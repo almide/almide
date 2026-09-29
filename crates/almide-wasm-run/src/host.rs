@@ -1213,6 +1213,29 @@ mod tests {
         assert_eq!(r.stderr, "Error: wasm trap: out of bounds memory access\n");
     }
 
+    /// A runaway program is STOPPED, not hung (#2955): the test harness's
+    /// bound on execution is the epoch watchdog (the embedded host arms no
+    /// wasmtime fuel), and it must still interrupt a diverging `main` on
+    /// the pinned wasmtime. Two shapes, because wasmtime checks the epoch
+    /// at two places: a loop header (`loop br 0`) and a function entry (a
+    /// self `return_call`, the tail-recursion lowering, which has no loop).
+    #[test]
+    fn a_runaway_program_is_interrupted_by_the_watchdog() {
+        let watchdog = Some(std::time::Duration::from_millis(200));
+        let shapes: [(&str, &[Instruction<'_>]); 2] = [
+            ("loop", &[Instruction::Loop(wasm_encoder::BlockType::Empty), Instruction::Br(0), Instruction::End]),
+            ("return_call", &[Instruction::ReturnCall(0)]),
+        ];
+        for (name, body) in shapes {
+            let started = std::time::Instant::now();
+            let r = super::run_wasm_src(&module(body), super::StdinSource::Buf(Vec::new()), None, &[], watchdog, false)
+                .expect("engine runs the module");
+            assert_eq!(r.exit, 1, "{name}: a runaway must abort");
+            assert_eq!(r.stderr, "Error: wasm trap: interrupt\n", "{name}");
+            assert!(started.elapsed() < std::time::Duration::from_secs(20), "{name}: stopped late");
+        }
+    }
+
     /// The happy path is untouched: a clean return is exit 0, empty stderr.
     #[test]
     fn a_clean_return_stays_silent() {
