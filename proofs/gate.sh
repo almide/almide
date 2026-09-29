@@ -430,6 +430,20 @@ echo "== structural leg, effect frames  ⊳  proven checker (#2758) =="
 run_structural spec/wasm_cross/witness_straightline.almd stash 0
 tamper_structural stash '2s/^im$/i/' "#2758 ok carrier"
 
+# ── #2758: EARLY `!` EXITS. The `!` site is a branch whose arm propagates:
+# `stash_len`'s parked carrier is shared, released with the frame and moved
+# out on that arm (`{iadm|id}`); the payload is a view the bind takes a
+# credit of. `stash_both` has two sites: the second carrier has three paths,
+# so its exit folds into a v5 branch-return item (`i{admx|}d`, checked from
+# the count at the site to exactly 0). Drills: the propagated carrier never
+# leaves, and the folded exit forgets its move-out.
+echo
+echo "== structural leg, early exits  ⊳  proven checker (#2758) =="
+run_structural spec/wasm_cross/witness_straightline.almd stash_len 0
+run_structural spec/wasm_cross/witness_straightline.almd stash_both 0
+tamper_structural stash_len 's/^{iadm|id}$/{iad|id}/' "#2758 propagated carrier"
+tamper_structural stash_both 's/^i{admx|}d$/i{adx|}d/' "#2758 folded exit"
+
 # ── #2152: almide-verify against the extracted checker on witnesses NO
 # producer wrote. The rows above only reach the shapes the emitters produce;
 # the transcription must agree on the whole input space, malformed bytes

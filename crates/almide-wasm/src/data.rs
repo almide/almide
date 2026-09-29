@@ -2,6 +2,7 @@
 //! record literals, spreads) — split from emitter.rs for the complexity
 //! budget; `lower`'s shared want-check tail still judges every result.
 
+use crate::witness_unwrap::Leaves;
 use almide_ir::{IrExpr, IrExprKind};
 use wasm_encoder::BlockType;
 
@@ -399,16 +400,21 @@ impl Emitter<'_> {
                                 .local_tee(self.scr_i32_local)
                                 .i32_eqz()
                                 .if_(BlockType::Empty);
+                            let wc = self.witness_unwrap_open(expr, owned_carrier, false);
+                            self.witness_unwrap_propagate(wc, false);
                             let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
                             self.emit_exit(&plan);
+                            self.witness_unwrap_exit(wc, Leaves::Nothing);
                             self.f
                                 .instructions()
                                 .i32_const(almide_layout::NULL_ADDR as i32)
                                 .return_()
                                 .end()
                                 .local_get(self.scr_i32_local);
+                            self.witness_unwrap_close();
                             self.load_ty_slot(et, almide_layout::OPTION_FIELD);
                             self.release_ok_carrier(e, owned_carrier);
+                            self.witness_unwrap_ok(wc, owned_carrier);
                             return Ok(et);
                         }
                         _ => return unsup("unwrap-propagating"),
@@ -429,6 +435,7 @@ impl Emitter<'_> {
                             .local_tee(self.scr_i32_local)
                             .i32_eqz()
                             .if_(BlockType::Empty);
+                        let wc = self.witness_unwrap_open(expr, owned_carrier, false);
                         if in_effect {
                             if fn_err != Some(STR) {
                                 return unsup("unwrap-none-err-ty");
@@ -446,19 +453,25 @@ impl Emitter<'_> {
                                 .local_get(self.tmp_i32_local)
                                 .i32_const(none_msg as i32)
                                 .i32_store(slot_memarg(almide_layout::SUM_FIELD));
+                            self.witness_unwrap_propagate(wc, false);
                             let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
                             self.emit_exit(&plan);
+                            self.witness_unwrap_exit(wc, Leaves::Fresh);
                             self.f.instructions().local_get(self.tmp_i32_local).return_();
                         } else if self.in_main {
+                            self.witness_unwrap_decline("abort");
                             let none_msg = self.pool.intern("none");
                             self.f.instructions().i32_const(none_msg as i32);
                             self.emit_error_frame_abort();
                         } else {
+                            self.witness_unwrap_decline("trap");
                             self.f.instructions().unreachable();
                         }
                         self.f.instructions().end().local_get(self.scr_i32_local);
+                        self.witness_unwrap_close();
                         self.load_ty_slot(et, almide_layout::OPTION_FIELD);
                         self.release_ok_carrier(e, owned_carrier);
+                        self.witness_unwrap_ok(wc, owned_carrier);
                         et
                     }
                     SliceTy::Result(o, er) => {
@@ -477,11 +490,14 @@ impl Emitter<'_> {
                             .i32_const(0)
                             .i32_ne()
                             .if_(BlockType::Empty);
+                        let wc = self.witness_unwrap_open(expr, owned_carrier, true);
                         if in_effect && fn_err == Some(STR) && ert != STR && !self.is_str_list(ert) {
+                            self.witness_unwrap_decline("err-repr");
                             // ADR-0021 D2 / #2725: a typed error `!`-ed into a
                             // String channel — the channel carries its repr text.
                             self.propagate_err_as_repr(SliceTy::Result(o, er), ert, owned_carrier)?;
                         } else if in_effect && fn_err == Some(STR) && self.is_str_list(ert) {
+                            self.witness_unwrap_decline("err-joined");
                             self.propagate_err_joined(SliceTy::Result(o, er), ert, owned_carrier)?;
                         } else if in_effect {
                             if fn_err != Some(ert) {
@@ -493,19 +509,25 @@ impl Emitter<'_> {
                             if !owned_carrier {
                                 self.f.instructions().local_get(self.scr_i32_local).call(F_INC);
                             }
+                            self.witness_unwrap_propagate(wc, !owned_carrier);
                             let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
                             self.emit_exit(&plan);
+                            self.witness_unwrap_exit(wc, Leaves::Carrier);
                             self.f.instructions().local_get(self.scr_i32_local).return_();
                         } else if self.in_main && ert == STR {
+                            self.witness_unwrap_decline("abort");
                             self.f.instructions().local_get(self.scr_i32_local);
                             self.load_ty_slot(ert, almide_layout::SUM_FIELD);
                             self.emit_error_frame_abort();
                         } else {
+                            self.witness_unwrap_decline("trap");
                             self.f.instructions().unreachable();
                         }
                         self.f.instructions().end().local_get(self.scr_i32_local);
+                        self.witness_unwrap_close();
                         self.load_ty_slot(et, almide_layout::SUM_FIELD);
                         self.release_ok_carrier(e, owned_carrier);
+                        self.witness_unwrap_ok(wc, owned_carrier);
                         et
                     }
                     other => return unsup(&format!("unwrap-of:{other:?}")),

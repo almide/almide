@@ -127,6 +127,9 @@ fn stmts_subset(stmts: &[almide_ir::IrStmt]) -> Option<String> {
                         | IrExprKind::ForIn { .. }
                         | IrExprKind::Break
                         | IrExprKind::Continue
+                        | IrExprKind::Block { .. }
+                        | IrExprKind::Try { .. }
+                        | IrExprKind::Unwrap { .. }
                 ) =>
             {
                 if let Some(w) = stmt_body_subset(expr) {
@@ -240,6 +243,18 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
         IrExprKind::Match { subject, arms } => match_head_subset(subject, arms)
             .map(Why::Deep)
             .or_else(|| arms.iter().find_map(|a| value_subset(&a.body))),
+        // #2758: `!` / `?` — a one-arm branch whose arm propagates (the exit
+        // plan's releases, the err block's move-out; witness_unwrap.rs).
+        // The operand is a bound carrier (arg_temps.rs parks every
+        // non-tail `f(x)!`; the payload is then a view) or, in tail
+        // position, the call itself (an owned carrier). A call typed with
+        // its raw payload (a move-mode effect call, mut_param.rs) has an
+        // ABI carrier no hook sees: declined.
+        IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => match &expr.kind {
+            IrExprKind::Var { .. } => None,
+            IrExprKind::Call { .. } if carrier_ty(&expr.ty) => call_subset(expr).map(|w| w.inside("unwrap-operand")),
+            _ => Some(Why::Here(tag(&e.kind))),
+        },
         other => Some(Why::Here(tag(other))),
     }
 }
@@ -363,6 +378,9 @@ fn stmt_body_subset(e: &IrExpr) -> Option<Why> {
         IrExprKind::Match { subject, arms } => match_head_subset(subject, arms)
             .map(Why::Deep)
             .or_else(|| arms.iter().find_map(|a| stmt_body_subset(&a.body))),
+        // A statement `f(x)!`: the site runs, its payload is discarded
+        // (released when the extraction handed the frame its credit).
+        IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } => value_subset(e),
         other => Some(Why::Here(tag(other))),
     }
 }
@@ -438,4 +456,10 @@ pub fn effect_subset(body: &IrExpr, raw_is_heap: bool) -> Option<String> {
         return Some("effect:carrier".into());
     }
     straightline_subset(body, raw_is_heap)
+}
+
+/// Is `t` a Result / Option carrier type?
+fn carrier_ty(t: &almide_types::types::Ty) -> bool {
+    use almide_types::types::constructor::TypeConstructorId as C;
+    matches!(t, almide_types::types::Ty::Applied(C::Result | C::Option, _))
 }
