@@ -505,7 +505,7 @@
 4389	spec/wasm_cross/negative_float_literal_sized.almd
 8563	spec/wasm_cross/negative_offset_and_width_totality.almd
 2537	spec/wasm_cross/nested_ctor_pattern.almd
-11673	spec/wasm_cross/nested_field_path_mut.almd
+11979	spec/wasm_cross/nested_field_path_mut.almd
 5752	spec/wasm_cross/nested_hof_lambda_inference.almd
 4451	spec/wasm_cross/nested_list_list_int.almd
 4681	spec/wasm_cross/nested_list_list_string.almd

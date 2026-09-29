@@ -8,7 +8,7 @@ call-arg:EmptyMap	1
 call-arg:If	3
 call-arg:Lambda	48
 call-arg:Match	4
-call-arg:Member	7
+call-arg:Member	8
 call-arg:OptionSome	1
 call-arg:Record	2
 call-arg:StringInterp	8
