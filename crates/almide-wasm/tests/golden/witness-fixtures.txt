@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 169 of 828
+# certified: 174 of 828
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/append_accumulator.almd
 spec/wasm_cross/append_accumulator_heap.almd
@@ -17,7 +17,9 @@ spec/wasm_cross/bytes_pad_ceiling_oom.almd
 spec/wasm_cross/bytes_rawptr.almd
 spec/wasm_cross/bytes_repeat_product_wrap_oom.almd
 spec/wasm_cross/bytes_string_window_domain.almd
+spec/wasm_cross/call_lambda_ctor.almd
 spec/wasm_cross/chunk_str.almd
+spec/wasm_cross/closure_tail_recursion.almd
 spec/wasm_cross/container_alias_return.almd
 spec/wasm_cross/control_flow.almd
 spec/wasm_cross/count_domain_nonbytes.almd
@@ -41,6 +43,7 @@ spec/wasm_cross/float_sign_minmax_ieee.almd
 spec/wasm_cross/float_to_fixed.almd
 spec/wasm_cross/general_recursion_tail.almd
 spec/wasm_cross/gleam_bool_shortcircuit.almd
+spec/wasm_cross/grain_functions.almd
 spec/wasm_cross/hash_digests.almd
 spec/wasm_cross/heap_result_if_bind_chain.almd
 spec/wasm_cross/heap_result_if_match_arm_frame.almd
@@ -66,6 +69,7 @@ spec/wasm_cross/int_rotate_nonpositive_width.almd
 spec/wasm_cross/int_wrap_rotate_width.almd
 spec/wasm_cross/io_write_ordering.almd
 spec/wasm_cross/koka_inline4_joinsep.almd
+spec/wasm_cross/koka_parc13_closure_escape.almd
 spec/wasm_cross/koka_parc14_generic_pick.almd
 spec/wasm_cross/koka_parc18_two_scrutinees.almd
 spec/wasm_cross/koka_parc21_eval_order.almd
@@ -113,6 +117,7 @@ spec/wasm_cross/option_heap_eq.almd
 spec/wasm_cross/option_match_heap_payload.almd
 spec/wasm_cross/or_pattern.almd
 spec/wasm_cross/or_pattern_guarded_nullary.almd
+spec/wasm_cross/pipe_chain_scalar_bind.almd
 spec/wasm_cross/pipe_lambda_block_value.almd
 spec/wasm_cross/pure_bang_propagation.almd
 spec/wasm_cross/random_int_entropy.almd
