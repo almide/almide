@@ -113,8 +113,7 @@ pub fn almide_rt_matrix_dims(rows: i64, cols: i64) -> (usize, usize) {
     // never produce an in-ceiling matrix anyway (cols >= 1 overflows the product;
     // cols = 0 is useless at that scale), so both targets die in the T6 form.
     if r > ALMIDE_MATRIX_MAX_ELEMS || r.saturating_mul(c) > ALMIDE_MATRIX_MAX_ELEMS {
-        eprintln!("Error: matrix dimensions too large");
-        std::process::exit(1);
+        almide_abort("matrix dimensions too large");
     }
     (r as usize, c as usize)
 }
@@ -137,8 +136,7 @@ pub fn almide_rt_matrix_dims(rows: i64, cols: i64) -> (usize, usize) {
 /// `matrix_head_count_domain_test.rs` is the matrix gate that keeps it that way.
 pub fn almide_rt_matrix_head_count(n: i64) -> usize {
     if n < 1 {
-        eprintln!("Error: head count must be positive");
-        std::process::exit(1);
+        almide_abort("head count must be positive");
     }
     n as usize
 }
@@ -154,8 +152,7 @@ pub fn almide_rt_matrix_head_count(n: i64) -> usize {
 /// `matrix_head_count_domain_test.rs` keeps every one of them routed here.
 pub fn almide_rt_matrix_head_geometry(n_heads_u: usize, head_dim_u: usize, rows: usize, cols: usize) {
     if rows > 0 && head_dim_u > 0 && n_heads_u > cols / head_dim_u {
-        eprintln!("Error: head geometry exceeds row width");
-        std::process::exit(1);
+        almide_abort("head geometry exceeds row width");
     }
 }
 
@@ -178,8 +175,7 @@ pub fn almide_rt_matrix_head_geometry(n_heads_u: usize, head_dim_u: usize, rows:
 #[inline]
 pub fn almide_rt_matrix_shape_eq(a: usize, b: usize) {
     if a != b {
-        eprintln!("Error: matrix shape mismatch");
-        std::process::exit(1);
+        almide_abort("matrix shape mismatch");
     }
 }
 
@@ -191,8 +187,7 @@ pub fn almide_rt_matrix_shape_eq(a: usize, b: usize) {
 #[inline]
 pub fn almide_rt_matrix_shape_le(a: usize, b: usize) {
     if a > b {
-        eprintln!("Error: matrix shape mismatch");
-        std::process::exit(1);
+        almide_abort("matrix shape mismatch");
     }
 }
 
@@ -205,8 +200,7 @@ pub fn almide_rt_matrix_shape_le(a: usize, b: usize) {
 pub fn almide_rt_matrix_rows_uniform(rows: &[Vec<f64>]) {
     if let Some(first) = rows.first() {
         if rows.iter().any(|r| r.len() != first.len()) {
-            eprintln!("Error: matrix rows must have equal length");
-            std::process::exit(1);
+            almide_abort("matrix rows must have equal length");
         }
     }
 }
@@ -220,8 +214,7 @@ pub fn almide_rt_matrix_rows_uniform(rows: &[Vec<f64>]) {
 /// the wasm leg divided by it and answered no rows.
 pub fn almide_rt_matrix_stride(stride: i64) -> usize {
     if stride < 1 {
-        eprintln!("Error: stride must be positive");
-        std::process::exit(1);
+        almide_abort("stride must be positive");
     }
     stride as usize
 }
@@ -265,8 +258,7 @@ pub fn almide_rt_matrix_cols(m: &AlmideMatrix) -> i64 {
 #[inline]
 pub fn almide_rt_matrix_bounds(idx: i64, extent: usize) {
     if idx < 0 || (idx as u64) >= extent as u64 {
-        eprintln!("Error: matrix index out of bounds");
-        std::process::exit(1);
+        almide_abort("matrix index out of bounds");
     }
 }
 
@@ -834,8 +826,7 @@ pub fn almide_rt_matrix_conv1d(input: &AlmideMatrix, weight: &AlmideMatrix, bias
     let k = kernel.max(0) as usize;
     let p = padding.max(0) as usize;
     if p as i64 > ALMIDE_MATRIX_MAX_ELEMS {
-        eprintln!("Error: matrix dimensions too large");
-        std::process::exit(1);
+        almide_abort("matrix dimensions too large");
     }
     // The weight row is `in_ch * kernel` taps wide and the bias has one entry
     // per output channel: a short weight row or bias was a raw index panic

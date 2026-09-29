@@ -724,8 +724,7 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
     let listener = match http_server_bind(port) {
         Ok(l) => l,
         Err(m) => {
-            eprintln!("Error: {}", m);
-            std::process::exit(1);
+            almide_abort(m);
         }
     };
     // Shutdown (ADR-0020 §5.6, #2692): a signal ends the loop below; the

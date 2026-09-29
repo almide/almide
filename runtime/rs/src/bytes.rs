@@ -67,8 +67,7 @@ pub fn almide_rt_bytes_concat(a: &Vec<u8>, b: &Vec<u8>) -> Vec<u8> { let mut r =
 fn alloc_elems_or_oom<T>(n: usize) -> Vec<T> {
     let mut v: Vec<T> = Vec::new();
     if v.try_reserve_exact(n).is_err() {
-        eprintln!("Error: out of memory");
-        std::process::exit(1);
+        almide_abort("out of memory");
     }
     v
 }
@@ -76,8 +75,7 @@ fn alloc_elems_or_oom<T>(n: usize) -> Vec<T> {
 fn alloc_bytes_or_oom(n: usize) -> Vec<u8> {
     let mut v: Vec<u8> = Vec::new();
     if v.try_reserve_exact(n).is_err() {
-        eprintln!("Error: out of memory");
-        std::process::exit(1);
+        almide_abort("out of memory");
     }
     v
 }

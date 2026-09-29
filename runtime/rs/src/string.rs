@@ -32,8 +32,7 @@ pub const ALMIDE_REPEAT_MAX_BYTES: i64 = 1 << 31;
 pub fn almide_rt_string_repeat(s: &str, n: i64) -> String {
     let n = n.max(0);
     if (s.len() as i64).saturating_mul(n) > ALMIDE_REPEAT_MAX_BYTES {
-        eprintln!("Error: repeat result too large");
-        std::process::exit(1);
+        almide_abort("repeat result too large");
     }
     s.repeat(n as usize)
 }
@@ -111,8 +110,7 @@ pub fn almide_rt_string_pad_left(s: &str, width: i64, pad: &str) -> String {
         .and_then(|x| x.checked_add(s.len()));
     let mut out = String::new();
     if need.is_none() || out.try_reserve_exact(need.unwrap()).is_err() {
-        eprintln!("Error: out of memory");
-        std::process::exit(1);
+        almide_abort("out of memory");
     }
     for _ in 0..(w - len) { out.push(p); }
     out.push_str(s);
@@ -132,8 +130,7 @@ pub fn almide_rt_string_pad_right(s: &str, width: i64, pad: &str) -> String {
         .and_then(|x| x.checked_add(s.len()));
     let mut out = String::new();
     if need.is_none() || out.try_reserve_exact(need.unwrap()).is_err() {
-        eprintln!("Error: out of memory");
-        std::process::exit(1);
+        almide_abort("out of memory");
     }
     out.push_str(s);
     for _ in 0..(w - len) { out.push(p); }
