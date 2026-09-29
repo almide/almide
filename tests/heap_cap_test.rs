@@ -129,16 +129,16 @@ fn churn_corpus_runs_identically_under_the_cap() {
 /// 2n-slot block — (n−1) value blocks leaked per literal, output-invisible;
 /// this harness caught it on its first live run. Under the ceiling, a
 /// regression is a deterministic OOM, not a green run.
-// The `map.get_or(m, "k1", some(0)) ?? 0` term this probe carried on the
-// incumbent leg leaks one block per call on the wasm leg (#2932); it is left
-// out until that lands, so the cap here judges the literal intermediates only.
+// The `map.get_or(m, "k1", some(0)) ?? 0` term also pins #2932: its Option
+// default leaked one block per call on the wasm leg (about 1 MiB over the
+// loop, an OOM under this cap) until the arm returned an owned result.
 const MAP_LITERAL_CHURN: &str = r#"effect fn main() -> Unit = {
   var i = 0
   var acc = 0
   while i < 15000 {
     let v: Option[Int] = (if i % 3 == 0 then none else some(i))
     let m = ["k0": v, "k1": some(i + 1), "k2": none]
-    acc = acc + map.len(m)
+    acc = acc + map.len(m) + (map.get_or(m, "k1", some(0)) ?? 0)
     let hv = ["a": [i], "b": [i + 1], "c": [i + 2]]
     acc = acc + map.len(hv)
     i = i + 1
@@ -146,7 +146,7 @@ const MAP_LITERAL_CHURN: &str = r#"effect fn main() -> Unit = {
   println(int.to_string(acc))
 }
 "#;
-const MAP_LITERAL_CHURN_EXPECTED: &str = "90000";
+const MAP_LITERAL_CHURN_EXPECTED: &str = "112597500";
 
 #[test]
 fn map_literal_intermediates_do_not_leak_under_the_cap() {
