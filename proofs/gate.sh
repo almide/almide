@@ -407,6 +407,20 @@ echo "== structural leg, self tail calls  ⊳  proven checker (#2757) =="
 run_structural spec/wasm_cross/witness_straightline.almd count_down 0
 tamper_structural count_down 's/^{iamd|id}$/{iam|id}/' "#2757 loop-back"
 
+# ── #2757: LOOP BODIES as activations, each iteration on its own line from
+# rc 0 (the loop is a holder that must hand back every credit it takes).
+# `tally` shares its list into `take` on every pass (`am` on the loop line)
+# and binds a per-iteration concat (`id`: the next rebind or the epilogue
+# releases it); `drain`'s row lives one `while` iteration (`{|id}`: the
+# check that leaves binds nothing). Drills: the loop line keeps a credit it
+# took, and an iteration's block is never released.
+echo
+echo "== structural leg, loop bodies  ⊳  proven checker (#2757) =="
+run_structural spec/wasm_cross/witness_straightline.almd tally 0
+run_structural spec/wasm_cross/witness_straightline.almd drain 0
+tamper_structural tally '2s/^am$/a/' "#2757 for body"
+tamper_structural drain 's/^{|id}$/{|i}/' "#2757 while body"
+
 # ── #2152: almide-verify against the extracted checker on witnesses NO
 # producer wrote. The rows above only reach the shapes the emitters produce;
 # the transcription must agree on the whole input space, malformed bytes
