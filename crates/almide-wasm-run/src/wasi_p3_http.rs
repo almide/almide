@@ -435,7 +435,12 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     if stop == 4 {
         fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
     }
-    i.local_get(sentfut).call(I_HTTP_REQ_SENTDROP);
+    // The transmit-result future (`sentfut`) is NOT dropped here (#2955):
+    // wasmtime 49 ties the connection driver to it, so dropping its
+    // readable before the response body drains ends a body that arrives
+    // after the headers as EMPTY (GET/PUT answered `""` on Linux CI). It
+    // drops on every exit past this point instead: send error, too-large,
+    // and after the drain.
     if stop == 5 {
         fs_err(&mut i, g_ppos, g_plen, park, MSG_HTTP, E_HTTP.len());
     }
@@ -491,6 +496,7 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     i.end();
     i.i32_const((park + SENDRET) as i32).i32_load8_u(mem8(0));
     i.if_(BlockType::Empty);
+    i.local_get(sentfut).call(I_HTTP_REQ_SENTDROP);
     http_send_err(&mut i, park, h, t, fns, ent);
     i.end();
     i.i32_const((park + SENDRET) as i32).i32_load(mem(h.send_payload)).local_set(response);
@@ -554,21 +560,27 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     i.local_get(buf).local_get(total).i32_add();
     i.local_get(cap).local_get(total).i32_sub();
     i.call(I_HTTP_BODY_READ);
-    i.call(f_await);
-    i.i32_const(4).i32_shr_u().local_set(n);
-    i.local_get(n).i32_eqz().br_if(1);
-    i.local_get(total).local_get(n).i32_add().local_set(total);
+    // #2955: `n` holds the RAW read result, `(count << 4) | status`. The end
+    // of the body is the status (DROPPED/CANCELLED), never a zero count: a
+    // read may COMPLETE with 0 items when the host's producer has nothing
+    // yet (wasmtime 49 does this when the body arrives after the headers),
+    // and reading that as EOF answered an empty body.
+    i.call(f_await).local_set(n);
+    i.local_get(total).local_get(n).i32_const(4).i32_shr_u().i32_add().local_set(total);
     i.local_get(lim).i64_const(0).i64_gt_s();
     i.local_get(total).local_get(pre).i32_sub().i64_extend_i32_u().local_get(lim).i64_gt_s();
     i.i32_and().if_(BlockType::Empty);
     http_body_retire(&mut i, park, (body_rx, trlfut, cb_tx), f_await);
+    i.local_get(sentfut).call(I_HTTP_REQ_SENTDROP);
     http_decimal_i64(&mut i, (park + CLEN_BUF) as i32, lim, secs, key_len, cur);
     i.i32_const((park + CLEN_BUF) as i32).local_set(key_ptr);
     let [tl0, tl1, tl2] = t.too_large;
     http_err_call(&mut i, fns, (a_ptr, a_len), tl0, tl1, Some((key_ptr, key_len)), tl2);
     i.end();
+    i.local_get(n).i32_const(15).i32_and().br_if(1);
     i.br(0).end().end();
     http_body_retire(&mut i, park, (body_rx, trlfut, cb_tx), f_await);
+    i.local_get(sentfut).call(I_HTTP_REQ_SENTDROP);
 
     i.local_get(buf).global_set(g_ppos);
     i.local_get(total).global_set(g_plen);

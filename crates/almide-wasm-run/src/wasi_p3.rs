@@ -558,11 +558,12 @@ fn write_all(
     i.global_get(g_tx);
     i.local_get(ptr).local_get(len);
     i.call(write_import);
-    i.call(f_await);
-    i.i32_const(4).i32_shr_u().local_set(n);
-    i.local_get(n).i32_eqz().br_if(1);
-    i.local_get(ptr).local_get(n).i32_add().local_set(ptr);
-    i.local_get(len).local_get(n).i32_sub().local_set(len);
+    // #2955: `n` = the raw `(count << 4) | status`. A COMPLETED write may
+    // accept 0 items (write again); only DROPPED/CANCELLED ends the loop.
+    i.call(f_await).local_set(n);
+    i.local_get(ptr).local_get(n).i32_const(4).i32_shr_u().i32_add().local_set(ptr);
+    i.local_get(len).local_get(n).i32_const(4).i32_shr_u().i32_sub().local_set(len);
+    i.local_get(n).i32_const(15).i32_and().br_if(1);
     i.br(0).end().end();
 }
 
