@@ -906,3 +906,53 @@ fn unknown_type_error_sorts_before_unrelated_body_errors() {
     assert!(errs.iter().all(|d| d.code != Some("E013")), "{:#?}", errs);
     assert!(errs.len() >= 2, "the unrelated error survives: {:#?}", errs);
 }
+
+// ---- #2927: a join reports the peer that disagrees with the declared return ----
+
+fn error_lines(input: &str) -> Vec<(Option<usize>, String, String)> {
+    let tokens = Lexer::tokenize(input);
+    let mut parser = Parser::new(tokens);
+    let mut prog = parser.parse().expect("parse failed");
+    let canon = canonicalize::canonicalize_program(&prog, std::iter::empty());
+    let mut checker = Checker::from_env(canon.env);
+    checker.diagnostics = canon.diagnostics;
+    checker.infer_program(&mut prog)
+        .into_iter()
+        .filter(|d| d.level == Level::Error)
+        .map(|d| (d.line, d.message, d.hint))
+        .collect()
+}
+
+#[test]
+fn wrong_first_arm_is_blamed_not_the_correct_last_arm() {
+    let src = "type Level = { label: String, n: Int }\n\
+               type Cmd = | A | B(Int)\n\
+               effect fn level() -> Level? = some({ label: \"v\", n: 1 })\n\
+               effect fn apply(c: Cmd) -> Result[Level?, String] = match c {\n\
+               \x20 A => ok(level()),\n\
+               \x20 B(_) => ok(none),\n\
+               }\n";
+    let errs = error_lines(src);
+    assert_eq!(errs.len(), 1, "one mistake, one error: {errs:?}");
+    let (line, msg, hint) = &errs[0];
+    assert_eq!(*line, Some(5), "blames the `A` arm: {msg}");
+    assert!(msg.contains("the arm at line 6 produces it"), "{msg}");
+    assert!(hint.contains("add `!` to `level()`"), "{hint}");
+}
+
+#[test]
+fn wrong_then_branch_is_blamed_not_the_correct_else() {
+    let src = "fn f(n: Int) -> String = {\n  let s = \"x\"\n  if n > 0 then n else s\n}\n";
+    let errs = error_lines(src);
+    assert_eq!(errs.len(), 1, "{errs:?}");
+    assert!(errs[0].1.contains("expected String but got Int"), "{:?}", errs[0]);
+}
+
+#[test]
+fn without_expectation_the_message_names_the_arm_that_fixed_the_type() {
+    let src = "fn f(n: Int) -> Int = {\n  let v = match n {\n    0 => 1,\n    _ => \"s\",\n  }\n  v\n}\n";
+    let errs = error_lines(src);
+    assert_eq!(errs.len(), 1, "{errs:?}");
+    assert_eq!(errs[0].0, Some(4));
+    assert!(errs[0].1.contains("the first arm at line 3 fixed the type to Int"), "{:?}", errs[0]);
+}

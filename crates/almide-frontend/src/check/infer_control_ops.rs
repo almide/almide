@@ -21,6 +21,10 @@ struct MatchArmTypes {
     /// an arm as `Never`, so its payload is judged separately against the
     /// error type the match produces (#2722).
     err_payloads: Vec<(Ty, Option<ast::Span>)>,
+    /// Per arm: where its value is reported (a block body's tail) and the
+    /// un-`!`ed call it wraps in `ok(..)` / `some(..)`, if any (#2927).
+    blame_spans: Vec<Option<ast::Span>>,
+    bangs: Vec<Option<(ast::Span, String)>>,
 }
 
 /// The two operands of a time-typed binop as the S3 matrix reads them: each
@@ -212,13 +216,14 @@ impl Checker {
 impl Checker {
     fn infer_expr_g2_match(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::Match { subject, arms, .. } = &mut expr.kind else { unreachable!("infer_expr_g2_match called on the wrong ExprKind") };
+        let expect = self.expr_expect.clone();
         let subject_ty = self.infer_expr(subject);
         let sc = resolve_ty(&subject_ty, &self.uf);
         self.queue_match_implicit_prop(subject, &subject_ty, arms);
         self.check_match_exhaustiveness(&sc, arms);
-        let mut inferred = self.infer_match_arms(&subject_ty, arms);
+        let mut inferred = self.infer_match_arms(&subject_ty, arms, expect.as_ref());
         let err_payloads = std::mem::take(&mut inferred.err_payloads);
-        let joined = self.join_match_arms(inferred);
+        let joined = self.join_match_arms(inferred, expect.as_ref());
         self.check_err_arm_payloads(&joined, err_payloads);
         joined
     }
@@ -305,7 +310,12 @@ impl Checker {
 
     /// Infer every arm in its own scope, with the subject's pattern bindings
     /// visible to that arm's guard and body.
-    fn infer_match_arms(&mut self, subject_ty: &Ty, arms: &mut [ast::MatchArm]) -> MatchArmTypes {
+    fn infer_match_arms(
+        &mut self,
+        subject_ty: &Ty,
+        arms: &mut [ast::MatchArm],
+        expect: Option<&super::types::TailExpect>,
+    ) -> MatchArmTypes {
         // If ANY arm is an explicit `ok(..)`/`err(..)` ctor, this match PRODUCES a Result (it
         // re-wraps — base64 decode's `match bs { ok(b) => ok(string.from_bytes(b)), err(e) =>
         // err(e) }`), so NO arm is auto-unwrapped: every arm keeps its Result type and the
@@ -330,8 +340,11 @@ impl Checker {
                 let gty = self.infer_expr(guard);
                 self.constrain(crate::types::Ty::Bool, gty, "match guard");
             }
+            self.tail_expect = expect.cloned();
             let arm_ty = self.infer_expr(&mut arm.body);
             out.real_types.push(arm_ty.clone());
+            out.blame_spans.push(super::arm_blame::value_leaf_span(&arm.body));
+            out.bangs.push(self.wrapped_unbanged_call(&arm.body));
             if matches!(&arm.body.kind, ExprKind::Err { .. }) {
                 if let Some((_, payload)) = resolve_ty(&arm_ty, &self.uf).inner2() {
                     out.err_payloads.push((payload.clone(), arm.body.span));
@@ -373,11 +386,19 @@ impl Checker {
 
     /// Unify the arm types with each other (not with a shared result var that
     /// external constraints could contaminate) and pick the match's own type.
-    fn join_match_arms(&mut self, inferred: MatchArmTypes) -> Ty {
-        let MatchArmTypes { types, real_types, peers, .. } = inferred;
-        let Some(first) = types.first().cloned() else { return Ty::Unit };
-        for aty in &types[1..] {
-            self.constrain(first.clone(), aty.clone(), "match arm");
+    ///
+    /// #2927: the arm the others are compared against is the first one the
+    /// tail expectation accepts (see `arm_blame.rs`), so a wrong FIRST arm is
+    /// the one reported — at its own span, not wherever inference ended.
+    fn join_match_arms(&mut self, inferred: MatchArmTypes, expect: Option<&super::types::TailExpect>) -> Ty {
+        let MatchArmTypes { types, real_types, peers, blame_spans, bangs, .. } = inferred;
+        if types.is_empty() { return Ty::Unit };
+        let (anchor, declared) = self.pick_join_anchor(expect, &types);
+        let first = types[anchor].clone();
+        for (i, aty) in types.iter().enumerate() {
+            if i == anchor { continue; }
+            let hint = FixHint::ArmBlame { anchor: blame_spans[anchor], declared: declared.clone(), bang: bangs[i].clone(), real: real_types[i].clone() };
+            self.constrain_peer((&first, blame_spans[anchor]), (aty, blame_spans[i]), "match arm", Some(hint));
         }
         // #880: a sized arm wins the join over canonical peers, the same rule
         // the `if` arms and list elements follow. Checked before the `Never`
@@ -447,9 +468,12 @@ impl Checker {
 
     fn infer_expr_g2_if(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::If { cond, then, else_, .. } = &mut expr.kind else { unreachable!("infer_expr_g2_if called on the wrong ExprKind") };
+                let expect = self.expr_expect.clone();
                 let cond_ty = self.infer_expr(cond);
                 self.constrain_condition(cond, cond_ty, "if");
+                self.tail_expect = expect.clone();
                 let then_ty = self.infer_expr(then);
+                self.tail_expect = expect.clone();
                 let else_ty = self.infer_expr(else_);
                 // In effect fn bodies, auto-unwrap Result[T, E] → T per
                 // branch before unifying them, mirroring the match-arm rule
@@ -515,7 +539,28 @@ impl Checker {
                     (cmp_else.clone(), else_.span, super::is_literal_numeric_ast(else_)),
                 ];
                 let joined = self.join_sized_peers(&peers, "if branches");
-                self.constrain_with_hint(cmp_then, cmp_else, "if branches", hint);
+                // #2927: the `then` branch fixes the if's type unless the tail
+                // expectation rejects it and accepts the `else` — then the
+                // `then` branch is the one reported, and the if types as `else`.
+                let (anchor, declared) = self.pick_join_anchor(expect.as_ref(), &[then_ty.clone(), else_ty.clone()]);
+                let then_at = super::arm_blame::value_leaf_span(then);
+                let else_at = super::arm_blame::value_leaf_span(else_);
+                let swapped = anchor == 1;
+                let (anchor_peer, blamed_peer, blamed_expr, blamed_real) = if swapped {
+                    ((&cmp_else, else_at), (&cmp_then, then_at), &**then, &then_ty)
+                } else {
+                    ((&cmp_then, then_at), (&cmp_else, else_at), &**else_, &else_ty)
+                };
+                let hint = hint.or_else(|| Some(FixHint::ArmBlame {
+                    anchor: anchor_peer.1,
+                    declared,
+                    bang: self.wrapped_unbanged_call(blamed_expr),
+                    real: blamed_real.clone(),
+                }));
+                self.constrain_peer(anchor_peer, blamed_peer, "if branches", hint);
+                if swapped {
+                    return else_ty;
+                }
                 // The join only replaces the then-arm rule when the then arm is
                 // ITSELF a bare numeric scalar. `cmp_then` may be an auto-unwrapped
                 // `Result[T, E]`, and the paragraph above requires the if's type to

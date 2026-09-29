@@ -83,7 +83,12 @@ impl Checker {
                 });
             }
         }
+        // #2927: a tail expectation belongs to exactly this expression; its
+        // children see one only where a tail position hands it on.
+        let expect = self.tail_expect.take();
+        let outer_expect = std::mem::replace(&mut self.expr_expect, expect);
         let ity = self.infer_expr_inner(expr);
+        self.expr_expect = outer_expect;
         self.type_map.insert(expr.id, ity.clone());
         // #662 extension (fuzz seed-20260718 index 145): a CALL's instantiated
         // result can carry an unconstrained phantom slot even when no binding

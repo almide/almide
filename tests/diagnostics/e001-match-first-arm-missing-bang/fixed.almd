@@ -1,0 +1,22 @@
+// #2927: the FIRST arm is wrong (an effect call without `!` inside `ok`);
+// the diagnostic names it, not the correct arms after it.
+type Level = { label: String, n: Int }
+type Cmd = | A | B(Int)
+
+effect fn level() -> Level? = some({ label: "v", n: 1 })
+effect fn get() -> Result[Int?, String] = ok(some(3))
+
+effect fn apply(c: Cmd) -> Result[Level?, String] = {
+  match c {
+    A => ok(level()!),
+    B(_) => match get()! {
+      some(n) => ok(some({ label: "x", n: n })),
+      none => ok(none),
+    },
+  }
+}
+
+effect fn main() -> Unit = {
+  let r = apply(A)!
+  println(if option.is_some(r) then "some" else "none")
+}
