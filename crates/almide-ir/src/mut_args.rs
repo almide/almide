@@ -16,12 +16,18 @@
 use almide_lang::ast::{AttrValue, Attribute, Decl, Param};
 
 /// The `mut` positions a declaration gives its params: every `mut p`, plus
-/// every param a `@mutating(p)` attribute names (the older spelling). The IR
-/// lowering fills `IrFunction::mutated_params` from this, so a lowered fn and
-/// an unlowered declaration answer the same.
+/// every param a `@mutating(p)` attribute names (the older spelling), and the
+/// FIRST param for a bare `@mutating` (the receiver — the reading native borrow
+/// inference has always given it, and the one the runtime's `&mut` agrees
+/// with: `@mutating fn as_mut_ptr(b: Bytes)` is `almide_rt_bytes_as_mut_ptr(b:
+/// &mut ..)`). The IR lowering fills `IrFunction::mutated_params` from this,
+/// so a lowered fn and an unlowered declaration answer the same.
 pub fn declared_mut_positions(params: &[Param], attrs: &[Attribute]) -> Vec<usize> {
     let mut out: Vec<usize> = params.iter().enumerate().filter(|(_, p)| p.is_mut).map(|(i, _)| i).collect();
     for attr in attrs.iter().filter(|a| a.name.as_str() == "mutating") {
+        if attr.args.is_empty() && !params.is_empty() && !out.contains(&0) {
+            out.push(0);
+        }
         for arg in &attr.args {
             if let AttrValue::Ident { name } = &arg.value {
                 if let Some(idx) = params.iter().position(|p| p.name == *name) {
@@ -85,6 +91,8 @@ mod tests {
         assert_eq!(stdlib_mut_positions("list", "push"), Some(vec![0]));
         assert_eq!(stdlib_mut_positions("list", "len"), None);
         assert_eq!(stdlib_mut_positions("bytes", "set_uint16"), Some(vec![0]));
+        // A bare `@mutating` writes its receiver.
+        assert_eq!(stdlib_mut_positions("bytes", "as_mut_ptr"), Some(vec![0]));
         assert_eq!(stdlib_mut_positions("no_such_module", "push"), None);
     }
 
