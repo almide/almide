@@ -107,6 +107,11 @@ enum Commands {
         /// (embedded host)
         #[arg(long)]
         target: Option<String>,
+        /// Arguments passed to the program on both legs, after a `--`
+        /// separator (a workload size, so a row's `main` is long enough to
+        /// time: `almide bench nbody.almd -- 200000`).
+        #[arg(last = true)]
+        program_args: Vec<String>,
     },
     /// Build a binary
     Build {
@@ -1162,9 +1167,9 @@ fn dispatch(cli: Cli) {
         Commands::Init => cli::cmd_init(),
         Commands::Run { file, no_check, release, target, verified: _, no_verified, time_report, program_args } =>
             dispatch_run(file, no_check, release, target, no_verified, time_report, program_args),
-        Commands::Bench { file, runs, target } => {
+        Commands::Bench { file, runs, target, program_args } => {
             let file = resolve_file(file);
-            cli::cmd_bench(&file, runs, target.as_deref());
+            cli::cmd_bench(&file, runs, target.as_deref(), &program_args);
         }
         Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, component, heap_cap, host } => {
             let file = resolve_file(file);
