@@ -79,7 +79,6 @@ use Scope::{Ablation, Ci, Debug as Dbg, Gate, Harness, Route, Runtime, Tool, Tra
 /// Every `ALMIDE_*` switch the tree reads. Sorted by name; the gate proves the
 /// order and the completeness.
 pub const SWITCHES: &[Switch] = &[
-    sw("ALMIDE_ABI_PROBE", Flag, Dbg, "print the lifted-effect-fn ABI decision per function (v1 lowering)"),
     sw("ALMIDE_ALLOC_COUNT", Flag, Harness, "build the native program with a counting allocator that prints `__ALMD_ALLOC allocs=N deallocs=N reallocs=N peak=N` on stderr when `__almide_main` returns (the native borrow oracle's allocation lane, tests/native_borrow_oracle_test.rs)"),
     sw("ALMIDE_BANG_RETURN", Flag, Ablation, "turn OFF the per-position `!` desugars of the v1 lowering so every `!` reaches the bind-position rule or walls loudly (the decline-matrix probe)"),
     sw("ALMIDE_BENCH_DIR", Value, Harness, "the fixture directory of the structural leg's perf probe (default `crates/almide-wasm/tests/perf`)"),
@@ -112,7 +111,6 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_DBG_GINIT", Flag, Dbg, "print the eager top-let init runner's admission set and why an extended runner declined (v1 lowering, C-007)"),
     sw("ALMIDE_DBG_LINK", Flag, Dbg, "dump the wasm link demand set and what each key resolves to"),
     sw("ALMIDE_DBG_LOWER_FN", Value, Dbg, "print the fully desugared body the v1 lowering actually lowers, for the fn named by the value (was `DBG_LOWER_FN`)"),
-    sw("ALMIDE_DBG_NEMATCH", Flag, Dbg, "print the never-err match analysis per function (v1 lowering)"),
     sw("ALMIDE_DBG_NESTED_MATCH", Flag, Dbg, "print why a nested-match chain was refused (v1 lowering)"),
     sw("ALMIDE_DBG_QQ", Flag, Dbg, "print which path lowered each `??` (match-first vs route fallback, v1 lowering)"),
     sw("ALMIDE_DBG_ROUTER", Flag, Dbg, "print a stdlib call name refused for its registered signature, with the mismatch and the argument types (v1 lowering)"),
@@ -146,7 +144,6 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_KEEP_SCRATCH", Flag, Tool, "keep the `almide test` scratch build directory instead of deleting it"),
     sw("ALMIDE_LSP_TRACE", Flag, Dbg, "print every LSP request and response the language server handles"),
     sw("ALMIDE_MANIFEST_TREE_CHECK", Value, Ci, "the parity-manifest generators' stale-tree refusal (#2405, scripts/lib/oracle-header.sh): `strict` (default) refuses an ORACLE that is not `<Cargo.toml version> (dev…)`, is stamped with a commit other than HEAD, or is unstamped and older than the sources; a worktree behind its upstream; and an untracked spec/ fixture. `gate` keeps only the untracked-fixture check (scripts/check-parity-goldens.sh vouches for CI's artifact). `off` is the deliberate override"),
-    sw("ALMIDE_MG_DEBUG", Flag, Dbg, "print the mutable-global slot assignment and cross-module name-bridge decisions (v1 lowering)"),
     sw("ALMIDE_MONO_DEBUG", Flag, Dbg, "print the monomorphisation discovery and instantiation decisions"),
     sw("ALMIDE_MP_PROBE", Flag, Dbg, "print the mut-param analysis decisions (IR)"),
     sw("ALMIDE_MUTATION_BASE", Value, Ci, "the base ref the mutation gate diffs against"),
