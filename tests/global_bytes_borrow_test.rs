@@ -4,8 +4,9 @@
 //! A global stores the RAW `Vec<u8>` shape (#617) and a bare read of it stays
 //! raw — what a runtime callee's `&Vec<u8>` parameter takes, but not a user
 //! fn's `&AlmideRcCow<Vec<u8>>`: `f(global)` failed with rustc E0308, natively
-//! only. A borrow of such a global now takes the glued value, which derefs to
-//! the raw shape for runtime callees as well.
+//! only. An argument to a user callee that borrows such a global now takes the
+//! glued value (cloned first for an immutable global, a static place); a
+//! runtime callee keeps the raw borrow.
 
 use std::path::Path;
 use std::process::Command;
@@ -25,6 +26,7 @@ const SRC: &str = r#"
 var pending: Bytes = bytes.new(0)
 var chunks: List[Bytes] = []
 var last: Bytes? = none
+let TBL = bytes.from_list([16, 32, 48])
 
 fn size(b: Bytes) -> Int = bytes.len(b)
 fn total(bs: List[Bytes]) -> Int = bs |> list.fold(0, (acc, b) => acc + bytes.len(b))
@@ -37,6 +39,9 @@ effect fn main() -> Unit = {
   println("${int.to_string(total(chunks))} ${int.to_string(maybe(last))}")
   last = some(pending)
   println(int.to_string(maybe(last)))
+  // An immutable global is a static place: borrowed by a user fn and by a
+  // runtime fn, it is never moved out of.
+  println("${int.to_string(size(TBL))} ${int.to_string(bytes.read_u8(TBL, 2))}")
   // Still the global's own value: nothing above moved or changed it.
   pending = bytes.concat(pending, bytes.from_string("!"))
   println("${int.to_string(size(pending))} ${bytes.to_string_lossy(pending)}")
@@ -57,7 +62,7 @@ fn run(target: Option<&str>) -> String {
     format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
 }
 
-const WANT: &str = "3 3\n5 -1\n3\n4 abc!\n";
+const WANT: &str = "3 3\n5 -1\n3\n3 48\n4 abc!\n";
 
 #[test]
 fn global_bytes_passed_to_user_fns_natively() {
