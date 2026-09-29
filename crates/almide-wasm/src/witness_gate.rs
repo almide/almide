@@ -67,6 +67,10 @@ pub fn straightline_subset(body: &IrExpr, ret_is_heap: bool) -> Option<String> {
         Some(IrExprKind::Match { subject, arms }) => match_head_subset(subject, arms).or_else(|| {
             arms.iter().find_map(|a| straightline_subset(&a.body, ret_is_heap))
         }),
+        // A Unit body ending in a loop lowers it as a statement (#2757).
+        Some(IrExprKind::While { .. } | IrExprKind::ForIn { .. }) if !ret_is_heap => {
+            stmt_body_subset(expr?).map(|w| w.at("tail"))
+        }
         Some(_) => value_subset(expr?).map(|w| w.at("tail")),
     }
 }
