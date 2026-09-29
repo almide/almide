@@ -70,22 +70,11 @@ fn bench_wasm(file: &str, runs: u32) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };
-    // JIT-compile once, outside the timer (#2980): the native leg times a
-    // prebuilt binary, not rustc, so the wasm leg times instantiate + run of
-    // a prebuilt module, not Cranelift. Each run still gets a fresh store,
-    // instance and linear memory.
-    let compiled = match almide_wasm_run::compile_wasm_unbounded(&bytes) {
-        Ok(c) => c,
-        Err(e) => {
-            err(&format!("error: embedded wasm host: {e}"));
-            std::process::exit(1);
-        }
-    };
     let run_once = move || -> Result<(Vec<u8>, f64), String> {
         let started = Instant::now();
         // No 30 s epoch watchdog: its loop-header checks are the harness's
         // cost, not the program's (1.9x on mandelbrot, #2150).
-        let r = almide_wasm_run::run_compiled_unbounded(&compiled).map_err(|e| format!("embedded wasm host: {e}"))?;
+        let r = almide_wasm_run::run_wasm_unbounded(&bytes).map_err(|e| format!("embedded wasm host: {e}"))?;
         let secs = started.elapsed().as_secs_f64();
         if r.exit != 0 {
             return Err(format!("workload exited {} — bench only times a clean run:\n{}", r.exit, r.stderr));
