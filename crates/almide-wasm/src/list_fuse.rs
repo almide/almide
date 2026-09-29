@@ -1,11 +1,10 @@
 //! map/filter → fold FUSION (deforestation): one pass over the source,
-//! zero intermediate lists. SOUND only when every callback is
-//! OBSERVATION-FREE — the unfused oracle runs all maps, then all
-//! filters, then the fold, so a printing callback would interleave
-//! differently. The purity scan is conservative: any Named call (user
-//! fns are opaque, and println IS a Named call), any observable-module
-//! call, any RuntimeCall/Fan/Lambda refuses fusion and the generic
-//! staged lowering runs instead. Deterministic fuel is symmetric: HOF
+//! zero intermediate lists. SOUND only when the stages may run element by
+//! element — the unfused oracle runs all maps, then all filters, then the
+//! fold, so a printing callback would interleave differently and a second
+//! aborting stage would abort first. Whether they may is the shared
+//! `almide_ir::fusion` judgment native's stream fusion also reads (#2953);
+//! any refusal takes the generic staged lowering instead. Deterministic fuel is symmetric: HOF
 //! internals never charge on either leg (the interp's pool-body rule),
 //! and callback-body charges are order-free sums within a region.
 
@@ -22,31 +21,47 @@ enum Stage<'a> {
     Filter(&'a IrExpr),
 }
 
-fn observation_free(e: &IrExpr) -> bool {
+/// Judge one stage's callback body for `almide_ir::fusion` (#2953): PURE when
+/// it observes nothing — no Named call (user fns are opaque here, and println
+/// IS a Named call), no call into a user module or an effect module, no
+/// RuntimeCall/Fan/Lambda, no write to a captured var — and TOTAL when it
+/// cannot abort: no trapping operator (`almide_ir::speculation`), no index or
+/// map access, and stdlib calls only into the total modules. The sequencing
+/// rule over the stages is the shared one native reads too.
+fn judge_stage(e: &IrExpr) -> almide_ir::fusion::Stage {
     struct Scan {
-        ok: bool,
+        pure: bool,
+        total: bool,
     }
     impl IrVisitor for Scan {
         fn visit_expr(&mut self, e: &IrExpr) {
             match &e.kind {
                 IrExprKind::Call { target, .. } => match target {
-                    CallTarget::Named { .. } | CallTarget::Computed { .. } => self.ok = false,
+                    // A user module's fn is as opaque as a Named one: it may
+                    // print (#2953 — the callback `util.say(x)` interleaved
+                    // its lines with the fold's).
                     CallTarget::Module { module, .. } => {
-                        if matches!(
-                            module.as_str(),
-                            "fs" | "io" | "http" | "process" | "env" | "random" | "fan"
-                        ) {
-                            self.ok = false;
+                        if !almide_ir::fusion::stdlib_module_is_pure(module.as_str()) {
+                            self.pure = false;
+                        }
+                        if !almide_ir::fusion::stdlib_module_is_total(module.as_str()) {
+                            self.total = false;
                         }
                     }
-                    _ => self.ok = false,
+                    _ => self.pure = false,
                 },
+                IrExprKind::BinOp { op, right, .. } => {
+                    if almide_ir::speculation::binop_may_trap(*op, right) {
+                        self.total = false;
+                    }
+                }
+                IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. } => self.total = false,
                 IrExprKind::RuntimeCall { .. }
                 | IrExprKind::Fan { .. }
-                | IrExprKind::Lambda { .. } => self.ok = false,
+                | IrExprKind::Lambda { .. } => self.pure = false,
                 _ => {}
             }
-            if self.ok {
+            if self.pure {
                 walk_expr(self, e);
             }
         }
@@ -62,16 +77,16 @@ fn observation_free(e: &IrExpr) -> bool {
                 s.kind,
                 IrStmtKind::Assign { .. } | IrStmtKind::IndexAssign { .. } | IrStmtKind::FieldAssign { .. }
             ) {
-                self.ok = false;
+                self.pure = false;
             }
-            if self.ok {
+            if self.pure {
                 walk_stmt(self, s);
             }
         }
     }
-    let mut s = Scan { ok: true };
+    let mut s = Scan { pure: true, total: true };
     s.visit_expr(e);
-    s.ok
+    almide_ir::fusion::Stage { pure: s.pure, total: s.total, short_circuits: false }
 }
 
 impl Emitter<'_> {
@@ -108,25 +123,28 @@ impl Emitter<'_> {
         if stages_rev.is_empty() {
             return Ok(None);
         }
-        // Every callback literal + observation-free, fold's included.
-        for st in &stages_rev {
+        // Every callback a literal lambda, and the stages — in source order,
+        // the fold's (its init included) last — mergeable under the shared
+        // rule (#2953): all pure, at most one that can abort.
+        let mut verdicts = Vec::new();
+        for st in stages_rev.iter().rev() {
             let f = match st {
                 Stage::Map(f) | Stage::Filter(f) => *f,
             };
             let IrExprKind::Lambda { body, .. } = &f.kind else {
                 return Ok(None);
             };
-            if !observation_free(body) {
-                return Ok(None);
-            }
+            verdicts.push(judge_stage(body));
         }
         {
             let IrExprKind::Lambda { body, .. } = &cb.kind else {
                 return Ok(None);
             };
-            if !observation_free(body) {
-                return Ok(None);
-            }
+            let (b, i) = (judge_stage(body), judge_stage(init));
+            verdicts.push(almide_ir::fusion::Stage { pure: b.pure && i.pure, total: b.total && i.total, short_circuits: false });
+        }
+        if !almide_ir::fusion::stages_mergeable(&verdicts) {
+            return Ok(None);
         }
         let stages: Vec<&Stage> = stages_rev.iter().rev().collect();
 
@@ -202,5 +220,51 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         Ok(Some(Some(Lowered::owned(acc_ty))))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use almide_types::types::Ty;
+
+    fn e(kind: IrExprKind) -> IrExpr {
+        IrExpr { kind, ty: Ty::Int, span: None, def_id: None }
+    }
+    fn var(n: u32) -> IrExpr {
+        e(IrExprKind::Var { id: almide_ir::VarId(n) })
+    }
+    fn module_call(module: &str, func: &str) -> IrExpr {
+        e(IrExprKind::Call {
+            target: CallTarget::Module {
+                module: almide_base::intern::sym(module),
+                func: almide_base::intern::sym(func),
+                def_id: None,
+            },
+            args: vec![var(0)],
+            type_args: vec![],
+        })
+    }
+
+    /// #2953: a callback calling a USER module's fn is as opaque as a Named
+    /// call — it may print — so it is not a pure stage.
+    #[test]
+    fn a_user_module_call_is_not_a_pure_stage() {
+        assert!(!judge_stage(&module_call("util", "say")).pure);
+        assert!(judge_stage(&module_call("int", "abs")).pure);
+        assert!(!judge_stage(&module_call("fs", "read_text")).pure);
+    }
+
+    /// #2953: the trap rules are the shared ones, and two partial stages do
+    /// not fuse.
+    #[test]
+    fn a_trapping_stage_is_partial_and_two_of_them_do_not_fuse() {
+        let div = e(IrExprKind::BinOp { op: almide_ir::BinOp::DivInt, left: Box::new(var(0)), right: Box::new(var(1)) });
+        let idx = e(IrExprKind::IndexAccess { object: Box::new(var(2)), index: Box::new(var(0)) });
+        let (a, b) = (judge_stage(&div), judge_stage(&idx));
+        assert!(a.pure && !a.total && b.pure && !b.total);
+        assert!(!almide_ir::fusion::stages_mergeable(&[a, b]));
+        let add = e(IrExprKind::BinOp { op: almide_ir::BinOp::AddInt, left: Box::new(var(0)), right: Box::new(var(1)) });
+        assert!(almide_ir::fusion::stages_mergeable(&[judge_stage(&add), a]));
     }
 }

@@ -106,22 +106,10 @@ impl NanoPass for StreamFusionPass {
 
 // ── Purity / totality vocabulary ──────────────────────────────────────
 
-/// Runtime modules whose calls are effects (or read the outside world).
-const EFFECT_MODULES: &[&str] = &[
-    "args", "datetime", "env", "fan", "fs", "http", "io", "mem", "net",
-    "process", "random", "sse", "testing", "time", "zlib",
-];
-
-/// Runtime modules whose every fn is TOTAL: pure arithmetic / conversion
-/// that never aborts. (`list`/`string`/`map` have aborting members —
-/// `list.chunk(xs, 0)` — so a call into them counts as a possible abort.)
-const TOTAL_MODULES: &[&str] = &["int", "float", "math", "bool"];
-
-/// Stdlib modules a leftover `Module { .. }` call (bundled pure-Almide fn)
-/// may name and still be pure.
-fn stdlib_module_is_pure(module: &str) -> bool {
-    almide_lang::stdlib_info::is_stdlib_module(module) && !EFFECT_MODULES.contains(&module)
-}
+// The module vocabulary and the stage-sequencing rule are shared with the
+// wasm leg's fusion (`almide_ir::fusion`, #2953): one judgment of when running
+// a pipeline element by element is the same program.
+use almide_ir::fusion::{stdlib_module_is_pure, TOTAL_MODULES};
 
 /// Purity uses a greatest fixpoint; recursion alone is not an effect.
 /// Totality uses a least fixpoint: a recursive cycle is not a termination proof.
@@ -274,13 +262,9 @@ fn operator_ok(e: &IrExpr, cx: &Cx) -> Option<bool> {
     use IrExprKind as K;
     Some(match &e.kind {
         K::BinOp { op, left, right } => {
-            // `/ 0`, `% 0` and `^ -n` abort (C-001 family); a literal right
-            // operand that is non-zero / non-negative cannot.
-            let aborts = match op {
-                BinOp::DivInt | BinOp::ModInt => !matches!(right.kind, K::LitInt { value } if value != 0),
-                BinOp::PowInt => !matches!(right.kind, K::LitInt { value } if value >= 0),
-                _ => false,
-            };
+            // `/ 0`, `% 0` and `^ -n` abort (C-001 family); the rule is the
+            // shared `almide_ir::speculation` one.
+            let aborts = almide_ir::speculation::binop_may_trap(*op, right);
             (!cx.total || !aborts) && expr_ok(left, cx) && expr_ok(right, cx)
         }
         K::UnOp { operand, .. } => expr_ok(operand, cx),
@@ -624,20 +608,15 @@ impl<'a> Fuser<'a> {
             IterCollector::Count { lambda } => stages.push((vec![lambda.as_ref()], false)),
             IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => {}
         }
-        if !stages.iter().all(|(es, _)| es.iter().all(|e| self.purity.pure(e))) {
-            return false;
-        }
-        let total: Vec<bool> = stages.iter().map(|(es, _)| es.iter().all(|e| self.purity.total(e))).collect();
-        if total.iter().filter(|t| !**t).count() > 1 {
-            return false;
-        }
-        // Every stage before a short-circuit point must be total.
-        let mut seen_partial = false;
-        for (i, (_, short)) in stages.iter().enumerate() {
-            if *short && seen_partial { return false; }
-            if !total[i] { seen_partial = true; }
-        }
-        true
+        let stages: Vec<almide_ir::fusion::Stage> = stages
+            .iter()
+            .map(|(es, short)| almide_ir::fusion::Stage {
+                pure: es.iter().all(|e| self.purity.pure(e)),
+                total: es.iter().all(|e| self.purity.total(e)),
+                short_circuits: *short,
+            })
+            .collect();
+        almide_ir::fusion::stages_mergeable(&stages)
     }
 }
 
