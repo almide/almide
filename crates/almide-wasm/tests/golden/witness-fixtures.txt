@@ -1,5 +1,32 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 1 of 828
+# certified: 28 of 828
+spec/wasm_cross/bytes_pad_ceiling_oom.almd
+spec/wasm_cross/container_alias_return.almd
+spec/wasm_cross/enumerate_unnameable_element.almd
 spec/wasm_cross/env_sleep_pause.almd
+spec/wasm_cross/int8_div_overflow.almd
+spec/wasm_cross/int_clamp_inverted.almd
+spec/wasm_cross/int_div_by_zero.almd
+spec/wasm_cross/int_div_by_zero_literal.almd
+spec/wasm_cross/int_div_mod_ok.almd
+spec/wasm_cross/int_div_overflow.almd
+spec/wasm_cross/int_mod_by_zero.almd
+spec/wasm_cross/int_mod_overflow.almd
+spec/wasm_cross/int_pow_negative_exponent.almd
+spec/wasm_cross/let_wildcard_discard.almd
+spec/wasm_cross/list_chunk_zero.almd
+spec/wasm_cross/list_sort_str.almd
+spec/wasm_cross/list_window_zero.almd
+spec/wasm_cross/list_windows_zero.almd
+spec/wasm_cross/map_of_maps_value.almd
+spec/wasm_cross/ref_gleam_div_zero_abort.almd
+spec/wasm_cross/ref_int_min_div_abort.almd
+spec/wasm_cross/replace_empty_pat.almd
+spec/wasm_cross/reserved_keyword_fn.almd
+spec/wasm_cross/split_empty_sep.almd
+spec/wasm_cross/string_pad_ceiling_oom.almd
+spec/wasm_cross/tm_str_list_fn_pass.almd
+spec/wasm_cross/tm_str_list_lit_print.almd
+spec/wasm_cross/unique_non_flat_element.almd
