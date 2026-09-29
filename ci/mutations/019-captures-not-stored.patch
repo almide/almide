@@ -1,12 +1,13 @@
 diff --git a/crates/almide-wasm/src/emitter_values.rs b/crates/almide-wasm/src/emitter_values.rs
-index 847ca9648..1a68b8396 100644
+index 214b12aa5..b8cac91d0 100644
 --- a/crates/almide-wasm/src/emitter_values.rs
 +++ b/crates/almide-wasm/src/emitter_values.rs
-@@ -131,20 +131,7 @@ impl Emitter<'_> {
+@@ -131,21 +131,7 @@ impl Emitter<'_> {
                          .i32_store(slot_memarg(ENV_DROP_OFF));
                      for (v, t, off, is_cell) in &captures {
                          let (idx, _) = self.locals[v];
 -                        self.f.instructions().local_get(hb).local_get(idx);
+-                        self.witness_capture(idx, *t, *is_cell);
 -                        if *is_cell {
 -                            // the local already holds the cell address; the
 -                            // env co-owns the cell (+1, released by its glue)
