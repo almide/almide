@@ -92,6 +92,20 @@ impl LowerCtx {
                 });
             }
         }
+        // Inside an EXECUTING loop body or unit arm the var's value is its stable
+        // local, carried across iterations / out of the arm: a `value_of` rebind is
+        // frame-local, so every later iteration would re-read (and re-drop) the
+        // block the first one already released (#2919: `a(id)(d)`, a trap). There
+        // the rebind is drop-old + `SetLocal` IN PLACE — the loop-carried `i(id)m`
+        // slot unit the heap reassignment in a scalar loop already proves.
+        if self.scalar_loop_depth > 0 || self.unit_arm_depth > 0 {
+            let old_drop = self.drop_op_for(old);
+            self.ops.push(old_drop);
+            self.ops.push(Op::SetLocal { local: old, src: new });
+            self.live_heap_handles.retain(|h| *h != new);
+            self.two_level_field_unique(new_h, fidx);
+            return Some(());
+        }
         // Rebind the var to the copy; transfer the read-shape/drop tracking; release the
         // old block's owned reference by its type route (masked/recursive).
         self.value_of.insert(*id, new);
@@ -109,8 +123,15 @@ impl LowerCtx {
         self.ops.push(old_drop);
         self.live_heap_handles.retain(|h| *h != old);
         self.live_heap_handles.push(new);
-        // Level 2: the FIELD COW — load the (possibly shared) child handle, make it
-        // unique (flat raw copy), store it back into the copied record's slot.
+        self.two_level_field_unique(new_h, fidx);
+        Some(())
+    }
+
+    /// Level 2 of [`Self::two_level_field_cow`]: the FIELD COW — load the (possibly
+    /// shared) child handle, make it unique (flat raw copy), store it back into the
+    /// copied record's slot.
+    fn two_level_field_unique(&mut self, new_h: ValueId, fidx: usize) {
+        use crate::PrimKind;
         let foff = crate::lower::layout::slot_offset(fidx) as i64;
         let faddr = self.addr_at(new_h, foff);
         let buf = self.fresh_value();
@@ -124,7 +145,6 @@ impl LowerCtx {
             dst: None,
             args: vec![faddr2, bh],
         });
-        Some(())
     }
 
     /// `base + off` as a fresh address value (a ConstInt + IntBinOp Add pair).
