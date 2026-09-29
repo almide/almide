@@ -315,3 +315,7 @@ spec/wasm_cross/branch_lift_stdlib_mut_arg.almd :: arm_writes
 # assign). The incumbent refuses the field-assign to a mutable global ("not in
 # this brick"); the structural leg serves it byte-identically to native.
 spec/wasm_cross/mutable_global_field_mut_arg.almd :: main
+# #2948: the same shape with the arms calling USER fns named like stdlib
+# mutators (`insert(tag, mut m)`, `push(label, mut xs)`); the lift declines on
+# every leg now, so the incumbent walls honestly on it too.
+spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd :: arm_writes
