@@ -759,7 +759,19 @@ impl Emitter<'_> {
         let must_transfer = std::mem::take(&mut self.try_see_through) && true_tail;
         let depth = self.borrowed_temps.len();
         let mut no_transfer = false;
-        let param_mut = self.table.infos[i].param_mut.clone();
+        // Which args the call writes (and so must make unique first): a
+        // bundled stdlib surface answers from its own DECLARATION, not from
+        // whichever implementation the self-host registry linked for it. The
+        // implementation's params carry no `mut` (`bytes_set_uint16(b: Bytes,
+        // ..)` behind `set_uint16(mut b: Bytes, ..)`), so the write went
+        // through a shared buffer and an alias saw it (#2949). The checker,
+        // native and the shared optimizer read the same declaration.
+        let param_mut: Vec<bool> = if almide_types::stdlib_info::is_bundled_module(module) {
+            let muts = almide_ir::mut_args::stdlib_mut_positions(module, func).unwrap_or_default();
+            (0..args.len()).map(|k| muts.contains(&k)).collect()
+        } else {
+            self.table.infos[i].param_mut.clone()
+        };
         for (k, (a, want)) in args.iter().zip(params).enumerate() {
             if !self.lower_mut_param_arg(a, param_mut.get(k).copied().unwrap_or(false))? {
                 self.lower(a, Some(want))?;
