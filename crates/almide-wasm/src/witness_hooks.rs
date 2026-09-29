@@ -63,7 +63,13 @@ impl Emitter<'_> {
         }
         match src_local {
             Some(src) if w.bind_alias(idx, src) => {}
-            None => w.decline("bind:view-result"),
+            // The frame withdraws; the local still gets an (opaque) object
+            // so its later release or loop-back carry is attributed, not
+            // mistaken for a hook disagreement.
+            None => {
+                w.decline("bind:view-result");
+                w.param_borrowed(idx);
+            }
             _ => w.poison(),
         }
     }
@@ -252,6 +258,57 @@ impl Emitter<'_> {
         match src {
             Some(l) if w.ret_move(l) => {}
             None => w.decline("tail:view-result"),
+            _ => w.poison(),
+        }
+    }
+
+    /// A self tail call in LOOP form (#2757, tco.rs) ends this activation's
+    /// path. Each owner local it CARRIES keeps its block until the local's
+    /// next rebind releases it (the Bind route's dec-old, stmts.rs) or the
+    /// epilogue does — exactly one release per bound block, on every path.
+    /// That release is recorded HERE, at the carry, as the block's `d`; the
+    /// rebind's dec-old is therefore never recorded (on a first binding it
+    /// is the release of NULL), and a local born on another path is not
+    /// touched (witness_paths.rs skips an unborn object's events).
+    pub(crate) fn witness_loop_back(&mut self, carried: &[u32]) {
+        let Some(w) = self.witness.as_mut() else { return };
+        for &idx in carried {
+            if !w.dec_local(idx) {
+                w.poison();
+            }
+        }
+        w.frame_replaced();
+    }
+
+    /// #2757 / #2976: under the raw-address rule a loop-form self call
+    /// releases nothing at the loop-back, so an owned param the arguments
+    /// do not hand straight through (`moved`) keeps its old block forever —
+    /// the regex capture accumulator's leak. The witness withdraws rather
+    /// than certify a leaking path.
+    pub(crate) fn witness_raw_loop_back(&mut self, loop_form_raw: bool, moved: &[u32]) {
+        if loop_form_raw
+            && self.witness.is_some()
+            && self.rc_frame_params.iter().any(|p| !moved.contains(p) && !self.tail_consumed.contains(p))
+        {
+            self.witness_decline("loop-back:raw-param-kept");
+        }
+    }
+
+    /// An argument whose credit MOVES without a share (#2757): the param a
+    /// loop-form self call hands straight through under the raw-address
+    /// rule, and the accumulator a `$str_append` / `$list_push` window
+    /// consumes (tail_append.rs). One credit in, one out — `m` on its
+    /// object, no `a`.
+    pub(crate) fn witness_arg_moved(&mut self, e: &almide_ir::IrExpr, ty: SliceTy) {
+        let Some(w) = self.witness.as_mut() else { return };
+        w.note_arg(node(e));
+        if !self.rc_droppable(ty) {
+            return;
+        }
+        let src = self.witness_src_local(e);
+        let Some(w) = self.witness.as_mut() else { return };
+        match src {
+            Some(l) if w.move_local(l) => {}
             _ => w.poison(),
         }
     }

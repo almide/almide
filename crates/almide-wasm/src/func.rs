@@ -430,11 +430,7 @@ pub(crate) fn lower_fn(
                 None
             };
             let verdict = pre_gate.or_else(|| {
-                crate::witness::straightline_subset(
-                    body,
-                    ret.is_some_and(crate::witness::heapish_ret),
-                    name.rsplit('.').next().unwrap_or(name),
-                )
+                crate::witness::straightline_subset(body, ret.is_some_and(crate::witness::heapish_ret))
             });
             match verdict {
                 Some(reason) => crate::witness::push_decline(name, &reason),
