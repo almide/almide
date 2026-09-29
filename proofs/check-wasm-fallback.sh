@@ -14,7 +14,7 @@ BASELINE="$ROOT/proofs/wasm-fallback-baseline.txt"
 BIN="${ALMIDE_BIN:-almide}"
 
 # FALLBACK_TEST_LOG=<file> keeps the run's full output (with the per-file wall
-# reasons) for scripts/check-incumbent-route.sh, so CI walks the suite once.
+# reasons) for a reader that wants them.
 if [ -n "${FALLBACK_TEST_LOG:-}" ]; then
   observed=$(cd "$ROOT" && ALMIDE_FALLBACK_NAMES=1 ALMIDE_WALL_REASON=1 "$BIN" test 2>&1 | tee "$FALLBACK_TEST_LOG" | sed -n 's/^FALLBACK //p' | sort)
 else
