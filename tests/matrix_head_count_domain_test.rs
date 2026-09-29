@@ -82,8 +82,8 @@ fn the_native_helper_aborts_rather_than_clamping() {
          on the self-hosted side): {body}"
     );
     assert!(
-        body.contains("Error: head count must be positive") && body.contains("exit(1)"),
-        "the helper must raise the unified `Error: <msg>` + exit 1 that list.chunk / \
+        body.contains("almide_abort(\"head count must be positive\")"),
+        "the helper must raise the unified `Error: <msg>` + exit 1 (the once-guarded `almide_abort`, #3022) that list.chunk / \
          int.rotate_* use, so both targets can print the SAME line: {body}"
     );
 }
@@ -148,8 +148,8 @@ fn the_native_geometry_helper_aborts_and_every_rope_entry_routes_through_it() {
         .expect("almide_rt_matrix_head_geometry is missing — the rope family has no shared geometry rule");
     let body = &src[start..start + 600.min(src.len() - start)];
     assert!(
-        body.contains("Error: head geometry exceeds row width") && body.contains("exit(1)"),
-        "the geometry helper must raise the unified `Error: <msg>` + exit 1 so both targets \
+        body.contains("almide_abort(\"head geometry exceeds row width\")"),
+        "the geometry helper must raise the unified `Error: <msg>` + exit 1 (the once-guarded `almide_abort`, #3022) so both targets \
          print the SAME line: {body}"
     );
     assert!(
@@ -210,8 +210,8 @@ fn the_native_index_guard_aborts_and_get_routes_through_it() {
         .expect("almide_rt_matrix_bounds is missing — the accessor family has no shared index rule");
     let body = &src[start..start + 400.min(src.len() - start)];
     assert!(
-        body.contains("Error: matrix index out of bounds") && body.contains("exit(1)"),
-        "the index guard must raise the unified `Error: <msg>` + exit 1 both targets print: {body}"
+        body.contains("almide_abort(\"matrix index out of bounds\")"),
+        "the index guard must raise the unified `Error: <msg>` + exit 1 (the once-guarded `almide_abort`, #3022) both targets print: {body}"
     );
     assert!(
         body.contains("idx < 0"),
@@ -267,8 +267,8 @@ fn the_native_shape_guard_aborts_and_every_two_operand_entry_routes_through_it()
         .expect("almide_rt_matrix_shape_eq is missing — the two-operand family has no shared shape rule");
     let body = &src[start..start + 400.min(src.len() - start)];
     assert!(
-        body.contains("Error: matrix shape mismatch") && body.contains("exit(1)"),
-        "the shape guard must raise the unified `Error: <msg>` + exit 1 both targets print: {body}"
+        body.contains("almide_abort(\"matrix shape mismatch\")"),
+        "the shape guard must raise the unified `Error: <msg>` + exit 1 (the once-guarded `almide_abort`, #3022) both targets print: {body}"
     );
 
     // Every native kernel that indexes one operand's extent against another's
