@@ -475,6 +475,7 @@
 10110	10102	163568	10105	spec/wasm_cross/mut_param_call_chain.almd
 71	22	780	23	spec/wasm_cross/mut_param_effect_can_err.almd
 9	1	88	5	spec/wasm_cross/mut_param_effect_never_err.almd
+85	23	1040	69	spec/wasm_cross/mut_param_move_mode_gaps.almd
 5	2	80	5	spec/wasm_cross/mut_param_spread_reassign.almd
 26	7	8304	20	spec/wasm_cross/mut_param_tail_recursion.almd
 13	1	327	11	spec/wasm_cross/mut_param_writeback_growth.almd

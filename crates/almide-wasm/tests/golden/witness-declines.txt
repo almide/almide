@@ -16,7 +16,7 @@ call-arg:TupleIndex	1
 call:ctor	42
 call:target:Computed	18
 display	10
-effect	164
+effect	168
 lambda	193
 list-elem	128
 module-arm:unaudited:bytes.push	2
@@ -30,7 +30,7 @@ module-arm:unaudited:string.push	1
 module-result:view:list.get_or	2
 named-op	11
 rhs:BinOp	796
-rhs:Block	158
+rhs:Block	162
 rhs:EmptyMap	2
 rhs:Fan	2
 rhs:If	658
@@ -54,7 +54,7 @@ scan	3
 stmt:Assign	11
 stmt:BindDestructure	16
 stmt:Comment	160
-stmt:Expr:Block	71
+stmt:Expr:Block	74
 stmt:Expr:ForIn	53
 stmt:Expr:If	24
 stmt:Expr:Match	2
@@ -70,12 +70,12 @@ stmt:Expr:call:target:Computed	1
 stmt:FieldAssign	1
 stmt:Guard	9
 stmt:IndexAssign	6
-tail:BinOp	710
+tail:BinOp	711
 tail:Block	17
 tail:If	4690
 tail:Lambda	10
 tail:MapAccess	5
-tail:Match	460
+tail:Match	464
 tail:Member	4
 tail:OptionNone	11
 tail:OptionSome	14

@@ -246,6 +246,9 @@ spec/stdlib/http_router_test.almd :: __test_almd_an app bound at the top level i
 spec/wasm_cross/mut_param_effect_can_err.almd :: go
 spec/wasm_cross/mut_param_effect_can_err.almd :: main
 spec/wasm_cross/mut_param_effect_can_err.almd :: uc__Mem
+spec/wasm_cross/mut_param_move_mode_gaps.almd :: main
+spec/wasm_cross/mut_param_move_mode_gaps.almd :: push_pos
+spec/wasm_cross/mut_param_move_mode_gaps.almd :: run_fill
 # #1576 also: the DDD gauntlet's mut_port `main` (the can-err mut-param port call
 # consumed by `!`) walls on the incumbent for the same reason as the fixture's fns.
 spec/gauntlet/pkg/mut_port/src/main.almd :: main
