@@ -1778,6 +1778,7 @@ evidence  = [
   { path = "spec/wasm_cross/mut_param_effect_can_err.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_move_mode_gaps.almd", class = "fixture" },
   { path = "spec/wasm_cross/mutable_global_field_mut_arg.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_effect_unpropagated.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-133"
