@@ -130,7 +130,7 @@
 1	#2973	spec/wasm_cross/mut_scalar_param_reassign.almd
 4	#2967	spec/wasm_cross/mutable_global_bytes_arena.almd
 7	#2967	spec/wasm_cross/mutable_global_bytes_copy_from.almd
-38	#2967	spec/wasm_cross/mutable_global_field_mut_arg.almd
+38	#2992	spec/wasm_cross/mutable_global_field_mut_arg.almd
 1	#2967	spec/wasm_cross/mutable_global_repeat_writes.almd
 4	#2972	spec/wasm_cross/nested_list_option_result.almd
 1	#2932	spec/wasm_cross/nested_scalar_record_append.almd
