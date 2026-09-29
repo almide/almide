@@ -58,6 +58,13 @@ impl FindingSink {
         *self.slow.lock().unwrap()
     }
 
+    /// Has a finding with this dedup key been recorded already? Lets the
+    /// worker skip minimizing a re-discovery of a constant-summary kind
+    /// (LeakAtExit), whose key does not change under minimization.
+    pub fn is_known(&self, finding: &Finding) -> bool {
+        self.seen.lock().unwrap().contains(&dedup_key(finding))
+    }
+
     /// Record a finding. Returns `true` if it was new (written), `false`
     /// if it deduplicated against a prior one.
     pub fn record(

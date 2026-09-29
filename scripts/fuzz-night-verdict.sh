@@ -94,12 +94,16 @@
 # (reporting, missing, shards_planned, minutes_planned, minutes_delivered,
 # delivered_pct, budget) so the issue-body step can carry them into the issue.
 #
-# Usage: fuzz-night-verdict.sh <shard-dir> <minutes-per-shard> <shards-planned> <findings> [<slow>]
+# Usage: fuzz-night-verdict.sh <shard-dir> <minutes-per-shard> <shards-planned> <findings> [<slow>] [<leak>]
 #   <shard-dir> holds one subdirectory per reporting shard, each containing
 #   fuzz-output.txt (the layout `actions/download-artifact` produces when
 #   several artifacts are downloaded without a `name:`).
 #   <slow> is the perf-class subset of <findings> (defaults to 0 so pre-#1235
 #   callers keep working); the record line splits the two.
+#   <leak> is the LeakAtExit subset (wasm heap blocks live at exit, the
+#   live-heap rung; defaults to 0) — its own class, like Slow: tracked under
+#   the fuzz-leak label, not fatal (the corpus live-at-exit ledger is the red
+#   gate for leaks; the fuzzer finds programs the corpus does not have).
 
 set -euo pipefail
 # Byte-order collation, pinned (#1031): the shard walk below is `find | sort`,
@@ -111,12 +115,13 @@ export LC_ALL=C
 # shellcheck source=scripts/lib/fuzz-night-line.sh
 . "$(cd "$(dirname "$0")" && pwd)/lib/fuzz-night-line.sh"
 
-DIR="${1:?usage: fuzz-night-verdict.sh <shard-dir> <minutes-per-shard> <shards-planned> <findings> [<slow>]}"
+DIR="${1:?usage: fuzz-night-verdict.sh <shard-dir> <minutes-per-shard> <shards-planned> <findings> [<slow>] [<leak>]}"
 MINUTES="${2:?minutes-per-shard}"
 PLANNED="${3:?shards-planned}"
 FINDINGS="${4:?findings}"
 SLOW="${5:-0}"
-CORRECTNESS=$((FINDINGS - SLOW))
+LEAK="${6:-0}"
+CORRECTNESS=$((FINDINGS - SLOW - LEAK))
 MINUTES_PLANNED=$((MINUTES * PLANNED))
 
 emit_outputs() {
@@ -223,7 +228,7 @@ fi
 # what is missing is a ruling on whether a night nobody uploaded can be scored
 # at all, and that is not this script's to make.
 if [ "$REPORTING" -eq 0 ]; then
-  LINE="fuzz-night: shards=0/$PLANNED reporting=0 recovered=none missing=$MISSING minutes_planned=$MINUTES_PLANNED minutes_delivered=0 delivered_pct=0 budget=partial generated=0 findings=$FINDINGS findings_recovered=0 correctness=$CORRECTNESS slow=$SLOW"
+  LINE="fuzz-night: shards=0/$PLANNED reporting=0 recovered=none missing=$MISSING minutes_planned=$MINUTES_PLANNED minutes_delivered=0 delivered_pct=0 budget=partial generated=0 findings=$FINDINGS findings_recovered=0 correctness=$CORRECTNESS slow=$SLOW leak=$LEAK"
   echo "$LINE" >&2
   emit_outputs 0 "$MISSING" 0 0 partial none 0
   echo "## Nightly fuzz verdict — findings=$FINDINGS of 0/$PLANNED shards"
@@ -308,7 +313,7 @@ DELIVERED=$(awk -v e="$ELAPSED" 'BEGIN{printf "%.1f", e/60}')
 THROUGHPUT=$(awk -v g="$GENERATED" -v e="$ELAPSED" 'BEGIN{printf "%.1f", (e>0)? g*60/e : 0}')
 PCT=$(awk -v p="$MINUTES_PLANNED" -v d="$DELIVERED" 'BEGIN{printf "%d", (p>0)? (100*d)/p : 0}')
 if [ "$PCT" -ge "$FUZZ_NIGHT_BUDGET_PCT" ]; then BUDGET=full; else BUDGET=partial; fi
-LINE="fuzz-night: shards=$COMPLETED/$PLANNED reporting=$REPORTING recovered=$RECOVERED missing=$MISSING minutes_planned=$MINUTES_PLANNED minutes_delivered=$DELIVERED delivered_pct=$PCT budget=$BUDGET generated=$GENERATED throughput=${THROUGHPUT}prog/min findings=$FINDINGS_TOTAL findings_recovered=$RECOVERED_FINDINGS correctness=$CORRECTNESS slow=$SLOW"
+LINE="fuzz-night: shards=$COMPLETED/$PLANNED reporting=$REPORTING recovered=$RECOVERED missing=$MISSING minutes_planned=$MINUTES_PLANNED minutes_delivered=$DELIVERED delivered_pct=$PCT budget=$BUDGET generated=$GENERATED throughput=${THROUGHPUT}prog/min findings=$FINDINGS_TOTAL findings_recovered=$RECOVERED_FINDINGS correctness=$CORRECTNESS slow=$SLOW leak=$LEAK"
 
 echo "$LINE" >&2
 emit_outputs "$REPORTING" "$MISSING" "$DELIVERED" "$PCT" "$BUDGET" "$RECOVERED" "$RECOVERED_FINDINGS"
@@ -391,6 +396,11 @@ fi
 if [ "$SLOW" -gt 0 ] && [ "$CORRECTNESS" -eq 0 ]; then
   echo "**$SLOW** perf-class Slow finding(s) (#1235: over budget but completed"
   echo "byte-identical at 10x) — tracked under the perf label, night stays green."
+  echo ""
+fi
+if [ "$LEAK" -gt 0 ] && [ "$CORRECTNESS" -eq 0 ]; then
+  echo "**$LEAK** LeakAtExit finding(s) (wasm heap blocks live at exit — native"
+  echo "drops them) — tracked under the fuzz-leak label, night stays green."
   echo ""
 fi
 echo "| shard | seed | budget | programs | elapsed |"
