@@ -12,13 +12,20 @@ test "every option left to its default" {
 }
 
 test "named options, the rest from defaults" {
-  assert_eq(surface.describe("launcher", layer: surface.Overlay, keyboard: surface.Exclusive),
-    "launcher overlay exclusive h30 m0")
+  assert_eq(
+    surface.describe("launcher", layer: surface.Overlay, keyboard: surface.Exclusive),
+    "launcher overlay exclusive h30 m0",
+  )
   assert_eq(surface.describe("bar", margin: 8), "bar top no-keys h30 m8")
-  assert_eq(surface.describe("osd", keyboard: surface.OnDemand, height: 64),
-    "osd top on-demand h64 m0")
+  assert_eq(
+    surface.describe("osd", keyboard: surface.OnDemand, height: 64),
+    "osd top on-demand h64 m0",
+  )
 }
 
 test "positional options, the rest from defaults" {
-  assert_eq(surface.describe("wallpaper", surface.Background), "wallpaper background no-keys h30 m0")
+  assert_eq(
+    surface.describe("wallpaper", surface.Background),
+    "wallpaper background no-keys h30 m0",
+  )
 }

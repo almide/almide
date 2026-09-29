@@ -10,9 +10,17 @@ let DEFAULT_MARGIN = 0
 
 fn default_height() -> Int = 30
 
-fn describe(name: String, layer: Layer = Top, keyboard: Keys = NoKeys,
-            height: Int = default_height(), margin: Int = DEFAULT_MARGIN) -> String = {
-  let l = match layer { Background => "background", Bottom => "bottom", Top => "top", Overlay => "overlay" }
-  let k = match keyboard { NoKeys => "no-keys", Exclusive => "exclusive", OnDemand => "on-demand" }
+fn describe(name: String, layer: Layer = Top, keyboard: Keys = NoKeys, height: Int = default_height(), margin: Int = DEFAULT_MARGIN) -> String = {
+  let l = match layer {
+    Background => "background",
+    Bottom => "bottom",
+    Top => "top",
+    Overlay => "overlay",
+  }
+  let k = match keyboard {
+    NoKeys => "no-keys",
+    Exclusive => "exclusive",
+    OnDemand => "on-demand",
+  }
   "${name} ${l} ${k} h${int.to_string(height)} m${int.to_string(margin)}"
 }
