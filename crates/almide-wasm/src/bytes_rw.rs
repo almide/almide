@@ -228,7 +228,7 @@ impl Emitter<'_> {
     pub(crate) fn lower_bytes_index(&mut self, index: &IrExpr) -> Result<SliceTy, EmitError> {
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
-        self.lower(index, Some(INT))?;
+        self.lower_arg(index, Some(INT), ArgMode::Borrow)?;
         let ih = self.hold_i64()?;
         self.f.instructions().local_set(ih);
         self.bytes_room(bh, ih, 1);
