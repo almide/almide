@@ -58,7 +58,7 @@ impl Emitter<'_> {
     /// counters are appended right after the top-let globals
     /// (assembly.rs), whose slots are `G_FIXED_COUNT..` contiguous — the
     /// map also carries use-site aliases, so count slots, not entries.
-    fn alloc_counter_base(&self) -> Option<u32> {
+    pub(crate) fn alloc_counter_base(&self) -> Option<u32> {
         crate::alloc_count::armed()
             .then(|| self.globals.values().map(|&(slot, _)| slot + 1).max().unwrap_or(G_FIXED_COUNT))
     }

@@ -322,9 +322,28 @@ impl<'a> Emitter<'a> {
     /// `RegionSave`: allocate the save block, file the bump pointer and
     /// the class heads into it, zero the heads. Returns the local holding
     /// the block (released by `emit_region_restore`).
-    pub(crate) fn emit_region_save(&mut self) -> Result<u32, EmitError> {
+    ///
+    /// Armed (the live-heap measurement, `alloc_count`): the window's
+    /// entry live count `allocs − frees − reclaimed` is snapshotted into an i64 hold
+    /// BEFORE the save block is taken, so the restore can book every block
+    /// it reclaims wholesale as `__region_reclaimed`.
+    pub(crate) fn emit_region_save(&mut self) -> Result<RegionSlot, EmitError> {
         self.work.region_used.set(true);
         let blk = self.hold_i32()?;
+        let snap = match self.alloc_counter_base() {
+            Some(c) => {
+                let snap = self.hold_i64()?;
+                let mut i = self.f.instructions();
+                i.global_get(c + crate::alloc_count::COUNT)
+                    .global_get(c + crate::alloc_count::FREES)
+                    .i64_sub()
+                    .global_get(c + crate::alloc_count::RECLAIMED)
+                    .i64_sub()
+                    .local_set(snap);
+                Some((snap, c))
+            }
+            None => None,
+        };
         let mut i = self.f.instructions();
         i.i32_const(SAVE_BYTES as i32).call(F_ALLOC).local_set(blk);
         i.local_get(blk).global_get(G_HEAP).i32_store(abs(almide_layout::PAYLOAD));
@@ -335,7 +354,7 @@ impl<'a> Emitter<'a> {
         i.local_get(blk).i32_const(SAVED_HEADS as i32).i32_add();
         i.i32_const(class_slot(0)).i32_const(HEADS_BYTES as i32).memory_copy(0, 0);
         i.i32_const(class_slot(0)).i32_const(0).i32_const(HEADS_BYTES as i32).memory_fill(0);
-        Ok(blk)
+        Ok((blk, snap))
     }
 
     /// The window site's half of the borrow pool: the producer's result,
@@ -360,7 +379,13 @@ impl<'a> Emitter<'a> {
 
     /// `RegionRestore`: heads back, bump pointer back, the save block
     /// filed into the restored lists.
-    pub(crate) fn emit_region_restore(&mut self, blk: u32) {
+    ///
+    /// Armed: nothing crosses the window edge, so every block the window
+    /// took and did not `$free` is reclaimed here — `reclaimed` becomes
+    /// `allocs − frees − snapshot`, which puts the live count `allocs −
+    /// frees − reclaimed` back at the snapshot (nested and sequential
+    /// windows compose: each restores the live count it found).
+    pub(crate) fn emit_region_restore(&mut self, (blk, snap): RegionSlot) {
         {
             let mut i = self.f.instructions();
             // The window's peak is the bump pointer right now (frees
@@ -375,10 +400,25 @@ impl<'a> Emitter<'a> {
             i.i32_const(HEADS_BYTES as i32).memory_copy(0, 0);
             i.local_get(blk).i32_load(abs(almide_layout::PAYLOAD)).global_set(G_HEAP);
             i.local_get(blk).call(F_FREE);
+            if let Some((snap, c)) = snap {
+                i.global_get(c + crate::alloc_count::COUNT)
+                    .global_get(c + crate::alloc_count::FREES)
+                    .i64_sub()
+                    .local_get(snap)
+                    .i64_sub()
+                    .global_set(c + crate::alloc_count::RECLAIMED);
+            }
+        }
+        if snap.is_some() {
+            self.release_i64();
         }
         self.release_i32();
     }
 }
+
+/// A window's save block local, and — armed — its entry live-count
+/// snapshot (an i64 hold) with the first counter global.
+pub(crate) type RegionSlot = (u32, Option<(u32, u32)>);
 
 /// Keyed by table index; empty when no fn qualifies (the common case for
 /// programs without a pure producer/consumer pair).

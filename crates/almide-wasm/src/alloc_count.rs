@@ -14,6 +14,15 @@
 //! | `__alloc_reused`  | the `$alloc` calls a free-list pop served         |
 //! | `__alloc_bytes`   | the sum of the payload lengths requested          |
 //! | `__free_count`    | every `$free` call (filed or abandoned)           |
+//! | `__region_reclaimed` | blocks a region window's restore reclaimed     |
+//! |                   | wholesale, without a `$free` call (#1961)          |
+//!
+//! LIVE AT EXIT (the live-heap gate). `allocs − frees − region_reclaimed`
+//! read after `main` returns is the number of heap blocks the program never
+//! released. An armed `main` also releases every droppable top-let global
+//! right before its epilogue (func.rs): a top-let is live BY DESIGN until
+//! exit, so the measurement mode drops it the way native's exit would, and
+//! what remains is a leak. A shipped module never runs that release.
 //!
 //! OFF (the default) nothing is emitted: the globals, the exports and the
 //! increments are all absent, so a shipped module is byte-identical to a
@@ -31,6 +40,33 @@ use std::cell::Cell;
 
 thread_local! {
     static ARMED: Cell<bool> = const { Cell::new(false) };
+    static KEEP_TOP_LETS: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Does the armed `main` release its top-let globals before returning?
+/// Always, except under the negative-test hook below.
+pub(crate) fn releases_top_lets() -> bool {
+    armed() && !KEEP_TOP_LETS.with(|c| c.get())
+}
+
+/// Negative-test hook (tests/live_at_exit.rs): drop the armed `main`'s
+/// top-let releases — one release the emitter omits — so the live-heap
+/// gate has a leak to see. Thread-local; restores on drop.
+#[doc(hidden)]
+#[must_use = "the guard restores the previous state when dropped"]
+pub struct KeepTopLetsGuard(bool);
+
+impl KeepTopLetsGuard {
+    pub fn set() -> Self {
+        let prev = KEEP_TOP_LETS.with(|c| c.replace(true));
+        Self(prev)
+    }
+}
+
+impl Drop for KeepTopLetsGuard {
+    fn drop(&mut self) {
+        KEEP_TOP_LETS.with(|c| c.set(self.0));
+    }
 }
 
 /// Is the counter being emitted into the module under emission?
@@ -40,15 +76,16 @@ pub fn armed() -> bool {
 
 /// The exported counter globals, in the order they are appended after the
 /// top-let globals (each an i64 starting at 0).
-pub const EXPORTS: [&str; 4] = ["__alloc_count", "__alloc_reused", "__alloc_bytes", "__free_count"];
+pub const EXPORTS: [&str; 5] = ["__alloc_count", "__alloc_reused", "__alloc_bytes", "__free_count", "__region_reclaimed"];
 
 /// Offsets of each counter from the first counter's global index.
 pub(crate) const COUNT: u32 = 0;
 pub(crate) const REUSED: u32 = 1;
 pub(crate) const BYTES: u32 = 2;
 pub(crate) const FREES: u32 = 3;
+pub(crate) const RECLAIMED: u32 = 4;
 
-/// Declare the four counter globals (i64, mutable, 0) when `counters` names
+/// Declare the counter globals (i64, mutable, 0) when `counters` names
 /// their first index — a no-op for a shipped module.
 pub(crate) fn declare_globals(globals: &mut wasm_encoder::GlobalSection, counters: Option<u32>) {
     use wasm_encoder::{ConstExpr, GlobalType, ValType};
