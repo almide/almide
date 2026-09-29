@@ -310,3 +310,8 @@ spec/wasm_cross/lambda_failure_channel.almd :: typed_slot
 # on native), so the incumbent walls honestly. The structural leg serves it
 # byte-identically to native.
 spec/wasm_cross/branch_lift_stdlib_mut_arg.almd :: arm_writes
+# #2946: `mut` arguments through a FIELD of a module-level `var` (list/string/map
+# in-place ops and a user fn's `mut` param on `g.xs`, beside a `g.n = ..` field
+# assign). The incumbent refuses the field-assign to a mutable global ("not in
+# this brick"); the structural leg serves it byte-identically to native.
+spec/wasm_cross/mutable_global_field_mut_arg.almd :: main
