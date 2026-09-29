@@ -87,6 +87,23 @@ pub(crate) fn cell_vars_of(body: &IrExpr) -> HashSet<VarId> {
     s.captured.intersection(&s.mutated).copied().collect()
 }
 
+/// Which args a linked module call writes (and so must make unique first).
+/// A bundled stdlib surface answers from its own DECLARATION, not from
+/// whichever implementation the self-host registry linked for it: the
+/// implementation's params carry no `mut` (`bytes_set_uint16(b: Bytes, ..)`
+/// behind `set_uint16(mut b: Bytes, ..)`), so the write went through a shared
+/// buffer and an alias saw it (#2949). The checker, native, the shared
+/// optimizer and the cell scan above read the same declaration. A user or
+/// package module fn keeps its own params (`linked`).
+pub(crate) fn linked_param_mut(module: &str, func: &str, arity: usize, linked: &[bool]) -> Vec<bool> {
+    if almide_types::stdlib_info::is_bundled_module(module) {
+        let muts = almide_ir::mut_args::stdlib_mut_positions(module, func).unwrap_or_default();
+        (0..arity).map(|k| muts.contains(&k)).collect()
+    } else {
+        linked.to_vec()
+    }
+}
+
 impl crate::emitter::Emitter<'_> {
     /// The lambda body's captured OUTER locals (VarIds are unique within
     /// a function context, so any Var resolving through the enclosing
