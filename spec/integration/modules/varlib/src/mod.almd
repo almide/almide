@@ -38,6 +38,22 @@ let SALUTE = "Ahoy"
 
 fn hail(name: String, greeting: String = SALUTE) -> String = "${greeting}, ${name}!"
 
+// Defaults that are this module's own constructors and functions travel the
+// same way: bare here, they resolved in the caller's scope — `OnFailure` to
+// nothing (an unresolved call that aborted codegen), and with two enums in
+// play a case of the wrong one.
+type Lane = | Fast | Slow
+
+fn base_retries() -> Int = 3
+
+fn retry_plan(policy: Policy = OnFailure, lane: Lane = Slow, tries: Int = base_retries(),
+              fallback: Wrapper = Wrap(7)) -> String = {
+  let p = match policy { Never => "never", OnFailure => "on-failure", Always => "always" }
+  let l = match lane { Fast => "fast", Slow => "slow" }
+  let f = match fallback { Wrap(n) => int.to_string(n), Empty => "none" }
+  "${p}/${l}/${int.to_string(tries)}/${f}"
+}
+
 // #1087: a convention method must be reachable from ANOTHER module. Both the
 // explicit `fn Tone.repr` and `Pigment`'s DERIVED Codec are registered under
 // different key shapes, and every consumer starts from the qualified

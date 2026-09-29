@@ -405,12 +405,25 @@ pub(super) fn qualify_callee_module_idents(expr: &mut ast::Expr, module: Sym, en
             ast::ExprKind::Ident { name } | ast::ExprKind::TypeName { name } => *name,
             _ => return,
         };
-        if !env.top_lets.contains_key(&sym(&format!("{}.{}", module, name))) {
+        if !names_callee_module_item(env, module, name) {
             return;
         }
         let obj = ast::Expr::new(e.id, e.span, ast::ExprKind::Ident { name: module });
         e.kind = ast::ExprKind::Member { object: Box::new(obj), field: name };
     });
+}
+
+/// Does bare `name`, written in `module`, name one of that module's own items —
+/// a module-level constant, a variant constructor (`keys: Keys = NoKeys`,
+/// `w: Wrapper = Wrap(7)`), or a function (`n: Int = base()`)? Left bare, the
+/// caller resolves it in ITS scope: a constant bound to the caller's first
+/// global (#1088), a constructor to a same-named case of another enum or to
+/// nothing (an unresolved call the ConcretizeTypes postcondition aborts on).
+fn names_callee_module_item(env: &crate::types::TypeEnv, module: Sym, name: Sym) -> bool {
+    let qualified = sym(&format!("{}.{}", module, name));
+    env.top_lets.contains_key(&qualified)
+        || env.functions.contains_key(&qualified)
+        || env.constructors.get(&name).is_some_and(|cands| cands.iter().any(|(_, owner, _)| *owner == Some(module)))
 }
 
 fn substitute_call_params(expr: &mut ast::Expr, param_values: &std::collections::HashMap<Sym, ast::Expr>) {

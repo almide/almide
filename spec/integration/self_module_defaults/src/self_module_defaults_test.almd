@@ -1,0 +1,24 @@
+// A default argument is written in the callee's module but filled in at the
+// caller's call site. Its bare names — the module's own constructors,
+// functions and constants — resolved in the CALLER's scope: `NoKeys` became an
+// unresolved call (the ConcretizeTypes postcondition aborted the build) or a
+// case of the wrong enum (`Layer::NoKeys`, rejected by rustc). Filling through
+// named arguments also skipped the declared-type correction positional
+// filling applies, so the same call broke only when an argument was named.
+import self.ui.surface
+
+test "every option left to its default" {
+  assert_eq(surface.describe("bar"), "bar top no-keys h30 m0")
+}
+
+test "named options, the rest from defaults" {
+  assert_eq(surface.describe("launcher", layer: surface.Overlay, keyboard: surface.Exclusive),
+    "launcher overlay exclusive h30 m0")
+  assert_eq(surface.describe("bar", margin: 8), "bar top no-keys h30 m8")
+  assert_eq(surface.describe("osd", keyboard: surface.OnDemand, height: 64),
+    "osd top on-demand h64 m0")
+}
+
+test "positional options, the rest from defaults" {
+  assert_eq(surface.describe("wallpaper", surface.Background), "wallpaper background no-keys h30 m0")
+}
