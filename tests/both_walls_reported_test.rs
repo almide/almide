@@ -11,21 +11,21 @@ fn almide() -> &'static str {
     env!("CARGO_BIN_EXE_almide")
 }
 
-/// A fn mutating TWO mut params: outside both legs' subsets today (the
-/// structural leg's C-132 write-back covers one; the incumbent refuses the
-/// index-assign on a mut List param), so the build must fail — with BOTH
-/// reasons on stderr.
-const DOUBLE_WALL: &str = r#"fn two(mut a: List[Int], mut b: List[Int]) -> Int = {
-  a[0] = a[0] + 1
-  list.push(b, 1)
-  a[0]
+/// An effect move-mode call (C-132) bound as a Result VALUE instead of
+/// propagated with `!`: outside both legs' subsets today (the structural leg
+/// sees the carrier where the Result was declared; the incumbent refuses the
+/// heap bind from Unit), so the build must fail — with BOTH reasons on
+/// stderr. (The two-mut-param shape this test used first lowers on the
+/// structural leg since #2907.)
+const DOUBLE_WALL: &str = r#"effect fn fill(mut a: List[Int], x: Int) -> Unit = {
+  a[0] = a[0] + x
+  list.push(a, x)
 }
 
-fn main() -> Unit = {
+effect fn main() -> Unit = {
   var a = [0]
-  var b: List[Int] = []
-  let r = two(a, b)
-  println("${r}")
+  let _r: Result[Unit, String] = fill(a, 2)
+  println("${a}")
 }
 "#;
 
@@ -61,10 +61,10 @@ fn both_leg_walls_are_reported_with_their_leg() {
         "the both-legs note is missing; stderr:\n{stderr}"
     );
     // #2807: the structural wall says where it came from — the reason string
-    // alone (`call-fn:two:mut-param`, `ty-mismatch:…`) names no location, and
+    // alone (`ty-mismatch:…`) names no location, and
     // in a 77-file package that could not be acted on.
     assert!(
-        stderr.contains("\n  --> in fn `main` (entry file, line 10)"),
+        stderr.contains("\n  --> in fn `main` (entry file, line 8)"),
         "the structural wall's site line is missing (#2807); stderr:\n{stderr}"
     );
 }
