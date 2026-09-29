@@ -100,8 +100,20 @@ fn lower_module_member(
         let resolved_mod_for_fn = ctx.env.import_table.resolve(&mod_name)
             .map(|s| s.to_string())
             .unwrap_or_else(|| mod_name.to_string());
-        let is_module_fn = crate::stdlib::lookup_sig(&mod_name, field).is_some()
-            || ctx.env.functions.contains_key(&sym(&format!("{}.{}", resolved_mod_for_fn, field)))
+        let names_fn = crate::stdlib::lookup_sig(&mod_name, field).is_some()
+            || ctx.env.functions.contains_key(&sym(&format!("{}.{}", resolved_mod_for_fn, field)));
+        // A payload-carrying `mod.Ctor` is Fn-typed too, and the module
+        // clauses below match every user module — so a constructor the
+        // checker resolved (it tries a fn first, then a let, then a
+        // constructor) must be taken before the eta expansion names it as a
+        // function that does not exist (`call to unknown function
+        // 'tree.Node'`, found in #2925's sweep).
+        if !names_fn
+            && let Some(e) = lower_module_ctor_value(ctx, mod_name, field, ty, span)
+        {
+            return Some(e);
+        }
+        let is_module_fn = names_fn
             || ctx.env.user_modules.contains(&sym(&mod_name))
             || ctx.env.import_table.aliases.contains_key(&sym(&mod_name));
         if is_module_fn {
@@ -141,9 +153,12 @@ fn lower_module_ctor_value(
     if !ctx.env.types.contains_key(&sym(&qualified)) {
         return None;
     }
-    let payload_tys = match &case.payload {
-        crate::types::VariantPayload::Tuple(param_tys)
-            if !param_tys.is_empty() && matches!(ty, Ty::Fn { .. }) => param_tys.clone(),
+    // The params come from the checker's instantiated `ty`, not the raw
+    // payload, which a generic type writes in its own `T` — the bare-ctor
+    // lowering (`lower_expr_type_name`) does the same.
+    let payload_tys = match (&case.payload, ty) {
+        (crate::types::VariantPayload::Tuple(param_tys), Ty::Fn { params, .. })
+            if !param_tys.is_empty() => params.clone(),
         // No payload to apply: the constructor IS the value.
         _ => return Some(ctx.mk(IrExprKind::Call {
             target: CallTarget::Named { name: *field },
