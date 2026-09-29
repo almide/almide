@@ -1,0 +1,47 @@
+// @contract: C-132, C-187
+// A `mut` argument whose place is a FIELD of a module-level `var` writes into
+// the global on both targets — the stdlib in-place mutators (`list.push` /
+// `pop` / `clear`, `string.push` / `clear`, `map.insert` / `delete` / `clear`)
+// and a user fn's `mut` parameter alike (#2946). Native rendered the place as
+// `&mut G.with(|c| (**c.borrow()).clone()).xs`, a write onto a discarded clone:
+// the first block printed `3 0` on native and `3 3` on wasm. The field assign
+// `g.n = g.n + 1` beside it always persisted.
+//
+// The call is now rendered inside the global's cell. A sibling argument that
+// reads the global (`list.len(g.xs)`) or calls a user fn that does (`width()`)
+// is evaluated BEFORE the cell is borrowed, so it sees the pre-call value and
+// never re-borrows the cell while it is mutably held (a RefCell panic on
+// native).
+type H = { xs: List[String], s: String, m: Map[String, Int], n: Int }
+
+var g: H = { xs: [], s: "", m: [:], n: 0 }
+
+fn add(mut xs: List[String], s: String) -> Unit = {
+  list.push(xs, s)
+}
+
+fn width() -> Int = list.len(g.xs)
+
+fn main() -> Unit = {
+  for i in 0..<3 {
+    g.n = g.n + 1
+    list.push(g.xs, int.to_string(i))
+  }
+  println(int.to_string(g.n) + " " + int.to_string(list.len(g.xs)))
+  list.push(g.xs, int.to_string(list.len(g.xs)))
+  list.push(g.xs, int.to_string(width()))
+  add(g.xs, "u")
+  add(g.xs, int.to_string(width()))
+  println(list.join(g.xs, ","))
+  string.push(g.s, "hi")
+  map.insert(g.m, "k", 1)
+  map.insert(g.m, "j", map.len(g.m))
+  map.delete(g.m, "k")
+  println("${g.s} ${map.len(g.m)} ${map.get(g.m, "j") ?? -1}")
+  let p = list.pop(g.xs)
+  println("${p ?? "none"} ${list.len(g.xs)}")
+  list.clear(g.xs)
+  string.clear(g.s)
+  map.clear(g.m)
+  println("${list.len(g.xs)} ${string.len(g.s)} ${map.len(g.m)}")
+}
