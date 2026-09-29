@@ -922,7 +922,6 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 <!-- almide switches --md: begin -->
 | 変数 | 種別 | 説明 |
 |---|---|---|
-| `ALMIDE_ABI_PROBE` | debug | print the lifted-effect-fn ABI decision per function (v1 lowering) |
 | `ALMIDE_ALLOC_COUNT` | harness | build the native program with a counting allocator that prints `__ALMD_ALLOC allocs=N deallocs=N reallocs=N peak=N` on stderr when `__almide_main` returns (the native borrow oracle's allocation lane, tests/native_borrow_oracle_test.rs) |
 | `ALMIDE_BANG_RETURN` | ablation | turn OFF the per-position `!` desugars of the v1 lowering so every `!` reaches the bind-position rule or walls loudly (the decline-matrix probe) |
 | `ALMIDE_BENCH_DIR=value` | harness | the fixture directory of the structural leg's perf probe (default `crates/almide-wasm/tests/perf`) |
@@ -955,7 +954,6 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_DBG_GINIT` | debug | print the eager top-let init runner's admission set and why an extended runner declined (v1 lowering, C-007) |
 | `ALMIDE_DBG_LINK` | debug | dump the wasm link demand set and what each key resolves to |
 | `ALMIDE_DBG_LOWER_FN=value` | debug | print the fully desugared body the v1 lowering actually lowers, for the fn named by the value (was `DBG_LOWER_FN`) |
-| `ALMIDE_DBG_NEMATCH` | debug | print the never-err match analysis per function (v1 lowering) |
 | `ALMIDE_DBG_NESTED_MATCH` | debug | print why a nested-match chain was refused (v1 lowering) |
 | `ALMIDE_DBG_QQ` | debug | print which path lowered each `??` (match-first vs route fallback, v1 lowering) |
 | `ALMIDE_DBG_ROUTER` | debug | print a stdlib call name refused for its registered signature, with the mismatch and the argument types (v1 lowering) |
@@ -989,7 +987,6 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_KEEP_SCRATCH` | tool | keep the `almide test` scratch build directory instead of deleting it |
 | `ALMIDE_LSP_TRACE` | debug | print every LSP request and response the language server handles |
 | `ALMIDE_MANIFEST_TREE_CHECK=value` | ci | the parity-manifest generators' stale-tree refusal (#2405, scripts/lib/oracle-header.sh): `strict` (default) refuses an ORACLE that is not `<Cargo.toml version> (dev…)`, is stamped with a commit other than HEAD, or is unstamped and older than the sources; a worktree behind its upstream; and an untracked spec/ fixture. `gate` keeps only the untracked-fixture check (scripts/check-parity-goldens.sh vouches for CI's artifact). `off` is the deliberate override |
-| `ALMIDE_MG_DEBUG` | debug | print the mutable-global slot assignment and cross-module name-bridge decisions (v1 lowering) |
 | `ALMIDE_MONO_DEBUG` | debug | print the monomorphisation discovery and instantiation decisions |
 | `ALMIDE_MP_PROBE` | debug | print the mut-param analysis decisions (IR) |
 | `ALMIDE_MUTATION_BASE=value` | ci | the base ref the mutation gate diffs against |
