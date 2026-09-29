@@ -525,6 +525,7 @@ evidence  = [
   { path = "spec/wasm_cross/bytes_writer_mut_from_declaration.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_push_on_record_field.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_pop_map_insert_on_record_field.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_field_path_mut.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_alias_cow.almd", class = "fixture" },
   { path = "spec/wasm_cross/inplace_clear_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_set_on_record_field.almd", class = "fixture" },
@@ -2902,6 +2903,7 @@ evidence  = [
   { path = "spec/wasm_cross/mut_param_spread_reassign.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_push_on_record_field.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_pop_map_insert_on_record_field.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_field_path_mut.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_scalar_param_reassign.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_tail_recursion.almd", class = "fixture" },
 ]
