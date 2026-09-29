@@ -84,11 +84,37 @@ fn label(o: Int?, name: String) -> String = match o {
 // path and `id` on the base path.
 fn count_down(xs: List[Int], n: Int) -> Int = if n <= 0 then list.len(xs) else count_down(xs, n - 1)
 
+// #2757 — LOOP BODIES as activations: each iteration is certified on its
+// own line, from rc 0. `tally` hands its list to `take` on every pass (`am`
+// on the loop's line; the frame line keeps `id`) and binds a per-iteration
+// concat whose block the next rebind or the epilogue releases (`id` on the
+// loop's line). `drain`'s row lives one iteration of a `while`; the check
+// that leaves the loop is an iteration too, one that binds nothing.
+fn tally(xs: List[Int], names: List[String]) -> Int = {
+  var total = 0
+  for n in names {
+    let t = n + "!"
+    total = total + string.len(t) + take(xs)
+  }
+  total
+}
+
+fn drain(n: Int) -> Int = {
+  var i = 0
+  var seen = 0
+  while i < n {
+    let row = [i, i]
+    seen = seen + list.len(row)
+    i = i + 1
+  }
+  seen
+}
+
 fn main() -> Unit = {
   println("${list.len(shed())} ${tag("w")} ${pass([1])} ${bind_then_pass()}")
   println("${discard([1, 2])} ${stamp(7)} ${shout("w")}")
   say("hi")
   println("${nest()} ${greet("w")} ${list.len(wrap([1, 2]) ?? [])}")
   println("${pick([1], true)} ${pick([2], false)} ${label(some(1), "a")} ${label(none, "b")}")
-  println("${count_down([1, 2, 3], 4)}")
+  println("${count_down([1, 2, 3], 4)} ${tally([1], ["a", "bb"])} ${drain(3)}")
 }

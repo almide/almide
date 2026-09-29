@@ -342,6 +342,66 @@ impl Emitter<'_> {
         }
     }
 
+    /// A `for` / `while` body opens / closes, and a `break` / `continue`
+    /// ends an iteration (#2757).
+    pub(crate) fn witness_loop_open(&mut self) {
+        if let Some(w) = self.witness.as_mut() {
+            w.loop_open();
+        }
+    }
+
+    pub(crate) fn witness_loop_close(&mut self) {
+        if let Some(w) = self.witness.as_mut() {
+            w.loop_close();
+        }
+    }
+
+    pub(crate) fn witness_loop_jump(&mut self) {
+        if let Some(w) = self.witness.as_mut() {
+            w.loop_jump();
+        }
+    }
+
+    /// A loop variable bound from the element it walks (#2757): a view,
+    /// like a pattern binder — known, no credit held.
+    pub(crate) fn witness_view_local(&mut self, idx: u32, ty: SliceTy) {
+        if self.rc_droppable(ty)
+            && let Some(w) = self.witness.as_mut()
+        {
+            w.param_borrowed(idx);
+        }
+    }
+
+    /// The general `Assign` route (#2757, stmts.rs), right after it stored
+    /// the new occupant: `released_old` = the route released the old one
+    /// (not when the rhs spends the var's credit, which declines here — its
+    /// callee's write-back is not audited). The new occupant mirrors the
+    /// Bind route: an owned rhs is a new object, a borrowed Var rhs took
+    /// `rc_inc_top` on its source, anything else declines.
+    pub(crate) fn witness_assign(&mut self, idx: u32, released_old: bool, spends: bool, value: &almide_ir::IrExpr) {
+        if self.witness.is_none() {
+            return;
+        }
+        if spends {
+            self.witness_decline("assign:spends-var");
+            return;
+        }
+        let owned = self.rc_owned_result(value);
+        let src = self.witness_src_local(value);
+        let Some(w) = self.witness.as_mut() else { return };
+        let ok = match (owned, src) {
+            (true, _) => w.assign(idx, released_old, None),
+            (false, Some(s)) => w.assign(idx, released_old, Some(s)),
+            (false, None) => {
+                w.decline("assign:view-result");
+                true
+            }
+        };
+        if !ok {
+            w.poison();
+        }
+    }
+
     /// A value arm hands the join its one credit (#2756): an owned arm
     /// value moves (`im`), a borrowed Var arm took the normalizing +1 and
     /// moves (`am`), a borrowed non-Var declines. Mirrors `lower_if_arms` /
