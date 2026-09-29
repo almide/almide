@@ -1,0 +1,27 @@
+# Release evidence seal — v0.65.1. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.65.1"
+tag = "v0.65.1"
+tag_commit = "371de8ff5b4c6ffcc605e62bacbd712d68bcc2ef"
+date = "2026-09-29"
+url = "https://github.com/almide/almide/releases/tag/v0.65.1"
+
+[derived]
+cargo_version = "0.65.1"
+contracts_sha256 = "a844831dba421af1dd7e6c9155ac1a8a2bbb035d785530a09d8262dc0fab2485"
+contracts_total = "370"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "c953796d0ce50c8afc764afe3e111606e03935378bbdb141948ddd963bbfd797"
+abstain_ledger_entries = "21"
+wasm_cross_fixtures = "822"
+rust_toolchain = "1.94.0"
+wasmtime = "v47.0.3"
+
+[recorded]
+release_gate = "Patch release through the rc channel (#1484). rc1 (6e90d18a2) was superseded by #2839, a dependency regression already shipped in v0.65.0 (a stdlib-named module's type shadowed builtin Map; gramide-cli, hew, ctxgate failed to build), fixed in #2840 and restructured in #2849. rc2 (a93322ea5) soak found #2853 (I-divergence, self-hosted zlib accepted corrupt streams), fixed in #2854. rc3 (9d80eb004) was followed by blocker fixes #2870 (regression), #2879, #2886, #2916, #2919 (I-miscompile), #2890, #2893 (I-divergence) and #2894 (I-miscompile), landed through batches #2906, #2923 and #2929. The new downstream canary (#2852, #2856) on develop 9fa9d4f99 vs v0.65.0 reported 6 REGRESSION rows (gramide family, almide test ok/FAIL); cause #2931, a branch_lift miscompile of a stdlib mut-param call exposed on wasm by 69433b58b, fixed in #2936. v0.65.1-rc4 (371de8ff5, release PR #2938: 128 checks green, mutation sweep green on 149f744a0, tree-identical to develop 149f744a0); the final is tagged on the rc4 commit. Downstream canary on 149f744a0 vs v0.65.0 (run 36530516101): 44 projects, 0 regressions, 4 fixed, 16 pre-existing failures. Blocker gate at the tag: 0 (#1482). Interface diff v0.65.0 -> v0.65.1: identical (added=0 removed=0; #1488). Trust spine on the tag green (run 36545932621, dossier attached). Fuzz soak on v0.65.1-rc4 (fuzz-nightly run 36537776113): shards 8/8, 481.7 of 480 minutes delivered, 121,029 programs, 1 finding classed slow (correctness=0). The run's condition-level coverage job failed its ratchet (55.14% < 56.55%), tracked as #2941 (A-ci; a measurement gate, not a correctness finding)."
+assets = "7: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256, almide-dossier-v0.65.1.md"
+known_problems = "None release-blocking. Open at the tag: (1) #2941 — the condition-level coverage ratchet dropped 1.41 points on rc4 (under investigation); (2) #2932 — map.get_or with an Option default over Map[_, Option[_]] leaks one block per call on the wasm leg; (3) #2917 — an effect fn with a mut param that mutates and then errs is refused on the structural wasm leg pending a carrier ruling (native keeps the partial write); (4) #2933 — list mutation through a field path two or more levels deep walls the structural wasm leg (gramide reparse_status); (5) the retiring incumbent wasm emitter is still present as the structural leg's fallback; its removal (#2930, #2935) lands after this release; (6) 16 public downstream packages fail on both v0.65.0 and v0.65.1 from stale syntax, tracked in their own repositories."
