@@ -513,7 +513,7 @@ struct Tally {
 /// `CallFn` to any of these is render-resolvable. Built once from the single-source
 /// registry so it can never drift from what render_program / lower_source actually link.
 fn auto_linkable_call_names() -> HashSet<String> {
-    let mut s: HashSet<String> = almide_mir::render_wasm::self_host_runtime()
+    let mut s: HashSet<String> = almide_mir::mir_ops::self_host_runtime()
         .iter()
         .flat_map(|(_, entries)| entries.iter().map(|(_, call)| call.to_string()))
         .collect();

@@ -533,6 +533,36 @@ fn wasm_indexassign_noncopy_element_through_closure() {
 }
 
 #[test]
+fn wasm_write_only_captures_through_closure() {
+    // #2752: a closure that only WRITES a captured var (no `Var` read) —
+    // plain assign, index-assign of a record element with an alias still
+    // holding the old list, and a nested lambda. The capture scan counted
+    // only `Var` reads, so the structural leg walled these
+    // (`index-assign:unmapped`) and the incumbent fallback hid it.
+    assert_cross_target_effect_main(
+        "type P = { name: String, n: Int }\n\
+         effect fn main() -> Unit = {\n\
+         \x20 var n = 0\n\
+         \x20 let f = () => { n = 5 }\n\
+         \x20 f()\n\
+         \x20 println(int.to_string(n))\n\
+         \x20 var ps: List[P] = [{ name: \"x\", n: 1 }, { name: \"y\", n: 2 }]\n\
+         \x20 let keep = ps\n\
+         \x20 let set = (i: Int, s: String) => { ps[i] = { name: s, n: i } }\n\
+         \x20 for i in 0..<10 { set(i % 2, \"z${i}\") }\n\
+         \x20 println(ps[0].name + ps[1].name + keep[0].name)\n\
+         \x20 var grid: List[List[Int]] = [[1, 2], [3, 4]]\n\
+         \x20 let outer = () => {\n\
+         \x20   let inner = () => { grid[1] = [9, 9, 9] }\n\
+         \x20   inner()\n\
+         \x20 }\n\
+         \x20 outer()\n\
+         \x20 println(int.to_string(list.len(grid[1])))\n\
+         }\n",
+    );
+}
+
+#[test]
 fn wasm_closures_stored_in_map() {
     // Two DIFFERENT closures stored in a `Map[String, () -> Unit]`, then one
     // extracted via get_or and called. Rust gave `E0308` — the map's erased `_`

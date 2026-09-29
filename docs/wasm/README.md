@@ -1,31 +1,29 @@
 # Almide WASM Documentation
 
-Almide compiles to a standalone `wasm32-wasip1` module. Since commissioning
-(#1599) there are **two verified wasm legs behind one router**
-(`render_wasm_module_routed` in `src/cli/build.rs`). The unverified v0 emitter
-was retired in #782, so a shape neither leg lowers is an honest wall (a clean
-error), never a silent fallback into unverified codegen.
+Almide compiles to a standalone `wasm32-wasip1` module through **one
+wasm leg**, the structural leg (entered through `render_wasm_module_routed` in
+`src/cli/build.rs`). The unverified v0 emitter was retired in #782, and the
+incumbent v1 leg (the MIR→WAT trust spine in `crates/almide-mir`) lost its last
+route in #2752 and was deleted in #2761. A shape the structural leg does not
+lower is an honest wall — `error[E082]` with a `wall: <reason>` line and a
+`--> in <fn>` site line — never a silent fallback.
 
 | Leg | Engine | Routed to it |
 |---|---|---|
-| **structural** (default) | The commissioned greenfield engine: `almide::wasm_leg` front + the `crates/almide-wasm` direct emitter. Accepted at 610/610 byte-identical to native on the `wasm_cross` corpus; build artifacts ship in the WASI form (#1588) and run on stock runtimes. Ownership is compiler-placed reference counting with copy-on-write; no certificate is emitted yet — its evidence is the byte-exact corpus (grow-only floor) and the semantic-mutation net in `crates/almide-wasm` | Every program with a `main`, no external packages, and no host-variant I/O on the build path |
-| **incumbent v1** | The MIR trust spine in `crates/almide-mir`: certified MIR → direct emit, with the per-function ownership certificate the kernel-proven checker re-verifies on every build | Main-less library modules (#881 export mode), dependency-bearing projects, host-variant programs on the build path, `ALMIDE_FUEL_PROBE` runs, and any shape the structural leg walls on — a verified-to-verified handover, named under `ALMIDE_VERIFIED_DEBUG=1` |
+| **structural** (the only leg) | The commissioned greenfield engine: `almide::wasm_leg` front + the `crates/almide-wasm` direct emitter. Accepted at 610/610 byte-identical to native on the `wasm_cross` corpus; build artifacts ship in the WASI form (#1588) and run on stock runtimes. Ownership is compiler-placed reference counting with copy-on-write; no certificate is emitted yet — its evidence is the byte-exact corpus (grow-only floor) and the semantic-mutation net in `crates/almide-wasm` | Every program with a `main`, no external packages, and no host-variant I/O on the build path |
 
-The `Built …` line every wasm build prints names the leg that produced the
-bytes. `ALMIDE_WASM_INCUMBENT=1` forces the incumbent — no longer a revert
-lever: the structural default is the ratified end state (#1696), and this
-switch selects the certified leg until the certificate moves and the incumbent
-retires; `ALMIDE_WASM_STRUCTURAL=1` forces the structural leg and turns
-its walls into hard errors (the frontier-development probe).
+The switch that forced the incumbent was removed with its route (#2752);
+`ALMIDE_WASM_SKIP_STOCK_AUDIT=1` now only skips the stock-WASI host-op audit
+on a build (the frontier-development probe).
 
 ## What ships today
 
 | Property | Shipped behaviour |
 |---|---|
 | Target | `wasm32-wasip1`, one exported linear memory, `_start` entry |
-| Memory | Bump allocation + **Perceus-style reference counting** on both legs; the incumbent leg additionally emits a per-function ownership certificate the kernel-proven checker re-verifies |
+| Memory | Bump allocation + **Perceus-style reference counting**. No per-build ownership certificate is re-verified for a shipped wasm byte (the structural leg's certificate is #2755–#2760); the runtime's bytes are checked against the Coq decoder model by `proofs/check-structural-bytes.sh` |
 | Equivalence | Observable output (stdout, stderr, exit code) is byte-identical to the native leg, contract by contract |
-| Walls | Outside the lowering subset ⇒ `Unsupported(...)`, surfaced to the user; `ALMIDE_WALL_REASON=1` names which stage declined |
+| Walls | Outside the lowering subset ⇒ `error[E082]` naming the wall and the function, surfaced to the user; under `almide test`, `ALMIDE_WALL_REASON=1` names which stage declined |
 
 ## Running a server on wasm
 
@@ -51,9 +49,9 @@ has no listening socket, so `build` and `check --target wasm` still refuse
 The authoritative references are:
 
 - **Architecture** — [docs/ARCHITECTURE.md](../ARCHITECTURE.md) (compiler pipeline,
-  including the leg router)
+  including the wasm route)
   and [docs/roadmap/active/v1-mir-architecture.md](../roadmap/active/v1-mir-architecture.md)
-  (why ownership and layout are decided once, in MIR — the incumbent leg).
+  (why ownership and layout are decided once, in MIR — the design of the incumbent leg, retired by #2761; MIR now serves the native leg).
 - **Cross-target equivalence** — [docs/contracts/](../contracts/): every observable
   native ⇄ wasm promise is a named contract traceable to an executable fixture.
 - **Ownership certificates** — [docs/roadmap/active/certificate-format-v1.md](../roadmap/active/certificate-format-v1.md).

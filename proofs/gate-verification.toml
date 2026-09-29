@@ -72,7 +72,7 @@
 # originals — joined the twin parity test in #2163 and both ceilings are 0.
 #
 # unverified_ceiling = "0"
-# unclassified_reads_ceiling = "81"
+# unclassified_reads_ceiling = "79"
 # unwired_ceiling = "2"
 # unvaried_ceiling = "0"
 #
@@ -178,7 +178,7 @@ path = "scripts/check-target-availability.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"
 class = "NEGATIVE_TESTED"
-evidence = "#1423 stage-2+3 landing (2026-08-28): a declared row hand-renamed (int.bnot -> int.bnot_GONE) went red in BOTH directions at once — the measured wall named as UNDECLARED, restored green. Stage 3 doubled the sweep: the DEFAULT-routing measurement diffs against the [[wasm-unavailable]] table the E081 check-time diagnostic consumes (four directions total: 323 lower / 66 native-only / 31 ratchet / 34 both-legs). The gate re-measures the whole surface per run with the renderer's own verdict (tools/target_availability_probe.py, ALMIDE_WASM_STRUCTURAL=1 hard-wall probe per public stdlib fn), so neither a silent new wall nor a stale row survives; name-diff false positives are structurally impossible (the ~199-row over-report experiment is the design's reason). Schema 3 (2026-09-21, #1423 bucket C): four forged matrices against one reused sweep (AVAIL_TSV_DIR) each went red — bytes.clear with its class line removed (unknown class + tag/class disagreement + the self-host ratchet shrank to 33), process.pid with its justification removed (forever without a sentence), process.env silently reclassified pending-port -> native-only-forever (pending-port shrank to 77 against ceiling 78), bytes.clear reclassified pending-port under a pending-self-host reason tag (disagreement + both ratchets moved) — restored green at 56/56, 56/56, 10 forever."
+evidence = "#1423 stage-2+3 landing (2026-08-28): a declared row hand-renamed (int.bnot -> int.bnot_GONE) went red in BOTH directions at once — the measured wall named as UNDECLARED, restored green. Stage 3 doubled the sweep: the DEFAULT-routing measurement diffs against the [[wasm-unavailable]] table the E081 check-time diagnostic consumes (four directions total: 323 lower / 66 native-only / 31 ratchet / 34 both-legs). The gate re-measures the whole surface per run with the renderer's own verdict (tools/target_availability_probe.py, ALMIDE_WASM_SKIP_STOCK_AUDIT=1 hard-wall probe per public stdlib fn), so neither a silent new wall nor a stale row survives; name-diff false positives are structurally impossible (the ~199-row over-report experiment is the design's reason). Schema 3 (2026-09-21, #1423 bucket C): four forged matrices against one reused sweep (AVAIL_TSV_DIR) each went red — bytes.clear with its class line removed (unknown class + tag/class disagreement + the self-host ratchet shrank to 33), process.pid with its justification removed (forever without a sentence), process.env silently reclassified pending-port -> native-only-forever (pending-port shrank to 77 against ceiling 78), bytes.clear reclassified pending-port under a pending-self-host reason tag (disagreement + both ratchets moved) — restored green at 56/56, 56/56, 10 forever."
 measures = "per-leg symmetric difference between the declared unavailable fns in proofs/target-availability.toml and the measured walls of tools/target_availability_probe.py over the whole public stdlib surface, plus the schema-3 closure classes: the pending-self-host and pending-port row counts against their shrink-only ceilings, a justification sentence on every native-only-forever row, an issue on every pending row, and no reason tag contradicting its class"
 varies = "2026-09-03 04d93c1d7: 38 pending-self-host rows left the ledger (74 -> 36) as the structural leg resolved them; 2026-09-07 b1944391a: string.split_once and datetime.parse_iso joined the resolvable set; 2026-09-21 schema 3: 122 rows classified 56 pending-self-host (every row that closes by a body, an arm or an emitter representation) / 56 pending-port / 10 native-only-forever with the bucket-C rulings (testing.assert_throws and the nine-fn subprocess family forever; env.set has no row, the overlay shim serves it)"
 
@@ -208,15 +208,6 @@ class = "NEGATIVE_TESTED"
 evidence = "PR #1185 (Stage 1 landing): unclassified/stale/UNGUARDED negative cases demonstrated to fail"
 measures = "symmetric difference between raw-memory-read fns in crates/almide-mir/src/lower/ and the verdict rows of proofs/scalar-read-audit.toml, plus the UNGUARDED count"
 varies = "PR #1185 (Stage 1 landing): an unclassified fn, a stale row and an UNGUARDED verdict each read as a non-zero difference on a tree that reads 0"
-
-[[gate]]
-path = "scripts/check-wat-prelude-audit.sh"
-reads = "UNCLASSIFIED"
-wired_by = ".github/workflows/ci.yml, lefthook.yml"
-class = "NEGATIVE_TESTED"
-evidence = "PR #1209 (Stage 1c landing): 5/5 negative tests (unclassified fn, stale row, digest drift, missing via, UNREACHED)"
-measures = "symmetric difference between the `(func $…)` names of the hand-written WAT prelude and the rows of proofs/wat-prelude-audit.toml, plus digest drift and UNREACHED rows"
-varies = "PR #1209 (Stage 1c landing): an unclassified fn, a stale row, a digest drift, a missing via and an UNREACHED row each read as one finding on a tree that reads none"
 
 [[gate]]
 path = "scripts/check-ratchet-separation.sh"
@@ -307,7 +298,7 @@ path = "proofs/output-parity.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci-cross-target.yml"
 class = "NEGATIVE_TESTED"
-evidence = "#2793 (2026-09-28), moved from the incumbent render_program to the structural leg (`ALMIDE_WASM_STRUCTURAL=1 almide build --target wasm`) with an equality-pinned wall ledger (proofs/output-parity-walled-baseline.txt via scripts/lib/determinism-walled.sh). Forged inputs over tests/gate-twin-parity/output-parity/spec, each exit 1 naming the offender: an ALMIDE_BIN whose `build` compiles a different program read MISMATCH on every runnable fixture and REGRESSION on the two baseline rows; an ALMIDE_BIN whose `build` always walls read the claimed hello_match as a wall with no ledger row; a baseline claiming the walled fixture with an empty ledger read the wall with no row; a ledger row for a matching file read STALE; a file in both lists read as both; MAX_WALLED forged to 1 read the rows==MAX_WALLED mismatch; the real ledger passed. Full run on origin/develop 063496844 (release build): match=889 wall=9 MISMATCH=3 RUNERR=17 XFAIL=6 over spec/, all 426 prior baseline rows still match (the 51 rows no other structural gate compared among them), 0 claimed walls. Before the move, flight-evidence-gaps.md F4 close: 5 consecutive full-run greens after the LC_ALL root-cause"
+evidence = "#2793 (2026-09-28), moved from the incumbent render_program to the structural leg (`ALMIDE_WASM_SKIP_STOCK_AUDIT=1 almide build --target wasm`) with an equality-pinned wall ledger (proofs/output-parity-walled-baseline.txt via scripts/lib/determinism-walled.sh). Forged inputs over tests/gate-twin-parity/output-parity/spec, each exit 1 naming the offender: an ALMIDE_BIN whose `build` compiles a different program read MISMATCH on every runnable fixture and REGRESSION on the two baseline rows; an ALMIDE_BIN whose `build` always walls read the claimed hello_match as a wall with no ledger row; a baseline claiming the walled fixture with an empty ledger read the wall with no row; a ledger row for a matching file read STALE; a file in both lists read as both; MAX_WALLED forged to 1 read the rows==MAX_WALLED mismatch; the real ledger passed. Full run on origin/develop 063496844 (release build): match=889 wall=9 MISMATCH=3 RUNERR=17 XFAIL=6 over spec/, all 426 prior baseline rows still match (the 51 rows no other structural gate compared among them), 0 claimed walls. Before the move, flight-evidence-gaps.md F4 close: 5 consecutive full-run greens after the LC_ALL root-cause"
 measures = "per-program byte diff of stdout (and, for a trap fixture, exit code plus normalised stderr) between `almide run` (native) and the STRUCTURAL wasm build -> wasmtime over spec/*.almd with a main, against proofs/output-parity-baseline.txt, plus the structural walls inside the claim (baseline rows + ledger rows) against proofs/output-parity-walled-baseline.txt (equality-pinned, row count == MAX_WALLED); every wasm run is under a per-fixture alarm and a fired alarm is its own HANG class that fails the gate, never a RUNERR to ratchet (#2567)"
 varies = "#2793 (2026-09-28): the measured subject changed from the incumbent to the structural leg and the baseline ratcheted 426 -> 889 rows on the structural measurement; the forged builds and ledgers above read MISMATCH, a wall with no row and STALE; flight-evidence-gaps.md F4: the LC_ALL collation difference read as diffs until pinned"
 
@@ -352,7 +343,7 @@ path = "proofs/diff-fuzz.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci-cross-target.yml"
 class = "NEGATIVE_TESTED"
-evidence = "#2753 (2026-09-28), moved from render_program (incumbent) to `ALMIDE_WASM_STRUCTURAL=1 almide build --target wasm` -> wasmtime: six of the eleven templates wrote the retired `0..n` range, so their programs failed natively and were silently skipped (N=300 SEED=12345: match=135 skip=165; the #1244 round-5 unforged run's 'match=19' at N=40 was the same blindness). Ranges migrated, and ANY skip or wall now fails: forging the templates back to `0..` read 'match=19 skip=21' at N=40 SEED=12345 and FAILED; forging the build (an unknown flag) read 'wall=20' and FAILED; the real tree reads match=300 wall=0 skip=0 at N=300. Before the move, #1244 round 5: a miscompile PLANTED in the v1 renderer (IntOp::Mul => i64.add) was caught at N=40 SEED=12345 ('mismatch=10') and an unassemblable mnemonic gave 'RUNERR'."
+evidence = "#2753 (2026-09-28), moved from render_program (incumbent) to `ALMIDE_WASM_SKIP_STOCK_AUDIT=1 almide build --target wasm` -> wasmtime: six of the eleven templates wrote the retired `0..n` range, so their programs failed natively and were silently skipped (N=300 SEED=12345: match=135 skip=165; the #1244 round-5 unforged run's 'match=19' at N=40 was the same blindness). Ranges migrated, and ANY skip or wall now fails: forging the templates back to `0..` read 'match=19 skip=21' at N=40 SEED=12345 and FAILED; forging the build (an unknown flag) read 'wall=20' and FAILED; the real tree reads match=300 wall=0 skip=0 at N=300. Before the move, #1244 round 5: a miscompile PLANTED in the v1 renderer (IntOp::Mul => i64.add) was caught at N=40 SEED=12345 ('mismatch=10') and an unassemblable mnemonic gave 'RUNERR'."
 measures = "count of generated programs whose native stdout differs from the structural wasm build's stdout under wasmtime, plus the counts of programs that do not run natively or that the structural leg declines, over N programs at SEED"
 varies = "#2753 (2026-09-28): the templates forged back to the retired range read skip=21 of 40 (FAIL), a forged build read wall=20 of 20 (FAIL), the tree reads 0/0/0; #1244 round 5: a planted IntOp::Mul -> i64.add read 1+ divergence at N=40 SEED=12345"
 
@@ -373,15 +364,6 @@ class = "NEGATIVE_TESTED"
 evidence = "#1244 round 2: effectful module 'fs' forged into PURE_MODULES demonstrated to fail with the accept-but-unsafe rationale; restored green"
 measures = "the set of modules in purity.rs::PURE_MODULES whose stdlib source reaches a host capability, re-derived from stdlib/*.almd"
 varies = "#1244 round 2: `fs` forged into PURE_MODULES read as one effectful module; the clean tree reads none"
-
-[[gate]]
-path = "proofs/check-wasm-bytes.sh"
-reads = "UNCLASSIFIED"
-wired_by = "proofs/check-structural-bytes.sh, proofs/check-wasm-exec.sh, proofs/check.sh"
-class = "NEGATIVE_TESTED"
-evidence = "#1244 round 5: the forge was in the SHIPPING RENDERER, not the proof — rc_inc's `(i32.const 1)` bumped to 2 in render_wasm_p3.rs gave 'FAIL rc_inc: the RENDERER'S bytes do not match WasmEncode.rc_inc_bytes', and deleting rc_dec's double-free sentinel line gave 'FAIL rc_dec: ... do not match WasmExec.rc_dec_bytes — drift'; restored green"
-measures = "byte equality of the .v rc_inc / rc_dec lists, wat2wasm's assembly of the WAT, and the renderer's own emitted $rc_inc / $rc_dec bodies"
-varies = "#1244 round 5: rc_inc's `(i32.const 1)` -> 2 in render_wasm_p3.rs read as a renderer-vs-WasmEncode diff; equal when restored"
 
 [[gate]]
 path = "proofs/check-wasm-exec.sh"
@@ -726,15 +708,6 @@ measures = "the set of documented E-codes (docs/diagnostics/E*.md) with zero fix
 varies = "landing (2026-08-18, A1-3): three no-fixture codes read as the exempt set; a documented code with its fixture dir removed reads as a finding"
 
 [[gate]]
-path = "scripts/check-incumbent-route.sh"
-reads = "scalar"
-wired_by = ".github/workflows/ci.yml"
-class = "NEGATIVE_TESTED"
-evidence = "#2741 landing drills (2026-09-27, dc832c1b9 release build): a ledger row removed (test lane spec/lang/panic_test.almd; build lane examples/md2html.almd) => exit 1 naming it as NEW; a forged row => exit 1 as STALE; a changed reason => exit 0 with the change printed; --prune on forged+changed restored the ledger byte-for-byte and never re-added a removed row."
-measures = "symmetric difference, keyed on lane :: file, between the programs the wasm router hands to the incumbent renderer (ALMIDE_VERIFIED_DEBUG narration of `check --target wasm` over every program with a main; ALMIDE_WALL_REASON `[wall] … structural` lines of the root `almide test` run with no incumbent wall) and proofs/incumbent-route-baseline.txt"
-varies = "#2741 landing drills (2026-09-27): the difference read 0 on the committed 91-row ledger and 1 with a row removed or forged, on both lanes"
-
-[[gate]]
 path = "scripts/check-intrinsic-boundary.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"
@@ -1043,7 +1016,7 @@ reads = "structured"
 wired_by = "tests/almide_gate_twin_parity_test.rs"
 class = "NEGATIVE_TESTED"
 evidence = "#2163 (2026-09-21): `the_output_parity_twin_answers_what_the_shell_gate_answers` in tests/almide_gate_twin_parity_test.rs runs proofs/output-parity.sh and the twin over tests/gate-twin-parity/output-parity/spec/ (nine fixtures, one per verdict row producible without a miscompile) and demands identical exit code and bytes. Negative input: a FORGED baseline naming a part-file that can never match and omitting two that do — the original reports the phantom as a REGRESSION, the pair as NEW matches, the unbracketed-warning fixture under XFAIL and exits 1, and the twin must say the same, offender for offender; then `--update` into a scratch baseline, compared as the bytes written. The first run found the twin lacked the --update ratchet, the no-baseline path, the tool checks and the #1123 warning-block stripping (a trap fixture printing an unused-import warning read XFAIL where the bash reads match), and that the stamp's coqc line printed empty where every pipefail caller prints n/a. #2793 (2026-09-28): ported to the structural leg with the wall ledger, and the test gained a FORGED LEDGER scenario (the walled fixture claimed with no row, a phantom row for a matching file that is also a baseline row) — the original names all three offences and exits 1 before any baseline comparison, and the twin must say the same; run locally against the bash on all three scenarios, identical bytes and exit codes"
-measures = "per-program byte diff of stdout between the native run and the STRUCTURAL wasm build (`env ALMIDE_WASM_STRUCTURAL=1 almide build --target wasm`, #2793) -> wasmtime over spec/, against proofs/output-parity-baseline.txt, plus the structural walls inside the claim against proofs/output-parity-walled-baseline.txt (the Almide twin of proofs/output-parity.sh); a fired per-fixture deadline on the wasm leg is the HANG class and fails the gate (#2567)"
+measures = "per-program byte diff of stdout between the native run and the STRUCTURAL wasm build (`env ALMIDE_WASM_SKIP_STOCK_AUDIT=1 almide build --target wasm`, #2793) -> wasmtime over spec/, against proofs/output-parity-baseline.txt, plus the structural walls inside the claim against proofs/output-parity-walled-baseline.txt (the Almide twin of proofs/output-parity.sh); a fired per-fixture deadline on the wasm leg is the HANG class and fails the gate (#2567)"
 varies = "#2163 (2026-09-21): the twin parity test read this twin DIVERGED from proofs/output-parity.sh on its first run (trap_with_bracket_warning: bash match, twin xfail; no --update; no n/a in the stamp), then identical after the port was corrected; the forged baseline flips the verdict OK -> REGRESSION with the offender named"
 
 [[gate]]

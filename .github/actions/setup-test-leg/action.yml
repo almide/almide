@@ -21,7 +21,7 @@ inputs:
   wasmtime-version:
     description: "The stock wasmtime CLI pin (bump this and nothing else — the cache key derives from it)"
     required: false
-    default: "v47.0.3"
+    default: "v49.0.1"
 
 runs:
   using: "composite"

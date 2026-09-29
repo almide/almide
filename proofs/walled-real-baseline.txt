@@ -246,7 +246,7 @@ spec/serve_cross/http_serve_shutdown.almd :: handle
 # top-level VALUE (`let site = http.router(...)`, then `let h = site!` and a
 # call). The incumbent MIR lowering walls the heap-result `match` the router
 # value reaches; the STRUCTURAL leg (the test lane's default, and
-# ALMIDE_WASM_STRUCTURAL=1) runs the test byte-for-byte with native. No
+# ALMIDE_WASM_SKIP_STOCK_AUDIT=1) runs the test byte-for-byte with native. No
 # incumbent work by design (#1696 retires it); prunes with #1696.
 spec/stdlib/http_router_test.almd :: __test_almd_an app bound at the top level is tested by calling it
 
@@ -310,3 +310,17 @@ spec/wasm_cross/lambda_failure_channel.almd :: typed_slot
 # on native), so the incumbent walls honestly. The structural leg serves it
 # byte-identically to native.
 spec/wasm_cross/branch_lift_stdlib_mut_arg.almd :: arm_writes
+# #2946: `mut` arguments through a FIELD of a module-level `var` (list/string/map
+# in-place ops and a user fn's `mut` param on `g.xs`, beside a `g.n = ..` field
+# assign). The incumbent refuses the field-assign to a mutable global ("not in
+# this brick"); the structural leg serves it byte-identically to native.
+spec/wasm_cross/mutable_global_field_mut_arg.almd :: main
+# #2948: the same shape with the arms calling USER fns named like stdlib
+# mutators (`insert(tag, mut m)`, `push(label, mut xs)`); the lift declines on
+# every leg now, so the incumbent walls honestly on it too.
+spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd :: arm_writes
+# #2933/#2944: every mut form through a two- and three-level record field path
+# (`o.inner.xs`, `o.a.b.m`). The MIR classifier walls the deeper field write;
+# the structural leg serves it byte-identically to native.
+spec/wasm_cross/nested_field_path_mut.almd :: drain
+spec/wasm_cross/nested_field_path_mut.almd :: main

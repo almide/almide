@@ -138,8 +138,11 @@ done
 [ "$drift" = 0 ] && echo "CLAIMS OK: every axiom-ledger theorem is kernel-checked (public claims ⊆ proven)." || exit 1
 
 echo
-echo "== A2 byte-binding grounding (wat2wasm cross-check; SKIP if wabt absent) =="
-bash ./check-wasm-bytes.sh
+echo "== A2 byte-binding grounding (the shipping structural runtime's bytes) =="
+# check-wasm-bytes.sh grounded WasmEncode/WasmExec against the INCUMBENT
+# renderer's $rc_inc/$rc_dec; it retired with that renderer (#2761). Those
+# theorems now stand about a modeled runtime; the bytes that ship are grounded
+# here (StructuralDecode.v against the structural emitter's runtime bodies).
 bash ./check-structural-bytes.sh
 
 echo

@@ -3,8 +3,7 @@
 //!
 //! Three gates:
 //!   1. The issue's repro rows (bind, match, param, `${e}`) build on the
-//!      FORCED structural leg and on the incumbent, printing native's output.
-//!      Against the origin/develop binary every row walls on both legs.
+//!      wasm leg, printing native's output.
 //!   2. The pull is a MATRIX over every `type` any bundled module declares
 //!      (enumerated from the bundled sources — no hand list): a program that
 //!      spells only the type, with no import, links with the declaration in
@@ -71,7 +70,7 @@ const ROWS: &[(&str, &str, &str)] = &[
 ];
 
 #[test]
-fn auto_import_endian_rows_build_on_both_wasm_legs() {
+fn auto_import_endian_rows_build_on_the_wasm_leg() {
     if !wasmtime_available() {
         eprintln!("skipping: wasmtime not on PATH");
         return;
@@ -83,13 +82,9 @@ fn auto_import_endian_rows_build_on_both_wasm_legs() {
         if !ok_n || out_n != *want {
             failures.push(format!("{tag}: native: ok={ok_n} out={out_n:?} err={err_n}"));
         }
-        let (ok_s, out_s, err_s) = run_leg(&path, &[("ALMIDE_WASM_STRUCTURAL", "1")], true);
+        let (ok_s, out_s, err_s) = run_leg(&path, &[("ALMIDE_WASM_SKIP_STOCK_AUDIT", "1")], true);
         if !ok_s || out_s != *want {
             failures.push(format!("{tag}: structural: ok={ok_s} out={out_s:?} err={err_s}"));
-        }
-        let (ok_i, out_i, err_i) = run_leg(&path, &[("ALMIDE_WASM_INCUMBENT", "1")], true);
-        if !ok_i || out_i != *want {
-            failures.push(format!("{tag}: incumbent: ok={ok_i} out={out_i:?} err={err_i}"));
         }
     }
     assert!(failures.is_empty(), "auto-import Endian rows:\n{}", failures.join("\n"));

@@ -10,11 +10,10 @@
 // every test whatever the caller asked. A green suite proved nothing, because
 // running MORE tests than asked still passes when they all pass.
 //
-// Test labels are not greppable in the module — the runner's `println` lowers to
-// a run of `i32.store8`, not a data string — so selection is asserted by MODULE
-// IDENTITY instead, which is a stronger claim than any substring: filtering a
-// two-test file down to one test must render byte-for-byte the module that a
-// file containing only that test renders.
+// Selection is asserted by what the runner PRINTS: filtering a two-test file
+// down to one test must print exactly what a file containing only that test
+// prints. (The module bytes differ by the assertion's source line, so they
+// are not compared.)
 
 use almide_base::names::{rust_safe_fn_name, test_name_matches_filter};
 
@@ -40,15 +39,20 @@ test \"beta fails\" {\n\
   assert_eq(1, 2)\n\
 }\n";
 
+/// What the wasm leg's synthesized runner prints for `source` under `filter`
+/// (the lane's own lowering, `almide::wasm_leg::lower_to_ir_tests_with_deps`,
+/// run on the embedded host): one `test: <label> ... ` line per selected test.
+/// A failing test ends the run, so stdout up to it is the observable.
 fn render(source: &str, filter: Option<&str>) -> String {
-    almide_mir::pipeline::try_render_wasm_source_tests(source, &[], false, filter)
-        .expect("the fixture renders on the v1 wasm leg")
+    let ir = almide::wasm_leg::lower_to_ir_tests_with_deps("t.almd", source, &[], filter)
+        .expect("the fixture lowers on the wasm leg");
+    let (bytes, _) = almide_wasm::emit_program_with_ops(&ir).expect("the fixture emits on the wasm leg");
+    almide_wasm_run::run_wasm(&bytes).expect("the embedded host runs the module").stdout
 }
 
-/// Each synthesized test contributes its `__almd_test_<i>` name to the module,
-/// so this counts what the runner was built out of without depending on labels.
+/// How many tests the runner was built out of: the `test: ` lines.
 fn tests_built_in(source: &str, filter: Option<&str>) -> usize {
-    render(source, filter).matches("__almd_test").count()
+    render(source, filter).matches("test: ").count()
 }
 
 #[test]

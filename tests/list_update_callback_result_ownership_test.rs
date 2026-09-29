@@ -110,7 +110,6 @@ fn agree(program: &str, label: &str) -> String {
                 "-o",
                 artifact.to_str().expect("path"),
             ])
-            .env_remove("ALMIDE_WASM_INCUMBENT")
             .env_remove("ALMIDE_COMPONENT_P3")
             .output()
             .expect("build");

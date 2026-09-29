@@ -30,19 +30,19 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-<!-- counts:generated:start (as of 2026-09-28) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
+<!-- counts:generated:start (as of 2026-09-29) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
 370 contracts
 <!-- counts:generated:end -->
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
-| C-001 | Integer division/modulo by zero is total — it aborts, never traps | 0.24.0 | active | fixture | 3 |
+| C-001 | Integer division/modulo by zero is total — it aborts, never traps | 0.24.0 | active | fixture | 5 |
 | C-002 | Signed MIN / -1 overflow aborts, at the TRUE per-width MIN | 0.24.0 | active | fixture | 3 |
 | C-003 | Non-aborting integer div/mod stay byte-identical | 0.24.0 | active | fixture | 1 |
 | C-004 | fan.any / fan.map / fan.settle are deterministic by list order | 0.24.0 | active | fixture | 8 |
 | C-005 | fan error propagation surfaces as the unified main-error abort | 0.24.0 | active | fixture | 4 |
 | C-006 | [fan.timeout does not exist — wall-clock deadlines live at the host boundary](C-006-fan-timeout-removed.md) | 0.29.0 | active | fixture | 0 |
-| C-007 | Abortable top-level lets evaluate eagerly at startup | 0.24.0 | active | fixture | 3 |
+| C-007 | Abortable top-level lets evaluate eagerly at startup | 0.24.0 | active | fixture | 4 |
 | C-008 | [Compound interpolation renders the Almide-literal repr (containers)](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 3 |
 | C-009 | [Record / variant / anonymous-record interpolation repr (field sorting)](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 4 |
 | C-010 | [Recursive / generic ADT interpolation repr keyed by instantiation](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 2 |
@@ -68,7 +68,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-030 | hex.encode / hex.decode are byte-identical incl. positional error detail | 0.24.0 | active | fixture | 2 |
 | C-031 | json get/set/remove_path edge cases match the infallible native oracle | 0.24.0 | active | fixture | 3 |
 | C-032 | Regex engine is byte-identical to the native engine over a fuzzed grammar | 0.24.0 | active | fuzz(220) | 3 |
-| C-033 | [Value semantics for aliased mutables (copy-on-write)](C-033-cow-truth-table.md) | 0.24.0 | active | fixture | 12 |
+| C-033 | [Value semantics for aliased mutables (copy-on-write)](C-033-cow-truth-table.md) | 0.24.0 | active | fixture | 14 |
 | C-034 | Out-of-range list ops clamp / no-op gracefully (no OOB heap access) | 0.24.0 | active | fixture | 8 |
 | C-035 | Effect-main errors terminate uniformly: Error: <msg> + exit 1 | 0.24.0 | active | fixture | 6 |
 | C-036 | Records, variants, and pattern matching are byte-identical | 0.24.0 | active | fixture | 10 |
@@ -152,7 +152,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-114 | Matching an Option with a heap payload byte-matches native on v1 wasm | 0.27.6 | active | fixture | 1 |
 | C-115 | Pipe into a block-bodied lambda producing a value byte-matches native on v1 wasm | 0.27.6 | active | fixture | 2 |
 | C-116 | v1 scalar-value lowering edges byte-match native (tail Bool literal, float.parse inf/nan) | 0.27.7 | active | fixture | 2 |
-| C-117 | In-loop let-bound heap if/match is lifted to a tail helper and renders on v1 | 0.27.7 | active | fixture | 2 |
+| C-117 | In-loop let-bound heap if/match is lifted to a tail helper and renders on v1 | 0.27.7 | active | fixture | 3 |
 | C-118 | env.args works on WASM and matches native (argv[0] skipped) | 0.27.8 | active | fixture | 1 |
 | C-119 | effect-`!` inside a `for` loop body propagates Err and byte-matches native | 0.27.6 | active | fixture | 1 |
 | C-120 | capturing filter_map with a conditional keep/skip arm body byte-matches native | 0.27.6 | active | fixture | 1 |
@@ -167,7 +167,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-129 | list.chunk / list.windows non-positive sizes: negative keeps the promoted norm, zero aborts in the T6 form | 0.28.4 | active | fixture | 4 |
 | C-130 | option/map combinators hand back OWNED heap results (no bare pass-through handles) | 0.28.5 | active | fixture | 2 |
 | C-131 | Loop-rebuilt buffers are O(n): COW guards only LIVE aliases, and LICM never hoists heap allocations | 0.28.6 | active | fixture | 2 |
-| C-132 | mut parameters of reallocating containers persist to the caller at every call position | 0.28.6 | active | fixture | 8 |
+| C-132 | mut parameters of reallocating containers persist to the caller at every call position | 0.28.6 | active | fixture | 9 |
 | C-133 | env.get observes the host environment identically on native and wasm | 0.29.0 | active | fixture | 1 |
 | C-134 | Vendored-libm atan / tanh are byte-identical cross-target | 0.30.0 | active | fuzz(3000) | 1 |
 | C-135 | Declared-Unit effect fn ABI agrees between def and every call site | 0.30.0 | active | fixture | 2 |
@@ -222,7 +222,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-184 | The integer `^` operator is the same total exponentiation as math.pow on both targets | 0.37.0 | active | fixture | 1 |
 | C-185 | fan.any returns the first Ok in list order on both targets, whatever position it is in | 0.37.0 | active | fixture | 1 |
 | C-186 | Appending an inline index read to a list accumulator lowers and runs on both targets | 0.37.0 | active | fixture | 2 |
-| C-187 | An in-place mutator writing through a module-level `var` buffer behaves identically on both targets | 0.37.0 | active | fixture | 4 |
+| C-187 | An in-place mutator writing through a module-level `var` buffer behaves identically on both targets | 0.37.0 | active | fixture | 5 |
 | C-188 | A scalar `if` arm executes its statement effects — global writes land and outer-var reassignments hit the stable local | 0.37.0 | active | fixture | 1 |
 | C-189 | env.os and the temp-dir surface report the HOST — the equivalence law's only exemption, and it is closed | 0.37.0 | active | fixture | 1 |
 | C-190 | A closure captures any scalar, not just Int and Bool — Float and every sized int width included | 0.37.0 | active | fixture | 1 |
@@ -253,7 +253,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-215 | fs content readers: absence is ok(none) via the _if_exists family, classified by the runtime | 0.53.7 | active | fixture | 3 |
 | C-216 | explicit ! on a declared-Option effect call is the implicit strip's identical twin | 0.54.1 | active | fixture | 1 |
 | C-217 | let _ = f() discards the Result — the err does not propagate | 0.55.0 | active | fixture | 1 |
-| C-218 | a heap-payload ?? returned as the fn tail yields the same value on both targets | 0.56.0 | active | fixture | 2 |
+| C-218 | a heap-payload ?? returned as the fn tail yields the same value on both targets | 0.56.0 | active | fixture | 3 |
 | C-219 | a Never-typed call in a branch arm runs on both targets and sets the exit code | 0.56.0 | active | fixture | 2 |
 | C-220 | fs streaming line walkers fold/each with read_lines line semantics | 0.56.1 | active | fixture | 1 |
 | C-221 | An effect fn-typed slot admits pure and fallible lambdas with one carrier semantics | 0.56.1 | active | fixture | 4 |
@@ -261,7 +261,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-223 | Matrix transcendentals compute through the vendored musl-libm, not the platform one | 0.56.1 | active | fixture | 7 |
 | C-224 | if let / guard let bind and release heap payloads identically on both targets | 0.56.1 | active | fixture | 1 |
 | C-225 | fs.read_lines materializes a file's lines identically on both targets | 0.56.2 | active | fixture | 2 |
-| C-226 | A mut parameter crossing a call boundary mutates the caller's data on both targets | 0.56.2 | active | fixture | 8 |
+| C-226 | A mut parameter crossing a call boundary mutates the caller's data on both targets | 0.56.2 | active | fixture | 9 |
 | C-227 | The fs metadata and composition family answers identically on both targets | 0.56.2 | active | fixture | 1 |
 | C-228 | The fs composition family and the matrix row selectors answer identically on both targets | 0.56.2 | active | fixture | 4 |
 | C-229 | A selected row past the byte buffer is the all-zero row on both targets | 0.57.1 | active | fixture | 9 |
@@ -319,7 +319,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-281 | Bare Result constructors and parameter-passthrough effect tails run identically per the kernel semantics | 0.57.1 | active | fixture | 3 |
 | C-282 | A matrix index out of range aborts identically on both targets; the row reductions answer their identity instead | 0.57.1 | active | fixture | 1 |
 | C-283 | A call through a Fn-typed local resolves that local, never a same-named top-level fn | 0.57.1 | active | fixture | 1 |
-| C-284 | A fallible list HOF driven by a user effect fn callback runs identically on both targets | 0.57.1 | active | fixture | 3 |
+| C-284 | A fallible list HOF driven by a user effect fn callback runs identically on both targets | 0.57.1 | active | fixture | 4 |
 | C-285 | regex.captures answers the whole match at index 0, and `none` means only that nothing matched | 0.57.1 | active | fixture | 1 |
 | C-286 | `??` reads its source; the Option survives the elimination and stays readable | 0.57.1 | active | fixture | 1 |
 | C-287 | A tail-position heap-result if/match with a none arm executes the taken arm for record and list payloads | 0.57.1 | active | fixture | 1 |
@@ -354,7 +354,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-316 | A @bounded effect fn may only use standard output; other effect modules, host-reaching modules and fan are rejected (E076) | 0.60.0 | active | fixture | 0 |
 | C-317 | Float operations are provisionally rejected in a @bounded function (E077) | 0.60.0 | active | fixture | 0 |
 | C-318 | Early exit inside a counted loop body is rejected in a @bounded function (E078) | 0.60.0 | active | fixture | 0 |
-| C-319 | A captured-and-mutated var List is shared storage through a closure | 0.60.0 | active | fixture | 2 |
+| C-319 | A captured-and-mutated var List is shared storage through a closure | 0.60.0 | active | fixture | 4 |
 | C-320 | A budget cut performs exit bookkeeping: exhausted is always Err, regions are independent, cut placement is unobservable | 0.60.0 | active | fixture | 1 |
 | C-321 | The fan prefetch split (start-all, await-in-arm-order, abandon-losers) is unobservable | 0.60.0 | active | fixture | 1 |
 | C-322 | Constructors are function values, the builtin trio included | 0.60.0 | active | fixture | 1 |

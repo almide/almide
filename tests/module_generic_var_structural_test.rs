@@ -47,7 +47,7 @@ fn generic_record_module_vars_lower_on_the_structural_leg() {
     assert_eq!(String::from_utf8_lossy(&native.stdout), "7\na,b\n2\n3\n");
     let wasm = Command::new(almide_bin())
         .args(["run", "src/main.almd", "--target", "wasm"])
-        .env("ALMIDE_WASM_STRUCTURAL", "1")
+        .env("ALMIDE_WASM_SKIP_STOCK_AUDIT", "1")
         .current_dir(&app)
         .output()
         .unwrap();

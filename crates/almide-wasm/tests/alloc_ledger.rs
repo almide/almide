@@ -28,6 +28,26 @@
 //! also held to the unarmed one: same stdout, same watermark — the
 //! instrument must not perturb what it measures.
 //!
+//! THE THIRD LEDGER — LIVE AT EXIT. Native drops every value when it goes
+//! out of scope; the wasm leg releases by hand, so a missing release is a
+//! wasm-only defect that stdout parity cannot see (#2932's `map.get_or`
+//! default, #2944's field write, #2931's OOM). From the same armed run,
+//! `allocs − frees − region_reclaimed` after `main` returns is the number
+//! of blocks the program never released — the armed `main` drops its
+//! top-let globals before its epilogue (`almide_wasm::alloc_count`), so a
+//! value that is live BY DESIGN until exit is not counted. The ideal is 0
+//! for every fixture; golden/live-at-exit-baseline.txt lists only the
+//! fixtures that are not there yet, each with the issue that owns its
+//! mechanism, and it is SHRINK-ONLY:
+//!   * a fixture not listed must exit with 0 live blocks — a new leak is red;
+//!   * a listed fixture may not leak more than its row, and one that leaks
+//!     less must lower its row in the same change (the fix PR does it);
+//!   * a row names an issue (`#NNNN`); regeneration writes `#?` for a new
+//!     non-zero row, which the check refuses — a leak is never ratified
+//!     without an owner.
+//! Only runs that exit 0 are judged (an abort path skips the releases by
+//! design); a fixture whose live count differs between two runs is `~`.
+//!
 //! Fixtures whose watermark is run-dependent (entropy-fed string widths
 //! and kin) are SELF-CALIBRATED out at generation time — the update run
 //! executes everything twice and pins `~` (excluded) where the two
@@ -56,20 +76,80 @@ fn count_baseline_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/alloc-count-baseline.txt")
 }
 
+fn live_baseline_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/live-at-exit-baseline.txt")
+}
+
+/// A live-at-exit row: the pinned live count (`None` = calibrated out,
+/// `~`) and the issue that owns the leak.
+type LiveRow = (Option<i64>, String);
+
+fn read_live_ledger(path: &std::path::Path) -> std::collections::BTreeMap<String, LiveRow> {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    text.lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .map(|l| {
+            let mut cols = l.splitn(3, '\t');
+            let (v, issue, rel) = (cols.next(), cols.next(), cols.next());
+            let (Some(v), Some(issue), Some(rel)) = (v, issue, rel) else {
+                panic!("live-at-exit row `{l}` is not `live<TAB>#issue<TAB>fixture`")
+            };
+            let v = if v == "~" { None } else { Some(v.parse().expect("live count")) };
+            (rel.to_string(), (v, issue.to_string()))
+        })
+        .collect()
+}
+
+const LIVE_HEADER: &str = "\
+# Live heap blocks at exit on the structural wasm leg (allocs - frees - region_reclaimed,
+# top-let globals released) — crates/almide-wasm/tests/alloc_ledger.rs. SHRINK-ONLY:
+# an unlisted fixture must exit with 0 live blocks; a row may only go down, and must
+# be lowered when it does. Every row names the issue that owns its leak mechanism.
+# live<TAB>issue<TAB>fixture
+";
+
+/// The live-at-exit verdict for one fixture. `got` is `None` when the run
+/// did not exit 0 (not judged); `want` is the fixture's row, if any.
+fn live_verdict(rel: &str, want: Option<&LiveRow>, got: Option<i64>) -> Option<String> {
+    if let Some((_, issue)) = want
+        && !(issue.starts_with('#') && issue[1..].parse::<u32>().is_ok())
+    {
+        return Some(format!("{rel}: live-at-exit row names no issue (`{issue}`) — file one per leak mechanism"));
+    }
+    let got = got?;
+    match want {
+        Some((None, _)) => None,
+        Some((Some(w), issue)) if got > *w => Some(format!(
+            "{rel}: {got} heap block(s) live at exit, ledger allows {w} ({issue}) — a new leak"
+        )),
+        Some((Some(w), issue)) if got < *w => Some(format!(
+            "{rel}: {got} heap block(s) live at exit < pinned {w} ({issue}) — lower the row (shrink-only ratchet)"
+        )),
+        Some(_) => None,
+        None if got != 0 => Some(format!(
+            "{rel}: {got} heap block(s) live at exit on the wasm leg — a new leak (native drops them; \
+             ALMIDE_WASM_ALLOC_COUNT=1 almide run {rel} --target wasm shows the counts)"
+        )),
+        None => None,
+    }
+}
+
 fn watermark(bytes: &[u8]) -> u64 {
     let r = run_wasm(bytes).expect("engine runs the module");
     r.heap_end.expect("__heap export present")
 }
 
 /// The armed run's observables: the count row (`allocs reused bytes
-/// frees`, tab-separated), its watermark and its stdout.
-fn counted(bytes: &[u8]) -> (String, u64, String) {
+/// frees`, tab-separated), its watermark, its stdout, and the live blocks
+/// at exit (`None` when the run did not exit 0 — not judged).
+fn counted(bytes: &[u8]) -> (String, u64, String, Option<i64>) {
     let r = run_wasm(bytes).expect("engine runs the armed module");
-    let c = r.alloc_count.expect("the armed module exports the four counters");
+    let c = r.alloc_count.expect("the armed module exports the counters");
     (
         format!("{}\t{}\t{}\t{}", c.allocs, c.reused, c.bytes, c.frees),
         r.heap_end.expect("__heap export present"),
         r.stdout,
+        (r.exit == 0).then(|| c.live()),
     )
 }
 
@@ -126,17 +206,31 @@ fn verdict(what: &str, rel: &str, want: Option<Option<String>>, got: Option<&str
 /// The generation side: the rows this fixture's measurement writes to the
 /// two ledgers. A second measurement separates deterministic totals from
 /// entropy-fed ones, per ledger.
-fn generated_rows(rel: &str, bytes: Option<&[u8]>, armed: Option<&[u8]>) -> (String, String) {
+fn generated_rows(
+    rel: &str,
+    bytes: Option<&[u8]>,
+    armed: Option<&[u8]>,
+    old_live: Option<&LiveRow>,
+) -> (String, String, String) {
     match (bytes, armed) {
         (Some(bytes), Some(armed)) => {
             let (w, w2) = (watermark(bytes), watermark(bytes));
-            let ((c, _, _), (c2, _, _)) = (counted(armed), counted(armed));
+            let ((c, _, _, l), (c2, _, _, l2)) = (counted(armed), counted(armed));
+            // The owner survives regeneration; a NEW non-zero row gets `#?`,
+            // which the check refuses until someone names the issue.
+            let issue = old_live.map_or("#?", |(_, i)| i.as_str());
+            let live = match (l, l2) {
+                (Some(a), Some(b)) if a != b => format!("~\t{issue}\t{rel}\n"),
+                (Some(a), _) if a != 0 => format!("{a}\t{issue}\t{rel}\n"),
+                _ => String::new(),
+            };
             (
                 if w == w2 { format!("{w}\t{rel}\n") } else { format!("~\t{rel}\n") },
                 if c == c2 { format!("{c}\t{rel}\n") } else { format!("~\t{rel}\n") },
+                live,
             )
         }
-        _ => (format!("~\t{rel}\n"), format!("~\t{rel}\n")),
+        _ => (format!("~\t{rel}\n"), format!("~\t{rel}\n"), String::new()),
     }
 }
 
@@ -163,8 +257,7 @@ fn check_fixture(
     rel: &str,
     bytes: Option<&[u8]>,
     armed: Option<&[u8]>,
-    pinned: Option<Option<String>>,
-    count_pinned: Option<Option<String>>,
+    (pinned, count_pinned, live_pinned): (Option<Option<String>>, Option<Option<String>>, Option<&LiveRow>),
     offences: &mut Vec<String>,
 ) {
     let got = bytes.map(|b| run_wasm(b).expect("engine runs the module"));
@@ -172,8 +265,15 @@ fn check_fixture(
     let deterministic = matches!(pinned, Some(Some(_)));
     offences.extend(verdict("watermark", rel, pinned, got_s.as_deref()));
     let armed_got = armed.map(counted);
-    offences.extend(verdict("count", rel, count_pinned, armed_got.as_ref().map(|(c, _, _)| c.as_str())));
-    let (Some(r), Some((_, aw, astdout))) = (&got, &armed_got) else { return };
+    offences.extend(verdict("count", rel, count_pinned, armed_got.as_ref().map(|(c, _, _, _)| c.as_str())));
+    match &armed_got {
+        Some((_, _, _, live)) => offences.extend(live_verdict(rel, live_pinned, *live)),
+        None if live_pinned.is_some() => {
+            offences.push(format!("{rel}: has a live-at-exit row but is not measured (refused or host-variant)"))
+        }
+        None => {}
+    }
+    let (Some(r), Some((_, aw, astdout, _))) = (&got, &armed_got) else { return };
     if deterministic && Some(*aw) != r.heap_end {
         offences.push(format!(
             "{rel}: the armed module's watermark {aw} != the unarmed {:?} — the counter perturbed the heap",
@@ -195,12 +295,15 @@ fn corpus_allocation_watermarks_hold() {
     .expect("run manifest");
 
     let update = std::env::var("ALMIDE_UPDATE_ALLOC").is_ok();
-    let (bp, cp) = (baseline_path(), count_baseline_path());
+    let (bp, cp, lp) = (baseline_path(), count_baseline_path(), live_baseline_path());
     let ((mut baseline, mut refused), (mut counts, mut count_refused)) =
         if update { Default::default() } else { (read_ledger(&bp), read_ledger(&cp)) };
+    // Read on update too: the issue column survives regeneration.
+    let mut live = read_live_ledger(&lp);
 
     let mut rows = String::new();
     let mut count_rows = String::new();
+    let mut live_rows = String::from(LIVE_HEADER);
     let mut offences = Vec::new();
     for line in almide_corpus::manifest_rows(&manifest) {
         let rel = line.splitn(3, '\t').nth(2).expect("manifest row");
@@ -233,17 +336,23 @@ fn corpus_allocation_watermarks_hold() {
             None => (None, None),
         };
         if update {
-            let (r, c) = generated_rows(rel, bytes, armed);
+            let (r, c, l) = generated_rows(rel, bytes, armed, live.get(rel));
             rows.push_str(&r);
             count_rows.push_str(&c);
+            live_rows.push_str(&l);
             continue;
         }
-        check_fixture(rel, bytes, armed, baseline.remove(rel), counts.remove(rel), &mut offences);
+        let live_row = live.remove(rel);
+        check_fixture(rel, bytes, armed, (baseline.remove(rel), counts.remove(rel), live_row.as_ref()), &mut offences);
     }
     if update {
         std::fs::write(&bp, &rows).expect("write baseline");
         std::fs::write(&cp, &count_rows).expect("write count baseline");
+        std::fs::write(&lp, &live_rows).expect("write live-at-exit baseline");
         return;
+    }
+    for rel in live.keys() {
+        offences.push(format!("{rel}: in the live-at-exit ledger but not measured (not in the corpus, refused or host-variant) — drop the row"));
     }
     for (rel, _) in baseline {
         offences.push(format!("{rel}: in the ledger but not in the corpus — regenerate"));

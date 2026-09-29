@@ -37,22 +37,18 @@ impl IrVisitor for Scan {
                 self.captured.insert(*id);
             }
             IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
-                let mutates = matches!(
-                    (module.as_str(), func.as_str()),
-                    ("list", "push" | "pop" | "clear")
-                        | ("map", "insert" | "delete" | "clear")
-                        | ("string", "push" | "clear")
-                        // bytes' in-place writers were MISSING here: a
-                        // captured Bytes var mutated through them was never
-                        // cell-classified, took the env value-copy path, and
-                        // printed a silently wrong value (the develop
-                        // wasm_runtime catch at the commissioning switchover).
-                        | ("bytes", "push" | "set_at" | "set_f32_le" | "set_f64_le" | "fill" | "clear")
-                );
-                if mutates
-                    && let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind)
-                {
-                    self.mutated.insert(*id);
+                // Which args a stdlib call writes comes from the callee's
+                // DECLARATION (`mut` params), the source native's borrow
+                // inference and the shared optimizer read too. A hand list
+                // of mutators lived here and drifted twice: bytes' writers
+                // were missing (the develop wasm_runtime catch), and then
+                // every bytes writer but six still was — a captured Bytes
+                // written through `bytes.set_u8` took the env value-copy
+                // path and the write was lost (#2951).
+                for k in almide_ir::mut_args::stdlib_mut_positions(module.as_str(), func.as_str()).unwrap_or_default() {
+                    if let Some(IrExprKind::Var { id }) = args.get(k).map(|a| &a.kind) {
+                        self.mutated.insert(*id);
+                    }
                 }
             }
             _ => {}
@@ -61,18 +57,26 @@ impl IrVisitor for Scan {
     }
 
     fn visit_stmt(&mut self, s: &IrStmt) {
-        match &s.kind {
-            IrStmtKind::Assign { var, .. } => {
-                self.mutated.insert(*var);
+        // A write target names the var without a `Var` read: inside a
+        // lambda it is a capture too (`() => { xs[5] = 1 }` reads nothing).
+        if let Some(v) = write_target(s) {
+            self.mutated.insert(v);
+            if self.in_lambda > 0 {
+                self.captured.insert(v);
             }
-            IrStmtKind::IndexAssign { target, .. }
-            | IrStmtKind::MapInsert { target, .. }
-            | IrStmtKind::FieldAssign { target, .. } => {
-                self.mutated.insert(*target);
-            }
-            _ => {}
         }
         walk_stmt(self, s);
+    }
+}
+
+/// The var a write statement stores into, if it is one.
+fn write_target(s: &IrStmt) -> Option<VarId> {
+    match &s.kind {
+        IrStmtKind::Assign { var, .. } => Some(*var),
+        IrStmtKind::IndexAssign { target, .. }
+        | IrStmtKind::MapInsert { target, .. }
+        | IrStmtKind::FieldAssign { target, .. } => Some(*target),
+        _ => None,
     }
 }
 
@@ -81,6 +85,23 @@ pub(crate) fn cell_vars_of(body: &IrExpr) -> HashSet<VarId> {
     let mut s = Scan::default();
     s.visit_expr(body);
     s.captured.intersection(&s.mutated).copied().collect()
+}
+
+/// Which args a linked module call writes (and so must make unique first).
+/// A bundled stdlib surface answers from its own DECLARATION, not from
+/// whichever implementation the self-host registry linked for it: the
+/// implementation's params carry no `mut` (`bytes_set_uint16(b: Bytes, ..)`
+/// behind `set_uint16(mut b: Bytes, ..)`), so the write went through a shared
+/// buffer and an alias saw it (#2949). The checker, native, the shared
+/// optimizer and the cell scan above read the same declaration. A user or
+/// package module fn keeps its own params (`linked`).
+pub(crate) fn linked_param_mut(module: &str, func: &str, arity: usize, linked: &[bool]) -> Vec<bool> {
+    if almide_types::stdlib_info::is_bundled_module(module) {
+        let muts = almide_ir::mut_args::stdlib_mut_positions(module, func).unwrap_or_default();
+        (0..arity).map(|k| muts.contains(&k)).collect()
+    } else {
+        linked.to_vec()
+    }
 }
 
 impl crate::emitter::Emitter<'_> {
@@ -108,9 +129,61 @@ impl crate::emitter::Emitter<'_> {
                 }
                 almide_ir::visit::walk_expr(self, e);
             }
+            fn visit_stmt(&mut self, s: &IrStmt) {
+                if let Some(id) = write_target(s)
+                    && !self.params.contains(&id)
+                    && let Some(&(_, ty)) = self.locals.get(&id)
+                    && !self.out.iter().any(|(v, _)| *v == id)
+                {
+                    self.out.push((id, ty));
+                }
+                almide_ir::visit::walk_stmt(self, s);
+            }
         }
         let mut sc = Scan { locals: self.locals, params, out: Vec::new() };
         almide_ir::visit::IrVisitor::visit_expr(&mut sc, body);
         sc.out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use almide_types::types::Ty;
+
+    fn e(kind: IrExprKind) -> IrExpr {
+        IrExpr { kind, ty: Ty::Unknown, span: None, def_id: None }
+    }
+
+    /// The #2951 GATE, enumerated from the stdlib declarations rather than a
+    /// hand list: a var a closure captures and that ANY stdlib call writes
+    /// through a declared `mut` param gets a shared cell. The list this
+    /// replaced covered six of the fifty bytes writers.
+    #[test]
+    fn every_stdlib_mut_write_to_a_captured_var_makes_a_cell() {
+        let mut missed = Vec::new();
+        for (module, func, idxs) in almide_ir::mut_args::stdlib_mut_fns() {
+            let arity = idxs.iter().max().copied().unwrap_or(0) + 1;
+            let args: Vec<IrExpr> = (0..arity)
+                .map(|i| if i == idxs[0] { e(IrExprKind::Var { id: VarId(0) }) } else { e(IrExprKind::LitInt { value: 0 }) })
+                .collect();
+            let call = e(IrExprKind::Call {
+                target: CallTarget::Module { module: almide_base::intern::sym(module), func: almide_base::intern::sym(&func), def_id: None },
+                args,
+                type_args: vec![],
+            });
+            let lambda = e(IrExprKind::Lambda { params: vec![], body: Box::new(e(IrExprKind::Var { id: VarId(0) })), lambda_id: None });
+            let body = e(IrExprKind::Block {
+                stmts: vec![
+                    IrStmt { kind: IrStmtKind::Expr { expr: lambda }, span: None },
+                    IrStmt { kind: IrStmtKind::Expr { expr: call }, span: None },
+                ],
+                expr: None,
+            });
+            if !cell_vars_of(&body).contains(&VarId(0)) {
+                missed.push(format!("{module}.{func}"));
+            }
+        }
+        assert!(missed.is_empty(), "a captured var written through these got no cell: {missed:?}");
     }
 }

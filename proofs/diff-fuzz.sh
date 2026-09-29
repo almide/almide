@@ -10,7 +10,7 @@
 # moment its shape appears in a generated program — no hand-written fixture required.
 #
 #   native oracle : almide run <f>
-#   wasm          : ALMIDE_WASM_STRUCTURAL=1 almide build <f> --target wasm -> wasmtime
+#   wasm          : ALMIDE_WASM_SKIP_STOCK_AUDIT=1 almide build <f> --target wasm -> wasmtime
 #                   (the STRUCTURAL leg — the renderer `--target wasm` ships by default — forced,
 #                   so a structural decline is a WALL here and never an incumbent module standing
 #                   in for it; #2753. The artifact is the stock-WASI build a user ships.)
@@ -247,7 +247,7 @@ for k in $(seq 1 "$N"); do
   t=$(( RANDOM % 11 ))
   src="$TMP/p$k.almd"; gen "$t" > "$src"
   o0="$("$ALM" run "$src" 2>/dev/null)" || { skip=$((skip+1)); echo "v0fail (native does not run) — tmpl $t:"; cat "$src"; continue; }
-  if ! ALMIDE_WASM_STRUCTURAL=1 "$ALM" build "$src" --target wasm -o "$src.wasm" >"$src.build" 2>&1; then
+  if ! ALMIDE_WASM_SKIP_STOCK_AUDIT=1 "$ALM" build "$src" --target wasm -o "$src.wasm" >"$src.build" 2>&1; then
     wall=$((wall+1)); echo "WALL (structural leg declines) — tmpl $t:"; cat "$src"; sed -n '1,8p' "$src.build"; continue
   fi
   if ! o1="$(wasmtime "$src.wasm" 2>/dev/null)"; then

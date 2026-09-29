@@ -95,7 +95,7 @@ fn dep_project_runs_on_the_structural_leg() {
     // structural leg itself lowered the dep project (no silent reroute).
     let forced = Command::new(almide_bin())
         .args(["run", "src/main.almd", "--target", "wasm"])
-        .env("ALMIDE_WASM_STRUCTURAL", "1")
+        .env("ALMIDE_WASM_SKIP_STOCK_AUDIT", "1")
         .env("ALMIDE_VERIFIED_DEBUG", "1")
         .current_dir(&app)
         .output()

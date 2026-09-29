@@ -18,7 +18,7 @@ mod ladder;
 mod runner;
 
 pub use interp::InterpOracle;
-pub use ladder::{run_ladder, Finding, FindingKind, Outcome, RunEvidence, Rung};
+pub use ladder::{leak_at_exit, run_ladder, Finding, FindingKind, Outcome, RunEvidence, Rung};
 pub use runner::Toolchain;
 
 /// A future reference-interpreter oracle. When supplied, the ladder will

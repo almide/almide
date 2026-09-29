@@ -33,13 +33,12 @@ mem.restore(mark)
 ```
 
 On every leg both calls are the trivial pair today: native's runtime returns `0`
-and ignores the mark (`runtime/rs/src/mem.rs`), and v1's wasm legs link the same
+and ignores the mark (`runtime/rs/src/mem.rs`), and the wasm leg links the same
 pair from `stdlib/mem_checkpoint.almd` — reference counting already reclaims
 scratch deterministically at scope end, exactly what a restore would reclaim, so
 there is nothing left for the mark to do (v0's wasm leg reset a bump pointer here;
 that allocator is gone). The mark is opaque and never meaningful to print. A
-program using `mem` builds and runs on `--target wasm` (both the structural leg
-and the incumbent) and behaves byte-identically to native; the parity fixture is
+program using `mem` builds and runs on `--target wasm` (the structural leg) and behaves byte-identically to native; the parity fixture is
 `spec/wasm_cross/mem_checkpoint.almd`. Before 0.63 no wasm leg built it (E081 at
 check time, #1423), and before that the native symbols were declared but never
 defined, so any program calling them emitted invalid Rust — both are pinned now.

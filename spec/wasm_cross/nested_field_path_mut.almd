@@ -1,0 +1,98 @@
+// @contract: C-226, C-033
+// #2933: the mut stdlib forms through a record field path TWO or more levels
+// deep — `list.push(doc.root.trace, t)`, `list.pop(h.mid.inner.xs)`,
+// `list.clear`, `string.push` / `string.clear`, `map.insert` /
+// `map.delete` — on a record var and on a `mut` record parameter. Each op
+// is the copy-on-write field write at every level (#2411 / #2908's one-level
+// route): a copy of any level bound before the op keeps its old contents
+// (C-033), and the loop is long enough that a leaked record or temporary
+// shows in the allocation ledger (#2944).
+type P = { name: String, w: Float }
+
+type In = { xs: List[Int], ss: List[String], fs: List[Float], ps: List[P], m: Map[String, Int], s: String }
+
+type Mid = { inner: In, trace: List[Int] }
+
+type Doc = { root: Mid, trace: List[Int], n: Int }
+
+fn fresh() -> Doc = {
+  root: { inner: { xs: [], ss: [], fs: [], ps: [], m: [:], s: "" }, trace: [1, 2, 3] },
+  trace: [],
+  n: 0,
+}
+
+// gramide's reparse_status shape: drain one nested list into another
+fn drain(mut doc: Doc) -> Int = {
+  while list.len(doc.root.trace) > 0 {
+    match list.pop(doc.root.trace) {
+      some(t) => list.push(doc.trace, t),
+      none => (),
+    }
+  }
+  list.len(doc.trace)
+}
+
+fn step(mut doc: Doc, i: Int) -> Unit = {
+  list.push(doc.root.inner.xs, i)
+  list.push(doc.root.inner.ss, "s" + int.to_string(i))
+  list.push(doc.root.inner.fs, int.to_float(i) / 2.0)
+  list.push(doc.root.inner.ps, { name: "p" + int.to_string(i), w: 1.5 })
+  map.insert(doc.root.inner.m, "k" + int.to_string(i % 7), i)
+  string.push(doc.root.inner.s, int.to_string(i % 10))
+  ()
+}
+
+fn snap_line(b: Doc) -> String = {
+  let n = list.len(b.root.inner.ss)
+  "${b.n}/${n}/${b.root.inner.s}"
+}
+
+effect fn main() -> Unit = {
+  var doc = fresh()
+  let before_root = doc.root
+  let drained = drain(doc)
+  let order = list.join(list.map(doc.trace, (t) => int.to_string(t)), ",")
+  println("drained ${drained}: ${order}")
+  let now = list.len(doc.root.trace)
+  let was = list.len(before_root.trace)
+  println("root.trace now ${now}, the copy bound before ${was}")
+  var snaps: List[Doc] = []
+  for i in 0..<1000 {
+    let before = doc
+    step(doc, i)
+    list.push(doc.root.trace, i)
+    doc.n = doc.n + 1
+    if list.len(doc.root.inner.xs) > 4 then {
+      let a = list.pop(doc.root.inner.xs) ?? -1
+      let b = list.pop(doc.root.inner.ss) ?? "none"
+      let c = list.pop(doc.root.inner.ps)
+      let d = list.pop(doc.root.trace) ?? -1
+      doc.n = doc.n + a + string.len(b) + d + (match c {
+        some(p) => string.len(p.name),
+        none => 0,
+      })
+    } else ()
+    if list.len(doc.root.inner.fs) > 8 then {
+      list.clear(doc.root.inner.fs)
+    } else ()
+    if string.len(doc.root.inner.s) > 20 then {
+      string.clear(doc.root.inner.s)
+    } else ()
+    if i % 250 == 0 then {
+      map.delete(doc.root.inner.m, "k3")
+      snaps = snaps + [before]
+    } else ()
+  }
+  let inner = doc.root.inner
+  let xs = list.join(list.map(inner.xs, (x) => int.to_string(x)), ",")
+  println("n ${doc.n} xs ${xs}")
+  let ss = list.join(inner.ss, ",")
+  let fs = list.join(list.map(inner.fs, (f) => float.to_string(f)), ",")
+  println("ss ${ss} fs ${fs} s ${inner.s}")
+  let ps = list.join(list.map(inner.ps, (p) => p.name), ",")
+  let m = map.len(inner.m)
+  let trace = list.len(doc.root.trace)
+  println("ps ${ps} m ${m} trace ${trace}")
+  let shots = list.join(list.map(snaps, (b) => snap_line(b)), " ")
+  println("snaps ${shots}")
+}

@@ -108,8 +108,8 @@ lefthook install
 ```
 
 The pre-push clippy ratchet gives a VERDICT only under CI's pinned toolchain
-(1.94.0); off-pin it prints `NO VERDICT` and skips, because the count is not
-comparable across clippy releases. `rustup toolchain install 1.94.0 --component
+(1.96.0); off-pin it prints `NO VERDICT` and skips, because the count is not
+comparable across clippy releases. `rustup toolchain install 1.96.0 --component
 clippy` makes it a verdict where rustup manages the toolchain; on a qusp-managed
 machine (no rustup) it stays CI's alone — a green push is never a clippy verdict
 there. run_parity in the same hook verdicts everywhere.

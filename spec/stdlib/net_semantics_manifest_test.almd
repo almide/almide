@@ -50,3 +50,55 @@ test "net.tcp_close unit=handle" {
 test "net.tcp_close_listener unit=handle" {
   assert_eq("${1}", "1")
 }
+
+test "net.unix_connect unit=file-descriptor" {
+  assert_eq("${1}", "1")
+}
+
+test "net.unix_listen unit=file-descriptor" {
+  assert_eq("${1}", "1")
+}
+
+test "net.unix_accept unit=file-descriptor" {
+  assert_eq("${1}", "1")
+}
+
+test "net.unix_send unit=file-descriptor" {
+  assert_eq("${1}", "1")
+}
+
+test "net.unix_recv unit=byte-count" {
+  assert_eq("${1}", "1")
+}
+
+test "net.unix_take_fds unit=file-descriptor" {
+  assert_eq("${1}", "1")
+}
+
+test "net.unix_poll unit=millisecond" {
+  assert_eq("${1}", "1")
+}
+
+test "net.unix_wait unit=millisecond" {
+  assert_eq("${1}", "1")
+}
+
+test "net.unix_close unit=file-descriptor" {
+  assert_eq("${1}", "1")
+}
+
+test "net.shm_create unit=byte-count" {
+  assert_eq("${1}", "1")
+}
+
+test "net.shm_resize unit=byte-count" {
+  assert_eq("${1}", "1")
+}
+
+test "net.shm_write unit=byte-offset" {
+  assert_eq("${1}", "1")
+}
+
+test "net.shm_read unit=byte-offset" {
+  assert_eq("${1}", "1")
+}

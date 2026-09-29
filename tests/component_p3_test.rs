@@ -10,7 +10,7 @@
 //! step 1): `wasmtime run app.wasm`, plus `-S http` — the capability grant,
 //! like `--dir` — for an http client. No harness here passes `-W` or
 //! `-S p3`, so a shim that reintroduces a 🚝 synchronous builtin fails the
-//! execution tests instead of being carried by a flag; CI installs 47.x.
+//! execution tests instead of being carried by a flag; CI installs 49.x.
 //! A wasmtime older than the p3 floor (46) skips the execution half (the
 //! emission half always runs); a refusal from a 46+ wasmtime is a failure.
 
@@ -266,7 +266,7 @@ fn p3_component_runs_fan_deterministically() {
 // byte-identical to the incumbent adapter leg. The structural leg still
 // routes fs programs to the incumbent by default (the write surface is
 // not ported), so the build uses the frontier probe switch
-// ALMIDE_WASM_STRUCTURAL=1 — the documented lever the eventual route
+// ALMIDE_WASM_SKIP_STOCK_AUDIT=1 — the documented lever the eventual route
 // flip is verified with.
 const FS_READ: &str = r#"import fs
 
@@ -323,7 +323,7 @@ fn build_p3_structural(src: &Path, out: &Path) -> String {
             out.to_str().unwrap(),
         ])
         .env("ALMIDE_COMPONENT_P3", "1")
-        .env("ALMIDE_WASM_STRUCTURAL", "1")
+        .env("ALMIDE_WASM_SKIP_STOCK_AUDIT", "1")
         .env("ALMIDE_DBG_FAN", "1")
         .output()
         .expect("spawn almide");
@@ -602,7 +602,7 @@ effect fn main() -> Unit = {
     .expect("write");
     // With the p3 component requested, an fs program's build takes the
     // STRUCTURAL leg by default (#1584's first default-route slice) —
-    // no ALMIDE_WASM_STRUCTURAL override.
+    // no ALMIDE_WASM_SKIP_STOCK_AUDIT override.
     let o = Command::new(almide_bin())
         .args(["build", src.to_str().unwrap(), "--target", "wasm", "--component", "-o",
                d.join("flip_p3.wasm").to_str().unwrap()])
@@ -841,6 +841,73 @@ effect fn main() -> Unit = {{
         stdout,
         "get:hello from p3\npost:len:9\nput:len:2097152\npatch:len:5\ndel:gone\n",
         "p3 http probe stdout; stderr:\n{stderr}"
+    );
+}
+
+/// #2955: a response body that arrives AFTER the headers — the shape a
+/// real server produces whenever the body is not in the header segment.
+/// The shim used to drop the request's transmit-result future right after
+/// `send`; wasmtime 49 ties the connection driver to it, so a late body
+/// came back empty (Linux CI saw `get:` / `put:` from the echo server,
+/// whose one `write!` the kernel may split). The server here makes the
+/// split deterministic: headers, a pause, then the body in pieces.
+#[test]
+fn p3_component_reads_a_body_that_arrives_after_the_headers() {
+    use std::io::{BufRead, BufReader};
+    let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind late-body server");
+    let addr = l.local_addr().expect("local addr");
+    std::thread::spawn(move || {
+        for conn in l.incoming() {
+            let Ok(c) = conn else { break };
+            let mut r = BufReader::new(c);
+            let mut line = String::new();
+            while r.read_line(&mut line).is_ok_and(|n| n > 2) {
+                line.clear();
+            }
+            let mut c = r.into_inner();
+            let body = "late body, three pieces";
+            let _ = write!(c, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+            let _ = c.flush();
+            for piece in [&body[..5], &body[5..11], &body[11..]] {
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                let _ = c.write_all(piece.as_bytes());
+                let _ = c.flush();
+            }
+        }
+    });
+    let program = format!(
+        r#"import http
+
+effect fn main() -> Unit = {{
+  match http.get("http://{addr}/late") {{
+    ok(b) => println("get:${{b}}"),
+    err(e) => println("get-err:${{e}}"),
+  }}
+  match http.get_status("http://{addr}/late") {{
+    ok((c, t)) => println("gets:${{c}}:" + t),
+    err(e) => println("gets err:" + e),
+  }}
+}}
+"#
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("late_body.almd");
+    std::fs::write(&src, program).expect("write probe");
+    let out = dir.path().join("late_body.wasm");
+    let stderr = build_p3(&src, &out);
+    assert!(out.exists(), "p3 late-body build produced no artifact:\n{stderr}");
+    if !wasmtime_available() {
+        eprintln!("skipping p3 late-body execution: wasmtime not installed");
+        return;
+    }
+    let Some((stdout, stderr, code)) = run_p3_http(&out) else {
+        return;
+    };
+    assert_eq!(code, 0, "p3 late-body probe exit code; stderr:\n{stderr}");
+    assert_eq!(
+        stdout,
+        "get:late body, three pieces\ngets:200:late body, three pieces\n",
+        "p3 late-body probe stdout (an empty body = the response stream ended before the body arrived); stderr:\n{stderr}"
     );
 }
 

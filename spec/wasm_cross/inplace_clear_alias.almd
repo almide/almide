@@ -6,9 +6,8 @@
 // printed `[] []` for the string var shape: the incumbent's self-hosted
 // `string_clear` stored length 0 into the block the var and its alias SHARE.
 // Both wasm legs now lower every clear as a var write-back of a fresh empty
-// block (the `list.clear` rebind), so native, the structural leg, the forced
-// incumbent (tests/incumbent_clear_alias_test.rs) and the interpreter print
-// the same bytes. The record-field receiver is the sibling
+// block (the `list.clear` rebind), so native, the wasm leg and the
+// interpreter print the same bytes. The record-field receiver is the sibling
 // inplace_clear_alias_field.almd; inplace_clear_family.almd pins the rest of
 // the family's behaviour (delete order, growth after clear).
 fn wipe_list(mut xs: List[Int]) -> Unit = list.clear(xs)

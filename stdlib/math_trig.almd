@@ -8,8 +8,10 @@
 // floor; op order / associativity is PRESERVED from the Rust source. Integer/bit math uses the
 // prim bit floor (fbits/ffrombits/band/bor/bxor/bshl/bshr/bshr_u, f2i/i2f).
 //
-// The reduction result (n, y0, y1) is written into a caller-provided 3-slot scratch List[Int]
-// (Almide self-host fns return a single value): slot0 = n, slot1 = bits(y0), slot2 = bits(y1).
+// The reduction result (n, y0, y1) is never materialized: Almide self-host fns return a single
+// value, so every exit of __rem_pio2 hands (n, y0, y1) straight to __trig_fin, which applies the
+// caller's kernel (k: 0 = sin, 1 = cos, 2 = tan) — continuation-passing in place of a heap
+// out-parameter, so a sin/cos/tan call allocates nothing on the common path (#2980).
 // rem_pio2_large uses a few small scratch List[Int]/List[Float] arrays (q/iq/f/fq + the IPIO2
 // 2/pi table prefix), each bounded and freed — pure scalar Float, the cert is untouched.
 // ───────────────────────── kernel sin / cos / tan ─────────────────────────
@@ -579,9 +581,19 @@ fn __rem_pio2_large(xh: Int, tyh: Int, e0: Int, nx: Int) -> Int = {
 }
 
 // ───────────────────────── rem_pio2 ─────────────────────────
-// Writes (n, y0, y1) into the caller's 3-slot scratch List[Int] at `outh`: slot0 = n,
-// slot1 = bits(y0), slot2 = bits(y1).
-fn __rpio2_medium(x: Float, ix: Int, outh: Int) -> Int = {
+// Every exit returns __trig_fin(k, n, y0, y1): the reduced argument goes straight into the
+// caller's kernel instead of through a scratch block.
+fn __trig_fin(k: Int, n: Int, y0: Float, y1: Float) -> Float = {
+  // cos(x) = sin(x + pi/2): the cos table is the sin table shifted one quadrant.
+  let q = prim.band(n + k, 3)
+  if k == 2 then __k_tan(y0, y1, prim.band(n, 1))
+  else if q == 0 then __k_sin(y0, y1, 1)
+  else if q == 1 then __k_cos(y0, y1)
+  else if q == 2 then 0.0 - __k_sin(y0, y1, 1)
+  else 0.0 - __k_cos(y0, y1)
+}
+
+fn __rpio2_medium(x: Float, ix: Int, k: Int) -> Float = {
   let inv_pio2 = prim.ffrombits(4603909380684499075)
   let to_int = prim.ffrombits(4843621399236968448)
   let pio2_1 = prim.ffrombits(4609753056924401664)
@@ -625,13 +637,10 @@ fn __rpio2_medium(x: Float, ix: Int, outh: Int) -> Int = {
   } else w1
   let y0 = if do3 then r2 - w2 else y01
   let y1 = (r2 - y0) - w2
-  prim.store64(outh + 12 + 0 * 8, n)
-  prim.store64(outh + 12 + 1 * 8, prim.fbits(y0))
-  prim.store64(outh + 12 + 2 * 8, prim.fbits(y1))
-  0
+  __trig_fin(k, n, y0, y1)
 }
 
-fn __rem_pio2(x: Float, outh: Int) -> Int = {
+fn __rem_pio2(x: Float, k: Int) -> Float = {
   let pio2_1 = prim.ffrombits(4609753056924401664)
   let pio2_1t = prim.ffrombits(4454258360616903473)
   let bits = prim.fbits(x)
@@ -639,95 +648,68 @@ fn __rem_pio2(x: Float, outh: Int) -> Int = {
   let ix = prim.band(prim.bshr_u(bits, 32), 2147483647)
   if ix <= 1074752122 then {
     // 0x400f6a7a, |x| ~<= 5pi/4
-    if prim.band(ix, 1048575) == 598523 then __rpio2_medium(x, ix, outh)
+    if prim.band(ix, 1048575) == 598523 then __rpio2_medium(x, ix, k)
     else if ix <= 1073928572 then {
       // 0x4002d97c, |x| ~<= 3pi/4
       if sign == 0 then {
         let z = x - pio2_1
         let y0 = z - pio2_1t
         let y1 = (z - y0) - pio2_1t
-        prim.store64(outh + 12 + 0 * 8, 1)
-        prim.store64(outh + 12 + 1 * 8, prim.fbits(y0))
-        prim.store64(outh + 12 + 2 * 8, prim.fbits(y1))
-        0
+        __trig_fin(k, 1, y0, y1)
       } else {
         let z = x + pio2_1
         let y0 = z + pio2_1t
         let y1 = (z - y0) + pio2_1t
-        prim.store64(outh + 12 + 0 * 8, 0 - 1)
-        prim.store64(outh + 12 + 1 * 8, prim.fbits(y0))
-        prim.store64(outh + 12 + 2 * 8, prim.fbits(y1))
-        0
+        __trig_fin(k, 0 - 1, y0, y1)
       }
     } else if sign == 0 then {
       let z = x - 2.0 * pio2_1
       let y0 = z - 2.0 * pio2_1t
       let y1 = (z - y0) - 2.0 * pio2_1t
-      prim.store64(outh + 12 + 0 * 8, 2)
-      prim.store64(outh + 12 + 1 * 8, prim.fbits(y0))
-      prim.store64(outh + 12 + 2 * 8, prim.fbits(y1))
-      0
+      __trig_fin(k, 2, y0, y1)
     } else {
       let z = x + 2.0 * pio2_1
       let y0 = z + 2.0 * pio2_1t
       let y1 = (z - y0) + 2.0 * pio2_1t
-      prim.store64(outh + 12 + 0 * 8, 0 - 2)
-      prim.store64(outh + 12 + 1 * 8, prim.fbits(y0))
-      prim.store64(outh + 12 + 2 * 8, prim.fbits(y1))
-      0
+      __trig_fin(k, 0 - 2, y0, y1)
     }
   } else if ix <= 1075594811 then {
     // 0x401c463b, |x| ~<= 9pi/4
     if ix <= 1075183036 then {
       // 0x4015fdbc, |x| ~<= 7pi/4
-      if ix == 1074977148 then __rpio2_medium(x, ix, outh)
+      if ix == 1074977148 then __rpio2_medium(x, ix, k)
       else if sign == 0 then {
         let z = x - 3.0 * pio2_1
         let y0 = z - 3.0 * pio2_1t
         let y1 = (z - y0) - 3.0 * pio2_1t
-        prim.store64(outh + 12 + 0 * 8, 3)
-        prim.store64(outh + 12 + 1 * 8, prim.fbits(y0))
-        prim.store64(outh + 12 + 2 * 8, prim.fbits(y1))
-        0
+        __trig_fin(k, 3, y0, y1)
       } else {
         let z = x + 3.0 * pio2_1
         let y0 = z + 3.0 * pio2_1t
         let y1 = (z - y0) + 3.0 * pio2_1t
-        prim.store64(outh + 12 + 0 * 8, 0 - 3)
-        prim.store64(outh + 12 + 1 * 8, prim.fbits(y0))
-        prim.store64(outh + 12 + 2 * 8, prim.fbits(y1))
-        0
+        __trig_fin(k, 0 - 3, y0, y1)
       }
     } else {
-      if ix == 1075388923 then __rpio2_medium(x, ix, outh)
+      if ix == 1075388923 then __rpio2_medium(x, ix, k)
       else if sign == 0 then {
         let z = x - 4.0 * pio2_1
         let y0 = z - 4.0 * pio2_1t
         let y1 = (z - y0) - 4.0 * pio2_1t
-        prim.store64(outh + 12 + 0 * 8, 4)
-        prim.store64(outh + 12 + 1 * 8, prim.fbits(y0))
-        prim.store64(outh + 12 + 2 * 8, prim.fbits(y1))
-        0
+        __trig_fin(k, 4, y0, y1)
       } else {
         let z = x + 4.0 * pio2_1
         let y0 = z + 4.0 * pio2_1t
         let y1 = (z - y0) + 4.0 * pio2_1t
-        prim.store64(outh + 12 + 0 * 8, 0 - 4)
-        prim.store64(outh + 12 + 1 * 8, prim.fbits(y0))
-        prim.store64(outh + 12 + 2 * 8, prim.fbits(y1))
-        0
+        __trig_fin(k, 0 - 4, y0, y1)
       }
     }
   } else if ix < 1094263291 then {
     // 0x413921fb, medium
-    __rpio2_medium(x, ix, outh)
+    __rpio2_medium(x, ix, k)
   } else if ix >= 2146435072 then {
     // 0x7ff00000, inf/NaN
     let y0 = x - x
-    prim.store64(outh + 12 + 0 * 8, 0)
-    prim.store64(outh + 12 + 1 * 8, prim.fbits(y0))
-    prim.store64(outh + 12 + 2 * 8, prim.fbits(y0))
-    0
+    __trig_fin(k, 0, y0, y0)
   } else {
     // large: set z = scalbn(|x|, -ilogb(x)+23); split into 3 24-bit terms.
     // ui &= (!1u64)>>12 (= 0x000fffffffffffff); ui |= (0x3ff+23)<<52.
@@ -758,15 +740,9 @@ fn __rem_pio2(x: Float, outh: Int) -> Int = {
     let ty0 = prim.ffrombits(prim.load64(tyh + 12 + 0 * 8))
     let ty1 = prim.ffrombits(prim.load64(tyh + 12 + 1 * 8))
     if sign != 0 then {
-      prim.store64(outh + 12 + 0 * 8, 0 - n)
-      prim.store64(outh + 12 + 1 * 8, prim.fbits(0.0 - ty0))
-      prim.store64(outh + 12 + 2 * 8, prim.fbits(0.0 - ty1))
-      0
+      __trig_fin(k, 0 - n, 0.0 - ty0, 0.0 - ty1)
     } else {
-      prim.store64(outh + 12 + 0 * 8, n)
-      prim.store64(outh + 12 + 1 * 8, prim.fbits(ty0))
-      prim.store64(outh + 12 + 2 * 8, prim.fbits(ty1))
-      0
+      __trig_fin(k, n, ty0, ty1)
     }
   }
 }
@@ -779,19 +755,7 @@ fn math_sin(x: Float) -> Float = {
     // 0x3fe921fb, |x| ~< pi/4
     if ix < 1045430272 then x
     else __k_sin(x, 0.0, 0)
-  } else if ix >= 2146435072 then x - x
-  else {
-    let out = prim.alloc_list(3)
-    let outh = prim.handle(out)
-    let _r = __rem_pio2(x, outh)
-    let n = prim.band(prim.load64(outh + 12 + 0 * 8), 3)
-    let y0 = prim.ffrombits(prim.load64(outh + 12 + 1 * 8))
-    let y1 = prim.ffrombits(prim.load64(outh + 12 + 2 * 8))
-    if n == 0 then __k_sin(y0, y1, 1)
-    else if n == 1 then __k_cos(y0, y1)
-    else if n == 2 then 0.0 - __k_sin(y0, y1, 1)
-    else 0.0 - __k_cos(y0, y1)
-  }
+  } else if ix >= 2146435072 then x - x else __rem_pio2(x, 0)
 }
 
 fn math_cos(x: Float) -> Float = {
@@ -804,19 +768,7 @@ fn math_cos(x: Float) -> Float = {
       let xi = prim.f2i(x)
       if xi == 0 then 1.0 else __k_cos(x, 0.0)
     } else __k_cos(x, 0.0)
-  } else if ix >= 2146435072 then x - x
-  else {
-    let out = prim.alloc_list(3)
-    let outh = prim.handle(out)
-    let _r = __rem_pio2(x, outh)
-    let n = prim.band(prim.load64(outh + 12 + 0 * 8), 3)
-    let y0 = prim.ffrombits(prim.load64(outh + 12 + 1 * 8))
-    let y1 = prim.ffrombits(prim.load64(outh + 12 + 2 * 8))
-    if n == 0 then __k_cos(y0, y1)
-    else if n == 1 then 0.0 - __k_sin(y0, y1, 1)
-    else if n == 2 then 0.0 - __k_cos(y0, y1)
-    else __k_sin(y0, y1, 1)
-  }
+  } else if ix >= 2146435072 then x - x else __rem_pio2(x, 1)
 }
 
 fn math_tan(x: Float) -> Float = {
@@ -826,14 +778,5 @@ fn math_tan(x: Float) -> Float = {
     // 0x3fe921fb, |x| ~< pi/4
     if ix < 1044381696 then x
     else __k_tan(x, 0.0, 0)
-  } else if ix >= 2146435072 then x - x
-  else {
-    let out = prim.alloc_list(3)
-    let outh = prim.handle(out)
-    let _r = __rem_pio2(x, outh)
-    let n = prim.load64(outh + 12 + 0 * 8)
-    let y0 = prim.ffrombits(prim.load64(outh + 12 + 1 * 8))
-    let y1 = prim.ffrombits(prim.load64(outh + 12 + 2 * 8))
-    __k_tan(y0, y1, prim.band(n, 1))
-  }
+  } else if ix >= 2146435072 then x - x else __rem_pio2(x, 2)
 }

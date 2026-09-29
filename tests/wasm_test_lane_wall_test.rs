@@ -9,7 +9,7 @@
 //! --target wasm`, a CI gate, was green while five files' tests had not run on
 //! wasm, under a reason line ("no verified wasm rendering") that named a v1
 //! verdict as if it were the product's. #2179 gave the lane the product's
-//! routing — structural first, the incumbent where it declines — and the
+//! routing (structural first then; the only leg since #2752) — and the
 //! register below emptied; it stays, held at empty, so a wall on either lane
 //! can never again be reported as a benign skip.
 //!
@@ -30,10 +30,9 @@
 use std::process::Command;
 
 /// A `pub fn` matching a variant produced INSIDE it and returning a String —
-/// the #2160 shape. The incumbent brick walls it ("heap-result `match` outside
-/// the executable subset"); `almide build --target wasm` renders the same file
-/// on the structural leg and reports it as such — and since #2179 so does the
-/// test lane.
+/// the #2160 shape. The retired incumbent brick walled it ("heap-result
+/// `match` outside the executable subset"); `almide build --target wasm`
+/// renders it on the structural leg — and since #2179 so does the test lane.
 const WALLS_THE_INCUMBENT: &str = r#"
 type T = | A(String) | B
 
@@ -96,23 +95,25 @@ fn the_file_the_incumbent_walls_runs_on_the_structural_leg() {
     );
 }
 
-/// Pinned to the incumbent (`ALMIDE_WASM_INCUMBENT=1`, the same switch the
-/// product router honours), the lane still walls this file — and says so under
-/// the greppable verdict the register's gate reads, naming both legs rather
-/// than claiming the product has no wasm rendering.
+/// A shape the wasm leg refuses on purpose (an unreachable typed hole, C-268;
+/// tests/wasm_wall_e082_test.rs pins the refusal's spelling).
+const WALLS_THE_LEG: &str = r#"
+fn later(n: Int) -> Int = todo("later")
+
+test "an unreachable typed hole" {
+  let n = 1
+  if n > 5 then assert_eq(later(n), 0) else ()
+  assert_eq(n, 1)
+}
+"#;
+
+/// A file the wasm leg walls is reported under the greppable verdict the
+/// register's gate reads, naming the leg that declined rather than claiming
+/// the product has no wasm rendering.
 #[test]
 fn a_renderer_wall_is_reported_as_a_wall_not_as_a_plain_skip() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let file = dir.path().join("t_test.almd");
-    std::fs::write(&file, WALLS_THE_INCUMBENT).expect("source");
-    let out = Command::new(almide_bin())
-        .args(["test", file.to_str().expect("path"), "--target", "wasm"])
-        .env("ALMIDE_WASM_INCUMBENT", "1")
-        .current_dir(dir.path())
-        .output()
-        .expect("run");
-    let report =
-        String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+    let (_, report) = test_on_wasm(dir.path(), WALLS_THE_LEG);
     assert!(
         report.contains("WALL ") && report.contains("tests did not run on wasm"),
         "a renderer wall must be reported under its own greppable verdict — the register's \
@@ -121,12 +122,12 @@ fn a_renderer_wall_is_reported_as_a_wall_not_as_a_plain_skip() {
     );
     assert!(
         !report.contains("no verified wasm rendering"),
-        "the reason must name the LEGS that declined, not claim the product has no wasm \
+        "the reason must name the leg that declined, not claim the product has no wasm \
          rendering:\n{report}"
     );
     assert!(
-        report.contains("incumbent") && report.contains("structural"),
-        "and must name both legs:\n{report}"
+        report.contains("structural leg declined") && !report.contains("incumbent"),
+        "and must name the one wasm leg:\n{report}"
     );
 }
 
@@ -145,7 +146,7 @@ fn a_renderer_wall_is_reported_as_a_wall_not_as_a_plain_skip() {
 /// rendered through the two-leg router whose default is the structural leg
 /// (`cross_module_repr_derive_test`, `as_pattern_test`, `list_rest_pattern_test`,
 /// `zlib_test`). The lane now takes the product's route, so a row here means a
-/// file BOTH legs decline, and it names the issue that lowers the shape.
+/// file the wasm leg declines, and it names the issue that lowers the shape.
 const TEST_LANE_WALLS: &[(&str, &str)] = &[];
 
 /// The register, held equal to what the lane actually reports — BOTH
@@ -250,7 +251,6 @@ fn the_build_lane_renders_the_file_the_test_lane_walls() {
             "-o",
             dir.path().join("m.wasm").to_str().expect("path"),
         ])
-        .env_remove("ALMIDE_WASM_INCUMBENT")
         .output()
         .expect("build");
     let report =

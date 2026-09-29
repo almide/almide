@@ -16,11 +16,9 @@
 # `almide verify` witness producer (MIR lowering + certificate producers);
 # and `almide test spec/` through the CLI (frontend→codegen production path).
 # The ratcheted TOTAL spans every workspace crate linked into those binaries
-# EXCEPT the incumbent WAT renderer (INCUMBENT_ONLY below): #2753 moved this
-# gate off `render_program` before #2761 deletes that renderer, so its files
-# leave the measured scope here rather than draining the TOTAL as dead code
-# (the report rows below are filtered by crate for readability; the TOTAL
-# is not). Two floors:
+# (#2753 moved this gate off the incumbent's `render_program`, and #2761
+# deleted that renderer; the report rows below are filtered by crate for
+# readability, the TOTAL is not). Two floors:
 # the TOTAL ratchet (proofs/coverage-baseline.txt) and per-file floors for
 # the #566 SAFETY SET (proofs/coverage-safety-baseline.txt) — the safety
 # files may not rot while the TOTAL holds.
@@ -102,13 +100,6 @@ sweep_stray_profraw() {
 }
 trap sweep_stray_profraw EXIT
 
-# The incumbent WAT renderer and the wasm-only pipeline tail — exactly the
-# files #2761 deletes (#1696 step 5). No workload here drives them any more
-# (the render_program sweep was their only driver), so they are excluded from
-# the report and the TOTAL; their own unit tests still run in step 2. A
-# safety-floor row naming one of them fails as "not found in the report".
-INCUMBENT_ONLY='almide-mir/src/(render_wasm[^/]*\.rs|render_wasm/|wasm_op_tables\.rs|region_alloc\.rs|region_compact[^/]*\.rs|concat_to_append\.rs|scalar_call_inline\.rs|translation_validation\.rs|heap_cap\.rs|host_exports\.rs|pipeline_(b|c|link|global_slots|test_runner)\.rs)'
-
 echo "== 1/4 instrumented build (almide-mir + almide-codegen + almide-wasm + almide-wasm-run + almide-rt-core tests, the almide CLI) =="
 # almide-wasm joined the instrumented set at the Stage 2 commissioning: the
 # default `--target wasm` leg (and `almide test`'s wasm phase workload) runs
@@ -182,7 +173,7 @@ done > "$COVDIR/sweep.list"
 n="$(wc -l < "$COVDIR/sweep.list" | tr -d ' ')"
 nw="$(tr '\n' '\0' < "$COVDIR/sweep.list" | COVDIR="$COVDIR" CLI="$CLI" xargs -0 -n 1 -P "$SWEEP_JOBS" sh -c '
     out="$COVDIR/sweep/$$"
-    if ALMIDE_WASM_STRUCTURAL=1 LLVM_PROFILE_FILE="$COVDIR/wasm-%4m.profraw" \
+    if ALMIDE_WASM_SKIP_STOCK_AUDIT=1 LLVM_PROFILE_FILE="$COVDIR/wasm-%4m.profraw" \
          "$CLI" build "$1" --target wasm -o "$out.wasm" >/dev/null 2>&1; then echo emitted; fi
     LLVM_PROFILE_FILE="$COVDIR/verify-%4m.profraw" \
       "$CLI" verify "$1" --emit "$out.bundle" >/dev/null 2>&1
@@ -240,7 +231,7 @@ OBJS="-object $CLI"
 for tb in $TESTBINS; do OBJS="$OBJS -object $tb"; done
 REPORT="$("$LLVM_BIN/llvm-cov" report $OBJS \
     -instr-profile="$COVDIR/all.profdata" \
-    -ignore-filename-regex="(\\.cargo|rustc|/tests?/|tests_part|examples/|/release/build/|$INCUMBENT_ONLY)" 2>/dev/null \
+    -ignore-filename-regex="(\\.cargo|rustc|/tests?/|tests_part|examples/|/release/build/)" 2>/dev/null \
   | awk 'NR<=2 || /almide-(mir|codegen|frontend|wasm|wasm-run)\// || /^TOTAL/' | grep -vE 'tests?_part')"
 # The full per-file table goes into a collapsed group so a ratchet slide can be
 # traced to its files from the log alone; the tail stays as the summary.
@@ -292,7 +283,7 @@ fi
 # stale); `--update` raises floors to the measured value (never lowers).
 SAFETY_FILE="$ROOT/proofs/coverage-safety-baseline.txt"
 if [ -f "$SAFETY_FILE" ]; then
-    FULL_REPORT="$("$LLVM_BIN/llvm-cov" report $OBJS -instr-profile="$COVDIR/all.profdata" -ignore-filename-regex="$INCUMBENT_ONLY" 2>/dev/null)"
+    FULL_REPORT="$("$LLVM_BIN/llvm-cov" report $OBJS -instr-profile="$COVDIR/all.profdata" 2>/dev/null)"
     fail=0
     updated=""
     while read -r sf floor; do

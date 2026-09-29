@@ -30,6 +30,9 @@ pub mod effect;
 pub mod annotations;
 pub mod mut_param;
 pub mod exit_code;
+pub mod fusion;
+pub mod speculation;
+pub mod mut_args;
 pub mod top_let_storage;
 pub mod accum_tre;
 

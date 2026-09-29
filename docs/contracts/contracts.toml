@@ -98,6 +98,8 @@ evidence  = [
   { path = "spec/wasm_cross/int_div_by_zero.almd", class = "fixture" },
   { path = "spec/wasm_cross/int_mod_by_zero.almd", class = "fixture" },
   { path = "spec/wasm_cross/int_div_by_zero_literal.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_div_by_zero_inlined_arg.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fusion_two_aborting_stages_staged.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-002"
@@ -179,6 +181,7 @@ evidence  = [
   { path = "spec/wasm_cross/top_let_div_eager.almd", class = "fixture" },
   { path = "spec/wasm_cross/top_let_div_used.almd", class = "fixture" },
   { path = "spec/wasm_cross/top_let_closure_eager.almd", class = "fixture" },
+  { path = "spec/wasm_cross/top_let_eager_through_call.almd", class = "fixture" },
 ]
 
 # ── COMPOUND / RECORD / RECURSIVE REPR INTERPOLATION (PR #379) ───────
@@ -519,8 +522,10 @@ evidence  = [
   { path = "spec/wasm_cross/module_var_alias_cow.almd", class = "fixture" },
   { path = "spec/wasm_cross/witness_straightline.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_set_in_place.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_writer_mut_from_declaration.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_push_on_record_field.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_pop_map_insert_on_record_field.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_field_path_mut.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_alias_cow.almd", class = "fixture" },
   { path = "spec/wasm_cross/inplace_clear_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_set_on_record_field.almd", class = "fixture" },
@@ -1485,7 +1490,6 @@ evidence  = [
   { path = "spec/wasm_cross/result_option_call_payload_return.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_rich_list_capture.almd", class = "fixture" },
   { path = "spec/wasm_cross/heap_result_if_some_user_call_temps.almd", class = "fixture" },
-  { path = "tests/heap_arm_some_user_call_temps_test.rs", class = "fixture", name = "the_incumbent_test_lane_runs_the_test_block" },
 ]
 [[contract]]
 id        = "C-107"
@@ -1609,6 +1613,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/branch_lift_in_loop.almd", class = "fixture" },
   { path = "spec/wasm_cross/branch_lift_stdlib_mut_arg.almd", class = "fixture" },
+  { path = "spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-118"
@@ -1777,6 +1782,7 @@ evidence  = [
   { path = "spec/wasm_cross/effect_mut_generic_port.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_effect_can_err.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_move_mode_gaps.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mutable_global_field_mut_arg.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-133"
@@ -2404,6 +2410,7 @@ evidence  = [
   { path = "spec/wasm_cross/scalar_if_arm_effects.almd", class = "fixture" },
   { path = "spec/wasm_cross/mutable_global_repeat_writes.almd", class = "fixture" },
   { path = "spec/wasm_cross/mutable_global_scalar_assign.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mutable_global_field_mut_arg.almd", class = "fixture" },
 ]
 
 # ── STATEMENT EFFECTS INSIDE A REAL SCALAR-`if` ARM ─
@@ -2449,9 +2456,9 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/global_in_both_arms.almd", class = "fixture" },
   { path = "spec/wasm_cross/global_in_shortcircuit_operand.almd", class = "fixture" },
-  { path = "tests/incumbent_shortcircuit_global_memo_test.rs", name = "a_global_read_on_a_short_circuit_right_side_is_true_on_the_skipped_path", class = "fixture" },
-  { path = "tests/incumbent_shortcircuit_global_memo_test.rs", name = "a_global_read_in_a_while_condition_survives_zero_iterations", class = "fixture" },
-  { path = "tests/incumbent_shortcircuit_global_memo_test.rs", name = "a_global_read_in_an_already_guarded_region_still_reads_its_value", class = "fixture" },
+  { path = "tests/shortcircuit_global_memo_test.rs", name = "a_global_read_on_a_short_circuit_right_side_is_true_on_the_skipped_path", class = "fixture" },
+  { path = "tests/shortcircuit_global_memo_test.rs", name = "a_global_read_in_a_while_condition_survives_zero_iterations", class = "fixture" },
+  { path = "tests/shortcircuit_global_memo_test.rs", name = "a_global_read_in_an_already_guarded_region_still_reads_its_value", class = "fixture" },
 ]
 [[contract]]
 id        = "C-192"
@@ -2716,7 +2723,6 @@ since     = "0.52.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/hex_two_module_link.almd", class = "fixture" },
-  { path = "crates/almide-mir/src/pipeline_link.rs", name = "dedup_linked_by_name", class = "by-construction" },
 ]
 [[contract]]
 id        = "C-213"
@@ -2792,6 +2798,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/unwrap_or_tail_result.almd", class = "fixture" },
   { path = "spec/wasm_cross/pipe_unwrap_or_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fallible_hof_release_matrix.almd", class = "fixture" },
 ]
 
 # ── A DIVERGING CALL IN A BRANCH ARM RUNS, AND ITS EXIT CODE IS THE PROCESS'S ──
@@ -2803,7 +2810,7 @@ statement = "A call whose return type is `Never` — `process.exit(code)`, the s
 since     = "0.56.0"
 status    = "active"
 evidence  = [
-  { path = "tests/incumbent_exit_tail_test.rs", name = "dynamic_exit_codes_execute_in_every_tail_position", class = "fixture" },
+  { path = "tests/exit_tail_positions_test.rs", name = "dynamic_exit_codes_execute_in_every_tail_position", class = "fixture" },
   { path = "spec/wasm_cross/guard_else_exit_code.almd", class = "fixture" },
   { path = "spec/wasm_cross/panic_value_arm.almd", class = "fixture" },
 ]
@@ -2897,6 +2904,7 @@ evidence  = [
   { path = "spec/wasm_cross/mut_param_spread_reassign.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_push_on_record_field.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_pop_map_insert_on_record_field.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_field_path_mut.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_scalar_param_reassign.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_tail_recursion.almd", class = "fixture" },
 ]
@@ -3540,6 +3548,7 @@ evidence  = [
   { path = "spec/wasm_cross/fallible_hof_effect_callback_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/fallible_hof_large_input.almd", class = "fixture" },
   { path = "spec/wasm_cross/fallible_hof_option_effect_callback.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fallible_hof_release_matrix.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-285"
@@ -3874,6 +3883,8 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/closure_captured_list_mutation.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_captured_map_records.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_writer_mut_from_declaration.almd", class = "fixture" },
+  { path = "spec/wasm_cross/closure_reads_var_written_by_mut_call.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-320"
@@ -4434,7 +4445,7 @@ statement = "`process.exit(code)` terminates with `code` when `0 <= code <= 255`
 since     = "0.63.0"
 status    = "active"
 evidence  = [
-  { path = "tests/incumbent_exit_tail_test.rs", name = "dynamic_exit_codes_execute_in_every_tail_position", class = "fixture" },
+  { path = "tests/exit_tail_positions_test.rs", name = "dynamic_exit_codes_execute_in_every_tail_position", class = "fixture" },
   { path = "spec/wasm_cross/exit_code_out_of_range.almd", class = "fixture" },
   { path = "spec/wasm_cross/exit_code_upper_bound.almd", class = "fixture" },
   { path = "spec/wasm_cross/exit_code_passthrough.almd", class = "fixture" },

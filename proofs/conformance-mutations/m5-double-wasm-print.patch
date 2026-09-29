@@ -5,7 +5,7 @@ lower_print, both the interpolation branch — the flush call issued twice —
 and the String-block branch — the argument lowered and printed twice):
 the default wasm leg since 0.60 (#1696), and the leg the conformance
 runner builds every corpus program on (48/48 via `almide build --target
-wasm` with no ALMIDE_WASM_INCUMBENT). The previous form of this mutant
+wasm`, the only wasm leg since #2752). The previous form of this mutant
 seeded the same bug into the incumbent renderer (almide-mir
 render_wasm_c.rs, RtFn::PrintStr) and SURVIVED seven nights once the
 route flipped: the runner never executed that code, so nothing could

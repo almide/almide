@@ -35,8 +35,8 @@
 // C-076's `EXTENDED (#2133)` and C-334's `EXTENDED (#2398)` clauses record.
 // The record row reads its element through a `let` because the incumbent
 // also refuses a `??`-bearing interpolation in call-argument position. A
-// nested receiver path (`h.i.xs`) is still refused (`list-push-nonvar`) and
-// is pinned as a wall by the same test.
+// nested receiver path (`h.i.xs`) lowers since #2933, through the same write
+// at every level (spec/wasm_cross/nested_field_path_mut.almd).
 type Names = { names: List[String], n: Int }
 
 type Floats = { xs: List[Float] }

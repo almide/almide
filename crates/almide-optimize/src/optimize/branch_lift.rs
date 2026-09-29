@@ -86,7 +86,7 @@ use almide_lang::types::{is_heap_ty, Ty};
 /// helper function, replacing the bind value with a call to that helper.
 pub fn lift_heap_branch_binds(program: &mut IrProgram) {
     let mut counter: u32 = 0;
-    let mut_params = mut_param_positions(program);
+    let mut_params = MutParams::of(program);
 
     // Root program: function bodies + top-level let initializers all share the
     // program-wide `var_table`, so a helper synthesized from any of them resolves
@@ -95,7 +95,7 @@ pub fn lift_heap_branch_binds(program: &mut IrProgram) {
         let IrProgram { functions, top_lets, var_table, .. } = &mut *program;
         let globals: HashSet<VarId> = top_lets.iter().map(|tl| tl.var).collect();
         let mut lifter = BranchLifter { vt: var_table, counter: &mut counter, new_funcs: Vec::new(), loop_depth: 0,
-        dense_depth: 0, globals, mut_params: &mut_params };
+        dense_depth: 0, globals, mut_params: &mut_params, scope: None };
         for func in functions.iter_mut() {
             lifter.visit_expr_mut(&mut func.body);
         }
@@ -110,9 +110,10 @@ pub fn lift_heap_branch_binds(program: &mut IrProgram) {
     // module's functions must be placed in that module (their body's VarIds index
     // the module's table, not the program's).
     for module in program.modules.iter_mut() {
-        let IrModule { functions, top_lets, var_table, .. } = &mut *module;
+        let IrModule { name, functions, top_lets, var_table, .. } = &mut *module;
         let globals: HashSet<VarId> = top_lets.iter().map(|tl| tl.var).collect();
-        let mut lifter = BranchLifter { vt: var_table, counter: &mut counter, new_funcs: Vec::new(), loop_depth: 0, dense_depth: 0, globals, mut_params: &mut_params };
+        let scope = Some(name.as_str().to_string());
+        let mut lifter = BranchLifter { vt: var_table, counter: &mut counter, new_funcs: Vec::new(), loop_depth: 0, dense_depth: 0, globals, mut_params: &mut_params, scope };
         for func in functions.iter_mut() {
             lifter.visit_expr_mut(&mut func.body);
         }
@@ -156,74 +157,93 @@ struct BranchLifter<'a> {
     /// lifted too: each bind becomes ONE helper call (chain-length immune, no 2^n
     /// duplication), the sound shape the try-lowered helper renders.
     dense_depth: u32,
-    /// Every user fn's `mut` parameter positions, by the names a call spells it
-    /// with (bare and `module.fn`): an argument passed there is WRITTEN by the
-    /// call (#2907), exactly like an `Assign` to it.
-    mut_params: &'a std::collections::HashMap<String, Vec<usize>>,
+    /// Every user fn's `mut` parameter positions (see [`MutParams`]): an
+    /// argument passed there is WRITTEN by the call (#2907), exactly like an
+    /// `Assign` to it.
+    mut_params: &'a MutParams,
+    /// The module whose fns this lifter walks (`None` = the root program): a
+    /// bare `Named` call resolves in this scope first.
+    scope: Option<String>,
 }
 
-/// The `mut` parameter positions of every program and module fn.
-fn mut_param_positions(program: &IrProgram) -> std::collections::HashMap<String, Vec<usize>> {
-    let mut out = std::collections::HashMap::new();
-    for f in program.functions.iter().filter(|f| !f.mutated_params.is_empty()) {
-        out.insert(f.name.as_str().to_string(), f.mutated_params.clone());
-    }
-    for m in &program.modules {
-        for f in m.functions.iter().filter(|f| !f.mutated_params.is_empty()) {
-            out.insert(f.name.as_str().to_string(), f.mutated_params.clone());
-            out.insert(format!("{}.{}", m.name.as_str(), f.name.as_str()), f.mutated_params.clone());
-        }
-    }
-    out
+/// The `mut` parameter positions of the USER fns (root program and user
+/// modules), by the scope they live in. A BUNDLED stdlib fn is never read from
+/// here, even when this leg lowered its module: its positions come from its
+/// declaration (`almide_ir::mut_args`), on every leg. The native leg lowers
+/// the bundled modules and the wasm leg does not, so a table built from the
+/// lowered modules answered differently per leg: wasm missed `list.pop`'s
+/// write (#2931), and native, keying `map.insert` under its bare name over a
+/// user's own `insert(tag, mut m)`, read position 0 for the user fn and lost
+/// its write (#2948).
+pub(crate) struct MutParams {
+    /// Root-program fns by bare name.
+    root: std::collections::HashMap<String, Vec<usize>>,
+    /// User-module fns by `(module, fn)`.
+    modules: std::collections::HashMap<(String, String), Vec<usize>>,
+    /// User-module fns by bare name, for a root call that names an imported
+    /// fn bare; ambiguous names (two modules) are dropped.
+    bare: std::collections::HashMap<String, Option<Vec<usize>>>,
 }
 
-/// The `mut` parameter positions a BUNDLED stdlib fn declares in its own
-/// source (`fn pop[A](mut xs: List[A]) -> A? = _`). `mut_param_positions`
-/// only sees the modules lowered into the program, and the wasm leg does not
-/// lower a module whose surface is bodyless (list, map, string, bytes): its
-/// calls resolve through the bridge. Without this, `let n = match
-/// list.pop(xs) { … }` was outlined into a helper that popped a copy of `xs`
-/// and dropped the write on the wasm leg only (#2931) — the native leg lowers
-/// the bundled module and so declined the lift. Read from the declaration
-/// itself, the same source the checker's signature comes from.
-fn bundled_mut_positions(module: &str, func: &str) -> Option<Vec<usize>> {
-    use almide_lang::ast::Decl;
-    if !almide_lang::stdlib_info::is_bundled_module(module) {
-        return None;
-    }
-    let program = almide_lang::parse_cached(almide_lang::stdlib_info::bundled_source(module)?)?;
-    program.decls.iter().find_map(|d| match d {
-        Decl::Fn { name, params, .. } if name.as_str() == func => {
-            let idxs: Vec<usize> = params.iter().enumerate().filter(|(_, p)| p.is_mut).map(|(i, _)| i).collect();
-            (!idxs.is_empty()).then_some(idxs)
+impl MutParams {
+    fn of(program: &IrProgram) -> Self {
+        let mut root = std::collections::HashMap::new();
+        for f in program.functions.iter().filter(|f| !f.mutated_params.is_empty()) {
+            root.insert(f.name.as_str().to_string(), f.mutated_params.clone());
         }
-        _ => None,
-    })
+        let mut modules = std::collections::HashMap::new();
+        let mut bare: std::collections::HashMap<String, Option<Vec<usize>>> = std::collections::HashMap::new();
+        for m in &program.modules {
+            if almide_lang::stdlib_info::is_bundled_module(m.name.as_str()) {
+                continue;
+            }
+            for f in m.functions.iter().filter(|f| !f.mutated_params.is_empty()) {
+                modules.insert((m.name.as_str().to_string(), f.name.as_str().to_string()), f.mutated_params.clone());
+                bare.entry(f.name.as_str().to_string())
+                    .and_modify(|e| if e.as_ref() != Some(&f.mutated_params) { *e = None })
+                    .or_insert_with(|| Some(f.mutated_params.clone()));
+            }
+        }
+        MutParams { root, modules, bare }
+    }
+
+    /// The positions `target` writes, called from `scope`.
+    fn of_call(&self, target: &CallTarget, scope: Option<&str>) -> Option<Vec<usize>> {
+        match target {
+            CallTarget::Module { module, func, .. } => {
+                if almide_lang::stdlib_info::is_bundled_module(module.as_str()) {
+                    almide_ir::mut_args::stdlib_mut_positions(module.as_str(), func.as_str())
+                } else {
+                    self.modules.get(&(module.as_str().to_string(), func.as_str().to_string())).cloned()
+                }
+            }
+            CallTarget::Named { name } => {
+                let name = name.as_str();
+                let own = match scope {
+                    Some(m) => self.modules.get(&(m.to_string(), name.to_string())),
+                    None => self.root.get(name),
+                };
+                own.cloned().or_else(|| self.bare.get(name).cloned().flatten())
+            }
+            _ => None,
+        }
+    }
 }
 
 /// The vars a call in `e` passes at a `mut` parameter position (as the
 /// argument itself or as the record a field argument is read from): the call
 /// writes them back, so outlining it into a helper that takes them by value
 /// would lose the write.
-fn collect_mut_arg_vars(e: &IrExpr, mut_params: &std::collections::HashMap<String, Vec<usize>>, out: &mut HashSet<u32>) {
+fn collect_mut_arg_vars(e: &IrExpr, mut_params: &MutParams, scope: Option<&str>, out: &mut HashSet<u32>) {
     struct V<'m, 'o> {
-        mut_params: &'m std::collections::HashMap<String, Vec<usize>>,
+        mut_params: &'m MutParams,
+        scope: Option<&'m str>,
         out: &'o mut HashSet<u32>,
     }
     impl visit::IrVisitor for V<'_, '_> {
         fn visit_expr(&mut self, e: &IrExpr) {
             if let IrExprKind::Call { target, args, .. } = &e.kind {
-                let name = match target {
-                    CallTarget::Named { name } => Some(name.as_str().to_string()),
-                    CallTarget::Module { module, func, .. } => Some(format!("{}.{}", module.as_str(), func.as_str())),
-                    _ => None,
-                };
-                let idxs = match (name.as_ref().and_then(|n| self.mut_params.get(n)), target) {
-                    (Some(idxs), _) => Some(idxs.clone()),
-                    (None, CallTarget::Module { module, func, .. }) => bundled_mut_positions(module.as_str(), func.as_str()),
-                    (None, _) => None,
-                };
-                if let Some(idxs) = idxs {
+                if let Some(idxs) = self.mut_params.of_call(target, self.scope) {
                     for i in idxs {
                         let place = args.get(i).map(|a| match &a.kind {
                             IrExprKind::Member { object, .. } => &object.kind,
@@ -238,7 +258,7 @@ fn collect_mut_arg_vars(e: &IrExpr, mut_params: &std::collections::HashMap<Strin
             visit::walk_expr(self, e);
         }
     }
-    visit::IrVisitor::visit_expr(&mut V { mut_params, out }, e);
+    visit::IrVisitor::visit_expr(&mut V { mut_params, scope, out }, e);
 }
 
 impl<'a> IrMutVisitor for BranchLifter<'a> {
@@ -396,7 +416,7 @@ impl<'a> BranchLifter<'a> {
         // Include write-only targets and specialized collection mutations too.
         let mut assigned = HashSet::new();
         almide_ir::collect_assigned_vars(value, &mut assigned);
-        collect_mut_arg_vars(value, self.mut_params, &mut assigned);
+        collect_mut_arg_vars(value, self.mut_params, self.scope.as_deref(), &mut assigned);
         if !assigned.is_empty() {
             let locals = almide_ir::free_vars::bound_vars(value);
             if assigned.iter().any(|id| {
@@ -725,7 +745,112 @@ mod tests {
 
         assert!(matches!(main_bind_value_kind(&prog), IrExprKind::If { .. }), "the writing branch stays inline");
         assert_eq!(prog.functions.len(), 1, "no helper synthesized");
-        assert_eq!(bundled_mut_positions("list", "pop"), Some(vec![0]));
-        assert_eq!(bundled_mut_positions("list", "len"), None);
+    }
+
+    fn stub_fn(name: &str, mutated_params: Vec<usize>) -> IrFunction {
+        IrFunction {
+            name: sym(name),
+            params: vec![],
+            ret_ty: Ty::Unit,
+            body: IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
+            is_effect: false,
+            is_test: false,
+            generics: None,
+            extern_attrs: vec![],
+            export_attrs: vec![],
+            attrs: vec![],
+            visibility: IrVisibility::Public,
+            doc: None,
+            blank_lines_before: 0,
+            def_id: None,
+            mutated_params,
+            module_origin: None,
+        }
+    }
+
+    fn lowered_module(name: &str, fns: Vec<IrFunction>) -> IrModule {
+        IrModule {
+            name: sym(name),
+            versioned_name: None,
+            type_decls: vec![],
+            functions: fns,
+            top_lets: vec![],
+            var_table: VarTable::new(),
+            exports: vec![],
+            imports: vec![],
+        }
+    }
+
+    /// `for v0 in [] { let v2: String = if v1 then { <call>; "a" } else "b" }`,
+    /// v3 the outer var the call is handed.
+    fn loop_with_writing_branch(call: IrExpr) -> IrProgram {
+        let then = IrExpr {
+            kind: IrExprKind::Block { stmts: vec![IrStmt { kind: IrStmtKind::Expr { expr: call }, span: None }], expr: Some(Box::new(lit_str("a"))) },
+            ty: Ty::String,
+            span: None,
+            def_id: None,
+        };
+        let branch = iff(1, then, lit_str("b"), Ty::String);
+        let body = for_in(0, vec![bind(2, Ty::String, branch)]);
+        program_with_main(body, &[Ty::Unit, Ty::Bool, Ty::String, Ty::Unknown])
+    }
+
+    fn call(target: CallTarget, args: Vec<IrExpr>) -> IrExpr {
+        IrExpr { kind: IrExprKind::Call { target, args, type_args: vec![] }, ty: Ty::Unit, span: None, def_id: None }
+    }
+
+    fn lifted(prog: &IrProgram) -> bool {
+        !matches!(main_bind_value_kind(prog), IrExprKind::If { .. })
+    }
+
+    /// #2948: a root fn `insert(tag, mut m)` beside the LOWERED `map` module
+    /// (the native leg's IR, where `map.insert(mut m, ..)` is present). The
+    /// user's call writes its SECOND argument; reading the stdlib fn's
+    /// position 0 instead let the branch be outlined and the write was lost on
+    /// native only.
+    #[test]
+    fn a_user_fn_named_like_a_stdlib_mutator_keeps_its_own_mut_positions() {
+        let c = call(CallTarget::Named { name: sym("insert") }, vec![lit_str("a"), var(3, Ty::Unknown)]);
+        let mut prog = loop_with_writing_branch(c);
+        prog.functions.push(stub_fn("insert", vec![1]));
+        prog.modules.push(lowered_module("map", vec![stub_fn("insert", vec![0])]));
+
+        lift_heap_branch_binds(&mut prog);
+
+        assert!(!lifted(&prog), "the branch writing v3 through the user's `mut m` stays inline");
+    }
+
+    /// The #2931 / #2948 GATE, enumerated from the stdlib declarations rather
+    /// than a hand list: for EVERY bundled fn that writes a param, a branch
+    /// handing it an outer var is declined identically whether the module was
+    /// lowered into the IR (native) or not (wasm) — and whatever
+    /// `mutated_params` the lowered copy happens to carry (here: a wrong one), since
+    /// a bundled fn's answer is read from its declaration on both legs.
+    #[test]
+    fn every_stdlib_mut_fn_declines_the_lift_whether_or_not_its_module_is_lowered() {
+        let fns = almide_ir::mut_args::stdlib_mut_fns();
+        assert!(!fns.is_empty());
+        let mut disagree = Vec::new();
+        for (module, func, idxs) in &fns {
+            let arity = idxs.iter().max().copied().unwrap_or(0) + 1;
+            let args: Vec<IrExpr> = (0..arity)
+                .map(|i| if i == idxs[0] { var(3, Ty::Unknown) } else { lit_int(0) })
+                .collect();
+            let target = CallTarget::Module { module: sym(module), func: sym(func), def_id: None };
+
+            let mut without = loop_with_writing_branch(call(target.clone(), args.clone()));
+            lift_heap_branch_binds(&mut without);
+
+            let mut with = loop_with_writing_branch(call(target, args));
+            // A lowered copy whose table points past every argument: if the
+            // lookup consulted the lowered module, the write would be missed.
+            with.modules.push(lowered_module(module, vec![stub_fn(func, vec![arity])]));
+            lift_heap_branch_binds(&mut with);
+
+            if lifted(&without) || lifted(&with) {
+                disagree.push(format!("{module}.{func}: lifted without={} with={}", lifted(&without), lifted(&with)));
+            }
+        }
+        assert!(disagree.is_empty(), "a write through a stdlib mut param was outlined:\n{}", disagree.join("\n"));
     }
 }

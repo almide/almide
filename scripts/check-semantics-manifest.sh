@@ -30,7 +30,7 @@ with open("docs/stdlib/semantics-manifest.toml", "rb") as f:
 UNIT_VOCAB = {
     "address", "bit-pattern", "byte", "byte-count", "byte-offset",
     "byte-value", "civil-field", "codepoint", "count", "cursor", "day",
-    "element-count", "element-index", "handle", "hour", "millisecond",
+    "element-count", "element-index", "file-descriptor", "handle", "hour", "millisecond",
     "minute", "nanosecond", "ordering", "port", "scalar", "second",
     "status-code", "value",
 }

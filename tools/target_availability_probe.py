@@ -22,7 +22,7 @@ the synthesizer cannot build a probe program for is an ERROR line and a
 non-zero exit — never a silent skip.
 
 The sweep is per-LEG (--leg, #1710 increment 2's vocabulary):
-  structural   ALMIDE_WASM_STRUCTURAL=1 build — the emitter frontier.
+  structural   ALMIDE_WASM_SKIP_STOCK_AUDIT=1 build — the emitter frontier.
   stock-p1     default `build --target wasm` (reroute included) — walls
                mean no build path serves the fn (the E081 set).
                (--default-routing is the legacy alias.)
@@ -564,7 +564,10 @@ def measure(mod, f, types, leg, tmp, env):
         # the ladder exists because verdicts are shape-sensitive (the
         # fs.for_each_line lesson — variant 0 walls, variant 4 builds),
         # so a first-shape wall must not stop it.
-        if "error[E0" in first or "Expected" in first or "type error" in first.lower():
+        # E082 is the wasm leg's WALL (#2752: a decline is a hard error, no
+        # fallback), not a type error in the probe program.
+        ill_typed = ("error[E0" in first and "error[E082]" not in first) or "Expected" in first
+        if ill_typed or "type error" in first.lower():
             # Never let a later shape's TYPE error demote an earlier
             # shape's renderer wall — verdict precedence is ok > wall > error.
             if verdict is None or verdict[0] != "wall":
@@ -596,10 +599,10 @@ def main():
         print(f"::error::unknown leg {leg!r}; swept legs are {', '.join(LEGS)}", file=sys.stderr)
         return 2
     if leg == "structural":
-        env = dict(os.environ, ALMIDE_WASM_STRUCTURAL="1")
+        env = dict(os.environ, ALMIDE_WASM_SKIP_STOCK_AUDIT="1")
     else:
         env = dict(os.environ)
-        env.pop("ALMIDE_WASM_STRUCTURAL", None)
+        env.pop("ALMIDE_WASM_SKIP_STOCK_AUDIT", None)
     # Measure the ground truth, not our own declaration (see
     # check_wasm_availability's escape).
     env["ALMIDE_NO_AVAIL_CHECK"] = "1"

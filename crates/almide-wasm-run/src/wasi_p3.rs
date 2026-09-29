@@ -20,7 +20,7 @@
 //! Canonical-ABI facts (variant discriminants, payload offsets) are
 //! DERIVED from the vendored WIT at emit time (`FsAbi`), never
 //! hand-counted. Requested p3 filesystem programs route here without an
-//! ALMIDE_WASM_STRUCTURAL override. Env and process operations outside
+//! ALMIDE_WASM_SKIP_STOCK_AUDIT override. Env and process operations outside
 //! this world's imports retain the defined refusal. The
 //! transform is a post-pass — the emitter's verified envelope is
 //! untouched.
@@ -558,11 +558,12 @@ fn write_all(
     i.global_get(g_tx);
     i.local_get(ptr).local_get(len);
     i.call(write_import);
-    i.call(f_await);
-    i.i32_const(4).i32_shr_u().local_set(n);
-    i.local_get(n).i32_eqz().br_if(1);
-    i.local_get(ptr).local_get(n).i32_add().local_set(ptr);
-    i.local_get(len).local_get(n).i32_sub().local_set(len);
+    // #2955: `n` = the raw `(count << 4) | status`. A COMPLETED write may
+    // accept 0 items (write again); only DROPPED/CANCELLED ends the loop.
+    i.call(f_await).local_set(n);
+    i.local_get(ptr).local_get(n).i32_const(4).i32_shr_u().i32_add().local_set(ptr);
+    i.local_get(len).local_get(n).i32_const(4).i32_shr_u().i32_sub().local_set(len);
+    i.local_get(n).i32_const(15).i32_and().br_if(1);
     i.br(0).end().end();
 }
 

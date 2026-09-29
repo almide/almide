@@ -101,4 +101,4 @@ fi
 echo
 echo "WASM-EXEC OK: wasmtime executes the rc bytes to EXACTLY WasmExec.v's proven memory"
 echo "effects (inc 4->5, free 1->0, trap on 0) — the byte-EXECUTION binding is grounded in a"
-echo "real engine, the executor counterpart of check-wasm-bytes.sh's encoder grounding."
+echo "real engine, the executor counterpart of the (retired, #2761) incumbent byte grounding: the bodies are a modeled runtime."

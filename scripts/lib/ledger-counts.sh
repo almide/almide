@@ -80,7 +80,6 @@ counts_measure() {
     spec_test_files          "$(grep -rlE '^[[:space:]]*test "' spec --include='*.almd' | wc -l | tr -d ' ')" \
     scalar_read_arms         "$(grep -c '^\[\[arm\]\]' proofs/scalar-read-audit.toml)" \
     scalar_read_unguarded    "$(grep -c 'class = "UNGUARDED"' proofs/scalar-read-audit.toml || true)" \
-    wat_prelude_fns          "$(grep -c '^\[\[fn\]\]' proofs/wat-prelude-audit.toml)" \
     libm_sites               "$(grep -c '^\[\[site\]\]' proofs/libm-determinism-audit.toml)" \
     als_elements             "$(grep -c '^\[\[element\]\]' proofs/als-element-coverage.toml)" \
     als_elements_unwritten   "$(grep -c 'section = "UNWRITTEN"' proofs/als-element-coverage.toml || true)" \
@@ -159,8 +158,8 @@ counts_render_stages() {
   els="$(counts_get als_elements)"; unwritten_els="$(counts_get als_elements_unwritten)"
   counts_start
   printf '> **Stage 1 (accept-and-wrong extinction): audits COMPLETE and gated** —\n'
-  printf '> scalar-read %s arms / %s UNGUARDED; WAT prelude %s fns classified;\n' \
-    "$(counts_get scalar_read_arms)" "$(counts_get scalar_read_unguarded)" "$(counts_get wat_prelude_fns)"
+  printf '> scalar-read %s arms / %s UNGUARDED;\n' \
+    "$(counts_get scalar_read_arms)" "$(counts_get scalar_read_unguarded)"
   printf '> platform-libm %s sites classified. New entries cannot land unclassified.\n' "$(counts_get libm_sites)"
   printf '>\n'
   printf '> **Stage 2 (translation validation): %s/%s fixtures cast a real 3-way vote (%s%%)** —\n' "$voting" "$corpus" "$((voting * 100 / corpus))"

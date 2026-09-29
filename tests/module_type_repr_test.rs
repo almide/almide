@@ -5,12 +5,10 @@
 //! the interp (the pre-flatten qualified decl name): an I-divergence in which
 //! no leg printed the source spelling. `spec/integration/modules/
 //! cross_module_repr_test.almd` pins the native and wasm `almide test` lanes;
-//! this net runs the issue's program on all FOUR legs — native, the structural
-//! wasm emitter, the incumbent (`ALMIDE_WASM_INCUMBENT=1`) and the interp —
-//! and demands the one spelling, `Cfg { a: 1, b: 2 }`. A second program adds
-//! the shapes the incumbent still walls on (a derived `Repr`, a list of
-//! module records): native, structural wasm and the interp must agree there
-//! too, including `m.Pt.repr(p) == "${p}"` (C-009: one format).
+//! this net runs the issue's program on all three legs — native, the wasm
+//! emitter and the interp — and demands the one spelling, `Cfg { a: 1, b: 2 }`.
+//! A second program adds a derived `Repr` and a list of module records:
+//! native, wasm and the interp must agree there too, including `m.Pt.repr(p) == "${p}"` (C-009: one format).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -87,12 +85,9 @@ fn project(tag: &str, module: &str, entry: &str) -> PathBuf {
     root
 }
 
-fn run(entry: &Path, target: &str, incumbent: bool) -> (bool, String, String) {
+fn run(entry: &Path, target: &str) -> (bool, String, String) {
     let mut cmd = Command::new(almide_bin());
     cmd.args(["run", entry.to_str().unwrap(), "--target", target]);
-    if incumbent {
-        cmd.env("ALMIDE_WASM_INCUMBENT", "1");
-    }
     let o = cmd.output().expect("spawn almide run");
     (
         o.status.success(),
@@ -134,37 +129,32 @@ fn interp_derived_repr_and_record_list_print_the_declared_name() {
 fn every_compiled_leg_prints_the_declared_name() {
     let root = project("compiled", ISSUE_MODULE, ISSUE_ENTRY);
     let entry = root.join("main.almd");
-    let (ok, out, err) = run(&entry, "rust", false);
+    let (ok, out, err) = run(&entry, "rust");
     assert!(ok, "native run failed:\n{err}");
     assert_eq!(out.trim(), ISSUE_EXPECTED, "native leg");
     if !wasmtime_available() {
         eprintln!("wasmtime not on PATH — the wasm legs are skipped here (CI installs it)");
         return;
     }
-    for incumbent in [false, true] {
-        let (ok, out, err) = run(&entry, "wasm", incumbent);
-        assert!(ok, "wasm run failed (incumbent={incumbent}):\n{err}");
-        assert_eq!(out.trim(), ISSUE_EXPECTED, "wasm leg (incumbent={incumbent})");
-    }
+    let (ok, out, err) = run(&entry, "wasm");
+    assert!(ok, "wasm run failed:\n{err}");
+    assert_eq!(out.trim(), ISSUE_EXPECTED, "wasm leg");
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// The incumbent is excluded on purpose: it walls on `Pt.repr` and the
-/// `__repr_list_rec_*` helper (a pre-existing renderer gap, not a spelling),
-/// and a wall is an honest refusal rather than a vote.
 #[cfg_attr(debug_assertions, ignore = "compiles the program on every leg (CI: release-shape job)")]
 #[test]
 fn derived_repr_and_record_list_agree_on_native_and_structural_wasm() {
     let root = project("compiled-shapes", SHAPES_MODULE, SHAPES_ENTRY);
     let entry = root.join("main.almd");
-    let (ok, out, err) = run(&entry, "rust", false);
+    let (ok, out, err) = run(&entry, "rust");
     assert!(ok, "native run failed:\n{err}");
     assert_eq!(out.trim(), SHAPES_EXPECTED, "native leg");
     if !wasmtime_available() {
         eprintln!("wasmtime not on PATH — the wasm leg is skipped here (CI installs it)");
         return;
     }
-    let (ok, out, err) = run(&entry, "wasm", false);
+    let (ok, out, err) = run(&entry, "wasm");
     assert!(ok, "structural wasm run failed:\n{err}");
     assert_eq!(out.trim(), SHAPES_EXPECTED, "structural wasm leg");
     let _ = std::fs::remove_dir_all(&root);

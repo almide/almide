@@ -168,26 +168,6 @@ fn specialize_metered_clones(functions: &mut Vec<MirFunction>) {
 
 // ───────────────────── charge certificate (static preservation) ─────────────────────
 
-/// Extract the charge-site sequence a rendered WAT module executes, in TEXT
-/// order, via the site-specific trace-update pattern (the same pattern
-/// [`crate::translation_validation::wasm_pattern`] claims). BCE-versioned
-/// loops legitimately DUPLICATE a body, so consumers compare
-/// [`first_occurrences`], not raw counts.
-pub fn wasm_charge_sites(wat: &str) -> Vec<u32> {
-    const PAT: &str = "(i64.mul (global.get $__trace) (i64.const 1000003)) (i64.const ";
-    let mut out = Vec::new();
-    let mut rest = wat;
-    while let Some(i) = rest.find(PAT) {
-        rest = &rest[i + PAT.len()..];
-        if let Some(end) = rest.find(')') {
-            if let Ok(site) = rest[..end].trim().parse::<u32>() {
-                out.push(site);
-            }
-        }
-    }
-    out
-}
-
 /// Extract the charge-site sequence from rendered native Rust source, in TEXT
 /// order, via the `__almd_charge(site, cost)` shim calls.
 pub fn native_charge_sites(rs: &str) -> Vec<u32> {
@@ -216,16 +196,6 @@ pub fn first_occurrences(sites: &[u32]) -> Vec<u32> {
 #[cfg(test)]
 mod cert_tests {
     use super::*;
-
-    #[test]
-    fn wasm_extraction_orders_and_parses() {
-        let wat = "\
-    (global.set $__fuel (i64.add (global.get $__fuel) (i64.const 1)))\n\
-    (global.set $__trace (i64.add (i64.mul (global.get $__trace) (i64.const 1000003)) (i64.const 42)))\n\
-    (i64.const 999)\n\
-    (global.set $__trace (i64.add (i64.mul (global.get $__trace) (i64.const 1000003)) (i64.const 7)))\n";
-        assert_eq!(wasm_charge_sites(wat), vec![42, 7]);
-    }
 
     #[test]
     fn native_extraction_orders_and_parses() {

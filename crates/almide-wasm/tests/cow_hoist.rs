@@ -144,3 +144,94 @@ fn main() -> Unit = {
         "[1, 1, 1, 1]\n[1, 1, 1, 1]\n[1, 2, 3, 4]\n[11, 11, 11, 11]\n116\n",
     );
 }
+
+/// The pre-judge (#2980): a counting loop whose first statement-level store
+/// is certain judges once in its preheader. Reads before that store, in the
+/// first iteration and after, see the list's own contents, and the alias
+/// taken before the loop keeps the old ones.
+#[test]
+fn a_prejudged_loop_reads_before_its_first_store() {
+    check(
+        "prejudge_reads",
+        r#"fn main() -> Unit = {
+  var a: List[Int] = [1, 2, 3]
+  let keep = a
+  for i in 0..<3 {
+    let x = a[2 - i]
+    a[i] = x * 10
+  }
+  println("${keep}")
+  println("${a}")
+}
+"#,
+        "[1, 2, 3]\n[30, 20, 300]\n",
+    );
+}
+
+/// An empty range runs no iteration, so the preheader judges nothing: the
+/// shared list is neither copied nor written.
+#[test]
+fn an_empty_range_does_not_judge() {
+    check(
+        "prejudge_empty",
+        r#"fn main() -> Unit = {
+  var a: List[Int] = [1, 2, 3]
+  let keep = a
+  let n = list.len(keep) - 3
+  for i in 0..<n {
+    a[i] = 9
+  }
+  println("${keep}")
+  println("${a}")
+}
+"#,
+        "[1, 2, 3]\n[1, 2, 3]\n",
+    );
+}
+
+/// A `break` before the store makes the store uncertain, so the loop keeps
+/// the per-entry flag; the alias still keeps its contents either way.
+#[test]
+fn a_break_before_the_store_keeps_the_flag() {
+    check(
+        "prejudge_break",
+        r#"fn main() -> Unit = {
+  var a: List[Int] = [1, 2, 3, 4]
+  let keep = a
+  for i in 0..<4 {
+    if i >= 2 then break
+    a[i] = 7
+  }
+  println("${keep}")
+  println("${a}")
+}
+"#,
+        "[1, 2, 3, 4]\n[7, 7, 3, 4]\n",
+    );
+}
+
+/// An enclosing loop's flag and an inner pre-judged loop on the same list:
+/// the outer loop's own store after the inner loop sees the flag the
+/// preheader set, and the snapshot taken before the outer loop is untouched.
+#[test]
+fn an_inner_prejudge_sets_the_outer_flag() {
+    check(
+        "prejudge_nested_flag",
+        r#"fn main() -> Unit = {
+  var a: List[Int] = [1, 2, 3]
+  let keep = a
+  var r = 0
+  while r < 2 {
+    for k in 0..<3 {
+      a[k] = a[k] + 1
+    }
+    a[0] = a[0] * 10
+    r = r + 1
+  }
+  println("${keep}")
+  println("${a}")
+}
+"#,
+        "[1, 2, 3]\n[210, 4, 5]\n",
+    );
+}

@@ -47,9 +47,6 @@ enum Leg {
     Embedded,
     /// `almide build --target wasm`, run on the stock `wasmtime` CLI.
     StockP1,
-    /// `ALMIDE_WASM_INCUMBENT=1 almide run --target wasm`: the incumbent
-    /// renderer's preview-1 artifact on the `wasmtime` CLI.
-    Incumbent,
 }
 
 fn has_wasmtime() -> bool {
@@ -64,18 +61,12 @@ fn run(dir: &std::path::Path, src: &str, leg: Leg) -> (i32, String, String) {
         Leg::Native => Command::new(almide()).args(["run", file.to_str().unwrap()]).output(),
         Leg::Embedded => Command::new(almide())
             .args(["run", file.to_str().unwrap(), "--target", "wasm"])
-            .env_remove("ALMIDE_WASM_INCUMBENT")
-            .output(),
-        Leg::Incumbent => Command::new(almide())
-            .args(["run", file.to_str().unwrap(), "--target", "wasm"])
-            .env("ALMIDE_WASM_INCUMBENT", "1")
             .output(),
         Leg::StockP1 => {
             let wasm = dir.join("main.wasm");
             let built = Command::new(almide())
                 .args(["build", file.to_str().unwrap(), "--target", "wasm", "-o"])
                 .arg(&wasm)
-                .env_remove("ALMIDE_WASM_INCUMBENT")
                 .output()
                 .unwrap();
             assert!(built.status.success(), "build failed: {}", String::from_utf8_lossy(&built.stderr));
@@ -83,11 +74,7 @@ fn run(dir: &std::path::Path, src: &str, leg: Leg) -> (i32, String, String) {
         }
     }
     .unwrap();
-    let stderr = String::from_utf8_lossy(&out.stderr)
-        .lines()
-        .filter(|line| !line.starts_with("[almide] ALMIDE_WASM_INCUMBENT is set:"))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).trim().to_string(),
@@ -111,7 +98,7 @@ fn expect(code: i64, legs: &[Leg], want_exit: i32, want_err: &str) {
     }
 }
 
-const EVERY_LEG: &[Leg] = &[Leg::Native, Leg::Embedded, Leg::StockP1, Leg::Incumbent];
+const EVERY_LEG: &[Leg] = &[Leg::Native, Leg::Embedded, Leg::StockP1];
 
 #[test]
 fn a_code_every_build_delivers_is_the_exit_code_on_every_leg() {
@@ -132,7 +119,7 @@ fn an_exit_status_above_125_passes_through_natively_and_on_the_embedded_host() {
 #[test]
 fn a_preview1_build_walls_126_to_255_with_its_own_line() {
     for code in [126, 127, 130, 255] {
-        expect(code, &[Leg::StockP1, Leg::Incumbent], 1, WALL);
+        expect(code, &[Leg::StockP1], 1, WALL);
     }
 }
 

@@ -240,8 +240,8 @@ fn fill_named_args(
     target: &CallTarget,
 ) {
     let Some(key) = target_fn_key(target) else { return };
-    let param_names: Vec<String> = ctx.env.functions.get(&key)
-        .map(|sig| sig.params.iter().map(|(n, _)| n.to_string()).collect())
+    let (param_names, param_tys): (Vec<String>, Vec<Ty>) = ctx.env.functions.get(&key)
+        .map(|sig| sig.params.iter().map(|(n, t)| (n.to_string(), t.clone())).unzip())
         .unwrap_or_default();
     let defaults = target_defaults(ctx, target);
     let positional_count = ir_args.len();
@@ -249,15 +249,21 @@ fn fill_named_args(
         return;
     }
     let remaining = &param_names[positional_count..];
-    ir_args.extend(remaining.iter().filter_map(|param_name| {
+    ir_args.extend(remaining.iter().enumerate().filter_map(|(k, param_name)| {
+        let slot = positional_count + k;
         named_args.iter()
             .find(|(n, _)| n == param_name)
             .map(|(_, expr)| lower_expr(ctx, expr))
             .or_else(|| defaults.as_ref()
-                .and_then(|defs| defs.get(
-                    positional_count + remaining.iter().position(|p| p == param_name).unwrap_or(0)))
+                .and_then(|defs| defs.get(slot))
                 .and_then(|d| d.as_ref())
-                .map(|default_expr| lower_expr(ctx, default_expr)))
+                .map(|default_expr| {
+                    // The same node-id caveat as the positional fill: the
+                    // default was parsed in the callee's program.
+                    let mut filled = lower_expr(ctx, default_expr);
+                    retype_filled_default(&mut filled, param_tys.get(slot));
+                    filled
+                }))
     }));
 }
 

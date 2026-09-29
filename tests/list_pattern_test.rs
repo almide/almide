@@ -67,7 +67,7 @@ fn list_patterns_are_byte_identical_across_targets() {
     let out = Command::new(almide_bin())
         .args(["build", src.to_str().unwrap(), "--target", "wasm", "-o"])
         .arg(dir.join("lp.wasm"))
-        .env("ALMIDE_WASM_STRUCTURAL", "1")
+        .env("ALMIDE_WASM_SKIP_STOCK_AUDIT", "1")
         .output()
         .expect("spawn build");
     assert!(

@@ -8,19 +8,28 @@ use wasm_encoder::{BlockType, ValType};
 use crate::emitter::Emitter;
 use crate::*;
 
-/// `h.f` where `h` is a plain var: the receiver shape the mut forms
-/// (`push`, `pop`, `clear` on a list / string / bytes / map field, and map
-/// `insert` / `delete`) route through the copy-on-write field write (#2411,
-/// #2908, #2747). A deeper path (`h.a.b`, `xs[i].f`) is still refused by the
-/// var-only arms, honestly.
-pub(crate) fn record_field_receiver(xs: &IrExpr) -> Option<(almide_ir::VarId, almide_base::intern::Sym)> {
-    let IrExprKind::Member { object, field } = &xs.kind else {
-        return None;
-    };
-    let IrExprKind::Var { id } = &object.kind else {
-        return None;
-    };
-    Some((*id, *field))
+/// `h.f`, `h.a.b`, … where `h` is a plain var: the receiver shape the mut
+/// forms (`push`, `pop`, `clear` on a list / string / bytes / map field, and
+/// map `insert` / `delete`) route through the copy-on-write field write
+/// (#2411, #2908, #2747), at any depth (#2933). The path is root-first. A
+/// receiver that is not a chain of field reads ending in a var
+/// (`xs[i].f`, a call result) is still refused by the var-only arms.
+pub(crate) fn record_field_receiver(xs: &IrExpr) -> Option<(almide_ir::VarId, Vec<almide_base::intern::Sym>)> {
+    let mut path = Vec::new();
+    let mut cur = xs;
+    loop {
+        match &cur.kind {
+            IrExprKind::Member { object, field } => {
+                path.push(*field);
+                cur = object;
+            }
+            IrExprKind::Var { id } if !path.is_empty() => {
+                path.reverse();
+                return Some((*id, path));
+            }
+            _ => return None,
+        }
+    }
 }
 
 impl Emitter<'_> {
@@ -29,10 +38,18 @@ impl Emitter<'_> {
     /// the stack (it owns that credit), rebind the var. `lower_field_assign`
     /// passes a lowered expression; `list.pop` on a field passes the
     /// shrunken copy it already holds.
+    ///
+    /// A deeper `path` (`h.a.b`, #2933) copies every record on the way down
+    /// the same way: each level's copy takes its field credits, so the
+    /// inner record it replaces gives back the credit the copy took on it,
+    /// and the fresh inner copy is stored in its place. The leaf write is
+    /// the one-level write; the var is rebound to the root copy. An alias
+    /// of any level bound before the write keeps its old value.
     pub(crate) fn field_assign_with(
         &mut self,
         target: &almide_ir::VarId,
-        field: &almide_base::intern::Sym,
+        path: &[almide_base::intern::Sym],
+        spends_var: bool,
         emit: impl FnOnce(&mut Self, SliceTy) -> Result<(), EmitError>,
     ) -> Result<(), EmitError> {
         // C-319 residual: only the Assign form writes THROUGH a shared
@@ -48,38 +65,96 @@ impl Emitter<'_> {
                 None => return unsup("field-assign:unmapped"),
             },
         };
-        let SliceTy::Named(ti) = declared else {
-            return unsup(&format!("field-assign-of:{declared:?}"));
+        let Some((leaf, inner)) = path.split_last() else {
+            return unsup("field-assign:empty-path");
         };
-        let (fty, off) = {
-            let crate::types_table::NamedDef::Record(r) = self.types.def(ti) else {
-                return unsup("field-assign-nonrecord");
-            };
-            let Some(fi) = r.fields.iter().find(|f| f.name == field.as_str()) else {
-                return unsup(&format!("field-assign-unknown:{field}"));
-            };
-            (fi.ty, fi.offset)
-        };
+        // Resolve every level before emitting anything: (record type,
+        // field type, field offset) per step, root first.
+        let mut steps = Vec::with_capacity(path.len());
+        let mut cur = declared;
+        for field in inner.iter().chain(std::iter::once(leaf)) {
+            let (fty, off) = self.record_field_slot(cur, field)?;
+            steps.push((cur, fty, off));
+            cur = fty;
+        }
+        let root = steps[0].0;
         let hb = self.hold_i32()?;
         match slot {
             Ok(idx) => self.f.instructions().local_get(idx),
             Err(gidx) => self.f.instructions().global_get(gidx),
         };
-        let copy = self.copy_fn_of(SliceTy::Named(ti));
-        self.f.instructions().call(copy).local_tee(hb);
+        let copy = self.copy_fn_of(root);
+        self.f.instructions().call(copy).local_set(hb);
+        // Walk down: copy each inner record out of its (already copied)
+        // parent. Holds are kept root-first so the stores below run
+        // innermost-first.
+        let mut holds = vec![hb];
+        for &(_, fty, off) in &steps[..steps.len() - 1] {
+            let parent = holds[holds.len() - 1];
+            let h = self.hold_i32()?;
+            let copy = self.copy_fn_of(fty);
+            self.f.instructions().local_get(parent).i32_load(slot_memarg(off)).call(copy).local_set(h);
+            // The parent copy's credit on the record it no longer holds.
+            if let Some(dec) = self.elem_is_handle(fty).then(|| self.dec_fn_of(fty)) {
+                self.f.instructions().local_get(parent).i32_load(slot_memarg(off)).call(dec);
+            }
+            holds.push(h);
+        }
+        let (_, fty, off) = steps[steps.len() - 1];
+        let hl = holds[holds.len() - 1];
+        self.f.instructions().local_get(hl);
         // The replaced field's credit goes with it (stage 2c-ii).
         if let Some(dec) = self.elem_is_handle(fty).then(|| self.dec_fn_of(fty)) {
-            self.f.instructions().local_get(hb).i32_load(slot_memarg(off)).call(dec);
+            self.f.instructions().local_get(hl).i32_load(slot_memarg(off)).call(dec);
         }
         emit(self, fty)?;
         self.store_ty_slot(fty, off);
+        // Link each fresh inner copy into its parent copy, innermost first.
+        for (k, &(_, _, off)) in steps[..steps.len() - 1].iter().enumerate().rev() {
+            self.f.instructions().local_get(holds[k]).local_get(holds[k + 1]).i32_store(slot_memarg(off));
+        }
+        // The rebind settles like an Assign (#2944): a local releases the
+        // record it replaces — the copy took its own credit on every field,
+        // so the old block and whatever it alone held go — and becomes the
+        // owner of the copy. Globals are main-lifetime, as for Assign; a
+        // value that spends the var's credit (a `mut`-param call's
+        // write-back) already released or reused the old block.
+        if let Ok(idx) = slot
+            && !spends_var
+            && self.rc_droppable(root)
+        {
+            let dec = self.dec_fn_of(root);
+            self.f.instructions().local_get(idx).call(dec);
+            self.rc_own(idx, root);
+        }
         self.f.instructions().local_get(hb);
         match slot {
             Ok(idx) => self.f.instructions().local_set(idx),
             Err(gidx) => self.f.instructions().global_set(gidx),
         };
-        self.release_i32();
+        for _ in &holds {
+            self.release_i32();
+        }
         Ok(())
+    }
+
+    /// The (type, offset) of `field` in the record type `rec`, or the
+    /// honest wall when `rec` is not a record carrying it.
+    fn record_field_slot(
+        &self,
+        rec: SliceTy,
+        field: &almide_base::intern::Sym,
+    ) -> Result<(SliceTy, u32), EmitError> {
+        let SliceTy::Named(ti) = rec else {
+            return unsup(&format!("field-assign-of:{rec:?}"));
+        };
+        let crate::types_table::NamedDef::Record(r) = self.types.def(ti) else {
+            return unsup("field-assign-nonrecord");
+        };
+        let Some(fi) = r.fields.iter().find(|f| f.name == field.as_str()) else {
+            return unsup(&format!("field-assign-unknown:{field}"));
+        };
+        Ok((fi.ty, fi.offset))
     }
 
     /// `<m>.clear(h.f)` on a record var's FIELD — list, string, bytes and
@@ -88,7 +163,7 @@ impl Emitter<'_> {
     /// alias bound before the clear keeps its field. `false` = not a field
     /// receiver (the caller's var arm, or its honest wall).
     pub(crate) fn lower_field_clear(&mut self, v: &IrExpr) -> Result<bool, EmitError> {
-        let Some((id, field)) = record_field_receiver(v) else {
+        let Some((id, path)) = record_field_receiver(v) else {
             return Ok(false);
         };
         use almide_types::types::{constructor::TypeConstructorId as C, Ty};
@@ -108,7 +183,7 @@ impl Emitter<'_> {
             _ => return Ok(false),
         };
         let empty = IrExpr { kind, ty: v.ty.clone(), span: None, def_id: None };
-        self.lower_field_assign(&id, &field, &empty)?;
+        self.lower_field_assign(&id, &path, &empty)?;
         Ok(true)
     }
 
@@ -118,7 +193,7 @@ impl Emitter<'_> {
     fn lower_list_pop(&mut self, xs: &IrExpr) -> ArmResult {
         {
                 let field = record_field_receiver(xs);
-                let var = match (&xs.kind, field) {
+                let var = match (&xs.kind, &field) {
                     (_, Some(_)) => None,
                     (IrExprKind::Var { id }, None) => {
                         let Some(v) = self.mut_var(id) else {
@@ -184,7 +259,7 @@ impl Emitter<'_> {
                         self.f.instructions().local_get(hnew);
                         self.emit_store_mut_var(*id, *var_idx, *var_ty, *vglob)?;
                     }
-                    (None, Some((id, field))) => self.field_assign_with(&id, &field, |s, _| {
+                    (None, Some((id, path))) => self.field_assign_with(&id, &path, false, |s, _| {
                         s.f.instructions().local_get(hnew);
                         Ok(())
                     })?,
@@ -233,32 +308,39 @@ impl Emitter<'_> {
             // (the growth fixture pushes as bare statements). Lowered as a
             // write-back: var = $push(var, v). Requires a plain var arg.
             ("push", [xs, v]) => {
-                // `list.push(h.f, v)` on a record var's FIELD: the builder
-                // idiom (`mut h: Holder` accumulating into `h.kids` in a
-                // loop, #2316's shape) had no wasm route at all (#2411).
-                // It takes the same copy-on-write rebind a field write
-                // takes — `h.f = h.f + [v]` — so every credit rides the
-                // path `lower_field_assign` already owns (copy the record,
-                // release the replaced slot, share-guard the new value,
-                // rebind) instead of a second receiver mode in this arm.
-                if let Some((id, field)) = record_field_receiver(xs) {
-                    let one = IrExpr {
-                        kind: IrExprKind::List { elements: vec![v.clone()] },
-                        ty: xs.ty.clone(),
-                        span: None,
-                        def_id: None,
-                    };
-                    let grown = IrExpr {
-                        kind: IrExprKind::BinOp {
-                            op: almide_ir::BinOp::ConcatList,
-                            left: Box::new(xs.clone()),
-                            right: Box::new(one),
-                        },
-                        ty: xs.ty.clone(),
-                        span: None,
-                        def_id: None,
-                    };
-                    self.lower_field_assign(&id, &field, &grown)?;
+                // `list.push(h.f, v)` on a record var's FIELD — at any
+                // depth (#2933): the builder idiom (`mut h: Holder`
+                // accumulating into `h.kids` in a loop, #2316's shape) had
+                // no wasm route at all (#2411). It takes the copy-on-write
+                // rebind a field write takes — `h.f = h.f + [v]` — through
+                // `field_assign_with` (copy the records, release the
+                // replaced slot, rebind). The grown list is built here, not
+                // as a synthesized `h.f + [v]` expression: the one-element
+                // list is a temporary no arg-temp hoist ever saw, and it
+                // leaked one block per push (#2944). The concat copies the
+                // element with its own credit, so the temporary is released
+                // right after.
+                if let Some((id, path)) = record_field_receiver(xs) {
+                    self.field_assign_with(&id, &path, false, |s, fty| {
+                        let SliceTy::List(h) = fty else {
+                            return unsup(&format!("list-push-of:{fty:?}"));
+                        };
+                        let elem = s.types.el(h);
+                        s.lower_arg(xs, Some(fty), ArgMode::Borrow)?;
+                        let one = s.hold_i32()?;
+                        s.f.instructions().i32_const(elem.slot_size() as i32).call(F_ALLOC).local_tee(one);
+                        s.lower_arg(v, Some(elem), ArgMode::Retain)?;
+                        s.store_ty_slot(elem, 0);
+                        s.f.instructions().local_get(one).call(F_CONCAT);
+                        if let Some(inc) = s.inc_elems_fn(elem) {
+                            let tmp = s.tmp_i32_local;
+                            s.f.instructions().local_tee(tmp).call(inc).local_get(tmp);
+                        }
+                        let drop_one = s.dec_fn_of(fty);
+                        s.f.instructions().local_get(one).call(drop_one);
+                        s.release_i32();
+                        Ok(())
+                    })?;
                     // Handled, no value: an early return bypasses the
                     // `.map(Some)` on the match below, so say so here.
                     return Ok(Some(None));

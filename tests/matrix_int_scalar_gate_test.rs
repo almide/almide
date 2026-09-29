@@ -1,10 +1,10 @@
 //! #2894 gate: `m * k` admits an `Int` scalar (the frontend's ScaleMatrix
 //! dispatch), and every leg must scale by its value. Native handed the i64
 //! to the f64 runtime scale and failed rustc, after `check` had passed. The
-//! incumbent wasm leg, which the default route fell back to, handed it to
-//! `matrix.scale` unconverted and scaled by its bit pattern read as a float.
-//! Each cell runs natively, on the default wasm route and on the incumbent
-//! leg, and must print the exact product.
+//! retired incumbent wasm leg, which the default route fell back to, handed
+//! it to `matrix.scale` unconverted and scaled by its bit pattern read as a
+//! float. Each cell runs natively and on the wasm leg, and must print the
+//! exact product.
 
 use std::process::Command;
 
@@ -34,17 +34,10 @@ fn a_matrix_scaled_by_an_int_prints_the_product_on_every_leg() {
         );
         let root = tempfile::tempdir().expect("tempdir");
         std::fs::write(root.path().join("t.almd"), &program).expect("write");
-        let legs: [(&str, &[&str], bool); 3] = [
-            ("native", &["run", "t.almd"], false),
-            ("wasm", &["run", "t.almd", "--target", "wasm"], false),
-            ("incumbent", &["run", "t.almd", "--target", "wasm"], true),
-        ];
-        for (leg, args, incumbent) in legs {
+        let legs: [(&str, &[&str]); 2] = [("native", &["run", "t.almd"]), ("wasm", &["run", "t.almd", "--target", "wasm"])];
+        for (leg, args) in legs {
             let mut cmd = Command::new(almide());
             cmd.current_dir(root.path()).args(args);
-            if incumbent {
-                cmd.env("ALMIDE_WASM_INCUMBENT", "1");
-            }
             let out = cmd.output().expect("run almide");
             let stdout = String::from_utf8_lossy(&out.stdout);
             if !out.status.success() || stdout != format!("{want}\n") {

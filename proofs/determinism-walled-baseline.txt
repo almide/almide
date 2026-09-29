@@ -1,7 +1,7 @@
 # DETERMINISM WALL LEDGER (#2753): the spec/wasm_cross fixtures the STRUCTURAL
 # leg declines, shared by scripts/check-host-determinism.sh and
 # scripts/check-browser-determinism.sh. Both gates drive the structural leg
-# forced (`almide::wasm_route::render_wasm_routed` with force_structural, the
+# forced (`almide::wasm_route::render_wasm_routed` with skip_stock_audit, the
 # renderer `--target wasm` ships by default), so a row here is a fixture whose
 # host-/browser-ABI reproducibility is NOT measured today.
 #
@@ -16,7 +16,7 @@
 # Measured 2026-09-28 on origin/develop 76e48de5b with the native harness:
 # 797 emitted + 5 walled of 802. Every row is a fixture the INCUMBENT renders
 # and the determinism gates byte-compared until they moved off it: these five
-# lost their reproducibility measurement in the move. Each is also a
-# proofs/incumbent-route-baseline.txt build row, and closes with its cause
+# lost their reproducibility measurement in the move. Each was also an
+# incumbent-route census build row (#2741, retired with the route in #2752), and closes with its cause
 # issue under #2739. (The incumbent's own ceiling was MAX_WALLED=30 — 30
 # fixtures IT refused, which the structural leg now all measures.)

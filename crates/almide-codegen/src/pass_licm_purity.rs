@@ -16,18 +16,11 @@ fn call_target_is_pure(target: &CallTarget, pure_fns: &HashSet<Sym>) -> bool {
     call_target_key(target).is_some_and(|key| pure_fns.contains(&key))
 }
 
-/// May this BinOp trap at runtime? Integer division/modulo trap on a zero
-/// divisor and PowInt can overflow-panic; their float duals are total (IEEE
-/// inf/NaN, never a trap). A nonzero integer-literal divisor is statically
-/// safe. Comparison, boolean, concat and wrapping arithmetic ops are total.
+/// May this BinOp trap at runtime? The rule is `almide_ir::speculation`'s, the
+/// one the small-scalar-fn inliner also reads (#2947): one trap rule for every
+/// rewrite that moves or drops an evaluation.
 fn binop_may_trap(op: BinOp, right: &IrExpr) -> bool {
-    match op {
-        BinOp::DivInt | BinOp::ModInt => {
-            !matches!(&right.kind, IrExprKind::LitInt { value } if *value != 0)
-        }
-        BinOp::PowInt => true,
-        _ => false,
-    }
+    almide_ir::speculation::binop_may_trap(op, right)
 }
 
 /// Returns true if the expression is SPECULATION-SAFE: no function calls with

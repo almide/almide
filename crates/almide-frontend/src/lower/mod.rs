@@ -32,6 +32,7 @@ mod derive_codec;
 mod auto_try;
 
 use expressions::lower_expr;
+pub(crate) use calls::{qualify_callee_module_idents, substitute_call_params};
 use types::resolve_type_expr;
 use derive::generate_auto_derives;
 
@@ -663,7 +664,31 @@ fn build_ir_program(mut ctx: LowerCtx, functions: Vec<IrFunction>, top_lets: Vec
 // module collection.
 fn finalize_ir_program(program: &mut IrProgram, env: &TypeEnv, annotated_result_vars: &std::collections::HashSet<VarId>) {
     compute_use_counts(program); // After auto-derive so derived functions get correct use_counts
-    demote_unused_mut(program);
+    // A var handed to a `mut` param is written (#2952): the positions come from
+    // the callee's declaration — a stdlib fn's own source on every leg, a user
+    // fn's lowered `mutated_params` or its checked signature.
+    let own: std::collections::HashMap<String, Vec<usize>> = program.functions.iter()
+        .filter(|f| !f.mutated_params.is_empty())
+        .map(|f| (f.name.as_str().to_string(), f.mutated_params.clone()))
+        .collect();
+    let callee_mut = |t: &CallTarget| -> Option<Vec<usize>> {
+        let (key, sig_key) = match t {
+            CallTarget::Module { module, func, .. } => {
+                if almide_lang::stdlib_info::is_bundled_module(module.as_str()) {
+                    return almide_ir::mut_args::stdlib_mut_positions(module.as_str(), func.as_str());
+                }
+                (None, format!("{}.{}", module.as_str(), func.as_str()))
+            }
+            CallTarget::Named { name } => (Some(name.as_str()), name.as_str().to_string()),
+            _ => return None,
+        };
+        key.and_then(|k| own.get(k).cloned()).or_else(|| {
+            env.functions.get(&almide_base::intern::sym(&sig_key))
+                .map(|s| s.mut_params.clone())
+                .filter(|m| !m.is_empty())
+        })
+    };
+    almide_ir::demote_unused_mut_with(program, &callee_mut);
 
     // Resolve any remaining inference TypeVars to Unknown (prevents codegen ICE)
     resolve_inference_typevars(program);

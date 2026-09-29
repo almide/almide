@@ -519,9 +519,11 @@ Prefer `for i in 0..<n` whenever the iteration count is known up front (thread s
 
 ### Pipe
 ```
-text |> string.trim |> string.split(",")
-xs |> filter(_, (x) => x > 0)      // _ = placeholder for piped value
+text |> string.trim |> string.split(",")   // = string.split(string.trim(text), ",")
+xs |> list.filter((x) => x > 0)            // the left side is always argument 1
 ```
+There is no pipe placeholder: `xs |> list.filter(_, f)` is E046 — drop the `_`.
+For any other argument position, pipe into a lambda: `x |> (v) => f(a, v)`.
 
 ### Record & Spread
 ```

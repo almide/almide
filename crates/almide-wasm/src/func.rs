@@ -144,6 +144,23 @@ fn emit_modinit_call(
     em.f.instructions().call_indirect(0, ti);
 }
 
+/// The live-heap measurement (`alloc_count`, armed builds only): drop every
+/// droppable top-let global at the end of `main`, so a value that is live by
+/// design until exit is not counted as a leak. A no-op for a shipped module.
+fn release_top_lets_for_measurement(em: &mut Emitter<'_>, in_main: bool, top_lets: &[crate::InitLet], ctx: &Ctx) {
+    if !in_main || !crate::alloc_count::releases_top_lets() {
+        return;
+    }
+    for il in top_lets {
+        if let Some(&(gidx, declared)) = ctx.globals.get(&(il.space, il.tl.var))
+            && em.rc_droppable(declared)
+        {
+            let dec = em.dec_fn_of(declared);
+            em.f.instructions().global_get(gidx).call(dec);
+        }
+    }
+}
+
 /// The name a wall in top-let `il`'s initializer is reported under
 /// (decline_site.rs): module-qualified, as program functions are.
 fn top_let_site_name(il: &crate::InitLet, ctx: &Ctx) -> String {
@@ -375,6 +392,7 @@ pub(crate) fn lower_fn(
             loop_ctl: None,
             hoisted_counts: HashMap::new(),
             cow_flags: HashMap::new(),
+            cow_prejudged: HashSet::new(),
             in_tail: false,
             try_see_through: false,
             branch_depth: 0,
@@ -545,6 +563,12 @@ pub(crate) fn lower_fn(
         // the callee-owned half of the argument convention (call sites
         // inc borrowed args; fresh temporaries are consumed here). The
         // same ExitPlan the early-return and tail sites consume (#1995).
+        // The live-heap measurement (alloc_count, armed builds only): a
+        // top-let is live by design until exit, so the measuring `main`
+        // releases every droppable one before its own epilogue — what the
+        // counters still see live after that is a leak. Before the exit
+        // window, so the E083 validator's window holds only frame credits.
+        release_top_lets_for_measurement(&mut em, in_main, top_lets, ctx);
         let plan = em.exit_plan(crate::exit_plan::Continuation::ReturnSuccess);
         em.emit_exit(&plan);
         em.rc_owned.clear();

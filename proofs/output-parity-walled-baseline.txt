@@ -1,7 +1,7 @@
 # OUTPUT-PARITY WALL LEDGER (#2793): the files proofs/output-parity.sh CLAIMS
 # (the must-match rows of proofs/output-parity-baseline.txt plus the rows here)
 # that the STRUCTURAL wasm leg declines. The gate drives that leg forced
-# (`ALMIDE_WASM_STRUCTURAL=1 almide build --target wasm`, the renderer
+# (`ALMIDE_WASM_SKIP_STOCK_AUDIT=1 almide build --target wasm`, the renderer
 # `--target wasm` ships by default), so a row here is a file whose native ⇄ wasm
 # stdout comparison is NOT made today.
 #

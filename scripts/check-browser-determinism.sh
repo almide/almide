@@ -8,7 +8,7 @@
 # divergence that the wasip1 gate can mask.
 #
 # The compiled path is the STRUCTURAL leg (#2753): both harnesses drive
-# `almide::wasm_route::render_wasm_routed` with force_structural — the renderer
+# `almide::wasm_route::render_wasm_routed` with skip_stock_audit — the renderer
 # `--target wasm` ships by default — and emit the structural module plus its
 # stock-WASI form. The incumbent renderer is never consulted.
 #

@@ -8,12 +8,9 @@
 //! ONE trailing `\r` where native's `trim_end_matches('\r')` cuts them all.
 //!
 //! The matrix: every line-splitting surface × inputs with the CR at the end, in
-//! the middle and doubled, on each leg one binary drives — native, the default
-//! wasm route (structural), and the forced incumbent — all byte-identical to
-//! one pinned expectation (native is `str::lines`, so the pin is its output).
-//! `fold_lines_range` / `_chunked` have no structural cell (they route to the
-//! incumbent), so their probe runs native, the default route and the forced
-//! incumbent too. A new line-aware surface belongs in PROBE_ALL or
+//! the middle and doubled, on each leg one binary drives — native and the
+//! wasm leg — all byte-identical to one pinned expectation (native is
+//! `str::lines`, so the pin is its output). A new line-aware surface belongs in PROBE_ALL or
 //! PROBE_PARTITIONED, never in a point test.
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -228,12 +225,8 @@ fn probe_dir(tag: &str, src: &str) -> PathBuf {
 /// One leg: (label, extra args, env).
 type Leg = (&'static str, &'static [&'static str], &'static [(&'static str, &'static str)]);
 
-/// The three legs.
-const LEGS: [Leg; 3] = [
-    ("native", &[], &[]),
-    ("wasm (default route)", &["--target", "wasm"], &[]),
-    ("wasm (forced incumbent)", &["--target", "wasm"], &[("ALMIDE_WASM_INCUMBENT", "1")]),
-];
+/// The legs one binary drives.
+const LEGS: [Leg; 2] = [("native", &[], &[]), ("wasm", &["--target", "wasm"], &[])];
 
 fn run_leg(dir: &Path, args: &[&str], env: &[(&str, &str)], stdin: &[u8]) -> String {
     let mut c = Command::new(almide_bin());

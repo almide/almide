@@ -27,7 +27,8 @@ pub struct RunResult {
     /// the export.
     pub heap_end: Option<u64>,
     /// The allocation counters (#2407), read from the `__alloc_count` /
-    /// `__alloc_reused` / `__alloc_bytes` / `__free_count` globals a module
+    /// `__alloc_reused` / `__alloc_bytes` / `__free_count` /
+    /// `__region_reclaimed` globals a module
     /// emitted under the `ALMIDE_WASM_ALLOC_COUNT` switch carries. None for
     /// a shipped (unarmed) module — the counters are absent, not zero.
     pub alloc_count: Option<AllocCount>,
@@ -37,19 +38,40 @@ pub struct RunResult {
 /// churn the `__heap` watermark cannot show. `allocs` is every allocation
 /// (a `$alloc` call or a fixed-size constructor's inlined bump, #2318),
 /// `reused` the ones a size-class free-list pop served (the rest bumped
-/// the heap), `bytes` the payload bytes requested in total, and `frees`
-/// every `$free` call.
+/// the heap), `bytes` the payload bytes requested in total, `frees`
+/// every `$free` call, and `reclaimed` the blocks a region window's restore
+/// took back wholesale without a `$free` (#1961).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AllocCount {
     pub allocs: u64,
     pub reused: u64,
     pub bytes: u64,
     pub frees: u64,
+    pub reclaimed: u64,
+}
+
+impl AllocCount {
+    /// The heap blocks still live when the run ended: `allocs − frees −
+    /// reclaimed`. An armed `main` releases its top-let globals before it
+    /// returns (almide_wasm::alloc_count), so after a normal exit a
+    /// non-zero value is a leak; negative would be a double release.
+    pub fn live(&self) -> i64 {
+        self.allocs as i64 - self.frees as i64 - self.reclaimed as i64
+    }
 }
 
 impl std::fmt::Display for AllocCount {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "allocs={} reused={} bytes={} frees={}", self.allocs, self.reused, self.bytes, self.frees)
+        write!(
+            f,
+            "allocs={} reused={} bytes={} frees={} reclaimed={} live={}",
+            self.allocs,
+            self.reused,
+            self.bytes,
+            self.frees,
+            self.reclaimed,
+            self.live()
+        )
     }
 }
 
@@ -1089,16 +1111,17 @@ fn run_wasm_src(
         (Some(h), Some(hi)) => Some(h.max(hi)),
         (h, _) => h,
     };
-    // #2407: the counters ride four i64 globals an armed build exports;
-    // all four or none — a module missing any is a shipped one.
+    // #2407: the counters ride five i64 globals an armed build exports;
+    // all five or none — a module missing any is a shipped one.
     let alloc_count = match (
         read_global(&mut store, "__alloc_count"),
         read_global(&mut store, "__alloc_reused"),
         read_global(&mut store, "__alloc_bytes"),
         read_global(&mut store, "__free_count"),
+        read_global(&mut store, "__region_reclaimed"),
     ) {
-        (Some(allocs), Some(reused), Some(bytes), Some(frees)) => {
-            Some(AllocCount { allocs, reused, bytes, frees })
+        (Some(allocs), Some(reused), Some(bytes), Some(frees), Some(reclaimed)) => {
+            Some(AllocCount { allocs, reused, bytes, frees, reclaimed })
         }
         _ => None,
     };
@@ -1188,6 +1211,29 @@ mod tests {
         let r = run_wasm(&module(&oob)).expect("engine runs the module");
         assert_eq!(r.exit, 1);
         assert_eq!(r.stderr, "Error: wasm trap: out of bounds memory access\n");
+    }
+
+    /// A runaway program is STOPPED, not hung (#2955): the test harness's
+    /// bound on execution is the epoch watchdog (the embedded host arms no
+    /// wasmtime fuel), and it must still interrupt a diverging `main` on
+    /// the pinned wasmtime. Two shapes, because wasmtime checks the epoch
+    /// at two places: a loop header (`loop br 0`) and a function entry (a
+    /// self `return_call`, the tail-recursion lowering, which has no loop).
+    #[test]
+    fn a_runaway_program_is_interrupted_by_the_watchdog() {
+        let watchdog = Some(std::time::Duration::from_millis(200));
+        let shapes: [(&str, &[Instruction<'_>]); 2] = [
+            ("loop", &[Instruction::Loop(wasm_encoder::BlockType::Empty), Instruction::Br(0), Instruction::End]),
+            ("return_call", &[Instruction::ReturnCall(0)]),
+        ];
+        for (name, body) in shapes {
+            let started = std::time::Instant::now();
+            let r = super::run_wasm_src(&module(body), super::StdinSource::Buf(Vec::new()), None, &[], watchdog, false)
+                .expect("engine runs the module");
+            assert_eq!(r.exit, 1, "{name}: a runaway must abort");
+            assert_eq!(r.stderr, "Error: wasm trap: interrupt\n", "{name}");
+            assert!(started.elapsed() < std::time::Duration::from_secs(20), "{name}: stopped late");
+        }
     }
 
     /// The happy path is untouched: a clean return is exit 0, empty stderr.

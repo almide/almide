@@ -11,7 +11,6 @@
 //! process abort — so a caller can fall back to v0 codegen when v1 declines.
 
 use crate::lower::LowerError;
-use crate::render_wasm::try_render_wasm_program;
 use crate::MirProgram;
 use almide_frontend::canonicalize;
 use almide_frontend::check::Checker;
@@ -45,19 +44,6 @@ fn user_module_fn_name(module: &str, func: &str) -> String {
 /// dotted stdlib call (`is_known_free`). A self-pkg call to an EFFECTFUL user fn therefore
 /// surfaces its capability transitively, exactly like any direct user call. A STDLIB module
 /// (`string`, bundled `json`, …) is NOT rewritten. No-op when there are no linked user modules.
-/// A module whose functions should link like ordinary user siblings.
-/// User modules always; a BUNDLED stdlib module qualifies too when ALL its
-/// fns are pure Almide (no @intrinsic / @inline_rust / @wasm_intrinsic /
-/// @extern, no hole bodies) — `import path` / `import args` then lower as
-/// real linked modules instead of walling as "unlinked stdlib call".
-/// Intrinsic-bearing bundled modules (json, …) keep registry-backed dispatch.
-pub(crate) fn is_linkable_module(m: &almide_ir::IrModule) -> bool {
-    let n = m.name.as_str();
-    if !almide_lang::stdlib_info::is_any_stdlib(n) {
-        return true;
-    }
-    almide_lang::stdlib_info::is_bundled_module(n) && m.functions.iter().all(is_pure_almide_fn)
-}
 
 /// A function with a real Almide body and no host boundary — linkable as an
 /// ordinary sibling fn.
@@ -79,7 +65,7 @@ fn registry_served_names() -> &'static std::collections::HashSet<&'static str> {
     use std::sync::OnceLock;
     static NAMES: OnceLock<std::collections::HashSet<&'static str>> = OnceLock::new();
     NAMES.get_or_init(|| {
-        crate::render_wasm::self_host_runtime()
+        crate::mir_ops::self_host_runtime()
             .iter()
             .flat_map(|(_, pairs)| pairs.iter().map(|(_, call_name)| *call_name))
             .collect()
@@ -619,153 +605,6 @@ pub fn bundled_self_modules(source: &str) -> Vec<(String, almide_lang::ast::Prog
     out
 }
 
-pub fn try_render_wasm_source(
-    source: &str,
-    self_modules: &[(String, almide_lang::ast::Program, bool)],
-    verbose: bool,
-) -> Result<String, LowerError> {
-    try_render_wasm_source_impl(source, self_modules, verbose, RenderMode::Run, None)
-}
-
-/// LIBRARY-mode variant for `almide build --target wasm` (#881): a module with
-/// `pub fn` exports and NO `main` renders with a SYNTHESIZED empty `main`, so
-/// `_start` runs the global-init chain and nothing else — the v0 export ABI
-/// (`_start` + `memory` + one named export per public fn) that web hosts like
-/// ceangal's runtime call. `almide run` keeps the wall: running a main-less
-/// module natively is a compile error (rustc E0601), and the wasm leg must
-/// fail the same way rather than silently succeeding at nothing.
-pub fn try_render_wasm_source_library(
-    source: &str,
-    self_modules: &[(String, almide_lang::ast::Program, bool)],
-    verbose: bool,
-) -> Result<String, LowerError> {
-    try_render_wasm_source_impl(source, self_modules, verbose, RenderMode::Library, None)
-}
-
-/// TEST-mode variant for the `almide test` wasm harness: when the file has NO `main`,
-/// its `test "…"` fns are promoted to ordinary effect fns (renamed `__almd_test_<i>` —
-/// the raw names carry spaces/unicode no WAT identifier admits) and a runner `main` is
-/// synthesized with v0's `__test_runner` protocol (`test: <name> ... ` / `ok` per test,
-/// assert failure = controlled halt with a non-zero exit). A file WITH `main` renders
-/// exactly like [`try_render_wasm_source`] — both legs run main only, the v0 protocol.
-/// Programs with top-let globals WALL in test mode (v0 re-inits globals before EVERY
-/// test; the v1 `_start` inits once — shipping that silently would leak one test's
-/// mutations into the next).
-/// `run_filter` is `almide test --run <pattern>`: `None` runs every test, and
-/// `Some(p)` synthesizes a runner over exactly the tests the NATIVE leg's Rust
-/// harness would select for the same `p` (`almide_base::names`). Dropping it
-/// here was #2085 — this leg ran every test whatever the caller asked for.
-pub fn try_render_wasm_source_tests(
-    source: &str,
-    self_modules: &[(String, almide_lang::ast::Program, bool)],
-    verbose: bool,
-    run_filter: Option<&str>,
-) -> Result<String, LowerError> {
-    try_render_wasm_source_impl(source, self_modules, verbose, RenderMode::Tests, run_filter)
-}
-
-/// How the caller intends to use the rendered module — decides main synthesis.
-#[derive(Clone, Copy, PartialEq)]
-enum RenderMode {
-    /// `almide run` / the cross-target gates: the program must carry `main`.
-    Run,
-    /// `almide test`: test fns promoted, a runner `main` synthesized.
-    Tests,
-    /// `almide build`: a main-less module with `pub fn` exports gets an empty
-    /// synthesized `main` (the v0 library ABI — #881).
-    Library,
-}
-
-fn try_render_wasm_source_impl(
-    source: &str,
-    self_modules: &[(String, almide_lang::ast::Program, bool)],
-    verbose: bool,
-    mode: RenderMode,
-    run_filter: Option<&str>,
-) -> Result<String, LowerError> {
-    crate::charge_probe::reset_budget_used();
-    // STRICT VALUE MODE spans the WHOLE render, not just the IR phase. `strict_values()`
-    // is read by MIR *lowering*, which runs in `try_render_wasm_source_impl_rest` below —
-    // so a guard scoped to `build_ir_with_drops` would be restored before the only code
-    // that consults it ever runs, and every deferred `Op::Const` ZERO would render as an
-    // executable 0 instead of walling. That is exactly what happened: the flag used to be
-    // a process-global the IR phase `store(true)`d and never reset, so lowering inherited
-    // strict mode by leak; converting it to a scoped guard silently moved the boundary and
-    // re-opened the silently-wrong-value class F2 closed (`result.unwrap_or_else(err(…),
-    // (_) => captured_float)` printed 0 on wasm against 100 on native — nightly fuzz
-    // finding, seed 1785217538023450905). Own it here, at the entrypoint that spans both
-    // phases, so the scope matches what the mode actually protects.
-    let _strict = crate::lower::StrictValuesGuard::set(true);
-    let mut ir = build_ir_with_drops(source, self_modules, mode == RenderMode::Tests, run_filter)?;
-    if mode == RenderMode::Library {
-        synthesize_library_main(&mut ir);
-    }
-    // C-350's preview-1 wall (#2780): this renderer's artifact always calls
-    // `proc_exit` directly, which a stock runtime traps on for 126..=255, so
-    // the band prints its defined line and exits 1 here. Wasm-only by
-    // position — `source_to_ir_with` also feeds the native trust-spine render.
-    almide_ir::exit_code::wall_preview1_exit_codes(&mut ir);
-    try_render_wasm_source_impl_rest(&mut ir, verbose)
-}
-
-/// LIBRARY mode (#881): a module with `pub fn` exports and no `main` gets an
-/// EMPTY `fn main() -> Unit` so `_start` exists and runs only the global-init
-/// chain — the v0 export-module ABI web hosts call (`_start`, `memory`, one
-/// named export per public fn). A module with NEITHER a main NOR any public
-/// fn is left alone: the honest "no main in the IR" wall downstream is the
-/// right answer for a program with nothing to run and nothing to export.
-fn synthesize_library_main(ir: &mut almide_ir::IrProgram) {
-    if ir.functions.iter().any(|f| f.name.as_str() == "main") {
-        return;
-    }
-    let has_exports = ir.functions.iter().any(|f| {
-        !f.is_test
-            && !f.generics.as_ref().map_or(false, |g| !g.is_empty())
-            && matches!(f.visibility, almide_ir::IrVisibility::Public)
-    });
-    if !has_exports {
-        return;
-    }
-    ir.functions.push(almide_ir::IrFunction {
-        name: almide_lang::intern::sym("main"),
-        params: vec![],
-        ret_ty: almide_lang::types::Ty::Unit,
-        body: almide_ir::IrExpr {
-            kind: almide_ir::IrExprKind::Unit,
-            ty: almide_lang::types::Ty::Unit,
-            span: Default::default(),
-            def_id: None,
-        },
-        is_effect: false,
-        is_test: false,
-        generics: None,
-        extern_attrs: vec![],
-        export_attrs: vec![],
-        attrs: vec![],
-        visibility: almide_ir::IrVisibility::Private,
-        doc: None,
-        blank_lines_before: 0,
-        def_id: None,
-        module_origin: None,
-        mutated_params: vec![], // fresh-fn: synthesized empty library main, zero params
-    });
-}
-
-/// Phase 1: synthesize the recursive-drop / repr source text this program's linked
-/// types need, splice it into the source, and re-lower (v1-trust-spine-only — v0
-/// manages its own memory). In `test_mode`, promote `test "…"` fns to a synthesized
-/// runner `main`. Returns the FINAL linked `IrProgram` the rest of the pipeline
-/// (globals, layouts, MIR lowering) continues from.
-/// One conditional drop/repr routine: its source text is spliced into the
-/// re-lower only when the program actually reaches it. An unneeded routine
-/// contributes the empty string, so the concatenation below stays a flat list.
-fn gated(needed: bool, src: &'static str) -> &'static str {
-    if needed {
-        src
-    } else {
-        ""
-    }
-}
 
 
 include!("pipeline_tail.rs");

@@ -41,7 +41,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: "1.94.0"  # runner-class MSRV: the almide binary embeds wasmtime 47 (commissioned host); compiler crates keep the 1.89 claim per-crate
+  RUST_TOOLCHAIN: "1.96.0"  # runner-class MSRV: the almide binary embeds wasmtime 49 (commissioned host); compiler crates keep the 1.89 claim per-crate
   # Cold runners gain nothing from the workspace's release-incremental
   # profile (#1006) — it only bloats the caches. Opt out.
   CARGO_INCREMENTAL: "0"
@@ -729,15 +729,7 @@ jobs:
           $ALMIDE test examples/
 
       - name: WASM coverage ratchet (the native-fallback set only shrinks — wasm is a first-class target)
-        run: ALMIDE_BIN=/tmp/almide-bin/almide FALLBACK_TEST_LOG=/tmp/almide-test-lane.log bash proofs/check-wasm-fallback.sh
-
-      # #2741: every program the router hands to the INCUMBENT renderer, with its
-      # structural decline, is a row in proofs/incumbent-route-baseline.txt —
-      # shrink-only to 0 as the incumbent is retired (#2739). The test lane is the
-      # suite run above (its log); the build lane is `check --target wasm` over
-      # every program with a `main`.
-      - name: Incumbent-route census (the programs the incumbent serves only shrink — #2741)
-        run: ALMIDE_BIN=/tmp/almide-bin/almide TEST_LOG=/tmp/almide-test-lane.log bash scripts/check-incumbent-route.sh
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash proofs/check-wasm-fallback.sh
 
       - name: Wall corpus (#1481 — refused shapes stay refused, with their reasons)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash proofs/check-wall-corpus.sh
@@ -747,18 +739,6 @@ jobs:
       # had no wasm body at all while that gate read a clean 18/18. ~70s.
       - name: WASM reachability ratchet (every stdlib fn builds on both legs, or is listed)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash proofs/check-wasm-reachability.sh
-
-      # Stage 1c. The two ratchets above measure code rendered FROM the shared MIR —
-      # the half the 3-way oracle can differ native against wasm. The prelude is the
-      # other half: hand-written wasm with no native counterpart, so its assurance has
-      # to be named per function. CI runs the reachability re-measurement (the `via`
-      # column is measured here, not trusted), which is why the example is built —
-      # debug on purpose: it shares the registry-regen step's dep cache, and
-      # rendering 47 fixtures is cheap even unoptimized.
-      - name: WAT prelude audit (every hand-written wasm fn's evidence named and re-measured)
-        run: |
-          cargo build -p almide-mir --example render_program
-          ALMIDE_RENDER=target/debug/examples/render_program bash scripts/check-wat-prelude-audit.sh
 
       # The dogfood program (Unit 0.46, #1001). Its own tests cover the decision rules
       # extracted from the shell gates — the parity verdict, the nightly streak fold, the
@@ -918,15 +898,15 @@ jobs:
       - name: Cache wasmtime tarball
         uses: actions/cache@v6
         with:
-          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
-          key: wasmtime-v47.0.3-x86_64-linux
+          path: wasmtime-v49.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v49.0.1-x86_64-linux
       - name: Install wasmtime
         run: |
           # Pinned + cached + retried. On a cache hit the tarball is already here,
           # so the per-IP-rate-limited release download runs at most once per key.
           # `-f` turns a 403 rate-limit body into a retry instead of a 92-byte
           # "not a tar archive". Bump VERSION and the cache key together.
-          VERSION=v47.0.3
+          VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
           if [ ! -s "$TARBALL" ]; then
             for i in 1 2 3 4 5; do
@@ -983,12 +963,12 @@ jobs:
       - name: Cache wasmtime zip
         uses: actions/cache@v6
         with:
-          path: wasmtime-v47.0.3-x86_64-windows.zip
-          key: wasmtime-v47.0.3-x86_64-windows
+          path: wasmtime-v49.0.1-x86_64-windows.zip
+          key: wasmtime-v49.0.1-x86_64-windows
       - name: Install wasmtime
         shell: bash
         run: |
-          VERSION=v47.0.3
+          VERSION=v49.0.1
           ZIP="wasmtime-${VERSION}-x86_64-windows.zip"
           if [ ! -s "$ZIP" ]; then
             for i in 1 2 3 4 5; do
@@ -1114,15 +1094,15 @@ jobs:
       - name: Cache wasmtime tarball
         uses: actions/cache@v6
         with:
-          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
-          key: wasmtime-v47.0.3-x86_64-linux
+          path: wasmtime-v49.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v49.0.1-x86_64-linux
       - name: Install wasmtime
         run: |
           # Pinned + cached + retried. On a cache hit the tarball is already here,
           # so the per-IP-rate-limited release download runs at most once per key.
           # `-f` turns a 403 rate-limit body into a retry instead of a 92-byte
           # "not a tar archive". Bump VERSION and the cache key together.
-          VERSION=v47.0.3
+          VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
           if [ ! -s "$TARBALL" ]; then
             for i in 1 2 3 4 5; do
@@ -1206,15 +1186,15 @@ jobs:
       - name: Cache wasmtime tarball
         uses: actions/cache@v6
         with:
-          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
-          key: wasmtime-v47.0.3-x86_64-linux
+          path: wasmtime-v49.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v49.0.1-x86_64-linux
       - name: Install wasmtime
         run: |
           # Pinned + cached + retried. On a cache hit the tarball is already here,
           # so the per-IP-rate-limited release download runs at most once per key.
           # `-f` turns a 403 rate-limit body into a retry instead of a 92-byte
           # "not a tar archive". Bump VERSION and the cache key together.
-          VERSION=v47.0.3
+          VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
           if [ ! -s "$TARBALL" ]; then
             for i in 1 2 3 4 5; do
@@ -1395,7 +1375,7 @@ jobs:
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
-      # RUST_TOOLCHAIN (1.94), not the historical 1.89 per-crate floor: the
+      # RUST_TOOLCHAIN (1.96), not the historical 1.89 per-crate floor: the
       # commissioned workspace lock carries deps (thiserror 2.0.20) whose MSRV
       # is above 1.89, so a 1.89 build of the WORKSPACE no longer resolves.
       - uses: dtolnay/rust-toolchain@stable
@@ -1742,7 +1722,7 @@ jobs:
       # idiom-ceiling reds; a probe on the runner class showed those reds
       # were runner bimodality under-sampled at 3 runs — see the RUNS
       # comment in scripts/check-perf-ratio.sh. Toolchain choice was never
-      # the cause.) Build and test jobs keep the 1.94 MSRV pin; this job's
+      # the cause.) Build and test jobs keep the 1.96 MSRV pin; this job's
       # claim is about the GENERATED CODE, not the compiler's build floor.
       - uses: dtolnay/rust-toolchain@stable
 
@@ -1771,11 +1751,11 @@ jobs:
         # the one job still exposed to the per-IP release rate limit.
         uses: actions/cache@v6
         with:
-          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
-          key: wasmtime-v47.0.3-x86_64-linux
+          path: wasmtime-v49.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v49.0.1-x86_64-linux
       - name: Install wasmtime (the wasm-leg gates)
         run: |
-          VERSION=v47.0.3
+          VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
           if [ ! -s "$TARBALL" ]; then
             for i in 1 2 3 4 5; do
@@ -1856,7 +1836,7 @@ jobs:
           #
           # An install that cannot install must fail its own step. The trailing
           # `wasmtime --version` is what makes that true.
-          VERSION=v47.0.3
+          VERSION=v49.0.1
           case "${{ runner.os }}" in
             macOS) ARCH_TRIPLE="aarch64-macos" ;;
             *)     ARCH_TRIPLE="x86_64-linux"  ;;
@@ -1962,7 +1942,7 @@ jobs:
       - name: Install wasmtime
         run: |
           # The same pinned, verified install as build-cross (#1036).
-          VERSION=v47.0.3
+          VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-aarch64-macos.tar.xz"
           for i in 1 2 3 4 5; do
             curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
@@ -2171,7 +2151,7 @@ jobs:
       # unreported. scripts/check-release-only-tests.sh keeps this list
       # honest; the wasm crate's seven ride the carried-gates step above.
       - name: Release-only root tests (the shards skip these by profile)
-        run: cargo test --release --locked --test embedded_cross_test --test http_serve_cross_test --test module_type_repr_test --test wasm_vm_parity_test --test wasm_route_parity_test
+        run: cargo test --release --locked --test embedded_cross_test --test http_serve_cross_test --test module_type_repr_test --test wasm_vm_parity_test
 
   commissioned-wasm-gates-probes:
     name: Commissioned wasm gates (target availability + runtime ratio)

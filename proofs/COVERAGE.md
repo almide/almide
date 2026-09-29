@@ -120,3 +120,51 @@ unmutated and red under the mutant. v1 mutant class is the operator swap;
 condition-level stuck-at mutants need operand extents (an AST) and are the
 next ratchet. Runs nightly (job "mcdc-mutation"); never run cargo
 concurrently with it.
+
+## Condition floor re-anchored — 2026-09-29 (#2941)
+
+The nightly per-condition job went red on v0.65.1-rc4: TOTAL 55.14% against the
+56.55% floor (fuzz-nightly run 36537776113). The last green night was
+36457122588 on 9d80eb004, at 56.94%. #2922 moved this gate's workload off the
+incumbent's `render_program` and onto the structural wasm build plus the witness
+producer. That move explains the whole drop, in two parts, both structural.
+
+Measured per file from the two nights' tables (branches / missed):
+
+| step | branches | missed | TOTAL |
+|---|---|---|---|
+| last green night (9d80eb004) | 37886 | 16313 | 56.94% |
+| the same night without the INCUMBENT_ONLY files | 36480 | 15888 | 56.45% |
+| rc4 (371de8ff5) | 36820 | 16518 | 55.14% |
+| develop after #2930 (54349cd6c, probe run 36550517708) | 36745 | 16429 | **55.29%** |
+
+1. **The denominator.** #2922 took the incumbent-only files (`render_wasm*`,
+   `region_*`, `pipeline_{b,c,link,global_slots,test_runner}`, …) out of scope.
+   Those are the 1406 branches, 425 of them missed (70% covered), that #2935
+   deletes. Taking them out moves the same green night from 56.94% to 56.45%,
+   which is already below the floor. That floor was seeded on 2026-09-04 with
+   those files in scope and driven.
+2. **Lowering reachable only through the deleted pipeline.** `almide-mir/src/lower/`
+   went from 3720 to 4315 missed branches, out of an unchanged total of about
+   11270 (+595). The
+   incumbent pipeline lowered each program's generated `__drop_*` / `__repr_*`
+   sources and ran `pipeline_b`'s program passes (`populate_abi_registries`,
+   `rewrap_never_err_into_result_targets`, …). Neither product leg calls that
+   code any more:
+   - the witness producer lowers only the program's own functions;
+   - the native leg lowers only the program's own functions.
+
+   On #2935's head, a dead-code probe (`lower` made private) finds 172 items,
+   about 7,400 lines, whose only remaining callers are their own unit tests and
+   the kept `emit_cert*` / `classify_corpus*` examples. #2950 deletes them. Until
+   then no workload can reach them, so adding one would measure nothing the
+   product runs.
+
+What is left is noise in both directions: -40 missed in the other reported
+crates, and the new structural files' 140 branches, 46 of them missed.
+
+The floor is therefore re-anchored to the CI measurement of develop after #2930:
+**55.29%** (`proofs/coverage-baseline-condition.txt` 5655 → 5529). #2935 and
+#2950 only take out code that no workload reaches, so each can only raise the
+TOTAL. Run `--update` on the first green night after each lands to ratchet the
+floor back up.

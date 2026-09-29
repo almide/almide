@@ -2,15 +2,10 @@
 // The alias-observes-clear shape over a RECORD FIELD (#2465): `string.clear(r.name)`
 // / `bytes.clear(r.buf)` / `list.clear(r.xs)` / `map.clear(r.m)` on a local
 // record var, and the same four through a `mut` record parameter. A record
-// alias bound before the clear keeps every field. The structural leg refuses
-// the string field receiver (`string-clear-nonvar`), so the default route
-// serves this fixture from the incumbent: the incumbent's clear rewrite
-// (`rewrite_clear`) routes a field receiver through FieldAssign — the C-132
-// mut-param write-back shape `list.push(h.xs, v)` already takes — instead of
-// the shared-block self-host twin that cleared the alias's field on 0.62.0.
-// tests/incumbent_clear_alias_test.rs holds native, the default route and the
-// forced incumbent to the same bytes; the var shapes are the sibling
-// inplace_clear_alias.almd.
+// alias bound before the clear keeps every field: a field receiver takes the
+// C-132 mut-param write-back shape `list.push(h.xs, v)` already takes,
+// instead of the shared-block self-host twin that cleared the alias's field
+// on 0.62.0. The var shapes are the sibling inplace_clear_alias.almd.
 type R = { name: String, buf: Bytes, xs: List[Int], m: Map[String, Int] }
 
 fn wipe_record(mut r: R) -> Unit = {

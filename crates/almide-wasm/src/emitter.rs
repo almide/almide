@@ -149,6 +149,9 @@ pub(crate) struct Emitter<'a> {
     /// it reaches only through element reads and stores (cow_hoist.rs). A
     /// store judges copy-on-write only while the flag is clear, then sets it.
     pub(crate) cow_flags: HashMap<VarId, u32>,
+    /// #2980: lists a counting loop judged copy-on-write in its preheader
+    /// (cow_hoist.rs, the pre-judge) — their stores inside it skip the judge.
+    pub(crate) cow_prejudged: HashSet<VarId>,
     /// One-shot tail-position marker: set by `lower_tail`, TAKEN at
     /// `lower`'s entry so it never leaks into operand lowering. A direct
     /// call in tail position with a matching return type emits
@@ -678,6 +681,9 @@ impl Emitter<'_> {
                 }
             }
             IrExprKind::IndexAccess { object, index } => self.lower_index_access(object, index)?,
+            // Refused ON PURPOSE (C-268: a typed hole carries no cross-target
+            // promise), reachable or not — the durable E082 repro pins this.
+            IrExprKind::Todo { .. } => return unsup("expr:Todo"),
             other => return unsup(&format!("expr:{}", expr_kind_name(other))),
         };
         Ok(got)

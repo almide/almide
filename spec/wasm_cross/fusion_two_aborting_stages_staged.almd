@@ -1,0 +1,25 @@
+// @contract: C-001
+// #2953: a map/filter → fold pipeline with TWO stages that can abort runs
+// stage by stage, so the first abort is the one the source order reaches first.
+// Here the map divides by zero on the second element; staged, it aborts with
+// "division by zero" before the filter runs at all. The wasm leg fused the
+// chain whenever the callbacks printed nothing, with no abort rule, so it ran
+// the filter on the first element first and aborted "index out of bounds".
+// Native refused to fuse (at most one aborting stage). Both now read one
+// judgment, almide_ir::fusion. The first line is the control: ONE aborting
+// stage (the fold's divide) still fuses and answers.
+fn one_partial(xs: List[Int]) -> Int = xs |> list.map((x) => x * 2) |> list.filter((y) => y > 2) |> list.fold(
+  0,
+  (a, b) => a + 100 / b,
+)
+
+fn two_partial(xs: List[Int]) -> Int = xs |> list.map((x) => 100 / x) |> list.filter((y) => [1, 2, 3][y] > 0) |> list.fold(
+  0,
+  (a, b) => a + b,
+)
+
+fn main() -> Unit = {
+  println(int.to_string(one_partial([1, 2, 3])))
+  println(int.to_string(two_partial([1, 0])))
+  println("unreachable")
+}

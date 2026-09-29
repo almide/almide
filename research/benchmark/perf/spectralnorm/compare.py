@@ -26,7 +26,7 @@ def main():
     compiler = str(Path(args.almide).resolve())
     sources = Path(__file__).resolve().parent
     env = os.environ.copy()
-    for name in ("ALMIDE_WASM_STRUCTURAL", "ALMIDE_WASM_INCUMBENT",
+    for name in ("ALMIDE_WASM_SKIP_STOCK_AUDIT",
                  "ALMIDE_FUEL_PROBE", "ALMIDE_COMPONENT_P3", "ALMIDE_COMPONENT_ADAPTER"):
         env.pop(name, None)
     result = {"n": args.n, "runs": args.runs,

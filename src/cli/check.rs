@@ -214,9 +214,9 @@ fn check_one(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critic
     }
 
     // #1922: `--target wasm` — the wasm build's ROUTING decision at check
-    // time. The same pipeline `build --target wasm` runs (front, both legs,
-    // the stock-p1 host-op audit) minus the write: a fn wall is E081, a
-    // both-legs shape wall is E082, each with its reason. Measured, never
+    // time. The same pipeline `build --target wasm` runs (front, the
+    // structural leg, the stock-p1 host-op audit) minus the write: a fn
+    // wall is E081, a shape the leg declines is E082, each with its reason. Measured, never
     // declared, so it cannot drift from what the build does.
     if wasm_target && super::build::compile_to_wasm_bytes(file, false, true, true, false).is_err() {
         std::process::exit(1);

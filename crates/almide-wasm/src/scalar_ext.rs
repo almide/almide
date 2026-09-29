@@ -85,6 +85,23 @@ impl Emitter<'_> {
                 | "bnot" | "to_u32" | "to_u8", _) => {
                 return self.lower_int_bitops(func.as_str(), args).map(Some);
             }
+            // The constants, as the constants (#2980): a call to a
+            // zero-argument self-hosted fn per use put a call site in every
+            // loop that names them (listbuild's per-iteration `math.pi()`).
+            // The bits are the ones stdlib/math_float.almd's literals parse
+            // to, which are std's.
+            ("math", "pi", []) => {
+                self.f.instructions().f64_const(std::f64::consts::PI.into());
+                Some(Lowered::scalar(FLOAT))
+            }
+            ("math", "e", []) => {
+                self.f.instructions().f64_const(std::f64::consts::E.into());
+                Some(Lowered::scalar(FLOAT))
+            }
+            ("float", "round", [x]) => {
+                self.lower_float_round(x)?;
+                Some(Lowered::scalar(FLOAT))
+            }
             // f64.ceil is IEEE-exact on both targets.
             ("float", "ceil", [x]) => {
                 self.lower_arg(x, Some(FLOAT), ArgMode::Borrow)?;
@@ -115,6 +132,37 @@ impl Emitter<'_> {
             _ => return Ok(None),
         };
         Ok(Some(out))
+    }
+
+    /// `float.round` inline (#2980) — stdlib/float_round.almd's exact
+    /// algorithm, op for op, without its two calls: `t = x >= 0 ? floor(x)
+    /// : ceil(x)` (a select; NaN compares false and takes ceil, as the
+    /// self-hosted `if` does), the fraction `|x - t|` is exact, a half or
+    /// more steps `t` one unit away from zero, and the result carries
+    /// `x`'s sign (round(-0.4) = -0.0, as `f64::round`). ±inf and NaN fall
+    /// through unchanged: `inf - inf` is NaN and a NaN compare is false.
+    fn lower_float_round(&mut self, x: &IrExpr) -> Result<(), EmitError> {
+        self.lower_arg(x, Some(FLOAT), ArgMode::Borrow)?;
+        let hx = self.hold_f64()?;
+        let ht = self.hold_f64()?;
+        let mut i = self.f.instructions();
+        // t = x >= 0 ? floor(x) : ceil(x), as a select — f64.trunc would be
+        // one op, but it is outside the closed set the wasm VM accepts
+        // (#865), and floor/ceil are what the self-hosted body runs.
+        i.local_tee(hx).f64_floor();
+        i.local_get(hx).f64_ceil();
+        i.local_get(hx).f64_const(0.0.into()).f64_ge();
+        i.select().local_set(ht);
+        // select(t + copysign(1, x), t, |x - t| >= 0.5)
+        i.local_get(ht).f64_const(1.0.into()).local_get(hx).f64_copysign().f64_add();
+        i.local_get(ht);
+        i.local_get(hx).local_get(ht).f64_sub().f64_abs().f64_const(0.5.into()).f64_ge();
+        i.select();
+        i.local_get(hx).f64_copysign();
+        let _ = i;
+        self.release_f64();
+        self.release_f64();
+        Ok(())
     }
 
     /// T6: an inverted range (float: NaN bounds too, via !(lo<=hi))

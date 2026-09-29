@@ -514,10 +514,28 @@ fn bump_vars_in_stmt(stmt: &IrStmt, locals: &HashSet<u32>, table: &mut VarTable)
 
 /// Demote `var` to `let` for variables that are never reassigned.
 /// This is a post-pass optimization that runs after compute_use_counts.
+///
+/// Only an `Assign`-family statement counts as a write here. A caller that can
+/// resolve callees should use [`demote_unused_mut_with`], which also counts a
+/// var handed to a `mut` param.
 pub fn demote_unused_mut(program: &mut IrProgram) {
+    demote_unused_mut_with(program, &|_| None);
+}
+
+/// [`demote_unused_mut`], counting as written every var passed at a `mut`
+/// param position of its callee (`callee_mut` answers the positions a call
+/// target writes, from the callee's declaration).
+///
+/// A `var` changed only through `list.push(xs, 1)` or a user `add(mut xs)` is
+/// still a var that changes: demoting it to `let` told native's capture pass
+/// the closure could keep a snapshot, while wasm (which counts those calls)
+/// made it shared storage, so a closure read `0` on native and `1` on wasm
+/// (#2952).
+pub fn demote_unused_mut_with(program: &mut IrProgram, callee_mut: &dyn Fn(&CallTarget) -> Option<Vec<usize>>) {
     let mut assigned_vars: HashSet<u32> = HashSet::new();
     for func in &program.functions {
         collect_assigned_vars(&func.body, &mut assigned_vars);
+        collect_mut_arg_targets(&func.body, callee_mut, &mut assigned_vars);
     }
     for i in 0..program.var_table.len() {
         if program.var_table.entries[i].mutability == Mutability::Var
@@ -526,6 +544,37 @@ pub fn demote_unused_mut(program: &mut IrProgram) {
             program.var_table.entries[i].mutability = Mutability::Let;
         }
     }
+}
+
+/// Every variable a call in `expr` hands to a `mut` param position (as the
+/// argument itself, or as the record a field argument is read from).
+pub fn collect_mut_arg_targets(
+    expr: &IrExpr,
+    callee_mut: &dyn Fn(&CallTarget) -> Option<Vec<usize>>,
+    out: &mut HashSet<u32>,
+) {
+    use crate::visit::{walk_expr, IrVisitor};
+    struct C<'a> {
+        callee_mut: &'a dyn Fn(&CallTarget) -> Option<Vec<usize>>,
+        out: &'a mut HashSet<u32>,
+    }
+    impl IrVisitor for C<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Call { target, args, .. } = &e.kind {
+                for i in (self.callee_mut)(target).unwrap_or_default() {
+                    let place = args.get(i).map(|a| match &a.kind {
+                        IrExprKind::Member { object, .. } => &object.kind,
+                        k => k,
+                    });
+                    if let Some(IrExprKind::Var { id }) = place {
+                        self.out.insert(id.0);
+                    }
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    C { callee_mut, out }.visit_expr(expr);
 }
 
 /// Every variable that appears as the TARGET of an in-place mutation
@@ -700,5 +749,67 @@ fn is_const_expr(expr: &IrExpr, const_vars: &std::collections::HashSet<u32>) -> 
         IrExprKind::BinOp { left, right, .. } => is_const_expr(left, const_vars) && is_const_expr(right, const_vars),
         IrExprKind::Var { id } => const_vars.contains(&id.0),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod mut_arg_write_tests {
+    use super::*;
+    use almide_base::intern::sym;
+
+    fn e(kind: IrExprKind) -> IrExpr {
+        IrExpr { kind, ty: Ty::Unknown, span: None, def_id: None }
+    }
+
+    /// The #2952 GATE, enumerated from the stdlib declarations: a `var` whose
+    /// only write is a stdlib call's `mut` param stays a `var`. Demoted, native
+    /// took a closure capture of it as a snapshot where wasm shared it.
+    #[test]
+    fn a_var_written_only_through_a_stdlib_mut_param_stays_a_var() {
+        let resolve = |t: &CallTarget| match t {
+            CallTarget::Module { module, func, .. } => {
+                crate::mut_args::stdlib_mut_positions(module.as_str(), func.as_str())
+            }
+            _ => None,
+        };
+        let mut demoted = Vec::new();
+        for (module, func, idxs) in crate::mut_args::stdlib_mut_fns() {
+            let mut var_table = VarTable::new();
+            let v = var_table.alloc(sym("xs"), Ty::Unknown, Mutability::Var, None);
+            let arity = idxs.iter().max().copied().unwrap_or(0) + 1;
+            let args: Vec<IrExpr> = (0..arity)
+                .map(|i| if i == idxs[0] { e(IrExprKind::Var { id: v }) } else { e(IrExprKind::LitInt { value: 0 }) })
+                .collect();
+            let call = e(IrExprKind::Call {
+                target: CallTarget::Module { module: sym(module), func: sym(&func), def_id: None },
+                args,
+                type_args: vec![],
+            });
+            let body = e(IrExprKind::Block { stmts: vec![IrStmt { kind: IrStmtKind::Expr { expr: call }, span: None }], expr: None });
+            let main = IrFunction {
+                name: sym("main"),
+                params: vec![],
+                ret_ty: Ty::Unit,
+                body,
+                is_effect: true,
+                is_test: false,
+                generics: None,
+                extern_attrs: vec![],
+                export_attrs: vec![],
+                attrs: vec![],
+                visibility: IrVisibility::Public,
+                doc: None,
+                blank_lines_before: 0,
+                def_id: None,
+                mutated_params: vec![], // fresh-fn: test fixture, the call site is what is under test
+                module_origin: None,
+            };
+            let mut program = IrProgram { functions: vec![main], var_table, ..Default::default() };
+            demote_unused_mut_with(&mut program, &resolve);
+            if program.var_table.get(v).mutability != Mutability::Var {
+                demoted.push(format!("{module}.{func}"));
+            }
+        }
+        assert!(demoted.is_empty(), "a var written only through these was demoted to let: {demoted:?}");
     }
 }

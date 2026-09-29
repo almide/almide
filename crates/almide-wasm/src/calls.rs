@@ -759,7 +759,7 @@ impl Emitter<'_> {
         let must_transfer = std::mem::take(&mut self.try_see_through) && true_tail;
         let depth = self.borrowed_temps.len();
         let mut no_transfer = false;
-        let param_mut = self.table.infos[i].param_mut.clone();
+        let param_mut = crate::cells::linked_param_mut(module, func, args.len(), &self.table.infos[i].param_mut);
         for (k, (a, want)) in args.iter().zip(params).enumerate() {
             if !self.lower_mut_param_arg(a, param_mut.get(k).copied().unwrap_or(false))? {
                 self.lower(a, Some(want))?;

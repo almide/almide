@@ -1,12 +1,14 @@
 //! #2554: the playground compiled through the incumbent renderer alone and
 //! so walled programs `almide run --target wasm` runs. The library entry
-//! `almide::wasm_route::render_wasm_routed` is the CLI's routing (structural
-//! first, incumbent on a decline) as a call a wasm32 consumer can make — with
-//! the modules read off disk (the CLI's form) or handed over pre-parsed (the
-//! browser's tabs). The program is the issue's tile example: `grid`'s tail
-//! `if` with a `guard let` is outside the incumbent's executable subset.
+//! `almide::wasm_route::render_wasm_routed` is the CLI's routing as a call a
+//! wasm32 consumer can make — with the modules read off disk (the CLI's form)
+//! or handed over pre-parsed (the browser's tabs). The program is the issue's
+//! tile example: `grid`'s tail `if` with a `guard let` was outside the retired
+//! incumbent's executable subset. Since #2752 the route has one leg, and a
+//! refusal comes back as a named `RouteError`, never as another renderer's
+//! module.
 
-use almide::wasm_route::{render_wasm_routed, Leg, ModuleSource, RouteError, RouteOptions};
+use almide::wasm_route::{render_wasm_routed, ModuleSource, RouteError, RouteOptions};
 
 const MAIN: &str = r#"import self.tile
 import self.view
@@ -86,7 +88,6 @@ fn tile_program_routes_to_the_structural_leg_from_disk() {
     let main = dir.path().join("src/main.almd");
     let routed = render_wasm_routed(main.to_str().expect("utf8"), MAIN, ModuleSource::Disk { dep_paths: &[] }, run_form())
         .unwrap_or_else(|e| panic!("the route refused the tile program: {e:?}"));
-    assert_eq!(routed.leg, Leg::Structural);
     assert_eq!(run_on_embedded_host(&routed.bytes), expected_stdout());
     // The stock-WASI form (what a browser p1 runner loads) is a valid module.
     let wasi = routed.stock_wasi().expect("to_wasi");
@@ -103,23 +104,32 @@ fn tile_program_routes_to_the_structural_leg_from_provided_modules() {
     modules.push(("view".to_string(), parse_tab(VIEW, "view.almd"), true));
     let routed = render_wasm_routed("main.almd", MAIN, ModuleSource::Provided(&modules), run_form())
         .unwrap_or_else(|e| panic!("the route refused the tile program: {e:?}"));
-    assert_eq!(routed.leg, Leg::Structural);
     assert_eq!(run_on_embedded_host(&routed.bytes), expected_stdout());
 }
 
+/// A shape the leg declines is `RouteError::Wall` with the leg's reason —
+/// the whole verdict, with no second renderer behind it (#2752).
 #[test]
-fn the_incumbent_alone_walls_the_tile_program() {
-    // The A side of the issue: the playground's old route (the incumbent
-    // renderer by itself) refuses this program, and the refusal is the
-    // incumbent's own wall, not a both-legs verdict.
-    let dir = project();
-    let main = dir.path().join("src/main.almd");
-    let forced = RouteOptions { library: false, force_incumbent: true, ..RouteOptions::default() };
-    match render_wasm_routed(main.to_str().expect("utf8"), MAIN, ModuleSource::Disk { dep_paths: &[] }, forced) {
-        Err(RouteError::Incumbent { error, structural_wall: None }) => {
-            let text = format!("{error:?}");
-            assert!(text.contains("heap-result `if`"), "the incumbent's wall names the shape: {text}");
-        }
-        other => panic!("expected the incumbent's wall, got {other:?}"),
+fn a_declined_program_is_a_named_wall() {
+    // An unreachable typed hole: refused on purpose (C-268).
+    let src = "fn later(n: Int) -> Int = todo(\"later\")\n\neffect fn main() -> Unit = {\n  let n = 1\n  if n > 5 then println(\"${later(n)}\") else ()\n  println(\"${n}\")\n}\n";
+    let modules = almide_mir::pipeline::bundled_self_modules(src);
+    match render_wasm_routed("main.almd", src, ModuleSource::Provided(&modules), run_form()) {
+        Err(RouteError::Wall { why }) => assert!(why.contains("expr:Todo"), "the wall names the leg's reason: {why}"),
+        other => panic!("expected the leg's wall, got {other:?}"),
     }
+}
+
+/// The run form on a main-less program is refused by the route itself.
+#[test]
+fn the_run_form_refuses_a_program_without_main() {
+    let src = "fn add(a: Int, b: Int) -> Int = a + b\n";
+    let modules = almide_mir::pipeline::bundled_self_modules(src);
+    match render_wasm_routed("lib.almd", src, ModuleSource::Provided(&modules), run_form()) {
+        Err(RouteError::NoMain) => {}
+        other => panic!("expected NoMain, got {other:?}"),
+    }
+    // The library form builds it (its `pub fn`s become exports).
+    let lib = RouteOptions { library: true, ..RouteOptions::default() };
+    render_wasm_routed("lib.almd", src, ModuleSource::Provided(&modules), lib).expect("the library form builds a main-less module");
 }

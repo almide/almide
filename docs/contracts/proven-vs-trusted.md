@@ -21,24 +21,25 @@ can still print the wrong string.
 
 ## Which leg is this page about?
 
-Since v0.60.0 (#1599) there are two wasm legs, and the boundary map below
-describes the **incumbent v1 leg** — the certified pipeline. That leg is what
-you get with `ALMIDE_WASM_INCUMBENT=1`, and automatically whenever the default
-leg refuses a shape (a verified-to-verified reroute; `ALMIDE_VERIFIED_DEBUG=1`
-names the handover).
+Since v0.60.0 (#1599) there were two wasm legs. The boundary map below
+describes the **MIR certificate pipeline** — the pipeline the incumbent v1 leg
+shipped. Since #2752 no route reached that leg, and #2761 deleted its renderer,
+so **no shipped wasm byte comes from this pipeline**: its rows now describe what
+`almide verify --emit` witnesses over MIR, not a property re-checked on the
+bytes you run. The Coq theorems `WasmEncode.v` / `WasmExec.v` / `WasmRcDec.v`
+stand about a *modeled* runtime (the retired incumbent's).
 
-The **default** `--target wasm` leg — the structural emitter in
-`crates/almide-wasm` — is **trusted end to end, certificate pending** (#1696):
-no row of the table below applies to it. Its evidence is differential and
-CI-gated: byte-identity against the certified leg and native on the whole
-`spec/wasm_cross` corpus (grow-only), semantic-mutation nets over the emitter,
-per-fixture allocation and size ledgers, and a refusal ratchet (a shape it
+The `--target wasm` leg — the structural emitter in `crates/almide-wasm`, the
+only wasm renderer — is **trusted end to end, certificate pending**
+(#2755–#2760): no row of the table below applies to its output. Its evidence is
+differential and CI-gated: byte-identity against native and the interpreter on
+the whole `spec/wasm_cross` corpus (grow-only), semantic-mutation nets over the
+emitter, per-fixture allocation and size ledgers, a refusal ratchet (a shape it
 refuses must stay refused — silently emitting it again is the #1688 regression
-class). The `Built …` line names the leg that produced your bytes; no sentence
-below should be read as a claim about bytes that line attributes to the
-structural leg.
+class), and `proofs/check-structural-bytes.sh`, which grounds the structural
+runtime's bytes against the Coq decoder model `StructuralDecode.v`.
 
-## Where the boundary runs (incumbent v1 leg)
+## Where the boundary runs (the MIR certificate pipeline)
 
 | Stage | Status | What backs it |
 |---|---|---|
@@ -49,7 +50,7 @@ structural leg.
 | IR → MIR lowering | **trusted** | ← *this is the gap F3 (#777) is about* |
 | MIR ownership witness | **proven to be re-checkable** | `proofs/gate.sh`: the untrusted producer emits a witness, the kernel-proven checker re-verifies it |
 | `almide-verify` (the checker a binary distribution runs, #2152) | trusted — agreement-gated, not proven | an independently versioned Rust transcription of the five Coq checkers, linking no compiler crate; `proofs/gate.sh` holds it to the extracted checker's verdict on every row plus a seeded random differential, `proofs/corpus-wall.sh` on the whole corpus witness set |
-| MIR → wasm bytes | trusted | `proofs/check-wasm-bytes.sh`, `WasmEncode.v` for the `rc_inc`/`rc_dec` byte trees |
+| MIR → wasm bytes | retired (#2761) | the incumbent renderer is deleted; `WasmEncode.v` / `WasmExec.v` / `WasmRcDec.v` now stand about its modeled runtime. The shipped structural runtime's bytes: `proofs/check-structural-bytes.sh` against `StructuralDecode.v` |
 | wasmtime | unqualified tool | out of scope by construction |
 
 ## Why the IR → MIR row is the one that matters

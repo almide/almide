@@ -283,7 +283,7 @@ impl Emitter<'_> {
             // this: an alias captured before the assign keeps the old
             // value).
             IrStmtKind::FieldAssign { target, field, value } => {
-                self.lower_field_assign(target, field, value)
+                self.lower_field_assign(target, std::slice::from_ref(field), value)
             }
             // `m[k] = v` on a map var — the in-place window when the var
             // owns its block (#1219), else the same write-back the
@@ -311,9 +311,6 @@ impl Emitter<'_> {
             }
             IrStmtKind::Assign { var, value } => self.lower_assign(var, value),
             IrStmtKind::IndexAssign { target, index, value } => {
-                if self.cells.contains(target) {
-                    return unsup("cell-write:index-assign");
-                }
                 self.lower_index_assign(target, index, value)
             }
             IrStmtKind::Expr { expr } => self.lower_stmt_expr(expr),
@@ -376,6 +373,11 @@ impl Emitter<'_> {
                     let floor = self.hold_i64()?;
                     self.f.instructions().local_get(var_idx).local_set(floor);
                     let flags = self.hoist_cow_flags(None, body)?;
+                    let incl = *inclusive;
+                    let pre = self.prejudge_first_stores(body, &|e: &mut Self| {
+                        e.range_exit_test(var_idx, floor, stop, incl);
+                        e.f.instructions().i32_eqz();
+                    });
                     self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                     self.emit_det_charge_const(1);
                     self.range_exit_test(var_idx, floor, stop, *inclusive);
@@ -390,6 +392,7 @@ impl Emitter<'_> {
                         .br(0)
                         .end()
                         .end();
+                    self.drop_prejudged(pre);
                     self.drop_cow_flags(flags);
                     self.release_i64();
                     self.release_i64();
@@ -406,6 +409,10 @@ impl Emitter<'_> {
                         }
                         self.f.instructions().local_get(sl).local_set(var_idx);
                         let flags = self.hoist_cow_flags(None, body)?;
+                        let pre = self.prejudge_first_stores(body, &|e: &mut Self| {
+                            e.range_exit_test(var_idx, sl, el, inclusive);
+                            e.f.instructions().i32_eqz();
+                        });
                         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                         self.emit_det_charge_const(1);
                         self.range_exit_test(var_idx, sl, el, inclusive);
@@ -420,6 +427,7 @@ impl Emitter<'_> {
                             .br(0)
                             .end()
                             .end();
+                        self.drop_prejudged(pre);
                         self.drop_cow_flags(flags);
                         return Ok(());
                     }
@@ -698,10 +706,11 @@ impl Emitter<'_> {
     pub(crate) fn lower_field_assign(
         &mut self,
         target: &almide_ir::VarId,
-        field: &almide_base::intern::Sym,
+        path: &[almide_base::intern::Sym],
         value: &IrExpr,
     ) -> Result<(), EmitError> {
-        self.field_assign_with(target, field, |s, fty| {
+        let spends_var = self.assign_rhs_spends_var(value, *target);
+        self.field_assign_with(target, path, spends_var, |s, fty| {
             s.lower(value, Some(fty))?;
             s.rc_share_guard(value, fty);
             Ok(())

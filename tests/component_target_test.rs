@@ -2,7 +2,7 @@
 //! wasm artifact as a WASI 0.2 COMPONENT (wit-component + the Cargo-pinned
 //! preview1 adapter — no vendored blob). The wrap is packaging, not a
 //! rewrite: the observable behavior must be identical to the plain
-//! artifact. Covers both legs and the stdin family (the op-35 cursor,
+//! artifact. Covers the direct and adapter forms and the stdin family (the op-35 cursor,
 //! #1625) so the component path inherits the sequential-read contract.
 
 use std::io::Write;
@@ -24,7 +24,7 @@ fn wasmtime_available() -> bool {
     Command::new("wasmtime").arg("--version").output().is_ok_and(|o| o.status.success())
 }
 
-fn build(src: &Path, out: &Path, component: bool, incumbent: bool) -> String {
+fn build(src: &Path, out: &Path, component: bool) -> String {
     let mut args = vec![
         "build",
         src.to_str().unwrap(),
@@ -38,9 +38,6 @@ fn build(src: &Path, out: &Path, component: bool, incumbent: bool) -> String {
     }
     let mut cmd = Command::new(almide_bin());
     cmd.args(&args);
-    if incumbent {
-        cmd.env("ALMIDE_WASM_INCUMBENT", "1");
-    }
     let o = cmd.output().expect("spawn almide");
     let stderr = String::from_utf8_lossy(&o.stderr).to_string();
     assert!(o.status.success(), "build failed:\n{stderr}");
@@ -85,7 +82,7 @@ effect fn main() -> Unit = {
 const STDIN: &str = "Xline-one\nrest-of-it";
 
 #[test]
-fn component_wrap_preserves_behavior_on_both_legs() {
+fn component_wrap_preserves_behavior_in_both_forms() {
     if Command::new(almide_bin()).arg("--version").output().is_err() {
         return;
     }
@@ -96,8 +93,8 @@ fn component_wrap_preserves_behavior_on_both_legs() {
 
     let core = dir.join("echo_core.wasm");
     let comp = dir.join("echo_comp.wasm");
-    build(&src, &core, false, false);
-    let line = build(&src, &comp, true, false);
+    build(&src, &core, false);
+    let line = build(&src, &comp, true);
     // #1628 stage 1: the structural leg's component form is the DIRECT
     // canonical-ABI encode — no preview1 adapter aboard.
     assert!(
@@ -109,13 +106,7 @@ fn component_wrap_preserves_behavior_on_both_legs() {
     let comp_bytes = std::fs::read(&comp).expect("read component");
     assert_eq!(&comp_bytes[6..8], &[1, 0], "not a component-layer artifact");
 
-    let icomp = dir.join("echo_icomp.wasm");
-    let iline = build(&src, &icomp, true, true);
-    assert!(
-        iline.contains("component (adapter)"),
-        "the incumbent component stays on the adapter path:\n{iline}"
-    );
-    // The reversible switch: the structural leg's stage-0 adapter wrap.
+    // The switch back to the stage-0 adapter wrap over the `to_wasi` module.
     let acomp = dir.join("echo_acomp.wasm");
     {
         let o = Command::new(almide_bin())
@@ -145,11 +136,6 @@ fn component_wrap_preserves_behavior_on_both_legs() {
         run_wasmtime(&comp, STDIN),
         core_out,
         "structural component diverged from the core module"
-    );
-    assert_eq!(
-        run_wasmtime(&icomp, STDIN),
-        core_out,
-        "incumbent component diverged from the core module"
     );
     assert_eq!(
         run_wasmtime(&acomp, STDIN),

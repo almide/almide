@@ -657,3 +657,37 @@ fn is_unit_type_expr(ty: &almide_lang::ast::TypeExpr) -> bool {
 
 include!("pass_borrow_inference_ownership.rs");
 include!("pass_borrow_inference_call_sites.rs");
+
+#[cfg(test)]
+mod declared_mut_agrees_with_runtime {
+    /// The native runtime's `&mut` table and a stdlib declaration's `mut`
+    /// params answer one question — which args the call writes — for two
+    /// different consumers: native borrow inference reads the table first,
+    /// every other leg reads the declaration (`almide_ir::mut_args`). This
+    /// enumerates every bundled `@intrinsic` fn that has a native body and
+    /// asserts the two agree position by position.
+    #[test]
+    fn every_intrinsic_with_a_native_body_writes_exactly_its_declared_mut_params() {
+        use almide_lang::ast::{AttrValue, Decl};
+        let mut disagree = Vec::new();
+        for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
+            let Some(src) = almide_lang::stdlib_info::bundled_source(module) else { continue };
+            let Some(program) = almide_lang::parse_cached(src) else { continue };
+            for d in &program.decls {
+                let Decl::Fn { name, params, attrs, .. } = d else { continue };
+                let Some(attr) = attrs.iter().find(|a| a.name.as_str() == "intrinsic") else { continue };
+                let Some(sym) = attr.args.first().and_then(|a| match &a.value {
+                    AttrValue::String { value } => Some(value.clone()),
+                    _ => None,
+                }) else { continue };
+                let Some(native) = crate::generated::runtime_fn_modes::runtime_param_mutability(&sym) else { continue };
+                let declared = almide_ir::mut_args::declared_mut_positions(params, attrs);
+                let runtime: Vec<usize> = native.iter().enumerate().filter(|(_, m)| **m).map(|(i, _)| i).collect();
+                if declared != runtime {
+                    disagree.push(format!("{module}.{name} ({sym}): declared {declared:?}, runtime &mut {runtime:?}"));
+                }
+            }
+        }
+        assert!(disagree.is_empty(), "declaration and native runtime disagree on which args are written:\n{}", disagree.join("\n"));
+    }
+}

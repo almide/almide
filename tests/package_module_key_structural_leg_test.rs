@@ -101,7 +101,7 @@ fn run(dir: &Path, args: &[&str], structural: bool) -> (bool, String, String) {
     let mut cmd = Command::new(almide());
     cmd.current_dir(dir).args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
     if structural {
-        cmd.env("ALMIDE_WASM_STRUCTURAL", "1");
+        cmd.env("ALMIDE_WASM_SKIP_STOCK_AUDIT", "1");
     }
     let mut child = cmd.spawn().expect("spawn almide");
     let (mut so, mut se) = (child.stdout.take().unwrap(), child.stderr.take().unwrap());
