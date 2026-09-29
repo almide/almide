@@ -529,16 +529,7 @@ pub(crate) use calls::is_inplace_mutator;
 mod tests;
 
 include!("drop_sources.rs");
-include!("variant_drop_field_frees.rs");
-include!("drop_sources_b.rs");
-include!("drop_sources_c.rs");
-include!("drop_sources_d.rs");
-include!("drop_sources_anon_tuple.rs");
-include!("repr_sources.rs");
-include!("repr_sources_b.rs");
-include!("repr_sources_c.rs");
 include!("repr_sources_d.rs");
-include!("usage_scan.rs");
 include!("newtype_erase.rs");
 include!("newtype_subst.rs");
 include!("record_defaults.rs");

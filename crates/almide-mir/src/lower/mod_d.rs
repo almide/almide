@@ -363,28 +363,6 @@ fn bare_is_stdlib_own_identity(bare: &str, qualified: &str) -> bool {
     almide_lang::stdlib_info::stdlib_type_vs_user_shadow(bare, qualified)
 }
 
-/// The [`canonical_record_key`] resolution over a NAME SET (the drop generators'
-/// `rec_names`) instead of the layout map — the same exact-then-unique-suffix rule.
-pub(crate) fn canonical_name_in<'a>(
-    names: &'a std::collections::HashSet<String>,
-    name: &str,
-) -> Option<&'a str> {
-    if let Some(k) = names.get(name) {
-        return Some(k.as_str());
-    }
-    let suffix = format!(".{name}");
-    let mut found: Option<&'a str> = None;
-    for k in names {
-        if k.ends_with(&suffix) && !bare_is_stdlib_own_identity(name, k) {
-            if found.is_some() {
-                return None;
-            }
-            found = Some(k.as_str());
-        }
-    }
-    found
-}
-
 /// Build the [`RecordLayouts`] registry from a program's type declarations — the
 /// VALUE-MODEL field structure the lowering consults to materialize records and
 /// resolve `r.x`. Each `type R = { … }` becomes `R → (generic params, fields)`;
