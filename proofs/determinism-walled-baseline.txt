@@ -1,7 +1,7 @@
 # DETERMINISM WALL LEDGER (#2753): the spec/wasm_cross fixtures the STRUCTURAL
 # leg declines, shared by scripts/check-host-determinism.sh and
 # scripts/check-browser-determinism.sh. Both gates drive the structural leg
-# forced (`almide::wasm_route::render_wasm_routed` with force_structural, the
+# forced (`almide::wasm_route::render_wasm_routed` with skip_stock_audit, the
 # renderer `--target wasm` ships by default), so a row here is a fixture whose
 # host-/browser-ABI reproducibility is NOT measured today.
 #

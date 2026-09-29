@@ -246,7 +246,7 @@ spec/serve_cross/http_serve_shutdown.almd :: handle
 # top-level VALUE (`let site = http.router(...)`, then `let h = site!` and a
 # call). The incumbent MIR lowering walls the heap-result `match` the router
 # value reaches; the STRUCTURAL leg (the test lane's default, and
-# ALMIDE_WASM_STRUCTURAL=1) runs the test byte-for-byte with native. No
+# ALMIDE_WASM_SKIP_STOCK_AUDIT=1) runs the test byte-for-byte with native. No
 # incumbent work by design (#1696 retires it); prunes with #1696.
 spec/stdlib/http_router_test.almd :: __test_almd_an app bound at the top level is tested by calling it
 
