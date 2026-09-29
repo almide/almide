@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 161 of 828
+# certified: 169 of 828
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/append_accumulator.almd
 spec/wasm_cross/append_accumulator_heap.almd
@@ -19,10 +19,12 @@ spec/wasm_cross/bytes_repeat_product_wrap_oom.almd
 spec/wasm_cross/bytes_string_window_domain.almd
 spec/wasm_cross/chunk_str.almd
 spec/wasm_cross/container_alias_return.almd
+spec/wasm_cross/control_flow.almd
 spec/wasm_cross/count_domain_nonbytes.almd
 spec/wasm_cross/cross_dep_accumulator.almd
 spec/wasm_cross/datetime_format.almd
 spec/wasm_cross/default_param_ref.almd
+spec/wasm_cross/effect_tco_err_rewrap.almd
 spec/wasm_cross/encoding_base64.almd
 spec/wasm_cross/enumerate_unnameable_element.almd
 spec/wasm_cross/env_args.almd
@@ -70,6 +72,7 @@ spec/wasm_cross/koka_parc21_eval_order.almd
 spec/wasm_cross/koka_parc3_guard_chain.almd
 spec/wasm_cross/koka_parc6_local_scrutinee.almd
 spec/wasm_cross/koka_reuse4_map_rebuild.almd
+spec/wasm_cross/let_unwrap_propagation.almd
 spec/wasm_cross/let_wildcard_discard.almd
 spec/wasm_cross/letbound_variant_match.almd
 spec/wasm_cross/list_call_element.almd
@@ -111,6 +114,7 @@ spec/wasm_cross/option_match_heap_payload.almd
 spec/wasm_cross/or_pattern.almd
 spec/wasm_cross/or_pattern_guarded_nullary.almd
 spec/wasm_cross/pipe_lambda_block_value.almd
+spec/wasm_cross/pure_bang_propagation.almd
 spec/wasm_cross/random_int_entropy.almd
 spec/wasm_cross/recursion_depth_within_limits.almd
 spec/wasm_cross/ref_gleam_div_zero_abort.almd
@@ -118,8 +122,11 @@ spec/wasm_cross/ref_int_min_div_abort.almd
 spec/wasm_cross/repeat_size_ceiling.almd
 spec/wasm_cross/replace_empty_pat.almd
 spec/wasm_cross/reserved_keyword_fn.almd
+spec/wasm_cross/result_default_and_passthrough.almd
 spec/wasm_cross/result_eq.almd
+spec/wasm_cross/result_heap_err_match.almd
 spec/wasm_cross/result_heap_ok_match.almd
+spec/wasm_cross/result_match_rewrap_modcall.almd
 spec/wasm_cross/scoped_region_value.almd
 spec/wasm_cross/sized_int_overflow_wrap.almd
 spec/wasm_cross/split_empty_sep.almd
@@ -157,6 +164,7 @@ spec/wasm_cross/tm_variant_shadow_drop.almd
 spec/wasm_cross/to_result_custom_e.almd
 spec/wasm_cross/trig_libm.almd
 spec/wasm_cross/unique_non_flat_element.almd
+spec/wasm_cross/unwrap_in_callarg.almd
 spec/wasm_cross/value_array_leak_loop.almd
 spec/wasm_cross/value_as_array_leak_loop.almd
 spec/wasm_cross/value_as_array_roundtrip.almd
