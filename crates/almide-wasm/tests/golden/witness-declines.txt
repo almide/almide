@@ -60,7 +60,7 @@ stmt:Expr:ForIn	53
 stmt:Expr:If	25
 stmt:Expr:Match	2
 stmt:Expr:While	153
-stmt:Expr:call-arg:BinOp	91
+stmt:Expr:call-arg:BinOp	92
 stmt:Expr:call-arg:Block	46
 stmt:Expr:call-arg:Call	138
 stmt:Expr:call-arg:If	5
@@ -71,7 +71,7 @@ stmt:Expr:call:target:Computed	1
 stmt:FieldAssign	1
 stmt:Guard	9
 stmt:IndexAssign	9
-tail:BinOp	717
+tail:BinOp	719
 tail:Block	17
 tail:If	4723
 tail:Lambda	10
@@ -90,4 +90,4 @@ tail:TupleIndex	4
 tail:UnOp	1
 tail:UnwrapOr	14
 tail:While	4
-top-lets	28
+top-lets	29
