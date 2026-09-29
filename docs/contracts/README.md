@@ -36,7 +36,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
-| C-001 | Integer division/modulo by zero is total — it aborts, never traps | 0.24.0 | active | fixture | 3 |
+| C-001 | Integer division/modulo by zero is total — it aborts, never traps | 0.24.0 | active | fixture | 4 |
 | C-002 | Signed MIN / -1 overflow aborts, at the TRUE per-width MIN | 0.24.0 | active | fixture | 3 |
 | C-003 | Non-aborting integer div/mod stay byte-identical | 0.24.0 | active | fixture | 1 |
 | C-004 | fan.any / fan.map / fan.settle are deterministic by list order | 0.24.0 | active | fixture | 8 |
