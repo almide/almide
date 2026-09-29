@@ -62,6 +62,7 @@
 67008	spec/wasm_cross/bytes_string_window_domain.almd
 2628720	spec/wasm_cross/bytes_temp_receiver.almd
 68352	spec/wasm_cross/bytes_writer_family.almd
+67056	spec/wasm_cross/bytes_writer_mut_from_declaration.almd
 66016	spec/wasm_cross/call_closure_lambda_param.almd
 65888	spec/wasm_cross/call_lambda_ctor.almd
 66144	spec/wasm_cross/callee_shadowing_family.almd

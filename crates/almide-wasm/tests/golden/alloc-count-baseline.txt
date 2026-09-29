@@ -60,8 +60,9 @@
 105	65	1081	105	spec/wasm_cross/bytes_set_on_record_field.almd
 48	32	377	48	spec/wasm_cross/bytes_set_value_semantics.almd
 51	19	476	47	spec/wasm_cross/bytes_string_window_domain.almd
-100141	80100	6463065	80131	spec/wasm_cross/bytes_temp_receiver.almd
+100142	80101	6463067	80132	spec/wasm_cross/bytes_temp_receiver.almd
 114	80	2689	105	spec/wasm_cross/bytes_writer_family.almd
+133	108	1700	131	spec/wasm_cross/bytes_writer_mut_from_declaration.almd
 5	0	35	5	spec/wasm_cross/call_closure_lambda_param.almd
 1	0	32	1	spec/wasm_cross/call_lambda_ctor.almd
 16	9	122	16	spec/wasm_cross/callee_shadowing_family.almd
