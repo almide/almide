@@ -182,12 +182,14 @@
 5375	spec/wasm_cross/fan_map_inline_lambda.almd
 6398	spec/wasm_cross/fan_map_nested_combinators.almd
 8595	spec/wasm_cross/fan_map_parallel_scalar.almd
+3058	spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd
 11278	spec/wasm_cross/fan_prefetch_fs.almd
 3615	spec/wasm_cross/fan_pure_thunks.almd
 6559	spec/wasm_cross/fan_race_mapper.almd
 8478	spec/wasm_cross/fan_settle_tuple.almd
 4994	spec/wasm_cross/fan_sibling_trap.almd
 3384	spec/wasm_cross/fan_var_thunk_list.almd
+2761	spec/wasm_cross/fan_worker_abort_keeps_stdout.almd
 3105	spec/wasm_cross/filter_map_conditional_arm.almd
 3233	spec/wasm_cross/flat_map_aliased_field.almd
 1987	spec/wasm_cross/flight_pid_control.almd

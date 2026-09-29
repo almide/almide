@@ -30,9 +30,9 @@ module-arm:unaudited:string.clear	2
 module-arm:unaudited:string.push	1
 named-op	11
 rhs:BinOp	806
-rhs:Block	169
+rhs:Block	170
 rhs:EmptyMap	3
-rhs:Fan	2
+rhs:Fan	3
 rhs:If	666
 rhs:IndexAccess	1
 rhs:Lambda	6
@@ -56,7 +56,7 @@ stmt:BindDestructure	16
 stmt:Comment	165
 stmt:Expr:Block	84
 stmt:Expr:ForIn	53
-stmt:Expr:If	25
+stmt:Expr:If	27
 stmt:Expr:Match	2
 stmt:Expr:While	153
 stmt:Expr:call-arg:BinOp	92
@@ -72,7 +72,7 @@ stmt:Guard	9
 stmt:IndexAssign	9
 tail:BinOp	722
 tail:Block	17
-tail:If	4743
+tail:If	4747
 tail:Lambda	10
 tail:MapAccess	5
 tail:Match	480
