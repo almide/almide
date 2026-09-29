@@ -51,7 +51,10 @@ impl Emitter<'_> {
             }
         };
         self.f.instructions().local_set(scr);
+        // The witness (#2756): one site, one arm per match arm.
+        self.witness_branch_open();
         let r = self.lower_arm_chain(arms, subj_ty, scr, result, tail);
+        self.witness_branch_close();
         if guarded {
             self.release_val(subj_ty);
         }
@@ -67,11 +70,13 @@ impl Emitter<'_> {
         tail: bool,
     ) -> Result<(), EmitError> {
         let arm = &arms[0];
+        self.witness_branch_arm();
         let irrefutable = pattern_irrefutable(&arm.pattern);
         if irrefutable && arm.guard.is_none() {
             // Selected unconditionally; later arms are dead (checker-
             // verified reachability aside, the oracle picks the first).
             self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
+            self.witness_pattern_views(&arm.pattern);
             return self.lower_arm_body(&arm.body, result, tail);
         }
         // The arm's verdict: pattern test AND guard. Binds run BEFORE the
@@ -82,12 +87,14 @@ impl Emitter<'_> {
             None => self.emit_pattern_test(&arm.pattern, subj_ty, scr)?,
             Some(g) if irrefutable => {
                 self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
+                self.witness_pattern_views(&arm.pattern);
                 self.lower(g, Some(BOOL))?;
             }
             Some(g) => {
                 self.emit_pattern_test(&arm.pattern, subj_ty, scr)?;
                 self.f.instructions().if_(BlockType::Result(ValType::I32));
                 self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
+                self.witness_pattern_views(&arm.pattern);
                 self.lower(g, Some(BOOL))?;
                 self.f.instructions().else_().i32_const(0).end();
             }
@@ -105,6 +112,7 @@ impl Emitter<'_> {
         let r = (|| {
             if arm.guard.is_none() {
                 self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
+                self.witness_pattern_views(&arm.pattern);
             }
             self.lower_arm_body(&arm.body, result, tail)?;
             self.f.instructions().else_();
@@ -140,6 +148,9 @@ impl Emitter<'_> {
                     // second credit at the enclosing return (#2046).
                     if self.rc_droppable(ty) && !self.rc_owned_result(body) {
                         self.rc_inc_top();
+                    }
+                    if self.rc_droppable(ty) {
+                        self.witness_arm_value(body);
                     }
                 })
             }

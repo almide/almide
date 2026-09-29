@@ -57,23 +57,24 @@
 //! and the certificate text is byte-compatible with the extracted checker
 //! for the gate.sh hookup (phase A2).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::Mutex;
 
-use almide_ir::{IrExpr, IrExprKind, IrStmtKind};
+use crate::witness_paths::{Branches, Ev};
+
 
 pub struct WitnessRecorder {
     next_obj: u32,
     obj_of_local: HashMap<u32, u32>,
-    streams: BTreeMap<u32, String>,
+    /// Every event in emission order, with the branch structure it was
+    /// emitted under (#2756); rendered per object by witness_paths.rs.
+    log: Vec<Ev>,
+    /// The open branch sites and what is dead code right now.
+    branches: Branches,
     /// A hook saw an event it could not attribute — the gate and the
     /// hooks disagree. The certificate becomes the loud `!poison`
     /// sentinel the floor test FAILS on, never a silent under-count.
     poisoned: bool,
-    /// A `return_call` replaced the frame: the releases it emitted are the
-    /// frame's last events, and the fall-through epilogue the emitter still
-    /// writes after the jump is dead code — its decs are not recorded.
-    frame_replaced: bool,
     /// An EMISSION-TIME decline (#1696 step 4): the gate admitted the
     /// body's shape, but the route it took has an RC site this phase does
     /// not record (a View result, a native arm that bypasses `lower_arg`).
@@ -101,9 +102,9 @@ impl WitnessRecorder {
         Self {
             next_obj: 0,
             obj_of_local: HashMap::new(),
-            streams: BTreeMap::new(),
+            log: Vec::new(),
+            branches: Branches::default(),
             poisoned: false,
-            frame_replaced: false,
             declined: None,
             hooked: Vec::new(),
         }
@@ -133,41 +134,63 @@ impl WitnessRecorder {
         self.temp_borrowed();
     }
 
-    fn fresh_obj(&mut self, local: u32) -> u32 {
+    /// A new object: logged as born here unless this is dead code.
+    fn new_obj(&mut self) -> u32 {
         let o = self.next_obj;
         self.next_obj += 1;
+        if !self.branches.dead() {
+            self.log.push(Ev::Birth(o));
+        }
+        o
+    }
+
+    fn fresh_obj(&mut self, local: u32) -> u32 {
+        let o = self.new_obj();
         self.obj_of_local.insert(local, o);
         o
+    }
+
+    /// Record `ops` on object `o`, unless this is dead code (after an exit
+    /// on this path — the instructions are emitted but never run).
+    fn ops(&mut self, o: u32, ops: &str) {
+        if !self.branches.dead() {
+            self.log.extend(ops.chars().map(|c| Ev::Op(o, c)));
+        }
+    }
+
+    fn local_ops(&mut self, local: u32, ops: &str) -> bool {
+        let Some(&o) = self.obj_of_local.get(&local) else { return false };
+        self.ops(o, ops);
+        true
     }
 
     /// A droppable param: callee-owned (+1 pre-paid by the call site's
     /// rc_arg_guard) — the object is born owned in this frame.
     pub fn param_owned(&mut self, local: u32) {
         let o = self.fresh_obj(local);
-        self.streams.entry(o).or_default().push('i');
+        self.ops(o, "i");
     }
 
     /// A droppable param this frame only BORROWS (param_borrow.rs, #2028):
     /// the object is known, no credit of it is held here — a share or a
-    /// ret-move on it balances against nothing this frame owns.
+    /// ret-move on it balances against nothing this frame owns. A pattern
+    /// bind (a view of the subject's payload, #2756) is the same.
     pub fn param_borrowed(&mut self, local: u32) {
-        let o = self.fresh_obj(local);
-        self.streams.entry(o).or_default();
+        self.fresh_obj(local);
     }
 
     /// A fresh temporary lent to a borrowed param: born at the site,
     /// released by the site right after the call.
     pub fn temp_borrowed(&mut self) {
-        let o = self.next_obj;
-        self.next_obj += 1;
-        self.streams.entry(o).or_default().push_str("id");
+        let o = self.new_obj();
+        self.ops(o, "id");
     }
 
     /// Bind of a certainly-fresh rhs (heap literal, block copy): a new
     /// object, one ownership.
     pub fn bind_fresh(&mut self, local: u32) {
         let o = self.fresh_obj(local);
-        self.streams.entry(o).or_default().push('i');
+        self.ops(o, "i");
     }
 
     /// Bind of a borrowed Var rhs: the SOURCE local's object gains a
@@ -175,7 +198,7 @@ impl WitnessRecorder {
     pub fn bind_alias(&mut self, local: u32, src_local: u32) -> bool {
         let Some(&o) = self.obj_of_local.get(&src_local) else { return false };
         self.obj_of_local.insert(local, o);
-        self.streams.entry(o).or_default().push('a');
+        self.ops(o, "a");
         true
     }
 
@@ -183,45 +206,48 @@ impl WitnessRecorder {
     /// share (`a`), and the value leaving the frame is the move-out
     /// (`m`) — together the transfer of one credit to the caller.
     pub fn ret_move(&mut self, local: u32) -> bool {
-        let Some(&o) = self.obj_of_local.get(&local) else { return false };
-        let st = self.streams.entry(o).or_default();
-        st.push('a');
-        st.push('m');
-        true
+        self.local_ops(local, "am")
     }
 
-    /// A real `$dec_flat` on the local's object (epilogue / dec-old). After
-    /// a frame replacement the epilogue's decs are dead code: attributed
+    /// A real `$dec_flat` on the local's object (epilogue / dec-old). In
+    /// dead code (after a frame replacement on this path) it is attributed
     /// (the local is known) but not recorded.
     pub fn dec_local(&mut self, local: u32) -> bool {
-        let Some(&o) = self.obj_of_local.get(&local) else { return false };
-        if !self.frame_replaced {
-            self.streams.entry(o).or_default().push('d');
-        }
-        true
+        self.local_ops(local, "d")
     }
 
-    /// The `return_call` site finished its releases: nothing emitted after
-    /// this executes.
+    /// A frame-ending edge (a `return_call`) finished its releases: nothing
+    /// emitted after it on this path executes (#2756: inside an arm, only
+    /// that arm is over).
     pub fn frame_replaced(&mut self) {
-        self.frame_replaced = true;
+        self.branches.exit(&mut self.log);
+    }
+
+    /// A branch site opens (`if` / `match`, #2756).
+    pub fn branch_open(&mut self) {
+        self.branches.open(&mut self.log);
+    }
+
+    /// The next arm of the innermost open site begins.
+    pub fn branch_arm(&mut self) {
+        self.branches.arm(&mut self.log);
+    }
+
+    /// The innermost open site joins.
+    pub fn branch_close(&mut self) {
+        self.branches.close(&mut self.log);
     }
 
     /// A droppable Var argument at a call site: the site's `rc_inc` is
     /// the share (`a`), and the credit moves into the callee (`m`).
     pub fn arg_share_move(&mut self, local: u32) -> bool {
-        let Some(&o) = self.obj_of_local.get(&local) else { return false };
-        let st = self.streams.entry(o).or_default();
-        st.push('a');
-        st.push('m');
-        true
+        self.local_ops(local, "am")
     }
 
     /// A fresh temporary handed to a callee: born here, consumed there.
     pub fn temp_move(&mut self) {
-        let o = self.next_obj;
-        self.next_obj += 1;
-        self.streams.entry(o).or_default().push_str("im");
+        let o = self.new_obj();
+        self.ops(o, "im");
     }
 
     /// An owned tail value (a call result or a fresh literal) leaving the
@@ -252,12 +278,13 @@ impl WitnessRecorder {
         if let Some(r) = &self.declined {
             return format!("{DECLINE_PREFIX}{r}\n");
         }
-        let mut s = String::new();
-        for stream in self.streams.values() {
-            s.push_str(stream);
-            s.push('\n');
+        if !self.branches.settled() {
+            return "!poison\n".to_string();
         }
-        s
+        match crate::witness_paths::render(&self.log, self.next_obj) {
+            Ok(s) => s,
+            Err(r) => format!("{DECLINE_PREFIX}{r}\n"),
+        }
     }
 }
 
@@ -285,266 +312,8 @@ pub fn balanced(cert: &str) -> bool {
     true
 }
 
-/// The phase-A/B1 subset gate: `None` = the body is straight-line and
-/// every RC-affecting site is covered by the recorder hooks (bind,
-/// call-argument, store, tail, epilogue / tail-release); `Some(reason)` =
-/// out of subset, do not record. Deliberately conservative — admitting a
-/// shape here without auditing its RC sites would let the witness
-/// under-count real events, which is the one dishonesty the recorder
-/// exists to rule out.
-///
-/// #2755 (step 4, the flat alphabet on temporaries): the value forms are
-/// one recursive predicate, [`value_subset`]. A nested call argument, a
-/// binary operator, a constructor (`some` / `ok` / `err` / a variant
-/// case) and a `{ let …; v }` block (what arg_temps.rs makes of a call
-/// operand) are admitted wherever a value is, because every RC site they
-/// reach is already a hook: an inner call's arguments are the call
-/// hooks', its owned result is the temporary the enclosing site records
-/// (`im` into an owned param or a payload slot, `id` when parked for a
-/// borrowed one), a payload store is `witness_store`, a nested bind is the
-/// Bind hook, and a concat reads its operands without a credit.
-pub fn straightline_subset(body: &IrExpr, ret_is_heap: bool, self_name: &str) -> Option<String> {
-    // `fn f(x) = expr` lowers exactly like `{ expr }`: a bare body is the
-    // empty-statement block with that tail (B1: the tail-call and
-    // literal-tail fns are almost all written this way).
-    let (stmts, expr): (&[almide_ir::IrStmt], Option<&IrExpr>) = match &body.kind {
-        IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
-        _ => (&[], Some(body)),
-    };
-    if let Some(r) = stmts_subset(stmts) {
-        return Some(r);
-    }
-    match expr.map(|t| &t.kind) {
-        // A heap return is admitted only as a plain bound Var (the
-        // ret-inc + move-out pair the func.rs hook records) or an OWNED
-        // value (its one credit moves out); any other heap tail has
-        // unrecorded RC sites.
-        None | Some(IrExprKind::Unit) if !ret_is_heap => None,
-        None => Some("tail:Unit-heap".into()),
-        // A SELF tail call is loop-converted (tco.rs): the frame is not
-        // replaced, the params are rebound by the loop-back and released
-        // again by the epilogue — a loop, not a straight line. Out of
-        // subset (the recorder is not loop-aware).
-        Some(IrExprKind::Call { target: almide_ir::CallTarget::Named { name }, .. })
-            if name.as_str() == self_name =>
-        {
-            Some("tail:self-call-loop".into())
-        }
-        // A scalar literal is no heap tail at all.
-        Some(IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. } | IrExprKind::LitFloat { .. })
-            if ret_is_heap =>
-        {
-            Some("tail:scalar-lit-heap".into())
-        }
-        // A block tail: its statements join the frame's straight line, its
-        // value is the tail's (rc_tail — the func.rs hooks read through it).
-        Some(IrExprKind::Block { .. }) => straightline_subset(expr?, ret_is_heap, self_name),
-        Some(_) => value_subset(expr?).map(|w| w.at("tail")),
-    }
-}
-
-/// Why a value is out of subset: the node ITSELF (`Here(tag)`, reported
-/// under the position it stands in — `rhs:If`, `call-arg:Lambda`), or a
-/// node somewhere inside it (`Deep(reason)`, already reported under ITS
-/// innermost position). The histogram thus names the shape to admit next
-/// and the slot it sits in, never the path to it.
-enum Why {
-    Here(String),
-    Deep(String),
-}
-
-impl Why {
-    fn at(self, position: &str) -> String {
-        match self {
-            Why::Here(t) => format!("{position}:{t}"),
-            Why::Deep(r) => r,
-        }
-    }
-
-    /// The node is inside `position`: a `Here` becomes `Deep` there.
-    fn inside(self, position: &str) -> Why {
-        Why::Deep(self.at(position))
-    }
-}
-
-/// The statement rules of a straight line: a Bind of an admissible value,
-/// a statement-position call (its owned droppable result is released by
-/// the discard route, `id`).
-fn stmts_subset(stmts: &[almide_ir::IrStmt]) -> Option<String> {
-    for s in stmts {
-        match &s.kind {
-            IrStmtKind::Bind { value, .. } => {
-                if let Some(w) = value_subset(value) {
-                    return Some(w.at("rhs"));
-                }
-            }
-            IrStmtKind::Expr { expr } if matches!(expr.kind, IrExprKind::Call { .. }) => {
-                if let Some(w) = call_subset(expr) {
-                    return Some(w.at("stmt:Expr"));
-                }
-            }
-            IrStmtKind::Expr { expr } => return Some(format!("stmt:Expr:{}", expr_tag(expr))),
-            other => return Some(format!("stmt:{}", tag(other))),
-        }
-    }
-    None
-}
-
-/// A space-free tag of an IR node's variant, for the decline histogram
-/// (`grep -o '^!decline:[^ ]*' | sort | uniq -c` over the floor dump).
-fn tag<T: std::fmt::Debug>(v: &T) -> String {
-    format!("{v:?}").chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect()
-}
-
-/// A statement-position expression's tag, one level deeper for a call
-/// (its target family is what the next increment chooses by).
-fn expr_tag(e: &IrExpr) -> String {
-    match &e.kind {
-        IrExprKind::Call { target, .. } => format!("Call:{}", tag(target)),
-        other => tag(other),
-    }
-}
-
-/// Is the value a scalar (no block, no RC site of its own)?
-fn scalar_ty(t: &almide_types::types::Ty) -> bool {
-    use almide_types::types::Ty;
-    matches!(
-        t,
-        Ty::Int
-            | Ty::Float
-            | Ty::Int8
-            | Ty::Int16
-            | Ty::Int32
-            | Ty::Int64
-            | Ty::UInt8
-            | Ty::UInt16
-            | Ty::UInt32
-            | Ty::UInt64
-            | Ty::Float32
-            | Ty::Float64
-            | Ty::Bool
-            | Ty::Unit
-    )
-}
-
-/// A value whose every RC site is a recorder hook (#2755). `Some(tag)` names
-/// the innermost shape that is not — the reason the histogram counts, under
-/// the caller's position prefix (`rhs:`, `tail:`, `call-arg:` …).
-fn value_subset(e: &IrExpr) -> Option<Why> {
-    match &e.kind {
-        IrExprKind::LitInt { .. }
-        | IrExprKind::LitFloat { .. }
-        | IrExprKind::LitBool { .. }
-        | IrExprKind::LitStr { .. }
-        | IrExprKind::Unit
-        | IrExprKind::Var { .. }
-        // `none` is NULL_ADDR: no block, no site.
-        | IrExprKind::OptionNone => None,
-        // A list literal: the spine is fresh, each element store is
-        // `witness_store` exactly like a constructor payload's.
-        IrExprKind::List { elements } => elements.iter().find_map(|x| value_subset(x).map(|w| w.inside("list-elem"))),
-        // A call: its arguments are the call hooks' (recursively), its
-        // droppable result is a received credit (#1986) the enclosing
-        // site records.
-        IrExprKind::Call { .. } => call_subset(e),
-        // A one-slot constructor: the block is fresh (the enclosing site's
-        // `i` / `im`), its payload store is `witness_store` — a Var shares
-        // and moves in (`am`), an owned temporary moves in (`im`).
-        IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } => {
-            value_subset(expr).map(|w| w.inside("payload"))
-        }
-        IrExprKind::BinOp { op, left, right } => binop_subset(*op, left, right),
-        // `{ let t = f(x); op(t) }` — arg_temps.rs's shape: the binds are the
-        // Bind hook's (the frame's exit plan releases them), the value is
-        // the tail's (`rc_owned_result` and the hooks read through blocks).
-        IrExprKind::Block { stmts, expr: Some(tail) } => {
-            stmts_subset(stmts).map(Why::Deep).or_else(|| value_subset(tail))
-        }
-        other => Some(Why::Here(tag(other))),
-    }
-}
-
-/// A binary operator. The operators read their operands and spend no
-/// credit (`$concat` copies, a comparison reads), so a HEAP operand is
-/// admitted only as a Var or a pool-static literal: a fresh heap operand
-/// would be an unowned temporary no hook records (arg_temps.rs binds every
-/// such operand first, so this is the shape the emitter actually sees). A
-/// SCALAR operand is any admissible value — except under `and` / `or`,
-/// whose right operand runs conditionally: there it must be RC-free.
-fn binop_subset(op: almide_ir::BinOp, left: &IrExpr, right: &IrExpr) -> Option<Why> {
-    let operand = |x: &IrExpr| -> Option<Why> {
-        if scalar_ty(&x.ty) {
-            return value_subset(x).map(|w| w.inside("operand"));
-        }
-        match &x.kind {
-            IrExprKind::Var { .. } | IrExprKind::LitStr { .. } => None,
-            other => Some(Why::Deep(format!("heap-operand:{}", tag(other)))),
-        }
-    };
-    if let Some(w) = operand(left) {
-        return Some(w);
-    }
-    if matches!(op, almide_ir::BinOp::And | almide_ir::BinOp::Or) && !rc_free(right) {
-        return Some(Why::Deep("short-circuit-operand".into()));
-    }
-    operand(right)
-}
-
-/// A value with no RC site anywhere inside (Vars, literals, operators over
-/// them): safe to evaluate conditionally inside a straight-line frame.
-fn rc_free(e: &IrExpr) -> bool {
-    match &e.kind {
-        IrExprKind::LitInt { .. }
-        | IrExprKind::LitFloat { .. }
-        | IrExprKind::LitBool { .. }
-        | IrExprKind::LitStr { .. }
-        | IrExprKind::Var { .. } => true,
-        IrExprKind::BinOp { left, right, .. } => rc_free(left) && rc_free(right),
-        IrExprKind::UnOp { operand, .. } => rc_free(operand),
-        _ => false,
-    }
-}
-
-/// A call the hooks cover: a Named user fn or variant constructor (the
-/// builtin `some`/`ok`/`err` are IR kinds, not calls) or, since step 4, a
-/// Module call (the native arms' declared modes are recorded at
-/// `lower_arg`; the registry route consults the callee's param_owned
-/// table like the Named route), over admissible arguments (#2755: nested
-/// calls, operators, constructors — each argument's own sites are hooks,
-/// and its owned result is the temporary the argument hook records).
-fn call_subset(e: &IrExpr) -> Option<Why> {
-    let IrExprKind::Call { target, args, .. } = &e.kind else {
-        return Some(Why::Deep("call:not-a-call".into()));
-    };
-    match target {
-        almide_ir::CallTarget::Named { name } => {
-            // The http_framed host-op leaves (calls.rs) intercept before
-            // resolution and lower their args outside every hook.
-            if name.as_str().starts_with("__http_framed_")
-                || name.as_str().starts_with("__http_call_")
-                || name.as_str().starts_with("__http_serve_")
-            {
-                return Some(Why::Deep("call:host-splice".into()));
-            }
-            // `__is_null` reads the Value tag of its lowered argument, and
-            // `panic` concatenates its message into a line it never binds:
-            // no argument hook fires for either, so only an RC-free
-            // argument is honest.
-            if matches!(name.as_str(), "__is_null" | "panic") && !args.iter().all(rc_free) {
-                return Some(Why::Deep(format!("call:{name}-arg")));
-            }
-        }
-        almide_ir::CallTarget::Module { .. } => {}
-        other => return Some(Why::Deep(format!("call:target:{}", tag(other)))),
-    }
-    for a in args {
-        if let Some(w) = value_subset(a) {
-            return Some(w.inside("call-arg"));
-        }
-    }
-    None
-}
-
+// The subset gate lives in witness_gate.rs (the file budget).
+pub use crate::witness_gate::straightline_subset;
 
 // ── the collection sink (diagnostic channel, test-enabled) ──────────────
 

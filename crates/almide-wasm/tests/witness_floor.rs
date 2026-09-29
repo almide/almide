@@ -5,8 +5,10 @@
 //!      and the recorder hooks agree on every admitted body (a poison
 //!      means an RC event fired that the hooks could not attribute:
 //!      a gate bug, loudly);
-//!   2. every collected certificate BALANCES under the mirror of the
-//!      proven rule (per object: no release at rc 0, no leak);
+//!   2. every collected certificate is ACCEPTED by the portable checker
+//!      (almide-verify, held to the extracted kernel-proven checker in
+//!      proofs/gate.sh): per object and per path, no release at rc 0, no
+//!      leak (#2756 — branch frames made the flat mirror too narrow);
 //!   3. the count of witnessed functions WITH RC EVENTS never shrinks —
 //!      golden/witness-floor.txt, grow-only, ratified with
 //!      ALMIDE_UPDATE_WITNESS_FLOOR=1 (phases B/C admit more shapes and
@@ -264,7 +266,10 @@ fn structural_witnesses_balance_and_hold_the_floor() {
                 declined.insert(key, reason.trim().to_string());
             } else if cert.starts_with('!') {
                 poisoned.push(key);
-            } else if !almide_wasm::witness::balanced(&cert) {
+            // #2756: the certificate carries branch frames (`{…|…}`, the
+            // v5 exit `x`) — judged by the portable checker itself, not a
+            // flat-alphabet mirror that would reject every branch.
+            } else if !almide_verify::check(almide_verify::Property::Ownership, cert.as_bytes()) {
                 unbalanced.push((key, cert));
             } else {
                 if dump {
@@ -316,7 +321,7 @@ fn structural_witnesses_balance_and_hold_the_floor() {
     );
     assert!(
         unbalanced.is_empty(),
-        "{} certificate(s) fail the balance mirror:\n{:?}",
+        "{} certificate(s) rejected by the portable checker:\n{:?}",
         unbalanced.len(),
         unbalanced
     );
