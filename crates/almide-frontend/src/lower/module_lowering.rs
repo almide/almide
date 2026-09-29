@@ -591,21 +591,8 @@ fn strip_const_param_generics(generics: &Option<Vec<ast::GenericParam>>) -> Opti
 
 // Resolve mut params: from `mut` keyword and @mutating(param_name) annotation
 fn resolve_mutated_params(params: &[ast::Param], attrs: &[ast::Attribute]) -> Vec<usize> {
-    let mut mutated_params: Vec<usize> = params.iter().enumerate()
-        .filter(|(_, p)| p.is_mut)
-        .map(|(i, _)| i)
-        .collect();
-    // Merge @mutating(param_name) indices (backward compat)
-    for attr in attrs.iter().filter(|a| a.name.as_str() == "mutating") {
-        for arg in &attr.args {
-            if let almide_lang::ast::AttrValue::Ident { name: pname } = &arg.value {
-                if let Some(idx) = params.iter().position(|p| p.name == *pname) {
-                    if !mutated_params.contains(&idx) {
-                        mutated_params.push(idx);
-                    }
-                }
-            }
-        }
-    }
-    mutated_params
+    // One reading of a declaration's `mut` positions (`mut p` plus
+    // `@mutating(p)`), shared with every consumer that asks about a callee it
+    // did not lower (#2948): a lowered fn and its declaration must agree.
+    almide_ir::mut_args::declared_mut_positions(params, attrs)
 }
