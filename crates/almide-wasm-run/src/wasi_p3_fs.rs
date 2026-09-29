@@ -147,10 +147,11 @@ fn fs_read_tail(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, l: Read
     i.local_get(buf).local_get(total).i32_add();
     i.local_get(cap).local_get(total).i32_sub();
     i.call(I_FS_SREAD);
-    i.call(f_await);
-    i.i32_const(4).i32_shr_u().local_set(n);
-    i.local_get(n).i32_eqz().br_if(1);
-    i.local_get(total).local_get(n).i32_add().local_set(total);
+    // #2955: the raw `(count << 4) | status`; EOF is the status (DROPPED /
+    // CANCELLED), not a zero count — a COMPLETED read may carry 0 items.
+    i.call(f_await).local_set(n);
+    i.local_get(total).local_get(n).i32_const(4).i32_shr_u().i32_add().local_set(total);
+    i.local_get(n).i32_const(15).i32_and().br_if(1);
     i.br(0).end().end();
     i.local_get(rx).call(I_FS_SDROP);
     i.local_get(fut).call(I_FS_FDROP);
@@ -218,18 +219,25 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>, f_e
         i.end();
     }
 
-    // op 35: stdin take up to a_len bytes — ONE read (through `$await`),
-    // straight into the park data span; a DROPPED status (writer closed)
-    // answers 0.
+    // op 35: stdin take up to a_len bytes — reads (through `$await`)
+    // straight into the park data span until one delivers bytes; a DROPPED
+    // status (writer closed) answers 0. A COMPLETED read of 0 items is not
+    // EOF (#2955) and reads again.
     i.local_get(op).i32_const(35).i32_eq().if_(BlockType::Empty);
     open_stdin(&mut i, g_in_rx, g_in_fut, park);
+    i.i32_const(0).local_set(n);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(a_len).i32_eqz().br_if(1);
     i.global_get(g_in_rx);
     i.global_get(g_in_rx);
     i.i32_const((park + DATA) as i32);
     i.local_get(a_len);
     i.call(I_STDIN_READ);
-    i.call(f_await);
-    i.i32_const(4).i32_shr_u().global_set(g_plen);
+    i.call(f_await).local_set(n);
+    i.local_get(n).i32_const(4).i32_shr_u().br_if(1);
+    i.local_get(n).i32_const(15).i32_and().br_if(1);
+    i.br(0).end().end();
+    i.local_get(n).i32_const(4).i32_shr_u().global_set(g_plen);
     i.i32_const((park + DATA) as i32).global_set(g_ppos);
     i.global_get(g_plen).i64_extend_i32_u().return_();
     i.end();
@@ -526,11 +534,11 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>, f_e
     i.local_get(rx);
     i.local_get(b_ptr).local_get(b_len);
     i.call(I_FS_WWRITE);
-    i.call(f_await);
-    i.i32_const(4).i32_shr_u().local_set(n);
-    i.local_get(n).i32_eqz().br_if(1);
-    i.local_get(b_ptr).local_get(n).i32_add().local_set(b_ptr);
-    i.local_get(b_len).local_get(n).i32_sub().local_set(b_len);
+    // #2955: raw result; a 0-item COMPLETED write retries, DROPPED ends.
+    i.call(f_await).local_set(n);
+    i.local_get(b_ptr).local_get(n).i32_const(4).i32_shr_u().i32_add().local_set(b_ptr);
+    i.local_get(b_len).local_get(n).i32_const(4).i32_shr_u().i32_sub().local_set(b_len);
+    i.local_get(n).i32_const(15).i32_and().br_if(1);
     i.br(0).end().end();
     i.local_get(rx).call(I_FS_WDROP);
     i.local_get(fut);
