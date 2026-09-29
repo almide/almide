@@ -788,6 +788,7 @@
 "net.unix_recv" = "unreleased"
 "net.unix_send" = "unreleased"
 "net.unix_take_fds" = "unreleased"
+"net.unix_wait" = "unreleased"
 "option.collect" = "<=0.15.0"
 "option.collect_map" = "<=0.15.0"
 "option.filter" = "<=0.7.0"

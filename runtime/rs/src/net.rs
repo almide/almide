@@ -547,6 +547,41 @@ pub fn almide_rt_net_unix_poll(fd: i64, timeout_ms: i64) -> Result<bool, String>
     }
 }
 
+/// The descriptors among `fds` that have something to read (data, a
+/// connection, or the peer's close) within `timeout_ms` milliseconds, in the
+/// order given; empty when none did. 0 checks without waiting, a negative
+/// timeout waits for the first. One wait for many sources: a Wayland socket
+/// and a compositor's event socket together, with no busy loop.
+pub fn almide_rt_net_unix_wait(fds: &[i64], timeout_ms: i64) -> Result<Vec<i64>, String> {
+    #[cfg(unix)]
+    {
+        use almide_net_unix as u;
+        let mut polls = Vec::with_capacity(fds.len());
+        for &f in fds {
+            polls.push(u::PollFd { fd: u::raw(f, "unix_wait")?, events: u::POLLIN, revents: 0 });
+        }
+        let timeout = if timeout_ms < 0 { -1 } else { timeout_ms.min(i64::from(i32::MAX)) as i32 };
+        loop {
+            for p in polls.iter_mut() { p.revents = 0; }
+            let n = unsafe { u::poll(polls.as_mut_ptr(), polls.len() as u::NFds, timeout) };
+            if n < 0 {
+                let e = std::io::Error::last_os_error();
+                if e.kind() == std::io::ErrorKind::Interrupted { continue; }
+                return Err(format!("unix_wait: {e}"));
+            }
+            return Ok(polls.iter().zip(fds)
+                .filter(|(p, _)| (p.revents & (u::POLLIN | u::POLLHUP)) != 0)
+                .map(|(_, &f)| f)
+                .collect());
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (fds, timeout_ms);
+        Err("unix_wait: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
+    }
+}
+
 /// Close a descriptor this module opened or received.
 pub fn almide_rt_net_unix_close(fd: i64) -> Result<(), String> {
     #[cfg(unix)]

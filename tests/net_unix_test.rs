@@ -50,6 +50,13 @@ effect fn main() -> Unit = {
   println("idle ${net.unix_poll(s, 0)!}")
   net.unix_send(c, bytes.from_string("hello"), [a, b])!
   println("ready ${net.unix_poll(s, 1000)!}")
+  let other = net.unix_connect(path)!
+  let peer = net.unix_accept(l)!
+  let ready = net.unix_wait([peer, s], 1000)!
+  println("wait ${int.to_string(list.len(ready))} ${if ready[0] == s then "s" else "peer"}")
+  println("wait none ${int.to_string(list.len(net.unix_wait([peer], 0)!))}")
+  net.unix_close(other)!
+  net.unix_close(peer)!
   let got = net.unix_recv(s, 100)!
   let fds = net.unix_take_fds(s)
   println("got ${bytes.to_string_lossy(got)} with ${int.to_string(list.len(fds))}")
@@ -72,7 +79,7 @@ effect fn main() -> Unit = {
     .replace("SOCK", sock.to_str().unwrap());
     let out = run("pass", &src);
     let _ = std::fs::remove_file(&sock);
-    let want = "idle false\nready true\ngot hello with 2\nfirst shared\nsecond second\n\
+    let want = "idle false\nready true\nwait 1 s\nwait none 0\ngot hello with 2\nfirst shared\nsecond second\n\
                 seen by the sender back\nsize 4096\nagain 0\nclosed true 0\n";
     assert!(out.contains(want), "{out}");
 }

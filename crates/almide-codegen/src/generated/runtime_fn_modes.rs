@@ -632,6 +632,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_net_unix_recv" => &[false, false],
         "almide_rt_net_unix_send" => &[false, false, false],
         "almide_rt_net_unix_take_fds" => &[false],
+        "almide_rt_net_unix_wait" => &[false, false],
         "almide_rt_option_and_then" => &[false, false],
         "almide_rt_option_filter" => &[false, false],
         "almide_rt_option_flatten" => &[false],
