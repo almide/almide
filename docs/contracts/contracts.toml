@@ -2528,6 +2528,7 @@ evidence  = [
   { path = "spec/wasm_cross/bytes_repeat_product_wrap_oom.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_worker_abort_keeps_stdout.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_map_all_workers_abort_one_line.almd", class = "fixture" },
   { path = "tests/alloc_bump_wrap_test.rs", class = "fixture", name = "bump_head_wrap_is_the_defined_oom_abort" },
   { path = "tests/component_realloc_oom_test.rs", class = "fixture", name = "host_driven_exhaustion_in_the_component_is_the_defined_abort" },
 ]
