@@ -2715,7 +2715,6 @@ since     = "0.52.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/hex_two_module_link.almd", class = "fixture" },
-  { path = "crates/almide-mir/src/pipeline_link.rs", name = "dedup_linked_by_name", class = "by-construction" },
 ]
 [[contract]]
 id        = "C-213"

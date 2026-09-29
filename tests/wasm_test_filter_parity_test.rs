@@ -10,9 +10,7 @@
 // every test whatever the caller asked. A green suite proved nothing, because
 // running MORE tests than asked still passes when they all pass.
 //
-// Test labels are not greppable in the module — the runner's `println` lowers to
-// a run of `i32.store8`, not a data string — so selection is asserted by MODULE
-// IDENTITY instead, which is a stronger claim than any substring: filtering a
+// Selection is asserted by MODULE IDENTITY, which is a stronger claim than any substring: filtering a
 // two-test file down to one test must render byte-for-byte the module that a
 // file containing only that test renders.
 
@@ -40,15 +38,23 @@ test \"beta fails\" {\n\
   assert_eq(1, 2)\n\
 }\n";
 
-fn render(source: &str, filter: Option<&str>) -> String {
-    almide_mir::pipeline::try_render_wasm_source_tests(source, &[], false, filter)
-        .expect("the fixture renders on the v1 wasm leg")
+/// The wasm leg's test-mode module for `source` under `filter` (the lane's
+/// own lowering, `almide::wasm_leg::lower_to_ir_tests_with_deps`, then the
+/// emitter) and the number of test fns the runner was built out of.
+fn build(source: &str, filter: Option<&str>) -> (Vec<u8>, usize) {
+    let ir = almide::wasm_leg::lower_to_ir_tests_with_deps("t.almd", source, &[], filter)
+        .expect("the fixture lowers on the wasm leg");
+    let tests = ir.functions.iter().filter(|f| f.name.as_str().starts_with("__test_almd")).count();
+    let (bytes, _) = almide_wasm::emit_program_with_ops(&ir).expect("the fixture emits on the wasm leg");
+    (bytes, tests)
 }
 
-/// Each synthesized test contributes its `__almd_test_<i>` name to the module,
-/// so this counts what the runner was built out of without depending on labels.
+fn render(source: &str, filter: Option<&str>) -> Vec<u8> {
+    build(source, filter).0
+}
+
 fn tests_built_in(source: &str, filter: Option<&str>) -> usize {
-    render(source, filter).matches("__almd_test").count()
+    build(source, filter).1
 }
 
 #[test]
