@@ -22,13 +22,14 @@ use crate::{BinOp, IrExpr, IrExprKind};
 /// May this BinOp raise a runtime error? Integer division and modulo fail on a
 /// zero divisor and overflow on `MIN / -1`, so only an integer-literal divisor
 /// other than `0` and `-1` is statically safe. `PowInt` fails on a negative
-/// exponent. Their float duals and every other op are total.
+/// exponent (it wraps on overflow), so only a non-negative literal exponent is
+/// safe. Their float duals and every other op are total.
 pub fn binop_may_trap(op: BinOp, right: &IrExpr) -> bool {
     match op {
         BinOp::DivInt | BinOp::ModInt => {
             !matches!(&right.kind, IrExprKind::LitInt { value } if *value != 0 && *value != -1)
         }
-        BinOp::PowInt => true,
+        BinOp::PowInt => !matches!(&right.kind, IrExprKind::LitInt { value } if *value >= 0),
         _ => false,
     }
 }
@@ -90,7 +91,9 @@ mod tests {
         assert!(!is_speculation_safe(&bin(BinOp::DivInt, var(0), var(1))));
         assert!(!is_speculation_safe(&bin(BinOp::DivInt, var(0), int(0))));
         assert!(!is_speculation_safe(&bin(BinOp::ModInt, var(0), int(-1))));
-        assert!(!is_speculation_safe(&bin(BinOp::PowInt, var(0), int(2))));
+        assert!(is_speculation_safe(&bin(BinOp::PowInt, var(0), int(2))));
+        assert!(!is_speculation_safe(&bin(BinOp::PowInt, var(0), int(-1))));
+        assert!(!is_speculation_safe(&bin(BinOp::PowInt, var(0), var(1))));
         assert!(is_speculation_safe(&bin(BinOp::AddInt, var(0), var(1))));
     }
 
