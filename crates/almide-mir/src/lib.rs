@@ -31,23 +31,16 @@ pub(crate) mod trace;
 pub mod alias_safety;
 pub mod certificate;
 pub mod charge_probe;
-pub mod concat_to_append;
 pub mod coown_names;
-pub mod heap_cap;
-pub mod host_exports;
 pub mod lower;
+pub mod mir_ops;
 pub(crate) mod mir_wellformed;
 pub mod native_result_rewrite;
 pub mod pipeline;
 pub mod purity;
-pub mod region_alloc;
-pub mod region_compact;
 pub mod render_native;
 mod render_native_op_families;
 mod render_native_shims;
-pub mod render_wasm;
-pub mod scalar_call_inline;
-pub mod translation_validation;
 
 use std::collections::{BTreeMap, BTreeSet};
 

@@ -91,13 +91,13 @@ fn source_cache() -> &'static Mutex<HashMap<usize, Option<SourceSigs>>> {
 /// The registry index of the source whose entry table maps `call_name`, and
 /// the impl fn name it maps to.
 fn registry_entry(call_name: &str) -> Option<(usize, &'static str)> {
-    crate::render_wasm::self_host_runtime().iter().enumerate().find_map(|(idx, (_, entries))| {
+    crate::mir_ops::self_host_runtime().iter().enumerate().find_map(|(idx, (_, entries))| {
         entries.iter().find(|(_, call)| *call == call_name).map(|(impl_fn, _)| (idx, *impl_fn))
     })
 }
 
 fn lower_source_sigs(idx: usize) -> Option<SourceSigs> {
-    let (source, _) = crate::render_wasm::self_host_runtime()[idx];
+    let (source, _) = crate::mir_ops::self_host_runtime()[idx];
     let ir = crate::pipeline::source_to_ir(source).ok()?;
     let sigs = ir
         .functions
@@ -123,7 +123,7 @@ pub fn registry_signature(call_name: &str) -> Option<RegistrySig> {
 
 /// Every registered call name the registry serves (the gate's enumeration).
 pub fn registered_call_names() -> Vec<&'static str> {
-    crate::render_wasm::self_host_runtime().iter().flat_map(|(_, es)| es.iter().map(|(_, c)| *c)).collect()
+    crate::mir_ops::self_host_runtime().iter().flat_map(|(_, es)| es.iter().map(|(_, c)| *c)).collect()
 }
 
 /// Do the call's argument classes fit the registered impl's declared

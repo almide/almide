@@ -36,7 +36,7 @@
 
 use std::collections::HashSet;
 
-use crate::render_wasm::{defined_value, op_reads, op_values};
+use crate::mir_ops::{defined_value, op_reads, op_values};
 use crate::{MirFunction, Op, ValueId};
 
 /// Check def-before-use (+ the defines/reads partition) over one lowered

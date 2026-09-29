@@ -35,7 +35,7 @@ fn classify_check_unlinkable_call(ctx: &FileCtx, t: &mut Tally, mir: &MirFunctio
         exports: vec![],
         mutable_global_count: 0,
     };
-    if !almide_mir::render_wasm::unlinked_call_names(&probe).contains(name) {
+    if !almide_mir::mir_ops::unlinked_call_names(&probe).contains(name) {
         t.forbidden_unwalled.push(format!(
             "{}::{} -> {name} (escaped the render wall)",
             ctx.file.display(),
