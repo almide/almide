@@ -10,9 +10,9 @@
 19375	T4 List	research/benchmark/perf/listbuild/listbuild_append.almd
 19707	T4 List	research/benchmark/perf/listbuild/listbuild_combinator.almd
 9369	T5 Map	research/benchmark/perf/mapbuild/mapbuild.almd
-11469	T5 Map	research/benchmark/perf/wordfreq/wordfreq.almd
-11492	T5 Map	research/benchmark/perf/wordfreq/wordfreq_group.almd
+11475	T5 Map	research/benchmark/perf/wordfreq/wordfreq.almd
+11498	T5 Map	research/benchmark/perf/wordfreq/wordfreq_group.almd
 32346	T6 JSON	research/benchmark/perf/decode/decode.almd
 27202	T6 JSON	spec/wasm_cross/json_gltf_walk.almd
 20120	T7 regex	spec/wasm_cross/regex_engine.almd
-185615	Σ	total
+185627	Σ	total
