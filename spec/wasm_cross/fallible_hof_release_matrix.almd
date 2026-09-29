@@ -1,0 +1,99 @@
+// @contract: C-218, C-284
+// Every fallible list-HOF carrier with a `!` callback, over four inputs — all
+// ok, the err at the FIRST element, in the MIDDLE, at the LAST — so each
+// carrier's all-ok path and its first-err short-circuit path both run (#2970).
+// Stdout was always the same on both targets; the wasm leg released by hand
+// and leaked on three routes no output shows: the callback's Result carrier
+// when the carrier body matched on a closure call's result directly (one
+// block per element), the half-built `ok(..)` box a non-canonical callback
+// body (`a + f(x)!`) was being built into when its `!` propagated, and the
+// fresh fallback of a heap-payload `?? fb` when the err side was taken. The
+// structural leg's live-at-exit counter pins this file at zero blocks.
+effect fn num(s: String) -> Int = if s == "x" then err("bad " + s)!
+else int.parse(s)!
+
+effect fn big(s: String) -> Bool = num(s)! > 1
+
+effect fn twice(s: String) -> List[Int] = {
+  let n = num(s)!
+  [n, n]
+}
+
+effect fn above(s: String) -> Int? = {
+  let n = num(s)!
+  if n > 1 then some(n) else none
+}
+
+effect fn visit(s: String) -> Unit = {
+  let n = num(s)!
+  if n < 0 then println("negative") else ()
+}
+
+fn show(ns: List[Int]) -> String = ns |> list.map((n) => int.to_string(n)) |> list.join(",")
+
+effect fn map_cell(label: String, xs: List[String]) -> Unit = match xs |> list.map((s) => num(s)!) {
+  ok(ns) => println(label + " map ok " + show(ns)),
+  err(e) => println(label + " map err " + e),
+}
+
+// The payload is built around the `!`: `1 + num(s)!` is not the canonical
+// tail the frontend strips, so the callback returns `ok(1 + num(s)!)`.
+effect fn map_plus_cell(label: String, xs: List[String]) -> Unit = match xs |> list.map((s) => 1 + num(s)!) {
+  ok(ns) => println(label + " map_plus ok " + show(ns)),
+  err(e) => println(label + " map_plus err " + e),
+}
+
+effect fn filter_cell(label: String, xs: List[String]) -> Unit = match xs |> list.filter((s) => big(s)!) {
+  ok(kept) => println(label + " filter ok " + list.join(kept, ",")),
+  err(e) => println(label + " filter err " + e),
+}
+
+effect fn flat_map_cell(label: String, xs: List[String]) -> Unit = match xs |> list.flat_map((s) => twice(s)!) {
+  ok(ns) => println(label + " flat_map ok " + show(ns)),
+  err(e) => println(label + " flat_map err " + e),
+}
+
+effect fn filter_map_cell(label: String, xs: List[String]) -> Unit = match xs |> list.filter_map((s) => above(s)!) {
+  ok(ns) => println(label + " filter_map ok " + show(ns)),
+  err(e) => println(label + " filter_map err " + e),
+}
+
+effect fn fold_cell(label: String, xs: List[String]) -> Unit = match xs |> list.fold(
+  0,
+  (acc, s) => acc + num(s)!,
+) {
+  ok(t) => println(label + " fold ok " + int.to_string(t)),
+  err(e) => println(label + " fold err " + e),
+}
+
+effect fn find_cell(label: String, xs: List[String]) -> Unit = match xs |> list.find((s) => big(s)!) {
+  ok(hit) => println(label + " find ok " + (hit ?? "none")),
+  err(e) => println(label + " find err " + e),
+}
+
+effect fn each_cell(label: String, xs: List[String]) -> Unit = match xs |> list.each((s) => visit(s)!) {
+  ok(_) => println(label + " each ok " + "done"),
+  err(e) => println(label + " each err " + e),
+}
+
+// The consumer idiom: a fresh heap fallback on the err side.
+effect fn heads(xs: List[String]) -> List[Int] = xs |> list.map((s) => num(s)!) ?? [0]
+
+effect fn run(label: String, xs: List[String]) -> Unit = {
+  map_cell(label, xs)!
+  map_plus_cell(label, xs)!
+  filter_cell(label, xs)!
+  flat_map_cell(label, xs)!
+  filter_map_cell(label, xs)!
+  fold_cell(label, xs)!
+  find_cell(label, xs)!
+  each_cell(label, xs)!
+  println(label + " unwrap_or " + show(heads(xs)!))
+}
+
+effect fn main() -> Unit = {
+  run("all_ok", ["1", "2", "3"])!
+  run("err_first", ["x", "2", "3"])!
+  run("err_middle", ["1", "x", "3"])!
+  run("err_last", ["1", "2", "x"])!
+}

@@ -2790,6 +2790,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/unwrap_or_tail_result.almd", class = "fixture" },
   { path = "spec/wasm_cross/pipe_unwrap_or_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fallible_hof_release_matrix.almd", class = "fixture" },
 ]
 
 # ── A DIVERGING CALL IN A BRANCH ARM RUNS, AND ITS EXIT CODE IS THE PROCESS'S ──
@@ -3538,6 +3539,7 @@ evidence  = [
   { path = "spec/wasm_cross/fallible_hof_effect_callback_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/fallible_hof_large_input.almd", class = "fixture" },
   { path = "spec/wasm_cross/fallible_hof_option_effect_callback.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fallible_hof_release_matrix.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-285"
