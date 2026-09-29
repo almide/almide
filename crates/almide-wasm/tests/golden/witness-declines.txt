@@ -10,7 +10,7 @@ branch-nested	10
 branch-paths:3	7
 call-arg:EmptyMap	1
 call-arg:IndexAccess	92
-call-arg:Lambda	210
+call-arg:Lambda	211
 call-arg:MapLiteral	1
 call-arg:Member	29
 call-arg:Record	11

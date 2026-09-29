@@ -177,6 +177,7 @@
 67184	spec/wasm_cross/fan_deterministic.almd
 66928	spec/wasm_cross/fan_effect_mapper.almd
 ~	spec/wasm_cross/fan_effect_mapper_capability.almd
+65968	spec/wasm_cross/fan_map_all_workers_abort_one_line.almd
 66112	spec/wasm_cross/fan_map_err.almd
 66112	spec/wasm_cross/fan_map_inline_err.almd
 67632	spec/wasm_cross/fan_map_inline_lambda.almd
