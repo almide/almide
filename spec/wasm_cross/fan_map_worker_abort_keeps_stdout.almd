@@ -3,9 +3,15 @@
 // `fan.map` callback routes to the native parallel map, and the defined
 // abort fires on one of its workers. The line printed before the map must
 // reach stdout on both legs (#3016); native printed nothing before the
-// parallel runtime flushed the spawning thread's buffer.
+// parallel runtime flushed the spawning thread's buffer. Only the last
+// element aborts: when every worker aborted, native printed the abort line
+// once per worker that reached it before the process exited (a race), and
+// wasm, which runs the map sequentially, printed it once.
 effect fn main() -> Unit = {
   println("a")
-  let r = fan.map(list.range(0, 4), (x) => ok(list.len(list.range(-9223372036854775807, x))))!
+  let r = fan.map(
+    list.range(0, 4),
+    (x) => ok(list.len(list.range(if x == 3 then -9223372036854775807 else 0, x))),
+  )!
   println("unreachable ${list.len(r)}")
 }
