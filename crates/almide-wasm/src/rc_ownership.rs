@@ -561,6 +561,9 @@ impl Emitter<'_> {
             almide_ir::IrExprKind::Try { .. }
                 | almide_ir::IrExprKind::Unwrap { .. }
                 | almide_ir::IrExprKind::ToOption { .. }
+                // `r ?? fb` is owned when its lowering normalized both arms
+                // to one credit (#2970, `own_unwrap_or_join`).
+                | almide_ir::IrExprKind::UnwrapOr { .. }
         ) {
             return self.owned_call_marks.contains(&(e as *const almide_ir::IrExpr as usize));
         }

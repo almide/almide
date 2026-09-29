@@ -63,7 +63,7 @@ pub(crate) fn bind_native_temporaries(ir: &IrProgram) -> Option<IrProgram> {
 /// whose slots are all non-Str scalars (#2010 stage 1). Records and
 /// variants need the type table and are bound by the emitter's own
 /// routes.
-fn droppable_ty(t: &Ty) -> bool {
+pub(crate) fn droppable_ty(t: &Ty) -> bool {
     match t {
         Ty::String | Ty::Bytes => true,
         // Any List (stage 2a: the spine is released; elements are 2b).
@@ -80,12 +80,19 @@ fn droppable_ty(t: &Ty) -> bool {
 }
 
 /// A call that produces its value: a Named user fn, or a module op
-/// (linked or native — either way a block nobody else owns).
-fn is_produced_by_call(e: &IrExpr) -> bool {
-    matches!(
-        &e.kind,
-        IrExprKind::Call { target: CallTarget::Named { .. } | CallTarget::Module { .. }, .. }
-    )
+/// (linked or native — either way a block nobody else owns). A closure call
+/// (`Computed`) is owned the same way (rc_ownership.rs: the lifted body's
+/// epilogue hands the caller one credit) and counts for the plain readers
+/// (#2970: `match f(x) { … }` inside the fallible-HOF carriers left every
+/// element's Result block unowned); an EXTRACTION already releases an owned
+/// closure-call carrier at the `!` itself (data.rs `release_ok_carrier`), so
+/// `extraction` keeps that immediate release instead of parking it.
+fn is_produced_by_call(e: &IrExpr, extraction: bool) -> bool {
+    match &e.kind {
+        IrExprKind::Call { target: CallTarget::Named { .. } | CallTarget::Module { .. }, .. } => true,
+        IrExprKind::Call { target: CallTarget::Computed { .. }, .. } => !extraction,
+        _ => false,
+    }
 }
 
 /// The value an expression evaluates to, through block wrappers.
@@ -194,7 +201,21 @@ fn is_born_here(e: &IrExpr) -> bool {
     matches!(
         &e.kind,
         IrExprKind::List { .. } | IrExprKind::StringInterp { .. } | IrExprKind::BinOp { .. }
-    )
+    ) || unwrap_or_joins_owned(e)
+}
+
+/// `r ?? fb` over a heap payload hands its consumer a credit when the
+/// fallback may be a fresh block (#2970, data.rs `own_unwrap_or_join`), so a
+/// reader that consumes nothing must see it through a bound local. A var or
+/// a string literal fallback never makes the join owned (a borrow, a pool
+/// static): that `??` stays a view and is not named.
+pub(crate) fn unwrap_or_joins_owned(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::UnwrapOr { fallback, .. } => {
+            !matches!(fallback.kind, IrExprKind::Var { .. } | IrExprKind::LitStr { .. })
+        }
+        _ => false,
+    }
 }
 
 /// #2312: `"${int.to_string(x)}"` displays exactly as `"${x}"` (`x: Int`
@@ -238,6 +259,15 @@ impl IrMutVisitor for Binder<'_> {
         if let IrExprKind::StringInterp { parts } = &mut e.kind {
             fold_int_display_parts(parts, self.changed);
         }
+        // A field / position read consumes nothing either, but naming every
+        // call-produced record it reads is a wider change than #2970 needs:
+        // only an owned `r ?? fb` (data.rs `own_unwrap_or_join`) is bound.
+        let projection = matches!(
+            e.kind,
+            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } | IrExprKind::OptionalChain { .. }
+        );
+        let extraction =
+            matches!(e.kind, IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } | IrExprKind::UnwrapOr { .. });
         let operands: Vec<&mut IrExpr> = match &mut e.kind {
             // A binary op over droppable operands — concatenation, or an
             // equality / ordering test on strings and lists — reads both
@@ -258,6 +288,8 @@ impl IrMutVisitor for Binder<'_> {
                 vec![expr.as_mut()]
             }
             IrExprKind::IndexAccess { object, .. } => vec![object.as_mut()],
+            IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => vec![object.as_mut()],
+            IrExprKind::OptionalChain { expr, .. } => vec![expr.as_mut()],
             IrExprKind::StringInterp { parts } => parts
                 .iter_mut()
                 .filter_map(|p| match p {
@@ -272,7 +304,12 @@ impl IrMutVisitor for Binder<'_> {
             // Children were rewritten first: an operand may already be a
             // `{ let …; value }` block — its value is the block's tail.
             let core = tail_of(a);
-            if !(droppable_ty(&a.ty) && (is_produced_by_call(core) || is_born_here(core))) {
+            let produced = if projection {
+                unwrap_or_joins_owned(core)
+            } else {
+                is_produced_by_call(core, extraction) || is_born_here(core)
+            };
+            if !(droppable_ty(&a.ty) && produced) {
                 continue;
             }
             let ty = a.ty.clone();
