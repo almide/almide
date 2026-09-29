@@ -62,8 +62,7 @@ app directly, with no socket. Routing and request construction are pure and
 behave identically on native and wasm, and a router is served like any other
 handler.
 The example prints the lines below on both targets; on wasm the router is
-served by the incumbent leg today, which runs through the `wasmtime` CLI
-(#2664).
+served by the structural leg (#2664; held by `spec/stdlib/http_router_test.almd`).
 
 ```almd check
 import http
