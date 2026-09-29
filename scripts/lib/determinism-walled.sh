@@ -32,5 +32,6 @@ check_walled_ledger() {
 # The ledger's row count — MAX_WALLED in each script must equal it, so the
 # number in the script and the names in the ledger cannot drift apart.
 walled_ledger_rows() {
-  grep -v '^[[:space:]]*#' "$1" | grep -cv '^[[:space:]]*$'
+  # `|| true`: an emptied ledger counts 0 rows, and grep -c exits 1 on 0.
+  grep -v '^[[:space:]]*#' "$1" | grep -cv '^[[:space:]]*$' || true
 }
