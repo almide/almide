@@ -23,10 +23,6 @@
 #                     40% of baseline = the bench broke or a durable win —
 #                     re-stamp in the same change).
 #                     THE VERDICT CI ACTS ON is the same-runner A/B below.
-#   routed-incumbent  the embedded-host bench must STILL refuse (the program
-#                     routes to the incumbent artifact). If it starts
-#                     benching, the routing improved: FAIL with the good
-#                     news — flip the row to `measured` in the same change.
 #   oom-embedded      the run must STILL die with the defined C-197 OOM
 #                     (#1729). A workload that starts completing flips its
 #                     row to `measured` in the same change.
@@ -120,9 +116,9 @@ if [ "${1:-}" = "--measure" ]; then
 # Rows: name | status | native_ms | wasm_ms | ratio (wasm/native) [ab_band=NN]
 #   measured          — `almide bench --target wasm` (embedded host, verify-
 #                       then-time, median of 5 + warmup) and the native twin
-#   routed-incumbent  — the program routes to the incumbent artifact; the
-#                       embedded-host bench honestly refuses
-#   walled            — the wasm build path walls the program (neither leg)
+#   walled            — the wasm build path walls the program (E082; the
+#                       incumbent fallback and its `routed-incumbent` status
+#                       are gone since #2752)
 #   oom-embedded      — the workload exceeds the embedded host's memory
 #                       service today (#1729)
 # Every non-measured row is RE-MEASURED by the gate: a row that starts
@@ -145,11 +141,9 @@ HDR
       if [ -n "$w" ] && [ -n "$n" ]; then
         ratio=$(python3 -c "print(f'{$w/$n:.2f}')")
         printf '%-21s | measured         | %-5s | %-4s | %s%s\n' "$name" "$n" "$w" "$ratio" "$fan_suffix"
-      elif grep -q "incumbent artifact" <<<"$w_out"; then
-        printf '%-21s | routed-incumbent | %-5s | -    | -\n' "$name" "${n:--}"
       elif grep -q "out of memory" <<<"$w_out"; then
         printf '%-21s | oom-embedded     | %-5s | -    | -\n' "$name" "${n:--}"
-      elif grep -q "wall (structural" <<<"$w_out"; then
+      elif grep -q '^wall: ' <<<"$w_out"; then
         printf '%-21s | walled           | %-5s | -    | -\n' "$name" "${n:--}"
       else
         printf '%-21s | UNCLASSIFIED     | %-5s | -    | -\n' "$name" "${n:--}"
@@ -255,18 +249,6 @@ print('HIGH' if r > 1 + $ab_band/100 else 'OK', f'{r:.2f}')")
         HIGH) echo "::error::wasm-runtime[$name]: A/B tree/release ${abr} (min ${t_min} vs ${b_min} ms) regressed past +${ab_band}% against $base_ver — a wasm-leg slowdown on this runner, same engine, same program"; fail=1 ;;
       esac
       ;;
-    routed-incumbent)
-      out=$(bench_wasm "$name")
-      if median=$(median_of "$out") && [ -n "$median" ]; then
-        echo "::error::wasm-runtime[$name]: routed-incumbent row now BENCHES (${median} ms) — the routing improved; flip the row to measured (--measure) in this change"
-        fail=1
-      elif ! grep -q "incumbent artifact" <<<"$out"; then
-        echo "::error::wasm-runtime[$name]: expected the incumbent-routing refusal, got: $(head -1 <<<"$out")"
-        fail=1
-      else
-        echo "wasm-runtime[$name]: still routed-incumbent (honest hole)"
-      fi
-      ;;
     oom-embedded)
       out=$(bench_wasm "$name")
       if median=$(median_of "$out") && [ -n "$median" ]; then
@@ -284,7 +266,7 @@ print('HIGH' if r > 1 + $ab_band/100 else 'OK', f'{r:.2f}')")
       if median=$(median_of "$out") && [ -n "$median" ]; then
         echo "::error::wasm-runtime[$name]: walled row now BENCHES (${median} ms) — flip the row to measured (--measure) in this change"
         fail=1
-      elif ! grep -q "wall (structural" <<<"$out"; then
+      elif ! grep -q '^wall: ' <<<"$out"; then
         echo "::error::wasm-runtime[$name]: expected the structural wall, got: $(head -1 <<<"$out")"
         fail=1
       else
@@ -307,4 +289,4 @@ if [ "$fail" -ne 0 ]; then
   echo "::error::wasm-runtime ratchet FAILED — see rows above"
   exit 1
 fi
-echo "wasm-runtime ratchet OK ($(grep -c '^[a-z].*| measured' "$LEDGER") measured, $(grep -c '^[a-z].*| routed-incumbent' "$LEDGER" || true) routed, $(grep -c '^[a-z].*| walled' "$LEDGER" || true) walled, $(grep -c '^[a-z].*| oom-embedded' "$LEDGER" || true) oom; A/B judged $ab_rows row(s))"
+echo "wasm-runtime ratchet OK ($(grep -c '^[a-z].*| measured' "$LEDGER") measured, $(grep -c '^[a-z].*| walled' "$LEDGER" || true) walled, $(grep -c '^[a-z].*| oom-embedded' "$LEDGER" || true) oom; A/B judged $ab_rows row(s))"

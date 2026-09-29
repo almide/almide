@@ -12,9 +12,9 @@
 # Rows: name | status | native_ms | wasm_ms | ratio (wasm/native) [ab_band=NN]
 #   measured          — `almide bench --target wasm` (embedded host, verify-
 #                       then-time, median of 5 + warmup) and the native twin
-#   routed-incumbent  — the program routes to the incumbent artifact; the
-#                       embedded-host bench honestly refuses
-#   walled            — the wasm build path walls the program (neither leg)
+#   walled            — the wasm build path walls the program (E082; the
+#                       incumbent fallback and its `routed-incumbent` status
+#                       are gone since #2752)
 #   oom-embedded      — the workload exceeds the embedded host's memory
 #                       service today (#1729)
 # Every non-measured row is RE-MEASURED by the gate: a row that starts
