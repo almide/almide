@@ -483,7 +483,7 @@
 103	77	1394	103	spec/wasm_cross/matrix_zero_cols_rows.almd
 266	249	77161	266	spec/wasm_cross/mem_checkpoint.almd
 350	171	14655	340	spec/wasm_cross/memory_stress.almd
-26	4	235	13	spec/wasm_cross/mg_rebuild_two_phase.almd
+26	14	235	25	spec/wasm_cross/mg_rebuild_two_phase.almd
 8	1	57	7	spec/wasm_cross/module_global_const.almd
 5	0	100	2	spec/wasm_cross/module_var_alias_cow.almd
 99	11	1203	63	spec/wasm_cross/mut_heap_param.almd
@@ -493,14 +493,15 @@
 10110	10102	163568	10105	spec/wasm_cross/mut_param_call_chain.almd
 71	27	780	29	spec/wasm_cross/mut_param_effect_can_err.almd
 9	3	88	9	spec/wasm_cross/mut_param_effect_never_err.almd
+61	28	922	58	spec/wasm_cross/mut_param_effect_unpropagated.almd
 85	25	1040	73	spec/wasm_cross/mut_param_move_mode_gaps.almd
 5	2	80	5	spec/wasm_cross/mut_param_spread_reassign.almd
 26	7	8304	20	spec/wasm_cross/mut_param_tail_recursion.almd
 13	1	327	11	spec/wasm_cross/mut_param_writeback_growth.almd
 1	0	1	0	spec/wasm_cross/mut_scalar_param_reassign.almd
-15	6	169	11	spec/wasm_cross/mutable_global_bytes_arena.almd
+15	6	169	12	spec/wasm_cross/mutable_global_bytes_arena.almd
 10	0	76	3	spec/wasm_cross/mutable_global_bytes_copy_from.almd
-52	7	704	14	spec/wasm_cross/mutable_global_field_mut_arg.almd
+52	33	704	51	spec/wasm_cross/mutable_global_field_mut_arg.almd
 4	0	32	3	spec/wasm_cross/mutable_global_repeat_writes.almd
 1	0	16	1	spec/wasm_cross/mutable_global_scalar_assign.almd
 37	31	116	37	spec/wasm_cross/mutual_append.almd
