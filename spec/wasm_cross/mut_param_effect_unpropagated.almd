@@ -1,0 +1,66 @@
+// @contract: C-132
+// #2945: an effect fn that takes a record (or list) by `mut`, in the two call
+// shapes the wasm leg used to refuse, prints native's values.
+//
+// 1. A `-> Result[Unit, String]` callee unwrapped with `!` in statement
+//    position. The move-mode block ends in the Unit-typed `__mp_res`, and
+//    the structural leg left that read on the stack (an invalid module).
+// 2. A NEVER-ERR callee whose call no `!` reaches: `let _ = f(r)`, a Result
+//    bound to a name, a `match` or `??` over the call. The write-back runs and
+//    the call's value is `ok(<payload>)`.
+//
+// A callee that CAN err, called without `!`, is not here: whether its partial
+// write survives the err is the open ruling of #2917 / #1871, and the gauntlet
+// cell x18 pins that wall.
+type R = { hits: List[Int], n: Int }
+
+effect fn record_hit(mut r: R, i: Int) -> Result[Unit, String] = {
+  list.push(r.hits, i)
+  r.n = r.n + i
+  ok(())
+}
+
+effect fn push_one(mut xs: List[Int], i: Int) -> Result[Unit, String] = {
+  list.push(xs, i)
+  ok(())
+}
+
+effect fn bump(mut r: R, by: Int) -> Unit = {
+  r.n = r.n + by
+  ()
+}
+
+effect fn scaled(mut r: R, i: Int) -> Result[Int, String] = {
+  list.push(r.hits, i)
+  r.n = r.n + i
+  ok(r.n * 10)
+}
+
+effect fn main() -> Unit = {
+  var r = { hits: [], n: 0 }
+  record_hit(r, 1)!
+  record_hit(r, 2)!
+  println("bang: ${list.len(r.hits)} ${r.n}")
+  var xs: List[Int] = []
+  push_one(xs, 7)!
+  push_one(xs, 8)!
+  println("bang list: ${xs}")
+  let _ = bump(r, 10)
+  let _ = record_hit(r, 3)
+  println("discarded: ${list.len(r.hits)} ${r.n}")
+  let kept: Result[Int, String] = scaled(r, 4)
+  let shown = match kept {
+    ok(v) => "ok ${v}",
+    err(e) => "err ${e}",
+  }
+  println("bound: ${shown} ${r.n}")
+  match scaled(r, 5) {
+    ok(v) => println("matched: ${v} ${r.n}"),
+    err(e) => println("matched err: ${e}"),
+  }
+  println("fallback: ${scaled(r, 6) ?? -1} ${list.len(r.hits)}")
+  for i in 0..<3 {
+    let _ = bump(r, i)
+  }
+  println("loop: ${r.n} ${r.hits}")
+}
