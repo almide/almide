@@ -17,6 +17,14 @@
 //! scalar; `IndexAssign` (copy-on-write `MakeUnique`); scope-end `Drop`s.
 //! Anything outside the subset (control flow, calls, …) returns
 //! [`LowerError::Unsupported`] — never a silent drop (flight-grade totality).
+//!
+//! # The deleted generators
+//! Comments throughout this module name `$__drop_*` / `__repr_*` routines
+//! "generated" by `generate_variant_drop_sources`, `generate_record_drop_sources`,
+//! `generate_variant_repr_sources` and their siblings, and program passes such
+//! as `inline_mutual_tail_recursion`. Those were the incumbent wasm pipeline's
+//! and were deleted with it (#2935, #2950). The references record the contract
+//! each lowering rule was built against; no product path generates them now.
 
 use crate::{Init, MirFunction, MirParam, Op, Repr, ValueId, PLACEHOLDER_LAYOUT};
 use almide_ir::{

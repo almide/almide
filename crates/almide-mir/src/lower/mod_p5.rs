@@ -305,53 +305,6 @@ pub fn is_result_unit_str_ty(ty: &Ty) -> bool {
         if a.len() == 2 && matches!(&a[0], Ty::Unit) && matches!(&a[1], Ty::String))
 }
 
-/// Is `ty` a `Result[String, String]` (the value.as_string shape — both arms a flat String)? The
-/// PRECISE str-str distinguisher (vs the broader `is_heap_ok_result`, which also matches a tuple-Ok
-/// `result.zip`), so the `??` routes only a genuine String-payload Result to `result.str_unwrap_or`.
-pub fn is_result_str_str_ty(ty: &Ty) -> bool {
-    use almide_lang::types::constructor::TypeConstructorId;
-    matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
-        if a.len() == 2 && matches!(&a[0], Ty::String) && matches!(&a[1], Ty::String))
-}
-
-/// Is `ty` an `Option[Value]` (the `list.get(rows, i)` shape — a dynamic Value Some-payload)? Its
-/// `??` routes to `option.value_unwrap_or` (the prim-based unwrap, since the value-match Some-arm's
-/// scalar_bind rejects a heap Value payload).
-pub fn is_option_value_ty(ty: &Ty) -> bool {
-    use almide_lang::types::constructor::TypeConstructorId;
-    matches!(ty, Ty::Applied(TypeConstructorId::Option, a)
-        if a.len() == 1 && is_value_ty(&a[0]))
-}
-
-/// Is `ty` an `Option[List[String]]` (the `list.get_liststr(rows, i)` shape — a nested-heap-list
-/// Some-payload)? Its `??` routes to `option.liststr_unwrap_or`, the List[String] analogue of
-/// `option.value_unwrap_or`.
-pub fn is_option_liststr_ty(ty: &Ty) -> bool {
-    use almide_lang::types::constructor::TypeConstructorId;
-    matches!(ty, Ty::Applied(TypeConstructorId::Option, a)
-        if a.len() == 1 && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
-            if e.len() == 1 && matches!(e[0], Ty::String)))
-}
-
-/// Is `ty` an `Option[List[<scalar>]]` (the `map.get(groups, k) ?? []` group_by shape)? Its `??`
-/// routes to `option.listint_unwrap_or`, the FLAT scalar-element analogue of
-/// `option.liststr_unwrap_or` (the payload list owns nothing — a flat rc drop is exact).
-pub fn is_option_listscalar_ty(ty: &Ty) -> bool {
-    use almide_lang::types::constructor::TypeConstructorId;
-    matches!(ty, Ty::Applied(TypeConstructorId::Option, a)
-        if a.len() == 1 && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
-            if e.len() == 1 && !is_heap_ty(&e[0])))
-}
-
-/// Is `ty` an `Option[List[Value]]` (the `json.as_array(v)` shape)? Its `??` routes to
-/// `option.listvalue_unwrap_or`, the List[Value] analogue of `option.liststr_unwrap_or`.
-pub fn is_option_listvalue_ty(ty: &Ty) -> bool {
-    use almide_lang::types::constructor::TypeConstructorId;
-    matches!(ty, Ty::Applied(TypeConstructorId::Option, a)
-        if a.len() == 1 && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
-            if e.len() == 1 && is_value_ty(&e[0])))
-}
-
 pub(crate) fn alloc_init(value: &IrExpr) -> Init {
     if let IrExprKind::LitStr { value } = &value.kind {
         return Init::Str(value.clone());
