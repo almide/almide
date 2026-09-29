@@ -72,14 +72,14 @@ The trusted base is recorded so the rest may be called "proven":
 Rocq/Coq provides `coqc`/`coqchk`. Toolchain pin + axiom ledger is a later
 brick (config management, §7 of the tier-1 stack).
 
-## Byte grounding: two runtimes, one retiring (#2753)
+## Byte grounding: two runtimes, one retired (#2753, #2761)
 
-Two gates bind proven byte lists to bytes the compiler really emits. They
+Two gates bound proven byte lists to bytes the compiler really emits. They
 are about DIFFERENT runtimes:
 
 | gate | proofs it grounds | bytes it compares against |
 |---|---|---|
-| `check-wasm-bytes.sh` (+ `check-wasm-exec.sh`) | `WasmEncode.v`, `WasmExec.v` (with `WasmRcDec.v`, `WasmDecode.v`, `WasmIsa.v`: FORMAL-CREDIT FC-4) | the **incumbent** WAT renderer's `$rc_inc` / `$rc_dec`, extracted from `render_program` output |
+| `check-wasm-bytes.sh` (retired in #2761) (+ `check-wasm-exec.sh`) | `WasmEncode.v`, `WasmExec.v` (with `WasmRcDec.v`, `WasmDecode.v`, `WasmIsa.v`: FORMAL-CREDIT FC-4) | the **incumbent** WAT renderer's `$rc_inc` / `$rc_dec`, extracted from `render_program` output |
 | `check-structural-bytes.sh` | `StructuralDecode.v` (with `StructuralRuntime.v`, `StructuralRun.v`, `StructuralAlloc.v`) | the **structural** emitter's `$inc` / `$dec_flat` / `$free` / `$alloc` code bodies (`almide-wasm` `dump_runtime_bytes`) |
 
 The structural emitter is the default `--target wasm` leg, so its runtime
@@ -87,18 +87,18 @@ bytes are already grounded. The incumbent's byte lists cannot be re-grounded
 on it: the two runtimes are different code, and the structural bodies already
 have their own proven lists.
 
-`check-wasm-bytes.sh` therefore **retires with the incumbent renderer**, in
-the same change that deletes it (#2761, #1696 step 5). It is not retired
-earlier: until then the incumbent still ships the programs the route census
-(`incumbent-route-baseline.txt`) sends to it, and the gate is true evidence
+`check-wasm-bytes.sh` therefore **retired with the incumbent renderer**, in
+the change that deleted it (#2761, #1696 step 5), and not earlier: until
+then the incumbent still shipped programs, and the gate was true evidence
 about those bytes. At the deletion:
 
-- delete `check-wasm-bytes.sh` and its `proofs/check.sh` call and
-  gate-verification row; `check-wasm-exec.sh` keeps running `run_g` against
-  a real engine, but its rc bodies stop being "the renderer's";
-- restate FC-4 and the C-PROVEN receipt line as theorems about a modeled
-  runtime, and name `check-structural-bytes.sh` as the shipping-bytes
-  grounding.
+- `check-wasm-bytes.sh`, its `proofs/check.sh` call and its
+  gate-verification row were deleted; `check-wasm-exec.sh` keeps running
+  `run_g` against a real engine, but its rc bodies are no longer "the
+  renderer's";
+- FC-4 and the C-PROVEN receipt line are restated as theorems about a
+  MODELED runtime (the retired incumbent's), and `check-structural-bytes.sh`
+  is named as the shipping-bytes grounding.
 
 ## Roadmap (the tier-1 stack, in critical-path order)
 
