@@ -485,3 +485,10 @@ fn carrier_ty(t: &almide_types::types::Ty) -> bool {
     use almide_types::types::constructor::TypeConstructorId as C;
     matches!(t, almide_types::types::Ty::Applied(C::Result | C::Option, _))
 }
+
+/// #2758: a top-let initializer lowered inline in `main`'s prologue: an
+/// admissible value (its sites are the hooks'); the store into the global is
+/// `witness_top_let`'s.
+pub fn top_let_subset(value: &IrExpr) -> Option<String> {
+    value_subset(value).map(|w| w.at("top-let"))
+}
