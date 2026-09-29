@@ -163,28 +163,27 @@ impl<'a> Interpreter<'a> {
         let Some(recv) = args.first() else {
             return Flow::Abort(format!("internal: `{m}.{f}` with no receiver"));
         };
-        // `h.f` where `h` is a binding of THIS frame: the backends write
-        // through the field (a copy-on-write field write, C-033 — #2411 gave
-        // the wasm leg that route), and so does this frame — the mutation runs
-        // on the field's slot inside the binding's own record storage, through
-        // `Rc::make_mut` on the field vector, so an alias of the record taken
-        // before the push keeps the old list. A deeper path (`h.a.b`,
-        // `xs[i].f`) still abstains below, by name.
-        if let IrExprKind::Member { object, field } = &recv.kind
-            && let IrExprKind::Var { id } = &object.kind
-        {
+        // `h.f` (or `h.a.b`, #2933) where `h` is a binding of THIS frame: the
+        // backends write through the field path (a copy-on-write field write
+        // at every level, C-033 — #2411 / #2933 gave the wasm leg that route),
+        // and so does this frame — the mutation runs on the leaf field's slot
+        // inside the binding's own record storage, through `Rc::make_mut` on
+        // each level's field vector, so an alias of any level taken before the
+        // push keeps its old value. An index or a call in the path (`xs[i].f`)
+        // still abstains below, by name.
+        if let Some((id, path)) = member_path(recv) {
             let mut rest = Vec::with_capacity(args.len().saturating_sub(1));
             for a in &args[1..] {
                 rest.push(val!(self.eval_expr(a, scope)));
             }
-            let field = *field;
-            return match scope.with_slot(*id, |slot| match slot {
-                Value::Record { fields, .. } => {
+            return match scope.with_slot(id, |slot| {
+                let mut cur = slot;
+                for field in &path {
+                    let Value::Record { fields, .. } = cur else { return None };
                     let fields = std::rc::Rc::make_mut(fields);
-                    let target = fields.iter_mut().find(|(k, _)| *k == field)?;
-                    crate::inplace::apply(m, f, &mut target.1, rest)
+                    cur = &mut fields.iter_mut().find(|(k, _)| k == field)?.1;
                 }
-                _ => None,
+                crate::inplace::apply(m, f, cur, rest)
             }) {
                 Some(Some(out)) => Flow::val(out),
                 Some(None) => Flow::Abort(format!(
@@ -540,6 +539,26 @@ impl<'a> Interpreter<'a> {
             Ok(Some(rebuilt)) => Flow::Value(rebuilt),
             Ok(None) => flow,
             Err(why) => Flow::Unsupported(why),
+        }
+    }
+}
+
+/// `h.f`, `h.a.b`, … — a chain of field reads ending in a var: the var and
+/// the root-first field path, or `None` for any other receiver.
+fn member_path(recv: &IrExpr) -> Option<(almide_ir::VarId, Vec<almide_base::intern::Sym>)> {
+    let mut path = Vec::new();
+    let mut cur = recv;
+    loop {
+        match &cur.kind {
+            IrExprKind::Member { object, field } => {
+                path.push(*field);
+                cur = object;
+            }
+            IrExprKind::Var { id } if !path.is_empty() => {
+                path.reverse();
+                return Some((*id, path));
+            }
+            _ => return None,
         }
     }
 }
