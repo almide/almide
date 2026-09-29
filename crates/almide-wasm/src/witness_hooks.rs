@@ -56,6 +56,7 @@ impl Emitter<'_> {
     pub(crate) fn witness_bind(&mut self, idx: u32, _declared: SliceTy, value: &almide_ir::IrExpr) {
         let src_local = self.witness_src_local(value);
         let owned = self.rc_owned_result(value);
+        let view = crate::witness_unwrap::is_extraction_view(value);
         let Some(w) = self.witness.as_mut() else { return };
         if owned {
             w.bind_fresh(idx);
@@ -63,6 +64,8 @@ impl Emitter<'_> {
         }
         match src_local {
             Some(src) if w.bind_alias(idx, src) => {}
+            // #2758: a `!` payload read out of a bound carrier.
+            None if view => w.bind_view(idx),
             // The frame withdraws; the local still gets an (opaque) object
             // so its later release or loop-back carry is attributed, not
             // mistaken for a hook disagreement.
@@ -97,6 +100,7 @@ impl Emitter<'_> {
     fn witness_share_or_move(&mut self, e: &almide_ir::IrExpr, reason: &str) {
         let src_local = self.witness_src_local(e);
         let fresh = self.rc_owned_result(e);
+        let view = crate::witness_unwrap::is_extraction_view(e);
         let Some(w) = self.witness.as_mut() else { return };
         if fresh {
             w.temp_move();
@@ -104,6 +108,7 @@ impl Emitter<'_> {
         }
         match src_local {
             Some(l) if w.arg_share_move(l) => {}
+            None if view => w.view_share_move(),
             None => w.decline(reason),
             _ => w.poison(),
         }
@@ -254,9 +259,16 @@ impl Emitter<'_> {
     /// tail (a native arm's View) declines; anything else is poison.
     pub(crate) fn witness_tail_var(&mut self, tail: &almide_ir::IrExpr) {
         let src = self.witness_src_local(tail);
+        let view = crate::witness_unwrap::is_extraction_view(tail);
         let Some(w) = self.witness.as_mut() else { return };
+        // After a `return_call` (a tail `f(x)!` seen through, C-069) the
+        // wrap the emitter still writes is dead: nothing to record.
+        if w.dead() {
+            return;
+        }
         match src {
             Some(l) if w.ret_move(l) => {}
+            None if view => w.view_share_move(),
             None => w.decline("tail:view-result"),
             _ => w.poison(),
         }

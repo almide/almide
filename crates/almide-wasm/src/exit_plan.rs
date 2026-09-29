@@ -22,9 +22,9 @@
 //! membership does not enter the plan.
 //!
 //! The witness (#1696) mirrors the plan: a success or tail exit records
-//! its releases (and the frame replacement); an error or guard exit is
-//! one path of several, which the straight-line recorder cannot
-//! attribute — it is poisoned rather than fed a partial stream.
+//! its releases (and the frame replacement); a `!` propagation the
+//! witness armed (#2758) records its releases the same way. Any other
+//! error or guard exit is poisoned rather than fed a partial stream.
 
 use std::collections::BTreeSet;
 
@@ -158,6 +158,15 @@ impl Emitter<'_> {
                     let carried: Vec<u32> =
                         plan.carried.iter().filter(|i| self.rc_owned.contains(i)).copied().collect();
                     self.witness_loop_back(&carried);
+                }
+            }
+            // #2758: a recorded `!` propagation (witness_unwrap.rs armed it)
+            // releases exactly what the success exit does; the site records
+            // the value that leaves and the exit itself. Any other error or
+            // guard exit is still unattributed.
+            Continuation::ReturnError if self.witness.as_mut().is_some_and(|w| w.take_err_exit()) => {
+                for &idx in &plan.released {
+                    self.witness_dec(idx);
                 }
             }
             Continuation::ReturnError | Continuation::GuardReturn => {

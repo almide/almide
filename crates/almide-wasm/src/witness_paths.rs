@@ -303,11 +303,24 @@ fn end_iteration(p: &mut Path) {
     p.ended = true;
 }
 
+/// How a walk renders a branch with an exiting arm.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Exits {
+    /// An exit ends its path; the line is the set of whole paths.
+    Paths,
+    /// #2758: an exiting arm is folded into the surviving path as the v5
+    /// branch-return item `{<arm>x|}` — checked from the count at the
+    /// branch to exactly 0, the line continuing from the survivor. A frame
+    /// with several `!` sites is then one path, not one per site.
+    Fold,
+}
+
 /// Extend each live path through `seq`, for object `o`.
 fn walk<'t>(
     seq: &'t [Node],
     o: u32,
     scope: Scope,
+    exits: Exits,
     paths: Vec<Path>,
     loops: &mut LoopEntries<'t>,
 ) -> Result<Vec<Path>, String> {
@@ -326,9 +339,13 @@ fn walk<'t>(
                 },
                 Node::Ev(Ev::Exit) if scope == Scope::Iteration => return Err("loop-exit".into()),
                 Node::Ev(ev) => step(ev, o, &mut p),
+                Node::Branch(arms) if exits == Exits::Fold => {
+                    next.extend(fold_branch(arms, o, scope, p, loops)?);
+                    continue;
+                }
                 Node::Branch(arms) => {
                     for arm in arms {
-                        next.extend(walk(arm, o, scope, vec![p.clone()], loops)?);
+                        next.extend(walk(arm, o, scope, exits, vec![p.clone()], loops)?);
                     }
                     continue;
                 }
@@ -348,12 +365,56 @@ fn walk<'t>(
     Ok(paths)
 }
 
+/// One branch in [`Exits::Fold`] mode: each arm is walked from the entry
+/// state with an empty event suffix; the arms that exit become `{<arm>x|}`
+/// items prefixed to every surviving path. A branch whose every arm exits
+/// leaves the enclosing arm too: its paths stay ended, for the enclosing
+/// branch (or the frame) to take.
+fn fold_branch<'t>(
+    arms: &'t [Vec<Node>],
+    o: u32,
+    scope: Scope,
+    p: Path,
+    loops: &mut LoopEntries<'t>,
+) -> Result<Vec<Path>, String> {
+    let mut exited: BTreeSet<String> = BTreeSet::new();
+    let mut ended: Vec<Path> = Vec::new();
+    let mut survivors: Vec<Path> = Vec::new();
+    for arm in arms {
+        let start = Path { events: String::new(), ..p.clone() };
+        for r in walk(arm, o, scope, Exits::Fold, vec![start], loops)? {
+            if !r.ended {
+                survivors.push(r);
+                continue;
+            }
+            // An arm item is flat (v5): a nested branch inside it withdraws.
+            if r.events.contains('{') {
+                return Err("branch-nested".into());
+            }
+            if r.born || !r.events.is_empty() {
+                exited.insert(r.events.clone());
+            }
+            ended.push(r);
+        }
+    }
+    if survivors.is_empty() {
+        return Ok(ended.into_iter().map(|r| Path { events: format!("{}{}", p.events, r.events), ..r }).collect());
+    }
+    let items: String = exited.iter().map(|e| format!("{{{e}x|}}")).collect();
+    Ok(survivors
+        .into_iter()
+        .map(|r| Path { events: format!("{}{items}{}", p.events, r.events), ..r })
+        .collect())
+}
+
 /// Two or fewer distinct paths as one certificate line.
 fn line(paths: &[Path]) -> Result<String, String> {
     let set: BTreeSet<&str> = paths.iter().map(|p| p.events.as_str()).collect();
     let v: Vec<&str> = set.into_iter().collect();
     match v.as_slice() {
         [one] => Ok((*one).to_string()),
+        // A whole-line branch's arms are flat (v5).
+        [a, b] if a.contains('{') || b.contains('{') => Err("branch-nested".into()),
         [a, b] => Ok(format!("{{{a}|{b}}}")),
         more => Err(format!("branch-paths:{}", more.len())),
     }
@@ -361,9 +422,9 @@ fn line(paths: &[Path]) -> Result<String, String> {
 
 /// One object's lines: the frame line, then one line per loop activation
 /// that touches it.
-fn render_object(tree: &[Node], o: u32, out: &mut String) -> Result<(), String> {
+fn render_object(tree: &[Node], o: u32, exits: Exits, out: &mut String) -> Result<(), String> {
     let mut loops: LoopEntries = Vec::new();
-    let frame = walk(tree, o, Scope::Frame, vec![Path::default()], &mut loops)?;
+    let frame = walk(tree, o, Scope::Frame, exits, vec![Path::default()], &mut loops)?;
     out.push_str(&line(&frame)?);
     out.push('\n');
     // Each loop reached, walked from each entry state; loops nested in a
@@ -379,7 +440,7 @@ fn render_object(tree: &[Node], o: u32, out: &mut String) -> Result<(), String> 
             holders: entry.holders.iter().map(|(&l, h)| (l, Holder { fresh: false, ..*h })).collect(),
             ended: false,
         };
-        let mut iter = walk(body, o, Scope::Iteration, vec![start], &mut loops)?;
+        let mut iter = walk(body, o, Scope::Iteration, exits, vec![start], &mut loops)?;
         iter.iter_mut().filter(|p| !p.ended).for_each(end_iteration);
         match by_loop.iter_mut().find(|(b, _)| std::ptr::eq(*b, body)) {
             Some((_, ps)) => ps.extend(iter),
@@ -406,7 +467,18 @@ pub(crate) fn render(log: &[Ev], objects: u32) -> Result<String, String> {
     };
     let mut s = String::new();
     for o in 0..objects {
-        render_object(&tree, o, &mut s)?;
+        // The whole-path form first (every certificate before #2758 keeps
+        // its bytes); an object whose paths it cannot carry — a frame with
+        // several exits — is rendered again with its exits folded.
+        let mut line = String::new();
+        if let Err(e) = render_object(&tree, o, Exits::Paths, &mut line) {
+            if !e.starts_with("branch-paths") {
+                return Err(e);
+            }
+            line.clear();
+            render_object(&tree, o, Exits::Fold, &mut line)?;
+        }
+        s.push_str(&line);
     }
     Ok(s)
 }
@@ -460,6 +532,31 @@ mod tests {
         // A missing release on the exiting arm: two paths, one leaking.
         let leak = [Birth(0), Op(0, 'i'), bind(3, 0), Open, Exit, Arm, Close, LOp(3, 'd')];
         assert_eq!(cert(&leak, 1), "{i|id}\n");
+    }
+
+    #[test]
+    fn several_exits_fold_into_branch_return_items() {
+        // x is live across two `!` sites, each exit releasing it, with a
+        // share-and-move between them: three distinct whole paths.
+        let site = |arm: &[Ev]| {
+            let mut v = vec![Open];
+            v.extend_from_slice(arm);
+            v.extend([Exit, Arm, Close]);
+            v
+        };
+        let share = [LOp(3, 'a'), LOp(3, 'm')];
+        let run = |first: &[Ev]| {
+            let mut log = vec![Birth(0), Op(0, 'i'), bind(3, 0)];
+            log.extend(site(first));
+            log.extend(share.clone());
+            log.extend(site(&[LOp(3, 'd')]));
+            log.extend(share.clone());
+            log.push(LOp(3, 'd'));
+            cert(&log, 1)
+        };
+        assert_eq!(run(&[LOp(3, 'd')]), "i{dx|}am{dx|}amd\n");
+        // An exit that forgets the release: its item does not reach 0.
+        assert_eq!(run(&[]), "i{x|}am{dx|}amd\n");
     }
 
     #[test]
