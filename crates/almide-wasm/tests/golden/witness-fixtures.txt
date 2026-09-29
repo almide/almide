@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 174 of 828
+# certified: 180 of 828
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/append_accumulator.almd
 spec/wasm_cross/append_accumulator_heap.almd
@@ -33,6 +33,7 @@ spec/wasm_cross/env_args.almd
 spec/wasm_cross/env_platform_reporting.almd
 spec/wasm_cross/env_sleep_pause.almd
 spec/wasm_cross/expr_stmt_comment.almd
+spec/wasm_cross/flight_pid_control.almd
 spec/wasm_cross/float32_literal_excess_precision.almd
 spec/wasm_cross/float_clamp_invalid.almd
 spec/wasm_cross/float_concrete.almd
@@ -43,6 +44,7 @@ spec/wasm_cross/float_sign_minmax_ieee.almd
 spec/wasm_cross/float_to_fixed.almd
 spec/wasm_cross/general_recursion_tail.almd
 spec/wasm_cross/gleam_bool_shortcircuit.almd
+spec/wasm_cross/global_in_both_arms.almd
 spec/wasm_cross/grain_functions.almd
 spec/wasm_cross/hash_digests.almd
 spec/wasm_cross/heap_result_if_bind_chain.almd
@@ -102,6 +104,7 @@ spec/wasm_cross/math_explog.almd
 spec/wasm_cross/math_log_gamma.almd
 spec/wasm_cross/math_log_gamma_negative.almd
 spec/wasm_cross/math_pow.almd
+spec/wasm_cross/module_global_const.almd
 spec/wasm_cross/mutual_recursive_types.almd
 spec/wasm_cross/mutual_tail_recursion.almd
 spec/wasm_cross/nan_canonical_bytes_write.almd
@@ -167,6 +170,9 @@ spec/wasm_cross/tm_variant_in_list.almd
 spec/wasm_cross/tm_variant_lit_print.almd
 spec/wasm_cross/tm_variant_shadow_drop.almd
 spec/wasm_cross/to_result_custom_e.almd
+spec/wasm_cross/top_let_div_eager.almd
+spec/wasm_cross/top_let_eager_through_call.almd
+spec/wasm_cross/toplevel_const_wrapping.almd
 spec/wasm_cross/trig_libm.almd
 spec/wasm_cross/unique_non_flat_element.almd
 spec/wasm_cross/unwrap_in_callarg.almd

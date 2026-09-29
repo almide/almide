@@ -257,7 +257,7 @@
 2671	spec/wasm_cross/gleam_pipe_shapes.almd
 2636	spec/wasm_cross/gleam_precedence_unary.almd
 3638	spec/wasm_cross/gleam_records_tuples.almd
-3439	spec/wasm_cross/gleam_toplet_consts.almd
+3457	spec/wasm_cross/gleam_toplet_consts.almd
 2063	spec/wasm_cross/global_in_both_arms.almd
 2128	spec/wasm_cross/global_in_shortcircuit_operand.almd
 2701	spec/wasm_cross/grain_functions.almd
@@ -270,7 +270,7 @@
 3670	spec/wasm_cross/guard_err_in_call_arg_block.almd
 4810	spec/wasm_cross/guard_let_statement.almd
 2466	spec/wasm_cross/guard_statement.almd
-23724	spec/wasm_cross/gzip_inflate_members.almd
+23754	spec/wasm_cross/gzip_inflate_members.almd
 6019	spec/wasm_cross/hash_digests.almd
 3191	spec/wasm_cross/heap_arena.almd
 2714	spec/wasm_cross/heap_result_err_interp.almd
@@ -483,9 +483,9 @@
 14055	spec/wasm_cross/matrix_zero_cols_rows.almd
 3191	spec/wasm_cross/mem_checkpoint.almd
 10911	spec/wasm_cross/memory_stress.almd
-6059	spec/wasm_cross/mg_rebuild_two_phase.almd
-2563	spec/wasm_cross/module_global_const.almd
-5572	spec/wasm_cross/module_var_alias_cow.almd
+6065	spec/wasm_cross/mg_rebuild_two_phase.almd
+2569	spec/wasm_cross/module_global_const.almd
+5578	spec/wasm_cross/module_var_alias_cow.almd
 5253	spec/wasm_cross/mut_heap_param.almd
 5037	spec/wasm_cross/mut_map_param.almd
 13839	spec/wasm_cross/mut_param_alias_cow.almd
@@ -498,10 +498,10 @@
 5381	spec/wasm_cross/mut_param_tail_recursion.almd
 3307	spec/wasm_cross/mut_param_writeback_growth.almd
 5445	spec/wasm_cross/mut_scalar_param_reassign.almd
-6001	spec/wasm_cross/mutable_global_bytes_arena.almd
-3472	spec/wasm_cross/mutable_global_bytes_copy_from.almd
+6013	spec/wasm_cross/mutable_global_bytes_arena.almd
+3484	spec/wasm_cross/mutable_global_bytes_copy_from.almd
 5986	spec/wasm_cross/mutable_global_field_mut_arg.almd
-2680	spec/wasm_cross/mutable_global_repeat_writes.almd
+2686	spec/wasm_cross/mutable_global_repeat_writes.almd
 2203	spec/wasm_cross/mutable_global_scalar_assign.almd
 2992	spec/wasm_cross/mutual_append.almd
 2618	spec/wasm_cross/mutual_recursive_types.almd
@@ -569,7 +569,7 @@
 2550	spec/wasm_cross/pure_fn_output_and_assert_abort.almd
 3203	spec/wasm_cross/qq_record_fallback.almd
 4723	spec/wasm_cross/r5_lowmisc_param_try_err.almd
-2268	spec/wasm_cross/r5_mod_global_init_order.almd
+2307	spec/wasm_cross/r5_mod_global_init_order.almd
 2383	spec/wasm_cross/r5_mod_producer_variant.almd
 3468	spec/wasm_cross/r5_wasm_inferred_record_repr.almd
 26235	spec/wasm_cross/r5_wasm_interp_alias_rc.almd
@@ -638,7 +638,7 @@
 11918	spec/wasm_cross/result_wall_escalations.almd
 24324	spec/wasm_cross/rope_at_family.almd
 22918	spec/wasm_cross/rope_geometry_family.almd
-2392	spec/wasm_cross/scalar_if_arm_effects.almd
+2398	spec/wasm_cross/scalar_if_arm_effects.almd
 3546	spec/wasm_cross/scan_heap_acc.almd
 3380	spec/wasm_cross/scoped_region_value.almd
 3084	spec/wasm_cross/scoped_worker_in_and_out.almd
@@ -654,7 +654,7 @@
 5743	spec/wasm_cross/sort_by_str_key_heap.almd
 3332	spec/wasm_cross/split_empty_sep.almd
 5457	spec/wasm_cross/spread_record_share.almd
-12159	spec/wasm_cross/sql_highlight_tokens.almd
+12253	spec/wasm_cross/sql_highlight_tokens.almd
 25295	spec/wasm_cross/stdlib_opaque_shadow.almd
 30678	spec/wasm_cross/stdlib_type_shadow.almd
 3331	spec/wasm_cross/str_result_heap_bind.almd
@@ -768,12 +768,12 @@
 2957	spec/wasm_cross/to_option_owned_carrier_release.almd
 2728	spec/wasm_cross/to_result_custom_e.almd
 3311	spec/wasm_cross/to_result_nested_share.almd
-2270	spec/wasm_cross/top_let_closure_eager.almd
-3181	spec/wasm_cross/top_let_closure_record.almd
+2525	spec/wasm_cross/top_let_closure_eager.almd
+3341	spec/wasm_cross/top_let_closure_record.almd
 1476	spec/wasm_cross/top_let_div_eager.almd
 1605	spec/wasm_cross/top_let_div_used.almd
 2351	spec/wasm_cross/top_let_eager_through_call.almd
-5471	spec/wasm_cross/top_let_stored_in_container.almd
+5489	spec/wasm_cross/top_let_stored_in_container.almd
 1559	spec/wasm_cross/toplevel_const_wrapping.almd
 14711	spec/wasm_cross/trig_libm.almd
 2599	spec/wasm_cross/tuple_eq.almd
