@@ -456,6 +456,12 @@ run_structural spec/wasm_cross/witness_straightline.almd '<lambda#0>' 0
 tamper_structural adder '2s/^im$/i/' "#2758 closure env"
 tamper_structural '<lambda#0>' '1s/^id$/i/' "#2758 lambda param"
 
+# ── #2758: a CLOSURE CALL. `apply_len` lends its Fn value to the lifted body
+# and shares its list into the body's callee-owned param (`am`). Drill: the
+# share never moves into the callee.
+run_structural spec/wasm_cross/witness_straightline.almd apply_len 0
+tamper_structural apply_len 's/^am$/a/' "#2758 closure call argument"
+
 # ── #2152: almide-verify against the extracted checker on witnesses NO
 # producer wrote. The rows above only reach the shapes the emitters produce;
 # the transcription must agree on the whole input space, malformed bytes

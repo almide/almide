@@ -341,6 +341,15 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
                 return Some(Why::Here(tag(&crate::rc_ownership::rc_tail(l).kind)).inside("call-arg"));
             }
         }
+        // #2758: a closure call — `call_indirect` through the env block the
+        // callee value is. The env is lent (a view to the lifted body); a
+        // fresh callee is released after the call (`id`); the arguments are
+        // callee-owned (the closure convention), each an argument hook's.
+        almide_ir::CallTarget::Computed { callee } => {
+            if let Some(w) = value_subset(callee) {
+                return Some(w.inside("callee"));
+            }
+        }
         other => return Some(Why::Deep(format!("call:target:{}", tag(other)))),
     }
     for a in args {

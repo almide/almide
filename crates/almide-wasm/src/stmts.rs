@@ -253,6 +253,13 @@ impl Emitter<'_> {
             let dec_cell = self.dec_cell_fn(declared);
             self.f.instructions().local_get(idx).call(dec_cell);
             self.rc_own(idx, declared);
+            // #2758: the cell's credits (the frame's and each capturing
+            // env's) are no hook's yet — withdraw, keeping the local known
+            // so its exit release is attributed.
+            if let Some(w) = self.witness.as_mut() {
+                w.decline("bind:cell");
+                w.param_borrowed(idx);
+            }
             self.f
                 .instructions()
                 .i32_const(declared.slot_size() as i32)
