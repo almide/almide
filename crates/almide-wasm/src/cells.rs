@@ -142,8 +142,48 @@ impl crate::emitter::Emitter<'_> {
         }
         let mut sc = Scan { locals: self.locals, params, out: Vec::new() };
         almide_ir::visit::IrVisitor::visit_expr(&mut sc, body);
+        // A var BOUND inside the body is the lambda's own local, not a
+        // capture (#2758): the enclosing frame never assigns it, so the env
+        // slot only ever carried a NULL the drop glue released again.
+        let inner = bound_within(body);
+        sc.out.retain(|(v, _)| !inner.contains(v));
         sc.out
     }
+}
+
+/// Every var a binding form inside `body` introduces: a `let`, a
+/// destructure or match pattern, a `for` variable, a nested lambda's params.
+fn bound_within(body: &IrExpr) -> HashSet<VarId> {
+    #[derive(Default)]
+    struct Bound(HashSet<VarId>);
+    impl IrVisitor for Bound {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match &e.kind {
+                IrExprKind::ForIn { var, var_tuple, .. } => {
+                    self.0.insert(*var);
+                    self.0.extend(var_tuple.iter().flatten().copied());
+                }
+                IrExprKind::Lambda { params, .. } => self.0.extend(params.iter().map(|(v, _)| *v)),
+                _ => {}
+            }
+            walk_expr(self, e);
+        }
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            if let IrStmtKind::Bind { var, .. } = &s.kind {
+                self.0.insert(*var);
+            }
+            walk_stmt(self, s);
+        }
+        fn visit_pattern(&mut self, p: &almide_ir::IrPattern) {
+            if let almide_ir::IrPattern::Bind { var, .. } | almide_ir::IrPattern::As { var, .. } = p {
+                self.0.insert(*var);
+            }
+            almide_ir::visit::walk_pattern(self, p);
+        }
+    }
+    let mut b = Bound::default();
+    b.visit_expr(body);
+    b.0
 }
 
 #[cfg(test)]
