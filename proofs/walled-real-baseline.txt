@@ -319,3 +319,8 @@ spec/wasm_cross/mutable_global_field_mut_arg.almd :: main
 # mutators (`insert(tag, mut m)`, `push(label, mut xs)`); the lift declines on
 # every leg now, so the incumbent walls honestly on it too.
 spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd :: arm_writes
+# #2933/#2944: every mut form through a two- and three-level record field path
+# (`o.inner.xs`, `o.a.b.m`). The MIR classifier walls the deeper field write;
+# the structural leg serves it byte-identically to native.
+spec/wasm_cross/nested_field_path_mut.almd :: drain
+spec/wasm_cross/nested_field_path_mut.almd :: main
