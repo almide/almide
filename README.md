@@ -191,24 +191,24 @@ build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; t
 `almide check` scales linearly: over a 2k → 30k-line ladder of this repo's own stdlib the log-log slope of check time against project lines is **1.13** (1.0 is linear, 2.0 quadratic) and the 10k-line rung costs **4.4×** the empty-project floor — measured 2026-08-13, held by `scripts/check-edit-loop-scale.sh`, table in [BENCHMARKS.md](./docs/project/BENCHMARKS.md#edit-loop-scale-1334). Native runtime against handwritten Rust: **1.00×** on n-body and spectral-norm, 1.16–1.18× on fasta and FFT, ~1.6× where the workload is list materialization (#1004), CI-gated ratio ratchet ([scoreboard](./docs/project/BENCHMARKS.md)). Wasm runtime, measured and gated (#1701):
 
 <!-- wasm-runtime:generated:start — rendered from docs/benchmarks/wasm-runtime.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
-| Benchmark (`almide bench`, verify-then-time, median of 5) | wasm/native ratio |
-|---|---:|
-| nbody | **1.97×** |
-| spectralnorm | **1.47×** |
-| binarytrees | **1.32×** |
-| treealloc | **1.01×** |
-| fasta | **1.58×** |
-| fannkuchredux | **1.86×** |
-| mandelbrot | **1.26×** |
-| onebrc | **1.87×** |
-| fft | **1.53×** |
-| strchurn | **0.84×** |
-| listbuild_append | **1.89×** |
-| listbuild_combinator | **1.86×** |
-| listbuild_prealloc | **1.70×** |
-| mapbuild | **0.82×** |
+| Benchmark (`almide bench`, verify-then-time, min of 2×5 interleaved) | wasm/native, `main` only | cold start (spawn vs compile + instantiate) |
+|---|---:|---:|
+| nbody | **1.97×** | × |
+| spectralnorm | **1.47×** | × |
+| binarytrees | **1.32×** | × |
+| treealloc | **1.01×** | × |
+| fasta | **1.58×** | × |
+| fannkuchredux | **1.86×** | × |
+| mandelbrot | **1.26×** | × |
+| onebrc | **1.87×** | × |
+| fft | **1.53×** | × |
+| strchurn | **0.84×** | × |
+| listbuild_append | **1.89×** | × |
+| listbuild_combinator | **1.86×** | × |
+| listbuild_prealloc | **1.70×** | × |
+| mapbuild | **0.82×** | × |
 
-Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the stamped ratio verdict runs on the stamping machine class; CI gates the STATUS taxonomy below and judges the wasm leg by a same-runner A/B against the latest release binary (interleaved, min-of-runs, `ab_band` in the ledger — #2143) (`scripts/check-wasm-runtime-ratio.sh`). binarytrees runs its fan arms on the embedded host's thread pool, which is why wasm WINS there. The unmeasured corpus cells stay honest instead of estimated: 0 wall on the wasm build path, 0 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (almide 0.65.1 (dev), 2026-09-29).
+Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. The ratio times the program's own `main`, entry to return, on both legs (native in-process, wasm around the host call): process spawn and module compile/instantiate are outside it, and the cold-start column shows them (#2980). Small workloads run at a ledger-fixed size (`args=`) so `main` is long enough to time. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the stamped ratio verdict runs on the stamping machine class; CI gates the STATUS taxonomy below and judges the wasm leg by a same-runner A/B against the latest release binary (interleaved, min-of-runs, `ab_band` in the ledger — #2143) (`scripts/check-wasm-runtime-ratio.sh`). binarytrees and mandelbrot run their fan arms on the embedded host's thread pool; fannkuchredux's fan runs sequentially on wasm, which is most of its gap. The unmeasured corpus cells stay honest instead of estimated: 0 wall on the wasm build path, 0 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (almide 0.65.1 (dev), 2026-09-29).
 <!-- wasm-runtime:generated:end -->
 
 ## How It Works
