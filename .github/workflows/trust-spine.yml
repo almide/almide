@@ -94,7 +94,7 @@ jobs:
       # ── Rust toolchain + cargo cache (almide-mir pulls in the frontend) ──
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.95.0"
+          toolchain: "1.96.0"  # the workspace lock needs >= 1.96 (wasmtime 49, #2955)
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "."
