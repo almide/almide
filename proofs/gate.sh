@@ -397,6 +397,16 @@ run_structural spec/wasm_cross/witness_straightline.almd label 0
 tamper_structural pick 's/^{iamd|id}$/{iam|id}/' "#2756 if arm"
 tamper_structural label 's/^{|am}$/{|a}/' "#2756 match arm"
 
+# ── #2757: a SELF TAIL CALL (loop-converted by tco.rs) certified as the next
+# activation of the frame: `count_down` shares its list into the next
+# activation's param and releases its own credit before the loop-back
+# (`{iamd|id}` — recursive path, base path). Drill: drop the loop-back
+# release, which is the leak a loop-form frame that forgets its params has.
+echo
+echo "== structural leg, self tail calls  ⊳  proven checker (#2757) =="
+run_structural spec/wasm_cross/witness_straightline.almd count_down 0
+tamper_structural count_down 's/^{iamd|id}$/{iam|id}/' "#2757 loop-back"
+
 # ── #2152: almide-verify against the extracted checker on witnesses NO
 # producer wrote. The rows above only reach the shapes the emitters produce;
 # the transcription must agree on the whole input space, malformed bytes
