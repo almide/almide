@@ -21,24 +21,27 @@ fn almide_bin() -> String {
 }
 
 /// A shape the wasm leg refuses ON PURPOSE, not one it merely has not
-/// reached yet: a mut op through a DEEPER field path (`o.inner.xs`), which
-/// the var-only arms refuse honestly (list_mut.rs: only `h.f` routes through
-/// the copy-on-write field write). `the_ingredient_is_still_refused_in_the_
-/// emitter` pins that refusal's spelling in the emitter source, so the day it
-/// is lowered this test fails with a pointer instead of passing silently.
-const WALLED: &str = r#"type Inner = { xs: List[Int] }
-type Outer = { inner: Inner }
+/// reached yet: a typed hole (`todo(msg)`). C-268 gives the holes no
+/// cross-target promise — native aborts only if the hole runs, the wasm leg
+/// refuses the whole function at build time whether or not it is reachable —
+/// so here the hole is unreachable, native runs, and the wasm route walls.
+/// `the_ingredient_is_still_refused_in_the_emitter` pins that refusal's
+/// spelling in the emitter source, so the day it is lowered this test fails
+/// with a pointer instead of passing silently. (Until #2933 this was
+/// `list.push(o.inner.xs, 2)`, a mut op through a deeper field path; that
+/// shape now lowers.)
+const WALLED: &str = r#"fn later(n: Int) -> Int = todo("later")
 
 effect fn main() -> Unit = {
-  var o = Outer { inner: Inner { xs: [1] } }
-  list.push(o.inner.xs, 2)
-  println("${list.len(o.inner.xs)}")
+  let n = 1
+  if n > 5 then println("${later(n)}") else ()
+  println("${n}")
 }
 "#;
 
-/// The wasm leg's decline reason for `WALLED`'s `list.push(o.inner.xs, ..)`,
-/// as the emitter spells it.
-const STRUCTURAL_DECLINE: &str = "list-push-nonvar";
+/// The wasm leg's decline reason for `WALLED`'s `todo(..)`, as the emitter
+/// spells it.
+const STRUCTURAL_DECLINE: &str = "expr:Todo";
 
 #[test]
 fn the_ingredient_is_still_refused_in_the_emitter() {
@@ -78,7 +81,7 @@ fn check_target_wasm_reports_the_wall_as_e082() {
     if Command::new(almide_bin()).arg("--version").output().is_err() {
         return;
     }
-    let src = write("deepfield.almd", WALLED);
+    let src = write("typedhole.almd", WALLED);
     // The native check stays clean: E082 is a wasm-route verdict.
     let o = Command::new(almide_bin()).args(["check", src.to_str().unwrap()]).output().expect("spawn");
     assert!(o.status.success(), "the native check must stay clean:\n{}", String::from_utf8_lossy(&o.stderr));

@@ -95,16 +95,15 @@ fn the_file_the_incumbent_walls_runs_on_the_structural_leg() {
     );
 }
 
-/// A shape the wasm leg refuses on purpose (a mut op through a deeper field
-/// path; tests/wasm_wall_e082_test.rs pins the refusal's spelling).
+/// A shape the wasm leg refuses on purpose (an unreachable typed hole, C-268;
+/// tests/wasm_wall_e082_test.rs pins the refusal's spelling).
 const WALLS_THE_LEG: &str = r#"
-type Inner = { xs: List[Int] }
-type Outer = { inner: Inner }
+fn later(n: Int) -> Int = todo("later")
 
-test "push through a deeper field" {
-  var o = Outer { inner: Inner { xs: [1] } }
-  list.push(o.inner.xs, 2)
-  assert_eq(list.len(o.inner.xs), 2)
+test "an unreachable typed hole" {
+  let n = 1
+  if n > 5 then assert_eq(later(n), 0) else ()
+  assert_eq(n, 1)
 }
 "#;
 
