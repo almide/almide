@@ -110,6 +110,10 @@ matrix.mul_f32_t_scaled :: UNPROBEABLE :: parameter type outside the synthesizer
 matrix.qwen3_block_f32_kv :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.qwen3_block_f32_kv — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the ca
 matrix.qwen3_block_q1_0_kv :: COMPILER_FRONTIER :: wasm build failed
 matrix.qwen3_block_q8_0_kv :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.qwen3_block_q8_0_kv — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the c
+net.shm_create :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
+net.shm_read :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
+net.shm_resize :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
+net.shm_write :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
 net.tcp_accept :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_accept needs a declared capability not in this brick
 net.tcp_available :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_available needs a declared capability not in this brick
 net.tcp_close :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_close needs a declared capability not in this brick
@@ -122,6 +126,15 @@ net.tcp_read_exact :: HOST_CAPABILITY :: main is outside the MIR-lowering subset
 net.tcp_read_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read_timeout needs a declared capability not in this brick
 net.tcp_set_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_set_timeout needs a declared capability not in this brick
 net.tcp_write :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_write needs a declared capability not in this brick
+net.unix_accept :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
+net.unix_close :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
+net.unix_connect :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
+net.unix_listen :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
+net.unix_poll :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
+net.unix_recv :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
+net.unix_send :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
+net.unix_take_fds :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
+net.unix_wait :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
 process.env :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.env needs a declared capability not in this brick
 process.exec :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec needs a declared capability not in this brick
 process.exec_attached :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_attached needs a declared capability not in this brick
