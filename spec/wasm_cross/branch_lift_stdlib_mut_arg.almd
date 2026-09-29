@@ -31,24 +31,8 @@ fn fold(mut out: List[Node], mark: Int) -> Unit = {
   list.push(out, Node { kind: 9, kids: kids })
 }
 
-effect fn main() -> Unit = {
-  // Straight-line: the popped String is the value, the list must shrink.
-  var names: List[String] = ["a", "b", "c"]
-  let last = match list.pop(names) {
-    some(x) => x,
-    none => "",
-  }
-  println("pop: ${last} left=${list.len(names)}")
-  // A drain loop through a mut param, then a push on the drained list.
-  var out: List[Node] = [
-    Node { kind: 1, kids: [] },
-    Node { kind: 2, kids: [] },
-    Node { kind: 3, kids: [] }
-  ]
-  fold(out, 1)
-  let top = list.get(out, 1) ?? Node { kind: -1, kids: [] }
-  println("fold: len=${list.len(out)} top=${top.kind} kids=${list.len(top.kids)}")
-  // In a loop: each arm writes an outer list / map / string / bytes buffer.
+// In a loop: each arm writes an outer list / map / string / bytes buffer.
+fn arm_writes() -> Unit = {
   var acc: List[String] = []
   var seen: Map[String, Int] = [:]
   var buf = ""
@@ -66,4 +50,24 @@ effect fn main() -> Unit = {
     println("${i}: ${label}")
   }
   println("acc=${list.join(acc, ",")} seen=${map.len(seen)} buf=${buf} raw=${bytes.len(raw)}")
+}
+
+effect fn main() -> Unit = {
+  // Straight-line: the popped String is the value, the list must shrink.
+  var names: List[String] = ["a", "b", "c"]
+  let last = match list.pop(names) {
+    some(x) => x,
+    none => "",
+  }
+  println("pop: ${last} left=${list.len(names)}")
+  // A drain loop through a mut param, then a push on the drained list.
+  var out: List[Node] = [
+    Node { kind: 1, kids: [] },
+    Node { kind: 2, kids: [] },
+    Node { kind: 3, kids: [] }
+  ]
+  fold(out, 1)
+  let top = list.get(out, 1) ?? Node { kind: -1, kids: [] }
+  println("fold: len=${list.len(out)} top=${top.kind} kids=${list.len(top.kids)}")
+  arm_writes()
 }
