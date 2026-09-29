@@ -6,7 +6,7 @@ Start here. Four doorways, by what you are trying to do.
 |---|---|
 | **Write Almide** | [CHEATSHEET.md](./CHEATSHEET.md) — syntax, stdlib, idioms. The one an LLM should load first (see also [`/llms.txt`](../llms.txt)) |
 | **Know what the language *is*** | [SPEC.md](./SPEC.md) (normative) · [GRAMMAR.md](./GRAMMAR.md) (EBNF) · [specs/](./specs/) (per-area, with test paths) |
-| **Change the compiler** | [ARCHITECTURE.md](./ARCHITECTURE.md) — pipeline and module map |
+| **Change the compiler** | [ARCHITECTURE.md](./ARCHITECTURE.md) — pipeline and module map · [cross-target-decisions.md](./cross-target-decisions.md) — the semantic questions both targets must answer from one source |
 | **Judge whether to trust it** | [TRUST-SPINE.md](./TRUST-SPINE.md) — what is proven, what is measured, what is neither |
 
 ## Directories
