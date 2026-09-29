@@ -1608,6 +1608,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/branch_lift_in_loop.almd", class = "fixture" },
   { path = "spec/wasm_cross/branch_lift_stdlib_mut_arg.almd", class = "fixture" },
+  { path = "spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-118"
