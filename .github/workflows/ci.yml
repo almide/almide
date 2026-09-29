@@ -41,7 +41,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: "1.94.0"  # runner-class MSRV: the almide binary embeds wasmtime 47 (commissioned host); compiler crates keep the 1.89 claim per-crate
+  RUST_TOOLCHAIN: "1.96.0"  # runner-class MSRV: the almide binary embeds wasmtime 49 (commissioned host); compiler crates keep the 1.89 claim per-crate
   # Cold runners gain nothing from the workspace's release-incremental
   # profile (#1006) — it only bloats the caches. Opt out.
   CARGO_INCREMENTAL: "0"
@@ -898,15 +898,15 @@ jobs:
       - name: Cache wasmtime tarball
         uses: actions/cache@v6
         with:
-          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
-          key: wasmtime-v47.0.3-x86_64-linux
+          path: wasmtime-v49.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v49.0.1-x86_64-linux
       - name: Install wasmtime
         run: |
           # Pinned + cached + retried. On a cache hit the tarball is already here,
           # so the per-IP-rate-limited release download runs at most once per key.
           # `-f` turns a 403 rate-limit body into a retry instead of a 92-byte
           # "not a tar archive". Bump VERSION and the cache key together.
-          VERSION=v47.0.3
+          VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
           if [ ! -s "$TARBALL" ]; then
             for i in 1 2 3 4 5; do
@@ -963,12 +963,12 @@ jobs:
       - name: Cache wasmtime zip
         uses: actions/cache@v6
         with:
-          path: wasmtime-v47.0.3-x86_64-windows.zip
-          key: wasmtime-v47.0.3-x86_64-windows
+          path: wasmtime-v49.0.1-x86_64-windows.zip
+          key: wasmtime-v49.0.1-x86_64-windows
       - name: Install wasmtime
         shell: bash
         run: |
-          VERSION=v47.0.3
+          VERSION=v49.0.1
           ZIP="wasmtime-${VERSION}-x86_64-windows.zip"
           if [ ! -s "$ZIP" ]; then
             for i in 1 2 3 4 5; do
@@ -1094,15 +1094,15 @@ jobs:
       - name: Cache wasmtime tarball
         uses: actions/cache@v6
         with:
-          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
-          key: wasmtime-v47.0.3-x86_64-linux
+          path: wasmtime-v49.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v49.0.1-x86_64-linux
       - name: Install wasmtime
         run: |
           # Pinned + cached + retried. On a cache hit the tarball is already here,
           # so the per-IP-rate-limited release download runs at most once per key.
           # `-f` turns a 403 rate-limit body into a retry instead of a 92-byte
           # "not a tar archive". Bump VERSION and the cache key together.
-          VERSION=v47.0.3
+          VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
           if [ ! -s "$TARBALL" ]; then
             for i in 1 2 3 4 5; do
@@ -1186,15 +1186,15 @@ jobs:
       - name: Cache wasmtime tarball
         uses: actions/cache@v6
         with:
-          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
-          key: wasmtime-v47.0.3-x86_64-linux
+          path: wasmtime-v49.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v49.0.1-x86_64-linux
       - name: Install wasmtime
         run: |
           # Pinned + cached + retried. On a cache hit the tarball is already here,
           # so the per-IP-rate-limited release download runs at most once per key.
           # `-f` turns a 403 rate-limit body into a retry instead of a 92-byte
           # "not a tar archive". Bump VERSION and the cache key together.
-          VERSION=v47.0.3
+          VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
           if [ ! -s "$TARBALL" ]; then
             for i in 1 2 3 4 5; do
@@ -1375,7 +1375,7 @@ jobs:
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
-      # RUST_TOOLCHAIN (1.94), not the historical 1.89 per-crate floor: the
+      # RUST_TOOLCHAIN (1.96), not the historical 1.89 per-crate floor: the
       # commissioned workspace lock carries deps (thiserror 2.0.20) whose MSRV
       # is above 1.89, so a 1.89 build of the WORKSPACE no longer resolves.
       - uses: dtolnay/rust-toolchain@stable
@@ -1722,7 +1722,7 @@ jobs:
       # idiom-ceiling reds; a probe on the runner class showed those reds
       # were runner bimodality under-sampled at 3 runs — see the RUNS
       # comment in scripts/check-perf-ratio.sh. Toolchain choice was never
-      # the cause.) Build and test jobs keep the 1.94 MSRV pin; this job's
+      # the cause.) Build and test jobs keep the 1.96 MSRV pin; this job's
       # claim is about the GENERATED CODE, not the compiler's build floor.
       - uses: dtolnay/rust-toolchain@stable
 
@@ -1751,11 +1751,11 @@ jobs:
         # the one job still exposed to the per-IP release rate limit.
         uses: actions/cache@v6
         with:
-          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
-          key: wasmtime-v47.0.3-x86_64-linux
+          path: wasmtime-v49.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v49.0.1-x86_64-linux
       - name: Install wasmtime (the wasm-leg gates)
         run: |
-          VERSION=v47.0.3
+          VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
           if [ ! -s "$TARBALL" ]; then
             for i in 1 2 3 4 5; do
@@ -1836,7 +1836,7 @@ jobs:
           #
           # An install that cannot install must fail its own step. The trailing
           # `wasmtime --version` is what makes that true.
-          VERSION=v47.0.3
+          VERSION=v49.0.1
           case "${{ runner.os }}" in
             macOS) ARCH_TRIPLE="aarch64-macos" ;;
             *)     ARCH_TRIPLE="x86_64-linux"  ;;
@@ -1942,7 +1942,7 @@ jobs:
       - name: Install wasmtime
         run: |
           # The same pinned, verified install as build-cross (#1036).
-          VERSION=v47.0.3
+          VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-aarch64-macos.tar.xz"
           for i in 1 2 3 4 5; do
             curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break

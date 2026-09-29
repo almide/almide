@@ -128,11 +128,11 @@ jobs:
       - name: Cache wasmtime tarball
         uses: actions/cache@v6
         with:
-          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
-          key: wasmtime-v47.0.3-x86_64-linux
+          path: wasmtime-v49.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v49.0.1-x86_64-linux
       - name: Install wasmtime
         run: |
-          VERSION=v47.0.3
+          VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
           if [ ! -s "$TARBALL" ]; then
             for i in 1 2 3 4 5; do

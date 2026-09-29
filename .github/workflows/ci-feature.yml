@@ -23,7 +23,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN: "1.94.0"  # runner-class MSRV: the almide binary embeds wasmtime 47 (commissioned host); compiler crates keep the 1.89 claim per-crate
+  RUST_TOOLCHAIN: "1.96.0"  # runner-class MSRV: the almide binary embeds wasmtime 49 (commissioned host); compiler crates keep the 1.89 claim per-crate
   # Cold runners gain nothing from the workspace's release-incremental
   # profile (#1006) — it only bloats the caches. Opt out.
   CARGO_INCREMENTAL: "0"
@@ -54,13 +54,13 @@ jobs:
       - name: Cache wasmtime tarball
         uses: actions/cache@v6
         with:
-          path: wasmtime-v47.0.3-x86_64-linux.tar.xz
-          key: wasmtime-v47.0.3-x86_64-linux
+          path: wasmtime-v49.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v49.0.1-x86_64-linux
 
       - name: Install the runtime `almide test` uses for its wasm leg
         run: |
           set -euo pipefail
-          VERSION=v47.0.3
+          VERSION=v49.0.1
           TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
           if ! tar -tf "$TARBALL" >/dev/null 2>&1; then
             curl --fail --location --retry 5 --retry-all-errors \
