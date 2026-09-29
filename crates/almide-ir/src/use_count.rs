@@ -801,7 +801,7 @@ mod mut_arg_write_tests {
                 doc: None,
                 blank_lines_before: 0,
                 def_id: None,
-                mutated_params: vec![],
+                mutated_params: vec![], // fresh-fn: test fixture, the call site is what is under test
                 module_origin: None,
             };
             let mut program = IrProgram { functions: vec![main], var_table, ..Default::default() };
