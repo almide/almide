@@ -24,22 +24,20 @@ fn almide_bin() -> String {
 /// structural leg still declines. Its original structural reason (the fs op
 /// had no stock-WASI service) is gone since the p1 fs service (#2742), so the
 /// structural decline now comes from the retirement bill's open rows
-/// (`random.shuffle`, #2749; `continue`, #2745): two, so one landing does not
-/// silently turn this test into a pass of a different program.
+/// (`list.partition` and matrix `*`; `random.shuffle` #2749 and `continue`
+/// #2745 were the previous pair until both landed together): two, so one
+/// landing does not silently turn this test into a pass of a different
+/// program.
 const BOTH_LEGS_WALL: &str = r#"import fs
-import random
 
 effect fn read_one(p: String) -> String = { let t = fs.read_text(p)!; string.trim(t) }
 
 effect fn main() -> Unit = {
-  var n = 0
-  for i in 0..<4 {
-    if i == 2 then continue
-    n = n + i
-  }
-  let xs = random.shuffle([n, 2, 3])
+  let (evens, odds) = list.partition([1, 2, 3, 4], (x) => x % 2 == 0)
+  let m = matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])
+  let sq = m * m
   let texts = fan.map(["a.txt"], (p) => read_one(p)!)!
-  println("${list.len(xs)} " + (texts |> list.join(",")))
+  println("${list.len(evens)} ${list.len(odds)} ${matrix.rows(sq)} " + (texts |> list.join(",")))
 }
 "#;
 
