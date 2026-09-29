@@ -66,7 +66,14 @@ impl Emitter<'_> {
                         None => return unsup("index-assign:unmapped"),
                     },
                 };
+                // A C-319 cell (a var a closure writes through) holds the
+                // list's ADDRESS one load deeper; the route reads through the
+                // cell and the COW judge writes the result back into it.
+                let in_cell = is_local && self.cells.contains(target);
                 if declared == crate::bytes::BYTES {
+                    if in_cell {
+                        return unsup("cell-write:bytes-index-assign");
+                    }
                     return self.lower_bytes_index_assign(target, is_local, index, value);
                 }
                 let SliceTy::List(h) = declared else {
@@ -87,7 +94,11 @@ impl Emitter<'_> {
                 self.f.instructions().local_set(hv);
                 let var_space = self.var_space;
                 let get_target = |f: &mut wasm_encoder::Function, locals: &HashMap<VarId, (u32, SliceTy)>, globals: &HashMap<GVar, (u32, SliceTy)>| {
-                    if is_local {
+                    if in_cell {
+                        let mut i = f.instructions();
+                        i.local_get(locals[target].0);
+                        i.i32_load(slot_memarg(0));
+                    } else if is_local {
                         f.instructions().local_get(locals[target].0);
                     } else {
                         f.instructions().global_get(globals[&(var_space, *target)].0);
@@ -99,7 +110,7 @@ impl Emitter<'_> {
                 // check in emitter.rs: `idx >=u count` covers the negative
                 // index too, and a loop that cannot change this list's length
                 // already has the count in a local.
-                let hoisted = self.hoisted_count_of(*target);
+                let hoisted = if in_cell { None } else { self.hoisted_count_of(*target) };
                 self.f.instructions().local_get(hi);
                 match hoisted {
                     Some(count) => {
@@ -130,7 +141,11 @@ impl Emitter<'_> {
                 // (#1729: the prealloc/fft rows OOM'd at 2^16 writes where
                 // the live payload is 512 KiB).
                 let cow = self.cow_fn_of(declared);
-                if is_local {
+                if in_cell {
+                    let idx = self.locals[target].0;
+                    self.emit_read_mut_var_cow(target, idx, declared, false)?;
+                    self.f.instructions().local_set(hb);
+                } else if is_local {
                     self.emit_local_cow(*target, cow, hb);
                 } else {
                     get_target(self.f, self.locals, self.globals);

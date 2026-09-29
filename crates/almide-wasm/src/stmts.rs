@@ -311,9 +311,6 @@ impl Emitter<'_> {
             }
             IrStmtKind::Assign { var, value } => self.lower_assign(var, value),
             IrStmtKind::IndexAssign { target, index, value } => {
-                if self.cells.contains(target) {
-                    return unsup("cell-write:index-assign");
-                }
                 self.lower_index_assign(target, index, value)
             }
             IrStmtKind::Expr { expr } => self.lower_stmt_expr(expr),

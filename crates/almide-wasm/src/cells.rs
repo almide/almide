@@ -61,18 +61,26 @@ impl IrVisitor for Scan {
     }
 
     fn visit_stmt(&mut self, s: &IrStmt) {
-        match &s.kind {
-            IrStmtKind::Assign { var, .. } => {
-                self.mutated.insert(*var);
+        // A write target names the var without a `Var` read: inside a
+        // lambda it is a capture too (`() => { xs[5] = 1 }` reads nothing).
+        if let Some(v) = write_target(s) {
+            self.mutated.insert(v);
+            if self.in_lambda > 0 {
+                self.captured.insert(v);
             }
-            IrStmtKind::IndexAssign { target, .. }
-            | IrStmtKind::MapInsert { target, .. }
-            | IrStmtKind::FieldAssign { target, .. } => {
-                self.mutated.insert(*target);
-            }
-            _ => {}
         }
         walk_stmt(self, s);
+    }
+}
+
+/// The var a write statement stores into, if it is one.
+fn write_target(s: &IrStmt) -> Option<VarId> {
+    match &s.kind {
+        IrStmtKind::Assign { var, .. } => Some(*var),
+        IrStmtKind::IndexAssign { target, .. }
+        | IrStmtKind::MapInsert { target, .. }
+        | IrStmtKind::FieldAssign { target, .. } => Some(*target),
+        _ => None,
     }
 }
 
@@ -107,6 +115,16 @@ impl crate::emitter::Emitter<'_> {
                     self.out.push((*id, ty));
                 }
                 almide_ir::visit::walk_expr(self, e);
+            }
+            fn visit_stmt(&mut self, s: &IrStmt) {
+                if let Some(id) = write_target(s)
+                    && !self.params.contains(&id)
+                    && let Some(&(_, ty)) = self.locals.get(&id)
+                    && !self.out.iter().any(|(v, _)| *v == id)
+                {
+                    self.out.push((id, ty));
+                }
+                almide_ir::visit::walk_stmt(self, s);
             }
         }
         let mut sc = Scan { locals: self.locals, params, out: Vec::new() };
