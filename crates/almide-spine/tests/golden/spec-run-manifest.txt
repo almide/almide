@@ -1,4 +1,4 @@
-# oracle: almide 0.65.1 (dev) at 5fdd778b6 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.65.1 (dev) at 53875d56c — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -74,6 +74,7 @@ f2230fa03d41f8aeac94bed62238d20871037979b05730b6b36f836d2362ad9e	0	spec/wasm_cro
 74a3b49a537162bf6a058ebedca424aeebd89235a618f4402ebf7c1d67a88359	0	spec/wasm_cross/closure_borrowed_arg_guard.almd
 c27cd54174d42fbee4e37b073e7f19bd9af3d44e0fb4ee6c5a72423cba9c031e	0	spec/wasm_cross/closure_captured_list_mutation.almd
 6379390a250c8a1bd2de515bab45bc5da736dd7cc1097796e2a85d0eff96e8ba	0	spec/wasm_cross/closure_captured_map_records.almd
+e29ff28f23df4788f2a6629b3633ae1b9e85b645157c7a720e99b448171f6d67	0	spec/wasm_cross/closure_reads_var_written_by_mut_call.almd
 f87261b512d6011ae0f42eb46bbd0a99fc9152bb7203714496b2259e502b98ae	0	spec/wasm_cross/closure_rich_list_capture.almd
 d26195e7b6c329ab05383acc6f825b92e02e036afb3124e7961b6d6ba3c3e09d	0	spec/wasm_cross/closure_scalar_captures.almd
 161008c304597ca415226255936615780830c9bd73d5d31ecc3bcf2ccbd5f0c4	0	spec/wasm_cross/closure_tail_recursion.almd
