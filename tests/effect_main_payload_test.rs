@@ -1,10 +1,9 @@
 //! #2885 gate: an `effect fn main` may declare any Ok type, and the entry
-//! wrapper throws the payload away (check's E044 rule). The incumbent wasm
-//! leg (`ALMIDE_WASM_INCUMBENT=1`, the structural leg's fallback) emitted
-//! invalid wasm for `-> Int` and turned a record payload into an `Error: `
-//! line with exit 1. Each Ok shape below must give the same stdout, stderr
-//! and exit code on the incumbent leg, the structural leg and native, on the
-//! value path and on the `!` error path.
+//! wrapper throws the payload away (check's E044 rule). The retired incumbent
+//! wasm leg emitted invalid wasm for `-> Int` and turned a record payload into
+//! an `Error: ` line with exit 1. Each Ok shape below must give the same
+//! stdout, stderr and exit code on the wasm leg and native, on the value path
+//! and on the `!` error path.
 
 use std::process::Command;
 
@@ -15,12 +14,9 @@ fn almide() -> String {
 }
 
 /// `(stdout, stderr without the leg banner, exit code)`.
-fn run(dir: &std::path::Path, args: &[&str], incumbent: bool) -> (String, String, Option<i32>) {
+fn run(dir: &std::path::Path, args: &[&str]) -> (String, String, Option<i32>) {
     let mut cmd = Command::new(almide());
     cmd.current_dir(dir).args(args);
-    if incumbent {
-        cmd.env("ALMIDE_WASM_INCUMBENT", "1");
-    }
     let out = cmd.output().expect("run almide");
     let stderr: String = String::from_utf8_lossy(&out.stderr)
         .lines()
@@ -52,16 +48,14 @@ fn an_effect_main_declaring_any_ok_type_runs_alike_on_every_leg() {
             );
             let root = tempfile::tempdir().expect("tempdir");
             std::fs::write(root.path().join("t.almd"), &program).expect("write");
-            let native = run(root.path(), &["run", "t.almd"], false);
+            let native = run(root.path(), &["run", "t.almd"]);
             let want = if fails { (String::new(), "Error: boom\n".to_string(), Some(1)) } else { ("n = 3\n".to_string(), String::new(), Some(0)) };
             if native != want {
                 failures.push(format!("`-> {ty}` ({path} path) native: {native:?}, expected {want:?}"));
             }
-            for (leg, incumbent) in [("structural", false), ("incumbent", true)] {
-                let got = run(root.path(), &["run", "t.almd", "--target", "wasm"], incumbent);
-                if got != native {
-                    failures.push(format!("`-> {ty}` ({path} path) {leg}: {got:?}, native {native:?}"));
-                }
+            let got = run(root.path(), &["run", "t.almd", "--target", "wasm"]);
+            if got != native {
+                failures.push(format!("`-> {ty}` ({path} path) wasm: {got:?}, native {native:?}"));
             }
         }
     }

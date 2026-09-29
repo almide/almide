@@ -302,7 +302,6 @@ fn corpus() -> Vec<(String, String, bool)> {
 fn build(source: &std::path::Path, target: &str, out: &std::path::Path, armed: bool) -> std::process::Output {
     let mut cmd = Command::new(almide_bin());
     cmd.args(["build", source.to_str().expect("path"), "--target", target, "-o", out.to_str().expect("path")])
-        .env_remove("ALMIDE_WASM_INCUMBENT")
         .env_remove("ALMIDE_COMPONENT_P3")
         .env_remove("ALMIDE_REGION_OFF")
         .env("ALMIDE_REGION_DEBUG", "1");

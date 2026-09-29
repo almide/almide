@@ -28,8 +28,8 @@ cd "$ROOT"
 # E081 fires in the BUILD path (--target wasm availability, #1423) — the
 # check-harness fixture format cannot reach it; its pin is
 # tests/wasm_availability_e081_test.rs (the E054 precedent).
-# E082 (#1922) is the both-legs wasm wall, same path and same precedent —
-# pinned by tests/wasm_both_legs_e082_test.rs.
+# E082 (#1922) is the wasm leg's wall, same path and same precedent —
+# pinned by tests/wasm_wall_e082_test.rs.
 # E083 (#1996) is the wasm emitter's own contract failure (an exit that does
 # not implement its checked ExitPlan) — no source program triggers it; pinned
 # by crates/almide-wasm/tests/exit_validation.rs through the emit-time

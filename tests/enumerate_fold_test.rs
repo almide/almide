@@ -32,7 +32,7 @@ fn main() -> Unit = {
         let artifact = dir.path().join(if target == "rust" { "native" } else { "module.wasm" });
         let built = Command::new(env!("CARGO_BIN_EXE_almide"))
             .args(["build", source.to_str().expect("path"), "--target", target, "-o", artifact.to_str().expect("path")])
-            .env_remove("ALMIDE_WASM_INCUMBENT").env_remove("ALMIDE_COMPONENT_P3")
+            .env_remove("ALMIDE_COMPONENT_P3")
             .output().expect("build");
         assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
         let mut command = if target == "rust" { Command::new(&artifact) } else {

@@ -18,8 +18,7 @@
 //!
 //! The matrix: every one of the 32 control characters plus `"`, `\` and
 //! U+007F, as a VALUE and as a KEY, through `json.stringify` and
-//! `json.stringify_pretty`, on native, the structural wasm leg and the
-//! incumbent wasm leg — each cell must equal the rule's bytes, computed here
+//! `json.stringify_pretty`, on native and the wasm leg — each cell must equal the rule's bytes, computed here
 //! independently of every implementation.
 
 use std::process::Command;
@@ -85,7 +84,7 @@ fn wasmtime_available() -> bool {
 }
 
 /// Build and run PROGRAM on one leg; the stdout.
-fn run_leg(target: &str, incumbent: bool) -> String {
+fn run_leg(target: &str) -> String {
     let dir = tempfile::tempdir().expect("tempdir");
     let source = dir.path().join("main.almd");
     std::fs::write(&source, PROGRAM).expect("source");
@@ -94,12 +93,8 @@ fn run_leg(target: &str, incumbent: bool) -> String {
     build
         .args(["build", source.to_str().expect("path"), "--target", target, "-o"])
         .arg(&artifact)
-        .env_remove("ALMIDE_WASM_INCUMBENT")
         .env_remove("ALMIDE_WASM_STRUCTURAL")
         .env_remove("ALMIDE_COMPONENT_P3");
-    if incumbent {
-        build.env("ALMIDE_WASM_INCUMBENT", "1");
-    }
     let built = build.output().expect("build");
     assert!(built.status.success(), "{target} build:\n{}", String::from_utf8_lossy(&built.stderr));
     let out = if target == "rust" {
@@ -137,16 +132,13 @@ fn the_rule_table_is_the_rfc_one() {
 #[test]
 fn every_leg_quotes_every_control_character_by_the_one_rule() {
     let want = expected();
-    let native = run_leg("rust", false);
+    let native = run_leg("rust");
     assert_cells("native", &native, &want);
     if !wasmtime_available() {
         eprintln!("skipping the wasm legs: wasmtime not on PATH");
         return;
     }
-    let structural = run_leg("wasm", false);
+    let structural = run_leg("wasm");
     assert_cells("wasm structural", &structural, &want);
-    let incumbent = run_leg("wasm", true);
-    assert_cells("wasm incumbent", &incumbent, &want);
     assert_eq!(native, structural, "native vs structural bytes");
-    assert_eq!(native, incumbent, "native vs incumbent bytes");
 }

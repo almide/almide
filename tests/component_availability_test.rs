@@ -17,7 +17,6 @@ fn unsupported_component_args_are_named_before_writing_an_artifact() {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
         cmd.args(["build", source.to_str().expect("path"), "--target", "wasm", "--component", "-o", artifact.to_str().expect("path")])
             .env_remove("ALMIDE_COMPONENT_ADAPTER")
-            .env_remove("ALMIDE_WASM_INCUMBENT")
             .env_remove("ALMIDE_FUEL_PROBE")
             .env_remove("ALMIDE_COMPONENT_P3");
         if p3 { cmd.env("ALMIDE_COMPONENT_P3", "1"); }

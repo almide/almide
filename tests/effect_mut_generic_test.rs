@@ -1,13 +1,11 @@
 //! #1622: `effect fn` protocol methods with `mut self` reached through a
 //! generic bound lower on the structural wasm leg in BOTH halves — the
-//! never-err half (#1622, both legs) and the can-err half (#1576's ruling:
+//! never-err half (#1622) and the can-err half (#1576's ruling:
 //! `(T, Buf)` rides the ok payload only, the err propagates before any
 //! write-back). The cross-target value parity is pinned by
 //! spec/wasm_cross/effect_mut_generic_port.almd (never-err) and
 //! spec/wasm_cross/mut_param_effect_can_err.almd (can-err); this gate pins
-//! the ROUTING from both sides: the never-err half on both legs, the can-err
-//! half on the structural leg (the incumbent walls the synthesized
-//! `let (r, b) = call!` destructure honestly — a walled-real baseline row).
+//! that the wasm leg lowers both halves itself.
 
 use std::path::Path;
 use std::process::Command;
@@ -110,18 +108,6 @@ fn never_err_effect_mut_method_via_bound_lowers_structurally() {
         "wasm/native divergence on the never-err shape"
     );
 
-    // The incumbent leg lowers it too (the same shared C-132 rewrite).
-    let incumbent = Command::new(almide_bin())
-        .args(["run", path.to_str().unwrap(), "--target", "wasm"])
-        .env("ALMIDE_WASM_INCUMBENT", "1")
-        .output()
-        .expect("spawn");
-    assert!(
-        incumbent.status.success(),
-        "incumbent leg walled on the never-err shape:\n{}",
-        String::from_utf8_lossy(&incumbent.stderr)
-    );
-    assert_eq!(String::from_utf8_lossy(&incumbent.stdout), expected);
 }
 
 #[test]
@@ -159,22 +145,4 @@ fn can_err_half_lowers_structurally_under_the_1576_ruling() {
         expected,
         "wasm/native divergence on the can-err shape"
     );
-
-    // The incumbent may still wall the synthesized destructure-unwrap, but
-    // it must never emit different bytes: either the same stdout, or an
-    // honest refusal.
-    let incumbent = Command::new(almide_bin())
-        .args(["run", path.to_str().unwrap(), "--target", "wasm"])
-        .env("ALMIDE_WASM_INCUMBENT", "1")
-        .output()
-        .expect("spawn");
-    if incumbent.status.success() {
-        assert_eq!(String::from_utf8_lossy(&incumbent.stdout), expected);
-    } else {
-        assert!(
-            String::from_utf8_lossy(&incumbent.stderr).contains("not yet supported"),
-            "the incumbent neither lowered nor walled honestly:\n{}",
-            String::from_utf8_lossy(&incumbent.stderr)
-        );
-    }
 }

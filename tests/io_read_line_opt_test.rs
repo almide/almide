@@ -4,8 +4,8 @@
 //! end of input, so an interactive loop that skips empty lines never sees the
 //! end — it spins on "" forever. `read_line_opt` answers `none` at the end and
 //! `some("")` for the empty line. The issue's input (`a`, an empty line, `b`
-//! with no trailing newline) must read the same on native and on both wasm
-//! legs, and it must compose with the rest of the stdin family on one cursor.
+//! with no trailing newline) must read the same on native and on the wasm
+//! leg, and it must compose with the rest of the stdin family on one cursor.
 //!
 //! Stdin-reading programs cannot live in the spec suites (the harness does not
 //! pipe per-file stdin), so this Command-with-stdin test is the executable
@@ -55,8 +55,7 @@ effect fn main() -> Unit = {
 "#;
 
 /// The leg selector: "" native, else the wasm leg forced by its env flag.
-const LEGS: [(&str, &str); 3] =
-    [("native", ""), ("structural", "ALMIDE_WASM_STRUCTURAL"), ("incumbent", "ALMIDE_WASM_INCUMBENT")];
+const LEGS: [(&str, &str); 2] = [("native", ""), ("structural", "ALMIDE_WASM_STRUCTURAL")];
 
 fn run(program: &str, leg: (&str, &str), stdin: &str) -> String {
     let dir = tempfile::Builder::new().prefix("t2539").tempdir().expect("tempdir");

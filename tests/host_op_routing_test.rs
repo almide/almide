@@ -4,8 +4,8 @@
 //! every fs op — and an fs program whose only fs use sat inside a
 //! `!`-consumed `fan.map` built on neither leg. Now the structural leg
 //! lowers the program; on the BUILD path its emitted host ops are audited
-//! against the p1 shim's served set and an unserved op reroutes the module
-//! to the incumbent's WASI rendering. Since #2742 the p1 shim serves the fs
+//! against the p1 shim's served set and an unserved op is a wall (E082; it
+//! rerouted to the incumbent's WASI rendering until #2752). Since #2742 the p1 shim serves the fs
 //! ops itself, so an fs program BUILDS on the structural leg too.
 
 use std::process::Command;

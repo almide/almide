@@ -26,7 +26,7 @@ check_parity                     272
 backend_parity                   270
 eval_test                        220
 surface_matrix                   213
-incumbent_exit_tail_test         203
+exit_tail_positions_test         203
 wasm_test_lane_wall_test         185
 bridge_test                      173
 native_result_ownership          144
@@ -102,7 +102,6 @@ stdout_buffering_test            6
 io_read_all_test                 6
 push_rewrite_test                6
 alloc_bump_wrap_test             6
-both_walls_reported_test         6
 critical_profile_test            6
 sort_by_compound_key_test        6
 list_set_in_place_test           6

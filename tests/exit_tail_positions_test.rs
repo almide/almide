@@ -55,33 +55,19 @@ fn dynamic_exit_codes_execute_in_every_tail_position() {
                     ),
                 )
                 .unwrap();
-                for leg in ["native", "structural", "incumbent"] {
+                for leg in ["native", "wasm"] {
                     let mut cmd = Command::new(&bin);
-                    cmd.arg("run")
-                        .arg(&file)
-                        .env_remove("ALMIDE_WASM_INCUMBENT");
+                    cmd.arg("run").arg(&file);
                     if leg != "native" {
                         cmd.args(["--target", "wasm"]);
                     }
-                    if leg == "incumbent" {
-                        cmd.env("ALMIDE_WASM_INCUMBENT", "1");
-                    }
                     let out = cmd.output().unwrap();
-                    let stderr = String::from_utf8(out.stderr).unwrap();
-                    // The forced-leg notice is compiler routing information.
-                    let stderr = stderr
-                        .lines()
-                        .filter(|line| !line.starts_with("[almide] ALMIDE_WASM_INCUMBENT is set:"))
-                        .collect::<Vec<_>>()
-                        .join("\n");
+                    let stderr = String::from_utf8(out.stderr).unwrap().lines().collect::<Vec<_>>().join("\n");
                     let context =
                         format!("{position}, code {code}, inline {inline}, {leg}: {stderr}");
-                    // C-350: the exit status 0..=255 passes through; the
-                    // incumbent's preview-1 artifact walls 126..=255 (#2780).
+                    // C-350: the exit status 0..=255 passes through.
                     let (want_code, want_err) = if !(0..=255).contains(&code) {
                         (1, "Error: exit code must be in 0..=255")
-                    } else if code > 125 && leg == "incumbent" {
-                        (1, "Error: a WASI preview-1 build cannot exit with a code in 126..=255")
                     } else {
                         (code, "")
                     };

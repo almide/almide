@@ -152,11 +152,11 @@ You write no ownership annotations, no lifetimes, no `free`: [Perceus](https://w
 No runtime, no GC, no interpreter — native compiles through Rust to machine code, and WASM is emitted directly as self-contained modules.
 
 <!-- wasm-size:generated:start — rendered from docs/benchmarks/wasm-size.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
-| Program (`almide build --target wasm`, verified, as shipped) | incumbent v1 leg | structural leg |
-|---|---:|---:|
-| Hello, world | **1,096 B** | **1,330 B** |
+| Program (`almide build --target wasm`, as shipped) | structural leg |
+|---|---:|
+| Hello, world | **1,330 B** |
 
-Measured on almide 0.62.0, 2026-09-12, from `docs/benchmarks/wasm-size.txt`; no post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the verified module).
+Measured on almide 0.62.0, 2026-09-12, from `docs/benchmarks/wasm-size.txt`; no post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the renderer's own module).
 <!-- wasm-size:generated:end -->
 
 Rust on the same wasm target is 40 KB+ for Hello, world even fully size-tuned; the native minigit CLI binary is 418 KB stripped with 0 dependencies. The byte-by-byte dissection, measured 2026-07-23 on the incumbent leg: **[docs/wasm/WASM-OUTPUT.md](./docs/wasm/WASM-OUTPUT.md)**.
@@ -226,7 +226,7 @@ flowchart LR
 
 **Native.** The Nanopass pipeline applies target-specific transformations — `ResultPropagation` (Rust `?`), `CloneInsertion` (Rust borrow analysis), `LICM` (loop-invariant code motion). The Template Renderer is purely syntactic: every semantic decision is already encoded in the IR.
 
-**WebAssembly.** Since commissioning ([#1599](https://github.com/almide/almide/pull/1599)) two verified renderers sit behind one router (`render_wasm_module_routed` in `src/cli/build.rs`). The **structural leg** — the commissioned engine, `almide::wasm_leg` front + `crates/almide-wasm` emitter — takes every program with a `main`, no external packages, and no host-variant I/O on the build path; it was accepted at 610/610 byte-identical to native on the `wasm_cross` corpus, and its build artifacts ship in the WASI form ([#1588](https://github.com/almide/almide/issues/1588)) so they run on stock runtimes. The **incumbent v1 leg** — the certified MIR trust spine in `crates/almide-mir` — takes main-less library modules, dependency-bearing projects, host-variant programs, and any shape the structural leg walls on: a verified-to-verified handover, never the retired unverified emitter, and a program neither leg lowers is an honest error. `ALMIDE_WASM_INCUMBENT=1` forces the incumbent; `ALMIDE_VERIFIED_DEBUG=1` narrates the routing.
+**WebAssembly.** Since commissioning ([#1599](https://github.com/almide/almide/pull/1599)) two verified renderers sit behind one router (`render_wasm_module_routed` in `src/cli/build.rs`). The **structural leg** — the commissioned engine, `almide::wasm_leg` front + `crates/almide-wasm` emitter — takes every program with a `main`, no external packages, and no host-variant I/O on the build path; it was accepted at 610/610 byte-identical to native on the `wasm_cross` corpus, and its build artifacts ship in the WASI form ([#1588](https://github.com/almide/almide/issues/1588)) so they run on stock runtimes. The **incumbent v1 leg** — the certified MIR trust spine in `crates/almide-mir` — took the shapes the structural leg walled on until #2752; no route reaches it now, and a program the structural leg does not lower is an honest error (E082), never a fallback. `ALMIDE_VERIFIED_DEBUG=1` narrates the route.
 
 ```bash
 almide run app.almd                  # Compile + execute (native)
