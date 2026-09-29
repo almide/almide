@@ -22,3 +22,10 @@ test "a default that names the callee module's own constant (#1088)" {
   assert_eq(varlib.hail("Dana"), "Ahoy, Dana!")
   assert_eq(varlib.hail("Eve", "Yo"), "Yo, Eve!")
 }
+
+test "defaults that are the callee module's own constructors and functions" {
+  assert_eq(varlib.retry_plan(), "on-failure/slow/3/7")
+  assert_eq(varlib.retry_plan(varlib.Always), "always/slow/3/7")
+  assert_eq(varlib.retry_plan(lane: varlib.Fast), "on-failure/fast/3/7")
+  assert_eq(varlib.retry_plan(tries: 5, fallback: varlib.Empty), "on-failure/slow/5/none")
+}

@@ -228,6 +228,11 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
 /// itself instead of falling through to one shared tail, since several
 /// arms also need to bypass it entirely via an early `return`.
 fn render_call_expr(ctx: &RenderContext, callee: &str, args: &[IrExpr]) -> String {
+    // A user fn's `mut` param bound to a global place writes through the
+    // global's cell (#2946).
+    if let Some(rendered) = render_call_through_global_places(ctx, callee, args, false, &|a| render_user_call_arg(ctx, a)) {
+        return rendered;
+    }
     // A closure ARG is already `Rc<dyn Fn>`: the box-by-default pass boxed every
     // closure literal where it sits — including a Named user-HOF arg, whose param
     // is `Rc<dyn Fn>` under the uniform repr (top-level fns no longer take
@@ -780,12 +785,92 @@ fn try_render_numeric_cast(ctx: &RenderContext, symbol: &almide_base::intern::Sy
     }
 }
 
-/// Mutating stdlib calls on a module-level (`ModuleRc`) or `AlmideRcCow` var:
-/// route through `Rc::make_mut`/`.make_mut()` so the mutation hits the
-/// shared backing store, not a clone. The mutator set is the one source of
-/// truth in `pass_closure_conversion` (list/map/string/bytes &mut-on-args[0]
-/// fns); before it was only list push/pop/clear, so `map.insert`/`bytes.push`/…
-/// on a global silently mutated a discarded `(**c.borrow()).clone()`.
+/// A `&mut` argument whose place is rooted at a `var` global (#2946): the
+/// global's static and the field path below it — `&mut g` → `("G", "")`,
+/// `&mut g.a.xs` → `("G", ".a.xs")`. Such a place has no Rust spelling
+/// outside the global's cell: rendered as an ordinary expression it became
+/// `&mut G.with(|c| (**c.borrow()).clone()).xs`, a write onto a discarded
+/// clone (native lost the write, wasm kept it). `allow_clone` admits the
+/// `Clone` spelling an in-place runtime mutator's `args[0]` may carry.
+fn global_mut_place(ctx: &RenderContext, arg: &IrExpr, allow_clone: bool) -> Option<(String, String)> {
+    use almide_ir::top_let_storage::TopLetStorage as Tls;
+    let inner = match &arg.kind {
+        IrExprKind::Borrow { expr, mutable: true, .. } => expr,
+        IrExprKind::Clone { expr } if allow_clone => expr,
+        _ => return None,
+    };
+    let mut path: Vec<String> = Vec::new();
+    let mut cur: &IrExpr = inner;
+    loop {
+        match &cur.kind {
+            IrExprKind::Member { object, field } => {
+                path.push(ctx.field_ident(field.as_str()).to_string());
+                cur = object;
+            }
+            IrExprKind::TupleIndex { object, index } => {
+                path.push(index.to_string());
+                cur = object;
+            }
+            // Clone insertion spells a tuple projection's object as
+            // `Clone(Var t)` (`t.clone().0`); the place is still `t.0`.
+            IrExprKind::Clone { expr } if !path.is_empty() => cur = expr,
+            IrExprKind::Var { id } => {
+                let info = ctx.ann.global(*id)?;
+                if !matches!(info.storage, Tls::RcRefCell) { return None; }
+                let suffix: String = path.iter().rev().map(|f| format!(".{f}")).collect();
+                return Some((info.static_name.clone(), suffix));
+            }
+            _ => return None,
+        }
+    }
+}
+
+/// Render a call one of whose `&mut` arguments is a global place
+/// ([`global_mut_place`]) INSIDE the global's cell, so the mutation lands on
+/// the stored value — the call-level twin of the field-assign template
+/// (`G.with(|c| Rc::make_mut(&mut *c.borrow_mut()).f = v)`):
+///
+/// `G.with(|__gc0| f(&mut std::rc::Rc::make_mut(&mut *__gc0.borrow_mut()).xs, a))`
+///
+/// A root place passes `Rc::make_mut(…)` itself (already `&mut T`). Every
+/// other argument renders through `render_arg`; `BorrowInsertion`'s hoist
+/// (`HoistCx::must_hoist`) has already moved out any sibling that reads the
+/// global or runs user code, so none re-borrows the cell while it is held.
+/// The closure parameter is `__gc<k>`, never a name a user binding can take.
+/// `None` when no argument is a global place.
+fn render_call_through_global_places(
+    ctx: &RenderContext,
+    callee: &str,
+    args: &[IrExpr],
+    allow_clone_at_0: bool,
+    render_arg: &dyn Fn(&IrExpr) -> String,
+) -> Option<String> {
+    let places: Vec<Option<(String, String)>> = args.iter().enumerate()
+        .map(|(i, a)| global_mut_place(ctx, a, allow_clone_at_0 && i == 0))
+        .collect();
+    if places.iter().all(Option::is_none) { return None; }
+    let mut cells: Vec<String> = Vec::new();
+    let rendered: Vec<String> = args.iter().zip(&places).map(|(a, place)| match place {
+        Some((static_name, suffix)) => {
+            let k = cells.len();
+            cells.push(static_name.clone());
+            let target = format!("std::rc::Rc::make_mut(&mut *__gc{k}.borrow_mut())");
+            if suffix.is_empty() { target } else { format!("&mut {target}{suffix}") }
+        }
+        None => render_arg(a),
+    }).collect();
+    let mut out = format!("{}({})", callee, rendered.join(", "));
+    for (k, static_name) in cells.iter().enumerate().rev() {
+        out = format!("{static_name}.with(|__gc{k}| {out})");
+    }
+    Some(out)
+}
+
+/// Mutating stdlib calls on an `AlmideRcCow` var route through `.make_mut()`
+/// so the mutation hits the shared backing store, not a clone. The mutator
+/// set is the one source of truth in `pass_licm::is_inplace_mutator`.
+/// A global target (and any global-rooted `&mut` place, #2946) is rendered by
+/// [`render_call_through_global_places`] before this is reached.
 /// Extracted from `render_runtime_call`: `Some` mirrors the original's
 /// early `return`, `None` falls through to the default owned-args render.
 fn try_render_mutating_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr]) -> Option<String> {
@@ -794,21 +879,6 @@ fn try_render_mutating_runtime_call(ctx: &RenderContext, symbol: &almide_base::i
     let (IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner }) = &args[0].kind else { return None; };
     let IrExprKind::Var { id } = &inner.kind else { return None; };
     let name = ctx.var_name(*id).to_string();
-    // §4 Stage 2: a global target dispatches on the attribute.
-    if let Some(info) = ctx.ann.global(*id) {
-        use almide_ir::top_let_storage::TopLetStorage as Tls;
-        if matches!(info.storage, Tls::RcRefCell) {
-            let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
-                .collect::<Vec<_>>().join(", ");
-            let rc_mut = "std::rc::Rc::make_mut(&mut *c.borrow_mut())";
-            let call_args = if rest_args.is_empty() {
-                rc_mut.to_string()
-            } else {
-                format!("{}, {}", rc_mut, rest_args)
-            };
-            return Some(format!("{}.with(|c| {}({}))", info.static_name, symbol.as_str(), call_args));
-        }
-    }
     match ctx.ann.get_var_storage(id) {
         VarStorage::RcCow => {
             let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
@@ -828,33 +898,42 @@ fn try_render_mutating_runtime_call(ctx: &RenderContext, symbol: &almide_base::i
 fn render_runtime_call_args_owned(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr]) -> String {
     args
         .iter()
-        .map(|a| {
-            let r = render_expr_owned(ctx, a);
-            // #617: a concrete container-of-raw runtime param cannot deref-coerce
-            // through AlmideRcCow ELEMENTS — clone them out at this (rare) boundary. The
-            // closure param is EXPLICITLY typed: the producer side may itself be
-            // result glue ending in `collect::<Vec<_>>()`, whose `_` only resolves
-            // from this consumer.
-            if rc_cow_arg_needs_raw_elems(symbol.as_str()) && rc_cow_needs_glue(&a.ty) {
-                let elem = match &a.ty {
-                    Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, es)
-                        if es.len() == 1 =>
-                    {
-                        render_type(ctx, &es[0])
-                    }
-                    _ => "_".to_string(),
-                };
-                format!("{r}.iter().map(|__e: &{elem}| (**__e).clone()).collect::<Vec<_>>()")
-            } else {
-                r
-            }
-        })
+        .map(|a| render_runtime_call_arg_owned(ctx, symbol, a))
         .collect::<Vec<_>>()
         .join(", ")
 }
 
+/// One argument of [`render_runtime_call_args_owned`].
+fn render_runtime_call_arg_owned(ctx: &RenderContext, symbol: &almide_base::intern::Sym, a: &IrExpr) -> String {
+    let r = render_expr_owned(ctx, a);
+    // #617: a concrete container-of-raw runtime param cannot deref-coerce
+    // through AlmideRcCow ELEMENTS — clone them out at this (rare) boundary. The
+    // closure param is EXPLICITLY typed: the producer side may itself be
+    // result glue ending in `collect::<Vec<_>>()`, whose `_` only resolves
+    // from this consumer.
+    if rc_cow_arg_needs_raw_elems(symbol.as_str()) && rc_cow_needs_glue(&a.ty) {
+        let elem = match &a.ty {
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, es)
+                if es.len() == 1 =>
+            {
+                render_type(ctx, &es[0])
+            }
+            _ => "_".to_string(),
+        };
+        format!("{r}.iter().map(|__e: &{elem}| (**__e).clone()).collect::<Vec<_>>()")
+    } else {
+        r
+    }
+}
+
 fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr]) -> String {
     if let Some(rendered) = try_render_numeric_cast(ctx, symbol, args) {
+        return rendered;
+    }
+    let allow_clone = crate::pass_licm::is_inplace_mutator(symbol.as_str());
+    if let Some(rendered) = render_call_through_global_places(ctx, symbol.as_str(), args, allow_clone,
+        &|a| render_runtime_call_arg_owned(ctx, symbol, a))
+    {
         return rendered;
     }
     if let Some(rendered) = try_render_mutating_runtime_call(ctx, symbol, args) {
