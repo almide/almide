@@ -233,10 +233,35 @@ fn render_call_expr(ctx: &RenderContext, callee: &str, args: &[IrExpr]) -> Strin
     // is `Rc<dyn Fn>` under the uniform repr (top-level fns no longer take
     // `impl Fn`). No call-site boxing here — re-wrapping a capture-clone
     // `{ let __cap; lambda }` arg (kind `Block`, not `RcWrap`) double-boxed it.
-    let args_str = args.iter().map(|a| render_expr_owned(ctx, a))
+    let args_str = args.iter().map(|a| render_user_call_arg(ctx, a))
         .collect::<Vec<_>>().join(", ");
     ctx.templates.render_with("call_expr", None, &[], &[("callee", callee), ("args", args_str.as_str())])
         .unwrap_or_else(|| format!("call(...)"))
+}
+
+/// #617: a module global stores the RAW Bytes/Matrix shape (an `Rc` in a
+/// static is not `Sync`), and a bare read of it stays raw — which a runtime
+/// callee's `&Vec<u8>` takes, but a USER fn's parameter is
+/// `&AlmideRcCow<Vec<u8>>` (rustc E0308 on `f(global_bytes)`). At a user
+/// callee only, borrow the glued value instead. A `var` global's read is
+/// already an owned copy; an immutable one (`LazyLock`/`const`) is a place a
+/// static can never be moved out of, so it is cloned first. Runtime callees
+/// keep the zero-copy raw borrow (they never reach this site).
+fn render_user_call_arg(ctx: &RenderContext, arg: &IrExpr) -> String {
+    use almide_ir::top_let_storage::TopLetStorage;
+    if let IrExprKind::Borrow { expr: inner, as_str: false, mutable: false } = &arg.kind
+        && let IrExprKind::Var { id } = &inner.kind
+        && let Some(global) = ctx.ann.global(*id)
+        && rc_cow_needs_glue(&inner.ty)
+    {
+        let read = render_expr(ctx, inner);
+        let owned = match global.storage {
+            TopLetStorage::Cell | TopLetStorage::RcRefCell => read,
+            TopLetStorage::Const | TopLetStorage::Lazy { .. } => format!("{read}.clone()"),
+        };
+        return format!("&{}", rc_cow_result_glue(owned, &inner.ty));
+    }
+    render_expr_owned(ctx, arg)
 }
 
 /// `CallTarget::Named` case of `render_generic_call`, extracted verbatim
