@@ -116,16 +116,21 @@ impl Emitter<'_> {
         // The rebind settles like an Assign (#2944): a local releases the
         // record it replaces — the copy took its own credit on every field,
         // so the old block and whatever it alone held go — and becomes the
-        // owner of the copy. Globals are main-lifetime, as for Assign; a
-        // value that spends the var's credit (a `mut`-param call's
+        // owner of the copy. A top-let global holds one credit on its
+        // occupant (#2992), so it releases the replaced block the same way.
+        // A value that spends the var's credit (a `mut`-param call's
         // write-back) already released or reused the old block.
-        if let Ok(idx) = slot
-            && !spends_var
-            && self.rc_droppable(root)
-        {
+        if !spends_var && self.rc_droppable(root) {
             let dec = self.dec_fn_of(root);
-            self.f.instructions().local_get(idx).call(dec);
-            self.rc_own(idx, root);
+            match slot {
+                Ok(idx) => {
+                    self.f.instructions().local_get(idx).call(dec);
+                    self.rc_own(idx, root);
+                }
+                Err(gidx) => {
+                    self.f.instructions().global_get(gidx).call(dec);
+                }
+            }
         }
         self.f.instructions().local_get(hb);
         match slot {
