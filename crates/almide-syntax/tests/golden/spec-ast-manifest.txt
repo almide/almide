@@ -1,4 +1,4 @@
-# oracle: almide 0.65.1 (dev) at ff5536e86 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.65.1 (dev) at 49a605e2a — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -197,7 +197,7 @@ daacfb956c7016655c994f2565b1612ab7bc651b5db2bb6980f8d2c1be56a0d2	spec/integratio
 595b122bea9708814082ae3467cc608382f9037b618a240b0cbf8682f568d855	spec/integration/same_leaf_submodules/src/same_leaf_test.almd
 6f69770b6ab5ade41c047b384195e387008a97867dcc21d615b54010662f2cfa	spec/integration/same_leaf_submodules/src/use_a.almd
 5b395cd69e5d41d924d47c32fa67a8216ea20754065214c7f9ee2ff4fe9da960	spec/integration/same_leaf_submodules/src/use_b.almd
-fe592977ac6e28388d8218ac7735438cda59214972ae709f5a270be5de671953	spec/integration/self_module_defaults/src/self_module_defaults_test.almd
+802aa20e60ce01b8922810fe1d0c4d4dbf66c5dc47b59ef6e4c8ccad59dded59	spec/integration/self_module_defaults/src/self_module_defaults_test.almd
 f89dfdcbdd175d1589ff8a450156f3c2f8f2ff0935edf90ca89f5cb185ecd511	spec/integration/self_module_defaults/src/ui/surface.almd
 bfd5eb3c00cbbb4990991c3264384106f8cc49298d0e2b8b522385fc5858e45b	spec/integration/stream_fusion_test.almd
 33033006407e6128ad22f43912dc0afc759399e5a5a6ad0ed4cda4a77d2209ca	spec/lang/alias_cow_test.almd
