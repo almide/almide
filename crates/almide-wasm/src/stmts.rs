@@ -698,7 +698,8 @@ impl Emitter<'_> {
         path: &[almide_base::intern::Sym],
         value: &IrExpr,
     ) -> Result<(), EmitError> {
-        self.field_assign_with(target, path, |s, fty| {
+        let spends_var = self.assign_rhs_spends_var(value, *target);
+        self.field_assign_with(target, path, spends_var, |s, fty| {
             s.lower(value, Some(fty))?;
             s.rc_share_guard(value, fty);
             Ok(())

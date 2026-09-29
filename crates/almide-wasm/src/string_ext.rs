@@ -184,17 +184,19 @@ impl Emitter<'_> {
     /// the route `list.push(h.f, v)` takes (#2411).
     fn lower_string_push(&mut self, v: &IrExpr, x: &IrExpr) -> ArmResult {
         if let Some((id, path)) = crate::list_mut::record_field_receiver(v) {
-            let grown = IrExpr {
-                kind: IrExprKind::BinOp {
-                    op: almide_ir::BinOp::ConcatStr,
-                    left: Box::new(v.clone()),
-                    right: Box::new(x.clone()),
-                },
-                ty: v.ty.clone(),
-                span: None,
-                def_id: None,
-            };
-            self.lower_field_assign(&id, &path, &grown)?;
+            // Built here, not as a synthesized `h.f + x` expression: a
+            // fresh `x` (`int.to_string(i)`) is then a borrowed argument
+            // the call's scope releases, where the synthesized concat left
+            // it unowned and leaked it on every push (#2944).
+            self.field_assign_with(&id, &path, false, |s, fty| {
+                if fty != STR {
+                    return unsup(&format!("string-push-of:{fty:?}"));
+                }
+                s.lower_arg(v, Some(STR), ArgMode::Borrow)?;
+                s.lower_arg(x, Some(STR), ArgMode::Borrow)?;
+                s.f.instructions().call(F_CONCAT);
+                Ok(())
+            })?;
             return Ok(None);
         }
         let IrExprKind::Var { id } = &v.kind else {
