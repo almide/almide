@@ -396,7 +396,7 @@ fn lower_call_target_cross_module_ufcs(ctx: &mut LowerCtx, object: &ast::Expr, f
 /// Only names the callee module actually declares are touched: a default
 /// referencing an earlier PARAMETER is already substituted by
 /// `substitute_call_params`, and must keep resolving to the caller's argument.
-pub(super) fn qualify_callee_module_idents(expr: &mut ast::Expr, module: Sym, env: &crate::types::TypeEnv) {
+pub(crate) fn qualify_callee_module_idents(expr: &mut ast::Expr, module: Sym, env: &crate::types::TypeEnv) {
     ast::visit_expr_mut(expr, &mut |e| {
         // A SCREAMING_CASE constant lexes as a `TypeName`, not an `Ident`, so
         // both spellings have to be considered or the common shape — a
@@ -408,9 +408,23 @@ pub(super) fn qualify_callee_module_idents(expr: &mut ast::Expr, module: Sym, en
         if !names_callee_module_item(env, module, name) {
             return;
         }
-        let obj = ast::Expr::new(e.id, e.span, ast::ExprKind::Ident { name: module });
+        let obj = ast::Expr::new(e.id, e.span, ast::ExprKind::Ident { name: caller_name_of(env, module) });
         e.kind = ast::ExprKind::Member { object: Box::new(obj), field: name };
     });
+}
+
+/// The name the calling file knows `module` by — its import alias (`surface`
+/// for `import self.ui.surface`), else the canonical name — so a filled
+/// default is the expression the caller would have written.
+fn caller_name_of(env: &crate::types::TypeEnv, module: Sym) -> Sym {
+    if env.import_table.aliases.get(&module) == Some(&module) {
+        return module;
+    }
+    env.import_table.aliases.iter()
+        .filter(|(_, target)| **target == module)
+        .map(|(alias, _)| *alias)
+        .min_by(|a, b| a.as_str().cmp(b.as_str()))
+        .unwrap_or(module)
 }
 
 /// Does bare `name`, written in `module`, name one of that module's own items —
@@ -426,7 +440,7 @@ fn names_callee_module_item(env: &crate::types::TypeEnv, module: Sym, name: Sym)
         || env.constructors.get(&name).is_some_and(|cands| cands.iter().any(|(_, owner, _)| *owner == Some(module)))
 }
 
-fn substitute_call_params(expr: &mut ast::Expr, param_values: &std::collections::HashMap<Sym, ast::Expr>) {
+pub(crate) fn substitute_call_params(expr: &mut ast::Expr, param_values: &std::collections::HashMap<Sym, ast::Expr>) {
     ast::visit_expr_mut(expr, &mut |e| {
         if let ast::ExprKind::Ident { name } = &e.kind {
             if let Some(repl) = param_values.get(name) {
