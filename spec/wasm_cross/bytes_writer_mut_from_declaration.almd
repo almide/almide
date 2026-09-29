@@ -1,0 +1,54 @@
+// @contract: C-033, C-319
+// Every bytes writer the stdlib declares with a `mut` param is a WRITE on both
+// legs, whichever implementation the wasm leg links for it. Two wasm decisions
+// used to come from somewhere other than the declaration:
+//  - #2949: a registry-linked call took its `mut` params from the linked
+//    implementation, whose params carry none (`bytes_set_uint16(b: Bytes, ..)`
+//    behind `set_uint16(mut b: Bytes, ..)`). No copy-on-write was done, so an
+//    alias taken before the write saw it (wasm printed 2 where native printed 0).
+//  - #2951: which captured vars need a shared closure cell came from a hand list
+//    of six bytes writers. A closure writing through any other one (`set_u8`,
+//    `set_u16_le`, `append_u8`, `copy_within`, ..) wrote a copy, and the write
+//    was lost (wasm printed 0 where native printed 7).
+// Both now read the declaration's `mut` positions. Byte-identical native == wasm.
+import bytes
+
+fn show(label: String, b: Bytes) -> Unit = println(label + " " + int.to_string(bytes.len(b)) + " " + int.to_string(bytes.read_u8(b, 0)) + " " + int.to_string(bytes.read_u8(b, 1)))
+
+effect fn main() -> Unit = {
+  // An alias taken before a typed write keeps the old contents.
+  var a = bytes.new(8)
+  let a0 = a
+  bytes.set_uint16(a, 0, 258, LittleEndian)
+  show("set_uint16 alias", a0)
+  show("set_uint16 own", a)
+  let a1 = a
+  bytes.set_uint32(a, 0, 772, BigEndian)
+  show("set_uint32 alias", a1)
+  show("set_uint32 own", a)
+  let a2 = a
+  bytes.set_int32(a, 0, 5, LittleEndian)
+  show("set_int32 alias", a2)
+  show("set_int32 own", a)
+  let a3 = a
+  bytes.write_uint16(a, 513, LittleEndian)
+  show("write_uint16 alias", a3)
+  show("write_uint16 own", a)
+  // A write inside a closure lands in the captured var.
+  var c = bytes.new(4)
+  let set8 = () => bytes.set_u8(c, 0, 7)
+  set8()
+  show("set_u8 closure", c)
+  let set16 = () => bytes.set_u16_le(c, 0, 1027)
+  set16()
+  show("set_u16_le closure", c)
+  let app = () => bytes.append_u8(c, 9)
+  app()
+  show("append_u8 closure", c)
+  let wr = () => bytes.write_u8(c, 11)
+  wr()
+  show("write_u8 closure", c)
+  let cw = () => bytes.copy_within(c, 0, 1, 1)
+  cw()
+  show("copy_within closure", c)
+}
