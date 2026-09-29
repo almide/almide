@@ -96,7 +96,7 @@
 1	#2977	spec/wasm_cross/map_index_order.almd
 1477	#2969	spec/wasm_cross/map_index_released_with_block.almd
 13	#2969	spec/wasm_cross/map_index_string_key_shapes.almd
-8	#2972	spec/wasm_cross/map_insertion_order.almd
+4	#2972	spec/wasm_cross/map_insertion_order.almd
 18	#2973	spec/wasm_cross/map_interp_string_value.almd
 2	#2932	spec/wasm_cross/map_literal_ctor_values.almd
 7	#2968	spec/wasm_cross/map_set_in_place.almd
@@ -173,7 +173,6 @@
 5	#2967	spec/wasm_cross/top_let_closure_record.almd
 6	#2967	spec/wasm_cross/top_let_stored_in_container.almd
 2	#2972	spec/wasm_cross/tuple_ops.almd
-1	#2972	spec/wasm_cross/unwrap_in_recursion.almd
 3	#2969	spec/wasm_cross/unwrap_or_heap_arg_and_subject.almd
 5	#2969	spec/wasm_cross/unwrap_or_heap_payload.almd
 2	#2969	spec/wasm_cross/unwrap_or_option_payload.almd

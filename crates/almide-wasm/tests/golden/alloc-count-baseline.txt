@@ -425,7 +425,7 @@
 799	735	50963	798	spec/wasm_cross/map_index_order.almd
 17903	16247	3171354	16426	spec/wasm_cross/map_index_released_with_block.almd
 35	14	449	22	spec/wasm_cross/map_index_string_key_shapes.almd
-264	172	7953	256	spec/wasm_cross/map_insertion_order.almd
+264	175	7953	260	spec/wasm_cross/map_insertion_order.almd
 57	36	1265	39	spec/wasm_cross/map_interp_string_value.almd
 43	19	427	41	spec/wasm_cross/map_literal_ctor_values.almd
 5	1	24	5	spec/wasm_cross/map_of_maps_value.almd
@@ -491,7 +491,7 @@
 8170	8049	72057178	8146	spec/wasm_cross/mut_param_alias_cow.almd
 9	0	8	9	spec/wasm_cross/mut_param_branch_forward.almd
 10110	10102	163568	10105	spec/wasm_cross/mut_param_call_chain.almd
-71	27	780	29	spec/wasm_cross/mut_param_effect_can_err.almd
+71	28	780	30	spec/wasm_cross/mut_param_effect_can_err.almd
 9	3	88	9	spec/wasm_cross/mut_param_effect_never_err.almd
 85	25	1040	73	spec/wasm_cross/mut_param_move_mode_gaps.almd
 5	2	80	5	spec/wasm_cross/mut_param_spread_reassign.almd
@@ -787,7 +787,7 @@
 25	11	280	25	spec/wasm_cross/unwrap_callarg_single_expr_effect_body.almd
 11	4	115	11	spec/wasm_cross/unwrap_in_callarg.almd
 12	5	129	12	spec/wasm_cross/unwrap_in_if_arm.almd
-11	2	76	10	spec/wasm_cross/unwrap_in_recursion.almd
+11	3	76	11	spec/wasm_cross/unwrap_in_recursion.almd
 27	7	245	24	spec/wasm_cross/unwrap_or_heap_arg_and_subject.almd
 27	12	292	22	spec/wasm_cross/unwrap_or_heap_payload.almd
 16	11	104	16	spec/wasm_cross/unwrap_or_operand.almd
@@ -823,7 +823,7 @@
 0	0	0	0	spec/wasm_cross/while_loops.almd
 12	6	70	12	spec/wasm_cross/whilep_str.almd
 140	0	1120	140	spec/wasm_cross/wide_function_body.almd
-21	13	240	21	spec/wasm_cross/witness_straightline.almd
+28	17	309	28	spec/wasm_cross/witness_straightline.almd
 15	1	643	14	spec/wasm_cross/zip_view_shape.almd
 4286	4192	342652	4266	spec/wasm_cross/zlib_selfhost.almd
 3	0	55	1	spec/wasm_fail/effect_err_aborts_both_legs.almd
