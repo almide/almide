@@ -1,8 +1,96 @@
-// The per-op VALUE tables — which ValueIds an op reads / touches — the
-// occurrence walk under the render-level peepholes. Split in two halves per
-// fn purely along op families (data vs flow); exhaustive matches, so a NEW
-// Op variant breaks the build here until it joins one half.
-// include!-spliced from render_wasm_b.rs.
+//! The per-op VALUE tables of the MIR — which `ValueId`s an op reads, touches
+//! or defines — and the linked-call check. These were
+//! the incumbent WAT renderer's (`render_wasm*`, deleted by #2761); the MIR
+//! well-formedness gate, the registry-signature lookup and the corpus
+//! classifier are the code that stays and reads them. Exhaustive matches, so a
+//! NEW `Op` variant breaks the build here until it joins a table.
+
+use crate::{CallArg, Init, MirFunction, MirProgram, Op, ValueId};
+use std::collections::BTreeSet;
+
+pub use almide_lang::self_host_registry::self_host_runtime;
+
+/// The names of `Op::CallFn` targets (and generated-drop targets) that resolve
+/// to no `MirFunction` in the program — a call that no linked body answers.
+pub fn unlinked_call_names(prog: &MirProgram) -> BTreeSet<String> {
+    let defined: BTreeSet<&str> = prog.functions.iter().map(|f: &MirFunction| f.name.as_str()).collect();
+    let mut missing = BTreeSet::new();
+    for f in &prog.functions {
+        for op in &f.ops {
+            let name = match op {
+                Op::CallFn { name, .. } => name.clone(),
+                Op::DropVariant { ty, .. } => format!("__drop_{}", ty.replace('.', "_")),
+                Op::DropWrapperRec { drop_fn, .. } => format!("__drop_{}", drop_fn.replace('.', "_")),
+                _ => continue,
+            };
+            if name != "__mg_take" && !defined.contains(name.as_str()) {
+                missing.insert(name);
+            }
+        }
+    }
+    missing
+}
+
+pub(crate) fn defined_value(op: &Op) -> Option<ValueId> {
+    // EXHAUSTIVE on purpose (#777): the old `_ => None` catch-all meant a new
+    // defining Op variant silently reported "defines nothing", which is the
+    // kind of registry drift F3 is about — every consumer of this fn (DCE,
+    // region passes, the def-before-use gate) would quietly treat the value as
+    // never-defined. A new variant is now a compile error here.
+    //
+    // `SetLocal` is deliberately NOT a definition: it REASSIGNS an existing
+    // slot (MIR is not single-assignment across loop iterations), and the
+    // passes keyed on "the op that created this value" must not match it. The
+    // def-before-use gate accounts for it separately as a redefinition.
+    match op {
+        Op::Alloc { dst, .. }
+        | Op::Dup { dst, .. }
+        | Op::Const { dst }
+        | Op::ConstInt { dst, .. }
+        | Op::FuncRef { dst, .. }
+        | Op::IntBinOp { dst, .. }
+        | Op::ListLit { dst, .. }
+        | Op::ListGetScalar { dst, .. }
+        | Op::Pure { dst, .. } => Some(*dst),
+        Op::CallFn { dst, .. } | Op::Call { dst, .. } => *dst,
+        Op::CallImport { dst, .. } => *dst,
+        Op::CallIndirect { dst, .. } => *dst,
+        Op::Prim { dst, .. } => *dst,
+        Op::IfThen { dst, .. } => *dst,
+        Op::ChargeDyn { .. }
+        | Op::Drop { .. }
+        | Op::DropListStr { .. }
+        | Op::DropValue { .. }
+        | Op::DropListValue { .. }
+        | Op::DropListStrValue { .. }
+        | Op::DropListStrStr { .. }
+        | Op::DropListIntStr { .. }
+        | Op::DropListStrInt { .. }
+        | Op::DropResultListValue { .. }
+        | Op::DropResultValue { .. }
+        | Op::DropResultStrInt { .. }
+        | Op::DropResultValueInt { .. }
+        | Op::DropResultListValueInt { .. }
+        | Op::DropResultListStrInt { .. }
+        | Op::DropResultListStr { .. }
+        | Op::DropListListStr { .. }
+        | Op::DropVariant { .. }
+        | Op::DropWrapperRec { .. }
+        | Op::Consume { .. }
+        | Op::Borrow { .. }
+        | Op::MakeUnique { .. }
+        | Op::ListSetScalar { .. }
+        | Op::Else { .. }
+        | Op::EndIf { .. }
+        | Op::LoopStart
+        | Op::LoopBreakUnless { .. }
+        | Op::LoopEnd
+        | Op::Return { .. }
+        | Op::SetLocal { .. } => None,
+        Op::Charge { .. } => None,
+    }
+}
+
 
 /// is an ordinary read. An `IfThen`'s `dst` is the definition, not a read; the
 /// `Else`/`EndIf` `val`s are reads (they feed the enclosing if-result).
