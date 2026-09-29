@@ -397,7 +397,7 @@ pub fn balanced(cert: &str) -> bool {
 }
 
 // The subset gate lives in witness_gate.rs (the file budget).
-pub use crate::witness_gate::straightline_subset;
+pub use crate::witness_gate::{effect_subset, straightline_subset};
 
 // ── the collection sink (diagnostic channel, test-enabled) ──────────────
 

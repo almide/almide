@@ -421,6 +421,15 @@ run_structural spec/wasm_cross/witness_straightline.almd drain 0
 tamper_structural tally '2s/^am$/a/' "#2757 for body"
 tamper_structural drain 's/^{|id}$/{|i}/' "#2757 while body"
 
+# ── #2758: an EFFECT frame certified at its raw ok type. `stash` shares its
+# borrowed param into the ok carrier's slot (`am`); the carrier is born and
+# moves out of the frame (`im`). Drill: the carrier never leaves — the leak
+# an effect frame that built its answer and dropped it would have.
+echo
+echo "== structural leg, effect frames  ⊳  proven checker (#2758) =="
+run_structural spec/wasm_cross/witness_straightline.almd stash 0
+tamper_structural stash '2s/^im$/i/' "#2758 ok carrier"
+
 # ── #2152: almide-verify against the extracted checker on witnesses NO
 # producer wrote. The rows above only reach the shapes the emitters produce;
 # the transcription must agree on the whole input space, malformed bytes

@@ -413,3 +413,29 @@ fn ends_in_loop_ctl(e: &IrExpr) -> bool {
         _ => false,
     }
 }
+
+/// #2758: the gate for an EFFECT frame. Its body lowers at the raw ok type
+/// and func.rs wraps the result in the ok carrier (both recorded there), so
+/// the straight-line rules apply unchanged — except to a constructor of the
+/// carrier itself. Inside an effect body `ok(v)` in a raw position is
+/// transparent and `err(e)` raises through the frame's error exit
+/// (lower_err_raise), neither of which is a store hook; any `ok` / `err`
+/// declines as `effect:carrier` until those exits are recorded.
+pub fn effect_subset(body: &IrExpr, raw_is_heap: bool) -> Option<String> {
+    struct Carrier(bool);
+    impl almide_ir::visit::IrVisitor for Carrier {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if matches!(e.kind, IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }) {
+                self.0 = true;
+            } else if !self.0 {
+                almide_ir::visit::walk_expr(self, e);
+            }
+        }
+    }
+    let mut c = Carrier(false);
+    almide_ir::visit::IrVisitor::visit_expr(&mut c, body);
+    if c.0 {
+        return Some("effect:carrier".into());
+    }
+    straightline_subset(body, raw_is_heap)
+}
