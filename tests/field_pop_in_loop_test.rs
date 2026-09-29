@@ -1,6 +1,5 @@
 //! #2919: `list.pop(h.f)` on a record var's list FIELD inside an executing
-//! loop body or unit arm, on the INCUMBENT wasm leg (almide-mir), forced
-//! with `ALMIDE_WASM_INCUMBENT=1` and compared with native.
+//! loop body or unit arm, on the wasm leg, compared with native.
 //!
 //! The two-level record+field COW rebound the var to its copy through
 //! `value_of`. That rebind is frame-local, so each later iteration re-read
@@ -8,12 +7,8 @@
 //! went `a(id)(d)` (the proven checker rejects it), the program trapped, and
 //! an alias taken before the loop could read the popped list's contents.
 //! Inside a real loop or arm the rebind is now drop-old + `SetLocal` on the
-//! var's stable local.
-//!
-//! These are Rust tests rather than `spec/wasm_cross` fixtures because the
-//! default route sends the shape to the structural leg once it lowers it.
-//! These tests force the incumbent, the fallback leg that still has to be
-//! right.
+//! var's stable local. The defect was the retired incumbent leg's (#2752);
+//! the programs stay as a native-vs-wasm pin of the field COW in a loop.
 
 use std::process::Command;
 
@@ -100,34 +95,30 @@ fn wasmtime_available() -> bool {
     Command::new("wasmtime").arg("--version").output().is_ok_and(|o| o.status.success())
 }
 
-/// Run on native, then on the forced incumbent wasm leg; assert both exit 0
-/// with identical stdout, and return it.
-fn agree_on_incumbent(program: &str, label: &str) -> String {
+/// Run on native, then on the wasm leg; assert both exit 0 with identical
+/// stdout, and return it.
+fn agree_on_wasm(program: &str, label: &str) -> String {
     let dir = tempfile::tempdir().expect("tempdir");
     let source = dir.path().join("main.almd");
     std::fs::write(&source, program).expect("source");
     let native = Command::new(almide_bin())
         .args(["run", source.to_str().expect("path")])
-        .env_remove("ALMIDE_WASM_INCUMBENT")
-        .env_remove("ALMIDE_WASM_STRUCTURAL")
         .output()
         .expect("native run");
     assert!(native.status.success(), "{label}/native: {}", String::from_utf8_lossy(&native.stderr));
     let wasm = Command::new(almide_bin())
         .args(["run", source.to_str().expect("path"), "--target", "wasm"])
-        .env("ALMIDE_WASM_INCUMBENT", "1")
-        .env_remove("ALMIDE_WASM_STRUCTURAL")
         .output()
-        .expect("incumbent run");
+        .expect("wasm run");
     assert!(
         wasm.status.success(),
-        "{label}/incumbent exited {:?}: {}",
+        "{label}/wasm exited {:?}: {}",
         wasm.status.code(),
         String::from_utf8_lossy(&wasm.stderr)
     );
     let native_out = String::from_utf8_lossy(&native.stdout).to_string();
     let wasm_out = String::from_utf8_lossy(&wasm.stdout).to_string();
-    assert_eq!(wasm_out, native_out, "{label}: the incumbent answered differently from native");
+    assert_eq!(wasm_out, native_out, "{label}: the wasm leg answered differently from native");
     native_out
 }
 
@@ -136,7 +127,7 @@ fn push_and_pop_through_a_field_in_one_loop() {
     if !wasmtime_available() {
         return;
     }
-    assert_eq!(agree_on_incumbent(PUSH_POP_SAME_LOOP, "same loop").trim(), "[1] 1");
+    assert_eq!(agree_on_wasm(PUSH_POP_SAME_LOOP, "same loop").trim(), "[1] 1");
 }
 
 #[test]
@@ -144,7 +135,7 @@ fn a_pop_loop_after_a_push_loop() {
     if !wasmtime_available() {
         return;
     }
-    assert_eq!(agree_on_incumbent(POP_LOOP_AFTER_PUSH_LOOP, "pop after push").trim(), "[0, 1] 9");
+    assert_eq!(agree_on_wasm(POP_LOOP_AFTER_PUSH_LOOP, "pop after push").trim(), "[0, 1] 9");
 }
 
 #[test]
@@ -153,7 +144,7 @@ fn a_pop_in_a_loop_arm_leaves_the_snapshot_intact() {
         return;
     }
     assert_eq!(
-        agree_on_incumbent(POP_IN_ARM_WITH_SNAPSHOT, "pop in arm").trim(),
+        agree_on_wasm(POP_IN_ARM_WITH_SNAPSHOT, "pop in arm").trim(),
         "[1, 2, 3, 4, 30] [1, 2, 3, 4, 5] 7"
     );
 }
@@ -163,5 +154,5 @@ fn popping_past_empty_in_a_loop() {
     if !wasmtime_available() {
         return;
     }
-    assert_eq!(agree_on_incumbent(POP_PAST_EMPTY, "past empty").trim(), "[] 3");
+    assert_eq!(agree_on_wasm(POP_PAST_EMPTY, "past empty").trim(), "[] 3");
 }

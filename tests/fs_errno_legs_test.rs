@@ -1,14 +1,14 @@
 //! #2206 (C-215): the fs error text is ONE table (`almide_base::fs_errno`),
 //! rendered by every leg — native's `std::io::Error` `Display`, the embedded
-//! host, the incumbent WAT's static data and the p1 fs service's statics
+//! host and the p1 fs service's statics
 //! (#2742) — so the message a program observes is byte-identical across them.
 //! This runs the issue's own probe (a file, a directory, a missing path;
-//! read/write/mkdir_p through and onto each) on the three legs the CLI can
+//! read/write/mkdir_p through and onto each) on the two legs the CLI can
 //! drive from one binary, plus the stock-p1 artifact `almide build` writes
 //! under wasmtime, and differs the outputs; the p3 component lane is
 //! `component_p3_test.rs`'s.
 //!
-//! The EEXIST line is printed TWICE on purpose: the incumbent laid the table's
+//! The EEXIST line is printed TWICE on purpose: the retired incumbent laid the table's
 //! rows over the self-host's newline scratch once, and only the SECOND print
 //! of a row showed it (the first fd_write had already stored the `\n`).
 use std::path::{Path, PathBuf};
@@ -109,8 +109,6 @@ fn every_leg_spells_the_table_byte_for_byte() {
     assert_eq!(native, expected, "native is std::io::Error's Display, the table's ground truth");
     let wasm = run_leg(&dir, &["--target", "wasm"], &[]);
     assert_eq!(wasm, expected, "the embedded host leg");
-    let incumbent = run_leg(&dir, &["--target", "wasm"], &[("ALMIDE_WASM_INCUMBENT", "1")]);
-    assert_eq!(incumbent, expected, "the incumbent WAT leg (static data rendered from the table)");
     if let Some(stock) = run_stock_p1(&dir) {
         assert_eq!(stock, expected, "the stock-p1 artifact (the p1 fs service's statics, #2742)");
     }

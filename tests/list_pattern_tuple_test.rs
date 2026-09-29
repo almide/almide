@@ -137,7 +137,6 @@ fn agree(program: &str, label: &str) -> String {
         let artifact = dir.path().join(if target == "rust" { "native" } else { "m.wasm" });
         let built = Command::new(almide_bin())
             .args(["build", source.to_str().expect("path"), "--target", target, "-o", artifact.to_str().expect("path")])
-            .env_remove("ALMIDE_WASM_INCUMBENT")
             .env_remove("ALMIDE_COMPONENT_P3")
             .output()
             .expect("build");

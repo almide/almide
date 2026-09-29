@@ -29,8 +29,7 @@ fn board_missing() -> Int = match parse_board("{}") { BoardNotFound => 9, _ => 0
                 "-o",
                 wasm.to_str().expect("path"),
             ])
-            .env_remove("ALMIDE_WASM_STRUCTURAL")
-            .env_remove("ALMIDE_WASM_INCUMBENT");
+            .env_remove("ALMIDE_WASM_STRUCTURAL");
         if forced {
             command.env("ALMIDE_WASM_STRUCTURAL", "1");
         }

@@ -1,10 +1,10 @@
 //! Stage 1 charge-trace preservation gate (ALMIDE_FUEL_PROBE).
 //!
 //! Three layers, per research/spike/charge-probe/REPORT.md:
-//!   1. DYNAMIC: run each fixture on BOTH targets with the probe env and
-//!      compare the full triple (stdout, consumed, trace_hash). The trace is
-//!      order-sensitive, so a dropped, duplicated, or reordered charge on
-//!      either leg diverges here.
+//!   1. DYNAMIC: run each fixture natively with the probe env (the probe is
+//!      native-only since #2752 — its wasm twin was the retired incumbent
+//!      renderer's instrumentation, and a probed wasm run is refused by name)
+//!      and compare stdout with the plain wasm run.
 //!   2. STATIC: render both legs in-process and compare the FIRST-OCCURRENCE
 //!      charge-site sequences extracted from the artifacts (the certificate
 //!      form — survives legitimate BCE body duplication, catches drops and
@@ -273,15 +273,12 @@ fn lower_for_interp(source: &str) -> almide_ir::IrProgram {
 }
 
 /// T3-9: `--time-report` prints the ADR-0001 D5 dual-time line (deterministic
-/// + wall), swallows the raw probe line, and reports the SAME deterministic
-/// time on both targets.
+/// + wall) and swallows the raw probe line natively. On wasm it is refused by
+/// name (#2752): the deterministic meter has no wasm twin since the incumbent
+/// renderer was retired, and a report missing half its line is not printed.
 fn time_report_prints_dual_time() {
-    if !wasmtime_available() {
-        eprintln!("skip: wasmtime not on PATH");
-        return;
-    }
     let fixture = fixtures_dir().join("loop.almd");
-    let det_of = |wasm: bool| {
+    let run = |wasm: bool| {
         let mut cmd = Command::new(almide_bin());
         cmd.arg("run").arg("--time-report");
         if wasm {
@@ -289,25 +286,24 @@ fn time_report_prints_dual_time() {
         }
         cmd.arg(&fixture);
         cmd.env_remove("ALMIDE_FUEL_PROBE");
-        let out = cmd.output().expect("spawn almide");
-        assert!(out.status.success(), "time-report run failed");
-        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-        assert!(
-            !stderr.contains("__ALMD_PROBE"),
-            "raw probe line must be swallowed, got: {stderr}"
-        );
-        let line = stderr
-            .lines()
-            .find(|l| l.starts_with("time: "))
-            .unwrap_or_else(|| panic!("dual-time line missing, got: {stderr}"))
-            .to_string();
-        assert!(line.contains("deterministic (≈"), "malformed report: {line}");
-        assert!(line.contains("ms wall here)"), "malformed report: {line}");
-        line.split("deterministic").next().unwrap().to_string()
+        cmd.output().expect("spawn almide")
     };
-    let n = det_of(false);
-    let w = det_of(true);
-    assert_eq!(n, w, "deterministic time diverged between targets");
+    let out = run(false);
+    assert!(out.status.success(), "time-report run failed");
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(!stderr.contains("__ALMD_PROBE"), "raw probe line must be swallowed, got: {stderr}");
+    let line = stderr
+        .lines()
+        .find(|l| l.starts_with("time: "))
+        .unwrap_or_else(|| panic!("dual-time line missing, got: {stderr}"));
+    assert!(line.contains("deterministic (≈"), "malformed report: {line}");
+    assert!(line.contains("ms wall here)"), "malformed report: {line}");
+
+    let out = run(true);
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    assert_eq!(out.status.code(), Some(2), "--time-report on wasm must be refused: {stderr}");
+    assert!(stderr.contains("`--time-report`") && stderr.contains("native-only"), "the refusal names the flag: {stderr}");
+    assert!(out.stdout.is_empty(), "a refused run prints nothing");
 }
 
 /// ADR-0001 S3 (T3-1): the time-constructor guard — a negative argument is a
@@ -522,10 +518,10 @@ fn race_deterministic_across_targets() {
         let n = plain(false);
         let w = plain(true);
         assert_eq!(n, w, "{name}: race outputs diverged across targets");
+        // The charge probe is native-only since #2752 (the wasm meter was
+        // the retired incumbent's Σ-probe instrumentation).
         let (n_ok, _, n_probe) = probed_run(&fixture, false);
-        let (w_ok, _, w_probe) = probed_run(&fixture, true);
-        assert!(n_ok && w_ok, "{name}: probed run failed");
-        assert_eq!(n_probe, w_probe, "{name}: probe triple diverged over race");
+        assert!(n_ok && n_probe.is_some(), "{name}: probed native run failed");
     }
     let out = {
         let mut cmd = Command::new(almide_bin());
@@ -566,11 +562,9 @@ fn bounded_deterministic_across_targets() {
         let n = plain(false);
         let w = plain(true);
         assert_eq!(n, w, "{name}: bounded outputs diverged across targets");
-        // Probed runs: the (consumed, trace) pair must also agree.
+        // The probed run (native-only since #2752) still measures.
         let (n_ok, _, n_probe) = probed_run(&fixture, false);
-        let (w_ok, _, w_probe) = probed_run(&fixture, true);
-        assert!(n_ok && w_ok, "{name}: probed run failed");
-        assert_eq!(n_probe, w_probe, "{name}: probe triple diverged over bounded");
+        assert!(n_ok && n_probe.is_some(), "{name}: probed native run failed");
     }
     // The flip point itself: EXHAUST through ns=3005, OK from ns=3006.
     let out = {
@@ -615,24 +609,26 @@ fn cut_bookkeeping_pins_normative_values() {
     }
 }
 
+/// The probe is native-only since #2752: each comparable fixture prints its
+/// probe line natively and the same stdout on wasm, and a probed wasm run is
+/// refused by name rather than run without its meter.
 fn dynamic_three_point_comparison() {
-    if !wasmtime_available() {
-        eprintln!("skip: wasmtime not on PATH");
-        return;
-    }
     for name in COMPARABLE {
         let fixture = fixture_path(name);
         let (n_ok, n_out, n_probe) = probed_run(&fixture, false);
-        let (w_ok, w_out, w_probe) = probed_run(&fixture, true);
         assert!(n_ok, "{name}: native run failed");
-        assert!(w_ok, "{name}: wasm run failed");
-        let n_probe = n_probe.unwrap_or_else(|| panic!("{name}: native probe line missing"));
-        let w_probe = w_probe.unwrap_or_else(|| panic!("{name}: wasm probe line missing"));
-        assert_eq!(n_out, w_out, "{name}: stdout diverged");
-        assert_eq!(
-            n_probe, w_probe,
-            "{name}: charge-trace preservation FALSIFIED — (consumed, trace) diverged"
-        );
+        assert!(n_probe.is_some(), "{name}: native probe line missing");
+        let plain = Command::new(almide_bin())
+            .arg("run")
+            .arg(&fixture)
+            .args(["--target", "wasm"])
+            .env_remove("ALMIDE_FUEL_PROBE")
+            .output()
+            .expect("spawn almide");
+        assert!(plain.status.success(), "{name}: wasm run failed");
+        assert_eq!(n_out, String::from_utf8_lossy(&plain.stdout).trim(), "{name}: stdout diverged");
+        let (w_ok, _, w_probe) = probed_run(&fixture, true);
+        assert!(!w_ok && w_probe.is_none(), "{name}: a probed wasm run must be refused, not run unmetered");
     }
 }
 

@@ -1485,7 +1485,6 @@ evidence  = [
   { path = "spec/wasm_cross/result_option_call_payload_return.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_rich_list_capture.almd", class = "fixture" },
   { path = "spec/wasm_cross/heap_result_if_some_user_call_temps.almd", class = "fixture" },
-  { path = "tests/heap_arm_some_user_call_temps_test.rs", class = "fixture", name = "the_incumbent_test_lane_runs_the_test_block" },
 ]
 [[contract]]
 id        = "C-107"
@@ -2449,9 +2448,9 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/global_in_both_arms.almd", class = "fixture" },
   { path = "spec/wasm_cross/global_in_shortcircuit_operand.almd", class = "fixture" },
-  { path = "tests/incumbent_shortcircuit_global_memo_test.rs", name = "a_global_read_on_a_short_circuit_right_side_is_true_on_the_skipped_path", class = "fixture" },
-  { path = "tests/incumbent_shortcircuit_global_memo_test.rs", name = "a_global_read_in_a_while_condition_survives_zero_iterations", class = "fixture" },
-  { path = "tests/incumbent_shortcircuit_global_memo_test.rs", name = "a_global_read_in_an_already_guarded_region_still_reads_its_value", class = "fixture" },
+  { path = "tests/shortcircuit_global_memo_test.rs", name = "a_global_read_on_a_short_circuit_right_side_is_true_on_the_skipped_path", class = "fixture" },
+  { path = "tests/shortcircuit_global_memo_test.rs", name = "a_global_read_in_a_while_condition_survives_zero_iterations", class = "fixture" },
+  { path = "tests/shortcircuit_global_memo_test.rs", name = "a_global_read_in_an_already_guarded_region_still_reads_its_value", class = "fixture" },
 ]
 [[contract]]
 id        = "C-192"
@@ -2803,7 +2802,7 @@ statement = "A call whose return type is `Never` — `process.exit(code)`, the s
 since     = "0.56.0"
 status    = "active"
 evidence  = [
-  { path = "tests/incumbent_exit_tail_test.rs", name = "dynamic_exit_codes_execute_in_every_tail_position", class = "fixture" },
+  { path = "tests/exit_tail_positions_test.rs", name = "dynamic_exit_codes_execute_in_every_tail_position", class = "fixture" },
   { path = "spec/wasm_cross/guard_else_exit_code.almd", class = "fixture" },
   { path = "spec/wasm_cross/panic_value_arm.almd", class = "fixture" },
 ]
@@ -4434,7 +4433,7 @@ statement = "`process.exit(code)` terminates with `code` when `0 <= code <= 255`
 since     = "0.63.0"
 status    = "active"
 evidence  = [
-  { path = "tests/incumbent_exit_tail_test.rs", name = "dynamic_exit_codes_execute_in_every_tail_position", class = "fixture" },
+  { path = "tests/exit_tail_positions_test.rs", name = "dynamic_exit_codes_execute_in_every_tail_position", class = "fixture" },
   { path = "spec/wasm_cross/exit_code_out_of_range.almd", class = "fixture" },
   { path = "spec/wasm_cross/exit_code_upper_bound.almd", class = "fixture" },
   { path = "spec/wasm_cross/exit_code_passthrough.almd", class = "fixture" },

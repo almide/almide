@@ -177,13 +177,10 @@ fn a_package_module_named_after_a_stdlib_module_may_reuse_its_fn_names() {
     }
 }
 
-/// #2865 (b): the incumbent wasm leg (the structural leg's fallback) spells
-/// each record's repr helper by the declared name, `fn __repr_rec_Float(e:
-/// Float)`, inside the entry program's scope. A package module's `type Float`
-/// then read as the builtin `Float` there (wasm validation `expected i32,
-/// found i64`). Keyed `self.float`, the helper names `self.float.Float`.
+/// #2865 (b): a package module's record named like a builtin (`type Float`)
+/// reprs by its declared name on the wasm leg.
 #[test]
-fn the_incumbent_leg_reprs_a_module_record_named_like_a_builtin() {
+fn the_wasm_leg_reprs_a_module_record_named_like_a_builtin() {
     let root = tempfile::tempdir().expect("tempdir");
     let pkg = root.path();
     write(&pkg.join("almide.toml"), PKG_TOML);
@@ -196,28 +193,21 @@ fn the_incumbent_leg_reprs_a_module_record_named_like_a_builtin() {
     );
     let out = Command::new(almide())
         .current_dir(pkg)
-        .env("ALMIDE_WASM_INCUMBENT", "1")
         .args(["run", "src/main.almd", "--target", "wasm"])
         .output()
         .expect("run almide");
     let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     assert!(
         out.status.success() && text.contains("Float { ok: true } Int { ok: true } Bytes { ok: false }"),
-        "incumbent leg:\n{text}"
+        "wasm leg:\n{text}"
     );
 }
 
-/// #2870: the incumbent leg's generated helpers (`fn __repr_quote(s: String)`,
-/// `fn __repr_rec_<R>(e: <R>)`, the drop sweeps) are appended to the ENTRY
-/// program and checked in its scope, where the file's own `type String`
-/// answers a bare `String` (#2858). Generated source now spells each builtin
-/// so that only the builtin answers it, and the entry program's own type as
-/// `self.<R>`. Every declarable bare builtin head is a cell, enumerated from
-/// the resolver's `BUILTIN_TYPE_HEADS`: the entry program declares a record
-/// under that name and prints it, and the incumbent leg must print what the
-/// structural leg and native print.
+/// #2870: every declarable bare builtin head is a cell, enumerated from the
+/// resolver's `BUILTIN_TYPE_HEADS`: the entry program declares a record under
+/// that name and prints it, and the wasm leg must print what native prints.
 #[test]
-fn the_incumbent_leg_reprs_an_entry_record_named_like_every_builtin() {
+fn every_leg_reprs_an_entry_record_named_like_every_builtin() {
     use almide_frontend::canonicalize::resolve::{BUILTIN_TYPE_HEADS, TypeSpelling};
     let mut names: Vec<&str> = BUILTIN_TYPE_HEADS
         .iter()
@@ -242,17 +232,10 @@ fn the_incumbent_leg_reprs_an_entry_record_named_like_every_builtin() {
         let want = format!("{name} {{ {field}: {value} }}\n");
         let root = tempfile::tempdir().expect("tempdir");
         write(&root.path().join("t.almd"), &program);
-        let legs: [(&str, &[&str], bool); 3] = [
-            ("incumbent", &["run", "t.almd", "--target", "wasm"], true),
-            ("structural", &["run", "t.almd", "--target", "wasm"], false),
-            ("native", &["run", "t.almd"], false),
-        ];
-        for (leg, args, incumbent) in legs {
+        let legs: [(&str, &[&str]); 2] = [("structural", &["run", "t.almd", "--target", "wasm"]), ("native", &["run", "t.almd"])];
+        for (leg, args) in legs {
             let mut cmd = Command::new(almide());
             cmd.current_dir(root.path()).args(args);
-            if incumbent {
-                cmd.env("ALMIDE_WASM_INCUMBENT", "1");
-            }
             let out = cmd.output().expect("run almide");
             let stdout = String::from_utf8_lossy(&out.stdout);
             if !out.status.success() || stdout != want {

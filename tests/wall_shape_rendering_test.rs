@@ -1,11 +1,8 @@
-//! A known-shape wall renders as headline + rewrite hint + caret + note (#931).
-//!
-//! The closure condition's rendering half: for a wall whose site stamped a
-//! `WallShape`, the CLI diagnostic leads with a surface-language headline,
-//! hints the documented rewrite (the while-heap-accumulator wall's hint is
-//! the recursion idiom), points at the source with a caret, and demotes the
-//! raw compiler-internal reason string to a trailing `note:`. Before, the
-//! reason WAS the headline and the hint was only the file-an-issue pointer.
+//! A wasm wall renders as E082 plus the ONE machine-readable `wall:` line the
+//! nightly fuzzer's honest-wall classifier keys on. (The #931 headline /
+//! rewrite-hint / caret rendering was the retired incumbent renderer's
+//! `WallShape` machinery; the structural leg's wall names its reason and the
+//! function it came from, #2807.)
 //!
 //! Skips cleanly when the `almide` binary is unavailable (CI builds it in the
 //! build step; locally run `cargo build --release` first).
@@ -26,108 +23,6 @@ fn almide_bin() -> String {
 
 fn tool_available() -> bool {
     Command::new(almide_bin()).arg("--version").output().is_ok()
-}
-
-/// The single most-reported wall (#931's own example class), reduced from
-/// `examples/minesweeper.almd` by ddmin: a `while` body reassigning a heap
-/// accumulator in a nested arm, past what the scalar-state loop admits. (The
-/// simple `s = s + "x"` loop now EXECUTES — the subset absorbed it — so the
-/// fixture needs the effect-call let + nested reassignment to still wall. If
-/// the subset absorbs this shape too, the first assertion below fails: pick
-/// the next still-walled shape from the skip ledger and update the fixture.)
-const WHILE_HEAP_ACCUMULATOR: &str = r#"import io
-
-effect fn pick() -> Result[List[Int], String] = ok([1, 2])
-
-fn grow(xs: List[Int], n: Int) -> List[Int] = xs + [n]
-
-effect fn main() -> Unit = {
-  var adj: List[Int] = []
-  var first = true
-  var game_over = false
-  while not game_over {
-    let input = io.read_line()!
-    match int.parse(input) {
-      err(msg) => {},
-      ok(n) => {
-        if n > 0 then {
-          if first then {
-            let mines = pick()!
-            adj = grow(mines, n)
-            first = false
-          } else ()
-        } else {
-          game_over = true
-        }
-      },
-    }
-  }
-  println(int.to_string(list.len(adj)))
-}
-"#;
-
-#[test]
-fn while_heap_accumulator_wall_renders_headline_hint_caret_and_note() {
-    if !tool_available() {
-        eprintln!("skipping: almide binary not available");
-        return;
-    }
-    let dir = std::env::temp_dir().join(format!("almide-wall-shape-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let src = dir.join("wall.almd");
-    std::fs::write(&src, WHILE_HEAP_ACCUMULATOR).unwrap();
-
-    let output = Command::new(almide_bin())
-        .args([
-            "build",
-            src.to_str().unwrap(),
-            "--target",
-            "wasm",
-            "-o",
-            dir.join("wall.wasm").to_str().unwrap(),
-        ])
-        // This test's SUBJECT is the incumbent leg's wall-rendering machinery
-        // (#931 headline/hint/caret/note; the marker line): pin that leg
-        // explicitly — the commissioned structural leg lowers some of these
-        // shapes outright (routing would otherwise change what is tested).
-        .env("ALMIDE_WASM_INCUMBENT", "1")
-        .output()
-        .expect("failed to spawn almide");
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    std::fs::remove_dir_all(&dir).ok();
-
-    assert!(
-        !output.status.success(),
-        "a walled build must fail (v0 was retired; a wall is an honest error), got success.\nstderr: {stderr}"
-    );
-    // Headline: what the user wrote, surface vocabulary — not the raw reason.
-    assert!(
-        stderr.contains("grows a heap value"),
-        "headline missing from:\n{stderr}"
-    );
-    // Hint: the documented rewrite, not (only) the file-an-issue pointer.
-    assert!(
-        stderr.contains("hoist the accumulator into a recursive helper"),
-        "rewrite hint missing from:\n{stderr}"
-    );
-    // The caret gutter points into the source.
-    assert!(stderr.contains("^"), "caret missing from:\n{stderr}");
-    assert!(stderr.contains("while"), "source line missing from:\n{stderr}");
-    // The raw reason survives as a note (it still serves a bug report), and
-    // is no longer the headline.
-    assert!(
-        stderr.contains("note: ") && stderr.contains("model-one-iteration"),
-        "raw-reason note missing from:\n{stderr}"
-    );
-    let headline_line = stderr
-        .lines()
-        .find(|l| l.contains("error"))
-        .unwrap_or_default();
-    assert!(
-        !headline_line.contains("model-one-iteration"),
-        "the raw reason leaked back into the headline:\n{stderr}"
-    );
-    assert_wall_marker_line(&stderr);
 }
 
 /// Every wall's stderr must carry the ONE machine-readable line the nightly
@@ -152,56 +47,39 @@ fn assert_wall_marker_line(stderr: &str) {
     assert!(!reason.trim().is_empty(), "empty wall reason in marker line:\n{stderr}");
 }
 
-/// The nightly regression shape (seed 1785822431097787593 index 16): a
-/// higher-order stdlib argument whose closure CAPTURES a local, on a NESTED
-/// Result (the flat `Result[Int, String]` variant is liftable and already
-/// compiles). This walls through the SPANLESS render path (no caret, banner
-/// form) — the marker line must be there too, or the fuzzer misfiles the
-/// wall as a finding.
-const CAPTURING_CLOSURE_HOF: &str = r#"fn main() -> Unit = {
-  let n: Result[Result[Int, String], String] = err("boom")
-  let r: Result[Result[Int, String], String] = result.or_else(n, ((e) => n))
-  println("${result.is_ok(r)}")
+/// A shape the wasm leg refuses on purpose (a mut op through a deeper field
+/// path; tests/wasm_wall_e082_test.rs pins the refusal's spelling).
+const WALLED_SHAPE: &str = r#"type Inner = { xs: List[Int] }
+type Outer = { inner: Inner }
+
+effect fn main() -> Unit = {
+  var o = Outer { inner: Inner { xs: [1] } }
+  list.push(o.inner.xs, 2)
+  println("${list.len(o.inner.xs)}")
 }
 "#;
 
 #[test]
-fn capturing_closure_hof_wall_emits_the_marker_line() {
+fn a_wasm_wall_is_e082_with_the_marker_line() {
     if !tool_available() {
         eprintln!("skipping: almide binary not available");
         return;
     }
-    let dir =
-        std::env::temp_dir().join(format!("almide-wall-marker-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("almide-wall-marker-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let src = dir.join("wall.almd");
-    std::fs::write(&src, CAPTURING_CLOSURE_HOF).unwrap();
-
+    std::fs::write(&src, WALLED_SHAPE).unwrap();
     let output = Command::new(almide_bin())
-        .args([
-            "build",
-            src.to_str().unwrap(),
-            "--target",
-            "wasm",
-            "-o",
-            dir.join("wall.wasm").to_str().unwrap(),
-        ])
-        // This test's SUBJECT is the incumbent leg's wall-rendering machinery
-        // (#931 headline/hint/caret/note; the marker line): pin that leg
-        // explicitly — the commissioned structural leg lowers some of these
-        // shapes outright (routing would otherwise change what is tested).
-        .env("ALMIDE_WASM_INCUMBENT", "1")
+        .args(["build", src.to_str().unwrap(), "--target", "wasm", "-o", dir.join("wall.wasm").to_str().unwrap()])
         .output()
         .expect("failed to spawn almide");
     let stderr = String::from_utf8_lossy(&output.stderr);
+    let wrote = dir.join("wall.wasm").exists();
     std::fs::remove_dir_all(&dir).ok();
-
-    // If this build ever SUCCEEDS, the subset absorbed capturing-closure
-    // HOF arguments — celebrate, then repoint the fixture at the next
-    // still-walled shape from the wall histogram.
-    assert!(
-        !output.status.success(),
-        "a walled build must fail (v0 was retired; a wall is an honest error), got success.\nstderr: {stderr}"
-    );
+    assert!(!output.status.success(), "a walled build must fail, got success.\nstderr: {stderr}");
+    assert!(!wrote, "a walled build must leave no artifact behind");
+    assert!(stderr.contains("error[E082]"), "the wall is E082:\n{stderr}");
+    // No second leg to name: the message is about the one wasm leg.
+    assert!(!stderr.contains("incumbent") && !stderr.contains("both wasm legs"), "{stderr}");
     assert_wall_marker_line(&stderr);
 }

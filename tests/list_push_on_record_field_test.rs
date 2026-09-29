@@ -119,7 +119,6 @@ fn build(program: &str, target: &str, dir: &std::path::Path) -> std::process::Ou
     let artifact = dir.join(if target == "rust" { "native" } else { "m.wasm" });
     Command::new(almide_bin())
         .args(["build", source.to_str().expect("path"), "--target", target, "-o", artifact.to_str().expect("path")])
-        .env_remove("ALMIDE_WASM_INCUMBENT")
         .env_remove("ALMIDE_COMPONENT_P3")
         .output()
         .expect("build")

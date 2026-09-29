@@ -13,10 +13,10 @@
 //!
 //! The structural leg now hands the key type to `emit_val_cmp`, the same
 //! type-directed comparator `list.sort` uses for a compound ELEMENT, so the
-//! key domain is stated in exactly one place. The checks below are the three
-//! halves of the fix: the answer agrees on the leg that now orders it, the
-//! cached keys are released exactly once, and the incumbent's mis-render is
-//! gone rather than merely unreachable.
+//! key domain is stated in exactly one place. The checks below are the
+//! halves of the fix: the answer agrees on the leg that now orders it, and the
+//! cached keys are released exactly once. (The incumbent's mis-render is
+//! unreachable by construction since #2752: no route reaches that leg.)
 
 use std::process::Command;
 
@@ -86,7 +86,6 @@ fn agree_on_the_structural_leg_with(program: &str, label: &str, trap_double_free
                 "-o",
                 artifact.to_str().expect("path"),
             ])
-            .env_remove("ALMIDE_WASM_INCUMBENT")
             .env_remove("ALMIDE_COMPONENT_P3");
         match trap_double_free && target == "wasm" {
             true => build.env("ALMIDE_RC_TRAP_DOUBLE_FREE", "1"),
@@ -199,45 +198,4 @@ fn the_cached_compound_keys_are_released_exactly_once() {
         true,
     );
     assert_eq!(out, "400\n", "50 rounds x (c=6 + len(\"w0\")=2): the max count, ties broken by the word");
-}
-
-/// The kill-check. The incumbent leg has no compound-key route, and the
-/// failure this issue reported was not that it lacked one — it was that it
-/// rendered one anyway. Forcing that leg must now REFUSE at build time; a
-/// success here means a `verified` artifact carrying the trap is reachable
-/// again for any program the structural leg walls for some other reason.
-#[test]
-fn the_incumbent_leg_refuses_a_compound_key_instead_of_mis_rendering_it() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let source = dir.path().join("main.almd");
-    std::fs::write(&source, TUPLE_KEY).expect("source");
-    let artifact = dir.path().join("m.wasm");
-    let built = Command::new(almide_bin())
-        .args([
-            "build",
-            source.to_str().expect("path"),
-            "--target",
-            "wasm",
-            "-o",
-            artifact.to_str().expect("path"),
-        ])
-        .env("ALMIDE_WASM_INCUMBENT", "1")
-        .env_remove("ALMIDE_COMPONENT_P3")
-        .output()
-        .expect("build");
-    let report =
-        String::from_utf8_lossy(&built.stdout).to_string() + &String::from_utf8_lossy(&built.stderr);
-    assert!(
-        !built.status.success(),
-        "the incumbent leg built a compound-key sort instead of walling it:\n{report}"
-    );
-    assert!(
-        report.contains("list.sort_by_x"),
-        "the refusal must name the unrendered sort, not fail for some other reason:\n{report}"
-    );
-    assert!(
-        !artifact.exists(),
-        "a walled build must leave no artifact behind — {} exists",
-        artifact.display()
-    );
 }

@@ -11,16 +11,9 @@
 //! and a `verified` build; the heap twin additionally trapped in `rc_dec` at
 //! teardown, dropping a handle from a block that never allocated.
 //!
-//! WHY THIS BINARY EXISTS ALONGSIDE spec/wasm_cross/global_in_shortcircuit_operand.almd:
-//! the corpus gates run that fixture on the STRUCTURAL leg (and re-render it
-//! through the v1 renderer for host determinism, which byte-compares the module
-//! across hosts and never executes it). The defect is incumbent-only, so the
-//! fixture alone would have stayed green through the whole regression. Here the
-//! incumbent leg is run and compared against native, which is what fails.
-//!
-//! The reported route was `@export(wasm)` — the router sends an exported module
-//! to the incumbent, which is why `almide run --target wasm` looked correct
-//! while the exported `f` did not. Same MIR, so the leg is what to pin.
+//! The defect was the retired incumbent leg's; the programs stay as a
+//! native-vs-wasm pin of the skipped-path read (the reported route was
+//! `@export(wasm)`, which the incumbent served until #2752).
 use std::process::Command;
 
 /// The issue's first repro, plus the `or` mirror, the heap twin and a chain.
@@ -127,12 +120,10 @@ fn almide() -> String {
         .unwrap_or_else(|_| format!("{}/target/release/almide", env!("CARGO_MANIFEST_DIR")))
 }
 
-/// Run one source on all three legs and return (native, structural, incumbent)
-/// stdout, each trimmed. A leg that fails to run returns its stderr instead, so
-/// the assertion names what happened rather than comparing two empty strings —
-/// the pre-fix heap twin trapped in `rc_dec`, which an stdout-only compare would
-/// have read as "both printed nothing".
-fn three_legs(src: &str) -> (String, String, String) {
+/// Run one source natively and on wasm and return (native, wasm) stdout,
+/// each trimmed. A leg that fails to run returns its stderr instead, so the
+/// assertion names what happened rather than comparing two empty strings.
+fn both_legs(src: &str) -> (String, String) {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("main.almd");
     std::fs::write(&file, src).unwrap();
@@ -149,41 +140,31 @@ fn three_legs(src: &str) -> (String, String, String) {
         }
     };
     let native = take(Command::new(almide()).args(["run", path]).output().unwrap());
-    let structural = take(
-        Command::new(almide()).args(["run", path, "--target", "wasm"]).output().unwrap(),
-    );
-    let incumbent = take(
-        Command::new(almide())
-            .args(["run", path, "--target", "wasm"])
-            .env("ALMIDE_WASM_INCUMBENT", "1")
-            .output()
-            .unwrap(),
-    );
-    (native, structural, incumbent)
+    let wasm = take(Command::new(almide()).args(["run", path, "--target", "wasm"]).output().unwrap());
+    (native, wasm)
 }
 
-fn all_three_agree(src: &str, expected: &str) {
-    let (native, structural, incumbent) = three_legs(src);
+fn all_agree(src: &str, expected: &str) {
+    let (native, wasm) = both_legs(src);
     assert_eq!(native, expected, "native is the oracle here and must print the stated values");
-    assert_eq!(structural, native, "the structural wasm leg must agree with native");
     assert_eq!(
-        incumbent, native,
-        "the incumbent wasm leg must agree with native — a global read on a \
-         short-circuit's right side must not be memoized for a path that skipped it"
+        wasm, native,
+        "the wasm leg must agree with native — a global read on a short-circuit's \
+         right side must not be memoized for a path that skipped it"
     );
 }
 
 #[test]
 fn a_global_read_on_a_short_circuit_right_side_is_true_on_the_skipped_path() {
-    all_three_agree(SHORTCIRCUIT, "3000\n1\n3000\n3000\nalpha\nhit\n3000\n1");
+    all_agree(SHORTCIRCUIT, "3000\n1\n3000\n3000\nalpha\nhit\n3000\n1");
 }
 
 #[test]
 fn a_global_read_in_a_while_condition_survives_zero_iterations() {
-    all_three_agree(WHILE_CONDITION, "500\n3000");
+    all_agree(WHILE_CONDITION, "500\n3000");
 }
 
 #[test]
 fn a_global_read_in_an_already_guarded_region_still_reads_its_value() {
-    all_three_agree(ALREADY_GUARDED, "3000\n3000\n3000\n3000");
+    all_agree(ALREADY_GUARDED, "3000\n3000\n3000\n3000");
 }
