@@ -60,7 +60,11 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use crate::witness_paths::{Branches, Ev};
+use paths::{Branches, Ev};
+
+/// The per-path event log and its renderer (split for the file budget).
+#[path = "witness_paths.rs"]
+mod paths;
 
 
 pub struct WitnessRecorder {
@@ -431,7 +435,7 @@ impl WitnessRecorder {
         if !self.branches.settled() {
             return "!poison\n".to_string();
         }
-        match crate::witness_paths::render(&self.log, self.next_obj) {
+        match paths::render(&self.log, self.next_obj) {
             Ok(s) => s,
             Err(r) => format!("{DECLINE_PREFIX}{r}\n"),
         }
@@ -463,7 +467,9 @@ pub fn balanced(cert: &str) -> bool {
 }
 
 // The subset gate lives in witness_gate.rs (the file budget).
-pub use crate::witness_gate::{effect_subset, straightline_subset, top_let_subset};
+#[path = "witness_gate.rs"]
+mod gate;
+pub use gate::{effect_subset, straightline_subset, top_let_subset};
 
 // ── the collection sink (diagnostic channel, test-enabled) ──────────────
 
