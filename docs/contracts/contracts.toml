@@ -98,6 +98,7 @@ evidence  = [
   { path = "spec/wasm_cross/int_div_by_zero.almd", class = "fixture" },
   { path = "spec/wasm_cross/int_mod_by_zero.almd", class = "fixture" },
   { path = "spec/wasm_cross/int_div_by_zero_literal.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_div_by_zero_inlined_arg.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-002"
