@@ -621,6 +621,26 @@ fn source_var_name(ctx: &RenderContext, id: VarId) -> String {
     ctx.var_table.get(cur).name.as_str().to_string()
 }
 
+/// The place under a `&mut` borrow, with the `Clone` that clone insertion
+/// spells over a projection's object removed (`t.clone().0` → `t.0`, #2946):
+/// under `&mut` the clone makes the write land on a discarded temporary.
+fn strip_place_clones(place: &IrExpr) -> IrExpr {
+    let strip_object = |object: &IrExpr| -> Box<IrExpr> {
+        let object = match &object.kind {
+            IrExprKind::Clone { expr } if matches!(expr.kind,
+                IrExprKind::Var { .. } | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }) => &**expr,
+            _ => object,
+        };
+        Box::new(strip_place_clones(object))
+    };
+    let kind = match &place.kind {
+        IrExprKind::Member { object, field } => IrExprKind::Member { object: strip_object(object), field: *field },
+        IrExprKind::TupleIndex { object, index } => IrExprKind::TupleIndex { object: strip_object(object), index: *index },
+        _ => return place.clone(),
+    };
+    IrExpr { kind, ty: place.ty.clone(), span: place.span, def_id: place.def_id }
+}
+
 fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::Borrow { expr: inner, as_str, mutable } = &expr.kind else { unreachable!() };
     // `&(lambda)` — a lambda literal at a callee's `&dyn Fn` slot (#2288,
@@ -644,6 +664,9 @@ fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
                 let var_name = ctx.var_name(*id).to_string();
                 return format!("{}.make_mut()", var_name);
             }
+        }
+        if matches!(inner.kind, IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }) {
+            return format!("&mut {}", render_expr(ctx, &strip_place_clones(inner)));
         }
         format!("&mut {}", render_expr(ctx, inner))
     } else if *as_str {
