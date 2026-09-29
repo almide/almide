@@ -1,0 +1,30 @@
+// @contract: C-319
+// #2952: a closure that READS a `var` the enclosing scope then changes only
+// through a `mut`-param call sees the change, exactly as it does when the change
+// is spelled as a rebind. The shared lowering demoted a var to `let` unless an
+// `Assign` wrote it, so a var written only by `list.push(xs, 1)` or a user
+// `add(mut xs)` became a `let`; native's capture pass then gave the closure a
+// snapshot (it printed 0) while wasm, which counts those calls, shared the
+// storage (it printed 1). A var handed to a declared `mut` param now counts as
+// written. The rebind spelling is the control. Byte-identical native == wasm.
+fn add(mut xs: List[Int]) -> Unit = list.push(xs, 10)
+
+effect fn main() -> Unit = {
+  var rebound: List[Int] = []
+  let n0 = () => list.len(rebound)
+  rebound = rebound + [1]
+  println("rebind " + int.to_string(n0()))
+  var pushed: List[Int] = []
+  let n1 = () => list.len(pushed)
+  list.push(pushed, 1)
+  list.push(pushed, 2)
+  println("list.push " + int.to_string(n1()))
+  var through_user_fn: List[Int] = []
+  let n2 = () => list.len(through_user_fn)
+  add(through_user_fn)
+  println("user mut fn " + int.to_string(n2()))
+  var m: Map[String, Int] = map.new()
+  let size = () => map.len(m)
+  map.insert(m, "a", 1)
+  println("map.insert " + int.to_string(size()))
+}
