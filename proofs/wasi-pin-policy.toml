@@ -30,9 +30,9 @@ minor = "0.3.0"
 # `crate_major` is the embedded host's Cargo pin; `ci` is the release CI
 # installs for the execution legs.
 floor = 46
-crate_major = 47
-ci = "v47.0.3"
-# The flag surface the p3 execution legs pass (47.x): NO feature flag
+crate_major = 49
+ci = "v49.0.1"
+# The flag surface the p3 execution legs pass (47.x, unchanged on 49.x): NO feature flag
 # (ADR-0023 step 1). The shim uses only the baseline async builtins
 # (`waitable-set.*`, the `[async-lower]` stream/future copies), which
 # need `component-model-async` alone — on by default since 46, as is p3
@@ -60,5 +60,6 @@ evidence = [
   "wasmtime 46 release notes: wasi:cli@0.3.0 default-on (p3)",
   "wasmtime v47.0.2 vendored crates/wasi/src/p3/wit — the WIT shapes the almide p3 leg transcribed (2026-08-27/28 survey, ../almide-references/RESEARCH-component-model.md)",
   "wasm-tools 0.258.0 release (wasmparser/wasm-encoder/wit-parser/wit-component lockstep, 2026-08; the 0.3.1 WIT-language train)",
+  "wasmtime v49.0.1 release 2026-09-24 (crates.io publish time) — the security release fixing RUSTSEC-2026-0315/-0316 (#2955); rust-version 1.96.0; the embedded host compiled unchanged and the p3 legs pass with no feature flag on the 49.0.1 CLI",
   "wasm-tools 0.259.0 release 2026-09-10 (crates.io publish time of wasmparser 0.259.0); `SizeAlign::fill` became fallible, the only API change this tree touches",
 ]
