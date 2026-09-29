@@ -231,6 +231,27 @@ impl Emitter<'_> {
         }
     }
 
+    /// #2758: a top-let's value becomes its global's (func.rs
+    /// `store_top_let`). A copied shape (List / Map / Set / Bytes): an owned
+    /// initializer is born and released after the copy (`id`), the fresh
+    /// copy moves into the global (`im`). Any other shape: an owned value
+    /// moves into the global (`im`); a borrowed one is stored without a
+    /// share — the global would hold no credit of its own (decline).
+    pub(crate) fn witness_top_let(&mut self, declared: SliceTy, owned: bool, copied: bool) {
+        if !self.rc_droppable(declared) {
+            return;
+        }
+        let Some(w) = self.witness.as_mut() else { return };
+        match (copied, owned) {
+            (true, true) => {
+                w.temp_discarded();
+                w.temp_move();
+            }
+            (true, false) | (false, true) => w.temp_move(),
+            (false, false) => w.decline("top-let:borrowed"),
+        }
+    }
+
     /// The module-call wrapper's audit (calls_modules.rs): a hook fired for
     /// EACH of the call's own argument nodes, or the frame declines; a droppable
     /// `View` result declines (identity, see the module doc).
