@@ -1125,6 +1125,9 @@ impl Checker {
             let slot_params: Option<Vec<Ty>> = self.lookup_call_sig(callee).map(|s| s.params.into_iter().map(|(_, t)| t).collect());
             self.check_effect_fn_args(args, slot_params.as_deref());
         }
+        // A cross-module call's omitted defaults, filled here so they are
+        // checked in this program (call_defaults.rs).
+        self.fill_cross_module_defaults(callee, args, named_args);
         // Save named arg names, then flatten into positional args temporarily.
         let named_names: Vec<almide_base::intern::Sym> = named_args.iter().map(|(n, _)| *n).collect();
         let named_start = args.len();
