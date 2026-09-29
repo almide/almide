@@ -250,10 +250,16 @@ fn structural_witnesses_balance_and_hold_the_floor() {
         let Ok(ir) = almide_spine::s5::lower_to_ir(rel, &text) else { continue };
         almide_wasm::witness::start_collecting();
         let emitted = almide_wasm::emit_program(&ir).is_ok();
-        let (frames, shipped) = almide_wasm::witness::take_with_shipped();
+        let (frames, shipped) = almide_wasm::witness::take_by_pass();
         per_fixture.record(rel, emitted, &shipped);
-        for (name, cert) in frames {
-            let key = format!("{rel} :: {name}");
+        for (pass, name, cert) in frames {
+            // The checked pass (no bounded-line rewrites) emits different
+            // code by design: it agrees with itself, not with passes 1-2.
+            let key = if pass == almide_wasm::witness::CHECKED_PASS {
+                format!("{rel} :: {name} [checked]")
+            } else {
+                format!("{rel} :: {name}")
+            };
             if let Some(reason) = cert.strip_prefix(almide_wasm::witness::DECLINE_PREFIX) {
                 declined.insert(key, reason.trim().to_string());
             } else if cert.starts_with('!') {
@@ -265,7 +271,8 @@ fn structural_witnesses_balance_and_hold_the_floor() {
                     eprintln!("[witness] {key}\n{cert}");
                 }
                 // emit_program lowers every fn once per emission pass
-                // (the reachability two-pass) — the passes must agree.
+                // (the reachability two-pass) — the passes of one code
+                // configuration must agree.
                 if let Some(prev) = certs.insert(key.clone(), cert.clone())
                     && prev != cert
                 {
@@ -274,8 +281,11 @@ fn structural_witnesses_balance_and_hold_the_floor() {
             }
         }
     }
-    let admitted = certs.len();
-    let witnessed = certs.values().filter(|c| !c.trim().is_empty()).count();
+    // The counts read the bounded configuration only (a checked-pass frame
+    // is the same fn re-emitted, not more coverage).
+    let bounded = |k: &String| !k.ends_with(" [checked]");
+    let admitted = certs.keys().filter(|k| bounded(k)).count();
+    let witnessed = certs.iter().filter(|(k, c)| bounded(k) && !c.trim().is_empty()).count();
     // A frame both passes admit AND decline is a pass disagreement too.
     for key in declined.keys().filter(|k| certs.contains_key(*k)) {
         nondet.push(key.clone());
@@ -288,7 +298,7 @@ fn structural_witnesses_balance_and_hold_the_floor() {
     eprintln!(
         "[witness-floor] admitted {admitted} function(s), {witnessed} with RC events, {} declined; \
          {} of {} spec/wasm_cross fixture(s) fully certified",
-        declined.len(),
+        declined.keys().filter(|k| bounded(k)).count(),
         per_fixture.certified().len(),
         per_fixture.manifest.len()
     );

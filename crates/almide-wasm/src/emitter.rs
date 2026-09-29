@@ -665,6 +665,7 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(hold);
                     self.lower(el, Some(elem))?;
                     self.rc_share_guard(el, elem);
+                    self.witness_store(el, elem);
                     self.store_ty_slot(elem, i as u32 * stride);
                 }
                 self.f.instructions().local_get(hold);
