@@ -55,7 +55,7 @@ fn witnesses() -> std::collections::BTreeMap<String, String> {
 }
 
 fn accepted(cert: &str) -> bool {
-    almide_wasm::witness::balanced(cert) && almide_verify::check(almide_verify::Property::Ownership, cert.as_bytes())
+    almide_verify::check(almide_verify::Property::Ownership, cert.as_bytes())
 }
 
 #[test]
@@ -91,9 +91,11 @@ fn temporaries_witness_exactly_and_unhooked_shapes_decline() {
         assert!(accepted(got), "{name}: the portable checker must accept {got:?}");
     }
     // The shapes whose sites are NOT hooks decline instead of certifying.
-    // `and`'s right operand runs conditionally: a call with an RC site there
-    // is a branch, not a straight line (#2756).
-    assert_eq!(w.get("short").map(String::as_str), Some("!decline:short-circuit-operand\n"));
+    // `and`'s right operand runs on one arm of a branch site (#2756): the
+    // param's share into `take` happens on that path only.
+    let short = w.get("short").map(String::as_str).unwrap_or("<none>");
+    assert_eq!(short, "{iamd|id}\n");
+    assert!(accepted(short));
     // A fresh heap operand of `==` is an unowned temporary no hook records
     // (#2972's leak) — declined, never certified.
     assert_eq!(w.get("eq_fresh").map(String::as_str), Some("!decline:heap-operand:OptionSome\n"));

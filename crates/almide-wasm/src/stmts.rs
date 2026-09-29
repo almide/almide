@@ -117,11 +117,15 @@ impl Emitter<'_> {
             *extra += 1;
         }
         self.branch_depth += 1;
+        self.witness_branch_open();
         let arms = (|| {
+            self.witness_branch_arm();
             self.lower_stmt_expr(then)?;
             self.f.instructions().else_();
+            self.witness_branch_arm();
             self.lower_stmt_expr(else_)
         })();
+        self.witness_branch_close();
         self.branch_depth -= 1;
         arms?;
         self.f.instructions().end();

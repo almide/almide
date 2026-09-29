@@ -265,6 +265,55 @@ impl Emitter<'_> {
         }
     }
 
+    /// A branch site opens / an arm begins / the site joins (#2756): the
+    /// recorder logs the structure its per-object lines are rendered from.
+    pub(crate) fn witness_branch_open(&mut self) {
+        if let Some(w) = self.witness.as_mut() {
+            w.branch_open();
+        }
+    }
+
+    pub(crate) fn witness_branch_arm(&mut self) {
+        if let Some(w) = self.witness.as_mut() {
+            w.branch_arm();
+        }
+    }
+
+    pub(crate) fn witness_branch_close(&mut self) {
+        if let Some(w) = self.witness.as_mut() {
+            w.branch_close();
+        }
+    }
+
+    /// A value arm hands the join its one credit (#2756): an owned arm
+    /// value moves (`im`), a borrowed Var arm took the normalizing +1 and
+    /// moves (`am`), a borrowed non-Var declines. Mirrors `lower_if_arms` /
+    /// `lower_arm_body`, which call it exactly where they settle the credit.
+    pub(crate) fn witness_arm_value(&mut self, e: &almide_ir::IrExpr) {
+        if self.witness.is_some() {
+            self.witness_share_or_move(e, "arm-value:borrowed-temp");
+        }
+    }
+
+    /// A match arm's pattern binds (#2756): each droppable binder is a VIEW
+    /// of the subject's payload — a known object the frame holds no credit
+    /// of (patterns.rs binds by `local.set`, no share, no release).
+    pub(crate) fn witness_pattern_views(&mut self, p: &almide_ir::IrPattern) {
+        if self.witness.is_none() {
+            return;
+        }
+        let mut vars = Vec::new();
+        pattern_binders(p, &mut vars);
+        for v in vars {
+            let Some(&(idx, ty)) = self.locals.get(&v) else { continue };
+            if self.rc_droppable(ty)
+                && let Some(w) = self.witness.as_mut()
+            {
+                w.param_borrowed(idx);
+            }
+        }
+    }
+
     /// An emission-time decline: the route this frame took has an RC
     /// site this phase does not record — withdraw the certificate with
     /// a reason the histogram counts (never a silent under-count).
@@ -272,5 +321,30 @@ impl Emitter<'_> {
         if let Some(w) = self.witness.as_mut() {
             w.decline(reason);
         }
+    }
+}
+
+/// Every variable a pattern binds (the list-rest binder included: the gate
+/// declines a named rest before any frame reaches here).
+fn pattern_binders(p: &almide_ir::IrPattern, out: &mut Vec<almide_ir::VarId>) {
+    use almide_ir::IrPattern as P;
+    match p {
+        P::Bind { var, .. } => out.push(*var),
+        P::As { var, inner, .. } => {
+            out.push(*var);
+            pattern_binders(inner, out);
+        }
+        P::Constructor { args: ps, .. } | P::Tuple { elements: ps } => ps.iter().for_each(|q| pattern_binders(q, out)),
+        P::Some { inner } | P::Ok { inner } | P::Err { inner } => pattern_binders(inner, out),
+        P::RecordPattern { fields, .. } => {
+            fields.iter().filter_map(|f| f.pattern.as_ref()).for_each(|q| pattern_binders(q, out));
+        }
+        P::List { elements, rest } => {
+            elements.iter().for_each(|q| pattern_binders(q, out));
+            if let Some(r) = rest {
+                pattern_binders(r, out);
+            }
+        }
+        P::Wildcard | P::Literal { .. } | P::None => {}
     }
 }

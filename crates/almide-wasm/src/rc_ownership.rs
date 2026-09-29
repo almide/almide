@@ -665,22 +665,33 @@ impl Emitter<'_> {
         let normalize = self.rc_droppable(ty) && (self.rc_predict_owned(then) || self.rc_predict_owned(else_));
         self.f.instructions().if_(wasm_encoder::BlockType::Result(ty.val_type()));
         self.branch_depth += 1;
+        // The witness (#2756) sees each arm and the credit it hands the join.
+        self.witness_branch_open();
         let arms = (|| {
+            self.witness_branch_arm();
             self.in_tail = tail;
             self.lower(then, Some(ty))?;
             let then_owned = self.rc_owned_result(then);
             if normalize && !then_owned {
                 self.rc_inc_top();
             }
+            if self.rc_droppable(ty) && (normalize || then_owned) {
+                self.witness_arm_value(then);
+            }
             self.f.instructions().else_();
+            self.witness_branch_arm();
             self.in_tail = tail;
             self.lower(else_, Some(ty))?;
             let join = normalize || (then_owned && self.rc_droppable(ty));
             if join && !self.rc_owned_result(else_) {
                 self.rc_inc_top();
             }
+            if join {
+                self.witness_arm_value(else_);
+            }
             Ok(join)
         })();
+        self.witness_branch_close();
         self.branch_depth -= 1;
         if arms? {
             self.owned_call_marks.insert(e as *const almide_ir::IrExpr as usize);

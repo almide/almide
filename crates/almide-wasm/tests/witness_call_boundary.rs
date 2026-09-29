@@ -52,7 +52,11 @@ fn the_call_boundary_shapes_witness_exactly_and_balance() {
     let expect = [
         ("pass", "iamd\n"),
         ("both", "iamd\niamd\n"),
-        ("owned_tail", "im\n"),
+        // `mk(3)` in tail position is a `return_call`: the callee hands its
+        // credit straight to this frame's caller, and nothing after the
+        // jump runs here (#2756: the recorder treats it as dead code), so
+        // the result object is never born in this frame.
+        ("owned_tail", "\n"),
         ("fresh_tail", "im\n"),
         // bind (i), share into take (a m), released before the jump (d).
         ("bind_then_pass", "iamd\n"),
