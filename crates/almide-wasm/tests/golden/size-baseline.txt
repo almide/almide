@@ -182,7 +182,7 @@
 4851	spec/wasm_cross/fan_map_inline_lambda.almd
 5887	spec/wasm_cross/fan_map_nested_combinators.almd
 8017	spec/wasm_cross/fan_map_parallel_scalar.almd
-2583	spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd
+2594	spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd
 4361	spec/wasm_cross/fan_prefetch_fs.almd
 3152	spec/wasm_cross/fan_pure_thunks.almd
 5702	spec/wasm_cross/fan_race_mapper.almd
