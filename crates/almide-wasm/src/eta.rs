@@ -27,7 +27,7 @@ use almide_ir::{CallTarget, IrExpr, IrExprKind, IrProgram, Mutability, VarTable}
 use almide_types::types::Ty;
 
 /// The stdlib families whose arms inline a callback (`hof_lambda`).
-const HOF_MODULES: &[&str] = &["list", "map", "set", "option", "result", "fan"];
+const HOF_MODULES: &[&str] = &["list", "map", "set", "option", "result", "fan", "fs", "matrix"];
 
 /// The eta-expanded program, or `None` when no callback needed it (the
 /// common case: no clone).
