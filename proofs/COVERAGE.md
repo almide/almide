@@ -145,7 +145,8 @@ Measured per file from the two nights' tables (branches / missed):
    which is already below the floor. That floor was seeded on 2026-09-04 with
    those files in scope and driven.
 2. **Lowering reachable only through the deleted pipeline.** `almide-mir/src/lower/`
-   went from 1146 to 1739 missed branches of about the same total (+593). The
+   went from 3720 to 4315 missed branches, out of an unchanged total of about
+   11270 (+595). The
    incumbent pipeline lowered each program's generated `__drop_*` / `__repr_*`
    sources and ran `pipeline_b`'s program passes (`populate_abi_registries`,
    `rewrap_never_err_into_result_targets`, …). Neither product leg calls that
