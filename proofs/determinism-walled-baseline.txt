@@ -20,4 +20,3 @@
 # proofs/incumbent-route-baseline.txt build row, and closes with its cause
 # issue under #2739. (The incumbent's own ceiling was MAX_WALLED=30 — 30
 # fixtures IT refused, which the structural leg now all measures.)
-inplace_clear_alias_field.almd :: string-clear-nonvar :: #2747
