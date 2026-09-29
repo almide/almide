@@ -256,6 +256,7 @@ spec/wasm_cross/expr_stmt_comment.almd
 spec/wasm_cross/fallible_hof_effect_callback_family.almd
 spec/wasm_cross/fallible_hof_large_input.almd
 spec/wasm_cross/fallible_hof_option_effect_callback.almd
+spec/wasm_cross/fallible_hof_release_matrix.almd
 spec/wasm_cross/fallible_tuple_value_tail.almd
 spec/wasm_cross/fan_any_allfail.almd
 spec/wasm_cross/fan_any_early_winner.almd

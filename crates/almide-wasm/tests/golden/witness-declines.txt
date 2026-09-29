@@ -1,9 +1,9 @@
 # Structural witness decline histogram (#2754): reason<TAB>declined frames of the
 # SHIPPED emission pass (fixture x fn, over the spec/wasm_cross rows of the run manifest). SHRINK-ONLY per reason; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-call-arg:BinOp	1267
+call-arg:BinOp	1269
 call-arg:Block	28
-call-arg:Call	513
+call-arg:Call	514
 call-arg:EmptyMap	1
 call-arg:If	3
 call-arg:Lambda	48
@@ -17,8 +17,8 @@ call-arg:TupleIndex	1
 call:ctor	42
 call:target:Computed	18
 display	10
-effect	169
-lambda	200
+effect	184
+lambda	209
 list-elem	129
 module-arm:unaudited:bytes.push	2
 module-arm:unaudited:bytes.set_at	1
@@ -41,7 +41,7 @@ rhs:MapAccess	1
 rhs:MapLiteral	7
 rhs:Match	5
 rhs:Member	2
-rhs:OptionNone	26
+rhs:OptionNone	33
 rhs:OptionSome	15
 rhs:Range	3
 rhs:Record	42
@@ -50,12 +50,12 @@ rhs:ResultOk	16
 rhs:RuntimeCall	66
 rhs:Tuple	12
 rhs:Unwrap	2
-rhs:UnwrapOr	2
+rhs:UnwrapOr	3
 scan	3
 stmt:Assign	11
 stmt:BindDestructure	16
 stmt:Comment	164
-stmt:Expr:Block	77
+stmt:Expr:Block	78
 stmt:Expr:ForIn	53
 stmt:Expr:If	25
 stmt:Expr:Match	2
@@ -71,9 +71,9 @@ stmt:Expr:call:target:Computed	1
 stmt:FieldAssign	1
 stmt:Guard	9
 stmt:IndexAssign	9
-tail:BinOp	716
+tail:BinOp	718
 tail:Block	17
-tail:If	4722
+tail:If	4733
 tail:Lambda	10
 tail:MapAccess	5
 tail:Match	479
@@ -86,7 +86,7 @@ tail:ResultOk	57
 tail:SpreadRecord	2
 tail:StringInterp	26
 tail:Tuple	6
-tail:TupleIndex	4
+tail:TupleIndex	3
 tail:UnOp	1
 tail:UnwrapOr	14
 tail:While	4
