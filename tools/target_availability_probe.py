@@ -564,7 +564,10 @@ def measure(mod, f, types, leg, tmp, env):
         # the ladder exists because verdicts are shape-sensitive (the
         # fs.for_each_line lesson — variant 0 walls, variant 4 builds),
         # so a first-shape wall must not stop it.
-        if "error[E0" in first or "Expected" in first or "type error" in first.lower():
+        # E082 is the wasm leg's WALL (#2752: a decline is a hard error, no
+        # fallback), not a type error in the probe program.
+        ill_typed = ("error[E0" in first and "error[E082]" not in first) or "Expected" in first
+        if ill_typed or "type error" in first.lower():
             # Never let a later shape's TYPE error demote an earlier
             # shape's renderer wall — verdict precedence is ok > wall > error.
             if verdict is None or verdict[0] != "wall":
