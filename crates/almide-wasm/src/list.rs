@@ -689,14 +689,34 @@ impl Emitter<'_> {
         let hd = self.hold_for(elem)?;
         self.lower_arg(default, Some(elem), ArgMode::Retain)?;
         self.f.instructions().local_set(hd);
+        // Owned either way (#2932): a miss hands the default's Retain
+        // credit over; a hit shares the element (+1, the list keeps its
+        // own credit), releases the unused default and frees the Option
+        // shell `$list_get` allocated — its payload took no share here, so
+        // the flat release is the whole of it. Before, the shell leaked on
+        // every hit and a heap default leaked on every call.
         self.f.instructions().local_get(hres).i32_eqz().if_(BlockType::Result(elem.val_type()));
         self.f.instructions().local_get(hd);
         self.f.instructions().else_().local_get(hres);
         self.load_ty_slot(elem, almide_layout::OPTION_FIELD);
+        self.share_handle_top(elem);
+        self.emit_release_hold(hd, elem);
+        self.f.instructions().local_get(hres).call(crate::F_DEC_FLAT);
         self.f.instructions().end();
         self.release_for(elem);
         self.release_i32();
-        Ok(Some(Lowered::view(elem)))
+        Ok(Some(self.selected_default_result(elem)))
+    }
+
+    /// A `get_or` arm's result: the selected value carries one owned
+    /// credit when it is a handle the frame releases (the hit branch's
+    /// `share_handle_top` paid it), and is a plain value otherwise.
+    pub(crate) fn selected_default_result(&self, v: SliceTy) -> Lowered {
+        if self.elem_is_handle(v) && self.rc_droppable(v) {
+            Lowered::owned(v)
+        } else {
+            Lowered::view(v)
+        }
     }
 }
 
