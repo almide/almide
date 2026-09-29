@@ -554,9 +554,12 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     i.local_get(buf).local_get(total).i32_add();
     i.local_get(cap).local_get(total).i32_sub();
     i.call(I_HTTP_BODY_READ);
-    i.call(f_await);
-    i.i32_const(4).i32_shr_u().local_set(n);
-    i.local_get(n).i32_eqz().br_if(1);
+    // `count<<4 | status`. The body ends on status DROPPED (1), not on a zero
+    // count: a read may complete (status 0) with nothing copied, and wasmtime
+    // 49 does that on Linux — reading it as EOF lost the whole body behind a
+    // 200 status (#2955). A DROPPED read may also carry its last bytes.
+    i.call(f_await).local_set(k);
+    i.local_get(k).i32_const(4).i32_shr_u().local_set(n);
     i.local_get(total).local_get(n).i32_add().local_set(total);
     i.local_get(lim).i64_const(0).i64_gt_s();
     i.local_get(total).local_get(pre).i32_sub().i64_extend_i32_u().local_get(lim).i64_gt_s();
@@ -567,6 +570,7 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     let [tl0, tl1, tl2] = t.too_large;
     http_err_call(&mut i, fns, (a_ptr, a_len), tl0, tl1, Some((key_ptr, key_len)), tl2);
     i.end();
+    i.local_get(k).i32_const(15).i32_and().i32_const(1).i32_eq().br_if(1);
     i.br(0).end().end();
     http_body_retire(&mut i, park, (body_rx, trlfut, cb_tx), f_await);
 
