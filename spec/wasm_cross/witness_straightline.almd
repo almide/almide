@@ -72,7 +72,7 @@ fn wrap(xs: List[Int]) -> List[Int]? = some(xs)
 // (its share moves out, `am`), and each arm hands the join one credit.
 fn pick(xs: List[Int], c: Bool) -> Int = if c then take(xs) + 1 else 0
 
-fn label(o: Option[Int], name: String) -> String = match o {
+fn label(o: Int?, name: String) -> String = match o {
   some(_) => name + "!",
   none => name,
 }
