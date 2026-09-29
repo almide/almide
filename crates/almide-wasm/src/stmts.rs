@@ -373,6 +373,11 @@ impl Emitter<'_> {
                     let floor = self.hold_i64()?;
                     self.f.instructions().local_get(var_idx).local_set(floor);
                     let flags = self.hoist_cow_flags(None, body)?;
+                    let incl = *inclusive;
+                    let pre = self.prejudge_first_stores(body, &|e: &mut Self| {
+                        e.range_exit_test(var_idx, floor, stop, incl);
+                        e.f.instructions().i32_eqz();
+                    });
                     self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                     self.emit_det_charge_const(1);
                     self.range_exit_test(var_idx, floor, stop, *inclusive);
@@ -387,6 +392,7 @@ impl Emitter<'_> {
                         .br(0)
                         .end()
                         .end();
+                    self.drop_prejudged(pre);
                     self.drop_cow_flags(flags);
                     self.release_i64();
                     self.release_i64();
@@ -403,6 +409,10 @@ impl Emitter<'_> {
                         }
                         self.f.instructions().local_get(sl).local_set(var_idx);
                         let flags = self.hoist_cow_flags(None, body)?;
+                        let pre = self.prejudge_first_stores(body, &|e: &mut Self| {
+                            e.range_exit_test(var_idx, sl, el, inclusive);
+                            e.f.instructions().i32_eqz();
+                        });
                         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                         self.emit_det_charge_const(1);
                         self.range_exit_test(var_idx, sl, el, inclusive);
@@ -417,6 +427,7 @@ impl Emitter<'_> {
                             .br(0)
                             .end()
                             .end();
+                        self.drop_prejudged(pre);
                         self.drop_cow_flags(flags);
                         return Ok(());
                     }

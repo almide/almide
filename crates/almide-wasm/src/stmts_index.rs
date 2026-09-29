@@ -40,7 +40,10 @@ impl Emitter<'_> {
         let idx = self.locals[&target].0;
         let flag = self.cow_flag_of(target);
         let mut i = self.f.instructions();
-        if let Some(flag) = flag {
+        if self.cow_prejudged.contains(&target) {
+            // The loop's preheader already judged it (cow_hoist.rs).
+            i.local_get(idx).local_set(hb);
+        } else if let Some(flag) = flag {
             i.local_get(flag).i32_eqz().if_(BlockType::Empty);
             i.local_get(idx).call(cow).local_set(idx);
             i.i32_const(1).local_set(flag).end();
@@ -48,6 +51,25 @@ impl Emitter<'_> {
         } else {
             i.local_get(idx).call(cow).local_set(hb);
             i.local_get(hb).local_set(idx);
+        }
+    }
+
+    /// The element-slot judge of `target`, run early: a counting loop's
+    /// preheader (cow_hoist.rs, the pre-judge, #2980) judges the list its
+    /// first store would have judged, so it is this route's judge moved, and
+    /// the #2344 argument is this route's: lists are never pooled. An
+    /// enclosing loop's flag is honoured and set.
+    pub(crate) fn emit_prejudge_cow(&mut self, target: VarId) {
+        let (idx, declared) = self.locals[&target];
+        let cow = self.cow_fn_of(declared);
+        let flag = self.cow_flag_of(target);
+        let mut i = self.f.instructions();
+        if let Some(flag) = flag {
+            i.local_get(flag).i32_eqz().if_(BlockType::Empty);
+            i.local_get(idx).call(cow).local_set(idx);
+            i.i32_const(1).local_set(flag).end();
+        } else {
+            i.local_get(idx).call(cow).local_set(idx);
         }
     }
 
