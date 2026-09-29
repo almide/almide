@@ -37,22 +37,18 @@ impl IrVisitor for Scan {
                 self.captured.insert(*id);
             }
             IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
-                let mutates = matches!(
-                    (module.as_str(), func.as_str()),
-                    ("list", "push" | "pop" | "clear")
-                        | ("map", "insert" | "delete" | "clear")
-                        | ("string", "push" | "clear")
-                        // bytes' in-place writers were MISSING here: a
-                        // captured Bytes var mutated through them was never
-                        // cell-classified, took the env value-copy path, and
-                        // printed a silently wrong value (the develop
-                        // wasm_runtime catch at the commissioning switchover).
-                        | ("bytes", "push" | "set_at" | "set_f32_le" | "set_f64_le" | "fill" | "clear")
-                );
-                if mutates
-                    && let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind)
-                {
-                    self.mutated.insert(*id);
+                // Which args a stdlib call writes comes from the callee's
+                // DECLARATION (`mut` params), the source native's borrow
+                // inference and the shared optimizer read too. A hand list
+                // of mutators lived here and drifted twice: bytes' writers
+                // were missing (the develop wasm_runtime catch), and then
+                // every bytes writer but six still was — a captured Bytes
+                // written through `bytes.set_u8` took the env value-copy
+                // path and the write was lost (#2951).
+                for k in almide_ir::mut_args::stdlib_mut_positions(module.as_str(), func.as_str()).unwrap_or_default() {
+                    if let Some(IrExprKind::Var { id }) = args.get(k).map(|a| &a.kind) {
+                        self.mutated.insert(*id);
+                    }
                 }
             }
             _ => {}
@@ -130,5 +126,47 @@ impl crate::emitter::Emitter<'_> {
         let mut sc = Scan { locals: self.locals, params, out: Vec::new() };
         almide_ir::visit::IrVisitor::visit_expr(&mut sc, body);
         sc.out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use almide_types::types::Ty;
+
+    fn e(kind: IrExprKind) -> IrExpr {
+        IrExpr { kind, ty: Ty::Unknown, span: None, def_id: None }
+    }
+
+    /// The #2951 GATE, enumerated from the stdlib declarations rather than a
+    /// hand list: a var a closure captures and that ANY stdlib call writes
+    /// through a declared `mut` param gets a shared cell. The list this
+    /// replaced covered six of the fifty bytes writers.
+    #[test]
+    fn every_stdlib_mut_write_to_a_captured_var_makes_a_cell() {
+        let mut missed = Vec::new();
+        for (module, func, idxs) in almide_ir::mut_args::stdlib_mut_fns() {
+            let arity = idxs.iter().max().copied().unwrap_or(0) + 1;
+            let args: Vec<IrExpr> = (0..arity)
+                .map(|i| if i == idxs[0] { e(IrExprKind::Var { id: VarId(0) }) } else { e(IrExprKind::LitInt { value: 0 }) })
+                .collect();
+            let call = e(IrExprKind::Call {
+                target: CallTarget::Module { module: almide_base::intern::sym(module), func: almide_base::intern::sym(&func), def_id: None },
+                args,
+                type_args: vec![],
+            });
+            let lambda = e(IrExprKind::Lambda { params: vec![], body: Box::new(e(IrExprKind::Var { id: VarId(0) })), lambda_id: None });
+            let body = e(IrExprKind::Block {
+                stmts: vec![
+                    IrStmt { kind: IrStmtKind::Expr { expr: lambda }, span: None },
+                    IrStmt { kind: IrStmtKind::Expr { expr: call }, span: None },
+                ],
+                expr: None,
+            });
+            if !cell_vars_of(&body).contains(&VarId(0)) {
+                missed.push(format!("{module}.{func}"));
+            }
+        }
+        assert!(missed.is_empty(), "a captured var written through these got no cell: {missed:?}");
     }
 }
