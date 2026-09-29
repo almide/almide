@@ -61,5 +61,9 @@ effect fn main() -> Unit = {
       none => (),
     }
   }
+  for i in 0..<5 {
+    list.push(it.kids, i * 100)
+    let _ = list.pop(it.kids)
+  }
   println("${cell.memo} ${it.kids} ${total}")
 }
