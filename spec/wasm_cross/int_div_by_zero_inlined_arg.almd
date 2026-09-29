@@ -1,0 +1,24 @@
+// @contract: C-001
+// A division by zero handed to a parameter the callee never reads still aborts.
+// `pick` and `second` are small pure-scalar fns, the shape the wasm leg and the
+// v1 native render inline into their call sites. The inliner substitutes the
+// arguments for the params, so an argument bound to an unread param (or one
+// read only in the untaken branch) is never evaluated. It used to admit any
+// call-free argument, and `10 / z` is call-free, so the abort vanished on the
+// inlining legs and they printed 0 where the classic native codegen exited 1
+// (#2947). The admission rule is now almide_ir::speculation, the trap rules
+// native LICM also reads. The `second(1, 2)` line is the control: a safe
+// argument still inlines and answers.
+fn den(x: Int) -> Int = x - x
+
+fn pick(c: Bool, x: Int) -> Int = if c then x else 0
+
+fn second(x: Int, y: Int) -> Int = y
+
+fn main() -> Unit = {
+  println("before")
+  let z = den(7)
+  println(int.to_string(second(1, 2)))
+  println(int.to_string(pick(false, 10 / z)))
+  println("unreachable")
+}
