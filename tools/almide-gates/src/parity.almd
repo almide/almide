@@ -1,7 +1,7 @@
 // The verdict rule of `proofs/output-parity.sh` — the v1 trust-spine output-parity gate.
 //
 // Per fixture: run it through the v0 oracle (`almide run`), build it on the structural wasm
-// leg (`ALMIDE_WASM_STRUCTURAL=1 almide build --target wasm`, #2793 — the incumbent's
+// leg (`ALMIDE_WASM_SKIP_STOCK_AUDIT=1 almide build --target wasm`, #2793 — the incumbent's
 // `render_program` before), run the module under wasmtime, and compare. The six verdicts and
 // the ORDER of the tests are the whole content — the bash gets them right and the order is
 // load-bearing:

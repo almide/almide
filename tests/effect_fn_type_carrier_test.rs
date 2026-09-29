@@ -131,9 +131,9 @@ fn top_level_wrapped_router_runs_on_the_structural_leg() {
     let expected = "200 hi a b 1\n404 Not Found 1\n";
     for leg in ["native", "structural"] {
         let mut cmd = Command::new(&bin);
-        cmd.arg("run").arg(&src).env_remove("ALMIDE_WASM_STRUCTURAL");
+        cmd.arg("run").arg(&src).env_remove("ALMIDE_WASM_SKIP_STOCK_AUDIT");
         if leg == "structural" {
-            cmd.args(["--target", "wasm"]).env("ALMIDE_WASM_STRUCTURAL", "1");
+            cmd.args(["--target", "wasm"]).env("ALMIDE_WASM_SKIP_STOCK_AUDIT", "1");
         }
         let out = cmd.output().unwrap();
         let stderr = String::from_utf8_lossy(&out.stderr);

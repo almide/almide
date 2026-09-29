@@ -73,7 +73,7 @@ fn unbanged_fallible_fan_map_err_is_a_value_on_the_structural_leg() {
     assert_eq!(ncode, 0);
 
     let (wout, werr, wcode) = run(
-        Some(("ALMIDE_WASM_STRUCTURAL", "1")),
+        Some(("ALMIDE_WASM_SKIP_STOCK_AUDIT", "1")),
         &["run", "unbanged.almd", "--target", "wasm"],
         &d,
     );

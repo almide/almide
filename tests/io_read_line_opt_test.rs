@@ -55,7 +55,7 @@ effect fn main() -> Unit = {
 "#;
 
 /// The leg selector: "" native, else the wasm leg forced by its env flag.
-const LEGS: [(&str, &str); 2] = [("native", ""), ("structural", "ALMIDE_WASM_STRUCTURAL")];
+const LEGS: [(&str, &str); 2] = [("native", ""), ("structural", "ALMIDE_WASM_SKIP_STOCK_AUDIT")];
 
 fn run(program: &str, leg: (&str, &str), stdin: &str) -> String {
     let dir = tempfile::Builder::new().prefix("t2539").tempdir().expect("tempdir");

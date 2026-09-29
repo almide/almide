@@ -82,7 +82,7 @@ fn auto_import_endian_rows_build_on_the_wasm_leg() {
         if !ok_n || out_n != *want {
             failures.push(format!("{tag}: native: ok={ok_n} out={out_n:?} err={err_n}"));
         }
-        let (ok_s, out_s, err_s) = run_leg(&path, &[("ALMIDE_WASM_STRUCTURAL", "1")], true);
+        let (ok_s, out_s, err_s) = run_leg(&path, &[("ALMIDE_WASM_SKIP_STOCK_AUDIT", "1")], true);
         if !ok_s || out_s != *want {
             failures.push(format!("{tag}: structural: ok={ok_s} out={out_s:?} err={err_s}"));
         }

@@ -9,7 +9,7 @@
 //! incumbent WAT renderer this module used to fall back to is no longer
 //! reachable from any route (#2739, #1696 step 5).
 //!
-//! The env probe switches (`ALMIDE_WASM_STRUCTURAL` / `ALMIDE_COMPONENT_P3`
+//! The env probe switches (`ALMIDE_WASM_SKIP_STOCK_AUDIT` / `ALMIDE_COMPONENT_P3`
 //! / `ALMIDE_VERIFIED_DEBUG`) are read by the CLI and arrive here as
 //! [`RouteOptions`] fields; this module reads no environment, prints
 //! nothing, and exits nowhere. Every refusal is a [`RouteError`] the caller
@@ -32,9 +32,9 @@ pub struct RouteOptions {
     /// by a stock runtime). `false` is the `run` form: `main` required,
     /// every host op served by the embedded host.
     pub library: bool,
-    /// `ALMIDE_WASM_STRUCTURAL=1`: skip the stock-p1 op audit — the probe
+    /// `ALMIDE_WASM_SKIP_STOCK_AUDIT=1`: skip the stock-p1 op audit — the probe
     /// switch measures the EMITTER frontier, not stock service.
-    pub force_structural: bool,
+    pub skip_stock_audit: bool,
     /// `ALMIDE_COMPONENT_P3=1`: the build ships through the p3 transform,
     /// whose shim carries the fs surface — the stock-p1 op audit is skipped.
     pub component_p3: bool,
@@ -48,7 +48,7 @@ impl RouteOptions {
     pub fn from_env(library: bool) -> Self {
         RouteOptions {
             library,
-            force_structural: almide_base::env::flag("ALMIDE_WASM_STRUCTURAL"),
+            skip_stock_audit: almide_base::env::flag("ALMIDE_WASM_SKIP_STOCK_AUDIT"),
             component_p3: almide_base::env::flag("ALMIDE_COMPONENT_P3"),
             debug: almide_base::env::flag("ALMIDE_VERIFIED_DEBUG"),
         }
@@ -171,12 +171,12 @@ pub fn route_wasm(
     }
     // BUILD artifacts run on stock runtimes through to_wasi: an emitted host
     // op the p1 shim cannot serve would be a RUNTIME refusal there (the
-    // env.set lesson) — refuse at build time. Not under force_structural (the
+    // env.set lesson) — refuse at build time. Not under skip_stock_audit (the
     // switch probes the emitter frontier, not stock service), and not under
     // component_p3 (the p3 transform's shim carries the fs surface the p1 set
     // does not; an op it cannot map still fails loudly there).
     if library
-        && !opts.force_structural
+        && !opts.skip_stock_audit
         && !opts.component_p3
         && let Some(op) = host_ops.iter().find(|op| !almide_wasi::P1_SERVED_OPS.contains(op))
     {

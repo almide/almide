@@ -121,7 +121,7 @@ jobs:
 
       - name: Structural wasm differential fuzz (native == structural build)
         run: |
-          # PER-PR generative byte-match of the STRUCTURAL wasm leg (`ALMIDE_WASM_STRUCTURAL=1
+          # PER-PR generative byte-match of the STRUCTURAL wasm leg (`ALMIDE_WASM_SKIP_STOCK_AUDIT=1
           # almide build --target wasm` -> wasmtime, #2753 — it drove the incumbent's
           # render_program before). The
           # cross-target step above compares the two `almide test` lanes' VERDICTS per file, not
@@ -139,7 +139,7 @@ jobs:
       - name: Structural wasm output parity (fixtures, ratcheting baseline + wall ledger)
         run: |
           # FIXTURE byte-match of native `almide run` against the STRUCTURAL wasm leg
-          # (`ALMIDE_WASM_STRUCTURAL=1 almide build --target wasm` -> wasmtime, #2793 — it drove
+          # (`ALMIDE_WASM_SKIP_STOCK_AUDIT=1 almide build --target wasm` -> wasmtime, #2793 — it drove
           # the incumbent's render_program before) over spec/ (recursive), gated against a
           # ratcheting baseline (proofs/output-parity-baseline.txt) that can only GROW and an
           # equality-pinned wall ledger (proofs/output-parity-walled-baseline.txt, empty today).

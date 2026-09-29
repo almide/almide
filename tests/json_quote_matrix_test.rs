@@ -93,7 +93,7 @@ fn run_leg(target: &str) -> String {
     build
         .args(["build", source.to_str().expect("path"), "--target", target, "-o"])
         .arg(&artifact)
-        .env_remove("ALMIDE_WASM_STRUCTURAL")
+        .env_remove("ALMIDE_WASM_SKIP_STOCK_AUDIT")
         .env_remove("ALMIDE_COMPONENT_P3");
     let built = build.output().expect("build");
     assert!(built.status.success(), "{target} build:\n{}", String::from_utf8_lossy(&built.stderr));

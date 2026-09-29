@@ -22,7 +22,7 @@ the synthesizer cannot build a probe program for is an ERROR line and a
 non-zero exit — never a silent skip.
 
 The sweep is per-LEG (--leg, #1710 increment 2's vocabulary):
-  structural   ALMIDE_WASM_STRUCTURAL=1 build — the emitter frontier.
+  structural   ALMIDE_WASM_SKIP_STOCK_AUDIT=1 build — the emitter frontier.
   stock-p1     default `build --target wasm` (reroute included) — walls
                mean no build path serves the fn (the E081 set).
                (--default-routing is the legacy alias.)
@@ -599,10 +599,10 @@ def main():
         print(f"::error::unknown leg {leg!r}; swept legs are {', '.join(LEGS)}", file=sys.stderr)
         return 2
     if leg == "structural":
-        env = dict(os.environ, ALMIDE_WASM_STRUCTURAL="1")
+        env = dict(os.environ, ALMIDE_WASM_SKIP_STOCK_AUDIT="1")
     else:
         env = dict(os.environ)
-        env.pop("ALMIDE_WASM_STRUCTURAL", None)
+        env.pop("ALMIDE_WASM_SKIP_STOCK_AUDIT", None)
     # Measure the ground truth, not our own declaration (see
     # check_wasm_availability's escape).
     env["ALMIDE_NO_AVAIL_CHECK"] = "1"
