@@ -355,6 +355,18 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // the default) — so the allocation ledger sees a process that frees what
     // it allocated, not a leak by design.
     s.push_str(&format!("{vis}fn almide_stdout_finish() {{ almide_stdout_flush(); ALMIDE_STDOUT_BUF.with(|buf| {{ let _ = std::mem::replace(&mut *buf.borrow_mut(), std::io::BufWriter::with_capacity(0, std::io::stdout())); }}); drop(std::panic::take_hook()); }}\n"));
+    // The ONE runtime abort (#3022): `Error: <msg>\n` on stderr, then exit 1
+    // (the §13 termination convention). Every abort the runtime and the
+    // prelude macros raise goes through here, behind a process-wide once-guard:
+    // several `fan` / parallel-list workers can each reach an abort before the
+    // first one's `process::exit` lands, and each used to print its own line —
+    // the wasm leg runs the chunks one after another and prints one. The first
+    // caller prints, flushes its own thread's stdout buffer and exits; a later
+    // caller parks forever (the exit already in flight ends it) without
+    // printing, so exactly one line and the same exit code on every leg. The
+    // stderr write ignores its error: a panic here would leave the guard taken
+    // and turn the abort into a join panic (exit 101).
+    s.push_str(&format!("{vis}fn almide_abort(msg: impl std::fmt::Display) -> ! {{ static ALMIDE_ABORTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false); if ALMIDE_ABORTING.swap(true, std::sync::atomic::Ordering::SeqCst) {{ loop {{ std::thread::park(); }} }} {{ let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!(\"Error: {{}}\\n\", msg)); }} almide_stdout_flush(); std::process::exit(1) }}\n"));
     s.push_str(&format!("{vis}fn almide_stdout_write_fmt(args: std::fmt::Arguments<'_>, newline: bool) {{ ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_fmt(&mut *w, args); if newline {{ let _ = std::io::Write::write_all(&mut *w, b\"\\n\"); }} if almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
     s.push_str(&format!("{vis}fn almide_stdout_write_bytes(bytes: &[u8]) {{ ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_all(&mut *w, bytes); if almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_println {{ ($($arg:tt)*) => {{ $crate::almide_stdout_write_fmt(format_args!($($arg)*), true) }}; }}\n"));
@@ -367,8 +379,8 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // `deny(unconditional_panic)` never fires on a literal `10 / 0` and the diagnostic
     // is the runtime abort below — byte-identical to the §13 termination convention
     // (`Error: <msg>\n` + exit 1) and to the WASM div/mod trap.
-    s.push_str(&format!("{macro_attr}macro_rules! almide_div {{ ($a:expr, $b:expr) => {{{{ let (__a, __b) = ($a, $b); match __a.checked_div(__b) {{ Some(__v) => __v, None => {{ eprintln!(\"Error: {{}}\", if __b == 0 {{ \"division by zero\" }} else {{ \"integer overflow\" }}); std::process::exit(1); }} }} }}}}; }}\n"));
-    s.push_str(&format!("{macro_attr}macro_rules! almide_mod {{ ($a:expr, $b:expr) => {{{{ let (__a, __b) = ($a, $b); match __a.checked_rem(__b) {{ Some(__v) => __v, None => {{ eprintln!(\"Error: {{}}\", if __b == 0 {{ \"division by zero\" }} else {{ \"integer overflow\" }}); std::process::exit(1); }} }} }}}}; }}\n"));
+    s.push_str(&format!("{macro_attr}macro_rules! almide_div {{ ($a:expr, $b:expr) => {{{{ let (__a, __b) = ($a, $b); match __a.checked_div(__b) {{ Some(__v) => __v, None => {{ $crate::almide_abort(if __b == 0 {{ \"division by zero\" }} else {{ \"integer overflow\" }}); }} }} }}}}; }}\n"));
+    s.push_str(&format!("{macro_attr}macro_rules! almide_mod {{ ($a:expr, $b:expr) => {{{{ let (__a, __b) = ($a, $b); match __a.checked_rem(__b) {{ Some(__v) => __v, None => {{ $crate::almide_abort(if __b == 0 {{ \"division by zero\" }} else {{ \"integer overflow\" }}); }} }} }}}}; }}\n"));
     // almide_pow!: integer `^`. A CALL form, not `{left}.pow({right} as u32)`, for
     // two reasons that were both live divergences (#895):
     //   * PRECEDENCE — `-3i64.pow(2)` parses as `-(3.pow(2))` == -9, because Rust
@@ -386,16 +398,16 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // widening to i64, and rustc has a concrete receiver type for the
     // `wrapping_mul` below (a bare `1` literal is an ambiguous `{integer}` that
     // no method call can resolve).
-    s.push_str(&format!("{macro_attr}macro_rules! almide_pow {{ ($a:expr, $b:expr) => {{{{ let mut __b = $a; let __e0 = ($b) as i64; if __e0 < 0 {{ eprintln!(\"Error: negative exponent\"); std::process::exit(1); }} let mut __e = __e0 as u64; let mut __r = __b.pow(0); while __e > 0 {{ if __e & 1 == 1 {{ __r = __r.wrapping_mul(__b); }} __e >>= 1; if __e > 0 {{ __b = __b.wrapping_mul(__b); }} }} __r }}}}; }}\n"));
+    s.push_str(&format!("{macro_attr}macro_rules! almide_pow {{ ($a:expr, $b:expr) => {{{{ let mut __b = $a; let __e0 = ($b) as i64; if __e0 < 0 {{ $crate::almide_abort(\"negative exponent\"); }} let mut __e = __e0 as u64; let mut __r = __b.pow(0); while __e > 0 {{ if __e & 1 == 1 {{ __r = __r.wrapping_mul(__b); }} __e >>= 1; if __e > 0 {{ __b = __b.wrapping_mul(__b); }} }} __r }}}}; }}\n"));
     // almide_index!/almide_index_set!: bounds-checked `xs[i]` get/set that abort
     // with the UNIFIED message (`Error: index out of bounds\n` + exit 1), so a
     // native OOB index matches the wasm trap and the div/mod abort contract
     // (#554/C-072) instead of a raw Rust panic (exit 101). i64 index is range-
     // checked against len as usize; negative or >= len aborts.
-    s.push_str(&format!("{macro_attr}macro_rules! almide_index_ref {{ ($xs:expr, $i:expr) => {{{{ let (__xs, __i) = (&$xs, $i as i64); if __i < 0 || (__i as u64) >= __xs.len() as u64 {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }} &__xs[__i as usize] }}}}; }}\n"));
-    s.push_str(&format!("{macro_attr}macro_rules! almide_index {{ ($xs:expr, $i:expr) => {{{{ let (__xs, __i) = (&$xs, $i as i64); if __i < 0 || (__i as u64) >= __xs.len() as u64 {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }} __xs[__i as usize].clone() }}}}; }}\n"));
+    s.push_str(&format!("{macro_attr}macro_rules! almide_index_ref {{ ($xs:expr, $i:expr) => {{{{ let (__xs, __i) = (&$xs, $i as i64); if __i < 0 || (__i as u64) >= __xs.len() as u64 {{ $crate::almide_abort(\"index out of bounds\"); }} &__xs[__i as usize] }}}}; }}\n"));
+    s.push_str(&format!("{macro_attr}macro_rules! almide_index {{ ($xs:expr, $i:expr) => {{{{ let (__xs, __i) = (&$xs, $i as i64); if __i < 0 || (__i as u64) >= __xs.len() as u64 {{ $crate::almide_abort(\"index out of bounds\"); }} __xs[__i as usize].clone() }}}}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_list_get_ref {{ ($xs:expr, $i:expr) => {{ ($xs).get(($i) as usize) }}; }}\n"));
-    s.push_str(&format!("{macro_attr}macro_rules! almide_index_set {{ ($xs:expr, $i:expr, $v:expr) => {{{{ let __i = $i as i64; if __i < 0 || (__i as u64) >= $xs.len() as u64 {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }} $xs[__i as usize] = $v; }}}}; }}\n"));
+    s.push_str(&format!("{macro_attr}macro_rules! almide_index_set {{ ($xs:expr, $i:expr, $v:expr) => {{{{ let __i = $i as i64; if __i < 0 || (__i as u64) >= $xs.len() as u64 {{ $crate::almide_abort(\"index out of bounds\"); }} $xs[__i as usize] = $v; }}}}; }}\n"));
     // AlmideRcCow<T>: COW value type. Clone = Rc::clone (O(1)), mutation = Rc::make_mut (COW).
     // Inspired by Swift's value type semantics.
     s.push_str(&format!("{vis}struct AlmideRcCow<T>({vis}std::rc::Rc<T>);\n"));
