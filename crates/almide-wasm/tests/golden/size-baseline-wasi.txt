@@ -301,6 +301,7 @@
 9649	spec/wasm_cross/int_bit_family.almd
 1670	spec/wasm_cross/int_clamp_inverted.almd
 1626	spec/wasm_cross/int_div_by_zero.almd
+1739	spec/wasm_cross/int_div_by_zero_inlined_arg.almd
 1589	spec/wasm_cross/int_div_by_zero_literal.almd
 1832	spec/wasm_cross/int_div_mod_ok.almd
 1645	spec/wasm_cross/int_div_overflow.almd

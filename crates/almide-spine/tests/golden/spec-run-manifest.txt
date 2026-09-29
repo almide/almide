@@ -1,4 +1,4 @@
-# oracle: almide 0.65.1 (dev) at 794c1c139 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.65.1 (dev) at 6f4039a42 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -302,6 +302,7 @@ de6a1467813390ddad9db7d2b1996b8033164bc52db08c61e68d821eebc7c446	0	spec/wasm_cro
 25f178de20788fb4df0529ae4b44b507962c126cdc5acfb75353b7cb25b6be76	0	spec/wasm_cross/int_bit_family.almd
 875641fc1f530ff6dea523cadd3daada5895734d16bb449e11cae6d8a08f5f24	1	spec/wasm_cross/int_clamp_inverted.almd
 9160d4be34c8695bd172a76c7c7966587ea5a4d991ad22c87b2b91af54aa9ebb	1	spec/wasm_cross/int_div_by_zero.almd
+99e423c059886dbf5726c7f6e0be38a20b88248f206e45985316c60b844d3f66	1	spec/wasm_cross/int_div_by_zero_inlined_arg.almd
 9160d4be34c8695bd172a76c7c7966587ea5a4d991ad22c87b2b91af54aa9ebb	1	spec/wasm_cross/int_div_by_zero_literal.almd
 24f0543610937421fe77d10d2f53153713009a9aebae793b80ae66234054d9e4	0	spec/wasm_cross/int_div_mod_ok.almd
 9160d4be34c8695bd172a76c7c7966587ea5a4d991ad22c87b2b91af54aa9ebb	1	spec/wasm_cross/int_div_overflow.almd

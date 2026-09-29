@@ -23,8 +23,9 @@
 //     no heap-typed node anywhere;
 //   - the reduced expression stays under a node cap (duplication from a
 //     multiply-used `let`/param is bounded);
-//   - every ARGUMENT at the call site is CALL-FREE (a duplicated arg is
-//     re-evaluated — safe only when it cannot carry an effect or a count).
+//   - every ARGUMENT at the call site, and every dissolved `let` init, is
+//     SPECULATION-SAFE (`almide_ir::speculation`): no call and no runtime
+//     error, because substitution re-evaluates, delays or drops it (#2947).
 
 fn is_scalar_ty(ty: &Ty) -> bool {
     matches!(ty, Ty::Int | Ty::Float | Ty::Bool)
@@ -109,6 +110,13 @@ fn reduce_expr(
                     return None;
                 }
                 let init = reduce_expr(value, &env, budget)?;
+                // The `let` dissolves: its init is evaluated wherever the
+                // tail reads it — once, twice, in one branch, or never. Only a
+                // speculation-safe init may move like that; a trapping one
+                // (`a / b`, `xs[i]`, a call) keeps the call (#2947).
+                if !almide_ir::speculation::is_speculation_safe(&init) {
+                    return None;
+                }
                 env.insert(*var, init);
             }
             reduce_expr(tail, &env, budget)
@@ -196,10 +204,15 @@ pub fn inline_small_scalar_fns(program: &mut almide_ir::IrProgram) {
             if name.as_str() == self.exclude || args.len() != params.len() {
                 return;
             }
-            // Every argument must be CALL-FREE: a multiply-used param duplicates
-            // its argument, which must not re-run an effect or shift the caps
-            // count (hot-loop args are plain vars).
-            if args.iter().any(crate::lower::expr_contains_call) {
+            // Every argument must be SPECULATION-SAFE: a param read twice
+            // duplicates its argument, one read in a single branch or never
+            // read delays or drops it. So an argument may carry no call (an
+            // effect, or a caps-count shift) and no runtime error — `10 / z`
+            // or `xs[7]` handed to an unread param lost its division-by-zero
+            // or out-of-bounds error on the inlining legs only (#2947). The
+            // trap rules are `almide_ir::speculation`'s, shared with native
+            // LICM. Hot-loop args are plain vars.
+            if !args.iter().all(almide_ir::speculation::is_speculation_safe) {
                 return;
             }
             let env: HashMap<VarId, IrExpr> =
