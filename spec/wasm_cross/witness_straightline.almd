@@ -63,7 +63,7 @@ fn nest() -> Int = take(shed())
 
 fn greet(name: String) -> String = "hi " + name + tag("!")
 
-fn wrap(xs: List[Int]) -> Option[List[Int]] = some(xs)
+fn wrap(xs: List[Int]) -> List[Int]? = some(xs)
 
 fn main() -> Unit = {
   println("${list.len(shed())} ${tag("w")} ${pass([1])} ${bind_then_pass()}")
