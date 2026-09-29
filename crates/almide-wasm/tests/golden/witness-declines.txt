@@ -55,7 +55,7 @@ scan	3
 stmt:Assign	11
 stmt:BindDestructure	16
 stmt:Comment	164
-stmt:Expr:Block	77
+stmt:Expr:Block	81
 stmt:Expr:ForIn	53
 stmt:Expr:If	25
 stmt:Expr:Match	2
