@@ -841,116 +841,58 @@ fn foreign_import(bytes: &[u8]) -> Option<(String, String)> {
 /// `wasmtime`'s own exit code is propagated unchanged, so a guest
 /// `proc_exit(n)` surfaces as `n` exactly as a native binary's exit would.
 fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report: bool) -> i32 {
+    // #2752: the deterministic meter (ADR-0001 D5, the `time:` line) is
+    // native-only now — its wasm twin was the incumbent renderer's Σ-probe
+    // instrumentation, and the structural leg carries no charge trace.
+    // Refuse by name rather than print a report with half its line missing.
+    if time_report || almide_base::env::flag("ALMIDE_FUEL_PROBE") {
+        err("error: `--time-report` (the ALMIDE_FUEL_PROBE charge meter) is native-only: its deterministic meter has no wasm twin since the incumbent wasm renderer was retired (#2752)");
+        err(&format!("  hint: `almide run {file} --time-report` reports both times natively; `ALMIDE_WASM_ALLOC_COUNT=1 almide run {file} --target wasm` measures the wasm run's allocations"));
+        return 2;
+    }
     // `run` does not expose the `--emit-unverified` waiver: running a module that
     // failed the Perceus RC gate would silently execute leaky/double-freeing code,
     // so a verification failure is always a hard error here. The waiver is
     // build-only (you opt into shipping a known-bad artifact, not into running it).
-    let (bytes, structural, _host_ops) = match super::build::compile_to_wasm_bytes(file, false, verified, false, true) {
+    let (bytes, _host_ops) = match super::build::compile_to_wasm_bytes(file, false, verified, false, true) {
         Ok(b) => b,
         Err(()) => return 1,
     };
 
-    // Structural-leg modules import `almide.*` and execute on the EMBEDDED
-    // host — the exact host the 610/610 corpus acceptance measured (fs, env
-    // and stdin included), so `run --target wasm` reproduces the measured
-    // bytes without an external runtime. Program args stay unsupported on
-    // this leg the honest way: a program that READS them walls at emit.
-    if structural {
-        // #2275: a declared `@extern(wasm, ..)` import has no host here —
-        // say so, instead of wasmtime's "unknown import" at instantiation.
-        if let Some((module, name)) = foreign_import(&bytes) {
-            err(&format!(
-                "error: this program imports `{module}.{name}` (an `@extern(wasm, \"{module}\", \"{name}\")` declaration), and `almide run --target wasm` has no host for it\n  \
-                 hint: `almide build {file} --target wasm --host js` writes the module with a JS host next to it — run it under node or in a page, where `init({{ js: {{ {name} }} }})` serves the import"
-            ));
-            return 1;
-        }
-        let started = std::time::Instant::now();
-        return match almide_wasm_run::run_wasm_real_stdin_args(&bytes, program_args) {
-            Ok(r) => {
-                print!("{}", r.stdout);
-                eprint!("{}", r.stderr);
-                use std::io::Write as _;
-                let _ = std::io::stdout().flush();
-                if time_report {
-                    eprintln!("[almide] wall {} ms (embedded wasmtime)", started.elapsed().as_millis());
-                }
-                // ALMIDE_WASM_ALLOC_COUNT (#2407): the counters the armed
-                // module carried, in native's `__ALMD_ALLOC` line form.
-                if almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT") {
-                    match r.alloc_count {
-                        Some(c) => eprintln!(
-                            "__ALMD_WASM_ALLOC {c} heap_end={}",
-                            r.heap_end.map_or_else(|| "?".to_string(), |h| h.to_string())
-                        ),
-                        None => eprintln!("__ALMD_WASM_ALLOC absent (the module carries no counters)"),
-                    }
-                }
-                r.exit.clamp(0, 255)
-            }
-            Err(e) => {
-                err(&format!("error: embedded wasm host: {e}"));
-                1
-            }
-        };
-    }
-
-    // ALMIDE_WASM_ALLOC_COUNT (#2407) is a structural-leg instrument: the
-    // incumbent module below carries no counters, and the wasmtime CLI
-    // reads no globals — say so rather than print nothing.
-    if almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT") {
-        eprintln!("__ALMD_WASM_ALLOC absent (this program took the incumbent wasm leg, which carries no counters)");
-    }
-    // Stage the module under a per-INVOCATION temp name. A content hash alone
-    // is not enough: two concurrent `almide run`s of the same program stage
-    // the same bytes, and the first to finish removes the file the second is
-    // about to open ("failed to open wasm module"). The pid separates them.
-    let wasm_name = format!("almide-run-{:016x}-{}.wasm", hash64(&bytes), std::process::id());
-    let wasm_path = std::env::temp_dir().join(wasm_name);
-    if let Err(e) = std::fs::write(&wasm_path, &bytes) {
-        err(&format!("error: failed to stage wasm module {}: {}", wasm_path.display(), e));
+    // The module imports `almide.*` and executes on the EMBEDDED host — the
+    // exact host the corpus acceptance measured (fs, env and stdin
+    // included), so `run --target wasm` reproduces the measured bytes
+    // without an external runtime.
+    // #2275: a declared `@extern(wasm, ..)` import has no host here — say
+    // so, instead of wasmtime's "unknown import" at instantiation.
+    if let Some((module, name)) = foreign_import(&bytes) {
+        err(&format!(
+            "error: this program imports `{module}.{name}` (an `@extern(wasm, \"{module}\", \"{name}\")` declaration), and `almide run --target wasm` has no host for it\n  \
+             hint: `almide build {file} --target wasm --host js` writes the module with a JS host next to it — run it under node or in a page, where `init({{ js: {{ {name} }} }})` serves the import"
+        ));
         return 1;
     }
-
-    // Preopens per host (#1066) + `-S inherit-env=y`, which passes the host
-    // environment through WASI so `env.get` observes the SAME variables native
-    // `std::env::var` does (without it every guest lookup is none — a silent
-    // cross-target divergence). Program args go after the module path;
-    // wasmtime forwards them to the guest as argv.
-    let mut cmd = Command::new("wasmtime");
-    wasmtime_fs_args(&mut cmd);
-    cmd.arg("-S").arg("inherit-env=y");
-    // The guest resolves relative fs paths against ALMIDE_CWD (in preference
-    // to a possibly-stale inherited PWD — #874); `--env` overrides win over
-    // `inherit-env`, so this pins the real launcher cwd either way. On
-    // Windows `wasmtime_fs_args` already pinned the guest spelling (`.`);
-    // a host-absolute path here would shadow it with an unmatchable one.
-    if !cfg!(windows) {
-        if let Some(cwd) = almide_cwd() {
-            cmd.arg(format!("--env=ALMIDE_CWD={}", cwd));
+    match almide_wasm_run::run_wasm_real_stdin_args(&bytes, program_args) {
+        Ok(r) => {
+            print!("{}", r.stdout);
+            eprint!("{}", r.stderr);
+            use std::io::Write as _;
+            let _ = std::io::stdout().flush();
+            // ALMIDE_WASM_ALLOC_COUNT (#2407): the counters the armed
+            // module carried, in native's `__ALMD_ALLOC` line form.
+            if almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT") {
+                match r.alloc_count {
+                    Some(c) => eprintln!(
+                        "__ALMD_WASM_ALLOC {c} heap_end={}",
+                        r.heap_end.map_or_else(|| "?".to_string(), |h| h.to_string())
+                    ),
+                    None => eprintln!("__ALMD_WASM_ALLOC absent (the module carries no counters)"),
+                }
+            }
+            r.exit.clamp(0, 255)
         }
-    }
-    cmd.arg(&wasm_path).args(program_args);
-    if time_report {
-        // Wall time here includes wasmtime's own module compile (~ms scale) —
-        // honest for a "wall here" report, and the deterministic side is
-        // unaffected (it comes from the guest's own meter).
-        let code = run_with_time_report(cmd);
-        let _ = std::fs::remove_file(&wasm_path);
-        return code;
-    }
-    let status = cmd.status();
-    let _ = std::fs::remove_file(&wasm_path);
-    match status {
-        Ok(s) => s.code().unwrap_or(1),
         Err(e) => {
-            err(&format!(
-                "error: failed to run wasm module on wasmtime: {}\n  \
-                 in `almide run --target wasm {}`\n  \
-                 hint: the `wasmtime` CLI must be on PATH to execute wasm \
-                 (install: https://wasmtime.dev) — or run natively without --target",
-                e, file
-            ));
+            err(&format!("error: embedded wasm host: {e}"));
             1
         }
     }

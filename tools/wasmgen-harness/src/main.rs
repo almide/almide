@@ -30,7 +30,6 @@ fn main() {
     let modules = almide::wasm_route::ModuleSource::Provided(&bundled);
     match almide::wasm_route::render_wasm_routed("in.almd", &source, modules, opts) {
         Ok(routed) => {
-            assert!(routed.structural(), "force_structural must never hand back an incumbent module");
             let mut bytes = routed.bytes.clone();
             if let Ok(wasi) = routed.stock_wasi() {
                 bytes.extend_from_slice(&wasi);

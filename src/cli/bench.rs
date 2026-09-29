@@ -66,14 +66,10 @@ fn bench_native(file: &str, runs: u32) {
 }
 
 fn bench_wasm(file: &str, runs: u32) {
-    let (bytes, structural, _host_ops) = match super::build::compile_to_wasm_bytes(file, false, true, false, true) {
+    let (bytes, _host_ops) = match super::build::compile_to_wasm_bytes(file, false, true, false, true) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };
-    if !structural {
-        err("error: bench --target wasm needs the structural leg (this program routed to the incumbent artifact, which runs on an external wasmtime — time it there)");
-        std::process::exit(1);
-    }
     let run_once = move || -> Result<(Vec<u8>, f64), String> {
         let started = Instant::now();
         // No 30 s epoch watchdog: its loop-header checks are the harness's
