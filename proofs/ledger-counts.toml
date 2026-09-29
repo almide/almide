@@ -25,7 +25,6 @@ stdlib_modules             = 45
 spec_test_files            = 470
 scalar_read_arms           = 64
 scalar_read_unguarded      = 0
-wat_prelude_fns            = 63
 libm_sites                 = 5
 als_elements               = 73
 als_elements_unwritten     = 0

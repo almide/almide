@@ -36,10 +36,10 @@ main_repo="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
 ORG_DIR="${ALMIDE_ORG_DIR:-$(dirname "$main_repo")}"
 OUT="$work_root/docs/project/org-trust-status.md"
 BIN="$work_root/target/debug/examples/classify_corpus"
-RBIN="$work_root/target/debug/examples/render_program"
+RBIN="$work_root/target/debug/almide"
 
-echo "building classify_corpus + render_program…" >&2
-( cd "$work_root" && cargo build -q -p almide-mir --example classify_corpus --example render_program )
+echo "building classify_corpus + almide…" >&2
+( cd "$work_root" && cargo build -q -p almide-mir --example classify_corpus && cargo build -q --bin almide )
 
 # The repos verified by a real native==wasm byte-match (not just wall=0): the repo's OWN test suite
 # passes in full on BOTH `almide test --target native` and `almide test --target wasm`.
@@ -81,10 +81,12 @@ for d in "$ORG_DIR"/*/; do
     # functions wall. A mainless library dies with the "main is outside" ARTIFACT after every
     # function lowered — that is clean, not a wall. A frontend type-error rejection is counted
     # separately (a checker bug like #783, not a lowering wall).
-    if "$RBIN" "$f" > /dev/null 2> "$tmp/rerr"; then
+    # The wasm leg's own verdict (`almide check --target wasm`, the library
+    # form, so a main-less module is admitted); a wall prints one `wall:` line.
+    if "$RBIN" check "$f" --target wasm > /dev/null 2> "$tmp/rerr"; then
       res_ok=$((res_ok + 1))
     else
-      wl_n="$(grep -oE '^\[render_program\] [0-9]+ of [0-9]+ function' "$tmp/rerr" | grep -oE '[0-9]+' | head -1 || true)"
+      wl_n="$(grep -c '^wall: ' "$tmp/rerr" || true)"
       wl_n="${wl_n:-0}"
       if grep -q 'type errors' "$tmp/rerr"; then
         res_ffail=$((res_ffail + 1))

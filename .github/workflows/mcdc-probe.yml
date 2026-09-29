@@ -67,7 +67,7 @@ jobs:
           "$LB/llvm-cov" report $OBJS -instr-profile="$COV/all.profdata" --show-mcdc-summary \
             -ignore-filename-regex='(\.cargo|rustc|/tests?/|tests_part|examples/)' > mcdc-report.txt
           echo "== safety-set rows (…, MC/DC columns at the tail) =="
-          { head -2 mcdc-report.txt; grep -E 'perceus_verified|mir/src/certificate|translation_validation|check/calls\.rs|infer_calls_closures|pass_effect_inference|^TOTAL' mcdc-report.txt; } | tee mcdc-safety.txt
+          { head -2 mcdc-report.txt; grep -E 'perceus_verified|mir/src/certificate|check/calls\.rs|infer_calls_closures|pass_effect_inference|^TOTAL' mcdc-report.txt; } | tee mcdc-safety.txt
           "$LB/llvm-cov" show $OBJS -instr-profile="$COV/all.profdata" --show-mcdc \
             crates/almide-codegen/src/perceus_verified.rs > mcdc-perceus-detail.txt || true
       - uses: actions/upload-artifact@v7

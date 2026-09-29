@@ -32,7 +32,6 @@ SAFETY_SET = [
     "crates/almide-mir/src/certificate_b_tail.rs",
     "crates/almide-mir/src/certificate_c.rs",
     "crates/almide-mir/src/certificate_p2.rs",
-    "crates/almide-mir/src/translation_validation.rs",
     "crates/almide-frontend/src/check/calls.rs",
     "crates/almide-frontend/src/check/infer_calls_closures.rs",
     "crates/almide-codegen/src/pass_effect_inference.rs",
