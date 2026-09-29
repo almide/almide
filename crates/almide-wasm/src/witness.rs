@@ -238,6 +238,11 @@ impl WitnessRecorder {
         self.branches.close(&mut self.log);
     }
 
+    /// A local's credit moves without a share (#2757).
+    pub fn move_local(&mut self, local: u32) -> bool {
+        self.held_ops(local, "m")
+    }
+
     /// A droppable Var argument at a call site: the site's `rc_inc` is
     /// the share (`a`), and the credit moves into the callee (`m`).
     pub fn arg_share_move(&mut self, local: u32) -> bool {

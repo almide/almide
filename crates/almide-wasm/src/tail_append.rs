@@ -53,7 +53,7 @@ impl Emitter<'_> {
         self.f.instructions().call(F_STR_APPEND);
         // The credit MOVES through the helper — one in, one out — which is
         // what a moved param records, not a freshly born block.
-        self.witness_arg(left, want);
+        self.witness_arg_moved(left, want);
         self.tail_consumed.insert(idx);
         Ok(true)
     }
@@ -103,7 +103,7 @@ impl Emitter<'_> {
         self.rc_share_guard(elem, el);
         let push = if el.slot_size() == 8 { F_LIST_PUSH_8 } else { F_LIST_PUSH_4 };
         self.f.instructions().call(push);
-        self.witness_arg(left, want);
+        self.witness_arg_moved(left, want);
         self.tail_consumed.insert(idx);
         Ok(true)
     }

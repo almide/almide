@@ -24,7 +24,7 @@ use almide_ir::{IrExpr, IrExprKind, IrStmtKind};
 /// (`im` into an owned param or a payload slot, `id` when parked for a
 /// borrowed one), a payload store is `witness_store`, a nested bind is the
 /// Bind hook, and a concat reads its operands without a credit.
-pub fn straightline_subset(body: &IrExpr, ret_is_heap: bool, self_name: &str) -> Option<String> {
+pub fn straightline_subset(body: &IrExpr, ret_is_heap: bool) -> Option<String> {
     // `fn f(x) = expr` lowers exactly like `{ expr }`: a bare body is the
     // empty-statement block with that tail (B1: the tail-call and
     // literal-tail fns are almost all written this way).
@@ -42,15 +42,13 @@ pub fn straightline_subset(body: &IrExpr, ret_is_heap: bool, self_name: &str) ->
         // unrecorded RC sites.
         None | Some(IrExprKind::Unit) if !ret_is_heap => None,
         None => Some("tail:Unit-heap".into()),
-        // A SELF tail call is loop-converted (tco.rs): the frame is not
-        // replaced, the params are rebound by the loop-back and released
-        // again by the epilogue — a loop, not a straight line. Out of
-        // subset (the recorder is not loop-aware).
-        Some(IrExprKind::Call { target: almide_ir::CallTarget::Named { name }, .. })
-            if name.as_str() == self_name =>
-        {
-            Some("tail:self-call-loop".into())
-        }
+        // A SELF tail call is loop-converted (tco.rs) — and certified as
+        // what it means (#2757): the next activation of this frame. The
+        // exit plan releases the params, the arguments move into the next
+        // activation's params (the callee-owned convention), and each owner
+        // local the loop-back carries is released by its next rebind or
+        // the epilogue (`WitnessRecorder::loop_back`). It is an ordinary
+        // tail call to the gate.
         // A scalar literal is no heap tail at all.
         Some(IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. } | IrExprKind::LitFloat { .. })
             if ret_is_heap =>
@@ -59,15 +57,15 @@ pub fn straightline_subset(body: &IrExpr, ret_is_heap: bool, self_name: &str) ->
         }
         // A block tail: its statements join the frame's straight line, its
         // value is the tail's (rc_tail — the func.rs hooks read through it).
-        Some(IrExprKind::Block { .. }) => straightline_subset(expr?, ret_is_heap, self_name),
+        Some(IrExprKind::Block { .. }) => straightline_subset(expr?, ret_is_heap),
         // #2756: a branch in tail position — each arm is a tail of its own
         // (a self call in an arm is the loop form, declined there).
         Some(IrExprKind::If { cond, then, else_ }) => value_subset(cond)
             .map(|w| w.at("if-cond"))
-            .or_else(|| straightline_subset(then, ret_is_heap, self_name))
-            .or_else(|| straightline_subset(else_, ret_is_heap, self_name)),
+            .or_else(|| straightline_subset(then, ret_is_heap))
+            .or_else(|| straightline_subset(else_, ret_is_heap)),
         Some(IrExprKind::Match { subject, arms }) => match_head_subset(subject, arms).or_else(|| {
-            arms.iter().find_map(|a| straightline_subset(&a.body, ret_is_heap, self_name))
+            arms.iter().find_map(|a| straightline_subset(&a.body, ret_is_heap))
         }),
         Some(_) => value_subset(expr?).map(|w| w.at("tail")),
     }
