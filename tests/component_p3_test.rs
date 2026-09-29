@@ -844,6 +844,73 @@ effect fn main() -> Unit = {{
     );
 }
 
+/// #2955: a response body that arrives AFTER the headers — the shape a
+/// real server produces whenever the body is not in the header segment.
+/// The shim used to drop the request's transmit-result future right after
+/// `send`; wasmtime 49 ties the connection driver to it, so a late body
+/// came back empty (Linux CI saw `get:` / `put:` from the echo server,
+/// whose one `write!` the kernel may split). The server here makes the
+/// split deterministic: headers, a pause, then the body in pieces.
+#[test]
+fn p3_component_reads_a_body_that_arrives_after_the_headers() {
+    use std::io::{BufRead, BufReader};
+    let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind late-body server");
+    let addr = l.local_addr().expect("local addr");
+    std::thread::spawn(move || {
+        for conn in l.incoming() {
+            let Ok(c) = conn else { break };
+            let mut r = BufReader::new(c);
+            let mut line = String::new();
+            while r.read_line(&mut line).is_ok_and(|n| n > 2) {
+                line.clear();
+            }
+            let mut c = r.into_inner();
+            let body = "late body, three pieces";
+            let _ = write!(c, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+            let _ = c.flush();
+            for piece in [&body[..5], &body[5..11], &body[11..]] {
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                let _ = c.write_all(piece.as_bytes());
+                let _ = c.flush();
+            }
+        }
+    });
+    let program = format!(
+        r#"import http
+
+effect fn main() -> Unit = {{
+  match http.get("http://{addr}/late") {{
+    ok(b) => println("get:${{b}}"),
+    err(e) => println("get-err:${{e}}"),
+  }}
+  match http.get_status("http://{addr}/late") {{
+    ok((c, t)) => println("gets:${{c}}:" + t),
+    err(e) => println("gets err:" + e),
+  }}
+}}
+"#
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let src = dir.path().join("late_body.almd");
+    std::fs::write(&src, program).expect("write probe");
+    let out = dir.path().join("late_body.wasm");
+    let stderr = build_p3(&src, &out);
+    assert!(out.exists(), "p3 late-body build produced no artifact:\n{stderr}");
+    if !wasmtime_available() {
+        eprintln!("skipping p3 late-body execution: wasmtime not installed");
+        return;
+    }
+    let Some((stdout, stderr, code)) = run_p3_http(&out) else {
+        return;
+    };
+    assert_eq!(code, 0, "p3 late-body probe exit code; stderr:\n{stderr}");
+    assert_eq!(
+        stdout,
+        "get:late body, three pieces\ngets:200:late body, three pieces\n",
+        "p3 late-body probe stdout (an empty body = the response stream ended before the body arrived); stderr:\n{stderr}"
+    );
+}
+
 /// #1710 PR B, the framed family on the p3 component: `request` /
 /// `request_status` / `get_status` / `request_bytes` / `get_bytes` ride
 /// the same async-lowered exchange (ops 48..=50). The frame the guest
