@@ -94,6 +94,8 @@ impl Emitter<'_> {
                     if callee_owned {
                         let dec = self.dec_fn_of(got);
                         self.f.instructions().local_get(h).call(dec);
+                        // #2758: a fresh callee value is born and released here.
+                        self.witness_discard();
                     }
                 }
                 self.release_i32();

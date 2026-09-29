@@ -137,6 +137,10 @@ effect fn stash_both(a: String, b: String) -> Int = {
 // a view of the env.
 fn adder(xs: List[Int]) -> (List[Int]) -> Int = (ys) => list.len(ys) + list.len(xs)
 
+// #2758: a CLOSURE CALL (`call_indirect`): the Fn value is lent to the
+// lifted body; the list shares into its callee-owned param (`am`).
+fn apply_len(f: (List[Int]) -> Int, xs: List[Int]) -> Int = f(xs)
+
 effect fn main() -> Unit = {
   println("${list.len(shed())} ${tag("w")} ${pass([1])} ${bind_then_pass()}")
   println("${discard([1, 2])} ${stamp(7)} ${shout("w")}")
@@ -147,5 +151,5 @@ effect fn main() -> Unit = {
   println(stash("e")!)
   println("${stash_len("ab")!} ${stash_both("a", "bc")!}")
   let plus = adder([1, 2])
-  println("${plus([3])}")
+  println("${plus([3])} ${apply_len(plus, [4, 5])}")
 }
