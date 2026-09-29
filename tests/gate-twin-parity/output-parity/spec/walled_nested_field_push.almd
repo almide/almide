@@ -1,0 +1,14 @@
+// The WALL row: the oracle runs it and the structural wasm leg declines it — a mut op
+// through a DEEPER field path (`o.inner.xs`) is `list-push-nonvar`: the var-only arms route
+// only `h.f` through the copy-on-write field write, and refuse the deeper path on purpose
+// (list_mut.rs; tests/wasm_both_legs_e082_test.rs pins the same refusal). A lifted wall
+// turns this into a match on both sides and the ledger rows the parity test forges into
+// STALE on both; the comparison does not care which.
+type Inner = { xs: List[Int] }
+type Outer = { inner: Inner }
+
+fn main() -> Unit = {
+  var o = Outer { inner: Inner { xs: [1] } }
+  list.push(o.inner.xs, 2)
+  println("${list.len(o.inner.xs)}")
+}

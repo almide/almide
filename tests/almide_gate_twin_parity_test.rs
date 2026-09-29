@@ -322,7 +322,7 @@ fn the_output_parity_twin_answers_what_the_shell_gate_answers() {
     std::fs::write(
         &ledger,
         format!(
-            "# forged\n{corpus}/walled_string_clear_field.almd :: string-clear-nonvar :: #2747\n"
+            "# forged\n{corpus}/walled_nested_field_push.almd :: list-push-nonvar :: #2747\n"
         ),
     )
     .expect("write forged wall ledger");
@@ -404,7 +404,7 @@ fn the_output_parity_twin_answers_what_the_shell_gate_answers() {
     let bad_ledger = scratch("ledger-forged-walled.txt");
     std::fs::write(
         &bad_base,
-        format!("{corpus}/hello_match.almd\n{corpus}/walled_string_clear_field.almd\n"),
+        format!("{corpus}/hello_match.almd\n{corpus}/walled_nested_field_push.almd\n"),
     )
     .expect("write ledger-forged baseline");
     std::fs::write(
@@ -415,7 +415,7 @@ fn the_output_parity_twin_answers_what_the_shell_gate_answers() {
     let env = env_with(&bad_base, &bad_ledger);
     let original = run_env("bash", &["proofs/output-parity.sh"], &env);
     for needle in [
-        "walled_string_clear_field.almd walls on the structural leg with no row in",
+        "walled_nested_field_push.almd walls on the structural leg with no row in",
         "hello_match.almd has a row in",
         "but no longer walls — STALE",
         "both a must-match baseline row and a wall-ledger row",
