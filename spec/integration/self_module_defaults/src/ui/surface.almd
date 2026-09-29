@@ -1,0 +1,18 @@
+// A surface description whose options are this module's own enums, each with a
+// default: the shape a library gives a call with many optional settings, so a
+// caller names the ones it sets (`keyboard: surface.Exclusive`) and a value in
+// the wrong slot is a type error rather than a wrong number.
+type Layer = | Background | Bottom | Top | Overlay
+
+type Keys = | NoKeys | Exclusive | OnDemand
+
+let DEFAULT_MARGIN = 0
+
+fn default_height() -> Int = 30
+
+fn describe(name: String, layer: Layer = Top, keyboard: Keys = NoKeys,
+            height: Int = default_height(), margin: Int = DEFAULT_MARGIN) -> String = {
+  let l = match layer { Background => "background", Bottom => "bottom", Top => "top", Overlay => "overlay" }
+  let k = match keyboard { NoKeys => "no-keys", Exclusive => "exclusive", OnDemand => "on-demand" }
+  "${name} ${l} ${k} h${int.to_string(height)} m${int.to_string(margin)}"
+}
