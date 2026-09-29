@@ -8,8 +8,8 @@
 // is stripped where a `!`, `?` or `??` names it. The fallible-HOF lambda has no
 // such node (the checker drops the `!` so the lambda returns the carrier), and
 // the pass that puts `ok(..)` back around a raw call in a Result position only
-// knew the lifted fns that do not declare an Option. The incumbent leg
-// (ALMIDE_WASM_INCUMBENT=1) then read the Option block with the Result layout:
+// knew the lifted fns that do not declare an Option. The (since retired) incumbent leg
+// then read the Option block with the Result layout:
 // filter_map over `Int?` trapped in rc_dec, over `String?` printed empty strings
 // with exit 0, over a record printed garbage, and map over `Int?` never
 // returned. Native and the structural leg were right throughout.

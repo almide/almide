@@ -4,9 +4,8 @@ Almide emits WebAssembly **directly** — no LLVM, no Cranelift, no wasm-bindgen
 and no compiled standard-library object code inside the module. Since the
 commissioning (#1599) there are **two verified renderers**: the **structural
 leg** (crates/almide-wasm, wasm-encoder, the default `--target wasm` path) and
-the **incumbent v1 leg** (the certified MIR→WAT renderer, reachable with
-`ALMIDE_WASM_INCUMBENT=1` and as the automatic reroute for shapes the
-structural leg declines). This document dissects real modules from BOTH legs
+the **incumbent v1 leg** (the certified MIR→WAT renderer; no route reaches it
+since #2752, and the measurements below that name it are historical). This document dissects real modules from BOTH legs
 byte by byte and states exactly what the size claims mean.
 
 The headline Hello, world bytes are CI-derived: `docs/benchmarks/wasm-size.txt`
@@ -303,7 +302,6 @@ ledger edit). CI runs it in the `checks` job.
 printf 'fn main() -> Unit = {\n  println("Hello, world!")\n}\n' > hello.almd
 almide build hello.almd --target wasm -o hello.wasm                    # structural, verified
 almide build hello.almd --target wasm --wasm-opt -o hello.min.wasm     # structural, -Oz
-ALMIDE_WASM_INCUMBENT=1 almide build hello.almd --target wasm -o hello_v1.wasm
 wasm-objdump -h hello.wasm                                             # the section tables above
 
 # Rust (same target, full size profile — 2026-07-23 numbers)

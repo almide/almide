@@ -76,12 +76,9 @@ and serves as the cross-target oracle / executable spec.
     whose instruction set is pinned to this emitter's;
     `tests/wasm_vm_parity_test.rs` holds it equal to the stock runtime on
     every fixture and to native on every Critical-profile one.
-  - the **incumbent WAT trust-spine**: `almide-mir` renders WAT, the CLI
-    assembles it with `wat` and strips local names. Routed for main-less
-    library modules (#881), dependency-package and `import self` projects
-    (#1596), host-variant BUILD artifacts, and `ALMIDE_FUEL_PROBE`
-    instrumentation; `ALMIDE_WASM_INCUMBENT=1` forces it (the reversible
-    switch, kept for one release).
+  - the **incumbent WAT trust-spine**: `almide-mir` renders WAT. No route
+    reaches it since #2752 — a program the structural leg declines is a hard
+    E082 wall, never a fallback — and its deletion is #2761.
   Every `ALMIDE_*` switch the tree reads — the forced routes here, the gate
   bypasses, the ablations, the trace channels — is one registry,
   `almide_base::env::SWITCHES` (`almide switches` lists it; `docs/specs/cli.md`
@@ -246,7 +243,7 @@ Which leg runs what:
 | native, v1 MIR render | `almide run`/`build` default (`--verified`), where `almide-mir` lowers | `link_ir` | almide-mir native rung (table D, the native rows) |
 | native, codegen v3 | `almide test` (native), and the fallback on a v1 native wall; `--target rust` emit; `--target wasm32`/`wasi` | `link_ir` | almide-codegen nanopass pipeline, Rust arm (table B) |
 | `--target wasm`, structural (default) | `src/wasm_leg.rs` → `almide-wasm::emit_program` | `link_ir` | almide-wasm emitter rewrites (table C) |
-| `--target wasm`, incumbent (retiring, #1696) | library modules, dependency projects, `ALMIDE_WASM_INCUMBENT=1`, structural wall reroute | `link_ir` | almide-mir wasm rung + WAT-level passes (table D) |
+| `--target wasm`, incumbent (unreachable since #2752, deleted by #2761) | none — no route reaches it | `link_ir` | almide-mir wasm rung + WAT-level passes (table D) |
 | `--target wgsl` | `almide-codegen::emit_wgsl` | `link_ir` | almide-codegen nanopass pipeline, Wgsl arm (table B, 4 passes) |
 | interp (oracle) | `almide-interp` | `link_ir` | none — by design |
 
