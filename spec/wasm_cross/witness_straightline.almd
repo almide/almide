@@ -110,11 +110,17 @@ fn drain(n: Int) -> Int = {
   seen
 }
 
-fn main() -> Unit = {
+// #2758: an EFFECT frame — the body lowers at the raw ok type, the borrowed
+// param is shared into the ok carrier's slot (`am`) and the carrier is born
+// and moves out (`im`).
+effect fn stash(name: String) -> String = name
+
+effect fn main() -> Unit = {
   println("${list.len(shed())} ${tag("w")} ${pass([1])} ${bind_then_pass()}")
   println("${discard([1, 2])} ${stamp(7)} ${shout("w")}")
   say("hi")
   println("${nest()} ${greet("w")} ${list.len(wrap([1, 2]) ?? [])}")
   println("${pick([1], true)} ${pick([2], false)} ${label(some(1), "a")} ${label(none, "b")}")
   println("${count_down([1, 2, 3], 4)} ${tally([1], ["a", "bb"])} ${drain(3)}")
+  println(stash("e")!)
 }
