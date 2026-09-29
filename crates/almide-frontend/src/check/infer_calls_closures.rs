@@ -205,7 +205,11 @@ impl Checker {
         let ExprKind::Block { stmts, expr, .. } = &mut expr.kind else { unreachable!() };
         self.env.push_scope();
         self.check_stmts_scoped(stmts, expr.as_deref());
-        let ty = if let Some(e) = expr { self.infer_expr(e) } else { Ty::Unit };
+        let expect = self.expr_expect.clone();
+        let ty = if let Some(e) = expr {
+            self.tail_expect = expect;
+            self.infer_expr(e)
+        } else { Ty::Unit };
         self.env.pop_scope();
         ty
     }

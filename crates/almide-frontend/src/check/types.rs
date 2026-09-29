@@ -51,6 +51,33 @@ pub enum FixHint {
     /// callback's `!` erased into its `String` channel (#2722): the erased
     /// type and that `!`'s span, reported when the arm's slot is that type.
     ErrArmErased { erased: Ty, at: Option<crate::ast::Span> },
+    /// A match arm / if branch reported against the PEER that fixed the
+    /// join's type (#2927). `anchor` is where that peer is; `declared` is
+    /// the type the construct had to produce when the peer was chosen
+    /// because it agrees with it (the fn's declared return), `None` when
+    /// the peer was chosen only for being first. `bang` is the span and text of an
+    /// un-`!`ed Result call wrapped in `ok(..)` / `some(..)` inside the
+    /// blamed branch — the ADR-0008 missing `!`.
+    ArmBlame {
+        anchor: Option<crate::ast::Span>,
+        declared: Option<Ty>,
+        bang: Option<(crate::ast::Span, String)>,
+        /// The blamed peer's own type, shown against `declared`: the join
+        /// compares effect-fn peers with their `Result` stripped, which is
+        /// not the type the declared return is compared with.
+        real: Ty,
+    },
+}
+
+/// The type an expression in TAIL position must produce (#2927): set for a
+/// fn body from its declared return, and carried into a block's tail, a
+/// match's arms and an if's branches. `effect_body` accepts the effect-fn
+/// leniency `constrain_effect_body` applies (a bare `T` for `Result[T, E]`,
+/// a `Result[T, _]` for a plain `T`).
+#[derive(Debug, Clone)]
+pub(crate) struct TailExpect {
+    pub ty: Ty,
+    pub effect_body: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

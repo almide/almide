@@ -463,13 +463,24 @@ impl Checker {
             generics.as_ref().map(|gs| gs.iter().map(|g| sym(&g.name)).collect()).unwrap_or_default(),
         ));
         self.expect_lambda(body, &ret_ty);
-        let body_ity = self.infer_expr(body);
-        self.current_fn = prev_fn;
-        self.check_return_width(name, &ret_ty, &body_ity, body, is_effect);
         // ADR-0002 Phase 1b (#1103): a `-> T!` fn's body gets the SAME
         // value-tail acceptance an effect fn's lifted body has — the
         // lowering wraps the T-typed exits in ok(...).
         let fallible_marker = matches!(return_type, ast::TypeExpr::Generic { name: g, .. } if g.as_str() == "!");
+        // #2927: the declared return is the body's tail expectation, so a
+        // match / if in tail position reports the peer that disagrees with it.
+        self.tail_expect = Some(types::TailExpect {
+            ty: ret_ty.clone(),
+            effect_body: effect.unwrap_or(false) || fallible_marker,
+        });
+        let body_ity = self.infer_expr(body);
+        self.current_fn = prev_fn;
+        self.check_return_width(name, &ret_ty, &body_ity, body, is_effect);
+        // #2927: the body-vs-return mismatch is reported at the value that
+        // fixed the body's type (a block's tail, the anchoring arm), not at
+        // wherever inference happened to end — the last arm's last leaf.
+        let saved_span = self.current_span;
+        self.current_span = arm_blame::tail_report_span(body).or(saved_span);
         if effect.unwrap_or(false) || fallible_marker {
             self.constrain_effect_body(name, &ret_ty, body_ity, body);
         } else {
@@ -478,6 +489,7 @@ impl Checker {
             let hint = trailing_let_name(body).map(FixHint::LastLetName);
             self.constrain_with_hint(ret_ty, body_ity, format!("fn '{}'", name), hint);
         }
+        self.current_span = saved_span;
         self.env.current_ret = prev.0; self.env.can_call_effect = prev.1; self.env.auto_unwrap = prev.2; self.env.lambda_depth = prev.3;
         self.exit_generics(generics, shadowed_generics);
         self.env.mutable_vars = outer_mutable;

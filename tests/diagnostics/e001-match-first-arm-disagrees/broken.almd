@@ -1,0 +1,9 @@
+// #2927: the first arm disagrees with the declared return; it is the arm
+// reported, not the two correct arms that follow.
+fn label(n: Int) -> String = match n {
+  0 => 0,
+  1 => "one",
+  _ => "many",
+}
+
+fn main() -> Unit = println(label(0))
