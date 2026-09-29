@@ -90,7 +90,7 @@ impl Emitter<'_> {
         // innermost-first.
         let mut holds = vec![hb];
         for &(_, fty, off) in &steps[..steps.len() - 1] {
-            let parent = *holds.last().unwrap();
+            let parent = holds[holds.len() - 1];
             let h = self.hold_i32()?;
             let copy = self.copy_fn_of(fty);
             self.f.instructions().local_get(parent).i32_load(slot_memarg(off)).call(copy).local_set(h);
@@ -100,8 +100,8 @@ impl Emitter<'_> {
             }
             holds.push(h);
         }
-        let (_, fty, off) = *steps.last().unwrap();
-        let hl = *holds.last().unwrap();
+        let (_, fty, off) = steps[steps.len() - 1];
+        let hl = holds[holds.len() - 1];
         self.f.instructions().local_get(hl);
         // The replaced field's credit goes with it (stage 2c-ii).
         if let Some(dec) = self.elem_is_handle(fty).then(|| self.dec_fn_of(fty)) {
