@@ -72,7 +72,7 @@
 # originals — joined the twin parity test in #2163 and both ceilings are 0.
 #
 # unverified_ceiling = "0"
-# unclassified_reads_ceiling = "81"
+# unclassified_reads_ceiling = "79"
 # unwired_ceiling = "2"
 # unvaried_ceiling = "0"
 #
@@ -208,15 +208,6 @@ class = "NEGATIVE_TESTED"
 evidence = "PR #1185 (Stage 1 landing): unclassified/stale/UNGUARDED negative cases demonstrated to fail"
 measures = "symmetric difference between raw-memory-read fns in crates/almide-mir/src/lower/ and the verdict rows of proofs/scalar-read-audit.toml, plus the UNGUARDED count"
 varies = "PR #1185 (Stage 1 landing): an unclassified fn, a stale row and an UNGUARDED verdict each read as a non-zero difference on a tree that reads 0"
-
-[[gate]]
-path = "scripts/check-wat-prelude-audit.sh"
-reads = "UNCLASSIFIED"
-wired_by = ".github/workflows/ci.yml, lefthook.yml"
-class = "NEGATIVE_TESTED"
-evidence = "PR #1209 (Stage 1c landing): 5/5 negative tests (unclassified fn, stale row, digest drift, missing via, UNREACHED)"
-measures = "symmetric difference between the `(func $…)` names of the hand-written WAT prelude and the rows of proofs/wat-prelude-audit.toml, plus digest drift and UNREACHED rows"
-varies = "PR #1209 (Stage 1c landing): an unclassified fn, a stale row, a digest drift, a missing via and an UNREACHED row each read as one finding on a tree that reads none"
 
 [[gate]]
 path = "scripts/check-ratchet-separation.sh"
@@ -373,15 +364,6 @@ class = "NEGATIVE_TESTED"
 evidence = "#1244 round 2: effectful module 'fs' forged into PURE_MODULES demonstrated to fail with the accept-but-unsafe rationale; restored green"
 measures = "the set of modules in purity.rs::PURE_MODULES whose stdlib source reaches a host capability, re-derived from stdlib/*.almd"
 varies = "#1244 round 2: `fs` forged into PURE_MODULES read as one effectful module; the clean tree reads none"
-
-[[gate]]
-path = "proofs/check-wasm-bytes.sh"
-reads = "UNCLASSIFIED"
-wired_by = "proofs/check-structural-bytes.sh, proofs/check-wasm-exec.sh, proofs/check.sh"
-class = "NEGATIVE_TESTED"
-evidence = "#1244 round 5: the forge was in the SHIPPING RENDERER, not the proof — rc_inc's `(i32.const 1)` bumped to 2 in render_wasm_p3.rs gave 'FAIL rc_inc: the RENDERER'S bytes do not match WasmEncode.rc_inc_bytes', and deleting rc_dec's double-free sentinel line gave 'FAIL rc_dec: ... do not match WasmExec.rc_dec_bytes — drift'; restored green"
-measures = "byte equality of the .v rc_inc / rc_dec lists, wat2wasm's assembly of the WAT, and the renderer's own emitted $rc_inc / $rc_dec bodies"
-varies = "#1244 round 5: rc_inc's `(i32.const 1)` -> 2 in render_wasm_p3.rs read as a renderer-vs-WasmEncode diff; equal when restored"
 
 [[gate]]
 path = "proofs/check-wasm-exec.sh"
