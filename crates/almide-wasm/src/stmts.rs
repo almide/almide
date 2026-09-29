@@ -14,6 +14,17 @@ mod stmts_loop;
 
 impl Emitter<'_> {
     /// Statement position: Unit-typed shapes only (blocks, calls, control).
+    /// `continue` / `break` in statement position: a branch to the loop
+    /// context's continue label (`break` adds the depth to its exit).
+    fn lower_loop_jump(&mut self, brk: bool) -> Result<(), EmitError> {
+        let Some((extra, delta)) = self.loop_ctl else {
+            return unsup(if brk { "expr:Break" } else { "expr:Continue" });
+        };
+        self.f.instructions().br(if brk { extra + delta } else { extra });
+        self.witness_loop_jump();
+        Ok(())
+    }
+
     pub(crate) fn lower_stmt_expr(&mut self, e: &IrExpr) -> Result<(), EmitError> {
         // main's Result-typed statement/tail is the effect carrier —
         // err aborts with the native contract instead of discarding
@@ -47,22 +58,8 @@ impl Emitter<'_> {
             // if_ labels into the loop context (#2745), so a `break` /
             // `continue` in an arm reaches the right depth.
             IrExprKind::Match { subject, arms } => self.lower_match(subject, arms, None).map(|_| ()),
-            IrExprKind::Continue => match self.loop_ctl {
-                Some((extra, _)) => {
-                    self.f.instructions().br(extra);
-                    self.witness_loop_jump();
-                    Ok(())
-                }
-                None => unsup("expr:Continue"),
-            },
-            IrExprKind::Break => match self.loop_ctl {
-                Some((extra, delta)) => {
-                    self.f.instructions().br(extra + delta);
-                    self.witness_loop_jump();
-                    Ok(())
-                }
-                None => unsup("expr:Break"),
-            },
+            IrExprKind::Continue => self.lower_loop_jump(false),
+            IrExprKind::Break => self.lower_loop_jump(true),
             // for x in <list> / for i in a..b — extracted for complexity.
             IrExprKind::ForIn { var, var_tuple, iterable, body } => {
                 self.lower_forin(*var, var_tuple.as_deref(), iterable, body)
