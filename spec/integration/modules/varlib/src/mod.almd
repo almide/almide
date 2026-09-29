@@ -46,11 +46,20 @@ type Lane = | Fast | Slow
 
 fn base_retries() -> Int = 3
 
-fn retry_plan(policy: Policy = OnFailure, lane: Lane = Slow, tries: Int = base_retries(),
-              fallback: Wrapper = Wrap(7)) -> String = {
-  let p = match policy { Never => "never", OnFailure => "on-failure", Always => "always" }
-  let l = match lane { Fast => "fast", Slow => "slow" }
-  let f = match fallback { Wrap(n) => int.to_string(n), Empty => "none" }
+fn retry_plan(policy: Policy = OnFailure, lane: Lane = Slow, tries: Int = base_retries(), fallback: Wrapper = Wrap(7)) -> String = {
+  let p = match policy {
+    Never => "never",
+    OnFailure => "on-failure",
+    Always => "always",
+  }
+  let l = match lane {
+    Fast => "fast",
+    Slow => "slow",
+  }
+  let f = match fallback {
+    Wrap(n) => int.to_string(n),
+    Empty => "none",
+  }
   "${p}/${l}/${int.to_string(tries)}/${f}"
 }
 
