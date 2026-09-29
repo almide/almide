@@ -315,9 +315,7 @@ impl Emitter<'_> {
         if a.len() != 2 {
             return Ok(false);
         }
-        // #2758: this route's carrier is never released on ok — a site the
-        // witness does not record.
-        self.witness_decline("main-err-carrier");
+        self.witness_decline("main-err-carrier"); // #2758: unreleased on ok, unrecorded
         let got = self.lower(e, None)?;
         let SliceTy::Result(_, eh) = got else {
             // Effect-ABI transparency already unwrapped it — nothing to route.
