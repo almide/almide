@@ -420,8 +420,10 @@ pub(crate) fn lower_fn(
         if let Some(name) = &witness_name
             && crate::witness::collecting()
         {
-            let pre_gate = if env_captures.is_some() {
-                Some("captures".to_string())
+            // #2758: a capture is a view of the env block (loaded without a
+            // share, below) — except a C-319 cell, whose address travels.
+            let pre_gate = if env_captures.as_ref().is_some_and(|c| c.iter().any(|&(_, _, _, cell)| cell)) {
+                Some("captures:cell".to_string())
             } else if !top_lets.is_empty() {
                 Some("top-lets".to_string())
             } else {
@@ -434,7 +436,16 @@ pub(crate) fn lower_fn(
             });
             match verdict {
                 Some(reason) => crate::witness::push_decline(name, &reason),
-                None => arm_witness(&mut em, params, env_shift, &param_owned),
+                None => {
+                    arm_witness(&mut em, params, env_shift, &param_owned);
+                    for &(var, ty, _, _) in env_captures.iter().flatten() {
+                        if em.rc_droppable(ty)
+                            && let (Some(w), Some(&(idx, _))) = (em.witness.as_mut(), em.locals.get(&var))
+                        {
+                            w.param_borrowed(idx);
+                        }
+                    }
+                }
             }
         }
         populate_tail_release_set(&mut em, cur_module, env_shift, params, body, &param_owned);

@@ -211,7 +211,12 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
         | IrExprKind::Unit
         | IrExprKind::Var { .. }
         // `none` is NULL_ADDR: no block, no site.
-        | IrExprKind::OptionNone => None,
+        | IrExprKind::OptionNone
+        // #2758: a Fn value is a fresh env block (or a pool static when it
+        // captures nothing); each capture's share into the env is the
+        // capture hook's. The lambda's body is a frame of its own.
+        | IrExprKind::Lambda { .. }
+        | IrExprKind::FnRef { .. } => None,
         // A list literal: the spine is fresh, each element store is
         // `witness_store` exactly like a constructor payload's.
         IrExprKind::List { elements } => elements.iter().find_map(|x| value_subset(x).map(|w| w.inside("list-elem"))),
@@ -327,7 +332,15 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
                 return Some(Why::Deep(format!("call:{name}-arg")));
             }
         }
-        almide_ir::CallTarget::Module { .. } => {}
+        // A native arm may INLINE a literal callback (list.map / filter /
+        // fold lower the lambda's body in this frame, list.rs): its params
+        // and binds are no hook's. Only a Fn value that arrives as a value
+        // (a Var, a call result) is an ordinary argument there.
+        almide_ir::CallTarget::Module { .. } => {
+            if let Some(l) = args.iter().find(|a| matches!(crate::rc_ownership::rc_tail(a).kind, IrExprKind::Lambda { .. })) {
+                return Some(Why::Here(tag(&crate::rc_ownership::rc_tail(l).kind)).inside("call-arg"));
+            }
+        }
         other => return Some(Why::Deep(format!("call:target:{}", tag(other)))),
     }
     for a in args {

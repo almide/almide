@@ -206,6 +206,31 @@ impl Emitter<'_> {
         }
     }
 
+    /// #2758: a capture stored into a new closure's env (emitter_values.rs
+    /// `lower_lambda_value`). The env is a holder: a handle-typed capture
+    /// takes the `share_handle_top` +1 and its credit moves into the env
+    /// (`am`, released by the env's drop glue). A C-319 cell co-owns the
+    /// cell, not the value (decline); a droppable capture that is not a
+    /// handle took no +1 (decline, as `witness_retain_var`).
+    pub(crate) fn witness_capture(&mut self, idx: u32, t: SliceTy, is_cell: bool) {
+        if self.witness.is_none() || !self.rc_droppable(t) {
+            return;
+        }
+        if is_cell {
+            self.witness_decline("capture:cell");
+            return;
+        }
+        if !self.elem_is_handle(t) {
+            self.witness_decline("capture:flat");
+            return;
+        }
+        if let Some(w) = self.witness.as_mut()
+            && !w.arg_share_move(idx)
+        {
+            w.poison();
+        }
+    }
+
     /// The module-call wrapper's audit (calls_modules.rs): a hook fired for
     /// EACH of the call's own argument nodes, or the frame declines; a droppable
     /// `View` result declines (identity, see the module doc).
