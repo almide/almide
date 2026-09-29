@@ -381,6 +381,22 @@ tamper_structural() { # fn sed-expr label
 tamper_structural nest 's/^im$/i/' "#2755 nested call"
 tamper_structural greet '3s/^id$/i/' "#2755 concat operand"
 
+# ── #2756: BRANCH FRAMES through the same checker. The recorder logs each RC
+# event with the `if` / `match` structure it was emitted under and renders
+# one line per object: a single path flat, two paths as the whole-line
+# branch `{p|q}` (the checker runs each arm from rc 0 and both must end at 0),
+# more as per-site `{a|b}` / `{a x|b}` items. `pick` hands its list to
+# `take` on one arm only (`{iamd|id}`); `label` keeps a string alive across
+# a match, returning its share on one arm (`{|am}`). Drills: drop the
+# release on the arm that took the share, and the move-out on the arm that
+# returned it — each arm is checked on its own, so each leak is seen.
+echo
+echo "== structural leg, branch frames  ⊳  proven checker (#2756) =="
+run_structural spec/wasm_cross/witness_straightline.almd pick 0
+run_structural spec/wasm_cross/witness_straightline.almd label 0
+tamper_structural pick 's/^{iamd|id}$/{iam|id}/' "#2756 if arm"
+tamper_structural label 's/^{|am}$/{|a}/' "#2756 match arm"
+
 # ── #2152: almide-verify against the extracted checker on witnesses NO
 # producer wrote. The rows above only reach the shapes the emitters produce;
 # the transcription must agree on the whole input space, malformed bytes
