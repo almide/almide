@@ -417,6 +417,7 @@ pub(crate) fn lower_fn(
         // effect wrap, no captures, no top-let prelude — every excluded
         // form has RC sites the two hooks do not cover yet). A turned-away
         // frame pushes its reason instead (the step-4 histogram).
+        record_signature(&em, params, self_index, &param_owned);
         if let Some(name) = &witness_name
             && crate::witness::collecting()
         {
@@ -777,4 +778,12 @@ fn arm_witness(
 /// The plan's verdict for param `k`: None = every param owned.
 fn param_is_owned(param_owned: &Option<Vec<bool>>, k: usize) -> bool {
     param_owned.as_ref().map_or(true, |v| v.get(k).copied().unwrap_or(true))
+}
+
+/// #2758: a table fn's frame convention, for the call-mode witness — one
+/// mode per droppable param, as its exit plan releases them.
+fn record_signature(em: &Emitter<'_>, params: &[(VarId, SliceTy)], self_index: Option<u32>, param_owned: &Option<Vec<bool>>) {
+    let Some(index) = self_index.filter(|_| crate::witness::collecting()) else { return };
+    let modes = params.iter().enumerate().filter(|(_, p)| em.rc_droppable(p.1));
+    crate::witness::modes::signature(index, modes.map(|(k, _)| u8::from(param_is_owned(param_owned, k))).collect());
 }
