@@ -242,8 +242,8 @@ impl Emitter<'_> {
                 // A record var's FIELD (#2908): `h.f = map.set(h.f, k, v)`
                 // through the copy-on-write field write, as `list.push` on
                 // a field takes (#2411).
-                if let Some((id, field)) = crate::list_mut::record_field_receiver(m) {
-                    return self.lower_map_field_write(&id, &field, m, "set", args);
+                if let Some((id, path)) = crate::list_mut::record_field_receiver(m) {
+                    return self.lower_map_field_write(&id, &path, m, "set", args);
                 }
                 let IrExprKind::Var { id } = &m.kind else {
                     return unsup("map-insert-nonvar");
@@ -265,8 +265,8 @@ impl Emitter<'_> {
             // holder bound before the delete keeps the pre-delete entries
             // (C-033's value semantics), and insertion order is preserved.
             ("delete", [m, _key]) => {
-                if let Some((id, field)) = crate::list_mut::record_field_receiver(m) {
-                    return self.lower_map_field_write(&id, &field, m, "remove", args);
+                if let Some((id, path)) = crate::list_mut::record_field_receiver(m) {
+                    return self.lower_map_field_write(&id, &path, m, "remove", args);
                 }
                 let IrExprKind::Var { id } = &m.kind else {
                     return unsup("map-delete-nonvar");
@@ -728,7 +728,7 @@ impl Emitter<'_> {
     fn lower_map_field_write(
         &mut self,
         id: &almide_ir::VarId,
-        field: &almide_base::intern::Sym,
+        path: &[almide_base::intern::Sym],
         m: &IrExpr,
         op: &str,
         args: &[IrExpr],
@@ -747,7 +747,7 @@ impl Emitter<'_> {
             span: None,
             def_id: None,
         };
-        self.lower_field_assign(id, field, &call)?;
+        self.lower_field_assign(id, path, &call)?;
         Ok(None)
     }
 }
