@@ -51,7 +51,15 @@ effect fn main() -> Unit = {
   for i in 0..<1000 {
     map.insert(cell.memo, int.to_string(i % 7), i)
     list.push(it.kids, i)
-    let _ = list.pop(it.kids)
   }
-  println("${cell.memo} ${it.kids}")
+  var total = 0
+  for _ in 0..<998 {
+    match list.pop(it.kids) {
+      some(x) => {
+        total = total + x
+      },
+      none => (),
+    }
+  }
+  println("${cell.memo} ${it.kids} ${total}")
 }
