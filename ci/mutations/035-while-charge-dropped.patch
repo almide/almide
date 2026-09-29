@@ -1,5 +1,5 @@
 diff --git a/crates/almide-wasm/src/stmts_loop.rs b/crates/almide-wasm/src/stmts_loop.rs
-index cc4120782..ede3ee547 100644
+index d9495c6f9..ff885a223 100644
 --- a/crates/almide-wasm/src/stmts_loop.rs
 +++ b/crates/almide-wasm/src/stmts_loop.rs
 @@ -30,9 +30,7 @@ impl Emitter<'_> {
@@ -10,6 +10,6 @@ index cc4120782..ede3ee547 100644
 -        // CHECK (n iterations = n+1 checks), ALS-DT2.
 -        self.emit_det_charge_const(1);
 +        // [MUTANT: while loop-head charge dropped]
-         self.lower(cond, Some(BOOL))?;
-         self.f.instructions().i32_eqz().br_if(1);
-         self.lower_loop_body(body, false)?;
+         // The witness (#2757): an iteration runs the condition, then either
+         // leaves (the failing check) or runs the body.
+         self.witness_loop_open();
