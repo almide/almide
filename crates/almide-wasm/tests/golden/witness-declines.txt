@@ -28,7 +28,6 @@ module-arm:unaudited:list.push	5
 module-arm:unaudited:map.clear	3
 module-arm:unaudited:string.clear	2
 module-arm:unaudited:string.push	1
-module-result:view:list.get_or	2
 named-op	11
 rhs:BinOp	802
 rhs:Block	168
