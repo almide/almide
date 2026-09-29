@@ -195,8 +195,8 @@
 10373	spec/wasm_cross/float_no_contraction.almd
 13614	spec/wasm_cross/float_parse.almd
 10311	spec/wasm_cross/float_parse_special.almd
-5117	spec/wasm_cross/float_round_exact.almd
-4897	spec/wasm_cross/float_round_negzero.almd
+5005	spec/wasm_cross/float_round_exact.almd
+4985	spec/wasm_cross/float_round_negzero.almd
 4319	spec/wasm_cross/float_shortest_roundtrip.almd
 6520	spec/wasm_cross/float_sign_minmax_ieee.almd
 5230	spec/wasm_cross/float_signed_zero_minmax.almd
@@ -441,7 +441,7 @@
 6748	spec/wasm_cross/math_atan_tanh.almd
 2924	spec/wasm_cross/math_choose_exact.almd
 7972	spec/wasm_cross/math_explog.almd
-19133	spec/wasm_cross/math_log_gamma.almd
+19116	spec/wasm_cross/math_log_gamma.almd
 15506	spec/wasm_cross/math_log_gamma_negative.almd
 9225	spec/wasm_cross/math_pow.almd
 21035	spec/wasm_cross/math_transcendental_bits.almd

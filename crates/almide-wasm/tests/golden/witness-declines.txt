@@ -34,7 +34,7 @@ rhs:BinOp	802
 rhs:Block	168
 rhs:EmptyMap	3
 rhs:Fan	2
-rhs:If	665
+rhs:If	663
 rhs:IndexAccess	1
 rhs:Lambda	5
 rhs:MapAccess	1
@@ -73,7 +73,7 @@ stmt:Guard	9
 stmt:IndexAssign	9
 tail:BinOp	716
 tail:Block	17
-tail:If	4722
+tail:If	4720
 tail:Lambda	10
 tail:MapAccess	5
 tail:Match	479
