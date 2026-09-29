@@ -97,19 +97,29 @@ impl Emitter<'_> {
             None => BlockType::Empty,
         };
         self.f.instructions().if_(bt);
-        if arm.guard.is_none() {
-            self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
-        }
-        self.lower_arm_body(&arm.body, result, tail)?;
-        self.f.instructions().else_();
-        if arms.len() > 1 {
-            self.lower_arm_chain(&arms[1..], subj_ty, scr, result, tail)?;
-        } else {
-            // The checker promises exhaustiveness — if it's ever wrong
-            // (or every remaining arm was guarded away), trap LOUDLY
-            // instead of silently misbehaving.
-            self.f.instructions().unreachable();
-        }
+        // A statement-position chain keeps the loop context (#2745): the
+        // arm's if_ is one more label between a `break` / `continue` in
+        // the body and its target. (Value position suspends it in
+        // `lower`.)
+        self.shift_loop_labels(1);
+        let r = (|| {
+            if arm.guard.is_none() {
+                self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
+            }
+            self.lower_arm_body(&arm.body, result, tail)?;
+            self.f.instructions().else_();
+            if arms.len() > 1 {
+                self.lower_arm_chain(&arms[1..], subj_ty, scr, result, tail)
+            } else {
+                // The checker promises exhaustiveness — if it's ever wrong
+                // (or every remaining arm was guarded away), trap LOUDLY
+                // instead of silently misbehaving.
+                self.f.instructions().unreachable();
+                Ok(())
+            }
+        })();
+        self.shift_loop_labels(-1);
+        r?;
         self.f.instructions().end();
         Ok(())
     }

@@ -1,0 +1,7 @@
+// #2927: the `then` branch is wrong; the correct `else` is not the one blamed.
+effect fn count() -> Int = 3
+
+effect fn pick(b: Bool) -> Result[Int, String] =
+  if b then ok(count()!) else ok(2)
+
+effect fn main() -> Unit = println(int.to_string(pick(true)!))

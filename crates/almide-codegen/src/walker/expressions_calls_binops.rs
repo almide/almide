@@ -54,7 +54,7 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
 /// Extracted from `render_binop`'s BinOp::{Mul,Add,Sub,Scale}Matrix arms
 /// (cog>30 decomposition, pattern 2, uniform-shaped arms grouped by a
 /// shared theme). Only ever called for those four ops.
-fn render_binop_matrix(ctx: &RenderContext, op: BinOp, left: &IrExpr, l: &str, r: &str) -> String {
+fn render_binop_matrix(ctx: &RenderContext, op: BinOp, (left, right): (&IrExpr, &IrExpr), l: &str, r: &str) -> String {
     match op {
         BinOp::MulMatrix => rc_cow_result_glue(
             ctx.templates.render_with("matrix_mul", None, &[], &[("left", l), ("right", r)])
@@ -73,11 +73,17 @@ fn render_binop_matrix(ctx: &RenderContext, op: BinOp, left: &IrExpr, l: &str, r
         ),
         BinOp::ScaleMatrix => {
             // Ensure matrix is first arg, scalar is second
-            let (mat, scalar) = if matches!(&left.ty, Ty::Matrix) {
-                (l, r)
+            let (mat, scalar, scalar_ty) = if matches!(&left.ty, Ty::Matrix) {
+                (l, r, &right.ty)
             } else {
-                (r, l)
+                (r, l, &left.ty)
             };
+            // `m * k` admits an `Int` scalar (the frontend's ScaleMatrix
+            // dispatch); the runtime scales by an f64. Convert it the way
+            // the wasm legs do (`int.to_float`), or rustc refuses the i64
+            // the checker accepted (#2894).
+            let scalar = if matches!(scalar_ty, Ty::Int) { format!("(({scalar}) as f64)") } else { scalar.to_string() };
+            let scalar = scalar.as_str();
             rc_cow_result_glue(
                 ctx.templates.render_with("matrix_scale", None, &[], &[("left", mat), ("right", scalar)])
                     .unwrap_or_else(|| format!("almide_rt_matrix_scale(&{}, {})", mat, scalar)),
@@ -159,7 +165,7 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
     // Type-dispatched operators
     match op {
         BinOp::MulMatrix | BinOp::AddMatrix | BinOp::SubMatrix | BinOp::ScaleMatrix =>
-            render_binop_matrix(ctx, op, left, l.as_str(), r.as_str()),
+            render_binop_matrix(ctx, op, (left, right), l.as_str(), r.as_str()),
         BinOp::Eq => {
             ctx.templates.render_with("eq_expr", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("_ == _"))
@@ -227,10 +233,35 @@ fn render_call_expr(ctx: &RenderContext, callee: &str, args: &[IrExpr]) -> Strin
     // is `Rc<dyn Fn>` under the uniform repr (top-level fns no longer take
     // `impl Fn`). No call-site boxing here — re-wrapping a capture-clone
     // `{ let __cap; lambda }` arg (kind `Block`, not `RcWrap`) double-boxed it.
-    let args_str = args.iter().map(|a| render_expr_owned(ctx, a))
+    let args_str = args.iter().map(|a| render_user_call_arg(ctx, a))
         .collect::<Vec<_>>().join(", ");
     ctx.templates.render_with("call_expr", None, &[], &[("callee", callee), ("args", args_str.as_str())])
         .unwrap_or_else(|| format!("call(...)"))
+}
+
+/// #617: a module global stores the RAW Bytes/Matrix shape (an `Rc` in a
+/// static is not `Sync`), and a bare read of it stays raw — which a runtime
+/// callee's `&Vec<u8>` takes, but a USER fn's parameter is
+/// `&AlmideRcCow<Vec<u8>>` (rustc E0308 on `f(global_bytes)`). At a user
+/// callee only, borrow the glued value instead. A `var` global's read is
+/// already an owned copy; an immutable one (`LazyLock`/`const`) is a place a
+/// static can never be moved out of, so it is cloned first. Runtime callees
+/// keep the zero-copy raw borrow (they never reach this site).
+fn render_user_call_arg(ctx: &RenderContext, arg: &IrExpr) -> String {
+    use almide_ir::top_let_storage::TopLetStorage;
+    if let IrExprKind::Borrow { expr: inner, as_str: false, mutable: false } = &arg.kind
+        && let IrExprKind::Var { id } = &inner.kind
+        && let Some(global) = ctx.ann.global(*id)
+        && rc_cow_needs_glue(&inner.ty)
+    {
+        let read = render_expr(ctx, inner);
+        let owned = match global.storage {
+            TopLetStorage::Cell | TopLetStorage::RcRefCell => read,
+            TopLetStorage::Const | TopLetStorage::Lazy { .. } => format!("{read}.clone()"),
+        };
+        return format!("&{}", rc_cow_result_glue(owned, &inner.ty));
+    }
+    render_expr_owned(ctx, arg)
 }
 
 /// `CallTarget::Named` case of `render_generic_call`, extracted verbatim

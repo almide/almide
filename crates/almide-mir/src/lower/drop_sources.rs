@@ -93,8 +93,9 @@ fn variant_drop_fn_source(
     // The fn NAME sanitizes the module prefix (`types.RunResult` → `types_RunResult`); the param
     // TYPE annotation keeps the dotted module-qualified name (a valid Almide type reference).
     let fname = drop_fn_ident(tname);
+    let tspell = generated_type_spelling(tname);
     let mut out = String::new();
-    out.push_str(&format!("fn __drop_{fname}(e: {tname}) -> Unit = {{\n"));
+    out.push_str(&format!("fn __drop_{fname}(e: {tspell}) -> Unit = {{\n"));
     out.push_str("  let h = prim.handle(e)\n");
     out.push_str("  if prim.load32(h + 0) == 1 then {\n");
     out.push_str(&format!("    let t = prim.load64(h + {})\n", layout::slot_offset(0)));
@@ -142,6 +143,7 @@ fn variant_list_drop_sources(
     list_drop_names.sort();
     for vn in list_drop_names {
         let vn_fn = drop_fn_ident(vn);
+        let vn = &generated_type_spelling(vn);
         out.push_str(&format!(
             "fn __drop_list_{vn_fn}(xs: List[{vn}]) -> Unit = {{\n  \
                let h = prim.handle(xs)\n  \
@@ -248,7 +250,9 @@ fn variant_map_drop_sources(
     all_variant_names.sort_unstable();
     for vn in all_variant_names {
         let vn_fn = drop_fn_ident(vn);
-        let free_v = if rec_variant_names.contains(vn) {
+        let recursive = rec_variant_names.contains(vn);
+        let vn = &generated_type_spelling(vn);
+        let free_v = if recursive {
             format!("let v: {vn} = prim.load_handle(h + 12 + (n + i) * 8)\n    __drop_{vn_fn}(v)")
         } else {
             "prim.rc_dec(prim.load64(h + 12 + (n + i) * 8))".to_string()
@@ -279,6 +283,7 @@ fn variant_map_drop_sources(
     scalar_recs.sort_unstable();
     for rn in scalar_recs {
         let rn_fn = drop_fn_ident(rn);
+        let rn = &generated_type_spelling(rn);
         out.push_str(&format!(
             "fn __drop_map_rec_{rn_fn}_go(h: Int, n: Int, i: Int) -> Unit =\n  \
                if i >= n then ()\n  \
@@ -419,7 +424,7 @@ fn render_generic_variant_case_fields(
                 // An already-declared NON-GENERIC user variant field — reference it by
                 // its own real name (it needs no shadow, it isn't generic).
                 variant_layouts.field_is_variant(&sub).then(|| match &sub {
-                    Ty::Named(n, _) => n.as_str().to_string(),
+                    Ty::Named(n, _) => generated_type_spelling(n.as_str()),
                     _ => String::new(),
                 })
             });

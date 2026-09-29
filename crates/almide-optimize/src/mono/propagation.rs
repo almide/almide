@@ -237,7 +237,18 @@ fn propagate_pattern_types_mut(pattern: &mut IrPattern, subject_ty: &Ty, vt: &mu
         IrPattern::RecordPattern { fields, .. } => {
             for f in fields { if let Some(p) = &mut f.pattern { propagate_pattern_types_mut(p, subject_ty, vt); } }
         }
-        _ => {}
+        IrPattern::As { var, ty, inner } => {
+            let vt_ty = &vt.get(*var).ty;
+            if has_typevar(ty) && !has_typevar(vt_ty) {
+                *ty = vt_ty.clone();
+            }
+            propagate_pattern_types_mut(inner, subject_ty, vt);
+        }
+        IrPattern::List { elements, rest } => {
+            for e in elements { propagate_pattern_types_mut(e, subject_ty, vt); }
+            if let Some(r) = rest { propagate_pattern_types_mut(r, subject_ty, vt); }
+        }
+        IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => {}
     }
 }
 
@@ -251,7 +262,11 @@ fn propagate_stmt(stmt: &mut IrStmt, vt: &mut VarTable) {
                 vt.entries[var.0 as usize].ty = value.ty.clone();
             }
         }
-        IrStmtKind::BindDestructure { value, .. } => propagate_expr(value, vt),
+        IrStmtKind::BindDestructure { pattern, value } => {
+            propagate_expr(value, vt);
+            let subj_ty = value.ty.clone();
+            propagate_pattern_types_mut(pattern, &subj_ty, vt);
+        }
         IrStmtKind::Assign { value, .. } => propagate_expr(value, vt),
         IrStmtKind::IndexAssign { index, value, .. } => { propagate_expr(index, vt); propagate_expr(value, vt); }
         IrStmtKind::MapInsert { key, value, .. } => { propagate_expr(key, vt); propagate_expr(value, vt); }

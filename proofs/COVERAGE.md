@@ -2,6 +2,12 @@
 
 Workloads: almide-mir + almide-codegen test suites, render_program over ALL runnable spec (v1 path), `almide test spec/` (v0 production path).
 
+> **Since #2753 (2026-09-29)** the render_program sweep is gone: the gate drives
+> every runnable spec program through the shipping `almide build --target wasm`
+> (structural leg forced) and the `almide verify --emit` witness producer, and
+> the incumbent WAT renderer's files (#2761 deletes them) are excluded from the
+> report. The snapshot below predates that and still lists them.
+
 ```
 crates/almide-frontend/src/lower/mod_p2.rs                                                      735               111    84.90%          21                 4    80.95%         314                41    86.94%           0                 0         -
 crates/almide-frontend/src/lower/mod_p3.rs                                                      398               127    68.09%          17                 4    76.47%         157                43    72.61%           0                 0         -

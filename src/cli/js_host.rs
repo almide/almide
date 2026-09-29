@@ -98,6 +98,23 @@ impl HostSurface {
             }
             s.exports.push(sig());
         }
+        // An extern declared in another module of the program is the same
+        // host binding (#2876): the structural leg imports it wherever it is
+        // declared, so the host serves it wherever it is declared. Module
+        // fns export nothing — only their externs join the surface.
+        for f in program.modules.iter().flat_map(|m| &m.functions) {
+            let Some(a) = f.extern_attrs.iter().find(|a| a.target.as_str() == "wasm") else { continue };
+            let (module, import) = (a.module.as_str().to_string(), a.function.as_str().to_string());
+            if s.externs.iter().any(|e| e.module == module && e.import == import) {
+                continue;
+            }
+            let sig = HostFn {
+                name: f.name.as_str().to_string(),
+                params: f.params.iter().map(|p| (p.name.as_str().to_string(), p.ty.clone())).collect(),
+                ret: f.ret_ty.clone(),
+            };
+            s.externs.push(HostExtern { module, import, sig });
+        }
         s
     }
 }

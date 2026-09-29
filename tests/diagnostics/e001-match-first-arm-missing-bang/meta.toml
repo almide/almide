@@ -1,0 +1,4 @@
+expects_code = "E001"
+expects_error = "type mismatch in match arm: expected Result[Option[Level], String] but got Result[Result[Option[Level], String], String]"
+hint_substring = "add `!` to `level()`"
+expects_line_col = "11:10"

@@ -1,0 +1,14 @@
+// #2888: two packages each declare `Call` and `Msg` with the same shape, and a
+// `Msg` built by one is passed to the other. The checker treats the twins as
+// one type (the native build merges them by `structural_fingerprint`), so the
+// structural wasm leg must too: a second type identity for the same shape was
+// a `ty-mismatch:Named` wall on this program, whatever the entry's location.
+import twina
+import twinb
+
+test "a same-shaped record built in one package is read by its twin's package" {
+  let a = twina.make("user", "hi")
+  let b = twina.make("bot", "yo")
+  assert_eq(twinb.render([a, b]), "user:hi#1,bot:yo#1")
+  assert_eq(twinb.first_call(a), "c1")
+}

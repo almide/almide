@@ -370,7 +370,13 @@ fn infer_or_wall(
 /// (main.rs). Skipping the check here would silently compile a TRUNCATED program
 /// instead of walling honestly.
 fn parse_or_wall(source: &str) -> Result<almide_lang::ast::Program, LowerError> {
-    let tokens = Lexer::tokenize(source);
+    parse_tokens_or_wall(source, Lexer::tokenize(source))
+}
+
+fn parse_tokens_or_wall(
+    source: &str,
+    tokens: Vec<almide_lang::lexer::Token>,
+) -> Result<almide_lang::ast::Program, LowerError> {
     let mut parser = Parser::new(tokens);
     let prog = parser
         .parse()
@@ -397,7 +403,13 @@ fn source_to_ir_with(
     source: &str,
     modules: &[(String, almide_lang::ast::Program, bool)],
 ) -> Result<almide_ir::IrProgram, LowerError> {
-    let mut prog = parse_or_wall(source)?;
+    program_to_ir_with(parse_or_wall(source)?, modules)
+}
+
+fn program_to_ir_with(
+    mut prog: almide_lang::ast::Program,
+    modules: &[(String, almide_lang::ast::Program, bool)],
+) -> Result<almide_ir::IrProgram, LowerError> {
     // #1052: an import this render was NOT handed a module for can never
     // type-check — every reference through it would surface as "undefined
     // function" and the wall would land in the "type errors" bucket, the one
@@ -504,6 +516,8 @@ fn source_to_ir_with(
     // Guard → if restructure at the fn-body tail chain (conditional early return
     // expressed without early-return control flow — see desugar_guard.rs; shared
     // with classify: desugar-before-both).
+    // #2885: an effect main's declared Ok payload is discarded (the E044 rule).
+    crate::lower::discard_effect_main_payload(&mut ir);
     crate::lower::desugar_fn_body_guards(&mut ir);
     // Tail err-raise ifs normalize to the proven bind-position `!` shape (fed by the
     // guard restructure above; shared with classify: desugar-before-both).

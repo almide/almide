@@ -41,4 +41,15 @@ crates/almide-mir/src/certificate_b.rs 7510
 crates/almide-mir/src/certificate_b_tail.rs 6630
 crates/almide-mir/src/certificate_c.rs 9209
 crates/almide-mir/src/certificate_p2.rs 9449
-crates/almide-mir/src/translation_validation.rs 6509
+# #2753 (2026-09-29): the gate moved off the incumbent's render_program sweep
+# onto the shipping wasm build + the `almide verify` witness producer.
+# translation_validation.rs left the set: it checks MIR against the INCUMBENT's
+# WAT, #2761 deletes it with that renderer, and coverage.sh now excludes the
+# incumbent-only files (a row naming one fails as "not found in the report").
+# Three rows join, each a file only the NEW workloads reach — so dropping a
+# workload from coverage.sh turns this gate red (measured: without the witness
+# sweep pipeline_witnesses.rs reads 0.00%; without the structural build sweep
+# imports.rs reads 4.82% and emit.rs 87.10%).
+crates/almide-mir/src/pipeline_witnesses.rs 9188
+crates/almide-wasm/src/imports.rs 8898
+crates/almide-wasm/src/emit.rs 8794

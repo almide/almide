@@ -46,10 +46,44 @@ pub fn synthesize_test_runner_main(
     ir: &mut IrProgram,
     run_filter: Option<&str>,
 ) -> Result<(), NotTestable> {
+    synthesize(ir, run_filter, ModuleReinit::ProgramUniqueIds)
+}
+
+/// The same synthesis for a leg whose module VarIds are NOT program-unique —
+/// the structural wasm leg keeps each module's own VarTable and names a
+/// global by (space, VarId) (#1596). A module's mutable top-lets cannot be
+/// re-assigned from the runner `main`: main's space is the entry program's,
+/// so a module id there is unmapped (`assign:unmapped`, #2751) or — worse —
+/// equal to an entry global's id, which the re-init then overwrites with the
+/// module's initializer. Each such module instead gets a synthesized
+/// `__almd_test_reinit` fn holding its re-assigns, lowered in the module's
+/// own space like any module fn, and the runner calls it before every test.
+pub fn synthesize_test_runner_main_spaced(
+    ir: &mut IrProgram,
+    run_filter: Option<&str>,
+) -> Result<(), NotTestable> {
+    synthesize(ir, run_filter, ModuleReinit::PerModuleFn)
+}
+
+/// How the runner re-initializes a MODULE's mutable top-lets before a test.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ModuleReinit {
+    /// Inline `Assign`s in the runner main (the incumbent pipeline, whose
+    /// `disambiguate_module_global_regions` made every module id unique).
+    ProgramUniqueIds,
+    /// One `__almd_test_reinit` fn per module, called from the runner main.
+    PerModuleFn,
+}
+
+/// The per-module re-init fn's name (`ModuleReinit::PerModuleFn`).
+pub const MODULE_REINIT_FN: &str = "__almd_test_reinit";
+
+fn synthesize(ir: &mut IrProgram, run_filter: Option<&str>, module_reinit: ModuleReinit) -> Result<(), NotTestable> {
     use almide_ir::{CallTarget, IrExpr, IrExprKind, IrStmt, IrStmtKind};
     use almide_lang::intern::sym;
     use almide_lang::types::Ty;
     let has_tests = has_tests(ir);
+    let unit = || IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
     if let Some(main_idx) =
         ir.functions.iter().position(|f| !f.is_test && f.name.as_str() == "main")
     {
@@ -86,22 +120,54 @@ pub fn synthesize_test_runner_main(
     // collide with an unrelated main-side id. `assign_mutable_global_slots` unions the
     // same two sources and sorts by raw id, so ordering the re-inits the same way
     // replays declaration order slot-for-slot, exactly as `__mg_init` does.
-    let mut mutable_tls: Vec<&almide_ir::IrTopLet> = ir
-        .top_lets
-        .iter()
-        .chain(ir.modules.iter().flat_map(|m| m.top_lets.iter()))
-        .filter(|tl| tl.mutable)
-        .collect();
-    mutable_tls.sort_by_key(|tl| tl.var.0);
-    let reinit_stmts: Vec<IrStmt> = mutable_tls
-        .iter()
-        .map(|tl| IrStmt {
-            kind: IrStmtKind::Assign { var: tl.var, value: tl.value.clone() },
-            span: None,
-        })
-        .collect();
-    let unit_expr =
-        || IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None };
+    let reassign = |tl: &almide_ir::IrTopLet| IrStmt {
+        kind: IrStmtKind::Assign { var: tl.var, value: tl.value.clone() },
+        span: None,
+    };
+    let inline_stmts: Vec<IrStmt> = {
+        let module_tls = ir.modules.iter().flat_map(|m| m.top_lets.iter());
+        let mut mutable_tls: Vec<&almide_ir::IrTopLet> = match module_reinit {
+            ModuleReinit::ProgramUniqueIds => ir.top_lets.iter().chain(module_tls).filter(|tl| tl.mutable).collect(),
+            ModuleReinit::PerModuleFn => ir.top_lets.iter().filter(|tl| tl.mutable).collect(),
+        };
+        mutable_tls.sort_by_key(|tl| tl.var.0);
+        mutable_tls.iter().map(|tl| reassign(tl)).collect()
+    };
+    let mut reinit_stmts: Vec<IrStmt> = Vec::new();
+    if module_reinit == ModuleReinit::PerModuleFn {
+        // Modules first, in `ir.modules` order (the resolver's, leaves first),
+        // then the entry's own top-lets below.
+        for m in ir.modules.iter_mut() {
+            let mut tls: Vec<&almide_ir::IrTopLet> = m.top_lets.iter().filter(|tl| tl.mutable).collect();
+            if tls.is_empty() {
+                continue;
+            }
+            tls.sort_by_key(|tl| tl.var.0);
+            let body = IrExpr {
+                kind: IrExprKind::Block { stmts: tls.iter().map(|tl| reassign(tl)).collect(), expr: Some(Box::new(unit())) },
+                ty: Ty::Unit,
+                span: None,
+                def_id: None,
+            };
+            m.functions.push(runner_fn(sym(MODULE_REINIT_FN), body, false));
+            reinit_stmts.push(IrStmt {
+                kind: IrStmtKind::Expr {
+                    expr: IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Module { module: m.name, func: sym(MODULE_REINIT_FN), def_id: None },
+                            args: Vec::new(),
+                            type_args: Vec::new(),
+                        },
+                        ty: Ty::Unit,
+                        span: None,
+                        def_id: None,
+                    },
+                },
+                span: None,
+            });
+        }
+    }
+    reinit_stmts.extend(inline_stmts);
     let println_stmt = |text: String| IrStmt {
         kind: IrStmtKind::Expr {
             expr: IrExpr {
@@ -185,17 +251,24 @@ pub fn synthesize_test_runner_main(
         stmts.push(println_stmt("ok".to_string()));
     }
     let body = IrExpr {
-        kind: IrExprKind::Block { stmts, expr: Some(Box::new(unit_expr())) },
+        kind: IrExprKind::Block { stmts, expr: Some(Box::new(unit())) },
         ty: Ty::Unit,
         span: None,
         def_id: None,
     };
-    ir.functions.push(almide_ir::IrFunction {
-        name: sym("main"),
+    ir.functions.push(runner_fn(sym("main"), body, true));
+    Ok(())
+}
+
+/// A synthesized zero-param Unit fn of the runner protocol (the runner `main`,
+/// a module's `__almd_test_reinit`).
+fn runner_fn(name: almide_lang::intern::Sym, body: almide_ir::IrExpr, is_effect: bool) -> almide_ir::IrFunction {
+    almide_ir::IrFunction {
+        name,
         params: vec![],
-        ret_ty: Ty::Unit,
+        ret_ty: almide_lang::types::Ty::Unit,
         body,
-        is_effect: true,
+        is_effect,
         is_test: false,
         generics: None,
         extern_attrs: vec![],
@@ -205,10 +278,9 @@ pub fn synthesize_test_runner_main(
         doc: None,
         blank_lines_before: 0,
         def_id: None,
-        mutated_params: vec![], // fresh-fn: synthesized test-runner main, zero params
+        mutated_params: vec![], // fresh-fn: synthesized runner fn, zero params
         module_origin: None,
-    });
-    Ok(())
+    }
 }
 
 /// The in-test assert lowering of the structural leg (#2179). The frontend

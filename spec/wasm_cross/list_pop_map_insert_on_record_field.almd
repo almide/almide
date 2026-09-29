@@ -1,0 +1,69 @@
+// @contract: C-226, C-033
+// #2908: the rest of the in-place collection ops on a record FIELD place —
+// `list.pop(h.f)`, `map.insert(h.f, k, v)`, `map.delete(h.f, k)` and
+// `map.clear(h.f)` — where `h` is a record var or a `mut` record parameter.
+// They take the copy-on-write field write `list.push` on a field already
+// takes (#2411): a copy bound before the op keeps the old contents (C-033),
+// pop on an empty field is `none` and leaves it empty, and a 1000-step loop
+// is a row so a leaked credit would show in the allocation ledger.
+type Item = { id: Int, kids: List[Int] }
+
+type Cell = { name: String, memo: Map[String, Int], words: List[String] }
+
+fn drain(mut u: Item) -> Int = {
+  var n = 0
+  while list.len(u.kids) > 0 {
+    match list.pop(u.kids) {
+      some(x) => {
+        n = n + x
+      },
+      none => (),
+    }
+  }
+  n
+}
+
+fn last_word(mut c: Cell) -> String = match list.pop(c.words) {
+  some(w) => w,
+  none => "-",
+}
+
+effect fn main() -> Unit = {
+  var it = { id: 1, kids: [1, 2, 3] }
+  println(int.to_string(drain(it)))
+  var cell = { name: "c", memo: map.new(), words: ["a", "bb", "ccc"] }
+  map.insert(cell.memo, "x", 1)
+  map.insert(cell.memo, "y", 2)
+  map.insert(cell.memo, "x", 3)
+  let before = cell
+  map.delete(cell.memo, "y")
+  println("${cell.memo} ${before.memo}")
+  let w1 = last_word(cell)
+  let p = list.pop(cell.words)
+  let snap = cell.words
+  let q = list.pop(cell.words)
+  println("${w1} ${p} ${q} ${snap} ${cell.words} ${before.words}")
+  let e = list.pop(cell.words)
+  let e2 = list.pop(cell.words)
+  println("${e} ${e2} ${cell.words}")
+  map.clear(cell.memo)
+  println("${cell.memo} ${before.memo} ${cell.name}")
+  for i in 0..<1000 {
+    map.insert(cell.memo, int.to_string(i % 7), i)
+    list.push(it.kids, i)
+  }
+  var total = 0
+  for _ in 0..<998 {
+    match list.pop(it.kids) {
+      some(x) => {
+        total = total + x
+      },
+      none => (),
+    }
+  }
+  for i in 0..<5 {
+    list.push(it.kids, i * 100)
+    let _ = list.pop(it.kids)
+  }
+  println("${cell.memo} ${it.kids} ${total}")
+}

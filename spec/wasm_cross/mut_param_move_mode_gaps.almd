@@ -1,0 +1,153 @@
+// @contract: C-132
+// #2907: three move-mode shapes the structural wasm leg used to decline.
+//   1. two `mut` params — the carrier is a tuple of every buffer (plus the
+//      ret for a value fn), and the call site writes each place back
+//   2. `!` on a non-effect move-mode callee whose ret is a Result — the
+//      write-back happens BEFORE the propagation, so the caller sees the
+//      buffer the callee left even on the err path
+//   3. a `guard` exit inside a move-mode fn — a non-raising exit carries the
+//      buffer like the tail does; a raising exit of an effect fn carries none
+// Plus: a move-mode call as a `match` subject keeps its write-back (the
+// let-bound branch outliner used to lose it).
+fn move2(mut a: List[Int], mut b: List[Int], x: Int) -> Unit = {
+  list.push(a, x)
+  list.push(b, x * 2)
+}
+
+fn split3(mut lo: List[Int], mut hi: List[Int], x: Int) -> Int = {
+  guard x != 0 else -1
+  if x < 10 then list.push(lo, x) else list.push(hi, x)
+  list.len(lo) + list.len(hi)
+}
+
+effect fn fill2(mut a: List[String], mut b: List[String], s: String) -> Unit = {
+  guard s != "" else err("empty")!
+  list.push(a, s)
+  list.push(b, s + "!")
+}
+
+effect fn fill1(mut a: List[String], s: String) -> Unit = {
+  guard s != "" else err("empty one")!
+  list.push(a, s)
+}
+
+fn take(mut c: List[Int], n: Int) -> Result[Int, String] = {
+  list.push(c, n)
+  if n < 0 then err("neg ${n}") else ok(list.len(c))
+}
+
+fn wrap(x: Int) -> Int = x * 10
+
+fn close(mut bs: List[Int], expected: Int) -> Result[Bool, String] = {
+  let opener = list.pop(bs)
+  let opened = match opener {
+    some(o) => o,
+    none => -1,
+  }
+  guard opened == expected else err("mismatch ${opened}")
+  ok(list.len(bs) > 0)
+}
+
+fn close_nested(mut bs: List[Int], expected: Int, recovering: Bool) -> Result[Bool, String] = {
+  if recovering and list.is_empty(bs) then ok(true)
+  else {
+    let opener = list.pop(bs)
+    let opened = match opener {
+      some(o) => o,
+      none => -1,
+    }
+    if opened == expected then ok(false)
+    else {
+      guard recovering else err("mismatch")
+      ok(list.len(bs) > 0)
+    }
+  }
+}
+
+fn push_pos(mut xs: List[Int], v: Int) -> Unit = {
+  list.push(xs, 0)
+  guard v > 0 else ()
+  list.push(xs, v)
+}
+
+type Pair = { l: List[Int], r: List[Int] }
+
+effect fn run_take(n: Int) -> Int = {
+  var c: List[Int] = [7]
+  let v = wrap(take(c, n)!)
+  v + list.len(c)
+}
+
+effect fn run_fill(s: String) -> String = {
+  var sa: List[String] = []
+  var sb: List[String] = []
+  fill2(sa, sb, s)!
+  fill1(sa, s)!
+  "${sa} ${sb}"
+}
+
+effect fn main() -> Unit = {
+  var a: List[Int] = []
+  var b: List[Int] = []
+  move2(a, b, 3)
+  move2(a, b, 4)
+  println("${a} ${b}")
+  let n1 = split3(a, b, 5)
+  let n2 = split3(a, b, 50)
+  let n3 = split3(a, b, 0)
+  println("${n1} ${n2} ${n3} ${a} ${b}")
+  var p = { l: [1], r: [2] }
+  move2(p.l, p.r, 7)
+  println("${p.l} ${p.r}")
+  let t1 = match run_take(3) {
+    ok(v) => "ok ${v}",
+    err(e) => "err ${e}",
+  }
+  let t2 = match run_take(-2) {
+    ok(v) => "ok ${v}",
+    err(e) => "err ${e}",
+  }
+  println("${t1} ${t2}")
+  let f1 = match run_fill("x") {
+    ok(v) => v,
+    err(e) => "err ${e}",
+  }
+  let f2 = match run_fill("") {
+    ok(v) => v,
+    err(e) => "err ${e}",
+  }
+  println("${f1} | ${f2}")
+  var bs = [1, 2, 3]
+  let c1 = match close(bs, 9) {
+    ok(v) => "ok ${v}",
+    err(e) => e,
+  }
+  println("${c1} ${bs}")
+  let c2 = match close(bs, 2) {
+    ok(v) => "ok ${v}",
+    err(e) => e,
+  }
+  println("${c2} ${bs}")
+  var ns = [1, 2, 5]
+  let d1 = match close_nested(ns, 3, false) {
+    ok(v) => "${v}",
+    err(e) => e,
+  }
+  let d2 = match close_nested(ns, 2, false) {
+    ok(v) => "${v}",
+    err(e) => e,
+  }
+  let d3 = match close_nested(ns, 9, true) {
+    ok(v) => "${v}",
+    err(e) => e,
+  }
+  let d4 = match close_nested(ns, 9, true) {
+    ok(v) => "${v}",
+    err(e) => e,
+  }
+  println("${d1} ${d2} ${d3} ${d4} ${ns}")
+  var xs: List[Int] = []
+  push_pos(xs, -1)
+  push_pos(xs, 5)
+  println("${xs}")
+}

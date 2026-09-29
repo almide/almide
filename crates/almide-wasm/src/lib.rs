@@ -193,6 +193,9 @@ mod ranges;
 mod rc_ownership;
 mod region;
 mod sums;
+mod random;
+mod fs_range;
+mod testing;
 mod tco;
 mod types_table;
 mod value;
@@ -667,12 +670,6 @@ fn registry_impl_names() -> &'static std::collections::HashSet<&'static str> {
     })
 }
 
-
-// ── entry ───────────────────────────────────────────────────────────────
-
-
-
-
 // ── reason-string helpers ───────────────────────────────────────────────
 
 fn pattern_irrefutable(p: &IrPattern) -> bool {
@@ -780,11 +777,10 @@ fn collect_program_fns(ir: &IrProgram) -> Vec<(&IrFunction, Option<String>, u32)
         .collect();
     for (i, m) in ir.modules.iter().enumerate() {
         for f in &m.functions {
-            // A Hole body is a bodyless SURFACE decl (`= _`) — a bridge
-            // boundary, not an implementation. Registering it would
-            // shadow the self-host registry's real implementation with
-            // an unlowersble stub (found by the burn-up: expr:Hole ×70).
-            let is_surface = matches!(f.body.kind, IrExprKind::Hole);
+            // A Hole body without `@extern` is a bridge SURFACE (`= _`): registering
+            // it would shadow the self-host registry's implementation (expr:Hole ×70).
+            // An `@extern` Hole is a host binding and registers (#2876).
+            let is_surface = matches!(f.body.kind, IrExprKind::Hole) && f.extern_attrs.is_empty();
             if !f.is_test && !is_surface {
                 program_fns.push((
                     f,

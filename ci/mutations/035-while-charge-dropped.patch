@@ -1,8 +1,8 @@
-diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
-index bf5e3e989..5878f692c 100644
---- a/crates/almide-wasm/src/stmts.rs
-+++ b/crates/almide-wasm/src/stmts.rs
-@@ -111,9 +111,7 @@ impl Emitter<'_> {
+diff --git a/crates/almide-wasm/src/stmts_loop.rs b/crates/almide-wasm/src/stmts_loop.rs
+index cc4120782..ede3ee547 100644
+--- a/crates/almide-wasm/src/stmts_loop.rs
++++ b/crates/almide-wasm/src/stmts_loop.rs
+@@ -30,9 +30,7 @@ impl Emitter<'_> {
          // before the loop — the bounds checks inside read the local.
          let hoisted = self.hoist_invariant_counts(Some(cond), body)?;
          self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);

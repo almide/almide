@@ -90,6 +90,34 @@ pub fn register_scoped_bare_type_keys(env: &mut crate::types::TypeEnv, scope: Op
             env.types.insert(scoped_bare_type_key(scope, &name), Ty::Named(*only, vec![]));
         }
     }
+    // The file's ALIAS spellings too (#2877): `import self.boxes as bx` makes
+    // `bx.Box` mean `boxes.Box` in THIS file. `register_alias_type_keys`
+    // mirrors aliases program-wide only while one file is being checked, so
+    // a module's own alias spelling was unknown when its declarations were
+    // REGISTERED (a `var n: bx.Box[Int]` recorded the bare `Box`) and when
+    // it was LOWERED (unless the entry happened to bind the same alias).
+    // Scoped like the bare keys, so every resolver reads one answer per file.
+    let mut alias_adds: Vec<(Sym, Ty)> = Vec::new();
+    for (alias, canonical) in &env.import_table.aliases {
+        if alias == canonical || almide_lang::stdlib_info::is_bundled_module(canonical.as_str()) {
+            continue;
+        }
+        let prefix = format!("{}.", canonical.as_str());
+        for (k, v) in &env.types {
+            if !matches!(v, Ty::Record { .. } | Ty::Variant { .. }) {
+                continue;
+            }
+            let Some(rest) = k.as_str().strip_prefix(&prefix) else { continue };
+            if rest.contains('.') {
+                continue;
+            }
+            let spelled = format!("{}.{}", alias.as_str(), rest);
+            alias_adds.push((scoped_bare_type_key(scope, &spelled), Ty::Named(*k, vec![])));
+        }
+    }
+    for (k, v) in alias_adds {
+        env.types.insert(k, v);
+    }
 }
 
 /// Mirror a dependency module's nominal type keys under every import-ALIAS
@@ -187,6 +215,7 @@ pub fn canonical_user_type_sym(name: &str, types: &HashMap<Sym, Ty>, cur_mod: Op
         return Some(key);
     }
     canonical_user_type_sym_own_module(name, types, cur_mod)
+        .or_else(|| canonical_user_type_sym_scoped_alias(name, types, cur_mod))
         .or_else(|| canonical_user_type_sym_qualified(name, types))
         .or_else(|| canonical_user_type_sym_sibling(name, types, cur_mod))
         .or_else(|| canonical_user_type_sym_bare(name, types, cur_mod))
@@ -226,6 +255,19 @@ fn canonical_user_type_sym_own_module(name: &str, types: &HashMap<Sym, Ty>, cur_
         }
     }
     None
+}
+
+// A qualified spelling through THIS file's import alias (`bx.Box` under
+// `import self.boxes as bx`) → the aliased module's type, as recorded by
+// `register_scoped_bare_type_keys` (#2877).
+fn canonical_user_type_sym_scoped_alias(name: &str, types: &HashMap<Sym, Ty>, cur_mod: Option<&str>) -> Option<Sym> {
+    if !name.contains('.') {
+        return None;
+    }
+    match types.get(&scoped_bare_type_key(cur_mod, name)) {
+        Some(Ty::Named(k, args)) if args.is_empty() => Some(*k),
+        _ => None,
+    }
 }
 
 // An already-qualified reference to a USER module's type → kept qualified.
@@ -493,8 +535,28 @@ pub const BUILTIN_TYPE_HEADS: &[BuiltinTypeHead] = &[
 
 /// The builtin head a spelling resolves to, if any — the first thing the
 /// resolver asks of every type name, before any declaration is consulted.
+/// The generated-source spelling ([`generated_builtin_spelling`]) answers the
+/// same head as the bare name.
 pub fn builtin_type_head(name: &str, spelling: TypeSpelling) -> Option<&'static BuiltinTypeHead> {
+    let name = name.strip_prefix(GENERATED_BUILTIN_MARK).unwrap_or(name);
     BUILTIN_TYPE_HEADS.iter().find(|h| h.name == name && h.arity.accepts(spelling))
+}
+
+/// The mark that makes a builtin's name the generated-source spelling. The
+/// lexer never puts it in a name, backticks included, so no declaration can
+/// take the spelling.
+const GENERATED_BUILTIN_MARK: char = '%';
+
+/// How compiler-GENERATED source names a builtin type (#2870): the same head
+/// as the bare `name`, under a spelling no file can declare. A file's own
+/// declaration answers its bare spelling of a builtin's name (#2858), and
+/// generated helpers appended to the entry program are read in that file's
+/// scope, so `fn __repr_quote(s: String)` read the user's `type String`. A
+/// generated `String` is always the builtin: the source generator's
+/// token stream carries this spelling, never the bare one, and the key
+/// [`builtin_named_type_key`] records is never consulted for it.
+pub fn generated_builtin_spelling(name: &str) -> Option<String> {
+    builtin_type_head(name, TypeSpelling::Bare).map(|h| format!("{GENERATED_BUILTIN_MARK}{}", h.name))
 }
 
 /// Where one bare type spelling of a file goes (#2715, #2839), in the order

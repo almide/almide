@@ -95,7 +95,11 @@ pub(crate) const OP_HTTP_CALL_STEP: i32 = 58;
 pub(crate) const OP_HTTP_CALL_DROP: i32 = 59;
 pub(crate) const OP_STAT: i32 = 38;
 pub(crate) const OP_GLOB: i32 = 39;
-const OP_READ_BYTES: i32 = 14;
+/// `read_bytes_raw` / `read_bytes_raw_if_exists`: ops 14 / 25's bodies under
+/// their own call name, so a failure names what the writer wrote (#2890,
+/// the #2090 class).
+const OP_READ_BYTES_RAW: i32 = 63;
+const OP_READ_BYTES_RAW_IF_EXISTS: i32 = 64;
 
 impl Emitter<'_> {
     /// The fs surfaces past fs.rs's set. Ok(None) = not handled.
@@ -160,11 +164,11 @@ impl Emitter<'_> {
                 })?
             }
             ("read_bytes_raw", [p]) => {
-                self.fs_call_1(p, OP_READ_BYTES)?;
+                self.fs_call_1(p, OP_READ_BYTES_RAW)?;
                 self.fs_result_bytes()?
             }
             ("read_bytes_raw_if_exists", [p]) => {
-                self.fs_call_1(p, OP_READ_BYTES_IF_EXISTS)?;
+                self.fs_call_1(p, OP_READ_BYTES_RAW_IF_EXISTS)?;
                 let bh = self.types.intern(SliceTy::Scalar(Scalar::Bytes));
                 self.fs_if_exists_wrap(bh, |em| {
                     let _ = em.fs_result_bytes()?;
@@ -309,7 +313,7 @@ impl Emitter<'_> {
     }
 
     /// ret on stack → Result[Int, String]: ok rides an 8-byte LE buffer.
-    fn fs_result_i64(&mut self) -> Result<SliceTy, EmitError> {
+    pub(crate) fn fs_result_i64(&mut self) -> Result<SliceTy, EmitError> {
         let hret = self.hold_i64()?;
         let hb = self.hold_i32()?;
         let mut i = self.f.instructions();

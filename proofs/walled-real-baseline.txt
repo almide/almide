@@ -125,6 +125,8 @@ spec/gauntlet/cells/x09_tuple_list_of_record.almd :: f
 spec/gauntlet/cells/x13_bang_nested_in_field.almd :: f
 spec/wasm_cross/bytes_equality_call_operands.almd :: main
 spec/wasm_cross/codec_triple_list.almd :: T.__dec_list_list_list_int_go
+spec/wasm_cross/list_pop_map_insert_on_record_field.almd :: drain
+spec/wasm_cross/list_pop_map_insert_on_record_field.almd :: last_word
 spec/wasm_cross/nested_three_level_literal.almd :: main
 # (2026-08-30, C-326/#1696) The gzip inflate joined the corpus lowering on the
 # STRUCTURAL leg (the phase-4 hoist); the incumbent's brick walls its loop-level
@@ -170,6 +172,17 @@ spec/wasm_cross/list_rest_pattern.almd :: main
 spec/wasm_cross/list_rest_pattern.almd :: shape
 spec/wasm_cross/list_rest_pattern.almd :: tail_of
 spec/wasm_cross/list_rest_pattern.almd :: total
+# (2026-09-29, C-332/#2748) the same division for the generic list-rest binds
+# instanced at Int and String: the incumbent brick walls the list-rest bind,
+# the STRUCTURAL leg (the default) lowers the instances.
+spec/wasm_cross/generic_pattern_binds_instanced.almd :: first__Int
+spec/wasm_cross/generic_pattern_binds_instanced.almd :: first__String
+spec/wasm_cross/generic_pattern_binds_instanced.almd :: tail_len__Int
+spec/wasm_cross/generic_pattern_binds_instanced.almd :: tail_len__String
+# (2026-09-29, C-213/#2747) the Endian IO fixture behind an explicit
+# `import bytes` interpolates sized-int reads the incumbent brick does not
+# execute; the STRUCTURAL leg (the default) lowers it.
+spec/wasm_cross/endian_explicit_import.almd :: main
 # (2026-09-02, C-333/#1461) as-patterns: the same incumbent division as the
 # list-rest rows above.
 spec/lang/as_pattern_test.almd :: __test_almd_as over option carriers
@@ -246,6 +259,9 @@ spec/stdlib/http_router_test.almd :: __test_almd_an app bound at the top level i
 spec/wasm_cross/mut_param_effect_can_err.almd :: go
 spec/wasm_cross/mut_param_effect_can_err.almd :: main
 spec/wasm_cross/mut_param_effect_can_err.almd :: uc__Mem
+spec/wasm_cross/mut_param_move_mode_gaps.almd :: main
+spec/wasm_cross/mut_param_move_mode_gaps.almd :: push_pos
+spec/wasm_cross/mut_param_move_mode_gaps.almd :: run_fill
 # #1576 also: the DDD gauntlet's mut_port `main` (the can-err mut-param port call
 # consumed by `!`) walls on the incumbent for the same reason as the fixture's fns.
 spec/gauntlet/pkg/mut_port/src/main.almd :: main
@@ -287,3 +303,10 @@ spec/wasm_cross/lambda_failure_channel.almd :: erased
 spec/wasm_cross/lambda_failure_channel.almd :: fold_mid_block
 spec/wasm_cross/lambda_failure_channel.almd :: sum_with
 spec/wasm_cross/lambda_failure_channel.almd :: typed_slot
+# #2931: a let-bound heap `if` in a loop whose arms write enclosing vars through
+# stdlib `mut` params (list.push / map.insert / string.push / bytes.push). The
+# incumbent lowered it only through the branch_lift helper, which took those
+# vars by value and dropped the writes; the lift now declines (as it always did
+# on native), so the incumbent walls honestly. The structural leg serves it
+# byte-identically to native.
+spec/wasm_cross/branch_lift_stdlib_mut_arg.almd :: arm_writes

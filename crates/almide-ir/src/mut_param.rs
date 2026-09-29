@@ -48,7 +48,7 @@
 //! pipeline's pre-lowering (both `source_to_ir` twins — desugar-before-both).
 
 use crate::visit::IrVisitor;
-use crate::visit_mut::{walk_expr_mut, IrMutVisitor};
+use crate::visit_mut::{walk_expr_mut, walk_stmt_mut, IrMutVisitor};
 use crate::*;
 use almide_base::intern::sym;
 use almide_lang::types::Ty;
@@ -428,8 +428,8 @@ fn fold_tail_writebacks(program: &mut IrProgram, mut_fns: &MutFns) {
 fn fold_one_fn_tail_writebacks(func: &mut IrFunction, scope: &str, mut_fns: &MutFns) {
     // Only a rewritten was-Unit mut fn (phase 1 cleared `mutated_params`; the
     // scope-keyed entry survives).
-    let Some(&(idx, ref mut_ty, was_unit, _)) = mut_fns.get(&scope_key(scope, func.name.as_str())) else { return };
-    if !was_unit {
+    let Some(&(idx, ref mut_ty, was_unit, _, ref extra)) = mut_fns.get(&scope_key(scope, func.name.as_str())) else { return };
+    if !was_unit || !extra.is_empty() {
         return;
     }
     let Some(p) = func.params.get(idx).map(|prm| prm.var) else { return };
@@ -689,12 +689,9 @@ fn collect_mut_fns(program: &IrProgram) -> MutFns {
 }
 
 /// One function's [`MutFns`] entry, or `None` when it is not eligible.
-fn mut_fn_entry(func: &IrFunction, same_scope_count: usize) -> Option<(usize, Ty, bool, Ty)> {
+fn mut_fn_entry(func: &IrFunction, same_scope_count: usize) -> Option<MutEntry> {
     let probe = almide_base::env::flag("ALMIDE_MP_PROBE");
-    if func.mutated_params.len() != 1 {
-        if probe && !func.mutated_params.is_empty() {
-            eprintln!("[mp-reject] {} mutated_params={:?}", func.name, func.mutated_params);
-        }
+    if func.mutated_params.is_empty() {
         return None;
     }
     if same_scope_count != 1 {
@@ -703,8 +700,15 @@ fn mut_fn_entry(func: &IrFunction, same_scope_count: usize) -> Option<(usize, Ty
         }
         return None;
     }
-    let idx = func.mutated_params[0];
+    let mut idxs = func.mutated_params.clone();
+    idxs.sort_unstable();
+    idxs.dedup();
+    let idx = idxs[0];
     let p = func.params.get(idx)?;
+    let mut extra = Vec::new();
+    for &i in &idxs[1..] {
+        extra.push((i, func.params.get(i)?.ty.clone()));
+    }
     let was_unit = matches!(func.ret_ty, Ty::Unit);
     let Some(payload) = value_payload_ty(func) else {
         if probe {
@@ -712,7 +716,7 @@ fn mut_fn_entry(func: &IrFunction, same_scope_count: usize) -> Option<(usize, Ty
         }
         return None;
     };
-    Some((idx, p.ty.clone(), was_unit, payload))
+    Some((idx, p.ty.clone(), was_unit, payload, extra))
 }
 
 /// The type the tuple rewrite pairs with the buffer — the callee's ORIGINAL
@@ -762,17 +766,21 @@ fn rewrite_signatures(program: &mut IrProgram, mut_fns: &MutFns) {
 
 /// Give one eligible function the move-mode signature and body.
 fn rewrite_one_signature(func: &mut IrFunction, scope: &str, vt: &mut VarTable, mut_fns: &MutFns) {
-    let Some(&(entry_idx, _, was_unit, _)) = mut_fns.get(&scope_key(scope, func.name.as_str())) else { return };
+    let Some((entry_idx, _, was_unit, _, extra)) = mut_fns.get(&scope_key(scope, func.name.as_str())).cloned() else { return };
     // Name-keyed entry — confirm THIS func is the one that was
     // collected (unique-name invariant above makes this a plain
     // assertion, but stay defensive).
-    let Some(&mut_idx) = func.mutated_params.first() else { return };
+    let Some(&mut_idx) = func.mutated_params.iter().min() else { return };
     if mut_idx != entry_idx {
         return;
     }
     let mut_var = func.params[mut_idx].var;
     let mut_ty = func.params[mut_idx].ty.clone();
-    if was_unit {
+    if !extra.is_empty() {
+        let mut bufs = vec![(mut_var, mut_ty)];
+        bufs.extend(extra.iter().map(|(i, t)| (func.params[*i].var, t.clone())));
+        rewrite_multi_body(func, vt, &bufs, was_unit);
+    } else if was_unit {
         rewrite_unit_body(func, mut_var, mut_ty);
     } else {
         rewrite_value_body(func, vt, mut_var, mut_ty);
@@ -782,11 +790,77 @@ fn rewrite_one_signature(func: &mut IrFunction, scope: &str, vt: &mut VarTable, 
     func.mutated_params.clear();
 }
 
+/// A fn with SEVERAL `mut` params (#2907): `{ <old body>; (p1, …, pN) }` when
+/// it returned Unit, `{ let __mp_ret = <old body>; (__mp_ret, p1, …, pN) }`
+/// otherwise — the single-param forms below with every buffer in the tuple.
+/// Its guard exits are paired with the same buffers.
+fn rewrite_multi_body(func: &mut IrFunction, vt: &mut VarTable, bufs: &[(VarId, Ty)], was_unit: bool) {
+    let single_layer = single_layer_ok_ty(func).map(|(ok_ty, _)| ok_ty);
+    let orig_ty = single_layer.clone().unwrap_or_else(|| func.ret_ty.clone());
+    let mut elems: Vec<Ty> = if was_unit { vec![] } else { vec![orig_ty.clone()] };
+    elems.extend(bufs.iter().map(|(_, t)| t.clone()));
+    let tuple_ty = Ty::Tuple(elems);
+    func.ret_ty = tuple_ty.clone();
+    let reads = || bufs.iter().map(|(v, t)| var_read(*v, t.clone())).collect::<Vec<_>>();
+    let mut old_body = std::mem::replace(&mut func.body, unit_placeholder());
+    if let Some(ok_ty) = &single_layer {
+        strip_ok_layer(&mut old_body, ok_ty);
+    }
+    let ty = tuple_ty.clone();
+    pair_guard_exits(&mut old_body, func.is_effect, &tuple_ty, &mut |e| {
+        let span = e.span;
+        let mut elements = if was_unit { vec![] } else { vec![e.clone()] };
+        elements.extend(reads());
+        let tuple = IrExpr { kind: IrExprKind::Tuple { elements }, ty: ty.clone(), span, def_id: None };
+        if was_unit {
+            IrExpr {
+                kind: IrExprKind::Block {
+                    stmts: vec![IrStmt { kind: IrStmtKind::Expr { expr: e }, span: None }],
+                    expr: Some(Box::new(tuple)),
+                },
+                ty: ty.clone(),
+                span,
+                def_id: None,
+            }
+        } else {
+            tuple
+        }
+    });
+    let (stmt, mut elements) = if was_unit {
+        (IrStmt { kind: IrStmtKind::Expr { expr: old_body }, span: None }, vec![])
+    } else {
+        let ret_var = vt.alloc(sym("__mp_ret"), orig_ty.clone(), Mutability::Let, None);
+        let bind = IrStmt {
+            kind: IrStmtKind::Bind { var: ret_var, mutability: Mutability::Let, ty: orig_ty.clone(), value: old_body },
+            span: None,
+        };
+        (bind, vec![var_read(ret_var, orig_ty)])
+    };
+    elements.extend(reads());
+    let tuple = IrExpr { kind: IrExprKind::Tuple { elements }, ty: tuple_ty.clone(), span: None, def_id: None };
+    func.body = IrExpr {
+        kind: IrExprKind::Block { stmts: vec![stmt], expr: Some(Box::new(tuple)) },
+        ty: tuple_ty,
+        span: None,
+        def_id: None,
+    };
+}
+
 /// Unit-returning callee: `{ <old body>; mut_param }` — wrap the existing body
 /// in a block whose tail reads the mutated param.
 fn rewrite_unit_body(func: &mut IrFunction, mut_var: VarId, mut_ty: Ty) {
     func.ret_ty = mut_ty.clone();
-    let old_body = std::mem::replace(&mut func.body, unit_placeholder());
+    let mut old_body = std::mem::replace(&mut func.body, unit_placeholder());
+    let new_ret = func.ret_ty.clone();
+    pair_guard_exits(&mut old_body, func.is_effect, &new_ret, &mut |e| IrExpr {
+        ty: mut_ty.clone(),
+        span: e.span,
+        def_id: None,
+        kind: IrExprKind::Block {
+            stmts: vec![IrStmt { kind: IrStmtKind::Expr { expr: e }, span: None }],
+            expr: Some(Box::new(var_read(mut_var, mut_ty.clone()))),
+        },
+    });
     func.body = IrExpr {
         kind: IrExprKind::Block {
             stmts: vec![IrStmt { kind: IrStmtKind::Expr { expr: old_body }, span: None }],
@@ -811,6 +885,12 @@ fn rewrite_value_body(func: &mut IrFunction, vt: &mut VarTable, mut_var: VarId, 
     if let Some(ok_ty) = &single_layer {
         strip_ok_layer(&mut old_body, ok_ty);
     }
+    pair_guard_exits(&mut old_body, func.is_effect, &tuple_ty.clone(), &mut |e| IrExpr {
+        ty: tuple_ty.clone(),
+        span: e.span,
+        def_id: None,
+        kind: IrExprKind::Tuple { elements: vec![e, var_read(mut_var, mut_ty.clone())] },
+    });
     let tuple = IrExpr {
         kind: IrExprKind::Tuple {
             elements: vec![var_read(ret_var, orig_ty.clone()), var_read(mut_var, mut_ty)],
@@ -836,6 +916,72 @@ fn rewrite_value_body(func: &mut IrFunction, vt: &mut VarTable, mut_var: VarId, 
         span: None,
         def_id: None,
     };
+}
+
+/// A `guard c else v` in a move-mode fn's body RETURNS `v` from the fn, past
+/// the `(ret, buf)` / `buf` tail the rewrite built (#2907): the guard's value
+/// exit is paired with the buffer the same way (`pair`). A lambda's guards are
+/// the lambda's own exits and are left alone. In an EFFECT fn a raising else
+/// (`err(m)`, `err(m)!`, any Result-typed exit) is the err channel — it carries
+/// no buffer (#1576: the caller's slot keeps its pre-call binding) — so only
+/// a non-raising exit is paired there.
+fn pair_guard_exits(body: &mut IrExpr, is_effect: bool, new_ret: &Ty, pair: &mut dyn FnMut(IrExpr) -> IrExpr) {
+    struct Pairer<'a> {
+        is_effect: bool,
+        new_ret: &'a Ty,
+        pair: &'a mut dyn FnMut(IrExpr) -> IrExpr,
+    }
+    /// A raising `err(m)` / `err(m)!` exit of an effect fn is typed with the
+    /// fn's ORIGINAL ok type; the fn now returns `new_ret` through its lifted
+    /// carrier, so the raise is retyped to that carrier — the propagation
+    /// shape the guard's early return recognizes (`err(m)!` over the fn's own
+    /// Result). The err payload is untouched.
+    fn retype_raise(e: &mut IrExpr, new_ret: &Ty) {
+        match &mut e.kind {
+            IrExprKind::Block { stmts, expr: Some(t) } if stmts.is_empty() => {
+                retype_raise(t, new_ret);
+                e.ty = t.ty.clone();
+            }
+            IrExprKind::Unwrap { expr } | IrExprKind::Try { expr }
+                if matches!(expr.kind, IrExprKind::ResultErr { .. }) =>
+            {
+                retype_raise(expr, new_ret);
+                e.ty = new_ret.clone();
+            }
+            IrExprKind::ResultErr { .. } => {
+                if let Some(err_ty) = e.ty.result_err_ty() {
+                    e.ty = Ty::result(new_ret.clone(), err_ty);
+                }
+            }
+            _ => {}
+        }
+    }
+    fn raises(e: &IrExpr) -> bool {
+        match &e.kind {
+            IrExprKind::Block { stmts, expr: Some(t) } if stmts.is_empty() => raises(t),
+            IrExprKind::ResultErr { .. } | IrExprKind::Unwrap { .. } | IrExprKind::Try { .. } => true,
+            _ => e.ty.result_ok_ty().is_some(),
+        }
+    }
+    impl IrMutVisitor for Pairer<'_> {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            if !matches!(e.kind, IrExprKind::Lambda { .. }) {
+                walk_expr_mut(self, e);
+            }
+        }
+        fn visit_stmt_mut(&mut self, stmt: &mut IrStmt) {
+            walk_stmt_mut(self, stmt);
+            if let IrStmtKind::Guard { else_, .. } = &mut stmt.kind {
+                if self.is_effect && raises(else_) {
+                    retype_raise(else_, self.new_ret);
+                } else {
+                    let exit = std::mem::replace(else_, unit_placeholder());
+                    *else_ = (self.pair)(exit);
+                }
+            }
+        }
+    }
+    Pairer { is_effect, new_ret, pair }.visit_expr_mut(body);
 }
 
 /// Strip the single-layer effect Result off a declared-Result effect fn's
@@ -936,7 +1082,13 @@ fn rewrite_call_sites(program: &mut IrProgram, mut_fns: &MutFns) {
 /// NODE carries the lifted `Result[T, String]` carrier, not T — the caller's
 /// destructure element must be typed by the callee's declaration, never by
 /// the call expression (#1575; the same lifted-carrier trap as #1573).
-type MutFns = std::collections::HashMap<String, (usize, Ty, bool, Ty)>;
+type MutFns = std::collections::HashMap<String, MutEntry>;
+
+/// A fn's move-mode entry: its FIRST `mut` param (index, type), was-Unit, the
+/// raw payload type, and every further `mut` param (#2907). With extras the
+/// fn returns ALL its buffers — `(buf1, …, bufN)` for a was-Unit fn,
+/// `(ret, buf1, …, bufN)` otherwise — and each call site writes each back.
+type MutEntry = (usize, Ty, bool, Ty, Vec<(usize, Ty)>);
 
 /// The caller-side slot the mutated buffer writes back into.
 enum ArgPlace {
@@ -989,6 +1141,10 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
             Self::rotate_wrapper_into_block(expr);
             return;
         }
+        if self.result_payload_rotation_applies(expr) {
+            Self::rotate_wrapper_onto_tail(expr);
+            return;
+        }
 
         if almide_base::env::flag("ALMIDE_MP_PROBE")
             && let IrExprKind::Call { target, .. } = &expr.kind
@@ -999,9 +1155,13 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
             return;
         };
         let Some(name) = call_spelling(target) else { return };
-        let Some((idx, mut_ty, was_unit, callee_ret)) = self.lookup_mut_fn(&name).cloned() else {
+        let Some((idx, mut_ty, was_unit, callee_ret, extra)) = self.lookup_mut_fn(&name).cloned() else {
             return;
         };
+        if !extra.is_empty() {
+            self.rewrite_multi_call(expr, idx, mut_ty, was_unit, callee_ret, &extra);
+            return;
+        }
         let Some(arg) = args.get(idx) else { return };
         let place = mut_arg_place(arg);
         let span = expr.span;
@@ -1093,6 +1253,55 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
 }
 
 impl CallSiteRewriter<'_> {
+    /// A call to a fn with several `mut` params (#2907):
+    /// `{ let (__mp_res?, b1, …, bN) = <call>; <writeback each>; __mp_res | () }`.
+    fn rewrite_multi_call(
+        &mut self,
+        expr: &mut IrExpr,
+        idx: usize,
+        mut_ty: Ty,
+        was_unit: bool,
+        orig_ty: Ty,
+        extra: &[(usize, Ty)],
+    ) {
+        let span = expr.span;
+        let mut call = std::mem::replace(expr, unit_placeholder());
+        let IrExprKind::Call { args, .. } = &call.kind else { unreachable!("the caller matched a Call") };
+        let slots: Vec<(usize, Ty)> = std::iter::once((idx, mut_ty)).chain(extra.iter().cloned()).collect();
+        let places: Vec<ArgPlace> = slots.iter().map(|(i, _)| args.get(*i).map_or(ArgPlace::None, mut_arg_place)).collect();
+        let mut pats = Vec::new();
+        let mut elem_tys = Vec::new();
+        let res = (!was_unit).then(|| self.vt.alloc(sym("__mp_res"), orig_ty.clone(), Mutability::Let, None));
+        if let Some(r) = res {
+            pats.push(IrPattern::Bind { var: r, ty: orig_ty.clone() });
+            elem_tys.push(orig_ty.clone());
+        }
+        let mut writebacks = Vec::new();
+        for ((_, ty), place) in slots.iter().zip(places) {
+            let buf = self.vt.alloc(sym("__mp_buf"), ty.clone(), Mutability::Let, None);
+            pats.push(IrPattern::Bind { var: buf, ty: ty.clone() });
+            elem_tys.push(ty.clone());
+            let read = var_read(buf, ty.clone());
+            let kind = match place {
+                ArgPlace::Var(v) => IrStmtKind::Assign { var: v, value: read },
+                ArgPlace::Field(obj, field) => IrStmtKind::FieldAssign { target: obj, field, value: read },
+                ArgPlace::None => continue,
+            };
+            writebacks.push(IrStmt { kind, span });
+        }
+        call.ty = Ty::Tuple(elem_tys);
+        let mut stmts = vec![IrStmt {
+            kind: IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements: pats }, value: call },
+            span,
+        }];
+        stmts.extend(writebacks);
+        let (tail, ty) = match res {
+            Some(r) => (var_read(r, orig_ty.clone()), orig_ty),
+            None => (unit_placeholder(), Ty::Unit),
+        };
+        *expr = IrExpr { kind: IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, ty, span, def_id: None };
+    }
+
     /// Is `expr` Unwrap/Try over a JUST-REWRITTEN move-mode Block whose first stmt
     /// binds a mut-fn call (the `h(a)!` shape, #1207)? Structurally
     /// unambiguous: after the bottom-up walk, a USER-written `Bind` of a mut-fn
@@ -1111,20 +1320,75 @@ impl CallSiteRewriter<'_> {
             Some(IrStmt { kind: IrStmtKind::Bind { value, .. }, .. }) => {
                 let IrExprKind::Call { target, .. } = &value.kind else { return false };
                 let Some(name) = call_spelling(target) else { return false };
-                matches!(self.lookup_mut_fn(&name), Some(&(_, _, true, _)))
+                matches!(self.lookup_mut_fn(&name), Some((_, _, true, _, extra)) if extra.is_empty())
                     && matches!(tail.as_deref().map(|t| &t.kind), Some(IrExprKind::Unit))
             }
             Some(IrStmt { kind: IrStmtKind::BindDestructure { value, .. }, .. }) => {
                 let IrExprKind::Call { target, .. } = &value.kind else { return false };
                 let Some(name) = call_spelling(target) else { return false };
-                matches!(self.lookup_mut_fn(&name), Some(&(_, _, false, _)))
-                    && matches!(tail.as_deref().map(|t| &t.kind), Some(IrExprKind::Var { .. }))
+                let tail = tail.as_deref().map(|t| &t.kind);
+                match self.lookup_mut_fn(&name) {
+                    Some((_, _, false, payload, _)) => {
+                        payload.result_ok_ty().is_none() && matches!(tail, Some(IrExprKind::Var { .. }))
+                    }
+                    // A was-Unit fn with several `mut` params destructures its
+                    // buffer tuple under a Unit tail (#2907).
+                    Some((_, _, true, _, extra)) => !extra.is_empty() && matches!(tail, Some(IrExprKind::Unit)),
+                    None => false,
+                }
             }
             _ => false,
         }
     }
 
-    fn lookup_mut_fn(&self, name: &str) -> Option<&(usize, Ty, bool, Ty)> {
+    /// `h(a)!` where `h` is a NON-effect fn whose declared return is itself a
+    /// `Result` (#2907): its move-mode tuple is `(Result, Buf)`, a plain value,
+    /// so the `!` belongs to the destructured `__mp_res`, not to the call —
+    /// rotating it onto the call unwrapped the TUPLE (`unwrap-of:Tuple`). And
+    /// native mutates through `&mut` before the Result is inspected, so the
+    /// write-back runs on the err path too: the wrapper moves onto the tail,
+    /// after the write-back. (A declared-Result EFFECT fn pairs its stripped
+    /// ok payload, never a Result, and keeps the call rotation above.)
+    fn result_payload_rotation_applies(&self, expr: &IrExpr) -> bool {
+        let (IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner }) = &expr.kind
+        else {
+            return false;
+        };
+        let IrExprKind::Block { stmts, expr: tail } = &inner.kind else { return false };
+        let Some(IrStmt { kind: IrStmtKind::BindDestructure { value, .. }, .. }) = stmts.first() else {
+            return false;
+        };
+        let IrExprKind::Call { target, .. } = &value.kind else { return false };
+        let Some(name) = call_spelling(target) else { return false };
+        matches!(self.lookup_mut_fn(&name), Some((_, _, false, payload, _)) if payload.result_ok_ty().is_some())
+            && matches!(tail.as_deref().map(|t| &t.kind), Some(IrExprKind::Var { .. }))
+    }
+
+    /// Perform [`Self::result_payload_rotation_applies`]'s rotation:
+    /// `W{ Block{ stmts, res } }` → `Block{ stmts, W{ res } }`.
+    fn rotate_wrapper_onto_tail(expr: &mut IrExpr) {
+        let ty = expr.ty.clone();
+        let is_unwrap = matches!(expr.kind, IrExprKind::Unwrap { .. });
+        let (IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner }) =
+            std::mem::replace(&mut expr.kind, IrExprKind::Unit)
+        else {
+            unreachable!("result_payload_rotation_applies checked the wrapper kind");
+        };
+        let IrExprKind::Block { stmts, expr: Some(tail) } = inner.kind else {
+            unreachable!("result_payload_rotation_applies checked the block");
+        };
+        let span = tail.span;
+        let wrapped = if is_unwrap {
+            IrExprKind::Unwrap { expr: tail }
+        } else {
+            IrExprKind::Try { expr: tail }
+        };
+        let tail = IrExpr { kind: wrapped, ty: ty.clone(), span, def_id: None };
+        expr.kind = IrExprKind::Block { stmts, expr: Some(Box::new(tail)) };
+        expr.ty = ty;
+    }
+
+    fn lookup_mut_fn(&self, name: &str) -> Option<&MutEntry> {
         self.mut_fns.get(name).or_else(|| self.mut_fns.get(&scope_key(&self.scope, name)))
     }
 

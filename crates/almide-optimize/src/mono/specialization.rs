@@ -393,7 +393,18 @@ fn substitute_pattern_types(pattern: &mut IrPattern, bindings: &HashMap<String, 
         IrPattern::Tuple { elements } => { for e in elements { substitute_pattern_types(e, bindings); } }
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => { substitute_pattern_types(inner, bindings); }
         IrPattern::RecordPattern { fields, .. } => { for f in fields { if let Some(p) = &mut f.pattern { substitute_pattern_types(p, bindings); } } }
-        _ => {}
+        IrPattern::As { ty, inner, .. } => {
+            *ty = substitute_ty(ty, bindings);
+            substitute_pattern_types(inner, bindings);
+        }
+        // #2748: a list pattern's element and rest binds are specialized like
+        // every other bind — a generic `[x, ..] => x` kept `x: A` in the
+        // `__Int` instance and the structural wasm leg sized the bind as Unit.
+        IrPattern::List { elements, rest } => {
+            for e in elements { substitute_pattern_types(e, bindings); }
+            if let Some(r) = rest { substitute_pattern_types(r, bindings); }
+        }
+        IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => {}
     }
 }
 
@@ -403,7 +414,13 @@ fn substitute_stmt_types(stmt: &mut IrStmt, bindings: &HashMap<String, Ty>) {
             *ty = substitute_ty(ty, bindings);
             substitute_expr_types(value, bindings);
         }
-        IrStmtKind::BindDestructure { value, .. } | IrStmtKind::Assign { value, .. } => {
+        // #2748: the destructure's binds are specialized with its value — a
+        // generic `let (a, b) = p` kept `a: A` in the instance.
+        IrStmtKind::BindDestructure { pattern, value } => {
+            substitute_pattern_types(pattern, bindings);
+            substitute_expr_types(value, bindings);
+        }
+        IrStmtKind::Assign { value, .. } => {
             substitute_expr_types(value, bindings);
         }
         IrStmtKind::IndexAssign { index, value, .. } => {

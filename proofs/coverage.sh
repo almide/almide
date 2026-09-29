@@ -10,11 +10,17 @@
 #   bash proofs/coverage.sh --check    # same, explicit (what CI passes)
 #   bash proofs/coverage.sh --update   # additionally RAISE the baseline on gain
 #
-# Scope: instruments the almide-mir AND almide-codegen test suites, the
-# render_program sweep over all runnable spec (v1 path), and `almide test
-# spec/` through the CLI (frontend→codegen production path). The ratcheted
-# TOTAL spans every workspace crate linked into those binaries (the report
-# rows below are filtered for readability; the TOTAL is not). Two floors:
+# Scope: instruments the almide-mir, almide-codegen and almide-wasm test
+# suites; a sweep of every runnable spec program through the SHIPPING wasm
+# build (`almide build --target wasm`, structural leg forced) and through the
+# `almide verify` witness producer (MIR lowering + certificate producers);
+# and `almide test spec/` through the CLI (frontend→codegen production path).
+# The ratcheted TOTAL spans every workspace crate linked into those binaries
+# EXCEPT the incumbent WAT renderer (INCUMBENT_ONLY below): #2753 moved this
+# gate off `render_program` before #2761 deletes that renderer, so its files
+# leave the measured scope here rather than draining the TOTAL as dead code
+# (the report rows below are filtered by crate for readability; the TOTAL
+# is not). Two floors:
 # the TOTAL ratchet (proofs/coverage-baseline.txt) and per-file floors for
 # the #566 SAFETY SET (proofs/coverage-safety-baseline.txt) — the safety
 # files may not rot while the TOTAL holds.
@@ -96,7 +102,14 @@ sweep_stray_profraw() {
 }
 trap sweep_stray_profraw EXIT
 
-echo "== 1/4 instrumented build (almide-mir + almide-codegen + almide-wasm + almide-wasm-run + almide-rt-core tests, render_program, the almide CLI) =="
+# The incumbent WAT renderer and the wasm-only pipeline tail — exactly the
+# files #2761 deletes (#1696 step 5). No workload here drives them any more
+# (the render_program sweep was their only driver), so they are excluded from
+# the report and the TOTAL; their own unit tests still run in step 2. A
+# safety-floor row naming one of them fails as "not found in the report".
+INCUMBENT_ONLY='almide-mir/src/(render_wasm[^/]*\.rs|render_wasm/|wasm_op_tables\.rs|region_alloc\.rs|region_compact[^/]*\.rs|concat_to_append\.rs|scalar_call_inline\.rs|translation_validation\.rs|heap_cap\.rs|host_exports\.rs|pipeline_(b|c|link|global_slots|test_runner)\.rs)'
+
+echo "== 1/4 instrumented build (almide-mir + almide-codegen + almide-wasm + almide-wasm-run + almide-rt-core tests, the almide CLI) =="
 # almide-wasm joined the instrumented set at the Stage 2 commissioning: the
 # default `--target wasm` leg (and `almide test`'s wasm phase workload) runs
 # the structural emitter, so a spine-crate-only measurement halves the TOTAL
@@ -121,8 +134,6 @@ LLVM_PROFILE_FILE="$COVDIR/build/host-%m-%p.profraw" \
 tail -1 "$COVDIR/build-tests.log"
 grep -oE '"executable":"[^"]+"' "$COVDIR/build-tests.json" | sed -E 's/^"executable":"//; s/"$//' | LC_ALL=C sort -u >"$COVDIR/testbins.txt" || true
 LLVM_PROFILE_FILE="$COVDIR/build/host-%m-%p.profraw" \
-  cargo build --release -p almide-mir --example render_program --target-dir "$COVDIR/t" 2>&1 | tail -1
-LLVM_PROFILE_FILE="$COVDIR/build/host-%m-%p.profraw" \
   cargo build --release --bin almide --target-dir "$COVDIR/t" 2>&1 | tail -1
 
 echo "== 2/4 run the test suites =="
@@ -146,16 +157,42 @@ for tb in $TESTBINS; do
 done
 echo "  test binaries run: $i"
 
-echo "== 3/4 workloads: render_program over ALL runnable spec + the v0 CLI over spec =="
-RP="$COVDIR/t/release/examples/render_program"
+echo "== 3/4 workloads: the shipping wasm build + the witness producer over ALL runnable spec, the v0 CLI over spec =="
 CLI="$COVDIR/t/release/almide"
-n=0
-for f in $(find spec -name '*.almd' | LC_ALL=C sort); do
-    grep -q 'fn main' "$f" || continue
-    LLVM_PROFILE_FILE="$COVDIR/rp-%m.profraw" "$RP" "$f" >/dev/null 2>&1 || true
-    n=$((n+1))
-done
-echo "  fixtures rendered (v1 path): $n"
+# Every runnable spec program goes through the two paths that SURVIVE the
+# incumbent's deletion (#2753; this sweep drove the incumbent's
+# `render_program` before):
+#   - `almide build --target wasm` with the structural leg forced — the
+#     default wasm emitter (almide-wasm) and its route. Forced, so a wall is a
+#     wall and never an incumbent fallback that would measure deleted code.
+#   - `almide verify --emit` — the untrusted producer only: MIR lowering and
+#     the ownership / name / capability witnesses (`certificate*.rs`,
+#     `pipeline_witnesses.rs`). With no `almide-verify` beside the binary it
+#     exits 127 after writing the bundle; the producer has already run.
+# The profile names are per-workload so a single workload's contribution can
+# be isolated from the profraw set (the #2753 mutation evidence did that).
+# `%4m`, not `%p`: a per-process file made ~1,900 raw profiles (tens of GB,
+# and 3 minutes of step 4/4 merging them) — the `%Nm` pool merges online
+# across processes, which is also what makes the parallel sweep safe.
+SWEEP_JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+mkdir -p "$COVDIR/sweep"
+find spec -name '*.almd' | LC_ALL=C sort | while read -r f; do
+    if grep -q 'fn main' "$f"; then printf '%s\n' "$f"; fi
+done > "$COVDIR/sweep.list"
+n="$(wc -l < "$COVDIR/sweep.list" | tr -d ' ')"
+nw="$(tr '\n' '\0' < "$COVDIR/sweep.list" | COVDIR="$COVDIR" CLI="$CLI" xargs -0 -n 1 -P "$SWEEP_JOBS" sh -c '
+    out="$COVDIR/sweep/$$"
+    if ALMIDE_WASM_STRUCTURAL=1 LLVM_PROFILE_FILE="$COVDIR/wasm-%4m.profraw" \
+         "$CLI" build "$1" --target wasm -o "$out.wasm" >/dev/null 2>&1; then echo emitted; fi
+    LLVM_PROFILE_FILE="$COVDIR/verify-%4m.profraw" \
+      "$CLI" verify "$1" --emit "$out.bundle" >/dev/null 2>&1
+    rm -f "$out.wasm" "$out.bundle"
+    exit 0
+' sh | grep -c emitted || true)"
+echo "  runnable spec programs: $n (structural wasm build emitted $nw; witness producer ran on all; $SWEEP_JOBS jobs)"
+# No vacuous sweep: a CLI that emits nothing (a broken build, a renamed flag)
+# would still leave profraw from the other workloads.
+[ "$nw" -gt 0 ] || { echo "coverage: the structural wasm sweep emitted NOTHING — the workload went blind"; exit 1; }
 # The v0 PRODUCTION path (almide-codegen walker/emit): `almide test` compiles +
 # runs every test-block file through the full frontend→codegen pipeline.
 LLVM_PROFILE_FILE="$COVDIR/cli-%m-%p.profraw" "$CLI" test spec/ >/dev/null 2>&1 || true
@@ -199,11 +236,11 @@ echo "== 4/4 merge + report (compiler crate lines) =="
 nprof="$(ls "$COVDIR"/*.profraw 2>/dev/null | wc -l | tr -d ' ')"
 [ "$nprof" -gt 0 ] || { echo "coverage: NO profraw produced — measurement failed"; exit 1; }
 "$LLVM_BIN/llvm-profdata" merge -sparse "$COVDIR"/*.profraw -o "$COVDIR/all.profdata"
-OBJS="-object $RP -object $CLI"
+OBJS="-object $CLI"
 for tb in $TESTBINS; do OBJS="$OBJS -object $tb"; done
 REPORT="$("$LLVM_BIN/llvm-cov" report $OBJS \
     -instr-profile="$COVDIR/all.profdata" \
-    -ignore-filename-regex='(\.cargo|rustc|/tests?/|tests_part|examples/|/release/build/)' 2>/dev/null \
+    -ignore-filename-regex="(\\.cargo|rustc|/tests?/|tests_part|examples/|/release/build/|$INCUMBENT_ONLY)" 2>/dev/null \
   | awk 'NR<=2 || /almide-(mir|codegen|frontend|wasm|wasm-run)\// || /^TOTAL/' | grep -vE 'tests?_part')"
 # The full per-file table goes into a collapsed group so a ratchet slide can be
 # traced to its files from the log alone; the tail stays as the summary.
@@ -255,7 +292,7 @@ fi
 # stale); `--update` raises floors to the measured value (never lowers).
 SAFETY_FILE="$ROOT/proofs/coverage-safety-baseline.txt"
 if [ -f "$SAFETY_FILE" ]; then
-    FULL_REPORT="$("$LLVM_BIN/llvm-cov" report $OBJS -instr-profile="$COVDIR/all.profdata" 2>/dev/null)"
+    FULL_REPORT="$("$LLVM_BIN/llvm-cov" report $OBJS -instr-profile="$COVDIR/all.profdata" -ignore-filename-regex="$INCUMBENT_ONLY" 2>/dev/null)"
     fail=0
     updated=""
     while read -r sf floor; do

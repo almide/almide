@@ -8,6 +8,10 @@ use wasm_encoder::BlockType;
 use crate::emitter::Emitter;
 use crate::*;
 
+// Loop statements and break/continue (#2745), split for the file budget.
+#[path = "stmts_loop.rs"]
+mod stmts_loop;
+
 impl Emitter<'_> {
     /// Statement position: Unit-typed shapes only (blocks, calls, control).
     pub(crate) fn lower_stmt_expr(&mut self, e: &IrExpr) -> Result<(), EmitError> {
@@ -39,15 +43,10 @@ impl Emitter<'_> {
             }
             IrExprKind::If { cond, then, else_ } => self.lower_stmt_if(cond, then, else_),
             IrExprKind::While { cond, body } => self.lower_while(cond, body),
-            // Match opens labels the walker does not track — suspend the
-            // loop context so a Continue inside an arm walls honestly
-            // instead of branching to the wrong depth.
-            IrExprKind::Match { subject, arms } => {
-                let saved = self.loop_ctl.take();
-                let r = self.lower_match(subject, arms, None).map(|_| ());
-                self.loop_ctl = saved;
-                r
-            }
+            // A statement-position match: the arm chain counts its own
+            // if_ labels into the loop context (#2745), so a `break` /
+            // `continue` in an arm reaches the right depth.
+            IrExprKind::Match { subject, arms } => self.lower_match(subject, arms, None).map(|_| ()),
             IrExprKind::Continue => match self.loop_ctl {
                 Some((extra, _)) => {
                     self.f.instructions().br(extra);
@@ -104,56 +103,6 @@ impl Emitter<'_> {
         }
     }
 
-    /// `while`: block { loop { !cond → br out; body; br loop } }.
-    /// `continue` brs to the loop head (the next cond CHECK, which
-    /// charges — the interp's per-check meter), `break` to the block.
-    fn lower_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> Result<(), EmitError> {
-        // #2150: one copy-on-write judge per loop entry for a list the loop
-        // reaches only element-wise — cleared before the unrolled lane too,
-        // which runs copies of this same condition and body.
-        let flags = self.hoist_cow_flags(Some(cond), body)?;
-        // Counted-shape fast lane (unroll.rs): on `true` the rolled loop
-        // below drains the remainder iterations.
-        let _ = self.try_unroll_while(cond, body)?;
-        // #2319: element counts this loop cannot change are loaded once,
-        // before the loop — the bounds checks inside read the local.
-        let hoisted = self.hoist_invariant_counts(Some(cond), body)?;
-        self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
-        // Deterministic meter: one loop-head charge per condition
-        // CHECK (n iterations = n+1 checks), ALS-DT2.
-        self.emit_det_charge_const(1);
-        self.lower(cond, Some(BOOL))?;
-        self.f.instructions().i32_eqz().br_if(1);
-        self.lower_loop_body(body, false)?;
-        self.f.instructions().br(0).end().end();
-        self.drop_hoisted_counts(hoisted);
-        self.drop_cow_flags(flags);
-        Ok(())
-    }
-
-    /// A loop body with break/continue wired. For-in bodies sit in an
-    /// extra block so `continue` still reaches the STEP code after it;
-    /// a while `continue` brs straight to the loop head (the next cond
-    /// check). break_delta = labels from the continue target up to the
-    /// exit block (while: 1; for-in: 2 — the inner block adds one).
-    fn lower_loop_body(&mut self, body: &[IrStmt], for_in: bool) -> Result<(), EmitError> {
-        let saved = self.loop_ctl.take();
-        if for_in {
-            self.f.instructions().block(BlockType::Empty);
-            self.loop_ctl = Some((0, 2));
-        } else {
-            self.loop_ctl = Some((0, 1));
-        }
-        for st in body {
-            self.lower_stmt(st)?;
-        }
-        if for_in {
-            self.f.instructions().end();
-        }
-        self.loop_ctl = saved;
-        Ok(())
-    }
-
     /// Unit-position `if`: both arms are statement bodies. The if_
     /// label shifts break/continue targets one deeper.
     fn lower_stmt_if(
@@ -187,6 +136,9 @@ impl Emitter<'_> {
     /// would skip their exit bookkeeping on this early return, and
     /// main's raise-abort frame is a different shape — both wall.
     fn lower_stmt_guard(&mut self, cond: &IrExpr, else_: &IrExpr) -> Result<(), EmitError> {
+        if self.try_lower_guard_loop_ctl(cond, else_)? {
+            return Ok(());
+        }
         if self.region_repair.is_some() {
             return unsup("guard-in-region-arm");
         }
@@ -202,7 +154,8 @@ impl Emitter<'_> {
                 // Result` (#1968), routing a correct program to the
                 // incumbent (#1967). The native walker strips the same
                 // wrapper (#1926).
-                let ret_direct = match &else_.kind {
+                let bare = crate::data::err_channel::through_empty_blocks(else_);
+                let ret_direct = match &bare.kind {
                     IrExprKind::Unwrap { expr } | IrExprKind::Try { expr }
                         if matches!(want, SliceTy::Result(..))
                             && slice_ty_of(&expr.ty, self.types) == Some(want) =>
@@ -740,59 +693,19 @@ impl Emitter<'_> {
 impl Emitter<'_> {
     /// `p.field = v` on a record var: copy-on-write write-back — fresh
     /// block, one slot replaced, rebound. Split from `lower_stmt` for the
-    /// complexity budget. Also the path `list.push` / `list.clear` on a
-    /// record field desugar into (`list_mut.rs`, #2411).
+    /// complexity budget; the core is `field_assign_with` (list_mut.rs),
+    /// which the record-field forms of the mut list/map ops share (#2411).
     pub(crate) fn lower_field_assign(
         &mut self,
         target: &almide_ir::VarId,
         field: &almide_base::intern::Sym,
         value: &IrExpr,
     ) -> Result<(), EmitError> {
-                // C-319 residual: only the Assign form writes THROUGH a
-                // shared cell — a field write against a cell var would land
-                // in the raw local and silently diverge. Refuse honestly.
-                if self.cells.contains(target) {
-                    return unsup("cell-write:field-assign");
-                }
-                let (slot, declared) = match self.locals.get(target) {
-                    Some(&(idx, d)) => (Ok(idx), d),
-                    None => match self.globals.get(&(self.var_space, *target)) {
-                        Some(&(gidx, d)) => (Err(gidx), d),
-                        None => return unsup("field-assign:unmapped"),
-                    },
-                };
-                let SliceTy::Named(ti) = declared else {
-                    return unsup(&format!("field-assign-of:{declared:?}"));
-                };
-                let (fty, off) = {
-                    let crate::types_table::NamedDef::Record(r) = self.types.def(ti) else {
-                        return unsup("field-assign-nonrecord");
-                    };
-                    let Some(fi) = r.fields.iter().find(|f| f.name == field.as_str()) else {
-                        return unsup(&format!("field-assign-unknown:{field}"));
-                    };
-                    (fi.ty, fi.offset)
-                };
-                let hb = self.hold_i32()?;
-                match slot {
-                    Ok(idx) => self.f.instructions().local_get(idx),
-                    Err(gidx) => self.f.instructions().global_get(gidx),
-                };
-                let copy = self.copy_fn_of(SliceTy::Named(ti));
-                self.f.instructions().call(copy).local_tee(hb);
-                // The replaced field's credit goes with it (stage 2c-ii).
-                if let Some(dec) = self.elem_is_handle(fty).then(|| self.dec_fn_of(fty)) {
-                    self.f.instructions().local_get(hb).i32_load(slot_memarg(off)).call(dec);
-                }
-                self.lower(value, Some(fty))?;
-                self.rc_share_guard(value, fty);
-                self.store_ty_slot(fty, off);
-                self.f.instructions().local_get(hb);
-                match slot {
-                    Ok(idx) => self.f.instructions().local_set(idx),
-                    Err(gidx) => self.f.instructions().global_set(gidx),
-                };
-                self.release_i32();
-                Ok(())
+        self.field_assign_with(target, field, |s, fty| {
+            s.lower(value, Some(fty))?;
+            s.rc_share_guard(value, fty);
+            Ok(())
+        })
     }
 }
+

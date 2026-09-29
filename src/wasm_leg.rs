@@ -55,6 +55,27 @@ fn lower_to_ir_impl(
     lower_resolved(path, source_text, program, resolved, tests)
 }
 
+/// An explicitly imported stdlib module (`import bytes`) lowers its `= _`
+/// intrinsic declarations as `Hole` bodies. Where the self-host registry
+/// implements that surface, the declaration is dropped so the call links the
+/// registry's body exactly as it does when the module is auto-imported and
+/// never lowered (#2747: `bytes.write_uint16` walled `expr:Hole` behind an
+/// `import bytes` and lowered without one).
+fn drop_registered_intrinsic_stubs(name: &str, module: &mut crate::ir::IrModule) {
+    if !crate::stdlib::is_stdlib_module(name) && !crate::stdlib::is_bundled_module(name) {
+        return;
+    }
+    let registered = |f: &crate::ir::IrFunction| {
+        let surface = format!("{name}.{}", f.name.as_str());
+        almide_types::self_host_registry::self_host_runtime()
+            .iter()
+            .any(|(_, maps)| maps.iter().any(|(_, s)| *s == surface))
+    };
+    module
+        .functions
+        .retain(|f| !(matches!(f.body.kind, crate::ir::IrExprKind::Hole) && registered(f)));
+}
+
 /// Where the modules an entry program imports come from (#2554).
 ///
 /// The CLI reads them off disk through the project resolver; a consumer
@@ -145,8 +166,16 @@ pub(crate) fn lower_resolved(
         // inside a linked stub returned the codepoint). Only fully
         // self-contained modules (every fn has a real body — url, html) are
         // lowered and linked; everything else stays bridge-resolved.
-        let has_bodyless = mod_prog.decls.iter().any(|d| matches!(d, crate::ast::Decl::Fn { body: None, .. }));
-        if has_bodyless {
+        // A bodyless `@extern(...)` decl is not a surface (#2878): it is the
+        // spec's other spelling of `fn f(...) -> T = _` with an extern
+        // binding, lowered to the same Hole body, and the emitter turns it
+        // into a declared import (or an `extern-native` wall). Skipping its
+        // module sent every call into that module's ORDINARY fns to a
+        // `call:` wall.
+        let has_bridge_surface = mod_prog.decls.iter().any(|d| {
+            matches!(d, crate::ast::Decl::Fn { body: None, extern_attrs, .. } if extern_attrs.is_empty())
+        });
+        if has_bridge_surface {
             continue;
         }
         let saved_self = checker.env.self_module_name;
@@ -171,9 +200,10 @@ pub(crate) fn lower_resolved(
         let import_table_name = self_name.as_deref().unwrap_or(name);
         let (mod_table, _) = crate::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
         let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
-        let mod_ir_module = crate::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
+        let mut mod_ir_module = crate::lower::lower_module(name, mod_prog, &checker.env, &checker.type_map, versioned);
         checker.env.import_table = saved_table;
         checker.env.self_module_name = saved_self;
+        drop_registered_intrinsic_stubs(name, &mut mod_ir_module);
         ir.modules.push(mod_ir_module);
     }
     // #2865: a module read off disk is the package's own, whatever its key
@@ -190,7 +220,9 @@ pub(crate) fn lower_resolved(
         // The structural leg's in-test assert lowering (the frontend's
         // non-test abort form), then the shared runner synthesis.
         almide_driver::test_runner::desugar_test_asserts(&mut ir);
-        almide_driver::test_runner::synthesize_test_runner_main(&mut ir, run_filter)
+        // Spaced (#2751): this leg keeps per-module VarTables, so a module's
+        // re-inits run in a fn of its own space.
+        almide_driver::test_runner::synthesize_test_runner_main_spaced(&mut ir, run_filter)
             .map_err(|e| format!("tests: {e}"))?;
     }
     link_self_host(&mut ir, &mut checker, &sources);
@@ -267,6 +299,11 @@ fn link_self_host(
                         // linked lossy decoder (same WHATWG algorithm).
                         if module.as_str() == "string" && func.as_str() == "from_bytes" {
                             out.insert("bytes.to_string_lossy".to_string());
+                        }
+                        // testing.assert_contains lowers as a native arm
+                        // over the linked string.contains (#2743).
+                        if module.as_str() == "testing" && func.as_str() == "assert_contains" {
+                            out.insert("string.contains".to_string());
                         }
                         out.insert(format!("{}.{}", module.as_str(), func.as_str()));
                     }

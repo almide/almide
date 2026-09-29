@@ -197,6 +197,7 @@ pub fn generate_record_drop_sources(
         }
         let tname = decl.name.as_str();
         let fname = drop_fn_ident(tname);
+        let tname = &generated_type_spelling(tname);
         let field_tys: Vec<Ty> = fields.iter().map(|f| f.ty.clone()).collect();
         out.push_str(&format!("fn __drop_{fname}(e: {tname}) -> Unit = {{\n"));
         out.push_str("  let h = prim.handle(e)\n");
@@ -352,6 +353,7 @@ fn emit_record_wrapper_drops(
         }
         let tname = decl.name.as_str();
         let fname = drop_fn_ident(tname);
+        let tname = &generated_type_spelling(tname);
         out.push_str(&format!(
             "fn __drop_opt_{fname}(e: Option[{tname}]) -> Unit = {{\n  match e {{\n    some(r) => (),\n    none => (),\n  }}\n}}\n"
         ));
@@ -389,6 +391,7 @@ fn emit_record_wrapper_drops(
                 continue;
             }
             let fname = drop_fn_ident(tname);
+            let tname = &generated_type_spelling(tname);
             out.push_str(&format!(
                 "fn __drop_opt_{fname}(e: Option[{tname}]) -> Unit = {{\n  match e {{\n    some(r) => (),\n    none => (),\n  }}\n}}\n"
             ));
@@ -425,6 +428,7 @@ fn emit_record_wrapper_drops(
         }
         let tname = decl.name.as_str();
         let fname = drop_fn_ident(tname);
+        let tname = &generated_type_spelling(tname);
         out.push_str(&format!(
             "fn __drop_tup_int_{fname}(e: ({tname}, Int)) -> Unit = {{
                  let h = prim.handle(e)
@@ -506,6 +510,7 @@ fn emit_record_list_wrapper_drops(out: &mut String, rec_names: &std::collections
         // fn NAMES sanitize the module prefix; the `List[{rn}]` / `e: {rn}` type annotations keep
         // the dotted module-qualified name (a valid Almide type reference).
         let rn_fn = drop_fn_ident(rn);
+        let rn = &generated_type_spelling(rn);
         out.push_str(&format!(
             "fn __drop_list_{rn_fn}(xs: List[{rn}]) -> Unit = {{\n  \
                let h = prim.handle(xs)\n  \

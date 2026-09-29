@@ -405,9 +405,14 @@ fn render_stmt_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
         // #617: the static stores the RAW Bytes/Matrix shape — un-wrap an
         // AlmideRcCow-shaped value at the assign boundary (identity otherwise).
         let value_s = super::expressions::rc_cow_unglue(value_s.clone(), &value.ty);
+        // The value is evaluated BEFORE the thread-local is entered: inside
+        // the `with` closure a `?` from `expr!` (a propagating value) would
+        // return from the closure, which returns `()`, not from the fn —
+        // rustc E0277 on `g = f()!`. Rust evaluates an assignment's value
+        // before its place anyway, so hoisting it changes no order.
         return match info.storage {
-            Tls::Cell => format!("{}.with(|c| c.set({}));", info.static_name, value_s),
-            Tls::RcRefCell => format!("{}.with(|c| *c.borrow_mut() = std::rc::Rc::new(({}).into()));", info.static_name, value_s),
+            Tls::Cell => format!("{{ let __almide_assigned = {}; {}.with(|c| c.set(__almide_assigned)); }}", value_s, info.static_name),
+            Tls::RcRefCell => format!("{{ let __almide_assigned = {}; {}.with(|c| *c.borrow_mut() = std::rc::Rc::new((__almide_assigned).into())); }}", value_s, info.static_name),
             Tls::Const | Tls::Lazy { .. } => unreachable!(
                 "[COMPILER BUG] assignment to immutable global `{}` reached codegen",
                 info.static_name

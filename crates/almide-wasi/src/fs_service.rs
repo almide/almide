@@ -62,6 +62,16 @@ pub const FS_SERVICE_OPS: &[(i32, &str, i32)] = &[
     (42, "op_nop", 42),
     (51, "op_read_lines", 51),
     (52, "op_read_lines", 52),
+    // 61: fold_lines_range (and fold_lines_chunked's worker read) — op 1's
+    // body under the range's name; the guest walks the text (#2744).
+    // 62: fold_lines_chunked's size probe — op 17's body under its name.
+    (61, "op_read_text", 61),
+    (62, "op_file_size", 62),
+    // 63/64: the Bytes-typed readers, ops 14/25's bodies under the writer's
+    // call name (#2890 — sharing 14/25 said `fs.read_bytes` where native
+    // says `fs.read_bytes_raw`).
+    (63, "op_read_bytes", 63),
+    (64, "op_read_bytes_if_exists", 64),
 ];
 
 /// Whether the fs service answers `op`.
@@ -98,6 +108,10 @@ const FS_OP_NAMES: &[(i32, &str)] = &[
     (39, "fs.glob"),
     (51, "fs.fold_lines"),
     (52, "fs.for_each_line"),
+    (61, "fs.fold_lines_range"),
+    (62, "fs.fold_lines_chunked"),
+    (63, "fs.read_bytes_raw"),
+    (64, "fs.read_bytes_raw_if_exists"),
 ];
 
 /// The call name of an fs op (`"fs"` for one without its own row).

@@ -181,6 +181,7 @@ fn generate_named_record_reprs(
         records_needing_list_repr(&record_decls, &rec_names, rec_emittable, interp_containers);
     for (tname, fields) in rec_sorted.iter() {
         let fname = drop_fn_ident(tname);
+        let tname = &generated_type_spelling(tname);
         out.push_str(&format!("fn __repr_rec_{fname}(e: {tname}) -> String = {{
 "));
         out.push_str("  let h = prim.handle(e)
@@ -275,6 +276,7 @@ fn emit_record_field_read(
                 _ => {
                     if let Some(fv) = variant_field_name(ty, &names) {
                         let fv_fn = drop_fn_ident(&fv);
+                        let fv = &generated_type_spelling(&fv);
                         out.push_str(&format!(
                             "  let v{i}: {fv} = prim.load_handle(h + {off})
   let f{i} = __repr_{fv_fn}(v{i})
@@ -282,6 +284,7 @@ fn emit_record_field_read(
                         ));
                     } else if let Some(r) = record_field_of(ty, &rec_names) {
                         let r_fn = drop_fn_ident(&r);
+                        let r = &generated_type_spelling(&r);
                         out.push_str(&format!(
                             "  let v{i}: {r} = prim.load_handle(h + {off})
   let f{i} = __repr_rec_{r_fn}(v{i})
@@ -290,6 +293,7 @@ fn emit_record_field_read(
                     } else {
                         let r = list_record_field_of(ty, &rec_names).expect("fixpoint-admitted");
                         let r_fn = drop_fn_ident(&r);
+                        let r = &generated_type_spelling(&r);
                         out.push_str(&format!(
                             "  let v{i}: List[{r}] = prim.load_handle(h + {off})
   let f{i} = __repr_list_rec_{r_fn}(v{i})
@@ -305,6 +309,7 @@ fn emit_record_field_read(
 /// sweep, #852).
 fn emit_record_list_repr(out: &mut String, r: &str) {
         let r_fn = drop_fn_ident(r);
+        let r = &generated_type_spelling(r);
         out.push_str(&format!(
             "fn __repr_list_rec_{r_fn}_go(h: Int, n: Int, i: Int, acc: String) -> String =
                  if i >= n then acc + \"]\"
@@ -361,6 +366,7 @@ fn generate_container_interp_reprs(
             continue;
         }
         let r_fn = drop_fn_ident(r);
+        let r = &generated_type_spelling(r);
         out.push_str(&format!(
             "fn __repr_opt_rec_{r_fn}(o: Option[{r}]) -> String = {{
                  let h = prim.handle(o)
@@ -379,6 +385,7 @@ fn generate_container_interp_reprs(
             continue;
         }
         let v_fn = drop_fn_ident(v);
+        let v = &generated_type_spelling(v);
         out.push_str(&format!(
             "fn __repr_opt_{v_fn}(o: Option[{v}]) -> String = {{
                  let h = prim.handle(o)
@@ -397,6 +404,7 @@ fn generate_container_interp_reprs(
             continue;
         }
         let v_fn = drop_fn_ident(v);
+        let v = &generated_type_spelling(v);
         out.push_str(&format!(
             "fn __repr_list_{v_fn}_go(h: Int, n: Int, i: Int, acc: String) -> String =
                  if i >= n then acc + \"]\"
@@ -420,6 +428,7 @@ fn generate_container_interp_reprs(
     // through the element repr. Empty renders `[:]`.
     let mut map_repr = |elem: &str, elem_call: &str| {
         let e_fn = drop_fn_ident(elem);
+        let elem = &generated_type_spelling(elem);
         // map_hobj's SPLIT layout: @4 = entry count n; key i @ 12+i*8, value i @ 12+(n+i)*8.
         out.push_str(&format!(
             "fn __repr_map_{e_fn}_go(h: Int, n: Int, i: Int, acc: String) -> String =

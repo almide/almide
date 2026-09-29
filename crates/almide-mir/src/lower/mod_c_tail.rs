@@ -545,6 +545,7 @@ include!("record_defaults.rs");
 include!("desugar_guard.rs");
 include!("desugar_guard_b.rs");
 include!("desugar_guard_c.rs");
+include!("desugar_main_payload.rs");
 include!("cells.rs");
 include!("inline_scalar_fns.rs");
 include!("mod_p2.rs");

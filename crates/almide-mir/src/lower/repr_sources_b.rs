@@ -259,7 +259,7 @@ fn emit_emittable_variant_bodies(
         let tname = decl.name.as_str();
         let fname = drop_fn_ident(tname);
         let flat = flatten_variant_cases(cases, None);
-        emit_variant_repr_body(out, &fname, tname, &flat, scalar_rec_names, names);
+        emit_variant_repr_body(out, &fname, &generated_type_spelling(tname), &flat, scalar_rec_names, names);
     }
 }
 
@@ -360,7 +360,7 @@ fn emit_variant_inst_reprs(
             inst_needs_list_int = true;
         }
         let key = repr_inst_ident(iname, iargs);
-        let tspell = format!("{}[{}]", iname, spells.join(", "));
+        let tspell = format!("{}[{}]", generated_type_spelling(iname), spells.join(", "));
         emit_variant_repr_body(out, &key, &tspell, &flat, scalar_rec_names, names);
         emitted_insts.push((iname.clone(), iargs.clone(), tspell));
     }

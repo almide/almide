@@ -184,8 +184,8 @@ fn build_ir_with_drops(
     let mut ir = if drops.trim().is_empty() {
         ir
     } else {
-        source_to_ir_with(
-            &format!("{source}\n{value_core_src}\n{drops}"),
+        program_to_ir_with(
+            parse_with_generated_or_wall(source, &format!("{value_core_src}\n{drops}"))?,
             self_modules,
         )?
     };
@@ -221,6 +221,49 @@ fn build_ir_with_drops(
             .map_err(|e| LowerError::Unsupported(e.0))?;
     }
     Ok(ir)
+}
+
+/// Parse the entry program with compiler-generated source appended — the
+/// helpers `build_ir_with_drops` re-lowers with, and the stdlib source they
+/// call. The text is the one `{source}\n{generated}` has always been; what
+/// changes is how the generated part names a builtin (#2870).
+///
+/// The appended source is checked in the ENTRY PROGRAM's scope, where a
+/// file's own declaration answers its bare spelling of a builtin's name
+/// (#2858). Read there, `fn __repr_quote(s: String)` took the user's `type
+/// String`, and `fn __repr_rec_Int(e: Int)` could not be both the user's
+/// `Int` and the builtin its body loads. Generated source never resolves a
+/// builtin through the user's scope: every bare builtin type name it spells
+/// is lexed as the resolver's generated-builtin spelling, which only the
+/// builtin answers. A user type it names is spelled so that it cannot be
+/// read as a builtin: qualified, `self.Int` for the entry program's
+/// ([`crate::lower::generated_type_spelling`]), which is why a name after a
+/// `.` is left alone.
+fn parse_with_generated_or_wall(
+    source: &str,
+    generated: &str,
+) -> Result<almide_lang::ast::Program, LowerError> {
+    use almide_frontend::canonicalize::resolve::generated_builtin_spelling;
+    use almide_lang::lexer::TokenType;
+    let text = format!("{source}\n{generated}");
+    // Lines are 1-based; the source's last line is `newlines + 1`, and the
+    // joining `\n` ends it, so every generated token starts below it.
+    let last_source_line = source.matches('\n').count() + 1;
+    let mut tokens = Lexer::tokenize(&text);
+    for i in 0..tokens.len() {
+        // Only a BARE spelling is ever a file's own type (#2839): a qualified
+        // `self.Int` and an applied `Matrix[Float]` are left as written.
+        let after_dot = i > 0 && tokens[i - 1].token_type == TokenType::Dot;
+        let applied = tokens.get(i + 1).is_some_and(|n| n.token_type == TokenType::LBracket);
+        let t = &mut tokens[i];
+        if t.line <= last_source_line || t.token_type != TokenType::TypeName || after_dot || applied {
+            continue;
+        }
+        if let Some(spelled) = generated_builtin_spelling(&t.value) {
+            t.value = spelled;
+        }
+    }
+    parse_tokens_or_wall(&text, tokens)
 }
 
 include!("pipeline_test_runner.rs");

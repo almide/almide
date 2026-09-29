@@ -1,0 +1,7 @@
+type Call = { id: String }
+
+type Msg = { role: String, body: String = "", calls: List[Call] = [] }
+
+fn make(r: String, b: String) -> Msg = { role: r, body: b, calls: [
+  Call { id: "c1" }
+] }

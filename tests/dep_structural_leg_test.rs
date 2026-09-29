@@ -43,7 +43,10 @@ fn scratch() -> std::path::PathBuf {
     );
     write(
         &root.join("shapes").join("src").join("path.almd"),
-        "fn close() -> String = \"Z\"\n",
+        // `close` calls a sibling in its own submodule: the structural leg
+        // resolves that call against the module `shapes.path`, not the
+        // package's first segment (#2904 — every such call walled `call:`).
+        "fn letter(n: Int) -> String = if n > 0 then \"Z\" else letter(n + 1)\n\nfn close() -> String = letter(0)\n",
     );
     write(
         &root.join("shapes").join("src").join("mod.almd"),

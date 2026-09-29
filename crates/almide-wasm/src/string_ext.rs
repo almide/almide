@@ -178,8 +178,25 @@ impl Emitter<'_> {
         Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(STR)))))
     }
 
-    /// mut append (native s.push_str): var write-back of concat.
+    /// mut append (native s.push_str): var write-back of concat. On a
+    /// record var's String FIELD (#2747) it is the field write
+    /// `h.f = h.f + x` through `lower_field_assign`'s copy-on-write rebind,
+    /// the route `list.push(h.f, v)` takes (#2411).
     fn lower_string_push(&mut self, v: &IrExpr, x: &IrExpr) -> ArmResult {
+        if let Some((id, field)) = crate::list_mut::record_field_receiver(v) {
+            let grown = IrExpr {
+                kind: IrExprKind::BinOp {
+                    op: almide_ir::BinOp::ConcatStr,
+                    left: Box::new(v.clone()),
+                    right: Box::new(x.clone()),
+                },
+                ty: v.ty.clone(),
+                span: None,
+                def_id: None,
+            };
+            self.lower_field_assign(&id, &field, &grown)?;
+            return Ok(None);
+        }
         let IrExprKind::Var { id } = &v.kind else {
             return unsup("string-push-nonvar");
         };
@@ -200,6 +217,9 @@ impl Emitter<'_> {
     /// fresh empty block — `push`'s write-back with nothing appended. An
     /// alias bound before the clear keeps the old text (value semantics).
     fn lower_string_clear(&mut self, v: &IrExpr) -> ArmResult {
+        if self.lower_field_clear(v)? {
+            return Ok(None);
+        }
         let IrExprKind::Var { id } = &v.kind else {
             return unsup("string-clear-nonvar");
         };

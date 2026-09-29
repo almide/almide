@@ -1,0 +1,3 @@
+expects_code = "E001"
+expects_error = "type mismatch in match arm: expected String but got Int — String is the declared return type, and the arm at line 5 produces it"
+expects_line_col = "4:8"

@@ -1,0 +1,36 @@
+// @contract: C-336
+// #2751: the per-test re-init of a MODULE's mutable globals and the entry
+// file's own. On the structural wasm leg every module keeps its own VarTable,
+// so gstate's `count` / `totals` and this file's `ticks` / `samples` carry
+// the same raw VarIds. The runner re-assigned module globals from `main` (the
+// entry's space): the module's id either named no global there
+// (`assign:unmapped`, the file fell back to the incumbent) or named THIS
+// file's globals, which the re-init then overwrote with gstate's
+// initializers (0.0, four zeros) — a silent wrong value (0.64.0 fails
+// `almide test --target wasm` here). Each module's re-init now runs in a fn
+// of its own space.
+import gstate
+
+var ticks: Float = 7.0
+
+var samples: List[Float] = [9.0]
+
+test "first test writes both files' globals" {
+  ticks = ticks + 1.0
+  samples = samples + [1.0]
+  gstate.bump_scalar(0.5)
+  gstate.bump_at(2, 1.5)
+  assert_eq(ticks, 8.0)
+  assert_eq(samples, [9.0, 1.0])
+  assert_eq(gstate.get_scalar(), 0.5)
+  assert_eq(gstate.get_at(2), 1.5)
+}
+
+test "second test sees every initializer again" {
+  assert_eq(ticks, 7.0)
+  assert_eq(samples, [9.0])
+  assert_eq(gstate.get_scalar(), 0.0)
+  assert_eq(gstate.get_at(2), 0.0)
+  ticks = ticks * 2.0
+  assert_eq(ticks, 14.0)
+}

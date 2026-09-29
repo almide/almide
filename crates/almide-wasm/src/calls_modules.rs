@@ -418,6 +418,16 @@ impl Emitter<'_> {
                 {
                     return Ok(out);
                 }
+                if module.as_str() == "random"
+                    && let Some(out) = self.lower_random_call("random", func.as_str(), args)?
+                {
+                    return Ok(out);
+                }
+                if module.as_str() == "testing"
+                    && let Some(out) = self.lower_testing_assert(func.as_str(), args)?
+                {
+                    return Ok(out);
+                }
                 self.lower_linked_call(module.as_str(), func.as_str(), args, tail)
             }
             _ => unreachable!("module dispatch"),

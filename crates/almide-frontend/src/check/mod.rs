@@ -26,6 +26,7 @@ pub(crate) mod calls;
 mod builtin_calls;
 mod static_dispatch;
 mod solving;
+mod arm_blame;
 mod diagnostics;
 mod deprecation_warn;
 mod exit_literal;
@@ -310,6 +311,11 @@ pub struct Checker {
     /// whether its `!` repair is the spelling of the callee's own declared
     /// type (machine-applicable) or a choice among consumptions.
     pub(crate) effect_call_spans: std::collections::HashSet<(usize, usize, usize)>,
+    /// #2927: the expectation handed to the NEXT `infer_expr` (a tail
+    /// position's), and the one of the expression being inferred now. See
+    /// `arm_blame.rs`.
+    pub(crate) tail_expect: Option<types::TailExpect>,
+    pub(crate) expr_expect: Option<types::TailExpect>,
     /// ADR-0006 D1 (#1108 Phase 2a): fns DECLARED with the `-> T!` marker.
     /// Resolution erases the marker into Result[T, String], so the 1-bit
     /// fallibility of a NAMED callback argument (`list.map(xs, parse)`) is
@@ -650,6 +656,8 @@ impl Checker {
             deferred_unresolved_binding_checks: Vec::new(),
             deferred_implicit_prop_checks: Vec::new(),
             effect_call_spans: std::collections::HashSet::new(),
+            tail_expect: None,
+            expr_expect: None,
             fallible_marker_fns: std::collections::HashSet::new(),
             hof_rewritten_calls: std::collections::HashSet::new(),
             lambda_err_erasures: Vec::new(),
@@ -1126,16 +1134,20 @@ impl Checker {
             if name.as_str() != "main" || effect.unwrap_or(false) {
                 continue;
             }
-            if matches!(return_type, ast::TypeExpr::Simple { name: t } if t.as_str() == "Unit") {
+            // The RESOLVED type, not the spelling (#2880): in a file that
+            // declares `type Unit`, `-> Unit` names that record (§4.5).
+            let ret = self.resolve_type_expr(return_type);
+            if ret == Ty::Unit {
                 continue;
             }
-            let mut diag = err(
-                "main() returns Unit",
-                "a program's result is its output, not a return value — print it, \
-                 or set the exit code with `process.exit(n)` (import process). \
-                 Declare the entry `fn main() -> Unit` (or `effect fn main() -> Unit`)",
-                "fn main",
-            )
+            let hint = match solving::declared_builtin_named(&ret) {
+                Some(n) => solving::builtin_named_decl_hint(&n),
+                None => "a program's result is its output, not a return value — print it, \
+                         or set the exit code with `process.exit(n)` (import process). \
+                         Declare the entry `fn main() -> Unit` (or `effect fn main() -> Unit`)"
+                    .to_string(),
+            };
+            let mut diag = err("main() returns Unit", hint, "fn main")
             .with_code("E044");
             if let Some(s) = span {
                 diag.file = self.source_file.clone();

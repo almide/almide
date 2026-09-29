@@ -24,6 +24,10 @@ pub struct Scope {
 
 struct ScopeInner {
     vars: RefCell<HashMap<VarId, Value>>,
+    /// The vars of THIS frame declared `Bytes` (#2899): the value model holds
+    /// a Bytes buffer as an Int list, so only the declaration says that an
+    /// index store must keep the low byte.
+    bytes_vars: RefCell<std::collections::HashSet<VarId>>,
     parent: Option<Scope>,
 }
 
@@ -33,6 +37,7 @@ impl Scope {
         Scope {
             inner: Rc::new(ScopeInner {
                 vars: RefCell::new(HashMap::new()),
+                bytes_vars: RefCell::default(),
                 parent: None,
             }),
         }
@@ -44,6 +49,7 @@ impl Scope {
         Scope {
             inner: Rc::new(ScopeInner {
                 vars: RefCell::new(HashMap::new()),
+                bytes_vars: RefCell::default(),
                 parent: Some(self.clone()),
             }),
         }
@@ -52,6 +58,20 @@ impl Scope {
     /// Bind (or rebind) a variable in *this* frame.
     pub fn bind(&self, id: VarId, value: Value) {
         self.inner.vars.borrow_mut().insert(id, value);
+    }
+
+    /// Bind a variable whose declared type is `Bytes` in *this* frame.
+    pub fn bind_bytes(&self, id: VarId, value: Value) {
+        self.inner.bytes_vars.borrow_mut().insert(id);
+        self.bind(id, value);
+    }
+
+    /// Was `id` declared `Bytes` by the frame that owns it?
+    pub fn is_bytes(&self, id: VarId) -> bool {
+        if self.inner.vars.borrow().contains_key(&id) {
+            return self.inner.bytes_vars.borrow().contains(&id);
+        }
+        self.inner.parent.as_ref().is_some_and(|p| p.is_bytes(id))
     }
 
     /// Look up a variable, walking the parent chain.

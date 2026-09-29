@@ -134,8 +134,9 @@ pub(crate) struct Emitter<'a> {
     /// Some((extra, break_delta)) inside a loop body: `extra` counts the
     /// statement-walker labels opened since the loop's continue target,
     /// so `continue` = br(extra) and `break` = br(extra + break_delta).
-    /// Suspended (None) under structures whose labels the walker does
-    /// not track (match arms) — a Continue there walls honestly.
+    /// Statement-position if / guard / match arms count their labels in
+    /// (#2745); VALUE position (`lower`) suspends it to None — a jump
+    /// there walls honestly.
     pub(crate) loop_ctl: Option<(u32, u32)>,
     /// #2319: VarId → the i64 local holding that list's ELEMENT COUNT,
     /// loaded once before a loop the scan proved never rebinds it
@@ -250,6 +251,7 @@ impl Emitter<'_> {
         };
         let elem = match self.lower(object, None)? {
             SliceTy::List(h) => self.types.el(h),
+            crate::bytes::BYTES => return self.lower_bytes_index(index),
             other => return Err(EmitError::Unsupported(format!("index-of:{other:?}"))),
         };
         let stride = elem.slot_size();
@@ -410,7 +412,15 @@ impl Emitter<'_> {
     }
 
     pub(crate) fn lower(&mut self, e: &IrExpr, want: Option<SliceTy>) -> Result<SliceTy, EmitError> {
+        // VALUE position suspends the loop context (#2745): its labels
+        // (value-typed if/block/match) are not counted, and a `break` /
+        // `continue` under a partially built operand stack would skip the
+        // releases of the temporaries on it — such a jump walls honestly
+        // (`expr:Break` / `expr:Continue`) instead of branching to the
+        // wrong depth. A loop lowered in here opens its own context.
+        let saved = self.loop_ctl.take();
         let r = self.lower_node(e, want);
+        self.loop_ctl = saved;
         crate::decline_site::note(&r, e.span);
         r
     }
@@ -487,6 +497,12 @@ impl Emitter<'_> {
                     match self.arm_scope(|em| em.lower_list_call("slice", args, None))? {
                         Some(t) => t.ty,
                         None => return unsup("rt:list-slice-unit"),
+                    }
+                } else if symbol.as_str() == "almide_rt_bytes_slice" && args.len() == 3 {
+                    // `b[a..<c]` on Bytes: the same runtime fn `bytes.slice` is (#2747).
+                    match self.arm_scope(|em| em.lower_bytes_call("slice", args))? {
+                        Some(t) => t.ty,
+                        None => return unsup("rt:bytes-slice-unit"),
                     }
                 } else if let Some(t) = self.lower_budget_prim(symbol.as_str(), args)? {
                     t

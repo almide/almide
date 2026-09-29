@@ -43,6 +43,8 @@ fn operation_name(op: i32) -> &'static str {
             48..=50 => "http.request framed response",
             53..=59 => "the http call handle (http.start / poll / read_new / wait / cancel)",
             60 => "datetime.monotonic_ns",
+            61 => "fs.fold_lines_range", 62 => "fs.fold_lines_chunked",
+            63 => "fs.read_bytes_raw", 64 => "fs.read_bytes_raw_if_exists",
             73 => "panic",
             _ => "unknown operation",
         })

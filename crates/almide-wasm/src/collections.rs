@@ -232,6 +232,12 @@ impl Emitter<'_> {
                 // mut form: the in-place window when the var owns its
                 // block (#1219), else a var write-back of the functional
                 // build.
+                // A record var's FIELD (#2908): `h.f = map.set(h.f, k, v)`
+                // through the copy-on-write field write, as `list.push` on
+                // a field takes (#2411).
+                if let Some((id, field)) = crate::list_mut::record_field_receiver(m) {
+                    return self.lower_map_field_write(&id, &field, m, "set", args);
+                }
                 let IrExprKind::Var { id } = &m.kind else {
                     return unsup("map-insert-nonvar");
                 };
@@ -252,6 +258,9 @@ impl Emitter<'_> {
             // holder bound before the delete keeps the pre-delete entries
             // (C-033's value semantics), and insertion order is preserved.
             ("delete", [m, _key]) => {
+                if let Some((id, field)) = crate::list_mut::record_field_receiver(m) {
+                    return self.lower_map_field_write(&id, &field, m, "remove", args);
+                }
                 let IrExprKind::Var { id } = &m.kind else {
                     return unsup("map-delete-nonvar");
                 };
@@ -266,6 +275,9 @@ impl Emitter<'_> {
             // mut clear (native m.clear()): rebind the var to the empty
             // map — the `list.clear` shape (list_mut.rs).
             ("clear", [m]) => {
+                if self.lower_field_clear(m)? {
+                    return Ok(None);
+                }
                 let IrExprKind::Var { id } = &m.kind else {
                     return unsup("map-clear-nonvar");
                 };
@@ -702,4 +714,33 @@ impl Emitter<'_> {
         };
     }
 
+    /// `map.insert` / `map.delete` on a record var's field (#2908): the
+    /// functional op over the same receiver, written back as `h.f = op(..)`
+    /// through the copy-on-write field write — the one path every field
+    /// write's credits already ride.
+    fn lower_map_field_write(
+        &mut self,
+        id: &almide_ir::VarId,
+        field: &almide_base::intern::Sym,
+        m: &IrExpr,
+        op: &str,
+        args: &[IrExpr],
+    ) -> ArmResult {
+        let call = IrExpr {
+            kind: IrExprKind::Call {
+                target: almide_ir::CallTarget::Module {
+                    module: almide_base::intern::sym("map"),
+                    func: almide_base::intern::sym(op),
+                    def_id: None,
+                },
+                args: args.to_vec(),
+                type_args: vec![],
+            },
+            ty: m.ty.clone(),
+            span: None,
+            def_id: None,
+        };
+        self.lower_field_assign(id, field, &call)?;
+        Ok(None)
+    }
 }

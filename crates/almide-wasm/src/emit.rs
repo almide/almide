@@ -14,6 +14,15 @@ use crate::*;
 #[path = "package_keys.rs"]
 pub mod package_keys;
 
+/// #2750: fn-value HOF callbacks eta-expanded to literal lambdas (a pre-pass
+/// of the leg's front, split out for the file budget).
+#[path = "eta.rs"]
+mod eta;
+/// #2747: surface forms rewritten to ones the arms lower (map-pair
+/// loops, `?.`).
+#[path = "front_desugar.rs"]
+mod front_desugar;
+
 /// Emit a core wasm module for `ir`, or say precisely why not yet.
 /// Two passes: the first loads the WHOLE linked registry graph (so
 /// resolution and the refusal BFS see everything) and reports which
@@ -49,6 +58,12 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     // (#1423 stage 4: the html/path SafeHtml/SafePath rows).
     let erased = crate::newtype::erase_transparent_aliases(ir);
     let ir = erased.as_ref().unwrap_or(ir);
+    let desugared = front_desugar::desugar(ir);
+    let ir = desugared.as_ref().unwrap_or(ir);
+    // #2750: a fn VALUE as a HOF callback becomes the literal lambda the
+    // arms inline (eta.rs) — one HOF lowering, never a second call path.
+    let expanded = eta::eta_expand_callbacks(ir);
+    let ir = expanded.as_ref().unwrap_or(ir);
     // #2004: a call result consumed by a module op's argument gets an
     // owner — bound first, released by the frame's exit plan.
     let bound = crate::arg_temps::bind_native_temporaries(ir);
@@ -258,7 +273,7 @@ fn emit_program_pass(
         let params: Vec<(VarId, SliceTy)> =
             f.params.iter().zip(&table.infos[i].params).map(|(p, &t)| (p.var, t)).collect();
         let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map, var_name: &var_name };
-        let cur_module = qual.as_ref().and_then(|q| q.split('.').next());
+        let cur_module = fn_module(qual.as_deref(), f);
         let effect_raw = if f.is_effect {
             match slice_ty_of(&f.ret_ty, &types) {
                 Some(SliceTy::Unit) => Some(SliceTy::Unit),
@@ -555,6 +570,15 @@ fn emit_program_pass(
     let bytes = imports::declare(&bytes, &declared).map_err(|e| EmitError::Unsupported(format!("extern-import:{e}")))?;
     let host_ops = work.host_ops.borrow().clone();
 Ok(Pass { bytes, visited, total, ops: host_ops, bounded_fired: work.bounded_fired.get() })
+}
+
+/// The module a program fn belongs to: its qualified key minus `.<fn name>`
+/// (`collect_program_fns` keys a module fn `"{module}.{fn}"`). A module name
+/// can itself be dotted (`gramide.lex`, a dependency's submodule), and a fn
+/// name can be too (`Cfg.get`), so neither the first nor the last dot splits
+/// it (#2904: `gramide.lex`'s own calls resolved against `gramide`).
+pub(crate) fn fn_module<'a>(qual: Option<&'a str>, f: &IrFunction) -> Option<&'a str> {
+    qual?.strip_suffix(f.name.as_str())?.strip_suffix('.')
 }
 
 /// Where a program function's wall points (#2807): its qualified name, its

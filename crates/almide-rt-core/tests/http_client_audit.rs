@@ -430,7 +430,8 @@ fn tls_origin(names: &[&str], connections: usize) -> (u16, std::path::PathBuf) {
     let ca = ca_params.self_signed(&ca_key).unwrap();
     let leaf_key = KeyPair::generate().unwrap();
     let leaf_params = CertificateParams::new(names.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap();
-    let leaf = leaf_params.signed_by(&leaf_key, &ca, &ca_key).unwrap();
+    let issuer = rcgen::Issuer::from_params(&ca_params, &ca_key);
+    let leaf = leaf_params.signed_by(&leaf_key, &issuer).unwrap();
 
     // One directory per CA: SSL_CERT_DIR reads every file in it, and the
     // tests run in parallel.

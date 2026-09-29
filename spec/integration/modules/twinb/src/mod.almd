@@ -1,0 +1,10 @@
+type Call = { id: String }
+
+type Msg = { role: String, body: String = "", calls: List[Call] = [] }
+
+fn render(ms: List[Msg]) -> String = ms |> list.map((m) => m.role + ":" + m.body + "#" + int.to_string(list.len(m.calls))) |> list.join(",")
+
+fn first_call(m: Msg) -> String = match list.first(m.calls) {
+  some(c) => c.id,
+  none => "-",
+}

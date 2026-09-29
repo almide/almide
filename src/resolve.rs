@@ -408,7 +408,10 @@ fn load_module_sub_namespaces(name: &str, file_path: &Path, pkg_id: &Option<proj
     }
     if file_name == "mod.almd" || file_name == "lib.almd" {
         if let Some(src_dir) = file_path.parent() {
-            load_sub_namespaces(name, src_dir, pkg_id, ctx)?;
+            // A package name has no dots: whatever namespace this entry
+            // registers under, its first segment is the package `self` names.
+            let root = name.split('.').next().unwrap_or(name);
+            load_sub_namespaces(root, name, src_dir, pkg_id, ctx)?;
         }
     }
     Ok(())
@@ -508,7 +511,7 @@ fn resolve_submodule_imports(
 
 /// `load_sub_namespaces`'s per-entry body for a single sibling `.almd` file.
 /// Extracted verbatim.
-fn load_sub_namespace_file(pkg_name: &str, file_path: &Path, pkg_id: &Option<project::PkgId>, ctx: &mut ResolveCtx) -> Result<(), String> {
+fn load_sub_namespace_file(root: &str, pkg_name: &str, file_path: &Path, pkg_id: &Option<project::PkgId>, ctx: &mut ResolveCtx) -> Result<(), String> {
     let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let sub_name = format!("{}.{}", pkg_name, stem);
     if ctx.loaded_names.contains(&sub_name) {
@@ -516,7 +519,7 @@ fn load_sub_namespace_file(pkg_name: &str, file_path: &Path, pkg_id: &Option<pro
     }
     let (program, mod_source) = parse_almd_file(file_path, &sub_name)?;
     record_module_source(ctx, &sub_name, file_path, mod_source);
-    resolve_submodule_imports(&program, pkg_name, ctx)?;
+    resolve_submodule_imports(&program, root, ctx)?;
     ctx.loaded_names.insert(sub_name.clone());
     ctx.loaded.push((sub_name, program, pkg_id.clone(), false));
     Ok(())
@@ -524,7 +527,7 @@ fn load_sub_namespace_file(pkg_name: &str, file_path: &Path, pkg_id: &Option<pro
 
 /// `load_sub_namespaces`'s per-entry body for a single sibling subdirectory
 /// (its `mod.almd`, then a recursive scan). Extracted verbatim.
-fn load_sub_namespace_dir(pkg_name: &str, subdir: &Path, pkg_id: &Option<project::PkgId>, ctx: &mut ResolveCtx) -> Result<(), String> {
+fn load_sub_namespace_dir(root: &str, pkg_name: &str, subdir: &Path, pkg_id: &Option<project::PkgId>, ctx: &mut ResolveCtx) -> Result<(), String> {
     let dir_name = subdir.file_name().and_then(|s| s.to_str()).unwrap_or("");
     let sub_name = format!("{}.{}", pkg_name, dir_name);
     if !ctx.loaded_names.contains(&sub_name) {
@@ -533,17 +536,23 @@ fn load_sub_namespace_dir(pkg_name: &str, subdir: &Path, pkg_id: &Option<project
         if sub_mod.exists() {
             let (program, mod_source) = parse_almd_file(&sub_mod, &sub_name)?;
             record_module_source(ctx, &sub_name, &sub_mod, mod_source);
-            resolve_submodule_imports(&program, pkg_name, ctx)?;
+            resolve_submodule_imports(&program, root, ctx)?;
             ctx.loaded_names.insert(sub_name.clone());
             ctx.loaded.push((sub_name.clone(), program, pkg_id.clone(), false));
         }
     }
     // Recurse into subdirectory for deeper sub-namespaces
-    load_sub_namespaces(&sub_name, subdir, pkg_id, ctx)
+    load_sub_namespaces(root, &sub_name, subdir, pkg_id, ctx)
 }
 
 /// Load all sibling .almd files as sub-namespaces, recursively scanning subdirectories.
-fn load_sub_namespaces(pkg_name: &str, src_dir: &Path, pkg_id: &Option<project::PkgId>, ctx: &mut ResolveCtx) -> Result<(), String> {
+///
+/// `pkg_name` is the namespace the files in `src_dir` are registered under
+/// (`snaidhm.native` for `src/native/`); `root` is the package itself, the one
+/// an `import self.<X>` in ANY of them names — `self` is the package, not the
+/// directory a module sits in. Resolving it against `pkg_name` looked for a
+/// package called `snaidhm.native` and failed the consumer's build.
+fn load_sub_namespaces(root: &str, pkg_name: &str, src_dir: &Path, pkg_id: &Option<project::PkgId>, ctx: &mut ResolveCtx) -> Result<(), String> {
     // Load .almd files in this directory (excluding mod.almd, lib.almd, main.almd)
     let mut files: Vec<PathBuf> = match std::fs::read_dir(src_dir) {
         Ok(entries) => entries
@@ -571,7 +580,7 @@ fn load_sub_namespaces(pkg_name: &str, src_dir: &Path, pkg_id: &Option<project::
     files.sort();
 
     for file_path in &files {
-        load_sub_namespace_file(pkg_name, file_path, pkg_id, ctx)?;
+        load_sub_namespace_file(root, pkg_name, file_path, pkg_id, ctx)?;
     }
 
     // Scan subdirectories recursively
@@ -582,7 +591,7 @@ fn load_sub_namespaces(pkg_name: &str, src_dir: &Path, pkg_id: &Option<project::
     subdirs.sort();
 
     for subdir in &subdirs {
-        load_sub_namespace_dir(pkg_name, subdir, pkg_id, ctx)?;
+        load_sub_namespace_dir(root, pkg_name, subdir, pkg_id, ctx)?;
     }
 
     Ok(())

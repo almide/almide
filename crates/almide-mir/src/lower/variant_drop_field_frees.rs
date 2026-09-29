@@ -80,6 +80,7 @@ fn variant_field_free_nested_variant(
         return Some(format!("        prim.rc_dec(prim.load64(h + {off}))\n"));
     }
     let fv_fn = drop_fn_ident(&fv);
+    let fv = generated_type_spelling(&fv);
     let free = format!(
         "        let f{idx}: {fv} = prim.load_handle(h + {off})\n        __drop_{fv_fn}(f{idx})\n"
     );
@@ -196,6 +197,7 @@ fn variant_field_free_rich_variant_list(
     // recursive-drop variant block, freed per-element by the generated `$__drop_list_<ev>`
     // (→ `$__drop_<ev>`). A flat `rc_dec` of the list block would leak every element.
     let ev_fn = drop_fn_ident(&ev);
+    let ev = generated_type_spelling(&ev);
     let free = format!(
         "        let f{idx}: List[{ev}] = prim.load_handle(h + {off})\n        __drop_list_{ev_fn}(f{idx})\n"
     );
@@ -225,7 +227,7 @@ fn variant_field_free_record(
     // free. Either way the ctor stored its HANDLE at this slot.
     if sets.rec_record_names.contains(rn.as_str()) {
         let rn_fn = drop_fn_ident(rn.as_str());
-        let rn_s = rn.as_str();
+        let rn_s = generated_type_spelling(rn.as_str());
         let free = format!(
             "        let f{idx}: {rn_s} = prim.load_handle(h + {off})\n        __drop_{rn_fn}(f{idx})\n"
         );

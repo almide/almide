@@ -9,10 +9,11 @@ use crate::emitter::Emitter;
 use crate::*;
 
 /// `h.f` where `h` is a plain var: the receiver shape the mut forms
-/// (`push`, `clear`) route through the copy-on-write field write (#2411).
-/// A deeper path (`h.a.b`, `xs[i].f`) is still refused by the var-only
-/// arms below, honestly.
-fn record_field_receiver(xs: &IrExpr) -> Option<(almide_ir::VarId, almide_base::intern::Sym)> {
+/// (`push`, `pop`, `clear` on a list / string / bytes / map field, and map
+/// `insert` / `delete`) route through the copy-on-write field write (#2411,
+/// #2908, #2747). A deeper path (`h.a.b`, `xs[i].f`) is still refused by the
+/// var-only arms, honestly.
+pub(crate) fn record_field_receiver(xs: &IrExpr) -> Option<(almide_ir::VarId, almide_base::intern::Sym)> {
     let IrExprKind::Member { object, field } = &xs.kind else {
         return None;
     };
@@ -23,19 +24,116 @@ fn record_field_receiver(xs: &IrExpr) -> Option<(almide_ir::VarId, almide_base::
 }
 
 impl Emitter<'_> {
+    /// The copy-on-write field write on a record var — copy the block,
+    /// release the replaced slot's credit, store the value `emit` leaves on
+    /// the stack (it owns that credit), rebind the var. `lower_field_assign`
+    /// passes a lowered expression; `list.pop` on a field passes the
+    /// shrunken copy it already holds.
+    pub(crate) fn field_assign_with(
+        &mut self,
+        target: &almide_ir::VarId,
+        field: &almide_base::intern::Sym,
+        emit: impl FnOnce(&mut Self, SliceTy) -> Result<(), EmitError>,
+    ) -> Result<(), EmitError> {
+        // C-319 residual: only the Assign form writes THROUGH a shared
+        // cell — a field write against a cell var would land in the raw
+        // local and silently diverge. Refuse honestly.
+        if self.cells.contains(target) {
+            return unsup("cell-write:field-assign");
+        }
+        let (slot, declared) = match self.locals.get(target) {
+            Some(&(idx, d)) => (Ok(idx), d),
+            None => match self.globals.get(&(self.var_space, *target)) {
+                Some(&(gidx, d)) => (Err(gidx), d),
+                None => return unsup("field-assign:unmapped"),
+            },
+        };
+        let SliceTy::Named(ti) = declared else {
+            return unsup(&format!("field-assign-of:{declared:?}"));
+        };
+        let (fty, off) = {
+            let crate::types_table::NamedDef::Record(r) = self.types.def(ti) else {
+                return unsup("field-assign-nonrecord");
+            };
+            let Some(fi) = r.fields.iter().find(|f| f.name == field.as_str()) else {
+                return unsup(&format!("field-assign-unknown:{field}"));
+            };
+            (fi.ty, fi.offset)
+        };
+        let hb = self.hold_i32()?;
+        match slot {
+            Ok(idx) => self.f.instructions().local_get(idx),
+            Err(gidx) => self.f.instructions().global_get(gidx),
+        };
+        let copy = self.copy_fn_of(SliceTy::Named(ti));
+        self.f.instructions().call(copy).local_tee(hb);
+        // The replaced field's credit goes with it (stage 2c-ii).
+        if let Some(dec) = self.elem_is_handle(fty).then(|| self.dec_fn_of(fty)) {
+            self.f.instructions().local_get(hb).i32_load(slot_memarg(off)).call(dec);
+        }
+        emit(self, fty)?;
+        self.store_ty_slot(fty, off);
+        self.f.instructions().local_get(hb);
+        match slot {
+            Ok(idx) => self.f.instructions().local_set(idx),
+            Err(gidx) => self.f.instructions().global_set(gidx),
+        };
+        self.release_i32();
+        Ok(())
+    }
 
-    /// mut pop: some(last) + shrunken-copy write-back.
+    /// `<m>.clear(h.f)` on a record var's FIELD — list, string, bytes and
+    /// map alike — is the field write `h.f = <empty>` through
+    /// `lower_field_assign`'s copy-on-write rebind (#2411, #2747): a record
+    /// alias bound before the clear keeps its field. `false` = not a field
+    /// receiver (the caller's var arm, or its honest wall).
+    pub(crate) fn lower_field_clear(&mut self, v: &IrExpr) -> Result<bool, EmitError> {
+        let Some((id, field)) = record_field_receiver(v) else {
+            return Ok(false);
+        };
+        use almide_types::types::{constructor::TypeConstructorId as C, Ty};
+        let kind = match &v.ty {
+            Ty::Applied(C::List, _) => IrExprKind::List { elements: vec![] },
+            Ty::Applied(C::Map, _) => IrExprKind::EmptyMap,
+            Ty::String => IrExprKind::LitStr { value: String::new() },
+            Ty::Bytes => IrExprKind::Call {
+                target: almide_ir::CallTarget::Module {
+                    module: almide_base::intern::sym("bytes"),
+                    func: almide_base::intern::sym("new"),
+                    def_id: None,
+                },
+                args: vec![IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None, def_id: None }],
+                type_args: vec![],
+            },
+            _ => return Ok(false),
+        };
+        let empty = IrExpr { kind, ty: v.ty.clone(), span: None, def_id: None };
+        self.lower_field_assign(&id, &field, &empty)?;
+        Ok(true)
+    }
+
+    /// mut pop: some(last) + shrunken-copy write-back. The receiver is a
+    /// plain var, or a record var's field (#2908) — read borrowed, the
+    /// shrunken copy written back through `field_assign_with`.
     fn lower_list_pop(&mut self, xs: &IrExpr) -> ArmResult {
         {
-
-                let IrExprKind::Var { id } = &xs.kind else {
-                    return unsup("list-pop-nonvar");
+                let field = record_field_receiver(xs);
+                let var = match (&xs.kind, field) {
+                    (_, Some(_)) => None,
+                    (IrExprKind::Var { id }, None) => {
+                        let Some(v) = self.mut_var(id) else {
+                            return unsup("var:unmapped");
+                        };
+                        Some((*id, v))
+                    }
+                    _ => return unsup("list-pop-nonvar"),
                 };
-                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
-                    return unsup("var:unmapped");
+                let list_ty = match &var {
+                    Some((_, (_, t, _))) => *t,
+                    None => self.infer(xs)?,
                 };
-                let SliceTy::List(h) = var_ty else {
-                    return unsup(&format!("list-pop-of:{var_ty:?}"));
+                let SliceTy::List(h) = list_ty else {
+                    return unsup(&format!("list-pop-of:{list_ty:?}"));
                 };
                 let elem = self.types.el(h);
                 let stride = elem.slot_size() as i32;
@@ -44,7 +142,14 @@ impl Emitter<'_> {
                 let hlen = self.hold_i32()?;
                 let hres = self.hold_i32()?;
                 let hnew = self.hold_i32()?;
-                self.emit_read_mut_var_cow(id, var_idx, var_ty, vglob)?;
+                match &var {
+                    Some((id, (var_idx, var_ty, vglob))) => {
+                        self.emit_read_mut_var_cow(id, *var_idx, *var_ty, *vglob)?
+                    }
+                    None => {
+                        self.lower_arg(xs, Some(list_ty), ArgMode::Borrow)?;
+                    }
+                }
                 {
                     let mut i = self.f.instructions();
                     i.local_set(hb);
@@ -73,9 +178,18 @@ impl Emitter<'_> {
                         i.local_get(hnew).call(inc);
                         i.local_get(hres).i32_load(slot_memarg(almide_layout::OPTION_FIELD)).call(F_INC);
                     }
-                    i.local_get(hnew);
                 }
-                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
+                match (&var, field) {
+                    (Some((id, (var_idx, var_ty, vglob))), _) => {
+                        self.f.instructions().local_get(hnew);
+                        self.emit_store_mut_var(*id, *var_idx, *var_ty, *vglob)?;
+                    }
+                    (None, Some((id, field))) => self.field_assign_with(&id, &field, |s, _| {
+                        s.f.instructions().local_get(hnew);
+                        Ok(())
+                    })?,
+                    (None, None) => return unsup("list-pop-nonvar"),
+                }
                 {
                     let mut i = self.f.instructions();
                     i.end();
@@ -99,16 +213,7 @@ impl Emitter<'_> {
             ("pop", [xs]) => self.lower_list_pop(xs),
             // mut form (native xs.clear()): rebind to the empty list.
             ("clear", [xs]) => {
-                // A record var's field: `h.f = []` through the field-write
-                // path (see the `push` arm, #2411).
-                if let Some((id, field)) = record_field_receiver(xs) {
-                    let empty = IrExpr {
-                        kind: IrExprKind::List { elements: vec![] },
-                        ty: xs.ty.clone(),
-                        span: None,
-                        def_id: None,
-                    };
-                    self.lower_field_assign(&id, &field, &empty)?;
+                if self.lower_field_clear(xs)? {
                     return Ok(Some(None));
                 }
                 let IrExprKind::Var { id } = &xs.kind else {

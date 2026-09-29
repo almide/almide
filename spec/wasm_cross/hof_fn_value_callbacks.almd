@@ -1,0 +1,55 @@
+// @contract: C-258
+// A function VALUE as a stdlib higher-order callback behaves as the literal
+// lambda it stands for, on every leg (#2750): a named fn, a fn-typed
+// parameter forwarded on, a let-bound capturing closure, a constructor and
+// a module function, across the list / option / result / map heads, over
+// Int and String elements (a String element is a borrowed read the callee
+// owns a share of, so every element still prints after the calls).
+type Tag = | Tagged(String)
+
+fn is_big(x: Int) -> Bool = x > 5
+
+fn shout(s: String) -> String = s + "!"
+
+fn half(x: Int) -> Int? = if x % 2 == 0 then some(x / 2) else none
+
+fn keep_map(xs: List[Int], pred: (Int) -> Bool, f: (Int) -> Int) -> List[Int] = xs |> list.filter(pred) |> list.map(f)
+
+fn pick(xs: List[Int], f: (Int) -> Int?) -> Int = xs |> list.filter_map(f) |> list.first ?? -1
+
+fn names(xs: List[String], f: (String) -> String) -> String = xs |> list.map(f) |> list.join(",")
+
+fn show_tag(t: Tag) -> String = match t {
+  Tagged(s) => "<" + s + ">"
+}
+
+effect fn main() -> Unit = {
+  let xs = [1, 10, 3, 20, 4]
+  let words = ["a", "bb", "ccc"]
+  let k = 3
+  let times_k = (n: Int) => n * k
+  let add = (a: Int, b: Int) => a + b
+  // named fns
+  println(list.filter(xs, is_big) |> list.map((n) => int.to_string(n)) |> list.join(" "))
+  println(names(words, shout))
+  // fn params forwarded to filter / map / filter_map
+  println(keep_map(xs, is_big, times_k) |> list.map((n) => int.to_string(n)) |> list.join(" "))
+  println(int.to_string(pick(xs, half)))
+  // a let-bound capturing closure to map / fold / any / all / find / count
+  println(list.map(xs, times_k) |> list.map((n) => int.to_string(n)) |> list.join(" "))
+  println(int.to_string(list.fold(xs, 0, add)))
+  println("${list.any(xs, is_big)} ${list.all(xs, is_big)}")
+  println(int.to_string(list.find(xs, is_big) ?? -1))
+  println(int.to_string(list.count(xs, is_big)))
+  // a constructor and a module function as callbacks
+  println(list.map(words, Tagged) |> list.map(show_tag) |> list.join(""))
+  println(list.map(words, string.to_upper) |> list.join("-"))
+  println(list.map(words, string.len) |> list.map((n) => int.to_string(n)) |> list.join(""))
+  // option / result heads
+  println(int.to_string(option.flat_map(some(8), half) ?? -1))
+  println(int.to_string(option.map(some(4), times_k) ?? -1))
+  let r: Result[Int, String] = ok(5)
+  println(int.to_string(result.map(r, times_k) ?? -1))
+  // the String elements are all still there
+  println(words |> list.join("+"))
+}

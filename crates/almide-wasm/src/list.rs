@@ -19,6 +19,10 @@ impl Emitter<'_> {
         if let Some(out) = self.lower_list_order_call(func, args)? {
             return Ok(out);
         }
+        // #2749: list.shuffle shares random.shuffle's arm (random.rs).
+        if let Some(out) = self.lower_random_call("list", func, args)? {
+            return Ok(out);
+        }
         if let Some(out) = self.lower_list_mut_call(func, args, ret_hint)? {
             return Ok(out);
         }
@@ -33,7 +37,7 @@ impl Emitter<'_> {
             ("get" | "join" | "find" | "find_index" | "contains" | "index_of" | "intersperse"
             | "zip" | "map" | "filter" | "any" | "all" | "count" | "take_while"
             | "drop_while" | "reduce" | "flat_map" | "filter_map" | "binary_search"
-            | "window" | "unique_by" | "group_by", [a, b]) => {
+            | "window" | "unique_by" | "group_by" | "partition", [a, b]) => {
                 self.lower_list_pair_named(func, a, b)
             }
             ("get_or" | "set" | "swap" | "update" | "scan" | "zip_with" | "slice"
@@ -714,6 +718,7 @@ impl Emitter<'_> {
             "window" => self.lower_list_window(a, b),
             "unique_by" => self.lower_list_unique_by(a, b),
             "group_by" => self.lower_list_group_by(a, b),
+            "partition" => self.lower_list_partition(a, b),
             _ => self.lower_list_filter_map(a, b),
         }
     }
