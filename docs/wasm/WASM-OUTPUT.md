@@ -1,12 +1,13 @@
 # WASM Output — What's in the Binary, and Why
 
 Almide emits WebAssembly **directly** — no LLVM, no Cranelift, no wasm-bindgen,
-and no compiled standard-library object code inside the module. Since the
-commissioning (#1599) there are **two verified renderers**: the **structural
-leg** (crates/almide-wasm, wasm-encoder, the default `--target wasm` path) and
-the **incumbent v1 leg** (the certified MIR→WAT renderer; no route reaches it
-since #2752, and the measurements below that name it are historical). This document dissects real modules from BOTH legs
-byte by byte and states exactly what the size claims mean.
+and no compiled standard-library object code inside the module. The one
+renderer is the **structural leg** (crates/almide-wasm, wasm-encoder, the
+`--target wasm` path). The **incumbent v1 leg** (the certified MIR→WAT
+renderer) lost its last route in #2752 and was deleted in #2761; the
+measurements below that name it are historical and cannot be reproduced on the
+current compiler. This document dissects real modules byte by byte and states
+exactly what the size claims mean.
 
 The headline Hello, world bytes are CI-derived: `docs/benchmarks/wasm-size.txt`
 (re-measured by `scripts/gen-readme-stats.sh`, gated since #1605). Everything
@@ -15,9 +16,9 @@ else below was measured 2026-08-27 on the current `develop` compiler with
 rows retain their 2026-07-23 measurement (`rustc 1.94.1`). Reproduce any number
 with the commands at the bottom.
 
-## The headline numbers (measured 2026-08-27)
+## The headline numbers (measured 2026-08-27; the incumbent columns are historical, retired by #2761)
 
-| Program | structural (default, verified) | structural + `-Oz` | incumbent v1 (verified) | incumbent + `-Oz` |
+| Program | structural (shipped) | structural + `-Oz` | incumbent v1 (retired) | incumbent + `-Oz` (retired) |
 |---|---:|---:|---:|---:|
 | Hello, world | 4,459 B | **364 B** | 1,096 B | 788 B |
 | FizzBuzz 1–100 | 4,716 B | **1,162 B** | 2,168 B | 1,346 B |
@@ -54,7 +55,7 @@ Two honest framings:
   `wasm-opt` column requires the explicit `--wasm-opt` opt-in, which takes
   the module outside the verified envelope.
 
-## Section anatomy — Hello, world, both legs
+## Section anatomy — Hello, world (structural; incumbent row historical)
 
 Structural leg, as shipped (4,459 B, via `wasm-objdump -h`):
 
@@ -80,7 +81,7 @@ allocation is reachable — would move the shipped 4.4 KB most of the way toward
 that 364 B without leaving the verified envelope; this document is where it
 gets measured if it lands.)
 
-Incumbent v1 leg (1,096 B): Type 26 B, Import 70 B (2 WASI imports), Function
+Incumbent v1 leg (historical — retired by #2761; 1,096 B): Type 26 B, Import 70 B (2 WASI imports), Function
 9 B, Memory 3 B, Global 38 B, Export 40 B, Code 739 B (8 functions — `alloc`,
 `rc_dec`, `main`, `print_str`, `_start` and three helpers), Data 46 B, plus a
 98-byte `name` custom section (function names only; locals stripped — a
@@ -116,9 +117,10 @@ unreachable is swept by reachability DCE before assembly.
 ## What's still not the smallest possible module, and why
 
 The verified pipeline **ships the bytes its own rendering process produced**.
-Every module built on the default path is emit-time validated, and the
-incumbent leg additionally carries a machine-checked ownership/refcount
-certificate re-verified by the Rocq-checked kernel each build. `wasm-opt` is a
+Every module built on the default path is emit-time validated. (The retired
+incumbent leg additionally carried a machine-checked ownership/refcount
+certificate re-verified by the Rocq-checked kernel each build; the structural
+leg's certificate is pending, #2755–#2760.) `wasm-opt` is a
 different kind of thing: an **external, unverified transform applied to the
 renderer's finished output** — running it replaces bytes the pipeline produced
 with bytes a separate, un-certified tool rewrote. That line is why it stays
@@ -128,15 +130,15 @@ opt-in:
 almide build app.almd --target wasm --wasm-opt   # runs: wasm-opt -Oz
 #   --enable-nontrapping-float-to-int --enable-tail-call --enable-bulk-memory
 #   --enable-mutable-globals
-#   (the features the two legs actually emit — no SIMD in the default output;
+#   (the features the structural leg actually emits — no SIMD in the default output;
 #    bulk-memory is the structural leg's memory.copy and mutable-globals its
 #    exported globals, #1616)
 ```
 
-**`-Oz` trades speed for those bytes.** The incumbent renderer versions hot
-loops into a guarded fast path with bounds checks discharged up front;
-`-Oz`'s code folding merges the near-identical copies back into one checked
-loop, measured ~3× slower on spectralnorm. Use `-Oz` for size-critical cold
+**`-Oz` trades speed for those bytes.** On the (now retired, #2761) incumbent
+renderer, which versioned hot loops into a guarded fast path with bounds checks
+discharged up front, `-Oz`'s code folding merged the near-identical copies back
+into one checked loop, measured ~3× slower on spectralnorm. Use `-Oz` for size-critical cold
 code; benchmark before applying it to compute kernels.
 
 ## Determinism and the cross-target contract
@@ -221,9 +223,7 @@ allocations. The corpus has the same shape at scale (rows of the two ledgers,
 
 Each requested a hundred to a thousand times more bytes than its watermark
 shows, and its watermark row would not move if the churn doubled. The
-instrument covers the structural leg only — a program the
-router hands to the incumbent leg runs on the `wasmtime` CLI, which reads no
-globals; `almide run` says so on stderr rather than print nothing.
+instrument covers the structural leg, which since #2761 is every wasm program.
 
 ## JS host (`--host js`, #2265)
 
@@ -258,7 +258,7 @@ marshalling. `app.js` is a dependency-free ES module:
   `Bool` → i32, `String` → i32 block, `Unit` → no result); a `String`
   argument is borrowed across the call (the host releases nothing) and a
   `String` result is a fresh block the guest owns. A `rs`/`rust` extern has
-  no wasm host and stays a wall on both legs. The `// @leg: structural` line
+  no wasm host and stays a wall (E082). The `// @leg: structural` line
   of `spec/wasm_host_js/extern_js.almd` is the ratchet row that makes a
   route change visible; `almide run --target wasm` refuses such a program by
   name (it has no host for the import) and points at `--host js`.
@@ -269,10 +269,9 @@ marshalling. `app.js` is a dependency-free ES module:
   records and variants are the next step, following the bindgen table).
 - `main` is `run()`; `_start` is not called by `init`.
 
-String marshalling reads the block layout both legs share (`almide-layout`:
+String marshalling reads the block layout (`almide-layout`:
 rc @0, len @4, cap @8, payload @12) and the module's own signatures for the
-valtype of each slot (`Bool` is `i32` on the structural leg and `i64` on the
-incumbent). A block the host builds goes through the module's exported
+valtype of each slot (`Bool` is `i32` on the structural leg). A block the host builds goes through the module's exported
 allocator (`__alloc`) and a block the host takes out is released through its
 exported release (`__release`); both exports exist only under `--host js`
 and only when some marshalled signature carries a `String` (#2276), so every
@@ -280,7 +279,7 @@ other build keeps its bytes — a scalar-only surface's module is
 byte-identical to the build without the switch, and the glue then carries no
 string helpers either. The structural leg also records which
 exported params the callee owns, so the host releases exactly the credits
-it still holds; the incumbent's callees borrow every param.
+it still holds.
 
 Gate: `scripts/check-js-host.sh` builds every `spec/wasm_host_js/*.almd`
 with `--host js`, runs it under node, byte-compares stdout to
@@ -298,9 +297,9 @@ ledger edit). CI runs it in the `checks` job.
 ## Reproducing the measurements
 
 ```bash
-# Almide — structural (default) and incumbent legs, plain and -Oz
+# Almide — the structural leg, plain and -Oz (the incumbent columns cannot be reproduced since #2761)
 printf 'fn main() -> Unit = {\n  println("Hello, world!")\n}\n' > hello.almd
-almide build hello.almd --target wasm -o hello.wasm                    # structural, verified
+almide build hello.almd --target wasm -o hello.wasm                    # structural, as shipped
 almide build hello.almd --target wasm --wasm-opt -o hello.min.wasm     # structural, -Oz
 wasm-objdump -h hello.wasm                                             # the section tables above
 

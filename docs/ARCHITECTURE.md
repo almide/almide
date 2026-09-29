@@ -29,14 +29,15 @@ assembly/validation), `lsp-server` + `lsp-types` (language server).
                           ┌───────────────────┼──────────────────────┐
                           ▼                   ▼                      ▼
                  Rust target          WASM target             WGSL target
-                 codegen v3           v1 MIR trust-spine      emit_wgsl
-                 (nanopass + TOML     (almide-mir → WAT →     (almide-codegen)
-                 templates + walker)  wat assemble)
+                 codegen v3           structural leg          emit_wgsl
+                 (nanopass + TOML     (wasm_leg →             (almide-codegen)
+                 templates + walker)  almide-wasm, direct
+                                      emit; wall = E082)
                           │                   │
                           ▼                   ▼
-                 native trust-spine      .wasm (verified;
-                 (v1 Rust render,        optional --wasm-opt
-                 v0 fallback on wall)    with parity gate)
+                 native trust-spine      .wasm (optional
+                 (v1 Rust render,        --wasm-opt with
+                 v0 fallback on wall)    parity gate)
                           │
                           ▼
                  rustc/cargo → binary
@@ -53,9 +54,9 @@ and serves as the cross-target oracle / executable spec.
   trust-spine renderer (`almide-mir`) replaces it where it can lower (v0
   codegen source is the fallback on a wall); `rustc`/`cargo` produces the
   binary.
-- **`--target wasm`** — two legs
+- **`--target wasm`** — one leg, the structural leg
   (`src/cli/build.rs::render_wasm_module_routed`): cheap PROJECT-SHAPE
-  routes pick the leg up front, and a structural wall reroutes (below).
+  checks run up front, and a structural wall is a hard E082 error (below).
   The routing is ONE library function, `almide::wasm_route::route_wasm`
   (src/wasm_route.rs, #2554): the CLI reads the probe switches off the
   environment into its `RouteOptions` and renders its `RouteError`s; a
@@ -76,21 +77,21 @@ and serves as the cross-target oracle / executable spec.
     whose instruction set is pinned to this emitter's;
     `tests/wasm_vm_parity_test.rs` holds it equal to the stock runtime on
     every fixture and to native on every Critical-profile one.
-  - the **incumbent WAT trust-spine**: `almide-mir` renders WAT. No route
-    reaches it since #2752 — a program the structural leg declines is a hard
-    E082 wall, never a fallback — and its deletion is #2761.
-  Every `ALMIDE_*` switch the tree reads — the forced routes here, the gate
+  - the **incumbent WAT trust-spine** (`almide-mir` rendering WAT) is gone:
+    #2752 removed its last route and #2761 deleted the renderer. `almide-mir`
+    keeps MIR lowering (the native leg), the native renderers, and the
+    certificate witness producer (`almide verify --emit`).
+  Every `ALMIDE_*` switch the tree reads — the gate
   bypasses, the ablations, the trace channels — is one registry,
   `almide_base::env::SWITCHES` (`almide switches` lists it; `docs/specs/cli.md`
   embeds its table; #2205). The compiler proper reads only through
   `almide_base::env::{flag, var}`: one boolean semantics, and a forced route
   or a bypassed gate inherited from the environment is announced once on
   stderr, so a verdict produced under it says so.
-  A structural WALL reroutes to the incumbent renderer (both legs are
-  VERIFIED — this is not #782's sin, which was falling into unverified v0
-  codegen; `ALMIDE_VERIFIED_DEBUG=1` names the wall that rerouted). A shape
-  NEITHER leg lowers is a hard, diagnosed error with the incumbent's rich
-  wall rendering. `--wasm-opt` is opt-in and
+  A structural WALL is a hard, diagnosed `error[E082]` — a `wall: <reason>`
+  line and a `--> in <fn>` site line — never a fallback (#782's sin was
+  falling into unverified v0 codegen; `ALMIDE_VERIFIED_DEBUG=1` names the
+  wall). `--wasm-opt` is opt-in and
   guarded by a differential parity gate against the verified module
   (`tests/wasm_runtime_opt_parity.rs::wasm_opt_parity_spec`).
 - **`--target wasm32` / `wasi`** — the generated Rust source compiled by bare
@@ -102,8 +103,7 @@ and serves as the cross-target oracle / executable spec.
 `almide run --target wasm` and `almide build --target wasm` share
 `compile_to_wasm_bytes`, so run and build observe one emission. On the
 structural leg the BUILD artifact additionally passes `to_wasi` (stock-runtime
-form) — same observable behavior, different bytes; on the incumbent leg the
-two stay byte-identical.
+form) — same observable behavior, different bytes.
 
 ## Crate Structure
 
@@ -135,7 +135,9 @@ almide/                    Workspace root
 │   │                      VarId/VarTable, visitors
 │   ├── almide-mir/        v1 Middle IR — single source of truth for ownership
 │   │                      and layout (Perceus). #![forbid(unsafe_code)].
-│   │                      Renders the wasm (WAT) and native trust-spines.
+│   │                      MIR lowering + the native trust-spine renderer
+│   │                      + certificate witnesses (`almide verify --emit`).
+│   │                      No wasm/WAT renderer since #2761.
 │   ├── almide-optimize/   Monomorphization, DCE, constant propagation,
 │   │                      stream fusion
 │   ├── almide-codegen/    Codegen v3 for Rust (+ WGSL): nanopass pipeline,
@@ -205,25 +207,28 @@ walker sees only typed IR nodes — it never checks what target it renders for.
    `scripts/check-ownership-certifier.sh`) is shrink-only and EMPTY: a
    violation is a defect, and the debug build refuses to emit it.
 
-## WASM Trust-Spine (almide-mir)
+## WASM backend (structural leg)
 
-The wasm backend is the v1 MIR pipeline in `almide-mir`:
+The wasm backend is the structural leg (`src/wasm_leg.rs` →
+`almide-wasm::emit_program`); the v1 MIR→WAT pipeline that once served it
+from `almide-mir` was deleted by #2761.
 
-- `pipeline::try_render_wasm_source` lowers linked IR through MIR to WAT text;
-  the CLI assembles it (`wat::parse_str`) and keeps only function names in the
-  name section.
-- Ownership/RC follows Perceus; the crate forbids `unsafe`.
+- Ownership/RC follows Perceus (Perceus-style RC in linear memory). The Coq
+  theorems WasmEncode/WasmExec/WasmRcDec stand about a MODELED runtime (the
+  retired incumbent's); the structural runtime's bytes are checked against
+  `StructuralDecode.v` by `proofs/check-structural-bytes.sh`. No per-build
+  ownership certificate is re-verified for a shipped wasm byte — the
+  structural leg is trusted, its certificate pending (#2755–#2760).
 - Stdlib calls are *self-hosted*: pure-Almide implementations from
   `stdlib/*.almd` are registered in `almide-types/src/self_host_registry.rs`
   and compiled along with user code. An unlinked stdlib call is a wall (hard
   error).
 - `wasmparser::validate` guards the test harness. `almide test --target wasm`
-  renders through the SAME two-leg route as `build`/`run --target wasm` (#2179):
-  the structural leg first (`almide-wasm`, with the shared `__test_runner`
+  renders through the SAME route as `build`/`run --target wasm` (#2179):
+  the structural leg (`almide-wasm`, with the shared `__test_runner`
   synthesis and the structural in-test assert lowering from
-  `almide_driver::test_runner`), the incumbent where it declines; a file both
-  legs wall is reported as a WALL, and the default `almide test` lane then
-  runs it natively.
+  `almide_driver::test_runner`); a file it walls is reported as a WALL, and
+  the default `almide test` lane then runs it natively.
 
 ## Optimization pass roster per target
 
@@ -242,8 +247,7 @@ Which leg runs what:
 |---|---|---|---|
 | native, v1 MIR render | `almide run`/`build` default (`--verified`), where `almide-mir` lowers | `link_ir` | almide-mir native rung (table D, the native rows) |
 | native, codegen v3 | `almide test` (native), and the fallback on a v1 native wall; `--target rust` emit; `--target wasm32`/`wasi` | `link_ir` | almide-codegen nanopass pipeline, Rust arm (table B) |
-| `--target wasm`, structural (default) | `src/wasm_leg.rs` → `almide-wasm::emit_program` | `link_ir` | almide-wasm emitter rewrites (table C) |
-| `--target wasm`, incumbent (unreachable since #2752, deleted by #2761) | none — no route reaches it | `link_ir` | almide-mir wasm rung + WAT-level passes (table D) |
+| `--target wasm`, structural (the only wasm leg) | `src/wasm_leg.rs` → `almide-wasm::emit_program` | `link_ir` | almide-wasm emitter rewrites (table C) |
 | `--target wgsl` | `almide-codegen::emit_wgsl` | `link_ir` | almide-codegen nanopass pipeline, Wgsl arm (table B, 4 passes) |
 | interp (oracle) | `almide-interp` | `link_ir` | none — by design |
 
@@ -352,25 +356,19 @@ IR→IR pass in the nanopass sense; each is a route inside `emit_program`.
 No SIMD (`v128`) is emitted anywhere on this leg; the matrix routines are
 scalar kernels (`matrix_kernels.rs`). Out of scope for #929 by decision.
 
-### D. Incumbent trust-spine — `crates/almide-mir` (retiring under #1696)
+### D. v1 native trust-spine — `crates/almide-mir` (retiring under #1696)
 
 Listed for completeness; the roster gate does not enumerate this crate because
-its rows leave with the retirement.
+its rows leave with the retirement. Its wasm rung (the WAT renderer and its
+WAT-level passes — operand fusion, peephole, preamble DCE, bounds-check
+elision, `br_table` dispatch, local-slot reuse, self-append rewrite, scalar
+wrapper inline, region allocation) was deleted by #2761.
 
 | Pass | File | Rung | Does |
 |---|---|---|---|
-| charge probe | `charge_probe.rs` | wasm + native (`ALMIDE_FUEL_PROBE` builds) | `Charge` at fn entry and after every `LoopStart` |
-| self-append rewrite | `concat_to_append.rs` | wasm | `x = x + [e]` → in-place append |
-| scalar wrapper inline | `scalar_call_inline.rs` | wasm | inline single-prim scalar stdlib wrappers (#826) |
-| dead `MakeUnique` elision | `alias_safety.rs` | wasm + native | drop unaliased copy-on-write guards (#824) |
-| region allocation / compaction | `region_alloc.rs`, `region_compact.rs` | wasm | `consume(produce(scalars))` windows become bump regions (#838) |
+| charge probe | `charge_probe.rs` | native (`ALMIDE_FUEL_PROBE` builds) | `Charge` at fn entry and after every `LoopStart` |
+| dead `MakeUnique` elision | `alias_safety.rs` | native | drop unaliased copy-on-write guards (#824) |
 | native Result carrier rewrite | `native_result_rewrite.rs` | native | T1-3 Result producer/consumer rewrite for the Rust render |
-| operand fusion | `render_wasm_fuse.rs` | wasm (WAT) | fold a value's defining op into its single consumer |
-| constant fold through extend/wrap | `render_wasm_peephole.rs` | wasm (WAT) | narrow text peephole over each rendered body |
-| preamble DCE | `render_wasm_dce.rs` | wasm (WAT) | dead WASI import / helper / data elimination |
-| bounds-check elision | `render_wasm_bce.rs` | wasm (WAT) | loop versioning for hot `v[i]` (#806 step 4) |
-| `br_table` dispatch | `render_wasm_switch.rs` | wasm (WAT) | dense integer `match` → `br_table` (#882) |
-| local-slot reuse | `render_wasm_local_reuse.rs` | wasm (WAT) | SSA locals shared in oversized fns (#1554) |
 
 ### E. Pre-split decision (closure of #929)
 
@@ -383,9 +381,9 @@ join it. Verdict per candidate:
 |---|---|---|
 | `ConstFold` (B.12) | no move needed | A.1 folds the same literal arithmetic before the split; on the Rust arm the pass only cleans artifacts of B.10–B.11, which exist on no other leg |
 | `TailCallOpt` (B.15) | no move needed | the structural leg converts self tail calls at the encoded-body level (`tco.rs`) and keeps `return_call` for the rest — the same constant-stack guarantee |
-| `LICM` (B.9) | **not today — follow-up** | (1) layering: `almide-driver` (owner of the cut point) depends on `almide-optimize`, not `almide-codegen`, and the pass is written against `NanoPass`/`Target` there — relocating three files, not a one-line pipeline change; (2) the cut point is also the interp oracle's and the incumbent's input, so a pre-split hoist needs an `ALMIDE_ONLY_PASS=licm` axis and `spec/pass_isolated/` rows before it lands; (3) the win on the structural leg is unmeasured — measure on the loop-bound ledger rows (`nbody`, `spectralnorm`) first |
+| `LICM` (B.9) | **not today — follow-up** | (1) layering: `almide-driver` (owner of the cut point) depends on `almide-optimize`, not `almide-codegen`, and the pass is written against `NanoPass`/`Target` there — relocating three files, not a one-line pipeline change; (2) the cut point is also the interp oracle's and the v1 native render's input, so a pre-split hoist needs an `ALMIDE_ONLY_PASS=licm` axis and `spec/pass_isolated/` rows before it lands; (3) the win on the structural leg is unmeasured — measure on the loop-bound ledger rows (`nbody`, `spectralnorm`) first |
 | `EggSaturation` (B.10) | **not today — follow-up** | pulls `almide-egg-lab` below the driver; the matrix half rewrites into fused `matrix.*` forms only the Rust stdlib lowering consumes, and the list half already has a structural twin (`list_fuse.rs`) |
-| `Peephole` (B.24) | **not today — follow-up** | its output nodes (`ListSwap` …) have no lowering in `almide-wasm`; pre-split it would wall every fixture that hits a pattern (the incumbent's `lower/mod_p5.rs` and the interp are the only consumers) |
+| `Peephole` (B.24) | **not today — follow-up** | its output nodes (`ListSwap` …) have no lowering in `almide-wasm`; pre-split it would wall every fixture that hits a pattern (almide-mir's `lower/mod_p5.rs` and the interp are the only consumers) |
 
 `--target wasm32`/`wasi` is a different beast: it compiles the codegen v3 Rust
 source with `rustc`, so it gets the full Rust arm of table B plus LLVM.
@@ -401,7 +399,7 @@ The stdlib is self-hosted: every function lives in `stdlib/<module>[_part].almd`
   declarations dispatch to hand-written Rust in `runtime/rs/src/<module>.rs`.
 - **WASM** — pure-Almide implementations registered in
   `almide-types/src/self_host_registry.rs` (shared with the interp oracle)
-  are compiled to WAT with user code.
+  are compiled with user code by the structural leg.
 
 Auto-import is the union of the seed list in
 `almide-frontend/src/import_table.rs` and `AUTO_IMPORT_BUNDLED` in

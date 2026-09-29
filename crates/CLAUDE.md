@@ -10,7 +10,8 @@ Source (.almd)
   → almide-frontend  Type check + lower → IR
   → almide-optimize  Monomorphize + DCE → IR
   → almide-codegen   Nanopass + emit → Rust
-  → almide-mir       v1 trust-spine → WASM (WAT) / native Rust render
+  → almide-mir       MIR lowering → v1 native Rust render + certificate witnesses
+  → almide-wasm      structural leg → WASM bytes (the only wasm renderer)
 ```
 
 ## Dependency Graph
@@ -28,7 +29,9 @@ almide-ir             Typed IR, VarTable, visitors
 almide-frontend       Type checker, constraint solver, AST→IR lowering
 almide-optimize       Monomorphization, DCE, constant propagation
 almide-codegen        Nanopass pipeline, TOML templates, walker（WGSL は on-hold — attribute パースのみ）
-almide-mir            v1 Middle IR: ownership/layout SoT, WASM (WAT) + native renderers
+almide-mir            v1 Middle IR: ownership/layout SoT, MIR lowering + native renderers +
+                      certificate witnesses (`almide verify --emit`); no WASM/WAT
+                      renderer since #2761
 almide-interp         Pre-codegen IR tree-walker — 3rd cross-target oracle / executable spec
 almide-tools          Formatter, module interface (.almdi). NOT the LSP — that
                       lives in src/cli/lsp*.rs at the workspace root, and
@@ -37,7 +40,7 @@ almide-tools          Formatter, module interface (.almdi). NOT the LSP — that
 almide-layout         THE single source for heap block layout — every consumer
                       (almide-wasm, almide-interp's arena) derives from it
 almide-wasm           Commissioned structural wasm emitter: typed IR → wasm
-                      bytes via wasm-encoder (no WAT text). The default
+                      bytes via wasm-encoder (no WAT text). The only
                       `--target wasm` leg (routing: `almide::wasm_route` in
                       the root lib — the CLI and the playground call the
                       same `route_wasm`, #2554)

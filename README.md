@@ -145,7 +145,7 @@ Scope, ledger mechanics, and the evidence stack (contract ledger, cross-target f
 
 ### Memory safety — proven where it is proven, trusted where it is trusted
 
-You write no ownership annotations, no lifetimes, no `free`: [Perceus](https://www.microsoft.com/en-us/research/publication/perceus-garbage-free-reference-counting-with-reuse/)-style ownership inference in the compiler decides where every heap value is introduced, duplicated, and consumed — garbage-collector-free, pause-free. On the **incumbent wasm leg** that decision ships with a per-build ownership certificate a **kernel-proven checker re-verifies** (Rocq/Coq spine, 96 audited theorems and lemmas, axiom-clean, independently re-checked by `coqchk`; the count is asserted by `proofs/check.sh`). The **structural wasm leg** (the default since #1599) and the **native leg** are trusted, not proven: their evidence is differential — byte-identical output against the certified leg on the contract corpus, held by a grow-only floor and a semantic-mutation net. The `Built …` line names the leg that produced your bytes. The boundary, stage by stage: **[proven-vs-trusted.md](docs/contracts/proven-vs-trusted.md)**; the full account, including the Lean 4 Perceus belt the design started from: **[docs/design/MEMORY-SAFETY.md](./docs/design/MEMORY-SAFETY.md)**.
+You write no ownership annotations, no lifetimes, no `free`: [Perceus](https://www.microsoft.com/en-us/research/publication/perceus-garbage-free-reference-counting-with-reuse/)-style ownership inference in the compiler decides where every heap value is introduced, duplicated, and consumed — garbage-collector-free, pause-free. The checker for those decisions is **kernel-proven** (Rocq/Coq spine, 96 audited theorems and lemmas, axiom-clean, independently re-checked by `coqchk`; the count is asserted by `proofs/check.sh`), and `almide verify --emit` still produces the MIR ownership witness it checks. The per-build certificate used to ride the incumbent wasm leg, which #2761 deleted; the **structural wasm leg** (the only wasm renderer) and the **native leg** are trusted, certificate pending (#2755–#2760): their evidence is differential — byte-identical output against each other and the interpreter on the contract corpus, held by a grow-only floor and a semantic-mutation net — and the structural runtime's bytes are checked against the Coq decoder model by `proofs/check-structural-bytes.sh`. The boundary, stage by stage: **[proven-vs-trusted.md](docs/contracts/proven-vs-trusted.md)**; the full account, including the Lean 4 Perceus belt the design started from: **[docs/design/MEMORY-SAFETY.md](./docs/design/MEMORY-SAFETY.md)**.
 
 ### Performance
 
@@ -159,7 +159,7 @@ No runtime, no GC, no interpreter — native compiles through Rust to machine co
 Measured on almide 0.62.0, 2026-09-12, from `docs/benchmarks/wasm-size.txt`; no post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the renderer's own module).
 <!-- wasm-size:generated:end -->
 
-Rust on the same wasm target is 40 KB+ for Hello, world even fully size-tuned; the native minigit CLI binary is 418 KB stripped with 0 dependencies. The byte-by-byte dissection, measured 2026-07-23 on the incumbent leg: **[docs/wasm/WASM-OUTPUT.md](./docs/wasm/WASM-OUTPUT.md)**.
+Rust on the same wasm target is 40 KB+ for Hello, world even fully size-tuned; the native minigit CLI binary is 418 KB stripped with 0 dependencies. The byte-by-byte dissection, measured 2026-07-23 (it also covers the incumbent leg, since retired by #2761): **[docs/wasm/WASM-OUTPUT.md](./docs/wasm/WASM-OUTPUT.md)**.
 
 Against handwritten Rust the arithmetic kernels sit at parity (n-body, spectral-norm 1.00×; the ratchet's anchored rows). Where Almide has information Rust does not — a tree whose whole lifetime is one `check(make(depth))` expression, proven by the effect system — it is faster than the ordinary Rust for the same program:
 
@@ -213,20 +213,18 @@ Embedded wasm host (Perceus RC in linear memory) against the native binary, same
 
 ## How It Works
 
-One frontend, one IR, three renderers behind two targets:
+One frontend, one IR, one renderer per target:
 
 ```mermaid
 flowchart LR
     SRC([".almd"]) --> FE["Lexer → Parser → Type Checker → Lowering"] --> IR(["IR"])
     IR --> NANO["Nanopass Pipeline<br/>semantic rewrites"] --> TMPL["Template Renderer<br/>TOML-driven"] --> RS([".rs → native binary"])
-    IR --> ROUTER{"router"}
-    ROUTER --> STRUCT["structural leg<br/>commissioned engine, direct emit"] --> WASM([".wasm"])
-    ROUTER --> INCUMB["incumbent v1 leg<br/>certified MIR, direct emit"] --> WASM
+    IR --> STRUCT["structural leg<br/>commissioned engine, direct emit"] --> WASM([".wasm"])
 ```
 
 **Native.** The Nanopass pipeline applies target-specific transformations — `ResultPropagation` (Rust `?`), `CloneInsertion` (Rust borrow analysis), `LICM` (loop-invariant code motion). The Template Renderer is purely syntactic: every semantic decision is already encoded in the IR.
 
-**WebAssembly.** Since commissioning ([#1599](https://github.com/almide/almide/pull/1599)) two verified renderers sit behind one router (`render_wasm_module_routed` in `src/cli/build.rs`). The **structural leg** — the commissioned engine, `almide::wasm_leg` front + `crates/almide-wasm` emitter — takes every program with a `main`, no external packages, and no host-variant I/O on the build path; it was accepted at 610/610 byte-identical to native on the `wasm_cross` corpus, and its build artifacts ship in the WASI form ([#1588](https://github.com/almide/almide/issues/1588)) so they run on stock runtimes. The **incumbent v1 leg** — the certified MIR trust spine in `crates/almide-mir` — took the shapes the structural leg walled on until #2752; no route reaches it now, and a program the structural leg does not lower is an honest error (E082), never a fallback. `ALMIDE_VERIFIED_DEBUG=1` narrates the route.
+**WebAssembly.** The **structural leg** — the engine commissioned in [#1599](https://github.com/almide/almide/pull/1599), `almide::wasm_leg` front + `crates/almide-wasm` emitter, entered through `render_wasm_module_routed` in `src/cli/build.rs` — is the only wasm renderer. It was accepted at 610/610 byte-identical to native on the `wasm_cross` corpus, and its build artifacts ship in the WASI form ([#1588](https://github.com/almide/almide/issues/1588)) so they run on stock runtimes. A program it does not lower is an honest error (`error[E082]`, naming the wall and the function), never a fallback: the incumbent v1 leg that once took those shapes lost its last route in #2752 and was deleted in #2761. `ALMIDE_VERIFIED_DEBUG=1` narrates the route.
 
 ```bash
 almide run app.almd                  # Compile + execute (native)
@@ -237,7 +235,7 @@ almide check app.almd --target wasm  # + the wasm build route: E081/E082 at chec
 almide fmt app.almd                  # Format source code
 ```
 
-Run `almide --help` for the full command list (compile, add, deps, clean, …). Pipeline and module map: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md); the two wasm legs in detail: [docs/wasm/](./docs/wasm/README.md).
+Run `almide --help` for the full command list (compile, add, deps, clean, …). Pipeline and module map: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md); the wasm leg in detail: [docs/wasm/](./docs/wasm/README.md).
 
 ### What's next — v1, the Trust Spine
 
@@ -250,9 +248,9 @@ The Perceus proof above proves one compiler pass, once. v1 generalizes that prin
 | Maturity | Pre-1.0, under active development on `develop`; the LLM-facing surface is frozen by [STABILITY.md](docs/STABILITY.md) (declared 2026-08-20) |
 | Support | Latest release line only, pre-1.0 — policy and versioning guarantees: [SUPPORT.md](./SUPPORT.md) · vulnerabilities: [SECURITY.md](./SECURITY.md) |
 | Compiler | Pure Rust, single binary, 0 ICE |
-| Targets | Rust (native), WASM (direct emit — two verified legs behind one router, see [How It Works](#how-it-works)) |
-| Verified codegen | Incumbent v1 leg: PCC certificates re-verified on every build since 0.29.0 (`--no-verified` opts out). Structural leg: byte-exact corpus and mutation gates, no certificate yet |
-| Codegen | Rust: Nanopass + TOML templates; wasm: structural engine or certified MIR → direct emit (the unverified v0 emitter is retired — a wall is an error, never a fallback) |
+| Targets | Rust (native), WASM (direct emit — the structural leg, see [How It Works](#how-it-works)) |
+| Verified codegen | Structural wasm leg: byte-exact corpus and mutation gates, trusted with its per-build certificate pending (#2755–#2760); the PCC-certified incumbent leg (per-build re-verification since 0.29.0) was retired by #2761 |
+| Codegen | Rust: Nanopass + TOML templates; wasm: structural engine → direct emit (the v0 emitter and the incumbent MIR→WAT renderer are retired — a wall is an error, never a fallback) |
 | Artifacts | `.almdi` module interface files via `almide compile` |
 | Playground | [Live](https://almide.github.io/playground/) — the compiler runs as WASM in the browser |
 
