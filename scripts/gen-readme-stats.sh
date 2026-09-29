@@ -65,34 +65,27 @@ almide_bin() {
   command -v almide 2>/dev/null || true
 }
 
-# Build Hello, world on one leg and print "<bytes> <leg>" exactly as the
-# compiler's own `Built …` line names them — a size that does not name the leg
-# that produced it is the ambiguity the Built line was added to remove.
+# Build Hello, world and print "<bytes> <leg>" exactly as the compiler's own
+# `Built …` line names them — a size that does not name the leg that produced
+# it is the ambiguity the Built line was added to remove. One wasm leg since
+# #2752.
 measure_leg() {
-  local bin="$1" force_incumbent="$2" dir out line
+  local bin="$1" dir out line
   dir="$(mktemp -d)"
   printf 'fn main() -> Unit = {\n  println("Hello, world!")\n}\n' > "$dir/hello.almd"
-  if [ "$force_incumbent" = 1 ]; then
-    out="$(ALMIDE_WASM_INCUMBENT=1 "$bin" build "$dir/hello.almd" --target wasm -o "$dir/hello.wasm" 2>&1 || true)"
-  else
-    out="$("$bin" build "$dir/hello.almd" --target wasm -o "$dir/hello.wasm" 2>&1 || true)"
-  fi
+  out="$("$bin" build "$dir/hello.almd" --target wasm -o "$dir/hello.wasm" 2>&1 || true)"
   rm -rf "$dir"
-  line="$(printf '%s\n' "$out" | grep -oE '\(([0-9]+) bytes, (structural|incumbent v1) leg' || true)"
+  line="$(printf '%s\n' "$out" | grep -oE '\(([0-9]+) bytes, structural leg' || true)"
   [ -n "$line" ] || { echo "::error::could not read the Built line from the compiler; output was: $out" >&2; return 1; }
-  printf '%s %s\n' "$(printf '%s' "$line" | grep -oE '[0-9]+' | head -1)" \
-    "$(printf '%s' "$line" | grep -oE 'structural|incumbent')"
+  printf '%s %s\n' "$(printf '%s' "$line" | grep -oE '[0-9]+' | head -1)" structural
 }
 
-measure_both() { # sets S_BYTES / I_BYTES from a fresh build on each leg
-  local bin s i
+measure_both() { # sets S_BYTES from a fresh build
+  local bin s
   bin="$(almide_bin)"
   [ -n "$bin" ] || { echo "::error::no compiler binary — set ALMIDE_BIN or build target/release/almide"; return 2; }
-  s="$(measure_leg "$bin" 0)"
-  i="$(measure_leg "$bin" 1)"
-  [ "${s#* }" = structural ] || { echo "::error::default routing did not take the structural leg (got: $s)"; return 1; }
-  [ "${i#* }" = incumbent ]  || { echo "::error::ALMIDE_WASM_INCUMBENT=1 did not take the incumbent leg (got: $i)"; return 1; }
-  S_BYTES="${s%% *}"; I_BYTES="${i%% *}"
+  s="$(measure_leg "$bin")"
+  S_BYTES="${s%% *}"
   BIN_VERSION="$("$bin" --version 2>/dev/null | head -1)"
 }
 
@@ -110,9 +103,8 @@ version          = $BIN_VERSION
 date             = $(date +%F)
 program          = fn main() -> Unit = { println("Hello, world!") }
 structural_bytes = $S_BYTES
-incumbent_bytes  = $I_BYTES
 EOF
-  echo "wasm-size: baseline restamped in $BASELINE (structural $S_BYTES B, incumbent $I_BYTES B)"
+  echo "wasm-size: baseline restamped in $BASELINE (structural $S_BYTES B)"
 fi
 
 [ -f "$BASELINE" ] || { echo "::error::$BASELINE not found — run: bash scripts/gen-readme-stats.sh --measure"; exit 2; }
@@ -126,7 +118,7 @@ stdlib_mods="$(counts_get stdlib_modules)"
 test_files="$(counts_get spec_test_files)"
 contracts="$(counts_get contracts)"
 size_version="$(kv version)"; size_date="$(kv date)"
-size_struct="$(thousands "$(kv structural_bytes)")"; size_incumb="$(thousands "$(kv incumbent_bytes)")"
+size_struct="$(thousands "$(kv structural_bytes)")"
 
 stats_body="$(mktemp)"; size_body="$(mktemp)"; rt_body="$(mktemp)"; rendered="$(mktemp)"
 trap 'rm -f "$stats_body" "$size_body" "$rt_body" "$rendered"' EXIT
@@ -134,11 +126,11 @@ trap 'rm -f "$stats_body" "$size_body" "$rt_body" "$rendered"' EXIT
 counts_render_stats > "$stats_body"
 
 cat > "$size_body" <<EOF
-| Program (\`almide build --target wasm\`, verified, as shipped) | incumbent v1 leg | structural leg |
-|---|---:|---:|
-| Hello, world | **${size_incumb} B** | **${size_struct} B** |
+| Program (\`almide build --target wasm\`, as shipped) | structural leg |
+|---|---:|
+| Hello, world | **${size_struct} B** |
 
-Measured on ${size_version}, ${size_date}, from \`docs/benchmarks/wasm-size.txt\`; no post-hoc optimizer touches the shipped bytes (\`--wasm-opt\` is opt-in and its output is not the verified module).
+Measured on ${size_version}, ${size_date}, from \`docs/benchmarks/wasm-size.txt\`; no post-hoc optimizer touches the shipped bytes (\`--wasm-opt\` is opt-in and its output is not the renderer's own module).
 EOF
 
 # The wasm-runtime block (#1701), rendered from the committed ledger — the
@@ -198,11 +190,11 @@ if [ "$MODE" = "--check" ]; then
   echo "readme-stats: blocks are fresh (stdlib ${stdlib_fns}/${stdlib_mods}, tests ${test_files}, contracts ${contracts} — as stamped $(counts_date))."
   if [ -n "$(almide_bin)" ]; then
     measure_both
-    if [ "$S_BYTES" != "$(kv structural_bytes)" ] || [ "$I_BYTES" != "$(kv incumbent_bytes)" ]; then
-      echo "::error::Hello, world no longer matches $BASELINE (structural $S_BYTES vs $(kv structural_bytes), incumbent $I_BYTES vs $(kv incumbent_bytes)) — run: bash scripts/gen-readme-stats.sh --measure"
+    if [ "$S_BYTES" != "$(kv structural_bytes)" ]; then
+      echo "::error::Hello, world no longer matches $BASELINE (structural $S_BYTES vs $(kv structural_bytes)) — run: bash scripts/gen-readme-stats.sh --measure"
       exit 1
     fi
-    echo "readme-stats: Hello, world rebuilt on both legs, bytes match the baseline."
+    echo "readme-stats: Hello, world rebuilt, bytes match the baseline."
   else
     echo "::warning::no compiler binary — Hello, world not rebuilt; the baseline's bytes were not re-verified."
   fi
@@ -213,5 +205,5 @@ if cmp -s "$rendered" "$README"; then
   echo "readme-stats: blocks already fresh."
 else
   cp "$rendered" "$README"
-  echo "readme-stats: README.md rewritten (stdlib ${stdlib_fns}/${stdlib_mods}, tests ${test_files}, contracts ${contracts}, Hello, world ${size_incumb}/${size_struct} B)."
+  echo "readme-stats: README.md rewritten (stdlib ${stdlib_fns}/${stdlib_mods}, tests ${test_files}, contracts ${contracts}, Hello, world ${size_struct} B)."
 fi

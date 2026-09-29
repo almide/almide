@@ -21,11 +21,11 @@ can still print the wrong string.
 
 ## Which leg is this page about?
 
-Since v0.60.0 (#1599) there are two wasm legs, and the boundary map below
-describes the **incumbent v1 leg** — the certified pipeline. That leg is what
-you get with `ALMIDE_WASM_INCUMBENT=1`, and automatically whenever the default
-leg refuses a shape (a verified-to-verified reroute; `ALMIDE_VERIFIED_DEBUG=1`
-names the handover).
+Since v0.60.0 (#1599) there were two wasm legs, and the boundary map below
+describes the **incumbent v1 leg** — the certified pipeline. Since #2752 no
+route reaches that leg: a shape the default leg refuses is a hard E082 wall,
+never a handover, so no shipped wasm byte comes from this pipeline any more
+(its deletion is #2761).
 
 The **default** `--target wasm` leg — the structural emitter in
 `crates/almide-wasm` — is **trusted end to end, certificate pending** (#1696):

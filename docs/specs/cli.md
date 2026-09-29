@@ -980,7 +980,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_FAN_SEQUENTIAL` | runtime | run `fan.*` sequentially in the native runtime (a determinism lever for measurement; the observable result is the same by contract) |
 | `ALMIDE_FLOAT_SWEEP_N=value` | harness | how many xorshift64 bit patterns the float printer sweep prints and compares with Rust `format!` on each leg (default 100000; tests/float_to_string_cross_target_test.rs) |
 | `ALMIDE_FN_ESCAPE_OFF` | ablation | make BorrowInsertion borrow EVERY fn-typed param as `&dyn Fn`, escaping or not (#2288) — the ablation the ownership certifier's C5 sensitivity test drives |
-| `ALMIDE_FUEL_PROBE` | route | insert fuel charges and force the INCUMBENT wasm leg (the charge probe); `almide run --time-report` sets it internally |
+| `ALMIDE_FUEL_PROBE` | route | insert fuel charges into the native render (the charge probe); `almide run --time-report` sets it internally. Native-only: the wasm leg carries no charge trace (#2752) |
 | `ALMIDE_FUZZ_BASE=value` | harness | the first seed of the differential fuzz's fixed seed range (default 0) |
 | `ALMIDE_FUZZ_HOST_ORACLE` | harness | run the differential fuzz in host-oracle mode (arm selection is deterministic per seed and mode) |
 | `ALMIDE_FUZZ_ITERS=value` | harness | how many seeds the differential fuzz's fixed range covers (default 200) |
@@ -1057,8 +1057,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_WALL_REASON` | debug | make `almide test` say WHICH stage of the wasm leg declined a fallback file, not just `v1 wall` |
 | `ALMIDE_WASM_ALLOC_COUNT` | harness | emit the structural wasm leg's allocation counters (#2407: four i64 globals `$alloc`/`$free` bump, exported as `__alloc_count` / `__alloc_reused` / `__alloc_bytes` / `__free_count`) and make `almide run --target wasm` print `__ALMD_WASM_ALLOC allocs=N reused=N bytes=N frees=N heap_end=N` on stderr after the run; off, the module is byte-identical to a build without the switch (the wasm twin of `ALMIDE_ALLOC_COUNT`; the count ledger is crates/almide-wasm/tests/golden/alloc-count-baseline.txt) |
 | `ALMIDE_WASM_FREES` | ci | the frees-churn gate's switch; its compiler reader retired with the v0 emitter (#782), the gate that still sets it is #2207's |
-| `ALMIDE_WASM_INCUMBENT` | route | force the INCUMBENT wasm leg (the v1 MIR renderer) instead of the structural-first route |
-| `ALMIDE_WASM_STRUCTURAL` | route | force the STRUCTURAL wasm leg for a shape the router would send to the incumbent (the route-flip probe) |
+| `ALMIDE_WASM_STRUCTURAL` | route | skip the stock-WASI host-op audit on `almide build --target wasm` (the emitter-frontier probe); the route has one leg since #2752 |
 | `ALMIDE_WASM_WATCHDOG_SECS=value` | harness | the wall-time seconds the IN-PROCESS test runner's epoch watchdog (`run_wasm` / `run_wasm_with` / `run_wasm_capped` in almide-wasm-run) lets a module run before it traps with `interrupt` (default 30); `almide run --target wasm` and `almide bench --target wasm` arm no watchdog on any setting, as native has none (#2615) |
 | `ALMIDE_WAT_PRELUDE_REACH` | ci | make the prelude audit re-render every named fixture to measure reachability (CI sets it) |
 | `ALMIDE_WITNESS_DUMP` | harness | print every fixture's certificate witness in the witness-floor test |
