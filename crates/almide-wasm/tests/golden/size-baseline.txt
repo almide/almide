@@ -203,7 +203,7 @@
 3372	spec/wasm_cross/float_to_int_edges.almd
 2396	spec/wasm_cross/fold_heap_acc.almd
 1891	spec/wasm_cross/for_in_forms.almd
-!	spec/wasm_cross/fs_call_head_family.almd
+12650	spec/wasm_cross/fs_call_head_family.almd
 13395	spec/wasm_cross/fs_composition_family.almd
 8906	spec/wasm_cross/fs_fallible_stream_callback.almd
 6987	spec/wasm_cross/fs_glob_segments.almd
