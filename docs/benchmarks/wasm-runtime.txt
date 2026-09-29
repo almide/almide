@@ -32,7 +32,7 @@ spectralnorm          | measured         | 1.65  | 2.42 | 1.47
 binarytrees           | measured         | 1.74  | 2.29 | 1.32 ab_band=100
 treealloc             | measured         | 42.21 | 42.81 | 1.01
 fasta                 | measured         | 1.46  | 2.31 | 1.58
-fannkuchredux         | routed-incumbent | 1.67  | -    | -
+fannkuchredux         | measured         | 1.48  | 2.75 | 1.86 ab_band=100
 mandelbrot            | measured         | 2.81  | 3.54 | 1.26 ab_band=100
 onebrc                | measured         | 2.14  | 4.01 | 1.87
 fft                   | measured         | 44.12 | 121.57 | 2.76
