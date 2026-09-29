@@ -283,7 +283,7 @@ impl Emitter<'_> {
             // this: an alias captured before the assign keeps the old
             // value).
             IrStmtKind::FieldAssign { target, field, value } => {
-                self.lower_field_assign(target, field, value)
+                self.lower_field_assign(target, std::slice::from_ref(field), value)
             }
             // `m[k] = v` on a map var — the in-place window when the var
             // owns its block (#1219), else the same write-back the
@@ -695,10 +695,10 @@ impl Emitter<'_> {
     pub(crate) fn lower_field_assign(
         &mut self,
         target: &almide_ir::VarId,
-        field: &almide_base::intern::Sym,
+        path: &[almide_base::intern::Sym],
         value: &IrExpr,
     ) -> Result<(), EmitError> {
-        self.field_assign_with(target, field, |s, fty| {
+        self.field_assign_with(target, path, |s, fty| {
             s.lower(value, Some(fty))?;
             s.rc_share_guard(value, fty);
             Ok(())
