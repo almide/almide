@@ -252,6 +252,8 @@ pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + S
     }
     let chunk_size = xs.len().div_ceil(almide_rt_list_par_workers(xs.len()));
     let mut slots: Vec<Option<B>> = (0..xs.len()).map(|_| None).collect();
+    // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
+    almide_stdout_flush();
     std::thread::scope(|s| {
         for (chunk, out) in xs.chunks(chunk_size).zip(slots.chunks_mut(chunk_size)) {
             let f = &f;
@@ -273,6 +275,8 @@ pub fn almide_rt_list_par_filter<A: Send + Sync + Clone, F: Fn(A) -> bool + Send
     let chunk_size = (xs.len() + cpus - 1) / cpus;
     let chunks: Vec<Vec<A>> = xs.chunks(chunk_size).map(|c| c.to_vec()).collect();
     let mut results: Vec<Option<Vec<A>>> = (0..chunks.len()).map(|_| None).collect();
+    // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
+    almide_stdout_flush();
     std::thread::scope(|s| {
         let mut handles = Vec::new();
         for chunk in &chunks {
@@ -296,6 +300,8 @@ pub fn almide_rt_list_par_any<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + 
     let chunk_size = (xs.len() + cpus - 1) / cpus;
     let chunks: Vec<&[A]> = xs.chunks(chunk_size).collect();
     let found = std::sync::atomic::AtomicBool::new(false);
+    // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
+    almide_stdout_flush();
     std::thread::scope(|s| {
         for chunk in &chunks {
             let f = &f;
@@ -322,6 +328,8 @@ pub fn almide_rt_list_par_all<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + 
     let chunk_size = (xs.len() + cpus - 1) / cpus;
     let chunks: Vec<&[A]> = xs.chunks(chunk_size).collect();
     let failed = std::sync::atomic::AtomicBool::new(false);
+    // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
+    almide_stdout_flush();
     std::thread::scope(|s| {
         for chunk in &chunks {
             let f = &f;
