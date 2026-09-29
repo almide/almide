@@ -1,15 +1,15 @@
-diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
-index abe6f3302..e99d25854 100644
---- a/crates/almide-wasm/src/stmts.rs
-+++ b/crates/almide-wasm/src/stmts.rs
-@@ -682,8 +682,8 @@ impl Emitter<'_> {
-                     Ok(idx) => self.f.instructions().local_get(idx),
-                     Err(gidx) => self.f.instructions().global_get(gidx),
-                 };
--                let copy = self.copy_fn_of(SliceTy::Named(ti));
--                self.f.instructions().call(copy).local_tee(hb);
-+                let _ = self.copy_fn_of(SliceTy::Named(ti));
-+                self.f.instructions().local_tee(hb); // [MUTANT: copy dropped]
-                 // The replaced field's credit goes with it (stage 2c-ii).
-                 if let Some(dec) = self.elem_is_handle(fty).then(|| self.dec_fn_of(fty)) {
-                     self.f.instructions().local_get(hb).i32_load(slot_memarg(off)).call(dec);
+diff --git a/crates/almide-wasm/src/list_mut.rs b/crates/almide-wasm/src/list_mut.rs
+index 5136b4e39..2e43b3bba 100644
+--- a/crates/almide-wasm/src/list_mut.rs
++++ b/crates/almide-wasm/src/list_mut.rs
+@@ -64,8 +64,8 @@ impl Emitter<'_> {
+             Ok(idx) => self.f.instructions().local_get(idx),
+             Err(gidx) => self.f.instructions().global_get(gidx),
+         };
+-        let copy = self.copy_fn_of(SliceTy::Named(ti));
+-        self.f.instructions().call(copy).local_tee(hb);
++        let _ = self.copy_fn_of(SliceTy::Named(ti));
++        self.f.instructions().local_tee(hb); // [MUTANT: copy dropped]
+         // The replaced field's credit goes with it (stage 2c-ii).
+         if let Some(dec) = self.elem_is_handle(fty).then(|| self.dec_fn_of(fty)) {
+             self.f.instructions().local_get(hb).i32_load(slot_memarg(off)).call(dec);
