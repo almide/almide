@@ -103,30 +103,32 @@ fn admissible_size(e: &IrExpr, fns: &HashSet<String>) -> Option<usize> {
             }
             n
         }
-        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
-            let ok = match target {
-                CallTarget::Named { name } => fns.contains(name.as_str()),
-                CallTarget::Module { module, func, .. } => {
-                    module.as_str() == "prim" && PURE_PRIMS.contains(&func.as_str())
-                }
-                _ => false,
-            };
-            if !ok || !is_scalar(&e.ty) {
-                return None;
-            }
-            let mut n = 1;
-            for a in args {
-                if !is_scalar(&a.ty) {
-                    return None;
-                }
-                n += sub(a)?;
-            }
-            n
-        }
+        IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => call_size(e, target, args, fns)?,
         _ => return None,
     };
     if !is_scalar(&e.ty) {
         return None;
+    }
+    Some(n)
+}
+
+/// A call's admissible size: a `Named` call of the same space or a pure
+/// scalar prim, scalar arguments and result (split from `admissible_size`).
+fn call_size(e: &IrExpr, target: &CallTarget, args: &[IrExpr], fns: &HashSet<String>) -> Option<usize> {
+    let ok = match target {
+        CallTarget::Named { name } => fns.contains(name.as_str()),
+        CallTarget::Module { module, func, .. } => module.as_str() == "prim" && PURE_PRIMS.contains(&func.as_str()),
+        _ => false,
+    };
+    if !ok || !is_scalar(&e.ty) {
+        return None;
+    }
+    let mut n = 1;
+    for a in args {
+        if !is_scalar(&a.ty) {
+            return None;
+        }
+        n += admissible_size(a, fns)?;
     }
     Some(n)
 }
