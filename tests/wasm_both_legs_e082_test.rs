@@ -20,26 +20,46 @@ fn almide_bin() -> String {
 }
 
 /// The issue's program shape — the CHEATSHEET's fallible-map idiom over
-/// `fan.*` with an fs op inside, which the incumbent walls — plus shapes the
-/// structural leg still declines. Its original structural reason (the fs op
-/// had no stock-WASI service) is gone since the p1 fs service (#2742), so the
-/// structural decline now comes from the retirement bill's open rows
-/// (`list.partition` and matrix `*`; `random.shuffle` #2749 and `continue`
-/// #2745 were the previous pair until both landed together): two, so one
-/// landing does not silently turn this test into a pass of a different
-/// program.
+/// `fan.*` with an fs op inside, which the incumbent walls (the retirement
+/// arc never lowers it there: the structural leg serves it) — plus ONE shape
+/// the structural leg declines. The structural ingredient is not chosen by
+/// hand from whatever is open today: it is the one named by
+/// `STRUCTURAL_DECLINE`, and `the_structural_ingredient_is_still_a_census_row`
+/// asserts the incumbent-route census still carries a row with that reason.
+/// The day the structural leg lowers it, the census prune drops the row and
+/// that test fails with a pointer to pick a new reason from the census —
+/// instead of this test turning, silently, into the pass of another program
+/// (it did twice: `random.shuffle` #2749 + `continue` #2745, then
+/// `list.partition` #2744).
 const BOTH_LEGS_WALL: &str = r#"import fs
 
 effect fn read_one(p: String) -> String = { let t = fs.read_text(p)!; string.trim(t) }
 
 effect fn main() -> Unit = {
-  let (evens, odds) = list.partition([1, 2, 3, 4], (x) => x % 2 == 0)
   let m = matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])
   let sq = m * m
   let texts = fan.map(["a.txt"], (p) => read_one(p)!)!
-  println("${list.len(evens)} ${list.len(odds)} ${matrix.rows(sq)} " + (texts |> list.join(",")))
+  println("${matrix.rows(sq)} " + (texts |> list.join(",")))
 }
 "#;
+
+/// The structural leg's decline reason for `BOTH_LEGS_WALL`'s `m * m`, as
+/// the census spells it.
+const STRUCTURAL_DECLINE: &str = "binop:MulMatrix";
+
+#[test]
+fn the_structural_ingredient_is_still_a_census_row() {
+    let census = Path::new(env!("CARGO_MANIFEST_DIR")).join("proofs/incumbent-route-baseline.txt");
+    let text = std::fs::read_to_string(&census).expect("read the incumbent-route census");
+    let suffix = format!(":: {STRUCTURAL_DECLINE}");
+    assert!(
+        text.lines().any(|l| l.trim_end().ends_with(&suffix)),
+        "proofs/incumbent-route-baseline.txt no longer lists a `{STRUCTURAL_DECLINE}` row: the structural \
+         leg now lowers BOTH_LEGS_WALL's structural ingredient, so the program is no longer a both-legs \
+         wall. Replace that ingredient (and STRUCTURAL_DECLINE) with a shape whose reason is still a \
+         census row, and check it alone gives E082."
+    );
+}
 
 /// One ingredient alone: a plain fs program builds (on the structural leg,
 /// through the p1 fs service, since #2742).
@@ -76,7 +96,10 @@ fn check_target_wasm_reports_the_both_legs_wall_as_e082() {
     let log = String::from_utf8_lossy(&o.stderr).to_string();
     assert!(!o.status.success(), "check --target wasm must refuse the both-legs wall:\n{log}");
     assert!(log.contains("error[E082]"), "must carry the E082 code:\n{log}");
-    assert!(log.contains("wall (structural leg, the default): "), "must name the structural leg's reason:\n{log}");
+    assert!(
+        log.contains(&format!("wall (structural leg, the default): {STRUCTURAL_DECLINE}")),
+        "must name the structural leg's reason ({STRUCTURAL_DECLINE}):\n{log}"
+    );
     assert!(log.contains("fan.map consumed by"), "must name the incumbent's shape reason:\n{log}");
     assert!(!log.contains("No errors found"), "a refused route is not a clean check:\n{log}");
 
