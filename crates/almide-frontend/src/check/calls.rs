@@ -1156,6 +1156,68 @@ impl Checker {
         }
     }
 
+    /// Instantiate a variant case at one use site: fresh inference vars for
+    /// the owning type's generics (`type_key` names its declaration), and the
+    /// substitution that rewrites the case's payload types — written in the
+    /// declaration's own vars (`Box[T]`'s `T`) — into those fresh vars.
+    ///
+    /// Every constructor site goes through this: the bare and the qualified
+    /// (`mod.Ctor`) call, the constructor used as a value, and the
+    /// record-variant literal. The qualified call once kept its own copy that
+    /// skipped non-generic types, so its payload gave no expected type to its
+    /// arguments and `tree.Node("n", [])` was E018 while `Node("n", [])`
+    /// checked (#2925).
+    pub(crate) fn instantiate_ctor_case(&mut self, type_key: &str) -> (Vec<Ty>, HashMap<Sym, Ty>) {
+        let generic_args = self.instantiate_type_generics(type_key);
+        if generic_args.is_empty() {
+            return (generic_args, HashMap::new());
+        }
+        let subst = self.env.types.get(&sym(type_key)).cloned().map(|ty_def| {
+            let mut type_var_names = Vec::new();
+            crate::types::TypeEnv::collect_typevars(&ty_def, &mut type_var_names);
+            type_var_names.iter().zip(generic_args.iter())
+                .map(|(tv, fresh)| (*tv, fresh.clone()))
+                .collect()
+        }).unwrap_or_default();
+        (generic_args, subst)
+    }
+
+    /// A tuple case's payload types at this use site (`subst` from
+    /// [`Self::instantiate_ctor_case`]); empty for a unit or record case.
+    pub(crate) fn ctor_tuple_payload(case: &crate::types::VariantCase, subst: &HashMap<Sym, Ty>) -> Vec<Ty> {
+        match &case.payload {
+            crate::types::VariantPayload::Tuple(tys) => tys.iter().map(|t| subst_ty(t, subst)).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Check a positional constructor call `Ctor(args…)` / `mod.Ctor(args…)`
+    /// against its case and return the constructed type `result_name[…]`.
+    /// Each argument is unified with its instantiated payload type — for a
+    /// generic variant that resolves the parent's vars (`Leaf(1)` → `T=Int`),
+    /// and for ANY variant it hands a concrete payload type to an argument that
+    /// has none of its own (`[]`, `[:]`, `none`), exactly as a fn parameter does.
+    pub(crate) fn check_positional_ctor_call(&mut self, name: &str, case: &crate::types::VariantCase, arg_tys: &[Ty], type_key: &str, result_name: Sym) -> Ty {
+        self.check_constructor_args(name, case, arg_tys);
+        let (generic_args, subst) = self.instantiate_ctor_case(type_key);
+        for (aty, ety) in arg_tys.iter().zip(Self::ctor_tuple_payload(case, &subst).iter()) {
+            self.unify_infer(aty, ety);
+        }
+        Ty::Named(result_name, generic_args)
+    }
+
+    /// A tuple-payload constructor used as a value (`Node`, `m.Node`): the
+    /// function from its instantiated payload to `result_name[…]`, params and
+    /// result sharing one set of fresh generic vars.
+    pub(crate) fn ctor_fn_value_ty(&mut self, case: &crate::types::VariantCase, type_key: &str, result_name: Sym) -> Ty {
+        let (generic_args, subst) = self.instantiate_ctor_case(type_key);
+        Ty::Fn {
+            params: Self::ctor_tuple_payload(case, &subst),
+            ret: Box::new(Ty::Named(result_name, generic_args)),
+            is_effect: false,
+        }
+    }
+
     pub(super) fn check_constructor_args(&mut self, name: &str, case: &crate::types::VariantCase, arg_tys: &[Ty]) {
         if let crate::types::VariantPayload::Tuple(expected_tys) = &case.payload {
             if arg_tys.len() != expected_tys.len() {

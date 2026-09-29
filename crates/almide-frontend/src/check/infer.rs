@@ -146,28 +146,9 @@ impl Checker {
                 if let Some((type_name, case)) = self.env.lookup_ctor_in(&sym(name), self.current_module_prefix.as_deref()) {
                     self.report_ambiguous_ctor(name);
                     match &case.payload {
-                        VariantPayload::Tuple(tys) if !tys.is_empty() => {
-                            // Constructor with payload used as value → function type
-                            let generic_args = self.instantiate_type_generics(type_name.as_str());
-                            let ret = Ty::Named(type_name, generic_args.clone());
-                            let params = if generic_args.is_empty() {
-                                tys.clone()
-                            } else {
-                                // Substitute TypeVars with fresh inference vars
-                                if let Some(ty_def) = self.env.types.get(&type_name).cloned() {
-                                    let mut type_var_names = Vec::new();
-                                    crate::types::TypeEnv::collect_typevars(&ty_def, &mut type_var_names);
-                                    let subst: std::collections::HashMap<Sym, Ty> = type_var_names.iter()
-                                        .zip(generic_args.iter())
-                                        .map(|(tv, fresh)| (*tv, fresh.clone()))
-                                        .collect();
-                                    tys.iter().map(|t| super::calls::subst_ty(t, &subst)).collect()
-                                } else {
-                                    tys.clone()
-                                }
-                            };
-                            Ty::Fn { params, ret: Box::new(ret), is_effect: false }
-                        }
+                        // Constructor with payload used as value → function type
+                        VariantPayload::Tuple(tys) if !tys.is_empty() =>
+                            self.ctor_fn_value_ty(&case, type_name.as_str(), type_name),
                         _ => Ty::Named(type_name, vec![])
                     }
                 }
@@ -328,15 +309,7 @@ impl Checker {
             ).with_code("E021"));
             return Err(Ty::Unknown);
         }
-        let generic_args = self.instantiate_type_generics(type_name.as_str());
-        let subst: std::collections::HashMap<Sym, Ty> = if !generic_args.is_empty() {
-            self.env.types.get(&type_name).cloned().map(|ty_def| {
-                let mut tv_names = Vec::new();
-                crate::types::TypeEnv::collect_typevars(&ty_def, &mut tv_names);
-                tv_names.iter().zip(generic_args.iter())
-                    .map(|(tv, fresh)| (*tv, fresh.clone())).collect()
-            }).unwrap_or_default()
-        } else { std::collections::HashMap::new() };
+        let (generic_args, subst) = self.instantiate_ctor_case(type_name.as_str());
         let decl = match &case.payload {
             crate::types::VariantPayload::Record(fs) =>
                 fs.iter().map(|(fname, fty)| (*fname, super::calls::subst_ty(fty, &subst))).collect(),
@@ -475,19 +448,21 @@ impl Checker {
                 let qualified = format!("{}.{}", resolved_mod.as_str(), type_name.as_str());
                 if self.env.types.contains_key(&sym(&qualified)) {
                     self.type_map.insert(object.id, Ty::Unit);
-                    let generic_args = self.instantiate_type_generics(type_name.as_str());
                     // #433: return the qualified `mod.Type` (it exists and was
                     // just confirmed) so the binding mangles to the namespaced
                     // struct, not the ambiguous bare name.
                     let qual_ty = sym(&qualified);
+                    // A payload-carrying case is the same function value the
+                    // bare `Ctor` is — its params instantiated with the SAME
+                    // fresh vars as its result (#2925's sweep: they were the
+                    // declaration's own `T`, so `list.map(xs, m.Box)` left the
+                    // result's element unconstrained).
                     return Some(match &case.payload {
-                        VariantPayload::Unit => Ty::Named(qual_ty, generic_args),
-                        VariantPayload::Tuple(param_tys) => Ty::Fn {
-                            params: param_tys.clone(),
-                            ret: Box::new(Ty::Named(qual_ty, generic_args)),
-                            is_effect: false,
-                        },
-                        VariantPayload::Record(_) => Ty::Named(qual_ty, generic_args),
+                        VariantPayload::Tuple(_) => self.ctor_fn_value_ty(&case, &qualified, qual_ty),
+                        VariantPayload::Unit | VariantPayload::Record(_) => {
+                            let generic_args = self.instantiate_type_generics(&qualified);
+                            Ty::Named(qual_ty, generic_args)
+                        }
                     });
                 }
             }
