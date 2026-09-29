@@ -140,6 +140,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_HEAP_TRACE", Flag, Dbg, "print the interpreter's heap-block allocations and frees"),
     sw("ALMIDE_HTTP_MAX_RESPONSE_BYTES", Value, Runtime, "the http client's cap on a buffered response in bytes, read by the compiled program (default 1 GiB; 0 = no cap, #2825)"),
     sw("ALMIDE_HTTP_TIMEOUT_SECS", Value, Runtime, "the http client's connect and read timeout in seconds, read by the compiled program (default 30; 0 = none)"),
+    sw("ALMIDE_INLINE_OFF", Flag, Ablation, "turn the structural leg's small scalar-fn inliner off (#2980): every call kept, for an A/B"),
     sw("ALMIDE_INSTALL", Value, Tool, "the directory `almide install` installs binaries into (overrides the default `~/.local/bin`)"),
     sw("ALMIDE_INTERP_SWEEP_THREADS", Value, Harness, "interp sweep thread count; 1 = serial (#2381)"),
     sw("ALMIDE_IR_FAULT", Value, Harness, "inject an IR violation after the named optimiser pass, so the per-pass verifier can be watched turning red in the release binary"),
