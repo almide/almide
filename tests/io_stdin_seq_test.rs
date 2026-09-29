@@ -50,7 +50,7 @@ fn run_with_stdin(file: &std::path::Path, wasm: bool, stdin: &str) -> (i32, Stri
     }
     let mut child = Command::new(almide())
         .args(&args)
-        .env("ALMIDE_WASM_STRUCTURAL", if wasm { "1" } else { "" })
+        .env("ALMIDE_WASM_SKIP_STOCK_AUDIT", if wasm { "1" } else { "" })
         .current_dir(repo_root())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

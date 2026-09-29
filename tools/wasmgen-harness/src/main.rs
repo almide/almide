@@ -7,7 +7,7 @@
 //!
 //! The entry is the library route (`almide::wasm_route::render_wasm_routed`,
 //! the one the CLI's `--target wasm` and the playground call) with
-//! `force_structural`, so the incumbent renderer is never consulted: a
+//! `skip_stock_audit`, so the incumbent renderer is never consulted: a
 //! structural wall is an exit-3 WALL (a tracked skip — the fixture is not
 //! host-nondeterministic, the default leg simply declines it), never an
 //! incumbent module standing in for it. Both hosts hitting the SAME wall is
@@ -26,7 +26,7 @@ fn main() {
     // route the bundled modules a single entry imports, pre-parsed (the
     // playground's ModuleSource::Provided form).
     let bundled = almide_mir::pipeline::bundled_self_modules(&source);
-    let opts = almide::wasm_route::RouteOptions { force_structural: true, ..Default::default() };
+    let opts = almide::wasm_route::RouteOptions { skip_stock_audit: true, ..Default::default() };
     let modules = almide::wasm_route::ModuleSource::Provided(&bundled);
     match almide::wasm_route::render_wasm_routed("in.almd", &source, modules, opts) {
         Ok(routed) => {

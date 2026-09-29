@@ -8,7 +8,7 @@
 # `fn main` through both pipelines and byte-diffs stdout.
 #
 #   v0 oracle : `almide run <f>`                                  (native)
-#   v1        : `ALMIDE_WASM_STRUCTURAL=1 almide build <f> --target wasm` -> `wasmtime`
+#   v1        : `ALMIDE_WASM_SKIP_STOCK_AUDIT=1 almide build <f> --target wasm` -> `wasmtime`
 #               (the STRUCTURAL leg — the renderer `--target wasm` ships by default —
 #               forced, so a structural decline is a WALL here and never an incumbent
 #               module standing in for it. Until #2793 this leg was the incumbent's
@@ -127,7 +127,7 @@ run_one() { # $1=file -> sets VERDICT to match|mismatch|wall|runerr|hang|v0fail
   to "$t" "$ALM" run "$f" > "$TMP/v0" 2>"$TMP/v0e" < /dev/null
   local v0rc=$?
   rm -f "$TMP/m.wasm"
-  ALMIDE_WASM_STRUCTURAL=1 to "$t" "$ALM" build "$f" --target wasm -o "$TMP/m.wasm" > /dev/null 2>&1 < /dev/null || {
+  ALMIDE_WASM_SKIP_STOCK_AUDIT=1 to "$t" "$ALM" build "$f" --target wasm -o "$TMP/m.wasm" > /dev/null 2>&1 < /dev/null || {
     if [ "$v0rc" -ne 0 ]; then VERDICT=v0fail; else VERDICT=wall; fi
     return
   }

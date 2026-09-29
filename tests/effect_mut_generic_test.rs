@@ -94,7 +94,7 @@ fn never_err_effect_mut_method_via_bound_lowers_structurally() {
     // structural leg itself lowered the shape (#1622's decline is gone).
     let forced = Command::new(almide_bin())
         .args(["run", path.to_str().unwrap(), "--target", "wasm"])
-        .env("ALMIDE_WASM_STRUCTURAL", "1")
+        .env("ALMIDE_WASM_SKIP_STOCK_AUDIT", "1")
         .output()
         .expect("spawn");
     assert!(
@@ -132,7 +132,7 @@ fn can_err_half_lowers_structurally_under_the_1576_ruling() {
     // structural leg lowered the can-err shape itself.
     let forced = Command::new(almide_bin())
         .args(["run", path.to_str().unwrap(), "--target", "wasm"])
-        .env("ALMIDE_WASM_STRUCTURAL", "1")
+        .env("ALMIDE_WASM_SKIP_STOCK_AUDIT", "1")
         .output()
         .expect("spawn");
     assert!(

@@ -157,8 +157,8 @@ fn a_native_extern_is_refused_on_the_wasm_target() {
     assert!(!dir.path().join("app.wasm").exists(), "a refused build writes nothing");
     let (ok, stderr) = build(dir.path(), NATIVE_EXTERN, &["--target", "wasm", "-o", "app.wasm"]);
     let _ = (ok, stderr);
-    // The structural leg names the wall: ALMIDE_WASM_STRUCTURAL turns the reroute into the reason.
-    let out = Command::new(almide()).current_dir(dir.path()).env("ALMIDE_WASM_STRUCTURAL", "1").args(["build", "main.almd", "--target", "wasm", "-o", "app.wasm"]).output().unwrap();
+    // The structural leg names the wall: ALMIDE_WASM_SKIP_STOCK_AUDIT turns the reroute into the reason.
+    let out = Command::new(almide()).current_dir(dir.path()).env("ALMIDE_WASM_SKIP_STOCK_AUDIT", "1").args(["build", "main.almd", "--target", "wasm", "-o", "app.wasm"]).output().unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success() && stderr.contains("extern-native:reverse_it"), "{stderr}");
 }
@@ -193,7 +193,7 @@ fn an_extern_declared_in_another_module_is_an_import_of_the_structural_module() 
     // The route-flip probe: a structural decline is the build's error, not a reroute.
     let out = Command::new(almide())
         .current_dir(root)
-        .env("ALMIDE_WASM_STRUCTURAL", "1")
+        .env("ALMIDE_WASM_SKIP_STOCK_AUDIT", "1")
         .args(["build", "src/main.almd", "--target", "wasm", "--host", "js", "-o", "app.wasm"])
         .output()
         .unwrap();

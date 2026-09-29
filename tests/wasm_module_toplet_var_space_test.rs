@@ -57,7 +57,7 @@ fn wasm_stdout(dir: &Path, structural: bool) -> Result<Option<String>, String> {
     let mut cmd = Command::new(almide());
     cmd.current_dir(dir).args(["build", "src/main.almd", "--target", "wasm", "-o", "out.wasm"]);
     if structural {
-        cmd.env("ALMIDE_WASM_STRUCTURAL", "1");
+        cmd.env("ALMIDE_WASM_SKIP_STOCK_AUDIT", "1");
     }
     let b = cmd.output().expect("wasm build");
     if !b.status.success() {

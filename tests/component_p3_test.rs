@@ -266,7 +266,7 @@ fn p3_component_runs_fan_deterministically() {
 // byte-identical to the incumbent adapter leg. The structural leg still
 // routes fs programs to the incumbent by default (the write surface is
 // not ported), so the build uses the frontier probe switch
-// ALMIDE_WASM_STRUCTURAL=1 — the documented lever the eventual route
+// ALMIDE_WASM_SKIP_STOCK_AUDIT=1 — the documented lever the eventual route
 // flip is verified with.
 const FS_READ: &str = r#"import fs
 
@@ -323,7 +323,7 @@ fn build_p3_structural(src: &Path, out: &Path) -> String {
             out.to_str().unwrap(),
         ])
         .env("ALMIDE_COMPONENT_P3", "1")
-        .env("ALMIDE_WASM_STRUCTURAL", "1")
+        .env("ALMIDE_WASM_SKIP_STOCK_AUDIT", "1")
         .env("ALMIDE_DBG_FAN", "1")
         .output()
         .expect("spawn almide");
@@ -602,7 +602,7 @@ effect fn main() -> Unit = {
     .expect("write");
     // With the p3 component requested, an fs program's build takes the
     // STRUCTURAL leg by default (#1584's first default-route slice) —
-    // no ALMIDE_WASM_STRUCTURAL override.
+    // no ALMIDE_WASM_SKIP_STOCK_AUDIT override.
     let o = Command::new(almide_bin())
         .args(["build", src.to_str().unwrap(), "--target", "wasm", "--component", "-o",
                d.join("flip_p3.wasm").to_str().unwrap()])

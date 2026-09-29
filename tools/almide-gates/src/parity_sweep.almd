@@ -48,7 +48,7 @@ effect fn run_capped(secs: Int, cmd: String, args: List[String]) -> process.Proc
 }
 
 // One fixture through both pipelines. The wasm leg is the STRUCTURAL build forced
-// (`ALMIDE_WASM_STRUCTURAL=1 almide build --target wasm`, #2793 — it was the incumbent's
+// (`ALMIDE_WASM_SKIP_STOCK_AUDIT=1 almide build --target wasm`, #2793 — it was the incumbent's
 // `render_program` before), so a structural decline is a WALL and never an incumbent module
 // standing in for it. `process.exec_status` takes no environment, so the variable rides on
 // `env(1)`. The module path is masked out of the compared stderr (`parity.normalize_wasm_err`).
@@ -59,7 +59,7 @@ effect fn run_one(root: String, alm: String, file: String, secs: Int) -> String 
     secs,
     "env",
     [
-      "ALMIDE_WASM_STRUCTURAL=1",
+      "ALMIDE_WASM_SKIP_STOCK_AUDIT=1",
       alm,
       "build",
       file,

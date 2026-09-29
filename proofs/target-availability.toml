@@ -12,7 +12,7 @@
 # shrink-only story.
 #
 # Legs:
-#   structural    ALMIDE_WASM_STRUCTURAL=1 build — the emitter frontier
+#   structural    ALMIDE_WASM_SKIP_STOCK_AUDIT=1 build — the emitter frontier
 #                 (the incumbent may still serve the fn; informational
 #                 for #1584).
 #   stock-p1      default `build --target wasm` (reroute included) — a

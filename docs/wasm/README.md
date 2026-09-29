@@ -13,7 +13,7 @@ lower is an honest wall — `error[E082]` with a `wall: <reason>` line and a
 | **structural** (the only leg) | The commissioned greenfield engine: `almide::wasm_leg` front + the `crates/almide-wasm` direct emitter. Accepted at 610/610 byte-identical to native on the `wasm_cross` corpus; build artifacts ship in the WASI form (#1588) and run on stock runtimes. Ownership is compiler-placed reference counting with copy-on-write; no certificate is emitted yet — its evidence is the byte-exact corpus (grow-only floor) and the semantic-mutation net in `crates/almide-wasm` | Every program with a `main`, no external packages, and no host-variant I/O on the build path |
 
 The switch that forced the incumbent was removed with its route (#2752);
-`ALMIDE_WASM_STRUCTURAL=1` now only skips the stock-WASI host-op audit
+`ALMIDE_WASM_SKIP_STOCK_AUDIT=1` now only skips the stock-WASI host-op audit
 on a build (the frontier-development probe).
 
 ## What ships today
