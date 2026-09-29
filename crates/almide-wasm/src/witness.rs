@@ -93,6 +93,11 @@ pub struct WitnessRecorder {
     /// so an arm that lowered its argument outside `lower_arg` could still
     /// have matched the count.
     hooked: Vec<usize>,
+    /// #2758: the next ReturnError exit is a recorded `!` propagation
+    /// (witness_unwrap.rs) — its releases are recorded like the success
+    /// exit's, and the site records the value that leaves. Unarmed, an
+    /// error exit still poisons.
+    err_exit_armed: bool,
 }
 
 impl Default for WitnessRecorder {
@@ -112,6 +117,7 @@ impl WitnessRecorder {
             poisoned: false,
             declined: None,
             hooked: Vec::new(),
+            err_exit_armed: false,
         }
     }
 
@@ -338,6 +344,66 @@ impl WitnessRecorder {
     /// frame as the return: one credit received, one credit moved out.
     pub fn tail_owned_move(&mut self) {
         self.temp_move();
+    }
+
+    /// #2758: a block this frame READS without holding — a `!` payload
+    /// extracted from a bound carrier. The object is known and holds no
+    /// credit of this frame's (like a borrowed param); a consumer that takes
+    /// one records it on this object's own line.
+    fn view_obj(&mut self) -> u32 {
+        self.new_obj()
+    }
+
+    /// A view handed to a new holder: the route's `rc_inc` is the share
+    /// (`a`), the holder takes it away (`m`).
+    pub fn view_share_move(&mut self) {
+        let o = self.view_obj();
+        self.ops(o, "am");
+    }
+
+    /// A Bind of a view: the Bind route's `rc_inc_top` is the share, and
+    /// the local is its owner from here on (its release is the local's).
+    pub fn bind_view(&mut self, local: u32) {
+        self.log(Ev::DecOld(local));
+        let o = self.view_obj();
+        self.ops(o, "a");
+        self.log(Ev::Bind { local, obj: o, owner: true });
+        let d = self.loop_depth;
+        self.bound.insert(local, d);
+    }
+
+    /// An owned temporary born here whose later events the site names by
+    /// object (a `!` operand carrier: moved out on the err arm, released
+    /// on the ok path).
+    pub fn temp_born(&mut self) -> u32 {
+        let o = self.new_obj();
+        self.ops(o, "i");
+        o
+    }
+
+    /// Record `ops` on an object a site holds by id ([`Self::temp_born`]).
+    pub fn temp_ops(&mut self, o: u32, ops: &str) {
+        self.ops(o, ops);
+    }
+
+    /// The share a borrowed `!` carrier takes before it propagates.
+    pub fn share_local(&mut self, local: u32) -> bool {
+        self.held_ops(local, "a")
+    }
+
+    /// Is the code being emitted right now unreachable on every path?
+    pub fn dead(&self) -> bool {
+        self.branches.dead()
+    }
+
+    /// Arm the next ReturnError exit as a recorded propagation.
+    pub fn arm_err_exit(&mut self) {
+        self.err_exit_armed = true;
+    }
+
+    /// Was the ReturnError exit being emitted armed? (Disarms it.)
+    pub fn take_err_exit(&mut self) -> bool {
+        std::mem::take(&mut self.err_exit_armed)
     }
 
     pub fn poison(&mut self) {

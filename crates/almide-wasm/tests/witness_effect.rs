@@ -4,8 +4,14 @@
 //! owned value's credit moves into the carrier's slot, `im`; a bound Var is
 //! shared and moves, `am`), and the carrier itself is born and moves out of
 //! the frame (`im`). A Unit body answers ok(()) with a carrier and no
-//! payload. The exits that are not hooks yet — the early `!` and a raw
-//! position `ok` / `err` — decline with a counted reason.
+//! payload.
+//!
+//! The early `!` (witness_unwrap.rs) is a branch whose arm propagates: the
+//! parked carrier is shared, released with the frame and leaves (`iadm` on
+//! that path), the payload read out of it is a view a consumer takes a
+//! credit of (`ad`). A frame with several `!` sites folds each exit into a
+//! v5 branch-return item (`i{admx|}d`). A raw position `ok` / `err` still
+//! declines.
 
 const PROGRAM: &str = r#"effect fn echo(s: String) -> String = s
 
@@ -18,6 +24,22 @@ effect fn noop(n: Int) -> Unit = {
 
 effect fn relay(s: String) -> String = echo(s)!
 
+effect fn twice(s: String) -> String = {
+  let a = echo(s)!
+  let b = echo(a)!
+  a + b
+}
+
+effect fn step(n: Int) -> Int = {
+  let xs = fresh(n)!
+  list.len(xs)
+}
+
+effect fn opt(o: Int?) -> Int = {
+  let v = o!
+  v + 1
+}
+
 effect fn checked(n: Int) -> Int = if n < 0 then err("neg") else ok(n)
 
 effect fn main() -> Unit = {
@@ -26,6 +48,9 @@ effect fn main() -> Unit = {
   noop(1)!
   let c = relay("c")!
   let d = checked(3)!
+  let e = twice("e")!
+  let f = step(1)!
+  let g = opt(some(1))!
   println(a)
   println(c)
 }
@@ -36,6 +61,10 @@ fn witnesses() -> std::collections::BTreeMap<String, String> {
     almide_wasm::witness::start_collecting();
     let _ = almide_wasm::emit_program(&ir).expect("the structural leg lowers the probe");
     almide_wasm::witness::take().into_iter().collect()
+}
+
+fn accepted(cert: &str) -> bool {
+    almide_verify::check(almide_verify::Property::Ownership, cert.as_bytes())
 }
 
 #[test]
@@ -53,11 +82,28 @@ fn effect_frames_witness_the_carrier_and_unhooked_exits_decline() {
     for (name, cert) in expect {
         let got = w.get(name).unwrap_or_else(|| panic!("{name} must be witnessed; got {:?}", w.get(name)));
         assert_eq!(got, cert, "{name}");
-        assert!(
-            almide_verify::check(almide_verify::Property::Ownership, got.as_bytes()),
-            "{name}: the portable checker must accept {got:?}"
-        );
+        assert!(accepted(got), "{name}: the portable checker must accept {got:?}");
     }
-    assert_eq!(w.get("relay").map(String::as_str), Some("!decline:tail:Unwrap\n"));
+    // A tail `f(x)!` whose callee returns this frame's Result is a
+    // `return_call` (C-069): the borrowed param lends, nothing is held.
+    assert_eq!(w.get("relay").map(String::as_str), Some("\n\n"));
+    let bang = [
+        // One site: the parked carrier propagates (`iadm`) or is released
+        // (`id`); the view `xs` exists on the ok path only.
+        ("step", "{iadm|id}\n{|ad}\n{|im}\n"),
+        // Two sites: the second carrier's three paths fold (`{admx|}`); the
+        // views `a` and `b` are lent to borrowed params, each bound once.
+        ("twice", "\n{iadm|id}\n{|ad}\ni{admx|}d\n{|ad}\n{|im}\n{|im}\n"),
+        // `!` on none: a fresh `err("none")` leaves on that arm.
+        ("opt", "\n{|im}\n{|im}\n"),
+    ];
+    for (name, cert) in bang {
+        let got = w.get(name).unwrap_or_else(|| panic!("{name} must be witnessed"));
+        assert_eq!(got, cert, "{name}");
+        assert!(accepted(got), "{name}: the portable checker must accept {got:?}");
+    }
+    // The folded item is checked from the count at its site to exactly 0:
+    // an exit that skipped the carrier's release is a leak the checker sees.
+    assert!(!accepted("i{amx|}d\n"));
     assert_eq!(w.get("checked").map(String::as_str), Some("!decline:effect:carrier\n"));
 }

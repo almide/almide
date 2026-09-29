@@ -115,6 +115,22 @@ fn drain(n: Int) -> Int = {
 // and moves out (`im`).
 effect fn stash(name: String) -> String = name
 
+// #2758: early `!` exits. The parked carrier propagates on the err arm
+// (shared, released with the frame, moved out) or is released on the ok
+// path; the payload is a view the bind takes a credit of. `stash_both`
+// has two sites, so the second carrier's exit folds into a v5
+// branch-return item.
+effect fn stash_len(name: String) -> Int = {
+  let s = stash(name)!
+  string.len(s)
+}
+
+effect fn stash_both(a: String, b: String) -> Int = {
+  let x = stash(a)!
+  let y = stash(b)!
+  string.len(x) + string.len(y)
+}
+
 effect fn main() -> Unit = {
   println("${list.len(shed())} ${tag("w")} ${pass([1])} ${bind_then_pass()}")
   println("${discard([1, 2])} ${stamp(7)} ${shout("w")}")
@@ -123,4 +139,5 @@ effect fn main() -> Unit = {
   println("${pick([1], true)} ${pick([2], false)} ${label(some(1), "a")} ${label(none, "b")}")
   println("${count_down([1, 2, 3], 4)} ${tally([1], ["a", "bb"])} ${drain(3)}")
   println(stash("e")!)
+  println("${stash_len("ab")!} ${stash_both("a", "bc")!}")
 }
