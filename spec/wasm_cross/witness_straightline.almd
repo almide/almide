@@ -77,10 +77,18 @@ fn label(o: Int?, name: String) -> String = match o {
   none => name,
 }
 
+// #2757 — a SELF tail call is loop-converted (tco.rs) and certified as the
+// next activation of the frame: `count_down` hands its list straight back
+// to itself (`am` into the next activation's param, its own credit released
+// before the loop-back), so each activation reads `iamd` on the recursive
+// path and `id` on the base path.
+fn count_down(xs: List[Int], n: Int) -> Int = if n <= 0 then list.len(xs) else count_down(xs, n - 1)
+
 fn main() -> Unit = {
   println("${list.len(shed())} ${tag("w")} ${pass([1])} ${bind_then_pass()}")
   println("${discard([1, 2])} ${stamp(7)} ${shout("w")}")
   say("hi")
   println("${nest()} ${greet("w")} ${list.len(wrap([1, 2]) ?? [])}")
   println("${pick([1], true)} ${pick([2], false)} ${label(some(1), "a")} ${label(none, "b")}")
+  println("${count_down([1, 2, 3], 4)}")
 }

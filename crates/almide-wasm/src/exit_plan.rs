@@ -144,12 +144,20 @@ impl Emitter<'_> {
                 for &idx in &plan.released {
                     self.witness_dec(idx);
                 }
-                // These were the frame's last events; the dead epilogue
-                // the emitter still writes after the jump records nothing.
-                // A self tail call's frame lives on (loop form) and its
-                // epilogue decs are real.
-                if replaces_frame && let Some(w) = self.witness.as_mut() {
-                    w.frame_replaced();
+                // These were the frame's last events on this path; the dead
+                // epilogue the emitter still writes after the jump records
+                // nothing. A self tail call (loop form, #2757) is certified
+                // as the next activation of this frame: its path ends here
+                // too, after the owner locals the loop-back carries are
+                // accounted (`witness_loop_back`).
+                if replaces_frame {
+                    if let Some(w) = self.witness.as_mut() {
+                        w.frame_replaced();
+                    }
+                } else {
+                    let carried: Vec<u32> =
+                        plan.carried.iter().filter(|i| self.rc_owned.contains(i)).copied().collect();
+                    self.witness_loop_back(&carried);
                 }
             }
             Continuation::ReturnError | Continuation::GuardReturn => {

@@ -67,18 +67,14 @@ fn the_call_boundary_shapes_witness_exactly_and_balance() {
         assert_eq!(got, cert, "{name}");
         assert!(almide_wasm::witness::balanced(got), "{name} must balance");
     }
-    // A SELF tail call is loop-converted (tco.rs, #1988): the frame lives
-    // on, the loop-back rebinds the param and the epilogue releases it
-    // again — a loop, which the straight-line recorder must decline rather
-    // than certify (it recorded `iamdd`, an over-release, before the gate
-    // learned the shape).
-    // Since step 4 the gate's refusal is itself recorded (the decline
-    // channel): a counted reason, never a certificate.
-    assert_eq!(
-        w.get("self_tail").map(String::as_str),
-        Some("!decline:tail:self-call-loop\n"),
-        "self_tail is a loop, out of the straight-line subset"
-    );
+    // A SELF tail call is loop-converted (tco.rs, #1988) and, since #2757,
+    // certified as the next activation of the frame. `self_tail` only ever
+    // passes `a` straight back to itself, so param_borrow.rs makes `a`
+    // BORROWED: the loop-back lends it as is — no share, no release, an
+    // empty stream. (Before the gate learned the shape the recorder wrote
+    // `iamdd` for it, an over-release: the epilogue after a loop-back is
+    // dead on that path. The owned-param case is gate.sh's `count_down`.)
+    assert_eq!(w.get("self_tail").map(String::as_str), Some("\n"), "self_tail is the next activation");
     // The callee `take` itself: one owned param, released at the epilogue.
     assert_eq!(w.get("take").map(String::as_str), Some("id\n"));
 }

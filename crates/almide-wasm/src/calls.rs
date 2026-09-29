@@ -310,7 +310,7 @@ impl Emitter<'_> {
                     }
                     if loop_form_raw && let Some(p) = self.frame_param_var(a) && !moved.contains(&p) {
                         moved.push(p);
-                        self.witness_arg(a, want);
+                        self.witness_arg_moved(a, want);
                         continue;
                     }
                     let owned_pos = param_owned.get(k).copied().unwrap_or(true);
@@ -319,6 +319,7 @@ impl Emitter<'_> {
                     }
                 }
                 let parked = self.borrowed_temps.len() > depth;
+                self.witness_raw_loop_back(loop_form_raw, &moved);
                 self.calls.insert(i);
                 if let Some(blk) = save {
                     self.f.instructions().call(index);
