@@ -82,6 +82,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_ALLOC_COUNT", Flag, Harness, "build the native program with a counting allocator that prints `__ALMD_ALLOC allocs=N deallocs=N reallocs=N peak=N` on stderr when `__almide_main` returns (the native borrow oracle's allocation lane, tests/native_borrow_oracle_test.rs)"),
     sw("ALMIDE_BANG_RETURN", Flag, Ablation, "turn OFF the per-position `!` desugars of the v1 lowering so every `!` reaches the bind-position rule or walls loudly (the decline-matrix probe)"),
     sw("ALMIDE_BENCH_DIR", Value, Harness, "the fixture directory of the structural leg's perf probe (default `crates/almide-wasm/tests/perf`)"),
+    sw("ALMIDE_BENCH_MAIN_NS", Value, Harness, "the file `almide bench` points a benched native binary at: the spliced `main` timer writes its elapsed nanoseconds there (#2980, the main-only boundary)"),
     sw("ALMIDE_BIN", Value, Harness, "path of the `almide` binary the test harnesses, scripts and workflows drive (default: `target/release/almide`, then PATH)"),
     sw("ALMIDE_BORROW_OWN_ALL", Flag, Ablation,"make BorrowInsertion own every borrow-eligible param, as before inference existed — the ablation the ownership certifier's C4 sensitivity test drives, and the borrow-inference perf knob"),
     sw("ALMIDE_BOUNDED_DEBUG", Flag, Dbg, "print why a bounded-loop bind declined (v1 lowering)"),
