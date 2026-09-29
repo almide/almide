@@ -594,8 +594,8 @@ impl Emitter<'_> {
                 if self.rc_droppable(declared) && !self.rc_owned_result(value) {
                     self.rc_inc_top();
                 }
-                // RC-3: same ownership settlement as Bind — locals only
-                // (globals are main-lifetime), never through a cell, and
+                // RC-3: same ownership settlement as Bind — here for locals
+                // (a global's is at the store below), never through a cell, and
                 // NEVER when the rhs SPENDS the assigned var's own credit
                 // (`assign_rhs_spends_var`): then the callee already released
                 // or reallocated the old block, and a dec here double-frees
@@ -631,6 +631,16 @@ impl Emitter<'_> {
                     Some(idx) => self.emit_store_var(*var, idx, declared)?,
                     None => {
                         let gidx = self.globals[&(self.var_space, *var)].0;
+                        // #2992: a top-let global holds ONE credit on its
+                        // occupant for the program's life (its initializer
+                        // takes it, func.rs), so replacing the occupant
+                        // releases it — the local settlement above, read
+                        // through the global. Without it every `g = …` in a
+                        // loop kept the previous block alive.
+                        if self.rc_droppable(declared) && !rhs_spends_var {
+                            let dec = self.dec_fn_of(declared);
+                            self.f.instructions().global_get(gidx).call(dec);
+                        }
                         self.f.instructions().global_set(gidx);
                     }
                 }

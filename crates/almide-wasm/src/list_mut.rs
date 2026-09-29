@@ -73,6 +73,22 @@ impl Emitter<'_> {
         }
         emit(self, fty)?;
         self.store_ty_slot(fty, off);
+        // #2992: the copy holds its own credit on every field, so an OWNING
+        // var releases the block it is rebound away from — after `emit`,
+        // which may still read the old field through the var (`h.f + [v]`).
+        // A shared block just loses this var's share, a static no-ops, and
+        // a borrowed param owns nothing: its caller's block stays.
+        let owns = match slot {
+            Ok(idx) => self.rc_owned.contains(&idx) || self.rc_frame_params.contains(&idx),
+            Err(_) => true,
+        };
+        if owns {
+            let dec = self.dec_fn_of(SliceTy::Named(ti));
+            match slot {
+                Ok(idx) => self.f.instructions().local_get(idx).call(dec),
+                Err(gidx) => self.f.instructions().global_get(gidx).call(dec),
+            };
+        }
         self.f.instructions().local_get(hb);
         match slot {
             Ok(idx) => self.f.instructions().local_set(idx),
@@ -238,8 +254,8 @@ impl Emitter<'_> {
                 // loop, #2316's shape) had no wasm route at all (#2411).
                 // It takes the same copy-on-write rebind a field write
                 // takes — `h.f = h.f + [v]` — so every credit rides the
-                // path `lower_field_assign` already owns (copy the record,
-                // release the replaced slot, share-guard the new value,
+                // path `field_assign_with` already owns (copy the record,
+                // release the replaced slot, store the fresh concat,
                 // rebind) instead of a second receiver mode in this arm.
                 if let Some((id, field)) = record_field_receiver(xs) {
                     let one = IrExpr {
@@ -248,17 +264,28 @@ impl Emitter<'_> {
                         span: None,
                         def_id: None,
                     };
-                    let grown = IrExpr {
-                        kind: IrExprKind::BinOp {
-                            op: almide_ir::BinOp::ConcatList,
-                            left: Box::new(xs.clone()),
-                            right: Box::new(one),
-                        },
-                        ty: xs.ty.clone(),
-                        span: None,
-                        def_id: None,
-                    };
-                    self.lower_field_assign(&id, &field, &grown)?;
+                    // `h.f + [v]`, lowered here rather than as a synthesized
+                    // ConcatList: the IR's ANF pass never saw this node, so
+                    // the one-element literal has no temp to release it and
+                    // leaked a block per push (#2992). Borrowing both
+                    // operands in one arm scope releases the literal once
+                    // the concat has copied it.
+                    self.field_assign_with(&id, &field, |s, fty| {
+                        s.arm_scope(|s| {
+                            s.lower_arg(xs, Some(fty), ArgMode::Borrow)?;
+                            s.lower_arg(&one, Some(fty), ArgMode::Borrow)?;
+                            s.f.instructions().call(F_CONCAT);
+                            // The fresh spine takes its own element credits
+                            // (#2010 stage 2b), as the ConcatList arm does.
+                            if let SliceTy::List(h) = fty
+                                && let Some(inc) = s.inc_elems_fn(s.types.el(h))
+                            {
+                                let tmp = s.tmp_i32_local;
+                                s.f.instructions().local_tee(tmp).call(inc).local_get(tmp);
+                            }
+                            Ok(())
+                        })
+                    })?;
                     // Handled, no value: an early return bypasses the
                     // `.map(Some)` on the match below, so say so here.
                     return Ok(Some(None));

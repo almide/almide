@@ -487,6 +487,11 @@ pub(crate) fn lower_fn(
             ) {
                 let copy = em.copy_fn_of(declared);
                 em.f.instructions().call(copy);
+            } else if em.rc_droppable(declared) && !em.rc_owned_result(&tl.value) {
+                // #2992: the global owns its occupant (a reassign releases
+                // it), so an initializer that BORROWS — another global, a
+                // pool static — takes the credit here, as a Bind would.
+                em.rc_inc_top();
             }
             em.f.instructions().global_set(gidx);
         }
