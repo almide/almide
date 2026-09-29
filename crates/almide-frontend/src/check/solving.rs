@@ -100,8 +100,18 @@ impl Checker {
         if c.span.is_some() {
             self.current_span = c.span;
         }
-        let mut diag = err(mismatch_message(&c.context, &exp, &act), hint, c.context.clone())
+        // #2927: a peer reported against the peer that fixed the join's type
+        // says which one that was, and names a missing `!` it wraps.
+        let blame = self.arm_blame_report(c, &exp, &act);
+        let (message, hint, bang) = match blame {
+            Some((headline, bang_hint, bang)) => (headline, bang_hint.unwrap_or(hint), bang),
+            None => (mismatch_message(&c.context, &exp, &act), hint, None),
+        };
+        let mut diag = err(message, hint, c.context.clone())
             .with_code("E001");
+        if let Some(span) = bang {
+            diag = self.attach_bang_repair(diag, span);
+        }
         if let Some(snippet) = try_snippet {
             diag = diag.with_try(snippet);
         }

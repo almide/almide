@@ -26,6 +26,7 @@ pub(crate) mod calls;
 mod builtin_calls;
 mod static_dispatch;
 mod solving;
+mod arm_blame;
 mod diagnostics;
 mod deprecation_warn;
 mod exit_literal;
@@ -310,6 +311,11 @@ pub struct Checker {
     /// whether its `!` repair is the spelling of the callee's own declared
     /// type (machine-applicable) or a choice among consumptions.
     pub(crate) effect_call_spans: std::collections::HashSet<(usize, usize, usize)>,
+    /// #2927: the expectation handed to the NEXT `infer_expr` (a tail
+    /// position's), and the one of the expression being inferred now. See
+    /// `arm_blame.rs`.
+    pub(crate) tail_expect: Option<types::TailExpect>,
+    pub(crate) expr_expect: Option<types::TailExpect>,
     /// ADR-0006 D1 (#1108 Phase 2a): fns DECLARED with the `-> T!` marker.
     /// Resolution erases the marker into Result[T, String], so the 1-bit
     /// fallibility of a NAMED callback argument (`list.map(xs, parse)`) is
@@ -650,6 +656,8 @@ impl Checker {
             deferred_unresolved_binding_checks: Vec::new(),
             deferred_implicit_prop_checks: Vec::new(),
             effect_call_spans: std::collections::HashSet::new(),
+            tail_expect: None,
+            expr_expect: None,
             fallible_marker_fns: std::collections::HashSet::new(),
             hof_rewritten_calls: std::collections::HashSet::new(),
             lambda_err_erasures: Vec::new(),
