@@ -95,13 +95,13 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     // out of it — but their helpers cost bytes when the checked machinery
     // ships anyway. Emit both and ship the smaller: never larger than the
     // checked emission, and the choice is deterministic.
-    mark(3);
+    mark(crate::witness::CHECKED_PASS);
     let checked = emit_program_pass(ir, keep, library, false)?;
     let best = if bounded.bytes.len() < checked.bytes.len() {
         ship(bounded_pass);
         bounded
     } else {
-        ship(3);
+        ship(crate::witness::CHECKED_PASS);
         checked
     };
     Ok((best.bytes, best.ops))

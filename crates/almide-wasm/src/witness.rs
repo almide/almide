@@ -80,9 +80,14 @@ pub struct WitnessRecorder {
     /// The certificate becomes `!decline:<reason>` — counted by the
     /// histogram, neither a certificate nor a poison.
     declined: Option<String>,
-    /// Argument hooks fired so far (step 4): the module-call wrapper
-    /// audits an arm by this count against its argument count.
-    arg_hooks: u32,
+    /// The argument expressions a hook fired for, by node address, in
+    /// order (step 4): the module-call wrapper audits an arm by asking
+    /// whether EACH of its own argument nodes went through a hook. A count
+    /// stopped being enough once nested arguments were admitted (#2755):
+    /// an inner call's argument hooks fire inside the outer arm's window,
+    /// so an arm that lowered its argument outside `lower_arg` could still
+    /// have matched the count.
+    hooked: Vec<usize>,
 }
 
 impl Default for WitnessRecorder {
@@ -100,17 +105,26 @@ impl WitnessRecorder {
             poisoned: false,
             frame_replaced: false,
             declined: None,
-            arg_hooks: 0,
+            hooked: Vec::new(),
         }
     }
 
-    /// One argument hook fired (any convention, droppable or not).
-    pub fn note_arg(&mut self) {
-        self.arg_hooks += 1;
+    /// One argument hook fired for the node at `node` (any convention,
+    /// droppable or not).
+    pub fn note_arg(&mut self, node: usize) {
+        self.hooked.push(node);
     }
 
-    pub fn arg_hooks(&self) -> u32 {
-        self.arg_hooks
+    /// The audit window's start: hooks fired so far.
+    pub fn arg_hooks(&self) -> usize {
+        self.hooked.len()
+    }
+
+    /// Did a hook fire for `node` since the window opened at `since`?
+    /// Every argument node is alive (borrowed from the IR) for the whole
+    /// window, so its address cannot be reused by a clone an arm made.
+    pub fn hooked_since(&self, since: usize, node: usize) -> bool {
+        self.hooked.get(since..).is_some_and(|w| w.contains(&node))
     }
 
     /// An owned droppable call result discarded in statement position:
@@ -273,56 +287,40 @@ pub fn balanced(cert: &str) -> bool {
 
 /// The phase-A/B1 subset gate: `None` = the body is straight-line and
 /// every RC-affecting site is covered by the recorder hooks (bind,
-/// call-argument, tail, epilogue / tail-release); `Some(reason)` = out
-/// of subset, do not record. Deliberately conservative — admitting a
+/// call-argument, store, tail, epilogue / tail-release); `Some(reason)` =
+/// out of subset, do not record. Deliberately conservative — admitting a
 /// shape here without auditing its RC sites would let the witness
 /// under-count real events, which is the one dishonesty the recorder
 /// exists to rule out.
+///
+/// #2755 (step 4, the flat alphabet on temporaries): the value forms are
+/// one recursive predicate, [`value_subset`]. A nested call argument, a
+/// binary operator, a constructor (`some` / `ok` / `err` / a variant
+/// case) and a `{ let …; v }` block (what arg_temps.rs makes of a call
+/// operand) are admitted wherever a value is, because every RC site they
+/// reach is already a hook: an inner call's arguments are the call
+/// hooks', its owned result is the temporary the enclosing site records
+/// (`im` into an owned param or a payload slot, `id` when parked for a
+/// borrowed one), a payload store is `witness_store`, a nested bind is the
+/// Bind hook, and a concat reads its operands without a credit.
 pub fn straightline_subset(body: &IrExpr, ret_is_heap: bool, self_name: &str) -> Option<String> {
     // `fn f(x) = expr` lowers exactly like `{ expr }`: a bare body is the
     // empty-statement block with that tail (B1: the tail-call and
     // literal-tail fns are almost all written this way).
-    let bare: Option<Box<IrExpr>>;
-    let (stmts, expr): (&[almide_ir::IrStmt], &Option<Box<IrExpr>>) = match &body.kind {
-        IrExprKind::Block { stmts, expr } => (stmts, expr),
-        _ => {
-            bare = Some(Box::new(body.clone()));
-            (&[], &bare)
-        }
+    let (stmts, expr): (&[almide_ir::IrStmt], Option<&IrExpr>) = match &body.kind {
+        IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
+        _ => (&[], Some(body)),
     };
-    for s in stmts {
-        match &s.kind {
-            IrStmtKind::Bind { value, .. } => {
-                if let Some(r) = subset_rhs(value) {
-                    return Some(r);
-                }
-            }
-            // Step 4: a statement-position call over Var / literal args —
-            // its argument sites are the call hooks', and an owned
-            // droppable result is released by the discard route (`id`).
-            IrStmtKind::Expr { expr } if matches!(expr.kind, IrExprKind::Call { .. }) => {
-                if let Some(r) = call_subset(expr) {
-                    return Some(format!("stmt:Expr:{r}"));
-                }
-            }
-            IrStmtKind::Expr { expr } => return Some(format!("stmt:Expr:{}", expr_tag(expr))),
-            other => return Some(format!("stmt:{}", tag(other))),
-        }
+    if let Some(r) = stmts_subset(stmts) {
+        return Some(r);
     }
-    match expr.as_deref().map(|t| &t.kind) {
+    match expr.map(|t| &t.kind) {
         // A heap return is admitted only as a plain bound Var (the
-        // ret-inc + move-out pair the func.rs hook records); any other
-        // heap tail has unrecorded RC sites.
+        // ret-inc + move-out pair the func.rs hook records) or an OWNED
+        // value (its one credit moves out); any other heap tail has
+        // unrecorded RC sites.
         None | Some(IrExprKind::Unit) if !ret_is_heap => None,
-        Some(IrExprKind::Var { .. }) => None,
-        Some(IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. } | IrExprKind::LitFloat { .. })
-            if !ret_is_heap =>
-        {
-            None
-        }
-        // B1: an owned tail — a user-fn call over Var/literal args (the
-        // call-arg hook covers its sites, the result moves out) or a
-        // fresh literal (its alloc IS the credit that moves out).
+        None => Some("tail:Unit-heap".into()),
         // A SELF tail call is loop-converted (tco.rs): the frame is not
         // replaced, the params are rebound by the loop-back and released
         // again by the epilogue — a loop, not a straight line. Out of
@@ -332,13 +330,64 @@ pub fn straightline_subset(body: &IrExpr, ret_is_heap: bool, self_name: &str) ->
         {
             Some("tail:self-call-loop".into())
         }
-        Some(IrExprKind::Call { .. }) => expr.as_deref().and_then(call_subset),
-        Some(k @ (IrExprKind::LitStr { .. } | IrExprKind::List { .. })) if ret_is_heap => {
-            subset_rhs_literal(k)
+        // A scalar literal is no heap tail at all.
+        Some(IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. } | IrExprKind::LitFloat { .. })
+            if ret_is_heap =>
+        {
+            Some("tail:scalar-lit-heap".into())
         }
-        Some(other) => Some(format!("tail:{}", tag(other))),
-        None => Some("tail:Unit-heap".into()),
+        // A block tail: its statements join the frame's straight line, its
+        // value is the tail's (rc_tail — the func.rs hooks read through it).
+        Some(IrExprKind::Block { .. }) => straightline_subset(expr?, ret_is_heap, self_name),
+        Some(_) => value_subset(expr?).map(|w| w.at("tail")),
     }
+}
+
+/// Why a value is out of subset: the node ITSELF (`Here(tag)`, reported
+/// under the position it stands in — `rhs:If`, `call-arg:Lambda`), or a
+/// node somewhere inside it (`Deep(reason)`, already reported under ITS
+/// innermost position). The histogram thus names the shape to admit next
+/// and the slot it sits in, never the path to it.
+enum Why {
+    Here(String),
+    Deep(String),
+}
+
+impl Why {
+    fn at(self, position: &str) -> String {
+        match self {
+            Why::Here(t) => format!("{position}:{t}"),
+            Why::Deep(r) => r,
+        }
+    }
+
+    /// The node is inside `position`: a `Here` becomes `Deep` there.
+    fn inside(self, position: &str) -> Why {
+        Why::Deep(self.at(position))
+    }
+}
+
+/// The statement rules of a straight line: a Bind of an admissible value,
+/// a statement-position call (its owned droppable result is released by
+/// the discard route, `id`).
+fn stmts_subset(stmts: &[almide_ir::IrStmt]) -> Option<String> {
+    for s in stmts {
+        match &s.kind {
+            IrStmtKind::Bind { value, .. } => {
+                if let Some(w) = value_subset(value) {
+                    return Some(w.at("rhs"));
+                }
+            }
+            IrStmtKind::Expr { expr } if matches!(expr.kind, IrExprKind::Call { .. }) => {
+                if let Some(w) = call_subset(expr) {
+                    return Some(w.at("stmt:Expr"));
+                }
+            }
+            IrStmtKind::Expr { expr } => return Some(format!("stmt:Expr:{}", expr_tag(expr))),
+            other => return Some(format!("stmt:{}", tag(other))),
+        }
+    }
+    None
 }
 
 /// A space-free tag of an IR node's variant, for the decline histogram
@@ -356,80 +405,146 @@ fn expr_tag(e: &IrExpr) -> String {
     }
 }
 
-/// A call the hooks cover: a Named user fn (lowercase — ctors are
-/// capitalized, the builtin `some`/`ok`/`err` are IR kinds, not calls)
-/// or, since step 4, a Module call (the native arms' declared modes are
-/// recorded at `lower_arg`; the registry route consults the callee's
-/// param_owned table like the Named route), over Var / literal
-/// arguments only.
-fn call_subset(e: &IrExpr) -> Option<String> {
+/// Is the value a scalar (no block, no RC site of its own)?
+fn scalar_ty(t: &almide_types::types::Ty) -> bool {
+    use almide_types::types::Ty;
+    matches!(
+        t,
+        Ty::Int
+            | Ty::Float
+            | Ty::Int8
+            | Ty::Int16
+            | Ty::Int32
+            | Ty::Int64
+            | Ty::UInt8
+            | Ty::UInt16
+            | Ty::UInt32
+            | Ty::UInt64
+            | Ty::Float32
+            | Ty::Float64
+            | Ty::Bool
+            | Ty::Unit
+    )
+}
+
+/// A value whose every RC site is a recorder hook (#2755). `Some(tag)` names
+/// the innermost shape that is not — the reason the histogram counts, under
+/// the caller's position prefix (`rhs:`, `tail:`, `call-arg:` …).
+fn value_subset(e: &IrExpr) -> Option<Why> {
+    match &e.kind {
+        IrExprKind::LitInt { .. }
+        | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitBool { .. }
+        | IrExprKind::LitStr { .. }
+        | IrExprKind::Unit
+        | IrExprKind::Var { .. }
+        // `none` is NULL_ADDR: no block, no site.
+        | IrExprKind::OptionNone => None,
+        // A list literal: the spine is fresh, each element store is
+        // `witness_store` exactly like a constructor payload's.
+        IrExprKind::List { elements } => elements.iter().find_map(|x| value_subset(x).map(|w| w.inside("list-elem"))),
+        // A call: its arguments are the call hooks' (recursively), its
+        // droppable result is a received credit (#1986) the enclosing
+        // site records.
+        IrExprKind::Call { .. } => call_subset(e),
+        // A one-slot constructor: the block is fresh (the enclosing site's
+        // `i` / `im`), its payload store is `witness_store` — a Var shares
+        // and moves in (`am`), an owned temporary moves in (`im`).
+        IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } => {
+            value_subset(expr).map(|w| w.inside("payload"))
+        }
+        IrExprKind::BinOp { op, left, right } => binop_subset(*op, left, right),
+        // `{ let t = f(x); op(t) }` — arg_temps.rs's shape: the binds are the
+        // Bind hook's (the frame's exit plan releases them), the value is
+        // the tail's (`rc_owned_result` and the hooks read through blocks).
+        IrExprKind::Block { stmts, expr: Some(tail) } => {
+            stmts_subset(stmts).map(Why::Deep).or_else(|| value_subset(tail))
+        }
+        other => Some(Why::Here(tag(other))),
+    }
+}
+
+/// A binary operator. The operators read their operands and spend no
+/// credit (`$concat` copies, a comparison reads), so a HEAP operand is
+/// admitted only as a Var or a pool-static literal: a fresh heap operand
+/// would be an unowned temporary no hook records (arg_temps.rs binds every
+/// such operand first, so this is the shape the emitter actually sees). A
+/// SCALAR operand is any admissible value — except under `and` / `or`,
+/// whose right operand runs conditionally: there it must be RC-free.
+fn binop_subset(op: almide_ir::BinOp, left: &IrExpr, right: &IrExpr) -> Option<Why> {
+    let operand = |x: &IrExpr| -> Option<Why> {
+        if scalar_ty(&x.ty) {
+            return value_subset(x).map(|w| w.inside("operand"));
+        }
+        match &x.kind {
+            IrExprKind::Var { .. } | IrExprKind::LitStr { .. } => None,
+            other => Some(Why::Deep(format!("heap-operand:{}", tag(other)))),
+        }
+    };
+    if let Some(w) = operand(left) {
+        return Some(w);
+    }
+    if matches!(op, almide_ir::BinOp::And | almide_ir::BinOp::Or) && !rc_free(right) {
+        return Some(Why::Deep("short-circuit-operand".into()));
+    }
+    operand(right)
+}
+
+/// A value with no RC site anywhere inside (Vars, literals, operators over
+/// them): safe to evaluate conditionally inside a straight-line frame.
+fn rc_free(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::LitInt { .. }
+        | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitBool { .. }
+        | IrExprKind::LitStr { .. }
+        | IrExprKind::Var { .. } => true,
+        IrExprKind::BinOp { left, right, .. } => rc_free(left) && rc_free(right),
+        IrExprKind::UnOp { operand, .. } => rc_free(operand),
+        _ => false,
+    }
+}
+
+/// A call the hooks cover: a Named user fn or variant constructor (the
+/// builtin `some`/`ok`/`err` are IR kinds, not calls) or, since step 4, a
+/// Module call (the native arms' declared modes are recorded at
+/// `lower_arg`; the registry route consults the callee's param_owned
+/// table like the Named route), over admissible arguments (#2755: nested
+/// calls, operators, constructors — each argument's own sites are hooks,
+/// and its owned result is the temporary the argument hook records).
+fn call_subset(e: &IrExpr) -> Option<Why> {
     let IrExprKind::Call { target, args, .. } = &e.kind else {
-        return Some("call:not-a-call".into());
+        return Some(Why::Deep("call:not-a-call".into()));
     };
     match target {
         almide_ir::CallTarget::Named { name } => {
-            if !name.as_str().starts_with(|c: char| c.is_ascii_lowercase() || c == '_') {
-                return Some("call:ctor".into());
-            }
             // The http_framed host-op leaves (calls.rs) intercept before
             // resolution and lower their args outside every hook.
-            if name.as_str().starts_with("__http_framed_") || name.as_str().starts_with("__http_call_") {
-                return Some("call:host-splice".into());
+            if name.as_str().starts_with("__http_framed_")
+                || name.as_str().starts_with("__http_call_")
+                || name.as_str().starts_with("__http_serve_")
+            {
+                return Some(Why::Deep("call:host-splice".into()));
+            }
+            // `__is_null` reads the Value tag of its lowered argument, and
+            // `panic` concatenates its message into a line it never binds:
+            // no argument hook fires for either, so only an RC-free
+            // argument is honest.
+            if matches!(name.as_str(), "__is_null" | "panic") && !args.iter().all(rc_free) {
+                return Some(Why::Deep(format!("call:{name}-arg")));
             }
         }
         almide_ir::CallTarget::Module { .. } => {}
-        other => return Some(format!("call:target:{}", tag(other))),
+        other => return Some(Why::Deep(format!("call:target:{}", tag(other)))),
     }
     for a in args {
-        match &a.kind {
-            IrExprKind::Var { .. }
-            | IrExprKind::LitInt { .. }
-            | IrExprKind::LitFloat { .. }
-            | IrExprKind::LitBool { .. }
-            | IrExprKind::LitStr { .. } => {}
-            IrExprKind::List { .. } => {
-                if let Some(r) = subset_rhs_literal(&a.kind) {
-                    return Some(r);
-                }
-            }
-            other => return Some(format!("call-arg:{}", tag(other))),
+        if let Some(w) = value_subset(a) {
+            return Some(w.inside("call-arg"));
         }
     }
     None
 }
 
-fn subset_rhs_literal(k: &IrExprKind) -> Option<String> {
-    match k {
-        IrExprKind::LitStr { .. } => None,
-        IrExprKind::List { elements } => {
-            for e in elements {
-                if !matches!(
-                    e.kind,
-                    IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitBool { .. } | IrExprKind::LitStr { .. }
-                ) {
-                    return Some("list-elem".into());
-                }
-            }
-            None
-        }
-        other => Some(format!("rhs:{}", tag(other))),
-    }
-}
-
-fn subset_rhs(value: &IrExpr) -> Option<String> {
-    match &value.kind {
-        IrExprKind::LitInt { .. }
-        | IrExprKind::LitFloat { .. }
-        | IrExprKind::LitBool { .. }
-        | IrExprKind::LitStr { .. }
-        | IrExprKind::Var { .. } => None,
-        IrExprKind::List { .. } => subset_rhs_literal(&value.kind),
-        // B1: a user-fn call — its arguments' RC sites are the call-arg
-        // hook's, its droppable result is a received credit (#1986).
-        IrExprKind::Call { .. } => call_subset(value),
-        other => Some(format!("rhs:{}", tag(other))),
-    }
-}
 
 // ── the collection sink (diagnostic channel, test-enabled) ──────────────
 
@@ -478,6 +593,21 @@ pub type Frames = Vec<(String, String)>;
 /// `(every frame of every pass, the frames of the pass that shipped)`. The
 /// second is empty when no pass was marked as shipped (a refused program).
 pub fn take_with_shipped() -> (Frames, Frames) {
+    let (all, shipped) = take_by_pass();
+    (all.into_iter().map(|(_, n, c)| (n, c)).collect(), shipped)
+}
+
+/// The pass `emit_program` emits WITHOUT the bounded-line rewrites (#2312,
+/// `line_bounded.rs`): its code differs from passes 1 and 2 by design (a
+/// `println(int.to_string(x))` builds and releases a block there instead of
+/// printing from the itoa scratch), so a sweep holds only the passes of one
+/// configuration to agreeing certificates.
+pub const CHECKED_PASS: usize = 3;
+
+/// `(every frame of every pass WITH its pass number, the frames of the pass
+/// that shipped)`. Pass numbers are those `emit_program` marks (1, 2,
+/// [`CHECKED_PASS`]); a frame pushed before any marker reads as pass 0.
+pub fn take_by_pass() -> (Vec<(usize, String, String)>, Frames) {
     let raw = sink().lock().expect("witness sink").take().unwrap_or_default();
     let shipped = raw.iter().rev().find(|(n, _)| n == SHIPPED_MARK).map(|(_, p)| p.clone());
     let mut all = Vec::new();
@@ -491,7 +621,8 @@ pub fn take_with_shipped() -> (Frames, Frames) {
             if shipped.is_some() && current == shipped {
                 in_shipped.push((name.clone(), cert.clone()));
             }
-            all.push((name, cert));
+            let pass = current.as_deref().and_then(|p| p.parse().ok()).unwrap_or(0);
+            all.push((pass, name, cert));
         }
     }
     (all, in_shipped)

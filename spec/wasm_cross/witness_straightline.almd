@@ -51,8 +51,23 @@ fn shout(s: String) -> String = string.to_upper(s)
 
 fn say(name: String) -> Unit = println(name)
 
+// #2755 — TEMPORARIES on the same flat alphabet. `nest` hands one call's
+// owned result straight to another: `take` only reads its param, so the
+// site parks the temporary and releases it after the call (`id`). `greet`
+// concatenates: the operands are bound first (the inner concat and the
+// call result each get a local, `i` … `d`), `tag`'s literal argument is
+// born and moves in (`im`), and the fresh concat moves out (`im`). `wrap`
+// tails a constructor: the param shares into the payload slot (`am`)
+// beside its own epilogue release.
+fn nest() -> Int = take(shed())
+
+fn greet(name: String) -> String = "hi " + name + tag("!")
+
+fn wrap(xs: List[Int]) -> Option[List[Int]] = some(xs)
+
 fn main() -> Unit = {
   println("${list.len(shed())} ${tag("w")} ${pass([1])} ${bind_then_pass()}")
   println("${discard([1, 2])} ${stamp(7)} ${shout("w")}")
   say("hi")
+  println("${nest()} ${greet("w")} ${list.len(wrap([1, 2]) ?? [])}")
 }

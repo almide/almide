@@ -355,6 +355,32 @@ kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-ta
 portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper(step4): almide-verify accepted the unreleased discard"; exit 1; }
 echo "ok   structural-tamper(step4): an unreleased statement-call result is rejected by the binary AND the kernel"
 
+# ── #2755: TEMPORARIES on the flat alphabet through the same checker. `nest`
+# hands a call's owned result straight to another call (`im`: born, moved
+# into the owned param); `greet` concatenates — its operands are bound first
+# (`id` each), the fresh concat moves out (`im`); `wrap` tails `some(xs)`, the
+# param sharing into the payload slot (`am`) and the cell moving out (`im`).
+# Two drills: a nested temporary that never leaves the frame, and a concat
+# operand that is never released — each must be seen as the leak it is.
+echo
+echo "== structural leg, temporaries  ⊳  proven checker (#2755) =="
+run_structural spec/wasm_cross/witness_straightline.almd nest 0
+run_structural spec/wasm_cross/witness_straightline.almd greet 0
+run_structural spec/wasm_cross/witness_straightline.almd wrap 0
+tamper_structural() { # fn sed-expr label
+  emit_structural spec/wasm_cross/witness_straightline.almd "$1" | sed "$2" > /tmp/structural.tamper
+  if cmp -s /tmp/structural.tamper <(emit_structural spec/wasm_cross/witness_straightline.almd "$1"); then
+    echo "FAIL structural-tamper($3): the drill changed nothing (the witness shape moved)"; exit 1
+  fi
+  set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
+  if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper($3): a leaked temporary was accepted"; exit 1; fi
+  kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper($3): the kernel accepted the leak"; exit 1; }
+  portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper($3): almide-verify accepted the leak"; exit 1; }
+  echo "ok   structural-tamper($3): the leak is rejected by the binary AND the kernel"
+}
+tamper_structural nest 's/^im$/i/' "#2755 nested call"
+tamper_structural greet '3s/^id$/i/' "#2755 concat operand"
+
 # ── #2152: almide-verify against the extracted checker on witnesses NO
 # producer wrote. The rows above only reach the shapes the emitters produce;
 # the transcription must agree on the whole input space, malformed bytes

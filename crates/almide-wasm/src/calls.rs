@@ -362,15 +362,6 @@ impl Emitter<'_> {
         }
     }
 
-
-
-
-
-
-
-
-
-
     /// Build a variant constructor's tagged block — split from
     /// lower_call_at for the complexity budget.
     fn lower_variant_ctor(
@@ -421,6 +412,7 @@ impl Emitter<'_> {
             // (koka_reuse1's Pair2(acc1, acc2) — params stored, then
             // epilogue-released) co-owns.
             self.rc_share_guard(a, fty);
+            self.witness_store(a, fty);
             self.store_ty_slot(fty, off);
         }
         self.f.instructions().local_get(hold);

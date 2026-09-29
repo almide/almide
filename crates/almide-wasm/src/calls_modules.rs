@@ -38,7 +38,7 @@ impl Emitter<'_> {
             // hook per argument, and declared no droppable View — or the
             // frame declines, before the promotion below adds a +1.
             if let (Some(before), CallTarget::Module { module, func, .. }) = (hooks_before, target) {
-                em.witness_module_result(&format!("{module}.{func}"), args.len(), before, l);
+                em.witness_module_result(&format!("{module}.{func}"), args, before, l);
             }
             // A `View` into a temporary this scope releases next would
             // dangle: it takes its share BEFORE the release (below).

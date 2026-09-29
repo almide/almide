@@ -57,6 +57,7 @@ impl Emitter<'_> {
                 self.f.instructions().local_get(hold);
                 self.lower(expr, Some(side))?;
                 self.rc_share_guard(expr, side);
+                self.witness_store(expr, side);
                 self.store_ty_slot(side, almide_layout::SUM_FIELD);
                 self.f.instructions().local_get(hold);
                 self.release_i32();
@@ -715,6 +716,7 @@ impl Emitter<'_> {
                     .local_tee(hold);
                 self.lower(expr, Some(s))?;
                 self.rc_share_guard(expr, s);
+                self.witness_store(expr, s);
                 self.store_ty_slot(s, almide_layout::OPTION_FIELD);
                 self.f.instructions().local_get(hold);
                 self.release_i32();
