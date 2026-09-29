@@ -1,4 +1,4 @@
-# oracle: almide 0.65.1 (dev) at 442fd0d08 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.65.1 (dev) at 7250312b7 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -690,6 +690,7 @@ f50109ba35043e9aa1200406d218340a21876e5f77db09415d6cb0631d4b69b3	spec/wasm_cross
 602cc615a4d7bc6028ff74b6b6df2f39c8a7cd0427639717790e7a06c3d5ad12	spec/wasm_cross/bounded_kernel.almd
 701779060dc7ded3ed39f474ddd64876892fd8874d74d778b0e5a8daf697281f	spec/wasm_cross/bounded_kernel_plain.almd
 9d14826b2f784190b250457cce680985fb9f770d50e43517f6388f62677e76db	spec/wasm_cross/branch_lift_in_loop.almd
+bcc2f2fe328ee024ab730bca4434a4e3b50c3da7351ae5f151cebaabe6e66df6	spec/wasm_cross/branch_lift_stdlib_mut_arg.almd
 f5551a3706417667323e1f9855871cabaaea42c62f7abb29683de62951f39b23	spec/wasm_cross/bundled_pure_modules.almd
 f5a9d4541f9545966ba5752320dd67b499717af07ab3db97db155dd51ea0b8ab	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
 4b3b6084208445a58a101dc339d1b3579bae676cdf02d7c7f3a4df53af51a715	spec/wasm_cross/bytes_array_count_domain.almd

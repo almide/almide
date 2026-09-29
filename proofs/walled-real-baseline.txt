@@ -303,3 +303,10 @@ spec/wasm_cross/lambda_failure_channel.almd :: erased
 spec/wasm_cross/lambda_failure_channel.almd :: fold_mid_block
 spec/wasm_cross/lambda_failure_channel.almd :: sum_with
 spec/wasm_cross/lambda_failure_channel.almd :: typed_slot
+# #2931: a let-bound heap `if` in a loop whose arms write enclosing vars through
+# stdlib `mut` params (list.push / map.insert / string.push / bytes.push). The
+# incumbent lowered it only through the branch_lift helper, which took those
+# vars by value and dropped the writes; the lift now declines (as it always did
+# on native), so the incumbent walls honestly. The structural leg serves it
+# byte-identically to native.
+spec/wasm_cross/branch_lift_stdlib_mut_arg.almd :: arm_writes
