@@ -39,6 +39,11 @@ impl Emitter<'_> {
                     other => return self.lower_err_raise(e, is_ok, other),
                 };
                 let side = self.types.el(if is_ok { o } else { er });
+                if crate::fs_meta::expr_propagates(expr) {
+                    let tag = i32::from(!is_ok);
+                    self.lower_payload_then_box(expr, side, 16, Some(tag), almide_layout::SUM_FIELD)?;
+                    return Ok(hty);
+                }
                 // Hold-local, not shared tmp — same seed-79 lesson as
                 // OptionSome above.
                 let hold = self.hold_i32()?;
@@ -74,6 +79,7 @@ impl Emitter<'_> {
                     self.lower(fallback, Some(et))?;
                     self.f.instructions().else_().local_get(self.scr_i32_local);
                     self.load_ty_slot(et, almide_layout::OPTION_FIELD);
+                    self.own_unwrap_or_join(e, fallback, et);
                     self.f.instructions().end();
                     et
                 }
@@ -89,6 +95,7 @@ impl Emitter<'_> {
                     self.lower(fallback, Some(et))?;
                     self.f.instructions().else_().local_get(self.scr_i32_local);
                     self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                    self.own_unwrap_or_join(e, fallback, et);
                     self.f.instructions().end();
                     et
                 }
@@ -696,6 +703,10 @@ impl Emitter<'_> {
                 // when the types forbid nested sums — the differential
                 // fuzzer falsified the old shared-tmp argument on day one
                 // (seed 79: the outer `some` returned the inner block).
+                if crate::fs_meta::expr_propagates(expr) {
+                    self.lower_payload_then_box(expr, s, s.slot_size() as i32, None, almide_layout::OPTION_FIELD)?;
+                    return Ok(hty);
+                }
                 let hold = self.hold_i32()?;
                 self.f
                     .instructions()
@@ -708,5 +719,76 @@ impl Emitter<'_> {
                 self.f.instructions().local_get(hold);
                 self.release_i32();
         Ok(hty)
+    }
+}
+
+impl Emitter<'_> {
+    /// #2970 — a one-slot box (`ok(p)` / `err(p)` / `some(p)`) whose payload
+    /// can PROPAGATE (`ok(1 + f(x)!)`, the fallible-callback carrier the
+    /// frontend wraps every non-canonical `!` body in). The ordinary build
+    /// allocates the box first and lowers the payload into it; a `!` in the
+    /// payload then returns the err block from the middle of the build and
+    /// the half-built box, held only by the operand stack, is never
+    /// released — one 16 B block per err, and per element on the fallible
+    /// HOF carriers' err path. Lowering the payload FIRST (parked in a typed
+    /// hold) leaves nothing allocated when the `!` exits; the box is built
+    /// only once the payload exists. Every other payload keeps the
+    /// allocate-first order and its exact bytes.
+    fn lower_payload_then_box(
+        &mut self,
+        expr: &IrExpr,
+        side: SliceTy,
+        size: i32,
+        tag: Option<i32>,
+        field: u32,
+    ) -> Result<(), EmitError> {
+        self.lower(expr, Some(side))?;
+        self.rc_share_guard(expr, side);
+        let val = self.hold_val(side)?;
+        self.f.instructions().local_set(val);
+        let hold = self.hold_i32()?;
+        self.f.instructions().i32_const(size).call(F_ALLOC).local_set(hold);
+        if let Some(tag) = tag {
+            self.f
+                .instructions()
+                .local_get(hold)
+                .i32_const(tag)
+                .i32_store(slot_memarg(almide_layout::SUM_TAG));
+        }
+        self.f.instructions().local_get(hold).local_get(val);
+        self.store_ty_slot(side, field);
+        self.f.instructions().local_get(hold);
+        self.release_i32();
+        self.release_val(side);
+        Ok(())
+    }
+}
+
+impl Emitter<'_> {
+    /// #2970 — `r ?? fallback` over a heap payload joins two values of
+    /// different ownership: the payload is a VIEW of the carrier (whose own
+    /// holder releases it), the fallback is often FRESH (`?? [0]`, a call).
+    /// Classed borrowed as a whole, every consumer took the
+    /// `+1` a view needs, and on the none / err path that second credit
+    /// landed on the fresh fallback — one block per fallback taken, never
+    /// released (`list.map(xs, (x) => f(x)!) ?? [0]`, the fallible-HOF
+    /// consumer idiom). When the fallback is owned, the payload arm takes
+    /// its `+1` here instead, so both arms hand the join one credit, and the
+    /// node is marked owned (`rc_owned_result`) so no consumer adds another
+    /// — the same normalization `lower_if_arms` applies to an `if`. A
+    /// borrowed or pool-static fallback (a var, a string literal) leaves both
+    /// arms views, as before, and so does a payload type arg_temps does not
+    /// name in a reader position (`arg_temps::droppable_ty`): an owned join
+    /// there would be read and never released.
+    fn own_unwrap_or_join(&mut self, e: &IrExpr, fallback: &IrExpr, et: SliceTy) {
+        if !self.rc_droppable(et)
+            || !crate::arg_temps::droppable_ty(&e.ty)
+            || !crate::arg_temps::unwrap_or_joins_owned(e)
+            || !self.rc_owned_result(fallback)
+        {
+            return;
+        }
+        self.rc_inc_top();
+        self.owned_call_marks.insert(e as *const IrExpr as usize);
     }
 }
