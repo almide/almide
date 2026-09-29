@@ -616,6 +616,31 @@ impl Checker {
         }
     }
 
+    /// E046 for `x |> f(_, a)`: the `_` stands where the pipe already puts
+    /// `x`. The `try:` is the call with that `_` dropped, lifted from the
+    /// source when the call is on one line.
+    fn reject_piped_slot_placeholder(&mut self, callee: &ast::Expr, hole: &ast::Expr, call_span: Option<ast::Span>) {
+        let name = callee_display_name(callee);
+        let what = match &name {
+            Some(n) => format!("argument 1 of {}()", n),
+            None => "argument 1".to_string(),
+        };
+        let mut diag = super::err(
+            format!("placeholder `_` is not valid in a call argument ({what}): `|>` already passes the value as the first argument"),
+            "Drop the `_`: `x |> f(a, b)` is `f(x, a, b)`. There is no pipe placeholder — the left side always \
+             goes first; for any other position, write a lambda: `x |> (v) => f(a, v)`.",
+            "call argument",
+        )
+        .with_code("E046");
+        if let Some(fixed) = call_span.and_then(|sp| self.source_slice(sp)).and_then(|t| drop_leading_hole(&t)) {
+            diag = diag.with_try(fixed);
+        }
+        if let (Some(file), Some(span)) = (self.source_file.clone(), hole.span) {
+            diag = diag.at_span(&file, span);
+        }
+        self.emit(diag);
+    }
+
     /// Build the `try:` snippet for E046 by lifting the call's own source text
     /// and rewriting EVERY `_` argument to a lambda parameter — so the steer
     /// reads `(x) => add(x, 10)` for the user's actual call, and
@@ -1430,6 +1455,18 @@ impl Checker {
         // `(x) => add3(x, 10)` — what lifting `add3(_, 10)` verbatim would
         // produce — has the wrong arity and would be a plausible-looking wrong
         // fix. The generic shape steer is the honest one on this path.
+        // A `_` FIRST is the piped value's own slot, written out as other
+        // pipelines spell it (`text |> string.replace(_, "a", "b")`). The pipe
+        // fills that slot already, so the fix is to drop the `_` — not the
+        // lambda the general E046 steers to — and once reported the `_` is
+        // removed, so the call is checked as the user meant it instead of
+        // cascading into an E004 arity error that names neither cause nor fix.
+        if let ExprKind::Call { callee, args, .. } = &mut right.kind
+            && matches!(args.first().map(|a| &a.kind), Some(ExprKind::Placeholder))
+        {
+            self.reject_piped_slot_placeholder(callee, &args[0], right.span);
+            args.remove(0);
+        }
         if let ExprKind::Call { callee, args, .. } = &right.kind {
             self.reject_arg_placeholders(&**callee, args.as_slice(), None);
         }
@@ -1582,4 +1619,15 @@ impl Checker {
             self.postfix_inner_spans.insert((o.line, o.col, o.end_col), i);
         }
     }
+}
+
+/// `f(_, a, b)` → `f(a, b)`, `f(_)` → `f()`: the call text with its leading
+/// `_` argument removed; `None` when the text is not that shape.
+fn drop_leading_hole(call: &str) -> Option<String> {
+    let open = call.find('(')?;
+    let rest = call[open + 1..].trim_start();
+    let after = rest.strip_prefix('_')?;
+    let after = after.trim_start();
+    let tail = if let Some(t) = after.strip_prefix(',') { t.trim_start() } else if after.starts_with(')') { after } else { return None };
+    Some(format!("{}({}", &call[..open], tail))
 }
