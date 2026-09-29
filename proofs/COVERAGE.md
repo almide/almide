@@ -168,3 +168,25 @@ The floor is therefore re-anchored to the CI measurement of develop after #2930:
 #2950 only take out code that no workload reaches, so each can only raise the
 TOTAL. Run `--update` on the first green night after each lands to ratchet the
 floor back up.
+
+## Condition floor raised — 2026-09-30 (batch-073, #2950)
+
+Develop slid to **53.46%** (throwaway probe run 36583088728 on e5b570e19: 36691
+branches, 17076 missed), below the 55.29% floor. Against the floor's own
+measurement (probe run 36550517708: 36745 / 16429) that is +647 missed
+branches at about the same total. The incumbent deletion removed the tests and
+workloads that drove MIR lowering through the incumbent render path, so that
+lowering went cold. Most of it was the dead lowering #2950 deletes
+(`repr_sources*`, `drop_sources*`, `usage_scan`, `variant_drop_field_frees`,
+`mod_p2_rewrap`, …). #2950 alone measures 55.06% (run 36578464452).
+
+batch-073 (with #2950) measures **55.35%** (run 36595422938 on 6da40736b:
+35957 / 16054), so the floor rises to it (`coverage-baseline-condition.txt`
+5529 → 5535).
+
+The TOTAL is back, but still-live files lost covered branches at an unchanged
+branch total. Most: `lower/defunc_tuple_fold_b.rs` 34 → 0 of 78,
+`lower/calls_p4_b_tail.rs` 44 → 21 of 61, `lower/defunc_tuple_fold.rs` 35 → 16
+of 70, `lower/result_ctors.rs` 74 → 62 of 116, `lower/mod_p5_b.rs` 119 → 108
+of 146, `lower/calls_p4_c.rs` 55 → 45 of 96. #3007 tracks restoring them with
+a workload the product legs run, rather than only re-anchoring.
