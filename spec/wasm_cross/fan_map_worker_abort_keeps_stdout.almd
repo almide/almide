@@ -1,0 +1,11 @@
+// @contract: C-197
+// The runtime twin of fan_worker_abort_keeps_stdout.almd: a pure scalar
+// `fan.map` callback routes to the native parallel map, and the defined
+// abort fires on one of its workers. The line printed before the map must
+// reach stdout on both legs (#3016); native printed nothing before the
+// parallel runtime flushed the spawning thread's buffer.
+effect fn main() -> Unit = {
+  println("a")
+  let r = fan.map(list.range(0, 4), (x) => ok(list.len(list.range(-9223372036854775807, x))))!
+  println("unreachable ${list.len(r)}")
+}
