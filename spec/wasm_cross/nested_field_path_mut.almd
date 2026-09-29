@@ -42,14 +42,20 @@ fn step(mut doc: Doc, i: Int) -> Unit = {
   ()
 }
 
+fn snap_line(b: Doc) -> String = {
+  let n = list.len(b.root.inner.ss)
+  "${b.n}/${n}/${b.root.inner.s}"
+}
+
 effect fn main() -> Unit = {
   var doc = fresh()
   let before_root = doc.root
-  println("drained " + int.to_string(drain(doc)) + ": " + list.join(
-    list.map(doc.trace, (t) => int.to_string(t)),
-    ",",
-  ))
-  println("root.trace now " + int.to_string(list.len(doc.root.trace)) + ", the copy bound before " + int.to_string(list.len(before_root.trace)))
+  let drained = drain(doc)
+  let order = list.join(list.map(doc.trace, (t) => int.to_string(t)), ",")
+  println("drained ${drained}: ${order}")
+  let now = list.len(doc.root.trace)
+  let was = list.len(before_root.trace)
+  println("root.trace now ${now}, the copy bound before ${was}")
   var snaps: List[Doc] = []
   for i in 0..<1000 {
     let before = doc
@@ -78,17 +84,15 @@ effect fn main() -> Unit = {
     } else ()
   }
   let inner = doc.root.inner
-  println("n " + int.to_string(doc.n) + " xs " + list.join(list.map(inner.xs, (x) => int.to_string(x)), ","))
-  println("ss " + list.join(inner.ss, ",") + " fs " + list.join(
-    list.map(inner.fs, (f) => float.to_string(f)),
-    ",",
-  ) + " s " + inner.s)
-  println("ps " + list.join(list.map(inner.ps, (p) => p.name), ",") + " m " + int.to_string(map.len(inner.m)) + " trace " + int.to_string(list.len(doc.root.trace)))
-  println("snaps " + list.join(
-    list.map(
-      snaps,
-      (b) => int.to_string(b.n) + "/" + int.to_string(list.len(b.root.inner.ss)) + "/" + b.root.inner.s,
-    ),
-    " ",
-  ))
+  let xs = list.join(list.map(inner.xs, (x) => int.to_string(x)), ",")
+  println("n ${doc.n} xs ${xs}")
+  let ss = list.join(inner.ss, ",")
+  let fs = list.join(list.map(inner.fs, (f) => float.to_string(f)), ",")
+  println("ss ${ss} fs ${fs} s ${inner.s}")
+  let ps = list.join(list.map(inner.ps, (p) => p.name), ",")
+  let m = map.len(inner.m)
+  let trace = list.len(doc.root.trace)
+  println("ps ${ps} m ${m} trace ${trace}")
+  let shots = list.join(list.map(snaps, (b) => snap_line(b)), " ")
+  println("snaps ${shots}")
 }
