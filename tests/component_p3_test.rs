@@ -10,7 +10,7 @@
 //! step 1): `wasmtime run app.wasm`, plus `-S http` — the capability grant,
 //! like `--dir` — for an http client. No harness here passes `-W` or
 //! `-S p3`, so a shim that reintroduces a 🚝 synchronous builtin fails the
-//! execution tests instead of being carried by a flag; CI installs 47.x.
+//! execution tests instead of being carried by a flag; CI installs 49.x.
 //! A wasmtime older than the p3 floor (46) skips the execution half (the
 //! emission half always runs); a refusal from a 46+ wasmtime is a failure.
 
