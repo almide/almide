@@ -9,9 +9,11 @@
 //! Borrow: a Var shares nothing, a parked temporary is born and released
 //! by the scope (`id`); Retain: a Var takes the `rc_share_guard` +1 and
 //! its credit moves into the arm (`am`), a temporary moves in (`im`);
-//! Raw: nothing. The wrapper (`lower_module_call`) COUNTS the hooks the
-//! arm fired against its argument count: an arm that lowered an argument
-//! any other way is unaudited and the frame DECLINES — counted, never
+//! Raw: nothing. The wrapper (`lower_module_call`) asks whether a hook
+//! fired for EACH of the arm's own argument nodes (by node identity — a
+//! count would let a nested argument's inner hooks stand in for an outer
+//! one the arm lowered bare, #2755): an arm that lowered an argument any
+//! other way is unaudited and the frame DECLINES — counted, never
 //! under-recorded. A droppable `View` result declines too: its share
 //! lands on an object the frame does not track by local, and this
 //! phase's object identity is the local map.
@@ -26,9 +28,17 @@ use crate::arm::{ArgMode, Lowered, Own};
 use crate::emitter::Emitter;
 use crate::SliceTy;
 
+/// A hooked node's identity for the module-call audit.
+fn node(e: &almide_ir::IrExpr) -> usize {
+    e as *const almide_ir::IrExpr as usize
+}
+
 impl Emitter<'_> {
+    /// The local whose object a value SHARES: a Var, read through block
+    /// tails (`{ let t = …; t }` is `t`'s object — the routes' +1 lands on
+    /// the tail's value, `rc_owned_result` reads through blocks the same way).
     fn witness_src_local(&self, e: &almide_ir::IrExpr) -> Option<u32> {
-        if let almide_ir::IrExprKind::Var { id } = &e.kind {
+        if let almide_ir::IrExprKind::Var { id } = &crate::rc_ownership::rc_tail(e).kind {
             self.locals.get(id).map(|&(l, _)| l)
         } else {
             None
@@ -37,26 +47,23 @@ impl Emitter<'_> {
 
     /// The Bind-route hook (stmts.rs): called right after the local joins
     /// `rc_owned`. Attribution mirrors the instructions the route just
-    /// emitted: a certainly-fresh rhs (heap literal) and a Map/Set Var rhs
-    /// (which took `$block_copy`) are NEW objects; a List/Str/Bytes Var
-    /// rhs took `rc_inc_top`, so the SOURCE object gains a share. A
-    /// non-owned call rhs (a native arm's View) declines; anything else
+    /// emitted: an OWNED rhs (fresh, or a call's handed-over credit, #1986)
+    /// is a NEW object; a borrowed Var rhs of any droppable shape took
+    /// `rc_inc_top` (Maps and Sets too since #2010 Map stage b retired the
+    /// bind-time `$block_copy`), so the SOURCE object gains a share. A
+    /// borrowed non-Var rhs (a native arm's View) declines; anything else
     /// under an armed recorder is a gate/hook disagreement — poison.
-    pub(crate) fn witness_bind(&mut self, idx: u32, declared: SliceTy, value: &almide_ir::IrExpr) {
+    pub(crate) fn witness_bind(&mut self, idx: u32, _declared: SliceTy, value: &almide_ir::IrExpr) {
         let src_local = self.witness_src_local(value);
-        // Mirrors the route exactly: an OWNED result (fresh, or a user-fn
-        // call's handed-over credit, #1986) is a new object; a Map/Set Var
-        // took `$block_copy`.
         let owned = self.rc_owned_result(value);
-        let is_call = matches!(value.kind, almide_ir::IrExprKind::Call { .. });
         let Some(w) = self.witness.as_mut() else { return };
-        if owned || (src_local.is_some() && matches!(declared, SliceTy::Map(..) | SliceTy::Set(_))) {
+        if owned {
             w.bind_fresh(idx);
             return;
         }
         match src_local {
             Some(src) if w.bind_alias(idx, src) => {}
-            None if is_call => w.decline("bind:view-result"),
+            None => w.decline("bind:view-result"),
             _ => w.poison(),
         }
     }
@@ -68,20 +75,56 @@ impl Emitter<'_> {
     /// armed recorder is a gate/hook disagreement — poison.
     pub(crate) fn witness_arg(&mut self, e: &almide_ir::IrExpr, ty: SliceTy) {
         let Some(w) = self.witness.as_mut() else { return };
-        w.note_arg();
+        w.note_arg(node(e));
         if !self.rc_droppable(ty) {
             return;
         }
+        self.witness_share_or_move(e, "call-arg:borrowed-temp");
+    }
+
+    /// Mirrors rc_arg_guard / rc_share_guard on a droppable value handed to
+    /// a new holder: an OWNED value (fresh literal or a call result carrying
+    /// its one credit) is born and moves (`im`); a borrowed Var shares and
+    /// moves (`am`). A borrowed NON-Var (a native arm's View, #2755's nested
+    /// arguments reach it) took a real `rc_inc` on an object this frame
+    /// does not track by local — withdraw with `reason`, never under-record.
+    fn witness_share_or_move(&mut self, e: &almide_ir::IrExpr, reason: &str) {
         let src_local = self.witness_src_local(e);
-        // Mirrors rc_arg_guard exactly: an OWNED argument (fresh literal
-        // or a call result carrying its one credit) is born and moves
-        // (`im`); a Var shares and moves (`am`).
         let fresh = self.rc_owned_result(e);
         let Some(w) = self.witness.as_mut() else { return };
+        if fresh {
+            w.temp_move();
+            return;
+        }
         match src_local {
             Some(l) if w.arg_share_move(l) => {}
-            None if fresh => w.temp_move(),
+            None => w.decline(reason),
             _ => w.poison(),
+        }
+    }
+
+    /// The payload-store hook (#2755: `some` / `ok` / `err` and a variant
+    /// case, right after `rc_share_guard`): the container becomes the
+    /// payload's holder. Mirrors the guard: an i64/f64 slot and a non-handle
+    /// Var carry no RC site; a Var of a handle shape takes the real +1 and
+    /// its credit moves in (`am`, `witness_retain_var`); an owned temporary
+    /// moves in (`im`); a borrowed non-Var droppable took an untracked +1
+    /// (decline).
+    pub(crate) fn witness_store(&mut self, e: &almide_ir::IrExpr, ty: SliceTy) {
+        if self.witness.is_none() || ty.val_type() != wasm_encoder::ValType::I32 {
+            return;
+        }
+        if let almide_ir::IrExprKind::Var { .. } = &e.kind {
+            // A scalar i32 slot (Bool, a narrow int) has no site; any
+            // droppable Var goes through the retain mirror, which declines
+            // a cell, a global and a droppable-but-flat local.
+            if self.rc_droppable(ty) {
+                self.witness_retain_var(e, "store");
+            }
+            return;
+        }
+        if self.rc_droppable(ty) {
+            self.witness_share_or_move(e, "store:borrowed-temp");
         }
     }
 
@@ -90,16 +133,15 @@ impl Emitter<'_> {
     /// temporary is born and released by the site (`id`).
     pub(crate) fn witness_arg_borrowed(&mut self, e: &almide_ir::IrExpr, ty: SliceTy, fresh: bool) {
         let Some(w) = self.witness.as_mut() else { return };
-        w.note_arg();
+        w.note_arg(node(e));
         if !self.rc_droppable(ty) {
             return;
         }
-        let is_var = matches!(e.kind, almide_ir::IrExprKind::Var { .. });
+        // A borrowed non-Var (a View through a block tail, a nested
+        // native arm's result) is lent as is: no RC site.
         let Some(w) = self.witness.as_mut() else { return };
         if fresh {
             w.temp_borrowed();
-        } else if !is_var && !matches!(e.kind, almide_ir::IrExprKind::LitStr { .. }) {
-            w.poison();
         }
     }
 
@@ -108,32 +150,22 @@ impl Emitter<'_> {
     /// for the scope's release.
     pub(crate) fn witness_module_arg(&mut self, e: &almide_ir::IrExpr, got: SliceTy, mode: ArgMode, parked: bool) {
         let Some(w) = self.witness.as_mut() else { return };
-        w.note_arg();
+        w.note_arg(node(e));
         if !self.rc_droppable(got) {
             return;
         }
         let is_var = matches!(e.kind, almide_ir::IrExprKind::Var { .. });
-        let is_static = matches!(e.kind, almide_ir::IrExprKind::LitStr { .. });
         match mode {
             ArgMode::Raw => {}
+            // A Borrow lends the value as is (a Var, a static, a View: no
+            // RC site); only a parked owned temporary has one (`id`).
             ArgMode::Borrow => {
-                let Some(w) = self.witness.as_mut() else { return };
-                if parked {
+                if parked && let Some(w) = self.witness.as_mut() {
                     w.temp_borrowed();
-                } else if !is_var && !is_static {
-                    w.poison();
                 }
             }
-            ArgMode::Retain if is_var => self.witness_retain_var(e),
-            ArgMode::Retain => {
-                let fresh = self.rc_owned_result(e);
-                let Some(w) = self.witness.as_mut() else { return };
-                if fresh {
-                    w.temp_move();
-                } else {
-                    w.poison();
-                }
-            }
+            ArgMode::Retain if is_var => self.witness_retain_var(e, "module-arg"),
+            ArgMode::Retain => self.witness_share_or_move(e, "module-arg:retain-borrowed-temp"),
         }
     }
 
@@ -142,18 +174,18 @@ impl Emitter<'_> {
     /// handle-typed local took the real `rc_inc` and its credit moves
     /// into the arm (`am`); a droppable local that is not a handle took
     /// no +1 at all — the arm retains what it did not share: decline.
-    fn witness_retain_var(&mut self, e: &almide_ir::IrExpr) {
+    fn witness_retain_var(&mut self, e: &almide_ir::IrExpr, position: &str) {
         let almide_ir::IrExprKind::Var { id } = &e.kind else { return };
         if self.cells.contains(id) {
-            self.witness_decline("module-arg:retain-cell");
+            self.witness_decline(&format!("{position}:retain-cell"));
             return;
         }
         let Some(&(l, vt)) = self.locals.get(id) else {
-            self.witness_decline("module-arg:retain-unknown-local");
+            self.witness_decline(&format!("{position}:retain-unknown-local"));
             return;
         };
         if !self.elem_is_handle(vt) {
-            self.witness_decline("module-arg:retain-flat");
+            self.witness_decline(&format!("{position}:retain-flat"));
             return;
         }
         if let Some(w) = self.witness.as_mut()
@@ -163,12 +195,25 @@ impl Emitter<'_> {
         }
     }
 
-    /// The module-call wrapper's audit (calls_modules.rs): the arm fired
-    /// one argument hook per argument, or the frame declines; a droppable
+    /// The module-call wrapper's audit (calls_modules.rs): a hook fired for
+    /// EACH of the call's own argument nodes, or the frame declines; a droppable
     /// `View` result declines (identity, see the module doc).
-    pub(crate) fn witness_module_result(&mut self, name: &str, args: usize, hooks_before: u32, lowered: Option<Lowered>) {
+    pub(crate) fn witness_module_result(
+        &mut self,
+        name: &str,
+        args: &[almide_ir::IrExpr],
+        hooks_before: usize,
+        lowered: Option<Lowered>,
+    ) {
         let Some(w) = self.witness.as_ref() else { return };
-        if (w.arg_hooks() - hooks_before) as usize != args {
+        // A SCALAR argument has no RC site of its own (an arm may lower it
+        // bare — `math.pow`'s operands); any site inside it (a nested
+        // call's arguments) is that call's own hook. Every droppable — or
+        // untyped — argument must have gone through `lower_arg`.
+        let scalar = |a: &almide_ir::IrExpr| {
+            crate::ty::slice_ty_of(&a.ty, self.types).is_some_and(|t| !self.rc_droppable(t))
+        };
+        if !args.iter().all(|a| scalar(a) || w.hooked_since(hooks_before, node(a))) {
             self.witness_decline(&format!("module-arm:unaudited:{name}"));
             return;
         }
@@ -203,11 +248,10 @@ impl Emitter<'_> {
     /// tail (a native arm's View) declines; anything else is poison.
     pub(crate) fn witness_tail_var(&mut self, tail: &almide_ir::IrExpr) {
         let src = self.witness_src_local(tail);
-        let is_call = matches!(tail.kind, almide_ir::IrExprKind::Call { .. });
         let Some(w) = self.witness.as_mut() else { return };
         match src {
             Some(l) if w.ret_move(l) => {}
-            None if is_call => w.decline("tail:view-result"),
+            None => w.decline("tail:view-result"),
             _ => w.poison(),
         }
     }
