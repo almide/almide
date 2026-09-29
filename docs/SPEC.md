@@ -784,14 +784,16 @@ text |> string.trim |> string.split(",")
 
 `x |> f` is equivalent to `f(x)`.
 
-**Placeholder `_`** for multi-argument functions:
+For a multi-argument function the piped value is the **first** argument:
 
 ```
-xs |> list.filter(_, (x) => x > 0)
-text |> string.split(_, ",")
+xs |> list.filter((x) => x > 0)
+text |> string.split(",")
 ```
 
-`_` specifies where the piped value is inserted. Multiple `_` in a single call is a compile error.
+There is no placeholder: `_` in a call argument is rejected (E046), and
+`text |> string.split(_, ",")` names the fix — drop the `_`. To pipe into
+another position, pipe into a lambda: `x |> (v) => f(a, v)`.
 
 **Pipe into match:**
 

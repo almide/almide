@@ -1,5 +1,6 @@
-// E046 variant: `_` inside a pipe target's argument list — it does NOT
-// partially apply.
+// E046 variant: `_` as the FIRST argument of a pipe target. Other pipelines
+// spell the piped value's slot this way; here the pipe fills argument 1
+// already, so the `_` is one argument too many — the steer is to drop it.
 fn add(a: Int, b: Int) -> Int = a + b
 
 fn main() -> Unit = println(int.to_string(2 |> add(_, 3)))
