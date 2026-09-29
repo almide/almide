@@ -35,9 +35,9 @@ fasta                 | measured         | 1.46  | 2.31 | 1.58
 fannkuchredux         | measured         | 1.48  | 2.75 | 1.86 ab_band=100
 mandelbrot            | measured         | 2.81  | 3.54 | 1.26 ab_band=100
 onebrc                | measured         | 2.14  | 4.01 | 1.87
-fft                   | measured         | 44.12 | 121.57 | 2.76
+fft                   | measured         | 43.96 | 67.41 | 1.53
 strchurn              | measured         | 59.97 | 50.56 | 0.84
-listbuild_append      | measured         | 22.54 | 67.32 | 2.99
-listbuild_combinator  | measured         | 22.62 | 70.04 | 3.10
-listbuild_prealloc    | measured         | 21.86 | 61.64 | 2.82
+listbuild_append      | measured         | 22.60 | 42.73 | 1.89
+listbuild_combinator  | measured         | 22.58 | 41.91 | 1.86
+listbuild_prealloc    | measured         | 22.03 | 37.47 | 1.70
 mapbuild              | measured         | 5.58  | 4.57 | 0.82
