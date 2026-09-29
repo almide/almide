@@ -269,8 +269,8 @@ fn classify_walled_fn(
     let reason = &reason;
     // Categorize the wall: NATIVE-FFI (structural, excluded) iff this function is
     // in the transitive native-FFI closure; else REAL (a lowering gap to close).
-    // A name absent from the node map (an inline_mutual_tail_recursion-synthesized
-    // aux) defaults REAL (conservative — never over-excludes a real gap).
+    // A name absent from the node map defaults REAL (conservative — never
+    // over-excludes a real gap).
     let is_native = ctx.native_ffi_set.contains(func.name.as_str());
     if is_native {
         t.walled_native_ffi += 1;
@@ -455,39 +455,6 @@ fn classify_file(
         globals.insert(tl.var, tl.ty.clone());
         global_inits.insert(tl.var, tl.value.clone());
     }
-    // MAIN-REGION precedence (this loop lowers the MAIN program's fns only): the raw
-    // module union above stays as the FALLBACK (a shared-allocator id matches it — the
-    // init_order shapes), the cross-module NAME bridge OVERRIDES a colliding module-raw
-    // key (the byvalue shapes), and main's own top-lets (re-inserted last) win where the
-    // name bridge would misfire — composition order: module union → bridge → main.
-    almide_mir::lower::bridge_cross_module_toplets(
-        &ir,
-        &mut globals,
-        &mut global_inits,
-        &mut std::collections::HashMap::new(),
-    );
-    for tl in &ir.top_lets {
-        globals.insert(tl.var, tl.ty.clone());
-        global_inits.insert(tl.var, tl.value.clone());
-    }
-    // MUTABLE module-level `var`s route through their storage slots — publish the
-    // VarId → (slot, Ty) map exactly as the render pipeline does (declaration order
-    // = VarId order), so the gate classifies with the same slot lowering the real
-    // emit performs (and the same walls for shapes beyond the slot subset).
-    let mut mutable_tls: Vec<_> = ir
-        .top_lets
-        .iter()
-        .chain(ir.modules.iter().flat_map(|m| m.top_lets.iter()))
-        .filter(|tl| tl.mutable)
-        .collect();
-    mutable_tls.sort_by_key(|tl| tl.var.0);
-    almide_mir::lower::set_mutable_global_vars(
-        mutable_tls
-            .iter()
-            .enumerate()
-            .map(|(i, tl)| (tl.var.0, (i as u32, tl.ty.clone())))
-            .collect(),
-    );
     // The functions DEFINED in this file (their names). A PROTOCOL METHOD is a
     // user-defined function whose name is dotted (`Type.method`, e.g. `MathExpr.eval`)
     // — it resolves to ITSELF / a sibling method, NOT a stdlib call. The unlinkable-
@@ -516,10 +483,6 @@ fn classify_file(
             .ctor_field_defaults
             .extend(m_vl.ctor_field_defaults);
     }
-    // PROGRAM pre-pass: inline mutual-recursive tail siblings → direct self-recursion (exposed to
-    // the append-accumulator TCO). Guarded: only where it makes a walled fn lower (no regression).
-    let inlined_fns =
-        almide_mir::lower::inline_mutual_tail_recursion(&ir.functions, &globals, &record_layouts);
     let ctx = FileCtx {
         file,
         globals: &globals,
@@ -530,7 +493,7 @@ fn classify_file(
         file_fn_names: &file_fn_names,
         native_ffi_set: &native_ffi_set,
     };
-    for func in &inlined_fns {
+    for func in &ir.functions {
         classify_lower_one_fn(&ctx, func, t, s, &mut file_mirs, &mut elided_call_fns);
     }
 
