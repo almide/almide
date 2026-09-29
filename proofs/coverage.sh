@@ -173,7 +173,7 @@ done > "$COVDIR/sweep.list"
 n="$(wc -l < "$COVDIR/sweep.list" | tr -d ' ')"
 nw="$(tr '\n' '\0' < "$COVDIR/sweep.list" | COVDIR="$COVDIR" CLI="$CLI" xargs -0 -n 1 -P "$SWEEP_JOBS" sh -c '
     out="$COVDIR/sweep/$$"
-    if ALMIDE_WASM_STRUCTURAL=1 LLVM_PROFILE_FILE="$COVDIR/wasm-%4m.profraw" \
+    if ALMIDE_WASM_SKIP_STOCK_AUDIT=1 LLVM_PROFILE_FILE="$COVDIR/wasm-%4m.profraw" \
          "$CLI" build "$1" --target wasm -o "$out.wasm" >/dev/null 2>&1; then echo emitted; fi
     LLVM_PROFILE_FILE="$COVDIR/verify-%4m.profraw" \
       "$CLI" verify "$1" --emit "$out.bundle" >/dev/null 2>&1
