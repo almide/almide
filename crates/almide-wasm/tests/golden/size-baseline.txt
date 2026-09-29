@@ -195,8 +195,8 @@
 10373	spec/wasm_cross/float_no_contraction.almd
 13614	spec/wasm_cross/float_parse.almd
 10311	spec/wasm_cross/float_parse_special.almd
-5005	spec/wasm_cross/float_round_exact.almd
-4985	spec/wasm_cross/float_round_negzero.almd
+5021	spec/wasm_cross/float_round_exact.almd
+5081	spec/wasm_cross/float_round_negzero.almd
 4319	spec/wasm_cross/float_shortest_roundtrip.almd
 6520	spec/wasm_cross/float_sign_minmax_ieee.almd
 5230	spec/wasm_cross/float_signed_zero_minmax.almd
