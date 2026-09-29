@@ -26,6 +26,20 @@
 //! an allocation the program did not have (the alloc ledgers may only go
 //! down).
 //!
+//! THE PRE-JUDGE (#2980). The flag still leaves the judge's CALL inside the
+//! loop body, cold but present: Cranelift has to keep every value live across
+//! a call site that clobbers the caller-saved registers, and fft's butterfly
+//! paid 2.4x for four never-taken `if !flag { call }` arms (measured by
+//! deleting them from the emitted module: 60 -> 25 ms, native 20). So a
+//! counting `for` loop whose body CERTAINLY stores into the list on its first
+//! iteration — the store is a top-level statement and nothing before it (or
+//! in it) can leave the body: no break / continue / `!` / guard / tail call —
+//! judges once in the loop's PREHEADER, guarded by "the range is non-empty",
+//! and its stores emit no judge at all. That moves the one judge the first
+//! store would have run to just before the iteration it runs in: the same
+//! copy, or none, on every run that does not abort, so the alloc ledgers do
+//! not move. Reads before that first store see the same contents either way.
+//!
 //! WHAT THE SCAN REFUSES, conservatively: every candidate when the loop holds
 //! a lambda, a closure, a fan, an iterator chain or an inline-Rust node (each
 //! can reach variables by id rather than through a `Var` read); a candidate
@@ -122,6 +136,55 @@ impl IrVisitor for Scan {
     }
 }
 
+/// A node that can leave the loop body before the statements after it run
+/// (an abort ends the run, so it is not one: no later state is observable).
+#[derive(Default)]
+struct Exits(bool);
+
+impl IrVisitor for Exits {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        if matches!(
+            expr.kind,
+            IrExprKind::Break
+                | IrExprKind::Continue
+                | IrExprKind::Try { .. }
+                | IrExprKind::Unwrap { .. }
+                | IrExprKind::TailCall { .. }
+        ) {
+            self.0 = true;
+            return;
+        }
+        walk_expr(self, expr);
+    }
+
+    fn visit_stmt(&mut self, stmt: &IrStmt) {
+        if matches!(stmt.kind, IrStmtKind::Guard { .. }) {
+            self.0 = true;
+            return;
+        }
+        walk_stmt(self, stmt);
+    }
+}
+
+/// The lists every iteration of this body stores into before anything can
+/// leave it: top-level `v[i] = x` statements up to the first statement that
+/// might exit (that statement's own store is not certain, so it stops the
+/// scan before counting). VarId order, for deterministic bytes.
+pub(crate) fn first_iteration_stores(body: &[IrStmt]) -> Vec<VarId> {
+    let mut out = BTreeSet::new();
+    for st in body {
+        let mut exits = Exits::default();
+        exits.visit_stmt(st);
+        if exits.0 {
+            break;
+        }
+        if let IrStmtKind::IndexAssign { target, .. } = &st.kind {
+            out.insert(*target);
+        }
+    }
+    out.into_iter().collect()
+}
+
 /// The lists a loop (its condition and body) stores into and otherwise
 /// reaches only through element reads, in VarId order (deterministic bytes).
 pub(crate) fn element_only_writes(cond: Option<&IrExpr>, body: &[IrStmt]) -> Vec<VarId> {
@@ -163,6 +226,52 @@ impl crate::emitter::Emitter<'_> {
             added.push(v);
         }
         Ok(added)
+    }
+
+    /// The pre-judge (module header, #2980): for a counting loop, judge each list
+    /// its body certainly stores into on the first iteration once, before
+    /// the loop, when `emit_runs` (which pushes an i32: the loop runs at
+    /// least once) holds — and mark it so the loop's stores skip the judge.
+    /// An enclosing loop's flag is honoured and set, so that loop's other
+    /// stores stay consistent. Returns the vars it marked, for
+    /// `drop_prejudged`.
+    pub(crate) fn prejudge_first_stores(
+        &mut self,
+        body: &[IrStmt],
+        emit_runs: &dyn Fn(&mut Self),
+    ) -> Vec<VarId> {
+        let certain = first_iteration_stores(body);
+        if certain.is_empty() {
+            return Vec::new();
+        }
+        let only = element_only_writes(None, body);
+        let cands: Vec<VarId> = certain
+            .into_iter()
+            .filter(|v| {
+                only.contains(v)
+                    && !self.cow_prejudged.contains(v)
+                    && !self.cells.contains(v)
+                    && matches!(self.locals.get(v), Some(&(_, crate::SliceTy::List(_))))
+            })
+            .collect();
+        if cands.is_empty() {
+            return cands;
+        }
+        emit_runs(self);
+        self.f.instructions().if_(wasm_encoder::BlockType::Empty);
+        for v in &cands {
+            self.emit_prejudge_cow(*v);
+        }
+        self.f.instructions().end();
+        self.cow_prejudged.extend(cands.iter().copied());
+        cands
+    }
+
+    /// Unmark one loop's pre-judged lists.
+    pub(crate) fn drop_prejudged(&mut self, added: Vec<VarId>) {
+        for v in added {
+            self.cow_prejudged.remove(&v);
+        }
     }
 
     /// Release one loop's flags, innermost hold first.

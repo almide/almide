@@ -570,6 +570,7 @@ fn build_helper_body(
             loop_ctl: None,
             hoisted_counts: HashMap::new(),
             cow_flags: HashMap::new(),
+            cow_prejudged: HashSet::new(),
             in_tail: false,
             try_see_through: false,
             branch_depth: 0,
