@@ -678,6 +678,9 @@ impl Emitter<'_> {
                 }
             }
             IrExprKind::IndexAccess { object, index } => self.lower_index_access(object, index)?,
+            // Refused ON PURPOSE (C-268: a typed hole carries no cross-target
+            // promise), reachable or not — the durable E082 repro pins this.
+            IrExprKind::Todo { .. } => return unsup("expr:Todo"),
             other => return unsup(&format!("expr:{}", expr_kind_name(other))),
         };
         Ok(got)

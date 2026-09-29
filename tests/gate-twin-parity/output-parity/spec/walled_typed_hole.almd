@@ -1,0 +1,14 @@
+// The WALL row: the oracle runs it and the structural wasm leg declines it — a typed
+// hole (`todo(msg)`) is `expr:Todo`: C-268 gives the holes no cross-target promise, and
+// the wasm leg refuses the whole function at build time on purpose, reachable or not
+// (emitter.rs; tests/wasm_wall_e082_test.rs pins the same refusal). The hole is never
+// reached, so the oracle prints. A lifted wall turns this into a match on both sides and
+// the ledger rows the parity test forges into STALE on both; the comparison does not care
+// which. (Until #2933 this row was a mut op through a deeper field path, which now lowers.)
+fn later(n: Int) -> Int = todo("later")
+
+fn main() -> Unit = {
+  let n = 1
+  if n > 5 then println("${later(n)}") else ()
+  println("${n}")
+}

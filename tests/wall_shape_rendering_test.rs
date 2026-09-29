@@ -47,15 +47,14 @@ fn assert_wall_marker_line(stderr: &str) {
     assert!(!reason.trim().is_empty(), "empty wall reason in marker line:\n{stderr}");
 }
 
-/// A shape the wasm leg refuses on purpose (a mut op through a deeper field
-/// path; tests/wasm_wall_e082_test.rs pins the refusal's spelling).
-const WALLED_SHAPE: &str = r#"type Inner = { xs: List[Int] }
-type Outer = { inner: Inner }
+/// A shape the wasm leg refuses on purpose (an unreachable typed hole, C-268;
+/// tests/wasm_wall_e082_test.rs pins the refusal's spelling).
+const WALLED_SHAPE: &str = r#"fn later(n: Int) -> Int = todo("later")
 
 effect fn main() -> Unit = {
-  var o = Outer { inner: Inner { xs: [1] } }
-  list.push(o.inner.xs, 2)
-  println("${list.len(o.inner.xs)}")
+  let n = 1
+  if n > 5 then println("${later(n)}") else ()
+  println("${n}")
 }
 "#;
 

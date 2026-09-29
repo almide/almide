@@ -60,9 +60,9 @@ fn the_declared_symbol_names_the_export() {
 
 #[test]
 fn a_declared_export_that_does_not_lower_refuses_the_module() {
-    // A mut op through a deeper field path: the leg refuses it on purpose
-    // (tests/wasm_wall_e082_test.rs pins the spelling).
-    let src = "type Inner = { xs: List[Int] }\ntype Outer = { inner: Inner }\n\n@export(wasm, \"grow\")\nfn grow(n: Int) -> Int = {\n  var o = Outer { inner: Inner { xs: [n] } }\n  list.push(o.inner.xs, 2)\n  list.len(o.inner.xs)\n}\n\neffect fn main() -> Unit = println(\"main\")\n";
+    // A typed hole in the export: the leg refuses it on purpose, reachable
+    // or not (C-268; tests/wasm_wall_e082_test.rs pins the spelling).
+    let src = "@export(wasm, \"grow\")\nfn grow(n: Int) -> Int = if n > 100 then todo(\"big\") else n + 1\n\neffect fn main() -> Unit = println(\"main\")\n";
     let (ok, bytes, err) = build(src);
     assert!(!ok && bytes.is_empty(), "a declared export that does not lower must refuse the build:\n{err}");
     assert!(err.contains("error[E082]") && err.contains("exported function `grow`"), "{err}");

@@ -111,10 +111,11 @@ fn tile_program_routes_to_the_structural_leg_from_provided_modules() {
 /// the whole verdict, with no second renderer behind it (#2752).
 #[test]
 fn a_declined_program_is_a_named_wall() {
-    let src = "type Inner = { xs: List[Int] }\ntype Outer = { inner: Inner }\n\neffect fn main() -> Unit = {\n  var o = Outer { inner: Inner { xs: [1] } }\n  list.push(o.inner.xs, 2)\n  println(\"${list.len(o.inner.xs)}\")\n}\n";
+    // An unreachable typed hole: refused on purpose (C-268).
+    let src = "fn later(n: Int) -> Int = todo(\"later\")\n\neffect fn main() -> Unit = {\n  let n = 1\n  if n > 5 then println(\"${later(n)}\") else ()\n  println(\"${n}\")\n}\n";
     let modules = almide_mir::pipeline::bundled_self_modules(src);
     match render_wasm_routed("main.almd", src, ModuleSource::Provided(&modules), run_form()) {
-        Err(RouteError::Wall { why }) => assert!(why.contains("list-push-nonvar"), "the wall names the leg's reason: {why}"),
+        Err(RouteError::Wall { why }) => assert!(why.contains("expr:Todo"), "the wall names the leg's reason: {why}"),
         other => panic!("expected the leg's wall, got {other:?}"),
     }
 }

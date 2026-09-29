@@ -8,12 +8,12 @@
 //! the copy-on-write field write (`lower_field_assign`) as `h.f = h.f + [v]`.
 //!
 //! The matrix lives in `spec/wasm_cross/list_push_on_record_field.almd`
-//! (C-226 / C-033). This file carries the shape the fixture cannot: the
-//! DECLARED OMISSION stays a wall (a nested path is refused, not mis-valued),
-//! pinned so that a later change that starts accepting `h.i.xs` has to say so
-//! here rather than silently widening the subset — and the negative control
-//! that a plain-var push still takes the original arm (its module bytes are
-//! unchanged by this PR, which the size ratchet pins too).
+//! (C-226 / C-033). This file carries the negative control that a plain-var
+//! push still takes the original arm (its module bytes are unchanged by this
+//! PR, which the size ratchet pins too). A nested path (`h.i.xs`) was this
+//! file's DECLARED OMISSION, pinned as a wall until #2933 lowered it through
+//! the same copy-on-write write at every level; it is now pinned as agreeing
+//! with native (the full matrix: `spec/wasm_cross/nested_field_path_mut.almd`).
 
 use std::process::Command;
 
@@ -167,15 +167,11 @@ fn a_plain_var_push_still_takes_the_original_arm() {
 }
 
 #[test]
-fn a_nested_path_receiver_is_still_refused_honestly() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let built = build(NESTED_PATH, "wasm", dir.path());
-    assert!(!built.status.success(), "a nested receiver path is outside the field-write desugar and must wall, not build");
-    let stderr = String::from_utf8_lossy(&built.stderr);
-    assert!(
-        stderr.contains("list-push-nonvar"),
-        "the refusal must name the receiver shape (list-push-nonvar), got:\n{stderr}"
-    );
+fn a_nested_path_receiver_agrees_with_native() {
+    if !wasmtime_available() {
+        return;
+    }
+    assert_eq!(agree(NESTED_PATH, "nested path").trim(), "[1]");
 }
 
 #[test]
