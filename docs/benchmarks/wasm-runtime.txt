@@ -37,7 +37,7 @@ mandelbrot            | measured         | 2.81  | 3.54 | 1.26 ab_band=100
 onebrc                | measured         | 2.14  | 4.01 | 1.87
 fft                   | measured         | 44.12 | 121.57 | 2.76
 strchurn              | measured         | 59.97 | 50.56 | 0.84
-listbuild_append      | measured         | 22.36 | 61.63 | 2.76
-listbuild_combinator  | measured         | 22.16 | 65.32 | 2.95
-listbuild_prealloc    | measured         | 22.20 | 56.06 | 2.53
+listbuild_append      | measured         | 22.61 | 64.50 | 2.85
+listbuild_combinator  | measured         | 22.70 | 67.43 | 2.97
+listbuild_prealloc    | measured         | 22.07 | 57.52 | 2.61
 mapbuild              | measured         | 5.58  | 4.57 | 0.82
