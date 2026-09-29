@@ -158,7 +158,7 @@ impl WitnessRecorder {
         }
     }
 
-    fn local_ops(&mut self, local: u32, ops: &str) -> bool {
+    fn held_ops(&mut self, local: u32, ops: &str) -> bool {
         let Some(&o) = self.obj_of_local.get(&local) else { return false };
         self.ops(o, ops);
         true
@@ -206,14 +206,14 @@ impl WitnessRecorder {
     /// share (`a`), and the value leaving the frame is the move-out
     /// (`m`) — together the transfer of one credit to the caller.
     pub fn ret_move(&mut self, local: u32) -> bool {
-        self.local_ops(local, "am")
+        self.held_ops(local, "am")
     }
 
     /// A real `$dec_flat` on the local's object (epilogue / dec-old). In
     /// dead code (after a frame replacement on this path) it is attributed
     /// (the local is known) but not recorded.
     pub fn dec_local(&mut self, local: u32) -> bool {
-        self.local_ops(local, "d")
+        self.held_ops(local, "d")
     }
 
     /// A frame-ending edge (a `return_call`) finished its releases: nothing
@@ -241,7 +241,7 @@ impl WitnessRecorder {
     /// A droppable Var argument at a call site: the site's `rc_inc` is
     /// the share (`a`), and the credit moves into the callee (`m`).
     pub fn arg_share_move(&mut self, local: u32) -> bool {
-        self.local_ops(local, "am")
+        self.held_ops(local, "am")
     }
 
     /// A fresh temporary handed to a callee: born here, consumed there.
