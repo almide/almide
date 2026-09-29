@@ -494,6 +494,7 @@
 1	0	1	0	spec/wasm_cross/mut_scalar_param_reassign.almd
 15	6	169	9	spec/wasm_cross/mutable_global_bytes_arena.almd
 10	0	76	1	spec/wasm_cross/mutable_global_bytes_copy_from.almd
+52	2	704	7	spec/wasm_cross/mutable_global_field_mut_arg.almd
 4	0	32	2	spec/wasm_cross/mutable_global_repeat_writes.almd
 1	0	16	1	spec/wasm_cross/mutable_global_scalar_assign.almd
 37	31	116	37	spec/wasm_cross/mutual_append.almd

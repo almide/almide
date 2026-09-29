@@ -8,7 +8,7 @@ call-arg:EmptyMap	1
 call-arg:If	3
 call-arg:Lambda	48
 call-arg:Match	4
-call-arg:Member	7
+call-arg:Member	8
 call-arg:OptionSome	1
 call-arg:Record	2
 call-arg:StringInterp	8
@@ -55,7 +55,7 @@ scan	3
 stmt:Assign	11
 stmt:BindDestructure	16
 stmt:Comment	164
-stmt:Expr:Block	77
+stmt:Expr:Block	78
 stmt:Expr:ForIn	53
 stmt:Expr:If	25
 stmt:Expr:Match	2
@@ -90,4 +90,4 @@ tail:TupleIndex	4
 tail:UnOp	1
 tail:UnwrapOr	14
 tail:While	4
-top-lets	28
+top-lets	29
