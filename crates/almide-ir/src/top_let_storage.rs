@@ -16,7 +16,7 @@
 
 use std::collections::HashMap;
 use almide_lang::types::Ty;
-use crate::{IrExpr, IrExprKind, BinOp, TopLetKind, VarId, VarInfo, VarTable, IrTopLet};
+use crate::{IrExpr, IrExprKind, TopLetKind, VarId, VarInfo, VarTable, IrTopLet};
 
 /// Copy-ness classes — ONE predicate for what today is four divergent ones
 /// (walker `Int|Float|Bool`, pass_clone heap-ness, RcCow exclusion,
@@ -166,25 +166,19 @@ pub fn static_name(vi: &VarInfo) -> String {
     }
 }
 
-/// THE abortability predicate (today: integer `/` or `%`, which abort on a
-/// zero divisor / MIN÷-1). Owned here so the native eager-force decision and
-/// any future wasm init decision share one rule.
+/// May evaluating this initializer do anything observable — abort, print, or
+/// anything else a call can do? Then native forces it at main entry, in
+/// `global_init_order`, the moment wasm evaluates every initializer (C-007).
+///
+/// The rule is `almide_ir::speculation`'s: an initializer that is not
+/// speculation-safe is not allowed to move, and a lazy that is first read
+/// mid-main (or never) would move it. This used to be its own shallower copy
+/// of the trap rules — only a DIRECT integer `/` or `%` — so an initializer
+/// that aborted or printed THROUGH a call ran lazily on native and eagerly on
+/// wasm: `let H = half(0)` never aborted natively, and `let X = noisy()`
+/// printed after main's first line instead of before it (#2954).
 pub fn init_can_abort(expr: &IrExpr) -> bool {
-    use crate::visit::{IrVisitor, walk_expr};
-    struct Finder { found: bool }
-    impl IrVisitor for Finder {
-        fn visit_expr(&mut self, e: &IrExpr) {
-            if self.found { return; }
-            if matches!(&e.kind, IrExprKind::BinOp { op: BinOp::DivInt | BinOp::ModInt, .. }) {
-                self.found = true;
-                return;
-            }
-            walk_expr(self, e);
-        }
-    }
-    let mut f = Finder { found: false };
-    f.visit_expr(expr);
-    f.found
+    !crate::speculation::is_speculation_safe(expr)
 }
 
 use std::collections::HashSet;
@@ -837,5 +831,15 @@ mod tests {
         // global (var1), so var1 still comes first. Both are present exactly once.
         assert_eq!(order.len(), 2);
         assert!(order.contains(&VarId(0)) && order.contains(&VarId(1)));
+    }
+
+    /// #2954: an initializer that CALLS is forced at startup like one that
+    /// divides; a literal or a read of another global is not. One rule with
+    /// the inliner and LICM (`crate::speculation`).
+    #[test]
+    fn an_initializer_that_calls_is_forced_like_one_that_divides() {
+        assert!(init_can_abort(&call_mod("m", "noisy")));
+        assert!(!init_can_abort(&lit()));
+        assert!(!init_can_abort(&var(0)));
     }
 }
