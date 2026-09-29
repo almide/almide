@@ -1,1 +1,2 @@
+expects_code = "E001"
 expects_error = "operator '-' requires a signed numeric type but got String"
