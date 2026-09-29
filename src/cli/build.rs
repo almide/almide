@@ -167,10 +167,8 @@ pub fn cmd_build(args: BuildArgs) {
         // The knob rides a render-scoped guard, not a params thread-through:
         // the whole CLI runs on the one `almide-main` worker thread, so the
         // thread-local is exactly as scoped as this call.
-        let _cap = heap_cap.map(almide_mir::heap_cap::HeapCapGuard::set);
-        // #1729: the structural leg's twin — the cap becomes the emitted
-        // memory's declared maximum (it silently ignored the knob before).
-        let _cap_structural = heap_cap.map(almide_wasm::heap_cap::HeapCapGuard::set);
+        // #1729: the cap becomes the emitted memory's declared maximum.
+        let _cap = heap_cap.map(almide_wasm::heap_cap::HeapCapGuard::set);
         cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified, wasm_opt, component, host);
         return;
     }
@@ -490,12 +488,12 @@ fn cmd_build_wasi_rustc(rs_code: &str, output: &str) {
 /// `--host js` (#2265): write `<mod>.js` + `<mod>.d.ts` next to the module
 /// (a refusal removes the module too, so a failed build leaves nothing) and
 /// return the note the `Built` line appends.
-fn write_js_host(output: &str, file: &str, bytes: &[u8], surface: &crate::cli::js_host::HostSurface, structural: bool) -> String {
+fn write_js_host(output: &str, file: &str, bytes: &[u8], surface: &crate::cli::js_host::HostSurface) -> String {
     let base = output.strip_suffix(".wasm").unwrap_or(output);
     let (js_path, dts_path) = (format!("{base}.js"), format!("{base}.d.ts"));
     let wasm_name = std::path::Path::new(output).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| output.to_string());
     let owned = almide_wasm::host_exports::export_param_owned();
-    let (js, dts) = match crate::cli::js_host::generate(&wasm_name, file, bytes, surface, structural, &owned) {
+    let (js, dts) = match crate::cli::js_host::generate(&wasm_name, file, bytes, surface, &owned) {
         Ok(g) => g,
         Err(message) => {
             let _ = std::fs::remove_file(output);
@@ -534,36 +532,31 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     let default_output = format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"));
     let output = output.unwrap_or(&default_output);
     // `--host js` (#2265): the compiler writes the JS host next to the
-    // module. Both legs export their allocator + release under the guard,
-    // and the structural leg notes which exported params the callee owns.
+    // module. The module exports its allocator + release under the guard,
+    // and the emitter notes which exported params the callee owns.
     let js_host = js_host_requested(host, component);
-    let _js_structural = js_host.then(almide_wasm::host_exports::JsHostGuard::set);
-    let _js_incumbent = js_host.then(almide_mir::host_exports::JsHostGuard::set);
+    let _js_host = js_host.then(almide_wasm::host_exports::JsHostGuard::set);
 
     // The whole parse→check→lower→emit pipeline lives in `compile_to_wasm_bytes`
     // so `almide run --target wasm` produces the byte-identical module this
     // command writes — the cross-target equivalence guarantee depends on both
     // entry points sharing one code path. Any compile diagnostic was already
     // printed there; we just propagate the exit.
-    let (bytes, structural, host_ops, surface) = match compile_to_wasm_bytes_surfaced(file, allow_unverified, verified, true, false) {
+    let (bytes, host_ops, surface) = match compile_to_wasm_bytes_surfaced(file, allow_unverified, verified, true, false) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };
-    // The structural leg's module imports `almide.*` (the embedded host's
-    // surface). A BUILD artifact must run on stock runtimes, so it ships in
+    // The module imports `almide.*` (the embedded host's surface). A BUILD artifact must run on stock runtimes, so it ships in
     // the WASI form — same index space, shimmed imports, proc_exit on trap
     // (the #1588 transform; the 578-fixture stock-wasmtime gate is its
     // reproduction witness).
-    // `--component` on the STRUCTURAL leg (#1628 stage 1): the DIRECT p2
-    // path — canonical-ABI imports straight off the almide.* module, no
-    // preview1 adapter (~25 KB lighter, and the only shape the stage-2
-    // fan/async lowering can build on). `ALMIDE_COMPONENT_ADAPTER=1` is
-    // the reversible switch back to the stage-0 adapter wrap; the
-    // incumbent leg stays on the adapter path (its module is already
-    // p1-shaped).
-    let direct_p2 = component
-        && structural
-        && !almide_base::env::flag("ALMIDE_COMPONENT_ADAPTER");
+    // `--component` (#1628 stage 1): the DIRECT p2 path — canonical-ABI
+    // imports straight off the almide.* module, no preview1 adapter (~25 KB
+    // lighter, and the only shape the stage-2 fan/async lowering can build
+    // on). `ALMIDE_COMPONENT_ADAPTER=1` is the switch back to the stage-0
+    // adapter wrap over the `to_wasi` module (#2752 keeps it: the adapter
+    // route is also what an fs program takes below).
+    let direct_p2 = component && !almide_base::env::flag("ALMIDE_COMPONENT_ADAPTER");
     // `ALMIDE_COMPONENT_P3=1` (#1628 stage 2, experimental): the WASI 0.3
     // component — stdio over component-model streams on the async
     // canonical ABI. Needs a p3-capable runtime (wasmtime 46+); stays an
@@ -606,20 +599,15 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
             }
         }
     } else {
-        let bytes = if structural {
-            match almide_wasm_run::wasi::to_wasi(&bytes, &host_ops) {
-                Ok(w) => w,
-                Err(e) => {
-                    err(&format!("error: WASI transform failed — this is an Almide bug: {e}"));
-                    std::process::exit(1);
-                }
+        let bytes = match almide_wasm_run::wasi::to_wasi(&bytes, &host_ops) {
+            Ok(w) => w,
+            Err(e) => {
+                err(&format!("error: WASI transform failed — this is an Almide bug: {e}"));
+                std::process::exit(1);
             }
-        } else {
-            bytes
         };
-        // Stage-0 adapter wrap (the incumbent leg's component form, and
-        // the structural leg's reversible fallback): the WASI core module
-        // + the Cargo-pinned preview1 adapter. Packaging, not a rewrite.
+        // Stage-0 adapter wrap: the WASI core module + the Cargo-pinned
+        // preview1 adapter. Packaging, not a rewrite.
         if component {
             match wrap_component(&bytes) {
                 Ok(c) => c,
@@ -640,7 +628,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     }
     // The JS host is derived from the bytes that SHIP (#2276): after the
     // optional `wasm-opt` rewrite below, never from the pre-opt module.
-    let host_from_shipped = |shipped: &[u8]| if js_host { write_js_host(output, file, shipped, &surface, structural) } else { String::new() };
+    let host_from_shipped = |shipped: &[u8]| if js_host { write_js_host(output, file, shipped, &surface) } else { String::new() };
 
     // The trust-spine ships the bytes ITS OWN rendering process produced —
     // reachability DCE and the name-section trim already ran inside that
@@ -656,21 +644,17 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // v1-verified even for structural output), and that opacity cost real
     // diagnosis time — a "wasm doesn't work" report cannot be split
     // between legs without it.
-    let leg = match (structural, component) {
-        (true, false) => "structural leg",
-        (false, false) => "incumbent v1 leg",
-        (true, true) if direct_p3 => "structural leg, WASI 0.3 component (direct, async ABI)",
-        (true, true) if direct_p2 => "structural leg, WASI 0.2 component (direct)",
-        (true, true) => "structural leg, WASI 0.2 component (adapter)",
-        (false, true) => "incumbent v1 leg, WASI 0.2 component (adapter)",
+    let leg = match component {
+        false => "structural leg",
+        true if direct_p3 => "structural leg, WASI 0.3 component (direct, async ABI)",
+        true if direct_p2 => "structural leg, WASI 0.2 component (direct)",
+        true => "structural leg, WASI 0.2 component (adapter)",
     };
-    // The trust word belongs to the leg that earned it. The incumbent's bytes
-    // carry the per-function ownership certificate the kernel-proven checker
-    // re-verifies; the structural leg is trusted end to end with its
-    // certificate PENDING (#1696, docs/contracts/proven-vs-trusted.md). This
-    // line printed `verified` for both, which attached the word to output no
-    // certificate covered — #2154's run-time trap shipped under it (#2184).
-    let trust = if structural { "trusted, certificate pending" } else { "verified" };
+    // The trust word belongs to what earned it: the structural leg is
+    // trusted end to end with its certificate PENDING (#1696,
+    // docs/contracts/proven-vs-trusted.md). `verified` on output no
+    // certificate covers is how #2154's run-time trap shipped (#2184).
+    let trust = "trusted, certificate pending";
     if !wasm_opt {
         let host_note = host_from_shipped(&bytes);
         err(&format!(
@@ -1047,85 +1031,65 @@ fn check_no_native_only_matrix(ir_program: &almide::ir::IrProgram) -> Result<(),
     Ok(())
 }
 
-/// The commissioned wasm leg (Stage 2 switchover): route between the
-/// structural emitter (`almide::wasm_leg` + `almide_wasm::emit_program`,
-/// the greenfield engine — measured 610/610 byte-identical to native on
-/// the full wasm_cross corpus) and the incumbent WAT trust-spine.
+/// The wasm leg (#2752: the only one): the structural emitter
+/// (`almide::wasm_leg` + `almide_wasm::emit_program`).
 ///
 /// The routing rules live in `almide::wasm_route::route_wasm` (#2554) — ONE
 /// implementation the CLI and library consumers (the playground) share; this
 /// wrapper reads the probe switches off the environment
 /// (`RouteOptions::from_env`), narrates under `ALMIDE_VERIFIED_DEBUG`, and
-/// renders every refusal exactly as the CLI always did. The docs of the
-/// tiers, the handovers and the switches are on that module.
+/// renders every refusal.
 ///
-/// The second tuple field is true when the STRUCTURAL leg produced the
-/// bytes (they import `almide.*` and run on the embedded host; the build
-/// path converts them with `to_wasi` for stock runtimes).
+/// The bytes import `almide.*` and run on the embedded host; the build path
+/// converts them with `to_wasi` for stock runtimes.
 fn render_wasm_module_routed(
     file: &str,
     source_text: &str,
     library_ok: bool,
     inputs: almide::wasm_route::RouteInputs,
     dep_paths: &[(project::PkgId, std::path::PathBuf)],
-) -> Result<(Vec<u8>, bool, Vec<i32>), ()> {
+) -> Result<(Vec<u8>, Vec<i32>), ()> {
     use almide::wasm_route::{route_wasm, ModuleSource, RouteOptions};
     let opts = RouteOptions::from_env(library_ok);
     let mut trace = |line: &str| err(line);
     match route_wasm(file, source_text, ModuleSource::Disk { dep_paths }, Some(inputs), opts, &mut trace) {
-        Ok(module) => {
-            let structural = module.structural();
-            Ok((module.bytes, structural, module.host_ops))
-        }
+        Ok(module) => Ok((module.bytes, module.host_ops)),
         Err(e) => {
-            report_route_error(e, source_text, library_ok);
+            report_route_error(e, file, library_ok);
             Err(())
         }
     }
 }
 
-/// The CLI rendering of a route refusal — the diagnostics the route used to
-/// print inline, unchanged in text and order.
-fn report_route_error(e: almide::wasm_route::RouteError, source_text: &str, library_ok: bool) {
+/// The CLI rendering of a route refusal.
+fn report_route_error(e: almide::wasm_route::RouteError, file: &str, library_ok: bool) {
     use almide::wasm_route::RouteError;
     match e {
         RouteError::Front(why) => err(&format!("error: {why}")),
-        // #1997: a `scoped` region is an OBLIGATION the structural leg honours
-        // (crates/almide-wasm/src/region.rs); the incumbent renderer has no
-        // declared-region lowering, so a route that lands there would drop the
-        // boundary silently. Refuse the route instead — on every path that
-        // would hand the program to the incumbent, forced or rerouted.
-        RouteError::RegionCannotReroute { why } => {
-            err(&format!(
-                "error: this program declares a `scoped` region, which only the structural wasm leg honours — {why}"
-            ));
-            err("  note: the incumbent renderer has no declared-region lowering, so the build is refused rather than shipped without the boundary");
+        // #2752: said by the route itself — no leg is needed to refuse it.
+        RouteError::NoMain => {
+            err(&format!("error: `almide run --target wasm` needs a `main` function, and {file} declares none"));
+            err(&format!("  hint: `almide build {file} --target wasm` builds a main-less library module (its `pub fn`s become exports)"));
         }
-        RouteError::StructuralForcedWall { why } => {
-            err(&format!("error: structural leg walled under ALMIDE_WASM_STRUCTURAL ({why})"));
+        // E082 (#1922, one leg since #2752): the structural leg declined the
+        // program and there is no second renderer to hand it to.
+        RouteError::Wall { why } => {
+            err(&format!("error[E082]: the wasm target cannot lower this program: {why}"));
             report_structural_wall_site();
-        }
-        RouteError::Incumbent { error, structural_wall } => {
-            report_incumbent_error(error, source_text);
-            if let Some(why) = structural_wall {
-                // #1690: BOTH legs refused. The incumbent just printed its own wall
-                // above — without these lines the DEFAULT leg's reason is invisible,
-                // and the reader bisects a function the structural leg lowers fine
-                // for a reason that belongs to the other engine.
-                err(&format!("wall (structural leg, the default): {why}"));
-                report_structural_wall_site();
-                // #1922: the both-legs refusal is a named diagnostic. `almide check
-                // --target wasm` runs this same routing and surfaces it at check
-                // time; the build path stays the backstop.
-                err("error[E082]: both wasm legs refused this program — the failure above these lines is the incumbent fallback's; the structural leg's own reason is the `wall (structural leg…)` line.");
-                if library_ok {
-                    err("  note: this is the stock-WASI BUILD route; `almide run --target wasm` (the embedded host serves every op) may still run it. `almide check --target wasm` reports this verdict with the same two reasons.");
-                }
+            if library_ok {
+                err("  note: this is the stock-WASI BUILD route; `almide run --target wasm` (the embedded host serves every op) may still run it");
             }
+            err("  note: `almide check --target wasm` reports this verdict at check time; the native target (`--target rust`) is unaffected");
+            // The one machine-readable line in a wall's stderr: `wall:
+            // <reason>`, whitespace-flattened to stay a single line. The
+            // nightly fuzzer's honest-wall classifier keys on
+            // crate::WASM_WALL_MARKER (tests/wall_shape_rendering_test.rs pins
+            // it); the human lines above may be reworked freely.
+            let reason_one_line = why.split_whitespace().collect::<Vec<_>>().join(" ");
+            err(&format!("{}{reason_one_line}", crate::WASM_WALL_MARKER));
         }
-        // E083 (#1996): a compiler ownership defect is NOT rerouted around —
-        // the incumbent would ship a program the checked plan says leaks,
-        // and the message must never tell the writer to change valid code.
+        // E083 (#1996): a compiler ownership defect — the message must never
+        // tell the writer to change valid code.
         RouteError::OwnershipLowering(d) => err(&d.to_string()),
     }
 }
@@ -1139,113 +1103,14 @@ fn report_structural_wall_site() {
     }
 }
 
-/// The incumbent renderer's refusal, rendered: an honest wall through the
-/// Diagnostic machinery (#931) plus the one machine-readable `wall:` line,
-/// or the two "this is an Almide bug" forms.
-fn report_incumbent_error(e: almide::wasm_route::IncumbentError, source_text: &str) {
-    use almide::wasm_route::IncumbentError;
-    match e {
-        IncumbentError::InvalidWasm { message, offset, site } => {
-            // Unconditional emit-time validation (the grain pattern:
-            // Binaryen `Module.validate` or die). `wat` ASSEMBLES without
-            // full stack-shape validation, so a renderer bug that types
-            // out (e.g. almide#1431's i32/i64 mismatch) would otherwise
-            // ship invalid bytes and surface as a wasmtime translation
-            // error at load — a runtime failure wearing the runner's
-            // vocabulary. The route validates before the name section is
-            // stripped, so the wall names the offending function.
-            err(&format!(
-                "error: emitted wasm failed validation — this is an Almide bug: {message} \
-                 (offset {offset:#x}, in {site})"
-            ));
-            err(
-                "  hint: please file this with the source that triggered it: \
-                 https://github.com/almide/almide/issues",
-            );
-        }
-        IncumbentError::UnparsableWat(e) => {
-            err(&format!("error: the v1 renderer produced unparsable WAT — this is an Almide bug: {e}"));
-        }
-        IncumbentError::Lower(e) => {
-            // The reason renders through `LowerError`'s Display — one readable
-            // sentence, however deep the wall nested — never the `{:?}` form,
-            // whose per-level `Unsupported("…")` wrappers and escaped quotes
-            // were the worst diagnostic in the compiler (#931). A wall whose
-            // construction site had a span renders through the Diagnostic
-            // machinery — source line, caret, the works — so the user sees
-            // WHERE the shape lives, not just what it is. A KNOWN WallShape
-            // additionally headlines the construct in surface-language
-            // vocabulary and hints its documented rewrite; the raw reason —
-            // compiler-internal vocabulary and all — moves to a trailing
-            // `note:` where it still serves a bug report.
-            if let Some(span) = e.span() {
-                let shape = e.shape();
-                let (message, hint, reason_note) =
-                    match (shape.headline(), shape.rewrite_hint()) {
-                        (Some(headline), Some(rewrite)) => {
-                            (headline.to_string(), rewrite.to_string(), Some(e.reason()))
-                        }
-                        _ => (
-                            e.reason().to_string(),
-                            "the unverified v0 wasm emitter was retired (#782): a wall is an \
-                             honest error instead of a silent fallback. If this names a missing \
-                             capability, please file it with the source shape that triggered it: \
-                             https://github.com/almide/almide/issues"
-                                .to_string(),
-                            None,
-                        ),
-                    };
-                let mut d = crate::diagnostic::Diagnostic::error(
-                    message,
-                    hint,
-                    "the verified wasm render (v1 trust spine) — this shape is not yet in its subset",
-                );
-                d.line = Some(span.line);
-                d.col = Some(span.col);
-                if span.end_col > span.col {
-                    d.end_col = Some(span.end_col);
-                }
-                let mut rendered =
-                    crate::diagnostic_render::display_with_source(&d, source_text);
-                if let Some(reason) = reason_note {
-                    rendered.push_str(&format!(
-                        "\n  note: {reason}\n  note: if the rewrite does not apply, file the \
-                         source shape that triggered this: \
-                         https://github.com/almide/almide/issues"
-                    ));
-                }
-                err(&rendered);
-            } else {
-                err(&format!(
-                    "error: this program shape is not yet supported by the verified wasm renderer\n\n  \
-                     {e}\n\n  \
-                     The unverified v0 wasm emitter was retired (#782): a wall is an honest error\n  \
-                     instead of a silent fallback. If this names a missing capability, please file\n  \
-                     it with the source shape that triggered it:\n  \
-                     https://github.com/almide/almide/issues"
-                ));
-            }
-            // The one machine-readable line in a wall's stderr, on BOTH render
-            // paths: `wall: <reason>`, whitespace-flattened to stay a single
-            // line. The nightly fuzzer's honest-wall classifier keys on
-            // crate::WASM_WALL_MARKER (shared through its `almide` path-dep) —
-            // the human diagnostic above may be reworked freely, this line may
-            // not (tests/wall_shape_rendering_test.rs pins it).
-            let reason_one_line =
-                e.to_string().split_whitespace().collect::<Vec<_>>().join(" ");
-            err(&format!("{}{reason_one_line}", crate::WASM_WALL_MARKER));
-        }
-    }
-}
-
-pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<(Vec<u8>, bool, Vec<i32>), ()> {
-    compile_to_wasm_bytes_surfaced(file, allow_unverified, verified, library_ok, embedded_leg).map(|(b, s, o, _)| (b, s, o))
+pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<(Vec<u8>, Vec<i32>), ()> {
+    compile_to_wasm_bytes_surfaced(file, allow_unverified, verified, library_ok, embedded_leg).map(|(b, o, _)| (b, o))
 }
 
 /// [`compile_to_wasm_bytes`] plus the program's host-visible surface (the
 /// `pub fn` exports, the `@extern(wasm, ..)` imports, whether `main` exists),
 /// read from the IR before routing — what `--host js` marshals (#2265).
-pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<(Vec<u8>, bool, Vec<i32>, crate::cli::js_host::HostSurface), ()> {
+pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<(Vec<u8>, Vec<i32>, crate::cli::js_host::HostSurface), ()> {
     let (mut program, source_text, mut resolved, dep_paths) = parse_and_resolve_wasm(file)?;
     // ALMIDE_WASM_ALLOC_COUNT (#2407): arm the structural leg's allocation
     // counters for this emission — the wasm twin of `arm_alloc_count`. The
@@ -1270,53 +1135,26 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
 
     // Routing inputs (`RouteInputs::of_ir`, the one rule): project shape,
     // decided from what the v0 gates already computed — never from a
-    // failure. `@export`-attributed fns must survive as wasm exports (the
-    // DCE-root contract, wasm_export_dce_root_test) — the structural leg has
-    // no export mode yet (#1598's sibling surface), so those modules stay on
-    // the incumbent leg.
+    // failure. `@export`-attributed fns survive as wasm exports under their
+    // declared names (the DCE-root contract, wasm_export_dce_root_test).
     let inputs = almide::wasm_route::RouteInputs::of_ir(&ir_program);
     let surface = crate::cli::js_host::HostSurface::of(&ir_program);
     // #2276: the allocator/release exports ship only for a surface that
-    // marshals a String — decided here, before either leg renders.
+    // marshals a String — decided here, before the module renders.
     if almide_wasm::host_exports::js_host() {
-        let string_abi = surface.needs_string_abi();
-        almide_wasm::host_exports::set_string_abi(string_abi);
-        almide_mir::host_exports::set_string_abi(string_abi);
+        almide_wasm::host_exports::set_string_abi(surface.needs_string_abi());
     }
-    // #1921 CLOSED: the module-level host-variant import scan is GONE. Host
-    // routing is decided from the EMITTED op set, not from import names:
-    // the structural leg lowers the program, and `render_wasm_module_routed`
-    // audits the host ops it emitted against the p1 shim's served set on the
-    // BUILD path (`library_ok`) — an fs op the `to_wasi` transform cannot
-    // serve reroutes the whole module to the incumbent's WASI rendering,
-    // while `almide run --target wasm` (the embedded host serves every op)
-    // and the direct p3 component (its shim carries the fs surface) keep the
-    // structural module. `process` fns have no structural surface and wall
-    // at lowering, taking the same verified-to-verified reroute. Before
-    // this, `import fs` / `import process` unconditionally denied the
-    // structural leg — including on the run path, where it served the
-    // program end to end — and an fs program whose only fs use was inside a
-    // `!`-consumed `fan.map` built on NEITHER leg.
-    // #1598 CLOSED as per-fn auto-flip: the matrix/io module pre-scan is
-    // GONE. The linked surfaces (io.read_all via the host's op-31 drain
-    // joined io.print/write/write_bytes/read_n_bytes; the measured matrix
-    // arms) lower structurally; anything still unlinked (the qwen/llama
-    // matrix long tail, io.read_line/read_byte) WALLS at lowering and the
-    // tier-2 verified-to-verified reroute hands it to the incumbent — so
-    // every future linked fn flips its own route with no hand-mirrored
-    // list to drift.
-    // #1596 CLOSED: `import self as m` projects run the structural leg.
-    // The spaced globals machinery ((space, VarId) keys — separately-
-    // lowered modules each restart VarIds at 0) fixed the top-let storage
-    // misalignment; the full crossmod matrix passes on the forced
-    // structural leg, and a shape it still cannot lower (a module
-    // initializer with inner binds) walls honestly and reroutes.
-    // #1997: a `scoped { … }` block was outlined into a marked entry fn; its
-    // region is an obligation only the structural leg honours
-    // (`inputs.declared_region`).
+    // Host routing is decided from the EMITTED op set, never from import
+    // names (#1921): `render_wasm_module_routed` audits the host ops the
+    // module emits against the p1 shim's served set on the BUILD path
+    // (`library_ok`) — an op the `to_wasi` transform cannot serve is a wall
+    // there, while `almide run --target wasm` (the embedded host serves every
+    // op) and the direct p3 component (its shim carries the fs surface) keep
+    // the module. An unlinked stdlib fn walls at lowering (#1598), so every
+    // newly linked fn flips its own verdict with no hand-mirrored list.
     let _ = (&mut ir_program, allow_unverified, verified);
     render_wasm_module_routed(file, &source_text, library_ok, inputs, &dep_paths)
-        .map(|(b, s, o)| (b, s, o, surface))
+        .map(|(b, o)| (b, o, surface))
 }
 
 /// Run `wasm-opt -Oz` on the output file, in-place.

@@ -507,6 +507,10 @@ fn emit_program_pass(
     // pub fn). An entry-program fn exports when its WHOLE call closure
     // lowers; one that (transitively) hits an unlowered body is simply not
     // exported — main-reachable strictness above is untouched.
+    // `@export(wasm, "sym")` (#2752) names the export `sym` instead of the
+    // fn's own name, and makes the export an obligation: a declared export
+    // that does not lower refuses the module in either form, never ships an
+    // artifact silently missing the entry point its host calls.
     let mut export_fns: Vec<(String, u32)> = Vec::new();
     for (i, (f, qual, _space)) in program_fns.iter().enumerate() {
         let name = f.name.as_str();
@@ -519,17 +523,29 @@ fn emit_program_pass(
         {
             continue;
         }
+        let declared = f.export_attrs.iter().find(|a| a.target.as_str() == "wasm").map(|a| a.symbol.to_string());
+        let export_name = declared.clone().unwrap_or_else(|| name.to_string());
         let (sub, err, site) = reach(vec![i], Vec::new());
         if let Some(reason) = &err
-            && library
+            && (library || declared.is_some())
         {
             crate::decline_site::set(site);
             return unsup(&format!("exported function `{name}` cannot be lowered: {reason}"));
         }
         if err.is_none() {
+            // A second export of one name is an invalid module — a wall,
+            // never a silent dedup (the name is the host's contract).
+            // `memory`, `main` and the `__`-prefixed runtime exports are the
+            // module's own.
+            let reserved = matches!(export_name.as_str(), "memory" | "main") || export_name.starts_with("__");
+            if reserved || export_fns.iter().any(|(e, _)| *e == export_name) {
+                return unsup(&format!(
+                    "duplicate wasm export name `{export_name}` (fn `{name}`) — two exports claim it, which is an invalid module"
+                ));
+            }
             visited.extend(sub);
-            export_fns.push((name.to_string(), table.infos[i].wasm_index));
-            crate::host_exports::note_export(name, table.infos[i].param_owned.clone());
+            crate::host_exports::note_export(&export_name, table.infos[i].param_owned.clone());
+            export_fns.push((export_name, table.infos[i].wasm_index));
         }
     }
 
