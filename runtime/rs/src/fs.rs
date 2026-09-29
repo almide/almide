@@ -176,6 +176,8 @@ pub fn almide_rt_fs_fold_lines_chunked<A: Clone + Send, F: Fn(A, String) -> A + 
             ranges.push((s, (s + chunk).min(size)));
         }
     }
+    // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
+    almide_stdout_flush();
     std::thread::scope(|scope| {
         let f = &f;
         let handles: Vec<_> = ranges
