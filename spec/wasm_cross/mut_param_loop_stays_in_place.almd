@@ -1,0 +1,35 @@
+// @contract: C-131, C-132
+// A `mut`-parameter call in a loop keeps writing ONE buffer (#3104): the
+// C-132 write-back `{ let __mp_buf = push_xs(xs, i); xs = __mp_buf }` now
+// MOVES the returned buffer's credit into `xs` instead of sharing it. As a
+// share, the temp kept a second credit until the next iteration, so the
+// call-site copy-on-write judge (#2503) saw rc 2 and copied the whole
+// buffer on every call: 1000 pushes of an Int allocated 1009 blocks and
+// 4 MB on the wasm leg. With the move the count stays 1, every push lands
+// in place, and the blocks allocated grow with the buffer's doublings
+// (the alloc-count ledger pins them). An alias bound before the loop still
+// keeps its value (C-033): the first call copies, the rest stay in place.
+fn push_xs(mut xs: List[Int], v: Int) -> Unit = {
+  list.push(xs, v)
+}
+
+fn push_b(mut b: Bytes, v: Int) -> Unit = {
+  bytes.push(b, v % 256)
+}
+
+effect fn main() -> Unit = {
+  var xs: List[Int] = []
+  for i in 0..<1000 {
+    push_xs(xs, i)
+  }
+  var b = bytes.new(0)
+  for i in 0..<1000 {
+    push_b(b, i)
+  }
+  var ys: List[Int] = [7]
+  let held = ys
+  for i in 0..<100 {
+    push_xs(ys, i)
+  }
+  println("${list.len(xs)} ${list.sum(xs)} ${bytes.len(b)} ${list.len(ys)} ${held}")
+}

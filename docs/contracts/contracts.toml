@@ -1778,6 +1778,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/loop_buffer_churn.almd", class = "fixture" },
   { path = "spec/wasm_cross/loop_push_trailing_increment.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_loop_stays_in_place.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-132"
@@ -1803,6 +1804,7 @@ evidence  = [
   { path = "spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_nested_place_writeback.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_interpolated.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_loop_stays_in_place.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-133"
