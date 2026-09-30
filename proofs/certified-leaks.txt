@@ -1,0 +1,19 @@
+# CERTIFIED FIXTURES THAT STILL LEAK — written by `almide-gates certified-leaks --update`.
+# The join of crates/almide-wasm/tests/golden/witness-fixtures.txt (every frame of the
+# shipped pass certified) and crates/almide-wasm/tests/golden/live-at-exit-baseline.txt
+# (blocks live at exit): the leak is inside a TRUSTED native arm or runtime helper the
+# ownership witness does not record. SHRINK-ONLY; a new row needs an OPEN owning issue.
+# blocks<TAB>issue<TAB>fixture
+35	#2968	spec/wasm_cross/bytes_copy_within_offset_domain.almd
+4	#2977	spec/wasm_cross/bytes_string_window_domain.almd
+2	#2975	spec/wasm_cross/heap_result_tuple_return.almd
+2	#2977	spec/wasm_cross/io_write_ordering.almd
+1	#2975	spec/wasm_cross/json_stringify_pretty.almd
+9	#2977	spec/wasm_cross/list_flatten_borrow.almd
+1	#2977	spec/wasm_cross/list_float_equality_family.almd
+4	#2974	spec/wasm_cross/matrix_head_count_domain.almd
+12	#2969	spec/wasm_cross/option_tuple_payload_matrix.almd
+1	#2971	spec/wasm_cross/or_pattern.almd
+2	#2971	spec/wasm_cross/or_pattern_guarded_nullary.almd
+1	#2971	spec/wasm_cross/result_default_and_passthrough.almd
+1	#2973	spec/wasm_cross/string_interp_large_hole.almd
