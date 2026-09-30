@@ -596,14 +596,20 @@ fn fs_walk_sorted(root: &str) -> (i64, Vec<u8>) {
     }
 }
 
-/// The host-environment ops (26+): env/args/entropy — split from
-/// The env.set overlay (op 37): process-wide, matching native's
-/// process-level setenv scope — one `almide test` process shares it
-/// across files exactly as one native process shares its environ.
-fn env_overlay() -> &'static Mutex<std::collections::HashMap<String, String>> {
-    use std::sync::OnceLock;
-    static OVERLAY: OnceLock<Mutex<std::collections::HashMap<String, String>>> = OnceLock::new();
-    OVERLAY.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+/// The env.set overlay (op 37), scoped to ONE run: a native program's
+/// `setenv` lives as long as its process, and every native test file is its
+/// own process, so a run is the unit here too. It is thread-local because a
+/// run executes on the thread that called `run_wasm_*` (the guest call is
+/// synchronous), and `run_wasm_src` clears it before the module starts —
+/// `almide test` runs many files in one process, concurrently on worker
+/// threads and one after another on each (#3046), and a process-wide map let
+/// one file's `env.set` leak into every later file's `env.get`.
+fn with_env_overlay<R>(f: impl FnOnce(&mut std::collections::HashMap<String, String>) -> R) -> R {
+    thread_local! {
+        static OVERLAY: std::cell::RefCell<std::collections::HashMap<String, String>> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    OVERLAY.with(|o| f(&mut o.borrow_mut()))
 }
 
 /// fs_dispatch_meta for the complexity budget.
@@ -699,7 +705,7 @@ fn fs_dispatch_env(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         // process-level setenv makes a later get observe the set, and the
         // overlay reproduces that observable without std::env::set_var
         // (unsafe under threads — the wasmtime host runs multi-threaded).
-        26 => match env_overlay().lock().expect("env overlay").get(a).cloned() {
+        26 => match with_env_overlay(|o| o.get(a).cloned()) {
             Some(v) => ok_text(v),
             None => match std::env::var(a) {
                 Ok(v) => ok_text(v),
@@ -719,7 +725,7 @@ fn fs_dispatch_env(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         // env.set (#1423 bucket C ruling): key in a, value in b.
         37 => {
             let v = String::from_utf8_lossy(b).to_string();
-            env_overlay().lock().expect("env overlay").insert(a.to_string(), v);
+            with_env_overlay(|o| o.insert(a.to_string(), v));
             (pack(0, 0), Vec::new())
         }
         27 => ok_text(std::env::consts::OS.to_string()),
@@ -836,7 +842,8 @@ fn harness_watchdog() -> std::time::Duration {
 }
 
 /// `run_wasm` WITHOUT the epoch watchdog — the timing runner
-/// (`almide bench --target wasm`, #2150). The watchdog is test-harness
+/// (`almide bench --target wasm`, #2150) and the wasm leg of `almide test`
+/// (#3046), which runs a test file to completion as its native twin does. The watchdog is test-harness
 /// equipment, and it is not free: epoch interruption makes wasmtime check
 /// the epoch at every loop header and function entry, which measured 1.9x
 /// on mandelbrot's inner loop and 1.2x on fft (same module, `wasmtime run`
@@ -890,6 +897,7 @@ fn run_wasm_src(
     live: bool,
 ) -> anyhow::Result<RunResult> {
     wasmparser::validate(bytes)?; // the wall: never instantiate an invalid module
+    with_env_overlay(|o| o.clear()); // a fresh environ per run, as per process
     // Epoch deadline (test harness only, see `harness_watchdog`): the
     // deadline maps to a plain trap.
     let mut cfg = wasmtime::Config::new();
