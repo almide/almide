@@ -491,6 +491,8 @@ impl Emitter<'_> {
                 "float_to_string",
                 "float_to_string_compound",
                 "float_to_fixed",
+                // float `%` (#3080): wasm has no float remainder op.
+                "float_fmod",
                 "int_to_string",
                 // Dragon4's own dependency closure (prim-only bodies).
                 "math_log",

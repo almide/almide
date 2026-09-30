@@ -192,6 +192,15 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
             ctx.templates.render_with("mod_int", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("almide_mod!({}, {})", l, r))
         }
+        // C-371: `**` on Float32 is the f64 pow of the widened operands,
+        // rounded once to binary32 — the operands met the f64-only
+        // `almide_rt_math_fpow` bare and rustc refused the build (#3082).
+        BinOp::PowFloat if matches!(left.ty, Ty::Float32) || matches!(right.ty, Ty::Float32) => {
+            let (lw, rw) = (format!("(({l}) as f64)"), format!("(({r}) as f64)"));
+            let pow = ctx.templates.render_with("power_expr", Some("Float"), &[], &[("left", lw.as_str()), ("right", rw.as_str())])
+                .unwrap_or_else(|| format!("pow(_, _)"));
+            format!("(({pow}) as f32)")
+        }
         BinOp::PowFloat => {
             ctx.templates.render_with("power_expr", Some("Float"), &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("pow(_, _)"))

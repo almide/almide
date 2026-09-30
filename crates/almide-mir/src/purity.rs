@@ -87,6 +87,7 @@ pub const PURE_MODULES: &[&str] = &[
     "float_convert",
     "float_core",
     "float_extra",
+    "float_fmod",
     "float_parse",
     "float_round",
     "float_saturating",
