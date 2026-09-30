@@ -27,6 +27,7 @@ pub mod generated;
 pub mod strip_test_blocks;
 pub mod pass;
 pub mod verify_names;
+pub mod verify_temp_names;
 pub mod use_kind;
 pub mod certify_ownership;
 pub mod pass_borrow_inference;
@@ -267,6 +268,13 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
     // span-tagged diagnostic (a controlled error, not an ICE). Stage-1(iv) of
     // the correctness completeness roadmap.
     pass_concretize_types::assert_types_concretized(program);
+
+    // SynthesizedNameCapture (#3049): the Rust walker renders a var by its
+    // NAME, so a compiler temp read under a later temp's shared name would
+    // silently take that temp's value. Refuse to emit instead (both profiles).
+    if target == Target::Rust {
+        verify_temp_names::assert_no_captured_temps(program);
+    }
 
     // Ownership certifier (#2231): re-derive each occurrence's use from the
     // final IR and check the passes' verdicts. `ALMIDE_CERTIFY_OWNERSHIP` =
