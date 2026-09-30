@@ -11,6 +11,11 @@ use crate::*;
 #[path = "stmts_loop.rs"]
 mod stmts_loop;
 
+// Does an Assign's rhs spend the var's own credit (#2616, #3127), split for
+// the file budget.
+#[path = "stmts_spend.rs"]
+mod stmts_spend;
+
 impl Emitter<'_> {
     /// Statement position: Unit-typed shapes only (blocks, calls, control).
     /// `continue` / `break` in statement position: a branch to the loop
@@ -708,67 +713,6 @@ impl Emitter<'_> {
                 }
                 self.empty_moved_temp(moved);
                 Ok(())
-    }
-}
-
-impl Emitter<'_> {
-    /// Does the rhs of `var = rhs` spend `var`'s own credit, so the Assign
-    /// must NOT release the old occupant? (#2616)
-    ///
-    /// * A NON-call rhs never does: `data = data + [x]` (the append loop's
-    ///   ConcatList) READS the old block and builds a fresh one; skipping
-    ///   the dec leaked every outgrown generation, and a 65k-append loop
-    ///   exhausted the 4 GiB address space in a quarter second (#1729).
-    /// * A MODULE call never does (arm-aware, #2010 item 4): a native arm
-    ///   declares Borrow (reads it) or Retain (+1 share), the registry route
-    ///   incs an owned position and passes a borrowed one as is — and the
-    ///   RC-5 inc already made an aliasing result (`s = set.insert(s, x)`'s
-    ///   present path) its own credit.
-    /// * A program-fn call spends it only through a `mut` parameter: the
-    ///   C-132 write-back hands the var to a callee that may reallocate it
-    ///   in place and returns the buffer the var is rebound to. Any other
-    ///   position leaves the local's credit where it was — a BORROWED param
-    ///   (#2028) takes no share and the callee releases nothing, an OWNED
-    ///   one takes the site's +1 (`rc_arg_guard`) and its exit plan releases
-    ///   exactly that. Skipping the dec there leaked every old value of
-    ///   `m = g(m, r)`: 1.6 GB over 20k steps of a list accumulator.
-    ///   A var mentioned INSIDE an argument (`g(h(m), r)`) keeps the
-    ///   conservative skip: the nested call's convention is not read here.
-    /// * A runtime helper (`xs = $push(xs, v)`) consumes its operand.
-    fn assign_rhs_spends_var(&self, value: &IrExpr, var: VarId) -> bool {
-        use almide_ir::CallTarget;
-        let call = match &value.kind {
-            IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => expr.as_ref(),
-            _ => value,
-        };
-        let mentions = || crate::rc_ownership::rc_mentions_var(call, var);
-        match &call.kind {
-            IrExprKind::Call { target: CallTarget::Module { .. }, .. } => false,
-            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
-                let name = name.as_str();
-                let resolved = if self.is_variant_ctor(name, call) { None } else { self.resolve_named_fn(name) };
-                let Some(i) = resolved else { return mentions() };
-                let param_mut = &self.table.infos[i].param_mut;
-                args.iter().enumerate().any(|(k, a)| match &a.kind {
-                    IrExprKind::Var { id } if *id == var => param_mut.get(k).copied().unwrap_or(true),
-                    _ => crate::rc_ownership::rc_mentions_var(a, var),
-                })
-            }
-            // A CLOSURE call shares a Var argument (`rc_arg_guard`, calls.rs)
-            // and the lifted body releases its params at its own exit plan,
-            // so a direct Var argument leaves the local's credit where it
-            // was: `acc = f(acc, x)` releases the old `acc` like any Assign
-            // (#2977 — every step of a closure accumulator loop kept it).
-            IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. } => {
-                crate::rc_ownership::rc_mentions_var(callee, var)
-                    || args.iter().any(|a| match &a.kind {
-                        IrExprKind::Var { id } if *id == var => false,
-                        _ => crate::rc_ownership::rc_mentions_var(a, var),
-                    })
-            }
-            IrExprKind::Call { .. } | IrExprKind::RuntimeCall { .. } => mentions(),
-            _ => false,
-        }
     }
 }
 
