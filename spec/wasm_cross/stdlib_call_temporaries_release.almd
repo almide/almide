@@ -1,0 +1,59 @@
+// @contract: C-162, C-335, C-013
+// Stdlib calls and the temporaries around them release what they build on
+// the structural wasm leg (#2977): the byte buffer `io.write_bytes` hands the
+// sink, the Option `string.ends_with` reads its verdict from, the byte slice
+// each `bytes.read_length_prefixed_strings_le` entry is decoded from, the
+// string a `path.stem` join answers beside a borrowed arm (an `if` whose
+// owned arm is a module call), a `match` value consumed by a concatenation
+// or an interpolation, a record a destructuring `let` reads its fields out
+// of, and — at exit — the keyed-lookup index's side table a map past 16
+// entries allocates (the runtime's own block, released with the top-lets
+// when the measurement is armed). Stdout pins the values and the raw-write
+// ordering; the live-at-exit ledger pins that nothing stays live.
+import io
+import path
+
+type Pt = { x: Int, tag: String }
+
+fn mk(i: Int) -> Pt = Pt { x: i, tag: "t" + int.to_string(i) }
+
+fn stem_or(name: String, full: Bool) -> String = if full then name else path.stem(name)
+
+fn kind(n: Int) -> String = match n % 3 {
+  0 => "zero" + int.to_string(n),
+  1 => "one",
+  _ => "two" + int.to_string(n),
+}
+
+effect fn main() -> Unit = {
+  io.write_bytes([104, 105, 10])
+  println("after write_bytes")
+  let hit = if string.ends_with("report.txt", ".txt") then "T" else "F"
+  let miss = if string.ends_with("a", ".txt") then "T" else "F"
+  println("ends=" + hit + miss)
+  let buf = bytes.from_list([
+    1,
+    0,
+    0,
+    0,
+    97,
+    2,
+    0,
+    0,
+    0,
+    98,
+    99
+  ])
+  let names = bytes.read_length_prefixed_strings_le(buf, 0, 5)
+  println("lps=" + list.join(names, "|"))
+  let stems = [stem_or("a.tar.gz", false), stem_or(".bashrc", false), stem_or("keep.me", true)]
+  println("stem=" + list.join(stems, " "))
+  println("match=" + kind(3) + "/" + kind(4) + " ${kind(5)}")
+  let { x, tag } = mk(7)
+  println("destructure=" + int.to_string(x) + tag)
+  var m: Map[Int, Int] = map.new()
+  for i in 0..<40 {
+    m[i * 7] = i
+  }
+  println("indexed=" + int.to_string(map.get_or(m, 21, -1)) + " size=" + int.to_string(map.len(m)))
+}

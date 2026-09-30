@@ -1,0 +1,26 @@
+// @contract: C-285
+// `regex.captures` builds its answer in a self-tail loop over an accumulator
+// (`__rx_caps_out(.., acc + [x])`) inside a body that reads the capture
+// buffer through raw addresses. Under the raw-address rule such a frame's
+// loop-back released nothing, so every intermediate accumulator stayed live
+// (#2976). The loop-back now releases each owned parameter no raw address
+// can be derived from (the accumulator), and keeps the ones one can; the
+// captures are the same list either way. Stdout pins index 0 as the whole
+// match and `none` as no match; the live-at-exit ledger pins the release.
+import regex
+
+fn show(o: List[String]?) -> String = match o {
+  some(xs) => "[" + string.join(xs, "|") + "]",
+  none => "NONE",
+}
+
+fn main() -> Unit = {
+  println(show(regex.captures("(a*)*", "")))
+  println(show(regex.captures("(\\d+)-(\\d+)-(\\d+)", "on 2026-09-30 ok")))
+  println(show(regex.captures("(x)(y)?(z)", "xz")))
+  println(show(regex.captures("q+", "abc")))
+  for _ in 0..<50 {
+    let _ = regex.captures("(a)(b)(c)(d)", "abcd")
+  }
+  println(show(regex.captures("(a)(b)(c)(d)", "zabcd")))
+}

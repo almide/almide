@@ -1,0 +1,61 @@
+// @contract: C-101
+// The list ops over heap elements release every block they build for
+// themselves, on the structural wasm leg as natively (#2977): the Option
+// `list.contains` reads its verdict from, the intermediate spines of
+// `list.flatten` and of a `list.flat_map` over handle chunks, each owned
+// chunk and each owned Option a `flat_map` / `filter_map` callback hands
+// back, the seen-key list of `list.unique_by` and every repeated String key,
+// the element `list.update` replaces and the value `list.set` drops out of
+// range, and the old accumulator of `acc = f(acc, x)` through a closure.
+// Each of them stayed live until exit; stdout cannot see that, the
+// live-at-exit ledger does. Borrowed callback results (a captured list, a
+// captured Option) stay their holder's.
+type Ev = { key: String, val: String }
+
+fn fold_with(f: (String, String) -> String, n: Int) -> String = {
+  var acc = "s"
+  var i = 0
+  while i < n {
+    acc = f(acc, "x")
+    i = i + 1
+  }
+  acc
+}
+
+fn long_ev(k: String) -> Ev? = if string.len(k) > 1 then some({ key: k, val: "long" })
+else none
+
+fn keep_long(keys: List[String]) -> List[Ev] = keys |> list.filter_map((k) => {
+  let e = long_ev(k)
+  e
+})
+
+fn b2s(b: Bool) -> String = if b then "T" else "F"
+
+fn main() -> Unit = {
+  let words = ["ab", "x", "cd", "ab"]
+  println("contains=" + b2s(list.contains(words, "cd")) + b2s(list.contains(words, "zz")))
+  let nested = [
+    ["a", "b"],
+    [],
+    ["c"]
+  ]
+  println("flatten=" + list.join(list.flatten(nested), ","))
+  let doubled: List[String] = words |> list.flat_map((w) => [w + "!", w])
+  let captured = ["c1", "c2"]
+  let repeated: List[String] = ["1", "2"] |> list.flat_map((w) => captured)
+  println("flat_map=" + list.join(doubled, ",") + " / " + list.join(repeated, ","))
+  let evs = keep_long(words)
+  println("filter_map=" + list.join(evs |> list.map((e) => e.key + ":" + e.val), ","))
+  let fallback: String? = some("q")
+  let fb = words |> list.filter_map((w) => fallback)
+  println("filter_map_borrowed=" + list.join(fb, ","))
+  let by_len = list.unique_by(words, (w) => int.to_string(string.len(w)))
+  println("unique_by=" + list.join(by_len, ","))
+  let updated = list.update(words, 1, (w) => w + w + "!")
+  println("update=" + list.join(updated, ","))
+  let set_in = list.set(words, 0, "zz" + "!")
+  let set_out = list.set(words, 9, "never" + "!")
+  println("set=" + list.join(set_in, ",") + " / " + list.join(set_out, ","))
+  println("fold=" + fold_with((a, b) => a + b, 4))
+}
