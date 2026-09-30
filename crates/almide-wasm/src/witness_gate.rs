@@ -292,11 +292,53 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
         // position, the call itself (an owned carrier). A call typed with
         // its raw payload (a move-mode effect call, mut_param.rs) has an
         // ABI carrier no hook sees: declined.
+        IrExprKind::UnwrapOr { .. } | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } | IrExprKind::RuntimeCall { .. } => {
+            extraction_or_rt_subset(e)
+        }
+        other => Some(Why::Here(tag(other))),
+    }
+}
+
+/// The runtime prims `lower_budget_prim` lowers (fuel.rs): the RC-free
+/// quartet of the deterministic meter and the wall-deadline trio.
+const METER_PRIMS: &[&str] = &[
+    "almide_rt_prim_budget_enter",
+    "almide_rt_prim_budget_exit",
+    "almide_rt_prim_budget_exhausted",
+    "almide_rt_prim_budget_spend",
+    "almide_rt_prim_timeout_enter",
+    "almide_rt_prim_timeout_exit",
+    "almide_rt_prim_timeout_hit",
+];
+
+/// The extraction forms (`??`, `!`, `?`) and runtime calls, split from
+/// [`value_subset`] for the complexity budget.
+fn extraction_or_rt_subset(e: &IrExpr) -> Option<Why> {
+    match &e.kind {
+        // `r ?? fallback`: a two-arm branch site over the carrier (data.rs,
+        // `witness_unwrap_or_arm`). The carrier must be a bound local
+        // (arg_temps.rs names a produced one), the fallback runs on its arm.
+        IrExprKind::UnwrapOr { expr, fallback } => {
+            if !matches!(crate::rc_ownership::rc_tail(expr).kind, IrExprKind::Var { .. }) {
+                return Some(Why::Here(format!("UnwrapOr-carrier:{}", tag(&crate::rc_ownership::rc_tail(expr).kind))));
+            }
+            value_subset(expr).or_else(|| value_subset(fallback).map(|w| w.inside("fallback")))
+        }
         IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => match &expr.kind {
             IrExprKind::Var { .. } => None,
             IrExprKind::Call { .. } if carrier_ty(&expr.ty) => call_subset(expr).map(|w| w.inside("unwrap-operand")),
             _ => Some(Why::Here(tag(&e.kind))),
         },
+        // The deterministic-meter / wall-deadline prims (fuel.rs
+        // `lower_budget_prim`): scalar in, scalar out, globals only — no RC
+        // site of their own. Their scalar arguments are ordinary values.
+        IrExprKind::RuntimeCall { symbol, args } if METER_PRIMS.contains(&symbol.as_str()) => {
+            match args.iter().find(|a| !scalar_ty(&a.ty)) {
+                Some(a) => Some(Why::Here(format!("RuntimeCall:{symbol}:heap-arg:{}", tag(&a.kind)))),
+                None => args.iter().find_map(|a| value_subset(a).map(|w| w.inside("rt-arg"))),
+            }
+        }
+        IrExprKind::RuntimeCall { symbol, .. } => Some(Why::Here(format!("RuntimeCall:{symbol}"))),
         other => Some(Why::Here(tag(other))),
     }
 }

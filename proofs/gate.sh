@@ -492,6 +492,16 @@ run_structural spec/wasm_cross/witness_straightline.almd total 0
 tamper_structural bang '4s/^im$/i/' "#2755 callback element"
 tamper_structural kept '3s/^im$/i/' "#2755 filtered spine"
 
+# ── #2755: `r ?? fallback`, a two-arm branch site with an owned join. The
+# borrowed param holds no credit (an empty line); the fresh fallback moves
+# into the join on the none arm (`{|im}`), the payload view takes its share
+# and moves on the some arm (`{|am}`), the join moves out (`im`). Drill: the
+# fallback never reaches the join.
+echo
+echo "== structural leg, unwrap-or  ⊳  proven checker (#2755) =="
+run_structural spec/wasm_cross/witness_straightline.almd or_zero 0
+tamper_structural or_zero 's/^{|im}$/{|i}/' "#2755 unwrap-or fallback"
+
 # ── #2758: MODULE-SPACE LETS. main's prologue stores each top-let into its
 # global: `ALPHA`'s literal moves in (`im`); `TBL`'s initializer (a
 # `bytes.from_list` result, line 3) is copied into the global (`im`) and

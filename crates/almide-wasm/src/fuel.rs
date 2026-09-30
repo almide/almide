@@ -265,6 +265,7 @@ impl Emitter<'_> {
         if !self.metered {
             return;
         }
+        self.witness_cut_exit();
         let mut i = self.f.instructions();
         i.global_get(G_DET_DEPTH);
         i.if_(BlockType::Empty);

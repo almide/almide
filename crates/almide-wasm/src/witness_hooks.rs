@@ -141,6 +141,54 @@ impl Emitter<'_> {
         }
     }
 
+    /// One arm of `r ?? fallback` (data.rs, #2970), right after the arm's
+    /// value is on the stack: a branch site of two arms (#2756). `fallback`
+    /// is `Some` on the none / err arm, `None` on the payload arm. An OWNED
+    /// join hands the join one credit from each arm: the fresh fallback moves
+    /// (`im`), the payload view takes the `rc_inc_top` and moves (`am`). A
+    /// borrowed join leaves both arms views (no site), unless the fallback is
+    /// an owned value the join does not take: that block has no owner here,
+    /// so the frame declines.
+    pub(crate) fn witness_unwrap_or_arm(&mut self, e: &almide_ir::IrExpr, fallback: Option<&almide_ir::IrExpr>, et: SliceTy) {
+        if self.witness.is_none() || !self.rc_droppable(et) {
+            return;
+        }
+        let almide_ir::IrExprKind::UnwrapOr { fallback: fb, .. } = &e.kind else { return };
+        let owned_join = self.unwrap_or_owns_join(e, fb, et);
+        match (fallback, owned_join) {
+            (Some(f), true) => self.witness_share_or_move(f, "unwrap-or:fallback"),
+            // A string literal / `none` / a named fn is a pool static the RC
+            // ops no-op on: a borrowed arm like any view.
+            (Some(f), false)
+                if self.rc_owned_result(f)
+                    && !matches!(
+                        f.kind,
+                        almide_ir::IrExprKind::LitStr { .. } | almide_ir::IrExprKind::OptionNone | almide_ir::IrExprKind::FnRef { .. }
+                    ) =>
+            {
+                self.witness_decline("unwrap-or:unowned-fresh-fallback")
+            }
+            (None, true) => {
+                if let Some(w) = self.witness.as_mut() {
+                    w.view_share_move();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The fuel meter's CUT (fuel.rs `emit_det_cut_check`): when a region's
+    /// fuel runs out, the frame returns its type's zero on the spot, without
+    /// the exit plan. A frame that owns a droppable local or param at that
+    /// point leaves it unreleased on that path (#3072, a leak measured on the
+    /// cut), which no hook records: the frame declines. A frame that owns
+    /// nothing there has no RC site on the cut path at all.
+    pub(crate) fn witness_cut_exit(&mut self) {
+        if self.witness.is_some() && (!self.rc_owned.is_empty() || !self.rc_frame_params.is_empty()) {
+            self.witness_decline("meter:cut-exit-unreleased");
+        }
+    }
+
     /// A record field the literal omits, filled from its declaration default
     /// (data.rs), called BEFORE the default lowers: the gate never saw that
     /// expression, so only a literal — no site but the slot store, which

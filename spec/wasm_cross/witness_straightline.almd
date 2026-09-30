@@ -166,6 +166,12 @@ fn kept(xs: List[String]) -> List[String] = list.filter(xs, (s) => string.len(s)
 
 fn total(xs: List[String]) -> Int = list.fold(xs, 0, (acc, s) => acc + string.len(s))
 
+// #2755 — `r ?? fallback` is a two-arm branch site: an owned join takes one
+// credit from each arm. `or_zero`'s fresh fallback moves into the join on the
+// none arm (`{|im}`), the payload view takes its share and moves on the some
+// arm (`{|am}`), and the join itself moves out (`im`).
+fn or_zero(o: List[Int]?) -> List[Int] = o ?? [0]
+
 effect fn main() -> Unit = {
   println("${list.len(shed())} ${tag("w")} ${pass([1])} ${bind_then_pass()}")
   println("${discard([1, 2])} ${stamp(7)} ${shout("w")}")
@@ -179,4 +185,5 @@ effect fn main() -> Unit = {
   println("${plus([3])} ${apply_len(plus, [4, 5])}")
   println("${left(pair("x"))} ${hello("y")}")
   println("${bang(["a", "bc"])} ${kept(["a", "bc"])} ${total(["a", "bc"])}")
+  println("${or_zero(some([1, 2]))} ${or_zero(none)}")
 }
