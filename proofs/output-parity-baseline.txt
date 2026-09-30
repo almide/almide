@@ -174,6 +174,7 @@ spec/wasm_cross/closure_accumulator.almd
 spec/wasm_cross/closure_borrowed_arg_guard.almd
 spec/wasm_cross/closure_captured_list_mutation.almd
 spec/wasm_cross/closure_captured_map_records.almd
+spec/wasm_cross/closure_captured_record_field_mutation.almd
 spec/wasm_cross/closure_reads_var_written_by_mut_call.almd
 spec/wasm_cross/closure_rich_list_capture.almd
 spec/wasm_cross/closure_scalar_captures.almd
@@ -292,6 +293,8 @@ spec/wasm_cross/fan_worker_abort_keeps_stdout.almd
 spec/wasm_cross/filter_map_conditional_arm.almd
 spec/wasm_cross/flat_map_aliased_field.almd
 spec/wasm_cross/flight_pid_control.almd
+spec/wasm_cross/float32_arithmetic_rounds.almd
+spec/wasm_cross/float32_display_shortest.almd
 spec/wasm_cross/float32_literal_excess_precision.almd
 spec/wasm_cross/float_clamp_invalid.almd
 spec/wasm_cross/float_clamp_negative_zero.almd
@@ -590,7 +593,12 @@ spec/wasm_cross/mut_param_effect_can_err.almd
 spec/wasm_cross/mut_param_effect_never_err.almd
 spec/wasm_cross/mut_param_effect_unpropagated.almd
 spec/wasm_cross/mut_param_err_write_visible.almd
+spec/wasm_cross/mut_param_global_callee_sees_precall.almd
+spec/wasm_cross/mut_param_global_no_reach_in_place.almd
+spec/wasm_cross/mut_param_interpolated.almd
+spec/wasm_cross/mut_param_loop_stays_in_place.almd
 spec/wasm_cross/mut_param_move_mode_gaps.almd
+spec/wasm_cross/mut_param_nested_place_writeback.almd
 spec/wasm_cross/mut_param_spread_reassign.almd
 spec/wasm_cross/mut_param_tail_recursion.almd
 spec/wasm_cross/mut_param_writeback_growth.almd
@@ -598,6 +606,7 @@ spec/wasm_cross/mut_scalar_param_reassign.almd
 spec/wasm_cross/mutable_global_bytes_arena.almd
 spec/wasm_cross/mutable_global_bytes_copy_from.almd
 spec/wasm_cross/mutable_global_field_mut_arg.almd
+spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd
 spec/wasm_cross/mutable_global_repeat_writes.almd
 spec/wasm_cross/mutable_global_scalar_assign.almd
 spec/wasm_cross/mutator_writeback_releases_old_block.almd
