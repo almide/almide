@@ -57,7 +57,12 @@ fn bench_native(file: &str, runs: u32, args: &[String]) {
         }
     };
     err("bench: building native release binary…");
-    let bin = match super::run::build_native_cached(&rs_code, false, true, None, &[], None) {
+    // The package's `[native-deps]` and `native/` modules (its own and its
+    // dependencies'), resolved exactly as `almide run` / `almide build`
+    // resolve them. Passing none made any package with a native module fail
+    // to build under `bench` alone (#3095).
+    let (native_deps, source_root) = super::load_native_build_config(file);
+    let bin = match super::run::build_native_cached(&rs_code, false, true, None, &native_deps, source_root.as_deref()) {
         Ok(b) => b,
         Err(e) => {
             err(&format!("Compile error:\n{e}"));
