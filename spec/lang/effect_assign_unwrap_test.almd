@@ -33,7 +33,7 @@ effect fn annotated_let_keeps() -> Int = {
 
 effect fn index_assign_unwraps() -> Int = {
   var xs = [0, 0]
-  xs[0] = step(10)
+  xs[0] = step(10)!
   list.get(xs, 0) ?? -1
 }
 
