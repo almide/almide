@@ -33,6 +33,7 @@ mod exit_literal;
 mod bang_error_channel;
 mod lambda_channel;
 mod intrinsic_authority;
+mod prim_wrappers;
 mod exhaustiveness;
 mod call_defaults;
 
@@ -1172,6 +1173,7 @@ impl Checker {
         self.validate_protocol_refs(program);
         self.validate_bare_type_visibility(program);
         self.body_diag_start = self.diagnostics.len();
+        self.reject_user_prim_import(&program.imports);
         for decl in program.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();

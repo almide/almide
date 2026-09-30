@@ -470,6 +470,7 @@ impl Checker {
     /// Resolve a module.func Member expression to a qualified call key.
     fn resolve_module_call(&mut self, object: &ast::Expr, field: &str) -> Option<String> {
         if let ExprKind::Ident { name: module, .. } = &object.kind {
+            self.reject_user_prim(module, &sym(field), object.span);
             if let Some(canonical) = self.env.import_table.resolve(module) {
                 self.env.import_table.mark_used(module);
                 let key = format!("{}.{}", canonical, field);
