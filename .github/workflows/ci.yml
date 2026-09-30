@@ -1639,6 +1639,10 @@ jobs:
 
       - name: LLM-surface fences compile (#1483 — every \`\`\`almide check fence passes almide check)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-llm-surface.sh
+      - name: Spec test files check and are run by a runner (#3065)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-spec-test-files.sh
+      - name: Spec test files gate negative control (#3065)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-spec-test-files-negative.sh
 
       - name: Intrinsic boundary (#1468 — every @intrinsic target has a provider)
         run: bash scripts/check-intrinsic-boundary.sh
