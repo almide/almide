@@ -32,6 +32,7 @@ impl Checker {
         self.validate_implicit_propagation();
         self.lint_error_surface(program);
         self.check_bounded_profile(program);
+        self.check_concurrent_var_reach(program);
         self.check_scoped(program);
     }
 

@@ -211,9 +211,16 @@ pub fn cmd_compile(module: Option<&str>, json: bool, dry_run: bool, output_dir: 
         .then(|| project::parse_toml(std::path::Path::new("almide.toml")).ok())
         .flatten()
         .map(|p| p.package.version);
-    let iface = almide::interface::extract_with_version(
+    let mut iface = almide::interface::extract_with_version(
         &ir, &module_name, Some(&source_text), pkg_version.as_deref(),
     );
+    // E008's cross-package facts (ADR-0020 §3.3) ride in the interface.
+    for (name, concurrent, reaches) in checker.concurrent_fn_facts(&program) {
+        if let Some(f) = iface.functions.iter_mut().find(|f| f.name == name) {
+            f.concurrent = concurrent;
+            f.reaches_var = reaches;
+        }
+    }
 
     let mode = if json {
         CompileOutputMode::Json

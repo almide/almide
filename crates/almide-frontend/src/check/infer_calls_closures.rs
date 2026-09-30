@@ -239,18 +239,8 @@ impl Checker {
                 "Mark the enclosing function as `effect fn`",
                 "fan block".to_string()).with_code("E007"));
         }
-        // Check for mutable variable capture
-        let mutable_captures: Vec<String> = exprs.iter().flat_map(|e| {
-            let mut idents = Vec::new();
-            collect_idents(e, &mut idents);
-            idents.into_iter().filter(|name| self.env.mutable_vars.contains(&sym(name))).collect::<Vec<_>>()
-        }).collect();
-        for name in &mutable_captures {
-            self.emit(super::err(
-                format!("cannot capture mutable variable '{}' inside fan block", name),
-                "Use a `let` binding instead of `var` for values shared across fan expressions",
-                "fan block".to_string()).with_code("E008"));
-        }
+        // A `var` reached from an arm is E008, judged after inference by
+        // `check_concurrent_var_reach` over every concurrent slot (#2697).
         let tys: Vec<Ty> = exprs.iter_mut().map(|e| {
             let ty = self.infer_expr(e);
             // Auto-unwrap Result: fan unwraps Result<T, E> to T

@@ -10,6 +10,9 @@ pub mod deprecation;
 pub mod attr_vocab;
 pub mod stdlib;
 pub mod bundled_sigs;
+/// E008 generalized (ADR-0020 §3): no `var` reachable from a concurrent body.
+pub mod concurrent_reach;
+pub mod concurrent_reach_types;
 
 /// The one implementation of integer-literal decoding.
 mod literals;

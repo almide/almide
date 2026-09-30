@@ -162,6 +162,10 @@ pub struct TypeEnv {
     /// (self submodules load under bare names, dep submodules under
     /// `dep.sub` dotted names).
     pub dep_root_modules: std::collections::HashSet<Sym>,
+    /// E008 (ADR-0020 §3): each user module fn's inferred concurrent slots and
+    /// whether its body reaches a `var` — computed over the resolved module
+    /// set at canonicalization, read by every program's reach check.
+    pub concurrent_summaries: crate::concurrent_reach::Summaries,
     /// The package's own module name (set when `register_module` is called with `is_self: true`).
     /// Used to resolve `import self` in the main file.
     pub self_module_name: Option<Sym>,
@@ -303,6 +307,7 @@ impl TypeEnv {
             constructors: std::collections::HashMap::new(),
             user_modules: std::collections::HashSet::new(),
             dep_root_modules: std::collections::HashSet::new(),
+            concurrent_summaries: std::collections::HashMap::new(),
             self_module_name: None,
             import_table: ImportTable::new(),
             fn_visibility: std::collections::HashMap::new(),
