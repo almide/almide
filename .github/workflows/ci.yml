@@ -784,6 +784,17 @@ jobs:
           ALMIDE=/tmp/almide-bin/almide
           $ALMIDE run tools/almide-gates/src/main.almd -- impl-count .
 
+      # The certified fixtures that still leak through a trusted native arm or runtime
+      # helper (#2755): the join of the witness and live-at-exit goldens, pinned in
+      # proofs/certified-leaks.txt. Shrink-only, and a row stands only while its owning
+      # issue is OPEN (read with gh — UNMEASURED fails here, under CI).
+      - name: Certified fixtures that still leak, each owned by an open issue (#2755)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ALMIDE=/tmp/almide-bin/almide
+          $ALMIDE run tools/almide-gates/src/main.almd -- certified-leaks .
+
       # The published build-speed table is DERIVED from docs/benchmarks/build-speed.txt, the
       # same discipline as the contract index and the claims block: a hand-edited number in the
       # README is a defect this catches rather than a change a reader is trusted not to make.

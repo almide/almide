@@ -1,0 +1,190 @@
+// `certified-leaks` — the certified fixtures that still leak (#2755, #2758).
+//
+// A structural-witness certificate is a claim about the frames the recorder
+// records: every RC instruction the emitter wrote for them balances. It says
+// nothing about what the TRUSTED parts do inside themselves — a native arm's
+// own temporaries, a runtime helper's blocks (crates/almide-wasm/src/
+// witness_hooks.rs, the TRUSTED paragraph). So a fixture can be certified
+// (crates/almide-wasm/tests/golden/witness-fixtures.txt) and still end with
+// blocks live at exit (crates/almide-wasm/tests/golden/live-at-exit-baseline.txt).
+// Excluding those fixtures from the certified set would make the count lie in
+// the other direction; this gate makes the gap MEASURED instead.
+//
+// The ledger `proofs/certified-leaks.txt` is the join of the two goldens: one
+// row per certified fixture with a live-at-exit row — `blocks<TAB>#issue<TAB>fixture`,
+// the live count and owning issue copied from the live-at-exit row. This gate
+// is its only writer (`--update`). Verdicts, each a failure:
+//   - a joined row the ledger does not have: a NEW certified leak. `--update`
+//     adds it, and only when its issue is an open one (below);
+//   - a ledger row whose fixture no longer joins (fixed, or no longer
+//     certified), or whose blocks / issue differ: the ledger never sits above
+//     or beside reality — run `--update` and commit the shrink;
+//   - a row that cites no issue (`#NNNN`), or an issue that is not OPEN: a
+//     leak through a trusted internal is only ratified with a live owner.
+// Issue state is read with `gh`. Where `gh` cannot answer, the verdict is
+// UNMEASURED — a failure under CI (`CI` set), a notice elsewhere.
+import fs
+import env
+import process
+
+type Verdict = { lines: List[String], ok: Bool }
+
+type Row = { blocks: String, issue: String, fixture: String }
+
+fn rows_of(text: String) -> List[String] = string.split(text, "\n") |> list.filter((l) => string.trim(l) != "" and not string.starts_with(l, "#"))
+
+// A live-at-exit (or certified-leaks) row: `blocks<TAB>issue<TAB>fixture`.
+fn tsv_row(line: String) -> Row? = {
+  let f = string.split(line, "\t")
+  if list.len(f) != 3 then none
+  else some(Row {
+    blocks: list.get_or(f, 0, ""),
+    issue: list.get_or(f, 1, ""),
+    fixture: list.get_or(f, 2, ""),
+  })
+}
+
+fn row_line(r: Row) -> String = r.blocks + "\t" + r.issue + "\t" + r.fixture
+
+// The certified fixtures that carry a live-at-exit row, in the live ledger's order.
+fn joined(certified: List[String], live: List[Row]) -> List[Row] = live |> list.filter((r) => list.contains(certified, r.fixture))
+
+// Is `issue` spelled `#NNNN`?
+fn cites_issue(issue: String) -> Bool = string.starts_with(issue, "#") and (int.parse(string.drop(issue, 1)) ?? 0) > 0
+
+fn ledger_text(rows: List[Row]) -> String = {
+  let head = """
+    # CERTIFIED FIXTURES THAT STILL LEAK — written by `almide-gates certified-leaks --update`.
+    # The join of crates/almide-wasm/tests/golden/witness-fixtures.txt (every frame of the
+    # shipped pass certified) and crates/almide-wasm/tests/golden/live-at-exit-baseline.txt
+    # (blocks live at exit): the leak is inside a TRUSTED native arm or runtime helper the
+    # ownership witness does not record. SHRINK-ONLY; a new row needs an OPEN owning issue.
+    # blocks<TAB>issue<TAB>fixture
+
+    """
+  head + (rows |> list.map((r) => row_line(r) + "\n") |> list.join(""))
+}
+
+// Pinned vs derived: every difference, as one line each.
+fn drift(pinned: List[Row], derived: List[Row]) -> List[String] = {
+  let pinned_lines = pinned |> list.map((r) => row_line(r))
+  let derived_lines = derived |> list.map((r) => row_line(r))
+  let added = derived |> list.filter((r) => not list.contains(pinned_lines, row_line(r))) |> list.map((r) => "NEW certified leak " + r.fixture + " (" + r.blocks + " blocks, " + r.issue + ") is not in the ledger — add it with --update")
+  let stale = pinned |> list.filter((r) => not list.contains(derived_lines, row_line(r))) |> list.map((r) => "ledger row " + row_line(r) + " no longer matches the goldens — run --update (shrink-only)")
+  added + stale
+}
+
+// The rows that do not cite an issue at all.
+fn uncited(rows: List[Row]) -> List[String] = rows |> list.filter((r) => not cites_issue(r.issue)) |> list.map((r) => r.fixture + " cites no issue (`" + r.issue + "`) — file one for the leak mechanism")
+
+// The distinct issue numbers the rows cite.
+fn issues_of(rows: List[Row]) -> List[String] = rows |> list.map((r) => r.issue) |> list.filter((i) => cites_issue(i)) |> list.unique
+
+// `OPEN` / `CLOSED` from gh, or none when gh cannot answer.
+effect fn issue_state(issue: String) -> String? = {
+  let out = process.exec(
+    "gh",
+    [
+      "issue",
+      "view",
+      string.drop(issue, 1),
+      "--json",
+      "state",
+      "-q",
+      ".state"
+    ],
+  )
+  match out {
+    ok(s) => some(string.trim(s)),
+    err(_) => none,
+  }
+}
+
+// Every cited issue must be OPEN. `none` states are UNMEASURED.
+effect fn closed_or_unmeasured(rows: List[Row]) -> (List[String], List[String]) = {
+  let states = issues_of(rows) |> list.map((i) => (i, issue_state(i)!))!
+  let closed = states |> list.filter_map(((i, s)) => match s {
+    some(st) => if st == "OPEN" then none
+    else some(i + " is " + st + " but still owns a certified leak — reopen it, or re-attribute the row"),
+    none => none,
+  })
+  let unmeasured = states |> list.filter_map(((i, s)) => match s {
+    some(_) => none,
+    none => some(i),
+  })
+  (closed, unmeasured)
+}
+
+effect fn run(root: String, update: Bool) -> Verdict = {
+  let golden = root + "/crates/almide-wasm/tests/golden/"
+  let certified = rows_of(fs.read_text(golden + "witness-fixtures.txt")!)
+  let live = rows_of(fs.read_text(golden + "live-at-exit-baseline.txt")!) |> list.filter_map((l) => tsv_row(l))
+  let derived = joined(certified, live)
+  let path = root + "/proofs/certified-leaks.txt"
+  let pinned = rows_of(fs.read_text(path) ?? "") |> list.filter_map((l) => tsv_row(l))
+  let structural = if update then []
+  else drift(pinned, derived)
+  let (closed, unmeasured) = closed_or_unmeasured(derived)!
+  let in_ci = (env.get("CI") ?? "") != ""
+  let unmeasured_bad = if in_ci then unmeasured |> list.map((i) => "could not read the state of " + i + " with gh (UNMEASURED under CI)")
+  else []
+  let bad = structural + uncited(derived) + closed + unmeasured_bad
+  let notice = if in_ci or list.len(unmeasured) == 0 then []
+  else [
+    "certified-leaks: NOTICE — issue state UNMEASURED here (no gh): " + list.join(unmeasured, ", ")
+  ]
+  if list.len(bad) > 0 then Verdict {
+    lines: (bad |> list.map((b) => "::error::certified-leaks: " + b)) + ["certified-leaks: FAILED — " + int.to_string(list.len(bad)) + " finding(s) against " + path],
+    ok: false,
+  } else if update then {
+    fs.write(path, ledger_text(derived))!
+    Verdict {
+      lines: notice + ["certified-leaks: ledger rewritten — " + int.to_string(list.len(derived)) + " certified fixture(s) still leak"],
+      ok: true,
+    }
+  } else Verdict {
+    lines: notice + [
+      "certified-leaks OK: " + int.to_string(list.len(derived)) + " of " + int.to_string(list.len(certified)) + " certified fixture(s) still leak through trusted internals, " + (if list.len(unmeasured) == 0 then "each owned by an open issue" else "issue state unmeasured")
+    ],
+    ok: true,
+  }
+}
+
+test "a certified fixture with a live row joins; an uncertified one does not" {
+  let live = [
+    Row { blocks: "2", issue: "#1", fixture: "a.almd" },
+    Row { blocks: "3", issue: "#2", fixture: "b.almd" }
+  ]
+  let j = joined(["b.almd", "c.almd"], live)
+  assert_eq(j |> list.map((r) => r.fixture), ["b.almd"])
+}
+
+test "a new joined row and a stale pinned row are both findings" {
+  let pinned = [
+    Row { blocks: "5", issue: "#9", fixture: "old.almd" }
+  ]
+  let derived = [
+    Row { blocks: "2", issue: "#1", fixture: "new.almd" }
+  ]
+  let d = drift(pinned, derived)
+  assert_eq(list.len(d), 2)
+  assert(string.starts_with(list.get_or(d, 0, ""), "NEW certified leak new.almd"))
+  assert(string.contains(list.get_or(d, 1, ""), "old.almd"))
+}
+
+test "a row whose blocks moved is a finding, an identical ledger is not" {
+  let r = Row { blocks: "2", issue: "#1", fixture: "a.almd" }
+  assert_eq(drift([r], [r]), [])
+  assert_eq(list.len(drift([
+    Row { blocks: "3", issue: "#1", fixture: "a.almd" }
+  ], [r])), 2)
+}
+
+test "a row must cite #NNNN" {
+  assert(cites_issue("#2968"))
+  assert(not cites_issue("#?"))
+  assert(not cites_issue("2968"))
+  assert_eq(list.len(uncited([
+    Row { blocks: "1", issue: "#?", fixture: "a.almd" }
+  ])), 1)
+}

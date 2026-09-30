@@ -331,7 +331,7 @@ impl Emitter<'_> {
         self.f.instructions().i32_const(0).local_set(hr);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
-        self.lower(body, Some(BOOL))?;
+        self.lower_inlined_predicate(cb, body)?;
         self.f.instructions().if_(BlockType::Empty);
         self.f.instructions().i32_const(1).local_set(hr);
         self.f.instructions().br(2);
@@ -356,7 +356,7 @@ impl Emitter<'_> {
         self.f.instructions().i32_const(1).local_set(hr);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
-        self.lower(body, Some(BOOL))?;
+        self.lower_inlined_predicate(cb, body)?;
         self.f.instructions().i32_eqz().if_(BlockType::Empty);
         self.f.instructions().i32_const(0).local_set(hr);
         self.f.instructions().br(2);
@@ -382,7 +382,7 @@ impl Emitter<'_> {
         self.f.instructions().i64_const(0).local_set(hn);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
-        self.lower(body, Some(BOOL))?;
+        self.lower_inlined_predicate(cb, body)?;
         self.f.instructions().if_(BlockType::Empty);
         self.f.instructions().local_get(hn).i64_const(1).i64_add().local_set(hn);
         self.f.instructions().end();
