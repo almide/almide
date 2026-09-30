@@ -1,8 +1,8 @@
 // @contract: C-132
 // #1576: a CAN-ERR effect fn with a `mut` param takes the C-132 move-mode
-// tuple rewrite — `(T, Buf)` rides the ok payload only; the err arm carries no
-// buffer and propagates BEFORE any write-back (the ratified err-path order,
-// the same one the was-Unit form realizes). Previously this class was the
+// tuple rewrite — `(T, Buf)` rides the ok payload (since #2917 the err arm
+// carries the buffer too: see mut_param_err_write_visible.almd). Previously
+// this class was the
 // last honest wall under the DDD package tree (`mut-param:can-err-effect`).
 // Matrix — one row per payload kind the carrier admits, crossed with the
 // buffer kinds and the argument places:
@@ -15,9 +15,8 @@
 //             `mut self` (the #1622 can-err half, the DDD port spelling)
 //   err     : the last call errs before mutating; `!` propagates to main —
 //             stderr `Error: bad`, exit 1, byte-identical on both targets.
-// Not pinned here (walled on every mut-param callee, never-err included):
-// a `??`/`match` consumer of the call, the only way the caller could READ
-// its buffer after an err — see the C-132 statement for the boundary.
+// A `??`/`match` consumer of the call, the only way the caller can READ its
+// buffer after an err, is pinned in mut_param_err_write_visible.almd.
 type Box = { n: Int }
 
 type Pair = { a: Int, b: Int }
