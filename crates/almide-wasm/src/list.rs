@@ -545,6 +545,7 @@ impl Emitter<'_> {
             .local_set(rh);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        self.witness_callback_open(cb);
         // dest addr, then value, then store
         self.f
             .instructions()
@@ -558,7 +559,9 @@ impl Emitter<'_> {
         // VIEW of the source's element: the result spine is a holder and
         // takes the share here (#2010 stage 2b).
         self.rc_share_guard(body, u);
+        self.witness_store(body, u);
         self.store_ty_slot(u, 0);
+        self.witness_loop_close();
         self.hof_step(ih);
         self.f.instructions().local_get(rh);
         self.release_i32();
@@ -591,7 +594,9 @@ impl Emitter<'_> {
         self.f.instructions().i32_const(0).local_set(hw);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        self.witness_callback_open(cb);
         self.lower(body, Some(BOOL))?;
+        self.witness_loop_close();
         self.f.instructions().if_(BlockType::Empty);
         self.f
             .instructions()
@@ -643,6 +648,7 @@ impl Emitter<'_> {
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, x_p);
+        self.witness_callback_open(cb);
         self.lower(body, Some(b))?;
         // The accumulator OWNS one credit on every step: a borrowed body
         // result (a captured var, the accumulator itself) takes its share,
@@ -653,6 +659,7 @@ impl Emitter<'_> {
             self.f.instructions().local_get(acc_p).call(dec);
         }
         self.f.instructions().local_set(acc_p);
+        self.witness_loop_close();
         self.hof_step(ih);
         self.f.instructions().local_get(acc_p);
         self.release_i32();

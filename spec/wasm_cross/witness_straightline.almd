@@ -155,6 +155,17 @@ fn left(p: (String, Int)) -> String = {
 
 fn hello(name: String) -> String = "hi ${name}!"
 
+// #2755 / #2758 — an INLINED callback is one loop activation per element:
+// `bang`'s body concatenates onto its param (a view of the element), and
+// the fresh text moves into the result spine (`im` on the loop's line); the
+// spine moves out (`im`). `kept` filters on a Bool and `total` folds into a
+// scalar: their callbacks carry no RC site of their own.
+fn bang(xs: List[String]) -> List[String] = list.map(xs, (s) => s + "!")
+
+fn kept(xs: List[String]) -> List[String] = list.filter(xs, (s) => string.len(s) > 1)
+
+fn total(xs: List[String]) -> Int = list.fold(xs, 0, (acc, s) => acc + string.len(s))
+
 effect fn main() -> Unit = {
   println("${list.len(shed())} ${tag("w")} ${pass([1])} ${bind_then_pass()}")
   println("${discard([1, 2])} ${stamp(7)} ${shout("w")}")
@@ -167,4 +178,5 @@ effect fn main() -> Unit = {
   let plus = adder([1, 2])
   println("${plus([3])} ${apply_len(plus, [4, 5])}")
   println("${left(pair("x"))} ${hello("y")}")
+  println("${bang(["a", "bc"])} ${kept(["a", "bc"])} ${total(["a", "bc"])}")
 }
