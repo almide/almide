@@ -417,7 +417,10 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str("impl<T: PartialEq> PartialEq<T> for AlmideRcCow<T> { fn eq(&self, other: &T) -> bool { *self.0 == *other } }\n");
     s.push_str("impl PartialEq<&str> for AlmideRcCow<String> { fn eq(&self, other: &&str) -> bool { self.0.as_str() == *other } }\n");
     s.push_str("impl<T> std::ops::Deref for AlmideRcCow<T> { type Target = T; fn deref(&self) -> &T { &self.0 } }\n");
-    s.push_str("impl<T: Clone> std::ops::DerefMut for AlmideRcCow<T> { fn deref_mut(&mut self) -> &mut T { std::rc::Rc::make_mut(&mut self.0) } }\n");
+    // Every in-place write (`bytes.set_*`, `list.push`, ...) goes through here.
+    // `Rc::make_mut` does not inline, so the common case — the value is not
+    // shared — paid a call per write; `get_mut` is that case, inlined.
+    s.push_str("impl<T: Clone> std::ops::DerefMut for AlmideRcCow<T> { #[inline(always)] fn deref_mut(&mut self) -> &mut T { if std::rc::Rc::get_mut(&mut self.0).is_none() { return std::rc::Rc::make_mut(&mut self.0); } std::rc::Rc::get_mut(&mut self.0).unwrap() } }\n");
     s.push_str(&format!("impl<T> AlmideRcCow<T> {{ {vis}fn new(v: T) -> Self {{ AlmideRcCow(std::rc::Rc::new(v)) }} {vis}fn make_mut(&mut self) -> &mut T where T: Clone {{ std::rc::Rc::make_mut(&mut self.0) }} {vis}fn into_inner(self) -> T where T: Clone {{ std::rc::Rc::try_unwrap(self.0).unwrap_or_else(|rc| (*rc).clone()) }} }}\n"));
     s.push_str("impl<T> From<T> for AlmideRcCow<T> { fn from(v: T) -> Self { AlmideRcCow::new(v) } }\n");
     s.push_str("impl<T: std::fmt::Display> std::fmt::Display for AlmideRcCow<T> { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { self.0.fmt(f) } }\n");
