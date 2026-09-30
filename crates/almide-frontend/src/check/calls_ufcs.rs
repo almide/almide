@@ -70,7 +70,7 @@ impl Checker {
         }
         // Built-in generic types -> stdlib module UFCS
         let builtin_module = builtin_module_for_type(&obj_concrete);
-        if let Some(ty) = self.check_call_target_builtin_ufcs(builtin_module, &field, &obj_ty, arg_tys, object, args) {
+        if let Some(ty) = self.check_call_target_builtin_ufcs(builtin_module, &field, &obj_ty, arg_tys, object, args, callee_span_snapshot) {
             return ty;
         }
         if let Some(ty) = self.check_call_target_convention(&obj_concrete, &field, &obj_ty, arg_tys) {
@@ -184,12 +184,21 @@ impl Checker {
         self.validate_mut_args(name, &arg_refs);
     }
 
-    fn check_call_target_builtin_ufcs(&mut self, builtin_module: Option<&str>, field: &Sym, obj_ty: &Ty, arg_tys: &[Ty], object: &ast::Expr, arg_exprs: &[ast::Expr]) -> Option<Ty> {
+    #[allow(clippy::too_many_arguments)]
+    fn check_call_target_builtin_ufcs(&mut self, builtin_module: Option<&str>, field: &Sym, obj_ty: &Ty, arg_tys: &[Ty], object: &ast::Expr, arg_exprs: &[ast::Expr], callee_span: Option<ast::Span>) -> Option<Ty> {
         let module = builtin_module?;
         let key = format!("{}.{}", module, field);
         if self.env.functions.contains_key(&sym(&key))
             || crate::stdlib::resolve_ufcs_candidates(field).contains(&module)
         {
+            // #3085: the method spelling must warn like the direct call and
+            // the pipe stage. The callee span ends at the method name, so
+            // the name's own span is its last `len` columns (one line).
+            let method_span = callee_span.and_then(|s| {
+                let start = s.end_col.checked_sub(field.as_str().chars().count())?;
+                (start >= s.col).then_some(ast::Span { col: start, ..s })
+            });
+            self.warn_if_deprecated_method(module, field.as_str(), method_span);
             let mut all_args = vec![obj_ty.clone()];
             all_args.extend(arg_tys.iter().cloned());
             let ty = self.check_named_call(&key, &all_args);
@@ -312,7 +321,7 @@ impl Checker {
             return Some(Ty::Unknown);
         }
         // Use the *full* surface (TOML + bundled `.almd`) so fns migrated through the Stdlib Unification arc still power the E002 suggestion. `module_functions` only sees TOML, so after `stdlib/string.almd` replaced the TOML the method-call try-snippet silently disappeared.
-        let module_funcs = crate::stdlib::module_functions_all(module);
+        let module_funcs = crate::stdlib::module_functions_current(module);
         let suggestion = almide_base::diagnostic::suggest(field, module_funcs.iter().copied());
         let hint = if let Some(close) = &suggestion {
             format!(
