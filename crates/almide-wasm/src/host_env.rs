@@ -316,12 +316,15 @@ impl Emitter<'_> {
                 i.i32_store8(crate::bytes::byte_k(0));
                 i.local_get(hk).i32_const(1).i32_add().local_set(hk);
                 i.br(0).end().end();
-                i.local_get(hb);
+                // The byte buffer is this arm's own temporary: the sink
+                // reads it, then it goes (#2977 — it outlived every call).
+                i.local_get(hb).local_get(hb);
                 let _ = i;
                 for _ in 0..4 {
                     self.release_i32();
                 }
                 self.io_stdout_raw()?;
+                self.f.instructions().call(F_DEC_FLAT);
                 None
             }
             // n <= 0 → []; else read up to n stdin bytes (harness: none)

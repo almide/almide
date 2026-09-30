@@ -174,6 +174,11 @@ impl Emitter<'_> {
             .local_get(hvi);
         let _ = i;
         self.store_ty_slot(et, 0);
+        // Out of range: nothing is stored, so the value's Retain credit is
+        // this arm's to give back (#2977 — it leaked on every miss).
+        if let Some(dec) = old_dec {
+            self.f.instructions().else_().local_get(hvi).call(dec);
+        }
         self.f.instructions().end().local_get(hb);
         match hv {
             Hv::I64(_) => self.release_i64(),
@@ -420,6 +425,13 @@ impl Emitter<'_> {
         }
         let hv = self.hold_val(et)?;
         self.f.instructions().local_set(hv);
+        // The copy took a credit on the element this store replaces; it
+        // goes now, after the body (which may have returned it with its own
+        // +1 above) — #2977: every heap element `update` replaced leaked.
+        if self.elem_is_handle(et) {
+            let dec = self.dec_fn_of(et);
+            self.f.instructions().local_get(ha).i32_load(slot_memarg(0)).call(dec);
+        }
         self.f.instructions().local_get(ha).local_get(hv);
         self.store_ty_slot(et, 0);
         self.release_val(et);

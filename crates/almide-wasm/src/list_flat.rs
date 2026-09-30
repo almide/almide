@@ -105,17 +105,29 @@ impl Emitter<'_> {
             // are co-owned by the chunk, and freeing after a raw byte copy
             // needs the Dup discipline (the C-186 trap) — outside this
             // window, as in the assign-site append gate.
+            //
+            //
+            // #2977: the chunk's handles are COPIED into the accumulator, so
+            // the accumulator takes one credit per element right here (the
+            // chunk's own credits stay the chunk's — fuzz 20260912: a
+            // callback returning a captured list); an OWNED chunk is then
+            // this arm's temporary and goes with its typed drop, a borrowed
+            // one is its holder's. The outgrown accumulator is a spine whose
+            // credits moved with the concat's byte copy: its spine goes.
+            let chunk_owned = self.rc_owned_result(crate::rc_ownership::rc_tail(body));
+            let prev = self.hold_i32()?;
             self.f.instructions().local_set(hs);
-            self.f.instructions().local_get(hacc).local_get(hs).call(F_CONCAT);
+            self.emit_inc_elems(hs, self.types.el(bi));
+            self.f.instructions().local_get(hacc).local_tee(prev).local_get(hs).call(F_CONCAT);
             self.f.instructions().local_set(hacc);
+            self.f.instructions().local_get(prev).call(F_DEC_FLAT);
+            if chunk_owned {
+                let dec = self.dec_fn_of(got);
+                self.f.instructions().local_get(hs).call(dec);
+            }
+            self.release_i32();
         }
         self.hof_step(ih);
-        // Handle elements were COPIED through the concats: the result takes
-        // one credit per element (the intermediate spines leak, never
-        // dangle — fuzz 20260912: a callback returning a captured list).
-        if !matches!(self.types.el(bi), SliceTy::Scalar(Scalar::Int | Scalar::Float)) {
-            self.emit_inc_elems(hacc, self.types.el(bi));
-        }
         self.f.instructions().local_get(hacc);
         for _ in 0..5 {
             self.release_i32();
@@ -150,6 +162,14 @@ impl Emitter<'_> {
         // temporary keeps (and releases) its own credit.
         self.share_handle_top(b);
         self.f.instructions().call(push).local_set(hacc).end();
+        // ...released here when the body handed it over OWNED (a fresh
+        // `some(..)`, a call result): every element's Option block leaked
+        // (#2977). A `none` is NULL_ADDR, which the drop no-ops; a borrowed
+        // Option (a captured one) is its holder's.
+        if self.rc_owned_result(crate::rc_ownership::rc_tail(body)) {
+            let dec = self.dec_fn_of(got);
+            self.f.instructions().local_get(hr).call(dec);
+        }
         self.hof_step(ih);
         self.f.instructions().local_get(hacc);
         for _ in 0..5 {

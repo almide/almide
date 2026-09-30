@@ -24,6 +24,25 @@ pub(super) fn release_top_lets_for_measurement(em: &mut Emitter<'_>, in_main: bo
     }
 }
 
+/// The live-heap measurement's other by-design survivor: the keyed-lookup
+/// index's SIDE TABLE (map_index.rs, `G_MAPIDX`) is the runtime's own block,
+/// allocated at the first indexed lookup and kept for the program's life —
+/// every map / set drop only clears its entry. After `main`'s epilogue has
+/// released the frame (whose map drops still consult the table), the armed
+/// build frees it, so a program that indexed a map past 16 entries does not
+/// read as one leaked block (#2977). A plain `$free`, outside the E083 exit
+/// window's credit vocabulary; a no-op for a shipped module.
+pub(super) fn release_runtime_tables_for_measurement(em: &mut Emitter<'_>, in_main: bool) {
+    if !in_main || !crate::alloc_count::releases_top_lets() {
+        return;
+    }
+    let mut i = em.f.instructions();
+    i.global_get(G_MAPIDX).if_(wasm_encoder::BlockType::Empty);
+    i.global_get(G_MAPIDX).call(F_FREE);
+    i.i32_const(0).global_set(G_MAPIDX);
+    i.end();
+}
+
 /// A top-let's lowered value becomes its global's. A List / Map / Set /
 /// Bytes global holds its own COPY of the block; a fresh initializer (a
 /// literal, a call result) was the copy's source only, and is released
