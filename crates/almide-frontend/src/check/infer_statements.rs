@@ -395,7 +395,11 @@ impl Checker {
             // lifted Result[Int, E]; a Result-typed target keeps it.
             // Only substitute when the unwrap actually fires, so an
             // unresolved TypeVar RHS keeps flowing through inference.
-            let unwrapped = self.effect_unwrap_rhs_warned(val_resolved.clone(), value, "of this assignment's value", false, var_resolved.is_result());
+            // The `!` insertion is machine-applicable for a plain call — the
+            // same rule `let x = f()` follows — so `almide fix` migrates
+            // `x = f()`, `s.f = f()` and `xs[i] = f()` alike (#3063).
+            let mechanical = matches!(value.kind, ast::ExprKind::Call { .. });
+            let unwrapped = self.effect_unwrap_rhs_warned(val_resolved.clone(), value, "of this assignment's value", mechanical, var_resolved.is_result());
             let constrain_val = if unwrapped != val_resolved { unwrapped } else { val_ty.clone() };
             self.constrain(var_ty.clone(), constrain_val, format!("assign {}", name));
         }
