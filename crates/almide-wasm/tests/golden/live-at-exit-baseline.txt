@@ -160,6 +160,7 @@
 2	#2969	spec/wasm_cross/result_uoe_float.almd
 1	#2969	spec/wasm_cross/result_wall_escalations.almd
 1	#2973	spec/wasm_cross/set_index_order.almd
+21	#2973	spec/wasm_cross/sized_tail_literal_matrix.almd
 26	#2967	spec/wasm_cross/sql_highlight_tokens.almd
 1	#2972	spec/wasm_cross/stdlib_type_shadow.almd
 1	#2973	spec/wasm_cross/string_interp_large_hole.almd

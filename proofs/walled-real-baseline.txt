@@ -456,3 +456,24 @@ spec/wasm_cross/mut_param_err_write_visible.almd :: append_then_check
 spec/wasm_cross/mut_param_err_write_visible.almd :: forward
 spec/wasm_cross/mut_param_err_write_visible.almd :: main
 spec/wasm_cross/mut_param_move_mode_gaps.almd :: fill2
+# (2026-09-30, C-038/#3060) the sized tail-literal matrix: every sized width's
+# `err(..)` payload cell (`-> Result[Bool, T]`) is a heap-result `if`, and each
+# width's printer matches on a heap Option / Result — both outside the
+# incumbent MIR brick's executable subset. The STRUCTURAL leg (the default)
+# lowers all sixteen; native, wasm and interp print identical bytes.
+spec/wasm_cross/sized_tail_literal_matrix.almd :: err_payload_float32
+spec/wasm_cross/sized_tail_literal_matrix.almd :: err_payload_int16
+spec/wasm_cross/sized_tail_literal_matrix.almd :: err_payload_int32
+spec/wasm_cross/sized_tail_literal_matrix.almd :: err_payload_int8
+spec/wasm_cross/sized_tail_literal_matrix.almd :: err_payload_uint16
+spec/wasm_cross/sized_tail_literal_matrix.almd :: err_payload_uint32
+spec/wasm_cross/sized_tail_literal_matrix.almd :: err_payload_uint64
+spec/wasm_cross/sized_tail_literal_matrix.almd :: err_payload_uint8
+spec/wasm_cross/sized_tail_literal_matrix.almd :: show_float32
+spec/wasm_cross/sized_tail_literal_matrix.almd :: show_int16
+spec/wasm_cross/sized_tail_literal_matrix.almd :: show_int32
+spec/wasm_cross/sized_tail_literal_matrix.almd :: show_int8
+spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint16
+spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint32
+spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint64
+spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint8
