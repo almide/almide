@@ -84,6 +84,10 @@ fn aggregates_witness_exactly_and_unhooked_shapes_decline() {
     // A Float part's formatted block is appended and never released (#2973):
     // declined at emission, never certified.
     assert_eq!(w.get("fl").map(String::as_str), Some("!decline:display:Float-temp\n"));
-    // A tuple literal as a match subject is a fresh block no route owns.
-    assert_eq!(w.get("subj").map(String::as_str), Some("!decline:match-subject:Tuple\n"));
+    // A tuple literal as a match subject: arg_temps.rs names the constructed
+    // subject first (#2971), so the Bind hook records the fresh block and the
+    // exit plan releases it — certified, and the checker accepts it.
+    let subj = w.get("subj").map(String::as_str);
+    assert_eq!(subj, Some("id\n"));
+    assert!(accepted(subj.unwrap()), "subj: the portable checker must accept {subj:?}");
 }
