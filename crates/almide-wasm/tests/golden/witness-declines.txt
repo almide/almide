@@ -90,14 +90,14 @@ interp-part:TupleIndex	2
 interp-part:UnwrapOr	10
 list-elem:IndexAccess	3
 list-elem:UnwrapOr	1
-loop-carried-assign	23
+loop-carried-assign	24
 loop-exit	4
 main-err-carrier	2
 match-guard	17
 match-subject:Member	18
 module-arm:unaudited:bytes.append_u8	4
 module-arm:unaudited:bytes.copy_from	1
-module-arm:unaudited:bytes.push	19
+module-arm:unaudited:bytes.push	20
 module-arm:unaudited:bytes.set_at	9
 module-arm:unaudited:bytes.set_f32_le	5
 module-arm:unaudited:bytes.set_i32_le	1
@@ -105,7 +105,7 @@ module-arm:unaudited:bytes.set_u8	4
 module-arm:unaudited:fan.any	4
 module-arm:unaudited:list.clear	2
 module-arm:unaudited:list.pop	2
-module-arm:unaudited:list.push	133
+module-arm:unaudited:list.push	134
 module-arm:unaudited:map.clear	3
 module-arm:unaudited:map.insert	2
 module-arm:unaudited:string.clear	3
