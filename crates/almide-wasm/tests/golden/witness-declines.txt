@@ -10,7 +10,7 @@ branch-nested	10
 branch-paths:3	7
 call-arg:EmptyMap	1
 call-arg:IndexAccess	92
-call-arg:Lambda	211
+call-arg:Lambda	214
 call-arg:MapLiteral	1
 call-arg:Member	29
 call-arg:Record	11
@@ -90,7 +90,7 @@ rhs:Tuple	17
 rhs:Unwrap	8
 rhs:UnwrapOr	62
 scan	3
-stmt:BindDestructure	316
+stmt:BindDestructure	317
 stmt:FieldAssign	8
 stmt:Guard	28
 stmt:IndexAssign	21
@@ -102,7 +102,7 @@ tail:Member	9
 tail:Record	16
 tail:SpreadRecord	2
 tail:StringInterp	126
-tail:Tuple	143
+tail:Tuple	144
 tail:TupleIndex	3
 tail:Unwrap	4
 tail:UnwrapOr	16
