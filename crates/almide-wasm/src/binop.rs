@@ -56,7 +56,18 @@ impl Emitter<'_> {
     ) -> Result<SliceTy, EmitError> {
         use BinOp::*;
         match op {
-            AddFloat | SubFloat | MulFloat | DivFloat => self.lower_float_arith(op, left, right),
+            // C-371: a Float32 op rides the f64 carrier but its result is
+            // rounded to binary32 after the one operation, as native's f32.
+            AddFloat | SubFloat | MulFloat | DivFloat => {
+                let t = self.lower_float_arith(op, left, right)?;
+                self.emit_f32_round(left, right);
+                Ok(t)
+            }
+            ModFloat => {
+                let t = self.lower_float_call("float.fmod", "ModFloat", left, right)?;
+                self.emit_f32_round(left, right);
+                Ok(t)
+            }
             AddInt | SubInt | MulInt => self.lower_int_arith(op, left, right),
             // C-002: wasm's own div/rem semantics DIFFER from the native
             // abort contract — `i64.rem_s` defines `MIN % -1 = 0` (no
@@ -71,7 +82,11 @@ impl Emitter<'_> {
                 self.emit_narrow_wrap(&left.ty, &right.ty);
                 Ok(t)
             }
-            PowFloat => self.lower_pow_float(left, right),
+            PowFloat => {
+                let t = self.lower_pow_float(left, right)?;
+                self.emit_f32_round(left, right);
+                Ok(t)
+            }
             Lt | Gt | Lte | Gte | Eq | Neq => self.lower_cmp(op, left, right),
             // SHORT-CIRCUIT: the right operand must not evaluate (and
             // possibly trap) when the left already decides — an `if`
@@ -303,19 +318,36 @@ impl Emitter<'_> {
     /// `**` on floats IS the vendored libm pow (the interp's PowFloat →
     /// almide_rt_libm_pow) — one table, bit parity.
     fn lower_pow_float(&mut self, left: &IrExpr, right: &IrExpr) -> Result<SliceTy, EmitError> {
-                let Some(fi) = self.resolve_qualified("math.fpow") else {
-                    return unsup("binop:PowFloat-unlinked");
-                };
-                let info = &self.table.infos[fi];
-                if info.refuse.is_some() || info.ret != Some(FLOAT) {
-                    return unsup("binop:PowFloat-impl");
-                }
-                let idx = info.wasm_index;
-                self.calls.insert(fi);
-                self.lower(left, Some(FLOAT))?;
-                self.lower(right, Some(FLOAT))?;
-                self.f.instructions().call(idx);
-                Ok(FLOAT)
+        self.lower_float_call("math.fpow", "PowFloat", left, right)
+    }
+
+    /// A float binop that IS a linked self-host fn of (Float, Float) -> Float:
+    /// `**` (math.fpow) and `%` (float.fmod — wasm has no float remainder).
+    fn lower_float_call(&mut self, key: &str, op: &str, left: &IrExpr, right: &IrExpr) -> Result<SliceTy, EmitError> {
+        let Some(fi) = self.resolve_qualified(key) else {
+            return unsup(&format!("binop:{op}-unlinked"));
+        };
+        let info = &self.table.infos[fi];
+        if info.refuse.is_some() || info.ret != Some(FLOAT) {
+            return unsup(&format!("binop:{op}-impl"));
+        }
+        let idx = info.wasm_index;
+        self.calls.insert(fi);
+        self.lower(left, Some(FLOAT))?;
+        self.lower(right, Some(FLOAT))?;
+        self.f.instructions().call(idx);
+        Ok(FLOAT)
+    }
+
+    /// C-371: when the operands are Float32, round the f64 result on the
+    /// stack to binary32 (demote, then promote back onto the carrier).
+    /// + - * / of two binary32 values rounded once from their exact f64
+    /// result equals the f32 op (double rounding is innocuous at these
+    /// widths); `%` is exact; `**` is defined as the f64 pow rounded once.
+    fn emit_f32_round(&mut self, left: &IrExpr, right: &IrExpr) {
+        if matches!(left.ty, Ty::Float32) || matches!(right.ty, Ty::Float32) {
+            self.f.instructions().f32_demote_f64().f64_promote_f32();
+        }
     }
 }
 

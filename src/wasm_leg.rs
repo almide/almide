@@ -328,6 +328,11 @@ fn link_self_host(
             crate::ir::IrExprKind::BinOp { op: crate::ir::BinOp::PowFloat, .. } => {
                 out.insert("math.fpow".to_string());
             }
+            // `%` on floats lowers to the LINKED exact remainder (wasm has no
+            // float rem instruction, #3080).
+            crate::ir::IrExprKind::BinOp { op: crate::ir::BinOp::ModFloat, .. } => {
+                out.insert("float.fmod".to_string());
+            }
             // A Float-reaching interpolation part formats through
             // float.to_string at emission — the demand is implicit.
             crate::ir::IrExprKind::StringInterp { parts } => {
