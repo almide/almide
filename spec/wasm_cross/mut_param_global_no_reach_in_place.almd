@@ -1,0 +1,33 @@
+// @contract: C-132
+// The #3103 pre-call copy is paid only where it is observable. A callee that
+// cannot reach the module-level `var` its `mut` argument is rooted at — its
+// body and everything it calls leave the global alone — keeps the in-place
+// call on the structural wasm leg: no copy of the place is made, and the
+// alloc-count ledger pins this fixture's allocations to the pushes alone.
+// A callee that CAN reach the global is mut_param_global_callee_sees_precall.
+type G = { xs: List[Int], n: Int }
+
+var gl: List[Int] = []
+
+var g: G = { xs: [], n: 0 }
+
+fn push_one(mut xs: List[Int], v: Int) -> Unit = {
+  list.push(xs, v)
+}
+
+fn push_two(mut xs: List[Int], v: Int) -> Unit = {
+  push_one(xs, v)
+  push_one(xs, v + 1)
+}
+
+effect fn main() -> Unit = {
+  for i in 0..<8 {
+    list.push(gl, i)
+    list.push(g.xs, i)
+  }
+  push_one(gl, 100)
+  push_two(gl, 200)
+  push_one(g.xs, 300)
+  push_two(g.xs, 400)
+  println("${gl} ${g.xs}")
+}
