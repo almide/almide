@@ -1,37 +1,4 @@
 
-/// The `prim.*` fs floors that take a #2206 CALL HEAD: every spelling, with the
-/// floor it reaches. `prim.<floor>` names the floor's own call (`fs.read_text`,
-/// `fs.write`, `fs.list_dir`, `fs.mkdir_p`, `fs.remove_all`); `prim.<floor>_as(…,
-/// call)` names the composite it serves (`fs.read_lines`, `fs.walk`, `fs.remove`,
-/// …); and, for the two FILE floors only, `prim.<floor>_as_pair(…, call, first,
-/// second)` names both paths of a two-path call (`fs.copy(src, dst)`) in message
-/// order. Every spelling is a literal here — `scripts/check-intrinsic-boundary.sh`
-/// proves each `@intrinsic("almide_rt_prim_<name>")` in stdlib/prim.almd has a
-/// lowering by finding its name in this crate.
-pub(crate) const FS_FLOOR_PRIMS: &[(&str, &str)] = &[
-    ("read_text_file", "read_text_file"),
-    ("read_text_file_as", "read_text_file"),
-    ("read_text_file_as_pair", "read_text_file"),
-    ("read_bytes_file", "read_bytes_file"),
-    ("read_bytes_file_as", "read_bytes_file"),
-    ("write_text_file", "write_text_file"),
-    ("write_text_file_as", "write_text_file"),
-    ("write_text_file_as_pair", "write_text_file"),
-    ("read_dir", "read_dir"),
-    ("read_dir_as", "read_dir"),
-    ("make_dir", "make_dir"),
-    ("make_dir_as", "make_dir"),
-    ("remove_all", "remove_all"),
-    ("remove_all_as", "remove_all"),
-];
-
-/// The floor a `prim.*` name reaches — `None` for a name that is not an fs floor
-/// spelling. ONE decoder: the lowering router, the floor lowering and the
-/// can-err analysis all read it, so a twin is known everywhere at once.
-pub(crate) fn fs_floor_base(func: &str) -> Option<&'static str> {
-    FS_FLOOR_PRIMS.iter().find(|(name, _)| *name == func).map(|(_, floor)| *floor)
-}
-
 /// The closed set of primitive-floor operations (the trusted, wasm-spec-faithful
 /// surface the self-hosted runtime is written over).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
