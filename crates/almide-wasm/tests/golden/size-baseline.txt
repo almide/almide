@@ -662,7 +662,7 @@
 2869	spec/wasm_cross/split_empty_sep.almd
 5006	spec/wasm_cross/spread_record_share.almd
 11868	spec/wasm_cross/sql_highlight_tokens.almd
-7722	spec/wasm_cross/stdlib_call_temporaries_release.almd
+7560	spec/wasm_cross/stdlib_call_temporaries_release.almd
 24595	spec/wasm_cross/stdlib_opaque_shadow.almd
 29956	spec/wasm_cross/stdlib_type_shadow.almd
 2844	spec/wasm_cross/str_result_heap_bind.almd
