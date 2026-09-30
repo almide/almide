@@ -24,7 +24,6 @@ float.sqrt  matrix_head_count_domain  floor: consumed inside a self-hosted body
 float.to_float32  bytes_writer_family  floor: consumed inside a self-hosted body
 float.to_float64  uint64_upper_half  floor: consumed inside a self-hosted body
 float.to_string  availability_pure_batch  floor: consumed inside a self-hosted body
-float32.to_string  checked_conversion_exact_bounds  float32.to_string: no lowered body
 int.band  datetime_monotonic_ns  floor: consumed inside a self-hosted body
 int.bor  zlib_selfhost  floor: consumed inside a self-hosted body
 int.bshl  matrix_composition_family  floor: consumed inside a self-hosted body
