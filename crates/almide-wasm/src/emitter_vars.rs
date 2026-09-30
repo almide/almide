@@ -1,7 +1,8 @@
 //! Var-slot access (locals, C-319 cells, top-let globals) and the
-//! abort frame — split from emitter.rs for the file budget.
+//! abort frame — split from emitter.rs for the file budget — and the
+//! effect-fn ok wrap of a raw exit value.
 
-use almide_ir::VarId;
+use almide_ir::{IrExpr, VarId};
 
 use crate::emitter::Emitter;
 use crate::*;
@@ -91,6 +92,36 @@ impl Emitter<'_> {
         } else {
             self.emit_store_var(id, idx, ty)
         }
+    }
+
+    /// The raw ok type a guard's else yields when it is a PLAIN value of an
+    /// effect fn's Result return — the else type is the Result's ok side and
+    /// not the Result itself. `None` when the else already is the Result
+    /// (`ok(..)` / `err(..)` / a propagated `r!`): that lowers at `want`.
+    pub(crate) fn raw_effect_else(&self, want: SliceTy, ret_direct: Option<&IrExpr>, else_: &IrExpr) -> Option<SliceTy> {
+        let SliceTy::Result(o, _) = want else { return None };
+        if ret_direct.is_some() {
+            return None;
+        }
+        let raw = self.types.el(o);
+        let ety = slice_ty_of(&else_.ty, self.types)?;
+        (ety == raw && ety != want).then_some(raw)
+    }
+
+    /// `[] -> [ok(else) Result block]`: a raw effect-fn exit value, wrapped
+    /// the way `lower_fn` wraps a raw tail — a Unit else runs as a
+    /// statement and the ok payload materializes after it.
+    pub(crate) fn lower_raw_effect_exit(&mut self, else_: &IrExpr, raw: SliceTy, want: SliceTy) -> Result<(), EmitError> {
+        if raw == SliceTy::Unit {
+            self.lower_stmt_expr(else_)?;
+            self.f.instructions().i32_const(0);
+        } else {
+            self.lower(else_, Some(raw))?;
+            if self.rc_droppable(raw) && !self.rc_owned_result(else_) {
+                self.rc_inc_top();
+            }
+        }
+        self.wrap_ok(raw, want)
     }
 
     /// `[raw value]` -> `[ok(..) Result block]` (the effect-fn return wrap).

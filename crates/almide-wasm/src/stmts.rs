@@ -174,12 +174,21 @@ impl Emitter<'_> {
                     _ => None,
                 };
                 let ret_e = ret_direct.unwrap_or(else_);
-                self.lower(ret_e, Some(want))?;
-                // The guard's early return is an exit like the tail: a
-                // droppable value that may BORROW a local takes +1 before
-                // the frame's owners are released (#2001).
-                if self.rc_droppable(want) && !self.rc_owned_result(ret_e) {
-                    self.rc_inc_top();
+                match self.raw_effect_else(want, ret_direct, else_) {
+                    // #3042: an effect fn's plain-value else (`guard c else
+                    // ()` / `else n`) is the fn's RAW return — ok-wrapped
+                    // exactly like a raw tail (func.rs), not lowered as the
+                    // Result it is not.
+                    Some(raw) => self.lower_raw_effect_exit(else_, raw, want)?,
+                    None => {
+                        self.lower(ret_e, Some(want))?;
+                        // The guard's early return is an exit like the tail: a
+                        // droppable value that may BORROW a local takes +1 before
+                        // the frame's owners are released (#2001).
+                        if self.rc_droppable(want) && !self.rc_owned_result(ret_e) {
+                            self.rc_inc_top();
+                        }
+                    }
                 }
                 let plan = self.exit_plan(crate::exit_plan::Continuation::GuardReturn);
                 self.emit_exit(&plan);

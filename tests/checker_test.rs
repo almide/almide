@@ -241,6 +241,23 @@ fn check_guard_stmt() {
 }
 
 #[test]
+fn check_guard_unit_else_fits_only_a_unit_return() {
+    // #3042: a Unit else returns `()` from the fn — accepted by an effect fn
+    // returning Unit (loop or not), refused by one returning Int, exactly as
+    // a pure fn refuses it.
+    let loop_body = "  for x in xs {\n    guard x > 0 else ()\n    println(\"${x}\")\n  }\n";
+    has_no_errors(&format!("effect fn f(xs: List[Int]) -> Unit = {{\n{loop_body}}}"));
+    has_no_errors(&format!("fn f(xs: List[Int]) -> Unit = {{\n{loop_body}}}"));
+    for head in ["effect fn f(xs: List[Int]) -> Int", "fn f(xs: List[Int]) -> Int"] {
+        let errs = errors(&format!("{head} = {{\n{loop_body}  0\n}}"));
+        assert!(
+            errs.iter().any(|e| e.contains("guard else") && e.contains("Int") && e.contains("Unit")),
+            "{head}: expected a guard-else Int/Unit mismatch, got {errs:?}"
+        );
+    }
+}
+
+#[test]
 fn check_impl_block() {
     has_no_errors("type Greeter = { name: String }\nimpl Greeter {\n  fn greet(self: Greeter) -> String = self.name\n}");
 }

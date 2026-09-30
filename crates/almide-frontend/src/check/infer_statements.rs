@@ -95,8 +95,12 @@ impl Checker {
             Ty::Applied(crate::types::TypeConstructorId::Result, ref args) if !args.is_empty() => {
                 self.constrain(ret, args[0].clone(), "guard else".to_string())
             }
-            // An empty-arg Result and a Unit else both carry nothing to constrain.
-            Ty::Applied(crate::types::TypeConstructorId::Result, _) | Ty::Unit => {}
+            // An empty-arg Result carries nothing to constrain.
+            Ty::Applied(crate::types::TypeConstructorId::Result, _) => {}
+            // A Unit else is a plain value like any other: it returns `()`
+            // from the fn, so it fits only a Unit return (#3042 — `guard c
+            // else ()` in a `-> Int` effect fn passed check, then died as
+            // rustc E0308; a pure fn already rejected it here).
             _ => self.constrain(ret, ety, "guard else".to_string()),
         }
     }
