@@ -2842,6 +2842,8 @@ evidence  = [
   { path = "tests/exit_tail_positions_test.rs", name = "dynamic_exit_codes_execute_in_every_tail_position", class = "fixture" },
   { path = "spec/wasm_cross/guard_else_exit_code.almd", class = "fixture" },
   { path = "spec/wasm_cross/panic_value_arm.almd", class = "fixture" },
+  { path = "spec/wasm_cross/panic_abort_positions.almd", class = "fixture" },
+  { path = "tests/panic_abort_positions_test.rs", name = "panic_aborts_identically_on_native_wasm_and_interp_in_every_position", class = "fixture" },
 ]
 
 # ── STREAMING LINE WALKERS: O(LONGEST LINE) MEMORY, READ_LINES SEMANTICS ──
