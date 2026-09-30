@@ -164,33 +164,15 @@ spec/wasm_cross/env_set_overlay.almd :: main
 # brick (binds_p4 walls the form honestly); the STRUCTURAL leg — the default
 # route — lowers them on every execution sweep. Same division as the
 # C-326/C-327/C-329 rows; prunes with #1696 steps 4-5.
-spec/lang/list_rest_pattern_test.almd :: __test_almd_whole-list rest binds the subject list
-spec/lang/list_rest_pattern_test.almd :: heads
-spec/lang/list_rest_pattern_test.almd :: shape
-spec/lang/list_rest_pattern_test.almd :: total
-spec/wasm_cross/list_rest_pattern.almd :: main
-spec/wasm_cross/list_rest_pattern.almd :: shape
-spec/wasm_cross/list_rest_pattern.almd :: tail_of
-spec/wasm_cross/list_rest_pattern.almd :: total
 # (2026-09-29, C-332/#2748) the same division for the generic list-rest binds
 # instanced at Int and String: the incumbent brick walls the list-rest bind,
 # the STRUCTURAL leg (the default) lowers the instances.
-spec/wasm_cross/generic_pattern_binds_instanced.almd :: first__Int
-spec/wasm_cross/generic_pattern_binds_instanced.almd :: first__String
-spec/wasm_cross/generic_pattern_binds_instanced.almd :: tail_len__Int
-spec/wasm_cross/generic_pattern_binds_instanced.almd :: tail_len__String
 # (2026-09-29, C-213/#2747) the Endian IO fixture behind an explicit
 # `import bytes` interpolates sized-int reads the incumbent brick does not
 # execute; the STRUCTURAL leg (the default) lowers it.
 spec/wasm_cross/endian_explicit_import.almd :: main
 # (2026-09-02, C-333/#1461) as-patterns: the same incumbent division as the
 # list-rest rows above.
-spec/lang/as_pattern_test.almd :: __test_almd_as over option carriers
-spec/lang/as_pattern_test.almd :: area_note
-spec/lang/as_pattern_test.almd :: pick
-spec/wasm_cross/as_pattern.almd :: area_note
-spec/wasm_cross/as_pattern.almd :: main
-spec/wasm_cross/as_pattern.almd :: pick
 
 # (2026-09-02, C-092/#1676) the generic record's instantiated closure field is
 # called from return position; the incumbent brick refuses the heap-result
@@ -337,6 +319,11 @@ spec/wasm_cross/nested_field_path_mut.almd :: main
 # bound from the IR (`lower::cross_module_toplet_refs` — the synthesized
 # reference's `module_origin` + uppercased name name exactly one immutable,
 # call-free top-let of that module), replacing the deleted name bridge.
+# Then 18 more (92 -> 74, class 2): list-rest arms (`[h, ..t]`, `[a, ..]`) and
+# top-level as-arms (`x @ P`) are desugared in the shared chain to the
+# length-test chain the lowering runs (`lower::desugar_list_rest_matches`: a
+# `>=` test, element reads under it, the tail as `list.drop(xs, k)`, the
+# as-binder read as the subject itself).
 # 2026-09-29 (#2950): the classifier now lowers what the product lowers. The
 # incumbent wasm pipeline ran program passes before lowering
 # (`inline_mutual_tail_recursion`, `populate_abi_registries`,
