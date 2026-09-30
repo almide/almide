@@ -211,7 +211,7 @@ impl Emitter<'_> {
         self.emit_read_mut_var(id, var_idx, var_ty, vglob);
         self.lower_arg(x, Some(STR), ArgMode::Borrow)?;
         self.f.instructions().call(F_CONCAT);
-        self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
+        self.emit_rebind_mut_var_fresh(*id, var_idx, var_ty, vglob)?;
         Ok(None)
     }
 
@@ -232,7 +232,7 @@ impl Emitter<'_> {
             return unsup(&format!("string-clear-of:{var_ty:?}"));
         }
         self.f.instructions().i32_const(0).call(F_ALLOC);
-        self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
+        self.emit_rebind_mut_var_fresh(*id, var_idx, var_ty, vglob)?;
         Ok(None)
     }
 

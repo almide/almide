@@ -137,7 +137,22 @@ impl Emitter<'_> {
     /// (`__bam`, `__bt_append`, `bytes_write_string_be`) build theirs with
     /// `prim.alloc_bytes` — so `$dec_flat` frees it, and no-ops a static.
     pub(crate) fn emit_bytes_writeback(&mut self, recv: &BytesRecv) -> Result<(), EmitError> {
+        self.bytes_writeback(recv, false)
+    }
+
+    /// `emit_bytes_writeback` for an arm whose block is FRESH (never the
+    /// receiver's own): a var's credit on the block it replaces goes with
+    /// the rebind (`emit_rebind_mut_var_fresh`) — fill / clear / the BE
+    /// writers / copy_within / the linked append family (#2968).
+    pub(crate) fn emit_bytes_writeback_fresh(&mut self, recv: &BytesRecv) -> Result<(), EmitError> {
+        self.bytes_writeback(recv, true)
+    }
+
+    fn bytes_writeback(&mut self, recv: &BytesRecv, fresh: bool) -> Result<(), EmitError> {
         match recv {
+            BytesRecv::Var { id, idx, ty, global } if fresh => {
+                self.emit_rebind_mut_var_fresh(*id, *idx, *ty, *global)
+            }
             BytesRecv::Var { id, idx, ty, global } => {
                 self.emit_store_mut_var(*id, *idx, *ty, *global)
             }

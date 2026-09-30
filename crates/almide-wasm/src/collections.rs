@@ -255,7 +255,7 @@ impl Emitter<'_> {
                     return unsup("var:unmapped");
                 };
                 let ret = self.lower_map_call("set", args, ret_hint)?;
-                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
+                self.emit_rebind_mut_var_fresh(*id, var_idx, var_ty, vglob)?;
                 let _ = ret;
                 Ok(None)
             }
@@ -275,7 +275,7 @@ impl Emitter<'_> {
                     return unsup("var:unmapped");
                 };
                 let ret = self.lower_map_call("remove", args, ret_hint)?;
-                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
+                self.emit_rebind_mut_var_fresh(*id, var_idx, var_ty, vglob)?;
                 let _ = ret;
                 Ok(None)
             }
@@ -295,7 +295,7 @@ impl Emitter<'_> {
                     return unsup(&format!("map-clear-of:{var_ty:?}"));
                 };
                 self.f.instructions().i32_const(0).call(F_ALLOC);
-                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
+                self.emit_rebind_mut_var_fresh(*id, var_idx, var_ty, vglob)?;
                 Ok(None)
             }
             // fold over entries in insertion order: (acc, k, v) => acc'.
