@@ -45,6 +45,8 @@ fn witness_globals(
         types.insert(tl.var, tl.ty.clone());
         inits.insert(tl.var, tl.value.clone());
     }
+    // An entry-file reference to another module's top-let (#3058).
+    crate::lower::bind_cross_module_toplets(ir, &mut types, &mut inits);
     (types, inits)
 }
 

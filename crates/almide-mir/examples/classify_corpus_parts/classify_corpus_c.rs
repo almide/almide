@@ -455,6 +455,9 @@ fn classify_file(
         globals.insert(tl.var, tl.ty.clone());
         global_inits.insert(tl.var, tl.value.clone());
     }
+    // An entry-file reference to another module's top-let — the SAME binding
+    // the witness producer applies (#3058).
+    almide_mir::lower::bind_cross_module_toplets(&ir, &mut globals, &mut global_inits);
     // The functions DEFINED in this file (their names). A PROTOCOL METHOD is a
     // user-defined function whose name is dotted (`Type.method`, e.g. `MathExpr.eval`)
     // — it resolves to ITSELF / a sibling method, NOT a stdlib call. The unlinkable-
