@@ -354,7 +354,12 @@ fn collect_binds_data_b(
             }
             collect_binds(body, out, seen, types)
         }
-        IrExprKind::Call { args, .. } => {
+        IrExprKind::Call { target, args, .. } => {
+            // A computed callee can carry binds too: `(stored(dbl)).f(4)`
+            // names the record it reads the callable out of (arg_temps.rs).
+            if let almide_ir::CallTarget::Computed { callee } = target {
+                collect_binds(callee, out, seen, types)?;
+            }
             for a in args {
                 collect_binds(a, out, seen, types)?;
             }
@@ -401,6 +406,18 @@ fn collect_binds_data_b(
                 if let IrStringPart::Expr { expr } = p {
                     collect_binds(expr, out, seen, types)?;
                 }
+            }
+            Ok(())
+        }
+        // `m[k]` and a runtime call: the Binder (arg_temps.rs) may name an
+        // operand inside either.
+        IrExprKind::MapAccess { object, key } => {
+            collect_binds(object, out, seen, types)?;
+            collect_binds(key, out, seen, types)
+        }
+        IrExprKind::RuntimeCall { args, .. } => {
+            for a in args {
+                collect_binds(a, out, seen, types)?;
             }
             Ok(())
         }
