@@ -32,7 +32,7 @@
 25	19	189	25	spec/wasm_cross/branch_lift_in_loop.almd
 35	7	282	24	spec/wasm_cross/branch_lift_stdlib_mut_arg.almd
 11	5	100	10	spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd
-49	39	333	45	spec/wasm_cross/bundled_pure_modules.almd
+49	41	333	48	spec/wasm_cross/bundled_pure_modules.almd
 30	18	185	30	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
 25	17	33061	25	spec/wasm_cross/bytes_array_count_domain.almd
 29	6	171	24	spec/wasm_cross/bytes_clear_mut_param.almd
@@ -378,7 +378,7 @@
 27	8	193	18	spec/wasm_cross/list_flatten_borrow.almd
 24	12	294	23	spec/wasm_cross/list_float_equality_family.almd
 66	36	1013	66	spec/wasm_cross/list_float_total_order.almd
-7751	3617	6498155	7749	spec/wasm_cross/list_fold_fused_callback_result_ownership.almd
+7751	3618	6498155	7751	spec/wasm_cross/list_fold_fused_callback_result_ownership.almd
 1833	1794	15324	1831	spec/wasm_cross/list_heap_tuple_return.almd
 236	193	1920	234	spec/wasm_cross/list_heapelem_rc.almd
 101	58	1282	101	spec/wasm_cross/list_index_element_append.almd
@@ -392,6 +392,7 @@
 9060	9014	8165397	9060	spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 18	10	164	18	spec/wasm_cross/list_product_overflow.almd
 36	17	250	34	spec/wasm_cross/list_push_on_record_field.almd
+634	616	2955	634	spec/wasm_cross/list_reduce_fused_fold_release.almd
 7	0	68	7	spec/wasm_cross/list_remove_at_oob.almd
 4	1	2147483672	4	spec/wasm_cross/list_repeat_size_ceiling.almd
 20	9	248	11	spec/wasm_cross/list_rest_pattern.almd
@@ -600,7 +601,7 @@
 16	2	132	16	spec/wasm_cross/records_variants.almd
 0	0	0	0	spec/wasm_cross/recursion_depth_within_limits.almd
 29	0	380	27	spec/wasm_cross/recursive_generic_repr_interp.almd
-13	3	59	9	spec/wasm_cross/reduce_str.almd
+13	5	59	13	spec/wasm_cross/reduce_str.almd
 5	1	55	5	spec/wasm_cross/ref_gleam_capture_shadow.almd
 0	0	0	0	spec/wasm_cross/ref_gleam_div_zero_abort.almd
 3	0	32	3	spec/wasm_cross/ref_gleam_fnvalue_shadow.almd
