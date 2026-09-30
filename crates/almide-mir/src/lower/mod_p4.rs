@@ -710,6 +710,12 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
         | Ty::UInt8
         | Ty::UInt16
         | Ty::UInt32 => ("int", "to_string"),
+        // UInt64 above i64::MAX would misprint through int.to_string; its own
+        // self-hosted printer divides once unsigned (#3058). Float32 keeps the
+        // unlinked fallback below: printing the widened f64 is not the f32's
+        // shortest round-trip form (`0.1f32` would print 0.10000000149011612),
+        // and no f32 printer is self-hosted yet.
+        Ty::UInt64 => ("uint64", "to_string"),
         Ty::Bool => ("bool", "to_string"),
         // Scalar `${f}` interp uses v0's Display format, which DROPS the `.0` for integer-valued
         // floats (`3.0`->`3`, `100.0`->`100`) — exactly the compound formatter

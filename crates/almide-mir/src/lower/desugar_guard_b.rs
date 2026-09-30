@@ -19,6 +19,16 @@
 /// statement that can still run after the flag is set (the stmts AFTER a nested
 /// while inside an outer body) is call-free (pure Assign/arith — running them once
 /// more is unobservable); the guard's `E` type equals the fn's Result type.
+///
+/// #3058 widens it along both axes the corpus walled on. The LOOP: a top-level
+/// `for x in xs` has no condition to conjoin, so its body is wrapped as
+/// `if __lr_set == false { <body'> }` — the remaining iterations run empty, which
+/// is unobservable. The RETURN: a fn whose body yields its value RAW — a pure fn,
+/// or an effect fn the effect-ABI facts prove never errs — seeds `__lr_val` with
+/// a literal of its scalar / Unit / String return (read only once the flag is
+/// set, so the seed never escapes). A `guard .. else break` / `else continue` is
+/// not a value return and is declined (its else holds a loop exit, which in a
+/// Unit fn the type alone would not tell apart).
 pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
     use almide_ir::{BinOp, IrExpr, IrExprKind, IrStmt, IrStmtKind, Mutability, VarTable};
     use almide_lang::types::constructor::TypeConstructorId;
@@ -31,7 +41,10 @@ pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
         }
         impl<'a> almide_ir::visit::IrVisitor for C<'a> {
             fn visit_expr(&mut self, e: &IrExpr) {
-                if matches!(e.kind, IrExprKind::Call { .. }) {
+                // A loop exit counts too (#3058): a `guard .. else break` /
+                // `else continue` is not a value return, and in a Unit fn its
+                // type alone would not tell them apart.
+                if matches!(e.kind, IrExprKind::Call { .. } | IrExprKind::Break | IrExprKind::Continue) {
                     *self.found = true;
                 }
                 almide_ir::visit::walk_expr(self, e);
@@ -171,18 +184,76 @@ pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
         });
     }
 
-    fn rewrite_fn(body: &mut IrExpr, ret_ty: &Ty, vt: &mut VarTable) {
-        // fn Result type with a String err — the err("") seed is exact.
-        let is_res_str = matches!(ret_ty,
-            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && matches!(a[1], Ty::String));
-        if !is_res_str {
-            return;
+    /// The `__lr_val` seed, read only once the flag is set: `err("")` for a
+    /// `Result[_, String]` fn (#3058: and, for a fn whose body returns its
+    /// value RAW — pure, or a never-err effect fn — the zero of a scalar,
+    /// `()`, or `""`).
+    fn seed_for(ret_ty: &Ty, raw: bool) -> Option<IrExpr> {
+        let lit = |kind: IrExprKind, ty: Ty| Some(IrExpr { kind, ty, span: None, def_id: None });
+        match ret_ty {
+            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && matches!(a[1], Ty::String) => lit(
+                IrExprKind::ResultErr {
+                    expr: Box::new(IrExpr {
+                        kind: IrExprKind::LitStr { value: String::new() },
+                        ty: Ty::String,
+                        span: None,
+                        def_id: None,
+                    }),
+                },
+                ret_ty.clone(),
+            ),
+            _ if !raw => None,
+            Ty::Int => lit(IrExprKind::LitInt { value: 0 }, Ty::Int),
+            Ty::Bool => lit(IrExprKind::LitBool { value: false }, Ty::Bool),
+            Ty::Float => lit(IrExprKind::LitFloat { value: 0.0 }, Ty::Float),
+            Ty::Unit => lit(IrExprKind::Unit, Ty::Unit),
+            Ty::String => lit(IrExprKind::LitStr { value: String::new() }, Ty::String),
+            _ => None,
         }
+    }
+
+    /// `for x in xs { body }` → `for x in xs { if __lr_set == false { body' } }`:
+    /// a for-in has no condition to conjoin, so the flag guards the body and
+    /// the remaining iterations run empty.
+    fn rewrite_for_body(wbody: &mut Vec<IrStmt>, ret_ty: &Ty, set: almide_ir::VarId, val: almide_ir::VarId) -> bool {
+        let mut wb = wbody.clone();
+        if rewrite_body(&mut wb, ret_ty, set, val) != Some(true) {
+            return false;
+        }
+        let mut cond = Box::new(IrExpr { kind: IrExprKind::LitBool { value: true }, ty: Ty::Bool, span: None, def_id: None });
+        conjoin_flag(&mut cond, set);
+        let IrExprKind::BinOp { left: not_set, .. } = cond.kind else { return false };
+        let guarded = IrExpr {
+            kind: IrExprKind::If {
+                cond: not_set,
+                then: Box::new(IrExpr {
+                    kind: IrExprKind::Block {
+                        stmts: wb,
+                        expr: Some(Box::new(IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None })),
+                    },
+                    ty: Ty::Unit,
+                    span: None,
+                    def_id: None,
+                }),
+                else_: Box::new(IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None }),
+            },
+            ty: Ty::Unit,
+            span: None,
+            def_id: None,
+        };
+        *wbody = vec![IrStmt { kind: IrStmtKind::Expr { expr: guarded }, span: None }];
+        true
+    }
+
+    fn rewrite_fn(body: &mut IrExpr, ret_ty: &Ty, raw: bool, vt: &mut VarTable) {
+        let Some(seed) = seed_for(ret_ty, raw) else { return };
         let IrExprKind::Block { stmts, expr: tail } = &mut body.kind else { return };
         let Some(tail_e) = tail.as_deref_mut() else { return };
         for wi in 0..stmts.len() {
             let IrStmtKind::Expr { expr } = &stmts[wi].kind else { continue };
-            let IrExprKind::While { .. } = &expr.kind else { continue };
+            if !matches!(&expr.kind, IrExprKind::While { .. } | IrExprKind::ForIn { .. }) {
+                continue;
+            }
             let set = vt.alloc(
                 almide_lang::intern::sym("__lr_set"),
                 Ty::Bool,
@@ -197,29 +268,25 @@ pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
             );
             // try the rewrite on a CLONE — commit only on success.
             let IrStmtKind::Expr { expr } = &mut stmts[wi].kind else { unreachable!() };
-            let IrExprKind::While { cond, body: wbody } = &mut expr.kind else { unreachable!() };
-            let mut wb = wbody.clone();
-            match rewrite_body(&mut wb, ret_ty, set, val) {
-                Some(true) => {
-                    *wbody = wb;
-                    conjoin_flag(cond, set);
+            match &mut expr.kind {
+                IrExprKind::While { cond, body: wbody } => {
+                    let mut wb = wbody.clone();
+                    match rewrite_body(&mut wb, ret_ty, set, val) {
+                        Some(true) => {
+                            *wbody = wb;
+                            conjoin_flag(cond, set);
+                        }
+                        _ => continue,
+                    }
+                }
+                IrExprKind::ForIn { body: wbody, .. } => {
+                    if !rewrite_for_body(wbody, ret_ty, set, val) {
+                        continue;
+                    }
                 }
                 _ => continue,
             }
-            // binds BEFORE the while
-            let seed = IrExpr {
-                kind: IrExprKind::ResultErr {
-                    expr: Box::new(IrExpr {
-                        kind: IrExprKind::LitStr { value: String::new() },
-                        ty: Ty::String,
-                        span: None,
-                        def_id: None,
-                    }),
-                },
-                ty: ret_ty.clone(),
-                span: None,
-                def_id: None,
-            };
+            // binds BEFORE the loop
             stmts.insert(
                 wi,
                 IrStmt {
@@ -270,12 +337,7 @@ pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
                         span: None,
                         def_id: None,
                     }),
-                    then: Box::new(IrExpr {
-                        kind: IrExprKind::Var { id: val },
-                        ty: ret_ty.clone(),
-                        span: None,
-                        def_id: None,
-                    }),
+                    then: Box::new(IrExpr { kind: IrExprKind::Var { id: val }, ty: ret_ty.clone(), span: None, def_id: None }),
                     else_: Box::new(else_block),
                 },
                 ty: ret_ty.clone(),
@@ -286,13 +348,25 @@ pub fn desugar_loop_early_returns(program: &mut almide_ir::IrProgram) {
         }
     }
 
+    // #3058: a fn whose body returns its value RAW — a pure fn, or an effect
+    // fn that can never err (its ABI is the raw value) — takes a raw seed.
+    let facts = almide_ir::effect_abi::effect_abi_facts(program);
     let almide_ir::IrProgram { functions, modules, var_table, .. } = program;
-    for func in functions
+    for (module, func) in functions
         .iter_mut()
-        .chain(modules.iter_mut().flat_map(|m| m.functions.iter_mut()))
+        .map(|f| (None, f))
+        .chain(modules.iter_mut().flat_map(|m| {
+            let name = m.name.as_str().to_string();
+            m.functions.iter_mut().map(move |f| (Some(name.clone()), f))
+        }))
     {
+        let key = match &module {
+            None => func.name.as_str().to_string(),
+            Some(m) => format!("{m}.{}", func.name.as_str()),
+        };
+        let raw = !func.is_effect || facts.never_err_lifted.contains(&key);
         let ret_ty = func.ret_ty.clone();
-        rewrite_fn(&mut func.body, &ret_ty, var_table);
+        rewrite_fn(&mut func.body, &ret_ty, raw, var_table);
     }
 }
 

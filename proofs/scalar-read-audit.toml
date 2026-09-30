@@ -300,10 +300,10 @@ why = "tag loaded (off 4 or 16), IfThen(tag); err-payload bind emitted between I
 [[arm]]
 file = "control_p2_e.rs"
 fn = "bind_result_err_payload"
-loads = 1
+loads = 2
 verdict = "CALLER_DISPATCHED"
 caller = "try_lower_result_match (control_p2_e.rs — call between IfThen(tag) and Else; a pure text move under the 800-line cap, PR #1816)"
-why = "Unconditional payload@12 read; sole caller emits it inside the Err (IfThen) region."
+why = "Unconditional payload@12 read (LoadHandle for a heap err, Load64 for a scalar-scalar Result's err, #3058 — one or the other per bind); sole caller emits it inside the Err (IfThen) region."
 
 [[arm]]
 file = "control_p2_e.rs"

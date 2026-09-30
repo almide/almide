@@ -140,6 +140,20 @@ impl Settler<'_> {
         raw_never_err_call(e, self.facts, &self.scope)
     }
 
+    /// `e` is a call to a never-err lifted fn that an earlier rewrite already
+    /// typed with its raw return `ty` (the C-132 move-mode rewrite types a
+    /// `mut`-param call as its `(result, buffer)` tuple), so a `!` over it is
+    /// the identity.
+    fn already_raw(&self, e: &IrExpr, ty: &Ty) -> bool {
+        let IrExprKind::Call { target, .. } = &e.kind else { return false };
+        let Some(name) = crate::mut_param::call_spelling(target) else { return false };
+        let quiet = self.facts.never_err_lifted.contains(&name)
+            || self.facts.never_err_lifted.contains(&crate::mut_param::scope_key(&self.scope, &name));
+        quiet
+            && e.ty == *ty
+            && !matches!(&e.ty, Ty::Applied(TypeConstructorId::Result | TypeConstructorId::Option, _) | Ty::Unknown)
+    }
+
     /// `match <never-err call> { ok(x) => A, .. }` (no guard on the Ok arm)
     /// → `{ let x = <raw call>; A }`: the err arm is dead.
     fn settle_match(&mut self, expr: &mut IrExpr) -> bool {
@@ -191,7 +205,7 @@ impl Settler<'_> {
     fn strip_identity(&mut self, expr: &mut IrExpr) -> bool {
         let strip = match &expr.kind {
             IrExprKind::Unwrap { expr: inner } | IrExprKind::Try { expr: inner } => {
-                self.raw(inner).is_some_and(|t| t == expr.ty)
+                self.raw(inner).is_some_and(|t| t == expr.ty) || self.already_raw(inner, &expr.ty)
             }
             IrExprKind::UnwrapOr { expr: inner, fallback } => {
                 self.raw(inner).is_some_and(|t| t == expr.ty) && effect_free(fallback)

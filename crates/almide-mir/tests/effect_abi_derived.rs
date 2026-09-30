@@ -61,3 +61,47 @@ fn list_rest_and_as_arms_lower_on_the_mir_rung() {
          fn main() -> Unit = {\n  println(int.to_string(total([1, 2]) + g([3]) + pick([4])))\n}\n",
     );
 }
+
+#[test]
+fn loop_value_exits_lower_beyond_while_in_result_string() {
+    // #3058 class 3: a guard's value exit in a `for` body, and in a pure or
+    // never-err fn returning its value raw, takes the same flag + value
+    // rewrite `while` in a `Result[_, String]` fn had.
+    assert_all_lower(
+        "loop-exit",
+        "fn first_neg(xs: List[Int]) -> Int = {\n  var n = 0\n  for x in xs {\n    guard x > 0 else x\n    n = n + x\n  }\n  n\n}\n\
+         fn capped(limit: Int) -> Int = {\n  var i = 0\n  var s = 0\n  while i < 10 {\n    i = i + 1\n    guard i <= limit else s * 100\n    s = s + i\n  }\n  s\n}\n\
+         effect fn eff(xs: List[Int]) -> Int = {\n  var n = 0\n  for x in xs {\n    guard x > 0 else x\n    n = n + x\n  }\n  n\n}\n\
+         effect fn main() -> Unit = {\n  println(int.to_string(first_neg([1, -2]) + capped(3) + eff([3])!))\n}\n",
+    );
+}
+
+#[test]
+fn scalar_scalar_result_if_and_match_lower() {
+    // #3058: `if c then ok(x) else err(y)` over a `Result[Int, Int]` builds the
+    // len-as-tag block the bind position already builds, and a match over the
+    // call binds the scalar err by value.
+    assert_all_lower(
+        "scalar-result",
+        "fn f(n: Int) -> Result[Int, Int] = if n > 0 then ok(n * 2) else err(n - 400)\n\
+         fn g(n: Int) -> Result[Bool, Int8] = if n > 0 then ok(true) else err(-3)\n\
+         effect fn main() -> Unit = {\n  match f(3) {\n    ok(v) => println(\"ok ${v}\"),\n    err(e) => println(\"err ${e}\"),\n  }\n  match g(0) {\n    ok(_) => println(\"ok\"),\n    err(e) => println(\"err ${e}\"),\n  }\n}\n",
+    );
+}
+
+#[test]
+fn uint64_interpolation_and_move_mode_unwrap_lower() {
+    // #3058: `${u}` of a UInt64 routes to its own unsigned printer, and a `!`
+    // over a never-err `mut`-param call the move-mode rewrite already typed as
+    // its raw `(result, buffer)` tuple is the identity.
+    assert_all_lower(
+        "u64-and-move-mode",
+        "protocol Counter {\n  fn bump(mut self: Self, by: Int) -> Unit\n  fn read(self) -> Int\n}\n\
+         type Tally: Counter = { n: Int }\n\
+         fn Tally.bump(mut self: Tally, by: Int) -> Unit = {\n  self.n = self.n + by\n}\n\
+         fn Tally.read(self) -> Int = self.n\n\
+         effect fn go[C: Counter](mut c: C) -> Int = {\n  c.bump(2)\n  c.read()\n}\n\
+         fn big() -> UInt64 = uint64.max_value()\n\
+         effect fn main() -> Unit = {\n  var t = Tally { n: 1 }\n  let a = go(t)!\n  println(\"${a} ${t.n} ${big()}\")\n}\n",
+    );
+}

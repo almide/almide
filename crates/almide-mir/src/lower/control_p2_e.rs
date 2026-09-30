@@ -196,6 +196,15 @@ impl LowerCtx {
             {
                 Ok(Some((*var, true)))
             }
+            // A SCALAR err of a scalar-scalar Result (`Result[Int, Int]`, #3058):
+            // `materialize_result_err_scalar` stores the payload by value in slot 0,
+            // so the bind is a value COPY (load64), exactly like the Ok side's.
+            IrPattern::Bind { var, ty }
+                if !is_heap_ty(ty)
+                    && self.value_shapes.get(&subj) == Some(&crate::lower::VariantShape::ResultScalar) =>
+            {
+                Ok(Some((*var, false)))
+            }
             IrPattern::Wildcard => Ok(None),
             _ => Err(()),
         }
@@ -204,10 +213,17 @@ impl LowerCtx {
     /// THEN (tag != 0 = Err): the message is the BORROWED slot-0 handle.
     fn bind_result_err_payload(&mut self, h: ValueId, err_bind: Option<(VarId, bool)>) {
         use crate::PrimKind;
-        if let Some((bind_var, _)) = err_bind {
-            let payload = self.load_at_offset(h, 12, PrimKind::LoadHandle);
-            self.value_of.insert(bind_var, payload);
-            self.param_values.insert(payload);
+        match err_bind {
+            Some((bind_var, true)) => {
+                let payload = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+                self.value_of.insert(bind_var, payload);
+                self.param_values.insert(payload);
+            }
+            Some((bind_var, false)) => {
+                let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
+                self.value_of.insert(bind_var, payload);
+            }
+            None => {}
         }
     }
 
