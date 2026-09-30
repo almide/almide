@@ -331,6 +331,10 @@ impl<'a> Interpreter<'a> {
                 IrStringPart::Lit { value } => out.push_str(value),
                 IrStringPart::Expr { expr } => {
                     let v = val!(self.eval_expr(expr, scope));
+                    // A Float32 rides the widened f64 carrier but displays its
+                    // own shortest binary32 digits, top-level or nested (C-372,
+                    // #3081): the type picks the leaves (f32_display.rs).
+                    let v = if self.mentions_f32(&expr.ty, 0) { self.f32_display_view(&v, &expr.ty) } else { v };
                     // A bare top-level String stays raw; everything else routes
                     // through the bare-display path (which for compounds is
                     // `almide_repr`, for scalars is plain Display).

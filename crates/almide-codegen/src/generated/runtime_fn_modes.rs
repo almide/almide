@@ -228,6 +228,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_fan_map_par" => &[false, false],
         "almide_rt_fan_race" => &[false],
         "almide_rt_fan_settle" => &[false],
+        "almide_rt_float32_to_string" => &[false],
         "almide_rt_float_abs" => &[false],
         "almide_rt_float_ceil" => &[false],
         "almide_rt_float_clamp" => &[false, false, false],

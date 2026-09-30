@@ -8,6 +8,16 @@ pub fn almide_rt_float_to_string(n: f64) -> String {
         s
     }
 }
+/// `float32.to_string` (#3079): f32 Display — the shortest decimal that
+/// round-trips to the same f32 — with the same `.0` integer suffix.
+pub fn almide_rt_float32_to_string(n: f32) -> String {
+    let s = format!("{}", n);
+    if n.fract() == 0.0 && !s.contains('.') && !s.contains("inf") && !s.contains("NaN") {
+        format!("{}.0", s)
+    } else {
+        s
+    }
+}
 pub fn almide_rt_float_parse(s: &str) -> Result<f64, String> { s.trim().parse::<f64>().map_err(|e| e.to_string()) }
 pub fn almide_rt_float_abs(n: f64) -> f64 { n.abs() }
 pub fn almide_rt_float_ceil(n: f64) -> f64 { n.ceil() }

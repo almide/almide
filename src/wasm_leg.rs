@@ -314,6 +314,7 @@ fn link_self_host(
                             && args.iter().any(|a| !ty_float_free(&a.ty)) =>
                     {
                         out.insert("float.to_string_compound".to_string());
+                        out.insert("float32.to_string_compound".to_string());
                     }
                     // Codec splices call their registry helpers by BARE
                     // dunder name — the demand key IS the name.
@@ -341,6 +342,9 @@ fn link_self_host(
                         && !ty_float_free(&expr.ty)
                     {
                         out.insert("float.to_string_compound".to_string());
+                        // A Float32, top-level or nested, prints through
+                        // the f32 Schubfach (C-372).
+                        out.insert("float32.to_string_compound".to_string());
                     }
                 }
             }

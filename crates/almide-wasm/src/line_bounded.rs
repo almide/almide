@@ -195,7 +195,9 @@ impl Emitter<'_> {
                     .local_get(self.cursor_local)
                     .global_set(G_LINE_CURSOR);
                 let got = self.lower(expr, None)?;
-                self.append_display_part(got, budget)?;
+                // The IR type rides along: a Float32 (at any depth) shares
+                // Float's slot but not its digits (C-372).
+                self.append_display_part(got, budget, &expr.ty)?;
             }
         }
         Ok(())
@@ -203,17 +205,17 @@ impl Emitter<'_> {
 
     /// The value of one part is on the stack: append it room-free when its
     /// display has a static bound the budget covers, checked otherwise.
-    fn append_display_part(&mut self, got: SliceTy, budget: &mut Option<u64>) -> Result<(), EmitError> {
+    fn append_display_part(&mut self, got: SliceTy, budget: &mut Option<u64>, ir: &Ty) -> Result<(), EmitError> {
         let bound = match got {
             INT => INT_DISPLAY_MAX,
             BOOL => BOOL_DISPLAY_MAX,
             _ => {
                 *budget = None;
-                return self.emit_display_value(got, false);
+                return self.emit_display_value(got, false, Some(ir));
             }
         };
         if !spend(budget, bound) {
-            return self.emit_display_value(got, false);
+            return self.emit_display_value(got, false, Some(ir));
         }
         let helper = self.raw_append_helper(Some(got));
         let scratch = if got == INT { self.scr_i64_local } else { self.tmp_i32_local };

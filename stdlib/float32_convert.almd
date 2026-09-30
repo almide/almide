@@ -5,8 +5,7 @@
 // THERE, so calling them from here is cross-file (an intra-file module call would re-trigger the
 // auto-linker forever). Pure scalar.
 //
-// `float32.to_string` is omitted — it needs `float.to_string` (decimal formatting / Ryu), not yet
-// self-hosted.
+// `float32.to_string` is not here: it is the f32 Schubfach in float_to_string.almd (C-372).
 fn float32_to_int8(x: Float32) -> Int8 = {
   let f = float.from_float32(x)
   float.to_int8(f)

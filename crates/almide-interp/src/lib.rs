@@ -23,6 +23,7 @@ mod bridge;
 mod dispatch;
 mod env;
 mod eval;
+mod f32_display;
 mod hofs;
 mod inplace;
 mod stdlib_pool;
