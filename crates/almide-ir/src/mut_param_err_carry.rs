@@ -666,23 +666,20 @@ fn write_back_armwise(block: &mut IrExpr, vt: &mut VarTable, ty: &Ty, propagate:
         .iter()
         .map(|(v, t)| (*v, vt.alloc(sym("__mp_ebuf"), t.clone(), Mutability::Let, None), t.clone()))
         .collect();
-    let renamed = |x: &IrExpr| -> IrExpr {
-        match &x.kind {
-            IrExprKind::Var { id } => fresh.iter().find(|(o, _, _)| o == id).map_or_else(|| x.clone(), |(_, n, t)| var(*n, t.clone())),
-            _ => x.clone(),
-        }
-    };
+    // A nested place's write-back (#3092) binds `var` temps and stores a
+    // rebuilt tuple: the err arm gets its own temps, and every buffer read —
+    // at any depth of a statement — reads the err arm's buffer.
+    let mut subst: Vec<(VarId, IrExpr)> = fresh.iter().map(|(o, n, t)| (*o, var(*n, t.clone()))).collect();
     let err_wbs: Vec<IrStmt> = wbs
         .iter()
-        .map(|s| IrStmt {
-            kind: match &s.kind {
-                IrStmtKind::Assign { var: v, value } => IrStmtKind::Assign { var: *v, value: renamed(value) },
-                IrStmtKind::FieldAssign { target, field, value } => {
-                    IrStmtKind::FieldAssign { target: *target, field: *field, value: renamed(value) }
-                }
-                other => other.clone(),
-            },
-            span: s.span,
+        .map(|s| {
+            let mut s = subst.iter().fold(s.clone(), |s, (o, r)| crate::substitute::substitute_var_in_stmt(&s, *o, r));
+            if let IrStmtKind::Bind { var: v, ty, .. } = &mut s.kind {
+                let t = vt.alloc(sym("__mp_place"), ty.clone(), Mutability::Var, None);
+                subst.push((*v, var(t, ty.clone())));
+                *v = t;
+            }
+            s
         })
         .collect();
     let err_inner = IrPattern::Tuple {

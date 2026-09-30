@@ -1109,25 +1109,7 @@ pub(crate) type MutFns = std::collections::HashMap<String, MutEntry>;
 /// `(ret, buf1, …, bufN)` otherwise — and each call site writes each back.
 pub(crate) type MutEntry = (usize, Ty, bool, Ty, Vec<(usize, Ty)>);
 
-/// The caller-side slot the mutated buffer writes back into.
-enum ArgPlace {
-    Var(VarId),
-    Field(VarId, almide_base::intern::Sym),
-    /// No named place (a temp expression) — native mutates an unobservable
-    /// temporary there as well, so skipping the writeback is equivalent.
-    None,
-}
-
-fn mut_arg_place(arg: &IrExpr) -> ArgPlace {
-    match &arg.kind {
-        IrExprKind::Var { id } => ArgPlace::Var(*id),
-        IrExprKind::Member { object, field } => match &object.kind {
-            IrExprKind::Var { id } => ArgPlace::Field(*id, *field),
-            _ => ArgPlace::None,
-        },
-        _ => ArgPlace::None,
-    }
-}
+use crate::mut_param_place::{mut_arg_place, writeback_stmts, ArgPlace};
 
 struct CallSiteRewriter<'a> {
     mut_fns: &'a MutFns,
@@ -1216,17 +1198,7 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
             span: None,
             def_id: None,
         };
-        let writeback = match place {
-            ArgPlace::Var(v) => Some(IrStmt {
-                kind: IrStmtKind::Assign { var: v, value: buf_read(mut_ty.clone()) },
-                span,
-            }),
-            ArgPlace::Field(obj, field) => Some(IrStmt {
-                kind: IrStmtKind::FieldAssign { target: obj, field, value: buf_read(mut_ty.clone()) },
-                span,
-            }),
-            ArgPlace::None => None,
-        };
+        let writeback = writeback_stmts(&place, buf_read(mut_ty.clone()), self.vt, span);
 
         let (bind_stmt, tail) = if was_unit {
             // Callee now returns the buffer directly.
@@ -1273,9 +1245,7 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
         };
 
         let mut stmts = vec![bind_stmt];
-        if let Some(wb) = writeback {
-            stmts.push(wb);
-        }
+        stmts.extend(writeback);
         *expr = IrExpr {
             kind: IrExprKind::Block { stmts, expr: Some(Box::new(tail)) },
             ty: if was_unit { Ty::Unit } else { orig_ty },
@@ -1332,12 +1302,7 @@ impl<'a> CallSiteRewriter<'a> {
             pats.push(IrPattern::Bind { var: buf, ty: ty.clone() });
             elem_tys.push(ty.clone());
             let read = var_read(buf, ty.clone());
-            let kind = match place {
-                ArgPlace::Var(v) => IrStmtKind::Assign { var: v, value: read },
-                ArgPlace::Field(obj, field) => IrStmtKind::FieldAssign { target: obj, field, value: read },
-                ArgPlace::None => continue,
-            };
-            writebacks.push(IrStmt { kind, span });
+            writebacks.extend(writeback_stmts(&place, read, self.vt, span));
         }
         call.ty = Ty::Tuple(elem_tys);
         let mut stmts = vec![IrStmt {
