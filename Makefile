@@ -98,6 +98,7 @@ verify-trust:
 	proofs/check.sh
 	proofs/gate.sh
 	proofs/corpus-wall.sh
+	proofs/structural-wall.sh
 	cargo test -p almide-mir
 	cargo test -p almide-verify
 	@## Record WHICH tree+toolchain this verification describes, so a `make
