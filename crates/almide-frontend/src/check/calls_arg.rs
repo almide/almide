@@ -331,7 +331,7 @@ impl Checker {
             a.starts_with(b) && a[b.len()..].starts_with('_')
                 || b.starts_with(a) && b[a.len()..].starts_with('_')
         };
-        let mut siblings = crate::stdlib::module_functions(module);
+        let mut siblings = crate::stdlib::module_functions_current(module);
         siblings.sort_unstable();
         for name in siblings {
             if name == func || !same_stem(name, func) {

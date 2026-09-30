@@ -331,6 +331,16 @@ pub fn module_functions_all(module: &str) -> Vec<&'static str> {
     module_functions(module)
 }
 
+/// The module's surface minus its `@deprecated` fns: what a suggestion may
+/// name. A "did you mean" that steers a writer onto a deprecated spelling
+/// (`list.lengt` → `list.length`, #3085) hands them the next warning.
+pub fn module_functions_current(module: &str) -> Vec<&'static str> {
+    module_functions(module)
+        .into_iter()
+        .filter(|f| crate::bundled_sigs::lookup_deprecation(module, f).is_none())
+        .collect()
+}
+
 /// Look up a stdlib function's type signature. Since the Stdlib
 /// Declarative Unification arc landed, every stdlib module is
 /// `@inline_rust`-bundled `.almd`, so the lookup delegates straight
