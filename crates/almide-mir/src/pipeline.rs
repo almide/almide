@@ -499,6 +499,8 @@ fn program_to_ir_with(
     // saw it and the raw Guard stmt survived to the lowering, whose fallback emitted
     // the scalar continuation against the Result ABI: invalid wasm (#1968).
     crate::lower::hoist_block_call_args(&mut ir);
+    // #3058: list-rest matches become the length-test chain the lowering runs.
+    crate::lower::desugar_list_rest_matches(&mut ir);
     // Guard → if restructure at the fn-body tail chain (conditional early return
     // expressed without early-return control flow — see desugar_guard.rs; shared
     // with classify: desugar-before-both).
