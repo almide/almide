@@ -89,16 +89,22 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
                 None => IrStmtKind::Assign { var, value: ir_val },
             }
         }
-        ast::Stmt::IndexAssign { target, index, value, .. } => {
-            let var = ctx.lookup_var(target).unwrap_or(VarId(0));
+        ast::Stmt::IndexAssign { target, path, index, value, .. } => {
             let ir_idx = lower_expr(ctx, index);
             let ir_val = lower_expr(ctx, value);
-            let var_ty = &ctx.var_table.get(var).ty;
-            if var_ty.is_map() {
-                IrStmtKind::MapInsert { target: var, key: ir_idx, value: ir_val }
-            } else {
-                IrStmtKind::IndexAssign { target: var, index: ir_idx, value: ir_val }
-            }
+            let write = |ctx: &mut LowerCtx, var: VarId| {
+                if ctx.var_table.get(var).ty.is_map() {
+                    IrStmtKind::MapInsert { target: var, key: ir_idx, value: ir_val }
+                } else {
+                    IrStmtKind::IndexAssign { target: var, index: ir_idx, value: ir_val }
+                }
+            };
+            lower_place_write(ctx, target, path, span, write)
+        }
+        ast::Stmt::FieldAssign { target, path, field, value, .. } if !path.is_empty() => {
+            let ir_val = lower_expr(ctx, value);
+            let field = *field;
+            lower_place_write(ctx, target, path, span, move |_, var| IrStmtKind::FieldAssign { target: var, field, value: ir_val })
         }
         ast::Stmt::FieldAssign { target, field, value, .. } => {
             let ir_val = lower_expr(ctx, value);
@@ -140,6 +146,59 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
     };
 
     IrStmt { kind, span }
+}
+
+/// Write through an assignment target's place (#3064). A one-level target
+/// (`xs[i] = v`, `s.f = v`, empty `path`) is `write` on the root binding
+/// itself. A nested one — `o.inner.xs = v`, `o.m[k] = v` — reads each record
+/// on the path into a fresh `var`, applies `write` to the innermost, and
+/// stores each back into its holder, innermost first:
+///
+/// ```text
+/// { var t1 = o.inner; t1.xs = v; o.inner = t1 }
+/// ```
+///
+/// Only one-level writes reach the backends, so native, wasm and the
+/// interpreter carry the nested form with the value semantics each already
+/// gives `s.f = v`: an alias of `o` or of `o.inner` taken before the write
+/// keeps the old value. The temps are `alloc_fresh`, so two nested writes in
+/// one block never share a name (#3049).
+fn lower_place_write(
+    ctx: &mut LowerCtx,
+    target: &almide_base::intern::Sym,
+    path: &[almide_base::intern::Sym],
+    span: Option<almide_base::Span>,
+    write: impl FnOnce(&mut LowerCtx, VarId) -> IrStmtKind,
+) -> IrStmtKind {
+    let root = ctx.lookup_var(target).unwrap_or(VarId(0));
+    if path.is_empty() {
+        return write(ctx, root);
+    }
+    let mk = |kind: IrExprKind, ty: Ty| IrExpr { kind, ty, span, def_id: None };
+    let mut stmts = Vec::new();
+    let mut chain: Vec<(VarId, almide_base::intern::Sym, VarId, Ty)> = Vec::new();
+    let (mut holder, mut holder_ty) = (root, ctx.var_table.get(root).ty.clone());
+    for step in path {
+        let step_ty = match ctx.env.resolve_named(&holder_ty) {
+            Ty::Record { fields } | Ty::OpenRecord { fields } =>
+                fields.iter().find(|(n, _)| n == step).map(|(_, t)| t.clone()).unwrap_or(Ty::Unknown),
+            _ => Ty::Unknown,
+        };
+        let tmp = ctx.var_table.alloc_fresh("__place", step_ty.clone(), Mutability::Var, span);
+        let read = mk(IrExprKind::Member {
+            object: Box::new(mk(IrExprKind::Var { id: holder }, holder_ty.clone())),
+            field: *step,
+        }, step_ty.clone());
+        stmts.push(IrStmt { kind: IrStmtKind::Bind { var: tmp, mutability: Mutability::Var, ty: step_ty.clone(), value: read }, span });
+        chain.push((holder, *step, tmp, step_ty.clone()));
+        (holder, holder_ty) = (tmp, step_ty);
+    }
+    stmts.push(IrStmt { kind: write(ctx, holder), span });
+    for (holder, field, tmp, ty) in chain.into_iter().rev() {
+        let value = mk(IrExprKind::Var { id: tmp }, ty);
+        stmts.push(IrStmt { kind: IrStmtKind::FieldAssign { target: holder, field, value }, span });
+    }
+    IrStmtKind::Expr { expr: mk(IrExprKind::Block { stmts, expr: None }, Ty::Unit) }
 }
 
 /// The source span of a statement.
