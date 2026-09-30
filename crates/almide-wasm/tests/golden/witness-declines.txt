@@ -47,7 +47,7 @@ call-arg:Range	1
 call-arg:TupleIndex-object:Unwrap	1
 call-arg:UnwrapOr-carrier:Member	2
 call-arg:borrowed-temp	9
-call:panic-arg	1
+call:panic-arg	7
 caps:argv-in-plain-fn	8
 captures:cell	24
 display	10
@@ -63,8 +63,8 @@ heap-operand:OptionNone	2
 heap-operand:UnwrapOr	5
 interp-part:IndexAccess:non-list	2
 interp-part:UnwrapOr-carrier:Member	1
-loop-carried-assign	28
-loop-exit	4
+loop-carried-assign	29
+loop-exit	5
 main-err-carrier	2
 match-guard	18
 module-arg:retain-borrowed-temp	7
