@@ -836,9 +836,9 @@ When a callback that never errs leaves `E` unconstrained, annotate the result:
 // @since 0.5.0 or earlier
 list.len(xs: List[A]) -> Int
 
-// Element count; same as list.len.
+// Alias of list.len.
 // @since 0.19.2 or earlier
-list.length(xs: List[A]) -> Int
+list.length(xs: List[A]) -> Int   (deprecated — use list.len)
 
 // Element at index i, or none when out of range.
 // @since 0.5.0 or earlier
