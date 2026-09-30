@@ -88,6 +88,10 @@ impl Emitter<'_> {
                     .i32_load(len_memarg())
                     .call(F_APPEND_COPY)
                     .local_set(self.cursor_local);
+                // #2973: the formatted text is this site's own block — the
+                // bytes are copied into the line, so its credit ends here.
+                let dec = self.dec_fn_of(STR);
+                self.f.instructions().local_get(self.tmp_i32_local).call(dec);
             }
             STR => {
                 if nested {
