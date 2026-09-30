@@ -303,6 +303,7 @@ impl Emitter<'_> {
             em.f.instructions().local_get(hlist).local_get(hline).call(F_LIST_PUSH_4).local_set(hlist);
             Ok(())
         })?;
+        self.fs_frames_release_raw(hraw, herr);
         let hs = self.hold_i32()?;
         {
             let mut i = self.f.instructions();
@@ -351,6 +352,16 @@ impl Emitter<'_> {
         let _ = i;
         self.release_i64();
         Ok((hraw, hlen, herr))
+    }
+
+    /// After a frames walk: the raw buffer `fs_frames_or_err` pulled is
+    /// scratch once every frame is copied out, unless it became the err
+    /// payload (#2977 — every `env.args` / `fs.read_lines` / … call kept it).
+    pub(crate) fn fs_frames_release_raw(&mut self, hraw: u32, herr: u32) {
+        let mut i = self.f.instructions();
+        i.local_get(herr).i32_eqz().if_(BlockType::Empty);
+        i.local_get(hraw).call(F_DEC_FLAT);
+        i.end();
     }
 
     /// Walk the u32-LE length-prefixed frames in the raw block (the
@@ -479,6 +490,7 @@ impl Emitter<'_> {
                     em.f.instructions().local_set(params[0]);
                     Ok(())
                 })?;
+                self.fs_frames_release_raw(hraw, herr);
                 // ok(acc) / err passthrough
                 let hs = self.hold_i32()?;
                 {
@@ -510,6 +522,7 @@ impl Emitter<'_> {
                     em.lower_stmt_expr(body)?;
                     Ok(())
                 })?;
+                self.fs_frames_release_raw(hraw, herr);
                 let hs = self.hold_i32()?;
                 {
                     let mut i = self.f.instructions();
