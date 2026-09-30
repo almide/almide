@@ -195,6 +195,7 @@
 22	0	142	16	spec/wasm_cross/flat_map_aliased_field.almd
 0	0	0	0	spec/wasm_cross/flight_pid_control.almd
 25	21	511	25	spec/wasm_cross/float32_arithmetic_rounds.almd
+59	29	1322	32	spec/wasm_cross/float32_display_shortest.almd
 1	0	11	1	spec/wasm_cross/float32_literal_excess_precision.almd
 2	1	6	2	spec/wasm_cross/float_clamp_invalid.almd
 7	0	12	0	spec/wasm_cross/float_clamp_negative_zero.almd

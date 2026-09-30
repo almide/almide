@@ -396,5 +396,9 @@ spec/wasm_cross/mut_param_move_mode_gaps.almd :: fill2
 # incumbent MIR brick's executable subset. The STRUCTURAL leg (the default)
 # lowers all sixteen; native, wasm and interp print identical bytes.
 # (2026-09-30, #3058) fifteen of the sixteen now lower on the MIR rung too;
-# show_float32 remains (the Float32 printer, see the #3058 note above).
-spec/wasm_cross/sized_tail_literal_matrix.almd :: show_float32
+# (2026-09-30, C-372/#3079) and the sixteenth, show_float32: a Float32 in `${}`
+# prints through the self-hosted f32 Schubfach (float32.to_string_compound).
+# (2026-09-30, C-372) the Float32 display fixture: `${(t, t)}`, a tuple with a
+# Float32 element, walls on the MIR rung (a record with one lowers); native
+# falls back to v0 and the three legs agree.
+spec/wasm_cross/float32_display_shortest.almd :: main  # #3086

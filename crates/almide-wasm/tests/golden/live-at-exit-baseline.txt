@@ -51,6 +51,7 @@
 1	#2969	spec/wasm_cross/fan_pure_thunks.almd
 4	#2977	spec/wasm_cross/filter_map_conditional_arm.almd
 6	#2977	spec/wasm_cross/flat_map_aliased_field.almd
+27	#2973	spec/wasm_cross/float32_display_shortest.almd
 7	#2973	spec/wasm_cross/float_clamp_negative_zero.almd
 5	#2973	spec/wasm_cross/float_interp_forms.almd
 6	#2973	spec/wasm_cross/float_round_negzero.almd
