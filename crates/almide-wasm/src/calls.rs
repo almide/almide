@@ -326,6 +326,9 @@ impl Emitter<'_> {
                     if self.lower_conv_arg(a, want, owned_pos, true_tail, must_transfer)? {
                         no_transfer = true;
                     }
+                    if owned_pos && param_mut.get(k).copied().unwrap_or(false) {
+                        self.detach_global_mut_arg(a, i)?;
+                    }
                 }
                 crate::witness::modes::site_end(site, index);
                 let parked = self.borrowed_temps.len() > depth;
@@ -731,6 +734,9 @@ impl Emitter<'_> {
             let owned_pos = param_owned.get(k).copied().unwrap_or(true);
             if self.lower_conv_arg(a, want, owned_pos, true_tail, must_transfer)? {
                 no_transfer = true;
+            }
+            if owned_pos && param_mut.get(k).copied().unwrap_or(false) {
+                self.detach_global_mut_arg(a, i)?;
             }
         }
         crate::witness::modes::site_end(site, index);

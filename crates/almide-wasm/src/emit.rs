@@ -239,7 +239,8 @@ fn emit_program_pass(
 
     // Function-VALUE work shared by every lowering below (funcref table,
     // call_indirect types, lifted lambdas).
-    let work = FnWork { region_pure: std::cell::RefCell::new(region_pure), ..FnWork::default() };
+    let reach = crate::global_reach::global_reach(&program_fns, &table, &global_map);
+    let work = FnWork { region_pure: std::cell::RefCell::new(region_pure), global_reach: reach.into(), ..FnWork::default() };
     work.bounded_lines.set(bounded_lines);
     // Calls made from display-helper bodies (BFS roots).
     let mut display_helper_calls: std::collections::HashSet<usize> = HashSet::new();
