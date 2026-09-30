@@ -31,6 +31,7 @@ pub mod annotations;
 pub mod mut_param;
 pub mod effect_abi;
 mod mut_param_err_carry;
+mod mut_param_place;
 mod mut_param_unpropagated;
 pub mod exit_code;
 pub mod fusion;
