@@ -116,7 +116,16 @@ impl Emitter<'_> {
             }
             self.lower_arm_body(&arm.body, result, tail)?;
             self.f.instructions().else_();
-            if arms.len() > 1 {
+            if arms.len() == 2 && arm.guard.is_none() && arms[1].guard.is_none() && result_halves(&arm.pattern, &arms[1].pattern) {
+                // `ok(..) => a, err(..) => b` with irrefutable payloads: a
+                // Result tag is 0 or 1, so the second arm is the else — no
+                // second tag test, no trap after it.
+                let last = &arms[1];
+                self.witness_branch_arm();
+                self.emit_pattern_binds(&last.pattern, subj_ty, scr)?;
+                self.witness_pattern_views(&last.pattern);
+                self.lower_arm_body(&last.body, result, tail)
+            } else if arms.len() > 1 {
                 self.lower_arm_chain(&arms[1..], subj_ty, scr, result, tail)
             } else {
                 // The checker promises exhaustiveness — if it's ever wrong
@@ -657,5 +666,16 @@ impl Emitter<'_> {
             NamedDef::Record(r) => Ok(r.fields.iter().map(|f| (f.name.clone(), f.ty, f.offset)).collect()),
             NamedDef::Excluded => unsup("pattern:record-excluded"),
         }
+    }
+}
+
+/// `ok(p)` then `err(q)` (or the reverse), both payload patterns irrefutable:
+/// the pair covers every Result, so the second is the first's else.
+fn result_halves(a: &IrPattern, b: &IrPattern) -> bool {
+    match (a, b) {
+        (IrPattern::Ok { inner: x }, IrPattern::Err { inner: y }) | (IrPattern::Err { inner: x }, IrPattern::Ok { inner: y }) => {
+            pattern_irrefutable(x) && pattern_irrefutable(y)
+        }
+        _ => false,
     }
 }

@@ -29,6 +29,7 @@ pub mod substitute;
 pub mod effect;
 pub mod annotations;
 pub mod mut_param;
+mod mut_param_err_carry;
 mod mut_param_unpropagated;
 pub mod exit_code;
 pub mod fusion;

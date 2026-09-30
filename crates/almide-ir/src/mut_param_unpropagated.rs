@@ -16,16 +16,15 @@
 //! The `!` cannot fire, so the write-back runs exactly as native's `&mut`
 //! write does, and the value is the one the Result consumer reads.
 //!
-//! A callee that CAN err is left alone: when it writes and then errs,
-//! native keeps the partial write, and the C-132 carrier returns no buffer
-//! on the err path. Which of those the language promises is the open ruling
-//! in #2917 / #1871, so those sites stay walled.
+//! A callee that CAN err is not settled here: it carries its buffer on the
+//! err arm too (#2917, `mut_param_err_carry`).
 //!
-//! "Never-err" is a local scan of the ORIGINAL body (before the rewrite
-//! strips a declared-Result fn's ok layer): no `err(..)` construction and
-//! no `!` / `?` anywhere in it. A call it makes without `!` cannot raise
-//! through it. Anything else counts as can-err, so the scan can wall a
-//! site that was safe, but it never admits one that was not.
+//! "Never-err" is a scan of the ORIGINAL body (before the rewrite strips a
+//! declared-Result fn's ok layer): no `err(..)` construction, and every `!` /
+//! `?` is over a call to another never-err effect fn (a greatest fixpoint, so
+//! a recursive walk over its own call qualifies). A call it makes without `!`
+//! cannot raise through it. Anything else counts as can-err and takes the
+//! err-carrying form (`mut_param_err_carry`).
 
 use crate::visit::IrVisitor;
 use crate::visit_mut::{walk_expr_mut, IrMutVisitor};
@@ -33,45 +32,90 @@ use crate::*;
 use almide_lang::types::Ty;
 use std::collections::HashSet;
 
-/// Does `body` have no exit through its err channel: no `err(..)` and no
-/// propagating `!` / `?`?
-fn never_errs(body: &IrExpr) -> bool {
-    struct Raises(bool);
-    impl IrVisitor for Raises {
+/// Does `body` have no exit through its err channel: no `err(..)`, and every
+/// propagating `!` / `?` is over a call to a fn `quiet` admits (a never-err
+/// effect fn, so the propagation cannot fire)?
+fn never_errs(body: &IrExpr, quiet: &dyn Fn(&str) -> bool) -> bool {
+    struct Raises<'q>(bool, &'q dyn Fn(&str) -> bool);
+    impl IrVisitor for Raises<'_> {
         fn visit_expr(&mut self, e: &IrExpr) {
-            if matches!(e.kind, IrExprKind::ResultErr { .. } | IrExprKind::Unwrap { .. } | IrExprKind::Try { .. }) {
-                self.0 = true;
+            match &e.kind {
+                IrExprKind::ResultErr { .. } => self.0 = true,
+                IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => {
+                    let quiet_call = match &expr.kind {
+                        IrExprKind::Call { target, .. } => {
+                            crate::mut_param::call_spelling(target).is_some_and(|n| (self.1)(&n))
+                        }
+                        _ => false,
+                    };
+                    if !quiet_call {
+                        self.0 = true;
+                    }
+                }
+                _ => {}
             }
             if !self.0 {
                 crate::visit::walk_expr(self, e);
             }
         }
     }
-    let mut r = Raises(false);
+    let mut r = Raises(false, quiet);
     r.visit_expr(body);
     !r.0
 }
 
-/// Every `MutFns` key that names a never-err EFFECT fn, over the keys
-/// `collect_mut_fns` gives each fn (main-scope bare; module bare, dotted,
-/// mangled, and a unique method spelling).
-pub(crate) fn never_err_effect_keys(program: &IrProgram, is_mut_key: impl Fn(&str) -> bool) -> HashSet<String> {
-    let admit = |f: &IrFunction| f.is_effect && never_errs(&f.body);
-    let mut keys = HashSet::new();
-    for f in program.functions.iter().filter(|f| admit(f)) {
-        keys.insert(crate::mut_param::scope_key("", f.name.as_str()));
+/// Every call-site spelling of a fn: main-scope bare, or a module fn's
+/// mangled, dotted, bare (a unique method) and scoped keys — the keys
+/// `collect_mut_fns` gives it.
+pub(crate) fn fn_spellings(module: Option<&str>, fname: &str) -> Vec<String> {
+    match module {
+        None => vec![crate::mut_param::scope_key("", fname)],
+        Some(mname) => vec![
+            format!("almide_rt_{}_{}", mname.replace('.', "_"), fname.replace('.', "_")),
+            format!("{mname}.{fname}"),
+            fname.to_string(),
+            crate::mut_param::scope_key(mname, fname),
+        ],
     }
+}
+
+/// Every EFFECT fn that can never take its err exit, as the keys of
+/// [`fn_spellings`]. A greatest fixpoint: a fn stays in the set while every
+/// `!` / `?` in its body is over a call to a fn still in the set, so a
+/// recursive walk whose only propagation is its own call (`walk(buf, n - 1)!`)
+/// is never-err, and one `err(..)` anywhere in a cycle takes the cycle out.
+pub(crate) fn never_err_effect_fn_keys(program: &IrProgram) -> HashSet<String> {
+    let mut cands: Vec<(Option<&str>, &IrFunction)> = Vec::new();
+    cands.extend(program.functions.iter().filter(|f| f.is_effect).map(|f| (None, f)));
     for m in &program.modules {
-        for f in m.functions.iter().filter(|f| admit(f)) {
-            let (mname, fname) = (m.name.as_str(), f.name.as_str());
-            keys.insert(format!("almide_rt_{}_{}", mname.replace('.', "_"), fname.replace('.', "_")));
-            keys.insert(format!("{mname}.{fname}"));
-            keys.insert(fname.to_string());
-            keys.insert(crate::mut_param::scope_key(mname, fname));
+        cands.extend(m.functions.iter().filter(|f| f.is_effect).map(|f| (Some(m.name.as_str()), f)));
+    }
+    // A bare `Type.method` spelling names a module fn only when exactly one
+    // fn in the program spells it (the `collect_mut_fns` rule); an ambiguous
+    // one must not make a raising call look quiet.
+    let mut spelled: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for f in program.functions.iter().chain(program.modules.iter().flat_map(|m| m.functions.iter())) {
+        *spelled.entry(f.name.as_str()).or_insert(0) += 1;
+    }
+    let spellings = |m: Option<&str>, f: &IrFunction| {
+        let mut ks = fn_spellings(m, f.name.as_str());
+        if m.is_some() && !(f.name.as_str().contains('.') && spelled.get(f.name.as_str()) == Some(&1)) {
+            ks.retain(|k| k != f.name.as_str());
+        }
+        ks
+    };
+    loop {
+        let keys: HashSet<String> = cands.iter().flat_map(|(m, f)| spellings(*m, f)).collect();
+        let before = cands.len();
+        cands.retain(|(m, f)| {
+            let scope = m.unwrap_or("");
+            let quiet = |n: &str| keys.contains(n) || keys.contains(&crate::mut_param::scope_key(scope, n));
+            never_errs(&f.body, &quiet)
+        });
+        if cands.len() == before {
+            return keys;
         }
     }
-    keys.retain(|k| is_mut_key(k));
-    keys
 }
 
 /// Rewrite every unpropagated move-mode block whose callee is in `keys`.
