@@ -63,6 +63,8 @@ use std::sync::Mutex;
 use paths::{Branches, Ev};
 
 /// The per-path event log and its renderer (split for the file budget).
+#[path = "witness_lines.rs"]
+mod lines;
 #[path = "witness_paths.rs"]
 mod paths;
 
@@ -210,6 +212,14 @@ impl WitnessRecorder {
         self.ops(o, "i");
     }
 
+    /// #2755: a LOOP-CARRIED owner received at the top of an iteration (a
+    /// heap `list.fold` accumulator): one credit arrives with the block (`i`),
+    /// and the iteration must release it or hand it on before it ends.
+    pub fn carried_owned(&mut self, local: u32) {
+        let o = self.fresh_obj(local, true);
+        self.ops(o, "i");
+    }
+
     /// A droppable param of this frame's signature that it only borrows
     /// (param_borrow.rs): [`Self::param_borrowed`], noted in the convention.
     pub fn param_lent(&mut self, local: u32) {
@@ -336,6 +346,12 @@ impl WitnessRecorder {
     /// that arm is over).
     pub fn frame_replaced(&mut self) {
         self.branches.exit(&mut self.log);
+    }
+
+    /// #2755: the process ABORTS here (exit_plan.rs `Continuation::Abort`):
+    /// the path ends in the checker's abort terminal.
+    pub fn abort_end(&mut self) {
+        self.branches.abort(&mut self.log);
     }
 
     /// A branch site opens (`if` / `match`, #2756).

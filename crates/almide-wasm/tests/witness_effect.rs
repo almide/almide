@@ -10,8 +10,9 @@
 //! parked carrier is shared, released with the frame and leaves (`iadm` on
 //! that path), the payload read out of it is a view a consumer takes a
 //! credit of (`ad`). A frame with several `!` sites folds each exit into a
-//! v5 branch-return item (`i{admx|}d`). A raw position `ok` / `err` still
-//! declines.
+//! v5 branch-return item (`i{admx|}d`). A raw position `err(e)` raises
+//! through a recorded exit (witness_effect_raise.rs); a raw position `ok(v)`
+//! over a borrowed value still declines.
 
 const PROGRAM: &str = r#"effect fn echo(s: String) -> String = s
 
@@ -105,5 +106,9 @@ fn effect_frames_witness_the_carrier_and_unhooked_exits_decline() {
     // The folded item is checked from the count at its site to exactly 0:
     // an exit that skipped the carrier's release is a leak the checker sees.
     assert!(!accepted("i{amx|}d\n"));
-    assert_eq!(w.get("checked").map(String::as_str), Some("!decline:effect:carrier\n"));
+    // A raw-position `err` raises through a recorded exit: the literal
+    // payload moves into the err block, which leaves on that arm; the ok
+    // carrier leaves on the other.
+    assert_eq!(w.get("checked").map(String::as_str), Some("{|im}\n{|im}\n{|im}\n"));
+    assert!(accepted(w.get("checked").map(String::as_str).unwrap_or("")));
 }

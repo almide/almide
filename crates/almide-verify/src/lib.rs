@@ -9,7 +9,7 @@
 //!
 //! | property          | mirrors (proofs/)                          | accepts iff |
 //! |-------------------|--------------------------------------------|-------------|
-//! | `ownership`       | `OwnershipChecker.check_xc`                | every object's refcount stream is fault-free and ends at 0 |
+//! | `ownership`       | `OwnershipChecker.check_xc`                | every object's refcount stream is fault-free and ends at 0 (a path ending in the abort terminal `t` need only be fault-free) |
 //! | `names`           | `NameTotality.check_names_cert`            | used ids ⊆ defined ids |
 //! | `caps`            | `CapabilityBound.check_caps_cert`          | used capabilities ⊆ declared |
 //! | `caps-transitive` | `CapabilityReach.check_prog_cert`          | every function's transitive reach ⊆ its declaration |
