@@ -531,9 +531,6 @@ template = "{{ almide_stdout_flush(); std::thread::scope(|__s| {{ {spawns} {join
 [fan_effect]
 template = "{{ almide_stdout_flush(); std::thread::scope(|__s| -> Result<_, String> {{ {spawns} Ok({join_expr}) }})? }}"
 
-[extern_fn]
-template = "use {module}::{function} as {name};"
-
 [loop_block]
 template = "loop {{\n{body}\n}}"
 

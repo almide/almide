@@ -183,12 +183,16 @@ fn infer_function_borrows(func: &IrFunction, scope: &Scope) -> Vec<ParamBorrow> 
     if has_inline_template {
         return func.params.iter().map(|_| ParamBorrow::Own).collect();
     }
-    // An `@extern(rust, …)` fn is a hole too, and its wrapper is written
+    // An `@extern(rust / c, …)` fn is a hole too, and its wrapper is written
     // against hand-written host code, so its ABI is FIXED by the param type
     // rather than inferred from a body it does not have (#3045: an empty body
-    // inferred `Ref` for Bytes while the wrapper took the value).
-    if is_extern_rust_fn(func) {
-        return func.params.iter().map(|p| extern_rust_borrow_mode(p, scope.round.records)).collect();
+    // inferred `Ref` for Bytes while the wrapper took the value; #3054: the
+    // same split for a C `String`).
+    if let Some((kind, _)) = native_extern(func) {
+        return func.params.iter().map(|p| match kind {
+            NativeExtern::Rust => extern_rust_borrow_mode(p, scope.round.records),
+            NativeExtern::C => extern_c_borrow_mode(p),
+        }).collect();
     }
     let has_intrinsic = func.attrs.iter().any(|a| a.name.as_str() == "intrinsic");
     if has_intrinsic {
@@ -525,10 +529,23 @@ fn intrinsic_borrow_mode(ty: &Ty, records: &HashSet<String>) -> ParamBorrow {
     }
 }
 
-/// Does `func` bind to a Rust host fn (`@extern(rust, "mod", "fn")`)? Its
-/// wrapper is rendered by `walker::extern_c::render_native_call`.
-pub(crate) fn is_extern_rust_fn(func: &IrFunction) -> bool {
-    func.extern_attrs.iter().any(|a| a.target.as_str() == "rust")
+/// The native binding the Rust renderer emits for `func` — the first `@extern`
+/// attr that names one (`rust` / `rs` / `c`), the renderer's own choice
+/// (`walker::try_render_extern_fn`), so the borrow modes and the wrapper read
+/// the same attr.
+pub(crate) fn native_extern(func: &IrFunction) -> Option<(NativeExtern, &almide_lang::ast::ExternAttr)> {
+    func.extern_attrs.iter().find_map(|a| native_extern_kind(a.target.as_str()).map(|k| (k, a)))
+}
+
+/// The `@extern(c)` parameter modes (#3054): a `String` is read as `&str` (the
+/// wrapper copies it into a NUL-terminated `CString`), every other C type is a
+/// scalar passed by value. The types themselves are
+/// `almide_lang::types::extern_abi`'s table; `check` refuses the rest (E090).
+fn extern_c_borrow_mode(param: &IrParam) -> ParamBorrow {
+    match param.ty {
+        Ty::String => ParamBorrow::RefStr,
+        _ => ParamBorrow::Own,
+    }
 }
 
 /// The `@extern(rust)` parameter ABI (#3045) — the ONE rule both the call
@@ -541,11 +558,13 @@ pub(crate) fn is_extern_rust_fn(func: &IrFunction) -> bool {
 /// - `mut` params are `&mut T`, as for every Almide fn;
 /// - `Matrix` is borrowed like `Bytes`: both are `AlmideRcCow` values in
 ///   generated code, and the wrapper hands the host the raw
-///   `&[u8]` / `&AlmideMatrix` behind the handle, never the handle.
+///   `&[u8]` / `&AlmideMatrix` behind the handle, never the handle;
+/// - a fn value is borrowed, `&dyn Fn(A) -> B`: the host calls it during the
+///   call, and the caller's closure needs no `Rc` handle to be passed.
 ///
-/// Read-only heap values are borrowed (`&str`, `&[T]`, `&[u8]`,
-/// `&AlmideMatrix`, `&Record`, `&AlmideMap`, `&AlmideSet`); scalars and the
-/// value-shaped types (`Option`, `Result`, tuples, variants, fn values) are
+/// Read-only heap values and callables are borrowed (`&str`, `&[T]`, `&[u8]`,
+/// `&AlmideMatrix`, `&Record`, `&AlmideMap`, `&AlmideSet`, `&dyn Fn`); scalars
+/// and the value-shaped types (`Option`, `Result`, tuples, variants) are
 /// passed owned. Documented in `docs/specs/module-system.md` §11.1 and gated
 /// by `tests/extern_rust_abi_test.rs`.
 pub(crate) fn extern_rust_borrow_mode(param: &IrParam, records: &HashSet<String>) -> ParamBorrow {
@@ -553,7 +572,7 @@ pub(crate) fn extern_rust_borrow_mode(param: &IrParam, records: &HashSet<String>
         return ParamBorrow::RefMut;
     }
     match &param.ty {
-        Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _) => ParamBorrow::Ref,
+        Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _) | Ty::Fn { .. } => ParamBorrow::Ref,
         ty => intrinsic_borrow_mode(ty, records),
     }
 }

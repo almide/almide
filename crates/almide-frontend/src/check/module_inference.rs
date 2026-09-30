@@ -499,6 +499,13 @@ impl Checker {
     }
 
     fn check_decl(&mut self, decl: &mut ast::Decl) {
+        // E090: an `@extern(c)` signature must be one the C ABI table has
+        // rows for — with a body (`= _`) or without.
+        if let ast::Decl::Fn { name, params, return_type, extern_attrs, span, .. } = &*decl
+            && !extern_attrs.is_empty()
+        {
+            self.reject_extern_c_types(name.as_str(), params, return_type, extern_attrs, *span);
+        }
         match decl {
             // E057: a fn DECLARATION with no body. The parser keeps the
             // bodyless form for @extern/@intrinsic declarations (and the

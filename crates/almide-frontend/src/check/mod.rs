@@ -33,6 +33,7 @@ mod exit_literal;
 mod bang_error_channel;
 mod lambda_channel;
 mod intrinsic_authority;
+mod extern_abi_check;
 mod prim_wrappers;
 mod exhaustiveness;
 mod call_defaults;
