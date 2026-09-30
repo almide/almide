@@ -2,7 +2,8 @@
 //! every witness its build produced, in the format `almide-verify bundle`
 //! reads (crates/almide-verify/src/bundle.rs).
 //!
-//! Usage: emit_structural_bundle <program.almd> [--only <property> <function>]
+//! Usage: emit_structural_bundle <program.almd> [--artifact <file.wasm>]
+//!        emit_structural_bundle <program.almd> --only <property> <function>
 //!
 //! The program goes through the PRODUCT route (`almide::wasm_route`, the
 //! function `almide build --target wasm` calls, build form) with the
@@ -16,6 +17,13 @@
 //!   function (cert_project.rs);
 //! - `caps` per source-declared function and one `caps-transitive` call
 //!   graph `(program)`, over the structural module (cert_project.rs).
+//!
+//! `--artifact <file.wasm>` (#2760) names the file `almide build --target
+//! wasm` wrote for the same program. The producer refuses unless those bytes
+//! are exactly the stock-WASI bytes its own route produced — the witnesses
+//! then describe that file — and writes a version-2 bundle whose `artifact`
+//! record carries the file's SHA-256 (the `sha2` crate; almide-verify
+//! recomputes it with its own implementation and rejects a mismatch).
 //!
 //! `--only` prints one witness's bytes instead (the gate.sh feeder). Exit 2
 //! when the program does not build or the witness is absent.
@@ -35,15 +43,21 @@ struct Record {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (rel, only) = match args.as_slice() {
-        [rel] => (rel.clone(), None),
-        [rel, flag, p, f] if flag == "--only" => (rel.clone(), Some((p.clone(), f.clone()))),
-        _ => fail("usage: emit_structural_bundle <program.almd> [--only <property> <function>]"),
+    let (rel, only, artifact) = match args.as_slice() {
+        [rel] => (rel.clone(), None, None),
+        [rel, flag, p, f] if flag == "--only" => (rel.clone(), Some((p.clone(), f.clone())), None),
+        [rel, flag, a] if flag == "--artifact" => {
+            // Absolute before the chdir below, so the bundle names the file
+            // the caller meant.
+            let a = std::path::absolute(a).unwrap_or_else(|e| fail(&format!("{a}: {e}")));
+            (rel.clone(), None, Some(a))
+        }
+        _ => fail("usage: emit_structural_bundle <program.almd> [--artifact <file.wasm> | --only <property> <function>]"),
     };
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     std::env::set_current_dir(&root).unwrap_or_else(|e| fail(&format!("cd {}: {e}", root.display())));
     let text = std::fs::read_to_string(&rel).unwrap_or_else(|e| fail(&format!("read {rel}: {e}")));
-    let (records, uncertified) = produce(&rel, &text);
+    let (records, uncertified, shipped) = produce(&rel, &text);
     if let Some((p, f)) = only {
         match records.iter().find(|r| r.property == p && r.function == f) {
             Some(r) => {
@@ -53,7 +67,26 @@ fn main() {
         }
         return;
     }
-    let mut out = format!("almide-certificate-bundle 1\nproducer almide-wasm emit_structural_bundle\nsource {rel}\n");
+    let mut out = match &artifact {
+        None => format!("almide-certificate-bundle 1\nproducer almide-wasm emit_structural_bundle\nsource {rel}\n"),
+        Some(path) => {
+            let file = std::fs::read(path).unwrap_or_else(|e| fail(&format!("read {}: {e}", path.display())));
+            if file != shipped {
+                fail(&format!(
+                    "{} ({} bytes) is not the stock-WASI module the route produced for {rel} ({} bytes) — the witnesses would describe other bytes",
+                    path.display(),
+                    file.len(),
+                    shipped.len()
+                ));
+            }
+            use sha2::Digest;
+            let hex: String = sha2::Sha256::digest(&file).iter().map(|b| format!("{b:02x}")).collect();
+            format!(
+                "almide-certificate-bundle 2\nproducer almide-wasm emit_structural_bundle\nsource {rel}\nartifact sha256 {hex} {}\n",
+                path.display()
+            )
+        }
+    };
     for r in &records {
         out.push_str(&format!("witness {} {} {}\n{}\n", r.property, r.bytes.len(), r.function, r.bytes));
     }
@@ -63,8 +96,9 @@ fn main() {
     let _ = std::io::stdout().write_all(out.as_bytes());
 }
 
-/// Build `rel` through the product route and collect every witness.
-fn produce(rel: &str, text: &str) -> (Vec<Record>, Vec<(String, String)>) {
+/// Build `rel` through the product route and collect every witness, with
+/// the stock-WASI bytes the witnesses describe.
+fn produce(rel: &str, text: &str) -> (Vec<Record>, Vec<(String, String)>, Vec<u8>) {
     use almide::wasm_route::{render_wasm_routed, ModuleSource, RouteOptions};
     almide_wasm::witness::start_collecting();
     let opts = RouteOptions { library: true, ..RouteOptions::default() };
@@ -105,5 +139,5 @@ fn produce(rel: &str, text: &str) -> (Vec<Record>, Vec<(String, String)>) {
         records.push(Record { property: "caps", function, bytes });
     }
     records.push(Record { property: "caps-transitive", function: "(program)".into(), bytes: graph });
-    (records, uncertified)
+    (records, uncertified, shipped)
 }
