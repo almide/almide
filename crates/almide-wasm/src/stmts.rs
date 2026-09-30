@@ -1,7 +1,6 @@
 //! Statement-position lowering (binds, assigns, index COW stores, loops,
 //! statement markers) — split from emitter.rs for the complexity budget.
 
-
 use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind, VarId};
 use wasm_encoder::BlockType;
 
@@ -296,7 +295,6 @@ impl Emitter<'_> {
         }
         Ok(())
     }
-
 
     pub(crate) fn rc_own(&mut self, idx: u32, ty: SliceTy) {
         self.rc_owned.insert(idx);
@@ -608,7 +606,6 @@ impl Emitter<'_> {
                 }
 
 }
-
 
 impl Emitter<'_> {
     /// `Assign` lowering — the share/dec discipline (RC-3/RC-5) plus the
