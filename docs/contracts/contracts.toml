@@ -3913,6 +3913,7 @@ evidence  = [
   { path = "spec/wasm_cross/closure_captured_map_records.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_writer_mut_from_declaration.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_reads_var_written_by_mut_call.almd", class = "fixture" },
+  { path = "spec/wasm_cross/closure_captured_record_field_mutation.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-320"

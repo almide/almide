@@ -1,0 +1,83 @@
+// @contract: C-319
+// A closure that captures a local `var` RECORD and mutates one of its fields
+// shares that record with the enclosing scope, like a captured List (#2961):
+// `let f = () => { list.push(h.xs, 1) }` writes the `h` the caller reads,
+// and a caller write between calls is seen by the next call. Covered: the
+// List, String, Map and Bytes in-place writers on a field (`bytes.push` on a
+// field walls the wasm leg for any receiver, so the Bytes row is `set_u8`), a field assign,
+// a user fn's `mut` param bound to a field, a nested field, a closure called
+// once, called many times, and handed to a HOF.
+//
+// Before: native rendered the place as `&mut __cap_0.get().xs`, a write onto
+// a clone (rustc E0525 on 0.64.0, a silently lost write on develop); the wasm
+// leg captured the record by value because the stdlib write's receiver was a
+// field rather than the var (it printed a lost write, and an out-of-bounds
+// trap once several closures shared the record), and a field assign through
+// the cell walled (`cell-write:field-assign`).
+type Inner = { ys: List[Int] }
+
+type H = { xs: List[Int], s: String, m: Map[String, Int], b: Bytes, n: Int, inner: Inner }
+
+fn push_mut(mut xs: List[Int], v: Int) -> Unit = {
+  list.push(xs, v)
+}
+
+fn apply_all(fs: List[() -> Unit]) -> Unit = {
+  for f in fs {
+    f()
+  }
+}
+
+effect fn main() -> Unit = {
+  var h: H = { xs: [], s: "", m: [:], b: bytes.new(2), n: 0, inner: { ys: [] } }
+  // called once, per mutator
+  let push_once = () => {
+    list.push(h.xs, 1)
+  }
+  push_once()
+  let str_once = () => {
+    string.push(h.s, "ab")
+  }
+  str_once()
+  let map_once = () => {
+    map.insert(h.m, "k", 3)
+  }
+  map_once()
+  let bytes_once = () => {
+    bytes.set_u8(h.b, 1, 7)
+  }
+  bytes_once()
+  let bump = () => {
+    h.n = h.n + 1
+  }
+  bump()
+  println("1 ${h.xs} ${h.s} ${map.len(h.m)} ${bytes.to_list(h.b)} ${h.n}")
+  // called many times, with a caller write in between
+  let push_many = () => {
+    list.push(h.xs, list.len(h.xs) * 10)
+  }
+  for _ in 0..<3 {
+    push_many()
+  }
+  list.push(h.xs, 99)
+  push_many()
+  println("2 ${h.xs}")
+  // a user fn's `mut` param bound to a field, and a nested field
+  let via_fn = () => {
+    push_mut(h.xs, 5)
+  }
+  via_fn()
+  let nested = () => {
+    list.push(h.inner.ys, 8)
+  }
+  nested()
+  nested()
+  println("3 ${h.xs} ${h.inner.ys}")
+  // handed to a HOF, and mapped over
+  apply_all([push_once, bump, str_once])
+  let lens = [1, 2, 3] |> list.map((k) => {
+    list.push(h.inner.ys, k)
+    list.len(h.inner.ys)
+  })
+  println("4 ${h.xs} ${h.n} ${h.s} ${lens} ${h.inner.ys}")
+}
