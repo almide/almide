@@ -4,7 +4,7 @@ name = "almide-verify"
 # compiler's. It moves when the checking semantics or the formats it reads
 # move, and never because the compiler shipped a release. `almide verify` is a
 # subprocess shim that execs this binary; it carries no linked copy.
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.89"
 license = "MIT OR Apache-2.0"
