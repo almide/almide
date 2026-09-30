@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at ad4d8c1ad — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at a70c2ea12 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -207,7 +207,7 @@ faca35899e2feb714ddfd013785fa11177b1eb90ea9a0536b6285ac51f826107	spec/lang/auto_
 bb2fb68205154e33e7c99909052acb354fb88c20798a0df0fe354afe91352223	spec/lang/bare_self_test.almd
 6f2d0ee6d25b445436d659ef8d47fe4d6dfa95784b014dd1182df9de8c458b85	spec/lang/bidirectional_type_test.almd
 154480edab7c33615f3f9d1b0ead7a4fc5e299e9919d6757ff93bd1ea11dc5b1	spec/lang/block_comment_raw_string_test.almd
-40be153384f4873f0643d246a4f43ae5cfaf760e2095bdda4dcbe4c5a46c0119	spec/lang/borrow_hoist_test.almd
+091d1ae2d95e3b9c23f7945dadecdb8374d79077310ed0b80bbee526793bac6f	spec/lang/borrow_hoist_test.almd
 88830d1f27b6507f67001b2fa6a5053144e2e91986ae87e8abb7a649359390d0	spec/lang/box_deref_clone_test.almd
 16c2ff3191fdffae145cb83c098f752cf263341304798c68828fe3d76c76620b	spec/lang/branch_lift_clone_test.almd
 e66b0a76c81ae37697692ae81993c25821783c23247a13b3e3249f103317aba4	spec/lang/branch_lift_mutation_test.almd
