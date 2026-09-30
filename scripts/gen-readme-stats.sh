@@ -35,7 +35,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.." || exit 2
 
-README="README.md"
+. scripts/lib/readme-targets.sh
+readme_fanout "$0" "$@"
+
+README="${ALMIDE_README_TARGET:-README.md}"
 LEDGER="docs/contracts/contracts.toml"
 BASELINE="docs/benchmarks/wasm-size.txt"
 MODE="${1:-}"

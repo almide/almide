@@ -36,8 +36,11 @@ NOUNS='(contracts?|functions?|modules?|tests?|test files?|fixtures?|theorems?|le
 # audited-theorem count is asserted where it is computed.
 EXEMPT='audited theorems'
 
+. scripts/lib/readme-targets.sh
+for readme in "${README_TARGETS[@]}"; do
+[ -f "$readme" ] || continue
 while IFS= read -r hit; do
-  echo "::error::README.md:$hit"
+  echo "::error::$readme:$hit"
   fail=1
 done < <(awk -v nouns="$NOUNS" -v exempt="$EXEMPT" '
   /<!-- [a-z-]+:generated:start/ { depth++ }
@@ -50,7 +53,8 @@ done < <(awk -v nouns="$NOUNS" -v exempt="$EXEMPT" '
       if (line ~ exempt) next
       print NR ": undated hand-written count (add the measurement date, or derive it in a generated block) — " substr($0, 1, 110)
     }
-  }' README.md)
+  }' "$readme")
+done
 
 # Fossils: each phrase names something that was true once and is quoted as
 # if it still were. Add to the list when a phrase is retired, never remove.
