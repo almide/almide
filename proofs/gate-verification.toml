@@ -1075,3 +1075,21 @@ class = "NEGATIVE_TESTED"
 evidence = "#2777 landing (2026-09-27, PR #2791): native-musl.yml run 36345333688 job 108693246071 ran --selftest on tests/native_musl/tls and the gate refused all three forged runs while accepting the genuine one: CC_x86_64_unknown_linux_musl=musl-gcc-absent (the runner without musl-tools) FAILED the build; a x86_64-unknown-linux-gnu build FAILED as `not a static binary: ELF 64-bit LSB pie executable ... dynamically linked`; a forged expected.txt FAILED as `printed [tls client ok], expected [forged line]`. From the next run on, a refusal counts only when the log carries its forged reason. Locally, NATIVE_MUSL_TARGET=aarch64-apple-darwin read `not a static binary: Mach-O 64-bit executable arm64`."
 measures = "per-fixture: almide build --target x86_64-unknown-linux-musl success, `file` reporting the binary statically linked, and byte equality of its stdout with tests/native_musl/<fixture>/expected.txt"
 varies = "#2777 landing (2026-09-27, run 36345333688): the tls fixture read PASS for x86_64-unknown-linux-musl (static, 57 MB, 37 s cold build) and FAIL for the three forged runs; the wasmtime fixture (job 108693245937) read PASS (static, 372 MB, 198 s cold build). Per PR (ci.yml Almide gates, job 108694287996): PASS, step 44 s cold with no cache (3 s musl-tools, 41 s build)."
+
+[[gate]]
+path = "scripts/check-spec-test-files.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#3065 landing (2026-09-30): develop's spec/integration/extern_c/extern_c_test.almd (3-argument assert_eq, no test block, `// wasm:skip` on line 1) fed through SPEC_FILES fails twice — `does not pass almide check` (E004 from the builtin arity check this landing adds) and `is run by nothing` — exit 1. scripts/check-spec-test-files-negative.sh repeats it on every CI run: one positive control (a test-block file, a main program and a refused expected-compile-error fixture pass) plus three forged files (a 3-argument assert_eq, a wasm:skip main with no test block, an expected-compile-error fixture the checker accepts), each exit 1. The empty-corpus direction exits 1 too."
+measures = "count of git-tracked spec/**/*_test.almd that fail `almide check`, are run by no runner (no test block, and no fn main output-parity runs), or declare an expected compile error the checker accepts"
+varies = "#3065 landing (2026-09-30): develop's tree reads 2 (extern_test.almd and extern_c_test.almd: E004 and run by nothing); the fixed tree reads 0 over 475 files with 4 expected-compile-error fixtures refused"
+
+[[gate]]
+path = "scripts/check-spec-test-files-negative.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "EXERCISED"
+evidence = "#3065 landing (2026-09-30): recorded 4-mode exercise on every run — one positive control (a test-block file, a fn-main program and a refused expected-compile-error fixture: exit 0) and three forged files (3-argument assert_eq, a wasm:skip main with no test block, an expected-compile-error fixture that checks clean), each of which the gate must refuse (exit 1). Against a gate with the reachability rule removed the orphan control is accepted and this script exits 1."
+measures = "the exit codes check-spec-test-files.sh gives one well-formed and three forged spec test files"
+varies = "#3065 landing (2026-09-30): observed exit 0 for the positive control and exit 1 for each of the three forged files"
