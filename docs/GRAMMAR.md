@@ -85,6 +85,8 @@ let_stmt    = "let" ("_" | IDENT) (":" type)? "=" expr
 var_stmt    = "var" IDENT (":" type)? "=" expr             (* no destructuring for var *)
 tuple_pat   = (IDENT | "_" | "(" tuple_pat ("," tuple_pat)* ")") ("," tuple_pat)*
 assign      = IDENT "=" expr | postfix "[" expr "]" "=" expr | postfix "." IDENT "=" expr
+            (* the value may carry a trailing ascription: `s.xs = []: List[Int]`; the
+               target's own type already fixes an empty literal, so it is optional *)
 guard_stmt  = "guard" expr "else" expr
             | "guard" "let" IDENT "=" expr "else" expr     (* bind Option, else on none *)
 
