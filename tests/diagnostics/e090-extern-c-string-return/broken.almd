@@ -1,0 +1,4 @@
+@extern(c, "c", "getenv")
+fn c_getenv(name: String) -> String = _
+
+effect fn main() -> Unit = println(c_getenv("HOME"))

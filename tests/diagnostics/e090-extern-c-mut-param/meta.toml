@@ -1,0 +1,3 @@
+expects_code = "E090"
+expects_error = "`mut` parameter 'n' cannot be written back through C"
+hint_substring = "drop `mut` and return the new value"

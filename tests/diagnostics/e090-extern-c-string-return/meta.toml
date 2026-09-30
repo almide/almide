@@ -1,0 +1,3 @@
+expects_code = "E090"
+expects_error = "return type String has no C representation"
+hint_substring = "an @extern(c) return is one of"

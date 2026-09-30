@@ -1,0 +1,4 @@
+@extern(c, "c", "strlen")
+fn c_strlen(s: String) -> Int = _
+
+effect fn main() -> Unit = println(int.to_string(c_strlen("HOME")))
