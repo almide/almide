@@ -833,11 +833,11 @@ fn foreign_import(bytes: &[u8]) -> Option<(String, String)> {
     None
 }
 
-/// Build `file` to a wasm32-wasi module and execute it on the `wasmtime` CLI.
+/// Build `file` to a wasm module and execute it on the embedded host.
 ///
-/// Mirrors the test runner's wasm invocation (`wasmtime --dir=/ <module>`) so
-/// the observable behavior matches `almide test --target wasm` and the
-/// `spec/wasm_cross` gate. Program args after `--` are forwarded to the guest.
+/// The same host `almide test`'s wasm leg runs on (#3046), so the observable
+/// behavior matches `almide test --target wasm` and the `spec/wasm_cross`
+/// gate. Program args after `--` are forwarded to the guest.
 /// `wasmtime`'s own exit code is propagated unchanged, so a guest
 /// `proc_exit(n)` surfaces as `n` exactly as a native binary's exit would.
 fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report: bool) -> i32 {
