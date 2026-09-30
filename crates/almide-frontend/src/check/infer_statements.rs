@@ -288,6 +288,10 @@ impl Checker {
 
     /// Flow an assignment target's type (`var_ty`) into the assigned value.
     /// `name` spells the target in diagnostics (`x`, `s.f`, `xs[...]`).
+    /// One rule for every target (#3063): an un-banged fallible call on the
+    /// right is E041 whether the target is `x`, `s.f` or `xs[i]` — ADR-0008's
+    /// explicit propagation, which the untyped field and index positions had
+    /// silently escaped.
     fn unify_assigned_value(&mut self, name: &str, var_ty: Ty, val_ty: &Ty, value: &ast::Expr) {
         let var_ty = &var_ty;
         let val_resolved = resolve_ty(val_ty, &self.uf);
