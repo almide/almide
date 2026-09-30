@@ -141,6 +141,20 @@ fn adder(xs: List[Int]) -> (List[Int]) -> Int = (ys) => list.len(ys) + list.len(
 // lifted body; the list shares into its callee-owned param (`am`).
 fn apply_len(f: (List[Int]) -> Int, xs: List[Int]) -> Int = f(xs)
 
+// #2755 — AGGREGATES and INTERPOLATION on the same flat alphabet. `pair`
+// tails a tuple: the param shares into its slot (`am`) and the fresh block
+// moves out (`im`). `left` destructures its param: each binder is a view of
+// a slot, and the one returned shares and moves out (`am`). `hello` tails an
+// interpolation: the build reads its part, the captured block moves out.
+fn pair(s: String) -> (String, Int) = (s, 1)
+
+fn left(p: (String, Int)) -> String = {
+  let (a, _) = p
+  a
+}
+
+fn hello(name: String) -> String = "hi ${name}!"
+
 effect fn main() -> Unit = {
   println("${list.len(shed())} ${tag("w")} ${pass([1])} ${bind_then_pass()}")
   println("${discard([1, 2])} ${stamp(7)} ${shout("w")}")
@@ -152,4 +166,5 @@ effect fn main() -> Unit = {
   println("${stash_len("ab")!} ${stash_both("a", "bc")!}")
   let plus = adder([1, 2])
   println("${plus([3])} ${apply_len(plus, [4, 5])}")
+  println("${left(pair("x"))} ${hello("y")}")
 }
