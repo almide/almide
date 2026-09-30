@@ -10,6 +10,7 @@ binop:Gt
 binop:Gte
 binop:Lt
 binop:Lte
+binop:ModFloat
 binop:ModInt
 binop:MulFloat
 binop:MulInt
