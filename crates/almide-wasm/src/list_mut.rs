@@ -192,7 +192,7 @@ impl Emitter<'_> {
 
     /// The (type, offset) of `field` in the record type `rec`, or the
     /// honest wall when `rec` is not a record carrying it.
-    fn record_field_slot(
+    pub(crate) fn record_field_slot(
         &self,
         rec: SliceTy,
         field: &almide_base::intern::Sym,
