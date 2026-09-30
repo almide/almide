@@ -97,11 +97,19 @@ impl Emitter<'_> {
             | Continuation::ReturnError
             | Continuation::GuardReturn => frame.clone(),
             Continuation::TailTransfer { replaces_frame } => {
-                if !self.tail_release_allowed {
+                if !self.tail_release_allowed && replaces_frame {
                     // The raw-address rule: every release stays on the
                     // epilogue (dead after a true return_call — the
                     // witness shows the leak; the frame is a prim body).
                     BTreeSet::new()
+                } else if !self.tail_release_allowed {
+                    // Loop form under the rule (#2976): the params no raw
+                    // address can come from are rebound by the loop-back
+                    // exactly as in a prim-free frame, so their old blocks
+                    // go here; a raw-source param keeps its block (leak,
+                    // never a dangle). A param handed straight through was
+                    // moved (`tail_consumed`) and is not a frame credit.
+                    params.intersection(&self.loop_back_releasable).copied().collect()
                 } else if replaces_frame {
                     frame.clone()
                 } else {
@@ -345,6 +353,53 @@ fn check_window(
         return Err(d.at("tail exit leaves an ownership credit outstanding", name_of(idx), "transfer or release before tail transfer", "neither"));
     }
     Ok(())
+}
+
+/// The params of a prim-using body a raw address may be derived from: any
+/// param mentioned in the arguments of a `prim.*` call, of a runtime-symbol
+/// call, or of any call whose value is an `Int` (an address rides an Int —
+/// `__rx_handle(p)` hands one out without a prim of its own, #1990). The
+/// rest are only ever read as values (`acc + [x]`, a returned `acc`), so a
+/// loop-form self call may release them at the loop-back the way a
+/// prim-free body does (#2976: `__rx_caps_out`'s accumulator kept every
+/// generation). Conservative by construction: a mention anywhere under
+/// such a call counts, `list.len(p)` included.
+pub(crate) fn raw_address_sources(body: &almide_ir::IrExpr, params: &[almide_ir::VarId]) -> std::collections::HashSet<almide_ir::VarId> {
+    struct Scan<'p> {
+        params: &'p [almide_ir::VarId],
+        hit: std::collections::HashSet<almide_ir::VarId>,
+    }
+    impl Scan<'_> {
+        fn mark_in(&mut self, args: &[almide_ir::IrExpr]) {
+            for &p in self.params {
+                if args.iter().any(|a| crate::rc_ownership::rc_mentions_var(a, p)) {
+                    self.hit.insert(p);
+                }
+            }
+        }
+    }
+    impl almide_ir::visit::IrVisitor for Scan<'_> {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            match &e.kind {
+                almide_ir::IrExprKind::Call { target, args, .. } | almide_ir::IrExprKind::TailCall { target, args } => {
+                    let prim = matches!(target, almide_ir::CallTarget::Module { module, .. } if module.as_str() == "prim");
+                    let computed = matches!(target, almide_ir::CallTarget::Computed { .. });
+                    if prim || computed || e.ty == almide_types::types::Ty::Int {
+                        self.mark_in(args);
+                    }
+                    if let almide_ir::CallTarget::Computed { callee } = target {
+                        self.mark_in(std::slice::from_ref(callee.as_ref()));
+                    }
+                }
+                almide_ir::IrExprKind::RuntimeCall { args, .. } => self.mark_in(args),
+                _ => {}
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut s = Scan { params, hit: Default::default() };
+    almide_ir::visit::IrVisitor::visit_expr(&mut s, body);
+    s.hit
 }
 
 /// E083 (#1996): read the function's bytes BACK and check that every exit

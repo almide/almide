@@ -351,6 +351,11 @@ impl Emitter<'_> {
                     // Same frame-replacement release as the indirect site —
                     // unless the callee is THIS fn: tco.rs turns that
                     // return_call into a loop-back, and the frame lives on.
+                    // A param the loop form handed straight through keeps
+                    // its credit in the next iteration: not this exit's.
+                    if loop_form_raw {
+                        self.tail_consumed.extend(moved.iter().copied());
+                    }
                     let plan = self.exit_plan(crate::exit_plan::Continuation::TailTransfer {
                         replaces_frame: Some(index) != self.self_index,
                     });
