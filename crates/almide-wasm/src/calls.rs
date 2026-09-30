@@ -493,6 +493,9 @@ impl Emitter<'_> {
                 "float_to_fixed",
                 // float `%` (#3080): wasm has no float remainder op.
                 "float_fmod",
+                // The f32 Schubfach (#3079): the same core, a String result.
+                "float32_to_string",
+                "float32_to_string_compound",
                 "int_to_string",
                 // Dragon4's own dependency closure (prim-only bodies).
                 "math_log",

@@ -722,6 +722,9 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
         // `float.to_string_compound`, NOT `float.to_string` (which keeps `.0` for an EXPLICIT
         // `float.to_string(x)` call). Same drop-.0 Display a Float record/list field already uses.
         Ty::Float => ("float", "to_string_compound"),
+        // A Float32 prints native's f32 Display — the shortest digits that round-trip to the
+        // f32, not the widened f64's (`0.1` stays `0.1`) — through the f32 Schubfach (#3079).
+        Ty::Float32 => ("float32", "to_string_compound"),
         // Decomposed (#781, cog 121): the List/Option/Result routings are verbatim
         // text moves into interp_{list,option,result}_to_string.
         Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {

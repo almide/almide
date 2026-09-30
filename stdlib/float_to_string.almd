@@ -274,10 +274,15 @@ else {
 // v = c * 2^q (c > 0): the shortest decimal in the rounding interval, closest on a draw, and on
 // an exact tie the LARGER magnitude — Rust's `{}` (Dragon4 "2R >= S") rounds a half up, not to
 // even: format! prints 1669760939663944.3 for ...944.25 where Giulietti's even rule gives ...4.2.
-fn __sf_core(q: Int, c: Int, neg: Bool, dot0: Bool) -> String = {
+//
+// `regular` is false only on the asymmetric power-of-two boundary — a normal value whose stored
+// fraction t is zero (c the hidden bit alone) — where the interval below is half as wide; the
+// caller knows it from the fields (t != 0 or a subnormal). The rest is precision-independent:
+// vb = floor(4v * 10^-k) holds for any c < 2^53, so the f32 printer below runs it unchanged, with
+// the 126-bit g(j) more precise than the 63 bits Giulietti's float variant needs.
+fn __sf_core(q: Int, c: Int, regular: Bool, neg: Bool, dot0: Bool) -> String = {
   let out = prim.band(c, 1)
   let cb = prim.bshl(c, 2)
-  let regular = if c != 4503599627370496 then true else q == 0 - 1074
   let cbl = if regular then cb - 2 else cb - 1
   let k = if regular then __sf_flog10pow2(q) else __sf_flog10_3q_pow2(q)
   let h = q + __sf_flog2pow10(0 - k) + 2
@@ -331,7 +336,7 @@ fn __sf_core(q: Int, c: Int, neg: Bool, dot0: Bool) -> String = {
 fn __sf_nonzero(bq: Int, t: Int, neg: Bool, dot0: Bool) -> String = {
   let q = if bq != 0 then bq - 1075 else 0 - 1074
   let c = if bq != 0 then t + 4503599627370496 else t
-  __sf_core(q, c, neg, dot0)
+  __sf_core(q, c, t != 0 or bq == 0, neg, dot0)
 }
 
 // every arm is one call → the heap-result-if lowering handles it. A zero renders as the one
@@ -353,6 +358,36 @@ fn float_to_string(x: Float) -> String = __sf_main(x, true)
 // The `${...}` / record / tuple / list form: integer-valued floats DROP the ".0" (`1.0` -> "1",
 // `-0.0` -> "-0"); every other value prints exactly as `float.to_string` does.
 fn float_to_string_compound(x: Float) -> String = __sf_main(x, false)
+
+// ───────────────────────── float32.to_string: the same Schubfach at f32 ─────────────────────────
+// A Float32 prints as native Rust's f32 Display does: the shortest decimal that round-trips to
+// the SAME f32 (0.1f32 -> "0.1", where its widened f64 prints 0.10000000149011612). The value is
+// read as its f32 bits — `prim.f32bits` rounds the widened carrier to f32 first, so a wasm or
+// interp operand that carries an unrounded f64 result prints the f32 native computed — and v =
+// c * 2^q with the 24-bit significand runs the f64 core above. NaN of either sign is "NaN".
+fn __sf32_nonzero(bq: Int, t: Int, neg: Bool, dot0: Bool) -> String = {
+  let q = if bq != 0 then bq - 150 else 0 - 149
+  let c = if bq != 0 then t + 8388608 else t
+  __sf_core(q, c, t != 0 or bq == 0, neg, dot0)
+}
+
+fn __sf32_special(t: Int, neg: Bool) -> String = if t != 0 then "NaN"
+else if neg then "-inf" else "inf"
+
+fn __sf32_main(x: Float32, dot0: Bool) -> String = {
+  let bits = prim.f32bits(x)
+  let bq = prim.band(prim.bshr_u(bits, 23), 255)
+  let t = prim.band(bits, 8388607)
+  let neg = prim.band(bits, 2147483648) != 0
+  if bq == 255 then __sf32_special(t, neg)
+  else if bits == 0 or bits == 2147483648 then __sf_render(0, 1, 1, neg, dot0)
+  else __sf32_nonzero(bq, t, neg, dot0)
+}
+
+fn float32_to_string(x: Float32) -> String = __sf32_main(x, true)
+
+// The `${...}` form of a Float32: an integer value drops the ".0", as float_to_string_compound.
+fn float32_to_string_compound(x: Float32) -> String = __sf32_main(x, false)
 
 // ───────────────────────── float.to_fixed: exact value, round half to even ─────────────────────────
 // v0 native: `format!("{:.N}", x)` — the EXACT decimal expansion rounded to N fractional digits,
