@@ -265,6 +265,37 @@ impl WitnessRecorder {
         self.bound.insert(local, d);
     }
 
+    /// A moved assignment (#3104, writeback_move.rs): `dst` takes over the
+    /// object `src` holds, credit and all — no share, no release. `src` is
+    /// emptied after the store ([`Self::empty_local`]). A var bound outside
+    /// the loop being assigned declines, as [`Self::assign`] does.
+    pub fn transfer(&mut self, dst: u32, released_old: bool, src: u32) -> bool {
+        match self.bound.get(&dst) {
+            None => return false,
+            Some(&d) if d < self.loop_depth => {
+                self.decline("loop-carried-assign");
+                return true;
+            }
+            Some(_) => {}
+        }
+        if !self.bound.contains_key(&src) {
+            return false;
+        }
+        if released_old {
+            self.held_ops(dst, "d");
+        }
+        self.log(Ev::Alias { local: dst, src, owner: true });
+        true
+    }
+
+    /// `local` was set to NULL (#3104): it holds nothing from here, so a
+    /// later release through it is a release of NULL (skipped).
+    pub fn empty_local(&mut self, local: u32) {
+        if self.bound.contains_key(&local) {
+            self.log(Ev::Bind { local, obj: u32::MAX, owner: false });
+        }
+    }
+
     /// Bind of a borrowed Var rhs: the SOURCE local's object gains a
     /// share (`rc_inc_top` at the bind), and the new local aliases it.
     pub fn bind_alias(&mut self, local: u32, src_local: u32) -> bool {

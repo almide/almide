@@ -129,6 +129,9 @@ pub(crate) struct Emitter<'a> {
     /// C-319 shared-cell vars: the local holds a one-slot heap cell's
     /// ADDRESS; reads load through it, writes store through it.
     pub(crate) cells: &'a std::collections::HashSet<VarId>,
+    /// #3104: the block temp the statement being lowered may MOVE out of
+    /// (writeback_move.rs) — set by the block walk, taken by the assign.
+    pub(crate) moved_temp: Option<VarId>,
     /// C-320: Some((saved_local, depth_entry_local)) when this fn is a
     /// region ARM — a cut here runs the exit bookkeeping its early
     /// return would otherwise skip (guarded by depth > depth-at-entry,
