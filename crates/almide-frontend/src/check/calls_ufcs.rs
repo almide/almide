@@ -26,8 +26,7 @@ impl Checker {
         // Go, Swift and JS give the local the name, Rust keeps the module on
         // `::` while `.` takes the local, and Ruby cannot collide because
         // constants are capitalised. None lets a module silently beat a binding.
-        let shadowed_by_local = matches!(&object.kind,
-            ExprKind::Ident { name, .. } if self.env.lookup_var(name).is_some());
+        let shadowed_by_local = self.object_shadowed_by_local(object);
         // #2349: every error from here on counts the receiver as an argument
         // the author did not write, so the diagnostics need to know WHICH
         // identifier is theirs. Cleared first so a previous call cannot leak
