@@ -381,8 +381,17 @@ impl Emitter<'_> {
             // ends_with = the strip_suffix compare with a Bool verdict.
             ("ends_with", [s, p]) => {
                 let got = self.lower_string_strip(s, p, false)?;
-                let _ = got;
-                self.f.instructions().i32_const(0).i32_ne();
+                // The verdict is whether the strip answered `some`; that
+                // Option and the stripped string in it are this arm's own
+                // and go right after (#2977 — every hit kept both; a `none`
+                // is NULL_ADDR, which the drop no-ops).
+                let dec = match got {
+                    Some(l) => self.dec_fn_of(l.ty),
+                    None => return unsup("string-ends-with-strip"),
+                };
+                let h = self.hold_i32()?;
+                self.f.instructions().local_tee(h).i32_const(0).i32_ne().local_get(h).call(dec);
+                self.release_i32();
                 Ok(Some(Lowered::scalar(BOOL)))
             }
             ("strip_prefix" | "strip_suffix", [s, p]) => {

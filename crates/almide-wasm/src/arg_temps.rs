@@ -75,6 +75,13 @@ pub(crate) fn droppable_ty(t: &Ty) -> bool {
         Ty::Applied(TypeConstructorId::UserDefined(_), _) => true,
         // Map stage a: the entries array is a credit.
         Ty::Applied(TypeConstructorId::Map | TypeConstructorId::Set, _) => true,
+        // #2010 item 5 / the flat matrix block: a dynamic `Value` (spelled
+        // as the bare Named type) and a `Matrix` are credits the typed drop
+        // releases like any other (rc_droppable). Unbound, a `${value.int(2)}`
+        // part or a `matrix.to_lists(matrix.pow(m, e))` operand kept its
+        // block for the program's life (#2975, #2974).
+        Ty::Named(name, args) if args.is_empty() && name.as_str() == "Value" => true,
+        Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _) => true,
         _ => false,
     }
 }
@@ -135,9 +142,14 @@ impl Binder<'_> {
     /// subject changes no pattern-bind rule. A subject that is already a
     /// variable is left alone — it has its own owner.
     fn name_destructure_subjects(&mut self, stmts: &mut Vec<IrStmt>) {
+        // A record subject reaches here as the bare `Named` type (a
+        // user record, `let { a, c } = P { … }` / `= mk()`), which
+        // `droppable_ty` does not list: it kept its block (#2977). A Named
+        // that turns out flat on this leg binds a plain local — harmless.
         let named = |s: &IrStmt| {
             matches!(&s.kind, IrStmtKind::BindDestructure { value, .. }
-                if droppable_ty(&value.ty) && !matches!(value.kind, IrExprKind::Var { .. }))
+                if (droppable_ty(&value.ty) || matches!(value.ty, Ty::Named(..)))
+                    && !matches!(value.kind, IrExprKind::Var { .. }))
         };
         if !stmts.iter().any(named) {
             return;
@@ -197,10 +209,21 @@ impl Binder<'_> {
 /// expression itself — a literal list, an interpolation, an inner
 /// concat — and, like a call result, has no owner after the op reads it
 /// (`xs + [4]` leaked the `[4]`; `a + b + c` leaked the inner `a + b`).
+///
+/// A value-position `match` / `if` joins its arms to one credit when any
+/// arm is owned (`lower_arm_body`, `lower_if_arms`), so it is a temporary
+/// the reader drops too: the derived Codec encoder's
+/// `match f { some(x) => [(k, enc(x))], none => [] } + …` chunks, a
+/// `"${match v { … }}"` part (#2975, #2977). Naming it is safe whichever
+/// way the join went — the Bind route takes a borrowed value's +1.
 fn is_born_here(e: &IrExpr) -> bool {
     matches!(
         &e.kind,
-        IrExprKind::List { .. } | IrExprKind::StringInterp { .. } | IrExprKind::BinOp { .. }
+        IrExprKind::List { .. }
+            | IrExprKind::StringInterp { .. }
+            | IrExprKind::BinOp { .. }
+            | IrExprKind::Match { .. }
+            | IrExprKind::If { .. }
     ) || unwrap_or_joins_owned(e)
 }
 
