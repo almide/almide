@@ -452,12 +452,14 @@ fn fetch_one_dep_recursive(
             if semver_of(&version_str) > semver_of(&existing.version) {
                 existing.version = version_str;
                 existing.source_dir = source_dir;
+                existing.package_dir = path;
             }
         }
         None => fetched.push(FetchedDep {
             pkg_id: actual_pkg_id,
             version: version_str,
             source_dir,
+            package_dir: path,
         }),
     }
 
