@@ -316,6 +316,7 @@ fn isqrt(n: Int) -> Int = {
 | E086 | A value built inside a `scoped { … }` block would outlive it (the block's value, or a write to an outer binding) — the rows name where it was allocated and where the scope ends (ALS-E31) | Compute the scalar summary inside the scope and let that cross the boundary |
 | E087 | An operation not permitted in a scoped region: a callee that is not `scoped fn`, a global, host output or an `effect fn`, an unknown indirect call, a heap value captured from outside, a type outside the fragment, or `!` / `?` / `guard` (ALS-E31) | Declare the callee `scoped fn`, pass the value in as a parameter, or move the effect outside the scope |
 | E088 | A recursive call in a `scoped fn` retains the current activation — a single non-tail self-call, or mutual recursion between scoped workers (ALS-E31) | Carry the pending work in an accumulator and return the recursive call, or fold the mutual pair into one worker |
+| E090 | An `@extern(c)` signature with a type that has no C representation — a list, Bytes, map, record, variant, Option, tuple or fn value parameter, a `String` return, or a `mut` parameter | Pass C scalars (`Int`, sized ints, `Float`, `Bool`, `RawPtr`, `String` parameters), or bind through an `@extern(rust, "crate::host", "f")` fn in `native/*.rs`, which takes Almide values as `&[u8]` / `&[T]` / `&str` / `&Record` |
 | E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
 
 A rustc 4-digit code (`error[E0XXX]`) leaking through always indicates
