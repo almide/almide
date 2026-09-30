@@ -1,0 +1,6 @@
+# CERTIFIED FIXTURES THAT STILL LEAK — written by `almide-gates certified-leaks --update`.
+# The join of crates/almide-wasm/tests/golden/witness-fixtures.txt (every frame of the
+# shipped pass certified) and crates/almide-wasm/tests/golden/live-at-exit-baseline.txt
+# (blocks live at exit): the leak is inside a TRUSTED native arm or runtime helper the
+# ownership witness does not record. SHRINK-ONLY; a new row needs an OPEN owning issue.
+# blocks<TAB>issue<TAB>fixture

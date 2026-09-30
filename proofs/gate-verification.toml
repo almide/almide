@@ -630,6 +630,15 @@ measures = "symmetric difference between long-lived pipeline types found by scri
 varies = "#1316 landing: nine forged inputs (an unregistered type in a [scope] file among them) each read as a finding; 2026-08-16 314a44290 recorded the dialect stamp in the frozen AST serde count"
 
 [[gate]]
+path = "tools/almide-gates:certified-leaks"
+reads = "structured"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#2755 (landing PR, 2026-09-30), run through `main.almd -- certified-leaks .` against the 13-row ledger the prototype carried before batch 076 emptied live-at-exit, tree restored and green after each: (1) or_pattern's owning issue rewritten to the CLOSED #2186 in both goldens => '#2186 is CLOSED but still owns a certified leak'; (2) the same row's issue rewritten to `#?` => 'cites no issue (`#?`)'; (3) or_pattern_guarded_nullary's row deleted from proofs/certified-leaks.txt => 'NEW certified leak … is not in the ledger — add it with --update'; (4) list_flatten_borrow's live count lowered 9 -> 8 in live-at-exit-baseline.txt => a NEW row and a stale row, 2 findings; (5) gh off PATH with CI=1 => 7 'UNMEASURED under CI' findings, and without CI a notice and OK. The pure verdicts (join, drift, citation) carry four `test` blocks in certified_leaks.almd"
+measures = "the join of crates/almide-wasm/tests/golden/witness-fixtures.txt and crates/almide-wasm/tests/golden/live-at-exit-baseline.txt (blocks, issue, fixture) against proofs/certified-leaks.txt, and each cited issue's state read with gh"
+varies = "#2755 landing: 13 rows on the prototype's first --update, 0 once batch 076 took live-at-exit to 0; the forged live count 9 -> 8 read as a drift"
+
+[[gate]]
 path = "tools/almide-gates:impl-count"
 reads = "structured"
 wired_by = ".github/workflows/ci.yml, lefthook.yml"
