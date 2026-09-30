@@ -190,16 +190,11 @@ impl<'a> RenderContext<'a> {
 // attr matched, fall through" (the original's implicit no-op when the loop
 // found nothing) — same control flow, just delegated construction.
 
-/// `@extern` dispatch: native module call / template-based / C FFI.
+/// `@extern` dispatch: the Rust host wrapper (`rust`, older spelling `rs`) or
+/// the C FFI binding — the FIRST attr naming one, the same choice the borrow
+/// pass read its parameter modes from (`native_extern`).
 fn try_render_extern_fn(ctx: &RenderContext, func: &IrFunction) -> Option<String> {
-    let target_str = match ctx.target {
-        Target::Rust => "rs",
-        _ => "",
-    };
-    let native_target = match ctx.target {
-        Target::Rust => "rust",
-        _ => "wasm",
-    };
+    use almide_lang::types::extern_abi::NativeExtern;
     // A module fn's call sites all render the flatten prefix
     // (`almide_rt_<origin>_<name>`), so an extern binding must be emitted
     // under that same prefixed name — a bare `use bridge::f as f;` defines
@@ -209,21 +204,16 @@ fn try_render_extern_fn(ctx: &RenderContext, func: &IrFunction) -> Option<String
             func.name.replace(' ', "_").replace('-', "_").replace('.', "_")),
         None => func.name.to_string(),
     };
-    for attr in &func.extern_attrs {
-        // @extern(rust, ...) / @extern(wasm, ...) — native module binding
-        if attr.target == native_target {
-            return Some(render_native_call(ctx, func, attr, &emit_name));
-        }
-        if attr.target == target_str {
-            return Some(ctx.templates.render_with("extern_fn", None, &[], &[("module", attr.module.as_str()), ("function", attr.function.as_str()), ("name", emit_name.as_str())])
-                .unwrap_or_else(|| format!("// extern: {}.{}", attr.module, attr.function)));
-        }
-        // @extern(c, "lib", "func") — generate extern "C" block + safe wrapper
-        if attr.target == "c" && matches!(ctx.target, Target::Rust) {
-            return Some(render_extern_c(ctx, func, attr, &emit_name));
-        }
+    match ctx.target {
+        Target::Rust => crate::pass_borrow_inference::native_extern(func).map(|(kind, attr)| match kind {
+            NativeExtern::Rust => render_native_call(ctx, func, attr, &emit_name),
+            // extern "C" block + safe wrapper
+            NativeExtern::C => render_extern_c(ctx, func, attr, &emit_name),
+        }),
+        _ => func.extern_attrs.iter()
+            .find(|a| a.target.as_str() == "wasm")
+            .map(|attr| render_native_call(ctx, func, attr, &emit_name)),
     }
-    None
 }
 
 /// Export fn: render body normally, then wrap with #[no_mangle] pub extern "C".
@@ -627,7 +617,7 @@ pub(crate) fn with_fn_err_ty<'a>(ctx: &RenderContext<'a>, fn_err_ty: Option<almi
 ///   same-module calls (tests, internal) have a callable function.
 /// * `@extern(rust, "mod", "fn")` → native module call (`render_native_call`);
 ///   `@extern(wasm, "env", "fn")` → WASM host import (future);
-///   `@extern(rs, …)` → template-based rendering (legacy);
+///   `@extern(rs, …)` → the same as `rust` (the older spelling);
 ///   `@extern(c, "lib", "fn")` → C FFI with an `extern "C"` block.
 /// * `@export` → render the body normally, then wrap with
 ///   `#[no_mangle] pub extern "C"`.

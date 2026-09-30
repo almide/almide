@@ -5,6 +5,7 @@ mod compatibility;
 mod heap;
 mod unify;
 pub mod constructor;
+pub mod extern_abi;
 
 pub use heap::is_heap_ty;
 pub use unify::{unify, substitute, contains_typevar};
