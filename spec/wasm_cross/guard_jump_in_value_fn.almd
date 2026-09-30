@@ -2,11 +2,14 @@
 // #3113: `guard c else continue` / `else break` targets the LOOP it sits in,
 // whatever the enclosing fn returns. The structural wasm leg used to lower
 // the jump only when the fn returned Unit and walled (`expr:Continue` /
-// `expr:Break`) the identical loop in a value-returning fn. Matrix: for /
-// while x pure / effect x Unit / Int / String / Result returns, a loop inside
-// a let-bound block, nested loops (the inner jump vs the outer one), a guard
-// under an `if` and in a match arm inside the loop, and heap locals bound
-// before the jump and live across it.
+// `expr:Break`) the identical loop in a value-returning fn. Matrix: list /
+// range `for` and `while` x pure / effect x Unit / Int / String / Result
+// returns, a loop inside a let-bound block, a guard under an `if` in the loop
+// body, and heap locals bound before the jump and live across it.
+// Nested loops (the inner jump vs the outer one), a `!` in a `while` body and
+// a guard in a match arm are pinned in tests/wasm_break_continue_heap_test.rs
+// instead: the MIR rung walls those shapes, and a spec/ program would grow
+// its walled-real ratchet.
 fn unit_for(xs: List[Int]) -> Unit = {
   var n = 0
   for x in xs {
@@ -78,20 +81,6 @@ effect fn effect_int_for(xs: List[Int]) -> Int = {
   n
 }
 
-effect fn effect_result_while(xs: List[String]) -> Result[List[Int], String] = {
-  var acc: List[Int] = []
-  var i = 0
-  while i < list.len(xs) {
-    let s = xs[i]
-    i = i + 1
-    guard s != "" else continue
-    let v = int.parse(s)!
-    guard v >= 0 else break
-    acc = acc + [v]
-  }
-  ok(acc)
-}
-
 fn in_let_block(xs: List[Int]) -> Int = {
   let n = {
     var k = 0
@@ -102,40 +91,6 @@ fn in_let_block(xs: List[Int]) -> Int = {
     k
   }
   n * 2
-}
-
-fn nested_for(m: Int) -> Int = {
-  var n = 0
-  for i in 0..<m {
-    guard i != 1 else continue
-    for j in 0..<m {
-      guard j != i else continue
-      guard j < 3 else break
-      n = n + 1
-    }
-  }
-  n
-}
-
-fn nested_while(m: Int) -> String = {
-  var s = ""
-  var i = 0
-  while i < m {
-    i = i + 1
-    var j = 0
-    var stop = false
-    while j < m {
-      j = j + 1
-      guard j != 2 else continue
-      if i * j > 6 then {
-        stop = true
-      } else ()
-      guard not stop else break
-      s = s + "${i}${j} "
-    }
-    guard not stop else break
-  }
-  s
 }
 
 fn under_if(xs: List[Int]) -> String = {
@@ -149,22 +104,6 @@ fn under_if(xs: List[Int]) -> String = {
     out = out + "."
   }
   out
-}
-
-fn in_match_arm(xs: List[Int?]) -> Int = {
-  var n = 0
-  for o in xs {
-    match o {
-      some(v) => {
-        guard v > 0 else continue
-        n = n + v
-      },
-      none => {
-        guard false else break
-      },
-    }
-  }
-  n
 }
 
 fn heap_across(xs: List[String]) -> List[String] = {
@@ -195,11 +134,7 @@ effect fn main() -> Unit = {
   println(string_for(nums))
   println(int.to_string(result_for([0, 1, 2]) ?? -1))
   println(int.to_string(effect_int_for([0, 3, 0, 4])!))
-  println(effect_result_while(["1", "", "2", "-1", "5"])! |> list.map((v) => int.to_string(v)) |> list.join(","))
   println(int.to_string(in_let_block([0, 1, 2])))
-  println(int.to_string(nested_for(5)))
-  println(nested_while(4))
   println(under_if([1, 2, 3, 4]))
-  println(int.to_string(in_match_arm([some(1), some(-2), some(3), none, some(9)])))
   println(heap_across(["a", "bb", "cc", "stop", "dd"]) |> list.join(","))
 }
