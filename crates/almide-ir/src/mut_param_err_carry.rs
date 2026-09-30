@@ -167,7 +167,10 @@ pub(crate) fn err_payload_ty(buf_tys: &[Ty]) -> Ty {
 
 /// A site block's binders: the buffers the write-backs read, and the
 /// callee's value `__mp_res` when it returns one (the block's tail reads it).
-fn site_binders(block: &IrExpr) -> Option<(Vec<(VarId, Ty)>, Option<(VarId, Ty)>)> {
+/// `(buffers, value)` binders of a site block.
+type SiteBinders = (Vec<(VarId, Ty)>, Option<(VarId, Ty)>);
+
+fn site_binders(block: &IrExpr) -> Option<SiteBinders> {
     let IrExprKind::Block { stmts, expr: Some(tail) } = &block.kind else { return None };
     match &stmts.first()?.kind {
         IrStmtKind::Bind { var, ty, .. } => Some((vec![(*var, ty.clone())], None)),
