@@ -482,7 +482,7 @@
 50	34	1704	50	spec/wasm_cross/matrix_pow_libm.almd
 132	114	2217	122	spec/wasm_cross/matrix_product_family.almd
 79	47	96005721	79	spec/wasm_cross/matrix_q1_full_loader_cols_beyond_buffer.almd
-112	87	46019	112	spec/wasm_cross/matrix_q1_full_loader_wrapped_offset.almd
+122	93	46175	122	spec/wasm_cross/matrix_q1_full_loader_wrapped_offset.almd
 32	9	2580	10	spec/wasm_cross/matrix_q_dims_guard.almd
 232	183	44345	232	spec/wasm_cross/matrix_q_fp16_scale_domain.almd
 30	11	1385	30	spec/wasm_cross/matrix_select_rows.almd
