@@ -1,0 +1,31 @@
+// #3030: a local named like a stdlib module owns `name.field` — the member
+// path takes the local first, as the call path does (#1441). Before, the
+// member resolved to the module's fn value (`string.len`) and interpolating
+// it was E089.
+type P = { len: Int }
+
+type Q = { trim: String, count: Int }
+
+fn read_len(string: P) -> Int = string.len
+
+test "a let binding named like a module is read through its field" {
+  let string = P { len: 7 }
+  assert_eq(string.len, 7)
+  assert_eq("${string.len}", "7")
+}
+
+test "a parameter named like a module is read through its field" {
+  assert_eq(read_len(P { len: 3 }), 3)
+}
+
+test "a second module name and a String field" {
+  let list = Q { trim: "x", count: 2 }
+  assert_eq(list.trim, "x")
+  assert_eq(list.count + 1, 3)
+}
+
+test "without a local the module reference is unchanged" {
+  let f = string.len
+  assert_eq(f("abc"), 3)
+  assert_eq(string.len("ab"), 2)
+}

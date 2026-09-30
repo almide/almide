@@ -390,6 +390,14 @@ impl Checker {
         Ok((named, decl, closed, defaults))
     }
 
+    /// Whether `object` is an identifier a local binding owns — then `object.x`
+    /// goes THROUGH that binding and never resolves as a module reference, even
+    /// when a module has the same name. The one rule for both the call path
+    /// (`object.f(..)`, #1441) and the member path (`object.f`, #3030).
+    pub(crate) fn object_shadowed_by_local(&self, object: &ast::Expr) -> bool {
+        matches!(&object.kind, ExprKind::Ident { name, .. } if self.env.lookup_var(name).is_some())
+    }
+
     fn infer_expr_member(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::Member { object, field, .. } = &mut expr.kind else { unreachable!("infer_expr_member called on the wrong ExprKind") };
         // `infer_expr(object)` below overwrites `current_span` with the object's
@@ -398,8 +406,11 @@ impl Checker {
         let member_span = self.current_span;
         // A module-qualified reference (`string.len`, `utils.CATEGORY_ORDER`) is
         // resolved BEFORE the object is inferred, because inferring it would fail:
-        // `string` is a module name, not a variable.
-        if let Some(ty) = self.infer_module_qualified_member(object, field) {
+        // `string` is a module name, not a variable. A local of the module's name
+        // takes the spelling first, as it does on the call path (#3030, #1441).
+        if !self.object_shadowed_by_local(object)
+            && let Some(ty) = self.infer_module_qualified_member(object, field)
+        {
             return ty;
         }
         let obj_ty = self.infer_expr(object);
