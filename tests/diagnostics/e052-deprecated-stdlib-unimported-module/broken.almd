@@ -1,0 +1,1 @@
+fn main() -> Unit = println(float.to_string(matrix.row_dot(matrix.from_lists([[1.0, 2.0]]), 0, [1.0, 1.0])))

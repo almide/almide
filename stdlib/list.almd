@@ -14,7 +14,8 @@
 @intrinsic("almide_rt_list_len")
 fn len[A](xs: List[A]) -> Int = _
 
-/// Element count; same as list.len.
+/// Alias of list.len.
+@deprecated(since=5, use="list.len")
 @intrinsic("almide_rt_list_len")
 fn length[A](xs: List[A]) -> Int = _
 

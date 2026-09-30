@@ -391,9 +391,9 @@ matrix.split_cols_even(m: Matrix, n: Int) -> List[Matrix]
 // @since 0.13.4 or earlier
 matrix.concat_cols(matrices: List[Matrix]) -> Matrix
 
-// Same as concat_cols; [] gives 0 x 0.
+// Alias of matrix.concat_cols.
 // @since 0.13.4 or earlier
-matrix.concat_cols_many(matrices: List[Matrix]) -> Matrix
+matrix.concat_cols_many(matrices: List[Matrix]) -> Matrix   (deprecated — use matrix.concat_cols)
 
 // mask_val added where col > row.
 // @since 0.13.4 or earlier
@@ -431,9 +431,9 @@ matrix.gather_rows(m: Matrix, indices: List[Int]) -> Matrix
 // @since 0.13.4 or earlier
 matrix.dot_row(m: Matrix, r: Int, vec: List[Float]) -> Float
 
-// Same as dot_row; 0.0 if r is out of range.
+// Alias of matrix.dot_row.
 // @since 0.13.4 or earlier
-matrix.row_dot(m: Matrix, r: Int, vec: List[Float]) -> Float
+matrix.row_dot(m: Matrix, r: Int, vec: List[Float]) -> Float   (deprecated — use matrix.dot_row)
 
 // Float32 rows x cols of 0.0; negatives clamp.
 // @since 0.14.0 or earlier
