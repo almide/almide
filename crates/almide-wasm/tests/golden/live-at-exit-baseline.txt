@@ -11,7 +11,7 @@
 2	#2975	spec/wasm_cross/availability_pure_batch.almd
 11	#2968	spec/wasm_cross/branch_lift_stdlib_mut_arg.almd
 1	#2968	spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd
-4	#2969	spec/wasm_cross/bundled_pure_modules.almd
+1	#2969	spec/wasm_cross/bundled_pure_modules.almd
 5	#2968	spec/wasm_cross/bytes_clear_mut_param.almd
 20	#2968	spec/wasm_cross/bytes_copy_from_negative_len.almd
 35	#2968	spec/wasm_cross/bytes_copy_within_offset_domain.almd
@@ -82,7 +82,6 @@
 2	#2932	spec/wasm_cross/list_comprehensive.almd
 9	#2977	spec/wasm_cross/list_flatten_borrow.almd
 1	#2977	spec/wasm_cross/list_float_equality_family.almd
-2	#2972	spec/wasm_cross/list_fold_fused_callback_result_ownership.almd
 2	#2973	spec/wasm_cross/list_heap_tuple_return.almd
 2	#2977	spec/wasm_cross/list_heapelem_rc.almd
 2	#2944	spec/wasm_cross/list_push_on_record_field.almd
@@ -148,7 +147,6 @@
 1	#2977	spec/wasm_cross/rc_alloc_stress.almd
 3	#2977	spec/wasm_cross/record_scalar_field_assign_alias.almd
 2	#2973	spec/wasm_cross/recursive_generic_repr_interp.almd
-4	#2969	spec/wasm_cross/reduce_str.almd
 2	#2971	spec/wasm_cross/ref_koka_guard_liveness.almd
 2	#2971	spec/wasm_cross/ref_rust_or_pattern_heap_subject.almd
 35	#2976	spec/wasm_cross/regex_engine.almd
