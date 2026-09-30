@@ -93,8 +93,14 @@ fn render_extern_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::a
         CConv::BoolAsI32 => format!("{call} != 0"),
         CConv::Same | CConv::CString => call,
     };
+    // libc and libm have no import library on Windows: their symbols live in
+    // the C runtime std already links, and `link.exe` refuses `m.lib` (LNK1181).
+    let link = match lib {
+        "c" | "m" => format!("#[cfg_attr(not(windows), link(name = \"{lib}\"))]"),
+        _ => format!("#[link(name = \"{lib}\")]"),
+    };
     format!(
-        "#[link(name = \"{lib}\")]\nextern \"C\" {{ fn {c_func}({}) -> {}; }}\n\
+        "{link}\nextern \"C\" {{ fn {c_func}({}) -> {}; }}\n\
          pub fn {emit_name}({}) -> {} {{\n{prelude}    unsafe {{ {body} }}\n}}",
         c_params.join(", "), ret.c_ty, wrapper_params.join(", "), render_type(ctx, &func.ret_ty),
     )
