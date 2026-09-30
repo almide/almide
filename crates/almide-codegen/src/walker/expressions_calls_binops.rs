@@ -198,7 +198,7 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
         BinOp::PowFloat if matches!(left.ty, Ty::Float32) || matches!(right.ty, Ty::Float32) => {
             let (lw, rw) = (format!("(({l}) as f64)"), format!("(({r}) as f64)"));
             let pow = ctx.templates.render_with("power_expr", Some("Float"), &[], &[("left", lw.as_str()), ("right", rw.as_str())])
-                .unwrap_or_else(|| format!("pow(_, _)"));
+                .unwrap_or_else(|| "pow(_, _)".to_string());
             format!("(({pow}) as f32)")
         }
         BinOp::PowFloat => {
