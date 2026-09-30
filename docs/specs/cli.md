@@ -975,9 +975,9 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_DUMP_VERIFY` | debug | print the native render's verification transcript |
 | `ALMIDE_DUMP_WMIR=value` | debug | print the lowered wasm-leg op stream of every fn whose name contains the value |
 | `ALMIDE_EXPECT_TOOLS` | harness | make a harness test FAIL instead of skipping when an external tool (wasmtime, wasm-tools) is missing; CI sets it |
+| `ALMIDE_F32_SWEEP_N=value` | harness | how many xorshift32 bit patterns the Float32 printer sweep prints (`${x}` and `float32.to_string`) and compares with Rust f32 Display on each leg (default 100000; tests/float32_to_string_cross_target_test.rs) |
 | `ALMIDE_FALLBACK_NAMES` | tool | make `almide test` print one `FALLBACK <file>` line per file the wasm leg did not pass — the wasm coverage ratchet's data feed |
 | `ALMIDE_FAN_SEQUENTIAL` | runtime | run `fan.*` sequentially in the native runtime (a determinism lever for measurement; the observable result is the same by contract) |
-| `ALMIDE_F32_SWEEP_N=value` | harness | how many xorshift32 bit patterns the Float32 printer sweep prints (`${x}` and `float32.to_string`) and compares with Rust f32 Display on each leg (default 100000; tests/float32_to_string_cross_target_test.rs) |
 | `ALMIDE_FLOAT_SWEEP_N=value` | harness | how many xorshift64 bit patterns the float printer sweep prints and compares with Rust `format!` on each leg (default 100000; tests/float_to_string_cross_target_test.rs) |
 | `ALMIDE_FMOD_SWEEP_N=value` | harness | how many xorshift64 bit-pattern pairs the float `%` sweep compares with Rust `%` on each leg, as Float and as Float32 (default 20000; tests/float_fmod_cross_target_test.rs) |
 | `ALMIDE_FN_ESCAPE_OFF` | ablation | make BorrowInsertion borrow EVERY fn-typed param as `&dyn Fn`, escaping or not (#2288) — the ablation the ownership certifier's C5 sensitivity test drives |
