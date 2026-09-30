@@ -1,0 +1,100 @@
+// @contract: C-132, C-187
+// A user fn handed a `mut` argument whose place is a module-level `var` (or a
+// field of one) may itself read or write that same global (#2960). Native
+// rendered the call inside the global's cell — `G.with(|c| f(&mut
+// …c.borrow_mut()…))` — so a callee touching `g` re-borrowed the held cell
+// and panicked `already mutably borrowed`; wasm and the interpreter ran it.
+//
+// All three legs share one semantics, C-132's copy-in / write-back: the
+// callee mutates a copy of the place, the global keeps its PRE-call value
+// until the call returns, and then the copy is stored back into the place —
+// overwriting whatever the callee stored into that same place, while every
+// OTHER field the callee wrote is kept. A NESTED field place
+// (`g.inner.xs`) is left out: wasm loses its write-back (#3092) and the
+// interpreter abstains on a nested `mut` lvalue.
+type G = { xs: List[Int], n: Int }
+
+var g: G = { xs: [], n: 0 }
+
+var gl: List[Int] = []
+
+// Reads the global in the middle of mutating its own copy.
+fn read_mid(mut xs: List[Int]) -> Unit = {
+  list.push(xs, 7)
+  println("read_mid: g.xs=${g.xs} copy=${list.len(xs)}")
+  list.push(xs, list.len(g.xs))
+}
+
+// Writes the whole global, then keeps mutating its copy.
+fn write_whole(mut xs: List[Int]) -> Unit = {
+  list.push(xs, 1)
+  g = { xs: [100, 200], n: 5 }
+  println("write_whole: g.xs=${g.xs} g.n=${g.n} copy=${list.len(xs)}")
+  list.push(xs, 2)
+}
+
+// Writes a sibling field: kept after the write-back.
+fn bump_n(mut xs: List[Int]) -> Unit = {
+  g.n = g.n + 10
+  list.push(xs, g.n)
+}
+
+// Reaches the global only through another fn.
+fn gl_len() -> Int = list.len(gl)
+
+fn via_helper(mut xs: List[Int]) -> Unit = {
+  list.push(xs, 9)
+  list.push(xs, gl_len())
+}
+
+// Recursion: every level reads the global through the helper.
+fn fill(mut xs: List[Int], k: Int) -> Unit = {
+  if k > 0 then {
+    list.push(xs, gl_len() * 10 + k)
+    fill(xs, k - 1)
+  } else ()
+}
+
+// A callee that runs a closure touching the global. The closure is made
+// away from the write-backs: a global captured by a lambda in the fn that
+// writes it walls the wasm leg (`cell-write:field-assign`).
+fn apply_to(mut xs: List[Int], f: (Int) -> Int) -> Unit = {
+  list.push(xs, f(list.len(xs)))
+}
+
+fn reader() -> (Int) -> Int = (k) => k + list.len(gl) + list.len(g.xs)
+
+fn push_gl() -> Unit = via_helper(gl)
+
+fn run_closure() -> Unit = {
+  let p = () => { push_gl() }
+  p()
+}
+
+// The whole global as the place, with a result.
+fn root_write(mut r: G) -> Int = {
+  list.push(r.xs, 3)
+  g.n = 99
+  println("root_write: g.n=${g.n} copy.n=${r.n}")
+  r.n = r.n + 1
+  list.len(r.xs)
+}
+
+effect fn main() -> Unit = {
+  read_mid(g.xs)
+  println("1 ${g.xs}")
+  write_whole(g.xs)
+  println("2 ${g.xs} ${g.n}")
+  bump_n(g.xs)
+  println("3 ${g.xs} ${g.n}")
+  via_helper(gl)
+  println("4 ${gl}")
+  fill(gl, 3)
+  println("5 ${gl}")
+  apply_to(gl, reader())
+  println("6 ${gl}")
+  run_closure()
+  println("7 ${gl}")
+  let k = root_write(g)
+  println("8 ${k} ${g.xs} ${g.n}")
+}
