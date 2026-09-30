@@ -396,8 +396,8 @@ spec/wasm_cross/mut_param_move_mode_gaps.almd :: fill2
 # incumbent MIR brick's executable subset. The STRUCTURAL leg (the default)
 # lowers all sixteen; native, wasm and interp print identical bytes.
 # (2026-09-30, #3058) fifteen of the sixteen now lower on the MIR rung too;
-# show_float32 remains (the Float32 printer, see the #3058 note above).
-spec/wasm_cross/sized_tail_literal_matrix.almd :: show_float32
+# (2026-09-30, C-372/#3079) and the sixteenth, show_float32: a Float32 in `${}`
+# prints through the self-hosted f32 Schubfach (float32.to_string_compound).
 # (2026-09-30, batch 076) the MIR-rung walls #3061, #3052 and #3066 leave after
 # #3073's derived effect-fn ABI facts: a `!` in a list-literal operand, a
 # Result-returning main over carrier releases, two hoisted mut-call arguments,
@@ -408,3 +408,25 @@ spec/wasm_cross/leak_free_propagating_literal_operand.almd :: in_list  # #3084
 spec/wasm_cross/leak_free_result_option_carriers.almd :: main  # #3084
 spec/wasm_cross/mut_call_hoisted_args_distinct.almd :: main  # #3084
 spec/wasm_cross/nested_place_assign.almd :: main  # #3084
+# (2026-09-30, C-372) the Float32 display fixture: `${(t, t)}`, a tuple with a
+# Float32 element, walls on the MIR rung (a record with one lowers); native
+# falls back to v0 and the three legs agree.
+spec/wasm_cross/float32_display_shortest.almd :: main  # #3086
+# #2960: a user fn handed a `mut` place of a module-level `var` that reads or
+# writes the same global. The MIR brick refuses the field-assign to a mutable
+# global ("field-assign to mutable module-level var … not in this brick"); the
+# structural leg serves it byte-identically to native and the interp.
+spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd :: bump_n  # #2739
+spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd :: main  # #2739
+spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd :: root_write  # #2739
+# #3092/#3101: the nested-place mut write-back fixture's `main` binds a can-err
+# callee's Result through `??` ("?? over an Option/Result operand outside the
+# executable subset"). The structural leg serves it byte-identically to native
+# and the interp.
+spec/wasm_cross/mut_param_nested_place_writeback.almd :: main  # #2739
+# #3103: the pre-call global fixtures' `main` fills a module-level record's
+# fields in place ("field-assign to mutable module-level var … not in this
+# brick"). The structural leg serves both byte-identically to native and the
+# interp.
+spec/wasm_cross/mut_param_global_callee_sees_precall.almd :: main  # #2739
+spec/wasm_cross/mut_param_global_no_reach_in_place.almd :: main  # #2739
