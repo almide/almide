@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at b433d3c8f — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at af49ddc9d — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -1232,6 +1232,7 @@ f3bae1d64fef56e10d01d4a8f00a25c25bfb1e5d573620209983846cb6fff237	spec/wasm_cross
 ebbe9c6c4a9fb11c555ea7c858c7d2bb8792a2c91b27f29878d0b2e1cf26894c	spec/wasm_cross/or_pattern_heap_subject_matrix.almd
 95ac9aa7a09368dc2a9eaa54dc9ba05110e64b10666b8cc3ae2f8758d858a9f4	spec/wasm_cross/ord_record_variant.almd
 309ab9fa08a2b54e425de1547e5adcc49997a63fdd13161f1ff84aaedcc42e27	spec/wasm_cross/ord_recursive.almd
+44eb64dccc2df53a81834fc1b49fc0ec7b43ac2f4f609eb795eb2db38ab096c6	spec/wasm_cross/panic_abort_positions.almd
 26d7942d2366c8354082ef801deb30156f40c0c8bb5222199b17cb23f350404c	spec/wasm_cross/panic_value_arm.almd
 ad026e8b39df787c06e55b511a90f9f24d56d96e935984704d63621b9ee42d00	spec/wasm_cross/path_extension_hidden.almd
 b8365dcc72d4f47c6335b68bd85bff3c8159711cedc4135d567dd35d072abf0e	spec/wasm_cross/phantom_type_param.almd

@@ -62,7 +62,7 @@ call-arg:Range	1
 call-arg:TupleIndex	8
 call-arg:UnwrapOr	84
 call-arg:borrowed-temp	2
-call:panic-arg	1
+call:panic-arg	7
 callback:Member	3
 callback:UnwrapOr	2
 callee:Member	8
@@ -145,5 +145,5 @@ tail:TupleIndex	4
 tail:Unwrap	4
 tail:UnwrapOr	18
 tuple-elem:TupleIndex	1
-unwrap:abort	37
+unwrap:abort	38
 unwrap:err-repr	2
