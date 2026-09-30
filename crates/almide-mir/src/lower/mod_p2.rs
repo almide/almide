@@ -1,13 +1,13 @@
 
-// UNPOPULATED since #2950. Every registry below except `EAGER_ABORT_GLOBALS`
-// was filled only by the incumbent wasm pipeline's program passes
-// (`populate_abi_registries`, `inline_mutual_tail_recursion`,
-// `set_mutable_global_vars`, `set_derived_type_owners`), which were deleted
-// with that pipeline (#2935, #2950). The native MIR leg and the witness
-// producer never ran them, so on every product path these sets are empty and
-// each membership test below reads `false`/`None`. The per-registry docs keep
-// the contract they were written against; removing the registries and the
-// branches that read them is follow-up work.
+// The ABI registries below are DERIVED from the IR (#3058): the shared desugar
+// chain calls [`settle_effect_abi`] on every product path and in the corpus
+// classifier, which computes `almide_ir::effect_abi::effect_abi_facts` (never-err
+// lifted / auto-wrap / declared-Option / mut params) and the mutable-global slot
+// map as pure functions of the program and installs them for the per-fn
+// lowering. The incumbent passes that used to fill them were deleted with that
+// pipeline (#2935, #2950). `DERIVED_TYPE_OWNERS` alone is still never written
+// (#3000). A per-registry doc names the old populating pass; read it as
+// "derived at the same point".
 thread_local! {
     /// The names of NEVER-ERR LIFTED user effect fns (an `effect fn` whose declared return is
     /// non-Result, so the frontend lifts its call type to `Result[T, String]`, but whose body builds
@@ -228,3 +228,82 @@ pub(crate) fn is_unstripped_declared_option_call(e: &IrExpr) -> bool {
             if DECLARED_OPTION_EFFECT_FNS.with(|s| s.borrow().contains(name.as_str())))
 }
 
+
+/// Derive the effect-fn ABI facts of `program` ([`almide_ir::effect_abi`]),
+/// settle every call site of a never-err lifted fn against its raw return, and
+/// install the facts for the lowering of the program's functions (#3058). The
+/// shared desugar chain runs this on every product path and in the corpus
+/// classifier, just before the continuation lift (which lowers fns).
+pub fn settle_effect_abi(program: &mut almide_ir::IrProgram) {
+    let facts = almide_ir::effect_abi::effect_abi_facts(program);
+    almide_ir::effect_abi::settle_never_err_calls(program, &facts);
+    install(facts);
+    install_mutable_globals(program);
+}
+
+/// The installed ABI facts, saved on creation and put back on drop: a nested
+/// pipeline run (the registry signature lookup lowers a stdlib source in the
+/// middle of a caller's per-fn lowering) installs ITS program's facts, which
+/// must not outlive it.
+pub(crate) struct AbiFactsScope(
+    almide_ir::effect_abi::EffectAbiFacts,
+    std::collections::HashMap<u32, (u32, Ty)>,
+);
+
+impl AbiFactsScope {
+    pub(crate) fn save() -> Self {
+        let facts = almide_ir::effect_abi::EffectAbiFacts {
+            never_err_lifted: NEVER_ERR_LIFTED_FNS.with(|s| s.borrow().clone()),
+            auto_wrap: AUTO_WRAP_ABI_FNS.with(|s| s.borrow().clone()),
+            declared_option: DECLARED_OPTION_FNS.with(|s| s.borrow().clone()),
+            declared_option_effect: DECLARED_OPTION_EFFECT_FNS.with(|s| s.borrow().clone()),
+            mut_params: MUT_PARAM_FNS.with(|s| s.borrow().clone()),
+        };
+        AbiFactsScope(facts, MUTABLE_GLOBAL_VARS.with(|s| s.borrow().clone()))
+    }
+}
+
+impl Drop for AbiFactsScope {
+    fn drop(&mut self) {
+        install(std::mem::take(&mut self.0));
+        let slots = std::mem::take(&mut self.1);
+        MUTABLE_GLOBAL_VARS.with(|s| *s.borrow_mut() = slots);
+    }
+}
+
+/// Is `name` a never-err lifted effect fn of the program being lowered (its
+/// body returns the raw value, and every call site was settled against it)?
+pub(crate) fn is_never_err_lifted(name: &str) -> bool {
+    NEVER_ERR_LIFTED_FNS.with(|s| s.borrow().contains(name))
+}
+
+/// Re-install the facts of `program` (after a pass added fns).
+pub fn install_effect_abi_facts(program: &almide_ir::IrProgram) {
+    install(almide_ir::effect_abi::effect_abi_facts(program));
+    install_mutable_globals(program);
+}
+
+/// The storage slot of every MUTABLE module-level `var` (program and module
+/// top-lets, `tl.mutable`), in declaration (= VarId) order: a pure function of
+/// the program, so a slot index means the same thing to every fn lowered.
+fn install_mutable_globals(program: &almide_ir::IrProgram) {
+    let mut vars: Vec<_> = program
+        .top_lets
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.top_lets.iter()))
+        .filter(|tl| tl.mutable)
+        .collect();
+    vars.sort_by_key(|tl| tl.var.0);
+    MUTABLE_GLOBAL_VARS.with(|s| {
+        *s.borrow_mut() =
+            vars.iter().enumerate().map(|(i, tl)| (tl.var.0, (i as u32, tl.ty.clone()))).collect();
+    });
+}
+
+fn install(facts: almide_ir::effect_abi::EffectAbiFacts) {
+    NEVER_ERR_LIFTED_FNS.with(|s| *s.borrow_mut() = facts.never_err_lifted);
+    AUTO_WRAP_ABI_FNS.with(|s| *s.borrow_mut() = facts.auto_wrap);
+    DECLARED_OPTION_FNS.with(|s| *s.borrow_mut() = facts.declared_option);
+    DECLARED_OPTION_EFFECT_FNS.with(|s| *s.borrow_mut() = facts.declared_option_effect);
+    MUT_PARAM_FNS.with(|s| *s.borrow_mut() = facts.mut_params);
+}

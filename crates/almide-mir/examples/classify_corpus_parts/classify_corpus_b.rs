@@ -364,7 +364,11 @@ fn source_to_ir(path: &Path, source: &str) -> FrontendOutcome {
         almide_mir::lower::hoist_record_literal_args(&mut ir);
         // #1147 — the SAME oracle-driven continuation lift the pipeline runs,
         // LAST in the chain (desugar-before-both).
+        // #3058: the effect-fn ABI facts, derived from this IR (the lift below
+        // lowers fns, and every fn is lowered against them).
+        almide_mir::lower::settle_effect_abi(&mut ir);
         almide_mir::lower::lift_poisoning_continuations(&mut ir);
+        almide_mir::lower::install_effect_abi_facts(&ir);
         Ok(ir)
     }));
     match result {
