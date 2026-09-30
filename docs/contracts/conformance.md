@@ -123,7 +123,7 @@
 | ALS-ST2 | C-249 | `spec/wasm_cross/for_in_forms.almd` (byte-compare)<br>`spec/wasm_cross/tuple_ops.almd` (byte-compare) |
 | ALS-ST3 | C-252, C-280 | `spec/wasm_cross/expr_stmt_comment.almd` (byte-compare)<br>`spec/wasm_cross/kernel_conformance.almd` (byte-compare) |
 | ALS-ST4 | C-253 | `spec/wasm_cross/place_assign_ascription.almd` (byte-compare) |
-| ALS-ST5 | C-265 | `spec/wasm_cross/guard_statement.almd` (byte-compare)<br>`spec/wasm_cross/generic_pattern_binds_instanced.almd` (byte-compare) |
+| ALS-ST5 | C-265 | `spec/wasm_cross/guard_statement.almd` (byte-compare)<br>`spec/wasm_cross/generic_pattern_binds_instanced.almd` (byte-compare)<br>`spec/wasm_cross/guard_value_exit_in_loop.almd` (byte-compare) |
 | ALS-ST6 | C-266 | `spec/wasm_cross/guard_let_statement.almd` (byte-compare) |
 | ALS-T1 | C-021, C-294 | `spec/wasm_cross/string_whitespace.almd` (byte-compare)<br>`spec/wasm_cross/fuel_zero_budget_inline.almd` (byte-compare) |
 | ALS-T2 | C-024, C-210, C-300, C-301 | `spec/wasm_cross/float_parse.almd` (byte-compare)<br>`spec/wasm_cross/nan_canonical_observation.almd` (byte-compare)<br>`spec/wasm_cross/nan_canonical_bytes_write.almd` (byte-compare)<br>`spec/wasm_cross/map_literal_ctor_values.almd` (byte-compare)<br>`tests/heap_cap_test.rs` (cargo gate)<br>`spec/wasm_cross/list_arg_map_view.almd` (byte-compare)<br>`spec/wasm_cross/map_upsert_str.almd` (byte-compare) |

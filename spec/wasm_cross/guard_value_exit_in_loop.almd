@@ -1,0 +1,103 @@
+// @contract: C-265
+// #3042: a guard's else is an EARLY RETURN from the enclosing fn — also when
+// the guard sits in a `for` / `while` body. A plain-value else (`else ()`,
+// `else n`, `else s`) is the fn's return value, never a `continue`; loop
+// control is spelled `else continue` / `else break`. An effect fn returns it
+// through its Ok channel: native Ok-wrapped only guards on the body's tail
+// spine, so `guard c else ()` in a loop emitted `return ()` against
+// `Result<(), String>` (rustc E0308), and the wasm leg lowered the raw value
+// as the Result it is not. Matrix: for / while x pure / effect x Unit / Int /
+// String returns, plus a guard under an `if` in the loop body.
+fn pure_unit_for(xs: List[Int]) -> Unit = {
+  for x in xs {
+    guard x > 0 else ()
+    println("pure_unit_for ${x}")
+  }
+  println("pure_unit_for done")
+}
+
+fn pure_int_while(limit: Int) -> Int = {
+  var i = 0
+  var s = 0
+  while i < 10 {
+    i = i + 1
+    guard i <= limit else s * 100
+    s = s + i
+  }
+  s
+}
+
+effect fn effect_unit_for(xs: List[Int]) -> Unit = {
+  for x in xs {
+    guard x > 0 else ()
+    println("effect_unit_for ${x}")
+  }
+  println("effect_unit_for done")
+}
+
+effect fn effect_unit_while(n: Int) -> Unit = {
+  var i = 0
+  while i < n {
+    i = i + 1
+    guard i != 3 else ()
+    println("effect_unit_while ${i}")
+  }
+  println("effect_unit_while done")
+}
+
+effect fn effect_int_for(xs: List[Int]) -> Int = {
+  var n = 0
+  for x in xs {
+    guard x > 0 else x
+    n = n + x
+  }
+  n
+}
+
+effect fn effect_int_while(limit: Int) -> Int = {
+  var i = 0
+  var s = 0
+  while i < 10 {
+    i = i + 1
+    guard i <= limit else s * 100
+    s = s + i
+  }
+  s
+}
+
+effect fn effect_str_for(words: List[String]) -> String = {
+  var acc = ""
+  for w in words {
+    guard w != "stop" else "${acc}!"
+    acc = acc + w
+  }
+  acc
+}
+
+effect fn effect_int_nested(xs: List[Int]) -> Int = {
+  var n = 0
+  for x in xs {
+    if x % 2 == 0 then {
+      guard x < 10 else n + 1000
+      n = n + x
+    } else {
+      n = n + 1
+    }
+  }
+  n
+}
+
+effect fn main() -> Unit = {
+  pure_unit_for([1, 2, -3, 4])
+  pure_unit_for([5])
+  println("${pure_int_while(3)} ${pure_int_while(20)}")
+  effect_unit_for([1, -2, 3])!
+  effect_unit_for([7])!
+  effect_unit_while(5)!
+  effect_unit_while(2)!
+  println("${effect_int_for([1, 2, 3])!} ${effect_int_for([1, -2, 3])!}")
+  println("${effect_int_while(3)!} ${effect_int_while(20)!}")
+  println(effect_str_for(["a", "b", "stop", "c"])!)
+  println(effect_str_for(["x", "y"])!)
+  println("${effect_int_nested([1, 2, 4])!} ${effect_int_nested([2, 12, 4])!}")
+}

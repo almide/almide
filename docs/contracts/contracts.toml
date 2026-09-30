@@ -3339,6 +3339,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/guard_statement.almd", class = "fixture" },
   { path = "spec/wasm_cross/generic_pattern_binds_instanced.almd", class = "fixture" },
+  { path = "spec/wasm_cross/guard_value_exit_in_loop.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-266"
