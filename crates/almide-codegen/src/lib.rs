@@ -513,6 +513,9 @@ fn almide_repr_prelude(vis: &str) -> String {
     s.push_str("impl<T: AlmideRepr + Clone> AlmideRepr for AlmideSharedMut<T> { fn almide_repr(&self) -> String { self.0.borrow().almide_repr() } }\n");
     // Reference forwarders so `almide_repr(&&x)` and slice elements compose.
     s.push_str("impl<T: AlmideRepr + ?Sized> AlmideRepr for &T { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
+    // A `mut` parameter is `&mut T` in the fn body, and interpolating it
+    // (`"${xs}"`) reprs `&(xs)` — `&&mut T` (#3093: E0277 for every type).
+    s.push_str("impl<T: AlmideRepr + ?Sized> AlmideRepr for &mut T { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
     s.push_str("impl<T: AlmideRepr + ?Sized> AlmideRepr for std::boxed::Box<T> { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
     // Tuples: `(a, b, …)` for arities 2..=12 (the parser caps tuple width well below this).
     let names = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
