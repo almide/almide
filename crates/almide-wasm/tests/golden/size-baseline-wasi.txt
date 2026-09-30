@@ -74,6 +74,7 @@
 7703	spec/wasm_cross/closure_borrowed_arg_guard.almd
 3422	spec/wasm_cross/closure_captured_list_mutation.almd
 5709	spec/wasm_cross/closure_captured_map_records.almd
+7722	spec/wasm_cross/closure_captured_record_field_mutation.almd
 4931	spec/wasm_cross/closure_reads_var_written_by_mut_call.almd
 5968	spec/wasm_cross/closure_rich_list_capture.almd
 5869	spec/wasm_cross/closure_scalar_captures.almd

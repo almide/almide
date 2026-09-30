@@ -67,11 +67,11 @@ callback:Member	3
 callback:UnwrapOr	2
 callee:Member	8
 caps:argv-in-plain-fn	8
-captures:cell	17
+captures:cell	25
 display	10
 display:Float-temp	29
 effect:carrier	38
-field:EmptyMap	5
+field:EmptyMap	6
 field:MapLiteral	1
 field:Member	1
 forin-map	4
@@ -105,7 +105,7 @@ module-arm:unaudited:bytes.set_u8	4
 module-arm:unaudited:fan.any	4
 module-arm:unaudited:list.clear	2
 module-arm:unaudited:list.pop	2
-module-arm:unaudited:list.push	133
+module-arm:unaudited:list.push	134
 module-arm:unaudited:map.clear	3
 module-arm:unaudited:map.insert	2
 module-arm:unaudited:string.clear	3
