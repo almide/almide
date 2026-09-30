@@ -18,16 +18,6 @@ call-arg:Lambda:fan.map	10
 call-arg:Lambda:fs.__fallible_fold_lines	1
 call-arg:Lambda:fs.fold_lines	1
 call-arg:Lambda:fs.fold_lines_chunked	1
-call-arg:Lambda:list.__fallible_each__String_String	1
-call-arg:Lambda:list.__fallible_filter__String_String	1
-call-arg:Lambda:list.__fallible_filter_map__Int_Int_String	1
-call-arg:Lambda:list.__fallible_filter_map__String_Int_String	1
-call-arg:Lambda:list.__fallible_find__String_String	1
-call-arg:Lambda:list.__fallible_flat_map__String_Int_String	1
-call-arg:Lambda:list.__fallible_fold__Int_Int_E	4
-call-arg:Lambda:list.__fallible_fold__String_Int_String	1
-call-arg:Lambda:list.__fallible_map__Int_Int_String	2
-call-arg:Lambda:list.__fallible_map__String_Int_String	8
 call-arg:Lambda:list.filter_map	2
 call-arg:Lambda:list.flat_map	1
 call-arg:Lambda:list.fold:fused	8
@@ -64,7 +54,7 @@ call-arg:TupleIndex	7
 call-arg:UnwrapOr-carrier:Member	1
 call-arg:borrowed-temp	8
 call:panic-arg	1
-callback:Member	3
+callback:Member	4
 callback:UnwrapOr-carrier:Call	1
 callback:UnwrapOr-carrier:MapAccess	1
 caps:argv-in-plain-fn	8
@@ -99,7 +89,7 @@ heap-operand:ResultOk	2
 heap-operand:Tuple	1
 heap-operand:TupleIndex	2
 heap-operand:Unwrap	1
-heap-operand:UnwrapOr	4
+heap-operand:UnwrapOr	5
 interp-part:IndexAccess	4
 interp-part:Member	18
 interp-part:TupleIndex	1
@@ -125,7 +115,7 @@ module-arm:unaudited:bytes.set_u8	4
 module-arm:unaudited:fan.any	4
 module-arm:unaudited:list.clear	2
 module-arm:unaudited:list.pop	2
-module-arm:unaudited:list.push	133
+module-arm:unaudited:list.push	134
 module-arm:unaudited:map.clear	3
 module-arm:unaudited:map.insert	3
 module-arm:unaudited:string.clear	3
@@ -167,5 +157,5 @@ tail:Unwrap	14
 tail:view-result	8
 tuple-elem:TupleIndex	1
 unwrap-or:unowned-fresh-fallback	36
-unwrap:abort	39
+unwrap:abort	41
 unwrap:err-repr	2
