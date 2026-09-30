@@ -324,6 +324,28 @@ spec/wasm_cross/nested_field_path_mut.almd :: main
 # length-test chain the lowering runs (`lower::desugar_list_rest_matches`: a
 # `>=` test, element reads under it, the tail as `list.drop(xs, k)`, the
 # as-binder read as the subject itself).
+# Then 24 more (90 -> 66, class 3 and the rest; 90 counts the sixteen sized
+# tail-literal rows #3067 recorded below). Per shape:
+#  - loop value exits: LOWERED. `desugar_loop_early_returns` takes a `for` body
+#    (the flag guards the body) and a fn returning its value raw (pure, or
+#    never-err effect) with a literal seed; `else break` / `else continue` is
+#    declined as not a value return.
+#  - heap-result `if` over a scalar-scalar Result (`ok(true)` / `err(-3)` in
+#    `Result[Bool, Int8]`): LOWERED, the bind position's len-as-tag err block.
+#  - printer match over a scalar-scalar Result (`err(e) => .. ${e}`): LOWERED,
+#    the err payload binds by value. `${u}` of a UInt64: LOWERED through its
+#    own unsigned printer.
+#  - `x!` over a never-err `mut`-param call the C-132 rewrite already typed as
+#    its `(result, buffer)` tuple: LOWERED as the identity it is.
+#  - `${f}` of a Float32: KEPT walled. The widened f64 is not the f32's
+#    shortest form (`0.1` would print 0.10000000149011612) and no f32 printer
+#    is self-hosted; show_float32 below stays until one is.
+#  - the heap-result if/match rows that remain return heap-payload Results
+#    (records, lists, closures, http responses) whose arms have no executable
+#    producer in this brick: KEPT walled, each is the incumbent's honest wall and
+#    the structural leg serves them.
+# New rows must now cite the open issue that owns them (`  # #NNNN`,
+# scripts/check-walled-real-growth.sh in CI).
 # 2026-09-29 (#2950): the classifier now lowers what the product lowers. The
 # incumbent wasm pipeline ran program passes before lowering
 # (`inline_mutual_tail_recursion`, `populate_abi_registries`,
@@ -336,21 +358,12 @@ spec/wasm_cross/nested_field_path_mut.almd :: main
 # top-let reads (no name bridge), and never-err / auto-wrap effect-fn ABIs (no
 # ABI registries). The structural leg serves these programs; this is the
 # MIR-lowering frontier, recorded rather than ported.
-spec/gauntlet/cells/x16_effect_mut_generic.almd :: main
 spec/integration/modules/cross_module_toplet_byvalue_test.almd :: __test_almd_cross-module record top-let list and fn-returned record
 spec/lang/effect_assign_unwrap_test.almd :: unannotated_unwraps
 spec/lang/explicit_propagation_test.almd :: explicit_unwraps
 spec/lang/guard_else_err_unwrap_test.almd :: show_unit
-spec/wasm_cross/destructure_owned_tuple_release.almd :: main
-spec/wasm_cross/effect_call_arg_credit.almd :: main
-spec/wasm_cross/effect_mut_generic_port.almd :: main
-spec/wasm_cross/effect_mut_generic_port.almd :: uc__Mem
 spec/wasm_cross/fallible_hof_large_input.almd :: stop_at
 spec/wasm_cross/fallible_hof_large_input.almd :: visit
-spec/wasm_cross/mut_param_call_chain.almd :: g
-spec/wasm_cross/mut_param_call_chain.almd :: main
-spec/wasm_cross/mut_param_effect_never_err.almd :: main
-spec/wasm_cross/mut_param_tail_recursion.almd :: main
 # The same #2950 classifier change, on a fixture that landed after the list above
 # was measured (the fallible-HOF release pin): its effect-fn helpers wall without the
 # ABI registries the deleted passes filled. The structural leg serves it.
@@ -382,19 +395,6 @@ spec/wasm_cross/mut_param_move_mode_gaps.almd :: fill2
 # width's printer matches on a heap Option / Result — both outside the
 # incumbent MIR brick's executable subset. The STRUCTURAL leg (the default)
 # lowers all sixteen; native, wasm and interp print identical bytes.
-spec/wasm_cross/sized_tail_literal_matrix.almd :: err_payload_float32
-spec/wasm_cross/sized_tail_literal_matrix.almd :: err_payload_int16
-spec/wasm_cross/sized_tail_literal_matrix.almd :: err_payload_int32
-spec/wasm_cross/sized_tail_literal_matrix.almd :: err_payload_int8
-spec/wasm_cross/sized_tail_literal_matrix.almd :: err_payload_uint16
-spec/wasm_cross/sized_tail_literal_matrix.almd :: err_payload_uint32
-spec/wasm_cross/sized_tail_literal_matrix.almd :: err_payload_uint64
-spec/wasm_cross/sized_tail_literal_matrix.almd :: err_payload_uint8
+# (2026-09-30, #3058) fifteen of the sixteen now lower on the MIR rung too;
+# show_float32 remains (the Float32 printer, see the #3058 note above).
 spec/wasm_cross/sized_tail_literal_matrix.almd :: show_float32
-spec/wasm_cross/sized_tail_literal_matrix.almd :: show_int16
-spec/wasm_cross/sized_tail_literal_matrix.almd :: show_int32
-spec/wasm_cross/sized_tail_literal_matrix.almd :: show_int8
-spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint16
-spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint32
-spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint64
-spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint8
