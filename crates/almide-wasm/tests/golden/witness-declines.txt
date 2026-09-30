@@ -71,13 +71,13 @@ captures:cell	17
 display	10
 display:Float-temp	29
 effect:carrier	38
-field:EmptyMap	5
+field:EmptyMap	7
 field:MapLiteral	1
 field:Member	1
 forin-map	4
 heap-interp-part:Block	4
 heap-interp-part:IndexAccess	2
-heap-interp-part:Member	13
+heap-interp-part:Member	14
 heap-interp-part:UnwrapOr	4
 heap-operand:Block	1
 heap-operand:IndexAccess	2
@@ -97,7 +97,7 @@ match-guard	17
 match-subject:Member	18
 module-arm:unaudited:bytes.append_u8	4
 module-arm:unaudited:bytes.copy_from	1
-module-arm:unaudited:bytes.push	19
+module-arm:unaudited:bytes.push	20
 module-arm:unaudited:bytes.set_at	9
 module-arm:unaudited:bytes.set_f32_le	5
 module-arm:unaudited:bytes.set_i32_le	1
@@ -105,11 +105,11 @@ module-arm:unaudited:bytes.set_u8	4
 module-arm:unaudited:fan.any	4
 module-arm:unaudited:list.clear	2
 module-arm:unaudited:list.pop	2
-module-arm:unaudited:list.push	133
+module-arm:unaudited:list.push	136
 module-arm:unaudited:map.clear	3
 module-arm:unaudited:map.insert	2
 module-arm:unaudited:string.clear	3
-module-arm:unaudited:string.push	2
+module-arm:unaudited:string.push	3
 module-result:view:option.flatten	1
 named-op	11
 operand:IndexAccess	5
@@ -129,7 +129,7 @@ rhs:Range	7
 rhs:RuntimeCall	88
 rhs:SpreadRecord	3
 rhs:ToOption	5
-rhs:Unwrap	14
+rhs:Unwrap	15
 rhs:UnwrapOr	77
 scan	3
 stmt:FieldAssign	13
