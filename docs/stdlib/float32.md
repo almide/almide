@@ -85,7 +85,7 @@ float32.to_uint64(x: Float32) -> UInt64
 // @since 0.15.0 or earlier
 float32.to_float64(x: Float32) -> Float64
 
-// f64 digits of x; 0.1 prints 0.10000000149011612.
+// Shortest f32 round-trip digits, no exponent; 0.1 stays 0.1, 2.0 keeps .0.
 // @since 0.15.0 or earlier
 float32.to_string(x: Float32) -> String
 ```

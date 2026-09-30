@@ -26,18 +26,62 @@ impl Emitter<'_> {
     /// the stack; append its ORACLE display form to the line buffer and
     /// update the cursor local. `nested` = the Rust-Debug nesting rule
     /// (strings quote+escape inside containers, bare at the top).
+    /// `ir` is the value's IR type when the caller has it: the slot type
+    /// cannot tell a Float32 from a Float (both ride the f64 slot), and a
+    /// Float32 — at the top or nested at any depth — prints its own shortest
+    /// binary32 digits (C-372, #3081).
     pub(crate) fn emit_display_value(
         &mut self,
         got: SliceTy,
         nested: bool,
+        ir: Option<&Ty>,
     ) -> Result<(), EmitError> {
-        self.emit_display_at(got, nested, &mut Vec::new())
+        self.emit_display_at(got, nested, ir, &mut Vec::new())
+    }
+
+    /// The float on the stack, appended through the linked compound printer
+    /// `key` names: `float.to_string_compound` for a Float, and for a
+    /// Float32 `float32.to_string_compound` — the f32 shortest form native's
+    /// f32 Display prints (#3079), which the widened f64 carrier would not.
+    pub(crate) fn emit_float_display(&mut self, key: &str) -> Result<(), EmitError> {
+        let Some(i) = self.resolve_qualified(key) else {
+            return unsup("interp-part:Float-unlinked");
+        };
+        let info = &self.table.infos[i];
+        if info.refuse.is_some() || info.ret != Some(STR) {
+            return unsup("interp-part:Float-impl");
+        }
+        let idx = info.wasm_index;
+        self.calls.insert(i);
+        // The formatted block this call hands over is appended and
+        // never released (#2973): an owned temporary with no `d`.
+        self.witness_decline("display:Float-temp");
+        self.f
+            .instructions()
+            .call(idx)
+            .local_set(self.tmp_i32_local);
+        self.f
+            .instructions()
+            .local_get(self.cursor_local)
+            .local_get(self.tmp_i32_local)
+            .i32_const(almide_layout::PAYLOAD as i32)
+            .i32_add()
+            .local_get(self.tmp_i32_local)
+            .i32_load(len_memarg())
+            .call(F_APPEND_COPY)
+            .local_set(self.cursor_local);
+        // #2973: the formatted text is this site's own block — the
+        // bytes are copied into the line, so its credit ends here.
+        let dec = self.dec_fn_of(STR);
+        self.f.instructions().local_get(self.tmp_i32_local).call(dec);
+        Ok(())
     }
 
     fn emit_display_at(
         &mut self,
         got: SliceTy,
         nested: bool,
+        ir: Option<&Ty>,
         path: &mut Vec<u32>,
     ) -> Result<(), EmitError> {
         // Emit-time recursion follows the TYPE SHAPE: a non-recursive
@@ -64,37 +108,13 @@ impl Emitter<'_> {
                     .local_set(self.cursor_local);
             }
             FLOAT => {
-                // The SAME linked Dragon4 compound form the oracle uses.
-                let Some(i) = self.resolve_qualified("float.to_string_compound") else {
-                    return unsup("interp-part:Float-unlinked");
-                };
-                let info = &self.table.infos[i];
-                if info.refuse.is_some() || info.ret != Some(STR) {
-                    return unsup("interp-part:Float-impl");
+                // The SAME linked Schubfach compound form the oracle uses —
+                // at binary32 for a Float32 (C-372).
+                if matches!(ir, Some(Ty::Float32)) {
+                    self.emit_float_display("float32.to_string_compound")?;
+                } else {
+                    self.emit_float_display("float.to_string_compound")?;
                 }
-                let idx = info.wasm_index;
-                self.calls.insert(i);
-                // The formatted block this call hands over is appended and
-                // never released (#2973): an owned temporary with no `d`.
-                self.witness_decline("display:Float-temp");
-                self.f
-                    .instructions()
-                    .call(idx)
-                    .local_set(self.tmp_i32_local);
-                self.f
-                    .instructions()
-                    .local_get(self.cursor_local)
-                    .local_get(self.tmp_i32_local)
-                    .i32_const(almide_layout::PAYLOAD as i32)
-                    .i32_add()
-                    .local_get(self.tmp_i32_local)
-                    .i32_load(len_memarg())
-                    .call(F_APPEND_COPY)
-                    .local_set(self.cursor_local);
-                // #2973: the formatted text is this site's own block — the
-                // bytes are copied into the line, so its credit ends here.
-                let dec = self.dec_fn_of(STR);
-                self.f.instructions().local_get(self.tmp_i32_local).call(dec);
             }
             STR => {
                 if nested {
@@ -133,7 +153,7 @@ impl Emitter<'_> {
                 self.append_lit("some(");
                 self.f.instructions().local_get(ho);
                 self.load_ty_slot(et, almide_layout::OPTION_FIELD);
-                self.emit_display_at(et, true, path)?;
+                self.emit_display_at(et, true, ir_arg(ir, 0), path)?;
                 self.append_lit(")");
                 self.f.instructions().end();
                 self.release_i32();
@@ -151,13 +171,13 @@ impl Emitter<'_> {
                 self.append_lit("ok(");
                 self.f.instructions().local_get(hr);
                 self.load_ty_slot(ot, almide_layout::SUM_FIELD);
-                self.emit_display_at(ot, true, path)?;
+                self.emit_display_at(ot, true, ir_arg(ir, 0), path)?;
                 self.append_lit(")");
                 self.f.instructions().else_();
                 self.append_lit("err(");
                 self.f.instructions().local_get(hr);
                 self.load_ty_slot(et, almide_layout::SUM_FIELD);
-                self.emit_display_at(et, true, path)?;
+                self.emit_display_at(et, true, ir_arg(ir, 1), path)?;
                 self.append_lit(")");
                 self.f.instructions().end();
                 self.release_i32();
@@ -194,7 +214,7 @@ impl Emitter<'_> {
                 self.f.instructions().end();
                 self.f.instructions().local_get(cur);
                 self.load_ty_slot_at(el);
-                self.emit_display_at(el, true, path)?;
+                self.emit_display_at(el, true, ir_arg(ir, 0), path)?;
                 {
                     let mut i = self.f.instructions();
                     i.local_get(cur).i32_const(stride).i32_add().local_set(cur);
@@ -218,7 +238,7 @@ impl Emitter<'_> {
                     }
                     self.f.instructions().local_get(hb);
                     self.load_ty_slot(fty, off);
-                    self.emit_display_at(fty, true, path)?;
+                    self.emit_display_at(fty, true, ir_arg(ir, k), path)?;
                 }
                 self.append_lit(")");
                 self.release_i32();
@@ -251,12 +271,12 @@ impl Emitter<'_> {
             // element array, so the list walk does the middle.
             SliceTy::Set(h) => {
                 self.append_lit("set.from_list(");
-                self.emit_display_at(SliceTy::List(h), nested, path)?;
+                self.emit_display_at(SliceTy::List(h), nested, ir, path)?;
                 self.append_lit(")");
             }
             // `["k": v, …]` in insertion order; empty is the literal
             // `[:]` (the oracle's map repr).
-            SliceTy::Map(kh, vh) => self.emit_display_map(kh, vh, path)?,
+            SliceTy::Map(kh, vh) => self.emit_display_map(kh, vh, ir, path)?,
             // A Value displays as its compact JSON — the SAME serializer
             // json.stringify uses (one repr, two spellings). The $vjson
             // helper appends AT THE DISPLAY CURSOR in place — the
@@ -324,7 +344,7 @@ impl Emitter<'_> {
                     self.append_lit(&format!("{}: ", fi.name));
                     self.f.instructions().local_get(hb);
                     self.load_ty_slot(fi.ty, fi.offset);
-                    self.emit_display_at(fi.ty, true, path)?;
+                    self.emit_display_at(fi.ty, true, fi.ir.as_ref(), path)?;
                 }
                 self.append_lit(" }");
                 self.release_i32();
@@ -371,7 +391,7 @@ impl Emitter<'_> {
                             }
                             self.f.instructions().local_get(hb);
                             self.load_ty_slot(f.ty, f.offset);
-                            self.emit_display_at(f.ty, true, path)?;
+                            self.emit_display_at(f.ty, true, f.ir.as_ref(), path)?;
                         }
                         self.append_lit(if record_case { " }" } else { ")" });
                     }
@@ -694,7 +714,7 @@ fn build_one_display_helper(
 impl Emitter<'_> {
     /// Map display (`["k": v, …]`, `[:]` when empty) — split from
     /// `emit_display_at` for the complexity budget.
-    fn emit_display_map(&mut self, kh: ETy, vh: ETy, path: &mut Vec<u32>) -> Result<(), EmitError> {
+    fn emit_display_map(&mut self, kh: ETy, vh: ETy, ir: Option<&Ty>, path: &mut Vec<u32>) -> Result<(), EmitError> {
                 let (k, v) = (self.types.el(kh), self.types.el(vh));
                 let (koff, voff, esz) = crate::collections::entry_layout(k, v);
                 let hb = self.hold_i32()?;
@@ -730,11 +750,11 @@ impl Emitter<'_> {
                 self.f.instructions().end();
                 self.f.instructions().local_get(cur).i32_const(koff as i32).i32_add();
                 self.load_ty_slot_at(k);
-                self.emit_display_at(k, true, path)?;
+                self.emit_display_at(k, true, ir_arg(ir, 0), path)?;
                 self.append_lit(": ");
                 self.f.instructions().local_get(cur).i32_const(voff as i32).i32_add();
                 self.load_ty_slot_at(v);
-                self.emit_display_at(v, true, path)?;
+                self.emit_display_at(v, true, ir_arg(ir, 1), path)?;
                 {
                     let mut i = self.f.instructions();
                     i.local_get(cur).i32_const(esz as i32).i32_add().local_set(cur);
@@ -748,5 +768,17 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
         Ok(())
+    }
+}
+
+/// The `i`-th component of a container's IR type — a List/Option/Set/Map/
+/// Result argument or a tuple element — for the display walk (C-372). `None`
+/// when the shape does not line up; the leaf then prints as a Float, never
+/// guesses Float32.
+fn ir_arg(ir: Option<&Ty>, i: usize) -> Option<&Ty> {
+    match ir? {
+        Ty::Applied(_, args) => args.get(i),
+        Ty::Tuple(elems) => elems.get(i),
+        _ => None,
     }
 }

@@ -68,7 +68,15 @@ pub(crate) fn dispatch(module: &str, func: &str, args: &[Value]) -> Option<Flow>
 fn sized_numeric_fn(module: &str, func: &str, args: &[Value]) -> Option<Flow> {
     match func {
         "to_string" => {
-            if module.starts_with("float") {
+            if module == "float32" {
+                // f32 Display's shortest digits of the value rounded to f32, the
+                // `.0` suffix on a whole value (#3079) — `runtime/rs/src/float.rs`
+                // `almide_rt_float32_to_string`.
+                let f = as_float(args.first())? as f32;
+                let s = format!("{}", f);
+                let whole = f.fract() == 0.0 && !s.contains('.') && !s.contains("inf") && !s.contains("NaN");
+                Some(Flow::val(Value::str(if whole { format!("{s}.0") } else { s })))
+            } else if module.starts_with("float") {
                 let f = as_float(args.first())?;
                 Some(Flow::val(Value::str(float_to_string(f))))
             } else {
