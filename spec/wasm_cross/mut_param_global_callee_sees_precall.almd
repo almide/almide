@@ -1,0 +1,65 @@
+// @contract: C-132
+// A `mut` argument is copied in and written back (#3103 ruling (A)): a callee
+// that reads the module-level `var` its argument is rooted at sees the
+// global's PRE-call value, on every leg — the argument is the callee's own
+// copy until the call returns and the write-back stores it. Covered: a bare
+// global, a field, a nested field, a callee that reaches the global only
+// through another fn, and one that reaches it through a closure it calls.
+// Each list has spare capacity before the call, so an in-place push would
+// have been visible: the structural wasm leg handed the callee the global's
+// own block and the read printed the in-progress value, where native and the
+// interpreter printed the pre-call one. The leg now repoints the global at a
+// copy of the place — only when the callee can reach that global (a callee
+// that cannot keeps the in-place call; mut_param_global_no_reach_in_place).
+type Inner = { ys: List[Int] }
+
+type G = { xs: List[Int], inner: Inner }
+
+var gl: List[Int] = []
+
+var g: G = { xs: [], inner: { ys: [] } }
+
+fn read_gl(mut xs: List[Int]) -> Unit = {
+  list.push(xs, 7)
+  println("bare: gl=${gl} copy=${list.len(xs)}")
+}
+
+fn read_field(mut xs: List[Int]) -> Unit = {
+  list.push(xs, 7)
+  println("field: g.xs=${g.xs} copy=${list.len(xs)}")
+}
+
+fn read_nested(mut ys: List[Int]) -> Unit = {
+  list.push(ys, 7)
+  println("nested: g.inner.ys=${g.inner.ys} copy=${list.len(ys)}")
+}
+
+fn gl_len() -> Int = list.len(gl)
+
+fn via_helper(mut xs: List[Int]) -> Unit = {
+  list.push(xs, 7)
+  println("helper: len(gl)=${gl_len()} copy=${list.len(xs)}")
+}
+
+fn via_closure(mut xs: List[Int], peek: () -> Int) -> Unit = {
+  list.push(xs, 7)
+  println("closure: peek=${peek()} copy=${list.len(xs)}")
+}
+
+fn fill(n: Int) -> Unit = {
+  for i in 0..<n {
+    list.push(gl, i)
+    list.push(g.xs, i)
+    list.push(g.inner.ys, i)
+  }
+}
+
+effect fn main() -> Unit = {
+  fill(5)
+  read_gl(gl)
+  read_field(g.xs)
+  read_nested(g.inner.ys)
+  via_helper(gl)
+  via_closure(gl, () => list.len(gl))
+  println("after: ${gl} ${g.xs} ${g.inner.ys}")
+}
