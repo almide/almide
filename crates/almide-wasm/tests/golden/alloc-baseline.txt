@@ -276,6 +276,7 @@
 66336	spec/wasm_cross/grain_string_escapes.almd
 66400	spec/wasm_cross/grouping_unary.almd
 66112	spec/wasm_cross/guard_err_in_call_arg_block.almd
+66736	spec/wasm_cross/guard_jump_in_value_fn.almd
 66128	spec/wasm_cross/guard_let_statement.almd
 65888	spec/wasm_cross/guard_statement.almd
 66560	spec/wasm_cross/guard_value_exit_in_loop.almd
