@@ -57,8 +57,10 @@ impl Checker {
         // rustc E0308 behind the codegen wall. Exempt: loop control
         // (continue/break), a diverging Never else (process.exit), and lambda
         // bodies (the lambda's own return type is not tracked in current_ret).
-        let is_loop_ctl = matches!(else_.kind, ast::ExprKind::Break | ast::ExprKind::Continue);
-        if is_loop_ctl || self.env.lambda_depth != 0 {
+        // #3115: a block else that ENDS in continue/break leaves the loop the
+        // same way the bare jump does; typing it against the fn's return
+        // refused `guard c else { log(); continue }` in any non-Unit fn.
+        if ends_in_loop_ctl(else_) || self.env.lambda_depth != 0 {
             return;
         }
         let Some(ret) = self.env.current_ret.clone() else { return };
@@ -1233,4 +1235,19 @@ fn cross_family_pattern_diag(
     )
     .with_code("E048")
     .with_try(fix.spelling())
+}
+
+/// Does this guard else leave the enclosing LOOP — a bare `continue` /
+/// `break`, or a block whose last step is one (#3115)? Such an else is not
+/// the fn's return value, so it is not typed against the return type.
+fn ends_in_loop_ctl(e: &ast::Expr) -> bool {
+    match &e.kind {
+        ast::ExprKind::Break | ast::ExprKind::Continue => true,
+        ast::ExprKind::Block { expr: Some(tail), .. } => ends_in_loop_ctl(tail),
+        ast::ExprKind::Block { stmts, expr: None } => matches!(
+            stmts.last(),
+            Some(ast::Stmt::Expr { expr, .. }) if ends_in_loop_ctl(expr)
+        ),
+        _ => false,
+    }
 }
