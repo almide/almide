@@ -312,6 +312,8 @@ impl Emitter<'_> {
         i.if_(BlockType::Empty);
         i.global_get(G_T_HIT).i32_eqz().if_(BlockType::Empty);
         self.note_host_op(crate::fs_meta::OP_WALL_NOW);
+        // #3041: the meter's own read, not the frame's (witness_decls.rs).
+        self.work.meter_reads_pending.set(self.work.meter_reads_pending.get() + 1);
         let mut i = self.f.instructions();
         i.i32_const(crate::fs_meta::OP_WALL_NOW);
         i.i32_const(0).i32_const(0).i32_const(0).i32_const(0);

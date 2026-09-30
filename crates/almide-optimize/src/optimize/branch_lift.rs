@@ -97,7 +97,13 @@ pub fn lift_heap_branch_binds(program: &mut IrProgram) {
         let mut lifter = BranchLifter { vt: var_table, counter: &mut counter, new_funcs: Vec::new(), loop_depth: 0,
         dense_depth: 0, globals, mut_params: &mut_params, scope: None };
         for func in functions.iter_mut() {
+            let before = lifter.new_funcs.len();
             lifter.visit_expr_mut(&mut func.body);
+            // #3041: a helper lifted out of an effect fn's body keeps its
+            // origin's declaration for the capability witness.
+            if func.declares_effect() {
+                IrFunction::mark_effect_origin(&mut lifter.new_funcs[before..]);
+            }
         }
         for tl in top_lets.iter_mut() {
             lifter.visit_expr_mut(&mut tl.value);
@@ -115,7 +121,13 @@ pub fn lift_heap_branch_binds(program: &mut IrProgram) {
         let scope = Some(name.as_str().to_string());
         let mut lifter = BranchLifter { vt: var_table, counter: &mut counter, new_funcs: Vec::new(), loop_depth: 0, dense_depth: 0, globals, mut_params: &mut_params, scope };
         for func in functions.iter_mut() {
+            let before = lifter.new_funcs.len();
             lifter.visit_expr_mut(&mut func.body);
+            // #3041: a helper lifted out of an effect fn's body keeps its
+            // origin's declaration for the capability witness.
+            if func.declares_effect() {
+                IrFunction::mark_effect_origin(&mut lifter.new_funcs[before..]);
+            }
         }
         for tl in top_lets.iter_mut() {
             lifter.visit_expr_mut(&mut tl.value);
@@ -673,6 +685,9 @@ mod tests {
         assert_eq!(helper.visibility, IrVisibility::Private);
         assert_eq!(helper.ret_ty, Ty::String);
         assert_eq!(helper.params.len(), 1);
+        // #3041: lifted out of an `effect fn` (main), the helper keeps that
+        // declaration for the capability witness — as a marker, not the ABI flag.
+        assert!(!helper.is_effect && helper.is_effect_origin() && helper.declares_effect());
         // The param is a FRESH id (the table had 3 vars), named and typed like
         // the captured `v1`, and the body reads it — the enclosing fn's `v1`
         // is bound in one function only.

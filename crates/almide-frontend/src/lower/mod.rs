@@ -514,10 +514,17 @@ fn lower_decls(
 
         match decl {
             ast::Decl::Fn { name, params, body: Some(body), effect, scoped, span, generics, extern_attrs, export_attrs, attrs, visibility, return_type, .. } => {
+                let synthesized_before = ctx.synthesized_fns.len();
                 let mut f = lower_fn(ctx, &FnToLower {
                     name, params, body: body, effect, span, generics,
                     extern_attrs, export_attrs, attrs, visibility, module_prefix,
                 });
+                // #3041: a fn outlined from this body (`__almd_bounded_*`,
+                // `__almd_res_*`, `__almd_scoped_*`) carries this fn's effect
+                // declaration for the capability witness.
+                if f.declares_effect() {
+                    IrFunction::mark_effect_origin(&mut ctx.synthesized_fns[synthesized_before..]);
+                }
                 // #1997: the qualifier rides into the IR as a marker the
                 // legs and the module interface read (never re-derived).
                 if *scoped {

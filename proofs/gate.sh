@@ -571,6 +571,24 @@ print(";".join(nodes), end="")
 PYEOF
 drill_structural_prop caps-transitive "#2759 call graph: file write from a plain fn"
 
+# ── #3041: DECLARATIONS the source implies but the synthesized fn does not
+# spell. `branch_lift_synth_0` is lifted out of an `effect fn`'s body and
+# reads a file: it is bounded by its origin's `effect` (the `effect:origin`
+# marker, not the ABI flag). `heavy` is a plain fn run inside a
+# `fan.timeout` region: the fuel meter's deadline test reads the clock in
+# its frame, and the declaration table charges that read to the region's
+# opener (witness_decls.rs, the #3041 ruling), so its reach is empty. Drills:
+# the synthesized fn bounded as the plain fn it is spelled as, and a clock
+# read that is the frame's own.
+FS=spec/wasm_cross/fs_read_text_utf8.almd
+run_structural_prop "$FS" caps branch_lift_synth_0 0
+sed 's/^[^|]*|/0 6|/' /tmp/structural.prop > /tmp/structural.tamper
+drill_structural_prop caps "#3041 synthesized fn declared plain"
+TO=spec/wasm_cross/fuel_timeout_ends.almd
+run_structural_prop "$TO" caps heavy 0
+sed 's/$/5/' /tmp/structural.prop > /tmp/structural.tamper
+drill_structural_prop caps "#3041 a clock read of the frame's own"
+
 # ── #2152: almide-verify against the extracted checker on witnesses NO
 # producer wrote. The rows above only reach the shapes the emitters produce;
 # the transcription must agree on the whole input space, malformed bytes

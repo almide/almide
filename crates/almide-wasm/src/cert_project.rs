@@ -396,19 +396,26 @@ pub fn decl_names(decls: &PassDecls) -> Result<BTreeMap<u32, String>, String> {
 pub fn caps(decls: &PassDecls) -> Result<(Vec<(String, String)>, String), String> {
     let m = decode(&decls.bytes)?;
     let n_imports = m.imports.len() as u32;
-    let direct: Vec<BTreeSet<u32>> = m.bodies.iter().map(|b| direct_caps(&m, b)).collect();
     let callees: Vec<BTreeSet<usize>> = m.bodies.iter().map(|b| graph_edges(&m, b)).collect();
     // The source declaration of each defined function, renumbered into the
     // bytes' index space (the declare post-pass map).
     let base_imports = n_imports - decls.stubs.len() as u32;
     let mut declared: BTreeMap<usize, (String, Declared)> = BTreeMap::new();
+    let mut meter: BTreeMap<usize, u32> = BTreeMap::new();
     for f in &decls.fns {
         let g = crate::imports::remap_index(f.index, &decls.stubs, base_imports);
         let Some(j) = g.checked_sub(n_imports).map(|j| j as usize).filter(|&j| j < m.bodies.len()) else { continue };
         if let Some(d) = f.declared {
             declared.insert(j, (f.name.clone(), d));
         }
+        meter.insert(j, f.meter_clock_reads);
     }
+    let direct: Vec<BTreeSet<u32>> = m
+        .bodies
+        .iter()
+        .enumerate()
+        .map(|(j, b)| direct_caps(&m, b, meter.get(&j).copied().unwrap_or(0)))
+        .collect();
     let bound = least_bounds(&direct, &callees, &declared);
     let flat = declared
         .iter()
@@ -503,8 +510,12 @@ fn components(callees: &[BTreeSet<usize>]) -> Vec<usize> {
     comp
 }
 
-/// The host capabilities one body calls directly.
-fn direct_caps(m: &Module, b: &Body) -> BTreeSet<u32> {
+/// The host capabilities one body calls directly. The first `meter_reads`
+/// wall-clock reads (op [`OP_WALL_NOW`]) are the fuel meter's deadline test,
+/// which the declaration table charges to the region opener, not this frame
+/// (witness_decls.rs, `DeclFn::meter_clock_reads`, #3041): they name no
+/// capability here. Any read beyond that count is the source's.
+fn direct_caps(m: &Module, b: &Body, meter_reads: u32) -> BTreeSet<u32> {
     let mut out = BTreeSet::new();
     for &f in b.funcs.iter().filter(|&&f| (f as usize) < m.imports.len()) {
         match m.imports[f as usize].0.as_str() {
@@ -522,11 +533,19 @@ fn direct_caps(m: &Module, b: &Body) -> BTreeSet<u32> {
             }
         }
     }
+    let mut meter_left = meter_reads;
     for op in &b.fs_ops {
+        if *op == Some(OP_WALL_NOW) && meter_left > 0 {
+            meter_left -= 1;
+            continue;
+        }
         out.extend(op.map_or(&[SENTINEL][..], op_caps).iter().copied());
     }
     out
 }
+
+/// The wall-clock read (`fs_meta.rs` `OP_WALL_NOW`).
+const OP_WALL_NOW: i32 = crate::fs_meta::OP_WALL_NOW;
 
 /// The defined functions one body can transfer control to (positions in
 /// the defined-function list).
@@ -632,5 +651,18 @@ mod tests {
         let b = least_bounds(&direct, &callees, &declared);
         assert_eq!(b[1], [cap::FS_READ].into());
         assert_eq!(reach(&direct, &callees, 0), vec![cap::FS_READ]);
+    }
+
+    #[test]
+    fn only_the_meters_own_clock_reads_leave_the_frame() {
+        // #3041: two wall-clock reads and a file read; one read is the meter's.
+        let m = Module::default();
+        let b = Body { fs_ops: vec![Some(OP_WALL_NOW), Some(1), Some(OP_WALL_NOW)], ..Body::default() };
+        assert_eq!(direct_caps(&m, &b, 0), [cap::FS_READ, cap::CLOCK].into());
+        assert_eq!(direct_caps(&m, &b, 1), [cap::FS_READ, cap::CLOCK].into(), "the second read is the frame's own");
+        assert_eq!(direct_caps(&m, &b, 2), [cap::FS_READ].into());
+        // A read the stack does not show as the constant is never discounted.
+        let hidden = Body { fs_ops: vec![None], ..Body::default() };
+        assert_eq!(direct_caps(&m, &hidden, 1), [SENTINEL].into());
     }
 }

@@ -154,7 +154,7 @@ fn int_to_int_param(func: &IrFunction) -> Option<&IrParam> {
         && func.generics.as_ref().is_none_or(|g| g.is_empty())
         && func.extern_attrs.is_empty()
         && func.export_attrs.is_empty()
-        && func.attrs.is_empty();
+        && !func.has_attrs_besides_effect_origin();
     (plain_param && plain_fn && func.ret_ty == Ty::Int).then_some(p)
 }
 
