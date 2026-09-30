@@ -8,6 +8,8 @@
 //!
 //! - each program function's and `main`'s index, name and declared class
 //!   (pure / effect), and each lifted lambda's index and name;
+//! - per function, how many of its clock reads are the fuel meter's
+//!   (`DeclFn::meter_clock_reads`, the #3041 ruling);
 //! - the `@extern(wasm, ..)` stub indices `imports::declare` turned into
 //!   imports, so the projector can renumber the table into the index space
 //!   of the bytes (the declare map, [`crate::imports::remap_index`]).
@@ -36,6 +38,24 @@ pub struct DeclFn {
     /// `None` = no source declaration (a lifted lambda): the witness gives
     /// it the least bound its own reach needs, checked by the graph form.
     pub declared: Option<Declared>,
+    /// How many of the body's wall-clock reads (`almide.fs_call` op 34) are
+    /// the FUEL METER's deadline test (`emit_det_cut_check`), not the
+    /// source's.
+    ///
+    /// RULING (#3041): the meter's read is a RUNTIME-INTERNAL capability,
+    /// outside the frame's declared bound. It fires only while a
+    /// `fan.timeout` region is armed (deadline != MAX), and it exists to
+    /// enforce that region's deadline, not to observe the clock: the frame
+    /// never sees the value, only the cut. The region's opener
+    /// (`almide_rt_prim_timeout_enter`) reads the clock itself to arm the
+    /// deadline, and that read stays in its frame's direct capabilities.
+    /// So the capability is charged where the source asked for it, and a
+    /// plain fn called inside the region, or a lambda or synthesized region
+    /// body, is not held to CLOCK for the meter's test. The alternative,
+    /// moving the read into a helper, leaves the graph checker charging
+    /// every caller with the helper's bound, so it would not change the
+    /// verdict.
+    pub meter_clock_reads: u32,
 }
 
 /// One emission pass's declaration table and the module it produced.
@@ -77,6 +97,22 @@ pub fn take() -> Vec<PassDecls> {
 /// returned), if a sweep recorded one.
 pub fn take_for(shipped: &[u8]) -> Option<PassDecls> {
     take().into_iter().rev().find(|p| p.bytes == shipped)
+}
+
+/// #3041 group 3, the COUNTED EXCEPTION pending #848's ruling: the `args`
+/// module's surface fns are declared plain `fn` in stdlib/args.almd, yet
+/// they read argv (`almide.fs_call` ENV ops), which a plain bound does not
+/// allow. Until #848 decides whether argv is ambient or `effect`, the
+/// capability witness would REJECT every program that reaches one. Their
+/// frames DECLINE instead, as `caps:argv-in-plain-fn` in the histogram
+/// (golden/witness-declines.txt, shrink-only), so a fixture calling one is
+/// never certified, and proofs/structural-wall-exceptions.txt stays empty.
+/// The list is the set of `args` fns the caps sweep rejected on 2026-09-30.
+pub const ARGV_PLAIN_FNS: &[&str] = &["args.raw", "args.flag", "args.option", "args.option_or", "args.positional"];
+
+/// Is `name` a frame of the #848 counted exception?
+pub(crate) fn argv_exception(name: &str) -> bool {
+    ARGV_PLAIN_FNS.contains(&name)
 }
 
 #[cfg(test)]

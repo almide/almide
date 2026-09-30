@@ -89,6 +89,9 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `check_modes_cert_sound` | CallModes.v | Closed under the global context |
 | `check_bc_unroll_sound` | OwnershipChecker.v | Closed under the global context |
 | `check_xc_unroll_sound` | OwnershipChecker.v | Closed under the global context |
+| `check_line_abort_sound` | OwnershipChecker.v | Closed under the global context |
+| `check_xc_abort_sound` | OwnershipChecker.v | Closed under the global context |
+| `check_line_prefix_safe` | OwnershipChecker.v | Closed under the global context |
 | `merge_subset_sound` | Subset.v | Closed under the global context |
 | `subset_check_fast_sound` | Subset.v | Closed under the global context |
 | `rc_inc_bytes_isa_effect` | WasmDecode.v | Closed under the global context |
@@ -130,7 +133,7 @@ The receipt's claims are scoped to exactly this:
   machine + the FULL `$rc_dec` bytes' SAFETY — no double-free AND leak-freedom —
   executed on the renderer's real bytes by a general interpreter (`WasmExec`),
   operand-stack balance, and termination of the loop-free fragment — all
-  kernel-checked and axiom-clean (96 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  kernel-checked and axiom-clean (99 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties

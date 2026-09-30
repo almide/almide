@@ -287,7 +287,7 @@ fn owned_verdict_is_checkable(f: &IrFunction, p: &IrParam, ann: &CodegenAnnotati
     !p.is_mut
         && p.default.is_none()
         && p.attrs.is_empty()
-        && f.attrs.is_empty()
+        && !f.has_attrs_besides_effect_origin()
         && f.extern_attrs.is_empty()
         && f.export_attrs.is_empty()
         && !f.is_test

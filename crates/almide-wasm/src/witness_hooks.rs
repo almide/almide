@@ -83,11 +83,13 @@ impl Emitter<'_> {
     /// Non-droppable arguments have no RC site. Anything else under an
     /// armed recorder is a gate/hook disagreement — poison.
     pub(crate) fn witness_arg(&mut self, e: &almide_ir::IrExpr, ty: SliceTy) {
+        let droppable = self.rc_droppable(ty);
         let Some(w) = self.witness.as_mut() else { return };
         w.note_arg(node(e));
-        if !self.rc_droppable(ty) {
+        if !droppable {
             return;
         }
+        w.convention('m');
         self.witness_share_or_move(e, "call-arg:borrowed-temp");
     }
 
@@ -139,6 +141,57 @@ impl Emitter<'_> {
         }
     }
 
+    /// One arm of `r ?? fallback` (data.rs, #2970), right after the arm's
+    /// value is on the stack: a branch site of two arms (#2756). `fallback`
+    /// is `Some` on the none / err arm, `None` on the payload arm. An OWNED
+    /// join hands the join one credit from each arm: the fresh fallback moves
+    /// (`im`), the payload view takes the `rc_inc_top` and moves (`am`). A
+    /// borrowed join leaves both arms views (no site), unless the fallback is
+    /// an owned value the join does not take: that block has no owner here,
+    /// so the frame declines.
+    pub(crate) fn witness_unwrap_or_arm(&mut self, e: &almide_ir::IrExpr, fallback: Option<&almide_ir::IrExpr>, et: SliceTy) {
+        if self.witness.is_none() || !self.rc_droppable(et) {
+            return;
+        }
+        let almide_ir::IrExprKind::UnwrapOr { fallback: fb, .. } = &e.kind else { return };
+        let owned_join = self.unwrap_or_owns_join(e, fb, et);
+        match (fallback, owned_join) {
+            (Some(f), true) => self.witness_share_or_move(f, "unwrap-or:fallback"),
+            // A string literal / `none` / a named fn is a pool static the RC
+            // ops no-op on: a borrowed arm like any view.
+            (Some(f), false)
+                if self.rc_owned_result(f)
+                    && !matches!(
+                        f.kind,
+                        almide_ir::IrExprKind::LitStr { .. } | almide_ir::IrExprKind::OptionNone | almide_ir::IrExprKind::FnRef { .. }
+                    ) =>
+            {
+                self.witness_decline("unwrap-or:unowned-fresh-fallback")
+            }
+            (None, true) => {
+                if let Some(w) = self.witness.as_mut() {
+                    w.view_share_move();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// A record field the literal omits, filled from its declaration default
+    /// (data.rs), called BEFORE the default lowers: the gate never saw that
+    /// expression, so only a literal — no site but the slot store, which
+    /// `witness_store` records after it — keeps the frame; any other default
+    /// withdraws it.
+    pub(crate) fn witness_record_default(&mut self, d: &almide_ir::IrExpr) {
+        use almide_ir::IrExprKind as K;
+        if !matches!(
+            &d.kind,
+            K::LitInt { .. } | K::LitFloat { .. } | K::LitBool { .. } | K::LitStr { .. } | K::Unit | K::OptionNone
+        ) {
+            self.witness_decline("record:default");
+        }
+    }
+
     /// The call-argument hook for a BORROWED callee param (#2028): a Var
     /// argument has no RC site (the callee holds nothing); a fresh
     /// temporary is born and released by the site (`id`).
@@ -151,6 +204,7 @@ impl Emitter<'_> {
         // A borrowed non-Var (a View through a block tail, a nested
         // native arm's result) is lent as is: no RC site.
         let Some(w) = self.witness.as_mut() else { return };
+        w.convention('b');
         if fresh {
             w.temp_borrowed();
         }
@@ -419,6 +473,104 @@ impl Emitter<'_> {
         if let Some(w) = self.witness.as_mut() {
             w.loop_jump();
         }
+    }
+
+    /// An INLINED literal callback's activation opens (list.rs `map` /
+    /// `filter` / `fold`, right after the element is loaded into its param):
+    /// one loop iteration per element (#2757), each droppable param a VIEW
+    /// of what it was loaded from, like a `for` loop variable. The callback
+    /// node itself is the arm's argument, hooked here for the module-call
+    /// audit (it never passes `lower_arg`).
+    /// `carried`: the local of a heap `list.fold` accumulator, which is not a
+    /// view but a loop-carried OWNER (`witness_fold_step`).
+    pub(crate) fn witness_callback_open(&mut self, cb: &almide_ir::IrExpr, carried: Option<u32>) {
+        let Some(w) = self.witness.as_mut() else { return };
+        w.note_arg(node(cb));
+        w.loop_open();
+        let almide_ir::IrExprKind::Lambda { params, .. } = &cb.kind else { return };
+        for (var, _) in params {
+            let Some(&(idx, ty)) = self.locals.get(var) else { continue };
+            if Some(idx) == carried {
+                if self.rc_droppable(ty)
+                    && let Some(w) = self.witness.as_mut()
+                {
+                    w.carried_owned(idx);
+                }
+            } else {
+                self.witness_view_local(idx, ty);
+            }
+        }
+    }
+
+    /// #2755: `list.find`'s hit (list.rs), recorded right after the callback
+    /// body: a one-arm branch where the element is stored into the fresh
+    /// some-cell — `share_handle_top`, so a handle-typed element's view takes
+    /// a share that moves into the cell (`am`) — and the scan breaks. The
+    /// activation closes after the site; the cell is the arm's owned result.
+    pub(crate) fn witness_find_hit(&mut self, elem_local: u32, elem: SliceTy) {
+        let shares = self.rc_droppable(elem) && self.elem_is_handle(elem);
+        let Some(w) = self.witness.as_mut() else { return };
+        w.branch_open();
+        w.branch_arm();
+        if shares && !w.arg_share_move(elem_local) {
+            w.poison();
+        }
+        w.branch_arm();
+        w.branch_close();
+        w.loop_close();
+    }
+
+    /// #2755: `fan.map` / `fan.any` / `any_map`'s sequential accumulator
+    /// (fan.rs), per element: the callback body's Result carrier is a
+    /// temporary born here (the body hands the loop its one credit). A
+    /// borrowed body would take a share the recorder does not name: decline.
+    pub(crate) fn witness_fan_carrier(&mut self, owned_body: bool) -> Option<u32> {
+        if !owned_body {
+            self.witness_decline("fan:borrowed-body");
+            return None;
+        }
+        Some(self.witness.as_mut()?.temp_born())
+    }
+
+    /// The carrier's two routes, as a branch: it LEAVES as the whole fan's
+    /// result (`map`'s err, `any`'s winner — the consumer records the owned
+    /// result, the call-result convention), or it is consumed here: `any`
+    /// releases a losing err (`d`), `map` releases the shell (`d`) after the
+    /// ok payload's credit moved into the accumulator (a fresh value moved,
+    /// `im`, when the payload is droppable).
+    pub(crate) fn witness_fan_step(&mut self, c: Option<u32>, first_ok_wins: bool, payload: SliceTy) {
+        let payload_moves = !first_ok_wins && self.rc_droppable(payload);
+        let (Some(w), Some(o)) = (self.witness.as_mut(), c) else { return };
+        w.branch_open();
+        w.branch_arm();
+        w.temp_ops(o, "m");
+        w.branch_arm();
+        w.temp_ops(o, "d");
+        if payload_moves {
+            w.temp_move();
+        }
+        w.branch_close();
+    }
+
+    /// #2755: one step of a heap `list.fold` accumulator (list.rs), after the
+    /// share guard: the body's value takes the accumulator's credit on to the
+    /// next iteration (or out of the loop — the fold's result is an owned
+    /// value its consumer records) — an owned value moves (`im`), a Var
+    /// shares and moves (`am`). The release of the block the iteration
+    /// received (the arm's `$dec` before the rebind) is the `d` the recorder
+    /// writes for every owner local bound in a loop body at the iteration's
+    /// end (witness_paths.rs), so it is not logged twice. A droppable
+    /// accumulator that is not a handle takes neither instruction: declined.
+    pub(crate) fn witness_fold_step(&mut self, body: &almide_ir::IrExpr, acc: u32, ty: SliceTy) {
+        if self.witness.is_none() || !self.rc_droppable(ty) {
+            return;
+        }
+        if !self.elem_is_handle(ty) {
+            self.witness_decline("fold-acc:flat");
+            return;
+        }
+        let _ = acc;
+        self.witness_store(body, ty);
     }
 
     /// A loop variable bound from the element it walks (#2757): a view,

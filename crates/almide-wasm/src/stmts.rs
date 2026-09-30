@@ -337,7 +337,9 @@ impl Emitter<'_> {
                 let ty = self.lower(value, None)?;
                 let scr = self.scr_i32_local;
                 self.f.instructions().local_set(scr);
-                self.emit_pattern_binds(pattern, ty, scr)
+                self.emit_pattern_binds(pattern, ty, scr)?;
+                self.witness_pattern_views(pattern);
+                Ok(())
             }
             IrStmtKind::Comment { .. } => Ok(()),
             IrStmtKind::Guard { cond, else_ } => self.lower_stmt_guard(cond, else_),

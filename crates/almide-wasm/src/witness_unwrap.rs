@@ -23,9 +23,13 @@
 //! carrier's credit (the node is marked owned), so its consumer records a
 //! fresh value.
 //!
+//! In `main` the site ABORTS instead (`Error: {msg}`, exit 1): the process
+//! ends, and the path ends in the checker's abort terminal (`t`, format v6),
+//! which discharges every credit still outstanding on it.
+//!
 //! The routes that convert the error on the way out (a typed error into a
-//! String channel, #2725) and the abort routes (a pure frame's `!`) have RC
-//! sites or trap edges this does not record: they decline.
+//! String channel, #2725) and a pure frame's `!` (a trap) have RC sites or
+//! trap edges this does not record: they decline.
 
 use crate::emitter::Emitter;
 
@@ -50,11 +54,27 @@ pub(crate) enum Leaves {
     Nothing,
 }
 
-/// Is `e` a payload read out of a BORROWED carrier (a `!` over a local)?
+/// Is `e` a slot read (`xs[i]` / `r.f` / `t.0`, chained) whose base is a
+/// bound Var?
+pub(crate) fn slot_read_of_var(e: &almide_ir::IrExpr) -> bool {
+    use almide_ir::IrExprKind as K;
+    match &crate::rc_ownership::rc_tail(e).kind {
+        K::Var { .. } => true,
+        K::IndexAccess { object, .. } | K::Member { object, .. } | K::TupleIndex { object, .. } => slot_read_of_var(object),
+        _ => false,
+    }
+}
+
+/// Is `e` a VIEW read out of a bound block: a payload out of a BORROWED
+/// carrier (a `!` over a local), or an element of a bound list (`xs[i]`)?
 pub(crate) fn is_extraction_view(e: &almide_ir::IrExpr) -> bool {
     use almide_ir::IrExprKind as K;
     match &crate::rc_ownership::rc_tail(e).kind {
         K::Try { expr } | K::Unwrap { expr } => matches!(expr.kind, K::Var { .. }),
+        // #2755: `xs[i]`, `r.f`, `t.0` read a slot of a bound block (through
+        // any chain of such reads): the block holds the slot's credit, the
+        // read holds none.
+        K::IndexAccess { .. } | K::Member { .. } | K::TupleIndex { .. } => slot_read_of_var(e),
         _ => false,
     }
 }
@@ -148,6 +168,24 @@ impl Emitter<'_> {
             WCarrier::Temp(o) => w.temp_ops(o, "d"),
             // An owned Option carrier: its block exists on this path only.
             _ => w.temp_discarded(),
+        }
+    }
+
+    /// #2758: a bare `err(e)` RAISED from an effect body (data.rs
+    /// `lower_err_raise`), right before its exit plan: the exit's releases
+    /// are recorded like a `!` propagation's.
+    pub(crate) fn witness_err_raise_arm(&mut self) {
+        if let Some(w) = self.witness.as_mut() {
+            w.arm_err_exit();
+        }
+    }
+
+    /// After the raise's releases: the fresh err block leaves the frame
+    /// (`im`) and the path ends.
+    pub(crate) fn witness_err_raise_leave(&mut self) {
+        if let Some(w) = self.witness.as_mut() {
+            w.temp_move();
+            w.frame_replaced();
         }
     }
 }

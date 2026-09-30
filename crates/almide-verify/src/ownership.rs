@@ -1,6 +1,7 @@
 //! The ownership checker — the Rust mirror of `proofs/OwnershipChecker.v`'s
-//! `check_xc` (certificate format v5: flat events, `(…)` loops, `[…|…]`
-//! conditional loops, `{…|…}` one-shot branches, the `x` arm-exit marker).
+//! `check_xc` (certificate format v6: flat events, `(…)` loops, `[…|…]`
+//! conditional loops, `{…|…}` one-shot branches, the `x` arm-exit marker and
+//! the `t` arm-abort terminal).
 //!
 //! One line per reference-counted object. Every function below is a
 //! transcription of the Gallina definition named in its comment, including
@@ -28,6 +29,8 @@ enum Item {
     Branch(Vec<Op>, Vec<Op>),
     /// `CBranchRet`: `true` = the THEN arm is the returning one.
     BranchRet(bool, Vec<Op>, Vec<Op>),
+    /// `CBranchAbort`: `true` = the THEN arm ends the process (format v6).
+    BranchAbort(bool, Vec<Op>, Vec<Op>),
     Poison,
 }
 
@@ -46,6 +49,11 @@ fn parse_byte(b: u8) -> Option<Op> {
 
 fn is_xmark(b: u8) -> bool {
     b == b'x' || b == b'X'
+}
+
+/// `is_tmark`: the arm-abort terminal (format v6).
+fn is_tmark(b: u8) -> bool {
+    b == b't' || b == b'T'
 }
 
 /// `exec`: fold the refcount; `None` is a fault (a release at 0, a reuse of a
@@ -85,6 +93,13 @@ fn exec_line(items: &[Item], mut rc: i64) -> Option<i64> {
                 let (exiting, surviving) = if *ret_then { (rt, re) } else { (re, rt) };
                 (exiting == 0).then_some(surviving)?
             }
+            // The aborting arm need only be fault-free: the process ends
+            // there, discharging what it holds. The line continues from the
+            // surviving arm alone.
+            Item::BranchAbort(ab_then, then_b, else_b) => {
+                let (rt, re) = (exec(then_b, rc)?, exec(else_b, rc)?);
+                if *ab_then { re } else { rt }
+            }
             Item::Poison => return None,
         };
     }
@@ -102,21 +117,30 @@ struct Brx {
     in_else: bool,
     then_exited: bool,
     else_exited: bool,
+    then_aborted: bool,
+    else_aborted: bool,
     malformed: bool,
     then_ops: Vec<Op>,
     else_ops: Vec<Op>,
 }
 
 impl Brx {
-    /// `close_brx`: malformed or both arms exiting → poison; one marked arm →
-    /// `CBranchRet`; no marker → the ordinary `CBranch`.
+    /// `close_brx`: malformed or both arms terminal → poison; one exit-marked
+    /// arm → `CBranchRet`; one abort-marked arm → `CBranchAbort`; no marker
+    /// → the ordinary `CBranch`.
     fn close(self) -> Item {
-        if self.malformed || (self.then_exited && self.else_exited) {
+        let then_term = self.then_exited || self.then_aborted;
+        let else_term = self.else_exited || self.else_aborted;
+        if self.malformed || (then_term && else_term) {
             Item::Poison
         } else if self.then_exited {
             Item::BranchRet(true, self.then_ops, self.else_ops)
         } else if self.else_exited {
             Item::BranchRet(false, self.then_ops, self.else_ops)
+        } else if self.then_aborted {
+            Item::BranchAbort(true, self.then_ops, self.else_ops)
+        } else if self.else_aborted {
+            Item::BranchAbort(false, self.then_ops, self.else_ops)
         } else {
             Item::Branch(self.then_ops, self.else_ops)
         }
@@ -126,22 +150,26 @@ impl Brx {
     fn step(&mut self, b: u8) {
         if b == b'|' {
             self.in_else = true;
-        } else if is_xmark(b) {
+        } else if is_xmark(b) || is_tmark(b) {
             // A second mark on the same arm is malformed.
+            let abort = is_tmark(b);
             if self.in_else {
-                self.malformed |= self.else_exited;
-                self.else_exited = true;
+                self.malformed |= self.else_exited || self.else_aborted;
+                self.else_exited |= !abort;
+                self.else_aborted |= abort;
             } else {
-                self.malformed |= self.then_exited;
-                self.then_exited = true;
+                self.malformed |= self.then_exited || self.then_aborted;
+                self.then_exited |= !abort;
+                self.then_aborted |= abort;
             }
         } else if let Some(op) = parse_byte(b) {
-            // An op after the current arm's mark: `x` must be arm-terminal.
+            // An op after the current arm's mark: `x` / `t` must be
+            // arm-terminal (nothing runs after an exit or an abort).
             if self.in_else {
-                self.malformed |= self.else_exited;
+                self.malformed |= self.else_exited || self.else_aborted;
                 self.else_ops.push(op);
             } else {
-                self.malformed |= self.then_exited;
+                self.malformed |= self.then_exited || self.then_aborted;
                 self.then_ops.push(op);
             }
         }
@@ -206,8 +234,8 @@ impl LineState {
             } else {
                 brx.step(b);
             }
-        } else if is_xmark(b) {
-            // An exit marker outside a `{…}` branch poisons the line.
+        } else if is_xmark(b) || is_tmark(b) {
+            // An exit or abort marker outside a `{…}` branch poisons the line.
             self.items.push(Item::Poison);
         } else if let Some(cond) = self.cond.as_mut() {
             if cond.step(b) {

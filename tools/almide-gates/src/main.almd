@@ -21,6 +21,7 @@ import ledger_gate
 import env_switches_doc
 import fold_seed_source
 import impl_count
+import certified_leaks
 import bench
 import env
 
@@ -122,6 +123,7 @@ effect fn main() -> Unit = {
       "env-switches-doc" => ".",
       "fold-seed-source" => ".",
       "impl-count" => ".",
+      "certified-leaks" => ".",
       "check-contracts" => "docs/contracts",
       "bench" => "docs/benchmarks",
       _ => "docs/roadmap",
@@ -210,6 +212,15 @@ effect fn main() -> Unit = {
     // writer (`--update`). Args: root, then optionally `--update`.
     "impl-count" => {
       let v = impl_count.run(root, list.get_or(args, 2, "") == "--update")!
+      println(list.join(v.lines, "\n"))
+      if v.ok then process.exit(0) else process.exit(1)
+    },
+    // The certified fixtures that still leak through trusted native arms or runtime
+    // helpers: the join of the witness and live-at-exit goldens, pinned in
+    // proofs/certified-leaks.txt, each row owned by an OPEN issue. Args: root, then
+    // optionally `--update` (the ledger's only writer).
+    "certified-leaks" => {
+      let v = certified_leaks.run(root, list.get_or(args, 2, "") == "--update")!
       println(list.join(v.lines, "\n"))
       if v.ok then process.exit(0) else process.exit(1)
     },

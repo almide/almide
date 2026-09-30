@@ -40,6 +40,11 @@ pub(crate) enum Continuation {
     ReturnError,
     /// `guard c else v`: the else value is the frame's return.
     GuardReturn,
+    /// #2755: main's `!` abort (`Error: {msg}`, exit 1) and an
+    /// out-of-bounds index: the process ends (`unreachable` after the exit
+    /// import). Nothing is released — every credit is carried into the
+    /// abort, which the ownership checker's abort terminal discharges.
+    Abort,
     /// A `return_call`. `replaces_frame == false` is the loop-converted
     /// SELF call (tco.rs): the frame is not replaced.
     TailTransfer { replaces_frame: bool },
@@ -96,6 +101,7 @@ impl Emitter<'_> {
             Continuation::ReturnSuccess
             | Continuation::ReturnError
             | Continuation::GuardReturn => frame.clone(),
+            Continuation::Abort => BTreeSet::new(),
             Continuation::TailTransfer { replaces_frame } => {
                 if !self.tail_release_allowed {
                     // The raw-address rule: every release stays on the
@@ -164,6 +170,12 @@ impl Emitter<'_> {
             // releases exactly what the success exit does; the site records
             // the value that leaves and the exit itself. Any other error or
             // guard exit is still unattributed.
+            // #2755: the process ends; the path ends in the abort terminal.
+            Continuation::Abort => {
+                if let Some(w) = self.witness.as_mut() {
+                    w.abort_end();
+                }
+            }
             Continuation::ReturnError if self.witness.as_mut().is_some_and(|w| w.take_err_exit()) => {
                 for &idx in &plan.released {
                     self.witness_dec(idx);
@@ -204,6 +216,7 @@ enum Op {
     Return,
     ReturnCall,
     FnEnd,
+    Unreachable,
     Other,
 }
 
@@ -252,6 +265,7 @@ fn read_ops(f: &wasm_encoder::Function, d: &Defects<'_>) -> Result<Vec<(usize, O
             W::LocalGet { local_index } => Op::LocalGet(local_index),
             W::Call { function_index } => Op::Call(function_index),
             W::Return => Op::Return,
+            W::Unreachable => Op::Unreachable,
             W::ReturnCall { .. } | W::ReturnCallIndirect { .. } => Op::ReturnCall,
             W::Block { .. } | W::Loop { .. } | W::If { .. } | W::TryTable { .. } => {
                 depth += 1;
@@ -277,6 +291,7 @@ fn scan_window(
     start: usize,
     claimed: &[(usize, usize)],
     cont_name: &str,
+    abort: bool,
     drop_fns: &[u32],
     d: &Defects<'_>,
 ) -> Result<(Vec<u32>, usize, Op), EmitError> {
@@ -304,6 +319,8 @@ fn scan_window(
                 }
             },
             Op::Return | Op::ReturnCall | Op::FnEnd => return Ok((decs, j, kind)),
+            // Only an abort's window ends at the trap after the exit import.
+            Op::Unreachable if abort => return Ok((decs, j, kind)),
             _ => {}
         }
         j += 1;
@@ -327,6 +344,7 @@ fn check_window(
         Continuation::ReturnSuccess => Op::FnEnd,
         Continuation::ReturnError | Continuation::GuardReturn => Op::Return,
         Continuation::TailTransfer { .. } => Op::ReturnCall,
+        Continuation::Abort => Op::Unreachable,
     };
     if got != want {
         return Err(d.at("an exit transfers by a different instruction than its plan", cont_name.to_string(), &format!("{want:?}"), &format!("{got:?}")));
@@ -340,7 +358,8 @@ fn check_window(
     if let Some(&idx) = decs.iter().find(|i| !rec.plan.released.contains(i)) {
         return Err(d.at("an exit releases a value outside its plan", name_of(idx), "no release (not a frame credit at this edge)", "released"));
     }
-    let replaces = !matches!(cont, Continuation::TailTransfer { replaces_frame: false });
+    // An abort carries every credit into the process's end: none outstanding.
+    let replaces = !matches!(cont, Continuation::TailTransfer { replaces_frame: false } | Continuation::Abort);
     if replaces && let Some(&idx) = rec.plan.carried.iter().next() {
         return Err(d.at("tail exit leaves an ownership credit outstanding", name_of(idx), "transfer or release before tail transfer", "neither"));
     }
@@ -377,8 +396,10 @@ pub(crate) fn validate_exits(
             Continuation::ReturnError => "the error return",
             Continuation::GuardReturn => "the guard return",
             Continuation::TailTransfer { .. } => "the tail transfer",
+            Continuation::Abort => "the abort",
         };
-        let (decs, tj, tk) = scan_window(&ops, rec.start, &claimed, cont_name, drop_fns, &d)?;
+        let abort = rec.plan.continuation == Continuation::Abort;
+        let (decs, tj, tk) = scan_window(&ops, rec.start, &claimed, cont_name, abort, drop_fns, &d)?;
         claimed.push((rec.start, ops[tj].0));
         check_window(rec, &decs, tk, cont_name, &name_of, &d)?;
     }

@@ -47,6 +47,21 @@ impl Emitter<'_> {
     /// one loses a holder here, because nothing but the carrier is released.
     /// A borrowed carrier (`rc_owned_result` false: a parked local, a var)
     /// is left exactly as before, so no route can free a block twice.
+    /// #2755: main's `!` ABORT (`Error: {msg}`, exit 1) — and an
+    /// out-of-bounds index — as a recorded TERMINAL. The message address is
+    /// on the stack. The process ends here (the exit import, then
+    /// `unreachable`), so no credit of the frame is released: the exit
+    /// ledger records an `Abort` plan that releases nothing (E083 pins that
+    /// the window reaches the `unreachable` with no release in it) and the
+    /// witness ends the path with the checker's abort terminal, which
+    /// discharges every outstanding credit (`CBranchAbort`, format v6). The
+    /// bytes are the plain abort frame's.
+    pub(crate) fn abort_frame(&mut self) {
+        let plan = self.exit_plan(crate::exit_plan::Continuation::Abort);
+        self.emit_exit(&plan);
+        self.emit_error_frame_abort();
+    }
+
     fn release_ok_carrier(&mut self, e: &IrExpr, owned_carrier: bool) {
         if !owned_carrier {
             return;
@@ -92,9 +107,15 @@ impl Emitter<'_> {
                     && slice_ty_of(&m.ty, self.types) == Some(STR)
                     && let Some(node) = node_ty
                 {
-                    self.witness_decline("unwrap:abort");
                     self.lower(m, Some(STR))?;
-                    self.emit_error_frame_abort();
+                    // A FRESH message is a block born here that the abort
+                    // takes with it: born, then discharged by the terminal.
+                    if self.rc_owned_result(m)
+                        && let Some(w) = self.witness.as_mut()
+                    {
+                        w.temp_born();
+                    }
+                    self.abort_frame();
                     // No value ever leaves: a consumer takes no credit of it.
                     self.owned_call_marks.insert(e as *const IrExpr as usize);
                     return Ok(node);
@@ -173,10 +194,9 @@ impl Emitter<'_> {
                             self.f.instructions().local_get(self.tmp_i32_local).return_();
                             self.witness_unwrap_exit(wc, Leaves::Fresh);
                         } else if self.in_main {
-                            self.witness_unwrap_decline("abort");
                             let none_msg = self.pool.intern("none");
                             self.f.instructions().i32_const(none_msg as i32);
-                            self.emit_error_frame_abort();
+                            self.abort_frame();
                         } else {
                             self.witness_unwrap_decline("trap");
                             self.f.instructions().unreachable();
@@ -229,10 +249,9 @@ impl Emitter<'_> {
                             self.f.instructions().local_get(self.scr_i32_local).return_();
                             self.witness_unwrap_exit(wc, Leaves::Carrier);
                         } else if self.in_main && ert == STR {
-                            self.witness_unwrap_decline("abort");
                             self.f.instructions().local_get(self.scr_i32_local);
                             self.load_ty_slot(ert, almide_layout::SUM_FIELD);
-                            self.emit_error_frame_abort();
+                            self.abort_frame();
                         } else {
                             self.witness_unwrap_decline("trap");
                             self.f.instructions().unreachable();

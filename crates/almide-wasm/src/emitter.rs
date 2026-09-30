@@ -285,7 +285,13 @@ impl Emitter<'_> {
             i.if_(BlockType::Empty);
             i.i32_const(msg as i32);
         }
-        self.emit_error_frame_abort();
+        // #2755: out of bounds ABORTS the process — a recorded abort
+        // terminal on its own arm (data_unwrap.rs `abort_frame`).
+        self.witness_branch_open();
+        self.witness_branch_arm();
+        self.abort_frame();
+        self.witness_branch_arm();
+        self.witness_branch_close();
         let mut i = self.f.instructions();
         i.end();
         // element address: hold + idx*stride, slot at offset PAYLOAD
@@ -636,7 +642,15 @@ impl Emitter<'_> {
             // (the interp's map_lookup contract).
             IrExprKind::MapAccess { object, key } => {
                 let args = [(**object).clone(), (**key).clone()];
-                match self.arm_scope(|em| em.lower_map_call("get", &args, want))? {
+                // #2755: audited like the `map.get` call it is (calls_modules.rs).
+                let before = self.witness.as_ref().map(|w| w.arg_hooks());
+                match self.arm_scope(|em| {
+                    let l = em.lower_map_call("get", &args, want)?;
+                    if let Some(before) = before {
+                        em.witness_module_result("map.get", &args, before, l);
+                    }
+                    Ok(l)
+                })? {
                     // #2969: the arm's fresh Option cell is this node's —
                     // marked, or a bind takes a second credit on it.
                     Some(t) => {

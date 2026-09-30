@@ -407,13 +407,26 @@ pub(crate) fn lower_fn(
         // form has RC sites the two hooks do not cover yet). A turned-away
         // frame pushes its reason instead (the step-4 histogram).
         record_signature(&em, params, self_index, &param_owned);
+        em.work.meter_reads_pending.set(0);
         if let Some(name) = &witness_name
             && crate::witness::collecting()
         {
             // #2758: a capture is a view of the env block (loaded without a
             // share, below) — except a C-319 cell, whose address travels.
-            let pre_gate = if env_captures.as_ref().is_some_and(|c| c.iter().any(|&(_, _, _, cell)| cell)) {
+            // #2758: a C-319 cell capture is its ADDRESS, loaded from the env
+            // (below) — the env's credit on the cell, which the env's drop
+            // glue releases; this frame neither shares nor releases it. Its
+            // OCCUPANT is read and written through the address: a scalar
+            // occupant has no RC site at all, a droppable one does (the
+            // write-back's release, a share of the read) on a block no local
+            // of this frame names, so that capture declines.
+            let pre_gate = if env_captures
+                .as_ref()
+                .is_some_and(|c| c.iter().any(|&(_, t, _, cell)| cell && em.rc_droppable(t)))
+            {
                 Some("captures:cell".to_string())
+            } else if crate::witness::argv_exception(name) {
+                Some("caps:argv-in-plain-fn".to_string())
             } else {
                 top_lets_gate(top_lets, ctx)
             };
@@ -577,8 +590,9 @@ pub(crate) fn lower_fn(
         // The armed recorder's certificate goes to the sink — poisoned
         // or not (the floor test fails loudly on the sentinel).
         if let (Some(w), Some(name)) = (em.witness.take(), &witness_name) {
-            crate::witness::push(name, w.certificate());
+            crate::witness::push_recorded(name, &w);
         }
+        record_meter_reads(&em, witness_name.as_deref());
         exit_ledger = std::mem::take(&mut em.exit_ledger);
         drop_fns = {
             let hs = em.work.helpers.borrow();
@@ -747,7 +761,7 @@ fn arm_witness(
             if param_is_owned(param_owned, k) {
                 w.param_owned(env_shift + k as u32);
             } else {
-                w.param_borrowed(env_shift + k as u32);
+                w.param_lent(env_shift + k as u32);
             }
         }
     }
@@ -765,4 +779,13 @@ fn record_signature(em: &Emitter<'_>, params: &[(VarId, SliceTy)], self_index: O
     let Some(index) = self_index.filter(|_| crate::witness::collecting()) else { return };
     let modes = params.iter().enumerate().filter(|(_, p)| em.rc_droppable(p.1));
     crate::witness::modes::signature(index, modes.map(|(k, _)| u8::from(param_is_owned(param_owned, k))).collect());
+}
+
+/// #3041: file the fuel meter's clock reads this frame emitted under its
+/// witness name (the declaration-table key, witness_decls.rs).
+fn record_meter_reads(em: &Emitter<'_>, name: Option<&str>) {
+    let n = em.work.meter_reads_pending.replace(0);
+    if let Some(name) = name.filter(|_| n > 0) {
+        *em.work.meter_reads.borrow_mut().entry(name.to_string()).or_default() += n;
+    }
 }

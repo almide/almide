@@ -64,6 +64,17 @@ fn ownership_checker_examples() {
             ("i{xd|}d", false),
             ("i{dx|dx}", false),
             ("idx", false),
+            // check_xc (format v6, the arm-abort terminal)
+            ("i{t|d}", true),
+            ("{it|}", true),
+            ("i{|t}d", true),
+            ("{dt|}", false),
+            ("i{td|d}", false),
+            ("it", false),
+            ("i{t|t}", false),
+            ("i{dx|t}", false),
+            ("i{t|}", false),
+            ("i{tx|}d", false),
             // CallModes.v — inlined streams over the same fold
             ("iadd", true),
             ("id", true),
