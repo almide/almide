@@ -487,6 +487,7 @@ fn sink() -> &'static Sink {
 pub fn start_collecting() {
     *sink().lock().expect("witness sink") = Some(Vec::new());
     crate::witness::modes::start();
+    crate::witness::decls::start();
 }
 
 /// The call-mode witness of every emission pass (#2758, witness_modes.rs):
@@ -496,6 +497,11 @@ pub use modes::take as take_modes;
 /// The call-mode witness sink (split for the file budget).
 #[path = "witness_modes.rs"]
 pub(crate) mod modes;
+
+/// The per-pass declaration table the name and capability witnesses read
+/// (#2759, witness_decls.rs).
+#[path = "witness_decls.rs"]
+pub mod decls;
 
 /// Every frame the sweep collected, over EVERY emission pass (the pass
 /// markers are stripped).
@@ -530,6 +536,24 @@ pub type Frames = Vec<(String, String)>;
 pub fn take_with_shipped() -> (Frames, Frames) {
     let (all, shipped) = take_by_pass();
     (all.into_iter().map(|(_, n, c)| (n, c)).collect(), shipped)
+}
+
+/// The frames of the pass that shipped, with that pass's number (#2759:
+/// the bundle producer pairs them with the same pass's call-mode witness).
+/// `None` when no pass was marked as shipped.
+pub fn take_shipped() -> Option<(usize, Frames)> {
+    let raw = sink().lock().expect("witness sink").take().unwrap_or_default();
+    let shipped: usize = raw.iter().rev().find(|(n, _)| n == SHIPPED_MARK)?.1.parse().ok()?;
+    let mut current = 0usize;
+    let mut frames = Vec::new();
+    for (name, cert) in raw {
+        if name == PASS_MARK {
+            current = cert.parse().unwrap_or(0);
+        } else if name != SHIPPED_MARK && current == shipped {
+            frames.push((name, cert));
+        }
+    }
+    Some((shipped, frames))
 }
 
 /// The pass `emit_program` emits WITHOUT the bounded-line rewrites (#2312,
