@@ -1,0 +1,31 @@
+// @contract: C-060, C-209, C-223
+// Value, Codec and matrix operations release their temporaries on the
+// structural wasm leg (#2975, #2974): a `Value` built inside an
+// interpolation part, the formatted digits of a float `Value` the JSON
+// serializer writes, the option chunks a derived `encode` concatenates to
+// omit a `none` field, and the scores scratch row of a (masked) multi-head
+// attention. Each stayed live until exit; stdout pins the reprs and the
+// attention values, the live-at-exit ledger pins that nothing stays live.
+import json
+
+type O: Codec = { oi: Int? = none, of: Float? = none, req: String }
+
+fn cell(m: Matrix, r: Int, c: Int) -> String = {
+  let rows = matrix.to_lists(m)
+  let row = list.get(rows, r) ?? []
+  float.to_string(list.get(row, c) ?? 0.0)
+}
+
+effect fn main() -> Unit = {
+  println("int=${value.int(2)} flt=${value.float(2.5)} arr=${value.array([value.float(0.25), value.str("s")])}")
+  println(json.stringify(value.object([("ratio", value.float(1.5)), ("n", value.int(3))])))
+  let missing = O.decode(json.parse("{\"req\": \"r\"}")!)!
+  println(json.stringify(O.encode(missing)))
+  let present = O { oi: some(4), of: some(0.5), req: "q" }
+  println(json.stringify(O.encode(present)))
+  let x = matrix.ones(4, 8)
+  let plain = matrix.multi_head_attention(x, x, x, 2)
+  let masked = matrix.masked_multi_head_attention(x, x, x, 2)
+  let shape = int.to_string(matrix.rows(plain)) + "x" + int.to_string(matrix.cols(plain))
+  println("mha=" + shape + " " + cell(plain, 3, 7) + " " + cell(masked, 0, 0))
+}
