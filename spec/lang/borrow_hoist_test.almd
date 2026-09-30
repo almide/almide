@@ -24,3 +24,36 @@ test "index write with index read same buffer" {
   buf[0] = buf[3]
   assert_eq(buf[0], 4)
 }
+
+// #3049: every hoisted arg of one call gets its own temporary. They all used
+// to be named `__hoist`, so each `let` shadowed the one before it and every
+// hoisted arg passed the value of the last.
+type HoistPair = { a: Int, b: Int, xs: List[Int], done: Bool }
+
+fn hoist_assign(mut p: HoistPair, x: Int, y: Int) -> Unit = {
+  p.a = x
+  p.b = y
+}
+
+fn hoist_at(p: HoistPair, i: Int) -> Int = list.get(p.xs, i) ?? 0
+
+fn hoist_swap_fields(mut p: HoistPair, mode: Int) -> Unit = {
+  if mode == 0 then hoist_assign(p, p.b, p.a)
+  else if mode == 1 then hoist_assign(p, 0, 0)
+  else ()
+  p.done = true
+}
+
+fn hoist_from_calls(mut p: HoistPair) -> Unit = hoist_assign(p, hoist_at(p, 1), hoist_at(p, 0))
+
+test "several field args hoisted around a mut param keep their order" {
+  var p = HoistPair { a: 1, b: 2, xs: [], done: false }
+  hoist_swap_fields(p, 0)
+  assert_eq((p.a, p.b, p.done), (2, 1, true))
+}
+
+test "several call args hoisted around a mut param keep their order" {
+  var p = HoistPair { a: 0, b: 0, xs: [3, 4], done: false }
+  hoist_from_calls(p)
+  assert_eq((p.a, p.b), (4, 3))
+}
