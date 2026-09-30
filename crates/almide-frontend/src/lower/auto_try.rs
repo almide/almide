@@ -194,7 +194,9 @@ fn hoist_root_unwrap_operands(body: IrExpr, ctx: &mut TryCtx) -> IrExpr {
             IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
             | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::Var { .. } => e,
             _ => {
-                let var = ctx.var_table.alloc(sym("__opnd"), ty.clone(), Mutability::Let, span);
+                // Fresh per operand (#3049): `a()! - b()!` hoists two operands into
+                // ONE block, and a shared `__opnd` name made the native `b - b`.
+                let var = ctx.var_table.alloc_fresh("__opnd", ty.clone(), Mutability::Let, span);
                 stmts.push(IrStmt {
                     kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty: ty.clone(), value: e },
                     span,
@@ -469,7 +471,7 @@ fn insert_try_control(kind: IrExprKind, ty: &Ty, keep_leaves: bool, ctx: &mut Tr
                 let hoist = |e: IrExpr, name: &str, stmts: &mut Vec<IrStmt>, ctx: &mut TryCtx| -> IrExpr {
                     let ty = e.ty.clone();
                     let span = e.span;
-                    let var = ctx.var_table.alloc(sym(name), ty.clone(), Mutability::Let, span);
+                    let var = ctx.var_table.alloc_fresh(name, ty.clone(), Mutability::Let, span);
                     stmts.push(IrStmt {
                         kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty: ty.clone(), value: e },
                         span,
