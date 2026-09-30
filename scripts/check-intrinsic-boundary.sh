@@ -46,17 +46,36 @@ grep -rhoE 'pub fn (almide_[a-z0-9_]+)' runtime/rs/src/*.rs \
   | sed 's/^pub fn //' | sort -u > "$TMP/pubfns"
 
 # The PRIM FLOOR is the second provider class: `prim.load8` etc. are
-# COMPILER-LOWERED — almide-mir matches the SHORT op name and emits the
+# COMPILER-LOWERED — a consumer matches the SHORT op name and emits the
 # instruction directly; the mangled `almide_rt_prim_*` string is never
-# called anywhere, so its @intrinsic target is satisfied by the lowering
-# arm, not a runtime fn.
+# called anywhere, so its @intrinsic target is satisfied by a lowering arm,
+# not a runtime fn. The consumers that lower a stdlib body naming `prim.*`
+# are the structural wasm emitter and the interp oracle; almide-mir keeps
+# only the ops its own desugars synthesize (#3025 deleted its floor arms:
+# `prim` is not user surface and MIR lowers only the program's functions).
+PRIM_CONSUMERS="crates/almide-wasm/src crates/almide-interp/src crates/almide-mir/src"
+# Floor ops no consumer lowers. Their only arm was the MIR floor #3025
+# deleted, which no product leg reached: each leg serves the public calls
+# over them (io.print / eprintln over fd_write, list.group_by over
+# alloc_map_kv) directly, never through the self-host body. Shrink-only: an
+# op leaves this list the day a consumer lowers it, and the gate says so.
+UNLOWERED_PRIM_OPS="alloc_map_kv fd_write"
 missing=""
 while IFS= read -r tgt; do
   [ -n "$tgt" ] || continue
   case "$tgt" in
     almide_rt_prim_*)
       op="${tgt#almide_rt_prim_}"
-      grep -rqF "\"$op\"" crates/almide-mir/src/ || missing="$missing$tgt (prim op \"$op\" not in the mir lowering)\n"
+      if grep -rqF "\"$op\"" $PRIM_CONSUMERS; then
+        case " $UNLOWERED_PRIM_OPS " in
+          *" $op "*) missing="$missing$tgt (prim op \"$op\" is lowered now — remove it from UNLOWERED_PRIM_OPS)\n" ;;
+        esac
+      else
+        case " $UNLOWERED_PRIM_OPS " in
+          *" $op "*) ;;
+          *) missing="$missing$tgt (prim op \"$op\" has no lowering in $PRIM_CONSUMERS)\n" ;;
+        esac
+      fi
       ;;
     *) missing="$missing$tgt\n" ;;
   esac
