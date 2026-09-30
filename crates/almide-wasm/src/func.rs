@@ -15,7 +15,7 @@ use crate::*;
 /// the file budget).
 #[path = "func_toplets.rs"]
 mod toplets;
-use toplets::{release_top_lets_for_measurement, store_top_let, top_lets_gate};
+use toplets::{release_runtime_blocks_for_measurement, release_top_lets_for_measurement, store_top_let, top_lets_gate};
 
 /// String literals placed in linear memory as REAL layout blocks.
 ///
@@ -576,7 +576,7 @@ pub(crate) fn lower_fn(
         release_top_lets_for_measurement(&mut em, in_main, top_lets, ctx);
         let plan = em.exit_plan(crate::exit_plan::Continuation::ReturnSuccess);
         em.emit_exit(&plan);
-        toplets::release_runtime_tables_for_measurement(&mut em, in_main);
+        release_runtime_blocks_for_measurement(&mut em, in_main);
         em.rc_owned.clear();
         // The armed recorder's certificate goes to the sink — poisoned
         // or not (the floor test fails loudly on the sentinel).
