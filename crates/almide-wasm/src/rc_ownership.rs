@@ -564,6 +564,10 @@ impl Emitter<'_> {
                 // `r ?? fb` is owned when its lowering normalized both arms
                 // to one credit (#2970, `own_unwrap_or_join`).
                 | almide_ir::IrExprKind::UnwrapOr { .. }
+                // `m[k]` is `map.get` (lower_data): owned when the arm was.
+                | almide_ir::IrExprKind::MapAccess { .. }
+                // `fan { … }` (fan.rs `lower_fan_block`): owned when marked.
+                | almide_ir::IrExprKind::Fan { .. }
         ) {
             return self.owned_call_marks.contains(&(e as *const almide_ir::IrExpr as usize));
         }
@@ -631,9 +635,14 @@ impl Emitter<'_> {
 
     /// `rc_owned_result` as a value-position `if` can know it BEFORE the
     /// arm is lowered: a nested `if` by its own normalization rule (either
-    /// arm owned), a block by its tail. A module call is owned only once
-    /// its lowering marks it, so it predicts borrowed — never owned where
-    /// the lowering will not agree.
+    /// arm owned), a block by its tail. A node that is owned only once its
+    /// lowering MARKS it (a module call, an extraction, `r?`, `??`, `m[k]`,
+    /// `fan { … }`) may be owned: it predicts owned (#2969 — `if
+    /// set.contains(s, x) then s else set.insert(s, x)` predicted borrowed,
+    /// so the fresh insert and the borrowed `s` went unnormalized and every
+    /// insert kept a second credit). A wrong guess costs nothing: each arm
+    /// is judged again after it is lowered, and a borrowed arm takes its
+    /// `+1` inside, so the join still hands back exactly one credit.
     fn rc_predict_owned(&self, e: &almide_ir::IrExpr) -> bool {
         match &e.kind {
             IrExprKind::If { then, else_, .. } => self.rc_predict_owned(then) || self.rc_predict_owned(else_),
@@ -645,7 +654,13 @@ impl Emitter<'_> {
             // was and gives a borrowed one its +1. Predicting borrowed left
             // `if c then name else string.join(xs, ".")` (path.stem) with a
             // borrowed join over an owned arm — its block leaked (#2977).
-            IrExprKind::Call { target: almide_ir::CallTarget::Module { .. }, .. } => true,
+            IrExprKind::Call { target: almide_ir::CallTarget::Module { .. }, .. }
+            | IrExprKind::Try { .. }
+            | IrExprKind::Unwrap { .. }
+            | IrExprKind::ToOption { .. }
+            | IrExprKind::UnwrapOr { .. }
+            | IrExprKind::MapAccess { .. }
+            | IrExprKind::Fan { .. } => true,
             _ => self.rc_owned_result(e),
         }
     }
