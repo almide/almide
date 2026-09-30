@@ -18,9 +18,10 @@
 #  (2) sum blocks are allocated at their Some/payload size even on the
 #      None/unit arm (Init::OptNone "sized like OptSome", binds_p4_b.rs:546),
 #      so the fixed +12 read is in-bounds on every arm.
-# TRUST-BOUNDARY NOTE: emit_prim_call is the raw prim floor — tag discipline
-# for prim.load* lives in the self-hosted stdlib .almd sources, a SEPARATE
-# audit surface (tracked for a later round).
+# TRUST-BOUNDARY NOTE: the raw prim floor (prim.load*) is no longer lowered
+# here — `prim` is stdlib-only (#3025) and MIR lowers only the program's own
+# functions; tag discipline for prim.load* lives in the self-hosted stdlib
+# .almd sources, a SEPARATE audit surface (tracked for a later round).
 
 [[arm]]
 file = "binds.rs"
@@ -112,20 +113,6 @@ fn = "lower_scalar_ok_payload_unwrap"
 loads = 3
 verdict = "TAG_DISPATCHED"
 why = "The #1183 fix: len-as-tag loaded first, IfThen(tag) dies with the err message, payload@12 read only on the surviving Ok path."
-
-[[arm]]
-file = "calls_p4_c.rs"
-fn = "prim_kind_load_store"
-loads = 5
-verdict = "NOT_SUM_READ"
-why = "Enumeration false positive: a pure str->PrimKind lookup TABLE (the 'Load' hits are string arms), emits no ops and performs no read."
-
-[[arm]]
-file = "calls_p4_c.rs"
-fn = "emit_prim_call"
-loads = 1
-verdict = "NOT_SUM_READ"
-why = "The raw prim-floor emitter (prim.load8/32/64/...) — address is caller-supplied; tag discipline lives in the self-hosted .almd sources (a separate audit surface, noted in the header)."
 
 [[arm]]
 file = "cells.rs"
