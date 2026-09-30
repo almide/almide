@@ -441,6 +441,24 @@ impl Emitter<'_> {
         }
     }
 
+    /// An INLINED literal callback's activation opens (list.rs `map` /
+    /// `filter` / `fold`, right after the element is loaded into its param):
+    /// one loop iteration per element (#2757), each droppable param a VIEW
+    /// of what it was loaded from, like a `for` loop variable. The callback
+    /// node itself is the arm's argument, hooked here for the module-call
+    /// audit (it never passes `lower_arg`).
+    pub(crate) fn witness_callback_open(&mut self, cb: &almide_ir::IrExpr) {
+        let Some(w) = self.witness.as_mut() else { return };
+        w.note_arg(node(cb));
+        w.loop_open();
+        let almide_ir::IrExprKind::Lambda { params, .. } = &cb.kind else { return };
+        for (var, _) in params {
+            if let Some(&(idx, ty)) = self.locals.get(var) {
+                self.witness_view_local(idx, ty);
+            }
+        }
+    }
+
     /// A loop variable bound from the element it walks (#2757): a view,
     /// like a pattern binder — known, no credit held.
     pub(crate) fn witness_view_local(&mut self, idx: u32, ty: SliceTy) {

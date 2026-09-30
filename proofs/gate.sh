@@ -478,6 +478,20 @@ tamper_structural pair '2s/^im$/i/' "#2755 tuple literal"
 tamper_structural left 's/^am$/a/' "#2755 destructured binder"
 tamper_structural hello 's/^im$/i/' "#2755 interpolation"
 
+# ── #2755 / #2758: INLINED CALLBACKS. `list.map` / `filter` / `fold` lower a
+# literal lambda's body in the frame, one loop activation per element: the
+# param is a view of the element (an empty line), `bang`'s fresh concat
+# moves into the result spine (`im` on the loop's line) and the spine moves
+# out (`im`); `kept` and `total` consume a Bool and a scalar. Drills: the
+# per-element text never reaches the spine, and the spine never leaves.
+echo
+echo "== structural leg, inlined callbacks  ⊳  proven checker (#2755) =="
+run_structural spec/wasm_cross/witness_straightline.almd bang 0
+run_structural spec/wasm_cross/witness_straightline.almd kept 0
+run_structural spec/wasm_cross/witness_straightline.almd total 0
+tamper_structural bang '4s/^im$/i/' "#2755 callback element"
+tamper_structural kept '3s/^im$/i/' "#2755 filtered spine"
+
 # ── #2758: MODULE-SPACE LETS. main's prologue stores each top-let into its
 # global: `ALPHA`'s literal moves in (`im`); `TBL`'s initializer (a
 # `bytes.from_list` result, line 3) is copied into the global (`im`) and

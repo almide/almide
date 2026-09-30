@@ -374,13 +374,14 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
                 return Some(Why::Deep(format!("call:{name}-arg")));
             }
         }
-        // A native arm may INLINE a literal callback (list.map / filter /
-        // fold lower the lambda's body in this frame, list.rs): its params
-        // and binds are no hook's. Only a Fn value that arrives as a value
-        // (a Var, a call result) is an ordinary argument there.
-        almide_ir::CallTarget::Module { .. } => {
-            if let Some(l) = args.iter().find(|a| matches!(crate::rc_ownership::rc_tail(a).kind, IrExprKind::Lambda { .. })) {
-                return Some(Why::Here(tag(&crate::rc_ownership::rc_tail(l).kind)).inside("call-arg"));
+        // A native arm may INLINE a literal callback (list.rs lowers the
+        // lambda's body in this frame, once per element). Only the arms whose
+        // callback activation is hooked are admitted (`inline_callback_subset`);
+        // any other declines by arm name. A Fn value that arrives as a value
+        // (a Var, a call result) is an ordinary argument everywhere.
+        almide_ir::CallTarget::Module { module, func, .. } => {
+            if args.iter().any(|a| matches!(crate::rc_ownership::rc_tail(a).kind, IrExprKind::Lambda { .. })) {
+                return inline_callback_subset(module.as_str(), func.as_str(), args);
             }
         }
         // #2758: a closure call — `call_indirect` through the env block the
@@ -403,6 +404,58 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
 }
 
 
+
+/// #2755 / #2758: a module call that INLINES a literal callback. Admitted
+/// for the arms whose lowering (list.rs) records the callback as a loop
+/// activation per element (`witness_callback_open` / `witness_loop_close`):
+/// each param is a VIEW of the element it is loaded from, the body's own
+/// sites are the ordinary hooks, and what the arm does with the body's value
+/// is hooked or carries no RC site:
+///
+/// - `list.map`: the value is stored into the fresh result spine after the
+///   share guard (`witness_store`);
+/// - `list.filter`: the value is a Bool;
+/// - `list.fold` with a SCALAR accumulator: the value is a scalar, and the
+///   accumulator carries no credit. A heap accumulator is a loop-carried
+///   owner, declined as `call-arg:Lambda:list.fold:heap-acc`. A fold over a
+///   `list.*` call takes the fused or enumerate lowering (list_fuse.rs,
+///   list_enumerate_fold.rs), whose activations are not hooked, so it
+///   declines as `call-arg:Lambda:list.fold:fused`.
+///
+/// A body that still PROPAGATES a `!` is not inlined at all (the fn-value
+/// route, list.rs), so it declines as `call-arg:Lambda:<arm>:propagating`.
+/// Any other arm declines as `call-arg:Lambda:<module>.<fn>`.
+fn inline_callback_subset(module: &str, func: &str, args: &[IrExpr]) -> Option<Why> {
+    let here = |t: &str| Some(Why::Here(format!("Lambda:{module}.{func}{t}")).inside("call-arg"));
+    let arity = match (module, func, args) {
+        ("list", "map" | "filter", [_, _]) => 1,
+        ("list", "fold", [xs, init, _]) => {
+            if !scalar_ty(&init.ty) {
+                return here(":heap-acc");
+            }
+            if matches!(&crate::rc_ownership::rc_tail(xs).kind,
+                IrExprKind::Call { target: almide_ir::CallTarget::Module { module: m, .. }, .. } if m.as_str() == "list")
+            {
+                return here(":fused");
+            }
+            2
+        }
+        _ => return here(""),
+    };
+    let (cb, rest) = args.split_last()?;
+    let IrExprKind::Lambda { params, body, .. } = &cb.kind else {
+        return here(":wrapped");
+    };
+    if params.len() != arity {
+        return here(":arity");
+    }
+    if crate::fs_meta::body_propagates(cb) {
+        return here(":propagating");
+    }
+    rest.iter()
+        .find_map(|a| value_subset(a).map(|w| w.inside("call-arg")))
+        .or_else(|| value_subset(body).map(|w| w.inside("callback")))
+}
 
 /// A statement body of a branch arm (#2756) or a loop (#2757): a call, a
 /// block of admitted statements, a nested branch or loop, a jump, or nothing.
