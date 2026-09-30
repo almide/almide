@@ -24,8 +24,8 @@ effect fn main() -> Unit = {
   widened("2^24+1", big + one)
   widened("10%3.3", (three * three + one) % (three + three * tenth))
   widened("-(1/3)", -(one / three))
-  widened("(1/3)**1.7", (one / three) ** (one + three * float.to_float32(0.23333333)))
-  widened("3**0.5", three ** (one / (one + one)))
+  widened("(1/3)**1.7", (one / three) ^ (one + three * float.to_float32(0.23333333)))
+  widened("3**0.5", three ^ (one / (one + one)))
   widened("0.1f32", tenth)
   widened("int 2^24+1", int.to_float32(16777217))
   var s: Float32 = 0.0
