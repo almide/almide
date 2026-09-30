@@ -266,6 +266,13 @@ impl Emitter<'_> {
         }
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
         self.lower(body, Some(kt))?;
+        // A handle key (a String) holds one credit here: the seen list keeps
+        // a first sighting, a repeat is released at once, and the seen list
+        // goes with its keys at the end (#2977 — every String key leaked).
+        let key_dec = self.elem_is_handle(kt).then(|| self.dec_fn_of(kt));
+        if key_dec.is_some() && !self.rc_owned_result(body) {
+            self.rc_inc_top();
+        }
         {
             let mut i = self.f.instructions();
             i.local_set(hkey);
@@ -280,9 +287,13 @@ impl Emitter<'_> {
             i.local_get(params[0]);
         }
         self.store_ty_slot(elem, 0);
+        let seen_dec = self.dec_fn_of(SliceTy::List(self.types.intern(kt)));
         {
             let mut i = self.f.instructions();
             i.local_get(hkept).i32_const(1).i32_add().local_set(hkept);
+            if let Some(dec) = key_dec {
+                i.else_().local_get(hkey).call(dec);
+            }
             i.end();
         }
         self.hof_step(ih);
@@ -290,8 +301,9 @@ impl Emitter<'_> {
             let mut i = self.f.instructions();
             i.local_get(hout).local_get(hkept).i32_const(stride).i32_mul().i32_store(len_memarg());
             // The seen-keys scratch block is this arm's own: released
-            // here (it was never, #2005 — 64 B per call).
-            i.local_get(hseen).call(F_DEC_FLAT);
+            // here, with the keys it holds (it was never, #2005 — 64 B per
+            // call).
+            i.local_get(hseen).call(seen_dec);
         }
         // The kept slots are COPIES of the source's handles (after LEN is
         // final — the walk reads it).
@@ -356,18 +368,20 @@ impl Emitter<'_> {
         }
         self.hof_elem_into(elem, bh, ch, ih, param);
         self.lower(body, Some(kt))?;
+        // Every key holds one credit (RC-3 share rule for a key read from a
+        // droppable local; a fresh key transfers as-is): the seen list keeps
+        // a first sighting, a repeat is released at once, and the seen list
+        // goes with its keys at the end (#2977 — the list and every repeat
+        // key leaked).
+        self.rc_share_guard(body, kt);
         self.f.instructions().local_set(hkey);
         self.emit_seen_key_scan(kt, hseen, hkey)?;
+        let key_dec = self.dec_fn_of(kt);
+        let seen_dec = self.dec_fn_of(SliceTy::List(self.types.intern(kt)));
         {
             let mut i = self.f.instructions();
             i.i32_eqz().if_(BlockType::Empty);
             i.local_get(hseen).local_get(hkey);
-        }
-        // The seen list becomes a co-owner of a key read from a droppable
-        // local (RC-3 share rule); fresh keys transfer as-is.
-        self.rc_share_guard(body, kt);
-        {
-            let mut i = self.f.instructions();
             i.call(F_LIST_PUSH_4).local_set(hseen);
             i.local_get(hout).local_get(hkept).i32_const(stride).i32_mul().i32_add();
             i.local_get(param);
@@ -376,12 +390,14 @@ impl Emitter<'_> {
         {
             let mut i = self.f.instructions();
             i.local_get(hkept).i32_const(1).i32_add().local_set(hkept);
+            i.else_().local_get(hkey).call(key_dec);
             i.end();
         }
         self.hof_step(ih);
         {
             let mut i = self.f.instructions();
             i.local_get(hout).local_get(hkept).i32_const(stride).i32_mul().i32_store(len_memarg());
+            i.local_get(hseen).call(seen_dec);
         }
         // The kept slots are COPIES of the source's handles (after LEN).
         self.emit_inc_elems(hout, elem);

@@ -638,6 +638,14 @@ impl Emitter<'_> {
         match &e.kind {
             IrExprKind::If { then, else_, .. } => self.rc_predict_owned(then) || self.rc_predict_owned(else_),
             IrExprKind::Block { expr: Some(t), .. } => self.rc_predict_owned(t),
+            // A module call's ownership is its arm's DECLARATION, known only
+            // once it is lowered (arm.rs) — and nearly every droppable arm
+            // result is `Owned` (two `View` arms exist). Predicting owned is
+            // safe either way: the join then asks each arm what it actually
+            // was and gives a borrowed one its +1. Predicting borrowed left
+            // `if c then name else string.join(xs, ".")` (path.stem) with a
+            // borrowed join over an owned arm — its block leaked (#2977).
+            IrExprKind::Call { target: almide_ir::CallTarget::Module { .. }, .. } => true,
             _ => self.rc_owned_result(e),
         }
     }
@@ -652,9 +660,9 @@ impl Emitter<'_> {
     /// #2046. Two borrowed arms stay borrowed and pay nothing.
     ///
     /// The `then` arm decides from a PREDICTION of `else_` (it is lowered
-    /// first); the `else_` arm from what `then` actually was. The one shape
-    /// left over — a borrowed `then` beside an `else_` owned only by a
-    /// module call's mark — stays borrowed: a leak, never a dangle.
+    /// first); the `else_` arm from what `then` actually was. A module call
+    /// predicts owned (`rc_predict_owned`), so an `else_` owned only by its
+    /// arm's mark normalizes the join too.
     pub(crate) fn lower_if_arms(
         &mut self,
         e: &almide_ir::IrExpr,
