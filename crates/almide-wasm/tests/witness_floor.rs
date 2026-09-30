@@ -238,6 +238,32 @@ fn judge_call_modes(rel: &str, rejected: &mut Vec<(String, String)>) -> usize {
     n
 }
 
+/// A frame's sweep key. The checked pass (no bounded-line rewrites) emits
+/// different code by design: it agrees with itself, not with passes 1-2.
+fn frame_key(rel: &str, pass: usize, name: &str) -> String {
+    if pass == almide_wasm::witness::CHECKED_PASS {
+        format!("{rel} :: {name} [checked]")
+    } else {
+        format!("{rel} :: {name}")
+    }
+}
+
+/// Was this frame compiled under the same calling conventions as the first
+/// pass that emitted it? Two emission passes compile a fn under different
+/// conventions when their fn sets differ (param_borrow.rs's fixpoint over the
+/// whole linked graph vs the reachable set) and then legitimately emit
+/// different code: such a certificate is compared with nothing (the shipped
+/// pass's is the one a fixture reads). It is still judged on its own.
+fn same_convention(contexts: &mut Map<String>, key: &str, ctx: String) -> bool {
+    match contexts.get(key) {
+        Some(prev) => *prev == ctx,
+        None => {
+            contexts.insert(key.to_string(), ctx);
+            true
+        }
+    }
+}
+
 #[cfg_attr(debug_assertions, ignore = "corpus sweep is release-only (CI: release-shape job)")]
 #[test]
 fn structural_witnesses_balance_and_hold_the_floor() {
@@ -248,6 +274,8 @@ fn structural_witnesses_balance_and_hold_the_floor() {
     .expect("run manifest");
 
     let mut certs: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    // Each frame's calling-convention context (`same_convention`).
+    let mut contexts: Map<String> = Map::new();
     // The step-4 measurement channel: every frame the gate turned away,
     // with its reason — dumped as `!decline:<reason> <key>` lines under
     // ALMIDE_WITNESS_DUMP so `grep -o '^!decline:[^ ]*' | sort | uniq -c`
@@ -268,19 +296,16 @@ fn structural_witnesses_balance_and_hold_the_floor() {
         let Ok(ir) = almide_spine::s5::lower_to_ir(rel, &text) else { continue };
         almide_wasm::witness::start_collecting();
         let emitted = almide_wasm::emit_program(&ir).is_ok();
-        let (frames, shipped) = almide_wasm::witness::take_by_pass();
+        let (frames, shipped) = almide_wasm::witness::take_by_pass_with_context();
         modes_checked += judge_call_modes(rel, &mut modes_rejected);
         per_fixture.record(rel, emitted, &shipped);
-        for (pass, name, cert) in frames {
-            // The checked pass (no bounded-line rewrites) emits different
-            // code by design: it agrees with itself, not with passes 1-2.
-            let key = if pass == almide_wasm::witness::CHECKED_PASS {
-                format!("{rel} :: {name} [checked]")
-            } else {
-                format!("{rel} :: {name}")
-            };
+        for (pass, name, cert, ctx) in frames {
+            let key = frame_key(rel, pass, &name);
+            let same_code = same_convention(&mut contexts, &key, ctx);
             if let Some(reason) = cert.strip_prefix(almide_wasm::witness::DECLINE_PREFIX) {
-                declined.insert(key, reason.trim().to_string());
+                if same_code {
+                    declined.insert(key, reason.trim().to_string());
+                }
             } else if cert.starts_with('!') {
                 poisoned.push(key);
             // #2756: the certificate carries branch frames (`{…|…}`, the
@@ -295,7 +320,8 @@ fn structural_witnesses_balance_and_hold_the_floor() {
                 // emit_program lowers every fn once per emission pass
                 // (the reachability two-pass) — the passes of one code
                 // configuration must agree.
-                if let Some(prev) = certs.insert(key.clone(), cert.clone())
+                if same_code
+                    && let Some(prev) = certs.insert(key.clone(), cert.clone())
                     && prev != cert
                 {
                     nondet.push(key);

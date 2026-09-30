@@ -576,7 +576,7 @@ pub(crate) fn lower_fn(
         // The armed recorder's certificate goes to the sink — poisoned
         // or not (the floor test fails loudly on the sentinel).
         if let (Some(w), Some(name)) = (em.witness.take(), &witness_name) {
-            crate::witness::push(name, w.certificate());
+            crate::witness::push_recorded(name, &w);
         }
         exit_ledger = std::mem::take(&mut em.exit_ledger);
         drop_fns = {
@@ -746,7 +746,7 @@ fn arm_witness(
             if param_is_owned(param_owned, k) {
                 w.param_owned(env_shift + k as u32);
             } else {
-                w.param_borrowed(env_shift + k as u32);
+                w.param_lent(env_shift + k as u32);
             }
         }
     }

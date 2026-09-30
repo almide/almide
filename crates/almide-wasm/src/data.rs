@@ -232,6 +232,7 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(hold);
                     self.lower(el, Some(fty))?;
                     self.rc_share_guard(el, fty);
+                    self.witness_store(el, fty);
                     self.store_ty_slot(fty, off);
                 }
                 self.f.instructions().local_get(hold);
@@ -279,6 +280,7 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(hold);
                     self.lower(fexpr, Some(fty))?;
                     self.rc_share_guard(fexpr, fty);
+                    self.witness_store(fexpr, fty);
                     self.store_ty_slot(fty, off);
                 }
                 self.f.instructions().local_get(hold);
@@ -352,6 +354,7 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(hold);
                     self.lower(fexpr, Some(fty))?;
                     self.rc_share_guard(fexpr, fty);
+                    self.witness_store(fexpr, fty);
                     self.store_ty_slot(fty, off);
                 }
                 self.f.instructions().local_get(hold);
@@ -424,8 +427,10 @@ impl Emitter<'_> {
                     // the elements (#2133).
                     for (fty, off, d) in defaults {
                         self.f.instructions().local_get(hold);
+                        self.witness_record_default(&d);
                         self.lower(&d, Some(fty))?;
                         self.rc_share_guard(&d, fty);
+                        self.witness_store(&d, fty);
                         self.store_ty_slot(fty, off);
                     }
                     for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
@@ -469,12 +474,15 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(hold);
                     self.lower(fexpr, Some(fty))?;
                     self.rc_share_guard(fexpr, fty);
+                    self.witness_store(fexpr, fty);
                     self.store_ty_slot(fty, off);
                 }
                 for (fty, off, d) in defaults {
                     self.f.instructions().local_get(hold);
+                    self.witness_record_default(&d);
                     self.lower(&d, Some(fty))?;
                     self.rc_share_guard(&d, fty);
+                    self.witness_store(&d, fty);
                     self.store_ty_slot(fty, off);
                 }
                 self.f.instructions().local_get(hold);

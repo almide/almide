@@ -83,11 +83,13 @@ impl Emitter<'_> {
     /// Non-droppable arguments have no RC site. Anything else under an
     /// armed recorder is a gate/hook disagreement — poison.
     pub(crate) fn witness_arg(&mut self, e: &almide_ir::IrExpr, ty: SliceTy) {
+        let droppable = self.rc_droppable(ty);
         let Some(w) = self.witness.as_mut() else { return };
         w.note_arg(node(e));
-        if !self.rc_droppable(ty) {
+        if !droppable {
             return;
         }
+        w.convention('m');
         self.witness_share_or_move(e, "call-arg:borrowed-temp");
     }
 
@@ -139,6 +141,21 @@ impl Emitter<'_> {
         }
     }
 
+    /// A record field the literal omits, filled from its declaration default
+    /// (data.rs), called BEFORE the default lowers: the gate never saw that
+    /// expression, so only a literal — no site but the slot store, which
+    /// `witness_store` records after it — keeps the frame; any other default
+    /// withdraws it.
+    pub(crate) fn witness_record_default(&mut self, d: &almide_ir::IrExpr) {
+        use almide_ir::IrExprKind as K;
+        if !matches!(
+            &d.kind,
+            K::LitInt { .. } | K::LitFloat { .. } | K::LitBool { .. } | K::LitStr { .. } | K::Unit | K::OptionNone
+        ) {
+            self.witness_decline("record:default");
+        }
+    }
+
     /// The call-argument hook for a BORROWED callee param (#2028): a Var
     /// argument has no RC site (the callee holds nothing); a fresh
     /// temporary is born and released by the site (`id`).
@@ -151,6 +168,7 @@ impl Emitter<'_> {
         // A borrowed non-Var (a View through a block tail, a nested
         // native arm's result) is lent as is: no RC site.
         let Some(w) = self.witness.as_mut() else { return };
+        w.convention('b');
         if fresh {
             w.temp_borrowed();
         }
