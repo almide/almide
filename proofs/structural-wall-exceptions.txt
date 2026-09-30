@@ -1,0 +1,5 @@
+# Structural-wall exceptions (#2759): witnesses of certified fixtures that the
+# proven checkers REJECT, one per line — fixture<TAB>property<TAB>function<TAB>issue.
+# SHRINK-ONLY: proofs/structural-wall.sh fails on a rejected witness this file
+# does not name AND on a row whose witness no longer rejects. A row is a known
+# defect with its issue, never a way to make a new rejection green.
