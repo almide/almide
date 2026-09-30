@@ -34,6 +34,8 @@ use almide_lang::types::Ty;
 use std::collections::{HashMap, HashSet};
 
 pub mod registry_sig;
+mod crossmod_toplets;
+pub use crossmod_toplets::{bind_cross_module_toplets, cross_module_toplet_refs};
 
 /// The KNOWN wall shapes (#931): a coarse classification of the constructs
 /// the verified renderer most often refuses. Each known shape carries a
