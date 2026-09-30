@@ -7,7 +7,7 @@ fn report(s: String) -> Unit = {
   println("-- ${s} --")
   println("len=${int.to_string(string.len(s))}")
   // BYTE length
-  println("nchars=${int.to_string(list.length(string.chars(s)))}")
+  println("nchars=${int.to_string(list.len(string.chars(s)))}")
   println("reverse=${string.reverse(s)}")
   println("chars=${list.join(string.chars(s), "|")}")
   println("take2=${string.take(s, 2)}")

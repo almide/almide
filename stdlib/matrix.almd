@@ -323,7 +323,8 @@ fn split_cols_even(m: Matrix, n: Int) -> List[Matrix] = _
 @intrinsic("almide_rt_matrix_concat_cols_many")
 fn concat_cols(matrices: List[Matrix]) -> Matrix = _
 
-/// Same as concat_cols; [] gives 0 x 0.
+/// Alias of matrix.concat_cols.
+@deprecated(since=5, use="matrix.concat_cols")
 @intrinsic("almide_rt_matrix_concat_cols_many")
 fn concat_cols_many(matrices: List[Matrix]) -> Matrix = _
 
@@ -364,7 +365,8 @@ fn gather_rows(m: Matrix, indices: List[Int]) -> Matrix = _
 @intrinsic("almide_rt_matrix_row_dot")
 fn dot_row(m: Matrix, r: Int, vec: List[Float]) -> Float = _
 
-/// Same as dot_row; 0.0 if r is out of range.
+/// Alias of matrix.dot_row.
+@deprecated(since=5, use="matrix.dot_row")
 @intrinsic("almide_rt_matrix_row_dot")
 fn row_dot(m: Matrix, r: Int, vec: List[Float]) -> Float = _
 

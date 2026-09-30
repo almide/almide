@@ -53,7 +53,7 @@ fn main() -> Unit = {
   show("concat_first0", matrix.concat_cols([e, a]))
   show(
     "concat_many",
-    matrix.concat_cols_many([
+    matrix.concat_cols([
       a,
       a,
       matrix.from_lists([

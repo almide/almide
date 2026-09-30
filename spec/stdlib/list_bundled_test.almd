@@ -54,7 +54,7 @@ test "list.* TOML fns coexist with bundled fns" {
   assert_eq(list.len([1, 2, 3]), 3)
 }
 
-test "list.length alias" {
+test "list.length is deprecated (#3085) but keeps len's behavior through the window" {
   assert_eq(list.length([1, 2, 3]), 3)
   let xs: List[Int] = []
   assert_eq(list.length(xs), 0)
