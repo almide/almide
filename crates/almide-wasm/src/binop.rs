@@ -115,7 +115,7 @@ impl Emitter<'_> {
                     i.local_get(t).i32_load(len_memarg()).i32_const(4).i32_shr_u().i64_extend_i32_u();
                     i.i64_add().i64_sub().global_set(G_DET_FUEL);
                     let _ = i;
-                    self.emit_det_cut_check();
+                    self.emit_det_cut_check_holding(Some((t, STR)));
                     self.f.instructions().local_get(t);
                 }
                 Ok(STR)
