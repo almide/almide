@@ -179,30 +179,31 @@ struct PackageNatives {
 impl CrateInputs {
     /// Read the `native/` trees and dependency `[native-deps]` reachable from
     /// `source_root`. Nothing is written.
+    ///
+    /// The dependency packages are the ones module resolution selected:
+    /// `project_fetch::fetch_all_deps`, the function the compiler resolves
+    /// `import`s through, honouring `almide.lock` and MVS. Each package's
+    /// `native/` is read from the same checkout its `.almd` sources came
+    /// from (#3094). This used to be a second walk that re-fetched each
+    /// manifest entry WITHOUT the lock, so a locked branch dependency built
+    /// the branch head's natives against the locked commit's `@extern`s, and
+    /// an MVS-raised package copied the natives of both versions.
     pub(super) fn collect(source_root: Option<&std::path::Path>) -> Result<Self, String> {
         let mut inputs = CrateInputs::default();
         let Some(root) = source_root else { return Ok(inputs) };
         inputs.packages.push(PackageNatives::read(root)?);
-        let mut visited = std::collections::HashSet::new();
-        inputs.collect_deps(root, &mut visited)?;
-        Ok(inputs)
-    }
-
-    fn collect_deps(&mut self, root: &std::path::Path, visited: &mut std::collections::HashSet<String>) -> Result<(), String> {
         let toml_path = root.join("almide.toml");
-        if !toml_path.exists() { return Ok(()); }
+        if !toml_path.exists() { return Ok(inputs); }
         let proj = crate::project::parse_toml(&toml_path).map_err(|e| format!("parse almide.toml: {}", e))?;
-        for dep in &proj.dependencies {
-            let Some(dep_dir) = resolve_dep_dir(dep) else { continue };
-            if !visited.insert(dep_dir.to_string_lossy().to_string()) { continue; }
-            self.packages.push(PackageNatives::read(&dep_dir)?);
-            let dep_toml = dep_dir.join("almide.toml");
+        if proj.dependencies.is_empty() { return Ok(inputs); }
+        for dep in crate::project_fetch::fetch_all_deps(&proj)? {
+            inputs.packages.push(PackageNatives::read(&dep.package_dir)?);
+            let dep_toml = dep.package_dir.join("almide.toml");
             if let Some(dep_proj) = dep_toml.exists().then(|| crate::project::parse_toml(&dep_toml).ok()).flatten() {
-                self.dep_native_deps.extend(dep_proj.native_deps);
+                inputs.dep_native_deps.extend(dep_proj.native_deps);
             }
-            self.collect_deps(&dep_dir, visited)?;
         }
-        Ok(())
+        Ok(inputs)
     }
 
     /// The cache-key component for these inputs: every file's crate path and
@@ -311,11 +312,6 @@ fn read_tree(dir: &std::path::Path, rel: &std::path::Path, out: &mut Vec<(std::p
         }
     }
     Ok(())
-}
-
-fn resolve_dep_dir(dep: &crate::project::Dependency) -> Option<std::path::PathBuf> {
-    if let Some(ref p) = dep.path { Some(std::path::PathBuf::from(p)) }
-    else { crate::project_fetch::fetch_dep(dep).ok() }
 }
 
 /// Everything OUTSIDE the generated crate that shapes the binary cargo or
