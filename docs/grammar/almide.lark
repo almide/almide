@@ -226,9 +226,13 @@ guard_stmt: GUARD LET _nl _ident _nl EQ _nl expr _nl ELSE _nl expr
 // Assignment targets accept TYPE_NAME too: module globals follow the
 // UPPERCASE convention (COUNT = 1), accepted by the parser since 2199ded6d;
 // the checker adjudicates the target (var / let-E009 / unknown-E003).
-assign_stmt: _assign_target EQ _nl expr
-index_assign_stmt: _assign_target "[" expr "]" EQ _nl expr
-field_assign_stmt: _assign_target DOT name_tok EQ _nl expr
+// A place target is a chain of fields, optionally ending in ONE index
+// (`o.inner.xs = v`, `o.m[k] = v`, #3064); the value may carry a trailing
+// ascription (`s.xs = []: List[Int]`, #3051). `ps[0].n = v` is refused.
+assign_stmt: _assign_target EQ _nl _assign_value
+index_assign_stmt: _assign_target (DOT name_tok)* "[" expr "]" EQ _nl _assign_value
+field_assign_stmt: _assign_target (DOT name_tok)+ EQ _nl _assign_value
+_assign_value: expr (COLON type_expr)?
 _assign_target: _ident | TYPENAME
 
 destructure_tuple: "(" (_destructure_elem _comma _nl)* ")"
