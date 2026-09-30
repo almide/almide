@@ -1,0 +1,9 @@
+// E041, index-assignment variant (#3063): a list slot takes the same
+// explicit-propagation rule as a var target — no `!`, no auto-unwrap.
+effect fn get() -> Int = 42
+
+effect fn main() -> Unit = {
+  var xs = [0, 0]
+  xs[0] = get()!
+  println("${xs}")
+}
