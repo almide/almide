@@ -24,6 +24,33 @@ pub(super) fn release_top_lets_for_measurement(em: &mut Emitter<'_>, in_main: bo
     }
 }
 
+/// The same measurement, after `main`'s exit plan: the runtime's own blocks
+/// that are live by design, each kept for the program's life once made —
+/// the keyed-lookup side table (map_index.rs, global `G_MAPIDX`, allocated
+/// at the first indexed lookup) and the line-buffer arena (runtime_line.rs,
+/// a build that outgrew the room relocates it to a heap block, reached as
+/// `G_LINE_START + G_LINE_DELTA`). Freed LAST, once every map / set the
+/// frame and the top-lets held (and the index block the table names for
+/// each) is gone.
+pub(super) fn release_runtime_blocks_for_measurement(em: &mut Emitter<'_>, in_main: bool) {
+    if !in_main || !crate::alloc_count::releases_top_lets() {
+        return;
+    }
+    let mut i = em.f.instructions();
+    i.global_get(crate::G_MAPIDX).if_(wasm_encoder::BlockType::Empty);
+    i.global_get(crate::G_MAPIDX).call(crate::F_FREE);
+    i.i32_const(0).global_set(crate::G_MAPIDX);
+    i.end();
+    i.global_get(crate::G_LINE_DELTA).if_(wasm_encoder::BlockType::Empty);
+    i.global_get(crate::G_LINE_START)
+        .global_get(crate::G_LINE_DELTA)
+        .i32_add()
+        .i32_const(almide_layout::PAYLOAD as i32)
+        .i32_sub()
+        .call(crate::F_FREE);
+    i.end();
+}
+
 /// A top-let's lowered value becomes its global's. A List / Map / Set /
 /// Bytes global holds its own COPY of the block; a fresh initializer (a
 /// literal, a call result) was the copy's source only, and is released
