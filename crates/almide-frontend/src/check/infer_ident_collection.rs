@@ -232,22 +232,6 @@ fn collect_in_expr_keyed_literals(expr: &ast::Expr, out: &mut std::collections::
     }
 }
 
-/// Collect all Ident names referenced in an expression (shallow, for var capture check).
-fn collect_idents(expr: &ast::Expr, out: &mut Vec<String>) {
-    // COMPLETE walk (ast::visit_expr covers every child, statements in
-    // Block/While/ForIn bodies and match arms included). The old two-group
-    // arm table had no Block/Match/loop arms, so a fan branch reading a
-    // mutable var inside `{ ... }` escaped the E008 capture check entirely
-    // (diagnostic sweep 2026-08-18, #1517). TypeName counts too — module
-    // globals follow the UPPERCASE convention and are assignable now.
-    // Over-approximation by NAME (a shadowing local of the same name still
-    // flags) matches the old operand-position behavior.
-    ast::visit_expr(expr, &mut |e| match &e.kind {
-        ExprKind::Ident { name, .. } | ExprKind::TypeName { name } => out.push(name.to_string()),
-        _ => {}
-    });
-}
-
 /// If an `if/else` arm is a statement-only block that assigns to a variable
 /// (e.g. `{ high = mid - 1 }`), return its target name. This is the dojo
 /// binary-search / matrix-ops pattern: an arm does a side-effect instead of

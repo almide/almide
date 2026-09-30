@@ -99,7 +99,8 @@ pub fn canonicalize_program_in<'a>(
         }
     };
     collect_dep_roots(&mut env, program);
-    for (name, mod_prog, is_self) in modules {
+    let modules: Vec<(&'a str, &'a ast::Program, bool)> = modules.collect();
+    for &(name, mod_prog, is_self) in &modules {
         collect_dep_roots(&mut env, mod_prog);
         // An imported module carrying a future dialect stamp is the same
         // error as the main file carrying one — it was verified somewhere
@@ -108,6 +109,7 @@ pub fn canonicalize_program_in<'a>(
         crate::dialect_check::check_dialect_stamp_in(Some(name), mod_prog, &mut diagnostics);
         register_module(&mut env, &mut diagnostics, name, mod_prog, is_self);
     }
+    compute_concurrent_summaries(&mut env, &modules);
 
     // 2b. The file's dialect stamp, if it carries one. Program-level and
     // resolution-independent, so it runs before any name is resolved: a file
@@ -161,7 +163,8 @@ pub fn canonicalize_modules_env<'a>(
     for module_name in almide_lang::stdlib_info::BUNDLED_MODULES {
         crate::bundled_sigs::register_bundled_types(module_name, &mut env);
     }
-    for (name, mod_prog, is_self) in modules {
+    let modules: Vec<(&'a str, &'a ast::Program, bool)> = modules.collect();
+    for &(name, mod_prog, is_self) in &modules {
         for imp in &mod_prog.imports {
             if let ast::Decl::Import { path, .. } = imp {
                 if let Some(root) = path.first() {
@@ -176,7 +179,31 @@ pub fn canonicalize_modules_env<'a>(
         crate::dialect_check::check_dialect_stamp_in(Some(name), mod_prog, &mut diagnostics);
         register_module(&mut env, &mut diagnostics, name, mod_prog, is_self);
     }
+    compute_concurrent_summaries(&mut env, &modules);
     CanonicalizationResult { env, diagnostics }
+}
+
+/// E008 (ADR-0020 §3): each user module fn's inferred concurrent slots and
+/// whether its body reaches a `var`, so a program that calls it across a
+/// module or package boundary is judged by the callee's facts.
+fn compute_concurrent_summaries(env: &mut TypeEnv, modules: &[(&str, &ast::Program, bool)]) {
+    let tables: Vec<_> = modules
+        .iter()
+        .filter(|(name, _, _)| !almide_lang::stdlib_info::is_stdlib_module(name))
+        .map(|&(name, prog, _)| {
+            let (table, _) = build_import_table(prog, Some(name), &env.user_modules);
+            (sym(name), prog, table.aliases, table.direct)
+        })
+        .collect();
+    if tables.is_empty() {
+        return;
+    }
+    let summaries = {
+        let env_ref = &*env;
+        let type_is_fn = |te: &ast::TypeExpr| crate::concurrent_reach_types::type_expr_is_fn_valued(env_ref, te);
+        crate::concurrent_reach::module_summaries(&tables, &type_is_fn)
+    };
+    env.concurrent_summaries = summaries;
 }
 
 /// Entry half: the per-file steps (2b–5 of the verbatim path) applied onto a

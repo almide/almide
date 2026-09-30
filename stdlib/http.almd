@@ -27,6 +27,7 @@ import json
 
 /// Serves 0.0.0.0:port forever; handler err is a 500.
 @intrinsic("almide_rt_http_serve")
+@concurrent(f)
 effect fn serve(port: Int, f: effect (HttpRequest) -> HttpResponse) -> Unit = _
 
 // ── Response builders ──
@@ -441,6 +442,7 @@ fn __pattern_path(pattern: String) -> String = match string.index_of(pattern, " 
 }
 
 /// "GET /users/{id}" to a route; no method = any.
+@concurrent(handler)
 fn route(pattern: String, handler: HttpHandler) -> HttpRoute = {
   let p = string.trim(pattern)
   let method = match string.index_of(p, " ") {
@@ -451,6 +453,7 @@ fn route(pattern: String, handler: HttpHandler) -> HttpRoute = {
 }
 
 /// Sub-app under prefix: /api/x reaches it as /x.
+@concurrent(sub)
 fn mount(prefix: String, sub: HttpHandler) -> HttpRoute = {
   let p = string.trim(prefix)
   { method: "", pattern: p + "/{...}", segments: __parts(p) + ["{...}"], handler: __mounted(sub) }
@@ -612,6 +615,7 @@ fn router(routes: List[HttpRoute]) -> Result[HttpHandler, String] = {
 }
 
 /// Applies middleware; the first is the outermost.
+@concurrent(handler, middleware)
 fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler = if list.is_empty(middleware) then handler
 else wrap(
   __apply(list.last(middleware) ?? __no_middleware, handler),
