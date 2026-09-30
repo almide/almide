@@ -294,6 +294,18 @@ measures = "per-function lowering outcome over the v0 spec corpus (Ok / explicit
 varies = "flight-evidence-gaps.md F8: a live REJECT exposed the via_if miscompile; 2026-09-04 f1a511468 and 95cf925c8 each added walled rows the incumbent refuses"
 
 [[gate]]
+path = "proofs/structural-wall.sh"
+# It runs the producer and the three checkers and compares their verdict
+# strings and exit codes; the fixture list and the exception ledger are read
+# as line lists, nothing parsed as a structure.
+reads = "scalar"
+wired_by = "Makefile"
+class = "KERNEL_PROVEN"
+evidence = "#2759 (2026-09-30): the verdict core is the extracted checker, re-derived by the Rocq kernel and cross-checked by almide-verify on every witness. The reject direction fired on real witnesses before the gate went green: over the 180 certified fixtures the first sweep REJECTED the capability witnesses of spec/wasm_cross/random_int_entropy.almd (the self-host body `fn random_int` behind the `effect fn random.int` surface declared plain) and spec/wasm_cross/count_domain_nonbytes.almd (io.read_n_bytes, a plain fn by io.almd's documented impure category, reaching stdin from a plain main), and the drills in proofs/gate.sh (an undefined callee, an undefined local, a file write from a plain fn, the same write in the call graph) are rejected by all three verdicts"
+measures = "per witness of each fixture in crates/almide-wasm/tests/golden/witness-fixtures.txt (ownership per frame, call-modes, names per index space and per function's locals, caps per source-declared function, the SCC-condensed call graph): the extracted checker's accept/reject, almide-verify's verdict on the fixture's bundle, and the Rocq kernel's vm_compute verdict, which must agree; a rejection must be named in proofs/structural-wall-exceptions.txt and a named one that accepts is stale"
+varies = "#2759 (2026-09-30): the caps witness of random_int_entropy read REJECT (declared plain) and then ACCEPT once self-host bodies stopped counting as declarations; count_domain_nonbytes read REJECT under the output-only plain-fn bound and ACCEPT under the console bound; the raw call graph of one 79-function fixture ran the extracted checker for minutes (5.6e10 reach terms) and its SCC condensation for milliseconds (118)"
+
+[[gate]]
 path = "proofs/output-parity.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci-cross-target.yml"
