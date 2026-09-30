@@ -295,6 +295,8 @@ pub(crate) struct FnWork {
     /// Region-pure fns by table index (#1961) — the vocabulary the
     /// `consume(produce(scalars))` window recogniser consults.
     pub(crate) region_pure: crate::region::RegionPure,
+    /// #3103: the globals each table fn can reach (global_reach.rs).
+    pub(crate) global_reach: std::cell::RefCell<Vec<crate::global_reach::Reach>>,
     /// Set once any region window was emitted (exports `__heap_high`).
     pub(crate) region_used: std::cell::Cell<bool>,
     /// #3041: the fuel meter's wall-clock reads (the deadline test of

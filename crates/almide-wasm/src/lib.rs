@@ -118,6 +118,7 @@ mod calls;
 mod http_call;
 mod calls_modules;
 mod cells;
+mod global_reach;
 mod unroll;
 mod collect;
 mod collections;
@@ -765,7 +766,6 @@ fn build_globals(
         init_order.iter().filter_map(|g| init_by_var.get(g).cloned()).collect();
     (global_map, global_decls, init_lets)
 }
-
 
 /// The callable-fn flattening (entry fns + module fns under qualified
 /// names, Hole-bodied surfaces excluded) — split from emit_program. The
