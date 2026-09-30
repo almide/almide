@@ -197,7 +197,7 @@ impl Emitter<'_> {
     /// The leaf takes the judge only for Lists and Bytes, as the bare-var
     /// read does: a String mutates functionally, a Map has its own
     /// (monotone) judge. A path that is not a chain of fields and tuple
-    /// slots over a mutable var is left to the plain read.
+    /// slots over a mutable local or global is left to the plain read.
     pub(crate) fn make_mut_place_unique(&mut self, arg: &IrExpr) -> Result<(), EmitError> {
         use almide_ir::IrExprKind;
         let mut steps: Vec<Result<almide_base::intern::Sym, usize>> = Vec::new();
@@ -221,7 +221,11 @@ impl Emitter<'_> {
         }
         steps.reverse();
         let Some((idx, root_ty, global)) = self.mut_var(&id) else { return Ok(()) };
-        if !self.rc_droppable(root_ty) {
+        // A PARAMETER root is exempt, as the var arm and the record-field
+        // bytes receiver (bytes_recv.rs) exempt it: its block is the
+        // caller's, the site's argument credit keeps its count above one,
+        // and its writes must stay caller-visible.
+        if !self.rc_droppable(root_ty) || (!global && idx < self.rc_param_ceiling) {
             return Ok(());
         }
         let cow = self.cow_fn_of(root_ty);
