@@ -274,6 +274,9 @@ impl Emitter<'_> {
                 // with the retained default, both branches hand back an
                 // owned value (#2010 stage 2c).
                 self.share_handle_top(et);
+                // #2969: the default was evaluated (strict) and retained, and
+                // this branch does not hand it back — its credit ends here.
+                self.emit_release_hold(hdef, et);
                 self.f.instructions().end();
                 match et.val_type() {
                     ValType::I64 => self.release_i64(),

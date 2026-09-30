@@ -150,6 +150,13 @@ impl Emitter<'_> {
         // temporary keeps (and releases) its own credit.
         self.share_handle_top(b);
         self.f.instructions().call(push).local_set(hacc).end();
+        // #2969: an OWNED Option (`(x) => some(x)`, `(r) => r?`) is released
+        // here, with its credit on the payload the list just shared; `none`
+        // is the null handle the drop skips.
+        if self.rc_owned_result(body) && self.rc_droppable(got) {
+            let dec = self.dec_fn_of(got);
+            self.f.instructions().local_get(hr).call(dec);
+        }
         self.hof_step(ih);
         self.f.instructions().local_get(hacc);
         for _ in 0..5 {
