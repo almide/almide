@@ -11,7 +11,7 @@ branch-paths:3	7
 branch-paths:4	2
 call-arg:EmptyMap	1
 call-arg:IndexAccess	96
-call-arg:Lambda	244
+call-arg:Lambda	243
 call-arg:MapLiteral	1
 call-arg:Member	82
 call-arg:TupleIndex	7
@@ -19,6 +19,7 @@ call-arg:UnwrapOr	82
 call-arg:borrowed-temp	2
 call:panic-arg	1
 callee:Member	6
+caps:argv-in-plain-fn	8
 captures:cell	16
 display	10
 display:Float-temp	26
