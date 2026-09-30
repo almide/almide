@@ -544,6 +544,7 @@ fn build_helper_body(
             tail_release_allowed: false,
             rc_frame_params: Vec::new(),
             tail_consumed: Default::default(),
+            loop_back_releasable: Default::default(),
             self_index: None,
             rc_owned: std::collections::BTreeSet::new(),
             owned_ty: std::collections::HashMap::new(),
