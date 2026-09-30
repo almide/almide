@@ -8,6 +8,9 @@
 > (CG-4 translation validation)と completeness-by-construction.md(意味論台帳)
 > はこの文書の §6 にぶら下がる。
 > **Status**: Draft — 2026-06-11 起草。数値は同日 origin/develop 検証時点。
+> 2026-09-30 改訂(#2760): 証明器は Rocq(Coq)カーネル(Lean ではない — 受領書
+> `proofs/receipt.sh` と `proofs/check.sh` が使うのは coqc + coqchk)。C-SAFE / C-PROVEN
+> は structural レッグ(出荷される wasm)の証人と、成果物 SHA-256 に結び付いた。
 
 ## §1 定義 — 「rustc 以外完全」の形式化
 
@@ -15,7 +18,7 @@
   **(主張文, 検証器, 信頼基底, 反証手続き)**。
 - **信頼基底 TB(claim)** — その主張を受け入れるとき、消費者が無検証で信じる
   ものの集合。
-- **公理集合 Axioms** = { rustc/LLVM, Lean カーネル, wasmtime + wasm 仕様,
+- **公理集合 Axioms** = { rustc/LLVM, Rocq(Coq)カーネル + OCaml 抽出, wasmtime + wasm 仕様,
   OS/ハードウェア, ALS の妥当性 }。
 - **「rustc 以外を完全にする」** ≝ R(a) の全主張について TB(claim) ⊆ Axioms、
   かつ主張台帳が使用目的に対して閉じている(§6)。
@@ -35,10 +38,10 @@ L0-L4 の各主張は論理形式が異なる 5 型に分類される。型が�
 
 | 型 | 論理形式 | 検証器 | TB | 対応レベル |
 |---|---|---|---|---|
-| **C-SAFE** | ∀実行: a は X をしない(成果物単独) | import セクション検査 + manifest 照合 | wasm 仕様 + wasmtime | L0/L1 |
+| **C-SAFE** | ∀実行: a は X をしない(成果物 a = その SHA-256 で名指されたバイト列) | structural レッグの証人(所有権・名前全域性・capability 上界・呼出しモード)を抽出チェッカー + Rocq カーネル + almide-verify が判定、bundle が a の SHA-256 を固定し検証器が再計算 | Rocq カーネル + 記録規律(証人 ⟺ 命令列)+ `to_wasi` + wasm 仕様 | L0/L1 |
 | **C-REPRO** | compile(s) = a(byte 等値) | 再コンパイル + diff | ツールチェーン一式 | L2 |
 | **C-FAITHFUL** | behave(a) ≡ sem_ALS(s) | interp 三つ巴 + translation-validation 性質列 | ALS + interp + 公理 | L3 |
-| **C-PROVEN** | ∀プログラム: パス P は性質 Q を持つ(全称・狭域) | Lean カーネル(lake build) | Lean カーネル | L3 |
+| **C-PROVEN** | ∀プログラム: パス P は性質 Q を持つ(全称・狭域) | Rocq カーネル(coqc + coqchk、`Print Assumptions` 監査、`proofs/check.sh`) | Rocq カーネル | L3 |
 | **C-MEASURED** | 生成工程の統計的主張 | dojo 再現走行 | 公開手順 + ピン留め一式 | L4 |
 
 C-SAFE は**ソース不要・成果物だけで検証できる最強の型**。C-FAITHFUL は ALS を
@@ -110,10 +113,10 @@ C-SAFE は**ソース不要・成果物だけで検証できる最強の型**。
 
 | 主張 | 反証となる観測 |
 |---|---|
-| C-SAFE | import に無い操作の実行 PoC(1 件で死) |
+| C-SAFE | 認証済み成果物(SHA-256 一致)での二重解放・未定義参照・未宣言 capability の実行 PoC(1 件で死) |
 | C-REPRO | 異ホストでの byte 不一致(1 件で死) |
 | C-FAITHFUL | 受理プログラムでの interp/native/wasm 三者不一致 |
-| C-PROVEN | `sorry`、lake build 失敗、または反例プログラム |
+| C-PROVEN | `Admitted` / 公理の混入(`Print Assumptions` が Closed でない)、coqc / coqchk 失敗、または反例プログラム |
 | C-MEASURED | 公開手順での再現走行の数字不一致 |
 
 見つかった反証は台帳の次の行になる(バグバウンティと同じ力学)。
@@ -143,8 +146,11 @@ C-SAFE は**ソース不要・成果物だけで検証できる最強の型**。
 ## §7 着手順(受領書の積み方 — 軽い型から)
 
 1. **Receipt v1**(C-SAFE + C-REPRO + C-PROVEN 現状範囲): wasm import 上界
-   manifest + byte 再現ハッシュ + Lean 証明参照(44 定理、RC サブシステム
-   スコープを明記)。capability Phase 1-2 が前提。
+   manifest + byte 再現ハッシュ + Coq 証明参照(RC サブシステムのスコープを
+   明記)。capability Phase 1-2 が前提。2026-09-30(#2760): C-SAFE は structural
+   ビルドの証人と、`almide build --target wasm` が出荷したバイトの SHA-256
+   (`proofs/structural-artifacts.sha256`、bundle v2 の `artifact` 記録)に
+   結び付き、受領書はその台帳ファイル自体の digest を名指す。
 2. **Receipt v2**(+ C-FAITHFUL): CG-1 oracle 反転 + 性質台帳の公開と拡張。
 3. **Receipt v3**(T4 対応): 再現ビルド → 2 バックエンドを使った DDC 型
    相互検証 → selfhost(旧 `research/selfhost/`、現 `research/spike/v1-mir/`)。rustc そのものへの攻撃は
@@ -162,7 +168,7 @@ trust-layer.md 改訂時に取り込む(本文書はその形式基盤として�
 ## 何をしないか
 
 - **絶対意味論の完全被覆** — CompCert 級の発散。完全性は使用目的に相対化する(§6)。
-- **公理の隠蔽** — rustc/LLVM・Lean カーネル・wasmtime・ALS 妥当性は消えない。
+- **公理の隠蔽** — rustc/LLVM・Rocq カーネル・wasmtime・ALS 妥当性は消えない。
   消えない底の明記が、残りを「完全」と呼ぶ資格。
 - **検証器の肥大** — 検査は生成より簡単であり続けること。検証器が育ちすぎたら
   それ自体が次の信頼問題になる(T5)。小ささと多様性で守る。
