@@ -503,6 +503,58 @@ kernel_verify call-modes /tmp/structural.modes.tamper 1   || { echo "FAIL struct
 portable_agrees call-modes /tmp/structural.modes.tamper 1 || { echo "FAIL structural-tamper(#2758 call modes): almide-verify accepted the mismatch"; exit 1; }
 echo "ok   structural-tamper(#2758 call modes): a site that lends where its callee takes a credit is rejected by the binary AND the kernel"
 
+# ── #2759: NAME TOTALITY and CAPABILITIES of the structural build, projected
+# from the module bytes (crates/almide-wasm/src/cert_project.rs) and printed
+# by the bundle producer the corpus sweep (proofs/structural-wall.sh) runs.
+# Names: the function index space of the stock-WASI bytes and one frame's
+# locals. Capabilities: `shed` is a plain `fn`, bounded by the console, and
+# the program's call graph is judged by CapabilityReach (the reach computed
+# in the proof). Drills: an index one past the function space (an undefined
+# callee), one past `shed`'s locals, a file write reached from the plain fn,
+# and the same write added to a plain fn's node of the call graph.
+echo
+echo "== structural leg, names + capabilities  ⊳  proven checker (#2759) =="
+WS=spec/wasm_cross/witness_straightline.almd
+bundle_one() { # fixture property function
+  (cd "$ROOT" && cargo run -q -p almide-wasm --example emit_structural_bundle -- "$1" --only "$2" "$3")
+}
+run_structural_prop() { # fixture property function expected_exit
+  bundle_one "$1" "$2" "$3" > /tmp/structural.prop
+  set +e; "$ROOT/proofs/checker" "$2" /tmp/structural.prop >/tmp/gate.out 2>&1; local rc=$?; set -e
+  if [ "$rc" -ne "$4" ]; then echo "FAIL [structural $2] $1::$3: got exit $rc want $4 ($(cat /tmp/gate.out))"; exit 1; fi
+  kernel_verify "$2" /tmp/structural.prop "$4"   || { echo "FAIL [structural $2] $1::$3: KERNEL oracle disagrees"; exit 1; }
+  portable_agrees "$2" /tmp/structural.prop "$4" || { echo "FAIL [structural $2] $1::$3: almide-verify disagrees"; exit 1; }
+  echo "ok   [structural $2] $1::$3: witness '$(head -c 120 /tmp/structural.prop | tr '\n' '|')…' accepted (kernel + almide-verify agree)"
+}
+drill_structural_prop() { # property label — /tmp/structural.prop is the honest witness, /tmp/structural.tamper the drill
+  if cmp -s /tmp/structural.prop /tmp/structural.tamper; then echo "FAIL structural-tamper($2): the drill changed nothing"; exit 1; fi
+  set +e; "$ROOT/proofs/checker" "$1" /tmp/structural.tamper >/dev/null 2>&1; local rc=$?; set -e
+  if [ "$rc" -ne 1 ]; then echo "FAIL structural-tamper($2): the binary accepted it"; exit 1; fi
+  kernel_verify "$1" /tmp/structural.tamper 1   || { echo "FAIL structural-tamper($2): the kernel accepted it"; exit 1; }
+  portable_agrees "$1" /tmp/structural.tamper 1 || { echo "FAIL structural-tamper($2): almide-verify accepted it"; exit 1; }
+  echo "ok   structural-tamper($2): rejected by the binary, the kernel AND almide-verify"
+}
+# Append the first id past the defined range to the used side.
+past_defined() { python3 -c 'import sys; d,u=sys.stdin.read().split("|",1); print(d+"|"+u.strip()+" "+str(len(d.split())), end="")'; }
+run_structural_prop "$WS" names '(module:funcs)' 0
+past_defined < /tmp/structural.prop > /tmp/structural.tamper
+drill_structural_prop names "#2759 undefined callee"
+run_structural_prop "$WS" names 'locals:shed' 0
+past_defined < /tmp/structural.prop > /tmp/structural.tamper
+drill_structural_prop names "#2759 undefined local"
+run_structural_prop "$WS" caps shed 0
+sed 's/$/ 4/' /tmp/structural.prop > /tmp/structural.tamper
+drill_structural_prop caps "#2759 file write from a plain fn"
+run_structural_prop "$WS" caps-transitive '(program)' 0
+python3 - > /tmp/structural.tamper <<'PYEOF'
+nodes = open("/tmp/structural.prop").read().split(";")
+k = next(i for i, n in enumerate(nodes) if n.split("|")[0] == "0 6")  # a plain fn's node
+d, direct, callees = nodes[k].split("|")
+nodes[k] = "|".join([d, (direct + " 4").strip(), callees])
+print(";".join(nodes), end="")
+PYEOF
+drill_structural_prop caps-transitive "#2759 call graph: file write from a plain fn"
+
 # ── #2152: almide-verify against the extracted checker on witnesses NO
 # producer wrote. The rows above only reach the shapes the emitters produce;
 # the transcription must agree on the whole input space, malformed bytes
