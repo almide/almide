@@ -1,16 +1,16 @@
-// @contract: C-162, C-335, C-013
+// @contract: C-335, C-013
 // Stdlib calls and the temporaries around them release what they build on
-// the structural wasm leg (#2977): the byte buffer `io.write_bytes` hands the
-// sink, the Option `string.ends_with` reads its verdict from, the byte slice
-// each `bytes.read_length_prefixed_strings_le` entry is decoded from, the
+// the structural wasm leg (#2977): the Option `string.ends_with` reads its
+// verdict from, the byte slice each `bytes.read_length_prefixed_strings_le`
+// entry is decoded from, the
 // string a `path.stem` join answers beside a borrowed arm (an `if` whose
 // owned arm is a module call), a `match` value consumed by a concatenation
 // or an interpolation, a record a destructuring `let` reads its fields out
 // of, and — at exit — the keyed-lookup index's side table a map past 16
 // entries allocates (the runtime's own block, released with the top-lets
-// when the measurement is armed). Stdout pins the values and the raw-write
-// ordering; the live-at-exit ledger pins that nothing stays live.
-import io
+// when the measurement is armed). The `io.write_bytes` buffer is pinned by
+// io_write_ordering.almd (the interpreter oracle has no raw sink). Stdout
+// pins the values; the live-at-exit ledger pins that nothing stays live.
 import path
 
 type Pt = { x: Int, tag: String }
@@ -26,8 +26,6 @@ fn kind(n: Int) -> String = match n % 3 {
 }
 
 effect fn main() -> Unit = {
-  io.write_bytes([104, 105, 10])
-  println("after write_bytes")
   let hit = if string.ends_with("report.txt", ".txt") then "T" else "F"
   let miss = if string.ends_with("a", ".txt") then "T" else "F"
   println("ends=" + hit + miss)
