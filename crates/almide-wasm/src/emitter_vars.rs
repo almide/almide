@@ -180,4 +180,90 @@ impl Emitter<'_> {
         Ok(())
     }
 
+    /// #3101: make every block on a `mut` argument's place path uniquely
+    /// held before the callee writes the leaf in place — the field-place
+    /// twin of the bare-var `$cow` read (`emit_read_mut_var_cow`, #2503).
+    /// The callee never judges sharing (its param is a borrowed view), so
+    /// the site must: `o.a.xs` copies `o`'s record when another binding
+    /// holds it (`let alias = o`), then `o.a`'s record the same way
+    /// (`let alias = o.a`), then the `xs` block (`let alias_xs = o.a.xs`),
+    /// each copy stored back into its (already unique) holder. An unshared
+    /// path costs one rc test per level and copies nothing. Before this,
+    /// the leaf block was written through while an alias still held it, so
+    /// the alias showed the callee's write (C-033). The C-132 write-back
+    /// (mut_param_place.rs) then stores the returned buffer into the same
+    /// place.
+    ///
+    /// The leaf takes the judge only for Lists and Bytes, as the bare-var
+    /// read does: a String mutates functionally, a Map has its own
+    /// (monotone) judge. A path that is not a chain of fields and tuple
+    /// slots over a mutable var is left to the plain read.
+    pub(crate) fn make_mut_place_unique(&mut self, arg: &IrExpr) -> Result<(), EmitError> {
+        use almide_ir::IrExprKind;
+        let mut steps: Vec<Result<almide_base::intern::Sym, usize>> = Vec::new();
+        let mut cur = arg;
+        let id = loop {
+            match &cur.kind {
+                IrExprKind::Member { object, field } => {
+                    steps.push(Ok(*field));
+                    cur = object;
+                }
+                IrExprKind::TupleIndex { object, index } => {
+                    steps.push(Err(*index));
+                    cur = object;
+                }
+                IrExprKind::Var { id } => break *id,
+                _ => return Ok(()),
+            }
+        };
+        if steps.is_empty() {
+            return Ok(());
+        }
+        steps.reverse();
+        let Some((idx, root_ty, global)) = self.mut_var(&id) else { return Ok(()) };
+        if !self.rc_droppable(root_ty) {
+            return Ok(());
+        }
+        let cow = self.cow_fn_of(root_ty);
+        let root = self.hold_i32()?;
+        self.emit_read_mut_var(&id, idx, root_ty, global);
+        self.f.instructions().call(cow).local_tee(root);
+        self.emit_store_mut_var(id, idx, root_ty, global)?;
+        let mut holds = vec![root];
+        let mut parent_ty = root_ty;
+        for (k, step) in steps.iter().enumerate() {
+            let (fty, off) = match step {
+                Ok(field) => self.record_field_slot(parent_ty, field)?,
+                Err(slot) => {
+                    let SliceTy::Tuple(ti) = parent_ty else { break };
+                    match self.types.tuple_def(ti).fields.get(*slot) {
+                        Some(&f) => f,
+                        None => break,
+                    }
+                }
+            };
+            let leaf = k + 1 == steps.len();
+            let judged = if leaf {
+                matches!(fty, SliceTy::List(_) | SliceTy::Scalar(Scalar::Bytes))
+            } else {
+                self.rc_droppable(fty) && !matches!(fty, SliceTy::Map(..) | SliceTy::Set(_))
+            };
+            if !judged {
+                break;
+            }
+            let parent = holds[holds.len() - 1];
+            let cow = self.cow_fn_of(fty);
+            let h = self.hold_i32()?;
+            self.f.instructions().local_get(parent);
+            self.load_ty_slot(fty, off);
+            self.f.instructions().call(cow).local_set(h).local_get(parent).local_get(h);
+            self.store_ty_slot(fty, off);
+            holds.push(h);
+            parent_ty = fty;
+        }
+        for _ in &holds {
+            self.release_i32();
+        }
+        Ok(())
+    }
 }
