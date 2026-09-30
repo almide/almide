@@ -44,5 +44,9 @@ Set Extraction Output Directory ".".
    divergence: the marked arm must discharge the whole frame-exit obligation
    inside itself — fault-free to exactly 0 — and the line continues from the
    surviving arm alone. A cert with no `x` parses byte-for-byte as `check_bc`,
-   so every earlier format is unchanged). The driver dispatches ownership to it. *)
+   so every earlier format is unchanged). Format v6 adds the arm-terminal `t`
+   ABORT (CBranchAbort): the marked arm ends the process, need only be
+   fault-free, and discharges what it holds (`check_xc_abort_sound`); a v5
+   cert, which never carries `t`, parses unchanged. The driver dispatches
+   ownership to it. *)
 Extraction "checker.ml" check_cert check_cert_lc check_clc check_bc check_xc check_names_cert check_caps_cert check_prog_cert check_modes_cert.

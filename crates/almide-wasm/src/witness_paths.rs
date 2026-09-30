@@ -45,6 +45,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::lines::{flat_exits, hoist, net};
+
 /// One logged event.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Ev {
@@ -65,6 +67,8 @@ pub(crate) enum Ev {
     LoopClose,
     Jump,
     Exit,
+    /// #2755: the process aborts (exit_plan.rs `Continuation::Abort`).
+    Abort,
 }
 
 #[derive(Default)]
@@ -151,6 +155,15 @@ impl Branches {
     pub(crate) fn jump(&mut self, log: &mut Vec<Ev>) {
         if !self.dead() {
             log.push(Ev::Jump);
+        }
+        self.left();
+    }
+
+    /// #2755: the process aborts here — the path ends, and its outstanding
+    /// credits are discharged by the abort terminal.
+    pub(crate) fn abort(&mut self, log: &mut Vec<Ev>) {
+        if !self.dead() {
+            log.push(Ev::Abort);
         }
         self.left();
     }
@@ -244,6 +257,9 @@ struct Path {
     born: bool,
     holders: BTreeMap<u32, Holder>,
     ended: bool,
+    /// #2755: the path ended in a process ABORT: whatever it still holds is
+    /// discharged by the checker's abort terminal (`t`, format v6).
+    aborted: bool,
 }
 
 /// The cap on enumerated paths per object: beyond it the frame declines.
@@ -287,6 +303,10 @@ fn step(ev: &Ev, o: u32, p: &mut Path) {
             p.holders.remove(l);
         }
         Ev::Exit => p.ended = true,
+        Ev::Abort => {
+            p.ended = true;
+            p.aborted = true;
+        }
         _ => {}
     }
 }
@@ -377,7 +397,9 @@ fn fold_branch<'t>(
     p: Path,
     loops: &mut LoopEntries<'t>,
 ) -> Result<Vec<Path>, String> {
-    let mut exited: BTreeSet<String> = BTreeSet::new();
+    // (events, aborted): an aborting arm folds as `{<arm>t|}` — checked
+    // fault-free from the count at the branch, its remainder discharged.
+    let mut exited: BTreeSet<(String, bool)> = BTreeSet::new();
     let mut ended: Vec<Path> = Vec::new();
     let mut survivors: Vec<Path> = Vec::new();
     for arm in arms {
@@ -387,12 +409,14 @@ fn fold_branch<'t>(
                 survivors.push(r);
                 continue;
             }
-            // An arm item is flat (v5): a nested branch inside it withdraws.
-            if r.events.contains('{') {
-                return Err("branch-nested".into());
-            }
+            // An arm item is flat (v5). An exiting arm that itself folded a
+            // nested exit (`a{bx|}c`, then its own exit) is several exit
+            // paths from this branch's entry — `ab` and `ac` — each its own
+            // flat item, checked from the same count.
             if r.born || !r.events.is_empty() {
-                exited.insert(r.events.clone());
+                for (flat, aborted) in flat_exits(&r.events, r.aborted) {
+                    exited.insert((flat, aborted));
+                }
             }
             ended.push(r);
         }
@@ -400,24 +424,85 @@ fn fold_branch<'t>(
     if survivors.is_empty() {
         return Ok(ended.into_iter().map(|r| Path { events: format!("{}{}", p.events, r.events), ..r }).collect());
     }
-    let items: String = exited.iter().map(|e| format!("{{{e}x|}}")).collect();
+    let items: String = exited
+        .iter()
+        .map(|(e, aborted)| format!("{{{e}{}|}}", if *aborted { 't' } else { 'x' }))
+        .collect();
     Ok(survivors
         .into_iter()
         .map(|r| Path { events: format!("{}{items}{}", p.events, r.events), ..r })
         .collect())
 }
 
-/// Two or fewer distinct paths as one certificate line.
-fn line(paths: &[Path]) -> Result<String, String> {
-    let set: BTreeSet<&str> = paths.iter().map(|p| p.events.as_str()).collect();
-    let v: Vec<&str> = set.into_iter().collect();
-    match v.as_slice() {
-        [one] => Ok((*one).to_string()),
-        // A whole-line branch's arms are flat (v5).
-        [a, b] if a.contains('{') || b.contains('{') => Err("branch-nested".into()),
-        [a, b] => Ok(format!("{{{a}|{b}}}")),
-        more => Err(format!("branch-paths:{}", more.len())),
+/// A path as the line shows it. #2755: a path that ABORTED still holding
+/// credits ends in the abort terminal `t`; one that aborted balanced is
+/// shown as the ordinary path it is (checked to 0 like any other).
+fn shown(p: &Path) -> String {
+    if p.aborted && net(&p.events) != 0 {
+        format!("{}t", p.events)
+    } else {
+        p.events.clone()
     }
+}
+
+/// Two or fewer distinct paths as one certificate line.
+///
+/// #2755: an ABORTING path whose events are a prefix of a non-aborting path
+/// of the same line needs no arm of its own: the checker runs that longer
+/// path fault-free, and a fault in the prefix would be a fault in it (`exec`
+/// is a left fold; `check_line_prefix_safe`), so the aborting run is safe up
+/// to the abort — all an abort owes; what it still holds is discharged. Only
+/// an aborting path no other path covers is shown, with its terminal (`t`).
+///
+/// A path that carries folded exit items has them hoisted to the line start
+/// ([`hoist`]), so the whole-line branch between the flat remainders stays
+/// flat (v5 arms do not nest).
+fn line(paths: &[Path], exits: Exits) -> Result<String, String> {
+    let returning: Vec<String> = paths.iter().filter(|p| !p.aborted || net(&p.events) == 0).map(shown).collect();
+    let covered = |p: &Path| p.aborted && net(&p.events) != 0 && returning.iter().any(|q| q.starts_with(&p.events));
+    let set: BTreeSet<String> = paths.iter().filter(|p| !covered(p)).map(shown).collect();
+    // One returning path carries its folded items in place, as before.
+    if let [one] = set.iter().collect::<Vec<_>>().as_slice()
+        && !one.ends_with('t')
+    {
+        return Ok((*one).clone());
+    }
+    let mut hoisted: BTreeSet<String> = BTreeSet::new();
+    let mut flats: BTreeSet<String> = BTreeSet::new();
+    for s in &set {
+        let (h, f) = hoist(s);
+        hoisted.extend(h);
+        flats.insert(f);
+    }
+    let head: String = hoisted.into_iter().collect();
+    let v: Vec<&str> = flats.iter().map(String::as_str).collect();
+    let body = match v.as_slice() {
+        // A lone aborting path is the abort arm of a branch whose other arm
+        // (a path that never runs) claims nothing: `{<p>t|}`.
+        [one] if one.ends_with('t') => format!("{{{one}|}}"),
+        [one] => (*one).to_string(),
+        // One terminal arm per branch: two paths, at most one aborting.
+        [a, b] if !(a.ends_with('t') && b.ends_with('t')) => format!("{{{a}|{b}}}"),
+        // Any other set of whole paths: every path but one is its own
+        // terminal item from the line's start (`{<p>x|}` — a returning path,
+        // checked from 0 to exactly 0; `{<p>t|}` — an aborting one, checked
+        // fault-free), each with an empty survivor that moves no count; the
+        // last returning path (or none) is the line's tail, checked to 0.
+        // The whole-path form keeps its two-arm shape; a frame whose paths
+        // it cannot carry is rendered again in the folded form first.
+        more if exits == Exits::Paths => return Err(format!("branch-paths:{}", more.len())),
+        more => {
+            let (aborting, returning): (Vec<&str>, Vec<&str>) = more.iter().partition(|p| p.ends_with('t'));
+            let (tail, rest) = returning.split_last().map_or(("", &[][..]), |(t, r)| (*t, r));
+            let items: String = aborting
+                .iter()
+                .map(|p| format!("{{{p}|}}"))
+                .chain(rest.iter().map(|p| format!("{{{p}x|}}")))
+                .collect();
+            format!("{items}{tail}")
+        }
+    };
+    Ok(format!("{head}{body}"))
 }
 
 /// One object's lines: the frame line, then one line per loop activation
@@ -425,7 +510,7 @@ fn line(paths: &[Path]) -> Result<String, String> {
 fn render_object(tree: &[Node], o: u32, exits: Exits, out: &mut String) -> Result<(), String> {
     let mut loops: LoopEntries = Vec::new();
     let frame = walk(tree, o, Scope::Frame, exits, vec![Path::default()], &mut loops)?;
-    out.push_str(&line(&frame)?);
+    out.push_str(&line(&frame, exits)?);
     out.push('\n');
     // Each loop reached, walked from each entry state; loops nested in a
     // body are reached by that body's walk (appended as it runs).
@@ -439,6 +524,7 @@ fn render_object(tree: &[Node], o: u32, exits: Exits, out: &mut String) -> Resul
             born: entry.born,
             holders: entry.holders.iter().map(|(&l, h)| (l, Holder { fresh: false, ..*h })).collect(),
             ended: false,
+            aborted: false,
         };
         let mut iter = walk(body, o, Scope::Iteration, exits, vec![start], &mut loops)?;
         iter.iter_mut().filter(|p| !p.ended).for_each(end_iteration);
@@ -452,7 +538,7 @@ fn render_object(tree: &[Node], o: u32, exits: Exits, out: &mut String) -> Resul
     }
     for (_, iter) in by_loop {
         if iter.iter().any(|p| !p.events.is_empty()) {
-            out.push_str(&line(&iter)?);
+            out.push_str(&line(&iter, exits)?);
             out.push('\n');
         }
     }
@@ -526,12 +612,54 @@ mod tests {
     }
 
     #[test]
+    fn an_abort_holding_a_prefix_of_a_returning_path_needs_no_arm() {
+        // i ; if { abort } else { } ; d — the aborting `i` is a prefix of `id`.
+        let log = [Birth(0), Op(0, 'i'), bind(3, 0), Open, Abort, Arm, Close, LOp(3, 'd')];
+        assert_eq!(cert(&log, 1), "id\n");
+    }
+
+    #[test]
+    fn an_abort_no_returning_path_extends_ends_in_the_terminal() {
+        // if { i ; abort } else { } — born on the aborting path only.
+        let log = [Open, Birth(0), Op(0, 'i'), Abort, Arm, Close];
+        assert_eq!(cert(&log, 1), "{|it}\n");
+        // A share the returning path never takes: the aborting path stands on
+        // its own, and the returning one still balances.
+        let log = [Birth(0), Op(0, 'i'), bind(3, 0), Open, LOp(3, 'a'), Abort, Arm, Close, LOp(3, 'd')];
+        assert_eq!(cert(&log, 1), "{iat|id}\n");
+    }
+
+    #[test]
     fn an_exit_ends_its_path() {
         let log = [Birth(0), Op(0, 'i'), bind(3, 0), Open, LOp(3, 'd'), Exit, Arm, Close, LOp(3, 'd')];
         assert_eq!(cert(&log, 1), "id\n");
         // A missing release on the exiting arm: two paths, one leaking.
         let leak = [Birth(0), Op(0, 'i'), bind(3, 0), Open, Exit, Arm, Close, LOp(3, 'd')];
         assert_eq!(cert(&leak, 1), "{i|id}\n");
+    }
+
+    #[test]
+    fn a_nested_exit_inside_an_exiting_arm_is_its_own_flat_item() {
+        // An exiting arm that folded a nested exit is two exit paths from
+        // the outer entry, each flat; a folded path's items hoist to the
+        // line start with the plain ops before them.
+        let (h, f) = hoist("i{dx|}a{amx|}d");
+        assert_eq!(h, vec!["{idx|}".to_string(), "{iaamx|}".to_string()]);
+        assert_eq!(f, "iad");
+        assert_eq!(flat_exits("a{bx|}c", false), vec![("ab".to_string(), false), ("ac".to_string(), false)]);
+        assert_eq!(flat_exits("a{bt|}c", true), vec![("ab".to_string(), true), ("ac".to_string(), true)]);
+    }
+
+    #[test]
+    fn more_than_two_whole_paths_are_terminal_items_and_a_tail() {
+        // Two sequential one-arm shares: three distinct paths, each checked
+        // from 0 on its own — two as `{…x|}` items, the last as the tail.
+        let site = [Open, LOp(3, 'a'), LOp(3, 'm'), Arm, Close];
+        let mut log = vec![Birth(0), Op(0, 'i'), bind(3, 0)];
+        log.extend(site.clone());
+        log.extend(site);
+        log.push(LOp(3, 'd'));
+        assert_eq!(cert(&log, 1), "{iamamdx|}{iamdx|}id\n");
     }
 
     #[test]

@@ -130,6 +130,10 @@ impl Emitter<'_> {
                     i.block(BlockType::Empty).loop_(BlockType::Empty);
                 }
                 self.hof_elem_into(elem, bh, ch, ih, param);
+                self.witness_callback_open(cb, None);
+                if closure.is_some() {
+                    self.witness_decline("fan:closure-route");
+                }
                 let got = match (closure, body) {
                     (Some((hcl, ti, _, ret)), _) => {
                         // Closure convention (calls.rs): env first, then the
@@ -158,6 +162,7 @@ impl Emitter<'_> {
                     self.rc_inc_top();
                 }
                 let carrier_dec = self.dec_fn_of(got);
+                let wc = self.witness_fan_carrier(owned);
                 {
                     let mut i = self.f.instructions();
                     i.local_set(hr);
@@ -189,7 +194,9 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(hr).call(F_DEC_FLAT);
                     self.f.instructions().i32_const(0).local_set(hr);
                 }
+                self.witness_fan_step(wc, first_ok_wins, b);
                 self.hof_step(ih);
+                self.witness_loop_close();
                 // loop fell through (no break): all elements consumed.
                 {
                     let mut i = self.f.instructions();
@@ -614,7 +621,7 @@ impl Emitter<'_> {
 /// the caller it aborted main where native carries the err into the
 /// fan's per-element Result. The fan accumulator IS the fallible form's
 /// first-err semantics, so the wrapper strips to the raw Result expr.
-fn strip_callback_try(body: &IrExpr) -> &IrExpr {
+pub(crate) fn strip_callback_try(body: &IrExpr) -> &IrExpr {
     match &body.kind {
         IrExprKind::Try { expr } => expr.as_ref(),
         IrExprKind::ResultOk { expr } => match &expr.kind {
@@ -634,7 +641,7 @@ fn strip_callback_try(body: &IrExpr) -> &IrExpr {
 /// `(p) => fs.read_text(p)` — possibly under the callback's `!` (one
 /// `Try` layer): the shape whose Result flows straight into the fan
 /// protocol, so prefetching the read is unobservable.
-fn body_is_fs_read_text(cb: &IrExpr) -> bool {
+pub(crate) fn body_is_fs_read_text(cb: &IrExpr) -> bool {
     let IrExprKind::Lambda { params, body, .. } = &cb.kind else {
         return false;
     };

@@ -286,7 +286,9 @@ impl Emitter<'_> {
         self.f.instructions().i32_const(0).local_set(rh);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        self.witness_callback_open(cb, None);
         self.lower(body, Some(BOOL))?;
+        self.witness_find_hit(params[0], elem);
         self.f.instructions().if_(BlockType::Empty);
         // some(x): the first match wins, then break the scan
         self.f
@@ -550,7 +552,7 @@ impl Emitter<'_> {
             .local_set(rh);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
-        self.witness_callback_open(cb);
+        self.witness_callback_open(cb, None);
         // dest addr, then value, then store
         self.f
             .instructions()
@@ -599,7 +601,7 @@ impl Emitter<'_> {
         self.f.instructions().i32_const(0).local_set(hw);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
-        self.witness_callback_open(cb);
+        self.witness_callback_open(cb, None);
         self.lower(body, Some(BOOL))?;
         self.witness_loop_close();
         self.f.instructions().if_(BlockType::Empty);
@@ -653,7 +655,7 @@ impl Emitter<'_> {
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, x_p);
-        self.witness_callback_open(cb);
+        self.witness_callback_open(cb, Some(acc_p));
         self.lower(body, Some(b))?;
         // The accumulator OWNS one credit on every step: a borrowed body
         // result (a captured var, the accumulator itself) takes its share,
@@ -663,6 +665,7 @@ impl Emitter<'_> {
         if let Some(dec) = self.elem_is_handle(b).then(|| self.dec_fn_of(b)) {
             self.f.instructions().local_get(acc_p).call(dec);
         }
+        self.witness_fold_step(body, acc_p, b);
         self.f.instructions().local_set(acc_p);
         self.witness_loop_close();
         self.hof_step(ih);

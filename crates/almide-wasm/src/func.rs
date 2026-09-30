@@ -414,7 +414,10 @@ pub(crate) fn lower_fn(
         {
             // #2758: a capture is a view of the env block (loaded without a
             // share, below) — except a C-319 cell, whose address travels.
-            let pre_gate = if env_captures.as_ref().is_some_and(|c| c.iter().any(|&(_, _, _, cell)| cell)) {
+            // A C-319 cell's ADDRESS is the env's (its drop glue releases
+            // it); only a DROPPABLE occupant has RC sites here — declined.
+            let droppable_cell = |c: &Vec<_>| c.iter().any(|&(_, t, _, cell)| cell && em.rc_droppable(t));
+            let pre_gate = if env_captures.as_ref().is_some_and(droppable_cell) {
                 Some("captures:cell".to_string())
             } else if crate::witness::argv_exception(name) {
                 Some("caps:argv-in-plain-fn".to_string())

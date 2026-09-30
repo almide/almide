@@ -81,10 +81,16 @@ impl Emitter<'_> {
                         .local_tee(self.scr_i32_local)
                         .i32_eqz()
                         .if_(BlockType::Result(et.val_type()));
+                    self.witness_branch_open();
+                    self.witness_branch_arm();
                     self.lower(fallback, Some(et))?;
+                    self.witness_unwrap_or_arm(e, Some(fallback), et);
                     self.f.instructions().else_().local_get(self.scr_i32_local);
+                    self.witness_branch_arm();
                     self.load_ty_slot(et, almide_layout::OPTION_FIELD);
                     self.own_unwrap_or_join(e, fallback, et);
+                    self.witness_unwrap_or_arm(e, None, et);
+                    self.witness_branch_close();
                     self.f.instructions().end();
                     et
                 }
@@ -97,10 +103,16 @@ impl Emitter<'_> {
                         .i32_const(0)
                         .i32_ne()
                         .if_(BlockType::Result(et.val_type()));
+                    self.witness_branch_open();
+                    self.witness_branch_arm();
                     self.lower(fallback, Some(et))?;
+                    self.witness_unwrap_or_arm(e, Some(fallback), et);
                     self.f.instructions().else_().local_get(self.scr_i32_local);
+                    self.witness_branch_arm();
                     self.load_ty_slot(et, almide_layout::SUM_FIELD);
                     self.own_unwrap_or_join(e, fallback, et);
+                    self.witness_unwrap_or_arm(e, None, et);
+                    self.witness_branch_close();
                     self.f.instructions().end();
                     et
                 }
@@ -204,7 +216,9 @@ impl Emitter<'_> {
             // An exit like any other: the frame's owners are released
             // before the jump (the err block already shares its payload).
             let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
+            self.witness_err_raise_arm();
             self.emit_exit(&plan);
+            self.witness_err_raise_leave();
             self.f.instructions().return_();
             return Ok(raw);
         }
@@ -595,14 +609,19 @@ impl Emitter<'_> {
     /// name in a reader position (`arg_temps::bindable_ty`): an owned join
     /// there would be read and never released.
     fn own_unwrap_or_join(&mut self, e: &IrExpr, fallback: &IrExpr, et: SliceTy) {
-        if !self.rc_droppable(et)
-            || !crate::arg_temps::bindable_ty(&e.ty)
-            || !crate::arg_temps::unwrap_or_joins_owned(e)
-            || !self.rc_owned_result(fallback)
-        {
+        if !self.unwrap_or_owns_join(e, fallback, et) {
             return;
         }
         self.rc_inc_top();
         self.owned_call_marks.insert(e as *const IrExpr as usize);
+    }
+
+    /// Does `own_unwrap_or_join` normalize this `??` to an owned join? (The
+    /// witness reads the same predicate, witness_hooks.rs.)
+    pub(crate) fn unwrap_or_owns_join(&self, e: &IrExpr, fallback: &IrExpr, et: SliceTy) -> bool {
+        self.rc_droppable(et)
+            && crate::arg_temps::bindable_ty(&e.ty)
+            && crate::arg_temps::unwrap_or_joins_owned(e)
+            && self.rc_owned_result(fallback)
     }
 }
