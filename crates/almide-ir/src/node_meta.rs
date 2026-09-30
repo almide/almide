@@ -300,6 +300,14 @@ pub const SCOPED_FN_ATTR: &str = "scoped:fn";
 /// the structural wasm leg rewinds its allocator around it, the native leg
 /// runs it in the arena window.
 pub const SCOPED_BLOCK_ATTR: &str = "scoped:block";
+/// #3041: the marker on a fn the compiler SYNTHESIZED out of an `effect fn`'s
+/// body (a lifted heap branch `branch_lift_synth_*`, a metered region
+/// `__almd_bounded_*`, an outlined result block `__almd_res_*`). Its own
+/// `is_effect` stays false — that flag is the ABI (a Result-wrapped return)
+/// — but its host reach is what its origin declared, and the capability
+/// witness bounds it by that declaration. Written by the pass that creates
+/// the fn; `:` keeps a source attribute from forging it.
+pub const EFFECT_ORIGIN_ATTR: &str = "effect:origin";
 
 impl IrFunction {
     /// Declared `scoped fn` (the qualifier, not the block).
@@ -310,6 +318,34 @@ impl IrFunction {
     /// The outlined body of a `scoped { … }` block.
     pub fn is_scoped_block_entry(&self) -> bool {
         self.attrs.iter().any(|a| a.name.as_str() == SCOPED_BLOCK_ATTR)
+    }
+
+    /// Synthesized from an `effect fn`'s body ([`EFFECT_ORIGIN_ATTR`]).
+    pub fn is_effect_origin(&self) -> bool {
+        self.attrs.iter().any(|a| a.name.as_str() == EFFECT_ORIGIN_ATTR)
+    }
+
+    /// Does the fn carry an attribute other than the #3041 effect-origin
+    /// marker? The marker is a witness declaration, not an annotation, so the
+    /// passes that leave an attributed fn alone (TCO, TRE, the native
+    /// ownership certifier's checkable verdicts) read this, not `attrs`.
+    pub fn has_attrs_besides_effect_origin(&self) -> bool {
+        self.attrs.iter().any(|a| a.name.as_str() != EFFECT_ORIGIN_ATTR)
+    }
+
+    /// What the source declares about host effects: an `effect fn`, or a fn
+    /// synthesized from one's body.
+    pub fn declares_effect(&self) -> bool {
+        self.is_effect || self.is_effect_origin()
+    }
+
+    /// Mark every fn in `synthesized` as carved out of an effect origin
+    /// (idempotent) — called by a pass right after it synthesized them from
+    /// a fn that [`Self::declares_effect`].
+    pub fn mark_effect_origin(synthesized: &mut [IrFunction]) {
+        for f in synthesized.iter_mut().filter(|f| !f.is_effect_origin()) {
+            f.attrs.push(Self::scoped_marker(EFFECT_ORIGIN_ATTR));
+        }
     }
 
     /// The marker attribute, for the lowering that writes it.
