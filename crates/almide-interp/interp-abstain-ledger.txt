@@ -47,4 +47,5 @@ range_materialize_oom  out-of-interp-scope capability: range materialization bey
 regex_repetition_depth  interp fuel/recursion budget exhausted
 set_entries_reclaim  out-of-interp-scope capability: prim.handle of a container holding a String element, where the impl the interp RESOLVED declares element type Int — a public container fn resolves to its scalar core by name (the _str/_skv/_hval choice is a MIR pass the interp does not run), so this is that resolution and not the program's type; materializing anyway would compare heap values as raw i64 slots
 set_index_order  out-of-interp-scope capability: prim.load64 outside this heap's arena — the backends read real memory here, so a guessed value would be a wrong vote
+stdlib_call_temporaries_release  out-of-interp-scope capability: prim.fd_write: no lowered body
 string_from_bytes  out-of-interp-scope capability: prim.load64 outside this heap's arena — the backends read real memory here, so a guessed value would be a wrong vote
