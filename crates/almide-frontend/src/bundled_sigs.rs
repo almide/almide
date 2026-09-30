@@ -56,6 +56,45 @@ pub fn lookup(module: &str, func: &str) -> Option<FnSig> {
     with_module(module, |sigs| sigs.get(&sym(func)).cloned()).flatten()
 }
 
+/// The `@deprecated` marker on a bundled-stdlib fn, read from the same
+/// cached parse as its signature. `env.deprecations` only holds the markers
+/// of modules the resolver registered (the auto-imported set, and whatever
+/// the program imports); a Tier-1 module reached without an import
+/// (`matrix`, `bytes`) and the `almide fix` engine, which canonicalizes with
+/// no stdlib modules at all, resolve through `lookup` above — so they must
+/// read the marker here, or a deprecated stdlib fn is silent on that path
+/// (#3085).
+pub fn lookup_deprecation(module: &str, func: &str) -> Option<crate::deprecation::Deprecation> {
+    type DepMap = HashMap<String, HashMap<Sym, crate::deprecation::Deprecation>>;
+    static CELL: OnceLock<std::sync::RwLock<DepMap>> = OnceLock::new();
+    let cell = CELL.get_or_init(|| std::sync::RwLock::new(HashMap::new()));
+    if let Ok(guard) = cell.read() {
+        if let Some(map) = guard.get(module) {
+            return map.get(&sym(func)).cloned();
+        }
+    }
+    if !almide_lang::stdlib_info::is_bundled_module(module) {
+        return None;
+    }
+    let source = super::stdlib::get_bundled_source(module)?;
+    let program = almide_lang::parse_cached(source)?;
+    let map: HashMap<Sym, crate::deprecation::Deprecation> = program
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            ast::Decl::Fn { name, attrs, .. } => {
+                crate::deprecation::parse(attrs).ok().flatten().map(|d| (*name, d))
+            }
+            _ => None,
+        })
+        .collect();
+    let found = map.get(&sym(func)).cloned();
+    if let Ok(mut guard) = cell.write() {
+        guard.insert(module.to_string(), map);
+    }
+    found
+}
+
 /// Return every fn name declared in a bundled stdlib module. Used by
 /// reflection paths (outline, docs-gen, ...) that need the full
 /// declared surface regardless of whether it originated in TOML or

@@ -509,3 +509,41 @@ fn main() -> Unit = {
     assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
     assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "a\nd");
 }
+
+/// #3085: every deprecated stdlib synonym is rewritten by `almide fix` in all
+/// three call spellings — the direct call, the pipe stage and the method form
+/// — including for a Tier-1 module used without an import (`matrix`). Before
+/// this, the fix engine (which canonicalizes with no stdlib modules
+/// registered) saw no `@deprecated` marker on any stdlib fn, so even #1735's
+/// `string.length` rewrite never applied.
+#[test]
+fn fix_rewrites_every_deprecated_stdlib_synonym_in_every_call_form() {
+    let path = write_tmp("fix_stdlib_synonyms_3085.almd", r#"fn main() -> Unit = {
+  let xs = [1, 2, 3]
+  println(int.to_string(list.length(xs)))
+  println(int.to_string(xs |> list.length))
+  println(int.to_string(xs.length()))
+  println(int.to_string(string.length("abc")))
+  let m = matrix.from_lists([[1.0, 2.0]])
+  println(float.to_string(matrix.row_dot(m, 0, [1.0, 1.0])))
+  println(int.to_string(matrix.cols(matrix.concat_cols_many([m, m]))))
+}
+"#);
+    let out = Command::new(almide()).args(["fix", &path]).output().unwrap();
+    assert!(out.status.success(), "stderr:\n{}", String::from_utf8_lossy(&out.stderr));
+    let after = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(after, r#"fn main() -> Unit = {
+  let xs = [1, 2, 3]
+  println(int.to_string(list.len(xs)))
+  println(int.to_string(xs |> list.len))
+  println(int.to_string(xs.len()))
+  println(int.to_string(string.len("abc")))
+  let m = matrix.from_lists([[1.0, 2.0]])
+  println(float.to_string(matrix.dot_row(m, 0, [1.0, 1.0])))
+  println(int.to_string(matrix.cols(matrix.concat_cols([m, m]))))
+}
+"#);
+    let check = Command::new(almide()).args(["check", &path]).output().unwrap();
+    let stderr = String::from_utf8_lossy(&check.stderr);
+    assert!(check.status.success() && !stderr.contains("E052"), "still warns after fix:\n{stderr}");
+}
