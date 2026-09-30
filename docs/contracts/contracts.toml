@@ -2980,6 +2980,7 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_q1_full_loader_cols_beyond_buffer.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_shape_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_select_rows_wrapped_rid.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_q1_full_loader_wrapped_offset.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-230"
