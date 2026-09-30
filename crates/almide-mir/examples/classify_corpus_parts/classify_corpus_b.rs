@@ -355,6 +355,8 @@ fn source_to_ir(path: &Path, source: &str) -> FrontendOutcome {
         // Arg-block hoist, THEN guard → if restructure — the SAME order the
         // pipeline runs (see source_to_ir_with, #1968).
         almide_mir::lower::hoist_block_call_args(&mut ir);
+        // #3058: list-rest matches become the length-test chain the lowering runs.
+        almide_mir::lower::desugar_list_rest_matches(&mut ir);
         // #2885: an effect main's declared Ok payload is discarded (the E044 rule).
         almide_mir::lower::discard_effect_main_payload(&mut ir);
         almide_mir::lower::desugar_fn_body_guards(&mut ir);

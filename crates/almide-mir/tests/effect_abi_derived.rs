@@ -1,4 +1,5 @@
-//! #3058: the effect-fn ABI facts are derived from the IR on the product paths.
+//! #3058: the MIR rung lowers what the deleted incumbent passes used to supply,
+//! from facts derived from the IR on the product paths.
 //!
 //! Before, the registries that told the MIR lowering an effect fn's ABI were
 //! filled only by passes that were deleted with the incumbent wasm pipeline,
@@ -45,4 +46,18 @@ fn never_err_scalar_fn_renders_natively_with_its_raw_return() {
     let code = almide_mir::pipeline::try_render_rust_source(src)
         .unwrap_or_else(|e| panic!("walled: {}", e.reason()));
     assert!(code.contains("fn almd_f(v0: i64) -> i64"), "{code}");
+}
+
+#[test]
+fn list_rest_and_as_arms_lower_on_the_mir_rung() {
+    // #3058 class 2: a named rest binds `list.drop(xs, k)` under a `>=` length
+    // test, an unnamed one only relaxes the test, and a top-level as-arm reads
+    // the subject itself.
+    assert_all_lower(
+        "list-rest",
+        "fn total(xs: List[Int]) -> Int = match xs {\n  [] => 0,\n  [h, ..t] => h + total(t),\n}\n\
+         fn g(xs: List[Int]) -> Int = match xs {\n  [] => 0,\n  [a, b, ..] => a * 10 + b,\n  [7, ..r] => 700 + list.len(r),\n  _ => -1,\n}\n\
+         fn pick(xs: List[Int]) -> Int = match xs {\n  all @ [x] => x + list.len(all),\n  _ => 0,\n}\n\
+         fn main() -> Unit = {\n  println(int.to_string(total([1, 2]) + g([3]) + pick([4])))\n}\n",
+    );
 }
