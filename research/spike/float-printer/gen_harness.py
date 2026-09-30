@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Assemble the measurement programs (Almide has no include; the prototype only compiles on the
-wasm leg because it is written over `prim.*`, so each leg gets its own concatenated file).
+"""Assemble the measurement programs (Almide has no include, so each leg gets its own
+concatenated file). The prototypes this was written for were over `prim.*`, which is not user
+surface since #3025; pass `/dev/null` as <printer.almd> and `float.to_string` as <entry_fn> to
+run the same stream against the shipped printer.
 
   gen_harness.py <printer.almd> <entry_fn> <seed> <n> <outdir>
 
