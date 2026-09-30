@@ -82,6 +82,23 @@ impl Emitter<'_> {
                     _ => None,
                 };
                 let in_effect = fn_err.is_some();
+                // A raise leaf `err(m)!` in main (the C-132 err-carrying
+                // `!` site re-raises its message this way, #2917) aborts with
+                // `m` directly: the err block it names would only be built to
+                // be read back.
+                if !in_effect
+                    && self.in_main
+                    && let IrExprKind::ResultErr { expr: m } = &crate::data::err_channel::through_empty_blocks(expr).kind
+                    && slice_ty_of(&m.ty, self.types) == Some(STR)
+                    && let Some(node) = node_ty
+                {
+                    self.witness_decline("unwrap:abort");
+                    self.lower(m, Some(STR))?;
+                    self.emit_error_frame_abort();
+                    // No value ever leaves: a consumer takes no credit of it.
+                    self.owned_call_marks.insert(e as *const IrExpr as usize);
+                    return Ok(node);
+                }
                 // #1067: `!` in a pure Option-returning fn PROPAGATES a
                 // none as none (a Result operand there stays refused —
                 // no oracle row pins its shape).
