@@ -79,7 +79,7 @@ rhs:Fan	4
 rhs:IndexAccess	5
 rhs:MapAccess	1
 rhs:MapLiteral	9
-rhs:Member	4
+rhs:Member	5
 rhs:Range	6
 rhs:Record	53
 rhs:RuntimeCall	78
@@ -99,14 +99,14 @@ store:retain-unknown-local	2
 tail:IndexAccess	1
 tail:MapAccess	5
 tail:Member	9
-tail:Record	16
+tail:Record	17
 tail:SpreadRecord	2
-tail:StringInterp	126
+tail:StringInterp	127
 tail:Tuple	143
 tail:TupleIndex	3
 tail:Unwrap	4
 tail:UnwrapOr	16
 tail:view-result	2
-top-let:Record	1
+top-let:Record	2
 unwrap:abort	24
 unwrap:err-repr	2
