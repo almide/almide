@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="./docs/assets/almide-banner.jpg" alt="Almide" width="720">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/brand/almide-cover-dark.png">
+    <img src="./docs/assets/brand/almide-cover.png" alt="Almide" width="720">
+  </picture>
 </p>
 
 <p align="center"><strong>When the model is wrong, the compiler names the fix.</strong></p>

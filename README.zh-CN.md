@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="./docs/assets/almide-banner.jpg" alt="Almide" width="720">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/brand/almide-cover-dark.png">
+    <img src="./docs/assets/brand/almide-cover.png" alt="Almide" width="720">
+  </picture>
 </p>
 
 <p align="center"><strong>当模型出错时，编译器会点名该怎么改。</strong></p>
