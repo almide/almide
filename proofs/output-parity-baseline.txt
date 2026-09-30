@@ -35,6 +35,7 @@ spec/gauntlet/cells/x14_layered_ports/src/main.almd
 spec/gauntlet/cells/x15_directory_namespace/src/main.almd
 spec/gauntlet/cells/x16_effect_mut_generic.almd
 spec/gauntlet/cells/x17_closure_param_dec.almd
+spec/gauntlet/cells/x18_mut_param_err_partial_write.almd
 spec/gauntlet/pkg/functional_port/src/main.almd
 spec/gauntlet/pkg/mut_port/src/main.almd
 spec/integration/generic_protocol_ports/src/main.almd
@@ -579,6 +580,7 @@ spec/wasm_cross/mut_param_call_chain.almd
 spec/wasm_cross/mut_param_effect_can_err.almd
 spec/wasm_cross/mut_param_effect_never_err.almd
 spec/wasm_cross/mut_param_effect_unpropagated.almd
+spec/wasm_cross/mut_param_err_write_visible.almd
 spec/wasm_cross/mut_param_move_mode_gaps.almd
 spec/wasm_cross/mut_param_spread_reassign.almd
 spec/wasm_cross/mut_param_tail_recursion.almd
