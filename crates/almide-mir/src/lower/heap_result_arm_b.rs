@@ -369,8 +369,38 @@ impl LowerCtx {
             IrExprKind::ResultErr { expr } if is_heap_ty(&expr.ty) => {
                 self.lower_err_message_opt_str_wrap_arm(expr, result_ty)
             }
+            IrExprKind::ResultErr { expr } if Self::is_scalar_scalar_result(result_ty) => {
+                self.lower_scalar_err_wrap_arm(expr, result_ty)
+            }
             _ => None,
         }
+    }
+
+    /// `Result[<scalar>, <scalar>]` — both payloads own nothing (#3058).
+    fn is_scalar_scalar_result(result_ty: &Ty) -> bool {
+        matches!(result_ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a)
+                if a.len() == 2 && !is_heap_ty(&a[0]) && !is_heap_ty(&a[1])
+                    && a[0] != Ty::Unit && a[1] != Ty::Unit)
+    }
+
+    /// The scalar `Err` arm of a scalar-scalar Result (`if c then ok(true) else
+    /// err(-3)` in `Result[Bool, Int8]`, #3058): the SAME len-as-tag block the
+    /// bind position builds for `let r = err(404)`
+    /// ([`Self::materialize_result_err_scalar`], len 1 = the Err tag, payload in
+    /// slot 0), paired with the scalar `Ok` arm above (len 0). Neither arm owns
+    /// a child, so the join's flat drop frees either block exactly. Same per-arm
+    /// frame as every sibling: a payload expr's transient heap temps are freed
+    /// within the arm.
+    fn lower_scalar_err_wrap_arm(&mut self, expr: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        let arm_mark = self.live_heap_handles.len();
+        let payload = self.lower_scalar_value(expr)?;
+        let repr = repr_of(result_ty).ok()?;
+        let obj = self.materialize_result_err_scalar(payload, repr);
+        self.value_shapes.insert(obj, crate::lower::VariantShape::ResultScalar);
+        self.ops.push(Op::Consume { v: obj });
+        self.drop_arm_locals(arm_mark);
+        Some(obj)
     }
 
     /// Extracted verbatim from [`Self::lower_heap_result_arm_result`] (codopsy round-3
