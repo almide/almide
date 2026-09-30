@@ -273,6 +273,7 @@ evidence  = [
   { path = "spec/wasm_cross/map_of_maps_value.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_set_index_threshold.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_entry_loop.almd", class = "fixture" },
+  { path = "spec/wasm_cross/stdlib_call_temporaries_release.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-014"
@@ -532,6 +533,7 @@ evidence  = [
   { path = "spec/wasm_cross/inplace_clear_alias.almd", class = "fixture" },
   { path = "spec/wasm_cross/inplace_clear_alias_field.almd", class = "fixture" },
   { path = "spec/wasm_cross/record_scalar_field_assign_alias.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mutator_writeback_releases_old_block.almd", class = "fixture" },
 ]
 
 # ── LIST BOUNDS GRACEFULNESS ─────────────────────────────────────────
@@ -931,6 +933,7 @@ since     = "0.26.7"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/value_repr.almd", class = "fixture" },
+  { path = "spec/wasm_cross/value_codec_matrix_temporaries_release.almd", class = "fixture" },
 ]
 
 # ── A mut Map PARAMETER MUTATED IN PLACE BUILDS + PERSISTS, IDENTICAL ─
@@ -1403,6 +1406,7 @@ evidence  = [
   { path = "spec/wasm_cross/list_of_maps_loop_build.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_three_level_literal.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_three_level_loop_build.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_heap_ops_release_temporaries.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-102"
@@ -1784,6 +1788,7 @@ evidence  = [
   { path = "spec/wasm_cross/mut_param_move_mode_gaps.almd", class = "fixture" },
   { path = "spec/wasm_cross/mutable_global_field_mut_arg.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_effect_unpropagated.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mutator_writeback_releases_old_block.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-133"
@@ -2118,6 +2123,7 @@ since     = "0.35.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/io_write_ordering.almd", class = "fixture" },
+  { path = "spec/wasm_cross/stdlib_call_temporaries_release.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-163"
@@ -2691,6 +2697,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/codec_none_omission.almd", class = "fixture" },
   { path = "spec/stdlib/codec_field_matrix_test.almd", class = "fixture" },
+  { path = "spec/wasm_cross/value_codec_matrix_temporaries_release.almd", class = "fixture" },
 ]
 
 # ── NaN OBSERVATION IS CANONICAL — Wasm 3.0 deterministic-profile conformance ─
@@ -2872,6 +2879,7 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_product_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_composition_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_softmax_nonfinite_rows.almd", class = "fixture" },
+  { path = "spec/wasm_cross/value_codec_matrix_temporaries_release.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-224"
@@ -3563,6 +3571,7 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/regex_engine.almd", class = "fixture" },
+  { path = "spec/wasm_cross/regex_captures_accumulator_release.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-286"
@@ -4272,6 +4281,7 @@ since     = "0.62.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/path_extension_hidden.almd", class = "fixture" },
+  { path = "spec/wasm_cross/stdlib_call_temporaries_release.almd", class = "fixture" },
 ]
 
 # ── PER-TEST RE-INIT OF MUTABLE MODULE GLOBALS ────────────────────────

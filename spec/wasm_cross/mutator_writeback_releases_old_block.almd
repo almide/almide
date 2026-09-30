@@ -1,0 +1,103 @@
+// @contract: C-033, C-132
+// Every in-place mutator the structural wasm leg lowers FUNCTIONALLY — a
+// fresh block written back into the receiver's slot — releases the block it
+// replaces, whatever the receiver is: a local `var`, a `mut` parameter, a
+// captured `var` (a closure cell) or a module-level `var` (#2968, #2967).
+// `string.push` / `string.clear`, `list.pop` / `list.clear`, the functional
+// `map.insert` / `map.delete` / `map.clear`, and the bytes window writers
+// (`fill`, `clear`, `write_*`, `copy_within`, `copy_from`, the `append_*`
+// family) each orphaned the old block on every call. A `list.push` /
+// `bytes.push` through a `mut` parameter that has to GROW kept the outgrown
+// block with the frame's credit on it (the caller's credit keeps a param's
+// block shared, so the push helper would not free it). Stdout pins the
+// values (an alias bound before a mutation keeps the old one, C-033; the
+// caller sees a `mut` parameter's growth, C-132); the live-at-exit ledger
+// pins that nothing stays live.
+var log_text: String = ""
+
+var log_buf: Bytes = bytes.new(0)
+
+fn add(mut xs: List[String], s: String) -> Unit = list.push(xs, s)
+
+fn pop_last(mut xs: List[String]) -> String = list.pop(xs) ?? "-"
+
+fn put(mut m: Map[String, Int], k: String, v: Int) -> Unit = map.insert(m, k, v)
+
+fn drop_key(mut m: Map[String, Int], k: String) -> Unit = map.delete(m, k)
+
+fn grow(mut b: Bytes, n: Int) -> Unit = {
+  for i in 0..<n {
+    bytes.push(b, i)
+  }
+}
+
+fn stamp(mut b: Bytes) -> Unit = {
+  bytes.write_u32_be(b, 258)
+  bytes.append_u8(b, 7)
+}
+
+fn show_list(xs: List[String]) -> String = "[" + list.join(xs, ",") + "]"
+
+fn show_bytes(b: Bytes) -> String = "${bytes.to_list(b)}"
+
+fn show_map(m: Map[String, Int]) -> String = map.keys(m) |> list.map((k) => k + "=" + int.to_string(map.get_or(m, k, 0))) |> list.join(",")
+
+fn main() -> Unit = {
+  // Strings: push and clear on a local, an alias keeps the old text.
+  var s = "a"
+  let s0 = s
+  for i in 0..<5 {
+    string.push(s, int.to_string(i))
+  }
+  println("s=" + s + " s0=" + s0)
+  string.clear(s)
+  string.push(s, "z")
+  println("s=" + s)
+  // Lists: pop and clear on a local; push and pop through `mut` params,
+  // growing past the capacity steps.
+  var xs: List[String] = ["p", "q", "r"]
+  let xs0 = xs
+  let last = list.pop(xs) ?? "-"
+  println("pop=" + last + " xs=" + show_list(xs) + " xs0=" + show_list(xs0))
+  list.clear(xs)
+  for i in 0..<9 {
+    add(xs, "v" + int.to_string(i))
+  }
+  println("grown=" + show_list(xs))
+  println("popped=" + pop_last(xs) + " rest=" + int.to_string(list.len(xs)))
+  // Maps: the functional insert/delete through a `mut` param, clear on a local.
+  var m: Map[String, Int] = map.new()
+  for i in 0..<4 {
+    put(m, "k" + int.to_string(i), i)
+  }
+  let m0 = m
+  drop_key(m, "k1")
+  println("m=" + show_map(m) + " m0=" + show_map(m0))
+  map.clear(m)
+  put(m, "x", 9)
+  println("m=" + show_map(m))
+  // Bytes: every window writer on a local, the growth push and the writers
+  // through `mut` params, and a captured var.
+  var b = bytes.new(4)
+  bytes.fill(b, 3)
+  bytes.write_u8(b, 513)
+  bytes.copy_within(b, 0, 2, 3)
+  let src = bytes.from_list([9, 8])
+  bytes.copy_from(b, src, 1, 0, 2)
+  println("b=" + show_bytes(b))
+  bytes.clear(b)
+  grow(b, 20)
+  stamp(b)
+  println("b.len=" + int.to_string(bytes.len(b)) + " tail=" + int.to_string(bytes.get_or(b, 24, -1)))
+  var c = bytes.new(3)
+  let cw = () => bytes.copy_within(c, 0, 1, 1)
+  cw()
+  println("c=" + show_bytes(c))
+  // Module-level vars take the same write-backs.
+  for i in 0..<3 {
+    string.push(log_text, "#" + int.to_string(i))
+    bytes.push(log_buf, i)
+  }
+  bytes.fill(log_buf, 5)
+  println("log=" + log_text + " buf=" + show_bytes(log_buf))
+}
