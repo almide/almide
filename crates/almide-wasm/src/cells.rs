@@ -45,9 +45,11 @@ impl IrVisitor for Scan {
                 // every bytes writer but six still was — a captured Bytes
                 // written through `bytes.set_u8` took the env value-copy
                 // path and the write was lost (#2951).
+                // The written place may be a field or tuple slot of the
+                // var (`list.push(h.xs, 1)`, #2961): its ROOT is mutated.
                 for k in almide_ir::mut_args::stdlib_mut_positions(module.as_str(), func.as_str()).unwrap_or_default() {
-                    if let Some(IrExprKind::Var { id }) = args.get(k).map(|a| &a.kind) {
-                        self.mutated.insert(*id);
+                    if let Some(id) = args.get(k).and_then(place_root) {
+                        self.mutated.insert(id);
                     }
                 }
             }
@@ -66,6 +68,16 @@ impl IrVisitor for Scan {
             }
         }
         walk_stmt(self, s);
+    }
+}
+
+/// The var at the root of a place — `h`, `h.xs`, `h.a.b`, `t.0` — or
+/// `None` when the expression is not a place over a var.
+fn place_root(e: &IrExpr) -> Option<VarId> {
+    match &e.kind {
+        IrExprKind::Var { id } => Some(*id),
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => place_root(object),
+        _ => None,
     }
 }
 

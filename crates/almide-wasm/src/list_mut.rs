@@ -99,12 +99,12 @@ impl Emitter<'_> {
         spends_var: bool,
         emit: impl FnOnce(&mut Self, SliceTy) -> Result<(), EmitError>,
     ) -> Result<(), EmitError> {
-        // C-319 residual: only the Assign form writes THROUGH a shared
-        // cell — a field write against a cell var would land in the raw
-        // local and silently diverge. Refuse honestly.
-        if self.cells.contains(target) {
-            return unsup("cell-write:field-assign");
-        }
+        // A C-319 cell var (#2961): the local holds the CELL's address, so
+        // the record is read through it and the fresh copy is stored back
+        // into it, and the cell's credit on the replaced record is released
+        // as an Assign through a cell releases it — a closure that captured
+        // the var sees the write, and so does the enclosing scope.
+        let in_cell = self.cells.contains(target);
         let (slot, declared) = match self.locals.get(target) {
             Some(&(idx, d)) => (Ok(idx), d),
             None => match self.globals.get(&(self.var_space, *target)) {
@@ -130,6 +130,9 @@ impl Emitter<'_> {
             Ok(idx) => self.f.instructions().local_get(idx),
             Err(gidx) => self.f.instructions().global_get(gidx),
         };
+        if in_cell {
+            self.load_ty_slot(declared, 0);
+        }
         let copy = self.copy_fn_of(root);
         self.f.instructions().call(copy).local_set(hb);
         // Walk down: copy each inner record out of its (already copied)
@@ -170,6 +173,11 @@ impl Emitter<'_> {
         if !spends_var && self.rc_droppable(root) {
             let dec = self.dec_fn_of(root);
             match slot {
+                Ok(idx) if in_cell => {
+                    self.f.instructions().local_get(idx);
+                    self.load_ty_slot(root, 0);
+                    self.f.instructions().call(dec);
+                }
                 Ok(idx) => {
                     self.f.instructions().local_get(idx).call(dec);
                     self.rc_own(idx, root);
@@ -179,11 +187,18 @@ impl Emitter<'_> {
                 }
             }
         }
-        self.f.instructions().local_get(hb);
         match slot {
-            Ok(idx) => self.f.instructions().local_set(idx),
-            Err(gidx) => self.f.instructions().global_set(gidx),
-        };
+            Ok(idx) if in_cell => {
+                self.f.instructions().local_get(idx).local_get(hb);
+                self.store_ty_slot(root, 0);
+            }
+            Ok(idx) => {
+                self.f.instructions().local_get(hb).local_set(idx);
+            }
+            Err(gidx) => {
+                self.f.instructions().local_get(hb).global_set(gidx);
+            }
+        }
         for _ in &holds {
             self.release_i32();
         }
