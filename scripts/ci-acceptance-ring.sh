@@ -19,6 +19,7 @@
 #      code, silently retreating the verified leg. All current ring projects
 #      run all-wasm, so fallback is pinned at zero; raise a project's
 #      allowance deliberately, in the workflow matrix, never here.
+#   3. The summary names 0 failed files, whatever the exit code said.
 set -euo pipefail
 
 dir=${1:?usage: ci-acceptance-ring.sh <project-dir> <min-test-files> [max-native-fallback]}
@@ -49,6 +50,14 @@ if [ -z "$summary" ]; then
 fi
 total=$(sed -E 's/.*\(of ([0-9]+) files?\).*/\1/' <<<"$summary")
 fallback=$(sed -E 's/.*, ([0-9]+) via native fallback.*/\1/' <<<"$summary")
+failed=$(sed -E 's/.*, ([0-9]+) failed.*/\1/' <<<"$summary")
+# The summary is read for failures too, not only the exit code: the floor and
+# the fallback cap exist because the exit code under-reports, and a summary
+# naming failed files under exit 0 passed this leg until #3032.
+if [ "$failed" -gt 0 ]; then
+  echo "$name: RING FAIL — the summary reports $failed failed file(s)" >&2
+  exit 1
+fi
 if [ "$total" -lt "$min" ]; then
   echo "$name: RING FAIL — ran $total test file(s), floor is $min (a shrunken run is not a green run)" >&2
   exit 1
