@@ -1,0 +1,28 @@
+// @contract: C-320
+// A budget cut returns early from every frame inside the region, and that
+// early return is an exit like any other: the frame's owned locals — here
+// the string a loop is growing — and the concat result the dynamic charge
+// was measuring are released before the return. The structural wasm leg
+// returned the zero value directly, so every cut left the half-built string
+// live (#2969). Rounds that are cut and rounds that finish print the same
+// text on both targets, and the program ends with no block live.
+fn build(n: Int) -> Int = {
+  var s = ""
+  var i = 0
+  while i < n {
+    s = s + "0123456789abcdef"
+    i = i + 1
+  }
+  string.len(s)
+}
+
+effect fn main() -> Unit = {
+  var ns = 70
+  while ns < 80 {
+    let r = fan.bounded(compute.ns(ns * 10)) { build(20) } ?? -1
+    println("${ns}: ${r}")
+    ns = ns + 2
+  }
+  let whole = fan.bounded(compute.ns(1000000)) { build(4) } ?? -1
+  println("whole: ${whole}")
+}
