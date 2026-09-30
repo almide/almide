@@ -46,6 +46,11 @@ breaks = [
   "the user-spelled `try_*` function family removed — use the `T?` / `T!` postfix forms",
   "a bare effect call in statement position is E042 (must-use) — write `let _ = f()` to discard",
 ]
+# Late enforcement of an existing break, not a new epoch. The ledger is
+# append-only; these notes add to epoch 2 without changing what it means.
+notes = [
+  "2026-09-30, 0.66.0 (#3063): the implicit-`?` break is now enforced on field and index assignment targets too. `s.f = f()`, `xs[i] = f()` and `o.inner.f = f()` had escaped E041 because the checker never typed their values. They were always epoch-2 violations. Each E041 carries the positioned `!` fix-it (`s.f = f()!`), the same one `let x = f()` gets. Like every E041 it is a suggestion that `almide fix --json` lists, not an automatic rewrite (#1312).",
+]
 
 [[epoch]]
 n = 3
