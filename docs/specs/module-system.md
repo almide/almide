@@ -1,6 +1,6 @@
 # Module System Specification
 
-> Last updated: 2026-09-28. Verified by `spec/integration/modules/` (25 tests + 4 error tests), `spec/wasm_cross/stdlib_type_shadow.almd` and `tests/module_shadow_member_test.rs`.
+> Last updated: 2026-09-30. Verified by `spec/integration/modules/` (25 tests + 4 error tests), `spec/wasm_cross/stdlib_type_shadow.almd`, `tests/module_shadow_member_test.rs` and `tests/extern_rust_abi_test.rs`.
 
 ---
 
@@ -574,6 +574,43 @@ fn my_min(a: Int, b: Int) -> Int = if a < b then a else b   // フォールバ�
 @extern(ts, "Math", "max")
 fn my_max(a: Int, b: Int) -> Int   // body なし: 全ターゲットに @extern 必須
 ```
+
+### 11.1 `@extern(rust, …)` の引数 ABI
+
+`@extern(rust, "crate::host", "f")` は `crate::host::f(..)` を呼ぶ薄いラッパを生成する。ホスト側（パッケージの `native/*.rs`）が受け取る型は引数の Almide 型だけで決まる（本体から推論しない）。読み取り専用のヒープ値は借用、スカラーと値型は所有で渡る。`String` / `List` と同じく、`Bytes` / `Matrix` も中身のスライス・値への参照で渡り、ホストが `AlmideRcCow` を見ることはない。
+
+| Almide 引数型 | ホスト側の Rust 型 |
+|---|---|
+| `Int` / `Int8`〜`Int64` / `UInt8`〜`UInt64` | `i64` / `i8`〜`i64` / `u8`〜`u64`（所有） |
+| `Float` / `Float32` / `Float64` / `Bool` / `Unit` | `f64` / `f32` / `f64` / `bool` / `()`（所有） |
+| `String` | `&str` |
+| `List[T]` | `&[T]` |
+| `Bytes` | `&[u8]` |
+| `Matrix` | `&AlmideMatrix` |
+| `Map[K, V]` / `Set[T]` | `&AlmideMap<K, V>` / `&AlmideSet<T>` |
+| 名前付きレコード `P` | `&crate::P` |
+| バリアント / `Option[T]` / `Result[T, E]` / タプル | 所有（`crate::Sh` / `Option<T>` / `Result<T, E>` / `(A, B)`） |
+| 関数値 `(A) -> B` | `std::rc::Rc<dyn Fn(A) -> B>`（所有 — ホストが保持してよい） |
+| `mut v: T` | `&mut T`（`mut v: Bytes` は `&mut Vec<u8>`、`mut v: Matrix` は `&mut AlmideMatrix`。書き込みは呼び出し側の `var` に copy-on-write で反映） |
+
+戻り値はその型の生成コード表現（`Int` → `i64`、`String` → `String` …）で返す。`Bytes` / `Matrix` の戻り値は生の `Vec<u8>` / `AlmideMatrix` でよい（ラッパが `.into()` する）。
+
+```rust
+// native/host.rs
+use crate::*;
+pub fn checksum(data: &[u8]) -> i64 { data.iter().map(|b| *b as i64).sum() }
+pub fn fill(n: i64) -> Vec<u8> { vec![0u8; n as usize] }
+```
+
+```almide
+@extern(rust, "crate::host", "checksum")
+fn checksum(data: Bytes) -> Int = _
+
+@extern(rust, "crate::host", "fill")
+fn fill(n: Int) -> Bytes = _
+```
+
+規則は `extern_rust_borrow_mode`（`crates/almide-codegen/src/pass_borrow_inference_ownership.rs`）一箇所にあり、呼び出し側の借用とラッパの引数型が同じ規則を読む。テスト: `tests/extern_rust_abi_test.rs`（全引数型を一つのパッケージにまとめて上の表のホスト型でビルド・実行し、`Ty` の全バリアントがどの行で被覆されるかを網羅 match で固定する）。
 
 ---
 
