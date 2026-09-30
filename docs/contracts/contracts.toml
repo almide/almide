@@ -4721,3 +4721,13 @@ evidence  = [
   { path = "spec/embedded_cross/http_header_refusal.almd", class = "fixture" },
   { path = "tests/http_error_class_cross_test.rs", class = "fixture", name = "the_spec_fixtures_read_the_same_on_native_embedded_and_p3" },
 ]
+[[contract]]
+id        = "C-371"
+spec      = "ALS-T28"
+title     = "Float32 arithmetic rounds every result to binary32 on every leg"
+statement = "Each Float32 `+`, `-`, `*`, `/`, `%`, `**` and unary `-` result is rounded to IEEE-754 binary32 (round-to-nearest-even) after that one operation, so every leg holds the value native's `f32` arithmetic computes: `1/3` widens to 0.3333333432674408, `2^24 + 1` is `2^24`, and ten additions of `0.1` give 1.0000001192092896. A leg that carries Float32 in an f64 slot rounds after every operation; before this, the wasm leg and the interpreter kept the unrounded f64 quotient (0.3333333333333333), which widening, a comparison or any later operation then observed. A conversion into Float32 (`float.to_float32`, `int.to_float32` and the sized `to_float32` twins) rounds once, a comparison reads the rounded values, and a bare float literal in a Float32 position narrows at birth (C-182). `a ** b` on Float32 is the f64 `**` of the widened operands (the vendored libm pow, C-026's one implementation) rounded once to binary32; before this, native did not build it at all (the f32 operands met the f64 pow, almide#3082). No `math.*` function takes a Float32; one reaches them only through an explicit `float32.to_float64`. spec/wasm_cross/float32_arithmetic_rounds.almd observes each operation through `float32.to_float64` and `float.to_string`, which show every bit of the binary32 value, and through comparisons whose answer flips when a leg does not round."
+since     = "0.66.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float32_arithmetic_rounds.almd", class = "fixture" },
+]

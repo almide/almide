@@ -152,3 +152,4 @@
 | ALS-T25 | C-223 | `spec/wasm_cross/matrix_pow_libm.almd` (byte-compare)<br>`spec/wasm_cross/matrix_softmax_fastexp.almd` (byte-compare)<br>`spec/wasm_cross/matrix_domain_edges.almd` (byte-compare)<br>`spec/wasm_cross/matrix_elementwise_family.almd` (byte-compare)<br>`spec/wasm_cross/matrix_product_family.almd` (byte-compare)<br>`spec/wasm_cross/matrix_composition_family.almd` (byte-compare)<br>`spec/wasm_cross/matrix_softmax_nonfinite_rows.almd` (byte-compare) |
 | ALS-T26 | C-359, C-360 | `spec/wasm_cross/datetime_pre_epoch.almd` (byte-compare)<br>`spec/stdlib/datetime_test.almd` (both-target test)<br>`spec/wasm_cross/datetime_parse_iso_strict.almd` (byte-compare) |
 | ALS-T27 | C-361 | `spec/wasm_cross/url_authority_edges.almd` (byte-compare)<br>`spec/stdlib/url_test.almd` (both-target test) |
+| ALS-T28 | C-371 | `spec/wasm_cross/float32_arithmetic_rounds.almd` (byte-compare) |

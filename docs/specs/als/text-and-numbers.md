@@ -1,6 +1,6 @@
 # ALS §T — Text and Number Semantics (normative)
 
-> Last updated: 2026-08-27
+> Last updated: 2026-09-30
 
 > **Status**: normative. これらの節は実装から独立した**規範**であり、v0（native）と
 > v1（MIR/wasm）の両実装がこの節に適合する義務を負う。適合の証拠は
@@ -531,3 +531,22 @@ host として読まずに名指しで拒否する: userinfo は
 
 テスト: `spec/wasm_cross/url_authority_edges.almd`、
 `spec/stdlib/url_test.almd`。Contracts: C-361。
+
+## ALS-T28 Float32 演算の binary32 丸め
+
+`Float32` の各演算（`+` `-` `*` `/` `%` `**`、単項 `-`）の結果は IEEE-754 **binary32**
+の最近接偶数丸めで **1 演算ごとに** f32 に丸まり、native の `f32` 演算と同じ値に
+なる。より広いスロット（f64）で `Float32` を運ぶ実装も、各演算の直後に binary32 へ
+丸めなければならない — 丸めない値は `float32.to_float64` による拡幅、比較、後続の
+演算のすべてで native と異なる。`Float32` への変換（`float.to_float32`、
+`int.to_float32` と sized 整数の `to_float32`）は 1 回丸める。比較（`==` `!=` `<`
+`<=` `>` `>=`）は丸めた binary32 の値を比べる。`Float32` 文脈の裸の float
+リテラルは生まれたときに binary32 へ狭まる（ALS-E3）。`math.*` は `Float` のみを
+受け取り、`Float32` は明示の拡幅（`float32.to_float64`）を経て渡る。`Float32` の
+`a ** b` は、拡幅した両辺の `Float` の `**`（ALS-T10 の単一の pow 実装）を 1 回
+binary32 へ丸めた値である。
+
+例: `1/3` は `0.3333333432674408` に拡幅され、`2^24 + 1` は `2^24` に丸まり、
+`0.1` を 10 回足した和は `1.0000001192092896`。
+
+テスト: `spec/wasm_cross/float32_arithmetic_rounds.almd`。Contracts: C-371。
