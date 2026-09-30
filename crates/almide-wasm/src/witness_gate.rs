@@ -465,10 +465,15 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
 ///
 /// - `list.map`: the value is stored into the fresh result spine after the
 ///   share guard (`witness_store`);
-/// - `list.filter`: the value is a Bool;
-/// - `list.fold` with a SCALAR accumulator: the value is a scalar, and the
-///   accumulator carries no credit. A heap accumulator is a loop-carried
-///   owner, declined as `call-arg:Lambda:list.fold:heap-acc`. A fold over a
+/// - `list.filter`, `any`, `all`, `count`: the value is a Bool;
+/// - `list.find`: the value is a Bool, and a hit shares the element into a
+///   fresh some-cell (`witness_find_hit`, `am`);
+/// - `list.fold`: a scalar accumulator carries no credit; a HEAP one is a
+///   loop-carried OWNER (`witness_fold_step`) — the init's credit moves into
+///   the loop (the Retain argument, `am` / `im`), each iteration receives the
+///   accumulator (`i`), hands the body's value on (`im` / `am`) and releases
+///   what it received (`d`), and the fold's result is the owned value its
+///   consumer records. A fold over a
 ///   `list.*` call takes the fused or enumerate lowering (list_fuse.rs,
 ///   list_enumerate_fold.rs), whose activations are not hooked, so it
 ///   declines as `call-arg:Lambda:list.fold:fused`.
@@ -479,11 +484,8 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
 fn inline_callback_subset(module: &str, func: &str, args: &[IrExpr]) -> Option<Why> {
     let here = |t: &str| Some(Why::Here(format!("Lambda:{module}.{func}{t}")).inside("call-arg"));
     let arity = match (module, func, args) {
-        ("list", "map" | "filter", [_, _]) => 1,
-        ("list", "fold", [xs, init, _]) => {
-            if !scalar_ty(&init.ty) {
-                return here(":heap-acc");
-            }
+        ("list", "map" | "filter" | "find" | "any" | "all" | "count", [_, _]) => 1,
+        ("list", "fold", [xs, _, _]) => {
             if matches!(&crate::rc_ownership::rc_tail(xs).kind,
                 IrExprKind::Call { target: almide_ir::CallTarget::Module { module: m, .. }, .. } if m.as_str() == "list")
             {

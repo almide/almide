@@ -492,6 +492,18 @@ run_structural spec/wasm_cross/witness_straightline.almd total 0
 tamper_structural bang '4s/^im$/i/' "#2755 callback element"
 tamper_structural kept '3s/^im$/i/' "#2755 filtered spine"
 
+# ── #2755: a HEAP `fold` accumulator is a loop-carried owner (born with the
+# seed, replaced by each step's fresh result, the old value released as the
+# activation closes, the final value moving out), and `find`'s hit is a
+# branch where the element's view shares into the fresh some-cell (`{|am}`).
+# Drills: the final accumulator never leaves; the hit takes no credit to move.
+echo
+echo "== structural leg, heap fold + find  ⊳  proven checker (#2755) =="
+run_structural spec/wasm_cross/witness_straightline.almd joined 0
+run_structural spec/wasm_cross/witness_straightline.almd long_one 0
+tamper_structural joined '8s/^im$/i/' "#2755 heap fold accumulator"
+tamper_structural long_one '3s/^{|am}$/{|m}/' "#2755 find hit"
+
 # ── #2755: `r ?? fallback`, a two-arm branch site with an owned join. The
 # borrowed param holds no credit (an empty line); the fresh fallback moves
 # into the join on the none arm (`{|im}`), the payload view takes its share

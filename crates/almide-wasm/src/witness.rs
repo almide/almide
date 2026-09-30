@@ -227,6 +227,14 @@ impl WitnessRecorder {
         &self.conv
     }
 
+    /// #2755: a LOOP-CARRIED owner received at the top of an iteration (a
+    /// heap `list.fold` accumulator): one credit arrives with the block (`i`),
+    /// and the iteration must release it or hand it on before it ends.
+    pub fn carried_owned(&mut self, local: u32) {
+        let o = self.fresh_obj(local, true);
+        self.ops(o, "i");
+    }
+
     /// A droppable param this frame only BORROWS (param_borrow.rs, #2028):
     /// the object is known, no credit of it is held here — a share or a
     /// ret-move on it balances against nothing this frame owns. A pattern

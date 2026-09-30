@@ -493,16 +493,64 @@ impl Emitter<'_> {
     /// of what it was loaded from, like a `for` loop variable. The callback
     /// node itself is the arm's argument, hooked here for the module-call
     /// audit (it never passes `lower_arg`).
-    pub(crate) fn witness_callback_open(&mut self, cb: &almide_ir::IrExpr) {
+    /// `carried`: the local of a heap `list.fold` accumulator, which is not a
+    /// view but a loop-carried OWNER (`witness_fold_step`).
+    pub(crate) fn witness_callback_open(&mut self, cb: &almide_ir::IrExpr, carried: Option<u32>) {
         let Some(w) = self.witness.as_mut() else { return };
         w.note_arg(node(cb));
         w.loop_open();
         let almide_ir::IrExprKind::Lambda { params, .. } = &cb.kind else { return };
         for (var, _) in params {
-            if let Some(&(idx, ty)) = self.locals.get(var) {
+            let Some(&(idx, ty)) = self.locals.get(var) else { continue };
+            if Some(idx) == carried {
+                if self.rc_droppable(ty)
+                    && let Some(w) = self.witness.as_mut()
+                {
+                    w.carried_owned(idx);
+                }
+            } else {
                 self.witness_view_local(idx, ty);
             }
         }
+    }
+
+    /// #2755: `list.find`'s hit (list.rs), recorded right after the callback
+    /// body: a one-arm branch where the element is stored into the fresh
+    /// some-cell — `share_handle_top`, so a handle-typed element's view takes
+    /// a share that moves into the cell (`am`) — and the scan breaks. The
+    /// activation closes after the site; the cell is the arm's owned result.
+    pub(crate) fn witness_find_hit(&mut self, elem_local: u32, elem: SliceTy) {
+        let shares = self.rc_droppable(elem) && self.elem_is_handle(elem);
+        let Some(w) = self.witness.as_mut() else { return };
+        w.branch_open();
+        w.branch_arm();
+        if shares && !w.arg_share_move(elem_local) {
+            w.poison();
+        }
+        w.branch_arm();
+        w.branch_close();
+        w.loop_close();
+    }
+
+    /// #2755: one step of a heap `list.fold` accumulator (list.rs), after the
+    /// share guard: the body's value takes the accumulator's credit on to the
+    /// next iteration (or out of the loop — the fold's result is an owned
+    /// value its consumer records) — an owned value moves (`im`), a Var
+    /// shares and moves (`am`). The release of the block the iteration
+    /// received (the arm's `$dec` before the rebind) is the `d` the recorder
+    /// writes for every owner local bound in a loop body at the iteration's
+    /// end (witness_paths.rs), so it is not logged twice. A droppable
+    /// accumulator that is not a handle takes neither instruction: declined.
+    pub(crate) fn witness_fold_step(&mut self, body: &almide_ir::IrExpr, acc: u32, ty: SliceTy) {
+        if self.witness.is_none() || !self.rc_droppable(ty) {
+            return;
+        }
+        if !self.elem_is_handle(ty) {
+            self.witness_decline("fold-acc:flat");
+            return;
+        }
+        let _ = acc;
+        self.witness_store(body, ty);
     }
 
     /// A loop variable bound from the element it walks (#2757): a view,

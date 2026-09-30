@@ -1,10 +1,12 @@
 //! #2755 / #2758 (#1696 step 4) — INLINED CALLBACKS in the structural
-//! witness. `list.map` / `filter` / `fold` lower a literal lambda's body in
-//! the calling frame, one loop activation per element: each param is a view
-//! of its element, the body's sites are the ordinary hooks, and the arm's use
-//! of the body's value is hooked (`map`'s store into the result spine) or
-//! carries no RC site (`filter`'s Bool, a scalar `fold`). Every other inlining
-//! shape declines by arm name, never certifies.
+//! witness. `list.map` / `filter` / `find` / `any` / `all` / `count` / `fold`
+//! lower a literal lambda's body in the calling frame, one loop activation per
+//! element: each param is a view of its element, the body's sites are the
+//! ordinary hooks, and the arm's use of the body's value is hooked (`map`'s
+//! store into the result spine, `find`'s share into the some-cell, a heap
+//! `fold`'s loop-carried accumulator) or carries no RC site (a Bool
+//! predicate, a scalar `fold`). Every other inlining shape declines by arm
+//! name, never certifies.
 
 const PROGRAM: &str = r#"fn bang(xs: List[String]) -> List[String] = list.map(xs, (s) => s + "!")
 
@@ -18,11 +20,18 @@ fn joined(xs: List[String]) -> String = list.fold(xs, "", (acc, s) => acc + s)
 
 fn fused(xs: List[String]) -> Int = list.fold(list.map(xs, (s) => string.len(s)), 0, (a, n) => a + n)
 
-fn first(xs: List[String]) -> String = list.find(xs, (s) => string.len(s) > 1) ?? ""
+fn first(xs: List[String]) -> String? = list.find(xs, (s) => string.len(s) > 1)
+
+fn any_long(xs: List[String]) -> Bool = list.any(xs, (s) => string.len(s) > 1)
+
+fn every(xs: List[String]) -> Bool = list.all(xs, (s) => string.len(s) > 1)
+
+fn many(xs: List[String]) -> Int = list.count(xs, (s) => string.len(s) > 1)
 
 effect fn main() -> Unit = {
   let xs = ["a", "bc"]
-  println("${bang(xs)} ${same(xs)} ${kept(xs)} ${total(xs)} ${joined(xs)} ${fused(xs)} ${first(xs)}")
+  println("${bang(xs)} ${same(xs)} ${kept(xs)} ${total(xs)} ${joined(xs)} ${fused(xs)} ${first(xs) ?? ""}")
+  println("${any_long(xs)} ${every(xs)} ${many(xs)}")
 }
 "#;
 
@@ -41,7 +50,7 @@ fn accepted(cert: &str) -> bool {
 fn inlined_callbacks_witness_per_element_and_other_shapes_decline() {
     // ONE test: the witness sink is process-global.
     let w = witnesses();
-    for name in ["bang", "same", "kept", "total"] {
+    for name in ["bang", "same", "kept", "total", "joined", "first", "any_long", "every", "many"] {
         let got = w.get(name).unwrap_or_else(|| panic!("{name} must be witnessed"));
         assert!(!got.starts_with('!'), "{name}: {got:?}");
         assert!(accepted(got), "{name}: the portable checker must accept {got:?}");
@@ -52,10 +61,14 @@ fn inlined_callbacks_witness_per_element_and_other_shapes_decline() {
     // A pass-through body hands back the view: the spine takes its share
     // and moves it in (`am` on the element's view line).
     assert!(w["same"].contains("am\n"), "{:?}", w["same"]);
-    // A heap accumulator is a loop-carried owner; a fold over a list call
-    // takes the fused lowering; any other inlining arm declines by name.
+    // A heap accumulator is a loop-carried owner: born with the seed, the
+    // step's fresh result replaces it (the old value's `d` closes each
+    // activation), and the final value moves out.
+    assert_eq!(w["joined"], "id\nim\n\nid\n\n\nim\nim\n");
+    // `find`'s hit is a branch: the element's view shares into the fresh
+    // some-cell (`am`), the other arm carries nothing.
+    assert!(w["first"].contains("{|am}\n"), "{:?}", w["first"]);
+    // A fold over a list call takes the fused lowering and declines by name.
     let declined = |n: &str| w.get(n).map(String::as_str).unwrap_or("<none>").to_string();
-    assert_eq!(declined("joined"), "!decline:call-arg:Lambda:list.fold:heap-acc\n");
     assert_eq!(declined("fused"), "!decline:call-arg:Lambda:list.fold:fused\n");
-    assert_eq!(declined("first"), "!decline:call-arg:Lambda:list.find\n");
 }
