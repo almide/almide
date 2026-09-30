@@ -162,6 +162,7 @@ mod cow_hoist;
 mod stmts;
 mod stmts_index;
 mod stmts_append;
+mod writeback_move;
 mod tail_append;
 mod string_ext;
 pub(crate) mod work;

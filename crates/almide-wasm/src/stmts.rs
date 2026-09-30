@@ -36,9 +36,7 @@ impl Emitter<'_> {
         }
         match &e.kind {
             IrExprKind::Block { stmts, expr } => {
-                for s in stmts {
-                    self.lower_stmt(s)?;
-                }
+                self.lower_block_stmts(stmts, expr.as_deref())?;
                 if let Some(tail) = expr {
                     self.lower_stmt_expr(tail)?;
                 }
@@ -613,6 +611,7 @@ impl Emitter<'_> {
     /// growing-accumulator window, split from `lower_stmt` for the
     /// complexity budget.
     fn lower_assign(&mut self, var: &almide_ir::VarId, value: &IrExpr) -> Result<(), EmitError> {
+                let moved = self.take_moved_temp(value);
                 if self.try_str_append_assign(var, value)? {
                     return Ok(());
                 }
@@ -641,8 +640,9 @@ impl Emitter<'_> {
                 // and the exit validator (E083) checks it; the refusal is
                 // retired (stage 2c-ii: records made the mut_port cell hit it).
                 self.lower(value, Some(declared))?;
-                // RC-5: same share discipline as Bind.
-                if self.rc_droppable(declared) && !self.rc_owned_result(value) {
+                // RC-5: same share discipline as Bind — except a MOVED
+                // temp (#3104), whose one credit becomes the var's.
+                if self.rc_droppable(declared) && !self.rc_owned_result(value) && moved.is_none() {
                     self.rc_inc_top();
                 }
                 // RC-3: same ownership settlement as Bind — here for locals
@@ -668,9 +668,10 @@ impl Emitter<'_> {
                 // The witness (#2757): a droppable local's occupant changes
                 // here; a global or a cell is not a frame local's to record.
                 match local {
-                    Some(idx) if self.rc_droppable(declared) && !self.cells.contains(var) => {
-                        self.witness_assign(idx, !rhs_spends_var, rhs_spends_var, value);
-                    }
+                    Some(idx) if self.rc_droppable(declared) && !self.cells.contains(var) => match moved {
+                        Some(src) => self.witness_transfer(idx, !rhs_spends_var, src),
+                        None => self.witness_assign(idx, !rhs_spends_var, rhs_spends_var, value),
+                    },
                     Some(_) if !self.rc_droppable(declared) => {}
                     _ => self.witness_decline("assign:global-or-cell"),
                 }
@@ -704,6 +705,7 @@ impl Emitter<'_> {
                         self.f.instructions().global_set(gidx);
                     }
                 }
+                self.empty_moved_temp(moved);
                 Ok(())
     }
 }
@@ -780,12 +782,17 @@ impl Emitter<'_> {
         path: &[almide_base::intern::Sym],
         value: &IrExpr,
     ) -> Result<(), EmitError> {
+        let moved = self.take_moved_temp(value);
         let spends_var = self.assign_rhs_spends_var(value, *target);
         self.field_assign_with(target, path, spends_var, |s, fty| {
             s.lower(value, Some(fty))?;
-            s.rc_share_guard(value, fty);
+            if moved.is_none() {
+                s.rc_share_guard(value, fty);
+            }
             Ok(())
-        })
+        })?;
+        self.empty_moved_temp(moved);
+        Ok(())
     }
 }
 
