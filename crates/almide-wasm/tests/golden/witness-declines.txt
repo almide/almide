@@ -63,7 +63,7 @@ heap-operand:OptionNone	2
 heap-operand:UnwrapOr	5
 interp-part:IndexAccess:non-list	2
 interp-part:UnwrapOr-carrier:Member	1
-loop-carried-assign	29
+loop-carried-assign	30
 loop-exit	5
 main-err-carrier	2
 match-guard	18

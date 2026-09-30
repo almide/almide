@@ -16,6 +16,7 @@
 65968	spec/wasm_cross/assert_abort_multiline.almd
 65904	spec/wasm_cross/assert_abort_ne.almd
 65872	spec/wasm_cross/assign_alias_rc.almd
+66784	spec/wasm_cross/assign_nested_call_release.almd
 224688	spec/wasm_cross/assign_self_call_release.almd
 66144	spec/wasm_cross/autotry_construction.almd
 65872	spec/wasm_cross/autotry_result_first_arg.almd
