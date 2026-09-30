@@ -520,6 +520,27 @@ fn match_head_subset(subject: &IrExpr, arms: &[almide_ir::IrMatchArm]) -> Option
     if let Some(w) = value_subset(subject) {
         return Some(w.at("match-subject"));
     }
+    // A subject the match BUILDS (`match (1, (4, 5), 3)`, `match some(7)`)
+    // is a fresh block no hook records and nothing released (#2971: three
+    // fixtures certified every frame and still ended with it live).
+    // arg_temps.rs names it first, so the site reads a local; one that
+    // reaches here unnamed declines rather than certifies.
+    let core = crate::rc_ownership::rc_tail(subject);
+    let builds = matches!(
+        core.kind,
+        IrExprKind::Tuple { .. }
+            | IrExprKind::Record { .. }
+            | IrExprKind::SpreadRecord { .. }
+            | IrExprKind::OptionSome { .. }
+            | IrExprKind::ResultOk { .. }
+            | IrExprKind::ResultErr { .. }
+            | IrExprKind::List { .. }
+            | IrExprKind::MapLiteral { .. }
+            | IrExprKind::StringInterp { .. }
+    );
+    if builds && crate::arg_temps::bindable_ty(&core.ty) {
+        return Some("match-subject:fresh".into());
+    }
     for a in arms {
         if pattern_has_named_rest(&a.pattern) {
             return Some("pattern:list-rest".into());
