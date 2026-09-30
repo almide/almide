@@ -297,24 +297,20 @@ pub fn desugar_method_calls(
     }
 
     /// The free-fn name a surviving Method resolves to: a pre-dotted method
-    /// (`Pigment.decode` via `varlib.Pigment.decode`) through the
-    /// derived-method owner map (#790 codec bridge); a `Ty::Named(T)` receiver
-    /// → the derived/user fn `T.method`; a non-Named, non-record receiver
+    /// (`Pigment.decode`) as spelled; a `Ty::Named(T)` receiver → the
+    /// derived/user fn `T.method`; a non-Named, non-record receiver
     /// (`3.double()`, `"hello".exclaim()`) is plain free-fn UFCS — `x.f(a)` =
     /// `f(x, a)` (the checker already resolved stdlib UFCS to Module calls).
+    /// (#3000: the cross-module derived-method owner map this consulted was
+    /// filled only by a deleted incumbent pass, so it answered "unchanged" on
+    /// every path; the fold keeps that answer.)
     fn resolved_free_fn_name(target: &CallTarget) -> Option<String> {
         let CallTarget::Method { object, method } = target else { return None };
         if method.as_str().contains('.') {
-            return Some(crate::lower::resolve_derived_method_owner(
-                method.as_str().to_string(),
-            ));
+            return Some(method.as_str().to_string());
         }
         if let Ty::Named(n, _) = &object.ty {
-            return Some(crate::lower::resolve_derived_method_owner(format!(
-                "{}.{}",
-                n.as_str(),
-                method.as_str()
-            )));
+            return Some(format!("{}.{}", n.as_str(), method.as_str()));
         }
         Some(method.as_str().to_string())
     }
