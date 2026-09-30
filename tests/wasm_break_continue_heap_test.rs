@@ -211,7 +211,9 @@ fn break_and_continue_over_heap_locals_match_native_on_the_structural_leg_withou
 /// walls (so they live here, not in spec/wasm_cross/guard_jump_in_value_fn.almd):
 /// nested loops where the inner guard jumps the inner loop and the outer guard
 /// the outer one, a `!` in a `while` body of an effect fn returning a Result,
-/// and a guard in a match arm. Each keeps a heap local live across the jump.
+/// a guard in a match arm, and (#3115) a guard else BLOCK that runs statements
+/// before its `break` or ends in `err(..)!`. Each keeps a heap local live
+/// across the jump.
 const VALUE_FN_PROGRAM: &str = r#"fn nested_for(m: Int) -> Int = {
   var n = 0
   for i in 0..<m {
@@ -276,15 +278,49 @@ fn in_match_arm(xs: List[Int?]) -> Int = {
   n
 }
 
+fn stop_block(xs: List[Int]) -> Int = {
+  var n = 0
+  for x in xs {
+    let tag = "x" + int.to_string(x)
+    guard x != 9 else {
+      println("stop " + tag)
+      break
+    }
+    n = n + x
+  }
+  n
+}
+
+effect fn eff_block(xs: List[Int]) -> Result[Int, String] = {
+  var n = 0
+  for x in xs {
+    let tag = "x" + int.to_string(x)
+    guard x >= 0 else {
+      println("neg " + tag)
+      err("negative " + tag)!
+    }
+    guard x != 0 else {
+      println("zero")
+      continue
+    }
+    n = n + x
+  }
+  ok(n)
+}
+
 effect fn main() -> Unit = {
   println(int.to_string(nested_for(5)))
   println(nested_while(4))
   println(parse_until_negative(["1", "", "2", "-1", "5"])! |> list.map((v) => int.to_string(v)) |> list.join(","))
   println(int.to_string(in_match_arm([some(1), some(-2), some(3), none, some(9)])))
+  println(int.to_string(stop_block([1, 2, 9, 4])))
+  println(int.to_string(eff_block([0, 1, 2])!))
+  println(int.to_string(eff_block([3, -1, 2]) ?? -100))
 }
 "#;
 
-const VALUE_FN_EXPECTED: &str = "10\n11 13 14 21 23 \n1,2\n4\n";
+const VALUE_FN_EXPECTED: &str =
+    "10\n11 13 14 21 23 \n1,2\n4\nstop x9\n3\nzero\n3\nneg x-1\n-100\n";
 
 #[test]
 fn guard_jumps_in_value_returning_fns_match_native_on_the_structural_leg_without_leaking() {
