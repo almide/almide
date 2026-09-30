@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at 941941c5d — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at ae98618d8 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -940,7 +940,7 @@ b63a0033a798fc23436fba1f3e114b0df5d5b15a2af88eb36ac48fc37b6aa97c	spec/wasm_cross
 00c47792808644ad08c30a2002a189c717b522a778c5cd738f7108a167febe07	spec/wasm_cross/grouping_unary.almd
 f400f0f0f8d148d284ac8edf067f5854ae9958de9d02e7865554171d84ad51ee	spec/wasm_cross/guard_else_exit_code.almd
 8946c809cf49d2cf6c39b8cf1b2ead351451bb525bb18467cfe3ad0befa66099	spec/wasm_cross/guard_err_in_call_arg_block.almd
-7845e9dc48448a5bc45331ef13319f6fe4e184a0ee954a2c5a91417cd28db853	spec/wasm_cross/guard_jump_in_value_fn.almd
+f892853835fd90b7cfc7ee0be11133beae822b2dcbf60c7a0bb839037db54d6f	spec/wasm_cross/guard_jump_in_value_fn.almd
 cdbf0ab83402598bf2e138e6a0535dee3deff990720301b8b942446dc055f9a0	spec/wasm_cross/guard_let_statement.almd
 817e49d1fd04178e79ac01ddbfd71fdf5123448a1f200f5b85c8ac69aff612cd	spec/wasm_cross/guard_statement.almd
 ef929b9c03f7eeb6c5365dd34bfc76128640c101987f7c7cab0e1f6980e112d9	spec/wasm_cross/guard_value_exit_in_loop.almd

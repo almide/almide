@@ -273,7 +273,7 @@
 17	12	218	17	spec/wasm_cross/grain_string_escapes.almd
 1	0	4	1	spec/wasm_cross/grouping_unary.almd
 28	20	266	28	spec/wasm_cross/guard_err_in_call_arg_block.almd
-70	56	638	70	spec/wasm_cross/guard_jump_in_value_fn.almd
+44	32	429	44	spec/wasm_cross/guard_jump_in_value_fn.almd
 7	3	69	7	spec/wasm_cross/guard_let_statement.almd
 3	0	34	3	spec/wasm_cross/guard_statement.almd
 25	10	389	25	spec/wasm_cross/guard_value_exit_in_loop.almd

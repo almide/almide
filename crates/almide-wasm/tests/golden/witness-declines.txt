@@ -121,7 +121,7 @@ payload:Member	8
 payload:UnwrapOr	2
 rhs:EmptyMap	5
 rhs:Fan	4
-rhs:IndexAccess	10
+rhs:IndexAccess	9
 rhs:MapAccess	5
 rhs:MapLiteral	16
 rhs:Member	5
