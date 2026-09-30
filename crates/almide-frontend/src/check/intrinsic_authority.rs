@@ -93,7 +93,7 @@ impl Checker {
         let at = span.map(|s| (s.line, s.col));
         if at.is_some()
             && self.diagnostics.iter().any(|d| {
-                d.code.as_deref() == Some("E085") && d.line.zip(d.col) == at
+                d.code == Some("E085") && d.line.zip(d.col) == at
             })
         {
             return;
