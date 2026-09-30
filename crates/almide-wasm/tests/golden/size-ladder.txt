@@ -3,7 +3,7 @@
 # shipped<TAB>rung<TAB>program; the last row is the ladder's total.
 1330	T0 nothing	research/benchmark/perf/wasm-size/hello.almd
 1499	T1 Int print	research/benchmark/perf/wasm-size/fibonacci.almd
-7606	T1 Int print	research/benchmark/perf/binarytrees/binarytrees.almd
+7693	T1 Int print	research/benchmark/perf/binarytrees/binarytrees.almd
 9957	T2 Float print	research/benchmark/perf/spectralnorm/spectralnorm.almd
 7256	T3 String	research/benchmark/perf/strchurn/strchurn.almd
 6587	T3 String	research/benchmark/perf/strbuild/strbuild_append.almd
@@ -12,7 +12,7 @@
 9294	T5 Map	research/benchmark/perf/mapbuild/mapbuild.almd
 11400	T5 Map	research/benchmark/perf/wordfreq/wordfreq.almd
 11423	T5 Map	research/benchmark/perf/wordfreq/wordfreq_group.almd
-31934	T6 JSON	research/benchmark/perf/decode/decode.almd
+31949	T6 JSON	research/benchmark/perf/decode/decode.almd
 26835	T6 JSON	spec/wasm_cross/json_gltf_walk.almd
 20111	T7 regex	spec/wasm_cross/regex_engine.almd
-184074	Σ	total
+184176	Σ	total
