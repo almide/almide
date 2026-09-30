@@ -424,6 +424,7 @@ impl Checker {
     ) -> Option<Ty> {
         if let ExprKind::Ident { name: mod_name, .. } = &object.kind {
             self.reject_dead_try_spelling(mod_name, field, object.id, object.span, None);
+            self.reject_user_prim(mod_name, field, object.span);
             if let Some(sig) = crate::stdlib::lookup_sig(mod_name, field) {
                 self.type_map.insert(object.id, Ty::Unit); // placeholder; object isn't evaluated
                 return Some(self.fn_value_ty(&sig));

@@ -38,6 +38,10 @@ pub const BUNDLED_MODULES: &[&str] = &[
 /// reads ONE list. The formatter used to carry its own eleven-name copy
 /// "matching types/env.rs", a file that no longer existed; the copy lacked
 /// `prim`.
+///
+/// `prim` is here so every STDLIB source reaches its floor without an import;
+/// it is not user surface (#3025) — the checker refuses a `prim.*` reference
+/// from any other source with E085 (`check/intrinsic_authority.rs`).
 pub const TIER1_ALWAYS_ACCESSIBLE: &[&str] = &[
     "string", "int", "float", "list", "bytes", "matrix",
     "map", "set", "option", "result", "value", "prim",

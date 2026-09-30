@@ -83,6 +83,7 @@ impl Checker {
         self.validate_protocol_refs(prog);
         self.validate_bare_type_visibility(prog);
         self.body_diag_start = self.diagnostics.len();
+        self.reject_user_prim_import(&prog.imports);
         for decl in prog.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();
