@@ -41,8 +41,9 @@ const LEDGERED: &[(&str, &str)] = &[
     ("md2html.almd", "reads stdin"),
     (
         "minesweeper.almd",
-        "stdin game; wasm leg honestly walls (auto-? nested in a loop — the \
-         effect-unwrap desugar's reach, see tests/nested_effect_unwrap_test.rs)",
+        "stdin game with time-seeded random mines: a whole game cannot \
+         byte-compare; its mine-free scripted prefix does, in \
+         minesweeper_builds_on_wasm_and_its_scripted_prefix_matches_native",
     ),
     ("todo-api.almd", "network (HTTP server)"),
     ("typed-api-client.almd", "network (HTTP)"),
@@ -226,4 +227,72 @@ fn the_llm_examples_check_against_the_real_almai() {
         "llm examples that no longer check against the pinned almai:\n{}",
         broken.join("\n")
     );
+}
+
+/// Minesweeper fell between the two wasm legs for months: the structural leg
+/// walled its `guard … else continue` in a value-returning fn (#3113) and the
+/// incumbent refused its main loop, so `build --target wasm` said E082. The
+/// board is placed by `random` on the first reveal, so a whole game never
+/// byte-compares; everything before the first reveal does — flags, unflags,
+/// rejected input — and so does the EOF loop after the script (`io.read_line`
+/// answers "" and the game keeps asking). Both builds run the same script and
+/// the first `PREFIX` bytes of stdout must be identical. The programs never
+/// exit on their own, so each is killed once its prefix is read.
+#[test]
+fn minesweeper_builds_on_wasm_and_its_scripted_prefix_matches_native() {
+    use std::io::{Read, Write};
+    const SCRIPT: &str = "f 1,1\nf 2,2\nf 1,1\nnonsense\n9,9\nf 8,0\n1,x\n";
+    const PREFIX: usize = 8000;
+    if !wasmtime_available() {
+        eprintln!("SKIP minesweeper wasm prefix: no `wasmtime` on PATH");
+        return;
+    }
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("minesweeper_prefix");
+    std::fs::create_dir_all(&dir).expect("tmp dir");
+    let native = dir.join("minesweeper");
+    let wasm = dir.join("minesweeper.wasm");
+    for (out, wasm_target) in [(&native, false), (&wasm, true)] {
+        let mut args = vec!["build", "examples/minesweeper.almd", "-o", out.to_str().unwrap()];
+        if wasm_target {
+            args.extend(["--target", "wasm"]);
+        }
+        let o = Command::new(almide()).args(&args).current_dir(repo_root()).output().expect("almide build");
+        assert!(
+            o.status.success(),
+            "minesweeper.almd no longer builds (wasm: {wasm_target}):\n{}{}",
+            String::from_utf8_lossy(&o.stdout),
+            String::from_utf8_lossy(&o.stderr)
+        );
+    }
+    let prefix = |mut cmd: Command| -> Vec<u8> {
+        let mut child = cmd
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn minesweeper");
+        child.stdin.take().unwrap().write_all(SCRIPT.as_bytes()).expect("write script");
+        let mut buf = vec![0u8; PREFIX];
+        child.stdout.take().unwrap().read_exact(&mut buf).expect("read the prefix");
+        let _ = child.kill();
+        let _ = child.wait();
+        buf
+    };
+    let n = prefix(Command::new(&native));
+    let mut w = Command::new("wasmtime");
+    w.arg(&wasm);
+    let w = prefix(w);
+    assert!(
+        String::from_utf8_lossy(&n).contains("Invalid input"),
+        "the script no longer reaches the rejected-input path; re-read the prefix"
+    );
+    if n != w {
+        let at = n.iter().zip(&w).position(|(a, b)| a != b).unwrap_or(PREFIX);
+        panic!(
+            "minesweeper: native and wasm stdout diverge at byte {at} of the scripted prefix\n\
+             native: {:?}\nwasm:   {:?}",
+            String::from_utf8_lossy(&n[at.saturating_sub(80)..(at + 80).min(PREFIX)]),
+            String::from_utf8_lossy(&w[at.saturating_sub(80)..(at + 80).min(PREFIX)])
+        );
+    }
 }
