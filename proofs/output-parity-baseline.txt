@@ -475,6 +475,7 @@ spec/wasm_cross/list_of_tuples_equality.almd
 spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 spec/wasm_cross/list_product_overflow.almd
 spec/wasm_cross/list_push_on_record_field.almd
+spec/wasm_cross/list_reduce_fused_fold_release.almd
 spec/wasm_cross/list_remove_at_oob.almd
 spec/wasm_cross/list_repeat_size_ceiling.almd
 spec/wasm_cross/list_rest_pattern.almd
