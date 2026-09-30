@@ -355,9 +355,16 @@ fn collect_binds_data_b(
             collect_binds(body, out, seen, types)
         }
         IrExprKind::Call { target, args, .. } => {
-            // A computed callee can carry binds too: `(stored(dbl)).f(4)`
+            // A projected callee can carry binds too: `(stored(dbl)).f(4)`
             // names the record it reads the callable out of (arg_temps.rs).
-            if let almide_ir::CallTarget::Computed { callee } = target {
+            // Only that shape is walked — a lambda or call callee keeps the
+            // locals it had (its params live in the lifted frame).
+            if let almide_ir::CallTarget::Computed { callee } = target
+                && matches!(
+                    callee.kind,
+                    IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } | IrExprKind::Block { .. }
+                )
+            {
                 collect_binds(callee, out, seen, types)?;
             }
             for a in args {
