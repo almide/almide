@@ -477,6 +477,14 @@ impl Checker {
         let body_ity = self.infer_expr(body);
         self.current_fn = prev_fn;
         self.check_return_width(name, &ret_ty, &body_ity, body, is_effect);
+        // #3060: the declared return narrows the tail's literals in lowering,
+        // so they face its range check here (`-> Int8 = 300` is E024, not a
+        // rustc rejection). An effect body may also yield its lifted carrier;
+        // that walk goes first so a bare leaf's last pin is the raw return.
+        if is_effect && !ret_ty.is_result() {
+            self.record_int_literal_context(body, &Ty::result(ret_ty.clone(), Ty::String));
+        }
+        self.record_int_literal_context(body, &ret_ty);
         // #2927: the body-vs-return mismatch is reported at the value that
         // fixed the body's type (a block's tail, the anchoring arm), not at
         // wherever inference happened to end — the last arm's last leaf.

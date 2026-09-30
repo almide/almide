@@ -393,6 +393,27 @@ impl Checker {
                 self.record_int_literal_context(tail, declared);
                 return;
             }
+            // #3060: carrier payloads and a lambda body narrow in lowering
+            // against the declared slot, so they face its range check here.
+            ExprKind::Some { expr } | ExprKind::Ok { expr } | ExprKind::Err { expr } => {
+                use almide_lang::types::constructor::TypeConstructorId as TC;
+                let slot = match (&value.kind, declared) {
+                    (ExprKind::Some { .. }, Ty::Applied(TC::Option, a)) if a.len() == 1 => a.first(),
+                    (ExprKind::Ok { .. }, Ty::Applied(TC::Result, a)) if a.len() == 2 => a.first(),
+                    (ExprKind::Err { .. }, Ty::Applied(TC::Result, a)) if a.len() == 2 => a.get(1),
+                    _ => None,
+                };
+                if let Some(slot) = slot.cloned() {
+                    self.record_int_literal_context(expr, &slot);
+                }
+                return;
+            }
+            ExprKind::Lambda { body, .. } => {
+                if let Ty::Fn { ret, is_effect: false, .. } = declared {
+                    self.record_int_literal_context(body, ret);
+                }
+                return;
+            }
             ExprKind::MapLiteral { entries } => {
                 use almide_lang::types::constructor::TypeConstructorId as TC;
                 if let Ty::Applied(TC::Map, args) = declared {

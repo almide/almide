@@ -326,7 +326,79 @@ pub(crate) fn coerce_literal_to_sized(ir_val: &mut IrExpr, declared: &Ty, env: &
         // field value against its declared field type, matched by name.
         Ty::Record { fields: decl_fields } | Ty::OpenRecord { fields: decl_fields } =>
             coerce_record_fields(ir_val, decl_fields, env),
+        // #3060: a `some(..)` / `ok(..)` / `err(..)` payload and a lambda body
+        // are value positions of the slot's inner type, and the node's own
+        // type is what codegen spells (`Some::<i64>`, `Ok::<i64, String>`,
+        // `dyn Fn(i64) -> i64`) — both are narrowed together.
+        Ty::Applied(TypeConstructorId::Option, _) | Ty::Applied(TypeConstructorId::Result, _) =>
+            coerce_carrier_payload(ir_val, declared, env),
+        Ty::Fn { ret, is_effect: false, .. } => coerce_lambda_body(ir_val, ret, env),
         _ => {}
+    }
+}
+
+/// Whether `inner` is the default numeric type a literal of the sized `slot`
+/// starts at (`Int` for the integer widths, `Float` for `Float32`) — or not
+/// yet known — so a carrier or fn type built around it may take the slot.
+fn is_default_width_of(inner: &Ty, slot: &Ty) -> bool {
+    let default = match slot {
+        Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 => Ty::Int,
+        Ty::Float32 => Ty::Float,
+        _ => return inner == slot,
+    };
+    *inner == default || *inner == *slot || matches!(inner, Ty::Unknown | Ty::TypeVar(_))
+}
+
+/// Narrow an Option / Result constructor against its declared carrier: the
+/// payload coerces against its slot, and the node takes the declared type when
+/// every argument it holds is that slot's default width (`none` included).
+fn coerce_carrier_payload(ir_val: &mut IrExpr, declared: &Ty, env: &TypeEnv) {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let Ty::Applied(ctor, slots) = declared else { return };
+    let payload_slot = match (&mut ir_val.kind, ctor, slots.as_slice()) {
+        (IrExprKind::OptionSome { expr }, TypeConstructorId::Option, [t])
+        | (IrExprKind::ResultOk { expr }, TypeConstructorId::Result, [t, _])
+        | (IrExprKind::ResultErr { expr }, TypeConstructorId::Result, [_, t]) => {
+            coerce_literal_to_sized(expr, t, env);
+            Some((expr.ty.clone(), t.clone()))
+        }
+        (IrExprKind::OptionNone, TypeConstructorId::Option, [_]) => None,
+        _ => return,
+    };
+    if payload_slot.is_some_and(|(have, want)| have != want) {
+        return;
+    }
+    if let Ty::Applied(own, args) = &ir_val.ty
+        && own == ctor
+        && args.len() == slots.len()
+        && args.iter().zip(slots).all(|(a, s)| is_default_width_of(a, s))
+    {
+        ir_val.ty = declared.clone();
+    }
+}
+
+/// Narrow a pure lambda's body against the declared fn type's return, and
+/// the lambda's own fn type with it (codegen casts the closure to it).
+fn coerce_lambda_body(ir_val: &mut IrExpr, ret: &Ty, env: &TypeEnv) {
+    let IrExprKind::Lambda { body, .. } = &mut ir_val.kind else { return };
+    coerce_literal_to_sized(body, ret, env);
+    if let Ty::Fn { ret: own, .. } = &mut ir_val.ty
+        && **own != *ret
+        && is_default_width_of(own, ret)
+        && coerced_width(body) == Some(ret)
+    {
+        **own = ret.clone();
+    }
+}
+
+/// The width a coerced value now yields: its own type, or — for a branch
+/// whose node type keeps the peer join — the width its first arm settled on.
+fn coerced_width(e: &IrExpr) -> Option<&Ty> {
+    match &e.kind {
+        IrExprKind::Block { expr: Some(tail), .. } => coerced_width(tail),
+        IrExprKind::If { then, .. } => coerced_width(then),
+        IrExprKind::Match { arms, .. } => arms.first().and_then(|a| coerced_width(&a.body)),
+        _ => Some(&e.ty),
     }
 }
 
