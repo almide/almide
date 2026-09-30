@@ -22,10 +22,9 @@ fn push_mut(mut xs: List[Int], v: Int) -> Unit = {
   list.push(xs, v)
 }
 
-fn apply_all(fs: List[() -> Unit]) -> Unit = {
-  for f in fs {
-    f()
-  }
+fn run_twice(f: () -> Unit) -> Unit = {
+  f()
+  f()
 }
 
 effect fn main() -> Unit = {
@@ -74,7 +73,10 @@ effect fn main() -> Unit = {
   nested()
   println("3 ${h.xs} ${h.inner.ys}")
   // handed to a HOF, and mapped over
-  apply_all([push_once, bump, str_once])
+  run_twice(push_once)
+  for f in [bump, str_once] {
+    f()
+  }
   let lens = [1, 2, 3] |> list.map((k) => {
     list.push(h.inner.ys, k)
     list.len(h.inner.ys)
