@@ -40,6 +40,7 @@ fn hoist_at(p: HoistPair, i: Int) -> Int = list.get(p.xs, i) ?? 0
 fn hoist_swap_fields(mut p: HoistPair, mode: Int) -> Unit = {
   if mode == 0 then hoist_assign(p, p.b, p.a)
   else if mode == 1 then hoist_assign(p, 0, 0)
+  else ()
   p.done = true
 }
 
