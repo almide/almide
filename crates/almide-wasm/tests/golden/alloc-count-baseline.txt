@@ -515,6 +515,7 @@
 15	8	169	15	spec/wasm_cross/mutable_global_bytes_arena.almd
 5	1	36	5	spec/wasm_cross/mutable_global_bytes_copy_from.almd
 52	34	704	52	spec/wasm_cross/mutable_global_field_mut_arg.almd
+23	11	540	23	spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd
 4	1	32	4	spec/wasm_cross/mutable_global_repeat_writes.almd
 1	0	16	1	spec/wasm_cross/mutable_global_scalar_assign.almd
 160	100	1447	160	spec/wasm_cross/mutator_writeback_releases_old_block.almd

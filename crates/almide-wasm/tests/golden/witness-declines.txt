@@ -57,11 +57,11 @@ call-arg:Lambda:result.map_err	2
 call-arg:Lambda:result.unwrap_or_else	4
 call-arg:Lambda:set.filter	3
 call-arg:MapLiteral	1
-call-arg:Member	91
+call-arg:Member	94
 call-arg:Range	1
 call-arg:TupleIndex	8
 call-arg:UnwrapOr	84
-call-arg:borrowed-temp	2
+call-arg:borrowed-temp	3
 call:panic-arg	1
 callback:Member	3
 callback:UnwrapOr	2
@@ -77,7 +77,7 @@ field:Member	1
 forin-map	4
 heap-interp-part:Block	4
 heap-interp-part:IndexAccess	2
-heap-interp-part:Member	13
+heap-interp-part:Member	15
 heap-interp-part:UnwrapOr	4
 heap-operand:Block	1
 heap-operand:IndexAccess	2
@@ -105,7 +105,7 @@ module-arm:unaudited:bytes.set_u8	4
 module-arm:unaudited:fan.any	4
 module-arm:unaudited:list.clear	2
 module-arm:unaudited:list.pop	2
-module-arm:unaudited:list.push	133
+module-arm:unaudited:list.push	136
 module-arm:unaudited:map.clear	3
 module-arm:unaudited:map.insert	2
 module-arm:unaudited:string.clear	3
@@ -132,7 +132,7 @@ rhs:ToOption	5
 rhs:Unwrap	14
 rhs:UnwrapOr	77
 scan	3
-stmt:FieldAssign	13
+stmt:FieldAssign	14
 stmt:Guard	36
 stmt:IndexAssign	24
 stmt:MapInsert	5
