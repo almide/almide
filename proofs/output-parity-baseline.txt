@@ -358,6 +358,7 @@ spec/wasm_cross/guard_else_exit_code.almd
 spec/wasm_cross/guard_err_in_call_arg_block.almd
 spec/wasm_cross/guard_let_statement.almd
 spec/wasm_cross/guard_statement.almd
+spec/wasm_cross/guard_value_exit_in_loop.almd
 spec/wasm_cross/gzip_inflate_members.almd
 spec/wasm_cross/hash_digests.almd
 spec/wasm_cross/heap_arena.almd
@@ -462,6 +463,7 @@ spec/wasm_cross/list_flatten_borrow.almd
 spec/wasm_cross/list_float_equality_family.almd
 spec/wasm_cross/list_float_total_order.almd
 spec/wasm_cross/list_fold_fused_callback_result_ownership.almd
+spec/wasm_cross/list_heap_ops_release_temporaries.almd
 spec/wasm_cross/list_heap_tuple_return.almd
 spec/wasm_cross/list_heapelem_rc.almd
 spec/wasm_cross/list_index_element_append.almd
@@ -475,6 +477,7 @@ spec/wasm_cross/list_of_tuples_equality.almd
 spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 spec/wasm_cross/list_product_overflow.almd
 spec/wasm_cross/list_push_on_record_field.almd
+spec/wasm_cross/list_reduce_fused_fold_release.almd
 spec/wasm_cross/list_remove_at_oob.almd
 spec/wasm_cross/list_repeat_size_ceiling.almd
 spec/wasm_cross/list_rest_pattern.almd
@@ -591,6 +594,7 @@ spec/wasm_cross/mutable_global_bytes_copy_from.almd
 spec/wasm_cross/mutable_global_field_mut_arg.almd
 spec/wasm_cross/mutable_global_repeat_writes.almd
 spec/wasm_cross/mutable_global_scalar_assign.almd
+spec/wasm_cross/mutator_writeback_releases_old_block.almd
 spec/wasm_cross/mutual_append.almd
 spec/wasm_cross/mutual_recursive_types.almd
 spec/wasm_cross/mutual_tail_recursion.almd
@@ -698,6 +702,7 @@ spec/wasm_cross/ref_roc_trmc_control.almd
 spec/wasm_cross/ref_rust_or_pattern_guard_count.almd
 spec/wasm_cross/ref_rust_or_pattern_guard_retry.almd
 spec/wasm_cross/ref_rust_or_pattern_heap_subject.almd
+spec/wasm_cross/regex_captures_accumulator_release.almd
 spec/wasm_cross/regex_engine.almd
 spec/wasm_cross/regex_fuzz_batch.almd
 spec/wasm_cross/regex_repetition_depth.almd
@@ -742,6 +747,7 @@ spec/wasm_cross/sort_by_str_key_heap.almd
 spec/wasm_cross/split_empty_sep.almd
 spec/wasm_cross/spread_record_share.almd
 spec/wasm_cross/sql_highlight_tokens.almd
+spec/wasm_cross/stdlib_call_temporaries_release.almd
 spec/wasm_cross/stdlib_opaque_shadow.almd
 spec/wasm_cross/stdlib_type_shadow.almd
 spec/wasm_cross/str_result_heap_bind.almd
@@ -893,6 +899,7 @@ spec/wasm_cross/value_array_tuple_tco.almd
 spec/wasm_cross/value_as_array_leak_loop.almd
 spec/wasm_cross/value_as_array_roundtrip.almd
 spec/wasm_cross/value_borrowed_constructors.almd
+spec/wasm_cross/value_codec_matrix_temporaries_release.almd
 spec/wasm_cross/value_deep_eq.almd
 spec/wasm_cross/value_domain_arith.almd
 spec/wasm_cross/value_eq.almd
