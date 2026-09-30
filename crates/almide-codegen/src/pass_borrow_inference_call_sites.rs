@@ -350,7 +350,11 @@ fn hoist_one_arg(arg: IrExpr, hoisted: &mut Vec<IrStmt>, cx: &mut HoistCx<'_>) -
         kind => (IrExpr { kind, ty: arg_ty.clone(), span: arg.span, def_id: arg.def_id }, None),
     };
     let tmp_ty = inner.ty.clone();
-    let tmp = cx.vt.alloc(sym("__hoist"), tmp_ty.clone(), Mutability::Let, None);
+    // A unique name per temporary: one call can hoist several args, and the
+    // native renderer emits locals by name, so a shared `__hoist` made every
+    // later `let` shadow the earlier ones and each arg read the last value
+    // (#3049).
+    let tmp = cx.vt.alloc(sym(&format!("__hoist_{}", cx.vt.len())), tmp_ty.clone(), Mutability::Let, None);
     hoisted.push(IrStmt {
         kind: IrStmtKind::Bind { var: tmp, mutability: Mutability::Let, ty: tmp_ty.clone(), value: inner },
         span: None,
