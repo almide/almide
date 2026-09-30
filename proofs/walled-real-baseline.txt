@@ -444,3 +444,15 @@ spec/wasm_cross/mut_param_effect_unpropagated.almd :: main
 # certifies both frames; this records the MIR-lowering frontier.
 spec/wasm_cross/witness_straightline.almd :: stash_both
 spec/wasm_cross/witness_straightline.almd :: stash_len
+# 2026-09-30 (#2917, #1871 ruling (B)): a can-err effect fn with a `mut` param
+# carries its buffer on the err arm, and every call site writes back on both
+# arms through a match over the `Result[(T, Buf), (String, Buf)]` carrier. The
+# MIR lowering refuses those heap-result matches ("heap-result `match` outside
+# the executable subset", "?? over an Option/Result operand outside the
+# executable subset"); the structural leg serves all five byte-identically to
+# native and the interp.
+spec/gauntlet/cells/x18_mut_param_err_partial_write.almd :: main
+spec/wasm_cross/mut_param_err_write_visible.almd :: append_then_check
+spec/wasm_cross/mut_param_err_write_visible.almd :: forward
+spec/wasm_cross/mut_param_err_write_visible.almd :: main
+spec/wasm_cross/mut_param_move_mode_gaps.almd :: fill2
