@@ -15,7 +15,7 @@ import bytes
 
 fn cells(m: Matrix, r: Int) -> String = {
   let row = list.get(matrix.to_lists(m), r) ?? []
-  "${list.get(row, 0) ?? 9.9},${list.get(row, 1) ?? 9.9}"
+  float.to_string(list.get(row, 0) ?? 9.9) + "," + float.to_string(list.get(row, 1) ?? 9.9)
 }
 
 effect fn main() -> Unit = {
