@@ -550,3 +550,15 @@ binary32 へ丸めた値である。
 `0.1` を 10 回足した和は `1.0000001192092896`。
 
 テスト: `spec/wasm_cross/float32_arithmetic_rounds.almd`。Contracts: C-371。
+
+## ALS-T29 Float32 の表示
+
+`Float32` は、**同じ binary32 に往復する最短の十進表現**（Rust `f32` の Display、
+位置記法・指数なし）で表示される。`0.1` は `0.1` であり、拡幅した f64 の
+`0.10000000149011612` ではない。二つの最短候補がちょうど等距離なら大きさを
+切り上げる（`2^-12` は `0.00024414063`）。文字列補間とコンテナ内（リスト・
+レコード・Option・タプル・variant のペイロード）は整数値の `.0` を落とし
+（ALS-R2 / C-011 の規則）、`float32.to_string` は保つ。`-0` の符号を保ち、
+非有限値は `inf` / `-inf` / `NaN`。
+
+テスト: `spec/wasm_cross/float32_display_shortest.almd`。Contracts: C-372。

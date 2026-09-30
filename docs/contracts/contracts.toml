@@ -4751,3 +4751,13 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float32_arithmetic_rounds.almd", class = "fixture" },
 ]
+[[contract]]
+id        = "C-372"
+spec      = "ALS-T29"
+title     = "A Float32 displays as the shortest decimal that round-trips to the same binary32"
+statement = "A Float32 prints as Rust `f32` Display does: the shortest positional decimal that parses back to the SAME binary32, so `0.1` prints `0.1`, not the widened f64's `0.10000000149011612`, and the f32 maximum prints 340282350000000000000000000000000000000. An exact tie between the two shortest candidates rounds the magnitude up (`2^-12` prints 0.00024414063, `2^20 + 0.25` prints 1048576.3). In interpolation and inside a list, record, option, tuple or variant payload an integral value drops its `.0` (C-011's rule: `${2.0f32}` is `2`), and `float32.to_string` keeps it (`2.0`); `-0` keeps its sign, and the non-finite values are `inf`, `-inf` and `NaN`. Before this, `float32.to_string` printed the widened f64's digits on every leg, and the wasm leg and the interpreter did the same for interpolation where native printed the f32 digits. spec/wasm_cross/float32_display_shortest.almd pins the value matrix (0.1, 1/3, a whole value, ±0, ±inf, NaN, the f32 maximum, the least normal, the least subnormal, a subnormal, both tie shapes) top-level in both forms and nested in each container."
+since     = "0.66.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float32_display_shortest.almd", class = "fixture" },
+]
