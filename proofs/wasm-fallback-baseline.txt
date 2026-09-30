@@ -37,3 +37,9 @@ spec/stdlib/http_status_test.almd :: HOST_CAPABILITY :: http client is an OS soc
 # (no wasm host) and the stock artifact refuses the handle (E081 on stock-p1;
 # the embedded lane serves it since #2633, tests/http_call_handle_test.rs).
 spec/stdlib/http_call_test.almd :: HOST_CAPABILITY :: http client is an OS socket API
+# 2026-09-30 (#3065): the two @extern fixtures became `test` files — before, they
+# had no test block and `almide test` never discovered them, so they fell back
+# from nowhere. An @extern(rs) / @extern(c) binding is native code the wasm leg
+# has no host for (`// wasm:skip`, tests/wasm_skip_ledger_test.rs NativeOnlyApi).
+spec/integration/extern/extern_test.almd :: HOST_CAPABILITY :: @extern(rs) binds native Rust code
+spec/integration/extern_c/extern_c_test.almd :: HOST_CAPABILITY :: @extern(c) links a C library
