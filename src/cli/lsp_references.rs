@@ -184,7 +184,7 @@ impl<'a> OccWalker<'a> {
                 self.use_at_recovered(*name, *span);
                 self.walk_expr(value);
             }
-            S::IndexAssign { target, index, value, span } => {
+            S::IndexAssign { target, index, value, span, .. } => {
                 self.use_at_recovered(*target, *span);
                 self.walk_expr(index);
                 self.walk_expr(value);
