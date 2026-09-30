@@ -85,11 +85,15 @@ impl Emitter<'_> {
             // Any other value expression in statement position: evaluate
             // and discard (a bare `ok(x)` statement is legal IR) — an OWNED
             // droppable value released, as a discarded call result is.
+            // A Unit VALUE is on the stack too: `lower` materializes Unit
+            // as an i32 placeholder (a `()` literal, a void call under a
+            // Unit want, a `r ?? ()` join over a `Result[Unit, _]`), so it
+            // is dropped like any scalar — skipping it left the i32 on the
+            // stack and failed validation (#3105: `fs.remove(p) ?? ()` as
+            // the tail of a Unit arm).
             _ => {
                 let ty = self.lower(e, None)?;
-                if ty != SliceTy::Unit {
-                    self.discard_result(e, ty);
-                }
+                self.discard_result(e, ty);
                 Ok(())
             }
         }
