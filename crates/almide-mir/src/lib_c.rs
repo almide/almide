@@ -131,7 +131,11 @@ struct OwnershipScan {
     struct BranchFrame {
         entry_rc: BTreeMap<ValueId, i64>,
         entry_dead: BTreeMap<ValueId, bool>,
-        then_exit: Option<(BTreeMap<ValueId, i64>, BTreeMap<ValueId, bool>)>,
+        /// Which object each handle denotes at the `IfThen`. A `SetLocal` rebind
+        /// in one arm rewrites a slot's object; the other arm must still start
+        /// from the entry binding (#3031).
+        entry_object_of: BTreeMap<ValueId, ValueId>,
+        then_exit: Option<ArmExit>,
         /// The `IfThen`'s result slot, and whether any arm MOVED a heap value
         /// into it — the branch-result modeling of #1037's second gap. An arm's
         /// merge value arrives either already `Consume`d (the Alloc+Consume
@@ -416,6 +420,7 @@ impl OwnershipScan {
         self.branches.push(BranchFrame {
             entry_rc: self.rc.clone(),
             entry_dead: self.dead.clone(),
+            entry_object_of: self.object_of.clone(),
             then_exit: None,
             dst,
             moved_in: false,
@@ -438,9 +443,10 @@ impl OwnershipScan {
         if let Some(fr) = self.branches.last_mut() {
             fr.moved_in |= moved;
             fr.then_diverged = diverged;
-            fr.then_exit = Some((self.rc.clone(), self.dead.clone()));
+            fr.then_exit = Some((self.rc.clone(), self.dead.clone(), self.object_of.clone()));
             self.rc = fr.entry_rc.clone();
             self.dead = fr.entry_dead.clone();
+            self.object_of = fr.entry_object_of.clone();
         }
     }
 
@@ -480,6 +486,7 @@ impl OwnershipScan {
                     if !else_seen {
                         self.rc = fr.entry_rc;
                         self.dead = fr.entry_dead;
+                        self.object_of = fr.entry_object_of;
                     }
                     if let Some(d) = dst {
                         self.own_fresh_object(d);
@@ -488,9 +495,10 @@ impl OwnershipScan {
                 }
                 (false, true) => {
                     // Continue from the surviving (then) state.
-                    let (then_rc, then_dead) = self.take_then_arm_exit(fr);
+                    let (then_rc, then_dead, then_obj) = self.take_then_arm_exit(fr);
                     self.rc = then_rc;
                     self.dead = then_dead;
+                    self.object_of = then_obj;
                     if let Some(d) = dst {
                         self.own_fresh_object(d);
                     }
@@ -499,13 +507,20 @@ impl OwnershipScan {
                 (true, true) => {
                     self.rc = fr.entry_rc;
                     self.dead = fr.entry_dead;
+                    self.object_of = fr.entry_object_of;
                     self.diverged = true;
                     return;
                 }
             }
-            let (then_rc, then_dead) = self.take_then_arm_exit(fr);
+            let entry_objects: BTreeSet<ValueId> =
+                fr.entry_object_of.values().chain(fr.entry_rc.keys()).copied().collect();
+            let (mut then_rc, then_dead, mut then_obj) = self.take_then_arm_exit(fr);
+            self.unify_rebound_slots(&entry_objects, &mut then_rc, &then_dead, &mut then_obj);
             self.check_branch_agreement(i, &then_rc);
             self.merge_branch_exits(then_rc, then_dead);
+            for (h, o) in then_obj {
+                self.object_of.entry(h).or_insert(o);
+            }
             // A HEAP branch result: each arm moved its value into the merge
             // (explicitly `Consume`d, or released by `merge_val_move`), so the
             // join owns the moved reference — a fresh object on the `IfThen`
@@ -541,19 +556,48 @@ impl OwnershipScan {
     /// Extracted from [`Self::step`]'s `EndIf` arm (codopsy r2, #852, phase 1 of 3):
     /// the then arm's exit state, rewinding the scan to the frame's entry state when
     /// there was no `Else` marker. Verbatim.
-    fn take_then_arm_exit(
-        &mut self,
-        fr: BranchFrame,
-    ) -> (BTreeMap<ValueId, i64>, BTreeMap<ValueId, bool>) {
+    fn take_then_arm_exit(&mut self, fr: BranchFrame) -> ArmExit {
         match fr.then_exit {
             Some(t) => t,
             // No Else marker: everything since IfThen was the then arm;
             // the else arm is empty (= the entry state).
             None => {
-                let cur = (self.rc.clone(), self.dead.clone());
+                let cur = (self.rc.clone(), self.dead.clone(), self.object_of.clone());
                 self.rc = fr.entry_rc.clone();
                 self.dead = fr.entry_dead.clone();
+                self.object_of = fr.entry_object_of.clone();
                 cur
+            }
+        }
+    }
+
+    /// Before the agreement check: a slot LIVE on both paths that the arms
+    /// rebound (`SetLocal`) onto DIFFERENT objects is still one slot owning one
+    /// reference after the join (#3031). Each arm-fresh object (allocated inside
+    /// its arm, so absent at the `IfThen`) is renamed onto the other arm's
+    /// object for that slot, carrying its count with it, so the agreement check
+    /// compares the slot's reference rather than two unrelated object ids. An
+    /// object that already existed at the `IfThen` is never renamed: two
+    /// pre-existing objects on the two paths still disagree, as before.
+    fn unify_rebound_slots(
+        &mut self,
+        entry_objects: &BTreeSet<ValueId>,
+        then_rc: &mut BTreeMap<ValueId, i64>,
+        then_dead: &BTreeMap<ValueId, bool>,
+        then_obj: &mut BTreeMap<ValueId, ValueId>,
+    ) {
+        let slots: Vec<(ValueId, ValueId)> = then_obj.iter().map(|(h, o)| (*h, *o)).collect();
+        for (h, oa) in slots {
+            let Some(&ob) = self.object_of.get(&h) else { continue };
+            let live_both = !then_dead.get(&h).copied().unwrap_or(true)
+                && !self.dead.get(&h).copied().unwrap_or(true);
+            if oa == ob || !live_both {
+                continue;
+            }
+            if !entry_objects.contains(&oa) {
+                rename_object(then_obj, then_rc, oa, ob);
+            } else if !entry_objects.contains(&ob) {
+                rename_object(&mut self.object_of, &mut self.rc, ob, oa);
             }
         }
     }
@@ -774,6 +818,28 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
         Ok(())
     } else {
         Err(violations)
+    }
+}
+
+/// One arm's exit state at a branch join: per-object counts, per-handle
+/// deadness, and which object each handle denotes.
+type ArmExit = (BTreeMap<ValueId, i64>, BTreeMap<ValueId, bool>, BTreeMap<ValueId, ValueId>);
+
+/// Rename object `from` to `to` in one arm's state: every handle that denotes
+/// `from` now denotes `to`, and `from`'s count is added to `to`'s.
+fn rename_object(
+    object_of: &mut BTreeMap<ValueId, ValueId>,
+    rc: &mut BTreeMap<ValueId, i64>,
+    from: ValueId,
+    to: ValueId,
+) {
+    for o in object_of.values_mut() {
+        if *o == from {
+            *o = to;
+        }
+    }
+    if let Some(c) = rc.remove(&from) {
+        *rc.entry(to).or_insert(0) += c;
     }
 }
 
