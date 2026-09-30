@@ -407,4 +407,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-369 | a lambda's failure channel carries the error type its ! operands agree on; a String channel carries a typed error as its interpolation text, identically on both targets | 0.65.0 | active | fixture | 1 |
 | C-370 | An http header that would split the request, or that the client manages, is refused with the same err on every lane | 0.66.0 | active | fixture | 0 |
 | C-371 | Float32 arithmetic rounds every result to binary32 on every leg | 0.66.0 | active | fixture | 1 |
+| C-372 | A Float32 displays as the shortest decimal that round-trips to the same binary32 | 0.66.0 | active | fixture | 1 |
 
