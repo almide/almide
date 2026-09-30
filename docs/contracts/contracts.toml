@@ -1802,6 +1802,7 @@ evidence  = [
   { path = "spec/wasm_cross/mutator_writeback_releases_old_block.almd", class = "fixture" },
   { path = "spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_nested_place_writeback.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_interpolated.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-133"

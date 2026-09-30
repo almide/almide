@@ -1,0 +1,86 @@
+// @contract: C-132
+// A `mut` parameter reads like any other value inside its fn: interpolating
+// it (`"${xs}"`) or printing it shows the value the fn has written so far,
+// for every type a `mut` param can have (#3093). On native the param is
+// `&mut T` and the interpolation reprs `&(xs)`, a `&&mut T` that no
+// `AlmideRepr` impl covered, so rustc rejected every row below (E0277) after
+// `almide check` accepted the program. Bytes has no string form (E089), so its
+// row prints `bytes.to_list`.
+type P = { x: Int, tags: List[String] }
+
+type Shape = | Dot | Box(Int)
+
+fn show_list(mut xs: List[Int]) -> Unit = {
+  list.push(xs, 1)
+  println("list ${xs}")
+}
+
+fn show_str(mut s: String) -> Unit = {
+  string.push(s, "!")
+  println("str ${s}")
+  println(s)
+}
+
+fn show_map(mut m: Map[String, Int]) -> Unit = {
+  map.insert(m, "a", 1)
+  println("map ${m}")
+}
+
+fn show_bytes(mut b: Bytes) -> Unit = {
+  bytes.push(b, 3)
+  println("bytes ${bytes.to_list(b)}")
+}
+
+fn show_rec(mut p: P) -> Unit = {
+  p.x = p.x + 1
+  println("rec ${p}")
+}
+
+fn show_nested(mut xss: List[List[String]]) -> Unit = {
+  list.push(xss, ["z"])
+  println("nested ${xss}")
+}
+
+fn show_opt(mut os: List[Int?]) -> Unit = {
+  list.push(os, some(2))
+  println("opt ${os}")
+}
+
+fn show_tuple(mut t: (Int, String)) -> Unit = {
+  println("tuple ${t}")
+}
+
+fn show_variant(mut v: List[Shape]) -> Unit = {
+  list.push(v, Box(2))
+  println("variant ${v}")
+}
+
+fn show_set(mut s: Set[Int]) -> Unit = {
+  println("set ${s}")
+}
+
+effect fn main() -> Unit = {
+  var xs: List[Int] = [0]
+  show_list(xs)
+  var s = "hi"
+  show_str(s)
+  var m: Map[String, Int] = [:]
+  show_map(m)
+  var b = bytes.new(1)
+  show_bytes(b)
+  var p: P = { x: 1, tags: ["t"] }
+  show_rec(p)
+  var xss: List[List[String]] = [
+    ["a"]
+  ]
+  show_nested(xss)
+  var os: List[Int?] = [none]
+  show_opt(os)
+  var t = (1, "a")
+  show_tuple(t)
+  var v: List[Shape] = [Dot]
+  show_variant(v)
+  var st = set.from_list([3, 1])
+  show_set(st)
+  println("${xs} ${s} ${m} ${bytes.len(b)} ${p} ${xss} ${os} ${t} ${v}")
+}
