@@ -61,7 +61,28 @@ fn never_errs(body: &IrExpr, quiet: &dyn Fn(&str) -> bool) -> bool {
     }
     let mut r = Raises(false, quiet);
     r.visit_expr(body);
-    !r.0
+    !r.0 && !passes_carrier_through(body, quiet)
+}
+
+/// Does a value exit of `body` pass a Result carrier through (#3058): a tail
+/// typed `Result[..]` that is neither an `ok(..)` nor a call to a fn `quiet`
+/// admits — `effect fn helper(p) -> String = fs.read_text(p)`, whose callee's
+/// err flows out verbatim with no `err(..)` and no `!` in the body?
+fn passes_carrier_through(e: &IrExpr, quiet: &dyn Fn(&str) -> bool) -> bool {
+    match &e.kind {
+        IrExprKind::Block { expr: Some(t), .. } => passes_carrier_through(t, quiet),
+        IrExprKind::If { then, else_, .. } => {
+            passes_carrier_through(then, quiet) || passes_carrier_through(else_, quiet)
+        }
+        IrExprKind::Match { arms, .. } => arms.iter().any(|a| passes_carrier_through(&a.body, quiet)),
+        IrExprKind::ResultOk { .. } => false,
+        IrExprKind::Call { target, .. }
+            if crate::mut_param::call_spelling(target).is_some_and(|n| quiet(&n)) =>
+        {
+            false
+        }
+        _ => e.ty.is_result(),
+    }
 }
 
 /// Every call-site spelling of a fn: main-scope bare, or a module fn's

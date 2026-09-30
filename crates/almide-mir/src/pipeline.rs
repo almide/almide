@@ -521,7 +521,11 @@ fn program_to_ir_with(
     // `!`-continuations whose UN-lifted certificate actually poisons,
     // restoring kernel-witness coverage. Transactional: any chain piece that
     // walls or still poisons rolls the fn back untouched.
+    // #3058: the effect-fn ABI facts, derived from this IR (the lift below
+    // lowers fns, and every fn is lowered against them).
+    crate::lower::settle_effect_abi(&mut ir);
     crate::lower::lift_poisoning_continuations(&mut ir);
+    crate::lower::install_effect_abi_facts(&ir);
     // Debug aid: `ALMIDE_DUMP_IR=<substr>` dumps the post-chain body of matching fns.
     if let Some(pat) = almide_base::env::var("ALMIDE_DUMP_IR") {
         for f in ir
