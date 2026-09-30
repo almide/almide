@@ -299,47 +299,6 @@ impl Emitter<'_> {
         self.release_i32();
         Ok(elem)
     }
-    /// main's err channel (#1734, the pre-existing structural hole): a
-    /// Result-typed expression in MAIN's statement/tail position is the
-    /// effect carrier, not a discardable value — the native/interp
-    /// contract is `Error: {msg}` on stderr + exit 1 on err, plain
-    /// fallthrough on ok. Discarding it swallowed the err (silent exit
-    /// 0 — `effect fn main() -> Unit = err("boom")` on the released
-    /// 0.61.0). Returns Ok(true) when this handled the expression.
-    /// A non-String err payload walls honestly (no message to print).
-    pub(crate) fn try_lower_main_err_carrier(&mut self, e: &IrExpr) -> Result<bool, EmitError> {
-        use almide_types::types::{Ty, TypeConstructorId};
-        if !self.in_main {
-            return Ok(false);
-        }
-        let Ty::Applied(TypeConstructorId::Result, a) = &e.ty else {
-            return Ok(false);
-        };
-        if a.len() != 2 {
-            return Ok(false);
-        }
-        self.witness_decline("main-err-carrier"); // #2758: unreleased on ok, unrecorded
-        let got = self.lower(e, None)?;
-        let SliceTy::Result(_, eh) = got else {
-            // Effect-ABI transparency already unwrapped it — nothing to route.
-            self.f.instructions().drop();
-            return Ok(true);
-        };
-        if self.types.el(eh) != STR {
-            return Err(EmitError::Unsupported("main-err-carrier:non-string-err".into()));
-        }
-        let hb = self.scr_i32_local;
-        let mut i = self.f.instructions();
-        i.local_set(hb);
-        i.local_get(hb)
-            .i32_load(slot_memarg(almide_layout::SUM_TAG))
-            .if_(BlockType::Empty);
-        i.local_get(hb).i32_load(slot_memarg(almide_layout::SUM_FIELD));
-        let _ = i;
-        self.emit_error_frame_abort();
-        self.f.instructions().end();
-        Ok(true)
-    }
 
     /// The main-level / pure-fn abort frame for a failed `!`: the exact
     /// native contract — `Error: {msg}` on stderr, exit 1. The message
@@ -496,7 +455,7 @@ impl Emitter<'_> {
             IrExprKind::Lambda { params, body, .. } => {
                 self.lower_lambda_value(e, params, body, want)?
             }
-            IrExprKind::Fan { exprs } => self.lower_fan_block(exprs)?,
+            IrExprKind::Fan { exprs } => self.lower_fan_block(e, exprs)?,
             IrExprKind::RuntimeCall { symbol, args } => {
                 // The slice SYNTAX `xs[a..b]` desugars to this runtime
                 // symbol — one impl with `list.slice` (as in native rt).
@@ -681,7 +640,14 @@ impl Emitter<'_> {
             IrExprKind::MapAccess { object, key } => {
                 let args = [(**object).clone(), (**key).clone()];
                 match self.arm_scope(|em| em.lower_map_call("get", &args, want))? {
-                    Some(t) => t.ty,
+                    // #2969: the arm's fresh Option cell is this node's —
+                    // marked, or a bind takes a second credit on it.
+                    Some(t) => {
+                        if t.own == crate::arm::Own::Owned {
+                            self.owned_call_marks.insert(e as *const IrExpr as usize);
+                        }
+                        t.ty
+                    }
                     None => return unsup("map-access-void"),
                 }
             }

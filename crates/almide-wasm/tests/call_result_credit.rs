@@ -755,12 +755,12 @@ fn an_owned_carrier_to_option_releases_the_some_cell() {
     assert_eq!(g, 0, "owned `?`: {g} B per call leaked");
 }
 
-/// #2516, the BORROWED-carrier cell: the some-cell's payload slot is a view
-/// of a carrier some other holder releases, so the node stays borrowed and
-/// the bind keeps its `+1` — the cell is not released (the payload must not
-/// be spent twice). Pinned at today's count, which this change must not move.
+/// #2516 / #2969, the BORROWED-carrier cell: the some-cell shares the payload
+/// of a carrier some other holder releases (its own `+1`), so the cell is an
+/// owned value like the owned-carrier one — the bind takes it without a
+/// second credit and the frame releases it, payload share included.
 #[test]
-fn a_borrowed_carrier_to_option_keeps_todays_count() {
+fn a_borrowed_carrier_to_option_releases_the_some_cell() {
     let g = growth_in(
         to_option_program,
         "let r: Result = mkr(i); let o = r?",
@@ -768,5 +768,5 @@ fn a_borrowed_carrier_to_option_keeps_todays_count() {
         "86042",
         "688084",
     );
-    assert_eq!(g, 21, "borrowed `?`: {g} B per call (today: the two some-cells, 2 × 16 B on two calls in three)");
+    assert_eq!(g, 0, "borrowed `?`: {g} B per call leaked");
 }

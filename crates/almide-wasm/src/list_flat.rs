@@ -165,8 +165,9 @@ impl Emitter<'_> {
         // ...released here when the body handed it over OWNED (a fresh
         // `some(..)`, a call result): every element's Option block leaked
         // (#2977). A `none` is NULL_ADDR, which the drop no-ops; a borrowed
-        // Option (a captured one) is its holder's.
-        if self.rc_owned_result(crate::rc_ownership::rc_tail(body)) {
+        // Option (a captured one) is its holder's. #2969: `(r) => r?` hands
+        // over an owned Option the same way.
+        if self.rc_owned_result(crate::rc_ownership::rc_tail(body)) && self.rc_droppable(got) {
             let dec = self.dec_fn_of(got);
             self.f.instructions().local_get(hr).call(dec);
         }

@@ -83,10 +83,12 @@ impl Emitter<'_> {
                 Ok(())
             }
             // Any other value expression in statement position: evaluate
-            // and discard (a bare `ok(x)` statement is legal IR).
+            // and discard (a bare `ok(x)` statement is legal IR) — an OWNED
+            // droppable value released, as a discarded call result is.
             _ => {
-                if self.lower(e, None)? != SliceTy::Unit {
-                    self.f.instructions().drop();
+                let ty = self.lower(e, None)?;
+                if ty != SliceTy::Unit {
+                    self.discard_result(e, ty);
                 }
                 Ok(())
             }

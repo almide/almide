@@ -122,7 +122,11 @@ impl Emitter<'_> {
                 {
                     let mut i = self.f.instructions();
                     i.i32_const(0).local_set(hr);
-                    i.i32_const(0).call(F_ALLOC).local_set(hacc);
+                    // #2969: only `map` accumulates; an `any` never read
+                    // the accumulator, and its block was never released.
+                    if !first_ok_wins {
+                        i.i32_const(0).call(F_ALLOC).local_set(hacc);
+                    }
                     i.block(BlockType::Empty).loop_(BlockType::Empty);
                 }
                 self.hof_elem_into(elem, bh, ch, ih, param);
@@ -145,13 +149,24 @@ impl Emitter<'_> {
                     return unsup(&format!("fan-{func}-body:{got:?}"));
                 };
                 let b = self.types.el(o);
+                // #2969: each element's Result carrier. A closure call and an
+                // owned body hand this loop its one credit; a borrowed body
+                // (a var the callback returns) takes its own +1 here, so every
+                // carrier below is released by exactly one route.
+                let owned = closure.is_some() || body.is_some_and(|x| self.rc_owned_result(x));
+                if !owned {
+                    self.rc_inc_top();
+                }
+                let carrier_dec = self.dec_fn_of(got);
                 {
                     let mut i = self.f.instructions();
                     i.local_set(hr);
                     i.local_get(hr).i32_load(slot_memarg(almide_layout::SUM_TAG));
                     if first_ok_wins {
-                        // err → skip this element; ok → hr wins, break.
+                        // err → release it and skip this element; ok → hr
+                        // wins (the result keeps its credit), break.
                         i.i32_eqz().br_if(1);
+                        i.local_get(hr).call(carrier_dec);
                         i.i32_const(0).local_set(hr);
                     } else {
                         // err → hr IS the whole result, break.
@@ -159,7 +174,8 @@ impl Emitter<'_> {
                     }
                 }
                 if !first_ok_wins {
-                    // collect the ok payload
+                    // collect the ok payload: its credit moves from the
+                    // carrier into the list, and the spine is released.
                     self.f.instructions().local_get(hacc).local_get(hr);
                     self.load_ty_slot(b, almide_layout::SUM_FIELD);
                     if b.val_type() == ValType::F64 {
@@ -170,6 +186,7 @@ impl Emitter<'_> {
                         _ => F_LIST_PUSH_4,
                     };
                     self.f.instructions().call(push).local_set(hacc);
+                    self.f.instructions().local_get(hr).call(F_DEC_FLAT);
                     self.f.instructions().i32_const(0).local_set(hr);
                 }
                 self.hof_step(ih);
@@ -199,6 +216,15 @@ impl Emitter<'_> {
                             .local_get(hacc)
                             .i32_store(slot_memarg(almide_layout::SUM_FIELD));
                     }
+                }
+                if !first_ok_wins {
+                    // An element's err is the result: the payloads already
+                    // collected are released with their accumulator.
+                    let acc_dec = self.dec_fn_of(SliceTy::List(self.types.intern(b)));
+                    self.f.instructions().else_().local_get(hacc).call(acc_dec);
+                }
+                {
+                    let mut i = self.f.instructions();
                     i.end();
                     i.local_get(hr);
                 }
@@ -238,12 +264,19 @@ impl Emitter<'_> {
                     let got = self.lower(body, None)?;
                     match got {
                         SliceTy::Result(..) => {
+                            // #2969: the winner is the result (one credit);
+                            // a losing err is released before the next arm.
+                            if !self.rc_owned_result(body) {
+                                self.rc_inc_top();
+                            }
+                            let dec = self.dec_fn_of(got);
                             let mut i = self.f.instructions();
                             i.local_set(hr);
                             i.local_get(hr)
                                 .i32_load(slot_memarg(almide_layout::SUM_TAG))
                                 .i32_eqz()
                                 .br_if(0);
+                            i.local_get(hr).call(dec);
                             result_ty.get_or_insert(got);
                         }
                         pure => {
@@ -297,12 +330,14 @@ impl Emitter<'_> {
     /// the FIRST err aborts AFTER all arms evaluated (the interp's
     /// eval_fan order), with the BARE String message. One arm = the bare
     /// value; several = a tuple of payloads.
-    pub(crate) fn lower_fan_block(&mut self, exprs: &[IrExpr]) -> Result<SliceTy, EmitError> {
+    pub(crate) fn lower_fan_block(&mut self, e: &IrExpr, exprs: &[IrExpr]) -> Result<SliceTy, EmitError> {
         let herr = self.hold_i32()?;
         self.f.instructions().i32_const(0).local_set(herr);
-        let mut vals: Vec<(u32, SliceTy)> = Vec::new();
+        // (hold, type, does the hold own its value's credit)
+        let mut vals: Vec<(u32, SliceTy, bool)> = Vec::new();
         for arm in exprs {
             let got = self.lower(arm, None)?;
+            let owned = self.rc_owned_result(arm);
             match got {
                 SliceTy::Result(o, er) => {
                     if self.types.el(er) != STR {
@@ -327,13 +362,18 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(ha);
                     self.load_ty_slot(p, almide_layout::SUM_FIELD);
                     self.f.instructions().local_set(hv);
+                    // #2969: an OWNED carrier's payload credit moves into the
+                    // value and its spine is released (an err aborts below).
+                    if owned {
+                        self.f.instructions().local_get(ha).call(F_DEC_FLAT);
+                    }
                     self.release_i32();
-                    vals.push((hv, p));
+                    vals.push((hv, p, owned));
                 }
                 pure => {
                     let hv = self.hold_val(pure)?;
                     self.f.instructions().local_set(hv);
-                    vals.push((hv, pure));
+                    vals.push((hv, pure, owned));
                 }
             }
         }
@@ -342,26 +382,35 @@ impl Emitter<'_> {
         self.f.instructions().local_get(herr);
         self.emit_error_frame_abort();
         self.f.instructions().end();
-        let out = if vals.len() == 1 {
-            let (hv, p) = vals[0];
+        let (out, owned_out) = if vals.len() == 1 {
+            let (hv, p, owned) = vals[0];
             self.f.instructions().local_get(hv);
-            p
+            (p, owned)
         } else {
-            let tys: Vec<SliceTy> = vals.iter().map(|(_, p)| *p).collect();
+            let tys: Vec<SliceTy> = vals.iter().map(|(_, p, _)| *p).collect();
             let ti = self.types.tuple(tys);
             let def = self.types.tuple_def(ti);
             let hb = self.hold_i32()?;
             self.f.instructions().i32_const(def.size as i32).call(F_ALLOC).local_set(hb);
-            for ((hv, p), (fty, off)) in vals.iter().zip(def.fields.clone()) {
+            for ((hv, p, owned), (fty, off)) in vals.iter().zip(def.fields.clone()) {
                 debug_assert_eq!(*p, fty);
                 self.f.instructions().local_get(hb).local_get(*hv);
+                // #2969: the fresh tuple owns every slot — a borrowed
+                // value takes its credit here.
+                if !owned {
+                    self.share_handle_top(*p);
+                }
                 self.store_ty_slot(*p, off);
             }
             self.f.instructions().local_get(hb);
             self.release_i32();
-            SliceTy::Tuple(ti)
+            (SliceTy::Tuple(ti), true)
         };
-        for (_, p) in vals.iter().rev() {
+        // The result's one credit is this node's: a bind takes no second.
+        if owned_out {
+            self.owned_call_marks.insert(e as *const IrExpr as usize);
+        }
+        for (_, p, _) in vals.iter().rev() {
             self.release_val(*p);
         }
         self.release_i32();

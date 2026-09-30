@@ -142,6 +142,11 @@ impl Emitter<'_> {
                         .local_tee(hc)
                         .local_get(hr);
                     self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                    if !owned_carrier {
+                        // #2969: over a BORROWED carrier the cell takes its
+                        // own credit on the payload, so it is owned too.
+                        self.share_handle_top(et);
+                    }
                     self.store_ty_slot(et, almide_layout::OPTION_FIELD);
                     if owned_carrier {
                         self.f.instructions().local_get(hr).call(F_DEC_FLAT);
@@ -154,13 +159,11 @@ impl Emitter<'_> {
                     // the carrier just released above), so it is an owned
                     // value — mark the node, or the bind takes the
                     // borrowed-source `+1` and the cell stays at rc 1
-                    // forever. Over a BORROWED carrier the cell's payload
-                    // slot is a view (no `$inc`): the cell cannot own it,
-                    // the node stays unmarked, and today's `+1` keeps the
-                    // payload's one credit with the carrier's holder.
-                    if owned_carrier {
-                        self.owned_call_marks.insert(e as *const IrExpr as usize);
-                    }
+                    // forever. Over a BORROWED carrier the cell shared the
+                    // payload above (#2969): it is fresh and owns its slot
+                    // on that path as well. Left unmarked, the bind's `+1`
+                    // landed on the fresh cell and it was never freed.
+                    self.owned_call_marks.insert(e as *const IrExpr as usize);
                     SliceTy::Option(o)
                 }
                 got @ SliceTy::Option(_) => got,
@@ -589,11 +592,11 @@ impl Emitter<'_> {
     /// — the same normalization `lower_if_arms` applies to an `if`. A
     /// borrowed or pool-static fallback (a var, a string literal) leaves both
     /// arms views, as before, and so does a payload type arg_temps does not
-    /// name in a reader position (`arg_temps::droppable_ty`): an owned join
+    /// name in a reader position (`arg_temps::bindable_ty`): an owned join
     /// there would be read and never released.
     fn own_unwrap_or_join(&mut self, e: &IrExpr, fallback: &IrExpr, et: SliceTy) {
         if !self.rc_droppable(et)
-            || !crate::arg_temps::droppable_ty(&e.ty)
+            || !crate::arg_temps::bindable_ty(&e.ty)
             || !crate::arg_temps::unwrap_or_joins_owned(e)
             || !self.rc_owned_result(fallback)
         {
