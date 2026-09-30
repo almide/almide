@@ -3262,6 +3262,7 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/loop_break_continue.almd", class = "fixture" },
+  { path = "spec/wasm_cross/guard_jump_in_value_fn.almd", class = "fixture" },
   { path = "tests/wasm_break_continue_heap_test.rs", name = "break_and_continue_over_heap_locals_match_native_on_the_structural_leg_without_leaking", class = "fixture" },
 ]
 [[contract]]

@@ -1,0 +1,205 @@
+// @contract: C-256
+// #3113: `guard c else continue` / `else break` targets the LOOP it sits in,
+// whatever the enclosing fn returns. The structural wasm leg used to lower
+// the jump only when the fn returned Unit and walled (`expr:Continue` /
+// `expr:Break`) the identical loop in a value-returning fn. Matrix: for /
+// while x pure / effect x Unit / Int / String / Result returns, a loop inside
+// a let-bound block, nested loops (the inner jump vs the outer one), a guard
+// under an `if` and in a match arm inside the loop, and heap locals bound
+// before the jump and live across it.
+fn unit_for(xs: List[Int]) -> Unit = {
+  var n = 0
+  for x in xs {
+    guard x != 0 else continue
+    n = n + 1
+  }
+  println("unit_for ${n}")
+}
+
+fn int_for(xs: List[Int]) -> Int = {
+  var n = 0
+  for x in xs {
+    guard x != 0 else continue
+    guard x != 9 else break
+    n = n + x
+  }
+  n
+}
+
+fn int_range(m: Int) -> Int = {
+  var n = 0
+  for i in 0..<m {
+    guard i % 3 != 0 else continue
+    n = n + i
+  }
+  n
+}
+
+fn int_while(xs: List[Int]) -> Int = {
+  var n = 0
+  var i = 0
+  while i < list.len(xs) {
+    let x = list.get(xs, i) ?? 0
+    i = i + 1
+    guard x != 0 else continue
+    guard x != 9 else break
+    n = n + x
+  }
+  n
+}
+
+fn string_for(xs: List[Int]) -> String = {
+  var acc = ""
+  for x in xs {
+    let s = "v${x}"
+    guard x != 0 else continue
+    guard x != 9 else break
+    acc = acc + s
+  }
+  acc
+}
+
+fn result_for(xs: List[Int]) -> Result[Int, String] = {
+  var n = 0
+  for x in xs {
+    guard x != 0 else continue
+    n = n + x
+  }
+  ok(n)
+}
+
+effect fn effect_int_for(xs: List[Int]) -> Int = {
+  var n = 0
+  for x in xs {
+    guard x != 0 else continue
+    let v = int.parse("${x}")!
+    n = n + v
+  }
+  n
+}
+
+effect fn effect_result_while(xs: List[String]) -> Result[List[Int], String] = {
+  var acc: List[Int] = []
+  var i = 0
+  while i < list.len(xs) {
+    let s = xs[i]
+    i = i + 1
+    guard s != "" else continue
+    let v = int.parse(s)!
+    guard v >= 0 else break
+    acc = acc + [v]
+  }
+  ok(acc)
+}
+
+fn in_let_block(xs: List[Int]) -> Int = {
+  let n = {
+    var k = 0
+    for x in xs {
+      guard x != 0 else continue
+      k = k + x
+    }
+    k
+  }
+  n * 2
+}
+
+fn nested_for(m: Int) -> Int = {
+  var n = 0
+  for i in 0..<m {
+    guard i != 1 else continue
+    for j in 0..<m {
+      guard j != i else continue
+      guard j < 3 else break
+      n = n + 1
+    }
+  }
+  n
+}
+
+fn nested_while(m: Int) -> String = {
+  var s = ""
+  var i = 0
+  while i < m {
+    i = i + 1
+    var j = 0
+    var stop = false
+    while j < m {
+      j = j + 1
+      guard j != 2 else continue
+      if i * j > 6 then {
+        stop = true
+      } else ()
+      guard not stop else break
+      s = s + "${i}${j} "
+    }
+    guard not stop else break
+  }
+  s
+}
+
+fn under_if(xs: List[Int]) -> String = {
+  var out = ""
+  for x in xs {
+    let label = "x${x}"
+    if x > 1 then {
+      guard x != 3 else continue
+      out = out + label
+    } else ()
+    out = out + "."
+  }
+  out
+}
+
+fn in_match_arm(xs: List[Int?]) -> Int = {
+  var n = 0
+  for o in xs {
+    match o {
+      some(v) => {
+        guard v > 0 else continue
+        n = n + v
+      },
+      none => {
+        guard false else break
+      },
+    }
+  }
+  n
+}
+
+fn heap_across(xs: List[String]) -> List[String] = {
+  var out: List[String] = []
+  for s in xs {
+    let t = s + "!"
+    let parts = [t, s]
+    guard string.len(s) > 1 else continue
+    guard s != "stop" else break
+    out = out + parts
+  }
+  out
+}
+
+effect fn main() -> Unit = {
+  let nums = [
+    0,
+    1,
+    0,
+    2,
+    9,
+    5
+  ]
+  unit_for([0, 1, 0, 2])
+  println(int.to_string(int_for(nums)))
+  println(int.to_string(int_range(10)))
+  println(int.to_string(int_while(nums)))
+  println(string_for(nums))
+  println(int.to_string(result_for([0, 1, 2]) ?? -1))
+  println(int.to_string(effect_int_for([0, 3, 0, 4])!))
+  println(effect_result_while(["1", "", "2", "-1", "5"])! |> list.map((v) => int.to_string(v)) |> list.join(","))
+  println(int.to_string(in_let_block([0, 1, 2])))
+  println(int.to_string(nested_for(5)))
+  println(nested_while(4))
+  println(under_if([1, 2, 3, 4]))
+  println(int.to_string(in_match_arm([some(1), some(-2), some(3), none, some(9)])))
+  println(heap_across(["a", "bb", "cc", "stop", "dd"]) |> list.join(","))
+}
