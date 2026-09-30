@@ -215,7 +215,7 @@ impl Parser {
         self.advance();
         self.expect(TokenType::Eq)?;
         self.skip_newlines();
-        let value = self.parse_expr()?;
+        let value = self.parse_expr_ascribed()?;
         Ok(Stmt::Assign { name, value, span: Some(span) })
     }
 
@@ -232,7 +232,7 @@ impl Parser {
         {
             self.advance();
             self.skip_newlines();
-            let value = self.parse_expr()?;
+            let value = self.parse_expr_ascribed()?;
             Ok(Some(Stmt::IndexAssign { target, index: Box::new(index), value, span: Some(span) }))
         } else {
             self.pos = saved;
@@ -248,7 +248,7 @@ impl Parser {
         let field = self.expect_any_name()?;
         self.expect(TokenType::Eq)?;
         self.skip_newlines();
-        let value = self.parse_expr()?;
+        let value = self.parse_expr_ascribed()?;
         Ok(Stmt::FieldAssign { target, field, value, span: Some(span) })
     }
 

@@ -22,6 +22,14 @@ fn extract_doc_comment(comments: &[String]) -> Option<String> {
 
 impl Parser {
     pub fn parse_single_expr(&mut self) -> Result<crate::ast::Expr, String> {
+        self.parse_expr_ascribed()
+    }
+
+    /// An expression with an optional trailing `: Type` ascription — a string
+    /// interpolation part, and the value of an assignment (#3051: `s.xs =
+    /// []: List[Int]`, the form the E018 hint names, has no other place to
+    /// carry the element type).
+    pub(crate) fn parse_expr_ascribed(&mut self) -> Result<crate::ast::Expr, String> {
         let expr = self.parse_expr()?;
         // A trailing `: Type` pins the expression's type, exactly as in call-arg
         // position. This matters for string interpolation: `"${[]: List[Int]}"`
