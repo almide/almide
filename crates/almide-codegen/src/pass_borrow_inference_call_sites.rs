@@ -350,7 +350,10 @@ fn hoist_one_arg(arg: IrExpr, hoisted: &mut Vec<IrStmt>, cx: &mut HoistCx<'_>) -
         kind => (IrExpr { kind, ty: arg_ty.clone(), span: arg.span, def_id: arg.def_id }, None),
     };
     let tmp_ty = inner.ty.clone();
-    let tmp = cx.vt.alloc(sym("__hoist"), tmp_ty.clone(), Mutability::Let, None);
+    // A fresh name per temp (#3049): a call with two conflicting read args
+    // binds two temps in ONE block; a shared `__hoist` name made the second
+    // `let` shadow the first, so every arg read the last one's value.
+    let tmp = cx.vt.alloc_fresh("__hoist", tmp_ty.clone(), Mutability::Let, None);
     hoisted.push(IrStmt {
         kind: IrStmtKind::Bind { var: tmp, mutability: Mutability::Let, ty: tmp_ty.clone(), value: inner },
         span: None,
