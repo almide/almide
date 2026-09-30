@@ -14,15 +14,23 @@ fn almide() -> &'static str {
     env!("CARGO_BIN_EXE_almide")
 }
 
-const FS_PROGRAM: &str = r#"import fs
-effect fn main() -> Unit = {
+/// The probe program, writing its own file: the run and build tests run in
+/// parallel, and with one shared path each could truncate the file between
+/// the other's write and read (`read= exists=true` in a merge-queue run).
+fn fs_program(tag: &str) -> String {
+    format!(
+        r#"import fs
+effect fn main() -> Unit = {{
   let dir = fs.temp_dir()
-  let p = "${dir}/almide_1921_routing_probe.txt"
+  let p = "${{dir}}/almide_1921_routing_probe_{tag}_{pid}.txt"
   fs.write(p, "hello")!
   let t = fs.read_text(p)!
-  println("read=${t} exists=${fs.exists(p)}")
+  println("read=${{t}} exists=${{fs.exists(p)}}")
+}}
+"#,
+        pid = std::process::id()
+    )
 }
-"#;
 
 fn run_debug(args: &[&str]) -> (bool, String, String) {
     let out = Command::new(almide())
@@ -43,7 +51,7 @@ fn run_debug(args: &[&str]) -> (bool, String, String) {
 fn fs_program_runs_on_the_structural_leg() {
     let dir = tempfile::tempdir().expect("tempdir");
     let src = dir.path().join("fs_probe.almd");
-    std::fs::write(&src, FS_PROGRAM).expect("write repro");
+    std::fs::write(&src, fs_program("run")).expect("write repro");
     let (ok, stdout, stderr) = run_debug(&["run", src.to_str().unwrap(), "--target", "wasm"]);
     assert!(ok, "run must succeed; stderr:\n{stderr}");
     assert!(
@@ -65,7 +73,7 @@ fn fs_program_builds_on_the_structural_leg() {
     let dir = tempfile::tempdir().expect("tempdir");
     let src = dir.path().join("fs_probe.almd");
     let wasm = dir.path().join("fs_probe.wasm");
-    std::fs::write(&src, FS_PROGRAM).expect("write repro");
+    std::fs::write(&src, fs_program("build")).expect("write repro");
     let (ok, _, stderr) = run_debug(&[
         "build",
         src.to_str().unwrap(),
