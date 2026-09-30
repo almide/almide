@@ -5,7 +5,9 @@
 //! and the block leaves. `ok(v)` there is transparent, which agrees with every
 //! consumer only for a scalar or certainly-fresh `v`; any other declines. A
 //! record field's Fn value is a view lent to the lifted body. A cell capture
-//! whose occupant is a scalar has no RC site in the lambda.
+//! whose occupant is a scalar has no RC site in the lambda. A callback that
+//! raises instantiates the self-hosted `list.__fallible_map`: an ordinary
+//! call whose literal lambda is a closure value built and released here.
 
 const PROGRAM: &str = r#"effect fn raise(x: Int) -> Int = if x == 0 then err("zero") else ok(x)
 
@@ -24,8 +26,11 @@ effect fn counter() -> Int = {
   bump(2) + bump(3)
 }
 
+effect fn raised_all(xs: List[Int]) -> List[Int] = list.map(xs, (n) => raise(n)!)!
+
 effect fn main() -> Unit = {
   println("${raise(2)!} ${keep("s", 1)!} ${apply_op(Op { run: (n) => n + 1 }, 4)} ${counter()!}")
+  println("${list.len(raised_all([1])!)}")
 }
 "#;
 
@@ -56,4 +61,7 @@ fn raised_errs_field_callees_and_scalar_cells_witness_exactly() {
     // The lambda capturing the Int cell `n` certifies.
     let cell_lambda = w.iter().find(|(k, c)| k.starts_with("<lambda#") && !c.starts_with('!'));
     assert!(cell_lambda.is_some(), "a scalar-cell lambda must certify: {w:?}");
+    // The fallible HOF's closure env is born, lent to the call and released.
+    assert!(get("raised_all").starts_with("id\n"), "{:?}", get("raised_all"));
+    assert!(accepted(&get("raised_all")), "{:?}", get("raised_all"));
 }

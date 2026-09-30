@@ -422,7 +422,9 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
         // any other declines by arm name. A Fn value that arrives as a value
         // (a Var, a call result) is an ordinary argument everywhere.
         almide_ir::CallTarget::Module { module, func, .. } => {
-            if args.iter().any(|a| matches!(crate::rc_ownership::rc_tail(a).kind, IrExprKind::Lambda { .. })) {
+            if args.iter().any(|a| matches!(crate::rc_ownership::rc_tail(a).kind, IrExprKind::Lambda { .. }))
+                && !is_self_hosted_hof(module.as_str(), func.as_str())
+            {
                 return inline_callback_subset(module.as_str(), func.as_str(), args);
             }
         }
@@ -455,6 +457,15 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
 }
 
 
+
+/// #2758: the fallible list HOFs (`list.__fallible_map__…`, the checker's
+/// instantiation of a callback that raises) are SELF-HOSTED: an ordinary call
+/// to a lifted stdlib body, no native arm inlines the lambda. The literal
+/// callback is then a closure VALUE — its env is built by the closure hooks
+/// and handed over under the callee's convention like any fresh argument.
+fn is_self_hosted_hof(module: &str, func: &str) -> bool {
+    module == "list" && func.starts_with("__fallible_")
+}
 
 /// #2755 / #2758: a module call that INLINES a literal callback. Admitted
 /// for the arms whose lowering (list.rs) records the callback as a loop

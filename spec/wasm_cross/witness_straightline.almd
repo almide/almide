@@ -186,6 +186,11 @@ fn or_zero(o: List[Int]?) -> List[Int] = o ?? [0]
 // success exit builds leaves on the other.
 effect fn raise(x: Int) -> Int = if x == 0 then err("zero") else ok(x)
 
+// #2758 — a callback that RAISES instantiates the self-hosted
+// `list.__fallible_map`: an ordinary call, the literal lambda a closure value
+// whose env is built here and handed to the lifted body.
+effect fn raised_all(xs: List[Int]) -> List[Int] = list.map(xs, (n) => raise(n)!)!
+
 // #2758 — a call through a record FIELD: the Fn value is a view of the slot,
 // lent to the lifted body, never shared or released here.
 type Op = { run: (Int) -> Int }
@@ -208,4 +213,5 @@ effect fn main() -> Unit = {
   println("${joined(["a", "bc"])} ${long_one(["a", "bc"]) ?? "-"}")
   println("${or_zero(some([1, 2]))} ${or_zero(none)}")
   println("${raise(2)!} ${apply_op(Op { run: (n) => n + 1 }, 4)}")
+  println("${list.len(raised_all([1, 2])!)}")
 }

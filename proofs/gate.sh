@@ -526,6 +526,15 @@ run_structural spec/wasm_cross/witness_straightline.almd apply_op 0
 tamper_structural raise '2s/^{|im}$/{|i}/' "#2758 raised err block"
 tamper_structural apply_op '1s/^$/d/' "#2758 field callee record"
 
+# ── #2758: a callback that RAISES instantiates the self-hosted
+# `list.__fallible_map` — an ordinary call. The literal lambda is a closure
+# value: its env is built here, lent to the lifted body and released (`id`).
+# Drill: the env never released.
+echo
+echo "== structural leg, fallible HOF closure argument  ⊳  proven checker (#2758) =="
+run_structural spec/wasm_cross/witness_straightline.almd raised_all 0
+tamper_structural raised_all '1s/^id$/i/' "#2758 fallible HOF env"
+
 # ── #2758: MODULE-SPACE LETS. main's prologue stores each top-let into its
 # global: `ALPHA`'s literal moves in (`im`); `TBL`'s initializer (a
 # `bytes.from_list` result, line 3) is copied into the global (`im`) and
