@@ -447,11 +447,20 @@ impl Emitter<'_> {
             i.local_get(bh);
         }
         self.load_ty_slot(elem, 0);
+        // The accumulator OWNS one credit on every step, as `list.fold`'s
+        // does (#2977): the first element takes its share, each step's
+        // borrowed result takes its share and the replaced accumulator is
+        // released, and the last one MOVES into the `some` cell.
+        self.share_handle_top(elem);
         self.f.instructions().local_set(params[0]);
         self.f.instructions().i32_const(1).local_set(ih);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[1]);
         self.lower(body, Some(elem))?;
+        self.rc_share_guard(body, elem);
+        if let Some(dec) = self.elem_is_handle(elem).then(|| self.dec_fn_of(elem)) {
+            self.f.instructions().local_get(params[0]).call(dec);
+        }
         self.f.instructions().local_set(params[0]);
         self.hof_step(ih);
         // some(acc)
@@ -461,9 +470,6 @@ impl Emitter<'_> {
             .call(F_ALLOC)
             .local_tee(hr)
             .local_get(params[0]);
-        // The element handle inside the Option block takes +1
-        // (leak-not-dangle until the Option's typed drop, stage 2c).
-        self.share_handle_top(elem);
         self.store_ty_slot(elem, almide_layout::OPTION_FIELD);
         self.f.instructions().local_get(hr).end();
         for _ in 0..4 {

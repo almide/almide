@@ -124,7 +124,7 @@ impl Emitter<'_> {
                 // process.args is the FULL argv (C-096, argv0 kept).
                 let skip0 = module == "env";
                 self.fs_call_0(OP_ARGS)?;
-                let (hraw, hlen, _herr) = self.fs_frames_or_err()?;
+                let (hraw, hlen, herr) = self.fs_frames_or_err()?;
                 let hlist = self.hold_i32()?;
                 let hfirst = self.hold_i32()?;
                 self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hlist);
@@ -145,6 +145,7 @@ impl Emitter<'_> {
                     em.f.instructions().end();
                     Ok(())
                 })?;
+                self.fs_frames_release_raw(hraw, herr);
                 self.f.instructions().local_get(hlist);
                 for _ in 0..5 {
                     self.release_i32();
