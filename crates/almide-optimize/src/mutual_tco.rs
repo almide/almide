@@ -59,7 +59,7 @@ fn candidate(f: &IrFunction) -> bool {
         && f.generics.is_none()
         && f.extern_attrs.is_empty()
         && f.export_attrs.is_empty()
-        && f.attrs.is_empty()
+        && !f.has_attrs_besides_effect_origin()
         // Module-qualified names (stdlib splices, linked module fns) render
         // through a prefix scheme this pass does not participate in.
         && !f.name.as_str().contains('.')
