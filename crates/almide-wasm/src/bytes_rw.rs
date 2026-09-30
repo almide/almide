@@ -99,6 +99,8 @@ impl Emitter<'_> {
         i.local_get(hout).local_get(hi).i32_const(4).i32_mul().i32_add();
         i.local_get(hs).call(lossy);
         i.i32_store(slot_memarg(0));
+        // The decode answers a fresh string: the slice was scratch (#2977).
+        i.local_get(hs).call(F_DEC_FLAT);
         i.local_get(hp).i64_const(4).i64_add().local_get(hsl).i64_add().local_set(hp);
         i.local_get(hi).i32_const(1).i32_add().local_set(hi);
         i.br(0).end().end();

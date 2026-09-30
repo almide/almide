@@ -183,6 +183,8 @@ pub(crate) fn emit_json_value_pretty_helper(
         .local_get(l32)
         .call(F_APPEND_COPY)
         .local_set(cursor);
+    // The linked formatter's string is this helper's own: copied, released (#2975).
+    i.local_get(s32).call(F_DEC_FLAT);
     i.end();
     i.else_();
     // 4 str
@@ -346,6 +348,8 @@ pub(crate) fn emit_json_value_helper(
         .local_get(l32)
         .call(F_APPEND_COPY)
         .local_set(cursor);
+    // The linked formatter's string is this helper's own: copied, released (#2975).
+    i.local_get(s32).call(F_DEC_FLAT);
     i.end();
     i.else_();
     // 4 str

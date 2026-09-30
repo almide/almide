@@ -102,24 +102,27 @@ impl Emitter<'_> {
         let hb = self.hold_i32()?;
         let hc = self.hold_i32()?;
         let hacc = self.hold_i32()?;
+        let hprev = self.hold_i32()?;
         let mut i = self.f.instructions();
         i.local_set(hb);
         i.i32_const(0).call(F_ALLOC).local_set(hacc);
         i.i32_const(0).local_set(hc);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hc).local_get(hb).i32_load(len_memarg()).i32_ge_u().br_if(1);
-        i.local_get(hacc);
+        i.local_get(hacc).local_tee(hprev);
         i.local_get(hb).local_get(hc).i32_add().i32_load(slot_memarg(0));
         i.call(F_CONCAT).local_set(hacc);
+        // The outgrown accumulator is a bare spine no credit was taken
+        // through yet (#2977 — one leaked per inner list).
+        i.local_get(hprev).call(F_DEC_FLAT);
         i.local_get(hc).i32_const(4).i32_add().local_set(hc);
         i.br(0).end().end();
         let _ = i;
         // The inner lists' handles were COPIED through the concats: the
-        // result takes one credit per element (intermediate spines leak,
-        // never dangle — fuzz 20260913).
+        // result takes one credit per element, once, on the final spine.
         self.emit_inc_elems(hacc, self.types.el(inner));
         self.f.instructions().local_get(hacc);
-        for _ in 0..3 {
+        for _ in 0..4 {
             self.release_i32();
         }
         Ok(Some(Lowered::owned(SliceTy::List(inner))))

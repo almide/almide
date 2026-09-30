@@ -738,6 +738,18 @@ impl Emitter<'_> {
                     _ => crate::rc_ownership::rc_mentions_var(a, var),
                 })
             }
+            // A CLOSURE call shares a Var argument (`rc_arg_guard`, calls.rs)
+            // and the lifted body releases its params at its own exit plan,
+            // so a direct Var argument leaves the local's credit where it
+            // was: `acc = f(acc, x)` releases the old `acc` like any Assign
+            // (#2977 — every step of a closure accumulator loop kept it).
+            IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. } => {
+                crate::rc_ownership::rc_mentions_var(callee, var)
+                    || args.iter().any(|a| match &a.kind {
+                        IrExprKind::Var { id } if *id == var => false,
+                        _ => crate::rc_ownership::rc_mentions_var(a, var),
+                    })
+            }
             IrExprKind::Call { .. } | IrExprKind::RuntimeCall { .. } => mentions(),
             _ => false,
         }

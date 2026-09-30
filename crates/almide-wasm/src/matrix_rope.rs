@@ -433,6 +433,8 @@ impl Emitter<'_> {
         i.br(0).end().end();
         i.local_get(hi).i32_const(1).i32_add().local_set(hi);
         i.br(0).end().end();
+        // The scores scratch row is this arm's own block (#2974).
+        i.local_get(hsc).call(F_DEC_FLAT);
         i.local_get(ho);
         let _ = i;
         for _ in 0..4 {

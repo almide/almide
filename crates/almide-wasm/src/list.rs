@@ -344,7 +344,12 @@ impl Emitter<'_> {
     fn lower_list_contains(&mut self, xs: &IrExpr, x: &IrExpr) -> ArmResult {
         let got = self.lower_list_index_of(xs, x)?;
         let _ = got;
-        self.f.instructions().i32_const(0).i32_ne();
+        // The verdict is whether index_of answered `some`; that Option
+        // block is this arm's own and goes right after (#2977 — every
+        // hit kept it; `none` is NULL_ADDR, which the release no-ops).
+        let h = self.hold_i32()?;
+        self.f.instructions().local_tee(h).i32_const(0).i32_ne().local_get(h).call(F_DEC_FLAT);
+        self.release_i32();
         Ok(Some(Lowered::scalar(BOOL)))
     }
 
