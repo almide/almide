@@ -48,7 +48,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-010 | [Recursive / generic ADT interpolation repr keyed by instantiation](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 2 |
 | C-011 | Bare-float interpolation Display drops .0; float.to_string keeps it | 0.24.0 | active | fuzz(100000) | 5 |
 | C-012 | Const-folded non-finite floats emit named constants | 0.24.0 | active | fixture | 1 |
-| C-013 | Map is a compact-ordered-dict: iteration is insertion order | 0.24.0 | active | fixture | 9 |
+| C-013 | Map is a compact-ordered-dict: iteration is insertion order | 0.24.0 | active | fixture | 10 |
 | C-014 | Set is insertion-ordered and deterministic | 0.24.0 | active | fixture | 3 |
 | C-015 | Structural deep equality for compound elements and heap values | 0.24.0 | active | fixture | 8 |
 | C-016 | UTF-8 codepoint-aware string ops are byte-identical | 0.24.0 | active | fixture | 2 |
@@ -68,7 +68,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-030 | hex.encode / hex.decode are byte-identical incl. positional error detail | 0.24.0 | active | fixture | 2 |
 | C-031 | json get/set/remove_path edge cases match the infallible native oracle | 0.24.0 | active | fixture | 3 |
 | C-032 | Regex engine is byte-identical to the native engine over a fuzzed grammar | 0.24.0 | active | fuzz(220) | 3 |
-| C-033 | [Value semantics for aliased mutables (copy-on-write)](C-033-cow-truth-table.md) | 0.24.0 | active | fixture | 14 |
+| C-033 | [Value semantics for aliased mutables (copy-on-write)](C-033-cow-truth-table.md) | 0.24.0 | active | fixture | 15 |
 | C-034 | Out-of-range list ops clamp / no-op gracefully (no OOB heap access) | 0.24.0 | active | fixture | 8 |
 | C-035 | Effect-main errors terminate uniformly: Error: <msg> + exit 1 | 0.24.0 | active | fixture | 6 |
 | C-036 | Records, variants, and pattern matching are byte-identical | 0.24.0 | active | fixture | 10 |
@@ -95,7 +95,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-057 | Assigning a Unit-returning in-place mutator's result is a checker error on both targets | 0.24.0 | active | fixture | 1 |
 | C-058 | An empty collection with an uninferable element type is a compile error on both targets, never silently defaulted | 0.24.0 | active | fixture | 1 |
 | C-059 | Compilation does not overflow the native stack on wide or deep input, identically on every host and build profile | 0.25.0 | active | fixture | 1 |
-| C-060 | A Value reprs as its JSON text byte-identically on native and WASM, bare and as a Repr-record field | 0.26.7 | active | fixture | 1 |
+| C-060 | A Value reprs as its JSON text byte-identically on native and WASM, bare and as a Repr-record field | 0.26.7 | active | fixture | 2 |
 | C-061 | A mut Map parameter mutated in place builds on both targets and the mutation persists, byte-identical | 0.26.9 | active | fixture | 1 |
 | C-062 | The RawPtr / linear-memory bridge moves bytes byte-identically on both targets | 0.26.15 | active | fixture | 1 |
 | C-063 | Parsing a heterogeneous-nested glTF/JSON document and walking its arrays by element is byte-identical on both targets | 0.26.19 | active | fixture | 1 |
@@ -136,7 +136,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-098 | cross-module derived Codec methods dispatch on WASM and match native | 0.27.6 | active | fixture | 0 |
 | C-099 | comparison/equality operators byte-match native across all operand types on the v1 wasm path | 0.27.6 | active | fixture | 10 |
 | C-100 | Self-hosted String classification/transform ops byte-match native on wasm | 0.27.6 | active | fixture | 4 |
-| C-101 | List ops over heap elements (String/Value) byte-match native and are leak/double-free free | 0.27.6 | active | fixture | 16 |
+| C-101 | List ops over heap elements (String/Value) byte-match native and are leak/double-free free | 0.27.6 | active | fixture | 17 |
 | C-102 | List iteration, call-result element materialization, and tail-recursive list traversal byte-match native | 0.27.6 | active | fixture | 4 |
 | C-103 | Self-hosted dynamic Value model (merge, array/as_array roundtrip, tuple TCO) byte-matches native and is leak-free in a loop | 0.27.6 | active | fixture | 7 |
 | C-104 | Tail-recursive accumulator shapes lower to bounded-stack loops byte-matching native | 0.27.6 | active | fixture | 6 |
@@ -167,7 +167,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-129 | list.chunk / list.windows non-positive sizes: negative keeps the promoted norm, zero aborts in the T6 form | 0.28.4 | active | fixture | 4 |
 | C-130 | option/map combinators hand back OWNED heap results (no bare pass-through handles) | 0.28.5 | active | fixture | 2 |
 | C-131 | Loop-rebuilt buffers are O(n): COW guards only LIVE aliases, and LICM never hoists heap allocations | 0.28.6 | active | fixture | 2 |
-| C-132 | mut parameters of reallocating containers persist to the caller at every call position | 0.28.6 | active | fixture | 12 |
+| C-132 | mut parameters of reallocating containers persist to the caller at every call position | 0.28.6 | active | fixture | 13 |
 | C-133 | env.get observes the host environment identically on native and wasm | 0.29.0 | active | fixture | 1 |
 | C-134 | Vendored-libm atan / tanh are byte-identical cross-target | 0.30.0 | active | fuzz(3000) | 1 |
 | C-135 | Declared-Unit effect fn ABI agrees between def and every call site | 0.30.0 | active | fixture | 2 |
@@ -197,7 +197,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-159 | list.binary_search returns the same index on both targets for duplicate keys | 0.32.0 | active | fixture | 1 |
 | C-160 | Pure-Almide bundled stdlib modules link and run byte-identically on wasm | 0.34.4 | active | fixture | 1 |
 | C-161 | Matrix constructor dimensions clamp negatives and abort over a shared ceiling | 0.35.0 | active | fixture | 13 |
-| C-162 | io.write / io.write_bytes emit in program order, interleaved with println | 0.35.0 | active | fixture | 1 |
+| C-162 | io.write / io.write_bytes emit in program order, interleaved with println | 0.35.0 | active | fixture | 2 |
 | C-163 | A heap-result if/match bound to a let/var executes the taken arm on both targets | 0.35.0 | active | fixture | 1 |
 | C-164 | List modifiers and suffix copies co-own tuple / record / nested-list elements | 0.35.0 | active | fixture | 1 |
 | C-165 | fold over a String-keyed map, a String list or a String set threads a heap accumulator on both targets | 0.36.0 | active | fixture | 1 |
@@ -244,7 +244,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-206 | A settle block settles every arm into its own tuple slot, in arm order | 0.47.0 | active | fixture | 1 |
 | C-207 | CM-1 is a versioned constant with a ratio-only wall-clock claim | 0.47.0 | active | fixture | 1 |
 | C-208 | fan.timeout is omega-relative: fixed ends everywhere, fixed omega replays byte-identically | 0.47.0 | active | fixture | 1 |
-| C-209 | Codec encode omits none; decode folds missing/null to none; Value passes through verbatim | 0.52.0 | active | fixture | 1 |
+| C-209 | Codec encode omits none; decode folds missing/null to none; Value passes through verbatim | 0.52.0 | active | fixture | 2 |
 | C-210 | NaN observation is canonical — the deterministic-profile conformance law | 0.53.0 | active | fixture | 2 |
 | C-211 | ! propagates in pure Result/Option-returning fns, byte-identical across targets | 0.53.5 | active | fixture | 1 |
 | C-212 | Two self-host modules with same-named private helpers link cleanly or wall — never an invalid module | 0.52.0 | active | fixture | 1 |
@@ -258,7 +258,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-220 | fs streaming line walkers fold/each with read_lines line semantics | 0.56.1 | active | fixture | 1 |
 | C-221 | An effect fn-typed slot admits pure and fallible lambdas with one carrier semantics | 0.56.1 | active | fixture | 4 |
 | C-222 | An expression-nested scalar unwrap propagates the err identically on both legs | 0.56.1 | active | fixture | 1 |
-| C-223 | Matrix transcendentals compute through the vendored musl-libm, not the platform one | 0.56.1 | active | fixture | 7 |
+| C-223 | Matrix transcendentals compute through the vendored musl-libm, not the platform one | 0.56.1 | active | fixture | 8 |
 | C-224 | if let / guard let bind and release heap payloads identically on both targets | 0.56.1 | active | fixture | 1 |
 | C-225 | fs.read_lines materializes a file's lines identically on both targets | 0.56.2 | active | fixture | 2 |
 | C-226 | A mut parameter crossing a call boundary mutates the caller's data on both targets | 0.56.2 | active | fixture | 9 |
@@ -320,7 +320,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-282 | A matrix index out of range aborts identically on both targets; the row reductions answer their identity instead | 0.57.1 | active | fixture | 1 |
 | C-283 | A call through a Fn-typed local resolves that local, never a same-named top-level fn | 0.57.1 | active | fixture | 1 |
 | C-284 | A fallible list HOF driven by a user effect fn callback runs identically on both targets | 0.57.1 | active | fixture | 4 |
-| C-285 | regex.captures answers the whole match at index 0, and `none` means only that nothing matched | 0.57.1 | active | fixture | 1 |
+| C-285 | regex.captures answers the whole match at index 0, and `none` means only that nothing matched | 0.57.1 | active | fixture | 2 |
 | C-286 | `??` reads its source; the Option survives the elimination and stays readable | 0.57.1 | active | fixture | 1 |
 | C-287 | A tail-position heap-result if/match with a none arm executes the taken arm for record and list payloads | 0.57.1 | active | fixture | 1 |
 | C-288 | list.enumerate over a rich-variant list executes on both targets | 0.57.1 | active | fixture | 1 |
@@ -370,7 +370,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-332 | List-rest patterns: the tail past the prefix binds as a list, identically on every leg | 0.62.0 | active | fixture | 2 |
 | C-333 | As-patterns: the whole value binds beside its own destructuring, identically on every leg | 0.62.0 | active | fixture | 1 |
 | C-334 | A closure call takes +1 on a borrowed heap argument: the RC-3 callee-owned convention holds through call_indirect | 0.62.0 | active | fixture | 3 |
-| C-335 | path.extension treats a leading dot as a hidden-file marker, not an extension, on both targets | 0.62.0 | active | fixture | 1 |
+| C-335 | path.extension treats a leading dot as a hidden-file marker, not an extension, on both targets | 0.62.0 | active | fixture | 2 |
 | C-336 | Each test starts from re-initialized mutable module globals, on both targets | 0.57.1 | active | fixture | 0 |
 | C-337 | The bytes search, edit and predicate family answers identically on every leg | 0.62.0 | active | fixture | 1 |
 | C-338 | The int bit family, bits_to_f32 and the Int -> Float32 convert agree on every leg | 0.62.0 | active | fixture | 2 |
