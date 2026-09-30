@@ -85,3 +85,12 @@ summary = "The bytes in-place writers declare their receiver `mut`, like `list.p
 breaks = [
   "passing a `let` binding, a non-`mut` parameter or a temporary to a bytes writer (`bytes.append_*`, `set_*`, `write_*`, `fill`, `clear`, `copy_from`) is E032 — declare a local buffer with `var`, and give a helper that fills its caller's buffer a `mut b: Bytes` parameter (the caller then passes a `var`)",
 ]
+
+[[epoch]]
+n = 6
+since = "0.67.0"
+name = "no-var-in-concurrent-bodies"
+summary = "E008 generalized from a `fan` block capturing a `var` to any concurrently-run body reaching one: http handlers, every fan head and callback, and the user fns their slots flow through (ADR-0020 §3, #2697). Measured impact: 0 programs across spec/, examples/, stdlib, research exercises and the 44 downstream canary projects."
+breaks = [
+  "a `var` reachable from an http handler or a `fan` body (captured, top-level, or through a called fn) is E008; keep cross-request state outside the program, bind a `let` copy for read-only use",
+]
