@@ -86,6 +86,15 @@ pub(crate) fn droppable_ty(t: &Ty) -> bool {
     }
 }
 
+/// The operand types the Binder names: the droppable shapes, and a user
+/// type by name (a record or a variant, `Ty::Named`) — whether ITS block is
+/// released is the Bind route's call (`rc_droppable` over the type table);
+/// a name whose shape carries no block binds a plain local (#2972: `T("x") ==
+/// T("y")` over a variant with a String payload left both operands live).
+pub(crate) fn bindable_ty(t: &Ty) -> bool {
+    droppable_ty(t) || matches!(t, Ty::Named(..) | Ty::Record { .. } | Ty::Variant { .. })
+}
+
 /// A call that produces its value: a Named user fn, or a module op
 /// (linked or native — either way a block nobody else owns). A closure call
 /// (`Computed`) is owned the same way (rc_ownership.rs: the lifted body's
@@ -93,13 +102,30 @@ pub(crate) fn droppable_ty(t: &Ty) -> bool {
 /// (#2970: `match f(x) { … }` inside the fallible-HOF carriers left every
 /// element's Result block unowned); an EXTRACTION already releases an owned
 /// closure-call carrier at the `!` itself (data.rs `release_ok_carrier`), so
-/// `extraction` keeps that immediate release instead of parking it.
+/// `extraction` keeps that immediate release instead of parking it. A `??`
+/// releases nothing (#2969: `g("41") ?? "err"` over an effect fn value left
+/// the carrier live), so only `!` / `?` pass `true`.
 fn is_produced_by_call(e: &IrExpr, extraction: bool) -> bool {
     match &e.kind {
         IrExprKind::Call { target: CallTarget::Named { .. } | CallTarget::Module { .. }, .. } => true,
         IrExprKind::Call { target: CallTarget::Computed { .. }, .. } => !extraction,
+        // `m[k]` lowers as the `map.get` call (emitter.rs `lower_data`).
+        IrExprKind::MapAccess { .. } => true,
         _ => false,
     }
+}
+
+/// A literal operand: evaluating it has no effect, so it may stay in place
+/// while the operands around it are named.
+fn is_literal(e: &IrExpr) -> bool {
+    matches!(
+        e.kind,
+        IrExprKind::LitInt { .. }
+            | IrExprKind::LitFloat { .. }
+            | IrExprKind::LitBool { .. }
+            | IrExprKind::LitStr { .. }
+            | IrExprKind::Unit
+    )
 }
 
 /// The value an expression evaluates to, through block wrappers.
@@ -177,6 +203,49 @@ impl Binder<'_> {
         *stmts = out;
     }
 
+    /// #2988 — a list / tuple / record literal whose operand can PROPAGATE
+    /// (`[1, chk(s)!]`, `(1, chk(s)!)`, `P { a: 1, b: chk(s)! }`). The
+    /// emitter allocates the container first and lowers the operands into
+    /// it, so a `!` that returns from the middle of the build leaves the
+    /// half-built block held only by the operand stack: never released,
+    /// nor the credits of the operands already stored. Every operand is
+    /// bound first, in order — `{ let a = 1; let b = chk(s)!; [a, b] }` —
+    /// so the `!` exits before anything is allocated and the operands
+    /// already evaluated are frame locals its exit plan releases. (The
+    /// one-slot boxes do the same in the emitter, data.rs
+    /// `lower_payload_then_box`.) A literal no operand of which propagates
+    /// keeps its tree, and its bytes.
+    fn hoist_propagating_elements(&mut self, e: &mut IrExpr) -> bool {
+        let operands: Vec<&mut IrExpr> = match &mut e.kind {
+            IrExprKind::List { elements } | IrExprKind::Tuple { elements } => elements.iter_mut().collect(),
+            IrExprKind::Record { fields, .. } => fields.iter_mut().map(|(_, v)| v).collect(),
+            // The base is evaluated first (copy, then overwrite).
+            IrExprKind::SpreadRecord { base, fields } => {
+                std::iter::once(base.as_mut()).chain(fields.iter_mut().map(|(_, v)| v)).collect()
+            }
+            _ => return false,
+        };
+        if !operands.iter().any(|a| crate::fs_meta::expr_propagates(a)) {
+            return false;
+        }
+        let mut binds = Vec::new();
+        for a in operands {
+            if is_literal(a) {
+                continue;
+            }
+            let (ty, span) = (a.ty.clone(), a.span);
+            let id = self.vars.alloc(sym("__elem_tmp"), ty.clone(), Mutability::Let, span);
+            let value =
+                std::mem::replace(a, IrExpr { kind: IrExprKind::Var { id }, ty: ty.clone(), span, def_id: None });
+            binds.push(IrStmt { kind: IrStmtKind::Bind { var: id, mutability: Mutability::Let, ty, value }, span });
+        }
+        *self.changed = true;
+        let (ty, span) = (e.ty.clone(), e.span);
+        let lit = std::mem::take(e);
+        *e = IrExpr { kind: IrExprKind::Block { stmts: binds, expr: Some(Box::new(lit)) }, ty, span, def_id: None };
+        true
+    }
+
     fn walk_with_tail(&mut self, e: &mut IrExpr, tail: bool) {
         match &mut e.kind {
             IrExprKind::Lambda { body, .. } => self.visit_with_tail(body, true),
@@ -219,12 +288,34 @@ impl Binder<'_> {
 fn is_born_here(e: &IrExpr) -> bool {
     matches!(
         &e.kind,
-        IrExprKind::List { .. }
-            | IrExprKind::StringInterp { .. }
-            | IrExprKind::BinOp { .. }
-            | IrExprKind::Match { .. }
-            | IrExprKind::If { .. }
-    ) || unwrap_or_joins_owned(e)
+        IrExprKind::List { .. } | IrExprKind::StringInterp { .. } | IrExprKind::BinOp { .. }
+    ) || is_constructed_here(e)
+        || unwrap_or_joins_owned(e)
+        // `r?` (Result → Option) builds a fresh some-cell (data.rs, #2969).
+        || matches!(&e.kind, IrExprKind::ToOption { .. })
+        // A value `match` hands its join one credit on every arm
+        // (patterns.rs `lower_arm_body`): `a + match r { … }` read it and
+        // released nothing (#2972). A value `if` is owned exactly when its
+        // lowering normalized it; named either way, the Bind route decides.
+        || matches!(&e.kind, IrExprKind::Match { .. } | IrExprKind::If { .. })
+}
+
+/// #2971 / #2972 / #3018 — a block the expression CONSTRUCTS: a tuple, a
+/// record, a `some` / `ok` / `err` box. A reader (`match (1, (4, 5), 3)`,
+/// `(1, 2) == (1, 2)`, `(2, 7).0`) consumes nothing, so like a call result
+/// the fresh block has no owner unless it is named first.
+fn is_constructed_here(e: &IrExpr) -> bool {
+    matches!(
+        &e.kind,
+        IrExprKind::Tuple { .. }
+            | IrExprKind::Record { .. }
+            | IrExprKind::SpreadRecord { .. }
+            | IrExprKind::OptionSome { .. }
+            | IrExprKind::ResultOk { .. }
+            | IrExprKind::ResultErr { .. }
+            | IrExprKind::MapLiteral { .. }
+            | IrExprKind::EmptyMap
+    )
 }
 
 /// `r ?? fb` over a heap payload hands its consumer a credit when the
@@ -271,6 +362,9 @@ impl IrMutVisitor for Binder<'_> {
         if tail && matches!(e.kind, IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }) {
             return;
         }
+        if self.hoist_propagating_elements(e) {
+            return;
+        }
         match &mut e.kind {
             IrExprKind::Block { stmts, .. } | IrExprKind::While { body: stmts, .. } => {
                 self.name_destructure_subjects(stmts);
@@ -282,15 +376,14 @@ impl IrMutVisitor for Binder<'_> {
         if let IrExprKind::StringInterp { parts } = &mut e.kind {
             fold_int_display_parts(parts, self.changed);
         }
-        // A field / position read consumes nothing either, but naming every
-        // call-produced record it reads is a wider change than #2970 needs:
-        // only an owned `r ?? fb` (data.rs `own_unwrap_or_join`) is bound.
+        // A field / position read consumes nothing either: its object is
+        // named when it is an owned `r ?? fb` (data.rs `own_unwrap_or_join`),
+        // a call result or a constructed literal (#3018).
         let projection = matches!(
             e.kind,
             IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } | IrExprKind::OptionalChain { .. }
         );
-        let extraction =
-            matches!(e.kind, IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } | IrExprKind::UnwrapOr { .. });
+        let unboxes = matches!(e.kind, IrExprKind::Try { .. } | IrExprKind::Unwrap { .. });
         let operands: Vec<&mut IrExpr> = match &mut e.kind {
             // A binary op over droppable operands — concatenation, or an
             // equality / ordering test on strings and lists — reads both
@@ -322,17 +415,49 @@ impl IrMutVisitor for Binder<'_> {
                 .collect(),
             _ => return,
         };
+        // Children were rewritten first: an operand may already be a
+        // `{ let …; value }` block — its value is the block's tail.
+        let mut named: Vec<bool> = operands
+            .iter()
+            .map(|a| {
+                let core = tail_of(a);
+                let produced = if projection {
+                    // #3018: a field / position read of a call result or a
+                    // constructed literal (`f().0`, `(2, 7).0`, `f().a`) names
+                    // the object so the frame releases it after the read.
+                    unwrap_or_joins_owned(core) || is_produced_by_call(core, false) || is_constructed_here(core)
+                } else {
+                    // A `!` / `?` of a constructed box (`err(e)!`, `ok(x)!`)
+                    // has its own raise / unbox route and stays unnamed; a `??`
+                    // over one (`some(2.5) ?? 0.1`) only reads it.
+                    is_produced_by_call(core, unboxes)
+                        || (is_born_here(core) && !(unboxes && is_constructed_here(core)))
+                };
+                bindable_ty(&a.ty) && produced
+            })
+            .collect();
+        // #2969: an extraction a reader consumes (`"[" + next(s)!`) hands it
+        // the payload's credit when its carrier was an owned temporary
+        // (data_unwrap.rs `release_ok_carrier`), and the reader releases
+        // nothing — it is named like any produced value. It is an EFFECT
+        // call, so every operand before it is named too, in order: a scalar
+        // effect operand left in place (`"${count()!} ${name()!}"`) would
+        // otherwise run after it.
+        if !projection
+            && let Some(last) = operands.iter().rposition(|a| {
+                bindable_ty(&a.ty) && matches!(tail_of(a).kind, IrExprKind::Try { .. } | IrExprKind::Unwrap { .. })
+            })
+        {
+            named[last] = true;
+            for (i, a) in operands.iter().enumerate().take(last) {
+                if !is_literal(a) {
+                    named[i] = true;
+                }
+            }
+        }
         let mut binds: Vec<IrStmt> = Vec::new();
-        for a in operands {
-            // Children were rewritten first: an operand may already be a
-            // `{ let …; value }` block — its value is the block's tail.
-            let core = tail_of(a);
-            let produced = if projection {
-                unwrap_or_joins_owned(core)
-            } else {
-                is_produced_by_call(core, extraction) || is_born_here(core)
-            };
-            if !(droppable_ty(&a.ty) && produced) {
+        for (a, name) in operands.into_iter().zip(named) {
+            if !name {
                 continue;
             }
             let ty = a.ty.clone();
