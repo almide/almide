@@ -5,9 +5,10 @@
 // lifted / auto-wrap / declared-Option / mut params) and the mutable-global slot
 // map as pure functions of the program and installs them for the per-fn
 // lowering. The incumbent passes that used to fill them were deleted with that
-// pipeline (#2935, #2950). `DERIVED_TYPE_OWNERS` alone is still never written
-// (#3000). A per-registry doc names the old populating pass; read it as
-// "derived at the same point".
+// pipeline (#2935, #2950). The one registry nothing derived,
+// `DERIVED_TYPE_OWNERS`, is folded away (#3000): it was never written, so its
+// reader answered "unchanged" everywhere. A per-registry doc names the old
+// populating pass; read it as "derived at the same point".
 thread_local! {
     /// The names of NEVER-ERR LIFTED user effect fns (an `effect fn` whose declared return is
     /// non-Result, so the frontend lifts its call type to `Result[T, String]`, but whose body builds
@@ -80,48 +81,8 @@ thread_local! {
     /// bump(); bump()` printed `5 3 0` where native says `5 8 8` — a LIVE miscompile).
     /// Populated by the pipeline / classify globals collection (the same pre-lowering
     /// point the maps are built); shapes beyond the slot subset still WALL.
-    /// Cross-module DERIVED-METHOD owners (#790 codec bridge): base type name → the ONE
-    /// non-stdlib module that declares it (unique owners only; main-declared types are
-    /// excluded by the pipeline's population). The MIR desugar consults this when it
-    /// forms a `T.encode`/`T.decode` Named target from a Method call, resolving it to
-    /// the module-mangled derived fn instead of an unlinked bare name.
-    pub(crate) static DERIVED_TYPE_OWNERS: std::cell::RefCell<std::collections::HashMap<String, String>> =
-        std::cell::RefCell::new(std::collections::HashMap::new());
     pub(crate) static MUTABLE_GLOBAL_VARS: std::cell::RefCell<std::collections::HashMap<u32, (u32, Ty)>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
-}
-
-/// Resolve a freshly-formed `T.encode`/`T.decode` (or `mod.T.<m>`) Named target through
-/// the derived-method owner map: a uniquely-owned module type's codec method maps to the
-/// module-mangled derived fn (`almide_rt_<m>_T_<method>` — dots become underscores, the
-/// `user_module_fn_name` convention). Everything else passes through unchanged.
-pub fn resolve_derived_method_owner(name: String) -> String {
-    let resolved = {
-        let parts: Vec<&str> = name.split('.').collect();
-        let (qualifier, ty, method) = match parts.as_slice() {
-            [t, m] => (None, *t, *m),
-            [q, t, m] => (Some(*q), *t, *m),
-            _ => return name,
-        };
-        if method != "encode" && method != "decode" {
-            return name;
-        }
-        DERIVED_TYPE_OWNERS.with(|o| {
-            let o = o.borrow();
-            match o.get(ty) {
-                Some(m) if qualifier.is_none() || qualifier == Some(m.as_str()) => {
-                    // The DEFINITION side mangles the QUALIFIED type name (`varlib.Pigment`
-                    // → `varlib_Pigment`) under the module prefix, so the derived fn is
-                    // `almide_rt_varlib_varlib_Pigment_encode` (module twice — observed in
-                    // the linked IR). Mirror that exactly or the call dangles unlinked.
-                    let mm = m.replace('.', "_");
-                    Some(format!("almide_rt_{mm}_{mm}_{ty}_{method}"))
-                }
-                _ => None,
-            }
-        })
-    };
-    resolved.unwrap_or(name)
 }
 
 /// Is `var` a mutable module-level `var` (slot-routed cross-function state)?
