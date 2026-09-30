@@ -1,0 +1,2 @@
+expects_error = "an index can only be the last step of an assignment target"
+hint_substring = "Read the element into a `var`"

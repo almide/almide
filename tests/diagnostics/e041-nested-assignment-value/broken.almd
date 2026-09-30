@@ -1,0 +1,14 @@
+// E041, nested-target variant (#3063, #3064): `o.inner.n = f()` and
+// `o.inner.m[k] = f()` take the same explicit-propagation rule as `x = f()`.
+type In = { n: Int, m: Map[String, Int] }
+
+type Out = { inner: In }
+
+effect fn get() -> Int = 42
+
+effect fn main() -> Unit = {
+  var o = Out { inner: { n: 0, m: [:] } }
+  o.inner.n = get()
+  o.inner.m["k"] = get()!
+  println("${o.inner.n} ${o.inner.m}")
+}
