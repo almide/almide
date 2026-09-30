@@ -1408,6 +1408,7 @@ evidence  = [
   { path = "spec/wasm_cross/nested_three_level_literal.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_three_level_loop_build.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_heap_ops_release_temporaries.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_reduce_fused_fold_release.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-102"
@@ -4275,6 +4276,7 @@ evidence  = [
   { path = "spec/wasm_cross/closure_borrowed_arg_guard.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_update_callback_result_ownership.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_fold_fused_callback_result_ownership.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_reduce_fused_fold_release.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-335"
