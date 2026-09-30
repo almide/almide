@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at a188ed4ff — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at dad2f580a — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -526,6 +526,7 @@ ad13f8934bcbd4c4ea29ba112e57823bf66714ca60514033ed0af41608d23860	0	spec/wasm_cro
 4f50ab38f656bff2f5da72786a5d7b15b2265c62a53a022fc396f82d80b65e3d	0	spec/wasm_cross/nested_map_list_values.almd
 7a80ee52fa81f309ac0533e60a6e4371fd95453e6a766aec85248034f4124d4e	0	spec/wasm_cross/nested_match_heap_arm.almd
 06e9d52c1720fca412803e3b07c4b228ff113e303f4c7ab94665319d832bbfb7	0	spec/wasm_cross/nested_payload_guard.almd
+420161abe0ec7f363cb76658ad170b2a6f0ae07f61b0720173c5f4053e51f90c	0	spec/wasm_cross/nested_place_assign.almd
 33b0719767e9867f4258f57c15651307b877eed8212a3a1a6d9e0aa88fa8522e	0	spec/wasm_cross/nested_scalar_record_append.almd
 917df3320d778ddbaa5c5c7742bc4046bf803c36ed2b050f30844ed206783469	0	spec/wasm_cross/nested_three_level_literal.almd
 53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3	0	spec/wasm_cross/nested_three_level_loop_build.almd
