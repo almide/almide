@@ -1,4 +1,5 @@
-//! The native build cache sees a DEPENDENCY package's `native/` tree (#3091).
+//! The native build cache sees a DEPENDENCY package's `native/` tree (#3091),
+//! and every native builder (`run`, `build`, `bench`) injects it (#3095).
 //!
 //! The cached binary used to be keyed by the building package's `native/`
 //! contents only (#887), while the build also copied every dependency's
@@ -115,5 +116,25 @@ fn rustflags_are_part_of_the_native_cache_key() {
         "7\nalpha\n",
         "a RUSTFLAGS change was a stale cache hit"
     );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// `almide bench` builds a package's native modules the way `run` does
+/// (#3095): it used to pass no native config, so a package whose code calls
+/// an `@extern(rust)` module failed to compile under `bench` alone.
+#[test]
+fn bench_builds_the_native_modules_of_the_package_and_its_dependencies() {
+    let root = scratch("bench");
+    let out = Command::new(env!("CARGO_BIN_EXE_almide"))
+        .current_dir(root.join("app"))
+        .env("ALMIDE_RUN_PROJECT_DIR", root.join(".run"))
+        .env_remove("RUSTFLAGS")
+        .env_remove("CARGO_ENCODED_RUSTFLAGS")
+        .args(["bench", "src/main.almd", "--runs", "1"])
+        .output()
+        .expect("spawn almide bench");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "almide bench failed on a package with a native dependency\n{stderr}");
+    assert!(stderr.contains("median"), "no median headline:\n{stderr}");
     let _ = std::fs::remove_dir_all(&root);
 }
