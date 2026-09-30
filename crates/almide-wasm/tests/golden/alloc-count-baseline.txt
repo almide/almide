@@ -508,7 +508,7 @@
 52	34	704	52	spec/wasm_cross/mutable_global_field_mut_arg.almd
 4	1	32	4	spec/wasm_cross/mutable_global_repeat_writes.almd
 1	0	16	1	spec/wasm_cross/mutable_global_scalar_assign.almd
-167	104	1522	167	spec/wasm_cross/mutator_writeback_releases_old_block.almd
+160	100	1447	160	spec/wasm_cross/mutator_writeback_releases_old_block.almd
 37	31	116	37	spec/wasm_cross/mutual_append.almd
 10	0	120	10	spec/wasm_cross/mutual_recursive_types.almd
 0	0	0	0	spec/wasm_cross/mutual_tail_recursion.almd
