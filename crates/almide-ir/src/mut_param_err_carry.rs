@@ -330,14 +330,15 @@ fn carry_fn(
     let IrExprKind::Block { stmts, expr: Some(tail) } = &mut func.body.kind else { return };
     // The original body is the first statement (`let __mp_ret = <body>` or
     // `<body>;`). An effect fn declared `-> T` may still yield a whole
-    // Result (`if c then err(..) else ok(n)`): strip it to the raw payload so
-    // its `err(..)` tails are raise leaves.
+    // Result, or a Result in some tails (`if c then err(..) else ok(n)`, a
+    // `none => err(..)` arm): strip every tail to the raw payload so its
+    // `err(..)` tails are raise leaves.
     match stmts.first_mut().map(|s| &mut s.kind) {
-        Some(IrStmtKind::Bind { value, ty, .. }) if value.ty.result_ok_ty().is_some() && ty.result_ok_ty().is_none() => {
+        Some(IrStmtKind::Bind { value, ty, .. }) if ty.result_ok_ty().is_none() => {
             let ty = ty.clone();
             crate::mut_param::strip_ok_layer(value, &ty);
         }
-        Some(IrStmtKind::Expr { expr }) if expr.ty.result_ok_ty().is_some() => {
+        Some(IrStmtKind::Expr { expr }) => {
             crate::mut_param::strip_ok_layer(expr, &Ty::Unit);
         }
         _ => {}
@@ -391,12 +392,18 @@ impl IrMutVisitor for Pairer<'_> {
                     inner.ty = target_ty_of(inner);
                     return;
                 }
-                if inner.ty.result_ok_ty().is_none() {
+                if inner.ty.is_option() {
                     return;
                 }
                 // `x!` → match x { ok(v) => v, err(e) => err((e, b..))! }
                 let ty = e.ty.clone();
-                let x = std::mem::replace(inner.as_mut(), placeholder());
+                let mut x = std::mem::replace(inner.as_mut(), placeholder());
+                // A rotated move-mode call (`let b = f(r)!`, a never-err
+                // callee) is typed with its raw payload; its value is still
+                // the lifted `Result[_, String]` carrier.
+                if x.ty.result_ok_ty().is_none() {
+                    x.ty = Ty::result(x.ty.clone(), Ty::String);
+                }
                 let ok_ty = x.ty.result_ok_ty().filter(|t| !matches!(t, Ty::Unknown)).unwrap_or_else(|| ty.clone());
                 let v = self.vt.alloc(sym("__mp_v"), ok_ty.clone(), Mutability::Let, None);
                 let er = self.vt.alloc(sym("__mp_e"), Ty::String, Mutability::Let, None);
