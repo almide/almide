@@ -28,13 +28,9 @@ call-arg:Lambda:list.__fallible_fold__Int_Int_E	4
 call-arg:Lambda:list.__fallible_fold__String_Int_String	1
 call-arg:Lambda:list.__fallible_map__Int_Int_String	2
 call-arg:Lambda:list.__fallible_map__String_Int_String	8
-call-arg:Lambda:list.all	3
-call-arg:Lambda:list.any	2
 call-arg:Lambda:list.filter_map	2
-call-arg:Lambda:list.find	9
 call-arg:Lambda:list.flat_map	1
-call-arg:Lambda:list.fold:fused	4
-call-arg:Lambda:list.fold:heap-acc	11
+call-arg:Lambda:list.fold:fused	8
 call-arg:Lambda:list.push	1
 call-arg:Lambda:list.reduce	1
 call-arg:Lambda:list.scan	1
@@ -50,7 +46,8 @@ call-arg:Lambda:map.map	2
 call-arg:Lambda:map.update	1
 call-arg:Lambda:matrix.map	2
 call-arg:Lambda:option.filter	1
-call-arg:Lambda:option.map	2
+call-arg:Lambda:option.flat_map	1
+call-arg:Lambda:option.map	3
 call-arg:Lambda:option.or_else	1
 call-arg:Lambda:option.unwrap_or_else	2
 call-arg:Lambda:result.filter__Option_Float_String	3
@@ -61,7 +58,7 @@ call-arg:Lambda:result.map_err	2
 call-arg:Lambda:result.unwrap_or_else	5
 call-arg:Lambda:set.filter	2
 call-arg:MapLiteral	1
-call-arg:Member	93
+call-arg:Member	94
 call-arg:Range	1
 call-arg:TupleIndex	7
 call-arg:UnwrapOr-carrier:Member	1
@@ -78,7 +75,7 @@ effect:carrier:ok-borrowed	2
 field:EmptyMap	3
 field:Member	1
 forin-map	4
-heap-interp-part:Block	12
+heap-interp-part:Block	13
 heap-interp-part:Call	4
 heap-interp-part:If	1
 heap-interp-part:IndexAccess	3
@@ -93,13 +90,14 @@ heap-operand:Call	14
 heap-operand:If	2
 heap-operand:IndexAccess	3
 heap-operand:MapLiteral	2
-heap-operand:Match	3
-heap-operand:Member	20
+heap-operand:Match	4
+heap-operand:Member	23
 heap-operand:OptionNone	2
 heap-operand:OptionSome	4
 heap-operand:Record	4
 heap-operand:ResultOk	2
 heap-operand:Tuple	1
+heap-operand:TupleIndex	2
 heap-operand:Unwrap	1
 heap-operand:UnwrapOr	4
 interp-part:IndexAccess	4
@@ -127,7 +125,7 @@ module-arm:unaudited:bytes.set_u8	4
 module-arm:unaudited:fan.any	4
 module-arm:unaudited:list.clear	2
 module-arm:unaudited:list.pop	2
-module-arm:unaudited:list.push	132
+module-arm:unaudited:list.push	133
 module-arm:unaudited:map.clear	3
 module-arm:unaudited:map.insert	3
 module-arm:unaudited:string.clear	3
@@ -135,7 +133,7 @@ module-arm:unaudited:string.push	2
 module-result:view:option.flatten	1
 named-op	11
 operand:IndexAccess	5
-operand:Member	20
+operand:Member	21
 operand:TupleIndex	2
 operand:UnwrapOr-carrier:MapAccess	2
 operand:UnwrapOr-carrier:Unwrap	1
@@ -158,6 +156,7 @@ stmt:FieldAssign	11
 stmt:Guard	36
 stmt:IndexAssign	25
 stmt:MapInsert	4
+store:borrowed-temp	1
 store:retain-unknown-local	4
 tail:IndexAccess	1
 tail:MapAccess	5
@@ -165,8 +164,8 @@ tail:Member	9
 tail:SpreadRecord	2
 tail:TupleIndex	4
 tail:Unwrap	14
-tail:view-result	7
+tail:view-result	8
 tuple-elem:TupleIndex	1
 unwrap-or:unowned-fresh-fallback	36
-unwrap:abort	40
+unwrap:abort	39
 unwrap:err-repr	2
