@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at b433d3c8f — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at 5b3aa9b92 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -195,6 +195,7 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	1	spec/wasm_cro
 19707f1bad006ff8b324685739426f656e03c3d61238a9d29888c6709fc22289	0	spec/wasm_cross/filter_map_conditional_arm.almd
 aa4d4c2fde5ae8069ed31c44b10f4d100e8c1ed24cc91a3348e8f9e140ef0741	0	spec/wasm_cross/flat_map_aliased_field.almd
 15cc683b3fed64d5507152c8975e7d30df3bb6e2ecb5686b6b433fac464341d1	0	spec/wasm_cross/flight_pid_control.almd
+e3c9c38def2b17b93d700e8746724cf2787cda035cdc279df8c515de763f3a2e	0	spec/wasm_cross/float32_arithmetic_rounds.almd
 e3790d3b2871c445860522f564dbe9b72ee3da5a12c9c622dbde3e1f2b7f5eed	0	spec/wasm_cross/float32_literal_excess_precision.almd
 33fa31c8e56e45b8ba37395fd286ac4d9853e697f7bedfc8da7ab09df45b7d37	1	spec/wasm_cross/float_clamp_invalid.almd
 ba72837574bea9ce8c7d484a1404ba8e3bb8f7697801987872e883e832e39fb3	0	spec/wasm_cross/float_clamp_negative_zero.almd

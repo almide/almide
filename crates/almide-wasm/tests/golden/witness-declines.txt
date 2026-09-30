@@ -14,7 +14,7 @@ call-arg:Lambda	211
 call-arg:MapLiteral	1
 call-arg:Member	29
 call-arg:Record	11
-call-arg:StringInterp	218
+call-arg:StringInterp	220
 call-arg:Tuple	9
 call-arg:TupleIndex	4
 call-arg:UnwrapOr	74

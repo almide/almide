@@ -194,6 +194,7 @@
 3105	spec/wasm_cross/filter_map_conditional_arm.almd
 3233	spec/wasm_cross/flat_map_aliased_field.almd
 1987	spec/wasm_cross/flight_pid_control.almd
+11055	spec/wasm_cross/float32_arithmetic_rounds.almd
 4587	spec/wasm_cross/float32_literal_excess_precision.almd
 4845	spec/wasm_cross/float_clamp_invalid.almd
 5675	spec/wasm_cross/float_clamp_negative_zero.almd
