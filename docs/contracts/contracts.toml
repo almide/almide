@@ -532,6 +532,7 @@ evidence  = [
   { path = "spec/wasm_cross/inplace_clear_alias.almd", class = "fixture" },
   { path = "spec/wasm_cross/inplace_clear_alias_field.almd", class = "fixture" },
   { path = "spec/wasm_cross/record_scalar_field_assign_alias.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_place_assign.almd", class = "fixture" },
 ]
 
 # ── LIST BOUNDS GRACEFULNESS ─────────────────────────────────────────
@@ -979,6 +980,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/effect_assign_unwrap.almd", class = "fixture" },
   { path = "spec/wasm_cross/fallible_hof_option_effect_callback.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_place_assign.almd", class = "fixture" },
 ]
 
 # ── STRING POSITION API SPEAKS ONE UNIT: CODEPOINTS ──────────────────

@@ -1,0 +1,10 @@
+// An index followed by more steps (`ps[0].n = v`) is not an assignment
+// target (#3064): the element would have to be read out and stored back.
+// Refused at the target with that rewrite, not as "Assignments return Unit".
+type P = { n: Int }
+
+fn main() -> Unit = {
+  var ps = [P { n: 1 }]
+  ps[0].n = 5
+  println("${ps}")
+}

@@ -1,0 +1,12 @@
+// A field write mutates its root binding, so the root must be a `var`
+// (#3064) — as `xs[i] = v` already required. `o.inner.n = v` on a `let`
+// passed check and failed natively as rustc E0594.
+type In = { n: Int }
+
+type Out = { inner: In }
+
+fn main() -> Unit = {
+  let o = Out { inner: { n: 0 } }
+  o.inner.n = 1
+  println("${o.inner.n}")
+}

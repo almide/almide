@@ -1,0 +1,57 @@
+// @contract: C-033, C-064
+// Every assignment target GRAMMAR.md lists writes in place on every leg
+// (#3064): a nested field (`o.inner.xs = v`, three levels deep), a field
+// then an index into a list or a map (`o.inner.m[k] = v`), rooted at a local
+// `var`, a `mut` parameter and a module-level `var`. Before, the nested forms
+// failed to parse ("Assignments return Unit"). The write keeps value
+// semantics (C-033): an alias of the root or of an inner record taken before
+// the write keeps the old value. The target's type is the expected type of
+// the value (#3051: `o.inner.xs = []`), and an effect call on the right
+// propagates only with an explicit `!` (#3063, C-064).
+type Leaf = { tag: String, n: Int }
+
+type In = { xs: List[Int], m: Map[String, Int], leaf: Leaf }
+
+type Out = { inner: In, name: String }
+
+var g: Out = { inner: { xs: [1], m: [:], leaf: { tag: "g", n: 0 } }, name: "g" }
+
+effect fn next(n: Int) -> Int = n + 1
+
+fn fresh(name: String) -> Out = {
+  inner: { xs: [1, 2, 3], m: ["a": 1], leaf: { tag: "t", n: 0 } },
+  name: name,
+}
+
+fn show(o: Out) -> String = "${o.name} xs=${o.inner.xs} m=${o.inner.m} leaf=${o.inner.leaf.tag}/${o.inner.leaf.n}"
+
+fn reset(mut o: Out) -> Unit = {
+  o.inner.m = [:]
+  o.inner.leaf.tag = "reset"
+  o.inner.xs[0] = 0
+}
+
+effect fn main() -> Unit = {
+  var o = fresh("local")
+  let before = o
+  let inner_before = o.inner
+  o.inner.xs = []
+  o.inner.leaf.n = 7
+  o.inner.leaf.tag = "deep"
+  o.inner.m["b"] = 2
+  o.inner.m["a"] = next(o.inner.leaf.n)!
+  println(show(o))
+  println(show(before))
+  println("inner alias xs=${inner_before.xs} leaf=${inner_before.leaf.tag}")
+  var p = fresh("indexed")
+  p.inner.xs[1] = 20
+  p.inner.xs[2] = p.inner.xs[1] + 1
+  println(show(p))
+  var q = fresh("param")
+  reset(q)
+  println(show(q))
+  g.inner.xs = [4, 5]
+  g.inner.leaf.n = next(g.inner.leaf.n)!
+  g.inner.m["k"] = list.len(g.inner.xs)
+  println(show(g))
+}
