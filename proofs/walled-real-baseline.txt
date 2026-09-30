@@ -477,3 +477,5 @@ spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint16
 spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint32
 spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint64
 spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint8
+spec/lang/assign_target_expected_type_test.almd :: __test_almd_an empty literal takes a module-level var's field type
+spec/wasm_cross/nested_place_assign.almd :: main
