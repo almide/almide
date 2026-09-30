@@ -905,6 +905,12 @@ fn render_runtime_call_args_owned(ctx: &RenderContext, symbol: &almide_base::int
 
 /// One argument of [`render_runtime_call_args_owned`].
 fn render_runtime_call_arg_owned(ctx: &RenderContext, symbol: &almide_base::intern::Sym, a: &IrExpr) -> String {
+    // A user-module fn normalized into the RuntimeCall spelling
+    // (`almide_rt_<module>_<fn>`) takes the mapped `&AlmideRcCow<Vec<u8>>`,
+    // as a user callee does: a Bytes global reaches it glued (#2937).
+    if !rc_cow_symbol_is_native_runtime(symbol.as_str()) {
+        return render_user_call_arg(ctx, a);
+    }
     let r = render_expr_owned(ctx, a);
     // #617: a concrete container-of-raw runtime param cannot deref-coerce
     // through AlmideRcCow ELEMENTS — clone them out at this (rare) boundary. The
