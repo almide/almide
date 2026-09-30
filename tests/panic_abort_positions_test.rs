@@ -16,7 +16,7 @@
 
 #![allow(dead_code)]
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 include!("wasm_runtime_test_parts/interp_leg.rs");
