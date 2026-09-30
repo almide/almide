@@ -682,6 +682,9 @@ evidence  = [
   { path = "spec/churn/construct_from_temp_churn.almd", class = "by-construction" },
   { path = "spec/churn/record_churn.almd", class = "by-construction" },
   { path = "spec/churn/tco_loop_churn.almd", class = "by-construction" },
+  { path = "spec/wasm_cross/leak_free_reader_temporaries.almd", class = "fixture" },
+  { path = "spec/wasm_cross/leak_free_propagating_literal_operand.almd", class = "fixture" },
+  { path = "spec/wasm_cross/leak_free_result_option_carriers.almd", class = "fixture" },
 ]
 
 # ── FILESYSTEM (WASI PREOPEN RESOLUTION) ─────────────────────────────
@@ -3913,6 +3916,7 @@ since     = "0.60.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fuel_cut_in_arm_loop.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fuel_cut_releases_frame.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-302"
