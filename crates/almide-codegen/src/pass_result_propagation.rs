@@ -373,6 +373,12 @@ fn wrap_guard_elses(body: &mut IrExpr, lifted: &HashMap<String, Ty>, intr: &Hash
 /// Recurses into branching structures (Block, If, Match) to find all
 /// exit paths. Guard elses are the other exits; `wrap_guard_elses` wraps them.
 fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>, intr: &HashSet<String>) -> IrExpr {
+    // A `panic(..)` tail never yields a value: Ok-wrapping it stamped
+    // `Ok::<(), String>(panic)` against the fn's real channel (E0308, #3118).
+    // Left bare, the abort's `!` coerces to whatever the fn returns.
+    if is_panic(&expr) {
+        return expr;
+    }
     let ty = expr.ty.clone();
     let span = expr.span;
     match expr.kind {
@@ -395,7 +401,7 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>, intr: &HashSet<St
         IrExprKind::If { cond, then, else_ } => {
             let then = Box::new(wrap_tail_in_ok(*then, lifted, intr));
             let else_ = Box::new(wrap_tail_in_ok(*else_, lifted, intr));
-            let wty = then.ty.clone();
+            let wty = if is_panic(&then) { else_.ty.clone() } else { then.ty.clone() };
             IrExpr { kind: IrExprKind::If { cond, then, else_ }, ty: wty, span, def_id: None }
         }
         IrExprKind::Match { subject, arms } => {
@@ -403,7 +409,7 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>, intr: &HashSet<St
                 pattern: arm.pattern, guard: arm.guard,
                 body: wrap_tail_in_ok(arm.body, lifted, intr),
             }).collect();
-            let wty = arms.first().map(|a| a.body.ty.clone())
+            let wty = arms.iter().find(|a| !is_panic(&a.body)).or(arms.first()).map(|a| a.body.ty.clone())
                 .unwrap_or_else(|| Ty::result(ty, Ty::String));
             IrExpr { kind: IrExprKind::Match { subject, arms }, ty: wty, span, def_id: None }
         }
@@ -487,6 +493,18 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>, intr: &HashSet<St
     }
 }
 
+/// `panic(..)` — as the builtin call, or once lowered to the prelude's abort
+/// macro — possibly as the tail of a block (`{ log(); panic(..) }`). Its IR type
+/// is not reliably `Never`, so the shape is what says it diverges.
+fn is_panic(expr: &IrExpr) -> bool {
+    match &expr.kind {
+        IrExprKind::Call { target: CallTarget::Named { name }, .. } => name.as_str() == "panic",
+        IrExprKind::RustMacro { name, .. } => matches!(name.as_str(), "panic" | "almide_panic"),
+        IrExprKind::Block { expr: Some(tail), .. } => is_panic(tail),
+        _ => false,
+    }
+}
+
 /// Check if an expression is divergent (never produces a value).
 /// Used to decide whether guard-else bodies need Ok() wrapping.
 fn is_divergent(expr: &IrExpr) -> bool {
@@ -496,6 +514,9 @@ fn is_divergent(expr: &IrExpr) -> bool {
     // non-Unit effect fn, #1541). The spec lists Never as an accepted guard
     // else; divergence is a TYPE fact here, not a syntax one.
     if matches!(expr.ty, Ty::Never) {
+        return true;
+    }
+    if is_panic(expr) {
         return true;
     }
     match &expr.kind {

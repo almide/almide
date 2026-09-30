@@ -435,11 +435,12 @@ fn rewrite_call_as_macro(name: Sym, args: Vec<IrExpr>, ty: Ty, span: Option<Span
             }],
         }, ty, span, def_id: None };
     }
-    // panic → RustMacro
+    // panic → the prelude's `almide_panic!`: the defined `PANIC: <msg>` abort
+    // (C-219, #3118), not Rust's unwinding `panic!` (exit 101).
     if name == "panic" {
         let mut macro_args = vec![IrExpr { kind: IrExprKind::LitStr { value: "{}".into() }, ty: Ty::String, span: None, def_id: None }];
         macro_args.extend(args);
-        return IrExpr { kind: IrExprKind::RustMacro { name: "panic".into(), args: macro_args }, ty, span, def_id: None };
+        return IrExpr { kind: IrExprKind::RustMacro { name: "almide_panic".into(), args: macro_args }, ty, span, def_id: None };
     }
     // println / eprintln → RustMacro. `println` is the runtime prelude's
     // `almide_println!` — the one stdout buffer (#2245), not Rust's
