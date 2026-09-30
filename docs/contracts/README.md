@@ -143,7 +143,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-105 | var/append accumulator loops (scalar, owned-handle, cross-dep, mutual-recursion) byte-match native on wasm | 0.27.6 | active | fixture | 6 |
 | C-106 | Heap value bound from an if/match arm byte-matches native on the v1 wasm path | 0.27.6 | active | fixture | 17 |
 | C-107 | heap Result-of-tuple / Result-of-list Ok payloads round-trip and byte-match native | 0.27.6 | active | fixture | 4 |
-| C-108 | Unwrap `!` and let-unwrap desugaring byte-match native in every position | 0.27.6 | active | fixture | 7 |
+| C-108 | Unwrap `!` and let-unwrap desugaring byte-match native in every position | 0.27.6 | active | fixture | 8 |
 | C-109 | Self-hosted base64 encode byte-matches canonical / native on the v1 wasm path | 0.27.6 | active | fixture | 1 |
 | C-110 | In-place bytes.push mutation accumulator byte-matches native on v1 wasm | 0.27.6 | active | fixture | 1 |
 | C-111 | Module-level const heap globals initialize and read identically on v1 wasm and native | 0.27.6 | active | fixture | 2 |
@@ -167,7 +167,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-129 | list.chunk / list.windows non-positive sizes: negative keeps the promoted norm, zero aborts in the T6 form | 0.28.4 | active | fixture | 4 |
 | C-130 | option/map combinators hand back OWNED heap results (no bare pass-through handles) | 0.28.5 | active | fixture | 2 |
 | C-131 | Loop-rebuilt buffers are O(n): COW guards only LIVE aliases, and LICM never hoists heap allocations | 0.28.6 | active | fixture | 2 |
-| C-132 | mut parameters of reallocating containers persist to the caller at every call position | 0.28.6 | active | fixture | 11 |
+| C-132 | mut parameters of reallocating containers persist to the caller at every call position | 0.28.6 | active | fixture | 12 |
 | C-133 | env.get observes the host environment identically on native and wasm | 0.29.0 | active | fixture | 1 |
 | C-134 | Vendored-libm atan / tanh are byte-identical cross-target | 0.30.0 | active | fuzz(3000) | 1 |
 | C-135 | Declared-Unit effect fn ABI agrees between def and every call site | 0.30.0 | active | fixture | 2 |
