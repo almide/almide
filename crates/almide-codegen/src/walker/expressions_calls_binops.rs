@@ -239,7 +239,7 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
 fn render_call_expr(ctx: &RenderContext, callee: &str, args: &[IrExpr]) -> String {
     // A user fn's `mut` param bound to a global place writes through the
     // global's cell (#2946).
-    if let Some(rendered) = render_call_through_global_places(ctx, callee, args, false, &|a| render_user_call_arg(ctx, a)) {
+    if let Some(rendered) = render_call_through_global_places(ctx, callee, args, false, true, &|a| render_user_call_arg(ctx, a)) {
         return rendered;
     }
     // A closure ARG is already `Rc<dyn Fn>`: the box-by-default pass boxed every
@@ -847,17 +847,29 @@ fn global_mut_place(ctx: &RenderContext, arg: &IrExpr, allow_clone: bool) -> Opt
 /// global or runs user code, so none re-borrows the cell while it is held.
 /// The closure parameter is `__gc<k>`, never a name a user binding can take.
 /// `None` when no argument is a global place.
+///
+/// That form holds `borrow_mut` for the whole call, so it is only taken when
+/// the callee cannot run user code: a native runtime mutator none of whose
+/// arguments is a closure. Any other callee — a user fn, or a call handed a
+/// closure — may read or write the same global from inside the call and
+/// would re-borrow the held cell (`already mutably borrowed`, #2960). Such a
+/// call copies each place out, calls on the copy, and writes it back
+/// ([`render_call_with_copied_global_places`]).
 fn render_call_through_global_places(
     ctx: &RenderContext,
     callee: &str,
     args: &[IrExpr],
     allow_clone_at_0: bool,
+    runs_user_code: bool,
     render_arg: &dyn Fn(&IrExpr) -> String,
 ) -> Option<String> {
     let places: Vec<Option<(String, String)>> = args.iter().enumerate()
         .map(|(i, a)| global_mut_place(ctx, a, allow_clone_at_0 && i == 0))
         .collect();
     if places.iter().all(Option::is_none) { return None; }
+    if runs_user_code || args.iter().any(|a| matches!(a.ty, almide_lang::types::Ty::Fn { .. })) {
+        return Some(render_call_with_copied_global_places(callee, args, &places, render_arg));
+    }
     let mut cells: Vec<String> = Vec::new();
     let rendered: Vec<String> = args.iter().zip(&places).map(|(a, place)| match place {
         Some((static_name, suffix)) => {
@@ -873,6 +885,56 @@ fn render_call_through_global_places(
         out = format!("{static_name}.with(|__gc{k}| {out})");
     }
     Some(out)
+}
+
+/// The copy-in / write-back form of a call with global `&mut` places (#2960),
+/// the native twin of the C-132 lowering wasm and the interpreter use: each
+/// place is copied out of its cell, the callee mutates the copy, and the copy
+/// is stored back into the place when the call returns. No cell borrow is
+/// held while the callee runs, so the callee may read or write the global
+/// freely; what it observes is the one semantics all three legs share —
+/// the global still holds its PRE-call value during the call, and the
+/// write-back overwrites whatever the callee stored into that same place
+/// (other fields the callee wrote are kept).
+///
+/// `({ let mut __gp0 = G.with(|__gc| (**__gc.borrow()).xs.clone());
+///     let __gr = f(&mut __gp0, a);
+///     G.with(|__gc| std::rc::Rc::make_mut(&mut *__gc.borrow_mut()).xs = __gp0);
+///     __gr })`
+///
+/// Sibling arguments are rendered in the call itself, after the copies:
+/// `BorrowInsertion`'s hoist has already moved any that read the global or
+/// run user code in front of the whole call.
+fn render_call_with_copied_global_places(
+    callee: &str,
+    args: &[IrExpr],
+    places: &[Option<(String, String)>],
+    render_arg: &dyn Fn(&IrExpr) -> String,
+) -> String {
+    let mut copy_in: Vec<String> = Vec::new();
+    let mut write_back: Vec<String> = Vec::new();
+    let rendered: Vec<String> = args.iter().zip(places).map(|(a, place)| match place {
+        Some((static_name, suffix)) => {
+            let k = copy_in.len();
+            copy_in.push(format!(
+                "let mut __gp{k} = {static_name}.with(|__gc| (**__gc.borrow()){suffix}.clone());"
+            ));
+            write_back.push(if suffix.is_empty() {
+                format!("{static_name}.with(|__gc| *__gc.borrow_mut() = std::rc::Rc::new((__gp{k}).into()));")
+            } else {
+                format!("{static_name}.with(|__gc| std::rc::Rc::make_mut(&mut *__gc.borrow_mut()){suffix} = __gp{k});")
+            });
+            format!("&mut __gp{k}")
+        }
+        None => render_arg(a),
+    }).collect();
+    format!(
+        "({{ {} let __gr = {}({}); {} __gr }})",
+        copy_in.join(" "),
+        callee,
+        rendered.join(", "),
+        write_back.join(" "),
+    )
 }
 
 /// Mutating stdlib calls on an `AlmideRcCow` var route through `.make_mut()`
@@ -946,8 +1008,10 @@ fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, a
         return rendered;
     }
     let allow_clone = crate::pass_licm::is_inplace_mutator(symbol.as_str());
+    // A user-module fn normalized into the runtime spelling runs user code.
+    let runs_user_code = !rc_cow_symbol_is_native_runtime(symbol.as_str());
     if let Some(rendered) = render_call_through_global_places(ctx, symbol.as_str(), args, allow_clone,
-        &|a| render_runtime_call_arg_owned(ctx, symbol, a))
+        runs_user_code, &|a| render_runtime_call_arg_owned(ctx, symbol, a))
     {
         return rendered;
     }
