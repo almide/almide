@@ -141,6 +141,7 @@
 2	0	36	0	spec/wasm_cross/effect_main_guard_err.almd
 4	0	35	4	spec/wasm_cross/effect_main_guard_ok.almd
 13	3	106	13	spec/wasm_cross/effect_mut_generic_port.almd
+15	8	240	15	spec/wasm_cross/effect_operand_unwrap_distinct.almd
 28	11	261	28	spec/wasm_cross/effect_option_explicit_bang.almd
 9	5	118	9	spec/wasm_cross/effect_slot_carrier.almd
 9	6	108	9	spec/wasm_cross/effect_slot_never_err_bang.almd
@@ -489,6 +490,7 @@
 26	15	235	26	spec/wasm_cross/mg_rebuild_two_phase.almd
 8	2	57	8	spec/wasm_cross/module_global_const.almd
 5	1	100	3	spec/wasm_cross/module_var_alias_cow.almd
+78	45	1476	77	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
 99	11	1203	63	spec/wasm_cross/mut_heap_param.almd
 18	4	176	12	spec/wasm_cross/mut_map_param.almd
 8170	8049	72057178	8146	spec/wasm_cross/mut_param_alias_cow.almd

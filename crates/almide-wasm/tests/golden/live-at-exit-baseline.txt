@@ -117,6 +117,7 @@
 35	#2974	spec/wasm_cross/matrix_softmax_nonfinite_rows.almd
 10	#2968	spec/wasm_cross/memory_stress.almd
 2	#2967	spec/wasm_cross/module_var_alias_cow.almd
+1	#2968	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
 36	#2968	spec/wasm_cross/mut_heap_param.almd
 6	#2968	spec/wasm_cross/mut_map_param.almd
 24	#2968	spec/wasm_cross/mut_param_alias_cow.almd
