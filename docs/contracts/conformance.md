@@ -153,3 +153,4 @@
 | ALS-T26 | C-359, C-360 | `spec/wasm_cross/datetime_pre_epoch.almd` (byte-compare)<br>`spec/stdlib/datetime_test.almd` (both-target test)<br>`spec/wasm_cross/datetime_parse_iso_strict.almd` (byte-compare) |
 | ALS-T27 | C-361 | `spec/wasm_cross/url_authority_edges.almd` (byte-compare)<br>`spec/stdlib/url_test.almd` (both-target test) |
 | ALS-T28 | C-371 | `spec/wasm_cross/float32_arithmetic_rounds.almd` (byte-compare) |
+| ALS-T29 | C-372 | `spec/wasm_cross/float32_display_shortest.almd` (byte-compare) |
