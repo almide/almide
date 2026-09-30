@@ -144,51 +144,140 @@ fn build_cargo_toml(base_toml: &str, native_deps: &[crate::project::NativeDep]) 
     toml
 }
 
-/// Copy native/*.rs files from source_root into src_dir and inject mod declarations into code.
-fn copy_dir_recursive(from: &std::path::Path, to: &std::path::Path) -> Result<(), String> {
-    std::fs::create_dir_all(to).map_err(|e| format!("failed to create {}: {}", to.display(), e))?;
-    let entries = std::fs::read_dir(from).map_err(|e| format!("failed to read {}: {}", from.display(), e))?;
-    for entry in entries.flatten() {
-        let src = entry.path();
-        let dst = to.join(entry.file_name());
-        if src.is_dir() {
-            copy_dir_recursive(&src, &dst)?;
-        } else {
-            std::fs::copy(&src, &dst)
-                .map_err(|e| format!("failed to copy {}: {}", src.display(), e))?;
-        }
-    }
-    Ok(())
+/// Everything a build copies INTO the generated crate besides the generated
+/// source itself: the `native/` tree of the building package and of every
+/// dependency package reached through `almide.toml`, plus those dependency
+/// packages' `[native-deps]` (#3091).
+///
+/// It is collected ONCE, before the native build cache is consulted, and the
+/// same value is both hashed into the cache key ([`CrateInputs::cache_key`])
+/// and written into the crate ([`CrateInputs::apply`]). The key therefore
+/// covers exactly the bytes the build ships, by construction: there is no
+/// second list of "things that shape the binary" to keep in step with the
+/// copy. That second list is what #3091 was — the key hashed the building
+/// package's `native/` (#887) while the copy also pulled in every
+/// dependency's, so editing only a dependency's native module was a cache hit
+/// that shipped the previous binary.
+#[derive(Default, Debug)]
+pub(super) struct CrateInputs {
+    /// One entry per package, in injection order (the building package
+    /// first, then its dependencies depth-first).
+    packages: Vec<PackageNatives>,
+    /// The `[native-deps]` of dependency packages, in visit order. (The
+    /// building package's own are passed separately as `native_deps`.)
+    dep_native_deps: Vec<crate::project::NativeDep>,
 }
 
-fn inject_native_modules(code: &mut String, source_root: Option<&std::path::Path>, src_dir: &std::path::Path) -> Result<(), String> {
-    let root = match source_root {
-        Some(r) => r,
-        None => return Ok(()),
-    };
-    let native_dir = root.join("native");
-    if !native_dir.is_dir() { return Ok(()); }
-    let mut mod_decls = String::new();
-    if let Ok(entries) = std::fs::read_dir(&native_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().map_or(false, |e| e == "rs") {
+#[derive(Default, Debug)]
+struct PackageNatives {
+    /// `(path under the crate's src/, contents)`, sorted by path.
+    files: Vec<(std::path::PathBuf, Vec<u8>)>,
+    /// The `native/*.rs` stems that get a `mod <stem>;`, sorted.
+    mod_stems: Vec<String>,
+}
+
+impl CrateInputs {
+    /// Read the `native/` trees and dependency `[native-deps]` reachable from
+    /// `source_root`. Nothing is written.
+    pub(super) fn collect(source_root: Option<&std::path::Path>) -> Result<Self, String> {
+        let mut inputs = CrateInputs::default();
+        let Some(root) = source_root else { return Ok(inputs) };
+        inputs.packages.push(PackageNatives::read(root)?);
+        let mut visited = std::collections::HashSet::new();
+        inputs.collect_deps(root, &mut visited)?;
+        Ok(inputs)
+    }
+
+    fn collect_deps(&mut self, root: &std::path::Path, visited: &mut std::collections::HashSet<String>) -> Result<(), String> {
+        let toml_path = root.join("almide.toml");
+        if !toml_path.exists() { return Ok(()); }
+        let proj = crate::project::parse_toml(&toml_path).map_err(|e| format!("parse almide.toml: {}", e))?;
+        for dep in &proj.dependencies {
+            let Some(dep_dir) = resolve_dep_dir(dep) else { continue };
+            if !visited.insert(dep_dir.to_string_lossy().to_string()) { continue; }
+            self.packages.push(PackageNatives::read(&dep_dir)?);
+            let dep_toml = dep_dir.join("almide.toml");
+            if let Some(dep_proj) = dep_toml.exists().then(|| crate::project::parse_toml(&dep_toml).ok()).flatten() {
+                self.dep_native_deps.extend(dep_proj.native_deps);
+            }
+            self.collect_deps(&dep_dir, visited)?;
+        }
+        Ok(())
+    }
+
+    /// The cache-key component for these inputs: every file's crate path and
+    /// content digest, every `mod` declaration, every dependency native dep.
+    /// Empty when there is nothing to inject.
+    pub(super) fn cache_key(&self) -> String {
+        let mut acc = String::new();
+        for (i, pkg) in self.packages.iter().enumerate() {
+            acc.push_str(&format!("pkg{}[", i));
+            for (path, bytes) in &pkg.files {
+                acc.push_str(&format!("{}:{:016x};", path.display(), super::hash64(bytes)));
+            }
+            acc.push_str(&format!("mods={}]", pkg.mod_stems.join(",")));
+        }
+        for nd in &self.dep_native_deps {
+            acc.push_str(&format!("dep:{}={};", nd.name, nd.spec));
+        }
+        acc
+    }
+
+    /// Write the collected files into `src_dir`, declare their modules in
+    /// `code`, and append the dependency native deps to `project_dir`'s
+    /// Cargo.toml.
+    fn apply(&self, code: &mut String, src_dir: &std::path::Path, project_dir: &std::path::Path) -> Result<(), String> {
+        for pkg in &self.packages {
+            pkg.apply(code, src_dir)?;
+        }
+        if !self.dep_native_deps.is_empty() {
+            let cargo_path = project_dir.join("Cargo.toml");
+            let mut cargo = std::fs::read_to_string(&cargo_path).unwrap_or_default();
+            for nd in &self.dep_native_deps {
+                if cargo.contains(&nd.name) { continue; }
+                append_cargo_dep(&mut cargo, &nd.name, &nd.spec);
+            }
+            let _ = std::fs::write(&cargo_path, &cargo);
+        }
+        Ok(())
+    }
+}
+
+impl PackageNatives {
+    /// `<root>/native/*.rs` become modules; subdirectories (assets such as
+    /// `native/wgsl/*.wgsl`, `include_str!`d by the modules) travel with them
+    /// whole. Other plain files in `native/` are not copied.
+    fn read(root: &std::path::Path) -> Result<Self, String> {
+        let mut pkg = PackageNatives::default();
+        let native_dir = root.join("native");
+        if !native_dir.is_dir() { return Ok(pkg); }
+        for entry in sorted_entries(&native_dir)? {
+            let path = native_dir.join(&entry);
+            if path.extension().is_some_and(|e| e == "rs") && path.is_file() {
                 let stem = path.file_stem()
                     .ok_or_else(|| format!("native module path has no file stem: {}", path.display()))?
                     .to_string_lossy().to_string();
-                let content = std::fs::read_to_string(&path)
+                let content = std::fs::read(&path)
                     .map_err(|e| format!("failed to read {}: {}", path.display(), e))?;
-                std::fs::write(src_dir.join(entry.file_name()), &content)
-                    .map_err(|e| format!("failed to write native module {}: {}", stem, e))?;
-                mod_decls.push_str(&format!("mod {};\n", stem));
+                pkg.files.push((std::path::PathBuf::from(&entry), content));
+                pkg.mod_stems.push(stem);
             } else if path.is_dir() {
-                // asset subdirectories (e.g. native/wgsl/*.wgsl) travel with the
-                // modules so include_str!("wgsl/...") resolves in the generated crate
-                copy_dir_recursive(&path, &src_dir.join(entry.file_name()))?;
+                read_tree(&path, std::path::Path::new(&entry), &mut pkg.files)?;
             }
         }
+        Ok(pkg)
     }
-    if !mod_decls.is_empty() {
+
+    fn apply(&self, code: &mut String, src_dir: &std::path::Path) -> Result<(), String> {
+        for (rel, bytes) in &self.files {
+            let dst = src_dir.join(rel);
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("failed to create {}: {}", parent.display(), e))?;
+            }
+            std::fs::write(&dst, bytes).map_err(|e| format!("failed to write {}: {}", dst.display(), e))?;
+        }
+        if self.mod_stems.is_empty() { return Ok(()); }
+        let mod_decls: String = self.mod_stems.iter().map(|s| format!("mod {};\n", s)).collect();
         if let Some(pos) = code.find("\nuse ") {
             code.insert_str(pos, &format!("\n{}", mod_decls));
         } else if let Some(pos) = code.find("\nfn ") {
@@ -196,30 +285,30 @@ fn inject_native_modules(code: &mut String, source_root: Option<&std::path::Path
         } else {
             *code = format!("{}\n{}", mod_decls, code);
         }
+        Ok(())
     }
-    Ok(())
 }
 
-/// Inject native modules and native-deps from all dependency packages (recursive).
-fn inject_dep_natives(code: &mut String, source_root: Option<&std::path::Path>, src_dir: &std::path::Path, project_dir: &std::path::Path) -> Result<(), String> {
-    let mut visited = std::collections::HashSet::new();
-    inject_dep_natives_rec(code, source_root, src_dir, project_dir, &mut visited)
+/// The entry names of `dir`, sorted, so the collected inputs (and the key
+/// hashed from them) do not depend on the filesystem's listing order.
+fn sorted_entries(dir: &std::path::Path) -> Result<Vec<std::ffi::OsString>, String> {
+    let entries = std::fs::read_dir(dir).map_err(|e| format!("failed to read {}: {}", dir.display(), e))?;
+    let mut names: Vec<_> = entries.flatten().map(|e| e.file_name()).collect();
+    names.sort();
+    Ok(names)
 }
 
-fn inject_dep_natives_rec(code: &mut String, source_root: Option<&std::path::Path>, src_dir: &std::path::Path, project_dir: &std::path::Path, visited: &mut std::collections::HashSet<String>) -> Result<(), String> {
-    let root = match source_root { Some(r) => r, None => return Ok(()) };
-    let toml_path = root.join("almide.toml");
-    if !toml_path.exists() { return Ok(()); }
-    let proj = crate::project::parse_toml(&toml_path).map_err(|e| format!("parse almide.toml: {}", e))?;
-    for dep in &proj.dependencies {
-        let dep_dir = resolve_dep_dir(dep);
-        let Some(dep_dir) = dep_dir else { continue };
-        let key = dep_dir.to_string_lossy().to_string();
-        if visited.contains(&key) { continue; }
-        visited.insert(key);
-        inject_native_modules(code, Some(&dep_dir), src_dir)?;
-        propagate_native_deps(&dep_dir, project_dir);
-        inject_dep_natives_rec(code, Some(&dep_dir), src_dir, project_dir, visited)?;
+/// Every file under `dir`, recorded at `rel/<path below dir>`.
+fn read_tree(dir: &std::path::Path, rel: &std::path::Path, out: &mut Vec<(std::path::PathBuf, Vec<u8>)>) -> Result<(), String> {
+    for name in sorted_entries(dir)? {
+        let src = dir.join(&name);
+        let dst = rel.join(&name);
+        if src.is_dir() {
+            read_tree(&src, &dst, out)?;
+        } else {
+            let bytes = std::fs::read(&src).map_err(|e| format!("failed to read {}: {}", src.display(), e))?;
+            out.push((dst, bytes));
+        }
     }
     Ok(())
 }
@@ -229,19 +318,73 @@ fn resolve_dep_dir(dep: &crate::project::Dependency) -> Option<std::path::PathBu
     else { crate::project_fetch::fetch_dep(dep).ok() }
 }
 
-fn propagate_native_deps(dep_dir: &std::path::Path, project_dir: &std::path::Path) {
-    let dep_toml = dep_dir.join("almide.toml");
-    let dep_proj = match dep_toml.exists().then(|| crate::project::parse_toml(&dep_toml).ok()).flatten() {
-        Some(p) => p, None => return,
-    };
-    if dep_proj.native_deps.is_empty() { return; }
-    let cargo_path = project_dir.join("Cargo.toml");
-    let mut cargo = std::fs::read_to_string(&cargo_path).unwrap_or_default();
-    for nd in &dep_proj.native_deps {
-        if cargo.contains(&nd.name) { continue; }
-        append_cargo_dep(&mut cargo, &nd.name, &nd.spec);
+/// Everything OUTSIDE the generated crate that shapes the binary cargo or
+/// rustc produces from it — the cache-key component for the build's
+/// environment, next to [`CrateInputs::cache_key`] for its contents (#3091).
+///
+/// - **The recipe**: this file and `native_target.rs` as compiled into this
+///   almide — the Cargo.toml templates (opt-level is load-bearing for
+///   correctness, see [`GENERATED_CARGO_TOML`]), the rustc/cargo invocations
+///   of every build path, the injection. The sources themselves are hashed,
+///   so an edit to any of them is a new key without anyone remembering to
+///   bump a revision.
+/// - **The toolchain**: `rustc -vV` (version, commit, host). A toolchain
+///   update that changes codegen is a new binary.
+/// - **Flags cargo and rustc read from the environment**: `RUSTFLAGS` and its
+///   spellings, `RUSTC`/`RUSTC_WRAPPER`, `CARGO_PROFILE_*` (which override the
+///   templates' profiles), per-target rustflags/linker, and
+///   `ALMIDE_NO_RTLIB` (which picks the build path).
+/// - **Cargo config files** cargo would read for a build in `project_dir`:
+///   `.cargo/config{,.toml}` in it and every ancestor, and in `CARGO_HOME`.
+pub(super) fn build_environment_key(project_dir: &std::path::Path) -> String {
+    let recipe = super::hash64(
+        concat!(include_str!("cargo_build.rs"), include_str!("native_target.rs")).as_bytes(),
+    );
+    let mut acc = format!("recipe={:016x};rustc={};", recipe, toolchain_identity());
+    let mut vars: Vec<(String, String)> = std::env::vars()
+        .filter(|(k, _)| env_shapes_the_binary(k))
+        .collect();
+    vars.sort();
+    for (k, v) in vars {
+        acc.push_str(&format!("{}={};", k, v));
     }
-    let _ = std::fs::write(&cargo_path, &cargo);
+    let cargo_home = std::env::var_os("CARGO_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cargo")));
+    let config_dirs = project_dir.ancestors().map(|d| d.join(".cargo")).chain(cargo_home);
+    for dir in config_dirs {
+        for name in ["config", "config.toml"] {
+            let path = dir.join(name);
+            if let Ok(bytes) = std::fs::read(&path) {
+                acc.push_str(&format!("{}:{:016x};", path.display(), super::hash64(&bytes)));
+            }
+        }
+    }
+    acc
+}
+
+/// Is `name` an environment variable that changes what cargo/rustc emit?
+fn env_shapes_the_binary(name: &str) -> bool {
+    matches!(
+        name,
+        "RUSTFLAGS" | "CARGO_ENCODED_RUSTFLAGS" | "CARGO_BUILD_RUSTFLAGS" | "RUSTC" | "RUSTC_WRAPPER"
+            | "CARGO_BUILD_RUSTC" | "CARGO_BUILD_RUSTC_WRAPPER" | "ALMIDE_NO_RTLIB"
+    ) || name.starts_with("CARGO_PROFILE_")
+        || (name.starts_with("CARGO_TARGET_") && (name.ends_with("_RUSTFLAGS") || name.ends_with("_LINKER")))
+}
+
+/// `rustc -vV` of the rustc on PATH, once per process. Empty when it cannot
+/// be run (the build then fails on its own).
+fn toolchain_identity() -> &'static str {
+    static ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ID.get_or_init(|| {
+        std::process::Command::new(crate::find_rustc())
+            .arg("-vV")
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().replace('\n', "|"))
+            .unwrap_or_default()
+    })
 }
 
 fn append_cargo_dep(cargo: &mut String, name: &str, spec: &str) {
@@ -260,7 +403,7 @@ pub(super) fn cargo_build_cdylib(rs_code: &str, project_dir: &std::path::Path, l
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
     // Base manifest for a cdylib; `build_cargo_toml` folds in `[native-deps]` and
-    // `inject_dep_natives` appends any dependency-package native deps below — so a
+    // `CrateInputs::apply` appends any dependency-package native deps below — so a
     // cdylib wires native crates exactly like the bin path (#719). Previously this
     // wrote a dep-free manifest and `rs_code` verbatim, so `@extern(rust, …)`
     // modules were undeclared (E0433) and `[native-deps]` never reached cargo.
@@ -308,8 +451,7 @@ codegen-units = 1
     // modules + `[native-deps]` from dependency packages — same wiring as
     // `cargo_build_generated_with_native`.
     let mut lib_code = rs_code.to_string();
-    inject_native_modules(&mut lib_code, source_root, &src_dir)?;
-    inject_dep_natives(&mut lib_code, source_root, &src_dir, project_dir)?;
+    CrateInputs::collect(source_root)?.apply(&mut lib_code, &src_dir, project_dir)?;
     std::fs::write(src_dir.join("lib.rs"), &lib_code)
         .map_err(|e| format!("failed to write lib.rs: {}", e))?;
 
@@ -385,7 +527,7 @@ pub(super) fn defines_entry_point(code: &str) -> bool {
 /// Build generated Rust code using cargo.
 /// Returns the path to the built binary on success.
 pub(super) fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Result<std::path::PathBuf, String> {
-    cargo_build_generated_with_native(rs_code, project_dir, release, &[], None)
+    cargo_build_generated_with_native(rs_code, project_dir, release, &[], None, &CrateInputs::default())
 }
 
 /// Build generated Rust code with optional native Rust dependencies and source files.
@@ -443,7 +585,7 @@ fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bo
 /// Write the generated Cargo.toml + `src/main.rs` for a cargo-based build:
 /// creates `src/`, selects the HTTP-enabled base Cargo.toml template when
 /// needed, appends zlib to `native_deps` when needed, injects native
-/// modules from `source_root` and from dependency packages, auto-generates
+/// modules (`inputs`: the package's and its dependencies'), auto-generates
 /// an empty `fn main()` for library-only code, and writes both files.
 /// Matrix programs need NO extra deps: the flat AlmideMatrix runtime + the
 /// embedded almide-kernel SIMD modules are pure Rust (the burn/BLAS splice
@@ -456,7 +598,7 @@ fn write_generated_cargo_project(
     rs_code: &str,
     project_dir: &std::path::Path,
     native_deps: &[crate::project::NativeDep],
-    source_root: Option<&std::path::Path>,
+    inputs: &CrateInputs,
     uses_http: bool,
     uses_zlib: bool,
 ) -> Result<std::path::PathBuf, String> {
@@ -474,9 +616,9 @@ fn write_generated_cargo_project(
 
     let mut final_code = rs_code.to_string();
 
-    inject_native_modules(&mut final_code, source_root, &src_dir)?;
-    // Inject native modules + native-deps from dependency packages
-    inject_dep_natives(&mut final_code, source_root, &src_dir, project_dir)?;
+    // The package's and its dependencies' native modules + dependency
+    // native-deps — exactly the inputs the cache key was computed from.
+    inputs.apply(&mut final_code, &src_dir, project_dir)?;
 
     // Library modules may not define main — auto-generate an empty one
     if !defines_entry_point(&final_code) {
@@ -546,6 +688,7 @@ pub(super) fn cargo_build_generated_with_native(
     release: bool,
     native_deps: &[crate::project::NativeDep],
     source_root: Option<&std::path::Path>,
+    inputs: &CrateInputs,
 ) -> Result<std::path::PathBuf, String> {
     let uses_matrix = rs_code.contains("almide_rt_matrix_");
     let uses_http = rs_code.contains("almide_rt_http_") || rs_code.contains("use rustls");
@@ -563,7 +706,7 @@ pub(super) fn cargo_build_generated_with_native(
         }
     }
 
-    write_generated_cargo_project(rs_code, project_dir, native_deps, source_root, uses_http, uses_zlib)?;
+    write_generated_cargo_project(rs_code, project_dir, native_deps, inputs, uses_http, uses_zlib)?;
 
     run_cargo_build_and_locate_binary(project_dir, release)
 }
@@ -636,12 +779,9 @@ fn ensure_runtime_rlib(opt_level: &str) -> Result<std::path::PathBuf, String> {
 fn build_runtime_rlib(opt_level: &str) -> Result<std::path::PathBuf, String> {
     let src = crate::codegen::emit_runtime_crate();
     let rustc = crate::find_rustc();
-    let rustc_ver = std::process::Command::new(&rustc)
-        .arg("--version")
-        .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default();
+    // `-vV`, not `--version`: two toolchains of one version for different
+    // hosts (x86_64 under Rosetta and arm64) must not share an rlib.
+    let rustc_ver = toolchain_identity();
     // The profile string here MUST match the per-file rustc invocation that links it.
     let key = format!("{:016x}", super::hash64(format!("{src}|{rustc_ver}|opt{opt_level}|ed2021").as_bytes()));
     let dir = std::env::temp_dir().join(format!("almide-rtlib-{key}"));
@@ -828,6 +968,7 @@ pub(super) fn cargo_build_test_with_native(
     project_dir: &std::path::Path,
     native_deps: &[crate::project::NativeDep],
     source_root: Option<&std::path::Path>,
+    inputs: &CrateInputs,
 ) -> Result<std::path::PathBuf, String> {
     let uses_http = rs_code.contains("almide_rt_http_") || rs_code.contains("use rustls");
     let uses_zlib = rs_code.contains("almide_rt_zlib_") || rs_code.contains("use flate2");
@@ -841,7 +982,7 @@ pub(super) fn cargo_build_test_with_native(
         return cargo_build_test_fast_path(rs_code, project_dir);
     }
 
-    write_generated_cargo_project(rs_code, project_dir, native_deps, source_root, uses_http, uses_zlib)?;
+    write_generated_cargo_project(rs_code, project_dir, native_deps, inputs, uses_http, uses_zlib)?;
 
     run_cargo_test_no_run_and_locate_binary(project_dir)
 }
