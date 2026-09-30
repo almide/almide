@@ -62,10 +62,25 @@ pub(crate) fn declare(bytes: &[u8], declared: &[Declared]) -> Result<Vec<u8>, St
     for (k, s) in stubs.values_mut().enumerate() {
         s.import = base_imports + k as u32;
     }
-    let mut re = Declare { base_imports, stubs };
+    let keys: Vec<u32> = stubs.keys().copied().collect();
+    let mut re = Declare { base_imports, stubs, keys };
     let mut module = Module::new();
     re.parse_core_module(&mut module, wasmparser::Parser::new(0), bytes).map_err(|e| e.to_string())?;
     Ok(module.finish())
+}
+
+/// Where function `func` lands once the ascending `stubs` became imports
+/// numbered from `base_imports` — the ONE renumbering both this post-pass
+/// and the witness projector (cert_project.rs, #2759) apply.
+pub(crate) fn remap_index(func: u32, stubs: &[u32], base_imports: u32) -> u32 {
+    if let Some(k) = stubs.iter().position(|&s| s == func) {
+        return base_imports + k as u32;
+    }
+    if func < base_imports {
+        return func;
+    }
+    let stubs_before = stubs.iter().filter(|&&s| s < func).count() as u32;
+    func + stubs.len() as u32 - stubs_before
 }
 
 struct Stub<'a> {
@@ -77,6 +92,8 @@ struct Stub<'a> {
 struct Declare<'a> {
     base_imports: u32,
     stubs: BTreeMap<u32, Stub<'a>>,
+    /// The stub indices, ascending (`remap_index`'s input).
+    keys: Vec<u32>,
 }
 
 impl Declare<'_> {
@@ -89,14 +106,7 @@ impl Reencode for Declare<'_> {
     type Error = std::convert::Infallible;
 
     fn function_index(&mut self, func: u32) -> Result<u32, Error<Self::Error>> {
-        if let Some(s) = self.stubs.get(&func) {
-            return Ok(s.import);
-        }
-        if func < self.base_imports {
-            return Ok(func);
-        }
-        let stubs_before = self.stubs.range(..func).count() as u32;
-        Ok(func + self.stubs.len() as u32 - stubs_before)
+        Ok(remap_index(func, &self.keys, self.base_imports))
     }
 
     fn parse_import_section(

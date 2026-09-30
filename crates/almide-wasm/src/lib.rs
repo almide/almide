@@ -111,6 +111,7 @@ mod alloc_inline;
 pub mod heap_cap;
 pub mod host_exports;
 pub mod witness;
+pub mod cert_project;
 mod witness_hooks;
 mod witness_unwrap;
 mod calls;
