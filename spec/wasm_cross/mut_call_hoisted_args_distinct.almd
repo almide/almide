@@ -1,0 +1,77 @@
+// @contract: C-132
+// Every argument of a call with a `mut` argument that READS the mutably
+// borrowed root is evaluated into its own temporary before the borrow is
+// taken, and each argument receives its own value (#3049). Native gave every
+// hoisted temporary the one name `__hoist`, so the `let`s shadowed each other
+// and every argument received the LAST one's value: `assign(s, arg(s, 1),
+// arg(s, 0))` printed `a=3 b=3` natively and the correct `a=4 b=3` on wasm.
+// Rows: two and three hoisted arguments, a hoisted argument that is itself a
+// hoisting call (nested), a caller holding the root as a `mut` parameter and
+// as a local `var`, a module-level `var` root, and the in-place stdlib
+// mutators whose `mut` argument is a FIELD while another argument reads the
+// same record through a call (#3050: `bytes.set_u8(s.buf, pos(s), 7)` failed
+// rustc E0502 before the sibling was hoisted).
+type S = { a: Int, b: Int, c: Int, params: List[Int] }
+
+type R = { buf: Bytes, n: Int, m: Map[String, Int], xs: List[Int], sb: List[String], t: String }
+
+var g: S = { a: 0, b: 0, c: 0, params: [7, 8, 9] }
+
+fn arg(s: S, i: Int) -> Int = list.get(s.params, i) ?? 0
+
+fn assign(mut s: S, x: Int, y: Int) -> Unit = {
+  s.a = x
+  s.b = y
+}
+
+fn set3(mut s: S, x: Int, y: Int, z: Int) -> Int = {
+  s.a = x
+  s.b = y
+  s.c = z
+  x * 100 + y * 10 + z
+}
+
+fn dispatch(mut s: S) -> Unit = assign(s, arg(s, 1), arg(s, 0))
+
+fn dispatch3(mut s: S) -> Int = set3(s, arg(s, 2), arg(s, 0), arg(s, 1))
+
+fn show(s: S) -> String = "a=${int.to_string(s.a)} b=${int.to_string(s.b)} c=${int.to_string(s.c)}"
+
+fn pos(r: R) -> Int = r.n
+
+fn key_of(r: R) -> String = "k${int.to_string(r.n)}"
+
+fn row_of(r: R) -> Int = list.len(r.xs)
+
+fn encode(row: Int) -> String = "row${int.to_string(row)}"
+
+fn push_row(mut sb: List[String], line: String) -> Unit = list.push(sb, line)
+
+fn drive(mut r: R) -> Unit = {
+  map.insert(r.m, key_of(r), pos(r) + 10)
+  list.push(r.xs, row_of(r))
+  push_row(r.sb, encode(row_of(r)))
+  string.push(r.t, key_of(r))
+}
+
+fn main() -> Unit = {
+  var s = S { a: 0, b: 0, c: 0, params: [3, 4, 5] }
+  dispatch(s)
+  println("two, mut param caller: ${show(s)}")
+  let r3 = dispatch3(s)
+  println("three, mut param caller: ${int.to_string(r3)} ${show(s)}")
+  assign(s, arg(s, 2), arg(s, 1))
+  println("two, var caller: ${show(s)}")
+  let nested = set3(s, arg(s, 2), arg(s, 0), set3(s, arg(s, 1), arg(s, 2), arg(s, 0)))
+  println("nested: ${int.to_string(nested)} ${show(s)}")
+  assign(g, arg(g, 2), arg(g, 0))
+  println("global root: ${show(g)}")
+  var r = R { buf: bytes.from_list([1, 2, 3, 4, 5]), n: 2, m: [:], xs: [9], sb: [], t: "t" }
+  bytes.set_u8(r.buf, pos(r), 7)
+  map.insert(r.m, key_of(r), pos(r))
+  list.push(r.xs, row_of(r))
+  push_row(r.sb, encode(row_of(r)))
+  string.push(r.t, key_of(r))
+  drive(r)
+  println("field mut args: ${bytes.to_list(r.buf)} ${r.m} ${r.xs} ${r.sb} ${r.t}")
+}

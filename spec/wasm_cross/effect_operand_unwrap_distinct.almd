@@ -1,0 +1,28 @@
+// @contract: C-108
+// An effect fn whose body is an operator tree over two or more `!` operands
+// hoists each operand into its own temporary, in evaluation order, and each
+// operand keeps its own value. Native gave every hoisted operand the one name
+// `__opnd` (the #3049 bug class), so the second `let` shadowed the first:
+// `a()! - b()!` computed `b - b` = 0 natively where wasm printed 7. The
+// released 0.64.0 has the same defect; `spec/lang/effect_operand_unwrap_test`
+// did not see it because both of its operands called the same fn.
+effect fn a() -> Int = 10
+
+effect fn b() -> Int = 3
+
+effect fn c() -> Int = 2
+
+effect fn diff() -> Int = a()! - b()!
+
+effect fn three() -> Int = a()! * 100 + b()! * 10 + c()!
+
+effect fn nested() -> Int = (a()! - b()!) * (c()! + a()!)
+
+effect fn unary() -> Int = -a()! + b()!
+
+effect fn main() -> Unit = {
+  println("diff=${int.to_string(diff()!)}")
+  println("three=${int.to_string(three()!)}")
+  println("nested=${int.to_string(nested()!)}")
+  println("unary=${int.to_string(unary()!)}")
+}
