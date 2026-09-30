@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 use almide_ir::*;
-use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut};
+use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut, walk_stmt_mut};
 use almide_lang::types::{Ty, TypeConstructorId};
 use super::pass::{NanoPass, PassResult, Target};
 
@@ -205,6 +205,7 @@ fn transform_lifted_fn_bodies(program: &mut IrProgram, lifted: &LiftedFns, intri
         };
         let ok_ty = extract_ok_type(&func.ret_ty);
         resolve_err_types(&mut func.body, &ok_ty);
+        wrap_guard_elses(&mut func.body, &lifted.call_names, intrinsic_effect_syms);
         func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), &lifted.call_names, intrinsic_effect_syms);
     }
 }
@@ -225,6 +226,7 @@ fn repair_already_result_effect_fn_bodies(program: &mut IrProgram, wrap_non_resu
         {
             let ok_ty = extract_ok_type(&func.ret_ty);
             resolve_err_types(&mut func.body, &ok_ty);
+            wrap_guard_elses(&mut func.body, &lifted.call_names, intrinsic_effect_syms);
             func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), &lifted.call_names, intrinsic_effect_syms);
         }
     }
@@ -235,6 +237,7 @@ fn repair_already_result_effect_fn_bodies(program: &mut IrProgram, wrap_non_resu
             {
                 let ok_ty = extract_ok_type(&func.ret_ty);
                 resolve_err_types(&mut func.body, &ok_ty);
+                wrap_guard_elses(&mut func.body, &lifted.call_names, intrinsic_effect_syms);
                 func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), &lifted.call_names, intrinsic_effect_syms);
             }
         }
@@ -327,30 +330,55 @@ fn resolve_err_ty_block_wrapper(expr: &mut IrExpr) {
     }
 }
 
+/// Wrap every non-divergent `guard … else V` of a lifted effect fn body in
+/// `Ok(V)`, wherever the guard sits.
+///
+/// A guard's else is an early RETURN from the enclosing fn (the checker
+/// constrains it against the fn's return channel; the interpreter returns it),
+/// so its value must be Ok-wrapped at every depth — a `for`/`while` body, a
+/// `let`-bound block, a branch that is not the tail. Only the tail spine was
+/// wrapped before (#3042), so `guard c else ()` in a loop of an effect fn
+/// emitted `return ()` against `Result<(), String>` (rustc E0308).
+///
+/// A lambda body returns into the LAMBDA's channel, and a `fan` branch into
+/// its own closure: neither is this fn's exit, so neither is entered.
+/// Post-order, so a guard nested in another guard's else is wrapped before
+/// the outer else is.
+fn wrap_guard_elses(body: &mut IrExpr, lifted: &HashMap<String, Ty>, intr: &HashSet<String>) {
+    struct GuardElseWrapper<'a> { lifted: &'a HashMap<String, Ty>, intr: &'a HashSet<String> }
+
+    impl IrMutVisitor for GuardElseWrapper<'_> {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            if matches!(expr.kind, IrExprKind::Lambda { .. } | IrExprKind::Fan { .. }) {
+                return;
+            }
+            walk_expr_mut(self, expr);
+        }
+
+        fn visit_stmt_mut(&mut self, stmt: &mut IrStmt) {
+            walk_stmt_mut(self, stmt);
+            if let IrStmtKind::Guard { else_, .. } = &mut stmt.kind
+                && !is_divergent(else_)
+            {
+                *else_ = wrap_tail_in_ok(std::mem::take(else_), self.lifted, self.intr);
+            }
+        }
+    }
+
+    GuardElseWrapper { lifted, intr }.visit_expr_mut(body);
+}
+
 /// Wrap the tail expression of an effect fn body in Ok(...).
 ///
 /// Recurses into branching structures (Block, If, Match) to find all
-/// exit paths. Guard-else bodies are divergent and never wrapped.
+/// exit paths. Guard elses are the other exits; `wrap_guard_elses` wraps them.
 fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>, intr: &HashSet<String>) -> IrExpr {
     let ty = expr.ty.clone();
     let span = expr.span;
     match expr.kind {
         IrExprKind::Block { stmts, expr: Some(tail) } => {
-            // Wrap non-divergent guard-else bodies in Ok().
-            // Divergent bodies (err(...)!, break, continue) are left as-is.
-            let stmts = stmts.into_iter().map(|stmt| {
-                let span = stmt.span;
-                match stmt.kind {
-                    IrStmtKind::Guard { cond, else_ } if !is_divergent(&else_) => IrStmt {
-                        kind: IrStmtKind::Guard {
-                            cond,
-                            else_: wrap_tail_in_ok(else_, lifted, intr),
-                        },
-                        span,
-                    },
-                    other => IrStmt { kind: other, span },
-                }
-            }).collect();
+            // Guard elses are exits too, but they are wrapped by
+            // `wrap_guard_elses` at every depth, not only on this tail spine.
             let wrapped = wrap_tail_in_ok(*tail, lifted, intr);
             // The block's ty IS its (now Ok-wrapped) tail's ty — NOT `Result[pre_ty]`.
             // When the tail was ALREADY a Result (an explicit `ok()`/`err()`, or a
