@@ -6,8 +6,6 @@
 // structural emitter's witness recorder covers every RC event in them
 // (crates/almide-wasm/tests/witness_floor.rs holds the floor above zero
 // on the strength of these shapes).
-import fan
-
 fn shed() -> List[Int] = {
   let a = [1, 2, 3]
   let b = a
