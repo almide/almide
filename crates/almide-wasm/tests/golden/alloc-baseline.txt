@@ -843,7 +843,7 @@
 65760	spec/wasm_cross/while_loops.almd
 66000	spec/wasm_cross/whilep_str.almd
 69616	spec/wasm_cross/wide_function_body.almd
-87488	spec/wasm_cross/witness_straightline.almd
+88064	spec/wasm_cross/witness_straightline.almd
 67680	spec/wasm_cross/zip_view_shape.almd
 103888	spec/wasm_cross/zlib_selfhost.almd
 66128	spec/wasm_fail/effect_err_aborts_both_legs.almd
