@@ -2123,7 +2123,6 @@ since     = "0.35.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/io_write_ordering.almd", class = "fixture" },
-  { path = "spec/wasm_cross/stdlib_call_temporaries_release.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-163"
