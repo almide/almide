@@ -1,0 +1,32 @@
+// @contract: C-229
+// An offset near i64::MAX is past the buffer, so every element of the full Q1_0
+// loader is 0.0 on both targets. Both wasm legs tested an element's block as
+// `off + bs + 18 > len` with `off` clamped only below, and the sum wrapped to a
+// negative that passed: the decode then read `data + wrap32(off + bs)`, which
+// for `off = i64::MAX` is `bs - 1` bytes into the payload — row 3's block
+// (bs = 54) at byte 53. Native answered all zeros; wasm answered whatever
+// linear memory held there (#3126, fuzz-nightly run 36763301603 on
+// v0.66.0-rc2, seed 588212825650 index 347, where it was `-8192.0`). The
+// buffer here is long and filled with a nonzero pattern, so a wrapped read
+// lands inside it and prints a nonzero weight instead of depending on
+// whatever the heap happened to hold.
+import matrix
+import bytes
+
+fn cells(m: Matrix, r: Int) -> String = {
+  let row = list.get(matrix.to_lists(m), r) ?? []
+  "${list.get(row, 0) ?? 9.9},${list.get(row, 1) ?? 9.9}"
+}
+
+effect fn main() -> Unit = {
+  var q1 = bytes.new(200)
+  bytes.fill(q1, 60)
+  let at_max = matrix.from_q1_0_bytes(q1, 9223372036854775807, 4, 128)
+  println("max r0=${cells(at_max, 0)} r1=${cells(at_max, 1)} r2=${cells(at_max, 2)} r3=${cells(at_max, 3)}")
+  let near_max = matrix.from_q1_0_bytes(q1, 9223372036854775807 - 17, 4, 128)
+  println("max-17 r0=${cells(near_max, 0)} r3=${cells(near_max, 3)}")
+  let past = matrix.from_q1_0_bytes(q1, 4294967296, 2, 128)
+  println("2^32 r0=${cells(past, 0)} r1=${cells(past, 1)}")
+  let edge = matrix.from_q1_0_bytes(q1, 182, 2, 128)
+  println("last-block r0=${cells(edge, 0)} r1=${cells(edge, 1)}")
+}
