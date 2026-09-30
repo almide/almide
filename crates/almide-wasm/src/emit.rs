@@ -592,8 +592,48 @@ fn emit_program_pass(
         })
         .collect();
     let bytes = imports::declare(&bytes, &declared).map_err(|e| EmitError::Unsupported(format!("extern-import:{e}")))?;
+    record_decls(&program_fns, (main, main_index), &work, &entry_fn_indices, &declared, &bytes);
     let host_ops = work.host_ops.borrow().clone();
 Ok(Pass { bytes, visited, total, ops: host_ops, bounded_fired: work.bounded_fired.get() })
+}
+
+/// #2759: the declaration table the name and capability witnesses read
+/// (witness_decls.rs) — each program fn's, `main`'s and lifted lambda's
+/// index with what its source declares.
+fn record_decls(
+    program_fns: &[(&IrFunction, Option<String>, u32)],
+    (main, main_index): (Option<&IrFunction>, u32),
+    work: &FnWork,
+    entry_fn_indices: &[u32],
+    stubs: &[imports::Declared],
+    bytes: &[u8],
+) {
+    use crate::witness::decls::{DeclFn, Declared, PassDecls};
+    if !crate::witness::decls::collecting() {
+        return;
+    }
+    let stubs = stubs.iter().map(|d| d.index).collect();
+    let class = |f: &IrFunction| Some(if f.is_effect { Declared::Effect } else { Declared::Pure });
+    let mut fns: Vec<DeclFn> = program_fns
+        .iter()
+        .enumerate()
+        .map(|(i, (f, qual, _))| DeclFn {
+            index: F_FN_BASE + i as u32,
+            name: qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
+            // A self-host registry body implements a SURFACE whose
+            // declaration its callers were checked against; its own `fn`
+            // keyword declares nothing about the host (random.int is an
+            // `effect fn` implemented by a plain `fn random_int`).
+            declared: if qual.as_deref().is_some_and(|q| q.starts_with("__selfhost_")) { None } else { class(f) },
+        })
+        .collect();
+    fns.push(DeclFn { index: main_index, name: "main".into(), declared: main.map_or(Some(Declared::Pure), class) });
+    for (pos, e) in work.entries.borrow().iter().enumerate() {
+        if let (TableEntry::Lambda(j), Some(&index)) = (e, entry_fn_indices.get(pos)) {
+            fns.push(DeclFn { index, name: format!("<lambda#{j}>"), declared: None });
+        }
+    }
+    crate::witness::decls::record(PassDecls { fns, stubs, bytes: bytes.to_vec() });
 }
 
 /// The module a program fn belongs to: its qualified key minus `.<fn name>`
