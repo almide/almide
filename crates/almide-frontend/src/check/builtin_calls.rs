@@ -60,6 +60,7 @@ impl Checker {
     /// order. `None` means "not my group" — the router tries the groups in that
     /// order, so which rule a call gets is unchanged.
     pub(super) fn check_builtin_output(&mut self, name: &str, arg_tys: &[Ty]) -> Option<Ty> {
+        self.check_builtin_arity(name, arg_tys.len());
         match name {
             "println" | "eprintln" => {
                 // println/eprintln require String argument
@@ -83,6 +84,31 @@ impl Checker {
             }
             _ => return None,
         }
+    }
+
+    /// E004 for a builtin output / assertion call with an argument count its
+    /// lowering cannot spell (#3065). These builtins have no signature in
+    /// `env.functions`, so the ordinary arity check never saw them:
+    /// `assert_eq(a, b, "msg")` passed `check` and died at rustc on the
+    /// generated `assert_eq!(a, b, "msg", "{}", "at line N")`.
+    fn check_builtin_arity(&mut self, name: &str, got: usize) {
+        let (allowed, spelled, hint): (&[usize], &str, &str) = match name {
+            "println" | "eprintln" | "panic" => (&[1], "1", "Pass one String; build it with `${…}` interpolation or `+`"),
+            "assert" => (&[1, 2], "1 or 2", "`assert(cond)` or `assert(cond, message)`"),
+            "assert_eq" | "assert_ne" => (&[2], "2", "Compare two values; a failure already reports both sides and the line. For a custom message use `assert(a == b, message)`"),
+            _ => return,
+        };
+        if allowed.contains(&got) {
+            return;
+        }
+        self.emit(
+            super::err(
+                format!("{name}() expects {spelled} argument(s) but got {got}"),
+                hint,
+                format!("call to {name}()"),
+            )
+            .with_code("E004"),
+        );
     }
 
     /// The `Result` / `Option` constructors and `unwrap_or`.
