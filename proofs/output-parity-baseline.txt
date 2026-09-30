@@ -565,6 +565,7 @@ spec/wasm_cross/matrix_neg_signed_zero.almd
 spec/wasm_cross/matrix_pow_libm.almd
 spec/wasm_cross/matrix_product_family.almd
 spec/wasm_cross/matrix_q1_full_loader_cols_beyond_buffer.almd
+spec/wasm_cross/matrix_q1_full_loader_wrapped_offset.almd
 spec/wasm_cross/matrix_q_dims_guard.almd
 spec/wasm_cross/matrix_q_fp16_scale_domain.almd
 spec/wasm_cross/matrix_select_rows.almd
