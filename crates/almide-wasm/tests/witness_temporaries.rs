@@ -96,7 +96,9 @@ fn temporaries_witness_exactly_and_unhooked_shapes_decline() {
     let short = w.get("short").map(String::as_str).unwrap_or("<none>");
     assert_eq!(short, "{iamd|id}\n");
     assert!(accepted(short));
-    // A fresh heap operand of `==` is an unowned temporary no hook records
-    // (#2972's leak) — declined, never certified.
-    assert_eq!(w.get("eq_fresh").map(String::as_str), Some("!decline:heap-operand:OptionSome\n"));
+    // A fresh heap operand of `==` is bound first (#2972, arg_temps.rs): the
+    // borrowed param records nothing, the operand is born and released.
+    let eq = w.get("eq_fresh").map(String::as_str).unwrap_or("<none>");
+    assert_eq!(eq, "\nid\n");
+    assert!(accepted(eq));
 }
