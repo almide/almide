@@ -333,6 +333,10 @@ spec/wasm_cross/nested_field_path_mut.almd :: main
 # mutable module-level `var`s get their storage slots. The rows the #2950 note
 # below introduced for those three classes are gone except where another wall
 # remains; the note is kept for the ones that do.
+# Then 21 more (113 -> 92): an entry-file read of another module's top-let is
+# bound from the IR (`lower::cross_module_toplet_refs` — the synthesized
+# reference's `module_origin` + uppercased name name exactly one immutable,
+# call-free top-let of that module), replacing the deleted name bridge.
 # 2026-09-29 (#2950): the classifier now lowers what the product lowers. The
 # incumbent wasm pipeline ran program passes before lowering
 # (`inline_mutual_tail_recursion`, `populate_abi_registries`,
@@ -346,26 +350,7 @@ spec/wasm_cross/nested_field_path_mut.almd :: main
 # ABI registries). The structural leg serves these programs; this is the
 # MIR-lowering frontier, recorded rather than ported.
 spec/gauntlet/cells/x16_effect_mut_generic.almd :: main
-spec/integration/modules/cross_module_default_args_test.almd :: __test_almd_a default that names the callee module's own constant (#1088)
-spec/integration/modules/cross_module_init_order_test.almd :: __test_almd_cross-module top-let List heap-global read at init (#632)
-spec/integration/modules/cross_module_init_order_test.almd :: __test_almd_cross-module top-let direct heap-global read at init (#632)
-spec/integration/modules/cross_module_let_test.almd :: __test_almd_cross-module let Float value
-spec/integration/modules/cross_module_let_test.almd :: __test_almd_cross-module let Int value
-spec/integration/modules/cross_module_let_test.almd :: __test_almd_cross-module let composes with stdlib pipes
-spec/integration/modules/cross_module_let_test.almd :: __test_almd_cross-module let repeated access
-spec/integration/modules/cross_module_let_test.almd :: __test_almd_cross-module let value access
-spec/integration/modules/cross_module_toplet_byvalue_test.almd :: __test_almd_cross-module List top-let passed by value (#486)
-spec/integration/modules/cross_module_toplet_byvalue_test.almd :: __test_almd_cross-module String top-let passed by value (#486)
 spec/integration/modules/cross_module_toplet_byvalue_test.almd :: __test_almd_cross-module record top-let list and fn-returned record
-spec/integration/modules/cross_module_toplet_byvalue_test.almd :: __test_almd_cross-module spread from a rebound top-let base (#502)
-spec/integration/modules/cross_module_toplet_byvalue_test.almd :: __test_almd_cross-module top-let in borrow position stays clone-free
-spec/integration/modules/cross_module_toplet_byvalue_test.almd :: __test_almd_cross-module top-let through bind and closure (#486)
-spec/integration/modules/cross_module_toplet_byvalue_test.almd :: __test_almd_cross-module un-annotated record top-let member access
-spec/integration/modules/same_name_toplet_test.almd :: __test_almd_a let and a fn declared above their module's type
-spec/integration/modules/same_name_toplet_test.almd :: __test_almd_top-level let of a same-name type, read from the importer
-spec/integration/self_module_defaults/src/self_module_defaults_test.almd :: __test_almd_every option left to its default
-spec/integration/self_module_defaults/src/self_module_defaults_test.almd :: __test_almd_named options, the rest from defaults
-spec/integration/self_module_defaults/src/self_module_defaults_test.almd :: __test_almd_positional options, the rest from defaults
 spec/lang/effect_assign_unwrap_test.almd :: unannotated_unwraps
 spec/lang/explicit_propagation_test.almd :: explicit_unwraps
 spec/lang/guard_else_err_unwrap_test.almd :: show_unit
@@ -379,8 +364,6 @@ spec/wasm_cross/mut_param_call_chain.almd :: g
 spec/wasm_cross/mut_param_call_chain.almd :: main
 spec/wasm_cross/mut_param_effect_never_err.almd :: main
 spec/wasm_cross/mut_param_tail_recursion.almd :: main
-spec/wasm_cross_pkg/main.almd :: init
-spec/wasm_cross_pkg/src/rec.almd :: create
 # The same #2950 classifier change, on a fixture that landed after the list above
 # was measured (the fallible-HOF release pin): its effect-fn helpers wall without the
 # ABI registries the deleted passes filled. The structural leg serves it.
