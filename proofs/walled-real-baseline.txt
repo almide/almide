@@ -456,3 +456,16 @@ spec/wasm_cross/mut_param_err_write_visible.almd :: append_then_check
 spec/wasm_cross/mut_param_err_write_visible.almd :: forward
 spec/wasm_cross/mut_param_err_write_visible.almd :: main
 spec/wasm_cross/mut_param_move_mode_gaps.almd :: fill2
+# (2026-09-30, C-265/#3042) guard value exits inside `for` / `while` bodies: a
+# plain-value else is a fn-level early return from the loop. The incumbent's
+# desugar_loop_early_returns covers only a `while` in a `Result[_, String]` fn,
+# so these seven frames (for-in bodies, Unit and Int returns, effect fns' raw
+# Ok values) keep its honest early-return wall. The STRUCTURAL leg (the
+# default) lowers all seven; native, wasm and interp print identical bytes.
+spec/wasm_cross/guard_value_exit_in_loop.almd :: effect_int_for
+spec/wasm_cross/guard_value_exit_in_loop.almd :: effect_int_while
+spec/wasm_cross/guard_value_exit_in_loop.almd :: effect_str_for
+spec/wasm_cross/guard_value_exit_in_loop.almd :: effect_unit_for
+spec/wasm_cross/guard_value_exit_in_loop.almd :: effect_unit_while
+spec/wasm_cross/guard_value_exit_in_loop.almd :: pure_int_while
+spec/wasm_cross/guard_value_exit_in_loop.almd :: pure_unit_for
