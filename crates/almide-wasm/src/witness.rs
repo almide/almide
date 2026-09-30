@@ -102,6 +102,13 @@ pub struct WitnessRecorder {
     /// exit's, and the site records the value that leaves. Unarmed, an
     /// error exit still poisons.
     err_exit_armed: bool,
+    /// The calling conventions this frame's code was emitted under: its own
+    /// params (`O` owned / `B` borrowed) and each droppable call argument
+    /// (`m` moved into an owned param / `b` lent to a borrowed one). Two
+    /// emission passes may legitimately differ here (param_borrow.rs over
+    /// a different fn set); the floor test compares their certificates only
+    /// where this agrees. Never part of the certificate.
+    conv: String,
 }
 
 impl Default for WitnessRecorder {
@@ -122,6 +129,7 @@ impl WitnessRecorder {
             declined: None,
             hooked: Vec::new(),
             err_exit_armed: false,
+            conv: String::new(),
         }
     }
 
@@ -197,8 +205,26 @@ impl WitnessRecorder {
     /// A droppable param: callee-owned (+1 pre-paid by the call site's
     /// rc_arg_guard) — the object is born owned in this frame.
     pub fn param_owned(&mut self, local: u32) {
+        self.conv.push('O');
         let o = self.fresh_obj(local, true);
         self.ops(o, "i");
+    }
+
+    /// A droppable param of this frame's signature that it only borrows
+    /// (param_borrow.rs): [`Self::param_borrowed`], noted in the convention.
+    pub fn param_lent(&mut self, local: u32) {
+        self.conv.push('B');
+        self.param_borrowed(local);
+    }
+
+    /// A droppable call argument's hand-over mode (`m` / `b`).
+    pub fn convention(&mut self, c: char) {
+        self.conv.push(c);
+    }
+
+    /// The frame's calling-convention fingerprint (see the field).
+    pub fn context(&self) -> &str {
+        &self.conv
     }
 
     /// A droppable param this frame only BORROWS (param_borrow.rs, #2028):
@@ -509,6 +535,32 @@ pub fn take() -> Vec<(String, String)> {
     take_with_shipped().0
 }
 
+/// A recorded frame: `(pass, function name, certificate, convention
+/// context)` — the context is empty for a frame the gate turned away.
+pub type PassFrame = (usize, String, String, String);
+
+/// The raw sink split into frames: every frame with its pass and context,
+/// and the shipped pass's marker value (`None`: nothing shipped).
+fn parse(raw: Vec<(String, String)>) -> (Vec<PassFrame>, Option<String>) {
+    let shipped = raw.iter().rev().find(|(n, _)| n == SHIPPED_MARK).map(|(_, p)| p.clone());
+    let mut out = Vec::new();
+    let mut pass = 0usize;
+    let mut ctx = String::new();
+    for (name, cert) in raw {
+        match name.as_str() {
+            PASS_MARK => pass = cert.parse().unwrap_or(0),
+            SHIPPED_MARK => {}
+            CONTEXT_MARK => ctx = cert,
+            _ => out.push((pass, name, cert, std::mem::take(&mut ctx))),
+        }
+    }
+    (out, shipped)
+}
+
+fn drain() -> Vec<(String, String)> {
+    sink().lock().expect("witness sink").take().unwrap_or_default()
+}
+
 /// The sink's pass boundaries (#2754). `emit_program` emits in up to three
 /// passes — the first over the WHOLE linked registry graph, the next over
 /// the reachable set, a third when the bounded-line rewrites fired — and
@@ -517,6 +569,7 @@ pub fn take() -> Vec<(String, String)> {
 /// SHIPPED pass. The markers use a name no function can spell.
 const PASS_MARK: &str = "\u{0}pass";
 const SHIPPED_MARK: &str = "\u{0}shipped";
+const CONTEXT_MARK: &str = "\u{0}context";
 
 /// Both markers go through `push`, a no-op unless a sweep collects.
 pub(crate) fn mark_pass(pass: usize) {
@@ -542,17 +595,9 @@ pub fn take_with_shipped() -> (Frames, Frames) {
 /// the bundle producer pairs them with the same pass's call-mode witness).
 /// `None` when no pass was marked as shipped.
 pub fn take_shipped() -> Option<(usize, Frames)> {
-    let raw = sink().lock().expect("witness sink").take().unwrap_or_default();
-    let shipped: usize = raw.iter().rev().find(|(n, _)| n == SHIPPED_MARK)?.1.parse().ok()?;
-    let mut current = 0usize;
-    let mut frames = Vec::new();
-    for (name, cert) in raw {
-        if name == PASS_MARK {
-            current = cert.parse().unwrap_or(0);
-        } else if name != SHIPPED_MARK && current == shipped {
-            frames.push((name, cert));
-        }
-    }
+    let (all, shipped) = parse(drain());
+    let shipped: usize = shipped?.parse().ok()?;
+    let frames = all.into_iter().filter(|f| f.0 == shipped).map(|(_, n, c, _)| (n, c)).collect();
     Some((shipped, frames))
 }
 
@@ -567,23 +612,17 @@ pub const CHECKED_PASS: usize = 3;
 /// that shipped)`. Pass numbers are those `emit_program` marks (1, 2,
 /// [`CHECKED_PASS`]); a frame pushed before any marker reads as pass 0.
 pub fn take_by_pass() -> (Vec<(usize, String, String)>, Frames) {
-    let raw = sink().lock().expect("witness sink").take().unwrap_or_default();
-    let shipped = raw.iter().rev().find(|(n, _)| n == SHIPPED_MARK).map(|(_, p)| p.clone());
-    let mut all = Vec::new();
-    let mut in_shipped = Vec::new();
-    let mut current: Option<String> = None;
-    for (name, cert) in raw {
-        if name == PASS_MARK {
-            current = Some(cert);
-        } else if name == SHIPPED_MARK {
-        } else {
-            if shipped.is_some() && current == shipped {
-                in_shipped.push((name.clone(), cert.clone()));
-            }
-            let pass = current.as_deref().and_then(|p| p.parse().ok()).unwrap_or(0);
-            all.push((pass, name, cert));
-        }
-    }
+    let (all, shipped) = take_by_pass_with_context();
+    (all.into_iter().map(|(p, n, c, _)| (p, n, c)).collect(), shipped)
+}
+
+/// [`take_by_pass`] with each frame's convention context (the floor test's
+/// cross-pass comparison keys on it).
+pub fn take_by_pass_with_context() -> (Vec<PassFrame>, Frames) {
+    let (all, shipped) = parse(drain());
+    let shipped: Option<usize> = shipped.and_then(|p| p.parse().ok());
+    let in_shipped =
+        all.iter().filter(|f| Some(f.0) == shipped).map(|(_, n, c, _)| (n.clone(), c.clone())).collect();
     (all, in_shipped)
 }
 
@@ -595,6 +634,13 @@ pub(crate) fn push(name: &str, cert: String) {
     if let Some(v) = sink().lock().expect("witness sink").as_mut() {
         v.push((name.to_string(), cert));
     }
+}
+
+/// An armed recorder's frame: its certificate, preceded by its convention
+/// context (see `WitnessRecorder::conv`).
+pub(crate) fn push_recorded(name: &str, w: &WitnessRecorder) {
+    push(CONTEXT_MARK, w.context().to_string());
+    push(name, w.certificate());
 }
 
 /// The certificate prefix of a DECLINED frame — the measurement channel

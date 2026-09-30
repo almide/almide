@@ -462,6 +462,22 @@ tamper_structural '<lambda#0>' '1s/^id$/i/' "#2758 lambda param"
 run_structural spec/wasm_cross/witness_straightline.almd apply_len 0
 tamper_structural apply_len 's/^am$/a/' "#2758 closure call argument"
 
+# ── #2755: AGGREGATES and INTERPOLATION. `pair` tails a tuple: the param
+# shares into the slot (`am`) and the fresh block moves out (`im`). `left`
+# destructures its borrowed param: each binder is a view of a slot (an empty
+# line for the param), and the returned binder shares and moves out (`am`).
+# `hello` tails an interpolation: the build reads the part, the captured
+# block moves out (`im`). Drills: the tuple never leaves, the returned view's
+# share never moves out, and the captured text never leaves.
+echo
+echo "== structural leg, aggregates and interpolation  ⊳  proven checker (#2755) =="
+run_structural spec/wasm_cross/witness_straightline.almd pair 0
+run_structural spec/wasm_cross/witness_straightline.almd left 0
+run_structural spec/wasm_cross/witness_straightline.almd hello 0
+tamper_structural pair '2s/^im$/i/' "#2755 tuple literal"
+tamper_structural left 's/^am$/a/' "#2755 destructured binder"
+tamper_structural hello 's/^im$/i/' "#2755 interpolation"
+
 # ── #2758: MODULE-SPACE LETS. main's prologue stores each top-let into its
 # global: `ALPHA`'s literal moves in (`im`); `TBL`'s initializer (a
 # `bytes.from_list` result, line 3) is copied into the global (`im`) and

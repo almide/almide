@@ -154,6 +154,24 @@ fn stmts_subset(stmts: &[almide_ir::IrStmt]) -> Option<String> {
                     return Some(w.at("stmt:Guard"));
                 }
             }
+            // `let (a, b) = t`: arg_temps.rs names every droppable subject
+            // first (`let t = …` is the Bind hook's, the exit plan releases
+            // it), so the subject is a Var and each binder is a VIEW of one
+            // of its slots (patterns.rs, `local.set`, no share, no release) —
+            // exactly a match arm's binders. A named list rest is a fresh
+            // block no owner releases (#2971).
+            IrStmtKind::BindDestructure { pattern, value } => {
+                if pattern_has_named_rest(pattern) {
+                    return Some("pattern:list-rest".into());
+                }
+                let subject = crate::rc_ownership::rc_tail(value);
+                if !matches!(subject.kind, IrExprKind::Var { .. }) && !scalar_ty(&subject.ty) {
+                    return Some(format!("destructure-subject:{}", tag(&subject.kind)));
+                }
+                if let Some(w) = value_subset(value) {
+                    return Some(w.at("destructure-subject"));
+                }
+            }
             // A source comment emits nothing.
             IrStmtKind::Comment { .. } => {}
             other => return Some(format!("stmt:{}", tag(other))),
@@ -220,6 +238,25 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
         // A list literal: the spine is fresh, each element store is
         // `witness_store` exactly like a constructor payload's.
         IrExprKind::List { elements } => elements.iter().find_map(|x| value_subset(x).map(|w| w.inside("list-elem"))),
+        // A tuple / record literal: the same shape as a list literal — a
+        // fresh block (the enclosing site's `i` / `im`), each slot store is
+        // `witness_store` after the share guard (data.rs). A record field
+        // the literal omits is its declaration default, lowered at emission
+        // where the gate cannot see it: `witness_record_default` declines
+        // one that is not a literal.
+        IrExprKind::Tuple { elements } => elements.iter().find_map(|x| value_subset(x).map(|w| w.inside("tuple-elem"))),
+        IrExprKind::Record { fields, .. } => {
+            fields.iter().find_map(|(_, x)| value_subset(x).map(|w| w.inside("field")))
+        }
+        // An interpolation builds in the line buffer and captures the text
+        // as a fresh block (emitter.rs), or prints it with no block at all
+        // (`println`): the build reads each part and spends no credit, so a
+        // part obeys the operator-operand rule — a heap part is a Var or a
+        // pool static (arg_temps.rs binds every produced part first).
+        IrExprKind::StringInterp { parts } => parts.iter().find_map(|p| match p {
+            almide_ir::IrStringPart::Expr { expr } => read_operand(expr, "interp-part"),
+            almide_ir::IrStringPart::Lit { .. } => None,
+        }),
         // A call: its arguments are the call hooks' (recursively), its
         // droppable result is a received credit (#1986) the enclosing
         // site records.
@@ -271,21 +308,26 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
 /// such operand first, so this is the shape the emitter actually sees). A
 /// SCALAR operand is any admissible value.
 fn binop_subset(left: &IrExpr, right: &IrExpr) -> Option<Why> {
-    let operand = |x: &IrExpr| -> Option<Why> {
-        if scalar_ty(&x.ty) {
-            return value_subset(x).map(|w| w.inside("operand"));
-        }
-        match &x.kind {
-            IrExprKind::Var { .. } | IrExprKind::LitStr { .. } => None,
-            other => Some(Why::Deep(format!("heap-operand:{}", tag(other)))),
-        }
-    };
-    if let Some(w) = operand(left) {
+    if let Some(w) = read_operand(left, "operand") {
         return Some(w);
     }
     // `and` / `or`: the right operand runs on one arm of a branch site the
     // lowering opens for the witness (#2756) — any admissible operand.
-    operand(right)
+    read_operand(right, "operand")
+}
+
+/// A value a reader consumes no credit of (an operator operand, an
+/// interpolation part): a scalar is any admissible value (reported under
+/// `position`), a heap value only a Var or a pool static — a fresh heap
+/// value there is an unowned temporary no hook records (`heap-<position>`).
+fn read_operand(x: &IrExpr, position: &str) -> Option<Why> {
+    if scalar_ty(&x.ty) {
+        return value_subset(x).map(|w| w.inside(position));
+    }
+    match &x.kind {
+        IrExprKind::Var { .. } | IrExprKind::LitStr { .. } => None,
+        other => Some(Why::Deep(format!("heap-{position}:{}", tag(other)))),
+    }
 }
 
 /// A value with no RC site anywhere inside (Vars, literals, operators over
@@ -413,6 +455,15 @@ fn stmt_body_subset(e: &IrExpr) -> Option<Why> {
 /// (#2971), declined; a guard runs between two arms' tests, so it must be
 /// RC-free.
 fn match_head_subset(subject: &IrExpr, arms: &[almide_ir::IrMatchArm]) -> Option<String> {
+    // A tuple / record literal subject is a fresh block the match only
+    // reads: no route owns or releases it (arg_temps.rs names a produced or
+    // concatenated subject, not a literal one), so no hook has its `i`.
+    if matches!(
+        crate::rc_ownership::rc_tail(subject).kind,
+        IrExprKind::Tuple { .. } | IrExprKind::Record { .. } | IrExprKind::StringInterp { .. }
+    ) {
+        return Some(format!("match-subject:{}", tag(&crate::rc_ownership::rc_tail(subject).kind)));
+    }
     if let Some(w) = value_subset(subject) {
         return Some(w.at("match-subject"));
     }
