@@ -183,6 +183,13 @@ fn infer_function_borrows(func: &IrFunction, scope: &Scope) -> Vec<ParamBorrow> 
     if has_inline_template {
         return func.params.iter().map(|_| ParamBorrow::Own).collect();
     }
+    // An `@extern(rust, …)` fn is a hole too, and its wrapper is written
+    // against hand-written host code, so its ABI is FIXED by the param type
+    // rather than inferred from a body it does not have (#3045: an empty body
+    // inferred `Ref` for Bytes while the wrapper took the value).
+    if is_extern_rust_fn(func) {
+        return func.params.iter().map(|p| extern_rust_borrow_mode(p, scope.round.records)).collect();
+    }
     let has_intrinsic = func.attrs.iter().any(|a| a.name.as_str() == "intrinsic");
     if has_intrinsic {
         return func.params.iter().map(|p| intrinsic_borrow_mode(&p.ty, scope.round.records)).collect();
@@ -515,6 +522,39 @@ fn intrinsic_borrow_mode(ty: &Ty, records: &HashSet<String>) -> ParamBorrow {
         // type downstream, Clone/Borrow annotations travel through the
         // call unchanged.
         _ => ParamBorrow::Own,
+    }
+}
+
+/// Does `func` bind to a Rust host fn (`@extern(rust, "mod", "fn")`)? Its
+/// wrapper is rendered by `walker::extern_c::render_native_call`.
+pub(crate) fn is_extern_rust_fn(func: &IrFunction) -> bool {
+    func.extern_attrs.iter().any(|a| a.target.as_str() == "rust")
+}
+
+/// The `@extern(rust)` parameter ABI (#3045) — the ONE rule both the call
+/// sites (through the signature table) and the wrapper
+/// (`render_native_call`, from `param.borrow`) follow, so the two cannot
+/// disagree. It is the `@intrinsic` rule, the same mechanical
+/// type-to-mode mapping the runtime's own native fns use, with two
+/// additions:
+///
+/// - `mut` params are `&mut T`, as for every Almide fn;
+/// - `Matrix` is borrowed like `Bytes`: both are `AlmideRcCow` values in
+///   generated code, and the wrapper hands the host the raw
+///   `&[u8]` / `&AlmideMatrix` behind the handle, never the handle.
+///
+/// Read-only heap values are borrowed (`&str`, `&[T]`, `&[u8]`,
+/// `&AlmideMatrix`, `&Record`, `&AlmideMap`, `&AlmideSet`); scalars and the
+/// value-shaped types (`Option`, `Result`, tuples, variants, fn values) are
+/// passed owned. Documented in `docs/specs/module-system.md` §11.1 and gated
+/// by `tests/extern_rust_abi_test.rs`.
+pub(crate) fn extern_rust_borrow_mode(param: &IrParam, records: &HashSet<String>) -> ParamBorrow {
+    if param.is_mut {
+        return ParamBorrow::RefMut;
+    }
+    match &param.ty {
+        Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _) => ParamBorrow::Ref,
+        ty => intrinsic_borrow_mode(ty, records),
     }
 }
 

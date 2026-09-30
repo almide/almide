@@ -1,39 +1,64 @@
 // ── C FFI extern codegen ──────────────────────────────────────
 
+/// Render `@extern(rust, "module", "function")` as a thin wrapper that
+/// delegates to `module::function(..)`.
+///
+/// The wrapper's params follow the `@extern(rust)` ABI
+/// (`extern_rust_borrow_mode`, #3045) through `param.borrow` — the same modes
+/// the call sites are decorated with — so a call site and the wrapper cannot
+/// disagree. The host fn sees plain Rust types: `&str`, `&[T]`, `&[u8]`,
+/// `&AlmideMatrix`, `&T` for records / maps / sets, `&mut T` for `mut`
+/// params, and owned scalars / `Option` / `Result` / tuples / variants /
+/// `Rc<dyn Fn>`. A `Bytes` / `Matrix` RETURN accepts either the raw
+/// `Vec<u8>` / `AlmideMatrix` or the `AlmideRcCow` handle (`.into()`).
+fn render_native_call(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::ast::ExternAttr, emit_name: &str) -> String {
+    use types::render_type;
+    let mod_name = attr.module.as_str();
+    let fn_name = attr.function.as_str();
+    let params: Vec<String> = func.params.iter()
+        .map(|p| format!("{}: {}", p.name, extern_rust_param_type(ctx, p)))
+        .collect();
+    let args: Vec<String> = func.params.iter().map(|p| p.name.to_string()).collect();
+    let ret = render_type(ctx, &func.ret_ty);
+    let call = format!("{}::{}({})", mod_name, fn_name, args.join(", "));
+    let body = if extern_rust_is_rc_cow(&func.ret_ty) { format!("{call}.into()") } else { call };
+    format!("fn {}({}) -> {} {{\n    {}\n}}", emit_name, params.join(", "), ret, body)
+}
+
+/// `Bytes` / `Matrix`: the two value types generated code holds behind an
+/// `AlmideRcCow` handle (#617).
+fn extern_rust_is_rc_cow(ty: &Ty) -> bool {
+    use almide_lang::types::TypeConstructorId;
+    matches!(ty, Ty::Bytes | Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _))
+}
+
+/// One `@extern(rust)` wrapper param type, from the mode the ABI assigned
+/// (`extern_rust_borrow_mode`). A borrowed `Bytes` / `Matrix` is the raw
+/// value behind the handle — `&AlmideRcCow<Vec<u8>>` at the call site
+/// deref-coerces to `&[u8]` — so the host never sees `AlmideRcCow`.
+fn extern_rust_param_type(ctx: &RenderContext, p: &IrParam) -> String {
+    use types::render_type;
+    use almide_lang::types::TypeConstructorId;
+    match (p.borrow, &p.ty) {
+        (ParamBorrow::Own, ty) => render_type(ctx, ty),
+        (ParamBorrow::RefStr, _) => "&str".to_string(),
+        (ParamBorrow::RefSlice, Ty::Applied(TypeConstructorId::List, args)) if args.len() == 1 => {
+            format!("&[{}]", render_type(ctx, &args[0]))
+        }
+        (ParamBorrow::Ref, Ty::Bytes) => "&[u8]".to_string(),
+        (ParamBorrow::Ref, ty) if extern_rust_is_rc_cow(ty) => "&AlmideMatrix".to_string(),
+        (ParamBorrow::Ref | ParamBorrow::RefSlice, ty) => format!("&{}", render_type(ctx, ty)),
+        // `&mut AlmideRcCow<T>` deref-coerces through `make_mut`: the host
+        // writes the caller's binding copy-on-write, as a `mut` param means.
+        (ParamBorrow::RefMut, Ty::Bytes) => "&mut Vec<u8>".to_string(),
+        (ParamBorrow::RefMut, ty) if extern_rust_is_rc_cow(ty) => "&mut AlmideMatrix".to_string(),
+        (ParamBorrow::RefMut, ty) => format!("&mut {}", render_type(ctx, ty)),
+    }
+}
+
 /// Render @extern(c, "lib", "func") as: extern "C" block + safe Almide wrapper.
 ///
 /// Type mapping (Almide → C extern → safe wrapper):
-/// Render @native("target", "module", "function") — delegates to module::function().
-/// Parameters use reference types (&str, &[T]) matching native Rust conventions.
-fn render_native_call(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::ast::ExternAttr, emit_name: &str) -> String {
-    use types::render_type;
-    use almide_lang::types::{Ty, TypeConstructorId};
-    let mod_name = attr.module.as_str();
-    let fn_name = attr.function.as_str();
-
-    // Wrapper params: use reference types for String/List to match native Rust conventions
-    let params: Vec<String> = func.params.iter().map(|p| {
-        let ty = match &p.ty {
-            Ty::String => "&str".to_string(),
-            Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
-                format!("&[{}]", render_type(ctx, &args[0]))
-            }
-            _ => render_type(ctx, &p.ty),
-        };
-        format!("{}: {}", p.name, ty)
-    }).collect();
-
-    // Call args: pass through directly (wrapper already uses reference types)
-    let args: Vec<String> = func.params.iter().map(|p| {
-        p.name.to_string()
-    }).collect();
-
-    let ret = render_type(ctx, &func.ret_ty);
-    format!("fn {}({}) -> {} {{\n    {}::{}({})\n}}",
-        emit_name, params.join(", "), ret,
-        mod_name, fn_name, args.join(", "))
-}
-
 ///   Int     → i32 in extern, i64 in wrapper (cast)
 ///   Float   → f64 (same)
 ///   Bool    → i32 in extern, bool in wrapper (cast)
