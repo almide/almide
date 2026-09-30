@@ -413,7 +413,17 @@ pub(crate) fn lower_fn(
         {
             // #2758: a capture is a view of the env block (loaded without a
             // share, below) — except a C-319 cell, whose address travels.
-            let pre_gate = if env_captures.as_ref().is_some_and(|c| c.iter().any(|&(_, _, _, cell)| cell)) {
+            // #2758: a C-319 cell capture is its ADDRESS, loaded from the env
+            // (below) — the env's credit on the cell, which the env's drop
+            // glue releases; this frame neither shares nor releases it. Its
+            // OCCUPANT is read and written through the address: a scalar
+            // occupant has no RC site at all, a droppable one does (the
+            // write-back's release, a share of the read) on a block no local
+            // of this frame names, so that capture declines.
+            let pre_gate = if env_captures
+                .as_ref()
+                .is_some_and(|c| c.iter().any(|&(_, t, _, cell)| cell && em.rc_droppable(t)))
+            {
                 Some("captures:cell".to_string())
             } else if crate::witness::argv_exception(name) {
                 Some("caps:argv-in-plain-fn".to_string())

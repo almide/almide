@@ -430,6 +430,15 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
         // callee value is. The env is lent (a view to the lifted body); a
         // fresh callee is released after the call (`id`); the arguments are
         // callee-owned (the closure convention), each an argument hook's.
+        // A field of a bound record (`r.f(x)`, #2758): the Fn value is a
+        // VIEW of the slot, lent to the lifted body like a borrowed local —
+        // no release (`rc_owned_result` of a field read is false), no share.
+        almide_ir::CallTarget::Computed { callee } if matches!(callee.kind, IrExprKind::Member { .. }) => {
+            let IrExprKind::Member { object, .. } = &callee.kind else { unreachable!() };
+            if !matches!(object.kind, IrExprKind::Var { .. }) {
+                return Some(Why::Deep(format!("callee:Member-of:{}", tag(&object.kind))));
+            }
+        }
         almide_ir::CallTarget::Computed { callee } => {
             if let Some(w) = value_subset(callee) {
                 return Some(w.inside("callee"));
@@ -603,15 +612,24 @@ fn ends_in_loop_ctl(e: &IrExpr) -> bool {
 /// #2758: the gate for an EFFECT frame. Its body lowers at the raw ok type
 /// and func.rs wraps the result in the ok carrier (both recorded there), so
 /// the straight-line rules apply unchanged — except to a constructor of the
-/// carrier itself. Inside an effect body `ok(v)` in a raw position is
-/// transparent and `err(e)` raises through the frame's error exit
-/// (lower_err_raise), neither of which is a store hook; any `ok` / `err`
-/// declines as `effect:carrier` until those exits are recorded.
+/// carrier itself. Inside an effect body, where the raw type is expected:
+///
+/// - `err(e)` RAISES through the frame's error exit (data.rs
+///   `lower_err_raise`): the err block is built (its payload store is
+///   `witness_store`), the exit plan's releases are recorded like a `!`
+///   propagation's, and the block leaves (`witness_err_raise`). Admitted.
+/// - `ok(v)` is transparent — the value IS `v` — while every consumer reads
+///   the node as a fresh construction (`rc_owned_result`). That agrees only
+///   when `v` is a scalar or certainly fresh itself, so any other `ok(v)`
+///   declines as `effect:carrier:ok-borrowed`.
 pub fn effect_subset(body: &IrExpr, raw_is_heap: bool) -> Option<String> {
     struct Carrier(bool);
     impl almide_ir::visit::IrVisitor for Carrier {
         fn visit_expr(&mut self, e: &IrExpr) {
-            if matches!(e.kind, IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }) {
+            if let IrExprKind::ResultOk { expr } = &e.kind
+                && !scalar_ty(&expr.ty)
+                && !crate::rc_ownership::rc_certainly_fresh(&expr.kind)
+            {
                 self.0 = true;
             } else if !self.0 {
                 almide_ir::visit::walk_expr(self, e);
@@ -621,7 +639,7 @@ pub fn effect_subset(body: &IrExpr, raw_is_heap: bool) -> Option<String> {
     let mut c = Carrier(false);
     almide_ir::visit::IrVisitor::visit_expr(&mut c, body);
     if c.0 {
-        return Some("effect:carrier".into());
+        return Some("effect:carrier:ok-borrowed".into());
     }
     straightline_subset(body, raw_is_heap)
 }

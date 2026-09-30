@@ -150,4 +150,22 @@ impl Emitter<'_> {
             _ => w.temp_discarded(),
         }
     }
+
+    /// #2758: a bare `err(e)` RAISED from an effect body (data.rs
+    /// `lower_err_raise`), right before its exit plan: the exit's releases
+    /// are recorded like a `!` propagation's.
+    pub(crate) fn witness_err_raise_arm(&mut self) {
+        if let Some(w) = self.witness.as_mut() {
+            w.arm_err_exit();
+        }
+    }
+
+    /// After the raise's releases: the fresh err block leaves the frame
+    /// (`im`) and the path ends.
+    pub(crate) fn witness_err_raise_leave(&mut self) {
+        if let Some(w) = self.witness.as_mut() {
+            w.temp_move();
+            w.frame_replaced();
+        }
+    }
 }

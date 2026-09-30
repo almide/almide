@@ -502,6 +502,18 @@ echo "== structural leg, unwrap-or  ⊳  proven checker (#2755) =="
 run_structural spec/wasm_cross/witness_straightline.almd or_zero 0
 tamper_structural or_zero 's/^{|im}$/{|i}/' "#2755 unwrap-or fallback"
 
+# ── #2758: an `err(e)` RAISED from an effect body, and a call through a record
+# FIELD. `raise`: the literal payload moves into the err block, the block
+# leaves on the raising arm, the ok carrier on the other (`{|im}` each).
+# `apply_op`: the record param and the field's Fn value are views (empty
+# lines). Drills: the err block never leaves; the borrowed record is released.
+echo
+echo "== structural leg, effect raise + field callee  ⊳  proven checker (#2758) =="
+run_structural spec/wasm_cross/witness_straightline.almd raise 0
+run_structural spec/wasm_cross/witness_straightline.almd apply_op 0
+tamper_structural raise '2s/^{|im}$/{|i}/' "#2758 raised err block"
+tamper_structural apply_op '1s/^$/d/' "#2758 field callee record"
+
 # ── #2758: MODULE-SPACE LETS. main's prologue stores each top-let into its
 # global: `ALPHA`'s literal moves in (`im`); `TBL`'s initializer (a
 # `bytes.from_list` result, line 3) is copied into the global (`im`) and

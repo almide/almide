@@ -213,7 +213,9 @@ impl Emitter<'_> {
             // An exit like any other: the frame's owners are released
             // before the jump (the err block already shares its payload).
             let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
+            self.witness_err_raise_arm();
             self.emit_exit(&plan);
+            self.witness_err_raise_leave();
             self.f.instructions().return_();
             return Ok(raw);
         }

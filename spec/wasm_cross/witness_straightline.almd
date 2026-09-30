@@ -172,6 +172,18 @@ fn total(xs: List[String]) -> Int = list.fold(xs, 0, (acc, s) => acc + string.le
 // arm (`{|am}`), and the join itself moves out (`im`).
 fn or_zero(o: List[Int]?) -> List[Int] = o ?? [0]
 
+// #2758 — a bare `err(e)` RAISED from an effect body: the err block is built
+// (its literal payload moves in, `im`), the exit releases the frame's owners,
+// and the block leaves (`im`) — one arm of the branch; the ok carrier the
+// success exit builds leaves on the other.
+effect fn raise(x: Int) -> Int = if x == 0 then err("zero") else ok(x)
+
+// #2758 — a call through a record FIELD: the Fn value is a view of the slot,
+// lent to the lifted body, never shared or released here.
+type Op = { run: (Int) -> Int }
+
+fn apply_op(o: Op, x: Int) -> Int = o.run(x)
+
 effect fn main() -> Unit = {
   println("${list.len(shed())} ${tag("w")} ${pass([1])} ${bind_then_pass()}")
   println("${discard([1, 2])} ${stamp(7)} ${shout("w")}")
@@ -186,4 +198,5 @@ effect fn main() -> Unit = {
   println("${left(pair("x"))} ${hello("y")}")
   println("${bang(["a", "bc"])} ${kept(["a", "bc"])} ${total(["a", "bc"])}")
   println("${or_zero(some([1, 2]))} ${or_zero(none)}")
+  println("${raise(2)!} ${apply_op(Op { run: (n) => n + 1 }, 4)}")
 }
