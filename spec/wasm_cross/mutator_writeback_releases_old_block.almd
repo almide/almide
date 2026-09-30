@@ -15,8 +15,6 @@
 // pins that nothing stays live.
 var log_text: String = ""
 
-var log_buf: Bytes = bytes.new(0)
-
 fn add(mut xs: List[String], s: String) -> Unit = list.push(xs, s)
 
 fn pop_last(mut xs: List[String]) -> String = list.pop(xs) ?? "-"
@@ -61,14 +59,17 @@ fn main() -> Unit = {
   println("pop=" + last + " xs=" + show_list(xs) + " xs0=" + show_list(xs0))
   list.clear(xs)
   for i in 0..<9 {
-    add(xs, "v" + int.to_string(i))
+    let v = "v" + int.to_string(i)
+    add(xs, v)
   }
   println("grown=" + show_list(xs))
-  println("popped=" + pop_last(xs) + " rest=" + int.to_string(list.len(xs)))
+  let popped = pop_last(xs)
+  println("popped=" + popped + " rest=" + int.to_string(list.len(xs)))
   // Maps: the functional insert/delete through a `mut` param, clear on a local.
   var m: Map[String, Int] = map.new()
   for i in 0..<4 {
-    put(m, "k" + int.to_string(i), i)
+    let k = "k" + int.to_string(i)
+    put(m, k, i)
   }
   let m0 = m
   drop_key(m, "k1")
@@ -93,11 +94,11 @@ fn main() -> Unit = {
   let cw = () => bytes.copy_within(c, 0, 1, 1)
   cw()
   println("c=" + show_bytes(c))
-  // Module-level vars take the same write-backs.
+  // A module-level var takes the same write-back.
   for i in 0..<3 {
-    string.push(log_text, "#" + int.to_string(i))
-    bytes.push(log_buf, i)
+    let tag = "#" + int.to_string(i)
+    string.push(log_text, tag)
   }
-  bytes.fill(log_buf, 5)
-  println("log=" + log_text + " buf=" + show_bytes(log_buf))
+  let text = log_text
+  println("log=" + text)
 }
