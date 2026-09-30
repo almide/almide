@@ -539,8 +539,10 @@ fn rewrite_guard_stmt_list(
     // `if cond then { rest } else ok(mid)` in the Unit loop body silently DROPPED the
     // return and looped forever (binary_search hung at v == target). Leave the Guard
     // un-rewritten — the loop lowering declines a Guard body and walls honestly.
+    // #3115: a BLOCK else that ends in the jump (`else { log(); continue }`) is the
+    // same loop exit with statements in front of it.
     if let IrStmtKind::Guard { else_, .. } = &body[i].kind {
-        if !matches!(else_.kind, IrExprKind::Continue | IrExprKind::Break) {
+        if loop_exit_else(else_.clone()).is_none() {
             return body;
         }
     }
@@ -562,15 +564,7 @@ fn rewrite_guard_stmt_list(
         },
         changed,
     );
-    let else_branch = match &else_.kind {
-        IrExprKind::Continue => IrExpr {
-            kind: IrExprKind::Unit,
-            ty: Ty::Unit,
-            span: else_.span,
-            def_id: else_.def_id,
-        },
-        _ => else_,
-    };
+    let else_branch = loop_exit_else(else_).expect("checked above");
     let if_expr = IrExpr {
         kind: IrExprKind::If {
             cond: Box::new(cond),
@@ -583,6 +577,37 @@ fn rewrite_guard_stmt_list(
     };
     pre.push(IrStmt { kind: IrStmtKind::Expr { expr: if_expr }, span: gspan });
     pre
+}
+
+/// The loop-body guard's else as the `if`'s else branch, or `None` when it does
+/// not leave the loop: `continue` is `()` (the rest is skipped by the `if`), a
+/// `break` stays verbatim, and a block ending in either keeps its statements in
+/// front (#3115).
+fn loop_exit_else(e: almide_ir::IrExpr) -> Option<almide_ir::IrExpr> {
+    use almide_ir::{IrExpr, IrExprKind, IrStmtKind};
+    let unit = |span, def_id| IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span, def_id };
+    match e.kind {
+        IrExprKind::Continue => Some(unit(e.span, e.def_id)),
+        IrExprKind::Break => Some(e),
+        IrExprKind::Block { mut stmts, expr } => {
+            let last = match expr {
+                Some(tail) => *tail,
+                None => match stmts.pop()?.kind {
+                    IrStmtKind::Expr { expr } => expr,
+                    _ => return None,
+                },
+            };
+            let exit = loop_exit_else(last)?;
+            if stmts.is_empty() {
+                return Some(exit);
+            }
+            if !matches!(exit.kind, IrExprKind::Unit) {
+                stmts.push(almide_ir::IrStmt { span: exit.span, kind: IrStmtKind::Expr { expr: exit } });
+            }
+            Some(IrExpr { kind: IrExprKind::Block { stmts, expr: None }, ty: Ty::Unit, span: e.span, def_id: e.def_id })
+        }
+        _ => None,
+    }
 }
 
 fn desugar_guard_rec(e: IrExpr, changed: &mut bool) -> IrExpr {
