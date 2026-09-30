@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  var m = ["a": 1]
+  m["b"] = 2
+  println("${m}")
+}
