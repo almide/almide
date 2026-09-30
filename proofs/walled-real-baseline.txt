@@ -477,3 +477,17 @@ spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint16
 spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint32
 spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint64
 spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint8
+# #2969 / #2971 / #2988: the leak-free wasm fixtures' functions meet the MIR
+# lowering frontier the rows above already record — the effect-fn ABI without
+# the deleted registries (`chk` and the `!`-in-literal helpers; the
+# Result-returning `main`), and a named list rest (`total` / `tail_of`, the
+# list_rest_pattern rows' class). The structural leg serves every one of them
+# byte-identically to native with no block live at exit; this records the
+# MIR-lowering frontier, not a regression.
+spec/wasm_cross/leak_free_propagating_literal_operand.almd :: chk
+spec/wasm_cross/leak_free_propagating_literal_operand.almd :: in_list
+spec/wasm_cross/leak_free_propagating_literal_operand.almd :: in_record
+spec/wasm_cross/leak_free_propagating_literal_operand.almd :: in_tuple
+spec/wasm_cross/leak_free_reader_temporaries.almd :: tail_of
+spec/wasm_cross/leak_free_reader_temporaries.almd :: total
+spec/wasm_cross/leak_free_result_option_carriers.almd :: main
