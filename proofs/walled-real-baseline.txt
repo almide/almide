@@ -398,3 +398,13 @@ spec/wasm_cross/mut_param_move_mode_gaps.almd :: fill2
 # (2026-09-30, #3058) fifteen of the sixteen now lower on the MIR rung too;
 # show_float32 remains (the Float32 printer, see the #3058 note above).
 spec/wasm_cross/sized_tail_literal_matrix.almd :: show_float32
+# (2026-09-30, batch 076) the MIR-rung walls #3061, #3052 and #3066 leave after
+# #3073's derived effect-fn ABI facts: a `!` in a list-literal operand, a
+# Result-returning main over carrier releases, two hoisted mut-call arguments,
+# and nested / module-var assignment targets. The structural leg serves all five
+# byte-identically to native; #3084 owns burning them down.
+spec/lang/assign_target_expected_type_test.almd :: __test_almd_an empty literal takes a module-level var's field type  # #3084
+spec/wasm_cross/leak_free_propagating_literal_operand.almd :: in_list  # #3084
+spec/wasm_cross/leak_free_result_option_carriers.almd :: main  # #3084
+spec/wasm_cross/mut_call_hoisted_args_distinct.almd :: main  # #3084
+spec/wasm_cross/nested_place_assign.almd :: main  # #3084
