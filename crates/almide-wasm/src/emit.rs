@@ -613,7 +613,11 @@ fn record_decls(
         return;
     }
     let stubs = stubs.iter().map(|d| d.index).collect();
-    let class = |f: &IrFunction| Some(if f.is_effect { Declared::Effect } else { Declared::Pure });
+    // #3041: a fn synthesized from an effect fn's body keeps its origin's
+    // declaration (`IrFunction::declares_effect`).
+    let class = |f: &IrFunction| Some(if f.declares_effect() { Declared::Effect } else { Declared::Pure });
+    let meter = work.meter_reads.borrow();
+    let reads = |name: &str| meter.get(name).copied().unwrap_or(0);
     let mut fns: Vec<DeclFn> = program_fns
         .iter()
         .enumerate()
@@ -625,12 +629,20 @@ fn record_decls(
             // keyword declares nothing about the host (random.int is an
             // `effect fn` implemented by a plain `fn random_int`).
             declared: if qual.as_deref().is_some_and(|q| q.starts_with("__selfhost_")) { None } else { class(f) },
+            meter_clock_reads: reads(&qual.clone().unwrap_or_else(|| f.name.as_str().to_string())),
         })
         .collect();
-    fns.push(DeclFn { index: main_index, name: "main".into(), declared: main.map_or(Some(Declared::Pure), class) });
+    fns.push(DeclFn {
+        index: main_index,
+        name: "main".into(),
+        declared: main.map_or(Some(Declared::Pure), class),
+        meter_clock_reads: reads("main"),
+    });
     for (pos, e) in work.entries.borrow().iter().enumerate() {
         if let (TableEntry::Lambda(j), Some(&index)) = (e, entry_fn_indices.get(pos)) {
-            fns.push(DeclFn { index, name: format!("<lambda#{j}>"), declared: None });
+            let name = format!("<lambda#{j}>");
+            let meter_clock_reads = reads(&name);
+            fns.push(DeclFn { index, name, declared: None, meter_clock_reads });
         }
     }
     crate::witness::decls::record(PassDecls { fns, stubs, bytes: bytes.to_vec() });

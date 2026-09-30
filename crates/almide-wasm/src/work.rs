@@ -297,6 +297,12 @@ pub(crate) struct FnWork {
     pub(crate) region_pure: crate::region::RegionPure,
     /// Set once any region window was emitted (exports `__heap_high`).
     pub(crate) region_used: std::cell::Cell<bool>,
+    /// #3041: the fuel meter's wall-clock reads (the deadline test of
+    /// `emit_det_cut_check`) emitted in the frame being lowered, and per
+    /// finished frame by its witness name — the capability witness's
+    /// declaration table charges them to the region opener, not the frame.
+    pub(crate) meter_reads_pending: std::cell::Cell<u32>,
+    pub(crate) meter_reads: std::cell::RefCell<HashMap<String, u32>>,
 }
 
 pub(crate) enum DisplayBuild {
