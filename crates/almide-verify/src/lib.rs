@@ -28,13 +28,14 @@ mod modes;
 mod nat;
 mod ownership;
 mod reach;
+pub mod sha256;
 
 /// The verifier's own version — independent of the compiler's.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The witness formats this version reads.
 pub const FORMATS: &str =
-    "ownership v5, names v1, caps v1, caps-transitive v1, call-modes v1, bundle v1";
+    "ownership v5, names v1, caps v1, caps-transitive v1, call-modes v1, bundle v1 and v2 (artifact sha256)";
 
 /// A flight-grade property a witness certifies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
