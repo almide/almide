@@ -162,15 +162,17 @@ effect fn main() -> Unit = {
 
 const EXPECTED: &str = "CCC!\nnone\n17\n6\nr1:1,r2:1,r3:1,r3:3,r4:1,r4:3\n14\n0 4 43\nk=1;k=2;k=4;k=5;k=7\n2000\n";
 
-#[test]
-fn break_and_continue_over_heap_locals_match_native_on_the_structural_leg_without_leaking() {
+/// Runs `program` natively and on the structural wasm leg: both must print
+/// `expected`, the wasm leg must not fall back, and every allocation the
+/// structural leg makes must be released.
+fn assert_structural_parity_without_leaks(program: &str, expected: &str) {
     let dir = tempfile::tempdir().expect("tempdir");
     let src = dir.path().join("loops.almd");
-    std::fs::write(&src, PROGRAM).unwrap();
+    std::fs::write(&src, program).unwrap();
 
     let native = Command::new(almide()).current_dir(dir.path()).args(["run", "loops.almd"]).output().expect("native run");
     assert!(native.status.success(), "native run failed:\n{}", String::from_utf8_lossy(&native.stderr));
-    assert_eq!(String::from_utf8_lossy(&native.stdout), EXPECTED, "native output");
+    assert_eq!(String::from_utf8_lossy(&native.stdout), expected, "native output");
 
     let wasm = Command::new(almide())
         .current_dir(dir.path())
@@ -185,7 +187,7 @@ fn break_and_continue_over_heap_locals_match_native_on_the_structural_leg_withou
         stderr.contains("structural leg emitted the module"),
         "the program must lower on the structural leg, not fall back:\n{stderr}"
     );
-    assert_eq!(String::from_utf8_lossy(&wasm.stdout), EXPECTED, "wasm output must be byte-identical to native");
+    assert_eq!(String::from_utf8_lossy(&wasm.stdout), expected, "wasm output must be byte-identical to native");
 
     let line = stderr
         .lines()
@@ -198,4 +200,129 @@ fn break_and_continue_over_heap_locals_match_native_on_the_structural_leg_withou
             .unwrap_or_else(|| panic!("no `{k}` in {line}"))
     };
     assert_eq!(field("allocs="), field("frees="), "every allocation is released: {line}");
+}
+
+#[test]
+fn break_and_continue_over_heap_locals_match_native_on_the_structural_leg_without_leaking() {
+    assert_structural_parity_without_leaks(PROGRAM, EXPECTED);
+}
+
+/// #3113: guard-else jumps in VALUE-returning fns, in the shapes the MIR rung
+/// walls (so they live here, not in spec/wasm_cross/guard_jump_in_value_fn.almd):
+/// nested loops where the inner guard jumps the inner loop and the outer guard
+/// the outer one, a `!` in a `while` body of an effect fn returning a Result,
+/// a guard in a match arm, and (#3115) a guard else BLOCK that runs statements
+/// before its `break` or ends in `err(..)!`. Each keeps a heap local live
+/// across the jump.
+const VALUE_FN_PROGRAM: &str = r#"fn nested_for(m: Int) -> Int = {
+  var n = 0
+  for i in 0..<m {
+    let tag = "i" + int.to_string(i)
+    guard i != 1 else continue
+    for j in 0..<m {
+      let cell = tag + ":" + int.to_string(j)
+      guard j != i else continue
+      guard j < 3 else break
+      n = n + string.len(cell) - string.len(cell) + 1
+    }
+  }
+  n
+}
+
+fn nested_while(m: Int) -> String = {
+  var s = ""
+  var i = 0
+  while i < m {
+    i = i + 1
+    var j = 0
+    var stop = false
+    while j < m {
+      j = j + 1
+      let cell = int.to_string(i) + int.to_string(j)
+      guard j != 2 else continue
+      if i * j > 6 then { stop = true } else ()
+      guard not stop else break
+      s = s + cell + " "
+    }
+    guard not stop else break
+  }
+  s
+}
+
+effect fn parse_until_negative(xs: List[String]) -> Result[List[Int], String] = {
+  var acc: List[Int] = []
+  var i = 0
+  while i < list.len(xs) {
+    let s = xs[i]
+    i = i + 1
+    guard s != "" else continue
+    let v = int.parse(s)!
+    guard v >= 0 else break
+    acc = acc + [v]
+  }
+  ok(acc)
+}
+
+fn in_match_arm(xs: List[Int?]) -> Int = {
+  var n = 0
+  for o in xs {
+    let label = "o" + int.to_string(n)
+    match o {
+      some(v) => {
+        guard v > 0 else continue
+        n = n + v + string.len(label) - string.len(label)
+      },
+      none => { guard false else break },
+    }
+  }
+  n
+}
+
+fn stop_block(xs: List[Int]) -> Int = {
+  var n = 0
+  for x in xs {
+    let tag = "x" + int.to_string(x)
+    guard x != 9 else {
+      println("stop " + tag)
+      break
+    }
+    n = n + x
+  }
+  n
+}
+
+effect fn eff_block(xs: List[Int]) -> Result[Int, String] = {
+  var n = 0
+  for x in xs {
+    let tag = "x" + int.to_string(x)
+    guard x >= 0 else {
+      println("neg " + tag)
+      err("negative " + tag)!
+    }
+    guard x != 0 else {
+      println("zero")
+      continue
+    }
+    n = n + x
+  }
+  ok(n)
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(nested_for(5)))
+  println(nested_while(4))
+  println(parse_until_negative(["1", "", "2", "-1", "5"])! |> list.map((v) => int.to_string(v)) |> list.join(","))
+  println(int.to_string(in_match_arm([some(1), some(-2), some(3), none, some(9)])))
+  println(int.to_string(stop_block([1, 2, 9, 4])))
+  println(int.to_string(eff_block([0, 1, 2])!))
+  println(int.to_string(eff_block([3, -1, 2]) ?? -100))
+}
+"#;
+
+const VALUE_FN_EXPECTED: &str =
+    "10\n11 13 14 21 23 \n1,2\n4\nstop x9\n3\nzero\n3\nneg x-1\n-100\n";
+
+#[test]
+fn guard_jumps_in_value_returning_fns_match_native_on_the_structural_leg_without_leaking() {
+    assert_structural_parity_without_leaks(VALUE_FN_PROGRAM, VALUE_FN_EXPECTED);
 }

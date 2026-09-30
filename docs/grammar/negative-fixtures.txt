@@ -145,3 +145,10 @@ scoped scoped fn f() -> Int = 1
 
 ### scoped-block-without-a-block
 fn f() -> Int = scoped 1
+
+### index-before-the-last-assignment-step
+type P = { n: Int }
+fn main() -> Unit = {
+  var ps = [P { n: 1 }]
+  ps[0].n = 5
+}

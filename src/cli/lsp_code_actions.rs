@@ -324,20 +324,84 @@ fn find_project_toml(file_path: &str) -> Option<std::path::PathBuf> {
 /// keystroke (#927). With `allow_fetch` false a cache miss resolves to no
 /// deps instead of touching the network. A failed fetch caches the empty
 /// list, so one broken manifest cannot re-trigger fetch storms.
+///
+/// An entry is keyed on the CONTENT of `almide.toml` and `almide.lock`
+/// (#3097): it used to be kept for the life of the server, so adding,
+/// removing or retargeting a dependency, or `almide update`, changed nothing
+/// until a restart. A stale entry is re-resolved even from a keystroke —
+/// that runs once per distinct manifest + lock, not once per keystroke,
+/// which is what #927 guards against. The fingerprint is taken AFTER the
+/// fetch, so the lock the fetch itself writes does not make the new entry
+/// stale again.
 fn project_deps_for(file_path: Option<&str>, cache: &mut DepCache, allow_fetch: bool) -> Vec<(crate::project::PkgId, std::path::PathBuf)> {
     let Some(toml) = file_path.and_then(find_project_toml) else { return Vec::new() };
-    if let Some(cached) = cache.get(&toml) {
-        return cached.clone();
-    }
-    if !allow_fetch {
-        return Vec::new();
+    match cache.get(&toml) {
+        Some((fingerprint, deps)) if *fingerprint == manifest_fingerprint(&toml) => return deps.clone(),
+        Some(_) => {}
+        None if !allow_fetch => return Vec::new(),
+        None => {}
     }
     let deps: Vec<(crate::project::PkgId, std::path::PathBuf)> = crate::project::parse_toml(&toml).ok()
         .and_then(|proj| crate::project_fetch::fetch_all_deps(&proj).ok())
         .map(|deps| deps.into_iter().map(|fd| (fd.pkg_id, fd.source_dir)).collect())
         .unwrap_or_default();
-    cache.insert(toml, deps.clone());
+    cache.insert(toml.clone(), (manifest_fingerprint(&toml), deps.clone()));
     deps
+}
+
+/// A digest of `almide.toml` and the `almide.lock` beside it (an absent file
+/// hashes as absent, not as empty).
+fn manifest_fingerprint(toml: &std::path::Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    std::fs::read(toml).ok().hash(&mut h);
+    std::fs::read(toml.with_file_name("almide.lock")).ok().hash(&mut h);
+    h.finish()
+}
+
+#[cfg(test)]
+mod dep_cache_tests {
+    use super::*;
+
+    fn write(path: std::path::PathBuf, body: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+
+    fn names(deps: &[(crate::project::PkgId, std::path::PathBuf)]) -> Vec<String> {
+        let mut n: Vec<String> = deps.iter().map(|(id, _)| id.name.clone()).collect();
+        n.sort();
+        n
+    }
+
+    /// #3097: a manifest edit reaches the next analysis, including one run
+    /// from a keystroke (`allow_fetch == false`), without a server restart.
+    #[test]
+    fn a_manifest_edit_is_seen_without_a_restart() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path();
+        for dep in ["one", "two"] {
+            write(root.join(format!("{dep}/almide.toml")), &format!("[package]\nname = \"{dep}\"\nversion = \"0.1.0\"\n"));
+            write(root.join(format!("{dep}/src/mod.almd")), "fn f() -> Int = 1\n");
+        }
+        let app_toml = root.join("app/almide.toml");
+        write(app_toml.clone(), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\none = { path = \"../one\" }\n");
+        let main = root.join("app/src/main.almd");
+        write(main.clone(), "effect fn main() -> Unit = ()\n");
+        let main = main.to_str().unwrap();
+
+        let mut cache = DepCache::new();
+        assert_eq!(names(&project_deps_for(Some(main), &mut cache, true)), ["one"]);
+        // Unchanged manifest: served from the cache.
+        assert_eq!(names(&project_deps_for(Some(main), &mut cache, false)), ["one"]);
+
+        write(app_toml, "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\none = { path = \"../one\" }\ntwo = { path = \"../two\" }\n");
+        assert_eq!(
+            names(&project_deps_for(Some(main), &mut cache, false)),
+            ["one", "two"],
+            "the added dependency was not seen until a restart"
+        );
+    }
 }
 
 fn resolve_imports_cached(file_path: &str, program: &crate::ast::Program, deps: &[(crate::project::PkgId, std::path::PathBuf)]) -> Vec<(String, crate::ast::Program, bool)> {

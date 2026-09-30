@@ -68,3 +68,23 @@ fn bundle_outcomes_have_distinct_exit_codes() {
     assert_eq!(run(&["bundle", &empty]).status.code(), Some(1));
     assert_eq!(run(&["bundle", &malformed]).status.code(), Some(2));
 }
+
+#[test]
+fn a_version_two_bundle_rejects_an_artifact_one_byte_off() {
+    let wasm = b"\0asm\x01\0\0\0";
+    let art = scratch("app.wasm", wasm);
+    let hex = almide_verify::sha256::hex(wasm);
+    let text = format!("almide-certificate-bundle 2\nartifact sha256 {hex} app.wasm\nwitness ownership 2 main\nid\n");
+    let bundle = scratch("artifact.bundle", text.as_bytes());
+    let o = run(&["bundle", &bundle]);
+    assert_eq!(o.status.code(), Some(0), "{}", stdout(&o));
+    assert!(stdout(&o).contains("MATCH"), "{}", stdout(&o));
+    let mut tampered = wasm.to_vec();
+    tampered[7] ^= 1;
+    std::fs::write(&art, &tampered).expect("tamper");
+    let o = run(&["bundle", &bundle]);
+    assert_eq!(o.status.code(), Some(1), "{}", stdout(&o));
+    assert!(stdout(&o).contains("MISMATCH"), "{}", stdout(&o));
+    std::fs::remove_file(&art).expect("remove");
+    assert_eq!(run(&["bundle", &bundle]).status.code(), Some(2), "an unreadable artifact is not a verdict");
+}

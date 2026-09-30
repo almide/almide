@@ -1,0 +1,83 @@
+// The assignment TARGET's type is the expected type of the value (#3051), as
+// a variable's is for `x = v` and an annotation's for `let x: T = v`. An empty
+// literal assigned to a field, a `mut` parameter's field, a module-level
+// `var`'s field, a generic record's field, a list slot or a map entry takes
+// its element type from the target, and the inline ascription the E018 hint
+// names (`[]: List[Int]`) is accepted on the value of every assignment form.
+// A mismatched value is E001 at check time
+// (tests/diagnostics/e001-{field,index}-assign-mismatch) where it used to pass
+// check and fail natively as rustc E0308.
+type S = { xs: List[Int], m: Map[String, Int], n: Int }
+
+type Box[T] = { items: List[T] }
+
+var g: S = { xs: [1], m: ["a": 1], n: 0 }
+
+fn reset(mut s: S) -> Unit = {
+  s.xs = []
+  s.m = [:]
+}
+
+fn reset_ascribed(mut s: S) -> Unit = {
+  s.xs = ([]: List[Int])
+  s.m = ([:]: Map[String, Int])
+}
+
+test "an empty literal takes a local var's field type" {
+  var s = S { xs: [1, 2], m: ["a": 1], n: 0 }
+  s.xs = []
+  s.m = [:]
+  assert_eq(list.len(s.xs), 0)
+  assert_eq(map.len(s.m), 0)
+  list.push(s.xs, 7)
+  assert_eq(s.xs, [7])
+}
+
+test "an empty literal takes a mut parameter's field type" {
+  var s = S { xs: [5], m: ["b": 2], n: 1 }
+  reset(s)
+  assert_eq(list.len(s.xs), 0)
+  assert_eq(map.len(s.m), 0)
+  var t = S { xs: [5], m: ["b": 2], n: 1 }
+  reset_ascribed(t)
+  assert_eq(list.len(t.xs) + map.len(t.m), 0)
+}
+
+test "an empty literal takes a module-level var's field type" {
+  g.xs = []
+  g.m = ([:]: Map[String, Int])
+  assert_eq(list.len(g.xs) + map.len(g.m), 0)
+}
+
+test "a generic record's field fixes the element type" {
+  var b: Box[String] = { items: ["x"] }
+  b.items = []
+  assert_eq(list.len(b.items), 0)
+  list.push(b.items, "y")
+  assert_eq(b.items, ["y"])
+}
+
+test "an index assign takes the container's element type" {
+  var ls = [
+    [1],
+    [2]
+  ]
+  ls[0] = []
+  assert_eq(ls, [
+    [],
+    [2]
+  ])
+  var mm = [
+    "k": [1]
+  ]
+  mm["k"] = []
+  mm["j"] = ([]: List[Int])
+  assert_eq(map.len(mm), 2)
+  assert_eq(mm["k"] ?? [9], [])
+}
+
+test "a var assign accepts the inline ascription" {
+  var e = [1]
+  e = ([]: List[Int])
+  assert_eq(e, [])
+}

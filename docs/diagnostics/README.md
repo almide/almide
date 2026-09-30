@@ -53,11 +53,12 @@ equal to the set of codes the compiler emits.
 | [E076](E076.md) | `@bounded`: effects bounded to standard output (ALS-B9) |
 | [E077](E077.md) | `@bounded`: no Float arithmetic, provisional (ALS-B10) |
 | [E078](E078.md) | `@bounded`: no early exit inside a counted loop (ALS-B11) |
-| [E085](E085.md) | `@intrinsic` / `@wasm_intrinsic` outside the stdlib — intrinsics live in the stdlib; wrap in an effect fn |
+| [E085](E085.md) | `@intrinsic` / `@wasm_intrinsic` or a `prim.*` reference outside the stdlib — the runtime boundary is the stdlib's; call the public function that wraps it |
 | [E086](E086.md) | `scoped`: a value would outlive its scoped allocation (ALS-E31) |
 | [E087](E087.md) | `scoped`: an operation not permitted in a scoped region (ALS-E31) |
 | [E088](E088.md) | `scoped`: a recursive call retains the current scoped activation (ALS-E31) |
 | [E089](E089.md) | Interpolating a value with no defined string form (Bytes, Unit, Matrix, a raw pointer, a function value or a value holding one) — including through a generic instantiation |
+| [E090](E090.md) | An `@extern(c)` signature with a type that has no C representation (a heap value, a `String` return, a `mut` parameter) |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired

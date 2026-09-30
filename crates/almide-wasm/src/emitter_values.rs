@@ -132,6 +132,7 @@ impl Emitter<'_> {
                     for (v, t, off, is_cell) in &captures {
                         let (idx, _) = self.locals[v];
                         self.f.instructions().local_get(hb).local_get(idx);
+                        self.witness_capture(idx, *t, *is_cell);
                         if *is_cell {
                             // the local already holds the cell address; the
                             // env co-owns the cell (+1, released by its glue)

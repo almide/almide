@@ -11,6 +11,12 @@ use crate::emitter::Emitter;
 use crate::types_table::TypeTable;
 use crate::*;
 
+/// The top-let prelude's store, gate and measurement release (split for
+/// the file budget).
+#[path = "func_toplets.rs"]
+mod toplets;
+use toplets::{release_runtime_blocks_for_measurement, release_top_lets_for_measurement, store_top_let, top_lets_gate};
+
 /// String literals placed in linear memory as REAL layout blocks.
 ///
 /// TWO MAPS, NOT ONE (#2369). Strings and block payloads are different
@@ -142,23 +148,6 @@ fn emit_modinit_call(
     em.f.instructions().i32_const(0); // env: unused
     em.f.instructions().i32_const(slot as i32);
     em.f.instructions().call_indirect(0, ti);
-}
-
-/// The live-heap measurement (`alloc_count`, armed builds only): drop every
-/// droppable top-let global at the end of `main`, so a value that is live by
-/// design until exit is not counted as a leak. A no-op for a shipped module.
-fn release_top_lets_for_measurement(em: &mut Emitter<'_>, in_main: bool, top_lets: &[crate::InitLet], ctx: &Ctx) {
-    if !in_main || !crate::alloc_count::releases_top_lets() {
-        return;
-    }
-    for il in top_lets {
-        if let Some(&(gidx, declared)) = ctx.globals.get(&(il.space, il.tl.var))
-            && em.rc_droppable(declared)
-        {
-            let dec = em.dec_fn_of(declared);
-            em.f.instructions().global_get(gidx).call(dec);
-        }
-    }
 }
 
 /// The name a wall in top-let `il`'s initializer is reported under
@@ -367,6 +356,7 @@ pub(crate) fn lower_fn(
             tail_release_allowed: false,
             rc_frame_params: Vec::new(),
             tail_consumed: Default::default(),
+            loop_back_releasable: Default::default(),
             self_index,
             rc_owned: std::collections::BTreeSet::new(),
             owned_ty: std::collections::HashMap::new(),
@@ -406,6 +396,7 @@ pub(crate) fn lower_fn(
             deferred_ranges: &deferred_ranges,
             metered,
             cells: &cell_vars,
+            moved_temp: None,
             region_repair: region_saved_var.and_then(|v| {
                 let saved = locals.get(&v)?.0;
                 Some((saved, region_depth_entry.expect("allocated with the var")))
@@ -417,28 +408,40 @@ pub(crate) fn lower_fn(
         // effect wrap, no captures, no top-let prelude — every excluded
         // form has RC sites the two hooks do not cover yet). A turned-away
         // frame pushes its reason instead (the step-4 histogram).
+        record_signature(&em, params, self_index, &param_owned);
+        em.work.meter_reads_pending.set(0);
         if let Some(name) = &witness_name
             && crate::witness::collecting()
         {
-            let pre_gate = if effect_raw.is_some() {
-                Some("effect".to_string())
-            } else if env_captures.is_some() {
-                Some("captures".to_string())
-            } else if !top_lets.is_empty() {
-                Some("top-lets".to_string())
+            // #2758: a capture is a view of the env block (loaded without a
+            // share, below) — except a C-319 cell, whose address travels.
+            // A C-319 cell's ADDRESS is the env's (its drop glue releases
+            // it); only a DROPPABLE occupant has RC sites here — declined.
+            let droppable_cell = |c: &Vec<_>| c.iter().any(|&(_, t, _, cell)| cell && em.rc_droppable(t));
+            let pre_gate = if env_captures.as_ref().is_some_and(droppable_cell) {
+                Some("captures:cell".to_string())
+            } else if crate::witness::argv_exception(name) {
+                Some("caps:argv-in-plain-fn".to_string())
             } else {
-                None
+                top_lets_gate(top_lets, ctx)
             };
-            let verdict = pre_gate.or_else(|| {
-                crate::witness::straightline_subset(
-                    body,
-                    ret.is_some_and(crate::witness::heapish_ret),
-                    name.rsplit('.').next().unwrap_or(name),
-                )
+            let verdict = pre_gate.or_else(|| match effect_raw {
+                // #2758: an effect frame is certified at its raw ok type.
+                Some(raw) => crate::witness::effect_subset(body, crate::witness::heapish_ret(raw)),
+                None => crate::witness::straightline_subset(body, ret.is_some_and(crate::witness::heapish_ret)),
             });
             match verdict {
                 Some(reason) => crate::witness::push_decline(name, &reason),
-                None => arm_witness(&mut em, params, env_shift, &param_owned),
+                None => {
+                    arm_witness(&mut em, params, env_shift, &param_owned);
+                    for &(var, ty, _, _) in env_captures.iter().flatten() {
+                        if em.rc_droppable(ty)
+                            && let (Some(w), Some(&(idx, _))) = (em.witness.as_mut(), em.locals.get(&var))
+                        {
+                            w.param_borrowed(idx);
+                        }
+                    }
+                }
             }
         }
         populate_tail_release_set(&mut em, cur_module, env_shift, params, body, &param_owned);
@@ -468,7 +471,10 @@ pub(crate) fn lower_fn(
             // binds cannot lower inline (its binds index the module's
             // VarTable, not this frame's locals map) — it becomes a
             // synthetic entry in its own frame instead.
-            if initializer_needs_own_frame(il, ctx)? {
+            // A synthetic initializer frame hands its result over like any
+            // closure call: owned.
+            let own_frame = initializer_needs_own_frame(il, ctx)?;
+            if own_frame {
                 emit_modinit_call(&mut em, il, declared, top_let_site_name(il, ctx));
             } else if il.space == var_space {
                 em.lower(&tl.value, Some(declared)).inspect_err(|_| {
@@ -496,17 +502,10 @@ pub(crate) fn lower_fn(
                     crate::decline_site::note_top_let(top_let_site_name(il, ctx), il.module.clone());
                 })?;
             }
-            if matches!(
-                declared,
-                SliceTy::List(_)
-                    | SliceTy::Map(..)
-                    | SliceTy::Set(_)
-                    | SliceTy::Scalar(Scalar::Bytes)
-            ) {
-                let copy = em.copy_fn_of(declared);
-                em.f.instructions().call(copy);
-            }
-            em.f.instructions().global_set(gidx);
+            // Read after lowering: a module call's ownership is the mark its
+            // dispatch left on the node.
+            let owned = own_frame || em.rc_owned_result(&tl.value);
+            store_top_let(&mut em, owned, declared, gidx)?;
         }
         if charge_entry {
             em.emit_det_charge_const(1);
@@ -551,11 +550,21 @@ pub(crate) fn lower_fn(
                     // RC-3: the raw payload rides inside the ok carrier
                     // past the epilogue — same borrow rule as the pure
                     // arm, and the +1 must precede the wrap.
-                    if em.rc_droppable(raw) && !em.rc_owned_result(crate::rc_ownership::rc_tail(body)) {
+                    let owned_tail = em.rc_owned_result(crate::rc_ownership::rc_tail(body));
+                    if em.rc_droppable(raw) && owned_tail {
+                        // #2758: the owned payload's credit moves into the slot.
+                        em.witness_tail_owned();
+                    }
+                    if em.rc_droppable(raw) && !owned_tail {
                         em.rc_inc_top();
+                        if em.witness.is_some() {
+                            em.witness_tail_var(crate::rc_ownership::rc_tail(body));
+                        }
                     }
                 }
                 em.wrap_ok(raw, want)?;
+                // #2758: the ok carrier is born here and moves out.
+                em.witness_tail_owned();
             }
         }
         // RC-3 epilogue: the fall-through exit releases every local the
@@ -571,12 +580,14 @@ pub(crate) fn lower_fn(
         release_top_lets_for_measurement(&mut em, in_main, top_lets, ctx);
         let plan = em.exit_plan(crate::exit_plan::Continuation::ReturnSuccess);
         em.emit_exit(&plan);
+        release_runtime_blocks_for_measurement(&mut em, in_main);
         em.rc_owned.clear();
         // The armed recorder's certificate goes to the sink — poisoned
         // or not (the floor test fails loudly on the sentinel).
         if let (Some(w), Some(name)) = (em.witness.take(), &witness_name) {
-            crate::witness::push(name, w.certificate());
+            crate::witness::push_recorded(name, &w);
         }
+        record_meter_reads(&em, witness_name.as_deref());
         exit_ledger = std::mem::take(&mut em.exit_ledger);
         drop_fns = {
             let hs = em.work.helpers.borrow();
@@ -724,7 +735,19 @@ fn populate_tail_release_set(
             }
         }
     }
-    if env_shift != 0 || crate::rc_ownership::body_uses_prim(body) {
+    if env_shift != 0 {
+        return;
+    }
+    if crate::rc_ownership::body_uses_prim(body) {
+        let ids: Vec<VarId> = params.iter().map(|&(v, _)| v).collect();
+        let raw = crate::exit_plan::raw_address_sources(body, &ids);
+        em.loop_back_releasable = params
+            .iter()
+            .enumerate()
+            .map(|(k, &(v, _))| (v, env_shift + k as u32))
+            .filter(|(v, idx)| !raw.contains(v) && em.rc_frame_params.contains(idx))
+            .map(|(_, idx)| idx)
+            .collect();
         return;
     }
     em.tail_release_allowed = true;
@@ -745,7 +768,7 @@ fn arm_witness(
             if param_is_owned(param_owned, k) {
                 w.param_owned(env_shift + k as u32);
             } else {
-                w.param_borrowed(env_shift + k as u32);
+                w.param_lent(env_shift + k as u32);
             }
         }
     }
@@ -755,4 +778,21 @@ fn arm_witness(
 /// The plan's verdict for param `k`: None = every param owned.
 fn param_is_owned(param_owned: &Option<Vec<bool>>, k: usize) -> bool {
     param_owned.as_ref().map_or(true, |v| v.get(k).copied().unwrap_or(true))
+}
+
+/// #2758: a table fn's frame convention, for the call-mode witness — one
+/// mode per droppable param, as its exit plan releases them.
+fn record_signature(em: &Emitter<'_>, params: &[(VarId, SliceTy)], self_index: Option<u32>, param_owned: &Option<Vec<bool>>) {
+    let Some(index) = self_index.filter(|_| crate::witness::collecting()) else { return };
+    let modes = params.iter().enumerate().filter(|(_, p)| em.rc_droppable(p.1));
+    crate::witness::modes::signature(index, modes.map(|(k, _)| u8::from(param_is_owned(param_owned, k))).collect());
+}
+
+/// #3041: file the fuel meter's clock reads this frame emitted under its
+/// witness name (the declaration-table key, witness_decls.rs).
+fn record_meter_reads(em: &Emitter<'_>, name: Option<&str>) {
+    let n = em.work.meter_reads_pending.replace(0);
+    if let Some(name) = name.filter(|_| n > 0) {
+        *em.work.meter_reads.borrow_mut().entry(name.to_string()).or_default() += n;
+    }
 }

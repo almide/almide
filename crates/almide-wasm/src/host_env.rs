@@ -124,7 +124,7 @@ impl Emitter<'_> {
                 // process.args is the FULL argv (C-096, argv0 kept).
                 let skip0 = module == "env";
                 self.fs_call_0(OP_ARGS)?;
-                let (hraw, hlen, _herr) = self.fs_frames_or_err()?;
+                let (hraw, hlen, herr) = self.fs_frames_or_err()?;
                 let hlist = self.hold_i32()?;
                 let hfirst = self.hold_i32()?;
                 self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hlist);
@@ -145,6 +145,7 @@ impl Emitter<'_> {
                     em.f.instructions().end();
                     Ok(())
                 })?;
+                self.fs_frames_release_raw(hraw, herr);
                 self.f.instructions().local_get(hlist);
                 for _ in 0..5 {
                     self.release_i32();
@@ -316,12 +317,15 @@ impl Emitter<'_> {
                 i.i32_store8(crate::bytes::byte_k(0));
                 i.local_get(hk).i32_const(1).i32_add().local_set(hk);
                 i.br(0).end().end();
-                i.local_get(hb);
+                // The byte buffer is this arm's own temporary: the sink
+                // reads it, then it goes (#2977 — it outlived every call).
+                i.local_get(hb).local_get(hb);
                 let _ = i;
                 for _ in 0..4 {
                     self.release_i32();
                 }
                 self.io_stdout_raw()?;
+                self.f.instructions().call(F_DEC_FLAT);
                 None
             }
             // n <= 0 → []; else read up to n stdin bytes (harness: none)

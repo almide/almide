@@ -16,7 +16,7 @@ pub fn almide_rt_int_from_string(s: String) -> Result<i64, String> {
 // ALS-T6: an inverted range is a domain error in the abort form (one stderr
 // line + exit 1) — the raw i64::clamp panic (exit 101) is non-conforming.
 #[inline(always)] pub fn almide_rt_int_clamp(n: i64, lo: i64, hi: i64) -> i64 {
-    if lo > hi { eprintln!("Error: clamp requires min <= max"); std::process::exit(1); }
+    if lo > hi { almide_abort("clamp requires min <= max"); }
     n.clamp(lo, hi)
 }
 #[inline(always)] pub fn almide_rt_int_to_float(n: i64) -> f64 { n as f64 }
@@ -46,8 +46,7 @@ fn almide_rt_rotate_mask(bits: i64) -> u64 {
 #[inline]
 fn almide_rt_check_rotate_width(bits: i64) {
     if bits <= 0 {
-        eprintln!("Error: {}", ALMIDE_ROTATE_NONPOSITIVE_WIDTH_MSG);
-        std::process::exit(1);
+        almide_abort(ALMIDE_ROTATE_NONPOSITIVE_WIDTH_MSG);
     }
 }
 /// The count reduced into `[0, bits)` EUCLIDEAN-ly, so a negative count rotates the

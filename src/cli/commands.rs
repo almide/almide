@@ -291,8 +291,10 @@ enum SkipKind {
     /// `// wasm:skip` in the first three lines — the author said so, with a
     /// reason a reader can audit. Benign.
     Declared,
-    /// The host cannot run the lane at all (no wasmtime, an unwritable scratch
-    /// path). Not a statement about the program. Benign.
+    /// The host cannot run the lane at all (the opt-in `wasmtime` CLI route
+    /// with no `wasmtime` on PATH, an unwritable scratch path). Not a
+    /// statement about the program. Benign — but never silent: each cause is
+    /// named once per run (`note_wasm_leg_unavailable`, #3046).
     Environment,
     /// A RENDERER declined this program. The caller asked for wasm and this
     /// file's tests did not run there — so the summary says exactly that,
@@ -386,7 +388,16 @@ fn wasm_test_dep_paths() -> Vec<(project::PkgId, std::path::PathBuf)> {
 /// host surface wasmtime serves; a decline at any stage is a wall, and the
 /// file routes to the authoritative native leg (#2752: there is no second
 /// wasm renderer to hand it to).
-fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almide::ir::IrProgram, declared_tests: usize, run_filter: Option<&str>, explain: bool) -> Option<Vec<u8>> {
+/// The test module, as the embedded host runs it (`almide.*` imports) and as
+/// the stock-runtime artifact `almide build --target wasm` ships (`to_wasi`).
+/// Both are produced so the wall verdict stays the build's own; which one RUNS
+/// is `WasmTestRunner`'s choice.
+struct TestModule {
+    almide: Vec<u8>,
+    wasi: Vec<u8>,
+}
+
+fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almide::ir::IrProgram, declared_tests: usize, run_filter: Option<&str>, explain: bool) -> Option<TestModule> {
     let has_main = ir_program.functions.iter().any(|f| f.name.as_str() == "main");
     if !has_main && declared_tests == 0 {
         return None;
@@ -415,18 +426,96 @@ fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almid
         wall("host audit", format!("op {op} is not served by the p1 shim"));
         return None;
     }
-    // The structural module imports `almide.*` (the embedded host's surface);
-    // wasmtime is a stock runtime, so the same `to_wasi` rewrite the build
-    // ships applies here.
+    // The structural module imports `almide.*` (the embedded host's surface,
+    // which runs it by default); the same `to_wasi` rewrite the build ships
+    // is a wall stage here too, and is what the opt-in stock-runtime route runs.
     let ops: Vec<i32> = host_ops.iter().copied().collect();
-    let bytes = match almide_wasm_run::wasi::to_wasi(&bytes, &ops) {
+    let wasi = match almide_wasm_run::wasi::to_wasi(&bytes, &ops) {
         Ok(w) => w,
         Err(e) => { wall("to_wasi", e.to_string()); return None; }
     };
     if explain {
-        err(&format!("[route] {}: structural leg rendered the test module ({} bytes)", test_file, bytes.len()));
+        err(&format!("[route] {}: structural leg rendered the test module ({} bytes)", test_file, wasi.len()));
     }
-    Some(bytes)
+    Some(TestModule { almide: bytes, wasi })
+}
+
+/// Which runtime executes the wasm leg of `almide test` (#3046).
+///
+/// The EMBEDDED host is the default: the same wasmtime `almide run --target
+/// wasm` uses, compiled into every `almide` binary, so the lane needs nothing
+/// on PATH. It used to spawn the `wasmtime` CLI, and where that binary was
+/// missing (a fresh CI runner, a container) every file fell to the native
+/// fallback with nothing but the count to say so — for a package with heavy
+/// `[native-deps]` that read as a hang.
+///
+/// `ALMIDE_TEST_WASM_RUNNER=wasmtime` keeps the CLI route: it runs the stock
+/// `to_wasi` artifact the build ships under a stock runtime, the comparison
+/// the embedded default is measured against.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WasmTestRunner {
+    Embedded,
+    WasmtimeCli,
+}
+
+impl WasmTestRunner {
+    fn from_env() -> Self {
+        match almide_base::env::var("ALMIDE_TEST_WASM_RUNNER").as_deref() {
+            Some("wasmtime") => WasmTestRunner::WasmtimeCli,
+            _ => WasmTestRunner::Embedded,
+        }
+    }
+}
+
+/// A finished run's verdict from what it printed and whether it exited 0 —
+/// shared by both runners so the classification is one rule.
+fn wasm_run_outcome(test_file: &str, declared_tests: usize, bytes_len: usize, success: bool, stdout: &str, stderr: &str) -> WasmTestOutcome {
+    if success {
+        let ran = stdout.matches("ok\n").count();
+        return WasmTestOutcome::Pass {
+            file: test_file.to_string(),
+            count: ran,
+            // The runner is synthesized over the SELECTED tests, so
+            // what `--run` excluded is only knowable from the source.
+            filtered_out: declared_tests.saturating_sub(ran),
+            bytes: bytes_len,
+            stdout: stdout.to_string(),
+            stderr: stderr.to_string(),
+        };
+    }
+    let mut last_test = String::new();
+    for line in stdout.lines() {
+        if line.starts_with("test: ") { last_test = line.to_string(); }
+    }
+    let mut detail = String::new();
+    if !last_test.is_empty() { detail.push_str(&format!("  trapped at: {}\n", last_test)); }
+    // From the failure block when there is one: the first
+    // stderr lines may be the program's own (#2538), which
+    // `printed` carries under their own label.
+    for line in super::test_output::wasm_failure_lines(stderr) {
+        detail.push_str(&format!("  {}\n", line));
+    }
+    let printed = super::test_output::TestOutput::wasm(stdout, stderr);
+    WasmTestOutcome::Fail { file: test_file.to_string(), detail, raw: format!("{stdout}{stderr}"), printed }
+}
+
+/// The one-line note for every cause that kept the wasm leg from STARTING on
+/// some files (`SkipKind::Environment`), once per run and cause (#3046): the
+/// files still run on the native fallback, and the summary's count must not
+/// be the only trace of why.
+fn note_wasm_leg_unavailable(outcomes: &[WasmTestOutcome]) {
+    let mut causes: Vec<(&str, usize)> = Vec::new();
+    for o in outcomes {
+        if let WasmTestOutcome::Skip { reason, kind: SkipKind::Environment, .. } = o {
+            match causes.iter_mut().find(|(r, _)| *r == reason.as_str()) {
+                Some((_, n)) => *n += 1,
+                None => causes.push((reason.as_str(), 1)),
+            }
+        }
+    }
+    for (reason, n) in causes {
+        err(&format!("note: the wasm leg could not start for {n} file(s) ({reason}); they run on the native fallback"));
+    }
 }
 
 /// `compile_and_run_wasm_test`'s type-check phase. Unlike `almide
@@ -580,11 +669,25 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run
     // The SAME leg `almide build --target wasm` uses (#2179): the test lane
     // and the product lane are one compiler.
     let module_bytes = structural_test_render(test_file, &source_text, &ir_program, declared_tests, run_filter, explain);
-    // Write the module and run it under wasmtime. `-S inherit-env=y` mirrors
-    // `cmd_run_wasm`: `env.get` in a test observes the same host variables native
-    // does (the env cross-target contract).
-    let run_module = |bytes: &[u8]| -> WasmTestOutcome {
-        if let Err(e) = std::fs::write(&wasm_path, bytes) {
+    let runner = WasmTestRunner::from_env();
+    let run_module = |module: &TestModule| -> WasmTestOutcome {
+        if runner == WasmTestRunner::Embedded {
+            // No time limit and no stdin, as the CLI route had: a test runs to
+            // completion exactly as its native twin does. The host reads the
+            // real environment and cwd, which `-S inherit-env=y` and the
+            // ALMIDE_CWD pin gave the CLI route.
+            return match almide_wasm_run::run_wasm_unbounded(&module.almide) {
+                Ok(r) => wasm_run_outcome(test_file, declared_tests, module.wasi.len(), r.exit == 0, &r.stdout, &r.stderr),
+                // A module the host cannot instantiate FAILS, as the CLI's
+                // non-zero exit did — it is not a benign skip.
+                Err(e) => wasm_run_outcome(test_file, declared_tests, module.wasi.len(), false, "", &format!("Error: embedded wasm host: {e:#}\n")),
+            };
+        }
+        // `ALMIDE_TEST_WASM_RUNNER=wasmtime`: write the stock artifact and run
+        // it under the wasmtime CLI. `-S inherit-env=y` mirrors the embedded
+        // host: `env.get` in a test observes the same host variables native
+        // does (the env cross-target contract).
+        if let Err(e) = std::fs::write(&wasm_path, &module.wasi) {
             return skip_env(format!("write: {}", e));
         }
         let mut cmd = std::process::Command::new("wasmtime");
@@ -598,45 +701,16 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run
                 cmd.arg(format!("--env=ALMIDE_CWD={}", cwd));
             }
         }
-        let output = cmd
-            .arg(wasm_path.to_str().unwrap())
-            .output();
-        match output {
-            Ok(result) => {
-                let stdout = String::from_utf8_lossy(&result.stdout);
-                let stderr = String::from_utf8_lossy(&result.stderr);
-                if result.status.success() {
-                    {
-                        let ran = stdout.matches("ok\n").count();
-                        WasmTestOutcome::Pass {
-                            file: test_file.to_string(),
-                            count: ran,
-                            // The runner is synthesized over the SELECTED tests, so
-                            // what `--run` excluded is only knowable from the source.
-                            filtered_out: declared_tests.saturating_sub(ran),
-                            bytes: bytes.len(),
-                            stdout: stdout.into_owned(),
-                            stderr: stderr.into_owned(),
-                        }
-                    }
-                } else {
-                    let mut last_test = String::new();
-                    for line in stdout.lines() {
-                        if line.starts_with("test: ") { last_test = line.to_string(); }
-                    }
-                    let mut detail = String::new();
-                    if !last_test.is_empty() { detail.push_str(&format!("  trapped at: {}\n", last_test)); }
-                    // From the failure block when there is one: the first
-                    // stderr lines may be the program's own (#2538), which
-                    // `printed` carries under their own label.
-                    for line in super::test_output::wasm_failure_lines(&stderr) {
-                        detail.push_str(&format!("  {}\n", line));
-                    }
-                    let printed = super::test_output::TestOutput::wasm(&stdout, &stderr);
-                    WasmTestOutcome::Fail { file: test_file.to_string(), detail, raw: format!("{stdout}{stderr}"), printed }
-                }
-            }
-            Err(e) => skip_env(format!("wasmtime: {}", e)),
+        match cmd.arg(wasm_path.to_str().unwrap()).output() {
+            Ok(result) => wasm_run_outcome(
+                test_file,
+                declared_tests,
+                module.wasi.len(),
+                result.status.success(),
+                &String::from_utf8_lossy(&result.stdout),
+                &String::from_utf8_lossy(&result.stderr),
+            ),
+            Err(e) => skip_env(format!("ALMIDE_TEST_WASM_RUNNER=wasmtime, and the `wasmtime` CLI did not start: {e}")),
         }
     };
     if prof {
@@ -652,7 +726,7 @@ fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run
     // overwritten by a hollow v0 "pass". A v1 WALL is an honest skip that routes
     // the file to native — the shrinking #813 remainder.
     match module_bytes {
-        Some(b) => run_module(&b),
+        Some(m) => run_module(&m),
         // The leg declined — the same verdict `almide build --target wasm`
         // gives this file (E082).
         None => skip(format!(
@@ -705,6 +779,7 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool,
         | WasmTestOutcome::Empty { file } => file.clone(),
     };
     outcomes.sort_by(|a, b| file_of(a).cmp(&file_of(b)));
+    note_wasm_leg_unavailable(&outcomes);
 
     let mut failed = 0;
     let mut passed = 0;
@@ -873,6 +948,7 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow
 
     // Phase 1: WASM (fast, rustc-free), parallel.
     let wasm_outcomes = run_wasm_test_phase(&test_files, &scratch, cpus, run_filter);
+    note_wasm_leg_unavailable(&wasm_outcomes);
 
     let mut wasm_pass = 0usize;
     let mut fallback: Vec<String> = Vec::new();

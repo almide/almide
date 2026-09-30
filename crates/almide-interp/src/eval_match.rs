@@ -295,6 +295,18 @@ impl<'a> Interpreter<'a> {
             return flow;
         }
         let out = self.apply_binop(op, l, r);
+        // C-371: a Float32 op rides the widened f64 carrier, and its result is
+        // rounded to binary32 after that one operation, as native's f32 is —
+        // unrounded, `1/3` read 0.3333333333333333 against native's
+        // 0.3333333432674408 on every widening, comparison and later op.
+        let out = if matches!(left.ty, Ty::Float32) || matches!(right.ty, Ty::Float32) {
+            match out {
+                Flow::Value(Value::Float(f)) => Flow::val(Value::Float(f as f32 as f64)),
+                other => other,
+            }
+        } else {
+            out
+        };
         // Arithmetic on a NARROW sized integer wraps at its declared width on
         // both backends (C-180, #889) — the interpreter carries every integer
         // in one i64 like the IR does, so it has to re-wrap for the same

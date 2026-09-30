@@ -22,8 +22,7 @@ const FORMAT_VERSION: u16 = 1;
 pub fn read_almdi(path: &Path) -> Result<(ModuleInterface, IrProgram), String> {
     let data = std::fs::read(path)
         .map_err(|e| format!("failed to read {}: {}", path.display(), e))?;
-    let (source_hash, iface_len, ir_len) = read_header(&data)?;
-    let _ = source_hash; // caller can check freshness separately
+    let (_content_hash, iface_len, ir_len) = read_header(&data)?;
 
     let iface_start = header_size();
     let iface_end = iface_start + iface_len as usize;
@@ -47,7 +46,7 @@ pub fn read_almdi(path: &Path) -> Result<(ModuleInterface, IrProgram), String> {
 pub fn read_interface_only(path: &Path) -> Result<ModuleInterface, String> {
     let data = std::fs::read(path)
         .map_err(|e| format!("failed to read {}: {}", path.display(), e))?;
-    let (_source_hash, iface_len, _ir_len) = read_header(&data)?;
+    let (_content_hash, iface_len, _ir_len) = read_header(&data)?;
 
     let iface_start = header_size();
     let iface_end = iface_start + iface_len as usize;
@@ -60,62 +59,58 @@ pub fn read_interface_only(path: &Path) -> Result<ModuleInterface, String> {
         .map_err(|e| format!("failed to parse interface section: {}", e))
 }
 
-/// Write a `.almdi` file.
-pub fn write_almdi(
-    path: &Path,
-    iface: &ModuleInterface,
-    ir: &IrProgram,
-    source_hash: u64,
-) -> Result<(), String> {
+/// The complete bytes of the `.almdi` artifact for `iface` + `ir`.
+///
+/// The header's hash field is a digest of the two sections, so it names the
+/// artifact's content.
+pub fn encode_almdi(iface: &ModuleInterface, ir: &IrProgram) -> Result<Vec<u8>, String> {
     let iface_json = serde_json::to_vec(iface)
         .map_err(|e| format!("failed to serialize interface: {}", e))?;
     let ir_json = serde_json::to_vec(ir)
         .map_err(|e| format!("failed to serialize IR: {}", e))?;
+    let mut digest: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in iface_json.iter().chain(ir_json.iter()) {
+        digest ^= *b as u64;
+        digest = digest.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let mut bytes = Vec::with_capacity(header_size() + iface_json.len() + ir_json.len());
+    bytes.extend_from_slice(MAGIC);
+    bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
+    bytes.extend_from_slice(&digest.to_le_bytes());
+    bytes.extend_from_slice(&(iface_json.len() as u64).to_le_bytes());
+    bytes.extend_from_slice(&(ir_json.len() as u64).to_le_bytes());
+    bytes.extend_from_slice(&iface_json);
+    bytes.extend_from_slice(&ir_json);
+    Ok(bytes)
+}
 
+/// Write the `.almdi` artifact for `iface` + `ir` to `path`, unless the file
+/// there already holds exactly these bytes. Returns whether it wrote.
+///
+/// Freshness is the artifact's own content (#3096). It used to be a hash of
+/// the module's source text alone, while the artifact also depends on the
+/// modules it imports, the package version written into its interface, and
+/// the compiler that lowered it — so bumping `version`, changing an imported
+/// type, or upgrading almide printed "is up to date" over a stale file.
+/// Comparing the encoded bytes covers every input by construction: whatever
+/// shapes the artifact shapes those bytes.
+pub fn write_almdi(path: &Path, iface: &ModuleInterface, ir: &IrProgram) -> Result<bool, String> {
+    let bytes = encode_almdi(iface, ir)?;
+    if std::fs::read(path).is_ok_and(|existing| existing == bytes) {
+        return Ok(false);
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("failed to create {}: {}", parent.display(), e))?;
     }
-
     let mut file = std::fs::File::create(path)
         .map_err(|e| format!("failed to create {}: {}", path.display(), e))?;
-
-    // Header
-    file.write_all(MAGIC).map_err(|e| e.to_string())?;
-    file.write_all(&FORMAT_VERSION.to_le_bytes()).map_err(|e| e.to_string())?;
-    file.write_all(&source_hash.to_le_bytes()).map_err(|e| e.to_string())?;
-    file.write_all(&(iface_json.len() as u64).to_le_bytes()).map_err(|e| e.to_string())?;
-    file.write_all(&(ir_json.len() as u64).to_le_bytes()).map_err(|e| e.to_string())?;
-
-    // Sections
-    file.write_all(&iface_json).map_err(|e| e.to_string())?;
-    file.write_all(&ir_json).map_err(|e| e.to_string())?;
-
-    Ok(())
-}
-
-/// Check if a `.almdi` file exists and matches the given source hash.
-pub fn is_fresh(path: &Path, source_hash: u64) -> bool {
-    let data = match std::fs::read(path) {
-        Ok(d) => d,
-        Err(_) => return false,
-    };
-    match read_header(&data) {
-        Ok((stored_hash, _, _)) => stored_hash == source_hash,
-        Err(_) => false,
-    }
-}
-
-/// Compute a source hash for staleness detection.
-pub fn source_hash(source: &str) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    source.hash(&mut hasher);
-    hasher.finish()
+    file.write_all(&bytes).map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
 // ── Header layout ──
-// MAGIC (6) + FORMAT_VERSION (2) + SOURCE_HASH (8) + IFACE_LEN (8) + IR_LEN (8) = 32 bytes
+// MAGIC (6) + FORMAT_VERSION (2) + CONTENT_HASH (8) + IFACE_LEN (8) + IR_LEN (8) = 32 bytes
 
 fn header_size() -> usize { 6 + 2 + 8 + 8 + 8 }
 

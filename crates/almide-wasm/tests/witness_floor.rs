@@ -5,8 +5,10 @@
 //!      and the recorder hooks agree on every admitted body (a poison
 //!      means an RC event fired that the hooks could not attribute:
 //!      a gate bug, loudly);
-//!   2. every collected certificate BALANCES under the mirror of the
-//!      proven rule (per object: no release at rc 0, no leak);
+//!   2. every collected certificate is ACCEPTED by the portable checker
+//!      (almide-verify, held to the extracted kernel-proven checker in
+//!      proofs/gate.sh): per object and per path, no release at rc 0, no
+//!      leak (#2756 — branch frames made the flat mirror too narrow);
 //!   3. the count of witnessed functions WITH RC EVENTS never shrinks —
 //!      golden/witness-floor.txt, grow-only, ratified with
 //!      ALMIDE_UPDATE_WITNESS_FLOOR=1 (phases B/C admit more shapes and
@@ -223,6 +225,45 @@ fn per_fixture_ratchets(pf: &PerFixture, update: bool) {
     );
 }
 
+/// #2758: judge every emission pass's call-mode witness of the program just
+/// emitted; returns how many were judged, pushing each rejection.
+fn judge_call_modes(rel: &str, rejected: &mut Vec<(String, String)>) -> usize {
+    let passes = almide_wasm::witness::take_modes();
+    let n = passes.len();
+    for (pass, w) in passes {
+        if !almide_verify::check(almide_verify::Property::CallModes, w.as_bytes()) {
+            rejected.push((format!("{rel} [pass {pass}]"), w));
+        }
+    }
+    n
+}
+
+/// A frame's sweep key. The checked pass (no bounded-line rewrites) emits
+/// different code by design: it agrees with itself, not with passes 1-2.
+fn frame_key(rel: &str, pass: usize, name: &str) -> String {
+    if pass == almide_wasm::witness::CHECKED_PASS {
+        format!("{rel} :: {name} [checked]")
+    } else {
+        format!("{rel} :: {name}")
+    }
+}
+
+/// Was this frame compiled under the same calling conventions as the first
+/// pass that emitted it? Two emission passes compile a fn under different
+/// conventions when their fn sets differ (param_borrow.rs's fixpoint over the
+/// whole linked graph vs the reachable set) and then legitimately emit
+/// different code: such a certificate is compared with nothing (the shipped
+/// pass's is the one a fixture reads). It is still judged on its own.
+fn same_convention(contexts: &mut Map<String>, key: &str, ctx: String) -> bool {
+    match contexts.get(key) {
+        Some(prev) => *prev == ctx,
+        None => {
+            contexts.insert(key.to_string(), ctx);
+            true
+        }
+    }
+}
+
 #[cfg_attr(debug_assertions, ignore = "corpus sweep is release-only (CI: release-shape job)")]
 #[test]
 fn structural_witnesses_balance_and_hold_the_floor() {
@@ -233,6 +274,8 @@ fn structural_witnesses_balance_and_hold_the_floor() {
     .expect("run manifest");
 
     let mut certs: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    // Each frame's calling-convention context (`same_convention`).
+    let mut contexts: Map<String> = Map::new();
     // The step-4 measurement channel: every frame the gate turned away,
     // with its reason — dumped as `!decline:<reason> <key>` lines under
     // ALMIDE_WITNESS_DUMP so `grep -o '^!decline:[^ ]*' | sort | uniq -c`
@@ -241,6 +284,9 @@ fn structural_witnesses_balance_and_hold_the_floor() {
     let mut poisoned: Vec<String> = Vec::new();
     let mut unbalanced: Vec<(String, String)> = Vec::new();
     let mut nondet: Vec<String> = Vec::new();
+    // #2758: the program-level call-mode witness of every pass.
+    let mut modes_rejected: Vec<(String, String)> = Vec::new();
+    let mut modes_checked = 0usize;
     let dump = std::env::var("ALMIDE_WITNESS_DUMP").is_ok();
     let mut per_fixture = PerFixture::default();
     for line in almide_corpus::manifest_rows(&manifest) {
@@ -250,23 +296,32 @@ fn structural_witnesses_balance_and_hold_the_floor() {
         let Ok(ir) = almide_spine::s5::lower_to_ir(rel, &text) else { continue };
         almide_wasm::witness::start_collecting();
         let emitted = almide_wasm::emit_program(&ir).is_ok();
-        let (frames, shipped) = almide_wasm::witness::take_with_shipped();
+        let (frames, shipped) = almide_wasm::witness::take_by_pass_with_context();
+        modes_checked += judge_call_modes(rel, &mut modes_rejected);
         per_fixture.record(rel, emitted, &shipped);
-        for (name, cert) in frames {
-            let key = format!("{rel} :: {name}");
+        for (pass, name, cert, ctx) in frames {
+            let key = frame_key(rel, pass, &name);
+            let same_code = same_convention(&mut contexts, &key, ctx);
             if let Some(reason) = cert.strip_prefix(almide_wasm::witness::DECLINE_PREFIX) {
-                declined.insert(key, reason.trim().to_string());
+                if same_code {
+                    declined.insert(key, reason.trim().to_string());
+                }
             } else if cert.starts_with('!') {
                 poisoned.push(key);
-            } else if !almide_wasm::witness::balanced(&cert) {
+            // #2756: the certificate carries branch frames (`{…|…}`, the
+            // v5 exit `x`) — judged by the portable checker itself, not a
+            // flat-alphabet mirror that would reject every branch.
+            } else if !almide_verify::check(almide_verify::Property::Ownership, cert.as_bytes()) {
                 unbalanced.push((key, cert));
             } else {
                 if dump {
                     eprintln!("[witness] {key}\n{cert}");
                 }
                 // emit_program lowers every fn once per emission pass
-                // (the reachability two-pass) — the passes must agree.
-                if let Some(prev) = certs.insert(key.clone(), cert.clone())
+                // (the reachability two-pass) — the passes of one code
+                // configuration must agree.
+                if same_code
+                    && let Some(prev) = certs.insert(key.clone(), cert.clone())
                     && prev != cert
                 {
                     nondet.push(key);
@@ -274,8 +329,11 @@ fn structural_witnesses_balance_and_hold_the_floor() {
             }
         }
     }
-    let admitted = certs.len();
-    let witnessed = certs.values().filter(|c| !c.trim().is_empty()).count();
+    // The counts read the bounded configuration only (a checked-pass frame
+    // is the same fn re-emitted, not more coverage).
+    let bounded = |k: &String| !k.ends_with(" [checked]");
+    let admitted = certs.keys().filter(|k| bounded(k)).count();
+    let witnessed = certs.iter().filter(|(k, c)| bounded(k) && !c.trim().is_empty()).count();
     // A frame both passes admit AND decline is a pass disagreement too.
     for key in declined.keys().filter(|k| certs.contains_key(*k)) {
         nondet.push(key.clone());
@@ -287,10 +345,17 @@ fn structural_witnesses_balance_and_hold_the_floor() {
     }
     eprintln!(
         "[witness-floor] admitted {admitted} function(s), {witnessed} with RC events, {} declined; \
-         {} of {} spec/wasm_cross fixture(s) fully certified",
-        declined.len(),
+         {} of {} spec/wasm_cross fixture(s) fully certified; {modes_checked} call-mode witness(es), {} rejected",
+        declined.keys().filter(|k| bounded(k)).count(),
         per_fixture.certified().len(),
-        per_fixture.manifest.len()
+        per_fixture.manifest.len(),
+        modes_rejected.len()
+    );
+    assert!(
+        modes_rejected.is_empty(),
+        "{} call-mode witness(es) rejected — a site hands an argument over unlike its callee's frame assumes:\n{}",
+        modes_rejected.len(),
+        modes_rejected.iter().map(|(k, w)| format!("{k}: {w}")).collect::<Vec<_>>().join("\n")
     );
     assert!(
         nondet.is_empty(),
@@ -306,7 +371,7 @@ fn structural_witnesses_balance_and_hold_the_floor() {
     );
     assert!(
         unbalanced.is_empty(),
-        "{} certificate(s) fail the balance mirror:\n{:?}",
+        "{} certificate(s) rejected by the portable checker:\n{:?}",
         unbalanced.len(),
         unbalanced
     );

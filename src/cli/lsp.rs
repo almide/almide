@@ -17,7 +17,10 @@ struct AnalyzedDoc {
 
 /// Dependency source dirs cached per almide.toml, so a keystroke never
 /// re-runs the fetcher (which shells out to git and writes almide.lock).
-type DepCache = HashMap<std::path::PathBuf, Vec<(crate::project::PkgId, std::path::PathBuf)>>;
+/// Each entry carries the manifest + lock fingerprint it was resolved from
+/// ([`manifest_fingerprint`]), and an entry whose fingerprint no longer
+/// matches the files is stale (#3097).
+type DepCache = HashMap<std::path::PathBuf, (u64, Vec<(crate::project::PkgId, std::path::PathBuf)>)>;
 
 impl AnalyzedDoc {
     fn analyze(source: &str, file_path: Option<&str>, deps: &[(crate::project::PkgId, std::path::PathBuf)]) -> Self {

@@ -1,117 +1,109 @@
 // ── C FFI extern codegen ──────────────────────────────────────
 
-/// Render @extern(c, "lib", "func") as: extern "C" block + safe Almide wrapper.
+/// Render `@extern(rust, "module", "function")` as a thin wrapper that
+/// delegates to `module::function(..)`.
 ///
-/// Type mapping (Almide → C extern → safe wrapper):
-/// Render @native("target", "module", "function") — delegates to module::function().
-/// Parameters use reference types (&str, &[T]) matching native Rust conventions.
+/// The wrapper's params follow the `@extern(rust)` ABI
+/// (`extern_rust_borrow_mode`, #3045) through the param modes — the same modes
+/// the call sites are decorated with — so a call site and the wrapper cannot
+/// disagree. The host fn sees plain Rust types: `&str`, `&[T]`, `&[u8]`,
+/// `&AlmideMatrix`, `&T` for records / maps / sets, `&mut T` for `mut`
+/// params, `&dyn Fn(A) -> B` for fn values, and owned scalars / `Option` /
+/// `Result` / tuples / variants. A `Bytes` / `Matrix` RETURN accepts either the raw
+/// `Vec<u8>` / `AlmideMatrix` or the `AlmideRcCow` handle (`.into()`).
 fn render_native_call(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::ast::ExternAttr, emit_name: &str) -> String {
     use types::render_type;
-    use almide_lang::types::{Ty, TypeConstructorId};
     let mod_name = attr.module.as_str();
     let fn_name = attr.function.as_str();
-
-    // Wrapper params: use reference types for String/List to match native Rust conventions
-    let params: Vec<String> = func.params.iter().map(|p| {
-        let ty = match &p.ty {
-            Ty::String => "&str".to_string(),
-            Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
-                format!("&[{}]", render_type(ctx, &args[0]))
-            }
-            _ => render_type(ctx, &p.ty),
-        };
-        format!("{}: {}", p.name, ty)
-    }).collect();
-
-    // Call args: pass through directly (wrapper already uses reference types)
-    let args: Vec<String> = func.params.iter().map(|p| {
-        p.name.to_string()
-    }).collect();
-
+    let params: Vec<String> = func.params.iter()
+        .map(|p| format!("{}: {}", p.name, extern_rust_param_type(ctx, p)))
+        .collect();
+    let args: Vec<String> = func.params.iter().map(|p| p.name.to_string()).collect();
     let ret = render_type(ctx, &func.ret_ty);
-    format!("fn {}({}) -> {} {{\n    {}::{}({})\n}}",
-        emit_name, params.join(", "), ret,
-        mod_name, fn_name, args.join(", "))
+    let call = format!("{}::{}({})", mod_name, fn_name, args.join(", "));
+    let body = if extern_rust_is_rc_cow(&func.ret_ty) { format!("{call}.into()") } else { call };
+    format!("fn {}({}) -> {} {{\n    {}\n}}", emit_name, params.join(", "), ret, body)
 }
 
-///   Int     → i32 in extern, i64 in wrapper (cast)
-///   Float   → f64 (same)
-///   Bool    → i32 in extern, bool in wrapper (cast)
-///   RawPtr  → *mut u8 (same)
-fn render_extern_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::ast::ExternAttr, emit_name: &str) -> String {
+/// `Bytes` / `Matrix`: the two value types generated code holds behind an
+/// `AlmideRcCow` handle (#617).
+fn extern_rust_is_rc_cow(ty: &Ty) -> bool {
+    use almide_lang::types::TypeConstructorId;
+    matches!(ty, Ty::Bytes | Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _))
+}
 
+
+/// Render `@extern(c, "lib", "func")` as an `extern "C"` block plus a safe
+/// wrapper, from the one C ABI table (`almide_lang::types::extern_abi`, #3054):
+///
+/// ```text
+/// #[link(name = "c")]
+/// extern "C" { fn strlen(s: *const u8) -> i32; }
+/// pub fn c_strlen(s: &str) -> i64 {
+///     let __s_cstr = std::ffi::CString::new(..s up to its first NUL..).unwrap_or_default();
+///     unsafe { strlen(__s_cstr.as_ptr() as *const u8) as i64 }
+/// }
+/// ```
+///
+/// The wrapper's params follow the borrow modes the call sites were given
+/// (`extern_c_borrow_mode`: a `String` is `&str`, everything else a scalar by
+/// value). A type with no C form never reaches here — `check` refuses it
+/// (E090) — so a `None` row renders a `compile_error!` naming it rather than
+/// a guessed type.
+fn render_extern_c(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang::ast::ExternAttr, emit_name: &str) -> String {
+    use types::render_type;
+    use almide_lang::types::extern_abi::{c_param_abi, c_return_abi, CConv};
     let lib = attr.module.as_str();
     let c_func = attr.function.as_str();
-    let almide_name = emit_name;
+    let refuse = |what: String| format!(
+        "compile_error!(\"@extern(c) fn `{}`: {what} has no C representation (E090)\");", func.name
+    );
 
-    // Build C parameter list and Almide parameter list
     let mut c_params = Vec::new();
-    let mut almide_params = Vec::new();
+    let mut wrapper_params = Vec::new();
+    let mut prelude = String::new();
     let mut call_args = Vec::new();
-
     for p in &func.params {
         let name = p.name.as_str();
-        let (c_ty, almide_ty, to_c) = extern_c_type_mapping(ctx, &p.ty, name);
-        c_params.push(format!("{}: {}", name, c_ty));
-        almide_params.push(format!("{}: {}", name, almide_ty));
-        call_args.push(to_c);
+        let Some(abi) = c_param_abi(&p.ty) else {
+            return refuse(format!("parameter `{name}: {}`", p.ty.display()));
+        };
+        c_params.push(format!("{name}: {}", abi.c_ty));
+        let (wrapper_ty, arg) = match abi.conv {
+            CConv::Same => (render_type(ctx, &p.ty), name.to_string()),
+            CConv::IntAsI32 => (render_type(ctx, &p.ty), format!("{name} as i32")),
+            CConv::BoolAsI32 => (render_type(ctx, &p.ty), format!("if {name} {{ 1 }} else {{ 0 }}")),
+            CConv::CString => {
+                let c = format!("__{name}_cstr");
+                prelude.push_str(&format!(
+                    "    let {c} = std::ffi::CString::new({name}.split('\\0').next().unwrap_or_default()).unwrap_or_default();\n"
+                ));
+                ("&str".to_string(), format!("{c}.as_ptr() as *const u8"))
+            }
+        };
+        wrapper_params.push(format!("{name}: {wrapper_ty}"));
+        call_args.push(arg);
     }
-
-    let (c_ret, almide_ret, from_c) = extern_c_return_mapping(ctx, &func.ret_ty);
-
-    let c_params_str = c_params.join(", ");
-    let almide_params_str = almide_params.join(", ");
-    let call_args_str = call_args.join(", ");
-
+    let Some(ret) = c_return_abi(&func.ret_ty) else {
+        return refuse(format!("return type `{}`", func.ret_ty.display()));
+    };
+    let call = format!("{c_func}({})", call_args.join(", "));
+    let body = match ret.conv {
+        CConv::IntAsI32 => format!("{call} as i64"),
+        CConv::BoolAsI32 => format!("{call} != 0"),
+        CConv::Same | CConv::CString => call,
+    };
+    // libc and libm have no import library on Windows: their symbols live in
+    // the C runtime std already links, and `link.exe` refuses `m.lib` (LNK1181).
+    let link = match lib {
+        "c" | "m" => format!("#[cfg_attr(not(windows), link(name = \"{lib}\"))]"),
+        _ => format!("#[link(name = \"{lib}\")]"),
+    };
     format!(
-        "#[link(name = \"{lib}\")]\nextern \"C\" {{ fn {c_func}({c_params_str}) -> {c_ret}; }}\n\
-         pub fn {almide_name}({almide_params_str}) -> {almide_ret} {{ {from_c} }}",
-        lib = lib,
-        c_func = c_func,
-        c_params_str = c_params_str,
-        c_ret = c_ret,
-        almide_name = almide_name,
-        almide_params_str = almide_params_str,
-        almide_ret = almide_ret,
-        from_c = format!("unsafe {{ {} }}", wrap_return(&from_c, c_func, &call_args_str)),
+        "{link}\nextern \"C\" {{ fn {c_func}({}) -> {}; }}\n\
+         pub fn {emit_name}({}) -> {} {{\n{prelude}    unsafe {{ {body} }}\n}}",
+        c_params.join(", "), ret.c_ty, wrapper_params.join(", "), render_type(ctx, &func.ret_ty),
     )
-}
-
-/// Map an Almide param type to (C type, Almide type, call expression).
-fn extern_c_type_mapping(_ctx: &RenderContext, ty: &almide_lang::types::Ty, name: &str) -> (String, String, String) {
-    use almide_lang::types::Ty;
-    match ty {
-        Ty::Int    => ("i32".into(), "i64".into(), format!("{} as i32", name)),
-        Ty::Float  => ("f64".into(), "f64".into(), name.into()),
-        Ty::Bool   => ("i32".into(), "bool".into(), format!("if {} {{ 1 }} else {{ 0 }}", name)),
-        Ty::RawPtr => ("*mut u8".into(), "*mut u8".into(), name.into()),
-        Ty::String => ("*const u8".into(), "String".into(), format!("{}.as_ptr()", name)),
-        other      => {
-            let s = format!("{:?}", other);
-            (s.clone(), s.clone(), name.into())
-        }
-    }
-}
-
-/// Map an Almide return type to (C type, Almide type, conversion wrapper template).
-fn extern_c_return_mapping(_ctx: &RenderContext, ty: &almide_lang::types::Ty) -> (String, String, String) {
-    use almide_lang::types::Ty;
-    match ty {
-        Ty::Int    => ("i32".into(), "i64".into(), "as_i64".into()),
-        Ty::Float  => ("f64".into(), "f64".into(), "direct".into()),
-        Ty::Bool   => ("i32".into(), "bool".into(), "ne_zero".into()),
-        Ty::RawPtr => ("*mut u8".into(), "*mut u8".into(), "direct".into()),
-        Ty::Unit   => ("()".into(), "()".into(), "direct".into()),
-        _other     => ("i32".into(), "i64".into(), "as_i64".into()),
-    }
-}
-
-fn wrap_return(mode: &str, c_func: &str, call_args: &str) -> String {
-    match mode {
-        "as_i64"  => format!("{}({}) as i64", c_func, call_args),
-        "ne_zero" => format!("{}({}) != 0", c_func, call_args),
-        _         => format!("{}({})", c_func, call_args),
-    }
 }
 
 /// Render @export(c, "symbol") — emits normal Almide fn + thin extern "C" wrapper.

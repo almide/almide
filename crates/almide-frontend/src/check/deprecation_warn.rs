@@ -35,9 +35,42 @@ impl super::Checker {
 
     pub(crate) fn warn_if_deprecated(&mut self, callee: &ast::Expr) {
         let Some(key) = self.callee_key(callee) else { return };
-        let Some(dep) = self.env.deprecations.get(&sym(&key)).cloned() else { return };
+        self.warn_deprecated_key(&key, callee.span, None);
+    }
 
-        let old_sig = self.env.functions.get(&sym(&key)).cloned();
+    /// The deprecation marker `key` resolves to: a registered one, else — for
+    /// a stdlib fn the call resolves through the bundled-signature fallback,
+    /// exactly as `lookup_call_sig` does — the marker on the bundled source.
+    fn deprecation_of(&self, key: &str) -> Option<crate::deprecation::Deprecation> {
+        if let Some(dep) = self.env.deprecations.get(&sym(key)) {
+            return Some(dep.clone());
+        }
+        if self.env.functions.contains_key(&sym(key)) {
+            return None;
+        }
+        let (module, f) = key.split_once('.')?;
+        crate::stdlib::is_stdlib_module(module).then_some(())?;
+        crate::bundled_sigs::lookup_deprecation(module, f)
+    }
+
+    /// E052 for the UFCS form `x.method(…)` that resolved to the stdlib fn
+    /// `module.method` — the third spelling of a call, after the direct call
+    /// and the pipe stage (#3085). `span` is the method NAME's span, so the
+    /// machine fix renames the method in place (`xs.length()` → `xs.len()`),
+    /// which is only the whole edit when the replacement lives in the same
+    /// module.
+    pub(crate) fn warn_if_deprecated_method(&mut self, module: &str, method: &str, span: Option<ast::Span>) {
+        self.warn_deprecated_key(&format!("{module}.{method}"), span, Some(module));
+    }
+
+    fn warn_deprecated_key(&mut self, key: &str, span: Option<ast::Span>, method_of: Option<&str>) {
+        let key = key.to_string();
+        let Some(dep) = self.deprecation_of(&key) else { return };
+
+        let old_sig = self.env.functions.get(&sym(&key)).cloned().or_else(|| {
+            let (module, f) = key.split_once('.')?;
+            crate::stdlib::lookup_sig(module, f)
+        });
         let new_sig = dep.use_instead.as_ref().and_then(|r| {
             self.env.functions.get(&sym(r)).cloned().or_else(|| {
                 let (module, f) = r.split_once('.')?;
@@ -53,7 +86,14 @@ impl super::Checker {
             Some(op) if !op.contains('.') && !op.chars().all(|c| c.is_alphanumeric() || c == '_') => (
                 format!("`{key}` is deprecated since dialect {}", dep.since),
                 format!(
-                    "Use the `{op}` operator — `value {op} default` — the default is evaluated only on the fallback path; `almide fix` rewrites the call.{}",
+                    "Use the `{op}` operator — `value {op} default` — the default is evaluated only on the fallback path; {}.{}",
+                    // The AST rewrite covers the direct call and the pipe
+                    // stage; the method form's receiver type is not known to
+                    // it, so that one edit is the reader's.
+                    match method_of {
+                        None => "`almide fix` rewrites the call".to_string(),
+                        Some(_) => format!("write `x {op} default` for `x.{}(default)`", key.rsplit('.').next().unwrap_or_default()),
+                    },
                     match &dep.note {
                         Some(n) => format!(" Note: {n}"),
                         None => String::new(),
@@ -87,7 +127,7 @@ impl super::Checker {
         };
 
         let mut diag = Diagnostic::warning(message, hint, key.clone()).with_code("E052");
-        if let Some(s) = &callee.span {
+        if let Some(s) = &span {
             diag.file = self.source_file.clone();
             diag.line = Some(s.line);
             diag.col = Some(s.col);
@@ -98,10 +138,16 @@ impl super::Checker {
             // edit — `almide fix` applies these unattended, so offering one
             // for a signature change would hand it a miscompile. A signature
             // change still shows the replacement in the hint; a human or a
-            // model does that edit.
-            if let Some((replacement, edit)) = &edit {
+            // model does that edit. The method form renames only the method, so the fix is the
+            // replacement's bare name — and exists only when the replacement
+            // is in the receiver's module (else `x.new()` would not resolve).
+            let spelled = match method_of {
+                None => edit.as_ref().map(|(r, _)| r.clone()),
+                Some(m) => edit.as_ref().and_then(|(r, _)| r.strip_prefix(m)?.strip_prefix('.')).map(str::to_string),
+            };
+            if let (Some((_, edit)), Some(text)) = (&edit, spelled) {
                 if edit.is_mechanical() && s.end_col > s.col {
-                    diag = diag.with_machine_fix(s.line, s.col, s.end_col, replacement.clone());
+                    diag = diag.with_machine_fix(s.line, s.col, s.end_col, text);
                 }
             }
         }

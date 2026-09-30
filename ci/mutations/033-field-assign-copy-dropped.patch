@@ -1,11 +1,11 @@
 diff --git a/crates/almide-wasm/src/list_mut.rs b/crates/almide-wasm/src/list_mut.rs
-index 07344c690..fe5b72a6b 100644
+index 266505969..df2e40627 100644
 --- a/crates/almide-wasm/src/list_mut.rs
 +++ b/crates/almide-wasm/src/list_mut.rs
-@@ -83,8 +83,8 @@ impl Emitter<'_> {
-             Ok(idx) => self.f.instructions().local_get(idx),
-             Err(gidx) => self.f.instructions().global_get(gidx),
-         };
+@@ -133,8 +133,8 @@ impl Emitter<'_> {
+         if in_cell {
+             self.load_ty_slot(declared, 0);
+         }
 -        let copy = self.copy_fn_of(root);
 -        self.f.instructions().call(copy).local_set(hb);
 +        let _ = self.copy_fn_of(root);

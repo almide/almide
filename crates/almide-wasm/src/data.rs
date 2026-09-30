@@ -13,6 +13,10 @@ use crate::*;
 #[path = "err_channel.rs"]
 pub(crate) mod err_channel;
 
+/// The `!` / `?` extraction (split for the file budget).
+#[path = "data_unwrap.rs"]
+mod data_unwrap;
+
 impl Emitter<'_> {
     /// Sum-shaped values: constructors and unwraps — split from
     /// `lower_data` for complexity budget. The `want` check happens in
@@ -57,6 +61,7 @@ impl Emitter<'_> {
                 self.f.instructions().local_get(hold);
                 self.lower(expr, Some(side))?;
                 self.rc_share_guard(expr, side);
+                self.witness_store(expr, side);
                 self.store_ty_slot(side, almide_layout::SUM_FIELD);
                 self.f.instructions().local_get(hold);
                 self.release_i32();
@@ -76,10 +81,16 @@ impl Emitter<'_> {
                         .local_tee(self.scr_i32_local)
                         .i32_eqz()
                         .if_(BlockType::Result(et.val_type()));
+                    self.witness_branch_open();
+                    self.witness_branch_arm();
                     self.lower(fallback, Some(et))?;
+                    self.witness_unwrap_or_arm(e, Some(fallback), et);
                     self.f.instructions().else_().local_get(self.scr_i32_local);
+                    self.witness_branch_arm();
                     self.load_ty_slot(et, almide_layout::OPTION_FIELD);
                     self.own_unwrap_or_join(e, fallback, et);
+                    self.witness_unwrap_or_arm(e, None, et);
+                    self.witness_branch_close();
                     self.f.instructions().end();
                     et
                 }
@@ -92,10 +103,16 @@ impl Emitter<'_> {
                         .i32_const(0)
                         .i32_ne()
                         .if_(BlockType::Result(et.val_type()));
+                    self.witness_branch_open();
+                    self.witness_branch_arm();
                     self.lower(fallback, Some(et))?;
+                    self.witness_unwrap_or_arm(e, Some(fallback), et);
                     self.f.instructions().else_().local_get(self.scr_i32_local);
+                    self.witness_branch_arm();
                     self.load_ty_slot(et, almide_layout::SUM_FIELD);
                     self.own_unwrap_or_join(e, fallback, et);
+                    self.witness_unwrap_or_arm(e, None, et);
+                    self.witness_branch_close();
                     self.f.instructions().end();
                     et
                 }
@@ -137,6 +154,11 @@ impl Emitter<'_> {
                         .local_tee(hc)
                         .local_get(hr);
                     self.load_ty_slot(et, almide_layout::SUM_FIELD);
+                    if !owned_carrier {
+                        // #2969: over a BORROWED carrier the cell takes its
+                        // own credit on the payload, so it is owned too.
+                        self.share_handle_top(et);
+                    }
                     self.store_ty_slot(et, almide_layout::OPTION_FIELD);
                     if owned_carrier {
                         self.f.instructions().local_get(hr).call(F_DEC_FLAT);
@@ -149,13 +171,11 @@ impl Emitter<'_> {
                     // the carrier just released above), so it is an owned
                     // value — mark the node, or the bind takes the
                     // borrowed-source `+1` and the cell stays at rc 1
-                    // forever. Over a BORROWED carrier the cell's payload
-                    // slot is a view (no `$inc`): the cell cannot own it,
-                    // the node stays unmarked, and today's `+1` keeps the
-                    // payload's one credit with the carrier's holder.
-                    if owned_carrier {
-                        self.owned_call_marks.insert(e as *const IrExpr as usize);
-                    }
+                    // forever. Over a BORROWED carrier the cell shared the
+                    // payload above (#2969): it is fresh and owns its slot
+                    // on that path as well. Left unmarked, the bind's `+1`
+                    // landed on the fresh cell and it was never freed.
+                    self.owned_call_marks.insert(e as *const IrExpr as usize);
                     SliceTy::Option(o)
                 }
                 got @ SliceTy::Option(_) => got,
@@ -196,7 +216,9 @@ impl Emitter<'_> {
             // An exit like any other: the frame's owners are released
             // before the jump (the err block already shares its payload).
             let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
+            self.witness_err_raise_arm();
             self.emit_exit(&plan);
+            self.witness_err_raise_leave();
             self.f.instructions().return_();
             return Ok(raw);
         }
@@ -227,6 +249,7 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(hold);
                     self.lower(el, Some(fty))?;
                     self.rc_share_guard(el, fty);
+                    self.witness_store(el, fty);
                     self.store_ty_slot(fty, off);
                 }
                 self.f.instructions().local_get(hold);
@@ -274,6 +297,7 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(hold);
                     self.lower(fexpr, Some(fty))?;
                     self.rc_share_guard(fexpr, fty);
+                    self.witness_store(fexpr, fty);
                     self.store_ty_slot(fty, off);
                 }
                 self.f.instructions().local_get(hold);
@@ -309,209 +333,6 @@ impl Emitter<'_> {
     }
 }
 
-impl Emitter<'_> {
-            // `!` — three enclosing shapes (the interp's eval_try_unwrap):
-            //   effect fn  -> PROPAGATE (return the err block as-is; err
-            //                 blocks of any Result(_, E) share one layout),
-            //   main       -> ABORT with the native frame
-            //                 ("Error: {msg}" + exit 1),
-            //   pure fn    -> same abort (the checker forbids propagating
-            //                 `!` outside effect fns; a pure-Option/Result
-            //                 fn's `!` is #1410-propagating — refused).
-            // `?` (Try) and `!` (Unwrap) are ONE marker in the oracle:
-            // eval.rs dispatches Try | Unwrap to the same eval_try_unwrap.
-    /// #2509 — the OK path of `expr!` releases the carrier it read the
-    /// payload out of, when that carrier is an OWNED anonymous temporary.
-    ///
-    /// The err path already moves an owned carrier out (no `$inc` above);
-    /// the ok path kept neither half of the pair, so every extraction from
-    /// an unowned-by-anyone carrier leaked the 16 B block AND the credit it
-    /// held on the payload. The usual `f(x)!` never showed it: arg_temps
-    /// parks a Result/Option-TYPED operand in a local, and that local's dec
-    /// releases both. A MOVE-MODE effect call (mut_param.rs) is typed with
-    /// the RAW payload, so the park never fires and the carrier the wasm ABI
-    /// built had no owner at all — `poke(buf, v)!` grew `buf`'s count by one
-    /// per call, the latent leak #2503's rc-gated copy turned into an OOM.
-    ///
-    /// WHICH RULE, and why it is not a free-too-early. `$dec_flat` releases
-    /// the carrier SPINE ONLY: the payload handle was loaded before it and
-    /// is a value on the stack, not a pointer into the block, and the flat
-    /// dec never recurses into the payload slot. So the carrier's ONE credit
-    /// on the payload transfers to the extracted value — the same move the
-    /// err path makes with the whole block — and the node is marked owned so
-    /// no consumer takes the borrowed-source `+1` on top of it. The two
-    /// cases the brief separates coincide under this rule: an argument
-    /// FOLDED INTO the result (the move-mode buffer) arrives holding the
-    /// carrier's credit and the write-back's `rc_share_guard` pays for the
-    /// caller's own second holder, while an argument still LIVE after the
-    /// call keeps the credit its own binding has held all along — neither
-    /// one loses a holder here, because nothing but the carrier is released.
-    /// A borrowed carrier (`rc_owned_result` false: a parked local, a var)
-    /// is left exactly as before, so no route can free a block twice.
-    fn release_ok_carrier(&mut self, e: &IrExpr, owned_carrier: bool) {
-        if !owned_carrier {
-            return;
-        }
-        self.f.instructions().local_get(self.scr_i32_local).call(F_DEC_FLAT);
-        // The extraction now hands its consumer one credit: the bind,
-        // assign, store and argument routes must not add another.
-        self.owned_call_marks.insert(e as *const IrExpr as usize);
-    }
-
-    /// `List[String]` — the error type native `!` JOINS into a String
-    /// channel (`map_err_join`) instead of rendering its repr
-    /// ([`Self::propagate_err_joined`]).
-    fn is_str_list(&self, t: SliceTy) -> bool {
-        matches!(t, SliceTy::List(h) if self.types.el(h) == STR)
-    }
-
-    pub(crate) fn lower_try_unwrap(
-        &mut self,
-        e: &IrExpr,
-        expr: &IrExpr,
-    ) -> Result<SliceTy, EmitError> {
-        Ok({
-
-                // C-216: a marker node TYPED Option is the effect-RESULT-
-                // layer strip on a declared-Option effect call — identity.
-                let node_ty = slice_ty_of(&e.ty, self.types);
-                // Propagation returns the operand's err block INTO the
-                // enclosing frame — sound only when the err slot types
-                // agree (they share one layout then).
-                let fn_err = match self.fn_ret {
-                    Some(SliceTy::Result(_, fe)) => Some(self.types.el(fe)),
-                    _ => None,
-                };
-                let in_effect = fn_err.is_some();
-                // #1067: `!` in a pure Option-returning fn PROPAGATES a
-                // none as none (a Result operand there stays refused —
-                // no oracle row pins its shape).
-                let in_option_fn =
-                    !in_effect && matches!(self.fn_ret, Some(SliceTy::Option(_)));
-                if in_option_fn {
-                    match self.lower(expr, None)? {
-                        SliceTy::Option(h) => {
-                            let et = self.types.el(h);
-                            let owned_carrier = self.rc_owned_result(expr);
-                            self.f
-                                .instructions()
-                                .local_tee(self.scr_i32_local)
-                                .i32_eqz()
-                                .if_(BlockType::Empty);
-                            let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
-                            self.emit_exit(&plan);
-                            self.f
-                                .instructions()
-                                .i32_const(almide_layout::NULL_ADDR as i32)
-                                .return_()
-                                .end()
-                                .local_get(self.scr_i32_local);
-                            self.load_ty_slot(et, almide_layout::OPTION_FIELD);
-                            self.release_ok_carrier(e, owned_carrier);
-                            return Ok(et);
-                        }
-                        _ => return unsup("unwrap-propagating"),
-                    }
-                }
-                match self.lower(expr, None)? {
-                    got @ SliceTy::Option(_)
-                        if node_ty == Some(got) =>
-                    {
-                        // Identity: pass the Option through untouched.
-                        got
-                    }
-                    SliceTy::Option(h) => {
-                        let et = self.types.el(h);
-                        let owned_carrier = self.rc_owned_result(expr);
-                        self.f
-                            .instructions()
-                            .local_tee(self.scr_i32_local)
-                            .i32_eqz()
-                            .if_(BlockType::Empty);
-                        if in_effect {
-                            if fn_err != Some(STR) {
-                                return unsup("unwrap-none-err-ty");
-                            }
-                            // err("none") — #556: `!` on none propagates
-                            // an Err whose message is "none".
-                            let none_msg = self.pool.intern("none");
-                            self.f
-                                .instructions()
-                                .i32_const(16)
-                                .call(F_ALLOC)
-                                .local_tee(self.tmp_i32_local)
-                                .i32_const(1)
-                                .i32_store(slot_memarg(almide_layout::SUM_TAG))
-                                .local_get(self.tmp_i32_local)
-                                .i32_const(none_msg as i32)
-                                .i32_store(slot_memarg(almide_layout::SUM_FIELD));
-                            let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
-                            self.emit_exit(&plan);
-                            self.f.instructions().local_get(self.tmp_i32_local).return_();
-                        } else if self.in_main {
-                            let none_msg = self.pool.intern("none");
-                            self.f.instructions().i32_const(none_msg as i32);
-                            self.emit_error_frame_abort();
-                        } else {
-                            self.f.instructions().unreachable();
-                        }
-                        self.f.instructions().end().local_get(self.scr_i32_local);
-                        self.load_ty_slot(et, almide_layout::OPTION_FIELD);
-                        self.release_ok_carrier(e, owned_carrier);
-                        et
-                    }
-                    SliceTy::Result(o, er) => {
-                        let et = self.types.el(o);
-                        let ert = self.types.el(er);
-                        // Who owns the CARRIER block this extraction reads?
-                        // An owned operand is an anonymous temporary this
-                        // frame holds the only credit of; a borrowed one is
-                        // a local (arg_temps parks the usual `f(x)!` carrier
-                        // in one) that some other route releases.
-                        let owned_carrier = self.rc_owned_result(expr);
-                        self.f
-                            .instructions()
-                            .local_tee(self.scr_i32_local)
-                            .i32_load(slot_memarg(almide_layout::SUM_TAG))
-                            .i32_const(0)
-                            .i32_ne()
-                            .if_(BlockType::Empty);
-                        if in_effect && fn_err == Some(STR) && ert != STR && !self.is_str_list(ert) {
-                            // ADR-0021 D2 / #2725: a typed error `!`-ed into a
-                            // String channel — the channel carries its repr text.
-                            self.propagate_err_as_repr(SliceTy::Result(o, er), ert, owned_carrier)?;
-                        } else if in_effect && fn_err == Some(STR) && self.is_str_list(ert) {
-                            self.propagate_err_joined(SliceTy::Result(o, er), ert, owned_carrier)?;
-                        } else if in_effect {
-                            if fn_err != Some(ert) {
-                                return unsup("unwrap-err-ty-mismatch");
-                            }
-                            // The propagated block is the operand's: a BORROWED
-                            // operand (a local the exit below releases) hands the
-                            // caller a share; an owned temporary moves out.
-                            if !owned_carrier {
-                                self.f.instructions().local_get(self.scr_i32_local).call(F_INC);
-                            }
-                            let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
-                            self.emit_exit(&plan);
-                            self.f.instructions().local_get(self.scr_i32_local).return_();
-                        } else if self.in_main && ert == STR {
-                            self.f.instructions().local_get(self.scr_i32_local);
-                            self.load_ty_slot(ert, almide_layout::SUM_FIELD);
-                            self.emit_error_frame_abort();
-                        } else {
-                            self.f.instructions().unreachable();
-                        }
-                        self.f.instructions().end().local_get(self.scr_i32_local);
-                        self.load_ty_slot(et, almide_layout::SUM_FIELD);
-                        self.release_ok_carrier(e, owned_carrier);
-                        et
-                    }
-                    other => return unsup(&format!("unwrap-of:{other:?}")),
-                }
-        })
-    }
-}
 
 impl Emitter<'_> {
     /// `{ ...base, f: v }` — spread-record build (split from
@@ -550,6 +371,7 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(hold);
                     self.lower(fexpr, Some(fty))?;
                     self.rc_share_guard(fexpr, fty);
+                    self.witness_store(fexpr, fty);
                     self.store_ty_slot(fty, off);
                 }
                 self.f.instructions().local_get(hold);
@@ -622,8 +444,10 @@ impl Emitter<'_> {
                     // the elements (#2133).
                     for (fty, off, d) in defaults {
                         self.f.instructions().local_get(hold);
+                        self.witness_record_default(&d);
                         self.lower(&d, Some(fty))?;
                         self.rc_share_guard(&d, fty);
+                        self.witness_store(&d, fty);
                         self.store_ty_slot(fty, off);
                     }
                     for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
@@ -667,12 +491,15 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(hold);
                     self.lower(fexpr, Some(fty))?;
                     self.rc_share_guard(fexpr, fty);
+                    self.witness_store(fexpr, fty);
                     self.store_ty_slot(fty, off);
                 }
                 for (fty, off, d) in defaults {
                     self.f.instructions().local_get(hold);
+                    self.witness_record_default(&d);
                     self.lower(&d, Some(fty))?;
                     self.rc_share_guard(&d, fty);
+                    self.witness_store(&d, fty);
                     self.store_ty_slot(fty, off);
                 }
                 self.f.instructions().local_get(hold);
@@ -715,6 +542,7 @@ impl Emitter<'_> {
                     .local_tee(hold);
                 self.lower(expr, Some(s))?;
                 self.rc_share_guard(expr, s);
+                self.witness_store(expr, s);
                 self.store_ty_slot(s, almide_layout::OPTION_FIELD);
                 self.f.instructions().local_get(hold);
                 self.release_i32();
@@ -778,17 +606,22 @@ impl Emitter<'_> {
     /// — the same normalization `lower_if_arms` applies to an `if`. A
     /// borrowed or pool-static fallback (a var, a string literal) leaves both
     /// arms views, as before, and so does a payload type arg_temps does not
-    /// name in a reader position (`arg_temps::droppable_ty`): an owned join
+    /// name in a reader position (`arg_temps::bindable_ty`): an owned join
     /// there would be read and never released.
     fn own_unwrap_or_join(&mut self, e: &IrExpr, fallback: &IrExpr, et: SliceTy) {
-        if !self.rc_droppable(et)
-            || !crate::arg_temps::droppable_ty(&e.ty)
-            || !crate::arg_temps::unwrap_or_joins_owned(e)
-            || !self.rc_owned_result(fallback)
-        {
+        if !self.unwrap_or_owns_join(e, fallback, et) {
             return;
         }
         self.rc_inc_top();
         self.owned_call_marks.insert(e as *const IrExpr as usize);
+    }
+
+    /// Does `own_unwrap_or_join` normalize this `??` to an owned join? (The
+    /// witness reads the same predicate, witness_hooks.rs.)
+    pub(crate) fn unwrap_or_owns_join(&self, e: &IrExpr, fallback: &IrExpr, et: SliceTy) -> bool {
+        self.rc_droppable(et)
+            && crate::arg_temps::bindable_ty(&e.ty)
+            && crate::arg_temps::unwrap_or_joins_owned(e)
+            && self.rc_owned_result(fallback)
     }
 }

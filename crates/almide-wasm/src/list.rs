@@ -286,7 +286,9 @@ impl Emitter<'_> {
         self.f.instructions().i32_const(0).local_set(rh);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        self.witness_callback_open(cb, None);
         self.lower(body, Some(BOOL))?;
+        self.witness_find_hit(params[0], elem);
         self.f.instructions().if_(BlockType::Empty);
         // some(x): the first match wins, then break the scan
         self.f
@@ -344,7 +346,12 @@ impl Emitter<'_> {
     fn lower_list_contains(&mut self, xs: &IrExpr, x: &IrExpr) -> ArmResult {
         let got = self.lower_list_index_of(xs, x)?;
         let _ = got;
-        self.f.instructions().i32_const(0).i32_ne();
+        // The verdict is whether index_of answered `some`; that Option
+        // block is this arm's own and goes right after (#2977 — every
+        // hit kept it; `none` is NULL_ADDR, which the release no-ops).
+        let h = self.hold_i32()?;
+        self.f.instructions().local_tee(h).i32_const(0).i32_ne().local_get(h).call(F_DEC_FLAT);
+        self.release_i32();
         Ok(Some(Lowered::scalar(BOOL)))
     }
 
@@ -545,6 +552,7 @@ impl Emitter<'_> {
             .local_set(rh);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        self.witness_callback_open(cb, None);
         // dest addr, then value, then store
         self.f
             .instructions()
@@ -558,7 +566,9 @@ impl Emitter<'_> {
         // VIEW of the source's element: the result spine is a holder and
         // takes the share here (#2010 stage 2b).
         self.rc_share_guard(body, u);
+        self.witness_store(body, u);
         self.store_ty_slot(u, 0);
+        self.witness_loop_close();
         self.hof_step(ih);
         self.f.instructions().local_get(rh);
         self.release_i32();
@@ -591,7 +601,9 @@ impl Emitter<'_> {
         self.f.instructions().i32_const(0).local_set(hw);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        self.witness_callback_open(cb, None);
         self.lower(body, Some(BOOL))?;
+        self.witness_loop_close();
         self.f.instructions().if_(BlockType::Empty);
         self.f
             .instructions()
@@ -643,6 +655,7 @@ impl Emitter<'_> {
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, x_p);
+        self.witness_callback_open(cb, Some(acc_p));
         self.lower(body, Some(b))?;
         // The accumulator OWNS one credit on every step: a borrowed body
         // result (a captured var, the accumulator itself) takes its share,
@@ -652,7 +665,9 @@ impl Emitter<'_> {
         if let Some(dec) = self.elem_is_handle(b).then(|| self.dec_fn_of(b)) {
             self.f.instructions().local_get(acc_p).call(dec);
         }
+        self.witness_fold_step(body, acc_p, b);
         self.f.instructions().local_set(acc_p);
+        self.witness_loop_close();
         self.hof_step(ih);
         self.f.instructions().local_get(acc_p);
         self.release_i32();

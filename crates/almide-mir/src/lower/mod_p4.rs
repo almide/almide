@@ -710,12 +710,21 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
         | Ty::UInt8
         | Ty::UInt16
         | Ty::UInt32 => ("int", "to_string"),
+        // UInt64 above i64::MAX would misprint through int.to_string; its own
+        // self-hosted printer divides once unsigned (#3058). Float32 keeps the
+        // unlinked fallback below: printing the widened f64 is not the f32's
+        // shortest round-trip form (`0.1f32` would print 0.10000000149011612),
+        // and no f32 printer is self-hosted yet.
+        Ty::UInt64 => ("uint64", "to_string"),
         Ty::Bool => ("bool", "to_string"),
         // Scalar `${f}` interp uses v0's Display format, which DROPS the `.0` for integer-valued
         // floats (`3.0`->`3`, `100.0`->`100`) — exactly the compound formatter
         // `float.to_string_compound`, NOT `float.to_string` (which keeps `.0` for an EXPLICIT
         // `float.to_string(x)` call). Same drop-.0 Display a Float record/list field already uses.
         Ty::Float => ("float", "to_string_compound"),
+        // A Float32 prints native's f32 Display — the shortest digits that round-trip to the
+        // f32, not the widened f64's (`0.1` stays `0.1`) — through the f32 Schubfach (#3079).
+        Ty::Float32 => ("float32", "to_string_compound"),
         // Decomposed (#781, cog 121): the List/Option/Result routings are verbatim
         // text moves into interp_{list,option,result}_to_string.
         Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {

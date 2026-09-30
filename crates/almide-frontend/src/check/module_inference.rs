@@ -83,6 +83,7 @@ impl Checker {
         self.validate_protocol_refs(prog);
         self.validate_bare_type_visibility(prog);
         self.body_diag_start = self.diagnostics.len();
+        self.reject_user_prim_import(&prog.imports);
         for decl in prog.decls.iter_mut() { self.check_decl(decl); }
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();
@@ -476,6 +477,14 @@ impl Checker {
         let body_ity = self.infer_expr(body);
         self.current_fn = prev_fn;
         self.check_return_width(name, &ret_ty, &body_ity, body, is_effect);
+        // #3060: the declared return narrows the tail's literals in lowering,
+        // so they face its range check here (`-> Int8 = 300` is E024, not a
+        // rustc rejection). An effect body may also yield its lifted carrier;
+        // that walk goes first so a bare leaf's last pin is the raw return.
+        if is_effect && !ret_ty.is_result() {
+            self.record_int_literal_context(body, &Ty::result(ret_ty.clone(), Ty::String));
+        }
+        self.record_int_literal_context(body, &ret_ty);
         // #2927: the body-vs-return mismatch is reported at the value that
         // fixed the body's type (a block's tail, the anchoring arm), not at
         // wherever inference happened to end — the last arm's last leaf.
@@ -498,6 +507,13 @@ impl Checker {
     }
 
     fn check_decl(&mut self, decl: &mut ast::Decl) {
+        // E090: an `@extern(c)` signature must be one the C ABI table has
+        // rows for — with a body (`= _`) or without.
+        if let ast::Decl::Fn { name, params, return_type, extern_attrs, span, .. } = &*decl
+            && !extern_attrs.is_empty()
+        {
+            self.reject_extern_c_types(name.as_str(), params, return_type, extern_attrs, *span);
+        }
         match decl {
             // E057: a fn DECLARATION with no body. The parser keeps the
             // bodyless form for @extern/@intrinsic declarations (and the

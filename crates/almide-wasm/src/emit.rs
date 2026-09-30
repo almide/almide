@@ -72,6 +72,10 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     // gets from TailCallOpt, from the same shared precondition check.
     let accumulated = accumulate_binary_recursion(ir);
     let ir = accumulated.as_ref().unwrap_or(ir);
+    // #2980: small scalar fns inline at their call sites, bound rather
+    // than substituted (inline_calls.rs) — the stdlib's own kernels too.
+    let inlined = crate::inline_calls::inline_small_scalar_calls(ir);
+    let ir = inlined.as_ref().unwrap_or(ir);
     // Witness sweeps (#2754) see the pass boundaries and which pass shipped
     // (no-ops unless a sweep collects).
     use crate::witness::{mark_pass as mark, mark_shipped as ship};
@@ -95,13 +99,13 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     // out of it — but their helpers cost bytes when the checked machinery
     // ships anyway. Emit both and ship the smaller: never larger than the
     // checked emission, and the choice is deterministic.
-    mark(3);
+    mark(crate::witness::CHECKED_PASS);
     let checked = emit_program_pass(ir, keep, library, false)?;
     let best = if bounded.bytes.len() < checked.bytes.len() {
         ship(bounded_pass);
         bounded
     } else {
-        ship(3);
+        ship(crate::witness::CHECKED_PASS);
         checked
     };
     Ok((best.bytes, best.ops))
@@ -235,7 +239,8 @@ fn emit_program_pass(
 
     // Function-VALUE work shared by every lowering below (funcref table,
     // call_indirect types, lifted lambdas).
-    let work = FnWork { region_pure: std::cell::RefCell::new(region_pure), ..FnWork::default() };
+    let reach = crate::global_reach::global_reach(&program_fns, &table, &global_map);
+    let work = FnWork { region_pure: std::cell::RefCell::new(region_pure), global_reach: reach.into(), ..FnWork::default() };
     work.bounded_lines.set(bounded_lines);
     // Calls made from display-helper bodies (BFS roots).
     let mut display_helper_calls: std::collections::HashSet<usize> = HashSet::new();
@@ -393,14 +398,16 @@ fn emit_program_pass(
             break;
         }
         for ll in pending {
-            // No witness recorder (`witness_name: None`): a counted decline (#2754).
-            crate::witness::decline_unrecorded(&format!("<lambda#{}>", lifted_fns.len()), "lambda");
+            // #2758: a lambda body is a frame like any other — its params
+            // callee-owned (the closure convention), its captures views of
+            // the env block the closure holds.
+            let lambda_name = format!("<lambda#{}>", lifted_fns.len());
             let plan = FnPlan {
                 ret: ll.ret,
                 cur_module: ll.cur_module.clone(),
                 var_space: ll.var_space,
                 name: "<lambda>".to_string(),
-                witness_name: None,
+                witness_name: Some(lambda_name.clone()),
                 effect_raw: ll.effect_raw,
                 in_main: false,
                 env_captures: Some(ll.captures.clone()),
@@ -420,6 +427,8 @@ fn emit_program_pass(
             let (f, calls, err) = match lower_fn(&ll.params, plan, &ll.body, &[], &ctx, &mut pool) {
                 Ok((f, calls)) => (f, calls, None),
                 Err(EmitError::Unsupported(r)) => {
+                    // The stub ships unrecorded: counted, never certified.
+                    crate::witness::decline_unrecorded(&lambda_name, "lambda:unlowered");
                     let mut stub = Function::new([]);
                     stub.instructions().unreachable().end();
                     (stub, HashSet::new(), Some(r))
@@ -584,8 +593,60 @@ fn emit_program_pass(
         })
         .collect();
     let bytes = imports::declare(&bytes, &declared).map_err(|e| EmitError::Unsupported(format!("extern-import:{e}")))?;
+    record_decls(&program_fns, (main, main_index), &work, &entry_fn_indices, &declared, &bytes);
     let host_ops = work.host_ops.borrow().clone();
 Ok(Pass { bytes, visited, total, ops: host_ops, bounded_fired: work.bounded_fired.get() })
+}
+
+/// #2759: the declaration table the name and capability witnesses read
+/// (witness_decls.rs) — each program fn's, `main`'s and lifted lambda's
+/// index with what its source declares.
+fn record_decls(
+    program_fns: &[(&IrFunction, Option<String>, u32)],
+    (main, main_index): (Option<&IrFunction>, u32),
+    work: &FnWork,
+    entry_fn_indices: &[u32],
+    stubs: &[imports::Declared],
+    bytes: &[u8],
+) {
+    use crate::witness::decls::{DeclFn, Declared, PassDecls};
+    if !crate::witness::decls::collecting() {
+        return;
+    }
+    let stubs = stubs.iter().map(|d| d.index).collect();
+    // #3041: a fn synthesized from an effect fn's body keeps its origin's
+    // declaration (`IrFunction::declares_effect`).
+    let class = |f: &IrFunction| Some(if f.declares_effect() { Declared::Effect } else { Declared::Pure });
+    let meter = work.meter_reads.borrow();
+    let reads = |name: &str| meter.get(name).copied().unwrap_or(0);
+    let mut fns: Vec<DeclFn> = program_fns
+        .iter()
+        .enumerate()
+        .map(|(i, (f, qual, _))| DeclFn {
+            index: F_FN_BASE + i as u32,
+            name: qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
+            // A self-host registry body implements a SURFACE whose
+            // declaration its callers were checked against; its own `fn`
+            // keyword declares nothing about the host (random.int is an
+            // `effect fn` implemented by a plain `fn random_int`).
+            declared: if qual.as_deref().is_some_and(|q| q.starts_with("__selfhost_")) { None } else { class(f) },
+            meter_clock_reads: reads(&qual.clone().unwrap_or_else(|| f.name.as_str().to_string())),
+        })
+        .collect();
+    fns.push(DeclFn {
+        index: main_index,
+        name: "main".into(),
+        declared: main.map_or(Some(Declared::Pure), class),
+        meter_clock_reads: reads("main"),
+    });
+    for (pos, e) in work.entries.borrow().iter().enumerate() {
+        if let (TableEntry::Lambda(j), Some(&index)) = (e, entry_fn_indices.get(pos)) {
+            let name = format!("<lambda#{j}>");
+            let meter_clock_reads = reads(&name);
+            fns.push(DeclFn { index, name, declared: None, meter_clock_reads });
+        }
+    }
+    crate::witness::decls::record(PassDecls { fns, stubs, bytes: bytes.to_vec() });
 }
 
 /// The module a program fn belongs to: its qualified key minus `.<fn name>`

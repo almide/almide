@@ -241,6 +241,76 @@ fn check_guard_stmt() {
 }
 
 #[test]
+fn sized_return_tail_literal_faces_the_range_check() {
+    // #3060: the declared return narrows a tail literal in lowering, so a
+    // literal it cannot hold is E024 at check time, not a rustc rejection.
+    for src in [
+        "fn f(n: Int) -> Int8 = if n > 0 then 300 else 1",
+        "fn f(n: Int) -> Option[UInt8] = if n > 0 then some(256) else none",
+        "fn f(n: Int) -> Result[String, Int16] = if n > 0 then ok(\"a\") else err(40000)",
+        "effect fn f(n: Int) -> Int16 = { if n > 0 then ok(40000) else 1 }",
+        "effect fn f(n: Int) -> UInt8 = { -1 }",
+        "fn f() -> Int32 = { let g: (Int) -> Int8 = (x) => 128\n  0 }",
+    ] {
+        let errs = errors(src);
+        assert!(errs.iter().any(|e| e.contains("out of range")), "{src}: expected E024, got {errs:?}");
+    }
+    has_no_errors("fn f(n: Int) -> UInt8 = if n > 0 then 255 else 0");
+}
+
+#[test]
+fn check_guard_unit_else_fits_only_a_unit_return() {
+    // #3042: a Unit else returns `()` from the fn — accepted by an effect fn
+    // returning Unit (loop or not), refused by one returning Int, exactly as
+    // a pure fn refuses it.
+    let loop_body = "  for x in xs {\n    guard x > 0 else ()\n    println(\"${x}\")\n  }\n";
+    has_no_errors(&format!("effect fn f(xs: List[Int]) -> Unit = {{\n{loop_body}}}"));
+    has_no_errors(&format!("fn f(xs: List[Int]) -> Unit = {{\n{loop_body}}}"));
+    for head in ["effect fn f(xs: List[Int]) -> Int", "fn f(xs: List[Int]) -> Int"] {
+        let errs = errors(&format!("{head} = {{\n{loop_body}  0\n}}"));
+        assert!(
+            errs.iter().any(|e| e.contains("guard else") && e.contains("Int") && e.contains("Unit")),
+            "{head}: expected a guard-else Int/Unit mismatch, got {errs:?}"
+        );
+    }
+}
+
+#[test]
+fn check_guard_block_else_ending_in_a_jump_leaves_the_loop() {
+    // #3115: `else { …; continue }` / `else { …; break }` leaves the loop like
+    // the bare jump, so it is not typed against the fn's return — in Unit and
+    // non-Unit, pure and effect fns alike. A block that does NOT end in a jump
+    // is still the fn's return value and still has to fit it.
+    for jump in ["continue", "break"] {
+        let body = format!(
+            "  var n = 0\n  for x in xs {{\n    guard x > 0 else {{\n      println(\"skip\")\n      {jump}\n    }}\n    n = n + x\n  }}\n"
+        );
+        for head in [
+            "fn f(xs: List[Int]) -> Int",
+            "effect fn f(xs: List[Int]) -> Int",
+            "fn f(xs: List[Int]) -> String",
+        ] {
+            let tail = if head.ends_with("String") { "\"${n}\"" } else { "n" };
+            has_no_errors(&format!("{head} = {{\n{body}  {tail}\n}}"));
+        }
+        has_no_errors(&format!("fn f(xs: List[Int]) -> Unit = {{\n{body}  println(\"${{n}}\")\n}}"));
+        has_no_errors(&format!(
+            "effect fn f(xs: List[Int]) -> Result[Int, String] = {{\n{body}  ok(n)\n}}"
+        ));
+    }
+    has_no_errors(
+        "effect fn f(xs: List[Int]) -> Result[Int, String] = {\n  var n = 0\n  for x in xs {\n    guard x >= 0 else {\n      println(\"neg\")\n      err(\"negative\")!\n    }\n    n = n + x\n  }\n  ok(n)\n}",
+    );
+    let errs = errors(
+        "fn f(xs: List[Int]) -> Int = {\n  var n = 0\n  for x in xs {\n    guard x > 0 else {\n      println(\"no jump\")\n    }\n    n = n + x\n  }\n  n\n}",
+    );
+    assert!(
+        errs.iter().any(|e| e.contains("guard else") && e.contains("Int") && e.contains("Unit")),
+        "a block else with no jump is the fn's return: expected the Int/Unit mismatch, got {errs:?}"
+    );
+}
+
+#[test]
 fn check_impl_block() {
     has_no_errors("type Greeter = { name: String }\nimpl Greeter {\n  fn greet(self: Greeter) -> String = self.name\n}");
 }

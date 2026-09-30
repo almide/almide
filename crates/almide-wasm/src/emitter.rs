@@ -44,6 +44,9 @@ pub(crate) struct Emitter<'a> {
     /// plan is told rather than the release quietly skipped. Set for one
     /// exit and cleared by it.
     pub(crate) tail_consumed: std::collections::BTreeSet<u32>,
+    /// #2976: the params a raw-rule loop-form self call still releases at
+    /// the loop-back (`exit_plan::raw_address_sources`); empty elsewhere.
+    pub(crate) loop_back_releasable: std::collections::BTreeSet<u32>,
     /// This fn's own wasm index (see FnPlan::self_index).
     pub(crate) self_index: Option<u32>,
     /// Locals the Bind/Assign routes made OWNERS of a droppable block
@@ -126,6 +129,9 @@ pub(crate) struct Emitter<'a> {
     /// C-319 shared-cell vars: the local holds a one-slot heap cell's
     /// ADDRESS; reads load through it, writes store through it.
     pub(crate) cells: &'a std::collections::HashSet<VarId>,
+    /// #3104: the block temp the statement being lowered may MOVE out of
+    /// (writeback_move.rs) — set by the block walk, taken by the assign.
+    pub(crate) moved_temp: Option<VarId>,
     /// C-320: Some((saved_local, depth_entry_local)) when this fn is a
     /// region ARM — a cut here runs the exit bookkeeping its early
     /// return would otherwise skip (guarded by depth > depth-at-entry,
@@ -285,7 +291,13 @@ impl Emitter<'_> {
             i.if_(BlockType::Empty);
             i.i32_const(msg as i32);
         }
-        self.emit_error_frame_abort();
+        // #2755: out of bounds ABORTS the process — a recorded abort
+        // terminal on its own arm (data_unwrap.rs `abort_frame`).
+        self.witness_branch_open();
+        self.witness_branch_arm();
+        self.abort_frame();
+        self.witness_branch_arm();
+        self.witness_branch_close();
         let mut i = self.f.instructions();
         i.end();
         // element address: hold + idx*stride, slot at offset PAYLOAD
@@ -295,46 +307,6 @@ impl Emitter<'_> {
         self.release_i64();
         self.release_i32();
         Ok(elem)
-    }
-    /// main's err channel (#1734, the pre-existing structural hole): a
-    /// Result-typed expression in MAIN's statement/tail position is the
-    /// effect carrier, not a discardable value — the native/interp
-    /// contract is `Error: {msg}` on stderr + exit 1 on err, plain
-    /// fallthrough on ok. Discarding it swallowed the err (silent exit
-    /// 0 — `effect fn main() -> Unit = err("boom")` on the released
-    /// 0.61.0). Returns Ok(true) when this handled the expression.
-    /// A non-String err payload walls honestly (no message to print).
-    pub(crate) fn try_lower_main_err_carrier(&mut self, e: &IrExpr) -> Result<bool, EmitError> {
-        use almide_types::types::{Ty, TypeConstructorId};
-        if !self.in_main {
-            return Ok(false);
-        }
-        let Ty::Applied(TypeConstructorId::Result, a) = &e.ty else {
-            return Ok(false);
-        };
-        if a.len() != 2 {
-            return Ok(false);
-        }
-        let got = self.lower(e, None)?;
-        let SliceTy::Result(_, eh) = got else {
-            // Effect-ABI transparency already unwrapped it — nothing to route.
-            self.f.instructions().drop();
-            return Ok(true);
-        };
-        if self.types.el(eh) != STR {
-            return Err(EmitError::Unsupported("main-err-carrier:non-string-err".into()));
-        }
-        let hb = self.scr_i32_local;
-        let mut i = self.f.instructions();
-        i.local_set(hb);
-        i.local_get(hb)
-            .i32_load(slot_memarg(almide_layout::SUM_TAG))
-            .if_(BlockType::Empty);
-        i.local_get(hb).i32_load(slot_memarg(almide_layout::SUM_FIELD));
-        let _ = i;
-        self.emit_error_frame_abort();
-        self.f.instructions().end();
-        Ok(true)
     }
 
     /// The main-level / pure-fn abort frame for a failed `!`: the exact
@@ -492,7 +464,7 @@ impl Emitter<'_> {
             IrExprKind::Lambda { params, body, .. } => {
                 self.lower_lambda_value(e, params, body, want)?
             }
-            IrExprKind::Fan { exprs } => self.lower_fan_block(exprs)?,
+            IrExprKind::Fan { exprs } => self.lower_fan_block(e, exprs)?,
             IrExprKind::RuntimeCall { symbol, args } => {
                 // The slice SYNTAX `xs[a..b]` desugars to this runtime
                 // symbol — one impl with `list.slice` (as in native rt).
@@ -665,6 +637,7 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(hold);
                     self.lower(el, Some(elem))?;
                     self.rc_share_guard(el, elem);
+                    self.witness_store(el, elem);
                     self.store_ty_slot(elem, i as u32 * stride);
                 }
                 self.f.instructions().local_get(hold);
@@ -675,8 +648,23 @@ impl Emitter<'_> {
             // (the interp's map_lookup contract).
             IrExprKind::MapAccess { object, key } => {
                 let args = [(**object).clone(), (**key).clone()];
-                match self.arm_scope(|em| em.lower_map_call("get", &args, want))? {
-                    Some(t) => t.ty,
+                // #2755: audited like the `map.get` call it is (calls_modules.rs).
+                let before = self.witness.as_ref().map(|w| w.arg_hooks());
+                match self.arm_scope(|em| {
+                    let l = em.lower_map_call("get", &args, want)?;
+                    if let Some(before) = before {
+                        em.witness_module_result("map.get", &args, before, l);
+                    }
+                    Ok(l)
+                })? {
+                    // #2969: the arm's fresh Option cell is this node's —
+                    // marked, or a bind takes a second credit on it.
+                    Some(t) => {
+                        if t.own == crate::arm::Own::Owned {
+                            self.owned_call_marks.insert(e as *const IrExpr as usize);
+                        }
+                        t.ty
+                    }
                     None => return unsup("map-access-void"),
                 }
             }
@@ -720,11 +708,6 @@ impl Emitter<'_> {
             None => unsup(&format!("infer-ty:{}", ty_name(&e.ty))),
         }
     }
-
-
-
-
-
 }
 
 impl Emitter<'_> {

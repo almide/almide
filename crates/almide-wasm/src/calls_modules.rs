@@ -38,7 +38,7 @@ impl Emitter<'_> {
             // hook per argument, and declared no droppable View — or the
             // frame declines, before the promotion below adds a +1.
             if let (Some(before), CallTarget::Module { module, func, .. }) = (hooks_before, target) {
-                em.witness_module_result(&format!("{module}.{func}"), args.len(), before, l);
+                em.witness_module_result(&format!("{module}.{func}"), args, before, l);
             }
             // A `View` into a temporary this scope releases next would
             // dangle: it takes its share BEFORE the release (below).
@@ -274,6 +274,9 @@ impl Emitter<'_> {
                 // with the retained default, both branches hand back an
                 // owned value (#2010 stage 2c).
                 self.share_handle_top(et);
+                // #2969: the default was evaluated (strict) and retained, and
+                // this branch does not hand it back — its credit ends here.
+                self.emit_release_hold(hdef, et);
                 self.f.instructions().end();
                 match et.val_type() {
                     ValType::I64 => self.release_i64(),

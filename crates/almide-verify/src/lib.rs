@@ -9,7 +9,7 @@
 //!
 //! | property          | mirrors (proofs/)                          | accepts iff |
 //! |-------------------|--------------------------------------------|-------------|
-//! | `ownership`       | `OwnershipChecker.check_xc`                | every object's refcount stream is fault-free and ends at 0 |
+//! | `ownership`       | `OwnershipChecker.check_xc`                | every object's refcount stream is fault-free and ends at 0 (a path ending in the abort terminal `t` need only be fault-free) |
 //! | `names`           | `NameTotality.check_names_cert`            | used ids ⊆ defined ids |
 //! | `caps`            | `CapabilityBound.check_caps_cert`          | used capabilities ⊆ declared |
 //! | `caps-transitive` | `CapabilityReach.check_prog_cert`          | every function's transitive reach ⊆ its declaration |
@@ -28,13 +28,14 @@ mod modes;
 mod nat;
 mod ownership;
 mod reach;
+pub mod sha256;
 
 /// The verifier's own version — independent of the compiler's.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The witness formats this version reads.
 pub const FORMATS: &str =
-    "ownership v5, names v1, caps v1, caps-transitive v1, call-modes v1, bundle v1";
+    "ownership v5, names v1, caps v1, caps-transitive v1, call-modes v1, bundle v1 and v2 (artifact sha256)";
 
 /// A flight-grade property a witness certifies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

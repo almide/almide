@@ -1,0 +1,92 @@
+// @contract: C-132
+// #1871 ruling (B), #2917: a CAN-ERR effect fn that writes its `mut` param and
+// THEN errs leaves the write visible to the caller, on every leg — native's
+// `&mut` semantics. Every raising exit of the callee (an explicit `err(..)`
+// tail, a guard exit, a propagated `x!`) carries the buffer it holds at that
+// point, and the call site writes it back on BOTH arms: an unpropagated call
+// (`??`, `match`, a bound Result, `let _ =`) writes back and then yields the
+// Result; a `!` call writes back and then propagates, so a caller one level up
+// that catches the err still sees the write.
+type Log = { lines: List[String], n: Int }
+
+// explicit err tail after a write
+effect fn push_then_err(mut xs: List[Int], v: Int) -> Int = {
+  list.push(xs, v)
+  if v > 5 then err("too big") else ok(v * 2)
+}
+
+// guard exit after a write
+effect fn push_then_guard(mut xs: List[Int], v: Int) -> Int = {
+  list.push(xs, v)
+  guard v % 2 == 0 else err("odd")
+  v
+}
+
+effect fn check(v: Int) -> Int = {
+  guard v >= 0 else err("negative")
+  v
+}
+
+// a propagated `x!` after a write (String buffer)
+effect fn append_then_check(mut s: String, v: Int) -> Int = {
+  s = s + "<${v}>"
+  let w = check(v)!
+  w + 1
+}
+
+// record buffer, err after two writes
+effect fn log_then_fail(mut log: Log, msg: String) -> Unit = {
+  log.lines = log.lines + [msg]
+  log.n = log.n + 1
+  guard msg != "boom" else err("boom seen")
+  ()
+}
+
+fn show(r: Result[Int, String]) -> String = match r {
+  ok(v) => "ok ${v}",
+  err(e) => "err ${e}",
+}
+
+// the `!` form: writes back, then propagates to ITS caller
+effect fn forward(mut xs: List[Int], v: Int) -> Int = {
+  list.push(xs, 0)
+  let r = push_then_err(xs, v)!
+  r + 1
+}
+
+effect fn main() -> Unit = {
+  var xs: List[Int] = []
+  // `??`
+  let a = push_then_err(xs, 9) ?? -1
+  println("?? err: a=${a} xs=${xs}")
+  let b = push_then_err(xs, 2) ?? -1
+  println("?? ok: b=${b} xs=${xs}")
+  // match
+  let m = match push_then_guard(xs, 3) {
+    ok(v) => "ok ${v}",
+    err(e) => "err ${e}",
+  }
+  println("match err: ${m} xs=${xs}")
+  let m2 = match push_then_guard(xs, 4) {
+    ok(v) => "ok ${v}",
+    err(e) => "err ${e}",
+  }
+  println("match ok: ${m2} xs=${xs}")
+  // bound Result, propagated `x!` inside the callee
+  var s = "s"
+  let r: Result[Int, String] = append_then_check(s, -3)
+  println("bound err: ${show(r)} s=${s}")
+  let r2: Result[Int, String] = append_then_check(s, 7)
+  println("bound ok: ${show(r2)} s=${s}")
+  // record buffer, `let _ =`
+  var log: Log = { lines: [], n: 0 }
+  let _ = log_then_fail(log, "hi")
+  let _ = log_then_fail(log, "boom")
+  println("log: n=${log.n} lines=${log.lines}")
+  // the `!` form, caught one level up
+  var ys: List[Int] = [1]
+  let f = forward(ys, 8) ?? -7
+  println("forward err: f=${f} ys=${ys}")
+  let g = forward(ys, 3) ?? -7
+  println("forward ok: g=${g} ys=${ys}")
+}

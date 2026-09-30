@@ -22,9 +22,9 @@
 //! membership does not enter the plan.
 //!
 //! The witness (#1696) mirrors the plan: a success or tail exit records
-//! its releases (and the frame replacement); an error or guard exit is
-//! one path of several, which the straight-line recorder cannot
-//! attribute — it is poisoned rather than fed a partial stream.
+//! its releases (and the frame replacement); a `!` propagation the
+//! witness armed (#2758) records its releases the same way. Any other
+//! error or guard exit is poisoned rather than fed a partial stream.
 
 use std::collections::BTreeSet;
 
@@ -40,6 +40,11 @@ pub(crate) enum Continuation {
     ReturnError,
     /// `guard c else v`: the else value is the frame's return.
     GuardReturn,
+    /// #2755: main's `!` abort (`Error: {msg}`, exit 1) and an
+    /// out-of-bounds index: the process ends (`unreachable` after the exit
+    /// import). Nothing is released — every credit is carried into the
+    /// abort, which the ownership checker's abort terminal discharges.
+    Abort,
     /// A `return_call`. `replaces_frame == false` is the loop-converted
     /// SELF call (tco.rs): the frame is not replaced.
     TailTransfer { replaces_frame: bool },
@@ -96,12 +101,21 @@ impl Emitter<'_> {
             Continuation::ReturnSuccess
             | Continuation::ReturnError
             | Continuation::GuardReturn => frame.clone(),
+            Continuation::Abort => BTreeSet::new(),
             Continuation::TailTransfer { replaces_frame } => {
-                if !self.tail_release_allowed {
+                if !self.tail_release_allowed && replaces_frame {
                     // The raw-address rule: every release stays on the
                     // epilogue (dead after a true return_call — the
                     // witness shows the leak; the frame is a prim body).
                     BTreeSet::new()
+                } else if !self.tail_release_allowed {
+                    // Loop form under the rule (#2976): the params no raw
+                    // address can come from are rebound by the loop-back
+                    // exactly as in a prim-free frame, so their old blocks
+                    // go here; a raw-source param keeps its block (leak,
+                    // never a dangle). A param handed straight through was
+                    // moved (`tail_consumed`) and is not a frame credit.
+                    params.intersection(&self.loop_back_releasable).copied().collect()
                 } else if replaces_frame {
                     frame.clone()
                 } else {
@@ -144,12 +158,35 @@ impl Emitter<'_> {
                 for &idx in &plan.released {
                     self.witness_dec(idx);
                 }
-                // These were the frame's last events; the dead epilogue
-                // the emitter still writes after the jump records nothing.
-                // A self tail call's frame lives on (loop form) and its
-                // epilogue decs are real.
-                if replaces_frame && let Some(w) = self.witness.as_mut() {
-                    w.frame_replaced();
+                // These were the frame's last events on this path; the dead
+                // epilogue the emitter still writes after the jump records
+                // nothing. A self tail call (loop form, #2757) is certified
+                // as the next activation of this frame: its path ends here
+                // too, after the owner locals the loop-back carries are
+                // accounted (`witness_loop_back`).
+                if replaces_frame {
+                    if let Some(w) = self.witness.as_mut() {
+                        w.frame_replaced();
+                    }
+                } else {
+                    let carried: Vec<u32> =
+                        plan.carried.iter().filter(|i| self.rc_owned.contains(i)).copied().collect();
+                    self.witness_loop_back(&carried);
+                }
+            }
+            // #2758: a recorded `!` propagation (witness_unwrap.rs armed it)
+            // releases exactly what the success exit does; the site records
+            // the value that leaves and the exit itself. Any other error or
+            // guard exit is still unattributed.
+            // #2755: the process ends; the path ends in the abort terminal.
+            Continuation::Abort => {
+                if let Some(w) = self.witness.as_mut() {
+                    w.abort_end();
+                }
+            }
+            Continuation::ReturnError if self.witness.as_mut().is_some_and(|w| w.take_err_exit()) => {
+                for &idx in &plan.released {
+                    self.witness_dec(idx);
                 }
             }
             Continuation::ReturnError | Continuation::GuardReturn => {
@@ -187,6 +224,7 @@ enum Op {
     Return,
     ReturnCall,
     FnEnd,
+    Unreachable,
     Other,
 }
 
@@ -235,6 +273,7 @@ fn read_ops(f: &wasm_encoder::Function, d: &Defects<'_>) -> Result<Vec<(usize, O
             W::LocalGet { local_index } => Op::LocalGet(local_index),
             W::Call { function_index } => Op::Call(function_index),
             W::Return => Op::Return,
+            W::Unreachable => Op::Unreachable,
             W::ReturnCall { .. } | W::ReturnCallIndirect { .. } => Op::ReturnCall,
             W::Block { .. } | W::Loop { .. } | W::If { .. } | W::TryTable { .. } => {
                 depth += 1;
@@ -251,6 +290,10 @@ fn read_ops(f: &wasm_encoder::Function, d: &Defects<'_>) -> Result<Vec<(usize, O
     }
     Ok(ops)
 }
+
+/// The abort's name in a defect — and the one window kind that ends at the
+/// `unreachable` after the exit import (#2755).
+const ABORT_NAME: &str = "the abort";
 
 /// One exit window: from `start` to the first transfer not inside an
 /// already-claimed (nested) window. Returns the locals decremented in it
@@ -287,6 +330,8 @@ fn scan_window(
                 }
             },
             Op::Return | Op::ReturnCall | Op::FnEnd => return Ok((decs, j, kind)),
+            // Only an abort's window ends at the trap after the exit import.
+            Op::Unreachable if cont_name == ABORT_NAME => return Ok((decs, j, kind)),
             _ => {}
         }
         j += 1;
@@ -310,6 +355,7 @@ fn check_window(
         Continuation::ReturnSuccess => Op::FnEnd,
         Continuation::ReturnError | Continuation::GuardReturn => Op::Return,
         Continuation::TailTransfer { .. } => Op::ReturnCall,
+        Continuation::Abort => Op::Unreachable,
     };
     if got != want {
         return Err(d.at("an exit transfers by a different instruction than its plan", cont_name.to_string(), &format!("{want:?}"), &format!("{got:?}")));
@@ -323,11 +369,59 @@ fn check_window(
     if let Some(&idx) = decs.iter().find(|i| !rec.plan.released.contains(i)) {
         return Err(d.at("an exit releases a value outside its plan", name_of(idx), "no release (not a frame credit at this edge)", "released"));
     }
-    let replaces = !matches!(cont, Continuation::TailTransfer { replaces_frame: false });
+    // An abort carries every credit into the process's end: none outstanding.
+    let replaces = !matches!(cont, Continuation::TailTransfer { replaces_frame: false } | Continuation::Abort);
     if replaces && let Some(&idx) = rec.plan.carried.iter().next() {
         return Err(d.at("tail exit leaves an ownership credit outstanding", name_of(idx), "transfer or release before tail transfer", "neither"));
     }
     Ok(())
+}
+
+/// The params of a prim-using body a raw address may be derived from: any
+/// param mentioned in the arguments of a `prim.*` call, of a runtime-symbol
+/// call, or of any call whose value is an `Int` (an address rides an Int —
+/// `__rx_handle(p)` hands one out without a prim of its own, #1990). The
+/// rest are only ever read as values (`acc + [x]`, a returned `acc`), so a
+/// loop-form self call may release them at the loop-back the way a
+/// prim-free body does (#2976: `__rx_caps_out`'s accumulator kept every
+/// generation). Conservative by construction: a mention anywhere under
+/// such a call counts, `list.len(p)` included.
+pub(crate) fn raw_address_sources(body: &almide_ir::IrExpr, params: &[almide_ir::VarId]) -> std::collections::HashSet<almide_ir::VarId> {
+    struct Scan<'p> {
+        params: &'p [almide_ir::VarId],
+        hit: std::collections::HashSet<almide_ir::VarId>,
+    }
+    impl Scan<'_> {
+        fn mark_in(&mut self, args: &[almide_ir::IrExpr]) {
+            for &p in self.params {
+                if args.iter().any(|a| crate::rc_ownership::rc_mentions_var(a, p)) {
+                    self.hit.insert(p);
+                }
+            }
+        }
+    }
+    impl almide_ir::visit::IrVisitor for Scan<'_> {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            match &e.kind {
+                almide_ir::IrExprKind::Call { target, args, .. } | almide_ir::IrExprKind::TailCall { target, args } => {
+                    let prim = matches!(target, almide_ir::CallTarget::Module { module, .. } if module.as_str() == "prim");
+                    let computed = matches!(target, almide_ir::CallTarget::Computed { .. });
+                    if prim || computed || e.ty == almide_types::types::Ty::Int {
+                        self.mark_in(args);
+                    }
+                    if let almide_ir::CallTarget::Computed { callee } = target {
+                        self.mark_in(std::slice::from_ref(callee.as_ref()));
+                    }
+                }
+                almide_ir::IrExprKind::RuntimeCall { args, .. } => self.mark_in(args),
+                _ => {}
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut s = Scan { params, hit: Default::default() };
+    almide_ir::visit::IrVisitor::visit_expr(&mut s, body);
+    s.hit
 }
 
 /// E083 (#1996): read the function's bytes BACK and check that every exit
@@ -360,6 +454,7 @@ pub(crate) fn validate_exits(
             Continuation::ReturnError => "the error return",
             Continuation::GuardReturn => "the guard return",
             Continuation::TailTransfer { .. } => "the tail transfer",
+            Continuation::Abort => ABORT_NAME,
         };
         let (decs, tj, tk) = scan_window(&ops, rec.start, &claimed, cont_name, drop_fns, &d)?;
         claimed.push((rec.start, ops[tj].0));

@@ -602,6 +602,39 @@ fn try_render_borrow_shared_mut(ctx: &RenderContext, inner: &IrExpr, mutable: bo
     })
 }
 
+/// `&mut` to a field or tuple slot of a shared-mut var (`AlmideSharedMut`,
+/// a C-319 cell): the place is reached through the cell's `borrow_mut()`,
+/// `&mut (*h.borrow_mut()).xs`, so a closure's `list.push(h.xs, 1)` writes
+/// the one value the enclosing scope also reads (#2961). Rendered as an
+/// ordinary expression the root read was `h.get()` — a clone — and the
+/// write landed on a discarded temporary (inside a closure, rustc's E0525
+/// before that). `BorrowInsertion`'s hoist has already moved out any
+/// sibling argument that reads the root, so the cell is not re-borrowed
+/// while this borrow is held.
+fn render_shared_mut_place(ctx: &RenderContext, place: &IrExpr) -> Option<String> {
+    let mut path: Vec<String> = Vec::new();
+    let mut cur = place;
+    let id = loop {
+        match &cur.kind {
+            IrExprKind::Member { object, field } => {
+                path.push(ctx.field_ident(field.as_str()).to_string());
+                cur = object;
+            }
+            IrExprKind::TupleIndex { object, index } => {
+                path.push(index.to_string());
+                cur = object;
+            }
+            IrExprKind::Var { id } => break *id,
+            _ => return None,
+        }
+    };
+    if !ctx.ann.is_shared_mut(&id) || almide_ir::top_let_storage::capture_copy_cell(&ctx.var_table.get(id).ty) {
+        return None;
+    }
+    let suffix: String = path.iter().rev().map(|f| format!(".{f}")).collect();
+    Some(format!("&mut (*{}.borrow_mut()){suffix}", ctx.var_name(id)))
+}
+
 /// The Almide-source name behind a var: a closure capture is renamed
 /// `__cap_<origin VarId>` by `capture_bindings`, so the origin's name is
 /// recovered by following that suffix (chained captures included); any
@@ -666,7 +699,11 @@ fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
             }
         }
         if matches!(inner.kind, IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }) {
-            return format!("&mut {}", render_expr(ctx, &strip_place_clones(inner)));
+            let place = strip_place_clones(inner);
+            if let Some(rendered) = render_shared_mut_place(ctx, &place) {
+                return rendered;
+            }
+            return format!("&mut {}", render_expr(ctx, &place));
         }
         format!("&mut {}", render_expr(ctx, inner))
     } else if *as_str {

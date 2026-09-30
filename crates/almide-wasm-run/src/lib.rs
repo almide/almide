@@ -18,6 +18,7 @@ pub mod wasi_p3;
 
 pub use host::{
     run_wasm, run_wasm_capped, run_wasm_real_stdin, run_wasm_real_stdin_args, run_wasm_unbounded,
+    run_wasm_unbounded_args,
     run_wasm_with,
     AllocCount, RunResult,
 };

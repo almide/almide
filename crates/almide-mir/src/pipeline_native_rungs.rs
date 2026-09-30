@@ -148,7 +148,11 @@ fn rewrite_native_result_windows(ir: &almide_ir::IrProgram, functions: &mut [cra
                 // ret_ty alone misses them (the lift lives in the ABI, not
                 // the signature), which left the windows unrewritten and
                 // the verifier flagging the raw LoadHandle as UseAfterFree.
-                || (f.is_effect && matches!(f.ret_ty, Ty::Int | Ty::Bool))
+                // A NEVER-ERR one returns its raw scalar instead: the shared
+                // chain settled every call site against that (#3058).
+                || (f.is_effect
+                    && matches!(f.ret_ty, Ty::Int | Ty::Bool)
+                    && !crate::lower::is_never_err_lifted(f.name.as_str()))
         })
         .map(|f| f.name.as_str().to_string())
         .collect();
@@ -243,7 +247,10 @@ let mut sigs: crate::render_native::NativeSigs = Default::default();
         let params: Option<Vec<_>> = func.params.iter().map(|p| native_sig_kind(&p.ty, record_layouts, variant_layouts)).collect();
         let ret = if matches!(func.ret_ty, Ty::Unit) {
             Some(None)
-        } else if func.is_effect && matches!(func.ret_ty, Ty::Int | Ty::Bool) {
+        } else if func.is_effect
+            && matches!(func.ret_ty, Ty::Int | Ty::Bool)
+            && !crate::lower::is_never_err_lifted(func.name.as_str())
+        {
             // A LIFTED effect fn returns the wrapped carrier on this leg
             // (the same widening `result_fns` applies above): its declared
             // scalar would type the call dst I64 while the value is Res.

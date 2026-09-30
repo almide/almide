@@ -13,22 +13,22 @@ by `scripts/gen-ledger-counts.sh` (a release step, or the answer to the nightly
 re-measured 2026-08-12) and `proofs/TOR.md` (the operational contract).
 
 <!-- stages:generated:start — derived from the proofs/ ledgers by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-<!-- counts:generated:start (as of 2026-09-29) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
+<!-- counts:generated:start (as of 2026-09-30) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
 > **Stage 1 (accept-and-wrong extinction): audits COMPLETE and gated** —
-> scalar-read 64 arms / 0 UNGUARDED;
+> scalar-read 62 arms / 0 UNGUARDED;
 > platform-libm 5 sites classified. New entries cannot land unclassified.
 >
-> **Stage 2 (translation validation): 810/831 fixtures cast a real 3-way vote (97%)** —
+> **Stage 2 (translation validation): 839/860 fixtures cast a real 3-way vote (97%)** —
 > the abstain remainder is classified and shrink-only (the interp-heap arc, #1226).
 >
-> **Stage 3 (semantics freeze): 370/370 contracts spec-keyed; syntax-element coverage
+> **Stage 3 (semantics freeze): 372/372 contracts spec-keyed; syntax-element coverage
 > 73/73 sectioned (0 UNWRITTEN, shrink-only — the freeze precondition is 0).**
 >
 > **Stage 4 (durability): fuzz true-green streak = 0 day(s)** (dated meter;
 > the correctness-only night verdict shipped 2026-08-12 — 90 days is the milestone).
 >
-> **Stage 5 (auditability): 16 release seal(s); 107 verification gates classified
-> (0 UNVERIFIED under a shrink-only ceiling); TOR with 9 enforced rows;
+> **Stage 5 (auditability): 16 release seal(s); 112 verification gates classified
+> (0 UNVERIFIED under a shrink-only ceiling); TOR with 10 enforced rows;
 > gap analysis consolidated in proofs/DO330-GAP.md (reference-gated).**
 <!-- counts:generated:end -->
 <!-- stages:generated:end -->

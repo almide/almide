@@ -181,6 +181,29 @@ echo "-- property: ownership, format v5 (law 6: the arm-terminal Return exit) --
 run branch-ret      ownership 0
 run branch-ret-leak ownership 1
 
+echo "-- property: ownership, format v6 (the arm-terminal ABORT) --"
+# #2755: an arm that ends the PROCESS (`t`: main's `!` abort, an out-of-bounds
+# index — `proc_exit` then `unreachable`, pinned by the emitter's E083 exit
+# validator) need only be fault-free: what it still holds is discharged with
+# the heap. Every other path balances exactly. The drills: an arm that
+# "aborts" and then CONTINUES (an op after `t`) is malformed; a release at 0
+# before the abort is a fault; the surviving path still owes its balance; a
+# `t` outside a branch has no survivor. Three verdicts on each row.
+run_raw() { # certificate expected_exit label
+  printf '%s\n' "$1" > /tmp/raw.witness
+  set +e; "$ROOT/proofs/checker" ownership /tmp/raw.witness >/tmp/gate.out 2>&1; local rc=$?; set -e
+  if [ "$rc" -ne "$2" ]; then echo "FAIL [ownership v6] $3 '$1': got exit $rc want $2"; exit 1; fi
+  kernel_verify ownership /tmp/raw.witness "$2"   || { echo "FAIL [ownership v6] $3: KERNEL oracle disagrees"; exit 1; }
+  portable_agrees ownership /tmp/raw.witness "$2" || { echo "FAIL [ownership v6] $3: almide-verify disagrees"; exit 1; }
+  echo "ok   [ownership v6] $3 '$1': exit $rc (kernel + almide-verify agree)"
+}
+run_raw 'i{t|d}'  0 "abort discharges what the arm holds"
+run_raw '{it|}'   0 "a block born on the aborting path only"
+run_raw 'i{td|d}' 1 "an abort that continues is malformed"
+run_raw '{dt|}'   1 "a release at 0 before the abort"
+run_raw 'i{t|}'   1 "the surviving path still balances"
+run_raw 'it'      1 "an abort outside a branch"
+
 echo "-- property: call-modes over CLOSURE dispatch (brick 5c: possible-callee set) --"
 # main calls through a funcref. AGREE: the dispatch shape matches the one table
 # target, the site's modes equal its signature → ACCEPT. UNKNOWABLE: the site's
@@ -355,6 +378,326 @@ kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-ta
 portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper(step4): almide-verify accepted the unreleased discard"; exit 1; }
 echo "ok   structural-tamper(step4): an unreleased statement-call result is rejected by the binary AND the kernel"
 
+# ── #2755: TEMPORARIES on the flat alphabet through the same checker. `nest`
+# hands a call's owned result straight to another call (`im`: born, moved
+# into the owned param); `greet` concatenates — its operands are bound first
+# (`id` each), the fresh concat moves out (`im`); `wrap` tails `some(xs)`, the
+# param sharing into the payload slot (`am`) and the cell moving out (`im`).
+# Two drills: a nested temporary that never leaves the frame, and a concat
+# operand that is never released — each must be seen as the leak it is.
+echo
+echo "== structural leg, temporaries  ⊳  proven checker (#2755) =="
+run_structural spec/wasm_cross/witness_straightline.almd nest 0
+run_structural spec/wasm_cross/witness_straightline.almd greet 0
+run_structural spec/wasm_cross/witness_straightline.almd wrap 0
+tamper_structural() { # fn sed-expr label
+  emit_structural spec/wasm_cross/witness_straightline.almd "$1" | sed "$2" > /tmp/structural.tamper
+  if cmp -s /tmp/structural.tamper <(emit_structural spec/wasm_cross/witness_straightline.almd "$1"); then
+    echo "FAIL structural-tamper($3): the drill changed nothing (the witness shape moved)"; exit 1
+  fi
+  set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
+  if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper($3): a leaked temporary was accepted"; exit 1; fi
+  kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper($3): the kernel accepted the leak"; exit 1; }
+  portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper($3): almide-verify accepted the leak"; exit 1; }
+  echo "ok   structural-tamper($3): the leak is rejected by the binary AND the kernel"
+}
+tamper_structural nest 's/^im$/i/' "#2755 nested call"
+tamper_structural greet '3s/^id$/i/' "#2755 concat operand"
+
+# ── #2756: BRANCH FRAMES through the same checker. The recorder logs each RC
+# event with the `if` / `match` structure it was emitted under and renders
+# one line per object: a single path flat, two paths as the whole-line
+# branch `{p|q}` (the checker runs each arm from rc 0 and both must end at 0),
+# more as per-site `{a|b}` / `{a x|b}` items. `pick` hands its list to
+# `take` on one arm only (`{iamd|id}`); `label` keeps a string alive across
+# a match, returning its share on one arm (`{|am}`). Drills: drop the
+# release on the arm that took the share, and the move-out on the arm that
+# returned it — each arm is checked on its own, so each leak is seen.
+echo
+echo "== structural leg, branch frames  ⊳  proven checker (#2756) =="
+run_structural spec/wasm_cross/witness_straightline.almd pick 0
+run_structural spec/wasm_cross/witness_straightline.almd label 0
+tamper_structural pick 's/^{iamd|id}$/{iam|id}/' "#2756 if arm"
+tamper_structural label 's/^{|am}$/{|a}/' "#2756 match arm"
+
+# ── #2757: a SELF TAIL CALL (loop-converted by tco.rs) certified as the next
+# activation of the frame: `count_down` shares its list into the next
+# activation's param and releases its own credit before the loop-back
+# (`{iamd|id}` — recursive path, base path). Drill: drop the loop-back
+# release, which is the leak a loop-form frame that forgets its params has.
+echo
+echo "== structural leg, self tail calls  ⊳  proven checker (#2757) =="
+run_structural spec/wasm_cross/witness_straightline.almd count_down 0
+tamper_structural count_down 's/^{iamd|id}$/{iam|id}/' "#2757 loop-back"
+
+# ── #2757: LOOP BODIES as activations, each iteration on its own line from
+# rc 0 (the loop is a holder that must hand back every credit it takes).
+# `tally` shares its list into `take` on every pass (`am` on the loop line)
+# and binds a per-iteration concat (`id`: the next rebind or the epilogue
+# releases it); `drain`'s row lives one `while` iteration (`{|id}`: the
+# check that leaves binds nothing). Drills: the loop line keeps a credit it
+# took, and an iteration's block is never released.
+echo
+echo "== structural leg, loop bodies  ⊳  proven checker (#2757) =="
+run_structural spec/wasm_cross/witness_straightline.almd tally 0
+run_structural spec/wasm_cross/witness_straightline.almd drain 0
+tamper_structural tally '2s/^am$/a/' "#2757 for body"
+tamper_structural drain 's/^{|id}$/{|i}/' "#2757 while body"
+
+# ── #2758: an EFFECT frame certified at its raw ok type. `stash` shares its
+# borrowed param into the ok carrier's slot (`am`); the carrier is born and
+# moves out of the frame (`im`). Drill: the carrier never leaves — the leak
+# an effect frame that built its answer and dropped it would have.
+echo
+echo "== structural leg, effect frames  ⊳  proven checker (#2758) =="
+run_structural spec/wasm_cross/witness_straightline.almd stash 0
+tamper_structural stash '2s/^im$/i/' "#2758 ok carrier"
+
+# ── #2758: EARLY `!` EXITS. The `!` site is a branch whose arm propagates:
+# `stash_len`'s parked carrier is shared, released with the frame and moved
+# out on that arm (`{iadm|id}`); the payload is a view the bind takes a
+# credit of. `stash_both` has two sites: the second carrier has three paths,
+# so its exit folds into a v5 branch-return item (`i{admx|}d`, checked from
+# the count at the site to exactly 0). Drills: the propagated carrier never
+# leaves, and the folded exit forgets its move-out.
+echo
+echo "== structural leg, early exits  ⊳  proven checker (#2758) =="
+run_structural spec/wasm_cross/witness_straightline.almd stash_len 0
+run_structural spec/wasm_cross/witness_straightline.almd stash_both 0
+tamper_structural stash_len 's/^{iadm|id}$/{iad|id}/' "#2758 propagated carrier"
+tamper_structural stash_both 's/^i{admx|}d$/i{adx|}d/' "#2758 folded exit"
+
+# ── #2758: CLOSURES. `adder` shares its param into the new env (`am`: the
+# env's drop glue releases it) and the env block moves out (`im`). The
+# lambda body (`<lambda#0>`, the fixture's only lambda) is a frame of its
+# own: its param callee-owned (`id`), its capture a view of the env (an
+# empty line). Drills: the env never leaves, and the lambda keeps its param.
+echo
+echo "== structural leg, closures  ⊳  proven checker (#2758) =="
+run_structural spec/wasm_cross/witness_straightline.almd adder 0
+run_structural spec/wasm_cross/witness_straightline.almd '<lambda#0>' 0
+tamper_structural adder '2s/^im$/i/' "#2758 closure env"
+tamper_structural '<lambda#0>' '1s/^id$/i/' "#2758 lambda param"
+
+# ── #2758: a CLOSURE CALL. `apply_len` lends its Fn value to the lifted body
+# and shares its list into the body's callee-owned param (`am`). Drill: the
+# share never moves into the callee.
+run_structural spec/wasm_cross/witness_straightline.almd apply_len 0
+tamper_structural apply_len 's/^am$/a/' "#2758 closure call argument"
+
+# ── #2755: AGGREGATES and INTERPOLATION. `pair` tails a tuple: the param
+# shares into the slot (`am`) and the fresh block moves out (`im`). `left`
+# destructures its borrowed param: each binder is a view of a slot (an empty
+# line for the param), and the returned binder shares and moves out (`am`).
+# `hello` tails an interpolation: the build reads the part, the captured
+# block moves out (`im`). Drills: the tuple never leaves, the returned view's
+# share never moves out, and the captured text never leaves.
+echo
+echo "== structural leg, aggregates and interpolation  ⊳  proven checker (#2755) =="
+run_structural spec/wasm_cross/witness_straightline.almd pair 0
+run_structural spec/wasm_cross/witness_straightline.almd left 0
+run_structural spec/wasm_cross/witness_straightline.almd hello 0
+tamper_structural pair '2s/^im$/i/' "#2755 tuple literal"
+tamper_structural left 's/^am$/a/' "#2755 destructured binder"
+# `t.0` / `r.f`: a slot VIEW of the bound param, shared out by the tail.
+run_structural spec/wasm_cross/witness_straightline.almd first_of 0
+run_structural spec/wasm_cross/witness_straightline.almd name_of 0
+tamper_structural first_of 's/^am$/m/' "#2755 tuple slot view"
+tamper_structural name_of 's/^am$/m/' "#2755 record field view"
+tamper_structural hello 's/^im$/i/' "#2755 interpolation"
+
+# ── #2755 / #2758: INLINED CALLBACKS. `list.map` / `filter` / `fold` lower a
+# literal lambda's body in the frame, one loop activation per element: the
+# param is a view of the element (an empty line), `bang`'s fresh concat
+# moves into the result spine (`im` on the loop's line) and the spine moves
+# out (`im`); `kept` and `total` consume a Bool and a scalar. Drills: the
+# per-element text never reaches the spine, and the spine never leaves.
+echo
+echo "== structural leg, inlined callbacks  ⊳  proven checker (#2755) =="
+run_structural spec/wasm_cross/witness_straightline.almd bang 0
+run_structural spec/wasm_cross/witness_straightline.almd kept 0
+run_structural spec/wasm_cross/witness_straightline.almd total 0
+tamper_structural bang '4s/^im$/i/' "#2755 callback element"
+tamper_structural kept '3s/^im$/i/' "#2755 filtered spine"
+
+# ── #2755: a HEAP `fold` accumulator is a loop-carried owner (born with the
+# seed, replaced by each step's fresh result, the old value released as the
+# activation closes, the final value moving out), and `find`'s hit is a
+# branch where the element's view shares into the fresh some-cell (`{|am}`).
+# Drills: the final accumulator never leaves; the hit takes no credit to move.
+echo
+echo "== structural leg, heap fold + find  ⊳  proven checker (#2755) =="
+run_structural spec/wasm_cross/witness_straightline.almd joined 0
+run_structural spec/wasm_cross/witness_straightline.almd long_one 0
+tamper_structural joined '8s/^im$/i/' "#2755 heap fold accumulator"
+tamper_structural long_one '3s/^{|am}$/{|m}/' "#2755 find hit"
+
+# ── #2755: `r ?? fallback`, a two-arm branch site with an owned join. The
+# borrowed param holds no credit (an empty line); the fresh fallback moves
+# into the join on the none arm (`{|im}`), the payload view takes its share
+# and moves on the some arm (`{|am}`), the join moves out (`im`). Drill: the
+# fallback never reaches the join.
+echo
+echo "== structural leg, unwrap-or  ⊳  proven checker (#2755) =="
+run_structural spec/wasm_cross/witness_straightline.almd or_zero 0
+tamper_structural or_zero 's/^{|im}$/{|i}/' "#2755 unwrap-or fallback"
+
+# ── #2758: an `err(e)` RAISED from an effect body, and a call through a record
+# FIELD. `raise`: the literal payload moves into the err block, the block
+# leaves on the raising arm, the ok carrier on the other (`{|im}` each).
+# `apply_op`: the record param and the field's Fn value are views (empty
+# lines). Drills: the err block never leaves; the borrowed record is released.
+echo
+echo "== structural leg, effect raise + field callee  ⊳  proven checker (#2758) =="
+run_structural spec/wasm_cross/witness_straightline.almd raise 0
+run_structural spec/wasm_cross/witness_straightline.almd apply_op 0
+tamper_structural raise '2s/^{|im}$/{|i}/' "#2758 raised err block"
+tamper_structural apply_op '1s/^$/d/' "#2758 field callee record"
+
+# ── #2758: a callback that RAISES instantiates the self-hosted
+# `list.__fallible_map` — an ordinary call. The literal lambda is a closure
+# value: its env is built here, lent to the lifted body and released (`id`).
+# Drill: the env never released.
+echo
+echo "== structural leg, fallible HOF closure argument  ⊳  proven checker (#2758) =="
+run_structural spec/wasm_cross/witness_straightline.almd raised_all 0
+tamper_structural raised_all '1s/^id$/i/' "#2758 fallible HOF env"
+
+# ── #2755: `fan.map` / `fan.any`'s sequential accumulator. Each element's
+# Result carrier is born in its activation: it leaves as the whole result, or
+# is released (`{id|im}`); `fan_bang`'s ok payload moves into the accumulator
+# (`{|im}`). Drills: a consumed carrier never released; a payload never moved.
+echo
+echo "== structural leg, fan accumulator  ⊳  proven checker (#2755) =="
+run_structural spec/wasm_cross/witness_straightline.almd fan_bang 0
+run_structural spec/wasm_cross/witness_straightline.almd fan_first 0
+tamper_structural fan_bang '4s/^{id|im}$/{i|im}/' "#2755 fan carrier"
+tamper_structural fan_bang '6s/^{|im}$/{|i}/' "#2755 fan payload"
+
+# ── #2755: `xs[i]` over a bound list is a VIEW of the element (shared out,
+# `{|am}`); out of bounds ABORTS the process with nothing released — the
+# abort terminal discharges it, and an aborting path a returning path extends
+# needs no arm of its own (`check_line_prefix_safe`: `tagged_at`'s `t` aborts
+# holding its block after `i`, a prefix of its returning `id`). Drills: the
+# view never shared; `t` never released on the returning path.
+echo
+echo "== structural leg, list index + abort exit  ⊳  proven checker (#2755) =="
+run_structural spec/wasm_cross/witness_straightline.almd elem_at 0
+run_structural spec/wasm_cross/witness_straightline.almd tagged_at 0
+tamper_structural elem_at '2s/^{|am}$/{|m}/' "#2755 index view"
+tamper_structural tagged_at '2s/^{|id}$/{|i}/' "#2755 abort-path release"
+
+# ── #2758: MODULE-SPACE LETS. main's prologue stores each top-let into its
+# global: `ALPHA`'s literal moves in (`im`); `TBL`'s initializer (a
+# `bytes.from_list` result, line 3) is copied into the global (`im`) and
+# itself released (`id` — it stayed live until exit before #2758, #2967).
+# Drill: that release is dropped.
+echo
+echo "== structural leg, module-space lets  ⊳  proven checker (#2758) =="
+run_structural spec/wasm_cross/module_global_const.almd main 0
+emit_structural spec/wasm_cross/module_global_const.almd main | sed '3s/^id$/i/' > /tmp/structural.tamper
+if cmp -s /tmp/structural.tamper <(emit_structural spec/wasm_cross/module_global_const.almd main); then
+  echo "FAIL structural-tamper(#2758 top-let): the drill changed nothing"; exit 1
+fi
+set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
+if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper(#2758 top-let): an unreleased initializer was accepted"; exit 1; fi
+kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper(#2758 top-let): the kernel accepted the leak"; exit 1; }
+portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper(#2758 top-let): almide-verify accepted the leak"; exit 1; }
+echo "ok   structural-tamper(#2758 top-let): an initializer the copy left behind is rejected by the binary AND the kernel"
+
+# ── #2758: the CALL-MODE witness of the structural leg. Per-frame
+# certificates compose only if every call site hands each heap argument over
+# as its callee's frame assumed (a move into a borrowed param leaks, a lend to
+# an owned param frees twice). The emitter records each table fn's frame
+# convention and each Named / linked site's actual hand-over; the stream is
+# judged by CallModes.check_modes_cert. Drill: one site's move becomes a
+# borrow against its callee's signature.
+echo
+echo "== structural leg, call modes  ⊳  proven checker (#2758) =="
+(cd "$ROOT" && cargo run -q -p almide-wasm --example emit_call_modes -- spec/wasm_cross/witness_straightline.almd) > /tmp/structural.modes
+set +e; "$ROOT/proofs/checker" call-modes /tmp/structural.modes >/tmp/gate.out 2>&1; src_rc=$?; set -e
+if [ "$src_rc" -ne 0 ]; then echo "FAIL [structural] call-modes: rejected ($(cat /tmp/gate.out))"; exit 1; fi
+kernel_verify call-modes /tmp/structural.modes 0   || { echo "FAIL [structural] call-modes: KERNEL oracle disagrees"; exit 1; }
+portable_agrees call-modes /tmp/structural.modes 0 || { echo "FAIL [structural] call-modes: almide-verify disagrees"; exit 1; }
+echo "ok   [structural] call-modes: every site of witness_straightline agrees with its callee (kernel + almide-verify agree)"
+sed -E 's/\|([0-9]+) 1/|\1 0/' /tmp/structural.modes > /tmp/structural.modes.tamper
+if cmp -s /tmp/structural.modes /tmp/structural.modes.tamper; then echo "FAIL structural-tamper(#2758 call modes): the drill changed nothing"; exit 1; fi
+set +e; "$ROOT/proofs/checker" call-modes /tmp/structural.modes.tamper >/dev/null 2>&1; src_rc=$?; set -e
+if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper(#2758 call modes): a mode mismatch was accepted"; exit 1; fi
+kernel_verify call-modes /tmp/structural.modes.tamper 1   || { echo "FAIL structural-tamper(#2758 call modes): the kernel accepted the mismatch"; exit 1; }
+portable_agrees call-modes /tmp/structural.modes.tamper 1 || { echo "FAIL structural-tamper(#2758 call modes): almide-verify accepted the mismatch"; exit 1; }
+echo "ok   structural-tamper(#2758 call modes): a site that lends where its callee takes a credit is rejected by the binary AND the kernel"
+
+# ── #2759: NAME TOTALITY and CAPABILITIES of the structural build, projected
+# from the module bytes (crates/almide-wasm/src/cert_project.rs) and printed
+# by the bundle producer the corpus sweep (proofs/structural-wall.sh) runs.
+# Names: the function index space of the stock-WASI bytes and one frame's
+# locals. Capabilities: `shed` is a plain `fn`, bounded by the console, and
+# the program's call graph is judged by CapabilityReach (the reach computed
+# in the proof). Drills: an index one past the function space (an undefined
+# callee), one past `shed`'s locals, a file write reached from the plain fn,
+# and the same write added to a plain fn's node of the call graph.
+echo
+echo "== structural leg, names + capabilities  ⊳  proven checker (#2759) =="
+WS=spec/wasm_cross/witness_straightline.almd
+bundle_one() { # fixture property function
+  (cd "$ROOT" && cargo run -q -p almide-wasm --example emit_structural_bundle -- "$1" --only "$2" "$3")
+}
+run_structural_prop() { # fixture property function expected_exit
+  bundle_one "$1" "$2" "$3" > /tmp/structural.prop
+  set +e; "$ROOT/proofs/checker" "$2" /tmp/structural.prop >/tmp/gate.out 2>&1; local rc=$?; set -e
+  if [ "$rc" -ne "$4" ]; then echo "FAIL [structural $2] $1::$3: got exit $rc want $4 ($(cat /tmp/gate.out))"; exit 1; fi
+  kernel_verify "$2" /tmp/structural.prop "$4"   || { echo "FAIL [structural $2] $1::$3: KERNEL oracle disagrees"; exit 1; }
+  portable_agrees "$2" /tmp/structural.prop "$4" || { echo "FAIL [structural $2] $1::$3: almide-verify disagrees"; exit 1; }
+  echo "ok   [structural $2] $1::$3: witness '$(head -c 120 /tmp/structural.prop | tr '\n' '|')…' accepted (kernel + almide-verify agree)"
+}
+drill_structural_prop() { # property label — /tmp/structural.prop is the honest witness, /tmp/structural.tamper the drill
+  if cmp -s /tmp/structural.prop /tmp/structural.tamper; then echo "FAIL structural-tamper($2): the drill changed nothing"; exit 1; fi
+  set +e; "$ROOT/proofs/checker" "$1" /tmp/structural.tamper >/dev/null 2>&1; local rc=$?; set -e
+  if [ "$rc" -ne 1 ]; then echo "FAIL structural-tamper($2): the binary accepted it"; exit 1; fi
+  kernel_verify "$1" /tmp/structural.tamper 1   || { echo "FAIL structural-tamper($2): the kernel accepted it"; exit 1; }
+  portable_agrees "$1" /tmp/structural.tamper 1 || { echo "FAIL structural-tamper($2): almide-verify accepted it"; exit 1; }
+  echo "ok   structural-tamper($2): rejected by the binary, the kernel AND almide-verify"
+}
+# Append the first id past the defined range to the used side.
+past_defined() { python3 -c 'import sys; d,u=sys.stdin.read().split("|",1); print(d+"|"+u.strip()+" "+str(len(d.split())), end="")'; }
+run_structural_prop "$WS" names '(module:funcs)' 0
+past_defined < /tmp/structural.prop > /tmp/structural.tamper
+drill_structural_prop names "#2759 undefined callee"
+run_structural_prop "$WS" names 'locals:shed' 0
+past_defined < /tmp/structural.prop > /tmp/structural.tamper
+drill_structural_prop names "#2759 undefined local"
+run_structural_prop "$WS" caps shed 0
+sed 's/$/ 4/' /tmp/structural.prop > /tmp/structural.tamper
+drill_structural_prop caps "#2759 file write from a plain fn"
+run_structural_prop "$WS" caps-transitive '(program)' 0
+python3 - > /tmp/structural.tamper <<'PYEOF'
+nodes = open("/tmp/structural.prop").read().split(";")
+k = next(i for i, n in enumerate(nodes) if n.split("|")[0] == "0 6")  # a plain fn's node
+d, direct, callees = nodes[k].split("|")
+nodes[k] = "|".join([d, (direct + " 4").strip(), callees])
+print(";".join(nodes), end="")
+PYEOF
+drill_structural_prop caps-transitive "#2759 call graph: file write from a plain fn"
+
+# ── #3041: DECLARATIONS the source implies but the synthesized fn does not
+# spell. `branch_lift_synth_0` is lifted out of an `effect fn`'s body and
+# reads a file: it is bounded by its origin's `effect` (the `effect:origin`
+# marker, not the ABI flag). `heavy` is a plain fn run inside a
+# `fan.timeout` region: the fuel meter's deadline test reads the clock in
+# its frame, and the declaration table charges that read to the region's
+# opener (witness_decls.rs, the #3041 ruling), so its reach is empty. Drills:
+# the synthesized fn bounded as the plain fn it is spelled as, and a clock
+# read that is the frame's own.
+FS=spec/wasm_cross/fs_read_text_utf8.almd
+run_structural_prop "$FS" caps branch_lift_synth_0 0
+sed 's/^[^|]*|/0 6|/' /tmp/structural.prop > /tmp/structural.tamper
+drill_structural_prop caps "#3041 synthesized fn declared plain"
+TO=spec/wasm_cross/fuel_timeout_ends.almd
+run_structural_prop "$TO" caps heavy 0
+sed 's/$/5/' /tmp/structural.prop > /tmp/structural.tamper
+drill_structural_prop caps "#3041 a clock read of the frame's own"
+
 # ── #2152: almide-verify against the extracted checker on witnesses NO
 # producer wrote. The rows above only reach the shapes the emitters produce;
 # the transcription must agree on the whole input space, malformed bytes
@@ -402,7 +745,7 @@ def ownership():
     # shapes with random contents — the soup alone almost never balances,
     # and the accept side needs coverage too.
     if rng.random() < 0.5:
-        return "".join(rng.choice("iiiidddaambrIDxX(){}[]||\n ") for _ in range(rng.randint(0, 28)))
+        return "".join(rng.choice("iiiidddaambrIDxXtT(){}[]||\n ") for _ in range(rng.randint(0, 28)))
     def item():
         r = rng.random()
         if r < 0.5:
@@ -411,7 +754,7 @@ def ownership():
             return "(" + ops(rng.randint(0, 3)) + ")"
         if r < 0.8:
             return "[" + ops(rng.randint(0, 3)) + "|" + ops(rng.randint(0, 2)) + "]"
-        return "{" + ops(rng.randint(0, 3)) + rng.choice(["", "x"]) + "|" + ops(rng.randint(0, 3)) + rng.choice(["", "", "x"]) + "}"
+        return "{" + ops(rng.randint(0, 3)) + rng.choice(["", "x", "t"]) + "|" + ops(rng.randint(0, 3)) + rng.choice(["", "", "x", "t"]) + "}"
     return "\n".join("i" + "".join(item() for _ in range(rng.randint(0, 4))) + rng.choice(["d", "m", "dd", ""])
                      for _ in range(rng.randint(1, 3)))
 

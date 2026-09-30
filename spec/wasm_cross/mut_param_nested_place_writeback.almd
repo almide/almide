@@ -1,0 +1,139 @@
+// @contract: C-033, C-132
+// A user fn's `mut` parameter bound to a NESTED place writes the mutated
+// buffer back at every depth (#3092): a field of a field (`o.inner.xs`), three
+// levels (`d.a.b.xs`), a tuple slot (`t.0`), a slot below a field
+// (`r.pair.1`) and a field below a slot (`p.1.xs`), for List, String, Map and
+// Bytes buffers, a value-returning callee, a callee with two `mut` params, a
+// can-err effect callee on both its ok and err arms, in a loop, and through a
+// module-level `var`. Only the one-level place (`b.items`) wrote back before:
+// the wasm leg printed the pre-call value for every row below where native
+// printed the mutation, and the interpreter abstained on the nested lvalue.
+//
+// An alias bound BEFORE the call keeps its pre-call value at every level
+// (#3101, C-033): the callee writes its `mut` param in place, so the call
+// site unshares the whole path first — the root record, each record or tuple
+// on the way down, and the leaf buffer. Before, the wasm leg wrote through
+// the shared block and every alias below showed the callee's push.
+type Inner = { xs: List[Int], s: String, m: Map[String, Int], b: Bytes }
+
+type Outer = { inner: Inner, n: Int }
+
+type B = { xs: List[Int] }
+
+type A = { b: B }
+
+type D = { a: A }
+
+type R = { pair: (String, List[Int]) }
+
+type G = { inner: Inner, tag: String }
+
+var g: G = { inner: { xs: [], s: "", m: [:], b: bytes.new(0) }, tag: "g" }
+
+fn push_xs(mut xs: List[Int], v: Int) -> Unit = {
+  list.push(xs, v)
+}
+
+fn push_s(mut s: String, t: String) -> Unit = {
+  string.push(s, t)
+}
+
+fn put_m(mut m: Map[String, Int], k: String, v: Int) -> Unit = {
+  map.insert(m, k, v)
+}
+
+fn push_b(mut b: Bytes, v: Int) -> Unit = {
+  bytes.push(b, v)
+}
+
+fn push_len(mut xs: List[Int]) -> Int = {
+  list.push(xs, list.len(xs) * 10)
+  list.len(xs)
+}
+
+fn swap_into(mut a: List[Int], mut b: List[Int]) -> Unit = {
+  list.push(a, 1)
+  list.push(b, 2)
+}
+
+effect fn push_checked(mut xs: List[Int], v: Int) -> Int = {
+  list.push(xs, v)
+  if v > 5 then err("too big: ${v}") else ok(v)
+}
+
+fn empty_inner() -> Inner = { xs: [], s: "", m: [:], b: bytes.new(0) }
+
+fn show_inner(i: Inner) -> String = "${i.xs} ${i.s} ${map.len(i.m)} ${bytes.len(i.b)}"
+
+effect fn main() -> Unit = {
+  var o: Outer = { inner: empty_inner(), n: 7 }
+  push_xs(o.inner.xs, 1)
+  push_s(o.inner.s, "ab")
+  put_m(o.inner.m, "k", 3)
+  push_b(o.inner.b, 9)
+  println("1 ${show_inner(o.inner)} ${o.n}")
+  var d: D = { a: { b: { xs: [5] } } }
+  push_xs(d.a.b.xs, 6)
+  println("2 ${d.a.b.xs}")
+  var t: (List[Int], String) = ([], "t")
+  push_xs(t.0, 4)
+  push_s(t.1, "u")
+  println("3 ${t.0} ${t.1}")
+  var r: R = { pair: ("p", [1]) }
+  push_xs(r.pair.1, 2)
+  push_s(r.pair.0, "q")
+  println("4 ${r.pair.0} ${r.pair.1}")
+  var p: (Int, B) = (0, { xs: [] })
+  push_xs(p.1.xs, 8)
+  println("5 ${p.0} ${p.1.xs}")
+  let k = push_len(o.inner.xs)
+  println("6 ${k} ${o.inner.xs}")
+  swap_into(o.inner.xs, d.a.b.xs)
+  println("7 ${o.inner.xs} ${d.a.b.xs}")
+  for i in 0..<3 {
+    push_xs(d.a.b.xs, i)
+  }
+  println("8 ${d.a.b.xs}")
+  let ok_v = push_checked(o.inner.xs, 3) ?? -1
+  let err_v = push_checked(o.inner.xs, 9) ?? -1
+  println("9 ${ok_v} ${err_v} ${o.inner.xs}")
+  push_xs(g.inner.xs, 1)
+  push_s(g.inner.s, "gs")
+  put_m(g.inner.m, "a", 1)
+  push_b(g.inner.b, 2)
+  println("10 ${show_inner(g.inner)} ${g.tag}")
+  // #3101: aliases taken before the call, at one, two and three levels.
+  var b1: B = { xs: [1] }
+  let alias_b1 = b1
+  let alias_b1_xs = b1.xs
+  push_xs(b1.xs, 2)
+  println("11 ${b1.xs} ${alias_b1.xs} ${alias_b1_xs}")
+  var a2: A = { b: { xs: [1] } }
+  let alias_a2 = a2
+  let alias_a2_b = a2.b
+  let alias_a2_xs = a2.b.xs
+  push_xs(a2.b.xs, 2)
+  println("12 ${a2.b.xs} ${alias_a2.b.xs} ${alias_a2_b.xs} ${alias_a2_xs}")
+  var d3: D = { a: { b: { xs: [1] } } }
+  let alias_d3 = d3
+  let alias_d3_a = d3.a
+  let alias_d3_b = d3.a.b
+  let alias_d3_xs = d3.a.b.xs
+  push_xs(d3.a.b.xs, 2)
+  println("13 ${d3.a.b.xs} ${alias_d3.a.b.xs} ${alias_d3_a.b.xs} ${alias_d3_b.xs} ${alias_d3_xs}")
+  var tp: (Int, B) = (0, { xs: [1] })
+  let alias_tp = tp
+  let alias_tp_b = tp.1
+  push_xs(tp.1.xs, 2)
+  println("14 ${tp.1.xs} ${alias_tp.1.xs} ${alias_tp_b.xs}")
+  var ob: Outer = { inner: { xs: [1], s: "", m: [:], b: bytes.new(1) }, n: 0 }
+  let alias_ob = ob
+  let alias_ob_b = ob.inner.b
+  push_b(ob.inner.b, 7)
+  push_xs(ob.inner.xs, 2)
+  println("15 ${bytes.len(ob.inner.b)} ${bytes.len(alias_ob.inner.b)} ${bytes.len(alias_ob_b)} ${ob.inner.xs} ${alias_ob.inner.xs}")
+  let alias_g = g
+  let alias_g_xs = g.inner.xs
+  push_xs(g.inner.xs, 3)
+  println("16 ${g.inner.xs} ${alias_g.inner.xs} ${alias_g_xs}")
+}

@@ -159,44 +159,6 @@ impl PhaseTimer {
     }
 }
 
-/// Build a native binary from GENERATED Rust source through a content-addressed
-/// cache: the key is the generated code itself (+ harness/profile/deps), never
-/// the caller's source path. Identical generated code from ANY entry point —
-/// `almide run`, `almide build`, a test harness compiling from a fresh tempdir —
-/// reuses one cached binary and skips cargo entirely. (The hit test was
-/// previously gated on a per-source-path side file, so path-unstable callers
-/// like the 268-fixture cross-target gate paid a full rustc per fixture per
-/// run even when the generated code was byte-identical.)
-/// A content digest of every file under `<root>/native/` (recursively — asset
-/// subdirectories travel with the modules and are `include_str!`d by them, so
-/// they shape the binary too). Sorted by path so the digest is deterministic.
-/// Empty when there is no `native/` directory.
-fn native_sources_key(root: &std::path::Path) -> String {
-    fn walk(dir: &std::path::Path, out: &mut Vec<(std::path::PathBuf, Vec<u8>)>) {
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
-        for e in entries.flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                walk(&p, out);
-            } else if let Ok(bytes) = std::fs::read(&p) {
-                out.push((p, bytes));
-            }
-        }
-    }
-    let native = root.join("native");
-    if !native.is_dir() {
-        return String::new();
-    }
-    let mut files = Vec::new();
-    walk(&native, &mut files);
-    files.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut acc = String::new();
-    for (path, bytes) in files {
-        acc.push_str(&format!("{}:{:016x};", path.display(), hash64(&bytes)));
-    }
-    acc
-}
-
 /// The shared native build scratch dir of `almide run` / `almide build`:
 /// `ALMIDE_RUN_PROJECT_DIR` when set, else `<temp>/almide-run`. One
 /// resolution, shared by the builder and by `almide clean` (#2500), so the
@@ -440,6 +402,15 @@ fn evict_stale_artifacts(project_dir: &std::path::Path) {
     stamp_sweep(project_dir);
 }
 
+/// Build a native binary from GENERATED Rust source through a content-addressed
+/// cache: the key is the generated code itself (+ harness/profile/deps/target and every
+/// file copied into the crate, see `CrateInputs`), never
+/// the caller's source path. Identical generated code from ANY entry point —
+/// `almide run`, `almide build`, a test harness compiling from a fresh tempdir —
+/// reuses one cached binary and skips cargo entirely. (The hit test was
+/// previously gated on a per-source-path side file, so path-unstable callers
+/// like the 268-fixture cross-target gate paid a full rustc per fixture per
+/// run even when the generated code was byte-identical.)
 pub(crate) fn build_native_cached(
     rs_code: &str,
     use_test_harness: bool,
@@ -464,19 +435,24 @@ pub(crate) fn build_native_cached(
         .map(|d| format!("{}={}", d.name, d.spec))
         .collect::<Vec<_>>()
         .join(",");
-    // The `native/*.rs` modules are compiled INTO the binary, so their
-    // CONTENTS are part of its identity (#887). Keyed only by the source_root
-    // PATH, editing a native module was a cache hit: nothing recompiled and
-    // `almide build` reported success while shipping the previous binary —
-    // exit 0 even with syntactically invalid Rust in the module.
-    let native_key = source_root.map(native_sources_key).unwrap_or_default();
+    // Everything copied INTO the crate besides `rs_code` — the package's and
+    // every dependency package's `native/` tree, and the dependencies'
+    // `[native-deps]` — is collected once here, hashed into the key, and the
+    // SAME value is what the build writes (#887, #3091). Keyed by anything
+    // narrower, editing an input the key did not see was a cache hit that
+    // shipped the previous binary with exit 0.
+    let inputs = super::cargo_build::CrateInputs::collect(source_root)?;
+    let native_key = inputs.cache_key();
     // The target triple (#2772) is part of the identity too: a musl build of
     // the same code is a different binary, and keyed without it `almide build
     // --target x86_64-unknown-linux-musl` would be a hit on the host binary.
     let triple = super::native_target::cross_target().unwrap_or_default();
+    // And what shapes the binary from OUTSIDE the crate (#3091): the build
+    // recipe, the toolchain, the flags and cargo config it reads.
+    let env_key = super::cargo_build::build_environment_key(&project_dir);
     let hash_input = format!(
-        "{}:test={}:release={}:deps={}:root={:?}:native={}:target={}",
-        &rs_code, use_test_harness, release, dep_key, source_root, native_key, triple
+        "{}:test={}:release={}:deps={}:root={:?}:native={}:target={}:env={}",
+        &rs_code, use_test_harness, release, dep_key, source_root, native_key, triple, env_key
     );
     let code_hash = format!("{:016x}", hash64(hash_input.as_bytes()));
     let profile_dir = if release { "release" } else { "debug" };
@@ -525,9 +501,9 @@ pub(crate) fn build_native_cached(
     // (under this same lock) and rebuilds once; see `build_recovering_from_ice`.
     let result = super::cargo_build::build_recovering_from_ice(&project_dir, || {
         if use_test_harness {
-            cargo_build_test_with_native(rs_code, &project_dir, native_deps, source_root)
+            cargo_build_test_with_native(rs_code, &project_dir, native_deps, source_root, &inputs)
         } else {
-            cargo_build_generated_with_native(rs_code, &project_dir, release, native_deps, source_root)
+            cargo_build_generated_with_native(rs_code, &project_dir, release, native_deps, source_root, &inputs)
         }
     });
 
@@ -833,11 +809,11 @@ fn foreign_import(bytes: &[u8]) -> Option<(String, String)> {
     None
 }
 
-/// Build `file` to a wasm32-wasi module and execute it on the `wasmtime` CLI.
+/// Build `file` to a wasm module and execute it on the embedded host.
 ///
-/// Mirrors the test runner's wasm invocation (`wasmtime --dir=/ <module>`) so
-/// the observable behavior matches `almide test --target wasm` and the
-/// `spec/wasm_cross` gate. Program args after `--` are forwarded to the guest.
+/// The same host `almide test`'s wasm leg runs on (#3046), so the observable
+/// behavior matches `almide test --target wasm` and the `spec/wasm_cross`
+/// gate. Program args after `--` are forwarded to the guest.
 /// `wasmtime`'s own exit code is propagated unchanged, so a guest
 /// `proc_exit(n)` surfaces as `n` exactly as a native binary's exit would.
 fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report: bool) -> i32 {

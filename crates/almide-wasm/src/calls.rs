@@ -7,6 +7,10 @@ use crate::emitter::Emitter;
 use crate::types_table::NamedDef;
 use crate::*;
 
+/// One argument under the callee's convention (split for the file budget).
+#[path = "calls_conv.rs"]
+mod calls_conv;
+
 impl Emitter<'_> {
     pub(crate) fn lower_call(
         &mut self,
@@ -94,6 +98,8 @@ impl Emitter<'_> {
                     if callee_owned {
                         let dec = self.dec_fn_of(got);
                         self.f.instructions().local_get(h).call(dec);
+                        // #2758: a fresh callee value is born and released here.
+                        self.witness_discard();
                     }
                 }
                 self.release_i32();
@@ -286,6 +292,7 @@ impl Emitter<'_> {
                         param_owned.get(k2).copied().unwrap_or(true) || !self.rc_droppable(w2)
                     });
                 let depth = self.borrowed_temps.len();
+                let site = crate::witness::modes::site_begin();
                 for (k, (a, want)) in args.iter().zip(params).enumerate() {
                     // #2117: `build(acc + s, …)` at a self tail call in loop
                     // form is the growing accumulator one position over from
@@ -303,6 +310,7 @@ impl Emitter<'_> {
                     if self.tail_str_append_arg(k, a, want, self_tail)?
                         || self.tail_list_append_arg(k, a, want, self_tail)?
                     {
+                        self.modes_arg(want, true);
                         continue;
                     }
                     if !self.lower_mut_param_arg(a, param_mut.get(k).copied().unwrap_or(false))? {
@@ -310,15 +318,21 @@ impl Emitter<'_> {
                     }
                     if loop_form_raw && let Some(p) = self.frame_param_var(a) && !moved.contains(&p) {
                         moved.push(p);
-                        self.witness_arg(a, want);
+                        self.witness_arg_moved(a, want);
+                        self.modes_arg(want, true);
                         continue;
                     }
                     let owned_pos = param_owned.get(k).copied().unwrap_or(true);
                     if self.lower_conv_arg(a, want, owned_pos, true_tail, must_transfer)? {
                         no_transfer = true;
                     }
+                    if owned_pos && param_mut.get(k).copied().unwrap_or(false) {
+                        self.detach_global_mut_arg(a, i)?;
+                    }
                 }
+                crate::witness::modes::site_end(site, index);
                 let parked = self.borrowed_temps.len() > depth;
+                self.witness_raw_loop_back(loop_form_raw, &moved);
                 self.calls.insert(i);
                 if let Some(blk) = save {
                     self.f.instructions().call(index);
@@ -340,6 +354,11 @@ impl Emitter<'_> {
                     // Same frame-replacement release as the indirect site —
                     // unless the callee is THIS fn: tco.rs turns that
                     // return_call into a loop-back, and the frame lives on.
+                    // A param the loop form handed straight through keeps
+                    // its credit in the next iteration: not this exit's.
+                    if loop_form_raw {
+                        self.tail_consumed.extend(moved.iter().copied());
+                    }
                     let plan = self.exit_plan(crate::exit_plan::Continuation::TailTransfer {
                         replaces_frame: Some(index) != self.self_index,
                     });
@@ -361,15 +380,6 @@ impl Emitter<'_> {
             _ => unsup("call:computed-or-method"),
         }
     }
-
-
-
-
-
-
-
-
-
 
     /// Build a variant constructor's tagged block — split from
     /// lower_call_at for the complexity budget.
@@ -421,6 +431,7 @@ impl Emitter<'_> {
             // (koka_reuse1's Pair2(acc1, acc2) — params stored, then
             // epilogue-released) co-owns.
             self.rc_share_guard(a, fty);
+            self.witness_store(a, fty);
             self.store_ty_slot(fty, off);
         }
         self.f.instructions().local_get(hold);
@@ -483,6 +494,11 @@ impl Emitter<'_> {
                 "float_to_string",
                 "float_to_string_compound",
                 "float_to_fixed",
+                // float `%` (#3080): wasm has no float remainder op.
+                "float_fmod",
+                // The f32 Schubfach (#3079): the same core, a String result.
+                "float32_to_string",
+                "float32_to_string_compound",
                 "int_to_string",
                 // Dragon4's own dependency closure (prim-only bodies).
                 "math_log",
@@ -664,6 +680,9 @@ impl Emitter<'_> {
             return Ok(false);
         }
         let IrExprKind::Var { id } = &a.kind else {
+            // A field / tuple-slot place (#3101): unshare the path, then
+            // the caller reads it as usual.
+            self.make_mut_place_unique(a)?;
             return Ok(false);
         };
         let Some((idx, ty, global)) = self.mut_var(id) else {
@@ -671,59 +690,6 @@ impl Emitter<'_> {
         };
         self.emit_read_mut_var_cow(id, idx, ty, global)?;
         Ok(true)
-    }
-
-    /// One already-lowered argument under the callee's declared convention
-    /// (param_borrow.rs, #2028) — the Named and the registry route share
-    /// it, so the two cannot disagree with the ONE `param_owned` table.
-    /// `owned_pos` = the callee owns this param (releases it at its exit
-    /// plan). Returns true when a borrowed position forbids a
-    /// `return_call` at this site (`no_transfer`).
-    pub(crate) fn lower_conv_arg(
-        &mut self,
-        a: &IrExpr,
-        want: SliceTy,
-        owned_pos: bool,
-        true_tail: bool,
-        must_transfer: bool,
-    ) -> Result<bool, EmitError> {
-        let is_static = matches!(a.kind, IrExprKind::LitStr { .. });
-        let fresh = self.rc_droppable(want) && self.rc_owned_result(a) && !is_static;
-        // Past a true tail site only a value THIS frame does not own
-        // survives the exit plan: a param it borrows itself, or a pool
-        // static (param_borrow.rs `tail_safe_arg`).
-        let tail_safe = !true_tail
-            || is_static
-            || matches!(&a.kind, IrExprKind::Var { id }
-                if self.locals.get(id).is_some_and(|&(idx, _)| {
-                    idx < self.rc_param_ceiling && !self.rc_frame_params.contains(&idx)
-                }));
-        // A borrowed POSITION: droppable, and not owned by the callee (a
-        // scalar param has no convention at all).
-        let borrowed_pos = self.rc_droppable(want) && !owned_pos;
-        let no_transfer = borrowed_pos && !tail_safe && !must_transfer;
-        if !borrowed_pos || (must_transfer && !tail_safe) {
-            // RC-3 callee-owned args: a borrowed droppable argument gets
-            // +1 here, the callee's epilogue decs its params — the pair
-            // keeps a mut-param callee's realloc-free honest (rc reflects
-            // both holders).
-            self.rc_arg_guard(a, want);
-            self.witness_arg(a, want);
-        } else {
-            // A borrowed param (#2028): a Var passes as is; an owned
-            // temporary is parked for release after the call (a string
-            // literal is a pool static: nothing to release).
-            if fresh {
-                if self.borrowed_temps.len() as u32 >= crate::emitter::BORROW_POOL {
-                    return Err(EmitError::Unsupported("borrow-depth".into()));
-                }
-                let h = self.borrow_base + self.borrowed_temps.len() as u32;
-                self.f.instructions().local_tee(h);
-                self.borrowed_temps.push((h, want));
-            }
-            self.witness_arg_borrowed(a, want, fresh);
-        }
-        Ok(no_transfer)
     }
 
     /// Linked module functions live in the table under their qualified
@@ -760,6 +726,7 @@ impl Emitter<'_> {
         let depth = self.borrowed_temps.len();
         let mut no_transfer = false;
         let param_mut = crate::cells::linked_param_mut(module, func, args.len(), &self.table.infos[i].param_mut);
+        let site = crate::witness::modes::site_begin();
         for (k, (a, want)) in args.iter().zip(params).enumerate() {
             if !self.lower_mut_param_arg(a, param_mut.get(k).copied().unwrap_or(false))? {
                 self.lower(a, Some(want))?;
@@ -768,7 +735,11 @@ impl Emitter<'_> {
             if self.lower_conv_arg(a, want, owned_pos, true_tail, must_transfer)? {
                 no_transfer = true;
             }
+            if owned_pos && param_mut.get(k).copied().unwrap_or(false) {
+                self.detach_global_mut_arg(a, i)?;
+            }
         }
+        crate::witness::modes::site_end(site, index);
         let parked = self.borrowed_temps.len() > depth;
         self.calls.insert(i);
         if tail

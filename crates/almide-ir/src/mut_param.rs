@@ -26,11 +26,11 @@
 //!
 //! An EFFECT fn with a non-Unit return takes the same tuple rewrite (#1575:
 //! the effect marker changes the return channel, not the parameter
-//! convention), whether or not it can err (#1576, ratified): `(T, Buf)`
-//! rides the OK payload only — the lifted carrier is `Result[(T, Buf), E]`,
-//! the err arm carries no buffer, and at a `!` site the err propagates
-//! BEFORE any write-back, so the caller's slot keeps its pre-call binding —
-//! exactly the order the was-Unit form has always realized. A declared-
+//! convention), whether or not it can err (#1576): `(T, Buf)` rides the OK
+//! payload — the lifted carrier is `Result[(T, Buf), E]`. A fn that CAN err
+//! carries the buffer on its err arm too (#2917, #1871 ruling (B): a write
+//! made before the err is visible to the caller, as native's `&mut`), and
+//! every call site writes back on both arms — `mut_param_err_carry`. A declared-
 //! Result effect fn (`-> T!`, the single-layer effect ABI: the body's
 //! `ok`/`err` ARE the effect channel) is first stripped to its raw payload
 //! (`ok(x)` tail -> `x`, an `err(e)` tail stays as the raise leaf, any other
@@ -60,8 +60,16 @@ pub fn lower_mut_params_move_mode(program: &mut IrProgram) -> bool {
     if mut_fns.is_empty() {
         return false;
     }
+    // Read before `rewrite_signatures` strips a declared-Result body's ok layer.
+    let never_err_fns = crate::mut_param_unpropagated::never_err_effect_fn_keys(program);
+    let never_err: std::collections::HashSet<String> =
+        never_err_fns.iter().filter(|k| mut_fns.contains_key(k.as_str())).cloned().collect();
+    // The can-err ones carry their buffer on the err arm too (#2917).
+    let carry = crate::mut_param_err_carry::carry_keys(program, |k| mut_fns.contains_key(k), &never_err_fns);
     rewrite_signatures(program, &mut_fns);
-    rewrite_call_sites(program, &mut_fns);
+    rewrite_call_sites(program, &mut_fns, &carry);
+    crate::mut_param_err_carry::carry_bodies(program, &mut_fns, &carry);
+    crate::mut_param_unpropagated::settle(program, &never_err);
     fold_tail_writebacks(program, &mut_fns);
     hoist_branch_writebacks(program);
     true
@@ -573,7 +581,7 @@ fn fold_if_arms(e: &mut IrExpr, p: VarId, mut_ty: &Ty, scope: &str, mut_fns: &Mu
 /// This is what makes a user `fn replace` immune to stdlib/string.almd's
 /// unrelated `replace` (#1558: the old GLOBAL bare count silently excluded the
 /// user fn from the rewrite and the wall message never said why).
-fn scope_key(scope: &str, name: &str) -> String {
+pub(crate) fn scope_key(scope: &str, name: &str) -> String {
     format!("{scope}\u{1}{name}")
 }
 
@@ -585,7 +593,7 @@ fn scope_key(scope: &str, name: &str) -> String {
 /// entry points were collected (the dotted key existed) but their call
 /// sites never rewrote, and the callee's tuple met the caller's record
 /// (structural `ty-mismatch:Tuple-vs-Named`).
-fn call_spelling(target: &CallTarget) -> Option<String> {
+pub(crate) fn call_spelling(target: &CallTarget) -> Option<String> {
     match target {
         CallTarget::Named { name } => Some(name.to_string()),
         // A STDLIB module call (`list.clear(xs)`, `string.push(s, c)`) is
@@ -923,8 +931,8 @@ fn rewrite_value_body(func: &mut IrFunction, vt: &mut VarTable, mut_var: VarId, 
 /// exit is paired with the buffer the same way (`pair`). A lambda's guards are
 /// the lambda's own exits and are left alone. In an EFFECT fn a raising else
 /// (`err(m)`, `err(m)!`, any Result-typed exit) is the err channel — it carries
-/// no buffer (#1576: the caller's slot keeps its pre-call binding) — so only
-/// a non-raising exit is paired there.
+/// its buffer by other means (`mut_param_err_carry` pairs it, #2917) — so
+/// only a non-raising exit is paired here.
 fn pair_guard_exits(body: &mut IrExpr, is_effect: bool, new_ret: &Ty, pair: &mut dyn FnMut(IrExpr) -> IrExpr) {
     struct Pairer<'a> {
         is_effect: bool,
@@ -992,7 +1000,7 @@ fn pair_guard_exits(body: &mut IrExpr, is_effect: bool, new_ret: &Ty, pair: &mut
 /// (a call returning the Result, a variable) is `!`-unwrapped, which raises
 /// the same way. Statement-position `err`s (a guard's else arm) are already
 /// raise leaves and are not touched.
-fn strip_ok_layer(e: &mut IrExpr, ok_ty: &Ty) {
+pub(crate) fn strip_ok_layer(e: &mut IrExpr, ok_ty: &Ty) {
     match &mut e.kind {
         IrExprKind::ResultOk { expr } => {
             let inner = std::mem::replace(&mut **expr, unit_placeholder());
@@ -1052,28 +1060,39 @@ fn unit_placeholder() -> IrExpr {
 /// and the writeback targets the argument PLACE: a bare var assigns it,
 /// a `b.items` field FieldAssigns it, and a temp (no named place) skips
 /// the writeback — native mutates an invisible temp there too.
-fn rewrite_call_sites(program: &mut IrProgram, mut_fns: &MutFns) {
+fn rewrite_call_sites(program: &mut IrProgram, mut_fns: &MutFns, carry: &std::collections::HashSet<String>) {
+    use crate::mut_param_err_carry::{own_buffers, settle_sites};
     {
         let vt = &mut program.var_table;
-        let mut rw = CallSiteRewriter { mut_fns, vt, scope: String::new() };
+        let mut rw = CallSiteRewriter::new(mut_fns, vt, String::new(), carry);
         for func in program.functions.iter_mut() {
+            rw.own_bufs = own_buffers(func, "", mut_fns, carry);
             rw.visit_expr_mut(&mut func.body);
         }
+        rw.own_bufs.clear();
         for tl in &mut program.top_lets {
             rw.visit_expr_mut(&mut tl.value);
         }
+        let pending = std::mem::take(&mut rw.carry_blocks);
+        let bodies = program.functions.iter_mut().map(|f| &mut f.body).chain(program.top_lets.iter_mut().map(|t| &mut t.value));
+        settle_sites(bodies, &pending, &mut program.var_table);
     }
     // Same table discipline as rewrite_signatures: module bodies allocate
     // their call-site temporaries in the MODULE's table.
     for m in &mut program.modules {
-        let mut rw =
-            CallSiteRewriter { mut_fns, vt: &mut m.var_table, scope: m.name.to_string() };
+        let scope = m.name.to_string();
+        let mut rw = CallSiteRewriter::new(mut_fns, &mut m.var_table, scope.clone(), carry);
         for func in m.functions.iter_mut() {
+            rw.own_bufs = own_buffers(func, &scope, mut_fns, carry);
             rw.visit_expr_mut(&mut func.body);
         }
+        rw.own_bufs.clear();
         for tl in &mut m.top_lets {
             rw.visit_expr_mut(&mut tl.value);
         }
+        let pending = std::mem::take(&mut rw.carry_blocks);
+        let bodies = m.functions.iter_mut().map(|f| &mut f.body).chain(m.top_lets.iter_mut().map(|t| &mut t.value));
+        settle_sites(bodies, &pending, &mut m.var_table);
     }
 }
 
@@ -1082,33 +1101,15 @@ fn rewrite_call_sites(program: &mut IrProgram, mut_fns: &MutFns) {
 /// NODE carries the lifted `Result[T, String]` carrier, not T — the caller's
 /// destructure element must be typed by the callee's declaration, never by
 /// the call expression (#1575; the same lifted-carrier trap as #1573).
-type MutFns = std::collections::HashMap<String, MutEntry>;
+pub(crate) type MutFns = std::collections::HashMap<String, MutEntry>;
 
 /// A fn's move-mode entry: its FIRST `mut` param (index, type), was-Unit, the
 /// raw payload type, and every further `mut` param (#2907). With extras the
 /// fn returns ALL its buffers — `(buf1, …, bufN)` for a was-Unit fn,
 /// `(ret, buf1, …, bufN)` otherwise — and each call site writes each back.
-type MutEntry = (usize, Ty, bool, Ty, Vec<(usize, Ty)>);
+pub(crate) type MutEntry = (usize, Ty, bool, Ty, Vec<(usize, Ty)>);
 
-/// The caller-side slot the mutated buffer writes back into.
-enum ArgPlace {
-    Var(VarId),
-    Field(VarId, almide_base::intern::Sym),
-    /// No named place (a temp expression) — native mutates an unobservable
-    /// temporary there as well, so skipping the writeback is equivalent.
-    None,
-}
-
-fn mut_arg_place(arg: &IrExpr) -> ArgPlace {
-    match &arg.kind {
-        IrExprKind::Var { id } => ArgPlace::Var(*id),
-        IrExprKind::Member { object, field } => match &object.kind {
-            IrExprKind::Var { id } => ArgPlace::Field(*id, *field),
-            _ => ArgPlace::None,
-        },
-        _ => ArgPlace::None,
-    }
-}
+use crate::mut_param_place::{mut_arg_place, writeback_stmts, ArgPlace};
 
 struct CallSiteRewriter<'a> {
     mut_fns: &'a MutFns,
@@ -1117,6 +1118,15 @@ struct CallSiteRewriter<'a> {
     /// BARE callee name resolves against this scope's key; the mangled and
     /// dotted spellings are global keys tried first.
     scope: String,
+    /// The can-err callees that carry their buffer on the err arm (#2917,
+    /// `mut_param_err_carry`).
+    carry: &'a std::collections::HashSet<String>,
+    /// The site blocks of those callees, by their first bound var: a `!`
+    /// over one is lowered where it is met, the rest take the Result-valued
+    /// form once the walk is done.
+    carry_blocks: std::collections::HashSet<VarId>,
+    /// The buffers the fn being walked carries on its own err arm.
+    own_bufs: std::collections::HashSet<VarId>,
 }
 
 impl IrMutVisitor for CallSiteRewriter<'_> {
@@ -1137,6 +1147,9 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
         // carries; err propagates before any writeback, exactly the by-reference
         // order native observes), and the tree now carries only proven shapes
         // (the C-222 bind-position unwrap + a statement Block).
+        if crate::mut_param_err_carry::propagate_site(expr, &mut self.carry_blocks, self.vt, &self.own_bufs) {
+            return;
+        }
         if self.wrapper_rotation_applies(expr) {
             Self::rotate_wrapper_into_block(expr);
             return;
@@ -1158,8 +1171,10 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
         let Some((idx, mut_ty, was_unit, callee_ret, extra)) = self.lookup_mut_fn(&name).cloned() else {
             return;
         };
+        let carries = self.carry.contains(&name) || self.carry.contains(&scope_key(&self.scope, &name));
         if !extra.is_empty() {
             self.rewrite_multi_call(expr, idx, mut_ty, was_unit, callee_ret, &extra);
+            self.carry_site(&*expr, carries);
             return;
         }
         let Some(arg) = args.get(idx) else { return };
@@ -1183,17 +1198,7 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
             span: None,
             def_id: None,
         };
-        let writeback = match place {
-            ArgPlace::Var(v) => Some(IrStmt {
-                kind: IrStmtKind::Assign { var: v, value: buf_read(mut_ty.clone()) },
-                span,
-            }),
-            ArgPlace::Field(obj, field) => Some(IrStmt {
-                kind: IrStmtKind::FieldAssign { target: obj, field, value: buf_read(mut_ty.clone()) },
-                span,
-            }),
-            ArgPlace::None => None,
-        };
+        let writeback = writeback_stmts(&place, buf_read(mut_ty.clone()), self.vt, span);
 
         let (bind_stmt, tail) = if was_unit {
             // Callee now returns the buffer directly.
@@ -1240,19 +1245,34 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
         };
 
         let mut stmts = vec![bind_stmt];
-        if let Some(wb) = writeback {
-            stmts.push(wb);
-        }
+        stmts.extend(writeback);
         *expr = IrExpr {
             kind: IrExprKind::Block { stmts, expr: Some(Box::new(tail)) },
             ty: if was_unit { Ty::Unit } else { orig_ty },
             span,
             def_id: None,
         };
+        self.carry_site(&*expr, carries);
     }
 }
 
-impl CallSiteRewriter<'_> {
+impl<'a> CallSiteRewriter<'a> {
+    fn new(
+        mut_fns: &'a MutFns,
+        vt: &'a mut VarTable,
+        scope: String,
+        carry: &'a std::collections::HashSet<String>,
+    ) -> Self {
+        CallSiteRewriter { mut_fns, vt, scope, carry, carry_blocks: Default::default(), own_bufs: Default::default() }
+    }
+
+    /// Record a can-err callee's site block (#2917).
+    fn carry_site(&mut self, expr: &IrExpr, carries: bool) {
+        if carries && let Some(v) = crate::mut_param_err_carry::site_key(expr) {
+            self.carry_blocks.insert(v);
+        }
+    }
+
     /// A call to a fn with several `mut` params (#2907):
     /// `{ let (__mp_res?, b1, …, bN) = <call>; <writeback each>; __mp_res | () }`.
     fn rewrite_multi_call(
@@ -1282,12 +1302,7 @@ impl CallSiteRewriter<'_> {
             pats.push(IrPattern::Bind { var: buf, ty: ty.clone() });
             elem_tys.push(ty.clone());
             let read = var_read(buf, ty.clone());
-            let kind = match place {
-                ArgPlace::Var(v) => IrStmtKind::Assign { var: v, value: read },
-                ArgPlace::Field(obj, field) => IrStmtKind::FieldAssign { target: obj, field, value: read },
-                ArgPlace::None => continue,
-            };
-            writebacks.push(IrStmt { kind, span });
+            writebacks.extend(writeback_stmts(&place, read, self.vt, span));
         }
         call.ty = Ty::Tuple(elem_tys);
         let mut stmts = vec![IrStmt {
@@ -1395,10 +1410,11 @@ impl CallSiteRewriter<'_> {
     /// Perform the rotation [`Self::wrapper_rotation_applies`] admitted. The
     /// wrapper's err-propagation moves INTO the bind (`let __mp_buf = call!` /
     /// `let (__mp_res, __mp_buf) = call!`), so on the err path the writeback
-    /// never runs: the callee returns no buffer on err, the caller's binding
-    /// keeps its pre-call value, and the err leaves the caller through its
-    /// own `!` — the ratified #1576 order, for the was-Unit and the value
-    /// shape alike.
+    /// never runs. That is exact for a never-err callee (the err path cannot
+    /// fire); a can-err callee carries its buffer on the err arm and takes
+    /// `mut_param_err_carry::propagate_site` instead. Only a can-err callee
+    /// whose raises cannot be paired (see `mut_param_err_carry`) still takes
+    /// this order, which keeps the caller's pre-call binding on err.
     fn rotate_wrapper_into_block(expr: &mut IrExpr) {
         let span = expr.span;
         let block_ty = {

@@ -224,6 +224,24 @@ jobs:
           case "$BASE" in ""|0000000000000000000000000000000000000000) BASE="$(git rev-parse HEAD~1)";; esac
           git cat-file -e "$BASE^{commit}" 2>/dev/null || BASE="$(git rev-parse HEAD~1)"
           bash scripts/check-dep-shaped-skips.sh "$BASE"
+      - name: Walled-real rows grow only with an open issue cited (#3058)
+        # proofs/corpus-wall.sh holds the ledger to the classifier exactly; this
+        # holds each NEW row to an owner: `  # #NNNN`, an issue open now.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bash scripts/check-walled-real-growth.sh --self-test
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            BASE="$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
+          elif [ "${{ github.event_name }}" = merge_group ]; then
+            BASE="${{ github.event.merge_group.base_sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          case "$BASE" in ""|0000000000000000000000000000000000000000) BASE="$(git rev-parse HEAD~1)";; esac
+          git cat-file -e "$BASE^{commit}" 2>/dev/null || BASE="$(git rev-parse HEAD~1)"
+          bash scripts/check-walled-real-growth.sh "$BASE"
       - name: The gate judges each commit by the law at its parent (negative controls)
         # Needs the full history this job checks out: the old law it replays
         # is the gate's real July version.
@@ -765,6 +783,17 @@ jobs:
         run: |
           ALMIDE=/tmp/almide-bin/almide
           $ALMIDE run tools/almide-gates/src/main.almd -- impl-count .
+
+      # The certified fixtures that still leak through a trusted native arm or runtime
+      # helper (#2755): the join of the witness and live-at-exit goldens, pinned in
+      # proofs/certified-leaks.txt. Shrink-only, and a row stands only while its owning
+      # issue is OPEN (read with gh — UNMEASURED fails here, under CI).
+      - name: Certified fixtures that still leak, each owned by an open issue (#2755)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ALMIDE=/tmp/almide-bin/almide
+          $ALMIDE run tools/almide-gates/src/main.almd -- certified-leaks .
 
       # The published build-speed table is DERIVED from docs/benchmarks/build-speed.txt, the
       # same discipline as the contract index and the claims block: a hand-edited number in the
@@ -1639,6 +1668,10 @@ jobs:
 
       - name: LLM-surface fences compile (#1483 — every \`\`\`almide check fence passes almide check)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-llm-surface.sh
+      - name: Spec test files check and are run by a runner (#3065)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-spec-test-files.sh
+      - name: Spec test files gate negative control (#3065)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-spec-test-files-negative.sh
 
       - name: Intrinsic boundary (#1468 — every @intrinsic target has a provider)
         run: bash scripts/check-intrinsic-boundary.sh

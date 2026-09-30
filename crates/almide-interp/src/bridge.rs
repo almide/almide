@@ -68,7 +68,11 @@ pub(crate) fn dispatch(module: &str, func: &str, args: &[Value]) -> Option<Flow>
 fn sized_numeric_fn(module: &str, func: &str, args: &[Value]) -> Option<Flow> {
     match func {
         "to_string" => {
-            if module.starts_with("float") {
+            // `float32.to_string` is not bridged: its self-hosted body (the f32
+            // Schubfach, C-372) evaluates in the pool tier.
+            if module == "float32" {
+                None
+            } else if module.starts_with("float") {
                 let f = as_float(args.first())?;
                 Some(Flow::val(Value::str(float_to_string(f))))
             } else {

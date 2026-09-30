@@ -297,24 +297,20 @@ pub fn desugar_method_calls(
     }
 
     /// The free-fn name a surviving Method resolves to: a pre-dotted method
-    /// (`Pigment.decode` via `varlib.Pigment.decode`) through the
-    /// derived-method owner map (#790 codec bridge); a `Ty::Named(T)` receiver
-    /// → the derived/user fn `T.method`; a non-Named, non-record receiver
+    /// (`Pigment.decode`) as spelled; a `Ty::Named(T)` receiver → the
+    /// derived/user fn `T.method`; a non-Named, non-record receiver
     /// (`3.double()`, `"hello".exclaim()`) is plain free-fn UFCS — `x.f(a)` =
     /// `f(x, a)` (the checker already resolved stdlib UFCS to Module calls).
+    /// (#3000: the cross-module derived-method owner map this consulted was
+    /// filled only by a deleted incumbent pass, so it answered "unchanged" on
+    /// every path; the fold keeps that answer.)
     fn resolved_free_fn_name(target: &CallTarget) -> Option<String> {
         let CallTarget::Method { object, method } = target else { return None };
         if method.as_str().contains('.') {
-            return Some(crate::lower::resolve_derived_method_owner(
-                method.as_str().to_string(),
-            ));
+            return Some(method.as_str().to_string());
         }
         if let Ty::Named(n, _) = &object.ty {
-            return Some(crate::lower::resolve_derived_method_owner(format!(
-                "{}.{}",
-                n.as_str(),
-                method.as_str()
-            )));
+            return Some(format!("{}.{}", n.as_str(), method.as_str()));
         }
         Some(method.as_str().to_string())
     }
@@ -543,8 +539,10 @@ fn rewrite_guard_stmt_list(
     // `if cond then { rest } else ok(mid)` in the Unit loop body silently DROPPED the
     // return and looped forever (binary_search hung at v == target). Leave the Guard
     // un-rewritten — the loop lowering declines a Guard body and walls honestly.
+    // #3115: a BLOCK else that ends in the jump (`else { log(); continue }`) is the
+    // same loop exit with statements in front of it.
     if let IrStmtKind::Guard { else_, .. } = &body[i].kind {
-        if !matches!(else_.kind, IrExprKind::Continue | IrExprKind::Break) {
+        if loop_exit_else(else_.clone()).is_none() {
             return body;
         }
     }
@@ -566,15 +564,7 @@ fn rewrite_guard_stmt_list(
         },
         changed,
     );
-    let else_branch = match &else_.kind {
-        IrExprKind::Continue => IrExpr {
-            kind: IrExprKind::Unit,
-            ty: Ty::Unit,
-            span: else_.span,
-            def_id: else_.def_id,
-        },
-        _ => else_,
-    };
+    let else_branch = loop_exit_else(else_).expect("checked above");
     let if_expr = IrExpr {
         kind: IrExprKind::If {
             cond: Box::new(cond),
@@ -587,6 +577,37 @@ fn rewrite_guard_stmt_list(
     };
     pre.push(IrStmt { kind: IrStmtKind::Expr { expr: if_expr }, span: gspan });
     pre
+}
+
+/// The loop-body guard's else as the `if`'s else branch, or `None` when it does
+/// not leave the loop: `continue` is `()` (the rest is skipped by the `if`), a
+/// `break` stays verbatim, and a block ending in either keeps its statements in
+/// front (#3115).
+fn loop_exit_else(e: almide_ir::IrExpr) -> Option<almide_ir::IrExpr> {
+    use almide_ir::{IrExpr, IrExprKind, IrStmtKind};
+    let unit = |span, def_id| IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span, def_id };
+    match e.kind {
+        IrExprKind::Continue => Some(unit(e.span, e.def_id)),
+        IrExprKind::Break => Some(e),
+        IrExprKind::Block { mut stmts, expr } => {
+            let last = match expr {
+                Some(tail) => *tail,
+                None => match stmts.pop()?.kind {
+                    IrStmtKind::Expr { expr } => expr,
+                    _ => return None,
+                },
+            };
+            let exit = loop_exit_else(last)?;
+            if stmts.is_empty() {
+                return Some(exit);
+            }
+            if !matches!(exit.kind, IrExprKind::Unit) {
+                stmts.push(almide_ir::IrStmt { span: exit.span, kind: IrStmtKind::Expr { expr: exit } });
+            }
+            Some(IrExpr { kind: IrExprKind::Block { stmts, expr: None }, ty: Ty::Unit, span: e.span, def_id: e.def_id })
+        }
+        _ => None,
+    }
 }
 
 fn desugar_guard_rec(e: IrExpr, changed: &mut bool) -> IrExpr {

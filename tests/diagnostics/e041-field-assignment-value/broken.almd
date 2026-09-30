@@ -1,0 +1,11 @@
+// E041, field-assignment variant (#3063): a field target takes the same
+// explicit-propagation rule as a var target — no `!`, no auto-unwrap.
+type Acc = { total: Int }
+
+effect fn get() -> Int = 42
+
+effect fn main() -> Unit = {
+  var acc = Acc { total: 0 }
+  acc.total = get()
+  println("${acc.total}")
+}

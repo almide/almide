@@ -47,6 +47,11 @@ pub struct FetchedDep {
     /// maximum requested version per `PkgId` (#1458).
     pub version: String,
     pub source_dir: PathBuf,
+    /// The checkout itself (the directory holding its `almide.toml` and
+    /// `native/`). `source_dir` is its `src/` when it has one. The native
+    /// build reads this package's `native/` from HERE, so the Rust modules
+    /// and the `.almd` sources come from one checkout (#3094).
+    pub package_dir: PathBuf,
 }
 
 #[derive(Debug, Clone)]

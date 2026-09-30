@@ -2,7 +2,8 @@
 //!
 //!   almide-verify <property> <witness-file>   one witness — the `proofs/checker`
 //!                                             interface: prints ACCEPT / REJECT
-//!   almide-verify bundle <bundle-file>        every witness of a certificate bundle
+//!   almide-verify bundle <bundle-file>        every witness of a certificate bundle, and
+//!                                             (version 2) the SHA-256 of the artifact it names
 //!   almide-verify --version | --help
 //!
 //! Exit codes: 0 accept / certified, 1 reject (a bundle with no witness is a
@@ -19,7 +20,8 @@ usage: almide-verify <property> <witness-file>
 
 properties: ownership | names | caps | caps-transitive | call-modes
 
-exit: 0 accept, 1 reject, 3 incomplete bundle, 2 usage or unreadable input";
+exit: 0 accept, 1 reject (a bundle whose artifact hash differs too), 3 incomplete bundle,
+      2 usage or unreadable input";
 
 fn read(path: &str) -> Result<Vec<u8>, ExitCode> {
     std::fs::read(path).map_err(|e| {
@@ -61,7 +63,17 @@ fn verify_bundle(path: &str) -> ExitCode {
     for (key, value) in &parsed.metadata {
         println!("{key}: {value} (producer claim, not checked)");
     }
+    let artifact_ok = match &parsed.artifact {
+        None => true,
+        Some(a) => match check_artifact(path, a) {
+            Ok(ok) => ok,
+            Err(code) => return code,
+        },
+    };
     let (verdicts, outcome) = bundle::verify(&parsed);
+    // A bundle whose artifact does not hash to the recorded digest certifies
+    // bytes that are not the file in hand: a reject, whatever the witnesses say.
+    let outcome = if artifact_ok { outcome } else { bundle::Outcome::Rejected };
     for v in &verdicts {
         let word = if v.accepted { "ACCEPT" } else { "REJECT" };
         println!("{word}  {:<15}  {}", v.property.name(), v.function);
@@ -78,6 +90,27 @@ fn verify_bundle(path: &str) -> ExitCode {
         outcome.label()
     );
     ExitCode::from(outcome.exit_code() as u8)
+}
+
+/// Recompute the SHA-256 of the file a version-2 bundle names (relative to
+/// the bundle's directory unless absolute) and report it; `Ok(false)` on a
+/// mismatch, `Err` (exit 2) when the file cannot be read.
+fn check_artifact(bundle_path: &str, a: &bundle::Artifact) -> Result<bool, ExitCode> {
+    let p = std::path::Path::new(&a.path);
+    let file = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::path::Path::new(bundle_path).parent().unwrap_or(std::path::Path::new("")).join(p)
+    };
+    let bytes = read(&file.display().to_string())?;
+    let got = almide_verify::sha256::hex(&bytes);
+    if got == a.sha256 {
+        println!("ARTIFACT  sha256 {got}  {}: MATCH", a.path);
+        Ok(true)
+    } else {
+        println!("ARTIFACT  sha256 {got}  {}: MISMATCH (the bundle names {})", a.path, a.sha256);
+        Ok(false)
+    }
 }
 
 fn main() -> ExitCode {

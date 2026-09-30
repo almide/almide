@@ -51,8 +51,199 @@ fn shout(s: String) -> String = string.to_upper(s)
 
 fn say(name: String) -> Unit = println(name)
 
-fn main() -> Unit = {
+// #2755 — TEMPORARIES on the same flat alphabet. `nest` hands one call's
+// owned result straight to another: `take` only reads its param, so the
+// site parks the temporary and releases it after the call (`id`). `greet`
+// concatenates: the operands are bound first (the inner concat and the
+// call result each get a local, `i` … `d`), `tag`'s literal argument is
+// born and moves in (`im`), and the fresh concat moves out (`im`). `wrap`
+// tails a constructor: the param shares into the payload slot (`am`)
+// beside its own epilogue release.
+fn nest() -> Int = take(shed())
+
+fn greet(name: String) -> String = "hi " + name + tag("!")
+
+fn wrap(xs: List[Int]) -> List[Int]? = some(xs)
+
+// #2756 — BRANCH FRAMES. `pick` hands its list to `take` on one arm only:
+// the param's two paths are `iamd` and `id`, rendered as one `{…|…}` line
+// the checker runs arm by arm. `label` keeps a string alive across a
+// match: one arm concatenates it (a read, no credit), the other returns it
+// (its share moves out, `am`), and each arm hands the join one credit.
+fn pick(xs: List[Int], c: Bool) -> Int = if c then take(xs) + 1 else 0
+
+fn label(o: Int?, name: String) -> String = match o {
+  some(_) => name + "!",
+  none => name,
+}
+
+// #2757 — a SELF tail call is loop-converted (tco.rs) and certified as the
+// next activation of the frame: `count_down` hands its list straight back
+// to itself (`am` into the next activation's param, its own credit released
+// before the loop-back), so each activation reads `iamd` on the recursive
+// path and `id` on the base path.
+fn count_down(xs: List[Int], n: Int) -> Int = if n <= 0 then list.len(xs) else count_down(xs, n - 1)
+
+// #2757 — LOOP BODIES as activations: each iteration is certified on its
+// own line, from rc 0. `tally` hands its list to `take` on every pass (`am`
+// on the loop's line; the frame line keeps `id`) and binds a per-iteration
+// concat whose block the next rebind or the epilogue releases (`id` on the
+// loop's line). `drain`'s row lives one iteration of a `while`; the check
+// that leaves the loop is an iteration too, one that binds nothing.
+fn tally(xs: List[Int], names: List[String]) -> Int = {
+  var total = 0
+  for n in names {
+    let t = n + "!"
+    total = total + string.len(t) + take(xs)
+  }
+  total
+}
+
+fn drain(n: Int) -> Int = {
+  var i = 0
+  var seen = 0
+  while i < n {
+    let row = [i, i]
+    seen = seen + list.len(row)
+    i = i + 1
+  }
+  seen
+}
+
+// #2758: an EFFECT frame — the body lowers at the raw ok type, the borrowed
+// param is shared into the ok carrier's slot (`am`) and the carrier is born
+// and moves out (`im`).
+effect fn stash(name: String) -> String = name
+
+// #2758: early `!` exits. The parked carrier propagates on the err arm
+// (shared, released with the frame, moved out) or is released on the ok
+// path; the payload is a view the bind takes a credit of. `stash_both`
+// has two sites, so the second carrier's exit folds into a v5
+// branch-return item.
+effect fn stash_len(name: String) -> Int = {
+  let s = stash(name)!
+  string.len(s)
+}
+
+effect fn stash_both(a: String, b: String) -> Int = {
+  let x = stash(a)!
+  let y = stash(b)!
+  string.len(x) + string.len(y)
+}
+
+// #2758: a CLOSURE. `adder` shares its param into the new env (`am`: the
+// env's drop glue releases it) and the env block moves out (`im`); the
+// lambda body is a frame of its own — its param callee-owned, its capture
+// a view of the env.
+fn adder(xs: List[Int]) -> (List[Int]) -> Int = (ys) => list.len(ys) + list.len(xs)
+
+// #2758: a CLOSURE CALL (`call_indirect`): the Fn value is lent to the
+// lifted body; the list shares into its callee-owned param (`am`).
+fn apply_len(f: (List[Int]) -> Int, xs: List[Int]) -> Int = f(xs)
+
+// #2755 — AGGREGATES and INTERPOLATION on the same flat alphabet. `pair`
+// tails a tuple: the param shares into its slot (`am`) and the fresh block
+// moves out (`im`). `left` destructures its param: each binder is a view of
+// a slot, and the one returned shares and moves out (`am`). `hello` tails an
+// interpolation: the build reads its part, the captured block moves out.
+fn pair(s: String) -> (String, Int) = (s, 1)
+
+fn left(p: (String, Int)) -> String = {
+  let (a, _) = p
+  a
+}
+
+fn hello(name: String) -> String = "hi ${name}!"
+
+// #2755 — `t.0` / `r.f` read a slot of a bound block: a VIEW, shared out by
+// the tail (`am`), like an element read but with no abort edge.
+type Named = { name: String, n: Int }
+
+fn first_of(p: (String, Int)) -> String = p.0
+
+fn name_of(r: Named) -> String = r.name
+
+// #2755 / #2758 — an INLINED callback is one loop activation per element:
+// `bang`'s body concatenates onto its param (a view of the element), and
+// the fresh text moves into the result spine (`im` on the loop's line); the
+// spine moves out (`im`). `kept` filters on a Bool and `total` folds into a
+// scalar: their callbacks carry no RC site of their own.
+fn bang(xs: List[String]) -> List[String] = list.map(xs, (s) => s + "!")
+
+fn kept(xs: List[String]) -> List[String] = list.filter(xs, (s) => string.len(s) > 1)
+
+fn total(xs: List[String]) -> Int = list.fold(xs, 0, (acc, s) => acc + string.len(s))
+
+// #2755 — a HEAP accumulator is a loop-carried owner: born with the seed, each
+// step's fresh result replaces it (the old value is released as the
+// activation closes), and the final value moves out. `long_one`'s hit is a branch:
+// the element's view shares into the fresh some-cell (`{|am}`).
+fn joined(xs: List[String]) -> String = list.fold(xs, "", (acc, s) => acc + s)
+
+fn long_one(xs: List[String]) -> String? = list.find(xs, (s) => string.len(s) > 1)
+
+// #2755 — `r ?? fallback` is a two-arm branch site: an owned join takes one
+// credit from each arm. `or_zero`'s fresh fallback moves into the join on the
+// none arm (`{|im}`), the payload view takes its share and moves on the some
+// arm (`{|am}`), and the join itself moves out (`im`).
+fn or_zero(o: List[Int]?) -> List[Int] = o ?? [0]
+
+// #2758 — a bare `err(e)` RAISED from an effect body: the err block is built
+// (its literal payload moves in, `im`), the exit releases the frame's owners,
+// and the block leaves (`im`) — one arm of the branch; the ok carrier the
+// success exit builds leaves on the other.
+effect fn raise(x: Int) -> Int = if x == 0 then err("zero") else ok(x)
+
+// #2758 — a callback that RAISES instantiates the self-hosted
+// `list.__fallible_map`: an ordinary call, the literal lambda a closure value
+// whose env is built here and handed to the lifted body.
+effect fn raised_all(xs: List[Int]) -> List[Int] = list.map(xs, (n) => raise(n)!)!
+
+// #2755 — `fan.map`'s sequential accumulator: each element's Result carrier
+// is born in the activation and either leaves as the whole result (an err)
+// or is released after its payload moves into the accumulator (`{|im}`).
+// `fan.any` releases a losing err and lets the winner leave.
+effect fn bang_ok(s: String) -> Result[String, String] = if s == "" then err("empty") else ok(s + "!")
+
+effect fn fan_bang(xs: List[String]) -> List[String] = fan.map(xs, (s) => bang_ok(s))!
+
+effect fn fan_first(xs: List[String]) -> String = fan.any(xs, (s) => bang_ok(s))!
+
+// #2755 — `xs[i]` reads a VIEW of the bound list's element: the tail shares
+// it out (`am`). Out of bounds ABORTS the process: the abort terminal
+// discharges what the path still holds (`tagged_at`'s fresh `t`), and the
+// returning path releases it (`id`).
+fn elem_at(xs: List[String], i: Int) -> String = xs[i]
+
+fn tagged_at(xs: List[String], i: Int) -> String = {
+  let t = xs[0] + "!"
+  t + xs[i]
+}
+
+// #2758 — a call through a record FIELD: the Fn value is a view of the slot,
+// lent to the lifted body, never shared or released here.
+type Op = { run: (Int) -> Int }
+
+fn apply_op(o: Op, x: Int) -> Int = o.run(x)
+
+effect fn main() -> Unit = {
   println("${list.len(shed())} ${tag("w")} ${pass([1])} ${bind_then_pass()}")
   println("${discard([1, 2])} ${stamp(7)} ${shout("w")}")
   say("hi")
+  println("${nest()} ${greet("w")} ${list.len(wrap([1, 2]) ?? [])}")
+  println("${pick([1], true)} ${pick([2], false)} ${label(some(1), "a")} ${label(none, "b")}")
+  println("${count_down([1, 2, 3], 4)} ${tally([1], ["a", "bb"])} ${drain(3)}")
+  println(stash("e")!)
+  println("${stash_len("ab")!} ${stash_both("a", "bc")!}")
+  let plus = adder([1, 2])
+  println("${plus([3])} ${apply_len(plus, [4, 5])}")
+  println("${left(pair("x"))} ${hello("y")}")
+  println("${bang(["a", "bc"])} ${kept(["a", "bc"])} ${total(["a", "bc"])}")
+  println("${joined(["a", "bc"])} ${long_one(["a", "bc"]) ?? "-"}")
+  println("${or_zero(some([1, 2]))} ${or_zero(none)}")
+  println("${raise(2)!} ${apply_op(Op { run: (n) => n + 1 }, 4)}")
+  println("${list.len(raised_all([1, 2])!)}")
+  println("${fan_bang(["a", "b"])!} ${fan_first(["", "c"])!}")
+  println("${elem_at(["p", "q"], 1)} ${tagged_at(["p", "q"], 1)}")
+  println("${first_of(pair("f"))} ${name_of(Named { name: "g", n: 1 })}")
 }

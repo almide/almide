@@ -1,0 +1,13 @@
+// @contract: C-197
+// Every `fan.map` worker hits the defined abort. A pure scalar callback routes
+// to the native parallel map, so several workers can reach `list.range`'s
+// out-of-memory abort before the first one's exit lands; each used to print
+// its own `Error: out of memory` line (a race: one to three lines per run),
+// while wasm, which runs the map sequentially, printed one (#3022). The
+// runtime's abort is once-guarded now: exactly one line, the first to fire,
+// then exit 1 — and the line printed before the map still reaches stdout.
+effect fn main() -> Unit = {
+  println("a")
+  let r = fan.map(list.range(0, 4), (x) => ok(list.len(list.range(-9223372036854775807, x))))!
+  println("unreachable ${list.len(r)}")
+}

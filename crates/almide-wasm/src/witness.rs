@@ -57,32 +57,60 @@
 //! and the certificate text is byte-compatible with the extracted checker
 //! for the gate.sh hookup (phase A2).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::Mutex;
 
-use almide_ir::{IrExpr, IrExprKind, IrStmtKind};
+use paths::{Branches, Ev};
+
+/// The per-path event log and its renderer (split for the file budget).
+#[path = "witness_lines.rs"]
+mod lines;
+#[path = "witness_paths.rs"]
+mod paths;
+
 
 pub struct WitnessRecorder {
     next_obj: u32,
-    obj_of_local: HashMap<u32, u32>,
-    streams: BTreeMap<u32, String>,
+    /// Every local some hook bound, with the loop depth it was bound at
+    /// (#2757: a rebind from a deeper loop is a loop-carried assign).
+    bound: HashMap<u32, u32>,
+    /// Every event in emission order, with the branch structure it was
+    /// emitted under (#2756); rendered per object by witness_paths.rs.
+    log: Vec<Ev>,
+    /// The open branch sites and loops, and what is dead code right now.
+    branches: Branches,
+    /// How many loop bodies the emitter is inside (#2757).
+    loop_depth: u32,
     /// A hook saw an event it could not attribute — the gate and the
     /// hooks disagree. The certificate becomes the loud `!poison`
     /// sentinel the floor test FAILS on, never a silent under-count.
     poisoned: bool,
-    /// A `return_call` replaced the frame: the releases it emitted are the
-    /// frame's last events, and the fall-through epilogue the emitter still
-    /// writes after the jump is dead code — its decs are not recorded.
-    frame_replaced: bool,
     /// An EMISSION-TIME decline (#1696 step 4): the gate admitted the
     /// body's shape, but the route it took has an RC site this phase does
     /// not record (a View result, a native arm that bypasses `lower_arg`).
     /// The certificate becomes `!decline:<reason>` — counted by the
     /// histogram, neither a certificate nor a poison.
     declined: Option<String>,
-    /// Argument hooks fired so far (step 4): the module-call wrapper
-    /// audits an arm by this count against its argument count.
-    arg_hooks: u32,
+    /// The argument expressions a hook fired for, by node address, in
+    /// order (step 4): the module-call wrapper audits an arm by asking
+    /// whether EACH of its own argument nodes went through a hook. A count
+    /// stopped being enough once nested arguments were admitted (#2755):
+    /// an inner call's argument hooks fire inside the outer arm's window,
+    /// so an arm that lowered its argument outside `lower_arg` could still
+    /// have matched the count.
+    hooked: Vec<usize>,
+    /// #2758: the next ReturnError exit is a recorded `!` propagation
+    /// (witness_unwrap.rs) — its releases are recorded like the success
+    /// exit's, and the site records the value that leaves. Unarmed, an
+    /// error exit still poisons.
+    err_exit_armed: bool,
+    /// The calling conventions this frame's code was emitted under: its own
+    /// params (`O` owned / `B` borrowed) and each droppable call argument
+    /// (`m` moved into an owned param / `b` lent to a borrowed one). Two
+    /// emission passes may legitimately differ here (param_borrow.rs over
+    /// a different fn set); the floor test compares their certificates only
+    /// where this agrees. Never part of the certificate.
+    conv: String,
 }
 
 impl Default for WitnessRecorder {
@@ -95,22 +123,34 @@ impl WitnessRecorder {
     pub fn new() -> Self {
         Self {
             next_obj: 0,
-            obj_of_local: HashMap::new(),
-            streams: BTreeMap::new(),
+            bound: HashMap::new(),
+            log: Vec::new(),
+            branches: Branches::default(),
+            loop_depth: 0,
             poisoned: false,
-            frame_replaced: false,
             declined: None,
-            arg_hooks: 0,
+            hooked: Vec::new(),
+            err_exit_armed: false,
+            conv: String::new(),
         }
     }
 
-    /// One argument hook fired (any convention, droppable or not).
-    pub fn note_arg(&mut self) {
-        self.arg_hooks += 1;
+    /// One argument hook fired for the node at `node` (any convention,
+    /// droppable or not).
+    pub fn note_arg(&mut self, node: usize) {
+        self.hooked.push(node);
     }
 
-    pub fn arg_hooks(&self) -> u32 {
-        self.arg_hooks
+    /// The audit window's start: hooks fired so far.
+    pub fn arg_hooks(&self) -> usize {
+        self.hooked.len()
+    }
+
+    /// Did a hook fire for `node` since the window opened at `since`?
+    /// Every argument node is alive (borrowed from the IR) for the whole
+    /// window, so its address cannot be reused by a clone an arm made.
+    pub fn hooked_since(&self, since: usize, node: usize) -> bool {
+        self.hooked.get(since..).is_some_and(|w| w.contains(&node))
     }
 
     /// An owned droppable call result discarded in statement position:
@@ -119,101 +159,328 @@ impl WitnessRecorder {
         self.temp_borrowed();
     }
 
-    fn fresh_obj(&mut self, local: u32) -> u32 {
+    /// A new object: logged as born here unless this is dead code.
+    fn new_obj(&mut self) -> u32 {
         let o = self.next_obj;
         self.next_obj += 1;
-        self.obj_of_local.insert(local, o);
+        if !self.branches.dead() {
+            self.log.push(Ev::Birth(o));
+        }
         o
+    }
+
+    /// Log `ev` unless this is dead code (after an exit or a jump on this
+    /// path — the instructions are emitted but never run).
+    fn log(&mut self, ev: Ev) {
+        if !self.branches.dead() {
+            self.log.push(ev);
+        }
+    }
+
+    /// `local` now holds a new object (`owner`: the local releases it).
+    fn fresh_obj(&mut self, local: u32, owner: bool) -> u32 {
+        let o = self.new_obj();
+        self.log(Ev::Bind { local, obj: o, owner });
+        let d = self.loop_depth;
+        self.bound.insert(local, d);
+        o
+    }
+
+    /// Record `ops` on object `o`.
+    fn ops(&mut self, o: u32, ops: &str) {
+        for c in ops.chars() {
+            self.log(Ev::Op(o, c));
+        }
+    }
+
+    /// Record `ops` on the block `local` holds (resolved per path).
+    fn held_ops(&mut self, local: u32, ops: &str) -> bool {
+        if !self.bound.contains_key(&local) {
+            return false;
+        }
+        for c in ops.chars() {
+            self.log(Ev::LOp(local, c));
+        }
+        true
     }
 
     /// A droppable param: callee-owned (+1 pre-paid by the call site's
     /// rc_arg_guard) — the object is born owned in this frame.
     pub fn param_owned(&mut self, local: u32) {
-        let o = self.fresh_obj(local);
-        self.streams.entry(o).or_default().push('i');
+        self.conv.push('O');
+        let o = self.fresh_obj(local, true);
+        self.ops(o, "i");
+    }
+
+    /// #2755: a LOOP-CARRIED owner received at the top of an iteration (a
+    /// heap `list.fold` accumulator): one credit arrives with the block (`i`),
+    /// and the iteration must release it or hand it on before it ends.
+    pub fn carried_owned(&mut self, local: u32) {
+        let o = self.fresh_obj(local, true);
+        self.ops(o, "i");
+    }
+
+    /// A droppable param of this frame's signature that it only borrows
+    /// (param_borrow.rs): [`Self::param_borrowed`], noted in the convention.
+    pub fn param_lent(&mut self, local: u32) {
+        self.conv.push('B');
+        self.param_borrowed(local);
+    }
+
+    /// A droppable call argument's hand-over mode (`m` / `b`).
+    pub fn convention(&mut self, c: char) {
+        self.conv.push(c);
+    }
+
+    /// The frame's calling-convention fingerprint (see the field).
+    pub fn context(&self) -> &str {
+        &self.conv
     }
 
     /// A droppable param this frame only BORROWS (param_borrow.rs, #2028):
     /// the object is known, no credit of it is held here — a share or a
-    /// ret-move on it balances against nothing this frame owns.
+    /// ret-move on it balances against nothing this frame owns. A pattern
+    /// bind or a loop variable (a view, #2756 / #2757) is the same.
     pub fn param_borrowed(&mut self, local: u32) {
-        let o = self.fresh_obj(local);
-        self.streams.entry(o).or_default();
+        self.fresh_obj(local, false);
     }
 
     /// A fresh temporary lent to a borrowed param: born at the site,
     /// released by the site right after the call.
     pub fn temp_borrowed(&mut self) {
-        let o = self.next_obj;
-        self.next_obj += 1;
-        self.streams.entry(o).or_default().push_str("id");
+        let o = self.new_obj();
+        self.ops(o, "id");
     }
 
     /// Bind of a certainly-fresh rhs (heap literal, block copy): a new
-    /// object, one ownership.
+    /// object, one ownership. The Bind route released the local's previous
+    /// occupant first (dec-old): a real release only when that block was
+    /// bound earlier in the same iteration (#2757, witness_paths.rs).
     pub fn bind_fresh(&mut self, local: u32) {
-        let o = self.fresh_obj(local);
-        self.streams.entry(o).or_default().push('i');
+        self.log(Ev::DecOld(local));
+        let o = self.new_obj();
+        self.ops(o, "i");
+        self.log(Ev::Bind { local, obj: o, owner: true });
+        let d = self.loop_depth;
+        self.bound.insert(local, d);
+    }
+
+    /// A moved assignment (#3104, writeback_move.rs): `dst` takes over the
+    /// object `src` holds, credit and all — no share, no release. `src` is
+    /// emptied after the store ([`Self::empty_local`]). A var bound outside
+    /// the loop being assigned declines, as [`Self::assign`] does.
+    pub fn transfer(&mut self, dst: u32, released_old: bool, src: u32) -> bool {
+        match self.bound.get(&dst) {
+            None => return false,
+            Some(&d) if d < self.loop_depth => {
+                self.decline("loop-carried-assign");
+                return true;
+            }
+            Some(_) => {}
+        }
+        if !self.bound.contains_key(&src) {
+            return false;
+        }
+        if released_old {
+            self.held_ops(dst, "d");
+        }
+        self.log(Ev::Alias { local: dst, src, owner: true });
+        true
+    }
+
+    /// `local` was set to NULL (#3104): it holds nothing from here, so a
+    /// later release through it is a release of NULL (skipped).
+    pub fn empty_local(&mut self, local: u32) {
+        if self.bound.contains_key(&local) {
+            self.log(Ev::Bind { local, obj: u32::MAX, owner: false });
+        }
     }
 
     /// Bind of a borrowed Var rhs: the SOURCE local's object gains a
     /// share (`rc_inc_top` at the bind), and the new local aliases it.
     pub fn bind_alias(&mut self, local: u32, src_local: u32) -> bool {
-        let Some(&o) = self.obj_of_local.get(&src_local) else { return false };
-        self.obj_of_local.insert(local, o);
-        self.streams.entry(o).or_default().push('a');
+        if !self.held_ops(src_local, "a") {
+            return false;
+        }
+        self.log(Ev::DecOld(local));
+        self.log(Ev::Alias { local, src: src_local, owner: true });
+        let d = self.loop_depth;
+        self.bound.insert(local, d);
         true
+    }
+
+    /// An `Assign` (#2757): the old occupant was released by the route
+    /// (`released_old`), and the local now holds the rhs — a new object
+    /// (`src = None`) or a share of `src`'s. A var bound outside the loop
+    /// being assigned declines: its block at the loop head differs per
+    /// iteration, which one activation line cannot carry.
+    pub fn assign(&mut self, local: u32, released_old: bool, src: Option<u32>) -> bool {
+        match self.bound.get(&local) {
+            None => return false,
+            Some(&d) if d < self.loop_depth => {
+                self.decline("loop-carried-assign");
+                return true;
+            }
+            Some(_) => {}
+        }
+        if released_old {
+            self.held_ops(local, "d");
+        }
+        match src {
+            None => {
+                let o = self.new_obj();
+                self.ops(o, "i");
+                self.log(Ev::Bind { local, obj: o, owner: true });
+            }
+            Some(s) => {
+                if !self.held_ops(s, "a") {
+                    return false;
+                }
+                self.log(Ev::Alias { local, src: s, owner: true });
+            }
+        }
+        true
+    }
+
+    /// A `for` / `while` body opens / closes (#2757), and a `break` /
+    /// `continue` ends an iteration.
+    pub fn loop_open(&mut self) {
+        self.branches.loop_open(&mut self.log);
+        self.loop_depth += 1;
+    }
+
+    pub fn loop_close(&mut self) {
+        self.branches.loop_close(&mut self.log);
+        self.loop_depth = self.loop_depth.saturating_sub(1);
+    }
+
+    pub fn loop_jump(&mut self) {
+        self.branches.jump(&mut self.log);
     }
 
     /// The heap return of a bound Var: the ret-inc instruction is the
     /// share (`a`), and the value leaving the frame is the move-out
     /// (`m`) — together the transfer of one credit to the caller.
     pub fn ret_move(&mut self, local: u32) -> bool {
-        let Some(&o) = self.obj_of_local.get(&local) else { return false };
-        let st = self.streams.entry(o).or_default();
-        st.push('a');
-        st.push('m');
-        true
+        self.held_ops(local, "am")
     }
 
-    /// A real `$dec_flat` on the local's object (epilogue / dec-old). After
-    /// a frame replacement the epilogue's decs are dead code: attributed
+    /// A real `$dec_flat` on the local's object (epilogue / dec-old). In
+    /// dead code (after a frame replacement on this path) it is attributed
     /// (the local is known) but not recorded.
     pub fn dec_local(&mut self, local: u32) -> bool {
-        let Some(&o) = self.obj_of_local.get(&local) else { return false };
-        if !self.frame_replaced {
-            self.streams.entry(o).or_default().push('d');
-        }
-        true
+        self.held_ops(local, "d")
     }
 
-    /// The `return_call` site finished its releases: nothing emitted after
-    /// this executes.
+    /// A frame-ending edge (a `return_call`) finished its releases: nothing
+    /// emitted after it on this path executes (#2756: inside an arm, only
+    /// that arm is over).
     pub fn frame_replaced(&mut self) {
-        self.frame_replaced = true;
+        self.branches.exit(&mut self.log);
+    }
+
+    /// #2755: the process ABORTS here (exit_plan.rs `Continuation::Abort`):
+    /// the path ends in the checker's abort terminal.
+    pub fn abort_end(&mut self) {
+        self.branches.abort(&mut self.log);
+    }
+
+    /// A branch site opens (`if` / `match`, #2756).
+    pub fn branch_open(&mut self) {
+        self.branches.open(&mut self.log);
+    }
+
+    /// The next arm of the innermost open site begins.
+    pub fn branch_arm(&mut self) {
+        self.branches.arm(&mut self.log);
+    }
+
+    /// The innermost open site joins.
+    pub fn branch_close(&mut self) {
+        self.branches.close(&mut self.log);
+    }
+
+    /// A local's credit moves without a share (#2757).
+    pub fn move_local(&mut self, local: u32) -> bool {
+        self.held_ops(local, "m")
     }
 
     /// A droppable Var argument at a call site: the site's `rc_inc` is
     /// the share (`a`), and the credit moves into the callee (`m`).
     pub fn arg_share_move(&mut self, local: u32) -> bool {
-        let Some(&o) = self.obj_of_local.get(&local) else { return false };
-        let st = self.streams.entry(o).or_default();
-        st.push('a');
-        st.push('m');
-        true
+        self.held_ops(local, "am")
     }
 
     /// A fresh temporary handed to a callee: born here, consumed there.
     pub fn temp_move(&mut self) {
-        let o = self.next_obj;
-        self.next_obj += 1;
-        self.streams.entry(o).or_default().push_str("im");
+        let o = self.new_obj();
+        self.ops(o, "im");
     }
 
     /// An owned tail value (a call result or a fresh literal) leaving the
     /// frame as the return: one credit received, one credit moved out.
     pub fn tail_owned_move(&mut self) {
         self.temp_move();
+    }
+
+    /// #2758: a block this frame READS without holding — a `!` payload
+    /// extracted from a bound carrier. The object is known and holds no
+    /// credit of this frame's (like a borrowed param); a consumer that takes
+    /// one records it on this object's own line.
+    fn view_obj(&mut self) -> u32 {
+        self.new_obj()
+    }
+
+    /// A view handed to a new holder: the route's `rc_inc` is the share
+    /// (`a`), the holder takes it away (`m`).
+    pub fn view_share_move(&mut self) {
+        let o = self.view_obj();
+        self.ops(o, "am");
+    }
+
+    /// A Bind of a view: the Bind route's `rc_inc_top` is the share, and
+    /// the local is its owner from here on (its release is the local's).
+    pub fn bind_view(&mut self, local: u32) {
+        self.log(Ev::DecOld(local));
+        let o = self.view_obj();
+        self.ops(o, "a");
+        self.log(Ev::Bind { local, obj: o, owner: true });
+        let d = self.loop_depth;
+        self.bound.insert(local, d);
+    }
+
+    /// An owned temporary born here whose later events the site names by
+    /// object (a `!` operand carrier: moved out on the err arm, released
+    /// on the ok path).
+    pub fn temp_born(&mut self) -> u32 {
+        let o = self.new_obj();
+        self.ops(o, "i");
+        o
+    }
+
+    /// Record `ops` on an object a site holds by id ([`Self::temp_born`]).
+    pub fn temp_ops(&mut self, o: u32, ops: &str) {
+        self.ops(o, ops);
+    }
+
+    /// The share a borrowed `!` carrier takes before it propagates.
+    pub fn share_local(&mut self, local: u32) -> bool {
+        self.held_ops(local, "a")
+    }
+
+    /// Is the code being emitted right now unreachable on every path?
+    pub fn dead(&self) -> bool {
+        self.branches.dead()
+    }
+
+    /// Arm the next ReturnError exit as a recorded propagation.
+    pub fn arm_err_exit(&mut self) {
+        self.err_exit_armed = true;
+    }
+
+    /// Was the ReturnError exit being emitted armed? (Disarms it.)
+    pub fn take_err_exit(&mut self) -> bool {
+        std::mem::take(&mut self.err_exit_armed)
     }
 
     pub fn poison(&mut self) {
@@ -238,12 +505,13 @@ impl WitnessRecorder {
         if let Some(r) = &self.declined {
             return format!("{DECLINE_PREFIX}{r}\n");
         }
-        let mut s = String::new();
-        for stream in self.streams.values() {
-            s.push_str(stream);
-            s.push('\n');
+        if !self.branches.settled() {
+            return "!poison\n".to_string();
         }
-        s
+        match paths::render(&self.log, self.next_obj) {
+            Ok(s) => s,
+            Err(r) => format!("{DECLINE_PREFIX}{r}\n"),
+        }
     }
 }
 
@@ -271,165 +539,10 @@ pub fn balanced(cert: &str) -> bool {
     true
 }
 
-/// The phase-A/B1 subset gate: `None` = the body is straight-line and
-/// every RC-affecting site is covered by the recorder hooks (bind,
-/// call-argument, tail, epilogue / tail-release); `Some(reason)` = out
-/// of subset, do not record. Deliberately conservative — admitting a
-/// shape here without auditing its RC sites would let the witness
-/// under-count real events, which is the one dishonesty the recorder
-/// exists to rule out.
-pub fn straightline_subset(body: &IrExpr, ret_is_heap: bool, self_name: &str) -> Option<String> {
-    // `fn f(x) = expr` lowers exactly like `{ expr }`: a bare body is the
-    // empty-statement block with that tail (B1: the tail-call and
-    // literal-tail fns are almost all written this way).
-    let bare: Option<Box<IrExpr>>;
-    let (stmts, expr): (&[almide_ir::IrStmt], &Option<Box<IrExpr>>) = match &body.kind {
-        IrExprKind::Block { stmts, expr } => (stmts, expr),
-        _ => {
-            bare = Some(Box::new(body.clone()));
-            (&[], &bare)
-        }
-    };
-    for s in stmts {
-        match &s.kind {
-            IrStmtKind::Bind { value, .. } => {
-                if let Some(r) = subset_rhs(value) {
-                    return Some(r);
-                }
-            }
-            // Step 4: a statement-position call over Var / literal args —
-            // its argument sites are the call hooks', and an owned
-            // droppable result is released by the discard route (`id`).
-            IrStmtKind::Expr { expr } if matches!(expr.kind, IrExprKind::Call { .. }) => {
-                if let Some(r) = call_subset(expr) {
-                    return Some(format!("stmt:Expr:{r}"));
-                }
-            }
-            IrStmtKind::Expr { expr } => return Some(format!("stmt:Expr:{}", expr_tag(expr))),
-            other => return Some(format!("stmt:{}", tag(other))),
-        }
-    }
-    match expr.as_deref().map(|t| &t.kind) {
-        // A heap return is admitted only as a plain bound Var (the
-        // ret-inc + move-out pair the func.rs hook records); any other
-        // heap tail has unrecorded RC sites.
-        None | Some(IrExprKind::Unit) if !ret_is_heap => None,
-        Some(IrExprKind::Var { .. }) => None,
-        Some(IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. } | IrExprKind::LitFloat { .. })
-            if !ret_is_heap =>
-        {
-            None
-        }
-        // B1: an owned tail — a user-fn call over Var/literal args (the
-        // call-arg hook covers its sites, the result moves out) or a
-        // fresh literal (its alloc IS the credit that moves out).
-        // A SELF tail call is loop-converted (tco.rs): the frame is not
-        // replaced, the params are rebound by the loop-back and released
-        // again by the epilogue — a loop, not a straight line. Out of
-        // subset (the recorder is not loop-aware).
-        Some(IrExprKind::Call { target: almide_ir::CallTarget::Named { name }, .. })
-            if name.as_str() == self_name =>
-        {
-            Some("tail:self-call-loop".into())
-        }
-        Some(IrExprKind::Call { .. }) => expr.as_deref().and_then(call_subset),
-        Some(k @ (IrExprKind::LitStr { .. } | IrExprKind::List { .. })) if ret_is_heap => {
-            subset_rhs_literal(k)
-        }
-        Some(other) => Some(format!("tail:{}", tag(other))),
-        None => Some("tail:Unit-heap".into()),
-    }
-}
-
-/// A space-free tag of an IR node's variant, for the decline histogram
-/// (`grep -o '^!decline:[^ ]*' | sort | uniq -c` over the floor dump).
-fn tag<T: std::fmt::Debug>(v: &T) -> String {
-    format!("{v:?}").chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect()
-}
-
-/// A statement-position expression's tag, one level deeper for a call
-/// (its target family is what the next increment chooses by).
-fn expr_tag(e: &IrExpr) -> String {
-    match &e.kind {
-        IrExprKind::Call { target, .. } => format!("Call:{}", tag(target)),
-        other => tag(other),
-    }
-}
-
-/// A call the hooks cover: a Named user fn (lowercase — ctors are
-/// capitalized, the builtin `some`/`ok`/`err` are IR kinds, not calls)
-/// or, since step 4, a Module call (the native arms' declared modes are
-/// recorded at `lower_arg`; the registry route consults the callee's
-/// param_owned table like the Named route), over Var / literal
-/// arguments only.
-fn call_subset(e: &IrExpr) -> Option<String> {
-    let IrExprKind::Call { target, args, .. } = &e.kind else {
-        return Some("call:not-a-call".into());
-    };
-    match target {
-        almide_ir::CallTarget::Named { name } => {
-            if !name.as_str().starts_with(|c: char| c.is_ascii_lowercase() || c == '_') {
-                return Some("call:ctor".into());
-            }
-            // The http_framed host-op leaves (calls.rs) intercept before
-            // resolution and lower their args outside every hook.
-            if name.as_str().starts_with("__http_framed_") || name.as_str().starts_with("__http_call_") {
-                return Some("call:host-splice".into());
-            }
-        }
-        almide_ir::CallTarget::Module { .. } => {}
-        other => return Some(format!("call:target:{}", tag(other))),
-    }
-    for a in args {
-        match &a.kind {
-            IrExprKind::Var { .. }
-            | IrExprKind::LitInt { .. }
-            | IrExprKind::LitFloat { .. }
-            | IrExprKind::LitBool { .. }
-            | IrExprKind::LitStr { .. } => {}
-            IrExprKind::List { .. } => {
-                if let Some(r) = subset_rhs_literal(&a.kind) {
-                    return Some(r);
-                }
-            }
-            other => return Some(format!("call-arg:{}", tag(other))),
-        }
-    }
-    None
-}
-
-fn subset_rhs_literal(k: &IrExprKind) -> Option<String> {
-    match k {
-        IrExprKind::LitStr { .. } => None,
-        IrExprKind::List { elements } => {
-            for e in elements {
-                if !matches!(
-                    e.kind,
-                    IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitBool { .. } | IrExprKind::LitStr { .. }
-                ) {
-                    return Some("list-elem".into());
-                }
-            }
-            None
-        }
-        other => Some(format!("rhs:{}", tag(other))),
-    }
-}
-
-fn subset_rhs(value: &IrExpr) -> Option<String> {
-    match &value.kind {
-        IrExprKind::LitInt { .. }
-        | IrExprKind::LitFloat { .. }
-        | IrExprKind::LitBool { .. }
-        | IrExprKind::LitStr { .. }
-        | IrExprKind::Var { .. } => None,
-        IrExprKind::List { .. } => subset_rhs_literal(&value.kind),
-        // B1: a user-fn call — its arguments' RC sites are the call-arg
-        // hook's, its droppable result is a received credit (#1986).
-        IrExprKind::Call { .. } => call_subset(value),
-        other => Some(format!("rhs:{}", tag(other))),
-    }
-}
+// The subset gate lives in witness_gate.rs (the file budget).
+#[path = "witness_gate.rs"]
+mod gate;
+pub use gate::{effect_subset, straightline_subset, top_let_subset};
 
 // ── the collection sink (diagnostic channel, test-enabled) ──────────────
 
@@ -446,12 +559,54 @@ fn sink() -> &'static Sink {
 
 pub fn start_collecting() {
     *sink().lock().expect("witness sink") = Some(Vec::new());
+    crate::witness::modes::start();
+    crate::witness::decls::start();
 }
+
+/// The call-mode witness of every emission pass (#2758, witness_modes.rs):
+/// `(pass, "<signatures>|<sites>")`, for `almide-verify call-modes`.
+pub use modes::take as take_modes;
+
+/// The call-mode witness sink (split for the file budget).
+#[path = "witness_modes.rs"]
+pub(crate) mod modes;
+
+/// The per-pass declaration table the name and capability witnesses read
+/// (#2759, witness_decls.rs).
+#[path = "witness_decls.rs"]
+pub mod decls;
+pub(crate) use decls::argv_exception;
 
 /// Every frame the sweep collected, over EVERY emission pass (the pass
 /// markers are stripped).
 pub fn take() -> Vec<(String, String)> {
     take_with_shipped().0
+}
+
+/// A recorded frame: `(pass, function name, certificate, convention
+/// context)` — the context is empty for a frame the gate turned away.
+pub type PassFrame = (usize, String, String, String);
+
+/// The raw sink split into frames: every frame with its pass and context,
+/// and the shipped pass's marker value (`None`: nothing shipped).
+fn parse(raw: Vec<(String, String)>) -> (Vec<PassFrame>, Option<String>) {
+    let shipped = raw.iter().rev().find(|(n, _)| n == SHIPPED_MARK).map(|(_, p)| p.clone());
+    let mut out = Vec::new();
+    let mut pass = 0usize;
+    let mut ctx = String::new();
+    for (name, cert) in raw {
+        match name.as_str() {
+            PASS_MARK => pass = cert.parse().unwrap_or(0),
+            SHIPPED_MARK => {}
+            CONTEXT_MARK => ctx = cert,
+            _ => out.push((pass, name, cert, std::mem::take(&mut ctx))),
+        }
+    }
+    (out, shipped)
+}
+
+fn drain() -> Vec<(String, String)> {
+    sink().lock().expect("witness sink").take().unwrap_or_default()
 }
 
 /// The sink's pass boundaries (#2754). `emit_program` emits in up to three
@@ -462,9 +617,11 @@ pub fn take() -> Vec<(String, String)> {
 /// SHIPPED pass. The markers use a name no function can spell.
 const PASS_MARK: &str = "\u{0}pass";
 const SHIPPED_MARK: &str = "\u{0}shipped";
+const CONTEXT_MARK: &str = "\u{0}context";
 
 /// Both markers go through `push`, a no-op unless a sweep collects.
 pub(crate) fn mark_pass(pass: usize) {
+    crate::witness::modes::begin_pass(pass);
     push(PASS_MARK, pass.to_string());
 }
 
@@ -478,22 +635,42 @@ pub type Frames = Vec<(String, String)>;
 /// `(every frame of every pass, the frames of the pass that shipped)`. The
 /// second is empty when no pass was marked as shipped (a refused program).
 pub fn take_with_shipped() -> (Frames, Frames) {
-    let raw = sink().lock().expect("witness sink").take().unwrap_or_default();
-    let shipped = raw.iter().rev().find(|(n, _)| n == SHIPPED_MARK).map(|(_, p)| p.clone());
-    let mut all = Vec::new();
-    let mut in_shipped = Vec::new();
-    let mut current: Option<String> = None;
-    for (name, cert) in raw {
-        if name == PASS_MARK {
-            current = Some(cert);
-        } else if name == SHIPPED_MARK {
-        } else {
-            if shipped.is_some() && current == shipped {
-                in_shipped.push((name.clone(), cert.clone()));
-            }
-            all.push((name, cert));
-        }
-    }
+    let (all, shipped) = take_by_pass();
+    (all.into_iter().map(|(_, n, c)| (n, c)).collect(), shipped)
+}
+
+/// The frames of the pass that shipped, with that pass's number (#2759:
+/// the bundle producer pairs them with the same pass's call-mode witness).
+/// `None` when no pass was marked as shipped.
+pub fn take_shipped() -> Option<(usize, Frames)> {
+    let (all, shipped) = parse(drain());
+    let shipped: usize = shipped?.parse().ok()?;
+    let frames = all.into_iter().filter(|f| f.0 == shipped).map(|(_, n, c, _)| (n, c)).collect();
+    Some((shipped, frames))
+}
+
+/// The pass `emit_program` emits WITHOUT the bounded-line rewrites (#2312,
+/// `line_bounded.rs`): its code differs from passes 1 and 2 by design (a
+/// `println(int.to_string(x))` builds and releases a block there instead of
+/// printing from the itoa scratch), so a sweep holds only the passes of one
+/// configuration to agreeing certificates.
+pub const CHECKED_PASS: usize = 3;
+
+/// `(every frame of every pass WITH its pass number, the frames of the pass
+/// that shipped)`. Pass numbers are those `emit_program` marks (1, 2,
+/// [`CHECKED_PASS`]); a frame pushed before any marker reads as pass 0.
+pub fn take_by_pass() -> (Vec<(usize, String, String)>, Frames) {
+    let (all, shipped) = take_by_pass_with_context();
+    (all.into_iter().map(|(p, n, c, _)| (p, n, c)).collect(), shipped)
+}
+
+/// [`take_by_pass`] with each frame's convention context (the floor test's
+/// cross-pass comparison keys on it).
+pub fn take_by_pass_with_context() -> (Vec<PassFrame>, Frames) {
+    let (all, shipped) = parse(drain());
+    let shipped: Option<usize> = shipped.and_then(|p| p.parse().ok());
+    let in_shipped =
+        all.iter().filter(|f| Some(f.0) == shipped).map(|(_, n, c, _)| (n.clone(), c.clone())).collect();
     (all, in_shipped)
 }
 
@@ -505,6 +682,13 @@ pub(crate) fn push(name: &str, cert: String) {
     if let Some(v) = sink().lock().expect("witness sink").as_mut() {
         v.push((name.to_string(), cert));
     }
+}
+
+/// An armed recorder's frame: its certificate, preceded by its convention
+/// context (see `WitnessRecorder::conv`).
+pub(crate) fn push_recorded(name: &str, w: &WitnessRecorder) {
+    push(CONTEXT_MARK, w.context().to_string());
+    push(name, w.certificate());
 }
 
 /// The certificate prefix of a DECLINED frame — the measurement channel

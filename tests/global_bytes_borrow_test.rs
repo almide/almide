@@ -7,6 +7,10 @@
 //! only. An argument to a user callee that borrows such a global now takes the
 //! glued value (cloned first for an immutable global, a static place); a
 //! runtime callee keeps the raw borrow.
+//!
+//! In a module other than the entry, a call to the module's own fn is spelled
+//! as a runtime call (`almide_rt_<module>_<fn>`) and took the runtime callee's
+//! raw borrow: the same E0308. It now takes the user callee's glued one.
 
 use std::path::Path;
 use std::process::Command;
@@ -74,4 +78,63 @@ fn global_bytes_passed_to_user_fns_natively() {
 fn global_bytes_passed_to_user_fns_on_wasm() {
     let out = run(Some("wasm"));
     assert!(out.contains(WANT), "wasm:\n{out}");
+}
+
+/// The same globals and fns in a non-entry module, called from inside it —
+/// where a call to the module's own fn is spelled `almide_rt_buf_<fn>`.
+const MODULE_SRC: &str = r#"
+var pending: Bytes = bytes.new(0)
+var chunks: List[Bytes] = []
+var last: Bytes? = none
+let TBL = bytes.from_list([16, 32, 48])
+
+fn size(b: Bytes) -> Int = bytes.len(b)
+fn total(bs: List[Bytes]) -> Int = bs |> list.fold(0, (acc, b) => acc + bytes.len(b))
+fn maybe(b: Bytes?) -> Int = match b { some(x) => bytes.len(x), none => 0 - 1 }
+
+fn report() -> String = {
+  pending = bytes.from_string("abc")
+  chunks = [bytes.from_string("de"), bytes.from_string("fgh")]
+  let first = "${int.to_string(size(pending))} ${int.to_string(total(chunks))} ${int.to_string(maybe(last))}"
+  last = some(pending)
+  pending = bytes.concat(pending, bytes.from_string("!"))
+  "${first}\n${int.to_string(maybe(last))} ${int.to_string(size(TBL))} ${int.to_string(size(pending))} ${bytes.to_string_lossy(pending)}"
+}
+"#;
+
+const MODULE_MAIN: &str = r#"
+import self.buf as buf
+
+effect fn main() -> Unit = {
+  println(buf.report())
+}
+"#;
+
+fn run_module(target: Option<&str>) -> String {
+    let dir = std::env::temp_dir().join(format!("almide-global-bytes-module-{}", target.unwrap_or("native")));
+    let _ = std::fs::create_dir_all(dir.join("src"));
+    std::fs::write(dir.join("almide.toml"), "[package]\nname = \"globalbytes\"\nversion = \"0.0.1\"\n").unwrap();
+    std::fs::write(dir.join("src/buf.almd"), MODULE_SRC).unwrap();
+    std::fs::write(dir.join("main.almd"), MODULE_MAIN).unwrap();
+    let mut cmd = Command::new(almide_bin());
+    cmd.current_dir(&dir).arg("run").arg("main.almd");
+    if let Some(t) = target {
+        cmd.args(["--target", t]);
+    }
+    let out = cmd.output().expect("spawn almide");
+    format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+}
+
+const MODULE_WANT: &str = "3 5 -1\n3 3 4 abc!\n";
+
+#[test]
+fn global_bytes_passed_to_the_modules_own_fns_natively() {
+    let out = run_module(None);
+    assert!(out.contains(MODULE_WANT), "native:\n{out}");
+}
+
+#[test]
+fn global_bytes_passed_to_the_modules_own_fns_on_wasm() {
+    let out = run_module(Some("wasm"));
+    assert!(out.contains(MODULE_WANT), "wasm:\n{out}");
 }

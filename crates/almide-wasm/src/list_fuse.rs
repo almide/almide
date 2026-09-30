@@ -92,6 +92,14 @@ fn judge_stage(e: &IrExpr) -> almide_ir::fusion::Stage {
 impl Emitter<'_> {
     /// Fused `src |> map* |> filter* |> fold(init, f)`. Ok(None) = the
     /// chain is not fusable here; take the generic staged path.
+    /// Release the element credits a fused chain's map stages produced.
+    fn release_fused_owners(&mut self, owners: &[(u32, SliceTy)]) {
+        for &(local, t) in owners {
+            let dec = self.dec_fn_of(t);
+            self.f.instructions().local_get(local).call(dec);
+        }
+    }
+
     pub(crate) fn lower_list_fold_fused(
         &mut self,
         xs: &IrExpr,
@@ -174,29 +182,44 @@ impl Emitter<'_> {
             .i32_add();
         self.load_ty_slot(elem0, 0);
         let mut cur_ty = elem0;
+        // #2977: a map stage whose body hands back an OWNED handle (a fresh
+        // string, a record) makes the element this iteration's credit. The
+        // local it lands in is an owner, released once the element is done
+        // with — after the fold step took its share, or where a later filter
+        // drops it. A borrowed map result stays its source's.
+        let mut owners: Vec<(u32, SliceTy)> = Vec::new();
+        let mut pending: Option<SliceTy> = None;
         for st in stages {
             match st {
                 Stage::Map(f) => {
                     let (p, body) = self.hof_lambda(f, 1)?;
                     self.f.instructions().local_set(p[0]);
+                    owners.extend(pending.take().map(|t| (p[0], t)));
                     let Some(u) = slice_ty_of(&body.ty, self.types) else {
                         return unsup(&format!("fuse-map-ret:{}", ty_name(&body.ty)));
                     };
                     self.lower(body, Some(u))?;
+                    if self.elem_is_handle(u) && self.rc_owned_result(body) {
+                        pending = Some(u);
+                    }
                     cur_ty = u;
                 }
                 Stage::Filter(f) => {
                     let (p, body) = self.hof_lambda(f, 1)?;
                     self.f.instructions().local_set(p[0]);
+                    owners.extend(pending.take().map(|t| (p[0], t)));
                     self.lower(body, Some(BOOL))?;
-                    // false → skip this element
-                    self.f.instructions().i32_eqz().br_if(0);
+                    // false → release what this element owns, skip it
+                    self.f.instructions().i32_eqz().if_(BlockType::Empty);
+                    self.release_fused_owners(&owners);
+                    self.f.instructions().br(1).end();
                     self.f.instructions().local_get(p[0]);
                 }
             }
         }
         // fold update: acc = f(acc, cur)
         self.f.instructions().local_set(fold_params[1]);
+        owners.extend(pending.take().map(|t| (fold_params[1], t)));
         self.lower(fold_body, Some(acc_ty))?;
         // The accumulator OWNS one credit on every step, exactly as the
         // staged `lower_list_fold` has since 10fed0494: a borrowed body
@@ -212,6 +235,7 @@ impl Emitter<'_> {
             self.f.instructions().local_get(fold_params[0]).call(dec);
         }
         self.f.instructions().local_set(fold_params[0]);
+        self.release_fused_owners(&owners);
         self.f.instructions().end(); // skip-block
         self.hof_step(ih);
         self.f.instructions().local_get(fold_params[0]);

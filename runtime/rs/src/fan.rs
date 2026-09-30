@@ -49,6 +49,9 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
     let chunk_size = items.len().div_ceil(workers);
     let first_err = std::sync::atomic::AtomicUsize::new(usize::MAX);
     let mut slots: Vec<Option<Result<B, String>>> = (0..items.len()).map(|_| None).collect();
+    // Flush before the workers start: a runtime abort on a worker exits
+    // without reaching this thread's stdout buffer (C-197, see rust.toml fan_expr).
+    almide_stdout_flush();
     std::thread::scope(|s| {
         for (chunk_idx, (chunk, out)) in items.chunks(chunk_size).zip(slots.chunks_mut(chunk_size)).enumerate() {
             let f = &f;
@@ -134,6 +137,9 @@ pub fn almide_rt_fan_any_map<A, B>(
 pub fn almide_rt_fan_settle<T: Send + 'static>(
     thunks: Vec<impl Fn() -> Result<T, String> + Send + Sync>,
 ) -> Vec<Result<T, String>> {
+    // Flush before the workers start: a runtime abort on a worker exits
+    // without reaching this thread's stdout buffer (C-197, see rust.toml fan_expr).
+    almide_stdout_flush();
     std::thread::scope(|s| {
         let handles: Vec<_> = thunks
             .iter()

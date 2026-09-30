@@ -294,6 +294,18 @@ measures = "per-function lowering outcome over the v0 spec corpus (Ok / explicit
 varies = "flight-evidence-gaps.md F8: a live REJECT exposed the via_if miscompile; 2026-09-04 f1a511468 and 95cf925c8 each added walled rows the incumbent refuses"
 
 [[gate]]
+path = "proofs/structural-wall.sh"
+# It runs the producer and the three checkers and compares their verdict
+# strings and exit codes; the fixture list and the exception ledger are read
+# as line lists, nothing parsed as a structure.
+reads = "scalar"
+wired_by = "Makefile, proofs/receipt.sh"
+class = "KERNEL_PROVEN"
+evidence = "#2760 (2026-09-30): the artifact drill flips one byte of a built fixture and almide-verify reads MISMATCH, exit 1, while the untouched file verifies, exit 0; on the first full run all 180 product-path builds (`almide build --target wasm`) were byte-identical to the route's own bytes and the three SHA-256 implementations agreed on every row. #2759 (2026-09-30): the verdict core is the extracted checker, re-derived by the Rocq kernel and cross-checked by almide-verify on every witness. The reject direction fired on real witnesses before the gate went green: over the 180 certified fixtures the first sweep REJECTED the capability witnesses of spec/wasm_cross/random_int_entropy.almd (the self-host body `fn random_int` behind the `effect fn random.int` surface declared plain) and spec/wasm_cross/count_domain_nonbytes.almd (io.read_n_bytes, a plain fn by io.almd's documented impure category, reaching stdin from a plain main), and the drills in proofs/gate.sh (an undefined callee, an undefined local, a file write from a plain fn, the same write in the call graph) are rejected by all three verdicts"
+measures = "per witness of each fixture in crates/almide-wasm/tests/golden/witness-fixtures.txt (ownership per frame, call-modes, names per index space and per function's locals, caps per source-declared function, the SCC-condensed call graph): the extracted checker's accept/reject, almide-verify's verdict on the fixture's bundle, and the Rocq kernel's vm_compute verdict, which must agree; a rejection must be named in proofs/structural-wall-exceptions.txt and a named one that accepts is stale. #2760: per fixture, byte equality of the `almide build --target wasm` file with the route's stock-WASI bytes, the SHA-256 the bundle pins against almide-verify's recomputation and `shasum -a 256`, and almide-verify's verdict on a copy one byte off"
+varies = "#2759 (2026-09-30): the caps witness of random_int_entropy read REJECT (declared plain) and then ACCEPT once self-host bodies stopped counting as declarations; count_domain_nonbytes read REJECT under the output-only plain-fn bound and ACCEPT under the console bound; the raw call graph of one 79-function fixture ran the extracted checker for minutes (5.6e10 reach terms) and its SCC condensation for milliseconds (118)"
+
+[[gate]]
 path = "proofs/output-parity.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci-cross-target.yml"
@@ -353,8 +365,8 @@ reads = "UNCLASSIFIED"
 wired_by = "Makefile"
 class = "NEGATIVE_TESTED"
 evidence = "#1244 round 5: the #984 guard demonstrated on the DERIVED path (no .verified-fingerprint present, so all four verdicts were really re-run). Forging the certified translation table (translation_validation.rs: Op::Dup's pattern -> a name the renderer never emits) rendered 'C-SAFE | PASS / FAIL' while C-PROVEN/C-WALL stayed PASS, and the script exited 1 with 'receipt: a verdict above is FAIL — refusing to exit green (#984)'. Restored; the VTEST cell is green again"
-measures = "the four verdicts (check / gate / corpus-wall / mir tests) folded into named claims with status, and the tree+toolchain fingerprint against .verified-fingerprint"
-varies = "#1244 round 5: a forged translation table read as a FAIL claim on the derived path (no fingerprint present, all four verdicts re-run)"
+measures = "the four verdicts (check / gate / structural-wall / almide-verify tests; corpus-wall and the MIR tests until #2760) folded into named claims with status, the row count and SHA-256 of proofs/structural-artifacts.sha256 (a missing file reads the structural-wall verdict FAIL), and the tree+toolchain fingerprint against .verified-fingerprint"
+varies = "#1244 round 5: a forged translation table read as a FAIL claim on the derived path (no fingerprint present, all four verdicts re-run); #2760 (2026-09-30): with proofs/structural-artifacts.sha256 removed the C-SAFE row read 'PASS / FAIL / PASS' and the receipt exited 1 on the fold path, and with the file present (180 rows) it read PASS and exited 0"
 
 [[gate]]
 path = "proofs/check-stdlib-purity-registry.sh"
@@ -618,6 +630,15 @@ measures = "symmetric difference between long-lived pipeline types found by scri
 varies = "#1316 landing: nine forged inputs (an unregistered type in a [scope] file among them) each read as a finding; 2026-08-16 314a44290 recorded the dialect stamp in the frozen AST serde count"
 
 [[gate]]
+path = "tools/almide-gates:certified-leaks"
+reads = "structured"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#2755 (landing PR, 2026-09-30), run through `main.almd -- certified-leaks .` against the 13-row ledger the prototype carried before batch 076 emptied live-at-exit, tree restored and green after each: (1) or_pattern's owning issue rewritten to the CLOSED #2186 in both goldens => '#2186 is CLOSED but still owns a certified leak'; (2) the same row's issue rewritten to `#?` => 'cites no issue (`#?`)'; (3) or_pattern_guarded_nullary's row deleted from proofs/certified-leaks.txt => 'NEW certified leak … is not in the ledger — add it with --update'; (4) list_flatten_borrow's live count lowered 9 -> 8 in live-at-exit-baseline.txt => a NEW row and a stale row, 2 findings; (5) gh off PATH with CI=1 => 7 'UNMEASURED under CI' findings, and without CI a notice and OK. The pure verdicts (join, drift, citation) carry four `test` blocks in certified_leaks.almd"
+measures = "the join of crates/almide-wasm/tests/golden/witness-fixtures.txt and crates/almide-wasm/tests/golden/live-at-exit-baseline.txt (blocks, issue, fixture) against proofs/certified-leaks.txt, and each cited issue's state read with gh"
+varies = "#2755 landing: 13 rows on the prototype's first --update, 0 once batch 076 took live-at-exit to 0; the forged live count 9 -> 8 read as a drift"
+
+[[gate]]
 path = "tools/almide-gates:impl-count"
 reads = "structured"
 wired_by = ".github/workflows/ci.yml, lefthook.yml"
@@ -697,6 +718,15 @@ class = "NEGATIVE_TESTED"
 evidence = "dependency-shaped leg landing (2026-09-28, #2839): `--self-test` builds a scratch repository with a one-entry base list and requires a grown list (a second id) to exit 1 while an unchanged, a shrunk, a reworded and a bootstrap (base without the file) list exit 0; CI runs the self-test before every real check. The other direction (an entry that no longer diverges or names no case) is refused by tests/dep_shaped_leg_test.rs itself as STALE SKIP."
 measures = "the set of case ids in scripts/lib/dep-shaped-skips.txt at HEAD minus the set at the base commit"
 varies = "the self-test's forged second id (a one-id base against a two-id list) reads a non-empty difference; the landing commit reads the bootstrap (no list at the base) with 4 ids"
+
+[[gate]]
+path = "scripts/check-walled-real-growth.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "walled-real burn-down (2026-09-30, #3058): `--self-test` judges a one-row base ledger against an unchanged, a cited-growth, a re-cited-old-row, a shrunk and an UNCITED-growth ledger, and requires only the last to exit 1; CI runs the self-test before every real check. The open-state lookup refuses a citation `gh` cannot confirm OPEN (an unverifiable owner is no owner)."
+measures = "the set of `file :: fn` keys in proofs/walled-real-baseline.txt at HEAD minus the set at the base commit, each checked for a trailing `# #NNNN` naming an issue whose state is OPEN"
+varies = "the self-test's forged uncited row (`spec/b.almd :: g` over a one-row base) reads a non-empty difference and is refused; the landing commit's range reads a shrinking ledger (no new rows)"
 
 [[gate]]
 path = "scripts/check-diagnostic-code-coverage.sh"
@@ -1063,3 +1093,21 @@ class = "NEGATIVE_TESTED"
 evidence = "#2777 landing (2026-09-27, PR #2791): native-musl.yml run 36345333688 job 108693246071 ran --selftest on tests/native_musl/tls and the gate refused all three forged runs while accepting the genuine one: CC_x86_64_unknown_linux_musl=musl-gcc-absent (the runner without musl-tools) FAILED the build; a x86_64-unknown-linux-gnu build FAILED as `not a static binary: ELF 64-bit LSB pie executable ... dynamically linked`; a forged expected.txt FAILED as `printed [tls client ok], expected [forged line]`. From the next run on, a refusal counts only when the log carries its forged reason. Locally, NATIVE_MUSL_TARGET=aarch64-apple-darwin read `not a static binary: Mach-O 64-bit executable arm64`."
 measures = "per-fixture: almide build --target x86_64-unknown-linux-musl success, `file` reporting the binary statically linked, and byte equality of its stdout with tests/native_musl/<fixture>/expected.txt"
 varies = "#2777 landing (2026-09-27, run 36345333688): the tls fixture read PASS for x86_64-unknown-linux-musl (static, 57 MB, 37 s cold build) and FAIL for the three forged runs; the wasmtime fixture (job 108693245937) read PASS (static, 372 MB, 198 s cold build). Per PR (ci.yml Almide gates, job 108694287996): PASS, step 44 s cold with no cache (3 s musl-tools, 41 s build)."
+
+[[gate]]
+path = "scripts/check-spec-test-files.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#3065 landing (2026-09-30): develop's spec/integration/extern_c/extern_c_test.almd (3-argument assert_eq, no test block, `// wasm:skip` on line 1) fed through SPEC_FILES fails twice — `does not pass almide check` (E004 from the builtin arity check this landing adds) and `is run by nothing` — exit 1. scripts/check-spec-test-files-negative.sh repeats it on every CI run: one positive control (a test-block file, a main program and a refused expected-compile-error fixture pass) plus three forged files (a 3-argument assert_eq, a wasm:skip main with no test block, an expected-compile-error fixture the checker accepts), each exit 1. The empty-corpus direction exits 1 too."
+measures = "count of git-tracked spec/**/*_test.almd that fail `almide check`, are run by no runner (no test block, and no fn main output-parity runs), or declare an expected compile error the checker accepts"
+varies = "#3065 landing (2026-09-30): develop's tree reads 2 (extern_test.almd and extern_c_test.almd: E004 and run by nothing); the fixed tree reads 0 over 475 files with 4 expected-compile-error fixtures refused"
+
+[[gate]]
+path = "scripts/check-spec-test-files-negative.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "EXERCISED"
+evidence = "#3065 landing (2026-09-30): recorded 4-mode exercise on every run — one positive control (a test-block file, a fn-main program and a refused expected-compile-error fixture: exit 0) and three forged files (3-argument assert_eq, a wasm:skip main with no test block, an expected-compile-error fixture that checks clean), each of which the gate must refuse (exit 1). Against a gate with the reachability rule removed the orphan control is accepted and this script exits 1."
+measures = "the exit codes check-spec-test-files.sh gives one well-formed and three forged spec test files"
+varies = "#3065 landing (2026-09-30): observed exit 0 for the positive control and exit 1 for each of the three forged files"

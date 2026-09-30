@@ -8,6 +8,16 @@ pub fn almide_rt_float_to_string(n: f64) -> String {
         s
     }
 }
+/// `float32.to_string` (#3079): f32 Display — the shortest decimal that
+/// round-trips to the same f32 — with the same `.0` integer suffix.
+pub fn almide_rt_float32_to_string(n: f32) -> String {
+    let s = format!("{}", n);
+    if n.fract() == 0.0 && !s.contains('.') && !s.contains("inf") && !s.contains("NaN") {
+        format!("{}.0", s)
+    } else {
+        s
+    }
+}
 pub fn almide_rt_float_parse(s: &str) -> Result<f64, String> { s.trim().parse::<f64>().map_err(|e| e.to_string()) }
 pub fn almide_rt_float_abs(n: f64) -> f64 { n.abs() }
 pub fn almide_rt_float_ceil(n: f64) -> f64 { n.ceil() }
@@ -39,7 +49,7 @@ pub fn almide_rt_float_max(a: f64, b: f64) -> f64 {
 // ALS-T6: lo > hi OR a NaN bound aborts in the T6 form — `!(lo <= hi)` covers
 // both (f64::clamp panics raw on either).
 pub fn almide_rt_float_clamp(n: f64, lo: f64, hi: f64) -> f64 {
-    if !(lo <= hi) { eprintln!("Error: clamp requires min <= max"); std::process::exit(1); }
+    if !(lo <= hi) { almide_abort("clamp requires min <= max"); }
     n.clamp(lo, hi)
 }
 pub fn almide_rt_float_sign(n: f64) -> f64 { n.signum() }
@@ -53,8 +63,7 @@ pub fn almide_rt_float_to_fixed(n: f64, decimals: i64) -> String {
     // trapped (exit 134) — differential-fuzz. An f64's exact expansion never
     // exceeds ~1074 fractional digits, so 4096 is generous AND total on both.
     if !(0..=4096).contains(&decimals) {
-        eprintln!("Error: to_fixed requires decimals in 0..=4096");
-        std::process::exit(1);
+        almide_abort("to_fixed requires decimals in 0..=4096");
     }
     format!("{:.1$}", n, decimals as usize)
 }

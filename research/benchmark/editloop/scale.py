@@ -108,6 +108,46 @@ SKIP = {"args.almd", "html.almd", "json.almd", "http.almd", "path.almd"}
 # 309 sources / 3,551 of 34,203 lines, leaving 30,652 — above the top rung.
 INTRINSIC_RE = re.compile(r"^\s*@(?:wasm_)?intrinsic\b", re.M)
 
+# A source that names `prim.*` (most of the stdlib: `prim` is the floor it is
+# written over) is not a user module either, since `prim` is stdlib-only (E085,
+# #3025). Excluding those would leave ~3.9k of ~31.5k lines, below the 10k rung,
+# so the ladder keeps them and points them at a STAND-IN: `mprim`, a user module
+# with every prim fn's signature and a self-call body (well-typed at any return
+# type and never run; the ladder only checks). A copy's `prim.` becomes `mprim.`
+# and its `import prim` (or none) becomes `import mprim`. The checker does the
+# same work on the same bodies, and the stand-in's lines count toward the rung
+# like any module's.
+PRIM_REF_RE = re.compile(r"\bprim\.")
+PRIM_IMPORT_RE = re.compile(r"^import prim$", re.M)
+PRIM_DECL_RE = re.compile(r"^((?:effect )?fn (\w+)(?:\[[^\]]*\])?\(([^)]*)\).*?) = _$")
+
+
+def prim_stand_in():
+    """`stdlib/prim.almd` as a checkable user module: attributes dropped, each
+    `= _` body replaced by a call to itself with its own parameters."""
+    out = []
+    with open(os.path.join(ROOT, "stdlib", "prim.almd"), encoding="utf-8") as f:
+        for line in f.read().split("\n"):
+            if line.lstrip().startswith("@"):
+                continue
+            m = PRIM_DECL_RE.match(line)
+            if m:
+                params = [p.split(":")[0].strip() for p in m.group(3).split(",") if p.strip()]
+                line = "%s = %s(%s)" % (m.group(1), m.group(2), ", ".join(params))
+            out.append(line)
+    return "\n".join(out)
+
+
+def to_stand_in(text):
+    """Point a copied stdlib source's `prim.*` at the `mprim` stand-in."""
+    had_import = PRIM_IMPORT_RE.search(text) is not None
+    text = PRIM_IMPORT_RE.sub("import mprim", text)
+    if not PRIM_REF_RE.search(text):
+        return text
+    text = PRIM_REF_RE.sub("mprim.", text)
+    return text if had_import else "import mprim\n" + text
+
+
 # Cumulative source-line targets for the rungs. 0 is the floor (entry only);
 # 10000 is the roadmap's headline size; the last rung is the whole corpus.
 DEFAULT_TARGETS = [0, 2000, 5000, 10000, 20000, 10 ** 9]
@@ -134,10 +174,15 @@ def build_rung(files, out_dir):
     shutil.rmtree(out_dir, ignore_errors=True)
     os.makedirs(src)
     total, names = 0, []
+    if files:
+        stand_in = prim_stand_in()
+        with open(os.path.join(src, "mprim.almd"), "w", encoding="utf-8") as f:
+            f.write(stand_in)
+        total += stand_in.count("\n")
     for i, (rel, _) in enumerate(files):
         name = "m%03d" % i
         with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
-            text = f.read()
+            text = to_stand_in(f.read())
         total += text.count("\n")
         with open(os.path.join(src, name + ".almd"), "w", encoding="utf-8") as f:
             f.write(text)

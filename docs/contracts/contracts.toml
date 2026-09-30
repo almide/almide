@@ -273,6 +273,7 @@ evidence  = [
   { path = "spec/wasm_cross/map_of_maps_value.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_set_index_threshold.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_entry_loop.almd", class = "fixture" },
+  { path = "spec/wasm_cross/stdlib_call_temporaries_release.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-014"
@@ -532,6 +533,9 @@ evidence  = [
   { path = "spec/wasm_cross/inplace_clear_alias.almd", class = "fixture" },
   { path = "spec/wasm_cross/inplace_clear_alias_field.almd", class = "fixture" },
   { path = "spec/wasm_cross/record_scalar_field_assign_alias.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mutator_writeback_releases_old_block.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_place_assign.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_nested_place_writeback.almd", class = "fixture" },
 ]
 
 # ── LIST BOUNDS GRACEFULNESS ─────────────────────────────────────────
@@ -608,6 +612,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/sized_int_record_fields.almd", class = "fixture" },
   { path = "spec/wasm_cross/sized_numeric_literals.almd", class = "fixture" },
+  { path = "spec/wasm_cross/sized_tail_literal_matrix.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-039"
@@ -679,6 +684,9 @@ evidence  = [
   { path = "spec/churn/construct_from_temp_churn.almd", class = "by-construction" },
   { path = "spec/churn/record_churn.almd", class = "by-construction" },
   { path = "spec/churn/tco_loop_churn.almd", class = "by-construction" },
+  { path = "spec/wasm_cross/leak_free_reader_temporaries.almd", class = "fixture" },
+  { path = "spec/wasm_cross/leak_free_propagating_literal_operand.almd", class = "fixture" },
+  { path = "spec/wasm_cross/leak_free_result_option_carriers.almd", class = "fixture" },
 ]
 
 # ── FILESYSTEM (WASI PREOPEN RESOLUTION) ─────────────────────────────
@@ -931,6 +939,7 @@ since     = "0.26.7"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/value_repr.almd", class = "fixture" },
+  { path = "spec/wasm_cross/value_codec_matrix_temporaries_release.almd", class = "fixture" },
 ]
 
 # ── A mut Map PARAMETER MUTATED IN PLACE BUILDS + PERSISTS, IDENTICAL ─
@@ -978,6 +987,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/effect_assign_unwrap.almd", class = "fixture" },
   { path = "spec/wasm_cross/fallible_hof_option_effect_callback.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_place_assign.almd", class = "fixture" },
 ]
 
 # ── STRING POSITION API SPEAKS ONE UNIT: CODEPOINTS ──────────────────
@@ -1403,6 +1413,8 @@ evidence  = [
   { path = "spec/wasm_cross/list_of_maps_loop_build.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_three_level_literal.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_three_level_loop_build.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_heap_ops_release_temporaries.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_reduce_fused_fold_release.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-102"
@@ -1519,6 +1531,7 @@ evidence  = [
   { path = "spec/wasm_cross/let_unwrap_propagation.almd", class = "fixture" },
   { path = "spec/wasm_cross/destructure_let_unwrap.almd", class = "fixture" },
   { path = "spec/wasm_cross/unwrap_callarg_single_expr_effect_body.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_operand_unwrap_distinct.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-109"
@@ -1765,12 +1778,13 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/loop_buffer_churn.almd", class = "fixture" },
   { path = "spec/wasm_cross/loop_push_trailing_increment.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_loop_stays_in_place.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-132"
 spec      = "ALS-M13"
 title     = "mut parameters of reallocating containers persist to the caller at every call position"
-statement = "A `mut` parameter of a REALLOCATING container (List, String, Bytes) mutated in place inside the callee persists to the caller on wasm exactly as native, at EVERY call position — statement, Bind/Assign RHS, nested expression, loop bodies — and for both bare-var and record-FIELD arguments (`push9(b.items, 7)` writes the buffer back into the field). Value-returning callees return an (orig, buffer) tuple destructured at the call site; Unit callees return the buffer. Previously only Unit callees in statement position were lowered: `let i = push9(v, 7)` pushed into a discarded copy (wasm len=1 vs native len=3, silent len=0 from empty; a real MLP printed loss 0.0), the #705 class.The SAME persistence holds through a PLAIN (non-`mut`) `Bytes` parameter, reached by a different route: the byte-writer family (`set_*`/`append_*`/`write_*`, plus `fill`/`copy_from`/`copy_within`) is `@intrinsic`s whose mutation lives in the native `&mut Vec<u8>` signature, so the `.almd` declaration carries no `mut` marker while the effect is identical — a callee writing into a `Bytes` param mutates the CALLER's buffer on both targets, and a temporary argument (legal here, since E032 only forbids one for a declared `mut` param) simply has no observable slot. Both backends always agreed; the INTERPRETER did not until 2026-08-15 — its #1022 copy-out fired only on `param.is_mut`, so the write died at the frame boundary and the third judge voted the unmodified buffer, which the first scheduled both-arch fuzz night surfaced as a false `both targets disagree with reference interpreter` (run 31861833115, seed 509789329843 index 150, #1436). The interp now copies a `Bytes` param out by TYPE as well as by declaration. EXTENDED (#1576, 0.61.2): a CAN-ERR effect fn with a `mut` param takes the same tuple rewrite — `(T, Buf)` rides the OK payload only (`Result[(T, Buf), String]`), the err arm carries no buffer, and at a `!` site the err propagates BEFORE any write-back, so the caller's slot keeps its pre-call binding (the ratified err-path order, the one the was-Unit form always realized); every payload kind the carrier admits pins byte-identical — Int, String, record, List, Option, a declared-Result `T!` (stripped to its raw payload first: `(Result, Buf)` had double-layered the carrier, structural `ok(22)` vs native `22`, and an INVALID module on the incumbent), and a scalar tuple — crossed with record/List/String buffers, bare-var and record-FIELD argument places, nested `!` forwarding, and a generic bound over an `effect fn` protocol method with `mut self` (the DDD port spelling; `spec/gauntlet/pkg/mut_port` now runs). Two caller-side holes closed with it: a RESOLVED cross-module call (`CallTarget::Module`, the mono instance's `place_order.place_order(repo, ..)`) and a `Type.method` spelled from another module than the method's (the bound's `MemoryOrderRepo.save` from `place_order`) were never rewritten, so the callee's returned buffer was dropped — native `rev=$37.50`, wasm `rev=$0.00`. Boundary: the err-path buffer is READABLE only through a `??`/`match` consumer of the call, which is refused on every mut-param callee (never-err included) — native's `&mut` shows pre-err writes there, so that consumer stays walled until the ruling is carried to native; a declared-Result effect fn whose err type is not `String` stays excluded (`mut-param`). SUPERSEDED (#2466, dialect epoch 5): the plain-`Bytes`-parameter route is closed. The byte-writer family now declares its receiver `mut` (the native `&mut Vec<u8>` first parameter made explicit on the surface, gated by scripts/check-mut-receivers.sh), so a callee that writes its caller's buffer declares `mut b: Bytes` and takes this contract's declared-`mut` route, and a plain parameter or a temporary argument to a writer is E032 — the checker, not a target, now decides that the caller's buffer changes. `bytes_param_writeback.almd` carries its helpers as `mut` parameters, and `bytes_clear_mut_param.almd` pins `bytes.clear` through a `mut` parameter in both write-back shapes."
+statement = "A `mut` parameter of a REALLOCATING container (List, String, Bytes) mutated in place inside the callee persists to the caller on wasm exactly as native, at EVERY call position — statement, Bind/Assign RHS, nested expression, loop bodies — and for both bare-var and record-FIELD arguments (`push9(b.items, 7)` writes the buffer back into the field). Value-returning callees return an (orig, buffer) tuple destructured at the call site; Unit callees return the buffer. Previously only Unit callees in statement position were lowered: `let i = push9(v, 7)` pushed into a discarded copy (wasm len=1 vs native len=3, silent len=0 from empty; a real MLP printed loss 0.0), the #705 class.The SAME persistence holds through a PLAIN (non-`mut`) `Bytes` parameter, reached by a different route: the byte-writer family (`set_*`/`append_*`/`write_*`, plus `fill`/`copy_from`/`copy_within`) is `@intrinsic`s whose mutation lives in the native `&mut Vec<u8>` signature, so the `.almd` declaration carries no `mut` marker while the effect is identical — a callee writing into a `Bytes` param mutates the CALLER's buffer on both targets, and a temporary argument (legal here, since E032 only forbids one for a declared `mut` param) simply has no observable slot. Both backends always agreed; the INTERPRETER did not until 2026-08-15 — its #1022 copy-out fired only on `param.is_mut`, so the write died at the frame boundary and the third judge voted the unmodified buffer, which the first scheduled both-arch fuzz night surfaced as a false `both targets disagree with reference interpreter` (run 31861833115, seed 509789329843 index 150, #1436). The interp now copies a `Bytes` param out by TYPE as well as by declaration. EXTENDED (#1576, 0.61.2): a CAN-ERR effect fn with a `mut` param takes the same tuple rewrite — `(T, Buf)` rides the OK payload; every payload kind the carrier admits pins byte-identical — Int, String, record, List, Option, a declared-Result `T!` (stripped to its raw payload first: `(Result, Buf)` had double-layered the carrier, structural `ok(22)` vs native `22`, and an INVALID module on the incumbent), and a scalar tuple — crossed with record/List/String buffers, bare-var and record-FIELD argument places, nested `!` forwarding, and a generic bound over an `effect fn` protocol method with `mut self` (the DDD port spelling; `spec/gauntlet/pkg/mut_port` now runs). Two caller-side holes closed with it: a RESOLVED cross-module call (`CallTarget::Module`, the mono instance's `place_order.place_order(repo, ..)`) and a `Type.method` spelled from another module than the method's (the bound's `MemoryOrderRepo.save` from `place_order`) were never rewritten, so the callee's returned buffer was dropped — native `rev=$37.50`, wasm `rev=$0.00`. A declared-Result effect fn whose err type is not `String` stays excluded (`mut-param`). AMENDED (#1871 ruling (B), #2917): a write the callee makes to its `mut` param BEFORE it errs is VISIBLE to the caller, on wasm exactly as native's `&mut`. The buffer rides the err arm too: every raising exit of the callee — an explicit `err(..)` tail, a guard exit, every `x!`/`x?` propagation inside it — carries the buffer it holds at that point, and the call site writes it back on BOTH arms. An unpropagated call (a bound Result, `??`, `match`, `let _ =`) writes back, then yields ok/err at its declared Result type; a `!` call writes back, then propagates, so a caller one level up that catches the err reads the write. This withdraws the #1576 order (the err propagated before any write-back and the caller's slot kept its pre-call binding), which went unobserved only while every consumer that could read the err-path buffer was walled. `mut_param_err_write_visible.almd` pins explicit-err, guard and propagated-`!` exits after a write, read through `??`, `match`, a bound Result, `let _ =` and a `!` forwarded one level up, over List, String and record buffers. SUPERSEDED (#2466, dialect epoch 5): the plain-`Bytes`-parameter route is closed. The byte-writer family now declares its receiver `mut` (the native `&mut Vec<u8>` first parameter made explicit on the surface, gated by scripts/check-mut-receivers.sh), so a callee that writes its caller's buffer declares `mut b: Bytes` and takes this contract's declared-`mut` route, and a plain parameter or a temporary argument to a writer is E032 — the checker, not a target, now decides that the caller's buffer changes. `bytes_param_writeback.almd` carries its helpers as `mut` parameters, and `bytes_clear_mut_param.almd` pins `bytes.clear` through a `mut` parameter in both write-back shapes. AMENDED (#3103 ruling (A)): a `mut` argument is COPIED IN and written back. A callee that reads the module-level `var` its argument is rooted at — bare or through a field path, directly, through another fn, or through a closure it calls — sees the global's PRE-call value until the call returns, on every leg; the write-back then stores the callee's buffer into the place, overwriting a write the callee made to that same place (a write to another part of the global is kept). The structural wasm leg had handed the callee the global's own block, so a read of the global inside the call printed the callee's in-progress push where native and the interpreter printed the pre-call value. The wasm leg pays the copy only when the callee can REACH that global (a compile-time over-approximation over the call graph: a call through a closure or fn value reaches every global); a callee that cannot keeps the in-place, zero-copy call. `mut_param_global_callee_sees_precall.almd` pins a bare global, a field, a nested field, a reach through another fn and one through a closure; `mut_param_global_no_reach_in_place.almd` pins a callee that cannot reach the global."
 since     = "0.28.6"
 status    = "active"
 evidence  = [
@@ -1781,8 +1795,18 @@ evidence  = [
   { path = "spec/wasm_cross/mut_param_effect_never_err.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_mut_generic_port.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_effect_can_err.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_err_write_visible.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_move_mode_gaps.almd", class = "fixture" },
   { path = "spec/wasm_cross/mutable_global_field_mut_arg.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_effect_unpropagated.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_call_hoisted_args_distinct.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mutator_writeback_releases_old_block.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_nested_place_writeback.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_interpolated.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_loop_stays_in_place.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_global_callee_sees_precall.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_global_no_reach_in_place.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-133"
@@ -2411,6 +2435,7 @@ evidence  = [
   { path = "spec/wasm_cross/mutable_global_repeat_writes.almd", class = "fixture" },
   { path = "spec/wasm_cross/mutable_global_scalar_assign.almd", class = "fixture" },
   { path = "spec/wasm_cross/mutable_global_field_mut_arg.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd", class = "fixture" },
 ]
 
 # ── STATEMENT EFFECTS INSIDE A REAL SCALAR-`if` ARM ─
@@ -2525,6 +2550,9 @@ evidence  = [
   { path = "spec/wasm_cross/string_pad_ceiling_oom.almd", class = "fixture" },
   { path = "spec/wasm_cross/prim_alloc_count_domain.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_repeat_product_wrap_oom.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_worker_abort_keeps_stdout.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_map_all_workers_abort_one_line.almd", class = "fixture" },
   { path = "tests/alloc_bump_wrap_test.rs", class = "fixture", name = "bump_head_wrap_is_the_defined_oom_abort" },
   { path = "tests/component_realloc_oom_test.rs", class = "fixture", name = "host_driven_exhaustion_in_the_component_is_the_defined_abort" },
 ]
@@ -2687,6 +2715,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/codec_none_omission.almd", class = "fixture" },
   { path = "spec/stdlib/codec_field_matrix_test.almd", class = "fixture" },
+  { path = "spec/wasm_cross/value_codec_matrix_temporaries_release.almd", class = "fixture" },
 ]
 
 # ── NaN OBSERVATION IS CANONICAL — Wasm 3.0 deterministic-profile conformance ─
@@ -2813,6 +2842,8 @@ evidence  = [
   { path = "tests/exit_tail_positions_test.rs", name = "dynamic_exit_codes_execute_in_every_tail_position", class = "fixture" },
   { path = "spec/wasm_cross/guard_else_exit_code.almd", class = "fixture" },
   { path = "spec/wasm_cross/panic_value_arm.almd", class = "fixture" },
+  { path = "spec/wasm_cross/panic_abort_positions.almd", class = "fixture" },
+  { path = "tests/panic_abort_positions_test.rs", name = "panic_aborts_identically_on_native_wasm_and_interp_in_every_position", class = "fixture" },
 ]
 
 # ── STREAMING LINE WALKERS: O(LONGEST LINE) MEMORY, READ_LINES SEMANTICS ──
@@ -2868,6 +2899,7 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_product_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_composition_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_softmax_nonfinite_rows.almd", class = "fixture" },
+  { path = "spec/wasm_cross/value_codec_matrix_temporaries_release.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-224"
@@ -2894,7 +2926,7 @@ evidence  = [
 id        = "C-226"
 spec      = "ALS-C7"
 title     = "A mut parameter crossing a call boundary mutates the caller's data on both targets"
-statement = "Passing a `mut` parameter to another function mutates the caller's data byte-identically native <-> wasm, in every #1207 shape: a Unit effect fn forwarding its own mut param to another effect fn (`g(mut a) = { h(a)! }`), tail recursion threading a mut Bytes buffer through an `if` arm (the Barnsley-fern chaos-game shape), a loop-heavy call chain (10k writebacks — an ownership imbalance would trap or leak only under repetition), and a growth writeback where the callee REALLOCATES (list.push through a guarded chain) so the caller must observe the successor handle. Mechanism, two halves: (1) the C-132 move-mode rewriter rotates the effect wrapper onto the bound call (`Unwrap{Block{let buf = call; wb}}` -> `Block{let buf = Unwrap{call}; wb}`), so the tree carries only proven shapes — the C-222 bind-position unwrap and a statement Block — instead of a wrapper-over-Block no lowering accepts; (2) the unit-arm assign machinery admits the write-back into the fn's OWN borrowed mut-param slot (drop-old skipped: the callee consumed the old buffer, which flowed in as the mut arg and returned as the same handle or its realloc successor), recognized structurally by VarId — the assigned temp must be call-bound with the assign target among that call's Var arguments. Before this contract every mut-param call chain fell off the wasm leg (walls naming the condition instead of the arm — the #1207 report). Excluded and honestly walled, as before: a VALUE-returning effect fn with a mut param (tuple-inside-Result plumbing, the documented C-132 exclusion). The #1770 addendum: a caller that keeps writing its own mut param AFTER a helper write-back, with the buffer reallocating during those later writes, must return the intact successor — the write-back's Assign made the param an epilogue owner ON TOP of the param pass's release, and the double dec freed the returned buffer (its freelist link zeroed the first payload word: native [1,16,...], wasm [0,0,0,0,...]). The epilogue now releases each local exactly once (the param pass skips rc_owned members), pinned by mut_param_writeback_growth and the zlib deflate helpers restored to their natural forwarding shape. EXTENDED (#2411, 0.63.0): the mutation may target a LIST FIELD of the mut record parameter — `list.push(h.kids, kid)` and `list.clear(h.xs)` where `h: mut Holder` — and the caller's record carries the grown list afterwards, byte-identical to native. Before this clause the structural leg's `push` arm accepted only a plain var receiver and refused a field with `list-push-nonvar`, while the incumbent brick refused the enclosing loop for its own reason, so the builder idiom — a `mut` record parameter accumulating into its list fields inside a `for` loop, the shape #2316 was found in — had NO wasm route at all: it built on native only, and the source gave no sign. It now routes through the copy-on-write field write the leg already owns (`lower_field_assign`, the C-033 doctrine) as `h.f = h.f + [v]` / `h.f = []`: the record block is copied, the replaced slot's credit is released, the fresh list takes its own credit, the var is rebound — no second receiver mode in the push arm, so every credit rides a path a fixture already pins. The cost model is the leg's own for any field write (a fresh record per write; the list concat is O(n) per push) and a 1000-push loop is a row of the fixture so a leak would show in the allocation ledger rather than in stdout. Element shapes covered: Int (scalar, no credit), Float (crosses the push helper as a bit pattern), String and a record (heap, the concat takes the credit); an alias taken before the push keeps the old list (C-033). DECLARED OMISSION: a nested receiver path (`h.i.xs`, `xs[i].f`) is still refused with the same `list-push-nonvar` — the field write takes one var and one field — and `tests/list_push_on_record_field_test.rs` pins that it stays a wall rather than silently widening. It predates the release: reproduced on the published v0.62.0 asset."
+statement = "Passing a `mut` parameter to another function mutates the caller's data byte-identically native <-> wasm, in every #1207 shape: a Unit effect fn forwarding its own mut param to another effect fn (`g(mut a) = { h(a)! }`), tail recursion threading a mut Bytes buffer through an `if` arm (the Barnsley-fern chaos-game shape), a loop-heavy call chain (10k writebacks — an ownership imbalance would trap or leak only under repetition), and a growth writeback where the callee REALLOCATES (list.push through a guarded chain) so the caller must observe the successor handle. Mechanism, two halves: (1) the C-132 move-mode rewriter rotates the effect wrapper onto the bound call (`Unwrap{Block{let buf = call; wb}}` -> `Block{let buf = Unwrap{call}; wb}`), so the tree carries only proven shapes — the C-222 bind-position unwrap and a statement Block — instead of a wrapper-over-Block no lowering accepts; (2) the unit-arm assign machinery admits the write-back into the fn's OWN borrowed mut-param slot (drop-old skipped: the callee consumed the old buffer, which flowed in as the mut arg and returned as the same handle or its realloc successor), recognized structurally by VarId — the assigned temp must be call-bound with the assign target among that call's Var arguments. Before this contract every mut-param call chain fell off the wasm leg (walls naming the condition instead of the arm — the #1207 report). A VALUE-returning effect fn with a mut param, walled when this contract landed, is carried by C-132: the buffer rides the Result's ok arm (#1576) and its err arm (#2917), so a write made before an err reaches the caller as on native. The #1770 addendum: a caller that keeps writing its own mut param AFTER a helper write-back, with the buffer reallocating during those later writes, must return the intact successor — the write-back's Assign made the param an epilogue owner ON TOP of the param pass's release, and the double dec freed the returned buffer (its freelist link zeroed the first payload word: native [1,16,...], wasm [0,0,0,0,...]). The epilogue now releases each local exactly once (the param pass skips rc_owned members), pinned by mut_param_writeback_growth and the zlib deflate helpers restored to their natural forwarding shape. EXTENDED (#2411, 0.63.0): the mutation may target a LIST FIELD of the mut record parameter — `list.push(h.kids, kid)` and `list.clear(h.xs)` where `h: mut Holder` — and the caller's record carries the grown list afterwards, byte-identical to native. Before this clause the structural leg's `push` arm accepted only a plain var receiver and refused a field with `list-push-nonvar`, while the incumbent brick refused the enclosing loop for its own reason, so the builder idiom — a `mut` record parameter accumulating into its list fields inside a `for` loop, the shape #2316 was found in — had NO wasm route at all: it built on native only, and the source gave no sign. It now routes through the copy-on-write field write the leg already owns (`lower_field_assign`, the C-033 doctrine) as `h.f = h.f + [v]` / `h.f = []`: the record block is copied, the replaced slot's credit is released, the fresh list takes its own credit, the var is rebound — no second receiver mode in the push arm, so every credit rides a path a fixture already pins. The cost model is the leg's own for any field write (a fresh record per write; the list concat is O(n) per push) and a 1000-push loop is a row of the fixture so a leak would show in the allocation ledger rather than in stdout. Element shapes covered: Int (scalar, no credit), Float (crosses the push helper as a bit pattern), String and a record (heap, the concat takes the credit); an alias taken before the push keeps the old list (C-033). DECLARED OMISSION: a nested receiver path (`h.i.xs`, `xs[i].f`) is still refused with the same `list-push-nonvar` — the field write takes one var and one field — and `tests/list_push_on_record_field_test.rs` pins that it stays a wall rather than silently widening. It predates the release: reproduced on the published v0.62.0 asset."
 since     = "0.56.2"
 status    = "active"
 evidence  = [
@@ -3230,7 +3262,9 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/loop_break_continue.almd", class = "fixture" },
+  { path = "spec/wasm_cross/guard_jump_in_value_fn.almd", class = "fixture" },
   { path = "tests/wasm_break_continue_heap_test.rs", name = "break_and_continue_over_heap_locals_match_native_on_the_structural_leg_without_leaking", class = "fixture" },
+  { path = "tests/wasm_break_continue_heap_test.rs", name = "guard_jumps_in_value_returning_fns_match_native_on_the_structural_leg_without_leaking", class = "fixture" },
 ]
 [[contract]]
 id        = "C-257"
@@ -3326,6 +3360,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/guard_statement.almd", class = "fixture" },
   { path = "spec/wasm_cross/generic_pattern_binds_instanced.almd", class = "fixture" },
+  { path = "spec/wasm_cross/guard_value_exit_in_loop.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-266"
@@ -3559,6 +3594,7 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/regex_engine.almd", class = "fixture" },
+  { path = "spec/wasm_cross/regex_captures_accumulator_release.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-286"
@@ -3885,6 +3921,7 @@ evidence  = [
   { path = "spec/wasm_cross/closure_captured_map_records.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_writer_mut_from_declaration.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_reads_var_written_by_mut_call.almd", class = "fixture" },
+  { path = "spec/wasm_cross/closure_captured_record_field_mutation.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-320"
@@ -3895,6 +3932,7 @@ since     = "0.60.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fuel_cut_in_arm_loop.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fuel_cut_releases_frame.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-302"
@@ -4258,6 +4296,7 @@ evidence  = [
   { path = "spec/wasm_cross/closure_borrowed_arg_guard.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_update_callback_result_ownership.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_fold_fused_callback_result_ownership.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_reduce_fused_fold_release.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-335"
@@ -4268,6 +4307,7 @@ since     = "0.62.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/path_extension_hidden.almd", class = "fixture" },
+  { path = "spec/wasm_cross/stdlib_call_temporaries_release.almd", class = "fixture" },
 ]
 
 # ── PER-TEST RE-INIT OF MUTABLE MODULE GLOBALS ────────────────────────
@@ -4714,4 +4754,24 @@ status    = "active"
 evidence  = [
   { path = "spec/embedded_cross/http_header_refusal.almd", class = "fixture" },
   { path = "tests/http_error_class_cross_test.rs", class = "fixture", name = "the_spec_fixtures_read_the_same_on_native_embedded_and_p3" },
+]
+[[contract]]
+id        = "C-371"
+spec      = "ALS-T28"
+title     = "Float32 arithmetic rounds every result to binary32 on every leg"
+statement = "Each Float32 `+`, `-`, `*`, `/`, `%`, `**` and unary `-` result is rounded to IEEE-754 binary32 (round-to-nearest-even) after that one operation, so every leg holds the value native's `f32` arithmetic computes: `1/3` widens to 0.3333333432674408, `2^24 + 1` is `2^24`, and ten additions of `0.1` give 1.0000001192092896. A leg that carries Float32 in an f64 slot rounds after every operation; before this, the wasm leg and the interpreter kept the unrounded f64 quotient (0.3333333333333333), which widening, a comparison or any later operation then observed. A conversion into Float32 (`float.to_float32`, `int.to_float32` and the sized `to_float32` twins) rounds once, a comparison reads the rounded values, and a bare float literal in a Float32 position narrows at birth (C-182). `a ** b` on Float32 is the f64 `**` of the widened operands (the vendored libm pow, C-026's one implementation) rounded once to binary32; before this, native did not build it at all (the f32 operands met the f64 pow, almide#3082). No `math.*` function takes a Float32; one reaches them only through an explicit `float32.to_float64`. spec/wasm_cross/float32_arithmetic_rounds.almd observes each operation through `float32.to_float64` and `float.to_string`, which show every bit of the binary32 value, and through comparisons whose answer flips when a leg does not round."
+since     = "0.66.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float32_arithmetic_rounds.almd", class = "fixture" },
+]
+[[contract]]
+id        = "C-372"
+spec      = "ALS-T29"
+title     = "A Float32 displays as the shortest decimal that round-trips to the same binary32"
+statement = "A Float32 prints as Rust `f32` Display does: the shortest positional decimal that parses back to the SAME binary32, so `0.1` prints `0.1`, not the widened f64's `0.10000000149011612`, and the f32 maximum prints 340282350000000000000000000000000000000. An exact tie between the two shortest candidates rounds the magnitude up (`2^-12` prints 0.00024414063, `2^20 + 0.25` prints 1048576.3). In interpolation and inside a list, record, option, tuple or variant payload an integral value drops its `.0` (C-011's rule: `${2.0f32}` is `2`), and `float32.to_string` keeps it (`2.0`); `-0` keeps its sign, and the non-finite values are `inf`, `-inf` and `NaN`. Before this, `float32.to_string` printed the widened f64's digits on every leg, and the wasm leg and the interpreter did the same for interpolation where native printed the f32 digits. spec/wasm_cross/float32_display_shortest.almd pins the value matrix (0.1, 1/3, a whole value, ±0, ±inf, NaN, the f32 maximum, the least normal, the least subnormal, a subnormal, both tie shapes) top-level in both forms and nested in each container."
+since     = "0.66.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float32_display_shortest.almd", class = "fixture" },
 ]

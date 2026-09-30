@@ -1,0 +1,9 @@
+// Assigning to a field the record does not have is E013, like reading it:
+// before, `s.nope = v` passed check and failed in codegen.
+type S = { note: Int }
+
+fn main() -> Unit = {
+  var s = S { note: 1 }
+  s.nope = 2
+  println("${s.note}")
+}

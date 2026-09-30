@@ -1,0 +1,54 @@
+// @contract: C-066
+// A `!` that propagates out of an operand of a list, tuple or record
+// literal leaves nothing behind. The structural wasm leg allocated the
+// container first and lowered the operands into it, so an err returned from
+// the middle of the build left the half-built block — and the credits of
+// the operands already stored in it — held by nobody (#2988). The operands
+// are now evaluated in order before the container exists. Both the err and
+// the ok path run for each literal form, with a heap operand stored ahead
+// of the one that propagates; the program prints the same text on both
+// targets and ends with no block live.
+type P = { name: String, n: Int }
+
+effect fn chk(s: String) -> Int = if s == "x" then err("bad " + s)!
+else int.parse(s)!
+
+effect fn in_list(s: String) -> Int = {
+  let v = [
+    "k" + s,
+    int.to_string(chk(s)!)
+  ]
+  list.len(v)
+}
+
+effect fn in_tuple(s: String) -> Int = {
+  let v = ("k" + s, chk(s)!)
+  v.1
+}
+
+effect fn in_record(s: String) -> Int = {
+  let v = P { name: "k" + s, n: chk(s)! }
+  v.n
+}
+
+effect fn in_spread(s: String) -> Int = {
+  let base = P { name: "b", n: 0 }
+  let v = { ...base, name: "k" + s, n: chk(s)! }
+  v.n + string.len(v.name)
+}
+
+fn show(label: String, r: Result[Int, String]) -> String = match r {
+  ok(n) => "${label} ok ${n}",
+  err(e) => "${label} err ${e}",
+}
+
+effect fn main() -> Unit = {
+  println(show("list", in_list("x")))
+  println(show("list", in_list("4")))
+  println(show("tuple", in_tuple("x")))
+  println(show("tuple", in_tuple("5")))
+  println(show("record", in_record("x")))
+  println(show("record", in_record("6")))
+  println(show("spread", in_spread("x")))
+  println(show("spread", in_spread("7")))
+}

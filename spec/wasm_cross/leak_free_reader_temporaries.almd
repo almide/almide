@@ -1,0 +1,83 @@
+// @contract: C-066
+// A value that is READ and never stored — a match subject, an operand of
+// `==` / `!=`, the object of a field or position read, an interpolated
+// part — is released once the read is done, whether it is a call result or
+// a block the expression builds itself (a tuple, a record, a `some` box, a
+// variant, a map literal). The structural wasm leg released only call
+// results in most of these positions, so every constructed subject, every
+// compared tuple and every `f().0` stayed live until exit (#2971, #2972,
+// #3018); a Float or compound interpolation kept its formatted text
+// (#2973); a named list rest (`[h, ..t]`) was never released (#2971). The
+// program prints the same text on both targets and ends with no block live.
+type Shape = | Circle(Int) | Label(String)
+
+type Rec = { a: Int, s: String }
+
+fn pair() -> (Int, Int) = (2, 7)
+
+fn named() -> (Int, String) = (1, "n" + "x")
+
+fn rec(k: Int) -> Rec = { a: k, s: "r" + int.to_string(k) }
+
+fn total(xs: List[Int]) -> Int = match xs {
+  [] => 0,
+  [h, ..t] => h + total(t),
+}
+
+fn tail_of(xs: List[String]) -> List[String] = match xs {
+  [_, ..t] => t,
+  [] => [],
+}
+
+fn describe(r: Result[Int, String]) -> String = match r {
+  ok(n) => int.to_string(n),
+  err(e) => e,
+}
+
+effect fn main() -> Unit = {
+  // A constructed match subject.
+  let t3 = match (1, (4, 5), 3) {
+    (a, (d, e), c) => a + c + d + e
+  }
+  let s = match some(7) {
+    some(v) => v,
+    none => 0,
+  }
+  let shape = match Label("q" + "z") {
+    Circle(r) => int.to_string(r),
+    Label(l) => l,
+  }
+  println("match: ${t3} ${s} ${shape}")
+  // A named list rest, in a recursive fn and as the returned value.
+  println("rest: ${total([1, 2, 3, 4])} ${list.join(tail_of(["a", "b", "c"]), ",")}")
+  // `==` / `!=` over heap temporaries.
+  let eq_t = (1, 2) == (1, 2)
+  let eq_v = Label("x") == Label("y")
+  let ne_o = some("a" + "b") != some("ab")
+  let eq_r = (ok("v" + "w"): Result[String, String]) == ok("vw")
+  let eq_m = ["a": 1] == ["a": 1, "b": 2]
+  println("eq: ${eq_t} ${eq_v} ${ne_o} ${eq_r} ${eq_m}")
+  // A field or position read from a call result or a literal.
+  let p0 = pair().0
+  let lit = (2, 7).1
+  let nm = named().1
+  let ra = rec(3).a
+  let rs = rec(4).s
+  println("read: ${p0} ${lit} ${nm} ${ra} ${rs}")
+  // Interpolating a Float, a variant, a map literal, an empty map.
+  let f = 1.5
+  println("float=${f} third=${1.0 / 3.0}")
+  println("repr: ${Circle(9)} ${[
+    "k": [1, 2]
+  ]} ${([:]: Map[String, Int])}")
+  // A value match read by `+` inside a fold callback.
+  let rs2: List[Result[Int, String]] = [ok(7), err("x"), ok(2)]
+  println("fold: ${list.fold(
+    rs2,
+    "",
+    (acc, r) => acc + describe(r) + match r {
+      ok(_) => "+",
+      err(_) => "-",
+    },
+  )}")
+}

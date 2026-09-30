@@ -5,22 +5,6 @@
 // this crate to; there is no boundary of meaning here, and `include!` at module
 // level is the one splice Rust allows (an impl-item position rejects it).
 
-fn body_has_tail_position_option_unwrap(body: &IrExpr) -> bool {
-    use almide_lang::types::constructor::TypeConstructorId;
-    fn scan(e: &IrExpr) -> bool {
-        match &e.kind {
-            IrExprKind::Unwrap { expr } => {
-                matches!(&expr.ty, Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1)
-            }
-            IrExprKind::Block { expr, .. } => expr.as_deref().is_some_and(scan),
-            IrExprKind::If { then, else_, .. } => scan(then) || scan(else_),
-            IrExprKind::Match { arms, .. } => arms.iter().any(|a| scan(&a.body)),
-            _ => false,
-        }
-    }
-    scan(body)
-}
-
 use almide_lang::intern::sym as __die_sym;
 fn die_expr(msg: &str) -> IrExpr {
     die_on(IrExpr {

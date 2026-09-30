@@ -1,0 +1,498 @@
+// @contract: C-038
+// #3060: a literal in a tail-like position of a fn with a SIZED return takes
+// the declared width, the way a `let` annotation gives it to its value. Native
+// used to spell the literal at its default width (`7i64` in an `-> i32` fn,
+// `Some(4i64)` in `-> Option<i32>`, `Ok::<i64, String>` in an effect fn) and
+// rustc rejected the crate that check accepted. The full matrix: every sized
+// width x every tail position, one fn per cell named `<position>_<width>`;
+// tests/sized_tail_literal_matrix_test.rs refuses a missing cell.
+// ── Int8 ──
+fn whole_int8() -> Int8 = -3
+
+fn if_arm_int8(n: Int) -> Int8 = if n > 0 then -3 else 7
+
+fn match_arm_int8(n: Int) -> Int8 = match n {
+  0 => 7,
+  _ => -3,
+}
+
+fn block_tail_int8(n: Int) -> Int8 = {
+  let k = n + 1
+  if k > 1 then -3 else 7
+}
+
+fn let_annot_int8(n: Int) -> Int8 = {
+  let v: Int8 = if n > 0 then -3 else 7
+  v
+}
+
+fn some_payload_int8(n: Int) -> Int8? = if n > 0 then some(-3) else none
+
+fn ok_payload_int8(n: Int) -> Result[Int8, String] = if n > 0 then ok(-3) else err("no")
+
+fn err_payload_int8(n: Int) -> Result[Bool, Int8] = if n > 0 then ok(true) else err(-3)
+
+effect fn effect_tail_int8(n: Int) -> Int8 = {
+  if n > 0 then -3 else 7
+}
+
+effect fn effect_ok_int8(n: Int) -> Int8 = {
+  if n > 0 then ok(-3) else ok(7)
+}
+
+fn lambda_let_int8(n: Int) -> Int8 = {
+  let g: (Int) -> Int8 = (x) => if x > 0 then -3 else 7
+  g(n)
+}
+
+fn apply_int8(f: (Int) -> Int8, x: Int) -> Int8 = f(x)
+
+fn lambda_arg_int8(n: Int) -> Int8 = apply_int8((x) => if x > 0 then -3 else 7, n)
+
+effect fn show_int8(n: Int) -> Unit = {
+  println("int8 ${n}: ${whole_int8()} ${if_arm_int8(n)} ${match_arm_int8(n)} ${block_tail_int8(n)} ${let_annot_int8(n)} ${effect_tail_int8(n)!} ${effect_ok_int8(n)!} ${lambda_let_int8(n)} ${lambda_arg_int8(n)}")
+  match some_payload_int8(n) {
+    some(v) => println("  some ${v}"),
+    none => println("  none"),
+  }
+  match ok_payload_int8(n) {
+    ok(v) => println("  ok ${v}"),
+    err(e) => println("  err ${e}"),
+  }
+  match err_payload_int8(n) {
+    ok(v) => println("  ok ${v}"),
+    err(v) => println("  err ${v}"),
+  }
+}
+
+// ── Int16 ──
+fn whole_int16() -> Int16 = -300
+
+fn if_arm_int16(n: Int) -> Int16 = if n > 0 then -300 else 7
+
+fn match_arm_int16(n: Int) -> Int16 = match n {
+  0 => 7,
+  _ => -300,
+}
+
+fn block_tail_int16(n: Int) -> Int16 = {
+  let k = n + 1
+  if k > 1 then -300 else 7
+}
+
+fn let_annot_int16(n: Int) -> Int16 = {
+  let v: Int16 = if n > 0 then -300 else 7
+  v
+}
+
+fn some_payload_int16(n: Int) -> Int16? = if n > 0 then some(-300) else none
+
+fn ok_payload_int16(n: Int) -> Result[Int16, String] = if n > 0 then ok(-300) else err("no")
+
+fn err_payload_int16(n: Int) -> Result[Bool, Int16] = if n > 0 then ok(true) else err(-300)
+
+effect fn effect_tail_int16(n: Int) -> Int16 = {
+  if n > 0 then -300 else 7
+}
+
+effect fn effect_ok_int16(n: Int) -> Int16 = {
+  if n > 0 then ok(-300) else ok(7)
+}
+
+fn lambda_let_int16(n: Int) -> Int16 = {
+  let g: (Int) -> Int16 = (x) => if x > 0 then -300 else 7
+  g(n)
+}
+
+fn apply_int16(f: (Int) -> Int16, x: Int) -> Int16 = f(x)
+
+fn lambda_arg_int16(n: Int) -> Int16 = apply_int16((x) => if x > 0 then -300 else 7, n)
+
+effect fn show_int16(n: Int) -> Unit = {
+  println("int16 ${n}: ${whole_int16()} ${if_arm_int16(n)} ${match_arm_int16(n)} ${block_tail_int16(n)} ${let_annot_int16(n)} ${effect_tail_int16(n)!} ${effect_ok_int16(n)!} ${lambda_let_int16(n)} ${lambda_arg_int16(n)}")
+  match some_payload_int16(n) {
+    some(v) => println("  some ${v}"),
+    none => println("  none"),
+  }
+  match ok_payload_int16(n) {
+    ok(v) => println("  ok ${v}"),
+    err(e) => println("  err ${e}"),
+  }
+  match err_payload_int16(n) {
+    ok(v) => println("  ok ${v}"),
+    err(v) => println("  err ${v}"),
+  }
+}
+
+// ── Int32 ──
+fn whole_int32() -> Int32 = -70000
+
+fn if_arm_int32(n: Int) -> Int32 = if n > 0 then -70000 else 7
+
+fn match_arm_int32(n: Int) -> Int32 = match n {
+  0 => 7,
+  _ => -70000,
+}
+
+fn block_tail_int32(n: Int) -> Int32 = {
+  let k = n + 1
+  if k > 1 then -70000 else 7
+}
+
+fn let_annot_int32(n: Int) -> Int32 = {
+  let v: Int32 = if n > 0 then -70000 else 7
+  v
+}
+
+fn some_payload_int32(n: Int) -> Int32? = if n > 0 then some(-70000) else none
+
+fn ok_payload_int32(n: Int) -> Result[Int32, String] = if n > 0 then ok(-70000) else err("no")
+
+fn err_payload_int32(n: Int) -> Result[Bool, Int32] = if n > 0 then ok(true) else err(-70000)
+
+effect fn effect_tail_int32(n: Int) -> Int32 = {
+  if n > 0 then -70000 else 7
+}
+
+effect fn effect_ok_int32(n: Int) -> Int32 = {
+  if n > 0 then ok(-70000) else ok(7)
+}
+
+fn lambda_let_int32(n: Int) -> Int32 = {
+  let g: (Int) -> Int32 = (x) => if x > 0 then -70000 else 7
+  g(n)
+}
+
+fn apply_int32(f: (Int) -> Int32, x: Int) -> Int32 = f(x)
+
+fn lambda_arg_int32(n: Int) -> Int32 = apply_int32((x) => if x > 0 then -70000 else 7, n)
+
+effect fn show_int32(n: Int) -> Unit = {
+  println("int32 ${n}: ${whole_int32()} ${if_arm_int32(n)} ${match_arm_int32(n)} ${block_tail_int32(n)} ${let_annot_int32(n)} ${effect_tail_int32(n)!} ${effect_ok_int32(n)!} ${lambda_let_int32(n)} ${lambda_arg_int32(n)}")
+  match some_payload_int32(n) {
+    some(v) => println("  some ${v}"),
+    none => println("  none"),
+  }
+  match ok_payload_int32(n) {
+    ok(v) => println("  ok ${v}"),
+    err(e) => println("  err ${e}"),
+  }
+  match err_payload_int32(n) {
+    ok(v) => println("  ok ${v}"),
+    err(v) => println("  err ${v}"),
+  }
+}
+
+// ── UInt8 ──
+fn whole_uint8() -> UInt8 = 200
+
+fn if_arm_uint8(n: Int) -> UInt8 = if n > 0 then 200 else 7
+
+fn match_arm_uint8(n: Int) -> UInt8 = match n {
+  0 => 7,
+  _ => 200,
+}
+
+fn block_tail_uint8(n: Int) -> UInt8 = {
+  let k = n + 1
+  if k > 1 then 200 else 7
+}
+
+fn let_annot_uint8(n: Int) -> UInt8 = {
+  let v: UInt8 = if n > 0 then 200 else 7
+  v
+}
+
+fn some_payload_uint8(n: Int) -> UInt8? = if n > 0 then some(200) else none
+
+fn ok_payload_uint8(n: Int) -> Result[UInt8, String] = if n > 0 then ok(200) else err("no")
+
+fn err_payload_uint8(n: Int) -> Result[Bool, UInt8] = if n > 0 then ok(true) else err(200)
+
+effect fn effect_tail_uint8(n: Int) -> UInt8 = {
+  if n > 0 then 200 else 7
+}
+
+effect fn effect_ok_uint8(n: Int) -> UInt8 = {
+  if n > 0 then ok(200) else ok(7)
+}
+
+fn lambda_let_uint8(n: Int) -> UInt8 = {
+  let g: (Int) -> UInt8 = (x) => if x > 0 then 200 else 7
+  g(n)
+}
+
+fn apply_uint8(f: (Int) -> UInt8, x: Int) -> UInt8 = f(x)
+
+fn lambda_arg_uint8(n: Int) -> UInt8 = apply_uint8((x) => if x > 0 then 200 else 7, n)
+
+effect fn show_uint8(n: Int) -> Unit = {
+  println("uint8 ${n}: ${whole_uint8()} ${if_arm_uint8(n)} ${match_arm_uint8(n)} ${block_tail_uint8(n)} ${let_annot_uint8(n)} ${effect_tail_uint8(n)!} ${effect_ok_uint8(n)!} ${lambda_let_uint8(n)} ${lambda_arg_uint8(n)}")
+  match some_payload_uint8(n) {
+    some(v) => println("  some ${v}"),
+    none => println("  none"),
+  }
+  match ok_payload_uint8(n) {
+    ok(v) => println("  ok ${v}"),
+    err(e) => println("  err ${e}"),
+  }
+  match err_payload_uint8(n) {
+    ok(v) => println("  ok ${v}"),
+    err(v) => println("  err ${v}"),
+  }
+}
+
+// ── UInt16 ──
+fn whole_uint16() -> UInt16 = 60000
+
+fn if_arm_uint16(n: Int) -> UInt16 = if n > 0 then 60000 else 7
+
+fn match_arm_uint16(n: Int) -> UInt16 = match n {
+  0 => 7,
+  _ => 60000,
+}
+
+fn block_tail_uint16(n: Int) -> UInt16 = {
+  let k = n + 1
+  if k > 1 then 60000 else 7
+}
+
+fn let_annot_uint16(n: Int) -> UInt16 = {
+  let v: UInt16 = if n > 0 then 60000 else 7
+  v
+}
+
+fn some_payload_uint16(n: Int) -> UInt16? = if n > 0 then some(60000) else none
+
+fn ok_payload_uint16(n: Int) -> Result[UInt16, String] = if n > 0 then ok(60000) else err("no")
+
+fn err_payload_uint16(n: Int) -> Result[Bool, UInt16] = if n > 0 then ok(true) else err(60000)
+
+effect fn effect_tail_uint16(n: Int) -> UInt16 = {
+  if n > 0 then 60000 else 7
+}
+
+effect fn effect_ok_uint16(n: Int) -> UInt16 = {
+  if n > 0 then ok(60000) else ok(7)
+}
+
+fn lambda_let_uint16(n: Int) -> UInt16 = {
+  let g: (Int) -> UInt16 = (x) => if x > 0 then 60000 else 7
+  g(n)
+}
+
+fn apply_uint16(f: (Int) -> UInt16, x: Int) -> UInt16 = f(x)
+
+fn lambda_arg_uint16(n: Int) -> UInt16 = apply_uint16((x) => if x > 0 then 60000 else 7, n)
+
+effect fn show_uint16(n: Int) -> Unit = {
+  println("uint16 ${n}: ${whole_uint16()} ${if_arm_uint16(n)} ${match_arm_uint16(n)} ${block_tail_uint16(n)} ${let_annot_uint16(n)} ${effect_tail_uint16(n)!} ${effect_ok_uint16(n)!} ${lambda_let_uint16(n)} ${lambda_arg_uint16(n)}")
+  match some_payload_uint16(n) {
+    some(v) => println("  some ${v}"),
+    none => println("  none"),
+  }
+  match ok_payload_uint16(n) {
+    ok(v) => println("  ok ${v}"),
+    err(e) => println("  err ${e}"),
+  }
+  match err_payload_uint16(n) {
+    ok(v) => println("  ok ${v}"),
+    err(v) => println("  err ${v}"),
+  }
+}
+
+// ── UInt32 ──
+fn whole_uint32() -> UInt32 = 4000000000
+
+fn if_arm_uint32(n: Int) -> UInt32 = if n > 0 then 4000000000 else 7
+
+fn match_arm_uint32(n: Int) -> UInt32 = match n {
+  0 => 7,
+  _ => 4000000000,
+}
+
+fn block_tail_uint32(n: Int) -> UInt32 = {
+  let k = n + 1
+  if k > 1 then 4000000000 else 7
+}
+
+fn let_annot_uint32(n: Int) -> UInt32 = {
+  let v: UInt32 = if n > 0 then 4000000000 else 7
+  v
+}
+
+fn some_payload_uint32(n: Int) -> UInt32? = if n > 0 then some(4000000000) else none
+
+fn ok_payload_uint32(n: Int) -> Result[UInt32, String] = if n > 0 then ok(4000000000) else err("no")
+
+fn err_payload_uint32(n: Int) -> Result[Bool, UInt32] = if n > 0 then ok(true) else err(4000000000)
+
+effect fn effect_tail_uint32(n: Int) -> UInt32 = {
+  if n > 0 then 4000000000 else 7
+}
+
+effect fn effect_ok_uint32(n: Int) -> UInt32 = {
+  if n > 0 then ok(4000000000) else ok(7)
+}
+
+fn lambda_let_uint32(n: Int) -> UInt32 = {
+  let g: (Int) -> UInt32 = (x) => if x > 0 then 4000000000 else 7
+  g(n)
+}
+
+fn apply_uint32(f: (Int) -> UInt32, x: Int) -> UInt32 = f(x)
+
+fn lambda_arg_uint32(n: Int) -> UInt32 = apply_uint32((x) => if x > 0 then 4000000000 else 7, n)
+
+effect fn show_uint32(n: Int) -> Unit = {
+  println("uint32 ${n}: ${whole_uint32()} ${if_arm_uint32(n)} ${match_arm_uint32(n)} ${block_tail_uint32(n)} ${let_annot_uint32(n)} ${effect_tail_uint32(n)!} ${effect_ok_uint32(n)!} ${lambda_let_uint32(n)} ${lambda_arg_uint32(n)}")
+  match some_payload_uint32(n) {
+    some(v) => println("  some ${v}"),
+    none => println("  none"),
+  }
+  match ok_payload_uint32(n) {
+    ok(v) => println("  ok ${v}"),
+    err(e) => println("  err ${e}"),
+  }
+  match err_payload_uint32(n) {
+    ok(v) => println("  ok ${v}"),
+    err(v) => println("  err ${v}"),
+  }
+}
+
+// ── UInt64 ──
+fn whole_uint64() -> UInt64 = 9000000000
+
+fn if_arm_uint64(n: Int) -> UInt64 = if n > 0 then 9000000000 else 7
+
+fn match_arm_uint64(n: Int) -> UInt64 = match n {
+  0 => 7,
+  _ => 9000000000,
+}
+
+fn block_tail_uint64(n: Int) -> UInt64 = {
+  let k = n + 1
+  if k > 1 then 9000000000 else 7
+}
+
+fn let_annot_uint64(n: Int) -> UInt64 = {
+  let v: UInt64 = if n > 0 then 9000000000 else 7
+  v
+}
+
+fn some_payload_uint64(n: Int) -> UInt64? = if n > 0 then some(9000000000) else none
+
+fn ok_payload_uint64(n: Int) -> Result[UInt64, String] = if n > 0 then ok(9000000000) else err("no")
+
+fn err_payload_uint64(n: Int) -> Result[Bool, UInt64] = if n > 0 then ok(true) else err(9000000000)
+
+effect fn effect_tail_uint64(n: Int) -> UInt64 = {
+  if n > 0 then 9000000000 else 7
+}
+
+effect fn effect_ok_uint64(n: Int) -> UInt64 = {
+  if n > 0 then ok(9000000000) else ok(7)
+}
+
+fn lambda_let_uint64(n: Int) -> UInt64 = {
+  let g: (Int) -> UInt64 = (x) => if x > 0 then 9000000000 else 7
+  g(n)
+}
+
+fn apply_uint64(f: (Int) -> UInt64, x: Int) -> UInt64 = f(x)
+
+fn lambda_arg_uint64(n: Int) -> UInt64 = apply_uint64((x) => if x > 0 then 9000000000 else 7, n)
+
+effect fn show_uint64(n: Int) -> Unit = {
+  println("uint64 ${n}: ${whole_uint64()} ${if_arm_uint64(n)} ${match_arm_uint64(n)} ${block_tail_uint64(n)} ${let_annot_uint64(n)} ${effect_tail_uint64(n)!} ${effect_ok_uint64(n)!} ${lambda_let_uint64(n)} ${lambda_arg_uint64(n)}")
+  match some_payload_uint64(n) {
+    some(v) => println("  some ${v}"),
+    none => println("  none"),
+  }
+  match ok_payload_uint64(n) {
+    ok(v) => println("  ok ${v}"),
+    err(e) => println("  err ${e}"),
+  }
+  match err_payload_uint64(n) {
+    ok(v) => println("  ok ${v}"),
+    err(v) => println("  err ${v}"),
+  }
+}
+
+// ── Float32 ──
+fn whole_float32() -> Float32 = 2.5
+
+fn if_arm_float32(n: Int) -> Float32 = if n > 0 then 2.5 else -1.25
+
+fn match_arm_float32(n: Int) -> Float32 = match n {
+  0 => -1.25,
+  _ => 2.5,
+}
+
+fn block_tail_float32(n: Int) -> Float32 = {
+  let k = n + 1
+  if k > 1 then 2.5 else -1.25
+}
+
+fn let_annot_float32(n: Int) -> Float32 = {
+  let v: Float32 = if n > 0 then 2.5 else -1.25
+  v
+}
+
+fn some_payload_float32(n: Int) -> Float32? = if n > 0 then some(2.5) else none
+
+fn ok_payload_float32(n: Int) -> Result[Float32, String] = if n > 0 then ok(2.5) else err("no")
+
+fn err_payload_float32(n: Int) -> Result[Bool, Float32] = if n > 0 then ok(true) else err(2.5)
+
+effect fn effect_tail_float32(n: Int) -> Float32 = {
+  if n > 0 then 2.5 else -1.25
+}
+
+effect fn effect_ok_float32(n: Int) -> Float32 = {
+  if n > 0 then ok(2.5) else ok(-1.25)
+}
+
+fn lambda_let_float32(n: Int) -> Float32 = {
+  let g: (Int) -> Float32 = (x) => if x > 0 then 2.5 else -1.25
+  g(n)
+}
+
+fn apply_float32(f: (Int) -> Float32, x: Int) -> Float32 = f(x)
+
+fn lambda_arg_float32(n: Int) -> Float32 = apply_float32((x) => if x > 0 then 2.5 else -1.25, n)
+
+effect fn show_float32(n: Int) -> Unit = {
+  println("float32 ${n}: ${whole_float32()} ${if_arm_float32(n)} ${match_arm_float32(n)} ${block_tail_float32(n)} ${let_annot_float32(n)} ${effect_tail_float32(n)!} ${effect_ok_float32(n)!} ${lambda_let_float32(n)} ${lambda_arg_float32(n)}")
+  match some_payload_float32(n) {
+    some(v) => println("  some ${v}"),
+    none => println("  none"),
+  }
+  match ok_payload_float32(n) {
+    ok(v) => println("  ok ${v}"),
+    err(e) => println("  err ${e}"),
+  }
+  match err_payload_float32(n) {
+    ok(v) => println("  ok ${v}"),
+    err(v) => println("  err ${v}"),
+  }
+}
+
+effect fn main() -> Unit = {
+  show_int8(1)!
+  show_int8(0)!
+  show_int16(1)!
+  show_int16(0)!
+  show_int32(1)!
+  show_int32(0)!
+  show_uint8(1)!
+  show_uint8(0)!
+  show_uint16(1)!
+  show_uint16(0)!
+  show_uint32(1)!
+  show_uint32(0)!
+  show_uint64(1)!
+  show_uint64(0)!
+  show_float32(1)!
+  show_float32(0)!
+}

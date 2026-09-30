@@ -262,6 +262,13 @@ impl Emitter<'_> {
     /// exit leaves (exhausted ⇒ Err, regions independent, placement
     /// unobservable).
     pub(crate) fn emit_det_cut_check(&mut self) {
+        self.emit_det_cut_check_holding(None);
+    }
+
+    /// The cut check at a site that holds a fresh block not yet anyone's
+    /// (the concat result the dynamic charge measures, in `pending`): the
+    /// cut releases it before the frame's own exit (#2969).
+    pub(crate) fn emit_det_cut_check_holding(&mut self, pending: Option<(u32, SliceTy)>) {
         if !self.metered {
             return;
         }
@@ -286,6 +293,58 @@ impl Emitter<'_> {
             i.global_get(G_DET_DEPTH).i32_const(1).i32_sub().global_set(G_DET_DEPTH);
             i.end();
         }
+        self.emit_cut_return(pending);
+        let mut i = self.f.instructions();
+        i.end();
+        i.end();
+        let _ = i;
+        // T5-1 wall deadline: armed regions only (deadline != MAX keeps
+        // the host clock un-consulted for budget-only programs).
+        let mut i = self.f.instructions();
+        i.global_get(G_T_DEADLINE).i64_const(i64::MAX).i64_ne();
+        i.if_(BlockType::Empty);
+        i.global_get(G_T_HIT).i32_eqz().if_(BlockType::Empty);
+        self.note_host_op(crate::fs_meta::OP_WALL_NOW);
+        // #3041: the meter's own read, not the frame's (witness_decls.rs).
+        self.work.meter_reads_pending.set(self.work.meter_reads_pending.get() + 1);
+        let mut i = self.f.instructions();
+        i.i32_const(crate::fs_meta::OP_WALL_NOW);
+        i.i32_const(0).i32_const(0).i32_const(0).i32_const(0);
+        i.call(F_FS_CALL);
+        i.global_get(G_T_DEADLINE).i64_ge_s().if_(BlockType::Empty);
+        i.i32_const(1).global_set(G_T_HIT);
+        i.end();
+        i.end();
+        i.global_get(G_T_HIT);
+        i.if_(BlockType::Empty);
+        let _ = i;
+        self.emit_cut_return(pending);
+        let mut i = self.f.instructions();
+        i.end();
+        i.end();
+    }
+
+    /// The CUT's early return: the zero of this fn's return type. #2969 —
+    /// the frame's credits are released first, by the same exit plan a `!`
+    /// propagation takes (a cut in `build`'s loop head left the string it
+    /// was growing live). The witness sees a one-arm branch whose arm exits
+    /// with nothing leaving, the `!` site's shape (witness_unwrap.rs); the
+    /// fall-through is the empty second arm.
+    fn emit_cut_return(&mut self, pending: Option<(u32, SliceTy)>) {
+        if let Some((local, ty)) = pending {
+            let dec = self.dec_fn_of(ty);
+            self.f.instructions().local_get(local).call(dec);
+        }
+        if let Some(w) = self.witness.as_mut() {
+            w.branch_open();
+            w.branch_arm();
+            w.arm_err_exit();
+        }
+        let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
+        self.emit_exit(&plan);
+        if let Some(w) = self.witness.as_mut() {
+            w.frame_replaced();
+        }
         let mut i = self.f.instructions();
         match self.fn_ret {
             None => {}
@@ -302,44 +361,9 @@ impl Emitter<'_> {
             },
         }
         i.return_();
-        i.end();
-        i.end();
-        let _ = i;
-        // T5-1 wall deadline: armed regions only (deadline != MAX keeps
-        // the host clock un-consulted for budget-only programs).
-        let mut i = self.f.instructions();
-        i.global_get(G_T_DEADLINE).i64_const(i64::MAX).i64_ne();
-        i.if_(BlockType::Empty);
-        i.global_get(G_T_HIT).i32_eqz().if_(BlockType::Empty);
-        self.note_host_op(crate::fs_meta::OP_WALL_NOW);
-        let mut i = self.f.instructions();
-        i.i32_const(crate::fs_meta::OP_WALL_NOW);
-        i.i32_const(0).i32_const(0).i32_const(0).i32_const(0);
-        i.call(F_FS_CALL);
-        i.global_get(G_T_DEADLINE).i64_ge_s().if_(BlockType::Empty);
-        i.i32_const(1).global_set(G_T_HIT);
-        i.end();
-        i.end();
-        i.global_get(G_T_HIT);
-        i.if_(BlockType::Empty);
-        let _ = i;
-        match self.fn_ret {
-            None => {}
-            Some(t) => match t.val_type() {
-                ValType::I64 => {
-                    self.f.instructions().i64_const(0);
-                }
-                ValType::F64 => {
-                    self.f.instructions().f64_const(0.0.into());
-                }
-                _ => {
-                    self.f.instructions().i32_const(0);
-                }
-            },
+        if let Some(w) = self.witness.as_mut() {
+            w.branch_arm();
+            w.branch_close();
         }
-        let mut i = self.f.instructions();
-        i.return_();
-        i.end();
-        i.end();
     }
 }

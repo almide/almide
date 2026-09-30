@@ -125,13 +125,17 @@ both were found by the boundary set, not by reading:
   printers where the old pair shared one bignum core. `alloc-baseline.txt` −281,632 B in
   total (the 3,744-byte Dragon4 scratch block became 208 bytes); 38 rows moved up by
   64–80 B where the smaller block shifts the allocator's peak.
-- `research/spike/float-printer/`: the prototypes (`schubfach.almd` is the shipped core
-  as a standalone user program; `schubfach_rt.almd` the first shift-subtract version;
-  `gen_table_variants.py` derives the two table variants), the differential harness
-  (`gen_harness.py` + `harness_common.almd`: the seeded stream, the boundary set, the
-  wasm-vs-native dump/diff and the `bench` programs) and the size probes. To re-run the
-  1M check: `python3 gen_harness.py schubfach.almd sf_float_to_string 12345 1000000 out`,
-  then `almide run out/dump_proto.almd --target wasm` and `almide run out/dump_native.almd`
+- `research/spike/float-printer/`: the differential harness (`gen_harness.py` +
+  `harness_common.almd`: the seeded stream, the boundary set, the wasm-vs-native dump/diff
+  and the `bench` programs), the exactness sets and the size probes. The prototypes the
+  measurement compared (`schubfach.almd`, the shipped core as a standalone program;
+  `schubfach_rt.almd` / `schubfach_rt2.almd`, the shift-subtract versions; the two table
+  variants and `gen_table_variants.py`, which derived them) were written over `prim.*` and
+  were removed when `prim` stopped being user surface (#3025) — recover them with
+  `git log --diff-filter=D -- research/spike/float-printer/`; they compile only as stdlib
+  sources now. To re-run the 1M check against the shipped printer:
+  `python3 gen_harness.py /dev/null float.to_string 12345 1000000 out`, then
+  `almide run out/dump_proto.almd --target wasm` and `almide run out/dump_native.almd`
   and `cmp` the two outputs.
 
 Gates run on the change: `almide test spec/stdlib/` (161 files) and `spec/lang/` (211),

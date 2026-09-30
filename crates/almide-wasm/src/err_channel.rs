@@ -4,6 +4,7 @@
 //! propagation recognizer uses — split from data.rs for the file budget.
 
 use almide_ir::{IrExpr, IrExprKind};
+use wasm_encoder::BlockType;
 
 use crate::emitter::Emitter;
 use crate::*;
@@ -90,7 +91,7 @@ impl Emitter<'_> {
             .local_get(car);
         self.load_ty_slot(ert, almide_layout::SUM_FIELD);
         self.build_depth += 1;
-        let shown = self.emit_display_value(ert, false);
+        let shown = self.emit_display_value(ert, false, None);
         self.build_depth -= 1;
         shown?;
         let msg = self.hold_i32()?;
@@ -126,5 +127,56 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         Ok(())
+    }
+}
+
+impl Emitter<'_> {
+    /// main's err channel (#1734, the pre-existing structural hole): a
+    /// Result-typed expression in MAIN's statement/tail position is the
+    /// effect carrier, not a discardable value — the native/interp
+    /// contract is `Error: {msg}` on stderr + exit 1 on err, plain
+    /// fallthrough on ok. Discarding it swallowed the err (silent exit
+    /// 0 — `effect fn main() -> Unit = err("boom")` on the released
+    /// 0.61.0). Returns Ok(true) when this handled the expression.
+    /// A non-String err payload walls honestly (no message to print).
+    pub(crate) fn try_lower_main_err_carrier(&mut self, e: &IrExpr) -> Result<bool, EmitError> {
+        use almide_types::types::{Ty, TypeConstructorId};
+        if !self.in_main {
+            return Ok(false);
+        }
+        let Ty::Applied(TypeConstructorId::Result, a) = &e.ty else {
+            return Ok(false);
+        };
+        if a.len() != 2 {
+            return Ok(false);
+        }
+        self.witness_decline("main-err-carrier"); // #2758: the carrier's release is unrecorded
+        let got = self.lower(e, None)?;
+        let SliceTy::Result(_, eh) = got else {
+            // Effect-ABI transparency already unwrapped it — nothing to route.
+            self.f.instructions().drop();
+            return Ok(true);
+        };
+        if self.types.el(eh) != STR {
+            return Err(EmitError::Unsupported("main-err-carrier:non-string-err".into()));
+        }
+        // #2969: an OWNED ok carrier (`effect fn main() -> Result[Unit,
+        // String] = { … }` ends in a fresh `ok(())`) is main's last use of
+        // it — released on the ok path, where the err path aborts.
+        let owned_dec = (self.rc_droppable(got) && self.rc_owned_result(e)).then(|| self.dec_fn_of(got));
+        let hb = self.scr_i32_local;
+        let mut i = self.f.instructions();
+        i.local_set(hb);
+        i.local_get(hb)
+            .i32_load(slot_memarg(almide_layout::SUM_TAG))
+            .if_(BlockType::Empty);
+        i.local_get(hb).i32_load(slot_memarg(almide_layout::SUM_FIELD));
+        let _ = i;
+        self.emit_error_frame_abort();
+        if let Some(dec) = owned_dec {
+            self.f.instructions().else_().local_get(hb).call(dec);
+        }
+        self.f.instructions().end();
+        Ok(true)
     }
 }

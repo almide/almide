@@ -102,24 +102,27 @@ impl Emitter<'_> {
         let hb = self.hold_i32()?;
         let hc = self.hold_i32()?;
         let hacc = self.hold_i32()?;
+        let hprev = self.hold_i32()?;
         let mut i = self.f.instructions();
         i.local_set(hb);
         i.i32_const(0).call(F_ALLOC).local_set(hacc);
         i.i32_const(0).local_set(hc);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hc).local_get(hb).i32_load(len_memarg()).i32_ge_u().br_if(1);
-        i.local_get(hacc);
+        i.local_get(hacc).local_tee(hprev);
         i.local_get(hb).local_get(hc).i32_add().i32_load(slot_memarg(0));
         i.call(F_CONCAT).local_set(hacc);
+        // The outgrown accumulator is a bare spine no credit was taken
+        // through yet (#2977 — one leaked per inner list).
+        i.local_get(hprev).call(F_DEC_FLAT);
         i.local_get(hc).i32_const(4).i32_add().local_set(hc);
         i.br(0).end().end();
         let _ = i;
         // The inner lists' handles were COPIED through the concats: the
-        // result takes one credit per element (intermediate spines leak,
-        // never dangle — fuzz 20260913).
+        // result takes one credit per element, once, on the final spine.
         self.emit_inc_elems(hacc, self.types.el(inner));
         self.f.instructions().local_get(hacc);
-        for _ in 0..3 {
+        for _ in 0..4 {
             self.release_i32();
         }
         Ok(Some(Lowered::owned(SliceTy::List(inner))))
@@ -328,7 +331,7 @@ impl Emitter<'_> {
         self.f.instructions().i32_const(0).local_set(hr);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
-        self.lower(body, Some(BOOL))?;
+        self.lower_inlined_predicate(cb, body)?;
         self.f.instructions().if_(BlockType::Empty);
         self.f.instructions().i32_const(1).local_set(hr);
         self.f.instructions().br(2);
@@ -353,7 +356,7 @@ impl Emitter<'_> {
         self.f.instructions().i32_const(1).local_set(hr);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
-        self.lower(body, Some(BOOL))?;
+        self.lower_inlined_predicate(cb, body)?;
         self.f.instructions().i32_eqz().if_(BlockType::Empty);
         self.f.instructions().i32_const(0).local_set(hr);
         self.f.instructions().br(2);
@@ -379,7 +382,7 @@ impl Emitter<'_> {
         self.f.instructions().i64_const(0).local_set(hn);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
-        self.lower(body, Some(BOOL))?;
+        self.lower_inlined_predicate(cb, body)?;
         self.f.instructions().if_(BlockType::Empty);
         self.f.instructions().local_get(hn).i64_const(1).i64_add().local_set(hn);
         self.f.instructions().end();
@@ -444,11 +447,20 @@ impl Emitter<'_> {
             i.local_get(bh);
         }
         self.load_ty_slot(elem, 0);
+        // The accumulator OWNS one credit on every step, as `list.fold`'s
+        // does (#2977): the first element takes its share, each step's
+        // borrowed result takes its share and the replaced accumulator is
+        // released, and the last one MOVES into the `some` cell.
+        self.share_handle_top(elem);
         self.f.instructions().local_set(params[0]);
         self.f.instructions().i32_const(1).local_set(ih);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[1]);
         self.lower(body, Some(elem))?;
+        self.rc_share_guard(body, elem);
+        if let Some(dec) = self.elem_is_handle(elem).then(|| self.dec_fn_of(elem)) {
+            self.f.instructions().local_get(params[0]).call(dec);
+        }
         self.f.instructions().local_set(params[0]);
         self.hof_step(ih);
         // some(acc)
@@ -458,9 +470,6 @@ impl Emitter<'_> {
             .call(F_ALLOC)
             .local_tee(hr)
             .local_get(params[0]);
-        // The element handle inside the Option block takes +1
-        // (leak-not-dangle until the Option's typed drop, stage 2c).
-        self.share_handle_top(elem);
         self.store_ty_slot(elem, almide_layout::OPTION_FIELD);
         self.f.instructions().local_get(hr).end();
         for _ in 0..4 {

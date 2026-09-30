@@ -12,7 +12,7 @@
 //! frozen pattern-matches alike — so any new mention of the spanless form
 //! (either kind) shows up and gets reviewed.
 
-const BASELINE: usize = 193;
+const BASELINE: usize = 157;
 
 #[test]
 fn spanless_wall_count_only_goes_down() {
@@ -36,7 +36,7 @@ fn spanless_wall_count_only_goes_down() {
          new wall sites must use `LowerError::at(<node>.span, reason)` so the wall \
          renders with a source location (#931)"
     );
-    // Blindness floor at 90% of the baseline, not 1 (#988): 192 of 193 sites
+    // Blindness floor at 90% of the baseline, not 1 (#988): all but one of the sites
     // relocating out of the scanned tree is a broken scan reading as a 99%
     // win, not progress. A legitimate migration lands in reviewable
     // increments and lowers BASELINE in the same (ratchet-only) commit.

@@ -1,6 +1,6 @@
 use crate::lexer::TokenType;
 use crate::ast::*;
-use crate::intern::sym;
+use crate::intern::{sym, Sym};
 use super::Parser;
 
 impl Parser {
@@ -23,26 +23,17 @@ impl Parser {
             return self.parse_assign_stmt();
         }
 
-        // xs[i] = value (index assignment)
+        // A place assignment (#3064): `xs[i] = v`, `obj.field = v`, and the
+        // nested targets GRAMMAR.md lists — `o.inner.xs = v`, `o.m[k] = v`.
+        // A field name may be any token `expect_any_name` accepts (ident,
+        // TypeName, or a soft keyword) so `obj.ok = v` routes here, exactly
+        // as `obj.ok` reads in expression position.
         if assign_target
-            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBracket)
+            && matches!(self.peek_at(1).map(|t| &t.token_type), Some(TokenType::LBracket | TokenType::Dot))
         {
-            if let Some(stmt) = self.try_parse_index_assign()? {
+            if let Some(stmt) = self.try_parse_place_assign()? {
                 return Ok(stmt);
             }
-        }
-
-        // obj.field = value (field assignment). The field name may be any token
-        // `expect_any_name` accepts (ident, TypeName, or a soft keyword) so
-        // `obj.ok = v` routes here, exactly as `obj.ok` reads in expression
-        // position — see parse_field_assign_stmt / parse_postfix.
-        if assign_target
-            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Dot)
-            && self.peek_at(2).map(|t| Self::is_name_token(&t.token_type)).unwrap_or(false)
-            && self.peek_at(3).map(|t| &t.token_type) == Some(&TokenType::Eq)
-            && self.peek_at(4).map(|t| &t.token_type) != Some(&TokenType::Eq)
-        {
-            return self.parse_field_assign_stmt();
         }
 
         let span = self.current_span();
@@ -215,41 +206,78 @@ impl Parser {
         self.advance();
         self.expect(TokenType::Eq)?;
         self.skip_newlines();
-        let value = self.parse_expr()?;
+        let value = self.parse_expr_ascribed()?;
         Ok(Stmt::Assign { name, value, span: Some(span) })
     }
 
-    fn try_parse_index_assign(&mut self) -> Result<Option<Stmt>, String> {
+    /// Parse `root(.field | [index])+ = value` when the tokens spell one;
+    /// restore and return `None` otherwise (a call, a comparison, a read).
+    ///
+    /// Supported targets: a chain of fields, optionally ending in ONE index —
+    /// `s.f`, `o.inner.xs`, `xs[i]`, `o.m[k]`. An index anywhere but last
+    /// (`xs[i].f = v`, `g[i][j] = v`) would need the element read back out of
+    /// its container and written again; it is refused here, at the target,
+    /// with the rewrite spelled out.
+    fn try_parse_place_assign(&mut self) -> Result<Option<Stmt>, String> {
         let saved = self.pos;
+        let saved_errors = self.errors.len();
         let span = self.current_span();
         let target = sym(&self.current().value);
         self.advance();
-        self.expect(TokenType::LBracket)?;
-        let index = self.parse_expr()?;
-        self.expect(TokenType::RBracket)?;
-        if self.check(TokenType::Eq)
-            && self.peek_at(1).map(|t| &t.token_type) != Some(&TokenType::Eq)
-        {
-            self.advance();
-            self.skip_newlines();
-            let value = self.parse_expr()?;
-            Ok(Some(Stmt::IndexAssign { target, index: Box::new(index), value, span: Some(span) }))
-        } else {
-            self.pos = saved;
-            Ok(None)
+        let mut fields: Vec<Sym> = Vec::new();
+        let mut index: Option<Expr> = None;
+        let mut misplaced_index: Option<usize> = None;
+        loop {
+            if self.check(TokenType::Dot)
+                && self.peek_at(1).map(|t| Self::is_name_token(&t.token_type)).unwrap_or(false)
+            {
+                if index.is_some() && misplaced_index.is_none() {
+                    misplaced_index = Some(saved);
+                }
+                self.advance();
+                fields.push(self.expect_any_name()?);
+            } else if self.check(TokenType::LBracket) {
+                if index.is_some() && misplaced_index.is_none() {
+                    misplaced_index = Some(saved);
+                }
+                self.advance();
+                let Ok(e) = self.parse_expr() else { break };
+                if !self.check(TokenType::RBracket) { break; }
+                self.advance();
+                index = Some(e);
+            } else {
+                break;
+            }
         }
-    }
-
-    fn parse_field_assign_stmt(&mut self) -> Result<Stmt, String> {
-        let span = self.current_span();
-        let target = sym(&self.current().value);
-        self.advance(); // ident
-        self.advance(); // .
-        let field = self.expect_any_name()?;
-        self.expect(TokenType::Eq)?;
+        let is_assign = self.check(TokenType::Eq)
+            && self.peek_at(1).map(|t| &t.token_type) != Some(&TokenType::Eq);
+        if !is_assign {
+            self.pos = saved;
+            self.errors.truncate(saved_errors);
+            return Ok(None);
+        }
+        if let Some(at) = misplaced_index {
+            self.pos = at;
+            let msg = "an index can only be the last step of an assignment target";
+            let hint = "Almide writes a container slot, or a field of a record, in place — not a \
+                        field of a slot. Read the element into a `var`, assign to it, and store \
+                        it back: `var e = xs[i]` then `e.f = v` then `xs[i] = e`.";
+            let diag = self.diag_error(msg, hint, "nested-index-assign");
+            self.errors.push(diag);
+            let tok = self.current().clone();
+            return Err(format!("{} at line {}:{}", msg, tok.line, tok.col));
+        }
+        self.advance(); // '='
         self.skip_newlines();
-        let value = self.parse_expr()?;
-        Ok(Stmt::FieldAssign { target, field, value, span: Some(span) })
+        let value = self.parse_expr_ascribed()?;
+        let span = Some(span);
+        Ok(Some(match index {
+            Some(index) => Stmt::IndexAssign { target, path: fields, index: Box::new(index), value, span },
+            None => {
+                let field = fields.pop().expect("a field target has at least one field");
+                Stmt::FieldAssign { target, path: fields, field, value, span }
+            }
+        }))
     }
 
     fn parse_destructure_tuple(&mut self) -> Result<Pattern, String> {

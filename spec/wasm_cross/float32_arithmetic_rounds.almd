@@ -1,0 +1,40 @@
+// @contract: C-371
+// Float32 arithmetic is binary32 on every leg: each + - * / % ** and unary -
+// result is rounded to f32 (round-to-nearest-even), a conversion into Float32
+// rounds once, and a comparison reads the rounded values. A leg that carries
+// Float32 on a wider slot must round after every operation, or the widened
+// value (and every comparison or later operation on it) differs from
+// native's `f32`; `**` is the one f64 pow of the widened operands, rounded
+// once. Operands come from run-time values so no folder decides.
+fn widened(label: String, x: Float32) -> Unit = {
+  println("${label}: ${float.to_string(float32.to_float64(x))}")
+}
+
+effect fn main() -> Unit = {
+  let n = list.len([1, 2, 3])
+  let three: Float32 = int.to_float32(n)
+  let one: Float32 = three / three
+  let big: Float32 = int.to_float32(n * 5592405 + 1)
+  let tenth: Float32 = float.to_float32(0.1)
+  let fifth: Float32 = tenth + tenth
+  widened("1/3", one / three)
+  widened("0.1+0.2", tenth + fifth)
+  widened("1.1*1.1", (one + tenth) * (one + tenth))
+  widened("1-1e-8", one - float.to_float32(0.00000001))
+  widened("2^24+1", big + one)
+  widened("10%3.3", (three * three + one) % (three + three * tenth))
+  widened("-(1/3)", -(one / three))
+  widened("(1/3)**1.7", (one / three) ^ (one + three * float.to_float32(0.23333333)))
+  widened("3**0.5", three ^ (one / (one + one)))
+  widened("0.1f32", tenth)
+  widened("int 2^24+1", int.to_float32(16777217))
+  var s: Float32 = 0.0
+  for _ in 0..<10 {
+    s = s + tenth
+  }
+  widened("sum 10x0.1", s)
+  println("2^24+1 == 2^24: ${big + one == big}")
+  println("1+1e-8 > 1: ${one + float.to_float32(0.00000001) > one}")
+  println("0.1+0.2 == 0.3: ${tenth + fifth == float.to_float32(0.3)}")
+  println("1/3*3 < 1: ${one / three * three < one}")
+}

@@ -473,10 +473,10 @@ template = "{expr}.clone()"
 # almide_rt_list_range's try_reserve discipline, inlined so the template has
 # no linkage dependency.
 [range_expr]
-template = "{{ let __rs: i64 = {start}; let __re: i64 = {end}; let __rn = __re.saturating_sub(__rs).max(0) as usize; let mut __rv: Vec<i64> = Vec::new(); if __rv.try_reserve_exact(__rn).is_err() {{ eprintln!(\"Error: out of memory\"); std::process::exit(1); }} __rv.extend(__rs..__re); __rv }}"
+template = "{{ let __rs: i64 = {start}; let __re: i64 = {end}; let __rn = __re.saturating_sub(__rs).max(0) as usize; let mut __rv: Vec<i64> = Vec::new(); if __rv.try_reserve_exact(__rn).is_err() {{ almide_abort(\"out of memory\"); }} __rv.extend(__rs..__re); __rv }}"
 
 [range_inclusive]
-template = "{{ let __rs: i64 = {start}; let __re: i64 = {end}; let __rn = if __re >= __rs {{ ((__re as i128) - (__rs as i128) + 1) as usize }} else {{ 0 }}; let mut __rv: Vec<i64> = Vec::new(); if __rv.try_reserve_exact(__rn).is_err() {{ eprintln!(\"Error: out of memory\"); std::process::exit(1); }} __rv.extend(__rs..=__re); __rv }}"
+template = "{{ let __rs: i64 = {start}; let __re: i64 = {end}; let __rn = if __re >= __rs {{ ((__re as i128) - (__rs as i128) + 1) as usize }} else {{ 0 }}; let mut __rv: Vec<i64> = Vec::new(); if __rv.try_reserve_exact(__rn).is_err() {{ almide_abort(\"out of memory\"); }} __rv.extend(__rs..=__re); __rv }}"
 
 [for_tuple_destructure]
 template = "({vars})"
@@ -520,14 +520,16 @@ template = "{expr}"
 [box_wrap]
 template = "std::rc::Rc::new({inner})"
 
+# The flush before the spawn: stdout is a THREAD-LOCAL buffer, and a runtime
+# abort (`Error: out of memory`, exit 1) raised inside a sibling runs
+# `process::exit` on the worker, which never reaches the spawning thread's
+# buffer — the lines printed before the fan were lost on native while the
+# sequential wasm leg kept them (C-197; fuzz seed 585689703894 index 4740).
 [fan_expr]
-template = "std::thread::scope(|__s| {{ {spawns} {join_expr} }})"
+template = "{{ almide_stdout_flush(); std::thread::scope(|__s| {{ {spawns} {join_expr} }}) }}"
 
 [fan_effect]
-template = "std::thread::scope(|__s| -> Result<_, String> {{ {spawns} Ok({join_expr}) }})?"
-
-[extern_fn]
-template = "use {module}::{function} as {name};"
+template = "{{ almide_stdout_flush(); std::thread::scope(|__s| -> Result<_, String> {{ {spawns} Ok({join_expr}) }})? }}"
 
 [loop_block]
 template = "loop {{\n{body}\n}}"

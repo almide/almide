@@ -170,7 +170,7 @@ enum CompileOutputMode<'a> {
 }
 
 /// `cmd_compile`'s output phase. Extracted verbatim.
-fn write_compile_output(iface: &almide::interface::ModuleInterface, ir: &almide::ir::IrProgram, source_text: &str, module_name: &str, mode: CompileOutputMode) {
+fn write_compile_output(iface: &almide::interface::ModuleInterface, ir: &almide::ir::IrProgram, module_name: &str, mode: CompileOutputMode) {
     match mode {
         CompileOutputMode::Json => {
             let output = serde_json::to_string_pretty(iface)
@@ -183,16 +183,12 @@ fn write_compile_output(iface: &almide::interface::ModuleInterface, ir: &almide:
         CompileOutputMode::Artifact(output_dir) => {
             let dir = output_dir.unwrap_or("target/compile");
             let out_path = std::path::PathBuf::from(dir).join(format!("{}.almdi", module_name));
-            let hash = almide::almdi::source_hash(source_text);
-
-            // Check freshness — skip if already up to date
-            if almide::almdi::is_fresh(&out_path, hash) {
+            let wrote = almide::almdi::write_almdi(&out_path, iface, ir)
+                .unwrap_or_else(|e| { err(&format!("error: {}", e)); std::process::exit(1); });
+            if !wrote {
                 err(&format!("{} is up to date", out_path.display()));
                 return;
             }
-
-            almide::almdi::write_almdi(&out_path, iface, ir, hash)
-                .unwrap_or_else(|e| { err(&format!("error: {}", e)); std::process::exit(1); });
             err(&format!("  compiled {}", out_path.display()));
         }
     }
@@ -226,7 +222,7 @@ pub fn cmd_compile(module: Option<&str>, json: bool, dry_run: bool, output_dir: 
     } else {
         CompileOutputMode::Artifact(output_dir)
     };
-    write_compile_output(&iface, &ir, &source_text, &module_name, mode);
+    write_compile_output(&iface, &ir, &module_name, mode);
 }
 
 /// `print_iface_types`'s per-type `type`-kind rendering (Record fields /

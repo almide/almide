@@ -1,0 +1,2 @@
+expects_code = "E085"
+hint_substring = "call `fs.read_text` instead"

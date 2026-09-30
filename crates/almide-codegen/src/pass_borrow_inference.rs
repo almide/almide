@@ -11,7 +11,8 @@
 use std::collections::{HashMap, HashSet};
 use almide_ir::*;
 use almide_lang::types::{Ty, TypeConstructorId};
-use almide_base::intern::{sym, Sym};
+use almide_lang::types::extern_abi::{native_extern_kind, NativeExtern};
+use almide_base::intern::Sym;
 use super::use_kind::{Chain, Ctor, Site, SlotMode, SlotOracle, Use, UseSites};
 
 /// The predicate `infer_program_fn_borrows` / `infer_program_module_borrows`

@@ -1,0 +1,72 @@
+// @contract: C-066
+// Every Result / Option carrier a program builds is released once it has
+// been read, on the path that reads it. The structural wasm leg left one
+// block live per carrier in each shape below (#2969): `r?` over a bound
+// Result, `??` over a closure call or a record payload, the retained input
+// of `result.map` / `flat_map` and a rejected `option.filter`, a `filter_map` callback's `some`, every element
+// carrier of `fan.map` / `fan.any`, a `fan { … }` tuple, an `if` whose
+// fresh arm is a module call (`set.insert`), and the `ok(())` a
+// Result-returning `main` ends with. A `mut`-param effect call's Result
+// consumed by `match` or `??` (#3004) is here too. The program prints the
+// same text on both targets and ends with no block live.
+type Out = { a: String }
+
+type Handler = effect (String) -> String
+
+fn half(n: Int) -> Result[Int, String] = if n % 2 == 0 then ok(n / 2) else err("odd " + int.to_string(n))
+
+fn mk(flag: Bool) -> Result[Out, String] = if flag then ok({ a: "x" + "y" })
+else err("no")
+
+effect fn inner(s: String) -> String = "in " + s
+
+effect fn probe(n: Int) -> Result[String, String] = if n > 2 then ok("p" + int.to_string(n)) else err("small " + int.to_string(n))
+
+effect fn scaled(mut r: List[Int], i: Int) -> Result[Int, String] = {
+  ok(i * list.len(r))
+}
+
+fn distinct(xs: List[Int]) -> Set[Int] = xs |> list.fold(
+  set.new(),
+  (s, x) => if set.contains(s, x) then s else set.insert(s, x),
+)
+
+effect fn main() -> Result[Unit, String] = {
+  // `r?` over a bound Result, and over a call.
+  let g: Result[Int, String] = half(8)
+  let o: Int? = g?
+  let o2: Int? = half(3)?
+  println("to_option: ${o ?? 0} ${o2 ?? -1}")
+  // `??` over a closure call and over a record payload.
+  let h: Handler = inner
+  let hv = h("41") ?? "err"
+  let rec = mk(false) ?? { a: "fb" }
+  println("unwrap_or: ${hv} ${rec.a} ${half(5) ?? -1}")
+  // Result / Option combinators.
+  let rs: Result[String, String] = ok("abc")
+  let mapped: Result[String, String] = result.map(rs, (y) => y + "?")
+  let flat: Result[String, String] = result.flat_map(rs, (y) => ok(y + "F"))
+  let kept = option.filter(some("q" + "r"), (s) => string.len(s) > 5)
+  println("combinators: ${mapped ?? "-"} ${flat ?? "-"} ${kept ?? "-"}")
+  // A filter_map callback's fresh Option.
+  let evens = [1, 2, 3, 4] |> list.filter_map((x) => if x % 2 == 0 then some("e" + int.to_string(x)) else none)
+  println("filter_map: ${list.join(evens, ",")}")
+  // fan.map / fan.any element carriers, and a fan block's tuple.
+  let labels = fan.map([3, 4], (x) => probe(x))!
+  let first = fan.any([1, 2, 5, 9], (n) => probe(n))!
+  let pair = fan {
+    half(4)
+    half(6)
+  }
+  println("fan: ${list.join(labels, ",")} ${first} ${pair.0 + pair.1}")
+  // An if whose fresh arm is a module call.
+  println("distinct: ${set.len(distinct([1, 2, 1, 3, 2]))}")
+  // A mut-param effect call's Result consumed by match and by ??.
+  var r = [1, 2]
+  let v = scaled(r, 6) ?? -1
+  match scaled(r, 5) {
+    ok(x) => println("mut: ${v} ${x}"),
+    err(e) => println("mut err: ${e}"),
+  }
+  ok(())
+}

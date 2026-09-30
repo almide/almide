@@ -1,7 +1,6 @@
 //! Statement-position lowering (binds, assigns, index COW stores, loops,
 //! statement markers) — split from emitter.rs for the complexity budget.
 
-
 use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind, VarId};
 use wasm_encoder::BlockType;
 
@@ -14,6 +13,17 @@ mod stmts_loop;
 
 impl Emitter<'_> {
     /// Statement position: Unit-typed shapes only (blocks, calls, control).
+    /// `continue` / `break` in statement position: a branch to the loop
+    /// context's continue label (`break` adds the depth to its exit).
+    fn lower_loop_jump(&mut self, brk: bool) -> Result<(), EmitError> {
+        let Some((extra, delta)) = self.loop_ctl else {
+            return unsup(if brk { "expr:Break" } else { "expr:Continue" });
+        };
+        self.f.instructions().br(if brk { extra + delta } else { extra });
+        self.witness_loop_jump();
+        Ok(())
+    }
+
     pub(crate) fn lower_stmt_expr(&mut self, e: &IrExpr) -> Result<(), EmitError> {
         // main's Result-typed statement/tail is the effect carrier —
         // err aborts with the native contract instead of discarding
@@ -25,9 +35,7 @@ impl Emitter<'_> {
         }
         match &e.kind {
             IrExprKind::Block { stmts, expr } => {
-                for s in stmts {
-                    self.lower_stmt(s)?;
-                }
+                self.lower_block_stmts(stmts, expr.as_deref())?;
                 if let Some(tail) = expr {
                     self.lower_stmt_expr(tail)?;
                 }
@@ -47,25 +55,19 @@ impl Emitter<'_> {
             // if_ labels into the loop context (#2745), so a `break` /
             // `continue` in an arm reaches the right depth.
             IrExprKind::Match { subject, arms } => self.lower_match(subject, arms, None).map(|_| ()),
-            IrExprKind::Continue => match self.loop_ctl {
-                Some((extra, _)) => {
-                    self.f.instructions().br(extra);
-                    Ok(())
-                }
-                None => unsup("expr:Continue"),
-            },
-            IrExprKind::Break => match self.loop_ctl {
-                Some((extra, delta)) => {
-                    self.f.instructions().br(extra + delta);
-                    Ok(())
-                }
-                None => unsup("expr:Break"),
-            },
+            IrExprKind::Continue => self.lower_loop_jump(false),
+            IrExprKind::Break => self.lower_loop_jump(true),
             // for x in <list> / for i in a..b — extracted for complexity.
             IrExprKind::ForIn { var, var_tuple, iterable, body } => {
                 self.lower_forin(*var, var_tuple.as_deref(), iterable, body)
             }
             IrExprKind::Unit => Ok(()),
+            // A Unit var read in statement position does nothing. Its local
+            // holds an i32 placeholder that `lower` pushes and types Unit, so
+            // the catch-all below would leave it on the stack (#2945: the tail
+            // of C-132's `{ let (__mp_res, __mp_buf) = f(r)!; r = __mp_buf;
+            // __mp_res }` for a `-> Result[Unit, String]` callee).
+            IrExprKind::Var { id } if matches!(self.locals.get(id), Some(&(_, SliceTy::Unit))) => Ok(()),
             // Statement-position `f()!` / `f()?`: the marker machinery
             // runs (propagation/abort), the ok payload is discarded — and
             // RELEASED when the extraction handed this frame its credit
@@ -78,11 +80,17 @@ impl Emitter<'_> {
                 Ok(())
             }
             // Any other value expression in statement position: evaluate
-            // and discard (a bare `ok(x)` statement is legal IR).
+            // and discard (a bare `ok(x)` statement is legal IR) — an OWNED
+            // droppable value released, as a discarded call result is.
+            // A Unit VALUE is on the stack too: `lower` materializes Unit
+            // as an i32 placeholder (a `()` literal, a void call under a
+            // Unit want, a `r ?? ()` join over a `Result[Unit, _]`), so it
+            // is dropped like any scalar — skipping it left the i32 on the
+            // stack and failed validation (#3105: `fs.remove(p) ?? ()` as
+            // the tail of a Unit arm).
             _ => {
-                if self.lower(e, None)? != SliceTy::Unit {
-                    self.f.instructions().drop();
-                }
+                let ty = self.lower(e, None)?;
+                self.discard_result(e, ty);
                 Ok(())
             }
         }
@@ -117,11 +125,15 @@ impl Emitter<'_> {
             *extra += 1;
         }
         self.branch_depth += 1;
+        self.witness_branch_open();
         let arms = (|| {
+            self.witness_branch_arm();
             self.lower_stmt_expr(then)?;
             self.f.instructions().else_();
+            self.witness_branch_arm();
             self.lower_stmt_expr(else_)
         })();
+        self.witness_branch_close();
         self.branch_depth -= 1;
         arms?;
         self.f.instructions().end();
@@ -165,12 +177,21 @@ impl Emitter<'_> {
                     _ => None,
                 };
                 let ret_e = ret_direct.unwrap_or(else_);
-                self.lower(ret_e, Some(want))?;
-                // The guard's early return is an exit like the tail: a
-                // droppable value that may BORROW a local takes +1 before
-                // the frame's owners are released (#2001).
-                if self.rc_droppable(want) && !self.rc_owned_result(ret_e) {
-                    self.rc_inc_top();
+                match self.raw_effect_else(want, ret_direct, else_) {
+                    // #3042: an effect fn's plain-value else (`guard c else
+                    // ()` / `else n`) is the fn's RAW return — ok-wrapped
+                    // exactly like a raw tail (func.rs), not lowered as the
+                    // Result it is not.
+                    Some(raw) => self.lower_raw_effect_exit(else_, raw, want)?,
+                    None => {
+                        self.lower(ret_e, Some(want))?;
+                        // The guard's early return is an exit like the tail: a
+                        // droppable value that may BORROW a local takes +1 before
+                        // the frame's owners are released (#2001).
+                        if self.rc_droppable(want) && !self.rc_owned_result(ret_e) {
+                            self.rc_inc_top();
+                        }
+                    }
                 }
                 let plan = self.exit_plan(crate::exit_plan::Continuation::GuardReturn);
                 self.emit_exit(&plan);
@@ -241,6 +262,13 @@ impl Emitter<'_> {
             let dec_cell = self.dec_cell_fn(declared);
             self.f.instructions().local_get(idx).call(dec_cell);
             self.rc_own(idx, declared);
+            // #2758: the cell's credits (the frame's and each capturing
+            // env's) are no hook's yet — withdraw, keeping the local known
+            // so its exit release is attributed.
+            if let Some(w) = self.witness.as_mut() {
+                w.decline("bind:cell");
+                w.param_borrowed(idx);
+            }
             self.f
                 .instructions()
                 .i32_const(declared.slot_size() as i32)
@@ -267,7 +295,6 @@ impl Emitter<'_> {
         }
         Ok(())
     }
-
 
     pub(crate) fn rc_own(&mut self, idx: u32, ty: SliceTy) {
         self.rc_owned.insert(idx);
@@ -319,7 +346,9 @@ impl Emitter<'_> {
                 let ty = self.lower(value, None)?;
                 let scr = self.scr_i32_local;
                 self.f.instructions().local_set(scr);
-                self.emit_pattern_binds(pattern, ty, scr)
+                self.emit_pattern_binds(pattern, ty, scr)?;
+                self.witness_pattern_views(pattern);
+                Ok(())
             }
             IrStmtKind::Comment { .. } => Ok(()),
             IrStmtKind::Guard { cond, else_ } => self.lower_stmt_guard(cond, else_),
@@ -382,7 +411,9 @@ impl Emitter<'_> {
                     self.emit_det_charge_const(1);
                     self.range_exit_test(var_idx, floor, stop, *inclusive);
                     self.f.instructions().br_if(1);
+                    self.witness_loop_open();
                     self.lower_loop_body(body, true)?;
+                    self.witness_loop_close();
                     self.f
                         .instructions()
                         .local_get(var_idx)
@@ -417,7 +448,9 @@ impl Emitter<'_> {
                         self.emit_det_charge_const(1);
                         self.range_exit_test(var_idx, sl, el, inclusive);
                         self.f.instructions().br_if(1);
+                        self.witness_loop_open();
                         self.lower_loop_body(body, true)?;
+                        self.witness_loop_close();
                         self.f
                             .instructions()
                             .local_get(var_idx)
@@ -456,6 +489,9 @@ impl Emitter<'_> {
                         if !self.rc_owned_result(iterable) {
                             self.rc_inc_top();
                         }
+                        // The cursor's share and its release after the loop
+                        // are not recorded yet (#2757).
+                        self.witness_decline("forin-map");
                         let drop_map = self.dec_fn_of(SliceTy::Map(kh, vh));
                         let bh = self.hold_i32()?;
                         let cur = self.hold_i32()?;
@@ -528,8 +564,10 @@ impl Emitter<'_> {
                     .i32_const(stride as i32)
                     .i32_mul()
                     .i32_add();
+                self.witness_loop_open();
                 self.load_ty_slot(elem, 0);
                 self.f.instructions().local_set(var_idx);
+                self.witness_view_local(var_idx, elem);
                 // for (a, b) in pairs — the loop var holds the tuple base;
                 // load each position into its destructured local.
                 if let Some(tvars) = var_tuple {
@@ -547,9 +585,11 @@ impl Emitter<'_> {
                         self.f.instructions().local_get(var_idx);
                         self.load_ty_slot(fty, off);
                         self.f.instructions().local_set(tidx);
+                        self.witness_view_local(tidx, fty);
                     }
                 }
                 self.lower_loop_body(body, true)?;
+                self.witness_loop_close();
                 self.f
                     .instructions()
                     .local_get(cur)
@@ -567,12 +607,12 @@ impl Emitter<'_> {
 
 }
 
-
 impl Emitter<'_> {
     /// `Assign` lowering — the share/dec discipline (RC-3/RC-5) plus the
     /// growing-accumulator window, split from `lower_stmt` for the
     /// complexity budget.
     fn lower_assign(&mut self, var: &almide_ir::VarId, value: &IrExpr) -> Result<(), EmitError> {
+                let moved = self.take_moved_temp(value);
                 if self.try_str_append_assign(var, value)? {
                     return Ok(());
                 }
@@ -601,12 +641,13 @@ impl Emitter<'_> {
                 // and the exit validator (E083) checks it; the refusal is
                 // retired (stage 2c-ii: records made the mut_port cell hit it).
                 self.lower(value, Some(declared))?;
-                // RC-5: same share discipline as Bind.
-                if self.rc_droppable(declared) && !self.rc_owned_result(value) {
+                // RC-5: same share discipline as Bind — except a MOVED
+                // temp (#3104), whose one credit becomes the var's.
+                if self.rc_droppable(declared) && !self.rc_owned_result(value) && moved.is_none() {
                     self.rc_inc_top();
                 }
-                // RC-3: same ownership settlement as Bind — locals only
-                // (globals are main-lifetime), never through a cell, and
+                // RC-3: same ownership settlement as Bind — here for locals
+                // (a global's is at the store below), never through a cell, and
                 // NEVER when the rhs SPENDS the assigned var's own credit
                 // (`assign_rhs_spends_var`): then the callee already released
                 // or reallocated the old block, and a dec here double-frees
@@ -625,6 +666,16 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(idx).call(dec);
                     self.rc_own(idx, declared);
                 }
+                // The witness (#2757): a droppable local's occupant changes
+                // here; a global or a cell is not a frame local's to record.
+                match local {
+                    Some(idx) if self.rc_droppable(declared) && !self.cells.contains(var) => match moved {
+                        Some(src) => self.witness_transfer(idx, !rhs_spends_var, src),
+                        None => self.witness_assign(idx, !rhs_spends_var, rhs_spends_var, value),
+                    },
+                    Some(_) if !self.rc_droppable(declared) => {}
+                    _ => self.witness_decline("assign:global-or-cell"),
+                }
                 // #2010: a C-319 cell's occupant is released as it is
                 // replaced (the cell holds exactly one credit on it) — the
                 // same settlement, one load deeper.
@@ -642,9 +693,20 @@ impl Emitter<'_> {
                     Some(idx) => self.emit_store_var(*var, idx, declared)?,
                     None => {
                         let gidx = self.globals[&(self.var_space, *var)].0;
+                        // #2992: a top-let global holds ONE credit on its
+                        // occupant for the program's life (its initializer
+                        // takes it, func.rs), so replacing the occupant
+                        // releases it — the local settlement above, read
+                        // through the global. Without it every `g = …` in a
+                        // loop kept the previous block alive.
+                        if self.rc_droppable(declared) && !rhs_spends_var {
+                            let dec = self.dec_fn_of(declared);
+                            self.f.instructions().global_get(gidx).call(dec);
+                        }
                         self.f.instructions().global_set(gidx);
                     }
                 }
+                self.empty_moved_temp(moved);
                 Ok(())
     }
 }
@@ -692,6 +754,18 @@ impl Emitter<'_> {
                     _ => crate::rc_ownership::rc_mentions_var(a, var),
                 })
             }
+            // A CLOSURE call shares a Var argument (`rc_arg_guard`, calls.rs)
+            // and the lifted body releases its params at its own exit plan,
+            // so a direct Var argument leaves the local's credit where it
+            // was: `acc = f(acc, x)` releases the old `acc` like any Assign
+            // (#2977 — every step of a closure accumulator loop kept it).
+            IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. } => {
+                crate::rc_ownership::rc_mentions_var(callee, var)
+                    || args.iter().any(|a| match &a.kind {
+                        IrExprKind::Var { id } if *id == var => false,
+                        _ => crate::rc_ownership::rc_mentions_var(a, var),
+                    })
+            }
             IrExprKind::Call { .. } | IrExprKind::RuntimeCall { .. } => mentions(),
             _ => false,
         }
@@ -709,12 +783,17 @@ impl Emitter<'_> {
         path: &[almide_base::intern::Sym],
         value: &IrExpr,
     ) -> Result<(), EmitError> {
+        let moved = self.take_moved_temp(value);
         let spends_var = self.assign_rhs_spends_var(value, *target);
         self.field_assign_with(target, path, spends_var, |s, fty| {
             s.lower(value, Some(fty))?;
-            s.rc_share_guard(value, fty);
+            if moved.is_none() {
+                s.rc_share_guard(value, fty);
+            }
             Ok(())
-        })
+        })?;
+        self.empty_moved_temp(moved);
+        Ok(())
     }
 }
 

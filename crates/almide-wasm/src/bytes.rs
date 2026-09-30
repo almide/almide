@@ -181,7 +181,7 @@ impl Emitter<'_> {
         i.memory_fill(0);
         i.local_get(ho);
         let _ = i;
-        self.emit_bytes_writeback(&recv)?;
+        self.emit_bytes_writeback_fresh(&recv)?;
         self.release_i32();
         self.release_i64();
         self.release_i32();
@@ -200,7 +200,7 @@ impl Emitter<'_> {
         let recv = self.bytes_recv("clear", b)?;
         self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
         self.f.instructions().drop().i32_const(0).call(F_ALLOC);
-        self.emit_bytes_writeback(&recv)?;
+        self.emit_bytes_writeback_fresh(&recv)?;
         Ok(None)
     }
 
@@ -532,8 +532,11 @@ impl Emitter<'_> {
             // buffer is a no-op; len clamps to both remainders.
             ("copy_from", [dst, src, doff, soff, n]) => {
                 let recv = self.bytes_recv("copy-from", dst)?;
+                // The receiver is unique here (a var through the COW gate, a
+                // temporary materialized unless fresh), so the window lands
+                // in place: the old extra copy orphaned the receiver's own
+                // block on every call (#2968 — 20k blocks over a loop).
                 self.emit_read_bytes_recv(&recv, dst)?;
-                self.f.instructions().call(F_BLOCK_COPY);
                 let dh = self.hold_i32()?;
                 self.f.instructions().local_set(dh);
                 self.lower_arg(src, Some(BYTES), ArgMode::Borrow)?;
@@ -635,7 +638,7 @@ impl Emitter<'_> {
                     _ => (8, true),
                 };
                 self.lower_bytes_write_be(b, v, k, float)?;
-                self.emit_bytes_writeback(&recv)?;
+                self.emit_bytes_writeback_fresh(&recv)?;
                 Ok(None)
             }
             // copy_within: memmove inside the buffer, NO-OP when the
@@ -715,7 +718,7 @@ impl Emitter<'_> {
                 i.end();
                 i.local_get(ho);
                 let _ = i;
-                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
+                self.emit_rebind_mut_var_fresh(*id, var_idx, var_ty, vglob)?;
                 self.release_i32();
                 self.release_i64();
                 self.release_i64();
@@ -755,15 +758,7 @@ impl Emitter<'_> {
                 // buffer per append, quadratic over a growing loop. The
                 // push intrinsic frees the outgrown block inside
                 // `$bytes_push`; the linked family releases it here.
-                if let crate::bytes_recv::BytesRecv::Var { id, idx, ty, global } = &recv {
-                    let hn = self.hold_i32()?;
-                    self.f.instructions().local_set(hn);
-                    self.emit_read_mut_var(id, *idx, *ty, *global);
-                    self.f.instructions().call(F_DEC_FLAT);
-                    self.f.instructions().local_get(hn);
-                    self.release_i32();
-                }
-                self.emit_bytes_writeback(&recv)?;
+                self.emit_bytes_writeback_fresh(&recv)?;
                 Ok(None)
             }
             // Not a native arm: the audited linked path before the wall.
@@ -779,8 +774,13 @@ impl Emitter<'_> {
     fn lower_bytes_push(&mut self, b: &IrExpr, v: &IrExpr) -> ArmResult {
         let recv = self.bytes_recv("push", b)?;
         self.emit_read_bytes_recv(&recv, b)?;
+        let shared = match &recv {
+            crate::bytes_recv::BytesRecv::Var { idx, global, .. } => self.note_shared_receiver(*idx, *global)?,
+            crate::bytes_recv::BytesRecv::Temp => None,
+        };
         self.lower_arg(v, Some(INT), ArgMode::Borrow)?;
         self.f.instructions().call(F_BYTES_PUSH);
+        self.settle_outgrown_receiver(shared, BYTES);
         self.emit_bytes_writeback(&recv)?;
         Ok(None)
     }

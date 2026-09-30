@@ -3,16 +3,16 @@
 # shipped<TAB>rung<TAB>program; the last row is the ladder's total.
 1330	T0 nothing	research/benchmark/perf/wasm-size/hello.almd
 1499	T1 Int print	research/benchmark/perf/wasm-size/fibonacci.almd
-7681	T1 Int print	research/benchmark/perf/binarytrees/binarytrees.almd
-10032	T2 Float print	research/benchmark/perf/spectralnorm/spectralnorm.almd
-7331	T3 String	research/benchmark/perf/strchurn/strchurn.almd
-6662	T3 String	research/benchmark/perf/strbuild/strbuild_append.almd
-19375	T4 List	research/benchmark/perf/listbuild/listbuild_append.almd
-19707	T4 List	research/benchmark/perf/listbuild/listbuild_combinator.almd
-9369	T5 Map	research/benchmark/perf/mapbuild/mapbuild.almd
-11469	T5 Map	research/benchmark/perf/wordfreq/wordfreq.almd
-11492	T5 Map	research/benchmark/perf/wordfreq/wordfreq_group.almd
-32346	T6 JSON	research/benchmark/perf/decode/decode.almd
-27202	T6 JSON	spec/wasm_cross/json_gltf_walk.almd
-20120	T7 regex	spec/wasm_cross/regex_engine.almd
-185615	Σ	total
+7703	T1 Int print	research/benchmark/perf/binarytrees/binarytrees.almd
+9967	T2 Float print	research/benchmark/perf/spectralnorm/spectralnorm.almd
+7266	T3 String	research/benchmark/perf/strchurn/strchurn.almd
+6597	T3 String	research/benchmark/perf/strbuild/strbuild_append.almd
+19265	T4 List	research/benchmark/perf/listbuild/listbuild_append.almd
+19597	T4 List	research/benchmark/perf/listbuild/listbuild_combinator.almd
+9304	T5 Map	research/benchmark/perf/mapbuild/mapbuild.almd
+11410	T5 Map	research/benchmark/perf/wordfreq/wordfreq.almd
+11433	T5 Map	research/benchmark/perf/wordfreq/wordfreq_group.almd
+31959	T6 JSON	research/benchmark/perf/decode/decode.almd
+26835	T6 JSON	spec/wasm_cross/json_gltf_walk.almd
+20119	T7 regex	spec/wasm_cross/regex_engine.almd
+184284	Σ	total

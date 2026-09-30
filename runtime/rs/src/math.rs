@@ -40,8 +40,7 @@ pub const ALMIDE_POW_NEGATIVE_EXPONENT_MSG: &str = "negative exponent";
 #[inline(always)]
 pub fn almide_rt_math_pow(base: i64, exp: i64) -> i64 {
     if exp < 0 {
-        eprintln!("Error: {}", ALMIDE_POW_NEGATIVE_EXPONENT_MSG);
-        std::process::exit(1);
+        almide_abort(ALMIDE_POW_NEGATIVE_EXPONENT_MSG);
     }
     let mut result: i64 = 1;
     let mut b = base;

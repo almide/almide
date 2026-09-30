@@ -54,7 +54,7 @@ impl Emitter<'_> {
             // a final len patch (the filter doctrine).
             ("result", "partition", [xs]) => Some(Lowered::owned(self.lower_result_partition(xs)?)),
             ("result", "flat_map", [r, f]) => {
-                let SliceTy::Result(o, _) = self.lower_arg(r, None, ArgMode::Retain)? else {
+                let SliceTy::Result(o, er) = self.lower_arg(r, None, ArgMode::Retain)? else {
                     return unsup("result-flat_map-of-nonresult");
                 };
                 let (params, body) = self.hof_lambda(f, 1)?;
@@ -82,6 +82,10 @@ impl Emitter<'_> {
                 // A callback result RETURNED as the arm's value: a view (a captured var,
                 // the input) takes its share so the value is owned on every path.
                 self.rc_share_guard(body, rb);
+                // #2969: the retained input is done with on this side (the
+                // err side hands it back), released with its payload.
+                let dec_in = self.dec_fn_of(SliceTy::Result(o, er));
+                self.f.instructions().local_get(hs).call(dec_in);
                 self.f.instructions().end();
                 self.release_i32();
                 Some(Lowered::owned(rb))
@@ -296,6 +300,12 @@ impl Emitter<'_> {
                 // input itself): the block storing it is a holder and takes the share.
                 self.rc_share_guard(body, b);
                 self.store_ty_slot(b, almide_layout::SUM_FIELD);
+                // #2969: the mapped side is done with the retained input —
+                // the new block took its own credit on whatever the body
+                // handed back (the share guard above), so the input is
+                // released here with its payload.
+                let dec_in = self.dec_fn_of(SliceTy::Result(o, er));
+                self.f.instructions().local_get(hs).call(dec_in);
                 self.f.instructions().local_get(hb).end();
                 self.release_i32();
                 self.release_i32();
@@ -303,8 +313,6 @@ impl Emitter<'_> {
                 // The pass-through side hands the INPUT block back, so the
                 // input is RETAINED (a temporary's credit moves into the
                 // result; a Var takes the share) and the result is owned.
-                // On the mapped side the retained Var's share is a leak,
-                // never a dangle (the per-arm identity is #1996).
                 Some(Lowered::owned(if on_ok { SliceTy::Result(bi, er) } else { SliceTy::Result(o, bi) }))
         })
     }
@@ -463,11 +471,15 @@ impl Emitter<'_> {
                 self.load_ty_slot(a, almide_layout::OPTION_FIELD);
                 self.f.instructions().local_set(params[0]);
                 self.lower(body, Some(BOOL))?;
+                // #2969: a rejected `some` is not handed back — its retained
+                // credit (and the payload's) ends here.
+                let dec_in = self.dec_fn_of(got);
                 {
                     let mut i = self.f.instructions();
                     i.if_(BlockType::Result(ValType::I32));
                     i.local_get(hs);
                     i.else_();
+                    i.local_get(hs).call(dec_in);
                     i.i32_const(0);
                     i.end();
                     i.end();

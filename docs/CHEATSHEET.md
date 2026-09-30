@@ -981,6 +981,8 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 - `List.new()` → **WRONG**. Write `[]`. There is no `new()` for List
 - `{"a": 1}` as a map → **WRONG**. Write `["a": 1]`. Braces `{}` are for records/blocks, brackets `[]` for lists and maps
 - `string.length(s)` → **WRONG**. Write `string.len(s)`. No synonyms
+- `list.length(xs)` → **WRONG**. Write `list.len(xs)`. No synonyms
+- `matrix.row_dot(m, r, v)` / `matrix.concat_cols_many(ms)` → **WRONG**. Write `matrix.dot_row(m, r, v)` / `matrix.concat_cols(ms)`. No synonyms
 - `string.to_lowercase(s)` → **WRONG**. Write `string.to_lower(s)`. No synonyms
 - `string.to_uppercase(s)` → **WRONG**. Write `string.to_upper(s)`. No synonyms
 - `string.substring(s, i, j)` → **WRONG**. Write `string.slice(s, i, j)`. No synonyms

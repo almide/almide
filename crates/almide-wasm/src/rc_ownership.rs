@@ -564,6 +564,10 @@ impl Emitter<'_> {
                 // `r ?? fb` is owned when its lowering normalized both arms
                 // to one credit (#2970, `own_unwrap_or_join`).
                 | almide_ir::IrExprKind::UnwrapOr { .. }
+                // `m[k]` is `map.get` (lower_data): owned when the arm was.
+                | almide_ir::IrExprKind::MapAccess { .. }
+                // `fan { … }` (fan.rs `lower_fan_block`): owned when marked.
+                | almide_ir::IrExprKind::Fan { .. }
         ) {
             return self.owned_call_marks.contains(&(e as *const almide_ir::IrExpr as usize));
         }
@@ -631,13 +635,32 @@ impl Emitter<'_> {
 
     /// `rc_owned_result` as a value-position `if` can know it BEFORE the
     /// arm is lowered: a nested `if` by its own normalization rule (either
-    /// arm owned), a block by its tail. A module call is owned only once
-    /// its lowering marks it, so it predicts borrowed — never owned where
-    /// the lowering will not agree.
+    /// arm owned), a block by its tail. A node that is owned only once its
+    /// lowering MARKS it (a module call, an extraction, `r?`, `??`, `m[k]`,
+    /// `fan { … }`) may be owned: it predicts owned (#2969 — `if
+    /// set.contains(s, x) then s else set.insert(s, x)` predicted borrowed,
+    /// so the fresh insert and the borrowed `s` went unnormalized and every
+    /// insert kept a second credit). A wrong guess costs nothing: each arm
+    /// is judged again after it is lowered, and a borrowed arm takes its
+    /// `+1` inside, so the join still hands back exactly one credit.
     fn rc_predict_owned(&self, e: &almide_ir::IrExpr) -> bool {
         match &e.kind {
             IrExprKind::If { then, else_, .. } => self.rc_predict_owned(then) || self.rc_predict_owned(else_),
             IrExprKind::Block { expr: Some(t), .. } => self.rc_predict_owned(t),
+            // A module call's ownership is its arm's DECLARATION, known only
+            // once it is lowered (arm.rs) — and nearly every droppable arm
+            // result is `Owned` (two `View` arms exist). Predicting owned is
+            // safe either way: the join then asks each arm what it actually
+            // was and gives a borrowed one its +1. Predicting borrowed left
+            // `if c then name else string.join(xs, ".")` (path.stem) with a
+            // borrowed join over an owned arm — its block leaked (#2977).
+            IrExprKind::Call { target: almide_ir::CallTarget::Module { .. }, .. }
+            | IrExprKind::Try { .. }
+            | IrExprKind::Unwrap { .. }
+            | IrExprKind::ToOption { .. }
+            | IrExprKind::UnwrapOr { .. }
+            | IrExprKind::MapAccess { .. }
+            | IrExprKind::Fan { .. } => true,
             _ => self.rc_owned_result(e),
         }
     }
@@ -652,9 +675,9 @@ impl Emitter<'_> {
     /// #2046. Two borrowed arms stay borrowed and pay nothing.
     ///
     /// The `then` arm decides from a PREDICTION of `else_` (it is lowered
-    /// first); the `else_` arm from what `then` actually was. The one shape
-    /// left over — a borrowed `then` beside an `else_` owned only by a
-    /// module call's mark — stays borrowed: a leak, never a dangle.
+    /// first); the `else_` arm from what `then` actually was. A module call
+    /// predicts owned (`rc_predict_owned`), so an `else_` owned only by its
+    /// arm's mark normalizes the join too.
     pub(crate) fn lower_if_arms(
         &mut self,
         e: &almide_ir::IrExpr,
@@ -665,22 +688,33 @@ impl Emitter<'_> {
         let normalize = self.rc_droppable(ty) && (self.rc_predict_owned(then) || self.rc_predict_owned(else_));
         self.f.instructions().if_(wasm_encoder::BlockType::Result(ty.val_type()));
         self.branch_depth += 1;
+        // The witness (#2756) sees each arm and the credit it hands the join.
+        self.witness_branch_open();
         let arms = (|| {
+            self.witness_branch_arm();
             self.in_tail = tail;
             self.lower(then, Some(ty))?;
             let then_owned = self.rc_owned_result(then);
             if normalize && !then_owned {
                 self.rc_inc_top();
             }
+            if self.rc_droppable(ty) && (normalize || then_owned) {
+                self.witness_arm_value(then);
+            }
             self.f.instructions().else_();
+            self.witness_branch_arm();
             self.in_tail = tail;
             self.lower(else_, Some(ty))?;
             let join = normalize || (then_owned && self.rc_droppable(ty));
             if join && !self.rc_owned_result(else_) {
                 self.rc_inc_top();
             }
+            if join {
+                self.witness_arm_value(else_);
+            }
             Ok(join)
         })();
+        self.witness_branch_close();
         self.branch_depth -= 1;
         if arms? {
             self.owned_call_marks.insert(e as *const almide_ir::IrExpr as usize);

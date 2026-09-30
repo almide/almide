@@ -29,6 +29,10 @@ pub mod substitute;
 pub mod effect;
 pub mod annotations;
 pub mod mut_param;
+pub mod effect_abi;
+mod mut_param_err_carry;
+mod mut_param_place;
+mod mut_param_unpropagated;
 pub mod exit_code;
 pub mod fusion;
 pub mod speculation;
@@ -208,6 +212,18 @@ impl VarTable {
         let id = VarId(self.entries.len() as u32);
         self.entries.push(VarInfo { name, ty, mutability, span, use_count: 0, module_origin: None });
         id
+    }
+
+    /// Allocate a compiler-synthesized temp whose rendered name is unique:
+    /// `{prefix}_{id}`. The Rust walker renders a var by its NAME, so two
+    /// synthesized temps that share a fixed name (`__hoist`) shadow each other
+    /// when both are bound in one block and read after the second binding —
+    /// every read then sees the last one (#3049). A pass that can bind the
+    /// same temp kind twice in one scope allocates through this, never
+    /// through [`VarTable::alloc`] with a fixed string.
+    pub fn alloc_fresh(&mut self, prefix: &str, ty: Ty, mutability: Mutability, span: Option<Span>) -> VarId {
+        let name = almide_base::intern::sym(&format!("{prefix}_{}", self.entries.len()));
+        self.alloc(name, ty, mutability, span)
     }
 
     pub fn get(&self, id: VarId) -> &VarInfo { &self.entries[id.0 as usize] }

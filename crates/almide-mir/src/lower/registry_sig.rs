@@ -98,6 +98,8 @@ fn registry_entry(call_name: &str) -> Option<(usize, &'static str)> {
 
 fn lower_source_sigs(idx: usize) -> Option<SourceSigs> {
     let (source, _) = crate::mir_ops::self_host_runtime()[idx];
+    // Lowering this source installs its own ABI facts; the caller's stay (#3058).
+    let _facts = crate::lower::AbiFactsScope::save();
     let ir = crate::pipeline::source_to_ir(source).ok()?;
     let sigs = ir
         .functions

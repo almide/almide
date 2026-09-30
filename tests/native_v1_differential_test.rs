@@ -115,6 +115,10 @@ const CORPUS: &[(&str, &str)] = &[
     //    v1 render's rustc verdict). Depth 1.5M also pins that the loop, not
     //    LLVM, carries the recursion. ──
     ("tail_self_accumulator", "fn count(n: Int, acc: Int) -> Int = if n == 0 then acc else count(n - 1, acc + 1)\n\nfn main() -> Unit = println(int.to_string(count(1500000, 0)))\n"),
+    // ── #3031: the TCO loop rebinds the heap accumulator slot in BOTH arms of
+    //    the `if`. The ownership verifier let the then arm's rebind leak into
+    //    the else arm and walled this program onto v0 as a use-after-free. ──
+    ("tail_accumulator_rebound_per_arm", "fn go(n: Int, acc: String) -> String =\n  if n == 0 then acc\n  else if n % 2 == 0 then go(n - 1, acc + \"y\")\n  else go(n - 1, acc + \"x\")\n\nfn main() -> Unit = println(go(5, \"\"))\n"),
 ];
 
 #[test]

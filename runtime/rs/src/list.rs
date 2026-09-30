@@ -48,8 +48,8 @@ pub fn almide_rt_list_max<T: Ord + Clone>(xs: &[T]) -> Option<T> { xs.iter().max
 // aborts with the ALS-T6 form (`Error: …` + exit 1) instead of leaking Rust's raw
 // `chunks(0)`/`windows(0)` panic (exit 101) — wasm previously even returned len+1
 // EMPTY windows silently for `windows(xs, 0)`.
-pub fn almide_rt_list_chunk<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { if n == 0 { eprintln!("Error: chunk size must be positive"); std::process::exit(1); } xs.chunks(n as usize).map(|c| c.to_vec()).collect() }
-pub fn almide_rt_list_windows<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { if n == 0 { eprintln!("Error: window size must be positive"); std::process::exit(1); } if (n as usize) > xs.len() { return vec![]; } xs.windows(n as usize).map(|w| w.to_vec()).collect() }
+pub fn almide_rt_list_chunk<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { if n == 0 { almide_abort("chunk size must be positive"); } xs.chunks(n as usize).map(|c| c.to_vec()).collect() }
+pub fn almide_rt_list_windows<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { if n == 0 { almide_abort("window size must be positive"); } if (n as usize) > xs.len() { return vec![]; } xs.windows(n as usize).map(|w| w.to_vec()).collect() }
 pub fn almide_rt_list_dedup<T: Clone + PartialEq>(xs: &[T]) -> Vec<T> { let mut r = Vec::new(); for x in xs { if r.last() != Some(x) { r.push(x.clone()); } } r }
 pub fn almide_rt_list_unique<T: Clone + PartialEq>(xs: &[T]) -> Vec<T> { let mut r = Vec::new(); for x in xs { if !r.contains(x) { r.push(x.clone()); } } r }
 pub fn almide_rt_list_set<T: Clone>(xs: &[T], i: i64, x: T) -> Vec<T> { let mut r = xs.to_vec(); if let Some(s) = r.get_mut(i as usize) { *s = x; } r }
@@ -139,8 +139,7 @@ pub fn almide_rt_list_intersperse<T: Clone>(xs: Vec<T>, sep: T) -> Vec<T> { let 
 pub const ALMIDE_LIST_REPEAT_MAX_ELEMS: i64 = (1 << 31) / 8;
 pub fn almide_rt_list_repeat<T: Clone>(x: T, n: i64) -> Vec<T> {
     if n > ALMIDE_LIST_REPEAT_MAX_ELEMS {
-        eprintln!("Error: repeat result too large");
-        std::process::exit(1);
+        almide_abort("repeat result too large");
     }
     vec![x; n.max(0) as usize]
 }
@@ -155,8 +154,7 @@ pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> {
     let count = end.saturating_sub(start).max(0) as usize;
     let mut v: Vec<i64> = Vec::new();
     if v.try_reserve_exact(count).is_err() {
-        eprintln!("Error: out of memory");
-        std::process::exit(1);
+        almide_abort("out of memory");
     }
     v.extend(start..end);
     v
@@ -210,7 +208,7 @@ pub fn almide_rt_list_shuffle<T>(mut xs: Vec<T>) -> Vec<T> {
 // panic exit 101 the wasm leg never shows). n > len returns empty like the
 // plural twin instead of leaking std's behavior.
 pub fn almide_rt_list_window<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
-    if n == 0 { eprintln!("Error: window size must be positive"); std::process::exit(1); }
+    if n == 0 { almide_abort("window size must be positive"); }
     if (n as usize) > xs.len() { return vec![]; }
     xs.windows(n as usize).map(|w| w.to_vec()).collect()
 }
@@ -251,6 +249,8 @@ pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + S
     }
     let chunk_size = xs.len().div_ceil(almide_rt_list_par_workers(xs.len()));
     let mut slots: Vec<Option<B>> = (0..xs.len()).map(|_| None).collect();
+    // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
+    almide_stdout_flush();
     std::thread::scope(|s| {
         for (chunk, out) in xs.chunks(chunk_size).zip(slots.chunks_mut(chunk_size)) {
             let f = &f;
@@ -272,6 +272,8 @@ pub fn almide_rt_list_par_filter<A: Send + Sync + Clone, F: Fn(A) -> bool + Send
     let chunk_size = (xs.len() + cpus - 1) / cpus;
     let chunks: Vec<Vec<A>> = xs.chunks(chunk_size).map(|c| c.to_vec()).collect();
     let mut results: Vec<Option<Vec<A>>> = (0..chunks.len()).map(|_| None).collect();
+    // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
+    almide_stdout_flush();
     std::thread::scope(|s| {
         let mut handles = Vec::new();
         for chunk in &chunks {
@@ -295,6 +297,8 @@ pub fn almide_rt_list_par_any<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + 
     let chunk_size = (xs.len() + cpus - 1) / cpus;
     let chunks: Vec<&[A]> = xs.chunks(chunk_size).collect();
     let found = std::sync::atomic::AtomicBool::new(false);
+    // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
+    almide_stdout_flush();
     std::thread::scope(|s| {
         for chunk in &chunks {
             let f = &f;
@@ -321,6 +325,8 @@ pub fn almide_rt_list_par_all<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + 
     let chunk_size = (xs.len() + cpus - 1) / cpus;
     let chunks: Vec<&[A]> = xs.chunks(chunk_size).collect();
     let failed = std::sync::atomic::AtomicBool::new(false);
+    // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
+    almide_stdout_flush();
     std::thread::scope(|s| {
         for chunk in &chunks {
             let f = &f;

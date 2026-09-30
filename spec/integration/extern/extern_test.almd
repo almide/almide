@@ -14,14 +14,16 @@ fn my_min(a: Int, b: Int) -> Int = if a < b then a else b
 @extern(ts, "Math", "max")
 fn my_max(a: Int, b: Int) -> Int
 
-fn main() -> Unit = {
-  // Pattern 1: pure Almide
-  assert_eq(add(2, 3), 5, "pure Almide fn")
-  // Pattern 2: @extern(rs) delegates to std::cmp::min
-  assert_eq(my_min(10, 20), 10, "@extern(rs) min")
-  assert_eq(my_min(5, 3), 3, "@extern(rs) min reversed")
-  // Pattern 3: @extern(rs) delegates to std::cmp::max
-  assert_eq(my_max(10, 20), 20, "@extern(rs) max")
-  assert_eq(my_max(5, 3), 5, "@extern(rs) max reversed")
-  println("All @extern tests passed!")
+test "a pure Almide fn uses its body" {
+  assert_eq(add(2, 3), 5)
+}
+
+test "@extern(rs) with a fallback body delegates to std::cmp::min" {
+  assert_eq(my_min(10, 20), 10)
+  assert_eq(my_min(5, 3), 3)
+}
+
+test "@extern(rs) with no body delegates to std::cmp::max" {
+  assert_eq(my_max(10, 20), 20)
+  assert_eq(my_max(5, 3), 5)
 }

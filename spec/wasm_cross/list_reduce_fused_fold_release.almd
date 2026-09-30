@@ -1,0 +1,46 @@
+// @contract: C-101, C-334
+// The accumulators a HOF replaces and the elements a fused fold consumes are
+// released, so the run ends with no live heap block on the wasm leg (#2977).
+//
+// `list.reduce` over heap elements: each step's result replaces the
+// accumulator, and the replaced one is released. The first element seeds it
+// by a shared credit, and the last accumulator moves into the `some`.
+//
+// `list.fold` over a `list.map` / `list.filter` chain runs the FUSED
+// lowering: each mapped element is an owned temporary the fold step consumes,
+// released after the step, and released too when a filter stage skips it.
+// The rows cover a String and a List[Int] element, a borrowed and a fresh
+// callback tail, and a filter that skips some mapped elements.
+fn join_all(xs: List[String]) -> String = (xs |> list.reduce((a, b) => a + "," + b)) ?? "none"
+
+fn longest(xs: List[String]) -> String = (xs |> list.reduce((a, b) => if string.len(b) > string.len(a) then b else a)) ?? "none"
+
+effect fn main() -> Unit = {
+  let words = ["alpha", "be", "gamma", "de", "epsilon"]
+  println(join_all(words))
+  println(longest(words))
+  let empty: List[String] = []
+  println(join_all(empty))
+  let total = words |> list.map((w) => w + "!") |> list.filter((w) => string.len(w) > 3) |> list.fold(
+    "",
+    (acc, w) => acc + w,
+  )
+  println(total)
+  let last = words |> list.map((w) => string.to_upper(w)) |> list.fold("", (acc, w) => w)
+  println(last)
+  let sizes = [1, 2, 3, 4] |> list.map((n) => list.repeat(n, n)) |> list.filter((xs) => list.len(xs) % 2 == 0) |> list.fold(
+    0,
+    (acc, xs) => acc + list.len(xs),
+  )
+  println(int.to_string(sizes))
+  var rounds = 0
+  for i in 0..<50 {
+    let r = [int.to_string(i), "x", "y"] |> list.reduce((a, b) => b + a)
+    let f = ["p", "q"] |> list.map((s) => s + int.to_string(i)) |> list.fold(
+      "",
+      (acc, s) => acc + s,
+    )
+    rounds = rounds + string.len(r ?? "") + string.len(f)
+  }
+  println(int.to_string(rounds))
+}

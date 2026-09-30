@@ -100,7 +100,9 @@ for p in sorted((repo / "stdlib").glob("*.almd")):
 for rel, _, _ in NATIVE:
     src = (repo / rel).read_text().splitlines()
     for i, line in enumerate(src, 1):
-        if "process::exit" not in line:
+        # `almide_abort(` is the once-guarded runtime abort (#3022) every
+        # native `Error: <msg>` + exit 1 now goes through.
+        if "process::exit" not in line and "almide_abort(" not in line:
             continue
         for back in src[max(0, i - 6):i]:
             for lit in re.findall(r"[<>]=?\s*(\d{6,})\b", back):

@@ -1,0 +1,194 @@
+// @contract: C-256
+// #3113: `guard c else continue` / `else break` targets the LOOP it sits in,
+// whatever the enclosing fn returns. The structural wasm leg used to lower
+// the jump only when the fn returned Unit and walled (`expr:Continue` /
+// `expr:Break`) the identical loop in a value-returning fn. Matrix: list /
+// range `for` and `while` x pure / effect x Unit / Int / String / Result
+// returns, a loop inside a let-bound block, a guard under an `if` in the loop
+// body, and heap locals bound before the jump and live across it.
+// Nested loops (the inner jump vs the outer one), a `!` in a `while` body and
+// a guard in a match arm are pinned in tests/wasm_break_continue_heap_test.rs
+// instead: the MIR rung walls those shapes, and a spec/ program would grow
+// its walled-real ratchet.
+fn unit_for(xs: List[Int]) -> Unit = {
+  var n = 0
+  for x in xs {
+    guard x != 0 else continue
+    n = n + 1
+  }
+  println("unit_for ${n}")
+}
+
+fn int_for(xs: List[Int]) -> Int = {
+  var n = 0
+  for x in xs {
+    guard x != 0 else continue
+    guard x != 9 else break
+    n = n + x
+  }
+  n
+}
+
+fn int_range(m: Int) -> Int = {
+  var n = 0
+  for i in 0..<m {
+    guard i % 3 != 0 else continue
+    n = n + i
+  }
+  n
+}
+
+fn int_while(xs: List[Int]) -> Int = {
+  var n = 0
+  var i = 0
+  while i < list.len(xs) {
+    let x = list.get(xs, i) ?? 0
+    i = i + 1
+    guard x != 0 else continue
+    guard x != 9 else break
+    n = n + x
+  }
+  n
+}
+
+fn string_for(xs: List[Int]) -> String = {
+  var acc = ""
+  for x in xs {
+    let s = "v${x}"
+    guard x != 0 else continue
+    guard x != 9 else break
+    acc = acc + s
+  }
+  acc
+}
+
+fn result_for(xs: List[Int]) -> Result[Int, String] = {
+  var n = 0
+  for x in xs {
+    guard x != 0 else continue
+    n = n + x
+  }
+  ok(n)
+}
+
+effect fn effect_int_for(xs: List[Int]) -> Int = {
+  var n = 0
+  for x in xs {
+    guard x != 0 else continue
+    let v = int.parse("${x}")!
+    n = n + v
+  }
+  n
+}
+
+fn in_let_block(xs: List[Int]) -> Int = {
+  let n = {
+    var k = 0
+    for x in xs {
+      guard x != 0 else continue
+      k = k + x
+    }
+    k
+  }
+  n * 2
+}
+
+fn under_if(xs: List[Int]) -> String = {
+  var out = ""
+  for x in xs {
+    let label = "x${x}"
+    if x > 1 then {
+      guard x != 3 else continue
+      out = out + label
+    } else ()
+    out = out + "."
+  }
+  out
+}
+
+fn heap_across(xs: List[String]) -> List[String] = {
+  var out: List[String] = []
+  for s in xs {
+    let t = s + "!"
+    let parts = [t, s]
+    guard string.len(s) > 1 else continue
+    guard s != "stop" else break
+    out = out + parts
+  }
+  out
+}
+
+// #3115: a guard else BLOCK that ends in the jump leaves the loop exactly like
+// the bare form, in Unit and non-Unit fns alike. A block that runs statements
+// before a `break`, and a block ending in `err(..)!`, are pinned in
+// tests/wasm_break_continue_heap_test.rs (the MIR rung walls both shapes).
+fn int_block(xs: List[Int]) -> Int = {
+  var n = 0
+  for x in xs {
+    let tag = "x${x}"
+    guard x != 0 else {
+      println("skip ${tag}")
+      continue
+    }
+    guard x != 9 else {
+      break
+    }
+    n = n + x
+  }
+  n
+}
+
+fn unit_block(xs: List[Int]) -> Unit = {
+  var n = 0
+  var skipped = 0
+  var i = 0
+  while i < list.len(xs) {
+    let x = xs[i]
+    i = i + 1
+    guard x != 0 else {
+      skipped = skipped + 1
+      continue
+    }
+    guard x != 9 else {
+      break
+    }
+    n = n + x
+  }
+  println("unit_block ${n} skipped ${skipped}")
+}
+
+fn string_block(xs: List[String]) -> String = {
+  var acc = ""
+  for s in xs {
+    guard s != "" else {
+      acc = acc + "_"
+      continue
+    }
+    acc = acc + s
+  }
+  acc
+}
+
+effect fn main() -> Unit = {
+  let nums = [
+    0,
+    1,
+    0,
+    2,
+    9,
+    5
+  ]
+  unit_for([0, 1, 0, 2])
+  println(int.to_string(int_for(nums)))
+  println(int.to_string(int_range(10)))
+  println(int.to_string(int_while(nums)))
+  println(string_for(nums))
+  println(int.to_string(result_for([0, 1, 2]) ?? -1))
+  println(int.to_string(effect_int_for([0, 3, 0, 4])!))
+  println(int.to_string(in_let_block([0, 1, 2])))
+  println(under_if([1, 2, 3, 4]))
+  println(heap_across(["a", "bb", "cc", "stop", "dd"]) |> list.join(","))
+  println(int.to_string(int_block(nums)))
+  unit_block([0, 1, 9, 2])
+  println(string_block(["a", "", "b"]))
+}

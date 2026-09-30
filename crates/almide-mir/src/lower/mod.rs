@@ -17,6 +17,14 @@
 //! scalar; `IndexAssign` (copy-on-write `MakeUnique`); scope-end `Drop`s.
 //! Anything outside the subset (control flow, calls, …) returns
 //! [`LowerError::Unsupported`] — never a silent drop (flight-grade totality).
+//!
+//! # The deleted generators
+//! Comments throughout this module name `$__drop_*` / `__repr_*` routines
+//! "generated" by `generate_variant_drop_sources`, `generate_record_drop_sources`,
+//! `generate_variant_repr_sources` and their siblings, and program passes such
+//! as `inline_mutual_tail_recursion`. Those were the incumbent wasm pipeline's
+//! and were deleted with it (#2935, #2950). The references record the contract
+//! each lowering rule was built against; no product path generates them now.
 
 use crate::{Init, MirFunction, MirParam, Op, Repr, ValueId, PLACEHOLDER_LAYOUT};
 use almide_ir::{
@@ -26,6 +34,10 @@ use almide_lang::types::Ty;
 use std::collections::{HashMap, HashSet};
 
 pub mod registry_sig;
+mod crossmod_toplets;
+mod list_rest;
+pub use list_rest::desugar_list_rest_matches;
+pub use crossmod_toplets::{bind_cross_module_toplets, cross_module_toplet_refs};
 
 /// The KNOWN wall shapes (#931): a coarse classification of the constructs
 /// the verified renderer most often refuses. Each known shape carries a

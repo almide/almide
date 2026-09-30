@@ -84,7 +84,12 @@ let_stmt    = "let" ("_" | IDENT) (":" type)? "=" expr
             | "let" "{" IDENT ("," IDENT)* ","? "}" "=" expr   (* record destructuring *)
 var_stmt    = "var" IDENT (":" type)? "=" expr             (* no destructuring for var *)
 tuple_pat   = (IDENT | "_" | "(" tuple_pat ("," tuple_pat)* ")") ("," tuple_pat)*
-assign      = IDENT "=" expr | postfix "[" expr "]" "=" expr | postfix "." IDENT "=" expr
+assign      = IDENT ("." name)* ("[" expr "]")? "=" expr (":" type)?
+            (* targets: `x = v`, `s.f = v`, `o.inner.xs = v`, `xs[i] = v`, `o.m[k] = v`.
+               An index can only be the LAST step: `ps[0].n = v` is refused at the
+               target with the read-modify-store rewrite. The value's trailing
+               ascription (`s.xs = []: List[Int]`) is optional — the target's own
+               type already fixes an empty literal. *)
 guard_stmt  = "guard" expr "else" expr
             | "guard" "let" IDENT "=" expr "else" expr     (* bind Option, else on none *)
 

@@ -12,17 +12,42 @@
 //! uncertified <function> <reason…>
 //! ```
 //!
+//! Version 2 (#2760) is version 1 plus at most one record naming the BYTES
+//! the witnesses describe:
+//!
+//! ```text
+//! almide-certificate-bundle 2
+//! artifact sha256 <64 lowercase hex digits> <path>
+//! ```
+//!
+//! The verifier reads the file at `<path>` (relative to the bundle's own
+//! directory unless absolute), recomputes its SHA-256 and REJECTS the bundle
+//! on a mismatch, so a verdict names a shipped file, not a build. Unlike the
+//! metadata, the artifact record is checked, never echoed on trust.
+//!
 //! A `witness` record's bytes are followed by exactly one `\n`. The length
 //! prefix, not a delimiter, ends the witness, so no witness byte can be
 //! mistaken for framing. Metadata is echoed and never trusted: nothing a
-//! producer writes outside a witness can change a verdict. Anything this
+//! producer writes outside a witness can change a verdict. Anything a
 //! version does not understand — an unknown metadata key, an unknown
-//! property, a short read — is a malformed bundle, never a silent accept.
+//! property, a short read, an `artifact` record in version 1 — is a
+//! malformed bundle, never a silent accept.
 
 use crate::{check, Property};
 
-/// The first line of every bundle this verifier reads.
+/// The first line of a version-1 bundle.
 pub const MAGIC: &str = "almide-certificate-bundle 1";
+/// The first line of a version-2 bundle (version 1 + the `artifact` record).
+pub const MAGIC_V2: &str = "almide-certificate-bundle 2";
+
+/// The shipped file a version-2 bundle's witnesses describe.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Artifact {
+    /// 64 lowercase hex digits.
+    pub sha256: String,
+    /// As written in the bundle; relative paths are the bundle directory's.
+    pub path: String,
+}
 
 /// The metadata keys version 1 defines.
 const METADATA_KEYS: &[&str] = &["producer", "source"];
@@ -43,6 +68,29 @@ pub struct Bundle {
     /// Functions the producer declares it could NOT certify, with its reason.
     /// A producer claim like the metadata: reported, never judged.
     pub uncertified: Vec<(String, String)>,
+    /// Version 2: the artifact the witnesses describe, checked by hash.
+    pub artifact: Option<Artifact>,
+}
+
+/// Does `bytes` hash to the digest the artifact record names?
+pub fn artifact_matches(artifact: &Artifact, bytes: &[u8]) -> bool {
+    crate::sha256::hex(bytes) == artifact.sha256
+}
+
+/// `artifact sha256 <hex> <path>` → the record, or why it is malformed.
+fn artifact_record(r: &Reader, rest: &str) -> Result<Artifact, BundleError> {
+    let mut parts = rest.splitn(3, ' ');
+    let (algo, digest, path) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+    if algo != "sha256" {
+        return Err(r.err(format!("artifact digest `{algo}` is not sha256")));
+    }
+    if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err(r.err(format!("`{digest}` is not 64 lowercase hex digits")));
+    }
+    if path.is_empty() {
+        return Err(r.err("an artifact record names no file"));
+    }
+    Ok(Artifact { sha256: digest.to_string(), path: path.to_string() })
 }
 
 /// Why a bundle could not be read. Every variant is a refusal to judge.
@@ -173,11 +221,12 @@ fn witness_header(r: &Reader, rest: &str) -> Result<(Property, usize, String), B
 /// Parse a bundle. Refuses (never guesses) on anything version 1 does not define.
 pub fn parse(bytes: &[u8]) -> Result<Bundle, BundleError> {
     let mut r = Reader { bytes, pos: 0, line: 0 };
-    match r.next_line()? {
-        Some(MAGIC) => {}
-        Some(other) => return Err(r.err(format!("expected `{MAGIC}`, found `{other}`"))),
+    let version = match r.next_line()? {
+        Some(MAGIC) => 1,
+        Some(MAGIC_V2) => 2,
+        Some(other) => return Err(r.err(format!("expected `{MAGIC}` or `{MAGIC_V2}`, found `{other}`"))),
         None => return Err(r.err("the bundle is empty")),
-    }
+    };
     let mut bundle = Bundle::default();
     while let Some(line) = r.next_line()? {
         let (keyword, rest) = line.split_once(' ').unwrap_or((line, ""));
@@ -193,6 +242,12 @@ pub fn parse(bytes: &[u8]) -> Result<Bundle, BundleError> {
                     return Err(r.err("an uncertified record names no function"));
                 }
                 bundle.uncertified.push((function.to_string(), reason.to_string()));
+            }
+            "artifact" if version >= 2 => {
+                if bundle.artifact.is_some() {
+                    return Err(r.err("a second artifact record"));
+                }
+                bundle.artifact = Some(artifact_record(&r, rest)?);
             }
             key if METADATA_KEYS.contains(&key) => {
                 if !bundle.witnesses.is_empty() || !bundle.uncertified.is_empty() {
@@ -236,8 +291,31 @@ mod tests {
     }
 
     #[test]
+    fn a_version_two_bundle_names_its_artifact_and_the_hash_decides() {
+        let hex = crate::sha256::hex(b"\0asm");
+        let text = format!("{MAGIC_V2}\nartifact sha256 {hex} out/app.wasm\nwitness ownership 2 main\nid\n");
+        let b = parse(text.as_bytes()).expect("a well-formed v2 bundle parses");
+        let a = b.artifact.as_ref().expect("the artifact record");
+        assert_eq!(a.path, "out/app.wasm");
+        assert!(artifact_matches(a, b"\0asm"));
+        assert!(!artifact_matches(a, b"\0asn"));
+    }
+
+    #[test]
+    fn a_malformed_or_repeated_artifact_record_is_refused() {
+        let hex = crate::sha256::hex(b"");
+        assert!(parse(format!("{MAGIC}\nartifact sha256 {hex} a.wasm\n").as_bytes()).is_err(), "v1 has no artifact record");
+        assert!(parse(format!("{MAGIC_V2}\nartifact md5 {hex} a.wasm\n").as_bytes()).is_err());
+        assert!(parse(format!("{MAGIC_V2}\nartifact sha256 {} a.wasm\n", &hex[1..]).as_bytes()).is_err());
+        assert!(parse(format!("{MAGIC_V2}\nartifact sha256 {} a.wasm\n", hex.to_uppercase()).as_bytes()).is_err());
+        assert!(parse(format!("{MAGIC_V2}\nartifact sha256 {hex}\n").as_bytes()).is_err());
+        let twice = format!("{MAGIC_V2}\nartifact sha256 {hex} a.wasm\nartifact sha256 {hex} b.wasm\n");
+        assert!(parse(twice.as_bytes()).is_err());
+    }
+
+    #[test]
     fn what_version_one_does_not_define_is_refused() {
-        assert!(parse(b"almide-certificate-bundle 2\n").is_err());
+        assert!(parse(b"almide-certificate-bundle 3\n").is_err());
         assert!(parse(&bundle("witness ownership 9 main\nid\n")).is_err());
         assert!(parse(&bundle("witness teleport 2 main\nid\n")).is_err());
         assert!(parse(&bundle("signed-by nobody\n")).is_err());

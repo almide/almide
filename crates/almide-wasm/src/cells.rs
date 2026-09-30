@@ -45,9 +45,11 @@ impl IrVisitor for Scan {
                 // every bytes writer but six still was — a captured Bytes
                 // written through `bytes.set_u8` took the env value-copy
                 // path and the write was lost (#2951).
+                // The written place may be a field or tuple slot of the
+                // var (`list.push(h.xs, 1)`, #2961): its ROOT is mutated.
                 for k in almide_ir::mut_args::stdlib_mut_positions(module.as_str(), func.as_str()).unwrap_or_default() {
-                    if let Some(IrExprKind::Var { id }) = args.get(k).map(|a| &a.kind) {
-                        self.mutated.insert(*id);
+                    if let Some(id) = args.get(k).and_then(place_root) {
+                        self.mutated.insert(id);
                     }
                 }
             }
@@ -66,6 +68,16 @@ impl IrVisitor for Scan {
             }
         }
         walk_stmt(self, s);
+    }
+}
+
+/// The var at the root of a place — `h`, `h.xs`, `h.a.b`, `t.0` — or
+/// `None` when the expression is not a place over a var.
+fn place_root(e: &IrExpr) -> Option<VarId> {
+    match &e.kind {
+        IrExprKind::Var { id } => Some(*id),
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => place_root(object),
+        _ => None,
     }
 }
 
@@ -142,8 +154,48 @@ impl crate::emitter::Emitter<'_> {
         }
         let mut sc = Scan { locals: self.locals, params, out: Vec::new() };
         almide_ir::visit::IrVisitor::visit_expr(&mut sc, body);
+        // A var BOUND inside the body is the lambda's own local, not a
+        // capture (#2758): the enclosing frame never assigns it, so the env
+        // slot only ever carried a NULL the drop glue released again.
+        let inner = bound_within(body);
+        sc.out.retain(|(v, _)| !inner.contains(v));
         sc.out
     }
+}
+
+/// Every var a binding form inside `body` introduces: a `let`, a
+/// destructure or match pattern, a `for` variable, a nested lambda's params.
+fn bound_within(body: &IrExpr) -> HashSet<VarId> {
+    #[derive(Default)]
+    struct Bound(HashSet<VarId>);
+    impl IrVisitor for Bound {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match &e.kind {
+                IrExprKind::ForIn { var, var_tuple, .. } => {
+                    self.0.insert(*var);
+                    self.0.extend(var_tuple.iter().flatten().copied());
+                }
+                IrExprKind::Lambda { params, .. } => self.0.extend(params.iter().map(|(v, _)| *v)),
+                _ => {}
+            }
+            walk_expr(self, e);
+        }
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            if let IrStmtKind::Bind { var, .. } = &s.kind {
+                self.0.insert(*var);
+            }
+            walk_stmt(self, s);
+        }
+        fn visit_pattern(&mut self, p: &almide_ir::IrPattern) {
+            if let almide_ir::IrPattern::Bind { var, .. } | almide_ir::IrPattern::As { var, .. } = p {
+                self.0.insert(*var);
+            }
+            almide_ir::visit::walk_pattern(self, p);
+        }
+    }
+    let mut b = Bound::default();
+    b.visit_expr(body);
+    b.0
 }
 
 #[cfg(test)]

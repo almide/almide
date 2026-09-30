@@ -33,6 +33,53 @@ pub(crate) fn record_field_receiver(xs: &IrExpr) -> Option<(almide_ir::VarId, Ve
 }
 
 impl Emitter<'_> {
+    /// A realloc-on-growth helper (`$list_push`, `$bytes_push`) frees the
+    /// outgrown block only when its rc is 1. A PARAMETER receiver skips the
+    /// COW (`emit_read_mut_var_cow`: the caller keeps its credit and the
+    /// frame holds the site's), so there the block is shared and the helper
+    /// kept it — with the frame's credit on it, and with the grown copy
+    /// holding its element handles without credits of their own (#2968).
+    /// With the receiver on the stack, remember it and whether it was
+    /// shared; `settle_outgrown_receiver` pays both after the helper. Any
+    /// other receiver was made unique by the COW: `None`, nothing emitted.
+    pub(crate) fn note_shared_receiver(&mut self, idx: u32, global: bool) -> Result<Option<(u32, u32)>, EmitError> {
+        if global || idx >= self.rc_param_ceiling {
+            return Ok(None);
+        }
+        let old = self.hold_i32()?;
+        let sh = self.hold_i32()?;
+        let rc = wasm_encoder::MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, memory_index: 0 };
+        let mut i = self.f.instructions();
+        i.local_tee(old);
+        i.local_get(old).global_get(G_LINE_END).i32_ge_u();
+        i.local_get(old).i32_load(rc).i32_const(1).i32_ne();
+        i.i32_and().local_set(sh);
+        Ok(Some((old, sh)))
+    }
+
+    /// The helper's result is on the stack (left there). When it is a new
+    /// block and the receiver was shared, the grown copy takes its own
+    /// element credits and the frame's credit on the outgrown block goes.
+    pub(crate) fn settle_outgrown_receiver(&mut self, shared: Option<(u32, u32)>, ty: SliceTy) {
+        let Some((old, sh)) = shared else { return };
+        let inc = match ty {
+            SliceTy::List(h) => self.inc_elems_fn(self.types.el(h)),
+            _ => None,
+        };
+        let dec = self.dec_fn_of(ty);
+        let scr = self.scr_i32_local;
+        let mut i = self.f.instructions();
+        i.local_tee(scr).local_get(scr).local_get(old).i32_ne().local_get(sh).i32_and();
+        i.if_(BlockType::Empty);
+        if let Some(inc) = inc {
+            i.local_get(old).call(inc);
+        }
+        i.local_get(old).call(dec);
+        i.end();
+        self.release_i32();
+        self.release_i32();
+    }
+
     /// The copy-on-write field write on a record var — copy the block,
     /// release the replaced slot's credit, store the value `emit` leaves on
     /// the stack (it owns that credit), rebind the var. `lower_field_assign`
@@ -52,12 +99,12 @@ impl Emitter<'_> {
         spends_var: bool,
         emit: impl FnOnce(&mut Self, SliceTy) -> Result<(), EmitError>,
     ) -> Result<(), EmitError> {
-        // C-319 residual: only the Assign form writes THROUGH a shared
-        // cell — a field write against a cell var would land in the raw
-        // local and silently diverge. Refuse honestly.
-        if self.cells.contains(target) {
-            return unsup("cell-write:field-assign");
-        }
+        // A C-319 cell var (#2961): the local holds the CELL's address, so
+        // the record is read through it and the fresh copy is stored back
+        // into it, and the cell's credit on the replaced record is released
+        // as an Assign through a cell releases it — a closure that captured
+        // the var sees the write, and so does the enclosing scope.
+        let in_cell = self.cells.contains(target);
         let (slot, declared) = match self.locals.get(target) {
             Some(&(idx, d)) => (Ok(idx), d),
             None => match self.globals.get(&(self.var_space, *target)) {
@@ -83,6 +130,9 @@ impl Emitter<'_> {
             Ok(idx) => self.f.instructions().local_get(idx),
             Err(gidx) => self.f.instructions().global_get(gidx),
         };
+        if in_cell {
+            self.load_ty_slot(declared, 0);
+        }
         let copy = self.copy_fn_of(root);
         self.f.instructions().call(copy).local_set(hb);
         // Walk down: copy each inner record out of its (already copied)
@@ -116,22 +166,39 @@ impl Emitter<'_> {
         // The rebind settles like an Assign (#2944): a local releases the
         // record it replaces — the copy took its own credit on every field,
         // so the old block and whatever it alone held go — and becomes the
-        // owner of the copy. Globals are main-lifetime, as for Assign; a
-        // value that spends the var's credit (a `mut`-param call's
+        // owner of the copy. A top-let global holds one credit on its
+        // occupant (#2992), so it releases the replaced block the same way.
+        // A value that spends the var's credit (a `mut`-param call's
         // write-back) already released or reused the old block.
-        if let Ok(idx) = slot
-            && !spends_var
-            && self.rc_droppable(root)
-        {
+        if !spends_var && self.rc_droppable(root) {
             let dec = self.dec_fn_of(root);
-            self.f.instructions().local_get(idx).call(dec);
-            self.rc_own(idx, root);
+            match slot {
+                Ok(idx) if in_cell => {
+                    self.f.instructions().local_get(idx);
+                    self.load_ty_slot(root, 0);
+                    self.f.instructions().call(dec);
+                }
+                Ok(idx) => {
+                    self.f.instructions().local_get(idx).call(dec);
+                    self.rc_own(idx, root);
+                }
+                Err(gidx) => {
+                    self.f.instructions().global_get(gidx).call(dec);
+                }
+            }
         }
-        self.f.instructions().local_get(hb);
         match slot {
-            Ok(idx) => self.f.instructions().local_set(idx),
-            Err(gidx) => self.f.instructions().global_set(gidx),
-        };
+            Ok(idx) if in_cell => {
+                self.f.instructions().local_get(idx).local_get(hb);
+                self.store_ty_slot(root, 0);
+            }
+            Ok(idx) => {
+                self.f.instructions().local_get(hb).local_set(idx);
+            }
+            Err(gidx) => {
+                self.f.instructions().local_get(hb).global_set(gidx);
+            }
+        }
         for _ in &holds {
             self.release_i32();
         }
@@ -140,7 +207,7 @@ impl Emitter<'_> {
 
     /// The (type, offset) of `field` in the record type `rec`, or the
     /// honest wall when `rec` is not a record carrying it.
-    fn record_field_slot(
+    pub(crate) fn record_field_slot(
         &self,
         rec: SliceTy,
         field: &almide_base::intern::Sym,
@@ -258,6 +325,12 @@ impl Emitter<'_> {
                     (Some((id, (var_idx, var_ty, vglob))), _) => {
                         self.f.instructions().local_get(hnew);
                         self.emit_store_mut_var(*id, *var_idx, *var_ty, *vglob)?;
+                        // The var held one credit on the block it no longer
+                        // names: the shrunken copy and the popped element
+                        // took their own above, so the old block goes with
+                        // the typed drop (#2968 — every pop leaked it).
+                        let dec = self.dec_fn_of(list_ty);
+                        self.f.instructions().local_get(hb).call(dec);
                     }
                     (None, Some((id, path))) => self.field_assign_with(&id, &path, false, |s, _| {
                         s.f.instructions().local_get(hnew);
@@ -301,7 +374,7 @@ impl Emitter<'_> {
                     return unsup(&format!("list-clear-of:{var_ty:?}"));
                 };
                 self.f.instructions().i32_const(0).call(F_ALLOC);
-                self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
+                self.emit_rebind_mut_var_fresh(*id, var_idx, var_ty, vglob)?;
                 Ok(None)
             }
             // `list.push` MUTATES through its `mut` param on the oracle
@@ -356,6 +429,7 @@ impl Emitter<'_> {
                 };
                 let elem = self.types.el(h);
                 self.emit_read_mut_var_cow(id, var_idx, var_ty, vglob)?;
+                let shared = self.note_shared_receiver(var_idx, vglob)?;
                 self.lower_arg(v, Some(elem), ArgMode::Retain)?;
                 // The 8-byte helper's value param is i64; an f64 element
                 // crosses the call boundary as its BIT PATTERN (memory is
@@ -368,6 +442,7 @@ impl Emitter<'_> {
                     _ => F_LIST_PUSH_4,
                 };
                 self.f.instructions().call(helper);
+                self.settle_outgrown_receiver(shared, var_ty);
                 self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
                 Ok(None)
             }

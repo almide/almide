@@ -1,0 +1,46 @@
+// @contract: C-372
+// A Float32 displays as the shortest decimal that round-trips to the SAME
+// binary32 (Rust `f32` Display): `0.1` stays `0.1`, never the widened f64's
+// `0.10000000149011612`. Interpolation drops the `.0` of an integral value and
+// `float32.to_string` keeps it (the C-011 rule), and the digits are the same
+// top-level and nested in a list, record, option, tuple or variant. An exact
+// tie between the two shortest candidates rounds the magnitude up (2^-12 is
+// 0.00024414063).
+type P = { x: Float32, n: Int }
+
+type Shape = | Dot(Float32) | Pair(Float32, Float32)
+
+fn show(label: String, x: Float32) -> Unit = {
+  println("${label}: ${x} | ${float32.to_string(x)}")
+}
+
+effect fn main() -> Unit = {
+  let n = list.len([1, 2, 3])
+  let three: Float32 = int.to_float32(n)
+  let one: Float32 = three / three
+  let zero: Float32 = three - three
+  let tenth: Float32 = float.to_float32(0.1)
+  show("0.1", tenth)
+  show("1/3", one / three)
+  show("2", one + one)
+  show("0", zero)
+  show("-0", -zero)
+  show("inf", one / zero)
+  show("-inf", -(one / zero))
+  show("nan", zero / zero)
+  show("max", float.to_float32(340282346638528859811704183484516925440.0))
+  show("min normal", float.to_float32(int.bits_to_float(4039728865751334912)))
+  show("min subnormal", float.to_float32(int.bits_to_float(3936146074321813504)))
+  show("subnormal", float.to_float32(int.bits_to_float(4008824136515190784)))
+  show("2^-12 tie", float.to_float32(0.000244140625))
+  show("2^20+0.25 tie", float.to_float32(1048576.25))
+  show("1e10", float.to_float32(10000000000.0))
+  show("123.456", float.to_float32(123.456))
+  let xs: List[Float32] = [tenth, one + one, one / three]
+  println("${xs}")
+  println("${P { x: tenth, n: 1 }}")
+  let o: Float32? = some(tenth)
+  println("${o}")
+  println("${(tenth, one + one)}")
+  println("${Dot(tenth)} ${Pair(one / three, one + one)}")
+}

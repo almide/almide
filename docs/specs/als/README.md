@@ -26,7 +26,7 @@
 | [ALS-C1](./collections.md#als-c1-map-の順序規範) | Map の順序規範 | C-013 |
 | [ALS-C2](./collections.md#als-c2-set-の順序規範) | Set の順序規範 | C-014 |
 | [ALS-C3](./collections.md#als-c3-構造的等価) | 構造的等価 | C-015, C-124, C-185 |
-| [ALS-C4](./collections.md#als-c4-範囲外アクセスの縮退規則) | 範囲外アクセスの縮退規則 | C-034 |
+| [ALS-C4](./collections.md#als-c4-範囲外アクセスの縮退規則) | 範囲外アクセスの縮退規則 | C-034, C-354 |
 | [ALS-C5](./collections.md#als-c5-値意味論（copy-on-write）) | 値意味論（copy-on-write） | C-033, C-125, C-131, C-150, C-213, C-337, C-340, C-342, C-343, C-344, C-345, C-346 |
 | [ALS-C6](./collections.md#als-c6-型変換コンビネータ) | 型変換コンビネータ | C-039 |
 | [ALS-C7](./collections.md#als-c7-レコード・変種・パターンマッチ) | レコード・変種・パターンマッチ | C-036, C-224, C-226 |
@@ -39,11 +39,11 @@
 | ID | Section | Contracts |
 |----|---------|-----------|
 | [ALS-D1](./data-formats.md#als-d1-json-パス操作) | JSON パス操作 | C-031 |
-| [ALS-D2](./data-formats.md#als-d2-value-の-json-テキスト表現) | Value の JSON テキスト表現 | C-060 |
+| [ALS-D2](./data-formats.md#als-d2-value-の-json-テキスト表現) | Value の JSON テキスト表現 | C-060, C-356 |
 | [ALS-D3](./data-formats.md#als-d3-異種ネスト文書の走査) | 異種ネスト文書の走査 | C-063 |
 | [ALS-D4](./data-formats.md#als-d4-正規表現エンジン) | 正規表現エンジン | C-032, C-160, C-285, C-347 |
 | [ALS-D5](./data-formats.md#als-d5-半精度浮動小数のデコード) | 半精度浮動小数のデコード | C-037 |
-| [ALS-D6](./data-formats.md#als-d6-codec-と-json-デコード) | Codec と JSON デコード | C-084, C-085, C-095, C-098, C-103, C-209, C-211, C-216, C-217 |
+| [ALS-D6](./data-formats.md#als-d6-codec-と-json-デコード) | Codec と JSON デコード | C-084, C-085, C-095, C-098, C-103, C-209, C-211, C-216, C-217, C-357 |
 | [ALS-D7](./data-formats.md#als-d7-バイト列ブリッジ) | バイト列ブリッジ | C-062, C-090 |
 
 ## deterministic-time.md — 5 section(s)
@@ -56,7 +56,7 @@
 | [ALS-DT4](./deterministic-time.md#als-dt4-settle-の-tuple-契約) | settle の tuple 契約 | C-206 |
 | [ALS-DT5](./deterministic-time.md#als-dt5-壁時計期限（fantimeout、oracle-層）) | 壁時計期限（fan.timeout、oracle 層） | C-208 |
 
-## expressions.md — 38 section(s)
+## expressions.md — 39 section(s)
 
 | ID | Section | Contracts |
 |----|---------|-----------|
@@ -98,6 +98,7 @@
 | [ALS-ST6](./expressions.md#als-st6-guard-let-文stmtguardlet) | guard let 文(`Stmt::GuardLet`) | C-266 |
 | [ALS-E29](./expressions.md#als-e29-二項演算子exprkindbinary) | 二項演算子(`ExprKind::Binary`) | C-267 |
 | [ALS-E30](./expressions.md#als-e30-ホールと未実装マーカーexprkindhole--todo--placeholder) | ホールと未実装マーカー(`ExprKind::Hole` / `Todo` / `Placeholder`) | C-268 |
+| [ALS-E31](./expressions.md#als-e31-スコープ付き領域exprkindscoped--scoped-fn) | スコープ付き領域(`ExprKind::Scoped` / `scoped fn`) | C-362, C-363, C-364 |
 
 ## implementation.md — 3 section(s)
 
@@ -115,10 +116,10 @@
 | [ALS-R2](./runtime.md#als-r2-補間の表示形) | 補間の表示形 | C-008, C-009, C-010, C-011, C-222 |
 | [ALS-R3](./runtime.md#als-r3-fan-並行コンビネータの決定性) | fan 並行コンビネータの決定性 | C-004, C-005, C-006, C-199, C-321, C-349 |
 | [ALS-R4](./runtime.md#als-r4-非有限浮動小数の定数表示) | 非有限浮動小数の定数表示 | C-012 |
-| [ALS-R5](./runtime.md#als-r5-プロセス環境) | プロセス環境 | C-096, C-112, C-118, C-133, C-189, C-214, C-215, C-290, C-327, C-330, C-328, C-329, C-331, C-366 |
+| [ALS-R5](./runtime.md#als-r5-プロセス環境) | プロセス環境 | C-096, C-112, C-118, C-133, C-189, C-214, C-215, C-290, C-327, C-330, C-328, C-329, C-331, C-366, C-367, C-370 |
 | [ALS-R6](./runtime.md#als-r6-ファイルシステムのパス解決) | ファイルシステムのパス解決 | C-042, C-137, C-220, C-225, C-227, C-228, C-229, C-230, C-270, C-272, C-273, C-278, C-282, C-283, C-284 |
 | [ALS-R7](./runtime.md#als-r7-ストリーミング行走査の可謬コールバック) | ストリーミング行走査の可謬コールバック | C-274, C-335 |
-| [ALS-R8](./runtime.md#als-r8-http-レスポンスヘッダの規範) | HTTP レスポンスヘッダの規範 | C-275 |
+| [ALS-R8](./runtime.md#als-r8-http-レスポンスヘッダの規範) | HTTP レスポンスヘッダの規範 | C-275, C-368 |
 | [ALS-R9](./runtime.md#als-r9-プロセス終了コードの値域) | プロセス終了コードの値域 | C-350, C-351 |
 
 ## semantics.md — 15 section(s)
@@ -129,13 +130,13 @@
 | [ALS-M2](./semantics.md#als-m2-レコード意味論) | レコード意味論 | C-046, C-072, C-078, C-092, C-123 |
 | [ALS-M3](./semantics.md#als-m3-変種型（adt）) | 変種型（ADT） | C-043, C-076, C-079, C-093 |
 | [ALS-M4](./semantics.md#als-m4-effect-fn-の脱糖規範) | effect fn の脱糖規範 | C-064, C-068, C-069, C-119, C-135, C-183, C-186, C-187, C-188, C-190, C-191, C-192, C-193, C-194, C-195, C-292, C-293, C-295, C-296, C-297 |
-| [ALS-M5](./semantics.md#als-m5-ジェネリクスと推論) | ジェネリクスと推論 | C-080, C-081, C-082, C-089, C-094, C-097, C-126, C-127, C-151, C-145, C-142, C-176, C-178 |
+| [ALS-M5](./semantics.md#als-m5-ジェネリクスと推論) | ジェネリクスと推論 | C-080, C-081, C-082, C-089, C-094, C-097, C-126, C-127, C-151, C-145, C-142, C-176, C-178, C-365 |
 | [ALS-M6](./semantics.md#als-m6-蓄積ループの規範) | 蓄積ループの規範 | C-102, C-104, C-105, C-117, C-174, C-177 |
 | [ALS-M7](./semantics.md#als-m7-識別子の独立性) | 識別子の独立性 | C-088, C-175 |
 | [ALS-M8](./semantics.md#als-m8-演算子の全域規範) | 演算子の全域規範 | C-083, C-099, C-167, C-170, C-181 |
 | [ALS-M9](./semantics.md#als-m9-静的検査（unit-変異子）) | 静的検査（Unit 変異子） | C-057 |
 | [ALS-M10](./semantics.md#als-m10-分岐からの-heap-束縛) | 分岐からの heap 束縛 | C-106, C-115, C-163, C-165, C-166, C-287, C-288, C-289, C-291 |
-| [ALS-M11](./semantics.md#als-m11-unwrap-の脱糖) | unwrap の脱糖 | C-108 |
+| [ALS-M11](./semantics.md#als-m11-unwrap-の脱糖) | unwrap の脱糖 | C-108, C-369 |
 | [ALS-M12](./semantics.md#als-m12-heap-要素リスト操作の一般性) | heap 要素リスト操作の一般性 | C-045, C-100, C-101, C-147, C-148, C-141, C-164, C-168, C-172, C-218 |
 | [ALS-M13](./semantics.md#als-m13-mut-パラメータの-in-place-変異) | mut パラメータの in-place 変異 | C-061, C-110, C-132, C-136, C-324, C-325, C-326 |
 | [ALS-M14](./semantics.md#als-m14-整数リテラルの型域（静的規範）) | 整数リテラルの型域（静的規範） | C-173, C-179, C-180 |
@@ -152,7 +153,7 @@
 | [ALS-S5](./strings.md#als-s5-split-の区切り規範) | split の区切り規範 | C-050 |
 | [ALS-S6](./strings.md#als-s6-規模不変性) | 規模不変性 | C-074 |
 
-## text-and-numbers.md — 27 section(s)
+## text-and-numbers.md — 29 section(s)
 
 | ID | Section | Contracts |
 |----|---------|-----------|
@@ -161,7 +162,7 @@
 | [ALS-T3](./text-and-numbers.md#als-t3-jsonparse) | `json.parse` | C-087, C-298, C-299 |
 | [ALS-T4](./text-and-numbers.md#als-t4-listchunk--listwindows) | `list.chunk` / `list.windows` | C-129, C-171 |
 | [ALS-T5](./text-and-numbers.md#als-t5-stringto_upper--stringto_lower) | `string.to_upper` / `string.to_lower` | C-020, C-162 |
-| [ALS-T6](./text-and-numbers.md#als-t6-整数演算の終了規約（termination-convention）) | 整数演算の終了規約（termination convention） | C-001, C-002, C-047, C-067, C-154, C-155, C-161, C-169, C-184, C-196, C-197, C-198, C-200, C-219 |
+| [ALS-T6](./text-and-numbers.md#als-t6-整数演算の終了規約（termination-convention）) | 整数演算の終了規約（termination convention） | C-001, C-002, C-047, C-067, C-154, C-155, C-161, C-169, C-184, C-196, C-197, C-198, C-200, C-219, C-353 |
 | [ALS-T7](./text-and-numbers.md#als-t7-トップレベル-let-の評価時機) | トップレベル let の評価時機 | C-007, C-077, C-111 |
 | [ALS-T8](./text-and-numbers.md#als-t8-整数パースの文法とエラー規範) | 整数パースの文法とエラー規範 | C-028, C-029 |
 | [ALS-T9](./text-and-numbers.md#als-t9-固定小数表示) | 固定小数表示 | C-025 |
@@ -174,14 +175,16 @@
 | [ALS-T16](./text-and-numbers.md#als-t16-個数・添字の-i64-クランプ) | 個数・添字の i64 クランプ | C-054, C-056 |
 | [ALS-T17](./text-and-numbers.md#als-t17-datetimeformat-の指定子置換) | datetime.format の指定子置換 | C-128 |
 | [ALS-T18](./text-and-numbers.md#als-t18-assert-の-abort-形（非-test-位置）) | assert の abort 形（非 test 位置） | C-153, C-339 |
-| [ALS-T19](./text-and-numbers.md#als-t19-数値決定性ファミリー) | 数値決定性ファミリー | C-302 |
+| [ALS-T19](./text-and-numbers.md#als-t19-数値決定性ファミリー) | 数値決定性ファミリー | C-302, C-358 |
 | [ALS-T20](./text-and-numbers.md#als-t20-丸めと縮約の禁止) | 丸めと縮約の禁止 | C-303 |
 | [ALS-T21](./text-and-numbers.md#als-t21-非正規数の保存) | 非正規数の保存 | C-304 |
 | [ALS-T22](./text-and-numbers.md#als-t22-超越関数の誤差上限) | 超越関数の誤差上限 | C-305 |
-| [ALS-T23](./text-and-numbers.md#als-t23-符号付きゼロ) | 符号付きゼロ | C-306 |
+| [ALS-T23](./text-and-numbers.md#als-t23-符号付きゼロ) | 符号付きゼロ | C-306, C-355 |
 | [ALS-T24](./text-and-numbers.md#als-t24-float-→-int-変換) | Float → Int 変換 | C-307, C-338, C-341 |
 | [ALS-T25](./text-and-numbers.md#als-t25-正準-fast-exp) | 正準 fast-exp | C-223 |
 | [ALS-T26](./text-and-numbers.md#als-t26-datetime-の暦フィールドと-parse_iso-の文法) | datetime の暦フィールドと parse_iso の文法 | C-359, C-360 |
 | [ALS-T27](./text-and-numbers.md#als-t27-urlparse-の-authority-規範) | url.parse の authority 規範 | C-361 |
+| [ALS-T28](./text-and-numbers.md#als-t28-float32-演算の-binary32-丸め) | Float32 演算の binary32 丸め | C-371 |
+| [ALS-T29](./text-and-numbers.md#als-t29-float32-の表示) | Float32 の表示 | C-372 |
 
-131 sections across 11 chapters.
+134 sections across 11 chapters.

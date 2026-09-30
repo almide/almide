@@ -499,6 +499,8 @@ fn program_to_ir_with(
     // saw it and the raw Guard stmt survived to the lowering, whose fallback emitted
     // the scalar continuation against the Result ABI: invalid wasm (#1968).
     crate::lower::hoist_block_call_args(&mut ir);
+    // #3058: list-rest matches become the length-test chain the lowering runs.
+    crate::lower::desugar_list_rest_matches(&mut ir);
     // Guard → if restructure at the fn-body tail chain (conditional early return
     // expressed without early-return control flow — see desugar_guard.rs; shared
     // with classify: desugar-before-both).
@@ -521,7 +523,11 @@ fn program_to_ir_with(
     // `!`-continuations whose UN-lifted certificate actually poisons,
     // restoring kernel-witness coverage. Transactional: any chain piece that
     // walls or still poisons rolls the fn back untouched.
+    // #3058: the effect-fn ABI facts, derived from this IR (the lift below
+    // lowers fns, and every fn is lowered against them).
+    crate::lower::settle_effect_abi(&mut ir);
     crate::lower::lift_poisoning_continuations(&mut ir);
+    crate::lower::install_effect_abi_facts(&ir);
     // Debug aid: `ALMIDE_DUMP_IR=<substr>` dumps the post-chain body of matching fns.
     if let Some(pat) = almide_base::env::var("ALMIDE_DUMP_IR") {
         for f in ir

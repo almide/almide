@@ -312,4 +312,71 @@ mod tests {
         f.ret = Some(outer); // the boundary consume releases the outer result
         assert_eq!(verify_ownership(&f), Ok(()));
     }
+
+    // #3031 — a loop-carried heap slot rebound (`SetLocal`) inside an `if`: the
+    // TCO rewrite of `go(n - 1, acc + "y")` / `go(n - 1, acc + "x")`. Each arm
+    // starts from the entry state where the slot owns its one reference, so a
+    // rebind in the then arm must not leak into the else arm, and two different
+    // fresh objects bound to the same slot are one reference at the join.
+    // The two flags say which arms rebind; the else arm reads the slot first.
+    fn shape_slot_rebind(rebind_then: bool, rebind_else: bool) -> MirFunction {
+        let (slot, c, t_new, e_new) = (v(0), v(1), v(2), v(3));
+        let mut ops = vec![
+            Op::Alloc { dst: slot, repr: heap(), init: Init::Opaque },
+            Op::Const { dst: c },
+            Op::IfThen { cond: c, dst: None },
+        ];
+        if rebind_then {
+            ops.extend([
+                Op::Drop { v: slot },
+                Op::Alloc { dst: t_new, repr: heap(), init: Init::Opaque },
+                Op::SetLocal { local: slot, src: t_new },
+            ]);
+        }
+        ops.extend([Op::Else { val: None }, Op::Borrow { v: slot }]);
+        if rebind_else {
+            ops.extend([
+                Op::Alloc { dst: e_new, repr: heap(), init: Init::Opaque },
+                Op::Drop { v: slot },
+                Op::SetLocal { local: slot, src: e_new },
+            ]);
+        }
+        ops.extend([Op::EndIf { val: None }, Op::Borrow { v: slot }, Op::Drop { v: slot }]);
+        func(ops)
+    }
+
+    #[test]
+    fn slot_rebound_in_either_or_both_arms_verifies_clean() {
+        for (t, e) in [(true, true), (true, false), (false, true)] {
+            assert_eq!(
+                verify_ownership(&shape_slot_rebind(t, e)),
+                Ok(()),
+                "rebind then={t} else={e}: the arms run on disjoint paths"
+            );
+        }
+    }
+
+    #[test]
+    fn slot_freed_in_one_arm_and_read_there_is_still_a_use_after_free() {
+        // Negative control: the else arm drops the slot WITHOUT rebinding it and
+        // then reads it. That is a real use-after-free on the path it is on.
+        let mut f = shape_slot_rebind(true, false);
+        let at = f.ops.iter().position(|op| matches!(op, Op::Else { .. })).unwrap() + 1;
+        f.ops.insert(at, Op::Drop { v: ValueId(0) });
+        let errs = verify_ownership(&f).unwrap_err();
+        assert!(errs.iter().any(|e| e.kind == ViolationKind::UseAfterFree && e.value == ValueId(0)));
+    }
+
+    #[test]
+    fn slot_rebound_on_one_path_and_freed_on_the_other_is_still_caught() {
+        // Negative control: the then arm rebinds, the else arm only frees. After
+        // the join the slot is dead on one path, so the arms disagree and the
+        // read after the `if` is a use-after-free.
+        let mut f = shape_slot_rebind(true, false);
+        let at = f.ops.iter().position(|op| matches!(op, Op::EndIf { .. })).unwrap();
+        f.ops.insert(at, Op::Drop { v: ValueId(0) });
+        let errs = verify_ownership(&f).unwrap_err();
+        assert!(errs.iter().any(|e| e.kind == ViolationKind::BranchDisagreement));
+        assert!(errs.iter().any(|e| e.kind == ViolationKind::UseAfterFree && e.value == ValueId(0)));
+    }
 }

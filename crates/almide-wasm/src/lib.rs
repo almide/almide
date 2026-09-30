@@ -111,11 +111,14 @@ mod alloc_inline;
 pub mod heap_cap;
 pub mod host_exports;
 pub mod witness;
+pub mod cert_project;
 mod witness_hooks;
+mod witness_unwrap;
 mod calls;
 mod http_call;
 mod calls_modules;
 mod cells;
+mod global_reach;
 mod unroll;
 mod collect;
 mod collections;
@@ -160,6 +163,7 @@ mod cow_hoist;
 mod stmts;
 mod stmts_index;
 mod stmts_append;
+mod writeback_move;
 mod tail_append;
 mod string_ext;
 pub(crate) mod work;
@@ -189,6 +193,7 @@ pub(crate) use arm::{ArgMode, ArmResult, Lowered, Own};
 mod exit_plan;
 pub use exit_plan::test_omit_first_release;
 mod fuel;
+mod inline_calls;
 mod ranges;
 mod rc_ownership;
 mod region;
@@ -528,7 +533,6 @@ impl SliceTy {
 }
 
 
-
 // ── literal pool ────────────────────────────────────────────────────────
 
 
@@ -762,7 +766,6 @@ fn build_globals(
         init_order.iter().filter_map(|g| init_by_var.get(g).cloned()).collect();
     (global_map, global_decls, init_lets)
 }
-
 
 /// The callable-fn flattening (entry fns + module fns under qualified
 /// names, Hole-bodied surfaces excluded) — split from emit_program. The

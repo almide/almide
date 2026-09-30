@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="./docs/assets/almide-banner.jpg" alt="Almide" width="720">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/brand/almide-cover-dark.png">
+    <img src="./docs/assets/brand/almide-cover.png" alt="Almide" width="720">
+  </picture>
 </p>
 
 <p align="center"><strong>The language where LLM edits survive.</strong></p>
@@ -131,8 +134,8 @@ The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-i
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI):
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> <!-- counts:generated:start (as of 2026-09-29) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
-> **Ledger: 370 contracts — 370 active, 0 flagged-for-revision.**
+> <!-- counts:generated:start (as of 2026-09-30) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
+> **Ledger: 372 contracts — 372 active, 0 flagged-for-revision.**
 > <!-- counts:generated:end -->
 >
 > **Divergences awaiting a fix: none.** Every contract in the ledger is
@@ -145,7 +148,7 @@ Scope, ledger mechanics, and the evidence stack (contract ledger, cross-target f
 
 ### Memory safety — proven where it is proven, trusted where it is trusted
 
-You write no ownership annotations, no lifetimes, no `free`: [Perceus](https://www.microsoft.com/en-us/research/publication/perceus-garbage-free-reference-counting-with-reuse/)-style ownership inference in the compiler decides where every heap value is introduced, duplicated, and consumed — garbage-collector-free, pause-free. The checker for those decisions is **kernel-proven** (Rocq/Coq spine, 96 audited theorems and lemmas, axiom-clean, independently re-checked by `coqchk`; the count is asserted by `proofs/check.sh`), and `almide verify --emit` still produces the MIR ownership witness it checks. The per-build certificate used to ride the incumbent wasm leg, which #2761 deleted; the **structural wasm leg** (the only wasm renderer) and the **native leg** are trusted, certificate pending (#2755–#2760): their evidence is differential — byte-identical output against each other and the interpreter on the contract corpus, held by a grow-only floor and a semantic-mutation net — and the structural runtime's bytes are checked against the Coq decoder model by `proofs/check-structural-bytes.sh`. The boundary, stage by stage: **[proven-vs-trusted.md](docs/contracts/proven-vs-trusted.md)**; the full account, including the Lean 4 Perceus belt the design started from: **[docs/design/MEMORY-SAFETY.md](./docs/design/MEMORY-SAFETY.md)**.
+You write no ownership annotations, no lifetimes, no `free`: [Perceus](https://www.microsoft.com/en-us/research/publication/perceus-garbage-free-reference-counting-with-reuse/)-style ownership inference in the compiler decides where every heap value is introduced, duplicated, and consumed — garbage-collector-free, pause-free. The checker for those decisions is **kernel-proven** (Rocq/Coq spine, 99 audited theorems and lemmas, axiom-clean, independently re-checked by `coqchk`; the count is asserted by `proofs/check.sh`), and `almide verify --emit` still produces the MIR ownership witness it checks. The per-build certificate used to ride the incumbent wasm leg, which #2761 deleted; the **structural wasm leg** (the only wasm renderer) and the **native leg** are trusted, certificate pending (#2755–#2760): their evidence is differential — byte-identical output against each other and the interpreter on the contract corpus, held by a grow-only floor and a semantic-mutation net — and the structural runtime's bytes are checked against the Coq decoder model by `proofs/check-structural-bytes.sh`. The boundary, stage by stage: **[proven-vs-trusted.md](docs/contracts/proven-vs-trusted.md)**; the full account, including the Lean 4 Perceus belt the design started from: **[docs/design/MEMORY-SAFETY.md](./docs/design/MEMORY-SAFETY.md)**.
 
 ### Performance
 
@@ -191,24 +194,24 @@ build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; t
 `almide check` scales linearly: over a 2k → 30k-line ladder of this repo's own stdlib the log-log slope of check time against project lines is **1.13** (1.0 is linear, 2.0 quadratic) and the 10k-line rung costs **4.4×** the empty-project floor — measured 2026-08-13, held by `scripts/check-edit-loop-scale.sh`, table in [BENCHMARKS.md](./docs/project/BENCHMARKS.md#edit-loop-scale-1334). Native runtime against handwritten Rust: **1.00×** on n-body and spectral-norm, 1.16–1.18× on fasta and FFT, ~1.6× where the workload is list materialization (#1004), CI-gated ratio ratchet ([scoreboard](./docs/project/BENCHMARKS.md)). Wasm runtime, measured and gated (#1701):
 
 <!-- wasm-runtime:generated:start — rendered from docs/benchmarks/wasm-runtime.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
-| Benchmark (`almide bench`, verify-then-time, median of 5) | wasm/native ratio |
-|---|---:|
-| nbody | **1.97×** |
-| spectralnorm | **1.47×** |
-| binarytrees | **1.32×** |
-| treealloc | **1.01×** |
-| fasta | **1.58×** |
-| fannkuchredux | **1.86×** |
-| mandelbrot | **1.26×** |
-| onebrc | **1.87×** |
-| fft | **1.53×** |
-| strchurn | **0.84×** |
-| listbuild_append | **1.89×** |
-| listbuild_combinator | **1.86×** |
-| listbuild_prealloc | **1.70×** |
-| mapbuild | **0.82×** |
+| Benchmark (`almide bench`, verify-then-time, min of 2×5 interleaved) | wasm/native, `main` only | cold start (spawn vs compile + instantiate) |
+|---|---:|---:|
+| nbody | **1.10×** | 1.14× |
+| spectralnorm | **1.21×** | 1.22× |
+| binarytrees | **1.07×** | 1.06× |
+| treealloc | **1.04×** | 1.04× |
+| fasta | **1.52×** | 1.50× |
+| fannkuchredux | **9.41×** | 8.79× |
+| mandelbrot | **1.11×** | 1.10× |
+| onebrc | **1.26×** | 1.33× |
+| fft | **1.53×** | 1.53× |
+| strchurn | **0.85×** | 0.85× |
+| listbuild_append | **1.96×** | 1.95× |
+| listbuild_combinator | **1.88×** | 1.86× |
+| listbuild_prealloc | **1.68×** | 1.68× |
+| mapbuild | **0.67×** | 0.72× |
 
-Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the stamped ratio verdict runs on the stamping machine class; CI gates the STATUS taxonomy below and judges the wasm leg by a same-runner A/B against the latest release binary (interleaved, min-of-runs, `ab_band` in the ledger — #2143) (`scripts/check-wasm-runtime-ratio.sh`). binarytrees runs its fan arms on the embedded host's thread pool, which is why wasm WINS there. The unmeasured corpus cells stay honest instead of estimated: 0 wall on the wasm build path, 0 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (almide 0.65.1 (dev), 2026-09-29).
+Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. The ratio times the program's own `main`, entry to return, on both legs (native in-process, wasm around the host call): process spawn and module compile/instantiate are outside it, and the cold-start column shows them (#2980). Small workloads run at a ledger-fixed size (`args=`) so `main` is long enough to time. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the stamped ratio verdict runs on the stamping machine class; CI gates the STATUS taxonomy below and judges the wasm leg by a same-runner A/B against the latest release binary (interleaved, min-of-runs, `ab_band` in the ledger — #2143) (`scripts/check-wasm-runtime-ratio.sh`). binarytrees and mandelbrot run their fan arms on the embedded host's thread pool; fannkuchredux's fan runs sequentially on wasm, which is most of its gap. The unmeasured corpus cells stay honest instead of estimated: 0 wall on the wasm build path, 0 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (almide 0.65.1 (dev), 2026-09-29).
 <!-- wasm-runtime:generated:end -->
 
 ## How It Works
@@ -255,11 +258,11 @@ The Perceus proof above proves one compiler pass, once. v1 generalizes that prin
 | Playground | [Live](https://almide.github.io/playground/) — the compiler runs as WASM in the browser |
 
 <!-- stats:generated:start — derived from docs/stdlib/*.md, spec/, and docs/contracts/contracts.toml by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
-<!-- counts:generated:start (as of 2026-09-29) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
+<!-- counts:generated:start (as of 2026-09-30) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
 | Derived count | Value |
 |---|---|
 | Stdlib | 1028 functions across 45 modules — self-hosted `.almd`, signature indexes regenerated from the compiler by `tools/gen-stdlib-doc-index.py` |
-| Tests | 471 `.almd` test files under `spec/` (`almide test spec/`) + the 370-contract cross-target ledger |
+| Tests | 475 `.almd` test files under `spec/` (`almide test spec/`) + the 372-contract cross-target ledger |
 <!-- counts:generated:end -->
 <!-- stats:generated:end -->
 

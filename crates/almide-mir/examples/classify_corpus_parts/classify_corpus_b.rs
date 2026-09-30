@@ -219,9 +219,7 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
 /// Every top-level expression (fn bodies + top-let inits) in `ir`, main AND every
 /// module, MUTABLY, in the SAME order a 4-loop nest would visit them (main
 /// functions, main top-lets, then per module: that module's functions, that
-/// module's top-lets) — the mutable twin of `for_each_program_expr` (mir/lower/
-/// drop_sources.rs; not shared across crate-boundary/example-binary here, so
-/// duplicated locally). An iterator-chain rewrite of nested `for` loops (codopsy
+/// module's top-lets). An iterator-chain rewrite of nested `for` loops (codopsy
 /// cog: nested `for` costs more cognitive complexity per level than a flat
 /// `.chain()`/`.flat_map()` pipeline). Disjoint field borrows (`ir.functions` /
 /// `ir.top_lets` / `ir.modules`), so chaining them is a plain borrow-checker-legal
@@ -357,6 +355,8 @@ fn source_to_ir(path: &Path, source: &str) -> FrontendOutcome {
         // Arg-block hoist, THEN guard → if restructure — the SAME order the
         // pipeline runs (see source_to_ir_with, #1968).
         almide_mir::lower::hoist_block_call_args(&mut ir);
+        // #3058: list-rest matches become the length-test chain the lowering runs.
+        almide_mir::lower::desugar_list_rest_matches(&mut ir);
         // #2885: an effect main's declared Ok payload is discarded (the E044 rule).
         almide_mir::lower::discard_effect_main_payload(&mut ir);
         almide_mir::lower::desugar_fn_body_guards(&mut ir);
@@ -366,7 +366,11 @@ fn source_to_ir(path: &Path, source: &str) -> FrontendOutcome {
         almide_mir::lower::hoist_record_literal_args(&mut ir);
         // #1147 — the SAME oracle-driven continuation lift the pipeline runs,
         // LAST in the chain (desugar-before-both).
+        // #3058: the effect-fn ABI facts, derived from this IR (the lift below
+        // lowers fns, and every fn is lowered against them).
+        almide_mir::lower::settle_effect_abi(&mut ir);
         almide_mir::lower::lift_poisoning_continuations(&mut ir);
+        almide_mir::lower::install_effect_abi_facts(&ir);
         Ok(ir)
     }));
     match result {
