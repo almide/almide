@@ -8,12 +8,13 @@
 // musl's `for`/early-return shape is restructured into tail-recursive helpers; the unsigned
 // 64-bit reads it needs never arise because every significand here stays below 2^54, so an i64
 // subtraction's sign is the borrow musl reads from bit 63.
-
 // Normalize a subnormal's significand: shift its fraction left until the implicit-bit position
 // (bit 52) is set, decrementing the exponent once per shift. Returns the exponent; the shifted
 // significand is `prim.bshl(frac, 1 - e)` for the returned e.
-fn __fmod_sub_exp(i: Int, e: Int) -> Int = if prim.bshr_u(i, 63) != 0 then e
-else __fmod_sub_exp(prim.bshl(i, 1), e - 1)
+fn __fmod_sub_exp(i: Int, e: Int) -> Int = if prim.bshr_u(i, 63) != 0 then e else __fmod_sub_exp(
+  prim.bshl(i, 1),
+  e - 1,
+)
 
 // (exponent, significand with the implicit bit) of a finite, non-zero magnitude's bits.
 fn __fmod_exp(bits: Int) -> Int = {
@@ -24,15 +25,14 @@ fn __fmod_exp(bits: Int) -> Int = {
 fn __fmod_sig(bits: Int, e: Int) -> Int = if prim.band(prim.bshr_u(bits, 52), 2047) != 0 then prim.bor(
   prim.band(bits, 4503599627370495),
   4503599627370496,
-)
-else prim.bshl(prim.band(bits, 4503599627370495), 1 - e)
+) else prim.bshl(prim.band(bits, 4503599627370495), 1 - e)
 
 // One shift-and-subtract step per exponent step: `ux mod uy` while ex > ey. -1 = an exact zero.
 fn __fmod_loop(ux: Int, uy: Int, ex: Int, ey: Int) -> Int = if ex <= ey then {
   let i = ux - uy
-  if i < 0 then ux else if i == 0 then 0 - 1 else i
-}
-else {
+  if i < 0 then ux
+  else if i == 0 then 0 - 1 else i
+} else {
   let i = ux - uy
   if i == 0 then 0 - 1
   else if i < 0 then __fmod_loop(prim.bshl(ux, 1), uy, ex - 1, ey)
@@ -40,14 +40,18 @@ else {
 }
 
 // The exponent the remainder lands on: shift ux up until bit 52 is set.
-fn __fmod_renorm_e(ux: Int, ex: Int) -> Int = if prim.bshr_u(ux, 52) != 0 then ex
-else __fmod_renorm_e(prim.bshl(ux, 1), ex - 1)
+fn __fmod_renorm_e(ux: Int, ex: Int) -> Int = if prim.bshr_u(ux, 52) != 0 then ex else __fmod_renorm_e(
+  prim.bshl(ux, 1),
+  ex - 1,
+)
 
 fn __fmod_finish(ux: Int, ex: Int, sign: Int) -> Float = {
   let e = __fmod_renorm_e(ux, ex)
   let m = prim.bshl(ux, ex - e)
-  let mag = if e > 0 then prim.bor(prim.band(m, 4503599627370495), prim.bshl(e, 52))
-  else prim.bshr_u(m, 1 - e)
+  let mag = if e > 0 then prim.bor(prim.band(m, 4503599627370495), prim.bshl(e, 52)) else prim.bshr_u(
+    m,
+    1 - e,
+  )
   prim.ffrombits(prim.bor(mag, sign))
 }
 
@@ -58,20 +62,21 @@ fn __fmod_core(bx: Int, by: Int) -> Float = {
   let ex = __fmod_exp(ax)
   let ey = __fmod_exp(ay)
   let r = __fmod_loop(__fmod_sig(ax, ex), __fmod_sig(ay, ey), ex, ey)
-  if r < 0 then prim.ffrombits(sign) else __fmod_finish(r, ey, sign)
+  if r < 0 then prim.ffrombits(sign)
+  else __fmod_finish(r, ey, sign)
 }
 
+// y = 0, y NaN or x non-finite: NaN (musl's (x*y)/(x*y)); |x| < |y|: x itself; |x| == |y|: a
+// zero with x's sign; otherwise the shift-and-subtract remainder.
 fn float_fmod(x: Float, y: Float) -> Float = {
   let bx = prim.fbits(x)
   let by = prim.fbits(y)
   let ax = prim.band(bx, 9223372036854775807)
   let ay = prim.band(by, 9223372036854775807)
-  // y = 0, y NaN or x non-finite: NaN (musl's (x*y)/(x*y))
-  if ay == 0 or ay > 9218868437227405312 or ax >= 9218868437227405312 then prim.ffrombits(
-    9221120237041090560,
-  )
-  // |x| < |y|: x itself; |x| == |y|: a zero with x's sign
+  if ay == 0 or ay > 9218868437227405312 or ax >= 9218868437227405312 then prim.ffrombits(9221120237041090560)
   else if ax < ay then x
-  else if ax == ay then prim.ffrombits(prim.band(bx, 0 - 9223372036854775807 - 1))
-  else __fmod_core(bx, by)
+  else if ax == ay then prim.ffrombits(prim.band(bx, 0 - 9223372036854775807 - 1)) else __fmod_core(
+    bx,
+    by,
+  )
 }
