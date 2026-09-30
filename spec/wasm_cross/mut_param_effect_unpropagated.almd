@@ -9,9 +9,9 @@
 //    bound to a name, a `match` or `??` over the call. The write-back runs and
 //    the call's value is `ok(<payload>)`.
 //
-// A callee that CAN err, called without `!`, is not here: whether its partial
-// write survives the err is the open ruling of #2917 / #1871, and the gauntlet
-// cell x18 pins that wall.
+// A callee that CAN err, called without `!`, is in
+// mut_param_err_write_visible.almd: its partial write survives the err
+// (#2917 / #1871 ruling (B)).
 type R = { hits: List[Int], n: Int }
 
 effect fn record_hit(mut r: R, i: Int) -> Result[Unit, String] = {

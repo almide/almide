@@ -170,9 +170,11 @@ both layered packages, which are blocked on `x13` (functional port) and on
 `#1576` (mut port — the `mut`-param err-path semantics need a ratified answer:
 what does the caller's argument hold when the callee returns `err` after
 mutating?). `#1576` was ratified and closed on the structural leg (0.61.2):
-the err propagates before any write-back, so the caller's slot keeps its
+the err propagated before any write-back, so the caller's slot kept its
 pre-call binding, and `pkg/mut_port` runs byte-identically to native in the
-greenfield gate below.
+greenfield gate below. #1871 ruled the other way on 2026-09-30 ((B), write
+visible, #2917): the err arm carries the buffer too, so a write made before the
+err reaches the caller as on native — `cells/x18` pins it.
 
 ## 5. What to do with this here
 
