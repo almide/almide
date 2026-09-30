@@ -60,7 +60,7 @@ call-arg:MapLiteral	1
 call-arg:Member	91
 call-arg:Range	1
 call-arg:TupleIndex	8
-call-arg:UnwrapOr	84
+call-arg:UnwrapOr	85
 call-arg:borrowed-temp	2
 call:panic-arg	1
 callback:Member	3
@@ -90,8 +90,8 @@ interp-part:TupleIndex	2
 interp-part:UnwrapOr	10
 list-elem:IndexAccess	3
 list-elem:UnwrapOr	1
-loop-carried-assign	23
-loop-exit	4
+loop-carried-assign	24
+loop-exit	5
 main-err-carrier	2
 match-guard	17
 match-subject:Member	18
@@ -121,7 +121,7 @@ payload:Member	8
 payload:UnwrapOr	2
 rhs:EmptyMap	5
 rhs:Fan	4
-rhs:IndexAccess	9
+rhs:IndexAccess	10
 rhs:MapAccess	5
 rhs:MapLiteral	16
 rhs:Member	5
@@ -130,7 +130,7 @@ rhs:RuntimeCall	88
 rhs:SpreadRecord	3
 rhs:ToOption	5
 rhs:Unwrap	14
-rhs:UnwrapOr	77
+rhs:UnwrapOr	78
 scan	3
 stmt:FieldAssign	13
 stmt:Guard	36
