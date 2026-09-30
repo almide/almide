@@ -33,6 +33,19 @@
 # RATCHET — a gate whose script compares against a committed `*-baseline.txt`,
 # an in-source `MAX_*=` ceiling or a `*_ceiling` — must carry `varies`; any
 # other row may leave it empty under the shrink-only `# unvaried_ceiling`.
+#
+# #3032 adds a FIFTH axis: what the gate does NOT see. The four axes above say
+# a gate can go red, is run, and measures something that moves — and the
+# release-blocker count still printed 0 over an unlabelled miscompile (#2293),
+# because its domain is labels, not defects. `blind` names the defect classes
+# outside the gate's domain, each routed to the gate that covers it or to
+# UNCOMPENSATED; `UNMAPPED` is the honest-debt spelling, shrink-only.
+#
+# #3032 also closes the ENUMERATION. The set used to be a filename glob, so a
+# script a workflow runs as a verdict under another name (count-release-
+# blockers.sh gates the final tag) had no row. Now every script a workflow or
+# lefthook INVOKES is either a `[[gate]]` or a `[[not_a_gate]]` with a reason;
+# the glob stays as the floor, the invocation scan is what makes it closed.
 set -euo pipefail
 export LC_ALL=C
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -67,6 +80,23 @@ if len(subcommands) < 5:
           file=sys.stderr)
     sys.exit(1)
 enumerated |= {f"tools/almide-gates:{c}" for c in subcommands}
+
+# Every script a workflow or lefthook invokes (#3032). A mention on a comment
+# line, or as a trigger pattern (`glob:`, a cache `key:`), is not an
+# invocation. What is invoked and not a gate is declared in `[[not_a_gate]]`.
+CONSUMERS = sorted(
+    os.path.join(".github/workflows", f)
+    for f in os.listdir(os.path.join(root, ".github/workflows")) if f.endswith(".yml")
+) + ["lefthook.yml"]
+NOT_INVOCATION = re.compile(r'^\s*(?:-\s*)?(?:glob|key|restore-keys|paths|paths-ignore)\s*:')
+SCRIPT_REF = re.compile(r'(?<![\w/.-])(?:[\w.-]+/)?((?:scripts|proofs|tools)/[\w./-]+\.(?:sh|py))')
+invoked = {}
+for c in CONSUMERS:
+    for line in open(os.path.join(root, c), encoding="utf-8"):
+        if line.lstrip().startswith("#") or NOT_INVOCATION.match(line):
+            continue
+        for m in SCRIPT_REF.finditer(line):
+            invoked.setdefault(m.group(1), set()).add(c)
 
 VOCAB = {"KERNEL_PROVEN", "MUTATION_TESTED", "NEGATIVE_TESTED", "EXERCISED", "UNVERIFIED"}
 # What the gate READS, which decides the language it belongs in (#2128).
@@ -107,7 +137,9 @@ ceiling = None
 unclassified_ceiling = None
 unwired_ceiling = None
 unvaried_ceiling = None
-rows, cur = [], None
+unmapped_ceiling = None
+uncompensated_ceiling = None
+rows, not_gates, cur = [], [], None
 for raw in open(ledger_path, encoding="utf-8"):
     line = raw.strip()
     m = re.match(r'#\s*unverified_ceiling\s*=\s*"(\d+)"', line)
@@ -122,16 +154,52 @@ for raw in open(ledger_path, encoding="utf-8"):
     m = re.match(r'#\s*unvaried_ceiling\s*=\s*"(\d+)"', line)
     if m:
         unvaried_ceiling = int(m.group(1))
-    if line == "[[gate]]":
+    m = re.match(r'#\s*unmapped_blind_ceiling\s*=\s*"(\d+)"', line)
+    if m:
+        unmapped_ceiling = int(m.group(1))
+    m = re.match(r'#\s*uncompensated_blind_ceiling\s*=\s*"(\d+)"', line)
+    if m:
+        uncompensated_ceiling = int(m.group(1))
+    if line in ("[[gate]]", "[[not_a_gate]]"):
         if cur:
-            rows.append(cur)
-        cur = {}
+            (not_gates if cur.pop("_kind") == "not_a_gate" else rows).append(cur)
+        cur = {"_kind": line.strip("[]")}
         continue
     m = re.match(r'([a-z_]+)\s*=\s*"(.*)"$', line)
     if m and cur is not None:
         cur[m.group(1)] = m.group(2)
 if cur:
-    rows.append(cur)
+    (not_gates if cur.pop("_kind") == "not_a_gate" else rows).append(cur)
+
+# The fifth axis (#3032): `blind` is `NONE: <why>`, `UNMAPPED`, or `;`-separated
+# entries `<defect class> -> <compensator>`, where the compensator is
+# UNCOMPENSATED or a path (optionally followed by prose) that exists. The
+# compensator is a file, not a gate row, because the gate that covers a
+# blind spot is often a test or a workflow.
+UNMAPPED = "UNMAPPED"
+UNCOMPENSATED = "UNCOMPENSATED"
+
+def blind_entries(p, text, errs):
+    if text.startswith("NONE:"):
+        if not text[5:].strip():
+            errs.append(f"{p}: `blind = \"NONE:\"` needs its reason — a gate that sees everything is a claim")
+        return []
+    out = []
+    for e in [x.strip() for x in text.split(";") if x.strip()]:
+        if "->" not in e:
+            errs.append(f"{p}: blind entry {e!r} has no `->` — route each defect class to the gate "
+                        f"that covers it, or to {UNCOMPENSATED}")
+            continue
+        what, comp = (s.strip() for s in e.split("->", 1))
+        if not what or not comp:
+            errs.append(f"{p}: blind entry {e!r} is missing its defect class or its compensator")
+            continue
+        if not comp.startswith(UNCOMPENSATED):
+            target = comp.split()[0]
+            if not os.path.exists(os.path.join(root, target.split(":", 1)[0])):
+                errs.append(f"{p}: blind entry routes {what!r} to {target!r}, which does not exist")
+        out.append((what, comp))
+    return out
 
 errs = []
 if ceiling is None:
@@ -142,12 +210,34 @@ if unwired_ceiling is None:
     errs.append("ledger header is missing `# unwired_ceiling = \"N\"`")
 if unvaried_ceiling is None:
     errs.append("ledger header is missing `# unvaried_ceiling = \"N\"`")
+if unmapped_ceiling is None:
+    errs.append("ledger header is missing `# unmapped_blind_ceiling = \"N\"`")
+if uncompensated_ceiling is None:
+    errs.append("ledger header is missing `# uncompensated_blind_ceiling = \"N\"`")
+
+# The closed enumeration (#3032): an invoked script is a gate unless declared
+# otherwise, and a declaration must name something that is still invoked.
+declared_not = set()
+for r in not_gates:
+    p = r.get("path", "")
+    if not r.get("reason", "").strip():
+        errs.append(f"{p}: [[not_a_gate]] without a `reason` — say why its exit code decides nothing")
+    if p not in invoked:
+        errs.append(f"{p}: STALE [[not_a_gate]] — no workflow or lefthook invokes it any more")
+    if p in declared_not:
+        errs.append(f"{p}: duplicate [[not_a_gate]]")
+    declared_not.add(p)
+enumerated |= set(invoked) - declared_not
+
 seen = set()
 unverified = 0
 unclassified = 0
 unwired = 0
 unvaried = 0
 ratchets = 0
+unmapped = 0
+mapped = 0
+uncompensated = []
 for r in rows:
     p = r.get("path")
     if not p:
@@ -155,7 +245,20 @@ for r in rows:
         continue
     if p in seen:
         errs.append(f"{p}: duplicate row")
+    if p in declared_not:
+        errs.append(f"{p}: both a [[gate]] and a [[not_a_gate]] — it is one or the other")
     seen.add(p)
+
+    # The fifth axis (#3032): what the gate does not see.
+    blind = r.get("blind", "")
+    if not blind.strip():
+        errs.append(f"{p}: no `blind` — name the defect classes this gate cannot see and what "
+                    f"covers each, or declare {UNMAPPED} under the ceiling (#3032)")
+    elif blind == UNMAPPED:
+        unmapped += 1
+    else:
+        mapped += 1
+        uncompensated += [(p, w) for w, c in blind_entries(p, blind, errs) if c.startswith(UNCOMPENSATED)]
     if p not in enumerated:
         errs.append(f"{p}: STALE row — the script no longer exists (or left the enumerated set)")
     cls = r.get("class", "")
@@ -246,6 +349,23 @@ if unvaried_ceiling is not None:
                     f"down in the ledger header (the debt may only shrink, and the ledger must "
                     f"say so)")
 
+if unmapped_ceiling is not None:
+    if unmapped > unmapped_ceiling:
+        errs.append(f"UNMAPPED blind count {unmapped} exceeds the ceiling {unmapped_ceiling} — a new "
+                    f"gate lands saying what it cannot see (#3032)")
+    elif unmapped < unmapped_ceiling:
+        errs.append(f"UNMAPPED blind count {unmapped} is BELOW the ceiling {unmapped_ceiling} — ratchet "
+                    f"it down in the ledger header (the debt may only shrink, and the ledger must "
+                    f"say so)")
+
+# Mapping a gate may ADD uncompensated entries (finding a blind spot is the
+# point), so this ceiling moves both ways by declaration; what it refuses is
+# the silent change — the header states the number the ledger holds.
+if uncompensated_ceiling is not None and len(uncompensated) != uncompensated_ceiling:
+    errs.append(f"UNCOMPENSATED blind entries {len(uncompensated)} != the declared "
+                f"{uncompensated_ceiling} — update `# uncompensated_blind_ceiling` in the header: "
+                f"up when a mapping names a new blind spot, down when a gate comes to cover one")
+
 if ceiling is not None:
     if unverified > ceiling:
         errs.append(f"UNVERIFIED count {unverified} exceeds the ceiling {ceiling} — new gates "
@@ -275,4 +395,8 @@ print("  reads: " + " / ".join(f"{k} {v}" for k, v in sorted(reads_by.items()))
 print(f"  measures: {len(rows)} named / ratchets {ratchets}, every one with `varies` / "
       f"unvaried {unvaried} (ceiling {unvaried_ceiling})")
 print(f"  wired: {len(rows) - unwired} consumer-verified / UNWIRED {unwired} (ceiling {unwired_ceiling})")
+print(f"  blind: {mapped} mapped / UNMAPPED {unmapped} (ceiling {unmapped_ceiling}) / "
+      f"{len(uncompensated)} uncompensated blind spot(s)")
+print(f"  enumeration: {len(invoked)} invoked script(s) — {len(set(invoked) & seen)} gate row(s), "
+      f"{len(declared_not)} declared not-a-gate")
 EOF
