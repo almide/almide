@@ -140,7 +140,10 @@ if [ "$CORPUS" = "$ROOT/spec" ] || [ "$CORPUS" = "spec" ]; then
   # is the TARGET state, not an error — comm handles empty files correctly).
   grep '^WALLED REAL ' "$REPORT" | sed "s|^WALLED REAL ||; s|^$ROOT/||" \
     | awk -F' :: ' '{print $1" :: "$2}' | LC_ALL=C sort -u > "$ACTUAL" || true
-  grep -v '^#' "$BASELINE" | grep -v '^[[:space:]]*$' | LC_ALL=C sort -u > "$EXPECTED" || true
+  # A row may end in `  # #NNNN`, the open issue that owns it (#3058 — required
+  # of every NEW row by scripts/check-walled-real-growth.sh); the key is the rest.
+  grep -v '^#' "$BASELINE" | grep -v '^[[:space:]]*$' \
+    | sed -E 's/[[:space:]]+#[[:space:]]*#[0-9]+[[:space:]]*$//' | LC_ALL=C sort -u > "$EXPECTED" || true
   # The summary COUNT and the per-fn ENUMERATION must agree (#988): if the
   # `WALLED REAL` line format drifts while the summary survives, $ACTUAL is
   # empty, comm agrees with an all-comments baseline on nothing, and the

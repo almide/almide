@@ -224,6 +224,24 @@ jobs:
           case "$BASE" in ""|0000000000000000000000000000000000000000) BASE="$(git rev-parse HEAD~1)";; esac
           git cat-file -e "$BASE^{commit}" 2>/dev/null || BASE="$(git rev-parse HEAD~1)"
           bash scripts/check-dep-shaped-skips.sh "$BASE"
+      - name: Walled-real rows grow only with an open issue cited (#3058)
+        # proofs/corpus-wall.sh holds the ledger to the classifier exactly; this
+        # holds each NEW row to an owner: `  # #NNNN`, an issue open now.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bash scripts/check-walled-real-growth.sh --self-test
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            BASE="$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
+          elif [ "${{ github.event_name }}" = merge_group ]; then
+            BASE="${{ github.event.merge_group.base_sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          case "$BASE" in ""|0000000000000000000000000000000000000000) BASE="$(git rev-parse HEAD~1)";; esac
+          git cat-file -e "$BASE^{commit}" 2>/dev/null || BASE="$(git rev-parse HEAD~1)"
+          bash scripts/check-walled-real-growth.sh "$BASE"
       - name: The gate judges each commit by the law at its parent (negative controls)
         # Needs the full history this job checks out: the old law it replays
         # is the gate's real July version.
