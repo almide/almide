@@ -397,7 +397,6 @@ call:list.is_empty
 call:list.join
 call:list.last
 call:list.len
-call:list.length
 call:list.map
 call:list.max
 call:list.min
@@ -474,7 +473,6 @@ call:matrix.broadcast_add_row
 call:matrix.causal_mask_add
 call:matrix.cols
 call:matrix.concat_cols
-call:matrix.concat_cols_many
 call:matrix.conv1d
 call:matrix.div
 call:matrix.dot_row
@@ -512,7 +510,6 @@ call:matrix.rms_norm_rows
 call:matrix.rope_rotate
 call:matrix.rope_rotate_at
 call:matrix.rope_rotate_neox_at
-call:matrix.row_dot
 call:matrix.rows
 call:matrix.scale
 call:matrix.scaled_dot_product_attention
