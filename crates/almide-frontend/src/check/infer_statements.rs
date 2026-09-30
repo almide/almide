@@ -14,7 +14,7 @@ impl Checker {
             }
             ast::Stmt::Assign { .. } => self.check_stmt_assign(stmt),
             ast::Stmt::IndexAssign { .. } => self.check_stmt_index_assign(stmt),
-            ast::Stmt::FieldAssign { value, .. } => { self.infer_expr(value); }
+            ast::Stmt::FieldAssign { .. } => self.check_stmt_field_assign(stmt),
             ast::Stmt::Guard { cond, else_, .. } => self.check_stmt_guard(cond, else_),
             ast::Stmt::GuardLet { .. } => self.check_stmt_guard_let(stmt),
             ast::Stmt::Expr { expr, .. } => {
@@ -237,71 +237,117 @@ impl Checker {
     /// value's type with the variable's declared type. Verbatim text move
     /// out of [`Self::check_stmt_assign`].
     fn check_stmt_assign_unify(&mut self, name: &Sym, val_ty: &Ty, value: &ast::Expr) {
-        // A local binding (`lookup_var`) OR a module-level `var`
-        // (`top_lets`) — both are valid assignment targets and both carry
-        // a concrete declared type to flow into the value.
-        let var_ty = self.env.lookup_var(name).cloned()
-            .or_else(|| self.env.top_lets.get(&sym(name)).cloned());
-        if let Some(var_ty) = &var_ty {
-            let val_resolved = resolve_ty(val_ty, &self.uf);
-            let var_resolved = self.env.resolve_named(var_ty);
-            if matches!(val_resolved, Ty::Unit) && !matches!(var_resolved, Ty::Unit | Ty::Unknown) {
-                // Rebuild form is type-directed: a List concatenates a
-                // singleton, a String appends a suffix string. Other
-                // collections (Map/Set/Bytes) have no `+` rebuild, so we
-                // steer toward the statement form only.
-                let rebuild = match &var_resolved {
-                    Ty::Applied(TypeConstructorId::List, _) => Some(format!("{0} = {0} + [<item>]", name)),
-                    Ty::String => Some(format!("{0} = {0} + \"<suffix>\"", name)),
-                    _ => None,
-                };
-                let snippet = match &rebuild {
-                    Some(rb) => format!(
-                        "// the mutator already updates '{n}' in place — drop the `{n} =` and call it as a statement:\n<mutator>({n}, ...)\n// or rebuild a fresh value:\n{rb}",
-                        n = name,
-                    ),
-                    None => format!(
-                        "// the mutator already updates '{n}' in place — drop the `{n} =` and call it as a statement:\n<mutator>({n}, ...)",
-                        n = name,
-                    ),
-                };
-                let hint = match &rebuild {
-                    Some(rb) => format!(
-                        "the right-hand side returns Unit (an in-place mutator). Call it as a \
-                         statement instead of assigning its result, or rebuild '{}' with a \
-                         value-returning expression like `{}`",
-                        name, rb
-                    ),
-                    None => format!(
-                        "the right-hand side returns Unit (an in-place mutator). Call it as a \
-                         statement instead of assigning its result — '{}' is already mutated in place",
-                        name
-                    ),
-                };
-                self.emit(super::err(
-                    format!("cannot assign a Unit value to '{}'", name),
-                    hint,
-                    format!("{} = ...", name),
-                ).with_code("E001").with_try(snippet));
-            } else {
-                // Unify the assigned value's type with the variable's
-                // declared type. The variable already carries a concrete
-                // type from its `var`/`let` declaration; flowing it into
-                // the value pins an otherwise-unconstrained element — e.g.
-                // `items = []` for `var items: List[Int]` resolves `[]`'s
-                // element to `Int` (it is the source of truth, exactly as
-                // a typed `let` binding is). Without this, an empty literal
-                // assigned to a typed var stays undecidable (E018).
-                //
-                // #485: apply the same effect-fn auto-unwrap rule as
-                // let/var first — `x = step(x)` with x: Int unwraps the
-                // lifted Result[Int, E]; a Result-typed target keeps it.
-                // Only substitute when the unwrap actually fires, so an
-                // unresolved TypeVar RHS keeps flowing through inference.
-                let unwrapped = self.effect_unwrap_rhs_warned(val_resolved.clone(), value, "of this assignment's value", false, var_resolved.is_result());
-                let constrain_val = if unwrapped != val_resolved { unwrapped } else { val_ty.clone() };
-                self.constrain(var_ty.clone(), constrain_val, format!("assign {}", name));
+        if let Some(var_ty) = self.assign_target_ty(name) {
+            self.unify_assigned_value(name.as_str(), var_ty, val_ty, value);
+        }
+    }
+
+    /// The declared type of an assignment target: a local binding
+    /// (`lookup_var`) OR a module-level `var` (`top_lets`) — both are valid
+    /// assignment targets and both carry a concrete declared type to flow
+    /// into the value.
+    fn assign_target_ty(&self, name: &Sym) -> Option<Ty> {
+        self.env.lookup_var(name).cloned()
+            .or_else(|| self.env.top_lets.get(&sym(name)).cloned())
+    }
+
+    /// `s.f = v` (#3051): the field's declared type is the expected type of
+    /// the value, exactly as a variable's is for `x = v` and an annotation's
+    /// for `let x: T = v`. Before, the value was inferred with no context, so
+    /// `s.xs = []` was an undecidable empty literal (E018) and a mismatched
+    /// value (`s.n = "x"`) passed check and failed as rustc E0308 natively.
+    fn check_stmt_field_assign(&mut self, stmt: &mut ast::Stmt) {
+        let ast::Stmt::FieldAssign { target, field, value, .. } = stmt else { unreachable!() };
+        let val_ty = self.infer_expr(value);
+        let Some(obj_ty) = self.assign_target_ty(target) else { return };
+        let field_ty = self.resolve_field_type(&obj_ty, field.as_str());
+        if matches!(resolve_ty(&field_ty, &self.uf), Ty::Unknown) {
+            return;
+        }
+        let label = format!("{}.{}", target, field);
+        self.unify_assigned_value(&label, field_ty, &val_ty, value);
+    }
+
+    /// `xs[i] = v` / `m[k] = v` (#3051): the container's element type is the
+    /// expected type of the value, and a Map's key type that of the index.
+    fn unify_index_assign(&mut self, target: &Sym, idx_ty: Ty, val_ty: &Ty, value: &ast::Expr) {
+        let Some(container) = self.assign_target_ty(target) else { return };
+        let resolved = self.env.resolve_named(&resolve_ty(&container, &self.uf));
+        let label = format!("{}[...]", target);
+        match &resolved {
+            Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
+                self.unify_assigned_value(&label, args[0].clone(), val_ty, value);
             }
+            Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => {
+                self.constrain(args[0].clone(), idx_ty, format!("key of {}", label));
+                self.unify_assigned_value(&label, args[1].clone(), val_ty, value);
+            }
+            _ => {}
+        }
+    }
+
+    /// Flow an assignment target's type (`var_ty`) into the assigned value.
+    /// `name` spells the target in diagnostics (`x`, `s.f`, `xs[...]`).
+    fn unify_assigned_value(&mut self, name: &str, var_ty: Ty, val_ty: &Ty, value: &ast::Expr) {
+        let var_ty = &var_ty;
+        let val_resolved = resolve_ty(val_ty, &self.uf);
+        let var_resolved = self.env.resolve_named(var_ty);
+        if matches!(val_resolved, Ty::Unit) && !matches!(var_resolved, Ty::Unit | Ty::Unknown) {
+            // Rebuild form is type-directed: a List concatenates a
+            // singleton, a String appends a suffix string. Other
+            // collections (Map/Set/Bytes) have no `+` rebuild, so we
+            // steer toward the statement form only.
+            let rebuild = match &var_resolved {
+                Ty::Applied(TypeConstructorId::List, _) => Some(format!("{0} = {0} + [<item>]", name)),
+                Ty::String => Some(format!("{0} = {0} + \"<suffix>\"", name)),
+                _ => None,
+            };
+            let snippet = match &rebuild {
+                Some(rb) => format!(
+                    "// the mutator already updates '{n}' in place — drop the `{n} =` and call it as a statement:\n<mutator>({n}, ...)\n// or rebuild a fresh value:\n{rb}",
+                    n = name,
+                ),
+                None => format!(
+                    "// the mutator already updates '{n}' in place — drop the `{n} =` and call it as a statement:\n<mutator>({n}, ...)",
+                    n = name,
+                ),
+            };
+            let hint = match &rebuild {
+                Some(rb) => format!(
+                    "the right-hand side returns Unit (an in-place mutator). Call it as a \
+                     statement instead of assigning its result, or rebuild '{}' with a \
+                     value-returning expression like `{}`",
+                    name, rb
+                ),
+                None => format!(
+                    "the right-hand side returns Unit (an in-place mutator). Call it as a \
+                     statement instead of assigning its result — '{}' is already mutated in place",
+                    name
+                ),
+            };
+            self.emit(super::err(
+                format!("cannot assign a Unit value to '{}'", name),
+                hint,
+                format!("{} = ...", name),
+            ).with_code("E001").with_try(snippet));
+        } else {
+            // Unify the assigned value's type with the variable's
+            // declared type. The variable already carries a concrete
+            // type from its `var`/`let` declaration; flowing it into
+            // the value pins an otherwise-unconstrained element — e.g.
+            // `items = []` for `var items: List[Int]` resolves `[]`'s
+            // element to `Int` (it is the source of truth, exactly as
+            // a typed `let` binding is). Without this, an empty literal
+            // assigned to a typed var stays undecidable (E018).
+            //
+            // #485: apply the same effect-fn auto-unwrap rule as
+            // let/var first — `x = step(x)` with x: Int unwraps the
+            // lifted Result[Int, E]; a Result-typed target keeps it.
+            // Only substitute when the unwrap actually fires, so an
+            // unresolved TypeVar RHS keeps flowing through inference.
+            let unwrapped = self.effect_unwrap_rhs_warned(val_resolved.clone(), value, "of this assignment's value", false, var_resolved.is_result());
+            let constrain_val = if unwrapped != val_resolved { unwrapped } else { val_ty.clone() };
+            self.constrain(var_ty.clone(), constrain_val, format!("assign {}", name));
         }
     }
 
@@ -389,8 +435,9 @@ impl Checker {
     /// `ast::Stmt::IndexAssign` arm of [`Self::check_stmt`]. Verbatim text move.
     fn check_stmt_index_assign(&mut self, stmt: &mut ast::Stmt) {
         let ast::Stmt::IndexAssign { target, index, value, .. } = stmt else { unreachable!() };
-        self.infer_expr(index);
-        self.infer_expr(value);
+        let idx_ty = self.infer_expr(index);
+        let val_ty = self.infer_expr(value);
+        self.unify_index_assign(target, idx_ty, &val_ty, value);
         // A module-level `let g` is immutable just like a local `let` — its
         // contents may not be index-assigned. `lookup_var` only sees locals,
         // so without the `top_lets` arm a global `let g; g[2]=…` slipped past
