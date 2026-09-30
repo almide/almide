@@ -1,0 +1,6 @@
+// `scale` is never assigned, so it is a `let`.
+effect fn main() -> Unit = {
+  let scale = 2
+  let r = fan.map([1, 2, 3], (x) => ok(x * scale))!
+  println("${list.sum(r)}")
+}

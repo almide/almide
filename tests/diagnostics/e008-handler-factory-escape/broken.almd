@@ -1,0 +1,13 @@
+// A factory returns a handler that closes over the factory's own `var`:
+// every request shares that one `c`.
+import http
+
+effect fn mk() -> HttpHandler = {
+  var c = 0
+  (req) => {
+    c = c + 1
+    http.response(200, "c=${c}")
+  }
+}
+
+effect fn main() -> Unit = http.serve(8080, mk()!)!

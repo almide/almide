@@ -1,0 +1,6 @@
+// Each element returns its contribution; the sum is taken after the fan.
+effect fn main() -> Unit = {
+  let add = (x: Int) => ok(x)
+  let r = fan.map([1, 2, 3], add)!
+  println("${list.len(r)} ${list.sum(r)}")
+}

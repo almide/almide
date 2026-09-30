@@ -1,0 +1,9 @@
+// The handler computes its answer from the request alone.
+import http
+
+effect fn main() -> Unit = {
+  let app = http.router([
+    http.route("GET /", (req) => http.response(200, "path=${http.req_path(req)}"))
+  ])!
+  http.serve(8080, app)!
+}

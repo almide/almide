@@ -1,0 +1,8 @@
+// The count is the length of the results, taken after the fan.
+type Job = { run: (Int) -> Result[Int, String] }
+
+effect fn main() -> Unit = {
+  let job: Job = { run: (x) => ok(x) }
+  let r = fan.map([1, 2], job.run)!
+  println("${list.sum(r)} ${list.len(r)}")
+}

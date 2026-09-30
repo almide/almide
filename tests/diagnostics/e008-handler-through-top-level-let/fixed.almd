@@ -1,0 +1,11 @@
+// The routes still live in a top-level `let`; the handler holds no state.
+import http
+
+effect fn home(req: HttpRequest) -> HttpResponse = http.response(200, "home")
+
+let routes = [http.route("GET /", home)]
+
+effect fn main() -> Unit = {
+  let app = http.router(routes)!
+  http.serve(8080, app)!
+}

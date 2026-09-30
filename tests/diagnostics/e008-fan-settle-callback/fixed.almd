@@ -1,0 +1,5 @@
+// Each element settles to its own Result; nothing is shared.
+effect fn main() -> Unit = {
+  let r = fan.settle([1, 2, 3], (x) => ok(x))
+  println("${list.len(r)}")
+}
