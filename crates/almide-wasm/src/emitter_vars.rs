@@ -93,6 +93,35 @@ impl Emitter<'_> {
         }
     }
 
+    /// Rebind the mut var to the FRESH block on the stack — a mutator the
+    /// leg lowers functionally (`string.push`'s concat, `list.clear`'s empty
+    /// list, the bytes window writers' copy): the var held one credit on
+    /// the block it no longer names, and that credit goes with the rebind,
+    /// exactly as an `Assign` settles its old occupant (#2968 — every such
+    /// write-back orphaned the old block). A PARAMETER receiver holds the
+    /// site's credit the same way (param_borrow.rs marks a param a module
+    /// op touches owned), so no receiver is exempt. The value must not BE
+    /// the old block: an in-place helper that may answer with its operand
+    /// (`$list_push`, `$bytes_push`) settles through
+    /// `settle_outgrown_receiver` instead.
+    pub(crate) fn emit_rebind_mut_var_fresh(
+        &mut self,
+        id: VarId,
+        idx: u32,
+        ty: SliceTy,
+        global: bool,
+    ) -> Result<(), EmitError> {
+        if self.rc_droppable(ty) {
+            let hn = self.hold_i32()?;
+            self.f.instructions().local_set(hn);
+            self.emit_read_mut_var(&id, idx, ty, global);
+            let dec = self.dec_fn_of(ty);
+            self.f.instructions().call(dec).local_get(hn);
+            self.release_i32();
+        }
+        self.emit_store_mut_var(id, idx, ty, global)
+    }
+
     /// `[raw value]` -> `[ok(..) Result block]` (the effect-fn return wrap).
     pub(crate) fn wrap_ok(&mut self, raw: SliceTy, ret: SliceTy) -> Result<(), EmitError> {
         let SliceTy::Result(o, _) = ret else {
