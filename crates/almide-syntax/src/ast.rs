@@ -336,8 +336,14 @@ pub enum Stmt {
     LetDestructure { pattern: Pattern, value: Expr, #[serde(skip)] span: Option<Span> },
     Var { name: Sym, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(skip)] span: Option<Span> },
     Assign { name: Sym, value: Expr, #[serde(skip)] span: Option<Span> },
-    IndexAssign { target: Sym, index: Box<Expr>, value: Expr, #[serde(skip)] span: Option<Span> },
-    FieldAssign { target: Sym, field: Sym, value: Expr, #[serde(skip)] span: Option<Span> },
+    /// `target(.p)*[index] = value`. `path` is the chain of fields between the
+    /// root binding and the indexed container (`o.m[k] = v` has path `[m]`),
+    /// empty for the one-level `xs[i] = v` (#3064).
+    IndexAssign { target: Sym, #[serde(default, skip_serializing_if = "Vec::is_empty")] path: Vec<Sym>, index: Box<Expr>, value: Expr, #[serde(skip)] span: Option<Span> },
+    /// `target(.p)*.field = value`. `path` is the chain of fields between the
+    /// root binding and the record written (`o.inner.xs = v` has path
+    /// `[inner]`), empty for the one-level `s.f = v` (#3064).
+    FieldAssign { target: Sym, #[serde(default, skip_serializing_if = "Vec::is_empty")] path: Vec<Sym>, field: Sym, value: Expr, #[serde(skip)] span: Option<Span> },
     Guard { cond: Expr, else_: Expr, #[serde(skip)] span: Option<Span> },
     /// `guard let name = scrutinee else { else_ }` — Swift-style: `name` binds the value
     /// inside the scrutinee's Option/Result and stays in scope for the REST of the block;

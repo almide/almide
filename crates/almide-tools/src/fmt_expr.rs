@@ -917,8 +917,8 @@ fn fmt_stmt(out: &mut String, stmt: &Stmt, depth: usize) {
             out.push_str(" = "); fmt_expr(out, value, depth);
         }
         Stmt::Assign { name, value, .. } => { w!(out, "{i}{name} = "); fmt_expr(out, value, depth); }
-        Stmt::IndexAssign { target, index, value, .. } => { w!(out, "{i}{target}["); fmt_expr(out, index, depth); out.push_str("] = "); fmt_expr(out, value, depth); }
-        Stmt::FieldAssign { target, field, value, .. } => { w!(out, "{i}{target}.{field} = "); fmt_expr(out, value, depth); }
+        Stmt::IndexAssign { target, path, index, value, .. } => { w!(out, "{i}{target}{}[", fmt_place_path(path)); fmt_expr(out, index, depth); out.push_str("] = "); fmt_expr(out, value, depth); }
+        Stmt::FieldAssign { target, path, field, value, .. } => { w!(out, "{i}{target}{}.{field} = ", fmt_place_path(path)); fmt_expr(out, value, depth); }
         Stmt::Guard { cond, else_, .. } => { out.push_str(&i); out.push_str("guard "); fmt_expr(out, cond, depth); out.push_str(" else "); fmt_expr(out, else_, depth); }
         Stmt::GuardLet { name, scrutinee, else_, .. } => { out.push_str(&i); out.push_str("guard let "); out.push_str(name.as_str()); out.push_str(" = "); fmt_expr(out, scrutinee, depth); out.push_str(" else "); fmt_expr(out, else_, depth); }
         Stmt::Expr { expr, .. } => { out.push_str(&i); fmt_expr(out, expr, depth); }
@@ -1025,3 +1025,8 @@ fn fmt_dpat(out: &mut String, pat: &Pattern) {
     }
 }
 
+/// The field chain between an assignment's root and its last step (#3064):
+/// `.inner` for `o.inner.xs = v`, empty for a one-level target.
+fn fmt_place_path(path: &[almide_base::intern::Sym]) -> String {
+    path.iter().map(|p| format!(".{p}")).collect()
+}
