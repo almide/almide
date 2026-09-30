@@ -241,6 +241,24 @@ fn check_guard_stmt() {
 }
 
 #[test]
+fn sized_return_tail_literal_faces_the_range_check() {
+    // #3060: the declared return narrows a tail literal in lowering, so a
+    // literal it cannot hold is E024 at check time, not a rustc rejection.
+    for src in [
+        "fn f(n: Int) -> Int8 = if n > 0 then 300 else 1",
+        "fn f(n: Int) -> Option[UInt8] = if n > 0 then some(256) else none",
+        "fn f(n: Int) -> Result[String, Int16] = if n > 0 then ok(\"a\") else err(40000)",
+        "effect fn f(n: Int) -> Int16 = { if n > 0 then ok(40000) else 1 }",
+        "effect fn f(n: Int) -> UInt8 = { -1 }",
+        "fn f() -> Int32 = { let g: (Int) -> Int8 = (x) => 128\n  0 }",
+    ] {
+        let errs = errors(src);
+        assert!(errs.iter().any(|e| e.contains("out of range")), "{src}: expected E024, got {errs:?}");
+    }
+    has_no_errors("fn f(n: Int) -> UInt8 = if n > 0 then 255 else 0");
+}
+
+#[test]
 fn check_impl_block() {
     has_no_errors("type Greeter = { name: String }\nimpl Greeter {\n  fn greet(self: Greeter) -> String = self.name\n}");
 }

@@ -389,6 +389,18 @@ pub(super) struct FnToLower<'a> {
     pub module_prefix: Option<&'a str>,
 }
 
+/// #3060: the declared return is the width of the body's tail, the same way a
+/// `let` annotation is the width of its value — a literal there (through `if`
+/// / `match` arms, block tails, `some` / `ok` / `err` payloads and lambda
+/// bodies) takes it, or native spells `7i64` in an `-> i32` fn. An effect fn's
+/// body may also yield its lifted carrier (`ok(3)` in `-> Int16`).
+fn coerce_fn_tail_literals(ctx: &LowerCtx, body: &mut IrExpr, ret_ty: &Ty, is_effect: bool) {
+    statements::coerce_literal_to_sized(body, ret_ty, ctx.env);
+    if is_effect && !ret_ty.is_result() {
+        statements::coerce_literal_to_sized(body, &Ty::result(ret_ty.clone(), Ty::String), ctx.env);
+    }
+}
+
 fn lower_fn(ctx: &mut LowerCtx, decl: &FnToLower<'_>) -> IrFunction {
     let FnToLower {
         name, params, body, effect, span, generics,
@@ -416,7 +428,8 @@ fn lower_fn(ctx: &mut LowerCtx, decl: &FnToLower<'_>) -> IrFunction {
 
     let ret_ty = resolve_fn_ret_ty(ctx, name, module_prefix, body);
 
-    let ir_body = lower_expr(ctx, body);
+    let mut ir_body = lower_expr(ctx, body);
+    coerce_fn_tail_literals(ctx, &mut ir_body, &ret_ty, effect.unwrap_or(false));
     ctx.protocol_bounds = saved_pb;
     ctx.const_param_vars = saved_cp;
     ctx.pop_scope();
