@@ -477,3 +477,8 @@ spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint16
 spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint32
 spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint64
 spec/wasm_cross/sized_tail_literal_matrix.almd :: show_uint8
+spec/wasm_cross/effect_operand_unwrap_distinct.almd :: diff
+spec/wasm_cross/effect_operand_unwrap_distinct.almd :: nested
+spec/wasm_cross/effect_operand_unwrap_distinct.almd :: three
+spec/wasm_cross/effect_operand_unwrap_distinct.almd :: unary
+spec/wasm_cross/mut_call_hoisted_args_distinct.almd :: main
