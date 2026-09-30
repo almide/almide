@@ -16,7 +16,7 @@ equal to the set of codes the compiler emits.
 | [E005](E005.md) | Argument type mismatch (constructor / function call) |
 | [E006](E006.md) | Effect isolation: pure fn calls effect fn |
 | [E007](E007.md) | `fan` block outside effect fn |
-| [E008](E008.md) | `fan` block captures mutable variable |
+| [E008](E008.md) | a concurrently-run body reaches a `var` |
 | [E009](E009.md) | Reassignment to immutable binding |
 | [E010](E010.md) | Non-exhaustive match |
 | [E011](E011.md) | Mutable var mutated inside closure in pure fn |

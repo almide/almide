@@ -1,0 +1,10 @@
+// The fan.map callback is a local `let` whose closure writes a `var`.
+effect fn main() -> Unit = {
+  var total = 0
+  let add = (x: Int) => {
+    total = total + x
+    ok(x)
+  }
+  let r = fan.map([1, 2, 3], add)!
+  println("${list.len(r)} ${total}")
+}

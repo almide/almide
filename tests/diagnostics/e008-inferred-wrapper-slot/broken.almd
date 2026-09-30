@@ -1,0 +1,13 @@
+// `serve_on` passes its parameter to http.serve, so the parameter is a handler
+// slot too, and the lambda given to it may not reach a `var`.
+import http
+
+effect fn serve_on(port: Int, h: HttpHandler) -> Unit = http.serve(port, h)!
+
+effect fn main() -> Unit = {
+  var hits = 0
+  serve_on(8080, (req) => {
+    hits = hits + 1
+    http.response(200, "hits=${hits}")
+  })!
+}

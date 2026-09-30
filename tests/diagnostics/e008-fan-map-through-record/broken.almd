@@ -1,0 +1,13 @@
+// A closure stored in a record field captures a `var`, and the field is the
+// fan.map callback.
+type Job = { run: (Int) -> Result[Int, String] }
+
+effect fn main() -> Unit = {
+  var calls = 0
+  let job: Job = { run: (x) => {
+    calls = calls + 1
+    ok(x)
+  } }
+  let r = fan.map([1, 2], job.run)!
+  println("${list.sum(r)} ${calls}")
+}

@@ -1,0 +1,11 @@
+// A handler fn that writes a top-level `var`.
+import http
+
+var hits = 0
+
+effect fn handle(req: HttpRequest) -> HttpResponse = {
+  hits = hits + 1
+  http.response(200, "hits=${hits}")
+}
+
+effect fn main() -> Unit = http.serve(8080, handle)!

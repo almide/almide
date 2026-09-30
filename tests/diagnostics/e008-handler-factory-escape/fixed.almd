@@ -1,0 +1,9 @@
+// The factory closes over a `let`, which every request may read.
+import http
+
+effect fn mk() -> HttpHandler = {
+  let banner = "ready"
+  (req) => http.response(200, banner)
+}
+
+effect fn main() -> Unit = http.serve(8080, mk()!)!
