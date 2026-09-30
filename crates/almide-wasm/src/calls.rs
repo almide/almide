@@ -672,6 +672,9 @@ impl Emitter<'_> {
             return Ok(false);
         }
         let IrExprKind::Var { id } = &a.kind else {
+            // A field / tuple-slot place (#3101): unshare the path, then
+            // the caller reads it as usual.
+            self.make_mut_place_unique(a)?;
             return Ok(false);
         };
         let Some((idx, ty, global)) = self.mut_var(id) else {
