@@ -318,23 +318,19 @@ impl<'a> Interpreter<'a> {
             }
             let kind = if by_decl { "mut-parameter" } else { "bytes-parameter" };
             match &arg.kind {
-                almide_ir::IrExprKind::Var { id } => out.push((i, MutLvalue::Var(*id))),
-                almide_ir::IrExprKind::Member { object, field } => match &object.kind {
-                    almide_ir::IrExprKind::Var { id } => {
-                        out.push((i, MutLvalue::Field(*id, *field)))
-                    }
-                    _ => {
+                almide_ir::IrExprKind::Var { .. }
+                | almide_ir::IrExprKind::Member { .. }
+                | almide_ir::IrExprKind::TupleIndex { .. } => match mut_lvalue_path(arg) {
+                    Some(lv) => out.push((i, lv)),
+                    None => {
                         return Err(Flow::Unsupported(format!(
-                            "{kind} argument through a nested lvalue \
-                             (`{}` param {i}) — only a Var or one-level record \
-                             field copies out (#1022)",
+                            "{kind} argument through an index lvalue \
+                             (`{}` param {i}) — not yet copied out (#1022)",
                             func.name.as_str()
                         )))
                     }
                 },
-                almide_ir::IrExprKind::IndexAccess { .. }
-                | almide_ir::IrExprKind::MapAccess { .. }
-                | almide_ir::IrExprKind::TupleIndex { .. } => {
+                almide_ir::IrExprKind::IndexAccess { .. } | almide_ir::IrExprKind::MapAccess { .. } => {
                     return Err(Flow::Unsupported(format!(
                         "{kind} argument through an index lvalue \
                          (`{}` param {i}) — not yet copied out (#1022)",
@@ -352,36 +348,25 @@ impl<'a> Interpreter<'a> {
         Ok(out)
     }
 
-    /// Assign a copy-out value into a caller lvalue. The field arm is the same
-    /// clone-record-and-set shape `exec_stmt_field_assign` uses, so the two
-    /// cannot diverge on COW semantics.
+    /// Assign a copy-out value into a caller lvalue. Each record level is the
+    /// same clone-record-and-set shape `exec_stmt_field_assign` uses, so the
+    /// two cannot diverge on COW semantics; a tuple slot is the same rebuild
+    /// on the tuple. The root is read AFTER the call returns, so a write the
+    /// callee made elsewhere in the same value is kept.
     fn write_mut_lvalue(&mut self, lv: MutLvalue, v: Value, scope: &Scope) -> Result<(), Flow> {
-        match lv {
-            MutLvalue::Var(id) => {
-                if scope.assign(id, v) {
-                    Ok(())
-                } else {
-                    Err(Flow::Abort("internal: mut-param copy-out to an unbound var".into()))
-                }
-            }
-            MutLvalue::Field(id, field) => {
-                let cur = scope.get(id).ok_or_else(|| {
-                    Flow::Abort("internal: mut-param copy-out to an unbound record".into())
-                })?;
-                match cur {
-                    Value::Record { name, fields } => {
-                        let mut new = (*fields).clone();
-                        if let Some(slot) = new.iter_mut().find(|(k, _)| *k == field) {
-                            slot.1 = v;
-                        } else {
-                            new.push((field, v));
-                        }
-                        scope.assign(id, Value::Record { name, fields: std::rc::Rc::new(new) });
-                        Ok(())
-                    }
-                    _ => Err(Flow::Abort("internal: mut-param copy-out on non-Record".into())),
-                }
-            }
+        let MutLvalue(id, path) = lv;
+        let new = if path.is_empty() {
+            v
+        } else {
+            let cur = scope.get(id).ok_or_else(|| {
+                Flow::Abort("internal: mut-param copy-out to an unbound record".into())
+            })?;
+            replace_at_path(cur, &path, v)?
+        };
+        if scope.assign(id, new) {
+            Ok(())
+        } else {
+            Err(Flow::Abort("internal: mut-param copy-out to an unbound var".into()))
         }
     }
 
@@ -515,15 +500,76 @@ include!("dispatch_heap.rs");
 include!("dispatch_body.rs");
 include!("dispatch_vfs.rs");
 
+// ── mut-parameter lvalues (#1022, #3092) ─────────────────────────
+
+/// The lvalue a `mut` argument names: a binding followed by any chain of
+/// record fields and tuple slots. `None` for anything else (an index, a
+/// call result).
+fn mut_lvalue_path(arg: &IrExpr) -> Option<MutLvalue> {
+    let mut steps = Vec::new();
+    let mut cur = arg;
+    loop {
+        match &cur.kind {
+            almide_ir::IrExprKind::Var { id } => {
+                steps.reverse();
+                return Some(MutLvalue(*id, steps));
+            }
+            almide_ir::IrExprKind::Member { object, field } => {
+                steps.push(LvalueStep::Field(*field));
+                cur = object;
+            }
+            almide_ir::IrExprKind::TupleIndex { object, index } => {
+                steps.push(LvalueStep::Slot(*index));
+                cur = object;
+            }
+            _ => return None,
+        }
+    }
+}
+
+/// `cur` with the value at `path` replaced by `v`, every level rebuilt.
+fn replace_at_path(cur: Value, path: &[LvalueStep], v: Value) -> Result<Value, Flow> {
+    let Some((step, rest)) = path.split_first() else { return Ok(v) };
+    match (cur, *step) {
+        (Value::Record { name, fields }, LvalueStep::Field(field)) => {
+            let mut new = (*fields).clone();
+            match new.iter_mut().find(|(k, _)| *k == field) {
+                Some(slot) => {
+                    let inner = std::mem::replace(&mut slot.1, Value::Unit);
+                    slot.1 = replace_at_path(inner, rest, v)?;
+                }
+                None if rest.is_empty() => new.push((field, v)),
+                None => return Err(Flow::Abort("internal: mut-param copy-out through a missing field".into())),
+            }
+            Ok(Value::Record { name, fields: std::rc::Rc::new(new) })
+        }
+        (Value::Tuple(items), LvalueStep::Slot(k)) if k < items.len() => {
+            let mut new = (*items).clone();
+            let inner = std::mem::replace(&mut new[k], Value::Unit);
+            new[k] = replace_at_path(inner, rest, v)?;
+            Ok(Value::Tuple(std::rc::Rc::new(new)))
+        }
+        _ => Err(Flow::Abort("internal: mut-param copy-out on a non-record, non-tuple step".into())),
+    }
+}
+
 // ── Constructor registry ────────────────────────────────────────
 
 /// A caller-side slot a `mut`-parameter argument names — where the copy-out
 /// lands after the call (#1022).
+///
+/// A binding and the field / tuple-slot path below it, root-first: `xs` is
+/// `(xs, [])`, `b.items` is `(b, [items])`, `o.inner.xs` is
+/// `(o, [inner, xs])` and `t.0` is `(t, [0])` (#3092 — every depth the
+/// backends write back into).
+#[derive(Clone)]
+pub(crate) struct MutLvalue(almide_ir::VarId, Vec<LvalueStep>);
+
+/// One step of a [`MutLvalue`] path.
 #[derive(Clone, Copy)]
-pub(crate) enum MutLvalue {
-    Var(almide_ir::VarId),
-    /// One-level record field (`push9(b.items, 7)`).
-    Field(almide_ir::VarId, Sym),
+pub(crate) enum LvalueStep {
+    Field(Sym),
+    Slot(usize),
 }
 
 #[derive(Clone, Copy)]
