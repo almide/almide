@@ -144,8 +144,12 @@ run_one() { # $1=file -> sets VERDICT to match|mismatch|wall|runerr|hang|v0fail
   if [ "$v0rc" -eq 0 ]; then VERDICT=match; return; fi
   # v0 FAILED (a trap/abort fixture): the full observable must agree —
   # exit code AND stderr (v1's normalized: strip the wasmtime module preamble).
+  # The trailing `awk '{ print }'` terminates the last line, as the v0 side's awk
+  # below does: a `panic` abort writes `PANIC: <msg>` with NO trailing newline on
+  # both legs (C-219), and sed kept v1's unterminated while awk terminated v0's, so
+  # byte-identical stderr read as XFAIL (#3118). The twin compares lines, not bytes.
   sed -e "s|$TMP/m.wasm|<module>|g" -e '/^Error: failed to run main module/d' \
-      -e '/^$/d' -e '/^Caused by:/d' -e 's/^ *[0-9]*: *//' "$TMP/v1e" > "$TMP/v1en"
+      -e '/^$/d' -e '/^Caused by:/d' -e 's/^ *[0-9]*: *//' "$TMP/v1e" | awk '{ print }' > "$TMP/v1en"
   # v0's stderr is normalized symmetrically: `almide run` interleaves COMPILE
   # notes with the program's runtime stderr, and #931 made the native-fallback
   # notice print by default — compiler infrastructure, not a program
