@@ -522,6 +522,7 @@ impl Emitter<'_> {
             i.end();
             Ok(())
         })?;
+        self.fs_frames_release_raw(hraw, herr);
         let hs = self.hold_i32()?;
         {
             let mut i = self.f.instructions();
@@ -616,6 +617,7 @@ impl Emitter<'_> {
             i.end();
             Ok(())
         })?;
+        self.fs_frames_release_raw(hraw, herr);
         let hs = self.hold_i32()?;
         {
             let mut i = self.f.instructions();
@@ -701,6 +703,7 @@ impl Emitter<'_> {
             i.end();
             Ok(())
         })?;
+        self.fs_frames_release_raw(hraw, herr);
         let hs = self.hold_i32()?;
         {
             let mut i = self.f.instructions();
