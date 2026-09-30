@@ -358,12 +358,12 @@ spec/wasm_cross/nested_field_path_mut.almd :: main
 # top-let reads (no name bridge), and never-err / auto-wrap effect-fn ABIs (no
 # ABI registries). The structural leg serves these programs; this is the
 # MIR-lowering frontier, recorded rather than ported.
-spec/integration/modules/cross_module_toplet_byvalue_test.almd :: __test_almd_cross-module record top-let list and fn-returned record
-spec/lang/effect_assign_unwrap_test.almd :: unannotated_unwraps
-spec/lang/explicit_propagation_test.almd :: explicit_unwraps
-spec/lang/guard_else_err_unwrap_test.almd :: show_unit
-spec/wasm_cross/fallible_hof_large_input.almd :: stop_at
-spec/wasm_cross/fallible_hof_large_input.almd :: visit
+spec/integration/modules/cross_module_toplet_byvalue_test.almd :: __test_almd_cross-module record top-let list and fn-returned record  # #3121
+spec/lang/effect_assign_unwrap_test.almd :: unannotated_unwraps  # #3121
+spec/lang/explicit_propagation_test.almd :: explicit_unwraps  # #3121
+spec/lang/guard_else_err_unwrap_test.almd :: show_unit  # #3121
+spec/wasm_cross/fallible_hof_large_input.almd :: stop_at  # #3121
+spec/wasm_cross/fallible_hof_large_input.almd :: visit  # #3121
 # The same #2950 classifier change, on a fixture that landed after the list above
 # was measured (the fallible-HOF release pin): its effect-fn helpers wall without the
 # ABI registries the deleted passes filled. The structural leg serves it.
@@ -372,7 +372,7 @@ spec/wasm_cross/fallible_hof_large_input.almd :: visit
 # `match`, `??` inside an interpolation). The MIR lowering refuses the
 # move-mode block in call-argument position ("call argument Block not in this
 # brick"); the structural leg serves it byte-identically to native.
-spec/wasm_cross/mut_param_effect_unpropagated.almd :: main
+spec/wasm_cross/mut_param_effect_unpropagated.almd :: main  # #3121
 # batch 074: the #2758 witness fixture's early-bang frames meet #2950's
 # classifier. `stash_len` / `stash_both` unwrap an effect-fn call with `!` in a
 # let; with the program passes gone the MIR lowering refuses the effect-fn ABI
@@ -385,9 +385,9 @@ spec/wasm_cross/mut_param_effect_unpropagated.almd :: main
 # the executable subset", "?? over an Option/Result operand outside the
 # executable subset"); the structural leg serves all five byte-identically to
 # native and the interp.
-spec/gauntlet/cells/x18_mut_param_err_partial_write.almd :: main
-spec/wasm_cross/mut_param_err_write_visible.almd :: append_then_check
-spec/wasm_cross/mut_param_err_write_visible.almd :: forward
+spec/gauntlet/cells/x18_mut_param_err_partial_write.almd :: main  # #3121
+spec/wasm_cross/mut_param_err_write_visible.almd :: append_then_check  # #3121
+spec/wasm_cross/mut_param_err_write_visible.almd :: forward  # #3121
 spec/wasm_cross/mut_param_err_write_visible.almd :: main  # #3121
 spec/wasm_cross/mut_param_move_mode_gaps.almd :: fill2  # #3121
 # (2026-09-30, C-038/#3060) the sized tail-literal matrix: every sized width's
