@@ -37,11 +37,7 @@ fn words(n: Int) -> List[String] = ["a", "b"]
 
 fn maybe(n: Int) -> Int? = if n >= 0 then some(n) else none
 
-fn scratch_tail(n: Int) -> String = {{
-  let blk = prim.alloc_list(468)
-  let p = prim.handle(blk) + 12
-  grow(p)
-}}
+fn scratch_tail(n: Int) -> String = float.to_string(int.to_float(n) + 0.5)
 
 effect fn main() -> Unit = {{
   var total = 0
@@ -454,14 +450,16 @@ fn a_printed_call_result_is_released() {
 /// epilogue) that ENDS in a tail call handed its owned scratch block to
 /// the dead epilogue — `float.to_string` leaked its 4 KB scratch list on
 /// every call. Such a frame keeps the call in non-tail form so the
-/// epilogue runs (`tail_transfer_ok`).
+/// epilogue runs (`tail_transfer_ok`). Pinned through `float.to_string`
+/// itself: `prim` is not user surface (#3025), so the probe cannot build
+/// its own prim-tier body.
 #[test]
 fn a_prim_body_with_owned_locals_releases_them_after_its_tail_call() {
     flat(
         "let s = scratch_tail(i)",
         "    let s = scratch_tail(i)\n    total = total + string.len(s)",
-        "2000",
-        "16000",
+        "4890",
+        "46890",
     );
 }
 
