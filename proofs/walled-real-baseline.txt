@@ -408,3 +408,10 @@ spec/wasm_cross/leak_free_propagating_literal_operand.almd :: in_list  # #3084
 spec/wasm_cross/leak_free_result_option_carriers.almd :: main  # #3084
 spec/wasm_cross/mut_call_hoisted_args_distinct.almd :: main  # #3084
 spec/wasm_cross/nested_place_assign.almd :: main  # #3084
+# #2960: a user fn handed a `mut` place of a module-level `var` that reads or
+# writes the same global. The MIR brick refuses the field-assign to a mutable
+# global ("field-assign to mutable module-level var … not in this brick"); the
+# structural leg serves it byte-identically to native and the interp.
+spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd :: bump_n  # #2739
+spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd :: main  # #2739
+spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd :: root_write  # #2739
