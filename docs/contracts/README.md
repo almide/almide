@@ -136,7 +136,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-098 | cross-module derived Codec methods dispatch on WASM and match native | 0.27.6 | active | fixture | 0 |
 | C-099 | comparison/equality operators byte-match native across all operand types on the v1 wasm path | 0.27.6 | active | fixture | 10 |
 | C-100 | Self-hosted String classification/transform ops byte-match native on wasm | 0.27.6 | active | fixture | 4 |
-| C-101 | List ops over heap elements (String/Value) byte-match native and are leak/double-free free | 0.27.6 | active | fixture | 16 |
+| C-101 | List ops over heap elements (String/Value) byte-match native and are leak/double-free free | 0.27.6 | active | fixture | 17 |
 | C-102 | List iteration, call-result element materialization, and tail-recursive list traversal byte-match native | 0.27.6 | active | fixture | 4 |
 | C-103 | Self-hosted dynamic Value model (merge, array/as_array roundtrip, tuple TCO) byte-matches native and is leak-free in a loop | 0.27.6 | active | fixture | 7 |
 | C-104 | Tail-recursive accumulator shapes lower to bounded-stack loops byte-matching native | 0.27.6 | active | fixture | 6 |
@@ -369,7 +369,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-331 | zlib is self-hosted on wasm: decoding is byte-identical, encoding is round-trip-exact with leg-dependent bytes | 0.62.0 | active | fixture | 1 |
 | C-332 | List-rest patterns: the tail past the prefix binds as a list, identically on every leg | 0.62.0 | active | fixture | 2 |
 | C-333 | As-patterns: the whole value binds beside its own destructuring, identically on every leg | 0.62.0 | active | fixture | 1 |
-| C-334 | A closure call takes +1 on a borrowed heap argument: the RC-3 callee-owned convention holds through call_indirect | 0.62.0 | active | fixture | 3 |
+| C-334 | A closure call takes +1 on a borrowed heap argument: the RC-3 callee-owned convention holds through call_indirect | 0.62.0 | active | fixture | 4 |
 | C-335 | path.extension treats a leading dot as a hidden-file marker, not an extension, on both targets | 0.62.0 | active | fixture | 1 |
 | C-336 | Each test starts from re-initialized mutable module globals, on both targets | 0.57.1 | active | fixture | 0 |
 | C-337 | The bytes search, edit and predicate family answers identically on every leg | 0.62.0 | active | fixture | 1 |
