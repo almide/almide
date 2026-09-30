@@ -509,3 +509,50 @@ fn main() -> Unit = {
     assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
     assert_eq!(String::from_utf8_lossy(&run.stdout).trim(), "a\nd");
 }
+
+/// #3063: E041 on `x = f()`, `s.f = f()` and `xs[i] = f()` each carries the
+/// `!` fix-it at an exact position. Like every E041 it is a SUGGESTION, not
+/// machine-applicable (#1312: `!` is one of several legal consumptions, so
+/// `almide fix` does not choose for the author). Applying the three
+/// suggestions, as an IDE or model harness does, gives a file that checks
+/// clean. Before #3063 the field and index forms had no diagnostic at all,
+/// and the var form had no positioned fix.
+#[test]
+fn every_assignment_target_offers_the_positioned_bang_fix() {
+    let src = r#"type Acc = { total: Int }
+
+effect fn get() -> Int = 42
+
+effect fn main() -> Unit = {
+  var x = 0
+  x = get()
+  var acc = Acc { total: 0 }
+  acc.total = get()
+  var xs = [0, 0]
+  xs[0] = get()
+  println("${x} ${acc.total} ${xs}")
+}
+"#;
+    let path = write_tmp("fix_e041_assign_targets.almd", src);
+    let out = Command::new(almide()).args(["fix", &path, "--json", "--dry-run"]).output().unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("valid json");
+    let sugg: Vec<_> = v["suggestions"].as_array().expect("suggestions array")
+        .iter().filter(|a| a["code"] == "E041").cloned().collect();
+    assert_eq!(sugg.len(), 3, "one positioned E041 fix per assignment target: {v}");
+    assert!(sugg.iter().all(|a| a["replacement"] == "!" && a["col"] == a["end_col"]), "{v}");
+    assert!(v["applied"].as_array().expect("applied").is_empty(), "E041 is never auto-applied (#1312): {v}");
+
+    // Apply the suggestions (1-based line/col insertion points).
+    let mut lines: Vec<String> = src.lines().map(str::to_string).collect();
+    for a in &sugg {
+        let (line, col) = (a["line"].as_u64().unwrap() as usize, a["col"].as_u64().unwrap() as usize);
+        lines[line - 1].insert_str(col - 1, "!");
+    }
+    let fixed = lines.join("\n") + "\n";
+    for line in ["x = get()!", "acc.total = get()!", "xs[0] = get()!"] {
+        assert!(fixed.contains(line), "`{line}` not produced:\n{fixed}");
+    }
+    let fixed_path = write_tmp("fix_e041_assign_targets_fixed.almd", &fixed);
+    let check = Command::new(almide()).args(["check", &fixed_path]).output().unwrap();
+    assert!(check.status.success(), "the fixed file must check clean:\n{}\n{fixed}", String::from_utf8_lossy(&check.stderr));
+}
