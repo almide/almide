@@ -91,10 +91,10 @@ fn scan(body: &Expr) -> (BTreeSet<String>, BTreeSet<String>) {
     let mut mentions = BTreeSet::new();
     ast::visit_expr(body, &mut |e| match &e.kind {
         ExprKind::Member { object, field, .. } => {
-            if let ExprKind::Ident { name, .. } = &object.kind {
-                if name.as_str() == "prim" {
-                    prims.insert(field.as_str().to_string());
-                }
+            if let ExprKind::Ident { name, .. } = &object.kind
+                && name.as_str() == "prim"
+            {
+                prims.insert(field.as_str().to_string());
             }
         }
         ExprKind::Ident { name, .. } => {
