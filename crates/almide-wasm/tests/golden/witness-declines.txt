@@ -14,7 +14,7 @@ call-arg:Lambda	211
 call-arg:MapLiteral	1
 call-arg:Member	29
 call-arg:Record	11
-call-arg:StringInterp	210
+call-arg:StringInterp	211
 call-arg:Tuple	9
 call-arg:TupleIndex	4
 call-arg:UnwrapOr	74
@@ -92,7 +92,7 @@ rhs:UnwrapOr	62
 scan	3
 stmt:BindDestructure	316
 stmt:FieldAssign	8
-stmt:Guard	28
+stmt:Guard	36
 stmt:IndexAssign	21
 stmt:MapInsert	4
 store:retain-unknown-local	2

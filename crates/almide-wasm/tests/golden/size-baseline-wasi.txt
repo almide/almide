@@ -273,6 +273,7 @@
 3653	spec/wasm_cross/guard_err_in_call_arg_block.almd
 4735	spec/wasm_cross/guard_let_statement.almd
 2449	spec/wasm_cross/guard_statement.almd
+5840	spec/wasm_cross/guard_value_exit_in_loop.almd
 23754	spec/wasm_cross/gzip_inflate_members.almd
 6110	spec/wasm_cross/hash_digests.almd
 3191	spec/wasm_cross/heap_arena.almd
