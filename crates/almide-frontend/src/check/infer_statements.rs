@@ -251,29 +251,75 @@ impl Checker {
             .or_else(|| self.env.top_lets.get(&sym(name)).cloned())
     }
 
+    /// The type of the record or container a nested target writes into:
+    /// the root binding's type walked through `path`'s fields (#3064 —
+    /// `o.inner.xs = v` writes into `o.inner`). `None` when the root is not
+    /// a binding or a step names no field of its record.
+    fn place_ty(&mut self, target: &Sym, path: &[Sym]) -> Option<Ty> {
+        let mut ty = self.assign_target_ty(target)?;
+        for step in path {
+            let next = self.resolve_field_type(&ty, step.as_str());
+            if matches!(resolve_ty(&next, &self.uf), Ty::Unknown) {
+                self.report_assign_missing_field(&ty, step);
+                return None;
+            }
+            ty = next;
+        }
+        Some(ty)
+    }
+
+    /// E013 for an assignment through a field a closed record does not have
+    /// (`s.nope = v`, `o.nope.xs = v`) — the read `s.nope` was already E013;
+    /// the write passed check and failed in codegen.
+    fn report_assign_missing_field(&mut self, obj_ty: &Ty, field: &Sym) {
+        let concrete = resolve_ty(obj_ty, &self.uf);
+        let Ty::Record { fields } = self.env.resolve_named(&concrete) else { return };
+        let available = fields.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ");
+        let hint = match almide_base::diagnostic::suggest(field, fields.iter().map(|(n, _)| n.as_str())) {
+            Some(close) => format!("Did you mean `{}`? Available fields: {}", close, available),
+            None => format!("Available fields: {}", available),
+        };
+        self.emit(super::err(
+            format!("no field '{}' on {}", field, concrete.display()),
+            hint,
+            format!("assignment to .{}", field),
+        ).with_code("E013"));
+    }
+
+    /// `(.p)*` spelled for a diagnostic label.
+    fn place_label(target: &Sym, path: &[Sym]) -> String {
+        std::iter::once(target.as_str().to_string())
+            .chain(path.iter().map(|p| p.as_str().to_string()))
+            .collect::<Vec<_>>()
+            .join(".")
+    }
+
     /// `s.f = v` (#3051): the field's declared type is the expected type of
     /// the value, exactly as a variable's is for `x = v` and an annotation's
     /// for `let x: T = v`. Before, the value was inferred with no context, so
     /// `s.xs = []` was an undecidable empty literal (E018) and a mismatched
     /// value (`s.n = "x"`) passed check and failed as rustc E0308 natively.
     fn check_stmt_field_assign(&mut self, stmt: &mut ast::Stmt) {
-        let ast::Stmt::FieldAssign { target, field, value, .. } = stmt else { unreachable!() };
+        let ast::Stmt::FieldAssign { target, path, field, value, .. } = stmt else { unreachable!() };
         let val_ty = self.infer_expr(value);
-        let Some(obj_ty) = self.assign_target_ty(target) else { return };
+        let shape = format!("{}.{} = ...", Self::place_label(target, path), field);
+        self.check_place_root_mutable(target, shape);
+        let Some(obj_ty) = self.place_ty(target, path) else { return };
         let field_ty = self.resolve_field_type(&obj_ty, field.as_str());
         if matches!(resolve_ty(&field_ty, &self.uf), Ty::Unknown) {
+            self.report_assign_missing_field(&obj_ty, field);
             return;
         }
-        let label = format!("{}.{}", target, field);
+        let label = format!("{}.{}", Self::place_label(target, path), field);
         self.unify_assigned_value(&label, field_ty, &val_ty, value);
     }
 
     /// `xs[i] = v` / `m[k] = v` (#3051): the container's element type is the
     /// expected type of the value, and a Map's key type that of the index.
-    fn unify_index_assign(&mut self, target: &Sym, idx_ty: Ty, val_ty: &Ty, value: &ast::Expr) {
-        let Some(container) = self.assign_target_ty(target) else { return };
+    fn unify_index_assign(&mut self, target: &Sym, path: &[Sym], idx_ty: Ty, val_ty: &Ty, value: &ast::Expr) {
+        let Some(container) = self.place_ty(target, path) else { return };
         let resolved = self.env.resolve_named(&resolve_ty(&container, &self.uf));
-        let label = format!("{}[...]", target);
+        let label = format!("{}[...]", Self::place_label(target, path));
         match &resolved {
             Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
                 self.unify_assigned_value(&label, args[0].clone(), val_ty, value);
@@ -437,29 +483,35 @@ impl Checker {
     }
 
     /// `ast::Stmt::IndexAssign` arm of [`Self::check_stmt`]. Verbatim text move.
-    fn check_stmt_index_assign(&mut self, stmt: &mut ast::Stmt) {
-        let ast::Stmt::IndexAssign { target, index, value, .. } = stmt else { unreachable!() };
-        let idx_ty = self.infer_expr(index);
-        let val_ty = self.infer_expr(value);
-        self.unify_index_assign(target, idx_ty, &val_ty, value);
-        // A module-level `let g` is immutable just like a local `let` — its
-        // contents may not be index-assigned. `lookup_var` only sees locals,
-        // so without the `top_lets` arm a global `let g; g[2]=…` slipped past
-        // this check and only failed later as opaque rustc `E0425` (the
-        // ModuleRc lowering never kicks in for a non-mutable global). Catch it
-        // here with the same E009 locals get.
+    /// E009: a place write (`xs[i] = v`, `s.f = v`, `o.inner.xs = v`)
+    /// mutates its ROOT binding, which must be a `var` (or a `mut` param).
+    /// A module-level `let g` is immutable just like a local `let` —
+    /// `lookup_var` only sees locals, so without the `top_lets` arm a global
+    /// `let g; g[2]=…` slipped past this check and only failed later as
+    /// opaque rustc `E0425`. A field write on a `let` passed check the same
+    /// way and failed natively as rustc E0594 (#3064).
+    fn check_place_root_mutable(&mut self, target: &Sym, shape: String) {
         let is_known_binding = self.env.lookup_var(target.as_str()).is_some()
             || self.env.top_lets.contains_key(&sym(target.as_str()));
         if is_known_binding && !self.env.mutable_vars.contains(target) {
             let mut diag = super::err(
                 format!("cannot mutate immutable binding '{}'", target),
                 format!("Use 'var {} = ...' to declare a mutable variable", target),
-                format!("{}[...] = ...", target)).with_code("E009");
+                shape).with_code("E009");
             if let Some(&(line, col)) = self.env.var_decl_locs.get(target) {
                 diag = diag.with_secondary(line, Some(col), format!("'{}' declared here", target));
             }
             self.emit(diag);
         }
+    }
+
+    fn check_stmt_index_assign(&mut self, stmt: &mut ast::Stmt) {
+        let ast::Stmt::IndexAssign { target, path, index, value, .. } = stmt else { unreachable!() };
+        let idx_ty = self.infer_expr(index);
+        let val_ty = self.infer_expr(value);
+        self.unify_index_assign(target, path, idx_ty, &val_ty, value);
+        let shape = format!("{}[...] = ...", Self::place_label(target, path));
+        self.check_place_root_mutable(target, shape);
     }
 
     /// `ast::Stmt::GuardLet` arm of [`Self::check_stmt`]: Swift-style
