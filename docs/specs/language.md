@@ -304,10 +304,15 @@ Attribute names with semantic meaning today:
   Unification arc. テスト: `spec/stdlib/int_bundled_inline_rust_test.almd`.
 
 `@intrinsic("almide_rt_…")` and `@wasm_intrinsic` are **stdlib only** by
-authority, not just by convention (#2152): the checker accepts them in
-sources under `stdlib/` or `runtime/` and in the bundled stdlib copy, and
-rejects them anywhere else with E085 ("intrinsics live in the stdlib; wrap
-in an effect fn"). テスト: `tests/diagnostics/e085-intrinsic-outside-stdlib/`.
+authority, not just by convention (#2152): the checker accepts them in the
+stdlib's own sources — the bundled stdlib copy, or a file under `stdlib/`
+named after one of its embedded sources — and rejects them anywhere else with
+E085 ("intrinsics live in the stdlib; wrap in an effect fn"). The `prim`
+module (the primitive floor the stdlib is written over) is held to the same
+authority (#3025): `prim.<fn>` and `import prim` outside the stdlib are E085,
+whose hint names the public function that wraps the floor op.
+テスト: `tests/diagnostics/e085-intrinsic-outside-stdlib/`,
+`tests/diagnostics/e085-prim-outside-stdlib/`.
 
 Other attribute names (`@pure`, `@schedule`, `@rewrite`) parse without
 error and are preserved in the AST, but carry no semantic behavior yet. They are reserved for later
