@@ -1,0 +1,5 @@
+// E085: `prim` is the stdlib's primitive floor, not user surface.
+effect fn main() -> Unit = {
+  let text = prim.read_text_file("in.txt")!
+  println(text)
+}
