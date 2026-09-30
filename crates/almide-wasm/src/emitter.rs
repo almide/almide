@@ -44,6 +44,9 @@ pub(crate) struct Emitter<'a> {
     /// plan is told rather than the release quietly skipped. Set for one
     /// exit and cleared by it.
     pub(crate) tail_consumed: std::collections::BTreeSet<u32>,
+    /// #2976: the params a raw-rule loop-form self call still releases at
+    /// the loop-back (`exit_plan::raw_address_sources`); empty elsewhere.
+    pub(crate) loop_back_releasable: std::collections::BTreeSet<u32>,
     /// This fn's own wasm index (see FnPlan::self_index).
     pub(crate) self_index: Option<u32>,
     /// Locals the Bind/Assign routes made OWNERS of a droppable block
@@ -722,11 +725,6 @@ impl Emitter<'_> {
             None => unsup(&format!("infer-ty:{}", ty_name(&e.ty))),
         }
     }
-
-
-
-
-
 }
 
 impl Emitter<'_> {

@@ -356,6 +356,7 @@ pub(crate) fn lower_fn(
             tail_release_allowed: false,
             rc_frame_params: Vec::new(),
             tail_consumed: Default::default(),
+            loop_back_releasable: Default::default(),
             self_index,
             rc_owned: std::collections::BTreeSet::new(),
             owned_ty: std::collections::HashMap::new(),
@@ -725,7 +726,19 @@ fn populate_tail_release_set(
             }
         }
     }
-    if env_shift != 0 || crate::rc_ownership::body_uses_prim(body) {
+    if env_shift != 0 {
+        return;
+    }
+    if crate::rc_ownership::body_uses_prim(body) {
+        let ids: Vec<VarId> = params.iter().map(|&(v, _)| v).collect();
+        let raw = crate::exit_plan::raw_address_sources(body, &ids);
+        em.loop_back_releasable = params
+            .iter()
+            .enumerate()
+            .map(|(k, &(v, _))| (v, env_shift + k as u32))
+            .filter(|(v, idx)| !raw.contains(v) && em.rc_frame_params.contains(idx))
+            .map(|(_, idx)| idx)
+            .collect();
         return;
     }
     em.tail_release_allowed = true;

@@ -347,7 +347,9 @@ impl Emitter<'_> {
     pub(crate) fn witness_raw_loop_back(&mut self, loop_form_raw: bool, moved: &[u32]) {
         if loop_form_raw
             && self.witness.is_some()
-            && self.rc_frame_params.iter().any(|p| !moved.contains(p) && !self.tail_consumed.contains(p))
+            && self.rc_frame_params.iter().any(|p| {
+                !moved.contains(p) && !self.tail_consumed.contains(p) && !self.loop_back_releasable.contains(p)
+            })
         {
             self.witness_decline("loop-back:raw-param-kept");
         }
