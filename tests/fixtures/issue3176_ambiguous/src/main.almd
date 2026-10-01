@@ -1,0 +1,12 @@
+// #3176: a bare record-case literal two imported modules declare is
+// ambiguous (E019), as a bare call already was — not a silent pick of
+// whichever module registered first.
+import self.shapes
+import self.other
+
+effect fn main() -> Unit = {
+  let l = Leaf { v: 5 }
+  let a = shapes.Pane(1)
+  let b = other.Pane("x")
+  println("${a} ${b}")
+}
