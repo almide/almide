@@ -1,0 +1,66 @@
+// @contract: C-070
+// #3174: a constructor pattern on a recursive variant nested UNDER a wrapper —
+// `some(Pair(Leaf(x), _))`, an `ok(..)`, a tuple, a non-recursive case's
+// payload. Native rendered the inner constructor straight against the boxed
+// field (`Some(Node::Pair(Node::Leaf(x), _))` over a `Box<Node>`, E0308): the
+// box-pattern rewrite only looked at a top-level constructor, and the boxed
+// binders under a wrapper were never marked for their deref. Each match
+// below failed the native build. A non-matching value still falls through to
+// the next arm.
+type Node = | Leaf(Int) | Pair(Node, Node)
+
+type Holder = | Hold(Node, String)
+
+fn sum(n: Node) -> Int = match n {
+  Leaf(v) => v,
+  Pair(a, b) => sum(a) + sum(b),
+}
+
+fn first_leaf(o: Node?) -> Int = match o {
+  some(Pair(Leaf(x), _)) => x,
+  some(Pair(Pair(Leaf(y), _), _)) => y * 10,
+  some(_) => -1,
+  none => -2,
+}
+
+fn from_result(r: Result[Node, String]) -> Int = match r {
+  ok(Pair(_, Leaf(v))) => v,
+  ok(Pair(_, rest)) => sum(rest) + 100,
+  ok(_) => 0,
+  err(e) => string.len(e),
+}
+
+fn from_tuple(p: (Node, Int)) -> Int = match p {
+  (Pair(Leaf(a), Leaf(b)), k) => a + b + k,
+  (Pair(l, r), k) => sum(l) * sum(r) + k,
+  (Leaf(v), k) => v - k,
+}
+
+fn from_holder(h: Holder) -> String = match h {
+  Hold(Pair(Leaf(a), b), tag) => "${tag}:${a}+${sum(b)}",
+  Hold(n, tag) => "${tag}:${sum(n)}",
+}
+
+// A wrapped binder captured by a closure.
+fn wrapped_capture(o: Node?) -> Int = match o {
+  some(Pair(a, b)) => some(1) |> option.map((k) => k + sum(a) * sum(b)) ?? 0,
+  _ => 0,
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(first_leaf(some(Pair(Leaf(1), Leaf(2))))))
+  println(int.to_string(first_leaf(some(Pair(Pair(Leaf(3), Leaf(4)), Leaf(5))))))
+  println(int.to_string(first_leaf(some(Pair(Pair(Pair(Leaf(9), Leaf(9)), Leaf(4)), Leaf(5))))))
+  println(int.to_string(first_leaf(some(Leaf(6)))))
+  println(int.to_string(first_leaf(none)))
+  println(int.to_string(from_result(ok(Pair(Leaf(1), Leaf(8))))))
+  println(int.to_string(from_result(ok(Pair(Leaf(1), Pair(Leaf(2), Leaf(3)))))))
+  println(int.to_string(from_result(ok(Leaf(1)))))
+  println(int.to_string(from_result(err("bad"))))
+  println(int.to_string(from_tuple((Pair(Leaf(2), Leaf(3)), 4))))
+  println(int.to_string(from_tuple((Pair(Pair(Leaf(1), Leaf(1)), Leaf(5)), 1))))
+  println(int.to_string(from_tuple((Leaf(9), 2))))
+  println(from_holder(Hold(Pair(Leaf(1), Pair(Leaf(2), Leaf(3))), "h")))
+  println(from_holder(Hold(Leaf(4), "g")))
+  println(int.to_string(wrapped_capture(some(Pair(Leaf(2), Leaf(3))))))
+}
