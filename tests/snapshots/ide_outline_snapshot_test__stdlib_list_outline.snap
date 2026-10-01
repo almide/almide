@@ -2,13 +2,28 @@
 source: tests/ide_outline_snapshot_test.rs
 expression: "run_outline(&[\"@stdlib/list\"])"
 ---
+fn list.__fallible_all[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]
+fn list.__fallible_any[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]
+fn list.__fallible_count[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Int, E]
+fn list.__fallible_drop_while[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[List[A], E]
 fn list.__fallible_each[A, E](xs: List[A], f: fn(A) -> Result[Unit, E]) -> Result[Unit, E]
 fn list.__fallible_filter[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[List[A], E]
 fn list.__fallible_filter_map[A, B, E](xs: List[A], f: fn(A) -> Result[Option[B], E]) -> Result[List[B], E]
 fn list.__fallible_find[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Option[A], E]
+fn list.__fallible_find_index[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Option[Int], E]
 fn list.__fallible_flat_map[A, B, E](xs: List[A], f: fn(A) -> Result[List[B], E]) -> Result[List[B], E]
 fn list.__fallible_fold[A, B, E](xs: List[A], init: B, f: fn(B, A) -> Result[B, E]) -> Result[B, E]
+fn list.__fallible_group_by[A, B, E](xs: List[A], f: fn(A) -> Result[B, E]) -> Result[Map[B, List[A]], E]
+fn list.__fallible_iterate[T, E](seed: T, f: fn(T) -> Result[T, E], n: Int) -> Result[List[T], E]
 fn list.__fallible_map[A, B, E](xs: List[A], f: fn(A) -> Result[B, E]) -> Result[List[B], E]
+fn list.__fallible_partition[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[(List[A], List[A]), E]
+fn list.__fallible_reduce[A, E](xs: List[A], f: fn(A, A) -> Result[A, E]) -> Result[Option[A], E]
+fn list.__fallible_scan[A, B, E](xs: List[A], init: B, f: fn(B, A) -> Result[B, E]) -> Result[List[B], E]
+fn list.__fallible_sort_by[A, B, E](xs: List[A], f: fn(A) -> Result[B, E]) -> Result[List[A], E]
+fn list.__fallible_take_while[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[List[A], E]
+fn list.__fallible_unique_by[A, K, E](xs: List[A], f: fn(A) -> Result[K, E]) -> Result[List[A], E]
+fn list.__fallible_update[A, E](xs: List[A], i: Int, f: fn(A) -> Result[A, E]) -> Result[List[A], E]
+fn list.__fallible_zip_with[A, B, C, E](xs: List[A], ys: List[B], f: fn(A, B) -> Result[C, E]) -> Result[List[C], E]
 fn list.all[A](xs: List[A], f: fn(A) -> Bool) -> Bool
 fn list.any[A](xs: List[A], f: fn(A) -> Bool) -> Bool
 fn list.binary_search(xs: List[Int], target: Int) -> Option[Int]

@@ -55,13 +55,28 @@ fn string.trim_end(s: String) -> String
 fn string.trim_start(s: String) -> String
 
 # @stdlib/list
+fn list.__fallible_all[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]
+fn list.__fallible_any[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]
+fn list.__fallible_count[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Int, E]
+fn list.__fallible_drop_while[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[List[A], E]
 fn list.__fallible_each[A, E](xs: List[A], f: fn(A) -> Result[Unit, E]) -> Result[Unit, E]
 fn list.__fallible_filter[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[List[A], E]
 fn list.__fallible_filter_map[A, B, E](xs: List[A], f: fn(A) -> Result[Option[B], E]) -> Result[List[B], E]
 fn list.__fallible_find[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Option[A], E]
+fn list.__fallible_find_index[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Option[Int], E]
 fn list.__fallible_flat_map[A, B, E](xs: List[A], f: fn(A) -> Result[List[B], E]) -> Result[List[B], E]
 fn list.__fallible_fold[A, B, E](xs: List[A], init: B, f: fn(B, A) -> Result[B, E]) -> Result[B, E]
+fn list.__fallible_group_by[A, B, E](xs: List[A], f: fn(A) -> Result[B, E]) -> Result[Map[B, List[A]], E]
+fn list.__fallible_iterate[T, E](seed: T, f: fn(T) -> Result[T, E], n: Int) -> Result[List[T], E]
 fn list.__fallible_map[A, B, E](xs: List[A], f: fn(A) -> Result[B, E]) -> Result[List[B], E]
+fn list.__fallible_partition[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[(List[A], List[A]), E]
+fn list.__fallible_reduce[A, E](xs: List[A], f: fn(A, A) -> Result[A, E]) -> Result[Option[A], E]
+fn list.__fallible_scan[A, B, E](xs: List[A], init: B, f: fn(B, A) -> Result[B, E]) -> Result[List[B], E]
+fn list.__fallible_sort_by[A, B, E](xs: List[A], f: fn(A) -> Result[B, E]) -> Result[List[A], E]
+fn list.__fallible_take_while[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[List[A], E]
+fn list.__fallible_unique_by[A, K, E](xs: List[A], f: fn(A) -> Result[K, E]) -> Result[List[A], E]
+fn list.__fallible_update[A, E](xs: List[A], i: Int, f: fn(A) -> Result[A, E]) -> Result[List[A], E]
+fn list.__fallible_zip_with[A, B, C, E](xs: List[A], ys: List[B], f: fn(A, B) -> Result[C, E]) -> Result[List[C], E]
 fn list.all[A](xs: List[A], f: fn(A) -> Bool) -> Bool
 fn list.any[A](xs: List[A], f: fn(A) -> Bool) -> Bool
 fn list.binary_search(xs: List[Int], target: Int) -> Option[Int]
@@ -204,6 +219,11 @@ fn int.wrap_add(a: Int, b: Int, bits: Int) -> Int
 fn int.wrap_mul(a: Int, b: Int, bits: Int) -> Int
 
 # @stdlib/option
+fn option.__fallible_filter[A, E](o: Option[A], f: fn(A) -> Result[Bool, E]) -> Result[Option[A], E]
+fn option.__fallible_flat_map[A, B, E](o: Option[A], f: fn(A) -> Result[Option[B], E]) -> Result[Option[B], E]
+fn option.__fallible_map[A, B, E](o: Option[A], f: fn(A) -> Result[B, E]) -> Result[Option[B], E]
+fn option.__fallible_or_else[A, E](o: Option[A], f: fn() -> Result[Option[A], E]) -> Result[Option[A], E]
+fn option.__fallible_unwrap_or_else[A, E](o: Option[A], f: fn() -> Result[A, E]) -> Result[A, E]
 fn option.collect[T](xs: List[Option[T]]) -> Option[List[T]]
 fn option.collect_map[T, U](xs: List[T], f: fn(T) -> Option[U]) -> Option[List[U]]
 fn option.filter[A](o: Option[A], f: fn(A) -> Bool) -> Option[A]
@@ -237,6 +257,15 @@ fn result.unwrap_or_else[A, E](r: Result[A, E], f: fn(E) -> A) -> A
 fn result.zip[A, B, E](a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E]
 
 # @stdlib/map
+fn map.__fallible_all[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> Result[Bool, E]
+fn map.__fallible_any[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> Result[Bool, E]
+fn map.__fallible_count[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> Result[Int, E]
+fn map.__fallible_filter[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> Result[Map[K, V], E]
+fn map.__fallible_find[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> Result[Option[(K, V)], E]
+fn map.__fallible_fold[K, V, A, E](m: Map[K, V], init: A, f: fn(A, K, V) -> Result[A, E]) -> Result[A, E]
+fn map.__fallible_map[K, V, B, E](m: Map[K, V], f: fn(V) -> Result[B, E]) -> Result[Map[K, B], E]
+fn map.__fallible_update[K, V, E](m: Map[K, V], key: K, f: fn(V) -> Result[V, E]) -> Result[Map[K, V], E]
+fn map.__fallible_upsert[K, V, E](m: Map[K, V], key: K, init: V, f: fn(V) -> Result[V, E]) -> Result[Map[K, V], E]
 fn map.all[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Bool
 fn map.any[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Bool
 fn map.clear[K, V](m: Map[K, V]) -> Unit
@@ -264,6 +293,11 @@ fn map.upsert[K, V](m: Map[K, V], key: K, init: V, f: fn(V) -> V) -> Map[K, V]
 fn map.values[K, V](m: Map[K, V]) -> List[V]
 
 # @stdlib/set
+fn set.__fallible_all[A, E](s: Set[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]
+fn set.__fallible_any[A, E](s: Set[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]
+fn set.__fallible_filter[A, E](s: Set[A], f: fn(A) -> Result[Bool, E]) -> Result[Set[A], E]
+fn set.__fallible_fold[A, B, E](s: Set[A], init: B, f: fn(B, A) -> Result[B, E]) -> Result[B, E]
+fn set.__fallible_map[A, B, E](s: Set[A], f: fn(A) -> Result[B, E]) -> Result[Set[B], E]
 fn set.all[A](s: Set[A], f: fn(A) -> Bool) -> Bool
 fn set.any[A](s: Set[A], f: fn(A) -> Bool) -> Bool
 fn set.contains[A](s: Set[A], value: A) -> Bool
