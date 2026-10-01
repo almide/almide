@@ -41,6 +41,7 @@ fn operation_name(op: i32) -> &'static str {
             43 => "http.get", 44 => "http.post", 45 => "http.put",
             46 => "http.patch", 47 => "http.delete",
             48..=50 => "http.request framed response",
+            51 => "fs.fold_lines", 52 => "fs.for_each_line",
             53..=59 => "the http call handle (http.start / poll / read_new / wait / cancel)",
             60 => "datetime.monotonic_ns",
             61 => "fs.fold_lines_range", 62 => "fs.fold_lines_chunked",
