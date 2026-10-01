@@ -1,10 +1,10 @@
 diff --git a/crates/almide-wasm/src/list_fuse.rs b/crates/almide-wasm/src/list_fuse.rs
-index c4fa198ed..9c3d75f80 100644
+index 32d25ed59..79f831a17 100644
 --- a/crates/almide-wasm/src/list_fuse.rs
 +++ b/crates/almide-wasm/src/list_fuse.rs
-@@ -210,7 +210,7 @@ impl Emitter<'_> {
-                     owners.extend(pending.take().map(|t| (p[0], t)));
+@@ -215,7 +215,7 @@ impl Emitter<'_> {
                      self.lower(body, Some(BOOL))?;
+                     self.witness_filter_skip();
                      // false → release what this element owns, skip it
 -                    self.f.instructions().i32_eqz().if_(BlockType::Empty);
 +                    self.f.instructions().i32_eqz().drop().i32_const(0).if_(BlockType::Empty); // [MUTANT: filter skip dropped]
