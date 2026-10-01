@@ -544,6 +544,7 @@ case of `type Shape = Circle { radius: Float } | ...`) only matches as
 []                         // empty list (there is NO list.new())
 xs[0]                      // index read
 xs[i] = value              // index write (var only)
+xs |> list.find_map(f)     // first some(..) that f gives, or none — f is not called past the hit
 ```
 
 ### Map

@@ -426,6 +426,19 @@ fn main() -> Unit = {
 [1, 3]
 ```
 
+### `list.find_map(xs: List[A], f: Fn[A] -> Option[B]) -> Option[B]`
+
+The first some value f gives, or none. f is not called after the hit — the short-circuiting `filter_map(xs, f) |> list.first`. A callback that propagates with `!` makes the whole call fallible, like the other list HOFs.
+
+```almd run
+fn main() -> Unit = {
+  println("${["x", "2", "3"].find_map((s) => int.parse(s)?)}")
+}
+```
+```output
+some(2)
+```
+
 ### `list.take_while(xs: List[A], f: Fn[A] -> Bool) -> List[A]`
 
 Take elements from the front while a predicate holds.
