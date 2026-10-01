@@ -2,6 +2,15 @@
 source: tests/ide_outline_snapshot_test.rs
 expression: "run_outline(&[\"@stdlib/map\"])"
 ---
+fn map.__fallible_all[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> Result[Bool, E]
+fn map.__fallible_any[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> Result[Bool, E]
+fn map.__fallible_count[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> Result[Int, E]
+fn map.__fallible_filter[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> Result[Map[K, V], E]
+fn map.__fallible_find[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> Result[Option[(K, V)], E]
+fn map.__fallible_fold[K, V, A, E](m: Map[K, V], init: A, f: fn(A, K, V) -> Result[A, E]) -> Result[A, E]
+fn map.__fallible_map[K, V, B, E](m: Map[K, V], f: fn(V) -> Result[B, E]) -> Result[Map[K, B], E]
+fn map.__fallible_update[K, V, E](m: Map[K, V], key: K, f: fn(V) -> Result[V, E]) -> Result[Map[K, V], E]
+fn map.__fallible_upsert[K, V, E](m: Map[K, V], key: K, init: V, f: fn(V) -> Result[V, E]) -> Result[Map[K, V], E]
 fn map.all[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Bool
 fn map.any[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Bool
 fn map.clear[K, V](m: Map[K, V]) -> Unit
