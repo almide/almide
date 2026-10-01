@@ -297,4 +297,20 @@ impl Emitter<'_> {
         self.witness_payload_share(payload);
         self.witness_branch_close();
     }
+
+    /// main's err channel (err_channel.rs): the carrier is read; its err arm
+    /// ABORTS (the checker's terminal discharges what is held), its ok arm
+    /// releases the carrier when main owns it — born here, released there.
+    pub(crate) fn witness_main_carrier(&mut self, owned: bool) {
+        let Some(w) = self.witness.as_mut() else { return };
+        let c = owned.then(|| w.temp_born());
+        w.branch_open();
+        w.branch_arm();
+        w.abort_end();
+        w.branch_arm();
+        if let Some(o) = c {
+            w.temp_ops(o, "d");
+        }
+        w.branch_close();
+    }
 }
