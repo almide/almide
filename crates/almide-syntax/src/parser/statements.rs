@@ -68,23 +68,11 @@ impl Parser {
         // so accepting it would only enable a dead binding. Soft keywords are
         // names in label/member position (`{ ok: … }`, `.ok`), not as bindings.
         if self.check(TokenType::LBrace) {
-            self.advance();
-            let mut names = Vec::new();
-            while !self.check(TokenType::RBrace) {
-                names.push(self.expect_ident()?);
-                if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
-            }
-            self.expect(TokenType::RBrace)?;
+            let pattern = self.parse_destructure_record()?;
             self.expect(TokenType::Eq)?;
             self.skip_newlines();
             let value = self.parse_expr()?;
-            let fields = names.into_iter()
-                .map(|n| FieldPattern { name: n, pattern: None })
-                .collect();
-            return Ok(Stmt::LetDestructure {
-                pattern: Pattern::RecordPattern { name: sym(""), fields, rest: false },
-                value, span: Some(span),
-            });
+            return Ok(Stmt::LetDestructure { pattern, value, span: Some(span) });
         }
 
         // Tuple destructuring: let (a, b) = expr
@@ -158,6 +146,9 @@ impl Parser {
     }
 
     fn parse_var_stmt(&mut self) -> Result<Stmt, String> {
+        if self.at_var_destructure() {
+            return self.parse_var_destructure();
+        }
         let span = self.current_span();
         self.expect(TokenType::Var)?;
         let name = self.expect_ident()?;
@@ -280,7 +271,7 @@ impl Parser {
         }))
     }
 
-    fn parse_destructure_tuple(&mut self) -> Result<Pattern, String> {
+    pub(crate) fn parse_destructure_tuple(&mut self) -> Result<Pattern, String> {
         self.expect(TokenType::LParen)?;
         let mut elements = Vec::new();
         while !self.check(TokenType::RParen) {

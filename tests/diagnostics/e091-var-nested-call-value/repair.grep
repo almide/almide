@@ -1,0 +1,3 @@
+# #3149: the value is named once, and a chained projection is parenthesized
+let p = <value>
+var last = (p.1).0

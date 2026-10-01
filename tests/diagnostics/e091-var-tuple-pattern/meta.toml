@@ -1,0 +1,3 @@
+expects_code = "E091"
+expects_error = "`var` does not destructure"
+hint_substring = "or use `let (x, y) = at` if they need not change"
