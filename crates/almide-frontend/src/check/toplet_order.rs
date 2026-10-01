@@ -69,6 +69,36 @@ pub(super) fn concrete_top_lets(env: &TypeEnv, decls: &[ast::Decl], prefix: Opti
         .collect()
 }
 
+/// The entry program's pre-pass runs under the pseudo-module `__entry`, so the
+/// user types in what it inferred are spelled `__entry.Op`; the entry's real
+/// pass names them `Op`. Strip the pseudo-qualifier before the types are read
+/// as the entry's own (a `List[__entry.Op]` is a type nothing else spells —
+/// it routed a closure-holding `let` to the wrong storage, #3164).
+pub(super) fn unqualify_entry(refreshed: Vec<(Sym, Ty)>) -> Vec<(Sym, Ty)> {
+    refreshed.into_iter().map(|(n, t)| (n, strip_qualifier(&t, "__entry."))).collect()
+}
+
+fn strip_qualifier(t: &Ty, pfx: &str) -> Ty {
+    use crate::types::TypeConstructorId as C;
+    let bare = |s: &str| s.strip_prefix(pfx).map(str::to_string);
+    let own = match t {
+        Ty::Named(n, args) => match bare(n.as_str()) {
+            Some(b) => Ty::Named(sym(&b), args.clone()),
+            None => t.clone(),
+        },
+        Ty::Applied(C::UserDefined(s), args) => match bare(s) {
+            Some(b) => Ty::Applied(C::UserDefined(b), args.clone()),
+            None => t.clone(),
+        },
+        Ty::Variant { name, cases } => match bare(name.as_str()) {
+            Some(b) => Ty::Variant { name: sym(&b), cases: cases.clone() },
+            None => t.clone(),
+        },
+        _ => t.clone(),
+    };
+    own.map_children(&|c| strip_qualifier(c, pfx))
+}
+
 /// Upgrade each bare `top_lets` entry that is still a partial seed to the
 /// concrete type `concrete_top_lets` found. A concrete entry (an annotation)
 /// is never replaced.
