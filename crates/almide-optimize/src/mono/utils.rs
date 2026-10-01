@@ -70,10 +70,15 @@ pub(super) fn mangle_ty(ty: &Ty) -> String {
                 format!("{}_{}", name, arg_strs.join("_"))
             }
         }
+        // A structural record is its field names AND types (#3189): keyed by
+        // the sorted names alone, `id({ x: 1, y: "p" })` and `id({ x: 5, y: 6 })`
+        // shared one `id__x_y` and the second call site got the first's
+        // signature (rustc E0308 / a wasm ty-mismatch wall).
         Ty::Record { fields } if !fields.is_empty() => {
-            let mut names: Vec<String> = fields.iter().map(|(n, _)| n.to_string()).collect();
-            names.sort();
-            names.join("_")
+            let mut sorted: Vec<&(almide_base::intern::Sym, Ty)> = fields.iter().collect();
+            sorted.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+            let parts: Vec<String> = sorted.iter().map(|(n, t)| format!("{}_{}", n, mangle_ty(t))).collect();
+            format!("Rec{}_{}", fields.len(), parts.join("_"))
         }
         Ty::Applied(almide_lang::types::TypeConstructorId::List, args) if args.len() == 1 => format!("List_{}", mangle_ty(&args[0])),
         Ty::Applied(id, args) => {
