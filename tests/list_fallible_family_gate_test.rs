@@ -171,6 +171,7 @@ const PROBES: &[(&str, &str, &str, &str)] = &[
     ("list", "filter_map", "list.filter_map([1, 2], (x) => o(x)!)", "List[Int]"),
     ("list", "fold", "list.fold([1, 2], 0, (a, x) => a2(a, x)!)", "Int"),
     ("list", "find", "list.find([1, 2], (x) => p(x)!)", "Int?"),
+    ("list", "find_map", "list.find_map([1, 2], (x) => o(x)!)", "Int?"),
     ("list", "each", "list.each([1, 2], (x) => seen(x)!)", "Unit"),
     ("list", "any", "list.any([1, 2], (x) => p(x)!)", "Bool"),
     ("list", "all", "list.all([1, 2], (x) => p(x)!)", "Bool"),
