@@ -443,6 +443,13 @@ impl WitnessRecorder {
         self.ops(o, "am");
     }
 
+    /// #2755: `ops` on a view this frame reads without holding (a callback
+    /// value an arm shares and releases again: `ad`).
+    pub fn view_ops(&mut self, ops: &str) {
+        let o = self.view_obj();
+        self.ops(o, ops);
+    }
+
     /// A Bind of a view: the Bind route's `rc_inc_top` is the share, and
     /// the local is its owner from here on (its release is the local's).
     pub fn bind_view(&mut self, local: u32) {
