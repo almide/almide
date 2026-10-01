@@ -241,8 +241,6 @@ spec/stdlib/http_router_test.almd :: __test_almd_an app bound at the top level i
 spec/wasm_cross/mut_param_effect_can_err.almd :: go
 spec/wasm_cross/mut_param_effect_can_err.almd :: main
 spec/wasm_cross/mut_param_effect_can_err.almd :: uc__Mem
-spec/wasm_cross/mut_param_move_mode_gaps.almd :: main
-spec/wasm_cross/mut_param_move_mode_gaps.almd :: push_pos
 spec/wasm_cross/mut_param_move_mode_gaps.almd :: run_fill
 # #1576 also: the DDD gauntlet's mut_port `main` (the can-err mut-param port call
 # consumed by `!`) walls on the incumbent for the same reason as the fixture's fns.
@@ -361,9 +359,6 @@ spec/wasm_cross/nested_field_path_mut.almd :: main
 spec/integration/modules/cross_module_toplet_byvalue_test.almd :: __test_almd_cross-module record top-let list and fn-returned record  # #3121
 spec/lang/effect_assign_unwrap_test.almd :: unannotated_unwraps  # #3121
 spec/lang/explicit_propagation_test.almd :: explicit_unwraps  # #3121
-spec/lang/guard_else_err_unwrap_test.almd :: show_unit  # #3121
-spec/wasm_cross/fallible_hof_large_input.almd :: stop_at  # #3121
-spec/wasm_cross/fallible_hof_large_input.almd :: visit  # #3121
 # The same #2950 classifier change, on a fixture that landed after the list above
 # was measured (the fallible-HOF release pin): its effect-fn helpers wall without the
 # ABI registries the deleted passes filled. The structural leg serves it.
@@ -385,10 +380,6 @@ spec/wasm_cross/mut_param_effect_unpropagated.almd :: main  # #3121
 # the executable subset", "?? over an Option/Result operand outside the
 # executable subset"); the structural leg serves all five byte-identically to
 # native and the interp.
-spec/gauntlet/cells/x18_mut_param_err_partial_write.almd :: main  # #3121
-spec/wasm_cross/mut_param_err_write_visible.almd :: append_then_check  # #3121
-spec/wasm_cross/mut_param_err_write_visible.almd :: forward  # #3121
-spec/wasm_cross/mut_param_err_write_visible.almd :: main  # #3121
 spec/wasm_cross/mut_param_move_mode_gaps.almd :: fill2  # #3121
 # (2026-09-30, C-038/#3060) the sized tail-literal matrix: every sized width's
 # `err(..)` payload cell (`-> Result[Bool, T]`) is a heap-result `if`, and each
@@ -405,8 +396,6 @@ spec/wasm_cross/mut_param_move_mode_gaps.almd :: fill2  # #3121
 # byte-identically to native; #3084 owns burning them down.
 spec/lang/assign_target_expected_type_test.almd :: __test_almd_an empty literal takes a module-level var's field type  # #3084
 spec/wasm_cross/leak_free_propagating_literal_operand.almd :: in_list  # #3084
-spec/wasm_cross/leak_free_result_option_carriers.almd :: main  # #3084
-spec/wasm_cross/mut_call_hoisted_args_distinct.almd :: main  # #3084
 spec/wasm_cross/nested_place_assign.almd :: main  # #3084
 # (2026-09-30, C-372) the Float32 display fixture: `${(t, t)}`, a tuple with a
 # Float32 element, walls on the MIR rung (a record with one lowers); native
@@ -430,3 +419,11 @@ spec/wasm_cross/mut_param_nested_place_writeback.almd :: main  # #2739
 # interp.
 spec/wasm_cross/mut_param_global_callee_sees_precall.almd :: main  # #2739
 spec/wasm_cross/mut_param_global_no_reach_in_place.almd :: main  # #2739
+
+# (2026-10-01, #3121/#3084) eleven rows pruned (77 -> 66): a match over an inert
+# Result literal reduces to the arm it selects (the err carrier's `err((m, b))!`
+# and a Unit effect fn's raising `if`), the Result tail match binds a tuple
+# ok/err payload whole, a block `??` operand / match subject absorbs into its
+# block, and call operands before a block argument are bound first. Also gone:
+# the move-mode gaps fixture's `main` and `push_pos`. almide-verify certifies the
+# corpus witness set; no previously rendered native program changed.
