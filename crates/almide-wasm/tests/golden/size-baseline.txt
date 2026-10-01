@@ -4,6 +4,7 @@
 4833	spec/wasm_cross/alias_combinator_rc.almd
 7551	spec/wasm_cross/alias_cow.almd
 1783	spec/wasm_cross/allocation_within_limits.almd
+3739	spec/wasm_cross/anon_record_structural_identity.almd
 2287	spec/wasm_cross/anon_record_variant_payloads.almd
 1646	spec/wasm_cross/anon_records_and_fusion.almd
 1670	spec/wasm_cross/append_accumulator.almd
