@@ -48,5 +48,6 @@ effect fn main() -> Unit = {
   println(cells.defaults())
   println(cells.boxed())
   println(cells.in_module())
+  println(int.to_string(cells.tags()))
   println(shadowed())
 }
