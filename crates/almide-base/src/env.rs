@@ -179,6 +179,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_SEMLAW_CASES", Value, Harness, "how many cases the semantic-laws property test draws"),
     sw("ALMIDE_SHUFFLE_PASSES", Value, Gate, "run the native passes in the seeded random order the declared dependency edges permit — a pass-dependency probe: the emitted Rust must not change (#2186)"),
     sw("ALMIDE_SIZE_ALONE", Value, Harness, "the one fixture a child process of the size ratchet measures alone, for its isolation check (#2309); the ratchet sets it on the processes it spawns"),
+    sw("ALMIDE_SIZE_PRESSURE", Value, Harness, "the allocation pressure (`plain` / `quarantine` / `ballast`) a size-ratchet child builds its one fixture under, for the determinism check (#3143); the ratchet sets it on the processes it spawns"),
     sw("ALMIDE_SKIP_PASS", Value, Ablation, "skip the named optional passes (comma-separated) — a pass-dependency probe: output must not change"),
     sw("ALMIDE_SKIP_VERSION_CHECK", Flag, Gate, "skip the project's `almide` version requirement check"),
     sw("ALMIDE_STREAM_FUSION_OFF", Flag, Ablation, "turn the stream-fusion pass off"),
