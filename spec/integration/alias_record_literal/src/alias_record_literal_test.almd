@@ -1,0 +1,42 @@
+// #3153: a record literal written through a cross-module type alias builds
+// the record the alias names, as annotations and field access already did.
+// `term.T { n: 3 }` was E013 "no fields" at its first field access (the
+// literal was typed as the alias, not the record); `render.Bar { … }` in a
+// sibling submodule passed the checker and named a bare `Bar` the
+// generated Rust does not declare (E0422).
+import self.term
+import self.gui.app
+
+type Local = term.T
+
+test "a record literal through a module's alias has the record's fields" {
+  let u = term.T { n: 3, small: 4 }
+  assert_eq(u.n, 3)
+  assert_eq("${u.small}", "4")
+  assert_eq(u.tag, "d")
+  let a: term.T = term.new()
+  assert_eq(a.n + u.n, 3)
+}
+
+test "an alias under another name builds the same record" {
+  let r = term.Renamed { n: 4, small: 3 }
+  assert_eq("${r.n} ${r.small} ${r.tag}", "4 3 d")
+  let k = term.renamed(9)
+  assert_eq("${k.n} ${k.small} ${k.tag}", "9 6 r")
+}
+
+test "the aliasing module builds through its own bare alias" {
+  let b = term.bare(6)
+  assert_eq("${b.n} ${b.small}", "6 5")
+  assert_eq(term.ORIGIN.n, 7)
+}
+
+test "an entry-program alias of a module's alias builds the record" {
+  let l = Local { n: 8, small: 1 }
+  assert_eq(l.n, 8)
+}
+
+test "a sibling submodule's alias builds the record in generated code" {
+  assert_eq(app.build("x").find, "x")
+  assert_eq(app.label("y"), "y:false")
+}

@@ -1,0 +1,6 @@
+// A sibling submodule builds the record through `render`'s alias.
+import self.gui.render
+
+fn build(s: String) -> render.Bar = render.Bar { find: s, focused: true }
+
+fn label(s: String) -> String = render.show(render.Bar { find: s, focused: false })

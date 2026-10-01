@@ -1,0 +1,22 @@
+// #3153, run as a program: tests/record_literal_through_alias_test.rs runs
+// this on native and wasm. The native leg is the one the sibling-alias
+// literal (`render.Bar { … }`) broke — rustc E0422 on a bare `Bar`.
+import self.term
+import self.gui.app
+
+type Local = term.T
+
+effect fn main() -> Unit = {
+  let u = term.T { n: 3, small: 4 }
+  println("${u.n} ${u.small} ${u.tag}")
+  let r = term.Renamed { n: 4, small: 3 }
+  println("${r.n} ${r.small} ${r.tag}")
+  let k = term.renamed(9)
+  println("${k.n} ${k.small} ${k.tag}")
+  let b = term.bare(6)
+  println("${b.n} ${b.small} ${term.ORIGIN.n}")
+  let l = Local { n: 8, small: 1 }
+  println("${l.n}")
+  println(app.build("x").find)
+  println(app.label("y"))
+}

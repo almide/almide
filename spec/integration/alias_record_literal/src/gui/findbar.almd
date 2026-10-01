@@ -1,0 +1,3 @@
+type Bar = { find: String, focused: Bool }
+
+fn empty() -> Bar = Bar { find: "", focused: false }
