@@ -397,7 +397,19 @@ fn lower_call_target_cross_module_ufcs(ctx: &mut LowerCtx, object: &ast::Expr, f
 /// referencing an earlier PARAMETER is already substituted by
 /// `substitute_call_params`, and must keep resolving to the caller's argument.
 pub(crate) fn qualify_callee_module_idents(expr: &mut ast::Expr, module: Sym, env: &crate::types::TypeEnv) {
+    let callee_aliases = env.module_import_aliases.get(&module);
     ast::visit_expr_mut(expr, &mut |e| {
+        // `c.LIMIT` names what `c` means in the CALLEE (`import consts as
+        // c`): the caller may not import it, or bind `c` to another module.
+        // Re-spelled by the caller's own name for that module (#3165).
+        if let ast::ExprKind::Member { object, .. } = &mut e.kind
+            && let ast::ExprKind::Ident { name: alias } = &mut object.kind
+            && let Some(target) = callee_aliases.and_then(|a| a.get(alias))
+            && !names_callee_module_item(env, module, *alias)
+        {
+            *alias = caller_name_of(env, *target);
+            return;
+        }
         // A SCREAMING_CASE constant lexes as a `TypeName`, not an `Ident`, so
         // both spellings have to be considered or the common shape — a
         // module-level constant as the default — is the one that slips through.

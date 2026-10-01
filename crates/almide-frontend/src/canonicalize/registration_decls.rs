@@ -215,6 +215,7 @@ fn register_type_decl_finalize(env: &mut TypeEnv, name: &str, ty: &ast::TypeExpr
             }
         }
     }
+    register_field_default_exprs(env, &key, ty, prefix);
     env.types.insert(sym(&key), resolved.clone());
     env.stdlib_preregistered_types.remove(&sym(&key));
     if dual_register_bare {
@@ -224,6 +225,36 @@ fn register_type_decl_finalize(env: &mut TypeEnv, name: &str, ty: &ast::TypeExpr
     } else if prefix.is_none() {
         // A local type owns the bare name now — it is no longer a dependency alias, so a later genuine local duplicate is still caught by E020.
         env.prefixed_bare_aliases.remove(&sym(name));
+    }
+}
+/// A module type's field default expressions, keyed `mod.Type` /
+/// `mod.Type.Case` (#3165). Only the canonical, module-prefixed registration
+/// records them: a literal in the declaring module splices its own default
+/// as before, and a literal in another module fills them in qualified
+/// (`check/call_defaults.rs`).
+fn register_field_default_exprs(env: &mut TypeEnv, key: &str, ty: &ast::TypeExpr, prefix: Option<&str>) {
+    let Some(module) = prefix else { return };
+    if env.alias_owner_module.is_some() || !env.user_modules.contains(&sym(module)) {
+        return;
+    }
+    let harvest = |fields: &[ast::FieldType]| -> Vec<(Sym, ast::Expr)> {
+        fields.iter().filter_map(|f| f.default.as_ref().map(|d| (f.name, d.clone()))).collect()
+    };
+    let mut put = |k: String, defs: Vec<(Sym, ast::Expr)>| {
+        if !defs.is_empty() {
+            env.field_default_exprs.insert(sym(&k), (sym(module), defs));
+        }
+    };
+    match ty {
+        ast::TypeExpr::Record { fields } | ast::TypeExpr::OpenRecord { fields } => put(key.to_string(), harvest(fields)),
+        ast::TypeExpr::Variant { cases, .. } => {
+            for c in cases {
+                if let ast::VariantCase::Record { name: cname, fields } = c {
+                    put(format!("{}.{}", key, cname), harvest(fields));
+                }
+            }
+        }
+        _ => {}
     }
 }
 /// Walk all declarations and register them into the type environment.
