@@ -1812,6 +1812,8 @@ evidence  = [
   { path = "spec/wasm_cross/mut_param_loop_stays_in_place.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_global_callee_sees_precall.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_global_no_reach_in_place.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_closure_capture_read.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_closure_capture_write.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-133"
@@ -3930,6 +3932,8 @@ evidence  = [
   { path = "spec/wasm_cross/bytes_writer_mut_from_declaration.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_reads_var_written_by_mut_call.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_captured_record_field_mutation.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_closure_capture_read.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_closure_capture_write.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-320"

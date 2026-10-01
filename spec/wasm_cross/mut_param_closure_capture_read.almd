@@ -1,0 +1,51 @@
+// @contract: C-132, C-319
+// #3154: a closure that only READS a `mut` parameter the fn writes elsewhere
+// sees the parameter as it stands when the closure runs, as it does for a
+// `var` (C-319) — the write before the call, the write a `mut` callee made,
+// the write between two calls. Native read the capture through a cell the
+// param never had (`r.borrow_proven(..)` on a `&mut R`, rustc E0599) or, with
+// no closure write, a snapshot taken at the closure's creation. The caller's
+// place carries every write afterwards. Byte-identical native == wasm == interp.
+type Grid = { cell_w: Int, n: Int }
+
+fn width_of(cp: Int) -> Int = if cp > 255 then 2 else 1
+
+fn bump(mut g: Grid, k: Int) -> Int = {
+  g.n = g.n + k
+  g.n
+}
+
+fn peek(g: Grid, k: Int) -> Int = g.n * k
+
+fn draw(mut g: Grid, cps: List[Int]) -> Int = {
+  g.cell_w = g.cell_w + 1
+  let advance = (cp: Int) => g.cell_w * int.max(1, width_of(cp))
+  list.fold(cps, 0, (acc, cp) => acc + advance(cp))
+}
+
+fn later(mut g: Grid) -> Int = {
+  let f = (k: Int) => peek(g, k)
+  let before = f(1)
+  g.n = g.n + 1
+  before * 100 + f(2)
+}
+
+fn through_callee(mut g: Grid) -> Int = {
+  let f = (k: Int) => peek(g, k)
+  let a = bump(g, 3)
+  a * 100 + f(2)
+}
+
+fn mixed(mut g: Grid, ks: List[Int]) -> Int = list.fold(
+  ks,
+  0,
+  (acc, k) => acc + peek(g, k) + bump(g, k),
+)
+
+effect fn main() -> Unit = {
+  var g = Grid { cell_w: 2, n: 2 }
+  println("draw ${int.to_string(draw(g, [65, 300, 66]))} w=${int.to_string(g.cell_w)}")
+  println("later ${int.to_string(later(g))} n=${int.to_string(g.n)}")
+  println("through_callee ${int.to_string(through_callee(g))} n=${int.to_string(g.n)}")
+  println("mixed ${int.to_string(mixed(g, [1, 2, 3]))} n=${int.to_string(g.n)}")
+}
