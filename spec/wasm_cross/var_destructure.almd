@@ -1,0 +1,55 @@
+// @contract: C-373
+// `var` takes the `let` patterns (ALS-ST2, almide#3149): a tuple, a nested
+// tuple with `_`, and a record shorthand, and every bound name is a var. The
+// value is evaluated once, and each name is then reassigned on its own: a
+// write to one name reaches neither the other names nor the destructured
+// value. Heap components (String, List) keep value semantics, and the form
+// works inside a loop body and as loop state.
+type Pos = { px: Int, py: Int }
+
+fn split_run(at: (Int, Int)) -> (Int, (Int, String)) = {
+  println("split_run called")
+  (at.0 + 1, (at.1, "run"))
+}
+
+effect fn main() -> Unit = {
+  let at = (1, 2)
+  var (x, y) = at
+  x = x + 10
+  y = y * 3
+  println("tuple: ${x} ${y} source ${at.0} ${at.1}")
+  var (n, (last, _)) = split_run(at)
+  n = n + last
+  last = 0
+  println("nested: ${n} ${last}")
+  let p = Pos { px: 4, py: 5 }
+  var { px, py } = p
+  px = px + py
+  py = 0
+  println("record: ${px} ${py} source ${p.px} ${p.py}")
+  let words = (["a"], "z")
+  var (xs, s) = words
+  xs = xs + ["b"]
+  s = s + "y"
+  let (orig_xs, orig_s) = words
+  println("heap: ${list.len(xs)} ${s} source ${list.len(orig_xs)} ${orig_s}")
+  var (i, acc) = (0, "")
+  while i < 4 {
+    i = i + 1
+    acc = acc + int.to_string(i)
+  }
+  println("loop state: ${i} ${acc}")
+  var total = 0
+  for k in 0..<3 {
+    var (lo, hi) = (k, k * 10)
+    lo = lo + 1
+    hi = hi + lo
+    total = total + hi
+  }
+  println("loop body: ${total}")
+  var (pq, q) = (at, 7)
+  var (u, v) = pq
+  u = u + q
+  pq = (0, 0)
+  println("chained: ${u} ${v} ${pq.0}")
+}

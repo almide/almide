@@ -4792,3 +4792,13 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float32_display_shortest.almd", class = "fixture" },
 ]
+[[contract]]
+id        = "C-373"
+spec      = "ALS-ST2"
+title     = "var destructures with the let patterns and every bound name is mutable, identically on both targets"
+statement = "ALS-ST2 (almide#3149): `var` accepts the patterns `let` destructures with — a tuple, a nested tuple with `_` holes, and a record shorthand `{ a, b }` — and every name the pattern binds is a var. `var (x, y) = e` evaluates `e` exactly once and is observationally `var x = e.0` / `var y = e.1` written one name at a time: each name is then reassigned on its own, and a write to one name reaches neither the other names nor the destructured value, for scalar and heap (String, List) components alike. The form binds loop state before a `while` and binds fresh vars on every iteration of a `for` body. Byte-identical stdout, stderr and exit code native <-> wasm."
+since     = "0.67.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/var_destructure.almd", class = "fixture" },
+]
