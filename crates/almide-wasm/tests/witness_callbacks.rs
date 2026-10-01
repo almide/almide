@@ -5,7 +5,8 @@
 //! ordinary hooks, and the arm's use of the body's value is hooked (`map`'s
 //! store into the result spine, `find`'s share into the some-cell, a heap
 //! `fold`'s loop-carried accumulator) or carries no RC site (a Bool
-//! predicate, a scalar `fold`). Every other inlining shape declines by arm
+//! predicate, a scalar `fold`). A fused `map |> fold` chain is one
+//! activation over every stage. Every other inlining shape declines by arm
 //! name, never certifies.
 
 const PROGRAM: &str = r#"import fan
@@ -81,7 +82,10 @@ fn inlined_callbacks_witness_per_element_and_other_shapes_decline() {
     // (`{id|im}`), and map's ok payload moves into the accumulator.
     assert!(w["fan_bang"].contains("{id|im}\n{|im}\n") || w["fan_bang"].contains("{id|im}\n\n{|im}\n"), "{:?}", w["fan_bang"]);
     assert!(w["fan_first"].contains("{id|im}\n"), "{:?}", w["fan_first"]);
-    // A fold over a list call takes the fused lowering and declines by name.
-    let declined = |n: &str| w.get(n).map(String::as_str).unwrap_or("<none>").to_string();
-    assert_eq!(declined("fused"), "!decline:call-arg:Lambda:list.fold:fused\n");
+    // A fold over a list call takes the fused lowering (#2755): one
+    // activation over the inlined map stage and the fold step: the scalar
+    // stage and accumulator carry no credit, the stage param is a view (the
+    // empty line), and the frame's one owned block is born and released.
+    assert_eq!(w["fused"], "id\n\n");
+    assert!(accepted(&w["fused"]));
 }
