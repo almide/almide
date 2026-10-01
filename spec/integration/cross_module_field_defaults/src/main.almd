@@ -1,0 +1,19 @@
+// #3165: the same program as field_defaults_test.almd, as a runnable entry
+// (native and wasm print the same). Locals named like `shapes`' items sit in
+// scope at the literal: a default must not capture them.
+import shapes
+import other as c
+
+effect fn main() -> Unit = {
+  let step = 100
+  let base = 7
+  let b = shapes.Box { n: 1 }
+  let over = shapes.Box { n: 2, e: 9 }
+  let i = shapes.inner(2)
+  let k = shapes.radius_plus_k(shapes.Circle { r: 2 })
+  let entry_limit = c.LIMIT
+  println("${b.e} ${b.f} ${b.g} ${b.s} ${shapes.total(b)}")
+  println("${over.e} ${shapes.total(over)}")
+  println("${i.n} ${i.e} ${i.s}")
+  println("${k} ${shapes.mk(1)} ${entry_limit} ${step} ${base}")
+}

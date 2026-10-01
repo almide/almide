@@ -1,0 +1,3 @@
+// A different module the entry imports under the SAME alias `c` that `shapes`
+// gives `consts`. A default `c.LIMIT` filled in the entry must not read it.
+let LIMIT: Int = 999
