@@ -112,7 +112,13 @@ impl<'a> Interpreter<'a> {
         };
         let text = match crate::vfs::read_text(&self.vfs, &path) {
             Ok(t) => t,
-            Err(e) => return Flow::val(Value::Result(Err(Box::new(Value::str(e))))),
+            // The message names the user's call over the quoted path, as native's
+            // `io_err("fs.fold_lines", …)` does (#3148 — this arm returned the
+            // bare errno text, the #2090 prefix never reached it).
+            Err(e) => {
+                let m = format!("fs.fold_lines(\"{path}\"): {e}");
+                return Flow::val(Value::Result(Err(Box::new(Value::str(m)))));
+            }
         };
         let mut rest = text.as_str();
         while !rest.is_empty() {
