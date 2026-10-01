@@ -9,10 +9,18 @@
 // blessed spelling `list.find_map(xs, (x) => f(x)!)!` lives in fn bodies.
 local fn even_tenfold(x: Int) -> Int? = if x % 2 == 0 then some(x * 10) else none
 
-local fn big(s: String) -> Result[Int?, String] = {
-  let n = int.parse(s)!
-  ok(if n > 10 then some(n) else none)
+local fn later_three_letter_len(n: String) -> Int? = if string.len(n) == 3 and n != "ann" then some(string.len(n)) else none
+
+local fn label_past_one(n: Int) -> String? = list.find([n], (k) => k > 1) |> option.map((k) => "n${k}")
+
+local fn over_six(x: Int) -> Int? = if x > 6 then some(x - 6) else none
+
+local fn big_non_negative(n: Int) -> Int? = {
+  assert(n >= 0)
+  if n > 10 then some(n) else none
 }
+
+local fn big(s: String) -> Result[Int?, String] = int.parse(s) |> result.map((n) => if n > 10 then some(n) else none)
 
 local fn first_big(xs: List[String]) -> Result[Int?, String] = list.find_map(xs, (s) => big(s)!)
 
@@ -31,33 +39,18 @@ test "no some, and the empty list, give none" {
 }
 
 test "the payload type is the callback's, not the element's" {
-  let names = ["ann", "bob", "cy"]
-  assert_eq(
-    list.find_map(
-      names,
-      (n) => if string.len(n) == 3 and n != "ann" then some(string.len(n)) else none,
-    ),
-    some(3),
-  )
-  assert_eq(list.find_map([1, 2, 3], (n) => if n > 1 then some("n${n}") else none), some("n2"))
+  assert_eq(list.find_map(["ann", "bob", "cy"], later_three_letter_len), some(3))
+  assert_eq(list.find_map([1, 2, 3], label_past_one), some("n2"))
 }
 
 test "pipes like its siblings" {
-  let hit = [5, 8, 9] |> list.find_map((x) => if x > 6 then some(x - 6) else none)
-  assert_eq(hit, some(2))
+  assert_eq([5, 8, 9] |> list.find_map(over_six), some(2))
 }
 
 test "f does not run after the hit" {
   // The element after the hit fails an assert if f reaches it — an effect the
   // test run would report — so a green test is the observation that f stopped.
-  let r = list.find_map(
-    [1, 20, 0 - 1],
-    (n) => {
-      assert(n >= 0)
-      if n > 10 then some(n) else none
-    },
-  )
-  assert_eq(r, some(20))
+  assert_eq(list.find_map([1, 20, 0 - 1], big_non_negative), some(20))
 }
 
 test "the fallible form short-circuits on a hit and on an err" {
