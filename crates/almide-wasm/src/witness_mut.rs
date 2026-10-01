@@ -29,27 +29,36 @@ impl Emitter<'_> {
     /// holding one credit on the block now in its slot (`i`) — the same
     /// block when the write landed in place, which the two events then
     /// account as a hand-over through the helper. An in-place write after
-    /// the read records nothing. A global or a C-319 cell holds the block
-    /// for a holder this frame does not track: decline.
+    /// the read records nothing. A global or a C-319 cell is an OUTER holder
+    /// the frame borrows ([`Emitter::witness_holder`]): its rebind is the
+    /// same `d` / `i`, on the holder's pseudo local.
     pub(crate) fn witness_mut_rebind(&mut self, id: almide_ir::VarId, global: bool) {
         if self.witness.is_none() {
             return;
         }
-        if global {
-            self.witness_decline("mut-receiver:global");
-            return;
-        }
-        if self.cells.contains(&id) {
-            self.witness_decline("mut-receiver:cell");
-            return;
-        }
-        let local = self.locals.get(&id).map(|&(l, _)| l);
+        let local = self.witness_holder(id, global);
         let Some(w) = self.witness.as_mut() else { return };
         w.note_arg(var_key(id));
         match local {
             Some(l) if w.assign(l, true, None) => {}
             _ => w.poison(),
         }
+    }
+
+    /// The local a write to `id` rebinds: a frame local; or, for a top-level
+    /// global or a C-319 cell, the pseudo local naming that OUTER holder,
+    /// marked as borrowed by the frame (witness.rs `outer_holder`). Pseudo
+    /// locals live far above any wasm local index.
+    pub(crate) fn witness_holder(&mut self, id: almide_ir::VarId, global: bool) -> Option<u32> {
+        let holder = if global {
+            0xC000_0000 | self.globals.get(&(self.var_space, id))?.0
+        } else if self.cells.contains(&id) {
+            0xA000_0000 | self.locals.get(&id)?.0
+        } else {
+            return self.locals.get(&id).map(|&(l, _)| l);
+        };
+        self.witness.as_mut()?.outer_holder(holder);
+        Some(holder)
     }
 
     /// #2755: the copy-on-write field write (list_mut.rs `field_assign_with`)
