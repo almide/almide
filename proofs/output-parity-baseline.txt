@@ -317,7 +317,6 @@ spec/wasm_cross/float_to_fixed.almd
 spec/wasm_cross/float_to_int_edges.almd
 spec/wasm_cross/fold_heap_acc.almd
 spec/wasm_cross/for_in_forms.almd
-spec/wasm_cross/fs_fallible_walker_call_head.almd
 spec/wasm_cross/fuel_bare_result.almd
 spec/wasm_cross/fuel_block_body.almd
 spec/wasm_cross/fuel_bounded_boundary.almd
