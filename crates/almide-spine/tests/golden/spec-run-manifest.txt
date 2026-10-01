@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at a60a82a99 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at 702d6040a — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -339,7 +339,7 @@ e3a4f53fce02f25ff2e08fe23fd7d77680f1ca1bd7064be6a84cbbc2c08b18e4	0	spec/wasm_cro
 ba5b1fc065e85714dc54f2cbe1bb4960107e64ec3c6741394a356fc9f6aef5c8	0	spec/wasm_cross/int_rotate_negative_count.almd
 9160d4be34c8695bd172a76c7c7966587ea5a4d991ad22c87b2b91af54aa9ebb	1	spec/wasm_cross/int_rotate_nonpositive_width.almd
 f7dba89e8140bd405435cc648735251c3d3d91074241d2f6b3c97a5c770a109f	0	spec/wasm_cross/int_wrap_rotate_width.almd
-7a45abc8145d6ce937fa96f10230b78acdb490e59aa495e1c0408555384521f1	1	spec/wasm_cross/interp_diverging_part.almd
+670a6ceaaf4018a559657528c405626121a0d7356aa8735667a2682eea4b9b61	1	spec/wasm_cross/interp_diverging_part.almd
 3ab204bec9dad3ad38ff7083ac77a36c8df02f0ba19cd8ecf04bd358895724d3	0	spec/wasm_cross/interp_effect_unwrap_arg.almd
 a528d9fa1bcc6897204c0814d7385616a0dfd8a906482e5ede8973511bbc13ad	0	spec/wasm_cross/interp_operand_order.almd
 af836f15668e850368bcfed186711dd57033cea2e23fe1002d48dece0ae36b4b	0	spec/wasm_cross/io_write_ordering.almd
