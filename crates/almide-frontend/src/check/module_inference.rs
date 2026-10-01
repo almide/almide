@@ -43,6 +43,10 @@ impl Checker {
         // are the bulk of a real project's check time, so leaving this to
         // `infer_program` alone would report a checker that costs almost nothing.
         let _phase = almide_base::profile::phase_scope(almide_base::profile::Phase::Check);
+        // #3164: the same top-let pre-pass the entry program runs, so a
+        // function above a `let` chain reads the chain's inferred types on
+        // this path too — not only when the driver happened to refresh first.
+        self.refresh_module_top_lets(prog, module_name);
         // Isolate module's constraint solving and type map from the main program
         let saved_constraints = std::mem::take(&mut self.constraints);
         let saved_slot_defaults = std::mem::take(&mut self.result_slot_defaults);
@@ -74,6 +78,11 @@ impl Checker {
             &mut self.env, &mut self.diagnostics, &prog.decls, None,
         );
         self.env.alias_owner_module = saved_alias_owner;
+        // #3164: registration just re-seeded the bare keys; a function checked
+        // before a top-level `let` reads the bare key, so give it the type the
+        // pre-pass inferred (kept under the prefixed key) instead of the seed.
+        let refreshed = toplet_order::concrete_top_lets(&self.env, &prog.decls, Some(module_name));
+        toplet_order::adopt_top_lets(&mut self.env, refreshed);
 
         // Infer + solve + resolve
         let saved_prefix = std::mem::replace(
@@ -166,15 +175,18 @@ impl Checker {
             &mut self.current_module_prefix,
             Some(module_name.to_string()),
         );
-        for decl in prog.decls.iter() {
-            if matches!(decl, ast::Decl::TopLet { .. }) {
-                let mut d = decl.clone();
-                self.check_decl(&mut d);
-            }
+        // #3164: dependencies first, so `let PAIRS = [("a", TEXT)]` above
+        // `let TEXT = ..` reads TEXT's inferred type, not its seed.
+        for i in toplet_order::toplet_check_order(&prog.decls) {
+            let mut d = prog.decls[i].clone();
+            self.check_decl(&mut d);
         }
         self.solve_constraints();
         self.flush_pending_toplet_tys();
         self.current_module_prefix = saved_prefix;
+        // What this pass learned, read before the bracket is undone: the
+        // restore below puts every BARE key back to its registration seed.
+        let refreshed = toplet_order::concrete_top_lets(&self.env, &prog.decls, None);
 
         self.constraints = saved_constraints;
         self.result_slot_defaults = saved_slot_defaults;
@@ -198,6 +210,13 @@ impl Checker {
         self.deferred_generic_calls.truncate(saved_deferred_lens.12);
         self.deferred_eq_checks.truncate(saved_deferred_lens.13);
         self.deferred_cascade_diags.truncate(saved_deferred_lens.14);
+        // #3164: the ENTRY program has no prefixed key to carry the result —
+        // its bare keys are the real ones — so the refreshed types go back
+        // onto them, where the main pass reads them. (A module's prefixed keys
+        // survive the restore; `infer_module` adopts them.)
+        if module_name == "__entry" {
+            toplet_order::adopt_top_lets(&mut self.env, refreshed);
+        }
     }
 
     /// Upgrade `env.top_lets` entries from the POST-solve resolution of their

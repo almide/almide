@@ -437,6 +437,14 @@ impl Pipeline {
         // Postcondition verification: the pass's own, then every one
         // established earlier that must still hold.
         let mut violations = verify_postconditions(pass_name, program, &passes[idx].postconditions());
+        // #3164: an unresolved type surviving the type-resolving passes is
+        // refused by the codegen-entry gate's controlled error (function +
+        // span, exit 1) — the same verdict it reaches at the end of the
+        // pipeline, without the panic and backtrace these postconditions used
+        // to raise first. A violation the gate does not see still panics.
+        if matches!(pass_name, "LambdaTypeResolve" | "ConcretizeTypes") && !violations.is_empty() {
+            crate::pass_concretize_types::assert_types_concretized(program);
+        }
         violations.extend(Self::established_violations(passes, done, pass_name, program));
         for v in &violations {
             eprintln!("[POSTCONDITION VIOLATION] {}", v);

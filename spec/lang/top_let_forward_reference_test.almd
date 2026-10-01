@@ -1,0 +1,38 @@
+// #3164: a top-level `let` may name a LATER top-level `let`, and a function
+// declared above both reads the chain's inferred type — not the registration
+// seed. Registration seeds each `let` in source order, so `TABLE`'s seed was
+// `List[(Int, Unknown)]` while `WORD` was not yet typed; `all_words` read that
+// seed, its loop variable stayed `(Int, Unknown)`, and the build panicked in
+// `ConcretizeTypes` behind a green `almide check`. Declaration order does not
+// matter for functions, so it does not matter for these either.
+fn all_words() -> String = {
+  var out = ""
+  for p in PAIRS {
+    out = out + p.1 + ";"
+  }
+  out
+}
+
+fn total() -> Int = list.fold(PAIRS, 0, (acc, p) => acc + string.len(p.1) + p.0)
+
+fn names() -> List[String] = TABLE |> list.map((p) => p.1)
+
+let TABLE = [(1, WORD), (2, WORD + "!")]
+
+let PAIRS = TABLE
+
+let WORD = PREFIX + "x"
+
+let PREFIX = greet("hi")
+
+fn greet(s: String) -> String = s + "-"
+
+test "a fn above a let chain reads the chain's type" {
+  assert_eq(all_words(), "hi-x;hi-x!;")
+  assert_eq(total(), 12)
+  assert_eq(names(), ["hi-x", "hi-x!"])
+}
+
+test "the issue's shape: a list of pairs naming a later let" {
+  assert_eq(PAIRS, [(1, "hi-x"), (2, "hi-x!")])
+}
