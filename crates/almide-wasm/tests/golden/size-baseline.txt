@@ -223,7 +223,7 @@
 12384	spec/wasm_cross/fs_call_head_family.almd
 13347	spec/wasm_cross/fs_composition_family.almd
 8969	spec/wasm_cross/fs_fallible_stream_callback.almd
-8223	spec/wasm_cross/fs_fallible_walker_call_head.almd
+8185	spec/wasm_cross/fs_fallible_walker_call_head.almd
 6811	spec/wasm_cross/fs_glob_segments.almd
 5608	spec/wasm_cross/fs_list_dir_multipass.almd
 6058	spec/wasm_cross/fs_metadata_family.almd
