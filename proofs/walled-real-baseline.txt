@@ -435,3 +435,13 @@ spec/wasm_cross/mut_param_closure_capture_write.almd :: main  # #2739
 # block, and call operands before a block argument are bound first. Also gone:
 # the move-mode gaps fixture's `main` and `push_pos`. almide-verify certifies the
 # corpus witness set; no previously rendered native program changed.
+# (2026-10-01, #3176) The qualified constructor name fixture. Each of these
+# three functions returns a String built by a `match` over a variant whose arm
+# binds the payload. The MIR rung refuses that shape whatever the names are: a
+# single-module repro with no shared case name walls the same way (#3181).
+# These rows do not record the bare-name mis-pick that #3176 fixed. The four
+# other fixture functions that walled because of it now lower. The structural
+# leg and native serve all three, and the outputs match.
+spec/integration/qualified_ctor_names/src/cells.almd :: case_beside_case  # #3181
+spec/integration/qualified_ctor_names/src/cells.almd :: defaults  # #3181
+spec/integration/qualified_ctor_names/src/main.almd :: shadowed  # #3181
