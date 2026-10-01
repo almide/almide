@@ -39,20 +39,60 @@ const GENERATORS: &[&str] = &["gen-ast-manifest", "gen-check-manifest", "gen-run
 
 /// A fake `almide` that answers `--version` with `line` and nothing else.
 fn fake_oracle(at: &Path, line: &str) -> PathBuf {
-    fs::create_dir_all(at.parent().unwrap()).unwrap();
-    fs::write(at, format!("#!/bin/sh\n[ \"$1\" = --version ] && echo '{line}'\n")).unwrap();
-    fs::set_permissions(at, fs::Permissions::from_mode(0o755)).unwrap();
+    mkdir(at.parent().expect("the oracle path has a directory"));
+    write(at, &format!("#!/bin/sh\n[ \"$1\" = --version ] && echo '{line}'\n"));
+    fs::set_permissions(at, fs::Permissions::from_mode(0o755)).unwrap_or_else(|e| panic!("chmod {}: {e}", at.display()));
     at.to_path_buf()
 }
 
+fn mkdir(at: &Path) {
+    fs::create_dir_all(at).unwrap_or_else(|e| panic!("mkdir -p {}: {e}", at.display()));
+}
+
+fn write(at: &Path, text: &str) {
+    fs::write(at, text).unwrap_or_else(|e| panic!("write {}: {e}", at.display()));
+}
+
+fn tempdir() -> tempfile::TempDir {
+    tempfile::tempdir().expect("create a temp dir")
+}
+
+/// Set `at`'s mtime to `stamp` (`touch -t` form).
+fn retouch(at: &Path, stamp: &str) {
+    let touched = Command::new("touch").args(["-t", stamp]).arg(at).status().expect("spawn touch");
+    assert!(touched.success(), "touch -t {stamp} {}", at.display());
+}
+
+/// `script` run by bash in `root` with `ORACLE` set; `mode` sets or clears
+/// `ALMIDE_MANIFEST_TREE_CHECK`.
+fn bash_in(root: &Path, oracle: &Path, script: &str, mode: Option<&str>) -> Run {
+    let mut cmd = Command::new("bash");
+    cmd.args(["-c", script]).current_dir(root).env("ORACLE", oracle);
+    match mode {
+        Some(m) => cmd.env("ALMIDE_MANIFEST_TREE_CHECK", m),
+        None => cmd.env_remove("ALMIDE_MANIFEST_TREE_CHECK"),
+    };
+    Run::from(cmd.output().expect("spawn bash"))
+}
+
 fn snapshot(root: &Path) -> Vec<Vec<u8>> {
-    GOLDENS.iter().map(|g| fs::read(root.join(g)).unwrap()).collect()
+    GOLDENS.iter().map(|g| fs::read(root.join(g)).unwrap_or_else(|e| panic!("read {g}: {e}"))).collect()
 }
 
 struct Run {
     code: Option<i32>,
     err: String,
     out: String,
+}
+
+impl From<std::process::Output> for Run {
+    fn from(o: std::process::Output) -> Run {
+        Run {
+            code: o.status.code(),
+            err: String::from_utf8_lossy(&o.stderr).into_owned(),
+            out: String::from_utf8_lossy(&o.stdout).into_owned(),
+        }
+    }
 }
 
 fn run_generator(generator: &str, oracle: &Path, mode: Option<&str>) -> Run {
@@ -62,12 +102,7 @@ fn run_generator(generator: &str, oracle: &Path, mode: Option<&str>) -> Run {
         Some(m) => cmd.env("ALMIDE_MANIFEST_TREE_CHECK", m),
         None => cmd.env_remove("ALMIDE_MANIFEST_TREE_CHECK"),
     };
-    let o = cmd.output().expect("spawn bash");
-    Run {
-        code: o.status.code(),
-        err: String::from_utf8_lossy(&o.stderr).into_owned(),
-        out: String::from_utf8_lossy(&o.stdout).into_owned(),
-    }
+    Run::from(cmd.output().expect("spawn bash"))
 }
 
 /// Every generator refuses with `needle` in its refusal, and the goldens are
@@ -95,28 +130,28 @@ fn tree_version() -> String {
 
 #[test]
 fn a_released_binary_is_refused_by_every_generator() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir();
     let oracle = fake_oracle(&dir.path().join("almide"), &format!("almide {} (release, 000000000)", tree_version()));
     every_generator_refuses(&oracle, "a release binary comes from the release workflow, never from this tree");
 }
 
 #[test]
 fn a_binary_of_another_version_is_refused_by_every_generator() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir();
     let oracle = fake_oracle(&dir.path().join("almide"), "almide 0.0.1 (dev)");
     every_generator_refuses(&oracle, &format!("ORACLE is `almide 0.0.1 (dev)` but this tree is version {}", tree_version()));
 }
 
 #[test]
 fn a_binary_stamped_with_another_commit_is_refused_by_every_generator() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir();
     let oracle = fake_oracle(&dir.path().join("almide"), &format!("almide {} (dev, 000000000)", tree_version()));
     every_generator_refuses(&oracle, "ORACLE was built at 000000000");
 }
 
 #[test]
 fn an_unstamped_binary_from_outside_this_tree_is_refused_by_every_generator() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir();
     let oracle = fake_oracle(&dir.path().join("almide"), &format!("almide {} (dev)", tree_version()));
     every_generator_refuses(&oracle, "carries no build sha");
 }
@@ -127,17 +162,18 @@ fn an_unstamped_binary_older_than_the_sources_is_refused_by_every_generator() {
     // source: the mtime fallback — what `cargo build` itself keys on.
     let at = root().join(format!("target/almide-corpus-stale-oracle-{}/almide", std::process::id()));
     let oracle = fake_oracle(&at, &format!("almide {} (dev)", tree_version()));
-    let touched = Command::new("touch").args(["-t", "200001010000"]).arg(&oracle).status().unwrap();
-    assert!(touched.success());
+    retouch(&oracle, "200001010000");
     every_generator_refuses(&oracle, "ORACLE predates the sources");
-    fs::remove_dir_all(at.parent().unwrap()).ok();
+    if let Some(dir) = at.parent() {
+        fs::remove_dir_all(dir).ok();
+    }
 }
 
 #[test]
 fn the_override_is_explicit_and_says_so() {
     // `off` records anyway (a deliberate act) and leaves a warning as the
     // trace; a misspelled mode is not an override.
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempdir();
     let oracle = fake_oracle(&dir.path().join("almide"), "almide 0.0.1 (dev)");
     let r = run_generator("gen-ast-manifest", &oracle, Some("of"));
     assert_eq!(r.code, Some(2), "a misspelled mode must not pass; stderr:\n{}", r.err);
@@ -145,16 +181,8 @@ fn the_override_is_explicit_and_says_so() {
     // Under `off` a generator would proceed past the check and truncate the
     // committed goldens (the fake oracle emits nothing), so the override is
     // asserted on the shared check alone: it passes, and it says so.
-    let root = root();
-    let o = Command::new("bash")
-        .args(["-c", ". scripts/lib/oracle-header.sh; refuse_stale_tree; echo rc=$?"])
-        .current_dir(&root)
-        .env("ORACLE", &oracle)
-        .env("ALMIDE_MANIFEST_TREE_CHECK", "off")
-        .output()
-        .unwrap();
-    let out = String::from_utf8_lossy(&o.stdout);
-    let err = String::from_utf8_lossy(&o.stderr);
+    let Run { out, err, .. } =
+        bash_in(&root(), &oracle, ". scripts/lib/oracle-header.sh; refuse_stale_tree; echo rc=$?", Some("off"));
     assert!(out.contains("rc=0"), "off must pass the check; stdout:\n{out}\nstderr:\n{err}");
     assert!(err.contains("::warning::ALMIDE_MANIFEST_TREE_CHECK=off"), "off must leave a trace; stderr:\n{err}");
 }
@@ -173,28 +201,27 @@ struct Forge {
 
 impl Forge {
     fn new() -> Forge {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempdir();
         let root = dir.path().to_path_buf();
-        fs::create_dir_all(root.join("scripts/lib")).unwrap();
-        fs::copy(self::root().join("scripts/lib/oracle-header.sh"), root.join("scripts/lib/oracle-header.sh")).unwrap();
-        fs::write(
-            root.join("Cargo.toml"),
+        mkdir(&root.join("scripts/lib"));
+        fs::copy(self::root().join("scripts/lib/oracle-header.sh"), root.join("scripts/lib/oracle-header.sh"))
+            .expect("copy the shared oracle-header library");
+        write(
+            &root.join("Cargo.toml"),
             "[workspace.package]\nversion = \"0.12.2\"\n\n[package]\nname = \"almide\"\nversion = \"9.9.9\"\n",
-        )
-        .unwrap();
-        fs::create_dir_all(root.join("spec/lang")).unwrap();
-        fs::write(root.join("spec/lang/committed.almd"), "fn f() -> Int = 1\n").unwrap();
-        fs::create_dir_all(root.join("crates/almide-wasm/src")).unwrap();
-        fs::write(root.join("crates/almide-wasm/src/emit.rs"), "// emitter\n").unwrap();
-        fs::write(root.join(".gitignore"), "target/\n").unwrap();
+        );
+        mkdir(&root.join("spec/lang"));
+        write(&root.join("spec/lang/committed.almd"), "fn f() -> Int = 1\n");
+        mkdir(&root.join("crates/almide-wasm/src"));
+        write(&root.join("crates/almide-wasm/src/emit.rs"), "// emitter\n");
+        write(&root.join(".gitignore"), "target/\n");
         let f = Forge { _dir: dir, root: root.clone(), oracle: PathBuf::new() };
         f.git(&["init", "-q", "-b", "main"]);
         f.git(&["add", "-A"]);
         f.git(&["commit", "-q", "-m", "seed"]);
         let oracle = fake_oracle(&root.join("target/release/almide"), "almide 9.9.9 (dev)");
         // Strictly newer than every source: `find -newer` compares whole seconds.
-        let t = Command::new("touch").args(["-t", "203001010000"]).arg(&oracle).status().unwrap();
-        assert!(t.success());
+        retouch(&oracle, "203001010000");
         Forge { oracle, ..f }
     }
 
@@ -204,26 +231,13 @@ impl Forge {
             .args(args)
             .current_dir(&self.root)
             .output()
-            .unwrap();
+            .expect("spawn git");
         assert!(o.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&o.stderr));
         String::from_utf8_lossy(&o.stdout).trim().to_string()
     }
 
     fn check(&self, mode: Option<&str>) -> Run {
-        let mut cmd = Command::new("bash");
-        cmd.args(["-c", ". scripts/lib/oracle-header.sh; refuse_stale_tree"])
-            .current_dir(&self.root)
-            .env("ORACLE", &self.oracle);
-        match mode {
-            Some(m) => cmd.env("ALMIDE_MANIFEST_TREE_CHECK", m),
-            None => cmd.env_remove("ALMIDE_MANIFEST_TREE_CHECK"),
-        };
-        let o = cmd.output().unwrap();
-        Run {
-            code: o.status.code(),
-            err: String::from_utf8_lossy(&o.stderr).into_owned(),
-            out: String::from_utf8_lossy(&o.stdout).into_owned(),
-        }
+        bash_in(&self.root, &self.oracle, ". scripts/lib/oracle-header.sh; refuse_stale_tree", mode)
     }
 }
 
@@ -238,13 +252,8 @@ fn a_clean_tree_with_its_own_fresh_binary_passes() {
 #[test]
 fn the_tree_version_is_the_package_one_not_the_workspace_one() {
     let f = Forge::new();
-    let o = Command::new("bash")
-        .args(["-c", ". scripts/lib/oracle-header.sh; tree_version"])
-        .current_dir(&f.root)
-        .env("ORACLE", &f.oracle)
-        .output()
-        .unwrap();
-    assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "9.9.9");
+    let r = bash_in(&f.root, &f.oracle, ". scripts/lib/oracle-header.sh; tree_version", None);
+    assert_eq!(r.out.trim(), "9.9.9");
     // …and the Rust reader agrees.
     assert_eq!(almide_corpus::tree_version(&f.root), "9.9.9");
 }
@@ -252,7 +261,7 @@ fn the_tree_version_is_the_package_one_not_the_workspace_one() {
 #[test]
 fn an_untracked_fixture_is_refused_until_it_is_added() {
     let f = Forge::new();
-    fs::write(f.root.join("spec/lang/forgotten.almd"), "fn g() -> Int = 2\n").unwrap();
+    write(&f.root.join("spec/lang/forgotten.almd"), "fn g() -> Int = 2\n");
     let r = f.check(None);
     assert_eq!(r.code, Some(1), "stderr:\n{}", r.err);
     assert!(r.err.contains("untracked .almd fixture(s) under spec/"), "{}", r.err);
@@ -271,9 +280,9 @@ fn a_worktree_behind_its_upstream_is_refused_and_the_emitter_commits_are_named()
     let f = Forge::new();
     f.git(&["checkout", "-q", "-b", "fix"]);
     f.git(&["checkout", "-q", "main"]);
-    fs::write(f.root.join("crates/almide-wasm/src/emit.rs"), "// emitter, changed\n").unwrap();
+    write(&f.root.join("crates/almide-wasm/src/emit.rs"), "// emitter, changed\n");
     f.git(&["commit", "-q", "-am", "Change the emitter"]);
-    fs::write(f.root.join("README.md"), "prose\n").unwrap();
+    write(&f.root.join("README.md"), "prose\n");
     f.git(&["add", "README.md"]);
     f.git(&["commit", "-q", "-m", "Prose only"]);
     f.git(&["checkout", "-q", "fix"]);
@@ -296,8 +305,7 @@ fn a_worktree_behind_its_upstream_is_refused_and_the_emitter_commits_are_named()
 #[test]
 fn a_stale_in_tree_binary_is_refused_and_the_newer_source_is_named() {
     let f = Forge::new();
-    let t = Command::new("touch").args(["-t", "200001010000"]).arg(&f.oracle).status().unwrap();
-    assert!(t.success());
+    retouch(&f.oracle, "200001010000");
     let r = f.check(None);
     assert_eq!(r.code, Some(1), "stderr:\n{}", r.err);
     assert!(r.err.contains("ORACLE predates the sources"), "{}", r.err);
@@ -309,18 +317,8 @@ fn the_committed_header_is_verified_before_a_gate_regenerates_over_it() {
     let f = Forge::new();
     let m = f.root.join("manifest.txt");
     let verify = |text: &str| -> Run {
-        fs::write(&m, text).unwrap();
-        let o = Command::new("bash")
-            .args(["-c", ". scripts/lib/oracle-header.sh; verify_committed_header manifest.txt"])
-            .current_dir(&f.root)
-            .env("ORACLE", &f.oracle)
-            .output()
-            .unwrap();
-        Run {
-            code: o.status.code(),
-            err: String::from_utf8_lossy(&o.stderr).into_owned(),
-            out: String::from_utf8_lossy(&o.stdout).into_owned(),
-        }
+        write(&m, text);
+        bash_in(&f.root, &f.oracle, ". scripts/lib/oracle-header.sh; verify_committed_header manifest.txt", None)
     };
     assert_eq!(verify("# oracle: almide 9.9.9 (dev) at 000000000 — x\nrow\n").code, Some(0));
     assert_eq!(verify("# oracle: almide 9.9.9 (dev, 000000000) at 000000000 — x\nrow\n").code, Some(0));
