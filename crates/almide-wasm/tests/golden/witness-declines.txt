@@ -63,7 +63,7 @@ heap-operand:OptionNone	2
 heap-operand:UnwrapOr	5
 interp-part:IndexAccess:non-list	2
 interp-part:UnwrapOr-carrier:Member	1
-loop-carried-assign	30
+loop-carried-assign	36
 loop-exit	5
 main-err-carrier	2
 match-guard	18
@@ -78,7 +78,7 @@ module-arm:unaudited:bytes.set_u8	4
 module-arm:unaudited:fan.any	5
 module-arm:unaudited:list.clear	2
 module-arm:unaudited:list.pop	4
-module-arm:unaudited:list.push	168
+module-arm:unaudited:list.push	172
 module-arm:unaudited:map.clear	3
 module-arm:unaudited:map.insert	5
 module-arm:unaudited:string.clear	4

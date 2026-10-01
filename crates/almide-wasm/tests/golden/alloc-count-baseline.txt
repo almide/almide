@@ -16,7 +16,10 @@
 0	0	0	0	spec/wasm_cross/assert_abort_multiline.almd
 0	0	0	0	spec/wasm_cross/assert_abort_ne.almd
 3	1	16	3	spec/wasm_cross/assign_alias_rc.almd
+32	23	800	32	spec/wasm_cross/assign_concat_operand_release.almd
+21	7	824	21	spec/wasm_cross/assign_mut_callee_consumes_var.almd
 31	23	703	31	spec/wasm_cross/assign_nested_call_release.almd
+26	16	560	26	spec/wasm_cross/assign_nested_mut_writeback_release.almd
 15022	14989	42181645	15022	spec/wasm_cross/assign_self_call_release.almd
 9	0	121	9	spec/wasm_cross/autotry_construction.almd
 5	3	55	5	spec/wasm_cross/autotry_result_first_arg.almd
