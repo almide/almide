@@ -1,8 +1,8 @@
 // #3165: the same program as field_defaults_test.almd, as a runnable entry
 // (native and wasm print the same). Locals named like `shapes`' items sit in
 // scope at the literal: a default must not capture them.
-import shapes
-import other as c
+import self.shapes
+import self.other as c
 
 effect fn main() -> Unit = {
   let step = 100

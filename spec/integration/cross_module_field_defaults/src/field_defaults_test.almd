@@ -1,8 +1,8 @@
 // #3165: a record literal in another module that omits a defaulted field
 // gets the default as the declaring module means it — its constants, its
 // fns, its import aliases — never a same-named binding of the caller's.
-import shapes
-import other as c
+import self.shapes
+import self.other as c
 
 test "a default naming its module's constant" {
   let b = shapes.Box { n: 1 }

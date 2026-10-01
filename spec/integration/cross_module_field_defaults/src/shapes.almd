@@ -2,7 +2,7 @@
 // in ANOTHER module that omits the field took the default as this module's
 // lowered IR, whose `K` is a VarId of this module's var table; the caller's
 // table resolved that id to an unrelated local of its own.
-import consts as c
+import self.consts as c
 
 let K: Int = 3
 
