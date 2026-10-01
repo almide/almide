@@ -333,7 +333,11 @@ pub struct LambdaParam {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Stmt {
     Let { name: Sym, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(skip)] span: Option<Span> },
-    LetDestructure { pattern: Pattern, value: Expr, #[serde(skip)] span: Option<Span> },
+    /// `let <pattern> = value`, or with `mutable` set, `var <pattern> = value`
+    /// (#3149): every name the pattern binds is then a `var`. The checker
+    /// desugars the `var` form into one `var` per name before typing it
+    /// ([`crate::var_destructure::desugar_var_destructure`]); the node keeps the written shape for fmt.
+    LetDestructure { pattern: Pattern, value: Expr, #[serde(default, skip_serializing_if = "std::ops::Not::not")] mutable: bool, #[serde(skip)] span: Option<Span> },
     Var { name: Sym, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(skip)] span: Option<Span> },
     Assign { name: Sym, value: Expr, #[serde(skip)] span: Option<Span> },
     /// `target(.p)*[index] = value`. `path` is the chain of fields between the

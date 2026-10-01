@@ -2,6 +2,7 @@ pub mod ast;
 pub mod lexer;
 pub mod parser;
 mod parse_cache;
+pub mod var_destructure;
 
 pub use parse_cache::parse_cached;
 

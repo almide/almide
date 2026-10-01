@@ -412,7 +412,6 @@ impl Parser {
         self.skip_newlines_into_stmts(&mut stmts);
         while !self.check(TokenType::RBrace) {
             stmts.push(self.parse_stmt()?);
-            stmts.append(&mut self.pending_stmts);
             self.skip_newlines_into_stmts(&mut stmts);
             if self.check(TokenType::Semicolon) {
                 self.advance();
@@ -451,7 +450,6 @@ impl Parser {
         self.skip_newlines_into_stmts(&mut stmts);
         while !self.check(TokenType::RBrace) {
             stmts.push(self.parse_stmt()?);
-            stmts.append(&mut self.pending_stmts);
             self.skip_newlines_into_stmts(&mut stmts);
             if self.check(TokenType::Semicolon) {
                 self.advance();

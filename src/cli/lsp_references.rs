@@ -170,7 +170,7 @@ impl<'a> OccWalker<'a> {
                 self.walk_expr(value); // RHS resolves against the OUTER binding
                 self.define(*name, *span, "binding");
             }
-            S::LetDestructure { pattern, value, span } => {
+            S::LetDestructure { pattern, value, span, .. } => {
                 self.walk_expr(value);
                 self.bind_pattern(pattern, *span, "binding");
             }
