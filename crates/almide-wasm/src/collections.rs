@@ -752,6 +752,9 @@ impl Emitter<'_> {
             def_id: None,
         };
         self.lower_field_assign(id, path, &call)?;
+        // #2755: the arguments were lowered as the synthesized call's — the
+        // clones its own module-call audit judged.
+        args.iter().for_each(|a| self.witness_inline_arg(a));
         Ok(None)
     }
 }
