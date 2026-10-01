@@ -182,7 +182,7 @@
 2011	spec/wasm_cross/fan_block_err_list_order.almd
 5285	spec/wasm_cross/fan_deterministic.almd
 3693	spec/wasm_cross/fan_effect_mapper.almd
-12249	spec/wasm_cross/fan_effect_mapper_capability.almd
+12259	spec/wasm_cross/fan_effect_mapper_capability.almd
 2685	spec/wasm_cross/fan_map_all_workers_abort_one_line.almd
 2357	spec/wasm_cross/fan_map_err.almd
 2322	spec/wasm_cross/fan_map_inline_err.almd
@@ -190,7 +190,7 @@
 5976	spec/wasm_cross/fan_map_nested_combinators.almd
 8290	spec/wasm_cross/fan_map_parallel_scalar.almd
 2696	spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd
-10584	spec/wasm_cross/fan_prefetch_fs.almd
+10602	spec/wasm_cross/fan_prefetch_fs.almd
 3222	spec/wasm_cross/fan_pure_thunks.almd
 6016	spec/wasm_cross/fan_race_mapper.almd
 7736	spec/wasm_cross/fan_settle_tuple.almd
@@ -220,12 +220,12 @@
 3415	spec/wasm_cross/float_to_int_edges.almd
 2409	spec/wasm_cross/fold_heap_acc.almd
 1914	spec/wasm_cross/for_in_forms.almd
-20936	spec/wasm_cross/fs_call_head_family.almd
+20952	spec/wasm_cross/fs_call_head_family.almd
 21662	spec/wasm_cross/fs_composition_family.almd
-15604	spec/wasm_cross/fs_fallible_stream_callback.almd
+15694	spec/wasm_cross/fs_fallible_stream_callback.almd
 14617	spec/wasm_cross/fs_glob_segments.almd
 11710	spec/wasm_cross/fs_list_dir_multipass.almd
-13992	spec/wasm_cross/fs_metadata_family.almd
+14008	spec/wasm_cross/fs_metadata_family.almd
 8110	spec/wasm_cross/fs_preopen_resolve.almd
 11274	spec/wasm_cross/fs_read_bytes_raw_call_head.almd
 15196	spec/wasm_cross/fs_read_directory_errno.almd
@@ -376,7 +376,7 @@
 1465	spec/wasm_cross/let_wildcard_discard.almd
 2065	spec/wasm_cross/letbound_variant_match.almd
 2236	spec/wasm_cross/licm_zero_trip_hoist.almd
-13677	spec/wasm_cross/line_endings_bare_cr.almd
+13714	spec/wasm_cross/line_endings_bare_cr.almd
 15445	spec/wasm_cross/list_arg_map_view.almd
 2340	spec/wasm_cross/list_call_element.almd
 3365	spec/wasm_cross/list_chunk_windows.almd
