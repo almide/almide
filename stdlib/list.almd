@@ -613,7 +613,8 @@ fn __fallible_all[A, E](xs: List[A], f: (A) -> Result[Bool, E]) -> Result[Bool, 
   for x in xs {
     if stop then ()
     else match f(x) {
-      ok(b) => if b then () else {
+      ok(b) => if b then ()
+      else {
         held = false
         stop = true
       },
@@ -706,7 +707,8 @@ fn __fallible_take_while[A, E](xs: List[A], f: (A) -> Result[Bool, E]) -> Result
   for x in xs {
     if stop then ()
     else match f(x) {
-      ok(keep) => if keep then list.push(out, x) else {
+      ok(keep) => if keep then list.push(out, x)
+      else {
         stop = true
       },
       err(e) => {
@@ -731,7 +733,8 @@ fn __fallible_drop_while[A, E](xs: List[A], f: (A) -> Result[Bool, E]) -> Result
   for x in xs {
     if stop then ()
     else if dropping then match f(x) {
-      ok(drop) => if drop then () else {
+      ok(drop) => if drop then ()
+      else {
         dropping = false
         list.push(out, x)
       },
@@ -739,8 +742,7 @@ fn __fallible_drop_while[A, E](xs: List[A], f: (A) -> Result[Bool, E]) -> Result
         failed = some(e)
         stop = true
       },
-    }
-    else list.push(out, x)
+    } else list.push(out, x)
   }
   match failed {
     some(e) => err(e),
@@ -842,13 +844,19 @@ fn __fallible_iterate[T, E](seed: T, f: (T) -> Result[T, E], n: Int) -> Result[L
 // ── the key-extracting cells ──
 // The keys are computed first, once per element in list order (the first err
 // stops there), then the total form runs over (key, element) pairs.
-fn __fallible_sort_by[A, B, E](xs: List[A], f: (A) -> Result[B, E]) -> Result[List[A], E] = match __fallible_map(xs, f) {
+fn __fallible_sort_by[A, B, E](xs: List[A], f: (A) -> Result[B, E]) -> Result[List[A], E] = match __fallible_map(
+  xs,
+  f,
+) {
   ok(keys) => ok(list.zip(keys, xs) |> list.sort_by((p) => p.0) |> list.map((p) => p.1)),
   err(e) => err(e),
 }
 
 // Groups in first-key order, each in list order — `group_by`'s own walk.
-fn __fallible_group_by[A, B, E](xs: List[A], f: (A) -> Result[B, E]) -> Result[Map[B, List[A]], E] = match __fallible_map(xs, f) {
+fn __fallible_group_by[A, B, E](xs: List[A], f: (A) -> Result[B, E]) -> Result[Map[B, List[A]], E] = match __fallible_map(
+  xs,
+  f,
+) {
   ok(keys) => {
     var out: Map[B, List[A]] = map.new()
     var i = 0
@@ -869,7 +877,10 @@ fn __fallible_group_by[A, B, E](xs: List[A], f: (A) -> Result[B, E]) -> Result[M
   err(e) => err(e),
 }
 
-fn __fallible_unique_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[List[A], E] = match __fallible_map(xs, f) {
+fn __fallible_unique_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[List[A], E] = match __fallible_map(
+  xs,
+  f,
+) {
   ok(keys) => ok(list.zip(keys, xs) |> list.unique_by((p) => p.0) |> list.map((p) => p.1)),
   err(e) => err(e),
 }
