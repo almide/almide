@@ -349,7 +349,8 @@ impl Emitter<'_> {
                     span: None,
                     def_id: None,
                 };
-                let args = [var_expr, key.clone(), value.clone()];
+                // Pinned: clones whose marks are keyed by address (#3143).
+                let args = self.owned_call_marks.pin_args(vec![var_expr, key.clone(), value.clone()]);
                 self.arm_scope(|em| em.lower_map_call("set", &args, None))?;
                 self.f.instructions().local_set(var_idx);
                 Ok(())

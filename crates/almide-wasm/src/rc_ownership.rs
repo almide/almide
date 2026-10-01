@@ -542,7 +542,7 @@ impl Emitter<'_> {
         // borrowed arm stays borrowed.
         if let almide_ir::IrExprKind::If { then, else_, .. } = &e.kind {
             return (self.rc_owned_result(then) && self.rc_owned_result(else_))
-                || self.owned_call_marks.contains(&(e as *const almide_ir::IrExpr as usize));
+                || self.owned_call_marks.is_marked(e);
         }
         if let almide_ir::IrExprKind::Match { arms, .. } = &e.kind {
             // lower_arm_body normalizes every value arm to one credit.
@@ -569,7 +569,7 @@ impl Emitter<'_> {
                 // `fan { … }` (fan.rs `lower_fan_block`): owned when marked.
                 | almide_ir::IrExprKind::Fan { .. }
         ) {
-            return self.owned_call_marks.contains(&(e as *const almide_ir::IrExpr as usize));
+            return self.owned_call_marks.is_marked(e);
         }
         let almide_ir::IrExprKind::Call { target, .. } = &e.kind else {
             return false;
@@ -590,7 +590,7 @@ impl Emitter<'_> {
             // the dispatch that lowered it: the registry-table path
             // (#1990) or a native arm that declared `Lowered::owned` (#2004).
             almide_ir::CallTarget::Module { .. } => {
-                return self.owned_call_marks.contains(&(target as *const almide_ir::CallTarget as usize));
+                return self.owned_call_marks.is_target_marked(target);
             }
             // A closure call (#2010): the lifted body is lowered by the same
             // `lower_fn` a table fn is — its epilogue hands the caller ONE
@@ -717,7 +717,7 @@ impl Emitter<'_> {
         self.witness_branch_close();
         self.branch_depth -= 1;
         if arms? {
-            self.owned_call_marks.insert(e as *const almide_ir::IrExpr as usize);
+            self.owned_call_marks.mark(e);
         }
         self.f.instructions().end();
         Ok(())

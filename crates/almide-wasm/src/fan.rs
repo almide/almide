@@ -346,7 +346,7 @@ impl Emitter<'_> {
         };
         // The result's one credit is this node's: a bind takes no second.
         if owned_out {
-            self.owned_call_marks.insert(e as *const IrExpr as usize);
+            self.owned_call_marks.mark(e);
         }
         for (_, p, _) in vals.iter().rev() {
             self.release_val(*p);

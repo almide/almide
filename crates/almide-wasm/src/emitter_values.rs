@@ -183,7 +183,10 @@ impl Emitter<'_> {
                     TypeConstructorId::List,
                     vec![pair_ty.clone()],
                 );
-                let pairs = IrExpr {
+                // Pinned: the marks its nodes' lowering writes are keyed
+                // by address, and a pairs list dropped here handed its
+                // marks to the next literal's (#3139 / #3143).
+                let pairs = self.owned_call_marks.pin(IrExpr {
                     kind: IrExprKind::List {
                         elements: entries
                             .iter()
@@ -200,8 +203,8 @@ impl Emitter<'_> {
                     ty: list_ty,
                     span: e.span,
                     def_id: None,
-                };
-                match self.arm_scope(|em| em.lower_map_call("from_list", &[pairs], Some(ty)))? {
+                });
+                match self.arm_scope(|em| em.lower_map_call("from_list", std::slice::from_ref(&*pairs), Some(ty)))? {
                     Some(t) => Ok(t.ty),
                     None => unsup("map-literal-unit"),
                 }

@@ -253,7 +253,8 @@ impl Emitter<'_> {
             },
             _ => return Ok(false),
         };
-        let empty = IrExpr { kind, ty: v.ty.clone(), span: None, def_id: None };
+        // Pinned: `bytes.new(0)`'s ownership mark is keyed by its address (#3143).
+        let empty = self.owned_call_marks.pin(IrExpr { kind, ty: v.ty.clone(), span: None, def_id: None });
         self.lower_field_assign(&id, &path, &empty)?;
         Ok(true)
     }

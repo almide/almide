@@ -121,7 +121,8 @@ impl Emitter<'_> {
             // The trailing `unreachable` keeps the stack polymorphic, which is
             // what lets `panic` stand in a value-producing arm.
             CallTarget::Named { name } if name.as_str() == "panic" && args.len() == 1 => {
-                let line = IrExpr {
+                // Pinned: a clone whose marks are keyed by address (#3143).
+                let line = self.owned_call_marks.pin(IrExpr {
                     kind: IrExprKind::BinOp {
                         op: almide_ir::BinOp::ConcatStr,
                         left: Box::new(IrExpr {
@@ -135,7 +136,7 @@ impl Emitter<'_> {
                     ty: args[0].ty.clone(),
                     span: args[0].span,
                     def_id: None,
-                };
+                });
                 self.arm_scope(|em| {
                     em.lower_arg(&line, Some(STR), ArgMode::Borrow)?;
                     em.io_raw(crate::fs_meta::OP_STDERR_RAW)

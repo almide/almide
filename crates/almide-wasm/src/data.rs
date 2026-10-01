@@ -176,7 +176,7 @@ impl Emitter<'_> {
                     // payload above (#2969): it is fresh and owns its slot
                     // on that path as well. Left unmarked, the bind's `+1`
                     // landed on the fresh cell and it was never freed.
-                    self.owned_call_marks.insert(e as *const IrExpr as usize);
+                    self.owned_call_marks.mark(e);
                     SliceTy::Option(o)
                 }
                 got @ SliceTy::Option(_) => got,
@@ -619,7 +619,7 @@ impl Emitter<'_> {
             return;
         }
         self.rc_inc_top();
-        self.owned_call_marks.insert(e as *const IrExpr as usize);
+        self.owned_call_marks.mark(e);
     }
 
     /// Does `own_unwrap_or_join` normalize this `??` to an owned join? (The
