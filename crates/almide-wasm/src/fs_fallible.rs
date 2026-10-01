@@ -44,9 +44,12 @@ impl Emitter<'_> {
         let owned = body.is_none_or(|b| self.rc_owned_result(b));
         let hline = self.hold_i32()?;
         let hres = self.hold_i32()?;
-        self.fs_frames_foreach_borrowed(hraw, hlen, |em| {
+        let record = !compound && self.witness_fallible_walk(None, owned);
+        let act = (!compound).then_some((cb, crate::fs::witness_walkers::WalkAcc::Carried(None)));
+        self.fs_frames_foreach_borrowed(hraw, hlen, act, |em| {
             em.f.instructions().local_set(hline);
             em.f.instructions().local_get(hr).i32_eqz().if_(BlockType::Empty);
+            em.witness_fallible_open(record);
             match (hcl, ti, body) {
                 (Some(hcl), Some(ti), _) => {
                     em.f.instructions().local_get(hcl);
@@ -61,6 +64,7 @@ impl Emitter<'_> {
                 }
                 _ => return unsup("fs-fallible-each-shape"),
             }
+            let wc = em.witness_fallible_carrier(record);
             let mut i = em.f.instructions();
             i.local_set(hres);
             i.local_get(hres).i32_load(slot_memarg(almide_layout::SUM_TAG)).if_(BlockType::Empty);
@@ -77,6 +81,7 @@ impl Emitter<'_> {
             }
             i.end();
             i.end();
+            em.witness_fallible_close(wc, false, None);
             Ok(())
         })?;
         self.release_i32();

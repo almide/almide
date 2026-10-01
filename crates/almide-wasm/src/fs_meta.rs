@@ -512,11 +512,20 @@ impl Emitter<'_> {
         let owned = self.rc_owned_result(body);
         let acc_dec = self.elem_is_handle(acc_ty).then(|| self.dec_fn_of(acc_ty));
         let hres = self.hold_i32()?;
-        self.fs_frames_foreach_borrowed(hraw, hlen, |em| {
+        let record = self.witness_fallible_walk(Some((params[0], acc_ty)), owned);
+        let heap_acc = record && acc_dec.is_some();
+        let act = if heap_acc {
+            crate::fs::witness_walkers::WalkAcc::Outer(params[0])
+        } else {
+            crate::fs::witness_walkers::WalkAcc::Carried(None)
+        };
+        self.fs_frames_foreach_borrowed(hraw, hlen, Some((cb, act)), |em| {
             em.f.instructions().local_set(params[1]);
             // once an err landed, the callback never runs again
             em.f.instructions().local_get(hr).i32_eqz().if_(BlockType::Empty);
+            em.witness_fallible_open(record);
             em.lower(body, None)?;
+            let wc = em.witness_fallible_carrier(record);
             let mut i = em.f.instructions();
             i.local_set(hres);
             i.local_get(hres).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_eqz();
@@ -542,10 +551,12 @@ impl Emitter<'_> {
             i.local_set(hr);
             i.end();
             i.end();
+            em.witness_fallible_close(wc, true, heap_acc.then_some(params[0]));
             Ok(())
         })?;
         self.release_i32();
         self.fs_frames_release_raw(hraw, herr);
+        self.witness_fallible_result(heap_acc, params[0], acc_ty);
         let hs = self.hold_i32()?;
         {
             let mut i = self.f.instructions();
@@ -619,7 +630,7 @@ impl Emitter<'_> {
         let acc_dec = self.elem_is_handle(acc_ty).then(|| self.dec_fn_of(acc_ty));
         let hline = self.hold_i32()?;
         let hres = self.hold_i32()?;
-        self.fs_frames_foreach_borrowed(hraw, hlen, |em| {
+        self.fs_frames_foreach_borrowed(hraw, hlen, None, |em| {
             em.f.instructions().local_set(hline);
             em.f.instructions().local_get(hr).i32_eqz().if_(BlockType::Empty);
             // Closure convention (calls.rs): env first, then the args —
