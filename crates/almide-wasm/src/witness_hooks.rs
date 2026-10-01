@@ -28,6 +28,10 @@ use crate::arm::{ArgMode, Lowered, Own};
 use crate::emitter::Emitter;
 use crate::SliceTy;
 
+/// The mut-receiver and inlined-thunk hooks (split for the file budget).
+#[path = "witness_mut.rs"]
+pub(crate) mod witness_mut;
+
 /// A hooked node's identity for the module-call audit.
 fn node(e: &almide_ir::IrExpr) -> usize {
     e as *const almide_ir::IrExpr as usize
@@ -325,7 +329,18 @@ impl Emitter<'_> {
         let scalar = |a: &almide_ir::IrExpr| {
             crate::ty::slice_ty_of(&a.ty, self.types).is_some_and(|t| !self.rc_droppable(t))
         };
-        if !args.iter().all(|a| scalar(a) || w.hooked_since(hooks_before, node(a))) {
+        // A mut receiver (`list.push(xs, v)`'s `xs`) is not lowered as an
+        // argument: the arm reads the var's slot and writes the result back,
+        // and that rebind is the hook (`witness_mut_rebind`).
+        // A record field receiver (`list.push(h.f, v)`) rebinds its root var.
+        let rebound = |a: &almide_ir::IrExpr| {
+            let root = match &a.kind {
+                almide_ir::IrExprKind::Var { id } => Some(*id),
+                _ => crate::list_mut::record_field_receiver(a).map(|(id, _)| id),
+            };
+            root.is_some_and(|id| w.hooked_since(hooks_before, witness_mut::var_key(id)))
+        };
+        if !args.iter().all(|a| scalar(a) || w.hooked_since(hooks_before, node(a)) || rebound(a)) {
             self.witness_decline(&format!("module-arm:unaudited:{name}"));
             return;
         }

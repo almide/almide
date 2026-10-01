@@ -202,6 +202,10 @@ impl Emitter<'_> {
         for _ in &holds {
             self.release_i32();
         }
+        // #2755: the var now holds the root copy — its old block released
+        // above — exactly a mut receiver's rebind. A value that spent the
+        // var's credit is the C-132 write-back's, not recorded here.
+        self.witness_field_rebind(*target, slot.is_err(), spends_var, root);
         Ok(())
     }
 
@@ -331,6 +335,7 @@ impl Emitter<'_> {
                         // the typed drop (#2968 — every pop leaked it).
                         let dec = self.dec_fn_of(list_ty);
                         self.f.instructions().local_get(hb).call(dec);
+                        self.witness_mut_rebind(*id, *vglob);
                     }
                     (None, Some((id, path))) => self.field_assign_with(&id, &path, false, |s, _| {
                         s.f.instructions().local_get(hnew);
@@ -444,6 +449,7 @@ impl Emitter<'_> {
                 self.f.instructions().call(helper);
                 self.settle_outgrown_receiver(shared, var_ty);
                 self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
+                self.witness_mut_rebind(*id, vglob);
                 Ok(None)
             }
             // ONE allocation, zero copies: the linked self-host impl binds
