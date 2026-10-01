@@ -81,9 +81,12 @@ fn aggregates_witness_exactly_and_unhooked_shapes_decline() {
         assert_eq!(got, cert, "{name}");
         assert!(accepted(got), "{name}: the portable checker must accept {got:?}");
     }
-    // A Float part's formatted block is appended and never released (#2973):
-    // declined at emission, never certified.
-    assert_eq!(w.get("fl").map(String::as_str), Some("!decline:display:Float-temp\n"));
+    // A Float part's formatted block is copied into the line and released
+    // (#2973, fixed): born and released at the part (`id`); the captured
+    // interpolation moves out.
+    let fl = w.get("fl").map(String::as_str);
+    assert_eq!(fl, Some("id\nim\n"));
+    assert!(accepted(fl.unwrap()), "fl: the portable checker must accept {fl:?}");
     // A tuple literal as a match subject: arg_temps.rs names the constructed
     // subject first (#2971), so the Bind hook records the fresh block and the
     // exit plan releases it — certified, and the checker accepts it.
