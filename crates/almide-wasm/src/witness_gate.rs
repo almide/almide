@@ -170,6 +170,13 @@ fn stmts_subset(stmts: &[almide_ir::IrStmt]) -> Option<String> {
                     return Some(w.at("stmt:Guard"));
                 }
             }
+            // #2755: `guard c else v` — a one-arm site whose arm settles the
+            // value like a tail and leaves through the exit plan (stmts.rs).
+            IrStmtKind::Guard { cond, else_ } => {
+                if let Some(w) = value_subset(cond).map(|w| w.inside("guard-cond")).or_else(|| value_subset(else_)) {
+                    return Some(w.at("stmt:Guard"));
+                }
+            }
             // `let (a, b) = t`: arg_temps.rs names every droppable subject
             // first (`let t = …` is the Bind hook's, the exit plan releases
             // it), so the subject is a Var and each binder is a VIEW of one
