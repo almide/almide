@@ -26,6 +26,7 @@ mod expressions;
 mod calls;
 mod statements;
 mod types;
+mod record_defaults;
 pub use types::lower_bundled_type_decl;
 mod derive;
 mod derive_codec;
@@ -44,6 +45,8 @@ pub struct LowerCtx<'a> {
     env: &'a TypeEnv,
     type_map: &'a TypeMap,
     fn_defaults: HashMap<Sym, Vec<Option<ast::Expr>>>,
+    /// This module's record field defaults (`record_defaults.rs`, #3167).
+    field_defaults: HashMap<Sym, Vec<(Sym, ast::Expr)>>,
     type_conventions: HashMap<Sym, std::collections::HashSet<Sym>>,
     /// `Type.convention` names the user wrote explicitly (vs auto-derived).
     explicit_convention_fns: std::collections::HashSet<Sym>,
@@ -85,6 +88,7 @@ impl<'a> LowerCtx<'a> {
             env,
             type_map,
             fn_defaults: HashMap::new(),
+            field_defaults: HashMap::new(),
             type_conventions: HashMap::new(),
             explicit_convention_fns: std::collections::HashSet::new(),
             protocol_bounds: HashMap::new(),
@@ -254,6 +258,7 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
     collect_type_conventions(&mut ctx, prog);
     collect_explicit_convention_fns(&mut ctx, prog);
     collect_fn_defaults(&mut ctx, prog);
+    record_defaults::collect_field_defaults(&mut ctx, prog);
 
     let mut functions = Vec::new();
     let mut top_lets = Vec::new();
