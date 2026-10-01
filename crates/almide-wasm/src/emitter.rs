@@ -6,6 +6,10 @@ use almide_ir::{IrExpr, IrExprKind, UnOp, VarId};
 use wasm_encoder::{BlockType, Function, ValType};
 
 use crate::*;
+// Diverging values in a value slot (#3144): a child of the emitter.
+#[path = "diverge.rs"]
+mod diverge;
+use diverge::is_diverging_call;
 
 #[path = "node_marks.rs"]
 pub(crate) mod node_marks;
@@ -401,13 +405,13 @@ impl Emitter<'_> {
         let saved = self.loop_ctl.take();
         // A node lowered again is marked by its latest lowering only (#3139).
         self.owned_call_marks.forget(e);
-        let r = self.lower_node(e, want);
+        let r = self.lower_node_or_never(e, want);
         self.loop_ctl = saved;
         crate::decline_site::note(&r, e.span);
         r
     }
 
-    fn lower_node(&mut self, e: &IrExpr, want: Option<SliceTy>) -> Result<SliceTy, EmitError> {
+    pub(crate) fn lower_node(&mut self, e: &IrExpr, want: Option<SliceTy>) -> Result<SliceTy, EmitError> {
         let tail = std::mem::take(&mut self.in_tail);
         let got = match &e.kind {
             IrExprKind::LitInt { value } => {
@@ -531,13 +535,12 @@ impl Emitter<'_> {
                         SliceTy::Unit
                     }
                     // A diverging call in a value-producing arm (#2769:
-                    // `if c then panic(m) else v`): its lowering ends in
-                    // `unreachable`, so the stack is polymorphic and the arm
-                    // types as whatever its branch expects.
-                    None if is_diverging_call(target) => match want {
-                        Some(t) => t,
-                        None => return unsup("diverging-call-untyped"),
-                    },
+                    // `if c then panic(m) else v`) or operand (#3144): the
+                    // stack is polymorphic past it, so it types as whatever
+                    // its slot expects (`diverge.rs`).
+                    None if is_diverging_call(target) || e.ty == almide_types::types::Ty::Never => {
+                        self.diverged_call_value(target, want)?
+                    }
                     None => return unsup("call-unit-in-value"),
                 }
             }
@@ -773,17 +776,4 @@ fn is_sum_shape(k: &IrExprKind) -> bool {
             | IrExprKind::UnwrapOr { .. }
             | IrExprKind::ToOption { .. }
     )
-}
-
-
-/// The calls whose lowering ends in `unreachable` (control never returns):
-/// `panic(msg)` and `process.exit(code)`.
-fn is_diverging_call(target: &almide_ir::CallTarget) -> bool {
-    match target {
-        almide_ir::CallTarget::Named { name } => name.as_str() == "panic",
-        almide_ir::CallTarget::Module { module, func, .. } => {
-            module.as_str() == "process" && func.as_str() == "exit"
-        }
-        _ => false,
-    }
 }

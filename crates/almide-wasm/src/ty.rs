@@ -160,7 +160,10 @@ fn applied_builtin_of(
             Some(SliceTy::Option(types.intern(e)))
         }
         (TypeConstructorId::Result, [a, b]) => {
-            let o = slice_ty_of(a, types)?;
+            // `Result[Never, E]` is an `effect fn … -> Never`'s carrier
+            // (#3144): its ok payload is never built, so the Unit
+            // placeholder its signature returns stands for it.
+            let o = if *a == Ty::Never { SliceTy::Unit } else { slice_ty_of(a, types)? };
             let e = slice_ty_of(b, types)?;
             Some(SliceTy::Result(types.intern(o), types.intern(e)))
         }
