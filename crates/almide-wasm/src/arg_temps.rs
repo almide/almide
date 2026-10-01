@@ -18,10 +18,10 @@
 //! scripts/check-arm-args.sh refuses an undeclared argument.
 //!
 //! Hoisting keeps the operands' relative order (binds in operand order,
-//! then the consumer). A hoisted operand is a non-effect call — an effect
-//! call arrives wrapped in `Try`/`Unwrap` and is left alone — so the
-//! evaluation order change against the non-hoisted operands (Vars,
-//! literals, reads) is unobservable.
+//! then the consumer). Every operand BEFORE a hoisted one that is not a
+//! plain read (a literal, a variable, a field of one) is hoisted with it,
+//! so no observable operand — a non-effect fn may still print or panic —
+//! changes places with a hoisted one (#3139).
 //! Extraction (`Try`, `Unwrap`, `UnwrapOr`) binds its single input at the
 //! extraction site as well. The wrapper then survives payload reads and
 //! joins the normal frame releases, including the propagation edge.
@@ -126,6 +126,17 @@ fn is_literal(e: &IrExpr) -> bool {
             | IrExprKind::LitStr { .. }
             | IrExprKind::Unit
     )
+}
+
+/// An operand whose evaluation can neither be observed nor trap — a
+/// literal, a variable, a field / position read of one — so evaluating it
+/// after a named (hoisted) operand is indistinguishable from before (#3139).
+fn is_plain_read(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::Var { .. } => true,
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => is_plain_read(object),
+        _ => is_literal(e),
+    }
 }
 
 /// The value an expression evaluates to, through block wrappers.
@@ -451,6 +462,20 @@ impl IrMutVisitor for Binder<'_> {
             named[last] = true;
             for (i, a) in operands.iter().enumerate().take(last) {
                 if !is_literal(a) {
+                    named[i] = true;
+                }
+            }
+        }
+        // #3139: naming an operand moves it AHEAD of every operand left in
+        // place, so an earlier operand that can be observed — a call (a
+        // pure fn may `println` or `panic`), an index that may trap — would
+        // run after it: `"${f()} ${g(5)}"` with `f(): Int` printing and
+        // `g(5): String` panicking ran `g` first and lost `f`'s output.
+        // Every earlier operand that is not a plain read is named too, in
+        // order, so the binds replay the source's left-to-right order.
+        if !projection && let Some(last) = named.iter().rposition(|n| *n) {
+            for (i, a) in operands.iter().enumerate().take(last) {
+                if !is_plain_read(a) {
                     named[i] = true;
                 }
             }
