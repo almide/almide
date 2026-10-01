@@ -123,4 +123,29 @@ impl Emitter<'_> {
             (true, false, _) => {}
         }
     }
+
+    /// #2755: `h.f = v` (stmts.rs `lower_field_assign`): the value moves into
+    /// the record copy's slot — behind the share guard (`witness_store`), or
+    /// as a MOVED temporary's own credit (`m`, #3104). The root var's rebind
+    /// is `field_assign_with`'s. A value that spends the var's credit (the
+    /// C-132 write-back) leaves the old block to the callee: not recorded.
+    pub(crate) fn witness_field_value(&mut self, value: &almide_ir::IrExpr, t: SliceTy, moved: Option<u32>, spends: bool) {
+        if self.witness.is_none() || !self.rc_droppable(t) {
+            return;
+        }
+        if spends {
+            self.witness_decline("field-assign:spends-var");
+            return;
+        }
+        match moved {
+            Some(l) => {
+                if let Some(w) = self.witness.as_mut()
+                    && !w.move_local(l)
+                {
+                    w.poison();
+                }
+            }
+            None => self.witness_store(value, t),
+        }
+    }
 }
