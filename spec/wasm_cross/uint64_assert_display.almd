@@ -1,0 +1,13 @@
+// @contract: C-179
+// A failing `assert_eq` over upper-half UInt64 values reports them unsigned
+// (#3187): the message renders each operand the way `${…}` does, so the
+// `expected:` / `found:` lines carry the same digits on native, wasm and the
+// interpreter, top-level and nested.
+fn main() -> Unit = {
+  let big: UInt64 = 18446744073709551615
+  let near: UInt64 = 9223372036854775808
+  assert_eq(big, big)
+  println("before ${big}")
+  assert_eq((big, [big], some(big)), (near, [near], some(near)))
+  println("unreachable")
+}
