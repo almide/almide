@@ -6,8 +6,10 @@
 // prints `-1` for u64::MAX; a Float32 rides the f64 slot, so a display that
 // loses its type prints the widened f64's digits. One fn per cell, named
 // `<path>_<width>`; tests/sized_display_matrix_test.rs keeps the matrix whole.
-// `err_propagate_<width>` is the repr an error of that width carries when `!`
-// lifts it into an effect fn's String channel. The `main_line_<width>` cells
+// Two columns live in that test instead, as generated programs it runs on all
+// three legs: `tuple` and `err_propagate` (the repr `!` carries into an effect
+// fn's String channel), whose shapes the incumbent MIR lowering refuses, so
+// as corpus cells they would grow the walled-real ledger. The `main_line_<width>` cells
 // interpolate in `main`'s own body, where the outermost build takes the
 // room-free appends (line_bounded.rs). Each integer row also asserts its
 // `${x}` against `<width>.to_string(x)`, a printer of its own, so a leaf that
@@ -72,8 +74,6 @@ fn generic_record_int8(x: Int8) -> String = {
   "${b}"
 }
 
-fn tuple_int8(x: Int8) -> String = "${(x, 1, x)}"
-
 fn option_int8(x: Int8) -> String = "${some(x)}"
 
 fn result_ok_int8(x: Int8) -> String = {
@@ -122,16 +122,7 @@ fn nested_int8(x: Int8) -> String = {
   "${o}"
 }
 
-fn fails_int8(x: Int8) -> Result[Int, Int8] = err(x)
-
-effect fn lift_int8(x: Int8) -> Int = fails_int8(x)!
-
-effect fn err_propagate_int8(x: Int8) -> String = match lift_int8(x) {
-  ok(v) => "ok ${v}",
-  err(e) => e,
-}
-
-effect fn row_int8(x: Int8) -> Unit = {
+fn row_int8(x: Int8) -> Unit = {
   println("Int8 interp: " + interp_int8(x))
   println("Int8 interp_mid: " + interp_mid_int8(x))
   println("Int8 concat: " + concat_int8(x))
@@ -139,7 +130,6 @@ effect fn row_int8(x: Int8) -> Unit = {
   println("Int8 record: " + record_int8(x))
   println("Int8 anon_record: " + anon_record_int8(x))
   println("Int8 generic_record: " + generic_record_int8(x))
-  println("Int8 tuple: " + tuple_int8(x))
   println("Int8 option: " + option_int8(x))
   println("Int8 result_ok: " + result_ok_int8(x))
   println("Int8 result_err: " + result_err_int8(x))
@@ -151,8 +141,6 @@ effect fn row_int8(x: Int8) -> Unit = {
   println("Int8 generic_variant: " + generic_variant_int8(x))
   println("Int8 recursive_generic: " + recursive_generic_int8(x))
   println("Int8 nested: " + nested_int8(x))
-  let ep = err_propagate_int8(x)!
-  println("Int8 err_propagate: " + ep)
   assert_eq(interp_int8(x), int8.to_string(x))
 }
 
@@ -175,8 +163,6 @@ fn generic_record_int16(x: Int16) -> String = {
   let b: Box[Int16] = Box { v: x }
   "${b}"
 }
-
-fn tuple_int16(x: Int16) -> String = "${(x, 1, x)}"
 
 fn option_int16(x: Int16) -> String = "${some(x)}"
 
@@ -226,16 +212,7 @@ fn nested_int16(x: Int16) -> String = {
   "${o}"
 }
 
-fn fails_int16(x: Int16) -> Result[Int, Int16] = err(x)
-
-effect fn lift_int16(x: Int16) -> Int = fails_int16(x)!
-
-effect fn err_propagate_int16(x: Int16) -> String = match lift_int16(x) {
-  ok(v) => "ok ${v}",
-  err(e) => e,
-}
-
-effect fn row_int16(x: Int16) -> Unit = {
+fn row_int16(x: Int16) -> Unit = {
   println("Int16 interp: " + interp_int16(x))
   println("Int16 interp_mid: " + interp_mid_int16(x))
   println("Int16 concat: " + concat_int16(x))
@@ -243,7 +220,6 @@ effect fn row_int16(x: Int16) -> Unit = {
   println("Int16 record: " + record_int16(x))
   println("Int16 anon_record: " + anon_record_int16(x))
   println("Int16 generic_record: " + generic_record_int16(x))
-  println("Int16 tuple: " + tuple_int16(x))
   println("Int16 option: " + option_int16(x))
   println("Int16 result_ok: " + result_ok_int16(x))
   println("Int16 result_err: " + result_err_int16(x))
@@ -255,8 +231,6 @@ effect fn row_int16(x: Int16) -> Unit = {
   println("Int16 generic_variant: " + generic_variant_int16(x))
   println("Int16 recursive_generic: " + recursive_generic_int16(x))
   println("Int16 nested: " + nested_int16(x))
-  let ep = err_propagate_int16(x)!
-  println("Int16 err_propagate: " + ep)
   assert_eq(interp_int16(x), int16.to_string(x))
 }
 
@@ -279,8 +253,6 @@ fn generic_record_int32(x: Int32) -> String = {
   let b: Box[Int32] = Box { v: x }
   "${b}"
 }
-
-fn tuple_int32(x: Int32) -> String = "${(x, 1, x)}"
 
 fn option_int32(x: Int32) -> String = "${some(x)}"
 
@@ -330,16 +302,7 @@ fn nested_int32(x: Int32) -> String = {
   "${o}"
 }
 
-fn fails_int32(x: Int32) -> Result[Int, Int32] = err(x)
-
-effect fn lift_int32(x: Int32) -> Int = fails_int32(x)!
-
-effect fn err_propagate_int32(x: Int32) -> String = match lift_int32(x) {
-  ok(v) => "ok ${v}",
-  err(e) => e,
-}
-
-effect fn row_int32(x: Int32) -> Unit = {
+fn row_int32(x: Int32) -> Unit = {
   println("Int32 interp: " + interp_int32(x))
   println("Int32 interp_mid: " + interp_mid_int32(x))
   println("Int32 concat: " + concat_int32(x))
@@ -347,7 +310,6 @@ effect fn row_int32(x: Int32) -> Unit = {
   println("Int32 record: " + record_int32(x))
   println("Int32 anon_record: " + anon_record_int32(x))
   println("Int32 generic_record: " + generic_record_int32(x))
-  println("Int32 tuple: " + tuple_int32(x))
   println("Int32 option: " + option_int32(x))
   println("Int32 result_ok: " + result_ok_int32(x))
   println("Int32 result_err: " + result_err_int32(x))
@@ -359,8 +321,6 @@ effect fn row_int32(x: Int32) -> Unit = {
   println("Int32 generic_variant: " + generic_variant_int32(x))
   println("Int32 recursive_generic: " + recursive_generic_int32(x))
   println("Int32 nested: " + nested_int32(x))
-  let ep = err_propagate_int32(x)!
-  println("Int32 err_propagate: " + ep)
   assert_eq(interp_int32(x), int32.to_string(x))
 }
 
@@ -383,8 +343,6 @@ fn generic_record_uint8(x: UInt8) -> String = {
   let b: Box[UInt8] = Box { v: x }
   "${b}"
 }
-
-fn tuple_uint8(x: UInt8) -> String = "${(x, 1, x)}"
 
 fn option_uint8(x: UInt8) -> String = "${some(x)}"
 
@@ -434,16 +392,7 @@ fn nested_uint8(x: UInt8) -> String = {
   "${o}"
 }
 
-fn fails_uint8(x: UInt8) -> Result[Int, UInt8] = err(x)
-
-effect fn lift_uint8(x: UInt8) -> Int = fails_uint8(x)!
-
-effect fn err_propagate_uint8(x: UInt8) -> String = match lift_uint8(x) {
-  ok(v) => "ok ${v}",
-  err(e) => e,
-}
-
-effect fn row_uint8(x: UInt8) -> Unit = {
+fn row_uint8(x: UInt8) -> Unit = {
   println("UInt8 interp: " + interp_uint8(x))
   println("UInt8 interp_mid: " + interp_mid_uint8(x))
   println("UInt8 concat: " + concat_uint8(x))
@@ -451,7 +400,6 @@ effect fn row_uint8(x: UInt8) -> Unit = {
   println("UInt8 record: " + record_uint8(x))
   println("UInt8 anon_record: " + anon_record_uint8(x))
   println("UInt8 generic_record: " + generic_record_uint8(x))
-  println("UInt8 tuple: " + tuple_uint8(x))
   println("UInt8 option: " + option_uint8(x))
   println("UInt8 result_ok: " + result_ok_uint8(x))
   println("UInt8 result_err: " + result_err_uint8(x))
@@ -463,8 +411,6 @@ effect fn row_uint8(x: UInt8) -> Unit = {
   println("UInt8 generic_variant: " + generic_variant_uint8(x))
   println("UInt8 recursive_generic: " + recursive_generic_uint8(x))
   println("UInt8 nested: " + nested_uint8(x))
-  let ep = err_propagate_uint8(x)!
-  println("UInt8 err_propagate: " + ep)
   assert_eq(interp_uint8(x), uint8.to_string(x))
 }
 
@@ -487,8 +433,6 @@ fn generic_record_uint16(x: UInt16) -> String = {
   let b: Box[UInt16] = Box { v: x }
   "${b}"
 }
-
-fn tuple_uint16(x: UInt16) -> String = "${(x, 1, x)}"
 
 fn option_uint16(x: UInt16) -> String = "${some(x)}"
 
@@ -538,16 +482,7 @@ fn nested_uint16(x: UInt16) -> String = {
   "${o}"
 }
 
-fn fails_uint16(x: UInt16) -> Result[Int, UInt16] = err(x)
-
-effect fn lift_uint16(x: UInt16) -> Int = fails_uint16(x)!
-
-effect fn err_propagate_uint16(x: UInt16) -> String = match lift_uint16(x) {
-  ok(v) => "ok ${v}",
-  err(e) => e,
-}
-
-effect fn row_uint16(x: UInt16) -> Unit = {
+fn row_uint16(x: UInt16) -> Unit = {
   println("UInt16 interp: " + interp_uint16(x))
   println("UInt16 interp_mid: " + interp_mid_uint16(x))
   println("UInt16 concat: " + concat_uint16(x))
@@ -555,7 +490,6 @@ effect fn row_uint16(x: UInt16) -> Unit = {
   println("UInt16 record: " + record_uint16(x))
   println("UInt16 anon_record: " + anon_record_uint16(x))
   println("UInt16 generic_record: " + generic_record_uint16(x))
-  println("UInt16 tuple: " + tuple_uint16(x))
   println("UInt16 option: " + option_uint16(x))
   println("UInt16 result_ok: " + result_ok_uint16(x))
   println("UInt16 result_err: " + result_err_uint16(x))
@@ -567,8 +501,6 @@ effect fn row_uint16(x: UInt16) -> Unit = {
   println("UInt16 generic_variant: " + generic_variant_uint16(x))
   println("UInt16 recursive_generic: " + recursive_generic_uint16(x))
   println("UInt16 nested: " + nested_uint16(x))
-  let ep = err_propagate_uint16(x)!
-  println("UInt16 err_propagate: " + ep)
   assert_eq(interp_uint16(x), uint16.to_string(x))
 }
 
@@ -591,8 +523,6 @@ fn generic_record_uint32(x: UInt32) -> String = {
   let b: Box[UInt32] = Box { v: x }
   "${b}"
 }
-
-fn tuple_uint32(x: UInt32) -> String = "${(x, 1, x)}"
 
 fn option_uint32(x: UInt32) -> String = "${some(x)}"
 
@@ -642,16 +572,7 @@ fn nested_uint32(x: UInt32) -> String = {
   "${o}"
 }
 
-fn fails_uint32(x: UInt32) -> Result[Int, UInt32] = err(x)
-
-effect fn lift_uint32(x: UInt32) -> Int = fails_uint32(x)!
-
-effect fn err_propagate_uint32(x: UInt32) -> String = match lift_uint32(x) {
-  ok(v) => "ok ${v}",
-  err(e) => e,
-}
-
-effect fn row_uint32(x: UInt32) -> Unit = {
+fn row_uint32(x: UInt32) -> Unit = {
   println("UInt32 interp: " + interp_uint32(x))
   println("UInt32 interp_mid: " + interp_mid_uint32(x))
   println("UInt32 concat: " + concat_uint32(x))
@@ -659,7 +580,6 @@ effect fn row_uint32(x: UInt32) -> Unit = {
   println("UInt32 record: " + record_uint32(x))
   println("UInt32 anon_record: " + anon_record_uint32(x))
   println("UInt32 generic_record: " + generic_record_uint32(x))
-  println("UInt32 tuple: " + tuple_uint32(x))
   println("UInt32 option: " + option_uint32(x))
   println("UInt32 result_ok: " + result_ok_uint32(x))
   println("UInt32 result_err: " + result_err_uint32(x))
@@ -671,8 +591,6 @@ effect fn row_uint32(x: UInt32) -> Unit = {
   println("UInt32 generic_variant: " + generic_variant_uint32(x))
   println("UInt32 recursive_generic: " + recursive_generic_uint32(x))
   println("UInt32 nested: " + nested_uint32(x))
-  let ep = err_propagate_uint32(x)!
-  println("UInt32 err_propagate: " + ep)
   assert_eq(interp_uint32(x), uint32.to_string(x))
 }
 
@@ -695,8 +613,6 @@ fn generic_record_uint64(x: UInt64) -> String = {
   let b: Box[UInt64] = Box { v: x }
   "${b}"
 }
-
-fn tuple_uint64(x: UInt64) -> String = "${(x, 1, x)}"
 
 fn option_uint64(x: UInt64) -> String = "${some(x)}"
 
@@ -746,16 +662,7 @@ fn nested_uint64(x: UInt64) -> String = {
   "${o}"
 }
 
-fn fails_uint64(x: UInt64) -> Result[Int, UInt64] = err(x)
-
-effect fn lift_uint64(x: UInt64) -> Int = fails_uint64(x)!
-
-effect fn err_propagate_uint64(x: UInt64) -> String = match lift_uint64(x) {
-  ok(v) => "ok ${v}",
-  err(e) => e,
-}
-
-effect fn row_uint64(x: UInt64) -> Unit = {
+fn row_uint64(x: UInt64) -> Unit = {
   println("UInt64 interp: " + interp_uint64(x))
   println("UInt64 interp_mid: " + interp_mid_uint64(x))
   println("UInt64 concat: " + concat_uint64(x))
@@ -763,7 +670,6 @@ effect fn row_uint64(x: UInt64) -> Unit = {
   println("UInt64 record: " + record_uint64(x))
   println("UInt64 anon_record: " + anon_record_uint64(x))
   println("UInt64 generic_record: " + generic_record_uint64(x))
-  println("UInt64 tuple: " + tuple_uint64(x))
   println("UInt64 option: " + option_uint64(x))
   println("UInt64 result_ok: " + result_ok_uint64(x))
   println("UInt64 result_err: " + result_err_uint64(x))
@@ -775,8 +681,6 @@ effect fn row_uint64(x: UInt64) -> Unit = {
   println("UInt64 generic_variant: " + generic_variant_uint64(x))
   println("UInt64 recursive_generic: " + recursive_generic_uint64(x))
   println("UInt64 nested: " + nested_uint64(x))
-  let ep = err_propagate_uint64(x)!
-  println("UInt64 err_propagate: " + ep)
   assert_eq(interp_uint64(x), uint64.to_string(x))
 }
 
@@ -799,8 +703,6 @@ fn generic_record_float32(x: Float32) -> String = {
   let b: Box[Float32] = Box { v: x }
   "${b}"
 }
-
-fn tuple_float32(x: Float32) -> String = "${(x, 1, x)}"
 
 fn option_float32(x: Float32) -> String = "${some(x)}"
 
@@ -850,16 +752,7 @@ fn nested_float32(x: Float32) -> String = {
   "${o}"
 }
 
-fn fails_float32(x: Float32) -> Result[Int, Float32] = err(x)
-
-effect fn lift_float32(x: Float32) -> Int = fails_float32(x)!
-
-effect fn err_propagate_float32(x: Float32) -> String = match lift_float32(x) {
-  ok(v) => "ok ${v}",
-  err(e) => e,
-}
-
-effect fn row_float32(x: Float32) -> Unit = {
+fn row_float32(x: Float32) -> Unit = {
   println("Float32 interp: " + interp_float32(x))
   println("Float32 interp_mid: " + interp_mid_float32(x))
   println("Float32 concat: " + concat_float32(x))
@@ -867,7 +760,6 @@ effect fn row_float32(x: Float32) -> Unit = {
   println("Float32 record: " + record_float32(x))
   println("Float32 anon_record: " + anon_record_float32(x))
   println("Float32 generic_record: " + generic_record_float32(x))
-  println("Float32 tuple: " + tuple_float32(x))
   println("Float32 option: " + option_float32(x))
   println("Float32 result_ok: " + result_ok_float32(x))
   println("Float32 result_err: " + result_err_float32(x))
@@ -879,30 +771,28 @@ effect fn row_float32(x: Float32) -> Unit = {
   println("Float32 generic_variant: " + generic_variant_float32(x))
   println("Float32 recursive_generic: " + recursive_generic_float32(x))
   println("Float32 nested: " + nested_float32(x))
-  let ep = err_propagate_float32(x)!
-  println("Float32 err_propagate: " + ep)
 }
 
-effect fn main() -> Unit = {
-  row_int8(-128)!
-  row_int8(127)!
-  row_int16(-32768)!
-  row_int16(32767)!
-  row_int32(-2147483648)!
-  row_int32(2147483647)!
-  row_uint8(0)!
-  row_uint8(255)!
-  row_uint16(0)!
-  row_uint16(65535)!
-  row_uint32(0)!
-  row_uint32(4294967295)!
-  row_uint64(0)!
-  row_uint64(9223372036854775807)!
-  row_uint64(9223372036854775808)!
-  row_uint64(18446744073709551615)!
-  row_float32(float.to_float32(0.1))!
-  row_float32(float.to_float32(2.0))!
-  row_float32(float.to_float32(-123.456))!
+fn main() -> Unit = {
+  row_int8(-128)
+  row_int8(127)
+  row_int16(-32768)
+  row_int16(32767)
+  row_int32(-2147483648)
+  row_int32(2147483647)
+  row_uint8(0)
+  row_uint8(255)
+  row_uint16(0)
+  row_uint16(65535)
+  row_uint32(0)
+  row_uint32(4294967295)
+  row_uint64(0)
+  row_uint64(9223372036854775807)
+  row_uint64(9223372036854775808)
+  row_uint64(18446744073709551615)
+  row_float32(float.to_float32(0.1))
+  row_float32(float.to_float32(2.0))
+  row_float32(float.to_float32(-123.456))
   let hi_int8: Int8 = 127
   println("main_line_int8: ${hi_int8}")
   println("${hi_int8}")

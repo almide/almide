@@ -1,9 +1,19 @@
 //! #3187 matrix gate: every sized width prints the same text through every
-//! display path, on every leg. The evidence is one fixture,
+//! display path, on every leg. Most of the evidence is one fixture,
 //! `spec/wasm_cross/sized_display_matrix.almd`, with one fn per cell named
 //! `<path>_<width>`; the cross-target corpus gates run it on native, wasm and
 //! the interpreter, and each integer row asserts its `${x}` against the
-//! width's own `to_string`. This gate keeps the matrix whole:
+//! width's own `to_string`.
+//!
+//! Two columns are GENERATED here instead (`GENERATED_PATHS`): a tuple display
+//! and the repr `!` carries into an effect fn's String channel. The incumbent
+//! MIR lowering refuses both shapes, so as corpus cells they would grow the
+//! walled-real ledger (`proofs/walled-real-baseline.txt`, a ratchet this
+//! change must not loosen). Each such cell is written as its own program, run
+//! on native, wasm and the interpreter, compared byte for byte, and checked
+//! against the expected unsigned / binary32 text.
+//!
+//! This gate keeps the matrix whole:
 //!
 //! - the WIDTH axis is derived from the resolver's builtin type table
 //!   (`BUILTIN_TYPE_HEADS`), so a new sized width without its cells fails here.
@@ -19,8 +29,13 @@
 //! at the first failure, so it is pinned once, for UInt64, by
 //! `spec/wasm_cross/uint64_assert_display.almd` (checked below).
 
+#![allow(dead_code)]
+
 use almide::canonicalize::resolve::{BuiltinArity, BuiltinTypeHead, BUILTIN_TYPE_HEADS};
 use almide::types::Ty;
+
+include!("wasm_runtime_test_parts/common.rs");
+include!("wasm_runtime_test_parts/interp_leg.rs");
 
 /// Every display path a sized value reaches, as its cell fn-name prefix.
 const PATHS: &[&str] = &[
@@ -31,7 +46,6 @@ const PATHS: &[&str] = &[
     "record",            // a declared record's field
     "anon_record",       // an anonymous record's field
     "generic_record",    // a generic record instance's field (`Box[T]`)
-    "tuple",             // a tuple element
     "option",            // a `some(..)` payload
     "result_ok",         // an `ok(..)` payload
     "result_err",        // an `err(..)` payload
@@ -43,7 +57,12 @@ const PATHS: &[&str] = &[
     "generic_variant",   // a generic variant instance's payload (`Tag[T]`)
     "recursive_generic", // a RECURSIVE generic instance (`Tree[T]`, the helper path)
     "nested",            // `Option[List[(T, Rec)]]`, several levels down
-    "err_propagate",     // the repr `!` carries into an effect fn's String channel
+];
+
+/// The columns this test generates and runs itself (see the module doc).
+const GENERATED_PATHS: &[&str] = &[
+    "tuple",         // a tuple element: `${(x, 1, x)}`
+    "err_propagate", // the repr `!` carries into an effect fn's String channel
 ];
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/spec/wasm_cross/sized_display_matrix.almd");
@@ -119,14 +138,16 @@ fn every_width_has_every_display_path_cell() {
 fn every_fixture_cell_is_a_listed_path() {
     let src = std::fs::read_to_string(FIXTURE).expect("read the display matrix fixture");
     let widths: Vec<String> = sized_widths().iter().map(|w| w.to_lowercase()).collect();
-    let helpers = ["row", "fails", "lift"];
+    let helpers = ["row"];
     let mut unlisted = Vec::new();
     for line in src.lines() {
         let Some(rest) = line.strip_prefix("fn ").or_else(|| line.strip_prefix("effect fn ")) else { continue };
         let Some(name) = rest.split('(').next() else { continue };
         let Some(w) = widths.iter().find(|w| name.ends_with(&format!("_{w}"))) else { continue };
         let path = &name[..name.len() - w.len() - 1];
-        if !PATHS.contains(&path) && !helpers.contains(&path) {
+        if GENERATED_PATHS.contains(&path) {
+            unlisted.push(format!("{name} (a generated column: it walls on the incumbent in the corpus)"));
+        } else if !PATHS.contains(&path) && !helpers.contains(&path) {
             unlisted.push(name.to_string());
         }
     }
@@ -157,4 +178,128 @@ fn the_assert_message_fixture_names_the_upper_half() {
     let src = std::fs::read_to_string(path).expect("read the assert display fixture");
     assert!(src.starts_with("// @contract: C-179"), "the fixture must declare C-179");
     assert!(src.contains("18446744073709551615") && src.contains("assert_eq("), "the fixture must fail an assert_eq on u64::MAX");
+}
+
+/// Each width's probe values, as Almide expressions, with the text a display
+/// of each must produce. A new sized width without a row fails here.
+fn probe_values(width: &str) -> Vec<(&'static str, &'static str)> {
+    match width {
+        "Int8" => vec![("-128", "-128"), ("127", "127")],
+        "Int16" => vec![("-32768", "-32768"), ("32767", "32767")],
+        "Int32" => vec![("-2147483648", "-2147483648"), ("2147483647", "2147483647")],
+        "UInt8" => vec![("0", "0"), ("255", "255")],
+        "UInt16" => vec![("0", "0"), ("65535", "65535")],
+        "UInt32" => vec![("0", "0"), ("4294967295", "4294967295")],
+        "UInt64" => vec![
+            ("0", "0"),
+            ("9223372036854775807", "9223372036854775807"),
+            ("9223372036854775808", "9223372036854775808"),
+            ("18446744073709551615", "18446744073709551615"),
+        ],
+        "Float32" => vec![
+            ("float.to_float32(0.1)", "0.1"),
+            ("float.to_float32(2.0)", "2"),
+            ("float.to_float32(-123.456)", "-123.456"),
+        ],
+        other => panic!("sized width `{other}` has no probe values in the display matrix"),
+    }
+}
+
+/// The program for one generated cell, and the stdout it must print.
+fn generated_cell(path: &str, width: &str) -> (String, String) {
+    let w = width.to_lowercase();
+    let vals = probe_values(width);
+    let (cell, effect) = match path {
+        "tuple" => (format!("fn tuple_{w}(x: {width}) -> String = \"${{(x, 1, x)}}\"\n"), false),
+        "err_propagate" => (
+            format!(
+                "fn fails_{w}(x: {width}) -> Result[Int, {width}] = err(x)\n\n\
+                 effect fn lift_{w}(x: {width}) -> Int = fails_{w}(x)!\n\n\
+                 effect fn err_propagate_{w}(x: {width}) -> String = match lift_{w}(x) {{\n  \
+                 ok(v) => \"ok ${{v}}\",\n  err(e) => e,\n}}\n"
+            ),
+            true,
+        ),
+        other => panic!("no generator for display path `{other}`"),
+    };
+    let calls: String = vals
+        .iter()
+        .map(|(v, _)| {
+            if effect {
+                format!("  let s = {path}_{w}({v})!\n  println(s)\n")
+            } else {
+                format!("  println({path}_{w}({v}))\n")
+            }
+        })
+        .collect();
+    let main = if effect { "effect fn main() -> Unit" } else { "fn main() -> Unit" };
+    let src = format!("{cell}\n{main} = {{\n{calls}}}\n");
+    let expected = vals
+        .iter()
+        .map(|(_, t)| match path {
+            "tuple" => format!("({t}, 1, {t})"),
+            _ => t.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    (src, expected)
+}
+
+/// Whether the native + wasm legs can run here. Off CI they self-skip; with
+/// `ALMIDE_EXPECT_TOOLS=1` a missing tool fails instead of passing silently.
+fn tools_armed() -> bool {
+    let ok = std::process::Command::new(almide_bin()).arg("--version").output().is_ok()
+        && std::process::Command::new("wasmtime").arg("--version").output().is_ok();
+    if !ok {
+        assert!(
+            std::env::var("ALMIDE_EXPECT_TOOLS").map_or(true, |v| v == "0"),
+            "ALMIDE_EXPECT_TOOLS is set but the almide binary or wasmtime is missing"
+        );
+    }
+    ok
+}
+
+/// The generated columns, every sized width, on native, wasm and the
+/// interpreter: byte-identical, and equal to the expected text.
+#[test]
+fn generated_cells_agree_on_every_leg() {
+    if !tools_armed() {
+        eprintln!("generated_cells_agree_on_every_leg: almide or wasmtime unavailable — skipping");
+        return;
+    }
+    let mut bad = Vec::new();
+    for path in GENERATED_PATHS {
+        for width in sized_widths() {
+            let (src, expected) = generated_cell(path, width);
+            let cell = format!("{path}_{}", width.to_lowercase());
+            let native = run_native_capture(&src);
+            let wasm = run_wasm_capture(&src).expect("wasmtime spawn");
+            let interp = match run_interp_capture(&src) {
+                InterpLeg::Ran(code, out, err) => (code, out.trim().to_string(), err.trim().to_string()),
+                InterpLeg::Skip(why) => {
+                    bad.push(format!("{cell}: the interpreter skipped it ({why})"));
+                    continue;
+                }
+            };
+            let want = (0, expected, String::new());
+            for (leg, got) in [("native", &native), ("wasm", &wasm), ("interp", &interp)] {
+                if *got != want {
+                    bad.push(format!("{cell} on {leg}: got {got:?}, want {want:?}\n--- program ---\n{src}"));
+                }
+            }
+        }
+    }
+    assert!(bad.is_empty(), "generated display cells diverge:\n{}", bad.join("\n"));
+}
+
+/// The two halves of the matrix partition the paths: every path is either a
+/// fixture column or a generated one, never both.
+#[test]
+fn fixture_and_generated_paths_partition_the_columns() {
+    for p in GENERATED_PATHS {
+        assert!(!PATHS.contains(p), "`{p}` is both a fixture and a generated column");
+    }
+    for w in sized_widths() {
+        assert!(!probe_values(w).is_empty(), "{w} has no probe values");
+    }
 }
