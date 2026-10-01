@@ -588,7 +588,14 @@ fn render_function_inner(ctx: &RenderContext, func: &IrFunction) -> String {
 
     let params_str = render_fn_params_str(&fn_ctx, func);
     let body_str = render_fn_body_str(&fn_ctx, func);
-    let ret_str = render_type_fn(ctx, &func.ret_ty);
+    // A fn declared `-> Never` returns Rust's `!` (#3144): its call then fits
+    // every value slot it is written in — an operand, an element, an arm —
+    // where the `()` the bottom type renders as elsewhere fits none.
+    let ret_str = if func.ret_ty == Ty::Never && !func.is_effect {
+        "!".to_string()
+    } else {
+        render_type_fn(ctx, &func.ret_ty)
+    };
 
     // Build generics string for functions
     let fn_generics = render_fn_generics_str(ctx, &fn_ctx, func);
