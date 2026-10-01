@@ -245,6 +245,18 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
         // where the gate cannot see it: `witness_record_default` declines
         // one that is not a literal.
         IrExprKind::Tuple { elements } => elements.iter().find_map(|x| value_subset(x).map(|w| w.inside("tuple-elem"))),
+        // #2755: `[]` of a map is a fresh empty block; `["k": v, …]` lowers as
+        // `map.from_list` over a fresh pairs list (emitter_values.rs) — a
+        // borrowed temporary of the arm (`id`) whose tuple slots are
+        // `witness_store`s; a range is a fresh Int list over its bounds
+        // (ranges.rs), whose overflow abort is a recorded terminal.
+        IrExprKind::EmptyMap => None,
+        IrExprKind::MapLiteral { entries } => entries
+            .iter()
+            .find_map(|(k, v)| value_subset(k).or_else(|| value_subset(v)).map(|w| w.inside("map-entry"))),
+        IrExprKind::Range { start, end, .. } => {
+            value_subset(start).or_else(|| value_subset(end)).map(|w| w.inside("range-bound"))
+        }
         IrExprKind::Record { fields, .. } => {
             fields.iter().find_map(|(_, x)| value_subset(x).map(|w| w.inside("field")))
         }

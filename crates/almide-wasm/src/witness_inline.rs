@@ -270,4 +270,15 @@ impl Emitter<'_> {
         self.witness_branch_close();
         self.witness_loop_close();
     }
+
+    /// A one-arm abort site the route emitted right before (`if over { abort
+    /// }`): the arm ends in the checker's abort terminal, releasing nothing.
+    pub(crate) fn witness_abort_site(&mut self) {
+        let Some(w) = self.witness.as_mut() else { return };
+        w.branch_open();
+        w.branch_arm();
+        w.abort_end();
+        w.branch_arm();
+        w.branch_close();
+    }
 }
