@@ -1,10 +1,14 @@
 // #3164: a top-level `let` may name a LATER top-level `let`, and a function
 // declared above both reads the chain's inferred type — not the registration
-// seed. Registration seeds each `let` in source order, so `TABLE`'s seed was
+// seed. Registration seeds each `let` in source order, so `PAIRS`'s seed was
 // `List[(Int, Unknown)]` while `WORD` was not yet typed; `all_words` read that
 // seed, its loop variable stayed `(Int, Unknown)`, and the build panicked in
 // `ConcretizeTypes` behind a green `almide check`. Declaration order does not
 // matter for functions, so it does not matter for these either.
+//
+// The initializers stay literals (or other such globals) so the v1 lowering
+// admits every function here; the computed-initializer chain is pinned by the
+// net in tests/top_let_forward_reference_test.rs.
 fn all_words() -> String = {
   var out = ""
   for p in PAIRS {
@@ -15,17 +19,15 @@ fn all_words() -> String = {
 
 fn total() -> Int = list.fold(PAIRS, 0, (acc, p) => acc + string.len(p.1) + p.0)
 
-fn names() -> List[String] = TABLE |> list.map((p) => p.1)
+fn first_name() -> String = TABLE |> list.map((p) => p.1) |> list.join(",")
 
-let TABLE = [(1, WORD), (2, WORD + "!")]
+let TABLE = [(1, WORD), (2, OTHER)]
 
 let PAIRS = TABLE
 
-let WORD = PREFIX + "x"
+let WORD = "hi-x"
 
-let PREFIX = greet("hi")
-
-fn greet(s: String) -> String = s + "-"
+let OTHER = "hi-x!"
 
 // The same order with a user type in the chain: the pre-pass that types the
 // lets first must hand the function `List[Shape]`, the type the program
@@ -39,18 +41,16 @@ fn area(s: Shape) -> Int = match s {
 
 fn total_area() -> Int = SHAPES |> list.fold(0, (a, s) => a + area(s))
 
-let SHAPES = [Circle(SIDE), Square(SIDE + 1)]
+let SHAPES = [Circle(SIDE), Square(WIDTH)]
 
 let SIDE = 2
+
+let WIDTH = 3
 
 test "a fn above a let chain reads the chain's type" {
   assert_eq(all_words(), "hi-x;hi-x!;")
   assert_eq(total(), 12)
-  assert_eq(names(), ["hi-x", "hi-x!"])
-}
-
-test "the issue's shape: a list of pairs naming a later let" {
-  assert_eq(PAIRS, [(1, "hi-x"), (2, "hi-x!")])
+  assert_eq(first_name(), "hi-x,hi-x!")
 }
 
 test "a user-typed let chain read from above" {

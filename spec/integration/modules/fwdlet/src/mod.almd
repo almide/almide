@@ -8,8 +8,8 @@ fn all_words() -> String = {
   out
 }
 
-let PAIRS = [("a", TEXT), ("b", TEXT + "!")]
+let PAIRS = [("a", TEXT), ("b", MORE)]
 
-let TEXT = greet("hello")
+let TEXT = "hello-"
 
-fn greet(s: String) -> String = s + "-"
+let MORE = "hello-!"
