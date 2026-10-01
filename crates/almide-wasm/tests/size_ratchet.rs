@@ -36,10 +36,37 @@
 //! every fixture ALONE — this binary re-run once per fixture, in a fresh
 //! process, through the `one_fixture_measured_alone` child entry — and
 //! refuses any fixture whose two forms are not byte-identical both ways.
+//!
+//! DETERMINISM (#3143): the emitter once kept per-node facts keyed by a
+//! node's memory ADDRESS, and a dropped temporary's address handed its
+//! fact to the next node allocated there — so whether a build was right
+//! depended on what the allocator happened to reuse (7 builds in 41 of one
+//! program freed a list a binding still held, #3139). One fresh process
+//! per fixture sees ONE heap history, which is why this check had passed
+//! over that bug. Each fixture is therefore built alone [`PRESSURES`]
+//! times, each child under a different allocation pressure installed by
+//! this binary's own `#[global_allocator]` (almide_base::alloc_pressure —
+//! nothing in the compiler installs it): `plain` (the system allocator as
+//! is), `quarantine` (every free held behind a ring of 256 before it is
+//! really freed, so an address is not handed straight back — the node
+//! rebuilt right after its dropped twin lands elsewhere) and `ballast` (a
+//! pseudo-random-size block held on every fifth allocation, so size
+//! classes fill in another order). Every child's emitted AND shipped
+//! digests must equal the
+//! corpus pass's; a second hash fails the gate naming the fixture and the
+//! pressure. COVERAGE, stated honestly: every run-manifest fixture, four
+//! builds each (the corpus pass plus three children), on the one host and
+//! allocator CI runs — a hazard whose firing needs an address coincidence
+//! none of the four heap histories produces still passes. The structural
+//! fix (`node_marks.rs`: no node the emitter marks can be freed while the
+//! marks live) is what closes the class; this gate is the backstop that
+//! shows it stayed closed.
 
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use almide_base::alloc_pressure::{Pressure, set_pressure};
 
 /// Per-fixture regression allowance: growth past this factor plus slack
 /// is named a regression rather than a move to claim (helper dedupe
@@ -55,6 +82,13 @@ const CHILD: &str = "one_fixture_measured_alone";
 /// The tag in front of the child's one result, so libtest's own output is
 /// never mistaken for it.
 const CHILD_TAG: &str = "size-alone\t";
+/// The switch naming the allocation pressure a child builds under (#3143).
+const PRESSURE: &str = "ALMIDE_SIZE_PRESSURE";
+/// The pressures every fixture is built alone under — see the header.
+const PRESSURES: [Pressure; 3] = Pressure::ALL;
+
+#[global_allocator]
+static ALLOC: almide_base::alloc_pressure::PressureAlloc = almide_base::alloc_pressure::PressureAlloc;
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("test harness invariant")
@@ -214,14 +248,19 @@ fn corpus_rows(root: &Path) -> Vec<String> {
 #[ignore = "the isolation check's child entry: corpus_sizes_hold_the_baseline spawns it once per fixture"]
 fn one_fixture_measured_alone() {
     let Ok(rel) = std::env::var(ALONE) else { return };
-    println!("{CHILD_TAG}{}", measure_one(&workspace_root(), &rel).print);
+    let root = workspace_root();
+    let p = std::env::var(PRESSURE).map_or(Pressure::Plain, |p| Pressure::from_name(&p).expect("a pressure name"));
+    set_pressure(p);
+    println!("{CHILD_TAG}{}", measure_one(&root, &rel).print);
 }
 
-/// One fixture's fingerprint from a fresh process of this binary.
-fn measured_alone(exe: &Path, rel: &str) -> Result<String, String> {
+/// One fixture's fingerprint from a fresh process of this binary, built
+/// under one allocation pressure.
+fn measured_alone(exe: &Path, rel: &str, pressure: Pressure) -> Result<String, String> {
     let out = Command::new(exe)
         .args([CHILD, "--exact", "--ignored", "--nocapture", "--test-threads=1"])
         .env(ALONE, rel)
+        .env(PRESSURE, pressure.name())
         .output()
         .map_err(|e| format!("spawn failed: {e}"))?;
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -237,10 +276,13 @@ fn measured_alone(exe: &Path, rel: &str) -> Result<String, String> {
     }
 }
 
-/// Every fixture measured alone, one fresh process each, spread over the
-/// available cores; the results come back in corpus order.
+/// Every fixture measured alone under every pressure, one fresh process
+/// each, spread over the available cores; the results come back in corpus
+/// order, one per (fixture, pressure) — fixture-major.
 fn measure_each_alone(rels: &[String]) -> Vec<Result<String, String>> {
     let exe = std::env::current_exe().expect("the test binary's own path");
+    let jobs: Vec<(&str, Pressure)> =
+        rels.iter().flat_map(|rel| PRESSURES.iter().map(move |&p| (rel.as_str(), p))).collect();
     let next = std::sync::atomic::AtomicUsize::new(0);
     let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
     let mut results: Vec<(usize, Result<String, String>)> = std::thread::scope(|s| {
@@ -250,8 +292,8 @@ fn measure_each_alone(rels: &[String]) -> Vec<Result<String, String>> {
                     let mut mine = Vec::new();
                     loop {
                         let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        let Some(rel) = rels.get(i) else { break mine };
-                        mine.push((i, measured_alone(&exe, rel)));
+                        let Some(&(rel, p)) = jobs.get(i) else { break mine };
+                        mine.push((i, measured_alone(&exe, rel, p)));
                     }
                 })
             })
@@ -263,22 +305,31 @@ fn measure_each_alone(rels: &[String]) -> Vec<Result<String, String>> {
 }
 
 /// Refuse any fixture whose module differs between the corpus pass and a
-/// fresh process: the ledger must pin what a one-program build ships.
+/// fresh process under any pressure: the ledger must pin what a one-program
+/// build ships, and that build must not depend on the heap it ran in.
 fn hold_isolation(corpus: &[Fixture], alone: &[Result<String, String>]) {
+    assert_eq!(alone.len(), corpus.len() * PRESSURES.len(), "one child per (fixture, pressure)");
     let offences: Vec<String> = corpus
         .iter()
-        .zip(alone)
-        .filter_map(|(f, a)| match a {
-            Ok(print) if *print == f.print => None,
-            Ok(print) => Some(format!("{}:\n    corpus order: {}\n    alone:        {print}", f.rel, f.print)),
-            Err(e) => Some(format!("{}: {e}", f.rel)),
+        .zip(alone.chunks(PRESSURES.len()))
+        .flat_map(|(f, prints)| {
+            PRESSURES.iter().map(|p| p.name()).zip(prints).filter_map(move |(p, a)| match a {
+                Ok(print) if *print == f.print => None,
+                Ok(print) => Some(format!(
+                    "{}:\n    corpus order:      {}\n    alone ({p:<10}): {print}",
+                    f.rel, f.print
+                )),
+                Err(e) => Some(format!("{} ({p}): {e}", f.rel)),
+            })
         })
         .collect();
     assert!(
         offences.is_empty(),
-        "size ratchet isolation ({} fixture(s)) — a fixture's module differs between the one-process corpus \
-         pass and a fresh process, so a process-global cache in the front or the emitter carries one \
-         program's state into the next (#2309); scope that state per program:\n{}",
+        "size ratchet isolation/determinism ({} build(s)) — a fixture's module differs between the one-process \
+         corpus pass and a fresh process. Under `plain` too: a process-global cache in the front or the emitter \
+         carries one program's state into the next (#2309); scope that state per program. Only under \
+         `quarantine` / `ballast`: the emitter's output depends on what the allocator reuses — a fact keyed by \
+         an address that outlived its node (#3143):\n{}",
         offences.len(),
         offences.join("\n")
     );
