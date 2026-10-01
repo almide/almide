@@ -230,10 +230,10 @@ fn emit_program_pass(
     let main_index = F_FN_BASE + program_fns.len() as u32;
     let region_pure = region::region_pure_fns(ir, &program_fns, &table);
 
+    // The runtime helpers' own literals ("true"/"false" for $append_bool, the
+    // OOM and repeat-overflow lines) are interned at assembly, and only for
+    // the helpers the module ships (#3114).
     let mut pool = Pool::new();
-    // Interned eagerly so $append_bool can carry their fixed addresses.
-    let true_base = pool.intern("true");
-    let false_base = pool.intern("false");
 
     let (global_map, global_decls, init_lets) = build_globals(ir, &types);
 
@@ -563,15 +563,11 @@ fn emit_program_pass(
     // land inside it. Indices start right after main.
     let (extra_fns, entry_fn_indices) = resolve_extras(&table, &work, &lifted_fns);
 
-    let oom_msg = pool.intern("Error: out of memory");
-    let repeat_msg = pool.intern("Error: repeat result too large");
     let total = lowered.len();
     let bytes = assemble_module(AssembleIn {
         table: &table,
         work: &work,
-        pool: &pool,
-        oom_msg,
-        repeat_msg,
+        pool: &mut pool,
         lowered: &lowered,
         reachable: &visited,
         main_fn: &main_fn,
@@ -580,8 +576,6 @@ fn emit_program_pass(
         global_decls: &global_decls,
         export_fns: &export_fns,
         main_index,
-        true_base,
-        false_base,
     })?;
     // #2275: the extern stubs become declared imports of the finished bytes.
     let declared: Vec<imports::Declared> = table
