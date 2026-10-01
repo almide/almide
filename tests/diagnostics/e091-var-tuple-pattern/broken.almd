@@ -1,8 +1,0 @@
-// E091: `var` binds one name; a tuple pattern after it is the `let` form.
-effect fn main() -> Unit = {
-  let at = (1, 2)
-  var (x, y) = at
-  x = x + 1
-  y = y + 2
-  println("${x} ${y}")
-}
