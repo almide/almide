@@ -501,7 +501,7 @@ impl Emitter<'_> {
         let (params, body) = self.hof_lambda(cb, 2)?;
         self.lower_arg(init, Some(acc_ty), ArgMode::Retain)?;
         self.f.instructions().local_set(params[0]);
-        self.fs_call_1(p, 12)?; // OP_READ_LINES
+        self.fs_call_1(p, crate::fs::OP_FOLD_LINES)?;
         let (hraw, hlen, herr) = self.fs_frames_or_err()?;
         let hr = self.hold_i32()?;
         self.f.instructions().i32_const(0).local_set(hr);
@@ -617,7 +617,7 @@ impl Emitter<'_> {
         let hacc = self.hold_for(acc_ty)?;
         self.lower_arg(init, Some(acc_ty), ArgMode::Retain)?;
         self.f.instructions().local_set(hacc);
-        self.fs_call_1(p, 12)?; // OP_READ_LINES
+        self.fs_call_1(p, crate::fs::OP_FOLD_LINES)?;
         let (hraw, hlen, herr) = self.fs_frames_or_err()?;
         let hr = self.hold_i32()?;
         self.f.instructions().i32_const(0).local_set(hr);
