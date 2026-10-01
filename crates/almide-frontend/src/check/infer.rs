@@ -454,7 +454,9 @@ impl Checker {
         call_args: Option<&[ast::Expr]>,
     ) {
         let module = mod_name.as_str();
-        if !matches!(module, "list" | "fs") || self.hof_rewritten_calls.contains(&object_id) {
+        if !matches!(module, "list" | "map" | "set" | "option" | "fs")
+            || self.hof_rewritten_calls.contains(&object_id)
+        {
             return;
         }
         let name = field.as_str();
@@ -468,23 +470,26 @@ impl Checker {
         // #1144: the fs streaming walkers carry the same carriers, so they need
         // the same "not a spelling" guard — `fs.__fallible_fold_lines` must be
         // as unwritable as `list.__fallible_map`.
-        let known = match module {
-            // `find_map` (#3156) arrived after the try_ family was gone, so it
-            // has a carrier but never had a public `try_` name to tombstone.
-            "list" => matches!(
-                core,
-                "map" | "filter" | "flat_map" | "filter_map" | "fold" | "find" | "each"
-            ) || (internal && core == "find_map"),
-            _ => matches!(core, "fold_lines" | "for_each_line"),
+        // The `try_` names are the seven PUBLIC list twins 0.56.0 deleted —
+        // history, so a fixed set. The `__fallible_` carriers are every cell
+        // of the fallible matrix (#3163): each is a desugar target only.
+        let had_try_twin = module == "list"
+            && matches!(core, "map" | "filter" | "flat_map" | "filter_map" | "fold" | "find" | "each");
+        let known = match (module, internal) {
+            ("fs", _) => matches!(core, "fold_lines" | "for_each_line"),
+            (_, false) => had_try_twin,
+            (m, true) => almide_lang::fallible_hofs::is_fallible_hof(m, core),
         };
         if !known {
             return;
         }
         let rewrite = match (module, core) {
-            ("list", "fold") => "list.fold(xs, z, (a, x) => f(a, x)!)!".to_string(),
+            ("list", "fold" | "scan") => format!("list.{core}(xs, z, (a, x) => f(a, x)!)!"),
             ("list", _) => format!("list.{}(xs, (x) => f(x)!)!", core),
-            (_, "fold_lines") => "fs.fold_lines(path, z, (a, l) => f(a, l)!)!".to_string(),
-            _ => "fs.for_each_line(path, (l) => f(l)!)!".to_string(),
+            ("map", "fold") => "map.fold(m, z, (a, k, v) => f(a, k, v)!)!".to_string(),
+            ("fs", "fold_lines") => "fs.fold_lines(path, z, (a, l) => f(a, l)!)!".to_string(),
+            ("fs", _) => "fs.for_each_line(path, (l) => f(l)!)!".to_string(),
+            (m, _) => format!("{m}.{core}(.., (x) => f(x)!)!"),
         };
         let (msg, hint) = if internal {
             (
@@ -494,7 +499,7 @@ impl Checker {
                 // The `list` carriers are what `try_*` left behind, so their
                 // hint names that history; the fs carriers (#1144) never had a
                 // public `try_` name and only ever existed as a desugar target.
-                if module == "list" {
+                if had_try_twin {
                     format!(
                         "{rewrite}\n        \
                          `__fallible_{core}` is what the checker instantiates FOR you when the callback \

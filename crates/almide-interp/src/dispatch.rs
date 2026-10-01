@@ -611,7 +611,10 @@ fn infer_module_for(v: &Value) -> Sym {
 /// argument)? Mirrors the runtime `Rc<dyn Fn>`-taking surface. The list is the
 /// design's verified ~45 HOFs.
 pub(crate) fn is_hof(module: &str, func: &str) -> bool {
-    matches!(
+    // #3163: every carrier of the fallible matrix takes a closure like its
+    // total sibling — the table, not a hand list, so a new cell cannot
+    // silently fall through to `Unsupported`.
+    almide_lang::fallible_hofs::is_fallible_carrier(module, func) || matches!(
         (module, func),
         ("list", "map")
             | ("list", "filter")
