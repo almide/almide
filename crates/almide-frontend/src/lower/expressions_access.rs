@@ -502,7 +502,7 @@ fn binop_other(op: &str, left_ty: &Ty, right_ty: &Ty) -> Option<BinOp> {
 
 fn lower_expr_record(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<crate::ast::Span>) -> IrExpr {
     let ast::ExprKind::Record { name, fields, .. } = &expr.kind else { unreachable!("lower_expr_record called on the wrong ExprKind") };
-            let fs = fields.iter().map(|f| (f.name, lower_expr(ctx, &f.value))).collect();
+            let mut fs: Vec<_> = fields.iter().map(|f| (f.name, lower_expr(ctx, &f.value))).collect();
             // Constructor name resolution:
             //  - A struct (Record-type) literal is pinned to its qualified canonical
             //    name `mod.Type` (#433) — bare `Config` in module M → `M.Config`, a
@@ -511,6 +511,7 @@ fn lower_expr_record(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
             //  - A variant constructor keeps the bare ctor name: the expr's type pins
             //    the module and both backends resolve it by name + type (#412).
             let ctor_name = (*name).map(|n| record_ctor_name(ctx, n, &ty));
+            super::record_defaults::fill_field_defaults(ctx, ctor_name, &ty, &mut fs);
             let mut rec = ctx.mk(IrExprKind::Record { name: ctor_name, fields: fs }, ty, span);
             // Narrow bare integer/float literals in sized fields to their
             // declared field type (`{ a: Int8 }` ← `a: 5` must emit `5i8`, not
