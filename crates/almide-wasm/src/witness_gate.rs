@@ -562,14 +562,11 @@ fn inline_callback_subset(module: &str, func: &str, args: &[IrExpr]) -> Option<W
             return here(":prefetch");
         }
         ("fan", "map" | "any" | "any_map", [_, _]) => 1,
-        ("list", "fold", [xs, _, _]) => {
-            if matches!(&crate::rc_ownership::rc_tail(xs).kind,
-                IrExprKind::Call { target: almide_ir::CallTarget::Module { module: m, .. }, .. } if m.as_str() == "list")
-            {
-                return here(":fused");
-            }
-            2
-        }
+        // A fold over a `list.*` chain may take the fused or enumerate
+        // lowering (list_fuse.rs, list_enumerate_fold.rs): one activation per
+        // element over every inlined stage, whose callbacks are the chain's
+        // own `list.map` / `list.filter` arguments, judged below as such.
+        ("list", "fold", [_, _, _]) => 2,
         _ => return here(""),
     };
     let (cb, rest) = args.split_last()?;

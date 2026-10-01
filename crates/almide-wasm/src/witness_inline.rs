@@ -154,4 +154,46 @@ impl Emitter<'_> {
         self.witness_branch_close();
         self.witness_loop_close();
     }
+
+    /// A fused `src |> map* |> filter* |> fold` (list_fuse.rs), at the top
+    /// of each iteration: the chain node is consumed whole (its stages are
+    /// inlined, never built), one activation covers every stage, and a heap
+    /// accumulator is the loop-carried owner `list.fold`'s is.
+    pub(crate) fn witness_fused_open(&mut self, chain: &almide_ir::IrExpr, cb: &almide_ir::IrExpr, acc: u32, t: SliceTy) {
+        let carried = self.rc_droppable(t);
+        let Some(w) = self.witness.as_mut() else { return };
+        w.note_arg(chain as *const almide_ir::IrExpr as usize);
+        w.note_arg(cb as *const almide_ir::IrExpr as usize);
+        w.loop_open();
+        if carried {
+            w.carried_owned(acc);
+        }
+    }
+
+    /// A fused stage's param takes the element: an OWNED map result (a
+    /// fresh handle the stage before produced) makes the param its owner —
+    /// born here, released by the chain once the element is done with (the
+    /// iteration-end `d`); anything else is a view.
+    pub(crate) fn witness_stage_param(&mut self, local: u32, t: SliceTy, owned: bool) {
+        if !self.rc_droppable(t) {
+            return;
+        }
+        let Some(w) = self.witness.as_mut() else { return };
+        if owned {
+            w.bind_fresh(local);
+        } else {
+            w.param_borrowed(local);
+        }
+    }
+
+    /// A fused filter's verdict: false releases what the element owns and
+    /// skips to the next element — the iteration ends on that arm.
+    pub(crate) fn witness_filter_skip(&mut self) {
+        let Some(w) = self.witness.as_mut() else { return };
+        w.branch_open();
+        w.branch_arm();
+        w.loop_jump();
+        w.branch_arm();
+        w.branch_close();
+    }
 }
