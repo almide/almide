@@ -215,7 +215,7 @@ impl Checker {
         // onto them, where the main pass reads them. (A module's prefixed keys
         // survive the restore; `infer_module` adopts them.)
         if module_name == "__entry" {
-            toplet_order::adopt_top_lets(&mut self.env, refreshed);
+            toplet_order::adopt_top_lets(&mut self.env, toplet_order::unqualify_entry(refreshed));
         }
     }
 
