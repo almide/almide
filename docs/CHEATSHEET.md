@@ -611,6 +611,7 @@ f([:]: Map[String, Int])    // typed empty map in call args
 ### Destructuring
 ```
 let { name, age } = user    // record destructure (1 level only)
+var (x, y) = pair           // var takes the let patterns; every name is a var
 ```
 
 ### Processing a file line-by-line (large files)

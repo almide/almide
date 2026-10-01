@@ -604,9 +604,10 @@ y = y + 1                   // reassign (var only)
 
 ```
 let { name, age } = user    // record destructure (one level only)
+var (x, y) = pair           // var takes the let patterns; x and y are both vars
 ```
 
-- Immutable bindings only (no `var` destructure)
+- `var` takes the same patterns as `let`, and every bound name is mutable (#3149)
 - Nested destructuring is not allowed
 - Renaming is not allowed
 

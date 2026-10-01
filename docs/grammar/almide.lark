@@ -218,7 +218,10 @@ let_stmt: LET "{" name_tok (COMMA _nl name_tok)* _comma "}" EQ _nl expr   -> let
         | LET destructure_tuple EQ _nl expr                               -> let_tuple
         | LET _bind_name _o_ty_ann EQ _nl expr
 
-var_stmt: VAR _ident _o_ty_ann EQ _nl expr
+// `var` takes the `let` destructuring patterns; every bound name is a var (#3149).
+var_stmt: VAR "{" name_tok (COMMA _nl name_tok)* _comma "}" EQ _nl expr   -> var_record
+        | VAR destructure_tuple EQ _nl expr                               -> var_tuple
+        | VAR _ident _o_ty_ann EQ _nl expr
 
 guard_stmt: GUARD LET _nl _ident _nl EQ _nl expr _nl ELSE _nl expr
           | GUARD expr ELSE _nl expr
