@@ -342,6 +342,29 @@ fn iterate[T](seed: T, f: (T) -> T, n: Int) -> List[T] = {
   out
 }
 
+// The short-circuiting sibling of `filter_map` (#3156), as `find` is of
+// `filter`: `filter_map(xs, f) |> list.first` without calling f past the hit.
+// A loop, not recursion, for the constant stack #2291 asks of every stdlib
+// body. The loop keeps a `stop` flag rather than `break` (see the carriers
+// below), so after the hit the remaining iterations only test the flag — f is
+// never called on them, which is the observable half of the contract.
+/// The first some that f gives, or none; f is not called after the hit.
+fn find_map[A, B](xs: List[A], f: (A) -> B?) -> B? = {
+  var hit: B? = none
+  var stop = false
+  for x in xs {
+    if stop then ()
+    else match f(x) {
+      some(b) => {
+        hit = some(b)
+        stop = true
+      },
+      none => (),
+    }
+  }
+  hit
+}
+
 // ── the fallible carriers (ADR-0006 D3) ──
 //
 // INTERNAL CARRIERS (v0.56.0): the public try_ family (#1041) is REMOVED —
@@ -503,6 +526,34 @@ fn __fallible_find[A, E](xs: List[A], f: (A) -> Result[Bool, E]) -> Result[A?, E
       some(v) => ok(some(v)),
       none => ok(none),
     },
+  }
+}
+
+// The first some an (erring) callback gives, `none` when every call gave none —
+// or the first err. Neither an err nor a hit lets f run on a later element.
+fn __fallible_find_map[A, B, E](xs: List[A], f: (A) -> Result[B?, E]) -> Result[B?, E] = {
+  var hit: B? = none
+  var failed: E? = none
+  var stop = false
+  for x in xs {
+    if stop then ()
+    else match f(x) {
+      ok(found) => match found {
+        some(b) => {
+          hit = some(b)
+          stop = true
+        },
+        none => (),
+      },
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(hit),
   }
 }
 

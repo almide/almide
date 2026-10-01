@@ -453,10 +453,12 @@ impl Checker {
         // the same "not a spelling" guard — `fs.__fallible_fold_lines` must be
         // as unwritable as `list.__fallible_map`.
         let known = match module {
+            // `find_map` (#3156) arrived after the try_ family was gone, so it
+            // has a carrier but never had a public `try_` name to tombstone.
             "list" => matches!(
                 core,
                 "map" | "filter" | "flat_map" | "filter_map" | "fold" | "find" | "each"
-            ),
+            ) || (internal && core == "find_map"),
             _ => matches!(core, "fold_lines" | "for_each_line"),
         };
         if !known {
