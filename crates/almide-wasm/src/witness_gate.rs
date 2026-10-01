@@ -251,6 +251,8 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
         // `witness_store`s; a range is a fresh Int list over its bounds
         // (ranges.rs), whose overflow abort is a recorded terminal.
         IrExprKind::EmptyMap => None,
+        // `r?` (data.rs `witness_to_option`): the carrier is an ordinary value.
+        IrExprKind::ToOption { expr } => value_subset(expr).map(|w| w.inside("to-option")),
         IrExprKind::MapLiteral { entries } => entries
             .iter()
             .find_map(|(k, v)| value_subset(k).or_else(|| value_subset(v)).map(|w| w.inside("map-entry"))),
@@ -366,7 +368,9 @@ fn extraction_or_rt_subset(e: &IrExpr) -> Option<Why> {
         // `witness_unwrap_or_arm`). The carrier must be a bound local
         // (arg_temps.rs names a produced one), the fallback runs on its arm.
         IrExprKind::UnwrapOr { expr, fallback } => {
-            if !matches!(crate::rc_ownership::rc_tail(expr).kind, IrExprKind::Var { .. }) {
+            // #2755: a slot of a bound block (`r.f ?? x`) is a carrier view
+            // like a local's.
+            if !crate::witness_unwrap::slot_read_of_var(expr) {
                 return Some(Why::Here(format!("UnwrapOr-carrier:{}", tag(&crate::rc_ownership::rc_tail(expr).kind))));
             }
             value_subset(expr).or_else(|| value_subset(fallback).map(|w| w.inside("fallback")))
