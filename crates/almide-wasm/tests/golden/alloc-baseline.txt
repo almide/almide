@@ -860,6 +860,7 @@
 66480	spec/wasm_cross/value_object_leak_loop.almd
 69184	spec/wasm_cross/value_object_ops_share.almd
 68320	spec/wasm_cross/value_repr.almd
+66352	spec/wasm_cross/var_destructure.almd
 66224	spec/wasm_cross/variant_case_named_like_its_type.almd
 66736	spec/wasm_cross/variant_pair_result_return.almd
 65856	spec/wasm_cross/variant_record_literal_equality.almd
