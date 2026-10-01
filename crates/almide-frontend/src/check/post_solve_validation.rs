@@ -54,6 +54,9 @@ fn infer_field_defaults(checker: &mut Checker, fields: &mut [ast::FieldType]) {
         let declared = checker.resolve_type_expr(&field.ty);
         if let Some(ref mut default_expr) = field.default {
             let val_ty = checker.infer_expr(default_expr);
+            // #3185: a default is a value position of the field's declared
+            // type, so its literals face that type's range check (E024).
+            checker.record_int_literal_context(default_expr, &declared);
             // The field's declared type is the source of truth for
             // its default value — flow it in so an empty default
             // (`items: List[Shape] = []`) pins its element to `Shape`

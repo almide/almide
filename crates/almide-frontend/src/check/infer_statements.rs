@@ -322,7 +322,9 @@ impl Checker {
 
     /// `xs[i] = v` / `m[k] = v` (#3051): the container's element type is the
     /// expected type of the value, and a Map's key type that of the index.
-    fn unify_index_assign(&mut self, target: &Sym, path: &[Sym], idx_ty: Ty, val_ty: &Ty, value: &ast::Expr) {
+    /// `key` and `val` are each an expression with its inferred type.
+    fn unify_index_assign(&mut self, target: &Sym, path: &[Sym], key: (&ast::Expr, Ty), val: (&ast::Expr, &Ty)) {
+        let ((index, idx_ty), (value, val_ty)) = (key, val);
         let Some(container) = self.place_ty(target, path) else { return };
         let resolved = self.env.resolve_named(&resolve_ty(&container, &self.uf));
         let label = format!("{}[...]", Self::place_label(target, path));
@@ -331,6 +333,8 @@ impl Checker {
                 self.unify_assigned_value(&label, args[0].clone(), val_ty, value);
             }
             Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => {
+                // #3185: the key is a value position of the key type too.
+                self.record_int_literal_context(index, &args[0]);
                 self.constrain(args[0].clone(), idx_ty, format!("key of {}", label));
                 self.unify_assigned_value(&label, args[1].clone(), val_ty, value);
             }
@@ -346,6 +350,10 @@ impl Checker {
     /// silently escaped.
     fn unify_assigned_value(&mut self, name: &str, var_ty: Ty, val_ty: &Ty, value: &ast::Expr) {
         let var_ty = &var_ty;
+        // #3185: the target's type narrows the value's literals in lowering,
+        // so they face its range check — `v = 1000` into a `UInt8` (local,
+        // module `var`, field or element) was accepted and printed 1000.
+        self.record_int_literal_context(value, var_ty);
         let val_resolved = resolve_ty(val_ty, &self.uf);
         let var_resolved = self.env.resolve_named(var_ty);
         if matches!(val_resolved, Ty::Unit) && !matches!(var_resolved, Ty::Unit | Ty::Unknown) {
@@ -519,7 +527,7 @@ impl Checker {
         let ast::Stmt::IndexAssign { target, path, index, value, .. } = stmt else { unreachable!() };
         let idx_ty = self.infer_expr(index);
         let val_ty = self.infer_expr(value);
-        self.unify_index_assign(target, path, idx_ty, &val_ty, value);
+        self.unify_index_assign(target, path, (index, idx_ty), (value, &val_ty));
         let shape = format!("{}[...] = ...", Self::place_label(target, path));
         self.check_place_root_mutable(target, shape);
     }

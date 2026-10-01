@@ -463,6 +463,8 @@ impl Checker {
             if p.is_mut { self.env.mutable_vars.insert(sym(&p.name)); }
             if let Some(ref mut default_expr) = p.default {
                 let dty = self.infer_expr(default_expr);
+                // #3185: a default is a value position of the parameter's type.
+                self.record_int_literal_context(default_expr, &ty);
                 self.constrain(ty, dty, format!("default arg '{}'", p.name));
             }
         }
@@ -635,6 +637,10 @@ impl Checker {
         // element stayed undecidable and tripped E018.)
         if let Some(te) = ty {
             let declared = self.resolve_type_expr(te);
+            // #3185: the annotation narrows the value's literals in lowering
+            // (`const K: u8 = 1000u8`), so they face its range check here —
+            // the same pin a local `let` gets.
+            self.record_int_literal_context(value, &declared);
             self.constrain(declared, ity.clone(), format!("top let {}", name));
         }
         let resolved = resolve_ty(&ity, &self.uf);
