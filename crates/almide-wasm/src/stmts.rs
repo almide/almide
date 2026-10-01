@@ -161,6 +161,9 @@ impl Emitter<'_> {
         }
         self.lower(cond, Some(BOOL))?;
         self.f.instructions().i32_eqz().if_(BlockType::Empty);
+        // #2755: a one-arm site whose arm leaves the frame (`emit_exit`).
+        self.witness_branch_open();
+        self.witness_branch_arm();
         match self.fn_ret {
             Some(want) => {
                 // `guard c else err(m)!` in an effect fn: the `!` over a
@@ -187,7 +190,14 @@ impl Emitter<'_> {
                     // ()` / `else n`) is the fn's RAW return — ok-wrapped
                     // exactly like a raw tail (func.rs), not lowered as the
                     // Result it is not.
-                    Some(raw) => self.lower_raw_effect_exit(else_, raw, want)?,
+                    Some(raw) => {
+                        self.lower_raw_effect_exit(else_, raw, want)?;
+                        if raw != SliceTy::Unit {
+                            self.witness_exit_value(else_, raw);
+                        }
+                        // The ok carrier is born here and moves out.
+                        self.witness_tail_owned();
+                    }
                     None => {
                         self.lower(ret_e, Some(want))?;
                         // The guard's early return is an exit like the tail: a
@@ -196,6 +206,7 @@ impl Emitter<'_> {
                         if self.rc_droppable(want) && !self.rc_owned_result(ret_e) {
                             self.rc_inc_top();
                         }
+                        self.witness_exit_value(ret_e, want);
                     }
                 }
                 let plan = self.exit_plan(crate::exit_plan::Continuation::GuardReturn);
@@ -218,6 +229,8 @@ impl Emitter<'_> {
             }
         }
         self.f.instructions().end();
+        self.witness_branch_arm();
+        self.witness_branch_close();
         Ok(())
     }
 

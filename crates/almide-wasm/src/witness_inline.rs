@@ -313,4 +313,19 @@ impl Emitter<'_> {
         }
         w.branch_close();
     }
+
+    /// A value leaving the frame on an early exit (a guard's return, stmts.rs),
+    /// after the route's borrow `+1`: the tail rule — an owned value moves
+    /// out (`im`), a borrowed one shares and moves (`witness_tail_var`).
+    pub(crate) fn witness_exit_value(&mut self, e: &almide_ir::IrExpr, t: SliceTy) {
+        if self.witness.is_none() || !self.rc_droppable(t) {
+            return;
+        }
+        let tail = crate::rc_ownership::rc_tail(e);
+        if self.rc_owned_result(tail) {
+            self.witness_tail_owned();
+        } else {
+            self.witness_tail_var(tail);
+        }
+    }
 }
