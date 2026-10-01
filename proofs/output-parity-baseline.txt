@@ -529,6 +529,7 @@ spec/wasm_cross/map_index_released_with_block.almd
 spec/wasm_cross/map_index_string_key_shapes.almd
 spec/wasm_cross/map_insertion_order.almd
 spec/wasm_cross/map_interp_string_value.almd
+spec/wasm_cross/map_literal_borrowed_if_arg.almd
 spec/wasm_cross/map_literal_ctor_values.almd
 spec/wasm_cross/map_of_maps_value.almd
 spec/wasm_cross/map_rich_variant_key.almd

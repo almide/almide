@@ -446,6 +446,7 @@
 66608	spec/wasm_cross/map_index_string_key_shapes.almd
 73232	spec/wasm_cross/map_insertion_order.almd
 68768	spec/wasm_cross/map_interp_string_value.almd
+66208	spec/wasm_cross/map_literal_borrowed_if_arg.almd
 67424	spec/wasm_cross/map_literal_ctor_values.almd
 65872	spec/wasm_cross/map_of_maps_value.almd
 65856	spec/wasm_cross/map_rich_variant_key.almd
