@@ -735,6 +735,7 @@ impl Emitter<'_> {
             if moved.is_none() {
                 s.rc_share_guard(value, fty);
             }
+            s.witness_field_value(value, fty, moved, spends_var);
             Ok(())
         })?;
         self.empty_moved_temp(moved);
