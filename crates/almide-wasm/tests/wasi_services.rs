@@ -1,10 +1,11 @@
 //! Pin for the p1 shim's reachability-gated services (#1841): the
 //! environ/args imports and their shims ship ONLY when the module's
 //! emitted op set reaches them — the #1712 fixed-slot discipline applied
-//! to the `to_wasi` transform. Hello, world keeps the five base imports
-//! (fd_write / proc_exit / random_get / clock_time_get / fd_read) and
-//! the five base shims; `env.get` earns the environ pair, `env.args` the
-//! args pair, `env.set` its overlay shim and no import at all.
+//! to the `to_wasi` transform. Hello, world keeps two imports (fd_write /
+//! proc_exit) and the five base shims; `env.get` earns the environ pair,
+//! `env.args` the args pair, `env.set` its overlay shim and no import at
+//! all. The other three base imports (fd_read / random_get /
+//! clock_time_get) ship only with the op whose shim arm calls them (#3114).
 //!
 //! The behavioural half (an args/env program answering byte-identically
 //! on native and stock wasmtime) is the cross-target gate's — this pin
@@ -84,7 +85,8 @@ fn shape(wasm: &[u8]) -> (Vec<String>, usize) {
     (imports, defined)
 }
 
-const BASE: [&str; 5] = ["fd_write", "proc_exit", "random_get", "clock_time_get", "fd_read"];
+/// What every artifact imports: the console and the exit.
+const BASE: [&str; 2] = ["fd_write", "proc_exit"];
 const ENVIRON_PAIR: [&str; 2] = ["environ_sizes_get", "environ_get"];
 const ARGS_PAIR: [&str; 2] = ["args_sizes_get", "args_get"];
 
@@ -216,4 +218,28 @@ fn an_fs_op_ships_the_fs_service_with_only_the_imports_it_reaches() {
     let (hello, host_ops) = artifact("hello.almd", HELLO);
     assert!(!P1Services::from_ops(&host_ops).fs);
     expect_imports(&shape(&hello).0, &BASE);
+}
+
+/// #3114: a base import ships only with the op whose shim arm calls it —
+/// stdin (35) `fd_read`, entropy (32) `random_get`, the wall clock (34),
+/// the monotonic clock (60) and sleep (36) `clock_time_get` — and an op set
+/// that names none of them keeps the two-import surface.
+#[test]
+fn each_served_arm_brings_only_its_own_import() {
+    let ir = almide_spine::s5::lower_to_ir("hello.almd", HELLO).expect("lowers");
+    let raw = almide_wasm::emit_program(&ir).expect("emits");
+    for (ops, extra) in [
+        (&[30][..], &[][..]),
+        (&[35], &["fd_read"]),
+        (&[32], &["random_get"]),
+        (&[34], &["clock_time_get"]),
+        (&[60], &["clock_time_get"]),
+        (&[36], &["clock_time_get"]),
+        (&[32, 34, 35], &["random_get", "clock_time_get", "fd_read"]),
+    ] {
+        let wasm = to_wasi(&raw, ops).expect("to_wasi");
+        wasmparser::validate(&wasm).expect("validates");
+        let want: Vec<&str> = BASE.iter().chain(extra.iter()).copied().collect();
+        assert_eq!(shape(&wasm).0, want, "op set {ops:?}");
+    }
 }
