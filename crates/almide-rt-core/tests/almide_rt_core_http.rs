@@ -381,7 +381,7 @@ fn a_header_that_would_split_the_response_is_named() {
 
 #[test]
 fn a_bind_failure_names_itself() {
-    let e = server::http_server_bind(99_999).err().expect("port 99999 is refused");
+    let e = server::http_server_bind(99_999).expect_err("port 99999 is refused");
     assert!(e.starts_with("bind failed: "), "{e}");
 }
 
