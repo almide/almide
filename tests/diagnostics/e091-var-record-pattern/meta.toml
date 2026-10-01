@@ -1,0 +1,3 @@
+expects_code = "E091"
+expects_error = "`var` does not destructure"
+hint_substring = "bind each name (`var px = p.px`)"

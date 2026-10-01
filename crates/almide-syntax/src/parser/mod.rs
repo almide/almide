@@ -26,6 +26,7 @@ mod test_let_rec;
 mod test_assign_ascription;
 mod test_multiline_tuple;
 mod types;
+mod var_destructure;
 mod variant_comments;
 
 use crate::lexer::{Token, TokenType};
@@ -72,6 +73,10 @@ pub struct Parser {
     /// keeps its pre-#1997 meaning). Inside a `(`/`[` the depth is deeper and
     /// the scoped block is available again, as a struct literal is in Rust.
     pub(crate) block_head_depth: Option<usize>,
+    /// Statements one source statement recovered into beyond the first
+    /// (`var (x, y) = p`, E091, #3149): the enclosing statement list takes
+    /// them right after the statement `parse_stmt` returned.
+    pub(crate) pending_stmts: Vec<crate::ast::Stmt>,
 }
 
 /// A comment collected from a continuation gap (#1326): the Newline/Comment
@@ -99,7 +104,7 @@ pub(crate) enum CommentSide {
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         let (tokens, inline_comments) = Self::drop_inline_comments(tokens);
-        Parser { tokens, pos: 0, inline_comments, expr_comments: std::collections::HashMap::new(), pending_gap: None, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new(), delim_depth: 0, block_head_depth: None }
+        Parser { tokens, pos: 0, inline_comments, expr_comments: std::collections::HashMap::new(), pending_gap: None, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, pending_stmts: Vec::new(), failed_fn_names: std::collections::HashSet::new(), delim_depth: 0, block_head_depth: None }
     }
 
     /// Drop Comment tokens sitting INLINE mid-expression (`f(1 /* x */, 2)`) so the
