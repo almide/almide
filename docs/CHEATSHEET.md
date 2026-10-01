@@ -229,8 +229,10 @@ fn checked(s: String) -> Int! = {
 ```
 
 A LAMBDA whose body uses `!` becomes a fallible closure `(A) -> Result[T, E]`
-(first-class; a fallible callback to a core list HOF takes the first-err form;
-fn-type slots spell it `(A) -> B!` or `(A) -> B!E`). Its E comes from the
+(first-class; as the callback of ANY list / map / set / option HOF —
+`list.all(xs, (x) => p(x)!)!`, `map.fold`, `set.map`, `option.map`, … — it
+makes the HOF fallible with the first-err form; fn-type slots spell it
+`(A) -> B!` or `(A) -> B!E`). Its E comes from the
 context — a typed slot `(A) -> B!E`, a typed `let`, the fn its result propagates
 into — else from the join of its `!` operands: one shared E stays that E, a
 disagreement falls to String (ADR-0021). In test blocks a lambda's `!` stays plain

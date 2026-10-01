@@ -831,11 +831,16 @@ list.try_map(xs, f)      →  list.map(xs, (x) => f(x)!)!
 list.try_fold(xs, z, f)  →  list.fold(xs, z, (a, x) => f(a, x)!)!
 ```
 
-Deliberate omissions unchanged: an erring predicate query is the find-form's
-domain (`any`/`all`/`count` never had twins), and `sort_by` has no meaningful
-order under an erring key extractor. The end state (empty public surface, the
-seven `__fallible_*` internal carriers present and un-nameable from source) is
-machine-checked by `tests/list_fallible_family_gate_test.rs`.
+Every callback-taking list fn takes a fallible callback (#3163) — the
+predicate queries (`any` / `all` / `count` / `find_index` / `partition` /
+`take_while` / `drop_while`), the accumulators (`reduce` / `scan` / `zip_with` /
+`update` / `iterate`) and the key extractors (`sort_by` / `group_by` /
+`unique_by`, which compute each key once, in list order, before any reordering,
+so their first err is defined) as much as `map`. The same rule covers the map,
+set and option HOFs. The matrix is `almide_types::fallible_hofs`; the end state
+(every cell has its `__fallible_*` carrier, un-nameable from source, and an
+empty public try_ surface) is machine-checked by
+`tests/list_fallible_family_gate_test.rs`.
 
 When a callback that never errs leaves `E` unconstrained, annotate the result:
 `let evens: Result[List[Int], String] = list.filter(xs, (n) => ok(n % 2 == 0)!)`.
