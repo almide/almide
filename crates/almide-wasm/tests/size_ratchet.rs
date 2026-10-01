@@ -92,9 +92,111 @@ fn measure_one(root: &Path, rel: &str) -> Fixture {
         .unwrap_or_else(|e| panic!("{rel}: to_wasi failed on an emitted module — an Almide bug: {e}"));
     let w = wasi.len() as u64;
     assert!(w >= n, "{rel}: shipped {w} B < emitted {n} B — the transform only ADDS sections, measurement broken");
+    let dead = [dead_weight(&bytes, false), dead_weight(&wasi, true)].concat();
+    assert!(dead.is_empty(), "{rel}: ships bytes it can prove dead (#3114):\n  {}", dead.join("\n  "));
     let digest = |b: &[u8]| Sha256::digest(b).iter().map(|x| format!("{x:02x}")).collect::<String>();
     let print = format!("emitted {n} B {} / shipped {w} B {}", digest(&bytes), digest(&wasi));
     Fixture { rel: rel.to_string(), sizes: Some((n, w)), print }
+}
+
+/// The dead weight #3114 removed, held out (the cost is fixed, so it would
+/// come back on every module at once): an active data segment that begins
+/// or ends with a zero byte (linear memory is already zero), and — in the
+/// SHIPPED form, the one the transform finishes — a function import or a
+/// global that nothing in the module names. The emitted form keeps its five
+/// `almide.*` imports and its fixed globals at constant indices on purpose:
+/// the transforms and the embedded host address them by position.
+fn dead_weight(wasm: &[u8], shipped: bool) -> Vec<String> {
+    let mut refs = Refs::default();
+    for payload in wasmparser::Parser::new(0).parse_all(wasm) {
+        refs.payload(payload.expect("valid module"));
+    }
+    let mut out = std::mem::take(&mut refs.zero_ended);
+    if shipped {
+        out.extend((0..refs.imports).filter(|f| !refs.funcs.contains(f)).map(|f| format!("function import {f} is never called")));
+        out.extend((0..refs.globals).filter(|g| !refs.gets.contains(g)).map(|g| format!("global {g} is never read, written or exported")));
+    }
+    out
+}
+
+/// What [`dead_weight`] reads off a module: the function-import and global
+/// counts, every function and global something names, and the zero-ended
+/// active data segments.
+#[derive(Default)]
+struct Refs {
+    imports: u32,
+    globals: u32,
+    funcs: std::collections::BTreeSet<u32>,
+    gets: std::collections::BTreeSet<u32>,
+    zero_ended: Vec<String>,
+}
+
+impl Refs {
+    fn op(&mut self, op: wasmparser::Operator<'_>) {
+        use wasmparser::Operator as O;
+        match op {
+            O::Call { function_index } | O::ReturnCall { function_index } | O::RefFunc { function_index } => {
+                self.funcs.insert(function_index);
+            }
+            O::GlobalGet { global_index } | O::GlobalSet { global_index } => {
+                self.gets.insert(global_index);
+            }
+            _ => {}
+        }
+    }
+
+    fn expr(&mut self, e: wasmparser::ConstExpr<'_>) {
+        for op in e.get_operators_reader() {
+            self.op(op.expect("const expr"));
+        }
+    }
+
+    fn element(&mut self, e: wasmparser::Element<'_>) {
+        if let wasmparser::ElementKind::Active { offset_expr, .. } = e.kind {
+            self.expr(offset_expr);
+        }
+        match e.items {
+            wasmparser::ElementItems::Functions(fs) => self.funcs.extend(fs.into_iter().map(|f| f.expect("element fn"))),
+            wasmparser::ElementItems::Expressions(_, es) => es.into_iter().for_each(|x| self.expr(x.expect("element expr"))),
+        }
+    }
+
+    fn data(&mut self, i: usize, d: wasmparser::Data<'_>) {
+        let zero_end = d.data.first() == Some(&0) || d.data.last() == Some(&0);
+        if matches!(d.kind, wasmparser::DataKind::Active { .. }) && zero_end {
+            self.zero_ended.push(format!("data segment {i} has a zero run at an end ({} B) — memory starts zeroed", d.data.len()));
+        }
+    }
+
+    fn export(&mut self, e: wasmparser::Export<'_>) {
+        match e.kind {
+            wasmparser::ExternalKind::Func => self.funcs.insert(e.index),
+            wasmparser::ExternalKind::Global => self.gets.insert(e.index),
+            _ => false,
+        };
+    }
+
+    fn payload(&mut self, payload: wasmparser::Payload<'_>) {
+        use wasmparser::Payload as P;
+        match payload {
+            P::ImportSection(r) => {
+                let funcs = r.into_imports().filter(|i| matches!(i.as_ref().expect("import").ty, wasmparser::TypeRef::Func(_)));
+                self.imports += funcs.count() as u32;
+            }
+            P::GlobalSection(r) => r.into_iter().for_each(|g| {
+                self.globals += 1;
+                self.expr(g.expect("global").init_expr);
+            }),
+            P::ExportSection(r) => r.into_iter().for_each(|e| self.export(e.expect("export"))),
+            P::StartSection { func, .. } => {
+                self.funcs.insert(func);
+            }
+            P::ElementSection(r) => r.into_iter().for_each(|e| self.element(e.expect("element"))),
+            P::CodeSectionEntry(b) => b.get_operators_reader().expect("body").into_iter().for_each(|op| self.op(op.expect("operator"))),
+            P::DataSection(r) => r.into_iter().enumerate().for_each(|(i, d)| self.data(i, d.expect("data segment"))),
+            _ => {}
+        }
+    }
 }
 
 fn corpus_rows(root: &Path) -> Vec<String> {
