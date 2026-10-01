@@ -3597,6 +3597,8 @@ evidence  = [
   { path = "spec/wasm_cross/fallible_hof_option_effect_callback.almd", class = "fixture" },
   { path = "spec/wasm_cross/fallible_hof_release_matrix.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_find_map_short_circuit.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fallible_hof_matrix_list.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fallible_hof_matrix_containers.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-285"
