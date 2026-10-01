@@ -182,7 +182,8 @@ fn __fallible_all[A, E](s: Set[A], f: (A) -> Result[Bool, E]) -> Result[Bool, E]
   for x in set.to_list(s) {
     if stop then ()
     else match f(x) {
-      ok(b) => if b then () else {
+      ok(b) => if b then ()
+      else {
         held = false
         stop = true
       },
