@@ -502,8 +502,14 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
 /// to a lifted stdlib body, no native arm inlines the lambda. The literal
 /// callback is then a closure VALUE — its env is built by the closure hooks
 /// and handed over under the callee's convention like any fresh argument.
+///
+/// A MONO-SUFFIXED surface name (`result.filter__String_String`, the
+/// checker's instantiation reaching the registry under its suffixed name) is
+/// the same: no native arm matches it, so it lowers as the linked call.
+/// Were an arm to inline it after all, the callback node would carry no
+/// hook and the module-call audit would decline the frame.
 fn is_self_hosted_hof(module: &str, func: &str) -> bool {
-    module == "list" && func.starts_with("__fallible_")
+    (module == "list" && func.starts_with("__fallible_")) || (!func.starts_with("__") && func.contains("__"))
 }
 
 /// #2755 / #2758: a module call that INLINES a literal callback. Admitted
@@ -526,7 +532,11 @@ fn is_self_hosted_hof(module: &str, func: &str) -> bool {
 ///   consumer records. A fold over a
 ///   `list.*` call takes the fused or enumerate lowering (list_fuse.rs,
 ///   list_enumerate_fold.rs), whose activations are not hooked, so it
-///   declines as `call-arg:Lambda:list.fold:fused`.
+///   declines as `call-arg:Lambda:list.fold:fused`;
+/// - the option / result combinators (sums.rs): the callback runs at most
+///   once, on one arm of a branch site (witness_inline.rs); its value is
+///   settled by the share guard (`witness_store`), a payload handed out on
+///   the other arm takes its share (`witness_payload_share`).
 ///
 /// A body that still PROPAGATES a `!` is not inlined at all (the fn-value
 /// route, list.rs), so it declines as `call-arg:Lambda:<arm>:propagating`.
@@ -535,6 +545,11 @@ fn inline_callback_subset(module: &str, func: &str, args: &[IrExpr]) -> Option<W
     let here = |t: &str| Some(Why::Here(format!("Lambda:{module}.{func}{t}")).inside("call-arg"));
     let arity = match (module, func, args) {
         ("list", "map" | "filter" | "find" | "any" | "all" | "count", [_, _]) => 1,
+        // #2755: the option / result combinators run the callback at most
+        // once, on one arm of a branch site (witness_inline.rs).
+        ("result", "unwrap_or_else" | "map" | "map_err" | "flat_map", [_, _])
+        | ("option", "map" | "flat_map" | "filter", [_, _]) => 1,
+        ("option", "unwrap_or_else" | "or_else", [_, _]) => 0,
         // The prefetch forms (fan.rs) start every read before the loop and
         // record no activation.
         ("fan", "map" | "any" | "any_map", [_, cb]) if crate::fan::body_is_fs_read_text(cb) => {
