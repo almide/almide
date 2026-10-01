@@ -93,3 +93,35 @@ fn every_width_has_every_tail_position_cell() {
     }
     assert!(missing.is_empty(), "sized tail-literal matrix has holes:\n  {}", missing.join("\n  "));
 }
+
+/// #3161: every place a declaration gives a literal its width, as the cell
+/// prefix in `spec/wasm_cross/sized_field_default_matrix.almd`.
+const DECL_POSITIONS: &[&str] = &[
+    "rec", // a record field default, filled when a literal omits the field
+    "low", // the same at the low end (negative, or zero for an unsigned width)
+    "var", // a record-variant payload field default
+    "top", // a top-level `let` constant
+];
+
+#[test]
+fn every_width_has_every_declared_default_cell() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/spec/wasm_cross/sized_field_default_matrix.almd");
+    let src = std::fs::read_to_string(path).expect("read the field-default matrix fixture");
+    let mut missing = Vec::new();
+    for w in sized_widths() {
+        for p in DECL_POSITIONS {
+            let cell = match *p {
+                "top" => format!("{}_{}", p.to_uppercase(), w.to_uppercase()),
+                _ => format!("{p}_{}", w.to_lowercase()),
+            };
+            if !src.contains(&format!("{cell}: {w} = ")) {
+                missing.push(format!("{cell}: {w} = .."));
+            }
+            // The cell is only evidence when main prints it.
+            if !src.contains(&format!("{cell}}}")) {
+                missing.push(format!("{cell} is never printed"));
+            }
+        }
+    }
+    assert!(missing.is_empty(), "sized declared-default matrix has holes:\n  {}", missing.join("\n  "));
+}
