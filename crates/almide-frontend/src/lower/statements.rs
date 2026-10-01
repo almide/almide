@@ -82,17 +82,26 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
             IrStmtKind::BindDestructure { pattern: ir_pat, value: ir_val }
         }
         ast::Stmt::Assign { name, value, .. } => {
-            let ir_val = lower_expr(ctx, value);
+            let mut ir_val = lower_expr(ctx, value);
             let var = ctx.lookup_var(name).unwrap_or(VarId(0));
+            // #3185: the target's declared type is the literal's slot, as an
+            // annotation is for `let` — `V = 254` into a `UInt8` module `var`
+            // emitted `254i64` into the `u8` cell (rustc E0277).
+            let target_ty = ctx.var_table.get(var).ty.clone();
+            coerce_literal_to_sized(&mut ir_val, &target_ty, ctx.env);
             match lower_self_list_set(ctx, var, &ir_val, span) {
                 Some(in_place) => in_place,
                 None => IrStmtKind::Assign { var, value: ir_val },
             }
         }
         ast::Stmt::IndexAssign { target, path, index, value, .. } => {
-            let ir_idx = lower_expr(ctx, index);
-            let ir_val = lower_expr(ctx, value);
+            let mut ir_idx = lower_expr(ctx, index);
+            let mut ir_val = lower_expr(ctx, value);
             let write = |ctx: &mut LowerCtx, var: VarId| {
+                // #3185: the container's key / element type is the slot.
+                let slots = index_write_slots(ctx, var);
+                if let Some(k) = &slots.0 { coerce_literal_to_sized(&mut ir_idx, k, ctx.env); }
+                if let Some(v) = &slots.1 { coerce_literal_to_sized(&mut ir_val, v, ctx.env); }
                 if ctx.var_table.get(var).ty.is_map() {
                     IrStmtKind::MapInsert { target: var, key: ir_idx, value: ir_val }
                 } else {
@@ -102,14 +111,20 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
             lower_place_write(ctx, target, path, span, write)
         }
         ast::Stmt::FieldAssign { target, path, field, value, .. } if !path.is_empty() => {
-            let ir_val = lower_expr(ctx, value);
+            let mut ir_val = lower_expr(ctx, value);
             let field = *field;
-            lower_place_write(ctx, target, path, span, move |_, var| IrStmtKind::FieldAssign { target: var, field, value: ir_val })
+            lower_place_write(ctx, target, path, span, move |ctx, var| {
+                coerce_field_write(ctx, var, field, &mut ir_val);
+                IrStmtKind::FieldAssign { target: var, field, value: ir_val }
+            })
         }
         ast::Stmt::FieldAssign { target, field, value, .. } => {
-            let ir_val = lower_expr(ctx, value);
+            let mut ir_val = lower_expr(ctx, value);
             match ctx.lookup_var(target) {
-                Some(var) => IrStmtKind::FieldAssign { target: var, field: *field, value: ir_val },
+                Some(var) => {
+                    coerce_field_write(ctx, var, *field, &mut ir_val);
+                    IrStmtKind::FieldAssign { target: var, field: *field, value: ir_val }
+                }
                 None => {
                     // `m.x = v` where `m` is a MODULE alias, not a local: an
                     // assignment to a cross-module top-let. Resolve through
@@ -120,6 +135,8 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
                     if let Some((var, _)) = crate::lower::expressions::module_top_let_var(
                         ctx, sym(target), *field, &ty,
                     ) {
+                        let target_ty = ctx.var_table.get(var).ty.clone();
+                        coerce_literal_to_sized(&mut ir_val, &target_ty, ctx.env);
                         IrStmtKind::Assign { var, value: ir_val }
                     } else {
                         IrStmtKind::FieldAssign { target: VarId(0), field: *field, value: ir_val }
@@ -163,6 +180,26 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
 /// gives `s.f = v`: an alias of `o` or of `o.inner` taken before the write
 /// keeps the old value. The temps are `alloc_fresh`, so two nested writes in
 /// one block never share a name (#3049).
+/// The (key, element) slot types an `xs[i] = v` / `m[k] = v` write into
+/// `var` gives its index and value: a List's element, a Map's key and value.
+fn index_write_slots(ctx: &LowerCtx, var: VarId) -> (Option<Ty>, Option<Ty>) {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    match ctx.env.resolve_named(&ctx.var_table.get(var).ty) {
+        Ty::Applied(TC::List, args) if args.len() == 1 => (None, args.first().cloned()),
+        Ty::Applied(TC::Map, args) if args.len() == 2 => (args.first().cloned(), args.get(1).cloned()),
+        _ => (None, None),
+    }
+}
+
+/// `r.f = v` (#3185): the field's declared type is the value's literal slot,
+/// as an annotation is for `let` — a bare `254` into a `UInt8` field emitted
+/// `254i64` (rustc E0308).
+fn coerce_field_write(ctx: &LowerCtx, var: VarId, field: almide_base::intern::Sym, ir_val: &mut IrExpr) {
+    let holder_ty = ctx.var_table.get(var).ty.clone();
+    let field_ty = ctx.resolve_field_ty(&holder_ty, field.as_str());
+    coerce_literal_to_sized(ir_val, &field_ty, ctx.env);
+}
+
 fn lower_place_write(
     ctx: &mut LowerCtx,
     target: &almide_base::intern::Sym,
