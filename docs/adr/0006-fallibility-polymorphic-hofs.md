@@ -150,3 +150,18 @@ D1 の「E は ADR-0002 D2 に従い String 固定」は [ADR-0021](./0021-lambd
 流れる。D4(E ジェネリック traverse の意図的非サポート)は撤回する。`__fallible_*` carrier は
 正準形の経路で既に E ジェネリックに動いていた。Falsifier 3(実需要 ≥3)は dojo bank の人手 baseline
 3 本と bank pilot の生成物 37 attempt で発火している(#2601)。
+
+## Amendment (2026-10-01): D1 は全 HOF に及ぶ — #3163
+
+D1 の規則「callback が `!` なら HOF も `!`」は、実装上は list の 7 関数(map / filter /
+flat_map / filter_map / fold / find / each)にしか適用されていなかった。一方で E005 の hint は
+「core list HOFs は可謬 callback を受理する」と述べており、`list.all(xs, (x) => p(x)!)` は
+受理すると言う hint の下で拒否されていた(#3163)。旧来の「意図的省略」(any/all/count は
+find 形の領域、sort_by は可謬キーに順序がない)は撤回する: 述語クエリは総形と同じ打ち切り点で
+止まり、キー抽出系はキーを要素順に 1 回ずつ計算してから並べ替えるので、最初の err が定まる。
+
+現在は list / map / set / option の callback を取る全関数が可謬形を持つ。表は
+`almide_types::fallible_hofs` の 1 か所だけで、checker の書き換え・dead-carrier ガード・hint・
+interp の HOF allowlist がすべてそれを読む。result の HOF と `option.collect_map` は
+TOTAL_ONLY として理由付きで除外する(result はコンテナ自体が失敗チャネル)。完全性規則は
+`tests/list_fallible_family_gate_test.rs` が実行可能な行列として検査する。

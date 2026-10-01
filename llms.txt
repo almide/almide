@@ -30,7 +30,9 @@ read here is what the current compiler accepts.
   Option spells `(T?)?`. Errors are spelled `Result[T, E]`, or `-> T!` for the
   pure-fallible `Result[T, String]` return (value tails lift into ok(...)).
   A lambda whose body uses `!` is a fallible closure `(A) -> Result[T, E]`
-  — first-class, and as a core list-HOF callback it takes the first-err form;
+  — first-class, and as the callback of any list / map / set / option HOF
+  (`list.all(xs, (x) => p(x)!)!`, `map.fold`, `option.map`, …) it makes the HOF
+  fallible with the first-err form;
   fn-type slots spell it `(A) -> B!` / `(A) -> B!E`. Its E comes from the context
   (a typed slot or `let`, the fn its result propagates into), else from the
   join of its `!` operands: one shared E stays, a disagreement falls to String
