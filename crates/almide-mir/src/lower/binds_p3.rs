@@ -187,7 +187,7 @@ impl LowerCtx {
         // A RECORD-CTOR literal is a TAGGED variant value — route to the variant builder
         // (see try_lower_record_construct's twin guard).
         if let IrExprKind::Record { name: Some(n), .. } = &value.kind {
-            if self.variant_layouts.ctor_to_type.contains_key(n.as_str()) {
+            if self.variant_layouts.is_ctor_for(n.as_str(), &value.ty) {
                 return self.try_lower_variant_ctor(value);
             }
         }
@@ -332,7 +332,7 @@ impl LowerCtx {
         // Resolve the ctor's tag + the type's uniform block width + the OWNING TYPE NAME from the
         // registry. Cloned out of the immutable borrow so the lowering below can mutate `self`.
         let (tag, slot_count, arity, type_name) = {
-            let (ty, layout, case) = self.variant_layouts.lookup_ctor(&ctor_name)?;
+            let (ty, layout, case) = self.variant_layouts.lookup_ctor_for(&ctor_name, &value.ty)?;
             (case.tag as i64, layout.slot_count, case.fields.len(), ty.to_string())
         };
         if args.len() != arity {
@@ -384,11 +384,11 @@ impl LowerCtx {
                 Some((name.as_str().to_string(), args.clone()))
             }
             IrExprKind::Record { name: Some(ctor), fields }
-                if self.variant_layouts.ctor_to_type.contains_key(ctor.as_str()) =>
+                if self.variant_layouts.is_ctor_for(ctor.as_str(), &value.ty) =>
             {
                 let ctor_s = ctor.as_str().to_string();
                 let case_fields = {
-                    let (_, _, case) = self.variant_layouts.lookup_ctor(&ctor_s)?;
+                    let (_, _, case) = self.variant_layouts.lookup_ctor_for(&ctor_s, &value.ty)?;
                     case.fields.clone()
                 };
                 let mut ordered = Vec::with_capacity(case_fields.len());
@@ -432,11 +432,11 @@ impl LowerCtx {
             let is_ctor_call = matches!(
                 &arg.kind,
                 IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                    if self.variant_layouts.ctor_to_type.contains_key(name.as_str())
+                    if self.variant_layouts.is_ctor_for(name.as_str(), &arg.ty)
             ) || matches!(
                 &arg.kind,
                 IrExprKind::Record { name: Some(n), .. }
-                    if self.variant_layouts.ctor_to_type.contains_key(n.as_str())
+                    if self.variant_layouts.is_ctor_for(n.as_str(), &arg.ty)
             );
             let v = if is_ctor_call {
                 self.try_lower_variant_ctor(arg)?

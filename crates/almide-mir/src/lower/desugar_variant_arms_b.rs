@@ -152,7 +152,7 @@ fn va_substitute_binds(r: &mut VaRow, refs: &[IrExpr], only: Option<usize>) {
 
 /// Do `keys` cover the column's type exhaustively (so the emitted match needs no `_`
 /// arm)? Conservative: anything unresolvable answers `false`.
-fn va_heads_cover(keys: &[VaKey], layouts: &crate::lower::VariantLayouts) -> bool {
+fn va_heads_cover(keys: &[VaKey], cty: &Ty, layouts: &crate::lower::VariantLayouts) -> bool {
     if keys.iter().all(|k| matches!(k, VaKey::Some_ | VaKey::None_)) {
         return keys.contains(&VaKey::Some_) && keys.contains(&VaKey::None_);
     }
@@ -160,7 +160,7 @@ fn va_heads_cover(keys: &[VaKey], layouts: &crate::lower::VariantLayouts) -> boo
         return keys.contains(&VaKey::Ok_) && keys.contains(&VaKey::Err_);
     }
     let Some(VaKey::User(first)) = keys.first() else { return false };
-    let Some((_, layout, _)) = layouts.lookup_ctor(first) else { return false };
+    let Some((_, layout, _)) = layouts.lookup_ctor_for(first, cty) else { return false };
     !layout.cases.is_empty()
         && layout.cases.iter().all(|c| keys.iter().any(|k| matches!(k, VaKey::User(n) if n == c.ctor.as_str())))
 }
@@ -180,7 +180,7 @@ fn va_head_fields(
     };
     match key {
         VaKey::User(name) => {
-            let (_, layout, case) = layouts.lookup_ctor(name)?;
+            let (_, layout, case) = layouts.lookup_ctor_for(name, cty)?;
             if !layout.generics.is_empty() {
                 return None;
             }
@@ -203,7 +203,10 @@ fn va_field_ty_from_pats<'a>(
         match p {
             IrPattern::Bind { ty, .. } => return Some(ty.clone()),
             IrPattern::Literal { expr } => return Some(expr.ty.clone()),
-            IrPattern::Constructor { name, .. } | IrPattern::RecordPattern { name, .. } => {
+            // A case name two variants declare names neither: decline (#3176).
+            IrPattern::Constructor { name, .. } | IrPattern::RecordPattern { name, .. }
+                if layouts.ctor_owner_count(name) == 1 =>
+            {
                 if let Some((tyname, layout, _)) = layouts.lookup_ctor(name) {
                     if layout.generics.is_empty() {
                         return Some(Ty::Named(almide_lang::intern::sym(tyname), Vec::new()));
@@ -259,7 +262,7 @@ fn va_compile(
     }
     let (key, _) = va_head(&probe)?;
     if let VaKey::User(name) = &key {
-        if layouts.lookup_ctor(name).is_none() {
+        if layouts.lookup_ctor_for(name, &refs[j].ty).is_none() {
             return match &refs[j].ty {
                 Ty::Named(tname, targs) if targs.is_empty() && tname.as_str() == name => {
                     va_compile_record_column(refs, rows, j, tmpl, next, layouts, emitted)
@@ -440,7 +443,7 @@ fn va_compile_ctor_column(
         arms.push(IrMatchArm { pattern, guard: None, body: branch });
     }
     let head_keys: Vec<VaKey> = keys.iter().map(|(k, _)| k.clone()).collect();
-    if !va_heads_cover(&head_keys, layouts) {
+    if !va_heads_cover(&head_keys, &refs[j].ty, layouts) {
         let mut drows: Vec<VaRow> = Vec::new();
         for r in &rows {
             if va_trivial(&r.pats[j]) {
@@ -620,7 +623,7 @@ fn specialize_user_variant_match(
             // one value.
             let reread = arms.iter().any(|a| match &a.pattern {
                 IrPattern::Bind { .. } => true,
-                IrPattern::RecordPattern { name, .. } => layouts.lookup_ctor(name).is_none(),
+                IrPattern::RecordPattern { name, .. } => layouts.lookup_ctor_for(name, &subject.ty).is_none(),
                 _ => false,
             });
             let subj = if reread { hoist_once(subject, next) } else { (**subject).clone() };

@@ -609,7 +609,7 @@ impl LowerCtx {
             // result in `live_heap_handles` (the caller decides) — returning it directly
             // IS the move-out tail position needs, no extra bookkeeping.
             IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
+                if self.variant_layouts.is_ctor_for(name.as_str(), &tail.ty) =>
             {
                 self.lower_tail_heap_call_named_ctor(tail)
             }

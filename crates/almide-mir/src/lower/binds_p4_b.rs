@@ -23,7 +23,7 @@ impl LowerCtx {
         };
         match &expr.kind {
             _ if Self::is_int_str_tuple(&expr.ty) => self.try_opt_int_str_tuple_payload(expr, ty),
-            _ if self.is_variant_ctor_call(&expr.kind) => self.try_opt_variant_ctor_payload(expr, ty),
+            _ if self.is_variant_ctor_call(expr) => self.try_opt_variant_ctor_payload(expr, ty),
             IrExprKind::Record { .. } if self.aggregate_field_tys(&expr.ty).is_some() => {
                 self.try_opt_record_aggregate_payload(expr, ty)
             }
@@ -65,10 +65,10 @@ impl LowerCtx {
         matches!(ty, Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String))
     }
 
-    fn is_variant_ctor_call(&self, kind: &IrExprKind) -> bool {
-        matches!(kind,
+    fn is_variant_ctor_call(&self, e: &IrExpr) -> bool {
+        matches!(&e.kind,
             IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                if self.variant_layouts.ctor_to_type.contains_key(name.as_str()))
+                if self.variant_layouts.is_ctor_for(name.as_str(), &e.ty))
     }
 
     fn is_all_scalar_tuple(ty: &Ty) -> bool {
@@ -111,9 +111,9 @@ impl LowerCtx {
         };
         let type_name = self
             .variant_layouts
-            .ctor_to_type
-            .get(name.as_str())?
-            .clone();
+            .lookup_ctor_for(name.as_str(), &expr.ty)?
+            .0
+            .to_string();
         let needs_rec = self
             .variant_layouts
             .needs_recursive_drop(&type_name, &|rn| {
@@ -290,7 +290,7 @@ impl LowerCtx {
                 target: CallTarget::Named { name },
                 args,
                 ..
-            } if !self.variant_layouts.ctor_to_type.contains_key(name.as_str()) => {
+            } if !self.variant_layouts.is_ctor_for(name.as_str(), &expr.ty) => {
                 self.piece_from_named_call(&expr.ty, name, args)?
             }
             // `Some(Some(..))` / `Some(None)` / `Some(Ok(..))` / `Some(Err(..))` — a NESTED
@@ -618,7 +618,7 @@ impl LowerCtx {
             IrExprKind::Call { target: CallTarget::Named { name }, .. } => name.as_str().to_string(),
             _ => return None,
         };
-        let type_name = self.variant_layouts.ctor_to_type.get(&ctor_name)?.clone();
+        let type_name = self.variant_layouts.lookup_ctor_for(&ctor_name, &expr.ty)?.0.to_string();
         let repr = repr_of(ty).ok()?;
         let needs_rec = self
             .variant_layouts
@@ -672,7 +672,7 @@ impl LowerCtx {
                 target: CallTarget::Named { name },
                 args,
                 ..
-            } if !self.variant_layouts.ctor_to_type.contains_key(name.as_str()) => {
+            } if !self.variant_layouts.is_ctor_for(name.as_str(), &expr.ty) => {
                 self.piece_from_named_call(&expr.ty, name, args)?
             }
             // `ok([])` / `ok(["a", …])` — a LIST-literal Ok payload (the

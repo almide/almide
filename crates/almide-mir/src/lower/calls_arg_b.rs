@@ -488,7 +488,7 @@ impl LowerCtx {
     ) -> Result<Option<ArgOutcome>, LowerError> {
         Ok(Some(ArgOutcome::Value(match &a.kind {
             IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
+                if self.variant_layouts.is_ctor_for(name.as_str(), &a.ty) =>
             {
                 let repr = repr_of(&a.ty)?;
                 match self.try_lower_variant_ctor(a) {
@@ -693,7 +693,7 @@ impl LowerCtx {
         match &e.kind {
             IrExprKind::Var { id } => self.value_for(*id).ok(),
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
-                if !self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
+                if !self.variant_layouts.is_ctor_for(name.as_str(), &e.ty) =>
             {
                 let lowered = self.lower_call_args(args).ok()?;
                 let erepr = repr_of(&e.ty).ok()?;
