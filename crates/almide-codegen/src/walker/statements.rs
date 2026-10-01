@@ -644,7 +644,7 @@ fn render_stmt_bind_destructure(ctx: &RenderContext, stmt: &IrStmt) -> String {
                 Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } => {
                     let mut names: Vec<String> = ty_fields.iter().map(|(n, _)| n.to_string()).collect();
                     names.sort();
-                    ctx.ann.named_records.get(&names).cloned()
+                    ctx.ann.named_records.label_for(ty_fields)
                         .or_else(|| ctx.ann.anon_records.get(&names).cloned())
                         .unwrap_or_else(|| names.join("_"))
                 }

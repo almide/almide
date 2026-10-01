@@ -53,13 +53,10 @@ fn render_type_named(ctx: &RenderContext, name: &almide_base::intern::Sym, args:
 fn render_type_record(ctx: &RenderContext, fields: &[(almide_base::intern::Sym, Ty)]) -> String {
     let mut names: Vec<String> = fields.iter().map(|(n, _)| n.to_string()).collect();
     names.sort();
-    // Check named records first (user-defined types)
-    if let Some(n) = ctx.ann.named_records.get(&names) {
-        // If the struct is generic but no type args are present, let Rust infer
-        if ctx.generic_types.contains(&almide_base::intern::sym(n)) {
-            return "_".to_string();
-        }
-        return n.clone();
+    // A declared record first — the one with these field names AND types
+    // (#3189); the same names with other types is an anonymous record.
+    if let Some((shape, bound)) = ctx.ann.named_records.lookup(fields) {
+        return render_declared_record_instance(ctx, &shape.label, &bound);
     }
     // Check anonymous records
     if let Some(n) = ctx.ann.anon_records.get(&names) {
@@ -75,6 +72,27 @@ fn render_type_record(ctx: &RenderContext, fields: &[(almide_base::intern::Sym, 
     } else {
         // Fallback: sorted field names
         names.join("_")
+    }
+}
+
+/// A structural record that IS a declared record: the struct name, with the
+/// type arguments its fields bind when the struct is generic (`Box<i64>`).
+/// An argument no field pins (or one inference left open) lets rustc infer
+/// the whole type (`_`), as before; a fully-phantom struct has no generics
+/// (#621).
+fn render_declared_record_instance(ctx: &RenderContext, name: &str, bound: &[Option<Ty>]) -> String {
+    if !ctx.generic_types.contains(&almide_base::intern::sym(name)) {
+        return name.to_string();
+    }
+    if ctx.ann.phantom_param_structs.contains(name) {
+        return name.to_string();
+    }
+    let args: Option<Vec<String>> = bound.iter()
+        .map(|t| t.as_ref().filter(|t| !t.contains_unknown()).map(|t| render_type(ctx, t)))
+        .collect();
+    match args {
+        Some(args) if !args.is_empty() => format!("{}<{}>", name, args.join(", ")),
+        _ => "_".to_string(),
     }
 }
 

@@ -41,6 +41,7 @@ pub mod speculation;
 pub mod mut_args;
 pub mod top_let_storage;
 pub mod accum_tre;
+pub mod record_shape;
 
 mod wasm_repr;
 

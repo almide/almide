@@ -272,7 +272,8 @@ fn lower_bind(
     // inferred type of the value. Otherwise two nominal record types with
     // identical fields (`Dog` and `Cat`, both `{ name: String }`) collide at
     // codegen, because the value keeps its structural type and
-    // `collect_named_records` keys by sorted field names.
+    // `collect_named_records` matches a structural shape by its field names
+    // and types, which two such types share.
     let val_ty = match ty {
         Some(te) => {
             let declared = crate::canonicalize::resolve::resolve_type_expr_in(
@@ -302,7 +303,8 @@ fn lower_bind(
 /// assigned to a let with an explicit nominal annotation (e.g. `let d: Dog`),
 /// the declared type should win. Otherwise multiple nominal types with
 /// identical field shapes (Dog vs Cat, both `{name: String}`) collide at
-/// codegen because `collect_named_records` keys by sorted field names.
+/// codegen because `collect_named_records` matches a structural shape by its
+/// field names and types, which the two share.
 fn override_record_literal_ty(ir_val: &mut IrExpr, declared: &Ty, env: &TypeEnv) {
     // Nominal record type override — keeps `Dog` / `Cat` distinct even
     // when their structural shapes match.
