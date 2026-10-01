@@ -558,10 +558,15 @@ pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
         )
     }
 
-    struct H;
-    impl IrMutVisitor for H {
+    struct H<'a> {
+        vt: &'a mut almide_ir::VarTable,
+    }
+    impl IrMutVisitor for H<'_> {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
+            if absorb_unwrap_or_block_operand(e) {
+                return;
+            }
             let IrExprKind::Call { args, .. } = &mut e.kind else { return };
             // Exactly ONE non-empty Block argument, every earlier arg pure.
             let blocks: Vec<usize> = args
@@ -575,13 +580,15 @@ pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
                 .collect();
             let [bi] = blocks.as_slice() else { return };
             let bi = *bi;
-            if !args[..bi].iter().all(is_pure_operand) {
+            // An impure EARLIER operand (a call) is bound to a fresh temp first, in
+            // order (#3084), so it still evaluates before the block's statements.
+            let Some(mut hoisted) = bind_earlier_call_operands(&mut args[..bi], self.vt) else {
                 return;
-            }
+            };
             let IrExprKind::Block { stmts, expr: Some(tail) } = &mut args[bi].kind else {
                 return;
             };
-            let hoisted = std::mem::take(stmts);
+            hoisted.append(stmts);
             let tail = (**tail).clone();
             args[bi] = tail;
             let call = std::mem::replace(
@@ -663,12 +670,12 @@ pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
             }
         }
     }
-    for func in program
-        .functions
+    let almide_ir::IrProgram { functions, modules, var_table, .. } = program;
+    for func in functions
         .iter_mut()
-        .chain(program.modules.iter_mut().flat_map(|m| m.functions.iter_mut()))
+        .chain(modules.iter_mut().flat_map(|m| m.functions.iter_mut()))
     {
-        H.visit_expr_mut(&mut func.body);
+        H { vt: &mut *var_table }.visit_expr_mut(&mut func.body);
         S2.visit_expr_mut(&mut func.body);
     }
 }
