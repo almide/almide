@@ -6,6 +6,11 @@
 
 use almide_ir::{IrExpr, IrExprKind, IrStmtKind};
 
+/// The inlined-callback rules (split for the file budget).
+#[path = "witness_gate_callbacks.rs"]
+mod callbacks;
+use callbacks::{inline_callback_subset, is_self_hosted_hof};
+
 /// The phase-A/B1 subset gate: `None` = the body is straight-line and
 /// every RC-affecting site is covered by the recorder hooks (bind,
 /// call-argument, store, tail, epilogue / tail-release); `Some(reason)` =
@@ -99,6 +104,38 @@ impl Why {
     }
 }
 
+/// A write statement's value (and index). `x = v` (#2757): the old
+/// occupant's release and the new one's binding are the Assign hook's (a var
+/// bound outside the loop it is assigned in is loop-carried). #2755: `xs[i] =
+/// v` — the copy-on-write judge rebinds the var (`witness_mut_rebind`), the
+/// value moves into the slot (`witness_store`), an out-of-range index aborts;
+/// `h.f = v` — the copy-on-write field write rebinds the root var
+/// (`witness_field_rebind`), the value moves into the copy's slot
+/// (`witness_field_value`).
+fn write_subset(s: &IrStmtKind) -> Option<String> {
+    match s {
+        IrStmtKind::Assign { value, .. } => value_subset(value).map(|w| w.at("assign")),
+        IrStmtKind::IndexAssign { index, value, .. } => {
+            value_subset(index).or_else(|| value_subset(value)).map(|w| w.at("index-assign"))
+        }
+        IrStmtKind::FieldAssign { value, .. } => value_subset(value).map(|w| w.at("field-assign")),
+        _ => None,
+    }
+}
+
+/// `guard c else …`: a one-arm site. `else break` / `else continue` leaves
+/// the iteration; any other else (#2755) settles its value like a tail and
+/// leaves the frame through the exit plan (stmts.rs `lower_stmt_guard`).
+fn guard_subset(cond: &IrExpr, else_: &IrExpr) -> Option<Why> {
+    value_subset(cond).map(|w| w.inside("guard-cond")).or_else(|| {
+        if ends_in_loop_ctl(else_) {
+            stmt_body_subset(else_)
+        } else {
+            value_subset(else_)
+        }
+    })
+}
+
 /// The statement rules of a straight line: a Bind of an admissible value,
 /// a statement-position call (its owned droppable result is released by
 /// the discard route, `id`).
@@ -137,43 +174,13 @@ fn stmts_subset(stmts: &[almide_ir::IrStmt]) -> Option<String> {
                 }
             }
             IrStmtKind::Expr { expr } => return Some(format!("stmt:Expr:{}", expr_tag(expr))),
-            // #2757: an assignment — the old occupant's release and the new
-            // one's binding are the Assign hook's (a var bound outside the
-            // loop it is assigned in declines at emission).
-            IrStmtKind::Assign { value, .. } => {
-                if let Some(w) = value_subset(value) {
-                    return Some(w.at("assign"));
+            IrStmtKind::Assign { .. } | IrStmtKind::IndexAssign { .. } | IrStmtKind::FieldAssign { .. } => {
+                if let Some(why) = write_subset(&s.kind) {
+                    return Some(why);
                 }
             }
-            // #2755: `xs[i] = v` — the copy-on-write judge rebinds the var
-            // (`witness_mut_rebind`), the value moves into the slot
-            // (`witness_store`), an out-of-range index aborts.
-            IrStmtKind::IndexAssign { index, value, .. } => {
-                if let Some(w) = value_subset(index).or_else(|| value_subset(value)) {
-                    return Some(w.at("index-assign"));
-                }
-            }
-            // #2755: `h.f = v` — the copy-on-write field write rebinds the
-            // root var (`witness_field_rebind`), the value moves into the
-            // copy's slot (`witness_field_value`).
-            IrStmtKind::FieldAssign { value, .. } => {
-                if let Some(w) = value_subset(value) {
-                    return Some(w.at("field-assign"));
-                }
-            }
-            // `guard c else break` / `else continue`: a one-arm branch that
-            // leaves the iteration (the loop-control form only; a guard that
-            // returns is an exit edge, not recorded yet).
-            IrStmtKind::Guard { cond, else_ } if ends_in_loop_ctl(else_) => {
-                if let Some(w) = value_subset(cond).map(|w| w.inside("guard-cond")).or_else(|| stmt_body_subset(else_))
-                {
-                    return Some(w.at("stmt:Guard"));
-                }
-            }
-            // #2755: `guard c else v` — a one-arm site whose arm settles the
-            // value like a tail and leaves through the exit plan (stmts.rs).
             IrStmtKind::Guard { cond, else_ } => {
-                if let Some(w) = value_subset(cond).map(|w| w.inside("guard-cond")).or_else(|| value_subset(else_)) {
+                if let Some(w) = guard_subset(cond, else_) {
                     return Some(w.at("stmt:Guard"));
                 }
             }
@@ -268,19 +275,8 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
         // where the gate cannot see it: `witness_record_default` declines
         // one that is not a literal.
         IrExprKind::Tuple { elements } => elements.iter().find_map(|x| value_subset(x).map(|w| w.inside("tuple-elem"))),
-        // #2755: `[]` of a map is a fresh empty block; `["k": v, …]` lowers as
-        // `map.from_list` over a fresh pairs list (emitter_values.rs) — a
-        // borrowed temporary of the arm (`id`) whose tuple slots are
-        // `witness_store`s; a range is a fresh Int list over its bounds
-        // (ranges.rs), whose overflow abort is a recorded terminal.
-        IrExprKind::EmptyMap => None,
-        // `r?` (data.rs `witness_to_option`): the carrier is an ordinary value.
-        IrExprKind::ToOption { expr } => value_subset(expr).map(|w| w.inside("to-option")),
-        IrExprKind::MapLiteral { entries } => entries
-            .iter()
-            .find_map(|(k, v)| value_subset(k).or_else(|| value_subset(v)).map(|w| w.inside("map-entry"))),
-        IrExprKind::Range { start, end, .. } => {
-            value_subset(start).or_else(|| value_subset(end)).map(|w| w.inside("range-bound"))
+        IrExprKind::EmptyMap | IrExprKind::MapLiteral { .. } | IrExprKind::Range { .. } | IrExprKind::ToOption { .. } => {
+            built_value_subset(e)
         }
         IrExprKind::Record { fields, .. } => {
             fields.iter().find_map(|(_, x)| value_subset(x).map(|w| w.inside("field")))
@@ -342,6 +338,25 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
         // a VIEW of the slot, like an element read, with no abort edge.
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => slot_subset(e, object),
         other => Some(Why::Here(tag(other))),
+    }
+}
+
+/// #2755: the values a route BUILDS from its operands. `[]` of a map is a
+/// fresh empty block; `["k": v, …]` lowers as `map.from_list` over a fresh
+/// pairs list (emitter_values.rs) — a borrowed temporary of the arm (`id`)
+/// whose tuple slots are `witness_store`s; a range is a fresh Int list over
+/// its bounds (ranges.rs), whose overflow abort is a recorded terminal; `r?`
+/// converts its carrier (data.rs `witness_to_option`).
+fn built_value_subset(e: &IrExpr) -> Option<Why> {
+    match &e.kind {
+        IrExprKind::MapLiteral { entries } => entries
+            .iter()
+            .find_map(|(k, v)| value_subset(k).or_else(|| value_subset(v)).map(|w| w.inside("map-entry"))),
+        IrExprKind::Range { start, end, .. } => {
+            value_subset(start).or_else(|| value_subset(end)).map(|w| w.inside("range-bound"))
+        }
+        IrExprKind::ToOption { expr } => value_subset(expr).map(|w| w.inside("to-option")),
+        _ => None,
     }
 }
 
@@ -536,104 +551,6 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
 
 
 
-/// #2758: the fallible list HOFs (`list.__fallible_map__…`, the checker's
-/// instantiation of a callback that raises) are SELF-HOSTED: an ordinary call
-/// to a lifted stdlib body, no native arm inlines the lambda. The literal
-/// callback is then a closure VALUE — its env is built by the closure hooks
-/// and handed over under the callee's convention like any fresh argument.
-///
-/// A MONO-SUFFIXED surface name (`result.filter__String_String`, the
-/// checker's instantiation reaching the registry under its suffixed name) is
-/// the same: no native arm matches it, so it lowers as the linked call.
-/// Were an arm to inline it after all, the callback node would carry no
-/// hook and the module-call audit would decline the frame.
-///
-/// Two surfaces take a Fn VALUE outright: `bytes.map_each` has no native arm
-/// (the linked self-host body calls the closure), and `list.push` stores the
-/// closure it is handed as an element (`lower_arg`, Retain).
-fn is_self_hosted_hof(module: &str, func: &str) -> bool {
-    (module == "list" && func.starts_with("__fallible_"))
-        || (!func.starts_with("__") && func.contains("__"))
-        || matches!((module, func), ("bytes", "map_each") | ("list", "push"))
-}
-
-/// #2755 / #2758: a module call that INLINES a literal callback. Admitted
-/// for the arms whose lowering (list.rs) records the callback as a loop
-/// activation per element (`witness_callback_open` / `witness_loop_close`):
-/// each param is a VIEW of the element it is loaded from, the body's own
-/// sites are the ordinary hooks, and what the arm does with the body's value
-/// is hooked or carries no RC site:
-///
-/// - `list.map`: the value is stored into the fresh result spine after the
-///   share guard (`witness_store`);
-/// - `list.filter`, `any`, `all`, `count`: the value is a Bool;
-/// - `list.find`: the value is a Bool, and a hit shares the element into a
-///   fresh some-cell (`witness_find_hit`, `am`);
-/// - `list.fold`: a scalar accumulator carries no credit; a HEAP one is a
-///   loop-carried OWNER (`witness_fold_step`) — the init's credit moves into
-///   the loop (the Retain argument, `am` / `im`), each iteration receives the
-///   accumulator (`i`), hands the body's value on (`im` / `am`) and releases
-///   what it received (`d`), and the fold's result is the owned value its
-///   consumer records. A fold over a
-///   `list.*` call takes the fused or enumerate lowering (list_fuse.rs,
-///   list_enumerate_fold.rs), whose activations are not hooked, so it
-///   declines as `call-arg:Lambda:list.fold:fused`;
-/// - the option / result combinators (sums.rs): the callback runs at most
-///   once, on one arm of a branch site (witness_inline.rs); its value is
-///   settled by the share guard (`witness_store`), a payload handed out on
-///   the other arm takes its share (`witness_payload_share`).
-///
-/// A body that still PROPAGATES a `!` is not inlined at all (the fn-value
-/// route, list.rs), so it declines as `call-arg:Lambda:<arm>:propagating`.
-/// Any other arm declines as `call-arg:Lambda:<module>.<fn>`.
-fn inline_callback_subset(module: &str, func: &str, args: &[IrExpr]) -> Option<Why> {
-    let here = |t: &str| Some(Why::Here(format!("Lambda:{module}.{func}{t}")).inside("call-arg"));
-    let arity = match (module, func, args) {
-        ("list", "map" | "filter" | "find" | "any" | "all" | "count", [_, _]) => 1,
-        // #2755: the option / result combinators run the callback at most
-        // once, on one arm of a branch site (witness_inline.rs).
-        ("list", "sort_by" | "flat_map" | "filter_map" | "take_while" | "drop_while" | "unique_by", [_, _]) | ("list", "update", [_, _, _]) => 1,
-        ("list", "reduce", [_, _]) | ("list", "scan" | "zip_with", [_, _, _]) => 2,
-        ("matrix", "map", [_, _]) => 1,
-        ("set", "filter" | "map", [_, _]) | ("map", "map", [_, _]) | ("map", "update", [_, _, _]) => 1,
-        ("map", "upsert", [_, _, _, _]) => 1,
-        ("map", "find" | "filter" | "all" | "any" | "count", [_, _]) => 2,
-        ("set", "fold", [_, _, _]) => 2,
-        ("map", "fold", [_, _, _]) => 3,
-        ("result", "unwrap_or_else" | "map" | "map_err" | "flat_map", [_, _])
-        | ("option", "map" | "flat_map" | "filter", [_, _]) => 1,
-        ("option", "unwrap_or_else" | "or_else", [_, _]) => 0,
-        // The prefetch forms (fan.rs) start every read before the loop and
-        // record no activation.
-        ("fan", "map" | "any" | "any_map", [_, cb]) if crate::fan::body_is_fs_read_text(cb) => {
-            return here(":prefetch");
-        }
-        ("fan", "map" | "any" | "any_map", [_, _]) => 1,
-        // A fold over a `list.*` chain may take the fused or enumerate
-        // lowering (list_fuse.rs, list_enumerate_fold.rs): one activation per
-        // element over every inlined stage, whose callbacks are the chain's
-        // own `list.map` / `list.filter` arguments, judged below as such.
-        ("list", "fold", [_, _, _]) => 2,
-        _ => return here(""),
-    };
-    let (cb, rest) = args.split_last()?;
-    let IrExprKind::Lambda { params, body, .. } = &cb.kind else {
-        return here(":wrapped");
-    };
-    if params.len() != arity {
-        return here(":arity");
-    }
-    // fan.rs lowers the body with its top-level `!` stripped (the
-    // accumulator performs the first-err semantics itself), and only a body
-    // that still propagates after the strip takes the closure route.
-    let body = if module == "fan" { crate::fan::strip_callback_try(body) } else { body };
-    if crate::fs_meta::expr_propagates(body) {
-        return here(":propagating");
-    }
-    rest.iter()
-        .find_map(|a| value_subset(a).map(|w| w.inside("call-arg")))
-        .or_else(|| value_subset(body).map(|w| w.inside("callback")))
-}
 
 /// A statement body of a branch arm (#2756) or a loop (#2757): a call, a
 /// block of admitted statements, a nested branch or loop, a jump, or nothing.
