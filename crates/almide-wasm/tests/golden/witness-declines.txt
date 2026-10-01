@@ -5,6 +5,7 @@ arm-value:borrowed-temp	3
 assign:SpreadRecord	2
 bind:cell	11
 bind:view-result	5
+call-arg:Lambda:map.__fallible_map__Int_String_String_Int	1
 call:panic-arg	7
 callback:SpreadRecord	1
 caps:argv-in-plain-fn	8
@@ -34,6 +35,6 @@ stmt:Guard:Unwrap	4
 stmt:MapInsert	9
 store:borrowed-temp	2
 tail:SpreadRecord	4
-tail:Unwrap	15
+tail:Unwrap	25
 unwrap-or:unowned-fresh-fallback	4
 unwrap:err-repr	2
