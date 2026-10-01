@@ -782,6 +782,9 @@ impl Emitter<'_> {
         self.f.instructions().call(F_BYTES_PUSH);
         self.settle_outgrown_receiver(shared, BYTES);
         self.emit_bytes_writeback(&recv)?;
+        if let crate::bytes_recv::BytesRecv::Var { id, global, .. } = &recv {
+            self.witness_mut_rebind(*id, *global);
+        }
         Ok(None)
     }
 }

@@ -258,76 +258,7 @@ impl Emitter<'_> {
             // Block form: ONE literal list of 0-ary thunks, statically
             // unrolled — first Ok short-circuits, a pure arm Ok-adapts
             // and wins, all-fail is the ledger Err.
-            ("any", [thunks]) => {
-                let IrExprKind::List { elements } = &thunks.kind else {
-                    return unsup("fan-any-nonliteral-thunks");
-                };
-                let hr = self.hold_i32()?;
-                self.f.instructions().block(BlockType::Empty);
-                let mut result_ty: Option<SliceTy> = None;
-                for arm in elements {
-                    let (_p, body) = self.hof_lambda(arm, 0)?;
-                    let body = strip_callback_try(body);
-                    let got = self.lower(body, None)?;
-                    match got {
-                        SliceTy::Result(..) => {
-                            // #2969: the winner is the result (one credit);
-                            // a losing err is released before the next arm.
-                            if !self.rc_owned_result(body) {
-                                self.rc_inc_top();
-                            }
-                            let dec = self.dec_fn_of(got);
-                            let mut i = self.f.instructions();
-                            i.local_set(hr);
-                            i.local_get(hr)
-                                .i32_load(slot_memarg(almide_layout::SUM_TAG))
-                                .i32_eqz()
-                                .br_if(0);
-                            i.local_get(hr).call(dec);
-                            result_ty.get_or_insert(got);
-                        }
-                        pure => {
-                            // Ok-adapt the bare value; evaluation stops.
-                            let hv = self.hold_val(pure)?;
-                            self.f.instructions().local_set(hv);
-                            self.f
-                                .instructions()
-                                .i32_const(16)
-                                .call(F_ALLOC)
-                                .local_tee(hr)
-                                .i32_const(0)
-                                .i32_store(slot_memarg(almide_layout::SUM_TAG));
-                            self.f.instructions().local_get(hr).local_get(hv);
-                            self.store_ty_slot(pure, almide_layout::SUM_FIELD);
-                            self.release_val(pure);
-                            self.f.instructions().br(0);
-                            result_ty
-                                .get_or_insert(SliceTy::Result(self.types.intern(pure), {
-                                    self.types.intern(STR)
-                                }));
-                        }
-                    }
-                }
-                {
-                    let msg = self.pool.intern("fan.any: all candidates failed");
-                    let mut i = self.f.instructions();
-                    i.i32_const(16)
-                        .call(F_ALLOC)
-                        .local_tee(hr)
-                        .i32_const(1)
-                        .i32_store(slot_memarg(almide_layout::SUM_TAG));
-                    i.local_get(hr)
-                        .i32_const(msg as i32)
-                        .i32_store(slot_memarg(almide_layout::SUM_FIELD));
-                    i.end();
-                    i.local_get(hr);
-                }
-                self.release_i32();
-                let Some(t) = result_ty else {
-                    return unsup("fan-any-armless");
-                };
-                Some(Lowered::owned(t))
-            }
+            ("any", [thunks]) => Some(self.lower_fan_any_thunks(thunks)?),
             _ => return Ok(None),
         };
         Ok(Some(out))
@@ -658,4 +589,93 @@ pub(crate) fn body_is_fs_read_text(cb: &IrExpr) -> bool {
         && func.as_str() == "read_text"
         && matches!(args.as_slice(),
                     [IrExpr { kind: IrExprKind::Var { id }, .. }] if id == param)
+}
+
+impl Emitter<'_> {
+    /// `fan.any { … }` — the block form, split from `lower_fan_call` for the
+    /// complexity budget.
+    fn lower_fan_any_thunks(&mut self, thunks: &IrExpr) -> Result<Lowered, EmitError> {
+        let IrExprKind::List { elements } = &thunks.kind else {
+            return unsup("fan-any-nonliteral-thunks");
+        };
+        let hr = self.hold_i32()?;
+        self.f.instructions().block(BlockType::Empty);
+        let mut result_ty: Option<SliceTy> = None;
+        // #2755: the thunks are inlined here, never built as a list.
+        self.witness_inline_arg(thunks);
+        let mut sites = 0;
+        for (k, arm) in elements.iter().enumerate() {
+            let (_p, body) = self.hof_lambda(arm, 0)?;
+            let body = strip_callback_try(body);
+            let got = self.lower(body, None)?;
+            match got {
+                SliceTy::Result(..) => {
+                    // #2969: the winner is the result (one credit);
+                    // a losing err is released before the next arm.
+                    let owned = self.rc_owned_result(body);
+                    if !owned {
+                        self.rc_inc_top();
+                    }
+                    // #2755: the carrier is born here; the winner's
+                    // credit leaves as the call's owned result (`m`),
+                    // a loser's is released (`d`) and the next arm
+                    // runs on that path only — its site nests there.
+                    let wc = self.witness_fan_carrier(owned);
+                    sites += u32::from(self.witness_any_arm(wc));
+                    let dec = self.dec_fn_of(got);
+                    let mut i = self.f.instructions();
+                    i.local_set(hr);
+                    i.local_get(hr)
+                        .i32_load(slot_memarg(almide_layout::SUM_TAG))
+                        .i32_eqz()
+                        .br_if(0);
+                    i.local_get(hr).call(dec);
+                    result_ty.get_or_insert(got);
+                }
+                pure => {
+                    self.witness_any_pure_arm(body, pure, k + 1 == elements.len());
+                    // Ok-adapt the bare value; evaluation stops.
+                    let hv = self.hold_val(pure)?;
+                    self.f.instructions().local_set(hv);
+                    self.f
+                        .instructions()
+                        .i32_const(16)
+                        .call(F_ALLOC)
+                        .local_tee(hr)
+                        .i32_const(0)
+                        .i32_store(slot_memarg(almide_layout::SUM_TAG));
+                    self.f.instructions().local_get(hr).local_get(hv);
+                    self.store_ty_slot(pure, almide_layout::SUM_FIELD);
+                    self.release_val(pure);
+                    self.f.instructions().br(0);
+                    result_ty
+                        .get_or_insert(SliceTy::Result(self.types.intern(pure), {
+                            self.types.intern(STR)
+                        }));
+                }
+            }
+        }
+        {
+            let msg = self.pool.intern("fan.any: all candidates failed");
+            let mut i = self.f.instructions();
+            i.i32_const(16)
+                .call(F_ALLOC)
+                .local_tee(hr)
+                .i32_const(1)
+                .i32_store(slot_memarg(almide_layout::SUM_TAG));
+            i.local_get(hr)
+                .i32_const(msg as i32)
+                .i32_store(slot_memarg(almide_layout::SUM_FIELD));
+            i.end();
+            i.local_get(hr);
+        }
+        for _ in 0..sites {
+            self.witness_branch_close();
+        }
+        self.release_i32();
+        let Some(t) = result_ty else {
+            return unsup("fan-any-armless");
+        };
+        Ok(Lowered::owned(t))
+    }
 }

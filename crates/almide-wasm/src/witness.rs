@@ -268,15 +268,10 @@ impl WitnessRecorder {
     /// A moved assignment (#3104, writeback_move.rs): `dst` takes over the
     /// object `src` holds, credit and all — no share, no release. `src` is
     /// emptied after the store ([`Self::empty_local`]). A var bound outside
-    /// the loop being assigned declines, as [`Self::assign`] does.
+    /// the loop being assigned is loop-carried, as in [`Self::assign`].
     pub fn transfer(&mut self, dst: u32, released_old: bool, src: u32) -> bool {
-        match self.bound.get(&dst) {
-            None => return false,
-            Some(&d) if d < self.loop_depth => {
-                self.decline("loop-carried-assign");
-                return true;
-            }
-            Some(_) => {}
+        if !self.rebind_site(dst) {
+            return false;
         }
         if !self.bound.contains_key(&src) {
             return false;
@@ -291,7 +286,7 @@ impl WitnessRecorder {
     /// `local` was set to NULL (#3104): it holds nothing from here, so a
     /// later release through it is a release of NULL (skipped).
     pub fn empty_local(&mut self, local: u32) {
-        if self.bound.contains_key(&local) {
+        if self.rebind_site(local) {
             self.log(Ev::Bind { local, obj: u32::MAX, owner: false });
         }
     }
@@ -309,19 +304,29 @@ impl WitnessRecorder {
         true
     }
 
+    /// A rebind of `local` is about to be logged: false when no hook bound
+    /// it. A var bound outside the loop being emitted holds a different
+    /// block at each loop head: the rebind marks every loop in between as
+    /// carrying it (`Carry`, rendered by witness_paths.rs `carry`).
+    fn rebind_site(&mut self, local: u32) -> bool {
+        match self.bound.get(&local) {
+            None => false,
+            Some(&depth) => {
+                if depth < self.loop_depth {
+                    self.log(Ev::Carry { local, depth });
+                }
+                true
+            }
+        }
+    }
+
     /// An `Assign` (#2757): the old occupant was released by the route
     /// (`released_old`), and the local now holds the rhs — a new object
     /// (`src = None`) or a share of `src`'s. A var bound outside the loop
-    /// being assigned declines: its block at the loop head differs per
-    /// iteration, which one activation line cannot carry.
+    /// being assigned is loop-carried (#2755, [`Self::rebind_site`]).
     pub fn assign(&mut self, local: u32, released_old: bool, src: Option<u32>) -> bool {
-        match self.bound.get(&local) {
-            None => return false,
-            Some(&d) if d < self.loop_depth => {
-                self.decline("loop-carried-assign");
-                return true;
-            }
-            Some(_) => {}
+        if !self.rebind_site(local) {
+            return false;
         }
         if released_old {
             self.held_ops(local, "d");
