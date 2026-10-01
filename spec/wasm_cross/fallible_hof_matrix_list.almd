@@ -25,6 +25,12 @@ effect fn add(a: Int, x: Int) -> Int = {
   else a + x
 }
 
+effect fn pick(x: Int) -> Int? = {
+  println("  pick " + int.to_string(x))
+  if x < 0 then err("bad pick " + int.to_string(x))!
+  else if x > 2 then some(x * 10) else none
+}
+
 fn ints(xs: List[Int]) -> String = "[" + (xs |> list.map((n) => int.to_string(n)) |> list.join(",")) + "]"
 
 fn show[T](label: String, r: Result[T, String], f: (T) -> String) -> Unit = match r {
@@ -50,6 +56,9 @@ effect fn main() -> Unit = {
   show("count", bad |> list.count((x) => chk(x)!), (n) => int.to_string(n))
   show("find_index", good |> list.find_index((x) => chk(x)!), oi)
   show("find_index", bad |> list.find_index((x) => chk(x)!), oi)
+  show("find_map", good |> list.find_map((x) => pick(x)!), oi)
+  show("find_map", bad |> list.find_map((x) => pick(x)!), oi)
+  show("find_map", [1, 2] |> list.find_map((x) => pick(x)!), oi)
   show("partition", good |> list.partition((x) => chk(x)!), (p) => ints(p.0) + ints(p.1))
   show("partition", bad |> list.partition((x) => chk(x)!), (p) => ints(p.0) + ints(p.1))
   show("take_while", [5, 4, 1, -1] |> list.take_while((x) => chk(x)!), ints)
