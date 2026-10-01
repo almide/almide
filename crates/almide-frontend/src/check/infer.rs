@@ -454,42 +454,12 @@ impl Checker {
         call_args: Option<&[ast::Expr]>,
     ) {
         let module = mod_name.as_str();
-        if !matches!(module, "list" | "map" | "set" | "option" | "fs")
-            || self.hof_rewritten_calls.contains(&object_id)
-        {
+        if self.hof_rewritten_calls.contains(&object_id) {
             return;
         }
         let name = field.as_str();
-        let (core, internal) = match name.strip_prefix("__fallible_") {
-            Some(core) => (core, true),
-            None => match name.strip_prefix("try_") {
-                Some(core) => (core, false),
-                None => return,
-            },
-        };
-        // #1144: the fs streaming walkers carry the same carriers, so they need
-        // the same "not a spelling" guard — `fs.__fallible_fold_lines` must be
-        // as unwritable as `list.__fallible_map`.
-        // The `try_` names are the seven PUBLIC list twins 0.56.0 deleted —
-        // history, so a fixed set. The `__fallible_` carriers are every cell
-        // of the fallible matrix (#3163): each is a desugar target only.
-        let had_try_twin = module == "list"
-            && matches!(core, "map" | "filter" | "flat_map" | "filter_map" | "fold" | "find" | "each");
-        let known = match (module, internal) {
-            ("fs", _) => matches!(core, "fold_lines" | "for_each_line"),
-            (_, false) => had_try_twin,
-            (m, true) => almide_lang::fallible_hofs::is_fallible_hof(m, core),
-        };
-        if !known {
+        let Some(DeadSpelling { core, internal, had_try_twin, rewrite }) = dead_spelling(module, name) else {
             return;
-        }
-        let rewrite = match (module, core) {
-            ("list", "fold" | "scan") => format!("list.{core}(xs, z, (a, x) => f(a, x)!)!"),
-            ("list", _) => format!("list.{}(xs, (x) => f(x)!)!", core),
-            ("map", "fold") => "map.fold(m, z, (a, k, v) => f(a, k, v)!)!".to_string(),
-            ("fs", "fold_lines") => "fs.fold_lines(path, z, (a, l) => f(a, l)!)!".to_string(),
-            ("fs", _) => "fs.for_each_line(path, (l) => f(l)!)!".to_string(),
-            (m, _) => format!("{m}.{core}(.., (x) => f(x)!)!"),
         };
         let (msg, hint) = if internal {
             (
@@ -601,4 +571,45 @@ impl Checker {
         };
         Some((call_span, snippet))
     }
+}
+
+/// A dead HOF spelling `reject_dead_try_spelling` refuses, and the rewrite it
+/// names.
+struct DeadSpelling<'a> {
+    core: &'a str,
+    internal: bool,
+    had_try_twin: bool,
+    rewrite: String,
+}
+
+/// `module.name` as a dead spelling, or `None` when it is not one.
+///
+/// The `try_` names are the seven PUBLIC list twins 0.56.0 deleted — history,
+/// so a fixed set. The `__fallible_` carriers are every cell of the fallible
+/// matrix (#3163), and the fs streaming walkers' (#1144): each is a desugar
+/// target only, as unwritable as `list.__fallible_map`.
+fn dead_spelling<'a>(module: &str, name: &'a str) -> Option<DeadSpelling<'a>> {
+    let (core, internal) = match name.strip_prefix("__fallible_") {
+        Some(core) => (core, true),
+        None => (name.strip_prefix("try_")?, false),
+    };
+    let had_try_twin = module == "list"
+        && matches!(core, "map" | "filter" | "flat_map" | "filter_map" | "fold" | "find" | "each");
+    let known = match (module, internal) {
+        ("fs", _) => matches!(core, "fold_lines" | "for_each_line"),
+        (_, false) => had_try_twin,
+        (m, true) => almide_lang::fallible_hofs::is_fallible_hof(m, core),
+    };
+    if !known {
+        return None;
+    }
+    let rewrite = match (module, core) {
+        ("list", "fold" | "scan") => format!("list.{core}(xs, z, (a, x) => f(a, x)!)!"),
+        ("list", _) => format!("list.{}(xs, (x) => f(x)!)!", core),
+        ("map", "fold") => "map.fold(m, z, (a, k, v) => f(a, k, v)!)!".to_string(),
+        ("fs", "fold_lines") => "fs.fold_lines(path, z, (a, l) => f(a, l)!)!".to_string(),
+        ("fs", _) => "fs.for_each_line(path, (l) => f(l)!)!".to_string(),
+        (m, _) => format!("{m}.{core}(.., (x) => f(x)!)!"),
+    };
+    Some(DeadSpelling { core, internal, had_try_twin, rewrite })
 }
