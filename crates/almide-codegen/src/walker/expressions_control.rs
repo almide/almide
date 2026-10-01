@@ -503,6 +503,17 @@ fn unwrap_err_coerce_attr(ctx: &RenderContext, inner_ty: &Ty) -> Option<&'static
     }
 }
 
+/// `e?` / `e!`. A `Never`-typed one is `bail(c)!` on an `effect fn … -> Never`
+/// (#3144): its ok payload renders `()`, which fits no value slot, and the
+/// callee never returns ok — so past the propagation it is spelled as `!`.
+fn render_expr_try_or_unwrap(ctx: &RenderContext, expr: &IrExpr) -> String {
+    let rendered = match &expr.kind {
+        IrExprKind::Try { expr: inner } => render_expr_try(ctx, inner),
+        _ => render_expr_unwrap(ctx, expr),
+    };
+    if expr.ty == Ty::Never { format!("{{ {rendered}; unreachable!() }}") } else { rendered }
+}
+
 fn render_expr_unwrap(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::Unwrap { expr: inner } = &expr.kind else { unreachable!() };
     // Short-circuit: ok(x)! = x, some(x)! = x — the unwrap is a no-op.
