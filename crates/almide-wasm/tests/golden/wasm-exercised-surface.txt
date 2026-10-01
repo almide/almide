@@ -379,6 +379,7 @@ call:list.__fallible_map__Int_Option_List_Int_String
 call:list.__fallible_map__Int_Option_String_String
 call:list.__fallible_map__Int_String_String
 call:list.__fallible_map__String_Int_String
+call:list.__fallible_map__W_W_String
 call:list.__fallible_partition__Int_String
 call:list.__fallible_reduce__Int_String
 call:list.__fallible_scan__Int_Int_String
