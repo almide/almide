@@ -5,11 +5,6 @@ arm-value:borrowed-temp	3
 assign:SpreadRecord	2
 bind:cell	11
 bind:view-result	5
-call-arg:Lambda:fan.any_map:prefetch	1
-call-arg:Lambda:fan.map:prefetch	2
-call-arg:Lambda:fs.__fallible_fold_lines	1
-call-arg:Lambda:fs.fold_lines	2
-call-arg:Lambda:fs.fold_lines_chunked	1
 call:panic-arg	7
 callback:SpreadRecord	1
 caps:argv-in-plain-fn	8
