@@ -47,7 +47,8 @@ impl Checker {
     /// accepted any operand and `not 5` reached the IR verifier as an
     /// internal compiler error on both targets.
     fn check_unary_not_operand(&mut self, t: &Ty) {
-        if matches!(t, Ty::Bool | Ty::Unknown | Ty::TypeVar(_)) {
+        // `Never` (#3144): `not panic(..)` diverges before `not` runs.
+        if matches!(t, Ty::Bool | Ty::Unknown | Ty::TypeVar(_) | Ty::Never) {
             return;
         }
         self.emit(super::err(
@@ -66,7 +67,9 @@ impl Checker {
             Ty::Int | Ty::Float | Ty::Unknown | Ty::TypeVar(_)
             | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
             | Ty::Float32 | Ty::Float64
-            | Ty::Matrix | Ty::Named(..) => {}
+            | Ty::Matrix | Ty::Named(..)
+            // `-panic(..)` diverges before `-` runs (#3144).
+            | Ty::Never => {}
             Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 => {
                 let name = t.display();
                 self.emit(super::err(
@@ -86,6 +89,11 @@ impl Checker {
         }
     }
 
+    /// The operand's type resolves to the bottom type: it diverges.
+    fn is_never(&self, t: &Ty) -> bool {
+        matches!(resolve_ty(t, &self.uf), Ty::Never)
+    }
+
     fn infer_expr_g2_binary(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::Binary { op, left, right, .. } = &mut expr.kind else { unreachable!("infer_expr_g2_binary called on the wrong ExprKind") };
         let lt = self.infer_expr(left);
@@ -103,6 +111,22 @@ impl Checker {
         // it is now an honest check-time mismatch.
         let lt = self.operand_effect_unwrap(left, lt);
         let rt = self.operand_effect_unwrap(right, rt);
+        // #3144: a diverging operand (`g() + panic("p")`) is `Never`, which
+        // fits any operand slot. Read it as the OTHER operand's type, so the
+        // operator's ordinary rule types the expression and still checks the
+        // other side; two diverging operands give the operator nothing to
+        // check. The lowering cuts the expression at the diverging operand.
+        let (lt, rt) = match (self.is_never(&lt), self.is_never(&rt)) {
+            (true, true) => {
+                return match op.as_str() {
+                    "==" | "!=" | "<" | ">" | "<=" | ">=" | "and" | "or" => Ty::Bool,
+                    _ => Ty::Never,
+                };
+            }
+            (true, false) => (rt.clone(), rt),
+            (false, true) => (lt.clone(), lt),
+            (false, false) => (lt, rt),
+        };
         self.pin_binop_literal_context(op, left, right, &lt, &rt);
         // ADR-0001 S3: the time-type operator matrix intercepts BEFORE the
         // generic paths — `Named` types pass the generic numeric check (the

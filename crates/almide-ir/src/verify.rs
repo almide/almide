@@ -524,6 +524,10 @@ fn verify_binop_types(op: BinOp, left: &IrExpr, right: &IrExpr, v: &mut Verifier
 
     // Skip if either side is Unknown (error recovery) or TypeVar (generic)
     if is_unresolved(lt) || is_unresolved(rt) { return; }
+    // A diverging operand fits any operand slot (#3144). The strict ones are
+    // cut away before codegen (`diverge`); the short-circuit side of `and` /
+    // `or` keeps its `Never`.
+    let fits = |t: &Ty, want: &Ty| *t == Ty::Never || ty_matches(t, want);
 
     let expected = match op {
         BinOp::AddInt | BinOp::SubInt | BinOp::MulInt
@@ -536,7 +540,7 @@ fn verify_binop_types(op: BinOp, left: &IrExpr, right: &IrExpr, v: &mut Verifier
     };
 
     if let Some(expected_ty) = expected {
-        if !ty_matches(lt, &expected_ty) || !ty_matches(rt, &expected_ty) {
+        if !fits(lt, &expected_ty) || !fits(rt, &expected_ty) {
             v.err(
                 format!(
                     "{:?} expects {} operands, got {} and {}",
@@ -549,7 +553,7 @@ fn verify_binop_types(op: BinOp, left: &IrExpr, right: &IrExpr, v: &mut Verifier
 
     // And/Or require Bool
     if matches!(op, BinOp::And | BinOp::Or)
-        && (!ty_matches(lt, &Ty::Bool) || !ty_matches(rt, &Ty::Bool))
+        && (!fits(lt, &Ty::Bool) || !fits(rt, &Ty::Bool))
     {
         v.err(
             format!(
