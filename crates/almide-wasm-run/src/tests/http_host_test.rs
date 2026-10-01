@@ -35,34 +35,54 @@ fn len(ret: i64) -> usize {
 
 fn text(r: (i64, Vec<u8>)) -> (i64, String) {
     assert_eq!(len(r.0), r.1.len(), "the len half matches the payload");
-    (status(r.0), String::from_utf8(r.1).unwrap())
+    (status(r.0), String::from_utf8(r.1).expect("the payload is UTF-8"))
 }
 
 /// Decode `u32 LE len + bytes` frames.
 fn unframe(mut b: &[u8]) -> Vec<String> {
     let mut out = Vec::new();
     while !b.is_empty() {
-        let n = u32::from_le_bytes(b[..4].try_into().unwrap()) as usize;
-        out.push(String::from_utf8(b[4..4 + n].to_vec()).unwrap());
+        let n = u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize;
+        out.push(String::from_utf8(b[4..4 + n].to_vec()).expect("a frame holds UTF-8"));
         b = &b[4 + n..];
     }
     out
 }
 
+/// A loopback listener and the `http://127.0.0.1:<port>/` URL that reaches it.
+fn loopback() -> (TcpListener, String) {
+    let l = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let url = format!("http://127.0.0.1:{}/", l.local_addr().expect("a bound listener has an address").port());
+    (l, url)
+}
+
+/// The one connection a peer serves.
+fn accept(l: &TcpListener) -> TcpStream {
+    l.accept().expect("the client connects").0
+}
+
+/// Read the request head off `s` (through the blank line, or to EOF).
+fn skip_head(s: &TcpStream) {
+    let mut r = BufReader::new(s.try_clone().expect("clone the peer stream"));
+    loop {
+        let mut line = String::new();
+        if r.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+            break;
+        }
+    }
+}
+
+fn join<T>(h: thread::JoinHandle<T>) -> T {
+    h.join().expect("the peer thread finished")
+}
+
 /// One-connection peer that reads the request head, then writes `reply` in
 /// the given pieces and closes.
 fn peer(pieces: Vec<&'static [u8]>) -> (String, thread::JoinHandle<()>) {
-    let l = TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!("http://127.0.0.1:{}/", l.local_addr().unwrap().port());
+    let (l, url) = loopback();
     let h = thread::spawn(move || {
-        let (mut s, _) = l.accept().unwrap();
-        let mut r = BufReader::new(s.try_clone().unwrap());
-        loop {
-            let mut line = String::new();
-            if r.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
-                break;
-            }
-        }
+        let mut s = accept(&l);
+        skip_head(&s);
         for p in pieces {
             let _ = s.write_all(p);
             let _ = s.flush();
@@ -106,7 +126,7 @@ fn unknown_ids_and_ops_are_errors_and_drop_is_idempotent() {
     let _ = by_id(&calls, 55, id);
     assert_eq!(by_id(&calls, 59, id), (0, Vec::new()));
     assert_eq!(status(by_id(&calls, 54, id).0), 1, "gone after drop");
-    h.join().unwrap();
+    join(h);
 }
 
 #[test]
@@ -128,24 +148,17 @@ fn a_call_answers_state_wait_read_and_step() {
     // The call is over: one step answers `o` with an empty cell.
     assert_eq!(text(by_id(&calls, 58, id)), (0, "o0\n".to_string()));
     assert_eq!(text(by_id(&calls, 57, id)), (0, String::new()));
-    h.join().unwrap();
+    join(h);
 }
 
 #[test]
 fn a_running_call_steps_c_then_ends_x_on_cancel() {
     let calls = Mutex::new(HttpCalls::default());
-    let l = TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!("http://127.0.0.1:{}/", l.local_addr().unwrap().port());
+    let (l, url) = loopback();
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     let h = thread::spawn(move || {
-        let (mut s, _) = l.accept().unwrap();
-        let mut r = BufReader::new(s.try_clone().unwrap());
-        loop {
-            let mut line = String::new();
-            if r.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
-                break;
-            }
-        }
+        let mut s = accept(&l);
+        skip_head(&s);
         let _ = s.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 50\r\n\r\npart");
         let _ = rx.recv_timeout(Duration::from_secs(10));
     });
@@ -157,16 +170,15 @@ fn a_running_call_steps_c_then_ends_x_on_cancel() {
     assert_eq!(text(by_id(&calls, 58, id)), (0, "x0\nrequest cancelled".to_string()));
     assert_eq!(text(by_id(&calls, 55, id)), (1, "request cancelled".to_string()));
     let _ = tx.send(());
-    h.join().unwrap();
+    join(h);
 }
 
 #[test]
 fn a_live_call_is_cancelled_when_the_table_drops() {
     let calls = Mutex::new(HttpCalls::default());
-    let l = TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!("http://127.0.0.1:{}/", l.local_addr().unwrap().port());
+    let (l, url) = loopback();
     let h = thread::spawn(move || {
-        let (mut s, _) = l.accept().unwrap();
+        let mut s = accept(&l);
         // The client's cancel shuts the connection: the read ends.
         let mut buf = Vec::new();
         let _ = s.read_to_end(&mut buf);
@@ -175,7 +187,7 @@ fn a_live_call_is_cancelled_when_the_table_drops() {
     assert_eq!(status(ret), 0);
     thread::sleep(Duration::from_millis(50));
     drop(calls);
-    h.join().unwrap();
+    join(h);
 }
 
 // ── serve ops ──
@@ -224,28 +236,31 @@ fn serve_ops_refuse_out_of_order_calls_and_a_bad_port() {
     assert!(m.starts_with("bind failed: "), "{m}");
 }
 
+/// A PUT whose answer is read to the close, then a GET left unanswered
+/// (its reply carries unparsable cells).
+fn put_then_get(port: u16) -> std::io::Result<String> {
+    let mut s = TcpStream::connect(("127.0.0.1", port))?;
+    s.write_all(b"PUT /x HTTP/1.1\r\nX-K: v\r\nContent-Length: 2\r\n\r\nhi")?;
+    let mut resp = String::new();
+    s.read_to_string(&mut resp)?;
+    let mut s2 = TcpStream::connect(("127.0.0.1", port))?;
+    s2.write_all(b"GET / HTTP/1.1\r\n\r\n")?;
+    Ok(resp)
+}
+
 #[test]
 fn serve_ops_bind_take_a_request_and_reply() {
     // Find a free port, then bind it through the op (it binds 0.0.0.0).
-    let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let port = loopback().0.local_addr().expect("a bound listener has an address").port();
     let st = Mutex::new(ServeState::default());
     assert_eq!(serve(&st, OP_SERVE_BIND, &format!(" {port} ")), (0, Vec::new()));
-    let client = thread::spawn(move || {
-        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        s.write_all(b"PUT /x HTTP/1.1\r\nX-K: v\r\nContent-Length: 2\r\n\r\nhi").unwrap();
-        let mut resp = String::new();
-        s.read_to_string(&mut resp).unwrap();
-        // Second request: its reply carries unparsable cells.
-        let mut s2 = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        s2.write_all(b"GET / HTTP/1.1\r\n\r\n").unwrap();
-        resp
-    });
+    let client = thread::spawn(move || put_then_get(port).expect("the client exchange"));
     let (ret, payload) = serve(&st, OP_SERVE_NEXT, "");
     assert_eq!(status(ret), 0);
     assert_eq!(unframe(&payload), ["PUT", "/x", "hi", "X-K", "v", "Content-Length", "2"]);
     let reply = [cell("201"), cell("made"), cell("X-R"), cell("1")].concat();
     assert_eq!(serve(&st, OP_SERVE_REPLY, &reply), (0, Vec::new()));
-    assert_eq!(client.join().unwrap(), "HTTP/1.1 201 Created\r\nX-R: 1\r\nConnection: close\r\nContent-Length: 4\r\n\r\nmade");
+    assert_eq!(join(client), "HTTP/1.1 201 Created\r\nX-R: 1\r\nConnection: close\r\nContent-Length: 4\r\n\r\nmade");
     let (ret, _) = serve(&st, OP_SERVE_NEXT, "");
     assert_eq!(status(ret), 0);
     assert_eq!(text(serve(&st, OP_SERVE_REPLY, "nonsense")), (1, "bad cells".to_string()));
