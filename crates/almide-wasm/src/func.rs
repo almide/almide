@@ -654,10 +654,10 @@ pub(crate) fn fn_signature(f: &IrFunction, types: &TypeTable) -> Result<(Vec<Sli
         params.push(sty);
     }
     let ret = match &f.ret_ty {
-        Ty::Unit if f.is_effect => {
+        Ty::Unit | Ty::Never if f.is_effect => {
             Some(SliceTy::Result(types.intern(SliceTy::Unit), types.intern(STR)))
         }
-        Ty::Unit => None,
+        Ty::Unit | Ty::Never => None, // `-> Never` never returns (#3144)
         other => match slice_ty_of(other, types) {
             // Effect convention: the wasm value of an effect fn is ALWAYS
             // one Result block — the interp's raw-value-or-Flow::Return(Err)
