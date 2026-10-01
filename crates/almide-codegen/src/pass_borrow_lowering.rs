@@ -432,16 +432,15 @@ impl Lower<'_> {
     fn own_consumed_ref_mut(&self, e: &mut IrExpr) {
         // A by-value position hands on whatever value its branches end in
         // (`if c then ws else []`, a match arm, a block's tail — #3170).
-        match &mut e.kind {
-            IrExprKind::If { then, else_, .. } => {
-                self.own_consumed_ref_mut(then);
-                return self.own_consumed_ref_mut(else_);
-            }
-            IrExprKind::Match { arms, .. } => {
-                return arms.iter_mut().for_each(|a| self.own_consumed_ref_mut(&mut a.body));
-            }
-            IrExprKind::Block { expr: Some(tail), .. } => return self.own_consumed_ref_mut(tail),
-            _ => {}
+        let branches: Vec<&mut IrExpr> = match &mut e.kind {
+            IrExprKind::If { then, else_, .. } => vec![then.as_mut(), else_.as_mut()],
+            IrExprKind::Match { arms, .. } => arms.iter_mut().map(|a| &mut a.body).collect(),
+            IrExprKind::Block { expr: Some(tail), .. } => vec![tail.as_mut()],
+            // A leaf value: judged below.
+            _ => Vec::new(),
+        };
+        if !branches.is_empty() {
+            return branches.into_iter().for_each(|b| self.own_consumed_ref_mut(b));
         }
         let Some(id) = var_id(e) else { return };
         if !is_ref_mut_param(self.params, id) || is_copy_scalar(&e.ty) {
@@ -456,27 +455,22 @@ impl Lower<'_> {
     /// borrowed slot is a `Borrow` node here (BorrowInsertion ran), so a
     /// bare `Var` argument is an owned slot by construction.
     fn lower_consumers(&self, expr: &mut IrExpr) {
-        match &mut expr.kind {
+        let slots: Vec<&mut IrExpr> = match &mut expr.kind {
             IrExprKind::Call { args, .. } | IrExprKind::TailCall { args, .. }
-            | IrExprKind::RuntimeCall { args, .. } => {
-                for a in args { self.own_consumed_ref_mut(a); }
-            }
+            | IrExprKind::RuntimeCall { args, .. } => args.iter_mut().collect(),
             // A chain consumes a bare source by value (`.into_iter()`, #3170).
-            IrExprKind::IterChain { source, consume: true, .. } => self.own_consumed_ref_mut(source),
+            IrExprKind::IterChain { source, consume: true, .. } => vec![source.as_mut()],
             IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
-            | IrExprKind::ResultErr { expr: e } => self.own_consumed_ref_mut(e),
-            IrExprKind::Record { fields, .. } => {
-                for (_, f) in fields { self.own_consumed_ref_mut(f); }
-            }
-            IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
-                for a in elements { self.own_consumed_ref_mut(a); }
-            }
+            | IrExprKind::ResultErr { expr: e } => vec![e.as_mut()],
+            IrExprKind::Record { fields, .. } => fields.iter_mut().map(|(_, f)| f).collect(),
+            IrExprKind::List { elements } | IrExprKind::Tuple { elements } => elements.iter_mut().collect(),
             IrExprKind::BinOp { op: BinOp::ConcatStr | BinOp::ConcatList, left, right } => {
-                self.own_consumed_ref_mut(left);
-                self.own_consumed_ref_mut(right);
+                vec![left.as_mut(), right.as_mut()]
             }
-            _ => {}
-        }
+            // Not a consumer: the visitor walks its children.
+            _ => Vec::new(),
+        };
+        for slot in slots { self.own_consumed_ref_mut(slot); }
     }
 }
 

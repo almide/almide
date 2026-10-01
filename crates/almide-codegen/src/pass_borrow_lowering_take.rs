@@ -56,26 +56,24 @@ struct Scan {
 
 impl IrVisitor for Scan {
     fn visit_expr(&mut self, e: &IrExpr) {
-        match &e.kind {
+        let (exits, nests) = match &e.kind {
             IrExprKind::Var { id } if *id == self.id => {
                 self.reads += 1;
-                self.bad |= self.depth > 0;
+                (self.depth > 0, false)
             }
             IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } | IrExprKind::ResultErr { .. }
-            | IrExprKind::Break | IrExprKind::Continue => self.bad = true,
+            | IrExprKind::Break | IrExprKind::Continue => (true, false),
             // A pre-rendered template may carry its own `?` or `return`.
-            IrExprKind::InlineRust { template: code, .. } | IrExprKind::RenderedCall { code }
-                if code.contains('?') || code.contains("return") => self.bad = true,
+            IrExprKind::InlineRust { template: code, .. } | IrExprKind::RenderedCall { code } =>
+                (code.contains('?') || code.contains("return"), false),
             IrExprKind::Lambda { .. } | IrExprKind::ForIn { .. }
-            | IrExprKind::While { .. } | IrExprKind::Fan { .. } => {
-                self.depth += 1;
-                walk_expr(self, e);
-                self.depth -= 1;
-                return;
-            }
-            _ => {}
-        }
+            | IrExprKind::While { .. } | IrExprKind::Fan { .. } => (false, true),
+            _ => (false, false),
+        };
+        self.bad |= exits;
+        self.depth += usize::from(nests);
         walk_expr(self, e);
+        self.depth -= usize::from(nests);
     }
 
     fn visit_stmt(&mut self, s: &IrStmt) {
