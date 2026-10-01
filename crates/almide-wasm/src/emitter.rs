@@ -394,10 +394,28 @@ impl Emitter<'_> {
         // (`expr:Break` / `expr:Continue`) instead of branching to the
         // wrong depth. A loop lowered in here opens its own context.
         let saved = self.loop_ctl.take();
+        self.forget_owned_mark(e);
         let r = self.lower_node(e, want);
         self.loop_ctl = saved;
         crate::decline_site::note(&r, e.span);
         r
+    }
+
+    /// An ownership mark is keyed by the node's ADDRESS (`owned_call_marks`),
+    /// and the emitter lowers nodes it synthesized and then dropped — a map
+    /// literal's pairs list (`lower_map_literal`) is rebuilt per literal. The
+    /// next temporary can be allocated at a freed one's address and inherit
+    /// its mark: `if c then acc else xs` inside a second map literal read as
+    /// an owned join, was parked as a borrowed temporary and released, and
+    /// `xs` was freed under its holder (#3139 — whether the addresses met
+    /// depended on the allocator, so one build in six diverged). A node's
+    /// mark is therefore written by its OWN lowering only: whatever the
+    /// address held before is forgotten as the node is entered.
+    fn forget_owned_mark(&mut self, e: &IrExpr) {
+        self.owned_call_marks.remove(&(e as *const IrExpr as usize));
+        if let IrExprKind::Call { target, .. } = &e.kind {
+            self.owned_call_marks.remove(&(target as *const almide_ir::CallTarget as usize));
+        }
     }
 
     fn lower_node(&mut self, e: &IrExpr, want: Option<SliceTy>) -> Result<SliceTy, EmitError> {
