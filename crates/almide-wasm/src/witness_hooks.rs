@@ -108,7 +108,9 @@ impl Emitter<'_> {
     pub(crate) fn witness_share_or_move(&mut self, e: &almide_ir::IrExpr, reason: &str) {
         let src_local = self.witness_src_local(e);
         let fresh = self.rc_owned_result(e);
-        let view = crate::witness_unwrap::is_extraction_view(e);
+        // A top-let GLOBAL holds its own credit for the program's life: a
+        // share of it is a view's, like a slot read's.
+        let view = crate::witness_unwrap::is_extraction_view(e) || self.global_var_ty(e).is_some();
         let Some(w) = self.witness.as_mut() else { return };
         if fresh {
             w.temp_move();
@@ -240,6 +242,15 @@ impl Emitter<'_> {
         }
     }
 
+    /// The declared type of a top-let global `e` names (a Var no local maps).
+    fn global_var_ty(&self, e: &almide_ir::IrExpr) -> Option<SliceTy> {
+        let almide_ir::IrExprKind::Var { id } = &e.kind else { return None };
+        if self.locals.contains_key(id) {
+            return None;
+        }
+        self.globals.get(&(self.var_space, *id)).map(|&(_, t)| t)
+    }
+
     /// Retain of a Var mirrors `rc_share_guard`: a cell var shares
     /// nothing (decline — the cell's credit is not this frame's); a
     /// handle-typed local took the real `rc_inc` and its credit moves
@@ -252,7 +263,16 @@ impl Emitter<'_> {
             return;
         }
         let Some(&(l, vt)) = self.locals.get(id) else {
-            self.witness_decline(&format!("{position}:retain-unknown-local"));
+            // A global's block: `rc_share_guard` shares a handle, a view's
+            // share moved into the holder (`am`).
+            match self.global_var_ty(e) {
+                Some(gt) if self.elem_is_handle(gt) => {
+                    if let Some(w) = self.witness.as_mut() {
+                        w.view_share_move();
+                    }
+                }
+                _ => self.witness_decline(&format!("{position}:retain-unknown-local")),
+            }
             return;
         };
         if !self.elem_is_handle(vt) {
