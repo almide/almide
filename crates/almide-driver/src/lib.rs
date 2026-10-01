@@ -73,6 +73,10 @@ pub fn optimize_half(ir: &mut IrProgram) {
     // that agree today. See `almide_ir::exit_code` for why 0..=255, and where the
     // preview-1 build's 126..=255 wall lives instead (#2303, #2780).
     almide_ir::exit_code::guard_exit_codes(ir);
+    // A diverging operand ends its expression (#3144): the operands to its
+    // left run as statements, then it aborts. After the exit guard, whose
+    // replacement is itself a diverging block an operand may hold.
+    almide_ir::diverge::cut_diverging_operands(ir);
     almide_optimize::optimize::optimize_program(ir);
     almide_ir::reclassify_top_lets(ir);
 }
