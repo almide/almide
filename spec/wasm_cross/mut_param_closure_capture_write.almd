@@ -1,0 +1,74 @@
+// @contract: C-132, C-319
+// #3154: a closure that WRITES a `mut` parameter — passing it on to a `mut`
+// callee, assigning a field, pushing into it — writes the caller's place, and
+// the fn sees the write after the closure runs. Native lowered the capture as
+// a shared cell the param never had (`r.get()` on a `&mut R`, rustc E0599);
+// the param now takes a var's cell for the call and is written back on every
+// exit, the error exit included. Byte-identical native == wasm == interp.
+type R = { n: Int, log: List[Int] }
+
+fn bump(mut r: R, k: Int) -> Int = {
+  r.n = r.n + k
+  r.n
+}
+
+fn total(mut r: R, ks: List[Int]) -> Int = list.fold(ks, 0, (acc, k) => acc + bump(r, k))
+
+fn stored(mut r: R, ks: List[Int]) -> Int = {
+  let step = (k: Int) => bump(r, k * 10)
+  let a = step(1)
+  let b = step(2)
+  a + b + r.n
+}
+
+effect fn record(mut r: R, ks: List[Int]) -> Unit = {
+  let note = (k: Int) => {
+    list.push(r.log, k)
+    r.n = r.n + 1
+  }
+  for k in ks {
+    note(k)
+  }
+}
+
+effect fn count(mut c: Int, ks: List[Int]) -> Int = {
+  let add = (k: Int) => {
+    c = c + k
+  }
+  for k in ks {
+    add(k)
+  }
+  c * 2
+}
+
+effect fn grow(mut xs: List[Int], n: Int) -> Unit = {
+  let push = (v: Int) => list.push(xs, v)
+  for i in 0..<n {
+    push(i)
+  }
+}
+
+effect fn fail_after(mut r: R, k: Int) -> Int = {
+  let step = (j: Int) => bump(r, j)
+  let got = step(k)
+  if got > 3 then err("over: ${int.to_string(got)}") else ok(got)
+}
+
+effect fn main() -> Unit = {
+  var r = R { n: 0, log: [] }
+  println("total ${int.to_string(total(r, [1, 2, 3]))} n=${int.to_string(r.n)}")
+  println("stored ${int.to_string(stored(r, [1]))} n=${int.to_string(r.n)}")
+  record(r, [7, 8, 9])!
+  println("record n=${int.to_string(r.n)} log=${int.to_string(list.len(r.log))}")
+  var c = 5
+  println("count ${int.to_string(count(c, [1, 2, 3])!)} c=${int.to_string(c)}")
+  var xs: List[Int] = [100]
+  grow(xs, 3)!
+  println("grow len=${int.to_string(list.len(xs))} last=${int.to_string(xs[3])}")
+  var f = R { n: 2, log: [] }
+  let outcome = match fail_after(f, 5) {
+    ok(v) => "ok ${int.to_string(v)}",
+    err(e) => "err ${e}",
+  }
+  println("${outcome} n=${int.to_string(f.n)}")
+}
