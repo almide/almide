@@ -52,6 +52,7 @@ pub(super) fn is_self_hosted_hof(module: &str, func: &str) -> bool {
 ///   `find`, `filter`, the predicates, `map`, `update`, `upsert`), each
 ///   settling the body's value at the instruction that takes it
 ///   (witness_inline.rs);
+/// - #3137: the fs line walkers and the prefetch fans (witness_walkers.rs);
 /// - the option / result combinators (sums.rs): the callback runs at most
 ///   once, on one arm of a branch site (witness_inline.rs); its value is
 ///   settled by the share guard (`witness_store`), a payload handed out on
@@ -77,12 +78,20 @@ pub(super) fn inline_callback_subset(module: &str, func: &str, args: &[IrExpr]) 
         ("result", "unwrap_or_else" | "map" | "map_err" | "flat_map", [_, _])
         | ("option", "map" | "flat_map" | "filter", [_, _]) => 1,
         ("option", "unwrap_or_else" | "or_else", [_, _]) => 0,
-        // The prefetch forms (fan.rs) start every read before the loop and
-        // record no activation.
-        ("fan", "map" | "any" | "any_map", [_, cb]) if crate::fan::body_is_fs_read_text(cb) => {
-            return here(":prefetch");
-        }
+        // The prefetch forms (fan.rs) never lower the body: each awaited
+        // read's Result carrier is born in the frame and settled as the
+        // sequential fan's (witness_walkers.rs).
         ("fan", "map" | "any" | "any_map", [_, _]) => 1,
+        // #3137: the fs line walkers (fs.rs, fs_meta.rs, fs_range.rs): one
+        // activation per line, the line a block the walk allocates and
+        // releases around it, a heap accumulator carried as `list.fold`'s
+        // (witness_walkers.rs). A fallible walker's compound body is called
+        // as a closure (`:propagating` below).
+        ("fs", "fold_lines", [_, _, _]) | ("fs", "fold_lines_chunked", [_, _, _, _]) => 2,
+        ("fs", "fold_lines_range", [_, _, _, _, _]) => 2,
+        ("fs", "for_each_line", [_, _]) => 1,
+        ("fs", f, [_, _, _]) if f.starts_with("__fallible_fold_lines") => 2,
+        ("fs", f, [_, _]) if f.starts_with("__fallible_for_each_line") => 1,
         // A fold over a `list.*` chain may take the fused or enumerate
         // lowering (list_fuse.rs, list_enumerate_fold.rs): one activation per
         // element over every inlined stage, whose callbacks are the chain's

@@ -50,7 +50,7 @@ impl Emitter<'_> {
                 if dbg {
                     eprintln!("[fan-dbg] fan.map: prefetch lowering engaged");
                 }
-                Some(Lowered::owned(self.lower_fan_map_fs_prefetch(xs)?))
+                Some(Lowered::owned(self.lower_fan_map_fs_prefetch(xs, cb)?))
             }
             // fan.any over the same shape (#1628 increment 2c): start every
             // read, await in ARM order, FIRST OK wins — and the remaining
@@ -62,7 +62,7 @@ impl Emitter<'_> {
                 if dbg {
                     eprintln!("[fan-dbg] fan.{func}: prefetch-any lowering engaged");
                 }
-                Some(Lowered::owned(self.lower_fan_any_fs_prefetch(xs)?))
+                Some(Lowered::owned(self.lower_fan_any_fs_prefetch(xs, cb)?))
             }
             ("map" | "any" | "any_map", [xs, cb]) => {
                 if dbg {
@@ -363,8 +363,10 @@ impl Emitter<'_> {
     fn lower_fan_any_fs_prefetch(
         &mut self,
         xs: &IrExpr,
+        cb: &IrExpr,
     ) -> Result<SliceTy, EmitError> {
         self.note_fan_ops();
+        self.witness_prefetch_open(cb);
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         if elem != STR {
             return unsup(&format!("fan-prefetch-any-elem:{elem:?}"));
@@ -391,6 +393,7 @@ impl Emitter<'_> {
             i.i32_const(0).local_set(ih);
             i.block(BlockType::Empty).loop_(BlockType::Empty);
         }
+        self.witness_loop_open();
         self.hof_elem_into(elem, bh, ch, ih, hp);
         {
             let mut i = self.f.instructions();
@@ -417,7 +420,9 @@ impl Emitter<'_> {
             i.end();
             i.local_get(hr).i32_const(0).i32_ne().br_if(1);
         }
+        self.witness_prefetch_any_step();
         self.hof_step(ih);
+        self.witness_loop_close();
         // ── abandon sweep: cancel every arm after the winner ──
         {
             let mut i = self.f.instructions();
@@ -464,8 +469,10 @@ impl Emitter<'_> {
     fn lower_fan_map_fs_prefetch(
         &mut self,
         xs: &IrExpr,
+        cb: &IrExpr,
     ) -> Result<SliceTy, EmitError> {
         self.note_fan_ops();
+        self.witness_prefetch_open(cb);
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         if elem != STR {
             return unsup(&format!("fan-prefetch-elem:{elem:?}"));
@@ -494,6 +501,7 @@ impl Emitter<'_> {
             i.i32_const(0).local_set(ih);
             i.block(BlockType::Empty).loop_(BlockType::Empty);
         }
+        self.witness_loop_open();
         self.hof_elem_into(elem, bh, ch, ih, hp);
         {
             let mut i = self.f.instructions();
@@ -525,7 +533,9 @@ impl Emitter<'_> {
             i.end();
             i.end();
         }
+        self.witness_prefetch_map_step();
         self.hof_step(ih);
+        self.witness_loop_close();
         let sh = self.types.intern(STR);
         let acc_dec = self.dec_fn_of(SliceTy::List(sh));
         // finale: no err → ok(acc); an err is the result, and the payloads
