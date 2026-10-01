@@ -127,6 +127,7 @@
 68608	spec/wasm_cross/datetime_parse_iso_strict.almd
 67088	spec/wasm_cross/datetime_pre_epoch.almd
 67472	spec/wasm_cross/declaration_forms.almd
+67808	spec/wasm_cross/declaration_literal_domain.almd
 66032	spec/wasm_cross/deep_eq_heap.almd
 65712	spec/wasm_cross/default_param_ref.almd
 65904	spec/wasm_cross/destructure_let_unwrap.almd
