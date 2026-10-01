@@ -763,6 +763,7 @@ spec/wasm_cross/scoped_worker_in_and_out.almd
 spec/wasm_cross/set_entries_reclaim.almd
 spec/wasm_cross/set_index_order.almd
 spec/wasm_cross/set_insertion_order.almd
+spec/wasm_cross/sized_field_default_matrix.almd
 spec/wasm_cross/sized_int_overflow_wrap.almd
 spec/wasm_cross/sized_int_record_fields.almd
 spec/wasm_cross/sized_numeric_literals.almd
