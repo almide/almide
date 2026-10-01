@@ -88,6 +88,13 @@ pub(crate) struct TypeTable {
     fn_sig_ids: RefCell<HashMap<FnSig, u32>>,
     /// Display name per def index ("" = anonymous record shape).
     names: RefCell<Vec<String>>,
+    /// Defs below this index are the CONCRETE declarations (phase 1); the
+    /// rest are on-demand generic instances and anonymous shapes.
+    concrete_len: usize,
+    /// The declared record types by field names and IR types — the rule every
+    /// leg reads (#3189); here it picks the GENERIC decl a structural record
+    /// instantiates when no concrete one fits.
+    shapes: almide_ir::record_shape::RecordShapeIndex,
 }
 
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -137,26 +144,15 @@ impl TypeTable {
         // An INFERRED structural record that matches a DECLARED record
         // type (same field names+types, any order) IS that type — the
         // oracle unifies them (r5_wasm_inferred_record_repr: declared
-        // name and declared field order in the repr).
-        {
-            let mut want: Vec<(String, SliceTy)> = infos.clone();
-            want.sort_by(|a, b| a.0.cmp(&b.0));
-            let defs = self.defs.borrow();
-            for (i, d) in defs.iter().enumerate() {
-                if let NamedDef::Record(r) = d {
-                    if self.names.borrow()[i].is_empty() {
-                        continue;
-                    }
-                    if r.fields.len() == want.len() {
-                        let mut have: Vec<(String, SliceTy)> =
-                            r.fields.iter().map(|f| (f.name.clone(), f.ty)).collect();
-                        have.sort_by(|a, b| a.0.cmp(&b.0));
-                        if have == want {
-                            return Some(i as u32);
-                        }
-                    }
-                }
-            }
+        // name and declared field order in the repr). A concrete decl first,
+        // in declaration order; then a generic one, instantiated at the
+        // field types (#3189) — whether or not the program spells that
+        // instance anywhere else, as native and the interp read it.
+        if let Some(i) = self.concrete_record_for(&infos) {
+            return Some(i);
+        }
+        if let Some(i) = self.generic_record_for(fields) {
+            return Some(i);
         }
         let widths: Vec<u32> = infos.iter().map(|(_, t)| t.slot_size()).collect();
         let (offsets, size) = almide_layout::pack_fields(&widths);
@@ -175,6 +171,34 @@ impl TypeTable {
         };
         self.anon_ids.borrow_mut().insert(infos, i);
         Some(i)
+    }
+
+    /// The concrete declared record with exactly these (name, slice type)
+    /// fields, in any order; structural twins share an index.
+    fn concrete_record_for(&self, infos: &[(String, SliceTy)]) -> Option<u32> {
+        let mut want: Vec<(String, SliceTy)> = infos.to_vec();
+        want.sort_by(|a, b| a.0.cmp(&b.0));
+        let defs = self.defs.borrow();
+        let names = self.names.borrow();
+        defs.iter().take(self.concrete_len).enumerate().find_map(|(i, d)| {
+            let NamedDef::Record(r) = d else { return None };
+            if names[i].is_empty() || r.fields.len() != want.len() {
+                return None;
+            }
+            let mut have: Vec<(String, SliceTy)> =
+                r.fields.iter().map(|f| (f.name.clone(), f.ty)).collect();
+            have.sort_by(|a, b| a.0.cmp(&b.0));
+            (have == want).then_some(i as u32)
+        })
+    }
+
+    /// The instance of the first generic declared record these fields fit,
+    /// when every parameter is pinned and the instance has a layout.
+    fn generic_record_for(&self, fields: &[(Sym, Ty)]) -> Option<u32> {
+        let (shape, bound) = self.shapes.lookup_generic(fields)?;
+        let args: Vec<Ty> = bound.into_iter().collect::<Option<_>>()?;
+        let i = self.instance(shape.name.as_str(), &args)?;
+        matches!(self.def(i), NamedDef::Record(_)).then_some(i)
     }
 
     /// Monomorph instance of a generic declaration, built on demand.
@@ -439,6 +463,8 @@ impl TypeTable {
             fn_sigs: RefCell::new(Vec::new()),
             fn_sig_ids: RefCell::new(HashMap::new()),
             names: RefCell::new(Vec::new()),
+            concrete_len: 0,
+            shapes: almide_ir::record_shape::RecordShapeIndex::build(ir, |td| td.name.to_string()),
         };
         // Phase 1: every CONCRETE declaration gets an index (Excluded
         // placeholder); generic declarations are kept whole for on-demand
@@ -477,6 +503,7 @@ impl TypeTable {
             table.names.borrow_mut().push(decl.name.as_str().to_string());
             table.by_name.insert(decl.name.as_str().to_string(), idx);
         }
+        table.concrete_len = table.defs.borrow().len();
         // Phase 2: build definitions in place.
         for decl in &all_decls {
             if decl.generics.is_some() {
