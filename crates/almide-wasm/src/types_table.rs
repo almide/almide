@@ -216,6 +216,35 @@ impl TypeTable {
     }
 }
 
+impl TypeTable {
+    /// The IR type of field `field` of case `case` (0 for a record; tuple
+    /// fields are `"0"`, `"1"`, …) in the GENERIC instance `ir` names. The
+    /// instance layout is keyed by slot types, so it is shared by every
+    /// argument with the same slot and its own field types are those of
+    /// whichever instance came first; a display needs the digits of THIS
+    /// one (`Box[UInt64]` reads unsigned, `Box[Float32]` prints binary32,
+    /// #3187). `None` when `ir` is not a generic instance.
+    pub(crate) fn instance_field_ir(&self, ir: Option<&Ty>, case: usize, field: &str) -> Option<Ty> {
+        let Some(Ty::Named(n, args)) = ir else { return None };
+        let decl = self.generic_decls.get(n.as_str())?;
+        let params = decl.generics.as_ref()?;
+        if params.len() != args.len() {
+            return None;
+        }
+        let env: HashMap<Sym, &Ty> = params.iter().map(|p| p.name).zip(args.iter()).collect();
+        let declared = match &decl.kind {
+            IrTypeDeclKind::Record { fields } => fields.iter().find(|f| f.name.as_str() == field)?.ty.clone(),
+            IrTypeDeclKind::Variant { cases, .. } => match &cases.get(case)?.kind {
+                IrVariantKind::Unit => return None,
+                IrVariantKind::Tuple { fields } => fields.get(field.parse::<usize>().ok()?)?.clone(),
+                IrVariantKind::Record { fields } => fields.iter().find(|f| f.name.as_str() == field)?.ty.clone(),
+            },
+            IrTypeDeclKind::Alias { .. } => return None,
+        };
+        Some(subst(&declared, &env))
+    }
+}
+
 /// Substitute type variables per the instantiation environment.
 fn subst(ty: &Ty, env: &HashMap<Sym, &Ty>) -> Ty {
     match ty {

@@ -223,7 +223,10 @@ impl Emitter<'_> {
                             self.witness_unwrap_decline("err-repr");
                             // ADR-0021 D2 / #2725: a typed error `!`-ed into a
                             // String channel — the channel carries its repr text.
-                            self.propagate_err_as_repr(SliceTy::Result(o, er), ert, owned_carrier)?;
+                            // The error's IR type picks its digits (a UInt64 reads
+                            // unsigned, a Float32 prints binary32 — #3187).
+                            let err_ir = crate::display::ir_arg(Some(&expr.ty), 1).cloned();
+                            self.propagate_err_as_repr(SliceTy::Result(o, er), ert, err_ir.as_ref(), owned_carrier)?;
                         } else if in_effect && fn_err == Some(STR) && self.is_str_list(ert) {
                             self.witness_unwrap_decline("err-joined");
                             self.propagate_err_joined(SliceTy::Result(o, er), ert, owned_carrier)?;
