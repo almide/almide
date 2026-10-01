@@ -109,7 +109,7 @@ impl Emitter<'_> {
         let fresh = self.rc_owned_result(e);
         // A top-let GLOBAL holds its own credit for the program's life: a
         // share of it is a view's, like a slot read's.
-        let view = crate::witness_unwrap::is_extraction_view(e) || self.global_var_ty(e).is_some();
+        let view = crate::witness_unwrap::is_extraction_view(e) || self.witness_top_let_ty(e).is_some();
         let Some(w) = self.witness.as_mut() else { return };
         if fresh {
             w.temp_move();
@@ -242,7 +242,7 @@ impl Emitter<'_> {
     }
 
     /// The declared type of a top-let global `e` names (a Var no local maps).
-    fn global_var_ty(&self, e: &almide_ir::IrExpr) -> Option<SliceTy> {
+    fn witness_top_let_ty(&self, e: &almide_ir::IrExpr) -> Option<SliceTy> {
         let almide_ir::IrExprKind::Var { id } = &e.kind else { return None };
         if self.locals.contains_key(id) {
             return None;
@@ -264,7 +264,7 @@ impl Emitter<'_> {
         let Some(&(l, vt)) = self.locals.get(id) else {
             // A global's block: `rc_share_guard` shares a handle, a view's
             // share moved into the holder (`am`).
-            match self.global_var_ty(e) {
+            match self.witness_top_let_ty(e) {
                 Some(gt) if self.elem_is_handle(gt) => {
                     if let Some(w) = self.witness.as_mut() {
                         w.view_share_move();
