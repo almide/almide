@@ -445,3 +445,24 @@ spec/wasm_cross/mut_param_closure_capture_write.almd :: main  # #2739
 spec/integration/qualified_ctor_names/src/cells.almd :: case_beside_case  # #3181
 spec/integration/qualified_ctor_names/src/cells.almd :: defaults  # #3181
 spec/integration/qualified_ctor_names/src/main.almd :: shadowed  # #3181
+# #3170: the mut-param reassign-from-HOF fixture's MIR rung walls on four
+# shapes its rows need: `main` builds its lines with interpolation in a call
+# argument, `f_filter_map` passes a closure that returns an option literal,
+# `f_branch` binds a heap-result `if`, and `f_fallible` a heap-result `match`
+# (the fallible map's carrier). Native falls back to the classic renderer —
+# the leg #3170 fixed — and the structural wasm leg and the interp agree with it.
+spec/wasm_cross/mut_param_reassign_from_hof.almd :: f_branch  # #2739
+spec/wasm_cross/mut_param_reassign_from_hof.almd :: f_fallible  # #2739
+spec/wasm_cross/mut_param_reassign_from_hof.almd :: f_filter_map  # #2739
+spec/wasm_cross/mut_param_reassign_from_hof.almd :: main  # #2739
+# #3174: the recursive-payload fixtures' MIR rung walls on a heap-result
+# `match` outside the executable subset (`left_bumped`, `swapped`,
+# `inner_right`), a match over an untracked tuple subject with call-bearing
+# arms (`from_tuple`) and a tail option match (`wrapped_capture`). Native falls
+# back to the classic renderer — the leg #3174 fixed — and the structural wasm
+# leg and the interp agree with it.
+spec/wasm_cross/recursive_payload_closure_capture.almd :: inner_right  # #2739
+spec/wasm_cross/recursive_payload_closure_capture.almd :: left_bumped  # #2739
+spec/wasm_cross/recursive_payload_closure_capture.almd :: swapped  # #2739
+spec/wasm_cross/recursive_payload_nested_pattern.almd :: from_tuple  # #2739
+spec/wasm_cross/recursive_payload_nested_pattern.almd :: wrapped_capture  # #2739
