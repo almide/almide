@@ -1,0 +1,45 @@
+// @contract: C-102, C-284
+// list.find_map (#3156): the first `some` the callback gives, and the callback
+// does not run on any element after it. The callback prints each element it
+// visits, so the short-circuit is in the stdout every leg must match: a leg
+// that kept mapping past the hit would print the extra `visit` lines.
+//
+// The plain form walks Int and String lists into Int and String payloads; the
+// fallible form (`list.find_map(xs, (s) => f(s)!)!`, ADR-0006) stops at a hit
+// AND at the first err, and an all-none walk is `ok(none)`. The fallback reads
+// use a `??` that opens its own line (#3155).
+effect fn even_tenfold(x: Int) -> Int? = {
+  println("visit ${x}")
+  if x % 2 == 0 then some(x * 10) else none
+}
+
+effect fn shout(s: String) -> String? = {
+  println("visit ${s}")
+  if string.len(s) > 2 then some(string.to_upper(s)) else none
+}
+
+effect fn big(s: String) -> Int? = {
+  println("parse ${s}")
+  let n = int.parse(s)!
+  if n > 10 then some(n) else none
+}
+
+effect fn first_big(xs: List[String]) -> Int? = list.find_map(xs, (s) => big(s)!)!
+
+fn show(r: Result[Int?, String]) -> String = match r {
+  ok(v) => "ok ${v ?? -1}",
+  err(e) => "err ${e}",
+}
+
+effect fn main() -> Unit = {
+  let hit = list.find_map([3, 5, 4, 6, 8], (x) => even_tenfold(x)!)!
+  println("hit ${hit ?? -1}")
+  let miss = list.find_map([1, 3], (x) => even_tenfold(x)!)!
+  println("miss ${miss ?? -1}")
+  let word = ["a", "bb", "ccc", "dddd"] |> list.find_map((s) => shout(s)!)!
+  println(word // the first word longer than two letters
+    ?? "none")
+  println(show(first_big(["1", "20", "boom"])))
+  println(show(first_big(["1", "boom", "30"])))
+  println(show(first_big(["1", "2"])))
+}
