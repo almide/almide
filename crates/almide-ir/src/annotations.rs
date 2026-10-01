@@ -40,6 +40,11 @@ pub struct CodegenAnnotations {
     /// `BorrowLoweringPass`; the walker's box-pattern rewrite reads it to
     /// spell a borrowed subject's guards and move-outs through the reference.
     pub ref_binders: HashSet<VarId>,
+    /// Pattern binders of a recursive enum's boxed field: the Almide type is
+    /// `T`, the Rust binding is `Box<T>`, and every read is a `Deref`.
+    /// Decided by `BoxDerefPass`; `CaptureClonePass` reads it so a closure's
+    /// capture binds the unboxed `T` its declared type promises (#3174).
+    pub box_binders: HashSet<VarId>,
     /// First parameter of every iterator-chain step / collector lambda: the
     /// closure runs synchronously inside the chain and never escapes it, so
     /// it renders without `move` and borrows what it reads for the chain's

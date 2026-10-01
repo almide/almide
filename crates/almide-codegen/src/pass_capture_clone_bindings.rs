@@ -27,6 +27,7 @@ pub(super) fn wrap_fan_with_clones(expr: &mut IrExpr, cx: &mut Cx, scope: &HashS
         };
         let (stmts, renames) = capture_bindings(&captures, cx, &mutated, Some("__fan_cap"), &move_now);
         replace_vars(arm, &renames);
+        unbox_captures(arm, &renames, &cx.facts.box_binders);
         bindings.extend(stmts);
     }
     if bindings.is_empty() { return false; }
@@ -73,6 +74,14 @@ pub(super) fn capture_bindings(
         // (the Almide-level owned type) expects an owned value. Materialise
         // the owned form explicitly so the `move |..|` closure can take it.
         let borrow = cx.facts.param_borrows.get(&var_id).copied();
+        // A boxed-payload binder is a `Box<T>` read as `*b` (#3174): the
+        // capture binds that unboxed `T`, and `unbox_captures` drops the
+        // body's `Deref` of the rename.
+        let read = |id: VarId| {
+            let var = IrExpr { kind: IrExprKind::Var { id }, ty: ty.clone(), span: None, def_id: None };
+            if !cx.facts.box_binders.contains(&id) { return var; }
+            IrExpr { kind: IrExprKind::Deref { expr: Box::new(var) }, ty: ty.clone(), span: None, def_id: None }
+        };
         let bind_value = match borrow {
             Some(ParamBorrow::RefSlice) => IrExpr {
                 kind: IrExprKind::ToVec {
@@ -99,12 +108,7 @@ pub(super) fn capture_bindings(
             // Nothing else — no later statement, no sibling closure, no
             // runtime-template borrow in the same call — can name the var
             // again, so the #809 hazard below cannot arise.
-            _ if move_now.contains(&var_id) => IrExpr {
-                kind: IrExprKind::Var { id: var_id },
-                ty: ty.clone(),
-                span: None,
-                def_id: None,
-            },
+            _ if move_now.contains(&var_id) => read(var_id),
             // The default capture bind CLONES explicitly (#809): CloneInsertion's
             // last-use analysis would MOVE the var here when this is its last
             // syntactic use — but a runtime-template borrow (`&{m}` — e.g.
@@ -118,24 +122,12 @@ pub(super) fn capture_bindings(
             // FLAG cannot gate this: a non-Copy `var` mutated only through a
             // method (`list.push`) is recorded `Mutability::Let`.
             _ if !lam_mutated.contains(&var_id) => IrExpr {
-                kind: IrExprKind::Clone {
-                    expr: Box::new(IrExpr {
-                        kind: IrExprKind::Var { id: var_id },
-                        ty: ty.clone(),
-                        span: None,
-                        def_id: None,
-                    }),
-                },
+                kind: IrExprKind::Clone { expr: Box::new(read(var_id)) },
                 ty: ty.clone(),
                 span: None,
                 def_id: None,
             },
-            _ => IrExpr {
-                kind: IrExprKind::Var { id: var_id },
-                ty: ty.clone(),
-                span: None,
-                def_id: None,
-            },
+            _ => read(var_id),
         };
 
         stmts.push(IrStmt {
@@ -150,6 +142,28 @@ pub(super) fn capture_bindings(
     }
 
     (stmts, renames)
+}
+
+/// The renamed body still reads a boxed-payload capture through BoxDeref's
+/// `Deref` (`*__cap_N`), but [`capture_bindings`] bound the unboxed `T`:
+/// drop that `Deref` so the closure reads the capture by its own type (#3174).
+pub(super) fn unbox_captures(body: &mut IrExpr, renames: &HashMap<VarId, VarId>, box_binders: &HashSet<VarId>) {
+    struct Unbox(HashSet<VarId>);
+    impl almide_ir::visit_mut::IrMutVisitor for Unbox {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            if let IrExprKind::Deref { expr: inner } = &mut e.kind
+                && matches!(inner.kind, IrExprKind::Var { id } if self.0.contains(&id))
+            {
+                *e = std::mem::replace(inner.as_mut(), IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None });
+                return;
+            }
+            almide_ir::visit_mut::walk_expr_mut(self, e);
+        }
+    }
+    let caps: HashSet<VarId> = renames.iter().filter(|(v, _)| box_binders.contains(v)).map(|(_, c)| *c).collect();
+    if !caps.is_empty() {
+        almide_ir::visit_mut::IrMutVisitor::visit_expr_mut(&mut Unbox(caps), body);
+    }
 }
 
 /// One occurrence of a var as the capture-move rule sees it: its index in
