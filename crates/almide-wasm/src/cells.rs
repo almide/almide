@@ -99,6 +99,31 @@ pub(crate) fn cell_vars_of(body: &IrExpr) -> HashSet<VarId> {
     s.captured.intersection(&s.mutated).copied().collect()
 }
 
+/// A PARAMETER in a fn's cell set (#3154: a `mut` param a closure captures
+/// and the fn writes) has no bind to allocate its cell at, so its local held
+/// the bare value while every read and write went through it as a cell
+/// address — garbage reads, and an invalid module for a scalar. Each one is
+/// rebound onto a `var` local at entry (`almide_ir::param_rebind`), which the
+/// bind path allocates as a cell; the C-132 exits read that local back, so
+/// the caller's place receives the final value. Runs after the move-mode
+/// rewrite, whose write-backs are the writes a captured callee call makes.
+pub fn rebind_cell_params(program: &mut almide_ir::IrProgram) {
+    fn each(funcs: &mut [almide_ir::IrFunction], vt: &mut almide_ir::VarTable) {
+        for func in funcs {
+            let cells = cell_vars_of(&func.body);
+            let params: Vec<VarId> = func.params.iter().map(|p| p.var).filter(|v| cells.contains(v)).collect();
+            for p in params {
+                almide_ir::param_rebind::rebind_param_as_var(&mut func.body, vt, p);
+            }
+        }
+    }
+    each(&mut program.functions, &mut program.var_table);
+    // A module fn's VarIds index its MODULE's table on this leg.
+    for m in &mut program.modules {
+        each(&mut m.functions, &mut m.var_table);
+    }
+}
+
 /// Which args a linked module call writes (and so must make unique first).
 /// A bundled stdlib surface answers from its own DECLARATION, not from
 /// whichever implementation the self-host registry linked for it: the

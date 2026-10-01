@@ -192,6 +192,7 @@ mod arm;
 pub(crate) use arm::{ArgMode, ArmResult, Lowered, Own};
 mod exit_plan;
 pub use exit_plan::test_omit_first_release;
+pub use cells::rebind_cell_params;
 mod fuel;
 mod inline_calls;
 mod ranges;
