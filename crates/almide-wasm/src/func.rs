@@ -414,13 +414,13 @@ pub(crate) fn lower_fn(
             && crate::witness::collecting()
         {
             // #2758: a capture is a view of the env block (loaded without a
-            // share, below) — except a C-319 cell, whose address travels.
-            // A C-319 cell's ADDRESS is the env's (its drop glue releases
-            // it); only a DROPPABLE occupant has RC sites here — declined.
-            let droppable_cell = |c: &Vec<_>| c.iter().any(|&(_, t, _, cell)| cell && em.rc_droppable(t));
-            let pre_gate = if env_captures.as_ref().is_some_and(droppable_cell) {
-                Some("captures:cell".to_string())
-            } else if crate::witness::argv_exception(name) {
+            // share, below). A C-319 cell's ADDRESS travels instead, and the
+            // env holds the cell (its drop glue releases it): a READ of the
+            // cell's occupant is a view like any capture's — a share it
+            // takes lands on the occupant, a block the frame does not hold —
+            // and every WRITE through the cell declines at its own route
+            // (`assign:global-or-cell`, `mut-receiver:cell`, `*:retain-cell`).
+            let pre_gate = if crate::witness::argv_exception(name) {
                 Some("caps:argv-in-plain-fn".to_string())
             } else {
                 top_lets_gate(top_lets, ctx)
