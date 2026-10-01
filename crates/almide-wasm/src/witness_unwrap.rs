@@ -60,6 +60,9 @@ pub(crate) fn slot_read_of_var(e: &almide_ir::IrExpr) -> bool {
     use almide_ir::IrExprKind as K;
     match &crate::rc_ownership::rc_tail(e).kind {
         K::Var { .. } => true,
+        // #2755: the payload a `!` reads out of a bound carrier is a view
+        // of the carrier's slot (`is_extraction_view`).
+        K::Try { expr } | K::Unwrap { expr } => matches!(expr.kind, K::Var { .. }),
         K::IndexAccess { object, .. } | K::Member { object, .. } | K::TupleIndex { object, .. } => slot_read_of_var(object),
         _ => false,
     }
