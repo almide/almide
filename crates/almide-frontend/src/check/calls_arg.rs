@@ -230,13 +230,17 @@ impl Checker {
             (Ty::Fn { ret: er, .. }, Ty::Fn { ret: ar, .. })
                 if !er.is_result() && ar.is_result() =>
             {
+                // #3163: the accepted cells are NAMED from the matrix the
+                // rewrite reads, so the hint cannot claim a cell it refuses.
                 format!(
                     "The callback is FALLIBLE (`(A) -> Result[..]`) but the slot is total. \
                      Either declare the slot fallible — `{}: (A) -> B!` — and consume the \
                      Result in the HOF body, or handle the error inside the lambda \
-                     (`?? fallback` / match). The core list HOFs accept fallible callbacks \
-                     natively; plain-slot transparency for user HOFs is #1108 Phase 2b-iii.",
-                    param_name
+                     (`?? fallback` / match). These stdlib HOFs accept a fallible callback \
+                     natively (first-err short-circuit): {}; plain-slot transparency for user \
+                     HOFs is #1108 Phase 2b-iii.",
+                    param_name,
+                    almide_lang::fallible_hofs::summary()
                 )
             }
             _ => hint,

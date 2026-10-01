@@ -240,7 +240,7 @@ impl<'a> Interpreter<'a> {
             "__fallible_find" => self.hof_try_find(evaled),
             "__fallible_fold" => self.hof_try_fold(evaled),
             "__fallible_each" => self.hof_try_each(evaled),
-            _ => Flow::Unsupported(format!("HOF list.{}", f)),
+            _ => self.eval_hof_fallible_matrix("list", f, evaled),
         }
     }
 
@@ -257,7 +257,7 @@ impl<'a> Interpreter<'a> {
             "find" => self.hof_map_find(evaled),
             "update" => self.hof_map_update(evaled),
             "upsert" => self.hof_map_upsert(evaled),
-            _ => Flow::Unsupported(format!("HOF map.{}", f)),
+            _ => self.eval_hof_fallible_matrix("map", f, evaled),
         }
     }
 
@@ -437,7 +437,7 @@ impl<'a> Interpreter<'a> {
             "filter" => self.hof_option_filter(evaled),
             "unwrap_or_else" => self.hof_option_unwrap_or_else(evaled),
             "or_else" => self.hof_option_or_else(evaled),
-            _ => Flow::Unsupported(format!("HOF option.{}", f)),
+            _ => self.eval_hof_fallible_matrix("option", f, evaled),
         }
     }
 
@@ -461,7 +461,7 @@ impl<'a> Interpreter<'a> {
             "any" => self.hof_any_all(evaled, true),
             "all" => self.hof_any_all(evaled, false),
             "fold" => self.hof_fold(evaled),
-            _ => Flow::Unsupported(format!("HOF set.{}", f)),
+            _ => self.eval_hof_fallible_matrix("set", f, evaled),
         }
     }
 }
@@ -470,3 +470,4 @@ include!("hofs_list.rs");
 include!("hofs_carrier.rs");
 include!("hofs_list_ops.rs");
 include!("hofs_map_set_ops.rs");
+include!("hofs_fallible.rs");
