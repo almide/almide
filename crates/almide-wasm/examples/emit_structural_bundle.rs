@@ -121,14 +121,15 @@ fn produce(rel: &str, text: &str) -> (Vec<Record>, Vec<(String, String)>, Vec<u8
     if let Some((_, w)) = modes.into_iter().find(|(p, _)| *p == pass) {
         records.push(Record { property: "call-modes", function: "(program)".into(), bytes: w });
     }
-    // `to_wasi` keeps every defined function's order and shifts it by the
-    // imports it adds, so a declared function keeps its name in the
-    // stock-WASI bytes; any other function is named by index.
+    // `to_wasi` keeps every defined function's order and moves it by the
+    // change in the import count — up for the imports it adds, down for the
+    // uncalled ones it prunes (#3114) — so a declared function keeps its
+    // name in the stock-WASI bytes; any other function is named by index.
     let named = almide_wasm::cert_project::decl_names(&decls).unwrap_or_else(|e| fail(&format!("decls: {e}")));
     let imports = |b: &[u8]| almide_wasm::cert_project::function_imports(b).unwrap_or_else(|e| fail(&format!("imports: {e}")));
-    let shift = imports(&shipped) - imports(&routed.bytes);
-    let label = |i: u32| match i.checked_sub(shift).and_then(|m| named.get(&m)) {
-        Some(n) if i >= imports(&shipped) => format!("locals:{n}"),
+    let (shipped_imports, emitted_imports) = (imports(&shipped), imports(&routed.bytes));
+    let label = |i: u32| match i.checked_sub(shipped_imports).and_then(|d| named.get(&(d + emitted_imports))) {
+        Some(n) => format!("locals:{n}"),
         _ => format!("locals:func[{i}]"),
     };
     for (function, bytes) in almide_wasm::cert_project::names(&shipped, &label).unwrap_or_else(|e| fail(&format!("names: {e}"))) {
