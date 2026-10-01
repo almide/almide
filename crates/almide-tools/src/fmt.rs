@@ -292,20 +292,95 @@ pub fn auto_imports(program: &mut Program, source: &str, dep_names: &[String], d
     messages
 }
 
+/// Every module name a declaration references, in EVERY position the parser
+/// keeps one: signatures, parameter DEFAULTS, generic bounds, `deriving`
+/// conformances, protocol method signatures, test `where` clauses, record
+/// field defaults — and every expression, through the shared AST visitor.
+///
+/// Exhaustive over `Decl` with no wildcard, so a new declaration form fails to
+/// compile here until its references are declared. A position missed here is a
+/// deleted import (#3168: a block's TAIL expression was never walked, so an
+/// import used only in `"${consts.LIMIT}"` on the last line of a fn was
+/// removed and the formatted file no longer checked).
 fn collect_module_refs_decl(decl: &Decl, used: &mut std::collections::HashSet<String>) {
     match decl {
-        Decl::Fn { params, return_type, body, .. } => {
-            for p in params { collect_module_refs_type(&p.ty, used); }
+        Decl::Fn { generics, params, return_type, body, .. } => {
+            collect_module_refs_generics(generics, used);
+            collect_module_refs_params(params, used);
             collect_module_refs_type(return_type, used);
             if let Some(body) = body { collect_module_refs_expr(body, used); }
         }
-        Decl::Test { body, .. } => collect_module_refs_expr(body, used),
+        Decl::Test { body, where_clauses, .. } => {
+            collect_module_refs_test_wheres(where_clauses, used);
+            collect_module_refs_expr(body, used);
+        }
+        Decl::TestWhereDef { clauses, .. } => collect_module_refs_test_wheres(clauses, used),
         Decl::TopLet { ty, value, .. } => {
             if let Some(te) = ty { collect_module_refs_type(te, used); }
             collect_module_refs_expr(value, used);
         }
-        Decl::Type { ty, .. } => collect_module_refs_type(ty, used),
-        _ => {}
+        Decl::Type { ty, deriving_refs, generics, .. } => {
+            collect_module_refs_type(ty, used);
+            collect_module_refs_protocol_refs(deriving_refs.as_deref(), used);
+            collect_module_refs_generics(generics, used);
+        }
+        Decl::Protocol { generics, methods, .. } => {
+            collect_module_refs_generics(generics, used);
+            for m in methods {
+                collect_module_refs_params(&m.params, used);
+                collect_module_refs_type(&m.return_type, used);
+            }
+        }
+        Decl::Module { .. } | Decl::Import { .. } => {}
+    }
+}
+
+/// Parameter types AND default values (`s: String = "${consts.LIMIT}"`).
+fn collect_module_refs_params(params: &[Param], used: &mut std::collections::HashSet<String>) {
+    for p in params {
+        collect_module_refs_type(&p.ty, used);
+        if let Some(d) = &p.default { collect_module_refs_expr(d, used); }
+    }
+}
+
+/// Generic parameters: a qualified bound (`[R: ports.Repository[K, V]]`) and a
+/// structural bound's types.
+fn collect_module_refs_generics(
+    generics: &Option<Vec<GenericParam>>,
+    used: &mut std::collections::HashSet<String>,
+) {
+    for g in generics.iter().flatten() {
+        collect_module_refs_protocol_refs(g.bound_refs.as_deref(), used);
+        if let Some(sb) = &g.structural_bound { collect_module_refs_type(sb, used); }
+    }
+}
+
+/// A protocol reference's module qualifier and type arguments.
+fn collect_module_refs_protocol_refs(
+    refs: Option<&[ProtocolRef]>,
+    used: &mut std::collections::HashSet<String>,
+) {
+    for r in refs.into_iter().flatten() {
+        if let Some(m) = &r.module { used.insert(m.to_string()); }
+        collect_module_refs_types(&r.args, used);
+    }
+}
+
+fn collect_module_refs_test_wheres(wheres: &[TestWhere], used: &mut std::collections::HashSet<String>) {
+    for w in wheres {
+        match w {
+            TestWhere::Bind { value, .. } => collect_module_refs_expr(value, used),
+            TestWhere::Override { path, value } => {
+                if path.len() > 1 { used.insert(path[0].to_string()); }
+                collect_module_refs_expr(value, used);
+            }
+            TestWhere::CallResponse { target, params, response } => {
+                if target.len() > 1 { used.insert(target[0].to_string()); }
+                for p in params { collect_module_refs_pattern(p, used); }
+                collect_module_refs_expr(response, used);
+            }
+            TestWhere::Case { bindings, .. } => collect_module_refs_test_wheres(bindings, used),
+        }
     }
 }
 
@@ -357,6 +432,8 @@ fn collect_module_refs_field_types(
 ) {
     for f in fields {
         collect_module_refs_type(&f.ty, used);
+        // A field DEFAULT is an expression (`label: String = "${consts.X}"`).
+        if let Some(d) = &f.default { collect_module_refs_expr(d, used); }
     }
 }
 
@@ -376,126 +453,99 @@ fn collect_module_refs_variant_case(c: &VariantCase, used: &mut std::collections
         VariantCase::Tuple { fields, .. } => {
             for f in fields { collect_module_refs_type(f, used); }
         }
-        VariantCase::Record { fields, .. } => {
-            for f in fields { collect_module_refs_type(&f.ty, used); }
-        }
+        VariantCase::Record { fields, .. } => collect_module_refs_field_types(fields, used),
     }
 }
 
 /// Collect the module names an expression references, for `auto_imports`.
 ///
-/// Split into a CHILD-LIST arm set and a SCOPED arm set. The first group's arms
-/// only name their sub-expressions, so they return `Vec<&Expr>` and the single
-/// driver below does the recursion — the arms carry no bodies at all, which is
-/// where the complexity was. The second group needs more than recursion (a
-/// module name to record, statement bodies, match arms with guards) and keeps
-/// its own helpers.
-///
-/// The `_ => {}` fallthrough is deliberate and pre-existing: an expression form
-/// with no sub-expressions references no module. But note what a MISSING arm
-/// costs here — a dropped import, i.e. code that no longer compiles after
-/// `almide fmt`. Any new `ExprKind` with children must be added to one group.
+/// The traversal is NOT this file's: it is `ast::visit_expr`, the exhaustive
+/// read-only visitor every other observer of the tree uses (no wildcard arm —
+/// a new `ExprKind` fails to compile there until its children are declared).
+/// The hand-written walk it replaces had its own child list, and that list had
+/// holes: a block's tail expression, call named arguments, `if let`, ranges,
+/// spreads, maps, `?.`, and every `${}` hole that sat in one of them (#3168).
+/// What remains here is only what the visitor does not do — read the NAMES
+/// and TYPES a node carries — in [`collect_module_refs_node`].
 fn collect_module_refs_expr(expr: &Expr, used: &mut std::collections::HashSet<String>) {
-    if collect_module_refs_scoped(expr, used) {
-        return;
-    }
-    for child in module_ref_children(expr) {
-        collect_module_refs_expr(child, used);
-    }
+    visit_expr(expr, &mut |e: &Expr| collect_module_refs_node(e, used));
 }
 
-/// Every sub-expression of a form whose only contribution is its children.
-fn module_ref_children(expr: &Expr) -> Vec<&Expr> {
-    match &expr.kind {
-        ExprKind::Call { callee, args, .. } => {
-            let mut v: Vec<&Expr> = vec![callee];
-            v.extend(args.iter());
-            v
+/// The module names ONE node spells itself (its children are the visitor's).
+fn collect_module_refs_node(e: &Expr, used: &mut std::collections::HashSet<String>) {
+    match &e.kind {
+        ExprKind::Member { object, .. } => {
+            if let ExprKind::Ident { name, .. } = &object.kind {
+                used.insert(name.to_string());
+            }
         }
-        ExprKind::Binary { left, right, .. }
-        | ExprKind::Pipe { left, right, .. } => vec![left, right],
-        ExprKind::If { cond, then, else_, .. } => vec![cond, then, else_],
-        ExprKind::List { elements, .. } | ExprKind::Tuple { elements, .. } => {
-            elements.iter().collect()
+        ExprKind::TypeName { name } => insert_type_name_prefix(name.as_str(), used),
+        ExprKind::Record { name: Some(name), .. } => insert_type_name_prefix(name.as_str(), used),
+        ExprKind::Call { type_args: Some(tas), .. } => collect_module_refs_types(tas, used),
+        ExprKind::TypeAscription { ty, .. } => collect_module_refs_type(ty, used),
+        ExprKind::Lambda { params, .. } => {
+            for p in params {
+                if let Some(t) = &p.ty { collect_module_refs_type(t, used); }
+            }
         }
-        ExprKind::Record { fields, .. } => fields.iter().map(|f| &f.value).collect(),
-        ExprKind::IndexAccess { object, index, .. } => vec![object, index],
-        ExprKind::Unary { operand, .. } => vec![operand],
-        ExprKind::Unwrap { expr, .. }
-        | ExprKind::Try { expr, .. }
-        | ExprKind::ToOption { expr, .. } => vec![expr],
-        ExprKind::Scoped { body, .. } => vec![body],
-        ExprKind::UnwrapOr { expr, fallback, .. } => vec![expr, fallback],
-        _ => Vec::new(),
-    }
-}
-
-/// The forms that contribute more than their child expressions: a module name to
-/// record, a statement body, or match arms with guards. Returns `true` when it
-/// handled the expression (so the child-list driver must not also walk it).
-fn collect_module_refs_scoped(expr: &Expr, used: &mut std::collections::HashSet<String>) -> bool {
-    match &expr.kind {
-        ExprKind::Member { .. } => collect_module_refs_member(expr, used),
-        ExprKind::Match { .. } => collect_module_refs_match(expr, used),
-        ExprKind::InterpolatedString { .. } => collect_module_refs_istring(expr, used),
-        ExprKind::Lambda { body, .. } => collect_module_refs_expr(body, used),
-        ExprKind::Block { stmts, .. } => {
-            for s in stmts { collect_module_refs_stmt(s, used); }
+        ExprKind::Match { arms, .. } => {
+            for arm in arms { collect_module_refs_pattern(&arm.pattern, used); }
         }
-        ExprKind::ForIn { iterable, body, .. } => {
-            collect_module_refs_expr(iterable, used);
-            for s in body { collect_module_refs_stmt(s, used); }
+        ExprKind::Block { stmts, .. } | ExprKind::ForIn { body: stmts, .. }
+        | ExprKind::While { body: stmts, .. } => collect_module_refs_stmt_types(stmts, used),
+        // The fan family is visited SHALLOWLY by contract (the visitor applies
+        // `f` to the budget/body without descending): walk those subtrees here.
+        ExprKind::FanBounded { budget: a, body: b } | ExprKind::FanTimeout { deadline: a, body: b } => {
+            collect_module_refs_expr(a, used);
+            collect_module_refs_expr(b, used);
         }
-        ExprKind::While { cond, body, .. } => {
-            collect_module_refs_expr(cond, used);
-            for s in body { collect_module_refs_stmt(s, used); }
+        ExprKind::FanRace { budget, .. } => {
+            if let Some(b) = budget { collect_module_refs_expr(b, used); }
         }
-        _ => return false,
-    }
-    true
-}
-
-fn collect_module_refs_member(expr: &Expr, used: &mut std::collections::HashSet<String>) {
-    let ExprKind::Member { object, .. } = &expr.kind else { unreachable!() };
-    if let ExprKind::Ident { name, .. } = &object.kind {
-        used.insert(name.to_string());
-    }
-    collect_module_refs_expr(object, used);
-}
-
-fn collect_module_refs_match(expr: &Expr, used: &mut std::collections::HashSet<String>) {
-    let ExprKind::Match { subject, arms, .. } = &expr.kind else { unreachable!() };
-    collect_module_refs_expr(subject, used);
-    for arm in arms {
-        collect_module_refs_expr(&arm.body, used);
-        if let Some(g) = &arm.guard { collect_module_refs_expr(g, used); }
-    }
-}
-
-fn collect_module_refs_istring(expr: &Expr, used: &mut std::collections::HashSet<String>) {
-    let ExprKind::InterpolatedString { parts, .. } = &expr.kind else { unreachable!() };
-    for p in parts {
-        if let StringPart::Expr { expr } = p { collect_module_refs_expr(expr, used); }
-    }
-}
-
-fn collect_module_refs_stmt(stmt: &Stmt, used: &mut std::collections::HashSet<String>) {
-    match stmt {
-        Stmt::Let { ty, value, .. } | Stmt::Var { ty, value, .. } => {
-            if let Some(te) = ty { collect_module_refs_type(te, used); }
-            collect_module_refs_expr(&value, used);
-        }
-        Stmt::Assign { value, .. } => collect_module_refs_expr(value, used),
-        Stmt::Expr { expr, .. } => collect_module_refs_expr(expr, used),
-        Stmt::Guard { cond, else_, .. } => {
-            collect_module_refs_expr(cond, used);
-            collect_module_refs_expr(else_, used);
-        }
-        Stmt::GuardLet { scrutinee, else_, .. } => {
-            collect_module_refs_expr(scrutinee, used);
-            collect_module_refs_expr(else_, used);
+        ExprKind::FanRaceMap { budget, list, mapper } => {
+            if let Some(b) = budget { collect_module_refs_expr(b, used); }
+            collect_module_refs_expr(list, used);
+            collect_module_refs_expr(mapper, used);
         }
         _ => {}
+    }
+}
+
+/// The TYPE annotations and patterns a statement list carries (the visitor
+/// walks their expressions).
+fn collect_module_refs_stmt_types(stmts: &[Stmt], used: &mut std::collections::HashSet<String>) {
+    for s in stmts {
+        match s {
+            Stmt::Let { ty: Some(te), .. } | Stmt::Var { ty: Some(te), .. } => {
+                collect_module_refs_type(te, used)
+            }
+            Stmt::LetDestructure { pattern, .. } => collect_module_refs_pattern(pattern, used),
+            _ => {}
+        }
+    }
+}
+
+/// A pattern's qualified constructor names (`consts.Red`, `shapes.Rect { .. }`).
+/// Literal sub-expressions are the visitor's.
+fn collect_module_refs_pattern(p: &Pattern, used: &mut std::collections::HashSet<String>) {
+    match p {
+        Pattern::Constructor { name, args } => {
+            insert_type_name_prefix(name.as_str(), used);
+            for a in args { collect_module_refs_pattern(a, used); }
+        }
+        Pattern::RecordPattern { name, fields, .. } => {
+            insert_type_name_prefix(name.as_str(), used);
+            for f in fields.iter().filter_map(|f| f.pattern.as_ref()) {
+                collect_module_refs_pattern(f, used);
+            }
+        }
+        Pattern::Tuple { elements } | Pattern::List { elements, .. } | Pattern::Or { alts: elements } => {
+            for x in elements { collect_module_refs_pattern(x, used); }
+        }
+        Pattern::Some { inner } | Pattern::Ok { inner } | Pattern::Err { inner }
+        | Pattern::As { inner, .. } => collect_module_refs_pattern(inner, used),
+        Pattern::Literal { value } => collect_module_refs_expr(value, used),
+        Pattern::Wildcard | Pattern::Ident { .. } | Pattern::None => {}
     }
 }
 
