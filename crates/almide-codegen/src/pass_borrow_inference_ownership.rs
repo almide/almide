@@ -253,14 +253,17 @@ pub(crate) fn is_named_in(ty: &Ty, names: &HashSet<String>) -> bool {
 /// record / list, captured or handed to an owned slot keeps the subject
 /// owned, where matching by value moves the payload out for free. Shared
 /// by the borrow verdict and the ownership certifier's C4, so the two read
-/// one rule.
-pub(crate) fn scrutinee_binders_borrow_only(body: &IrExpr, var: VarId, uses: &UseSites) -> bool {
+/// one rule. `captures` names the `__cap_*` capture binds (`CaptureClone`,
+/// after the verdict): the certifier's final IR spells a binder's capture as
+/// `let __cap = b` outside the closure, and that bind IS the capture (#3174).
+/// The verdict runs before the binds exist and passes an empty set.
+pub(crate) fn scrutinee_binders_borrow_only(body: &IrExpr, var: VarId, uses: &UseSites, captures: &HashSet<VarId>) -> bool {
     use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
     use std::collections::HashMap;
     /// Every match in the body whose subject is a variable (bare, or under
     /// the clone / borrow / box-deref a pass wrapped it in), by that variable:
     /// the binders its arms introduce.
-    struct Scan { matches: HashMap<VarId, Vec<(VarId, Ty)>> }
+    struct Scan<'c> { matches: HashMap<VarId, Vec<(VarId, Ty)>>, captures: &'c HashSet<VarId>, captured: HashSet<VarId> }
     fn binders(p: &IrPattern, out: &mut Vec<(VarId, Ty)>) {
         match p {
             IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => {}
@@ -278,7 +281,7 @@ pub(crate) fn scrutinee_binders_borrow_only(body: &IrExpr, var: VarId, uses: &Us
             }
         }
     }
-    impl IrVisitor for Scan {
+    impl IrVisitor for Scan<'_> {
         fn visit_expr(&mut self, e: &IrExpr) {
             // The subject is the variable itself, or the clone / borrow /
             // box-deref of it a pass wrapped it in: the certifier reads the
@@ -293,9 +296,17 @@ pub(crate) fn scrutinee_binders_borrow_only(body: &IrExpr, var: VarId, uses: &Us
             }
             walk_expr(self, e);
         }
-        fn visit_stmt(&mut self, s: &IrStmt) { walk_stmt(self, s); }
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            if let IrStmtKind::Bind { var, value, .. } = &s.kind
+                && self.captures.contains(var)
+                && let Some(root) = subject_root(value)
+            {
+                self.captured.insert(root);
+            }
+            walk_stmt(self, s);
+        }
     }
-    let mut scan = Scan { matches: HashMap::new() };
+    let mut scan = Scan { matches: HashMap::new(), captures, captured: HashSet::new() };
     scan.visit_expr(body);
     if !scan.matches.contains_key(&var) {
         return false;
@@ -321,7 +332,7 @@ pub(crate) fn scrutinee_binders_borrow_only(body: &IrExpr, var: VarId, uses: &Us
                 if nested_subject(u) {
                     if !scan.matches.contains_key(b) { return false; }
                     todo.push(*b);
-                } else if consumed(u) && !u.in_guard {
+                } else if (consumed(u) && !u.in_guard) || scan.captured.contains(b) {
                     // A guard's consuming read clones (#2605), from a `&T`
                     // binder as well as from an owned one.
                     return false;
@@ -384,7 +395,7 @@ fn param_borrow(slot: usize, param: &IrParam, uses: &UseSites, scope: &Scope, bo
     // verdict: matching by value moves it out for free where a borrowed
     // match would clone it.
     let variant_subject = is_named_in(&param.ty, scope.round.variants)
-        && scrutinee_binders_borrow_only(body, param.var, uses);
+        && scrutinee_binders_borrow_only(body, param.var, uses, &HashSet::new());
     let read_by_ref = |u: &Use| ((literal_subject || variant_subject) && u.site == Site::Scrutinee)
         || (is_string && u.site == Site::Construct(Ctor::Interp) && u.depth == 0);
     // A consuming use that a LATER statement follows with another use of
