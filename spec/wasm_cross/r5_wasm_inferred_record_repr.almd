@@ -2,13 +2,13 @@
 // Cross-target repr of a NAMED record inferred without an annotation (#627).
 //
 // A record literal with no type annotation keeps its structural `Ty::Record` in
-// the IR. Native's checker resolves that structural shape to the unique declared
-// record type by sorted field-name set and reprs it nominally — `Rec { … }` in
-// DECLARATION field order. WASM used to treat it as anonymous: no type-name
+// the IR. Native resolves that structural shape to the declared record type
+// with the same field names AND types (#3189 — the names alone are not the
+// type) and reprs it nominally — `Rec { … }` in DECLARATION field order. WASM used to treat it as anonymous: no type-name
 // prefix and ALPHABETICAL field order, diverging two ways.
 //
-// The fix mirrors native: WASM indexes declared records by their sorted
-// field-name set (`named_records`) and, on a match, renders the type name +
+// The fix mirrors native: WASM matches declared records by field names and
+// types (`TypeTable::anon_record`) and, on a match, renders the type name +
 // declaration order while still loading each field VALUE from its real layout
 // offset (so a literal written out of declaration order reads correct values).
 // A truly anonymous record (no matching declared type) stays prefix-less and
