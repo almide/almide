@@ -3,12 +3,13 @@
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
 arm-value:borrowed-temp	3
 assign:SpreadRecord	2
-bind:cell	20
+assign:Unwrap	1
+bind:cell	21
 bind:view-result	5
 call-arg:Lambda:fs.__fallible_fold_lines:propagating	1
 call-arg:Lambda:map.__fallible_map__Int_String_String_Int	1
 call:panic-arg	7
-callback:SpreadRecord	1
+callback:SpreadRecord	6
 caps:argv-in-plain-fn	8
 display	10
 forin-map	7
@@ -23,11 +24,12 @@ match-guard	18
 named-op	11
 operand:IndexAccess:non-list	1
 pattern:list-rest	8
+payload:SpreadRecord	2
 payload:UnwrapOr-carrier:OptionNone	1
 record:default	2
 rhs:Fan	6
 rhs:SpreadRecord	5
-rhs:Unwrap	18
+rhs:Unwrap	19
 scan	3
 stmt:Expr:Unit	1
 stmt:Expr:Unwrap	1
