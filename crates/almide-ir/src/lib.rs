@@ -35,6 +35,7 @@ mod mut_param_err_carry;
 mod mut_param_place;
 mod mut_param_unpropagated;
 pub mod exit_code;
+pub mod diverge;
 pub mod fusion;
 pub mod speculation;
 pub mod mut_args;
