@@ -102,8 +102,12 @@ pub(crate) enum Helper {
     /// `$display_<ti>(block, cursor) -> cursor` — the runtime-recursive
     /// display of a RECURSIVE Named type (emit-time inlining follows the
     /// type shape and cycles are cut here; the body is Emitter-built in
-    /// the display-helper phase and stored in `display_bodies`).
-    DisplayNamed { ti: u32 },
+    /// the display-helper phase and stored in `display_bodies`). `irk`
+    /// names the generic instance's IR type (`FnWork::display_ir_key`;
+    /// 0 = a non-generic type): one instance layout serves every argument
+    /// with the same slot, so `Tree[UInt64]` and `Tree[Int]` share `ti` and
+    /// only the IR arguments pick the leaves' digits (#3187).
+    DisplayNamed { ti: u32, irk: u32 },
     /// The keyed-lookup index family (#1219 stage 2, map_index.rs): the
     /// address-keyed side table (`get` / `raw` / `set`), the per-class
     /// key hash, the index builder, the `$scan_*`-shaped `find` and the
@@ -283,7 +287,9 @@ pub(crate) struct FnWork {
     /// granularity survives: a failing body refuses THAT fn, later
     /// callers see Failed and refuse themselves, and assembly stubs the
     /// promised index with `unreachable`).
-    pub(crate) display_bodies: std::cell::RefCell<HashMap<u32, DisplayBuild>>,
+    pub(crate) display_bodies: std::cell::RefCell<HashMap<(u32, u32), DisplayBuild>>,
+    /// The generic-instance IR types `DisplayNamed::irk` names (`irk - 1`).
+    pub(crate) display_irs: std::cell::RefCell<Vec<Ty>>,
     /// `Helper::NamedOp` bodies, keyed by `(op, ti)` — ONE map for both
     /// ops, so neither the build loop nor assembly can learn about one and
     /// forget the other (#2172).
@@ -341,6 +347,28 @@ impl FnWork {
     }
 
     /// The function index of a helper, registering it on first use.
+    /// The `DisplayNamed` key of a display's IR type: only a GENERIC
+    /// instance (`Named` with arguments) is keyed — its shared layout cannot
+    /// tell `UInt64` from `Int` or `Float32` from `Float` — and every other
+    /// type keeps the one helper per `ti` (0).
+    pub(crate) fn display_ir_key(&self, ir: Option<&Ty>) -> u32 {
+        let Some(t @ Ty::Named(_, args)) = ir else { return 0 };
+        if args.is_empty() {
+            return 0;
+        }
+        let mut irs = self.display_irs.borrow_mut();
+        let pos = irs.iter().position(|x| x == t).unwrap_or_else(|| {
+            irs.push(t.clone());
+            irs.len() - 1
+        });
+        pos as u32 + 1
+    }
+
+    /// The IR type a `DisplayNamed::irk` names (`None` for 0).
+    pub(crate) fn display_ir(&self, irk: u32) -> Option<Ty> {
+        irk.checked_sub(1).and_then(|i| self.display_irs.borrow().get(i as usize).cloned())
+    }
+
     pub(crate) fn helper(&self, h: Helper) -> u32 {
         let mut v = self.helpers.borrow_mut();
         if let Some(pos) = v.iter().position(|x| *x == h) {

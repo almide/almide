@@ -597,8 +597,8 @@ fn helper_body_b(h: &Helper, work: &FnWork, helper_snapshot: &[Helper]) -> Funct
     Helper::FastExp => matrix_scalars::emit_fast_exp(),
     Helper::GeluScalar { fast_exp } => matrix_scalars::emit_gelu_scalar(*fast_exp),
     Helper::Q10Val => matrix_scalars::emit_q10_val(F_F16_TO_F64),
-    Helper::DisplayNamed { ti } => {
-        match work.display_bodies.borrow_mut().remove(ti) {
+    Helper::DisplayNamed { ti, irk } => {
+        match work.display_bodies.borrow_mut().remove(&(*ti, *irk)) {
             Some(work::DisplayBuild::Built(f)) => f,
             // Failed (all callers refused) — keep the promised
             // index aligned with a loud stub.

@@ -9,6 +9,8 @@ use crate::emitter::Emitter;
 use crate::types_table::NamedDef;
 use crate::*;
 
+include!("display_map.rs");
+
 impl Emitter<'_> {
     /// Append a static fragment to the line buffer.
     fn append_lit(&mut self, text: &str) {
@@ -78,6 +80,24 @@ impl Emitter<'_> {
         Ok(())
     }
 
+    /// The i64 slot on the stack, appended as decimal digits. A `UInt64`
+    /// reads the slot UNSIGNED (C-179, #3187): a pattern in the upper half
+    /// (negative as an i64) prints as its `div_u 10` quotient — back in the
+    /// signed-safe band — then the `rem_u 10` digit, the one-split
+    /// `uint64.to_string` makes. Every other width prints the slot signed.
+    fn emit_int_display(&mut self, unsigned: bool) {
+        let (cur, x) = (self.cursor_local, self.scr_i64_local);
+        let mut i = self.f.instructions();
+        i.local_set(x);
+        if unsigned {
+            i.local_get(x).i64_const(0).i64_lt_s().if_(BlockType::Empty);
+            i.local_get(cur).local_get(x).i64_const(10).i64_div_u().call(F_APPEND_I64).local_set(cur);
+            i.local_get(x).i64_const(10).i64_rem_u().local_set(x);
+            i.end();
+        }
+        i.local_get(cur).local_get(x).call(F_APPEND_I64).local_set(cur);
+    }
+
     fn emit_display_at(
         &mut self,
         got: SliceTy,
@@ -90,15 +110,7 @@ impl Emitter<'_> {
         // Named type) is cut at the Named arm below with a call to the
         // runtime-recursive per-type helper.
         match got {
-            INT => {
-                self.f.instructions().local_set(self.scr_i64_local);
-                self.f
-                    .instructions()
-                    .local_get(self.cursor_local)
-                    .local_get(self.scr_i64_local)
-                    .call(F_APPEND_I64)
-                    .local_set(self.cursor_local);
-            }
+            INT => self.emit_int_display(matches!(ir, Some(Ty::UInt64))),
             BOOL => {
                 self.f.instructions().local_set(self.tmp_i32_local);
                 self.f
@@ -249,13 +261,14 @@ impl Emitter<'_> {
                     // Recursive type: cut the cycle with the runtime
                     // helper `(block, cursor) -> cursor`. A body that
                     // failed to build refuses THIS caller too.
+                    let irk = self.work.display_ir_key(ir);
                     if matches!(
-                        self.work.display_bodies.borrow().get(&ti),
+                        self.work.display_bodies.borrow().get(&(ti, irk)),
                         Some(crate::work::DisplayBuild::Failed)
                     ) {
                         return unsup("display-helper-failed");
                     }
-                    let idx = self.work.helper(Helper::DisplayNamed { ti });
+                    let idx = self.work.helper(Helper::DisplayNamed { ti, irk });
                     self.f
                         .instructions()
                         .local_get(self.cursor_local)
@@ -263,7 +276,7 @@ impl Emitter<'_> {
                         .local_set(self.cursor_local);
                 } else {
                     path.push(ti);
-                    self.emit_display_named(ti, path)?;
+                    self.emit_display_named(ti, ir, path)?;
                     path.pop();
                 }
             }
@@ -320,7 +333,16 @@ impl Emitter<'_> {
 
     /// Records: `Nm { f: v, g: w }`; variants: `Case(v)` / bare unit
     /// names / record-shaped cases in the record form.
-    pub(crate) fn emit_display_named(&mut self, ti: u32, path: &mut Vec<u32>) -> Result<(), EmitError> {
+    /// `ir` is the record's own IR type when the caller has it: an
+    /// ANONYMOUS record shape is interned by its slot types, so its fields
+    /// carry no IR type of their own, and a UInt64 / Float32 field reads its
+    /// digits from the enclosing `{ f: T }` type instead (#3187).
+    pub(crate) fn emit_display_named(
+        &mut self,
+        ti: u32,
+        ir: Option<&Ty>,
+        path: &mut Vec<u32>,
+    ) -> Result<(), EmitError> {
         let name = self.types.name_of(ti);
         match self.types.def(ti) {
             NamedDef::Record(def) => {
@@ -345,12 +367,14 @@ impl Emitter<'_> {
                     self.append_lit(&format!("{}: ", fi.name));
                     self.f.instructions().local_get(hb);
                     self.load_ty_slot(fi.ty, fi.offset);
-                    self.emit_display_at(fi.ty, true, fi.ir.as_ref(), path)?;
+                    let inst = self.types.instance_field_ir(ir, 0, &fi.name);
+                    let fir = inst.as_ref().or(fi.ir.as_ref()).or_else(|| record_field_ir(ir, &fi.name));
+                    self.emit_display_at(fi.ty, true, fir, path)?;
                 }
                 self.append_lit(" }");
                 self.release_i32();
             }
-            NamedDef::Variant(ref v) => self.display_variant(v, path)?,
+            NamedDef::Variant(ref v) => self.display_variant(v, ir, path)?,
             NamedDef::Excluded => return unsup("interp-part:excluded"),
         }
         Ok(())
@@ -358,7 +382,12 @@ impl Emitter<'_> {
 
 
     /// Variant display (split from emit_display_named for the complexity budget).
-    fn display_variant(&mut self, v: &crate::types_table::VariantDef, path: &mut Vec<u32>) -> Result<(), EmitError> {
+    fn display_variant(
+        &mut self,
+        v: &crate::types_table::VariantDef,
+        ir: Option<&Ty>,
+        path: &mut Vec<u32>,
+    ) -> Result<(), EmitError> {
 
                 let hb = self.hold_i32()?;
                 self.f.instructions().local_set(hb);
@@ -392,7 +421,8 @@ impl Emitter<'_> {
                             }
                             self.f.instructions().local_get(hb);
                             self.load_ty_slot(f.ty, f.offset);
-                            self.emit_display_at(f.ty, true, f.ir.as_ref(), path)?;
+                            let inst = self.types.instance_field_ir(ir, c.tag as usize, &f.name);
+                            self.emit_display_at(f.ty, true, inst.as_ref().or(f.ir.as_ref()), path)?;
                         }
                         self.append_lit(if record_case { " }" } else { ")" });
                     }
@@ -421,14 +451,14 @@ pub(crate) fn build_display_helpers(
 ) -> Result<std::collections::HashSet<usize>, EmitError> {
     let mut all_calls = std::collections::HashSet::new();
     loop {
-        let (todo, todo_named): (Vec<u32>, Vec<(crate::work::NamedOp, u32)>) = {
+        let (todo, todo_named): (Vec<(u32, u32)>, Vec<(crate::work::NamedOp, u32)>) = {
             let hs = work.helpers.borrow();
             let bodies = work.display_bodies.borrow();
             let named_bodies = work.named_bodies.borrow();
             let d = hs
                 .iter()
                 .filter_map(|h| match h {
-                    Helper::DisplayNamed { ti } if !bodies.contains_key(ti) => Some(*ti),
+                    Helper::DisplayNamed { ti, irk } if !bodies.contains_key(&(*ti, *irk)) => Some((*ti, *irk)),
                     _ => None,
                 })
                 .collect();
@@ -456,16 +486,16 @@ pub(crate) fn build_display_helpers(
         if todo.is_empty() && todo_named.is_empty() && todo_scan.is_empty() {
             return Ok(all_calls);
         }
-        for ti in todo {
-            match build_one_display_helper(table, types, work, pool, ti) {
+        for key in todo {
+            match build_one_display_helper(table, types, work, pool, key) {
                 Ok((f, calls)) => {
                     all_calls.extend(calls.iter().copied());
                     work.display_bodies
                         .borrow_mut()
-                        .insert(ti, crate::work::DisplayBuild::Built(f));
+                        .insert(key, crate::work::DisplayBuild::Built(f));
                 }
                 Err(e) => {
-                    work.display_bodies.borrow_mut().insert(ti, crate::work::DisplayBuild::Failed);
+                    work.display_bodies.borrow_mut().insert(key, crate::work::DisplayBuild::Failed);
                     return Err(e);
                 }
             }
@@ -700,76 +730,28 @@ fn build_one_display_helper(
     types: &TypeTable,
     work: &FnWork,
     pool: &mut Pool,
-    ti: u32,
+    (ti, irk): (u32, u32),
 ) -> Result<(wasm_encoder::Function, std::collections::HashSet<usize>), EmitError> {
     crate::witness::decline_unrecorded(&format!("<display:{ti}>"), "display");
+    let ir = work.display_ir(irk);
     build_helper_body(table, types, work, pool, Shell::PAIR, |em| {
         em.f.instructions().local_get(1).local_set(2);
         em.f.instructions().local_get(0);
         let mut path = vec![ti];
-        em.emit_display_named(ti, &mut path)?;
+        em.emit_display_named(ti, ir.as_ref(), &mut path)?;
         em.f.instructions().local_get(2);
         Ok(())
     })
 }
 
-impl Emitter<'_> {
-    /// Map display (`["k": v, …]`, `[:]` when empty) — split from
-    /// `emit_display_at` for the complexity budget.
-    fn emit_display_map(&mut self, kh: ETy, vh: ETy, ir: Option<&Ty>, path: &mut Vec<u32>) -> Result<(), EmitError> {
-                let (k, v) = (self.types.el(kh), self.types.el(vh));
-                let (koff, voff, esz) = crate::collections::entry_layout(k, v);
-                let hb = self.hold_i32()?;
-                let end = self.hold_i32()?;
-                let cur = self.hold_i32()?;
-                self.f.instructions().local_set(hb);
-                self.f.instructions().local_get(hb).i32_load(len_memarg()).i32_eqz();
-                self.f.instructions().if_(BlockType::Empty);
-                self.append_lit("[:]");
-                self.f.instructions().else_();
-                self.append_lit("[");
-                {
-                    let mut i = self.f.instructions();
-                    i.local_get(hb)
-                        .i32_const(almide_layout::PAYLOAD as i32)
-                        .i32_add()
-                        .local_set(cur);
-                    i.local_get(cur)
-                        .local_get(hb)
-                        .i32_load(len_memarg())
-                        .i32_add()
-                        .local_set(end);
-                    i.block(BlockType::Empty).loop_(BlockType::Empty);
-                    i.local_get(cur).local_get(end).i32_ge_u().br_if(1);
-                    i.local_get(cur)
-                        .local_get(hb)
-                        .i32_const(almide_layout::PAYLOAD as i32)
-                        .i32_add()
-                        .i32_ne()
-                        .if_(BlockType::Empty);
-                }
-                self.append_lit(", ");
-                self.f.instructions().end();
-                self.f.instructions().local_get(cur).i32_const(koff as i32).i32_add();
-                self.load_ty_slot_at(k);
-                self.emit_display_at(k, true, ir_arg(ir, 0), path)?;
-                self.append_lit(": ");
-                self.f.instructions().local_get(cur).i32_const(voff as i32).i32_add();
-                self.load_ty_slot_at(v);
-                self.emit_display_at(v, true, ir_arg(ir, 1), path)?;
-                {
-                    let mut i = self.f.instructions();
-                    i.local_get(cur).i32_const(esz as i32).i32_add().local_set(cur);
-                    i.br(0);
-                    i.end();
-                    i.end();
-                }
-                self.append_lit("]");
-                self.f.instructions().end();
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
-        Ok(())
+/// The IR type of field `name` in a record IR type (`{ f: T }`, open or
+/// closed) — the anonymous-record shape's leaf types (#3187).
+fn record_field_ir<'t>(ir: Option<&'t Ty>, name: &str) -> Option<&'t Ty> {
+    match ir? {
+        Ty::Record { fields } | Ty::OpenRecord { fields } => {
+            fields.iter().find(|(f, _)| f.as_str() == name).map(|(_, t)| t)
+        }
+        _ => None,
     }
 }
 
@@ -777,7 +759,7 @@ impl Emitter<'_> {
 /// Result argument or a tuple element — for the display walk (C-372). `None`
 /// when the shape does not line up; the leaf then prints as a Float, never
 /// guesses Float32.
-fn ir_arg(ir: Option<&Ty>, i: usize) -> Option<&Ty> {
+pub(crate) fn ir_arg(ir: Option<&Ty>, i: usize) -> Option<&Ty> {
     match ir? {
         Ty::Applied(_, args) => args.get(i),
         Ty::Tuple(elems) => elems.get(i),

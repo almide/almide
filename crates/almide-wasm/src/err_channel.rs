@@ -76,6 +76,7 @@ impl Emitter<'_> {
         &mut self,
         carrier_ty: SliceTy,
         ert: SliceTy,
+        err_ir: Option<&Ty>,
         owned_carrier: bool,
     ) -> Result<(), EmitError> {
         let car = self.hold_i32()?;
@@ -91,7 +92,7 @@ impl Emitter<'_> {
             .local_get(car);
         self.load_ty_slot(ert, almide_layout::SUM_FIELD);
         self.build_depth += 1;
-        let shown = self.emit_display_value(ert, false, None);
+        let shown = self.emit_display_value(ert, false, err_ir);
         self.build_depth -= 1;
         shown?;
         let msg = self.hold_i32()?;

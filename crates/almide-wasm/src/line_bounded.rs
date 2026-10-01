@@ -214,7 +214,11 @@ impl Emitter<'_> {
                 return self.emit_display_value(got, false, Some(ir));
             }
         };
-        if !spend(budget, bound) {
+        // A UInt64 reads its slot unsigned (#3187), which the signed
+        // room-free itoa cannot: it spends the same 20 bytes (`u64::MAX`
+        // has 20 digits) and takes the checked unsigned append, so the
+        // room-free prefix stays sound for the parts after it.
+        if !spend(budget, bound) || *ir == Ty::UInt64 {
             return self.emit_display_value(got, false, Some(ir));
         }
         let helper = self.raw_append_helper(Some(got));
