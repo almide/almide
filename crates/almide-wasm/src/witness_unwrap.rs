@@ -75,6 +75,13 @@ pub(crate) fn is_extraction_view(e: &almide_ir::IrExpr) -> bool {
         // any chain of such reads): the block holds the slot's credit, the
         // read holds none.
         K::IndexAccess { .. } | K::Member { .. } | K::TupleIndex { .. } => slot_read_of_var(e),
+        // #2755: `o ?? fallback` over a bound carrier whose join is BORROWED
+        // (every caller asks only once the value is known not to be owned):
+        // the payload arm reads the carrier's slot, the fallback arm is a
+        // view of its own (a static, a borrowed var — an owned fresh fallback
+        // under a borrowed join has already declined at the arm,
+        // `witness_unwrap_or_arm`).
+        K::UnwrapOr { expr, .. } => slot_read_of_var(expr),
         _ => false,
     }
 }

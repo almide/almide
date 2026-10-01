@@ -1,0 +1,117 @@
+//! The mut-receiver and inlined-thunk witness hooks (#2755), split from
+//! witness_hooks.rs for the file budget.
+//!
+//! A mut RECEIVER (`list.push(xs, v)`'s `xs`, `bytes.set_u8(b, …)`'s `b`,
+//! `string.push(h.f, s)`'s `h`) never passes `lower_arg`: the arm reads the
+//! var's slot and writes the result back. Every write-back site records the
+//! rebind ([`Emitter::witness_mut_rebind`]) and notes the var for the
+//! module-call audit, so a receiver the arm rebound counts as hooked
+//! (witness_hooks.rs `witness_module_result`).
+
+use crate::emitter::Emitter;
+use crate::SliceTy;
+
+/// A mut RECEIVER's identity for the module-call audit (#2755): the var a
+/// write-back rebound, tagged so it can never equal a node address (an
+/// IrExpr is aligned and lives far below the top bit).
+pub(crate) fn var_key(id: almide_ir::VarId) -> usize {
+    (1usize << (usize::BITS - 1)) | id.0 as usize
+}
+
+impl Emitter<'_> {
+    /// #2755: a mut receiver's slot was rebound (emitter_vars.rs / list_mut.rs
+    /// / bytes.rs / map_inplace.rs): the copy-on-write read (`$cow`), a
+    /// realloc-on-growth helper's result (`$list_push`, `$bytes_push`), a
+    /// functional rebuild written back (`emit_rebind_mut_var_fresh`), the
+    /// shrunken copy of a pop. Each takes the var's one credit on the block
+    /// it held (`d`: `$cow` releases it when it copies, the helper frees the
+    /// outgrown block or the route's `$dec` drops it) and leaves the var
+    /// holding one credit on the block now in its slot (`i`) — the same
+    /// block when the write landed in place, which the two events then
+    /// account as a hand-over through the helper. An in-place write after
+    /// the read records nothing. A global or a C-319 cell holds the block
+    /// for a holder this frame does not track: decline.
+    pub(crate) fn witness_mut_rebind(&mut self, id: almide_ir::VarId, global: bool) {
+        if self.witness.is_none() {
+            return;
+        }
+        if global {
+            self.witness_decline("mut-receiver:global");
+            return;
+        }
+        if self.cells.contains(&id) {
+            self.witness_decline("mut-receiver:cell");
+            return;
+        }
+        let local = self.locals.get(&id).map(|&(l, _)| l);
+        let Some(w) = self.witness.as_mut() else { return };
+        w.note_arg(var_key(id));
+        match local {
+            Some(l) if w.assign(l, true, None) => {}
+            _ => w.poison(),
+        }
+    }
+
+    /// #2755: the copy-on-write field write (list_mut.rs `field_assign_with`)
+    /// rebound its root var — when it settled the old block itself: a value
+    /// that `spends` the var's credit is the C-132 write-back's.
+    pub(crate) fn witness_field_rebind(&mut self, id: almide_ir::VarId, global: bool, spends: bool, root: SliceTy) {
+        if !spends && self.rc_droppable(root) {
+            self.witness_mut_rebind(id, global);
+        }
+    }
+
+    /// #2755: a mut receiver read WITHOUT the copy-on-write — a parameter,
+    /// whose writes stay caller-visible (`emit_read_mut_var_cow`). The read
+    /// moves no credit; an in-place write through it records nothing, and a
+    /// helper that answers with another block is a rebind of its own.
+    pub(crate) fn witness_mut_read(&mut self, id: almide_ir::VarId, global: bool) {
+        if global || self.cells.contains(&id) {
+            return;
+        }
+        if let Some(w) = self.witness.as_mut() {
+            w.note_arg(var_key(id));
+        }
+    }
+
+    /// #2755: an argument an arm consumes WITHOUT lowering it as a value —
+    /// `fan.any { … }`'s thunk list, whose bodies the arm inlines (each one's
+    /// sites are the ordinary hooks).
+    pub(crate) fn witness_inline_arg(&mut self, e: &almide_ir::IrExpr) {
+        if let Some(w) = self.witness.as_mut() {
+            w.note_arg(e as *const almide_ir::IrExpr as usize);
+        }
+    }
+
+    /// #2755: one arm of the `fan.any { … }` block form (fan.rs), right after
+    /// its Result carrier was born ([`Self::witness_fan_carrier`]): a branch
+    /// site whose first arm is the winner — the carrier leaves as the call's
+    /// owned result (`m`) — and whose second is the loser — released (`d`),
+    /// with the arms after it emitted inside it. The fan closes every site
+    /// it opened (`true` here) after the all-fail result.
+    pub(crate) fn witness_any_arm(&mut self, c: Option<u32>) -> bool {
+        let (Some(w), Some(o)) = (self.witness.as_mut(), c) else { return false };
+        w.branch_open();
+        w.branch_arm();
+        w.temp_ops(o, "m");
+        w.branch_arm();
+        w.temp_ops(o, "d");
+        true
+    }
+
+    /// #2755: a PURE arm of `fan.any { … }` wins: its bare value moves into
+    /// the fresh ok block without a share — an owned value moves (`im`), a
+    /// borrowed one would need the share the route does not take (decline).
+    /// The arms after it are dead code the recorder would log as live.
+    pub(crate) fn witness_any_pure_arm(&mut self, e: &almide_ir::IrExpr, t: SliceTy, last: bool) {
+        let moves = self.rc_droppable(t);
+        let owned = self.rc_owned_result(e);
+        let Some(w) = self.witness.as_mut() else { return };
+        match (last, moves, owned) {
+            (false, _, _) => w.decline("fan:any-after-pure-arm"),
+            (true, true, true) => w.temp_move(),
+            (true, true, false) => w.decline("fan:any-borrowed-pure-arm"),
+            (true, false, _) => {}
+        }
+    }
+}
