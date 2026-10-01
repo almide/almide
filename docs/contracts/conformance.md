@@ -120,7 +120,7 @@
 | ALS-S5 | C-050 | `spec/wasm_cross/string_split_rle_codepoint.almd` (byte-compare) |
 | ALS-S6 | C-074 | `spec/wasm_cross/r5_wasm_split_replace_iterative.almd` (byte-compare) |
 | ALS-ST1 | C-241 | `spec/wasm_cross/binding_stmts.almd` (byte-compare) |
-| ALS-ST2 | C-249 | `spec/wasm_cross/for_in_forms.almd` (byte-compare)<br>`spec/wasm_cross/tuple_ops.almd` (byte-compare) |
+| ALS-ST2 | C-249, C-373 | `spec/wasm_cross/for_in_forms.almd` (byte-compare)<br>`spec/wasm_cross/tuple_ops.almd` (byte-compare)<br>`spec/wasm_cross/var_destructure.almd` (byte-compare) |
 | ALS-ST3 | C-252, C-280 | `spec/wasm_cross/expr_stmt_comment.almd` (byte-compare)<br>`spec/wasm_cross/kernel_conformance.almd` (byte-compare) |
 | ALS-ST4 | C-253 | `spec/wasm_cross/place_assign_ascription.almd` (byte-compare) |
 | ALS-ST5 | C-265 | `spec/wasm_cross/guard_statement.almd` (byte-compare)<br>`spec/wasm_cross/generic_pattern_binds_instanced.almd` (byte-compare)<br>`spec/wasm_cross/guard_value_exit_in_loop.almd` (byte-compare) |
