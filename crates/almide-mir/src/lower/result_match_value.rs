@@ -29,6 +29,13 @@ impl LowerCtx {
         // twin's `materialized_results_str` discipline). Opens the desugared
         // `let v = result.collect_map(..)!; ok(v)` tail (a heap-Ok match returned).
         let (ok_pay_ty, err_pay_ty) = Self::result_match_payload_types(subject, arms, result_ty)?;
+        // A tuple payload (`ok((r, b))` / `err((e, b))` — the C-132 err carrier, #3121)
+        // binds the whole payload, then destructures it inside the arm.
+        if Self::split_result_match_arms(arms).is_none() {
+            let arms = desugar_tuple_payload_arms_with(arms, Some((&ok_pay_ty, &err_pay_ty)))?;
+            Self::split_result_match_arms(&arms)?;
+            return self.try_lower_result_match_value(subject, &arms, result_ty);
+        }
         let heap_ok = is_heap_ty(&ok_pay_ty);
         let tag_off = if heap_ok { 16 } else { 4 };
         let ((ok_body, ok_bind), (err_body, err_bind)) = Self::split_result_match_arms(arms)?;
