@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 735 of 866
+# certified: 740 of 866
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -147,11 +147,13 @@ spec/wasm_cross/fan_any_allfail.almd
 spec/wasm_cross/fan_any_early_winner.almd
 spec/wasm_cross/fan_deterministic.almd
 spec/wasm_cross/fan_effect_mapper.almd
+spec/wasm_cross/fan_effect_mapper_capability.almd
 spec/wasm_cross/fan_map_all_workers_abort_one_line.almd
 spec/wasm_cross/fan_map_err.almd
 spec/wasm_cross/fan_map_inline_err.almd
 spec/wasm_cross/fan_map_inline_lambda.almd
 spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd
+spec/wasm_cross/fan_prefetch_fs.almd
 spec/wasm_cross/fan_pure_thunks.almd
 spec/wasm_cross/fan_race_mapper.almd
 spec/wasm_cross/fan_settle_tuple.almd
@@ -179,6 +181,8 @@ spec/wasm_cross/float_to_fixed.almd
 spec/wasm_cross/float_to_int_edges.almd
 spec/wasm_cross/fold_heap_acc.almd
 spec/wasm_cross/for_in_forms.almd
+spec/wasm_cross/fs_call_head_family.almd
+spec/wasm_cross/fs_fallible_stream_callback.almd
 spec/wasm_cross/fs_glob_segments.almd
 spec/wasm_cross/fs_metadata_family.almd
 spec/wasm_cross/fs_preopen_resolve.almd
@@ -311,6 +315,7 @@ spec/wasm_cross/let_unwrap_propagation.almd
 spec/wasm_cross/let_wildcard_discard.almd
 spec/wasm_cross/letbound_variant_match.almd
 spec/wasm_cross/licm_zero_trip_hoist.almd
+spec/wasm_cross/line_endings_bare_cr.almd
 spec/wasm_cross/list_arg_map_view.almd
 spec/wasm_cross/list_call_element.almd
 spec/wasm_cross/list_chunk_windows.almd
