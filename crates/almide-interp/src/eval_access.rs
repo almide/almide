@@ -131,8 +131,8 @@ impl<'a> Interpreter<'a> {
         // the expression's type. Three cases, in the walker's order:
         //   1. `expr.ty == Ty::Named(n, _)`  → the nominal name `n`,
         //      fields in literal (declaration) order.
-        //   2. `expr.ty == Ty::Record/OpenRecord` whose field-name set
-        //      matches a registered NAMED record type (e.g. a nested
+        //   2. `expr.ty == Ty::Record/OpenRecord` whose field names AND
+        //      types match a registered NAMED record type (#3189) (e.g. a nested
         //      list element `[{ val: 2, kids: [] }]` whose element type
         //      was inferred structurally) → that type's name, fields
         //      reordered to the type's DECLARATION order.
@@ -145,10 +145,10 @@ impl<'a> Interpreter<'a> {
         } else {
             match ty {
                 Ty::Named(n, _) => resolved_name = Some(*n),
-                Ty::Record { .. } | Ty::OpenRecord { .. } => {
-                    let mut key: Vec<Sym> = out.iter().map(|(k, _)| *k).collect();
-                    key.sort();
-                    if let Some((ty_name, decl_order)) = self.named_records.get(&key).cloned() {
+                Ty::Record { fields: ty_fields } | Ty::OpenRecord { fields: ty_fields } => {
+                    let declared = self.named_records.lookup(ty_fields)
+                        .map(|(shape, _)| (shape.name, shape.fields.iter().map(|(f, _)| *f).collect::<Vec<Sym>>()));
+                    if let Some((ty_name, decl_order)) = declared {
                         // Case 2: reorder fields to declaration order.
                         let mut reordered = Vec::with_capacity(out.len());
                         for field in &decl_order {

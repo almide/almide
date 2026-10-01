@@ -97,7 +97,9 @@ pub struct CodegenAnnotations {
     /// field — its generated struct derives `Clone` only (a closure is not
     /// `Debug`/`PartialEq`), like a `type`-declared record's `has_fn_fields` path.
     pub anon_records_with_fn: std::collections::HashSet<Vec<String>>,
-    pub named_records: HashMap<Vec<String>, String>,
+    /// The declared record types a STRUCTURAL record can be, matched on field
+    /// names AND types (#3189); each shape's label is its Rust struct name.
+    pub named_records: crate::record_shape::RecordShapeIndex,
     /// Almide name → the runtime's reserved Rust spelling for every
     /// runtime-owned nominal type this program references (`Value` →
     /// `AlmideValue`, `HttpRequest` → `AlmideHttpRequest`, …), minus the names
