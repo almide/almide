@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at 702d6040a — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at ccc84ed9a — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -128,6 +128,7 @@ edace836382ff0003fd4e68e2b53b9aecb7e3691fbec2b9fae63d059d375eb09	0	spec/wasm_cro
 48f95ac4de5b3733c1fbd48bc7b96b24606d8b1a2c9585cd6aa2299991cab1df	0	spec/wasm_cross/datetime_parse_iso_strict.almd
 84089083b3c46acc54dcf5a809853a38eeb35ebb66fbf4c1b4c03851ddb2d919	0	spec/wasm_cross/datetime_pre_epoch.almd
 12b13db667657ac749076f03306607032a35ddb1147ab1ecbc516e6ec9d6b4f7	0	spec/wasm_cross/declaration_forms.almd
+099ebfdd136d639afb340816cb5beb3330a7ce3ab6f75c6c574996f4d4251141	0	spec/wasm_cross/declaration_literal_domain.almd
 e81fb07daa435c94a95c61f9a4932e84fb2cbf53540b7d0a92d8b07d7c53465d	0	spec/wasm_cross/deep_eq_heap.almd
 029e28a4457da0a03950af82ff8ff2d2018343ff789ff447e49b04de2ad1e2dc	0	spec/wasm_cross/default_param_ref.almd
 9c349ad31d1c0ac50aed0a9940d2855529c4c00ffad54e3ca1817b5d65264c6b	0	spec/wasm_cross/destructure_let_unwrap.almd
