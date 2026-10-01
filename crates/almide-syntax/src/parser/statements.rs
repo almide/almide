@@ -72,7 +72,7 @@ impl Parser {
             self.expect(TokenType::Eq)?;
             self.skip_newlines();
             let value = self.parse_expr()?;
-            return Ok(Stmt::LetDestructure { pattern, value, span: Some(span) });
+            return Ok(Stmt::LetDestructure { pattern, value, mutable: false, span: Some(span) });
         }
 
         // Tuple destructuring: let (a, b) = expr
@@ -81,7 +81,7 @@ impl Parser {
             self.expect(TokenType::Eq)?;
             self.skip_newlines();
             let value = self.parse_expr()?;
-            return Ok(Stmt::LetDestructure { pattern, value, span: Some(span) });
+            return Ok(Stmt::LetDestructure { pattern, value, mutable: false, span: Some(span) });
         }
 
         // Detect `let mut` (Rust style)

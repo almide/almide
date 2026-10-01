@@ -218,7 +218,16 @@ impl Checker {
     /// `match { ok/err }` consumes them — each statement under the set of
     /// names consumed after it that still refer to it (#2795: a shadowed
     /// binding does not inherit its successor's consumer).
-    fn check_stmts_scoped(&mut self, stmts: &mut [ast::Stmt], tail: Option<&ast::Expr>) {
+    fn check_stmts_scoped(&mut self, stmts: &mut Vec<ast::Stmt>, tail: Option<&ast::Expr>) {
+        // #3149: `var <pattern> = e` is one `var` per bound name. Expanded here,
+        // before anything reads the list, so the checker, lowering and every
+        // backend see only the hand-written spelling.
+        let mut next = self.next_synth_expr_id;
+        almide_lang::var_destructure::expand_var_destructures(stmts, &mut || {
+            next += 1;
+            ast::ExprId(next - 1)
+        });
+        self.next_synth_expr_id = next;
         let (per_stmt, _) = collect_block_result_match_vars(stmts, tail);
         let saved_skip = std::mem::take(&mut self.env.skip_auto_unwrap_for);
         for (stmt, skip) in stmts.iter_mut().zip(per_stmt) {

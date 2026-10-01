@@ -910,7 +910,7 @@ fn fmt_stmt(out: &mut String, stmt: &Stmt, depth: usize) {
             if let Some(t) = ty { out.push_str(": "); fmt_type(out, t, depth); }
             out.push_str(" = "); fmt_expr(out, value, depth);
         }
-        Stmt::LetDestructure { pattern, value, .. } => { out.push_str(&i); out.push_str("let "); fmt_dpat(out, pattern); out.push_str(" = "); fmt_expr(out, value, depth); }
+        Stmt::LetDestructure { pattern, value, mutable, .. } => { out.push_str(&i); out.push_str(if *mutable { "var " } else { "let " }); fmt_dpat(out, pattern); out.push_str(" = "); fmt_expr(out, value, depth); }
         Stmt::Var { name, ty, value, .. } => {
             w!(out, "{i}var {name}");
             if let Some(t) = ty { out.push_str(": "); fmt_type(out, t, depth); }
