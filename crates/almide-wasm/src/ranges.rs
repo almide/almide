@@ -161,6 +161,7 @@ impl crate::emitter::Emitter<'_> {
                     i.i32_const(msg as i32);
                 }
                 self.emit_error_frame_abort();
+                self.witness_abort_site();
                 {
                     let mut i = self.f.instructions();
                     i.end();
