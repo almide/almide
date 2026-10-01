@@ -53,9 +53,10 @@ impl Emitter<'_> {
         }
         let idx = info.wasm_index;
         self.calls.insert(i);
-        // The formatted block this call hands over is appended and
-        // never released (#2973): an owned temporary with no `d`.
-        self.witness_decline("display:Float-temp");
+        // The formatted block this call hands over is copied into the line
+        // and released below (#2973): an owned temporary, born and released
+        // here (`id`).
+        self.witness_discard();
         self.f
             .instructions()
             .call(idx)
