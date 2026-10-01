@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at 72529d35e — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at 210df860a — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -574,7 +574,7 @@ f9658c6f9e35ed3780dc45f0c1b4222b677698007de96fd80bdbd9ed82db24b0	spec/stdlib/lis
 0916721ef545c725086342a02a76ec8f8ddd52dab6c0ca0e8c28fd9eb022a18a	spec/stdlib/list_deep_heap_combinators_test.almd
 170a6ae1446887ed670932d37808b9090e77a4debd989c86de77e7bcd79e666f	spec/stdlib/list_extra_test.almd
 c9a24d232037a03b877fad3e4697826b53ff4b35447c384df0f8055fb02c01ad	spec/stdlib/list_fallible_hof_test.almd
-d2f39f072b6bf481d84c3e4de65e942eab2e8a2fd3e9cf6a342c54136e0e055c	spec/stdlib/list_find_map_test.almd
+61a083823673ecf2ebb5de399b3c6726543b6cd2592606a3a6f5e971e0de2e54	spec/stdlib/list_find_map_test.almd
 f64d64e0b5c6f9fadc48dc6912f95ec3b6efde8e3f42265395465d238d32514a	spec/stdlib/list_flat_map_array_test.almd
 58e71a577da1e6cfde1ff0ddc6d2ad3b85a798d7858bec8f1a7430c176ecf7d8	spec/stdlib/list_map_range_test.almd
 00dc92295fda1324fa0f95efe5080309f64b52835c2f4c778043c777b91ddee2	spec/stdlib/list_mutable_test.almd
