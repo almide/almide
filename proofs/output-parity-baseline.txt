@@ -420,6 +420,7 @@ spec/wasm_cross/int_rotate_negative_count.almd
 spec/wasm_cross/int_rotate_nonpositive_width.almd
 spec/wasm_cross/int_wrap_rotate_width.almd
 spec/wasm_cross/interp_effect_unwrap_arg.almd
+spec/wasm_cross/interp_operand_order.almd
 spec/wasm_cross/io_write_ordering.almd
 spec/wasm_cross/json_get_int_float.almd
 spec/wasm_cross/json_gltf_walk.almd

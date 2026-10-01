@@ -336,6 +336,7 @@
 0	0	0	0	spec/wasm_cross/int_rotate_nonpositive_width.almd
 0	0	0	0	spec/wasm_cross/int_wrap_rotate_width.almd
 5	2	73	5	spec/wasm_cross/interp_effect_unwrap_arg.almd
+10	3	124	10	spec/wasm_cross/interp_operand_order.almd
 7	3	90	7	spec/wasm_cross/io_write_ordering.almd
 113	74	1518	113	spec/wasm_cross/json_get_int_float.almd
 4761	3422	56577	4761	spec/wasm_cross/json_gltf_walk.almd
@@ -705,7 +706,7 @@
 40	20	2045881	40	spec/wasm_cross/string_interp_large_hole.almd
 1	0	3	1	spec/wasm_cross/string_interpolation.almd
 11	9	176	11	spec/wasm_cross/string_is_alphanumeric.almd
-52	46	178	52	spec/wasm_cross/string_lines.almd
+52	47	178	52	spec/wasm_cross/string_lines.almd
 24	8	104	24	spec/wasm_cross/string_ops.almd
 43	26	272	43	spec/wasm_cross/string_ops_drain.almd
 3	0	36	1	spec/wasm_cross/string_pad_ceiling_oom.almd

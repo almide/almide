@@ -46,7 +46,7 @@ call-arg:MapLiteral	1
 call-arg:Range	1
 call-arg:TupleIndex-object:Unwrap	1
 call-arg:UnwrapOr-carrier:Member	2
-call-arg:borrowed-temp	9
+call-arg:borrowed-temp	10
 call:panic-arg	7
 caps:argv-in-plain-fn	8
 captures:cell	24
@@ -56,7 +56,7 @@ effect:carrier:ok-borrowed	2
 field:EmptyMap	8
 field:MapLiteral	1
 forin-map	4
-heap-interp-part:Block	8
+heap-interp-part:Block	7
 heap-interp-part:UnwrapOr	4
 heap-operand:Block	4
 heap-operand:OptionNone	2
