@@ -173,6 +173,8 @@
 846	spec/wasm_cross/expr_stmt_comment.almd
 8317	spec/wasm_cross/fallible_hof_effect_callback_family.almd
 7849	spec/wasm_cross/fallible_hof_large_input.almd
+22804	spec/wasm_cross/fallible_hof_matrix_containers.almd
+19732	spec/wasm_cross/fallible_hof_matrix_list.almd
 14169	spec/wasm_cross/fallible_hof_option_effect_callback.almd
 12735	spec/wasm_cross/fallible_hof_release_matrix.almd
 2827	spec/wasm_cross/fallible_tuple_value_tail.almd
@@ -223,6 +225,7 @@
 20952	spec/wasm_cross/fs_call_head_family.almd
 21662	spec/wasm_cross/fs_composition_family.almd
 15694	spec/wasm_cross/fs_fallible_stream_callback.almd
+13046	spec/wasm_cross/fs_fallible_walker_call_head.almd
 14617	spec/wasm_cross/fs_glob_segments.almd
 11710	spec/wasm_cross/fs_list_dir_multipass.almd
 14008	spec/wasm_cross/fs_metadata_family.almd
@@ -376,7 +379,7 @@
 1465	spec/wasm_cross/let_wildcard_discard.almd
 2065	spec/wasm_cross/letbound_variant_match.almd
 2236	spec/wasm_cross/licm_zero_trip_hoist.almd
-13714	spec/wasm_cross/line_endings_bare_cr.almd
+13757	spec/wasm_cross/line_endings_bare_cr.almd
 15445	spec/wasm_cross/list_arg_map_view.almd
 2340	spec/wasm_cross/list_call_element.almd
 3365	spec/wasm_cross/list_chunk_windows.almd
@@ -390,6 +393,7 @@
 2787	spec/wasm_cross/list_enumerate_rich.almd
 2222	spec/wasm_cross/list_eq.almd
 2118	spec/wasm_cross/list_eq_float_bool.almd
+30094	spec/wasm_cross/list_find_map_short_circuit.almd
 2787	spec/wasm_cross/list_flatten_borrow.almd
 3664	spec/wasm_cross/list_float_equality_family.almd
 8671	spec/wasm_cross/list_float_total_order.almd
@@ -514,6 +518,8 @@
 13534	spec/wasm_cross/mut_param_alias_cow.almd
 3098	spec/wasm_cross/mut_param_branch_forward.almd
 4112	spec/wasm_cross/mut_param_call_chain.almd
+3808	spec/wasm_cross/mut_param_closure_capture_read.almd
+6468	spec/wasm_cross/mut_param_closure_capture_write.almd
 11895	spec/wasm_cross/mut_param_effect_can_err.almd
 2423	spec/wasm_cross/mut_param_effect_never_err.almd
 5444	spec/wasm_cross/mut_param_effect_unpropagated.almd
@@ -680,6 +686,7 @@
 7166	spec/wasm_cross/set_entries_reclaim.almd
 7887	spec/wasm_cross/set_index_order.almd
 8879	spec/wasm_cross/set_insertion_order.almd
+6684	spec/wasm_cross/sized_field_default_matrix.almd
 2998	spec/wasm_cross/sized_int_overflow_wrap.almd
 3265	spec/wasm_cross/sized_int_record_fields.almd
 2236	spec/wasm_cross/sized_numeric_literals.almd
