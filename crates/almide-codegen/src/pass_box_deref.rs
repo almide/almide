@@ -304,22 +304,38 @@ struct DerefCollector<'a> {
 
 impl IrVisitor for DerefCollector<'_> {
     fn visit_expr(&mut self, expr: &IrExpr) {
-        if let IrExprKind::Match { subject, arms } = &expr.kind {
-            // A recursive-enum match binds Box'd fields — collect their deref vars.
-            let enum_name = match &subject.ty {
-                Ty::Named(n, _) => Some(n.clone()),
-                Ty::Variant { name, .. } => Some(name.clone()),
-                _ => None,
-            };
-            if let Some(ref ename) = enum_name {
-                if self.recursive_enums.contains(ename.as_str()) {
-                    for arm in arms {
-                        collect_deref_from_pattern(&arm.pattern, self.recursive_enums, self.type_decls, self.name_to_var, self.deref_vars);
-                    }
-                }
+        // A match whose subject holds a recursive enum — directly, or under a
+        // wrapper (`Option[Node]`, a tuple, another case's payload, #3174) —
+        // binds Box'd fields: collect their deref vars.
+        if let IrExprKind::Match { subject, arms } = &expr.kind
+            && walker::ty_contains_any_recursive(&subject.ty, self.recursive_enums)
+        {
+            for arm in arms {
+                self.collect_wrapped(&arm.pattern);
             }
         }
         walk_expr(self, expr); // recurse subject, arm bodies, and every other kind
+    }
+}
+
+impl DerefCollector<'_> {
+    /// Find each recursive-enum constructor pattern, however deeply it sits
+    /// under wrappers, and collect the boxed binders it introduces. A
+    /// non-recursive constructor holds no box itself: look through it.
+    fn collect_wrapped(&mut self, pat: &IrPattern) {
+        match pat {
+            IrPattern::Constructor { name, .. } | IrPattern::RecordPattern { name, .. }
+                if find_td_for_ctor(self.type_decls, name.as_str())
+                    .is_some_and(|td| self.recursive_enums.contains(td.name.as_str())) =>
+                collect_deref_from_pattern(pat, self.recursive_enums, self.type_decls, self.name_to_var, self.deref_vars),
+            IrPattern::Constructor { args, .. } => args.iter().for_each(|a| self.collect_wrapped(a)),
+            IrPattern::RecordPattern { fields, .. } => fields.iter()
+                .filter_map(|f| f.pattern.as_ref()).for_each(|p| self.collect_wrapped(p)),
+            IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner }
+            | IrPattern::As { inner, .. } => self.collect_wrapped(inner),
+            IrPattern::Tuple { elements } => elements.iter().for_each(|e| self.collect_wrapped(e)),
+            _ => {}
+        }
     }
 }
 
