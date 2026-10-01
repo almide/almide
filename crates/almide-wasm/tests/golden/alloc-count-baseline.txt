@@ -514,6 +514,8 @@
 171	71	75138	171	spec/wasm_cross/mut_param_alias_cow.almd
 3	0	0	3	spec/wasm_cross/mut_param_branch_forward.almd
 10110	10102	163568	10110	spec/wasm_cross/mut_param_call_chain.almd
+24	12	308	24	spec/wasm_cross/mut_param_closure_capture_read.almd
+58	40	690	58	spec/wasm_cross/mut_param_closure_capture_write.almd
 72	15	788	17	spec/wasm_cross/mut_param_effect_can_err.almd
 9	4	88	9	spec/wasm_cross/mut_param_effect_never_err.almd
 61	28	922	61	spec/wasm_cross/mut_param_effect_unpropagated.almd
