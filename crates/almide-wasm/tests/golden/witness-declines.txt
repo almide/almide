@@ -35,7 +35,7 @@ stmt:Expr:Unit	1
 stmt:Expr:Unwrap	1
 stmt:Expr:Var	1
 stmt:Guard:Unwrap	4
-stmt:MapInsert	9
+stmt:MapInsert	10
 store:borrowed-temp	2
 tail:SpreadRecord	4
 tail:Unwrap	26
