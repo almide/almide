@@ -140,6 +140,9 @@ fn try_render_bind_shared_mut(ctx: &RenderContext, var: &VarId, ty: &Ty, value: 
     // (`Rc<RefCell<T>>`, P6). A `__cap_*` capture rename is an `Rc::clone`
     // of the original for either kind, so the closure shares the SAME cell.
     let is_copy = almide_ir::top_let_storage::capture_copy_cell(ty);
+    if let Some(param) = ctx.ann.mut_param_cells.get(var) {
+        return Some(render_mut_param_cell(&name_s, &ctx.var_name(*param), is_copy));
+    }
     let fresh_cell = |ctx: &RenderContext| if is_copy {
         format!("std::rc::Rc::new(std::cell::Cell::new({}))", render_expr(ctx, value))
     } else {
@@ -164,6 +167,20 @@ fn try_render_bind_shared_mut(ctx: &RenderContext, var: &VarId, ty: &Ty, value: 
         None => fresh_cell(ctx),
     };
     Some(format!("let {} = {};", name_s, val_s))
+}
+
+/// The cell a captured-and-written `mut` param is rebound onto (#3154): the
+/// param's value copied in, and an `AlmideWriteBack` guard holding the
+/// caller's `&mut` place, whose `Drop` stores the cell's final value there on
+/// every exit. The block keeps the param name in scope for both halves, so
+/// the cell may shadow it.
+fn render_mut_param_cell(cell: &str, param: &str, is_copy: bool) -> String {
+    let copied_in = format!("(*{param}).clone()");
+    let new_cell = if is_copy { format!("std::rc::Rc::new(std::cell::Cell::new({copied_in}))") } else { format!("AlmideSharedMut::new({copied_in})") };
+    format!(
+        "let ({cell}, __wb_{cell}) = {{ let __cell = {new_cell}; \
+         let __wb = AlmideWriteBack({param}, {{ let __c = __cell.clone(); move || __c.get() }}); (__cell, __wb) }};"
+    )
 }
 
 /// Resolve the `Ty` to render for a Bind statement: erase Fn types (Rust
