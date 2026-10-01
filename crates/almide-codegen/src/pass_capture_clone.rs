@@ -24,6 +24,8 @@ use super::use_kind::{written_vars, ExplicitBorrows, Site, UseSites};
 
 #[path = "pass_capture_clone_bindings.rs"]
 mod bindings;
+#[path = "pass_capture_clone_mut_param.rs"]
+mod mut_param;
 use bindings::{capture_bindings, wrap_fan_with_clones};
 
 #[derive(Debug)]
@@ -42,6 +44,12 @@ impl NanoPass for CaptureClonePass {
     fn run_before(&self) -> Vec<&'static str> { vec!["CloneInsertion"] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        // A captured-and-written `mut` param takes a `var` local's storage
+        // first (#3154), so the shared-cell scan below classifies it as one.
+        // Before the snapshot: its local is no `__cap_*` clone binding.
+        let mut_param_cells = mut_param::cell_mut_params(&mut program);
+        let rebound = !mut_param_cells.is_empty();
+        program.codegen_annotations.mut_param_cells.extend(mut_param_cells);
         // Every VarId this pass allocates is a `__cap_*` clone binding (one
         // alloc site); snapshot the table length and mark the new ids in
         // `always_clone_vars` afterwards — id-keyed, rename-proof.
@@ -58,7 +66,7 @@ impl NanoPass for CaptureClonePass {
         for v in &shared_mut { program.codegen_annotations.shared_mut_vars.insert(*v); }
         let mut facts = Facts { param_borrows: HashMap::new(), shared_mut, capture_uses: bindings::CaptureUses::default() };
 
-        let mut changed = false;
+        let mut changed = rebound;
         let IrProgram { functions, modules, var_table, codegen_annotations, .. } = &mut program;
         let module_fns = modules.iter_mut().flat_map(|m| m.functions.iter_mut());
         for func in functions.iter_mut().chain(module_fns) {

@@ -29,6 +29,7 @@ pub mod substitute;
 pub mod effect;
 pub mod annotations;
 pub mod mut_param;
+pub mod param_rebind;
 pub mod effect_abi;
 mod mut_param_err_carry;
 mod mut_param_place;
