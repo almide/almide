@@ -189,7 +189,18 @@ impl Emitter<'_> {
                     self.witness_dec(idx);
                 }
             }
-            Continuation::ReturnError | Continuation::GuardReturn => {
+            // #2755: a guard's early return releases what the success exit
+            // does (its value already settled, `witness_exit_value`); the
+            // path ends here.
+            Continuation::GuardReturn => {
+                for &idx in &plan.released {
+                    self.witness_dec(idx);
+                }
+                if let Some(w) = self.witness.as_mut() {
+                    w.frame_replaced();
+                }
+            }
+            Continuation::ReturnError => {
                 if let Some(w) = self.witness.as_mut() {
                     w.poison();
                 }
