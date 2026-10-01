@@ -1,0 +1,37 @@
+// @contract: C-072
+// #3189: a structural record IS a declared record type only when it has that
+// type's field names AND field types (in any order). Native matched on the
+// sorted field NAMES alone, so the annotated anonymous record below was built
+// as `R`'s Rust struct and rustc refused it (E0308: `String` expected, `i64`
+// found) while wasm ran it. The same names with other types, a field subset or
+// superset, and a record two declared types could be (the field types pick; a
+// concrete type beats a generic one) print byte-identically on every leg. A
+// generic fn called at two such records gets two specializations: the mono key
+// was the sorted names too, so `id` at `{ x: Int, y: String }` and at
+// `{ x: Int, y: Int }` shared one function.
+type R = { v: String, n: Int }
+
+type P[T] = { x: T, y: T }
+
+type A = { x: Int, y: String }
+
+fn sum(r: { v: Int, n: Int }) -> Int = r.v + r.n
+
+fn id[T](x: T) -> T = x
+
+effect fn main() -> Unit = {
+  let x = 5
+  let r: { v: Int, n: Int } = { v: x, n: 1 }
+  println("${r.v}")
+  println("${r}")
+  let { v, n } = r
+  println("${v + n} ${sum(r)}")
+  let named: { n: Int, v: String } = { n: 2, v: "s" }
+  println("${named}")
+  println("${{ v: "a" }} ${{ v: "b", n: 1, k: 2 }}")
+  println("${id({ x: 1, y: "p" })} ${id({ x: 3, y: 4 })}")
+  let xs: List[{ v: Int, n: Int }] = [
+    { v: 6, n: 7 }
+  ]
+  println("${xs}")
+}

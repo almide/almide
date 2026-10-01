@@ -1087,6 +1087,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/r5_wasm_inferred_record_repr.almd", class = "fixture" },
+  { path = "spec/wasm_cross/anon_record_structural_identity.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-073"

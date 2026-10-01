@@ -107,7 +107,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-069 | Effect-fn tail self-recursion loop-converts to O(1) stack on both targets | 0.27.4 | active | fixture | 3 |
 | C-070 | Nested constructor patterns match and bind identically on both targets | 0.27.6 | active | fixture | 8 |
 | C-071 | Single-part interpolation RC balance | 0.27.6 | active | fixture | 1 |
-| C-072 | Inferred named-record repr parity | 0.27.6 | active | fixture | 1 |
+| C-072 | Inferred named-record repr parity | 0.27.6 | active | fixture | 2 |
 | C-073 | Tuple pattern testing a variant constructor | 0.27.6 | active | fixture | 1 |
 | C-074 | Iterative split/replace on large inputs | 0.27.6 | active | fixture | 1 |
 | C-075 | lowmisc round-5 cluster: borrowed-param owning binding, effect-Option auto-try strip, matching-error ! passthrough | 0.27.6 | active | fixture | 1 |
