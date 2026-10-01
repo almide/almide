@@ -332,6 +332,93 @@ fn http_server_chunked(
     Err(HttpServerReject::Status(431))
 }
 
+/// The body framing a request head declares.
+#[derive(Default)]
+struct HttpServerFraming {
+    content_length: Option<u64>,
+    chunked: bool,
+}
+
+impl HttpServerFraming {
+    /// Fold one header field into the framing: a garbled or conflicting
+    /// length is 400, a coding other than `chunked` is 501.
+    fn note(&mut self, key: &str, val: &str) -> Result<(), HttpServerReject> {
+        if key.eq_ignore_ascii_case("content-length") {
+            // Digits only; a length past u64 is too large, not garbage.
+            if val.is_empty() || !val.bytes().all(|b| b.is_ascii_digit()) {
+                return Err(HttpServerReject::Status(400));
+            }
+            let n = val.parse::<u64>().unwrap_or(u64::MAX);
+            if self.content_length.is_some_and(|m| m != n) {
+                return Err(HttpServerReject::Status(400));
+            }
+            self.content_length = Some(n);
+        } else if key.eq_ignore_ascii_case("transfer-encoding") {
+            // Only `chunked` is decoded; any other coding is 501.
+            for coding in val.split(',').map(|c| c.trim()).filter(|c| !c.is_empty()) {
+                if coding.eq_ignore_ascii_case("chunked") && !self.chunked {
+                    self.chunked = true;
+                } else {
+                    return Err(HttpServerReject::Status(501));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The header fields up to the empty line (a line without a colon is
+/// skipped but counts toward the cap), and the framing they declare.
+fn http_server_read_headers(
+    reader: &mut std::io::BufReader<std::net::TcpStream>,
+    deadline: std::time::Instant,
+) -> Result<(Vec<(String, String)>, HttpServerFraming), HttpServerReject> {
+    let too_many = || HttpServerReject::Status(431);
+    let mut headers = Vec::new();
+    let mut framing = HttpServerFraming::default();
+    let mut lines = 0usize;
+    loop {
+        let line = http_server_line(reader, deadline, true, too_many())?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return Ok((headers, framing));
+        }
+        lines += 1;
+        if lines > HTTP_SERVER_MAX_HEADERS {
+            return Err(too_many());
+        }
+        if let Some(idx) = trimmed.find(':') {
+            let key = trimmed[..idx].trim().to_string();
+            let val = trimmed[idx + 1..].trim().to_string();
+            framing.note(&key, &val)?;
+            headers.push((key, val));
+        }
+    }
+}
+
+/// The body the framing declares, bounded by `max_body`.
+fn http_server_read_body(
+    reader: &mut std::io::BufReader<std::net::TcpStream>,
+    deadline: std::time::Instant,
+    max_body: usize,
+    framing: &HttpServerFraming,
+) -> Result<Vec<u8>, HttpServerReject> {
+    if framing.chunked {
+        // Both framings at once is a smuggling shape (RFC 9112 §6.3): refused.
+        if framing.content_length.is_some() {
+            return Err(HttpServerReject::Status(400));
+        }
+        return http_server_chunked(reader, deadline, max_body);
+    }
+    let n = framing.content_length.unwrap_or(0);
+    if n > max_body as u64 {
+        return Err(HttpServerReject::Status(413));
+    }
+    let mut body = Vec::with_capacity(n as usize);
+    http_server_exact(reader, deadline, n as usize, &mut body)?;
+    Ok(body)
+}
+
 fn http_server_read_request(
     stream: &std::net::TcpStream,
     deadline: std::time::Instant,
@@ -346,66 +433,8 @@ fn http_server_read_request(
     }
     let method = parts[0].to_string();
     let path = parts[1].to_string();
-
-    let bad = || HttpServerReject::Status(400);
-    let too_many = || HttpServerReject::Status(431);
-    let mut headers = Vec::new();
-    let mut content_length: Option<u64> = None;
-    let mut chunked = false;
-    let mut lines = 0usize;
-    loop {
-        let line = http_server_line(&mut reader, deadline, true, too_many())?;
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            break;
-        }
-        lines += 1;
-        if lines > HTTP_SERVER_MAX_HEADERS {
-            return Err(too_many());
-        }
-        if let Some(idx) = trimmed.find(':') {
-            let key = trimmed[..idx].trim().to_string();
-            let val = trimmed[idx + 1..].trim().to_string();
-            if key.eq_ignore_ascii_case("content-length") {
-                // Digits only; a length past u64 is too large, not garbage.
-                if val.is_empty() || !val.bytes().all(|b| b.is_ascii_digit()) {
-                    return Err(bad());
-                }
-                let n = val.parse::<u64>().unwrap_or(u64::MAX);
-                if content_length.is_some_and(|m| m != n) {
-                    return Err(bad());
-                }
-                content_length = Some(n);
-            } else if key.eq_ignore_ascii_case("transfer-encoding") {
-                // Only `chunked` is decoded; any other coding is 501.
-                for coding in val.split(',').map(|c| c.trim()).filter(|c| !c.is_empty()) {
-                    if coding.eq_ignore_ascii_case("chunked") && !chunked {
-                        chunked = true;
-                    } else {
-                        return Err(HttpServerReject::Status(501));
-                    }
-                }
-            }
-            headers.push((key, val));
-        }
-    }
-
-    let body = if chunked {
-        // Both framings at once is a smuggling shape (RFC 9112 §6.3): refused.
-        if content_length.is_some() {
-            return Err(bad());
-        }
-        http_server_chunked(&mut reader, deadline, max_body)?
-    } else {
-        let n = content_length.unwrap_or(0);
-        if n > max_body as u64 {
-            return Err(HttpServerReject::Status(413));
-        }
-        let mut body = Vec::with_capacity(n as usize);
-        http_server_exact(&mut reader, deadline, n as usize, &mut body)?;
-        body
-    };
-
+    let (headers, framing) = http_server_read_headers(&mut reader, deadline)?;
+    let body = http_server_read_body(&mut reader, deadline, max_body, &framing)?;
     Ok((method, path, String::from_utf8_lossy(&body).to_string(), headers))
 }
 
@@ -415,72 +444,77 @@ fn http_server_read_request(
 /// the codes registered since); a code outside it gets an empty reason, which
 /// the status line allows (RFC 9112 §4). C-367 does not compare it.
 pub fn http_server_reason(status: i64) -> &'static str {
-    match status {
-        100 => "Continue",
-        101 => "Switching Protocols",
-        102 => "Processing",
-        103 => "Early Hints",
-        200 => "OK",
-        201 => "Created",
-        202 => "Accepted",
-        203 => "Non-Authoritative Information",
-        204 => "No Content",
-        205 => "Reset Content",
-        206 => "Partial Content",
-        207 => "Multi-Status",
-        208 => "Already Reported",
-        226 => "IM Used",
-        300 => "Multiple Choices",
-        301 => "Moved Permanently",
-        302 => "Found",
-        303 => "See Other",
-        304 => "Not Modified",
-        305 => "Use Proxy",
-        307 => "Temporary Redirect",
-        308 => "Permanent Redirect",
-        400 => "Bad Request",
-        401 => "Unauthorized",
-        402 => "Payment Required",
-        403 => "Forbidden",
-        404 => "Not Found",
-        405 => "Method Not Allowed",
-        406 => "Not Acceptable",
-        407 => "Proxy Authentication Required",
-        408 => "Request Timeout",
-        409 => "Conflict",
-        410 => "Gone",
-        411 => "Length Required",
-        412 => "Precondition Failed",
-        413 => "Content Too Large",
-        414 => "URI Too Long",
-        415 => "Unsupported Media Type",
-        416 => "Range Not Satisfiable",
-        417 => "Expectation Failed",
-        418 => "I'm a teapot",
-        421 => "Misdirected Request",
-        422 => "Unprocessable Content",
-        423 => "Locked",
-        424 => "Failed Dependency",
-        425 => "Too Early",
-        426 => "Upgrade Required",
-        428 => "Precondition Required",
-        429 => "Too Many Requests",
-        431 => "Request Header Fields Too Large",
-        451 => "Unavailable For Legal Reasons",
-        500 => "Internal Server Error",
-        501 => "Not Implemented",
-        502 => "Bad Gateway",
-        503 => "Service Unavailable",
-        504 => "Gateway Timeout",
-        505 => "HTTP Version Not Supported",
-        506 => "Variant Also Negotiates",
-        507 => "Insufficient Storage",
-        508 => "Loop Detected",
-        510 => "Not Extended",
-        511 => "Network Authentication Required",
-        _ => "",
+    match HTTP_SERVER_REASONS.binary_search_by_key(&status, |&(code, _)| code) {
+        Ok(i) => HTTP_SERVER_REASONS[i].1,
+        Err(_) => "",
     }
 }
+
+/// Sorted by code: `http_server_reason` binary-searches it.
+const HTTP_SERVER_REASONS: &[(i64, &str)] = &[
+    (100, "Continue"),
+    (101, "Switching Protocols"),
+    (102, "Processing"),
+    (103, "Early Hints"),
+    (200, "OK"),
+    (201, "Created"),
+    (202, "Accepted"),
+    (203, "Non-Authoritative Information"),
+    (204, "No Content"),
+    (205, "Reset Content"),
+    (206, "Partial Content"),
+    (207, "Multi-Status"),
+    (208, "Already Reported"),
+    (226, "IM Used"),
+    (300, "Multiple Choices"),
+    (301, "Moved Permanently"),
+    (302, "Found"),
+    (303, "See Other"),
+    (304, "Not Modified"),
+    (305, "Use Proxy"),
+    (307, "Temporary Redirect"),
+    (308, "Permanent Redirect"),
+    (400, "Bad Request"),
+    (401, "Unauthorized"),
+    (402, "Payment Required"),
+    (403, "Forbidden"),
+    (404, "Not Found"),
+    (405, "Method Not Allowed"),
+    (406, "Not Acceptable"),
+    (407, "Proxy Authentication Required"),
+    (408, "Request Timeout"),
+    (409, "Conflict"),
+    (410, "Gone"),
+    (411, "Length Required"),
+    (412, "Precondition Failed"),
+    (413, "Content Too Large"),
+    (414, "URI Too Long"),
+    (415, "Unsupported Media Type"),
+    (416, "Range Not Satisfiable"),
+    (417, "Expectation Failed"),
+    (418, "I'm a teapot"),
+    (421, "Misdirected Request"),
+    (422, "Unprocessable Content"),
+    (423, "Locked"),
+    (424, "Failed Dependency"),
+    (425, "Too Early"),
+    (426, "Upgrade Required"),
+    (428, "Precondition Required"),
+    (429, "Too Many Requests"),
+    (431, "Request Header Fields Too Large"),
+    (451, "Unavailable For Legal Reasons"),
+    (500, "Internal Server Error"),
+    (501, "Not Implemented"),
+    (502, "Bad Gateway"),
+    (503, "Service Unavailable"),
+    (504, "Gateway Timeout"),
+    (505, "HTTP Version Not Supported"),
+    (506, "Variant Also Negotiates"),
+    (507, "Insufficient Storage"),
+    (508, "Loop Detected"),
+    (510, "Not Extended"),
+    (511, "Network Authentication Required"),
+];
 
 /// A header the response may not carry as written (#2822): a name that is
 /// not an RFC 9110 token, or a value holding CR, LF or NUL — either would
