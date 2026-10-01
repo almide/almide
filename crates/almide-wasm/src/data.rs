@@ -131,6 +131,7 @@ impl Emitter<'_> {
                     // carrier WITH its err payload (the typed drop, whose
                     // tag-1 arm is the one that runs).
                     let owned_carrier = self.rc_owned_result(expr);
+                    self.witness_to_option(owned_carrier, et);
                     let err_dec = owned_carrier.then(|| self.dec_fn_of(SliceTy::Result(o, er)));
                     let hr = self.hold_i32()?;
                     let hc = self.hold_i32()?;
