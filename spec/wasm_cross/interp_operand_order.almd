@@ -1,0 +1,38 @@
+// @contract: C-192
+// #3139: interpolation parts are evaluated left to right on both targets,
+// including the parts the wasm leg names first so their blocks have an owner.
+// A String-producing call part was bound AHEAD of the scalar call parts before
+// it, so `"${tick("a")} ${word("b")}"` ran `word` first: its `println` came
+// before `tick`'s, and when the String part panicked the earlier part's output
+// never appeared at all (native printed 140 B, wasm 0 B). Every observable
+// part before a named one is now named with it, in order.
+fn tick(tag: String) -> Int = {
+  println("tick ${tag}")
+  1
+}
+
+fn word(tag: String) -> String = {
+  println("word ${tag}")
+  "w"
+}
+
+fn nums(tag: String) -> List[Int] = {
+  println("nums ${tag}")
+  [1, 2]
+}
+
+fn flag(tag: String) -> Bool = {
+  println("flag ${tag}")
+  true
+}
+
+effect fn main() -> Unit = {
+  println("${tick("a")} ${word("b")}")
+  let s = "${tick("c")}-${flag("d")}-${word("e")}-${tick("f")}"
+  println(s)
+  println("${[10, 20][tick("g")]} ${word("h")}")
+  println("${tick("i")} ${nums("j")}")
+  let xs = [tick("k"), 2] + nums("l")
+  println("${xs}")
+  println("${tick("m") + tick("n")}${word("o")}${word("p")}")
+}

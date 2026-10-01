@@ -2498,6 +2498,7 @@ since     = "0.37.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/interp_effect_unwrap_arg.almd", class = "fixture" },
+  { path = "spec/wasm_cross/interp_operand_order.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-193"
