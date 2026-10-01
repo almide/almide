@@ -157,7 +157,8 @@ Option/Result でない被演算子は `E034`。
 - **チェーンは右入れ子**: `a ?? b ?? c` は `a ?? (b ?? c)`(AST 実測)。
   意味は「最初の成功が勝つ」。
 - **行またぎ禁止(E038)**: 文レベルでは fallback は `??` と同じ行に置く。
-  複数行は括弧 + `??` 後置:
+  `??` 自体は中置演算子と同じく継続行の先頭に置ける(#3155):
+  `xs\n  |> list.first\n  ?? 0`。fallback を次の行に送る複数行は括弧 + `??` 後置:
   ```almide
   fn parse_or_minus_five(s: String) -> Int = {
     let v = (int.parse(s) ??
