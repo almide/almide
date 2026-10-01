@@ -20,16 +20,25 @@ type Shape = | Circle { r: Int, k: Int = K } | Dot
 // The same alias in a parameter default.
 fn mk(n: Int, g: Int = c.LIMIT) -> Int = n + g
 
-// The same constants as defaults of a type only this module constructs.
-type Tag = { n: Int, e: Int = K, s: Int = step }
+// The same defaults on a type only this module constructs.
+type Tag = { n: Int, e: Int = K, f: Int = base(), s: Int = step }
 
 // A literal inside the declaring module itself, beside locals of its own —
-// one of them named like the default's constant.
+// one of them named like the default's constant. #3167: the `base()` default
+// of a literal in its own module named a fn the native build never declared.
 fn inner(n: Int) -> Tag = {
   let z = n * 10
   let step = 1
   Tag { n: z + step }
 }
+
+// The cross-module type built inside its own module, and its case.
+fn own_box(n: Int) -> Box = {
+  let base = 0
+  Box { n: n + base }
+}
+
+fn own_circle(r: Int) -> Shape = Circle { r: r }
 
 fn total(b: Box) -> Int = b.n + b.e + b.f + b.g + b.s
 

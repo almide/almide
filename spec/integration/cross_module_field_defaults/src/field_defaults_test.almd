@@ -43,7 +43,13 @@ test "a literal inside the declaring module" {
   let b = shapes.inner(2)
   assert_eq(b.n, 21)
   assert_eq(b.e, 3)
+  assert_eq(b.f, 6)
   assert_eq(b.s, 5)
+}
+
+test "a literal inside the declaring module whose default calls its fn (#3167)" {
+  assert_eq(shapes.total(shapes.own_box(4)), 58)
+  assert_eq(shapes.radius_plus_k(shapes.own_circle(1)), 4)
 }
 
 test "a parameter default through the declaring module's import alias" {
