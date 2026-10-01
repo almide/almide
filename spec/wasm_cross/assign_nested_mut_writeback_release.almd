@@ -1,0 +1,53 @@
+// @contract: C-066
+// `ys = keep(grow(ys))` releases the written-back value of `ys` (#3130).
+// `grow` takes a `mut` parameter, so the C-132 write-back arrives inside
+// the argument as `{ let t = grow(ys); let (r, b) = t; ys = b; r }`. That
+// inner assignment already settles the old occupant and leaves `ys`
+// holding one credit on the written-back block; the outer Assign counted
+// the mention as `keep` taking that credit and never released it, which
+// left one block live per assign on wasm. Native drops every generation.
+fn keep(xs: List[Int]) -> List[Int] = xs
+
+// Grows the argument in place and answers it: the write-back and the
+// result are the same block.
+fn grow(mut ys: List[Int]) -> List[Int] = {
+  list.push(ys, list.len(ys))
+  ys
+}
+
+// Grows the argument and answers a different, fresh block.
+fn grow_sum(mut ys: List[Int]) -> List[Int] = {
+  list.push(ys, 7)
+  [
+    list.fold(ys, 0, (a, x) => a + x)
+  ]
+}
+
+fn total(xs: List[Int]) -> Int = list.fold(xs, 0, (a, x) => a + x)
+
+fn aliased(n: Int) -> List[Int] = {
+  var ys = [1, 2, 3]
+  var i = 0
+  while i < n {
+    ys = keep(grow(ys))
+    i = i + 1
+  }
+  ys
+}
+
+fn fresh(n: Int) -> List[Int] = {
+  var ys = [1, 2]
+  var i = 0
+  while i < n {
+    ys = keep(grow_sum(ys))
+    i = i + 1
+  }
+  ys
+}
+
+effect fn main() -> Unit = {
+  let a = aliased(6)
+  println("aliased: ${list.len(a)} ${total(a)}")
+  let b = fresh(4)
+  println("fresh: ${list.len(b)} ${total(b)}")
+}

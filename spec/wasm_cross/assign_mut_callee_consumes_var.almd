@@ -1,0 +1,40 @@
+// @contract: C-066
+// The negative control of #3130: where a `mut` callee really does take the
+// var's credit, the Assign must NOT release the old occupant as well. A
+// `mut` call whose argument is the var itself (`fill(ys)`, `ys = grow(ys)`)
+// hands the buffer to a callee that may reallocate it in place; releasing
+// it again at the assign is a double free. Every value is read after the
+// loop, so a block freed under the var shows in the output or the live
+// count.
+fn fill(mut ys: List[Int], n: Int) -> Unit = {
+  var i = 0
+  while i < n {
+    list.push(ys, i)
+    i = i + 1
+  }
+}
+
+fn grow(mut ys: List[Int]) -> List[Int] = {
+  list.push(ys, list.len(ys))
+  ys
+}
+
+fn total(xs: List[Int]) -> Int = list.fold(xs, 0, (a, x) => a + x)
+
+effect fn main() -> Unit = {
+  var ys = [1]
+  var i = 0
+  while i < 5 {
+    fill(ys, 3)
+    ys = grow(ys)
+    i = i + 1
+  }
+  println("consumed: ${list.len(ys)} ${total(ys)}")
+  var zs = ["a"]
+  var j = 0
+  while j < 4 {
+    zs = zs + ["${j}"]
+    j = j + 1
+  }
+  println("strs: ${list.join(zs, ",")}")
+}
