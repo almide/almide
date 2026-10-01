@@ -405,6 +405,31 @@ impl Emitter<'_> {
         self.release_i32();
         Ok(())
     }
+
+    /// The callback walkers' frames walk (#3137): each line is a fresh
+    /// STRING block the CALLBACK only borrows — it takes its own share of
+    /// whatever it keeps (a list it returns, a closure param's +1) — so the
+    /// walk holds the line in its own local and releases it once `body`
+    /// has run. `body` sees the line on the stack, as with
+    /// `fs_frames_foreach`; the readers that MOVE the line into a list
+    /// (`read_lines`, `env.args`) keep the bare walk.
+    pub(crate) fn fs_frames_foreach_borrowed(
+        &mut self,
+        hraw: u32,
+        hlen: u32,
+        body: impl FnOnce(&mut Self) -> Result<(), EmitError>,
+    ) -> Result<(), EmitError> {
+        let hln = self.hold_i32()?;
+        let dec_str = self.dec_fn_of(STR);
+        self.fs_frames_foreach(hraw, hlen, |em| {
+            em.f.instructions().local_tee(hln);
+            body(em)?;
+            em.f.instructions().local_get(hln).call(dec_str);
+            Ok(())
+        })?;
+        self.release_i32();
+        Ok(())
+    }
 }
 
 fn byte_memarg() -> wasm_encoder::MemArg {
@@ -483,19 +508,31 @@ impl Emitter<'_> {
                 self.f.instructions().local_set(params[0]);
                 self.fs_call_1(p, OP_FOLD_LINES)?;
                 let (hraw, hlen, herr) = self.fs_frames_or_err()?;
-                // walk the frames, folding
-                self.fs_frames_foreach(hraw, hlen, |em| {
+                // walk the frames, folding — the list.fold discipline: the
+                // accumulator owns one credit on every step, a borrowed body
+                // result takes its share, and the replaced accumulator is
+                // released before the rebind (#3137).
+                let acc_dec = self.elem_is_handle(acc_ty).then(|| self.dec_fn_of(acc_ty));
+                self.fs_frames_foreach_borrowed(hraw, hlen, |em| {
                     em.f.instructions().local_set(params[1]);
                     em.lower(body, Some(acc_ty))?;
+                    em.rc_share_guard(body, acc_ty);
+                    if let Some(dec) = acc_dec {
+                        em.f.instructions().local_get(params[0]).call(dec);
+                    }
                     em.f.instructions().local_set(params[0]);
                     Ok(())
                 })?;
                 self.fs_frames_release_raw(hraw, herr);
-                // ok(acc) / err passthrough
+                // ok(acc) / err passthrough (the read failed before any
+                // line: the init's credit is released with it)
                 let hs = self.hold_i32()?;
                 {
                     let mut i = self.f.instructions();
                     i.local_get(herr).if_(BlockType::Result(ValType::I32));
+                    if let Some(dec) = acc_dec {
+                        i.local_get(params[0]).call(dec);
+                    }
                     i.local_get(herr);
                     i.else_();
                     i.i32_const(16)
@@ -517,7 +554,7 @@ impl Emitter<'_> {
                 let (params, body) = self.hof_lambda(cb, 1)?;
                 self.fs_call_1(p, OP_FOR_EACH_LINE)?;
                 let (hraw, hlen, herr) = self.fs_frames_or_err()?;
-                self.fs_frames_foreach(hraw, hlen, |em| {
+                self.fs_frames_foreach_borrowed(hraw, hlen, |em| {
                     em.f.instructions().local_set(params[0]);
                     em.lower_stmt_expr(body)?;
                     Ok(())

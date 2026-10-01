@@ -403,6 +403,7 @@ impl Emitter<'_> {
         }
         let got = self.fs_result_string()?;
         debug_assert!(matches!(got, SliceTy::Result(..)));
+        let res_dec = self.dec_fn_of(got);
         {
             let mut i = self.f.instructions();
             i.local_set(hp);
@@ -410,6 +411,9 @@ impl Emitter<'_> {
             i.i32_eqz().if_(BlockType::Empty);
             // winner: hr = the ok Result, break to the abandon sweep.
             i.local_get(hp).local_set(hr);
+            i.else_();
+            // #3137: a losing err skips its arm — released with its message.
+            i.local_get(hp).call(res_dec);
             i.end();
             i.local_get(hr).i32_const(0).i32_ne().br_if(1);
         }
@@ -515,11 +519,17 @@ impl Emitter<'_> {
             i.local_get(hacc).local_get(hp);
             i.i32_load(slot_memarg(almide_layout::SUM_FIELD));
             i.call(F_LIST_PUSH_4).local_set(hacc);
+            // #3137: the payload's credit moved into the list; the shell
+            // is released.
+            i.local_get(hp).call(F_DEC_FLAT);
             i.end();
             i.end();
         }
         self.hof_step(ih);
-        // finale: no err → ok(acc)
+        let sh = self.types.intern(STR);
+        let acc_dec = self.dec_fn_of(SliceTy::List(sh));
+        // finale: no err → ok(acc); an err is the result, and the payloads
+        // already collected are released with their accumulator.
         {
             let mut i = self.f.instructions();
             i.local_get(hr).i32_eqz().if_(BlockType::Empty);
@@ -531,6 +541,8 @@ impl Emitter<'_> {
             i.local_get(hr)
                 .local_get(hacc)
                 .i32_store(slot_memarg(almide_layout::SUM_FIELD));
+            i.else_();
+            i.local_get(hacc).call(acc_dec);
             i.end();
             i.local_get(hr);
         }
@@ -538,7 +550,6 @@ impl Emitter<'_> {
             self.release_i32();
         }
         self.release_i64();
-        let sh = self.types.intern(STR);
         let lh = self.types.intern(SliceTy::List(sh));
         Ok(SliceTy::Result(lh, sh))
     }

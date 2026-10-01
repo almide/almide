@@ -342,6 +342,8 @@ impl Emitter<'_> {
         i.local_get(hs2);
         i.local_get(hb).i64_load(slot_memarg(0));
         i.i64_store(slot_memarg(almide_layout::SUM_FIELD));
+        // #3137: the 8-byte scratch is read out; it was never released.
+        i.local_get(hb).call(F_DEC_FLAT);
         i.local_get(hs2);
         i.end();
         let _ = i;
@@ -499,37 +501,60 @@ impl Emitter<'_> {
         let (hraw, hlen, herr) = self.fs_frames_or_err()?;
         let hr = self.hold_i32()?;
         self.f.instructions().i32_const(0).local_set(hr);
-        self.fs_frames_foreach(hraw, hlen, |em| {
-            let hline = em.tmp_i32_local;
-            em.f.instructions().local_set(hline);
+        // #3137: the body's Result carrier. An owned body (the canonical
+        // `step(a, l)` call) hands the walk its one credit: an ok payload
+        // moves into the accumulator and the shell is released; an err IS
+        // the result. A borrowed body's carrier is shared instead.
+        let owned = self.rc_owned_result(body);
+        let acc_dec = self.elem_is_handle(acc_ty).then(|| self.dec_fn_of(acc_ty));
+        let hres = self.hold_i32()?;
+        self.fs_frames_foreach_borrowed(hraw, hlen, |em| {
+            em.f.instructions().local_set(params[1]);
             // once an err landed, the callback never runs again
             em.f.instructions().local_get(hr).i32_eqz().if_(BlockType::Empty);
-            em.f.instructions().local_get(hline).local_set(params[1]);
             em.lower(body, None)?;
-            let hres = em.tmp_i32_local;
             let mut i = em.f.instructions();
             i.local_set(hres);
             i.local_get(hres).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_eqz();
             i.if_(BlockType::Empty);
+            if let Some(dec) = acc_dec {
+                i.local_get(params[0]).call(dec);
+            }
             i.local_get(hres);
             let _ = i;
             em.load_ty_slot(acc_ty, almide_layout::SUM_FIELD);
+            if !owned {
+                em.share_handle_top(acc_ty);
+            }
+            em.f.instructions().local_set(params[0]);
+            if owned {
+                em.f.instructions().local_get(hres).call(F_DEC_FLAT);
+            }
+            em.f.instructions().else_().local_get(hres);
+            if !owned {
+                em.rc_inc_top();
+            }
             let mut i = em.f.instructions();
-            i.local_set(params[0]);
-            i.else_();
-            i.local_get(hres).local_set(hr);
+            i.local_set(hr);
             i.end();
             i.end();
             Ok(())
         })?;
+        self.release_i32();
         self.fs_frames_release_raw(hraw, herr);
         let hs = self.hold_i32()?;
         {
             let mut i = self.f.instructions();
             i.local_get(herr).if_(BlockType::Result(ValType::I32));
+            if let Some(dec) = acc_dec {
+                i.local_get(params[0]).call(dec);
+            }
             i.local_get(herr);
             i.else_();
             i.local_get(hr).if_(BlockType::Result(ValType::I32));
+            if let Some(dec) = acc_dec {
+                i.local_get(params[0]).call(dec);
+            }
             i.local_get(hr);
             i.else_();
             i.i32_const(16)
@@ -583,8 +608,14 @@ impl Emitter<'_> {
         self.f.instructions().i32_const(0).local_set(hr);
         let acc_droppable = self.rc_droppable(p_acc);
         let line_droppable = self.rc_droppable(p_line);
-        self.fs_frames_foreach(hraw, hlen, |em| {
-            let hline = em.tmp_i32_local;
+        // #3137: the walk keeps its own credit on the accumulator (the
+        // callee got a +1 of its own), so an ok rebind releases the
+        // replaced one; the call's Result carrier is owned — its payload
+        // moves into the accumulator and the shell is released.
+        let acc_dec = self.elem_is_handle(acc_ty).then(|| self.dec_fn_of(acc_ty));
+        let hline = self.hold_i32()?;
+        let hres = self.hold_i32()?;
+        self.fs_frames_foreach_borrowed(hraw, hlen, |em| {
             em.f.instructions().local_set(hline);
             em.f.instructions().local_get(hr).i32_eqz().if_(BlockType::Empty);
             // Closure convention (calls.rs): env first, then the args —
@@ -601,30 +632,41 @@ impl Emitter<'_> {
             }
             em.f.instructions().local_get(hcl).i32_load(slot_memarg(0));
             em.f.instructions().call_indirect(0, ti);
-            let hres = em.tmp_i32_local;
             let mut i = em.f.instructions();
             i.local_set(hres);
             i.local_get(hres).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_eqz();
             i.if_(BlockType::Empty);
+            if let Some(dec) = acc_dec {
+                i.local_get(hacc).call(dec);
+            }
             i.local_get(hres);
             let _ = i;
             em.load_ty_slot(acc_ty, almide_layout::SUM_FIELD);
             let mut i = em.f.instructions();
             i.local_set(hacc);
+            i.local_get(hres).call(F_DEC_FLAT);
             i.else_();
             i.local_get(hres).local_set(hr);
             i.end();
             i.end();
             Ok(())
         })?;
+        self.release_i32();
+        self.release_i32();
         self.fs_frames_release_raw(hraw, herr);
         let hs = self.hold_i32()?;
         {
             let mut i = self.f.instructions();
             i.local_get(herr).if_(BlockType::Result(ValType::I32));
+            if let Some(dec) = acc_dec {
+                i.local_get(hacc).call(dec);
+            }
             i.local_get(herr);
             i.else_();
             i.local_get(hr).if_(BlockType::Result(ValType::I32));
+            if let Some(dec) = acc_dec {
+                i.local_get(hacc).call(dec);
+            }
             i.local_get(hr);
             i.else_();
             i.i32_const(16)
@@ -676,8 +718,13 @@ impl Emitter<'_> {
         let (hraw, hlen, herr) = self.fs_frames_or_err()?;
         let hr = self.hold_i32()?;
         self.f.instructions().i32_const(0).local_set(hr);
-        self.fs_frames_foreach(hraw, hlen, |em| {
-            let hline = em.tmp_i32_local;
+        // #3137: a called closure and an owned inline body hand the walk the
+        // Result carrier's one credit — an ok is released, an err IS the
+        // result; a borrowed inline body's err takes its own share.
+        let owned = body.is_none_or(|b| self.rc_owned_result(b));
+        let hline = self.hold_i32()?;
+        let hres = self.hold_i32()?;
+        self.fs_frames_foreach_borrowed(hraw, hlen, |em| {
             em.f.instructions().local_set(hline);
             em.f.instructions().local_get(hr).i32_eqz().if_(BlockType::Empty);
             match (hcl, ti, body) {
@@ -694,15 +741,26 @@ impl Emitter<'_> {
                 }
                 _ => return unsup("fs-fallible-each-shape"),
             }
-            let hres = em.tmp_i32_local;
             let mut i = em.f.instructions();
             i.local_set(hres);
             i.local_get(hres).i32_load(slot_memarg(almide_layout::SUM_TAG)).if_(BlockType::Empty);
-            i.local_get(hres).local_set(hr);
+            i.local_get(hres);
+            let _ = i;
+            if !owned {
+                em.rc_inc_top();
+            }
+            let mut i = em.f.instructions();
+            i.local_set(hr);
+            if owned {
+                i.else_();
+                i.local_get(hres).call(F_DEC_FLAT);
+            }
             i.end();
             i.end();
             Ok(())
         })?;
+        self.release_i32();
+        self.release_i32();
         self.fs_frames_release_raw(hraw, herr);
         let hs = self.hold_i32()?;
         {
