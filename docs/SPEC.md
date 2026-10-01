@@ -155,8 +155,12 @@ A newline is ignored and the statement continues when:
 - Keywords: `if`, `then`, `else`, `match`, `not`, `|`
 
 **The next line starts with:**
-- `.` (method chaining)
-- `|>` (pipe)
+- `.` followed by a name (method chaining)
+- Any infix operator: `|>`, `>>`, `+`, `-`, `*`, `/`, `%`, `^`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `..<`, `and`, `or`
+- `??` (its fallback stays on the `??` line — E038)
+
+A line-initial `-` glued to its operand (`-1`) starts a new statement, and a
+line-initial `...` is a spread, so neither continues.
 
 ```
 let result = items
@@ -166,6 +170,10 @@ let result = items
 text
   |> string.trim
   |> string.split(",")
+
+list.first(xs)
+  |> option.map((x) => x + 1)
+  ?? 0
 ```
 
 ---
