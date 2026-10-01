@@ -240,7 +240,7 @@ pub(crate) fn lower_resolved(
     // Excluded shapes keep `mutated_params` and keep walling honestly.
     crate::ir::mut_param::lower_mut_params_move_mode(&mut ir);
     // #3154: a param a closure captures and the fn writes takes a var's cell.
-    almide_wasm::rebind_cell_params(&mut ir);
+    almide_wasm::cells::rebind_cell_params(&mut ir);
     Ok(ir)
 }
 
