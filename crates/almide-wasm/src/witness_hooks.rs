@@ -31,6 +31,8 @@ use crate::SliceTy;
 /// The mut-receiver and inlined-thunk hooks (split for the file budget).
 #[path = "witness_mut.rs"]
 pub(crate) mod witness_mut;
+#[path = "witness_inline.rs"]
+mod witness_inline;
 
 /// A hooked node's identity for the module-call audit.
 fn node(e: &almide_ir::IrExpr) -> usize {
