@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at 36d2618b4 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at 58d16fd76 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -889,6 +889,7 @@ eaa0293c42d4846c48277613431046290acf0ca1141b8a3d15feb0c8608c5b22	spec/wasm_cross
 252bf9dd0b74b1225ba90cf6b316610b8880e95cee2c188b87db88e2d924ea0c	spec/wasm_cross/fs_call_head_family.almd
 5b244a882a8150183c504d7bf806b03c9792e27a6cd88d5eb243338e032bde1d	spec/wasm_cross/fs_composition_family.almd
 38a3bdaa413674e15986f81ba1bea6170c7063f5e0e96a83e1c799349978c20b	spec/wasm_cross/fs_fallible_stream_callback.almd
+1361aac1ec640035fe81f35b9eeb7400ec90ebcf454856c293b2531f94ccb828	spec/wasm_cross/fs_fallible_walker_call_head.almd
 85de0e12c5b10f9be48dc1df27bd68d7852a955fa11360683b08a4dad693921a	spec/wasm_cross/fs_glob_segments.almd
 df447cefc3f182d7c491f9138f602eb82884f4b5c3ffe0a7fb317ca1d3abefb3	spec/wasm_cross/fs_list_dir_multipass.almd
 1b9d9100b9d5e2203bb9c1377dec5cab328293d6617bb324881ed77a53cdf2b3	spec/wasm_cross/fs_metadata_family.almd
