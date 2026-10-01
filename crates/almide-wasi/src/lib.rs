@@ -10,7 +10,9 @@
 //!     plus the environ/args quartet ONLY when the module's emitted op
 //!     set reaches it (below); every non-import index shifts by the
 //!     import delta, and the element section re-encodes through the
-//!     same Remap (#1716);
+//!     same Remap (#1716). A final pass (`prune.rs`, #3114) then drops
+//!     the imports no shipped body calls — hello, world keeps fd_write
+//!     and proc_exit — along with unreferenced globals and types;
 //!   - every call to an old import retargets to one of 5 appended SHIM
 //!     functions implementing the almide host contract over WASI;
 //!   - one PARK span is appended to linear memory for iovecs, the
@@ -32,7 +34,7 @@
 //! overlay-append shim, `env.args`/`process.args` (op 29) the args
 //! pair of imports + its frames shim — each only when the emitted op
 //! set names the op. A hello-world artifact carries none of them
-//! (five imports, five shims), and an op that never reached the module
+//! (two imports, five shims), and an op that never reached the module
 //! cannot be called, so the gate is a selection over the op table the
 //! build path already audits against `P1_SERVED_OPS`, not an analysis.
 //! The fs service rides the same gate: it ships when an fs op is in the
@@ -57,6 +59,7 @@ pub const P1_SERVED_OPS: &[i32] = &[
 ];
 
 mod fs_service;
+mod prune;
 pub use fs_service::{fs_op_name, FS_SERVICE_OPS};
 
 pub const UNSUPPORTED_MSG: &[u8] = b"Error: host op unsupported in the WASI build\n";
@@ -589,7 +592,7 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         code.function(&stub);
         code.function(&stub);
     } else {
-        code.function(&shim_fs_call(park, g_plen, g_ppos, &forward, host_ops.contains(&60), host_ops.contains(&73)));
+        code.function(&shim_fs_call(park, g_plen, g_ppos, &forward, host_ops));
         code.function(&shim_host_read(park, g_plen, g_ppos));
     }
     if f_env_get.is_some() {
@@ -622,11 +625,11 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
             .map_err(|e| anyhow::anyhow!("element reencode: {e:?}"))?;
     }
 
-    data.active(
-        0,
-        &ConstExpr::i32_const((park + MSG) as i32),
-        UNSUPPORTED_MSG.iter().copied(),
-    );
+    // The refusal line is read only by `shim_fs_call`, which ships only for a
+    // non-empty op set (#3114: hello carried it unreferenced).
+    if !host_ops.is_empty() {
+        data.active(0, &ConstExpr::i32_const((park + MSG) as i32), UNSUPPORTED_MSG.iter().copied());
+    }
     if f_env_set.is_some() {
         data.active(0, &ConstExpr::i32_const((park + MSG2) as i32), ENV_FULL_MSG.iter().copied());
     }
@@ -650,7 +653,10 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         .section(&element_sec)
         .section(&code)
         .section(&data);
-    let out = m.finish();
+    // Last: drop the imports, globals and types nothing in the finished
+    // module names (#3114) — the base five WASI imports keep fixed indices
+    // above so the shims are written once, and most programs call two.
+    let out = prune::prune(&m.finish())?;
     wasmparser::validate(&out)?;
     Ok(out)
 }
