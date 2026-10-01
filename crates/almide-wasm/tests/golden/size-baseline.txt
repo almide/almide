@@ -680,6 +680,7 @@
 6978	spec/wasm_cross/set_entries_reclaim.almd
 7699	spec/wasm_cross/set_index_order.almd
 8695	spec/wasm_cross/set_insertion_order.almd
+6474	spec/wasm_cross/sized_field_default_matrix.almd
 2771	spec/wasm_cross/sized_int_overflow_wrap.almd
 3046	spec/wasm_cross/sized_int_record_fields.almd
 2012	spec/wasm_cross/sized_numeric_literals.almd

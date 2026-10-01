@@ -24,7 +24,7 @@ pattern:list-rest	8
 payload:UnwrapOr-carrier:OptionNone	1
 record:default	2
 rhs:Fan	6
-rhs:SpreadRecord	4
+rhs:SpreadRecord	5
 rhs:Unwrap	16
 scan	3
 stmt:Expr:Unit	1
