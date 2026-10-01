@@ -85,6 +85,13 @@ pub(crate) fn is_extraction_view(e: &almide_ir::IrExpr) -> bool {
         // under a borrowed join has already declined at the arm,
         // `witness_unwrap_or_arm`).
         K::UnwrapOr { expr, .. } => slot_read_of_var(expr),
+        // #2755: `option.flatten(o)` hands back o's payload as is — the
+        // arm's declared `View` (sums.rs) — a slot read of a bound carrier.
+        K::Call { target: almide_ir::CallTarget::Module { module, func, .. }, args, .. }
+            if module.as_str() == "option" && func.as_str() == "flatten" =>
+        {
+            matches!(args.as_slice(), [a] if slot_read_of_var(a))
+        }
         _ => false,
     }
 }

@@ -653,7 +653,7 @@ impl Emitter<'_> {
                 match self.arm_scope(|em| {
                     let l = em.lower_map_call("get", &args, want)?;
                     if let Some(before) = before {
-                        em.witness_module_result("map.get", &args, before, l);
+                        em.witness_module_result("map.get", &args, before);
                     }
                     Ok(l)
                 })? {
