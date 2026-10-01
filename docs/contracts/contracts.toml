@@ -1065,6 +1065,8 @@ evidence  = [
   { path = "spec/wasm_cross/nested_variant_tag_box.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_payload_guard.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_tuple_pattern.almd", class = "fixture" },
+  { path = "spec/wasm_cross/recursive_payload_closure_capture.almd", class = "fixture" },
+  { path = "spec/wasm_cross/recursive_payload_nested_pattern.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-071"
@@ -1816,6 +1818,7 @@ evidence  = [
   { path = "spec/wasm_cross/mut_param_global_no_reach_in_place.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_closure_capture_read.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_closure_capture_write.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_reassign_from_hof.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-133"

@@ -1,0 +1,320 @@
+// @contract: C-132
+// #3170: a `mut` parameter reassigned from a call that consumes its own old
+// value — `ws = list.filter(ws, f)`. Native passes the param as `&mut Vec<T>`
+// and handed that reference to the consuming call as if it were the owned
+// list (`(ws).into_iter()` yields `&mut T`, E0308; a runtime call taking
+// `Vec<T>` got `&mut Vec<T>`, E0308). Every list row below failed the native
+// build. The old value is dead once the assign lands, so native now moves it
+// out (`std::mem::take`) when nothing else in the right-hand side can see the
+// hole, and clones it otherwise; the caller sees the new list on every leg.
+// The field rows reassign a list field of a `mut` record parameter; the
+// fallible row errs part-way and the caller must still see the OLD list.
+type W = { id: Int, alive: Bool, name: String }
+
+type Bag = { ws: List[W], tags: Map[String, Int], ids: Set[Int], label: String }
+
+fn f_filter(mut ws: List[W]) -> Unit = {
+  ws = list.filter(ws, (w) => w.alive)
+}
+
+fn f_map(mut ws: List[W]) -> Unit = {
+  ws = list.map(ws, (w) => { ...w, id: w.id * 10 })
+}
+
+fn f_filter_map(mut ws: List[W]) -> Unit = {
+  ws = list.filter_map(ws, (w) => if w.alive then some({ ...w, name: w.name + "!" })
+  else none)
+}
+
+fn f_flat_map(mut ws: List[W]) -> Unit = {
+  ws = list.flat_map(ws, (w) => [w, w])
+}
+
+fn f_sort_by(mut ws: List[W]) -> Unit = {
+  ws = list.sort_by(ws, (w) => 0 - w.id)
+}
+
+fn f_reverse(mut ws: List[W]) -> Unit = {
+  ws = list.reverse(ws)
+}
+
+fn f_take(mut ws: List[W]) -> Unit = {
+  ws = list.take(ws, 1)
+}
+
+fn f_drop(mut ws: List[W]) -> Unit = {
+  ws = list.drop(ws, 1)
+}
+
+fn f_take_while(mut ws: List[W]) -> Unit = {
+  ws = list.take_while(ws, (w) => w.alive)
+}
+
+fn f_drop_while(mut ws: List[W]) -> Unit = {
+  ws = list.drop_while(ws, (w) => w.alive)
+}
+
+fn f_concat(mut ws: List[W]) -> Unit = {
+  ws = ws + ws
+}
+
+fn f_unique_by(mut ws: List[W]) -> Unit = {
+  ws = list.unique_by(ws, (w) => w.alive)
+}
+
+fn f_slice(mut ws: List[W]) -> Unit = {
+  ws = list.slice(ws, 0, 1)
+}
+
+fn f_insert(mut ws: List[W]) -> Unit = {
+  ws = list.insert(ws, 0, W { id: 9, alive: true, name: "z" })
+}
+
+fn f_remove_at(mut ws: List[W]) -> Unit = {
+  ws = list.remove_at(ws, 0)
+}
+
+fn f_update(mut ws: List[W]) -> Unit = {
+  ws = list.update(ws, 0, (w) => { ...w, id: 7 })
+}
+
+fn f_scan(mut ws: List[W]) -> Unit = {
+  ws = list.scan(ws, W { id: 0, alive: true, name: "" }, (acc, w) => { ...w, id: acc.id + w.id })
+}
+
+fn f_take_end(mut ws: List[W]) -> Unit = {
+  ws = list.take_end(ws, 1)
+}
+
+fn f_fold(mut ws: List[W]) -> Unit = {
+  ws = list.fold(ws, [], (acc, w) => [w] + acc)
+}
+
+fn f_nested(mut ws: List[W]) -> Unit = {
+  ws = list.take(list.filter(ws, (w) => w.alive), 1)
+}
+
+fn f_two(mut ws: List[W]) -> Unit = {
+  ws = list.filter(ws, (w) => w.alive)
+  ws = list.map(ws, (w) => { ...w, id: w.id + 1 })
+}
+
+fn f_branch(mut ws: List[W], keep: Bool) -> Unit = {
+  ws = if keep then ws
+  else list.filter(ws, (w) => w.alive)
+}
+
+fn f_loop(mut ws: List[W]) -> Unit = {
+  for _ in 0..<2 {
+    ws = list.drop(ws, 1)
+  }
+}
+
+fn f_self_read(mut ws: List[W]) -> Unit = {
+  ws = list.filter(ws, (w) => list.len(ws) > 2 and w.alive)
+}
+
+fn f_kept(mut ws: List[W]) -> Int = {
+  let alive = list.filter(ws, (w) => w.alive)
+  ws = ws + alive
+  list.len(alive)
+}
+
+fn f_tail(mut ws: List[W]) -> List[W] = list.sort_by(ws, (w) => 0 - w.id)
+
+fn f_some(mut ws: List[W]) -> List[W]? = some(ws)
+
+fn f_if_tail(mut ws: List[W], c: Bool) -> List[W] = if c then ws
+else []
+
+effect fn f_fallible(mut ws: List[W]) -> Unit = {
+  ws = list.map(ws, (w) => { ...w, id: int.parse(w.name)! })!
+}
+
+fn f_string(mut s: String) -> Unit = {
+  s = string.to_upper(string.trim(s)) + "!"
+}
+
+fn f_map_filter(mut m: Map[String, Int]) -> Unit = {
+  m = map.filter(m, (k, v) => v > 1)
+}
+
+fn f_map_set(mut m: Map[String, Int]) -> Unit = {
+  m = map.set(m, "k", 5)
+}
+
+fn f_set_filter(mut s: Set[Int]) -> Unit = {
+  s = set.filter(s, (x) => x > 1)
+}
+
+fn f_set_insert(mut s: Set[Int]) -> Unit = {
+  s = set.insert(s, 4)
+}
+
+fn g_filter(mut b: Bag) -> Unit = {
+  b.ws = list.filter(b.ws, (w) => w.alive)
+}
+
+fn g_map(mut b: Bag) -> Unit = {
+  b.ws = list.map(b.ws, (w) => { ...w, id: w.id + 100 })
+}
+
+fn g_sort(mut b: Bag) -> Unit = {
+  b.ws = list.sort_by(b.ws, (w) => 0 - w.id)
+}
+
+fn g_reverse(mut b: Bag) -> Unit = {
+  b.ws = list.reverse(b.ws)
+}
+
+fn g_label(mut b: Bag) -> Unit = {
+  b.label = b.label + "+"
+}
+
+fn g_tags(mut b: Bag) -> Unit = {
+  b.tags = map.filter(b.tags, (k, v) => v > 1)
+}
+
+fn g_ids(mut b: Bag) -> Unit = {
+  b.ids = set.filter(b.ids, (x) => x > 1)
+}
+
+fn show(ws: List[W]) -> String = ws |> list.map((w) => "${w.id}${w.name}") |> list.join(",")
+
+effect fn main() -> Unit = {
+  let base = [
+    W { id: 1, alive: true, name: "a" },
+    W { id: 2, alive: false, name: "b" },
+    W { id: 3, alive: true, name: "c" }
+  ]
+  var a = base
+  f_filter(a)
+  println("filter ${show(a)}")
+  a = base
+  f_map(a)
+  println("map ${show(a)}")
+  a = base
+  f_filter_map(a)
+  println("filter_map ${show(a)}")
+  a = base
+  f_flat_map(a)
+  println("flat_map ${show(a)}")
+  a = base
+  f_sort_by(a)
+  println("sort_by ${show(a)}")
+  a = base
+  f_reverse(a)
+  println("reverse ${show(a)}")
+  a = base
+  f_take(a)
+  println("take ${show(a)}")
+  a = base
+  f_drop(a)
+  println("drop ${show(a)}")
+  a = base
+  f_take_while(a)
+  println("take_while ${show(a)}")
+  a = base
+  f_drop_while(a)
+  println("drop_while ${show(a)}")
+  a = base
+  f_concat(a)
+  println("concat ${show(a)}")
+  a = base
+  f_unique_by(a)
+  println("unique_by ${show(a)}")
+  a = base
+  f_slice(a)
+  println("slice ${show(a)}")
+  a = base
+  f_insert(a)
+  println("insert ${show(a)}")
+  a = base
+  f_remove_at(a)
+  println("remove_at ${show(a)}")
+  a = base
+  f_update(a)
+  println("update ${show(a)}")
+  a = base
+  f_scan(a)
+  println("scan ${show(a)}")
+  a = base
+  f_take_end(a)
+  println("take_end ${show(a)}")
+  a = base
+  f_fold(a)
+  println("fold ${show(a)}")
+  a = base
+  f_nested(a)
+  println("nested ${show(a)}")
+  a = base
+  f_two(a)
+  println("two ${show(a)}")
+  a = base
+  f_branch(a, true)
+  println("branch keep ${show(a)}")
+  f_branch(a, false)
+  println("branch drop ${show(a)}")
+  a = base
+  f_loop(a)
+  println("loop ${show(a)}")
+  a = base
+  f_self_read(a)
+  println("self_read ${show(a)}")
+  a = base
+  let k = f_kept(a)
+  println("kept ${k} ${show(a)}")
+  a = base
+  println("tail ${show(f_tail(a))} ${show(a)}")
+  println("some ${show(f_some(a) ?? [])}")
+  println("if_tail ${show(f_if_tail(a, true))} ${show(f_if_tail(a, false))}")
+  var nums = [
+    W { id: 0, alive: true, name: "4" },
+    W { id: 0, alive: true, name: "5" }
+  ]
+  f_fallible(nums)!
+  println("fallible ok ${show(nums)}")
+  var bad = [
+    W { id: 0, alive: true, name: "6" },
+    W { id: 0, alive: true, name: "x" }
+  ]
+  let r = f_fallible(bad)
+  let msg = match r {
+    ok(_) => "ok",
+    err(_) => "err",
+  }
+  println("fallible ${msg} ${show(bad)}")
+  var s = "  hi  "
+  f_string(s)
+  println("string [${s}]")
+  var m = map.from_list([("x", 1), ("y", 2), ("z", 3)])
+  f_map_filter(m)
+  println("map_filter ${map.len(m)}")
+  f_map_set(m)
+  println("map_set ${map.len(m)} ${map.get(m, "k") ?? 0}")
+  var st = set.from_list([1, 2, 3])
+  f_set_filter(st)
+  println("set_filter ${set.len(st)}")
+  f_set_insert(st)
+  println("set_insert ${set.len(st)}")
+  var b = Bag {
+    ws: base,
+    tags: map.from_list([("p", 1), ("q", 5)]),
+    ids: set.from_list([1, 5]),
+    label: "L",
+  }
+  g_filter(b)
+  println("field filter ${show(b.ws)}")
+  g_map(b)
+  println("field map ${show(b.ws)}")
+  g_sort(b)
+  println("field sort ${show(b.ws)}")
+  g_reverse(b)
+  println("field reverse ${show(b.ws)}")
+  g_label(b)
+  println("field label ${b.label}")
+  g_tags(b)
+  println("field tags ${map.len(b.tags)}")
+  g_ids(b)
+  println("field ids ${set.len(b.ids)}")
+}
