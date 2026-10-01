@@ -390,6 +390,7 @@
 66176	spec/wasm_cross/list_enumerate_rich.almd
 65984	spec/wasm_cross/list_eq.almd
 65824	spec/wasm_cross/list_eq_float_bool.almd
+87440	spec/wasm_cross/list_find_map_short_circuit.almd
 66112	spec/wasm_cross/list_flatten_borrow.almd
 66224	spec/wasm_cross/list_float_equality_family.almd
 67632	spec/wasm_cross/list_float_total_order.almd
