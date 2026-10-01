@@ -403,6 +403,7 @@ pub(crate) fn lower_fn(
             }),
             f: &mut f,
         };
+        em.owned_call_marks.register_frame(body, top_lets.iter().map(|t| &t.tl.value));
         // #1696 phase A: arm the witness recorder when the sweep is
         // collecting and the straightline gate admits this body (no
         // effect wrap, no captures, no top-let prelude — every excluded

@@ -442,6 +442,6 @@ impl Emitter<'_> {
     /// Mark this call node's result as OWNED by the caller (#1990 /
     /// #2004): read by `rc_owned_result` through the node's identity.
     pub(crate) fn mark_owned_call(&mut self, target: &CallTarget) {
-        self.owned_call_marks.insert(target as *const CallTarget as usize);
+        self.owned_call_marks.mark_target(target);
     }
 }

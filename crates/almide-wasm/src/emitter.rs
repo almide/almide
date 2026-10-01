@@ -7,6 +7,9 @@ use wasm_encoder::{BlockType, Function, ValType};
 
 use crate::*;
 
+#[path = "node_marks.rs"]
+pub(crate) mod node_marks;
+
 // ── body lowering ───────────────────────────────────────────────────────
 
 pub(crate) struct Emitter<'a> {
@@ -65,8 +68,10 @@ pub(crate) struct Emitter<'a> {
     /// through any `{ let t = …; op(t) }` wrapping (arg_temps.rs) and any
     /// nesting, where a completion-order stamp was not. A value-position
     /// `if` whose arms `lower_if_arms` normalized to one credit each is
-    /// marked here too, by its own `IrExpr` node (#2317).
-    pub(crate) owned_call_marks: std::collections::HashSet<usize>,
+    /// marked here too, by its own `IrExpr` node (#2317). Keyed by node
+    /// address, so it only accepts nodes that outlive it: a tree the emitter
+    /// builds and lowers must be `pin`ned in it (node_marks.rs, #3143).
+    pub(crate) owned_call_marks: node_marks::NodeMarks,
     /// Temporaries the arms of the module call being lowered BORROWED
     /// (`lower_arg`, arm.rs): released by the enclosing `arm_scope`. Each
     /// entry is a local of the BORROW pool — disjoint from the scratch
@@ -394,28 +399,12 @@ impl Emitter<'_> {
         // (`expr:Break` / `expr:Continue`) instead of branching to the
         // wrong depth. A loop lowered in here opens its own context.
         let saved = self.loop_ctl.take();
-        self.forget_owned_mark(e);
+        // A node lowered again is marked by its latest lowering only (#3139).
+        self.owned_call_marks.forget(e);
         let r = self.lower_node(e, want);
         self.loop_ctl = saved;
         crate::decline_site::note(&r, e.span);
         r
-    }
-
-    /// An ownership mark is keyed by the node's ADDRESS (`owned_call_marks`),
-    /// and the emitter lowers nodes it synthesized and then dropped — a map
-    /// literal's pairs list (`lower_map_literal`) is rebuilt per literal. The
-    /// next temporary can be allocated at a freed one's address and inherit
-    /// its mark: `if c then acc else xs` inside a second map literal read as
-    /// an owned join, was parked as a borrowed temporary and released, and
-    /// `xs` was freed under its holder (#3139 — whether the addresses met
-    /// depended on the allocator, so one build in six diverged). A node's
-    /// mark is therefore written by its OWN lowering only: whatever the
-    /// address held before is forgotten as the node is entered.
-    fn forget_owned_mark(&mut self, e: &IrExpr) {
-        self.owned_call_marks.remove(&(e as *const IrExpr as usize));
-        if let IrExprKind::Call { target, .. } = &e.kind {
-            self.owned_call_marks.remove(&(target as *const almide_ir::CallTarget as usize));
-        }
     }
 
     fn lower_node(&mut self, e: &IrExpr, want: Option<SliceTy>) -> Result<SliceTy, EmitError> {
@@ -665,7 +654,8 @@ impl Emitter<'_> {
             // m[k]: exactly map.get — a miss is `none`, never an abort
             // (the interp's map_lookup contract).
             IrExprKind::MapAccess { object, key } => {
-                let args = [(**object).clone(), (**key).clone()];
+                // Pinned: clones whose marks are keyed by address (#3143).
+                let args = self.owned_call_marks.pin_args(vec![(**object).clone(), (**key).clone()]);
                 // #2755: audited like the `map.get` call it is (calls_modules.rs).
                 let before = self.witness.as_ref().map(|w| w.arg_hooks());
                 match self.arm_scope(|em| {
@@ -679,7 +669,7 @@ impl Emitter<'_> {
                     // marked, or a bind takes a second credit on it.
                     Some(t) => {
                         if t.own == crate::arm::Own::Owned {
-                            self.owned_call_marks.insert(e as *const IrExpr as usize);
+                            self.owned_call_marks.mark(e);
                         }
                         t.ty
                     }

@@ -69,7 +69,7 @@ impl Emitter<'_> {
         self.f.instructions().local_get(self.scr_i32_local).call(F_DEC_FLAT);
         // The extraction now hands its consumer one credit: the bind,
         // assign, store and argument routes must not add another.
-        self.owned_call_marks.insert(e as *const IrExpr as usize);
+        self.owned_call_marks.mark(e);
     }
 
     /// `List[String]` — the error type native `!` JOINS into a String
@@ -111,7 +111,7 @@ impl Emitter<'_> {
                     self.witness_abort_message(m);
                     self.abort_frame();
                     // No value ever leaves: a consumer takes no credit of it.
-                    self.owned_call_marks.insert(e as *const IrExpr as usize);
+                    self.owned_call_marks.mark(e);
                     return Ok(node);
                 }
                 // #1067: `!` in a pure Option-returning fn PROPAGATES a

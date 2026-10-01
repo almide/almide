@@ -737,7 +737,8 @@ impl Emitter<'_> {
         op: &str,
         args: &[IrExpr],
     ) -> ArmResult {
-        let call = IrExpr {
+        // Pinned: the call's ownership mark is keyed by its address (#3143).
+        let call = self.owned_call_marks.pin(IrExpr {
             kind: IrExprKind::Call {
                 target: almide_ir::CallTarget::Module {
                     module: almide_base::intern::sym("map"),
@@ -750,7 +751,7 @@ impl Emitter<'_> {
             ty: m.ty.clone(),
             span: None,
             def_id: None,
-        };
+        });
         self.lower_field_assign(id, path, &call)?;
         // #2755: the arguments were lowered as the synthesized call's — the
         // clones its own module-call audit judged.
