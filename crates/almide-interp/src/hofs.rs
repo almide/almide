@@ -194,6 +194,7 @@ impl<'a> Interpreter<'a> {
             "scan" => self.hof_scan(evaled),
             "update" => self.hof_list_update(evaled),
             "group_by" => self.hof_group_by(evaled),
+            "find_map" => self.hof_find_map(evaled),
             _ => self.eval_hof_list_try(f, evaled),
         }
     }
@@ -244,6 +245,7 @@ impl<'a> Interpreter<'a> {
             "__fallible_filter_map" => self.hof_try_filter_map(evaled),
             "__fallible_flat_map" => self.hof_try_flat_map(evaled),
             "__fallible_find" => self.hof_try_find(evaled),
+            "__fallible_find_map" => self.hof_try_find_map(evaled),
             "__fallible_fold" => self.hof_try_fold(evaled),
             "__fallible_each" => self.hof_try_each(evaled),
             _ => Flow::Unsupported(format!("HOF list.{}", f)),

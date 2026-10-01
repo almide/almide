@@ -9,7 +9,8 @@
 //!   - the public surface carries NO try_-prefixed fn — a resurrected twin is
 //!     the drift this gate exists to catch (a new combinator's fallible form
 //!     is the polymorphic instantiation, never a named sibling), and
-//!   - the seven `__fallible_*` INTERNAL CARRIERS exist — the checker's
+//!   - the eight `__fallible_*` INTERNAL CARRIERS exist (`find_map` joined
+//!     the seven in #3156) — the checker's
 //!     fallible-callback normalization routes to them, so a silently deleted
 //!     carrier would break `list.map(xs, (x) => f(x)!)` at a distance.
 
@@ -38,7 +39,7 @@ fn list_decls() -> Vec<String> {
 /// The carriers the polymorphic normalization targets (ADR-0006 D1).
 const INTERNAL_CARRIERS: &[&str] = &[
     "__fallible_map", "__fallible_filter", "__fallible_flat_map", "__fallible_filter_map",
-    "__fallible_fold", "__fallible_find", "__fallible_each",
+    "__fallible_fold", "__fallible_find", "__fallible_find_map", "__fallible_each",
 ];
 
 #[test]
@@ -54,7 +55,7 @@ fn the_public_try_family_is_empty() {
 }
 
 #[test]
-fn the_seven_internal_carriers_exist() {
+fn the_internal_carriers_exist() {
     let declared: HashSet<String> = list_decls().into_iter().collect();
     for carrier in INTERNAL_CARRIERS {
         assert!(
