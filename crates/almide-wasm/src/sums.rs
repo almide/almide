@@ -75,6 +75,7 @@ impl Emitter<'_> {
                     i.local_get(hs);
                     i.else_();
                 }
+                self.witness_once_open(f);
                 self.f.instructions().local_get(hs);
                 self.load_ty_slot(a, almide_layout::SUM_FIELD);
                 self.f.instructions().local_set(params[0]);
@@ -82,11 +83,14 @@ impl Emitter<'_> {
                 // A callback result RETURNED as the arm's value: a view (a captured var,
                 // the input) takes its share so the value is owned on every path.
                 self.rc_share_guard(body, rb);
+                self.witness_store(body, rb);
                 // #2969: the retained input is done with on this side (the
                 // err side hands it back), released with its payload.
                 let dec_in = self.dec_fn_of(SliceTy::Result(o, er));
                 self.f.instructions().local_get(hs).call(dec_in);
                 self.f.instructions().end();
+                self.witness_once_arm();
+                self.witness_once_close();
                 self.release_i32();
                 Some(Lowered::owned(rb))
             }
@@ -106,6 +110,7 @@ impl Emitter<'_> {
                         .i32_ne();
                     i.if_(BlockType::Result(a.val_type()));
                 }
+                self.witness_once_open(f);
                 self.f.instructions().local_get(hs);
                 self.load_ty_slot(e, almide_layout::SUM_FIELD);
                 self.f.instructions().local_set(params[0]);
@@ -113,13 +118,17 @@ impl Emitter<'_> {
                 // A callback result RETURNED as the arm's value: a view (a captured var,
                 // the input) takes its share so the value is owned on every path.
                 self.rc_share_guard(body, a);
+                self.witness_store(body, a);
+                self.witness_once_arm();
                 self.f.instructions().else_().local_get(hs);
                 self.load_ty_slot(a, almide_layout::SUM_FIELD);
                 // The payload handed out is a SHARE of the Option's (the
                 // borrowed source may be a temporary released next): +1,
                 // so both branches hand back an owned value.
                 self.share_handle_top(a);
+                self.witness_payload_share(a);
                 self.f.instructions().end();
+                self.witness_once_close();
                 self.release_i32();
                 Some(Lowered::owned(a))
             }
@@ -284,6 +293,7 @@ impl Emitter<'_> {
                     i.local_get(hs);
                     i.else_();
                 }
+                self.witness_once_open(f);
                 self.f.instructions().local_get(hs);
                 self.load_ty_slot(side, almide_layout::SUM_FIELD);
                 self.f.instructions().local_set(params[0]);
@@ -299,6 +309,9 @@ impl Emitter<'_> {
                 // A pass-through body hands back a VIEW (a captured var, the
                 // input itself): the block storing it is a holder and takes the share.
                 self.rc_share_guard(body, b);
+                self.witness_store(body, b);
+                self.witness_once_arm();
+                self.witness_once_close();
                 self.store_ty_slot(b, almide_layout::SUM_FIELD);
                 // #2969: the mapped side is done with the retained input —
                 // the new block took its own credit on whatever the body
@@ -351,6 +364,7 @@ impl Emitter<'_> {
                     i.i32_const(0);
                     i.else_();
                 }
+                self.witness_once_open(f);
                 self.f.instructions().local_get(hs);
                 self.load_ty_slot(a, almide_layout::OPTION_FIELD);
                 self.f.instructions().local_set(params[0]);
@@ -374,6 +388,9 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(hb);
                     SliceTy::Option(self.types.intern(b))
                 };
+                self.witness_store(body, b);
+                self.witness_once_arm();
+                self.witness_once_close();
                 self.f.instructions().end();
                 self.release_i32();
                 self.release_i32();
@@ -417,17 +434,22 @@ impl Emitter<'_> {
                     i.local_get(hs).i32_eqz();
                     i.if_(BlockType::Result(a.val_type()));
                 }
+                self.witness_once_open(f);
                 self.lower(body, Some(a))?;
                 // A callback result RETURNED as the arm's value: a view (a captured var,
                 // the input) takes its share so the value is owned on every path.
                 self.rc_share_guard(body, a);
+                self.witness_store(body, a);
+                self.witness_once_arm();
                 self.f.instructions().else_().local_get(hs);
                 self.load_ty_slot(a, almide_layout::OPTION_FIELD);
                 // The payload handed out is a SHARE of the Option's (the
                 // borrowed source may be a temporary released next): +1,
                 // so both branches hand back an owned value.
                 self.share_handle_top(a);
+                self.witness_payload_share(a);
                 self.f.instructions().end();
+                self.witness_once_close();
                 self.release_i32();
                 Some(Lowered::owned(a))
             }
@@ -443,10 +465,14 @@ impl Emitter<'_> {
                     i.local_get(hs).i32_eqz();
                     i.if_(BlockType::Result(ValType::I32));
                 }
+                self.witness_once_open(f);
                 self.lower(body, Some(got))?;
                 // A callback result RETURNED as the arm's value: a view (a captured var,
                 // the input) takes its share so the value is owned on every path.
                 self.rc_share_guard(body, got);
+                self.witness_store(body, got);
+                self.witness_once_arm();
+                self.witness_once_close();
                 self.f.instructions().else_().local_get(hs).end();
                 self.release_i32();
                 // `some` hands the INPUT back: retained in, owned out (see result.map).
@@ -467,10 +493,13 @@ impl Emitter<'_> {
                     i.i32_const(0);
                     i.else_();
                 }
+                self.witness_once_open(f);
                 self.f.instructions().local_get(hs);
                 self.load_ty_slot(a, almide_layout::OPTION_FIELD);
                 self.f.instructions().local_set(params[0]);
                 self.lower(body, Some(BOOL))?;
+                self.witness_once_arm();
+                self.witness_once_close();
                 // #2969: a rejected `some` is not handed back — its retained
                 // credit (and the payload's) ends here.
                 let dec_in = self.dec_fn_of(got);
