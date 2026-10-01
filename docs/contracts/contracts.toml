@@ -2271,6 +2271,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/unsigned_literal_domain.almd", class = "fixture" },
   { path = "tests/diagnostics/e024-unsigned-negative-literal/broken.almd", class = "fixture" },
+  { path = "spec/wasm_cross/declaration_literal_domain.almd", class = "fixture" },
 ]
 
 # ── TCO HEAP-ACCUMULATOR SEED: THE UPFRONT COPY IS A REAL SHARE ───────
@@ -2345,6 +2346,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/uint64_upper_half.almd", class = "fixture" },
   { path = "spec/wasm_cross/unsigned_literal_domain.almd", class = "fixture" },
+  { path = "spec/wasm_cross/declaration_literal_domain.almd", class = "fixture" },
 ]
 
 # ── SIZED-INTEGER ARITHMETIC WRAPS AT ITS DECLARED WIDTH ─
