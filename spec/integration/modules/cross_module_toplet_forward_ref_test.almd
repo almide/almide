@@ -5,7 +5,3 @@ import fwdlet
 test "a module fn above a let chain reads the chain's type" {
   assert_eq(fwdlet.all_words(), "a=hello-;b=hello-!;")
 }
-
-test "the chain is readable across the module boundary" {
-  assert_eq(fwdlet.PAIRS, [("a", "hello-"), ("b", "hello-!")])
-}

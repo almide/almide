@@ -17,30 +17,29 @@ fn err_all() -> String = match list.all([2, -1, 0], (x) => pos(x)!) {
   err(e) => e,
 }
 
-fn any_count() -> (Bool, Int) = (list.any([0, 1, 5], (x) => pos(x)!) ?? false, list.count(
-  [0, 2, 5],
-  (x) => pos(x)!,
-) ?? -1)
+fn any_hit() -> Bool = list.any([0, 1, 5], (x) => pos(x)!) ?? false
 
-fn keyed() -> (List[Int], List[Int]) = (list.sort_by([5, 3, 4], (x) => key(x)!) ?? [], list.unique_by(
-  [5, 2, 4, 1],
-  (x) => key(x)!,
-) ?? [])
+fn count_hits() -> Int = list.count([0, 2, 5], (x) => pos(x)!) ?? -1
 
-fn while_cells() -> (List[Int], List[Int]) = (list.take_while([3, 2, 1, 4], (x) => pos(x)!) ?? [], list.drop_while(
-  [3, 2, 1, -4],
-  (x) => pos(x)!,
-) ?? [])
+fn sorted() -> List[Int] = list.sort_by([5, 3, 4], (x) => key(x)!) ?? []
 
-fn map_cells() -> (Int, Bool) = {
-  let m = map.from_list([("a", 1), ("b", 2)])
-  (map.fold(m, 0, (acc, k, v) => acc + key(v)!) ?? -1, map.any(m, (k, v) => pos(v)!) ?? false)
-}
+fn uniq() -> List[Int] = list.unique_by([5, 2, 4, 1], (x) => key(x)!) ?? []
 
-fn set_and_option() -> (Bool, Int?) = (set.all(set.from_list([2, 3]), (x) => pos(x)!) ?? false, option.map(
-  some(4),
-  (x) => key(x)!,
-) ?? none)
+fn taken() -> List[Int] = list.take_while([3, 2, 1, 4], (x) => pos(x)!) ?? []
+
+fn dropped() -> List[Int] = list.drop_while([3, 2, 1, -4], (x) => pos(x)!) ?? []
+
+fn map_fold() -> Int = map.fold(
+  map.from_list([("a", 1), ("b", 2)]),
+  0,
+  (acc, k, v) => acc + key(v)!,
+) ?? -1
+
+fn map_any() -> Bool = map.any(map.from_list([("a", 1), ("b", 2)]), (k, v) => pos(v)!) ?? false
+
+fn set_all() -> Bool = set.all(set.from_list([2, 3]), (x) => pos(x)!) ?? false
+
+fn option_mapped() -> Int = (option.map(some(4), (x) => key(x)!) ?? none) ?? -1
 
 test "list.all takes a fallible predicate (#3163)" {
   assert_eq(ok_all(), true)
@@ -48,12 +47,17 @@ test "list.all takes a fallible predicate (#3163)" {
 }
 
 test "the other predicate and key-extracting cells" {
-  assert_eq(any_count(), (true, 2))
-  assert_eq(keyed(), ([3, 4, 5], [5, 4]))
-  assert_eq(while_cells(), ([3, 2], [1, -4]))
+  assert_eq(any_hit(), true)
+  assert_eq(count_hits(), 2)
+  assert_eq(sorted(), [3, 4, 5])
+  assert_eq(uniq(), [5, 4])
+  assert_eq(taken(), [3, 2])
+  assert_eq(dropped(), [1, -4])
 }
 
 test "map / set / option cells" {
-  assert_eq(map_cells(), (3, true))
-  assert_eq(set_and_option(), (true, some(1)))
+  assert_eq(map_fold(), 3)
+  assert_eq(map_any(), true)
+  assert_eq(set_all(), true)
+  assert_eq(option_mapped(), 1)
 }
