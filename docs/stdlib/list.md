@@ -829,7 +829,7 @@ When a callback that never errs leaves `E` unconstrained, annotate the result:
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (66 functions)
+## Signature index (67 functions)
 
 ```
 // Element count; 0 for an empty list.
@@ -1095,6 +1095,10 @@ list.split_at(xs: List[T], n: Int) -> (List[T], List[T])
 // [seed, f(seed), ...] of length n; [] if n <= 0.
 // @since 0.14.6 or earlier
 list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]
+
+// The first some that f gives, or none; f is not called after the hit.
+// @since unreleased
+list.find_map(xs: List[A], f: (A) -> Option[B]) -> Option[B]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
