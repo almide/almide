@@ -4,9 +4,10 @@
 //! env: each handle-typed capture shares into it (`am`, released by the
 //! env's drop glue) and the env is an owned value. A literal lambda handed
 //! to a native arm is inlined in the caller's frame: `list.map` / `filter` /
-//! `find` / `any` / `all` / `count` / `fold` record it as a per-element
-//! activation (witness_callbacks.rs),
-//! any other arm declines by name. A closure CALL lends the Fn value,
+//! `find` / `any` / `all` / `count` / `fold` (and since #2755 the other
+//! list, map, set, option and result callback arms) record it as a
+//! per-element activation (witness_callbacks.rs); an arm without one
+//! declines by name. A closure CALL lends the Fn value,
 //! hands its arguments over under the callee-owned convention and releases
 //! a fresh callee after the call.
 
@@ -62,8 +63,10 @@ fn closure_frames_and_env_captures_witness_exactly() {
     // A literal callback inlined by `list.map`: the scalar body carries no
     // site, the owned param is released, the fresh spine moves out.
     assert_eq!(w.get("bump").map(String::as_str), Some("id\nim\n"));
-    // An inlining arm whose activation is not hooked declines by name.
-    assert_eq!(w.get("big").map(String::as_str), Some("!decline:call-arg:Lambda:list.take_while\n"));
+    // `list.take_while`'s activation (#2755): the scalar predicate carries no
+    // site, the fresh prefix is lent to `list.len` and released.
+    assert_eq!(w.get("big").map(String::as_str), Some("id\nid\n"));
+    assert!(accepted(&w["big"]));
     let lambdas: Vec<(&String, &String)> = w.iter().filter(|(k, _)| k.starts_with("<lambda#")).collect();
     assert!(!lambdas.is_empty(), "the lambda bodies are witnessed: {w:?}");
     for (name, cert) in lambdas {

@@ -3,7 +3,7 @@
 //! takes one credit from each arm — the fresh fallback moves in on the
 //! none / err arm, the payload view takes its share and moves on the other —
 //! and the join is an owned value its consumer records. A BORROWED join (a
-//! var fallback) is a view the bind cannot attribute: declined. The
+//! var fallback) is a view of a bound block, shared like any extraction. The
 //! deterministic-meter prims (`fan.bounded`'s enter / exit) are scalar,
 //! global-only runtime calls with no RC site: a region body certifies. The
 //! meter's CUT runs the frame's exit plan before it returns (#3072), so a
@@ -63,9 +63,11 @@ fn unwrap_or_joins_and_meter_prims_witness_exactly() {
     // owned join is lent to `list.len` and released (`id`).
     assert_eq!(get("fresh"), "id\n{|im}\n{|am}\nid\n");
     assert!(accepted(&get("fresh")));
-    // A var fallback leaves the join a view: the bind cannot say whose share
-    // it took.
-    assert_eq!(get("borrowed"), "!decline:bind:view-result\n");
+    // A var fallback leaves the join a view of a bound carrier's payload or
+    // of the fallback (#2755): the bind's share lands on that view and the
+    // epilogue releases it (`ad`); the named carrier is born and released.
+    assert_eq!(get("borrowed"), "\nid\nad\n");
+    assert!(accepted(&get("borrowed")));
     // The meter's cut runs the frame's exit plan (#3072, C-320): a metered
     // frame that owns a block at a charge point certifies.
     assert!(!get("wordy").starts_with('!') && accepted(&get("wordy")), "{:?}", get("wordy"));
