@@ -62,6 +62,7 @@ pub fn build_variant_layouts(type_decls: &[almide_ir::IrTypeDecl]) -> VariantLay
 fn build_variant_layouts_for_decl(decl: &almide_ir::IrTypeDecl, out: &mut VariantLayouts) {
     use almide_ir::IrTypeDeclKind;
     if let IrTypeDeclKind::Record { fields } = &decl.kind {
+        out.records.insert(decl.name.as_str().to_string());
         for f in fields {
             if let Some(d) = &f.default {
                 out.ctor_field_defaults

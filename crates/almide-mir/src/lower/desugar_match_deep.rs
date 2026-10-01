@@ -66,7 +66,7 @@ pub fn desugar_tuple_variant_match_deep(
     ) -> Option<Vec<Ty>> {
         match key {
             HKey::User(name) => {
-                let (tyname, layout, case) = layouts.lookup_ctor(name)?;
+                let (tyname, layout, case) = layouts.lookup_ctor_for(name, cty)?;
                 let _ = tyname;
                 if !layout.generics.is_empty() || case.fields.len() != arity {
                     return None;
@@ -90,7 +90,7 @@ pub fn desugar_tuple_variant_match_deep(
     /// Do `keys` cover the component's type EXHAUSTIVELY (so the emitted match needs no
     /// `_` arm)? Conservative: an unresolvable/generic layout answers `false` (the caller
     /// then requires a real default or declines).
-    fn heads_cover(keys: &[HKey], layouts: &crate::lower::VariantLayouts) -> bool {
+    fn heads_cover(keys: &[HKey], cty: &Ty, layouts: &crate::lower::VariantLayouts) -> bool {
         if keys.iter().all(|k| matches!(k, HKey::Some_ | HKey::None_)) {
             return keys.contains(&HKey::Some_) && keys.contains(&HKey::None_);
         }
@@ -101,8 +101,7 @@ pub fn desugar_tuple_variant_match_deep(
             return false;
         }
         let HKey::User(first) = &keys[0] else { return false };
-        let Some(tyname) = layouts.ctor_to_type.get(first) else { return false };
-        let Some(layout) = layouts.by_type.get(tyname) else { return false };
+        let Some((_, layout, _)) = layouts.lookup_ctor_for(first, cty) else { return false };
         !layout.cases.is_empty()
             && layout.cases.iter().all(|c| {
                 keys.iter().any(|k| matches!(k, HKey::User(n) if n == c.ctor.as_str()))
@@ -180,7 +179,7 @@ pub fn desugar_tuple_variant_match_deep(
             arms.push(IrMatchArm { pattern: head_pattern(key, pat_args), guard: None, body: branch });
         }
         let head_keys: Vec<HKey> = keys.iter().map(|(k, _)| k.clone()).collect();
-        if !heads_cover(&head_keys, layouts) {
+        if !heads_cover(&head_keys, &refs[j].ty, layouts) {
             let drows = rows_without_dispatch_column(&rows, j);
             if drows.is_empty() {
                 // Frontend exhaustiveness says this path is unreachable, but emitting a

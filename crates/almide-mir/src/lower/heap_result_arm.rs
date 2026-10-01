@@ -406,7 +406,7 @@ impl LowerCtx {
                 self.arm_some_record(expr, result_ty)
             }
             IrExprKind::Call { target: CallTarget::Named { name }, .. }
-                if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
+                if self.variant_layouts.is_ctor_for(name.as_str(), &expr.ty) =>
             {
                 self.arm_some_variant_ctor(expr, result_ty)
             }
@@ -484,7 +484,7 @@ impl LowerCtx {
         else {
             return None;
         };
-        let type_name = self.variant_layouts.ctor_to_type.get(name.as_str())?.clone();
+        let type_name = self.variant_layouts.lookup_ctor_for(name.as_str(), &expr.ty)?.0.to_string();
         let needs_rec = self.variant_layouts.needs_recursive_drop(&type_name, &|rn| {
             crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
         });

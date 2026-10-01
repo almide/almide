@@ -282,7 +282,7 @@ impl LowerCtx {
         // guard's exact twin) and MOVE it out — the same per-arm `"im"` balance;
         // field temps the ctor materializes are moved into the block, and any
         // stray arm temp is freed by `drop_arm_locals`.
-        if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) {
+        if self.variant_layouts.is_ctor_for(name.as_str(), &arm.ty) {
             let arm_mark = self.live_heap_handles.len();
             let obj = self.try_lower_variant_ctor(arm)?;
             self.live_heap_handles.retain(|x| *x != obj);

@@ -268,7 +268,7 @@ fn group_option_result_arms(
                 // variant-layout registry names it exactly.
                 .or_else(|| {
                     layouts
-                        .lookup_ctor(name)
+                        .lookup_ctor_for(name, &subject_ty)
                         .and_then(|(_, _, case)| case.fields.get(c).map(|(_, t)| t.clone()))
                 }),
         }

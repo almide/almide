@@ -479,12 +479,7 @@ fn classify_file(
     // `record_layouts`, so the corpus-wall exercises variant construct / `match` too.
     let mut variant_layouts = almide_mir::lower::build_variant_layouts(&ir.type_decls);
     for m in &ir.modules {
-        let m_vl = almide_mir::lower::build_variant_layouts(&m.type_decls);
-        variant_layouts.by_type.extend(m_vl.by_type);
-        variant_layouts.ctor_to_type.extend(m_vl.ctor_to_type);
-        variant_layouts
-            .ctor_field_defaults
-            .extend(m_vl.ctor_field_defaults);
+        variant_layouts.extend(almide_mir::lower::build_variant_layouts(&m.type_decls));
     }
     let ctx = FileCtx {
         file,
