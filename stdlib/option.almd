@@ -85,3 +85,39 @@ fn collect[T](xs: List[T?]) -> List[T]? = list.fold(
 
 /// some of all f(x), or none; f runs on every x.
 fn collect_map[T, U](xs: List[T], f: (T) -> U?) -> List[U]? = option.collect(list.map(xs, f))
+
+// ── the fallible carriers (ADR-0006, #3163) ──
+//
+// INTERNAL: the checker rewrites `option.map(o, (x) => f(x)!)` to
+// `option.__fallible_map(o, <stripped callback>)` — source may not name these
+// (E043). The callback runs at most once, so its err is the whole result.
+fn __fallible_map[A, B, E](o: A?, f: (A) -> Result[B, E]) -> Result[B?, E] = match o {
+  some(x) => match f(x) {
+    ok(b) => ok(some(b)),
+    err(e) => err(e),
+  },
+  none => ok(none),
+}
+
+fn __fallible_flat_map[A, B, E](o: A?, f: (A) -> Result[B?, E]) -> Result[B?, E] = match o {
+  some(x) => f(x),
+  none => ok(none),
+}
+
+fn __fallible_filter[A, E](o: A?, f: (A) -> Result[Bool, E]) -> Result[A?, E] = match o {
+  some(x) => match f(x) {
+    ok(keep) => if keep then ok(some(x)) else ok(none),
+    err(e) => err(e),
+  },
+  none => ok(none),
+}
+
+fn __fallible_unwrap_or_else[A, E](o: A?, f: () -> Result[A, E]) -> Result[A, E] = match o {
+  some(x) => ok(x),
+  none => f(),
+}
+
+fn __fallible_or_else[A, E](o: A?, f: () -> Result[A?, E]) -> Result[A?, E] = match o {
+  some(x) => ok(some(x)),
+  none => f(),
+}

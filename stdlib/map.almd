@@ -121,3 +121,189 @@ fn delete[K, V](mut m: Map[K, V], key: K) -> Unit = _
 /// Removes every entry of m in place.
 @intrinsic("almide_rt_map_clear")
 fn clear[K, V](mut m: Map[K, V]) -> Unit = _
+
+// ── the fallible carriers (ADR-0006, #3163) ──
+//
+// INTERNAL: the checker rewrites `map.fold(m, z, (a, k, v) => f(a, k, v)!)` to
+// `map.__fallible_fold(m, z, <stripped callback>)` — source may not name these
+// (E043). Each walks the entries in insertion order and stops at the FIRST
+// err: no entry after it reaches the callback. The matrix is
+// `almide_types::fallible_hofs`.
+fn __fallible_map[K, V, B, E](m: Map[K, V], f: (V) -> Result[B, E]) -> Result[Map[K, B], E] = {
+  var out: List[(K, B)] = []
+  var failed: E? = none
+  var stop = false
+  for p in map.entries(m) {
+    if stop then ()
+    else match f(p.1) {
+      ok(b) => list.push(out, (p.0, b)),
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(map.from_list(out)),
+  }
+}
+
+fn __fallible_filter[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result[Map[K, V], E] = {
+  var out: List[(K, V)] = []
+  var failed: E? = none
+  var stop = false
+  for p in map.entries(m) {
+    if stop then ()
+    else match f(p.0, p.1) {
+      ok(keep) => if keep then list.push(out, p) else (),
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(map.from_list(out)),
+  }
+}
+
+fn __fallible_fold[K, V, A, E](m: Map[K, V], init: A, f: (A, K, V) -> Result[A, E]) -> Result[A, E] = {
+  var acc = init
+  var failed: E? = none
+  var stop = false
+  for p in map.entries(m) {
+    if stop then ()
+    else match f(acc, p.0, p.1) {
+      ok(a) => {
+        acc = a
+      },
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(acc),
+  }
+}
+
+fn __fallible_any[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result[Bool, E] = {
+  var hit = false
+  var failed: E? = none
+  var stop = false
+  for p in map.entries(m) {
+    if stop then ()
+    else match f(p.0, p.1) {
+      ok(b) => if b then {
+        hit = true
+        stop = true
+      } else (),
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(hit),
+  }
+}
+
+fn __fallible_all[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result[Bool, E] = {
+  var held = true
+  var failed: E? = none
+  var stop = false
+  for p in map.entries(m) {
+    if stop then ()
+    else match f(p.0, p.1) {
+      ok(b) => if b then () else {
+        held = false
+        stop = true
+      },
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(held),
+  }
+}
+
+fn __fallible_count[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result[Int, E] = {
+  var n = 0
+  var failed: E? = none
+  var stop = false
+  for p in map.entries(m) {
+    if stop then ()
+    else match f(p.0, p.1) {
+      ok(b) => if b then {
+        n = n + 1
+      } else (),
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(n),
+  }
+}
+
+// The hit is kept as an INDEX into the entries and read back, as
+// `list.__fallible_find` does.
+fn __fallible_find[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result[(K, V)?, E] = {
+  let es = map.entries(m)
+  var hit_at = list.len(es)
+  var i = 0
+  var failed: E? = none
+  var stop = false
+  for p in es {
+    if stop then ()
+    else match f(p.0, p.1) {
+      ok(hit) => if hit then {
+        hit_at = i
+        stop = true
+      } else (),
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+    i = i + 1
+  }
+  match failed {
+    some(e) => err(e),
+    none => match list.get(es, hit_at) {
+      some(v) => ok(some(v)),
+      none => ok(none),
+    },
+  }
+}
+
+// An absent key leaves the map unchanged without calling `f`.
+fn __fallible_update[K, V, E](m: Map[K, V], key: K, f: (V) -> Result[V, E]) -> Result[Map[K, V], E] = match map.get(m, key) {
+  none => ok(m),
+  some(v) => match f(v) {
+    ok(nv) => ok(map.set(m, key, nv)),
+    err(e) => err(e),
+  },
+}
+
+// An absent key takes `init` without calling `f`.
+fn __fallible_upsert[K, V, E](m: Map[K, V], key: K, init: V, f: (V) -> Result[V, E]) -> Result[Map[K, V], E] = match map.get(m, key) {
+  none => ok(map.set(m, key, init)),
+  some(v) => match f(v) {
+    ok(nv) => ok(map.set(m, key, nv)),
+    err(e) => err(e),
+  },
+}

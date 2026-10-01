@@ -20,6 +20,9 @@ pub use almide_types::self_host_registry;
 /// ADR-0001 time-unit surface (closed unit set, clocks, S4 clock column) —
 /// single source for checker, lowering, and the matrix gates.
 pub use almide_types::time_units;
+/// The fallibility-polymorphic HOF matrix (ADR-0006, #3163) — one table for
+/// the checker's rewrite, its hints, the interp allowlist and the gate.
+pub use almide_types::fallible_hofs;
 
 // Re-export almide-base for convenience
 pub use almide_base;
