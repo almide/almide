@@ -168,6 +168,8 @@ impl Emitter<'_> {
         // element value rides a typed hold between stages.
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.f.instructions().local_get(ih).local_get(ch).i32_ge_u().br_if(1);
+        // #2755: one activation per element covers every stage.
+        self.witness_fused_open(xs, cb, fold_params[0], acc_ty);
         // The skip-block opens BEFORE the element value exists — a wasm
         // block cannot receive operands from outside (the validator
         // caught the push-then-open draft immediately). Filter's br_if
@@ -194,6 +196,7 @@ impl Emitter<'_> {
                 Stage::Map(f) => {
                     let (p, body) = self.hof_lambda(f, 1)?;
                     self.f.instructions().local_set(p[0]);
+                    self.witness_stage_param(p[0], cur_ty, pending.is_some());
                     owners.extend(pending.take().map(|t| (p[0], t)));
                     let Some(u) = slice_ty_of(&body.ty, self.types) else {
                         return unsup(&format!("fuse-map-ret:{}", ty_name(&body.ty)));
@@ -207,8 +210,10 @@ impl Emitter<'_> {
                 Stage::Filter(f) => {
                     let (p, body) = self.hof_lambda(f, 1)?;
                     self.f.instructions().local_set(p[0]);
+                    self.witness_stage_param(p[0], cur_ty, pending.is_some());
                     owners.extend(pending.take().map(|t| (p[0], t)));
                     self.lower(body, Some(BOOL))?;
+                    self.witness_filter_skip();
                     // false → release what this element owns, skip it
                     self.f.instructions().i32_eqz().if_(BlockType::Empty);
                     self.release_fused_owners(&owners);
@@ -219,6 +224,7 @@ impl Emitter<'_> {
         }
         // fold update: acc = f(acc, cur)
         self.f.instructions().local_set(fold_params[1]);
+        self.witness_stage_param(fold_params[1], cur_ty, pending.is_some());
         owners.extend(pending.take().map(|t| (fold_params[1], t)));
         self.lower(fold_body, Some(acc_ty))?;
         // The accumulator OWNS one credit on every step, exactly as the
@@ -234,8 +240,12 @@ impl Emitter<'_> {
         if let Some(dec) = self.elem_is_handle(acc_ty).then(|| self.dec_fn_of(acc_ty)) {
             self.f.instructions().local_get(fold_params[0]).call(dec);
         }
+        self.witness_fold_step(fold_body, fold_params[0], acc_ty);
         self.f.instructions().local_set(fold_params[0]);
+        // The owners' releases are the iteration-end `d`s the recorder
+        // writes for every owner local bound in it (witness_paths.rs).
         self.release_fused_owners(&owners);
+        self.witness_loop_close();
         self.f.instructions().end(); // skip-block
         self.hof_step(ih);
         self.f.instructions().local_get(fold_params[0]);

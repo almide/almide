@@ -63,6 +63,10 @@ impl Emitter<'_> {
         self.f.instructions().i32_const(size as i32).call(F_ALLOC).local_set(pair_p);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.f.instructions().local_get(index).local_get(count).i32_ge_u().br_if(1);
+        // #2755: the enumerate is fused here, never built; scalar acc and
+        // elements, and the private pair is read by projection only.
+        self.witness_inline_arg(xs);
+        self.witness_callback_open(cb, Some(acc_p));
         self.f.instructions().local_get(pair_p).local_get(index).i64_extend_i32_u();
         self.store_ty_slot(INT, index_offset);
         self.f.instructions().local_get(pair_p).local_get(base).local_get(index)
@@ -71,6 +75,7 @@ impl Emitter<'_> {
         self.store_ty_slot(elem, value_offset);
         self.lower(body, Some(acc))?;
         self.f.instructions().local_set(acc_p);
+        self.witness_loop_close();
         self.hof_step(index);
         self.f.instructions().local_get(pair_p).call(F_DEC_FLAT)
             .local_get(base).call(F_DEC_FLAT).local_get(acc_p);
