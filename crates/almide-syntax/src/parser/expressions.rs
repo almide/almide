@@ -53,9 +53,13 @@ impl Parser {
     /// spread inside a multiline record/list literal, and joining it to the
     /// previous item as an inclusive range would rewrite those programs. An
     /// inclusive range therefore cannot break the line BEFORE its `...`.
+    /// Every other row of `infix_bp` must be here (#3155: `<` and `>` were
+    /// missing); tests/operator_continuation_matrix_test.rs gates the family.
+    /// The postfix `??` opens a line too, in `parse_postfix`.
     pub(crate) const INFIX_TOKENS: &'static [TokenType] = &[
         TokenType::Or, TokenType::And,
         TokenType::EqEq, TokenType::BangEq, TokenType::LtEq, TokenType::GtEq,
+        TokenType::LAngle, TokenType::RAngle,
         TokenType::PipeArrow, TokenType::ComposeArrow,
         TokenType::DotDot, TokenType::DotDotEq, TokenType::DotDotLt,
         TokenType::Plus, TokenType::Minus, TokenType::PlusPlus,
@@ -315,7 +319,13 @@ impl Parser {
             // continuation rule (#1091). The comments in that gap bind to the
             // receiver whose line they end (#1326); the `.` link is consumed
             // right below, so there is no outer loop to defer to.
-            let gap = self.skip_newlines_if_method_chain();
+            let mut gap = self.skip_newlines_if_method_chain();
+            // `expr\n  ?? fallback` — `??` opens its line like an infix
+            // operator does (#3155). Nothing can start a statement with `??`,
+            // so the join changes no program that parsed before. It lives
+            // here, not in INFIX_TOKENS, because `??` is a postfix: it binds
+            // the operand this loop is building.
+            gap.extend(self.skip_newlines_if_followed_by_any(&[TokenType::QuestionQuestion]));
             self.attach_gap_comments(expr.id, gap);
             let (next, consumed) = self.parse_one_postfix(expr)?;
             expr = next;
@@ -414,7 +424,6 @@ impl Parser {
         // expr ?? fallback — unwrap with default
         let span = Some(self.current_span());
         let qq_tok = (self.current().line, self.current().col, self.current().end_col);
-        let qq_after_newline = self.newline_before_current();
         self.advance();
         self.skip_newlines();
         // Terminal `??` — nothing that can start an expression follows.
@@ -432,14 +441,13 @@ impl Parser {
             return Ok((expr, true));
         }
         // #1112: at statement level (delimiter depth 0) the fallback must
-        // start on the SAME line as `??`, and `??` on the same line as its
-        // operand — otherwise the next statement is silently swallowed as
-        // the fallback (`let v = f()??\n-5` parsed as `f() ?? -5`, and a
-        // following `println(v)` became the fallback expr, surfacing as a
-        // distant E003). Multiline fallbacks are spelled with parens.
-        if self.delim_depth == 0
-            && (qq_after_newline || self.current().line != qq_tok.0)
-        {
+        // start on the SAME line as `??` — otherwise the next statement is
+        // silently swallowed as the fallback (`let v = f()??\n-5` parsed as
+        // `f() ?? -5`, and a following `println(v)` became the fallback expr,
+        // surfacing as a distant E003). Multiline fallbacks are spelled with
+        // parens. `??` itself MAY open a line (#3155): no statement starts
+        // with `??`, so joining that line to the operand above is unambiguous.
+        if self.delim_depth == 0 && self.current().line != qq_tok.0 {
             let mut d = crate::diagnostic::Diagnostic::error(
                 "the ?? fallback is not on this line",
                 "Write the fallback on the same line as `??`; for a multiline \
