@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at 297d04055 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at da6116119 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -1113,6 +1113,7 @@ f9eaf0a1a9894e30dfa1f0dcf1c77d3646abb72a9120945549b0a1eb1341e9c5	spec/wasm_cross
 93b4f7d57b1c1fd3d9e66ac409c6cce1fc46b83d279a07eea32dc55add1d0a73	spec/wasm_cross/map_index_string_key_shapes.almd
 1ade6bfeffe982b3f8cacad082360a0e64b5efec58a82e63d9f3a0c7af46da08	spec/wasm_cross/map_insertion_order.almd
 aaaee5fc77c5ffc51efc270c1b16173636a149cda49711b49260295de05186a4	spec/wasm_cross/map_interp_string_value.almd
+37252ae03584426af40306fd6f8b0ac6ae58e8371bc37603c654620624824aa6	spec/wasm_cross/map_literal_borrowed_if_arg.almd
 0b87a0681121c0774bdeb8117114ebe738ca66c244310a2dd110574deba60d9e	spec/wasm_cross/map_literal_ctor_values.almd
 b3cdb8448f9ef9b885609c85601c1ec98b02d8ddad22bc2e457440d749bc8ba5	spec/wasm_cross/map_of_maps_value.almd
 68e087553590976cd280ca8a94944097cf05d64a77740c34ea4160514e98c504	spec/wasm_cross/map_rich_variant_key.almd

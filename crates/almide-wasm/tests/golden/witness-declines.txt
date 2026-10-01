@@ -90,7 +90,7 @@ payload:UnwrapOr-carrier:OptionNone	1
 record:default	2
 rhs:EmptyMap	6
 rhs:Fan	5
-rhs:MapLiteral	17
+rhs:MapLiteral	18
 rhs:Range	7
 rhs:SpreadRecord	4
 rhs:ToOption	5
