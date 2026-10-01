@@ -223,6 +223,7 @@
 12384	spec/wasm_cross/fs_call_head_family.almd
 13347	spec/wasm_cross/fs_composition_family.almd
 8969	spec/wasm_cross/fs_fallible_stream_callback.almd
+8185	spec/wasm_cross/fs_fallible_walker_call_head.almd
 6811	spec/wasm_cross/fs_glob_segments.almd
 5608	spec/wasm_cross/fs_list_dir_multipass.almd
 6058	spec/wasm_cross/fs_metadata_family.almd
@@ -514,6 +515,8 @@
 13338	spec/wasm_cross/mut_param_alias_cow.almd
 2727	spec/wasm_cross/mut_param_branch_forward.almd
 3844	spec/wasm_cross/mut_param_call_chain.almd
+3595	spec/wasm_cross/mut_param_closure_capture_read.almd
+6260	spec/wasm_cross/mut_param_closure_capture_write.almd
 11648	spec/wasm_cross/mut_param_effect_can_err.almd
 2220	spec/wasm_cross/mut_param_effect_never_err.almd
 5205	spec/wasm_cross/mut_param_effect_unpropagated.almd

@@ -3,8 +3,9 @@
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
 arm-value:borrowed-temp	3
 assign:SpreadRecord	2
-bind:cell	11
+bind:cell	20
 bind:view-result	5
+call-arg:Lambda:fs.__fallible_fold_lines:propagating	1
 call:panic-arg	7
 callback:SpreadRecord	1
 caps:argv-in-plain-fn	8
@@ -25,7 +26,7 @@ payload:UnwrapOr-carrier:OptionNone	1
 record:default	2
 rhs:Fan	6
 rhs:SpreadRecord	4
-rhs:Unwrap	16
+rhs:Unwrap	18
 scan	3
 stmt:Expr:Unit	1
 stmt:Expr:Unwrap	1

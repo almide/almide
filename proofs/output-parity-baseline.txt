@@ -317,6 +317,7 @@ spec/wasm_cross/float_to_fixed.almd
 spec/wasm_cross/float_to_int_edges.almd
 spec/wasm_cross/fold_heap_acc.almd
 spec/wasm_cross/for_in_forms.almd
+spec/wasm_cross/fs_fallible_walker_call_head.almd
 spec/wasm_cross/fuel_bare_result.almd
 spec/wasm_cross/fuel_block_body.almd
 spec/wasm_cross/fuel_bounded_boundary.almd
@@ -597,6 +598,8 @@ spec/wasm_cross/mut_map_param.almd
 spec/wasm_cross/mut_param_alias_cow.almd
 spec/wasm_cross/mut_param_branch_forward.almd
 spec/wasm_cross/mut_param_call_chain.almd
+spec/wasm_cross/mut_param_closure_capture_read.almd
+spec/wasm_cross/mut_param_closure_capture_write.almd
 spec/wasm_cross/mut_param_effect_can_err.almd
 spec/wasm_cross/mut_param_effect_never_err.almd
 spec/wasm_cross/mut_param_effect_unpropagated.almd
