@@ -483,6 +483,9 @@ impl Emitter<'_> {
         }
         self.load_ty_slot(elem, 0);
         self.f.instructions().local_set(params[0]);
+        // #2755: one key activation per element; the key moves into the
+        // keys array behind the share guard.
+        self.witness_callback_open(cb, None);
         self.f
             .instructions()
             .local_get(hkeys)
@@ -494,6 +497,8 @@ impl Emitter<'_> {
         // A pass-through body hands back a VIEW (a captured var, the
         // input itself): the block storing it is a holder and takes the share.
         self.rc_share_guard(body, k);
+        self.witness_store(body, k);
+        self.witness_loop_close();
         self.store_ty_slot(k, 0);
         {
             let mut i = self.f.instructions();

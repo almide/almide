@@ -56,4 +56,52 @@ impl Emitter<'_> {
             w.view_share_move();
         }
     }
+
+    /// A callback value an arm guards with `rc_inc_top` when it is not owned
+    /// (`droppable && !owned`) and hands to a holder it builds: an owned
+    /// value moves (`im`), a borrowed Var or view shares and moves (`am`).
+    pub(crate) fn witness_guarded(&mut self, e: &almide_ir::IrExpr, t: SliceTy) {
+        if self.witness.is_some() && self.rc_droppable(t) {
+            self.witness_share_or_move(e, "callback-value:borrowed-temp");
+        }
+    }
+
+    /// A callback value an arm RELEASES when it arrived owned and leaves to
+    /// its holder otherwise (`list.filter_map`'s Option, `flat_map`'s handle
+    /// chunk): an owned one is born and released here (`id`).
+    pub(crate) fn witness_owned_released(&mut self, e: &almide_ir::IrExpr, t: SliceTy) {
+        if self.rc_droppable(t)
+            && self.rc_owned_result(crate::rc_ownership::rc_tail(e))
+            && let Some(w) = self.witness.as_mut()
+        {
+            w.temp_borrowed();
+        }
+    }
+
+    /// A callback value an arm shares when borrowed and releases either way
+    /// (`flat_map`'s scalar chunk): owned — born and released (`id`);
+    /// borrowed — the share and the release land on its source (`ad`).
+    pub(crate) fn witness_shared_released(&mut self, e: &almide_ir::IrExpr, t: SliceTy) {
+        if self.witness.is_none() || !self.rc_droppable(t) {
+            return;
+        }
+        let tail = crate::rc_ownership::rc_tail(e);
+        let owned = self.rc_owned_result(tail);
+        let src = match &tail.kind {
+            almide_ir::IrExprKind::Var { id } => self.locals.get(id).map(|&(l, _)| l),
+            _ => None,
+        };
+        let view = crate::witness_unwrap::is_extraction_view(tail);
+        let Some(w) = self.witness.as_mut() else { return };
+        match (owned, src) {
+            (true, _) => w.temp_borrowed(),
+            (false, Some(l)) => {
+                if !(w.share_local(l) && w.dec_local(l)) {
+                    w.poison();
+                }
+            }
+            (false, None) if view => w.view_ops("ad"),
+            (false, None) => w.decline("callback-value:borrowed-temp"),
+        }
+    }
 }

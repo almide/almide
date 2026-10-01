@@ -105,7 +105,7 @@ impl Emitter<'_> {
     /// moves (`am`). A borrowed NON-Var (a native arm's View, #2755's nested
     /// arguments reach it) took a real `rc_inc` on an object this frame
     /// does not track by local — withdraw with `reason`, never under-record.
-    fn witness_share_or_move(&mut self, e: &almide_ir::IrExpr, reason: &str) {
+    pub(crate) fn witness_share_or_move(&mut self, e: &almide_ir::IrExpr, reason: &str) {
         let src_local = self.witness_src_local(e);
         let fresh = self.rc_owned_result(e);
         let view = crate::witness_unwrap::is_extraction_view(e);
