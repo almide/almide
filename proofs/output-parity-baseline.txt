@@ -116,7 +116,10 @@ spec/wasm_cross/assert_abort_msg.almd
 spec/wasm_cross/assert_abort_multiline.almd
 spec/wasm_cross/assert_abort_ne.almd
 spec/wasm_cross/assign_alias_rc.almd
+spec/wasm_cross/assign_concat_operand_release.almd
+spec/wasm_cross/assign_mut_callee_consumes_var.almd
 spec/wasm_cross/assign_nested_call_release.almd
+spec/wasm_cross/assign_nested_mut_writeback_release.almd
 spec/wasm_cross/assign_self_call_release.almd
 spec/wasm_cross/autotry_construction.almd
 spec/wasm_cross/autotry_result_first_arg.almd
