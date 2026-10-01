@@ -145,6 +145,14 @@ fn stmts_subset(stmts: &[almide_ir::IrStmt]) -> Option<String> {
                     return Some(w.at("assign"));
                 }
             }
+            // #2755: `h.f = v` — the copy-on-write field write rebinds the
+            // root var (`witness_field_rebind`), the value moves into the
+            // copy's slot (`witness_field_value`).
+            IrStmtKind::FieldAssign { value, .. } => {
+                if let Some(w) = value_subset(value) {
+                    return Some(w.at("field-assign"));
+                }
+            }
             // `guard c else break` / `else continue`: a one-arm branch that
             // leaves the iteration (the loop-control form only; a guard that
             // returns is an exit edge, not recorded yet).
