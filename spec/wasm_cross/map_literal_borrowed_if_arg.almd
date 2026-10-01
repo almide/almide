@@ -1,0 +1,22 @@
+// @contract: C-041
+// A borrowed `if` handed to an op inside a map literal is not released
+// under its holder (#3139). The structural wasm leg keys "this node's
+// result is owned" by the node's address, and a map literal lowers a pairs
+// list it builds and drops per literal. The second literal's
+// `if c then e else xs` was allocated where the first literal's owned join
+// had lived, inherited its mark, was parked as an owned temporary and
+// released after `string.from_bytes` read it — so `xs` was freed under its
+// binding and printed reused memory. Whether the addresses met depended on
+// the allocator: the fuzzer's program diverged in one build in six.
+fn main() -> Unit = {
+  let a = [
+    "k": string.is_digit(if string.is_empty("a") then "b" else "c")
+  ]
+  let xs: List[Int] = list.dedup([-2147483648, 4294967295, 65535])
+  let e: List[Int] = []
+  let b = [
+    "k": string.from_bytes(if string.is_empty("z") then e else xs)
+  ]
+  println("xs = ${xs}")
+  println("${map.len(a)} ${map.len(b)} ${string.len(b["k"] ?? "")}")
+}
