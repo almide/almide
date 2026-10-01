@@ -43,10 +43,7 @@ pub(super) fn lower_type_decl(ctx: &mut LowerCtx, decl: &TypeToLower<'_>) -> IrT
     let resolve = |te: &ast::TypeExpr| crate::canonicalize::resolve::resolve_type_expr_in(te, Some(&ctx.env.types), module_prefix);
     let kind = match ty {
         ast::TypeExpr::Record { fields } => {
-            let fs = fields.iter().map(|f| {
-                let default = f.default.as_ref().map(|d| lower_expr(ctx, d));
-                IrFieldDecl { name: f.name, ty: resolve(&f.ty), default, alias: f.alias, attrs: f.attrs.clone() }
-            }).collect();
+            let fs = fields.iter().map(|f| lower_field_decl(ctx, f, resolve(&f.ty))).collect();
             IrTypeDeclKind::Record { fields: fs }
         }
         ast::TypeExpr::Variant { cases, .. } => {
@@ -81,13 +78,25 @@ fn lower_variant_case(ctx: &mut LowerCtx, case: &ast::VariantCase, _parent: &str
             IrVariantDecl { name: *name, kind: IrVariantKind::Tuple { fields: tys } }
         }
         ast::VariantCase::Record { name, fields } => {
-            let fs = fields.iter().map(|f| {
-                let default = f.default.as_ref().map(|d| lower_expr(ctx, d));
-                IrFieldDecl { name: f.name, ty: resolve(&f.ty), default, alias: f.alias, attrs: f.attrs.clone() }
-            }).collect();
+            let fs = fields.iter().map(|f| lower_field_decl(ctx, f, resolve(&f.ty))).collect();
             IrVariantDecl { name: *name, kind: IrVariantKind::Record { fields: fs } }
         }
     }
+}
+
+/// One record / variant-record field declaration. A field default is a value
+/// position of the field's declared type (#3161): `small: Int8 = 0` lowers its
+/// `0` at the default `Int` width, and a literal that omits the field splices
+/// that node in as is — native emitted `0i64` into an `i8` slot (E0308). The
+/// declared field type narrows the default the way it narrows an explicit
+/// field value at the construction site.
+fn lower_field_decl(ctx: &mut LowerCtx, f: &ast::FieldType, ty: Ty) -> IrFieldDecl {
+    let default = f.default.as_ref().map(|d| {
+        let mut ir = lower_expr(ctx, d);
+        super::statements::coerce_literal_to_sized(&mut ir, &ty, ctx.env);
+        ir
+    });
+    IrFieldDecl { name: f.name, ty, default, alias: f.alias, attrs: f.attrs.clone() }
 }
 
 // ── Type expression resolution (delegates to canonical version) ──
