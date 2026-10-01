@@ -39,6 +39,7 @@ pub fn register_module(
     // imports registered before it (the resolver loads leaves first).
     let package = name.split('.').next().unwrap_or(name);
     let (table, _) = build_import_table(prog, Some(package), &env.user_modules);
+    env.module_import_aliases.insert(sym(name), table.aliases.clone());
     let saved = std::mem::replace(&mut env.import_table, table);
     resolve::register_scoped_bare_type_keys(env, Some(name));
     env.import_table = saved;

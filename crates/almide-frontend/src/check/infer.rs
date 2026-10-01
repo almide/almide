@@ -178,6 +178,11 @@ impl Checker {
 
     fn infer_expr_record(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::Record { name, fields, .. } = &mut expr.kind else { unreachable!("infer_expr_record called on the wrong ExprKind") };
+                if let Some(n) = name {
+                    // Another module's omitted defaults, written in before the
+                    // fields are inferred (call_defaults.rs, #3165).
+                    self.fill_cross_module_field_defaults(n, fields);
+                }
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
                 if let Some(n) = name {
                     self.infer_expr_record_named(n, fields)
@@ -320,18 +325,40 @@ impl Checker {
                 fs.iter().map(|(fname, fty)| (*fname, super::calls::subst_ty(fty, &subst))).collect(),
             _ => Vec::new(),
         };
-        // #433: a qualified record-variant `mod.Ctor { … }` takes
-        // the namespaced `mod.Type` so it mangles to the right enum.
-        let result_named = match n.as_str().rsplit_once('.') {
+        let result_named = self.record_case_type_name(n, type_name);
+        let case_defaults = self.env.ctor_field_defaults.get(&ctor_sym).cloned().unwrap_or_default();
+        Ok((Ty::Named(result_named, generic_args), decl, true, case_defaults))
+    }
+
+    /// #433: a qualified record-variant `mod.Ctor { … }` takes the namespaced
+    /// `mod.Type` so it mangles to the right enum.
+    pub(super) fn record_case_type_name(&self, n: &Sym, type_name: Sym) -> Sym {
+        match n.as_str().rsplit_once('.') {
             Some((m, _)) => {
                 let rm = self.env.import_table.resolve(m).map(|s| s.to_string()).unwrap_or_else(|| m.to_string());
                 let q = format!("{}.{}", rm, type_name.as_str());
                 if self.env.types.contains_key(&sym(&q)) { sym(&q) } else { type_name }
             }
             None => type_name,
+        }
+    }
+
+    /// The canonical `mod.Type` key a named-record literal constructs (#433).
+    pub(super) fn record_type_canon(&self, n: &Sym) -> Sym {
+        let canon = match n.rsplit_once('.') {
+            // `alias.Cfg { … }`: resolve the import alias to
+            // the real module, keep qualified if registered.
+            Some((m, base)) => {
+                let rm = self.env.import_table.resolve(m).map(|s| s.to_string()).unwrap_or_else(|| m.to_string());
+                let q = format!("{}.{}", rm, base);
+                if self.env.types.contains_key(&sym(&q)) { sym(&q) } else { *n }
+            }
+            None => crate::canonicalize::resolve::canonical_user_type_sym(
+                n, &self.env.types, self.current_module_prefix.as_deref(),
+            ).unwrap_or(*n),
         };
-        let case_defaults = self.env.ctor_field_defaults.get(&ctor_sym).cloned().unwrap_or_default();
-        Ok((Ty::Named(result_named, generic_args), decl, true, case_defaults))
+        // `term.T { … }` through `type T = state.T` builds a `state.T` (#3153).
+        crate::canonicalize::resolve::follow_record_alias(canon, &self.env.types)
     }
 
     // Bare named-record-type path of `infer_expr_record_named`: `n` names a
@@ -351,20 +378,7 @@ impl Checker {
         // `Cfg` into IrTopLet.ty, rendering an unmangled
         // static type on native (E0425) and missing the
         // qualified record_fields key on wasm (trap).
-        let canon = match n.rsplit_once('.') {
-            // `alias.Cfg { … }`: resolve the import alias to
-            // the real module, keep qualified if registered.
-            Some((m, base)) => {
-                let rm = self.env.import_table.resolve(m).map(|s| s.to_string()).unwrap_or_else(|| m.to_string());
-                let q = format!("{}.{}", rm, base);
-                if self.env.types.contains_key(&sym(&q)) { sym(&q) } else { sym(n) }
-            }
-            None => crate::canonicalize::resolve::canonical_user_type_sym(
-                n, &self.env.types, self.current_module_prefix.as_deref(),
-            ).unwrap_or_else(|| sym(n)),
-        };
-        // `term.T { … }` through `type T = state.T` builds a `state.T` (#3153).
-        let canon = crate::canonicalize::resolve::follow_record_alias(canon, &self.env.types);
+        let canon = self.record_type_canon(n);
         // E029: a record literal naming an UNDECLARED type
         // previously fell through with empty decl fields —
         // validation skipped, `Ty::Named(Inner)` flowed into

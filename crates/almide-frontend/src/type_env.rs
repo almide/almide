@@ -235,6 +235,14 @@ pub struct TypeEnv {
     /// only ever sees the program being lowered, so a call into an imported
     /// module had no defaults to fill from (#1088).
     pub fn_defaults: std::collections::HashMap<Sym, Vec<Option<almide_lang::ast::Expr>>>,
+    /// A module record field's default EXPRESSION, keyed `mod.Type` (a
+    /// record) or `mod.Type.Case` (a record-payload case), with the module
+    /// that declares it. A literal in ANOTHER module that omits the field
+    /// gets it written in, qualified, before it is checked (#3165).
+    pub field_default_exprs: std::collections::HashMap<Sym, (Sym, Vec<(Sym, almide_lang::ast::Expr)>)>,
+    /// Each user module's own import aliases (`c` → `consts`), so a default
+    /// written in that module can be re-qualified for a caller (#3165).
+    pub module_import_aliases: std::collections::HashMap<Sym, std::collections::HashMap<Sym, Sym>>,
     /// Protocol definitions: protocol name → ProtocolDef
     pub protocols: std::collections::HashMap<Sym, ProtocolDef>,
     /// Explicit `fn Type.method` declarations that have a body, keyed by the
@@ -319,6 +327,8 @@ impl TypeEnv {
             generic_protocol_bound_args: std::collections::HashMap::new(),
             fn_min_params: std::collections::HashMap::new(),
             fn_defaults: std::collections::HashMap::new(),
+            field_default_exprs: std::collections::HashMap::new(),
+            module_import_aliases: std::collections::HashMap::new(),
             explicit_convention_fns: std::collections::HashSet::new(),
             protocols: std::collections::HashMap::new(),
             type_protocols: std::collections::HashMap::new(),
