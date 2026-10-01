@@ -221,6 +221,26 @@ pub fn canonical_user_type_sym(name: &str, types: &HashMap<Sym, Ty>, cur_mod: Op
         .or_else(|| canonical_user_type_sym_bare(name, types, cur_mod))
 }
 
+/// The record a record LITERAL builds when its head names a transparent
+/// alias of a nominal record (#3153): `type T = state.T` registers `term.T`
+/// as `Ty::Named("state.T")`, so `term.T { n: 3 }` builds a `state.T`, the
+/// type annotations and field access already read through the alias. Follows
+/// non-generic alias links to the record they name; any other key is
+/// returned unchanged.
+pub fn follow_record_alias(key: Sym, types: &HashMap<Sym, Ty>) -> Sym {
+    let mut cur = key;
+    for _ in 0..8 {
+        match types.get(&cur) {
+            Some(Ty::Named(next, args)) if args.is_empty() && *next != cur => cur = *next,
+            _ => break,
+        }
+    }
+    match types.get(&cur) {
+        Some(Ty::Record { .. } | Ty::OpenRecord { .. }) if cur != key => cur,
+        _ => key,
+    }
+}
+
 // A SIBLING submodule's type, referenced by the short module name the source
 // actually writes: `domain.Span` inside `collidelib.wire` is
 // `collidelib.domain.Span`.

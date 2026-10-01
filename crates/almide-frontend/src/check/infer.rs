@@ -363,6 +363,8 @@ impl Checker {
                 n, &self.env.types, self.current_module_prefix.as_deref(),
             ).unwrap_or_else(|| sym(n)),
         };
+        // `term.T { … }` through `type T = state.T` builds a `state.T` (#3153).
+        let canon = crate::canonicalize::resolve::follow_record_alias(canon, &self.env.types);
         // E029: a record literal naming an UNDECLARED type
         // previously fell through with empty decl fields —
         // validation skipped, `Ty::Named(Inner)` flowed into

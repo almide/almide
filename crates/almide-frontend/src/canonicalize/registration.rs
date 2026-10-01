@@ -44,6 +44,7 @@ pub fn infer_top_let_seed(env: &TypeEnv, prefix: Option<&str>, value: &ast::Expr
         ast::ExprKind::Record { name: Some(n), .. } => {
             let canonical = super::resolve::canonical_user_type_sym(n.as_str(), &env.types, prefix)
                 .unwrap_or_else(|| sym(n.as_str()));
+            let canonical = super::resolve::follow_record_alias(canonical, &env.types);
             match env.types.get(&canonical) {
                 Some(decl) if !decl.has_unresolved_deep() => Ty::Named(canonical, vec![]),
                 _ => Ty::Unknown,

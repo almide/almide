@@ -1,0 +1,5 @@
+import self.gui.findbar
+
+type Bar = findbar.Bar
+
+fn show(b: Bar) -> String = "${b.find}:${b.focused}"

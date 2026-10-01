@@ -1,0 +1,3 @@
+type T = { n: Int, small: Int8, tag: String = "d" }
+
+fn make() -> T = T { n: 0, small: 1 }
