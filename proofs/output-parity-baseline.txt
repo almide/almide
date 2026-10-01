@@ -612,6 +612,7 @@ spec/wasm_cross/mut_param_interpolated.almd
 spec/wasm_cross/mut_param_loop_stays_in_place.almd
 spec/wasm_cross/mut_param_move_mode_gaps.almd
 spec/wasm_cross/mut_param_nested_place_writeback.almd
+spec/wasm_cross/mut_param_reassign_from_hof.almd
 spec/wasm_cross/mut_param_spread_reassign.almd
 spec/wasm_cross/mut_param_tail_recursion.almd
 spec/wasm_cross/mut_param_writeback_growth.almd
@@ -717,6 +718,8 @@ spec/wasm_cross/record_variant_field_literal.almd
 spec/wasm_cross/records_variants.almd
 spec/wasm_cross/recursion_depth_within_limits.almd
 spec/wasm_cross/recursive_generic_repr_interp.almd
+spec/wasm_cross/recursive_payload_closure_capture.almd
+spec/wasm_cross/recursive_payload_nested_pattern.almd
 spec/wasm_cross/reduce_str.almd
 spec/wasm_cross/ref_gleam_capture_shadow.almd
 spec/wasm_cross/ref_gleam_div_zero_abort.almd
