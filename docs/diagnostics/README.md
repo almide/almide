@@ -59,13 +59,16 @@ equal to the set of codes the compiler emits.
 | [E088](E088.md) | `scoped`: a recursive call retains the current scoped activation (ALS-E31) |
 | [E089](E089.md) | Interpolating a value with no defined string form (Bytes, Unit, Matrix, a raw pointer, a function value or a value holding one) — including through a generic instantiation |
 | [E090](E090.md) | An `@extern(c)` signature with a type that has no C representation (a heap value, a `String` return, a `mut` parameter) |
-| [E091](E091.md) | A pattern after `var` (`var (x, y) = p`): `var` binds one name, so bind each with its own `var` or destructure with `let` |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired
 for one release and was retired when the aliases dropped (#1078) — a retired
 spelling is an ordinary [E002](E002.md) now; the migration map is recorded in
 [docs/stdlib/json.md](../stdlib/json.md#renamed-operations).
+**E091** (a pattern after `var`, 0.66.0) was retired in 0.67.0 when `var`
+began to take the `let` patterns (#3149): `var (x, y) = p` and
+`var { a, b } = r` are legal and bind every name as a `var`, so nothing is
+left for the code to report.
 
 Codes in the 4-digit range (`E0001` and up) that leak into output
 are **rustc** errors, not Almide ones — they indicate a codegen bug

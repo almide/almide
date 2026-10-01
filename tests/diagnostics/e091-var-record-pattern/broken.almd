@@ -1,9 +1,0 @@
-// E091: the record shorthand pattern after `var` — one `var` per field.
-type Pos = { px: Int, py: Int }
-
-effect fn main() -> Unit = {
-  let p = Pos { px: 1, py: 2 }
-  var { px, py } = p
-  px = px + py
-  println("${px} ${py}")
-}
