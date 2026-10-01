@@ -450,7 +450,9 @@ fn lower_decls(
             ast::Decl::TopLet { name, ty: _, value, mutable, .. } => {
                 let var = ctx.lookup_var(name).expect("top-level let pre-registered");
                 let val_ty = ctx.var_table.get(var).ty.clone();
-                let ir_value = lower_expr(ctx, value);
+                let mut ir_value = lower_expr(ctx, value);
+                // `let K: Int8 = 3` declares the width its literal takes (#3161).
+                statements::coerce_literal_to_sized(&mut ir_value, &val_ty, ctx.env);
                 let kind = classify_top_let_kind(&ir_value);
                 let tl_def_id = ctx.def_map.get(&sym(name)).copied();
                 top_lets.push(IrTopLet { var, ty: val_ty, value: ir_value, kind, mutable: *mutable, doc, blank_lines_before: blank_lines, def_id: tl_def_id });
