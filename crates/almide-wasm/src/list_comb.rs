@@ -295,11 +295,19 @@ impl Emitter<'_> {
         self.f.instructions().i32_const(0).local_set(hd);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        // #2755: the callback runs on the dropping arm only; a kept element
+        // is shared into the suffix.
+        self.witness_callback_open(cb, None);
+        self.witness_branch_open();
+        self.witness_branch_arm();
         // still dropping? run the callback; a false flips to keeping
         self.f.instructions().local_get(hd).i32_eqz().if_(BlockType::Empty);
         self.lower(body, Some(BOOL))?;
         self.f.instructions().i32_eqz().local_set(hd);
         self.f.instructions().end();
+        self.witness_branch_arm();
+        self.witness_branch_close();
+        self.witness_hit(&[(params[0], elem)]);
         self.f.instructions().local_get(hd).if_(BlockType::Empty);
         self.f.instructions().local_get(hacc).local_get(params[0]);
         if elem.val_type() == ValType::F64 {

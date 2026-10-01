@@ -444,10 +444,12 @@ impl WitnessRecorder {
     }
 
     /// #2755: `ops` on a view this frame reads without holding (a callback
-    /// value an arm shares and releases again: `ad`).
-    pub fn view_ops(&mut self, ops: &str) {
+    /// value an arm shares and releases again: `ad`). Returns the object, for
+    /// a site that settles the share later ([`Self::temp_ops`]).
+    pub fn view_ops(&mut self, ops: &str) -> u32 {
         let o = self.view_obj();
         self.ops(o, ops);
+        o
     }
 
     /// A Bind of a view: the Bind route's `rc_inc_top` is the share, and
