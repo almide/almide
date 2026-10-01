@@ -119,7 +119,7 @@ fn guard_shape(ctx: &RenderContext, pat: &IrPattern, ty: Option<&Ty>, counter: &
                 return qualified;
             }
             let shapes: Vec<String> = args.iter().enumerate()
-                .map(|(i, arg)| guard_slot(ctx, ty, name.as_str(), &i.to_string(), arg, counter, subs))
+                .map(|(i, arg)| guard_slot(ctx, arg, slot_of(ctx, ty, name.as_str(), &i.to_string()), counter, subs))
                 .collect();
             format!("{}({})", qualified, shapes.join(", "))
         }
@@ -128,7 +128,7 @@ fn guard_shape(ctx: &RenderContext, pat: &IrPattern, ty: Option<&Ty>, counter: &
             let shapes: Vec<String> = fields.iter()
                 .map(|fp| match &fp.pattern {
                     Some(p) => format!("{}: {}", ctx.field_ident(fp.name.as_str()),
-                        guard_slot(ctx, ty, name.as_str(), fp.name.as_str(), p, counter, subs)),
+                        guard_slot(ctx, p, slot_of(ctx, ty, name.as_str(), fp.name.as_str()), counter, subs)),
                     None => format!("{}: _", ctx.field_ident(fp.name.as_str())),
                 })
                 .collect();
@@ -140,12 +140,16 @@ fn guard_shape(ctx: &RenderContext, pat: &IrPattern, ty: Option<&Ty>, counter: &
     }
 }
 
-/// One payload position `field` of case `ctor` in a guard shape: a boxed
-/// position holding a refutable pattern binds a fresh box var and guards
-/// through it.
-fn guard_slot(ctx: &RenderContext, ty: Option<&Ty>, ctor: &str, field: &str, arg: &IrPattern, counter: &mut usize, subs: &mut Vec<String>) -> String {
-    let arg_ty = case_field_ty(ctx, ty, ctor, field);
-    if is_boxed_field(ctx, ty, ctor, field) && needs_unbox(arg) {
+/// Payload position `field` of case `ctor` under a value typed `ty`: whether
+/// it is boxed, and its declared type when known.
+fn slot_of(ctx: &RenderContext, ty: Option<&Ty>, ctor: &str, field: &str) -> (bool, Option<Ty>) {
+    (is_boxed_field(ctx, ty, ctor, field), case_field_ty(ctx, ty, ctor, field))
+}
+
+/// One payload position in a guard shape ([`slot_of`]): a boxed position
+/// holding a refutable pattern binds a fresh box var and guards through it.
+fn guard_slot(ctx: &RenderContext, arg: &IrPattern, (boxed, arg_ty): (bool, Option<Ty>), counter: &mut usize, subs: &mut Vec<String>) -> String {
+    if boxed && needs_unbox(arg) {
         let g = fresh_box_var(counter);
         subs.push(box_shape_guard(ctx, arg, arg_ty.as_ref(), &format!("&**{}", g), counter));
         g
