@@ -63,11 +63,17 @@ pub(crate) fn emit_q10_val(f16_to_f64: u32) -> Function {
     let mut i = f.instructions();
     // bs = (k >> 7) * 18
     i.local_get(k).i64_const(7).i64_shr_u().i64_const(18).i64_mul().local_set(bs);
-    // off + bs + 18 > len → 0.0
-    i.local_get(off).local_get(bs).i64_add().i64_const(18).i64_add();
+    // bs + 18 > len - off → 0.0. Subtracted, never added: `off` is only
+    // clamped to >= 0, so `off + bs + 18` wraps for an offset near i64::MAX
+    // to a negative sum that passed the old `> len` test and read the bytes
+    // at `data + wrap32(off + bs)` — memory outside the buffer (#3126, fuzz
+    // seed 588212825650 index 347). `len - off` cannot wrap (both >= 0) and
+    // `bs` is bounded by the dims guard.
+    i.local_get(bs).i64_const(18).i64_add();
     i.local_get(data)
         .i32_load(MemArg { offset: 4, align: 2, memory_index: 0 })
         .i64_extend_i32_u();
+    i.local_get(off).i64_sub();
     i.i64_gt_s().if_(BlockType::Empty);
     i.f64_const(0.0f64.into()).return_();
     i.end();

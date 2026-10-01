@@ -670,6 +670,7 @@ evidence  = [
   { path = "spec/wasm_cross/rc_reclaim_churn.almd", class = "fixture" },
   { path = "spec/wasm_cross/assign_alias_rc.almd", class = "fixture" },
   { path = "spec/wasm_cross/assign_self_call_release.almd", class = "fixture" },
+  { path = "spec/wasm_cross/assign_nested_call_release.almd", class = "fixture" },
   { path = "spec/wasm_cross/container_alias_return.almd", class = "fixture" },
   { path = "spec/wasm_cross/loop_outer_inplace_mutate_rc.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_entries_reclaim.almd", class = "fixture" },
@@ -2980,6 +2981,7 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_q1_full_loader_cols_beyond_buffer.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_shape_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_select_rows_wrapped_rid.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_q1_full_loader_wrapped_offset.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-230"

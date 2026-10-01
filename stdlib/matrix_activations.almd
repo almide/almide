@@ -710,7 +710,10 @@ fn __q_dims_guard(rows: Int, cols: Int) -> Int = {
 
 fn matrix_from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
   let hd = prim.handle(data)
-  let off = if offset < 0 then 0 else offset
+  // #3126: clamp to [0, len] like the selector — an offset near i64::MAX
+  // wrapped `hd + 12 + off` below the buffer, so the per-element bound
+  // passed and the decode read memory outside it.
+  let off = __q_sel_off(offset, prim.load32(hd + 4))
   let base = hd + 12 + off
   let limit = hd + 12 + prim.load32(hd + 4)
   // #1503: negative dims clamp to the empty matrix like every loader.

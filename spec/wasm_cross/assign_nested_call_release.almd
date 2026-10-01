@@ -1,0 +1,52 @@
+// @contract: C-066
+// `x = f(g(x, …))` and `x = f(x.field, …)` release the old value of `x`
+// (#3127). The Assign lowering skipped the release whenever the var was
+// mentioned INSIDE an argument, not read the nested call's convention: a
+// scalar read out of the old block (`v3(rd.x, 0.0, 0.0)`) and a nested
+// call with a borrowed or owned parameter (`vnorm(vreflect(rd, n))`) never
+// take the var's credit, so every such assign left its old block live on
+// wasm. The fuzzer found it on the ray tracer's mirror bounce; native
+// drops every generation.
+type V3 = { x: Float, y: Float, z: Float }
+
+fn v3(x: Float, y: Float, z: Float) -> V3 = { x: x, y: y, z: z }
+
+fn vadd(a: V3, b: V3) -> V3 = v3(a.x + b.x, a.y + b.y, a.z + b.z)
+
+fn vmul(a: V3, s: Float) -> V3 = v3(a.x * s, a.y * s, a.z * s)
+
+fn vdot(a: V3, b: V3) -> Float = a.x * b.x + a.y * b.y + a.z * b.z
+
+fn vnorm(a: V3) -> V3 = {
+  let len = float.sqrt(vdot(a, a))
+  if len > 0.0 then vmul(a, 1.0 / len) else a
+}
+
+fn vreflect(d: V3, n: V3) -> V3 = vadd(d, vmul(n, -2.0 * vdot(d, n)))
+
+// The ray tracer's loop: the direction is rebound through a nested call
+// every bounce, and the fn returns a scalar so no region window covers it.
+fn bounce(rd0: V3, depth: Int) -> Float = {
+  var rd = rd0
+  var acc = 0.0
+  var i = 0
+  while i < depth {
+    rd = vnorm(vreflect(rd, v3(0.0, 1.0, 0.0)))
+    acc = acc + rd.y
+    i = i + 1
+  }
+  acc
+}
+
+// A scalar read of the old block under a nested call.
+fn flatten(p0: V3) -> V3 = {
+  var p = p0
+  p = vnorm(v3(p.x, 0.0, p.z))
+  p
+}
+
+effect fn main() -> Unit = {
+  println("bounce: ${float.to_string(bounce(vnorm(v3(0.3, -0.8, 1.0)), 5))}")
+  let f = flatten(v3(3.0, 7.0, 4.0))
+  println("flatten: ${float.to_string(f.x)} ${float.to_string(f.y)} ${float.to_string(f.z)}")
+}

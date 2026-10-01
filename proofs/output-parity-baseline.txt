@@ -116,6 +116,7 @@ spec/wasm_cross/assert_abort_msg.almd
 spec/wasm_cross/assert_abort_multiline.almd
 spec/wasm_cross/assert_abort_ne.almd
 spec/wasm_cross/assign_alias_rc.almd
+spec/wasm_cross/assign_nested_call_release.almd
 spec/wasm_cross/assign_self_call_release.almd
 spec/wasm_cross/autotry_construction.almd
 spec/wasm_cross/autotry_result_first_arg.almd
@@ -565,6 +566,7 @@ spec/wasm_cross/matrix_neg_signed_zero.almd
 spec/wasm_cross/matrix_pow_libm.almd
 spec/wasm_cross/matrix_product_family.almd
 spec/wasm_cross/matrix_q1_full_loader_cols_beyond_buffer.almd
+spec/wasm_cross/matrix_q1_full_loader_wrapped_offset.almd
 spec/wasm_cross/matrix_q_dims_guard.almd
 spec/wasm_cross/matrix_q_fp16_scale_domain.almd
 spec/wasm_cross/matrix_select_rows.almd
