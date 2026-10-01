@@ -309,8 +309,8 @@ impl WitnessRecorder {
     /// borrows its credit for the whole run (witness_carry.rs `frame_carry`).
     /// Marked once, live code or not — the marker places nothing.
     pub fn outer_holder(&mut self, holder: u32) {
-        if !self.bound.contains_key(&holder) {
-            self.bound.insert(holder, 0);
+        if let std::collections::hash_map::Entry::Vacant(v) = self.bound.entry(holder) {
+            v.insert(0);
             self.log.push(Ev::Carry { local: holder, depth: paths::FRAME_HELD });
         }
     }
