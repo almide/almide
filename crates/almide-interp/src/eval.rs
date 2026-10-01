@@ -591,14 +591,25 @@ pub(crate) fn marker_is_option_identity(node_ty: &Ty) -> bool {
 pub(crate) enum ErrConv {
     Keep,
     Repr,
+    /// The repr of an error whose type reaches a UInt64 / Float32 leaf: the
+    /// index names that type in `Interpreter::err_tys` (#3187).
+    ReprTyped(u32),
     Join,
 }
 
 impl ErrConv {
-    pub(crate) fn apply(self, e: Box<Value>) -> Box<Value> {
+    pub(crate) fn apply(self, e: Box<Value>, interp: &crate::Interpreter<'_>) -> Box<Value> {
         match self {
             ErrConv::Keep => e,
             ErrConv::Repr => Box::new(Value::str(e.almide_repr())),
+            ErrConv::ReprTyped(i) => {
+                let ty = interp.err_tys.borrow().get(i as usize).cloned();
+                let shown = match ty {
+                    Some(t) => interp.sized_display_view(&e, &t),
+                    None => *e,
+                };
+                Box::new(Value::str(shown.almide_repr()))
+            }
             ErrConv::Join => match &*e {
                 Value::List(xs) => Box::new(Value::str(
                     xs.iter().map(|x| x.display_bare()).collect::<Vec<_>>().join(", "),

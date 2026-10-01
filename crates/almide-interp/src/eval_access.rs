@@ -26,10 +26,28 @@ impl<'a> Interpreter<'a> {
     /// callable's) — small and `Copy`, so the trampoline carries the mark
     /// instead of cloning a `Ty` per hop (#1232, the last quick-win row).
     pub(crate) fn try_mark(&self, node_ty: &Ty, operand_ty: &Ty) -> TryMark {
-        TryMark {
-            opt_identity: marker_is_option_identity(node_ty),
-            conv: if self.chan_str.get() { err_conv_into_string(operand_ty) } else { ErrConv::Keep },
+        let conv = if self.chan_str.get() { err_conv_into_string(operand_ty) } else { ErrConv::Keep };
+        TryMark { opt_identity: marker_is_option_identity(node_ty), conv: self.typed_repr(conv, operand_ty) }
+    }
+
+    /// `Repr` of an error type that reaches a UInt64 / Float32 leaf becomes
+    /// `ReprTyped`, so the repr prints those digits (#3187).
+    fn typed_repr(&self, conv: ErrConv, operand_ty: &Ty) -> ErrConv {
+        let Some(err_ty) = (match operand_ty {
+            Ty::Applied(_, a) if conv == ErrConv::Repr => a.get(1),
+            _ => None,
+        }) else {
+            return conv;
+        };
+        if !self.mentions_sized_display(err_ty, 0) {
+            return conv;
         }
+        let mut tys = self.err_tys.borrow_mut();
+        let i = tys.iter().position(|t| t == err_ty).unwrap_or_else(|| {
+            tys.push(err_ty.clone());
+            tys.len() - 1
+        });
+        ErrConv::ReprTyped(i as u32)
     }
 
     /// The value half of [`Self::eval_try_unwrap`] — the `!`/`?` marker's
@@ -45,7 +63,7 @@ impl<'a> Interpreter<'a> {
         }
         match v {
             Value::Result(Ok(inner)) => Flow::val(*inner),
-            Value::Result(Err(e)) => Flow::Return(Value::Result(Err(mark.conv.apply(e)))),
+            Value::Result(Err(e)) => Flow::Return(Value::Result(Err(mark.conv.apply(e, self)))),
             Value::Option(Some(inner)) => Flow::val(*inner),
             // #556: `expr!` on a None propagates an Err whose message is
             // "none" on BOTH backends (the codegen lowers Option `!` to
@@ -332,9 +350,15 @@ impl<'a> Interpreter<'a> {
                 IrStringPart::Expr { expr } => {
                     let v = val!(self.eval_expr(expr, scope));
                     // A Float32 rides the widened f64 carrier but displays its
-                    // own shortest binary32 digits, top-level or nested (C-372,
-                    // #3081): the type picks the leaves (f32_display.rs).
-                    let v = if self.mentions_f32(&expr.ty, 0) { self.f32_display_view(&v, &expr.ty) } else { v };
+                    // own shortest binary32 digits, and a UInt64 rides the i64
+                    // carrier but reads unsigned, top-level or nested (C-372,
+                    // #3081; C-179, #3187): the type picks the leaves
+                    // (f32_display.rs).
+                    let v = if self.mentions_sized_display(&expr.ty, 0) {
+                        self.sized_display_view(&v, &expr.ty)
+                    } else {
+                        v
+                    };
                     // A bare top-level String stays raw; everything else routes
                     // through the bare-display path (which for compounds is
                     // `almide_repr`, for scalars is plain Display).

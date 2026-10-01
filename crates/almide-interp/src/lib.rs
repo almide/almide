@@ -244,6 +244,10 @@ pub struct Interpreter<'a> {
     /// #2725): a `!` whose operand fails with a typed error converts it to
     /// its repr text there, as native's `map_err` does.
     pub(crate) chan_str: Cell<bool>,
+    /// The error types an `ErrConv::ReprTyped` names (#3187): a typed error
+    /// whose repr reaches a UInt64 or Float32 leaf needs its type to print
+    /// those digits, and the `Copy` marker carries only the index.
+    pub(crate) err_tys: std::cell::RefCell<Vec<almide_lang::types::Ty>>,
     /// Open metered regions (budget_enter +1 / budget_exit -1): the strict
     /// cut (T1-1) fires only inside a region — outside one, fuel below zero
     /// is impossible in budget mode and irrelevant in probe mode.
@@ -581,6 +585,7 @@ impl<'a> Interpreter<'a> {
             det_spend: Cell::new(0),
             det_in_user: Cell::new(false),
             chan_str: Cell::new(false),
+            err_tys: std::cell::RefCell::new(Vec::new()),
             det_region_depth: Cell::new(0),
             det_saved: Cell::new(0),
             user_fn_names,
