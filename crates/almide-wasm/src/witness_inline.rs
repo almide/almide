@@ -110,17 +110,23 @@ impl Emitter<'_> {
     /// was loaded from — is shared into the arm's fresh result (`am`), and
     /// the scan breaks. The activation closes after the site.
     pub(crate) fn witness_hit(&mut self, views: &[(u32, SliceTy)]) {
+        self.witness_branch_open();
+        self.witness_branch_arm();
+        self.witness_view_shares(views);
+        self.witness_branch_arm();
+        self.witness_branch_close();
+        self.witness_loop_close();
+    }
+
+    /// Each droppable handle param — a view of the element it was loaded
+    /// from — shared into the arm's fresh result (`share_handle_top`, `am`).
+    pub(crate) fn witness_view_shares(&mut self, views: &[(u32, SliceTy)]) {
         let shared: Vec<u32> =
             views.iter().filter(|&&(_, t)| self.rc_droppable(t) && self.elem_is_handle(t)).map(|&(l, _)| l).collect();
         let Some(w) = self.witness.as_mut() else { return };
-        w.branch_open();
-        w.branch_arm();
         if !shared.iter().all(|&l| w.arg_share_move(l)) {
             w.poison();
         }
-        w.branch_arm();
-        w.branch_close();
-        w.loop_close();
     }
 
     /// `set.map`'s member, per element (collections_set.rs): a branch on
