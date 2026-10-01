@@ -4,8 +4,9 @@
 //! module's constant, calling its fn, naming another module's constant through
 //! the declaring module's import alias (which the caller binds to a different
 //! module), a caller local spelled like the default's constant, a
-//! record-payload case, and a literal inside the declaring module beside a
-//! same-named local. Before the fix the native leg failed with rustc E0425 (or
+//! record-payload case, and literals inside the declaring module beside
+//! same-named locals, with a default calling the module's fn (#3167). Before
+//! the fix the native leg failed with rustc E0425 (or
 //! silently read a caller local) and the wasm leg walled on a type mismatch.
 //! `almide test` runs one leg, so this net runs the project's `src/main.almd`
 //! on both and demands one output.
@@ -15,7 +16,8 @@ use std::process::Command;
 
 const EXPECTED: &str = "3 6 40 5 55
 9 62
-21 3 5
+21 3 6 5
+58 4
 5 41 999 100 7";
 
 fn project() -> PathBuf {

@@ -14,6 +14,8 @@ effect fn main() -> Unit = {
   let entry_limit = c.LIMIT
   println("${b.e} ${b.f} ${b.g} ${b.s} ${shapes.total(b)}")
   println("${over.e} ${shapes.total(over)}")
-  println("${i.n} ${i.e} ${i.s}")
+  let o = shapes.own_box(4)
+  println("${i.n} ${i.e} ${i.f} ${i.s}")
+  println("${shapes.total(o)} ${shapes.radius_plus_k(shapes.own_circle(1))}")
   println("${k} ${shapes.mk(1)} ${entry_limit} ${step} ${base}")
 }
