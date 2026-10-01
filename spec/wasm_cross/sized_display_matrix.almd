@@ -1,0 +1,940 @@
+// @contract: C-179, C-372
+// The SIZED-number display matrix (#3187): every sized width (rows) through
+// every display path (columns) prints the same text on native, wasm and the
+// interpreter. A UInt64 in the upper half (`i64::MAX+1 ..= u64::MAX`) rides
+// the i64 slot as a bit pattern, so a display that reads the slot signed
+// prints `-1` for u64::MAX; a Float32 rides the f64 slot, so a display that
+// loses its type prints the widened f64's digits. One fn per cell, named
+// `<path>_<width>`; tests/sized_display_matrix_test.rs keeps the matrix whole.
+// `err_propagate_<width>` is the repr an error of that width carries when `!`
+// lifts it into an effect fn's String channel. The `main_line_<width>` cells
+// interpolate in `main`'s own body, where the outermost build takes the
+// room-free appends (line_bounded.rs). Each integer row also asserts its
+// `${x}` against `<width>.to_string(x)`, a printer of its own, so a leaf that
+// every leg got wrong the same way still fails. The closing lines run each generic
+// instance next to the default width that shares its slot layout, in both
+// orders, so neither instance borrows the other's digits.
+type Box[T] = { v: T }
+
+type Tag[T] = | One(T) | Nope
+
+type Tree[T] = | Leaf | Node(Tree[T], T)
+
+type RecInt8 = { v: Int8, n: Int }
+
+type VarInt8 = | TupInt8(Int8, Int8) | FldInt8 { v: Int8 }
+
+type RecInt16 = { v: Int16, n: Int }
+
+type VarInt16 = | TupInt16(Int16, Int16) | FldInt16 { v: Int16 }
+
+type RecInt32 = { v: Int32, n: Int }
+
+type VarInt32 = | TupInt32(Int32, Int32) | FldInt32 { v: Int32 }
+
+type RecUInt8 = { v: UInt8, n: Int }
+
+type VarUInt8 = | TupUInt8(UInt8, UInt8) | FldUInt8 { v: UInt8 }
+
+type RecUInt16 = { v: UInt16, n: Int }
+
+type VarUInt16 = | TupUInt16(UInt16, UInt16) | FldUInt16 { v: UInt16 }
+
+type RecUInt32 = { v: UInt32, n: Int }
+
+type VarUInt32 = | TupUInt32(UInt32, UInt32) | FldUInt32 { v: UInt32 }
+
+type RecUInt64 = { v: UInt64, n: Int }
+
+type VarUInt64 = | TupUInt64(UInt64, UInt64) | FldUInt64 { v: UInt64 }
+
+type RecFloat32 = { v: Float32, n: Int }
+
+type VarFloat32 = | TupFloat32(Float32, Float32) | FldFloat32 { v: Float32 }
+
+fn interp_int8(x: Int8) -> String = "${x}"
+
+fn interp_mid_int8(x: Int8) -> String = "<${x}|${x}>"
+
+fn concat_int8(x: Int8) -> String = "s=" + int8.to_string(x) + "."
+
+fn list_int8(x: Int8) -> String = "${[x, x]}"
+
+fn record_int8(x: Int8) -> String = "${RecInt8 { v: x, n: 1 }}"
+
+fn anon_record_int8(x: Int8) -> String = {
+  let r: { u: Int8, k: Int } = { u: x, k: 1 }
+  "${r}"
+}
+
+fn generic_record_int8(x: Int8) -> String = {
+  let b: Box[Int8] = Box { v: x }
+  "${b}"
+}
+
+fn tuple_int8(x: Int8) -> String = "${(x, 1, x)}"
+
+fn option_int8(x: Int8) -> String = "${some(x)}"
+
+fn result_ok_int8(x: Int8) -> String = {
+  let r: Result[Int8, String] = ok(x)
+  "${r}"
+}
+
+fn result_err_int8(x: Int8) -> String = {
+  let r: Result[Int, Int8] = err(x)
+  "${r}"
+}
+
+fn map_key_int8(x: Int8) -> String = {
+  let m: Map[Int8, Int] = map.from_list([(x, 1)])
+  "${m}"
+}
+
+fn map_value_int8(x: Int8) -> String = {
+  let m: Map[String, Int8] = map.from_list([("k", x)])
+  "${m}"
+}
+
+fn set_int8(x: Int8) -> String = {
+  let s: Set[Int8] = set.from_list([x])
+  "${s}"
+}
+
+fn variant_tuple_int8(x: Int8) -> String = "${TupInt8(x, x)}"
+
+fn variant_record_int8(x: Int8) -> String = "${FldInt8 { v: x }}"
+
+fn generic_variant_int8(x: Int8) -> String = {
+  let t: Tag[Int8] = One(x)
+  "${t}"
+}
+
+fn recursive_generic_int8(x: Int8) -> String = {
+  let t: Tree[Int8] = Node(Node(Leaf, x), x)
+  "${t}"
+}
+
+fn nested_int8(x: Int8) -> String = {
+  let o: List[(Int8, RecInt8)]? = some([
+    (x, RecInt8 { v: x, n: 2 })
+  ])
+  "${o}"
+}
+
+fn fails_int8(x: Int8) -> Result[Int, Int8] = err(x)
+
+effect fn lift_int8(x: Int8) -> Int = fails_int8(x)!
+
+effect fn err_propagate_int8(x: Int8) -> String = match lift_int8(x) {
+  ok(v) => "ok ${v}",
+  err(e) => e,
+}
+
+effect fn row_int8(x: Int8) -> Unit = {
+  println("Int8 interp: " + interp_int8(x))
+  println("Int8 interp_mid: " + interp_mid_int8(x))
+  println("Int8 concat: " + concat_int8(x))
+  println("Int8 list: " + list_int8(x))
+  println("Int8 record: " + record_int8(x))
+  println("Int8 anon_record: " + anon_record_int8(x))
+  println("Int8 generic_record: " + generic_record_int8(x))
+  println("Int8 tuple: " + tuple_int8(x))
+  println("Int8 option: " + option_int8(x))
+  println("Int8 result_ok: " + result_ok_int8(x))
+  println("Int8 result_err: " + result_err_int8(x))
+  println("Int8 map_key: " + map_key_int8(x))
+  println("Int8 map_value: " + map_value_int8(x))
+  println("Int8 set: " + set_int8(x))
+  println("Int8 variant_tuple: " + variant_tuple_int8(x))
+  println("Int8 variant_record: " + variant_record_int8(x))
+  println("Int8 generic_variant: " + generic_variant_int8(x))
+  println("Int8 recursive_generic: " + recursive_generic_int8(x))
+  println("Int8 nested: " + nested_int8(x))
+  let ep = err_propagate_int8(x)!
+  println("Int8 err_propagate: " + ep)
+  assert_eq(interp_int8(x), int8.to_string(x))
+}
+
+fn interp_int16(x: Int16) -> String = "${x}"
+
+fn interp_mid_int16(x: Int16) -> String = "<${x}|${x}>"
+
+fn concat_int16(x: Int16) -> String = "s=" + int16.to_string(x) + "."
+
+fn list_int16(x: Int16) -> String = "${[x, x]}"
+
+fn record_int16(x: Int16) -> String = "${RecInt16 { v: x, n: 1 }}"
+
+fn anon_record_int16(x: Int16) -> String = {
+  let r: { u: Int16, k: Int } = { u: x, k: 1 }
+  "${r}"
+}
+
+fn generic_record_int16(x: Int16) -> String = {
+  let b: Box[Int16] = Box { v: x }
+  "${b}"
+}
+
+fn tuple_int16(x: Int16) -> String = "${(x, 1, x)}"
+
+fn option_int16(x: Int16) -> String = "${some(x)}"
+
+fn result_ok_int16(x: Int16) -> String = {
+  let r: Result[Int16, String] = ok(x)
+  "${r}"
+}
+
+fn result_err_int16(x: Int16) -> String = {
+  let r: Result[Int, Int16] = err(x)
+  "${r}"
+}
+
+fn map_key_int16(x: Int16) -> String = {
+  let m: Map[Int16, Int] = map.from_list([(x, 1)])
+  "${m}"
+}
+
+fn map_value_int16(x: Int16) -> String = {
+  let m: Map[String, Int16] = map.from_list([("k", x)])
+  "${m}"
+}
+
+fn set_int16(x: Int16) -> String = {
+  let s: Set[Int16] = set.from_list([x])
+  "${s}"
+}
+
+fn variant_tuple_int16(x: Int16) -> String = "${TupInt16(x, x)}"
+
+fn variant_record_int16(x: Int16) -> String = "${FldInt16 { v: x }}"
+
+fn generic_variant_int16(x: Int16) -> String = {
+  let t: Tag[Int16] = One(x)
+  "${t}"
+}
+
+fn recursive_generic_int16(x: Int16) -> String = {
+  let t: Tree[Int16] = Node(Node(Leaf, x), x)
+  "${t}"
+}
+
+fn nested_int16(x: Int16) -> String = {
+  let o: List[(Int16, RecInt16)]? = some([
+    (x, RecInt16 { v: x, n: 2 })
+  ])
+  "${o}"
+}
+
+fn fails_int16(x: Int16) -> Result[Int, Int16] = err(x)
+
+effect fn lift_int16(x: Int16) -> Int = fails_int16(x)!
+
+effect fn err_propagate_int16(x: Int16) -> String = match lift_int16(x) {
+  ok(v) => "ok ${v}",
+  err(e) => e,
+}
+
+effect fn row_int16(x: Int16) -> Unit = {
+  println("Int16 interp: " + interp_int16(x))
+  println("Int16 interp_mid: " + interp_mid_int16(x))
+  println("Int16 concat: " + concat_int16(x))
+  println("Int16 list: " + list_int16(x))
+  println("Int16 record: " + record_int16(x))
+  println("Int16 anon_record: " + anon_record_int16(x))
+  println("Int16 generic_record: " + generic_record_int16(x))
+  println("Int16 tuple: " + tuple_int16(x))
+  println("Int16 option: " + option_int16(x))
+  println("Int16 result_ok: " + result_ok_int16(x))
+  println("Int16 result_err: " + result_err_int16(x))
+  println("Int16 map_key: " + map_key_int16(x))
+  println("Int16 map_value: " + map_value_int16(x))
+  println("Int16 set: " + set_int16(x))
+  println("Int16 variant_tuple: " + variant_tuple_int16(x))
+  println("Int16 variant_record: " + variant_record_int16(x))
+  println("Int16 generic_variant: " + generic_variant_int16(x))
+  println("Int16 recursive_generic: " + recursive_generic_int16(x))
+  println("Int16 nested: " + nested_int16(x))
+  let ep = err_propagate_int16(x)!
+  println("Int16 err_propagate: " + ep)
+  assert_eq(interp_int16(x), int16.to_string(x))
+}
+
+fn interp_int32(x: Int32) -> String = "${x}"
+
+fn interp_mid_int32(x: Int32) -> String = "<${x}|${x}>"
+
+fn concat_int32(x: Int32) -> String = "s=" + int32.to_string(x) + "."
+
+fn list_int32(x: Int32) -> String = "${[x, x]}"
+
+fn record_int32(x: Int32) -> String = "${RecInt32 { v: x, n: 1 }}"
+
+fn anon_record_int32(x: Int32) -> String = {
+  let r: { u: Int32, k: Int } = { u: x, k: 1 }
+  "${r}"
+}
+
+fn generic_record_int32(x: Int32) -> String = {
+  let b: Box[Int32] = Box { v: x }
+  "${b}"
+}
+
+fn tuple_int32(x: Int32) -> String = "${(x, 1, x)}"
+
+fn option_int32(x: Int32) -> String = "${some(x)}"
+
+fn result_ok_int32(x: Int32) -> String = {
+  let r: Result[Int32, String] = ok(x)
+  "${r}"
+}
+
+fn result_err_int32(x: Int32) -> String = {
+  let r: Result[Int, Int32] = err(x)
+  "${r}"
+}
+
+fn map_key_int32(x: Int32) -> String = {
+  let m: Map[Int32, Int] = map.from_list([(x, 1)])
+  "${m}"
+}
+
+fn map_value_int32(x: Int32) -> String = {
+  let m: Map[String, Int32] = map.from_list([("k", x)])
+  "${m}"
+}
+
+fn set_int32(x: Int32) -> String = {
+  let s: Set[Int32] = set.from_list([x])
+  "${s}"
+}
+
+fn variant_tuple_int32(x: Int32) -> String = "${TupInt32(x, x)}"
+
+fn variant_record_int32(x: Int32) -> String = "${FldInt32 { v: x }}"
+
+fn generic_variant_int32(x: Int32) -> String = {
+  let t: Tag[Int32] = One(x)
+  "${t}"
+}
+
+fn recursive_generic_int32(x: Int32) -> String = {
+  let t: Tree[Int32] = Node(Node(Leaf, x), x)
+  "${t}"
+}
+
+fn nested_int32(x: Int32) -> String = {
+  let o: List[(Int32, RecInt32)]? = some([
+    (x, RecInt32 { v: x, n: 2 })
+  ])
+  "${o}"
+}
+
+fn fails_int32(x: Int32) -> Result[Int, Int32] = err(x)
+
+effect fn lift_int32(x: Int32) -> Int = fails_int32(x)!
+
+effect fn err_propagate_int32(x: Int32) -> String = match lift_int32(x) {
+  ok(v) => "ok ${v}",
+  err(e) => e,
+}
+
+effect fn row_int32(x: Int32) -> Unit = {
+  println("Int32 interp: " + interp_int32(x))
+  println("Int32 interp_mid: " + interp_mid_int32(x))
+  println("Int32 concat: " + concat_int32(x))
+  println("Int32 list: " + list_int32(x))
+  println("Int32 record: " + record_int32(x))
+  println("Int32 anon_record: " + anon_record_int32(x))
+  println("Int32 generic_record: " + generic_record_int32(x))
+  println("Int32 tuple: " + tuple_int32(x))
+  println("Int32 option: " + option_int32(x))
+  println("Int32 result_ok: " + result_ok_int32(x))
+  println("Int32 result_err: " + result_err_int32(x))
+  println("Int32 map_key: " + map_key_int32(x))
+  println("Int32 map_value: " + map_value_int32(x))
+  println("Int32 set: " + set_int32(x))
+  println("Int32 variant_tuple: " + variant_tuple_int32(x))
+  println("Int32 variant_record: " + variant_record_int32(x))
+  println("Int32 generic_variant: " + generic_variant_int32(x))
+  println("Int32 recursive_generic: " + recursive_generic_int32(x))
+  println("Int32 nested: " + nested_int32(x))
+  let ep = err_propagate_int32(x)!
+  println("Int32 err_propagate: " + ep)
+  assert_eq(interp_int32(x), int32.to_string(x))
+}
+
+fn interp_uint8(x: UInt8) -> String = "${x}"
+
+fn interp_mid_uint8(x: UInt8) -> String = "<${x}|${x}>"
+
+fn concat_uint8(x: UInt8) -> String = "s=" + uint8.to_string(x) + "."
+
+fn list_uint8(x: UInt8) -> String = "${[x, x]}"
+
+fn record_uint8(x: UInt8) -> String = "${RecUInt8 { v: x, n: 1 }}"
+
+fn anon_record_uint8(x: UInt8) -> String = {
+  let r: { u: UInt8, k: Int } = { u: x, k: 1 }
+  "${r}"
+}
+
+fn generic_record_uint8(x: UInt8) -> String = {
+  let b: Box[UInt8] = Box { v: x }
+  "${b}"
+}
+
+fn tuple_uint8(x: UInt8) -> String = "${(x, 1, x)}"
+
+fn option_uint8(x: UInt8) -> String = "${some(x)}"
+
+fn result_ok_uint8(x: UInt8) -> String = {
+  let r: Result[UInt8, String] = ok(x)
+  "${r}"
+}
+
+fn result_err_uint8(x: UInt8) -> String = {
+  let r: Result[Int, UInt8] = err(x)
+  "${r}"
+}
+
+fn map_key_uint8(x: UInt8) -> String = {
+  let m: Map[UInt8, Int] = map.from_list([(x, 1)])
+  "${m}"
+}
+
+fn map_value_uint8(x: UInt8) -> String = {
+  let m: Map[String, UInt8] = map.from_list([("k", x)])
+  "${m}"
+}
+
+fn set_uint8(x: UInt8) -> String = {
+  let s: Set[UInt8] = set.from_list([x])
+  "${s}"
+}
+
+fn variant_tuple_uint8(x: UInt8) -> String = "${TupUInt8(x, x)}"
+
+fn variant_record_uint8(x: UInt8) -> String = "${FldUInt8 { v: x }}"
+
+fn generic_variant_uint8(x: UInt8) -> String = {
+  let t: Tag[UInt8] = One(x)
+  "${t}"
+}
+
+fn recursive_generic_uint8(x: UInt8) -> String = {
+  let t: Tree[UInt8] = Node(Node(Leaf, x), x)
+  "${t}"
+}
+
+fn nested_uint8(x: UInt8) -> String = {
+  let o: List[(UInt8, RecUInt8)]? = some([
+    (x, RecUInt8 { v: x, n: 2 })
+  ])
+  "${o}"
+}
+
+fn fails_uint8(x: UInt8) -> Result[Int, UInt8] = err(x)
+
+effect fn lift_uint8(x: UInt8) -> Int = fails_uint8(x)!
+
+effect fn err_propagate_uint8(x: UInt8) -> String = match lift_uint8(x) {
+  ok(v) => "ok ${v}",
+  err(e) => e,
+}
+
+effect fn row_uint8(x: UInt8) -> Unit = {
+  println("UInt8 interp: " + interp_uint8(x))
+  println("UInt8 interp_mid: " + interp_mid_uint8(x))
+  println("UInt8 concat: " + concat_uint8(x))
+  println("UInt8 list: " + list_uint8(x))
+  println("UInt8 record: " + record_uint8(x))
+  println("UInt8 anon_record: " + anon_record_uint8(x))
+  println("UInt8 generic_record: " + generic_record_uint8(x))
+  println("UInt8 tuple: " + tuple_uint8(x))
+  println("UInt8 option: " + option_uint8(x))
+  println("UInt8 result_ok: " + result_ok_uint8(x))
+  println("UInt8 result_err: " + result_err_uint8(x))
+  println("UInt8 map_key: " + map_key_uint8(x))
+  println("UInt8 map_value: " + map_value_uint8(x))
+  println("UInt8 set: " + set_uint8(x))
+  println("UInt8 variant_tuple: " + variant_tuple_uint8(x))
+  println("UInt8 variant_record: " + variant_record_uint8(x))
+  println("UInt8 generic_variant: " + generic_variant_uint8(x))
+  println("UInt8 recursive_generic: " + recursive_generic_uint8(x))
+  println("UInt8 nested: " + nested_uint8(x))
+  let ep = err_propagate_uint8(x)!
+  println("UInt8 err_propagate: " + ep)
+  assert_eq(interp_uint8(x), uint8.to_string(x))
+}
+
+fn interp_uint16(x: UInt16) -> String = "${x}"
+
+fn interp_mid_uint16(x: UInt16) -> String = "<${x}|${x}>"
+
+fn concat_uint16(x: UInt16) -> String = "s=" + uint16.to_string(x) + "."
+
+fn list_uint16(x: UInt16) -> String = "${[x, x]}"
+
+fn record_uint16(x: UInt16) -> String = "${RecUInt16 { v: x, n: 1 }}"
+
+fn anon_record_uint16(x: UInt16) -> String = {
+  let r: { u: UInt16, k: Int } = { u: x, k: 1 }
+  "${r}"
+}
+
+fn generic_record_uint16(x: UInt16) -> String = {
+  let b: Box[UInt16] = Box { v: x }
+  "${b}"
+}
+
+fn tuple_uint16(x: UInt16) -> String = "${(x, 1, x)}"
+
+fn option_uint16(x: UInt16) -> String = "${some(x)}"
+
+fn result_ok_uint16(x: UInt16) -> String = {
+  let r: Result[UInt16, String] = ok(x)
+  "${r}"
+}
+
+fn result_err_uint16(x: UInt16) -> String = {
+  let r: Result[Int, UInt16] = err(x)
+  "${r}"
+}
+
+fn map_key_uint16(x: UInt16) -> String = {
+  let m: Map[UInt16, Int] = map.from_list([(x, 1)])
+  "${m}"
+}
+
+fn map_value_uint16(x: UInt16) -> String = {
+  let m: Map[String, UInt16] = map.from_list([("k", x)])
+  "${m}"
+}
+
+fn set_uint16(x: UInt16) -> String = {
+  let s: Set[UInt16] = set.from_list([x])
+  "${s}"
+}
+
+fn variant_tuple_uint16(x: UInt16) -> String = "${TupUInt16(x, x)}"
+
+fn variant_record_uint16(x: UInt16) -> String = "${FldUInt16 { v: x }}"
+
+fn generic_variant_uint16(x: UInt16) -> String = {
+  let t: Tag[UInt16] = One(x)
+  "${t}"
+}
+
+fn recursive_generic_uint16(x: UInt16) -> String = {
+  let t: Tree[UInt16] = Node(Node(Leaf, x), x)
+  "${t}"
+}
+
+fn nested_uint16(x: UInt16) -> String = {
+  let o: List[(UInt16, RecUInt16)]? = some([
+    (x, RecUInt16 { v: x, n: 2 })
+  ])
+  "${o}"
+}
+
+fn fails_uint16(x: UInt16) -> Result[Int, UInt16] = err(x)
+
+effect fn lift_uint16(x: UInt16) -> Int = fails_uint16(x)!
+
+effect fn err_propagate_uint16(x: UInt16) -> String = match lift_uint16(x) {
+  ok(v) => "ok ${v}",
+  err(e) => e,
+}
+
+effect fn row_uint16(x: UInt16) -> Unit = {
+  println("UInt16 interp: " + interp_uint16(x))
+  println("UInt16 interp_mid: " + interp_mid_uint16(x))
+  println("UInt16 concat: " + concat_uint16(x))
+  println("UInt16 list: " + list_uint16(x))
+  println("UInt16 record: " + record_uint16(x))
+  println("UInt16 anon_record: " + anon_record_uint16(x))
+  println("UInt16 generic_record: " + generic_record_uint16(x))
+  println("UInt16 tuple: " + tuple_uint16(x))
+  println("UInt16 option: " + option_uint16(x))
+  println("UInt16 result_ok: " + result_ok_uint16(x))
+  println("UInt16 result_err: " + result_err_uint16(x))
+  println("UInt16 map_key: " + map_key_uint16(x))
+  println("UInt16 map_value: " + map_value_uint16(x))
+  println("UInt16 set: " + set_uint16(x))
+  println("UInt16 variant_tuple: " + variant_tuple_uint16(x))
+  println("UInt16 variant_record: " + variant_record_uint16(x))
+  println("UInt16 generic_variant: " + generic_variant_uint16(x))
+  println("UInt16 recursive_generic: " + recursive_generic_uint16(x))
+  println("UInt16 nested: " + nested_uint16(x))
+  let ep = err_propagate_uint16(x)!
+  println("UInt16 err_propagate: " + ep)
+  assert_eq(interp_uint16(x), uint16.to_string(x))
+}
+
+fn interp_uint32(x: UInt32) -> String = "${x}"
+
+fn interp_mid_uint32(x: UInt32) -> String = "<${x}|${x}>"
+
+fn concat_uint32(x: UInt32) -> String = "s=" + uint32.to_string(x) + "."
+
+fn list_uint32(x: UInt32) -> String = "${[x, x]}"
+
+fn record_uint32(x: UInt32) -> String = "${RecUInt32 { v: x, n: 1 }}"
+
+fn anon_record_uint32(x: UInt32) -> String = {
+  let r: { u: UInt32, k: Int } = { u: x, k: 1 }
+  "${r}"
+}
+
+fn generic_record_uint32(x: UInt32) -> String = {
+  let b: Box[UInt32] = Box { v: x }
+  "${b}"
+}
+
+fn tuple_uint32(x: UInt32) -> String = "${(x, 1, x)}"
+
+fn option_uint32(x: UInt32) -> String = "${some(x)}"
+
+fn result_ok_uint32(x: UInt32) -> String = {
+  let r: Result[UInt32, String] = ok(x)
+  "${r}"
+}
+
+fn result_err_uint32(x: UInt32) -> String = {
+  let r: Result[Int, UInt32] = err(x)
+  "${r}"
+}
+
+fn map_key_uint32(x: UInt32) -> String = {
+  let m: Map[UInt32, Int] = map.from_list([(x, 1)])
+  "${m}"
+}
+
+fn map_value_uint32(x: UInt32) -> String = {
+  let m: Map[String, UInt32] = map.from_list([("k", x)])
+  "${m}"
+}
+
+fn set_uint32(x: UInt32) -> String = {
+  let s: Set[UInt32] = set.from_list([x])
+  "${s}"
+}
+
+fn variant_tuple_uint32(x: UInt32) -> String = "${TupUInt32(x, x)}"
+
+fn variant_record_uint32(x: UInt32) -> String = "${FldUInt32 { v: x }}"
+
+fn generic_variant_uint32(x: UInt32) -> String = {
+  let t: Tag[UInt32] = One(x)
+  "${t}"
+}
+
+fn recursive_generic_uint32(x: UInt32) -> String = {
+  let t: Tree[UInt32] = Node(Node(Leaf, x), x)
+  "${t}"
+}
+
+fn nested_uint32(x: UInt32) -> String = {
+  let o: List[(UInt32, RecUInt32)]? = some([
+    (x, RecUInt32 { v: x, n: 2 })
+  ])
+  "${o}"
+}
+
+fn fails_uint32(x: UInt32) -> Result[Int, UInt32] = err(x)
+
+effect fn lift_uint32(x: UInt32) -> Int = fails_uint32(x)!
+
+effect fn err_propagate_uint32(x: UInt32) -> String = match lift_uint32(x) {
+  ok(v) => "ok ${v}",
+  err(e) => e,
+}
+
+effect fn row_uint32(x: UInt32) -> Unit = {
+  println("UInt32 interp: " + interp_uint32(x))
+  println("UInt32 interp_mid: " + interp_mid_uint32(x))
+  println("UInt32 concat: " + concat_uint32(x))
+  println("UInt32 list: " + list_uint32(x))
+  println("UInt32 record: " + record_uint32(x))
+  println("UInt32 anon_record: " + anon_record_uint32(x))
+  println("UInt32 generic_record: " + generic_record_uint32(x))
+  println("UInt32 tuple: " + tuple_uint32(x))
+  println("UInt32 option: " + option_uint32(x))
+  println("UInt32 result_ok: " + result_ok_uint32(x))
+  println("UInt32 result_err: " + result_err_uint32(x))
+  println("UInt32 map_key: " + map_key_uint32(x))
+  println("UInt32 map_value: " + map_value_uint32(x))
+  println("UInt32 set: " + set_uint32(x))
+  println("UInt32 variant_tuple: " + variant_tuple_uint32(x))
+  println("UInt32 variant_record: " + variant_record_uint32(x))
+  println("UInt32 generic_variant: " + generic_variant_uint32(x))
+  println("UInt32 recursive_generic: " + recursive_generic_uint32(x))
+  println("UInt32 nested: " + nested_uint32(x))
+  let ep = err_propagate_uint32(x)!
+  println("UInt32 err_propagate: " + ep)
+  assert_eq(interp_uint32(x), uint32.to_string(x))
+}
+
+fn interp_uint64(x: UInt64) -> String = "${x}"
+
+fn interp_mid_uint64(x: UInt64) -> String = "<${x}|${x}>"
+
+fn concat_uint64(x: UInt64) -> String = "s=" + uint64.to_string(x) + "."
+
+fn list_uint64(x: UInt64) -> String = "${[x, x]}"
+
+fn record_uint64(x: UInt64) -> String = "${RecUInt64 { v: x, n: 1 }}"
+
+fn anon_record_uint64(x: UInt64) -> String = {
+  let r: { u: UInt64, k: Int } = { u: x, k: 1 }
+  "${r}"
+}
+
+fn generic_record_uint64(x: UInt64) -> String = {
+  let b: Box[UInt64] = Box { v: x }
+  "${b}"
+}
+
+fn tuple_uint64(x: UInt64) -> String = "${(x, 1, x)}"
+
+fn option_uint64(x: UInt64) -> String = "${some(x)}"
+
+fn result_ok_uint64(x: UInt64) -> String = {
+  let r: Result[UInt64, String] = ok(x)
+  "${r}"
+}
+
+fn result_err_uint64(x: UInt64) -> String = {
+  let r: Result[Int, UInt64] = err(x)
+  "${r}"
+}
+
+fn map_key_uint64(x: UInt64) -> String = {
+  let m: Map[UInt64, Int] = map.from_list([(x, 1)])
+  "${m}"
+}
+
+fn map_value_uint64(x: UInt64) -> String = {
+  let m: Map[String, UInt64] = map.from_list([("k", x)])
+  "${m}"
+}
+
+fn set_uint64(x: UInt64) -> String = {
+  let s: Set[UInt64] = set.from_list([x])
+  "${s}"
+}
+
+fn variant_tuple_uint64(x: UInt64) -> String = "${TupUInt64(x, x)}"
+
+fn variant_record_uint64(x: UInt64) -> String = "${FldUInt64 { v: x }}"
+
+fn generic_variant_uint64(x: UInt64) -> String = {
+  let t: Tag[UInt64] = One(x)
+  "${t}"
+}
+
+fn recursive_generic_uint64(x: UInt64) -> String = {
+  let t: Tree[UInt64] = Node(Node(Leaf, x), x)
+  "${t}"
+}
+
+fn nested_uint64(x: UInt64) -> String = {
+  let o: List[(UInt64, RecUInt64)]? = some([
+    (x, RecUInt64 { v: x, n: 2 })
+  ])
+  "${o}"
+}
+
+fn fails_uint64(x: UInt64) -> Result[Int, UInt64] = err(x)
+
+effect fn lift_uint64(x: UInt64) -> Int = fails_uint64(x)!
+
+effect fn err_propagate_uint64(x: UInt64) -> String = match lift_uint64(x) {
+  ok(v) => "ok ${v}",
+  err(e) => e,
+}
+
+effect fn row_uint64(x: UInt64) -> Unit = {
+  println("UInt64 interp: " + interp_uint64(x))
+  println("UInt64 interp_mid: " + interp_mid_uint64(x))
+  println("UInt64 concat: " + concat_uint64(x))
+  println("UInt64 list: " + list_uint64(x))
+  println("UInt64 record: " + record_uint64(x))
+  println("UInt64 anon_record: " + anon_record_uint64(x))
+  println("UInt64 generic_record: " + generic_record_uint64(x))
+  println("UInt64 tuple: " + tuple_uint64(x))
+  println("UInt64 option: " + option_uint64(x))
+  println("UInt64 result_ok: " + result_ok_uint64(x))
+  println("UInt64 result_err: " + result_err_uint64(x))
+  println("UInt64 map_key: " + map_key_uint64(x))
+  println("UInt64 map_value: " + map_value_uint64(x))
+  println("UInt64 set: " + set_uint64(x))
+  println("UInt64 variant_tuple: " + variant_tuple_uint64(x))
+  println("UInt64 variant_record: " + variant_record_uint64(x))
+  println("UInt64 generic_variant: " + generic_variant_uint64(x))
+  println("UInt64 recursive_generic: " + recursive_generic_uint64(x))
+  println("UInt64 nested: " + nested_uint64(x))
+  let ep = err_propagate_uint64(x)!
+  println("UInt64 err_propagate: " + ep)
+  assert_eq(interp_uint64(x), uint64.to_string(x))
+}
+
+fn interp_float32(x: Float32) -> String = "${x}"
+
+fn interp_mid_float32(x: Float32) -> String = "<${x}|${x}>"
+
+fn concat_float32(x: Float32) -> String = "s=" + float32.to_string(x) + "."
+
+fn list_float32(x: Float32) -> String = "${[x, x]}"
+
+fn record_float32(x: Float32) -> String = "${RecFloat32 { v: x, n: 1 }}"
+
+fn anon_record_float32(x: Float32) -> String = {
+  let r: { u: Float32, k: Int } = { u: x, k: 1 }
+  "${r}"
+}
+
+fn generic_record_float32(x: Float32) -> String = {
+  let b: Box[Float32] = Box { v: x }
+  "${b}"
+}
+
+fn tuple_float32(x: Float32) -> String = "${(x, 1, x)}"
+
+fn option_float32(x: Float32) -> String = "${some(x)}"
+
+fn result_ok_float32(x: Float32) -> String = {
+  let r: Result[Float32, String] = ok(x)
+  "${r}"
+}
+
+fn result_err_float32(x: Float32) -> String = {
+  let r: Result[Int, Float32] = err(x)
+  "${r}"
+}
+
+fn map_key_float32(x: Float32) -> String = {
+  let m: Map[Float32, Int] = map.from_list([(x, 1)])
+  "${m}"
+}
+
+fn map_value_float32(x: Float32) -> String = {
+  let m: Map[String, Float32] = map.from_list([("k", x)])
+  "${m}"
+}
+
+fn set_float32(x: Float32) -> String = {
+  let s: Set[Float32] = set.from_list([x])
+  "${s}"
+}
+
+fn variant_tuple_float32(x: Float32) -> String = "${TupFloat32(x, x)}"
+
+fn variant_record_float32(x: Float32) -> String = "${FldFloat32 { v: x }}"
+
+fn generic_variant_float32(x: Float32) -> String = {
+  let t: Tag[Float32] = One(x)
+  "${t}"
+}
+
+fn recursive_generic_float32(x: Float32) -> String = {
+  let t: Tree[Float32] = Node(Node(Leaf, x), x)
+  "${t}"
+}
+
+fn nested_float32(x: Float32) -> String = {
+  let o: List[(Float32, RecFloat32)]? = some([
+    (x, RecFloat32 { v: x, n: 2 })
+  ])
+  "${o}"
+}
+
+fn fails_float32(x: Float32) -> Result[Int, Float32] = err(x)
+
+effect fn lift_float32(x: Float32) -> Int = fails_float32(x)!
+
+effect fn err_propagate_float32(x: Float32) -> String = match lift_float32(x) {
+  ok(v) => "ok ${v}",
+  err(e) => e,
+}
+
+effect fn row_float32(x: Float32) -> Unit = {
+  println("Float32 interp: " + interp_float32(x))
+  println("Float32 interp_mid: " + interp_mid_float32(x))
+  println("Float32 concat: " + concat_float32(x))
+  println("Float32 list: " + list_float32(x))
+  println("Float32 record: " + record_float32(x))
+  println("Float32 anon_record: " + anon_record_float32(x))
+  println("Float32 generic_record: " + generic_record_float32(x))
+  println("Float32 tuple: " + tuple_float32(x))
+  println("Float32 option: " + option_float32(x))
+  println("Float32 result_ok: " + result_ok_float32(x))
+  println("Float32 result_err: " + result_err_float32(x))
+  println("Float32 map_key: " + map_key_float32(x))
+  println("Float32 map_value: " + map_value_float32(x))
+  println("Float32 set: " + set_float32(x))
+  println("Float32 variant_tuple: " + variant_tuple_float32(x))
+  println("Float32 variant_record: " + variant_record_float32(x))
+  println("Float32 generic_variant: " + generic_variant_float32(x))
+  println("Float32 recursive_generic: " + recursive_generic_float32(x))
+  println("Float32 nested: " + nested_float32(x))
+  let ep = err_propagate_float32(x)!
+  println("Float32 err_propagate: " + ep)
+}
+
+effect fn main() -> Unit = {
+  row_int8(-128)!
+  row_int8(127)!
+  row_int16(-32768)!
+  row_int16(32767)!
+  row_int32(-2147483648)!
+  row_int32(2147483647)!
+  row_uint8(0)!
+  row_uint8(255)!
+  row_uint16(0)!
+  row_uint16(65535)!
+  row_uint32(0)!
+  row_uint32(4294967295)!
+  row_uint64(0)!
+  row_uint64(9223372036854775807)!
+  row_uint64(9223372036854775808)!
+  row_uint64(18446744073709551615)!
+  row_float32(float.to_float32(0.1))!
+  row_float32(float.to_float32(2.0))!
+  row_float32(float.to_float32(-123.456))!
+  let hi_int8: Int8 = 127
+  println("main_line_int8: ${hi_int8}")
+  println("${hi_int8}")
+  let hi_int16: Int16 = 32767
+  println("main_line_int16: ${hi_int16}")
+  println("${hi_int16}")
+  let hi_int32: Int32 = 2147483647
+  println("main_line_int32: ${hi_int32}")
+  println("${hi_int32}")
+  let hi_uint8: UInt8 = 255
+  println("main_line_uint8: ${hi_uint8}")
+  println("${hi_uint8}")
+  let hi_uint16: UInt16 = 65535
+  println("main_line_uint16: ${hi_uint16}")
+  println("${hi_uint16}")
+  let hi_uint32: UInt32 = 4294967295
+  println("main_line_uint32: ${hi_uint32}")
+  println("${hi_uint32}")
+  let hi_uint64: UInt64 = 18446744073709551615
+  println("main_line_uint64: ${hi_uint64}")
+  println("${hi_uint64}")
+  let hi_float32: Float32 = float.to_float32(-123.456)
+  println("main_line_float32: ${hi_float32}")
+  println("${hi_float32}")
+  let bu: Box[UInt64] = Box { v: hi_uint64 }
+  let bi: Box[Int] = Box { v: -1 }
+  let bi2: Box[Int] = Box { v: -2 }
+  let bu2: Box[UInt64] = Box { v: hi_uint64 }
+  println("shared box: ${bu} ${bi} ${bi2} ${bu2}")
+  let tf: Tree[Float32] = Node(Leaf, float.to_float32(0.1))
+  let td: Tree[Float] = Node(Leaf, 0.1 + 0.2)
+  let td2: Tree[Float] = Node(Leaf, 0.1)
+  let tf2: Tree[Float32] = Node(Leaf, float.to_float32(0.1 + 0.2))
+  println("shared tree: ${tf} ${td} ${td2} ${tf2}")
+}

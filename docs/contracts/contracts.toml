@@ -2347,6 +2347,8 @@ evidence  = [
   { path = "spec/wasm_cross/uint64_upper_half.almd", class = "fixture" },
   { path = "spec/wasm_cross/unsigned_literal_domain.almd", class = "fixture" },
   { path = "spec/wasm_cross/declaration_literal_domain.almd", class = "fixture" },
+  { path = "spec/wasm_cross/sized_display_matrix.almd", class = "fixture" },
+  { path = "spec/wasm_cross/uint64_assert_display.almd", class = "fixture" },
 ]
 
 # ── SIZED-INTEGER ARITHMETIC WRAPS AT ITS DECLARED WIDTH ─
@@ -4801,4 +4803,5 @@ since     = "0.66.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float32_display_shortest.almd", class = "fixture" },
+  { path = "spec/wasm_cross/sized_display_matrix.almd", class = "fixture" },
 ]
