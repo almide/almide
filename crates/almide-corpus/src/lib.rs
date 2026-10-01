@@ -216,12 +216,12 @@ mod oracle_header_tests {
 
     #[test]
     fn parses_the_generators_line() {
-        let h = oracle_header(GOOD).unwrap();
+        let h = oracle_header(GOOD).expect("GOOD carries a header");
         assert_eq!(h.version, "0.63.0");
         assert_eq!(h.kind, "dev");
         assert_eq!(h.build_sha, None);
         assert_eq!(h.head, "e8c95e285");
-        let stamped = oracle_header("# oracle: almide 0.63.0 (dev, ac10929aa) at ac10929aa — x\n").unwrap();
+        let stamped = oracle_header("# oracle: almide 0.63.0 (dev, ac10929aa) at ac10929aa — x\n").expect("a stamped header parses");
         assert_eq!(stamped.build_sha.as_deref(), Some("ac10929aa"));
     }
 
@@ -691,7 +691,7 @@ mod shard_tests {
             assert_eq!(partial.parent(), Some(dir), "partials stay at the top level");
         }
         assert_eq!(weights.parent(), Some(dir.join("weights").as_path()));
-        assert_eq!(weights.file_name().unwrap(), "run_parity.run_parity.1-of-2.txt");
+        assert_eq!(weights.file_name().expect("a weights file name"), "run_parity.run_parity.1-of-2.txt");
         // Unsharded (the local generator): one file per column and gate.
         assert_eq!(weights_file(dir, "interp", "wasm_runtime_interp_ledger", ""), dir.join("weights/interp.wasm_runtime_interp_ledger.txt"));
     }
