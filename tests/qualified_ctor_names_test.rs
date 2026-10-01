@@ -26,6 +26,7 @@ const EXPECTED: &str = "1 2 3
 1 first 2 second
 3 7 12
 8 in 10 k
+575318
 q lv 3 entry 11 4 first";
 
 fn root() -> PathBuf {

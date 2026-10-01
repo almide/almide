@@ -1,0 +1,10 @@
+// Same case names as `cmd`, declared in a different order, so every shared
+// case has a different tag in each (#3176: the MIR rung built `sig.Halt` and
+// `sig.Turn(5)` with `cmd.Cmd`'s tags).
+type Sig = | Go(Int) | Halt | Turn(Int)
+
+fn code(s: Sig) -> Int = match s {
+  Go(n) => n,
+  Halt => 100,
+  Turn(n) => 200 + n,
+}

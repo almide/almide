@@ -8,6 +8,8 @@ import self.second
 import self.tree
 import self.flat
 import self.inner
+import self.sig
+import self.cmd
 
 fn record_beside_case() -> String = {
   let t = shapes.Pane(1)
@@ -104,4 +106,20 @@ fn in_module() -> String = {
   let p = inner.build(4)
   let k = inner.Pair("k")
   "${p.w} ${inner.pick(inner.mk())} ${inner.sum(inner.theirs(5))} ${inner.pick(k)}"
+}
+
+fn tags() -> Int = {
+  let x = sig.Halt
+  let y = cmd.Go(7)
+  let z = sig.Turn(5)
+  let w = cmd.Turn(6)
+  let p = match y {
+    cmd.Go(n) => n,
+    _ => 0,
+  }
+  let q = match z {
+    sig.Turn(n) => n,
+    _ => 0,
+  }
+  sig.code(x) + cmd.code(y) + sig.code(z) + cmd.code(w) + p * 10000 + q * 100000
 }

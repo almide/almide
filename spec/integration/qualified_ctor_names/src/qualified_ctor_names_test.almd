@@ -42,6 +42,10 @@ test "inside a module its own record and case win over an import's" {
   assert_eq(cells.in_module(), "8 in 10 k")
 }
 
+test "two modules' same-named cases keep their own tags" {
+  assert_eq(cells.tags(), 575318)
+}
+
 test "the entry program's own types shadow an import's constructors" {
   let p = Pane { id: 1, w: 2 }
   let q = Pair("q")
