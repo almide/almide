@@ -44,42 +44,53 @@ fn is_int_literal(arg: &str) -> bool {
     !a.is_empty() && a.chars().all(|c| c.is_ascii_digit() || c == '_')
 }
 
-#[test]
-fn no_host_op_site_takes_a_bare_integer() {
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut offenders = Vec::new();
-    let mut sites = 0;
-    let mut stack = vec![src];
+/// Every `.rs` file under `root`, recursively.
+fn rust_sources(root: std::path::PathBuf) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    let mut stack = vec![root];
     while let Some(dir) = stack.pop() {
         for entry in std::fs::read_dir(&dir).expect("read src dir") {
             let path = entry.expect("dir entry").path();
             if path.is_dir() {
                 stack.push(path);
-                continue;
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                files.push(path);
             }
-            if path.extension().is_none_or(|e| e != "rs") {
-                continue;
-            }
-            let text = std::fs::read_to_string(&path).expect("read source");
-            for (n, line) in text.lines().enumerate() {
-                let code = line.split("//").next().unwrap_or("");
-                for site in OP_SITES {
-                    let mut from = 0;
-                    while let Some(at) = code[from..].find(site) {
-                        let open = from + at + site.len();
-                        from = open;
-                        // A definition (`fn fs_call_1(&mut self, …`) is not a site.
-                        if code[..open - site.len()].trim_end().ends_with("fn") {
-                            continue;
-                        }
-                        let Some(arg) = last_arg(&code[open..]) else { continue };
-                        sites += 1;
-                        // The `op` parameter a helper forwards is a name too.
-                        if is_int_literal(arg) {
-                            offenders.push(format!("{}:{}: {}", path.display(), n + 1, line.trim()));
-                        }
-                    }
-                }
+        }
+    }
+    files
+}
+
+/// The op argument of every `site` call on one comment-stripped line.
+fn op_args<'a>(code: &'a str, site: &str) -> Vec<&'a str> {
+    let mut args = Vec::new();
+    let mut from = 0;
+    while let Some(at) = code[from..].find(site) {
+        let open = from + at + site.len();
+        from = open;
+        // A definition (`fn fs_call_1(&mut self, …`) is not a site.
+        let is_def = code[..open - site.len()].trim_end().ends_with("fn");
+        if let Some(arg) = last_arg(&code[open..]).filter(|_| !is_def) {
+            args.push(arg);
+        }
+    }
+    args
+}
+
+#[test]
+fn no_host_op_site_takes_a_bare_integer() {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut offenders = Vec::new();
+    let mut sites = 0;
+    for path in rust_sources(src) {
+        let text = std::fs::read_to_string(&path).expect("read source");
+        for (n, line) in text.lines().enumerate() {
+            let code = line.split("//").next().unwrap_or("");
+            let args: Vec<&str> = OP_SITES.iter().flat_map(|site| op_args(code, site)).collect();
+            sites += args.len();
+            // The `op` parameter a helper forwards is a name too.
+            if args.iter().any(|a| is_int_literal(a)) {
+                offenders.push(format!("{}:{}: {}", path.display(), n + 1, line.trim()));
             }
         }
     }
