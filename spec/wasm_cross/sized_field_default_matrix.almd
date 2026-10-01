@@ -46,7 +46,8 @@ fn main() -> Unit = {
   // one written, the rest defaulted: the neighbours keep their widths
   println(show_defaults(Defaults { n: 2, rec_int8: 5, rec_uint64: 3, rec_float32: 2.0 }))
   // a spread over a defaulted base carries the defaulted widths through
-  println(show_defaults({ ...d, n: 3 }))
+  let spread = { ...d, n: 3 }
+  println(show_defaults(spread))
   // a record-variant payload that omits its defaulted fields
   println(show_cell(Packed { tag: "all-default" }))
   println(show_cell(Packed { tag: "one-written", var_int8: 9 }))
