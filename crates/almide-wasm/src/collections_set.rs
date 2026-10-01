@@ -378,10 +378,12 @@ impl Emitter<'_> {
         }
         self.load_ty_slot_at(e);
         self.f.instructions().local_set(params[0]);
+        self.witness_callback_open(cb, None);
         self.lower(body, Some(b_ty))?;
         // the callback's member: stored when absent (a borrowed one takes
         // +1), dropped when present (an owned one is released)
         let owned = self.rc_owned_result(body);
+        self.witness_member_step(body, b_ty, owned);
         {
             let mut i = self.f.instructions();
             i.local_set(hv);
@@ -574,6 +576,8 @@ impl Emitter<'_> {
                 }
                 self.load_ty_slot_at(e);
                 self.f.instructions().local_set(x_p);
+                // #2755: the list.fold activation (`witness_fold_step`).
+                self.witness_callback_open(cb, Some(acc_p));
                 self.lower(body, Some(b))?;
                 // Same three-part change as `map.fold` (`collections.rs`) and the
                 // staged `list.fold` (`list.rs:647`): share the borrowed body
@@ -586,7 +590,9 @@ impl Emitter<'_> {
                 if let Some(dec) = self.elem_is_handle(b).then(|| self.dec_fn_of(b)) {
                     self.f.instructions().local_get(acc_p).call(dec);
                 }
+                self.witness_fold_step(body, acc_p, b);
                 self.f.instructions().local_set(acc_p);
+                self.witness_loop_close();
                 {
                     let mut i = self.f.instructions();
                     i.local_get(cur).i32_const(stride).i32_add().local_set(cur);

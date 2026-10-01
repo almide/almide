@@ -104,4 +104,54 @@ impl Emitter<'_> {
             (false, None) => w.decline("callback-value:borrowed-temp"),
         }
     }
+
+    /// A scan's HIT (`map.find`), right after the predicate: a one-arm
+    /// branch where each droppable handle param — a view of the entry it
+    /// was loaded from — is shared into the arm's fresh result (`am`), and
+    /// the scan breaks. The activation closes after the site.
+    pub(crate) fn witness_hit(&mut self, views: &[(u32, SliceTy)]) {
+        let shared: Vec<u32> =
+            views.iter().filter(|&&(_, t)| self.rc_droppable(t) && self.elem_is_handle(t)).map(|&(l, _)| l).collect();
+        let Some(w) = self.witness.as_mut() else { return };
+        w.branch_open();
+        w.branch_arm();
+        if !shared.iter().all(|&l| w.arg_share_move(l)) {
+            w.poison();
+        }
+        w.branch_arm();
+        w.branch_close();
+        w.loop_close();
+    }
+
+    /// `set.map`'s member, per element (collections_set.rs): a branch on
+    /// whether the accumulator already holds it. An OWNED member is born
+    /// here and released when present (`d`) or moves into the accumulator
+    /// when absent (`m`); a borrowed one is left alone when present and
+    /// shared into the accumulator when absent (`am`). The activation closes
+    /// after the site.
+    pub(crate) fn witness_member_step(&mut self, body: &almide_ir::IrExpr, t: SliceTy, owned: bool) {
+        if self.witness.is_none() {
+            return;
+        }
+        let droppable = self.rc_droppable(t);
+        let c = if droppable && owned { self.witness.as_mut().map(|w| w.temp_born()) } else { None };
+        self.witness_branch_open();
+        self.witness_branch_arm();
+        if let (Some(o), Some(w)) = (c, self.witness.as_mut()) {
+            w.temp_ops(o, "d");
+        }
+        self.witness_branch_arm();
+        match c {
+            Some(o) => {
+                if let Some(w) = self.witness.as_mut() {
+                    w.temp_ops(o, "m");
+                }
+            }
+            None if droppable && self.elem_is_handle(t) => self.witness_share_or_move(body, "set-member:borrowed-temp"),
+            None if droppable => self.witness_decline("set-member:flat"),
+            None => {}
+        }
+        self.witness_branch_close();
+        self.witness_loop_close();
+    }
 }
