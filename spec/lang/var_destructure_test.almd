@@ -1,0 +1,91 @@
+// `var` takes the `let` destructuring patterns, and every bound name is a
+// var (#3149). Each name is reassigned on its own; a write to one reaches
+// neither the other names nor the destructured value.
+type Pos = { px: Int, py: Int }
+
+fn step(at: (Int, Int)) -> (Int, (Int, String)) = (at.0 + 1, (at.1, "run"))
+
+test "var tuple pattern binds mutable names" {
+  let at = (1, 2)
+  var (x, y) = at
+  x = x + 10
+  y = y * 3
+  assert_eq(x, 11)
+  assert_eq(y, 6)
+  assert_eq(at.0, 1)
+  assert_eq(at.1, 2)
+}
+
+test "var nested tuple pattern with a hole" {
+  var (n, (last, _)) = step((4, 5))
+  n = n + last
+  last = 0
+  assert_eq(n, 10)
+  assert_eq(last, 0)
+}
+
+test "var record pattern binds mutable fields" {
+  let p = Pos { px: 4, py: 5 }
+  var { px, py } = p
+  px = px + py
+  py = 0
+  assert_eq(px, 9)
+  assert_eq(py, 0)
+  assert_eq(p.px, 4)
+  assert_eq(p.py, 5)
+}
+
+test "var pattern over heap components keeps value semantics" {
+  let words = (["a"], "z")
+  var (xs, s) = words
+  xs = xs + ["b"]
+  s = s + "y"
+  assert_eq(xs, ["a", "b"])
+  assert_eq(s, "zy")
+  let (orig_xs, orig_s) = words
+  assert_eq(orig_xs, ["a"])
+  assert_eq(orig_s, "z")
+}
+
+test "var pattern as while-loop state" {
+  var (i, acc) = (0, "")
+  while i < 4 {
+    i = i + 1
+    acc = acc + int.to_string(i)
+  }
+  assert_eq(i, 4)
+  assert_eq(acc, "1234")
+}
+
+test "var pattern inside a for body binds fresh vars each iteration" {
+  var total = 0
+  for k in 0..<3 {
+    var (lo, hi) = (k, k * 10)
+    lo = lo + 1
+    hi = hi + lo
+    total = total + hi
+  }
+  assert_eq(total, 36)
+}
+
+test "var pattern may rebind the name it destructures" {
+  let p = (3, 4)
+  var (p, q) = p
+  p = p + q
+  q = 0
+  assert_eq(p, 7)
+  assert_eq(q, 0)
+}
+
+test "var pattern over a call evaluates it once" {
+  var calls = 0
+  let next = () => {
+    calls = calls + 1
+    (calls, calls * 2)
+  }
+  var (a, b) = next()
+  a = a + b
+  assert_eq(a, 3)
+  assert_eq(b, 2)
+  assert_eq(calls, 1)
+}
