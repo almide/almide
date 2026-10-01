@@ -1,0 +1,44 @@
+// @contract: C-219
+// #3144: a call to a user fn declared `-> Never` fits every value slot, and
+// control never comes back from it. Native rendered the declared `Never` as
+// `()` (`pub fn die(m: &str) -> ()`), so `vec![g(), die(..)]` found `()` where
+// it wanted `i64`; the structural wasm leg had no signature for it
+// (`call-fn:die:ret-ty:Never`), nor for the effect form's `Result[Never, _]`.
+//
+// The untaken arms below are the build half: a list element, a call argument,
+// an operand, a record field, an `if` arm and a `match` arm. The last line is
+// the abort half — `bail(4)!` on an `effect fn … -> Never` in an operand, after
+// the operand to its left has run: `left` on stdout, exit 4, empty stderr.
+import process
+
+fn die(m: String) -> Never = panic(m)
+
+effect fn bail(c: Int) -> Never = process.exit(c)
+
+fn left(n: Int) -> Int = {
+  println("left")
+  n
+}
+
+fn add(a: Int, b: Int) -> Int = a + b
+
+fn pick(n: Int) -> Int = {
+  let xs = if n > 0 then [n, n * 2]
+  else [n, die("list")]
+  let a = if n > 0 then add(n, 1) else add(n, die("arg"))
+  let b = if n > 0 then n + a else n + die("operand")
+  let r = if n > 0 then { v: b } else { v: die("field") }
+  let c = if n > 0 then r.v
+  else die("arm")
+  match c % 2 {
+    0 => c + list.len(xs),
+    _ => if n > 100 then die("match") else c,
+  }
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(pick(3)))
+  let total = left(1) + bail(4)!
+  println(int.to_string(total))
+  println("unreachable")
+}
