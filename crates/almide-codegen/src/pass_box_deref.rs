@@ -30,6 +30,7 @@ impl NanoPass for BoxDerefPass {
         //         same table rather than the now-empty `module.var_table`.
         let (deref_ids, recursive) = collect_deref_vars(&program);
         insert_deref_nodes(&mut program, &deref_ids);
+        program.codegen_annotations.box_binders.extend(deref_ids);
 
         // Step 2: Process module-level box deref using the unified table.
         let all_type_decls: Vec<_> = program.type_decls.iter()
@@ -41,6 +42,7 @@ impl NanoPass for BoxDerefPass {
         for module in &mut program.modules {
             let mod_deref_ids = collect_module_deref_vars_with_vt(module, &shared_vt, &all_type_decls);
             insert_module_deref_nodes(module, &mod_deref_ids);
+            program.codegen_annotations.box_binders.extend(mod_deref_ids);
         }
 
         // Step 3: Populate codegen annotations
