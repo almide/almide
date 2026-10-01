@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at 36d2618b4 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at f5a25377b — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -1347,6 +1347,7 @@ e21fdcbb8583602a6847b42033c780c2fa9a7dc40dfc16ee48b8978208a15483	spec/wasm_cross
 acae630e7f0a607852ce6073c8d20b73ccd5492782f39db4bc1d3aa69de47aaa	spec/wasm_cross/set_entries_reclaim.almd
 0b8c7201f2d26abea5b7fe5142dc459440c92118ce77f9a0dc5d02bad4ceb9a7	spec/wasm_cross/set_index_order.almd
 012710321ffac50d4218514f53aaf855f20361e6e68cd6c8eb7c3eef046de0c1	spec/wasm_cross/set_insertion_order.almd
+cd44a03b7277d30738852797e3a9aa4d12e2671b5fb59ead0ef6ddc864055683	spec/wasm_cross/sized_field_default_matrix.almd
 26eacb96b27f8225b30bb6f870233572d5a2481ab1ac9714b1ace7206718d2f0	spec/wasm_cross/sized_int_overflow_wrap.almd
 c9d81ad576b468dba46c797689129dc76559f69f3560e92380cbf62372306609	spec/wasm_cross/sized_int_record_fields.almd
 59245cdceda63509fcaeac29b656a1988ee0c22f58b4880f87fe2d34bca1914c	spec/wasm_cross/sized_numeric_literals.almd
