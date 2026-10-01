@@ -206,6 +206,11 @@ impl Emitter<'_> {
             && matches!(self.fn_ret, Some(SliceTy::Result(..)))
         {
             self.lower(expr, Some(raw))?;
+            // #2758: the consumer reads `ok(x)` as fresh; under this ABI the
+            // value is x's own, so only an owned x keeps that true.
+            if self.rc_droppable(raw) && !self.rc_owned_result(expr) {
+                self.witness_decline("effect:carrier:ok-borrowed");
+            }
             return Ok(raw);
         }
         if !is_ok

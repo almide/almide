@@ -751,9 +751,13 @@ pub fn effect_subset(body: &IrExpr, raw_is_heap: bool) -> Option<String> {
     struct Carrier(bool);
     impl almide_ir::visit::IrVisitor for Carrier {
         fn visit_expr(&mut self, e: &IrExpr) {
+            // A call's droppable result is its callee's handed-over credit
+            // (#1986); one an arm declares a View declines at emission
+            // (data.rs `lower_err_raise`).
             if let IrExprKind::ResultOk { expr } = &e.kind
                 && !scalar_ty(&expr.ty)
                 && !crate::rc_ownership::rc_certainly_fresh(&expr.kind)
+                && !matches!(expr.kind, IrExprKind::Call { .. })
             {
                 self.0 = true;
             } else if !self.0 {
