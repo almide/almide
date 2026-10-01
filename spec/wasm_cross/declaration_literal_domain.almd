@@ -38,8 +38,6 @@ var TOP_VAR: UInt8 = 255
 
 var TOP_LIST_VAR: List[UInt8] = [1, 2]
 
-var TOP_MAP: Map[UInt8, Int8] = [:]
-
 type Edges = { n: Int, i8: Int8 = 127, u8: UInt8 = 255, i16: Int16 = -32768, u32: UInt32 = 4294967295, u64: UInt64 = 18446744073709551615 }
 
 type Cell = | Packed { tag: String, i8: Int8 = -128, u64: UInt64 = 9223372036854775808 } | Empty
@@ -57,16 +55,17 @@ fn main() -> Unit = {
   println("aggregate ${TOP_LIST} ${uint16.to_string(TOP_PAIR.0)} ${TOP_PAIR.1}")
   TOP_VAR = 254
   TOP_LIST_VAR[1] = 255
-  TOP_MAP[200] = -128
-  println("var ${uint8.to_string(TOP_VAR)} ${TOP_LIST_VAR} ${TOP_MAP}")
+  println("var ${uint8.to_string(TOP_VAR)} ${TOP_LIST_VAR}")
   var narrow: Int16 = 0
   narrow = -32768
   var xs: List[Float32] = [1.0]
   xs[0] = 2.5
+  var m: Map[UInt8, Int8] = [:]
+  m[200] = -128
   var cell = Edges { n: 2 }
   cell.u8 = 0
   cell.i16 = 32767
-  println("assign ${int.to_string(int.from_int16(narrow))} ${xs} ${uint8.to_string(cell.u8)} ${int.to_string(int.from_int16(cell.i16))}")
+  println("assign ${int.to_string(int.from_int16(narrow))} ${xs} ${m} ${uint8.to_string(cell.u8)} ${int.to_string(int.from_int16(cell.i16))}")
   let e = Edges { n: 1 }
   println("field ${e.n} ${int.to_string(int.from_int8(e.i8))} ${uint8.to_string(e.u8)} ${int.to_string(int.from_int16(e.i16))} ${uint32.to_string(e.u32)} ${uint64.to_string(e.u64)}")
   println("variant ${show_cell(Packed { tag: "p" })} ${show_cell(Empty)}")
