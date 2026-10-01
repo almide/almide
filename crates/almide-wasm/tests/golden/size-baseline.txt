@@ -338,6 +338,7 @@
 2870	spec/wasm_cross/int_rotate_negative_count.almd
 1215	spec/wasm_cross/int_rotate_nonpositive_width.almd
 1437	spec/wasm_cross/int_wrap_rotate_width.almd
+2023	spec/wasm_cross/interp_diverging_part.almd
 2531	spec/wasm_cross/interp_effect_unwrap_arg.almd
 3353	spec/wasm_cross/interp_operand_order.almd
 1585	spec/wasm_cross/io_write_ordering.almd
