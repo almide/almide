@@ -2286,16 +2286,35 @@ jobs:
           git clone --depth 1 https://github.com/O6lvl4/codopsy /tmp/codopsy
           cargo build --release --manifest-path /tmp/codopsy/Cargo.toml
           mkdir -p /tmp/codopsy-bin && cp /tmp/codopsy/target/release/codopsy /tmp/codopsy-bin/codopsy
-      - name: score must be A (>= 90)
+      # Every workspace member crate holds A (>= 90), not only the
+      # commissioned two: four crates had slipped to B/C unseen while the
+      # gate measured almide-wasm and almide-verify alone. The crate list is
+      # the root Cargo.toml's `[workspace] members`, so a new crate is gated
+      # from its first commit. The root package (".") is not in the loop:
+      # its directory holds every crate, and its own src/ + tests/ are not
+      # yet measured as one unit — that is a separate campaign.
+      - name: score must be A (>= 90) for every workspace crate
         run: |
+          set -uo pipefail
           chmod +x /tmp/codopsy-bin/codopsy
-          cp .codopsyrc.json crates/almide-wasm/ 2>/dev/null || true
-          /tmp/codopsy-bin/codopsy analyze crates/almide-wasm 2>&1 | tee /tmp/codopsy.out
-          sed 's/\x1b\[[0-9;]*m//g' /tmp/codopsy.out | grep -E "Quality Score:" | grep -qE "\((9[0-9]|100)/100\)" || { echo "::error::codopsy below A"; exit 1; }
-          # #2152: the independent certificate verifier is held to A too.
-          cp .codopsyrc.json crates/almide-verify/ 2>/dev/null || true
-          /tmp/codopsy-bin/codopsy analyze crates/almide-verify 2>&1 | tee /tmp/codopsy-verify.out
-          sed 's/\x1b\[[0-9;]*m//g' /tmp/codopsy-verify.out | grep -E "Quality Score:" | grep -qE "\((9[0-9]|100)/100\)" || { echo "::error::codopsy below A (crates/almide-verify)"; exit 1; }
+          mapfile -t crates < <(python3 -c 'import tomllib; print("\n".join(m for m in tomllib.load(open("Cargo.toml", "rb"))["workspace"]["members"] if m != "."))')
+          [ "${#crates[@]}" -gt 0 ] || { echo "::error::no workspace members read from Cargo.toml"; exit 1; }
+          below=()
+          for c in "${crates[@]}"; do
+            cp .codopsyrc.json "$c/"
+            line="$(/tmp/codopsy-bin/codopsy analyze "$c" 2>&1 >/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -E "Quality Score:" || true)"
+            rm -f "$c/.codopsyrc.json"
+            score="$(printf '%s\n' "$line" | sed -nE 's/.*\(([0-9]+)\/100\).*/\1/p')"
+            printf '%-28s %s\n' "$c" "${line:-<no score line>}"
+            if [ -z "$score" ] || [ "$score" -lt 90 ]; then
+              below+=("$c (${score:-no score})")
+            fi
+          done
+          if [ "${#below[@]}" -gt 0 ]; then
+            for b in "${below[@]}"; do echo "::error::codopsy below A: $b"; done
+            exit 1
+          fi
+          echo "codopsy: all ${#crates[@]} workspace crates score A"
       - name: file discipline (800-line cap over the commissioned backend)
         run: bash scripts/check-file-discipline.sh
 
