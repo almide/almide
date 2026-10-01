@@ -13,6 +13,14 @@
 use crate::emitter::Emitter;
 use crate::SliceTy;
 
+/// Where a callback value's one credit lives once an arm took it: a
+/// temporary or a view the recorder names by object, or a bound local.
+#[derive(Clone, Copy)]
+pub(crate) enum WCredit {
+    Obj(u32),
+    Local(u32),
+}
+
 impl Emitter<'_> {
     /// The callback's arm of the site opens (after `hof_lambda` mapped the
     /// params): the callback node is the arm's argument, hooked here for
@@ -100,7 +108,9 @@ impl Emitter<'_> {
                     w.poison();
                 }
             }
-            (false, None) if view => w.view_ops("ad"),
+            (false, None) if view => {
+                w.view_ops("ad");
+            }
             (false, None) => w.decline("callback-value:borrowed-temp"),
         }
     }
@@ -201,5 +211,63 @@ impl Emitter<'_> {
         w.loop_jump();
         w.branch_arm();
         w.branch_close();
+    }
+
+    /// A callback value an arm takes ONE credit on, to settle later on each
+    /// arm of a branch ([`Self::witness_credit_ops`]): an owned value is born
+    /// with it (`i`); a borrowed Var or view takes the guard's share (`a`).
+    pub(crate) fn witness_credit_take(&mut self, e: &almide_ir::IrExpr, t: SliceTy) -> Option<WCredit> {
+        if self.witness.is_none() || !self.rc_droppable(t) {
+            return None;
+        }
+        let tail = crate::rc_ownership::rc_tail(e);
+        let owned = self.rc_owned_result(tail);
+        let src = match &tail.kind {
+            almide_ir::IrExprKind::Var { id } => self.locals.get(id).map(|&(l, _)| l),
+            _ => None,
+        };
+        let view = crate::witness_unwrap::is_extraction_view(tail);
+        let w = self.witness.as_mut()?;
+        match (owned, src) {
+            (true, _) => Some(WCredit::Obj(w.temp_born())),
+            (false, Some(l)) if w.share_local(l) => Some(WCredit::Local(l)),
+            (false, Some(_)) => {
+                w.poison();
+                None
+            }
+            (false, None) if view => Some(WCredit::Obj(w.view_ops("a"))),
+            (false, None) => {
+                w.decline("callback-value:borrowed-temp");
+                None
+            }
+        }
+    }
+
+    /// Settle a credit [`Self::witness_credit_take`] took: `m` (moved into a
+    /// holder) or `d` (released).
+    pub(crate) fn witness_credit_ops(&mut self, c: Option<WCredit>, ops: &str) {
+        let (Some(c), Some(w)) = (c, self.witness.as_mut()) else { return };
+        let ok = match c {
+            WCredit::Obj(o) => {
+                w.temp_ops(o, ops);
+                true
+            }
+            WCredit::Local(l) => ops.chars().all(|op| if op == 'm' { w.move_local(l) } else { w.dec_local(l) }),
+        };
+        if !ok {
+            w.poison();
+        }
+    }
+
+    /// `list.unique_by`'s key, per element: kept by the seen list on a first
+    /// sighting (`m`), released on a repeat (`d`). The activation closes.
+    pub(crate) fn witness_seen_key(&mut self, c: Option<WCredit>) {
+        self.witness_branch_open();
+        self.witness_branch_arm();
+        self.witness_credit_ops(c, "m");
+        self.witness_branch_arm();
+        self.witness_credit_ops(c, "d");
+        self.witness_branch_close();
+        self.witness_loop_close();
     }
 }
