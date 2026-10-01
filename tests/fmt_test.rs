@@ -649,18 +649,164 @@ fn walkdir(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 // the general claim machine-checked: if a file type-checks, its formatted
 // output must type-check too.
 
+/// What `almide fmt` does to a file: the import pass (`auto_imports`, which
+/// removes unused imports) and THEN the printer. `roundtrip` above runs the
+/// printer alone, so an import-survival assertion built on it can never fail.
+fn fmt_with_import_edit(input: &str) -> String {
+    let tokens = Lexer::tokenize(input);
+    let mut parser = Parser::new(tokens);
+    let mut prog = parser.parse().expect("parse failed");
+    fmt::auto_imports(&mut prog, input, &[], &std::collections::HashMap::new());
+    fmt::format_program(&prog)
+}
+
+fn assert_keeps_consts(src: &str, position: &str) {
+    let out = fmt_with_import_edit(src);
+    assert!(out.contains("import consts"),
+        "an import whose only use is {position} must survive formatting:\n{out}");
+}
+
 #[test]
 fn fmt_keeps_import_used_only_in_type_position() {
-    let out = roundtrip("import varlib\n\nfn h(p: varlib.Policy) -> Int = 1\n");
+    let out = fmt_with_import_edit("import varlib\n\nfn h(p: varlib.Policy) -> Int = 1\n");
     assert!(out.contains("import varlib"),
         "an import whose only use is a TYPE position must survive formatting:\n{}", out);
 }
 
 #[test]
 fn fmt_keeps_import_used_only_in_type_decl_payload() {
-    let out = roundtrip("import varlib\n\ntype T = | A(varlib.Policy) | B\n");
+    let out = fmt_with_import_edit("import varlib\n\ntype T = | A(varlib.Policy) | B\n");
     assert!(out.contains("import varlib"),
         "an import used only in a variant payload type must survive formatting:\n{}", out);
+}
+
+// #3168: an import used only inside a `${}` hole was deleted when the hole sat
+// somewhere the formatter's own usage walk did not reach — the walk skipped a
+// block's TAIL expression, parameter defaults and record field defaults. The
+// token-level backstop cannot see into a string literal, so nothing kept it.
+// One pin per position; each fails on the pre-fix walk.
+
+#[test]
+fn fmt_keeps_import_used_only_in_block_tail_interpolation() {
+    assert_keeps_consts(
+        "import consts\n\neffect fn main() -> Unit = {\n  println(\"${consts.LIMIT}\")\n}\n",
+        "an interpolation in a block's tail expression",
+    );
+}
+
+#[test]
+fn fmt_keeps_import_used_only_in_heredoc_interpolation() {
+    assert_keeps_consts(
+        "import consts\n\nfn text() -> String = {\n  \"\"\"\n  limit ${consts.LIMIT}\n  \"\"\"\n}\n",
+        "an interpolation in a heredoc",
+    );
+}
+
+#[test]
+fn fmt_keeps_import_used_only_in_param_default() {
+    assert_keeps_consts(
+        "import consts\n\nfn label(s: String = \"${consts.LIMIT}\") -> String = s\n",
+        "a parameter default",
+    );
+}
+
+#[test]
+fn fmt_keeps_import_used_only_in_record_field_default() {
+    assert_keeps_consts(
+        "import consts\n\ntype Cfg = { n: Int, label: String = \"${consts.LIMIT}\" }\n",
+        "a record field default",
+    );
+}
+
+#[test]
+fn fmt_keeps_import_used_only_in_variant_case_field_default() {
+    assert_keeps_consts(
+        "import consts\n\ntype S = | Rect { w: Int, label: String = \"${consts.LIMIT}\" } | Dot\n",
+        "a variant-case field default",
+    );
+}
+
+#[test]
+fn fmt_keeps_import_used_only_in_convention_method() {
+    // A protocol implementation is a convention method `fn Type.method`.
+    assert_keeps_consts(
+        "import consts\n\ntype Mem = { n: Int }\n\nfn Mem.describe(self) -> String = {\n  \"${consts.LIMIT}\"\n}\n",
+        "a convention (protocol) method body",
+    );
+}
+
+#[test]
+fn fmt_keeps_import_used_only_in_match_arm_of_block_tail() {
+    assert_keeps_consts(
+        "import consts\n\nfn name(n: Int) -> String = {\n  match n {\n    0 => \"zero\",\n    _ => \"${consts.LIMIT}\",\n  }\n}\n",
+        "a match arm (pattern position's sibling) in a block tail",
+    );
+}
+
+#[test]
+fn fmt_keeps_import_used_only_in_typed_lambda_of_block_tail() {
+    assert_keeps_consts(
+        "import consts\n\nfn render(xs: List[Int]) -> List[String] = {\n  xs |> list.map((x: Int) => \"${x}/${consts.LIMIT}\")\n}\n",
+        "a type-annotated lambda in a block tail",
+    );
+}
+
+/// The two "is this import used" verdicts — the checker's E060 and the
+/// formatter's removal — are computed by different code over different
+/// representations (the checker marks a module used while RESOLVING a name;
+/// fmt walks the AST and a token superset). #3168 was those two drifting: the
+/// checker saw a use fmt did not, and fmt deleted a live import. This gate
+/// runs both over every `spec/` file with an import that checks clean and
+/// requires the same set of unused imports from each.
+#[test]
+fn fmt_unused_import_verdict_agrees_with_checker_on_all_spec_files() {
+    let bin = {
+        if let Ok(b) = std::env::var("ALMIDE_BIN") { b } else {
+            let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/release/almide");
+            if !p.exists() { return; } // debug-only invocation: covered in CI by the release run
+            p.to_str().unwrap().to_string()
+        }
+    };
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let import_name = |d: &almide::ast::Decl| -> Option<String> {
+        let almide::ast::Decl::Import { path, alias, .. } = d else { return None };
+        alias.as_ref().or(path.last()).map(|s| s.to_string())
+    };
+    let mut failures = Vec::new();
+    let mut tested = 0u32;
+    for path in walkdir(root.join("spec").as_path()) {
+        let Ok(source) = std::fs::read_to_string(&path) else { continue };
+        let Ok(mut prog) = Parser::new(Lexer::tokenize(&source)).parse() else { continue };
+        // A recovered parse is out of scope for both verdicts (E060 stays
+        // silent on one by design).
+        if prog.imports.is_empty() || prog.parse_recovered { continue; }
+        let check = std::process::Command::new(&bin)
+            .args(["check", "--json", path.to_str().unwrap()])
+            .output().expect("almide check");
+        if !check.status.success() { continue; }
+        let checker: std::collections::BTreeSet<String> = String::from_utf8_lossy(&check.stdout)
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter(|v| v["code"] == "E060")
+            .filter_map(|v| v["message"].as_str()?.strip_prefix("unused import '")?.strip_suffix('\'').map(String::from))
+            .collect();
+        let before: Vec<String> = prog.imports.iter().filter_map(import_name).collect();
+        fmt::auto_imports(&mut prog, &source, &[], &std::collections::HashMap::new());
+        let after: std::collections::BTreeSet<String> = prog.imports.iter().filter_map(import_name).collect();
+        let removed: std::collections::BTreeSet<String> =
+            before.into_iter().filter(|n| !after.contains(n)).collect();
+        if removed != checker {
+            failures.push(format!(
+                "{}: fmt removes {:?}, the checker reports unused {:?}",
+                path.display(), removed, checker
+            ));
+        }
+        tested += 1;
+    }
+    assert!(failures.is_empty(),
+        "fmt/checker unused-import disagreement in {} of {} file(s):\n{}",
+        failures.len(), tested, failures.join("\n"));
+    assert!(tested > 50, "gate coverage collapsed: only {} files tested", tested);
 }
 
 #[test]
