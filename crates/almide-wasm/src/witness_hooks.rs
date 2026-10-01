@@ -14,9 +14,8 @@
 //! count would let a nested argument's inner hooks stand in for an outer
 //! one the arm lowered bare, #2755): an arm that lowered an argument any
 //! other way is unaudited and the frame DECLINES — counted, never
-//! under-recorded. A droppable `View` result declines too: its share
-//! lands on an object the frame does not track by local, and this
-//! phase's object identity is the local map.
+//! under-recorded. A droppable `View` result is judged by its consumer
+//! (`witness_module_result`).
 //!
 //! TRUSTED (not mechanically checked here): an arm that routed every
 //! argument through `lower_arg` emits no other rc_inc / dec on those
@@ -24,7 +23,7 @@
 //! arm repeats it"). The runtime helpers' element bookkeeping inside
 //! `$block_copy` / `$dec_flat` is the helper's contract, as for phase A.
 
-use crate::arm::{ArgMode, Lowered, Own};
+use crate::arm::ArgMode;
 use crate::emitter::Emitter;
 use crate::SliceTy;
 
@@ -334,15 +333,8 @@ impl Emitter<'_> {
     }
 
     /// The module-call wrapper's audit (calls_modules.rs): a hook fired for
-    /// EACH of the call's own argument nodes, or the frame declines; a droppable
-    /// `View` result declines (identity, see the module doc).
-    pub(crate) fn witness_module_result(
-        &mut self,
-        name: &str,
-        args: &[almide_ir::IrExpr],
-        hooks_before: usize,
-        lowered: Option<Lowered>,
-    ) {
+    /// EACH of the call's own argument nodes, or the frame declines.
+    pub(crate) fn witness_module_result(&mut self, name: &str, args: &[almide_ir::IrExpr], hooks_before: usize) {
         let Some(w) = self.witness.as_ref() else { return };
         // A SCALAR argument has no RC site of its own (an arm may lower it
         // bare — `math.pow`'s operands); any site inside it (a nested
@@ -364,14 +356,14 @@ impl Emitter<'_> {
         };
         if !args.iter().all(|a| scalar(a) || w.hooked_since(hooks_before, node(a)) || rebound(a)) {
             self.witness_decline(&format!("module-arm:unaudited:{name}"));
-            return;
         }
-        if let Some(l) = lowered
-            && l.own == Own::View
-            && self.rc_droppable(l.ty)
-        {
-            self.witness_decline(&format!("module-result:view:{name}"));
-        }
+        // #2755: a droppable `View` result is a block the frame does not
+        // track by local. Every consumer that SHARES it — a bind, a tail, a
+        // store, an owned argument, an arm value — recognises only the views
+        // it can name and declines the rest itself; a view escaping a
+        // temporary the scope releases is promoted to an owned result first
+        // (arm.rs `promote_escaping_view`), which its consumer records like
+        // any owned call result. A reader that shares nothing records nothing.
     }
 
     /// The statement-position discard (stmts.rs): an owned droppable
