@@ -1,0 +1,1 @@
+type Flat = | Node { left: Int, right: Int } | Wrap(Int)

@@ -1,0 +1,4 @@
+// A variant whose case names the sibling modules reuse: `Pane` and `Leaf`
+// are records in `draw`, `Pair` is a case of `draw.Mark`, `Leaf` and `Pane`
+// are cases of `other.Box` (#3176).
+type Tree = | Pane(Int) | Pair(Int, Int) | Leaf { v: Int }

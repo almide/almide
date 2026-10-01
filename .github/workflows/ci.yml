@@ -2184,7 +2184,7 @@ jobs:
       # unreported. scripts/check-release-only-tests.sh keeps this list
       # honest; the wasm crate's seven ride the carried-gates step above.
       - name: Release-only root tests (the shards skip these by profile)
-        run: cargo test --release --locked --test cross_module_field_defaults_test --test embedded_cross_test --test http_serve_cross_test --test module_type_repr_test --test record_literal_through_alias_test --test top_let_forward_reference_test --test wasm_vm_parity_test
+        run: cargo test --release --locked --test cross_module_field_defaults_test --test embedded_cross_test --test http_serve_cross_test --test module_type_repr_test --test qualified_ctor_names_test --test record_literal_through_alias_test --test top_let_forward_reference_test --test wasm_vm_parity_test
 
   commissioned-wasm-gates-probes:
     name: Commissioned wasm gates (target availability + runtime ratio)

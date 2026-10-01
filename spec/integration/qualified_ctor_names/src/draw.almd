@@ -1,0 +1,5 @@
+type Pane = { id: Int, w: Int }
+
+type Leaf = { v: Int, tag: String }
+
+type Mark = | Pair(String) | Dot

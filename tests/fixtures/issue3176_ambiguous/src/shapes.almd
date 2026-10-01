@@ -1,0 +1,1 @@
+type Tree = | Leaf { v: Int } | Pane(Int)
