@@ -35,9 +35,12 @@ const OP_APPEND: i32 = 16;
 // native says `fs.fold_lines(...)` — a divergence introduced by the fix. The
 // body the host runs is identical; only the name it reports differs.
 // 43..=50 is the http family and 26..=37 the env/host family, so these take
-// the first numbers above both.
-const OP_FOLD_LINES: i32 = 51;
-const OP_FOR_EACH_LINE: i32 = 52;
+// the first numbers above both. The ADR-0006 fallible carriers
+// (`__fallible_fold_lines` / `__fallible_for_each_line`, fs_meta.rs /
+// fs_fallible.rs) are the SAME user calls and ride these ops too (#3148 —
+// they kept a literal op 12 and said `fs.read_lines(...)`).
+pub(crate) const OP_FOLD_LINES: i32 = 51;
+pub(crate) const OP_FOR_EACH_LINE: i32 = 52;
 
 impl Emitter<'_> {
     /// `fs.*` module calls. Ok(None) = not handled here.

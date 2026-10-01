@@ -34,7 +34,7 @@ impl Emitter<'_> {
             let (params, body) = self.hof_lambda(cb, 1)?;
             (params, Some(body), None, None)
         };
-        self.fs_call_1(p, 12)?; // OP_READ_LINES
+        self.fs_call_1(p, crate::fs::OP_FOR_EACH_LINE)?;
         let (hraw, hlen, herr) = self.fs_frames_or_err()?;
         let hr = self.hold_i32()?;
         self.f.instructions().i32_const(0).local_set(hr);
