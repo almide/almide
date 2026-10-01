@@ -508,8 +508,14 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
 /// the same: no native arm matches it, so it lowers as the linked call.
 /// Were an arm to inline it after all, the callback node would carry no
 /// hook and the module-call audit would decline the frame.
+///
+/// Two surfaces take a Fn VALUE outright: `bytes.map_each` has no native arm
+/// (the linked self-host body calls the closure), and `list.push` stores the
+/// closure it is handed as an element (`lower_arg`, Retain).
 fn is_self_hosted_hof(module: &str, func: &str) -> bool {
-    (module == "list" && func.starts_with("__fallible_")) || (!func.starts_with("__") && func.contains("__"))
+    (module == "list" && func.starts_with("__fallible_"))
+        || (!func.starts_with("__") && func.contains("__"))
+        || matches!((module, func), ("bytes", "map_each") | ("list", "push"))
 }
 
 /// #2755 / #2758: a module call that INLINES a literal callback. Admitted
@@ -549,6 +555,7 @@ fn inline_callback_subset(module: &str, func: &str, args: &[IrExpr]) -> Option<W
         // once, on one arm of a branch site (witness_inline.rs).
         ("list", "sort_by" | "flat_map" | "filter_map" | "take_while" | "drop_while" | "unique_by", [_, _]) | ("list", "update", [_, _, _]) => 1,
         ("list", "reduce", [_, _]) | ("list", "scan" | "zip_with", [_, _, _]) => 2,
+        ("matrix", "map", [_, _]) => 1,
         ("set", "filter" | "map", [_, _]) | ("map", "map", [_, _]) | ("map", "update", [_, _, _]) => 1,
         ("map", "upsert", [_, _, _, _]) => 1,
         ("map", "find" | "filter" | "all" | "any" | "count", [_, _]) => 2,
