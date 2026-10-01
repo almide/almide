@@ -1789,7 +1789,14 @@ impl Checker {
         // names it spells; the per-declaration walk below, which only supplies
         // each error's span, runs only when one of them is actually out of
         // scope. A clean file costs one walk and one scan of the type table.
-        let spelled = import_spellings(program).bare_types;
+        // A record head the checker resolves as a variant case the file sees
+        // (its own `| Leaf { .. }`) names that case, not a type, whatever a
+        // module the file never imports declares under the name (#3176).
+        let cur = self.current_module_prefix.clone();
+        let names_a_case = |env: &crate::types::TypeEnv, n: Sym, sp: TypeSpelling|
+            sp == TypeSpelling::RecordHead && env.lookup_ctor_in(&n, cur.as_deref()).is_some();
+        let spelled: Vec<(Sym, TypeSpelling)> = import_spellings(program).bare_types
+            .into_iter().filter(|(n, sp)| !names_a_case(&self.env, *n, *sp)).collect();
         let names: std::collections::HashSet<Sym> = spelled.iter().map(|(n, _)| *n).collect();
         let scope = FileTypeScope::new(&self.env, self.current_module_prefix.as_deref(), own, &names);
         // The one decision: the resolver's answer for each spelling. E029 is
@@ -1814,7 +1821,7 @@ impl Checker {
             shell.decls = vec![decl.clone()];
             let mut here: Vec<(Sym, TypeSpelling)> = import_spellings(&mut shell).bare_types
                 .into_iter()
-                .filter(|(n, _)| !letters.contains(n))
+                .filter(|(n, sp)| !letters.contains(n) && !names_a_case(&self.env, *n, *sp))
                 .collect();
             here.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()).then(a.1.cmp(&b.1)));
             for (name, spelling) in here {

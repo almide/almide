@@ -333,6 +333,10 @@ fn remap_codegen_annotations(ann: &mut CodegenAnnotations, r: &TypeRename) {
     // `Sampling` against the flat `almide_rt_mod_Sampling` → E0422).
     ann.default_fields = std::mem::take(&mut ann.default_fields).into_iter()
         .map(|((c, f), e)| ((remap_ctor(&c), f), rename_expr(e, r))).collect();
+    ann.case_default_fields = std::mem::take(&mut ann.case_default_fields).into_iter()
+        .map(|((e, c, f), d)| ((remap(&e), c, f), rename_expr(d, r))).collect();
+    ann.boxed_case_fields = std::mem::take(&mut ann.boxed_case_fields).into_iter()
+        .map(|(e, c, f)| (remap(&e), c, f)).collect();
     ann.boxed_fields = std::mem::take(&mut ann.boxed_fields).into_iter()
         .map(|(c, f)| (remap_ctor(&c), f)).collect();
     ann.ctor_to_enum = std::mem::take(&mut ann.ctor_to_enum).into_iter()

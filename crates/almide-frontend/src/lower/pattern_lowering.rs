@@ -51,7 +51,7 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
         ast::Pattern::Literal { value } => lower_pattern_literal(ctx, value),
         ast::Pattern::Constructor { name, args } => {
             let bare_name = bare_ctor_name(name);
-            let payload_tys = get_constructor_payload_tys_from_subject(ctx, &bare_name, ty);
+            let payload_tys = get_constructor_payload_tys_from_subject(ctx, name, ty);
             let ir_args = args.iter().enumerate().map(|(i, a)| {
                 let arg_ty = payload_tys.get(i).cloned().unwrap_or(Ty::Unknown);
                 lower_pattern(ctx, a, &arg_ty)
@@ -155,7 +155,7 @@ fn lower_pattern_record(
     rest: bool,
     subject_ty: &Ty,
 ) -> IrPattern {
-    let pat_name = struct_pattern_name(ctx, name);
+    let pat_name = struct_pattern_name(ctx, name, subject_ty);
     let field_ty_of = |ctx: &LowerCtx, field: &str| {
         record_case_field_ty_from_subject(ctx, name, field, subject_ty)
             .unwrap_or_else(|| resolve_record_field_ty(ctx, &pat_name, field))
@@ -185,8 +185,16 @@ fn lower_pattern_record(
 /// flat program no longer has (`Cfg { a, .. }` against `almide_rt_m_Cfg` was
 /// rustc E0308 while the wasm leg ran — a divergence of this landing's
 /// family). A record-VARIANT case keeps the bare case name: the ctor table is
-/// keyed by it and the subject's enum qualifies it (#412).
-fn struct_pattern_name(ctx: &LowerCtx, written: &almide_base::intern::Sym) -> almide_base::intern::Sym {
+/// keyed by it and the subject's enum qualifies it (#412). A subject that is
+/// a variant with that case answers first: read as a type spelling the name
+/// could find a same-named struct of a module this file never imports (#3176).
+fn struct_pattern_name(ctx: &LowerCtx, written: &almide_base::intern::Sym, subject_ty: &Ty) -> almide_base::intern::Sym {
+    let bare = bare_ctor_name(written);
+    if let Ty::Variant { cases, .. } = ctx.env.resolve_named(subject_ty)
+        && cases.iter().any(|c| c.name == bare)
+    {
+        return bare;
+    }
     let cur_mod = ctx.current_module.map(|m| m.as_str());
     match crate::canonicalize::resolve::canonical_user_type_sym(written.as_str(), &ctx.env.types, cur_mod) {
         Some(key) if matches!(ctx.env.types.get(&key), Some(Ty::Record { .. })) => key,
@@ -215,7 +223,8 @@ fn ctor_pattern_name(ctx: &LowerCtx, bare_name: &almide_base::intern::Sym, subje
 
 /// Extract constructor payload types from the subject type first (instantiated types),
 /// falling back to the constructor registry (template types) if the subject type doesn't match.
-fn get_constructor_payload_tys_from_subject(ctx: &LowerCtx, ctor_name: &str, subject_ty: &Ty) -> Vec<Ty> {
+fn get_constructor_payload_tys_from_subject(ctx: &LowerCtx, written: &almide_base::intern::Sym, subject_ty: &Ty) -> Vec<Ty> {
+    let ctor_name = bare_ctor_name(written);
     // Try to extract from the subject type (has instantiated generics)
     let resolved = ctx.env.resolve_named(subject_ty);
     if let Ty::Variant { cases, .. } = &resolved {
@@ -228,8 +237,9 @@ fn get_constructor_payload_tys_from_subject(ctx: &LowerCtx, ctor_name: &str, sub
         }
     }
     // Fallback: constructor registry (may have uninstantiated generic types).
-    // Owned-first (#1426): mirror the checker's candidate choice.
-    if let Some((_, case)) = ctx.env.lookup_ctor_in(&sym(ctor_name), ctx.current_module.map(|s| s.as_str())) {
+    // Owned-first (#1426), a qualified name inside its module alone (#3176):
+    // mirror the checker's candidate choice.
+    if let Some((_, case)) = ctx.env.lookup_ctor_written(written.as_str(), ctx.current_module.map(|s| s.as_str())) {
         match &case.payload {
             crate::types::VariantPayload::Tuple(tys) => tys.clone(),
             crate::types::VariantPayload::Record(fs) => fs.iter().map(|(_, t)| t.clone()).collect(),
@@ -268,7 +278,7 @@ fn resolve_record_field_ty(ctx: &LowerCtx, record_name: &str, field_name: &str) 
     let type_def = ctx.env.types.get(&sym(record_name)).filter(|td| !matches!(td, Ty::Variant { .. }));
     if let Some(type_def) = type_def {
         ctx.resolve_field_ty(type_def, field_name)
-    } else if let Some((_, case)) = ctx.env.lookup_ctor_in(&sym(record_name), ctx.current_module.map(|s| s.as_str())) {
+    } else if let Some((_, case)) = ctx.env.lookup_ctor_written(record_name, ctx.current_module.map(|s| s.as_str())) {
         if let crate::types::VariantPayload::Record(fs) = &case.payload {
             fs.iter().find(|(n, _)| n == field_name).map(|(_, t)| t.clone()).unwrap_or(Ty::Unknown)
         } else { Ty::Unknown }

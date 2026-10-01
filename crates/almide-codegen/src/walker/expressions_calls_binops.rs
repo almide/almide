@@ -305,21 +305,12 @@ fn render_generic_call_named(ctx: &RenderContext, name: almide_base::intern::Sym
          (expected RuntimeCall — see pass_normalize_runtime_calls)",
         name.as_str()
     );
-    if let Some(mapped) = ctx.ann.ctor_to_enum.get(name.as_str()) {
-        // `name` is a variant constructor. The global `ctor_to_enum` map
-        // collapses a constructor name shared across packages to the
-        // last-registered enum (#413). When the construction's RESOLVED
-        // type (`.ty`, disambiguated by the type checker) names a DIFFERENT
-        // but valid enum, prefer it; otherwise keep the mapped enum (no
-        // change for the common, non-colliding case — and for non-variant
-        // ctors like newtypes where `.ty` isn't a known enum).
-        let enum_name = match result_ty {
-            almide_lang::types::Ty::Named(n, _)
-                if n.as_str() != mapped.as_str()
-                   && ctx.ann.ctor_to_enum.values().any(|e| e.as_str() == n.as_str())
-                => n.to_string(),
-            _ => mapped.clone(),
-        };
+    // `name` is a variant constructor. The global `ctor_to_enum` map
+    // collapses a constructor name shared across packages to the
+    // last-registered enum (#413), so the construction's RESOLVED type
+    // (`.ty`, disambiguated by the type checker) answers first when it is
+    // an enum with this case (#3176).
+    if let Some(enum_name) = super::ctor_enum_for(ctx, name.as_str(), Some(result_ty)) {
         return render_enum_constructor(ctx, &name, &enum_name, args);
     }
     // Convention methods: "Type.method" → "Type_method" (free functions in all targets)
@@ -539,7 +530,7 @@ fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str
         let rendered = render_expr(ctx, a);
         let needs_box = ctx.ann.recursive_enums.contains(enum_name)
             && (ty_contains_name(&a.ty, enum_name)
-                || ctx.ann.boxed_fields.contains(&(ctor_name.to_string(), format!("{}", i))));
+                || ctx.ann.boxed_case_fields.contains(&(enum_name.to_string(), ctor_name.to_string(), format!("{}", i))));
         // Unwrap AlmideRcCow for var bindings used as variant constructor args.
         let is_rc_cow_var = matches!(&a.kind, IrExprKind::Var { id } if ctx.ann.is_rc_cow(id));
         let rendered = if is_rc_cow_var {

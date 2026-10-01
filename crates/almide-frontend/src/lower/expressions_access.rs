@@ -540,6 +540,14 @@ fn lower_expr_record(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
 /// bare ctor name (the expr's type pins the module, #412).
 fn record_ctor_name(ctx: &LowerCtx, n: almide_base::intern::Sym, ty: &Ty) -> almide_base::intern::Sym {
     let is_struct = |key: &str| matches!(ctx.env.types.get(&sym(key)), Some(crate::types::Ty::Record { .. }));
+    // A head the checker typed as a variant case builds that case: its bare
+    // name, the enum pinned by `ty`. Read as a type spelling it could name a
+    // same-named struct of a module this file never imports (#3176).
+    if let crate::types::Ty::Named(k, _) = ty
+        && matches!(ctx.env.types.get(k), Some(crate::types::Ty::Variant { .. }))
+    {
+        return sym(n.as_str().rsplit('.').next().unwrap_or(n.as_str()));
+    }
     let key = record_ctor_name_by_spelling(ctx, n);
     // A head the table cannot resolve to a struct from this file's spelling —
     // an alias of another module's record (`render.Bar` for `type Bar =

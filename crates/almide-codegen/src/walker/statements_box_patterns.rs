@@ -26,10 +26,8 @@ fn fresh_box_var(counter: &mut usize) -> String {
     v
 }
 
-fn qualify_ctor(ctx: &RenderContext, name: &str, enum_hint: Option<&str>) -> String {
-    let enum_name = enum_hint.map(|s| s.to_string())
-        .or_else(|| ctx.ann.ctor_to_enum.get(name).map(|s| s.to_string()));
-    match enum_name {
+fn qualify_ctor(ctx: &RenderContext, name: &str, subject: Option<&Ty>) -> String {
+    match super::ctor_enum_for(ctx, name, subject) {
         Some(en) => ctx.templates.render_with("ctor_qualify", None, &[],
             &[("enum_name", en.as_str()), ("ctor_name", name)])
             .unwrap_or_else(|| format!("{}::{}", en, name)),
@@ -37,12 +35,35 @@ fn qualify_ctor(ctx: &RenderContext, name: &str, enum_hint: Option<&str>) -> Str
     }
 }
 
-fn is_boxed_tuple_field(ctx: &RenderContext, ctor: &str, idx: usize) -> bool {
-    ctx.ann.boxed_fields.contains(&(ctor.to_string(), idx.to_string()))
+/// The type of a pattern's `i`-th sub-position under a value typed `ty`: an
+/// `Option` / `Result` / `List` argument or a tuple element. `Err` is the
+/// `Result`'s second argument. None when the walker cannot tell — the
+/// sub-pattern then qualifies by the bare case name alone.
+fn sub_pattern_ty(ty: Option<&Ty>, i: usize) -> Option<Ty> {
+    match ty? {
+        Ty::Applied(_, args) => args.get(i).cloned(),
+        Ty::Tuple(elems) => elems.get(i).cloned(),
+        _ => None,
+    }
 }
 
-fn is_boxed_record_field(ctx: &RenderContext, ctor: &str, field: &str) -> bool {
-    ctx.ann.boxed_fields.contains(&(ctor.to_string(), field.to_string()))
+/// The declared type of payload position `field` (a tuple index or a record
+/// field name) of case `ctor`, under a value typed `ty` (#3176). A nested
+/// pattern has no subject of its own, so this is how it learns which of two
+/// same-named cases it names.
+fn case_field_ty(ctx: &RenderContext, ty: Option<&Ty>, ctor: &str, field: &str) -> Option<Ty> {
+    let owner = match ty {
+        Some(Ty::Named(n, _)) if ctx.ann.case_fields.contains_key(&(n.to_string(), ctor.to_string())) => n.to_string(),
+        _ => super::ctor_enum_for(ctx, ctor, ty)?,
+    };
+    ctx.ann.case_fields.get(&(owner, ctor.to_string()))?
+        .iter().find(|(f, _)| f == field).map(|(_, t)| t.clone())
+}
+
+/// Is payload position `field` (a tuple index or a record field name) of case
+/// `ctor` boxed, for a value typed `ty`?
+fn is_boxed_field(ctx: &RenderContext, ty: Option<&Ty>, ctor: &str, field: &str) -> bool {
+    super::case_field_is_boxed(ctx, ty, ctor, field)
 }
 
 /// `matches!`-shaped boolean that `access` (a `&Enum`-typed expr) structurally
@@ -52,11 +73,11 @@ fn is_boxed_record_field(ctx: &RenderContext, ctor: &str, field: &str) -> bool {
 /// `unreachable!()` (#757: erasing a non-boxed inner tag like `Color::Red` to
 /// `_` let a `Black` node through the guard and panicked instead of falling
 /// through to the next arm).
-fn box_shape_guard(ctx: &RenderContext, pat: &IrPattern, access: &str, counter: &mut usize) -> String {
+fn box_shape_guard(ctx: &RenderContext, pat: &IrPattern, ty: Option<&Ty>, access: &str, counter: &mut usize) -> String {
     match pat {
         IrPattern::Constructor { .. } | IrPattern::RecordPattern { .. } => {
             let mut subs = Vec::new();
-            let shape = guard_shape(ctx, pat, counter, &mut subs);
+            let shape = guard_shape(ctx, pat, ty, counter, &mut subs);
             if subs.is_empty() {
                 format!("matches!({}, {})", access, shape)
             } else {
@@ -74,22 +95,22 @@ fn box_shape_guard(ctx: &RenderContext, pat: &IrPattern, access: &str, counter: 
 /// warn), literals and non-boxed constructors keep their refutable structure
 /// inline, and a boxed-nested sub-pattern binds a fresh var whose deref guard
 /// joins `subs` (Rust can't pattern-match through a `Box` on stable).
-fn guard_shape(ctx: &RenderContext, pat: &IrPattern, counter: &mut usize, subs: &mut Vec<String>) -> String {
+fn guard_shape(ctx: &RenderContext, pat: &IrPattern, ty: Option<&Ty>, counter: &mut usize, subs: &mut Vec<String>) -> String {
     match pat {
         IrPattern::Wildcard | IrPattern::Bind { .. } => "_".to_string(),
-        IrPattern::As { inner, .. } => guard_shape(ctx, inner, counter, subs),
+        IrPattern::As { inner, .. } => guard_shape(ctx, inner, ty, counter, subs),
         IrPattern::Literal { .. } => render_pattern_hinted(ctx, pat, None),
-        IrPattern::Some { inner } => format!("Some({})", guard_shape(ctx, inner, counter, subs)),
+        IrPattern::Some { inner } => format!("Some({})", guard_shape(ctx, inner, sub_pattern_ty(ty, 0).as_ref(), counter, subs)),
         IrPattern::None => "None".to_string(),
-        IrPattern::Ok { inner } => format!("Ok({})", guard_shape(ctx, inner, counter, subs)),
-        IrPattern::Err { inner } => format!("Err({})", guard_shape(ctx, inner, counter, subs)),
+        IrPattern::Ok { inner } => format!("Ok({})", guard_shape(ctx, inner, sub_pattern_ty(ty, 0).as_ref(), counter, subs)),
+        IrPattern::Err { inner } => format!("Err({})", guard_shape(ctx, inner, sub_pattern_ty(ty, 1).as_ref(), counter, subs)),
         IrPattern::Tuple { elements } => {
-            let shapes: Vec<String> =
-                elements.iter().map(|p| guard_shape(ctx, p, counter, subs)).collect();
+            let shapes: Vec<String> = elements.iter().enumerate()
+                .map(|(i, p)| guard_shape(ctx, p, sub_pattern_ty(ty, i).as_ref(), counter, subs)).collect();
             format!("({})", super::helpers::tuple_elems_join(&shapes))
         }
         IrPattern::Constructor { name, args } => {
-            let qualified = qualify_ctor(ctx, name.as_str(), None);
+            let qualified = qualify_ctor(ctx, name.as_str(), ty);
             if args.is_empty() {
                 return qualified;
             }
@@ -97,30 +118,35 @@ fn guard_shape(ctx: &RenderContext, pat: &IrPattern, counter: &mut usize, subs: 
                 .iter()
                 .enumerate()
                 .map(|(i, arg)| {
-                    if is_boxed_tuple_field(ctx, name.as_str(), i) && pattern_is_complex(arg) {
+                    let arg_ty = case_field_ty(ctx, ty, name.as_str(), &i.to_string());
+                    if is_boxed_field(ctx, ty, name.as_str(), &i.to_string()) && pattern_is_complex(arg) {
                         let g = fresh_box_var(counter);
-                        subs.push(box_shape_guard(ctx, arg, &format!("&**{}", g), counter));
+                        subs.push(box_shape_guard(ctx, arg, arg_ty.as_ref(), &format!("&**{}", g), counter));
                         g
                     } else {
-                        guard_shape(ctx, arg, counter, subs)
+                        guard_shape(ctx, arg, arg_ty.as_ref(), counter, subs)
                     }
                 })
                 .collect();
             format!("{}({})", qualified, shapes.join(", "))
         }
         IrPattern::RecordPattern { name, fields, .. } => {
-            let qualified = qualify_ctor(ctx, name.as_str(), None);
+            let qualified = qualify_ctor(ctx, name.as_str(), ty);
             let shapes: Vec<String> = fields
                 .iter()
                 .map(|fp| match &fp.pattern {
-                    Some(p) if is_boxed_record_field(ctx, name.as_str(), fp.name.as_str())
+                    Some(p) if is_boxed_field(ctx, ty, name.as_str(), fp.name.as_str())
                         && pattern_is_complex(p) =>
                     {
                         let g = fresh_box_var(counter);
-                        subs.push(box_shape_guard(ctx, p, &format!("&**{}", g), counter));
+                        let fty = case_field_ty(ctx, ty, name.as_str(), fp.name.as_str());
+                        subs.push(box_shape_guard(ctx, p, fty.as_ref(), &format!("&**{}", g), counter));
                         format!("{}: {}", ctx.field_ident(fp.name.as_str()), g)
                     }
-                    Some(p) => format!("{}: {}", ctx.field_ident(fp.name.as_str()), guard_shape(ctx, p, counter, subs)),
+                    Some(p) => {
+                        let fty = case_field_ty(ctx, ty, name.as_str(), fp.name.as_str());
+                        format!("{}: {}", ctx.field_ident(fp.name.as_str()), guard_shape(ctx, p, fty.as_ref(), counter, subs))
+                    }
                     None => format!("{}: _", ctx.field_ident(fp.name.as_str())),
                 })
                 .collect();
@@ -135,10 +161,12 @@ fn guard_shape(ctx: &RenderContext, pat: &IrPattern, counter: &mut usize, subs: 
 /// Emit `let <flat pat> = <move_expr> else { unreachable!() };` to move the value
 /// out of its box and bind the inner names by value, recursing for deeper boxes.
 /// The guard has already verified the structure, so `else` is dead.
-fn box_extract(ctx: &RenderContext, pat: &IrPattern, move_expr: &str, binds: &mut Vec<String>, counter: &mut usize, borrowed: bool) {
+/// `ty` is the boxed value's type, when known. Only `st`'s counter, binds and
+/// borrowed flag are touched.
+fn box_extract(ctx: &RenderContext, pat: &IrPattern, ty: Option<&Ty>, move_expr: &str, st: &mut UnboxState) {
     match pat {
-        IrPattern::Constructor { name, args } => box_extract_constructor(ctx, name, args, move_expr, binds, counter, borrowed),
-        IrPattern::RecordPattern { name, fields, .. } => box_extract_record(ctx, name, fields, move_expr, binds, counter, borrowed),
+        IrPattern::Constructor { name, args } => box_extract_constructor(ctx, name, args, ty, move_expr, st),
+        IrPattern::RecordPattern { name, fields, .. } => box_extract_record(ctx, name, fields, ty, move_expr, st),
         _ => {}
     }
 }
@@ -153,48 +181,50 @@ fn deeper_box(e: &str, borrowed: bool) -> String {
 /// `IrPattern::Constructor` case of `box_extract`, extracted verbatim
 /// (cog>30 decomposition, pattern 1 — `binds`/`counter` are write-only
 /// accumulators, same safety class as `check_needs_ownership`'s `needs`).
-fn box_extract_constructor(ctx: &RenderContext, name: &str, args: &[IrPattern], move_expr: &str, binds: &mut Vec<String>, counter: &mut usize, borrowed: bool) {
-    let qualified = qualify_ctor(ctx, name, None);
+fn box_extract_constructor(ctx: &RenderContext, name: &str, args: &[IrPattern], ty: Option<&Ty>, move_expr: &str, st: &mut UnboxState) {
+    let qualified = qualify_ctor(ctx, name, ty);
     let mut flat = Vec::with_capacity(args.len());
-    let mut deeper: Vec<(String, &IrPattern)> = Vec::new();
+    let mut deeper: Vec<(String, &IrPattern, Option<Ty>)> = Vec::new();
     for (i, arg) in args.iter().enumerate() {
-        if is_boxed_tuple_field(ctx, name, i) && pattern_is_complex(arg) {
-            let e = fresh_box_var(counter);
+        let arg_ty = case_field_ty(ctx, ty, name, &i.to_string());
+        if is_boxed_field(ctx, ty, name, &i.to_string()) && pattern_is_complex(arg) {
+            let e = fresh_box_var(&mut st.counter);
             flat.push(e.clone());
-            deeper.push((e, arg));
+            deeper.push((e, arg, arg_ty));
         } else {
-            flat.push(render_pattern_hinted(ctx, arg, None));
+            flat.push(render_pattern_hinted(ctx, arg, arg_ty.as_ref()));
         }
     }
     let flat_pat = if args.is_empty() { qualified } else { format!("{}({})", qualified, flat.join(", ")) };
-    binds.push(format!("let {} = {} else {{ unreachable!() }};", flat_pat, move_expr));
-    for (e, sub) in deeper {
-        box_extract(ctx, sub, &deeper_box(&e, borrowed), binds, counter, borrowed);
+    st.binds.push(format!("let {} = {} else {{ unreachable!() }};", flat_pat, move_expr));
+    for (e, sub, sub_ty) in deeper {
+        box_extract(ctx, sub, sub_ty.as_ref(), &deeper_box(&e, st.borrowed), st);
     }
 }
 
 /// `IrPattern::RecordPattern` case of `box_extract`, extracted verbatim
 /// (cog>30 decomposition).
-fn box_extract_record(ctx: &RenderContext, name: &str, fields: &[IrFieldPattern], move_expr: &str, binds: &mut Vec<String>, counter: &mut usize, borrowed: bool) {
-    let qualified = qualify_ctor(ctx, name, None);
+fn box_extract_record(ctx: &RenderContext, name: &str, fields: &[IrFieldPattern], ty: Option<&Ty>, move_expr: &str, st: &mut UnboxState) {
+    let qualified = qualify_ctor(ctx, name, ty);
     let mut flat = Vec::with_capacity(fields.len());
-    let mut deeper: Vec<(String, &IrPattern)> = Vec::new();
+    let mut deeper: Vec<(String, &IrPattern, Option<Ty>)> = Vec::new();
     for fp in fields {
+        let fty = case_field_ty(ctx, ty, name, fp.name.as_str());
         match &fp.pattern {
-            Some(p) if is_boxed_record_field(ctx, name, fp.name.as_str())
+            Some(p) if is_boxed_field(ctx, ty, name, fp.name.as_str())
                 && pattern_is_complex(p) =>
             {
-                let e = fresh_box_var(counter);
+                let e = fresh_box_var(&mut st.counter);
                 flat.push(format!("{}: {}", ctx.field_ident(fp.name.as_str()), e));
-                deeper.push((e, p));
+                deeper.push((e, p, fty));
             }
-            Some(p) => flat.push(format!("{}: {}", ctx.field_ident(fp.name.as_str()), render_pattern_hinted(ctx, p, None))),
+            Some(p) => flat.push(format!("{}: {}", ctx.field_ident(fp.name.as_str()), render_pattern_hinted(ctx, p, fty.as_ref()))),
             None => flat.push(ctx.field_ident(fp.name.as_str())),
         }
     }
-    binds.push(format!("let {} {{ {}, .. }} = {} else {{ unreachable!() }};", qualified, flat.join(", "), move_expr));
-    for (e, sub) in deeper {
-        box_extract(ctx, sub, &deeper_box(&e, borrowed), binds, counter, borrowed);
+    st.binds.push(format!("let {} {{ {}, .. }} = {} else {{ unreachable!() }};", qualified, flat.join(", "), move_expr));
+    for (e, sub, sub_ty) in deeper {
+        box_extract(ctx, sub, sub_ty.as_ref(), &deeper_box(&e, st.borrowed), st);
     }
 }
 
@@ -225,69 +255,60 @@ impl UnboxState {
 }
 
 /// `Constructor { name, args }` arm of [`unbox_arm_pattern`].
-fn unbox_constructor_pattern(ctx: &RenderContext, name: &str, args: &[IrPattern], enum_hint: Option<&str>, st: &mut UnboxState) -> String {
-    let qualified = qualify_ctor(ctx, name, enum_hint);
+fn unbox_constructor_pattern(ctx: &RenderContext, name: &str, args: &[IrPattern], subject: Option<&Ty>, st: &mut UnboxState) -> String {
+    let qualified = qualify_ctor(ctx, name, subject);
     let mut flat = Vec::with_capacity(args.len());
     for (i, arg) in args.iter().enumerate() {
-        if is_boxed_tuple_field(ctx, name, i) && pattern_is_complex(arg) {
+        let arg_ty = case_field_ty(ctx, subject, name, &i.to_string());
+        if is_boxed_field(ctx, subject, name, &i.to_string()) && pattern_is_complex(arg) {
             let v = fresh_box_var(&mut st.counter);
-            st.guards.push(box_shape_guard(ctx, arg, &st.through_box(&v), &mut st.counter));
-            box_extract(ctx, arg, &st.out_of_box(&v), &mut st.binds, &mut st.counter, st.borrowed);
+            st.guards.push(box_shape_guard(ctx, arg, arg_ty.as_ref(), &st.through_box(&v), &mut st.counter));
+            let out = st.out_of_box(&v);
+            box_extract(ctx, arg, arg_ty.as_ref(), &out, st);
             flat.push(v);
         } else {
-            flat.push(render_pattern_hinted(ctx, arg, None));
+            flat.push(render_pattern_hinted(ctx, arg, arg_ty.as_ref()));
         }
     }
     if args.is_empty() { qualified } else { format!("{}({})", qualified, flat.join(", ")) }
 }
 
 /// `RecordPattern { name, fields, .. }` arm of [`unbox_arm_pattern`].
-fn unbox_record_pattern(ctx: &RenderContext, name: &str, fields: &[IrFieldPattern], enum_hint: Option<&str>, st: &mut UnboxState) -> String {
-    let qualified = qualify_ctor(ctx, name, enum_hint);
+fn unbox_record_pattern(ctx: &RenderContext, name: &str, fields: &[IrFieldPattern], subject: Option<&Ty>, st: &mut UnboxState) -> String {
+    let qualified = qualify_ctor(ctx, name, subject);
     let mut flat = Vec::with_capacity(fields.len());
     for fp in fields {
+        let fty = case_field_ty(ctx, subject, name, fp.name.as_str());
         match &fp.pattern {
-            Some(p) if is_boxed_record_field(ctx, name, fp.name.as_str())
+            Some(p) if is_boxed_field(ctx, subject, name, fp.name.as_str())
                 && pattern_is_complex(p) =>
             {
                 let v = fresh_box_var(&mut st.counter);
-                st.guards.push(box_shape_guard(ctx, p, &st.through_box(&v), &mut st.counter));
-                box_extract(ctx, p, &st.out_of_box(&v), &mut st.binds, &mut st.counter, st.borrowed);
+                st.guards.push(box_shape_guard(ctx, p, fty.as_ref(), &st.through_box(&v), &mut st.counter));
+                let out = st.out_of_box(&v);
+                box_extract(ctx, p, fty.as_ref(), &out, st);
                 flat.push(format!("{}: {}", ctx.field_ident(fp.name.as_str()), v));
             }
-            Some(p) => flat.push(format!("{}: {}", ctx.field_ident(fp.name.as_str()), render_pattern_hinted(ctx, p, None))),
+            Some(p) => flat.push(format!("{}: {}", ctx.field_ident(fp.name.as_str()), render_pattern_hinted(ctx, p, fty.as_ref()))),
             None => flat.push(ctx.field_ident(fp.name.as_str())),
         }
     }
     format!("{} {{ {} }}", qualified, flat.join(", "))
 }
 
-fn unbox_arm_pattern(ctx: &RenderContext, pat: &IrPattern, enum_hint: Option<&str>, borrowed: bool)
+fn unbox_arm_pattern(ctx: &RenderContext, pat: &IrPattern, subject: Option<&Ty>, borrowed: bool)
     -> Option<(String, Vec<String>, Vec<String>)>
 {
     let mut st = UnboxState { borrowed, ..UnboxState::default() };
     let flat = match pat {
-        IrPattern::Constructor { name, args } => unbox_constructor_pattern(ctx, name, args, enum_hint, &mut st),
-        IrPattern::RecordPattern { name, fields, .. } => unbox_record_pattern(ctx, name, fields, enum_hint, &mut st),
+        IrPattern::Constructor { name, args } => unbox_constructor_pattern(ctx, name, args, subject, &mut st),
+        IrPattern::RecordPattern { name, fields, .. } => unbox_record_pattern(ctx, name, fields, subject, &mut st),
         _ => return None,
     };
     if st.guards.is_empty() { None } else { Some((flat, st.guards, st.binds)) }
 }
 
 // ── Match arm rendering ──
-
-/// #413: a top-level variant pattern belongs to the match SUBJECT's enum, so
-/// pass that enum's (mangled) name as a hint — it disambiguates a constructor
-/// name shared across packages, which the global ctor→enum map collapses.
-/// Only when the subject is a known variant enum — never a struct/opaque
-/// type (whose patterns must not be qualified `Type::field`).
-fn subject_enum_hint<'t>(ctx: &RenderContext, subject_ty: &'t almide_lang::types::Ty) -> Option<&'t str> {
-    match subject_ty {
-        almide_lang::types::Ty::Named(n, _) if ctx.ann.ctor_to_enum.values().any(|e| e.as_str() == n.as_str())
-            => Some(n.as_str()),
-        _ => None,
-    }
-}
 
 /// True when this match needs the refinement BACKSTOP arm: some arm was
 /// guard-lowered by the #610 box-pattern rewrite — a `matches!` shape-guard
@@ -302,8 +323,7 @@ pub fn match_needs_unreachable_backstop(
     arms: &[IrMatchArm],
     subject_ty: &almide_lang::types::Ty,
 ) -> bool {
-    let enum_hint = subject_enum_hint(ctx, subject_ty);
-    if !arms.iter().any(|a| unbox_arm_pattern(ctx, &a.pattern, enum_hint, false).is_some()) {
+    if !arms.iter().any(|a| unbox_arm_pattern(ctx, &a.pattern, Some(subject_ty), false).is_some()) {
         return false;
     }
     let has_irrefutable = arms.iter().any(|a| {
@@ -327,13 +347,15 @@ pub fn subject_is_borrowed(ctx: &RenderContext, subject: &IrExpr) -> bool {
 }
 
 pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide_lang::types::Ty, subject_ty: &almide_lang::types::Ty, borrowed: bool) -> String {
-    let enum_hint = subject_enum_hint(ctx, subject_ty);
+    // #413/#3176: the arm's patterns are rendered against the SUBJECT's type,
+    // so a case name two enums share qualifies with the enum the value has,
+    // at the top level and at every nested position the type reaches.
     // #610: a boxed-nested constructor pattern is rewritten to a flat pattern + a
     // `matches!` shape-guard + `let-else` box move-outs in the body. None when the
     // arm has no boxed-nested position (the common case → identical to before).
-    let (pattern, shape_guards, box_binds) = match unbox_arm_pattern(ctx, &arm.pattern, enum_hint, borrowed) {
+    let (pattern, shape_guards, box_binds) = match unbox_arm_pattern(ctx, &arm.pattern, Some(subject_ty), borrowed) {
         Some((flat, guards, binds)) => (flat, guards, binds),
-        None => (render_pattern_hinted(ctx, &arm.pattern, enum_hint), Vec::new(), Vec::new()),
+        None => (render_pattern_hinted(ctx, &arm.pattern, Some(subject_ty)), Vec::new(), Vec::new()),
     };
     // err() in a match arm where the match type is NOT Result: early return.
     // This handles `let x: T = match ... { none => err("msg") }` in
@@ -394,48 +416,39 @@ fn render_pattern_literal(ctx: &RenderContext, expr: &IrExpr) -> String {
     }
 }
 
-/// Resolve a `Constructor`/`RecordPattern` name's enum qualifier: prefer the
-/// subject's enum (`enum_hint`, #413) over the collapsing global
-/// `ctor_to_enum` map. Shared by `render_pattern_constructor` and
-/// `render_pattern_record` (same lookup, previously duplicated inline).
-fn resolve_pattern_enum_name(ctx: &RenderContext, enum_hint: Option<&str>, name: &str) -> Option<String> {
-    enum_hint.map(|s| s.to_string())
-        .or_else(|| ctx.ann.ctor_to_enum.get(name).map(|s| s.to_string()))
-}
-
 /// `render_pattern_hinted`'s `Constructor` arm, extracted verbatim.
-fn render_pattern_constructor(ctx: &RenderContext, name: &str, args: &[IrPattern], enum_hint: Option<&str>) -> String {
-    let enum_name = resolve_pattern_enum_name(ctx, enum_hint, name);
-    let qualified = if let Some(enum_name) = enum_name {
-        ctx.templates.render_with("ctor_qualify", None, &[], &[("enum_name", enum_name.as_str()), ("ctor_name", name)])
-            .unwrap_or_else(|| format!("{}::{}", enum_name, name))
-    } else {
-        name.to_string()
-    };
+fn render_pattern_constructor(ctx: &RenderContext, name: &str, args: &[IrPattern], subject: Option<&Ty>) -> String {
+    let qualified = qualify_ctor(ctx, name, subject);
     if args.is_empty() {
         qualified
     } else {
-        let args_str = args.iter().map(|a| render_pattern(ctx, a)).collect::<Vec<_>>().join(", ");
+        let args_str = args.iter().enumerate()
+            .map(|(i, a)| render_pattern_hinted(ctx, a, case_field_ty(ctx, subject, name, &i.to_string()).as_ref()))
+            .collect::<Vec<_>>().join(", ");
         format!("{}({})", qualified, args_str)
     }
 }
 
 /// `render_pattern_hinted`'s `RecordPattern` arm, extracted verbatim.
-fn render_pattern_record(ctx: &RenderContext, name: &str, fields: &[almide_ir::IrFieldPattern], rest: bool, enum_hint: Option<&str>) -> String {
+fn render_pattern_record(ctx: &RenderContext, name: &str, fields: &[almide_ir::IrFieldPattern], rest: bool, subject: Option<&Ty>) -> String {
     // Qualify enum variant record patterns: Circle → Shape::Circle. A plain
     // record pattern on a runtime-owned struct (`FileStat`, #1821) spells the
     // runtime's reserved name.
     // With no enum subject, a name the program declares as a struct is that
     // struct's pattern, not a same-spelled case of another module (#2636).
-    let struct_pattern = enum_hint.is_none() && ctx.ann.record_field_counts.contains_key(name);
-    let qualified_name = if let Some(enum_name) = resolve_pattern_enum_name(ctx, enum_hint, name).filter(|_| !struct_pattern) {
+    let enum_subject = subject.is_some_and(|t| super::names_enum(ctx, t));
+    let struct_pattern = !enum_subject && ctx.ann.record_field_counts.contains_key(name);
+    let qualified_name = if let Some(enum_name) = super::ctor_enum_for(ctx, name, subject).filter(|_| !struct_pattern) {
         format!("{}::{}", enum_name, name)
     } else {
         ctx.ann.runtime_owned_types.get(name).cloned().unwrap_or_else(|| name.to_string())
     };
     let fields_str = fields.iter()
         .map(|f| match &f.pattern {
-            Some(p) => format!("{}: {}", ctx.field_ident(f.name.as_str()), render_pattern(ctx, p)),
+            Some(p) => {
+                let fty = case_field_ty(ctx, subject, name, f.name.as_str());
+                format!("{}: {}", ctx.field_ident(f.name.as_str()), render_pattern_hinted(ctx, p, fty.as_ref()))
+            }
             None => ctx.field_ident(f.name.as_str()),
         })
         .collect::<Vec<_>>()
@@ -449,40 +462,42 @@ fn render_pattern_record(ctx: &RenderContext, name: &str, fields: &[almide_ir::I
     }
 }
 
-/// Like `render_pattern`, but `enum_hint` is the match subject's enum type name
-/// (mangled), used to qualify a TOP-LEVEL variant pattern. This disambiguates a
-/// constructor name shared across packages (#413): the pattern belongs to the
-/// subject's enum, not the (collapsed) global `ctor_to_enum` entry. Nested patterns
-/// recurse without a hint (fall back to `ctor_to_enum`).
-pub fn render_pattern_hinted(ctx: &RenderContext, pat: &IrPattern, enum_hint: Option<&str>) -> String {
+/// Like `render_pattern`, but `subject` is the type of the value the pattern
+/// is matched against, when known. A variant pattern qualifies with the enum
+/// that value has, which disambiguates a case name shared across packages
+/// (#413) — the global `ctor_to_enum` entry keeps only one of them — and the
+/// type is carried into every nested position it determines (#3176): an
+/// `Option` / `Result` / `List` argument, a tuple element, a case's payload.
+pub fn render_pattern_hinted(ctx: &RenderContext, pat: &IrPattern, subject: Option<&Ty>) -> String {
+    let at = |i: usize| sub_pattern_ty(subject, i);
     match pat {
         IrPattern::Wildcard => template_or(ctx, "pattern_wildcard", &[], "_"),
         IrPattern::Bind { var, .. } => ctx.var_name(*var).to_string(),
         // As-pattern (#1461): Rust's own `name @ pat` carries it 1:1.
         IrPattern::As { var, inner, .. } => {
-            format!("{} @ {}", ctx.var_name(*var), render_pattern(ctx, inner))
+            format!("{} @ {}", ctx.var_name(*var), render_pattern_hinted(ctx, inner, subject))
         }
         IrPattern::Literal { expr } => render_pattern_literal(ctx, expr),
         IrPattern::Some { inner } => {
-            let binding_s = render_pattern(ctx, inner);
+            let binding_s = render_pattern_hinted(ctx, inner, at(0).as_ref());
             ctx.templates.render_with("pattern_some", None, &[], &[("binding", binding_s.as_str())])
                 .unwrap_or_else(|| format!("Some(_)"))
         }
         IrPattern::None => template_or(ctx, "pattern_none", &[], "None"),
         IrPattern::Ok { inner } => {
-            let binding_s = render_pattern(ctx, inner);
+            let binding_s = render_pattern_hinted(ctx, inner, at(0).as_ref());
             ctx.templates.render_with("pattern_ok", None, &[], &[("binding", binding_s.as_str())])
                 .unwrap_or_else(|| format!("Ok(_)"))
         }
         IrPattern::Err { inner } => {
-            let binding_s = render_pattern(ctx, inner);
+            let binding_s = render_pattern_hinted(ctx, inner, at(1).as_ref());
             ctx.templates.render_with("pattern_err", None, &[], &[("binding", binding_s.as_str())])
                 .unwrap_or_else(|| format!("Err(_)"))
         }
-        IrPattern::Constructor { name, args } => render_pattern_constructor(ctx, name, args, enum_hint),
+        IrPattern::Constructor { name, args } => render_pattern_constructor(ctx, name, args, subject),
         IrPattern::Tuple { elements } => {
             let elems = super::helpers::tuple_elems_join(
-                &elements.iter().map(|e| render_pattern(ctx, e)).collect::<Vec<_>>(),
+                &elements.iter().enumerate().map(|(i, e)| render_pattern_hinted(ctx, e, at(i).as_ref())).collect::<Vec<_>>(),
             );
             ctx.templates.render_with("tuple_literal", None, &[], &[("elements", elems.as_str())])
                 .unwrap_or_else(|| "tuple(...)".into())
@@ -491,10 +506,10 @@ pub fn render_pattern_hinted(ctx: &RenderContext, pat: &IrPattern, enum_hint: Op
             if elements.is_empty() {
                 "[]".to_string()
             } else {
-                let elems = elements.iter().map(|e| render_pattern(ctx, e)).collect::<Vec<_>>().join(", ");
+                let elems = elements.iter().map(|e| render_pattern_hinted(ctx, e, at(0).as_ref())).collect::<Vec<_>>().join(", ");
                 format!("[{}]", elems)
             }
         }
-        IrPattern::RecordPattern { name, fields, rest } => render_pattern_record(ctx, name, fields, *rest, enum_hint),
+        IrPattern::RecordPattern { name, fields, rest } => render_pattern_record(ctx, name, fields, *rest, subject),
     }
 }

@@ -91,6 +91,7 @@ fn register_ctor_to_enum(ctx: &mut RenderContext, program: &IrProgram) {
         let ann = std::rc::Rc::make_mut(&mut ctx.ann);
         for (ctor, enum_name) in runtime_owned::variant_ctors() {
             ann.ctor_to_enum.insert(ctor.to_string(), enum_name.to_string());
+            ann.enum_cases.entry(enum_name.to_string()).or_default().insert(ctor.to_string());
         }
     }
     for td in &program.type_decls {
@@ -115,6 +116,13 @@ fn register_type_decl_ctors(ctx: &mut RenderContext, td: &IrTypeDecl) {
         let ann = std::rc::Rc::make_mut(&mut ctx.ann);
         for c in cases {
             ann.ctor_to_enum.insert(c.name.to_string(), enum_name.clone());
+            ann.enum_cases.entry(enum_name.clone()).or_default().insert(c.name.to_string());
+            let fields = match &c.kind {
+                IrVariantKind::Unit => Vec::new(),
+                IrVariantKind::Tuple { fields } => fields.iter().enumerate().map(|(i, t)| (i.to_string(), t.clone())).collect(),
+                IrVariantKind::Record { fields } => fields.iter().map(|f| (f.name.to_string(), f.ty.clone())).collect(),
+            };
+            ann.case_fields.insert((enum_name.clone(), c.name.to_string()), fields);
         }
     }
 }
