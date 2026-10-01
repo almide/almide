@@ -155,8 +155,12 @@ A newline is ignored and the statement continues when:
 - Keywords: `if`, `then`, `else`, `match`, `not`, `|`
 
 **The next line starts with:**
-- `.` (method chaining)
-- `|>` (pipe)
+- `.` followed by a name (method chaining)
+- Any infix operator: `|>`, `>>`, `+`, `-`, `*`, `/`, `%`, `^`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `..<`, `and`, `or`
+- `??` (its fallback stays on the `??` line — E038)
+
+A line-initial `-` glued to its operand (`-1`) starts a new statement, and a
+line-initial `...` is a spread, so neither continues.
 
 ```
 let result = items
@@ -166,6 +170,10 @@ let result = items
 text
   |> string.trim
   |> string.split(",")
+
+list.first(xs)
+  |> option.map((x) => x + 1)
+  ?? 0
 ```
 
 ---
@@ -1195,7 +1203,7 @@ The `is_` prefix convention is used for predicates in the stdlib: `string.is_emp
 
 ## 16. Standard Library
 
-1016 functions across 43 modules, defined in pure Almide (`stdlib/*.almd`). Runtime implementation: 100%.
+1017 functions across 43 modules, defined in pure Almide (`stdlib/*.almd`). Runtime implementation: 100%.
 
 ### 16.1 Auto-Imported Modules
 

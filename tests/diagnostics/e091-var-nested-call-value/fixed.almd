@@ -1,0 +1,12 @@
+// E091: a nested pattern over a call — name the value once, then one `var`
+// per component.
+fn decode_run(at: (Int, Int)) -> (Int, (Int, String)) = (at.0 + 1, (at.1, "run"))
+
+effect fn main() -> Unit = {
+  let p = decode_run((1, 2))
+  var x = p.0
+  var last = (p.1).0
+  x = x + last
+  last = 0
+  println("${x} ${last}")
+}

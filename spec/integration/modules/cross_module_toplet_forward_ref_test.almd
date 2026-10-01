@@ -1,0 +1,7 @@
+// #3164: the module-path twin of spec/lang/top_let_forward_reference_test.almd
+// — `fwdlet.all_words` iterates a top-level `let` that names a later one.
+import fwdlet
+
+test "a module fn above a let chain reads the chain's type" {
+  assert_eq(fwdlet.all_words(), "a=hello-;b=hello-!;")
+}

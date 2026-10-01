@@ -117,7 +117,7 @@ mod witness_unwrap;
 mod calls;
 mod http_call;
 mod calls_modules;
-mod cells;
+pub mod cells;
 mod global_reach;
 mod unroll;
 mod collect;

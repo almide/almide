@@ -6,6 +6,11 @@
 
 use almide_ir::{IrExpr, IrExprKind, IrStmtKind};
 
+/// The inlined-callback rules (split for the file budget).
+#[path = "witness_gate_callbacks.rs"]
+mod callbacks;
+use callbacks::{inline_callback_subset, is_self_hosted_hof};
+
 /// The phase-A/B1 subset gate: `None` = the body is straight-line and
 /// every RC-affecting site is covered by the recorder hooks (bind,
 /// call-argument, store, tail, epilogue / tail-release); `Some(reason)` =
@@ -99,6 +104,38 @@ impl Why {
     }
 }
 
+/// A write statement's value (and index). `x = v` (#2757): the old
+/// occupant's release and the new one's binding are the Assign hook's (a var
+/// bound outside the loop it is assigned in is loop-carried). #2755: `xs[i] =
+/// v` — the copy-on-write judge rebinds the var (`witness_mut_rebind`), the
+/// value moves into the slot (`witness_store`), an out-of-range index aborts;
+/// `h.f = v` — the copy-on-write field write rebinds the root var
+/// (`witness_field_rebind`), the value moves into the copy's slot
+/// (`witness_field_value`).
+fn write_subset(s: &IrStmtKind) -> Option<String> {
+    match s {
+        IrStmtKind::Assign { value, .. } => value_subset(value).map(|w| w.at("assign")),
+        IrStmtKind::IndexAssign { index, value, .. } => {
+            value_subset(index).or_else(|| value_subset(value)).map(|w| w.at("index-assign"))
+        }
+        IrStmtKind::FieldAssign { value, .. } => value_subset(value).map(|w| w.at("field-assign")),
+        _ => None,
+    }
+}
+
+/// `guard c else …`: a one-arm site. `else break` / `else continue` leaves
+/// the iteration; any other else (#2755) settles its value like a tail and
+/// leaves the frame through the exit plan (stmts.rs `lower_stmt_guard`).
+fn guard_subset(cond: &IrExpr, else_: &IrExpr) -> Option<Why> {
+    value_subset(cond).map(|w| w.inside("guard-cond")).or_else(|| {
+        if ends_in_loop_ctl(else_) {
+            stmt_body_subset(else_)
+        } else {
+            value_subset(else_)
+        }
+    })
+}
+
 /// The statement rules of a straight line: a Bind of an admissible value,
 /// a statement-position call (its owned droppable result is released by
 /// the discard route, `id`).
@@ -137,20 +174,13 @@ fn stmts_subset(stmts: &[almide_ir::IrStmt]) -> Option<String> {
                 }
             }
             IrStmtKind::Expr { expr } => return Some(format!("stmt:Expr:{}", expr_tag(expr))),
-            // #2757: an assignment — the old occupant's release and the new
-            // one's binding are the Assign hook's (a var bound outside the
-            // loop it is assigned in declines at emission).
-            IrStmtKind::Assign { value, .. } => {
-                if let Some(w) = value_subset(value) {
-                    return Some(w.at("assign"));
+            IrStmtKind::Assign { .. } | IrStmtKind::IndexAssign { .. } | IrStmtKind::FieldAssign { .. } => {
+                if let Some(why) = write_subset(&s.kind) {
+                    return Some(why);
                 }
             }
-            // `guard c else break` / `else continue`: a one-arm branch that
-            // leaves the iteration (the loop-control form only; a guard that
-            // returns is an exit edge, not recorded yet).
-            IrStmtKind::Guard { cond, else_ } if ends_in_loop_ctl(else_) => {
-                if let Some(w) = value_subset(cond).map(|w| w.inside("guard-cond")).or_else(|| stmt_body_subset(else_))
-                {
+            IrStmtKind::Guard { cond, else_ } => {
+                if let Some(w) = guard_subset(cond, else_) {
                     return Some(w.at("stmt:Guard"));
                 }
             }
@@ -245,6 +275,9 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
         // where the gate cannot see it: `witness_record_default` declines
         // one that is not a literal.
         IrExprKind::Tuple { elements } => elements.iter().find_map(|x| value_subset(x).map(|w| w.inside("tuple-elem"))),
+        IrExprKind::EmptyMap | IrExprKind::MapLiteral { .. } | IrExprKind::Range { .. } | IrExprKind::ToOption { .. } => {
+            built_value_subset(e)
+        }
         IrExprKind::Record { fields, .. } => {
             fields.iter().find_map(|(_, x)| value_subset(x).map(|w| w.inside("field")))
         }
@@ -308,6 +341,25 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
     }
 }
 
+/// #2755: the values a route BUILDS from its operands. `[]` of a map is a
+/// fresh empty block; `["k": v, …]` lowers as `map.from_list` over a fresh
+/// pairs list (emitter_values.rs) — a borrowed temporary of the arm (`id`)
+/// whose tuple slots are `witness_store`s; a range is a fresh Int list over
+/// its bounds (ranges.rs), whose overflow abort is a recorded terminal; `r?`
+/// converts its carrier (data.rs `witness_to_option`).
+fn built_value_subset(e: &IrExpr) -> Option<Why> {
+    match &e.kind {
+        IrExprKind::MapLiteral { entries } => entries
+            .iter()
+            .find_map(|(k, v)| value_subset(k).or_else(|| value_subset(v)).map(|w| w.inside("map-entry"))),
+        IrExprKind::Range { start, end, .. } => {
+            value_subset(start).or_else(|| value_subset(end)).map(|w| w.inside("range-bound"))
+        }
+        IrExprKind::ToOption { expr } => value_subset(expr).map(|w| w.inside("to-option")),
+        _ => None,
+    }
+}
+
 /// #2755: `xs[i]` over a bound list (arg_temps.rs names a produced object
 /// first): the element is a VIEW of the list's slot — a consumer that keeps
 /// it shares it (`is_extraction_view`), a reader spends nothing — and an
@@ -354,7 +406,9 @@ fn extraction_or_rt_subset(e: &IrExpr) -> Option<Why> {
         // `witness_unwrap_or_arm`). The carrier must be a bound local
         // (arg_temps.rs names a produced one), the fallback runs on its arm.
         IrExprKind::UnwrapOr { expr, fallback } => {
-            if !matches!(crate::rc_ownership::rc_tail(expr).kind, IrExprKind::Var { .. }) {
+            // #2755: a slot of a bound block (`r.f ?? x`) is a carrier view
+            // like a local's.
+            if !crate::witness_unwrap::slot_read_of_var(expr) {
                 return Some(Why::Here(format!("UnwrapOr-carrier:{}", tag(&crate::rc_ownership::rc_tail(expr).kind))));
             }
             value_subset(expr).or_else(|| value_subset(fallback).map(|w| w.inside("fallback")))
@@ -497,78 +551,6 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
 
 
 
-/// #2758: the fallible list HOFs (`list.__fallible_map__…`, the checker's
-/// instantiation of a callback that raises) are SELF-HOSTED: an ordinary call
-/// to a lifted stdlib body, no native arm inlines the lambda. The literal
-/// callback is then a closure VALUE — its env is built by the closure hooks
-/// and handed over under the callee's convention like any fresh argument.
-fn is_self_hosted_hof(module: &str, func: &str) -> bool {
-    module == "list" && func.starts_with("__fallible_")
-}
-
-/// #2755 / #2758: a module call that INLINES a literal callback. Admitted
-/// for the arms whose lowering (list.rs) records the callback as a loop
-/// activation per element (`witness_callback_open` / `witness_loop_close`):
-/// each param is a VIEW of the element it is loaded from, the body's own
-/// sites are the ordinary hooks, and what the arm does with the body's value
-/// is hooked or carries no RC site:
-///
-/// - `list.map`: the value is stored into the fresh result spine after the
-///   share guard (`witness_store`);
-/// - `list.filter`, `any`, `all`, `count`: the value is a Bool;
-/// - `list.find`: the value is a Bool, and a hit shares the element into a
-///   fresh some-cell (`witness_find_hit`, `am`);
-/// - `list.fold`: a scalar accumulator carries no credit; a HEAP one is a
-///   loop-carried OWNER (`witness_fold_step`) — the init's credit moves into
-///   the loop (the Retain argument, `am` / `im`), each iteration receives the
-///   accumulator (`i`), hands the body's value on (`im` / `am`) and releases
-///   what it received (`d`), and the fold's result is the owned value its
-///   consumer records. A fold over a
-///   `list.*` call takes the fused or enumerate lowering (list_fuse.rs,
-///   list_enumerate_fold.rs), whose activations are not hooked, so it
-///   declines as `call-arg:Lambda:list.fold:fused`.
-///
-/// A body that still PROPAGATES a `!` is not inlined at all (the fn-value
-/// route, list.rs), so it declines as `call-arg:Lambda:<arm>:propagating`.
-/// Any other arm declines as `call-arg:Lambda:<module>.<fn>`.
-fn inline_callback_subset(module: &str, func: &str, args: &[IrExpr]) -> Option<Why> {
-    let here = |t: &str| Some(Why::Here(format!("Lambda:{module}.{func}{t}")).inside("call-arg"));
-    let arity = match (module, func, args) {
-        ("list", "map" | "filter" | "find" | "any" | "all" | "count", [_, _]) => 1,
-        // The prefetch forms (fan.rs) start every read before the loop and
-        // record no activation.
-        ("fan", "map" | "any" | "any_map", [_, cb]) if crate::fan::body_is_fs_read_text(cb) => {
-            return here(":prefetch");
-        }
-        ("fan", "map" | "any" | "any_map", [_, _]) => 1,
-        ("list", "fold", [xs, _, _]) => {
-            if matches!(&crate::rc_ownership::rc_tail(xs).kind,
-                IrExprKind::Call { target: almide_ir::CallTarget::Module { module: m, .. }, .. } if m.as_str() == "list")
-            {
-                return here(":fused");
-            }
-            2
-        }
-        _ => return here(""),
-    };
-    let (cb, rest) = args.split_last()?;
-    let IrExprKind::Lambda { params, body, .. } = &cb.kind else {
-        return here(":wrapped");
-    };
-    if params.len() != arity {
-        return here(":arity");
-    }
-    // fan.rs lowers the body with its top-level `!` stripped (the
-    // accumulator performs the first-err semantics itself), and only a body
-    // that still propagates after the strip takes the closure route.
-    let body = if module == "fan" { crate::fan::strip_callback_try(body) } else { body };
-    if crate::fs_meta::expr_propagates(body) {
-        return here(":propagating");
-    }
-    rest.iter()
-        .find_map(|a| value_subset(a).map(|w| w.inside("call-arg")))
-        .or_else(|| value_subset(body).map(|w| w.inside("callback")))
-}
 
 /// A statement body of a branch arm (#2756) or a loop (#2757): a call, a
 /// block of admitted statements, a nested branch or loop, a jump, or nothing.
@@ -709,9 +691,13 @@ pub fn effect_subset(body: &IrExpr, raw_is_heap: bool) -> Option<String> {
     struct Carrier(bool);
     impl almide_ir::visit::IrVisitor for Carrier {
         fn visit_expr(&mut self, e: &IrExpr) {
+            // A call's droppable result is its callee's handed-over credit
+            // (#1986); one an arm declares a View declines at emission
+            // (data.rs `lower_err_raise`).
             if let IrExprKind::ResultOk { expr } = &e.kind
                 && !scalar_ty(&expr.ty)
                 && !crate::rc_ownership::rc_certainly_fresh(&expr.kind)
+                && !matches!(expr.kind, IrExprKind::Call { .. })
             {
                 self.0 = true;
             } else if !self.0 {

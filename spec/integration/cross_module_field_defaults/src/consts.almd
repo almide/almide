@@ -1,0 +1,2 @@
+// The module `shapes` imports as `c`. A default `c.LIMIT` names THIS 40.
+let LIMIT: Int = 40

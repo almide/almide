@@ -268,15 +268,10 @@ impl WitnessRecorder {
     /// A moved assignment (#3104, writeback_move.rs): `dst` takes over the
     /// object `src` holds, credit and all — no share, no release. `src` is
     /// emptied after the store ([`Self::empty_local`]). A var bound outside
-    /// the loop being assigned declines, as [`Self::assign`] does.
+    /// the loop being assigned is loop-carried, as in [`Self::assign`].
     pub fn transfer(&mut self, dst: u32, released_old: bool, src: u32) -> bool {
-        match self.bound.get(&dst) {
-            None => return false,
-            Some(&d) if d < self.loop_depth => {
-                self.decline("loop-carried-assign");
-                return true;
-            }
-            Some(_) => {}
+        if !self.rebind_site(dst) {
+            return false;
         }
         if !self.bound.contains_key(&src) {
             return false;
@@ -291,7 +286,7 @@ impl WitnessRecorder {
     /// `local` was set to NULL (#3104): it holds nothing from here, so a
     /// later release through it is a release of NULL (skipped).
     pub fn empty_local(&mut self, local: u32) {
-        if self.bound.contains_key(&local) {
+        if self.rebind_site(local) {
             self.log(Ev::Bind { local, obj: u32::MAX, owner: false });
         }
     }
@@ -309,19 +304,40 @@ impl WitnessRecorder {
         true
     }
 
+    /// #2755 / #2758: `holder` (a pseudo local naming a top-level global or
+    /// a captured C-319 cell) is an OUTER holder this frame writes: the frame
+    /// borrows its credit for the whole run (witness_carry.rs `frame_carry`).
+    /// Marked once, live code or not — the marker places nothing.
+    pub fn outer_holder(&mut self, holder: u32) {
+        if let std::collections::hash_map::Entry::Vacant(v) = self.bound.entry(holder) {
+            v.insert(0);
+            self.log.push(Ev::Carry { local: holder, depth: paths::FRAME_HELD });
+        }
+    }
+
+    /// A rebind of `local` is about to be logged: false when no hook bound
+    /// it. A var bound outside the loop being emitted holds a different
+    /// block at each loop head: the rebind marks every loop in between as
+    /// carrying it (`Carry`, rendered by witness_paths.rs `carry`).
+    fn rebind_site(&mut self, local: u32) -> bool {
+        match self.bound.get(&local) {
+            None => false,
+            Some(&depth) => {
+                if depth < self.loop_depth {
+                    self.log(Ev::Carry { local, depth });
+                }
+                true
+            }
+        }
+    }
+
     /// An `Assign` (#2757): the old occupant was released by the route
     /// (`released_old`), and the local now holds the rhs — a new object
     /// (`src = None`) or a share of `src`'s. A var bound outside the loop
-    /// being assigned declines: its block at the loop head differs per
-    /// iteration, which one activation line cannot carry.
+    /// being assigned is loop-carried (#2755, [`Self::rebind_site`]).
     pub fn assign(&mut self, local: u32, released_old: bool, src: Option<u32>) -> bool {
-        match self.bound.get(&local) {
-            None => return false,
-            Some(&d) if d < self.loop_depth => {
-                self.decline("loop-carried-assign");
-                return true;
-            }
-            Some(_) => {}
+        if !self.rebind_site(local) {
+            return false;
         }
         if released_old {
             self.held_ops(local, "d");
@@ -436,6 +452,15 @@ impl WitnessRecorder {
     pub fn view_share_move(&mut self) {
         let o = self.view_obj();
         self.ops(o, "am");
+    }
+
+    /// #2755: `ops` on a view this frame reads without holding (a callback
+    /// value an arm shares and releases again: `ad`). Returns the object, for
+    /// a site that settles the share later ([`Self::temp_ops`]).
+    pub fn view_ops(&mut self, ops: &str) -> u32 {
+        let o = self.view_obj();
+        self.ops(o, ops);
+        o
     }
 
     /// A Bind of a view: the Bind route's `rc_inc_top` is the share, and
@@ -723,66 +748,5 @@ pub(crate) fn heapish_ret(t: SliceTy) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_fresh_bind_and_its_epilogue_release_balance() {
-        let mut w = WitnessRecorder::new();
-        w.bind_fresh(3);
-        assert!(w.dec_local(3));
-        assert_eq!(w.certificate(), "id\n");
-        assert!(balanced(&w.certificate()));
-    }
-
-    #[test]
-    fn an_alias_bind_shares_the_source_object_and_both_release() {
-        // let a = [1]; let b = a — one object, streams to the canonical
-        // shared shape the incumbent's tests pin ("iadd").
-        let mut w = WitnessRecorder::new();
-        w.bind_fresh(3);
-        assert!(w.bind_alias(4, 3));
-        assert!(w.dec_local(3));
-        assert!(w.dec_local(4));
-        assert_eq!(w.certificate(), "iadd\n");
-        assert!(balanced(&w.certificate()));
-    }
-
-    #[test]
-    fn a_var_argument_shares_then_moves_into_the_callee() {
-        // let a = [1]; f(a) — the site's rc_inc + the credit's move.
-        let mut w = WitnessRecorder::new();
-        w.bind_fresh(3);
-        assert!(w.arg_share_move(3));
-        assert!(w.dec_local(3));
-        assert_eq!(w.certificate(), "iamd\n");
-        assert!(balanced(&w.certificate()));
-    }
-
-    #[test]
-    fn a_temporary_argument_and_an_owned_tail_each_move_one_credit() {
-        let mut w = WitnessRecorder::new();
-        w.temp_move();
-        w.tail_owned_move();
-        assert_eq!(w.certificate(), "im\nim\n");
-        assert!(balanced(&w.certificate()));
-    }
-
-    #[test]
-    fn an_over_release_fails_the_balance_mirror() {
-        assert!(!balanced("idd\n"));
-        assert!(!balanced("ia\n"));
-        assert!(balanced("iadd\nid\n"));
-    }
-
-    #[test]
-    fn a_decline_withdraws_the_certificate_and_a_poison_outranks_it() {
-        let mut w = WitnessRecorder::new();
-        w.bind_fresh(3);
-        w.decline("module-result:view");
-        w.decline("second-reason-loses");
-        assert_eq!(w.certificate(), "!decline:module-result:view\n");
-        w.poison();
-        assert_eq!(w.certificate(), "!poison\n");
-    }
-}
+#[path = "witness_tests.rs"]
+mod tests;

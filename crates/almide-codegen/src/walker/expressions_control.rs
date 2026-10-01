@@ -326,6 +326,20 @@ fn render_expr_list(ctx: &RenderContext, expr: &IrExpr) -> String {
         .unwrap_or_else(|| format!("[...]"))
 }
 
+/// The field defaults of the record-payload case `ctor` a literal typed `ty`
+/// builds, when `ty` names an enum with that case (#3176). None for a struct
+/// literal, which keeps the `default_fields` lookup.
+fn case_literal_defaults<'a>(ctx: &'a RenderContext, ctor: &str, ty: &Ty) -> Option<Vec<(String, &'a IrExpr)>> {
+    let Ty::Named(n, _) = ty else { return None };
+    if !ctx.ann.enum_cases.get(n.as_str()).is_some_and(|cs| cs.contains(ctor)) || super::literal_is_declared_struct(ctx, ctor, ty) {
+        return None;
+    }
+    Some(ctx.ann.case_default_fields.iter()
+        .filter(|((e, c, _), _)| e == n.as_str() && c == ctor)
+        .map(|((_, _, f), d)| (f.clone(), d))
+        .collect())
+}
+
 fn render_expr_record(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::Record { name, fields } = &expr.kind else { unreachable!() };
     // Build field strings (explicit + defaults for missing)
@@ -337,7 +351,7 @@ fn render_expr_record(ctx: &RenderContext, expr: &IrExpr) -> String {
         let mut val_str = render_expr_owned(ctx, v);
         // Box recursive fields (annotation is target-aware — empty for non-Rust)
         if let Some(cn) = name {
-            if ctx.ann.boxed_fields.contains(&(cn.to_string(), k.to_string())) {
+            if super::case_field_is_boxed(ctx, Some(&expr.ty), cn.as_str(), k.as_str()) {
                 val_str = format!("std::boxed::Box::new({})", val_str);
             }
         }
@@ -351,11 +365,17 @@ fn render_expr_record(ctx: &RenderContext, expr: &IrExpr) -> String {
     }
     // Fill in default fields that were not explicitly provided.
     // default_fields is keyed by both bare name ("Msg") and module-qualified
-    // name ("dep_pkg.Msg"), so we try the exact ctor_name_str first.
-    let mut default_keys: Vec<(String, String)> = ctx.ann.default_fields.keys()
-        .filter(|(cn, _)| cn == ctor_name_str)
-        .cloned()
-        .collect();
+    // name ("dep_pkg.Msg"), so we try the exact ctor_name_str first. A
+    // variant case's literal reads its OWN enum's defaults: the bare case
+    // name is shared by every enum declaring it (#3176).
+    let case_defaults = case_literal_defaults(ctx, ctor_name_str, &expr.ty);
+    let mut default_keys: Vec<(String, String)> = match &case_defaults {
+        Some(d) => d.iter().map(|(f, _)| (ctor_name_str.to_string(), f.clone())).collect(),
+        None => ctx.ann.default_fields.keys()
+            .filter(|(cn, _)| cn == ctor_name_str)
+            .cloned()
+            .collect(),
+    };
     if default_keys.is_empty() && almide_base::env::flag("ALMIDE_DEFAULTS_DEBUG") {
         let all: Vec<&String> = ctx.ann.default_fields.keys().map(|(c, _)| c).collect();
         eprintln!("[defaults-miss] ctor={:?} known={:?}", ctor_name_str, all);
@@ -368,10 +388,14 @@ fn render_expr_record(ctx: &RenderContext, expr: &IrExpr) -> String {
     default_keys.sort();
     for (_, field_name) in &default_keys {
         if explicit_names.contains(field_name.as_str()) { continue; }
-        let Some(default_expr) = ctx.ann.default_fields.get(&(ctor_name_str.to_string(), field_name.clone())) else { continue; };
+        let default_expr = match &case_defaults {
+            Some(d) => d.iter().find(|(f, _)| f == field_name).map(|(_, e)| *e),
+            None => ctx.ann.default_fields.get(&(ctor_name_str.to_string(), field_name.clone())),
+        };
+        let Some(default_expr) = default_expr else { continue; };
         let mut val_str = render_expr(ctx, default_expr);
         let needs_box = name.as_ref()
-            .map_or(false, |cn| ctx.ann.boxed_fields.contains(&(cn.to_string(), field_name.clone())));
+            .map_or(false, |cn| super::case_field_is_boxed(ctx, Some(&expr.ty), cn.as_str(), field_name));
         if needs_box { val_str = format!("std::boxed::Box::new({})", val_str); }
         let fname = ctx.field_ident(field_name.as_str());
         field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", fname.as_str()), ("value", val_str.as_str())])
@@ -412,7 +436,7 @@ fn render_expr_record(ctx: &RenderContext, expr: &IrExpr) -> String {
     // module's same-spelled case (`type Stop = { .. }` beside a dependency's
     // `| Stop`, #2636): `ctor_to_enum` is keyed by the bare case name
     // program-wide, so it answers only when the literal is not the struct.
-    if let Some(enum_name) = ctx.ann.ctor_to_enum.get(&type_name)
+    if let Some(enum_name) = super::ctor_enum_for(ctx, &type_name, Some(&expr.ty))
         .filter(|_| !super::literal_is_declared_struct(ctx, &type_name, &expr.ty))
     {
         // Try ctor_record template first (TS: function call), fallback to record_literal
@@ -477,6 +501,17 @@ fn unwrap_err_coerce_attr(ctx: &RenderContext, inner_ty: &Ty) -> Option<&'static
     } else {
         None
     }
+}
+
+/// `e?` / `e!`. A `Never`-typed one is `bail(c)!` on an `effect fn … -> Never`
+/// (#3144): its ok payload renders `()`, which fits no value slot, and the
+/// callee never returns ok — so past the propagation it is spelled as `!`.
+fn render_expr_try_or_unwrap(ctx: &RenderContext, expr: &IrExpr) -> String {
+    let rendered = match &expr.kind {
+        IrExprKind::Try { expr: inner } => render_expr_try(ctx, inner),
+        _ => render_expr_unwrap(ctx, expr),
+    };
+    if expr.ty == Ty::Never { format!("{{ {rendered}; unreachable!() }}") } else { rendered }
 }
 
 fn render_expr_unwrap(ctx: &RenderContext, expr: &IrExpr) -> String {

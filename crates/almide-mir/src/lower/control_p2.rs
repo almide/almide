@@ -111,10 +111,32 @@ fn classify_variant_arm(
 /// the @12-handle bind is required, not a plain var destructure. `$p` ids start above subject+arms.
 /// `None` = no tuple payload anywhere (the caller keeps the original arms).
 fn desugar_tuple_payload_arms(_subject: &IrExpr, arms: &[IrMatchArm]) -> Option<Vec<IrMatchArm>> {
-    let has_tuple_payload = arms.iter().any(|a| {
-        matches!(&a.pattern, IrPattern::Some { inner } | IrPattern::Ok { inner }
-            if matches!(&**inner, IrPattern::Tuple { .. }))
-    });
+    desugar_tuple_payload_arms_with(arms, None)
+}
+
+/// [`desugar_tuple_payload_arms`], over the `err(..)` arm too when the Result's
+/// `(ok, err)` payload types are given — the C-132 err carrier's `err((e, b))` arm
+/// (#3121), which the Result tail match destructures the same way. The given types
+/// also type the bound payload exactly (a `_` element has no binder type).
+fn desugar_tuple_payload_arms_with(
+    arms: &[IrMatchArm],
+    payload_tys: Option<(&Ty, &Ty)>,
+) -> Option<Vec<IrMatchArm>> {
+    let with_err = payload_tys.is_some();
+    let tuple_inner = |pat: &IrPattern| -> Option<Vec<IrPattern>> {
+        match pat {
+            IrPattern::Some { inner } | IrPattern::Ok { inner } => match &**inner {
+                IrPattern::Tuple { elements } => Some(elements.clone()),
+                _ => None,
+            },
+            IrPattern::Err { inner } if with_err => match &**inner {
+                IrPattern::Tuple { elements } => Some(elements.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
+    };
+    let has_tuple_payload = arms.iter().any(|a| tuple_inner(&a.pattern).is_some());
     if !has_tuple_payload {
         return None;
     }
@@ -124,31 +146,29 @@ fn desugar_tuple_payload_arms(_subject: &IrExpr, arms: &[IrMatchArm]) -> Option<
     let mut next = crate::lower::desugar_var_seed();
     let mut out: Vec<IrMatchArm> = Vec::with_capacity(arms.len());
     for a in arms {
-        let inner_tuple = match &a.pattern {
-            IrPattern::Some { inner } | IrPattern::Ok { inner } => match &**inner {
-                IrPattern::Tuple { elements } => Some(elements.clone()),
-                _ => None,
-            },
-            _ => None,
-        };
-        let Some(elements) = inner_tuple else {
+        let Some(elements) = tuple_inner(&a.pattern) else {
             out.push(a.clone());
             continue;
         };
         let p = VarId(next);
         next += 1;
-        let tuple_ty = Ty::Tuple(
-            elements
-                .iter()
-                .map(|e| match e {
-                    IrPattern::Bind { ty, .. } => ty.clone(),
-                    _ => Ty::Unknown,
-                })
-                .collect(),
-        );
+        let tuple_ty = match (payload_tys, &a.pattern) {
+            (Some((_, err_ty)), IrPattern::Err { .. }) => err_ty.clone(),
+            (Some((ok_ty, _)), _) => ok_ty.clone(),
+            (None, _) => Ty::Tuple(
+                elements
+                    .iter()
+                    .map(|e| match e {
+                        IrPattern::Bind { ty, .. } => ty.clone(),
+                        _ => Ty::Unknown,
+                    })
+                    .collect(),
+            ),
+        };
         let p_inner = Box::new(IrPattern::Bind { var: p, ty: tuple_ty.clone() });
         let new_pat = match &a.pattern {
             IrPattern::Some { .. } => IrPattern::Some { inner: p_inner },
+            IrPattern::Err { .. } => IrPattern::Err { inner: p_inner },
             _ => IrPattern::Ok { inner: p_inner },
         };
         let destr = IrStmt {

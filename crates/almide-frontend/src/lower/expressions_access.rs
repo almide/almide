@@ -502,7 +502,7 @@ fn binop_other(op: &str, left_ty: &Ty, right_ty: &Ty) -> Option<BinOp> {
 
 fn lower_expr_record(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<crate::ast::Span>) -> IrExpr {
     let ast::ExprKind::Record { name, fields, .. } = &expr.kind else { unreachable!("lower_expr_record called on the wrong ExprKind") };
-            let fs = fields.iter().map(|f| (f.name, lower_expr(ctx, &f.value))).collect();
+            let mut fs: Vec<_> = fields.iter().map(|f| (f.name, lower_expr(ctx, &f.value))).collect();
             // Constructor name resolution:
             //  - A struct (Record-type) literal is pinned to its qualified canonical
             //    name `mod.Type` (#433) — bare `Config` in module M → `M.Config`, a
@@ -510,55 +510,8 @@ fn lower_expr_record(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
             //    right (mangled) struct. (`is_struct` distinguishes it from a variant.)
             //  - A variant constructor keeps the bare ctor name: the expr's type pins
             //    the module and both backends resolve it by name + type (#412).
-            let ctor_name = (*name).map(|n| {
-                let s = n.as_str();
-                let is_struct = |key: &str| matches!(ctx.env.types.get(&sym(key)), Some(crate::types::Ty::Record { .. }));
-                if let Some((m, base)) = s.rsplit_once('.') {
-                    // The module part is what the source WROTE: an import alias
-                    // (`import dep.shape as sh` → `sh.Box`) or the short last
-                    // segment (`shape.Box`), while the type table keys the
-                    // struct under its canonical module (`dep.shape.Box`).
-                    // Resolve to the canonical key (alias indirection + dotted
-                    // suffix, `canonical_user_type_sym_qualified`): a miss here
-                    // fell to the bare name and the native emit constructed the
-                    // ENTRY program's same-named struct (#1955).
-                    if !almide_lang::stdlib_info::is_bundled_module(m) {
-                        let cur_mod = ctx.current_module.map(|cm| cm.as_str());
-                        if let Some(key) = crate::canonicalize::resolve::canonical_user_type_sym(s, &ctx.env.types, cur_mod) {
-                            if is_struct(key.as_str()) {
-                                return key; // user-module struct: keep qualified for mangling
-                            }
-                        }
-                    }
-                    return sym(base); // stdlib / variant: strip (existing #412 behavior)
-                }
-                if let Some(m) = ctx.current_module {
-                    let qual = format!("{}.{}", m.as_str(), s);
-                    if is_struct(&qual) {
-                        return sym(&qual);
-                    }
-                }
-                // A bare literal of an IMPORTED module's struct pins to that
-                // module's canonical key, resolved the way the checker typed
-                // it (#2715): left bare it named no struct in the flat
-                // program (rustc E0422) whenever the name was declared by
-                // more than one module.
-                let cur_mod = ctx.current_module.map(|cm| cm.as_str());
-                if let Some(key) = crate::canonicalize::resolve::canonical_user_type_sym(s, &ctx.env.types, cur_mod)
-                    && key.as_str().contains('.')
-                    && is_struct(key.as_str())
-                {
-                    return key;
-                }
-                // The entry program's struct shadowing a stdlib-owned name is
-                // `self.Type` (#1828), pinned like a module's own struct.
-                if let Some(qual) = crate::canonicalize::resolve::stdlib_shadow_key(s, ctx.current_module.map(|m| m.as_str())) {
-                    if is_struct(&qual) {
-                        return sym(&qual);
-                    }
-                }
-                n
-            });
+            let ctor_name = (*name).map(|n| record_ctor_name(ctx, n, &ty));
+            super::record_defaults::fill_field_defaults(ctx, ctor_name, &ty, &mut fs);
             let mut rec = ctx.mk(IrExprKind::Record { name: ctor_name, fields: fs }, ty, span);
             // Narrow bare integer/float literals in sized fields to their
             // declared field type (`{ a: Int8 }` ← `a: 5` must emit `5i8`, not
@@ -569,10 +522,96 @@ fn lower_expr_record(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
             // `M { a: 5i64 }` (E0308) and WASM writes the wrong byte width into
             // the field, corrupting the next field. Mirrors the let/var path
             // in `override_record_literal_ty`.
-            if let Some(decl) = name.and_then(|n| super::statements::declared_record_ty(ctx.env, n, ctx.current_module.map(|m| m.as_str()))) {
+            // The written head first, then the resolved one: an alias head
+            // (`render.Bar`, #3153) is not itself a key of the type table.
+            let cur_mod = ctx.current_module.map(|m| m.as_str());
+            let decl = name.and_then(|n| super::statements::declared_record_ty(ctx.env, n, cur_mod))
+                .or_else(|| ctor_name.and_then(|n| super::statements::declared_record_ty(ctx.env, n, cur_mod)));
+            if let Some(decl) = decl {
                 super::statements::coerce_literal_to_sized(&mut rec, &decl, ctx.env);
             }
             rec
+}
+
+/// The constructor name a named record literal lowers to. A struct literal is
+/// pinned to its qualified canonical name `mod.Type` (#433) — bare `Config` in
+/// module M → `M.Config`, a cross-module `dep.Config` stays qualified — so
+/// codegen names the right (mangled) struct; a variant constructor keeps the
+/// bare ctor name (the expr's type pins the module, #412).
+fn record_ctor_name(ctx: &LowerCtx, n: almide_base::intern::Sym, ty: &Ty) -> almide_base::intern::Sym {
+    let is_struct = |key: &str| matches!(ctx.env.types.get(&sym(key)), Some(crate::types::Ty::Record { .. }));
+    // A head the checker typed as a variant case builds that case: its bare
+    // name, the enum pinned by `ty`. Read as a type spelling it could name a
+    // same-named struct of a module this file never imports (#3176).
+    if let crate::types::Ty::Named(k, _) = ty
+        && matches!(ctx.env.types.get(k), Some(crate::types::Ty::Variant { .. }))
+    {
+        return sym(n.as_str().rsplit('.').next().unwrap_or(n.as_str()));
+    }
+    let key = record_ctor_name_by_spelling(ctx, n);
+    // A head the table cannot resolve to a struct from this file's spelling —
+    // an alias of another module's record (`render.Bar` for `type Bar =
+    // findbar.Bar`, `Local` for `type Local = term.T`, #3153) — builds the
+    // record the checker typed it as. Left as written it named no struct in
+    // the flat program (rustc E0422).
+    if !is_struct(key.as_str())
+        && let crate::types::Ty::Named(k, _) = ty
+        && is_struct(k.as_str())
+    {
+        return *k;
+    }
+    key
+}
+
+fn record_ctor_name_by_spelling(ctx: &LowerCtx, n: almide_base::intern::Sym) -> almide_base::intern::Sym {
+    let s = n.as_str();
+    let is_struct = |key: &str| matches!(ctx.env.types.get(&sym(key)), Some(crate::types::Ty::Record { .. }));
+    if let Some((m, base)) = s.rsplit_once('.') {
+        // The module part is what the source WROTE: an import alias
+        // (`import dep.shape as sh` → `sh.Box`) or the short last
+        // segment (`shape.Box`), while the type table keys the
+        // struct under its canonical module (`dep.shape.Box`).
+        // Resolve to the canonical key (alias indirection + dotted
+        // suffix, `canonical_user_type_sym_qualified`): a miss here
+        // fell to the bare name and the native emit constructed the
+        // ENTRY program's same-named struct (#1955).
+        if !almide_lang::stdlib_info::is_bundled_module(m) {
+            let cur_mod = ctx.current_module.map(|cm| cm.as_str());
+            if let Some(key) = crate::canonicalize::resolve::canonical_user_type_sym(s, &ctx.env.types, cur_mod) {
+                let key = crate::canonicalize::resolve::follow_record_alias(key, &ctx.env.types);
+                if is_struct(key.as_str()) {
+                    return key; // user-module struct: keep qualified for mangling
+                }
+            }
+        }
+        return sym(base); // stdlib / variant: strip (existing #412 behavior)
+    }
+    if let Some(m) = ctx.current_module {
+        let qual = format!("{}.{}", m.as_str(), s);
+        if is_struct(&qual) {
+            return sym(&qual);
+        }
+    }
+    // A bare literal of an IMPORTED module's struct pins to that
+    // module's canonical key, resolved the way the checker typed
+    // it (#2715): left bare it named no struct in the flat
+    // program (rustc E0422) whenever the name was declared by
+    // more than one module.
+    let cur_mod = ctx.current_module.map(|cm| cm.as_str());
+    if let Some(key) = crate::canonicalize::resolve::canonical_user_type_sym(s, &ctx.env.types, cur_mod)
+        && key.as_str().contains('.')
+        && is_struct(key.as_str())
+    {
+        return key;
+    }
+    // The entry program's struct shadowing a stdlib-owned name is
+    // `self.Type` (#1828), pinned like a module's own struct.
+    if let Some(qual) = crate::canonicalize::resolve::stdlib_shadow_key(s, ctx.current_module.map(|m| m.as_str())) {
+        if is_struct(&qual) {
+            return sym(&qual);
+        }
+    }
+    n
 }
 
 fn lower_expr_type_name(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<crate::ast::Span>) -> IrExpr {

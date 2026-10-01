@@ -6,6 +6,13 @@ use almide_ir::{IrExpr, IrExprKind, UnOp, VarId};
 use wasm_encoder::{BlockType, Function, ValType};
 
 use crate::*;
+// Diverging values in a value slot (#3144): a child of the emitter.
+#[path = "diverge.rs"]
+mod diverge;
+use diverge::is_diverging_call;
+
+#[path = "node_marks.rs"]
+pub(crate) mod node_marks;
 
 // ── body lowering ───────────────────────────────────────────────────────
 
@@ -65,8 +72,10 @@ pub(crate) struct Emitter<'a> {
     /// through any `{ let t = …; op(t) }` wrapping (arg_temps.rs) and any
     /// nesting, where a completion-order stamp was not. A value-position
     /// `if` whose arms `lower_if_arms` normalized to one credit each is
-    /// marked here too, by its own `IrExpr` node (#2317).
-    pub(crate) owned_call_marks: std::collections::HashSet<usize>,
+    /// marked here too, by its own `IrExpr` node (#2317). Keyed by node
+    /// address, so it only accepts nodes that outlive it: a tree the emitter
+    /// builds and lowers must be `pin`ned in it (node_marks.rs, #3143).
+    pub(crate) owned_call_marks: node_marks::NodeMarks,
     /// Temporaries the arms of the module call being lowered BORROWED
     /// (`lower_arg`, arm.rs): released by the enclosing `arm_scope`. Each
     /// entry is a local of the BORROW pool — disjoint from the scratch
@@ -394,13 +403,15 @@ impl Emitter<'_> {
         // (`expr:Break` / `expr:Continue`) instead of branching to the
         // wrong depth. A loop lowered in here opens its own context.
         let saved = self.loop_ctl.take();
-        let r = self.lower_node(e, want);
+        // A node lowered again is marked by its latest lowering only (#3139).
+        self.owned_call_marks.forget(e);
+        let r = self.lower_node_or_never(e, want);
         self.loop_ctl = saved;
         crate::decline_site::note(&r, e.span);
         r
     }
 
-    fn lower_node(&mut self, e: &IrExpr, want: Option<SliceTy>) -> Result<SliceTy, EmitError> {
+    pub(crate) fn lower_node(&mut self, e: &IrExpr, want: Option<SliceTy>) -> Result<SliceTy, EmitError> {
         let tail = std::mem::take(&mut self.in_tail);
         let got = match &e.kind {
             IrExprKind::LitInt { value } => {
@@ -524,13 +535,12 @@ impl Emitter<'_> {
                         SliceTy::Unit
                     }
                     // A diverging call in a value-producing arm (#2769:
-                    // `if c then panic(m) else v`): its lowering ends in
-                    // `unreachable`, so the stack is polymorphic and the arm
-                    // types as whatever its branch expects.
-                    None if is_diverging_call(target) => match want {
-                        Some(t) => t,
-                        None => return unsup("diverging-call-untyped"),
-                    },
+                    // `if c then panic(m) else v`) or operand (#3144): the
+                    // stack is polymorphic past it, so it types as whatever
+                    // its slot expects (`diverge.rs`).
+                    None if is_diverging_call(target) || e.ty == almide_types::types::Ty::Never => {
+                        self.diverged_call_value(target, want)?
+                    }
                     None => return unsup("call-unit-in-value"),
                 }
             }
@@ -647,13 +657,14 @@ impl Emitter<'_> {
             // m[k]: exactly map.get — a miss is `none`, never an abort
             // (the interp's map_lookup contract).
             IrExprKind::MapAccess { object, key } => {
-                let args = [(**object).clone(), (**key).clone()];
+                // Pinned: clones whose marks are keyed by address (#3143).
+                let args = self.owned_call_marks.pin_args(vec![(**object).clone(), (**key).clone()]);
                 // #2755: audited like the `map.get` call it is (calls_modules.rs).
                 let before = self.witness.as_ref().map(|w| w.arg_hooks());
                 match self.arm_scope(|em| {
                     let l = em.lower_map_call("get", &args, want)?;
                     if let Some(before) = before {
-                        em.witness_module_result("map.get", &args, before, l);
+                        em.witness_module_result("map.get", &args, before);
                     }
                     Ok(l)
                 })? {
@@ -661,7 +672,7 @@ impl Emitter<'_> {
                     // marked, or a bind takes a second credit on it.
                     Some(t) => {
                         if t.own == crate::arm::Own::Owned {
-                            self.owned_call_marks.insert(e as *const IrExpr as usize);
+                            self.owned_call_marks.mark(e);
                         }
                         t.ty
                     }
@@ -765,17 +776,4 @@ fn is_sum_shape(k: &IrExprKind) -> bool {
             | IrExprKind::UnwrapOr { .. }
             | IrExprKind::ToOption { .. }
     )
-}
-
-
-/// The calls whose lowering ends in `unreachable` (control never returns):
-/// `panic(msg)` and `process.exit(code)`.
-fn is_diverging_call(target: &almide_ir::CallTarget) -> bool {
-    match target {
-        almide_ir::CallTarget::Named { name } => name.as_str() == "panic",
-        almide_ir::CallTarget::Module { module, func, .. } => {
-            module.as_str() == "process" && func.as_str() == "exit"
-        }
-        _ => false,
-    }
 }

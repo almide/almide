@@ -35,17 +35,29 @@
 //!   end, and the dec-old of a rebind is recorded only when it releases a
 //!   block bound earlier in the SAME iteration (the unrolled lane).
 //!
+//! A var bound outside a loop and rebound inside it is LOOP-CARRIED
+//! (#2755, [`carry`]): the loop holds its block between iterations, each
+//! iteration receives one and hands one on.
+//!
 //! This decomposition is sound because each line is one holder's account of
 //! one block. The block's count is the sum of its holders' counts, and every
 //! line is checked never to release what it does not hold and to end at 0.
 //! The recorder declines what the decomposition cannot carry:
-//! - a var bound outside a loop and rebound inside it (`loop-carried-assign`);
 //! - an exit from inside a loop body (`loop-exit`);
 //! - more than two distinct paths (`branch-paths:N`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::lines::{flat_exits, hoist, net};
+
+/// The loop-carried locals (#2755), split for the file budget.
+#[path = "witness_carry.rs"]
+mod carry;
+use carry::carry;
+
+/// The `Carry` depth of an OUTER holder the whole frame borrows (#2755 /
+/// #2758, witness_carry.rs `frame_carry`).
+pub(crate) const FRAME_HELD: u32 = u32::MAX;
 
 /// One logged event.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,6 +81,9 @@ pub(crate) enum Ev {
     Exit,
     /// #2755: the process aborts (exit_plan.rs `Continuation::Abort`).
     Abort,
+    /// #2755: `local`, bound at loop depth `depth`, was rebound inside a
+    /// deeper loop — every loop between is LOOP-CARRIED for it ([`carry`]).
+    Carry { local: u32, depth: u32 },
 }
 
 #[derive(Default)]
@@ -195,7 +210,8 @@ impl Branches {
 enum Node {
     Ev(Ev),
     Branch(Vec<Vec<Node>>),
-    Loop(Vec<Node>),
+    /// A loop body and the locals it carries ([`carry`]).
+    Loop(Vec<Node>, Vec<u32>),
 }
 
 fn parse(log: &[Ev]) -> Option<Vec<Node>> {
@@ -230,7 +246,7 @@ fn parse_seq(log: &[Ev], pos: &mut usize) -> Option<Vec<Node>> {
                 if log.get(*pos)? != &Ev::LoopClose {
                     return None;
                 }
-                seq.push(Node::Loop(body));
+                seq.push(Node::Loop(body, Vec::new()));
             }
             other => seq.push(Node::Ev(other.clone())),
         }
@@ -267,13 +283,16 @@ const PATH_CAP: usize = 64;
 
 /// Where a walk runs: the frame, or one loop iteration.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Scope {
-    Frame,
-    Iteration,
+enum Scope<'t> {
+    /// The frame, with the outer holders it borrows (`frame_carry`).
+    Frame(&'t [u32]),
+    /// One iteration of a loop body, with the locals that loop carries.
+    Iteration(&'t [u32]),
 }
 
-/// The loops a walk passed, with the object's state at each entry.
-type LoopEntries<'t> = Vec<(&'t [Node], Path)>;
+/// The loops a walk passed, with the locals each carries and the object's
+/// state at each entry.
+type LoopEntries<'t> = Vec<(&'t [Node], &'t [u32], Path)>;
 
 fn step(ev: &Ev, o: u32, p: &mut Path) {
     match ev {
@@ -313,14 +332,26 @@ fn step(ev: &Ev, o: u32, p: &mut Path) {
 
 /// The end of one iteration (natural, `break` or `continue`): each owner
 /// local bound in it keeps its block until its next rebind or the epilogue
-/// releases it — that release, recorded here.
-fn end_iteration(p: &mut Path) {
-    for h in p.holders.values() {
+/// releases it — that release, recorded here. A LOOP-CARRIED local
+/// ([`carry`]) instead hands its block on to the next iteration, or out of
+/// the loop (`m`).
+fn end_iteration(p: &mut Path, carried: &[u32]) {
+    for (l, h) in &p.holders {
         if h.owner && h.fresh {
-            p.events.push('d');
+            p.events.push(if carried.contains(l) { 'm' } else { 'd' });
         }
     }
     p.ended = true;
+}
+
+/// A path leaves the frame: each outer holder it borrowed gets its block
+/// back (`m`, witness_carry.rs `frame_carry`).
+fn hand_back(p: &mut Path, held: &[u32]) {
+    for (l, h) in &p.holders {
+        if h.owner && held.contains(l) {
+            p.events.push('m');
+        }
+    }
 }
 
 /// How a walk renders a branch with an exiting arm.
@@ -339,7 +370,7 @@ enum Exits {
 fn walk<'t>(
     seq: &'t [Node],
     o: u32,
-    scope: Scope,
+    scope: Scope<'t>,
     exits: Exits,
     paths: Vec<Path>,
     loops: &mut LoopEntries<'t>,
@@ -354,10 +385,16 @@ fn walk<'t>(
             }
             match node {
                 Node::Ev(Ev::Jump) => match scope {
-                    Scope::Iteration => end_iteration(&mut p),
-                    Scope::Frame => return Err("loop-jump-outside-loop".into()),
+                    Scope::Iteration(carried) => end_iteration(&mut p, carried),
+                    Scope::Frame(_) => return Err("loop-jump-outside-loop".into()),
                 },
-                Node::Ev(Ev::Exit) if scope == Scope::Iteration => return Err("loop-exit".into()),
+                Node::Ev(Ev::Exit) => match scope {
+                    Scope::Frame(held) => {
+                        hand_back(&mut p, held);
+                        step(&Ev::Exit, o, &mut p);
+                    }
+                    Scope::Iteration(_) => return Err("loop-exit".into()),
+                },
                 Node::Ev(ev) => step(ev, o, &mut p),
                 Node::Branch(arms) if exits == Exits::Fold => {
                     next.extend(fold_branch(arms, o, scope, p, loops)?);
@@ -371,7 +408,7 @@ fn walk<'t>(
                 }
                 // A loop is its own activation: skipped here, walked later
                 // from the state it was entered with.
-                Node::Loop(body) => loops.push((body.as_slice(), p.clone())),
+                Node::Loop(body, carried) => loops.push((body.as_slice(), carried.as_slice(), p.clone())),
             }
             next.push(p);
         }
@@ -393,7 +430,7 @@ fn walk<'t>(
 fn fold_branch<'t>(
     arms: &'t [Vec<Node>],
     o: u32,
-    scope: Scope,
+    scope: Scope<'t>,
     p: Path,
     loops: &mut LoopEntries<'t>,
 ) -> Result<Vec<Path>, String> {
@@ -507,9 +544,10 @@ fn line(paths: &[Path], exits: Exits) -> Result<String, String> {
 
 /// One object's lines: the frame line, then one line per loop activation
 /// that touches it.
-fn render_object(tree: &[Node], o: u32, exits: Exits, out: &mut String) -> Result<(), String> {
+fn render_object(tree: &[Node], o: u32, exits: Exits, held: &[u32], out: &mut String) -> Result<(), String> {
     let mut loops: LoopEntries = Vec::new();
-    let frame = walk(tree, o, Scope::Frame, exits, vec![Path::default()], &mut loops)?;
+    let mut frame = walk(tree, o, Scope::Frame(held), exits, vec![Path::default()], &mut loops)?;
+    frame.iter_mut().filter(|p| !p.ended).for_each(|p| hand_back(p, held));
     out.push_str(&line(&frame, exits)?);
     out.push('\n');
     // Each loop reached, walked from each entry state; loops nested in a
@@ -517,7 +555,7 @@ fn render_object(tree: &[Node], o: u32, exits: Exits, out: &mut String) -> Resul
     let mut k = 0;
     let mut by_loop: Vec<(&[Node], Vec<Path>)> = Vec::new();
     while k < loops.len() {
-        let (body, entry) = loops[k].clone();
+        let (body, carried, entry) = loops[k].clone();
         k += 1;
         let start = Path {
             events: String::new(),
@@ -526,8 +564,8 @@ fn render_object(tree: &[Node], o: u32, exits: Exits, out: &mut String) -> Resul
             ended: false,
             aborted: false,
         };
-        let mut iter = walk(body, o, Scope::Iteration, exits, vec![start], &mut loops)?;
-        iter.iter_mut().filter(|p| !p.ended).for_each(end_iteration);
+        let mut iter = walk(body, o, Scope::Iteration(carried), exits, vec![start], &mut loops)?;
+        iter.iter_mut().filter(|p| !p.ended).for_each(|p| end_iteration(p, carried));
         match by_loop.iter_mut().find(|(b, _)| std::ptr::eq(*b, body)) {
             Some((_, ps)) => ps.extend(iter),
             None => by_loop.push((body, iter)),
@@ -548,21 +586,24 @@ fn render_object(tree: &[Node], o: u32, exits: Exits, out: &mut String) -> Resul
 /// Render every object's lines, in object order; `Err(reason)` withdraws
 /// the certificate.
 pub(crate) fn render(log: &[Ev], objects: u32) -> Result<String, String> {
-    let Some(tree) = parse(log) else {
+    let Some(mut tree) = parse(log) else {
         return Err("branch-log:unbalanced".into());
     };
+    let mut objects = objects;
+    carry(&mut tree, 0, &mut objects);
+    let held = carry::frame_carry(&mut tree, &mut objects);
     let mut s = String::new();
     for o in 0..objects {
         // The whole-path form first (every certificate before #2758 keeps
         // its bytes); an object whose paths it cannot carry — a frame with
         // several exits — is rendered again with its exits folded.
         let mut line = String::new();
-        if let Err(e) = render_object(&tree, o, Exits::Paths, &mut line) {
+        if let Err(e) = render_object(&tree, o, Exits::Paths, &held, &mut line) {
             if !e.starts_with("branch-paths") {
                 return Err(e);
             }
             line.clear();
-            render_object(&tree, o, Exits::Fold, &mut line)?;
+            render_object(&tree, o, Exits::Fold, &held, &mut line)?;
         }
         s.push_str(&line);
     }

@@ -118,6 +118,9 @@ impl Emitter<'_> {
         self.emit_read_mut_var(id, idx, rty, global);
         self.f.instructions().call(rcow).local_tee(hr);
         self.emit_store_mut_var(*id, idx, rty, global)?;
+        // #2755: the record's copy-on-write rebinds the var; the field's own
+        // `$cow` below moves a credit the record holds, not this frame.
+        self.witness_mut_rebind(*id, global);
         let scr = self.scr_i32_local;
         {
             let mut i = self.f.instructions();

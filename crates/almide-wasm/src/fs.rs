@@ -12,6 +12,11 @@ use wasm_encoder::{BlockType, ValType};
 use crate::emitter::Emitter;
 use crate::*;
 
+/// The I/O walkers' witness hooks (the line walkers here and in fs_meta /
+/// fs_range, and the prefetch fans), declared here for the lib.rs budget.
+#[path = "witness_walkers.rs"]
+pub(crate) mod witness_walkers;
+
 const OP_READ_TEXT: i32 = 1;
 const OP_WRITE: i32 = 2;
 const OP_WRITE_BYTES: i32 = 3;
@@ -35,9 +40,12 @@ const OP_APPEND: i32 = 16;
 // native says `fs.fold_lines(...)` — a divergence introduced by the fix. The
 // body the host runs is identical; only the name it reports differs.
 // 43..=50 is the http family and 26..=37 the env/host family, so these take
-// the first numbers above both.
-const OP_FOLD_LINES: i32 = 51;
-const OP_FOR_EACH_LINE: i32 = 52;
+// the first numbers above both. The ADR-0006 fallible carriers
+// (`__fallible_fold_lines` / `__fallible_for_each_line`, fs_meta.rs /
+// fs_fallible.rs) are the SAME user calls and ride these ops too (#3148 —
+// they kept a literal op 12 and said `fs.read_lines(...)`).
+pub(crate) const OP_FOLD_LINES: i32 = 51;
+pub(crate) const OP_FOR_EACH_LINE: i32 = 52;
 
 impl Emitter<'_> {
     /// `fs.*` module calls. Ok(None) = not handled here.
@@ -405,6 +413,46 @@ impl Emitter<'_> {
         self.release_i32();
         Ok(())
     }
+
+    /// The callback walkers' frames walk (#3137): each line is a fresh
+    /// STRING block the CALLBACK only borrows — it takes its own share of
+    /// whatever it keeps (a list it returns, a closure param's +1) — so the
+    /// walk holds the line in its own local and releases it once `body`
+    /// has run. `body` sees the line on the stack, as with
+    /// `fs_frames_foreach`; the readers that MOVE the line into a list
+    /// (`read_lines`, `env.args`) keep the bare walk.
+    ///
+    /// `act`: the inlined callback (and its heap accumulator's local) whose
+    /// activation each iteration is, for the witness (witness_walkers.rs);
+    /// `None` for a callback called as a closure value.
+    pub(crate) fn fs_frames_foreach_borrowed(
+        &mut self,
+        hraw: u32,
+        hlen: u32,
+        act: Option<(&IrExpr, crate::fs::witness_walkers::WalkAcc)>,
+        body: impl FnOnce(&mut Self) -> Result<(), EmitError>,
+    ) -> Result<(), EmitError> {
+        let hln = self.hold_i32()?;
+        let dec_str = self.dec_fn_of(STR);
+        self.fs_frames_foreach(hraw, hlen, |em| {
+            let line = match act {
+                Some((cb, acc)) => em.witness_line_open(cb, acc),
+                None => {
+                    em.witness_decline("fs:closure-route");
+                    None
+                }
+            };
+            em.f.instructions().local_tee(hln);
+            body(em)?;
+            em.f.instructions().local_get(hln).call(dec_str);
+            if act.is_some() {
+                em.witness_line_close(line);
+            }
+            Ok(())
+        })?;
+        self.release_i32();
+        Ok(())
+    }
 }
 
 fn byte_memarg() -> wasm_encoder::MemArg {
@@ -483,19 +531,33 @@ impl Emitter<'_> {
                 self.f.instructions().local_set(params[0]);
                 self.fs_call_1(p, OP_FOLD_LINES)?;
                 let (hraw, hlen, herr) = self.fs_frames_or_err()?;
-                // walk the frames, folding
-                self.fs_frames_foreach(hraw, hlen, |em| {
+                // walk the frames, folding — the list.fold discipline: the
+                // accumulator owns one credit on every step, a borrowed body
+                // result takes its share, and the replaced accumulator is
+                // released before the rebind (#3137).
+                let acc_dec = self.elem_is_handle(acc_ty).then(|| self.dec_fn_of(acc_ty));
+                self.fs_frames_foreach_borrowed(hraw, hlen, Some((cb, crate::fs::witness_walkers::WalkAcc::Carried(Some(params[0])))), |em| {
                     em.f.instructions().local_set(params[1]);
                     em.lower(body, Some(acc_ty))?;
+                    em.rc_share_guard(body, acc_ty);
+                    if let Some(dec) = acc_dec {
+                        em.f.instructions().local_get(params[0]).call(dec);
+                    }
+                    em.witness_fold_step(body, params[0], acc_ty);
                     em.f.instructions().local_set(params[0]);
                     Ok(())
                 })?;
                 self.fs_frames_release_raw(hraw, herr);
-                // ok(acc) / err passthrough
+                self.witness_walk_result(acc_ty);
+                // ok(acc) / err passthrough (the read failed before any
+                // line: the init's credit is released with it)
                 let hs = self.hold_i32()?;
                 {
                     let mut i = self.f.instructions();
                     i.local_get(herr).if_(BlockType::Result(ValType::I32));
+                    if let Some(dec) = acc_dec {
+                        i.local_get(params[0]).call(dec);
+                    }
                     i.local_get(herr);
                     i.else_();
                     i.i32_const(16)
@@ -517,7 +579,7 @@ impl Emitter<'_> {
                 let (params, body) = self.hof_lambda(cb, 1)?;
                 self.fs_call_1(p, OP_FOR_EACH_LINE)?;
                 let (hraw, hlen, herr) = self.fs_frames_or_err()?;
-                self.fs_frames_foreach(hraw, hlen, |em| {
+                self.fs_frames_foreach_borrowed(hraw, hlen, Some((cb, crate::fs::witness_walkers::WalkAcc::Carried(None))), |em| {
                     em.f.instructions().local_set(params[0]);
                     em.lower_stmt_expr(body)?;
                     Ok(())

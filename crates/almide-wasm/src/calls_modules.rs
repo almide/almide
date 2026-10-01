@@ -38,7 +38,7 @@ impl Emitter<'_> {
             // hook per argument, and declared no droppable View — or the
             // frame declines, before the promotion below adds a +1.
             if let (Some(before), CallTarget::Module { module, func, .. }) = (hooks_before, target) {
-                em.witness_module_result(&format!("{module}.{func}"), args, before, l);
+                em.witness_module_result(&format!("{module}.{func}"), args, before);
             }
             // A `View` into a temporary this scope releases next would
             // dangle: it takes its share BEFORE the release (below).
@@ -442,6 +442,6 @@ impl Emitter<'_> {
     /// Mark this call node's result as OWNED by the caller (#1990 /
     /// #2004): read by `rc_owned_result` through the node's identity.
     pub(crate) fn mark_owned_call(&mut self, target: &CallTarget) {
-        self.owned_call_marks.insert(target as *const CallTarget as usize);
+        self.owned_call_marks.mark_target(target);
     }
 }

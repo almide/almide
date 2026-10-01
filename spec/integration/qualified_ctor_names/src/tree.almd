@@ -1,0 +1,9 @@
+// A recursive `| Node { .. }` whose fields are boxed, beside `flat`'s
+// unboxed `| Node { .. }` of the same field names (#3176).
+type Expr = | Node { left: Expr, right: Expr } | Lit(Int) | Wrap(Expr)
+
+fn total(e: Expr) -> Int = match e {
+  Node { left, right } => total(left) + total(right),
+  Lit(n) => n,
+  Wrap(x) => total(x),
+}

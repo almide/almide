@@ -2,6 +2,11 @@
 source: tests/ide_outline_snapshot_test.rs
 expression: "run_outline(&[\"@stdlib/set\"])"
 ---
+fn set.__fallible_all[A, E](s: Set[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]
+fn set.__fallible_any[A, E](s: Set[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]
+fn set.__fallible_filter[A, E](s: Set[A], f: fn(A) -> Result[Bool, E]) -> Result[Set[A], E]
+fn set.__fallible_fold[A, B, E](s: Set[A], init: B, f: fn(B, A) -> Result[B, E]) -> Result[B, E]
+fn set.__fallible_map[A, B, E](s: Set[A], f: fn(A) -> Result[B, E]) -> Result[Set[B], E]
 fn set.all[A](s: Set[A], f: fn(A) -> Bool) -> Bool
 fn set.any[A](s: Set[A], f: fn(A) -> Bool) -> Bool
 fn set.contains[A](s: Set[A], value: A) -> Bool

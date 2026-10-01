@@ -150,7 +150,6 @@ impl Emitter<'_> {
         if a.len() != 2 {
             return Ok(false);
         }
-        self.witness_decline("main-err-carrier"); // #2758: the carrier's release is unrecorded
         let got = self.lower(e, None)?;
         let SliceTy::Result(_, eh) = got else {
             // Effect-ABI transparency already unwrapped it — nothing to route.
@@ -164,6 +163,9 @@ impl Emitter<'_> {
         // String] = { … }` ends in a fresh `ok(())`) is main's last use of
         // it — released on the ok path, where the err path aborts.
         let owned_dec = (self.rc_droppable(got) && self.rc_owned_result(e)).then(|| self.dec_fn_of(got));
+        // #2758: the err arm aborts (the checker's terminal), the ok arm
+        // releases an owned carrier.
+        self.witness_main_carrier(owned_dec.is_some());
         let hb = self.scr_i32_local;
         let mut i = self.f.instructions();
         i.local_set(hb);

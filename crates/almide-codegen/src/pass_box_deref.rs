@@ -30,6 +30,7 @@ impl NanoPass for BoxDerefPass {
         //         same table rather than the now-empty `module.var_table`.
         let (deref_ids, recursive) = collect_deref_vars(&program);
         insert_deref_nodes(&mut program, &deref_ids);
+        program.codegen_annotations.box_binders.extend(deref_ids);
 
         // Step 2: Process module-level box deref using the unified table.
         let all_type_decls: Vec<_> = program.type_decls.iter()
@@ -41,6 +42,7 @@ impl NanoPass for BoxDerefPass {
         for module in &mut program.modules {
             let mod_deref_ids = collect_module_deref_vars_with_vt(module, &shared_vt, &all_type_decls);
             insert_module_deref_nodes(module, &mod_deref_ids);
+            program.codegen_annotations.box_binders.extend(mod_deref_ids);
         }
 
         // Step 3: Populate codegen annotations
@@ -49,29 +51,33 @@ impl NanoPass for BoxDerefPass {
         // Build boxed_fields: for each recursive enum, find which variant fields
         // reference ANY cycle member (mutual recursion, not only self) (#656).
         let rec_ref = &recursive;
-        program.codegen_annotations.boxed_fields = program.type_decls.iter()
+        let boxed: Vec<(String, String, String)> = program.type_decls.iter()
             .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
             .filter(|td| rec_ref.contains(&*td.name))
             .filter_map(|td| match &td.kind {
-                IrTypeDeclKind::Variant { cases, .. } => Some(cases),
+                IrTypeDeclKind::Variant { cases, .. } => Some((td.name.to_string(), cases)),
                 _ => None,
             })
-            .flat_map(|cases| {
+            .flat_map(|(enum_name, cases)| {
                 cases.iter().flat_map(move |c| {
-                    match &c.kind {
+                    let boxed_at: Vec<String> = match &c.kind {
                         IrVariantKind::Record { fields } => fields.iter()
                             .filter(|f| walker::ty_contains_any_recursive(&f.ty, rec_ref))
-                            .map(|f| (c.name.to_string(), f.name.to_string()))
-                            .collect::<Vec<_>>(),
+                            .map(|f| f.name.to_string())
+                            .collect(),
                         IrVariantKind::Tuple { fields } => fields.iter().enumerate()
                             .filter(|(_, t)| walker::ty_contains_any_recursive(t, rec_ref))
-                            .map(|(i, _)| (c.name.to_string(), format!("{}", i)))
-                            .collect::<Vec<_>>(),
+                            .map(|(i, _)| format!("{}", i))
+                            .collect(),
                         _ => vec![],
-                    }
+                    };
+                    let enum_name = enum_name.clone();
+                    boxed_at.into_iter().map(move |f| (enum_name.clone(), c.name.to_string(), f))
                 })
             })
             .collect();
+        program.codegen_annotations.boxed_fields = boxed.iter().map(|(_, c, f)| (c.clone(), f.clone())).collect();
+        program.codegen_annotations.boxed_case_fields = boxed.into_iter().collect();
 
         // Build default_fields: for each variant/record constructor with default field values.
         // Chain module type_decls so types declared in submodules also fill defaults at
@@ -109,6 +115,7 @@ impl NanoPass for BoxDerefPass {
             }
         }
         program.codegen_annotations.default_fields = defaults;
+        program.codegen_annotations.case_default_fields = case_default_fields(&program);
 
         PassResult { program, changed: true }
     }
@@ -297,22 +304,38 @@ struct DerefCollector<'a> {
 
 impl IrVisitor for DerefCollector<'_> {
     fn visit_expr(&mut self, expr: &IrExpr) {
-        if let IrExprKind::Match { subject, arms } = &expr.kind {
-            // A recursive-enum match binds Box'd fields — collect their deref vars.
-            let enum_name = match &subject.ty {
-                Ty::Named(n, _) => Some(n.clone()),
-                Ty::Variant { name, .. } => Some(name.clone()),
-                _ => None,
-            };
-            if let Some(ref ename) = enum_name {
-                if self.recursive_enums.contains(ename.as_str()) {
-                    for arm in arms {
-                        collect_deref_from_pattern(&arm.pattern, self.recursive_enums, self.type_decls, self.name_to_var, self.deref_vars);
-                    }
-                }
+        // A match whose subject holds a recursive enum — directly, or under a
+        // wrapper (`Option[Node]`, a tuple, another case's payload, #3174) —
+        // binds Box'd fields: collect their deref vars.
+        if let IrExprKind::Match { subject, arms } = &expr.kind
+            && walker::ty_contains_any_recursive(&subject.ty, self.recursive_enums)
+        {
+            for arm in arms {
+                self.collect_wrapped(&arm.pattern);
             }
         }
         walk_expr(self, expr); // recurse subject, arm bodies, and every other kind
+    }
+}
+
+impl DerefCollector<'_> {
+    /// Find each recursive-enum constructor pattern, however deeply it sits
+    /// under wrappers, and collect the boxed binders it introduces. A
+    /// non-recursive constructor holds no box itself: look through it.
+    fn collect_wrapped(&mut self, pat: &IrPattern) {
+        match pat {
+            IrPattern::Constructor { name, .. } | IrPattern::RecordPattern { name, .. }
+                if find_td_for_ctor(self.type_decls, name.as_str())
+                    .is_some_and(|td| self.recursive_enums.contains(td.name.as_str())) =>
+                collect_deref_from_pattern(pat, self.recursive_enums, self.type_decls, self.name_to_var, self.deref_vars),
+            IrPattern::Constructor { args, .. } => args.iter().for_each(|a| self.collect_wrapped(a)),
+            IrPattern::RecordPattern { fields, .. } => fields.iter()
+                .filter_map(|f| f.pattern.as_ref()).for_each(|p| self.collect_wrapped(p)),
+            IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner }
+            | IrPattern::As { inner, .. } => self.collect_wrapped(inner),
+            IrPattern::Tuple { elements } => elements.iter().for_each(|e| self.collect_wrapped(e)),
+            _ => {}
+        }
     }
 }
 
@@ -382,4 +405,31 @@ fn mark_boxed_field_pattern(pat: &IrPattern, recursive: &HashSet<String>, type_d
             collect_deref_from_pattern(pat, recursive, type_decls, name_to_var, deref_vars),
         _ => {}
     }
+}
+
+/// Every record-payload case's field defaults, keyed by the enum's type name
+/// as values carry it (`mod.Type` for a module's, the bare name for the entry
+/// program's), the case and the field (#3176).
+fn case_default_fields(program: &IrProgram) -> HashMap<(String, String, String), IrExpr> {
+    let mut out = HashMap::new();
+    for (mod_prefix, decls) in std::iter::once((None, &program.type_decls))
+        .chain(program.modules.iter().map(|m| (Some(m.name.as_str()), &m.type_decls)))
+    {
+        for td in decls {
+            let IrTypeDeclKind::Variant { cases, .. } = &td.kind else { continue };
+            let enum_name = match mod_prefix {
+                Some(p) if !td.name.as_str().contains('.') => format!("{}.{}", p, td.name),
+                _ => td.name.to_string(),
+            };
+            for c in cases {
+                let IrVariantKind::Record { fields } = &c.kind else { continue };
+                for f in fields {
+                    if let Some(d) = &f.default {
+                        out.insert((enum_name.clone(), c.name.to_string(), f.name.to_string()), d.clone());
+                    }
+                }
+            }
+        }
+    }
+    out
 }

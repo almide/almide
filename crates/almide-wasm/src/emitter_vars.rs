@@ -74,6 +74,9 @@ impl Emitter<'_> {
             self.f.instructions().local_get(scr);
             self.emit_store_mut_var(*id, idx, ty, global)?;
             self.f.instructions().local_get(scr);
+            self.witness_mut_rebind(*id, global);
+        } else {
+            self.witness_mut_read(*id, global);
         }
         Ok(())
     }
@@ -119,6 +122,9 @@ impl Emitter<'_> {
             let dec = self.dec_fn_of(ty);
             self.f.instructions().call(dec).local_get(hn);
             self.release_i32();
+            self.emit_store_mut_var(id, idx, ty, global)?;
+            self.witness_mut_rebind(id, global);
+            return Ok(());
         }
         self.emit_store_mut_var(id, idx, ty, global)
     }

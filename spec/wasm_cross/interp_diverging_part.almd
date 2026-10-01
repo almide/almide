@@ -1,0 +1,20 @@
+// @contract: C-192, C-219
+// #3144: a diverging call as an interpolation part. The parts to its left run,
+// left to right, and the program aborts at it; the parts to its right never
+// run. Native rendered the `Never` part as `()` inside `format!` (rustc E0277,
+// `()` is not Display) and the structural wasm leg refused it
+// (`diverging-call-untyped`: a diverging call with no expected type).
+//
+// The issue's own shape: it prints `tick a`, then `PANIC: p` on stderr with no
+// trailing newline, exit 1. (The same cut inside an untaken `if` arm is a cell of
+// tests/diverging_operand_matrix_test.rs; the MIR rung walls that function.)
+fn tick(s: String) -> String = {
+  println("tick ${s}")
+  s
+}
+
+effect fn main() -> Unit = {
+  let s = "${tick("a")} ${panic("p")} ${tick("b")}"
+  println(s)
+  println("unreachable")
+}

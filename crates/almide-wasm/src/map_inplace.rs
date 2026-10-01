@@ -255,6 +255,9 @@ impl Emitter<'_> {
         self.f.instructions().end();
         self.f.instructions().local_get(mh);
         self.emit_store_mut_var(*id, idx, ty, global)?;
+        // #2755: the window rebinds the var — in place, grown, or the copy
+        // that replaced a shared block.
+        self.witness_mut_rebind(*id, global);
         self.release_i32(); // eh
         self.release_i32(); // oh
         self.release_i32(); // mh

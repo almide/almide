@@ -97,6 +97,26 @@ impl<'a> Interpreter<'a> {
         Flow::val(Value::Option(None))
     }
 
+    /// `list.find_map` (#3156): the first `some` the callback gives, and the
+    /// callback is not run on any element after it.
+    fn hof_find_map(&mut self, args: &[Value]) -> Flow {
+        let items = match Self::recv_items(args) {
+            Ok(i) => i,
+            Err(f) => return f,
+        };
+        let clo = match Self::recv_closure(args, 1) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        for item in items {
+            let r = val!(self.apply_closure(&clo, vec![item]));
+            if matches!(r, Value::Option(Some(_))) {
+                return Flow::val(r);
+            }
+        }
+        Flow::val(Value::Option(None))
+    }
+
     fn hof_any_all(&mut self, args: &[Value], is_any: bool) -> Flow {
         let items = match Self::recv_items(args) {
             Ok(i) => i,
@@ -550,6 +570,27 @@ impl<'a> Interpreter<'a> {
                         item,
                     )))))))
                 }
+                Ok(_) => {}
+                Err(f) => return f,
+            }
+        }
+        Flow::val(Value::Result(Ok(Box::new(Value::Option(None)))))
+    }
+
+    fn hof_try_find_map(&mut self, args: &[Value]) -> Flow {
+        let items = match Self::recv_items(args) {
+            Ok(i) => i,
+            Err(f) => return f,
+        };
+        let clo = match Self::recv_closure(args, 1) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        for item in items {
+            match self.try_step(&clo, vec![item]) {
+                // The first `some` ends the walk with it; neither a hit nor an
+                // err lets the callback run on a later element.
+                Ok(hit @ Value::Option(Some(_))) => return Flow::val(Value::Result(Ok(Box::new(hit)))),
                 Ok(_) => {}
                 Err(f) => return f,
             }

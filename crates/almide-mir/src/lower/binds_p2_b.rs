@@ -321,7 +321,7 @@ impl LowerCtx {
             // callee reads a garbage tag — the same miscompile class the Call-ctor
             // bind gate above already errors on.
             if let IrExprKind::Record { name: Some(n), .. } = &value.kind {
-                if self.variant_layouts.ctor_to_type.contains_key(n.as_str()) {
+                if self.variant_layouts.is_ctor_for(n.as_str(), &value.ty) {
                     return Err(LowerError::Unsupported(format!(
                         "variant record-ctor `{}` bound to a let/var cannot be \
                          faithfully materialized in this brick (a field outside the \
@@ -549,7 +549,7 @@ impl LowerCtx {
         // + dropped at scope end (cert `i` + `d`, like the scalar-record bind). Must
         // precede the CallFn emission, which would emit a dangling `(call $Num)`. A
         // heap/recursive ctor field is ADT brick 5 → WALL (never a wrong-bytes block).
-        if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) {
+        if self.variant_layouts.is_ctor_for(name.as_str(), &value.ty) {
             if let Some(dst) = self.try_lower_variant_ctor(value) {
                 self.value_of.insert(var, dst);
                 self.live_heap_handles.push(dst);

@@ -12,12 +12,11 @@ use crate::work::FnWork;
 use crate::*;
 
 pub(crate) struct AssembleIn<'a> {
-    /// Pooled "Error: out of memory" block for the allocator's C-197 die.
-    pub(crate) oom_msg: u32,
-    pub(crate) repeat_msg: u32,
     pub(crate) table: &'a FnTable,
     pub(crate) work: &'a FnWork,
-    pub(crate) pool: &'a Pool,
+    /// Mutable for the helpers' own literals, interned here once the shipped
+    /// helper set is known (#3114).
+    pub(crate) pool: &'a mut Pool,
     pub(crate) lowered: &'a [Result<(Function, std::collections::HashSet<usize>), String>],
     /// Program-fn indices REACHABLE from main (the emit_program BFS) —
     /// an unreached body ships as a 3-byte `unreachable` stub, which is
@@ -30,8 +29,89 @@ pub(crate) struct AssembleIn<'a> {
     pub(crate) global_decls: &'a [(almide_ir::VarId, SliceTy)],
     pub(crate) export_fns: &'a [(String, u32)],
     pub(crate) main_index: u32,
-    pub(crate) true_base: u32,
-    pub(crate) false_base: u32,
+}
+
+/// The pool addresses the fixed-slot helpers bake in (#3114): `$append_bool`'s
+/// "true"/"false", `$alloc`'s C-197 line and `$str_repeat`'s overflow line.
+/// Each is interned only when its helper ships, so a module that never
+/// reaches the helper carries neither the literal nor its block header. A
+/// helper that does not ship gets address 0 — it is emitted as a stub, so
+/// the address is never encoded.
+#[derive(Default)]
+struct HelperLits {
+    true_base: u32,
+    false_base: u32,
+    oom_msg: u32,
+    repeat_msg: u32,
+}
+
+impl HelperLits {
+    fn intern(pool: &mut Pool, used: &std::collections::HashSet<u32>) -> Self {
+        let mut at = |idx: u32, s: &str| if used.contains(&idx) { pool.intern(s) } else { 0 };
+        let true_base = at(F_APPEND_BOOL, "true");
+        let false_base = at(F_APPEND_BOOL, "false");
+        let oom_msg = at(F_ALLOC, "Error: out of memory");
+        let repeat_msg = at(F_STR_REPEAT, "Error: repeat result too large");
+        Self { true_base, false_base, oom_msg, repeat_msg }
+    }
+}
+
+/// The 37 fixed-slot helper bodies, in F_* slot order.
+fn static_helpers(lit: &HelperLits, counters: Option<u32>) -> Vec<(u32, Function)> {
+    vec![
+        (F_PRINTLN_BLOCK, emit_block_print(F_PRINTLN_IMPORT)),
+        (F_EPRINTLN_BLOCK, emit_block_print(F_EPRINTLN_IMPORT)),
+        (F_APPEND_COPY, emit_append_copy()),
+        (F_ITOA, emit_itoa()),
+        (F_APPEND_I64, emit_append_i64()),
+        (F_APPEND_BOOL, emit_append_bool(lit.true_base, lit.false_base)),
+        (F_ALLOC, emit_alloc(lit.oom_msg, counters)),
+        (F_INT_TO_STRING, emit_int_to_string()),
+        (F_CONCAT, emit_concat()),
+        (F_STR_EQ, emit_str_eq()),
+        (F_LIST_GET_8, emit_list_get(Scalar::Int)),
+        (F_LIST_GET_4, emit_list_get(Scalar::Str)),
+        (F_LIST_PUSH_8, emit_list_push(Scalar::Int)),
+        (F_LIST_PUSH_4, emit_list_push(Scalar::Str)),
+        (F_LIST_JOIN, emit_list_join()),
+        (F_BLOCK_COPY, emit_block_copy()),
+        (F_BUF_TO_BLOCK, emit_buf_to_block()),
+        (F_STR_LEN_CHARS, emit_str_len_chars()),
+        (F_SCAN_W64, emit_scan_w64()),
+        (F_SCAN_W32, emit_scan_w32()),
+        (F_SCAN_STR, emit_scan_str()),
+        (F_F16_TO_F64, emit_f16_to_f64()),
+        (F_CP_OFF, emit_cp_off()),
+        (F_STR_SLICE, emit_str_slice()),
+        (F_STR_REPEAT, emit_str_repeat(lit.repeat_msg)),
+        (F_STR_CMP, emit_str_cmp()),
+        (F_STR_REPLACE, emit_str_replace()),
+        (F_COPY, emit_copy()),
+        (F_FREE, emit_free(counters)),
+        (F_INC, emit_inc()),
+        (F_DEC_FLAT, emit_dec_flat()),
+        (F_COW, emit_cow()),
+        (F_STR_APPEND, emit_str_append()),
+        (F_BYTES_PUSH, emit_bytes_push()),
+        (F_LINE_GROW, emit_line_grow()),
+        (F_LINE_PRINTLN, emit_line_print(F_PRINTLN_IMPORT)),
+        (F_LINE_EPRINTLN, emit_line_print(F_EPRINTLN_IMPORT)),
+    ]
+}
+
+/// The pool as ONE active segment that skips its zero head and tail (#3114):
+/// linear memory starts zeroed, so the null guard + itoa scratch the pool
+/// reserves at address 0 (112 bytes in every module) need no initializer.
+/// The memory image is the same; only the bytes that say it are fewer.
+/// A pool with no nonzero byte at all ships no data section.
+fn append_pool(module: &mut Module, pool: &[u8]) {
+    let lead = pool.iter().position(|&b| b != 0).unwrap_or(pool.len());
+    let end = pool.iter().rposition(|&b| b != 0).map_or(lead, |i| i + 1);
+    if lead < end {
+        let mut data = DataSection::new();
+        data.active(0, &ConstExpr::i32_const(lead as i32), pool[lead..end].iter().copied());
+        module.section(&data);
+    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -40,8 +120,6 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         table,
         work,
         pool,
-        oom_msg,
-        repeat_msg,
         lowered,
         reachable,
         main_fn,
@@ -50,9 +128,30 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         global_decls,
         export_fns,
         main_index,
-        true_base,
-        false_base,
     } = a;
+    // #2407: the allocation counters, APPENDED after the top-let globals so
+    // no existing index moves — four i64 globals `$alloc` / `$free` bump,
+    // present only under the `alloc_count` switch (a shipped module has
+    // none: byte-identical to a build without the switch).
+    let counters = crate::alloc_count::armed().then(|| G_FIXED_COUNT + global_decls.len() as u32);
+    // #1699: which fixed-slot helpers ship. The call edges do not depend on
+    // the literal addresses, so the set is computed over placeholder bodies;
+    // the literals of the helpers that ship are then interned BEFORE the
+    // pool's length fixes the line buffer and heap base (#3114).
+    let used = used_static_helpers(
+        &static_helpers(&HelperLits::default(), counters),
+        lowered
+            .iter()
+            .enumerate()
+            .filter_map(|(i, l)| match l {
+                Ok((f, _)) if reachable.contains(&i) => Some(f),
+                _ => None,
+            })
+            .chain(std::iter::once(main_fn))
+            .chain(extra_fns.iter().map(|(_, f)| f)),
+        if crate::host_exports::string_abi() { &[F_ALLOC, F_DEC_FLAT] } else { &[] },
+    );
+    let lits = HelperLits::intern(pool, &used);
     // ── assemble the module structurally ────────────────────────────────
     let line_start = (pool.data.len() as u32 + 15) & !15;
     let heap_start = u64::from(line_start) + LINE_BUF_MIN;
@@ -259,11 +358,6 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         };
         globals.global(GlobalType { val_type: vt, mutable: true, shared: false }, &init);
     }
-    // #2407: the allocation counters, APPENDED after the top-let globals so
-    // no existing index moves — four i64 globals `$alloc` / `$free` bump,
-    // present only under the `alloc_count` switch (a shipped module has
-    // none: byte-identical to a build without the switch).
-    let counters = crate::alloc_count::armed().then(|| G_FIXED_COUNT + global_decls.len() as u32);
     crate::alloc_count::declare_globals(&mut globals, counters);
 
     let mut exports = ExportSection::new();
@@ -308,61 +402,10 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     // edge set. The proven runtime core (the trees StructuralRuntime.v
     // grounds byte-for-byte: alloc, free, inc, dec_flat, cow) ships
     // unconditionally so the grounding gate keeps its subject.
-    let static_helpers: Vec<(u32, Function)> = vec![
-        (F_PRINTLN_BLOCK, emit_block_print(F_PRINTLN_IMPORT)),
-        (F_EPRINTLN_BLOCK, emit_block_print(F_EPRINTLN_IMPORT)),
-        (F_APPEND_COPY, emit_append_copy()),
-        (F_ITOA, emit_itoa()),
-        (F_APPEND_I64, emit_append_i64()),
-        (F_APPEND_BOOL, emit_append_bool(true_base, false_base)),
-        (F_ALLOC, emit_alloc(oom_msg, counters)),
-        (F_INT_TO_STRING, emit_int_to_string()),
-        (F_CONCAT, emit_concat()),
-        (F_STR_EQ, emit_str_eq()),
-        (F_LIST_GET_8, emit_list_get(Scalar::Int)),
-        (F_LIST_GET_4, emit_list_get(Scalar::Str)),
-        (F_LIST_PUSH_8, emit_list_push(Scalar::Int)),
-        (F_LIST_PUSH_4, emit_list_push(Scalar::Str)),
-        (F_LIST_JOIN, emit_list_join()),
-        (F_BLOCK_COPY, emit_block_copy()),
-        (F_BUF_TO_BLOCK, emit_buf_to_block()),
-        (F_STR_LEN_CHARS, emit_str_len_chars()),
-        (F_SCAN_W64, emit_scan_w64()),
-        (F_SCAN_W32, emit_scan_w32()),
-        (F_SCAN_STR, emit_scan_str()),
-        (F_F16_TO_F64, emit_f16_to_f64()),
-        (F_CP_OFF, emit_cp_off()),
-        (F_STR_SLICE, emit_str_slice()),
-        (F_STR_REPEAT, emit_str_repeat(repeat_msg)),
-        (F_STR_CMP, emit_str_cmp()),
-        (F_STR_REPLACE, emit_str_replace()),
-        (F_COPY, emit_copy()),
-        (F_FREE, emit_free(counters)),
-        (F_INC, emit_inc()),
-        (F_DEC_FLAT, emit_dec_flat()),
-        (F_COW, emit_cow()),
-        (F_STR_APPEND, emit_str_append()),
-        (F_BYTES_PUSH, emit_bytes_push()),
-        (F_LINE_GROW, emit_line_grow()),
-        (F_LINE_PRINTLN, emit_line_print(F_PRINTLN_IMPORT)),
-        (F_LINE_EPRINTLN, emit_line_print(F_EPRINTLN_IMPORT)),
-    ];
+    let static_helpers = static_helpers(&lits, counters);
     debug_assert!(
         static_helpers.iter().enumerate().all(|(i, (idx, _))| *idx == F_PRINTLN_BLOCK + i as u32),
         "static helper list must mirror the F_* slot order exactly"
-    );
-    let used = used_static_helpers(
-        &static_helpers,
-        lowered
-            .iter()
-            .enumerate()
-            .filter_map(|(i, l)| match l {
-                Ok((f, _)) if reachable.contains(&i) => Some(f),
-                _ => None,
-            })
-            .chain(std::iter::once(main_fn))
-            .chain(extra_fns.iter().map(|(_, f)| f)),
-        if crate::host_exports::string_abi() { &[F_ALLOC, F_DEC_FLAT] } else { &[] },
     );
     for (idx, f) in &static_helpers {
         if used.contains(idx) {
@@ -394,9 +437,6 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         code.function(f);
     }
 
-    let mut data = DataSection::new();
-    data.active(0, &ConstExpr::i32_const(0), pool.data.iter().copied());
-
     let mut module = Module::new();
     module
         .section(&types)
@@ -409,7 +449,8 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     if !entry_fn_indices.is_empty() {
         module.section(&elements);
     }
-    module.section(&code).section(&data);
+    module.section(&code);
+    append_pool(&mut module, &pool.data);
     Ok(module.finish())
 }
 

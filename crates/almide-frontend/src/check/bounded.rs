@@ -36,7 +36,7 @@ impl Checker {
         }
         let mut diags: Vec<Diagnostic> = Vec::new();
         for decl in &program.decls {
-            let ast::Decl::Fn { name, attrs, effect, body: Some(body), span, .. } = decl else {
+            let ast::Decl::Fn { name, attrs, body: Some(body), span, .. } = decl else {
                 continue;
             };
             if !critical && !attrs.iter().any(|a| a.name.as_str() == "bounded") {
@@ -59,7 +59,6 @@ impl Checker {
                 fns: &fns,
                 fn_name: name.as_str(),
                 fn_span: *span,
-                is_effect: effect.unwrap_or(false),
                 consts: Vec::new(),
                 loop_depth: 0,
             };
@@ -291,7 +290,6 @@ struct BoundedCx<'a, 'c> {
     fns: &'a std::collections::HashMap<&'a str, (bool, Option<&'a ast::Expr>)>,
     fn_name: &'a str,
     fn_span: Option<BSpan>,
-    is_effect: bool,
     /// let-bound names currently known to be integer literals (ALS-B3's
     /// "constant-foldable from a literal"); shadowing/mutation removes them
     consts: Vec<String>,
@@ -789,156 +787,8 @@ impl BoundedCx<'_, '_> {
 
     fn check_call(&mut self, call: &ast::Expr, callee: &ast::Expr, args: &[ast::Expr]) {
         match &callee.kind {
-            ast::ExprKind::Ident { name } => {
-                let n = name.as_str();
-                if let Some((is_bounded, _)) = self.fns.get(n) {
-                    if !is_bounded {
-                        // ALS-B7 / E074
-                        self.err(
-                            "calling a function outside the profile is not admissible in a @bounded function",
-                            "mark the callee @bounded, or use a first-order pure stdlib member (@bounded callee)",
-                            "E074",
-                            call.span,
-                        );
-                    }
-                    return;
-                }
-                // bare builtins: the print family is B9's one capability
-                if n.starts_with("print") || n.starts_with("eprint") {
-                    if !self.is_effect {
-                        // a pure fn cannot reach it anyway; E006 owns that
-                    }
-                    return;
-                }
-                if n == "assert" || n == "assert_eq" {
-                    return; // test-position machinery, not a profile callee
-                }
-                // unknown bare callee: not a @bounded fn, not admissible
-                self.err(
-                    "calling a function outside the profile is not admissible in a @bounded function",
-                    "mark the callee @bounded, or use a first-order pure stdlib member (@bounded callee)",
-                    "E074",
-                    call.span,
-                );
-            }
-            ast::ExprKind::Member { object, field } => {
-                let ast::ExprKind::Ident { name: module } = &object.kind else {
-                    // a computed receiver is an indirect callee
-                    self.err(
-                        "an indirect call is not admissible in a @bounded function",
-                        "call @bounded functions or first-order pure stdlib members directly (@bounded callee)",
-                        "E074",
-                        call.span,
-                    );
-                    return;
-                };
-                let m0 = module.as_str();
-                let resolved = self
-                    .checker
-                    .env
-                    .import_table
-                    .resolve(m0)
-                    .map(|s| s.as_str().to_string())
-                    .unwrap_or_else(|| m0.to_string());
-                let m = resolved.as_str();
-                let f = field.as_str();
-                if m == "io" {
-                    if self.module_granted("io") {
-                        return;
-                    }
-                    if !(f.starts_with("print") || f.starts_with("eprint")) {
-                        self.err(
-                            "an effect outside the declared capability is not admissible in a @bounded function",
-                            "the profile's declared capability is standard output only",
-                            "E076",
-                            call.span,
-                        );
-                    }
-                    return;
-                }
-                if BOUNDED_DENIED_MODULES.contains(&m) {
-                    // #567: a granted capability un-denies its module wholesale
-                    // (the module is not in the pure set, so return — its calls
-                    // are the capability's own surface, not profile callees)
-                    if self.module_granted(m) {
-                        return;
-                    }
-                    // ALS-B9 / E076
-                    self.err(
-                        "an effect outside the declared capability is not admissible in a @bounded function",
-                        "the profile's declared capability is standard output only",
-                        "E076",
-                        call.span,
-                    );
-                    return;
-                }
-                if !BOUNDED_PURE_MODULES.contains(&m) {
-                    self.err(
-                        "calling a function outside the profile is not admissible in a @bounded function",
-                        "mark the callee @bounded, or use a first-order pure stdlib member (@bounded callee)",
-                        "E074",
-                        call.span,
-                    );
-                    return;
-                }
-                let full = format!("{m}.{f}");
-                // ALS-B7 / E074: higher-order stdlib members take function
-                // values — indirect callees the profile cannot follow
-                let higher_order = crate::stdlib::lookup_sig(m, f)
-                    .map(|sig| sig.params.iter().any(|(_, t)| matches!(t, Ty::Fn { .. })))
-                    .unwrap_or(false)
-                    || args
-                        .iter()
-                        .any(|a| matches!(a.kind, ast::ExprKind::Lambda { .. }));
-                if higher_order {
-                    self.err(
-                        "a higher-order call is not admissible in a @bounded function",
-                        "iterate with a counted loop and first-order calls (@bounded callee)",
-                        "E074",
-                        call.span,
-                    );
-                    return;
-                }
-                // ALS-B8 / E075: run-time-length heap construction
-                if let Some((_, slots)) = BOUNDED_SIZED_CTORS.iter().find(|(n, _)| *n == full) {
-                    for slot in slots.iter() {
-                        if let Some(a) = args.get(*slot) {
-                            if !self.is_const_int(a) {
-                                self.err(
-                                    "run-time-length heap construction is not admissible in a @bounded function",
-                                    "give every constructed length a compile-time size",
-                                    "E075",
-                                    call.span,
-                                );
-                                return;
-                            }
-                        }
-                    }
-                }
-                // ALS-B4 / E071: allocating calls inside a counted loop
-                if self.loop_depth > 0 && BOUNDED_ALLOC_CALLS.contains(&full.as_str()) {
-                    self.err(
-                        "an allocating call inside a counted loop is not admissible in a @bounded function",
-                        "allocate outside the loop and keep the loop body allocation-free",
-                        "E071",
-                        call.span,
-                    );
-                    return;
-                }
-                // ALS-B10 / E077: a stdlib call computing on Float arguments
-                if args.iter().any(|a| self.expr_is_float(a)) && m != "float" {
-                    // float.to_string / float.sign etc. OBSERVE a Float —
-                    // computing modules (math.*) reject it
-                    if m == "math" {
-                        self.err(
-                            "a Float operation is not admissible in a @bounded function",
-                            "keep to Int arithmetic — Float values may be held and passed, not computed on",
-                            "E077",
-                            call.span,
-                        );
-                    }
-                }
-            }
+            ast::ExprKind::Ident { name } => self.check_call_ident(call, name.as_str()),
+            ast::ExprKind::Member { object, field } => self.check_call_member(call, object, field.as_str(), args),
             // ALS-B7 (#2297): a variant constructor application builds a
             // value, as a record literal or a tuple does. It is not a call,
             // and B4 does not list it; the caller walks its payload under
@@ -953,5 +803,175 @@ impl BoundedCx<'_, '_> {
                 );
             }
         }
+    }
+
+    /// A bare callee: a @bounded fn, the print family, the assert macros, or
+    /// nothing the profile admits.
+    fn check_call_ident(&mut self, call: &ast::Expr, n: &str) {
+        if let Some((is_bounded, _)) = self.fns.get(n) {
+            if !is_bounded {
+                // ALS-B7 / E074
+                self.err(
+                    "calling a function outside the profile is not admissible in a @bounded function",
+                    "mark the callee @bounded, or use a first-order pure stdlib member (@bounded callee)",
+                    "E074",
+                    call.span,
+                );
+            }
+            return;
+        }
+        // bare builtins: the print family is B9's one capability (a pure fn
+        // cannot reach it anyway; E006 owns that)
+        if n.starts_with("print") || n.starts_with("eprint") {
+            return;
+        }
+        if n == "assert" || n == "assert_eq" {
+            return; // test-position machinery, not a profile callee
+        }
+        // unknown bare callee: not a @bounded fn, not admissible
+        self.err(
+            "calling a function outside the profile is not admissible in a @bounded function",
+            "mark the callee @bounded, or use a first-order pure stdlib member (@bounded callee)",
+            "E074",
+            call.span,
+        );
+    }
+
+    /// A `module.member` callee: the capability gate on the module, then the
+    /// shape rules on the call.
+    fn check_call_member(&mut self, call: &ast::Expr, object: &ast::Expr, f: &str, args: &[ast::Expr]) {
+        let ast::ExprKind::Ident { name: module } = &object.kind else {
+            // a computed receiver is an indirect callee
+            self.err(
+                "an indirect call is not admissible in a @bounded function",
+                "call @bounded functions or first-order pure stdlib members directly (@bounded callee)",
+                "E074",
+                call.span,
+            );
+            return;
+        };
+        let m0 = module.as_str();
+        let resolved = self
+            .checker
+            .env
+            .import_table
+            .resolve(m0)
+            .map(|s| s.as_str().to_string())
+            .unwrap_or_else(|| m0.to_string());
+        let m = resolved.as_str();
+        if self.member_module_decided(call, m, f) {
+            return;
+        }
+        self.check_member_call_shape(call, m, f, args);
+    }
+
+    /// The module half of a member call: `io` and the denied modules are
+    /// capability questions, and a module outside the pure set is not a
+    /// profile callee. `true` when that settles the call.
+    fn member_module_decided(&mut self, call: &ast::Expr, m: &str, f: &str) -> bool {
+        if m == "io" {
+            if self.module_granted("io") {
+                return true;
+            }
+            if !(f.starts_with("print") || f.starts_with("eprint")) {
+                self.err(
+                    "an effect outside the declared capability is not admissible in a @bounded function",
+                    "the profile's declared capability is standard output only",
+                    "E076",
+                    call.span,
+                );
+            }
+            return true;
+        }
+        if BOUNDED_DENIED_MODULES.contains(&m) {
+            // #567: a granted capability un-denies its module wholesale
+            // (the module is not in the pure set, so return — its calls
+            // are the capability's own surface, not profile callees)
+            if self.module_granted(m) {
+                return true;
+            }
+            // ALS-B9 / E076
+            self.err(
+                "an effect outside the declared capability is not admissible in a @bounded function",
+                "the profile's declared capability is standard output only",
+                "E076",
+                call.span,
+            );
+            return true;
+        }
+        if !BOUNDED_PURE_MODULES.contains(&m) {
+            self.err(
+                "calling a function outside the profile is not admissible in a @bounded function",
+                "mark the callee @bounded, or use a first-order pure stdlib member (@bounded callee)",
+                "E074",
+                call.span,
+            );
+            return true;
+        }
+        false
+    }
+
+    /// A pure stdlib member call: first-order (B7), constant-size
+    /// construction (B8), no allocation in a counted loop (B4), no Float
+    /// computation (B10) — the first rule broken is the one reported.
+    fn check_member_call_shape(&mut self, call: &ast::Expr, m: &str, f: &str, args: &[ast::Expr]) {
+        let full = format!("{m}.{f}");
+        // ALS-B7 / E074: higher-order stdlib members take function
+        // values — indirect callees the profile cannot follow
+        let higher_order = crate::stdlib::lookup_sig(m, f)
+            .map(|sig| sig.params.iter().any(|(_, t)| matches!(t, Ty::Fn { .. })))
+            .unwrap_or(false)
+            || args
+                .iter()
+                .any(|a| matches!(a.kind, ast::ExprKind::Lambda { .. }));
+        if higher_order {
+            self.err(
+                "a higher-order call is not admissible in a @bounded function",
+                "iterate with a counted loop and first-order calls (@bounded callee)",
+                "E074",
+                call.span,
+            );
+            return;
+        }
+        // ALS-B8 / E075: run-time-length heap construction
+        if self.has_runtime_sized_slot(&full, args) {
+            self.err(
+                "run-time-length heap construction is not admissible in a @bounded function",
+                "give every constructed length a compile-time size",
+                "E075",
+                call.span,
+            );
+            return;
+        }
+        // ALS-B4 / E071: allocating calls inside a counted loop
+        if self.loop_depth > 0 && BOUNDED_ALLOC_CALLS.contains(&full.as_str()) {
+            self.err(
+                "an allocating call inside a counted loop is not admissible in a @bounded function",
+                "allocate outside the loop and keep the loop body allocation-free",
+                "E071",
+                call.span,
+            );
+            return;
+        }
+        // ALS-B10 / E077: a stdlib call computing on Float arguments.
+        // float.to_string / float.sign etc. OBSERVE a Float — computing
+        // modules (math.*) reject it
+        if m == "math" && args.iter().any(|a| self.expr_is_float(a)) {
+            self.err(
+                "a Float operation is not admissible in a @bounded function",
+                "keep to Int arithmetic — Float values may be held and passed, not computed on",
+                "E077",
+                call.span,
+            );
+        }
+    }
+
+    /// A sized constructor (`list.repeat`-like) given a size slot that is not
+    /// a compile-time Int.
+    fn has_runtime_sized_slot(&self, full: &str, args: &[ast::Expr]) -> bool {
+        BOUNDED_SIZED_CTORS
+            .iter()
+            .find(|(n, _)| *n == full)
+            .is_some_and(|(_, slots)| slots.iter().filter_map(|slot| args.get(*slot)).any(|a| !self.is_const_int(a)))
     }
 }

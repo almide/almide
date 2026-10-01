@@ -178,7 +178,7 @@ impl LowerCtx {
             // tuple walled. Same materialization, same tracking, same drop
             // story as the positional twin by construction.
             IrExprKind::Record { name: Some(ctor), .. }
-                if self.variant_layouts.ctor_to_type.contains_key(ctor.as_str()) =>
+                if self.variant_layouts.is_ctor_for(ctor.as_str(), &expr.ty) =>
             {
                 let obj = self.try_lower_variant_ctor(expr)?;
                 self.track_owned_field(obj)
@@ -278,7 +278,7 @@ impl LowerCtx {
                 // CallFn would emit a dangling `(call $IntV)` (unlinked). Materialize the
                 // fresh OWNED tag-block via `try_lower_variant_ctor` (the same pre-check the
                 // list-element arm uses) and track it for the caller's move-in.
-                if self.variant_layouts.ctor_to_type.contains_key(name) {
+                if self.variant_layouts.is_ctor_for(name, &expr.ty) {
                     let obj = self.try_lower_variant_ctor(expr)?;
                     if !self.live_heap_handles.contains(&obj) {
                         self.live_heap_handles.push(obj);

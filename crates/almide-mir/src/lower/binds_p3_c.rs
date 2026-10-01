@@ -222,7 +222,7 @@ impl LowerCtx {
         // variant constructor): this is a TAGGED variant value, NOT a plain record — route
         // to the variant builder (a tag-less field block here would misread every match).
         if let IrExprKind::Record { name: Some(n), .. } = &value.kind {
-            if self.variant_layouts.ctor_to_type.contains_key(n.as_str()) {
+            if self.variant_layouts.is_ctor_for(n.as_str(), &value.ty) {
                 return self.try_lower_variant_ctor(value);
             }
         }

@@ -1,0 +1,14 @@
+// A facade over `state`: the record is re-exported through aliases.
+import self.state
+
+type T = state.T
+
+type Renamed = state.T
+
+let ORIGIN = T { n: 7, small: 2 }
+
+fn new() -> T = state.make()
+
+fn bare(k: Int) -> T = T { n: k, small: 5 }
+
+fn renamed(k: Int) -> Renamed = Renamed { n: k, small: 6, tag: "r" }

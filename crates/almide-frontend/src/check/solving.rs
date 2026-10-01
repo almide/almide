@@ -71,10 +71,10 @@ impl Checker {
         }
         // #1108 Phase 2b-iii: a fallible callback handed to a container HOF the
         // name-keyed normalization does not cover. `list.map(xs, (x) => f(x)!)`
-        // is rewritten to the `__fallible_*` twin before inference; `set.map`,
-        // `option.map`, `map.map`, and every user HOF have no twin, so the
+        // is rewritten to the `__fallible_*` twin before inference (so are the
+        // map / set / option cells since #3163); a user HOF has no twin, so the
         // callback's Result rides through the container and the mismatch
-        // surfaces here as `Set[Result[..]]` vs `Result[Set[..]]` — under the
+        // surfaces here as `List[Result[..]]` vs `Result[List[..]]` — under the
         // generic "fix the expression type", which names neither the cause nor
         // a way out. Detect the SHAPE (a Result nested one level inside the
         // actual where the expected has it outside) and say what happened.
@@ -399,12 +399,12 @@ pub(crate) fn is_numeric_scalar(t: &Ty) -> bool {
 /// callback's Result stayed INSIDE the container instead of the whole traversal
 /// becoming fallible.
 ///
-/// Only the core `list` HOFs get the fallible form today (a pre-inference
-/// rewrite to the hand-written `__fallible_*` twins, keyed by name in
-/// `infer_calls_closures.rs`). Every other container — and every user-defined
-/// HOF — leaves the bit where the callback put it, which is correct for the
-/// types and useless as a message. Naming the two spellings that DO work is the
-/// difference between a dead end and a five-second fix.
+/// The stdlib HOFs of `almide_lang::fallible_hofs` get the fallible form (a
+/// pre-inference rewrite to the hand-written `__fallible_*` twins). Anything
+/// else that maps a callback into a container — a user-defined HOF — leaves
+/// the bit where the callback put it, which is correct for the types and
+/// useless as a message. Naming the spellings that DO work is the difference
+/// between a dead end and a five-second fix.
 fn fallible_callback_shape_hint(expected: &Ty, actual: &Ty) -> Option<String> {
     use crate::types::TypeConstructorId as C;
     // expected: Result[Container[T], E]
@@ -423,17 +423,17 @@ fn fallible_callback_shape_hint(expected: &Ty, actual: &Ty) -> Option<String> {
         Ty::Applied(c, _) if c == act_ctor => {}
         _ => return None,
     }
-    Some(
+    // #3163: the accepted cells come from the matrix the rewrite reads.
+    Some(format!(
         "The callback is FALLIBLE, so its Result stayed INSIDE the container \
-         instead of the traversal itself becoming fallible. Only the core list \
-         HOFs (map / filter / flat_map / filter_map / fold / find / each) and \
-         the fs streaming walkers (fs.fold_lines / fs.for_each_line) accept \
-         a fallible callback natively today. Either traverse via `list.*` — \
-         convert with `set.to_list` first — or handle the error inside the \
-         callback (`?? fallback`, or match on ok/err). Transparency for the \
-         other containers and for user HOFs is #1108 Phase 2b-iii."
-            .to_string(),
-    )
+         instead of the traversal itself becoming fallible. These HOFs accept \
+         a fallible callback natively (first-err short-circuit): {}, and the fs \
+         streaming walkers (fs.fold_lines / fs.for_each_line). Either traverse \
+         with one of them, or handle the error inside the callback \
+         (`?? fallback`, or match on ok/err). Transparency for user HOFs is \
+         #1108 Phase 2b-iii.",
+        almide_lang::fallible_hofs::summary()
+    ))
 }
 
 /// `Some(hint)` when the actual type is a FUNCTION whose result is what the

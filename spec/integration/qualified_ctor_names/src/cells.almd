@@ -1,0 +1,125 @@
+// The module-qualified cells of #3176, shared by `main.almd` (both legs,
+// compared by tests/qualified_ctor_names_test.rs) and the test file.
+import self.shapes
+import self.draw
+import self.other
+import self.first
+import self.second
+import self.tree
+import self.flat
+import self.inner
+import self.sig
+import self.cmd
+
+fn record_beside_case() -> String = {
+  let t = shapes.Pane(1)
+  let p = draw.Pane { id: 2, w: 3 }
+  let n = match t {
+    shapes.Pane(k) => k,
+    _ => 0,
+  }
+  "${n} ${p.id} ${p.w}"
+}
+
+fn case_beside_record() -> String = {
+  let l = shapes.Leaf { v: 5 }
+  let d = draw.Leaf { v: 6, tag: "t" }
+  let n = match l {
+    shapes.Leaf { v } => v,
+    _ => 0,
+  }
+  "${n} ${d.v} ${d.tag}"
+}
+
+fn case_beside_case() -> String = {
+  let a = shapes.Leaf { v: 5 }
+  let b = other.Leaf { v: 7 }
+  let c = other.Pane("p")
+  let x = match a {
+    shapes.Leaf { v } => "${v}",
+    _ => "x",
+  }
+  let y = match b {
+    other.Leaf { v } => "${v}",
+    other.Pane(s) => s,
+  }
+  let z = match c {
+    other.Leaf { v } => "${v}",
+    other.Pane(s) => s,
+  }
+  "${x} ${y} ${z}"
+}
+
+fn nested_patterns() -> String = {
+  let o = some(shapes.Pair(1, 2))
+  let m = some(draw.Pair("z"))
+  let a = match o {
+    some(shapes.Pair(x, y)) => "${x + y}",
+    _ => "x",
+  }
+  let b = match m {
+    some(draw.Pair(s)) => s,
+    _ => "x",
+  }
+  let c = match (o, m) {
+    (some(shapes.Pair(x, _)), some(draw.Pair(s))) => "${x}${s}",
+    _ => "x",
+  }
+  "${a} ${b} ${c}"
+}
+
+fn ctor_values() -> Int = {
+  let ts = [1, 2] |> list.map(shapes.Pane)
+  let ms = ["a", "b", "c"] |> list.map(draw.Pair)
+  list.len(ts) + list.len(ms)
+}
+
+fn defaults() -> String = {
+  let a = first.Note { v: 1 }
+  let b = second.Note { v: 2 }
+  let x = match a {
+    first.Note { v, text } => "${v} ${text}",
+    _ => "x",
+  }
+  let y = match b {
+    second.Note { v, text } => "${v} ${text}",
+    _ => "x",
+  }
+  "${x} ${y}"
+}
+
+fn boxed() -> String = {
+  let t = tree.Node { left: tree.Lit(1), right: tree.Wrap(tree.Lit(2)) }
+  let f = flat.Node { left: 3, right: 4 }
+  let a = match f {
+    flat.Node { left, right } => left + right,
+    flat.Wrap(n) => n,
+  }
+  let b = match t {
+    tree.Node { left: tree.Lit(x), right: tree.Wrap(tree.Lit(y)) } => x * 10 + y,
+    _ => 0,
+  }
+  "${tree.total(t)} ${a} ${b}"
+}
+
+fn in_module() -> String = {
+  let p = inner.build(4)
+  let k = inner.Pair("k")
+  "${p.w} ${inner.pick(inner.mk())} ${inner.sum(inner.theirs(5))} ${inner.pick(k)}"
+}
+
+fn tags() -> Int = {
+  let x = sig.Halt
+  let y = cmd.Go(7)
+  let z = sig.Turn(5)
+  let w = cmd.Turn(6)
+  let p = match y {
+    cmd.Go(n) => n,
+    _ => 0,
+  }
+  let q = match z {
+    sig.Turn(n) => n,
+    _ => 0,
+  }
+  sig.code(x) + cmd.code(y) + sig.code(z) + cmd.code(w) + p * 10000 + q * 100000
+}

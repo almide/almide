@@ -24,6 +24,8 @@ use super::use_kind::{written_vars, ExplicitBorrows, Site, UseSites};
 
 #[path = "pass_capture_clone_bindings.rs"]
 mod bindings;
+#[path = "pass_capture_clone_mut_param.rs"]
+mod mut_param;
 use bindings::{capture_bindings, wrap_fan_with_clones};
 
 #[derive(Debug)]
@@ -42,6 +44,12 @@ impl NanoPass for CaptureClonePass {
     fn run_before(&self) -> Vec<&'static str> { vec!["CloneInsertion"] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        // A captured-and-written `mut` param takes a `var` local's storage
+        // first (#3154), so the shared-cell scan below classifies it as one.
+        // Before the snapshot: its local is no `__cap_*` clone binding.
+        let mut_param_cells = mut_param::cell_mut_params(&mut program);
+        let rebound = !mut_param_cells.is_empty();
+        program.codegen_annotations.mut_param_cells.extend(mut_param_cells);
         // Every VarId this pass allocates is a `__cap_*` clone binding (one
         // alloc site); snapshot the table length and mark the new ids in
         // `always_clone_vars` afterwards — id-keyed, rename-proof.
@@ -56,9 +64,10 @@ impl NanoPass for CaptureClonePass {
         // adds the `__cap` renames to the set so their reads/writes are cells too.
         let shared_mut = detect_shared_mut(&program);
         for v in &shared_mut { program.codegen_annotations.shared_mut_vars.insert(*v); }
-        let mut facts = Facts { param_borrows: HashMap::new(), shared_mut, capture_uses: bindings::CaptureUses::default() };
+        let box_binders = program.codegen_annotations.box_binders.clone();
+        let mut facts = Facts { param_borrows: HashMap::new(), shared_mut, capture_uses: bindings::CaptureUses::default(), box_binders };
 
-        let mut changed = false;
+        let mut changed = rebound;
         let IrProgram { functions, modules, var_table, codegen_annotations, .. } = &mut program;
         let module_fns = modules.iter_mut().flat_map(|m| m.functions.iter_mut());
         for func in functions.iter_mut().chain(module_fns) {
@@ -95,6 +104,9 @@ struct Facts {
     /// capture-move rule reads (`bindings::capture_moves`, #2231: the Perceus
     /// rule, a lambda dups its free variables only while they stay live).
     capture_uses: bindings::CaptureUses,
+    /// Boxed-payload binders (`BoxDeref`): a capture of one binds the
+    /// unboxed value, so the closure reads a plain `T` (#3174).
+    box_binders: HashSet<VarId>,
 }
 
 /// What the walk threads through every node: the table it allocates the
@@ -558,6 +570,7 @@ fn wrap_lambda_with_clones(
     // Rename captured vars inside the lambda body
     if let IrExprKind::Lambda { body, .. } = &mut expr.kind {
         replace_vars(body, &renames);
+        bindings::unbox_captures(body, &renames, &cx.facts.box_binders);
     }
 
     // Wrap: { let __cap = var; ...; original_lambda }

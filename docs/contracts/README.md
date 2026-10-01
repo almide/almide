@@ -73,10 +73,10 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-035 | Effect-main errors terminate uniformly: Error: <msg> + exit 1 | 0.24.0 | active | fixture | 6 |
 | C-036 | Records, variants, and pattern matching are byte-identical | 0.24.0 | active | fixture | 10 |
 | C-037 | bytes.read_f16_le decodes IEEE-754 half floats identically | 0.24.0 | active | fixture | 1 |
-| C-038 | Sized-integer literals narrow to the declared field width | 0.24.0 | active | fixture | 3 |
+| C-038 | Sized-integer literals narrow to the declared field width | 0.24.0 | active | fixture | 4 |
 | C-039 | Type-changing map.map / set.map yield a collection of the new type | 0.24.0 | active | fixture | 2 |
 | C-040 | Codegen emit is host-architecture deterministic | 0.24.0 | active | fixture | 3 |
-| C-041 | Heap / RC primitives honour the Lean-certified Perceus discipline | 0.24.0 | active | lean | 6 |
+| C-041 | Heap / RC primitives honour the Lean-certified Perceus discipline | 0.24.0 | active | lean | 7 |
 | C-042 | fs preopen-dir scan + path resolution is observable-equivalent | 0.24.0 | active | fixture | 1 |
 | C-043 | A user type named Box coexists with recursive-enum heap indirection | 0.24.0 | active | fixture | 1 |
 | C-044 | Result/Option construction and matching are byte-identical | 0.24.0 | active | fixture | 5 |
@@ -101,11 +101,11 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-063 | Parsing a heterogeneous-nested glTF/JSON document and walking its arrays by element is byte-identical on both targets | 0.26.19 | active | fixture | 1 |
 | C-064 | The effect-fn Result auto-unwrap rule is identical across binding positions and type-directed, byte-identical on both targets | 0.26.20 | active | fixture | 3 |
 | C-065 | The string position API is codepoint-indexed end-to-end on both targets | 0.26.20 | active | fixture | 3 |
-| C-066 | WASM heap is reclaimed by default (true Perceus) | 0.27.0 | active | fixture | 17 |
+| C-066 | WASM heap is reclaimed by default (true Perceus) | 0.27.0 | active | fixture | 20 |
 | C-067 | The xs[i] index syntax aborts on out-of-bounds (read and write) | 0.27.4 | active | fixture | 9 |
 | C-068 | Auto-? is target-directed in construction positions | 0.27.4 | active | fixture | 3 |
 | C-069 | Effect-fn tail self-recursion loop-converts to O(1) stack on both targets | 0.27.4 | active | fixture | 3 |
-| C-070 | Nested constructor patterns match and bind identically on both targets | 0.27.6 | active | fixture | 6 |
+| C-070 | Nested constructor patterns match and bind identically on both targets | 0.27.6 | active | fixture | 8 |
 | C-071 | Single-part interpolation RC balance | 0.27.6 | active | fixture | 1 |
 | C-072 | Inferred named-record repr parity | 0.27.6 | active | fixture | 1 |
 | C-073 | Tuple pattern testing a variant constructor | 0.27.6 | active | fixture | 1 |
@@ -137,7 +137,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-099 | comparison/equality operators byte-match native across all operand types on the v1 wasm path | 0.27.6 | active | fixture | 10 |
 | C-100 | Self-hosted String classification/transform ops byte-match native on wasm | 0.27.6 | active | fixture | 4 |
 | C-101 | List ops over heap elements (String/Value) byte-match native and are leak/double-free free | 0.27.6 | active | fixture | 18 |
-| C-102 | List iteration, call-result element materialization, and tail-recursive list traversal byte-match native | 0.27.6 | active | fixture | 4 |
+| C-102 | List iteration, call-result element materialization, and tail-recursive list traversal byte-match native | 0.27.6 | active | fixture | 5 |
 | C-103 | Self-hosted dynamic Value model (merge, array/as_array roundtrip, tuple TCO) byte-matches native and is leak-free in a loop | 0.27.6 | active | fixture | 7 |
 | C-104 | Tail-recursive accumulator shapes lower to bounded-stack loops byte-matching native | 0.27.6 | active | fixture | 6 |
 | C-105 | var/append accumulator loops (scalar, owned-handle, cross-dep, mutual-recursion) byte-match native on wasm | 0.27.6 | active | fixture | 6 |
@@ -167,7 +167,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-129 | list.chunk / list.windows non-positive sizes: negative keeps the promoted norm, zero aborts in the T6 form | 0.28.4 | active | fixture | 4 |
 | C-130 | option/map combinators hand back OWNED heap results (no bare pass-through handles) | 0.28.5 | active | fixture | 2 |
 | C-131 | Loop-rebuilt buffers are O(n): COW guards only LIVE aliases, and LICM never hoists heap allocations | 0.28.6 | active | fixture | 3 |
-| C-132 | mut parameters of reallocating containers persist to the caller at every call position | 0.28.6 | active | fixture | 19 |
+| C-132 | mut parameters of reallocating containers persist to the caller at every call position | 0.28.6 | active | fixture | 22 |
 | C-133 | env.get observes the host environment identically on native and wasm | 0.29.0 | active | fixture | 1 |
 | C-134 | Vendored-libm atan / tanh are byte-identical cross-target | 0.30.0 | active | fuzz(3000) | 1 |
 | C-135 | Declared-Unit effect fn ABI agrees between def and every call site | 0.30.0 | active | fixture | 2 |
@@ -227,7 +227,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-189 | env.os and the temp-dir surface report the HOST — the equivalence law's only exemption, and it is closed | 0.37.0 | active | fixture | 1 |
 | C-190 | A closure captures any scalar, not just Int and Bool — Float and every sized int width included | 0.37.0 | active | fixture | 1 |
 | C-191 | A module-level global reads its true value on every branch path — the materialization memo is scoped to straight-line context | 0.37.1 | active | fixture | 2 |
-| C-192 | An auto-unwrapped effect call inside a string interpolation lifts and propagates like a call argument | 0.37.1 | active | fixture | 1 |
+| C-192 | An auto-unwrapped effect call inside a string interpolation lifts and propagates like a call argument | 0.37.1 | active | fixture | 3 |
 | C-193 | Repeated in-place writes through a mutable global stay in place — the receiver borrows the post-COW handle | 0.37.1 | active | fixture | 1 |
 | C-194 | bytes.copy_from with a mutable-global destination writes through the storage slot | 0.38.1 | active | fixture | 1 |
 | C-195 | Value-position variant match over the checked-conversion family executes | 0.38.1 | active | fixture | 1 |
@@ -250,11 +250,11 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-212 | Two self-host modules with same-named private helpers link cleanly or wall — never an invalid module | 0.52.0 | active | fixture | 1 |
 | C-213 | The bytes byte-level writers encode the same buffer on both targets, out-of-range writes included | 0.53.5 | active | fixture | 6 |
 | C-214 | process.exec_status_timeout: the fire-path error is pinned; whether it fires is the host's | 0.53.6 | active | fixture | 0 |
-| C-215 | fs content readers: absence is ok(none) via the _if_exists family, classified by the runtime | 0.53.7 | active | fixture | 3 |
+| C-215 | fs content readers: absence is ok(none) via the _if_exists family, classified by the runtime | 0.53.7 | active | fixture | 4 |
 | C-216 | explicit ! on a declared-Option effect call is the implicit strip's identical twin | 0.54.1 | active | fixture | 1 |
 | C-217 | let _ = f() discards the Result — the err does not propagate | 0.55.0 | active | fixture | 1 |
 | C-218 | a heap-payload ?? returned as the fn tail yields the same value on both targets | 0.56.0 | active | fixture | 3 |
-| C-219 | a Never-typed call in a branch arm runs on both targets and sets the exit code | 0.56.0 | active | fixture | 3 |
+| C-219 | a Never-typed call in a branch arm runs on both targets and sets the exit code | 0.56.0 | active | fixture | 5 |
 | C-220 | fs streaming line walkers fold/each with read_lines line semantics | 0.56.1 | active | fixture | 1 |
 | C-221 | An effect fn-typed slot admits pure and fallible lambdas with one carrier semantics | 0.56.1 | active | fixture | 4 |
 | C-222 | An expression-nested scalar unwrap propagates the err identically on both legs | 0.56.1 | active | fixture | 1 |
@@ -319,7 +319,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-281 | Bare Result constructors and parameter-passthrough effect tails run identically per the kernel semantics | 0.57.1 | active | fixture | 3 |
 | C-282 | A matrix index out of range aborts identically on both targets; the row reductions answer their identity instead | 0.57.1 | active | fixture | 1 |
 | C-283 | A call through a Fn-typed local resolves that local, never a same-named top-level fn | 0.57.1 | active | fixture | 1 |
-| C-284 | A fallible list HOF driven by a user effect fn callback runs identically on both targets | 0.57.1 | active | fixture | 4 |
+| C-284 | A fallible list HOF driven by a user effect fn callback runs identically on both targets | 0.57.1 | active | fixture | 7 |
 | C-285 | regex.captures answers the whole match at index 0, and `none` means only that nothing matched | 0.57.1 | active | fixture | 2 |
 | C-286 | `??` reads its source; the Option survives the elimination and stays readable | 0.57.1 | active | fixture | 1 |
 | C-287 | A tail-position heap-result if/match with a none arm executes the taken arm for record and list payloads | 0.57.1 | active | fixture | 1 |
@@ -354,7 +354,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-316 | A @bounded effect fn may only use standard output; other effect modules, host-reaching modules and fan are rejected (E076) | 0.60.0 | active | fixture | 0 |
 | C-317 | Float operations are provisionally rejected in a @bounded function (E077) | 0.60.0 | active | fixture | 0 |
 | C-318 | Early exit inside a counted loop body is rejected in a @bounded function (E078) | 0.60.0 | active | fixture | 0 |
-| C-319 | A captured-and-mutated var List is shared storage through a closure | 0.60.0 | active | fixture | 5 |
+| C-319 | A captured-and-mutated var List is shared storage through a closure | 0.60.0 | active | fixture | 7 |
 | C-320 | A budget cut performs exit bookkeeping: exhausted is always Err, regions are independent, cut placement is unobservable | 0.60.0 | active | fixture | 2 |
 | C-321 | The fan prefetch split (start-all, await-in-arm-order, abandon-losers) is unobservable | 0.60.0 | active | fixture | 1 |
 | C-322 | Constructors are function values, the builtin trio included | 0.60.0 | active | fixture | 1 |

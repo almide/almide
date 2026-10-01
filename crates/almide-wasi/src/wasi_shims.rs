@@ -105,9 +105,13 @@ fn shim_fs_call(
     g_plen: u32,
     g_ppos: Option<u32>,
     forward: &[(i32, u32)],
-    mono: bool,
-    raw_stderr: bool,
+    ops: &[i32],
 ) -> Function {
+    // Each served arm ships only when the module's op set names its op
+    // (#3114): an arm no call can select is the only reference its WASI
+    // import has, so a dead arm kept fd_read / random_get / clock_time_get in
+    // every artifact. The refusal below still answers anything else.
+    let has = |op: i32| ops.contains(&op);
     // params: 0=op 1=a_ptr 2=a_len 3=b_ptr 4=b_len; locals: 5=nread
     // 6=deadline (i64, op 36)
     let (op, a_len, b_ptr, b_len, nread) = (0u32, 2u32, 3u32, 4u32, 5u32);
@@ -135,8 +139,7 @@ fn shim_fs_call(
     // op 30: raw stdout append; op 73: raw stderr append (#2769) — the
     // same fd_write on fd 1 / fd 2. The op-73 arm ships only when the
     // module's op set names it (`panic`), so no other artifact grows.
-    let raw_ops: &[(i32, i32)] = if raw_stderr { &[(30, 1), (73, 2)] } else { &[(30, 1)] };
-    for &(code, fd) in raw_ops {
+    for (code, fd) in [(30, 1), (73, 2)].into_iter().filter(|(code, _)| has(*code)) {
         i.local_get(op).i32_const(code).i32_eq().if_(BlockType::Empty);
         i.i32_const(park as i32).local_get(b_ptr).i32_store(mem(IOV));
         i.i32_const(park as i32).local_get(b_len).i32_store(mem(IOV + 4));
@@ -149,12 +152,44 @@ fn shim_fs_call(
         i.end();
     }
 
-    // op 35: incremental stdin — ONE fd_read of up to min(a_len, 4096)
-    // bytes into the park data region (the count rides in a_len, op 32's
-    // b_len convention). Short reads are the contract ("up to n"): the
-    // guest's read_line/read_byte loops ask byte-at-a-time, so one
-    // fd_read per call is exactly the incumbent leg's cadence. An errno
-    // or EOF answers 0 bytes.
+    if has(35) {
+        stdin_arm(&mut i, park, g_plen, (op, a_len, nread));
+    }
+
+    // op 32: entropy into the park data region (count rides in b_len).
+    if has(32) {
+        i.local_get(op).i32_const(32).i32_eq().if_(BlockType::Empty);
+        i.i32_const((park + DATA) as i32).local_get(b_len).call(2).drop();
+        i.local_get(b_len).global_set(g_plen);
+        i.i64_const(0).return_();
+        i.end();
+    }
+
+    // op 34: the wall clock (clock id 0), op 60: the monotonic clock (clock
+    // id 1, the one the op-36 spin below reads) — raw nanos.
+    for (code, clock) in [(34, 0), (60, 1)].into_iter().filter(|(code, _)| has(*code)) {
+        i.local_get(op).i32_const(code).i32_eq().if_(BlockType::Empty);
+        i.i32_const(clock).i64_const(1).i32_const(park as i32).call(3).drop();
+        i.i32_const(park as i32).i64_load(mem(0)).return_();
+        i.end();
+    }
+
+    if has(36) {
+        sleep_arm(&mut i, park, (op, a_len, deadline));
+    }
+
+    // Everything else: the defined refusal.
+    refuse(&mut i, park, MSG, UNSUPPORTED_MSG.len());
+    i.end();
+    f
+}
+
+/// op 35: incremental stdin — ONE fd_read of up to min(a_len, 4096) bytes
+/// into the park data region (the count rides in a_len, op 32's b_len
+/// convention). Short reads are the contract ("up to n"): the guest's
+/// read_line/read_byte loops ask byte-at-a-time, so one fd_read per call is
+/// exactly the incumbent leg's cadence. An errno or EOF answers 0 bytes.
+fn stdin_arm(i: &mut wasm_encoder::InstructionSink<'_>, park: u64, g_plen: u32, (op, a_len, nread): (u32, u32, u32)) {
     i.local_get(op).i32_const(35).i32_eq().if_(BlockType::Empty);
     i.i32_const(park as i32).i32_const((park + DATA) as i32).i32_store(mem(IOV));
     // len = clamp(a_len, 0..=4096) — unsigned min folds a negative count
@@ -182,37 +217,15 @@ fn shim_fs_call(
     i.local_get(nread).global_set(g_plen);
     i.local_get(nread).i64_extend_i32_u().return_();
     i.end();
+}
 
-    // op 32: entropy into the park data region (count rides in b_len).
-    i.local_get(op).i32_const(32).i32_eq().if_(BlockType::Empty);
-    i.i32_const((park + DATA) as i32).local_get(b_len).call(2).drop();
-    i.local_get(b_len).global_set(g_plen);
-    i.i64_const(0).return_();
-    i.end();
-
-    // op 34: the wall clock, raw nanos.
-    i.local_get(op).i32_const(34).i32_eq().if_(BlockType::Empty);
-    i.i32_const(0).i64_const(1).i32_const(park as i32).call(3).drop();
-    i.i32_const(park as i32).i64_load(mem(0)).return_();
-    i.end();
-
-    // op 60: the monotonic clock (clock id 1), raw nanos — the clock the
-    // op-36 spin below already reads, so it adds no import. Emitted only
-    // when the module reaches the op, so no other artifact grows.
-    if mono {
-        i.local_get(op).i32_const(60).i32_eq().if_(BlockType::Empty);
-        i.i32_const(1).i64_const(1).i32_const(park as i32).call(3).drop();
-        i.i32_const(park as i32).i64_load(mem(0)).return_();
-        i.end();
-    }
-
-    // op 36: env.sleep_ms — a MONOTONIC busy-wait over clock_time_get
-    // (the ms count rides a_len, the op-35 scalar convention). WASI p1
-    // has no sleep primitive short of poll_oneoff; the import-count
-    // objection died with #1716 (elements re-encode through the Remap
-    // now), so the spin survives only until someone wires poll_oneoff.
-    // The embedded host and native sleep properly; the CPU burn is
-    // confined to stock-runtime artifacts.
+/// op 36: env.sleep_ms — a MONOTONIC busy-wait over clock_time_get (the ms
+/// count rides a_len, the op-35 scalar convention). WASI p1 has no sleep
+/// primitive short of poll_oneoff; the import-count objection died with
+/// #1716 (elements re-encode through the Remap now), so the spin survives
+/// only until someone wires poll_oneoff. The embedded host and native sleep
+/// properly; the CPU burn is confined to stock-runtime artifacts.
+fn sleep_arm(i: &mut wasm_encoder::InstructionSink<'_>, park: u64, (op, a_len, deadline): (u32, u32, u32)) {
     i.local_get(op).i32_const(36).i32_eq().if_(BlockType::Empty);
     i.local_get(a_len).i32_const(0).i32_lt_s().if_(BlockType::Empty);
     i.i32_const(0).local_set(a_len);
@@ -228,11 +241,6 @@ fn shim_fs_call(
     i.end();
     i.i64_const(0).return_();
     i.end();
-
-    // Everything else: the defined refusal.
-    refuse(&mut i, park, MSG, UNSUPPORTED_MSG.len());
-    i.end();
-    f
 }
 
 /// `(dst) -> ()`: copy the staged bytes into guest memory. The source is

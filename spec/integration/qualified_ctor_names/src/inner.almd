@@ -1,0 +1,23 @@
+// Inside a module: its own record `Pane` and case `Pair` are what the bare
+// names mean, beside the imported `shapes` cases of the same names.
+import self.shapes
+
+type Pane = { id: Int, w: Int }
+
+type Kind = | Pair(String) | Solo
+
+fn build(n: Int) -> Pane = Pane { id: n, w: n * 2 }
+
+fn pick(k: Kind) -> String = match k {
+  Pair(s) => s,
+  Solo => "solo",
+}
+
+fn mk() -> Kind = Pair("in")
+
+fn theirs(n: Int) -> shapes.Tree = shapes.Pair(n, n)
+
+fn sum(t: shapes.Tree) -> Int = match t {
+  shapes.Pair(a, b) => a + b,
+  _ => 0,
+}

@@ -1,0 +1,88 @@
+// @contract: C-070
+// #3174: a closure that captures a binder bound from a recursive variant's
+// payload. Native stores that field as a `Box` and reads the binder through a
+// deref; the closure's capture was typed as the unboxed value but bound the
+// box itself (`let __cap: Node = b`, E0308) and then dereferenced the unboxed
+// copy (E0614). Each fn below failed the native build. The capture now binds
+// the unboxed value, by move when the closure holds the binder's last use and
+// by clone when the binder is read again after it.
+type Node = | Leaf(Int) | Pair(Node, Node)
+
+type Expr = | Num(Int) | Add { left: Expr, right: Expr } | Neg(Expr)
+
+fn sum(n: Node) -> Int = match n {
+  Leaf(v) => v,
+  Pair(a, b) => sum(a) + sum(b),
+}
+
+fn show(n: Node) -> String = match n {
+  Leaf(v) => int.to_string(v),
+  Pair(a, b) => "(${show(a)} ${show(b)})",
+}
+
+// The issue's shape: the closure holds `b`'s last use, so the capture moves.
+fn left_bumped(n: Node) -> Node? = match n {
+  Leaf(v) => some(Leaf(v + 1)),
+  Pair(a, b) => left_bumped(a) |> option.map((a2) => Pair(a2, b)),
+}
+
+// `b` is read again after the closure: the capture clones.
+fn both(n: Node) -> Int = match n {
+  Leaf(v) => v,
+  Pair(a, b) => {
+    let f = (k: Int) => k + sum(b)
+    f(1) + sum(b) + sum(a)
+  },
+}
+
+// Both payload binders captured by one closure.
+fn swapped(n: Node) -> Node? = match n {
+  Leaf(_) => none,
+  Pair(a, b) => some(0) |> option.map((_) => Pair(b, a)),
+}
+
+// A binder two boxes deep.
+fn inner_right(n: Node) -> Node? = match n {
+  Pair(Pair(_, r), _) => some(1) |> option.map((k) => Pair(Leaf(k), r)),
+  _ => none,
+}
+
+// A record-shaped case's boxed fields, and a single boxed payload.
+fn eval(e: Expr) -> Int = match e {
+  Num(v) => v,
+  Add { left, right } => some(eval(left)) |> option.map((l) => l + eval(right)) ?? 0,
+  Neg(inner) => some(0) |> option.map((z) => z - eval(inner)) ?? 0,
+}
+
+// A binder copied into a `let` tuple before the capture.
+fn via_let(n: Node) -> Int = match n {
+  Leaf(v) => v,
+  Pair(a, b) => {
+    let (x, y) = (a, b)
+    let g = () => sum(x) * 10 + sum(y)
+    g()
+  },
+}
+
+// Two closures capture the same binder.
+fn twice(n: Node) -> Int = match n {
+  Leaf(v) => v,
+  Pair(_, b) => {
+    let f = () => sum(b)
+    let g = () => sum(b) * 2
+    f() + g()
+  },
+}
+
+effect fn main() -> Unit = {
+  let t = Pair(Leaf(1), Pair(Leaf(2), Leaf(3)))
+  println(show(left_bumped(Pair(Leaf(1), Leaf(2))) ?? Leaf(0)))
+  println(show(left_bumped(t) ?? Leaf(0)))
+  println(int.to_string(both(t)))
+  println(show(swapped(t) ?? Leaf(0)))
+  println(show(inner_right(Pair(Pair(Leaf(4), Leaf(5)), Leaf(6))) ?? Leaf(0)))
+  println(show(inner_right(t) ?? Leaf(0)))
+  println(int.to_string(eval(Add { left: Num(7), right: Neg(Num(2)) })))
+  println(int.to_string(via_let(t)))
+  println(int.to_string(twice(t)))
+}

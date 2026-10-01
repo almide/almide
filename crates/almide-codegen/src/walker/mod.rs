@@ -58,8 +58,38 @@ pub(crate) fn is_rust_keyword(name: &str) -> bool {
 /// It is the struct when the program declares one under that name and the
 /// value's type does not name an enum (a case's value has its enum's type).
 pub(crate) fn literal_is_declared_struct(ctx: &RenderContext, name: &str, ty: &Ty) -> bool {
-    ctx.ann.record_field_counts.contains_key(name)
-        && !matches!(ty, Ty::Named(n, _) if ctx.ann.ctor_to_enum.values().any(|e| e.as_str() == n.as_str()))
+    ctx.ann.record_field_counts.contains_key(name) && !names_enum(ctx, ty)
+}
+
+/// Does `ty` name an enum the program renders?
+pub(crate) fn names_enum(ctx: &RenderContext, ty: &Ty) -> bool {
+    matches!(ty, Ty::Named(n, _) if ctx.ann.enum_cases.contains_key(n.as_str()))
+}
+
+/// Is payload position `field` (a tuple index or a record field name) of case
+/// `ctor` boxed, for a value typed `ty` (#3176)? `boxed_fields` keys a case by
+/// its bare name, so a recursive enum's `| Node { .. }` boxed the same-named
+/// fields of another module's flat `| Node { .. }`; the value's own enum
+/// answers first.
+pub(crate) fn case_field_is_boxed(ctx: &RenderContext, ty: Option<&Ty>, ctor: &str, field: &str) -> bool {
+    match ty {
+        Some(Ty::Named(n, _)) if ctx.ann.enum_cases.get(n.as_str()).is_some_and(|cs| cs.contains(ctor)) =>
+            ctx.ann.boxed_case_fields.contains(&(n.to_string(), ctor.to_string(), field.to_string())),
+        _ => ctx.ann.boxed_fields.contains(&(ctor.to_string(), field.to_string())),
+    }
+}
+
+/// The enum the variant case `ctor` of a value typed `ty` belongs to (#3176).
+/// The value's own type answers first when it is an enum with that case:
+/// `ctor_to_enum` is keyed by the bare case name program-wide, so of two
+/// modules' `| Pair` it holds only the last registered, and a construction of
+/// the other one — typed by the checker with its own enum — was spelled
+/// against the wrong enum (rustc E0061/E0308).
+pub(crate) fn ctor_enum_for(ctx: &RenderContext, ctor: &str, ty: Option<&Ty>) -> Option<String> {
+    match ty {
+        Some(Ty::Named(n, _)) if ctx.ann.enum_cases.get(n.as_str()).is_some_and(|cs| cs.contains(ctor)) => Some(n.to_string()),
+        _ => ctx.ann.ctor_to_enum.get(ctor).cloned(),
+    }
 }
 
 /// Prefix that renames the four keywords rustc refuses to raw-escape.
@@ -558,7 +588,14 @@ fn render_function_inner(ctx: &RenderContext, func: &IrFunction) -> String {
 
     let params_str = render_fn_params_str(&fn_ctx, func);
     let body_str = render_fn_body_str(&fn_ctx, func);
-    let ret_str = render_type_fn(ctx, &func.ret_ty);
+    // A fn declared `-> Never` returns Rust's `!` (#3144): its call then fits
+    // every value slot it is written in — an operand, an element, an arm —
+    // where the `()` the bottom type renders as elsewhere fits none.
+    let ret_str = if func.ret_ty == Ty::Never && !func.is_effect {
+        "!".to_string()
+    } else {
+        render_type_fn(ctx, &func.ret_ty)
+    };
 
     // Build generics string for functions
     let fn_generics = render_fn_generics_str(ctx, &fn_ctx, func);

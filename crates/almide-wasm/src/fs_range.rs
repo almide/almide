@@ -90,6 +90,7 @@ impl Emitter<'_> {
         he: u32,
         hbad: u32,
         params: &[u32],
+        cb: &IrExpr,
         body: &IrExpr,
         acc_ty: SliceTy,
     ) -> Result<(), EmitError> {
@@ -152,6 +153,7 @@ impl Emitter<'_> {
             i.local_get(hle).local_get(hpos).i32_sub();
             i.memory_copy(0, 0);
         }
+        let line = self.witness_line_open(cb, crate::fs::witness_walkers::WalkAcc::Carried(Some(params[0])));
         self.lower(body, Some(acc_ty))?;
         // The list.fold discipline: the accumulator owns one credit on every
         // step — a borrowed body result takes its share, and the previous
@@ -160,12 +162,14 @@ impl Emitter<'_> {
         if let Some(dec) = self.elem_is_handle(acc_ty).then(|| self.dec_fn_of(acc_ty)) {
             self.f.instructions().local_get(params[0]).call(dec);
         }
+        self.witness_fold_step(body, params[0], acc_ty);
         self.f.instructions().local_set(params[0]);
         // The line was this walk's fresh block; the body only borrowed it.
         let dec_str = self.dec_fn_of(STR);
+        self.f.instructions().local_get(params[1]).call(dec_str);
+        self.witness_line_close(line);
         {
             let mut i = self.f.instructions();
-            i.local_get(params[1]).call(dec_str);
             i.local_get(hq).i32_const(1).i32_add().local_set(hpos);
             i.br(0).end().end();
         }
@@ -257,8 +261,9 @@ impl Emitter<'_> {
             i.end();
             i.local_set(he);
         }
-        self.emit_range_walk(hraw, hlen, hs, he, hbad, &params, body, acc_ty)?;
+        self.emit_range_walk(hraw, hlen, hs, he, hbad, &params, cb, body, acc_ty)?;
         self.emit_utf8_err(hbad, hraw, hp, herr, "fs.fold_lines_range")?;
+        self.witness_walk_result(acc_ty);
         let acc_dec = self.elem_is_handle(acc_ty).then(|| self.dec_fn_of(acc_ty));
         self.fs_range_result(hraw, herr, params[0], acc_ty, acc_dec)?;
         for _ in 0..7 {
@@ -405,13 +410,18 @@ impl Emitter<'_> {
             self.rc_inc_top();
         }
         self.f.instructions().local_set(params[0]);
-        self.emit_range_walk(hraw, hlen, hs, he, hbad, &params, body, acc_ty)?;
+        // One range per outer iteration: its accumulator leaves the line
+        // walk owned and moves into the partials list's slot.
+        self.witness_loop_open();
+        self.emit_range_walk(hraw, hlen, hs, he, hbad, &params, cb, body, acc_ty)?;
         {
             let mut i = self.f.instructions();
             i.local_get(hlist).local_get(hi).i32_const(stride).i32_mul().i32_add();
             i.local_get(params[0]);
         }
         self.store_ty_slot(acc_ty, 0);
+        self.witness_walk_stored(acc_ty);
+        self.witness_loop_close();
         {
             let mut i = self.f.instructions();
             i.local_get(hi).i32_const(1).i32_add().local_set(hi);

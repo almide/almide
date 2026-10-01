@@ -1,0 +1,53 @@
+// #3176: a module-qualified constructor or record name resolves inside the
+// named module alone, on every leg. tests/qualified_ctor_names_test.rs runs
+// this on native and wasm and demands one output.
+import self.cells
+import self.shapes
+import self.first
+
+// The entry program's own types shadow an import's same-named constructors.
+type Pane = { id: Int, w: Int }
+
+type Mine = | Pair(String) | Leaf { v: String } | Note { v: Int, text: String = "entry" }
+
+fn shadowed() -> String = {
+  let p = Pane { id: 1, w: 2 }
+  let q = Pair("q")
+  let l = Leaf { v: "lv" }
+  let n = Note { v: 3 }
+  let s = shapes.Pane(9)
+  let a = match q {
+    Pair(x) => x,
+    _ => "x",
+  }
+  let b = match l {
+    Leaf { v } => v,
+    _ => "x",
+  }
+  let c = match n {
+    Note { v, text } => "${v} ${text}",
+    _ => "x",
+  }
+  let d = match s {
+    shapes.Pane(k) => k + p.w,
+    _ => 0,
+  }
+  let e = match first.Note { v: 4 } {
+    first.Note { v, text } => "${v} ${text}",
+    _ => "x",
+  }
+  "${a} ${b} ${c} ${d} ${e}"
+}
+
+effect fn main() -> Unit = {
+  println(cells.record_beside_case())
+  println(cells.case_beside_record())
+  println(cells.case_beside_case())
+  println(cells.nested_patterns())
+  println(int.to_string(cells.ctor_values()))
+  println(cells.defaults())
+  println(cells.boxed())
+  println(cells.in_module())
+  println(int.to_string(cells.tags()))
+  println(shadowed())
+}

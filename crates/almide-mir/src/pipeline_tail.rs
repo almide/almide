@@ -7,3 +7,5 @@
 
 include!("pipeline_native_rungs.rs");
 include!("pipeline_witnesses.rs");
+#[cfg(test)]
+include!("pipeline_ctor_resolution_tests.rs");

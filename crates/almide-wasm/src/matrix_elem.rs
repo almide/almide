@@ -182,8 +182,13 @@ impl Emitter<'_> {
             Some((params, body)) => {
                 self.elem_at(hm, hi, hc, hj);
                 self.f.instructions().f64_load(mat_elem()).local_set(params[0]);
+                // #2755: one activation per element, all scalars.
+                if let Some(cb) = arg {
+                    self.witness_callback_open(cb, None);
+                }
                 self.elem_at(ho, hi, hc, hj);
                 self.lower(body, Some(FLOAT))?;
+                self.witness_loop_close();
             }
             None => {
                 self.elem_at(ho, hi, hc, hj);

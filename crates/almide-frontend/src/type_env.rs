@@ -235,6 +235,14 @@ pub struct TypeEnv {
     /// only ever sees the program being lowered, so a call into an imported
     /// module had no defaults to fill from (#1088).
     pub fn_defaults: std::collections::HashMap<Sym, Vec<Option<almide_lang::ast::Expr>>>,
+    /// A module record field's default EXPRESSION, keyed `mod.Type` (a
+    /// record) or `mod.Type.Case` (a record-payload case), with the module
+    /// that declares it. A literal in ANOTHER module that omits the field
+    /// gets it written in, qualified, before it is checked (#3165).
+    pub field_default_exprs: std::collections::HashMap<Sym, (Sym, Vec<(Sym, almide_lang::ast::Expr)>)>,
+    /// Each user module's own import aliases (`c` → `consts`), so a default
+    /// written in that module can be re-qualified for a caller (#3165).
+    pub module_import_aliases: std::collections::HashMap<Sym, std::collections::HashMap<Sym, Sym>>,
     /// Protocol definitions: protocol name → ProtocolDef
     pub protocols: std::collections::HashMap<Sym, ProtocolDef>,
     /// Explicit `fn Type.method` declarations that have a body, keyed by the
@@ -319,6 +327,8 @@ impl TypeEnv {
             generic_protocol_bound_args: std::collections::HashMap::new(),
             fn_min_params: std::collections::HashMap::new(),
             fn_defaults: std::collections::HashMap::new(),
+            field_default_exprs: std::collections::HashMap::new(),
+            module_import_aliases: std::collections::HashMap::new(),
             explicit_convention_fns: std::collections::HashSet::new(),
             protocols: std::collections::HashMap::new(),
             type_protocols: std::collections::HashMap::new(),
@@ -751,14 +761,38 @@ impl TypeEnv {
             None => cands.iter().find(|(_, owner, _)| self.ctor_owner_visible(*owner, cur_mod))?,
         };
         let (t, owner, c) = pick;
-        // Qualify with the owner so the resolved `.ty` carries the namespaced enum
-        // (`mod.Type`) — unless already qualified or owned by stdlib.
-        let qual = match owner {
+        Some((Self::owner_qualified(*t, *owner), c.clone()))
+    }
+
+    /// Qualify a candidate's type with its owner so the resolved `.ty` carries
+    /// the namespaced enum (`mod.Type`) — unless already qualified or owned by
+    /// stdlib.
+    fn owner_qualified(t: Sym, owner: Option<Sym>) -> Sym {
+        match owner {
             Some(o) if !t.as_str().contains('.') && !almide_lang::stdlib_info::is_bundled_module(o.as_str())
                 => sym(&format!("{}.{}", o.as_str(), t.as_str())),
-            _ => *t,
+            _ => t,
+        }
+    }
+
+    /// Resolve a constructor name as the source WROTE it (#3176). `mod.Ctor`
+    /// names a case of `mod` alone: the table is keyed by the bare name, so a
+    /// bare-key lookup answered `draw.Pane { .. }` with `shapes.Pane` — another
+    /// imported module's case — and a module's record type of that name was
+    /// never reached. A bare name takes `lookup_ctor_in`'s visibility rules; a
+    /// qualifier that names no module keeps that bare resolution.
+    pub fn lookup_ctor_written(&self, written: &str, cur_mod: Option<&str>) -> Option<(Sym, VariantCase)> {
+        let Some((m, bare)) = written.rsplit_once('.') else {
+            return self.lookup_ctor_in(&sym(written), cur_mod);
         };
-        Some((qual, c.clone()))
+        match self.import_table.resolve(m) {
+            Some(module) => {
+                let cands = self.constructors.get(&sym(bare))?;
+                let (t, owner, c) = cands.iter().find(|(_, owner, _)| *owner == Some(module))?;
+                Some((Self::owner_qualified(*t, *owner), c.clone()))
+            }
+            None => self.lookup_ctor_in(&sym(bare), cur_mod),
+        }
     }
 
     /// Can a bare constructor owned by `owner` be named from the file being
@@ -791,9 +825,16 @@ impl TypeEnv {
     /// `(type, owner)` — the ones `lookup_ctor_in` chooses among, so an
     /// ambiguity is judged over the same set the resolution uses (#2636).
     pub fn visible_ctor_candidates(&self, name: &Sym, cur_mod: Option<&str>) -> Vec<(Sym, Option<Sym>)> {
-        self.constructors.get(name).map_or_else(Vec::new, |c| {
+        let visible: Vec<(Sym, Option<Sym>)> = self.constructors.get(name).map_or_else(Vec::new, |c| {
             c.iter().filter(|(_, owner, _)| self.ctor_owner_visible(*owner, cur_mod)).map(|(t, m, _c)| (*t, *m)).collect()
-        })
+        });
+        // The file's own candidates are the name's meaning here, as
+        // `lookup_ctor_in` picks them: an import's same-named case competes
+        // only when the file declares none (#3176 — the entry program's
+        // `type Mine = | Pair(..)` beside an import's `| Pair`).
+        let own: Vec<(Sym, Option<Sym>)> = visible.iter().copied()
+            .filter(|(_, owner)| Self::ctor_owner_is_file(*owner, cur_mod)).collect();
+        if own.is_empty() { visible } else { own }
     }
 
     /// Does `cur_mod` itself declare this constructor? When it does,

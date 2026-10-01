@@ -1002,8 +1002,11 @@ impl Checker {
         if self.env.in_test_block {
             return;
         }
-        const FALLIBLE_HOF_CORE: &[&str] =
-            &["map", "filter", "flat_map", "filter_map", "fold", "find", "each"];
+        // The core cells (list / map / set / option) live in ONE table that
+        // the hints, the dead-carrier guard, the interp and the matrix gate
+        // also read — #3163: `list.all` was refused here while the E005 hint
+        // said the core list HOFs accepted fallible callbacks.
+        //
         // #1144 (C-220's tracked cell, now C-274): the fs streaming walkers
         // take the same rule — but only the two SEQUENTIAL, callback-driven
         // cells. `fold_lines_range` / `fold_lines_chunked` are deliberately
@@ -1015,11 +1018,11 @@ impl Checker {
         let ExprKind::Member { object, field } = &mut callee.kind else { return };
         let ExprKind::Ident { name: mod_name, .. } = &object.kind else { return };
         let known = match mod_name.as_str() {
-            "list" => FALLIBLE_HOF_CORE.contains(&field.as_str()),
             "fs" => FALLIBLE_HOF_FS.contains(&field.as_str()),
-            _ => false,
+            m => almide_lang::fallible_hofs::is_fallible_hof(m, field.as_str()),
         };
-        if !known {
+        // A local named like a module (`let map = ..`) is not the module.
+        if !known || self.env.lookup_var(mod_name.as_str()).is_some() {
             return;
         }
         fn contains_unwrap(e: &mut ast::Expr) -> bool {

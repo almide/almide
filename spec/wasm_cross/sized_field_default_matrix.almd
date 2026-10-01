@@ -1,0 +1,57 @@
+// @contract: C-038
+// #3161: a field default is a value position of the field's declared type.
+// `small: Int8 = 0` lowered its `0` at the default `Int` width, and a record
+// literal that OMITS the field spliced that node in as is: native emitted
+// `small: 0i64` into an `i8` slot and rustc rejected the crate (E0308) that
+// check accepted. The full matrix: every sized width x every place a default
+// fills, one field per cell named `<position>_<width>`;
+// tests/sized_tail_literal_matrix_test.rs refuses a missing cell.
+// Positions: `rec` (a record literal omits the field), `low` (the low end: a negative
+// default, or zero for an unsigned width), `var` (a record-variant payload omits the field),
+// and `top` (a top-level `let` declares the width its literal takes: the same
+// lowering spelled `const K: i8 = 3i64`).
+let TOP_INT8: Int8 = -8
+
+let TOP_INT16: Int16 = -16
+
+let TOP_INT32: Int32 = -32
+
+let TOP_UINT8: UInt8 = 208
+
+let TOP_UINT16: UInt16 = 65016
+
+let TOP_UINT32: UInt32 = 4000000032
+
+let TOP_UINT64: UInt64 = 9000000000000000064
+
+let TOP_FLOAT32: Float32 = -3.25
+
+type Defaults = { n: Int, rec_int8: Int8 = 100, low_int8: Int8 = -100, rec_int16: Int16 = 30000, low_int16: Int16 = -30000, rec_int32: Int32 = 2000000000, low_int32: Int32 = -2000000000, rec_uint8: UInt8 = 250, low_uint8: UInt8 = 0, rec_uint16: UInt16 = 65000, low_uint16: UInt16 = 0, rec_uint32: UInt32 = 4000000000, low_uint32: UInt32 = 0, rec_uint64: UInt64 = 9000000000000000000, low_uint64: UInt64 = 0, rec_float32: Float32 = 1.5, low_float32: Float32 = -0.25 }
+
+type Cell = | Packed { tag: String, var_int8: Int8 = -7, var_int16: Int16 = 1234, var_int32: Int32 = -123456, var_uint8: UInt8 = 200, var_uint16: UInt16 = 60000, var_uint32: UInt32 = 3000000000, var_uint64: UInt64 = 8000000000000000000, var_float32: Float32 = 0.5 } | Empty
+
+fn show_defaults(d: Defaults) -> String = "${d.n} | ${d.rec_int8} ${d.low_int8} | ${d.rec_int16} ${d.low_int16} | ${d.rec_int32} ${d.low_int32} | ${d.rec_uint8} ${d.low_uint8} | ${d.rec_uint16} ${d.low_uint16} | ${d.rec_uint32} ${d.low_uint32} | ${d.rec_uint64} ${d.low_uint64} | ${d.rec_float32} ${d.low_float32}"
+
+fn show_cell(c: Cell) -> String = match c {
+  Packed { tag, var_int8, var_int16, var_int32, var_uint8, var_uint16, var_uint32, var_uint64, var_float32 } => "${tag} | ${var_int8} ${var_int16} ${var_int32} | ${var_uint8} ${var_uint16} ${var_uint32} ${var_uint64} | ${var_float32}",
+  Empty => "empty",
+}
+
+fn make() -> Defaults = Defaults { n: 1 }
+
+fn main() -> Unit = {
+  // every defaulted field omitted: each default fills at its declared width
+  let d = make()
+  println(show_defaults(d))
+  // one written, the rest defaulted: the neighbours keep their widths
+  println(show_defaults(Defaults { n: 2, rec_int8: 5, rec_uint64: 3, rec_float32: 2.0 }))
+  // a spread over a defaulted base carries the defaulted widths through
+  let spread = { ...d, n: 3 }
+  println(show_defaults(spread))
+  // a record-variant payload that omits its defaulted fields
+  println(show_cell(Packed { tag: "all-default" }))
+  println(show_cell(Packed { tag: "one-written", var_int8: 9 }))
+  println(show_cell(Empty))
+  // top-level sized constants
+  println("top | ${TOP_INT8} ${TOP_INT16} ${TOP_INT32} | ${TOP_UINT8} ${TOP_UINT16} ${TOP_UINT32} ${TOP_UINT64} | ${TOP_FLOAT32}")
+}

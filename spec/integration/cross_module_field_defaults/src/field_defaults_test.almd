@@ -1,0 +1,57 @@
+// #3165: a record literal in another module that omits a defaulted field
+// gets the default as the declaring module means it — its constants, its
+// fns, its import aliases — never a same-named binding of the caller's.
+import self.shapes
+import self.other as c
+
+test "a default naming its module's constant" {
+  let b = shapes.Box { n: 1 }
+  assert_eq(b.e, 3)
+}
+
+test "a default calling its module's fn" {
+  let b = shapes.Box { n: 1 }
+  assert_eq(b.f, 6)
+}
+
+test "a default naming another module's constant through the declaring module's import" {
+  let b = shapes.Box { n: 1 }
+  assert_eq(b.g, 40)
+  assert_eq(c.LIMIT, 999)
+}
+
+test "a caller local with the default's name is not captured" {
+  let step = 100
+  let base = 7
+  let b = shapes.Box { n: 1 }
+  assert_eq(b.s, 5)
+  assert_eq(shapes.total(b), 55)
+  assert_eq(step + base, 107)
+}
+
+test "a given field overrides its default, the rest still fill" {
+  let b = shapes.Box { n: 2, e: 9 }
+  assert_eq(b.e, 9)
+  assert_eq(shapes.total(b), 62)
+}
+
+test "a record-payload case's default" {
+  assert_eq(shapes.radius_plus_k(shapes.Circle { r: 2 }), 5)
+}
+
+test "a literal inside the declaring module" {
+  let b = shapes.inner(2)
+  assert_eq(b.n, 21)
+  assert_eq(b.e, 3)
+  assert_eq(b.f, 6)
+  assert_eq(b.s, 5)
+}
+
+test "a literal inside the declaring module whose default calls its fn (#3167)" {
+  assert_eq(shapes.total(shapes.own_box(4)), 58)
+  assert_eq(shapes.radius_plus_k(shapes.own_circle(1)), 4)
+}
+
+test "a parameter default through the declaring module's import alias" {
+  assert_eq(shapes.mk(1), 41)
+}

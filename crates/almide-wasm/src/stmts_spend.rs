@@ -82,11 +82,72 @@ impl Emitter<'_> {
 
     /// Can evaluating this call ARGUMENT spend `var`'s credit? A nested
     /// program-fn call by its own convention, a scalar projection of the
-    /// var never (`rd.x`), anything else that mentions it conservatively.
+    /// var never (`rd.x`), a concat operand or a write-back block by the
+    /// rules below (#3130), anything else that mentions it conservatively.
     fn arg_spends_var(&self, a: &IrExpr, var: VarId) -> bool {
-        self.named_call_spends_var(a, var)
-            .unwrap_or_else(|| mentions_var_beyond_scalar_reads(a, var))
+        if let Some(spends) = self.named_call_spends_var(a, var) {
+            return spends;
+        }
+        // `keep(keep(xs) + [4])` (#3130): `$concat` READS both operands
+        // and answers a FRESH block (runtime.rs `emit_concat`: it allocates
+        // `la + lb` and copies; it releases neither operand and never hands
+        // one back), so the concat spends `var` only where an operand does —
+        // the var itself is a read, anything else is judged as an argument.
+        if let IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList | almide_ir::BinOp::ConcatStr, left, right } = &a.kind {
+            return [left, right].into_iter().any(|o| match &o.kind {
+                IrExprKind::Var { id } if *id == var => false,
+                _ => self.arg_spends_var(o, var),
+            });
+        }
+        if let IrExprKind::Block { stmts, expr } = &a.kind {
+            if write_back_settles_var(stmts, expr.as_deref(), var) {
+                return false;
+            }
+            if let Some(spends) = self.let_block_spends_var(stmts, expr.as_deref(), var) {
+                return spends;
+            }
+        }
+        mentions_var_beyond_scalar_reads(a, var)
     }
+
+    /// A block of plain `let` temporaries and a tail — the ANF form an
+    /// argument arrives in (`keep(xs) + [4]` is
+    /// `{ let t = keep(xs); let u = [4]; t + u }`, #3130) — spends `var`
+    /// only where a bound value or the tail does, each judged as an
+    /// argument: a `let` binds a NEW local that takes its own credit (RC-5
+    /// share, or the owned result's) and leaves `var`'s where it was. The
+    /// var itself as a bound value or as the tail stays conservative.
+    /// `None` when any statement is not a plain `let`.
+    fn let_block_spends_var(&self, stmts: &[almide_ir::IrStmt], tail: Option<&IrExpr>, var: VarId) -> Option<bool> {
+        let judge = |e: &IrExpr| match &e.kind {
+            IrExprKind::Var { id } if *id == var => true,
+            _ => self.arg_spends_var(e, var),
+        };
+        let mut spends = false;
+        for s in stmts {
+            let almide_ir::IrStmtKind::Bind { value, .. } = &s.kind else { return None };
+            spends = spends || judge(value);
+        }
+        Some(spends || tail.is_some_and(judge))
+    }
+}
+
+/// Is this block (statements and tail) one whose LAST statement assigns `var`, with a tail that
+/// mentions it nowhere (beyond scalar reads)? The C-132 write-back of a
+/// `mut` call nested in an argument is exactly this shape (#3130):
+/// `ys = keep(grow(ys))` arrives as
+/// `ys = keep({ let t = grow(ys); let (r, b) = t; ys = b; r })`.
+/// Whatever the statements before it did with the old occupant's credit,
+/// that inner `Assign` settles it under its own judgement and leaves the
+/// local holding exactly ONE credit on the written-back block (RC-5: an
+/// inc, an owned result, or a moved temp). The outer Assign's release
+/// reads the local AFTER the whole rhs is evaluated, so it releases that
+/// credit — unless something evaluated after the write-back spends it,
+/// which is why the tail must not mention the var; a later sibling
+/// argument is judged on its own by the caller's `any`.
+fn write_back_settles_var(stmts: &[almide_ir::IrStmt], tail: Option<&IrExpr>, var: VarId) -> bool {
+    matches!(stmts.last().map(|s| &s.kind), Some(almide_ir::IrStmtKind::Assign { var: v, .. }) if *v == var)
+        && !tail.is_some_and(|t| mentions_var_beyond_scalar_reads(t, var))
 }
 
 /// Does the expression mention `var` other than through a SCALAR
@@ -99,32 +160,37 @@ impl Emitter<'_> {
 /// assign. Every other mention (the var itself, a droppable field of it)
 /// keeps the conservative reading.
 fn mentions_var_beyond_scalar_reads(e: &IrExpr, var: VarId) -> bool {
-    fn projection_root(e: &IrExpr) -> Option<VarId> {
-        match &e.kind {
-            IrExprKind::Var { id } => Some(*id),
-            IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => projection_root(object),
-            _ => None,
-        }
-    }
-    struct Finder {
-        var: VarId,
-        found: bool,
-    }
-    impl almide_ir::visit::IrVisitor for Finder {
-        fn visit_expr(&mut self, e: &IrExpr) {
-            if self.found {
-                return;
-            }
-            match &e.kind {
-                IrExprKind::Var { id } if *id == self.var => self.found = true,
-                IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
-                    if matches!(e.ty, almide_types::types::Ty::Int | almide_types::types::Ty::Float | almide_types::types::Ty::Bool)
-                        && projection_root(e) == Some(self.var) => {}
-                _ => almide_ir::visit::walk_expr(self, e),
-            }
-        }
-    }
     let mut f = Finder { var, found: false };
     almide_ir::visit::IrVisitor::visit_expr(&mut f, e);
     f.found
+}
+
+fn projection_root(e: &IrExpr) -> Option<VarId> {
+    match &e.kind {
+        IrExprKind::Var { id } => Some(*id),
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => projection_root(object),
+        _ => None,
+    }
+}
+
+/// The walk behind [`mentions_var_beyond_scalar_reads`]: finds a mention of
+/// `var` other than a scalar projection of it.
+struct Finder {
+    var: VarId,
+    found: bool,
+}
+
+impl almide_ir::visit::IrVisitor for Finder {
+    fn visit_expr(&mut self, e: &IrExpr) {
+        if self.found {
+            return;
+        }
+        match &e.kind {
+            IrExprKind::Var { id } if *id == self.var => self.found = true,
+            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+                if matches!(e.ty, almide_types::types::Ty::Int | almide_types::types::Ty::Float | almide_types::types::Ty::Bool)
+                    && projection_root(e) == Some(self.var) => {}
+            _ => almide_ir::visit::walk_expr(self, e),
+        }
+    }
 }

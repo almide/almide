@@ -461,6 +461,12 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // `already mutably borrowed: BorrowError` from inside `RefCell`.
     s.push_str(&format!("impl<T> AlmideSharedMut<T> {{ #[inline(always)] {vis}fn borrow_proven(&self, var: &'static str) -> std::cell::Ref<'_, T> {{ match self.0.try_borrow() {{ Ok(r) => r, Err(_) => almide_shared_cell_misproof(var) }} }} }}\n"));
     s.push_str(&format!("#[cold] #[inline(never)] {vis}fn almide_shared_cell_misproof(var: &str) -> ! {{ panic!(\"almide: shared cell `{{var}}` is mutably borrowed at a read pass_shared_cell_borrow proved safe (#1143); the pass's statement-proof was wrong — report it\") }}\n"));
+    // #3154: a `mut` param a closure captures and the fn writes lives in a
+    // shared cell for the call; this guard holds the caller's `&mut` place and
+    // stores the cell's final value into it when the frame unwinds — on the
+    // tail, on a `?` propagation, on every exit (copy-in/write-back, #3103).
+    s.push_str(&format!("{vis}struct AlmideWriteBack<'a, T, F: FnMut() -> T>({vis}&'a mut T, {vis}F);\n"));
+    s.push_str("impl<'a, T, F: FnMut() -> T> Drop for AlmideWriteBack<'a, T, F> { fn drop(&mut self) { *self.0 = (self.1)(); } }\n");
     s.push_str(&almide_repr_prelude(vis));
     s.push_str(&prelude_region::region_arena_prelude(vis, prelude_region::region_trap_armed()));
     s

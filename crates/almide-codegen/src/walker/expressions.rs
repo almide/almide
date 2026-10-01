@@ -730,8 +730,7 @@ fn render_expr_data(ctx: &RenderContext, expr: &IrExpr) -> String {
 fn render_expr_wrappers(ctx: &RenderContext, expr: &IrExpr) -> String {
     match &expr.kind {
         // ── Try / Await / Unwrap / ToOption ──
-        IrExprKind::Try { expr: inner } => render_expr_try(ctx, inner),
-        IrExprKind::Unwrap { .. } => render_expr_unwrap(ctx, expr),
+        IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } => render_expr_try_or_unwrap(ctx, expr),
         IrExprKind::UnwrapOr { expr: inner, fallback } => render_expr_unwrap_or(ctx, inner, fallback),
         IrExprKind::ToOption { expr: inner } => render_expr_to_option(ctx, inner),
         IrExprKind::OptionalChain { expr: inner, field } => render_expr_optional_chain(ctx, inner, field),

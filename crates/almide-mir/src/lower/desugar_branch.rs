@@ -693,6 +693,10 @@ const BRANCH_PASSES: &[(RowTrigger, BranchPass)] = &[
     // `ok(e!)` shape this pass deliberately excludes.
     (RowTrigger::Always, |src, next_var, layouts| desugar_returned_ctor_call_payload(src, next_var, layouts)),
     (RowTrigger::Always, |src, _, _| if crate::lower::bang_return_probe() { None } else { desugar_let_unwrap(src) }),
+    // #3121: a match over a Result/Option LITERAL selects its arm statically — the
+    // C-132 err carrier's `err((m, b))!` leaves `match err(..) { ok(v) => <dead>, err(x) => .. }`.
+    (RowTrigger::Always, |src, _, _| desugar_known_ctor_match(src)),
+    (RowTrigger::Always, |src, _, _| desugar_drop_unit_read_stmts(src)),
     // Collapse the scopeless `Block { stmts: [], expr: e }` wrappers `desugar_let_unwrap` leaves
     // behind (one per `?`-bind field of the derived variant decode), so the nested monadic matches
     // lower like the hand-written form instead of walling on the `Block`-wrapped arm.

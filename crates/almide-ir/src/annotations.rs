@@ -40,6 +40,11 @@ pub struct CodegenAnnotations {
     /// `BorrowLoweringPass`; the walker's box-pattern rewrite reads it to
     /// spell a borrowed subject's guards and move-outs through the reference.
     pub ref_binders: HashSet<VarId>,
+    /// Pattern binders of a recursive enum's boxed field: the Almide type is
+    /// `T`, the Rust binding is `Box<T>`, and every read is a `Deref`.
+    /// Decided by `BoxDerefPass`; `CaptureClonePass` reads it so a closure's
+    /// capture binds the unboxed `T` its declared type promises (#3174).
+    pub box_binders: HashSet<VarId>,
     /// First parameter of every iterator-chain step / collector lambda: the
     /// closure runs synchronously inside the chain and never escapes it, so
     /// it renders without `move` and borrows what it reads for the chain's
@@ -71,7 +76,22 @@ pub struct CodegenAnnotations {
     /// vector both the native force loop and wasm `__init_globals` are
     /// meant to consume in stage 2 (C-007 by construction).
     pub global_init_order: Vec<VarId>,
+    /// Variant case name -> the enum that declares it. Keyed by the BARE case
+    /// name program-wide, so a name two enums share keeps only the last one
+    /// registered: read it through the walker's `ctor_enum_for`, which asks
+    /// `enum_cases` about the value's own type first.
     pub ctor_to_enum: HashMap<String, String>,
+    /// Enum name -> its case names: every enum the program renders, keyed by
+    /// the enum, so an enum whose cases another enum's same-named cases
+    /// overwrote in `ctor_to_enum` is still known as an enum with those cases
+    /// (#3176).
+    pub enum_cases: HashMap<String, HashSet<String>>,
+    /// (enum, case) -> the case's payload positions and declared types: a
+    /// tuple payload's by index (`"0"`, `"1"`, the `boxed_fields` spelling), a
+    /// record payload's by field name. The walker reads it to give a NESTED
+    /// pattern the type of its position, so a case name two enums share is
+    /// qualified by the enum the value has there (#3176).
+    pub case_fields: HashMap<(String, String), Vec<(String, almide_lang::types::Ty)>>,
     pub anon_records: HashMap<Vec<String>, String>,
     /// Anon-record keys (sorted field names) whose struct has a closure (`Fn`)
     /// field — its generated struct derives `Clone` only (a closure is not
@@ -107,7 +127,16 @@ pub struct CodegenAnnotations {
     /// subset of `recursive_enums` whenever the twin is recursive.
     pub region_enums: HashSet<String>,
     pub boxed_fields: HashSet<(String, String)>,
+    /// `boxed_fields` keyed by (enum, case, field): the bare case name is
+    /// shared by every enum declaring it (#3176).
+    pub boxed_case_fields: HashSet<(String, String, String)>,
     pub default_fields: HashMap<(String, String), IrExpr>,
+    /// A record-payload case's field defaults keyed by (enum, case, field):
+    /// `default_fields` keys a case by its bare name alone, so two modules'
+    /// `| Leaf { .. }` shared one key and a literal of one was filled with
+    /// the other's defaults (#3176). The walker reads this one whenever the
+    /// literal's type names the enum.
+    pub case_default_fields: HashMap<(String, String, String), IrExpr>,
     /// User-defined record/enum names whose generated Rust struct cannot
     /// derive `PartialEq` (a field transitively blocks equality — e.g.
     /// contains a Matrix or a function pointer).
@@ -135,6 +164,11 @@ pub struct CodegenAnnotations {
     /// a plain `move` closure would capture a *copy* and silently drop the mutation.
     /// (Closure v2, P3.)
     pub shared_mut_vars: HashSet<VarId>,
+    /// A `mut` param a closure captures and the fn writes (#3154) is rebound
+    /// at entry onto a `var` local that takes the shared-cell lowering: this
+    /// maps that local to the param, so the walker renders its bind as the
+    /// cell plus the guard that writes it back into the caller's place.
+    pub mut_param_cells: HashMap<VarId, VarId>,
     /// Heap-typed function-local vars that are BOTH copy-aliased (some other live
     /// binding shares their heap value via `var b = a`, `let b = a`, `b = r.field`,
     /// an if/match arm, or a destructure element) AND mutated in place (IndexAssign,

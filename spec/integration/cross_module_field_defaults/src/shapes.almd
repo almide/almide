@@ -1,0 +1,48 @@
+// #3165: record field defaults that name this module's own items. A literal
+// in ANOTHER module that omits the field took the default as this module's
+// lowered IR, whose `K` is a VarId of this module's var table; the caller's
+// table resolved that id to an unrelated local of its own.
+import self.consts as c
+
+let K: Int = 3
+
+let step: Int = 5
+
+fn base() -> Int = K * 2
+
+// A module constant, a module fn, another module's constant through this
+// module's import alias, and a lower-case constant a caller local shadows.
+type Box = { n: Int, e: Int = K, f: Int = base(), g: Int = c.LIMIT, s: Int = step }
+
+// A record-payload case with a defaulted field.
+type Shape = | Circle { r: Int, k: Int = K } | Dot
+
+// The same alias in a parameter default.
+fn mk(n: Int, g: Int = c.LIMIT) -> Int = n + g
+
+// The same defaults on a type only this module constructs.
+type Tag = { n: Int, e: Int = K, f: Int = base(), s: Int = step }
+
+// A literal inside the declaring module itself, beside locals of its own —
+// one of them named like the default's constant. #3167: the `base()` default
+// of a literal in its own module named a fn the native build never declared.
+fn inner(n: Int) -> Tag = {
+  let z = n * 10
+  let step = 1
+  Tag { n: z + step }
+}
+
+// The cross-module type built inside its own module, and its case.
+fn own_box(n: Int) -> Box = {
+  let base = 0
+  Box { n: n + base }
+}
+
+fn own_circle(r: Int) -> Shape = Circle { r: r }
+
+fn total(b: Box) -> Int = b.n + b.e + b.f + b.g + b.s
+
+fn radius_plus_k(s: Shape) -> Int = match s {
+  Circle { r, k } => r + k,
+  Dot => 0,
+}

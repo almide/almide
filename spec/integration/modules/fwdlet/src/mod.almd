@@ -1,0 +1,15 @@
+// #3164 on the MODULE path: the same forward-referencing top-level `let`
+// chain, read by a function declared above it, inside an imported module.
+fn all_words() -> String = {
+  var out = ""
+  for p in PAIRS {
+    out = out + p.0 + "=" + p.1 + ";"
+  }
+  out
+}
+
+let PAIRS = [("a", TEXT), ("b", MORE)]
+
+let TEXT = "hello-"
+
+let MORE = "hello-!"

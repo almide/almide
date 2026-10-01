@@ -592,6 +592,7 @@
 "list.filter_map" = "<=0.5.0"
 "list.find" = "<=0.5.0"
 "list.find_index" = "<=0.5.0"
+"list.find_map" = "unreleased"
 "list.first" = "<=0.5.0"
 "list.flat_map" = "<=0.5.0"
 "list.flatten" = "<=0.5.0"

@@ -1,0 +1,73 @@
+// @contract: C-215
+// #3148 — a fallible line walker whose READ fails names the call the writer
+// made. `fs.fold_lines(p, z, (a, l) => g(a, l)!)` and
+// `fs.for_each_line(p, (l) => g(l)!)` are rewritten to the
+// `__fallible_fold_lines` / `__fallible_for_each_line` carriers; on the
+// incumbent wasm leg those carriers fetched the file through host op 12, the
+// op `fs.read_lines` owns, so a missing file read
+// `fs.read_lines("…"): No such file or directory (os error 2)` where native
+// says `fs.fold_lines("…")` / `fs.for_each_line("…")`. The plain walkers had
+// their own ops (51/52) since #2090; the fallible twins never took them.
+//
+// Every fallible walker form, against a path that does not exist: inline
+// (canonical) and compound (a real closure) bodies, Int / String / Map
+// accumulators, printed in full — then one `!` lets the last failure reach
+// stderr, so the exit code and the stderr line are pinned too. That `!` is the
+// body's tail: a statement after it walls `main` on the structural MIR lowering
+// (a match over an untracked subject with a call-bearing arm), a different
+// question from this one. The path is relative and never created, so no temp
+// dir has to be redacted.
+// fs_fallible_stream_callback.almd prints only `missing=err` for this case,
+// which is why the divergence was invisible to it.
+import fs
+
+fn add_row(acc: Int, line: String) -> Int! = if line == "b" then err("bad row: " + line) else ok(acc + 1)
+
+fn join_row(acc: String, line: String) -> String! = if line == "b" then err("bad join: " + line) else ok(acc + line)
+
+fn tally(acc: Map[String, Int], line: String) -> Map[String, Int]! = if line == "b" then err("bad key")
+else ok(map.set(acc, line, 1))
+
+fn note(l: String) -> Unit! = if l == "b" then err("bad line: " + l) else ok(())
+
+fn show_int(r: Result[Int, String]) -> String = match r {
+  ok(n) => "ok " + int.to_string(n),
+  err(e) => "err " + e,
+}
+
+fn show_str(r: Result[String, String]) -> String = match r {
+  ok(s) => "ok " + s,
+  err(e) => "err " + e,
+}
+
+fn show_map(r: Result[Map[String, Int], String]) -> String = match r {
+  ok(m) => "ok " + int.to_string(map.len(m)),
+  err(e) => "err " + e,
+}
+
+fn show_unit(r: Result[Unit, String]) -> String = match r {
+  ok(_) => "ok",
+  err(e) => "err " + e,
+}
+
+effect fn main() -> Unit = {
+  let missing = "xt_3148_never_created/absent.txt"
+  println("fold inline int: " + show_int(fs.fold_lines(missing, 0, (acc, line) => add_row(acc, line)!)))
+  println("fold inline string: " + show_str(fs.fold_lines(missing, "", (acc, line) => join_row(acc, line)!)))
+  let m0: Map[String, Int] = map.new()
+  println("fold inline map: " + show_map(fs.fold_lines(missing, m0, (acc, line) => tally(acc, line)!)))
+  println("fold closure int: " + show_int(fs.fold_lines(missing, 0, (acc, line) => {
+    let l = string.trim(line)
+    add_row(acc, l)!
+  })))
+  println("fold closure string: " + show_str(fs.fold_lines(missing, "", (acc, line) => {
+    let l = string.trim(line)
+    join_row(acc, l)!
+  })))
+  println("each inline: " + show_unit(fs.for_each_line(missing, (l) => note(l)!)))
+  println("each closure: " + show_unit(fs.for_each_line(missing, (l) => {
+    let t = string.trim(l)
+    note(t)!
+  })))
+  fs.for_each_line(missing, (l) => note(l)!)!
+}

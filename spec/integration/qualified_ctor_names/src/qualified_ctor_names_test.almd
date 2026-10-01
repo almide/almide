@@ -1,0 +1,75 @@
+// #3176: a module-qualified constructor or record name resolves inside the
+// named module alone. `draw.Pane { .. }` was rejected with E021 because the
+// bare-keyed constructor table answered with `shapes.Tree`'s `| Pane`.
+// tests/qualified_ctor_names_test.rs runs `main.almd` on both legs.
+import self.cells
+import self.shapes
+import self.first
+
+type Pane = { id: Int, w: Int }
+
+type Mine = | Pair(String) | Leaf { v: String } | Note { v: Int, text: String = "entry" }
+
+test "a qualified record literal builds that module's record beside another module's case" {
+  assert_eq(cells.record_beside_case(), "1 2 3")
+}
+
+test "a qualified record-case literal builds that module's case beside another module's record" {
+  assert_eq(cells.case_beside_record(), "5 6 t")
+}
+
+test "two modules' same-named cases each resolve inside their module" {
+  assert_eq(cells.case_beside_case(), "5 7 p")
+}
+
+test "qualified constructor patterns nested in Option and tuples" {
+  assert_eq(cells.nested_patterns(), "3 z 1z")
+}
+
+test "qualified constructors as function values" {
+  assert_eq(cells.ctor_values(), 5)
+}
+
+test "a record case takes its own module's field defaults" {
+  assert_eq(cells.defaults(), "1 first 2 second")
+}
+
+test "a recursive case's boxed fields do not box another module's same-named case" {
+  assert_eq(cells.boxed(), "3 7 12")
+}
+
+test "inside a module its own record and case win over an import's" {
+  assert_eq(cells.in_module(), "8 in 10 k")
+}
+
+test "two modules' same-named cases keep their own tags" {
+  assert_eq(cells.tags(), 575318)
+}
+
+test "the entry program's own types shadow an import's constructors" {
+  let p = Pane { id: 1, w: 2 }
+  let q = Pair("q")
+  let l = Leaf { v: "lv" }
+  let n = Note { v: 3 }
+  let a = match q {
+    Pair(x) => x,
+    _ => "x",
+  }
+  let b = match l {
+    Leaf { v } => v,
+    _ => "x",
+  }
+  let c = match n {
+    Note { v, text } => "${v} ${text}",
+    _ => "x",
+  }
+  let d = match shapes.Pane(9) {
+    shapes.Pane(k) => k + p.w,
+    _ => 0,
+  }
+  let e = match first.Note { v: 4 } {
+    first.Note { v, text } => "${v} ${text}",
+    _ => "x",
+  }
+  assert_eq("${a} ${b} ${c} ${d} ${e}", "q lv 3 entry 11 4 first")
+}

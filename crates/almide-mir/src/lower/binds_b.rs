@@ -315,7 +315,7 @@ impl LowerCtx {
         match &e.kind {
             IrExprKind::Record { name: Some(n), .. }
                 if (elem_flat_variant || elem_rich_variant.is_some())
-                    && self.variant_layouts.ctor_to_type.contains_key(n.as_str()) =>
+                    && self.variant_layouts.is_ctor_for(n.as_str(), &e.ty) =>
             {
                 true
             }
@@ -338,7 +338,7 @@ impl LowerCtx {
         match &e.kind {
             IrExprKind::Call { target: CallTarget::Named { name }, .. }
                 if (elem_flat_variant || elem_rich_variant.is_some())
-                    && self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
+                    && self.variant_layouts.is_ctor_for(name.as_str(), &e.ty) =>
             {
                 true
             }
@@ -407,7 +407,7 @@ impl LowerCtx {
             // each element recursively. Checked BEFORE the plain-record arms.
             IrExprKind::Record { name: Some(n), .. }
                 if (elem_flat_variant || elem_rich_variant.is_some())
-                    && self.variant_layouts.ctor_to_type.contains_key(n.as_str()) =>
+                    && self.variant_layouts.is_ctor_for(n.as_str(), &elem.ty) =>
             {
                 self.try_lower_variant_ctor(elem)?
             }
@@ -488,7 +488,7 @@ impl LowerCtx {
             // inner handle (flat), so the list's `DropListStr` `rc_dec` is its full free.
             IrExprKind::Call { target: CallTarget::Named { name }, .. }
                 if (elem_flat_variant || elem_rich_variant.is_some())
-                && self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
+                && self.variant_layouts.is_ctor_for(name.as_str(), &elem.ty) =>
             {
                 self.try_lower_variant_ctor(elem)?
             }

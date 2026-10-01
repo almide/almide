@@ -18,10 +18,30 @@ use std::time::Duration;
 
 // ── peers ──
 
+/// The ephemeral port a listener was bound to.
+fn port_of(l: &TcpListener) -> u16 {
+    l.local_addr().expect("a bound listener has an address").port()
+}
+
+/// Join a peer thread; a peer that panicked fails the test.
+fn join<T>(h: thread::JoinHandle<T>) -> T {
+    h.join().expect("the peer thread finished")
+}
+
+/// The error a call ends with; an answered call fails the test.
+fn wait_err(sh: &client::AlmideHttpCallShared) -> String {
+    client::http_call_wait(sh).expect_err("the call fails")
+}
+
+/// The server core's response bytes as text (they are ASCII + UTF-8 bodies).
+fn text(bytes: Vec<u8>) -> String {
+    String::from_utf8(bytes).expect("the response bytes are UTF-8")
+}
+
 /// A one-connection peer: accept, read the request head, then run `reply`.
 fn peer(reply: impl FnOnce(TcpStream) + Send + 'static) -> (String, thread::JoinHandle<()>) {
     let l = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
-    let url = format!("http://127.0.0.1:{}/path?q=1", l.local_addr().unwrap().port());
+    let url = format!("http://127.0.0.1:{}/path?q=1", port_of(&l));
     let h = thread::spawn(move || {
         let (s, _) = l.accept().expect("accept");
         let mut r = BufReader::new(s.try_clone().expect("clone"));
@@ -101,25 +121,22 @@ fn utf8_tail_holds_back_only_an_unfinished_sequence() {
 
 #[test]
 fn start_refuses_negative_limits_before_any_thread() {
-    let e = client::http_call_spawn("GET", "http://127.0.0.1:1/", "", vec![], -1, 0).err().unwrap();
+    let e = client::http_call_spawn("GET", "http://127.0.0.1:1/", "", vec![], -1, 0).err().expect("start refuses");
     assert_eq!(e, "invalid limits: total_ms and idle_ms must be >= 0 (0 = no limit), got total_ms -1 idle_ms 0");
-    let e = client::http_call_spawn("GET", "http://127.0.0.1:1/", "", vec![], 0, -5).err().unwrap();
+    let e = client::http_call_spawn("GET", "http://127.0.0.1:1/", "", vec![], 0, -5).err().expect("start refuses");
     assert!(e.contains("got total_ms 0 idle_ms -5"), "{e}");
 }
 
 #[test]
 fn a_refused_connection_is_a_connection_error() {
-    let port = {
-        let l = TcpListener::bind("127.0.0.1:0").unwrap();
-        l.local_addr().unwrap().port()
-    };
+    let port = port_of(&TcpListener::bind("127.0.0.1:0").expect("bind loopback"));
     let want = format!("could not connect to \"http://127.0.0.1:{port}/\" (connection refused or unreachable)");
     let sh = start(&format!("http://127.0.0.1:{port}/"), 0, 0);
-    let e = client::http_call_wait(&sh).err().unwrap();
+    let e = wait_err(&sh);
     assert_eq!(e, want);
     // The same with a wall clock set: the dial is bounded by it.
     let sh = start(&format!("http://127.0.0.1:{port}/"), 5_000, 0);
-    let e = client::http_call_wait(&sh).err().unwrap();
+    let e = wait_err(&sh);
     assert_eq!(e, want);
 }
 
@@ -144,7 +161,7 @@ fn a_content_length_response_is_answered_whole() {
     // Cancelling an ended call leaves it as it is.
     sh.cancel();
     assert!(client::http_call_wait(&sh).is_ok());
-    h.join().unwrap();
+    join(h);
 }
 
 #[test]
@@ -158,7 +175,7 @@ fn a_chunked_response_decodes_across_split_reads() {
     let sh = start(&url, 0, 0);
     let (status, _, body) = client::http_call_wait(&sh).expect("answered");
     assert_eq!((status, body.as_str()), (200, "hello world"));
-    h.join().unwrap();
+    join(h);
 }
 
 #[test]
@@ -170,7 +187,7 @@ fn a_chunk_size_line_split_mid_line_waits_for_the_rest() {
     ]);
     let sh = start(&url, 0, 0);
     assert_eq!(client::http_call_wait(&sh).expect("answered").2, "abc");
-    h.join().unwrap();
+    join(h);
 }
 
 #[test]
@@ -178,15 +195,15 @@ fn a_body_framed_by_the_close_ends_with_the_close() {
     let (url, h) = pieces_peer(vec![b"HTTP/1.1 200 OK\r\n\r\nuntil".to_vec(), b" close".to_vec()]);
     let sh = start(&url, 0, 0);
     assert_eq!(client::http_call_wait(&sh).expect("answered").2, "until close");
-    h.join().unwrap();
+    join(h);
 }
 
 #[test]
 fn a_close_before_the_head_is_an_error() {
     let (url, h) = pieces_peer(vec![b"HTTP/1.1 200 OK\r\nX-Partial".to_vec()]);
     let sh = start(&url, 0, 0);
-    assert_eq!(client::http_call_wait(&sh).err().unwrap(), format!("malformed or incomplete response from \"{url}\""));
-    h.join().unwrap();
+    assert_eq!(wait_err(&sh), format!("malformed or incomplete response from \"{url}\""));
+    join(h);
 }
 
 // ── streaming ──
@@ -204,7 +221,7 @@ fn the_stream_step_splits_only_between_characters() {
     let (text, outcome) = stream_all(&sh);
     assert_eq!(text, body);
     assert_eq!(outcome, Ok(()));
-    h.join().unwrap();
+    join(h);
 }
 
 #[test]
@@ -214,7 +231,7 @@ fn a_non_2xx_stream_is_refused_with_its_body_quoted() {
     let (text, outcome) = client::http_call_stream_step(&sh);
     assert_eq!(text, "");
     assert_eq!(outcome, Some(Err("HTTP 404: Not Found: missing".to_string())));
-    h.join().unwrap();
+    join(h);
 }
 
 // ── limits and cancel ──
@@ -223,24 +240,24 @@ fn a_non_2xx_stream_is_refused_with_its_body_quoted() {
 fn an_idle_peer_trips_idle_ms() {
     let (url, tx, h) = silent_peer();
     let sh = start(&url, 0, 150);
-    assert_eq!(client::http_call_wait(&sh).err().unwrap(), "request timeout: idle_ms 150 exceeded");
+    assert_eq!(wait_err(&sh), "request timeout: idle_ms 150 exceeded");
     let _ = tx.send(());
-    h.join().unwrap();
+    join(h);
 }
 
 #[test]
 fn a_silent_peer_trips_total_ms() {
     let (url, tx, h) = silent_peer();
     let sh = start(&url, 200, 0);
-    assert_eq!(client::http_call_wait(&sh).err().unwrap(), "request timeout: total_ms 200 exceeded");
+    assert_eq!(wait_err(&sh), "request timeout: total_ms 200 exceeded");
     // Both limits set: the wall clock is the shorter one and names itself.
     let _ = tx.send(());
-    h.join().unwrap();
+    join(h);
     let (url, tx, h) = silent_peer();
     let sh = start(&url, 150, 5_000);
-    assert_eq!(client::http_call_wait(&sh).err().unwrap(), "request timeout: total_ms 150 exceeded");
+    assert_eq!(wait_err(&sh), "request timeout: total_ms 150 exceeded");
     let _ = tx.send(());
-    h.join().unwrap();
+    join(h);
 }
 
 #[test]
@@ -252,7 +269,7 @@ fn the_wall_clock_is_checked_from_the_callers_side() {
     assert_eq!(client::http_call_read_new(&sh), "");
     assert_eq!(client::http_call_poll(&sh), Some(Err("request timeout: total_ms 100 exceeded".to_string())));
     let _ = tx.send(());
-    h.join().unwrap();
+    join(h);
 }
 
 #[test]
@@ -263,7 +280,7 @@ fn a_streaming_step_is_bounded_by_the_wall_clock() {
     assert_eq!(text, "");
     assert_eq!(outcome, Err("request timeout: total_ms 150 exceeded".to_string()));
     let _ = tx.send(());
-    h.join().unwrap();
+    join(h);
 }
 
 #[test]
@@ -292,10 +309,10 @@ fn cancel_ends_a_running_call_and_drops_unread_bytes() {
     assert!(seen, "the partial body arrived");
     assert!(client::http_call_poll(&sh).is_none(), "still running");
     sh.cancel();
-    assert_eq!(client::http_call_wait(&sh).err().unwrap(), "request cancelled");
+    assert_eq!(wait_err(&sh), "request cancelled");
     assert_eq!(client::http_call_read_new(&sh), "");
     let _ = tx.send(());
-    h.join().unwrap();
+    join(h);
 }
 
 #[test]
@@ -304,10 +321,10 @@ fn cancel_before_the_head_arrives() {
     let sh = start(&url, 0, 0);
     thread::sleep(Duration::from_millis(50));
     sh.cancel();
-    assert_eq!(client::http_call_wait(&sh).err().unwrap(), "request cancelled");
+    assert_eq!(wait_err(&sh), "request cancelled");
     assert_eq!(client::http_call_poll(&sh), Some(Err("request cancelled".to_string())));
     let _ = tx.send(());
-    h.join().unwrap();
+    join(h);
 }
 
 // ── the server core ──
@@ -328,7 +345,7 @@ fn the_response_bytes_carry_the_registered_reason_and_close_the_connection() {
         (599, ""),
     ];
     for (status, reason) in table {
-        let out = String::from_utf8(server::http_server_response_bytes(status, &[], "")).unwrap();
+        let out = text(server::http_server_response_bytes(status, &[], ""));
         assert_eq!(out, format!("HTTP/1.1 {status} {reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"));
     }
     let headers = vec![
@@ -336,17 +353,17 @@ fn the_response_bytes_carry_the_registered_reason_and_close_the_connection() {
         ("connection".to_string(), "keep-alive".to_string()),
         ("X-B".to_string(), "2".to_string()),
     ];
-    let out = String::from_utf8(server::http_server_response_bytes(200, &headers, "héllo")).unwrap();
+    let out = text(server::http_server_response_bytes(200, &headers, "héllo"));
     assert_eq!(out, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nX-B: 2\r\nConnection: close\r\nContent-Length: 6\r\n\r\nhéllo");
 }
 
 #[test]
 fn head_204_and_304_carry_no_body() {
-    let head = String::from_utf8(server::http_server_response_bytes_for(true, 200, &[], "hello")).unwrap();
+    let head = text(server::http_server_response_bytes_for(true, 200, &[], "hello"));
     assert_eq!(head, "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 5\r\n\r\n");
-    let no_content = String::from_utf8(server::http_server_response_bytes(204, &[], "x")).unwrap();
+    let no_content = text(server::http_server_response_bytes(204, &[], "x"));
     assert_eq!(no_content, "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
-    let not_modified = String::from_utf8(server::http_server_response_bytes(304, &[], "x")).unwrap();
+    let not_modified = text(server::http_server_response_bytes(304, &[], "x"));
     assert_eq!(not_modified, "HTTP/1.1 304 Not Modified\r\nConnection: close\r\nContent-Length: 1\r\n\r\n");
 }
 
@@ -364,8 +381,23 @@ fn a_header_that_would_split_the_response_is_named() {
 
 #[test]
 fn a_bind_failure_names_itself() {
-    let e = server::http_server_bind(99_999).err().unwrap();
+    let e = server::http_server_bind(99_999).expect_err("port 99999 is refused");
     assert!(e.starts_with("bind failed: "), "{e}");
+}
+
+/// A connection to the server on `port` that has sent `raw`.
+fn connect_send(port: u16, raw: &[u8]) -> std::io::Result<TcpStream> {
+    let mut s = TcpStream::connect(("127.0.0.1", port))?;
+    s.write_all(raw)?;
+    Ok(s)
+}
+
+/// Send `raw` on a fresh connection and read the answer to the close.
+fn fetch(port: u16, raw: &[u8]) -> std::io::Result<String> {
+    let mut s = connect_send(port, raw)?;
+    let mut out = String::new();
+    s.read_to_string(&mut out)?;
+    Ok(out)
 }
 
 /// One raw exchange against `http_server_next_with`: the client sends `raw`
@@ -378,33 +410,29 @@ fn exchange(
     serve: impl FnOnce(server::HttpServerConn, server::HttpServerRequest),
 ) -> String {
     let listener = server::http_server_bind(0).expect("bind");
-    let port = listener.local_addr().unwrap().port();
+    let port = port_of(&listener);
     let client = thread::spawn(move || {
-        let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        s.write_all(raw).unwrap();
+        let mut s = connect_send(port, raw).expect("the client reaches the server");
         if half_close {
-            s.shutdown(std::net::Shutdown::Write).unwrap();
+            s.shutdown(std::net::Shutdown::Write).expect("half-close the request");
         }
         let mut resp = Vec::new();
         let _ = s.read_to_end(&mut resp);
         // The core answered: a second connection proves it keeps serving.
-        let mut next = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        next.write_all(b"GET /next HTTP/1.1\r\n\r\n").unwrap();
-        let mut second = String::new();
-        next.read_to_string(&mut second).unwrap();
+        let second = fetch(port, b"GET /next HTTP/1.1\r\n\r\n").expect("the second request is answered");
         (String::from_utf8_lossy(&resp).into_owned(), second)
     });
     let (conn, req) = server::http_server_next_with(&listener, &limits).expect("no shutdown signal in this test");
     let mut out = String::new();
     if req.1 == "/next" {
-        server::http_server_write(conn, 200, &[], "next").unwrap();
+        server::http_server_write(conn, 200, &[], "next").expect("written");
     } else {
         serve(conn, req);
         let (conn, req) = server::http_server_next_with(&listener, &limits).expect("second");
         assert_eq!(req.1, "/next");
-        server::http_server_write(conn, 200, &[], "next").unwrap();
+        server::http_server_write(conn, 200, &[], "next").expect("written");
     }
-    let (first, second) = client.join().unwrap();
+    let (first, second) = join(client);
     assert!(second.ends_with("\r\n\r\nnext"), "the server stopped answering: {second:?}");
     out.push_str(&first);
     out
@@ -451,7 +479,7 @@ fn a_response_after_the_request_timeout_is_503() {
     let limits = server::HttpServerLimits { max_body_bytes: 1 << 20, request_timeout_ms: 200 };
     let resp = exchange(b"GET /slow HTTP/1.1\r\n\r\n", false, limits, |conn, _| {
         thread::sleep(Duration::from_millis(400));
-        server::http_server_write(conn, 200, &[], "late").unwrap();
+        server::http_server_write(conn, 200, &[], "late").expect("written");
     });
     assert_eq!(status_line(&resp), "HTTP/1.1 503 Service Unavailable");
     assert!(!resp.ends_with("late"), "{resp:?}");
@@ -463,7 +491,7 @@ fn a_chunked_body_is_decoded_and_bounded() {
         b"POST /x HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n2;ext=1\r\nhe\r\n3\r\nllo\r\n0\r\nX-Trailer: t\r\n\r\n",
         false,
         server::HTTP_SERVER_DEFAULT_LIMITS,
-        |conn, (method, _, body, _)| server::http_server_write(conn, 200, &[], &format!("{method} {body}")).unwrap(),
+        |conn, (method, _, body, _)| server::http_server_write(conn, 200, &[], &format!("{method} {body}")).expect("written"),
     );
     assert!(resp.ends_with("\r\n\r\nPOST hello"), "{resp:?}");
     let limits = server::HttpServerLimits { max_body_bytes: 4, request_timeout_ms: 30_000 };
@@ -506,7 +534,7 @@ fn header_lines_are_bounded_in_length_and_count() {
 fn a_crlf_header_is_refused_with_500() {
     let resp = exchange(b"GET /x HTTP/1.1\r\n\r\n", false, server::HTTP_SERVER_DEFAULT_LIMITS, |conn, _| {
         let evil = [("X-A".to_string(), "1\r\nSet-Cookie: evil=1".to_string())];
-        server::http_server_write(conn, 200, &evil, "x").unwrap();
+        server::http_server_write(conn, 200, &evil, "x").expect("written");
     });
     assert_eq!(status_line(&resp), "HTTP/1.1 500 Internal Server Error");
     assert!(!resp.contains("Set-Cookie"), "{resp:?}");
@@ -515,20 +543,16 @@ fn a_crlf_header_is_refused_with_500() {
 #[test]
 fn the_server_skips_an_unparsable_request_and_answers_the_next() {
     let listener = server::http_server_bind(0).expect("bind");
-    let port = listener.local_addr().unwrap().port();
+    let port = port_of(&listener);
     let client = thread::spawn(move || {
         // First connection: a request line with no target — dropped unanswered.
-        let mut bad = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        bad.write_all(b"GARBAGE\r\n\r\n").unwrap();
+        let mut bad = connect_send(port, b"GARBAGE\r\n\r\n").expect("the client reaches the server");
         let mut rest = Vec::new();
         let _ = bad.read_to_end(&mut rest);
         assert!(rest.is_empty(), "an unparsable request gets no answer");
         // Second connection: a request with headers and a body.
-        let mut ok = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        ok.write_all(b"POST /echo?x=1 HTTP/1.1\r\nHost: t\r\nno colon here\r\ncontent-length: 4\r\nX-K:  v \r\n\r\nping").unwrap();
-        let mut resp = String::new();
-        ok.read_to_string(&mut resp).unwrap();
-        resp
+        fetch(port, b"POST /echo?x=1 HTTP/1.1\r\nHost: t\r\nno colon here\r\ncontent-length: 4\r\nX-K:  v \r\n\r\nping")
+            .expect("the second connection is answered")
     });
     let (stream, (method, target, body, headers)) = server::http_server_next(&listener).expect("no shutdown signal in this test");
     assert_eq!((method.as_str(), target.as_str(), body.as_str()), ("POST", "/echo?x=1", "ping"));
@@ -541,14 +565,14 @@ fn the_server_skips_an_unparsable_request_and_answers_the_next() {
         ]
     );
     server::http_server_write(stream, 404, &[("X-R".to_string(), "1".to_string())], "nope").expect("written");
-    assert_eq!(client.join().unwrap(), "HTTP/1.1 404 Not Found\r\nX-R: 1\r\nConnection: close\r\nContent-Length: 4\r\n\r\nnope");
+    assert_eq!(join(client), "HTTP/1.1 404 Not Found\r\nX-R: 1\r\nConnection: close\r\nContent-Length: 4\r\n\r\nnope");
 }
 
 #[test]
 fn a_request_without_a_body_reads_as_empty_and_a_garbled_length_is_400() {
     let resp = exchange(b"GET / HTTP/1.1\r\n\r\n", false, server::HTTP_SERVER_DEFAULT_LIMITS, |conn, (method, target, body, _)| {
         assert_eq!((method.as_str(), target.as_str(), body.as_str()), ("GET", "/", ""));
-        server::http_server_write(conn, 200, &[], "").unwrap();
+        server::http_server_write(conn, 200, &[], "").expect("written");
     });
     assert_eq!(resp, "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
     let nan = exchange(b"GET / HTTP/1.1\r\nContent-Length: nan\r\n\r\n", false, server::HTTP_SERVER_DEFAULT_LIMITS, |_, r| {

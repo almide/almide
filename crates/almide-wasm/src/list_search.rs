@@ -244,7 +244,7 @@ impl Emitter<'_> {
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let kt = self.infer(body)?;
         let SliceTy::Scalar(_) = kt else {
-            return self.lower_list_unique_by_deep(kt, elem, (bh, ch, ih), params[0], body);
+            return self.lower_list_unique_by_deep(kt, elem, (bh, ch, ih), cb, body);
         };
         let scan = self.scan_helper(kt)?;
         let kstride = kt.slot_size() as i32;
@@ -265,6 +265,7 @@ impl Emitter<'_> {
             i.block(BlockType::Empty).loop_(BlockType::Empty);
         }
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        self.witness_callback_open(cb, None);
         self.lower(body, Some(kt))?;
         // A handle key (a String) holds one credit here: the seen list keeps
         // a first sighting, a repeat is released at once, and the seen list
@@ -273,6 +274,8 @@ impl Emitter<'_> {
         if key_dec.is_some() && !self.rc_owned_result(body) {
             self.rc_inc_top();
         }
+        let key = if key_dec.is_some() { self.witness_credit_take(body, kt) } else { None };
+        self.witness_seen_key(key);
         {
             let mut i = self.f.instructions();
             i.local_set(hkey);
@@ -347,9 +350,10 @@ impl Emitter<'_> {
         kt: SliceTy,
         elem: SliceTy,
         loop_: (u32, u32, u32),
-        param: u32,
+        cb: &IrExpr,
         body: &IrExpr,
     ) -> ArmResult {
+        let param = self.hof_lambda(cb, 1)?.0[0];
         if !unique_by_key_equatable(kt) {
             return unsup(&format!("list-unique-by-key:{kt:?}"));
         }
@@ -367,6 +371,7 @@ impl Emitter<'_> {
             i.block(BlockType::Empty).loop_(BlockType::Empty);
         }
         self.hof_elem_into(elem, bh, ch, ih, param);
+        self.witness_callback_open(cb, None);
         self.lower(body, Some(kt))?;
         // Every key holds one credit (RC-3 share rule for a key read from a
         // droppable local; a fresh key transfers as-is): the seen list keeps
@@ -374,6 +379,8 @@ impl Emitter<'_> {
         // goes with its keys at the end (#2977 — the list and every repeat
         // key leaked).
         self.rc_share_guard(body, kt);
+        let key = self.witness_credit_take(body, kt);
+        self.witness_seen_key(key);
         self.f.instructions().local_set(hkey);
         self.emit_seen_key_scan(kt, hseen, hkey)?;
         let key_dec = self.dec_fn_of(kt);

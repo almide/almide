@@ -26,6 +26,7 @@ mod expressions;
 mod calls;
 mod statements;
 mod types;
+mod record_defaults;
 pub use types::lower_bundled_type_decl;
 mod derive;
 mod derive_codec;
@@ -44,6 +45,8 @@ pub struct LowerCtx<'a> {
     env: &'a TypeEnv,
     type_map: &'a TypeMap,
     fn_defaults: HashMap<Sym, Vec<Option<ast::Expr>>>,
+    /// This module's record field defaults (`record_defaults.rs`, #3167).
+    field_defaults: HashMap<Sym, Vec<(Sym, ast::Expr)>>,
     type_conventions: HashMap<Sym, std::collections::HashSet<Sym>>,
     /// `Type.convention` names the user wrote explicitly (vs auto-derived).
     explicit_convention_fns: std::collections::HashSet<Sym>,
@@ -85,6 +88,7 @@ impl<'a> LowerCtx<'a> {
             env,
             type_map,
             fn_defaults: HashMap::new(),
+            field_defaults: HashMap::new(),
             type_conventions: HashMap::new(),
             explicit_convention_fns: std::collections::HashSet::new(),
             protocol_bounds: HashMap::new(),
@@ -254,6 +258,7 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
     collect_type_conventions(&mut ctx, prog);
     collect_explicit_convention_fns(&mut ctx, prog);
     collect_fn_defaults(&mut ctx, prog);
+    record_defaults::collect_field_defaults(&mut ctx, prog);
 
     let mut functions = Vec::new();
     let mut top_lets = Vec::new();
@@ -271,145 +276,7 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
     program
 }
 
-/// #1055: rewrite every `effect (A) -> B` fn TYPE in the IR to its runtime
-/// carrier `(A) -> Result[B, String]`. The checker keeps the effect form for
-/// its diagnostics; downstream (v0 codegen, the v1 renders, almide-interp)
-/// then see EXACTLY the shape the landed D3 fallible-slot machinery already
-/// handles — no backend learns a new type. Recursive, so a nested effect fn
-/// type inside a container or another fn type normalizes too.
-fn normalize_effect_fn_types(program: &mut IrProgram) {
-    use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
-    use almide_lang::types::constructor::TypeConstructorId;
-
-    fn norm(ty: &Ty) -> Ty {
-        let mapped = ty.map_children(&mut |c: &Ty| norm(c));
-        match mapped {
-            Ty::Fn { params, ret, is_effect: true } => Ty::Fn {
-                params,
-                ret: Box::new(Ty::Applied(TypeConstructorId::Result, vec![*ret, Ty::String])),
-                is_effect: false,
-            },
-            other => other,
-        }
-    }
-
-    fn has_effect_fn(ty: &Ty) -> bool {
-        if let Ty::Fn { is_effect: true, .. } = ty {
-            return true;
-        }
-        ty.children().into_iter().any(has_effect_fn)
-    }
-
-    struct Norm;
-    impl IrMutVisitor for Norm {
-        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
-            if has_effect_fn(&expr.ty) {
-                expr.ty = norm(&expr.ty);
-            }
-            // A lambda carries its param types inline: an eta-expanded
-            // middleware (`[server_header]`, a fn taking a handler) kept
-            // `_fn_arg0: effect (A) -> B` and rendered the non-carrier shape.
-            if let IrExprKind::Lambda { params, .. } = &mut expr.kind {
-                for (_, pt) in params.iter_mut() {
-                    if has_effect_fn(pt) {
-                        *pt = norm(pt);
-                    }
-                }
-            }
-            if let IrExprKind::Call { type_args, .. } = &mut expr.kind {
-                for t in type_args.iter_mut() {
-                    if has_effect_fn(t) {
-                        *t = norm(t);
-                    }
-                }
-            }
-            walk_expr_mut(self, expr);
-        }
-        // #2664: a `let` carries its declared type on the STATEMENT, not on
-        // an expression. `let h = mk("t:")` with `mk -> Handler` (an alias of
-        // `effect (A) -> B`) kept the effect form there while the value was
-        // the carrier, and the structural wasm leg interned two fn signatures
-        // for one value (ty-mismatch:Fn).
-        fn visit_stmt_mut(&mut self, stmt: &mut IrStmt) {
-            if let IrStmtKind::Bind { ty, .. } = &mut stmt.kind
-                && has_effect_fn(ty)
-            {
-                *ty = norm(ty);
-            }
-            almide_ir::visit_mut::walk_stmt_mut(self, stmt);
-        }
-        // A pattern binder names its type too (`some(h) => h(x)!` over a
-        // `List[Handler]` element, a destructured handler field).
-        fn visit_pattern_mut(&mut self, pat: &mut IrPattern) {
-            if let IrPattern::Bind { ty, .. } | IrPattern::As { ty, .. } = pat
-                && has_effect_fn(ty)
-            {
-                *ty = norm(ty);
-            }
-            almide_ir::visit_mut::walk_pattern_mut(self, pat);
-        }
-    }
-
-    let mut v = Norm;
-    for f in program.functions.iter_mut().chain(program.modules.iter_mut().flat_map(|m| m.functions.iter_mut())) {
-        for p in f.params.iter_mut() {
-            if has_effect_fn(&p.ty) {
-                p.ty = norm(&p.ty);
-            }
-        }
-        if has_effect_fn(&f.ret_ty) {
-            f.ret_ty = norm(&f.ret_ty);
-        }
-        v.visit_expr_mut(&mut f.body);
-    }
-    // #2588: a top-level `let app = http.router([...])` and a record field
-    // holding a handler (`Route.handler`) carry the same effect fn type —
-    // left in effect form, the native static and the struct field rendered
-    // `dyn Fn(A) -> B` while every value flowing in was the carrier.
-    for tl in program.top_lets.iter_mut() {
-        if has_effect_fn(&tl.ty) {
-            tl.ty = norm(&tl.ty);
-        }
-        v.visit_expr_mut(&mut tl.value);
-    }
-    fn norm_fields(fields: &mut [almide_ir::IrFieldDecl]) {
-        for fd in fields.iter_mut() {
-            if has_effect_fn(&fd.ty) {
-                fd.ty = norm(&fd.ty);
-            }
-        }
-    }
-    for td in program.type_decls.iter_mut() {
-        match &mut td.kind {
-            almide_ir::IrTypeDeclKind::Record { fields } => norm_fields(fields),
-            almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
-                for c in cases.iter_mut() {
-                    match &mut c.kind {
-                        almide_ir::IrVariantKind::Tuple { fields } => {
-                            for t in fields.iter_mut() {
-                                if has_effect_fn(t) {
-                                    *t = norm(t);
-                                }
-                            }
-                        }
-                        almide_ir::IrVariantKind::Record { fields } => norm_fields(fields),
-                        almide_ir::IrVariantKind::Unit => {}
-                    }
-                }
-            }
-            almide_ir::IrTypeDeclKind::Alias { target } => {
-                if has_effect_fn(target) {
-                    *target = norm(target);
-                }
-            }
-        }
-    }
-    for entry in program.var_table.entries.iter_mut() {
-        if has_effect_fn(&entry.ty) {
-            entry.ty = norm(&entry.ty);
-        }
-    }
-}
+include!("effect_fn_types.rs");
 
 // Register cross-package top-level lets that weren't in register_decls
 // (dependency packages populate env.top_lets during project fetch).
@@ -583,7 +450,9 @@ fn lower_decls(
             ast::Decl::TopLet { name, ty: _, value, mutable, .. } => {
                 let var = ctx.lookup_var(name).expect("top-level let pre-registered");
                 let val_ty = ctx.var_table.get(var).ty.clone();
-                let ir_value = lower_expr(ctx, value);
+                let mut ir_value = lower_expr(ctx, value);
+                // `let K: Int8 = 3` declares the width its literal takes (#3161).
+                statements::coerce_literal_to_sized(&mut ir_value, &val_ty, ctx.env);
                 let kind = classify_top_let_kind(&ir_value);
                 let tl_def_id = ctx.def_map.get(&sym(name)).copied();
                 top_lets.push(IrTopLet { var, ty: val_ty, value: ir_value, kind, mutable: *mutable, doc, blank_lines_before: blank_lines, def_id: tl_def_id });

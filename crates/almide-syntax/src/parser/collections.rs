@@ -172,10 +172,12 @@ impl Parser {
                             final_expr = Some(Box::new(expr));
                         } else {
                             stmts.push(stmt);
+                            stmts.append(&mut self.pending_stmts);
                         }
                         stmts.extend(trailing);
                     } else {
                         stmts.push(stmt);
+                        stmts.append(&mut self.pending_stmts);
                         stmts.extend(trailing);
                     }
                 }
@@ -214,10 +216,12 @@ impl Parser {
                             final_expr = Some(Box::new(expr));
                         } else {
                             stmts.push(stmt);
+                            stmts.append(&mut self.pending_stmts);
                         }
                         break;
                     } else {
                         stmts.push(stmt);
+                        stmts.append(&mut self.pending_stmts);
                     }
                 }
                 Err(msg) => {

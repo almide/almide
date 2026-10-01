@@ -131,6 +131,7 @@ impl Emitter<'_> {
                     // carrier WITH its err payload (the typed drop, whose
                     // tag-1 arm is the one that runs).
                     let owned_carrier = self.rc_owned_result(expr);
+                    self.witness_to_option(owned_carrier, et);
                     let err_dec = owned_carrier.then(|| self.dec_fn_of(SliceTy::Result(o, er)));
                     let hr = self.hold_i32()?;
                     let hc = self.hold_i32()?;
@@ -175,7 +176,7 @@ impl Emitter<'_> {
                     // payload above (#2969): it is fresh and owns its slot
                     // on that path as well. Left unmarked, the bind's `+1`
                     // landed on the fresh cell and it was never freed.
-                    self.owned_call_marks.insert(e as *const IrExpr as usize);
+                    self.owned_call_marks.mark(e);
                     SliceTy::Option(o)
                 }
                 got @ SliceTy::Option(_) => got,
@@ -205,6 +206,11 @@ impl Emitter<'_> {
             && matches!(self.fn_ret, Some(SliceTy::Result(..)))
         {
             self.lower(expr, Some(raw))?;
+            // #2758: the consumer reads `ok(x)` as fresh; under this ABI the
+            // value is x's own, so only an owned x keeps that true.
+            if self.rc_droppable(raw) && !self.rc_owned_result(expr) {
+                self.witness_decline("effect:carrier:ok-borrowed");
+            }
             return Ok(raw);
         }
         if !is_ok
@@ -613,7 +619,7 @@ impl Emitter<'_> {
             return;
         }
         self.rc_inc_top();
-        self.owned_call_marks.insert(e as *const IrExpr as usize);
+        self.owned_call_marks.mark(e);
     }
 
     /// Does `own_unwrap_or_join` normalize this `??` to an owned join? (The

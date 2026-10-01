@@ -513,6 +513,8 @@ impl Emitter<'_> {
                 self.f.instructions().local_get(cur).i32_const(voff as i32).i32_add();
                 self.load_ty_slot_at(v);
                 self.f.instructions().local_set(v_p);
+                // #2755: the list.fold activation (`witness_fold_step`).
+                self.witness_callback_open(cb, Some(acc_p));
                 self.lower(body, Some(b))?;
                 // The accumulator OWNS one credit on every step, as in the staged
                 // `list.fold` (`list.rs:647`): a borrowed body result takes its
@@ -528,7 +530,9 @@ impl Emitter<'_> {
                 if let Some(dec) = self.elem_is_handle(b).then(|| self.dec_fn_of(b)) {
                     self.f.instructions().local_get(acc_p).call(dec);
                 }
+                self.witness_fold_step(body, acc_p, b);
                 self.f.instructions().local_set(acc_p);
+                self.witness_loop_close();
                 {
                     let mut i = self.f.instructions();
                     i.local_get(cur).i32_const(esz as i32).i32_add().local_set(cur);
@@ -733,7 +737,8 @@ impl Emitter<'_> {
         op: &str,
         args: &[IrExpr],
     ) -> ArmResult {
-        let call = IrExpr {
+        // Pinned: the call's ownership mark is keyed by its address (#3143).
+        let call = self.owned_call_marks.pin(IrExpr {
             kind: IrExprKind::Call {
                 target: almide_ir::CallTarget::Module {
                     module: almide_base::intern::sym("map"),
@@ -746,8 +751,11 @@ impl Emitter<'_> {
             ty: m.ty.clone(),
             span: None,
             def_id: None,
-        };
+        });
         self.lower_field_assign(id, path, &call)?;
+        // #2755: the arguments were lowered as the synthesized call's — the
+        // clones its own module-call audit judged.
+        args.iter().for_each(|a| self.witness_inline_arg(a));
         Ok(None)
     }
 }

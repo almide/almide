@@ -1,0 +1,3 @@
+// Two modules' `| Note { .. }` with different defaults (#3176): a literal of
+// one never takes the other's.
+type Opt = | Note { v: Int, text: String = "first" } | Blank

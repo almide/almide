@@ -403,6 +403,7 @@ pub(crate) fn lower_fn(
             }),
             f: &mut f,
         };
+        em.owned_call_marks.register_frame(body, top_lets.iter().map(|t| &t.tl.value));
         // #1696 phase A: arm the witness recorder when the sweep is
         // collecting and the straightline gate admits this body (no
         // effect wrap, no captures, no top-let prelude — every excluded
@@ -414,13 +415,13 @@ pub(crate) fn lower_fn(
             && crate::witness::collecting()
         {
             // #2758: a capture is a view of the env block (loaded without a
-            // share, below) — except a C-319 cell, whose address travels.
-            // A C-319 cell's ADDRESS is the env's (its drop glue releases
-            // it); only a DROPPABLE occupant has RC sites here — declined.
-            let droppable_cell = |c: &Vec<_>| c.iter().any(|&(_, t, _, cell)| cell && em.rc_droppable(t));
-            let pre_gate = if env_captures.as_ref().is_some_and(droppable_cell) {
-                Some("captures:cell".to_string())
-            } else if crate::witness::argv_exception(name) {
+            // share, below). A C-319 cell's ADDRESS travels instead, and the
+            // env holds the cell (its drop glue releases it): a READ of the
+            // cell's occupant is a view like any capture's — a share it
+            // takes lands on the occupant, a block the frame does not hold —
+            // and every WRITE through the cell declines at its own route
+            // (`assign:global-or-cell`, `mut-receiver:cell`, `*:retain-cell`).
+            let pre_gate = if crate::witness::argv_exception(name) {
                 Some("caps:argv-in-plain-fn".to_string())
             } else {
                 top_lets_gate(top_lets, ctx)
@@ -653,10 +654,10 @@ pub(crate) fn fn_signature(f: &IrFunction, types: &TypeTable) -> Result<(Vec<Sli
         params.push(sty);
     }
     let ret = match &f.ret_ty {
-        Ty::Unit if f.is_effect => {
+        Ty::Unit | Ty::Never if f.is_effect => {
             Some(SliceTy::Result(types.intern(SliceTy::Unit), types.intern(STR)))
         }
-        Ty::Unit => None,
+        Ty::Unit | Ty::Never => None, // `-> Never` never returns (#3144)
         other => match slice_ty_of(other, types) {
             // Effect convention: the wasm value of an effect fn is ALWAYS
             // one Result block — the interp's raw-value-or-Flow::Return(Err)

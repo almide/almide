@@ -1,0 +1,55 @@
+// @contract: C-066
+// `xs = keep(keep(xs) + [4])` releases the old value of `xs` (#3130). The
+// argument arrives as a block of `let` temporaries around the concat
+// (`{ let t = keep(xs); let u = [4]; t + u }`), and the Assign lowering
+// counted any mention of the var inside it as the callee taking its
+// credit. `$concat` reads both operands and answers a fresh block, and a
+// `let` temporary takes its own credit, so the old block is the local's to
+// release; skipping it left one block live per assign on wasm. Native
+// drops every generation.
+fn keep(xs: List[Int]) -> List[Int] = xs
+
+fn keep_s(s: String) -> String = s
+
+fn total(xs: List[Int]) -> Int = list.fold(xs, 0, (a, x) => a + x)
+
+// The issue's shape, in a loop: one block per step was never released.
+fn grow_nested(n: Int) -> List[Int] = {
+  var xs = [1, 2, 3]
+  var i = 0
+  while i < n {
+    xs = keep(keep(xs) + [i])
+    i = i + 1
+  }
+  xs
+}
+
+// The var as a concat operand directly under the call.
+fn grow_direct(n: Int) -> List[Int] = {
+  var xs = [10]
+  var i = 0
+  while i < n {
+    xs = keep(xs + [i, i])
+    i = i + 1
+  }
+  xs
+}
+
+// The string twin: `$concat` is the same helper.
+fn grow_str(n: Int) -> String = {
+  var s = "a"
+  var i = 0
+  while i < n {
+    s = keep_s(keep_s(s) + "b")
+    i = i + 1
+  }
+  s
+}
+
+effect fn main() -> Unit = {
+  let a = grow_nested(6)
+  println("nested: ${list.len(a)} ${total(a)}")
+  let b = grow_direct(5)
+  println("direct: ${list.len(b)} ${total(b)}")
+  println("str: ${grow_str(7)}")
+}

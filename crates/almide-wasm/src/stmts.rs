@@ -161,6 +161,9 @@ impl Emitter<'_> {
         }
         self.lower(cond, Some(BOOL))?;
         self.f.instructions().i32_eqz().if_(BlockType::Empty);
+        // #2755: a one-arm site whose arm leaves the frame (`emit_exit`).
+        self.witness_branch_open();
+        self.witness_branch_arm();
         match self.fn_ret {
             Some(want) => {
                 // `guard c else err(m)!` in an effect fn: the `!` over a
@@ -187,7 +190,14 @@ impl Emitter<'_> {
                     // ()` / `else n`) is the fn's RAW return — ok-wrapped
                     // exactly like a raw tail (func.rs), not lowered as the
                     // Result it is not.
-                    Some(raw) => self.lower_raw_effect_exit(else_, raw, want)?,
+                    Some(raw) => {
+                        self.lower_raw_effect_exit(else_, raw, want)?;
+                        if raw != SliceTy::Unit {
+                            self.witness_exit_value(else_, raw);
+                        }
+                        // The ok carrier is born here and moves out.
+                        self.witness_tail_owned();
+                    }
                     None => {
                         self.lower(ret_e, Some(want))?;
                         // The guard's early return is an exit like the tail: a
@@ -196,6 +206,7 @@ impl Emitter<'_> {
                         if self.rc_droppable(want) && !self.rc_owned_result(ret_e) {
                             self.rc_inc_top();
                         }
+                        self.witness_exit_value(ret_e, want);
                     }
                 }
                 let plan = self.exit_plan(crate::exit_plan::Continuation::GuardReturn);
@@ -218,6 +229,8 @@ impl Emitter<'_> {
             }
         }
         self.f.instructions().end();
+        self.witness_branch_arm();
+        self.witness_branch_close();
         Ok(())
     }
 
@@ -336,7 +349,8 @@ impl Emitter<'_> {
                     span: None,
                     def_id: None,
                 };
-                let args = [var_expr, key.clone(), value.clone()];
+                // Pinned: clones whose marks are keyed by address (#3143).
+                let args = self.owned_call_marks.pin_args(vec![var_expr, key.clone(), value.clone()]);
                 self.arm_scope(|em| em.lower_map_call("set", &args, None))?;
                 self.f.instructions().local_set(var_idx);
                 Ok(())
@@ -672,14 +686,15 @@ impl Emitter<'_> {
                     self.rc_own(idx, declared);
                 }
                 // The witness (#2757): a droppable local's occupant changes
-                // here; a global or a cell is not a frame local's to record.
-                match local {
-                    Some(idx) if self.rc_droppable(declared) && !self.cells.contains(var) => match moved {
+                // here — or a global's / a cell's, an outer holder the frame
+                // borrows (#2755, `witness_holder`), settled the same way below.
+                if self.rc_droppable(declared)
+                    && let Some(idx) = self.witness_holder(*var, local.is_none())
+                {
+                    match moved {
                         Some(src) => self.witness_transfer(idx, !rhs_spends_var, src),
                         None => self.witness_assign(idx, !rhs_spends_var, rhs_spends_var, value),
-                    },
-                    Some(_) if !self.rc_droppable(declared) => {}
-                    _ => self.witness_decline("assign:global-or-cell"),
+                    }
                 }
                 // #2010: a C-319 cell's occupant is released as it is
                 // replaced (the cell holds exactly one credit on it) — the
@@ -734,6 +749,7 @@ impl Emitter<'_> {
             if moved.is_none() {
                 s.rc_share_guard(value, fty);
             }
+            s.witness_field_value(value, fty, moved, spends_var);
             Ok(())
         })?;
         self.empty_moved_temp(moved);

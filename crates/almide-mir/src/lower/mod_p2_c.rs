@@ -105,6 +105,9 @@ pub struct VariantLayouts {
     /// defaulted field (v0 fills the default at construction; leaving the slot would be
     /// garbage, and declining walled the whole default_fields family).
     pub ctor_field_defaults: HashMap<String, HashMap<String, almide_ir::IrExpr>>,
+    /// The RECORD types the registered declarations name: a value of one of these is
+    /// never a variant case, whatever case shares its name (#3176).
+    pub records: std::collections::HashSet<String>,
 }
 
 impl VariantLayouts {
@@ -124,7 +127,47 @@ impl VariantLayouts {
         }
     }
 
+    /// Resolve case `ctor` of a value typed `ty` (#3176). The table below is keyed by
+    /// the BARE case name program-wide, so of two modules' `| Halt` it holds only the
+    /// last registered: `a.Halt` built with `b.Cmd`'s tag, silently, whenever both
+    /// layouts lowered. The value's own type answers first. A named type the registry
+    /// has as a variant resolves inside that variant alone, and a record type (a struct
+    /// `Pane` beside another module's `| Pane`) is no constructor at all. Any other type
+    /// (a generic parameter, an unknown) falls back to the bare name.
+    pub fn lookup_ctor_for(&self, ctor: &str, ty: &Ty) -> Option<(&str, &VariantLayout, &VariantCaseLayout)> {
+        match ty {
+            Ty::Named(n, _) if self.by_type.contains_key(n.as_str()) => {
+                let (name, layout) = self.by_type.get_key_value(n.as_str())?;
+                let case = layout.case_by_ctor(ctor)?;
+                Some((name.as_str(), layout, case))
+            }
+            Ty::Named(n, _) if self.records.contains(n.as_str()) => None,
+            _ => self.lookup_ctor(ctor),
+        }
+    }
+
+    /// Fold another declaration set's layouts into this one (a module's, beside the
+    /// entry file's).
+    pub fn extend(&mut self, other: VariantLayouts) {
+        self.by_type.extend(other.by_type);
+        self.ctor_to_type.extend(other.ctor_to_type);
+        self.ctor_field_defaults.extend(other.ctor_field_defaults);
+        self.records.extend(other.records);
+    }
+
+    /// How many registered variants declare a case `ctor`: the bare name is a
+    /// resolution only when this is 1.
+    pub fn ctor_owner_count(&self, ctor: &str) -> usize {
+        self.by_type.values().filter(|l| l.case_by_ctor(ctor).is_some()).count()
+    }
+
+    /// Is `ctor` a variant case of a value typed `ty`? [`Self::lookup_ctor_for`]'s rule.
+    pub fn is_ctor_for(&self, ctor: &str, ty: &Ty) -> bool {
+        self.lookup_ctor_for(ctor, ty).is_some()
+    }
+
     /// Resolve a constructor name to its owning type's name + layout + the specific case.
+    /// Prefer [`Self::lookup_ctor_for`] wherever the value's type is at hand.
     pub fn lookup_ctor(&self, ctor: &str) -> Option<(&str, &VariantLayout, &VariantCaseLayout)> {
         let ty = self.ctor_to_type.get(ctor)?;
         let layout = self.by_type.get(ty)?;

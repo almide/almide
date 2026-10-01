@@ -1,0 +1,66 @@
+// list.find_map (#3156): the first `some` the callback gives, and the
+// callback does not run on any element after it. It is to `filter_map` what
+// `find` is to `filter`, so each case below also checks the equivalence
+// `find_map(xs, f) == list.first(filter_map(xs, f))` where the callback has no
+// effect to observe.
+//
+// The fallible cases are top-level fns: inside a `test` block a callback's `!`
+// is a plain unwrap and does not instantiate the fallible form (L9), so the
+// blessed spelling `list.find_map(xs, (x) => f(x)!)!` lives in fn bodies.
+local fn even_tenfold(x: Int) -> Int? = if x % 2 == 0 then some(x * 10) else none
+
+local fn later_three_letter_len(n: String) -> Int? = if string.len(n) == 3 and n != "ann" then some(string.len(n)) else none
+
+local fn label_past_one(n: Int) -> String? = list.find([n], (k) => k > 1) |> option.map((k) => "n${k}")
+
+local fn over_six(x: Int) -> Int? = if x > 6 then some(x - 6) else none
+
+local fn big_non_negative(n: Int) -> Int? = {
+  assert(n >= 0)
+  if n > 10 then some(n) else none
+}
+
+local fn big(s: String) -> Result[Int?, String] = int.parse(s) |> result.map((n) => if n > 10 then some(n) else none)
+
+local fn first_big(xs: List[String]) -> Result[Int?, String] = list.find_map(xs, (s) => big(s)!)
+
+test "the first some wins" {
+  assert_eq(list.find_map([1, 3, 4, 6], even_tenfold), some(40))
+  assert_eq(
+    list.find_map([1, 3, 4, 6], even_tenfold),
+    list.first(list.filter_map([1, 3, 4, 6], even_tenfold)),
+  )
+}
+
+test "no some, and the empty list, give none" {
+  assert_eq(list.find_map([1, 3, 5], even_tenfold), none)
+  let empty: List[Int] = []
+  assert_eq(list.find_map(empty, even_tenfold), none)
+}
+
+test "the payload type is the callback's, not the element's" {
+  assert_eq(list.find_map(["ann", "bob", "cy"], later_three_letter_len), some(3))
+  assert_eq(list.find_map([1, 2, 3], label_past_one), some("n2"))
+}
+
+test "pipes like its siblings" {
+  assert_eq([5, 8, 9] |> list.find_map(over_six), some(2))
+}
+
+test "f does not run after the hit" {
+  // The element after the hit fails an assert if f reaches it — an effect the
+  // test run would report — so a green test is the observation that f stopped.
+  assert_eq(list.find_map([1, 20, 0 - 1], big_non_negative), some(20))
+}
+
+test "the fallible form short-circuits on a hit and on an err" {
+  // A hit stops the walk before "boom" can err.
+  assert_eq(first_big(["1", "20", "boom"]), ok(some(20)))
+  // An err before any hit is the whole call's err; "30" is never reached.
+  match first_big(["1", "boom", "30"]) {
+    ok(_) => assert(false),
+    err(e) => assert_eq(e, "invalid digit found in string"),
+  }
+  // Every call gave none: a successful search that found nothing.
+  assert_eq(first_big(["1", "2"]), ok(none))
+}

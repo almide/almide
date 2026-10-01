@@ -143,9 +143,7 @@ fn dump_mir_ops(
     let mut variant_layouts = almide_mir::lower::build_variant_layouts(&ir.type_decls);
     for m in &ir.modules {
         record_layouts.extend(almide_mir::lower::build_record_layouts(&m.type_decls));
-        let vl = almide_mir::lower::build_variant_layouts(&m.type_decls);
-        variant_layouts.by_type.extend(vl.by_type);
-        variant_layouts.ctor_to_type.extend(vl.ctor_to_type);
+        variant_layouts.extend(almide_mir::lower::build_variant_layouts(&m.type_decls));
     }
     for f in &ir.functions {
         if !f.name.as_str().contains(func_name) {

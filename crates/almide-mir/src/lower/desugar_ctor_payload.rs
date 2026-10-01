@@ -110,7 +110,7 @@ fn take_ctor_call_payload(
     // pushed `ok(int.to_string(v))` match arms off the wasm leg.
     match &inner.kind {
         IrExprKind::Call { target: CallTarget::Named { name }, .. }
-            if layouts.ctor_to_type.contains_key(name.as_str()) =>
+            if layouts.is_ctor_for(name.as_str(), &inner.ty) =>
         {
             return None;
         }

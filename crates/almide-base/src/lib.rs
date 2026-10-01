@@ -1,3 +1,4 @@
+pub mod alloc_pressure;
 pub mod intern;
 pub mod span;
 pub mod diagnostic;

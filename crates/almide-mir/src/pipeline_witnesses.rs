@@ -57,10 +57,7 @@ fn witness_layouts(ir: &almide_ir::IrProgram) -> (crate::lower::RecordLayouts, c
     let mut variants = crate::lower::build_variant_layouts(&ir.type_decls);
     for m in &ir.modules {
         records.extend(crate::lower::build_record_layouts(&m.type_decls));
-        let vl = crate::lower::build_variant_layouts(&m.type_decls);
-        variants.by_type.extend(vl.by_type);
-        variants.ctor_to_type.extend(vl.ctor_to_type);
-        variants.ctor_field_defaults.extend(vl.ctor_field_defaults);
+        variants.extend(crate::lower::build_variant_layouts(&m.type_decls));
     }
     variants.forget_ctors_shadowed_by_entry_records(&ir.type_decls);
     (records, variants)

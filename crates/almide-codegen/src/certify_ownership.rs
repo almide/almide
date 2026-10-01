@@ -137,7 +137,7 @@ fn certify_param(f: &IrFunction, p: &IrParam, uses: &[&Use], sites: &UseSites, a
     // reference (the borrow pass's rule, `scrutinee_binders_borrow_only`):
     // its subject position justifies nothing.
     let subject_reads = crate::pass_borrow_inference::is_named_in(&p.ty, variants)
-        && crate::pass_borrow_inference::scrutinee_binders_borrow_only(&f.body, p.var, sites);
+        && crate::pass_borrow_inference::scrutinee_binders_borrow_only(&f.body, p.var, sites, &ann.always_clone_vars);
     match p.borrow {
         ParamBorrow::Ref | ParamBorrow::RefStr | ParamBorrow::RefSlice => {
             // A reference handed bare to a call slot, bound to a local, or

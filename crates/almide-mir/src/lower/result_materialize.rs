@@ -284,7 +284,7 @@ impl LowerCtx {
                 // as a dangling unlinked call. Build the tagged block inline instead (the
                 // same guard `lower_named_call_heap_field` carries); its decline stays a
                 // decline (never a dangling call).
-                if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) {
+                if self.variant_layouts.is_ctor_for(name.as_str(), &expr.ty) {
                     return self.try_lower_variant_ctor(expr);
                 }
                 let lowered = self.lower_call_args(args).ok()?;

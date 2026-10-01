@@ -83,3 +83,118 @@ fn any[A](s: Set[A], f: (A) -> Bool) -> Bool = _
 /// true if f holds for every member; true if empty.
 @intrinsic("almide_rt_set_all")
 fn all[A](s: Set[A], f: (A) -> Bool) -> Bool = _
+
+// ── the fallible carriers (ADR-0006, #3163) ──
+//
+// INTERNAL: the checker rewrites `set.map(s, (x) => f(x)!)` to
+// `set.__fallible_map(s, <stripped callback>)` — source may not name these
+// (E043). Each walks the elements in insertion order and stops at the FIRST
+// err. The matrix is `almide_types::fallible_hofs`.
+fn __fallible_map[A, B, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[Set[B], E] = {
+  var out: List[B] = []
+  var failed: E? = none
+  var stop = false
+  for x in set.to_list(s) {
+    if stop then ()
+    else match f(x) {
+      ok(b) => list.push(out, b),
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(set.from_list(out)),
+  }
+}
+
+fn __fallible_filter[A, E](s: Set[A], f: (A) -> Result[Bool, E]) -> Result[Set[A], E] = {
+  var out: List[A] = []
+  var failed: E? = none
+  var stop = false
+  for x in set.to_list(s) {
+    if stop then ()
+    else match f(x) {
+      ok(keep) => if keep then list.push(out, x) else (),
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(set.from_list(out)),
+  }
+}
+
+fn __fallible_fold[A, B, E](s: Set[A], init: B, f: (B, A) -> Result[B, E]) -> Result[B, E] = {
+  var acc = init
+  var failed: E? = none
+  var stop = false
+  for x in set.to_list(s) {
+    if stop then ()
+    else match f(acc, x) {
+      ok(b) => {
+        acc = b
+      },
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(acc),
+  }
+}
+
+fn __fallible_any[A, E](s: Set[A], f: (A) -> Result[Bool, E]) -> Result[Bool, E] = {
+  var hit = false
+  var failed: E? = none
+  var stop = false
+  for x in set.to_list(s) {
+    if stop then ()
+    else match f(x) {
+      ok(b) => if b then {
+        hit = true
+        stop = true
+      } else (),
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(hit),
+  }
+}
+
+fn __fallible_all[A, E](s: Set[A], f: (A) -> Result[Bool, E]) -> Result[Bool, E] = {
+  var held = true
+  var failed: E? = none
+  var stop = false
+  for x in set.to_list(s) {
+    if stop then ()
+    else match f(x) {
+      ok(b) => if b then ()
+      else {
+        held = false
+        stop = true
+      },
+      err(e) => {
+        failed = some(e)
+        stop = true
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(held),
+  }
+}

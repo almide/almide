@@ -1,3 +1,4 @@
 spec/wasm_cross/exit_code_passthrough.almd	oracle exit 130
 spec/wasm_cross/exit_code_upper_bound.almd	oracle exit 125
 spec/wasm_cross/guard_else_exit_code.almd	oracle exit 3
+spec/wasm_cross/never_fn_value_positions.almd	oracle exit 4

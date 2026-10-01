@@ -243,7 +243,8 @@ _bind_name: _ident | UNDERSCORE
 // Expressions
 //
 // A leading `_nl` marks an operator that may open a continuation line
-// (Parser::INFIX_TOKENS); `<`, `>` and `...` deliberately may not.
+// (Parser::INFIX_TOKENS, plus the postfix `??`, #3155); `...` deliberately
+// may not — a line-initial `...` is a spread.
 // ═══════════════════════════════════════════════════════════════════
 
 ?expr: bool_level
@@ -255,11 +256,9 @@ _bind_name: _ident | UNDERSCORE
 
 // Comparison is NON-ASSOCIATIVE: `a < b < c` is a parse error, so at most one
 // comparison operator may appear here.
-?cmp_level: range_level _nl cmp_op_nl _nl range_level
-          | range_level cmp_op_bare _nl range_level
+?cmp_level: range_level _nl cmp_op _nl range_level
           | range_level
-!cmp_op_nl: EQEQ | BANGEQ | LTEQ | GTEQ
-!cmp_op_bare: LT | GT
+!cmp_op: EQEQ | BANGEQ | LTEQ | GTEQ | LT | GT
 
 // Ranges are NON-ASSOCIATIVE too — `0..<1..<2` is rejected (#899).
 ?range_level: bin_level _nl DOTDOTLT _nl bin_level   -> range_exclusive
@@ -290,7 +289,7 @@ postfix_op: _nl DOT TYPENAME named_record          -> qualified_record
           | "[" expr "]"                           -> index
           | "(" call_args ")"                      -> call
           | BANG                                   -> unwrap
-          | QQ _nl unary                           -> unwrap_or
+          | _nl QQ _nl unary                       -> unwrap_or
           | QDOT name_tok                          -> optional_chain
           | QUESTION                               -> to_option
 

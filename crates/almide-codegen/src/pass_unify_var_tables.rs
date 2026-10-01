@@ -11,7 +11,8 @@
 //! Post-pass invariant: `program.var_table` is the single authoritative
 //! `VarTable`. Every `VarId` in any `IrFunction` / `IrTopLet` under
 //! `program.functions` or `program.modules[_].functions` /
-//! `program.modules[_].top_lets` indexes into `program.var_table`.
+//! `program.modules[_].top_lets` / `program.modules[_].type_decls` field
+//! defaults indexes into `program.var_table`.
 //! `module.var_table` is cleared (entries empty) and becomes a dead
 //! field — callers that still reference it should migrate to
 //! `program.var_table`.
@@ -110,6 +111,16 @@ impl NanoPass for UnifyVarTablesPass {
                 shifter.shift(&mut tl.var);
                 shifter.visit_expr_mut(&mut tl.value);
             }
+            // A field default is a module expression too: a literal in this
+            // module that omits the field splices it, so its VarIds must land
+            // in the same table as the module's code (#3165).
+            for td in module.type_decls.iter_mut() {
+                for f in field_decls_mut(&mut td.kind) {
+                    if let Some(d) = f.default.as_mut() {
+                        shifter.visit_expr_mut(d);
+                    }
+                }
+            }
 
             // Move VarInfo entries into the program-level table, then
             // leave the module's table empty so any lingering
@@ -120,5 +131,20 @@ impl NanoPass for UnifyVarTablesPass {
             any_merged = true;
         }
         PassResult { program, changed: any_merged }
+    }
+}
+
+/// Every field declaration of a type: a record's, and each record-payload
+/// case's.
+fn field_decls_mut(kind: &mut IrTypeDeclKind) -> Vec<&mut IrFieldDecl> {
+    match kind {
+        IrTypeDeclKind::Record { fields } => fields.iter_mut().collect(),
+        IrTypeDeclKind::Variant { cases, .. } => cases.iter_mut()
+            .flat_map(|c| match &mut c.kind {
+                IrVariantKind::Record { fields } => fields.iter_mut().collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .collect(),
+        _ => Vec::new(),
     }
 }

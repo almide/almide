@@ -1,0 +1,7 @@
+type Cmd = | Halt | Turn(Int) | Go(Int)
+
+fn code(c: Cmd) -> Int = match c {
+  Halt => 1,
+  Turn(n) => 2000 + n,
+  Go(n) => 3000 + n,
+}

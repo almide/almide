@@ -52,7 +52,10 @@ impl Emitter<'_> {
         self.f.instructions().local_get(hcur).i32_const(voff as i32).i32_add();
         self.load_ty_slot_at(v);
         self.f.instructions().local_set(params[1]);
+        self.witness_callback_open(cb, None);
         self.lower(body, Some(BOOL))?;
+        // #2755: a hit shares the entry's key and value into the pair.
+        self.witness_hit(&[(params[0], k), (params[1], v)]);
         self.f.instructions().if_(BlockType::Empty);
         // some((k, v)): the pair block, then the option cell — the pair
         // co-owns the handles it copied out of the entry
@@ -109,7 +112,9 @@ impl Emitter<'_> {
         self.f.instructions().local_get(hcur).i32_const(voff as i32).i32_add();
         self.load_ty_slot_at(v);
         self.f.instructions().local_set(params[1]);
+        self.witness_callback_open(cb, None);
         self.lower(body, Some(BOOL))?;
+        self.witness_loop_close();
         {
             let mut i = self.f.instructions();
             i.if_(BlockType::Empty);
@@ -165,7 +170,9 @@ impl Emitter<'_> {
         self.f.instructions().local_get(hcur).i32_const(voff as i32).i32_add();
         self.load_ty_slot_at(v);
         self.f.instructions().local_set(params[1]);
+        self.witness_callback_open(cb, None);
         self.lower(body, Some(BOOL))?;
+        self.witness_loop_close();
         {
             let mut i = self.f.instructions();
             match func {
@@ -251,6 +258,7 @@ impl Emitter<'_> {
         }
         self.load_ty_slot_at(v);
         self.f.instructions().local_set(params[0]);
+        self.witness_callback_open(cb, None);
         // key copies through (a handle key is co-owned by the out map)
         self.f.instructions().local_get(hw).i32_const(okoff as i32).i32_add();
         self.f.instructions().local_get(hcur).i32_const(koff as i32).i32_add();
@@ -262,6 +270,8 @@ impl Emitter<'_> {
         // a borrowed callback result (`(v) => v`) takes its +1; an owned
         // one moves into the slot
         self.rc_share_guard(body, got);
+        self.witness_store(body, got);
+        self.witness_loop_close();
         self.store_ty_slot_at(got);
         {
             let mut i = self.f.instructions();
@@ -439,7 +449,11 @@ impl Emitter<'_> {
         }
         self.load_ty_slot_at(v);
         self.f.instructions().local_set(params[0]);
+        // #2755: a present key runs the callback once.
+        self.witness_once_open(cb);
         self.emit_replace_out_value(ho, he, voff, body, v)?;
+        self.witness_once_arm();
+        self.witness_once_close();
         self.f.instructions().end();
         self.f.instructions().local_get(ho);
         self.release_i32();
@@ -463,6 +477,7 @@ impl Emitter<'_> {
         let hnew = self.hold_for(v)?;
         self.lower(body, Some(v))?;
         self.rc_share_guard(body, v);
+        self.witness_store(body, v);
         self.f.instructions().local_set(hnew);
         for _ in 0..2 {
             self.f
@@ -543,7 +558,11 @@ impl Emitter<'_> {
         }
         self.load_ty_slot_at(v);
         self.f.instructions().local_set(params[0]);
+        // #2755: a present key runs the callback once.
+        self.witness_once_open(cb);
         self.emit_replace_out_value(ho, he, voff, body, v)?;
+        self.witness_once_arm();
+        self.witness_once_close();
         // present: the Retain credits of the unstored key and init go back
         self.emit_release_hold(hkey, k);
         self.emit_release_hold(hinit, v);

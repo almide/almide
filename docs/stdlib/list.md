@@ -426,6 +426,19 @@ fn main() -> Unit = {
 [1, 3]
 ```
 
+### `list.find_map(xs: List[A], f: Fn[A] -> Option[B]) -> Option[B]`
+
+The first some value f gives, or none. f is not called after the hit — the short-circuiting `filter_map(xs, f) |> list.first`. A callback that propagates with `!` makes the whole call fallible, like the other list HOFs.
+
+```almd run
+fn main() -> Unit = {
+  println("${["x", "2", "3"].find_map((s) => int.parse(s)?)}")
+}
+```
+```output
+some(2)
+```
+
 ### `list.take_while(xs: List[A], f: Fn[A] -> Bool) -> List[A]`
 
 Take elements from the front while a predicate holds.
@@ -818,18 +831,23 @@ list.try_map(xs, f)      →  list.map(xs, (x) => f(x)!)!
 list.try_fold(xs, z, f)  →  list.fold(xs, z, (a, x) => f(a, x)!)!
 ```
 
-Deliberate omissions unchanged: an erring predicate query is the find-form's
-domain (`any`/`all`/`count` never had twins), and `sort_by` has no meaningful
-order under an erring key extractor. The end state (empty public surface, the
-seven `__fallible_*` internal carriers present and un-nameable from source) is
-machine-checked by `tests/list_fallible_family_gate_test.rs`.
+Every callback-taking list fn takes a fallible callback (#3163) — the
+predicate queries (`any` / `all` / `count` / `find_index` / `partition` /
+`take_while` / `drop_while`), the accumulators (`reduce` / `scan` / `zip_with` /
+`update` / `iterate`) and the key extractors (`sort_by` / `group_by` /
+`unique_by`, which compute each key once, in list order, before any reordering,
+so their first err is defined) as much as `map`. The same rule covers the map,
+set and option HOFs. The matrix is `almide_types::fallible_hofs`; the end state
+(every cell has its `__fallible_*` carrier, un-nameable from source, and an
+empty public try_ surface) is machine-checked by
+`tests/list_fallible_family_gate_test.rs`.
 
 When a callback that never errs leaves `E` unconstrained, annotate the result:
 `let evens: Result[List[Int], String] = list.filter(xs, (n) => ok(n % 2 == 0)!)`.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (66 functions)
+## Signature index (67 functions)
 
 ```
 // Element count; 0 for an empty list.
@@ -1095,6 +1113,10 @@ list.split_at(xs: List[T], n: Int) -> (List[T], List[T])
 // [seed, f(seed), ...] of length n; [] if n <= 0.
 // @since 0.14.6 or earlier
 list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]
+
+// The first some that f gives, or none; f is not called after the hit.
+// @since unreleased
+list.find_map(xs: List[A], f: (A) -> Option[B]) -> Option[B]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
