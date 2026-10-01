@@ -1,4 +1,4 @@
-> Last updated: 2026-09-27
+> Last updated: 2026-10-01
 
 # Almide Language Specification
 
@@ -1085,7 +1085,25 @@ test "tuple destructuring" {
 }
 ```
 
-テスト: `spec/lang/variable_test.almd`, `spec/lang/data_types_test.almd`
+`var` takes the same patterns — tuple (nested, with `_`) and record shorthand —
+and every bound name is a `var` (#3149). The value is evaluated once, and
+`var (x, y) = p` behaves exactly as `var x = p.0` / `var y = p.1` written one
+name at a time: each name is reassigned on its own, and a write to one reaches
+neither the other names nor `p`.
+
+```almide
+test "var destructuring" {
+  let point = (1, 2)
+  var (x, y) = point
+  x = x + 10
+  y = y * 3
+  assert_eq(x + y, 17)
+  assert_eq(point.0, 1)
+}
+```
+
+テスト: `spec/lang/variable_test.almd`, `spec/lang/data_types_test.almd`,
+`spec/lang/var_destructure_test.almd`
 
 ### 6.4 Assignment
 

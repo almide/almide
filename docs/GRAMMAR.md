@@ -82,7 +82,9 @@ stmt        = let_stmt | var_stmt | guard_stmt | assign | expr
 let_stmt    = "let" ("_" | IDENT) (":" type)? "=" expr
             | "let" "(" tuple_pat ")" "=" expr             (* tuple destructuring, nestable *)
             | "let" "{" IDENT ("," IDENT)* ","? "}" "=" expr   (* record destructuring *)
-var_stmt    = "var" IDENT (":" type)? "=" expr             (* no destructuring for var *)
+var_stmt    = "var" IDENT (":" type)? "=" expr
+            | "var" "(" tuple_pat ")" "=" expr             (* the let patterns; every bound name is a var *)
+            | "var" "{" IDENT ("," IDENT)* ","? "}" "=" expr
 tuple_pat   = (IDENT | "_" | "(" tuple_pat ("," tuple_pat)* ")") ("," tuple_pat)*
 assign      = IDENT ("." name)* ("[" expr "]")? "=" expr (":" type)?
             (* targets: `x = v`, `s.f = v`, `o.inner.xs = v`, `xs[i] = v`, `o.m[k] = v`.
