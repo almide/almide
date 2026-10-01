@@ -173,6 +173,8 @@
 630	spec/wasm_cross/expr_stmt_comment.almd
 8109	spec/wasm_cross/fallible_hof_effect_callback_family.almd
 7601	spec/wasm_cross/fallible_hof_large_input.almd
+22546	spec/wasm_cross/fallible_hof_matrix_containers.almd
+19486	spec/wasm_cross/fallible_hof_matrix_list.almd
 13904	spec/wasm_cross/fallible_hof_option_effect_callback.almd
 12511	spec/wasm_cross/fallible_hof_release_matrix.almd
 2608	spec/wasm_cross/fallible_tuple_value_tail.almd
@@ -223,6 +225,7 @@
 12384	spec/wasm_cross/fs_call_head_family.almd
 13347	spec/wasm_cross/fs_composition_family.almd
 8969	spec/wasm_cross/fs_fallible_stream_callback.almd
+8185	spec/wasm_cross/fs_fallible_walker_call_head.almd
 6811	spec/wasm_cross/fs_glob_segments.almd
 5608	spec/wasm_cross/fs_list_dir_multipass.almd
 6058	spec/wasm_cross/fs_metadata_family.almd
@@ -390,6 +393,7 @@
 2576	spec/wasm_cross/list_enumerate_rich.almd
 2011	spec/wasm_cross/list_eq.almd
 1907	spec/wasm_cross/list_eq_float_bool.almd
+29854	spec/wasm_cross/list_find_map_short_circuit.almd
 2596	spec/wasm_cross/list_flatten_borrow.almd
 3445	spec/wasm_cross/list_float_equality_family.almd
 8472	spec/wasm_cross/list_float_total_order.almd
@@ -514,6 +518,8 @@
 13338	spec/wasm_cross/mut_param_alias_cow.almd
 2727	spec/wasm_cross/mut_param_branch_forward.almd
 3844	spec/wasm_cross/mut_param_call_chain.almd
+3595	spec/wasm_cross/mut_param_closure_capture_read.almd
+6260	spec/wasm_cross/mut_param_closure_capture_write.almd
 11648	spec/wasm_cross/mut_param_effect_can_err.almd
 2220	spec/wasm_cross/mut_param_effect_never_err.almd
 5205	spec/wasm_cross/mut_param_effect_unpropagated.almd
@@ -680,6 +686,7 @@
 6978	spec/wasm_cross/set_entries_reclaim.almd
 7699	spec/wasm_cross/set_index_order.almd
 8695	spec/wasm_cross/set_insertion_order.almd
+6474	spec/wasm_cross/sized_field_default_matrix.almd
 2771	spec/wasm_cross/sized_int_overflow_wrap.almd
 3046	spec/wasm_cross/sized_int_record_fields.almd
 2012	spec/wasm_cross/sized_numeric_literals.almd
