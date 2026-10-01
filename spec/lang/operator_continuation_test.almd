@@ -1,0 +1,144 @@
+// operator_continuation_test — every binary operator may open a continuation
+// line (SPEC.md §2.1, #3155). One test per operator; each also writes the
+// same expression on one line, so a continuation that parsed into a different
+// tree would show up as a different value. The parser-side matrix that keeps
+// this family complete is tests/operator_continuation_matrix_test.rs.
+//
+// Each break carries an end-of-line comment: fmt joins a bare continuation
+// onto one line (as it does for `|>`), and reprints the break only where a
+// comment ends the operand's line — so this is the canonical spelling that
+// keeps the operator at the head of its line under the fmt gate.
+fn inc(x: Int) -> Int = x + 1
+
+fn double(x: Int) -> Int = x * 2
+
+test "?? opens a line after a pipe chain" {
+  let v = list.first([1]) // operator opens the next line
+    |> option.map((x) => x + 1) // operator opens the next line
+    ?? 0
+  assert_eq(v, 2)
+  let w = list.first([]) // operator opens the next line
+    |> option.map((x) => x + 1) // operator opens the next line
+    ?? 7
+  assert_eq(w, 7)
+}
+
+test "?? opens a line after a plain operand" {
+  let v = int.parse("x") // operator opens the next line
+    ?? 5
+  assert_eq(v, 5)
+}
+
+test "?? chains across lines as it does on one line" {
+  let a: Int? = none
+  let b: Int? = none
+  let v = a // operator opens the next line
+    ?? b // operator opens the next line
+    ?? 3
+  assert_eq(v, a ?? b ?? 3)
+}
+
+test "|> opens a line" {
+  let v = 5 // operator opens the next line
+    |> double
+  assert_eq(v, 5 |> double)
+}
+
+test ">> opens a line" {
+  let f = inc // operator opens the next line
+    >> double
+  assert_eq(f(3), (inc >> double)(3))
+}
+
+test "+ opens a line" {
+  let v = 1 // operator opens the next line
+    + 2
+  assert_eq(v, 1 + 2)
+}
+
+test "- opens a line when spaced" {
+  let v = 10 // operator opens the next line
+    - 3
+  assert_eq(v, 10 - 3)
+}
+
+test "* opens a line" {
+  let v = 6 // operator opens the next line
+    * 7
+  assert_eq(v, 6 * 7)
+}
+
+test "/ opens a line" {
+  let v = 42 // operator opens the next line
+    / 6
+  assert_eq(v, 42 / 6)
+}
+
+test "% opens a line" {
+  let v = 43 // operator opens the next line
+    % 6
+  assert_eq(v, 43 % 6)
+}
+
+test "^ opens a line" {
+  let v = 2 // operator opens the next line
+    ^ 10
+  assert_eq(v, 2 ^ 10)
+}
+
+test "== opens a line" {
+  let v = 1 // operator opens the next line
+    == 1
+  assert_eq(v, 1 == 1)
+}
+
+test "!= opens a line" {
+  let v = 1 // operator opens the next line
+    != 2
+  assert_eq(v, 1 != 2)
+}
+
+test "< opens a line" {
+  let v = 1 // operator opens the next line
+    < 2
+  assert_eq(v, 1 < 2)
+}
+
+test "<= opens a line" {
+  let v = 2 // operator opens the next line
+    <= 2
+  assert_eq(v, 2 <= 2)
+}
+
+test "> opens a line" {
+  let v = 3 // operator opens the next line
+    > 2
+  assert_eq(v, 3 > 2)
+}
+
+test ">= opens a line" {
+  let v = 1 // operator opens the next line
+    >= 2
+  assert_eq(v, 1 >= 2)
+}
+
+test "..< opens a line" {
+  var n = 0
+  for i in 0 // operator opens the next line
+    ..<3 {
+    n = n + i
+  }
+  assert_eq(n, 3)
+}
+
+test "and opens a line" {
+  let v = true // operator opens the next line
+    and false
+  assert_eq(v, true and false)
+}
+
+test "or opens a line" {
+  let v = false // operator opens the next line
+    or true
+  assert_eq(v, false or true)
+}
