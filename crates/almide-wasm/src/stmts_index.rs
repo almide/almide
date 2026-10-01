@@ -111,6 +111,8 @@ impl Emitter<'_> {
                 // A handle element stored into the spine is a holder: a
                 // borrowed rhs takes its +1 here (#2010 stage 2b).
                 self.rc_share_guard(value, el);
+                // #2755: the value moves into the slot behind the guard.
+                self.witness_store(value, el);
                 let hv = self.hold_val(el)?;
                 let hb = self.hold_i32()?;
                 self.f.instructions().local_set(hv);
@@ -153,6 +155,7 @@ impl Emitter<'_> {
                     i.i32_const(msg as i32);
                 }
                 self.emit_error_frame_abort();
+                self.witness_abort_site();
                 self.f.instructions().end();
                 // RC-5: the COW judge, not an unconditional copy — a
                 // uniquely-held list takes the store IN PLACE, a shared one
@@ -169,11 +172,13 @@ impl Emitter<'_> {
                     self.f.instructions().local_set(hb);
                 } else if is_local {
                     self.emit_local_cow(*target, cow, hb);
+                    self.witness_mut_rebind(*target, false);
                 } else {
                     get_target(self.f, self.locals, self.globals);
                     self.f.instructions().call(cow).local_set(hb);
                     let g = self.globals[&(self.var_space, *target)].0;
                     self.f.instructions().local_get(hb).global_set(g);
+                    self.witness_mut_rebind(*target, true);
                 }
                 // The replaced element's credit goes with it.
                 if let Some(dec) = self.elem_is_handle(el).then(|| self.dec_fn_of(el)) {
@@ -217,6 +222,7 @@ impl Emitter<'_> {
         let msg = self.pool.intern("index out of bounds");
         self.f.instructions().i32_eqz().if_(BlockType::Empty).i32_const(msg as i32);
         self.emit_error_frame_abort();
+        self.witness_abort_site();
         self.f.instructions().end();
         match slot {
             None => self.emit_local_cow(*target, F_COW, hb),
@@ -224,6 +230,8 @@ impl Emitter<'_> {
                 self.f.instructions().global_get(g).call(F_COW).local_tee(hb).global_set(g);
             }
         }
+        // #2755: the judge rebinds the var (the copy, or the same block).
+        self.witness_mut_rebind(*target, slot.is_some());
         let mut i = self.f.instructions();
         i.local_get(hb).local_get(hi).i32_wrap_i64().i32_add().local_get(hv);
         i.i64_store8(crate::bytes::byte_k(0));

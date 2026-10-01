@@ -145,6 +145,14 @@ fn stmts_subset(stmts: &[almide_ir::IrStmt]) -> Option<String> {
                     return Some(w.at("assign"));
                 }
             }
+            // #2755: `xs[i] = v` — the copy-on-write judge rebinds the var
+            // (`witness_mut_rebind`), the value moves into the slot
+            // (`witness_store`), an out-of-range index aborts.
+            IrStmtKind::IndexAssign { index, value, .. } => {
+                if let Some(w) = value_subset(index).or_else(|| value_subset(value)) {
+                    return Some(w.at("index-assign"));
+                }
+            }
             // #2755: `h.f = v` — the copy-on-write field write rebinds the
             // root var (`witness_field_rebind`), the value moves into the
             // copy's slot (`witness_field_value`).
