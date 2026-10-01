@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at 36d2618b4 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at 72529d35e — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -391,6 +391,7 @@ da124f36b35a4d28a9ffb03707d72330c49a7de9278cb54ba1b2607de9bbd0ff	0	spec/wasm_cro
 a59b996307fe9bbc2d201d25679131e4984dcc723c4fdc7350939c116946a576	0	spec/wasm_cross/list_enumerate_rich.almd
 9afa568831160ce6e2297ae8f941044e9cbf6b04e160adf7e0b63101c3975c68	0	spec/wasm_cross/list_eq.almd
 9afa568831160ce6e2297ae8f941044e9cbf6b04e160adf7e0b63101c3975c68	0	spec/wasm_cross/list_eq_float_bool.almd
+0464ec87365068a7703b6daa5af36ddbf3927dd779e7a35e66d2649ce0352a28	0	spec/wasm_cross/list_find_map_short_circuit.almd
 4fa841ea37c5448320f47496b7c9f062f09464bed8c88db39f1ce0f8c8a24464	0	spec/wasm_cross/list_flatten_borrow.almd
 dbbe485d0ac3ca6e9fd15f8579db891fba4a69861a2eb6898a3c68aeb605ccbb	0	spec/wasm_cross/list_float_equality_family.almd
 cfbdce65832fec4c96eb407d981d3ed95e4345b5c3225078703a51a1562dfde0	0	spec/wasm_cross/list_float_total_order.almd
