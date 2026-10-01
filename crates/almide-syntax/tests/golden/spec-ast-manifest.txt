@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at 3ae1a275d — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at b4d1d71d5 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -438,7 +438,7 @@ ae6ac9231687c04aaca07c6ac7336890b52b88a2eaa8e5f11c2ead03de29bc83	spec/lang/strin
 a43c58f2c78e01f5723c54977116a0e2aa4a1aaeb4bf70c3608cb10f1eef6df4	spec/lang/tco_test.almd
 477b828e2c2ec8fd4f8ea8c1963a7fb9df66fbedeab238061e73051cc0798869	spec/lang/test_where_monkey_test.almd
 74f3a106d158f64ae64f373616052f04e37cbc783b9a9fff686bae7aa2bd3a55	spec/lang/test_where_test.almd
-8da19c0dcf4b80f4287127e4484189b2daea97f8997a59df0a76686702a9765e	spec/lang/top_let_forward_reference_test.almd
+853963a37cdcf9de0e6e748032431da143d9faf07aa4ba9d5db6ac56fafff520	spec/lang/top_let_forward_reference_test.almd
 e0a81639a5b3c57e26e192c0b9344c2fa7a1fa1d7c7f92260163a8dfcb900521	spec/lang/top_let_test.almd
 be129f819c481ffd14b24ef96ae887a6a8e3942f483c7d07c2c96a19278d2f7f	spec/lang/trait_impl_test.almd
 dc529b60d0f879a7099b531cffd584383e8b0813cd302f28f1acdd452df3b89b	spec/lang/tuple_and_multifield_match_wasm.almd

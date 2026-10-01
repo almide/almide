@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at 3ae1a275d — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at b4d1d71d5 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -809,7 +809,7 @@ a25655e44c15b94808c93708dc55090ae4583c6f90aa5dbc0b44f5afefda990c	0	spec/wasm_cro
 4fdfaf851a7445eae8904b0412b0b58b2c42755453433a0c5aa7ecb86687168e	0	spec/wasm_cross/to_result_custom_e.almd
 00f5ac8a4361639b5b4318503dca90175d8b771df49ca01f693fbf650cf45df2	0	spec/wasm_cross/to_result_nested_share.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	1	spec/wasm_cross/top_let_closure_eager.almd
-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	1	spec/wasm_cross/top_let_closure_record.almd
+6da4ac5c10693196af467c38e78febaa16fad9ba2188c6a671c1896c6ae0612b	0	spec/wasm_cross/top_let_closure_record.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	1	spec/wasm_cross/top_let_div_eager.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	1	spec/wasm_cross/top_let_div_used.almd
 388805c2572ce1bd2921df51157f1f169486e3283550351510a41515f5c0e74a	1	spec/wasm_cross/top_let_eager_through_call.almd
