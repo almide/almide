@@ -60,7 +60,9 @@ impl Emitter<'_> {
         self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        self.witness_callback_open(cb, None);
         if let Some(bi) = self.try_flat_map_literal_tail(body, hacc)? {
+            self.witness_loop_close();
             self.hof_step(ih);
             self.f.instructions().local_get(hacc);
             for _ in 0..5 {
@@ -84,6 +86,8 @@ impl Emitter<'_> {
             if !self.rc_owned_result(crate::rc_ownership::rc_tail(body)) {
                 self.rc_inc_top();
             }
+            // #2755: shared when borrowed, released after the walk either way.
+            self.witness_shared_released(body, got);
             self.f.instructions().local_set(hs);
             let hj = self.hold_i32()?;
             let he = self.hold_i32()?;
@@ -125,8 +129,10 @@ impl Emitter<'_> {
                 let dec = self.dec_fn_of(got);
                 self.f.instructions().local_get(hs).call(dec);
             }
+            self.witness_owned_released(body, got);
             self.release_i32();
         }
+        self.witness_loop_close();
         self.hof_step(ih);
         self.f.instructions().local_get(hacc);
         for _ in 0..5 {
@@ -143,6 +149,7 @@ impl Emitter<'_> {
         self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        self.witness_callback_open(cb, None);
         let got = self.lower(body, None)?;
         let SliceTy::Option(oi) = got else {
             return unsup(&format!("filter-map-body:{got:?}"));
@@ -161,6 +168,12 @@ impl Emitter<'_> {
         // The Option's payload moves into the result as a SHARE: the Option
         // temporary keeps (and releases) its own credit.
         self.share_handle_top(b);
+        // #2755: on the `some` arm the payload's share moves into the result.
+        self.witness_branch_open();
+        self.witness_branch_arm();
+        self.witness_payload_share(b);
+        self.witness_branch_arm();
+        self.witness_branch_close();
         self.f.instructions().call(push).local_set(hacc).end();
         // ...released here when the body handed it over OWNED (a fresh
         // `some(..)`, a call result): every element's Option block leaked
@@ -171,6 +184,8 @@ impl Emitter<'_> {
             let dec = self.dec_fn_of(got);
             self.f.instructions().local_get(hr).call(dec);
         }
+        self.witness_owned_released(body, got);
+        self.witness_loop_close();
         self.hof_step(ih);
         self.f.instructions().local_get(hacc);
         for _ in 0..5 {

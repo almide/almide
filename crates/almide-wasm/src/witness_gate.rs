@@ -547,6 +547,7 @@ fn inline_callback_subset(module: &str, func: &str, args: &[IrExpr]) -> Option<W
         ("list", "map" | "filter" | "find" | "any" | "all" | "count", [_, _]) => 1,
         // #2755: the option / result combinators run the callback at most
         // once, on one arm of a branch site (witness_inline.rs).
+        ("list", "sort_by" | "flat_map" | "filter_map", [_, _]) | ("list", "update", [_, _, _]) => 1,
         ("result", "unwrap_or_else" | "map" | "map_err" | "flat_map", [_, _])
         | ("option", "map" | "flat_map" | "filter", [_, _]) => 1,
         ("option", "unwrap_or_else" | "or_else", [_, _]) => 0,

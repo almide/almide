@@ -411,6 +411,8 @@ impl Emitter<'_> {
         let _ = i;
         self.load_ty_slot(et, 0);
         self.f.instructions().local_set(params[0]);
+        // #2755: the in-range arm runs the callback once.
+        self.witness_once_open(cb);
         self.lower(body, Some(et))?;
         // The result goes into this arm's COPY, so a BORROWED one (a body that
         // just reads a captured binding, `(t) => s`) needs its own credit: the
@@ -423,6 +425,9 @@ impl Emitter<'_> {
         if self.rc_droppable(et) && !self.rc_owned_result(body) {
             self.rc_inc_top();
         }
+        self.witness_guarded(body, et);
+        self.witness_once_arm();
+        self.witness_once_close();
         let hv = self.hold_val(et)?;
         self.f.instructions().local_set(hv);
         // The copy took a credit on the element this store replaces; it
