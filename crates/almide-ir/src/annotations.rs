@@ -135,6 +135,11 @@ pub struct CodegenAnnotations {
     /// a plain `move` closure would capture a *copy* and silently drop the mutation.
     /// (Closure v2, P3.)
     pub shared_mut_vars: HashSet<VarId>,
+    /// A `mut` param a closure captures and the fn writes (#3154) is rebound
+    /// at entry onto a `var` local that takes the shared-cell lowering: this
+    /// maps that local to the param, so the walker renders its bind as the
+    /// cell plus the guard that writes it back into the caller's place.
+    pub mut_param_cells: HashMap<VarId, VarId>,
     /// Heap-typed function-local vars that are BOTH copy-aliased (some other live
     /// binding shares their heap value via `var b = a`, `let b = a`, `b = r.field`,
     /// an if/match arm, or a destructure element) AND mutated in place (IndexAssign,
