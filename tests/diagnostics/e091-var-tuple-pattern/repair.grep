@@ -1,4 +1,0 @@
-# #3149: both readings, with the program's own names
-var x = at.0
-var y = at.1
-let (x, y) = at
