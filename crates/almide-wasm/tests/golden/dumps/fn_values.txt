@@ -72,10 +72,10 @@ func 42 -> type 21
 func 43 -> type 21
 table TableType { element_type: funcref, table64: false, initial: 3, maximum: Some(3), shared: false }
 memory MemoryType { memory64: false, shared: false, initial: 2, maximum: None, page_size_log2: None }
-global GlobalType { content_type: I32, mutable: false, shared: false } = I32Const { value: 256 } End
-global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 65792 } End
-global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 256 } End
-global GlobalType { content_type: I32, mutable: false, shared: false } = I32Const { value: 65792 } End
+global GlobalType { content_type: I32, mutable: false, shared: false } = I32Const { value: 144 } End
+global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 65680 } End
+global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 144 } End
+global GlobalType { content_type: I32, mutable: false, shared: false } = I32Const { value: 65680 } End
 global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const { value: 9223372036854775807 } End
 global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const { value: 0 } End
 global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const { value: 0 } End
@@ -85,9 +85,9 @@ global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const
 global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 0 } End
 global GlobalType { content_type: I64, mutable: true, shared: false } = I64Const { value: 0 } End
 global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 0 } End
-global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 65792 } End
+global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 65680 } End
 global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 0 } End
-global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 65792 } End
+global GlobalType { content_type: I32, mutable: true, shared: false } = I32Const { value: 65680 } End
 export memory Memory 0
 export main Func 44
 export __heap Global 1
@@ -274,9 +274,9 @@ code locals=[1xI64,1xI32,1xI64,1xI64,3xI32,1xI64,1xF64,24xI32,16xI64,8xF64,8xI32
   I64Const { value: 1 }
   I64Eq
   If { blockty: Type(I32) }
-  I32Const { value: 145 }
+  I32Const { value: 112 }
   Else
-  I32Const { value: 161 }
+  I32Const { value: 128 }
   End
   LocalGet { local_index: 1 }
   Call { function_index: 45 }
@@ -324,4 +324,4 @@ code locals=[3xI32,1xI64,1xF64,24xI32,16xI64,8xF64,8xI32]
   I64Const { value: 2 }
   I64Add
   End
-data len=251 head=000000000000000000000000000000000000000000000000
+data len=29 head=010000000400000004000000010000000100000004000000
