@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use super::{Ev, Node};
+use super::{Ev, Node, FRAME_HELD};
 
 /// #2755: the LOOP-CARRIED locals. A var bound outside a loop and rebound
 /// inside it (`list.push(xs, v)` in a `for`, `acc = acc + [x]` in a
@@ -55,6 +55,41 @@ pub(super) fn carry(seq: &mut Vec<Node>, level: u32, next: &mut u32) {
         }
     }
     *seq = out;
+}
+
+/// #2755 / #2758: the frame's OUTER holders — a top-let global, or the
+/// C-319 cell a lifted lambda captured — that the frame WRITES. The holder
+/// keeps one credit on its occupant for its whole life; the frame borrows it
+/// for its run: it receives the occupant with that credit at its start
+/// (`i`, a fresh object bound to the holder's pseudo local, prepended here)
+/// and hands the occupant then held back at each of its ends (`m`,
+/// witness_paths.rs `hand_back`; an abort's terminal discharges it). A
+/// write in between is an ordinary rebind of the pseudo local: the old
+/// occupant released (`d`), the new one held (`i`). A write that forgets
+/// the release leaves the received object unbalanced. Returns the holders.
+pub(super) fn frame_carry(tree: &mut Vec<Node>, next: &mut u32) -> Vec<u32> {
+    fn collect(seq: &[Node], set: &mut BTreeSet<u32>) {
+        for node in seq {
+            match node {
+                Node::Ev(Ev::Carry { local, depth }) if *depth == FRAME_HELD => {
+                    set.insert(*local);
+                }
+                Node::Branch(arms) => arms.iter().for_each(|a| collect(a, set)),
+                Node::Loop(body, _) => collect(body, set),
+                Node::Ev(_) => {}
+            }
+        }
+    }
+    let mut held = BTreeSet::new();
+    collect(tree, &mut held);
+    let mut head = Vec::new();
+    for &l in &held {
+        let o = *next;
+        *next += 1;
+        head.extend([Ev::Birth(o), Ev::Op(o, 'i'), Ev::Bind { local: l, obj: o, owner: true }].map(Node::Ev));
+    }
+    tree.splice(0..0, head);
+    held.into_iter().collect()
 }
 
 /// The locals a loop body at `level` carries: every `Carry` in it, nested
@@ -121,5 +156,21 @@ mod tests {
         // t's own block moves into the inner loop; the inner loop's
         // hand-back is released at the outer iteration's end.
         assert_eq!(cert(&log, 2), "\nim\n\nim\n\nid\n\nid\n");
+    }
+
+    #[test]
+    fn an_outer_holder_lends_its_block_for_the_frame_and_gets_one_back() {
+        const H: u32 = 0xC000_0001;
+        let held = Carry { local: H, depth: super::super::FRAME_HELD };
+        // g = f() (releasing the old occupant): the occupant the frame
+        // received is released, the new one handed back at the end.
+        let log = [held.clone(), LOp(H, 'd'), Birth(0), Op(0, 'i'), bind(H, 0)];
+        assert_eq!(cert(&log, 1), "im\nid\n");
+        // A write that forgets the old occupant leaves it held.
+        let leak = [held.clone(), Birth(0), Op(0, 'i'), bind(H, 0)];
+        assert_eq!(cert(&leak, 1), "im\ni\n");
+        // An exit hands the occupant back on its own path too.
+        let exit = [held, Open, Exit, Arm, Close, LOp(H, 'd'), Birth(0), Op(0, 'i'), bind(H, 0)];
+        assert_eq!(cert(&exit, 1), "{|im}\n{id|im}\n");
     }
 }
