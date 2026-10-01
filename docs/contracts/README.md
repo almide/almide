@@ -208,13 +208,13 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-170 | Integer arithmetic wraps in every position, including a module-level let | 0.36.0 | active | fixture | 3 |
 | C-171 | Byte-offset bound checks do not overflow at the i64 boundary | 0.36.0 | active | fixture | 1 |
 | C-172 | unwrap_or over any heap payload yields the same value on both targets | 0.36.0 | active | fixture | 2 |
-| C-173 | An integer literal outside what its context can represent is a checker error on both targets, never a silent value | 0.36.0 | active | fixture | 1 |
+| C-173 | An integer literal outside what its context can represent is a checker error on both targets, never a silent value | 0.36.0 | active | fixture | 2 |
 | C-174 | A tail-recursive Map/Set accumulator keeps its seed on both targets, non-empty seeds included | 0.36.0 | active | fixture | 1 |
 | C-175 | A List literal of a variant type builds and drops identically on both targets, in bind and heap-result-if-arm position | 0.37.0 | active | fixture | 1 |
 | C-176 | some/ok around an inline tuple-returning call materializes the real payload on both targets | 0.37.0 | active | fixture | 1 |
 | C-177 | A mutable-global projection read in a loop-body call argument reads the CURRENT slot every iteration | 0.37.0 | active | fixture | 1 |
 | C-178 | A mutual tail-recursion chain runs at unbounded depth on the wasm target | 0.37.0 | active | fixture | 2 |
-| C-179 | UInt64 reaches its full declared domain, with every observer reading the slot unsigned | 0.37.0 | active | fixture | 2 |
+| C-179 | UInt64 reaches its full declared domain, with every observer reading the slot unsigned | 0.37.0 | active | fixture | 3 |
 | C-180 | Sized-integer +, -, * and ^ wrap at the declared width on both targets | 0.37.0 | active | fixture | 1 |
 | C-181 | args.positional returns every non-flag argument, and the args surface agrees across targets | 0.37.0 | active | fixture | 1 |
 | C-182 | A negated float literal takes its context's float type on both targets | 0.37.0 | active | fixture | 2 |

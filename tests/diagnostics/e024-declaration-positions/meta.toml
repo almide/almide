@@ -1,0 +1,3 @@
+expects_code = "E024"
+expects_error = "'1000' is out of range for UInt8"
+hint_substring = "would silently fold to 0"
