@@ -1,0 +1,24 @@
+// @contract: C-192, C-219
+// #3144: a diverging call as an interpolation part. The parts to its left run,
+// left to right, and the program aborts at it; the parts to its right never
+// run. Native rendered the `Never` part as `()` inside `format!` (rustc E0277,
+// `()` is not Display) and the structural wasm leg refused it
+// (`diverging-call-untyped`: a diverging call with no expected type).
+//
+// `checked` is the build half — the cut inside an `if` arm, untaken. The `let`
+// in `main` is the abort half, the issue's own shape: it prints `tick a`, then
+// `PANIC: p` on stderr with no trailing newline, exit 1.
+fn tick(s: String) -> String = {
+  println("tick ${s}")
+  s
+}
+
+fn checked(n: Int) -> String = if n >= 0 then "ok ${n}"
+else "${tick("left")} ${panic("negative ${n}")} ${tick("right")}"
+
+effect fn main() -> Unit = {
+  println(checked(3))
+  let s = "${tick("a")} ${panic("p")} ${tick("b")}"
+  println(s)
+  println("unreachable")
+}
