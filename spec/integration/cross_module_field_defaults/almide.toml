@@ -1,0 +1,3 @@
+[package]
+name = "cross_module_field_defaults"
+version = "0.1.0"
