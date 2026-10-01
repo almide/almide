@@ -49,29 +49,33 @@ impl NanoPass for BoxDerefPass {
         // Build boxed_fields: for each recursive enum, find which variant fields
         // reference ANY cycle member (mutual recursion, not only self) (#656).
         let rec_ref = &recursive;
-        program.codegen_annotations.boxed_fields = program.type_decls.iter()
+        let boxed: Vec<(String, String, String)> = program.type_decls.iter()
             .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
             .filter(|td| rec_ref.contains(&*td.name))
             .filter_map(|td| match &td.kind {
-                IrTypeDeclKind::Variant { cases, .. } => Some(cases),
+                IrTypeDeclKind::Variant { cases, .. } => Some((td.name.to_string(), cases)),
                 _ => None,
             })
-            .flat_map(|cases| {
+            .flat_map(|(enum_name, cases)| {
                 cases.iter().flat_map(move |c| {
-                    match &c.kind {
+                    let boxed_at: Vec<String> = match &c.kind {
                         IrVariantKind::Record { fields } => fields.iter()
                             .filter(|f| walker::ty_contains_any_recursive(&f.ty, rec_ref))
-                            .map(|f| (c.name.to_string(), f.name.to_string()))
-                            .collect::<Vec<_>>(),
+                            .map(|f| f.name.to_string())
+                            .collect(),
                         IrVariantKind::Tuple { fields } => fields.iter().enumerate()
                             .filter(|(_, t)| walker::ty_contains_any_recursive(t, rec_ref))
-                            .map(|(i, _)| (c.name.to_string(), format!("{}", i)))
-                            .collect::<Vec<_>>(),
+                            .map(|(i, _)| format!("{}", i))
+                            .collect(),
                         _ => vec![],
-                    }
+                    };
+                    let enum_name = enum_name.clone();
+                    boxed_at.into_iter().map(move |f| (enum_name.clone(), c.name.to_string(), f))
                 })
             })
             .collect();
+        program.codegen_annotations.boxed_fields = boxed.iter().map(|(_, c, f)| (c.clone(), f.clone())).collect();
+        program.codegen_annotations.boxed_case_fields = boxed.into_iter().collect();
 
         // Build default_fields: for each variant/record constructor with default field values.
         // Chain module type_decls so types declared in submodules also fill defaults at
@@ -109,6 +113,7 @@ impl NanoPass for BoxDerefPass {
             }
         }
         program.codegen_annotations.default_fields = defaults;
+        program.codegen_annotations.case_default_fields = case_default_fields(&program);
 
         PassResult { program, changed: true }
     }
@@ -382,4 +387,31 @@ fn mark_boxed_field_pattern(pat: &IrPattern, recursive: &HashSet<String>, type_d
             collect_deref_from_pattern(pat, recursive, type_decls, name_to_var, deref_vars),
         _ => {}
     }
+}
+
+/// Every record-payload case's field defaults, keyed by the enum's type name
+/// as values carry it (`mod.Type` for a module's, the bare name for the entry
+/// program's), the case and the field (#3176).
+fn case_default_fields(program: &IrProgram) -> HashMap<(String, String, String), IrExpr> {
+    let mut out = HashMap::new();
+    for (mod_prefix, decls) in std::iter::once((None, &program.type_decls))
+        .chain(program.modules.iter().map(|m| (Some(m.name.as_str()), &m.type_decls)))
+    {
+        for td in decls {
+            let IrTypeDeclKind::Variant { cases, .. } = &td.kind else { continue };
+            let enum_name = match mod_prefix {
+                Some(p) if !td.name.as_str().contains('.') => format!("{}.{}", p, td.name),
+                _ => td.name.to_string(),
+            };
+            for c in cases {
+                let IrVariantKind::Record { fields } = &c.kind else { continue };
+                for f in fields {
+                    if let Some(d) = &f.default {
+                        out.insert((enum_name.clone(), c.name.to_string(), f.name.to_string()), d.clone());
+                    }
+                }
+            }
+        }
+    }
+    out
 }

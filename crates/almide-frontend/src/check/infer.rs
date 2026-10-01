@@ -199,13 +199,19 @@ impl Checker {
     // record literal (record-variant ctor or bare named-record type) to its
     // result type, with field validation and per-field type constraints.
     fn infer_expr_record_named(&mut self, n: &Sym, fields: &Vec<ast::FieldInit>) -> Ty {
-                    // A qualified record-variant name (`mod.Ctor { … }`) keys the
-                    // constructor table by its BARE name, so strip any module prefix
-                    // before a ctor lookup — otherwise a cross-module record-variant
-                    // is mis-typed as a standalone `mod.Ctor` type (#412).
+                    // The case's bare name keys its field defaults (#412).
                     let ctor_sym = n.rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or_else(|| sym(n));
-                    if let Some(early) = self.check_record_enum_misuse(n, ctor_sym) {
-                        return early;
+                    // #3176: the qualifier picks the module the case is looked up
+                    // in — `draw.Pane { .. }` never answers with another
+                    // import's `| Pane` — and a bare name another import also
+                    // declares is ambiguous, as in call position.
+                    let ctor_lookup = self.env.lookup_ctor_written(n.as_str(), self.current_module_prefix.as_deref());
+                    if ctor_lookup.is_none() {
+                        if let Some(early) = self.check_record_enum_misuse(n) {
+                            return early;
+                        }
+                    } else if !n.contains('.') {
+                        self.report_ambiguous_ctor(n);
                     }
                     // Constrain each provided field value to its DECLARED field
                     // type (with the parent type's generics instantiated to fresh
@@ -227,7 +233,6 @@ impl Checker {
                     // pins `type_name` to the owner-qualified `mod.Shape`,
                     // matching the tuple-ctor path. Without this the bare result
                     // type tripped the #433 name-pinning guard at codegen.
-                    let ctor_lookup = self.env.lookup_ctor_in(&ctor_sym, self.current_module_prefix.as_deref());
                     let (result_ty, decl_fields, closed, defaults): (Ty, Vec<(Sym, Ty)>, bool, std::collections::HashSet<Sym>) =
                         match ctor_lookup {
                             Some((type_name, case)) => match self.infer_expr_record_variant_ctor(n, ctor_sym, type_name, &case) {
@@ -249,33 +254,31 @@ impl Checker {
     // reject it here with a proper diagnostic that lists the available
     // record-variant cases. Returns `Some(Ty::Unknown)` to signal an
     // early-return to the caller, `None` to continue.
-    fn check_record_enum_misuse(&mut self, n: &Sym, ctor_sym: Sym) -> Option<Ty> {
-        if !self.env.constructors.contains_key(&ctor_sym) {
-            // The literal's TYPE resolves canonically: the entry program's
-            // `type Endian = { n: Int }` is `self.Endian`, not the bundled
-            // `Endian` enum the bare key holds (#1828).
-            let key = crate::canonicalize::resolve::canonical_user_type_sym(
-                n.as_str(), &self.env.types, self.current_module_prefix.as_deref(),
-            ).unwrap_or(*n);
-            if let Some(Ty::Variant { cases, .. }) = self.env.types.get(&key) {
-                let record_cases: Vec<&str> = cases.iter()
-                    .filter(|c| matches!(c.payload, VariantPayload::Record(_)))
-                    .map(|c| c.name.as_str())
-                    .collect();
-                let hint = if record_cases.is_empty() {
-                    format!("`{}` is an enum type; none of its cases take named fields. Construct a case directly, e.g. `{}::SomeCase(...)`.", n, n)
-                } else {
-                    format!("`{}` is an enum type, not a record. Construct a case instead: {}.",
-                        n,
-                        record_cases.iter().map(|c| format!("`{} {{ ... }}`", c)).collect::<Vec<_>>().join(" or "))
-                };
-                self.emit(super::err(
-                    format!("cannot construct enum type '{}' with record syntax", n),
-                    hint,
-                    format!("record literal {}", n),
-                ).with_code("E017"));
-                return Some(Ty::Unknown);
-            }
+    fn check_record_enum_misuse(&mut self, n: &Sym) -> Option<Ty> {
+        // The literal's TYPE resolves canonically: the entry program's
+        // `type Endian = { n: Int }` is `self.Endian`, not the bundled
+        // `Endian` enum the bare key holds (#1828).
+        let key = crate::canonicalize::resolve::canonical_user_type_sym(
+            n.as_str(), &self.env.types, self.current_module_prefix.as_deref(),
+        ).unwrap_or(*n);
+        if let Some(Ty::Variant { cases, .. }) = self.env.types.get(&key) {
+            let record_cases: Vec<&str> = cases.iter()
+                .filter(|c| matches!(c.payload, VariantPayload::Record(_)))
+                .map(|c| c.name.as_str())
+                .collect();
+            let hint = if record_cases.is_empty() {
+                format!("`{}` is an enum type; none of its cases take named fields. Construct a case directly, e.g. `{}::SomeCase(...)`.", n, n)
+            } else {
+                format!("`{}` is an enum type, not a record. Construct a case instead: {}.",
+                    n,
+                    record_cases.iter().map(|c| format!("`{} {{ ... }}`", c)).collect::<Vec<_>>().join(" or "))
+            };
+            self.emit(super::err(
+                format!("cannot construct enum type '{}' with record syntax", n),
+                hint,
+                format!("record literal {}", n),
+            ).with_code("E017"));
+            return Some(Ty::Unknown);
         }
         None
     }

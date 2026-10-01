@@ -112,9 +112,9 @@ impl Checker {
             }
             _ => return false,
         };
-        let bare = n.as_str().rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(n);
-        // Record-payload variant case? (ctor table is keyed by bare name)
-        let ctor_payload_record = self.env.lookup_ctor_in(&bare, self.current_module_prefix.as_deref())
+        // Record-payload variant case? A qualified name is looked up in its
+        // module alone (#3176).
+        let ctor_payload_record = self.env.lookup_ctor_written(n.as_str(), self.current_module_prefix.as_deref())
             .map(|(_, case)| matches!(case.payload, crate::types::VariantPayload::Record(_)));
         // Record TYPE? (resolve through the same canonicalization annotations use)
         let is_record_type = ctor_payload_record.is_none() && {

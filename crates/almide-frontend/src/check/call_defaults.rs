@@ -108,10 +108,11 @@ impl Checker {
 
     /// The `field_default_exprs` key of the type a named record literal
     /// builds — resolved the way `infer_expr_record_named` resolves it: a
-    /// record-payload case first (`mod.Type.Case`), else a named record.
+    /// record-payload case first (`mod.Type.Case`), else a named record. A
+    /// qualified head names a case of that module alone (#3176).
     fn record_literal_defaults_key(&self, n: &Sym) -> Option<Sym> {
         let ctor_sym = n.rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(*n);
-        if let Some((type_name, _)) = self.env.lookup_ctor_in(&ctor_sym, self.current_module_prefix.as_deref()) {
+        if let Some((type_name, _)) = self.env.lookup_ctor_written(n.as_str(), self.current_module_prefix.as_deref()) {
             let ty = self.record_case_type_name(n, type_name);
             return Some(sym(&format!("{}.{}", ty, ctor_sym)));
         }

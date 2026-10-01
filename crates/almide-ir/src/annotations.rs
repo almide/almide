@@ -71,7 +71,22 @@ pub struct CodegenAnnotations {
     /// vector both the native force loop and wasm `__init_globals` are
     /// meant to consume in stage 2 (C-007 by construction).
     pub global_init_order: Vec<VarId>,
+    /// Variant case name -> the enum that declares it. Keyed by the BARE case
+    /// name program-wide, so a name two enums share keeps only the last one
+    /// registered: read it through the walker's `ctor_enum_for`, which asks
+    /// `enum_cases` about the value's own type first.
     pub ctor_to_enum: HashMap<String, String>,
+    /// Enum name -> its case names: every enum the program renders, keyed by
+    /// the enum, so an enum whose cases another enum's same-named cases
+    /// overwrote in `ctor_to_enum` is still known as an enum with those cases
+    /// (#3176).
+    pub enum_cases: HashMap<String, HashSet<String>>,
+    /// (enum, case) -> the case's payload positions and declared types: a
+    /// tuple payload's by index (`"0"`, `"1"`, the `boxed_fields` spelling), a
+    /// record payload's by field name. The walker reads it to give a NESTED
+    /// pattern the type of its position, so a case name two enums share is
+    /// qualified by the enum the value has there (#3176).
+    pub case_fields: HashMap<(String, String), Vec<(String, almide_lang::types::Ty)>>,
     pub anon_records: HashMap<Vec<String>, String>,
     /// Anon-record keys (sorted field names) whose struct has a closure (`Fn`)
     /// field — its generated struct derives `Clone` only (a closure is not
@@ -107,7 +122,16 @@ pub struct CodegenAnnotations {
     /// subset of `recursive_enums` whenever the twin is recursive.
     pub region_enums: HashSet<String>,
     pub boxed_fields: HashSet<(String, String)>,
+    /// `boxed_fields` keyed by (enum, case, field): the bare case name is
+    /// shared by every enum declaring it (#3176).
+    pub boxed_case_fields: HashSet<(String, String, String)>,
     pub default_fields: HashMap<(String, String), IrExpr>,
+    /// A record-payload case's field defaults keyed by (enum, case, field):
+    /// `default_fields` keys a case by its bare name alone, so two modules'
+    /// `| Leaf { .. }` shared one key and a literal of one was filled with
+    /// the other's defaults (#3176). The walker reads this one whenever the
+    /// literal's type names the enum.
+    pub case_default_fields: HashMap<(String, String, String), IrExpr>,
     /// User-defined record/enum names whose generated Rust struct cannot
     /// derive `PartialEq` (a field transitively blocks equality — e.g.
     /// contains a Matrix or a function pointer).

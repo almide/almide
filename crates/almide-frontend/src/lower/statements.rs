@@ -569,9 +569,10 @@ fn coerce_record_fields(ir_val: &mut IrExpr, decl_fields: &[(almide_base::intern
 /// (nothing to coerce against).
 pub(crate) fn declared_record_ty(env: &TypeEnv, name: almide_base::intern::Sym, cur_mod: Option<&str>) -> Option<Ty> {
     // Variant case with a record payload takes priority, resolved the way the
-    // checker resolves it (`lookup_ctor_in`): only a case visible from this
-    // file, and never over the file's own same-named type (#2636).
-    if let Some((_, case)) = env.lookup_ctor_in(&name, cur_mod) {
+    // checker resolves it (`lookup_ctor_written`): only a case visible from
+    // this file, never over the file's own same-named type (#2636), and a
+    // qualified name inside its module alone (#3176).
+    if let Some((_, case)) = env.lookup_ctor_written(name.as_str(), cur_mod) {
         if let crate::types::VariantPayload::Record(fields) = &case.payload {
             return Some(Ty::Record { fields: fields.clone() });
         }
