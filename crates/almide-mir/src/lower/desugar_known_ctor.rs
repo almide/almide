@@ -308,3 +308,76 @@ pub fn desugar_drop_unit_read_stmts(body: &IrExpr) -> Option<IrExpr> {
     V.visit_expr_mut(&mut out);
     Some(out)
 }
+
+// ── block operands (#3121, #3084) ──
+
+/// `{ stmts; r } ?? fb  ≡  { stmts; r ?? fb }` — a `??` whose operand is a block
+/// absorbs into it, the way a call absorbs a block argument
+/// ([`hoist_block_call_args`]). Exact: the operand's statements already ran
+/// before the fallback could, and the fallback stays lazy. The C-132 call site
+/// of a can-err `mut`-param callee (`f(xs) ?? d`, #3121) is that block — the
+/// write-back `{ let (r, b) = match f(xs) {…}; xs = b; r }`. Returns whether
+/// `e` was rewritten.
+fn absorb_unwrap_or_block_operand(e: &mut IrExpr) -> bool {
+    let IrExprKind::UnwrapOr { expr, .. } = &mut e.kind else { return false };
+    let IrExprKind::Block { stmts, expr: Some(tail) } = &mut expr.kind else { return false };
+    if stmts.is_empty() {
+        return false;
+    }
+    let hoisted = std::mem::take(stmts);
+    let tail = (**tail).clone();
+    **expr = tail;
+    let ty = e.ty.clone();
+    let span = e.span.clone();
+    let inner = std::mem::replace(
+        e,
+        IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
+    );
+    *e = IrExpr {
+        kind: IrExprKind::Block { stmts: hoisted, expr: Some(Box::new(inner)) },
+        ty,
+        span,
+        def_id: None,
+    };
+    true
+}
+
+/// The operands BEFORE a call's block argument, made safe to evaluate after
+/// nothing: a Var or literal stays (re-reading it later is unobservable), a call
+/// is bound to a fresh `let` returned in order — `f(g(x), { s; e })` becomes
+/// `{ let t = g(x); s; f(t, e) }`, so `g` still runs before the block (#3084: a
+/// nested `mut`-param call, whose write-back block follows its sibling
+/// arguments). Any other operand (a field or index place, an operator) declines
+/// with `None`, leaving the call untouched.
+fn bind_earlier_call_operands(
+    args: &mut [IrExpr],
+    vt: &mut almide_ir::VarTable,
+) -> Option<Vec<almide_ir::IrStmt>> {
+    use almide_ir::{IrStmt, IrStmtKind, Mutability};
+    let pure = |e: &IrExpr| {
+        matches!(
+            e.kind,
+            IrExprKind::Var { .. }
+                | IrExprKind::LitInt { .. }
+                | IrExprKind::LitFloat { .. }
+                | IrExprKind::LitBool { .. }
+                | IrExprKind::LitStr { .. }
+                | IrExprKind::Unit
+        )
+    };
+    if !args.iter().all(|a| pure(a) || matches!(a.kind, IrExprKind::Call { .. })) {
+        return None;
+    }
+    let mut binds = Vec::new();
+    for a in args.iter_mut().filter(|a| !pure(a)) {
+        let ty = a.ty.clone();
+        let span = a.span.clone();
+        let var = vt.alloc(almide_base::intern::sym("__arg"), ty.clone(), Mutability::Let, None);
+        let value = std::mem::replace(
+            a,
+            IrExpr { kind: IrExprKind::Var { id: var }, ty: ty.clone(), span: span.clone(), def_id: None },
+        );
+        binds.push(IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value }, span });
+    }
+    Some(binds)
+}

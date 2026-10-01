@@ -27,6 +27,9 @@ fn is_pure_match_subject(e: &IrExpr) -> bool {
 /// into block stmts / tails / if & match arms so a nested such match is hoisted too.
 fn desugar_match_subject_hoist(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
     if let IrExprKind::Match { subject, arms } = &body.kind {
+        if let Some(absorbed) = absorb_block_match_subject(body, subject, arms) {
+            return Some(absorbed);
+        }
         if match_subject_needs_hoist(subject, arms) {
             return Some(hoist_match_subject(body, subject, arms, next_var));
         }
@@ -38,6 +41,35 @@ fn desugar_match_subject_hoist(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
         IrExprKind::Match { .. } => hoist_subject_in_arms(body, next_var),
         _ => None,
     }
+}
+
+/// `match { stmts; e } { arms }  ≡  { stmts; match e { arms } }` — a BLOCK subject
+/// absorbs the match, as a call absorbs a block argument (`hoist_block_call_args`).
+/// Exact: the statements run before any arm either way, and VarIds are unique, so
+/// no arm can see a binding it did not see before. The C-132 call site of a can-err
+/// `mut`-param callee (`match f(xs) { … }`, #3121) is that block — the write-back
+/// `{ let (r, b) = match f(xs) {…}; xs = b; r }`.
+fn absorb_block_match_subject(
+    body: &IrExpr,
+    subject: &IrExpr,
+    arms: &[almide_ir::IrMatchArm],
+) -> Option<IrExpr> {
+    let IrExprKind::Block { stmts, expr: Some(tail) } = &subject.kind else { return None };
+    if stmts.is_empty() {
+        return None;
+    }
+    let new_match = IrExpr {
+        kind: IrExprKind::Match { subject: tail.clone(), arms: arms.to_vec() },
+        ty: body.ty.clone(),
+        span: body.span.clone(),
+        def_id: body.def_id,
+    };
+    Some(IrExpr {
+        kind: IrExprKind::Block { stmts: stmts.clone(), expr: Some(Box::new(new_match)) },
+        ty: body.ty.clone(),
+        span: body.span.clone(),
+        def_id: body.def_id,
+    })
 }
 
 /// Does this match need the single-eval subject hoist? A NON-VARIANT literal
