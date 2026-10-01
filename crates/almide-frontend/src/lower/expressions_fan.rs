@@ -471,7 +471,9 @@ fn lower_fan_race_fold(
             _ => unreachable!(),
         }
     }
-    (stmts, ok_var.unwrap(), val_var.unwrap(), arm_ty)
+    // The parser refuses an armless `fan.race`, so the first arm set all three.
+    let (Some(ok_var), Some(val_var)) = (ok_var, val_var) else { unreachable!("fan.race lowered with no arms") };
+    (stmts, ok_var, val_var, arm_ty)
 }
 
 /// Lower `fan.race(budget?, xs, f)` — the MAPPER form (T7-1) — into a dynamic

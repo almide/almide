@@ -566,7 +566,8 @@ impl Checker {
         let mid = &call_src[head.len()..call_src.len() - tail.len()];
         // Fresh-enough param names: never collide with the callback's own
         // spelling (a param shadowing `f` would rebind the callee).
-        let pick = |cands: [&str; 2]| cands.iter().find(|c| **c != cb_src).unwrap().to_string();
+        // The two candidates differ, so at most one is taken.
+        let pick = |[first, second]: [&str; 2]| if first == cb_src { second } else { first }.to_string();
         let snippet = if is_fold {
             let a = pick(["a", "acc"]);
             let x = pick(["x", "e"]);
