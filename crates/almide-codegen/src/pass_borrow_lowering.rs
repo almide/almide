@@ -24,6 +24,9 @@ use almide_ir::visit_mut::{walk_expr_mut, walk_stmt_mut, IrMutVisitor};
 use almide_lang::types::{Ty, TypeConstructorId};
 use super::pass::{NanoPass, PassResult, Target};
 
+#[path = "pass_borrow_lowering_take.rs"]
+mod take;
+
 #[derive(Debug)]
 pub struct BorrowLoweringPass;
 
@@ -427,6 +430,19 @@ impl Lower<'_> {
     /// constructor field or element, a concatenation operand, the body's
     /// result. A `Copy` scalar's read is `*p` ([`Lower::lower_scalar_ref_read`]).
     fn own_consumed_ref_mut(&self, e: &mut IrExpr) {
+        // A by-value position hands on whatever value its branches end in
+        // (`if c then ws else []`, a match arm, a block's tail — #3170).
+        match &mut e.kind {
+            IrExprKind::If { then, else_, .. } => {
+                self.own_consumed_ref_mut(then);
+                return self.own_consumed_ref_mut(else_);
+            }
+            IrExprKind::Match { arms, .. } => {
+                return arms.iter_mut().for_each(|a| self.own_consumed_ref_mut(&mut a.body));
+            }
+            IrExprKind::Block { expr: Some(tail), .. } => return self.own_consumed_ref_mut(tail),
+            _ => {}
+        }
         let Some(id) = var_id(e) else { return };
         if !is_ref_mut_param(self.params, id) || is_copy_scalar(&e.ty) {
             return;
@@ -441,9 +457,14 @@ impl Lower<'_> {
     /// bare `Var` argument is an owned slot by construction.
     fn lower_consumers(&self, expr: &mut IrExpr) {
         match &mut expr.kind {
-            IrExprKind::Call { args, .. } | IrExprKind::TailCall { args, .. } => {
+            IrExprKind::Call { args, .. } | IrExprKind::TailCall { args, .. }
+            | IrExprKind::RuntimeCall { args, .. } => {
                 for a in args { self.own_consumed_ref_mut(a); }
             }
+            // A chain consumes a bare source by value (`.into_iter()`, #3170).
+            IrExprKind::IterChain { source, consume: true, .. } => self.own_consumed_ref_mut(source),
+            IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
+            | IrExprKind::ResultErr { expr: e } => self.own_consumed_ref_mut(e),
             IrExprKind::Record { fields, .. } => {
                 for (_, f) in fields { self.own_consumed_ref_mut(f); }
             }
@@ -524,10 +545,12 @@ impl IrMutVisitor for Lower<'_> {
         // `Borrow { Var p }` the TCO rotation binds into a `_`-typed temp
         // carries the reference on purpose, and only becomes a bare `Var`
         // once the expression walk below lowers it.
+        self.take_overwritten_ref_mut(stmt);
         match &mut stmt.kind {
             IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. }
             | IrStmtKind::FieldAssign { value, .. } | IrStmtKind::IndexAssign { value, .. } => {
-                self.lower_stored_value(value)
+                self.lower_stored_value(value);
+                self.own_consumed_ref_mut(value);
             }
             _ => {}
         }
