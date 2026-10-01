@@ -55,6 +55,10 @@ use super::lines::{flat_exits, hoist, net};
 mod carry;
 use carry::carry;
 
+/// The `Carry` depth of an OUTER holder the whole frame borrows (#2755 /
+/// #2758, witness_carry.rs `frame_carry`).
+pub(crate) const FRAME_HELD: u32 = u32::MAX;
+
 /// One logged event.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Ev {
@@ -280,7 +284,8 @@ const PATH_CAP: usize = 64;
 /// Where a walk runs: the frame, or one loop iteration.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Scope<'t> {
-    Frame,
+    /// The frame, with the outer holders it borrows (`frame_carry`).
+    Frame(&'t [u32]),
     /// One iteration of a loop body, with the locals that loop carries.
     Iteration(&'t [u32]),
 }
@@ -339,6 +344,16 @@ fn end_iteration(p: &mut Path, carried: &[u32]) {
     p.ended = true;
 }
 
+/// A path leaves the frame: each outer holder it borrowed gets its block
+/// back (`m`, witness_carry.rs `frame_carry`).
+fn hand_back(p: &mut Path, held: &[u32]) {
+    for (l, h) in &p.holders {
+        if h.owner && held.contains(l) {
+            p.events.push('m');
+        }
+    }
+}
+
 /// How a walk renders a branch with an exiting arm.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Exits {
@@ -371,9 +386,15 @@ fn walk<'t>(
             match node {
                 Node::Ev(Ev::Jump) => match scope {
                     Scope::Iteration(carried) => end_iteration(&mut p, carried),
-                    Scope::Frame => return Err("loop-jump-outside-loop".into()),
+                    Scope::Frame(_) => return Err("loop-jump-outside-loop".into()),
                 },
-                Node::Ev(Ev::Exit) if scope != Scope::Frame => return Err("loop-exit".into()),
+                Node::Ev(Ev::Exit) => match scope {
+                    Scope::Frame(held) => {
+                        hand_back(&mut p, held);
+                        step(&Ev::Exit, o, &mut p);
+                    }
+                    Scope::Iteration(_) => return Err("loop-exit".into()),
+                },
                 Node::Ev(ev) => step(ev, o, &mut p),
                 Node::Branch(arms) if exits == Exits::Fold => {
                     next.extend(fold_branch(arms, o, scope, p, loops)?);
@@ -523,9 +544,10 @@ fn line(paths: &[Path], exits: Exits) -> Result<String, String> {
 
 /// One object's lines: the frame line, then one line per loop activation
 /// that touches it.
-fn render_object(tree: &[Node], o: u32, exits: Exits, out: &mut String) -> Result<(), String> {
+fn render_object(tree: &[Node], o: u32, exits: Exits, held: &[u32], out: &mut String) -> Result<(), String> {
     let mut loops: LoopEntries = Vec::new();
-    let frame = walk(tree, o, Scope::Frame, exits, vec![Path::default()], &mut loops)?;
+    let mut frame = walk(tree, o, Scope::Frame(held), exits, vec![Path::default()], &mut loops)?;
+    frame.iter_mut().filter(|p| !p.ended).for_each(|p| hand_back(p, held));
     out.push_str(&line(&frame, exits)?);
     out.push('\n');
     // Each loop reached, walked from each entry state; loops nested in a
@@ -569,18 +591,19 @@ pub(crate) fn render(log: &[Ev], objects: u32) -> Result<String, String> {
     };
     let mut objects = objects;
     carry(&mut tree, 0, &mut objects);
+    let held = carry::frame_carry(&mut tree, &mut objects);
     let mut s = String::new();
     for o in 0..objects {
         // The whole-path form first (every certificate before #2758 keeps
         // its bytes); an object whose paths it cannot carry — a frame with
         // several exits — is rendered again with its exits folded.
         let mut line = String::new();
-        if let Err(e) = render_object(&tree, o, Exits::Paths, &mut line) {
+        if let Err(e) = render_object(&tree, o, Exits::Paths, &held, &mut line) {
             if !e.starts_with("branch-paths") {
                 return Err(e);
             }
             line.clear();
-            render_object(&tree, o, Exits::Fold, &mut line)?;
+            render_object(&tree, o, Exits::Fold, &held, &mut line)?;
         }
         s.push_str(&line);
     }

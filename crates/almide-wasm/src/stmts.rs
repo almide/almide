@@ -672,14 +672,15 @@ impl Emitter<'_> {
                     self.rc_own(idx, declared);
                 }
                 // The witness (#2757): a droppable local's occupant changes
-                // here; a global or a cell is not a frame local's to record.
-                match local {
-                    Some(idx) if self.rc_droppable(declared) && !self.cells.contains(var) => match moved {
+                // here — or a global's / a cell's, an outer holder the frame
+                // borrows (#2755, `witness_holder`), settled the same way below.
+                if self.rc_droppable(declared)
+                    && let Some(idx) = self.witness_holder(*var, local.is_none())
+                {
+                    match moved {
                         Some(src) => self.witness_transfer(idx, !rhs_spends_var, src),
                         None => self.witness_assign(idx, !rhs_spends_var, rhs_spends_var, value),
-                    },
-                    Some(_) if !self.rc_droppable(declared) => {}
-                    _ => self.witness_decline("assign:global-or-cell"),
+                    }
                 }
                 // #2010: a C-319 cell's occupant is released as it is
                 // replaced (the cell holds exactly one credit on it) — the

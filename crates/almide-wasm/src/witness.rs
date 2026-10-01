@@ -304,6 +304,17 @@ impl WitnessRecorder {
         true
     }
 
+    /// #2755 / #2758: `holder` (a pseudo local naming a top-level global or
+    /// a captured C-319 cell) is an OUTER holder this frame writes: the frame
+    /// borrows its credit for the whole run (witness_carry.rs `frame_carry`).
+    /// Marked once, live code or not — the marker places nothing.
+    pub fn outer_holder(&mut self, holder: u32) {
+        if !self.bound.contains_key(&holder) {
+            self.bound.insert(holder, 0);
+            self.log.push(Ev::Carry { local: holder, depth: paths::FRAME_HELD });
+        }
+    }
+
     /// A rebind of `local` is about to be logged: false when no hook bound
     /// it. A var bound outside the loop being emitted holds a different
     /// block at each loop head: the rebind marks every loop in between as
