@@ -612,6 +612,7 @@ spec/wasm_cross/mut_param_cell_tail_capture_read.almd
 spec/wasm_cross/mut_param_cell_tail_capture_write.almd
 spec/wasm_cross/mut_param_closure_capture_read.almd
 spec/wasm_cross/mut_param_closure_capture_write.almd
+spec/wasm_cross/mut_param_closure_field_path_write.almd
 spec/wasm_cross/mut_param_effect_can_err.almd
 spec/wasm_cross/mut_param_effect_never_err.almd
 spec/wasm_cross/mut_param_effect_unpropagated.almd
