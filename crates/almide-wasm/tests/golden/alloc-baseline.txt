@@ -66,6 +66,7 @@
 66096	spec/wasm_cross/bytes_set_value_semantics.almd
 66864	spec/wasm_cross/bytes_string_window_domain.almd
 68592	spec/wasm_cross/bytes_temp_receiver.almd
+67024	spec/wasm_cross/bytes_to_string_err_release.almd
 68128	spec/wasm_cross/bytes_writer_family.almd
 66944	spec/wasm_cross/bytes_writer_mut_from_declaration.almd
 65936	spec/wasm_cross/call_closure_lambda_param.almd
