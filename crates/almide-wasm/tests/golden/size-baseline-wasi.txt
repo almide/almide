@@ -691,11 +691,12 @@
 7166	spec/wasm_cross/set_entries_reclaim.almd
 7887	spec/wasm_cross/set_index_order.almd
 8879	spec/wasm_cross/set_insertion_order.almd
-6684	spec/wasm_cross/sized_field_default_matrix.almd
+57873	spec/wasm_cross/sized_display_matrix.almd
+6788	spec/wasm_cross/sized_field_default_matrix.almd
 2998	spec/wasm_cross/sized_int_overflow_wrap.almd
 3265	spec/wasm_cross/sized_int_record_fields.almd
 2236	spec/wasm_cross/sized_numeric_literals.almd
-21169	spec/wasm_cross/sized_tail_literal_matrix.almd
+21481	spec/wasm_cross/sized_tail_literal_matrix.almd
 2640	spec/wasm_cross/snapshot_mismatch_abort.almd
 3769	spec/wasm_cross/sort_by_call_count.almd
 10955	spec/wasm_cross/sort_by_compound_key.almd
@@ -828,6 +829,7 @@
 2138	spec/wasm_cross/tuple_eq.almd
 1891	spec/wasm_cross/tuple_ops.almd
 1382	spec/wasm_cross/tuple_single.almd
+3129	spec/wasm_cross/uint64_assert_display.almd
 5728	spec/wasm_cross/uint64_upper_half.almd
 1832	spec/wasm_cross/unannotated_toplet_generic_ctor.almd
 2187	spec/wasm_cross/unique_non_flat_element.almd

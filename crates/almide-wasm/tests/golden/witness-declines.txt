@@ -11,7 +11,7 @@ call-arg:Lambda:map.__fallible_map__Int_String_String_Int	1
 call:panic-arg	7
 callback:SpreadRecord	6
 caps:argv-in-plain-fn	8
-display	10
+display	12
 forin-map	7
 heap-interp-part:Block	8
 heap-interp-part:UnwrapOr	6
@@ -36,7 +36,7 @@ stmt:Expr:Unwrap	1
 stmt:Expr:Var	1
 stmt:Guard:Unwrap	4
 stmt:MapInsert	10
-store:borrowed-temp	2
+store:borrowed-temp	11
 tail:SpreadRecord	4
 tail:Unwrap	26
 unwrap-or:unowned-fresh-fallback	4
