@@ -306,6 +306,8 @@ fn scratch(name: &str) -> PathBuf {
 ///    all three offences and exit 1 before any baseline comparison.
 /// 3. `--update` into a scratch baseline: the ratchet's write, compared as the
 ///    bytes written and the message printed.
+/// 4. That baseline minus one matching row (#3198): no regression, yet the
+///    gate must fail and name the unrecorded match.
 ///
 /// The wasm leg is the STRUCTURAL build of the oracle binary on both sides
 /// (#2793), so there is no second binary to hand either of them.
@@ -468,7 +470,6 @@ fn the_output_parity_twin_answers_what_the_shell_gate_answers() {
     );
     let _ = std::fs::remove_file(&base_a);
     let _ = std::fs::remove_file(&base_b);
-    let _ = std::fs::remove_file(&ledger);
     // The message names the path it wrote, and the two paths differ by design;
     // compare the message with the path masked, and the written bytes as-is.
     let mask = |a: &Answer, p: &Path| {
@@ -491,6 +492,40 @@ fn the_output_parity_twin_answers_what_the_shell_gate_answers() {
     if let Some(d) = first_divergence(&wrote_a, &wrote_b) {
         panic!("output-parity (--update): the written baselines differ\n{d}");
     }
+
+    // 4. An INCOMPLETE baseline (#3198): the ratcheted baseline with one matching
+    //    row dropped. No regression, but a match with no row — the gate fails and
+    //    names it, where it used to print it and pass.
+    let short = scratch("incomplete-baseline.txt");
+    let dropped = wrote_a.lines().next().expect("ratcheted baseline has rows").to_string();
+    std::fs::write(&short, wrote_a.lines().skip(1).map(|l| format!("{l}\n")).collect::<String>())
+        .expect("write incomplete baseline");
+    let env = env_for(&short);
+    let original = run_env("bash", &["proofs/output-parity.sh"], &env);
+    for needle in [
+        "output-parity: NEW matches not yet in baseline".to_string(),
+        format!("  + {dropped}"),
+        "INCOMPLETE BASELINE — 1 matching file(s)".to_string(),
+    ] {
+        assert!(
+            original.text.contains(&needle),
+            "output-parity: the incomplete baseline no longer produces {needle:?}\n{}",
+            original.text
+        );
+    }
+    assert_eq!(
+        original.code,
+        Some(1),
+        "a matching file with no baseline row must fail the gate (#3198)\n{}",
+        original.text
+    );
+    assert_same(
+        "output-parity (incomplete baseline)",
+        mask_dirty_count(original),
+        mask_dirty_count(twin_env(&["output-parity", ".", &oracle], &env)),
+    );
+    let _ = std::fs::remove_file(&short);
+    let _ = std::fs::remove_file(&ledger);
 }
 
 /// The comparison must be able to SEE a difference — a diff that cannot fail is

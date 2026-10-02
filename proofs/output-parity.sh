@@ -25,6 +25,12 @@
 # RATCHET: proofs/output-parity-baseline.txt lists the files that MUST byte-match.
 # The gate FAILS if any baseline file stops matching (a regression). As fixes land,
 # re-run with `--update` to ADD newly-matching files (the baseline only grows).
+# COMPLETENESS (#3198): the gate ALSO fails when a file matches but has no baseline
+# row. It used to only PRINT those as "NEW matches" and pass, so a PR that added a
+# fixture and forgot `--update` went green, and the file was never compared again —
+# 8 matching fixtures sat outside the baseline that way. The baseline is therefore
+# exactly the match set; a fixture that must not be pinned does not match (it walls
+# into the ledger below, or is skipped by `// wasm:skip` / having no `fn main`).
 #
 # WALL LEDGER (#2793): proofs/output-parity-walled-baseline.txt names every file the
 # incumbent baseline held that the STRUCTURAL leg declines, each with its decline and
@@ -330,6 +336,12 @@ gained="$(comm -13 "$TMP/baseline_sorted.txt" "$TMP/matches.txt")"
 if [ -n "$regressions" ]; then
   echo "output-parity: REGRESSION — these baseline files stopped byte-matching v0:" >&2
   echo "$regressions" | sed 's/^/  - /' >&2
+  rm -rf "$TMP"; exit 1
+fi
+# A match with no row is unguarded from the next commit on: nothing would notice
+# it stop matching. Refuse it here, in the PR that introduced it (#3198).
+if [ -n "$gained" ]; then
+  echo "::error::output-parity: INCOMPLETE BASELINE — $(echo "$gained" | wc -l | tr -d ' ') matching file(s) above have no row, so no later run compares them (#3198). Run --update and commit the rows."
   rm -rf "$TMP"; exit 1
 fi
 echo "output-parity: OK — all $(wc -l < "$BASELINE" | tr -d ' ') baseline files still byte-match v0."
