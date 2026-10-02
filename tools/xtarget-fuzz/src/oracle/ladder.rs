@@ -6,6 +6,7 @@ use std::path::Path;
 use almide::fmt::format_program;
 
 use super::runner::Toolchain;
+use crate::findings::{quoted_excerpt, SUMMARY_SIDE_CAP};
 use super::ReferenceOracle;
 
 /// Which rung a program reached / failed at.
@@ -661,7 +662,15 @@ fn divergence_summary(native: &RunEvidence, wasm: &RunEvidence) -> String {
     }
     for (n, w) in native.stdout.lines().zip(wasm.stdout.lines()) {
         if n != w {
-            return format!("stdout differs: native={n:?} wasm={w:?}");
+            // Each side is a byte-capped excerpt (#3207): the differing line
+            // can be the whole output — a 2^31-1-wide `pad_start` made it
+            // 2 GiB, and the summary is the dedup key, a log line and a
+            // `meta.txt` field.
+            return format!(
+                "stdout differs: native={} wasm={}",
+                quoted_excerpt(n, SUMMARY_SIDE_CAP),
+                quoted_excerpt(w, SUMMARY_SIDE_CAP)
+            );
         }
     }
     format!(
@@ -690,13 +699,19 @@ fn self_check_diff(expected: &str, actual: &RunEvidence) -> String {
     if actual.exit_code != Some(0) {
         let last = actual.stderr.lines().last().unwrap_or("").trim();
         return format!(
-            "the leg exited {:?} (expected a clean run): {last:?}",
-            actual.exit_code
+            "the leg exited {:?} (expected a clean run): {}",
+            actual.exit_code,
+            quoted_excerpt(last, SUMMARY_SIDE_CAP)
         );
     }
     for (i, (e, a)) in expected.lines().zip(actual.stdout.lines()).enumerate() {
         if e != a {
-            return format!("line {}: expected {e:?} got {a:?}", i + 1);
+            return format!(
+                "line {}: expected {} got {}",
+                i + 1,
+                quoted_excerpt(e, SUMMARY_SIDE_CAP),
+                quoted_excerpt(a, SUMMARY_SIDE_CAP)
+            );
         }
     }
     format!(
