@@ -60,6 +60,38 @@ const NONDETERMINISTIC_FUNCTIONS: &[(&str, &str)] = &[
     ("fan", "timeout"),  // wall-clock deadline — nondeterministic
 ];
 
+/// Functions whose Int result is a **host address** — the semantics
+/// manifest's `index_unit = "address"` unit, which it defines as "never a
+/// stable value". The language promises only leg-independent properties
+/// of such a value (non-zero, two reads of one buffer agree — C-337), so
+/// its MAGNITUDE is target layout: native `as_ptr` of an empty `Vec` is
+/// the dangling `0x1`, wasm's is a linear-memory offset in the hundreds.
+/// A mutation that perturbs a literal the address is compared against
+/// (`data_ptr(b) >= 0` → `>= 160`, #3193) turns a leg-independent
+/// observation into a layout one and reports a "divergence" no contract
+/// promises against. Screened as a word so the UFCS form is caught too.
+///
+/// The other address-unit entries (`bytes.heap_save` / `heap_restore`,
+/// `mem.save` / `mem.restore`) are NOT here: C-041 pins their observable
+/// results native == wasm, so they stay valid seeds.
+/// [`ADDRESS_UNIT_PINNED_BY_CONTRACT`] lists them, and a test holds the
+/// two tables to the manifest's address-unit set cell for cell.
+const HOST_ADDRESS_FUNCTIONS: &[(&str, &str)] = &[
+    ("bytes", "data_ptr"), // as_ptr / handle + 12 — target layout
+];
+
+/// Address-unit functions whose result a contract pins leg-independent,
+/// with the contract that pins it. Exists so the matrix test can tell an
+/// intentional omission from [`HOST_ADDRESS_FUNCTIONS`] from a forgotten
+/// one.
+#[cfg(test)]
+const ADDRESS_UNIT_PINNED_BY_CONTRACT: &[(&str, &str, &str)] = &[
+    ("bytes", "heap_save", "C-041"),
+    ("bytes", "heap_restore", "C-041"),
+    ("mem", "save", "C-041"),
+    ("mem", "restore", "C-041"),
+];
+
 /// Bare tokens that name a nondeterministic operation regardless of the
 /// receiver, used as a belt-and-braces source screen for the mutation
 /// path (catches `xs.shuffle()` UFCS-style or any future re-export). Kept
@@ -71,6 +103,7 @@ impl NamedDenylist {
     pub fn is_denied_function(module: &str, func: &str) -> bool {
         NONDETERMINISTIC_FUNCTIONS
             .iter()
+            .chain(HOST_ADDRESS_FUNCTIONS)
             .any(|(m, f)| *m == module && *f == func)
     }
 
@@ -102,6 +135,11 @@ impl NamedDenylist {
         for &tok in NONDETERMINISTIC_TOKENS {
             if contains_word(src, tok) {
                 return Some(tok);
+            }
+        }
+        for &(_, f) in HOST_ADDRESS_FUNCTIONS {
+            if contains_word(src, f) {
+                return Some(f);
             }
         }
         None
@@ -230,5 +268,55 @@ mod tests {
     fn function_predicate_agrees_with_table() {
         assert!(NamedDenylist::is_denied_function("list", "shuffle"));
         assert!(!NamedDenylist::is_denied_function("list", "map"));
+        assert!(NamedDenylist::is_denied_function("bytes", "data_ptr"));
+        assert!(!NamedDenylist::is_denied_function("bytes", "heap_save"));
+    }
+
+    /// #3193: the nightly mutated `data_ptr(b("")) >= 0` into `>= 160` and
+    /// reported native `false` / wasm `true` — an address magnitude, which
+    /// no contract promises. Both the call and the UFCS form are screened.
+    #[test]
+    fn denies_host_address_observations() {
+        let repro = "let p1 = bytes.data_ptr(abcde)\n\
+                     println(\"${bytes.data_ptr(b(\"\")) >= 160}\")";
+        assert_eq!(NamedDenylist::source_references_denied_surface(repro), Some("data_ptr"));
+        assert!(NamedDenylist::source_references_denied_surface("buf.data_ptr()").is_some());
+        // A longer identifier that merely contains the word stays allowed.
+        assert!(NamedDenylist::source_references_denied_surface("let data_ptrs = 1").is_none());
+        // The contract-pinned checkpoint pair stays a valid seed.
+        assert!(NamedDenylist::source_references_denied_surface("let cp = mem.save()\nmem.restore(cp)").is_none());
+        assert!(NamedDenylist::source_references_denied_surface("bytes.heap_restore(bytes.heap_save())").is_none());
+    }
+
+    /// Every `index_unit = "address"` fn in the semantics manifest is in
+    /// exactly one of the two tables: screened as a host address, or named
+    /// with the contract that pins it leg-independent. A new address-unit
+    /// fn fails here until someone decides which it is.
+    #[test]
+    fn address_unit_matrix_matches_the_semantics_manifest() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/stdlib/semantics-manifest.toml");
+        let text = std::fs::read_to_string(path).expect("read semantics-manifest.toml");
+        let mut manifest: Vec<(String, String)> = Vec::new();
+        let (mut module, mut name) = (String::new(), String::new());
+        for line in text.lines().map(str::trim) {
+            if let Some(m) = line.strip_prefix("[[").and_then(|l| l.strip_suffix(".fn]]")) {
+                module = m.to_string();
+                name.clear();
+            } else if let Some(n) = line.strip_prefix("name = \"").and_then(|l| l.strip_suffix('"')) {
+                name = n.to_string();
+            } else if line == "index_unit = \"address\"" {
+                manifest.push((module.clone(), name.clone()));
+            }
+        }
+        let mut tables: Vec<(String, String)> = HOST_ADDRESS_FUNCTIONS
+            .iter()
+            .map(|&(m, f)| (m, f))
+            .chain(ADDRESS_UNIT_PINNED_BY_CONTRACT.iter().map(|&(m, f, _)| (m, f)))
+            .map(|(m, f)| (m.to_string(), f.to_string()))
+            .collect();
+        manifest.sort();
+        tables.sort();
+        assert!(!manifest.is_empty(), "no address-unit fn parsed from {path}");
+        assert_eq!(manifest, tables, "address-unit fns vs HOST_ADDRESS_FUNCTIONS + ADDRESS_UNIT_PINNED_BY_CONTRACT");
     }
 }
