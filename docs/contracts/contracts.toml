@@ -2156,6 +2156,7 @@ since     = "0.35.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/io_write_ordering.almd", class = "fixture" },
+  { path = "tests/wasi_p1_large_write_test.rs", name = "a_stock_p1_artifact_writes_and_reads_a_payload_past_the_host_per_call_bound", class = "fixture" },
 ]
 [[contract]]
 id        = "C-163"

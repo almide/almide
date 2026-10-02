@@ -45,8 +45,42 @@ fn stage_for(i: &mut wasm_encoder::InstructionSink<'_>, park: u64, need: u32, st
     i.end();
 }
 
-/// `(ptr, len) -> ()`: TWO `fd_write` calls, one iovec each — the payload,
-/// then `"\n"`. Not one call over both iovecs: wasmtime's preview-1
+/// The largest slice one `fd_write` is handed (#3206). A preview-1 host may
+/// bound the bytes one call can name: wasmtime 47 charges every iovec against
+/// a per-call "hostcall fuel" budget and answers ENOMEM (48), having written
+/// nothing, once a single iovec passes it (measured: a 64 MiB `println`
+/// printed, a 128 MiB one printed nothing). The p2 shim already slices at the
+/// spec's 4096; this is the p1 twin, at a size no host refuses.
+const WRITE_CHUNK: i32 = 65536;
+
+/// Write all of `len` bytes at `ptr` to `fd`: slice at [`WRITE_CHUNK`] and
+/// advance by each call's `nwritten`, so neither a host's per-call bound nor
+/// a short write drops the tail (#3206 — a `println` of 128 MiB or more
+/// printed an empty line, exit 0). An errno or a zero-byte write ends the
+/// loop, the prior single-call behavior for a stream that refuses output.
+/// `ptr` and `len` are locals this consumes.
+fn write_all(i: &mut wasm_encoder::InstructionSink<'_>, fd: i32, park: u64, ptr: u32, len: u32) {
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(len).i32_eqz().br_if(1);
+    i.i32_const(park as i32).local_get(ptr).i32_store(mem(IOV));
+    i.i32_const(park as i32);
+    i.local_get(len).i32_const(WRITE_CHUNK).local_get(len).i32_const(WRITE_CHUNK).i32_lt_u().select();
+    i.i32_store(mem(IOV + 4));
+    i.i32_const(fd);
+    i.i32_const((park + IOV) as i32);
+    i.i32_const(1);
+    i.i32_const((park + NREAD) as i32);
+    i.call(0); // fd_write: one slice
+    i.br_if(1);
+    i.i32_const(park as i32).i32_load(mem(NREAD)).i32_eqz().br_if(1);
+    i.local_get(ptr).i32_const(park as i32).i32_load(mem(NREAD)).i32_add().local_set(ptr);
+    i.local_get(len).i32_const(park as i32).i32_load(mem(NREAD)).i32_sub().local_set(len);
+    i.br(0);
+    i.end().end();
+}
+
+/// `(ptr, len) -> ()`: the payload through [`write_all`], then `"\n"` in its
+/// own call. Not one call over both iovecs: wasmtime's preview-1
 /// `fd_write` writes only the FIRST non-empty iovec and returns its count
 /// (measured 2026-09-24, wasmtime 47: `fd_write(1, [("hello",5),("\n",1)])`
 /// printed `hello` with no newline), so a single call would drop every
@@ -55,14 +89,7 @@ fn shim_print(fd: i32, park: u64) -> Function {
     let (ptr, len) = (0u32, 1u32);
     let mut f = Function::new([]);
     let mut i = f.instructions();
-    i.i32_const(park as i32).local_get(ptr).i32_store(mem(IOV));
-    i.i32_const(park as i32).local_get(len).i32_store(mem(IOV + 4));
-    i.i32_const(fd);
-    i.i32_const((park + IOV) as i32);
-    i.i32_const(1);
-    i.i32_const((park + NREAD) as i32);
-    i.call(0); // fd_write: the payload
-    i.drop();
+    write_all(&mut i, fd, park, ptr, len);
     i.i32_const(park as i32).i32_const(0x0A).i32_store8(mem8(NL));
     i.i32_const(park as i32).i32_const((park + NL) as i32).i32_store(mem(IOV));
     i.i32_const(park as i32).i32_const(1).i32_store(mem(IOV + 4));
@@ -141,13 +168,7 @@ fn shim_fs_call(
     // module's op set names it (`panic`), so no other artifact grows.
     for (code, fd) in [(30, 1), (73, 2)].into_iter().filter(|(code, _)| has(*code)) {
         i.local_get(op).i32_const(code).i32_eq().if_(BlockType::Empty);
-        i.i32_const(park as i32).local_get(b_ptr).i32_store(mem(IOV));
-        i.i32_const(park as i32).local_get(b_len).i32_store(mem(IOV + 4));
-        i.i32_const(fd);
-        i.i32_const((park + IOV) as i32);
-        i.i32_const(1);
-        i.i32_const((park + NREAD) as i32);
-        i.call(0).drop();
+        write_all(&mut i, fd, park, b_ptr, b_len);
         i.i64_const(0).return_();
         i.end();
     }

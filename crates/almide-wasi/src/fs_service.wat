@@ -448,6 +448,11 @@
 
   ;; ── reading ────────────────────────────────────────────────────────────
 
+  ;; One fd_read / fd_write slice: at most 64 KiB (#3206, the p1 shims'
+  ;; WRITE_CHUNK). The loops around it already advance by each call's count.
+  (func $slice (param $n i32) (result i32)
+    (select (local.get $n) (i32.const 65536) (i32.lt_u (local.get $n) (i32.const 65536))))
+
   ;; The whole file at a guest path: (bytes, len, errno). A directory is
   ;; EISDIR (31), classified from the stat, not from fd_read's host-specific
   ;; errno (the incumbent's #1368 rule).
@@ -470,7 +475,10 @@
             (block $done (loop $rd
               (br_if $done (i32.ge_u (local.get $got) (local.get $sz)))
               (i32.store offset=16 (global.get $fsp) (i32.add (local.get $buf) (local.get $got)))
-              (i32.store offset=20 (global.get $fsp) (i32.sub (local.get $sz) (local.get $got)))
+              ;; One slice per call (#3206): a p1 host may bound the bytes one
+              ;; iovec names (wasmtime 47 answers ENOMEM past its per-call
+              ;; budget), so a whole-file iovec failed every read over it.
+              (i32.store offset=20 (global.get $fsp) (call $slice (i32.sub (local.get $sz) (local.get $got))))
               (local.set $e (call $fd_read (local.get $h) (i32.add (global.get $fsp) (i32.const 16)) (i32.const 1)
                                            (i32.add (global.get $fsp) (i32.const 8))))
               (br_if $done (local.get $e))
@@ -668,7 +676,7 @@
     (block $out (loop $wr
       (br_if $out (i32.ge_u (local.get $done) (local.get $dl)))
       (i32.store offset=16 (global.get $fsp) (i32.add (local.get $d) (local.get $done)))
-      (i32.store offset=20 (global.get $fsp) (i32.sub (local.get $dl) (local.get $done)))
+      (i32.store offset=20 (global.get $fsp) (call $slice (i32.sub (local.get $dl) (local.get $done))))
       (local.set $e (call $fd_write (local.get $h) (i32.add (global.get $fsp) (i32.const 16)) (i32.const 1)
                                     (i32.add (global.get $fsp) (i32.const 8))))
       (br_if $out (local.get $e))
