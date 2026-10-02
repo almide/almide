@@ -241,9 +241,13 @@ fn is_hole(ty: &Ty) -> bool {
     matches!(ty, Ty::Unknown | Ty::TypeVar(_) | Ty::Never | Ty::ConstParam { .. })
 }
 
-/// Leaf equality, with the same-width spellings (`Int64` is `Int`, `Float64`
-/// is `Float`) identified.
-fn same_scalar(a: &Ty, b: &Ty) -> bool {
+/// Leaf equality of a `decl` field type and an `actual` one, with the
+/// same-width spellings (`Int64` is `Int`, `Float64` is `Float`) identified.
+/// An actual `Int` / `Float` also fits any sized integer / float decl: that is
+/// a bare literal, which the checker coerces into the sized slot
+/// (`let r: SizedRec = { b: 127, n: 1 }` with `b: Int8` keeps `b: Int` on the
+/// literal's structural type).
+fn same_scalar(decl: &Ty, actual: &Ty) -> bool {
     fn canon(t: &Ty) -> &Ty {
         match t {
             Ty::Int64 => &Ty::Int,
@@ -251,7 +255,10 @@ fn same_scalar(a: &Ty, b: &Ty) -> bool {
             other => other,
         }
     }
-    canon(a) == canon(b)
+    let (d, a) = (canon(decl), canon(actual));
+    d == a
+        || (*a == Ty::Int && matches!(d, Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64))
+        || (*a == Ty::Float && matches!(d, Ty::Float32))
 }
 
 #[cfg(test)]
@@ -325,6 +332,13 @@ mod tests {
         assert_eq!(ix.label_for(&rec(&[("v", Ty::String), ("n", Ty::Int)])).as_deref(), Some("R"));
         assert_eq!(ix.label_for(&rec(&[("v", Ty::Int), ("n", Ty::Int)])).as_deref(), Some("Box"));
         assert_eq!(ix.lookup_generic(&rec(&[("v", Ty::String), ("n", Ty::Int)])).map(|(s, _)| s.label.as_str()), Some("Box"));
+    }
+
+    #[test]
+    fn a_bare_int_literal_fits_a_sized_field_but_not_the_reverse() {
+        let ix = index(&[("S", &[("b", Ty::Int8), ("n", Ty::Int)], &[])]);
+        assert_eq!(ix.label_for(&rec(&[("b", Ty::Int), ("n", Ty::Int)])).as_deref(), Some("S"));
+        assert_eq!(ix.label_for(&rec(&[("b", Ty::Int8), ("n", Ty::Int8)])), None);
     }
 
     #[test]
