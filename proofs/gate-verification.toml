@@ -1347,6 +1347,10 @@ path = "scripts/ci-test-shard.sh"
 reason = "lists the test targets per shard; the union check that decides is inline in ci.yml's coverage job"
 
 [[not_a_gate]]
+path = "scripts/coverage-night-route.sh"
+reason = "routes a red #566 coverage job to the coverage-ratchet issue (#3195); the verdicts are proofs/coverage.sh and proofs/mcdc-mutation.sh"
+
+[[not_a_gate]]
 path = "scripts/downstream-canary.sh"
 reason = "the per-leg driver; it writes result.tsv and always exits 0, and the verdict is scripts/downstream-canary.py report"
 
