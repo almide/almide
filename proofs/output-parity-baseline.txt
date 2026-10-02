@@ -601,6 +601,8 @@ spec/wasm_cross/mut_map_param.almd
 spec/wasm_cross/mut_param_alias_cow.almd
 spec/wasm_cross/mut_param_branch_forward.almd
 spec/wasm_cross/mut_param_call_chain.almd
+spec/wasm_cross/mut_param_cell_tail_capture_read.almd
+spec/wasm_cross/mut_param_cell_tail_capture_write.almd
 spec/wasm_cross/mut_param_closure_capture_read.almd
 spec/wasm_cross/mut_param_closure_capture_write.almd
 spec/wasm_cross/mut_param_effect_can_err.almd
