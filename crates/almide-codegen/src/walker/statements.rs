@@ -183,21 +183,17 @@ fn render_mut_param_cell(cell: &str, param: &str, is_copy: bool) -> String {
     )
 }
 
-/// A block's tail that reads a write-back cell bound in that block is bound to
-/// a local first (#3192). A tail expression's temporaries outlive the block's
-/// locals (edition 2021), so the `RefMut` of a tail call `f(&mut *s.borrow_mut())`
-/// would still borrow the cell `s` after it dropped (rustc E0597); a `let`
-/// drops them at its `;`, before the cell and its guard. A diverging tail
-/// yields no value to bind.
+/// The tail of a block that binds a write-back cell (the `mut_param_cells`
+/// CaptureClone publishes) is bound to a local first (#3192). A tail
+/// expression's temporaries outlive the block's locals (edition 2021), so the
+/// `RefMut` of a tail call `f(&mut *s.borrow_mut())` would still borrow the
+/// cell `s` after it dropped (rustc E0597); a `let` drops them at its `;`,
+/// before the cell and its guard. A tail that never reads the cell binds the
+/// same value. A diverging tail yields no value to bind.
 pub(super) fn bind_tail_past_cells(ctx: &RenderContext, stmts: &[IrStmt], tail: &IrExpr, rendered: String) -> String {
     let diverges = matches!(tail.ty, Ty::Never) || matches!(tail.kind, IrExprKind::Break | IrExprKind::Continue);
-    let cells: std::collections::HashSet<VarId> = stmts.iter()
-        .filter_map(|s| match &s.kind {
-            IrStmtKind::Bind { var, .. } if ctx.ann.mut_param_cells.contains_key(var) => Some(*var),
-            _ => None,
-        })
-        .collect();
-    if diverges || cells.is_empty() || !almide_ir::free_vars::free_vars(tail, &Default::default()).iter().any(|v| cells.contains(v)) {
+    let binds_cell = stmts.iter().any(|s| matches!(&s.kind, IrStmtKind::Bind { var, .. } if ctx.ann.mut_param_cells.contains_key(var)));
+    if diverges || !binds_cell {
         return rendered;
     }
     format!("let __almide_tail = {rendered};\n__almide_tail")
