@@ -66,6 +66,7 @@
 4309	spec/wasm_cross/bytes_set_value_semantics.almd
 5446	spec/wasm_cross/bytes_string_window_domain.almd
 9526	spec/wasm_cross/bytes_temp_receiver.almd
+5052	spec/wasm_cross/bytes_to_string_err_release.almd
 12287	spec/wasm_cross/bytes_writer_family.almd
 4852	spec/wasm_cross/bytes_writer_mut_from_declaration.almd
 2693	spec/wasm_cross/call_closure_lambda_param.almd
@@ -848,7 +849,7 @@
 2160	spec/wasm_cross/unwrap_or_strict_default.almd
 5125	spec/wasm_cross/unwrap_or_tail_result.almd
 2398	spec/wasm_cross/unwrap_or_tuple_payload_extract.almd
-26068	spec/wasm_cross/unwrap_or_unwrap_fallback.almd
+26140	spec/wasm_cross/unwrap_or_unwrap_fallback.almd
 21310	spec/wasm_cross/unwrap_or_value_fn_named_parse.almd
 5661	spec/wasm_cross/uoe_heap_ok_share.almd
 9781	spec/wasm_cross/url_authority_edges.almd
