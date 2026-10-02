@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use almide_ir::*;
+use almide_ir::record_shape::RecordShapeIndex;
 use almide_lang::types::Ty;
 use super::RenderContext;
 use super::types::render_type;
@@ -369,21 +370,13 @@ fn render_repr_variant_arm(ctx: &RenderContext, type_name: &str, v: &IrVariantDe
 // ── Anonymous record collection ──
 // Simplified version of emit_rust::lower_types logic, directly in codegen.
 
-/// Sorted field names → the Rust struct a record literal of that shape
-/// constructs. A bundled twin (`FileStat`, #1821) keys to the runtime's
-/// reserved struct, since its decl is never emitted.
-pub fn collect_named_records(program: &IrProgram) -> HashMap<Vec<String>, String> {
-    let mut map = HashMap::new();
-    let all = program.type_decls.iter()
-        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()));
-    for td in all {
-        if let IrTypeDeclKind::Record { fields } = &td.kind {
-            let mut names: Vec<String> = fields.iter().map(|f| f.name.to_string()).collect();
-            names.sort();
-            map.insert(names, super::runtime_owned::decl_rust_name(td));
-        }
-    }
-    map
+/// The declared record types a structural record can be — matched on field
+/// names AND types (#3189) — each labelled with the Rust struct a record
+/// literal of that shape constructs. A bundled twin (`FileStat`, #1821) is
+/// labelled with the runtime's reserved struct, since its decl is never
+/// emitted.
+pub fn collect_named_records(program: &IrProgram) -> RecordShapeIndex {
+    RecordShapeIndex::build(program, super::runtime_owned::decl_rust_name)
 }
 
 /// Map each named record type to its total field count so destructure
@@ -411,7 +404,7 @@ pub fn take_anon_fn_keys() -> HashSet<Vec<String>> {
     ANON_FN_KEYS.with(|s| s.borrow().clone())
 }
 
-pub fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, String>) -> HashMap<Vec<String>, String> {
+pub fn collect_anon_records(program: &IrProgram, named: &RecordShapeIndex) -> HashMap<Vec<String>, String> {
     ANON_FN_KEYS.with(|s| s.borrow_mut().clear());
     // The same transitive fn-blocked set the derive gate uses (#1674): an anon
     // record whose field is a fn-BLOCKED named type must also derive Clone only.
@@ -420,7 +413,6 @@ pub fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, St
         .cloned()
         .collect();
     ANON_FN_BLOCKED.with(|s| *s.borrow_mut() = compute_fn_blocked_types(&all_decls));
-    let named_set: HashSet<Vec<String>> = named.keys().cloned().collect();
     let mut seen: HashSet<Vec<String>> = HashSet::new();
 
     // Collect from TYPE DECLARATIONS — a variant case payload or record field
@@ -429,14 +421,14 @@ pub fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, St
     // its struct goes unregistered and `render_type` falls back to emitting the
     // bare field name as a type → `Square(s)` → rustc E0425 (#628).
     for td in program.type_decls.iter().chain(program.modules.iter().flat_map(|m| m.type_decls.iter())) {
-        collect_anon_from_type_decl(td, &named_set, &mut seen);
+        collect_anon_from_type_decl(td, named, &mut seen);
     }
 
     // Collect from all types AND expressions in the program
-    collect_anon_from_fns_and_lets(&program.functions, &program.top_lets, &named_set, &mut seen);
+    collect_anon_from_fns_and_lets(&program.functions, &program.top_lets, named, &mut seen);
     // Also collect from module functions and top_lets
     for module in &program.modules {
-        collect_anon_from_fns_and_lets(&module.functions, &module.top_lets, &named_set, &mut seen);
+        collect_anon_from_fns_and_lets(&module.functions, &module.top_lets, named, &mut seen);
     }
 
     let mut map = HashMap::new();
@@ -453,7 +445,7 @@ pub fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, St
 /// loops, extracted (cog>30 decomposition, sequential-phase pattern — was
 /// duplicated verbatim once for `program.functions`/`program.top_lets` and
 /// once for each `module.functions`/`module.top_lets`).
-fn collect_anon_from_fns_and_lets(functions: &[IrFunction], top_lets: &[IrTopLet], named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+fn collect_anon_from_fns_and_lets(functions: &[IrFunction], top_lets: &[IrTopLet], named: &RecordShapeIndex, seen: &mut HashSet<Vec<String>>) {
     for func in functions {
         for p in &func.params { collect_anon_from_ty(&p.ty, named, seen); }
         collect_anon_from_ty(&func.ret_ty, named, seen);
@@ -467,7 +459,7 @@ fn collect_anon_from_fns_and_lets(functions: &[IrFunction], top_lets: &[IrTopLet
 
 /// Descend a type declaration's field / variant-payload types, registering any
 /// anonymous record reachable only from the declaration (never constructed).
-fn collect_anon_from_type_decl(td: &IrTypeDecl, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+fn collect_anon_from_type_decl(td: &IrTypeDecl, named: &RecordShapeIndex, seen: &mut HashSet<Vec<String>>) {
     match &td.kind {
         IrTypeDeclKind::Record { fields } => {
             for f in fields { collect_anon_from_ty(&f.ty, named, seen); }
@@ -481,7 +473,7 @@ fn collect_anon_from_type_decl(td: &IrTypeDecl, named: &HashSet<Vec<String>>, se
 
 /// `IrVariantKind` case of `collect_anon_from_type_decl`'s `Variant` arm,
 /// extracted verbatim (cog>30 decomposition).
-fn collect_anon_from_variant_case(kind: &IrVariantKind, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+fn collect_anon_from_variant_case(kind: &IrVariantKind, named: &RecordShapeIndex, seen: &mut HashSet<Vec<String>>) {
     match kind {
         IrVariantKind::Unit => {}
         IrVariantKind::Tuple { fields } => {
@@ -497,7 +489,7 @@ fn collect_anon_from_variant_case(kind: &IrVariantKind, named: &HashSet<Vec<Stri
 /// Match, Call, ForIn, While, Lambda). Not exhaustive — the caller runs this
 /// alongside `collect_anon_from_expr_data`, so a `_ => {}` here just means
 /// "not this group's variant" (cog>25 decomposition).
-fn collect_anon_from_expr_control(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+fn collect_anon_from_expr_control(expr: &IrExpr, named: &RecordShapeIndex, seen: &mut HashSet<Vec<String>>) {
     match &expr.kind {
         IrExprKind::Block { .. } => collect_anon_from_block(expr, named, seen),
         IrExprKind::If { cond, then, else_ } => {
@@ -517,7 +509,7 @@ fn collect_anon_from_expr_control(expr: &IrExpr, named: &HashSet<Vec<String>>, s
 /// `collect_anon_from_expr` group: operator/data/wrapper nodes (BinOp, UnOp,
 /// collection literals, access, Result/Option wrappers, StringInterp,
 /// codegen-specific wrappers). See `collect_anon_from_expr_control`.
-fn collect_anon_from_expr_data(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+fn collect_anon_from_expr_data(expr: &IrExpr, named: &RecordShapeIndex, seen: &mut HashSet<Vec<String>>) {
     match &expr.kind {
         IrExprKind::BinOp { left, right, .. } => {
             collect_anon_from_expr(left, named, seen);
@@ -559,7 +551,7 @@ fn collect_anon_from_expr_data(expr: &IrExpr, named: &HashSet<Vec<String>>, seen
     }
 }
 
-fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+fn collect_anon_from_expr(expr: &IrExpr, named: &RecordShapeIndex, seen: &mut HashSet<Vec<String>>) {
     collect_anon_from_ty(&expr.ty, named, seen);
     collect_anon_from_expr_control(expr, named, seen);
     collect_anon_from_expr_data(expr, named, seen);
@@ -567,7 +559,7 @@ fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mu
 
 /// `IrExprKind::Block` case of `collect_anon_from_expr`, extracted verbatim
 /// (cog>30 decomposition).
-fn collect_anon_from_block(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+fn collect_anon_from_block(expr: &IrExpr, named: &RecordShapeIndex, seen: &mut HashSet<Vec<String>>) {
     let IrExprKind::Block { stmts, expr: e } = &expr.kind else { unreachable!() };
     for s in stmts { collect_anon_from_stmt(s, named, seen); }
     if let Some(e) = e { collect_anon_from_expr(e, named, seen); }
@@ -575,7 +567,7 @@ fn collect_anon_from_block(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &m
 
 /// `IrExprKind::Match` case of `collect_anon_from_expr`, extracted verbatim
 /// (cog>30 decomposition).
-fn collect_anon_from_match(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+fn collect_anon_from_match(expr: &IrExpr, named: &RecordShapeIndex, seen: &mut HashSet<Vec<String>>) {
     let IrExprKind::Match { subject, arms } = &expr.kind else { unreachable!() };
     collect_anon_from_expr(subject, named, seen);
     for arm in arms { collect_anon_from_expr(&arm.body, named, seen); }
@@ -583,7 +575,7 @@ fn collect_anon_from_match(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &m
 
 /// `IrExprKind::Call` case of `collect_anon_from_expr`, extracted verbatim
 /// (cog>30 decomposition).
-fn collect_anon_from_call(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+fn collect_anon_from_call(expr: &IrExpr, named: &RecordShapeIndex, seen: &mut HashSet<Vec<String>>) {
     let IrExprKind::Call { args, target, .. } = &expr.kind else { unreachable!() };
     if let CallTarget::Method { object, .. } | CallTarget::Computed { callee: object } = target {
         collect_anon_from_expr(object, named, seen);
@@ -595,12 +587,12 @@ fn collect_anon_from_call(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mu
 /// extracted verbatim — both arms shared the identical "recurse the head
 /// expr, then walk body stmts" shape (`iterable`/`cond` as the head), so
 /// they now share one helper instead of two copies.
-fn collect_anon_from_loop_body(head: &IrExpr, body: &[IrStmt], named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+fn collect_anon_from_loop_body(head: &IrExpr, body: &[IrStmt], named: &RecordShapeIndex, seen: &mut HashSet<Vec<String>>) {
     collect_anon_from_expr(head, named, seen);
     for s in body { collect_anon_from_stmt(s, named, seen); }
 }
 
-fn collect_anon_from_stmt(stmt: &IrStmt, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+fn collect_anon_from_stmt(stmt: &IrStmt, named: &RecordShapeIndex, seen: &mut HashSet<Vec<String>>) {
     match &stmt.kind {
         IrStmtKind::Bind { value, ty, .. } => {
             collect_anon_from_ty(ty, named, seen);
@@ -816,12 +808,14 @@ thread_local! {
         std::cell::RefCell::new(HashSet::new());
 }
 
-fn collect_anon_from_ty(ty: &Ty, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+fn collect_anon_from_ty(ty: &Ty, named: &RecordShapeIndex, seen: &mut HashSet<Vec<String>>) {
     // Record/OpenRecord: register anonymous record fields
     if let Ty::Record { fields } | Ty::OpenRecord { fields } = ty {
         let mut names: Vec<String> = fields.iter().map(|(n, _)| n.to_string()).collect();
         names.sort();
-        if !named.contains(&names) {
+        // A declared record's names with other field types is still an
+        // anonymous record, so it needs its own struct (#3189).
+        if named.lookup(fields).is_none() {
             // A field whose type CONTAINS a closure anywhere (`Fn`, `List[Fn]`,
             // `Map[_, Fn]`, `(Fn, _)`, …) lowers to a type that is neither `Debug`
             // nor `PartialEq`, so the generated struct must derive `Clone` only.

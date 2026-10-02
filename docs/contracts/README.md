@@ -107,7 +107,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-069 | Effect-fn tail self-recursion loop-converts to O(1) stack on both targets | 0.27.4 | active | fixture | 3 |
 | C-070 | Nested constructor patterns match and bind identically on both targets | 0.27.6 | active | fixture | 8 |
 | C-071 | Single-part interpolation RC balance | 0.27.6 | active | fixture | 1 |
-| C-072 | Inferred named-record repr parity | 0.27.6 | active | fixture | 1 |
+| C-072 | Inferred named-record repr parity | 0.27.6 | active | fixture | 2 |
 | C-073 | Tuple pattern testing a variant constructor | 0.27.6 | active | fixture | 1 |
 | C-074 | Iterative split/replace on large inputs | 0.27.6 | active | fixture | 1 |
 | C-075 | lowmisc round-5 cluster: borrowed-param owning binding, effect-Option auto-try strip, matching-error ! passthrough | 0.27.6 | active | fixture | 1 |
@@ -208,13 +208,13 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-170 | Integer arithmetic wraps in every position, including a module-level let | 0.36.0 | active | fixture | 3 |
 | C-171 | Byte-offset bound checks do not overflow at the i64 boundary | 0.36.0 | active | fixture | 1 |
 | C-172 | unwrap_or over any heap payload yields the same value on both targets | 0.36.0 | active | fixture | 2 |
-| C-173 | An integer literal outside what its context can represent is a checker error on both targets, never a silent value | 0.36.0 | active | fixture | 1 |
+| C-173 | An integer literal outside what its context can represent is a checker error on both targets, never a silent value | 0.36.0 | active | fixture | 2 |
 | C-174 | A tail-recursive Map/Set accumulator keeps its seed on both targets, non-empty seeds included | 0.36.0 | active | fixture | 1 |
 | C-175 | A List literal of a variant type builds and drops identically on both targets, in bind and heap-result-if-arm position | 0.37.0 | active | fixture | 1 |
 | C-176 | some/ok around an inline tuple-returning call materializes the real payload on both targets | 0.37.0 | active | fixture | 1 |
 | C-177 | A mutable-global projection read in a loop-body call argument reads the CURRENT slot every iteration | 0.37.0 | active | fixture | 1 |
 | C-178 | A mutual tail-recursion chain runs at unbounded depth on the wasm target | 0.37.0 | active | fixture | 2 |
-| C-179 | UInt64 reaches its full declared domain, with every observer reading the slot unsigned | 0.37.0 | active | fixture | 2 |
+| C-179 | UInt64 reaches its full declared domain, with every observer reading the slot unsigned | 0.37.0 | active | fixture | 5 |
 | C-180 | Sized-integer +, -, * and ^ wrap at the declared width on both targets | 0.37.0 | active | fixture | 1 |
 | C-181 | args.positional returns every non-flag argument, and the args surface agrees across targets | 0.37.0 | active | fixture | 1 |
 | C-182 | A negated float literal takes its context's float type on both targets | 0.37.0 | active | fixture | 2 |
@@ -407,5 +407,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-369 | a lambda's failure channel carries the error type its ! operands agree on; a String channel carries a typed error as its interpolation text, identically on both targets | 0.65.0 | active | fixture | 1 |
 | C-370 | An http header that would split the request, or that the client manages, is refused with the same err on every lane | 0.66.0 | active | fixture | 0 |
 | C-371 | Float32 arithmetic rounds every result to binary32 on every leg | 0.66.0 | active | fixture | 1 |
-| C-372 | A Float32 displays as the shortest decimal that round-trips to the same binary32 | 0.66.0 | active | fixture | 1 |
+| C-372 | A Float32 displays as the shortest decimal that round-trips to the same binary32 | 0.66.0 | active | fixture | 2 |
 

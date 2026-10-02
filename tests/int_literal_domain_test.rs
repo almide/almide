@@ -317,3 +317,56 @@ fn ctor_payloads_are_range_checked() {
         "an in-range ctor payload literal stays accepted, got:\n{out}"
     );
 }
+
+/// #3185: every DECLARATION and ASSIGNMENT position is a value position of its
+/// declared type, exactly as a local `let` annotation is. Each narrows its
+/// literal in lowering, so each must face that type's range check: before,
+/// `let K: UInt8 = 1000` at top level passed `check` and rustc rejected the
+/// emitted `1000u8` while wasm printed 1000, and `UInt64`'s legal upper half
+/// was refused there (the unpinned literal was judged against `Int`). The
+/// matrix: every position x every sized width, the declared maximum (or
+/// minimum) ACCEPTED and one step past it REJECTED as E024. A position added
+/// to the language without its range pin fails a whole row here.
+#[test]
+fn declaration_and_assignment_positions_are_range_checked() {
+    // (position, program with `{T}` for the type and `{v}` for the literal)
+    const POSITIONS: &[(&str, &str)] = &[
+        ("top let", "let K: {T} = {v}\n\nfn main() -> Unit = println(\"x\")\n"),
+        ("top var", "var K: {T} = {v}\n\nfn main() -> Unit = println(\"x\")\n"),
+        ("record field default", "type D = { n: Int, f: {T} = {v} }\n\nfn main() -> Unit = println(\"${D { n: 1 }.n}\")\n"),
+        ("variant field default", "type C = | P { f: {T} = {v} } | E\n\nfn main() -> Unit = println(\"x\")\n"),
+        ("param default", "fn g(x: {T} = {v}) -> Int = 0\n\nfn main() -> Unit = println(\"${g()}\")\n"),
+        ("local assign", "fn main() -> Unit = {\n  var a: {T} = 0\n  a = {v}\n  println(\"x\")\n}\n"),
+        ("module var assign", "var K: {T} = 0\n\nfn main() -> Unit = {\n  K = {v}\n  println(\"x\")\n}\n"),
+        ("field assign", "type R = { f: {T} }\n\nfn main() -> Unit = {\n  var r = R { f: 0 }\n  r.f = {v}\n  println(\"x\")\n}\n"),
+        ("element assign", "fn main() -> Unit = {\n  var xs: List[{T}] = [0]\n  xs[0] = {v}\n  println(\"x\")\n}\n"),
+        ("map value assign", "fn main() -> Unit = {\n  var m: Map[String, {T}] = [:]\n  m[\"k\"] = {v}\n  println(\"x\")\n}\n"),
+        ("map key assign", "fn main() -> Unit = {\n  var m: Map[{T}, Int] = [:]\n  m[{v}] = 1\n  println(\"x\")\n}\n"),
+    ];
+    // (type, the boundary it can hold, one step past it)
+    const WIDTHS: &[(&str, &str, &str)] = &[
+        ("Int8", "-128", "128"),
+        ("UInt8", "255", "256"),
+        ("Int16", "-32768", "-32769"),
+        ("UInt16", "65535", "65536"),
+        ("Int32", "2147483647", "2147483648"),
+        ("UInt32", "4294967295", "-1"),
+        ("UInt64", "18446744073709551615", "-1"),
+    ];
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut wrong = Vec::new();
+    for (pos, tmpl) in POSITIONS {
+        for (ty, fits, past) in WIDTHS {
+            let src = |v: &str| tmpl.replace("{T}", ty).replace("{v}", v);
+            let ok = check(dir.path(), &src(fits));
+            if ok.contains("error[") {
+                wrong.push(format!("{pos} / {ty}: {fits} must be ACCEPTED, got:\n{ok}"));
+            }
+            let bad = check(dir.path(), &src(past));
+            if !(bad.contains("E024") && bad.contains(&format!("out of range for {ty}"))) {
+                wrong.push(format!("{pos} / {ty}: {past} must be E024 for {ty}, got:\n{bad}"));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{} cell(s) wrong:\n{}", wrong.len(), wrong.join("\n"));
+}

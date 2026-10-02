@@ -1,0 +1,73 @@
+// @contract: C-173, C-179
+// #3185: a DECLARATION is a value position of its declared type, the same as a
+// local `let` — a top-level `let`/`var`, a record or variant field default, and
+// a parameter default each narrow their literal to the declared width in
+// lowering (`const K: u8 = 255u8`), so each faces that width's range check.
+// None was pinned: `let K: UInt8 = 1000` passed `almide check`, rustc rejected
+// `1000u8` and wasm printed 1000; and the pin's absence ALSO refused the legal
+// upper half of `UInt64` here (E024 "out of range for Int"). This is the
+// accepted side — every boundary of every width at every declaration position,
+// identical on all targets. An ASSIGNMENT is the same slot again: `V = 254`
+// into a `UInt8` module `var`, `xs[0] = 254` into a `List[UInt8]`, `m[k] = v`
+// and `r.f = v` each emitted `254i64` into the narrower slot (rustc E0277 /
+// E0308) while wasm ran, and none was range-checked (`v = 1000` printed 1000).
+// The rejected side, which has no runtime behaviour to compare, is
+// tests/diagnostics/e024-declaration-positions/ and the position matrix in
+// tests/int_literal_domain_test.rs.
+let TOP_I8: Int8 = -128
+
+let TOP_U8: UInt8 = 255
+
+let TOP_I16: Int16 = -32768
+
+let TOP_U16: UInt16 = 65535
+
+let TOP_I32: Int32 = -2147483648
+
+let TOP_U32: UInt32 = 4294967295
+
+let TOP_U64: UInt64 = 18446744073709551615
+
+let TOP_U64_LOW_HALF_TOP: UInt64 = 9223372036854775808
+
+let TOP_LIST: List[Int8] = [127, -128]
+
+let TOP_PAIR: (UInt16, Int) = (65535, 1)
+
+var TOP_VAR: UInt8 = 255
+
+var TOP_LIST_VAR: List[UInt8] = [1, 2]
+
+type Edges = { n: Int, i8: Int8 = 127, u8: UInt8 = 255, i16: Int16 = -32768, u32: UInt32 = 4294967295, u64: UInt64 = 18446744073709551615 }
+
+type Cell = | Packed { tag: String, i8: Int8 = -128, u64: UInt64 = 9223372036854775808 } | Empty
+
+fn param_edges(a: Int8 = -128, b: UInt16 = 65535, c: UInt64 = 18446744073709551615) -> String = "${int.to_string(int.from_int8(a))} ${uint16.to_string(b)} ${uint64.to_string(c)}"
+
+fn show_cell(c: Cell) -> String = match c {
+  Packed { tag, i8, u64 } => "${tag} ${int.to_string(int.from_int8(i8))} ${uint64.to_string(u64)}",
+  Empty => "empty",
+}
+
+fn main() -> Unit = {
+  println("top ${int.to_string(int.from_int8(TOP_I8))} ${uint8.to_string(TOP_U8)} ${int.to_string(int.from_int16(TOP_I16))} ${uint16.to_string(TOP_U16)} ${int.to_string(int.from_int32(TOP_I32))} ${uint32.to_string(TOP_U32)}")
+  println("top64 ${uint64.to_string(TOP_U64)} ${uint64.to_string(TOP_U64_LOW_HALF_TOP)}")
+  println("aggregate ${TOP_LIST} ${uint16.to_string(TOP_PAIR.0)} ${TOP_PAIR.1}")
+  TOP_VAR = 254
+  TOP_LIST_VAR[1] = 255
+  println("var ${uint8.to_string(TOP_VAR)} ${TOP_LIST_VAR}")
+  var narrow: Int16 = 0
+  narrow = -32768
+  var xs: List[Float32] = [1.0]
+  xs[0] = 2.5
+  var m: Map[UInt8, Int8] = [:]
+  m[200] = -128
+  var cell = Edges { n: 2 }
+  cell.u8 = 0
+  cell.i16 = 32767
+  println("assign ${int.to_string(int.from_int16(narrow))} ${xs} ${m} ${uint8.to_string(cell.u8)} ${int.to_string(int.from_int16(cell.i16))}")
+  let e = Edges { n: 1 }
+  println("field ${e.n} ${int.to_string(int.from_int8(e.i8))} ${uint8.to_string(e.u8)} ${int.to_string(int.from_int16(e.i16))} ${uint32.to_string(e.u32)} ${uint64.to_string(e.u64)}")
+  println("variant ${show_cell(Packed { tag: "p" })} ${show_cell(Empty)}")
+  println("param ${param_edges()}")
+}

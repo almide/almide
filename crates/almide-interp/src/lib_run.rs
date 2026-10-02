@@ -605,6 +605,11 @@ fn bind_hop_frame<'a>(
 fn callee_channel_is_string(callee: &TailCallee<'_>) -> bool {
     use almide_lang::types::constructor::TypeConstructorId as C;
     let ret = match callee {
+        // An effect fn declared with a plain `-> T` fails through the
+        // effect's own `String` channel (#3187: `effect fn f() -> Int =
+        // g()!` over a `Result[Int, UInt64]` carries the repr, as native's
+        // `map_err` does).
+        TailCallee::Fn(f) if f.is_effect && !matches!(&f.ret_ty, Ty::Applied(C::Result, _)) => return true,
         TailCallee::Fn(f) => Some(&f.ret_ty),
         TailCallee::Clo(c) => c.ret_ty.as_ref(),
     };

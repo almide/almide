@@ -1,0 +1,8 @@
+// #3185: a module-level `let` declares the width its literal takes, exactly as
+// a local `let` annotation does — but the range check never saw it. `check`
+// accepted `UInt8 = 1000`, native rustc rejected the emitted `1000u8`, and wasm
+// printed 1000. Field defaults, parameter defaults and assignments were the
+// same gap; tests/int_literal_domain_test.rs holds the full position matrix.
+let LIMIT: UInt8 = 1000
+
+fn main() -> Unit = println(uint8.to_string(LIMIT))

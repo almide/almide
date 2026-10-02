@@ -4,6 +4,7 @@
 27	12	206	27	spec/wasm_cross/alias_combinator_rc.almd
 168	114	1412	168	spec/wasm_cross/alias_cow.almd
 16	0	2096720	16	spec/wasm_cross/allocation_within_limits.almd
+10	1	176	10	spec/wasm_cross/anon_record_structural_identity.almd
 9	6	104	9	spec/wasm_cross/anon_record_variant_payloads.almd
 6	1	144	6	spec/wasm_cross/anon_records_and_fusion.almd
 5	2	88	5	spec/wasm_cross/append_accumulator.almd
@@ -127,6 +128,7 @@
 1828	1800	16658	1828	spec/wasm_cross/datetime_parse_iso_strict.almd
 183	159	3198	183	spec/wasm_cross/datetime_pre_epoch.almd
 21	9	220	21	spec/wasm_cross/declaration_forms.almd
+48	22	986	48	spec/wasm_cross/declaration_literal_domain.almd
 8	0	88	8	spec/wasm_cross/deep_eq_heap.almd
 1	0	4	1	spec/wasm_cross/default_param_ref.almd
 8	2	81	8	spec/wasm_cross/destructure_let_unwrap.almd
@@ -690,6 +692,7 @@
 56001	55968	551345	56001	spec/wasm_cross/set_entries_reclaim.almd
 810	742	65423	810	spec/wasm_cross/set_index_order.almd
 87	75	997	87	spec/wasm_cross/set_insertion_order.almd
+1355	1314	26550	1355	spec/wasm_cross/sized_display_matrix.almd
 19	12	1097	19	spec/wasm_cross/sized_field_default_matrix.almd
 23	21	102	23	spec/wasm_cross/sized_int_overflow_wrap.almd
 8	0	136	8	spec/wasm_cross/sized_int_record_fields.almd
@@ -827,6 +830,7 @@
 10	0	184	10	spec/wasm_cross/tuple_eq.almd
 7	1	108	7	spec/wasm_cross/tuple_ops.almd
 1	0	8	1	spec/wasm_cross/tuple_single.almd
+6	0	64	0	spec/wasm_cross/uint64_assert_display.almd
 31	22	554	31	spec/wasm_cross/uint64_upper_half.almd
 2	0	8	2	spec/wasm_cross/unannotated_toplet_generic_ctor.almd
 5	0	32	5	spec/wasm_cross/unique_non_flat_element.almd

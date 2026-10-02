@@ -39,6 +39,7 @@ use std::rc::Rc;
 
 use almide_base::intern::Sym;
 use almide_ir::{IrExpr, IrFunction, IrProgram};
+use almide_ir::record_shape::RecordShapeIndex;
 use almide_lang::types::Ty;
 
 /// The observable result of an interpreter run — the SAME 3-tuple shape as the
@@ -145,19 +146,15 @@ pub struct Interpreter<'a> {
     /// every later `.maybe` access aborts where both backends read the
     /// default (codec_empty_and_bool, surfaced by #1226 slice 2).
     pub(crate) record_decls: HashMap<Sym, &'a [almide_ir::IrFieldDecl]>,
-    /// Named record types keyed by their SORTED field-name set, mapping to
-    /// `(type name, declaration-order field names)`. Lets the repr recover the
-    /// nominal name + declaration order for a record LITERAL whose inferred type
-    /// is structural (`Ty::Record`) rather than `Ty::Named` — e.g. nested list
-    /// elements `[{ val: 2, kids: [] }]` whose element type was inferred
-    /// structurally. This mirrors the codegen walker's
-    /// `ctx.ann.named_records.get(&sorted_names)` lookup
-    /// (walker/expressions.rs:520) so `${value}` renders `RNode { .. }` (decl
-    /// order), not the anonymous `{ .. }` (sorted) the structural type would
-    /// otherwise imply. A field-name set shared by two record types is
-    /// ambiguous and intentionally NOT indexed (the structural type is then
-    /// treated as a true anonymous record).
-    pub(crate) named_records: HashMap<Vec<Sym>, (Sym, Vec<Sym>)>,
+    /// The declared record types, matched on field names AND types (#3189).
+    /// Lets the repr recover the nominal name + declaration order for a record
+    /// LITERAL whose inferred type is structural (`Ty::Record`) rather than
+    /// `Ty::Named` — e.g. nested list elements `[{ val: 2, kids: [] }]` whose
+    /// element type was inferred structurally. The codegen walker reads the
+    /// same index, so `${value}` renders `RNode { .. }` (decl order) where
+    /// native builds `RNode`, and the anonymous `{ .. }` (sorted) where the
+    /// field types say it is not one; several fitting decls → the first.
+    pub(crate) named_records: RecordShapeIndex,
     /// Variant constructor registry: case name → `(type name, ctor kind)`,
     /// built once from `program.type_decls`. The old per-call linear scan of
     /// every type decl ran for EVERY Named call (user fn calls included)
@@ -244,6 +241,10 @@ pub struct Interpreter<'a> {
     /// #2725): a `!` whose operand fails with a typed error converts it to
     /// its repr text there, as native's `map_err` does.
     pub(crate) chan_str: Cell<bool>,
+    /// The error types an `ErrConv::ReprTyped` names (#3187): a typed error
+    /// whose repr reaches a UInt64 or Float32 leaf needs its type to print
+    /// those digits, and the `Copy` marker carries only the index.
+    pub(crate) err_tys: std::cell::RefCell<Vec<almide_lang::types::Ty>>,
     /// Open metered regions (budget_enter +1 / budget_exit -1): the strict
     /// cut (T1-1) fires only inside a region — outside one, fuel below zero
     /// is impossible in budget mode and irrelevant in probe mode.
@@ -355,41 +356,12 @@ impl Flow {
     }
 }
 
-/// Index named record types by their sorted field-name set, so a record VALUE
-/// can recover the nominal name its repr prints.
-///
-/// A field-name set shared by two distinct record types is ambiguous → drop it
-/// (sentinel-marked in `ambiguous`, which also stops a later decl from
-/// re-adding it), so the repr falls back to anonymous-record rendering rather
-/// than guessing a name.
-fn index_named_records(program: &IrProgram) -> HashMap<Vec<Sym>, (Sym, Vec<Sym>)> {
-    let mut named_records: HashMap<Vec<Sym>, (Sym, Vec<Sym>)> = HashMap::new();
-    let mut ambiguous: HashSet<Vec<Sym>> = HashSet::new();
-    let record_decls = program
-        .type_decls
-        .iter()
-        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()));
-    for decl in record_decls {
-        let almide_ir::IrTypeDeclKind::Record { fields } = &decl.kind else { continue };
-        let decl_order: Vec<Sym> = fields.iter().map(|f| f.name).collect();
-        let mut key = decl_order.clone();
-        key.sort();
-        if ambiguous.contains(&key) {
-            continue;
-        }
-        match named_records.get(&key) {
-            // Two record types with identical field-name sets: ambiguous.
-            Some(prev) if prev.0 != decl.name => {
-                named_records.remove(&key);
-                ambiguous.insert(key);
-            }
-            Some(_) => {}
-            None => {
-                named_records.insert(key, (decl.name, decl_order));
-            }
-        }
-    }
-    named_records
+/// Index the declared record types, so a STRUCTURAL record value can recover
+/// the nominal name its repr prints: the decl with its field names AND types
+/// (#3189), the first in declaration order when several fit — the codegen
+/// walker and the wasm type table read the same index rule.
+fn index_named_records(program: &IrProgram) -> RecordShapeIndex {
+    RecordShapeIndex::build(program, |td| td.name.to_string())
 }
 
 /// Variant constructor registry: case name → `(type name, ctor kind)`.
@@ -581,6 +553,7 @@ impl<'a> Interpreter<'a> {
             det_spend: Cell::new(0),
             det_in_user: Cell::new(false),
             chan_str: Cell::new(false),
+            err_tys: std::cell::RefCell::new(Vec::new()),
             det_region_depth: Cell::new(0),
             det_saved: Cell::new(0),
             user_fn_names,

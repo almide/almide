@@ -1087,6 +1087,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/r5_wasm_inferred_record_repr.almd", class = "fixture" },
+  { path = "spec/wasm_cross/anon_record_structural_identity.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-073"
@@ -2271,6 +2272,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/unsigned_literal_domain.almd", class = "fixture" },
   { path = "tests/diagnostics/e024-unsigned-negative-literal/broken.almd", class = "fixture" },
+  { path = "spec/wasm_cross/declaration_literal_domain.almd", class = "fixture" },
 ]
 
 # ── TCO HEAP-ACCUMULATOR SEED: THE UPFRONT COPY IS A REAL SHARE ───────
@@ -2345,6 +2347,9 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/uint64_upper_half.almd", class = "fixture" },
   { path = "spec/wasm_cross/unsigned_literal_domain.almd", class = "fixture" },
+  { path = "spec/wasm_cross/declaration_literal_domain.almd", class = "fixture" },
+  { path = "spec/wasm_cross/sized_display_matrix.almd", class = "fixture" },
+  { path = "spec/wasm_cross/uint64_assert_display.almd", class = "fixture" },
 ]
 
 # ── SIZED-INTEGER ARITHMETIC WRAPS AT ITS DECLARED WIDTH ─
@@ -4799,4 +4804,5 @@ since     = "0.66.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float32_display_shortest.almd", class = "fixture" },
+  { path = "spec/wasm_cross/sized_display_matrix.almd", class = "fixture" },
 ]
