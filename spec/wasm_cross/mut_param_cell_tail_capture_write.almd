@@ -1,0 +1,101 @@
+// @contract: C-132, C-319
+// #3192: a `mut` param a closure WRITES (#3154's shape) and the fn's tail then
+// reads — a call taking it by `mut` or by value, a `match` / `if` whose arms
+// call with it, nested blocks, a loop, a `guard` exit before the tail.
+// Native's write-back cell outlived the tail call's `RefMut` temporary (rustc
+// E0597). The caller sees the closure's and the tail's writes. The
+// `!`-propagated tail and its error exit are in
+// tests/mut_param_cell_tail_matrix_test.rs (a `!` tail walls the MIR rung).
+// Byte-identical native == wasm == interp.
+type S = { n: Int, xs: List[Int] }
+
+fn bump(mut s: S, k: Int) -> Unit = {
+  s.n = s.n + k
+}
+
+fn bumpv(mut s: S, k: Int) -> Int = {
+  s.n = s.n + k
+  s.n
+}
+
+fn weigh(s: S) -> Int = s.n * 100 + list.len(s.xs)
+
+fn mut_call(mut s: S) -> Unit = {
+  let note = (k: Int) => bump(s, k)
+  note(3)
+  bump(s, 1)
+}
+
+fn by_value(mut s: S) -> Int = {
+  let note = (k: Int) => bump(s, k)
+  note(9)
+  weigh(s)
+}
+
+fn match_arms(mut s: S, k: Int) -> Int = {
+  let note = (j: Int) => bump(s, j)
+  note(3)
+  match k {
+    0 => bumpv(s, 1),
+    _ => bumpv(s, k),
+  }
+}
+
+fn if_arms(mut s: S, k: Int) -> Int = {
+  let note = (j: Int) => bump(s, j)
+  note(3)
+  if k > 2 then bumpv(s, 10) else bumpv(s, 20)
+}
+
+fn nested(mut s: S, k: Int) -> Unit = {
+  let note = (j: Int) => bump(s, j)
+  note(3)
+  {
+    let t = k + 1
+    { bump(s, t) }
+  }
+}
+
+fn loop_tail(mut s: S, k: Int) -> Unit = {
+  let note = (j: Int) => bump(s, j)
+  for i in 0..<k {
+    note(i)
+    bump(s, i)
+  }
+}
+
+fn early(mut s: S, k: Int) -> Int = {
+  let note = (j: Int) => bump(s, j)
+  note(3)
+  guard k < 5 else bumpv(s, 100)
+  bump(s, 1)
+  bumpv(s, 2)
+}
+
+fn show(tag: String, s: S) -> Unit = println("${tag} n=${int.to_string(s.n)} xs=${s.xs |> list.map((x) => int.to_string(x)) |> list.join(",")}")
+
+fn fresh() -> S = S { n: 1, xs: [1, 2] }
+
+effect fn main() -> Unit = {
+  var a = fresh()
+  mut_call(a)
+  show("mut_call", a)
+  var b = fresh()
+  let bv = by_value(b)
+  show("by_value ${int.to_string(bv)}", b)
+  var e = fresh()
+  let ev = match_arms(e, 0) + match_arms(e, 7)
+  show("match_arms ${int.to_string(ev)}", e)
+  var f = fresh()
+  let fv = if_arms(f, 1) + if_arms(f, 9)
+  show("if_arms ${int.to_string(fv)}", f)
+  var g = fresh()
+  nested(g, 4)
+  show("nested", g)
+  var h = fresh()
+  loop_tail(h, 4)
+  show("loop_tail", h)
+  var i = fresh()
+  let iv = early(i, 2) + early(i, 9)
+  show("early ${int.to_string(iv)}", i)
+}

@@ -167,7 +167,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-129 | list.chunk / list.windows non-positive sizes: negative keeps the promoted norm, zero aborts in the T6 form | 0.28.4 | active | fixture | 4 |
 | C-130 | option/map combinators hand back OWNED heap results (no bare pass-through handles) | 0.28.5 | active | fixture | 2 |
 | C-131 | Loop-rebuilt buffers are O(n): COW guards only LIVE aliases, and LICM never hoists heap allocations | 0.28.6 | active | fixture | 3 |
-| C-132 | mut parameters of reallocating containers persist to the caller at every call position | 0.28.6 | active | fixture | 22 |
+| C-132 | mut parameters of reallocating containers persist to the caller at every call position | 0.28.6 | active | fixture | 24 |
 | C-133 | env.get observes the host environment identically on native and wasm | 0.29.0 | active | fixture | 1 |
 | C-134 | Vendored-libm atan / tanh are byte-identical cross-target | 0.30.0 | active | fuzz(3000) | 1 |
 | C-135 | Declared-Unit effect fn ABI agrees between def and every call site | 0.30.0 | active | fixture | 2 |
@@ -354,7 +354,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-316 | A @bounded effect fn may only use standard output; other effect modules, host-reaching modules and fan are rejected (E076) | 0.60.0 | active | fixture | 0 |
 | C-317 | Float operations are provisionally rejected in a @bounded function (E077) | 0.60.0 | active | fixture | 0 |
 | C-318 | Early exit inside a counted loop body is rejected in a @bounded function (E078) | 0.60.0 | active | fixture | 0 |
-| C-319 | A captured-and-mutated var List is shared storage through a closure | 0.60.0 | active | fixture | 7 |
+| C-319 | A captured-and-mutated var List is shared storage through a closure | 0.60.0 | active | fixture | 9 |
 | C-320 | A budget cut performs exit bookkeeping: exhausted is always Err, regions are independent, cut placement is unobservable | 0.60.0 | active | fixture | 2 |
 | C-321 | The fan prefetch split (start-all, await-in-arm-order, abandon-losers) is unobservable | 0.60.0 | active | fixture | 1 |
 | C-322 | Constructors are function values, the builtin trio included | 0.60.0 | active | fixture | 1 |
@@ -372,7 +372,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-334 | A closure call takes +1 on a borrowed heap argument: the RC-3 callee-owned convention holds through call_indirect | 0.62.0 | active | fixture | 4 |
 | C-335 | path.extension treats a leading dot as a hidden-file marker, not an extension, on both targets | 0.62.0 | active | fixture | 2 |
 | C-336 | Each test starts from re-initialized mutable module globals, on both targets | 0.57.1 | active | fixture | 0 |
-| C-337 | The bytes search, edit and predicate family answers identically on every leg | 0.62.0 | active | fixture | 1 |
+| C-337 | The bytes search, edit and predicate family answers identically on every leg | 0.62.0 | active | fixture | 3 |
 | C-338 | The int bit family, bits_to_f32 and the Int -> Float32 convert agree on every leg | 0.62.0 | active | fixture | 2 |
 | C-339 | testing.assert_snapshot mismatches abort in the T18 form on both targets, inside test blocks too | 0.62.0 | active | fixture | 1 |
 | C-340 | The eager *_or family — option/result.unwrap_or, list/map/bytes.get_or — evaluates its default before the selection on both targets | 0.62.0 | active | fixture | 2 |

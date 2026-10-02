@@ -373,6 +373,7 @@ fn render_fn_body_str(fn_ctx: &RenderContext, func: &IrFunction) -> String {
             if let Some(e) = expr {
                 let mut expr_str = render_expr_fn(fn_ctx, e);
                 unwrap_block_tail_var(fn_ctx, e, &mut expr_str);
+                let expr_str = statements::bind_tail_past_cells(fn_ctx, stmts, e, expr_str);
                 parts.push(render_control_or_wrapped(fn_ctx, &e.kind, expr_str));
             }
             parts.join("\n")

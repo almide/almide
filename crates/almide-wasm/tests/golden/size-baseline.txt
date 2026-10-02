@@ -44,6 +44,7 @@
 4743	spec/wasm_cross/bytes_copy_from_negative_len.almd
 4087	spec/wasm_cross/bytes_copy_within_offset_domain.almd
 10448	spec/wasm_cross/bytes_cursor_read_domain.almd
+1503	spec/wasm_cross/bytes_data_ptr_identity.almd
 1306	spec/wasm_cross/bytes_equality_call_operands.almd
 6158	spec/wasm_cross/bytes_f16.almd
 22401	spec/wasm_cross/bytes_f16_offset_overflow.almd
@@ -61,11 +62,12 @@
 1647	spec/wasm_cross/bytes_push_inplace.almd
 3327	spec/wasm_cross/bytes_rawptr.almd
 2424	spec/wasm_cross/bytes_repeat_product_wrap_oom.almd
-17244	spec/wasm_cross/bytes_search_edit_family.almd
+17077	spec/wasm_cross/bytes_search_edit_family.almd
 7186	spec/wasm_cross/bytes_set_on_record_field.almd
 4105	spec/wasm_cross/bytes_set_value_semantics.almd
 5247	spec/wasm_cross/bytes_string_window_domain.almd
 9263	spec/wasm_cross/bytes_temp_receiver.almd
+4857	spec/wasm_cross/bytes_to_string_err_release.almd
 12024	spec/wasm_cross/bytes_writer_family.almd
 4656	spec/wasm_cross/bytes_writer_mut_from_declaration.almd
 2469	spec/wasm_cross/call_closure_lambda_param.almd
@@ -521,6 +523,8 @@
 13338	spec/wasm_cross/mut_param_alias_cow.almd
 2727	spec/wasm_cross/mut_param_branch_forward.almd
 3844	spec/wasm_cross/mut_param_call_chain.almd
+11705	spec/wasm_cross/mut_param_cell_tail_capture_read.almd
+6035	spec/wasm_cross/mut_param_cell_tail_capture_write.almd
 3595	spec/wasm_cross/mut_param_closure_capture_read.almd
 6260	spec/wasm_cross/mut_param_closure_capture_write.almd
 11648	spec/wasm_cross/mut_param_effect_can_err.almd
@@ -848,7 +852,7 @@
 1940	spec/wasm_cross/unwrap_or_strict_default.almd
 4937	spec/wasm_cross/unwrap_or_tail_result.almd
 2191	spec/wasm_cross/unwrap_or_tuple_payload_extract.almd
-25861	spec/wasm_cross/unwrap_or_unwrap_fallback.almd
+25933	spec/wasm_cross/unwrap_or_unwrap_fallback.almd
 21096	spec/wasm_cross/unwrap_or_value_fn_named_parse.almd
 5434	spec/wasm_cross/uoe_heap_ok_share.almd
 9578	spec/wasm_cross/url_authority_edges.almd

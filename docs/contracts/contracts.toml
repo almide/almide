@@ -1819,6 +1819,8 @@ evidence  = [
   { path = "spec/wasm_cross/mut_param_global_no_reach_in_place.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_closure_capture_read.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_closure_capture_write.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_cell_tail_capture_read.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_cell_tail_capture_write.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_reassign_from_hof.almd", class = "fixture" },
 ]
 [[contract]]
@@ -3952,6 +3954,8 @@ evidence  = [
   { path = "spec/wasm_cross/closure_captured_record_field_mutation.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_closure_capture_read.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_closure_capture_write.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_cell_tail_capture_read.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_cell_tail_capture_write.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-320"
@@ -4368,6 +4372,8 @@ since     = "0.62.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_search_edit_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_to_string_err_release.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_data_ptr_identity.almd", class = "fixture" },
 ]
 
 # ── INT BIT-INTROSPECTION FAMILY AND THE Int -> Float32 CONVERT ───────

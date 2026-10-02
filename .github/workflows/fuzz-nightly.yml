@@ -111,6 +111,14 @@ jobs:
         working-directory: tools/xtarget-fuzz
         run: cargo build --release
 
+      # The fuzzer is not in the parent workspace, so no PR job runs its unit
+      # tests. The denylist's matrix test holds the screened surface to the
+      # semantics manifest's address-unit set (#3193); run it before the
+      # shards spend their budget on seeds it should have dropped.
+      - name: Fuzzer denylist tests
+        working-directory: tools/xtarget-fuzz
+        run: cargo test --release generator::denylist
+
       - name: Upload binaries
         uses: actions/upload-artifact@v7
         with:
@@ -516,7 +524,9 @@ jobs:
   coverage-ratchet:
     name: Compiler structural coverage ratchet (#566)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 90, not 60: the native codegen leg (ALMIDE_COVERAGE_NATIVE_LEG, #3195)
+    # adds an `almide test spec/ --target rust` sweep to a ~45-minute job.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
       # Pin the toolchain like every other job (#990): this job used to rely
@@ -542,12 +552,12 @@ jobs:
           mkdir -p ~/.local/bin && cp target/release/almide ~/.local/bin/
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Measure coverage and enforce the ratchet
-        run: bash proofs/coverage.sh --check
+        run: ALMIDE_COVERAGE_NATIVE_LEG=1 bash proofs/coverage.sh --check
 
   coverage-condition:
     name: Condition-level coverage — the MC/DC ledger's measured backstop (#566)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90  # the native codegen leg, as above (#3195)
     steps:
       - uses: actions/checkout@v7
       # rustc's MC/DC instrumentation was REMOVED upstream (rust-lang/rust
@@ -601,3 +611,32 @@ jobs:
           key: mcdc-mutation-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
       - name: Every vectors-resolved ledger site kills its mutant
         run: bash proofs/mcdc-mutation.sh
+
+  # A red #566 gate reaches a LABELLED ISSUE, not only this run's page (#3195).
+  # The per-condition ratchet was red on every night of the v0.66.0 window,
+  # and twice before (#2707, #2941), and was seen only by whoever opened the
+  # run. This is the fuzz-findings shape (#2379): open an issue labelled
+  # `coverage-ratchet`, or comment on the open one, with each red job's verdict
+  # lines. Live only for develop and release tags (the scheduled night and the
+  # rc soak dispatches); a branch dispatch runs the same routing as a dry run,
+  # so a probe branch exercises it without filing anything.
+  coverage-route:
+    if: always()
+    name: Route a red coverage gate to its issue (#3195)
+    needs: [coverage-ratchet, coverage-condition, mcdc-mutation]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Open / update the coverage-ratchet issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          case "${{ github.ref }}" in
+            refs/heads/develop|refs/tags/v*) bash scripts/coverage-night-route.sh "${{ github.run_id }}" ;;
+            *) bash scripts/coverage-night-route.sh "${{ github.run_id }}" --dry-run ;;
+          esac

@@ -38,10 +38,13 @@ spec/gauntlet/cells/x17_closure_param_dec.almd
 spec/gauntlet/cells/x18_mut_param_err_partial_write.almd
 spec/gauntlet/pkg/functional_port/src/main.almd
 spec/gauntlet/pkg/mut_port/src/main.almd
+spec/integration/alias_record_literal/src/main.almd
+spec/integration/cross_module_field_defaults/src/main.almd
 spec/integration/generic_protocol_ports/src/main.almd
 spec/integration/generics/generics_recursive_test.almd
 spec/integration/modules/cross_module_unit_effect_test.almd
 spec/integration/modules/vis_effect_test.almd
+spec/integration/qualified_ctor_names/src/main.almd
 spec/integration/same_leaf_submodules/src/main.almd
 spec/lang/block_comment_raw_string_test.almd
 spec/lang/closure_capturing_fn_wasm.almd
@@ -144,6 +147,7 @@ spec/wasm_cross/bytes_clear_mut_param.almd
 spec/wasm_cross/bytes_copy_from_negative_len.almd
 spec/wasm_cross/bytes_copy_within_offset_domain.almd
 spec/wasm_cross/bytes_cursor_read_domain.almd
+spec/wasm_cross/bytes_data_ptr_identity.almd
 spec/wasm_cross/bytes_equality_call_operands.almd
 spec/wasm_cross/bytes_f16.almd
 spec/wasm_cross/bytes_f16_offset_overflow.almd
@@ -166,6 +170,7 @@ spec/wasm_cross/bytes_set_on_record_field.almd
 spec/wasm_cross/bytes_set_value_semantics.almd
 spec/wasm_cross/bytes_string_window_domain.almd
 spec/wasm_cross/bytes_temp_receiver.almd
+spec/wasm_cross/bytes_to_string_err_release.almd
 spec/wasm_cross/bytes_writer_family.almd
 spec/wasm_cross/bytes_writer_mut_from_declaration.almd
 spec/wasm_cross/call_closure_lambda_param.almd
@@ -228,6 +233,7 @@ spec/wasm_cross/datetime_monotonic_ns.almd
 spec/wasm_cross/datetime_parse_iso_strict.almd
 spec/wasm_cross/datetime_pre_epoch.almd
 spec/wasm_cross/declaration_forms.almd
+spec/wasm_cross/declaration_literal_domain.almd
 spec/wasm_cross/deep_eq_heap.almd
 spec/wasm_cross/default_param_ref.almd
 spec/wasm_cross/destructure_let_unwrap.almd
@@ -422,6 +428,7 @@ spec/wasm_cross/int_pow_overflow_wraps.almd
 spec/wasm_cross/int_rotate_negative_count.almd
 spec/wasm_cross/int_rotate_nonpositive_width.almd
 spec/wasm_cross/int_wrap_rotate_width.almd
+spec/wasm_cross/interp_diverging_part.almd
 spec/wasm_cross/interp_effect_unwrap_arg.almd
 spec/wasm_cross/interp_operand_order.almd
 spec/wasm_cross/io_write_ordering.almd
@@ -601,6 +608,8 @@ spec/wasm_cross/mut_map_param.almd
 spec/wasm_cross/mut_param_alias_cow.almd
 spec/wasm_cross/mut_param_branch_forward.almd
 spec/wasm_cross/mut_param_call_chain.almd
+spec/wasm_cross/mut_param_cell_tail_capture_read.almd
+spec/wasm_cross/mut_param_cell_tail_capture_write.almd
 spec/wasm_cross/mut_param_closure_capture_read.almd
 spec/wasm_cross/mut_param_closure_capture_write.almd
 spec/wasm_cross/mut_param_effect_can_err.almd
@@ -654,6 +663,7 @@ spec/wasm_cross/nested_unwrap_propagation.almd
 spec/wasm_cross/nested_variant_match_bind.almd
 spec/wasm_cross/nested_variant_tag_box.almd
 spec/wasm_cross/nested_variant_tree.almd
+spec/wasm_cross/never_fn_value_positions.almd
 spec/wasm_cross/newtype_string_form.almd
 spec/wasm_cross/num_edge_to_string.almd
 spec/wasm_cross/opt_ctor_over_call_payload.almd
@@ -772,6 +782,7 @@ spec/wasm_cross/scoped_worker_in_and_out.almd
 spec/wasm_cross/set_entries_reclaim.almd
 spec/wasm_cross/set_index_order.almd
 spec/wasm_cross/set_insertion_order.almd
+spec/wasm_cross/sized_display_matrix.almd
 spec/wasm_cross/sized_field_default_matrix.almd
 spec/wasm_cross/sized_int_overflow_wrap.almd
 spec/wasm_cross/sized_int_record_fields.almd
@@ -908,6 +919,7 @@ spec/wasm_cross/trig_libm.almd
 spec/wasm_cross/tuple_eq.almd
 spec/wasm_cross/tuple_ops.almd
 spec/wasm_cross/tuple_single.almd
+spec/wasm_cross/uint64_assert_display.almd
 spec/wasm_cross/uint64_upper_half.almd
 spec/wasm_cross/unannotated_toplet_generic_ctor.almd
 spec/wasm_cross/unique_non_flat_element.almd

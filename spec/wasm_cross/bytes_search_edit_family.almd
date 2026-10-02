@@ -2,11 +2,14 @@
 // #1423 stage 4: the bytes search / edit / predicate family closes on the
 // STRUCTURAL leg — cmp, contains, index_of, starts_with, ends_with,
 // is_empty, is_valid_utf8, eof, skip, insert, remove_at, reverse, xor,
-// map_each, split, lines, data_ptr. Native (runtime/rs/src/bytes.rs) is
+// map_each, split, lines. Native (runtime/rs/src/bytes.rs) is
 // the oracle; every fn prints over the domain-edge values the integer
 // matrix feeds (zero, one, -1, the i32 rails, u32::MAX, 2^32, the i64
 // rails and their neighbours, len-1 / len / len+1) and every wasm leg
-// must match byte for byte.
+// must match byte for byte. The address getter is pinned in
+// bytes_data_ptr_identity.almd (#3193): an address is target layout, so
+// the fuzzer drops any file naming it from its mutation seeds, and
+// keeping it here would cost this whole family as a seed.
 fn show(label: String, b: Bytes) -> Unit = println(label + " " + "${bytes.to_list(b)}")
 
 fn show_list(label: String, xs: List[Bytes]) -> Unit = {
@@ -107,9 +110,4 @@ fn main() -> Unit = {
   show_list("lines", bytes.lines(b("\n")))
   show_list("lines", bytes.lines(b("a\r\nb")))
   show_list("lines", bytes.lines(b("abc")))
-  // data_ptr: an address, never printed — two calls on one buffer agree,
-  // the empty buffer's address is never negative
-  let p1 = bytes.data_ptr(abcde)
-  let p2 = bytes.data_ptr(abcde)
-  println("data_ptr ${p1 == p2} ${bytes.data_ptr(b("")) >= 0}")
 }

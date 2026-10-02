@@ -28,14 +28,22 @@ pub(crate) fn emit_bytes_to_string_helper(inv_pre: u32, inv_mid: u32, inc_pre: u
     let mut f = Function::new([(10, ValType::I32)]);
     let mut i = f.instructions();
     // err epilogues are open-coded twice (invalid / incomplete); each
-    // builds the message then RETURNS the err block.
+    // builds the message then RETURNS the err block. `$concat` BORROWS both
+    // operands and returns a fresh block, so every `int.to_string` digit
+    // block and every intermediate prefix is parked in a local and released
+    // once the next concat has copied it (#3194: the four temporaries
+    // outlived the program). The parking locals (b0/lo/hi/j) are dead past
+    // an err epilogue — it returns.
     let emit_err_invalid = |i: &mut wasm_encoder::InstructionSink| {
-        i.i32_const(inv_pre as i32);
-        i.local_get(vlen).i64_extend_i32_u().call(F_INT_TO_STRING);
-        i.call(F_CONCAT);
-        i.i32_const(inv_mid as i32).call(F_CONCAT);
-        i.local_get(k).i64_extend_i32_u().call(F_INT_TO_STRING).call(F_CONCAT);
-        i.local_set(c);
+        i.local_get(vlen).i64_extend_i32_u().call(F_INT_TO_STRING).local_set(lo);
+        i.i32_const(inv_pre as i32).local_get(lo).call(F_CONCAT).local_set(hi);
+        i.local_get(lo).call(F_DEC_FLAT);
+        i.local_get(hi).i32_const(inv_mid as i32).call(F_CONCAT).local_set(b0);
+        i.local_get(hi).call(F_DEC_FLAT);
+        i.local_get(k).i64_extend_i32_u().call(F_INT_TO_STRING).local_set(j);
+        i.local_get(b0).local_get(j).call(F_CONCAT).local_set(c);
+        i.local_get(b0).call(F_DEC_FLAT);
+        i.local_get(j).call(F_DEC_FLAT);
         i.i32_const(16).call(F_ALLOC).local_tee(r);
         i.i32_const(1).i32_store(m_tag);
         i.local_get(r).local_get(c).i32_store(m_pay);
@@ -98,9 +106,9 @@ pub(crate) fn emit_bytes_to_string_helper(inv_pre: u32, inv_mid: u32, inc_pre: u
     i.local_get(j).local_get(extra).i32_gt_u().br_if(1);
     i.local_get(k).local_get(j).i32_add().local_get(n).i32_ge_u().if_(BlockType::Empty);
     // ran off the end mid-sequence: the "incomplete" Display form
-    i.i32_const(inc_pre as i32);
-    i.local_get(k).i64_extend_i32_u().call(F_INT_TO_STRING).call(F_CONCAT);
-    i.local_set(c);
+    i.local_get(k).i64_extend_i32_u().call(F_INT_TO_STRING).local_set(lo);
+    i.i32_const(inc_pre as i32).local_get(lo).call(F_CONCAT).local_set(c);
+    i.local_get(lo).call(F_DEC_FLAT);
     i.i32_const(16).call(F_ALLOC).local_tee(r);
     i.i32_const(1).i32_store(m_tag);
     i.local_get(r).local_get(c).i32_store(m_pay);
