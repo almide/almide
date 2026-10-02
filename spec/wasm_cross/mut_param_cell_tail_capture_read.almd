@@ -1,11 +1,12 @@
 // @contract: C-132, C-319
 // #3192: a `mut` param a closure READS (the whole param, or one field) and the
 // fn writes is rebound onto the #3154 write-back cell on native. A tail that
-// reads the param — a call taking it by `mut` or by value, a `!`-propagated
-// call, a `match` / `if` whose arms call with it, nested blocks, a loop, a
-// `guard` exit before the tail — left the call's `RefMut` temporary alive past
-// the cell (rustc E0597). The caller sees the final value on every exit, the
-// `!` error exit included. Byte-identical native == wasm == interp.
+// reads the param — a call taking it by `mut` or by value, a `match` / `if`
+// whose arms call with it, nested blocks, a loop, a `guard` exit before the
+// tail — left the call's `RefMut` temporary alive past the cell (rustc E0597).
+// The caller sees the final value on every exit. The `!`-propagated tail and
+// its error exit are in tests/mut_param_cell_tail_matrix_test.rs (a `!` tail
+// walls the MIR rung). Byte-identical native == wasm == interp.
 type S = { n: Int, xs: List[Int] }
 
 fn bump(mut s: S, k: Int) -> Unit = {
@@ -18,11 +19,6 @@ fn bumpv(mut s: S, k: Int) -> Int = {
 }
 
 fn weigh(s: S) -> Int = s.n * 100 + list.len(s.xs)
-
-effect fn bump_e(mut s: S, k: Int) -> Unit = {
-  s.n = s.n + k
-  guard k < 100 else err("big ${int.to_string(k)}")
-}
 
 // whole-param capture: the closure reads `s` itself
 fn wc_mutcall(mut s: S) -> Unit = {
@@ -43,18 +39,12 @@ fn wc_byval(mut s: S) -> Int = {
   weigh(s)
 }
 
-effect fn wc_bang(mut s: S, k: Int) -> Unit = {
-  let ys = s.xs |> list.map((x) => x + weigh(s))
-  s.xs = ys
-  bump_e(s, k)!
-}
-
-fn wc_match(mut s: S, k: Int) -> Unit = {
+fn wc_match(mut s: S, k: Int) -> Int = {
   let ys = s.xs |> list.map((x) => x + weigh(s))
   s.xs = ys
   match k {
-    0 => bump(s, 1),
-    _ => bump(s, k),
+    0 => bumpv(s, 1),
+    _ => bumpv(s, k),
   }
 }
 
@@ -117,18 +107,12 @@ fn fc_byval(mut s: S) -> Int = {
   weigh(s)
 }
 
-effect fn fc_bang(mut s: S, k: Int) -> Unit = {
-  let ys = s.xs |> list.map((x) => x + s.n)
-  s.xs = ys
-  bump_e(s, k)!
-}
-
-fn fc_match(mut s: S, k: Int) -> Unit = {
+fn fc_match(mut s: S, k: Int) -> Int = {
   let ys = s.xs |> list.map((x) => x + s.n)
   s.xs = ys
   match k {
-    0 => bump(s, 1),
-    _ => bump(s, k),
+    0 => bumpv(s, 1),
+    _ => bumpv(s, k),
   }
 }
 
@@ -186,19 +170,9 @@ effect fn main() -> Unit = {
   var c = fresh()
   let cv = wc_byval(c)
   show("wc_byval ${int.to_string(cv)}", c)
-  var d = fresh()
-  wc_bang(d, 5)!
-  show("wc_bang ok", d)
-  var e = fresh()
-  let eo = match wc_bang(e, 500) {
-    ok(_) => "ok",
-    err(m) => "err ${m}",
-  }
-  show("wc_bang ${eo}", e)
   var f = fresh()
-  wc_match(f, 0)
-  wc_match(f, 7)
-  show("wc_match", f)
+  let fv = wc_match(f, 0) + wc_match(f, 7)
+  show("wc_match ${int.to_string(fv)}", f)
   var g = fresh()
   let gv = wc_if(g, 1) + wc_if(g, 9)
   show("wc_if ${int.to_string(gv)}", g)
@@ -223,19 +197,9 @@ effect fn main() -> Unit = {
   var c2 = fresh()
   let cv2 = fc_byval(c2)
   show("fc_byval ${int.to_string(cv2)}", c2)
-  var d2 = fresh()
-  fc_bang(d2, 5)!
-  show("fc_bang ok", d2)
-  var e2 = fresh()
-  let eo2 = match fc_bang(e2, 500) {
-    ok(_) => "ok",
-    err(m) => "err ${m}",
-  }
-  show("fc_bang ${eo2}", e2)
   var f2 = fresh()
-  fc_match(f2, 0)
-  fc_match(f2, 7)
-  show("fc_match", f2)
+  let fv2 = fc_match(f2, 0) + fc_match(f2, 7)
+  show("fc_match ${int.to_string(fv2)}", f2)
   var g2 = fresh()
   let gv2 = fc_if(g2, 1) + fc_if(g2, 9)
   show("fc_if ${int.to_string(gv2)}", g2)
