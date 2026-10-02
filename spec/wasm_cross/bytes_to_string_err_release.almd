@@ -1,0 +1,46 @@
+// @contract: C-337
+// #3194: `bytes.to_string` on a buffer that is not valid UTF-8 errs with
+// Rust's Utf8Error Display, and on wasm the err message is built by the
+// `$bytes_to_string` helper out of `int.to_string` digit blocks and
+// intermediate concatenations. The helper concatenated them without
+// releasing any: every err left one block live ("incomplete" form) or four
+// ("invalid sequence" form), so the program exited with heap blocks native
+// had dropped. The output was the same on both legs; only the live-at-exit
+// ledger sees it.
+//
+// Each cell prints `is_valid_utf8` beside the decoded result, so the
+// predicate and the decode are held to agree on every buffer. The cells
+// reach all three err epilogues — a bad lead byte, a bad continuation, a
+// truncated tail — and the ok path. The last cell is the fuzzer's shape: a
+// propagating `!` on the err inside a Result-returning fn.
+fn decode(xs: List[Int]) -> String = {
+  let b = bytes.from_list(xs)
+  let shown = match bytes.to_string(b) {
+    ok(s) => "ok ${s}",
+    err(e) => "err ${e}",
+  }
+  "${bytes.is_valid_utf8(b)} ${shown}"
+}
+
+fn describe(b: Bytes) -> Result[String, String] = ok("${bytes.len(b)}:${bytes.to_string(b)!}")
+
+effect fn main() -> Unit = {
+  println(decode([65, 66]))
+  println(decode([206, 163, 33]))
+  println(decode([65, -128, 0]))
+  println(decode([255]))
+  println(decode([224, 40, 161]))
+  println(decode([240, 144, 128, 65]))
+  println(decode([65, 226]))
+  println(decode([226, 130]))
+  println(decode([237, 160, 128]))
+  let rs: List[String] = [
+    [65, 66, 67],
+    [72, -128],
+    [72, 226, 130]
+  ] |> list.map((xs) => match describe(bytes.from_list(xs)) {
+    ok(s) => "ok ${s}",
+    err(e) => "err ${e}",
+  })
+  println(rs |> list.join("\n"))
+}

@@ -372,7 +372,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-334 | A closure call takes +1 on a borrowed heap argument: the RC-3 callee-owned convention holds through call_indirect | 0.62.0 | active | fixture | 4 |
 | C-335 | path.extension treats a leading dot as a hidden-file marker, not an extension, on both targets | 0.62.0 | active | fixture | 2 |
 | C-336 | Each test starts from re-initialized mutable module globals, on both targets | 0.57.1 | active | fixture | 0 |
-| C-337 | The bytes search, edit and predicate family answers identically on every leg | 0.62.0 | active | fixture | 1 |
+| C-337 | The bytes search, edit and predicate family answers identically on every leg | 0.62.0 | active | fixture | 2 |
 | C-338 | The int bit family, bits_to_f32 and the Int -> Float32 convert agree on every leg | 0.62.0 | active | fixture | 2 |
 | C-339 | testing.assert_snapshot mismatches abort in the T18 form on both targets, inside test blocks too | 0.62.0 | active | fixture | 1 |
 | C-340 | The eager *_or family — option/result.unwrap_or, list/map/bytes.get_or — evaluates its default before the selection on both targets | 0.62.0 | active | fixture | 2 |
