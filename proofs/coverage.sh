@@ -187,7 +187,23 @@ echo "  runnable spec programs: $n (structural wasm build emitted $nw; witness p
 # The v0 PRODUCTION path (almide-codegen walker/emit): `almide test` compiles +
 # runs every test-block file through the full frontend→codegen pipeline.
 LLVM_PROFILE_FILE="$COVDIR/cli-%m-%p.profraw" "$CLI" test spec/ >/dev/null 2>&1 || true
-echo "  v0 CLI: almide test spec/ (frontend + codegen production path)"
+echo "  v0 CLI: almide test spec/ (frontend + the embedded wasm test host)"
+# The NATIVE codegen leg (almide-codegen's Rust passes + walker) must be
+# driven explicitly. The default `almide test` runs every file on the wasm
+# leg first and compiles natively only what that leg cannot pass. While the
+# wasm leg needed the wasmtime CLI, which coverage runners do not have, every
+# file fell back to native and this workload measured the Rust codegen by
+# accident. 7fb199704 moved the wasm leg onto the embedded host, the fallback
+# emptied, and ~1,500 codegen branches went cold at once (#3195: pass_peephole
+# 148 -> 32 of 248, pass_region_window 154 -> 46 of 188, ...).
+# `--target rust` is the pure-native harness CI's "Test Rust" job runs.
+# On by default in CONDITION mode (the nightly-only job); the line-mode run
+# opts in with ALMIDE_COVERAGE_NATIVE_LEG=1 (the nightly does, the push-time
+# job keeps its 45-minute budget and its own green floor without it).
+if [ "${ALMIDE_COVERAGE_NATIVE_LEG:-${ALMIDE_COVERAGE_CONDITION:-0}}" = "1" ]; then
+    LLVM_PROFILE_FILE="$COVDIR/cli-%m-%p.profraw" "$CLI" test spec/ --target rust >/dev/null 2>&1 || true
+    echo "  v0 CLI: almide test spec/ --target rust (frontend + native codegen production path)"
+fi
 # The COMPONENT emit paths (almide-wasm-run: the p2 shim and the p3 shim with
 # its http / fs / env / io / process op families) are reached only through
 # `almide build --target wasm --component`, which no spec test drives — the
