@@ -1,0 +1,101 @@
+// @contract: C-132, C-319
+// #3197: a closure whose ONLY write to a `mut` parameter is a place below it —
+// a field-path `mut` argument (`list.push(s.xs, k)`), a nested field, a
+// method-call receiver, a user fn's `mut` param, an element through a field —
+// writes the caller's place. Native's write scan counted only a bare-`Var`
+// `&mut`, so no write-back cell was built and rustc refused the closure
+// (E0525). Byte-identical native == wasm == interp.
+type In = { xs: List[Int] }
+
+type S = { xs: List[Int], ys: List[Int], inner: In, n: Int }
+
+fn grow(mut xs: List[Int], k: Int) -> Unit = list.push(xs, k)
+
+fn fresh() -> S = S { xs: [0], ys: [], inner: In { xs: [] }, n: 0 }
+
+fn field_arg(mut s: S) -> Unit = {
+  let add = (k: Int) => list.push(s.xs, k)
+  add(1)
+  add(2)
+}
+
+fn nested_arg(mut s: S) -> Unit = {
+  let add = (k: Int) => list.push(s.inner.xs, k)
+  add(3)
+  add(4)
+}
+
+fn method_arg(mut s: S) -> Unit = {
+  let add = (k: Int) => s.xs.push(k)
+  add(6)
+}
+
+fn user_fn_arg(mut s: S) -> Unit = {
+  let add = (k: Int) => grow(s.xs, k)
+  add(7)
+}
+
+fn passed(mut s: S, ks: List[Int]) -> Int = list.fold(
+  ks,
+  0,
+  (acc, k) => {
+    list.push(s.ys, k)
+    acc + k
+  },
+)
+
+fn over_own_field(mut s: S) -> Int = list.fold(
+  s.xs,
+  0,
+  (acc, x) => {
+    list.push(s.ys, x)
+    acc + x
+  },
+)
+
+fn element_through_field(mut s: S) -> Unit = {
+  let bump = (k: Int) => {
+    s.xs[0] = s.xs[0] + k
+  }
+  bump(10)
+  bump(20)
+}
+
+fn read_in_closure_write_outside(mut s: S) -> Int = {
+  let size = () => list.len(s.xs)
+  let before = size()
+  list.push(s.xs, 99)
+  before * 100 + size()
+}
+
+effect fn fail_after(mut s: S, k: Int) -> Int = {
+  let add = (j: Int) => list.push(s.xs, j)
+  add(k)
+  if k > 3 then err("over ${int.to_string(k)}")
+  else ok(list.len(s.xs))
+}
+
+fn show(s: S) -> String = "xs=${int.to_string(list.len(s.xs))} ys=${int.to_string(list.len(s.ys))} in=${int.to_string(list.len(s.inner.xs))} x0=${int.to_string(s.xs[0])}"
+
+effect fn main() -> Unit = {
+  var s = fresh()
+  field_arg(s)
+  println("field ${show(s)}")
+  nested_arg(s)
+  println("nested ${show(s)}")
+  method_arg(s)
+  println("method ${show(s)}")
+  user_fn_arg(s)
+  println("user ${show(s)}")
+  println("passed ${int.to_string(passed(s, [1, 2, 3]))} ${show(s)}")
+  println("own ${int.to_string(over_own_field(s))} ${show(s)}")
+  element_through_field(s)
+  println("element ${show(s)}")
+  println("read ${int.to_string(read_in_closure_write_outside(s))} ${show(s)}")
+  var f = fresh()
+  let outcome = match fail_after(f, 5) {
+    ok(v) => "ok ${int.to_string(v)}",
+    err(e) => "err ${e}",
+  }
+  println("${outcome} ${show(f)}")
+}

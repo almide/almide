@@ -1,7 +1,9 @@
 // ── Use-count computation (post-pass) ───────────────────────────
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use super::*;
+use crate::visit::{walk_expr, IrVisitor};
 
 /// Walk the entire IR program and count variable uses, storing results
 /// in VarTable. When invoked post `UnifyVarTablesPass` every
@@ -358,157 +360,47 @@ fn collect_pattern_vars(pat: &IrPattern, vars: &mut HashSet<u32>) {
 /// Extra-count Var references in loop body for variables defined OUTSIDE the loop.
 /// This makes use_count > 1 for outer vars, triggering clone insertion.
 fn bump_outer_vars_in_loop(stmts: &[IrStmt], locals: &HashSet<u32>, table: &mut VarTable) {
+    let mut b = OuterBump { locals: Cow::Borrowed(locals), table };
     for s in stmts {
-        bump_vars_in_stmt(s, locals, table);
+        b.visit_stmt(s);
     }
 }
 
-/// Grouped by CHILD SHAPE like [`count_uses_in_expr`], but with a `_ => {}`
-/// default: this pass only re-counts *references*, so node kinds that cannot
-/// contain a plain `Var` reference to bump (macro/inline-Rust args, iterator
-/// chains, leaves) are deliberately skipped rather than traversed.
+/// Bump every `Var` reference under `expr` whose id is not in `locals`.
 fn bump_vars_in_expr(expr: &IrExpr, locals: &HashSet<u32>, table: &mut VarTable) {
-    match &expr.kind {
-        IrExprKind::Var { id } if !locals.contains(&id.0) => {
-            table.increment_use(*id);
-        }
-
-        // ── One child ──
-        IrExprKind::UnOp { operand: e, .. } | IrExprKind::Lambda { body: e, .. }
-        | IrExprKind::Member { object: e, .. } | IrExprKind::TupleIndex { object: e, .. }
-        | IrExprKind::OptionalChain { expr: e, .. }
-        | IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
-        | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
-        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
-        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
-        | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
-        | IrExprKind::RcWrap { expr: e, .. } | IrExprKind::ToVec { expr: e } => {
-            bump_vars_in_expr(e, locals, table);
-        }
-
-        // ── Two children ──
-        IrExprKind::BinOp { left: a, right: b, .. }
-        | IrExprKind::Range { start: a, end: b, .. }
-        | IrExprKind::IndexAccess { object: a, index: b }
-        | IrExprKind::MapAccess { object: a, key: b }
-        | IrExprKind::UnwrapOr { expr: a, fallback: b } => {
-            bump_vars_in_expr(a, locals, table);
-            bump_vars_in_expr(b, locals, table);
-        }
-
-        // ── Three children ──
-        IrExprKind::If { cond, then, else_ } => {
-            bump_vars_in_expr(cond, locals, table);
-            bump_vars_in_expr(then, locals, table);
-            bump_vars_in_expr(else_, locals, table);
-        }
-
-        // ── A flat sequence of children (calls contribute their args only) ──
-        IrExprKind::Call { args: xs, .. } | IrExprKind::TailCall { args: xs, .. }
-        | IrExprKind::RuntimeCall { args: xs, .. }
-        | IrExprKind::List { elements: xs } | IrExprKind::Tuple { elements: xs }
-        | IrExprKind::Fan { exprs: xs } => {
-            for e in xs { bump_vars_in_expr(e, locals, table); }
-        }
-
-        // ── Name-tagged children ──
-        IrExprKind::Record { fields, .. } => bump_vars_in_fields(fields, locals, table),
-        IrExprKind::SpreadRecord { base, fields } => {
-            bump_vars_in_expr(base, locals, table);
-            bump_vars_in_fields(fields, locals, table);
-        }
-
-        // ── Shapes with their own rule ──
-        // Recurse into sub-expressions but don't double-count nested loops
-        // (they'll handle their own bumping)
-        IrExprKind::Block { stmts, expr } => bump_vars_in_block(stmts, expr.as_deref(), locals, table),
-        IrExprKind::Match { subject, arms } => bump_vars_in_match(subject, arms, locals, table),
-        IrExprKind::StringInterp { parts } => bump_vars_in_string_interp(parts, locals, table),
-        IrExprKind::MapLiteral { entries } => bump_vars_in_map_entries(entries, locals, table),
-        // Nested loops: bump outer vars in iterable/cond AND body. The lead
-        // expression is re-evaluated each iteration of the enclosing loop.
-        IrExprKind::ForIn { iterable: lead, body, .. }
-        | IrExprKind::While { cond: lead, body } => {
-            bump_vars_in_loop_body(lead, body, locals, table)
-        }
-
-        _ => {}
-    }
+    OuterBump { locals: Cow::Borrowed(locals), table }.visit_expr(expr);
 }
 
-/// `MapLiteral` arm of [`bump_vars_in_expr`]: each entry's key, then its value.
-fn bump_vars_in_map_entries(entries: &[(IrExpr, IrExpr)], locals: &HashSet<u32>, table: &mut VarTable) {
-    for (k, v) in entries {
-        bump_vars_in_expr(k, locals, table);
-        bump_vars_in_expr(v, locals, table);
-    }
+/// The extra count for a body that runs many times (a loop body, a closure
+/// body): every reference to a var bound OUTSIDE it, at any depth and in
+/// EVERY node kind — through the exhaustive `walk_expr`, not a hand-picked
+/// subset of shapes. The hand-picked walk skipped iterator chains, so a fused
+/// `list.find(ids, f)` in a loop body left `ids` single-use, it moved on the
+/// first iteration and rustc refused the program (E0382, #3208); a match
+/// guard, a method receiver and inline-Rust / macro args were skipped the
+/// same way. A nested closure's own params and the lets in its body are fresh
+/// per call, so they are locals of that closure, never bumped.
+struct OuterBump<'a, 't> {
+    locals: Cow<'a, HashSet<u32>>,
+    table: &'t mut VarTable,
 }
 
-/// `Block` arm of [`bump_vars_in_expr`]: statements, then the optional tail expr.
-fn bump_vars_in_block(
-    stmts: &[IrStmt],
-    tail: Option<&IrExpr>,
-    locals: &HashSet<u32>,
-    table: &mut VarTable,
-) {
-    for s in stmts { bump_vars_in_stmt(s, locals, table); }
-    if let Some(e) = tail { bump_vars_in_expr(e, locals, table); }
-}
-
-/// `Match` arm of [`bump_vars_in_expr`]: subject, then each arm's body.
-fn bump_vars_in_match(subject: &IrExpr, arms: &[IrMatchArm], locals: &HashSet<u32>, table: &mut VarTable) {
-    bump_vars_in_expr(subject, locals, table);
-    for a in arms { bump_vars_in_expr(&a.body, locals, table); }
-}
-
-/// `StringInterp` arm of [`bump_vars_in_expr`]: each interpolated sub-expression.
-fn bump_vars_in_string_interp(parts: &[IrStringPart], locals: &HashSet<u32>, table: &mut VarTable) {
-    for p in parts { if let IrStringPart::Expr { expr } = p { bump_vars_in_expr(expr, locals, table); } }
-}
-
-/// `Record`/`SpreadRecord` field-value loop shared by [`bump_vars_in_expr`].
-fn bump_vars_in_fields(fields: &[(Sym, IrExpr)], locals: &HashSet<u32>, table: &mut VarTable) {
-    for (_, v) in fields { bump_vars_in_expr(v, locals, table); }
-}
-
-/// `ForIn`/`While` arms of [`bump_vars_in_expr`]: bump the lead expression
-/// (iterable / cond, re-evaluated every enclosing-loop iteration), then the
-/// body statements — identical shape for both, so they share one helper.
-fn bump_vars_in_loop_body(lead: &IrExpr, body: &[IrStmt], locals: &HashSet<u32>, table: &mut VarTable) {
-    bump_vars_in_expr(lead, locals, table);
-    for s in body { bump_vars_in_stmt(s, locals, table); }
-}
-
-fn bump_vars_in_stmt(stmt: &IrStmt, locals: &HashSet<u32>, table: &mut VarTable) {
-    match &stmt.kind {
-        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
-        | IrStmtKind::Assign { value, .. } => bump_vars_in_expr(value, locals, table),
-        IrStmtKind::IndexAssign { index, value, .. } => {
-            bump_vars_in_expr(index, locals, table);
-            bump_vars_in_expr(value, locals, table);
+impl IrVisitor for OuterBump<'_, '_> {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        match &expr.kind {
+            IrExprKind::Var { id } => {
+                if !self.locals.contains(&id.0) {
+                    self.table.increment_use(*id);
+                }
+            }
+            IrExprKind::Lambda { params, body, .. } => {
+                let mut inner = self.locals.clone().into_owned();
+                inner.extend(params.iter().map(|(v, _)| v.0));
+                collect_bound_vars_in_expr(body, &mut inner);
+                OuterBump { locals: Cow::Owned(inner), table: self.table }.visit_expr(body);
+            }
+            _ => walk_expr(self, expr),
         }
-        IrStmtKind::MapInsert { key, value, .. } => {
-            bump_vars_in_expr(key, locals, table);
-            bump_vars_in_expr(value, locals, table);
-        }
-        IrStmtKind::FieldAssign { value, .. } => bump_vars_in_expr(value, locals, table),
-        IrStmtKind::ListSwap { a, b, .. } => {
-            bump_vars_in_expr(a, locals, table);
-            bump_vars_in_expr(b, locals, table);
-        }
-        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
-            bump_vars_in_expr(end, locals, table);
-        }
-        IrStmtKind::ListCopySlice { len, .. } => {
-            bump_vars_in_expr(len, locals, table);
-        }
-        IrStmtKind::Expr { expr } => bump_vars_in_expr(expr, locals, table),
-        IrStmtKind::Guard { cond, else_ } => {
-            bump_vars_in_expr(cond, locals, table);
-            bump_vars_in_expr(else_, locals, table);
-        }
-        IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => {}
-        IrStmtKind::Comment { .. } => {}
     }
 }
 
@@ -811,5 +703,67 @@ mod mut_arg_write_tests {
             }
         }
         assert!(demoted.is_empty(), "a var written only through these was demoted to let: {demoted:?}");
+    }
+}
+
+#[cfg(test)]
+mod loop_bump_tests {
+    use super::*;
+    use almide_base::intern::sym;
+
+    fn e(kind: IrExprKind) -> IrExpr {
+        IrExpr { kind, ty: Ty::Unknown, span: None, def_id: None }
+    }
+
+    fn var(id: VarId) -> IrExpr {
+        e(IrExprKind::Var { id })
+    }
+
+    fn lambda(param: VarId, body: IrExpr) -> Box<IrExpr> {
+        Box::new(e(IrExprKind::Lambda { params: vec![(param, Ty::Unknown)], body: Box::new(body), lambda_id: None }))
+    }
+
+    /// `for j in [] { <read> }`, counted: the use counts of every var.
+    fn counts_in_loop(table: VarTable, j: VarId, read: IrExpr) -> VarTable {
+        let body = vec![IrStmt { kind: IrStmtKind::Expr { expr: read }, span: None }];
+        let lp = e(IrExprKind::ForIn { var: j, var_tuple: None, iterable: Box::new(e(IrExprKind::List { elements: vec![] })), body });
+        let mut table = table;
+        count_uses_in_expr(&lp, &mut table);
+        table
+    }
+
+    /// #3208: an outer list read once inside a loop body is read on every
+    /// iteration, whichever node kind holds the read — an iterator chain's
+    /// source, a fold seed, a match guard, an inline-Rust arg. A chain
+    /// callback's own param is fresh per call and keeps its single count.
+    #[test]
+    fn an_outer_read_in_a_loop_body_counts_twice_in_every_node_kind() {
+        let mut t = VarTable::new();
+        let ids = t.alloc(sym("ids"), Ty::Unknown, Mutability::Let, None);
+        let j = t.alloc(sym("j"), Ty::Unknown, Mutability::Let, None);
+        let x = t.alloc(sym("x"), Ty::Unknown, Mutability::Let, None);
+        let find = |src: IrExpr| e(IrExprKind::IterChain {
+            source: Box::new(src),
+            consume: true,
+            steps: vec![],
+            collector: IterCollector::Find { lambda: lambda(x, var(x)) },
+        });
+        let fold_seed = e(IrExprKind::IterChain {
+            source: Box::new(e(IrExprKind::List { elements: vec![] })),
+            consume: true,
+            steps: vec![],
+            collector: IterCollector::Fold { init: Box::new(var(ids)), lambda: lambda(x, var(x)) },
+        });
+        let guard = e(IrExprKind::Match {
+            subject: Box::new(var(j)),
+            arms: vec![IrMatchArm { pattern: IrPattern::Wildcard, guard: Some(var(ids)), body: e(IrExprKind::Unit) }],
+        });
+        let inline = e(IrExprKind::InlineRust { template: String::new(), args: vec![(sym("a"), var(ids))] });
+        for (name, read) in [("chain source", find(var(ids))), ("fold seed", fold_seed), ("match guard", guard), ("inline rust", inline)] {
+            let counted = counts_in_loop(t.clone(), j, read);
+            assert!(counted.use_count(ids) >= 2, "{name}: an outer read in a loop body counted once");
+        }
+        let counted = counts_in_loop(t.clone(), j, find(var(ids)));
+        assert_eq!(counted.use_count(x), 1, "a chain callback's own param was counted as an outer read");
     }
 }

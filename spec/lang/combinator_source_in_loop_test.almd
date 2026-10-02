@@ -1,0 +1,102 @@
+// #3208 — a list read by a list combinator inside a loop or closure body is
+// read again on the next iteration, so the native lowering must not move it.
+// The fused `list.find(ids, f)` lowered to `(ids).into_iter().find(..)`: the
+// extra use count a loop body gives every outer var skipped iterator chains,
+// so `ids` looked single-use, moved on the first iteration, and rustc refused
+// the program (E0382). Each fn below reads its list once, inside the repeated
+// body, and the list is still whole afterwards.
+fn find_in_for(ids: List[String], js: List[String]) -> Int = {
+  var n = 0
+  for j in js {
+    if option.is_some(list.find(ids, (i) => i == j)) then {
+      n = n + 1
+    } else ()
+  }
+  n
+}
+
+fn find_local_in_for(js: List[String]) -> Int = {
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  for j in js {
+    n = n + (list.find(ids, (i) => i == j) |> option.map((s) => string.len(s)) ?? 0)
+  }
+  n
+}
+
+fn find_index_in_while(js: List[String]) -> Int = {
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  var k = 0
+  while k < list.len(js) {
+    let j = list.get(js, k) ?? ""
+    n = n + (list.find_index(ids, (i) => i == j) ?? -1)
+    k = k + 1
+  }
+  n
+}
+
+fn find_map_in_closure(js: List[String]) -> Int = {
+  let ids = ["a", "bb", "ccc"]
+  list.map(js, (j) => list.find_map(ids, (i) => if i == j then some(string.len(i)) else none) ?? 0) |> list.sum
+}
+
+fn chains_in_nested_loop(js: List[List[Int]]) -> Int = {
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  for j in js {
+    for q in [0, 1] {
+      let hit = match list.filter(ids, (x) => x != j) |> list.find((x) => list.len(x) > q) {
+        some(x) => list.len(x),
+        none => 0,
+      }
+      let first = match list.enumerate(ids) |> list.find(((i, x)) => x == j) {
+        some((i, _)) => i,
+        none => -1,
+      }
+      n = n + hit + first + (list.fold(ids, none, (a, x) => if x == j then some(x) else a) |> option.map((x) => list.len(x)) ?? 0)
+    }
+  }
+  n
+}
+
+fn for_in_then_reused(js: List[String]) -> Int = {
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  for j in js {
+    for x in ids {
+      if x == j then {
+        n = n + 1
+      } else ()
+    }
+    n = n + (list.map(ids, (x) => x) |> list.fold(0, (a, x) => a + string.len(x)))
+  }
+  n
+}
+
+test "list.find in a for body leaves its source list readable" {
+  let ids = ["a", "bb", "ccc"]
+  assert_eq(find_in_for(ids, ["a", "bb", "zz"]), 2)
+  assert_eq(list.len(ids), 3)
+  assert_eq(find_local_in_for(["a", "bb", "zz"]), 3)
+}
+
+test "find_index in a while body and find_map in a closure body" {
+  assert_eq(find_index_in_while(["a", "ccc", "zz"]), 1)
+  assert_eq(find_map_in_closure(["a", "ccc", "zz"]), 4)
+}
+
+test "filter, enumerate and fold chains ending in a find in a nested loop" {
+  assert_eq(chains_in_nested_loop([
+    [1],
+    [2, 2]
+  ]), 16)
+}
+
+test "a for-in over a list reused by a later combinator in the same body" {
+  assert_eq(for_in_then_reused(["a", "bb"]), 14)
+}

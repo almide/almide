@@ -386,11 +386,21 @@ fn fallback_ledger_path() -> PathBuf {
 /// fixtures outside this shard would read as stale, and a shard cannot tell.
 /// So a slice (`k/N`) judges only what IS sound on a subset — a name the
 /// ledger lacks — and leaves its observed names as a partial; `merge/N`
-/// unions the N partials (first fixture in corpus order wins, as in one
-/// sweep) and runs the whole judge below unchanged.
+/// unions the N partials and runs the whole judge below unchanged.
+///
+/// The witness column is the SMALLEST stem (byte order) that reached the name,
+/// in every mode (#3203). Both the one sweep and the merge apply that rule
+/// through `witness_min`, rather than one taking "first in walk order" and the
+/// other "smallest stem": the two agree only while no stem is a prefix of
+/// another followed by a byte below `.` (the walk sorts by PATH). And the gate
+/// holds the witness equal to the observed one, like the reason, so a fixture
+/// that sorts ahead of the recorded witness is a ledger edit in its own PR —
+/// before, the column was written but never compared, and a regenerated
+/// ledger silently disagreed with the committed one (int.from_uint16/32
+/// moved from endian_explicit_import to declaration_literal_domain).
 fn audit_bridge_fallback_ledger(sweep: &Sweep) -> String {
     let slice = sweep.slice();
-    // name → (first fixture that reached it, the body's reason), corpus order
+    // name → (smallest fixture stem that reached it, that fixture's reason)
     let mut observed: std::collections::BTreeMap<String, (String, String)> =
         std::collections::BTreeMap::new();
     let mut calls = 0usize;
@@ -403,13 +413,7 @@ fn audit_bridge_fallback_ledger(sweep: &Sweep) -> String {
                 let name = it.next().expect("bridge partial row: name").to_string();
                 let stem = it.next().expect("bridge partial row: fixture").to_string();
                 let why = it.next().expect("bridge partial row: reason").to_string();
-                // Stems sort as the corpus does (one directory, one
-                // extension), so the smallest stem is the first fixture of
-                // the unsharded sweep.
-                let e = observed.entry(name).or_insert((stem.clone(), why.clone()));
-                if stem < e.0 {
-                    *e = (stem, why);
-                }
+                witness_min(&mut observed, name, stem, why);
             }
         }
         walked_n = sweep.all_stems.len();
@@ -418,9 +422,7 @@ fn audit_bridge_fallback_ledger(sweep: &Sweep) -> String {
         for (stem, _, fallbacks) in &sweep.rows {
             calls += fallbacks.len();
             for (name, why) in fallbacks {
-                observed
-                    .entry(name.clone())
-                    .or_insert((stem.clone(), why.replace('\n', " ")));
+                witness_min(&mut observed, name.clone(), stem.clone(), why.replace('\n', " "));
             }
         }
         walked_n = sweep.rows.len();
@@ -443,11 +445,13 @@ fn audit_bridge_fallback_ledger(sweep: &Sweep) -> String {
              # fallbacks where the body abstained or has no body. The body is the third\n\
              # vote; this is the bridge's measured residue. An arm absent here is dead.\n\
              #\n\
-             # Format: <module.func>  <first fixture>  <floor: … | why the body abstained>\n\
+             # Format: <module.func>  <witness>  <floor: … | why the body abstained>\n\
+             #         witness = the smallest fixture stem (byte order) reaching the name\n\
              # Gate:   wasm_runtime_interp_ledger.rs::interp_bridge_fallback_ledger —\n\
              #         fails on a name missing here AND on a ledgered name the corpus no\n\
              #         longer reaches through the bridge (a shadowed arm: delete it), AND\n\
-             #         on a recorded reason that differs from the observed reason.\n\
+             #         on a recorded reason or witness that differs from the observed one\n\
+             #         (#3203: this file equals a regeneration).\n\
              # Regenerate (then review the diff!):\n\
              #   ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test --test wasm_runtime_interp_ledger interp_bridge_fallback_ledger\n\n",
         );
@@ -472,7 +476,11 @@ fn audit_bridge_fallback_ledger(sweep: &Sweep) -> String {
     });
     // name → recorded reason, held equal to the observed one for the same
     // reason the abstain ledger above holds its own (#2333).
-    let recorded = parse_reason_ledger(&ledger_text, true);
+    let rows = parse_ledger_rows(&ledger_text, true);
+    let recorded: std::collections::BTreeMap<String, String> = rows
+        .iter()
+        .map(|(n, (_, why))| (n.clone(), why.clone()))
+        .collect();
     let ledger: std::collections::BTreeSet<String> = recorded.keys().cloned().collect();
 
     let unledgered: Vec<(&String, &(String, String))> = observed
@@ -555,7 +563,53 @@ fn audit_bridge_fallback_ledger(sweep: &Sweep) -> String {
              Re-record it in this same PR (ALMIDE_UPDATE_INTERP_LEDGER=1).\n",
         );
     }
+    // The witness is judged like the reason: only over the whole corpus (a
+    // slice may not hold the smallest stem).
+    let misattributed: Vec<(&String, &String, &String)> = observed
+        .iter()
+        .filter(|_| slice.is_none())
+        .filter_map(|(n, (stem, _))| {
+            rows.get(n)
+                .map(|(rec, _)| rec)
+                .filter(|rec| *rec != stem)
+                .map(|rec| (n, rec, stem))
+        })
+        .collect();
+    if !misattributed.is_empty() {
+        failures.push_str(&format!(
+            "\nDRIFTED WITNESS(ES) — {} ledgered name(s) whose recorded witness fixture is not \
+             the smallest corpus stem that reaches it through the bridge:\n",
+            misattributed.len()
+        ));
+        for (n, rec, obs) in &misattributed {
+            failures.push_str(&format!(
+                "    - {n}\n        recorded: {rec}\n        observed: {obs}\n"
+            ));
+        }
+        failures.push_str(
+            "  A new fixture sorting ahead of the witness (or the witness no longer reaching \
+             the name) moves it. Re-record it in this same PR (ALMIDE_UPDATE_INTERP_LEDGER=1) \
+             so the committed ledger stays equal to a regeneration.\n",
+        );
+    }
     failures
+}
+
+/// Record `stem` as the witness for `name` when it is the smallest stem seen
+/// so far (#3203) — independent of the order rows or shard partials arrive in.
+fn witness_min(
+    observed: &mut std::collections::BTreeMap<String, (String, String)>,
+    name: String,
+    stem: String,
+    why: String,
+) {
+    match observed.get_mut(&name) {
+        Some(e) if stem < e.0 => *e = (stem, why),
+        Some(_) => {}
+        None => {
+            observed.insert(name, (stem, why));
+        }
+    }
 }
 
 /// Malformed or duplicate rows must not disappear from the reason comparison.
@@ -563,6 +617,18 @@ fn parse_reason_ledger(
     text: &str,
     has_fixture: bool,
 ) -> std::collections::BTreeMap<String, String> {
+    parse_ledger_rows(text, has_fixture)
+        .into_iter()
+        .map(|(n, (_, why))| (n, why))
+        .collect()
+}
+
+/// name → (witness fixture, reason); the witness is "" for a ledger without
+/// that column. Fails closed on a malformed or duplicate row.
+fn parse_ledger_rows(
+    text: &str,
+    has_fixture: bool,
+) -> std::collections::BTreeMap<String, (String, String)> {
     let mut recorded = std::collections::BTreeMap::new();
     for line in text
         .lines()
@@ -572,7 +638,7 @@ fn parse_reason_ledger(
         let (name, rest) = line
             .split_once("  ")
             .expect("ledger row needs a name and reason");
-        let reason = if has_fixture {
+        let (witness, reason) = if has_fixture {
             let (fixture, reason) = rest
                 .trim()
                 .split_once("  ")
@@ -581,14 +647,14 @@ fn parse_reason_ledger(
                 !fixture.trim().is_empty(),
                 "bridge witness must not be empty"
             );
-            reason.trim()
+            (fixture.trim(), reason.trim())
         } else {
-            rest.trim()
+            ("", rest.trim())
         };
         assert!(!reason.is_empty(), "ledger reason must not be empty");
         assert!(
             recorded
-                .insert(name.to_string(), reason.to_string())
+                .insert(name.to_string(), (witness.to_string(), reason.to_string()))
                 .is_none(),
             "duplicate ledger name: {name}"
         );
@@ -665,4 +731,25 @@ fn a_reason_naming_a_declared_type_says_whose_declaration_it_is() {
          resolved by name, because the _str/_skv/_hval variant choice is a MIR pass it does not run.",
         offenders.join("\n  ")
     );
+}
+
+/// #3203: the bridge witness is the smallest stem whatever order rows or shard
+/// partials arrive in — including a stem that is a prefix of another followed
+/// by a byte below `.`, where path order and stem order disagree.
+#[test]
+fn bridge_witness_is_the_smallest_stem_in_any_arrival_order() {
+    let rows = [
+        ("endian_explicit_import", "r1"),
+        ("declaration_literal_domain", "r2"),
+        ("a-b", "r3"),
+        ("a", "r4"),
+    ];
+    for order in [[0, 1, 2, 3], [3, 2, 1, 0], [1, 3, 0, 2]] {
+        let mut observed = std::collections::BTreeMap::new();
+        for i in order {
+            let (stem, why) = rows[i];
+            witness_min(&mut observed, "int.f".into(), stem.into(), why.into());
+        }
+        assert_eq!(observed["int.f"], ("a".to_string(), "r4".to_string()));
+    }
 }

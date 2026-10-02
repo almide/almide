@@ -1,0 +1,797 @@
+// #3208 matrix: one op per combinator family x three element types x two
+// repeated-body positions (a for body, a closure body). Each fn binds its
+// list locally and reads it once inside the repeated body; native used to
+// move it on the first iteration (rustc E0382). Expected values are the
+// wasm leg's answers. `js` is local too: as a param, the unfused
+// find_index / find_map cells render it owned for nothing (certifier C4, #3214).
+fn for_int_find_opt_map() -> Int = {
+  let js = [1, 2]
+  let ids = [1, 2, 3]
+  var n = 0
+  for j in js {
+    n = n + (list.find(ids, (x) => x == j) |> option.map((y) => y * 10) ?? 0)
+  }
+  n
+}
+
+fn closure_int_find_opt_map() -> Int = {
+  let js = [1, 2]
+  let ids = [1, 2, 3]
+  var n = 0
+  let r = list.map(js, (j) => list.find(ids, (x) => x == j) |> option.map((y) => y * 10) ?? 0)
+  n = n + list.sum(r)
+  n
+}
+
+fn for_int_find_index() -> Int = {
+  let js = [1, 2]
+  let ids = [1, 2, 3]
+  var n = 0
+  for j in js {
+    n = n + (list.find_index(ids, (x) => x == j) ?? -1)
+  }
+  n
+}
+
+fn closure_int_find_index() -> Int = {
+  let js = [1, 2]
+  let ids = [1, 2, 3]
+  var n = 0
+  let r = list.map(js, (j) => list.find_index(ids, (x) => x == j) ?? -1)
+  n = n + list.sum(r)
+  n
+}
+
+fn for_int_find_map() -> Int = {
+  let js = [1, 2]
+  let ids = [1, 2, 3]
+  var n = 0
+  for j in js {
+    n = n + (list.find_map(ids, (x) => if x == j then some(x * 10) else none) ?? 0)
+  }
+  n
+}
+
+fn closure_int_find_map() -> Int = {
+  let js = [1, 2]
+  let ids = [1, 2, 3]
+  var n = 0
+  let r = list.map(js, (j) => list.find_map(ids, (x) => if x == j then some(x * 10) else none) ?? 0)
+  n = n + list.sum(r)
+  n
+}
+
+fn for_int_any() -> Int = {
+  let js = [1, 2]
+  let ids = [1, 2, 3]
+  var n = 0
+  for j in js {
+    n = n + (if list.any(ids, (x) => x == j) then 1 else 0)
+  }
+  n
+}
+
+fn closure_int_any() -> Int = {
+  let js = [1, 2]
+  let ids = [1, 2, 3]
+  var n = 0
+  let r = list.map(js, (j) => if list.any(ids, (x) => x == j) then 1 else 0)
+  n = n + list.sum(r)
+  n
+}
+
+fn for_int_count() -> Int = {
+  let js = [1, 2]
+  let ids = [1, 2, 3]
+  var n = 0
+  for j in js {
+    n = n + (list.count(ids, (x) => x == j))
+  }
+  n
+}
+
+fn closure_int_count() -> Int = {
+  let js = [1, 2]
+  let ids = [1, 2, 3]
+  var n = 0
+  let r = list.map(js, (j) => list.count(ids, (x) => x == j))
+  n = n + list.sum(r)
+  n
+}
+
+fn for_int_filter_find() -> Int = {
+  let js = [1, 2]
+  let ids = [1, 2, 3]
+  var n = 0
+  for j in js {
+    n = n + (if option.is_some(list.filter(ids, (x) => x != j) |> list.find((x) => x != j)) then 1 else 0)
+  }
+  n
+}
+
+fn closure_int_filter_find() -> Int = {
+  let js = [1, 2]
+  let ids = [1, 2, 3]
+  var n = 0
+  let r = list.map(
+    js,
+    (j) => if option.is_some(list.filter(ids, (x) => x != j) |> list.find((x) => x != j)) then 1 else 0,
+  )
+  n = n + list.sum(r)
+  n
+}
+
+fn for_int_fold_elem() -> Int = {
+  let js = [1, 2]
+  let ids = [1, 2, 3]
+  var n = 0
+  for j in js {
+    n = n + (match list.fold(ids, none, (a, x) => if x == j then some(x) else a) {
+      some(y) => y * 10,
+      none => 0,
+    })
+  }
+  n
+}
+
+fn closure_int_fold_elem() -> Int = {
+  let js = [1, 2]
+  let ids = [1, 2, 3]
+  var n = 0
+  let r = list.map(
+    js,
+    (j) => match list.fold(ids, none, (a, x) => if x == j then some(x) else a) {
+      some(y) => y * 10,
+      none => 0,
+    },
+  )
+  n = n + list.sum(r)
+  n
+}
+
+fn for_int_map_keep() -> Int = {
+  let js = [1, 2]
+  let ids = [1, 2, 3]
+  var n = 0
+  for _j in js {
+    n = n + (list.map(ids, (x) => x) |> list.fold(0, (a, x) => a + x * 10))
+  }
+  n
+}
+
+fn closure_int_map_keep() -> Int = {
+  let js = [1, 2]
+  let ids = [1, 2, 3]
+  var n = 0
+  let r = list.map(js, (_j) => list.map(ids, (x) => x) |> list.fold(0, (a, x) => a + x * 10))
+  n = n + list.sum(r)
+  n
+}
+
+fn for_int_for_in_keep() -> Int = {
+  let js = [1, 2]
+  let ids = [1, 2, 3]
+  var n = 0
+  for _j in js {
+    n = n + ({
+      var c = 0
+      for x in ids {
+        c = c + x * 10
+      }
+      c
+    })
+  }
+  n
+}
+
+fn closure_int_for_in_keep() -> Int = {
+  let js = [1, 2]
+  let ids = [1, 2, 3]
+  var n = 0
+  let r = list.map(
+    js,
+    (_j) => {
+      var c = 0
+      for x in ids {
+        c = c + x * 10
+      }
+      c
+    },
+  )
+  n = n + list.sum(r)
+  n
+}
+
+fn for_str_find_opt_map() -> Int = {
+  let js = ["a", "bb"]
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  for j in js {
+    n = n + (list.find(ids, (x) => x == j) |> option.map((y) => string.len(y)) ?? 0)
+  }
+  n
+}
+
+fn closure_str_find_opt_map() -> Int = {
+  let js = ["a", "bb"]
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  let r = list.map(
+    js,
+    (j) => list.find(ids, (x) => x == j) |> option.map((y) => string.len(y)) ?? 0,
+  )
+  n = n + list.sum(r)
+  n
+}
+
+fn for_str_find_index() -> Int = {
+  let js = ["a", "bb"]
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  for j in js {
+    n = n + (list.find_index(ids, (x) => x == j) ?? -1)
+  }
+  n
+}
+
+fn closure_str_find_index() -> Int = {
+  let js = ["a", "bb"]
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  let r = list.map(js, (j) => list.find_index(ids, (x) => x == j) ?? -1)
+  n = n + list.sum(r)
+  n
+}
+
+fn for_str_find_map() -> Int = {
+  let js = ["a", "bb"]
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  for j in js {
+    n = n + (list.find_map(ids, (x) => if x == j then some(string.len(x)) else none) ?? 0)
+  }
+  n
+}
+
+fn closure_str_find_map() -> Int = {
+  let js = ["a", "bb"]
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  let r = list.map(
+    js,
+    (j) => list.find_map(ids, (x) => if x == j then some(string.len(x)) else none) ?? 0,
+  )
+  n = n + list.sum(r)
+  n
+}
+
+fn for_str_any() -> Int = {
+  let js = ["a", "bb"]
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  for j in js {
+    n = n + (if list.any(ids, (x) => x == j) then 1 else 0)
+  }
+  n
+}
+
+fn closure_str_any() -> Int = {
+  let js = ["a", "bb"]
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  let r = list.map(js, (j) => if list.any(ids, (x) => x == j) then 1 else 0)
+  n = n + list.sum(r)
+  n
+}
+
+fn for_str_count() -> Int = {
+  let js = ["a", "bb"]
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  for j in js {
+    n = n + (list.count(ids, (x) => x == j))
+  }
+  n
+}
+
+fn closure_str_count() -> Int = {
+  let js = ["a", "bb"]
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  let r = list.map(js, (j) => list.count(ids, (x) => x == j))
+  n = n + list.sum(r)
+  n
+}
+
+fn for_str_filter_find() -> Int = {
+  let js = ["a", "bb"]
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  for j in js {
+    n = n + (if option.is_some(list.filter(ids, (x) => x != j) |> list.find((x) => x != j)) then 1 else 0)
+  }
+  n
+}
+
+fn closure_str_filter_find() -> Int = {
+  let js = ["a", "bb"]
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  let r = list.map(
+    js,
+    (j) => if option.is_some(list.filter(ids, (x) => x != j) |> list.find((x) => x != j)) then 1 else 0,
+  )
+  n = n + list.sum(r)
+  n
+}
+
+fn for_str_fold_elem() -> Int = {
+  let js = ["a", "bb"]
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  for j in js {
+    n = n + (match list.fold(ids, none, (a, x) => if x == j then some(x) else a) {
+      some(y) => string.len(y),
+      none => 0,
+    })
+  }
+  n
+}
+
+fn closure_str_fold_elem() -> Int = {
+  let js = ["a", "bb"]
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  let r = list.map(
+    js,
+    (j) => match list.fold(ids, none, (a, x) => if x == j then some(x) else a) {
+      some(y) => string.len(y),
+      none => 0,
+    },
+  )
+  n = n + list.sum(r)
+  n
+}
+
+fn for_str_map_keep() -> Int = {
+  let js = ["a", "bb"]
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  for _j in js {
+    n = n + (list.map(ids, (x) => x) |> list.fold(0, (a, x) => a + string.len(x)))
+  }
+  n
+}
+
+fn closure_str_map_keep() -> Int = {
+  let js = ["a", "bb"]
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  let r = list.map(js, (_j) => list.map(ids, (x) => x) |> list.fold(0, (a, x) => a + string.len(x)))
+  n = n + list.sum(r)
+  n
+}
+
+fn for_str_for_in_keep() -> Int = {
+  let js = ["a", "bb"]
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  for _j in js {
+    n = n + ({
+      var c = 0
+      for x in ids {
+        c = c + string.len(x)
+      }
+      c
+    })
+  }
+  n
+}
+
+fn closure_str_for_in_keep() -> Int = {
+  let js = ["a", "bb"]
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  let r = list.map(
+    js,
+    (_j) => {
+      var c = 0
+      for x in ids {
+        c = c + string.len(x)
+      }
+      c
+    },
+  )
+  n = n + list.sum(r)
+  n
+}
+
+fn for_lst_find_opt_map() -> Int = {
+  let js = [
+    [1],
+    [2, 2]
+  ]
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  for j in js {
+    n = n + (list.find(ids, (x) => x == j) |> option.map((y) => list.len(y)) ?? 0)
+  }
+  n
+}
+
+fn closure_lst_find_opt_map() -> Int = {
+  let js = [
+    [1],
+    [2, 2]
+  ]
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  let r = list.map(js, (j) => list.find(ids, (x) => x == j) |> option.map((y) => list.len(y)) ?? 0)
+  n = n + list.sum(r)
+  n
+}
+
+fn for_lst_find_index() -> Int = {
+  let js = [
+    [1],
+    [2, 2]
+  ]
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  for j in js {
+    n = n + (list.find_index(ids, (x) => x == j) ?? -1)
+  }
+  n
+}
+
+fn closure_lst_find_index() -> Int = {
+  let js = [
+    [1],
+    [2, 2]
+  ]
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  let r = list.map(js, (j) => list.find_index(ids, (x) => x == j) ?? -1)
+  n = n + list.sum(r)
+  n
+}
+
+fn for_lst_find_map() -> Int = {
+  let js = [
+    [1],
+    [2, 2]
+  ]
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  for j in js {
+    n = n + (list.find_map(ids, (x) => if x == j then some(list.len(x)) else none) ?? 0)
+  }
+  n
+}
+
+fn closure_lst_find_map() -> Int = {
+  let js = [
+    [1],
+    [2, 2]
+  ]
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  let r = list.map(
+    js,
+    (j) => list.find_map(ids, (x) => if x == j then some(list.len(x)) else none) ?? 0,
+  )
+  n = n + list.sum(r)
+  n
+}
+
+fn for_lst_any() -> Int = {
+  let js = [
+    [1],
+    [2, 2]
+  ]
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  for j in js {
+    n = n + (if list.any(ids, (x) => x == j) then 1 else 0)
+  }
+  n
+}
+
+fn closure_lst_any() -> Int = {
+  let js = [
+    [1],
+    [2, 2]
+  ]
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  let r = list.map(js, (j) => if list.any(ids, (x) => x == j) then 1 else 0)
+  n = n + list.sum(r)
+  n
+}
+
+fn for_lst_count() -> Int = {
+  let js = [
+    [1],
+    [2, 2]
+  ]
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  for j in js {
+    n = n + (list.count(ids, (x) => x == j))
+  }
+  n
+}
+
+fn closure_lst_count() -> Int = {
+  let js = [
+    [1],
+    [2, 2]
+  ]
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  let r = list.map(js, (j) => list.count(ids, (x) => x == j))
+  n = n + list.sum(r)
+  n
+}
+
+fn for_lst_filter_find() -> Int = {
+  let js = [
+    [1],
+    [2, 2]
+  ]
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  for j in js {
+    n = n + (if option.is_some(list.filter(ids, (x) => x != j) |> list.find((x) => x != j)) then 1 else 0)
+  }
+  n
+}
+
+fn closure_lst_filter_find() -> Int = {
+  let js = [
+    [1],
+    [2, 2]
+  ]
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  let r = list.map(
+    js,
+    (j) => if option.is_some(list.filter(ids, (x) => x != j) |> list.find((x) => x != j)) then 1 else 0,
+  )
+  n = n + list.sum(r)
+  n
+}
+
+fn for_lst_fold_elem() -> Int = {
+  let js = [
+    [1],
+    [2, 2]
+  ]
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  for j in js {
+    n = n + (match list.fold(ids, none, (a, x) => if x == j then some(x) else a) {
+      some(y) => list.len(y),
+      none => 0,
+    })
+  }
+  n
+}
+
+fn closure_lst_fold_elem() -> Int = {
+  let js = [
+    [1],
+    [2, 2]
+  ]
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  let r = list.map(
+    js,
+    (j) => match list.fold(ids, none, (a, x) => if x == j then some(x) else a) {
+      some(y) => list.len(y),
+      none => 0,
+    },
+  )
+  n = n + list.sum(r)
+  n
+}
+
+fn for_lst_map_keep() -> Int = {
+  let js = [
+    [1],
+    [2, 2]
+  ]
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  for _j in js {
+    n = n + (list.map(ids, (x) => x) |> list.fold(0, (a, x) => a + list.len(x)))
+  }
+  n
+}
+
+fn closure_lst_map_keep() -> Int = {
+  let js = [
+    [1],
+    [2, 2]
+  ]
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  let r = list.map(js, (_j) => list.map(ids, (x) => x) |> list.fold(0, (a, x) => a + list.len(x)))
+  n = n + list.sum(r)
+  n
+}
+
+fn for_lst_for_in_keep() -> Int = {
+  let js = [
+    [1],
+    [2, 2]
+  ]
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  for _j in js {
+    n = n + ({
+      var c = 0
+      for x in ids {
+        c = c + list.len(x)
+      }
+      c
+    })
+  }
+  n
+}
+
+fn closure_lst_for_in_keep() -> Int = {
+  let js = [
+    [1],
+    [2, 2]
+  ]
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  let r = list.map(
+    js,
+    (_j) => {
+      var c = 0
+      for x in ids {
+        c = c + list.len(x)
+      }
+      c
+    },
+  )
+  n = n + list.sum(r)
+  n
+}
+
+test "int elements: the source list survives every family in a repeated body" {
+  assert_eq(for_int_find_opt_map(), 30)
+  assert_eq(closure_int_find_opt_map(), 30)
+  assert_eq(for_int_find_index(), 1)
+  assert_eq(closure_int_find_index(), 1)
+  assert_eq(for_int_find_map(), 30)
+  assert_eq(closure_int_find_map(), 30)
+  assert_eq(for_int_any(), 2)
+  assert_eq(closure_int_any(), 2)
+  assert_eq(for_int_count(), 2)
+  assert_eq(closure_int_count(), 2)
+  assert_eq(for_int_filter_find(), 2)
+  assert_eq(closure_int_filter_find(), 2)
+  assert_eq(for_int_fold_elem(), 30)
+  assert_eq(closure_int_fold_elem(), 30)
+  assert_eq(for_int_map_keep(), 120)
+  assert_eq(closure_int_map_keep(), 120)
+  assert_eq(for_int_for_in_keep(), 120)
+  assert_eq(closure_int_for_in_keep(), 120)
+}
+
+test "str elements: the source list survives every family in a repeated body" {
+  assert_eq(for_str_find_opt_map(), 3)
+  assert_eq(closure_str_find_opt_map(), 3)
+  assert_eq(for_str_find_index(), 1)
+  assert_eq(closure_str_find_index(), 1)
+  assert_eq(for_str_find_map(), 3)
+  assert_eq(closure_str_find_map(), 3)
+  assert_eq(for_str_any(), 2)
+  assert_eq(closure_str_any(), 2)
+  assert_eq(for_str_count(), 2)
+  assert_eq(closure_str_count(), 2)
+  assert_eq(for_str_filter_find(), 2)
+  assert_eq(closure_str_filter_find(), 2)
+  assert_eq(for_str_fold_elem(), 3)
+  assert_eq(closure_str_fold_elem(), 3)
+  assert_eq(for_str_map_keep(), 12)
+  assert_eq(closure_str_map_keep(), 12)
+  assert_eq(for_str_for_in_keep(), 12)
+  assert_eq(closure_str_for_in_keep(), 12)
+}
+
+test "lst elements: the source list survives every family in a repeated body" {
+  assert_eq(for_lst_find_opt_map(), 3)
+  assert_eq(closure_lst_find_opt_map(), 3)
+  assert_eq(for_lst_find_index(), 1)
+  assert_eq(closure_lst_find_index(), 1)
+  assert_eq(for_lst_find_map(), 3)
+  assert_eq(closure_lst_find_map(), 3)
+  assert_eq(for_lst_any(), 2)
+  assert_eq(closure_lst_any(), 2)
+  assert_eq(for_lst_count(), 2)
+  assert_eq(closure_lst_count(), 2)
+  assert_eq(for_lst_filter_find(), 2)
+  assert_eq(closure_lst_filter_find(), 2)
+  assert_eq(for_lst_fold_elem(), 3)
+  assert_eq(closure_lst_fold_elem(), 3)
+  assert_eq(for_lst_map_keep(), 12)
+  assert_eq(closure_lst_map_keep(), 12)
+  assert_eq(for_lst_for_in_keep(), 12)
+  assert_eq(closure_lst_for_in_keep(), 12)
+}

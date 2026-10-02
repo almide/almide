@@ -128,10 +128,11 @@ impl UseSites {
         counts
     }
 
-    /// The variables written directly: reassigned, mutated in place, or
-    /// `&mut`-borrowed as a bare `Var`.
+    /// The variables written: reassigned, mutated in place, or `&mut`-borrowed
+    /// — as a bare `Var` or as the root of a place projection (`&mut r.xs`,
+    /// `&mut r.a.b`), since writing a field of `r` writes `r` (#3197).
     pub fn written(&self) -> HashSet<VarId> {
-        self.uses.iter().filter(|u| u.is_write(false)).map(|u| u.var).collect()
+        self.uses.iter().filter(|u| u.is_write(true)).map(|u| u.var).collect()
     }
 }
 
@@ -711,9 +712,10 @@ impl<'a> Walk<'a> {
     }
 }
 
-/// The variables `expr` writes directly: reassigned, mutated in place, or
+/// The variables `expr` writes: reassigned, mutated in place, or
 /// `&mut`-borrowed as a bare `Var` (the form `list.push(v, …)` takes after
-/// `BorrowInsertion`). Shared by `CaptureClone` (a capture the closure writes
+/// `BorrowInsertion`) or as the root of a projection (`list.push(r.xs, …)`,
+/// a field-path `mut` argument, #3197). Shared by `CaptureClone` (a capture the closure writes
 /// keeps its bare bind so the shared-cell wiring sees it) and `StreamFusion`
 /// (a chain whose callback writes its source cannot borrow it, #2098).
 pub fn written_vars(expr: &IrExpr) -> HashSet<VarId> {
