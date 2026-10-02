@@ -29,10 +29,10 @@ payload:UnwrapOr-carrier:OptionNone	1
 record:default	2
 rhs:Fan	6
 rhs:SpreadRecord	5
-rhs:Unwrap	21
+rhs:Unwrap	19
 scan	3
 stmt:Expr:Unit	1
-stmt:Expr:Unwrap	4
+stmt:Expr:Unwrap	1
 stmt:Expr:Var	1
 stmt:Guard:Unwrap	4
 stmt:MapInsert	10
