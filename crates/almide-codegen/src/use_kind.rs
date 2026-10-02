@@ -596,7 +596,8 @@ impl<'a> Walk<'a> {
                         self.chain_lambda(lambda);
                     }
                     IterCollector::Any { lambda } | IterCollector::All { lambda }
-                    | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+                    | IterCollector::Find { lambda } | IterCollector::Count { lambda }
+                    | IterCollector::FindIndex { lambda } | IterCollector::FindMap { lambda } => {
                         self.chain_lambda(lambda)
                     }
                 }
@@ -783,8 +784,12 @@ pub fn element_reads_only(uses: &UseSites, var: VarId, ty: &Ty, fields_move: boo
     // follow in the same iteration is CLONED there by the clone pass (the
     // binder stays live), as is one the E0505 call guard forces: ownership
     // of the element buys it nothing, and a `&T` binder clones the same once
-    // (`param_borrow`'s `cloned_anyway`, applied per element).
-    let cloned_anyway = |u: &Use| u.guard_forced
+    // (`param_borrow`'s `cloned_anyway`, applied per element). So is one
+    // inside a loop or scope lambda nested in the body (`in_loop`): it runs
+    // once per inner iteration / callback call, and the binder is bound
+    // outside it, so it can never move there (#3214 — a list `==` against
+    // the element inside a borrowed callback made the source param owned).
+    let cloned_anyway = |u: &Use| u.guard_forced || u.in_loop
         || all.iter().any(|w| !std::ptr::eq(*w, u) && (*w as *const Use) > (u as *const Use) && uses.keeps_live(u, w));
     all.iter().all(|u| {
         if u.depth > 0 || u.in_mut || u.is_write(true) {

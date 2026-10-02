@@ -568,7 +568,8 @@ fn box_node_unbox_consumed(expr: &mut IrExpr) -> bool {
             match collector {
                 IterCollector::Fold { lambda, .. } | IterCollector::Any { lambda }
                 | IterCollector::All { lambda } | IterCollector::Find { lambda }
-                | IterCollector::Count { lambda } => c |= unbox_consumed(lambda),
+                | IterCollector::Count { lambda } | IterCollector::FindIndex { lambda }
+                | IterCollector::FindMap { lambda } => c |= unbox_consumed(lambda),
                 IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => {}
             }
             c

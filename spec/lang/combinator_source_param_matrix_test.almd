@@ -1,0 +1,152 @@
+// #3214: the param-shaped twin of combinator_source_in_loop_matrix_test.
+// `js` is a PARAM here, iterated by a repeated body (a for body, a closure
+// body) that only reads its elements, around a short-circuiting search over
+// a local list. Native used to render `js` owned (certifier C4) for
+// `list.find_index` / `list.find_map`, which were not fused: the callback
+// was an `Rc<dyn Fn>` that captured the element, and the twins took the
+// searched list as an owned `Vec` (an `ids.clone()` per iteration). The
+// ownership certifier gate runs over this file and must stay at 0. Expected
+// values are the wasm leg's answers.
+fn for_str_find_index(js: List[String]) -> Int = {
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  for j in js {
+    n = n + (list.find_index(ids, (x) => x == j) ?? -1)
+  }
+  n
+}
+
+fn closure_str_find_index(js: List[String]) -> Int = {
+  let ids = ["a", "bb", "ccc"]
+  list.map(js, (j) => list.find_index(ids, (x) => x == j) ?? -1) |> list.sum
+}
+
+fn for_lst_find_index(js: List[List[Int]]) -> Int = {
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  for j in js {
+    n = n + (list.find_index(ids, (x) => x == j) ?? -1)
+  }
+  n
+}
+
+fn closure_lst_find_index(js: List[List[Int]]) -> Int = {
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  list.map(js, (j) => list.find_index(ids, (x) => x == j) ?? -1) |> list.sum
+}
+
+fn for_str_find_map(js: List[String]) -> Int = {
+  let ids = ["a", "bb", "ccc"]
+  var n = 0
+  for j in js {
+    n = n + (list.find_map(ids, (x) => if x == j then some(string.len(x)) else none) ?? 0)
+  }
+  n
+}
+
+fn closure_str_find_map(js: List[String]) -> Int = {
+  let ids = ["a", "bb", "ccc"]
+  list.map(js, (j) => list.find_map(ids, (x) => if x == j then some(string.len(x)) else none) ?? 0) |> list.sum
+}
+
+fn for_lst_find_map(js: List[List[Int]]) -> Int = {
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  for j in js {
+    n = n + (list.find_map(ids, (x) => if x == j then some(list.len(x)) else none) ?? 0)
+  }
+  n
+}
+
+fn closure_lst_find_map(js: List[List[Int]]) -> Int = {
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  list.map(js, (j) => list.find_map(ids, (x) => if x == j then some(list.len(x)) else none) ?? 0) |> list.sum
+}
+
+// A program fn with a callback param is the same shape without the stdlib:
+// its callback slot only calls `f`, so the lambda handed to it is a scope,
+// and a list element it compares is cloned on every call whatever the
+// element's ownership.
+fn first_hit(xs: List[List[Int]], f: (List[Int]) -> Bool) -> Int = {
+  var hit = -1
+  var i = 0
+  for x in xs {
+    if hit < 0 and f(x) then {
+      hit = i
+    } else { () }
+    i = i + 1
+  }
+  hit
+}
+
+fn for_lst_program_callback(js: List[List[Int]]) -> Int = {
+  let ids = [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ]
+  var n = 0
+  for j in js {
+    n = n + first_hit(ids, (x) => x == j)
+  }
+  n
+}
+
+// A search over a fresh list the call owns: the fused chain consumes it.
+fn find_map_over_a_temporary(js: List[String]) -> Int = list.find_map(
+  list.map(js, (s) => s + "!"),
+  (x) => if string.len(x) > 2 then some(string.len(x)) else none,
+) ?? 0
+
+test "find_index over a param read in a repeated body" {
+  let strs = ["bb", "zz", "ccc"]
+  let lsts = [
+    [2, 2],
+    [9],
+    [1]
+  ]
+  assert_eq(for_str_find_index(strs), 2)
+  assert_eq(closure_str_find_index(strs), 2)
+  assert_eq(for_lst_find_index(lsts), 0)
+  assert_eq(closure_lst_find_index(lsts), 0)
+  assert_eq(list.len(strs) + list.len(lsts), 6)
+}
+
+test "find_map over a param read in a repeated body" {
+  let strs = ["bb", "zz", "ccc"]
+  let lsts = [
+    [3, 3, 3],
+    [9],
+    [1]
+  ]
+  assert_eq(for_str_find_map(strs), 5)
+  assert_eq(closure_str_find_map(strs), 5)
+  assert_eq(for_lst_find_map(lsts), 4)
+  assert_eq(closure_lst_find_map(lsts), 4)
+  assert_eq(list.len(strs) + list.len(lsts), 6)
+}
+
+test "a program callback slot and a temporary source" {
+  assert_eq(for_lst_program_callback([
+    [2, 2],
+    [7],
+    [3, 3, 3]
+  ]), 2)
+  assert_eq(find_map_over_a_temporary(["a", "bcd", "ef"]), 4)
+}

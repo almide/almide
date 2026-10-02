@@ -196,7 +196,8 @@ fn collect_varids_in_iter_chain(expr: &IrExpr, out: &mut Vec<VarId>) {
         IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => {}
         IterCollector::Fold { init, lambda } => { collect_varids_in_expr(init, out); collect_varids_in_expr(lambda, out); }
         IterCollector::Any { lambda } | IterCollector::All { lambda }
-        | IterCollector::Find { lambda } | IterCollector::Count { lambda } => collect_varids_in_expr(lambda, out),
+        | IterCollector::Find { lambda } | IterCollector::Count { lambda }
+        | IterCollector::FindIndex { lambda } | IterCollector::FindMap { lambda } => collect_varids_in_expr(lambda, out),
     }
 }
 
@@ -413,7 +414,8 @@ fn remap_iter_chain_varids(expr: &mut IrExpr, remap: &HashMap<VarId, VarId>) {
         IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => {}
         IterCollector::Fold { init, lambda } => { remap_expr_varids(init, remap); remap_expr_varids(lambda, remap); }
         IterCollector::Any { lambda } | IterCollector::All { lambda }
-        | IterCollector::Find { lambda } | IterCollector::Count { lambda } => remap_expr_varids(lambda, remap),
+        | IterCollector::Find { lambda } | IterCollector::Count { lambda }
+        | IterCollector::FindIndex { lambda } | IterCollector::FindMap { lambda } => remap_expr_varids(lambda, remap),
     }
 }
 
