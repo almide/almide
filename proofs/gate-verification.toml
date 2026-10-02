@@ -1355,8 +1355,8 @@ path = "scripts/downstream-canary.sh"
 reason = "the per-leg driver; it writes result.tsv and always exits 0, and the verdict is scripts/downstream-canary.py report"
 
 [[not_a_gate]]
-path = "scripts/fuzz-night-issue-body.sh"
-reason = "renders the findings issue body; the night's verdict is scripts/fuzz-night-verdict.sh"
+path = "scripts/fuzz-night-route.sh"
+reason = "posts the findings issue the body renderer scripts/fuzz-night-issue-body.sh builds (or the #3207 fallback when rendering fails); the night's verdict is scripts/fuzz-night-verdict.sh"
 
 [[not_a_gate]]
 path = "scripts/gen-dossier.sh"

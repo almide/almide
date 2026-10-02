@@ -28,6 +28,15 @@
 #   <cap>             findings listed inline (default 20); the rest stay in the
 #                     artifact and the run log, and the body says so
 #
+# Every field is read with a byte cap (#3207). Run 37013034169's divergence
+# printed a 2^31-1-wide `pad_start`: its `meta.txt` was 2 GiB, the `summary`
+# line embedding the whole stdout line, and this script's output — pulled into
+# `BODY=$(...)` by the workflow — took the verdict job down with SIGSEGV
+# (exit 139), so no issue was filed. The fuzzer now caps what it writes, but
+# an artifact written before that (or by any other path) must not be able to
+# crash the renderer either: a meta.txt is read through `head -c` / `tail -c`
+# only, each listed line is cut at FIELD_CAP bytes, and a cut says so.
+#
 # Tested with forged nights by tests/fuzz_night_report_test.rs.
 
 set -euo pipefail
@@ -40,6 +49,10 @@ REPORTING="${4:?reporting}"
 PLANNED="${5:?planned}"
 MISSING="${6:?missing}"
 CAP="${7:-20}"
+# Bytes of meta.txt read from each end, and bytes kept of each listed line.
+# 20 findings x 3 lines x FIELD_CAP stays under GitHub's 65,536-char body.
+META_CAP=65536
+FIELD_CAP=1024
 
 case "$CLASS" in
   correctness) mapfile -t DIRS < <(find "$DIR" -mindepth 1 -maxdepth 1 -type d ! -name 'Slow__*' ! -name 'LeakAtExit__*' | sort) ;;
@@ -118,11 +131,33 @@ else
   echo "<details><summary>Finding summaries ($COUNT)</summary>"
 fi
 echo ""
+# One finding's listed fields, never more than META_CAP bytes read from either
+# end of its meta.txt. `kind` and `summary` come from the head; `reproduce` is
+# the last line the fuzzer writes, so on an oversized file it comes from the
+# tail (a head read would cut it off). `-a`: a cut can land mid-UTF-8 and the
+# excerpt must still be read as text.
+meta_fields() {
+  local meta="$1" size
+  size=$(wc -c <"$meta" | tr -d ' ')
+  if [ "$size" -le "$META_CAP" ]; then
+    head -c "$META_CAP" "$meta" | grep -aE '^(kind|summary|reproduce)' | cut_lines || true
+  else
+    head -c "$META_CAP" "$meta" | grep -aE '^(kind|summary)' | cut_lines || true
+    tail -c "$META_CAP" "$meta" | grep -aE '^reproduce' | cut_lines || true
+    echo "(meta.txt is $size bytes; listed fields are excerpts — the full file is in the artifact)"
+  fi
+}
+
+# Cut each line at FIELD_CAP bytes, marking the cut. LC_ALL=C: bytes, not chars.
+cut_lines() {
+  awk -v cap="$FIELD_CAP" '{ if (length($0) > cap) print substr($0, 1, cap) "... (line cut at " cap " bytes)"; else print }'
+}
+
 echo '```'
 for ((i = 0; i < SHOWN; i++)); do
   meta="${DIRS[$i]}/meta.txt"
   [ -f "$meta" ] || { echo "kind        = ? (no meta.txt in $(basename "${DIRS[$i]}"))"; continue; }
-  grep -E '^(kind|summary|reproduce)' "$meta" || true
+  meta_fields "$meta"
 done
 if [ "$SHOWN" -lt "$COUNT" ]; then
   echo "... $((COUNT - SHOWN)) more finding(s) not shown (showing $SHOWN of $COUNT)"

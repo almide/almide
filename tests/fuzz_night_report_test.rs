@@ -590,11 +590,21 @@ fn a_recovered_night_counts_and_a_recovered_finding_is_never_a_green_night() {
 fn the_workflow_calls_the_renderers_by_their_committed_paths() {
     let wf = fs::read_to_string(repo_root().join(".github/workflows/fuzz-nightly.yml")).unwrap();
     assert!(wf.contains("bash scripts/fuzz-night-verdict.sh shards"), "verdict call");
-    // correctness, slow (perf-class), leak (LeakAtExit)
-    assert_eq!(wf.matches("bash scripts/fuzz-night-issue-body.sh night-findings").count(), 3, "one call per class");
+    // correctness, slow (perf-class), leak (LeakAtExit) — each through the
+    // route, which renders the body to a file and falls back when it fails
+    // (#3207). A body held in `BODY=$(...)` is the crash that filed nothing.
+    assert_eq!(wf.matches("bash scripts/fuzz-night-route.sh night-findings").count(), 3, "one route per class");
+    assert!(!wf.contains("BODY=$("), "the issue body is back in a shell variable (#3207)");
+    let route = fs::read_to_string(repo_root().join("scripts/fuzz-night-route.sh")).unwrap();
+    assert!(route.contains("fuzz-night-issue-body.sh"), "the route no longer renders the committed body");
     assert!(!wf.contains("head -60"), "the silent 20-finding cap is back");
     assert!(!wf.contains("across ${{ env.FUZZ_SHARDS }} shard(s)"), "the unconditional denominator is back");
-    for p in ["scripts/fuzz-night-verdict.sh", "scripts/fuzz-night-issue-body.sh", "scripts/lib/fuzz-night-line.sh"] {
+    for p in [
+        "scripts/fuzz-night-verdict.sh",
+        "scripts/fuzz-night-issue-body.sh",
+        "scripts/fuzz-night-route.sh",
+        "scripts/lib/fuzz-night-line.sh",
+    ] {
         assert!(repo_root().join(p).is_file(), "{p} missing");
     }
 }
@@ -715,4 +725,103 @@ esac
     let line = r.stderr.lines().find(|l| l.starts_with("fuzz-night: ")).unwrap();
     assert_eq!(field(line, "recovered"), "8@250s", "{}", r.stderr);
     assert_eq!(field(line, "missing"), "none", "{}", r.stderr);
+}
+
+/// #3207: run 37013034169's divergence printed a 2^31-1-wide `pad_start`, its
+/// `meta.txt` was 2 GiB (the `summary` line embeds the differing stdout line),
+/// and the body renderer took the verdict job down with SIGSEGV — no issue was
+/// filed. The renderer now reads every field through a byte cap. This forges a
+/// meta.txt whose summary line is 8 MB (the shape, not the size) and asserts
+/// the body stays small, keeps the replay line from the file's TAIL, and says
+/// it cut.
+#[test]
+fn an_oversized_meta_renders_a_bounded_body_that_keeps_the_replay_line() {
+    let dir = scratch("oversized-meta");
+    let d = dir.join("OutputDivergence__stdout_differs__huge");
+    fs::create_dir_all(&d).unwrap();
+    let huge = " ".repeat(8 * 1024 * 1024);
+    fs::write(
+        d.join("meta.txt"),
+        format!(
+            "seed        = 592208546712\nindex       = 9898\nrung        = Run\nkind        = OutputDivergence\nsummary     = stdout differs: native=\"{huge}\" wasm=\"x\"\nreproduce   = xtarget-fuzz replay --seed 592208546712 --index 9898 --family all\n"
+        ),
+    )
+    .unwrap();
+    let r = bash(
+        &["scripts/fuzz-night-issue-body.sh", dir.to_str().unwrap(), "correctness", "https://example/run", "8", "8", "none"],
+        &[],
+    );
+    assert_eq!(r.code, Some(0), "{}", r.stderr);
+    assert!(r.stdout.len() < 8 * 1024, "body is {} bytes", r.stdout.len());
+    assert!(r.stdout.contains("kind        = OutputDivergence"), "{}", r.stdout);
+    assert!(r.stdout.contains("(line cut at 1024 bytes)"), "the cut is silent");
+    assert!(
+        r.stdout.contains("reproduce   = xtarget-fuzz replay --seed 592208546712 --index 9898 --family all"),
+        "the replay line (the meta's last) was lost to the head cap"
+    );
+    assert!(r.stdout.contains("bytes; listed fields are excerpts"), "the oversize is silent");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// #3207: if the body still cannot be built, the finding is delivered anyway.
+/// A renderer that dies by SIGSEGV (the run 37013034169 exit 139) must leave
+/// the route posting a fallback body that names the count, the exit, and the
+/// artifact — with an `::error::` annotation, and exit 0 because it DID post.
+/// A renderer that works is posted as rendered.
+#[cfg(unix)]
+#[test]
+fn a_body_that_fails_to_render_still_files_the_fallback() {
+    let dir = scratch("route-fallback");
+    let bin = dir.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    finding(&dir.join("findings"), "OutputDivergence__a", "OutputDivergence", 1);
+    let posted = dir.join("posted.md");
+    let gh = format!(
+        r#"#!/bin/bash
+case "$1 $2" in
+  "issue list") echo "" ;;
+  "label create") ;;
+  "issue create"|"issue comment")
+    while [ $# -gt 0 ]; do [ "$1" = --body-file ] && cp "$2" '{posted}'; shift; done ;;
+  *) echo "fake gh: unexpected $*" >&2; exit 2 ;;
+esac
+"#,
+        posted = posted.display()
+    );
+    fs::write(bin.join("gh"), gh).unwrap();
+    fs::write(dir.join("crash.sh"), "#!/bin/bash\necho 'renderer blew up' >&2\nkill -SEGV $$\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(bin.join("gh"), fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+    let findings = dir.join("findings");
+    let args = [
+        "scripts/fuzz-night-route.sh",
+        findings.to_str().unwrap(),
+        "correctness",
+        "1",
+        "https://example/run/37013034169",
+        "8",
+        "8",
+        "none",
+        "fuzz-findings-37013034169",
+    ];
+
+    let crash = dir.join("crash.sh");
+    let r = bash(&args, &[("PATH", &path), ("FUZZ_NIGHT_BODY_SCRIPT", crash.to_str().unwrap())]);
+    assert_eq!(r.code, Some(0), "{}{}", r.stdout, r.stderr);
+    assert!(r.stdout.contains("::error::"), "a fallback delivery is silent: {}", r.stdout);
+    let body = fs::read_to_string(&posted).expect("nothing was posted");
+    assert!(body.contains("**1 correctness finding(s); body generation failed (exit 139"), "{body}");
+    assert!(body.contains("`fuzz-findings-37013034169`"), "{body}");
+    assert!(body.contains("https://example/run/37013034169"), "{body}");
+    assert!(body.contains("renderer blew up"), "{body}");
+
+    fs::remove_file(&posted).unwrap();
+    let r = bash(&args, &[("PATH", &path)]);
+    assert_eq!(r.code, Some(0), "{}{}", r.stdout, r.stderr);
+    assert!(!r.stdout.contains("::error::"), "{}", r.stdout);
+    let body = fs::read_to_string(&posted).expect("nothing was posted");
+    assert!(body.contains("recorded **1** unique finding(s)"), "{body}");
+    assert!(body.contains("stdout differs (OutputDivergence__a)"), "{body}");
+    let _ = fs::remove_dir_all(&dir);
 }
