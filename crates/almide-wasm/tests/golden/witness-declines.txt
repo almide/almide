@@ -4,7 +4,7 @@
 arm-value:borrowed-temp	3
 assign:SpreadRecord	2
 assign:Unwrap	1
-bind:cell	21
+bind:cell	46
 bind:view-result	5
 call-arg:Lambda:fs.__fallible_fold_lines:propagating	1
 call-arg:Lambda:map.__fallible_map__Int_String_String_Int	1
@@ -29,10 +29,10 @@ payload:UnwrapOr-carrier:OptionNone	1
 record:default	2
 rhs:Fan	6
 rhs:SpreadRecord	5
-rhs:Unwrap	19
+rhs:Unwrap	21
 scan	3
 stmt:Expr:Unit	1
-stmt:Expr:Unwrap	1
+stmt:Expr:Unwrap	4
 stmt:Expr:Var	1
 stmt:Guard:Unwrap	4
 stmt:MapInsert	10
