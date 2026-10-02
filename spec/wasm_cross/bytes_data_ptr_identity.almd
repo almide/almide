@@ -1,0 +1,20 @@
+// @contract: C-337
+// bytes.data_ptr is an ADDRESS (semantics manifest `index_unit = "address"`,
+// "never a stable value"): native is `as_ptr`, wasm is the handle + 12, so
+// its magnitude is target layout and is never printed cross-leg. What every
+// leg promises is leg-independent: two calls on one buffer agree, a
+// non-empty buffer's address is non-zero, and the empty buffer's is never
+// negative (native's dangling 0x1, wasm's linear-memory offset).
+//
+// Split out of bytes_search_edit_family.almd for #3193: the nightly fuzzer
+// mutated `>= 0` here into `>= 160` and reported the layout difference as a
+// divergence. The fuzzer now screens every file naming data_ptr out of its
+// mutation seeds, so this property lives in its own small file and the
+// rest of the bytes family stays a seed.
+fn main() -> Unit = {
+  let abcde = bytes.from_string("abcde")
+  let p1 = bytes.data_ptr(abcde)
+  let p2 = bytes.data_ptr(abcde)
+  let e = bytes.from_string("")
+  println("data_ptr ${p1 == p2} ${p1 != 0} ${bytes.data_ptr(e) >= 0}")
+}
