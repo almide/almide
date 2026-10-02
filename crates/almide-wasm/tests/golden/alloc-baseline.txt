@@ -44,6 +44,7 @@
 66528	spec/wasm_cross/bytes_copy_from_negative_len.almd
 66176	spec/wasm_cross/bytes_copy_within_offset_domain.almd
 72192	spec/wasm_cross/bytes_cursor_read_domain.almd
+65824	spec/wasm_cross/bytes_data_ptr_identity.almd
 65776	spec/wasm_cross/bytes_equality_call_operands.almd
 66736	spec/wasm_cross/bytes_f16.almd
 67648	spec/wasm_cross/bytes_f16_offset_overflow.almd
@@ -61,7 +62,7 @@
 65696	spec/wasm_cross/bytes_push_inplace.almd
 66256	spec/wasm_cross/bytes_rawptr.almd
 65952	spec/wasm_cross/bytes_repeat_product_wrap_oom.almd
-67920	spec/wasm_cross/bytes_search_edit_family.almd
+67888	spec/wasm_cross/bytes_search_edit_family.almd
 67824	spec/wasm_cross/bytes_set_on_record_field.almd
 66096	spec/wasm_cross/bytes_set_value_semantics.almd
 66864	spec/wasm_cross/bytes_string_window_domain.almd
