@@ -428,34 +428,23 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          COUNT="${{ steps.agg.outputs.correctness }}"
-          TITLE="Nightly fuzz: $COUNT cross-target finding(s)"
-          # The body says from how many shards the count was collected, names
-          # the shards that did not return, and caps the listing by FINDINGS
-          # with a "showing k of N" when it bites (#2390: the inline 60-line
-          # head was a silent cap of exactly 20 findings, and "across 8
-          # shard(s)" was printed whether 8 uploaded or 1).
-          BODY=$(bash scripts/fuzz-night-issue-body.sh night-findings correctness \
+          # The body (scripts/fuzz-night-issue-body.sh) says from how many shards
+          # the count was collected, names the shards that did not return, and
+          # caps the listing by FINDINGS with a "showing k of N" when it bites
+          # (#2390). The route renders it to a file and, if rendering fails,
+          # still files a fallback body naming the count and the artifact
+          # (#3207: run 37013034169 died with SIGSEGV pulling a 2 GiB meta.txt
+          # into a shell variable and filed nothing). It routes by a label only a
+          # FINDINGS issue wears: `fuzz` is worn by long-lived instrument issues
+          # too (#924, the full-budget ratchet), and `--label fuzz` once posted
+          # 54 correctness findings there as comments (#2379).
+          bash scripts/fuzz-night-route.sh night-findings correctness \
+            "${{ steps.agg.outputs.correctness }}" \
             "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             "${{ steps.verdict.outputs.reporting || '?' }}" \
             "${{ steps.verdict.outputs.shards_planned || env.FUZZ_SHARDS }}" \
-            "${{ steps.verdict.outputs.missing || 'unknown' }}")
-          # Route by a label only a FINDINGS issue wears. `fuzz` is worn by
-          # long-lived instrument issues too — #924 is the full-budget ratchet
-          # — so `--label fuzz` picked whichever the API listed first and
-          # posted correctness findings there as comments. 54 of them went to
-          # #924, the last on the morning of the 0.63.0 cut: a real E0505
-          # regression sat as comment 71 on a budget tracker and reached the
-          # release only because the soak was run by hand before the tag.
-          # The perf step below has always had its own `fuzz-perf` label and
-          # was never affected; this is that shape, applied here.
-          EXISTING=$(gh issue list --label fuzz-findings --state open --json number --jq '.[0].number' || echo "")
-          if [ -n "$EXISTING" ]; then
-            gh issue comment "$EXISTING" --body "$BODY"
-          else
-            gh label create fuzz-findings --color B60205 --description "Correctness findings from the nightly differential fuzzer" 2>/dev/null || true
-            gh issue create --title "$TITLE" --body "$BODY" --label fuzz-findings
-          fi
+            "${{ steps.verdict.outputs.missing || 'unknown' }}" \
+            "fuzz-findings-${{ github.run_id }}"
 
       # Perf-class Slow findings route to their OWN issue under their own
       # label (#1235): they are real findings — an order-of-magnitude budget
@@ -467,23 +456,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          COUNT="${{ steps.agg.outputs.slow }}"
-          TITLE="Nightly fuzz: $COUNT slow finding(s) (perf-class)"
-          # Same renderer as the correctness path, same cap-by-findings and
-          # same shard qualification (#2390: the perf path carried the identical
-          # silent 60-line head; #2302 is subject to it).
-          BODY=$(bash scripts/fuzz-night-issue-body.sh night-findings slow \
+          # Same route as the correctness path, same body, same fallback (#3207).
+          bash scripts/fuzz-night-route.sh night-findings slow \
+            "${{ steps.agg.outputs.slow }}" \
             "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             "${{ steps.verdict.outputs.reporting || '?' }}" \
             "${{ steps.verdict.outputs.shards_planned || env.FUZZ_SHARDS }}" \
-            "${{ steps.verdict.outputs.missing || 'unknown' }}")
-          EXISTING=$(gh issue list --label fuzz-perf --state open --json number --jq '.[0].number' || echo "")
-          if [ -n "$EXISTING" ]; then
-            gh issue comment "$EXISTING" --body "$BODY"
-          else
-            gh label create fuzz-perf --color D93F0B --description "Perf-class (Slow) findings from the nightly fuzzer" 2>/dev/null || true
-            gh issue create --title "$TITLE" --body "$BODY" --label fuzz-perf
-          fi
+            "${{ steps.verdict.outputs.missing || 'unknown' }}" \
+            "fuzz-findings-${{ github.run_id }}"
 
       # LeakAtExit findings (the live-heap rung) route to their own issue
       # under their own label, the Slow shape: a leak the corpus ledger does
@@ -495,20 +475,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          COUNT="${{ steps.agg.outputs.leak }}"
-          TITLE="Nightly fuzz: $COUNT wasm leak-at-exit finding(s)"
-          BODY=$(bash scripts/fuzz-night-issue-body.sh night-findings leak \
+          # Same route as the correctness path, same body, same fallback (#3207).
+          bash scripts/fuzz-night-route.sh night-findings leak \
+            "${{ steps.agg.outputs.leak }}" \
             "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             "${{ steps.verdict.outputs.reporting || '?' }}" \
             "${{ steps.verdict.outputs.shards_planned || env.FUZZ_SHARDS }}" \
-            "${{ steps.verdict.outputs.missing || 'unknown' }}")
-          EXISTING=$(gh issue list --label fuzz-leak --state open --json number --jq '.[0].number' || echo "")
-          if [ -n "$EXISTING" ]; then
-            gh issue comment "$EXISTING" --body "$BODY"
-          else
-            gh label create fuzz-leak --color 5319E7 --description "Wasm heap blocks live at exit, from the nightly fuzzer's live-heap rung" 2>/dev/null || true
-            gh issue create --title "$TITLE" --body "$BODY" --label fuzz-leak
-          fi
+            "${{ steps.verdict.outputs.missing || 'unknown' }}" \
+            "fuzz-findings-${{ github.run_id }}"
 
       # CORRECTNESS findings, and only those, make the night red. Coverage lost
       # to a reclaimed runner is reported by the verdict as `shards=k/N` and is
