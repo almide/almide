@@ -4,8 +4,9 @@
 // The gate's shape: walk `spec/` for every `.almd` with a `fn main`, run each one through
 // BOTH pipelines, classify with `parity.verdict_full`, and compare the resulting match-list
 // against a committed baseline that may only grow. A file that drops out of the baseline is a
-// regression and fails the gate; a file that newly matches is reported so a human can ratchet
-// it in with `--update`.
+// regression and fails the gate; a file that matches with no baseline row fails it too (#3198:
+// it used to be reported and passed, so a forgotten `--update` left the file uncompared) — a
+// human ratchets it in with `--update`.
 //
 // Two behaviours here look like bugs and are not — the bash learned both the hard way, and a
 // reimplementation that "cleans them up" produces different bytes:
@@ -363,11 +364,14 @@ effect fn sweep(root: String, alm: String, baseline_path: String, update: Bool) 
     let tail = if list.len(regressions) > 0 then [
       "output-parity: REGRESSION — these baseline files stopped byte-matching v0:"
     ] + (regressions |> list.map((f) => "  - " + f))
+    else if list.len(gained) > 0 then [
+      "::error::output-parity: INCOMPLETE BASELINE — " + int.to_string(list.len(gained)) + " matching file(s) above have no row, so no later run compares them (#3198). Run --update and commit the rows."
+    ]
     else ["output-parity: OK — all " + int.to_string(list.len(baseline)) + " baseline files still byte-match v0."]
     Sweep {
       lines: [summary] + classes + ledger.lines + gained_lines + tail,
       matches: matches,
-      ok: list.len(regressions) == 0,
+      ok: list.len(regressions) == 0 and list.len(gained) == 0,
     }
   }
 }
@@ -382,7 +386,8 @@ test "the skipped files are counted, not silently dropped" {
 
 test "a regression is a baseline file that stopped matching, and only that" {
   // A NEW match is not a regression — the baseline only grows, and it grows by an explicit
-  // `--update`, never by the gate quietly accepting whatever it saw this run.
+  // `--update`, never by the gate quietly accepting whatever it saw this run. It still fails
+  // the gate, as an incomplete baseline (#3198), not as a regression.
   let baseline = ["a.almd", "b.almd"]
   let matches = ["a.almd", "c.almd"]
   assert_eq(missing_from(baseline, matches), ["b.almd"])
