@@ -157,9 +157,9 @@ No runtime, no GC, no interpreter — native compiles through Rust to machine co
 <!-- wasm-size:generated:start — rendered from docs/benchmarks/wasm-size.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
 | Program (`almide build --target wasm`, as shipped) | structural leg |
 |---|---:|
-| Hello, world | **831 B** |
+| Hello, world | **953 B** |
 
-Measured on almide 0.66.0 (dev), 2026-10-01, from `docs/benchmarks/wasm-size.txt`; no post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the renderer's own module).
+Measured on almide 0.66.0 (dev), 2026-10-03, from `docs/benchmarks/wasm-size.txt`; no post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the renderer's own module).
 <!-- wasm-size:generated:end -->
 
 Rust on the same wasm target is 40 KB+ for Hello, world even fully size-tuned; the native minigit CLI binary is 418 KB stripped with 0 dependencies. The byte-by-byte dissection, measured 2026-07-23 (it also covers the incumbent leg, since retired by #2761): **[docs/wasm/WASM-OUTPUT.md](./docs/wasm/WASM-OUTPUT.md)**.
