@@ -215,3 +215,32 @@ tested or deleted depends on whether `prim` is user surface (#3025).
 
 This floor includes #2950's deletion, which reaches develop with batch-074;
 measured on a tree without it, the TOTAL is about two points lower.
+
+## Condition floor restored without moving it — 2026-10-02 (#3195)
+
+The nightly per-condition job was red on every night of the v0.66.0 window
+(52.08–52.30% against the 55.53% floor). The tree had not lost its tests; the
+workload had lost its native leg. `almide test spec/` runs every file on the
+wasm leg first and compiles natively only what that leg cannot pass. While the
+wasm leg needed the wasmtime CLI, which the coverage runners do not have, every
+file fell back to native, so the sweep measured the Rust codegen by accident.
+7fb199704 moved the wasm leg onto the embedded host, the fallback emptied, and
+almide-codegen lost ~1,500 covered branches in one night (develop 595d60459,
+51.86%): `pass_peephole.rs` 148 → 32 of 248, `pass_region_window.rs` 154 → 46
+of 188, `pass_list_pattern.rs` 59 → 1 of 86, `pass_shared_cell_borrow.rs`
+41 → 1 of 44, and so on through every native pass and the walker.
+
+`coverage.sh` now also runs `almide test spec/ --target rust` (on in CONDITION
+mode; the nightly line-mode job opts in with `ALMIDE_COVERAGE_NATIVE_LEG=1`;
+the push-time job keeps its 45-minute budget without it). Measured as the
+nightly condition job on the fix branch (run 36972952531):
+
+| run | branches | missed | TOTAL |
+|---|---|---|---|
+| v0.66.0-rc5 night (36966772832) | 38303 | 18270 | 52.30% |
+| the fix branch (36972952531) | 38303 | 16618 | **56.61%** |
+
+almide-codegen +1,579 covered branches, almide-frontend +8, the other crates
+unchanged. The floor stays at 55.53%. A red #566 job now opens or comments on
+an issue labelled `coverage-ratchet` (`scripts/coverage-night-route.sh`, the
+`coverage-route` job), so a red night reaches someone without opening the run.
