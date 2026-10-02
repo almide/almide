@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at ec204251a — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at 424b0f121 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -761,6 +761,7 @@ ad1ce30e25dc8a74e1570de8d1693f031b5d841746b0566b59cf9da18c5b6750	spec/wasm_cross
 ef915ed79cc87fe2352e7ea5a18c82b2aa750b9477a7fc1ace519b6c21e66da4	spec/wasm_cross/bytes_set_value_semantics.almd
 8016afc68950f5a018a05b6a8a3f770ced74e7c27366581790ce0a9075a1b3b9	spec/wasm_cross/bytes_string_window_domain.almd
 825872b239ac1973c700eca59d4574ed9c98b4ffb600eed0367a50691abd27a4	spec/wasm_cross/bytes_temp_receiver.almd
+e611607dbce0e4441a7a6091191dc5b5e6f9c9fdbf8278449a0973bc2bb94c8c	spec/wasm_cross/bytes_to_string_err_release.almd
 a66742768e5d6eb021c9f3564219111f5bc2158993b940af43a9b41f10e3510c	spec/wasm_cross/bytes_writer_family.almd
 f10b117edf4d1cb15667a040b3e6a4db194321e467cd2dd8f45a337828403f0f	spec/wasm_cross/bytes_writer_mut_from_declaration.almd
 0bd0a44cdbbe84053fe39d10c3bdee0c0250f339d8035f2d926fc179ddfa234d	spec/wasm_cross/call_closure_lambda_param.almd
