@@ -5,11 +5,13 @@
 # fallbacks where the body abstained or has no body. The body is the third
 # vote; this is the bridge's measured residue. An arm absent here is dead.
 #
-# Format: <module.func>  <first fixture>  <floor: … | why the body abstained>
+# Format: <module.func>  <witness>  <floor: … | why the body abstained>
+#         witness = the smallest fixture stem (byte order) reaching the name
 # Gate:   wasm_runtime_interp_ledger.rs::interp_bridge_fallback_ledger —
 #         fails on a name missing here AND on a ledgered name the corpus no
 #         longer reaches through the bridge (a shadowed arm: delete it), AND
-#         on a recorded reason that differs from the observed reason.
+#         on a recorded reason or witness that differs from the observed one
+#         (#3203: this file equals a regeneration).
 # Regenerate (then review the diff!):
 #   ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test --test wasm_runtime_interp_ledger interp_bridge_fallback_ledger
 
@@ -33,8 +35,8 @@ int.from_int16  int_bit_family  floor: consumed inside a self-hosted body
 int.from_int32  checked_conversion_value_match  floor: consumed inside a self-hosted body
 int.from_int64  checked_conversion_value_match  floor: consumed inside a self-hosted body
 int.from_int8  checked_conversion_value_match  floor: consumed inside a self-hosted body
-int.from_uint16  endian_explicit_import  floor: consumed inside a self-hosted body
-int.from_uint32  endian_explicit_import  floor: consumed inside a self-hosted body
+int.from_uint16  declaration_literal_domain  floor: consumed inside a self-hosted body
+int.from_uint32  declaration_literal_domain  floor: consumed inside a self-hosted body
 int.from_uint64  checked_conversion_exact_bounds  floor: consumed inside a self-hosted body
 int.from_uint8  checked_conversion_value_match  floor: consumed inside a self-hosted body
 int.parse  datetime_parse_iso_strict  floor: consumed inside a self-hosted body
