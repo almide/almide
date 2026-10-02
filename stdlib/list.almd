@@ -202,7 +202,6 @@ fn group_by[A, B](xs: List[A], f: (A) -> B) -> Map[B, List[A]] = _
 
 /// Index of the first x where f holds, or none.
 @intrinsic("almide_rt_list_find_index")
-@consume(xs)
 fn find_index[A](xs: List[A], f: (A) -> Bool) -> Int? = _
 
 /// Copy with slot i = f(old); no-op if i out of range.
@@ -232,7 +231,6 @@ fn range(start: Int, end: Int) -> List[Int] = _
 
 /// Indices start..<end, clamped; [] if start >= end.
 @intrinsic("almide_rt_list_slice")
-@consume(xs)
 fn slice[A](xs: List[A], start: Int, end: Int) -> List[A] = _
 
 /// Copy with val at i; i >= len or i < 0 appends.
@@ -264,12 +262,10 @@ fn dedup[A](xs: List[A]) -> List[A] = _
 
 /// Last n elements; all if n >= len or n < 0.
 @intrinsic("almide_rt_list_take_end")
-@consume(xs)
 fn take_end[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All but the last n; [] if n >= len or n < 0.
 @intrinsic("almide_rt_list_drop_end")
-@consume(xs)
 fn drop_end[A](xs: List[A], n: Int) -> List[A] = _
 
 /// Random permutation; unseeded, differs per run.
@@ -279,7 +275,6 @@ fn shuffle[A](xs: List[A]) -> List[A] = _
 
 /// All n-long runs; [] if n > len; n = 0 aborts.
 @intrinsic("almide_rt_list_window")
-@consume(xs)
 fn window[A](xs: List[A], n: Int) -> List[List[A]] = _
 
 /// Index of target in ascending xs, or none.

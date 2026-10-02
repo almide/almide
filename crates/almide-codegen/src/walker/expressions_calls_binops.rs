@@ -38,6 +38,8 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
         IterCollector::Any { lambda } => format!("{}.any({})", chain, render_expr(ctx, lambda)),
         IterCollector::All { lambda } => format!("{}.all({})", chain, render_expr(ctx, lambda)),
         IterCollector::Find { lambda } => format!("{}.find({})", chain, render_expr(ctx, lambda)),
+        IterCollector::FindIndex { lambda } => format!("{}.position({}).map(|i| i as i64)", chain, render_expr(ctx, lambda)),
+        IterCollector::FindMap { lambda } => format!("{}.find_map({})", chain, render_expr(ctx, lambda)),
         IterCollector::Count { lambda } => format!("{}.filter({}).count() as i64", chain, render_expr(ctx, lambda)),
         // Same law as `almide_rt_list_sum` (C-056): two's-complement wrapping,
         // never the profile-dependent `Iterator::sum` overflow check.

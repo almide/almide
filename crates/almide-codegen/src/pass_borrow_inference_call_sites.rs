@@ -478,6 +478,8 @@ fn map_collector(collector: IterCollector, f: &mut dyn FnMut(IrExpr) -> IrExpr) 
         IterCollector::Any { lambda } => IterCollector::Any { lambda: Box::new(f(*lambda)) },
         IterCollector::All { lambda } => IterCollector::All { lambda: Box::new(f(*lambda)) },
         IterCollector::Find { lambda } => IterCollector::Find { lambda: Box::new(f(*lambda)) },
+        IterCollector::FindIndex { lambda } => IterCollector::FindIndex { lambda: Box::new(f(*lambda)) },
+        IterCollector::FindMap { lambda } => IterCollector::FindMap { lambda: Box::new(f(*lambda)) },
         IterCollector::Count { lambda } => IterCollector::Count { lambda: Box::new(f(*lambda)) },
         IterCollector::Collect => IterCollector::Collect,
         IterCollector::Sum { float } => IterCollector::Sum { float },

@@ -55,6 +55,17 @@ fn assert_builds_and_passes_natively(name: &str) {
         "{name} failed on the native target (a chain source moved in a repeated body again?):\n{}\n{stdout}",
         String::from_utf8_lossy(&out.stderr)
     );
+    // The ownership certifier re-derives every native verdict from the final
+    // IR; a param a repeated body only reads must not be rendered owned (C4,
+    // #3214), and nothing else in these files may be flagged either.
+    let out = Command::new(almide())
+        .args([src.to_str().unwrap(), "--target", "rust"])
+        .env("ALMIDE_CERTIFY_OWNERSHIP", "report")
+        .output()
+        .expect("emit rust");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let violations: Vec<&str> = stderr.lines().filter(|l| l.contains("[CERTIFY OWNERSHIP]")).collect();
+    assert!(violations.is_empty(), "{name}: the ownership certifier flagged the native verdicts:\n{}", violations.join("\n"));
 }
 
 #[test]
@@ -65,4 +76,11 @@ fn combinator_sources_in_repeated_bodies_build_natively() {
 #[test]
 fn combinator_family_matrix_builds_natively() {
     assert_builds_and_passes_natively("combinator_source_in_loop_matrix_test.almd");
+}
+
+/// #3214: the matrix with `js` as a PARAM. `list.find_index` / `list.find_map`
+/// were unfused, so the element their callback captured made the param owned.
+#[test]
+fn combinator_param_matrix_builds_natively_and_borrows() {
+    assert_builds_and_passes_natively("combinator_source_param_matrix_test.almd");
 }

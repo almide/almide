@@ -276,6 +276,8 @@ pub fn substitute_var_in_expr(expr: &IrExpr, var: VarId, replacement: &IrExpr) -
                     IterCollector::Any { lambda } => IterCollector::Any { lambda: Box::new(sub(lambda)) },
                     IterCollector::All { lambda } => IterCollector::All { lambda: Box::new(sub(lambda)) },
                     IterCollector::Find { lambda } => IterCollector::Find { lambda: Box::new(sub(lambda)) },
+                    IterCollector::FindIndex { lambda } => IterCollector::FindIndex { lambda: Box::new(sub(lambda)) },
+                    IterCollector::FindMap { lambda } => IterCollector::FindMap { lambda: Box::new(sub(lambda)) },
                     IterCollector::Count { lambda } => IterCollector::Count { lambda: Box::new(sub(lambda)) },
                 },
             },

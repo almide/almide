@@ -353,7 +353,8 @@ fn transform_expr_iter_chain(expr: &mut IrExpr, cx: &mut Cx, scope_vars: &HashSe
             changed |= transform_chain_lambda(lambda, cx, scope_vars);
         }
         IterCollector::Any { lambda } | IterCollector::All { lambda }
-        | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+        | IterCollector::Find { lambda } | IterCollector::Count { lambda }
+        | IterCollector::FindIndex { lambda } | IterCollector::FindMap { lambda } => {
             changed |= transform_chain_lambda(lambda, cx, scope_vars);
         }
     }
@@ -670,7 +671,8 @@ fn replace_vars_iter_chain(expr: &mut IrExpr, renames: &Renames) {
             replace_vars(lambda, renames);
         }
         IterCollector::Any { lambda } | IterCollector::All { lambda }
-        | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+        | IterCollector::Find { lambda } | IterCollector::Count { lambda }
+        | IterCollector::FindIndex { lambda } | IterCollector::FindMap { lambda } => {
             replace_vars(lambda, renames);
         }
     }

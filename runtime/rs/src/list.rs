@@ -102,7 +102,7 @@ pub fn almide_rt_list_flat_map_arr<A, B, const N: usize, F: Fn(A) -> [B; N]>(xs:
 }
 pub fn almide_rt_list_flat_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<Vec<B>, String>>) -> Result<Vec<B>, String> { let f = move |a| f(a); let mut r = Vec::new(); for x in xs { r.extend(f(x)?); } Ok(r) }
 pub fn almide_rt_list_filter_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Option<B>>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().filter_map(f).collect() }
-pub fn almide_rt_list_find_index<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<i64> { let f = move |a| f(a); xs.into_iter().position(|x| f(x)).map(|i| i as i64) }
+pub fn almide_rt_list_find_index<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<i64> { let f = move |a| f(a); xs.iter().position(|x| f(x.clone())).map(|i| i as i64) }
 pub fn almide_rt_list_take<T>(xs: Vec<T>, n: i64) -> Vec<T> { xs.into_iter().take(n as usize).collect() }
 pub fn almide_rt_list_drop<T>(xs: Vec<T>, n: i64) -> Vec<T> { xs.into_iter().skip(n as usize).collect() }
 pub fn almide_rt_list_take_while<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let f = move |a| f(a); xs.into_iter().take_while(|x| f(x.clone())).collect() }
@@ -117,7 +117,7 @@ pub fn almide_rt_list_group_by<A: Clone, B: PartialEq + Clone + 'static>(xs: Vec
     }
     m
 }
-pub fn almide_rt_list_slice<T: Clone>(xs: Vec<T>, start: i64, end: i64) -> Vec<T> { let s = start as usize; let e = (end as usize).min(xs.len()); if s >= e { vec![] } else { xs[s..e].to_vec() } }
+pub fn almide_rt_list_slice<T: Clone>(xs: &[T], start: i64, end: i64) -> Vec<T> { let s = start as usize; let e = (end as usize).min(xs.len()); if s >= e { vec![] } else { xs[s..e].to_vec() } }
 pub fn almide_rt_list_insert<T>(mut xs: Vec<T>, i: i64, x: T) -> Vec<T> { let idx = (i as usize).min(xs.len()); xs.insert(idx, x); xs }
 pub fn almide_rt_list_remove_at<T>(mut xs: Vec<T>, i: i64) -> Vec<T> { if (i as usize) < xs.len() { xs.remove(i as usize); } xs }
 pub fn almide_rt_list_update<A: Clone>(mut xs: Vec<A>, i: i64, f: std::rc::Rc<dyn Fn(A) -> A>) -> Vec<A> { let f = move |a| f(a); if let Some(s) = xs.get_mut(i as usize) { *s = f(s.clone()); } xs }
@@ -165,11 +165,11 @@ pub fn almide_rt_list_sort_by<A: Clone, B: Ord>(mut xs: Vec<A>, f: std::rc::Rc<d
 pub fn almide_rt_list_fold_effect<A, B>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> Result<B, String>>) -> Result<B, String> { let f = move |a, b| f(a, b); let mut a = init; for x in xs { a = f(a, x)?; } Ok(a) }
 pub fn almide_rt_list_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<B, String>>) -> Result<Vec<B>, String> { let f = move |a| f(a); xs.into_iter().map(f).collect() }
 
-pub fn almide_rt_list_take_end<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
+pub fn almide_rt_list_take_end<T: Clone>(xs: &[T], n: i64) -> Vec<T> {
     let start = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize };
     xs[start..].to_vec()
 }
-pub fn almide_rt_list_drop_end<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
+pub fn almide_rt_list_drop_end<T: Clone>(xs: &[T], n: i64) -> Vec<T> {
     let end = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize };
     xs[..end].to_vec()
 }
@@ -207,7 +207,7 @@ pub fn almide_rt_list_shuffle<T>(mut xs: Vec<T>) -> Vec<T> {
 // unified `Error: …` + exit 1 form (std's `windows(0)` panics — a raw Rust
 // panic exit 101 the wasm leg never shows). n > len returns empty like the
 // plural twin instead of leaking std's behavior.
-pub fn almide_rt_list_window<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
+pub fn almide_rt_list_window<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> {
     if n == 0 { almide_abort("window size must be positive"); }
     if (n as usize) > xs.len() { return vec![]; }
     xs.windows(n as usize).map(|w| w.to_vec()).collect()

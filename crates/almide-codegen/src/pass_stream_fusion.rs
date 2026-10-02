@@ -19,7 +19,7 @@
 //! Two rewrites, bottom-up:
 //!
 //! 1. **Single stage** — one `almide_rt_list_{map,filter,flat_map,filter_map,
-//!    fold,find,any,all,count}` call whose callback is a lambda LITERAL
+//!    fold,find,any,all,count,find_index,find_map}` call whose callback is a lambda LITERAL
 //!    becomes an `IterChain` with one step / collector. This never changes
 //!    observable behaviour: the runtime twin is the same adapter over the same
 //!    elements in the same order. What it removes is the `Rc<dyn Fn>` box and
@@ -39,7 +39,7 @@
 //!      that is not on the total allowlist): with two, which abort fires
 //!      first depends on the order;
 //!    - every stage BEFORE a short-circuit point (`take`, `find`, `any`,
-//!      `all`) is total: stage-by-stage runs it over the whole list, the fused
+//!      `all`, `find_index`, `find_map`) is total: stage-by-stage runs it over the whole list, the fused
 //!      chain stops early, and an abort the spec leg reports must not vanish.
 //!
 //!    An impure chain stays nested (`(inner.collect()).into_iter()…`): one
@@ -91,7 +91,8 @@ impl NanoPass for StreamFusionPass {
             return PassResult { program, changed: false };
         }
         let purity = Purity::of(&program);
-        let mut v = Fuser { purity: &purity, chain_params: HashSet::new(), changed: false, in_fan: false };
+        let find_map_twins = find_map_twins(&program);
+        let mut v = Fuser { purity: &purity, find_map_twins, chain_params: HashSet::new(), changed: false, in_fan: false };
         for f in &mut program.functions { v.visit_expr_mut(&mut f.body); }
         for tl in &mut program.top_lets { v.visit_expr_mut(&mut tl.value); }
         for m in &mut program.modules {
@@ -357,11 +358,28 @@ fn call_ok(e: &IrExpr, cx: &Cx) -> Option<bool> {
 
 struct Fuser<'a> {
     in_fan: bool,
+    /// The monomorphized `list.find_map` instances (`find_map_twins`).
+    find_map_twins: HashSet<Sym>,
     /// First param of every chain lambda this run built: published as
     /// `borrowed_lambda_params`, the walker renders those without `move`.
     chain_params: HashSet<VarId>,
     purity: &'a Purity,
     changed: bool,
+}
+
+/// `list.find_map` is self-hosted, not an `@intrinsic` (#3156), so it reaches
+/// this pass as a `Call` to its monomorphized instance — `find_map__<types>`
+/// in the bundled `list` module, spelled `almide_rt_list_find_map__<types>` —
+/// rather than as a `RuntimeCall`. The instances are read off the program's
+/// `list` module, never off the spelling: a root fn that happens to carry
+/// the prefix is not the stdlib twin (#3214).
+fn find_map_twins(program: &IrProgram) -> HashSet<Sym> {
+    program.modules.iter()
+        .filter(|m| m.name.as_str() == "list" && m.versioned_name.is_none())
+        .flat_map(|m| m.functions.iter())
+        .filter(|f| f.name.as_str() == "find_map" || f.name.as_str().starts_with("find_map__"))
+        .map(|f| sym(&format!("almide_rt_list_{}", f.name)))
+        .collect()
 }
 
 impl<'a> IrMutVisitor for Fuser<'a> {
@@ -467,10 +485,14 @@ fn chain(expr: &IrExpr, source: IrExpr, consume: bool, steps: Vec<IterStep>, col
 
 impl<'a> Fuser<'a> {
     fn rewrite(&mut self, expr: &mut IrExpr) -> Option<IrExpr> {
-        let IrExprKind::RuntimeCall { symbol, args } = &expr.kind else { return None };
-        let op = symbol.as_str().strip_prefix("almide_rt_list_")?;
+        let (op, args) = match &expr.kind {
+            IrExprKind::RuntimeCall { symbol, args } => (symbol.as_str().strip_prefix("almide_rt_list_")?, args),
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } if self.find_map_twins.contains(name) => ("find_map", args),
+            _ => return None,
+        };
         let single = match op {
-            "map" | "filter" | "flat_map" | "filter_map" | "find" | "any" | "all" | "count" if args.len() == 2 => {
+            "map" | "filter" | "flat_map" | "filter_map" | "find" | "any" | "all" | "count"
+            | "find_index" | "find_map" if args.len() == 2 => {
                 self.single_stage(expr, op)?
             }
             "fold" if args.len() == 3 => self.single_stage(expr, op)?,
@@ -484,7 +506,7 @@ impl<'a> Fuser<'a> {
     /// Rewrite 1: one runtime combinator call with a lambda literal → a
     /// one-step / one-collector chain. Order-preserving by construction.
     fn single_stage(&mut self, expr: &IrExpr, op: &str) -> Option<IrExpr> {
-        let IrExprKind::RuntimeCall { args, .. } = &expr.kind else { return None };
+        let (IrExprKind::RuntimeCall { args, .. } | IrExprKind::Call { args, .. }) = &expr.kind else { return None };
         let callback = take_lambda(args.last()?.clone())?;
         // The chain lambda is a scope, not a closure (`Use::depth`): it
         // borrows what it reads, so it renders without `move`.
@@ -523,6 +545,8 @@ impl<'a> Fuser<'a> {
             "any" => (vec![], IterCollector::Any { lambda: Box::new(lambda) }),
             "all" => (vec![], IterCollector::All { lambda: Box::new(lambda) }),
             "count" => (vec![], IterCollector::Count { lambda: Box::new(lambda) }),
+            "find_index" => (vec![], IterCollector::FindIndex { lambda: Box::new(lambda) }),
+            "find_map" => (vec![], IterCollector::FindMap { lambda: Box::new(lambda) }),
             _ => return None,
         };
         // The source adapter runs BEFORE whatever this call contributes.
@@ -602,7 +626,8 @@ impl<'a> Fuser<'a> {
         }
         match collector {
             IterCollector::Fold { init, lambda } => stages.push((vec![init.as_ref(), lambda.as_ref()], false)),
-            IterCollector::Find { lambda } | IterCollector::Any { lambda } | IterCollector::All { lambda } => {
+            IterCollector::Find { lambda } | IterCollector::Any { lambda } | IterCollector::All { lambda }
+            | IterCollector::FindIndex { lambda } | IterCollector::FindMap { lambda } => {
                 stages.push((vec![lambda.as_ref()], true))
             }
             IterCollector::Count { lambda } => stages.push((vec![lambda.as_ref()], false)),

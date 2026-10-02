@@ -2,8 +2,8 @@
 // repeated-body positions (a for body, a closure body). Each fn binds its
 // list locally and reads it once inside the repeated body; native used to
 // move it on the first iteration (rustc E0382). Expected values are the
-// wasm leg's answers. `js` is local too: as a param, the unfused
-// find_index / find_map cells render it owned for nothing (certifier C4, #3214).
+// wasm leg's answers. `js` is local here; its param-shaped twin is
+// combinator_source_param_matrix_test.almd (certifier C4, #3214).
 fn for_int_find_opt_map() -> Int = {
   let js = [1, 2]
   let ids = [1, 2, 3]

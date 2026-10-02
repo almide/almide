@@ -239,7 +239,8 @@ fn count_uses_in_iter_chain(
             count_uses_in_expr(lambda, table);
         }
         IterCollector::Any { lambda } | IterCollector::All { lambda }
-        | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+        | IterCollector::Find { lambda } | IterCollector::Count { lambda }
+        | IterCollector::FindIndex { lambda } | IterCollector::FindMap { lambda } => {
             count_uses_in_expr(lambda, table);
         }
     }
