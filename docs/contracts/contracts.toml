@@ -4368,6 +4368,7 @@ since     = "0.62.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_search_edit_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/bytes_data_ptr_identity.almd", class = "fixture" },
 ]
 
 # ── INT BIT-INTROSPECTION FAMILY AND THE Int -> Float32 CONVERT ───────
