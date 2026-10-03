@@ -771,14 +771,14 @@ fn render_fan(ctx: &RenderContext, exprs: &[IrExpr]) -> String {
     let count_s = format!("{}", exprs.len());
     let handles: Vec<String> = (0..exprs.len()).map(|i| format!("__fan_h{}", i)).collect();
     let spawns: Vec<String> = rendered.iter().enumerate()
-        .map(|(i, body)| format!("let {} = __s.spawn(move || {{ {} }});", handles[i], body))
+        .map(|(i, body)| format!("let {} = __s.spawn(move || {{ let __fan_e = almide_fan_enter(__fan_g, {}); {} }});", handles[i], i, body))
         .collect();
     let any_result = exprs.iter().any(|e| e.ty.is_result());
     let joins: Vec<String> = exprs.iter().enumerate().map(|(i, e)| {
         if e.ty.is_result() {
-            if ctx.auto_unwrap { format!("{}.join().unwrap()?", handles[i]) }
-            else { format!("{}.join().unwrap().unwrap()", handles[i]) }
-        } else { format!("{}.join().unwrap()", handles[i]) }
+            if ctx.auto_unwrap { format!("almide_fan_join({})?", handles[i]) }
+            else { format!("almide_fan_join({}).unwrap()", handles[i]) }
+        } else { format!("almide_fan_join({})", handles[i]) }
     }).collect();
     let join_expr = if joins.len() == 1 { joins[0].clone() }
         else { format!("({})", joins.join(", ")) };

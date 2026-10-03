@@ -66,6 +66,7 @@ pub mod pass_range_counting;
 pub mod pass_region_window;
 pub mod pass_region_window_clone;
 mod prelude_region;
+mod prelude_fan;
 pub use prelude_region::region_arena_prelude_source;
 pub mod perceus_verified;
 pub mod pass_egg_saturation;
@@ -374,7 +375,7 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // printing, so exactly one line and the same exit code on every leg. The
     // stderr write ignores its error: a panic here would leave the guard taken
     // and turn the abort into a join panic (exit 101).
-    s.push_str(&format!("{vis}fn almide_abort(msg: impl std::fmt::Display) -> ! {{ static ALMIDE_ABORTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false); if ALMIDE_ABORTING.swap(true, std::sync::atomic::Ordering::SeqCst) {{ loop {{ std::thread::park(); }} }} {{ let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!(\"Error: {{}}\\n\", msg)); }} almide_stdout_flush(); std::process::exit(1) }}\n"));
+    s.push_str(&format!("{vis}fn almide_abort(msg: impl std::fmt::Display) -> ! {{ almide_fan_trap_wait(); static ALMIDE_ABORTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false); if ALMIDE_ABORTING.swap(true, std::sync::atomic::Ordering::SeqCst) {{ loop {{ std::thread::park(); }} }} {{ let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!(\"Error: {{}}\\n\", msg)); }} almide_stdout_flush(); std::process::exit(1) }}\n"));
     // `panic(msg)` (#3118): the SAME once-guarded abort, spelled the way C-219
     // pins it on every leg — `PANIC: <msg>` on stderr with NO trailing newline,
     // exit 1 — never a raw Rust panic (exit 101 + the thread banner). A `--test`
@@ -382,11 +383,17 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // payload and `testing.assert_throws` catches it. The `cfg!(test)` sits in
     // the MACRO so it is read in the crate the `panic` is written in — the
     // prelude may be compiled once, as a crate of its own, without `--test`.
-    s.push_str(&format!("{vis}fn almide_panic_abort(msg: std::fmt::Arguments<'_>) -> ! {{ static ALMIDE_PANICKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false); if ALMIDE_PANICKING.swap(true, std::sync::atomic::Ordering::SeqCst) {{ loop {{ std::thread::park(); }} }} almide_stdout_flush(); {{ let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!(\"PANIC: {{}}\", msg)); }} std::process::exit(1) }}\n"));
+    s.push_str(&format!("{vis}fn almide_panic_abort(msg: std::fmt::Arguments<'_>) -> ! {{ almide_fan_trap_wait(); static ALMIDE_PANICKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false); if ALMIDE_PANICKING.swap(true, std::sync::atomic::Ordering::SeqCst) {{ loop {{ std::thread::park(); }} }} almide_stdout_flush(); {{ let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!(\"PANIC: {{}}\", msg)); }} std::process::exit(1) }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_panic {{ ($($arg:tt)*) => {{ if cfg!(test) {{ panic!($($arg)*) }} else {{ $crate::almide_panic_abort(format_args!($($arg)*)) }} }}; }}\n"));
-    s.push_str(&format!("{vis}fn almide_stdout_write_fmt(args: std::fmt::Arguments<'_>, newline: bool) {{ ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_fmt(&mut *w, args); if newline {{ let _ = std::io::Write::write_all(&mut *w, b\"\\n\"); }} if almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
-    s.push_str(&format!("{vis}fn almide_stdout_write_bytes(bytes: &[u8]) {{ ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_all(&mut *w, bytes); if almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
+    s.push_str(&format!("{vis}fn almide_stdout_write_fmt(args: std::fmt::Arguments<'_>, newline: bool) {{ if almide_fan_active() {{ return almide_fan_write_fmt(false, args, newline); }} ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_fmt(&mut *w, args); if newline {{ let _ = std::io::Write::write_all(&mut *w, b\"\\n\"); }} if almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
+    s.push_str(&format!("{vis}fn almide_stdout_write_bytes(bytes: &[u8]) {{ if almide_fan_active() {{ return almide_out_write(false, bytes); }} ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_all(&mut *w, bytes); if almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_println {{ ($($arg:tt)*) => {{ $crate::almide_stdout_write_fmt(format_args!($($arg)*), true) }}; }}\n"));
+    // `eprintln` (ADR-0024 D5): unbuffered on stderr as before, except inside a
+    // `fan` element, where it joins the element's one stdout+stderr timeline.
+    s.push_str(&format!("{vis}fn almide_stderr_write_fmt(args: std::fmt::Arguments<'_>, newline: bool) {{ if almide_fan_active() {{ return almide_fan_write_fmt(true, args, newline); }} let mut e = std::io::stderr().lock(); let _ = std::io::Write::write_fmt(&mut e, args); if newline {{ let _ = std::io::Write::write_all(&mut e, b\"\\n\"); }} }}\n"));
+    s.push_str(&format!("{vis}fn almide_fan_write_fmt(err: bool, args: std::fmt::Arguments<'_>, newline: bool) {{ let mut v: Vec<u8> = Vec::new(); let _ = std::io::Write::write_fmt(&mut v, args); if newline {{ v.push(b'\\n'); }} almide_out_write(err, &v) }}\n"));
+    s.push_str(&format!("{macro_attr}macro_rules! almide_eprintln {{ ($($arg:tt)*) => {{ $crate::almide_stderr_write_fmt(format_args!($($arg)*), true) }}; }}\n"));
+    s.push_str(&prelude_fan::fan_timeline_prelude(vis));
     s.push_str(&format!("{macro_attr}macro_rules! almide_eq {{ ($a:expr, $b:expr) => {{ ($a) == ($b) }}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_ne {{ ($a:expr, $b:expr) => {{ ($a) != ($b) }}; }}\n"));
     // almide_div!/almide_mod!: total integer `/` and `%`. `checked_div`/`checked_rem`
