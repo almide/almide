@@ -459,8 +459,38 @@ impl LowerCtx {
     /// move-out — the shape `{ let t = (..); ok(t) }` lowers through today.
     /// A decline rolls everything back, so the caller's honest wall stands.
     fn lower_tail_result_ctor_via_bound_payload(&mut self, tail: &IrExpr) -> Option<ValueId> {
+        let dst = self.lower_result_ctor_bound_payload(tail, &tail.ty)?;
+        // Tail position has no merge: drop the arm's trailing move marker,
+        // exactly as the direct ctor route in `lower_tail_heap_fresh_ctors_and_opaque` does.
+        if let Some(pos) = self.ops.iter().rposition(|op| matches!(op, Op::Consume { v } if *v == dst)) {
+            self.ops.remove(pos);
+        }
+        Some(dst)
+    }
+
+    /// The ARM-position twin of [`Self::lower_tail_result_ctor_via_bound_payload`]
+    /// (`if c then err((msg, r)) else ..` — the C-132 err carrier over a record
+    /// owning heap, #2739 family C3): the temp is released within the arm's own
+    /// frame, after the wrapper took its reference, so it never outlives the
+    /// arm that built it.
+    pub(crate) fn lower_result_ctor_arm_via_bound_payload(
+        &mut self,
+        arm: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        let arm_mark = self.live_heap_handles.len();
+        let dst = self.lower_result_ctor_bound_payload(arm, result_ty)?;
+        self.drop_arm_locals(arm_mark);
+        Some(dst)
+    }
+
+    /// `ok(<Tuple|Record>)` / `err(<Tuple|Record>)` → `let $p = <payload>;
+    /// ok($p)`, lowered through [`Self::lower_heap_result_arm`]; the temp stays
+    /// tracked for the caller to release. Refuses a payload the permissive bind
+    /// could only defer (an `Init::Opaque` block), and rolls back on any decline.
+    fn lower_result_ctor_bound_payload(&mut self, ctor: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
         let (IrExprKind::ResultOk { expr: payload } | IrExprKind::ResultErr { expr: payload }) =
-            &tail.kind
+            &ctor.kind
         else {
             return None;
         };
@@ -489,18 +519,12 @@ impl LowerCtx {
                 span: payload.span,
                 def_id: None,
             };
-            let kind = match &tail.kind {
+            let kind = match &ctor.kind {
                 IrExprKind::ResultOk { .. } => IrExprKind::ResultOk { expr: Box::new(var) },
                 _ => IrExprKind::ResultErr { expr: Box::new(var) },
             };
-            let rebuilt = IrExpr { kind, ..tail.clone() };
-            let dst = self.lower_heap_result_arm(&rebuilt, &tail.ty)?;
-            // Tail position has no merge: drop the arm's trailing move marker,
-            // exactly as the direct ctor route above does.
-            if let Some(pos) = self.ops.iter().rposition(|op| matches!(op, Op::Consume { v } if *v == dst)) {
-                self.ops.remove(pos);
-            }
-            Some(dst)
+            let rebuilt = IrExpr { kind, ..ctor.clone() };
+            self.lower_heap_result_arm(&rebuilt, result_ty)
         });
         if lowered.is_none() {
             self.ops.truncate(mark);
