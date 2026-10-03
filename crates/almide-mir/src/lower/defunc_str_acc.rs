@@ -161,19 +161,10 @@ impl LowerCtx {
         // load_porta_config's CAPTURING `secrets` filter_map). The leading lets are lowered per-iteration
         // AFTER the element param is bound (captures resolve via value_of), BEFORE the match arms. Defer
         // anything else.
-        let (lead_stmts, subject, arms): (&[almide_ir::IrStmt], &IrExpr, &[IrMatchArm]) = match &body.kind
-        {
-            IrExprKind::Match { subject, arms } if is_variant_ty(&subject.ty) => {
-                (&[], subject.as_ref(), arms.as_slice())
-            }
-            IrExprKind::Block { stmts, expr: Some(tail) } => match &tail.kind {
-                IrExprKind::Match { subject, arms } if is_variant_ty(&subject.ty) => {
-                    (stmts.as_slice(), subject.as_ref(), arms.as_slice())
-                }
-                _ => return None,
-            },
-            _ => return None,
-        };
+        // Any other body (`if w.alive then some({ ...w, name: .. }) else none`) is a keep/skip
+        // CONTROL tree the per-arm walker `emit_filter_map_arm` already lowers inside a variant
+        // arm (If / Block / some / none); it runs on the whole body with no subject.
+        let keep_skip = filter_map_keep_skip_body(body);
 
         // Borrow the source list (evaluated once); a non-handle iterable is out of subset.
         let list_v = match self.lower_call_args(std::slice::from_ref(xs)).ok()?.into_iter().next()? {
@@ -259,19 +250,14 @@ impl LowerCtx {
         // subject (`val`) is in scope; their own heap temps are freed within the iteration frame.
         self.in_frame += 1;
         self.in_defunc_body += 1;
-        let mut lead_ok = true;
-        for stmt in lead_stmts {
-            if self.lower_stmt(stmt).is_err() {
-                lead_ok = false;
-                break;
+        let out = ResultList { handle: rh, cursor, elem: result_elem, elem_size: eight };
+        let ok = match keep_skip {
+            Some((lead_stmts, subject, arms)) => {
+                lead_stmts.iter().all(|stmt| self.lower_stmt(stmt).is_ok())
+                    && self.append_variant_match_to_result_list(subject, arms, out).is_some()
             }
-        }
-        let ok = lead_ok
-            && self
-                .append_variant_match_to_result_list(subject, arms, ResultList {
-                    handle: rh, cursor, elem: result_elem, elem_size: eight,
-                })
-                .is_some();
+            None => self.emit_filter_map_arm(body, rh, cursor, result_elem, eight).is_some(),
+        };
         self.in_defunc_body -= 1;
         self.in_frame -= 1;
         if !ok {
@@ -425,5 +411,23 @@ impl LowerCtx {
             }
             _ => None,
         }
+    }
+}
+
+/// A `filter_map` body that decides keep/skip by a VARIANT match — bare, or as the tail of a
+/// block whose leading lets feed it — split into (leading lets, subject, arms). `None` for any
+/// other body: the caller then walks it as a keep/skip control tree (`emit_filter_map_arm`).
+fn filter_map_keep_skip_body(body: &IrExpr) -> Option<(&[almide_ir::IrStmt], &IrExpr, &[IrMatchArm])> {
+    match &body.kind {
+        IrExprKind::Match { subject, arms } if is_variant_ty(&subject.ty) => {
+            Some((&[], subject.as_ref(), arms.as_slice()))
+        }
+        IrExprKind::Block { stmts, expr: Some(tail) } => match &tail.kind {
+            IrExprKind::Match { subject, arms } if is_variant_ty(&subject.ty) => {
+                Some((stmts.as_slice(), subject.as_ref(), arms.as_slice()))
+            }
+            _ => None,
+        },
+        _ => None,
     }
 }
