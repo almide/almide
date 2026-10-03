@@ -27,7 +27,8 @@ impl LowerCtx {
     ///
     /// Returns None (nothing emitted — the ops are appended only after every gate
     /// passes) when the receiver is not a LOCAL var bound to a materialized aggregate
-    /// with a resolvable layout at every level — the caller walls, unchanged.
+    /// (or a borrowed `mut` param outside a loop/unit arm) with a resolvable layout at
+    /// every level — the caller walls, unchanged.
     fn two_level_field_cow(
         &mut self,
         object: &IrExpr,
@@ -36,7 +37,15 @@ impl LowerCtx {
         let (root, path) = member_path(object);
         let IrExprKind::Var { id } = &root.kind else { return None };
         let old = self.value_for(*id).ok()?;
-        if self.param_values.contains(&old) || !self.materialized_aggregates.contains(&old) {
+        // A BORROWED `mut` param (the C-132 write-back body) is copied like a local but
+        // never released — the caller owns it; the copy is a plain tracked local from
+        // here, and the write-back returns it. In a loop or unit arm its stable local
+        // would hold the borrow on the first pass and the copy after: walled.
+        let borrowed = self.param_values.contains(&old);
+        if borrowed && (self.scalar_loop_depth > 0 || self.unit_arm_depth > 0) {
+            return None;
+        }
+        if !borrowed && !self.materialized_aggregates.contains(&old) {
             return None;
         }
         let levels = self.record_path_levels(&root.ty, &path, field)?;
@@ -70,9 +79,11 @@ impl LowerCtx {
         if self.value_drops.get(&old).is_some_and(|d| d.flat_elems) {
             self.value_drops.entry(new).or_default().flat_elems = true;
         }
-        let old_drop = self.drop_op_for(old);
-        self.ops.push(old_drop);
-        self.live_heap_handles.retain(|h| *h != old);
+        if !borrowed {
+            let old_drop = self.drop_op_for(old);
+            self.ops.push(old_drop);
+            self.live_heap_handles.retain(|h| *h != old);
+        }
         self.live_heap_handles.push(new);
         self.path_field_unique(new_h, &levels);
         Some(())
