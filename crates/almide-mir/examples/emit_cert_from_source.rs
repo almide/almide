@@ -31,39 +31,16 @@ fn die(msg: String) -> ! {
 }
 
 /// Read `[permissions] allow = ["IO", …]` from an `almide.toml`-shaped manifest
-/// — the SAME section `src/project.rs` parses for the production permission
-/// check (`cli::check_permissions`); this example cannot depend on the root
-/// crate (it is above almide-mir), so the section reader is mirrored here.
-/// The strings feed `apply_manifest_caps`: the effect fn's declared bound
-/// becomes the OPERATOR's written manifest instead of the all-caps default.
+/// through the production manifest reader (`almide::project::parse_toml`, a
+/// dev-dependency here), so a multi-line `allow` array reads the same as it
+/// does for `cli::check_permissions` (#3253 — a mirrored line reader saw it as
+/// empty). The strings feed `apply_manifest_caps`: the effect fn's declared
+/// bound becomes the OPERATOR's written manifest instead of the all-caps
+/// default.
 fn read_manifest_allow(path: &str) -> Vec<String> {
-    let text = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| die(format!("cannot read manifest {path}: {e}")));
-    let mut in_permissions = false;
-    let mut allow: Vec<String> = Vec::new();
-    for line in text.lines() {
-        let line = line.trim();
-        if line.starts_with('[') {
-            in_permissions = line == "[permissions]";
-            continue;
-        }
-        if in_permissions {
-            if let Some(rest) = line.strip_prefix("allow") {
-                if let Some(eq) = rest.find('=') {
-                    allow.extend(
-                        rest[eq + 1..]
-                            .trim()
-                            .trim_start_matches('[')
-                            .trim_end_matches(']')
-                            .split(',')
-                            .map(|s| s.trim().trim_matches('"').to_string())
-                            .filter(|s| !s.is_empty()),
-                    );
-                }
-            }
-        }
-    }
-    allow
+    almide::project::parse_toml(std::path::Path::new(path))
+        .unwrap_or_else(|e| die(format!("cannot read manifest {path}: {e}")))
+        .permissions
 }
 
 /// Lower `.almd` source to a linked `IrProgram` at the pre-codegen cut point

@@ -99,88 +99,111 @@ pub struct NativeDep {
     pub spec: String,
 }
 
-/// Parse almide.toml (simple line-based, no toml crate)
-/// `parse_toml`'s running accumulator — one field group per TOML section, so
-/// the per-section line handlers below can each take just the fields they
-/// touch by `&mut` reference (write-only from each handler's own
-/// perspective; no handler reads a field another handler writes).
-#[derive(Default)]
-struct TomlAccum {
-    name: String,
-    version: String,
-    almide_min: Option<String>,
-    deps: Vec<Dependency>,
-    permissions: Vec<String>,
-    proc_allow: Option<Vec<String>>,
-    native_deps: Vec<NativeDep>,
+/// `almide.toml` as the `toml` crate reads it (#3253). The manifest used to
+/// be read one line at a time, so any value spread over several lines was
+/// lost: `allow = [` with its names on the lines below read as `allow = []`,
+/// which means "every capability". Each array spelling TOML has (multi-line,
+/// a trailing comma, comments between items) and a multi-line inline table
+/// now read as TOML says.
+///
+/// Two views of one parse: `values` for what the keys hold, `spans` (the
+/// crate's spanned document) for what a `toml::Table` drops — the line an
+/// `allow` name is written on, and the order the dependency tables write
+/// their entries in (a TOML table has no order of its own).
+struct Manifest<'i> {
+    values: toml::Table,
+    spans: toml::de::DeTable<'i>,
 }
 
-/// `parse_toml`'s `[package]` section line handler. Extracted verbatim.
-fn apply_package_line(line: &str, acc: &mut TomlAccum) {
-    if let Some((key, val)) = parse_kv(line) {
-        match key {
-            "name" => acc.name = val,
-            "version" => acc.version = val,
-            "almide" => acc.almide_min = Some(val),
-            _ => {}
+type SpannedValue<'i> = toml::Spanned<toml::de::DeValue<'i>>;
+
+/// The 1-based line holding byte `offset` of `content`.
+fn line_of(content: &str, offset: usize) -> usize {
+    content.as_bytes()[..offset.min(content.len())].iter().filter(|&&b| b == b'\n').count() + 1
+}
+
+/// `path:line: message`, the line found from a byte offset.
+fn located(path: &Path, content: &str, offset: usize, message: &str) -> String {
+    format!("{}:{}: {message}", path.display(), line_of(content, offset))
+}
+
+/// Parse `content` as the manifest, or say where it is not TOML.
+fn read_manifest<'i>(path: &Path, content: &'i str) -> Result<Manifest<'i>, String> {
+    let not_toml = |e: toml::de::Error| {
+        let message = format!(
+            "{}\n  hint: almide.toml is read as TOML — fix this line; every command reads the manifest",
+            e.message().trim()
+        );
+        match e.span() {
+            Some(s) => located(path, content, s.start, &message),
+            None => format!("{}: {message}", path.display()),
         }
-    }
-}
-
-/// `parse_toml`'s `[permissions]` section line handler. Extracted verbatim.
-fn apply_permissions_line(line: &str, acc: &mut TomlAccum) {
-    let list = |val: String| -> Vec<String> {
-        val.trim_matches(|c| c == '[' || c == ']')
-            .split(',')
-            .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
     };
-    match parse_kv(line) {
-        Some(("allow", val)) => acc.permissions.extend(list(val)),
-        // #2589: the commands `process.*` may start; an empty list allows none.
-        Some(("proc", val)) => acc.proc_allow.get_or_insert_with(Vec::new).extend(list(val)),
-        _ => {}
+    let values: toml::Table = toml::from_str(content).map_err(not_toml)?;
+    let spans = toml::de::DeTable::parse(content).map_err(not_toml)?.into_inner();
+    Ok(Manifest { values, spans })
+}
+
+/// The spanned value under `key` in a spanned table.
+fn spanned_entry<'a, 'i>(table: &'a toml::de::DeTable<'i>, key: &str) -> Option<&'a SpannedValue<'i>> {
+    table.iter().find(|(k, _)| k.get_ref().as_ref() == key).map(|(_, v)| v)
+}
+
+/// A string value as written; any other value as its TOML text (an inline
+/// table stays a table, so a `[native-deps]` spec reaches Cargo.toml intact).
+fn value_text(v: &toml::Value) -> String {
+    v.as_str().map_or_else(|| v.to_string(), str::to_string)
+}
+
+impl Manifest<'_> {
+    /// `[table]`'s entries in the order the file writes them.
+    fn entries_in_file_order(&self, table: &str) -> Vec<(String, toml::Value)> {
+        let Some(values) = self.values.get(table).and_then(toml::Value::as_table) else { return Vec::new() };
+        let mut keys: Vec<(usize, String)> = spanned_entry(&self.spans, table)
+            .and_then(|t| t.get_ref().as_table())
+            .map(|t| t.iter().map(|(k, _)| (k.span().start, k.get_ref().to_string())).collect())
+            .unwrap_or_default();
+        keys.sort();
+        keys.into_iter().filter_map(|(_, k)| values.get(&k).map(|v| (k, v.clone()))).collect()
+    }
+
+    /// `[package].<key>` as text.
+    fn package_field(&self, key: &str) -> Option<String> {
+        self.values.get("package").and_then(|p| p.get(key)).map(value_text)
+    }
+
+    /// `[permissions].<key>` as strings, each with the byte offset it is
+    /// written at; `None` when the key is absent. Anything but an array of
+    /// strings is refused on its line, never read as an empty list.
+    fn permission_list(&self, path: &Path, content: &str, key: &str) -> Result<Option<Vec<(String, usize)>>, String> {
+        let Some(perm) = spanned_entry(&self.spans, "permissions") else { return Ok(None) };
+        let Some(table) = perm.get_ref().as_table() else {
+            return Err(located(path, content, perm.span().start, "[permissions] must be a table"));
+        };
+        let Some(list) = spanned_entry(table, key) else { return Ok(None) };
+        let not_a_list = || {
+            located(path, content, list.span().start, &format!("[permissions].{key} must be an array of strings, like `{key} = [\"…\"]`"))
+        };
+        let items = list.get_ref().as_array().ok_or_else(not_a_list)?;
+        items
+            .into_iter()
+            .map(|v| v.get_ref().as_str().map(|s| (s.to_string(), v.span().start)).ok_or_else(not_a_list))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Some)
     }
 }
 
-/// `parse_toml`'s `[native-deps]` section line handler. Extracted verbatim.
-fn apply_native_deps_line(line: &str, acc: &mut TomlAccum) {
-    if let Some((dep_name, spec)) = parse_kv(line) {
-        acc.native_deps.push(NativeDep {
-            name: dep_name.to_string(),
-            spec,
-        });
+/// One `[dependencies]` entry: a table naming `git` or `path`. Any other
+/// shape is not a dependency this reader knows, as before.
+fn dependency_from(name: String, value: &toml::Value) -> Option<Dependency> {
+    let table = value.as_table()?;
+    let field = |k: &str| table.get(k).map(value_text);
+    let git = field("git").unwrap_or_default();
+    let path = field("path");
+    if git.is_empty() && path.is_none() {
+        return None;
     }
-}
-
-/// `parse_toml`'s `[section]` header detection. Extracted verbatim (the
-/// original if/else-if chain nested inside the section-header `if`, which
-/// pushed that branch past the max-depth threshold).
-fn detect_section(line: &str) -> &'static str {
-    match line {
-        "[package]" => "package",
-        "[dependencies]" => "dependencies",
-        "[permissions]" => "permissions",
-        "[native-deps]" => "native-deps",
-        _ => "",
-    }
-}
-
-/// `parse_toml`'s per-line dispatch within the current `[section]`.
-/// Extracted verbatim.
-fn apply_toml_line(section: &str, line: &str, acc: &mut TomlAccum) {
-    match section {
-        "package" => apply_package_line(line, acc),
-        "dependencies" => {
-            if let Some(dep) = parse_dep_line(line) {
-                acc.deps.push(dep);
-            }
-        }
-        "permissions" => apply_permissions_line(line, acc),
-        "native-deps" => apply_native_deps_line(line, acc),
-        _ => {}
-    }
+    Some(Dependency { name, git, tag: field("tag"), branch: field("branch"), version: field("version"), path })
 }
 
 /// Validate that a package name is a valid Almide identifier (no hyphens).
@@ -275,9 +298,10 @@ struct DuplicateKey {
 }
 
 /// The first key assigned twice in one table of `content`, or the first
-/// table header written twice (#2583). TOML forbids both; the manifest reader
-/// below is line-based rather than the `toml` crate, so it has to enforce it
-/// itself — without this it silently accepted the second line and kept BOTH
+/// table header written twice (#2583). TOML forbids both, and the `toml`
+/// crate refuses them too (the manifest reader is that crate since #3253),
+/// but only as a bare "duplicate key"; this names both lines and the fix.
+/// The line-based reader before it accepted the second line and kept BOTH
 /// dependencies, which the lock writer then recorded twice. `tables` limits
 /// the scan to the tables a reader actually reads (`None` = every table).
 fn find_duplicate_key(content: &str, tables: Option<&[&str]>) -> Option<DuplicateKey> {
@@ -397,61 +421,64 @@ pub fn allowed_effects(allow: &[String]) -> Result<std::collections::HashSet<alm
         .collect()
 }
 
-/// Refuse an `almide.toml` whose `[permissions].allow` names something that
-/// is not an effect category, on the line that names it (#3247). Reads the
-/// lines exactly as `parse_toml` does, so it judges the names that would be
-/// enforced.
-pub fn check_manifest_permissions(path: &Path, content: &str) -> Result<(), String> {
-    let mut section = "";
-    for (i, raw) in content.lines().enumerate() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if line.starts_with('[') && line.ends_with(']') {
-            section = detect_section(line);
-            continue;
-        }
-        if section != "permissions" {
-            continue;
-        }
-        let mut acc = TomlAccum::default();
-        apply_permissions_line(line, &mut acc);
-        allowed_effects(&acc.permissions).map_err(|e| format!("{}:{}: {e}", path.display(), i + 1))?;
+/// Refuse an `almide.toml` before any command runs (#2583, #3247, #3253): a
+/// key written twice, text that is not TOML, or a `[permissions].allow` name
+/// that is not an effect category — each on the line that writes it. The
+/// names come from the same parse `parse_toml` enforces, so a name on any
+/// line of a multi-line array is judged like one on a single line.
+pub fn check_manifest(path: &Path, content: &str) -> Result<(), String> {
+    check_manifest_duplicates(path, content)?;
+    let manifest = read_manifest(path, content)?;
+    manifest.permission_list(path, content, "proc")?;
+    for (name, at) in manifest.permission_list(path, content, "allow")?.unwrap_or_default() {
+        allowed_effects(std::slice::from_ref(&name)).map_err(|e| located(path, content, at, &e))?;
     }
     Ok(())
+}
+
+/// `[package].name` of the manifest at `path`, read as TOML and not otherwise
+/// validated; `None` when there is no readable manifest or no name.
+pub fn manifest_package_name(path: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    read_manifest(path, &content).ok()?.package_field("name").filter(|n| !n.is_empty())
 }
 
 pub fn parse_toml(path: &Path) -> Result<Project, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
     check_manifest_duplicates(path, &content)?;
+    let manifest = read_manifest(path, &content)?;
 
-    let mut acc = TomlAccum { version: "0.1.0".to_string(), ..TomlAccum::default() };
-    let mut section = "";
-
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if line.starts_with('[') && line.ends_with(']') {
-            section = detect_section(line);
-            continue;
-        }
-        apply_toml_line(section, line, &mut acc);
-    }
-
-    validate_package_name(&acc.name)?;
+    let name = manifest.package_field("name").unwrap_or_default();
+    validate_package_name(&name)?;
+    let package = Package {
+        name,
+        version: manifest.package_field("version").unwrap_or_else(|| "0.1.0".to_string()),
+        almide_min: manifest.package_field("almide"),
+    };
+    let names = |key: &str| -> Result<Option<Vec<String>>, String> {
+        Ok(manifest.permission_list(path, &content, key)?.map(|l| l.into_iter().map(|(n, _)| n).collect()))
+    };
+    let permissions = names("allow")?.unwrap_or_default();
+    let proc_allow = names("proc")?;
 
     let root = project_root_from_toml_path(path);
-    let dependencies = anchor_relative_dep_paths(acc.deps, &root);
+    let deps = manifest
+        .entries_in_file_order("dependencies")
+        .into_iter()
+        .filter_map(|(name, value)| dependency_from(name, &value))
+        .collect();
+    let native_deps = manifest
+        .entries_in_file_order("native-deps")
+        .into_iter()
+        .map(|(name, value)| NativeDep { name, spec: value_text(&value) })
+        .collect();
     Ok(Project {
-        package: Package { name: acc.name, version: acc.version, almide_min: acc.almide_min },
-        dependencies,
-        permissions: acc.permissions,
-        proc_allow: acc.proc_allow,
-        native_deps: acc.native_deps,
+        package,
+        dependencies: anchor_relative_dep_paths(deps, &root),
+        permissions,
+        proc_allow,
+        native_deps,
         root,
     })
 }
@@ -486,49 +513,6 @@ pub fn check_compiler_version_with(project: &Project, skip: bool) -> Result<(), 
          or set ALMIDE_SKIP_VERSION_CHECK=1 to bypass",
         project.package.name, required, installed
     ))
-}
-
-fn parse_kv(line: &str) -> Option<(&str, String)> {
-    let mut parts = line.splitn(2, '=');
-    let key = parts.next()?.trim();
-    let val = parts.next()?.trim().trim_matches('"').to_string();
-    Some((key, val))
-}
-
-/// Parse: name = { git = "url", tag = "v0.1.0" }
-fn parse_dep_line(line: &str) -> Option<Dependency> {
-    let mut parts = line.splitn(2, '=');
-    let name = parts.next()?.trim().to_string();
-    let rest = parts.next()?.trim();
-
-    if !rest.starts_with('{') {
-        return None;
-    }
-    let inner = rest.trim_start_matches('{').trim_end_matches('}').trim();
-    let mut git = String::new();
-    let mut tag: Option<String> = None;
-    let mut branch: Option<String> = None;
-    let mut version: Option<String> = None;
-    let mut path: Option<String> = None;
-
-    for item in inner.split(',') {
-        if let Some((k, v)) = parse_kv(item) {
-            match k {
-                "git" => git = v,
-                "tag" => tag = Some(v),
-                "branch" => branch = Some(v),
-                "version" => version = Some(v),
-                "path" => path = Some(v),
-                _ => {}
-            }
-        }
-    }
-
-    if git.is_empty() && path.is_none() {
-        return None;
-    }
-
-    Some(Dependency { name, git, tag, branch, version, path })
 }
 
 /// Cache directory for dependencies
