@@ -122,7 +122,6 @@
 # incumbent's admitted profile by design. Each row prunes when the incumbent
 # learns the shape — or with the incumbent's retirement, whichever first.
 spec/gauntlet/cells/x13_bang_nested_in_field.almd :: f
-spec/wasm_cross/codec_triple_list.almd :: T.__dec_list_list_list_int_go
 spec/wasm_cross/list_pop_map_insert_on_record_field.almd :: drain
 spec/wasm_cross/nested_three_level_literal.almd :: main
 # (2026-08-30, C-326/#1696) The gzip inflate joined the corpus lowering on the
