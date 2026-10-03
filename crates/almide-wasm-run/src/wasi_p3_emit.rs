@@ -420,7 +420,10 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         .section(&element_sec)
         .section(&code)
         .section(&data);
-    let mut core = m.finish();
+    // The p1 build's last pass (#3136): drop the shims, helper slots,
+    // imports and globals nothing the exports reach names, before the
+    // component encode reads the core module's imports.
+    let mut core = crate::wasi::prune(&m.finish())?;
     wasmparser::validate(&core)?;
 
     wit_component::embed_component_metadata(
