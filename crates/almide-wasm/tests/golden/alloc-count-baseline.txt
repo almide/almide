@@ -190,11 +190,12 @@
 38	13	453	38	spec/wasm_cross/fan_effect_mapper.almd
 ~	spec/wasm_cross/fan_effect_mapper_capability.almd
 3	0	48	0	spec/wasm_cross/fan_map_all_workers_abort_one_line.almd
-9	3	137	6	spec/wasm_cross/fan_map_err.almd
-9	3	137	4	spec/wasm_cross/fan_map_inline_err.almd
+10	4	153	7	spec/wasm_cross/fan_map_err.almd
+11	4	207	8	spec/wasm_cross/fan_map_err_runs_every_element.almd
+10	3	153	5	spec/wasm_cross/fan_map_inline_err.almd
 71	29	814	71	spec/wasm_cross/fan_map_inline_lambda.almd
 94	41	1291	94	spec/wasm_cross/fan_map_nested_combinators.almd
-158	73	3586	158	spec/wasm_cross/fan_map_parallel_scalar.almd
+199	113	4994	199	spec/wasm_cross/fan_map_parallel_scalar.almd
 10	4	152	7	spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd
 ~	spec/wasm_cross/fan_prefetch_fs.almd
 5	1	72	5	spec/wasm_cross/fan_pure_thunks.almd
