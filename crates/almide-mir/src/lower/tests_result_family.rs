@@ -67,3 +67,50 @@ fn the_merged_name_set_survives_the_historical_name_mangling_incidents() {
     assert!(!is_self_host_materialized_result_fn("fan", "nonexistent"));
     assert!(!is_self_host_materialized_result_fn("http", "get"));
 }
+
+#[test]
+fn every_registry_result_fn_is_in_the_materialized_set() {
+    // #3159: the merged name set had drifted from the registry — `fs.for_each_line`
+    // and its fallible carrier build their Result through the ok()/err() ctors, yet a
+    // `match`/`!` over them read as UNTRACKED and walled. The set may only differ from
+    // the registry by a NAMED reason, so it cannot drift silently again: every
+    // registry-served `module.fn` whose impl returns a Result is in the set — itself,
+    // or as the mono-suffixed twin of a member (`fs.fold_lines_i` of `fs.fold_lines`,
+    // the pre-routing name the classify sites see) — or listed below.
+    use crate::lower::is_self_host_materialized_result_fn;
+    use crate::lower::registry_sig::{registered_call_names, registry_signature};
+    // http: every entry point needs a declared capability, and the call walls at
+    // that gate before any match could read its block — no corpus or user program
+    // reaches a match over these on the structural leg today. Admit them with the
+    // capability brick, not before.
+    const NOT_YET: &[&str] = &[
+        "http.get_bytes",
+        "http.get_status",
+        "http.poll",
+        "http.request",
+        "http.request_bytes",
+        "http.request_status",
+        "http.wait",
+    ];
+    let member = |module: &str, func: &str| {
+        is_self_host_materialized_result_fn(module, func)
+            || func.match_indices('_').any(|(i, _)| i > 0 && is_self_host_materialized_result_fn(module, &func[..i]))
+    };
+    let mut missing = Vec::new();
+    for name in registered_call_names() {
+        // A dot-less name is a Named-call helper, never a Module call subject.
+        let Some((module, func)) = name.split_once('.') else { continue };
+        let Some(sig) = registry_signature(name) else { continue };
+        if !matches!(&sig.ret, Ty::Applied(TypeConstructorId::Result, _)) || NOT_YET.contains(&name) {
+            continue;
+        }
+        if !member(module, func) {
+            missing.push(name);
+        }
+    }
+    assert!(missing.is_empty(), "registry Result fns missing from the materialized set: {missing:?}");
+    for name in NOT_YET {
+        let Some((module, func)) = name.split_once('.') else { continue };
+        assert!(!member(module, func), "{name} is in the set now — drop it from NOT_YET");
+    }
+}
