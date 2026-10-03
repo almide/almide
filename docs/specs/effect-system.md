@@ -115,6 +115,62 @@ Tests: `tests/checker_test.rs` (`pure_fn_admits_output_and_abort_builtins`,
 `spec/lang/pure_fn_output_builtins_test.almd`,
 `spec/wasm_cross/pure_fn_output_and_assert_abort.almd` (C-153).
 
+### 2.2 Stdlib readers are effect fns
+
+*Dialect epoch 8 (#3248).* `io.read_byte`, `io.read_n_bytes` and
+`process.args` read stdin or argv, and are `effect fn`s like `io.read_line`
+and `env.args`. They were plain `fn`s, so a pure fn could read the outside
+world through them; a call from a pure fn is now E006. The `args` module's
+argv readers are the one exception still pending its own ruling (#848).
+
+```almide check-fail=E006
+import io
+
+fn first_byte() -> Int = io.read_byte()
+```
+
+Tests: `tests/diagnostics/e006-io-read-byte-in-pure-fn/`,
+`tests/diagnostics/e006-io-read-n-bytes-in-pure-fn/`,
+`tests/diagnostics/e006-process-args-in-pure-fn/`.
+
+### 2.3 `@pure`: the empty effect set (E092)
+
+*Added with #3250.* `@pure` on a fn is checked: the fn, and everything it
+calls, has no effect category (§8), no output and no declared abort. It is
+E092 when the fn is an `effect fn` or an `@extern`, or when anything it
+reaches calls one of the six builtins of §2.1, a stdlib function that carries
+a category, or an `@extern` fn. The error is located at the call that leads
+there and names the path.
+
+A call through a fn-typed parameter is judged where the argument is written,
+so `@pure fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)` is pure. A
+language-defined trap — division by zero, an index out of bounds — is not a
+declared abort and does not count.
+
+```almide check
+@pure
+fn area(w: Int, h: Int) -> Int = w * h
+
+fn main() -> Unit = println("${area(2, 3)}")
+```
+
+```almide check-fail=E092
+@pure
+fn area(w: Int, h: Int) -> Int = {
+  println("w=${w}")
+  w * h
+}
+```
+
+ADR-0027 (draft) proposes a `pure fn` modifier with this meaning and retiring
+the attribute in its favour; `@pure` means the same set, so the two never
+disagree.
+
+Tests: `tests/diagnostics/e092-pure-calls-println/`,
+`tests/diagnostics/e092-pure-reaches-assert-via-helper/`,
+`tests/diagnostics/e092-pure-calls-categorised-stdlib/`,
+`tests/diagnostics/e092-pure-on-effect-fn/`.
+
 ## 3. Return Type Wrapping
 
 In the Rust target, `effect fn` return types are lifted to `Result[T, String]` during codegen if they are not already `Result`. The `ResultPropagationPass` performs this transformation:
@@ -328,20 +384,30 @@ If `[permissions]` is absent or `allow` is empty, all capabilities are permitted
 
 ### Effect categories
 
-The `EffectInferencePass` maps stdlib module usage to six categories, the
-`Effect` enum in `crates/almide-ir/src/effect.rs`:
+The `EffectInferencePass` classifies each call into one of six categories. The
+classification is one table, `STDLIB_MODULE_EFFECTS` in
+`crates/almide-ir/src/effect.rs`; a gate beside it refuses a stdlib module with
+no row, and an `@intrinsic` whose runtime symbol classifies unlike the function
+that declares it (#3246).
 
-| Category | Stdlib modules |
-|----------|---------------|
-| `IO` | `fs`, `path` |
-| `Net` | `http`, `url` |
-| `Env` | `env`, `process` |
-| `Time` | `datetime` |
-| `Rand` | none — no module infers it, so naming it grants nothing |
+| Category | What carries it |
+|----------|-----------------|
+| `IO` | `fs`, `io` (files and the standard streams) |
+| `Net` | `net`, and the `effect fn`s of `http` (its builders and router are pure) |
+| `Env` | `env`, `process`, `args` |
+| `Time` | the `effect fn`s of `datetime` (`now`, `monotonic_ns`); the calendar math is pure |
+| `Rand` | `random` |
 | `Fan` | `fan` |
 
-Calls into any other module, including `io` and `random`, infer no category.
-There is no `Log` category and no `log` module.
+Every other stdlib module — `path`, `url`, `json`, `regex`, `zlib`, the
+collections and numerics — carries no category.
+
+A call to an **`@extern` fn is every category** (⊤, #3245). Its body is foreign,
+inference cannot see into it, and no bound can be declared on it yet (ADR-0027
+§5 proposes one), so it passes `[permissions]` only when `allow` lists all six.
+
+Tests: `tests/effect_permissions_test.rs`; the table's gate is the
+`classification_gate` module in `crates/almide-ir/src/effect.rs`.
 
 ### Unknown names
 
@@ -398,3 +464,4 @@ Test: Effect inference unit tests in `crates/almide-codegen/src/pass_effect_infe
 | E006 | Effect isolation violation | Pure `fn` calls an `effect fn` | Mark the caller as `effect fn` |
 | E007 | Fan block in pure function | `fan { ... }` used outside effect context | Mark the enclosing function as `effect fn` |
 | E008 | Mutable variable capture in fan | `fan` block references a `var` binding | Change `var` to `let`, or copy the value into a `let` before the `fan` |
+| E092 | `@pure` fn is not pure | A `@pure` fn reaches output, an abort, a categorised stdlib call or an `@extern` | Move the call to a caller, or remove `@pure` |

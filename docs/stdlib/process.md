@@ -171,7 +171,9 @@ effect fn main() -> Unit = {
 
 ### `process.args() -> List[String]`
 
-Get command-line arguments as a list of strings.
+Get command-line arguments as a list of strings, the program path first. An
+`effect fn` like `env.args`: it reads argv, so its caller is an `effect fn`
+(dialect epoch 8).
 
 ```almd check
 import process
@@ -256,7 +258,7 @@ effect process.exit(code: Int) -> Never
 
 // Full argv, program name at index 0.
 // @since 0.10.3 or earlier
-process.args() -> List[String]
+effect process.args() -> List[String]
 
 // All stdin lines; err on non-UTF-8 input.
 // @since 0.5.0 or earlier
