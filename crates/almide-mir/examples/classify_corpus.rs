@@ -212,7 +212,8 @@ fn count_eq_calls_list(
 
 /// The Map/Set tier of [`count_eq_calls_depth`], verbatim: the implemented repr
 /// variants lower to ONE synthetic eq CallFn (`map.eq_ivh`/`map.eq_hval`/
-/// `map.eq_skv`/`set.eq_str`), all pure deep reads. Mirror EXACTLY the operand
+/// `map.eq_skv`/`set.eq_str`, and the scalar cores' `bytes.eq`/`map.eq`/
+/// `set.eq`), all pure deep reads. Mirror EXACTLY the operand
 /// shapes calls_p4's eq dispatch admits. `None` = not a Map/Set shape.
 fn count_eq_calls_map_set(ty: &almide_lang::types::Ty) -> Option<usize> {
     use almide_lang::types::{constructor::TypeConstructorId as TC, Ty};
@@ -229,7 +230,7 @@ fn count_eq_calls_map_set(ty: &almide_lang::types::Ty) -> Option<usize> {
             return Some(1);
         }
     }
-    None
+    almide_mir::lower::scalar_core_eq_module(ty).map(|_| 1)
 }
 
 /// The custom-variant tier of [`count_eq_calls_depth`], verbatim: the
