@@ -196,14 +196,14 @@ mod tests {
 
         // A load64-fed rc (NO prim.handle carrier) stays UNMODELED — the differential-test floor: the
         // RcInc on a non-carrier handle emits no `a` and the verifier no-ops it, so the function is
-        // just the balanced Alloc+Drop ("id").
+        // just the balanced Alloc+Drop, plus the load's own live dereference probe ("ibd").
         let load_fed = func(vec![
             Op::Alloc { dst: o, repr: heap(), init: Init::Opaque },
             Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(h), args: vec![o] },
             Op::Prim { kind: PrimKind::RcInc, dst: None, args: vec![h] },
             Op::Drop { v: o },
         ]);
-        assert_eq!(ownership_certificate(&load_fed), "id\n");
+        assert_eq!(ownership_certificate(&load_fed), "ibd\n");
         assert_eq!(verify_ownership(&load_fed), Ok(()));
     }
 
@@ -521,6 +521,65 @@ mod tests {
         assert!(!cert_all_balanced(&cert));
         // a borrowed PARAM's line re-aliased at 0 stays legal (the caller holds it).
         assert!(cert_all_balanced("amam\n"));
+    }
+
+    /// #3233: a freed owned object read only through the address bridge
+    /// (`prim.handle` → `+ off` → `LoadHandle`) or as a call's handle argument
+    /// left NO event, so its line was a balanced `id` and certified. Every
+    /// dereference and every call handle arg is now a `b` probe, and the
+    /// liveness guard rejects both shapes.
+    #[test]
+    fn handle_reads_after_free_are_witnessed() {
+        let (o, h, off, addr, p) = (ValueId(0), ValueId(1), ValueId(2), ValueId(3), ValueId(4));
+        let load = || Op::Prim { kind: PrimKind::LoadHandle, dst: Some(p), args: vec![addr] };
+        let mut ops = vec![
+            Op::Alloc { dst: o, repr: heap(), init: Init::Opaque },
+            Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![o] },
+            Op::ConstInt { dst: off, value: 12 },
+            Op::IntBinOp { dst: addr, op: crate::IntOp::Add, a: h, b: off },
+            load(),
+            Op::Drop { v: o },
+        ];
+        let live = func(ops.clone());
+        assert_eq!(ownership_certificate(&live), "ibd\n");
+        assert!(cert_all_balanced(&ownership_certificate(&live)));
+        ops.push(load());
+        let after_free = func(ops);
+        assert_eq!(ownership_certificate(&after_free), "ibdb\n");
+        assert!(!cert_all_balanced(&ownership_certificate(&after_free)));
+
+        let call_after_free = func(vec![
+            Op::Alloc { dst: o, repr: heap(), init: Init::Opaque },
+            Op::Drop { v: o },
+            Op::Call { dst: None, func: RtFn::PrintStr, args: vec![CallArg::Handle(o)], result: None },
+        ]);
+        assert_eq!(ownership_certificate(&call_after_free), "idb\n");
+        assert!(verify_ownership(&call_after_free).is_err());
+        assert!(!cert_all_balanced(&ownership_certificate(&call_after_free)));
+
+        // The lowering's move into a container: `Consume v`, then the slot
+        // store of `prim.handle(v)`. The handle bridge is not a dereference of
+        // `v` (the store dereferences the LIST), so `v`'s line stays `im`.
+        let (xs, v, hx, hv) = (ValueId(5), ValueId(6), ValueId(7), ValueId(8));
+        let store_move = func(vec![
+            Op::Alloc { dst: xs, repr: heap(), init: Init::Opaque },
+            Op::Alloc { dst: v, repr: heap(), init: Init::Opaque },
+            Op::Prim { kind: PrimKind::Handle, dst: Some(hx), args: vec![xs] },
+            Op::Consume { v },
+            Op::Prim { kind: PrimKind::Handle, dst: Some(hv), args: vec![v] },
+            Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![hx, hv] },
+            Op::Drop { v: xs },
+        ]);
+        assert_eq!(ownership_certificate(&store_move), "ibd\nim\n");
+
+        // A borrowed PARAM's line is not owned: passing the param on after its
+        // own Dup was moved out is the caller's reference, not a probe (`am`).
+        let param = param_fn("pass_param_on", vec![
+            Op::Dup { dst: h, src: o },
+            Op::Consume { v: h },
+            Op::Call { dst: None, func: RtFn::PrintStr, args: vec![CallArg::Handle(o)], result: None },
+        ], None);
+        assert_eq!(ownership_certificate(&param), "am\n");
     }
 
     include!("certificate_p2.rs");

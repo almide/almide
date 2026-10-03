@@ -324,6 +324,7 @@ struct CertScan {
     feeder_to_slot: BTreeMap<ValueId, ValueId>,
     slots: BTreeSet<ValueId>,
     line_slots: BTreeSet<ValueId>,
+    addr_of: BTreeMap<ValueId, ValueId>, // address → the object it points into (#3233)
 }
 
 impl CertScan {
@@ -332,6 +333,7 @@ impl CertScan {
     /// [`drop_family_value`] / [`alloc_class_prim_dst`] / [`heap_call_dst`] and
     /// the loop-slot feeder routing is [`Self::feed_or_own`].
     fn step(&mut self, op: &Op) {
+        self.read_probes(op); // every handle READ is a `b` probe (#3233, certificate_b_tail.rs)
         // Plain release (−1). A `DropListStr`/`DropListValue` is the SAME single `d` on the LIST
         // object — its elements were already accounted as `m` (consumed) when stored into it, so
         // the recursive runtime free (per-String, or per-Value via `$__drop_value`) adds no extra

@@ -344,8 +344,15 @@ fi
 #   lower/calls_b.rs disabled). The frame-end `drop_arm_locals` frees the copy,
 #   then the write-back `Dup`s it: the owned line reads `idam` / `iiddam`,
 #   balanced to 0, accepted before the owned-line resurrection rule.
+#   3233-loadhandle-after-free.cert / 3233-callarg-after-free.cert — an owned
+#   object freed, then read only through the address bridge (`prim.handle` →
+#   `+ off` → `LoadHandle`, the address computed while it lived) or passed as
+#   a call's handle argument. Before #3233 neither read emitted an event, so
+#   both lines were a balanced `id`; the producer now probes every handle read
+#   with `b`, and these are its witnesses for the two shapes (`ibdb`, `idb` —
+#   the emit_cert scenarios loadhandle-after-free / callarg-after-free).
 echo
-echo "== POISON RATCHET (negative leg, #3229): every poisoned certificate is REJECTED by all three verdicts =="
+echo "== POISON RATCHET (negative leg, #3229, #3233): every poisoned certificate is REJECTED by all three verdicts =="
 POISONED=("$ROOT"/proofs/poisoned-certs/*.cert)
 if [ ! -e "${POISONED[0]}" ]; then
   echo "POISON RATCHET FAIL: proofs/poisoned-certs/ holds no certificate — the negative leg would pass vacuously." >&2

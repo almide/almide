@@ -132,6 +132,7 @@ pub fn ownership_certificate_with_poison(func: &MirFunction) -> (String, bool) {
         feeder_to_slot,
         slots,
         line_slots,
+        addr_of: BTreeMap::new(),
     };
     for op in &func.ops {
         scan.step(op);
@@ -209,4 +210,117 @@ pub fn plus_one_events_backed(func: &MirFunction) -> bool {
         return false;
     }
     a == dups
+}
+
+/// The handle-READ probes (#3233). A line witnessed only its `+1`/`−1` events
+/// and the explicit `Borrow`/`MakeUnique` uses, so an owned object freed and
+/// then read through the address bridge (`prim.handle` → `+ off` →
+/// `LoadHandle`/`Load`/`Store`) or passed as a call's handle argument, with
+/// no later `Dup`, left a balanced line and certified. Every such read is now
+/// the existing `b` (+0, faults at count 0) on its object, so the proven
+/// checker's liveness guard sees it. A read here is a DEREFERENCE (a load or
+/// store through an address into the object) or a borrowing use (a call's
+/// handle arg, a list element op, a `Pure`/`ChargeDyn` operand). Probed on an OWNED line only — one born
+/// by an `i` (the `guard_line` notion of owned): a borrowed param's or a
+/// slot's line legitimately sits at 0 while the caller holds the object.
+impl CertScan {
+    fn read_probes(&mut self, op: &Op) {
+        match op {
+            Op::Call { args, .. }
+            | Op::CallFn { args, .. }
+            | Op::CallImport { args, .. }
+            | Op::CallIndirect { args, .. } => self.call_arg_probes(args),
+            Op::Prim { kind, dst, args } => self.prim_read_probe(kind, *dst, args),
+            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } => self.address_alias(*dst, *a, *b),
+            Op::ListGetScalar { list, .. } | Op::ListSetScalar { list, .. } => self.probe_handle(*list),
+            Op::ChargeDyn { src, .. } => self.probe_handle(*src),
+            Op::Pure { uses, .. } => uses.iter().for_each(|v| self.probe_handle(*v)),
+            _ => {}
+        }
+    }
+
+    fn call_arg_probes(&mut self, args: &[CallArg]) {
+        for a in args {
+            if let CallArg::Handle(v) = a {
+                self.probe_handle(*v);
+            }
+        }
+    }
+
+    /// A load/store DEREFERENCES the object its address points into; `ElemAddr`
+    /// reads its list's bounds and its result is an address into that list,
+    /// like the `Add` bridge. `prim.handle` itself is not probed: it only
+    /// turns the pointer into an integer, and the lowering's move into a
+    /// container (`Consume v`, then `Store(slot, prim.handle(v))`) reads it
+    /// after the `m` that transferred the reference — a transfer, not a use.
+    fn prim_read_probe(&mut self, kind: &PrimKind, dst: Option<ValueId>, args: &[ValueId]) {
+        let Some(&first) = args.first() else { return };
+        match kind {
+            PrimKind::LoadHandle | PrimKind::Load { .. } | PrimKind::Store { .. } => self.probe_address(first),
+            PrimKind::ElemAddr => {
+                self.probe_address(first);
+                if let (Some(d), Some(o)) = (dst, self.address_object(first)) {
+                    self.addr_of.insert(d, o);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// An `Add` with exactly one tracked operand is an address INTO that
+    /// operand's object (verify_ownership's `step_add_address_alias`).
+    fn address_alias(&mut self, dst: ValueId, a: ValueId, b: ValueId) {
+        match (self.address_object(a), self.address_object(b)) {
+            (Some(o), None) | (None, Some(o)) => {
+                self.addr_of.insert(dst, o);
+            }
+            _ => {}
+        }
+    }
+
+    /// The object an address (or a handle used as one) points into.
+    fn address_object(&self, v: ValueId) -> Option<ValueId> {
+        if let Some(&o) = self.addr_of.get(&v) {
+            return Some(o);
+        }
+        self.s.of.get(&v).map(|_| self.s.object_of(v))
+    }
+
+    fn probe_address(&mut self, addr: ValueId) {
+        if let Some(o) = self.address_object(addr) {
+            self.probe_object(o);
+        }
+    }
+
+    fn probe_handle(&mut self, v: ValueId) {
+        if self.s.of.contains_key(&v) {
+            let o = self.s.object_of(v);
+            self.probe_object(o);
+        }
+    }
+
+    fn probe_object(&mut self, o: ValueId) {
+        if self.owned_line(o) {
+            self.s.event(o, 'b');
+        }
+    }
+
+    /// Is `o`'s line born by a fresh `i`? Its first event decides: on the
+    /// stream if it has one, else in the outermost open branch arm holding it.
+    fn owned_line(&self, o: ValueId) -> bool {
+        if let Some(line) = self.s.stream.get(&o) {
+            return line.starts_with('i');
+        }
+        for fr in &self.s.frames {
+            let t = fr.then_ev.get(&o).map_or("", |s| s.as_str());
+            let e = fr.else_ev.get(&o).map_or("", |s| s.as_str());
+            if !t.is_empty() {
+                return t.starts_with('i');
+            }
+            if !e.is_empty() {
+                return e.starts_with('i');
+            }
+        }
+        false
+    }
 }
