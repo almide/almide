@@ -252,10 +252,15 @@ pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + S
     let mut slots: Vec<Option<B>> = (0..xs.len()).map(|_| None).collect();
     // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
     almide_stdout_flush();
+    // The workers work for the enclosing fan element: a trap on one waits for
+    // the elements below it (ADR-0024 D6).
+    let sink = almide_fan_current();
     std::thread::scope(|s| {
         for (chunk, out) in xs.chunks(chunk_size).zip(slots.chunks_mut(chunk_size)) {
             let f = &f;
+            let sink = sink.clone();
             s.spawn(move || {
+                almide_fan_adopt(sink);
                 for (slot, x) in out.iter_mut().zip(chunk) {
                     *slot = Some(f(x.clone()));
                 }
@@ -275,11 +280,16 @@ pub fn almide_rt_list_par_filter<A: Send + Sync + Clone, F: Fn(A) -> bool + Send
     let mut results: Vec<Option<Vec<A>>> = (0..chunks.len()).map(|_| None).collect();
     // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
     almide_stdout_flush();
+    // The workers work for the enclosing fan element: a trap on one waits for
+    // the elements below it (ADR-0024 D6).
+    let sink = almide_fan_current();
     std::thread::scope(|s| {
         let mut handles = Vec::new();
         for chunk in &chunks {
             let f = &f;
+            let sink = sink.clone();
             handles.push(s.spawn(move || {
+                almide_fan_adopt(sink);
                 chunk.iter().filter(|x| f((*x).clone())).cloned().collect::<Vec<A>>()
             }));
         }
@@ -300,11 +310,16 @@ pub fn almide_rt_list_par_any<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + 
     let found = std::sync::atomic::AtomicBool::new(false);
     // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
     almide_stdout_flush();
+    // The workers work for the enclosing fan element: a trap on one waits for
+    // the elements below it (ADR-0024 D6).
+    let sink = almide_fan_current();
     std::thread::scope(|s| {
         for chunk in &chunks {
             let f = &f;
             let found = &found;
+            let sink = sink.clone();
             s.spawn(move || {
+                almide_fan_adopt(sink);
                 for x in *chunk {
                     if found.load(std::sync::atomic::Ordering::Relaxed) { return; }
                     if f(x.clone()) {
@@ -328,11 +343,16 @@ pub fn almide_rt_list_par_all<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + 
     let failed = std::sync::atomic::AtomicBool::new(false);
     // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
     almide_stdout_flush();
+    // The workers work for the enclosing fan element: a trap on one waits for
+    // the elements below it (ADR-0024 D6).
+    let sink = almide_fan_current();
     std::thread::scope(|s| {
         for chunk in &chunks {
             let f = &f;
             let failed = &failed;
+            let sink = sink.clone();
             s.spawn(move || {
+                almide_fan_adopt(sink);
                 for x in *chunk {
                     if failed.load(std::sync::atomic::Ordering::Relaxed) { return; }
                     if !f(x.clone()) {
