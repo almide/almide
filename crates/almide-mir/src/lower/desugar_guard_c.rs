@@ -89,7 +89,8 @@ mod hoist_impl {
     /// (`Out { a: label(r)! }` — the fallible-DTO shape) walled whenever the
     /// field is heap-typed and the literal is a Result carrier's Ok payload;
     /// the hoisted `let` spelling always lowered. Mechanize that spelling:
-    /// hoist every field up to and including the LAST `!` field that is not a
+    /// hoist every field up to and including the LAST `!`-bearing field (the
+    /// `!` is the field or nested in it, [`bang_bearing`]) that is not a
     /// trivially pure read (Var / literal) to its own `__rec_fld` bind —
     /// evaluation order is preserved among the hoisted fields, later fields
     /// stay inline and still evaluate after them, and the `!`'s early return
@@ -128,11 +129,30 @@ mod hoist_impl {
         }
     }
 
+    /// A field that propagates: a `!` / `?` as the field itself or nested in it
+    /// (`wrap(label(r)!)`, `"p" + label(r)! + "q"`, `"x${label(r)!}y"`), but not
+    /// one inside a lambda body, which the field only builds. The hoisted bind
+    /// then carries the nested `!`, which the call-argument unwrap lift places.
+    fn bang_bearing(e: &IrExpr) -> bool {
+        use almide_ir::visit::{walk_expr, IrVisitor};
+        struct B(bool);
+        impl IrVisitor for B {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                match &e.kind {
+                    IrExprKind::Unwrap { .. } | IrExprKind::Try { .. } => self.0 = true,
+                    IrExprKind::Lambda { .. } => {}
+                    _ => walk_expr(self, e),
+                }
+            }
+        }
+        let mut b = B(false);
+        b.visit_expr(e);
+        b.0
+    }
+
     fn record_last_bang(e: &IrExpr) -> Option<usize> {
         let IrExprKind::Record { fields, .. } = &e.kind else { return None };
-        fields
-            .iter()
-            .rposition(|(_, fe)| matches!(fe.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. }))
+        record_last_bang_fields(fields)
     }
 
     fn hoist_bang_record_fields(
@@ -148,9 +168,7 @@ mod hoist_impl {
         };
         match &mut rec.kind {
             IrExprKind::Record { fields, .. } => {
-                let Some(last_bang) = fields.iter().rposition(|(_, fe)| {
-                    matches!(fe.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. })
-                }) else {
+                let Some(last_bang) = record_last_bang_fields(fields) else {
                     return;
                 };
                 hoist_record_fields_upto(fields, last_bang, vt, hoists);
@@ -195,9 +213,7 @@ mod hoist_impl {
     fn record_last_bang_fields(
         fields: &[(almide_lang::intern::Sym, IrExpr)],
     ) -> Option<usize> {
-        fields
-            .iter()
-            .rposition(|(_, fe)| matches!(fe.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. }))
+        fields.iter().rposition(|(_, fe)| bang_bearing(fe))
     }
 
     fn rewrite_block(stmts: &mut Vec<IrStmt>, vt: &mut VarTable) {
