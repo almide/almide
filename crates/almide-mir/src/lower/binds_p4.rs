@@ -72,7 +72,16 @@ impl LowerCtx {
             return;
         }
         if crate::lower::is_result_ty(ty) {
-            self.value_shapes.insert(v, crate::lower::VariantShape::ResultScalar);
+            // A heap-Ok Result is the cap-as-tag block every producer builds (tag @16, the
+            // `ok(..)` ctor and a user call alike — the statement-match subject's own seed),
+            // so it reads as ResultHeapOk. Seeded ResultScalar it read the tag at @4 and the
+            // match declined (C-132 write-visible slot `(ok(s), b)`, #2739).
+            let shape = if Self::is_heap_ok_result(ty) {
+                crate::lower::VariantShape::ResultHeapOk
+            } else {
+                crate::lower::VariantShape::ResultScalar
+            };
+            self.value_shapes.insert(v, shape);
             if crate::lower::is_heap_elem_list_ty(ty) {
                 self.value_drops.entry(v).or_default().flat_elems = true;
             }

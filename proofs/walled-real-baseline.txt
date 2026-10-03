@@ -113,28 +113,10 @@
 # arms) lowers where the old `__decode_default_*` helper shape walled. The
 # baseline is EMPTY again; ANY row is a regression.
 #
-# (2026-08-26, the commissioning switchover) The wall-corpus GRADUATION moved
-# sixteen shapes the incumbent refused into spec/wasm_cross — the commissioned
-# structural leg renders and byte-verifies all of them, so they are corpus
-# rows now, and the eight functions below are the subset the incumbent's MIR
-# lowering still walls (the rest lower at MIR and walled later, at
-# render). These are NOT lowering regressions: the corpus grew past the
-# incumbent's admitted profile by design. Each row prunes when the incumbent
-# learns the shape — or with the incumbent's retirement, whichever first.
-spec/gauntlet/cells/x13_bang_nested_in_field.almd :: f
-spec/wasm_cross/list_pop_map_insert_on_record_field.almd :: drain
-spec/wasm_cross/nested_three_level_literal.almd :: main
-# (2026-08-30, C-326/#1696) The gzip inflate joined the corpus lowering on the
-# STRUCTURAL leg (the phase-4 hoist); the incumbent's brick walls its loop-level
-# tuple write-back (WhileHeapAccumulator) and its dispatch callee by design —
-# the same division the host-determinism MAX_WALLED=17 row records. Both rows
-# prune with #1696 steps 4-5 (certificate on the structural leg, incumbent
-# retirement) — or earlier if the incumbent learns the shape.
-spec/wasm_cross/gzip_inflate_members.almd :: gunzip
-spec/wasm_cross/gzip_inflate_members.almd :: inflate
 # (2026-08-31, C-327) env.sleep_ms has no capability seat in the incumbent
 # brick; the structural leg serves it (embedded-host op 36 / p1 clock spin).
-# Prunes with #1696 steps 4-5, same as the inflate pair above.
+# Prunes with #1696 steps 4-5. (The gzip inflate pair that sat above lowers
+# since walls lane 4, #2739: the loop-level tuple write-back executes.)
 spec/wasm_cross/env_sleep_pause.almd :: main
 # 2026-08-31 (#1710 increment 1): the embedded_cross http fixture's `main` walls
 # on the BUILD path by DESIGN — ops 43-47 are served by the embedded host
@@ -224,24 +206,6 @@ spec/serve_cross/http_serve_shutdown.almd :: handle
 # incumbent work by design (#1696 retires it); prunes with #1696.
 spec/stdlib/http_router_test.almd :: __test_almd_an app bound at the top level is tested by calling it
 
-# (2026-09-03, C-132/#1576) a CAN-ERR effect fn with a `mut` param takes the
-# move-mode tuple rewrite (`(T, Buf)` on the ok payload only); the incumbent
-# brick walls the synthesized `let (r, b) = call!` destructure-unwrap in the
-# callers (`unwrap `!` in a call-argument position`) and the generic port's
-# heap-result `if` tail (`uc__Mem`), where the STRUCTURAL leg (the default)
-# lowers every cell byte-identical to native. Prunes with #1696 4-5.
-spec/wasm_cross/mut_param_effect_can_err.almd :: go
-spec/wasm_cross/mut_param_effect_can_err.almd :: main
-spec/wasm_cross/mut_param_effect_can_err.almd :: uc__Mem
-spec/wasm_cross/mut_param_move_mode_gaps.almd :: run_fill
-# #1576 also: the DDD gauntlet's mut_port `main` (the can-err mut-param port call
-# consumed by `!`) walls on the incumbent for the same reason as the fixture's fns.
-spec/gauntlet/pkg/mut_port/src/main.almd :: main
-# #2933/#2944: every mut form through a two- and three-level record field path
-# (`o.inner.xs`, `o.a.b.m`). `drain`'s `list.pop` on a `mut` param's field sits in
-# a `while` the MIR brick models one iteration of, and the field-path COW refuses
-# a modeled frame; the structural leg serves it byte-identically to native.
-spec/wasm_cross/nested_field_path_mut.almd :: drain
 # 2026-09-30 (#3058, class 1): 58 rows pruned (171 -> 113). The effect-fn ABI
 # facts the deleted registries held are now DERIVED from the typed IR on every
 # product path and in the classifier (`almide_ir::effect_abi`, sharing the C-132
@@ -357,20 +321,13 @@ spec/wasm_cross/nested_field_path_mut.almd :: drain
 # same `err(e) => err(e)`); a record-slot closure field is callable in tail
 # (3); the nested-list concat admits `List[List[scalar]]` elements (the codec
 # triple-list worker); and the closure env captures a user variant (4).
-# #3170: the mut-param reassign-from-HOF fixture's MIR rung walls on the
-# can-err `mut`-param carrier: `f_fallible` reassigns its `mut` param from a
-# fallible map (a heap-result `match` over the carrier) and `main` calls it with
-# `!`. Native falls back to the classic renderer — the leg #3170 fixed — and the
-# structural wasm leg and the interp agree with it. (`main`'s interpolated
-# mut-call, `f_filter_map`'s option-literal closure and `f_branch`'s bound
-# heap-result `if` lower since walls lane 3, #2739.)
-spec/wasm_cross/mut_param_reassign_from_hof.almd :: f_fallible  # #2739
-spec/wasm_cross/mut_param_reassign_from_hof.almd :: main  # #2739
-# #3230: the nested-`mut`-read fixture's `main` interpolates a `mut`-argument
-# call after a part that reads the same variable. Walls lane 3 lowers the
-# write-back block inside the interpolation part; the row now walls on the next
-# shape, the interpolation passed in a call-argument position ("non-lowerable
-# string interpolation in a call-argument position"), the same class as the
-# #3154 rows. Native falls back to the classic renderer (the leg #3230 fixed);
-# the structural wasm leg and the interp agree with it.
-spec/wasm_cross/mut_call_nested_read_before.almd :: main  # #2739
+# (2026-10-04, #2739 lane 4) 14 rows pruned (25 -> 11), every non-http/env row:
+# operands read before a mut-call write-back are bound first (the #3230 fixture's
+# `main`); a three-level list literal binds its nested elements; a record field's
+# nested `!` hoists (x13); a destructuring `let` splices its write-back block
+# (gzip `inflate` / `gunzip`); a borrowed record param under a field-path in-place
+# mutator is pre-copied before an executing loop (the two `drain`s); and the C-132
+# can-err `!` call sites become the write-visible match plus a let-bound `!` (the
+# can-err fixture's `go` / `main` / `uc__Mem`, `run_fill`, the mut_port `main`,
+# and the reassign-from-HOF `f_fallible` / `main`). What remains is the 11 http /
+# env capability rows, B and B2, which wait on a ruling.
