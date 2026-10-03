@@ -123,7 +123,6 @@
 # learns the shape — or with the incumbent's retirement, whichever first.
 spec/gauntlet/cells/x13_bang_nested_in_field.almd :: f
 spec/wasm_cross/list_pop_map_insert_on_record_field.almd :: drain
-spec/wasm_cross/nested_three_level_literal.almd :: main
 # (2026-08-30, C-326/#1696) The gzip inflate joined the corpus lowering on the
 # STRUCTURAL leg (the phase-4 hoist); the incumbent's brick walls its loop-level
 # tuple write-back (WhileHeapAccumulator) and its dispatch callee by design —
