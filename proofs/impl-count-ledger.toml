@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 708  implementations = 1737
+# holes = 832  implementations = 1992
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -1168,6 +1168,20 @@ selfhost = 1
 total    = 2
 [[hole]]
 module   = "datetime"
+name     = "now"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
+name     = "monotonic_ns"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "datetime"
 name     = "parse_iso"
 native   = 1
 emitter  = 0
@@ -1204,6 +1218,62 @@ total    = 2
 [[hole]]
 module   = "datetime"
 name     = "year"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "env"
+name     = "unix_timestamp"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "env"
+name     = "args"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "env"
+name     = "get"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "env"
+name     = "set"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "env"
+name     = "cwd"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "env"
+name     = "millis"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "env"
+name     = "sleep_ms"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "env"
+name     = "temp_dir"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -1447,6 +1517,258 @@ emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
+module   = "fs"
+name     = "read_text"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "fs"
+name     = "read_bytes"
+native   = 1
+emitter  = 1
+selfhost = 4
+total    = 6
+[[hole]]
+module   = "fs"
+name     = "write"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "fs"
+name     = "write_bytes"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "fs"
+name     = "write_bytes_raw"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "append"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "mkdir_p"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "exists"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "read_lines"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "fs"
+name     = "fold_lines"
+native   = 1
+emitter  = 2
+selfhost = 12
+total    = 15
+[[hole]]
+module   = "fs"
+name     = "for_each_line"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "__fallible_fold_lines"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "fs"
+name     = "__fallible_for_each_line"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "fold_lines_range"
+native   = 1
+emitter  = 1
+selfhost = 4
+total    = 6
+[[hole]]
+module   = "fs"
+name     = "fold_lines_chunked"
+native   = 1
+emitter  = 1
+selfhost = 4
+total    = 6
+[[hole]]
+module   = "fs"
+name     = "read_text_if_exists"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "read_bytes_if_exists"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "read_lines_if_exists"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "read_bytes_raw_if_exists"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "remove"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "fs"
+name     = "list_dir"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "is_dir"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "is_file"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "copy"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "rename"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "walk"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "remove_all"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "file_size"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "temp_dir"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "stat"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "glob"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "create_temp_file"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "create_temp_dir"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "is_symlink"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "modified_at"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "read_bytes_raw"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
 module   = "hash"
 name     = "fnv1a32"
 native   = 1
@@ -1491,6 +1813,13 @@ total    = 2
 [[hole]]
 module   = "hex"
 name     = "decode"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "serve"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -1614,6 +1943,195 @@ native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
+[[hole]]
+module   = "http"
+name     = "get"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "http"
+name     = "post"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "put"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "patch"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "delete"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "request"
+native   = 1
+emitter  = 0
+selfhost = 3
+total    = 4
+[[hole]]
+module   = "http"
+name     = "get_status"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "request_status"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "get_response"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "post_response"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "put_response"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "patch_response"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "delete_response"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "request_response"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "get_bytes"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "request_bytes"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "request_stream"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "openai_streaming_call"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "anthropic_streaming_call"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "__call_start"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "poll"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "read_new"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "wait"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "cancel"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "http"
+name     = "__request_stream_limited"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "__openai_streaming_limited"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "http"
+name     = "__anthropic_streaming_limited"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
 [[hole]]
 module   = "http"
 name     = "new_request"
@@ -2006,6 +2524,34 @@ native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
+[[hole]]
+module   = "io"
+name     = "read_line"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "io"
+name     = "read_line_opt"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "io"
+name     = "print"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "io"
+name     = "read_all"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "io"
 name     = "read_byte"
@@ -3422,7 +3968,175 @@ selfhost = 1
 total    = 2
 [[hole]]
 module   = "net"
+name     = "tcp_connect"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "tcp_read"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "tcp_write"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "tcp_read_exact"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "tcp_close"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
 name     = "tcp_is_open"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "tcp_read_timeout"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "tcp_set_timeout"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "tcp_available"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "tcp_listen"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "tcp_accept"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "tcp_close_listener"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "unix_connect"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "unix_listen"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "unix_accept"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "unix_send"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "unix_recv"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "unix_take_fds"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "unix_poll"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "unix_wait"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "unix_close"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "shm_create"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "shm_resize"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "shm_write"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "net"
+name     = "shm_read"
 native   = 1
 emitter  = 0
 selfhost = 0
@@ -4115,7 +4829,63 @@ selfhost = 0
 total    = 1
 [[hole]]
 module   = "process"
+name     = "exec"
+native   = 1
+emitter  = 0
+selfhost = 6
+total    = 7
+[[hole]]
+module   = "process"
+name     = "exit"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "process"
 name     = "args"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "process"
+name     = "stdin_lines"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "process"
+name     = "exec_in"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "process"
+name     = "exec_with_stdin"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "process"
+name     = "exec_status"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "process"
+name     = "exec_status_timeout"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "process"
+name     = "exec_attached"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -4136,6 +4906,20 @@ selfhost = 0
 total    = 1
 [[hole]]
 module   = "process"
+name     = "spawn"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "process"
+name     = "kill"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "process"
 name     = "sleep"
 native   = 1
 emitter  = 0
@@ -4148,6 +4932,34 @@ native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
+[[hole]]
+module   = "random"
+name     = "int"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "random"
+name     = "float"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "random"
+name     = "choice"
+native   = 1
+emitter  = 1
+selfhost = 3
+total    = 5
+[[hole]]
+module   = "random"
+name     = "shuffle"
+native   = 1
+emitter  = 1
+selfhost = 3
+total    = 5
 [[hole]]
 module   = "regex"
 name     = "is_match"
@@ -4956,6 +5768,62 @@ total    = 2
 [[hole]]
 module   = "value"
 name     = "keys"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "zlib"
+name     = "compress"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "zlib"
+name     = "compress_level"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "zlib"
+name     = "decompress"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "zlib"
+name     = "deflate"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "zlib"
+name     = "deflate_level"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "zlib"
+name     = "inflate"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "zlib"
+name     = "gzip"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "zlib"
+name     = "gunzip"
 native   = 1
 emitter  = 0
 selfhost = 1
