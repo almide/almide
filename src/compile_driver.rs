@@ -338,6 +338,11 @@ fn optimize_verify_and_link(ir_program: &mut Option<almide::ir::IrProgram>, pars
                 cli::check_permissions(ir, &proj.permissions)?;
             }
         }
+        // #2589: `[permissions] proc` — statically, and as the embedded wasm
+        // host's run-time bound.
+        if let Some(ir) = ir_program.as_ref() {
+            cli::enforce_proc_allowlist(ir, proj.proc_allow.as_deref())?;
+        }
     }
 
     // The driver's SECOND half (monomorphize + link), after the gates above.

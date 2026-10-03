@@ -4,12 +4,16 @@
 
 mod host;
 mod http_call_host;
+mod host_process;
 mod host_serve;
 #[cfg(test)]
 #[path = "tests/http_host_test.rs"]
 mod http_host_test;
 pub(crate) mod component_alloc;
 pub mod component_availability;
+/// The private `almide:process/spawn` capability (#2589, ADR-0025): the
+/// `[permissions] proc` bound and the canonical-ABI import.
+pub use host_process::{link_spawn_import, set_allowlist as set_proc_allowlist};
 /// The stock-WASI transform (`to_wasi`, `P1_SERVED_OPS`, …): its own crate
 /// since #2554 (it never needed the engine); the path stays.
 pub use almide_wasi as wasi;

@@ -98,6 +98,85 @@ pub fn check_permissions(ir: &almide::ir::IrProgram, permissions: &[String]) -> 
     Ok(())
 }
 
+/// The subprocess fns that START a child, with the index of the argument
+/// that names the command (#2589).
+const PROC_SPAWNING: &[(&str, usize)] = &[
+    ("exec", 0),
+    ("exec_in", 1),
+    ("exec_with_stdin", 0),
+    ("exec_status", 0),
+    ("exec_status_timeout", 0),
+    ("exec_attached", 0),
+    ("spawn", 0),
+];
+
+/// `[permissions] proc` (#2589, ADR-0025), statically: every call that starts
+/// a child must name its command as a string literal on the list. A command
+/// computed at run time, or a spawning fn passed as a value, cannot be checked
+/// here and is refused too — so a program that compiles never starts a
+/// command outside the list, on any target.
+pub fn check_proc_allowlist(ir: &almide::ir::IrProgram, allow: &[String]) -> Result<(), String> {
+    use almide::ir::visit::IrVisitor;
+    use almide::ir::{CallTarget, IrExpr, IrExprKind};
+    struct Scan<'a> {
+        allow: &'a [String],
+        bad: Vec<String>,
+    }
+    impl IrVisitor for Scan<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match &e.kind {
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                    if module.as_str() == "process" =>
+                {
+                    if let Some(&(_, at)) = PROC_SPAWNING.iter().find(|(f, _)| *f == func.as_str()) {
+                        let line = e.span.map_or(String::new(), |s| format!(" (line {})", s.line));
+                        match args.get(at).map(|a| &a.kind) {
+                            Some(IrExprKind::LitStr { value }) if self.allow.iter().any(|c| c == value) => {}
+                            Some(IrExprKind::LitStr { value }) => {
+                                self.bad.push(format!("process.{func}(\"{value}\"){line}: `{value}` is not in [permissions] proc"))
+                            }
+                            _ => self.bad.push(format!(
+                                "process.{func}{line}: the command is not a string literal, so [permissions] proc cannot check it"
+                            )),
+                        }
+                    }
+                }
+                IrExprKind::FnRef { name } => {
+                    let n = name.as_str();
+                    if let Some(f) = n.strip_prefix("process.").filter(|f| PROC_SPAWNING.iter().any(|(p, _)| p == f)) {
+                        self.bad.push(format!("process.{f} passed as a value: [permissions] proc cannot check its command"));
+                    }
+                }
+                _ => {}
+            }
+            almide::ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut scan = Scan { allow, bad: Vec::new() };
+    for f in ir.functions.iter().chain(ir.modules.iter().flat_map(|m| m.functions.iter())) {
+        scan.visit_expr(&f.body);
+    }
+    if scan.bad.is_empty() {
+        return Ok(());
+    }
+    for b in &scan.bad {
+        err(&format!("error: {b}"));
+    }
+    err(&format!("  hint: [permissions] proc = {allow:?} in almide.toml lists the commands process.* may start"));
+    Err(format!("{} [permissions] proc violation(s)", scan.bad.len()))
+}
+
+/// Apply `[permissions] proc`: the static gate above, and the same list as
+/// the embedded wasm host's run-time bound (`almide:process/spawn` answers a
+/// command outside it with an err naming the command).
+pub fn enforce_proc_allowlist(ir: &almide::ir::IrProgram, allow: Option<&[String]>) -> Result<(), String> {
+    almide_wasm_run::set_proc_allowlist(allow.map(<[String]>::to_vec));
+    match allow {
+        Some(list) => check_proc_allowlist(ir, list),
+        None => Ok(()),
+    }
+}
+
 /// Compute a 64-bit hash of a byte slice (using DefaultHasher).
 fn hash64(data: &[u8]) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();

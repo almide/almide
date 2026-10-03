@@ -1,0 +1,66 @@
+// almide:process/spawn — the PRIVATE subprocess capability (#2589, ADR-0025).
+//
+// Stock WASI (0.2 and 0.3) has no subprocess API. This interface is Almide's
+// own, the one exception ADR-0025 makes to ADR-0023 §2.6 (no private host ABI
+// on stock runtimes). It is bounded three ways:
+//
+// - it ships only when the program's op set names a process op (80..=89):
+//   a program that never starts a child never carries the import;
+// - a host that does not implement it refuses the module at load (stock
+//   wasmtime: "unknown import: `almide:process/spawn::call` has not been
+//   defined") — never a silent wrong answer at run time;
+// - every operation that starts a child is checked against the project's
+//   `[permissions] proc` allowlist, at compile time (`cli::check_permissions`)
+//   and again by the host.
+//
+// The core-module import is the canonical-ABI lowering of `call`:
+//   (import "almide:process/spawn" "call"
+//     (func (param $op i32) (param $a-ptr i32) (param $a-len i32)
+//           (param $b-ptr i32) (param $b-len i32) (param $ret i32)))
+// with the answer's bytes placed through the module's `cabi_realloc` export.
+// The embedded host (`almide run --target wasm`, `almide test`) serves the
+// same operations to the raw module as `almide.fs_call` ops 80..=89.
+package almide:process;
+
+interface spawn {
+  /// The operation; the case index is the host op minus 80.
+  ///
+  /// Operands are text. `argv` is the argument list as decimal CHAR-length
+  /// cells (`<chars>\n<payload>`, one per argument).
+  enum op {
+    /// a = cmd, b = argv. ok = stdout (exit 0); err = stderr, or a status
+    /// line when stderr is empty, or the spawn error.
+    exec,
+    /// a = dir, b = [cmd] ++ argv. ok = stdout; err = stderr or spawn error.
+    exec-in,
+    /// a = cmd, b = [input] ++ argv; input is piped to the child's stdin.
+    exec-with-stdin,
+    /// a = cmd, b = argv. ok = `<code>\n<stdout chars>\n<stdout><stderr>`,
+    /// code -1 when the child was killed by a signal.
+    exec-status,
+    /// a = cmd, b = [timeout-ms] ++ argv. ok as exec-status; err is exactly
+    /// `exec timed out after <ms>ms` when the deadline fires (the child's
+    /// process group is killed).
+    exec-status-timeout,
+    /// a = cmd, b = argv. The child shares the host's stdin/stdout/stderr;
+    /// ok = the exit code in decimal.
+    exec-attached,
+    /// a = cmd, b = argv. Starts the child in the background (stdin null);
+    /// ok = its pid in decimal.
+    spawn,
+    /// a = pid, b = signal, both decimal. ok = empty; err = the platform
+    /// tool's stderr.
+    kill,
+    /// a = pid in decimal. ok = `1` while the process exists, else `0`.
+    is-alive,
+    /// ok = the host process's pid in decimal.
+    pid,
+  }
+
+  /// Run one operation.
+  call: func(op: op, a: string, b: string) -> result<string, string>;
+}
+
+world process-host {
+  import spawn;
+}

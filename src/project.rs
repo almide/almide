@@ -81,6 +81,9 @@ pub struct Project {
     /// If empty, all capabilities are allowed (backwards compatible).
     /// e.g., ["IO", "Net", "Log"]
     pub permissions: Vec<String>,
+    /// `[permissions] proc = [...]` (#2589, ADR-0025): the commands the
+    /// subprocess family may start. `None` (no key) = any command.
+    pub proc_allow: Option<Vec<String>>,
     /// Native Rust crate dependencies added to generated Cargo.toml.
     /// e.g., [("wasmtime", "42.0.0")]
     pub native_deps: Vec<NativeDep>,
@@ -107,6 +110,7 @@ struct TomlAccum {
     almide_min: Option<String>,
     deps: Vec<Dependency>,
     permissions: Vec<String>,
+    proc_allow: Option<Vec<String>>,
     native_deps: Vec<NativeDep>,
 }
 
@@ -124,13 +128,18 @@ fn apply_package_line(line: &str, acc: &mut TomlAccum) {
 
 /// `parse_toml`'s `[permissions]` section line handler. Extracted verbatim.
 fn apply_permissions_line(line: &str, acc: &mut TomlAccum) {
-    if let Some(("allow", val)) = parse_kv(line) {
-        acc.permissions.extend(
-            val.trim_matches(|c| c == '[' || c == ']')
-                .split(',')
-                .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
-                .filter(|s| !s.is_empty())
-        );
+    let list = |val: String| -> Vec<String> {
+        val.trim_matches(|c| c == '[' || c == ']')
+            .split(',')
+            .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+    match parse_kv(line) {
+        Some(("allow", val)) => acc.permissions.extend(list(val)),
+        // #2589: the commands `process.*` may start; an empty list allows none.
+        Some(("proc", val)) => acc.proc_allow.get_or_insert_with(Vec::new).extend(list(val)),
+        _ => {}
     }
 }
 
@@ -376,6 +385,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
         package: Package { name: acc.name, version: acc.version, almide_min: acc.almide_min },
         dependencies,
         permissions: acc.permissions,
+        proc_allow: acc.proc_allow,
         native_deps: acc.native_deps,
         root,
     })
