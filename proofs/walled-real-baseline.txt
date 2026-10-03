@@ -245,27 +245,12 @@ spec/gauntlet/pkg/mut_port/src/main.almd :: main
 # Result through `match r { ok(v) => ok(v + 1), err(e) => err(e) }`; the incumbent
 # MIR lowering walls it, the structural leg serves both files byte-identically to
 # native, and the incumbent is retiring under #1696 (recorded, not ported).
-spec/lang/match_err_arm_payload_test.almd :: bump
-spec/wasm_cross/match_err_arm_typed_payload.almd :: bump
 # 2026-09-27 (#2723, found while recording #2725): the typed-error callback channel
 # spec test's `fold_mid_block` / `sum_with` (a `__fallible_fold` whose callback is
 # not liftable) and `typed_slot` (a lambda passed to a typed slot) wall on the
 # incumbent MIR lowering; the structural leg runs the file via WASM. Recorded, not
 # ported (#1696).
-spec/lang/typed_error_callback_channel_test.almd :: fold_mid_block
-spec/lang/typed_error_callback_channel_test.almd :: sum_with
-spec/lang/typed_error_callback_channel_test.almd :: typed_slot
 # 2026-09-27 (#2725, ADR-0021 step 4, C-369): the lambda failure-channel files.
-# The incumbent MIR lowering walls a `__fallible_fold` whose callback carries a
-# TYPED error channel through a block body (`fold_mid_block`, `sum_with`: its
-# `err(e) => err(e)` re-wrap of a variant payload is the heap-result re-wrap
-# family) and a lambda passed to a typed slot (`typed_slot`). The structural leg
-# serves every one byte-identically to native (3-way oracle agrees). The
-# String-erasure rows (`erased`, `fn_level`, `disagree`, `erased_fold`) lower since
-# walls lane 3 (#2739): the `!` carries the typed error's repr text.
-spec/wasm_cross/lambda_failure_channel.almd :: fold_mid_block
-spec/wasm_cross/lambda_failure_channel.almd :: sum_with
-spec/wasm_cross/lambda_failure_channel.almd :: typed_slot
 # #2933/#2944: every mut form through a two- and three-level record field path
 # (`o.inner.xs`, `o.a.b.m`). `drain`'s `list.pop` on a `mut` param's field sits in
 # a `while` the MIR brick models one iteration of, and the field-path COW refuses
