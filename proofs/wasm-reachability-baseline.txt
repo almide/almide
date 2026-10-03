@@ -30,7 +30,9 @@
 #
 # COMPILER_FRONTIER — the burn-down:
 #
-# HOST_CAPABILITY (40) — out of scope by design:
+# HOST_CAPABILITY (43) — out of scope by design (2026-10-03, #2589: the twelve
+# process.* rows left — the subprocess family builds over almide:process/spawn,
+# ADR-0025, and process.env / process.sleep over host ops 26 / 36):
 #
 # UNPROBEABLE (113) — the sweep's OWN coverage hole, not a compiler
 # verdict: the argument synthesizer has no literal for these parameter types
@@ -135,18 +137,6 @@ net.unix_recv :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-
 net.unix_send :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
 net.unix_take_fds :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
 net.unix_wait :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-process.env :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.env needs a declared capability not in this brick
-process.exec :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec needs a declared capability not in this brick
-process.exec_attached :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_attached needs a declared capability not in this brick
-process.exec_in :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_in needs a declared capability not in this brick
-process.exec_status :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_status needs a declared capability not in this brick
-process.exec_status_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_status_timeout needs a declared capability not in this brick
-process.exec_with_stdin :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.exec_with_stdin needs a declared capability not in this brick
-process.is_alive :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed in this brick (the permissive caps-counting path 
-process.kill :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.kill needs a declared capability not in this brick
-process.pid :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed in this brick (the permissive caps-counting path 
-process.sleep :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.sleep needs a declared capability not in this brick
-process.spawn :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.spawn needs a declared capability not in this brick
 process.stdin_lines :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.stdin_lines needs a declared capability not in this brick
 result.flat_map :: UNPROBEABLE :: no candidate shape builds natively
 result.flatten :: UNPROBEABLE :: no candidate shape builds natively
