@@ -1,6 +1,6 @@
 # Hello, world wasm size — the SOURCE for the README's wasm-size block.
 # Regenerate: bash scripts/gen-readme-stats.sh --measure
-#             (ALMIDE_RELEASE_BIN=<binary from a release asset> also restamps
+#             (README_RELEASE_BIN=<binary from a release asset> also restamps
 #             the released row; without it the released row is carried over)
 # Checked:    bash scripts/gen-readme-stats.sh --check rebuilds Hello, world and
 #             demands these exact bytes — a changed preamble is re-stamped HERE,
