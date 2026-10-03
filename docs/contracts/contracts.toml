@@ -705,6 +705,7 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_preopen_resolve.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 
 # ── RECURSIVE-ENUM HEAP INDIRECTION / NAME COLLISION ────────────────
@@ -1878,6 +1879,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_relative_path.almd", class = "fixture" },
   { path = "spec/stdlib/fs_stat_test.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 [[contract]]
 id        = "C-138"
@@ -2481,6 +2483,7 @@ since     = "0.37.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_platform_reporting.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 [[contract]]
 id        = "C-190"
@@ -2816,6 +2819,7 @@ evidence  = [
   { path = "spec/wasm_cross/fs_call_head_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/fs_read_bytes_raw_call_head.almd", class = "fixture" },
   { path = "spec/wasm_cross/fs_fallible_walker_call_head.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 [[contract]]
 id        = "C-216"
@@ -2887,6 +2891,7 @@ evidence  = [
   { path = "spec/stdlib/fs_fold_lines_range_test.almd", class = "fixture" },
   { path = "spec/stdlib/fs_fold_lines_chunked_test.almd", class = "fixture" },
   { path = "spec/wasm_cross/line_endings_bare_cr.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 [[contract]]
 id        = "C-221"
@@ -2949,6 +2954,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_read_lines.almd", class = "fixture" },
   { path = "spec/wasm_cross/line_endings_bare_cr.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 [[contract]]
 id        = "C-226"
@@ -2977,6 +2983,8 @@ since     = "0.56.2"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_metadata_family.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_reads_and_writes_past_the_host_per_call_bound" },
 ]
 [[contract]]
 id        = "C-228"
@@ -2990,6 +2998,7 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_select_rows.almd", class = "fixture" },
   { path = "spec/wasm_cross/fs_glob_segments.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_shape_family.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 [[contract]]
 id        = "C-229"
@@ -3469,6 +3478,7 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_list_dir_multipass.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 
 # ── fs WRITE-SIDE ERROR TEXT ───────────────────────────────────────────
@@ -3481,6 +3491,7 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_write_errno.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 
 # ── ADR-0006 FALLIBLE CALLBACK FOR THE fs STREAMING WALKERS ────────────
@@ -3496,6 +3507,7 @@ evidence  = [
   { path = "spec/wasm_cross/fs_fallible_stream_callback.almd", class = "fixture" },
   { path = "spec/stdlib/fs_streaming_test.almd", class = "fixture" },
   { path = "tests/fs_streaming_family_gate_test.rs", name = "every_streaming_cell_decides_its_fallible_form", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 
 # ── http RESPONSE HEADERS ──────────────────────────────────────────────
@@ -3687,6 +3699,7 @@ since     = "0.57.2"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_read_text_utf8.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 
 # ── REFERENCE-SUITE CONFORMANCE CORPUS ─
@@ -4174,6 +4187,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fan_prefetch_fs.almd", class = "fixture" },
   { path = "tests/component_p3_test.rs", class = "fixture", name = "p3_component_fan_prefetch_reads_concurrently" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 [[contract]]
 id        = "C-322"
