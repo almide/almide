@@ -1,4 +1,4 @@
-// @contract: C-214
+// @contract: C-374, C-214
 // The subprocess family on the embedded wasm host (#2589, ADR-0025): every
 // `process.*` call that starts, signals or asks about a child answers what
 // native answers — the captured text, the exit code, the err strings — since

@@ -4846,3 +4846,13 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/var_destructure.almd", class = "fixture" },
 ]
+[[contract]]
+id        = "C-374"
+spec      = "ALS-R5"
+title     = "process on the embedded wasm host answers what native answers; a stand-alone artifact that starts a child carries the private almide:process/spawn import and is refused at load where it is not defined"
+statement = "ALS-R5 (almide#2589, ADR-0025): on the embedded wasm host (`almide run --target wasm` and the wasm leg of `almide test`) the subprocess family — `process.exec`, `exec_in`, `exec_with_stdin`, `exec_status`, `exec_status_timeout`, `exec_attached`, `spawn`, `kill`, `is_alive` and `pid` — answers what the native leg answers: the captured stdout and stderr text, the exit code (-1 for a child ended by a signal) and every err string are byte-identical. Pids are host values and are not compared across legs. A stand-alone artifact (`almide build --target wasm`) whose program names a subprocess operation imports `call` from the private interface `almide:process/spawn`, and an artifact whose program names none does not carry that import; a runtime that does not define the import refuses the module at load, before `_start` runs, so no subprocess call is ever answered wrongly at run time. A component build (`--component`) of such a program is refused with E081."
+since     = "0.67.0"
+status    = "active"
+evidence  = [
+  { path = "spec/embedded_cross/process_spawn_family.almd", class = "fixture" },
+]
