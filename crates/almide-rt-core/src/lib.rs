@@ -18,3 +18,6 @@
 //! (the splice assembler hoists and dedups them).
 pub mod http_client_core;
 pub mod http_server_core;
+/// The subprocess family (#2589, ADR-0025): `runtime/rs/src/process.rs`
+/// includes it, the embedded host serves `almide:process/spawn` with it.
+pub mod process_core;
