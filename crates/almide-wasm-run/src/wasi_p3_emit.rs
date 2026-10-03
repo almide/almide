@@ -74,10 +74,6 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     let has = |m: &str, n: &str| blocks.iter().flat_map(|b| b.iter()).any(|(_, bm, bn, _)| *bm == m && *bn == n);
     let fs = P3Fs::plan(host_ops, (park + PARK_SPAN) as u32, &resolve, &abi, &has)?;
     let fs_span: u64 = fs.as_ref().map_or(0, |_| FS_PAGE);
-    // The env.set overlay log (#3223): its own page past the fs page — the
-    // park's last page, where p1 keeps it, holds the http texts here.
-    let ovl_span: u64 = if env.set { crate::wasi::env_overlay::OVERLAY_BYTES } else { 0 };
-    let span = PARK_SPAN + fs_span + ovl_span;
     let n_imports = n_env + fs.as_ref().map_or(0, |f| f.splice.fresh_imports());
     let shift = n_imports - 5;
     let shim_base = n_imports + n_funcs;
@@ -92,6 +88,10 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     let f_alloc = shim_base + 9;
     let f_eprintln = shim_base + 1;
     let f_await = shim_base + 10;
+    // The env.set overlay log (#3223): its own page past the fs page, its
+    // length global past the environment cache.
+    let ovl = P3Overlay::plan(env, park + PARK_SPAN + fs_span, global_count + 13, f_eprintln);
+    let span = PARK_SPAN + fs_span + ovl.map_or(0, |_| crate::wasi::env_overlay::OVERLAY_BYTES);
     let f_http = wants_http.then_some(shim_base + 11);
     let f_env = env.any().then_some(shim_base + 11 + u32::from(wants_http));
     // The http error helpers (ADR-0023 step 2) follow the env service,
@@ -115,9 +115,7 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     let g_slots = global_count + 9; // fan slot-table base (0 = unallocated)
     let g_slotn = global_count + 10; // slot high-water mark
     let (g_env, g_envn) = (global_count + 11, global_count + 12); // cached environment list
-    // g_ovl: bytes appended to the overlay log, when env.set ships.
-    let g_ovl = env.set.then_some(global_count + 13);
-    let fs_first_global = global_count + 13 + u32::from(env.set); // the fs service's own globals
+    let fs_first_global = global_count + 13 + u32::from(ovl.is_some()); // the fs service's own globals
     let mut globals = GlobalSection::new();
     for (idx, (gt, i32v, i64v, f64v)) in parsed_globals.iter().enumerate() {
         let init = if idx as u32 == heap_global {
@@ -141,9 +139,7 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     globals.global(mutable_i32, &ConstExpr::i32_const(0)); // g_slotn
     globals.global(mutable_i32, &ConstExpr::i32_const(-1)); // g_env (unfetched)
     globals.global(mutable_i32, &ConstExpr::i32_const(0)); // g_envn
-    if g_ovl.is_some() {
-        globals.global(mutable_i32, &ConstExpr::i32_const(0)); // g_ovl
-    }
+    P3Overlay::emit_global(ovl, &mut globals);
     if let Some(f) = &fs {
         f.splice.emit_globals(&mut globals);
     }
@@ -250,10 +246,6 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     code.function(&shim_realloc_checked(f_reserve, f_realloc));
     code.function(&shim_await(park));
     let texts = habi.as_ref().map(|h| HttpErrTexts::new(park, h));
-    let ovl = g_ovl.map(|g_len| P3Overlay {
-        log: crate::wasi::env_overlay::OverlayLog { base: park + PARK_SPAN + fs_span, g_len },
-        f_eprintln,
-    });
     push_optional_shims(&mut code, g, habi.as_ref().zip(texts.as_ref()).zip(http_fns), (env, ovl), f_env);
     let fs_to = fs_import_at.map(|import_at| SpliceTargets {
         import_at,
@@ -284,9 +276,7 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     if let Some(t) = &texts {
         data.active(0, &ConstExpr::i32_const(t.base as i32), t.blob.iter().copied());
     }
-    if ovl.is_some() {
-        data.active(0, &ConstExpr::i32_const((park + MSG2) as i32), ENV_FULL_MSG.iter().copied());
-    }
+    P3Overlay::emit_data(ovl, &mut data, park);
 
     let mut m = Module::new();
     m.section(&type_sec)
