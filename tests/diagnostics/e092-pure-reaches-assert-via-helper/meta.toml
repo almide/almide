@@ -1,0 +1,3 @@
+expects_code = "E092"
+expects_error = "`@pure` fn `double` reaches `assert` via `checked`"
+expects_line_col = "8:28"

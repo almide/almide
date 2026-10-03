@@ -625,6 +625,8 @@ impl Checker {
                     *ty
                 }
                 else if let Some(sig) = self.env.functions.get(&sym(name)).cloned() {
+                    let callee = self.purity_callee(name);
+                    self.record_purity_ref(callee, expr.span);
                     self.fn_value_ty(&sig)
                 }
                 else {
