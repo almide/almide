@@ -133,6 +133,7 @@ pub fn ownership_certificate_with_poison(func: &MirFunction) -> (String, bool) {
         slots,
         line_slots,
         addr_of: BTreeMap::new(),
+        child_of: BTreeMap::new(),
     };
     for op in &func.ops {
         scan.step(op);
@@ -235,6 +236,11 @@ impl CertScan {
             Op::ListGetScalar { list, .. } | Op::ListSetScalar { list, .. } => self.probe_handle(*list),
             Op::ChargeDyn { src, .. } => self.probe_handle(*src),
             Op::Pure { uses, .. } => uses.iter().for_each(|v| self.probe_handle(*v)),
+            // A raw loaded child's own Borrow/MakeUnique, and a `Dup` of it (the
+            // Dup reads the block it shares — a Dup of a freed child is a use
+            // after free), go through the child rule (#3261).
+            Op::Borrow { v } | Op::MakeUnique { v } => self.probe_raw_child(*v),
+            Op::Dup { src, .. } => self.probe_raw_child(*src),
             _ => {}
         }
     }
@@ -256,7 +262,12 @@ impl CertScan {
     fn prim_read_probe(&mut self, kind: &PrimKind, dst: Option<ValueId>, args: &[ValueId]) {
         let Some(&first) = args.first() else { return };
         match kind {
-            PrimKind::LoadHandle | PrimKind::Load { .. } | PrimKind::Store { .. } => self.probe_address(first),
+            PrimKind::LoadHandle => {
+                self.probe_address(first);
+                self.load_child(dst, first);
+            }
+            PrimKind::Load { .. } | PrimKind::Store { .. } => self.probe_address(first),
+            PrimKind::Handle => self.child_handle(dst, first),
             PrimKind::ElemAddr => {
                 self.probe_address(first);
                 if let (Some(d), Some(o)) = (dst, self.address_object(first)) {
@@ -283,6 +294,9 @@ impl CertScan {
         if let Some(&o) = self.addr_of.get(&v) {
             return Some(o);
         }
+        if self.is_raw_child(v) {
+            return Some(v);
+        }
         self.s.of.get(&v).map(|_| self.s.object_of(v))
     }
 
@@ -296,11 +310,15 @@ impl CertScan {
         if self.s.of.contains_key(&v) {
             let o = self.s.object_of(v);
             self.probe_object(o);
+        } else {
+            self.probe_raw_child(v);
         }
     }
 
     fn probe_object(&mut self, o: ValueId) {
-        if self.owned_line(o) {
+        if self.child_of.contains_key(&o) {
+            self.child_probe(o);
+        } else if self.owned_line(o) {
             self.s.event(o, 'b');
         }
     }
@@ -322,5 +340,78 @@ impl CertScan {
             }
         }
         false
+    }
+}
+
+/// The loaded-CHILD rule (#3261). A `LoadHandle` through an address into a
+/// tracked object yields a RAW child: a handle the parent's slot holds, with
+/// no reference of the frame's own. It is live while its parent is live, or
+/// while a reference the frame took on it (a `Dup`) is held. The child's own
+/// line (keyed by the raw child) carries exactly those `Dup` references: a
+/// `Dup` of the raw child is an `a` on it (`dup_step`, identity object), and
+/// each release of a `Dup`'d handle a `d`/`m`.
+///
+/// A read of the raw child is ONE `b` probe on whichever of those lines the
+/// producer finds positive on the current path: the child's own line, else
+/// (up the chain of children) its parent's. The producer's choice is not
+/// trusted: any line the checker finds above 0 at the probe proves the child
+/// live (its own references, or the parent's slot reference). When none is
+/// positive the probe lands on the root parent's line, where the checker
+/// rejects a freed owned object. A root the frame does not own (a borrowed
+/// param) is the caller's to keep alive and takes no probe, as before.
+impl CertScan {
+    fn is_raw_child(&self, v: ValueId) -> bool {
+        self.child_of.contains_key(&v) && !self.s.of.contains_key(&v)
+    }
+
+    /// A `LoadHandle` dst through an address into a tracked object is a raw child.
+    fn load_child(&mut self, dst: Option<ValueId>, addr: ValueId) {
+        if let (Some(d), Some(o)) = (dst, self.address_object(addr)) {
+            if !self.s.of.contains_key(&d) {
+                self.child_of.insert(d, o);
+            }
+        }
+    }
+
+    /// `prim.handle` of a raw child is an address into the child.
+    fn child_handle(&mut self, dst: Option<ValueId>, src: ValueId) {
+        if let (Some(d), true) = (dst, self.is_raw_child(src)) {
+            self.addr_of.insert(d, src);
+        }
+    }
+
+    fn probe_raw_child(&mut self, v: ValueId) {
+        if self.is_raw_child(v) {
+            self.child_probe(v);
+        }
+    }
+
+    fn child_probe(&mut self, child: ValueId) {
+        let mut c = child;
+        loop {
+            if self.path_balance(c) > 0 {
+                self.s.event(c, 'b');
+                return;
+            }
+            let Some(&p) = self.child_of.get(&c) else { return };
+            if !self.child_of.contains_key(&p) {
+                if self.owned_line(p) {
+                    self.s.event(p, 'b');
+                }
+                return;
+            }
+            c = p;
+        }
+    }
+
+    /// `o`'s count on the path being emitted: its stream, plus the CURRENT
+    /// arm of each open branch region.
+    fn path_balance(&self, o: ValueId) -> i64 {
+        let mut b = self.s.stream.get(&o).map_or(0, |l| seg_net(l));
+        for fr in &self.s.frames {
+            let arm = if fr.in_else { &fr.else_ev } else { &fr.then_ev };
+            b += arm.get(&o).map_or(0, |l| seg_net(l));
+        }
+        b
     }
 }

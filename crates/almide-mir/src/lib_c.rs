@@ -129,6 +129,8 @@ struct OwnershipScan {
     /// An ADDRESS → the object it points into, for the dereference liveness
     /// check only (#3259): the certificate's `addr_of` rule, mirrored.
     addr_of: BTreeMap<ValueId, ValueId>,
+    /// A raw `LoadHandle` child → the object it was loaded from (#3261).
+    child_parent: BTreeMap<ValueId, ValueId>,
 }
 
     struct BranchFrame {
@@ -355,7 +357,7 @@ impl OwnershipScan {
     /// [`ViolationKind::UseAfterFree`] when it is not. The shared body of the
     /// `ListGetScalar`/`ListSetScalar` and `Borrow`/`MakeUnique` arms, verbatim.
     fn check_borrowed_use(&mut self, i: usize, v: ValueId) {
-        if live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, v).is_none() {
+        if self.live(v).is_none() {
             self.violations.push(violation(i, v, ViolationKind::UseAfterFree));
         }
     }
@@ -364,7 +366,7 @@ impl OwnershipScan {
     /// a second handle on `src`'s object and we acquire one more reference to it.
     /// Verbatim.
     fn acquire_reference(&mut self, i: usize, dst: ValueId, src: ValueId) {
-        if let Some(o) = live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, src) {
+        if let Some(o) = self.live(src) {
             // Acquire OUR own reference. A `Dup` of a self.borrowed param has no
             // prior self.rc entry (we owned none) — start it at 0, then +1.
             *self.rc.entry(o).or_insert(0) += 1;
@@ -396,7 +398,7 @@ impl OwnershipScan {
             // Only heap handles are accountable; scalar uses are absent
             // from `self.object_of` and correctly skipped.
             if self.object_of.contains_key(v)
-                && live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, *v).is_none()
+                && self.live(*v).is_none()
             {
                 self.violations.push(violation(i, *v, ViolationKind::UseAfterFree));
             }
@@ -417,7 +419,7 @@ impl OwnershipScan {
     ) {
         for a in args {
             if let CallArg::Handle(v) = a {
-                if live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, *v).is_none() {
+                if self.live(*v).is_none() {
                     self.violations.push(violation(i, *v, ViolationKind::UseAfterFree));
                 }
             }
@@ -682,18 +684,20 @@ impl OwnershipScan {
             }
             // A `LoadHandle` through a TRACKED address (the `IntBinOp Add` alias
             // above): the loaded CHILD handle — an Option/Result payload, a
-            // record field — ALIASES the parent object for accounting, the same
-            // conflation `ResErrStr` already makes for the Err String. A `Dup`
-            // of it acquires a reference counted on the parent; the matching
-            // `Drop` releases it — per-object balance is preserved, and the
-            // live-check grounds out on the parent the frame still owns
-            // (#1037). An address with NO tracked root stays off the model
+            // record field — is its OWN object, live while the object it was
+            // loaded from is (its slot holds the child) or while the frame
+            // holds a `Dup` of it (#3261, [`Self::object_alive`]). A `Dup`
+            // acquires a reference counted on the CHILD, the matching `Drop`
+            // releases it. (#1037 counted it on the parent, which kept a raw
+            // child "live" through a `Dup` of a grandchild after the parent
+            // was freed.) An address with NO tracked root stays off the model
             // (the pre-existing load64 floor) — unknown, never guessed.
             PrimKind::LoadHandle => {
                 if let (Some(d), Some(&o)) =
                     (dst.as_ref(), args.first().and_then(|a| self.object_of.get(a)))
                 {
-                    self.object_of.insert(*d, o);
+                    self.object_of.insert(*d, *d);
+                    self.child_parent.insert(*d, o);
                     self.dead.insert(*d, false);
                 }
             }
@@ -735,6 +739,31 @@ impl OwnershipScan {
         }
     }
 
+    /// The object `v` denotes, iff the handle is live ([`live_object`], with
+    /// the loaded-child rule of [`Self::object_alive`]).
+    fn live(&self, v: ValueId) -> Option<ValueId> {
+        if self.dead.get(&v).copied().unwrap_or(true) {
+            return None;
+        }
+        let o = *self.object_of.get(&v)?;
+        self.object_alive(o).then_some(o)
+    }
+
+    /// Object `o` is live: a borrowed param, an object we hold a reference
+    /// to, or a loaded child whose parent is live (#3261).
+    fn object_alive(&self, o: ValueId) -> bool {
+        let mut o = o;
+        loop {
+            if self.borrowed.contains(&o) || self.rc.get(&o).copied().unwrap_or(0) >= 1 {
+                return true;
+            }
+            match self.child_parent.get(&o) {
+                Some(&p) => o = p,
+                None => return false,
+            }
+        }
+    }
+
     /// The object an address (or a handle used as one) points into.
     fn address_object(&self, v: ValueId) -> Option<ValueId> {
         self.addr_of.get(&v).or_else(|| self.object_of.get(&v)).copied()
@@ -746,7 +775,7 @@ impl OwnershipScan {
     /// An address with no tracked object stays off the model, as before.
     fn check_address_live(&mut self, i: usize, addr: ValueId) {
         let Some(o) = self.address_object(addr) else { return };
-        if !self.borrowed.contains(&o) && self.rc.get(&o).copied().unwrap_or(0) < 1 {
+        if !self.object_alive(o) {
             self.violations.push(violation(i, addr, ViolationKind::UseAfterFree));
         }
     }
@@ -852,6 +881,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
         violations,
         diverged: false,
         addr_of: BTreeMap::new(),
+        child_parent: BTreeMap::new(),
     };
     for (i, op) in func.ops.iter().enumerate() {
         scan.step(i, op);

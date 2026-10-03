@@ -325,6 +325,7 @@ struct CertScan {
     slots: BTreeSet<ValueId>,
     line_slots: BTreeSet<ValueId>,
     addr_of: BTreeMap<ValueId, ValueId>, // address → the object it points into (#3233)
+    child_of: BTreeMap<ValueId, ValueId>, // raw LoadHandle child → the object it was loaded from (#3261)
 }
 
 impl CertScan {

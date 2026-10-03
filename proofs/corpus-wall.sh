@@ -354,8 +354,12 @@ fi
 #   3259-structural-read-after-free.cert — the structural recorder's witness
 #   of an owned block read after its release (`ibdb`); structural-wall.sh's
 #   poison leg judges it too.
+#   3261-loaded-child-after-parent-free.cert — a payload loaded from an owned
+#   object (`LoadHandle`), `Dup`'d and the Dup released, the object released,
+#   then the raw payload read (`ibbdb` / `ad`). Before #3261 a raw loaded child
+#   had no line and its read no probe, so the object's line was `ibbd`.
 echo
-echo "== POISON RATCHET (negative leg, #3229, #3233): every poisoned certificate is REJECTED by all three verdicts =="
+echo "== POISON RATCHET (negative leg, #3229, #3233, #3261): every poisoned certificate is REJECTED by all three verdicts =="
 POISONED=("$ROOT"/proofs/poisoned-certs/*.cert)
 if [ ! -e "${POISONED[0]}" ]; then
   echo "POISON RATCHET FAIL: proofs/poisoned-certs/ holds no certificate — the negative leg would pass vacuously." >&2
