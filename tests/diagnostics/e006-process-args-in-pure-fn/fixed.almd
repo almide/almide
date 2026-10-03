@@ -1,0 +1,5 @@
+import process
+
+fn command(argv: List[String]) -> String = list.get(argv, 1) ?? "help"
+
+effect fn main() -> Unit = println(command(process.args()))

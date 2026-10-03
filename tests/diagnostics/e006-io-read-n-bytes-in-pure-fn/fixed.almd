@@ -1,0 +1,5 @@
+import io
+
+fn header_len(bytes: List[Int]) -> Int = list.len(bytes)
+
+effect fn main() -> Unit = println("${header_len(io.read_n_bytes(4))}")
