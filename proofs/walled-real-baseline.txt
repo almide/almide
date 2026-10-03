@@ -366,11 +366,3 @@ spec/wasm_cross/nested_field_path_mut.almd :: drain
 # heap-result `if` lower since walls lane 3, #2739.)
 spec/wasm_cross/mut_param_reassign_from_hof.almd :: f_fallible  # #2739
 spec/wasm_cross/mut_param_reassign_from_hof.almd :: main  # #2739
-# #3230: the nested-`mut`-read fixture's `main` interpolates a `mut`-argument
-# call after a part that reads the same variable. Walls lane 3 lowers the
-# write-back block inside the interpolation part; the row now walls on the next
-# shape, the interpolation passed in a call-argument position ("non-lowerable
-# string interpolation in a call-argument position"), the same class as the
-# #3154 rows. Native falls back to the classic renderer (the leg #3230 fixed);
-# the structural wasm leg and the interp agree with it.
-spec/wasm_cross/mut_call_nested_read_before.almd :: main  # #2739
