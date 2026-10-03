@@ -74,7 +74,7 @@ fn inlined_callbacks_witness_per_element_and_other_shapes_decline() {
     // A heap accumulator is a loop-carried owner: born with the seed, the
     // step's fresh result replaces it (the old value's `d` closes each
     // activation), and the final value moves out.
-    assert_eq!(w["joined"], "id\nim\n\nid\n\n\nim\nim\n");
+    assert_eq!(w["joined"], "ibd\nim\n\nibd\n\n\nim\nim\n");
     // `find`'s hit is a branch: the element's view shares into the fresh
     // some-cell (`am`), the other arm carries nothing.
     assert!(w["first"].contains("{|am}\n"), "{:?}", w["first"]);
@@ -86,6 +86,6 @@ fn inlined_callbacks_witness_per_element_and_other_shapes_decline() {
     // activation over the inlined map stage and the fold step: the scalar
     // stage and accumulator carry no credit, the stage param is a view (the
     // empty line), and the frame's one owned block is born and released.
-    assert_eq!(w["fused"], "id\n\n");
+    assert_eq!(w["fused"], "ibd\n\n");
     assert!(accepted(&w["fused"]));
 }

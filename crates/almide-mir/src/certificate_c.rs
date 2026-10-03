@@ -582,5 +582,39 @@ mod tests {
         assert_eq!(ownership_certificate(&param), "am\n");
     }
 
+    /// #3259: `verify_ownership` live-checks the object behind a load's
+    /// address, so the #3233 shape is rejected by both sides now.
+    #[test]
+    fn verify_ownership_rejects_a_load_through_a_freed_address() {
+        let (o, h, off, addr, p) = (ValueId(0), ValueId(1), ValueId(2), ValueId(3), ValueId(4));
+        let load = || Op::Prim { kind: PrimKind::LoadHandle, dst: Some(p), args: vec![addr] };
+        let mut ops = vec![
+            Op::Alloc { dst: o, repr: heap(), init: Init::Opaque },
+            Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![o] },
+            Op::ConstInt { dst: off, value: 12 },
+            Op::IntBinOp { dst: addr, op: crate::IntOp::Add, a: h, b: off },
+            load(),
+            Op::Drop { v: o },
+        ];
+        assert_eq!(verify_ownership(&func(ops.clone())), Ok(()));
+        ops.push(load());
+        let errs = verify_ownership(&func(ops)).unwrap_err();
+        assert_eq!(errs[0].kind, crate::ViolationKind::UseAfterFree);
+        assert_eq!(errs[0].op_index, 6);
+
+        // An ElemAddr result is an address into its list too.
+        let (xs, idx, e) = (ValueId(0), ValueId(1), ValueId(2));
+        let elem = func(vec![
+            Op::Alloc { dst: xs, repr: heap(), init: Init::Opaque },
+            Op::ConstInt { dst: idx, value: 0 },
+            Op::Prim { kind: PrimKind::ElemAddr, dst: Some(e), args: vec![xs, idx] },
+            Op::Drop { v: xs },
+            Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(ValueId(3)), args: vec![e] },
+        ]);
+        assert_eq!(ownership_certificate(&elem), "ibdb\n");
+        assert!(verify_ownership(&elem).is_err());
+    }
+
+    include!("certificate_c_gen.rs");
     include!("certificate_p2.rs");
 }

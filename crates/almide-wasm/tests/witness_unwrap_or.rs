@@ -61,12 +61,12 @@ fn unwrap_or_joins_and_meter_prims_witness_exactly() {
     // The carrier is born and released (`id`); the fallback moves into the
     // join on one arm, the payload view shares and moves on the other; the
     // owned join is lent to `list.len` and released (`id`).
-    assert_eq!(get("fresh"), "id\n{|im}\n{|am}\nid\n");
+    assert_eq!(get("fresh"), "ibd\n{|im}\n{|am}\nid\n");
     assert!(accepted(&get("fresh")));
     // A var fallback leaves the join a view of a bound carrier's payload or
     // of the fallback (#2755): the bind's share lands on that view and the
     // epilogue releases it (`ad`); the named carrier is born and released.
-    assert_eq!(get("borrowed"), "\nid\nad\n");
+    assert_eq!(get("borrowed"), "\nibd\nad\n");
     assert!(accepted(&get("borrowed")));
     // The meter's cut runs the frame's exit plan (#3072, C-320): a metered
     // frame that owns a block at a charge point certifies.

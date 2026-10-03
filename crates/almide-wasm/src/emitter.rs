@@ -460,6 +460,7 @@ impl Emitter<'_> {
             IrExprKind::Var { id } => {
                 if let Some(&(idx, ty)) = self.locals.get(id) {
                     self.f.instructions().local_get(idx);
+                    self.witness_read(id, idx, ty);
                     if self.cells.contains(id) {
                         self.load_ty_slot(ty, 0);
                     }

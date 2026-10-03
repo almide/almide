@@ -70,6 +70,18 @@ impl Emitter<'_> {
         }
     }
 
+    /// #3259: a READ of a droppable local's value (the Var route, a mut
+    /// receiver read) — the read probe on the block the local holds. A cell
+    /// local holds the cell, not the block, so it is not probed.
+    pub(crate) fn witness_read(&mut self, id: &almide_ir::VarId, idx: u32, ty: SliceTy) {
+        if self.cells.contains(id) || !self.rc_droppable(ty) {
+            return;
+        }
+        if let Some(w) = self.witness.as_mut() {
+            w.read(idx);
+        }
+    }
+
     /// #2755: a mut receiver read WITHOUT the copy-on-write — a parameter,
     /// whose writes stay caller-visible (`emit_read_mut_var_cow`). The read
     /// moves no credit; an in-place write through it records nothing, and a
