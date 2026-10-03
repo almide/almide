@@ -1,0 +1,16 @@
+// @contract: C-005
+// fan.map evaluates EVERY element in list order, including the elements after one
+// that returns Err (ADR-0024 D1), and the LOWEST-INDEX Err is the one that surfaces.
+// Elements 2 and 4 fail; elements 3 and 5 still run, so all five lines reach stdout
+// in list order, and the abort names element 2 — not element 4, and not whichever
+// failed first in wall-clock time. The block form `fan { }` already had this rule
+// (C-199); a short-circuit after element 2 would print only two lines.
+effect fn step(x: Int) -> Result[Int, String] = {
+  println("element ${x}")
+  if x == 2 or x == 4 then err("element ${x} failed") else ok(x * 100)
+}
+
+effect fn main() -> Unit = {
+  let mapped = fan.map([1, 2, 3, 4, 5], (x) => step(x))!
+  println("unreachable: ${list.len(mapped)}")
+}
