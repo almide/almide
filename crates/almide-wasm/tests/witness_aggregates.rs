@@ -68,9 +68,10 @@ fn aggregates_witness_exactly_and_unhooked_shapes_decline() {
         // The borrowed param holds no credit (an empty line); the binder is a
         // view of its slot whose returned share moves out.
         ("left", "\nam\n"),
-        // The named subject (arg_temps.rs) is pair's owned result, released at
-        // the exit; the binders are views that are only read.
-        ("left_call", "\nid\n\n"),
+        // The named subject (arg_temps.rs) is pair's owned result, read by the
+        // match (`b`, #3259) and released at the exit; the binders are views
+        // that are only read.
+        ("left_call", "\nibd\n\n"),
         // The interpolation reads its parts; the captured block moves out.
         ("hello", "\nim\n"),
         // A printed interpolation builds no block at all.
@@ -91,6 +92,6 @@ fn aggregates_witness_exactly_and_unhooked_shapes_decline() {
     // subject first (#2971), so the Bind hook records the fresh block and the
     // exit plan releases it — certified, and the checker accepts it.
     let subj = w.get("subj").map(String::as_str);
-    assert_eq!(subj, Some("id\n"));
+    assert_eq!(subj, Some("ibd\n"));
     assert!(accepted(subj.unwrap()), "subj: the portable checker must accept {subj:?}");
 }

@@ -61,7 +61,8 @@ fn raised_errs_field_callees_and_scalar_cells_witness_exactly() {
     // The lambda capturing the Int cell `n` certifies.
     let cell_lambda = w.iter().find(|(k, c)| k.starts_with("<lambda#") && !c.starts_with('!'));
     assert!(cell_lambda.is_some(), "a scalar-cell lambda must certify: {w:?}");
-    // The fallible HOF's closure env is born, lent to the call and released.
-    assert!(get("raised_all").starts_with("id\n"), "{:?}", get("raised_all"));
+    // The fallible HOF's closure env is born, lent to the call (read, `b`,
+    // #3259) and released.
+    assert!(get("raised_all").starts_with("ibd\n"), "{:?}", get("raised_all"));
     assert!(accepted(&get("raised_all")), "{:?}", get("raised_all"));
 }

@@ -78,7 +78,7 @@ fn effect_frames_witness_the_carrier_and_unhooked_exits_decline() {
         // The fresh spine's credit moves into the slot; the carrier moves out.
         ("fresh", "im\nim\n"),
         // A Unit body: the local is born and released, the carrier moves out.
-        ("noop", "id\nim\n"),
+        ("noop", "ibd\nim\n"),
     ];
     for (name, cert) in expect {
         let got = w.get(name).unwrap_or_else(|| panic!("{name} must be witnessed; got {:?}", w.get(name)));
@@ -91,10 +91,10 @@ fn effect_frames_witness_the_carrier_and_unhooked_exits_decline() {
     let bang = [
         // One site: the parked carrier propagates (`iadm`) or is released
         // (`id`); the view `xs` exists on the ok path only.
-        ("step", "{iadm|id}\n{|ad}\n{|im}\n"),
+        ("step", "{ibadm|ibd}\n{|ad}\n{|im}\n"),
         // Two sites: the second carrier's three paths fold (`{admx|}`); the
         // views `a` and `b` are lent to borrowed params, each bound once.
-        ("twice", "\n{iadm|id}\n{|ad}\ni{admx|}d\n{|ad}\n{|im}\n{|im}\n"),
+        ("twice", "\n{ibadm|ibd}\n{|ad}\nib{admx|}d\n{|ad}\n{|im}\n{|im}\n"),
         // `!` on none: a fresh `err("none")` leaves on that arm.
         ("opt", "\n{|im}\n{|im}\n"),
     ];
