@@ -15,10 +15,10 @@ impl LowerCtx {
         // #2739 family N) borrowed from its container — the container keeps
         // ownership, the borrow joins `param_values` (never dropped here).
         let Some(blk) = self.closure_block_of_mut(callee) else {
-            return Err(LowerError::Unsupported(
+            return Err(LowerError::at(
+                tail.span,
                 "heap-result method/computed call cannot be faithfully returned in this \
-                 brick (would move out an empty deferred heap value)"
-                    .into(),
+                 brick (would move out an empty deferred heap value)",
             ));
         };
         let lowered = self.lower_call_args(args)?;
