@@ -107,6 +107,29 @@ struct P3Overlay {
     f_eprintln: u32,
 }
 
+impl P3Overlay {
+    /// The overlay when the op set names env.set: the log at `base`, its
+    /// length in global `g_len`, refusals through `f_eprintln`.
+    fn plan(e: EnvImports, base: u64, g_len: u32, f_eprintln: u32) -> Option<Self> {
+        e.set.then_some(P3Overlay { log: crate::wasi::env_overlay::OverlayLog { base, g_len }, f_eprintln })
+    }
+
+    /// The log-length global (starts empty), in its planned slot.
+    fn emit_global(ovl: Option<Self>, globals: &mut GlobalSection) {
+        if ovl.is_some() {
+            let t = GlobalType { val_type: ValType::I32, mutable: true, shared: false };
+            globals.global(t, &ConstExpr::i32_const(0));
+        }
+    }
+
+    /// The full-log refusal line, at `park + MSG2` as on p1.
+    fn emit_data(ovl: Option<Self>, data: &mut wasm_encoder::DataSection, park: u64) {
+        if ovl.is_some() {
+            data.active(0, &ConstExpr::i32_const((park + MSG2) as i32), ENV_FULL_MSG.iter().copied());
+        }
+    }
+}
+
 /// The env service over the fs_call ABI `(op, a_ptr, a_len, b_ptr, b_len)
 /// -> i64` — the native semantics the embedded host and the p1 shim serve:
 ///
