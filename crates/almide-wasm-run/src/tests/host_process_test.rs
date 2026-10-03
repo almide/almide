@@ -114,16 +114,16 @@ fn the_canonical_import_lands_the_answer_through_cabi_realloc() {
     link_spawn_import(&mut linker).expect("link");
     let mut store = wasmtime::Store::new(&engine, ());
     let inst = linker.instantiate(&mut store, &module).expect("instantiate");
-    inst.get_typed_func::<(), ()>(&mut store, "run").unwrap().call(&mut store, ()).unwrap();
-    let mem = inst.get_memory(&mut store, "memory").unwrap();
+    inst.get_typed_func::<(), ()>(&mut store, "run").expect("run export").call(&mut store, ()).expect("run");
+    let mem = inst.get_memory(&mut store, "memory").expect("memory");
     let mut cell = [0u8; 12];
-    mem.read(&store, 64, &mut cell).unwrap();
+    mem.read(&store, 64, &mut cell).expect("result cell");
     assert_eq!(cell[0], 0, "ok discriminant");
-    let ptr = u32::from_le_bytes(cell[4..8].try_into().unwrap()) as usize;
-    let len = u32::from_le_bytes(cell[8..12].try_into().unwrap()) as usize;
+    let word = |at: usize| u32::from_le_bytes([cell[at], cell[at + 1], cell[at + 2], cell[at + 3]]) as usize;
+    let (ptr, len) = (word(4), word(8));
     let mut text = vec![0u8; len];
-    mem.read(&store, ptr, &mut text).unwrap();
-    assert_eq!(String::from_utf8(text).unwrap(), "hi\n");
+    mem.read(&store, ptr, &mut text).expect("answer bytes");
+    assert_eq!(String::from_utf8(text).expect("utf-8"), "hi\n");
 }
 
 #[test]
@@ -253,7 +253,7 @@ fn the_p1_artifact_forwards_process_ops_to_the_private_import() {
                 for k in 0..n as u32 {
                     let mut iov = [0u8; 8];
                     mem.read(&caller, iovs as usize + 8 * k as usize, &mut iov).expect("iov");
-                    let (ptr, len) = (u32::from_le_bytes(iov[..4].try_into().unwrap()), u32::from_le_bytes(iov[4..].try_into().unwrap()));
+                    let (ptr, len) = (u32::from_le_bytes([iov[0], iov[1], iov[2], iov[3]]), u32::from_le_bytes([iov[4], iov[5], iov[6], iov[7]]));
                     let mut buf = vec![0u8; len as usize];
                     mem.read(&caller, ptr as usize, &mut buf).expect("bytes");
                     caller.data_mut().extend_from_slice(&buf);
@@ -271,8 +271,8 @@ fn the_p1_artifact_forwards_process_ops_to_the_private_import() {
         .expect("proc_exit");
     let mut store = wasmtime::Store::new(&engine, Vec::new());
     let inst = linker.instantiate(&mut store, &module).expect("a host with the import instantiates it");
-    inst.get_typed_func::<(), ()>(&mut store, "_start").unwrap().call(&mut store, ()).expect("runs");
-    assert_eq!(String::from_utf8(store.data().clone()).unwrap(), "0\n2\nhi\n");
+    inst.get_typed_func::<(), ()>(&mut store, "_start").expect("_start").call(&mut store, ()).expect("runs");
+    assert_eq!(String::from_utf8(store.data().clone()).expect("utf-8"), "0\n2\nhi\n");
 
     // A stock host: the two preview-1 calls, no almide:process/spawn.
     let mut stock = wasmtime::Linker::<()>::new(&engine);

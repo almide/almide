@@ -45,10 +45,15 @@ pub fn check(host_ops: &[i32], p3: bool) -> Result<(), String> {
         Some(op) => Err(format!(
             "error[E081]: {} (host op {op}) is unavailable in the direct WASI {} component. \
              Use a target that serves this operation; `almide run --target wasm` uses the embedded host.",
-            operation_name(op), if p3 { "0.3" } else { "0.2" },
+            operation_label(op), if p3 { "0.3" } else { "0.2" },
         )),
         None => Ok(()),
     }
+}
+
+/// `operation_name`, with the subprocess family (#2589) named as one.
+fn operation_label(op: i32) -> &'static str {
+    if (80..=89).contains(&op) { "the subprocess family (process.exec / exec_status / spawn / kill / …)" } else { operation_name(op) }
 }
 
 fn operation_name(op: i32) -> &'static str {
@@ -77,7 +82,6 @@ fn operation_name(op: i32) -> &'static str {
             61 => "fs.fold_lines_range", 62 => "fs.fold_lines_chunked",
             63 => "fs.read_bytes_raw", 64 => "fs.read_bytes_raw_if_exists",
             73 => "panic",
-            80..=89 => "the subprocess family (process.exec / exec_status / spawn / kill / …)",
             _ => "unknown operation",
         })
 }

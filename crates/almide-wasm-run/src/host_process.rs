@@ -145,41 +145,47 @@ pub(crate) fn dispatch(op: i32, a: &str, b: &[u8], flush: &dyn Fn()) -> (i64, Ve
 /// the answer's bytes placed with the guest's `cabi_realloc` export, the
 /// discriminant at `retptr` and `(ptr, len)` at `retptr + 4`.
 pub fn link_spawn_import<T: 'static>(linker: &mut wasmtime::Linker<T>) -> anyhow::Result<()> {
-    linker.func_wrap(
-        "almide:process/spawn",
-        "call",
-        |mut caller: wasmtime::Caller<'_, T>, op: i32, a_ptr: i32, a_len: i32, b_ptr: i32, b_len: i32, ret: i32| -> wasmtime::Result<()> {
-            let mem = caller
-                .get_export("memory")
-                .and_then(|e| e.into_memory())
-                .ok_or_else(|| wasmtime::Error::msg("almide:process/spawn: the guest exports no memory"))?;
-            let read = |caller: &wasmtime::Caller<'_, T>, ptr: i32, len: i32| -> wasmtime::Result<String> {
-                let mut buf = vec![0u8; len as u32 as usize];
-                mem.read(caller, ptr as u32 as usize, &mut buf)?;
-                String::from_utf8(buf).map_err(|_| wasmtime::Error::msg("almide:process/spawn: operand is not UTF-8"))
-            };
-            let a = read(&caller, a_ptr, a_len)?;
-            let b = read(&caller, b_ptr, b_len)?;
-            let (disc, text) = match call(op + OP_FIRST, &a, &b, &|| {}) {
-                Ok(t) => (0u8, t),
-                Err(m) => (1u8, m),
-            };
-            let realloc = caller
-                .get_export("cabi_realloc")
-                .and_then(|e| e.into_func())
-                .ok_or_else(|| wasmtime::Error::msg("almide:process/spawn: the guest exports no cabi_realloc"))?
-                .typed::<(i32, i32, i32, i32), i32>(&caller)?;
-            let len = i32::try_from(text.len()).map_err(|_| wasmtime::Error::msg("almide:process/spawn: answer too large"))?;
-            let ptr = realloc.call(&mut caller, (0, 0, 1, len))?;
-            mem.write(&mut caller, ptr as u32 as usize, text.as_bytes())?;
-            let mut cell = [0u8; 12];
-            cell[0] = disc;
-            cell[4..8].copy_from_slice(&ptr.to_le_bytes());
-            cell[8..12].copy_from_slice(&len.to_le_bytes());
-            mem.write(&mut caller, ret as u32 as usize, &cell)?;
-            Ok(())
-        },
-    )?;
+    let ty = wasmtime::FuncType::new(linker.engine(), std::iter::repeat_n(wasmtime::ValType::I32, 6), []);
+    linker.func_new("almide:process/spawn", "call", ty, |mut caller, params, _results| {
+        let mut args = [0i32; 6];
+        for (slot, v) in args.iter_mut().zip(params) {
+            *slot = v.unwrap_i32();
+        }
+        spawn_call(&mut caller, args)
+    })?;
+    Ok(())
+}
+
+/// One canonical-ABI `call`: `[op, a_ptr, a_len, b_ptr, b_len, retptr]`.
+fn spawn_call<T>(caller: &mut wasmtime::Caller<'_, T>, [op, a_ptr, a_len, b_ptr, b_len, ret]: [i32; 6]) -> wasmtime::Result<()> {
+    let mem = caller
+        .get_export("memory")
+        .and_then(|e| e.into_memory())
+        .ok_or_else(|| wasmtime::Error::msg("almide:process/spawn: the guest exports no memory"))?;
+    let read = |caller: &wasmtime::Caller<'_, T>, ptr: i32, len: i32| -> wasmtime::Result<String> {
+        let mut buf = vec![0u8; len as u32 as usize];
+        mem.read(caller, ptr as u32 as usize, &mut buf)?;
+        String::from_utf8(buf).map_err(|_| wasmtime::Error::msg("almide:process/spawn: operand is not UTF-8"))
+    };
+    let a = read(caller, a_ptr, a_len)?;
+    let b = read(caller, b_ptr, b_len)?;
+    let (disc, text) = match call(op + OP_FIRST, &a, &b, &|| {}) {
+        Ok(t) => (0u8, t),
+        Err(m) => (1u8, m),
+    };
+    let realloc = caller
+        .get_export("cabi_realloc")
+        .and_then(|e| e.into_func())
+        .ok_or_else(|| wasmtime::Error::msg("almide:process/spawn: the guest exports no cabi_realloc"))?
+        .typed::<(i32, i32, i32, i32), i32>(&*caller)?;
+    let len = i32::try_from(text.len()).map_err(|_| wasmtime::Error::msg("almide:process/spawn: answer too large"))?;
+    let ptr = realloc.call(&mut *caller, (0, 0, 1, len))?;
+    mem.write(&mut *caller, ptr as u32 as usize, text.as_bytes())?;
+    let mut cell = [0u8; 12];
+    cell[0] = disc;
+    cell[4..8].copy_from_slice(&ptr.to_le_bytes());
+    cell[8..12].copy_from_slice(&len.to_le_bytes());
+    mem.write(&mut *caller, ret as u32 as usize, &cell)?;
     Ok(())
 }
 
