@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-09-26
+> Last updated: 2026-10-03
 
 ## Overview
 
@@ -347,11 +347,14 @@ almide check --json                     # 診断を JSON で出力(パッケー�
 almide check --explain E001             # エラーコードの説明
 almide check --effects                  # 各関数のエフェクト分析を表示
 almide check --timings                  # フロントエンドの phase 別内訳
+almide check app.almd --profile critical --allow IO  # critical profile (#567)
 ```
 
 | オプション | 説明 |
 |---|---|
 | `--deny-warnings` | 警告をエラー扱い |
+| `--profile critical` | 全関数に bounded profile を適用、capability は deny-all から(下記) |
+| `--allow <CAP>` | `--profile critical` で capability を 1 つ許可(複数回指定可) |
 | `--json` | 診断を JSON で出力（1 行 1 診断、エディタ/エージェント統合用） |
 | `--explain <code>` | エラーコードの説明(`almide explain <code>` と同じ) |
 
@@ -364,6 +367,50 @@ almide check --timings                  # フロントエンドの phase 別内�
 severity はフィクスチャ全件で実際の level と照合される(`tests/explain_list_test.rs`)。
 | `--effects` | 各関数のエフェクト/ケイパビリティ分析 |
 | `--timings` | lex / parse / check の phase 別 wall time（#1311） |
+
+#### `--profile critical`
+
+`--profile critical`(#567)は bounded profile(ALS §B、E070–E078)を **全関数** に
+適用する。`@bounded` 属性は要らない。critical で通るコードは通常モードでも必ず通る
+(部分集合であって方言ではない)。高階呼び出しやクロージャ生成は E074 になる。
+
+capability は deny-all から始まる。host に触れる stdlib 呼び出しは E076 になり、
+`--allow` で許可した分だけ通る。`--allow` の語彙と、それぞれが許可する module は
+`crates/almide-frontend/src/check/bounded.rs` の `CAPABILITY_GRANTS`:
+
+| `--allow` | 許可する module |
+|---|---|
+| `IO` | `io`, `fs` |
+| `Net` | `http`, `net` |
+| `Env` | `env`, `args` |
+| `Time` | `datetime`, `duration` |
+| `Rand` | `random` |
+| `Process` | `process` |
+
+`Fan` は無い。`fan.*` は critical profile の外にある(#1628)。この語彙は
+`almide.toml` の `[permissions].allow`(`IO` / `Net` / `Env` / `Time` / `Rand` / `Fan`、
+`docs/specs/effect-system.md` §8)とは別物で、`Process` と `Fan` が違う。
+
+```
+$ almide check rd.almd --profile critical
+error[E076]: an effect outside the declared capability is not admissible under `--profile critical`
+  hint: capabilities start deny-all — grant one with --allow IO|Net|Env|Time|Rand|Process
+$ almide check rd.almd --profile critical --allow IO
+No errors found
+```
+
+拒否されるもの(いずれも終了コード 1):
+
+- 語彙に無い名前: ``error: unknown capability `io` in --allow — grantable capabilities are IO, Net, Env, Time, Rand, Process``
+  と ``hint: did you mean `IO`?``。文面は `[permissions].allow` の拒否と同じ(#3247)
+- `--profile` 無しの `--allow`: `error: --allow requires --profile critical`
+- `critical` 以外の profile 名: ``error: unknown profile `strict` — the only profile is `critical` ``
+- `--effects` との併用: `error: --profile is not supported with --effects`
+
+`--json` とパッケージ全体の形(FILE 省略)も同じ profile で判定する。
+
+テスト: `tests/critical_profile_test.rs`、`tests/manifest_permissions_test.rs`
+(`critical_allow_suggests_the_nearest_capability`)
 
 #### `--timings`
 

@@ -1,4 +1,4 @@
-> Last updated: 2026-09-27
+> Last updated: 2026-10-03
 
 # Effect System
 
@@ -49,7 +49,7 @@ Test: `spec/integration/modules/vis_effect_test.almd`
 Six builtins may be called from a pure `fn`: **`println`, `eprintln`,
 `panic`, `assert`, `assert_eq`, `assert_ne`**. The set is closed. Every other
 output path is a stdlib effect fn and stays E006 from a pure fn, including
-`io.print`, `io.write`, `io.write_bytes` and the `log` module.
+`io.print`, `io.write` and `io.write_bytes`.
 
 1. **They write, or they abort. They never read.** `println` appends to stdout
    and `eprintln` to stderr. `panic` and a failing assert end the process
@@ -321,24 +321,43 @@ The `[permissions]` section in `almide.toml` restricts which effect categories a
 
 ```toml
 [permissions]
-allow = ["IO", "Net", "Log"]
+allow = ["IO", "Net"]
 ```
 
 If `[permissions]` is absent or `allow` is empty, all capabilities are permitted (backwards compatible).
 
 ### Effect categories
 
-The `EffectInferencePass` maps stdlib module usage to seven categories:
+The `EffectInferencePass` maps stdlib module usage to six categories, the
+`Effect` enum in `crates/almide-ir/src/effect.rs`:
 
 | Category | Stdlib modules |
 |----------|---------------|
 | `IO` | `fs`, `path` |
 | `Net` | `http`, `url` |
 | `Env` | `env`, `process` |
-| `Time` | `time`, `datetime` |
-| `Rand` | (reserved) |
+| `Time` | `datetime` |
+| `Rand` | none — no module infers it, so naming it grants nothing |
 | `Fan` | `fan` |
-| `Log` | `log` |
+
+Calls into any other module, including `io` and `random`, infer no category.
+There is no `Log` category and no `log` module.
+
+### Unknown names
+
+`allow` accepts exactly these six names. Any other name, including a
+different case (`io`), is an error on the manifest line that writes it, before
+any command runs (#3247):
+
+```
+error: almide.toml:6: unknown capability `Fil` in [permissions].allow — grantable capabilities are IO, Net, Env, Time, Rand, Fan
+  hint: did you mean `IO`?
+```
+
+The hint names the nearest capability, the same way `almide check --profile
+critical --allow` reports an unknown name (`docs/specs/cli.md`).
+
+Test: `tests/manifest_permissions_test.rs`, `tests/diagnostics/permissions-unknown-capability/`
 
 ### Enforcement
 
