@@ -4,10 +4,9 @@
 // async canonical ABI (write-via-stream is a sync import returning a
 // completion future; the guest drives the async stream builtins through
 // waitable-set.wait — no 🚝 sync builtin, ADR-0023 step 1 — and drains
-// the future before task-return) — PLUS the filesystem READ surface (increment 2a:
-// exists/is-dir/is-file via stat-at, read_text/read_bytes via open-at +
-// read-via-stream against the first preopen) and WRITE surface
-// (increment 2d: write/append/write_bytes/mkdir_p/remove/remove_all).
+// the future before task-return) — PLUS the filesystem surface: the p1 fs
+// service spliced over a wasi:filesystem@0.3 adapter (#3140), resolving
+// paths against the whole preopen table.
 // env.get / the program arguments / env.sleep_ms ride wasi:cli/environment
 // and monotonic-clock.wait-for (ADR-0023 step 3); the rest of env and
 // process keep the defined refusal inside the shims. An import the module

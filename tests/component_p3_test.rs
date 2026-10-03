@@ -290,13 +290,12 @@ effect fn main() -> Unit = {
 }
 "#;
 
-// #2206: the p3 shim's message pack is rendered from `almide_base::fs_errno`
-// at emit time — the same table native's `Display` is pinned to — so every
-// errno the shim can classify (no-entry / not-directory / exist / is-directory)
-// answers the table's text. The `fs.<call>("<operand>"): ` head is not carried
-// on this lane (the issue's noted, separate gap), so the lines are the bare
-// texts. The EEXIST line prints twice: a scratch overlap only shows on a
-// row's second print.
+// #2206: the p3 lane's messages are `almide_base::fs_errno`'s texts — the same
+// table native's `Display` is pinned to. Since #3140 the component runs the p1
+// fs service itself, so each line also carries native's `fs.<call>("<operand>"): `
+// head (the gap this lane used to have) — the lines are native's, byte for
+// byte. The EEXIST line prints twice: a scratch overlap only shows on a row's
+// second print.
 const FS_ERRNO_TABLE: &str = r#"import fs
 
 effect fn main() -> Unit = {
@@ -574,7 +573,7 @@ fn p3_component_writes_the_filesystem() {
 HI
 
 cleaned
-werr=No such file or directory (os error 2)
+werr=fs.write(\"wtmp/deep/nope.txt\"): No such file or directory (os error 2)
 ",
         "fs write surface diverged (stderr: {err})"
     );
@@ -1060,14 +1059,14 @@ fn p3_component_spells_the_fs_errno_table() {
         return;
     };
     let expected = [
-        ENOTDIR.text,
-        ENOTDIR.text,
-        EEXIST.text,
-        EEXIST.text,
-        "ok",
-        ENOTDIR.text,
-        ENOENT.text,
-        EISDIR.text,
+        format!("fs.read_text(\"f.txt/x\"): {}", ENOTDIR.text),
+        format!("fs.write(\"f.txt/y\"): {}", ENOTDIR.text),
+        format!("fs.mkdir_p(\"f.txt\"): {}", EEXIST.text),
+        format!("fs.mkdir_p(\"f.txt\"): {}", EEXIST.text),
+        "ok".to_string(),
+        format!("fs.mkdir_p(\"f.txt/sub\"): {}", ENOTDIR.text),
+        format!("fs.read_text(\"nope.txt\"): {}", ENOENT.text),
+        format!("fs.write(\"adir\"): {}", EISDIR.text),
     ]
     .join("\n")
         + "\n";

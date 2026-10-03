@@ -4,7 +4,9 @@
 // (the runtime's copy is the ground truth); interfaces carry only the
 // functions the shim imports, but every TYPE is complete and in the
 // original case/bit order — variant discriminants and flags bits are
-// ABI, a subset there would silently misdecode.
+// ABI, a subset there would silently misdecode. The fs service's p1
+// adapter (#3140, `p3_fs_adapter.wat`) adds read-directory, rename-at
+// and stat, and with them the directory-entry record.
 package wasi:filesystem@0.3.0;
 
 interface types {
@@ -54,6 +56,11 @@ interface types {
     status-change-timestamp: option<instant>,
   }
 
+  record directory-entry {
+    %type: descriptor-type,
+    name: string,
+  }
+
   variant error-code {
     access,
     already,
@@ -100,7 +107,10 @@ interface types {
     append-via-stream: func(data: stream<u8>) -> future<result<_, error-code>>;
     create-directory-at: async func(path: string) -> result<_, error-code>;
     open-at: async func(path-flags: path-flags, path: string, open-flags: open-flags, %flags: descriptor-flags) -> result<descriptor, error-code>;
+    read-directory: func() -> tuple<stream<directory-entry>, future<result<_, error-code>>>;
     remove-directory-at: async func(path: string) -> result<_, error-code>;
+    rename-at: async func(old-path: string, new-descriptor: borrow<descriptor>, new-path: string) -> result<_, error-code>;
+    stat: async func() -> result<descriptor-stat, error-code>;
     stat-at: async func(path-flags: path-flags, path: string) -> result<descriptor-stat, error-code>;
     unlink-file-at: async func(path: string) -> result<_, error-code>;
   }

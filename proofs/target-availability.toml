@@ -30,8 +30,13 @@
 #                 entropy, the fs family, http ops 43..=50 and — since
 #                 ADR-0023 step 3 — env.get / env.args / process.args /
 #                 env.sleep_ms (ops 26 / 29 / 36, over wasi:cli/environment
-#                 and monotonic-clock.wait-for). The artifact runs on a
-#                 stock wasmtime 46+ with no feature flag (step 1).
+#                 and monotonic-clock.wait-for). Since #3140 the fs family is
+#                 the p1 fs service itself over a wasi:filesystem@0.3
+#                 adapter: every op P1_SERVED_OPS names but env.set (37, the
+#                 declared exclusion in component_availability.rs), with
+#                 env.os / env.temp_dir / env.cwd (27 / 28 / 33). The
+#                 artifact runs on a stock wasmtime 46+ with no feature
+#                 flag (step 1).
 #
 # Row discipline (per leg, the rustc tier-check rule): every measured
 # wall MUST have its leg in a row, every declared leg MUST still measure

@@ -45,34 +45,8 @@ fn open_stdin(i: &mut wasm_encoder::InstructionSink<'_>, g_rx: u32, g_fut: u32, 
     i.end();
 }
 
-/// Lazy first-preopen resolve: `if g_pre < 0 { get-directories(retptr);
-/// if len > 0 { g_pre = mem[listptr] } }` — increment 2a resolves guest
-/// paths against the FIRST preopen verbatim (relative paths under
-/// `wasmtime run --dir=.`); prefix matching over the full preopen list
-/// is the follow-up noted in the module header.
-fn fs_preopen(
-    i: &mut wasm_encoder::InstructionSink<'_>,
-    g_pre: u32,
-    park: u64,
-    f_reserve: u32,
-) {
-    i.global_get(g_pre).i32_const(0).i32_lt_s();
-    i.if_(BlockType::Empty);
-    // The preopen list's descriptors and path strings land via
-    // cabi_realloc at a length the HOST chooses, so the reservation is a
-    // declared ceiling rather than an exact bound (#2119): every real
-    // preopen table is orders of magnitude under it, and a table past it
-    // is the residual this shim ledgers.
-    i.i32_const(PREOPEN_RESERVE).call(f_reserve);
-    i.i32_const((park + RET) as i32).call(I_FS_PRE);
-    i.i32_const((park + RET) as i32).i32_load(mem(4));
-    i.if_(BlockType::Empty);
-    i.i32_const((park + RET) as i32).i32_load(mem(0)).i32_load(mem(0)).global_set(g_pre);
-    i.end();
-    i.end();
-}
-
-/// Err return: park the static message, answer `pack(1, len)`.
+/// Err return: park the static message, answer `pack(1, len)` (the http
+/// shim's static refusals).
 fn fs_err(
     i: &mut wasm_encoder::InstructionSink<'_>,
     g_ppos: u32,
@@ -86,47 +60,13 @@ fn fs_err(
     i.i64_const((1i64 << 32) | len as i64).return_();
 }
 
-/// Error-code discriminant in local `n` -> the fs_err mapping (no-entry
-/// / access / not-permitted / is-directory / not-directory / exist /
-/// generic — the texts are `almide_base::fs_errno`'s, #2206). Always returns.
-#[allow(clippy::too_many_arguments)]
-fn fs_open_err_map(
-    i: &mut wasm_encoder::InstructionSink<'_>,
-    g_ppos: u32,
-    g_plen: u32,
-    park: u64,
-    abi: &FsAbi,
-    n: u32,
-) {
-    i.local_get(n).i32_const(abi.ec_no_entry).i32_eq();
-    i.if_(BlockType::Empty);
-    fs_err(i, g_ppos, g_plen, park, MSG_NOENT, E_NOENT.len());
-    i.end();
-    i.local_get(n).i32_const(abi.ec_access).i32_eq();
-    i.local_get(n).i32_const(abi.ec_not_permitted).i32_eq().i32_or();
-    i.if_(BlockType::Empty);
-    fs_err(i, g_ppos, g_plen, park, MSG_ACCES, E_ACCES.len());
-    i.end();
-    i.local_get(n).i32_const(abi.ec_is_directory).i32_eq();
-    i.if_(BlockType::Empty);
-    fs_err(i, g_ppos, g_plen, park, MSG_ISDIR, E_ISDIR.len());
-    i.end();
-    i.local_get(n).i32_const(abi.ec_not_directory).i32_eq();
-    i.if_(BlockType::Empty);
-    fs_err(i, g_ppos, g_plen, park, MSG_NOTDIR, E_NOTDIR.len());
-    i.end();
-    i.local_get(n).i32_const(abi.ec_exist).i32_eq();
-    i.if_(BlockType::Empty);
-    fs_err(i, g_ppos, g_plen, park, MSG_EXIST, E_EXIST.len());
-    i.end();
-    fs_err(i, g_ppos, g_plen, park, MSG_GEN, E_GEN.len());
-}
-
-/// Open descriptor in local `d` -> read-via-stream, the doubling
-/// read loop (DROPPED = EOF, each read through `$await`), handle drops,
-/// payload park, and the `pack(0, total)` return.
-fn fs_read_tail(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, l: ReadLocals) {
-    let P3Globals { park, f_alloc, g_ppos, g_plen, f_await, .. } = g;
+/// The fan await's read of a PREFETCHED descriptor in local `d`:
+/// read-via-stream, the doubling read loop (DROPPED = EOF, each read through
+/// `$await`) and the handle drops, leaving the bytes in `buf` / `total` for
+/// the caller to vet (#3140: anything the sync read would answer
+/// differently goes back through it).
+fn fs_read_prefetched(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, l: ReadLocals) {
+    let P3Globals { park, f_alloc, f_await, .. } = g;
     let ReadLocals { d, rx, fut, buf, cap, total, n } = l;
     i.local_get(d).i64_const(0).i32_const((park + RET) as i32).call(I_FS_RVS);
     i.i32_const((park + RET) as i32).i32_load(mem(0)).local_set(rx);
@@ -156,23 +96,32 @@ fn fs_read_tail(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, l: Read
     i.local_get(rx).call(I_FS_SDROP);
     i.local_get(fut).call(I_FS_FDROP);
     i.local_get(d).call(I_FS_RESDROP);
-    i.local_get(buf).global_set(g_ppos);
-    i.local_get(total).global_set(g_plen);
-    i.local_get(total).i64_extend_i32_u().return_();
+}
+
+/// `return fs_call(1, a, al, 0, 0)`: the sequential read_text, which the
+/// fs service answers — every fan-await path that cannot vouch for its
+/// prefetched answer ends here, so the observable answer is the sync one.
+fn fs_read_sync(i: &mut wasm_encoder::InstructionSink<'_>, f_self: u32, a_ptr: u32, a_len: u32) {
+    i.i32_const(1).local_get(a_ptr).local_get(a_len).i32_const(0).i32_const(0);
+    i.call(f_self).return_();
+}
+
+/// The p3 fs service (#3140): the spliced p1 service over its p3 adapter —
+/// its dispatcher's index and the ops `shim_fs_call` forwards to it.
+struct FsService {
+    f: u32,
+    ops: Vec<i32>,
 }
 
 /// The host contract over p3 (op codes shared with the embedded host): 30
 /// raw stdout, 31 stdin read-to-end, 35 stdin take-n, 32 entropy, 34 wall
-/// clock, 60 monotonic clock, plus the fs, http and env (26 / 29 / 36)
-/// families; anything else = the defined refusal.
-fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>, f_env: Option<u32>) -> Function {
-    let P3Globals { park, g_plen, g_ppos, g_in_rx, g_in_fut, g_out_tx, g_out_fut, g_err_tx, g_err_fut, g_pre, f_alloc, g_wset, g_slots, g_slotn, f_reserve, f_await, .. } = g;
-    let (op, a_ptr, a_len, b_ptr, b_len) = (0u32, 1u32, 2u32, 3u32, 4u32);
-    let total = 5u32;
+/// clock, 60 monotonic clock, plus the fs (through the spliced service), http
+/// and env (26 / 29 / 36) families; anything else = the defined refusal.
+fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>, f_env: Option<u32>, svc: Option<&FsService>) -> Function {
+    let P3Globals { park, g_plen, g_ppos, g_in_rx, g_in_fut, g_out_tx, g_out_fut, g_err_tx, g_err_fut, f_reserve, f_await, .. } = g;
+    let (op, a_len, b_ptr, b_len) = (0u32, 2u32, 3u32, 4u32);
     let n = 6u32;
     let s64 = 7u32;
-    let (d, buf, cap, rx, fut) = (8u32, 9u32, 10u32, 11u32, 12u32);
-    let (sl, j) = (13u32, 14u32);
     let mut f = Function::new([(2, ValType::I32), (1, ValType::I64), (7, ValType::I32)]);
     let mut i = f.instructions();
 
@@ -271,99 +220,61 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>, f_e
     i.call(I_MONO_NOW).return_();
     i.end();
 
-    // ── The filesystem READ surface (#1628 increment 2a) ──────────────
+    // ── The filesystem (#3140): the spliced service ───────────────────
+    // Every fs op but the fan prefetch triple goes to the p1 fs service,
+    // spliced over its p3 adapter — the same code the stock-p1 artifact
+    // runs, so the two answer alike by construction.
+    if let Some(s) = svc.filter(|s| !s.ops.is_empty()) {
+        for (k, o) in s.ops.iter().enumerate() {
+            i.local_get(op).i32_const(*o).i32_eq();
+            if k > 0 {
+                i.i32_or();
+            }
+        }
+        i.if_(BlockType::Empty);
+        for pidx in 0..5u32 {
+            i.local_get(pidx);
+        }
+        i.call(s.f).return_();
+        i.end();
+        fan_prefetch_arms(&mut i, g, abi, f_self, s.f);
+    }
 
-    // ops 4/5/6: exists / is_dir / is_file — stat-at with symlink-follow
-    // (the native `fs::metadata` behavior). The flag rides the len half;
-    // these never err: any stat failure (including no preopen) is false.
-    i.local_get(op).i32_const(4).i32_eq();
-    i.local_get(op).i32_const(5).i32_eq().i32_or();
-    i.local_get(op).i32_const(6).i32_eq().i32_or();
-    i.if_(BlockType::Empty);
-    fs_preopen(&mut i, g_pre, park, f_reserve);
-    i.global_get(g_pre).i32_const(0).i32_lt_s();
-    i.if_(BlockType::Empty);
-    i.i64_const(0).return_();
+    // Everything else: the defined refusal — the message on stderr, exit 1.
+    open_stream(&mut i, g_err_tx, g_err_fut, I_ERR_CALL, I_ERR_NEW, s64);
+    i.i32_const((park + MSG) as i32).local_set(b_ptr);
+    i.i32_const(UNSUPPORTED_MSG.len() as i32).local_set(b_len);
+    write_all(&mut i, g_err_tx, I_ERR_WRITE, f_await, (b_ptr, b_len, n));
+    i.i32_const(1).call(I_EXIT);
+    i.unreachable();
     i.end();
-    i.global_get(g_pre);
-    i.i32_const(1); // path-flags: symlink-follow
-    i.local_get(a_ptr).local_get(a_len);
-    i.i32_const((park + STATRET) as i32);
-    i.call(I_FS_STAT);
-    // result disc @0: nonzero = error-code → false.
-    i.i32_const((park + STATRET) as i32).i32_load8_u(mem8(0));
-    i.if_(BlockType::Empty);
-    i.i64_const(0).return_();
-    i.end();
-    i.local_get(op).i32_const(4).i32_eq();
-    i.if_(BlockType::Empty);
-    i.i64_const(1).return_();
-    i.end();
-    // descriptor-stat's %type is its first field, so its discriminant
-    // sits at the result payload offset (both WIT-derived).
-    i.i32_const((park + STATRET) as i32).i32_load8_u(mem8(abi.stat_payload)).local_set(n);
-    i.local_get(op).i32_const(5).i32_eq();
-    i.if_(BlockType::Result(ValType::I32));
-    i.local_get(n).i32_const(abi.dt_directory).i32_eq();
-    i.else_();
-    i.local_get(n).i32_const(abi.dt_regular_file).i32_eq();
-    i.end();
-    i.i64_extend_i32_u().return_();
-    i.end();
+    f
+}
 
-    // ops 1/13/14: read_text / read_text_if_exists / read_bytes —
-    // open-at(read) then a sync stream-read loop into a cabi_realloc'd
-    // buffer (grown by doubling; the bump never frees). DROPPED (n=0)
-    // is EOF: stream bytes arrive in order, so total is the whole file.
-    // 61 (fold_lines_range, and fold_lines_chunked's worker read) is op 1
-    // under the range's call name (#2744): the same read.
-    i.local_get(op).i32_const(1).i32_eq();
-    i.local_get(op).i32_const(13).i32_eq().i32_or();
-    i.local_get(op).i32_const(14).i32_eq().i32_or();
-    i.local_get(op).i32_const(61).i32_eq().i32_or();
-    // 63 (read_bytes_raw) is op 14 under the writer's call name (#2890).
-    i.local_get(op).i32_const(63).i32_eq().i32_or();
-    i.if_(BlockType::Empty);
-    fs_preopen(&mut i, g_pre, park, f_reserve);
-    i.global_get(g_pre).i32_const(0).i32_lt_s();
-    i.if_(BlockType::Empty);
-    fs_err(&mut i, g_ppos, g_plen, park, MSG_NOPRE, E_NOPRE.len());
-    i.end();
-    i.global_get(g_pre);
-    i.i32_const(1); // path-flags: symlink-follow
-    i.local_get(a_ptr).local_get(a_len);
-    i.i32_const(0); // open-flags: none
-    i.i32_const(1); // descriptor-flags: read
-    i.i32_const((park + RET) as i32);
-    i.call(I_FS_OPEN);
-    i.i32_const((park + RET) as i32).i32_load8_u(mem8(0));
-    i.if_(BlockType::Empty);
-    // error-code discriminant at the result payload offset — case
-    // indices WIT-derived, mapped to the native io::Error Display
-    // strings so the error legs match.
-    i.i32_const((park + RET) as i32).i32_load8_u(mem8(abi.open_payload)).local_set(n);
-    i.local_get(op).i32_const(13).i32_eq();
-    i.local_get(n).i32_const(abi.ec_no_entry).i32_eq().i32_and();
-    i.if_(BlockType::Empty);
-    i.i64_const(2i64 << 32).return_(); // ok-none
-    i.end();
-    fs_open_err_map(&mut i, g_ppos, g_plen, park, abi, n);
-    i.end();
-    i.i32_const((park + RET) as i32).i32_load(mem(abi.open_payload)).local_set(d);
-    fs_read_tail(&mut i, g, ReadLocals { d, rx, fut, buf, cap, total, n });
-    i.end();
+/// The fan prefetch triple (#1628 increments 2b/2c) — START (40), AWAIT (41)
+/// and ABANDON (42) a slot. The path a slot opens is the one the fs service
+/// RESOLVES the guest path to (pseudo-op -1: its preopen descriptor and
+/// relative remainder), so a prefetched read and a sequential one name the
+/// same file (#3140).
+fn fan_prefetch_arms(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, abi: &FsAbi, f_self: u32, f_svc: u32) {
+    let P3Globals { park, g_plen, g_ppos, f_alloc, g_wset, g_slots, g_slotn, .. } = g;
+    let (op, a_ptr, a_len, b_len) = (0u32, 1u32, 2u32, 4u32);
+    let total = 5u32;
+    let n = 6u32;
+    let s64 = 7u32;
+    let (d, buf, cap, rx, fut) = (8u32, 9u32, 10u32, 11u32, 12u32);
+    let (sl, j) = (13u32, 14u32);
 
-    // ── The fan prefetch pair (#1628 increment 2b) ────────────────────
-
-    // op 40: START a slot — async-lower open-at for slot k (k rides
-    // b_len; the path rides a). The subtask joins the ONE waitable set;
-    // an immediate Returned (packed status 2, no subtask) marks the slot
-    // done on the spot. No preopen / k past the cap: the slot stays
-    // empty and the await falls back to the sync path.
+    // op 40: START a slot — async-lower open-at for slot k (k rides b_len;
+    // the path rides a). The subtask joins the ONE waitable set; an
+    // immediate Returned (packed status 2, no subtask) marks the slot done
+    // on the spot. A path the service cannot resolve / k past the cap: the
+    // slot stays empty and the await falls back to the sync path.
     i.local_get(op).i32_const(40).i32_eq();
     i.if_(BlockType::Empty);
-    fs_preopen(&mut i, g_pre, park, f_reserve);
-    i.global_get(g_pre).i32_const(0).i32_ge_s();
+    i.i32_const(-1).local_get(a_ptr).local_get(a_len).i32_const(0).i32_const(0);
+    i.call(f_svc).local_set(s64);
+    i.local_get(s64).i64_const(0).i64_ge_s();
     i.local_get(b_len).i32_const(SLOT_CAP).i32_lt_u().i32_and();
     i.if_(BlockType::Empty);
     i.global_get(g_slots).i32_eqz();
@@ -383,11 +294,12 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>, f_e
     i.if_(BlockType::Empty);
     i.local_get(b_len).i32_const(1).i32_add().global_set(g_slotn);
     i.end();
-    // the argptr block (canonical layout of open-at's params)
-    i.local_get(sl).global_get(g_pre).i32_store(mem(0));
+    // the argptr block (canonical layout of open-at's params): the resolved
+    // descriptor and remainder (ppos / plen) from the service.
+    i.local_get(sl).local_get(s64).i32_wrap_i64().i32_store(mem(0));
     i.local_get(sl).i32_const(1).i32_store(mem(4)); // path-flags: symlink-follow
-    i.local_get(sl).local_get(a_ptr).i32_store(mem(8));
-    i.local_get(sl).local_get(a_len).i32_store(mem(12));
+    i.local_get(sl).global_get(g_ppos).i32_store(mem(8));
+    i.local_get(sl).global_get(g_plen).i32_store(mem(12));
     i.local_get(sl).i32_const(0).i32_store(mem(16)); // open-flags: none
     i.local_get(sl).i32_const(1).i32_store(mem(20)); // descriptor-flags: read
     // packed = [async-lower]open-at(args, ret)
@@ -410,22 +322,22 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>, f_e
     // op 41: AWAIT slot k in arm order (the path rides a again, so every
     // fallback is one recursive op-1 call). The drain loop is THE guest
     // scheduler: wait on the one set, mark each Returned subtask's slot
-    // done, until slot k is done; then decode its parked open result and
-    // run the same stream-read tail as the sync path.
+    // done, until slot k is done; then read the parked descriptor. A failed
+    // open, a descriptor that is not a regular file (a directory) or bytes
+    // that are not UTF-8 go back through the sync read, whose error text and
+    // checks are the service's — the prefetch never answers what it would not.
     i.local_get(op).i32_const(41).i32_eq();
     i.if_(BlockType::Empty);
     i.global_get(g_slots).i32_eqz();
     i.local_get(b_len).i32_const(SLOT_CAP).i32_ge_u().i32_or();
     i.if_(BlockType::Empty);
-    i.i32_const(1).local_get(a_ptr).local_get(a_len).i32_const(0).i32_const(0);
-    i.call(f_self).return_();
+    fs_read_sync(i, f_self, a_ptr, a_len);
     i.end();
     i.global_get(g_slots).local_get(b_len).i32_const(SLOT_STRIDE).i32_mul().i32_add();
     i.local_set(sl);
     i.local_get(sl).i32_load(mem(48)).i32_eqz();
     i.if_(BlockType::Empty);
-    i.i32_const(1).local_get(a_ptr).local_get(a_len).i32_const(0).i32_const(0);
-    i.call(f_self).return_();
+    fs_read_sync(i, f_self, a_ptr, a_len);
     i.end();
     // drain until slot k reads done
     i.block(BlockType::Empty).loop_(BlockType::Empty);
@@ -452,193 +364,29 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>, f_e
     i.end();
     i.end();
     i.br(0).end().end();
-    // consume the slot; decode the parked open result
+    // consume the slot; a failed open re-reads synchronously
     i.local_get(sl).i32_const(0).i32_store(mem(48));
     i.local_get(sl).i32_load8_u(mem8(24));
     i.if_(BlockType::Empty);
-    i.local_get(sl).i32_load8_u(mem8(24 + abi.open_payload)).local_set(n);
-    fs_open_err_map(&mut i, g_ppos, g_plen, park, abi, n);
+    fs_read_sync(i, f_self, a_ptr, a_len);
     i.end();
     i.local_get(sl).i32_load(mem(24 + abi.open_payload)).local_set(d);
-    fs_read_tail(&mut i, g, ReadLocals { d, rx, fut, buf, cap, total, n });
-    i.end();
-
-    // ── The filesystem WRITE surface (#1628 increment 2d) ─────────────
-
-    // ops 2/15 (write: create|truncate), 16 (append: create), 3
-    // (write_bytes: the List[Int] payload packs to raw bytes first).
-    // Shape: open-at(write) → stream.new → write/append-via-stream hands
-    // the host the readable end → sync stream.write feeds the writable
-    // end → drop writable → future.read is the DURABILITY handshake
-    // (blocks until the host wrote every byte) → resource-drop → ok.
-    i.local_get(op).i32_const(2).i32_eq();
-    i.local_get(op).i32_const(15).i32_eq().i32_or();
-    i.local_get(op).i32_const(16).i32_eq().i32_or();
-    i.local_get(op).i32_const(3).i32_eq().i32_or();
+    // only a regular file is streamed (read-via-stream traps on a directory)
+    i.i32_const(-3).local_get(d).i32_const(0).i32_const(0).i32_const(0);
+    i.call(f_svc).i64_eqz();
     i.if_(BlockType::Empty);
-    fs_preopen(&mut i, g_pre, park, f_reserve);
-    i.global_get(g_pre).i32_const(0).i32_lt_s();
-    i.if_(BlockType::Empty);
-    fs_err(&mut i, g_ppos, g_plen, park, MSG_NOPRE, E_NOPRE.len());
-    i.end();
-    // write_bytes: pack the 8-byte slots' low bytes into a compact buffer.
-    i.local_get(op).i32_const(3).i32_eq();
-    i.if_(BlockType::Empty);
-    i.local_get(b_len).i32_const(3).i32_shr_u().local_set(cap);
-    i.i32_const(0).i32_const(0).i32_const(8).local_get(cap).call(f_alloc).local_set(buf);
-    i.i32_const(0).local_set(j);
-    i.block(BlockType::Empty).loop_(BlockType::Empty);
-    i.local_get(j).local_get(cap).i32_ge_u().br_if(1);
-    i.local_get(buf).local_get(j).i32_add();
-    i.local_get(b_ptr).local_get(j).i32_const(3).i32_shl().i32_add();
-    i.i32_load8_u(mem8(0));
-    i.i32_store8(mem8(0));
-    i.local_get(j).i32_const(1).i32_add().local_set(j);
-    i.br(0).end().end();
-    i.local_get(buf).local_set(b_ptr);
-    i.local_get(cap).local_set(b_len);
-    i.end();
-    // open for write: append keeps the tail (create), write truncates.
-    i.global_get(g_pre);
-    i.i32_const(1); // path-flags: symlink-follow
-    i.local_get(a_ptr).local_get(a_len);
-    i.local_get(op).i32_const(16).i32_eq();
-    i.if_(BlockType::Result(ValType::I32));
-    i.i32_const(1); // open-flags: create
-    i.else_();
-    i.i32_const(9); // open-flags: create|truncate
-    i.end();
-    i.i32_const(2); // descriptor-flags: write
-    i.i32_const((park + RET) as i32);
-    i.call(I_FS_OPEN);
-    i.i32_const((park + RET) as i32).i32_load8_u(mem8(0));
-    i.if_(BlockType::Empty);
-    i.i32_const((park + RET) as i32).i32_load8_u(mem8(abi.open_payload)).local_set(n);
-    fs_open_err_map(&mut i, g_ppos, g_plen, park, abi, n);
-    i.end();
-    i.i32_const((park + RET) as i32).i32_load(mem(abi.open_payload)).local_set(d);
-    // the write stream: tx = high half, rx = low half (the stdio packing).
-    i.call(I_FS_WNEW).local_set(s64);
-    i.local_get(s64).i64_const(32).i64_shr_u().i32_wrap_i64().local_set(rx); // rx local holds TX
-    i.local_get(op).i32_const(16).i32_eq();
-    i.if_(BlockType::Result(ValType::I32));
-    i.local_get(d).local_get(s64).i32_wrap_i64().call(I_FS_AVS);
-    i.else_();
-    i.local_get(d).local_get(s64).i32_wrap_i64().i64_const(0).call(I_FS_WVS);
-    i.end();
-    i.local_set(fut);
-    // write loop on the LOCAL writable end (each write through `$await`).
-    i.block(BlockType::Empty).loop_(BlockType::Empty);
-    i.local_get(b_len).i32_eqz().br_if(1);
-    i.local_get(rx);
-    i.local_get(rx);
-    i.local_get(b_ptr).local_get(b_len);
-    i.call(I_FS_WWRITE);
-    // #2955: raw result; a 0-item COMPLETED write retries, DROPPED ends.
-    i.call(f_await).local_set(n);
-    i.local_get(b_ptr).local_get(n).i32_const(4).i32_shr_u().i32_add().local_set(b_ptr);
-    i.local_get(b_len).local_get(n).i32_const(4).i32_shr_u().i32_sub().local_set(b_len);
-    i.local_get(n).i32_const(15).i32_and().br_if(1);
-    i.br(0).end().end();
-    i.local_get(rx).call(I_FS_WDROP);
-    i.local_get(fut);
-    i.local_get(fut).i32_const((park + RET) as i32).call(I_FS_WFUT);
-    i.call(f_await).drop();
     i.local_get(d).call(I_FS_RESDROP);
-    i.i64_const(0).return_();
+    fs_read_sync(i, f_self, a_ptr, a_len);
     i.end();
-
-    // op 7: mkdir_p — create-directory-at per '/'-prefix, exist ignored
-    // (idempotent, the create_dir_all shape); the FULL path's non-exist
-    // error surfaces through the shared map.
-    i.local_get(op).i32_const(7).i32_eq();
+    fs_read_prefetched(i, g, ReadLocals { d, rx, fut, buf, cap, total, n });
+    i.i32_const(-2).local_get(buf).local_get(total).i32_const(0).i32_const(0);
+    i.call(f_svc).i64_eqz();
     i.if_(BlockType::Empty);
-    fs_preopen(&mut i, g_pre, park, f_reserve);
-    i.global_get(g_pre).i32_const(0).i32_lt_s();
-    i.if_(BlockType::Empty);
-    fs_err(&mut i, g_ppos, g_plen, park, MSG_NOPRE, E_NOPRE.len());
+    fs_read_sync(i, f_self, a_ptr, a_len);
     i.end();
-    i.i32_const(0).local_set(j);
-    i.block(BlockType::Empty).loop_(BlockType::Empty);
-    i.local_get(j).local_get(a_len).i32_gt_u().br_if(1);
-    // segment boundary: end-of-path or '/'
-    i.local_get(j).local_get(a_len).i32_eq();
-    i.local_get(j).local_get(a_len).i32_lt_u();
-    i.local_get(a_ptr).local_get(j).i32_add().i32_load8_u(mem8(0)).i32_const(47).i32_eq();
-    i.i32_and().i32_or();
-    i.local_get(j).i32_const(0).i32_gt_u().i32_and();
-    i.if_(BlockType::Empty);
-    i.global_get(g_pre);
-    i.local_get(a_ptr).local_get(j);
-    i.i32_const((park + RET) as i32);
-    i.call(I_FS_MKDIR);
-    // the FULL path's error decides; 'exist' is success ONLY for a directory
-    // (create_dir_all's idempotence) — a file at the path is the EEXIST error
-    // native answers (#2206), so stat decides which.
-    i.local_get(j).local_get(a_len).i32_eq();
-    i.i32_const((park + RET) as i32).i32_load8_u(mem8(0)).i32_and();
-    i.if_(BlockType::Empty);
-    i.i32_const((park + RET) as i32).i32_load8_u(mem8(abi.unit_payload)).local_set(n);
-    i.local_get(n).i32_const(abi.ec_exist).i32_eq();
-    i.if_(BlockType::Empty);
-    i.global_get(g_pre);
-    i.i32_const(1);
-    i.local_get(a_ptr).local_get(a_len);
-    i.i32_const((park + STATRET) as i32);
-    i.call(I_FS_STAT);
-    i.i32_const((park + STATRET) as i32).i32_load8_u(mem8(0)).i32_eqz();
-    i.i32_const((park + STATRET) as i32).i32_load8_u(mem8(abi.stat_payload));
-    i.i32_const(abi.dt_directory).i32_eq();
-    i.i32_and();
-    i.if_(BlockType::Empty);
-    i.i64_const(0).return_();
-    i.end();
-    i.end();
-    fs_open_err_map(&mut i, g_ppos, g_plen, park, abi, n);
-    i.end();
-    i.end();
-    i.local_get(j).i32_const(1).i32_add().local_set(j);
-    i.br(0).end().end();
-    i.i64_const(0).return_();
-    i.end();
-
-    // ops 8/9: remove / remove_all — stat decides file vs directory (the
-    // embedded host's `is_dir()` shape); a NON-EMPTY directory under op 9
-    // answers the honest not-empty error (the recursive walk is a later
-    // increment, not a refusal).
-    i.local_get(op).i32_const(8).i32_eq();
-    i.local_get(op).i32_const(9).i32_eq().i32_or();
-    i.if_(BlockType::Empty);
-    fs_preopen(&mut i, g_pre, park, f_reserve);
-    i.global_get(g_pre).i32_const(0).i32_lt_s();
-    i.if_(BlockType::Empty);
-    fs_err(&mut i, g_ppos, g_plen, park, MSG_NOPRE, E_NOPRE.len());
-    i.end();
-    i.global_get(g_pre);
-    i.i32_const(1);
-    i.local_get(a_ptr).local_get(a_len);
-    i.i32_const((park + STATRET) as i32);
-    i.call(I_FS_STAT);
-    i.i32_const((park + STATRET) as i32).i32_load8_u(mem8(0));
-    i.if_(BlockType::Empty);
-    i.i32_const((park + STATRET) as i32).i32_load8_u(mem8(abi.stat_payload)).local_set(n);
-    fs_open_err_map(&mut i, g_ppos, g_plen, park, abi, n);
-    i.end();
-    i.i32_const((park + STATRET) as i32).i32_load8_u(mem8(abi.stat_payload));
-    i.i32_const(abi.dt_directory).i32_eq();
-    i.if_(BlockType::Empty);
-    i.global_get(g_pre).local_get(a_ptr).local_get(a_len).i32_const((park + RET) as i32);
-    i.call(I_FS_RMDIR);
-    i.else_();
-    i.global_get(g_pre).local_get(a_ptr).local_get(a_len).i32_const((park + RET) as i32);
-    i.call(I_FS_UNLINK);
-    i.end();
-    i.i32_const((park + RET) as i32).i32_load8_u(mem8(0));
-    i.if_(BlockType::Empty);
-    i.i32_const((park + RET) as i32).i32_load8_u(mem8(abi.unit_payload)).local_set(n);
-    fs_open_err_map(&mut i, g_ppos, g_plen, park, abi, n);
-    i.end();
-    i.i64_const(0).return_();
+    i.local_get(buf).global_set(g_ppos);
+    i.local_get(total).global_set(g_plen);
+    i.local_get(total).i64_extend_i32_u().return_();
     i.end();
 
     // op 42: ABANDON slot k (k rides b_len; the path args are unused) —
@@ -680,14 +428,4 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>, f_e
     i.local_get(sl).i32_const(0).i32_store(mem(48));
     i.i64_const(0).return_();
     i.end();
-
-    // Everything else: the defined refusal — the message on stderr, exit 1.
-    open_stream(&mut i, g_err_tx, g_err_fut, I_ERR_CALL, I_ERR_NEW, s64);
-    i.i32_const((park + MSG) as i32).local_set(b_ptr);
-    i.i32_const(UNSUPPORTED_MSG.len() as i32).local_set(b_len);
-    write_all(&mut i, g_err_tx, I_ERR_WRITE, f_await, (b_ptr, b_len, n));
-    i.i32_const(1).call(I_EXIT);
-    i.unreachable();
-    i.end();
-    f
 }

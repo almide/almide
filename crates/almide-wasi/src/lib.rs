@@ -58,7 +58,7 @@ pub const P1_SERVED_OPS: &[i32] = &[
     29, 30, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 51, 52, 60, 61, 62, 63, 64, 73,
 ];
 
-mod fs_service;
+pub mod fs_service;
 mod prune;
 pub use fs_service::{fs_op_name, FS_SERVICE_OPS};
 

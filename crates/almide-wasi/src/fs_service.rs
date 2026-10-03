@@ -126,6 +126,13 @@ const STATICS_END: u32 = 8192;
 
 /// The WAT of the service for the ops in `ops`, its page at `fsp`.
 fn service_wat(fsp: u32, ops: &[i32]) -> String {
+    service_wat_ext(fsp, ops, "")
+}
+
+/// [`service_wat`] with `extra_arms` spliced into the dispatcher ahead of
+/// the op arms — the p3 transform's own entry points into the service
+/// (#3140), which answer through the same `(op, a, al, b, bl) -> i64` ABI.
+pub fn service_wat_ext(fsp: u32, ops: &[i32], extra_arms: &str) -> String {
     let mut wat = TEMPLATE.replace("@FSP@", &fsp.to_string());
     let mut blob: Vec<u8> = Vec::new();
     let mut place = |bytes: &[u8]| -> (u32, u32) {
@@ -179,6 +186,7 @@ fn service_wat(fsp: u32, ops: &[i32]) -> String {
     tail.push_str(
         "  (func $fs (export \"fs\") (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)\n    (call $prologue)\n",
     );
+    tail.push_str(extra_arms);
     for (op, func, name_op) in FS_SERVICE_OPS.iter().filter(|(o, _, _)| ops.contains(o)) {
         tail.push_str(&format!(
             "    (if (i32.eq (local.get $op) (i32.const {op})) (then (return (call ${func} (i32.const {name_op}) (local.get $a) (local.get $al) (local.get $b) (local.get $bl)))))\n"
@@ -203,8 +211,8 @@ const BASE_IMPORTS: [&str; 5] = ["fd_write", "proc_exit", "random_get", "clock_t
 #[derive(Default)]
 struct Parsed {
     types: Vec<(Vec<ValType>, Vec<ValType>)>,
-    /// (name, type index) of each function import, in index order.
-    imports: Vec<(String, u32)>,
+    /// (module, name, type index) of each function import, in index order.
+    imports: Vec<(String, String, u32)>,
     /// The `shim.*` global imports by name, in index order.
     global_imports: Vec<String>,
     globals: Vec<(wasm_encoder::GlobalType, ConstExpr)>,
@@ -262,7 +270,7 @@ impl Parsed {
 
     fn import(&mut self, imp: wasmparser::Import<'_>) {
         match imp.ty {
-            wasmparser::TypeRef::Func(t) => self.imports.push((imp.name.to_string(), t)),
+            wasmparser::TypeRef::Func(t) => self.imports.push((imp.module.to_string(), imp.name.to_string(), t)),
             wasmparser::TypeRef::Global(_) => self.global_imports.push(imp.name.to_string()),
             _ => {}
         }
@@ -334,23 +342,30 @@ impl FsSplice {
         if ops.is_empty() {
             return Ok(None);
         }
-        let bytes = wat::parse_str(service_wat(fs_page, &ops))?;
+        let shared = |_module: &str, name: &str| {
+            BASE_IMPORTS.contains(&name) || (environ_shipped && matches!(name, "environ_sizes_get" | "environ_get"))
+        };
+        Self::from_wat(&service_wat(fs_page, &ops), ops, &shared).map(Some)
+    }
+
+    /// A service from its whole WAT text (the p3 transform's, #3140, whose
+    /// imports are its adapter's): `shared(module, name)` says which imports
+    /// the artifact already carries, so only the others are appended.
+    pub fn from_wat(wat: &str, ops: Vec<i32>, shared: &dyn Fn(&str, &str) -> bool) -> anyhow::Result<Self> {
+        let bytes = wat::parse_str(wat)?;
         let m = Parsed::read(&bytes)?;
         let n_imp = m.imports.len();
         let entry = m.entry.ok_or_else(|| anyhow::anyhow!("fs service: no `fs` export"))?;
         let reached = m.reachable(entry);
-        let shared = |name: &str| {
-            BASE_IMPORTS.contains(&name) || (environ_shipped && matches!(name, "environ_sizes_get" | "environ_get"))
-        };
-        let fresh = (0..n_imp).filter(|i| reached[*i] && !shared(&m.imports[*i].0)).collect();
-        Ok(Some(Self {
+        let fresh = (0..n_imp).filter(|i| reached[*i] && !shared(&m.imports[*i].0, &m.imports[*i].1)).collect();
+        Ok(Self {
             shipped: reached[n_imp..].to_vec(),
             entry: entry - n_imp as u32,
             m,
             bytes,
             ops,
             fresh,
-        }))
+        })
     }
 
     /// The WASI imports the splice appends.
@@ -372,23 +387,33 @@ impl FsSplice {
         next_import: &mut u32,
         environ: Option<(u32, u32)>,
     ) -> Vec<u32> {
-        let mut at: Vec<u32> = self
-            .m
-            .imports
-            .iter()
-            .map(|(name, _)| match (name.as_str(), environ) {
-                ("environ_sizes_get", Some((sizes, _))) => sizes,
-                ("environ_get", Some((_, get))) => get,
-                (name, _) => BASE_IMPORTS.iter().position(|b| *b == name).unwrap_or(0) as u32,
-            })
-            .collect();
+        let at = |_module: &str, name: &str| match (name, environ) {
+            ("environ_sizes_get", Some((sizes, _))) => Some(sizes),
+            ("environ_get", Some((_, get))) => Some(get),
+            (name, _) => BASE_IMPORTS.iter().position(|b| *b == name).map(|p| p as u32),
+        };
+        self.import_mapped(imports, types, next_import, &at)
+    }
+
+    /// [`Self::import`] over any mapping: `at(module, name)` is the index an
+    /// import the artifact already has lands on (or any function index —
+    /// the p3 service calls the transform's own shims this way); the fresh
+    /// imports are appended under their own module name.
+    pub fn import_mapped(
+        &self,
+        imports: &mut wasm_encoder::ImportSection,
+        types: &FsTypes,
+        next_import: &mut u32,
+        at: &dyn Fn(&str, &str) -> Option<u32>,
+    ) -> Vec<u32> {
+        let mut out: Vec<u32> = self.m.imports.iter().map(|(module, name, _)| at(module, name).unwrap_or(0)).collect();
         for &i in &self.fresh {
-            let (name, ty) = &self.m.imports[i];
-            imports.import("wasi_snapshot_preview1", name, wasm_encoder::EntityType::Function(types.map[*ty as usize]));
-            at[i] = *next_import;
+            let (module, name, ty) = &self.m.imports[i];
+            imports.import(module, name, wasm_encoder::EntityType::Function(types.map[*ty as usize]));
+            out[i] = *next_import;
             *next_import += 1;
         }
-        at
+        out
     }
 
     /// Declare the shipped functions from index `first` on; the dispatcher's
@@ -414,6 +439,19 @@ impl FsSplice {
 
     /// Append the shipped bodies to `code` and the statics to `data`.
     pub fn emit(&self, code: &mut CodeSection, data: &mut DataSection, types: &FsTypes, to: &SpliceTargets) -> anyhow::Result<()> {
+        self.emit_with_globals(code, data, types, to, &[])
+    }
+
+    /// [`Self::emit`] with more `shim.*` globals by name (the p3 service's
+    /// environment cache, #3140) beside plen / ppos / heap.
+    pub fn emit_with_globals(
+        &self,
+        code: &mut CodeSection,
+        data: &mut DataSection,
+        types: &FsTypes,
+        to: &SpliceTargets,
+        named: &[(&str, u32)],
+    ) -> anyhow::Result<()> {
         let mut slot = to.first_func;
         let funcs: Vec<u32> = self
             .shipped
@@ -423,9 +461,10 @@ impl FsSplice {
                 slot - u32::from(*s)
             })
             .collect();
-        let shim = |name: &str| match name {
-            "plen" => to.g_plen,
-            "ppos" => to.g_ppos,
+        let shim = |name: &str| match (name, named.iter().find(|(n, _)| *n == name)) {
+            (_, Some((_, g))) => *g,
+            ("plen", None) => to.g_plen,
+            ("ppos", None) => to.g_ppos,
             _ => to.heap,
         };
         let globals: Vec<u32> = self

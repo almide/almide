@@ -8,10 +8,11 @@ fn unsupported_component_args_are_named_before_writing_an_artifact() {
     let artifact = dir.path().join("args.wasm");
     std::fs::write(&source, "import args\neffect fn main() -> Unit = println(args.option(\"x\") ?? \"-\")\n").expect("source");
     // The p2 component refuses argv; the p3 one serves it over
-    // wasi:cli/environment (ADR-0023 step 3) and refuses env.temp_dir
-    // (host op 28) instead, which no component shim serves.
-    let temp_dir_source = dir.path().join("temp_dir.almd");
-    std::fs::write(&temp_dir_source, "import env\neffect fn main() -> Unit = println(env.temp_dir())\n").expect("source");
+    // wasi:cli/environment (ADR-0023 step 3) and refuses env.set (host op
+    // 37) instead — its declared exclusion (#3140: the p3 env service has no
+    // overlay for env.get to read through).
+    let env_set_source = dir.path().join("env_set.almd");
+    std::fs::write(&env_set_source, "import env\neffect fn main() -> Unit = env.set(\"ALMIDE_X\", \"1\")\n").expect("source");
     let component = |source: &std::path::Path, p3: bool| {
         std::fs::write(&artifact, b"existing artifact").expect("sentinel");
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
@@ -22,7 +23,7 @@ fn unsupported_component_args_are_named_before_writing_an_artifact() {
         if p3 { cmd.env("ALMIDE_COMPONENT_P3", "1"); }
         cmd.output().expect("build")
     };
-    for (src, p3, op, name) in [(&source, false, 29, "args.option"), (&temp_dir_source, true, 28, "env.temp_dir")] {
+    for (src, p3, op, name) in [(&source, false, 29, "args.option"), (&env_set_source, true, 37, "env.set")] {
         let out = component(src, p3);
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(!out.status.success(), "{stderr}");
