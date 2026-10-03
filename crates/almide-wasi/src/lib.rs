@@ -346,6 +346,12 @@ impl P1Services {
         }
     }
 
+    /// Whether a service can stage a result outside the park (#2120), so the
+    /// module carries `g_ppos`, the pointer `host_read` copies from.
+    pub fn stages_outside_park(self) -> bool {
+        self.env_get || self.args || self.fs || self.proc
+    }
+
     /// The WASI imports this selection adds past the base five (the fs
     /// service's own count on top, which depends on the ops it reaches).
     pub fn extra_imports(self) -> u32 {
@@ -435,7 +441,7 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     let g_plen = global_count;
     // g_ppos exists only for the services that can stage outside the park
     // (#2120); a module without them keeps the fixed source and its bytes.
-    let g_ppos = (services.env_get || services.args || services.fs || services.proc).then_some(global_count + 1);
+    let g_ppos = services.stages_outside_park().then_some(global_count + 1);
     // g_ovl (the overlay log length) exists only when an env service
     // ships — nothing else reads or writes the log.
     let g_ovl = (services.env_get || services.env_set)
@@ -600,9 +606,9 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         exports.export(name, *kind, idx);
     }
     exports.export("_start", ExportKind::Func, main_index + shift);
-    if let Some(f) = f_realloc {
+    f_realloc.into_iter().for_each(|f| {
         exports.export("cabi_realloc", ExportKind::Func, f);
-    }
+    });
 
     let mut code = CodeSection::new();
     let mut remap = Remap { shim_base, shift };
@@ -645,10 +651,10 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         let (i_sizes, i_get) = args_imports.expect("args service imports its pair");
         code.function(&shim_args(park, g_plen, g_ppos.expect("args stages"), i_sizes, i_get));
     }
-    if let (Some(_), Some(i_call)) = (f_proc, proc_import) {
+    f_proc.and(proc_import).into_iter().for_each(|i_call| {
         code.function(&proc_service::shim_proc(park, g_plen, g_ppos.expect("the proc service stages"), i_call));
         code.function(&proc_service::shim_cabi_realloc(heap_global));
-    }
+    });
     if let (Some(f), Some(t), Some(import_at)) = (&fs, &fs_types, fs_import_at) {
         let to = fs_service::SpliceTargets {
             import_at,
