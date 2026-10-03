@@ -56,6 +56,7 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
 
 root, ledger_path = sys.argv[1], sys.argv[2]
 enumerated = set(
@@ -139,8 +140,51 @@ unwired_ceiling = None
 unvaried_ceiling = None
 unmapped_ceiling = None
 uncompensated_ceiling = None
-rows, not_gates, cur = [], [], None
-for raw in open(ledger_path, encoding="utf-8"):
+# The rows are read by a real TOML parser, strictly (#3254). The line scanner
+# this replaced let a repeated key overwrite the earlier one in silence: a row
+# carried two `evidence =` lines for a month, the file failed every strict
+# reader, and the gate read only the shorter, older text. A file a TOML reader
+# refuses is now a gate failure, not a quiet last-wins.
+def load_rows(text):
+    """(gate rows, not_a_gate rows), or ValueError naming why the text is refused."""
+    try:
+        doc = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise ValueError(f"not valid TOML: {e}") from None
+    extra = sorted(set(doc) - {"gate", "not_a_gate"})
+    if extra:
+        raise ValueError(f"top-level key(s) {extra}; only [[gate]] and [[not_a_gate]] tables belong in it")
+    for kind in ("gate", "not_a_gate"):
+        for r in doc.get(kind, []):
+            bad = sorted(k for k, v in r.items() if not isinstance(v, str))
+            if bad:
+                raise ValueError(f"[[{kind}]] {r.get('path')!r} has non-string field(s) {bad}")
+    return doc.get("gate", []), doc.get("not_a_gate", [])
+
+# Negative control, run on every invocation: a row that repeats a key must be
+# refused by the same loader the ledger goes through, and a well-formed row
+# must load. A loader that goes back to last-wins (or any lenient reader)
+# fails here before the ledger is judged.
+_forged = '[[gate]]\npath = "x"\nevidence = "a"\nevidence = "b"\n'
+try:
+    load_rows(_forged)
+    print("GATE VERIFICATION LEDGER FAIL — loader self-check: a [[gate]] row with a repeated "
+          "`evidence` key was accepted; the ledger reader is no longer strict", file=sys.stderr)
+    sys.exit(1)
+except ValueError:
+    pass
+if load_rows('[[gate]]\npath = "x"\nevidence = "a"\n') != ([{"path": "x", "evidence": "a"}], []):
+    print("GATE VERIFICATION LEDGER FAIL — loader self-check: a well-formed row did not load",
+          file=sys.stderr)
+    sys.exit(1)
+
+ledger_text = open(ledger_path, encoding="utf-8").read()
+try:
+    rows, not_gates = load_rows(ledger_text)
+except ValueError as e:
+    print(f"GATE VERIFICATION LEDGER FAIL — {ledger_path}: {e}", file=sys.stderr)
+    sys.exit(1)
+for raw in ledger_text.split("\n"):
     line = raw.strip()
     m = re.match(r'#\s*unverified_ceiling\s*=\s*"(\d+)"', line)
     if m:
@@ -160,16 +204,6 @@ for raw in open(ledger_path, encoding="utf-8"):
     m = re.match(r'#\s*uncompensated_blind_ceiling\s*=\s*"(\d+)"', line)
     if m:
         uncompensated_ceiling = int(m.group(1))
-    if line in ("[[gate]]", "[[not_a_gate]]"):
-        if cur:
-            (not_gates if cur.pop("_kind") == "not_a_gate" else rows).append(cur)
-        cur = {"_kind": line.strip("[]")}
-        continue
-    m = re.match(r'([a-z_]+)\s*=\s*"(.*)"$', line)
-    if m and cur is not None:
-        cur[m.group(1)] = m.group(2)
-if cur:
-    (not_gates if cur.pop("_kind") == "not_a_gate" else rows).append(cur)
 
 # The fifth axis (#3032): `blind` is `NONE: <why>`, `UNMAPPED`, or `;`-separated
 # entries `<defect class> -> <compensator>`, where the compensator is
