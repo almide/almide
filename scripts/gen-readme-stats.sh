@@ -133,20 +133,20 @@ describe_build() { # $1 = `almide --version` line → one phrase on stdout
 if [ "$MODE" = "--measure" ]; then
   measure_both
   BUILD_DESC="$(describe_build "$BIN_VERSION")" || exit 2
-  # The released row: ALMIDE_RELEASE_BIN names a binary from a release asset
+  # The released row: README_RELEASE_BIN names a binary from a release asset
   # (`gh release download vX.Y.Z -R almide/almide`); without it the previous
   # stamp is carried over — a release's bytes are immutable once shipped.
-  if [ -n "${ALMIDE_RELEASE_BIN:-}" ]; then
-    R_VERSION="$("$ALMIDE_RELEASE_BIN" --version 2>/dev/null | head -1)"
-    case "$R_VERSION" in *"(release"*) ;; *) echo "::error::ALMIDE_RELEASE_BIN is '$R_VERSION', not a release build"; exit 2 ;; esac
-    r="$(measure_leg "$ALMIDE_RELEASE_BIN")"; R_BYTES="${r%% *}"; R_DATE="$(date +%F)"
+  if [ -n "${README_RELEASE_BIN:-}" ]; then
+    R_VERSION="$("$README_RELEASE_BIN" --version 2>/dev/null | head -1)"
+    case "$R_VERSION" in *"(release"*) ;; *) echo "::error::README_RELEASE_BIN is '$R_VERSION', not a release build"; exit 2 ;; esac
+    r="$(measure_leg "$README_RELEASE_BIN")"; R_BYTES="${r%% *}"; R_DATE="$(date +%F)"
   else
     R_VERSION="$(kv release_version 2>/dev/null || true)"; R_BYTES="$(kv release_bytes 2>/dev/null || true)"; R_DATE="$(kv release_date 2>/dev/null || true)"
   fi
   cat > "$BASELINE" <<EOF
 # Hello, world wasm size — the SOURCE for the README's wasm-size block.
 # Regenerate: bash scripts/gen-readme-stats.sh --measure
-#             (ALMIDE_RELEASE_BIN=<binary from a release asset> also restamps
+#             (README_RELEASE_BIN=<binary from a release asset> also restamps
 #             the released row; without it the released row is carried over)
 # Checked:    bash scripts/gen-readme-stats.sh --check rebuilds Hello, world and
 #             demands these exact bytes — a changed preamble is re-stamped HERE,
