@@ -23,11 +23,6 @@
 //! the winner exits the process). Then the same wait runs one level up, for
 //! the element that started this fan, and the abort proceeds.
 //!
-//! `fan_map_par` still stops at the first `Err` until ADR-0024 step 3, so its
-//! group carries a CUT: elements above the lowest `Err` are never flushed, and
-//! a trap above the cut is not a trap of the sequential evaluation — it
-//! unwinds with `AlmideFanDiscard`, which the element's worker catches.
-//!
 //! A helper thread that works FOR an element (the `list.par_*` chunk workers
 //! under a `fan { }` arm) adopts that element's sink, so a trap on it waits
 //! like a trap on the element's own thread.
@@ -38,8 +33,7 @@
 const FAN_PRELUDE: &str = r#"
 #[derive(Clone)] VIS struct AlmideFanSink { group: std::sync::Arc<AlmideFanGroup>, index: usize }
 VIS struct AlmideFanGroup { state: std::sync::Mutex<AlmideFanState>, cv: std::sync::Condvar, parent: Option<AlmideFanSink> }
-VIS struct AlmideFanState { head: usize, cut: usize, done: Vec<bool>, trapped: Vec<bool>, bufs: Vec<Vec<(bool, Vec<u8>)>> }
-VIS struct AlmideFanDiscard;
+VIS struct AlmideFanState { head: usize, done: Vec<bool>, trapped: Vec<bool>, bufs: Vec<Vec<(bool, Vec<u8>)>> }
 VIS struct AlmideFanElem(AlmideFanSink, Option<AlmideFanSink>);
 thread_local! { VIS static ALMIDE_FAN_SINK: std::cell::RefCell<Option<AlmideFanSink>> = const { std::cell::RefCell::new(None) }; }
 fn almide_fan_lock(g: &AlmideFanGroup) -> std::sync::MutexGuard<'_, AlmideFanState> { g.state.lock().unwrap_or_else(|e| e.into_inner()) }
@@ -64,7 +58,7 @@ fn almide_out_route(sink: Option<&AlmideFanSink>, err: bool, bytes: &[u8]) {
 VIS fn almide_out_write(err: bool, bytes: &[u8]) { let sink = almide_fan_current(); almide_out_route(sink.as_ref(), err, bytes) }
 VIS fn almide_fan_group(n: usize) -> std::sync::Arc<AlmideFanGroup> {
     almide_stdout_flush();
-    let state = AlmideFanState { head: 0, cut: usize::MAX, done: vec![false; n], trapped: vec![false; n], bufs: (0..n).map(|_| Vec::new()).collect() };
+    let state = AlmideFanState { head: 0, done: vec![false; n], trapped: vec![false; n], bufs: (0..n).map(|_| Vec::new()).collect() };
     std::sync::Arc::new(AlmideFanGroup { state: std::sync::Mutex::new(state), cv: std::sync::Condvar::new(), parent: almide_fan_current() })
 }
 VIS fn almide_fan_enter(g: &std::sync::Arc<AlmideFanGroup>, index: usize) -> AlmideFanElem {
@@ -73,8 +67,7 @@ VIS fn almide_fan_enter(g: &std::sync::Arc<AlmideFanGroup>, index: usize) -> Alm
     AlmideFanElem(sink, prev)
 }
 fn almide_fan_drain(g: &AlmideFanGroup, st: &mut AlmideFanState) {
-    let limit = st.done.len().min(st.cut.saturating_add(1));
-    while st.head < limit {
+    while st.head < st.done.len() {
         let h = st.head;
         for (e, b) in std::mem::take(&mut st.bufs[h]) { almide_out_route(g.parent.as_ref(), e, &b); }
         if !st.done[h] { break; }
@@ -82,7 +75,6 @@ fn almide_fan_drain(g: &AlmideFanGroup, st: &mut AlmideFanState) {
     }
     almide_stdout_flush();
 }
-VIS fn almide_fan_cut(g: &AlmideFanGroup, index: usize) { let mut st = almide_fan_lock(g); st.cut = st.cut.min(index); drop(st); g.cv.notify_all(); }
 impl Drop for AlmideFanElem {
     fn drop(&mut self) {
         almide_stdout_flush();
@@ -105,7 +97,6 @@ VIS fn almide_fan_trap_wait() {
         st.trapped[s.index] = true;
         g.cv.notify_all();
         loop {
-            if s.index > st.cut { drop(st); std::panic::resume_unwind(Box::new(AlmideFanDiscard)); }
             if st.head >= s.index && !st.trapped[..s.index].contains(&true) { break; }
             st = g.cv.wait(st).unwrap_or_else(|e| e.into_inner());
         }

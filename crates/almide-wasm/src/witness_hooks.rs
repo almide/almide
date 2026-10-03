@@ -577,12 +577,13 @@ impl Emitter<'_> {
         Some(self.witness.as_mut()?.temp_born())
     }
 
-    /// The carrier's two routes, as a branch: it LEAVES as the whole fan's
-    /// result (`map`'s err, `any`'s winner — the consumer records the owned
-    /// result, the call-result convention), or it is consumed here: `any`
-    /// releases a losing err (`d`), `map` releases the shell (`d`) after the
-    /// ok payload's credit moved into the accumulator (a fresh value moved,
-    /// `im`, when the payload is droppable).
+    /// The carrier's routes, as a branch: it LEAVES as the whole fan's
+    /// result (`map`'s lowest-index err, `any`'s winner — the consumer
+    /// records the owned result, the call-result convention), or it is
+    /// consumed here: `any` releases a losing err (`d`), `map` releases the
+    /// shell (`d`) after the ok payload's credit moved into the accumulator (a
+    /// fresh value moved, `im`, when the payload is droppable), and — every
+    /// element runs (ADR-0024 D1) — releases an err after the first (`d`).
     pub(crate) fn witness_fan_step(&mut self, c: Option<u32>, first_ok_wins: bool, payload: SliceTy) {
         let payload_moves = !first_ok_wins && self.rc_droppable(payload);
         let (Some(w), Some(o)) = (self.witness.as_mut(), c) else { return };
@@ -593,6 +594,10 @@ impl Emitter<'_> {
         w.temp_ops(o, "d");
         if payload_moves {
             w.temp_move();
+        }
+        if !first_ok_wins {
+            w.branch_arm();
+            w.temp_ops(o, "d");
         }
         w.branch_close();
     }

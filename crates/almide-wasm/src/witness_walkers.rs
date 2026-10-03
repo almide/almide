@@ -202,7 +202,8 @@ impl Emitter<'_> {
     }
 
     /// One awaited read of `fan.map`'s prefetch: after the first err the
-    /// remaining awaits only drain (second arm, no carrier); otherwise the
+    /// remaining awaits only drain — every read already ran, started in
+    /// phase A (ADR-0024 D1) — (second arm, no carrier); otherwise the
     /// read's Result carrier is born and settled as the sequential `map`'s.
     pub(crate) fn witness_prefetch_map_step(&mut self) {
         if self.witness.is_none() {
