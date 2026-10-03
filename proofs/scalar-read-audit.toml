@@ -67,10 +67,17 @@ why = "Reads the mutable global's own storage slot (mg_slot_addr) — a single s
 
 [[arm]]
 file = "calls_b.rs"
-fn = "two_level_field_cow"
-loads = 2
+fn = "copy_record_path"
+loads = 1
 verdict = "NOT_SUM_READ"
-why = "Record spread-copy over aggregate_field_tys slots (level 1); record-only layout, no tag."
+why = "Record spread-copy over aggregate_field_tys slots at every level of a field path (level 1); record-only layout, no tag."
+
+[[arm]]
+file = "calls_b.rs"
+fn = "load_handle"
+loads = 1
+verdict = "NOT_SUM_READ"
+why = "Child handle of a record slot on a field path (copy_record_path / path_field_unique), offsets from aggregate_field_tys; record-only layout, no tag."
 
 [[arm]]
 file = "calls_b.rs"
