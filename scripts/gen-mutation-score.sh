@@ -28,11 +28,15 @@ export LC_ALL=C
 cd "$(dirname "$0")/.." || exit 2
 
 LEDGER="proofs/mutation-score.toml"
-README="README.md"
+README="${ALMIDE_README_TARGET:-README.md}"
 REPO="almide/almide"
 
 mode="${1:-}"
 [ -n "$mode" ] || { sed -n '2,25p' "$0"; exit 2; }
+
+. scripts/lib/readme-targets.sh
+readme_fanout "$0" "$@"
+
 shift
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT

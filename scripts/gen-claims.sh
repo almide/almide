@@ -26,8 +26,11 @@ cd "$(dirname "$0")/.." || exit 2
 . scripts/lib/ledger-counts.sh
 [ "${1:-}" = "--counts" ] && counts_stamp
 
+. scripts/lib/readme-targets.sh
+readme_fanout "$0" "$@"
+
 LEDGER="docs/contracts/contracts.toml"
-README="README.md"
+README="${ALMIDE_README_TARGET:-README.md}"
 START="<!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->"
 END="<!-- claims:generated:end -->"
 
