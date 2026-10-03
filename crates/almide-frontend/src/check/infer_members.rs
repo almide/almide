@@ -50,8 +50,12 @@ impl Checker {
         if let ExprKind::Ident { name: mod_name, .. } = &object.kind {
             self.reject_dead_try_spelling(mod_name, field, object.id, object.span, None);
             self.reject_user_prim(mod_name, field, object.span);
+            // Every resolved branch below marks the import used (#3241): a
+            // member taken as a VALUE (`let f = process.pid`, an argument, a
+            // pipe RHS) is as much a use as a call, which marks on its own path.
             if let Some(sig) = crate::stdlib::lookup_sig(mod_name, field) {
                 self.type_map.insert(object.id, Ty::Unit); // placeholder; object isn't evaluated
+                self.env.import_table.mark_used(mod_name);
                 return Some(self.fn_value_ty(&sig));
             }
             let resolved_mod_name = self.env.import_table.resolve(mod_name)
@@ -79,6 +83,7 @@ impl Checker {
                 let qualified = format!("{}.{}", resolved_mod.as_str(), type_name.as_str());
                 if self.env.types.contains_key(&sym(&qualified)) {
                     self.type_map.insert(object.id, Ty::Unit);
+                    self.env.import_table.mark_used(mod_name);
                     // #433: return the qualified `mod.Type` (it exists and was
                     // just confirmed) so the binding mangles to the namespaced
                     // struct, not the ambiguous bare name.

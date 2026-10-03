@@ -1,0 +1,19 @@
+// A stdlib import used ONLY through a member taken as a VALUE — bound by
+// `let`, passed as an argument, stored in a record field or a list, never
+// called through `process.*(..)` — is USED: dropping it breaks the build
+// (#3241). This broken file adds a genuinely unused import beside it.
+import process
+import zlib
+
+type Probe = { read: () -> Int }
+
+fn call_it(g: () -> Int) -> Int = g()
+
+fn runner(r: (String, List[String]) -> Result[String, String]) -> Int = 0
+
+fn main() -> Unit = {
+  let f = process.pid
+  let probe = Probe { read: process.pid }
+  let fs = [process.pid]
+  println("${f() > 0} ${call_it(process.pid) > 0} ${probe.read() > 0} ${list.len(fs)} ${runner(process.exec)}")
+}

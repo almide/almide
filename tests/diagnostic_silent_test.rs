@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 /// Shrink-only in spirit: lowering it needs a reason in the PR body.
-const SILENT_FLOOR: usize = 34;
+const SILENT_FLOOR: usize = 35;
 
 fn silent_cases() -> Vec<PathBuf> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/diagnostics/silent");
