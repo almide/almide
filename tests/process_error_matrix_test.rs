@@ -25,10 +25,11 @@
 //! A child that starts and exits non-zero retains its own stderr/status.
 //! C-214 now includes both status twins after almide/als#65 merged.
 //!
-//! `process` has no wasm host binding (E081, the availability matrix's row
-//! names the reason), so this is the only leg that renders these strings — there is no
-//! cross-target equality to maintain here, which is exactly why this half of
-//! #2090 could land while the `fs` half waits on the structural leg's WAT.
+//! Since #2589 (ADR-0025) the embedded wasm host renders these strings too —
+//! with the SAME code: `runtime/rs/src/process.rs` includes
+//! `crates/almide-rt-core/src/process_core.rs`, and the host's
+//! `almide:process/spawn` calls it. The last test below holds the two legs
+//! byte-equal over every row.
 
 use std::process::Command;
 
@@ -159,52 +160,37 @@ fn a_child_that_ran_and_failed_is_untouched() {
     );
 }
 
-/// Why this family has ONE leg, asserted rather than assumed.
-///
-/// Every string above is rendered by the native runtime and by nothing else,
-/// because `process` has no wasm host binding at all — so unlike the `fs` half
-/// of #2090, there is no second implementation to keep byte-identical and no
-/// contract to update. That is the whole reason this half could land alone.
-///
-/// If someone ports `process` to wasi-p3 (#1628), this test goes red, and that
-/// is the point: the port acquires a second renderer for these messages and
-/// C-215's rule starts applying to them.
+/// The second leg (#2589): the embedded wasm host renders every row of the
+/// family byte for byte as native does — stdout, stderr and exit code — since
+/// both run one core. This test used to assert the opposite (that `process`
+/// had no wasm leg), as the tripwire for exactly this moment.
 #[test]
-fn the_process_surface_has_no_second_leg_to_keep_equal() {
+fn the_embedded_wasm_leg_renders_every_row_as_native_does() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let file = dir.path().join("wasmleg.almd");
-    std::fs::write(
-        &file,
-        "import process\n\
-         effect fn main() -> Unit = {\n\
-        \x20 let _ = process.exec(\"ghh-not-a-binary\", [])!\n\
-         }\n",
-    )
-    .expect("write fixture");
-    let out = Command::new(almide())
-        .arg("check")
-        .arg(&file)
-        .args(["--target", "wasm"])
-        .output()
-        .expect("run almide check");
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert!(
-        text.contains("error[E081]") && text.contains("is not available on --target wasm"),
-        "process grew a wasm leg — these messages now have a second renderer, so \
-         the #2090 form has to be reproduced there and C-215 applies:\n{text}"
-    );
+    let mut diverged = Vec::new();
+    for (i, (call, _)) in rows().into_iter().enumerate() {
+        let file = dir.path().join(format!("leg{i}.almd"));
+        std::fs::write(&file, format!("import process\neffect fn main() -> Unit = {{\n  {call}\n}}\n")).expect("write fixture");
+        let leg = |extra: &[&str]| {
+            let out = Command::new(almide()).arg("run").arg(&file).args(extra).output().expect("run almide");
+            (out.status.code(), String::from_utf8_lossy(&out.stdout).to_string(), String::from_utf8_lossy(&out.stderr).to_string())
+        };
+        let (native, wasm) = (leg(&[]), leg(&["--target", "wasm"]));
+        if native != wasm {
+            diverged.push(format!("  {call}\n    native: {native:?}\n    wasm:   {wasm:?}"));
+        }
+    }
+    assert!(diverged.is_empty(), "the process.* failure family diverges between native and the embedded host:\n{}", diverged.join("\n"));
 }
 
 /// The status twins joined the family after the normative amendment.
 #[test]
 fn no_anonymous_process_failure_remains() {
-    let src = include_str!("../runtime/rs/src/process.rs");
-    assert!(!src.contains("exec failed:"));
-    assert!(!src.contains(".map_err(|e| e.to_string())"));
+    // The family's bodies live in the shared core since #2589.
+    for src in [include_str!("../runtime/rs/src/process.rs"), include_str!("../crates/almide-rt-core/src/process_core.rs")] {
+        assert!(!src.contains("exec failed:"));
+        assert!(!src.contains(".map_err(|e| e.to_string())"));
+    }
 }
 
 #[test]
