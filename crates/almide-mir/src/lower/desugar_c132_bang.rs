@@ -128,7 +128,7 @@ fn c132_write_visible(
     let value = IrExpr {
         kind: IrExprKind::Match { subject: Box::new(subject.clone()), arms },
         ty: pair_ty,
-        span: span.clone(),
+        span,
         def_id: None,
     };
     let stmt = IrStmt { kind: IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements: pats }, value }, span };
@@ -212,8 +212,8 @@ fn c132_noncarried_site(stmt: &almide_ir::IrStmt, vt: &mut almide_ir::VarTable) 
     let (ok_ty, buf_tys) = c132_err_buffers(&subject.ty)?;
     let (t_ty, unit) = c132_ok_split(&ok_ty, &buf_tys)?;
     let ok_arm = c132_noncarried_ok_arm(&t_ty, unit, &buf_tys, vt);
-    let span = stmt.span.clone();
-    let (wv, r, bufs) = c132_write_visible(subject, ok_arm, &t_ty, &buf_tys, span.clone(), vt);
+    let span = stmt.span;
+    let (wv, r, bufs) = c132_write_visible(subject, ok_arm, &t_ty, &buf_tys, span, vt);
     let res_ty = c132_result_ty(&t_ty, &Ty::String);
     let direct = c132_direct_binders(stmt, unit, buf_tys.len());
     let t = match direct.as_ref().map(|e| &e[0]) {
@@ -223,16 +223,16 @@ fn c132_noncarried_site(stmt: &almide_ir::IrStmt, vt: &mut almide_ir::VarTable) 
     let unwrap = IrExpr {
         kind: IrExprKind::Unwrap { expr: Box::new(c132_var(r, &res_ty)) },
         ty: t_ty.clone(),
-        span: value.span.clone(),
+        span: value.span,
         def_id: None,
     };
-    let bang = IrStmt { kind: IrStmtKind::Bind { var: t, mutability: Mutability::Let, ty: t_ty.clone(), value: unwrap }, span: span.clone() };
+    let bang = IrStmt { kind: IrStmtKind::Bind { var: t, mutability: Mutability::Let, ty: t_ty.clone(), value: unwrap }, span };
     let mut out = vec![wv, bang];
     if let Some(elements) = direct {
         for ((p, b), ty) in elements[1..].iter().zip(&bufs).zip(&buf_tys) {
             if let IrPattern::Bind { var, .. } = p {
                 let value = c132_var(*b, ty);
-                out.push(IrStmt { kind: IrStmtKind::Bind { var: *var, mutability: Mutability::Let, ty: ty.clone(), value }, span: span.clone() });
+                out.push(IrStmt { kind: IrStmtKind::Bind { var: *var, mutability: Mutability::Let, ty: ty.clone(), value }, span });
             }
         }
         return Some(out);
@@ -294,12 +294,12 @@ fn c132_carried_site(stmt: &almide_ir::IrStmt, vt: &mut almide_ir::VarTable) -> 
     }
     let t_ty = ok_tail.ty.clone();
     let ok_reads: Vec<IrExpr> = ok_w.iter().zip(&buf_tys).map(|((_, b), t)| c132_var(*b, t)).collect();
-    let span = stmt.span.clone();
+    let span = stmt.span;
     let (wv, r, bufs) =
-        c132_write_visible(subject, ((**ok_pat).clone(), (**ok_tail).clone(), ok_reads), &t_ty, &buf_tys, span.clone(), vt);
+        c132_write_visible(subject, ((**ok_pat).clone(), (**ok_tail).clone(), ok_reads), &t_ty, &buf_tys, span, vt);
     let mut out = vec![wv];
     for ((p, ty), b) in places.iter().zip(&buf_tys).zip(&bufs) {
-        out.push(IrStmt { kind: IrStmtKind::Assign { var: *p, value: c132_var(*b, ty) }, span: span.clone() });
+        out.push(IrStmt { kind: IrStmtKind::Assign { var: *p, value: c132_var(*b, ty) }, span });
     }
     // After the write-backs: `let q = match r { ok(v) => ok(v), err(m') => err(E[m := m']) }`,
     // whose Err is the carrier's own error, then the statement over `q!` — a let-bound `!`,
@@ -327,11 +327,11 @@ fn c132_carried_site(stmt: &almide_ir::IrStmt, vt: &mut almide_ir::VarTable) -> 
     let paired = IrExpr {
         kind: IrExprKind::Match { subject: Box::new(c132_var(r, &res_ty)), arms },
         ty: q_ty.clone(),
-        span: value.span.clone(),
+        span: value.span,
         def_id: None,
     };
-    out.push(IrStmt { kind: IrStmtKind::Bind { var: q, mutability: Mutability::Let, ty: q_ty.clone(), value: paired }, span: span.clone() });
-    let bang = IrExpr { kind: IrExprKind::Unwrap { expr: Box::new(c132_var(q, &q_ty)) }, ty: t_ty.clone(), span: value.span.clone(), def_id: None };
+    out.push(IrStmt { kind: IrStmtKind::Bind { var: q, mutability: Mutability::Let, ty: q_ty.clone(), value: paired }, span });
+    let bang = IrExpr { kind: IrExprKind::Unwrap { expr: Box::new(c132_var(q, &q_ty)) }, ty: t_ty.clone(), span: value.span, def_id: None };
     let last = match &stmt.kind {
         IrStmtKind::Bind { var, mutability, ty, .. } => {
             IrStmt { kind: IrStmtKind::Bind { var: *var, mutability: *mutability, ty: ty.clone(), value: bang }, span }
@@ -408,7 +408,7 @@ fn flatten_bang_statement_blocks(stmts: &mut Vec<almide_ir::IrStmt>) {
         let mut hoisted = std::mem::take(inner);
         // A Unit tail that does something (`io.print(..)`) stays, as the last statement.
         if let Some(t) = tail.take().filter(|t| !matches!(t.kind, IrExprKind::Unit)) {
-            let span = t.span.clone();
+            let span = t.span;
             hoisted.push(almide_ir::IrStmt { kind: IrStmtKind::Expr { expr: *t }, span });
         }
         let n = hoisted.len();
@@ -446,7 +446,7 @@ fn c132_paired_assign_site(stmt: &almide_ir::IrStmt, vt: &mut almide_ir::VarTabl
         return None;
     }
     let raised = c132_raised(&err.body)?;
-    let span = stmt.span.clone();
+    let span = stmt.span;
     let x_ty = value.ty.clone();
     let r_ty = c132_result_ty(&Ty::Unit, &Ty::String);
     let q_ty = c132_result_ty(&Ty::Unit, &raised.ty);
@@ -483,7 +483,7 @@ fn c132_paired_assign_site(stmt: &almide_ir::IrStmt, vt: &mut almide_ir::VarTabl
             ],
         },
         ty: Ty::Tuple(vec![r_ty.clone(), x_ty.clone()]),
-        span: value.span.clone(),
+        span: value.span,
         def_id: None,
     };
     let paired_err = almide_ir::substitute::substitute_var_in_expr(raised, *e, &c132_var(e2, &Ty::String));
@@ -504,21 +504,21 @@ fn c132_paired_assign_site(stmt: &almide_ir::IrStmt, vt: &mut almide_ir::VarTabl
             ],
         },
         ty: q_ty.clone(),
-        span: value.span.clone(),
+        span: value.span,
         def_id: None,
     };
-    let bang = IrExpr { kind: IrExprKind::Unwrap { expr: Box::new(c132_var(q, &q_ty)) }, ty: Ty::Unit, span: value.span.clone(), def_id: None };
+    let bang = IrExpr { kind: IrExprKind::Unwrap { expr: Box::new(c132_var(q, &q_ty)) }, ty: Ty::Unit, span: value.span, def_id: None };
     Some(vec![
-        IrStmt { kind: IrStmtKind::Bind { var: s, mutability: Mutability::Let, ty: subject.ty.clone(), value: (**subject).clone() }, span: span.clone() },
+        IrStmt { kind: IrStmtKind::Bind { var: s, mutability: Mutability::Let, ty: subject.ty.clone(), value: (**subject).clone() }, span },
         IrStmt {
             kind: IrStmtKind::BindDestructure {
                 pattern: IrPattern::Tuple { elements: vec![c132_bind(r, &r_ty), c132_bind(nx, &x_ty)] },
                 value: first,
             },
-            span: span.clone(),
+            span,
         },
-        IrStmt { kind: IrStmtKind::Assign { var: *x, value: c132_var(nx, &x_ty) }, span: span.clone() },
-        IrStmt { kind: IrStmtKind::Bind { var: q, mutability: Mutability::Let, ty: q_ty, value: paired }, span: span.clone() },
+        IrStmt { kind: IrStmtKind::Assign { var: *x, value: c132_var(nx, &x_ty) }, span },
+        IrStmt { kind: IrStmtKind::Bind { var: q, mutability: Mutability::Let, ty: q_ty, value: paired }, span },
         IrStmt { kind: IrStmtKind::Bind { var: done, mutability: Mutability::Let, ty: Ty::Unit, value: bang }, span },
     ])
 }
