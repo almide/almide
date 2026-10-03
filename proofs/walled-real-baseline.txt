@@ -267,17 +267,6 @@ spec/lang/typed_error_callback_channel_test.almd :: typed_slot
 spec/wasm_cross/lambda_failure_channel.almd :: fold_mid_block
 spec/wasm_cross/lambda_failure_channel.almd :: sum_with
 spec/wasm_cross/lambda_failure_channel.almd :: typed_slot
-# #2931: a let-bound heap `if` in a loop whose arms write enclosing vars through
-# stdlib `mut` params (list.push / map.insert / string.push / bytes.push). The
-# incumbent lowered it only through the branch_lift helper, which took those
-# vars by value and dropped the writes; the lift now declines (as it always did
-# on native), so the incumbent walls honestly. The structural leg serves it
-# byte-identically to native.
-spec/wasm_cross/branch_lift_stdlib_mut_arg.almd :: arm_writes
-# #2948: the same shape with the arms calling USER fns named like stdlib
-# mutators (`insert(tag, mut m)`, `push(label, mut xs)`); the lift declines on
-# every leg now, so the incumbent walls honestly on it too.
-spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd :: arm_writes
 # #2933/#2944: every mut form through a two- and three-level record field path
 # (`o.inner.xs`, `o.a.b.m`). `drain`'s `list.pop` on a `mut` param's field sits in
 # a `while` the MIR brick models one iteration of, and the field-path COW refuses
@@ -394,13 +383,13 @@ spec/wasm_cross/mut_param_closure_field_path_write.almd :: fail_after  # #2739
 # variant `match` over a subject the function OWNS (a `let`-bound constructor,
 # a fresh call result) now dispatches on the tag like a borrowed one: each
 # returned payload is a fresh copy and the subject drops at its scope end.
-# #3170: the mut-param reassign-from-HOF fixture's MIR rung walls on two
-# shapes its rows need: `f_branch` binds a heap-result `if`, and `f_fallible`
-# and `main` a heap-result `match` (the fallible map's carrier). Native falls
-# back to the classic renderer — the leg #3170 fixed — and the structural wasm
-# leg and the interp agree with it. (`main`'s interpolated mut-call and
-# `f_filter_map`'s option-literal closure lower since walls lane 3, #2739.)
-spec/wasm_cross/mut_param_reassign_from_hof.almd :: f_branch  # #2739
+# #3170: the mut-param reassign-from-HOF fixture's MIR rung walls on the
+# can-err `mut`-param carrier: `f_fallible` reassigns its `mut` param from a
+# fallible map (a heap-result `match` over the carrier) and `main` calls it with
+# `!`. Native falls back to the classic renderer — the leg #3170 fixed — and the
+# structural wasm leg and the interp agree with it. (`main`'s interpolated
+# mut-call, `f_filter_map`'s option-literal closure and `f_branch`'s bound
+# heap-result `if` lower since walls lane 3, #2739.)
 spec/wasm_cross/mut_param_reassign_from_hof.almd :: f_fallible  # #2739
 spec/wasm_cross/mut_param_reassign_from_hof.almd :: main  # #2739
 # #3174: the recursive-payload fixtures' MIR rung walls on a heap-result
