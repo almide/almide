@@ -172,7 +172,7 @@ impl LowerCtx {
             || is_map_skv
             || is_set_str;
         if !admitted {
-            return None;
+            return crate::lower::scalar_core_eq_module(ty);
         }
         Some(if is_set_str { "set" } else { "map" })
     }

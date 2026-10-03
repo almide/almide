@@ -190,6 +190,32 @@ fn map_get_or(m: Map[Int, Int], k: Int, default: Int) -> Int = {
   if idx < 0 then default else prim.load64(h + 12 + idx * 16 + 8)
 }
 
+// `a == b` over Map[Int, Int] (the eq lowering's `map.eq`), order-independent like v0's:
+// the same entry count and every (k, v) of `a` has an equal value under k in `b`.
+fn __map_eqm_at(ah: Int, an: Int, bh: Int, bn: Int, bcap: Int, i: Int) -> Bool = if i >= an then true
+else {
+  let j = __map_lookup(bh, bn, bcap, prim.load64(ah + 12 + i * 16))
+  if j < 0 then false
+  else if prim.load64(ah + 12 + i * 16 + 8) == prim.load64(bh + 12 + j * 16 + 8) then __map_eqm_at(
+    ah,
+    an,
+    bh,
+    bn,
+    bcap,
+    i + 1,
+  )
+  else false
+}
+
+fn map_eq(a: Map[Int, Int], b: Map[Int, Int]) -> Bool = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let an = prim.load32(ah + 4)
+  let bn = prim.load32(bh + 4)
+  if an != bn then false
+  else __map_eqm_at(ah, an, bh, bn, prim.load32(bh + 8), 0)
+}
+
 // Copy all `len` entries (key+value pairs) from sh to rh.
 fn __map_copy(sh: Int, rh: Int, len: Int, i: Int) -> Int = if i >= len then 0
 else {

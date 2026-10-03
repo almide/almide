@@ -348,6 +348,14 @@ fn set_is_disjoint(a: Set[Int], b: Set[Int]) -> Bool = {
   __set_none_in(ah, alen, bh, 0)
 }
 
+// `a == b` over Set[Int] (the eq lowering's `set.eq`): the same size and every element of
+// `a` in `b` (equal sizes make the one-directional subset sufficient).
+fn set_eq(a: Set[Int], b: Set[Int]) -> Bool = {
+  let la = prim.load32(prim.handle(a) + 4)
+  let lb = prim.load32(prim.handle(b) + 4)
+  if la != lb then false else set_is_subset(a, b)
+}
+
 // ── Set construction (closure-free, Int) ── new/insert/remove/symmetric_difference. Each
 // returns a fresh owned Set (v0's insert/remove clone-then-mutate).
 // An empty Set[Int] — a 0-length block. alloc_set(0) already sets len=0.

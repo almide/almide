@@ -598,3 +598,19 @@ fn field_eq_call_count(layouts: &crate::lower::VariantLayouts, fty: &Ty) -> usiz
     }
     0
 }
+
+/// The self-host module whose bare `eq` compares two values of `ty` over the
+/// plain scalar cores: `bytes.eq` (Bytes), `map.eq` (map_core: int-class keys
+/// and values) and `set.eq` (set_core: int-class elements). One borrowed,
+/// Bool-returning call. A Float slot is excluded (bit-eq is not `==` on -0.0
+/// and NaN). Shared with the classify counter, so `mir == ir` holds.
+pub fn scalar_core_eq_module(ty: &Ty) -> Option<&'static str> {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    let int_class = |t: &Ty| matches!(t, Ty::Int | Ty::Bool);
+    match ty {
+        Ty::Bytes => Some("bytes"),
+        Ty::Applied(TC::Map, kv) if kv.len() == 2 && kv.iter().all(int_class) => Some("map"),
+        Ty::Applied(TC::Set, es) if es.len() == 1 && int_class(&es[0]) => Some("set"),
+        _ => None,
+    }
+}
