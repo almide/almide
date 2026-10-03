@@ -91,6 +91,18 @@ fn every_registry_result_fn_is_in_the_materialized_set() {
         "http.request_bytes",
         "http.request_status",
         "http.wait",
+        // process (#2589): these registry rows are the wasm legs' self-host
+        // (stdlib/process_wasm.almd). The v1 lowering keeps treating a process
+        // Result as it did before the rows existed (untracked), exactly as for
+        // http above; admit them with the layout audit of their bodies, not before.
+        "process.exec",
+        "process.exec_attached",
+        "process.exec_in",
+        "process.exec_status",
+        "process.exec_status_timeout",
+        "process.exec_with_stdin",
+        "process.kill",
+        "process.spawn",
     ];
     let member = |module: &str, func: &str| {
         is_self_host_materialized_result_fn(module, func)
