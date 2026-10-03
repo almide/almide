@@ -4299,6 +4299,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_set_overlay.almd", class = "fixture" },
   { path = "crates/almide-wasm/tests/wasi_services.rs", name = "hello_ships_no_environ_or_args_service", class = "by-construction" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_env_set_matches_native_and_p1" },
 ]
 [[contract]]
 id        = "C-331"

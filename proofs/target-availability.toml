@@ -32,9 +32,10 @@
 #                 env.sleep_ms (ops 26 / 29 / 36, over wasi:cli/environment
 #                 and monotonic-clock.wait-for). Since #3140 the fs family is
 #                 the p1 fs service itself over a wasi:filesystem@0.3
-#                 adapter: every op P1_SERVED_OPS names but env.set (37, the
-#                 declared exclusion in component_availability.rs), with
-#                 env.os / env.temp_dir / env.cwd (27 / 28 / 33). The
+#                 adapter: every op P1_SERVED_OPS names, with env.os /
+#                 env.temp_dir / env.cwd (27 / 28 / 33); since #3223 env.set
+#                 (37) too, through the p1 shim's guest-side overlay log,
+#                 so component_availability.rs declares no exclusion. The
 #                 artifact runs on a stock wasmtime 46+ with no feature
 #                 flag (step 1).
 #
