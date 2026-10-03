@@ -397,6 +397,9 @@ fn register_decl_fn(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, seen_f
     let ret = env.functions.get(&sym(&fn_key)).map(|s| s.ret.clone()).unwrap_or(Ty::Unknown);
     let did = env.def_table.alloc(sym(pkg), sym(mod_path), sym(name), almide_ir::DefKind::Function, ret);
     env.def_map.insert(sym(&fn_key), did);
+    if !extern_attrs.is_empty() {
+        env.extern_fns.insert(sym(&fn_key));
+    }
     // An EXPLICIT `fn Type.method` with a body, recorded on the shared env so
     // another module can find it. Lowering's own set only ever holds the
     // program being lowered, so a custom `repr` was silently ignored across an

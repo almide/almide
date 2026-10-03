@@ -1,0 +1,10 @@
+// #3250: the check follows calls — an assert two calls down is still an abort.
+fn checked(n: Int) -> Int = {
+  assert(n >= 0)
+  n
+}
+
+@pure
+fn double(n: Int) -> Int = checked(n) * 2
+
+fn main() -> Unit = println("${double(4)}")

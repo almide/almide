@@ -1,0 +1,7 @@
+@pure
+fn area(w: Int, h: Int) -> Int = w * h
+
+fn main() -> Unit = {
+  println("w=2")
+  println("${area(2, 3)}")
+}

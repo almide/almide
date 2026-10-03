@@ -1,0 +1,6 @@
+fn checked(n: Int) -> Int = if n >= 0 then n else 0
+
+@pure
+fn double(n: Int) -> Int = checked(n) * 2
+
+fn main() -> Unit = println("${double(4)}")
