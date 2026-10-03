@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at 4e3630bd0 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at c28a0cefe — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -264,6 +264,7 @@ c9c94ff1c7b8be36e28c97b20b57b2f574582d63c7ef477405f9b9d9b334c0a6	spec/lang/codec
 3e61d5bb00a43b650163215ded49df72aa7ecaad7f9c21e880fed3565515ddd7	spec/lang/codec_weather_test.almd
 29d27e7d7652b9e36b5618bbb5b827d7c550f1e22670b2baf2109bbb75fb4d6a	spec/lang/combinator_source_in_loop_matrix_test.almd
 cc61151c74f6decff79dba571988e098f700e77b44bda1e28496e8d30fd55b87	spec/lang/combinator_source_in_loop_test.almd
+2eedec363ee6c7d37dfb11b2fc5ad765e32c0c96d75ef71f778093e4f8110a68	spec/lang/combinator_source_param_matrix_test.almd
 ce7028a200f1ffd6376ec6145c915c4efc8ef569f1fe01518d8701c744511e54	spec/lang/compose_test.almd
 9648b3f7ca60e46be556577cc818b84cd204d19196cd20f81be95cdd04646800	spec/lang/compound_repr_interp_test.almd
 95b2bc5e1afc2aeb2e88fb97f638eec43b00624769c565bbb5cbfdef183c8168	spec/lang/control_flow_test.almd
