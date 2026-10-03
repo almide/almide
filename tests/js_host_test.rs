@@ -84,8 +84,9 @@ fn a_scalar_only_surface_keeps_the_module_bytes_and_ships_only_its_shims() {
         .filter(|l| l.starts_with("  ") && !l.starts_with("   ") && l.as_bytes()[2].is_ascii_lowercase() && l.contains('('))
         .map(|l| l.trim_start().split('(').next().unwrap())
         .collect();
-    // The renderer's own module links the println floor: fd_write, proc_exit and the clock/random/read imports.
-    assert!(shims.contains(&"fd_write") && shims.contains(&"proc_exit"), "{shims:?}");
+    // The shipped module imports only what its reached code calls (#3136):
+    // `fib` prints and can neither trap nor exit, so `fd_write` alone.
+    assert_eq!(shims, ["fd_write"], "{shims:?}");
     assert!(!shims.contains(&"path_open") && !shims.contains(&"poll_oneoff") && !shims.contains(&"fd_readdir"), "unlinked shims must not ship: {shims:?}");
     for name in &shims {
         assert!(js.contains(&format!("wasiImports.{name} = wasi.{name};")), "every emitted shim is wired: {name}\n{js}");
