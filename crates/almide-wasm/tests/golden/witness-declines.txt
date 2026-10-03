@@ -13,7 +13,7 @@ callback:SpreadRecord	6
 caps:argv-in-plain-fn	8
 display	12
 forin-map	7
-heap-interp-part:Block	8
+heap-interp-part:Block	9
 heap-interp-part:UnwrapOr	6
 heap-operand:Block	4
 heap-operand:OptionNone	3

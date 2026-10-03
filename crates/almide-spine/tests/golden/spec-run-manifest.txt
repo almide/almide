@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at 6c73dda87 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at 28b5a70f6 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -520,6 +520,7 @@ b999bc81cddba4013342866809d85fa73b2e890397ea83541eb37524cdf9f0d7	0	spec/wasm_cro
 94a63af3cea403e7e41825f8f32b2d9762da2b88144dd7c904dcc6721b1f0f5b	0	spec/wasm_cross/module_global_const.almd
 457060d6d1c695e726125f831de6e3e430b09907e759105421d3abe27d7c2626	0	spec/wasm_cross/module_var_alias_cow.almd
 e5dc6c84b6f4a48b7bed259418704e83d17be4071bbdc5023ddcdb8e05833c47	0	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
+996e38c0b7940c256a8982696f3d766fca3f51a2439a2565a6135bb6fffe624c	0	spec/wasm_cross/mut_call_nested_read_before.almd
 79036d3886ca571b3dbe5e842fedd0bb177b771724894fecccf0cf5379087e58	0	spec/wasm_cross/mut_heap_param.almd
 af7554d2ef91bfe1df9f443bee48341681424297ebeee1a2eb62a912d448388f	0	spec/wasm_cross/mut_map_param.almd
 17d87a404e8585b089d040cf9824e2e82fedc0d7ee3af455f518fe43313794b1	0	spec/wasm_cross/mut_param_alias_cow.almd

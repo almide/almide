@@ -463,3 +463,10 @@ spec/wasm_cross/recursive_payload_closure_capture.almd :: left_bumped  # #2739
 spec/wasm_cross/recursive_payload_closure_capture.almd :: swapped  # #2739
 spec/wasm_cross/recursive_payload_nested_pattern.almd :: from_tuple  # #2739
 spec/wasm_cross/recursive_payload_nested_pattern.almd :: wrapped_capture  # #2739
+# #3230: the nested-`mut`-read fixture's `main` interpolates a `mut`-argument
+# call after a part that reads the same variable; the MIR rung refuses a
+# `mut` call's write-back block inside an interpolation part
+# (heap-interp-part:Block — walls lane 3, PR #3231, lowers it). Native falls
+# back to the classic renderer (the leg #3230 fixed); the structural wasm leg
+# and the interp agree with it.
+spec/wasm_cross/mut_call_nested_read_before.almd :: main  # #2739
