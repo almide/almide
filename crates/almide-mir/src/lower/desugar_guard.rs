@@ -667,12 +667,15 @@ pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
         }
         Vec::new()
     }
-    struct S2;
-    impl IrMutVisitor for S2 {
+    struct S2<'a> {
+        vt: &'a mut almide_ir::VarTable,
+    }
+    impl IrMutVisitor for S2<'_> {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
             if let IrExprKind::Block { stmts, .. } = &mut e.kind {
                 hoist_in_stmts(stmts);
+                bind_nested_list_literal_elems(stmts, self.vt);
             }
         }
     }
@@ -682,7 +685,7 @@ pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
         .chain(modules.iter_mut().flat_map(|m| m.functions.iter_mut()))
     {
         H { vt: &mut *var_table }.visit_expr_mut(&mut func.body);
-        S2.visit_expr_mut(&mut func.body);
+        S2 { vt: &mut *var_table }.visit_expr_mut(&mut func.body);
     }
 }
 
