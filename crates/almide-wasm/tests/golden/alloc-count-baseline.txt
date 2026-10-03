@@ -346,6 +346,7 @@
 0	0	0	0	spec/wasm_cross/int_wrap_rotate_width.almd
 1	0	8	1	spec/wasm_cross/interp_diverging_part.almd
 5	2	73	5	spec/wasm_cross/interp_effect_unwrap_arg.almd
+20	6	264	20	spec/wasm_cross/interp_mut_call_part_order.almd
 10	3	124	10	spec/wasm_cross/interp_operand_order.almd
 7	3	90	7	spec/wasm_cross/io_write_ordering.almd
 113	74	1518	113	spec/wasm_cross/json_get_int_float.almd
@@ -521,6 +522,7 @@
 8	2	57	8	spec/wasm_cross/module_global_const.almd
 5	2	100	5	spec/wasm_cross/module_var_alias_cow.almd
 78	47	1476	78	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
+35	8	370	35	spec/wasm_cross/mut_call_nested_read_before.almd
 99	46	1203	99	spec/wasm_cross/mut_heap_param.almd
 18	8	176	18	spec/wasm_cross/mut_map_param.almd
 171	71	75138	171	spec/wasm_cross/mut_param_alias_cow.almd
