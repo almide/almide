@@ -344,6 +344,7 @@
 65776	spec/wasm_cross/int_wrap_rotate_width.almd
 65776	spec/wasm_cross/interp_diverging_part.almd
 65952	spec/wasm_cross/interp_effect_unwrap_arg.almd
+66416	spec/wasm_cross/interp_mut_call_part_order.almd
 66368	spec/wasm_cross/interp_operand_order.almd
 65888	spec/wasm_cross/io_write_ordering.almd
 69392	spec/wasm_cross/json_get_int_float.almd
