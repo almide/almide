@@ -1,0 +1,10 @@
+// The defect is in broken.toml, not here: `allow = ["io"]` names no
+// capability (they are spelled IO, Net, Env, Time, Rand, Fan), and it used to
+// be dropped in silence, so this file-reading program was refused for "IO"
+// with nothing saying `io` was not one (#3247).
+import fs
+
+effect fn main() -> Unit = {
+  let text = fs.read_text("notes.txt")!
+  println(text)
+}

@@ -1,0 +1,2 @@
+expects_error = "almide.toml:6: unknown capability `io` in [permissions].allow"
+hint_substring = "did you mean `IO`?"

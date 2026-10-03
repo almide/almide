@@ -24,6 +24,18 @@ impl std::fmt::Display for Effect {
     }
 }
 
+impl Effect {
+    /// Every category, in declaration order. This is the whole vocabulary of
+    /// `almide.toml [permissions].allow`: a name is valid there exactly when
+    /// it is the `Display` of one of these (#3247).
+    pub const ALL: [Effect; 6] = [Effect::IO, Effect::Net, Effect::Env, Effect::Time, Effect::Rand, Effect::Fan];
+
+    /// The category a `[permissions].allow` name spells, or `None`.
+    pub fn from_name(name: &str) -> Option<Effect> {
+        Self::ALL.into_iter().find(|e| e.to_string() == name)
+    }
+}
+
 /// Result of effect inference for a single function.
 #[derive(Debug, Clone, Default)]
 pub struct FunctionEffects {

@@ -79,7 +79,8 @@ pub struct Project {
     pub dependencies: Vec<Dependency>,
     /// Allowed effect capabilities for this package (Security Layer 2).
     /// If empty, all capabilities are allowed (backwards compatible).
-    /// e.g., ["IO", "Net", "Log"]
+    /// e.g., ["IO", "Net"]. Each name is an `Effect` category
+    /// (`allowed_effects`); any other name is refused (#3247).
     pub permissions: Vec<String>,
     /// `[permissions] proc = [...]` (#2589, ADR-0025): the commands the
     /// subprocess family may start. `None` (no key) = any command.
@@ -355,6 +356,70 @@ pub fn check_manifest_duplicates(path: &Path, content: &str) -> Result<(), Strin
             second = dup.second_line,
         ),
     })
+}
+
+/// The refusal for a capability name the vocabulary does not have, shared by
+/// `[permissions].allow` and `--profile critical --allow` so the two read
+/// alike (#3247). `site` names where it was written; `grantable` is that
+/// site's vocabulary. A case-only miss (`io`) is suggested before an edit-
+/// distance one, since the distance is case-blind and scores it 0.
+pub fn unknown_capability_message(name: &str, site: &str, grantable: &[&str]) -> String {
+    let near = grantable
+        .iter()
+        .find(|g| g.eq_ignore_ascii_case(name))
+        .map(|g| g.to_string())
+        .or_else(|| almide_base::diagnostic::suggest(name, grantable.iter().copied()));
+    let hint = match near {
+        Some(n) => format!("did you mean `{n}`?"),
+        None => "write one of the capabilities above, or delete this name".to_string(),
+    };
+    format!(
+        "unknown capability `{name}` in {site} — grantable capabilities are {}\n  hint: {hint}",
+        grantable.join(", ")
+    )
+}
+
+/// `[permissions].allow` names → the effect categories they grant. The ONE
+/// matcher every enforcement path uses (`almide check`, `check --effects`,
+/// `build` / `run`), so the vocabulary is `Effect::ALL` and cannot drift
+/// between copies again. An unknown name is an error, never dropped (#3247).
+pub fn allowed_effects(allow: &[String]) -> Result<std::collections::HashSet<almide_ir::effect::Effect>, String> {
+    use almide_ir::effect::Effect;
+    allow
+        .iter()
+        .map(|name| {
+            Effect::from_name(name).ok_or_else(|| {
+                let names: Vec<String> = Effect::ALL.iter().map(|e| e.to_string()).collect();
+                let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+                unknown_capability_message(name, "[permissions].allow", &refs)
+            })
+        })
+        .collect()
+}
+
+/// Refuse an `almide.toml` whose `[permissions].allow` names something that
+/// is not an effect category, on the line that names it (#3247). Reads the
+/// lines exactly as `parse_toml` does, so it judges the names that would be
+/// enforced.
+pub fn check_manifest_permissions(path: &Path, content: &str) -> Result<(), String> {
+    let mut section = "";
+    for (i, raw) in content.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = detect_section(line);
+            continue;
+        }
+        if section != "permissions" {
+            continue;
+        }
+        let mut acc = TomlAccum::default();
+        apply_permissions_line(line, &mut acc);
+        allowed_effects(&acc.permissions).map_err(|e| format!("{}:{}: {e}", path.display(), i + 1))?;
+    }
+    Ok(())
 }
 
 pub fn parse_toml(path: &Path) -> Result<Project, String> {
