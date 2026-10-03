@@ -334,7 +334,7 @@ mod tests {
             doc: None,
             blank_lines_before: 0,
             def_id: None,
-            mutated_params: vec![],
+            mutated_params: vec![], // fresh-fn: a test fixture extern with no params
             module_origin: None,
         }
     }
