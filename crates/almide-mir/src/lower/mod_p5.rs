@@ -36,6 +36,9 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             // shape, so a `match`/`!` over the bound result EXECUTES.
             | ("fs", "file_size")
             | ("fs", "modified_at")
+            // `datetime.parse_iso` — Result[Int, String] from the ok()/err() ctors
+            // (datetime_parse_iso.almd), the int.parse scalar-Ok shape.
+            | ("datetime", "parse_iso")
     )
 }
 
@@ -117,6 +120,33 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // (ok()/err() ctors), and additionally FORWARDS the callback's own
             // err block — same cap-as-tag layout either way.
             | ("fs", "__fallible_fold_lines")
+            // #3159: the visitor twins (fs_fold_lines.almd) — `ok(())`/`err(m)` ctors,
+            // and the fallible carrier forwards the callback's own err block: the
+            // Result[Unit, String] layout fs.write has. Missing from this set, a
+            // `match`/`!` over them fell to the untracked-subject wall (main's
+            // `fs.for_each_line(..)!` followed by a statement).
+            | ("fs", "for_each_line")
+            | ("fs", "__fallible_for_each_line")
+            // `json.set_path` / `value.field` — Result[Value, String] built by the
+            // ok()/err() ctors (json_path.almd, value_core.almd), json.parse's shape.
+            | ("json", "set_path")
+            | ("value", "field")
+            // The zlib family — Result[Bytes, String] from the ok()/err() ctors
+            // (zlib_deflate.almd, zlib_inflate.almd), fs.read_bytes_raw's shape.
+            | ("zlib", "deflate")
+            | ("zlib", "deflate_level")
+            | ("zlib", "compress")
+            | ("zlib", "compress_level")
+            | ("zlib", "gzip")
+            | ("zlib", "inflate")
+            | ("zlib", "decompress")
+            | ("zlib", "gunzip")
+            // The text decoders — ok()/err() ctors over a fresh payload: Bytes from
+            // hex_encode.almd / base64_encode.almd, a String from bytes_core.almd.
+            | ("hex", "decode")
+            | ("base64", "decode")
+            | ("base64", "decode_url")
+            | ("bytes", "to_string")
             // `fs.stat` returns the cap-as-tag `Result[FileStat, String]` (the self-host builds
             // it with the ordinary ok()/err() ctors — payload @12, tag @16). The Ok payload is a
             // SCALAR-ONLY record block (size/is_dir/is_file/modified — no heap fields), so the
