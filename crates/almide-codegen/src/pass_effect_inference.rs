@@ -2,7 +2,9 @@
 //!
 //! Analyzes which stdlib modules each function calls (directly and transitively)
 //! and maps them to effect categories (IO, Net, Env, Time, Rand, Fan — the
-//! `almide_ir::effect::Effect` enum; there is no `Log` category).
+//! `almide_ir::effect::Effect` enum; there is no `Log` category). The
+//! module table is `almide_ir::effect::STDLIB_MODULE_EFFECTS`; an `@extern`
+//! fn is every category (⊤).
 //!
 //! This is the foundation for Security Layer 2-3:
 //! - Layer 2: Package declares allowed capabilities in almide.toml
@@ -22,24 +24,27 @@ use super::pass::{NanoPass, PassResult, Target};
 // Re-export from almide-ir
 pub use almide_ir::effect::{Effect, FunctionEffects, EffectMap};
 
-fn module_to_effect(module: &str) -> Option<Effect> {
-    match module {
-        "fs" | "path" => Some(Effect::IO),
-        "http" | "url" => Some(Effect::Net),
-        "env" | "process" => Some(Effect::Env),
-        "time" | "datetime" => Some(Effect::Time),
-        "fan" => Some(Effect::Fan),
-        _ => None,
-    }
+/// The category of a source-level stdlib call `module.func` — the one table
+/// in `almide_ir::effect::STDLIB_MODULE_EFFECTS` (#3246).
+fn module_call_effect(module: &str, func: &str) -> Option<Effect> {
+    almide_ir::effect::stdlib_call_effect(module, func)
 }
 
+/// The category of a runtime call (`almide_rt_<module>_<fn>`).
 fn runtime_name_to_effect(name: &str) -> Option<Effect> {
-    if !name.starts_with("almide_rt_") {
-        return None;
+    almide_ir::effect::runtime_symbol_effect(name)
+}
+
+/// The direct effects of a function declaration. An `@extern` body is
+/// foreign: inference cannot see into it and no bound can be declared on it
+/// yet, so it is ⊤ — every category (#3245, ADR-0027 §5). Before this, its
+/// `_` body contributed nothing and a foreign call reached the host
+/// uncategorised, past `[permissions]` and `check --effects`.
+fn declared_direct_effects(func: &IrFunction) -> HashSet<Effect> {
+    if !func.extern_attrs.is_empty() {
+        return Effect::ALL.into_iter().collect();
     }
-    let rest = &name["almide_rt_".len()..];
-    let module = rest.split('_').next()?;
-    module_to_effect(module)
+    collect_direct_effects(&func.body)
 }
 
 #[derive(Debug)]
@@ -97,7 +102,7 @@ fn seed_function_effects(program: &IrProgram, effect_map: &mut EffectMap) {
 /// One function's seed: its direct categories, and the closure values it
 /// calls without creating them (#3268).
 fn function_effects(func: &IrFunction, vt: &VarTable, known: &HashSet<String>) -> FunctionEffects {
-    let direct = collect_direct_effects(&func.body);
+    let direct = declared_direct_effects(func);
     FunctionEffects {
         direct: direct.clone(),
         transitive: direct,
@@ -202,8 +207,9 @@ impl IrVisitor for EffectCollector {
     fn visit_expr(&mut self, expr: &IrExpr) {
         match &expr.kind {
             // Module call: list.map, fs.read_text, etc.
-            IrExprKind::Call { target: CallTarget::Module { module, .. }, .. } => {
-                if let Some(effect) = module_to_effect(module) {
+            // Module call: list.map, fs.read_text, etc.
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {
+                if let Some(effect) = module_call_effect(module, func) {
                     self.effects.insert(effect);
                 }
             }
@@ -400,19 +406,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn module_to_effect_mapping() {
-        assert_eq!(module_to_effect("fs"), Some(Effect::IO));
-        assert_eq!(module_to_effect("path"), Some(Effect::IO));
-        assert_eq!(module_to_effect("http"), Some(Effect::Net));
-        assert_eq!(module_to_effect("url"), Some(Effect::Net));
-        assert_eq!(module_to_effect("env"), Some(Effect::Env));
-        assert_eq!(module_to_effect("process"), Some(Effect::Env));
-        assert_eq!(module_to_effect("time"), Some(Effect::Time));
-        assert_eq!(module_to_effect("datetime"), Some(Effect::Time));
-        assert_eq!(module_to_effect("fan"), Some(Effect::Fan));
-        assert_eq!(module_to_effect("list"), None);
-        assert_eq!(module_to_effect("string"), None);
-        assert_eq!(module_to_effect("math"), None);
+    fn module_call_effect_mapping() {
+        assert_eq!(module_call_effect("fs", "read_text"), Some(Effect::IO));
+        assert_eq!(module_call_effect("io", "read_line"), Some(Effect::IO));
+        assert_eq!(module_call_effect("path", "join"), None);
+        assert_eq!(module_call_effect("http", "get"), Some(Effect::Net));
+        assert_eq!(module_call_effect("url", "parse"), None);
+        assert_eq!(module_call_effect("env", "get"), Some(Effect::Env));
+        assert_eq!(module_call_effect("process", "exec"), Some(Effect::Env));
+        assert_eq!(module_call_effect("datetime", "now"), Some(Effect::Time));
+        assert_eq!(module_call_effect("random", "int"), Some(Effect::Rand));
+        assert_eq!(module_call_effect("fan", "map"), Some(Effect::Fan));
+        assert_eq!(module_call_effect("list", "map"), None);
+        assert_eq!(module_call_effect("string", "len"), None);
+        assert_eq!(module_call_effect("math", "sqrt"), None);
     }
 
     #[test]
@@ -420,9 +427,45 @@ mod tests {
         assert_eq!(runtime_name_to_effect("almide_rt_fs_read_text"), Some(Effect::IO));
         assert_eq!(runtime_name_to_effect("almide_rt_http_get"), Some(Effect::Net));
         assert_eq!(runtime_name_to_effect("almide_rt_env_get"), Some(Effect::Env));
-        assert_eq!(runtime_name_to_effect("almide_rt_time_now"), Some(Effect::Time));
+        assert_eq!(runtime_name_to_effect("almide_rt_datetime_now"), Some(Effect::Time));
+        assert_eq!(runtime_name_to_effect("almide_rt_random_float"), Some(Effect::Rand));
         assert_eq!(runtime_name_to_effect("almide_rt_list_map"), None);
         assert_eq!(runtime_name_to_effect("println"), None);
+    }
+
+    fn extern_fn(name: &str, is_effect: bool) -> IrFunction {
+        IrFunction {
+            name: almide_base::intern::sym(name),
+            params: vec![],
+            ret_ty: almide_lang::types::Ty::Unit,
+            body: IrExpr { kind: IrExprKind::Hole, ty: almide_lang::types::Ty::Unit, span: None, def_id: None },
+            is_effect,
+            is_test: false,
+            generics: None,
+            extern_attrs: vec![almide_lang::ast::ExternAttr {
+                target: almide_base::intern::sym("rust"),
+                module: almide_base::intern::sym("host"),
+                function: almide_base::intern::sym(name),
+            }],
+            export_attrs: vec![],
+            attrs: vec![],
+            visibility: IrVisibility::Public,
+            doc: None,
+            blank_lines_before: 0,
+            def_id: None,
+            mutated_params: vec![],
+            module_origin: None,
+        }
+    }
+
+    // #3245: an `@extern` fn is ⊤ whether it is spelled `fn` or `effect fn`;
+    // its `_` body no longer reads as "touches nothing".
+    #[test]
+    fn an_extern_fn_is_every_category() {
+        for is_effect in [false, true] {
+            let f = extern_fn("push_u32", is_effect);
+            assert_eq!(declared_direct_effects(&f), Effect::ALL.into_iter().collect(), "is_effect={is_effect}");
+        }
     }
 
     #[test]
