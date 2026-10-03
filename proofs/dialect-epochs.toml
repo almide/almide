@@ -94,3 +94,12 @@ summary = "E008 generalized from a `fan` block capturing a `var` to any concurre
 breaks = [
   "a `var` reachable from an http handler or a `fan` body (captured, top-level, or through a called fn) is E008; keep cross-request state outside the program, bind a `let` copy for read-only use",
 ]
+
+[[epoch]]
+n = 7
+since = "0.67.0"
+name = "fan-map-runs-every-element"
+summary = "`fan.map` evaluates every element in list order, including the ones after an element that returns `Err`, and the lowest-index `Err` surfaces — the rule `fan { }` block arms already followed (ADR-0024 D1, C-005). Measured impact: 0 programs — none of the 18 programs in spec/ and examples/ that call `fan.map` changes its observation (native A/B against 0.64.0), and the almide-dojo corpus (124 .almd files) has no `fan.map`."
+breaks = [
+  "`fan.map` runs every element even after one returns `Err`; to stop at the first failure, use a `for` loop with `!`",
+]
