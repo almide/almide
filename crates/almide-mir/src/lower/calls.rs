@@ -699,6 +699,41 @@ impl LowerCtx {
 /// COW-or-wall discipline as `bytes.clear`). Shared with `inline_pure_call_globals`,
 /// which must not substitute a global's initializer into a RECEIVER position: the write
 /// would land in a fresh temporary (#906).
+/// #3261: the vars whose record field path an in-place mutator writes through
+/// (`list.pop(cell.words)`, `bytes.set_u8(p.buf, …)`) anywhere in `body` — the
+/// receivers `cow_inplace_receiver` sends to the two-level field COW, which
+/// releases the var's old block.
+pub(crate) fn field_cow_roots(body: &IrExpr) -> std::collections::HashSet<VarId> {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct Scan(std::collections::HashSet<VarId>);
+    impl IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind {
+                let (m, f) = (module.as_str(), func.as_str());
+                let mutates = is_inplace_mutator(m, f) || (m == "list" && f == "pop");
+                if let (true, Some(a)) = (mutates, args.first()) {
+                    if matches!(a.kind, IrExprKind::Member { .. }) {
+                        self.0.extend(field_path_root(a));
+                    }
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut s = Scan(std::collections::HashSet::new());
+    s.visit_expr(body);
+    s.0
+}
+
+/// The var at the root of a field path (`d.inner.xs` → `d`).
+fn field_path_root(e: &IrExpr) -> Option<VarId> {
+    match &e.kind {
+        IrExprKind::Member { object, .. } => field_path_root(object),
+        IrExprKind::Var { id } => Some(*id),
+        _ => None,
+    }
+}
+
 pub(crate) fn is_inplace_mutator(module: &str, func: &str) -> bool {
     (module == "bytes"
         && (func.starts_with("set_")

@@ -1,0 +1,14 @@
+// #3261: a field bound before a copy-on-write of its record keeps its value.
+// `let snap = cell.words` reads the field of `cell`'s block; `list.pop(cell.words)`
+// then copies `cell` and pops the copy's field. The pop must not show through
+// `snap`.
+type Cell = { name: String, words: List[String] }
+
+test "a bound field keeps its value across a pop of the field" {
+  var cell = { name: "c", words: ["a", "bb", "ccc"] }
+  let snap = cell.words
+  let q = list.pop(cell.words)
+  assert_eq(snap, ["a", "bb", "ccc"])
+  assert_eq(cell.words, ["a", "bb"])
+  assert_eq(q, some("ccc"))
+}
