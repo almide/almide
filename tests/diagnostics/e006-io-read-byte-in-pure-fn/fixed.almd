@@ -1,0 +1,5 @@
+import io
+
+effect fn first_byte() -> Int = io.read_byte()
+
+effect fn main() -> Unit = println("${first_byte()!}")

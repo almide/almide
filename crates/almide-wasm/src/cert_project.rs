@@ -79,12 +79,12 @@ pub const SENTINEL: u32 = 9;
 
 /// What an `effect fn` declares: every modeled capability.
 const EFFECT_BOUND: &[u32] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, cap::PROC];
-/// What a plain `fn` declares: the console. `println` is admitted in any
-/// function, and io.almd declares its byte-level stdin readers
-/// (`io.read_byte`, `io.read_n_bytes`) plain `fn` on purpose — the
-/// "impure" category it documents. Files, the clock, entropy, the
-/// environment, the network and foreign imports need `effect fn`.
-const PURE_BOUND: &[u32] = &[cap::STDOUT, cap::STDIN];
+/// What a plain `fn` declares: the console output. `println` is admitted in
+/// any function (ADR-0022: a plain `fn` writes and aborts, never reads).
+/// Stdin, files, the clock, entropy, the environment, the network and
+/// foreign imports need `effect fn` — `io.read_byte` / `io.read_n_bytes`
+/// were plain `fn` stdin readers until #3248 and this bound admitted them.
+const PURE_BOUND: &[u32] = &[cap::STDOUT];
 
 /// The capabilities one `almide.fs_call` op reaches (op numbers:
 /// fs_meta.rs and its siblings). An op outside the table is [`SENTINEL`].
