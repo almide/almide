@@ -147,12 +147,13 @@ evidence  = [
 id        = "C-005"
 spec      = "ALS-R3"
 title     = "fan error propagation surfaces as the unified main-error abort"
-statement = "The first element fn returning Err in `fan.map` (named or inline lambda) and the all-fail case of `fan.any` (defined `Err(\"fan.any: all candidates failed\")`) all propagate as `Error: <msg>` + exit 1 on BOTH targets via the effect-main termination — NOT a native panic (101) nor a wasm trap (134)."
+statement = "`fan.map` (named or inline lambda) evaluates EVERY element in list order, including the elements after one that returns Err (ADR-0024 D1): their output appears in list order before the abort, and when several elements return Err the LOWEST-INDEX Err is the one that surfaces, the same rule `fan { }` block arms follow (C-199). That Err and the all-fail case of `fan.any` (defined `Err(\"fan.any: all candidates failed\")`) propagate as `Error: <msg>` + exit 1 on BOTH targets via the effect-main termination — NOT a native panic (101) nor a wasm trap (134). To stop at the first failure, the writer spells a `for` loop with `!`."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fan_map_err.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_map_inline_err.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_map_err_runs_every_element.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_any_allfail.almd", class = "fixture" },
   { path = "spec/wasm_cross/option_none_unwrap_term.almd", class = "fixture" },
 ]

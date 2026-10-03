@@ -672,12 +672,13 @@ All `fan.*` forms require an `effect fn` context. There is NO `async`/`await` in
 ```
 // Dynamic mappers — a list + one callback returning Result (the mapper matrix
 // covers every A→B pairing with A, B in {Int, Float, String}):
-let results = fan.map(urls, (u) => http.get(u))!          // Result[List[B], String]: first Err (list order) propagates
+let results = fan.map(urls, (u) => http.get(u))!          // Result[List[B], String]: EVERY element runs, the lowest-index Err propagates
 let winner  = fan.any(mirrors, (m) => fetch(m)) ?? fb     // Result[B, String]: first Ok in LIST order; an Err skips that element
 let report  = fan.settle(jobs, (j) => run(j))             // List[Result[B, String]]: EVERY element's Result, Errs captured
 // The callback may be an EFFECT fn, in either spelling — an inline lambda that
 // calls one, or a bare effect-fn value. Same rule as the block heads' arms.
 let checked = fan.map(paths, read_meta)                   // read_meta: an `effect fn`, passed by name
+// To stop at the FIRST failure instead, write a `for` loop with `!` — `fan.map` never stops early.
 // A heavy PURE callback over scalars is parallelised (a thread per core, results in list
 // order) ONLY by writing `fan.map` / `fan { list.map(...) }` — the compiler never threads
 // an implicit `|>` chain (those are fused sequentially).
