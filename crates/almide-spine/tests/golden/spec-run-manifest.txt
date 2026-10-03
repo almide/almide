@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at 6c73dda87 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at 432c966ec — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -192,6 +192,7 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	1	spec/wasm_cro
 20ab52b3128fce4fffd79e0ad17006e1439748cb2200b2249b015bba20845da7	0	spec/wasm_cross/fan_effect_mapper_capability.almd
 87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7	1	spec/wasm_cross/fan_map_all_workers_abort_one_line.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	1	spec/wasm_cross/fan_map_err.almd
+bfe021ba2a971182ae8e86b446f049a94c93eb24e220322175507e0868c3d92e	1	spec/wasm_cross/fan_map_err_runs_every_element.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	1	spec/wasm_cross/fan_map_inline_err.almd
 f402052ae966bbed45c70cede8be710a59c85b5f7dda6b90e62cc368e323022b	0	spec/wasm_cross/fan_map_inline_lambda.almd
 f686262d57bdafccc8a64b84668c7439c66e2e230bc2c3b20098efbcf1e348dd	0	spec/wasm_cross/fan_map_nested_combinators.almd
