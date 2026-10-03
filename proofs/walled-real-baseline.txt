@@ -440,8 +440,4 @@ spec/wasm_cross/mut_param_reassign_from_hof.almd :: main  # #2739
 # arms (`from_tuple`) and a tail option match (`wrapped_capture`). Native falls
 # back to the classic renderer — the leg #3174 fixed — and the structural wasm
 # leg and the interp agree with it.
-spec/wasm_cross/recursive_payload_closure_capture.almd :: inner_right  # #2739
-spec/wasm_cross/recursive_payload_closure_capture.almd :: left_bumped  # #2739
-spec/wasm_cross/recursive_payload_closure_capture.almd :: swapped  # #2739
 spec/wasm_cross/recursive_payload_nested_pattern.almd :: from_tuple  # #2739
-spec/wasm_cross/recursive_payload_nested_pattern.almd :: wrapped_capture  # #2739
