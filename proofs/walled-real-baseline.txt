@@ -295,7 +295,6 @@ spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd :: arm_writes
 # (`o.inner.xs`, `o.a.b.m`). The MIR classifier walls the deeper field write;
 # the structural leg serves it byte-identically to native.
 spec/wasm_cross/nested_field_path_mut.almd :: drain
-spec/wasm_cross/nested_field_path_mut.almd :: main
 # 2026-09-30 (#3058, class 1): 58 rows pruned (171 -> 113). The effect-fn ABI
 # facts the deleted registries held are now DERIVED from the typed IR on every
 # product path and in the classifier (`almide_ir::effect_abi`, sharing the C-132
