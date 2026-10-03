@@ -106,10 +106,21 @@ pub(crate) fn fn_spellings(module: Option<&str>, fname: &str) -> Vec<String> {
 /// recursive walk whose only propagation is its own call (`walk(buf, n - 1)!`)
 /// is never-err, and one `err(..)` anywhere in a cycle takes the cycle out.
 pub(crate) fn never_err_effect_fn_keys(program: &IrProgram) -> HashSet<String> {
+    never_err_effect_fn_keys_among(program, &|_| true)
+}
+
+/// [`never_err_effect_fn_keys`] over the effect fns `admit` accepts: a fn it
+/// refuses is never a candidate, so a `!` over a call to it counts as a raise.
+pub(crate) fn never_err_effect_fn_keys_among(
+    program: &IrProgram,
+    admit: &dyn Fn(&IrFunction) -> bool,
+) -> HashSet<String> {
     let mut cands: Vec<(Option<&str>, &IrFunction)> = Vec::new();
-    cands.extend(program.functions.iter().filter(|f| f.is_effect).map(|f| (None, f)));
+    cands.extend(program.functions.iter().filter(|f| f.is_effect && admit(f)).map(|f| (None, f)));
     for m in &program.modules {
-        cands.extend(m.functions.iter().filter(|f| f.is_effect).map(|f| (Some(m.name.as_str()), f)));
+        cands.extend(
+            m.functions.iter().filter(|f| f.is_effect && admit(f)).map(|f| (Some(m.name.as_str()), f)),
+        );
     }
     // A bare `Type.method` spelling names a module fn only when exactly one
     // fn in the program spells it (the `collect_mut_fns` rule); an ambiguous
