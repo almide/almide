@@ -277,7 +277,7 @@ impl LowerCtx {
             // over a route row `r`): the single-element case of the list arm above.
             // Same `[tag][handle]` wrapper; the `one:<R>` dispatcher arm releases
             // it through the record's own `$__drop_<R>`.
-            if self.record_capture_name(&ty).is_some() {
+            if self.record_capture_name(&ty).or_else(|| self.variant_capture_name(&ty)).is_some() {
                 rich_caps.push((v, ty));
                 continue;
             }
@@ -660,8 +660,8 @@ impl LowerCtx {
                     .expect("Routed cell admitted only via map_named_value_drop")
             } else {
                 self.rich_capture_elem_name(cap_ty)
-                    .or_else(|| self.record_capture_name(cap_ty).map(|n| format!("one:{n}")))
-                    .expect("rich class admitted only via rich_capture_elem_name / record_capture_name")
+                    .or_else(|| self.record_capture_name(cap_ty).or_else(|| self.variant_capture_name(cap_ty)).map(|n| format!("one:{n}")))
+                    .expect("rich class admitted only via rich_capture_elem_name / record_capture_name / variant_capture_name")
             };
             let tag_val = crate::lower::rich_env_tag(&tag_name);
             let two = self.fresh_value();
