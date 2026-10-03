@@ -311,6 +311,9 @@ impl LowerCtx {
         // SHRINK the set (a new non-head read disqualifies), and shrinking it
         // just returns a var to today's materializing path, so extending the
         // map rather than replacing it stays sound.
+        // #3261: likewise only grows — a root added here makes a field bind take
+        // its own reference, which is balanced whether or not the COW happens.
+        self.field_cow_roots.extend(crate::lower::field_cow_roots(body));
         for (v, r) in crate::lower::range_counting_vars(body) {
             self.range_counting_vars.entry(v).or_insert(r);
         }
