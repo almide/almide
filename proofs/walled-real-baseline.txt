@@ -247,15 +247,6 @@ spec/gauntlet/pkg/mut_port/src/main.almd :: main
 spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_3
 spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_4
 spec/wasm_cross/map_set_index_threshold.almd :: branch_lift_synth_7
-# 2026-09-27 (#2722, the err-arm payload fixtures): `bump` re-wraps a typed-error
-# Result through `match r { ok(v) => ok(v + 1), err(e) => err(e) }`; the incumbent
-# MIR lowering walls it, the structural leg serves both files byte-identically to
-# native, and the incumbent is retiring under #1696 (recorded, not ported).
-# 2026-09-27 (#2723, found while recording #2725): the typed-error callback channel
-# spec test's `fold_mid_block` / `sum_with` (a `__fallible_fold` whose callback is
-# not liftable) and `typed_slot` (a lambda passed to a typed slot) wall on the
-# incumbent MIR lowering; the structural leg runs the file via WASM. Recorded, not
-# ported (#1696).
 # 2026-09-27 (#2725, ADR-0021 step 4, C-369): the lambda failure-channel files.
 # The incumbent MIR lowering walls a `!` bound under an operator whose typed error
 # erases into a String channel (`erased`, `fn_level`: "unwrap `!` bound to a
@@ -424,6 +415,15 @@ spec/wasm_cross/mut_param_closure_field_path_write.almd :: main  # #2739
 # variant `match` over a subject the function OWNS (a `let`-bound constructor,
 # a fresh call result) now dispatches on the tag like a borrowed one: each
 # returned payload is a fresh copy and the subject drops at its scope end.
+# (2026-10-03, #2739 lane 2) 22 rows pruned (80 -> 58), the tail heap-result
+# producers: a `!` over a declared-Result effect fn now makes its caller
+# auto-wrap instead of raw (2); an ok/err aggregate payload is built at bind
+# position, in tail and arm position (x09 + the fill2 tail it fronted, and the
+# two mut-param closure `fail_after`s); the scalar-Ok typed-variant err arm
+# re-wraps a bound error (`bump` x2 and the six typed-callback rows behind the
+# same `err(e) => err(e)`); a record-slot closure field is callable in tail
+# (3); the nested-list concat admits `List[List[scalar]]` elements (the codec
+# triple-list worker); and the closure env captures a user variant (4).
 # #3170: the mut-param reassign-from-HOF fixture's MIR rung walls on four
 # shapes its rows need: `main` builds its lines with interpolation in a call
 # argument, `f_filter_map` passes a closure that returns an option literal,
@@ -434,10 +434,8 @@ spec/wasm_cross/mut_param_reassign_from_hof.almd :: f_branch  # #2739
 spec/wasm_cross/mut_param_reassign_from_hof.almd :: f_fallible  # #2739
 spec/wasm_cross/mut_param_reassign_from_hof.almd :: f_filter_map  # #2739
 spec/wasm_cross/mut_param_reassign_from_hof.almd :: main  # #2739
-# #3174: the recursive-payload fixtures' MIR rung walls on a heap-result
-# `match` outside the executable subset (`left_bumped`, `swapped`,
-# `inner_right`), a match over an untracked tuple subject with call-bearing
-# arms (`from_tuple`) and a tail option match (`wrapped_capture`). Native falls
+# #3174: the recursive-payload fixtures' MIR rung walls on a match over an
+# untracked tuple subject with call-bearing arms (`from_tuple`). Native falls
 # back to the classic renderer — the leg #3174 fixed — and the structural wasm
 # leg and the interp agree with it.
 spec/wasm_cross/recursive_payload_nested_pattern.almd :: from_tuple  # #2739
