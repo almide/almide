@@ -324,8 +324,6 @@ spec/wasm_cross/nested_field_path_mut.almd :: drain
 # top-let reads (no name bridge), and never-err / auto-wrap effect-fn ABIs (no
 # ABI registries). The structural leg serves these programs; this is the
 # MIR-lowering frontier, recorded rather than ported.
-spec/lang/effect_assign_unwrap_test.almd :: unannotated_unwraps  # #3121
-spec/lang/explicit_propagation_test.almd :: explicit_unwraps  # #3121
 # The same #2950 classifier change, on a fixture that landed after the list above
 # was measured (the fallible-HOF release pin): its effect-fn helpers wall without the
 # ABI registries the deleted passes filled. The structural leg serves it.
