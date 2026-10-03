@@ -326,6 +326,10 @@ allow = ["IO", "Net"]
 
 If `[permissions]` is absent or `allow` is empty, all capabilities are permitted (backwards compatible).
 
+`almide.toml` is read as TOML, so `allow` may use any array spelling: one
+line, several lines, a trailing comma, comments between the items (#3253).
+A multi-line array used to read as empty, which permitted everything.
+
 ### Effect categories
 
 The `EffectInferencePass` maps stdlib module usage to six categories, the
@@ -357,7 +361,8 @@ error: almide.toml:6: unknown capability `Fil` in [permissions].allow — granta
 The hint names the nearest capability, the same way `almide check --profile
 critical --allow` reports an unknown name (`docs/specs/cli.md`).
 
-Test: `tests/manifest_permissions_test.rs`, `tests/diagnostics/permissions-unknown-capability/`
+Test: `tests/manifest_permissions_test.rs`, `tests/manifest_toml_reader_test.rs`,
+`tests/diagnostics/permissions-unknown-capability/`, `tests/diagnostics/permissions-unknown-capability-multiline/`
 
 ### Enforcement
 
