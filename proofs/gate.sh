@@ -174,6 +174,14 @@ run borrow-uaf  ownership 1
 # probes every later `a` → REJECT. (`balanced` above, `iadd`, aliases the
 # object while it is live and still accepts.)
 run alias-after-free ownership 1
+# A handle READ after the release (#3233): the address bridge (`prim.handle` →
+# `+ off` → `LoadHandle`) and a call's handle argument emitted no event, so a
+# freed object read only that way left a balanced `id`. Every handle read is
+# now a `b` probe on an owned line: the live load is `ibd` → ACCEPT; a second load
+# after the drop is `ibdb` and the call arg after the drop `idb` → REJECT.
+run loadhandle-live       ownership 0
+run loadhandle-after-free ownership 1
+run callarg-after-free    ownership 1
 
 echo "-- property: ownership, format v5 (law 6: the arm-terminal Return exit) --"
 # The R2 `!` exit shape: the arm drops everything it owns BEFORE the
