@@ -7,7 +7,7 @@
 // Drop frees just the block: no leak). Because this body reaches prim.read_n_bytes, its cap_witness
 // carries Capability::Stdin — the SAME distinct capability io.read_line carries — so a caller is
 // caps-verified ONLY if it declares Stdin (an `effect fn`). NON-DETERMINISTIC (reads live stdin):
-// no byte-match unless stdin is fixed. Matches io.almd's `fn read_n_bytes(n: Int) -> List[Int]`.
+// no byte-match unless stdin is fixed. Matches io.almd's `effect fn read_n_bytes(n: Int) -> List[Int]`.
 //
 // THERE IS NO PER-CALL MAXIMUM. The answer is min(n, what stdin has), and a caller who
 // asks for 100 MiB of a 100 MiB stream gets 100 MiB.
@@ -39,4 +39,4 @@ else {
   if list.len(got) < want then got else got + __read_n_chunked(remaining - want)
 }
 
-fn io_read_n_bytes(n: Int) -> List[Int] = if n <= 0 then prim.read_n_bytes(0) else __read_n_chunked(n)
+effect fn io_read_n_bytes(n: Int) -> List[Int] = if n <= 0 then prim.read_n_bytes(0) else __read_n_chunked(n)

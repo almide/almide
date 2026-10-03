@@ -1,0 +1,6 @@
+import io
+
+// #3248: io.read_n_bytes reads stdin, so it is an effect fn.
+fn header() -> List[Int] = io.read_n_bytes(4)
+
+effect fn main() -> Unit = println("${list.len(header())}")

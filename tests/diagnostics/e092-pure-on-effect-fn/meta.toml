@@ -1,0 +1,2 @@
+expects_code = "E092"
+expects_error = "`@pure` fn `load` is an `effect fn`"
