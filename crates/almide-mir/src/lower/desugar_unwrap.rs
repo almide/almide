@@ -580,7 +580,8 @@ fn build_unwrap_match(
     // old unconditional `Ty::String` bind type-punned every non-String err. A same-type err
     // passes through unchanged; a List[String] err into a String-err fn joins ", " (exactly
     // v0's `.map_err(|errs| errs.join(", "))?` — `result.collect/collect_map(..)!`); any
-    // other mismatch DECLINES so the `!` walls honestly downstream. The SAME conversion
+    // typed err into a String channel carries its repr text (`erased_err_text`, ADR-0021 D2);
+    // any other mismatch DECLINES so the `!` walls honestly downstream. The SAME conversion
     // lives in `desugar_let_unwrap` — the lowering chain reaches that one first (via
     // `desugar_heap_branches`), this one first in the counted `desugar_all` order — so the
     // call counts agree on both sides (mir == ir, the caps-gate contract).
@@ -627,6 +628,8 @@ fn build_unwrap_match(
             span: body.span.clone(),
             def_id: None,
         }
+    } else if matches!(fn_err_ty, Ty::String) {
+        erased_err_text(e_ref)
     } else {
         return None;
     };
