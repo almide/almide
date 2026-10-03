@@ -663,7 +663,7 @@ impl LowerCtx {
             // This opens higher-order functions RETURNING a heap value (Result/List/String) — the
             // foundation for a self-hosted `fan.map` / traverse. An UNKNOWN callee stays walled.
             IrExprKind::Call { target: CallTarget::Computed { callee }, .. }
-                if self.closure_value_of(callee).is_some() =>
+                if self.closure_value_of(callee).is_some() || Self::is_fn_member_callee(callee) =>
             {
                 self.lower_tail_heap_call_computed(tail)
             }

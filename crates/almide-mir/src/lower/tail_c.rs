@@ -11,7 +11,16 @@ impl LowerCtx {
     fn lower_tail_heap_call_computed(&mut self, tail: &IrExpr) -> Result<Option<ValueId>, LowerError> {
         let IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. } = &tail.kind else { unreachable!() };
         let mark = self.live_heap_handles.len();
-        let blk = self.closure_value_of(callee).expect("the caller's match guard already proved closure_value_of(callee).is_some() for the same callee");
+        // A tracked closure local, or a record-slot `Fn` field (`(q.run)(k)`,
+        // #2739 family N) borrowed from its container — the container keeps
+        // ownership, the borrow joins `param_values` (never dropped here).
+        let Some(blk) = self.closure_block_of_mut(callee) else {
+            return Err(LowerError::Unsupported(
+                "heap-result method/computed call cannot be faithfully returned in this \
+                 brick (would move out an empty deferred heap value)"
+                    .into(),
+            ));
+        };
         let lowered = self.lower_call_args(args)?;
         let dst = self.fresh_value();
         let repr = repr_of(&tail.ty)?;
