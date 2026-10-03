@@ -567,7 +567,12 @@ pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
             if absorb_unwrap_or_block_operand(e) || absorb_interp_block_parts(e, self.vt) {
                 return;
             }
-            let IrExprKind::Call { args, .. } = &mut e.kind else { return };
+            // A list literal absorbs a block element exactly as a call absorbs a
+            // block argument: `[a, { s; r }]` ≡ `{ let t = a; s; [t, r] }`.
+            let (IrExprKind::Call { args, .. } | IrExprKind::List { elements: args }) = &mut e.kind
+            else {
+                return;
+            };
             // Exactly ONE non-empty Block argument, every earlier arg pure.
             let blocks: Vec<usize> = args
                 .iter()
@@ -582,7 +587,8 @@ pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
             let bi = *bi;
             // An impure EARLIER operand (a call) is bound to a fresh temp first, in
             // order (#3084), so it still evaluates before the block's statements.
-            let Some(mut hoisted) = bind_earlier_call_operands(&mut args[..bi], self.vt) else {
+            let (earlier, rest) = args.split_at_mut(bi);
+            let Some(mut hoisted) = bind_earlier_call_operands(earlier, &rest[0], self.vt) else {
                 return;
             };
             let IrExprKind::Block { stmts, expr: Some(tail) } = &mut args[bi].kind else {

@@ -445,7 +445,7 @@ pub(crate) fn desugar_heap_if_call_args(body: &IrExpr) -> Option<IrExpr> {
 /// Evaluation order is kept: an EARLIER part that calls something or reads a variable
 /// the block writes is bound to a fresh `let` first, in order, so it still evaluates
 /// before the block's statements ([`bind_earlier_interp_parts`] — a heap read through a
-/// written variable declines instead, leaving the interp untouched); parts after the
+/// written variable binds its rendered text); parts after the
 /// block already evaluate after it. Returns whether `e` changed.
 fn absorb_interp_block_parts(e: &mut IrExpr, vt: &mut almide_ir::VarTable) -> bool {
     let IrExprKind::StringInterp { parts } = &mut e.kind else { return false };
@@ -489,9 +489,11 @@ fn first_interp_block_part(parts: &[almide_ir::IrStringPart]) -> Option<usize> {
 ///     after the block is unobservable);
 ///   - a SCALAR part, or a heap part that is itself a call (a fresh owned result) → bound
 ///     to a fresh `let`, so it is computed before the block;
-///   - any other heap part (a field or element read through a written variable, an
-///     operator over one) → `None`, nothing changed: a `let` of it would be a borrow
-///     into a value the block's write may release.
+///   - any other heap part (a variable the block writes, a field or element read
+///     through one, an operator over one) → its RENDERED text is bound instead,
+///     `let t = "${p}"`: a `let` of the part itself could be a borrow into a value the
+///     block's write releases, while the one-part interpolation is a fresh owned
+///     `String` with the same bytes the part prints.
 fn bind_earlier_interp_parts(
     parts: &mut [almide_ir::IrStringPart],
     bi: usize,
@@ -504,31 +506,39 @@ fn bind_earlier_interp_parts(
     let mut plan = Vec::with_capacity(earlier.len());
     for p in earlier.iter() {
         let IrStringPart::Expr { expr: a } = p else {
-            plan.push(false);
+            plan.push(None);
             continue;
         };
         let (reads_written, calls) = part_reads_and_calls(a, &written);
+        // None = stays; Some(false) = bound as itself; Some(true) = its rendered text bound.
         let bind = match (reads_written || calls, crate::lower::is_heap_ty(&a.ty)) {
-            (false, _) => false,
-            (true, false) => true,
-            (true, true) if matches!(a.kind, IrExprKind::Call { .. }) => true,
-            (true, true) => return None,
+            (false, _) => None,
+            (true, false) => Some(false),
+            (true, true) => Some(!matches!(a.kind, IrExprKind::Call { .. })),
         };
         plan.push(bind);
     }
     let mut binds = Vec::new();
     for (p, bind) in earlier.iter_mut().zip(plan) {
         let IrStringPart::Expr { expr: a } = p else { continue };
-        if !bind {
-            continue;
-        }
-        let ty = a.ty.clone();
+        let Some(render) = bind else { continue };
         let span = a.span.clone();
+        let ty = if render { Ty::String } else { a.ty.clone() };
         let var = vt.alloc(almide_base::intern::sym("__part"), ty.clone(), Mutability::Let, None);
-        let value = std::mem::replace(
+        let part = std::mem::replace(
             a,
             IrExpr { kind: IrExprKind::Var { id: var }, ty: ty.clone(), span: span.clone(), def_id: None },
         );
+        let value = if render {
+            IrExpr {
+                kind: IrExprKind::StringInterp { parts: vec![IrStringPart::Expr { expr: part }] },
+                ty: Ty::String,
+                span: span.clone(),
+                def_id: None,
+            }
+        } else {
+            part
+        };
         binds.push(IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value }, span });
     }
     Some(binds)
