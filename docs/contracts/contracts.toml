@@ -2809,6 +2809,7 @@ since     = "0.53.6"
 status    = "active"
 evidence  = [
   { path = "spec/stdlib/process_timeout_test.almd", class = "fixture" },
+  { path = "spec/embedded_cross/process_spawn_family.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-215"

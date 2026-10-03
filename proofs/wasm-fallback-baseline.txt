@@ -10,8 +10,9 @@
 #   COMPILER_FRONTIER — the burn-down DEBT: the wasm pipeline cannot yet
 #                       compile the shape; each entry names its brick.
 #   HOST_CAPABILITY   — the tested API is an OS surface WASI does not provide
-#                       (TCP listen, subprocess, zlib); out of wasm scope BY
-#                       DESIGN until the WASI story changes.
+#                       and the embedded host does not serve (TCP listen, an
+#                       @extern binding); out of wasm scope BY DESIGN until the
+#                       WASI story changes.
 #   HARNESS_LIMITATION— the TESTING harness needs a mechanism wasm lacks
 #                       (assert_throws requires catching a panic; wasm traps
 #                       are uncatchable in-process).
@@ -22,12 +23,12 @@
 # C-333 pin them on every execution sweep). Retires with the #1584
 # render_wasm switchover.
 #
-# HOST_CAPABILITY (6):
+# HOST_CAPABILITY (3):
+# 2026-10-03 (#2589, ADR-0025): the three subprocess files left — the embedded
+# host serves the private almide:process/spawn capability, so they pass the
+# wasm leg byte for byte with native.
 spec/lang/effect_intrinsic_tail_test.almd :: HOST_CAPABILITY :: http.serve is a TCP listener
 spec/stdlib/net_test.almd :: HOST_CAPABILITY :: net is an OS socket API
-spec/stdlib/process_exec_status_test.almd :: HOST_CAPABILITY :: subprocess exec
-spec/stdlib/process_ext_test.almd :: HOST_CAPABILITY :: subprocess exec
-spec/stdlib/process_timeout_test.almd :: HOST_CAPABILITY :: subprocess exec
 #
 # HARNESS_LIMITATION (2):
 spec/stdlib/coverage_assert_throws_test.almd :: HARNESS_LIMITATION :: assert_throws needs panic catching; a wasm trap is uncatchable in-process

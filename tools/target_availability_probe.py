@@ -511,10 +511,82 @@ def run_probe(prog: str, leg: str, tmp: str, env: dict):
             capture_output=True, text=True, env=env, cwd=tmp,
             stdin=subprocess.DEVNULL, timeout=120,
         )
-    return subprocess.run(
-        [ALMIDE, "build", src, "--target", "wasm", "-o", os.devnull],
+    out = os.path.join(tmp, "probe.wasm")
+    r = subprocess.run(
+        [ALMIDE, "build", src, "--target", "wasm", "-o", out],
         capture_output=True, text=True, env=env, cwd=tmp,
     )
+    # A host capability (#2589, ADR-0025): the build succeeds, but the stock
+    # artifact imports a PRIVATE `almide:*` interface that a stock runtime
+    # refuses at load. That is a wall on the stock-p1 leg, by the leg's own
+    # meaning (what a stock runtime runs), with the import as its reason.
+    if leg == "stock-p1" and r.returncode == 0:
+        private = private_imports(out)
+        if private:
+            r = subprocess.CompletedProcess(
+                r.args, 1, r.stdout,
+                f"host-capability: the artifact imports {', '.join(private)}\n" + r.stderr,
+            )
+    return r
+
+
+def private_imports(path: str) -> list:
+    """The `almide:*` import modules of a core wasm module (the import
+    section, read directly — no tool dependency)."""
+    try:
+        with open(path, "rb") as fh:
+            b = fh.read()
+    except OSError:
+        return []
+    if b[:4] != b"\0asm":
+        return []
+
+    def leb(i):
+        n, shift = 0, 0
+        while True:
+            byte = b[i]
+            i += 1
+            n |= (byte & 0x7F) << shift
+            shift += 7
+            if byte < 0x80:
+                return n, i
+
+    def name(i):
+        n, i = leb(i)
+        return b[i:i + n].decode("utf-8", "replace"), i + n
+
+    i, found = 8, []
+    while i < len(b):
+        sid = b[i]
+        size, i = leb(i + 1)
+        end = i + size
+        if sid == 2:
+            count, j = leb(i)
+            for _ in range(count):
+                mod, j = name(j)
+                _, j = name(j)
+                kind = b[j]
+                j += 1
+                if kind == 0:  # func: type index
+                    _, j = leb(j)
+                elif kind == 1:  # table: reftype + limits
+                    j += 1
+                    flags = b[j]
+                    _, j = leb(j + 1)
+                    if flags & 1:
+                        _, j = leb(j)
+                elif kind == 2:  # memory: limits
+                    flags = b[j]
+                    _, j = leb(j + 1)
+                    if flags & 1:
+                        _, j = leb(j)
+                else:  # global: valtype + mut
+                    j += 2
+                if mod.startswith("almide:") and mod not in found:
+                    found.append(mod)
+            break
+        i = end
+    return found
 
 
 def measure(mod, f, types, leg, tmp, env):
