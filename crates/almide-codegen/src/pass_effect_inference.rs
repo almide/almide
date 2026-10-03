@@ -103,29 +103,40 @@ fn seed_function_effects(program: &IrProgram, effect_map: &mut EffectMap) {
     }
 }
 
-/// Step 3 of `EffectInferencePass::run`, extracted verbatim (cog>30
-/// decomposition): fixpoint-iterate the call graph until every caller's
-/// `transitive` effect set has absorbed every (already-seeded) callee's.
+/// Step 3 of `EffectInferencePass::run`: solve the call graph to its least
+/// fixpoint, so every caller's `transitive` set has absorbed every callee's.
+///
+/// Worklist over reverse edges: when a function's set grows, only its callers
+/// are revisited. Sets only grow and are bounded by the finite `Effect` enum,
+/// so this terminates with no iteration cap — a fixed round budget (formerly
+/// 20) would hand a partially-propagated set to `check_permissions` on a call
+/// chain deeper than the budget, reporting "no effect" for an effectful caller.
 fn close_effects_transitively(call_graph: &HashMap<String, HashSet<String>>, effect_map: &mut EffectMap) {
-    let max_iterations = 20;
-    for _ in 0..max_iterations {
-        let mut changed = false;
-        for (caller, callees) in call_graph {
-            let callee_effects: HashSet<Effect> = callees.iter()
-                .filter_map(|callee| effect_map.functions.get(callee))
-                .flat_map(|fe| fe.transitive.iter().copied())
-                .collect();
+    let mut callers_of: HashMap<&str, Vec<&str>> = HashMap::new();
+    for (caller, callees) in call_graph {
+        for callee in callees {
+            callers_of.entry(callee.as_str()).or_default().push(caller.as_str());
+        }
+    }
 
+    let mut worklist: Vec<String> = effect_map.functions.iter()
+        .filter(|(_, fe)| !fe.transitive.is_empty())
+        .map(|(name, _)| name.clone())
+        .collect();
+    while let Some(callee) = worklist.pop() {
+        let Some(callers) = callers_of.get(callee.as_str()) else { continue };
+        let callee_effects = match effect_map.functions.get(&callee) {
+            Some(fe) => fe.transitive.clone(),
+            None => continue,
+        };
+        for &caller in callers {
             if let Some(fe) = effect_map.functions.get_mut(caller) {
                 let before = fe.transitive.len();
-                fe.transitive.extend(callee_effects);
+                fe.transitive.extend(callee_effects.iter().copied());
                 if fe.transitive.len() > before {
-                    changed = true;
+                    worklist.push(caller.to_string());
                 }
             }
-        }
-        if !changed {
-            break;
         }
     }
 }
@@ -312,5 +323,57 @@ mod tests {
         effects.insert(Effect::Net);
         effects.insert(Effect::IO);
         assert_eq!(EffectMap::format_effects(&effects), "{IO, Net}");
+    }
+
+    /// Seeds `names` with empty sets, except `seeded` which gets `IO`.
+    fn seeded_map(names: &[String], seeded: &str) -> EffectMap {
+        let mut map = EffectMap::default();
+        for name in names {
+            let direct: HashSet<Effect> = if name == seeded { [Effect::IO].into() } else { HashSet::new() };
+            map.functions.insert(name.clone(), FunctionEffects {
+                direct: direct.clone(),
+                transitive: direct,
+                is_effect: false,
+            });
+        }
+        map
+    }
+
+    // T03: a call chain far deeper than the former 20-round budget still
+    // carries the leaf's effect to the root.
+    #[test]
+    fn long_call_chain_reaches_the_root() {
+        let n = 200;
+        let names: Vec<String> = (0..n).map(|i| format!("f{i}")).collect();
+        let graph: HashMap<String, HashSet<String>> = (0..n - 1)
+            .map(|i| (names[i].clone(), [names[i + 1].clone()].into()))
+            .collect();
+        let mut map = seeded_map(&names, &names[n - 1]);
+        close_effects_transitively(&graph, &mut map);
+        for name in &names {
+            assert_eq!(map.functions[name].transitive, [Effect::IO].into(), "{name} lost IO");
+        }
+    }
+
+    // T04: an effect entering anywhere in a cycle reaches the whole cycle and
+    // every caller of it; the direct set is untouched.
+    #[test]
+    fn cycle_propagates_to_every_member_and_caller() {
+        let names: Vec<String> = ["main", "a", "b", "c", "pure"].iter().map(|s| s.to_string()).collect();
+        let graph: HashMap<String, HashSet<String>> = [
+            ("main", vec!["a", "pure"]),
+            ("a", vec!["b"]),
+            ("b", vec!["c"]),
+            ("c", vec!["a"]),
+        ].into_iter()
+            .map(|(k, v)| (k.to_string(), v.into_iter().map(String::from).collect()))
+            .collect();
+        let mut map = seeded_map(&names, "b");
+        close_effects_transitively(&graph, &mut map);
+        for name in ["main", "a", "b", "c"] {
+            assert_eq!(map.functions[name].transitive, [Effect::IO].into(), "{name} lost IO");
+        }
+        assert!(map.functions["pure"].transitive.is_empty());
+        assert!(map.functions["a"].direct.is_empty());
     }
 }
