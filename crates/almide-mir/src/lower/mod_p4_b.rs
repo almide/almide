@@ -272,6 +272,9 @@ fn field_displayable(ty: &Ty, registry: &RecordLayouts) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     match ty {
         Ty::Int | Ty::Bool | Ty::Float | Ty::String => true,
+        // A Float64 is the f64 `Float` under its sized spelling, and a Float32 slot
+        // holds the value its own `float32.to_string_compound` leaf reads (#3086).
+        Ty::Float32 | Ty::Float64 => true,
         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => !is_heap_ty(&a[0]),
         Ty::Record { .. } | Ty::Tuple(_) | Ty::Named(..) => match resolve_aggregate(ty, registry) {
             // A NESTED aggregate must be SCALAR-ONLY (the construction's `lower_owned_heap_field`
