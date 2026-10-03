@@ -135,10 +135,10 @@ effect fn main() -> Unit = {
 }
 "#;
 
-/// The parallel `fan.map` (#2044): until ADR-0024 step 3 it still stops at the
-/// first Err, so a trap ABOVE that Err is never reached by the sequential
-/// evaluation — the map's value is the Err. In the second map the trap is
-/// BELOW the Err and wins.
+/// The parallel `fan.map` (#2044) runs every element (ADR-0024 D1): in the
+/// first map the slow Err at 2 still wins over the fast Err at 9, and in the
+/// second a trap ABOVE the Err is reached, exactly as the sequential
+/// evaluation reaches it, and aborts after the first map's output.
 const MAP_PAR: &str = r#"fn churn(x: Int, n: Int) -> Int = {
   var acc = 0
   var i = 0
@@ -151,12 +151,12 @@ const MAP_PAR: &str = r#"fn churn(x: Int, n: Int) -> Int = {
 
 effect fn main() -> Unit = {
   println("before")
-  let r = fan.map(list.range(0, 16), (x) => if x == 2 then err("bad ${churn(x, 2000000)}") else ok(100 / (x - 9)))
+  let r = fan.map(list.range(0, 16), (x) => if x == 2 then err("bad ${churn(x, 2000000)}") else if x == 9 then err("e9") else ok(x))
   match r {
     ok(v) => println("ok ${list.len(v)}"),
     err(e) => println("err ${e}"),
   }
-  let t = fan.map(list.range(0, 16), (x) => if x == 1 then ok(churn(x, 2000000) / (x - 1)) else if x == 3 then err("e3") else ok(x))
+  let t = fan.map(list.range(0, 16), (x) => if x == 2 then err("bad ${churn(x, 2000000)}") else ok(100 / (x - 9)))
   match t {
     ok(v) => println("ok ${list.len(v)}"),
     err(e) => println("err ${e}"),

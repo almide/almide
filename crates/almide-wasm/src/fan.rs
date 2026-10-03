@@ -2,7 +2,8 @@
 //! ORDER, never wall-clock — semantics verbatim from the self-hosted
 //! stdlib bodies (fan_map.almd / fan_any.almd) and the interp's
 //! eval_fan_any / eval_fan:
-//!   - fan.map(xs, f): collect oks in order, the FIRST err IS the result.
+//!   - fan.map(xs, f): EVERY element runs (ADR-0024 D1), oks collect in
+//!     order, and the LOWEST-INDEX err IS the result.
 //!   - fan.any(xs, f): first Ok wins, an element's err skips it,
 //!     all-fail (and empty) is the ledger-constant Err.
 //!   - fan.any { arms }: one literal list of 0-ary thunks — first Ok
@@ -42,8 +43,9 @@ impl Emitter<'_> {
             // The PREFETCH form (#1628 increment 2b): a map whose whole
             // arm body is one fs.read_text on the element starts every
             // read up front (op 40) and awaits in arm order (op 41) —
-            // sequential semantics verbatim (C-004 list order, first err
-            // is the result), but a host that can overlap I/O (the p3
+            // sequential semantics verbatim (C-004 list order; every read
+            // runs and the lowest-index err is the result, ADR-0024 D1),
+            // but a host that can overlap I/O (the p3
             // component) serves the reads concurrently. Hosts that
             // cannot treat start as a no-op.
             ("map", [xs, cb]) if body_is_fs_read_text(cb) => {
@@ -119,13 +121,17 @@ impl Emitter<'_> {
                 // The callback body VALUE is a Result block.
                 let hr = self.hold_i32()?;
                 let hacc = self.hold_i32()?;
+                // `map` only: the lowest-index err, held while the elements
+                // after it still run (ADR-0024 D1); 0 = none yet.
+                let herr = if first_ok_wins { None } else { Some(self.hold_i32()?) };
                 {
                     let mut i = self.f.instructions();
                     i.i32_const(0).local_set(hr);
                     // #2969: only `map` accumulates; an `any` never read
                     // the accumulator, and its block was never released.
-                    if !first_ok_wins {
+                    if let Some(herr) = herr {
                         i.i32_const(0).call(F_ALLOC).local_set(hacc);
+                        i.i32_const(0).local_set(herr);
                     }
                     i.block(BlockType::Empty).loop_(BlockType::Empty);
                 }
@@ -167,19 +173,29 @@ impl Emitter<'_> {
                     let mut i = self.f.instructions();
                     i.local_set(hr);
                     i.local_get(hr).i32_load(slot_memarg(almide_layout::SUM_TAG));
-                    if first_ok_wins {
-                        // err → release it and skip this element; ok → hr
-                        // wins (the result keeps its credit), break.
-                        i.i32_eqz().br_if(1);
-                        i.local_get(hr).call(carrier_dec);
-                        i.i32_const(0).local_set(hr);
-                    } else {
-                        // err → hr IS the whole result, break.
-                        i.i32_const(0).i32_ne().br_if(1);
+                    match herr {
+                        None => {
+                            // err → release it and skip this element; ok → hr
+                            // wins (the result keeps its credit), break.
+                            i.i32_eqz().br_if(1);
+                            i.local_get(hr).call(carrier_dec);
+                            i.i32_const(0).local_set(hr);
+                        }
+                        Some(herr) => {
+                            // err → the first one is kept as the result, a
+                            // later one is released; the loop goes on.
+                            i.if_(BlockType::Empty);
+                            i.local_get(herr).i32_eqz().if_(BlockType::Empty);
+                            i.local_get(hr).local_set(herr);
+                            i.else_();
+                            i.local_get(hr).call(carrier_dec);
+                            i.end();
+                            i.else_();
+                        }
                     }
                 }
-                if !first_ok_wins {
-                    // collect the ok payload: its credit moves from the
+                if herr.is_some() {
+                    // ok: collect the payload — its credit moves from the
                     // carrier into the list, and the spine is released.
                     self.f.instructions().local_get(hacc).local_get(hr);
                     self.load_ty_slot(b, almide_layout::SUM_FIELD);
@@ -192,14 +208,20 @@ impl Emitter<'_> {
                     };
                     self.f.instructions().call(push).local_set(hacc);
                     self.f.instructions().local_get(hr).call(F_DEC_FLAT);
-                    self.f.instructions().i32_const(0).local_set(hr);
+                    let mut i = self.f.instructions();
+                    i.end();
+                    i.i32_const(0).local_set(hr);
                 }
                 self.witness_fan_step(wc, first_ok_wins, b);
                 self.hof_step(ih);
                 self.witness_loop_close();
-                // loop fell through (no break): all elements consumed.
+                // loop fell through (no break): all elements consumed. A
+                // `map`'s err, if any, now becomes the result.
                 {
                     let mut i = self.f.instructions();
+                    if let Some(herr) = herr {
+                        i.local_get(herr).local_set(hr);
+                    }
                     i.local_get(hr).i32_eqz().if_(BlockType::Empty);
                     if first_ok_wins {
                         // ledger-constant all-fail Err
@@ -235,8 +257,11 @@ impl Emitter<'_> {
                     i.end();
                     i.local_get(hr);
                 }
-                // hacc, hr; [the closure route's element scratch]; ih, ch,
-                // bh; [the closure hold] — LIFO per pool.
+                // [herr], hacc, hr; [the closure route's element scratch];
+                // ih, ch, bh; [the closure hold] — LIFO per pool.
+                if herr.is_some() {
+                    self.release_i32();
+                }
                 self.release_i32();
                 self.release_i32();
                 if closure.is_some() {
