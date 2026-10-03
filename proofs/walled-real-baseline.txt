@@ -351,7 +351,6 @@ spec/lang/explicit_propagation_test.almd :: explicit_unwraps  # #3121
 # `match`, `??` inside an interpolation). The MIR lowering refuses the
 # move-mode block in call-argument position ("call argument Block not in this
 # brick"); the structural leg serves it byte-identically to native.
-spec/wasm_cross/mut_param_effect_unpropagated.almd :: main  # #3121
 # batch 074: the #2758 witness fixture's early-bang frames meet #2950's
 # classifier. `stash_len` / `stash_both` unwrap an effect-fn call with `!` in a
 # let; with the program passes gone the MIR lowering refuses the effect-fn ABI
@@ -387,11 +386,8 @@ spec/wasm_cross/leak_free_propagating_literal_operand.almd :: in_list  # #3084
 # call-argument position"), and `fail_after` returns a heap-result `if`
 # ("heap-result `if` outside the executable subset"). The structural leg serves
 # both files byte-identically to native and the interp.
-spec/wasm_cross/mut_param_closure_capture_read.almd :: main  # #2739
 spec/wasm_cross/mut_param_closure_capture_write.almd :: fail_after  # #2739
-spec/wasm_cross/mut_param_closure_capture_write.almd :: main  # #2739
 spec/wasm_cross/mut_param_closure_field_path_write.almd :: fail_after  # #2739
-spec/wasm_cross/mut_param_closure_field_path_write.almd :: main  # #2739
 
 # (2026-10-01, #3121/#3084) eleven rows pruned (77 -> 66): a match over an inert
 # Result literal reduces to the arm it selects (the err carrier's `err((m, b))!`
@@ -405,12 +401,12 @@ spec/wasm_cross/mut_param_closure_field_path_write.almd :: main  # #2739
 # variant `match` over a subject the function OWNS (a `let`-bound constructor,
 # a fresh call result) now dispatches on the tag like a borrowed one: each
 # returned payload is a fresh copy and the subject drops at its scope end.
-# #3170: the mut-param reassign-from-HOF fixture's MIR rung walls on four
-# shapes its rows need: `main` builds its lines with interpolation in a call
-# argument, `f_filter_map` passes a closure that returns an option literal,
-# `f_branch` binds a heap-result `if`, and `f_fallible` a heap-result `match`
-# (the fallible map's carrier). Native falls back to the classic renderer —
-# the leg #3170 fixed — and the structural wasm leg and the interp agree with it.
+# #3170: the mut-param reassign-from-HOF fixture's MIR rung walls on two
+# shapes its rows need: `f_branch` binds a heap-result `if`, and `f_fallible`
+# and `main` a heap-result `match` (the fallible map's carrier). Native falls
+# back to the classic renderer — the leg #3170 fixed — and the structural wasm
+# leg and the interp agree with it. (`main`'s interpolated mut-call and
+# `f_filter_map`'s option-literal closure lower since walls lane 3, #2739.)
 spec/wasm_cross/mut_param_reassign_from_hof.almd :: f_branch  # #2739
 spec/wasm_cross/mut_param_reassign_from_hof.almd :: f_fallible  # #2739
 spec/wasm_cross/mut_param_reassign_from_hof.almd :: main  # #2739
