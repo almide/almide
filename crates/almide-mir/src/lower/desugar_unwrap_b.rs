@@ -520,14 +520,27 @@ fn never_err_short_circuit(
     ))
 }
 
+/// A typed error falling into a `String` channel (ADR-0021 D2, #2725): the text
+/// `"${e}"` shows — its repr — as a one-part interpolation, so the lowering's own
+/// Display desugar (and the corpus call counter, which reads the same node) renders it.
+fn erased_err_text(err: IrExpr) -> IrExpr {
+    IrExpr {
+        span: err.span.clone(),
+        kind: IrExprKind::StringInterp { parts: vec![almide_ir::IrStringPart::Expr { expr: err }] },
+        ty: Ty::String,
+        def_id: None,
+    }
+}
+
 /// The `err($x) => err(<payload>)` arm's payload — the propagated error IS the
 /// function result.
 ///
 /// Sound only when the propagated err TYPE is the fn's err type; v0 coerces a
 /// mismatch at the `?` site (walker/expressions.rs): List[String] → String joins
-/// ", " (`result.collect_map(..)!` in a String-err effect fn), any other mismatch
-/// Debug-formats. Mirror the join here (an executable `list.join` call the
-/// self-host registry links); decline the Debug class (`None`) so it walls honestly
+/// ", " (`result.collect_map(..)!` in a String-err effect fn). Mirror the join here
+/// (an executable `list.join` call the self-host registry links); any other typed
+/// err into a `String` channel carries its repr text ([`erased_err_text`]); a
+/// mismatch into a non-String channel declines (`None`) so it walls honestly
 /// instead of type-punning the err payload into the fn's err repr.
 fn let_unwrap_err_payload(
     body: &IrExpr,
@@ -547,8 +560,11 @@ fn let_unwrap_err_payload(
     }
     let list_str_err = matches!(err_ty,
         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String));
-    if !list_str_err || !matches!(fn_err, Ty::String) {
+    if !matches!(fn_err, Ty::String) {
         return None;
+    }
+    if !list_str_err {
+        return Some(erased_err_text(err_var));
     }
     Some(mk_at(
         body,
@@ -647,9 +663,9 @@ pub fn desugar_let_unwrap(body: &IrExpr) -> Option<IrExpr> {
     // err($x) => err($x)  (the propagated error IS the function result). Sound only when
     // the propagated err TYPE is the fn's err type; v0 coerces a mismatch at the `?` site
     // (walker/expressions.rs): List[String] → String joins ", " (`result.collect_map(..)!`
-    // in a String-err effect fn), any other mismatch Debug-formats. Mirror the join here
-    // (an executable list.join call the self-host registry links); decline the Debug class
-    // so it walls honestly instead of type-punning the err payload into the fn's err repr.
+    // in a String-err effect fn); any other typed err into a String channel carries its
+    // repr text (ADR-0021 D2). Mirror both here; a mismatch into a non-String channel
+    // declines so it walls honestly instead of type-punning the err payload.
     let err_payload = let_unwrap_err_payload(body, fresh, &err_ty, &result_ty)?;
     let err_body = mk(IrExprKind::ResultErr { expr: Box::new(err_payload) }, result_ty.clone());
     let err_arm = almide_ir::IrMatchArm {
