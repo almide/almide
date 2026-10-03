@@ -314,6 +314,12 @@ impl Emitter<'_> {
                 if let Some(out) = self.lower_host_call(module.as_str(), func.as_str(), args)? {
                     return Ok(out);
                 }
+                // The subprocess family (#2589) is self-hosted over the
+                // `__proc_*` leaves (stdlib/process_wasm.almd): the registry
+                // route, as http's non-host fns take it.
+                if module.as_str() == "process" {
+                    return self.lower_module_call_c(target, args, tail, ret_hint);
+                }
                 unsup(&format!("call:{module}.{func}"))
             }
             // datetime.now (#2703) and datetime.monotonic_ns are the two host

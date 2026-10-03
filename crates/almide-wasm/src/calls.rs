@@ -197,6 +197,14 @@ impl Emitter<'_> {
                         self.fs_call_str2(&args[0], &args[1], crate::fs_meta::OP_HTTP_FRAMED_BYTES)?;
                         return Ok(Some(self.fs_result_bytes()?));
                     }
+                    // The subprocess leaves (#2589, ADR-0025): two text
+                    // operands in a/b, a Result[String, String] answer.
+                    n if n.starts_with("__proc_") => {
+                        if let Some(&(_, op)) = crate::fs_meta::PROC_LEAVES.iter().find(|(l, _)| *l == n) {
+                            self.fs_call_str2(&args[0], &args[1], op)?;
+                            return Ok(Some(self.fs_result_string()?));
+                        }
+                    }
                     // The http call handle's leaves (#2633, http_call.rs).
                     n if n.starts_with("__http_call_") => {
                         if let Some(t) = self.lower_http_call_leaf(n, args)? {

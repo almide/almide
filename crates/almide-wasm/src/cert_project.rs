@@ -64,6 +64,10 @@ pub mod cap {
     pub const NET: u32 = 7;
     /// A program-declared `@extern(wasm, ..)` host function.
     pub const FOREIGN: u32 = 8;
+    /// Starting and signalling child processes (ops 80..=89, the private
+    /// `almide:process/spawn` capability, ADR-0025). Past [`super::SENTINEL`]
+    /// so the sentinel keeps its small value.
+    pub const PROC: u32 = 10;
 }
 
 /// A host operation the projector cannot name: no function declares it, so
@@ -74,7 +78,7 @@ pub mod cap {
 pub const SENTINEL: u32 = 9;
 
 /// What an `effect fn` declares: every modeled capability.
-const EFFECT_BOUND: &[u32] = &[0, 1, 2, 3, 4, 5, 6, 7, 8];
+const EFFECT_BOUND: &[u32] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, cap::PROC];
 /// What a plain `fn` declares: the console. `println` is admitted in any
 /// function, and io.almd declares its byte-level stdin readers
 /// (`io.read_byte`, `io.read_n_bytes`) plain `fn` on purpose — the
@@ -96,6 +100,7 @@ pub fn op_caps(op: i32) -> &'static [u32] {
         34 | 36 | 60 => &[CLOCK],
         35 => &[STDIN],
         43..=50 | 53..=59 | 70..=72 => &[NET],
+        80..=89 => &[PROC],
         _ => &[SENTINEL],
     }
 }

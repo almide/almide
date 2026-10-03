@@ -20,10 +20,23 @@ pub fn serves(op: i32, p3: bool) -> bool {
 
 /// The p1-served ops the p3 component does NOT serve, each with the reason
 /// (#3140's gate: the p3 served set covers `P1_SERVED_OPS` minus exactly
-/// these; `tests` below hold both directions). Empty since #3223 served
-/// env.set: a program that builds as a p1 core module builds as a p3
-/// component.
-pub const P3_EXCLUDED_P1_OPS: &[(i32, &str)] = &[];
+/// these; `tests` below hold both directions). Since #3223 only the
+/// subprocess family (#2589): the p1 core module carries it as the private
+/// `almide:process/spawn` import, and no component world declares that
+/// interface (ADR-0025).
+const PROC_EXCLUDED: &str = "the private almide:process/spawn import has no place in a component world (ADR-0025)";
+pub const P3_EXCLUDED_P1_OPS: &[(i32, &str)] = &[
+    (80, PROC_EXCLUDED),
+    (81, PROC_EXCLUDED),
+    (82, PROC_EXCLUDED),
+    (83, PROC_EXCLUDED),
+    (84, PROC_EXCLUDED),
+    (85, PROC_EXCLUDED),
+    (86, PROC_EXCLUDED),
+    (87, PROC_EXCLUDED),
+    (88, PROC_EXCLUDED),
+    (89, PROC_EXCLUDED),
+];
 
 /// Reject an artifact before writing it when its direct shim cannot serve it.
 /// P3 HTTP imports are selected separately whenever an HTTP operation is emitted.
@@ -64,6 +77,7 @@ fn operation_name(op: i32) -> &'static str {
             61 => "fs.fold_lines_range", 62 => "fs.fold_lines_chunked",
             63 => "fs.read_bytes_raw", 64 => "fs.read_bytes_raw_if_exists",
             73 => "panic",
+            80..=89 => "the subprocess family (process.exec / exec_status / spawn / kill / …)",
             _ => "unknown operation",
         })
 }

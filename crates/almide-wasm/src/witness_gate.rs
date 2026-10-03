@@ -498,6 +498,7 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
             if name.as_str().starts_with("__http_framed_")
                 || name.as_str().starts_with("__http_call_")
                 || name.as_str().starts_with("__http_serve_")
+                || name.as_str().starts_with("__proc_")
             {
                 return Some(Why::Deep("call:host-splice".into()));
             }

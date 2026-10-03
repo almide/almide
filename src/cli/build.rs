@@ -556,6 +556,18 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // on). `ALMIDE_COMPONENT_ADAPTER=1` is the switch back to the stage-0
     // adapter wrap over the `to_wasi` module (#2752 keeps it: the adapter
     // route is also what an fs program takes below).
+    // #2589 (ADR-0025): the subprocess family rides the private
+    // `almide:process/spawn` import, which the p1 core module carries and no
+    // component world declares — refuse the component build by name rather
+    // than let a transform fail on an import it cannot place.
+    let proc_op = host_ops.iter().copied().find(|op| (80..=89).contains(op));
+    if component && let Some(op) = proc_op {
+        err(&format!(
+            "error[E081]: process.* (host op {op}) needs the private almide:process/spawn capability, which no component world declares (ADR-0025)\n  \
+             hint: build the core module (drop --component) for a host that implements almide:process/spawn, or run it with `almide run {file} --target wasm`"
+        ));
+        std::process::exit(1);
+    }
     let direct_p2 = component && !almide_base::env::flag("ALMIDE_COMPONENT_ADAPTER");
     // `ALMIDE_COMPONENT_P3=1` (#1628 stage 2, experimental): the WASI 0.3
     // component — stdio over component-model streams on the async
@@ -655,6 +667,14 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // docs/contracts/proven-vs-trusted.md). `verified` on output no
     // certificate covers is how #2154's run-time trap shipped (#2184).
     let trust = "trusted, certificate pending";
+    // The artifact needs a host that grants the subprocess capability: say
+    // so at build time, since a stock runtime will refuse it at load.
+    if proc_op.is_some() {
+        err(&format!(
+            "note: {output} imports almide:process/spawn (process.*, ADR-0025): a stock WASI runtime refuses it at load; \
+             it runs on a host that implements that import — `almide run {file} --target wasm` is one"
+        ));
+    }
     if !wasm_opt {
         let host_note = host_from_shipped(&bytes);
         err(&format!(
@@ -914,6 +934,12 @@ fn check_wasm_availability(
                 .find_map(|l| l.strip_prefix("legs = ["))
                 .unwrap_or("")
                 .to_string();
+            // A host-capability row (#2589, ADR-0025) is not a build wall:
+            // the artifact ships with the capability's import and a host
+            // without it refuses at load.
+            if field("class").as_deref() == Some("host-capability") {
+                continue;
+            }
             if let Some(fn_name) = field("fn") {
                 out.insert(
                     fn_name,
@@ -1132,6 +1158,11 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
         .filter(|name| resolved.sources.contains_key(name))
         .collect();
     check_wasm_availability(&ir_program, &package, embedded_leg)?;
+    // #2589: `[permissions] proc` bounds the subprocess family on this path
+    // too — statically here, and at run time in the embedded host.
+    if let Some(proj) = std::path::Path::new("almide.toml").exists().then(|| project::parse_toml(std::path::Path::new("almide.toml")).ok()).flatten() {
+        super::enforce_proc_allowlist(&ir_program, proj.proc_allow.as_deref()).map_err(|_| ())?;
+    }
 
     // Routing inputs (`RouteInputs::of_ir`, the one rule): project shape,
     // decided from what the v0 gates already computed — never from a

@@ -204,9 +204,13 @@ fn check_one(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critic
     // Security Layer 2: check permissions if defined in almide.toml
     if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            if !proj.permissions.is_empty() {
+            if !proj.permissions.is_empty() || proj.proc_allow.is_some() {
                 let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
-                if let Err(_) = super::check_permissions(&ir, &proj.permissions) {
+                if !proj.permissions.is_empty() && super::check_permissions(&ir, &proj.permissions).is_err() {
+                    std::process::exit(1);
+                }
+                // #2589: `[permissions] proc`, the commands process.* may start.
+                if super::enforce_proc_allowlist(&ir, proj.proc_allow.as_deref()).is_err() {
                     std::process::exit(1);
                 }
             }

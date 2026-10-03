@@ -310,6 +310,23 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         // convention); poll / read_new / wait / cancel are its public intrinsics.
         (crate::embedded::SRC_HTTP_CALL, &[("__hc_start_impl", "__call_start"), ("__hc_stream_limited_impl", "__request_stream_limited"), ("__hc_poll_impl", "http.poll"), ("__hc_read_new_impl", "http.read_new"), ("__hc_wait_impl", "http.wait"), ("__hc_cancel_impl", "http.cancel")]),
         (crate::embedded::SRC_HTTP_SERVE, &[("http_serve", "http.serve")]),
+        // The subprocess family (#2589, ADR-0025): one `almide:process/spawn`
+        // call per fn, over the `__proc_*` host-op leaves.
+        (
+            crate::embedded::SRC_PROCESS_WASM,
+            &[
+                ("__process_exec_impl", "process.exec"),
+                ("__process_exec_in_impl", "process.exec_in"),
+                ("__process_exec_with_stdin_impl", "process.exec_with_stdin"),
+                ("__process_exec_status_impl", "process.exec_status"),
+                ("__process_exec_status_timeout_impl", "process.exec_status_timeout"),
+                ("__process_exec_attached_impl", "process.exec_attached"),
+                ("__process_spawn_impl", "process.spawn"),
+                ("__process_kill_impl", "process.kill"),
+                ("__process_is_alive_impl", "process.is_alive"),
+                ("__process_pid_impl", "process.pid"),
+            ],
+        ),
         (crate::embedded::SRC_DATETIME_PARSE_ISO, &[("datetime_parse_iso", "datetime.parse_iso")]),
         (crate::embedded::SRC_HTTP_REQUEST, &[("http_new_request", "http.new_request"), ("http_req_method", "http.req_method"), ("http_req_path", "http.req_path"), ("http_req_body", "http.req_body"), ("http_req_header", "http.req_header"), ("http_param", "http.param"), ("http_req_with_params", "http.__with_params"), ("http_req_with_path", "http.__with_path")]),
         (crate::embedded::SRC_HTTP_RESPONSE, &[("http_response", "http.response"), ("http_json", "http.json"), ("http_redirect", "http.redirect"), ("http_with_headers", "http.with_headers"), ("http_status", "http.status"), ("http_body", "http.body"), ("http_set_header", "http.set_header"), ("http_get_header", "http.get_header"), ("http_status_code", "http.status_code"), ("http_headers", "http.headers"), ("http_header_values", "http.header_values"), ("http_set_body", "http.__set_body")]),

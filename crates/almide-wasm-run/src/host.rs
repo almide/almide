@@ -351,6 +351,9 @@ fn run_wasm_src(
         Err(wasmtime::Error::msg("almide.exit"))
     }
     linker.func_wrap("almide", "exit", exit_host)?;
+    // The private subprocess import (#2589): the canonical form a stock
+    // artifact carries, served here with the same core as ops 80..=89.
+    crate::host_process::link_spawn_import(&mut linker)?;
     linker.func_wrap(
         "almide",
         "fs_call",
@@ -439,6 +442,21 @@ fn run_wasm_src(
             // live in the run's own state — one per run, like native's.
             if (crate::host_serve::OP_SERVE_BIND..=crate::host_serve::OP_SERVE_REPLY).contains(&op) {
                 let (ret, buf) = crate::host_serve::dispatch(&caller.data().serve, caller.data().live_out.as_ref(), op, &a, frames, parse_http_frame);
+                *caller.data().fs_buf.lock().expect("fs buf") = buf;
+                return Ok(ret);
+            }
+            // ops 80..=89 = almide:process/spawn (#2589, ADR-0025): the
+            // subprocess core native runs; stdout flushed before a child
+            // that shares it.
+            if (crate::host_process::OP_FIRST..=crate::host_process::OP_LAST).contains(&op) {
+                let live = caller.data().live_out.clone();
+                let flush = move || {
+                    if let Some(w) = &live {
+                        use std::io::Write as _;
+                        let _ = w.lock().expect("live stdout").flush();
+                    }
+                };
+                let (ret, buf) = crate::host_process::dispatch(op, &a, &b, &flush);
                 *caller.data().fs_buf.lock().expect("fs buf") = buf;
                 return Ok(ret);
             }
