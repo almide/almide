@@ -1,13 +1,13 @@
 diff --git a/crates/almide-wasm/src/fan.rs b/crates/almide-wasm/src/fan.rs
-index 8bb80efe9..8633b8b2d 100644
+index 37dcd193c..d69c2fce3 100644
 --- a/crates/almide-wasm/src/fan.rs
 +++ b/crates/almide-wasm/src/fan.rs
-@@ -54,7 +54,7 @@ impl Emitter<'_> {
-                         i.i32_const(0).local_set(hr);
-                     } else {
-                         // err → hr IS the whole result, break.
--                        i.i32_const(0).i32_ne().br_if(1);
-+                        i.i32_const(0).i32_ne().drop(); // [MUTANT: map err-break dropped]
-                     }
-                 }
-                 if !first_ok_wins {
+@@ -185,7 +185,7 @@ impl Emitter<'_> {
+                             // err → the first one is kept as the result, a
+                             // later one is released; the loop goes on.
+                             i.if_(BlockType::Empty);
+-                            i.local_get(herr).i32_eqz().if_(BlockType::Empty);
++                            i.i32_const(1).if_(BlockType::Empty); // [MUTANT: map keeps the LAST err, not the lowest-index one]
+                             i.local_get(hr).local_set(herr);
+                             i.else_();
+                             i.local_get(hr).call(carrier_dec);
