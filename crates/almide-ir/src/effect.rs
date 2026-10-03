@@ -298,7 +298,7 @@ mod classification_gate {
             }
         }
         for q in HOST_FREE_EFFECT_FNS {
-            let (m, f) = q.split_once('.').unwrap();
+            let (m, f) = q.split_once('.').expect("HOST_FREE_EFFECT_FNS rows are module.fn");
             assert_eq!(module_effects(m), Some(ModuleEffects::Pure), "`{q}` is listed but `{m}` is not Pure");
             assert!(module_fns(m).any(|d| fn_name(d) == f && fn_is_effect(d)), "`{q}` is not an effect fn of `{m}`");
         }
