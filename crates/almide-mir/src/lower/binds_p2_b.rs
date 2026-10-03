@@ -777,7 +777,7 @@ impl LowerCtx {
     /// Extracted from `Self::lower_bind_heap_call_named` (second-round split, cog
     /// reduction): the independent (non-mutually-exclusive) read-shape tracking checks
     /// for a Named-call's fresh heap result, verbatim.
-    fn seed_call_named_heap_read_shape(&mut self, dst: ValueId, ty: &Ty) {
+    pub(crate) fn seed_call_named_heap_read_shape(&mut self, dst: ValueId, ty: &Ty) {
         // A user fn returning `List[heap]` (`build_nested() -> List[List[Int]]`) is
         // likewise a REAL, POPULATED nested-ownership block, so admit the element
         // borrow `nested[i]` (LoadHandle at `$elem_addr`) over the bound var — the
