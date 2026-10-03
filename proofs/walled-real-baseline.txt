@@ -122,17 +122,10 @@
 # incumbent's admitted profile by design. Each row prunes when the incumbent
 # learns the shape — or with the incumbent's retirement, whichever first.
 spec/wasm_cross/list_pop_map_insert_on_record_field.almd :: drain
-# (2026-08-30, C-326/#1696) The gzip inflate joined the corpus lowering on the
-# STRUCTURAL leg (the phase-4 hoist); the incumbent's brick walls its loop-level
-# tuple write-back (WhileHeapAccumulator) and its dispatch callee by design —
-# the same division the host-determinism MAX_WALLED=17 row records. Both rows
-# prune with #1696 steps 4-5 (certificate on the structural leg, incumbent
-# retirement) — or earlier if the incumbent learns the shape.
-spec/wasm_cross/gzip_inflate_members.almd :: gunzip
-spec/wasm_cross/gzip_inflate_members.almd :: inflate
 # (2026-08-31, C-327) env.sleep_ms has no capability seat in the incumbent
 # brick; the structural leg serves it (embedded-host op 36 / p1 clock spin).
-# Prunes with #1696 steps 4-5, same as the inflate pair above.
+# Prunes with #1696 steps 4-5. (The gzip inflate pair that sat above lowers
+# since walls lane 4, #2739: the loop-level tuple write-back executes.)
 spec/wasm_cross/env_sleep_pause.almd :: main
 # 2026-08-31 (#1710 increment 1): the embedded_cross http fixture's `main` walls
 # on the BUILD path by DESIGN — ops 43-47 are served by the embedded host
