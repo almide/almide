@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 832  implementations = 1992
+# holes = 855  implementations = 1992
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -2167,6 +2167,97 @@ native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
+[[hole]]
+module   = "http"
+name     = "__http_call_open"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "http"
+name     = "__http_call_state"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "http"
+name     = "__http_call_result_raw"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "http"
+name     = "__http_call_wait_raw"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "http"
+name     = "__http_call_read_raw"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "http"
+name     = "__http_call_cancel_raw"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "http"
+name     = "__http_call_step_raw"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "http"
+name     = "__http_framed_text"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "http"
+name     = "__http_framed_status"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "http"
+name     = "__http_framed_bytes"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "http"
+name     = "__http_serve_bind"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "http"
+name     = "__http_serve_next"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "http"
+name     = "__http_serve_reply"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
 [[hole]]
 module   = "int"
 name     = "to_string"
@@ -4932,6 +5023,76 @@ native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
+[[hole]]
+module   = "process"
+name     = "__proc_exec"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_exec_in"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_exec_with_stdin"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_exec_status"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_exec_status_timeout"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_exec_attached"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_spawn"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_kill"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_is_alive"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "process"
+name     = "__proc_pid"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
 [[hole]]
 module   = "random"
 name     = "int"
