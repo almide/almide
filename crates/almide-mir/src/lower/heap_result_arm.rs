@@ -71,7 +71,8 @@ impl LowerCtx {
             .lower_heap_result_arm_literal(arm, result_ty)
             .or_else(|| self.lower_heap_result_arm_option(arm, result_ty))
             .or_else(|| self.lower_heap_result_arm_result(arm, result_ty))
-            .or_else(|| self.lower_heap_result_arm_ctrl(arm, result_ty));
+            .or_else(|| self.lower_heap_result_arm_ctrl(arm, result_ty))
+            .or_else(|| self.lower_result_ctor_arm_via_bound_payload(arm, result_ty));
         if out.is_none() {
             crate::trace::trace("ALMIDE_DBG_ELEM", || {
                 format!(
