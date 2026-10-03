@@ -419,7 +419,7 @@ impl OwnershipScan {
     ) {
         for a in args {
             if let CallArg::Handle(v) = a {
-                if self.live(*v).is_none() {
+                if !self.call_arg_live(*v) {
                     self.violations.push(violation(i, *v, ViolationKind::UseAfterFree));
                 }
             }
@@ -663,11 +663,17 @@ impl OwnershipScan {
     /// ownership-neutral. Verbatim.
     fn apply_prim_rc_event(&mut self, kind: &PrimKind, dst: &Option<ValueId>, args: &[ValueId]) {
         match kind {
+            // The carrier is a LIVE alias of its source's object (#3263): a
+            // borrowing use of it (a call's handle arg — `string.eq(prim.handle
+            // (child))`) live-checks that OBJECT, as the certificate's line does.
+            // It acquires nothing, so a release through it still needs a held
+            // reference.
             PrimKind::Handle => {
                 if let (Some(d), Some(&o)) =
                     (dst.as_ref(), args.first().and_then(|a| self.object_of.get(a)))
                 {
                     self.object_of.insert(*d, o);
+                    self.dead.insert(*d, false);
                 }
             }
             // T1-3 native Result carrier: the borrowed Err-String read ALIASES
@@ -692,9 +698,13 @@ impl OwnershipScan {
             // child "live" through a `Dup` of a grandchild after the parent
             // was freed.) An address with NO tracked root stays off the model
             // (the pre-existing load64 floor) — unknown, never guessed.
+            // The address may come from `ElemAddr` (a list element — every
+            // `__list_dec_go` / `__list_enc_go` over a borrowed list param), which
+            // only `addr_of` records: the certificate's `load_child` reads the
+            // same map (#3263).
             PrimKind::LoadHandle => {
-                if let (Some(d), Some(&o)) =
-                    (dst.as_ref(), args.first().and_then(|a| self.object_of.get(a)))
+                if let (Some(d), Some(o)) =
+                    (dst.as_ref(), args.first().and_then(|a| self.address_object(*a)))
                 {
                     self.object_of.insert(*d, *d);
                     self.child_parent.insert(*d, o);
@@ -762,6 +772,13 @@ impl OwnershipScan {
                 None => return false,
             }
         }
+    }
+
+    /// A call's handle argument is checked per OBJECT, the certificate's
+    /// probe (#3263): a handle released while a sibling still holds its object
+    /// passes the same live pointer. An untracked argument stays a violation.
+    fn call_arg_live(&self, v: ValueId) -> bool {
+        self.address_object(v).is_some_and(|o| self.object_alive(o))
     }
 
     /// The object an address (or a handle used as one) points into.

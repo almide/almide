@@ -7,11 +7,14 @@
 // object may have been freed in between), direct loads through a handle, and
 // `Call` handle args — over owned objects and a borrowed heap param. #3261:
 // the loaded CHILD handles are reused — read, dereferenced, loaded from, and
-// `Dup`'d (a reference of the frame's own on the child).
+// `Dup`'d (a reference of the frame's own on the child). #3263: a child
+// loaded through an `ElemAddr` address is reused like any other, and a call
+// arg may be any handle — one released while a sibling keeps its object, or a
+// `prim.handle` carrier — since both sides now check a call arg per object.
 
 /// The generator state: the op list, the live owned handles, which object each
 /// handle denotes, the address pool, the raw loaded children, and the
-/// handles `Dup`'d from a child (directly or from another such handle).
+/// `prim.handle` carriers.
 struct ReadGen {
     st: u64,
     next: u32,
@@ -21,8 +24,7 @@ struct ReadGen {
     param: Option<ValueId>,
     addrs: Vec<ValueId>,
     children: Vec<ValueId>,
-    child_dups: std::collections::BTreeSet<ValueId>,
-    elem_addrs: std::collections::BTreeSet<ValueId>,
+    carriers: Vec<ValueId>,
 }
 
 impl ReadGen {
@@ -44,26 +46,12 @@ impl ReadGen {
         self.obj.keys().copied().collect()
     }
 
-    /// Is `o` still held: the param (the caller holds it), or some live handle on it.
-    fn object_live(&self, o: ValueId) -> bool {
-        Some(o) == self.param || self.live.iter().any(|h| self.obj.get(h) == Some(&o))
-    }
-
-    /// The call-arg pool. A handle that was dropped while a sibling handle
-    /// keeps its object alive is left out: `verify_ownership` checks a call
-    /// arg per HANDLE and the certificate per OBJECT, a known difference that
-    /// `gen_wellformed` also steers around (it only `Dup`s / `Borrow`s live
-    /// handles). Live handles and handles whose whole object is gone are in.
-    /// A released child `Dup` is out for the same per-handle reason; the raw
-    /// children are in.
+    /// The call-arg pool: every handle, live or released, every raw child and
+    /// every `prim.handle` carrier.
     fn call_arg_pool(&self) -> Vec<ValueId> {
-        let mut pool: Vec<ValueId> = self
-            .handles()
-            .into_iter()
-            .filter(|h| self.live.contains(h) || Some(*h) == self.param || !self.object_live(self.obj[h]))
-            .filter(|h| self.live.contains(h) || !self.child_dups.contains(h))
-            .collect();
+        let mut pool = self.handles();
         pool.extend(self.children.iter().copied());
+        pool.extend(self.carriers.iter().copied());
         pool
     }
 
@@ -83,9 +71,6 @@ impl ReadGen {
         self.ops.push(Op::Dup { dst: v, src });
         let o = self.obj.get(&src).copied().unwrap_or(src);
         self.obj.insert(v, o);
-        if self.children.contains(&src) || self.child_dups.contains(&src) {
-            self.child_dups.insert(v);
-        }
         self.live.push(v);
     }
 
@@ -108,31 +93,27 @@ impl ReadGen {
         self.ops.push(Op::ConstInt { dst: k, value: 8 });
         if next_rand(&mut self.st) % 3 == 0 {
             self.ops.push(Op::Prim { kind: PrimKind::ElemAddr, dst: Some(a), args: vec![src, k] });
-            self.elem_addrs.insert(a);
         } else {
             self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![src] });
             self.ops.push(Op::IntBinOp { dst: a, op: crate::IntOp::Add, a: h, b: k });
+            self.carriers.push(h);
         }
         self.addrs.push(a);
     }
 
     /// A load or store through an address from the pool, or directly through a
-    /// handle or a raw child. A `LoadHandle` result joins the child pool.
+    /// handle, a raw child or a carrier. A `LoadHandle` result joins the child pool.
     fn deref(&mut self) {
         let mut pool = self.addrs.clone();
         pool.extend(self.handles());
         pool.extend(self.children.iter().copied());
+        pool.extend(self.carriers.iter().copied());
         let Some(a) = self.pick(&pool) else { return };
         let d = self.fresh();
         match next_rand(&mut self.st) % 3 {
             0 => {
                 self.ops.push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), args: vec![a] });
-                // `verify_ownership` keeps a child loaded through an `ElemAddr`
-                // address off its model (an unknown handle, dead to every
-                // use), where the certificate tracks it: not reused.
-                if !self.elem_addrs.contains(&a) {
-                    self.children.push(d);
-                }
+                self.children.push(d);
             }
             1 => self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(d), args: vec![a] }),
             _ => {
@@ -181,8 +162,7 @@ fn gen_reads(seed: u64) -> MirFunction {
         param: None,
         addrs: Vec::new(),
         children: Vec::new(),
-        child_dups: std::collections::BTreeSet::new(),
-        elem_addrs: std::collections::BTreeSet::new(),
+        carriers: Vec::new(),
     };
     if with_param {
         let p = g.fresh();
@@ -304,4 +284,58 @@ fn a_grandchild_dup_does_not_keep_the_child() {
     ok.ops[10] = Op::Call { dst: None, func: RtFn::PrintStr, args: vec![CallArg::Handle(v(7))], result: None };
     assert!(cert_all_balanced(&ownership_certificate(&ok)));
     assert_eq!(verify_ownership(&ok), Ok(()));
+}
+
+/// #3263: a `prim.handle` carrier of a raw child, passed as a call arg. Both
+/// sides accept it while the child's parent is live (`string.eq(prim.handle
+/// (child))` in every derived `eq`), and both reject it after the parent's
+/// last release. The certificate used to miss the second case: the carrier
+/// sits only in `addr_of`, so its call-arg probe found no line.
+#[test]
+fn a_child_carrier_call_arg_is_probed_on_the_child() {
+    let v = ValueId;
+    let call = Op::Call { dst: None, func: RtFn::PrintStr, args: vec![CallArg::Handle(v(2))], result: None };
+    let head = vec![
+        Op::Alloc { dst: v(0), repr: heap(), init: Init::Opaque },
+        Op::Prim { kind: PrimKind::LoadHandle, dst: Some(v(1)), args: vec![v(0)] },
+        Op::Prim { kind: PrimKind::Handle, dst: Some(v(2)), args: vec![v(1)] },
+    ];
+    let live = func([head.clone(), vec![call.clone(), Op::Drop { v: v(0) }]].concat());
+    assert_eq!(ownership_certificate(&live), "ibbd\n");
+    assert_eq!(verify_ownership(&live), Ok(()));
+    let freed = func([head, vec![Op::Drop { v: v(0) }, call]].concat());
+    assert_eq!(
+        ownership_certificate(&freed),
+        include_str!("../../../proofs/poisoned-certs/3263-child-carrier-callarg-after-free.cert")
+    );
+    assert!(!cert_all_balanced(&ownership_certificate(&freed)));
+    assert!(verify_ownership(&freed).is_err());
+}
+
+/// #3263: a child loaded through an `ElemAddr` address is tracked like one
+/// loaded through `prim.handle + off`. Over a borrowed list param (every
+/// `__list_dec_go` / `__list_enc_go`) a call on the element is fine; over an
+/// owned list it is fine until the list's last release.
+#[test]
+fn an_elem_addr_child_is_tracked() {
+    let v = ValueId;
+    let call = Op::Call { dst: None, func: RtFn::PrintStr, args: vec![CallArg::Handle(v(3))], result: None };
+    let load = |list: ValueId| {
+        vec![
+            Op::ConstInt { dst: v(1), value: 0 },
+            Op::Prim { kind: PrimKind::ElemAddr, dst: Some(v(2)), args: vec![list, v(1)] },
+            Op::Prim { kind: PrimKind::LoadHandle, dst: Some(v(3)), args: vec![v(2)] },
+        ]
+    };
+    let mut borrowed = func([load(v(0)), vec![call.clone()]].concat());
+    borrowed.params = vec![MirParam { value: v(0), repr: heap() }];
+    assert!(cert_all_balanced(&ownership_certificate(&borrowed)));
+    assert_eq!(verify_ownership(&borrowed), Ok(()));
+    let alloc = Op::Alloc { dst: v(0), repr: heap(), init: Init::Opaque };
+    let owned = func([vec![alloc.clone()], load(v(0)), vec![call.clone(), Op::Drop { v: v(0) }]].concat());
+    assert!(cert_all_balanced(&ownership_certificate(&owned)));
+    assert_eq!(verify_ownership(&owned), Ok(()));
+    let freed = func([vec![alloc], load(v(0)), vec![Op::Drop { v: v(0) }, call]].concat());
+    assert!(!cert_all_balanced(&ownership_certificate(&freed)));
+    assert!(verify_ownership(&freed).is_err());
 }
