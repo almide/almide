@@ -439,7 +439,9 @@ allow = ["FS.read", "IO.stdout"]
 > The dotted names in this document are a design. The compiler does not
 > accept them. Today `allow` takes the six effect categories `IO`, `Net`,
 > `Env`, `Time`, `Rand` and `Fan` ([effect-system.md §8](../specs/effect-system.md#8-permissions)),
-> and refuses any other name, these included (#3247).
+> and refuses any other name, these included (#3247). The one implemented
+> addition is the `proc` command list beside it ([What the checker enforces
+> today](#what-the-checker-enforces-today)).
 
 No `[permissions]` section = all capabilities allowed (backward compatible with pre-capability code).
 
