@@ -122,6 +122,9 @@ impl LowerCtx {
                 }
                 return Ok(Some(dst));
             }
+            if let Some(dst) = self.lower_tail_result_ctor_via_bound_payload(tail) {
+                return Ok(Some(dst));
+            }
         }
         let repr = repr_of(&tail.ty)?;
         let init = alloc_init(tail);
