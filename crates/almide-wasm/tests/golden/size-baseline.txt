@@ -201,6 +201,7 @@
 5567	spec/wasm_cross/fan_race_mapper.almd
 2922	spec/wasm_cross/fan_settle_tuple.almd
 4267	spec/wasm_cross/fan_sibling_trap.almd
+4471	spec/wasm_cross/fan_trap_waits_for_elements_below.almd
 2768	spec/wasm_cross/fan_var_thunk_list.almd
 2087	spec/wasm_cross/fan_worker_abort_keeps_stdout.almd
 2498	spec/wasm_cross/filter_map_conditional_arm.almd

@@ -301,6 +301,7 @@ spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd
 spec/wasm_cross/fan_pure_thunks.almd
 spec/wasm_cross/fan_settle_tuple.almd
 spec/wasm_cross/fan_sibling_trap.almd
+spec/wasm_cross/fan_trap_waits_for_elements_below.almd
 spec/wasm_cross/fan_var_thunk_list.almd
 spec/wasm_cross/fan_worker_abort_keeps_stdout.almd
 spec/wasm_cross/filter_map_conditional_arm.almd
