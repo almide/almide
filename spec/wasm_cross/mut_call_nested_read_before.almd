@@ -1,0 +1,88 @@
+// @contract: C-132
+// An operand that READS a variable before a later operand passes that same
+// variable to a `mut` parameter sees the value from BEFORE the call, and every
+// operand runs left to right (#3230). The `&mut` sits INSIDE the later operand
+// — an interpolation part, or the argument of a nested call — not as a direct
+// argument of the call being built. Native emitted `format!("{} {}", c,
+// bump(&mut c))` and `three(&*s, &*grow(&mut s), &*s)`, which rustc refused
+// (E0502); wasm already printed the left-to-right result. Native now binds
+// the earlier operands to temporaries first, in order, and never an operand
+// after the call (it must see the write-back).
+// Rows: an interpolation over Int, Float, Bool, String, a record field and a
+// List; a nested call's arguments; that call inside a list element and inside
+// an interpolation; effectful operands around the hoisted read (order); a
+// module-level `var` read before a call that writes it.
+type R = { n: Int, tag: String }
+
+var hits = 0
+
+fn bump(mut c: Int) -> Int = {
+  c = c * 10
+  c + 1
+}
+
+fn flip(mut b: Bool) -> Bool = {
+  b = not b
+  b
+}
+
+fn half(mut f: Float) -> Float = {
+  f = f / 2.0
+  f
+}
+
+fn grow(mut s: String) -> String = {
+  s = s + "!"
+  s
+}
+
+fn later(mut r: R) -> Int = {
+  r.n = r.n + 1
+  r.tag = r.tag + "!"
+  r.n
+}
+
+fn push9(mut xs: List[Int]) -> Int = {
+  list.push(xs, 9)
+  list.len(xs)
+}
+
+fn noisy(n: Int) -> Int = {
+  println("noisy ${n}")
+  n
+}
+
+fn show(s: String) -> String = {
+  println("show ${s}")
+  s
+}
+
+fn hit() -> Int = {
+  hits = hits + 1
+  hits
+}
+
+fn three(a: String, b: String, d: String) -> String = "${a}/${b}/${d}"
+
+fn main() -> Unit = {
+  var c = 3
+  println("c ${c} bump ${bump(c)} c ${c}")
+  var b = true
+  var f = 3.0
+  println("${b} ${flip(b)} ${b} ${f} ${half(f)} ${f}")
+  var s = "x"
+  println("s ${s} ${grow(s)} ${s}")
+  var g = R { n: 1, tag: "t" }
+  println("${g.tag} ${g.n} ${later(g)} ${g.tag} ${g.n}")
+  var xs = [1, 2]
+  println("xs ${xs} ${push9(xs)} ${xs}")
+  println(three(s, grow(s), s))
+  let ls = [
+    three(s, grow(s), s)
+  ]
+  println("${ls}")
+  println("n ${three(s, grow(s), s)} ${c + 1} ${bump(c)} ${c}")
+  println("o ${noisy(1)} ${show(s)} ${noisy(2)} ${grow(s)} ${show(s)}")
+  println(three("${noisy(3)}", show(s), grow(s)))
+  println("h ${hits} ${hit()} ${hits}")
+}
