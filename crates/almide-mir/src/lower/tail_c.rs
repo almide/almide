@@ -534,3 +534,5 @@ impl LowerCtx {
         lowered
     }
 }
+
+include!("closure_variant_capture.rs");
