@@ -32,7 +32,7 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     let abi = fs_abi(&resolve)?;
     let habi = if wants_http { Some(http_abi(&resolve)?) } else { None };
     // The stat result's WIT-derived footprint must fit its park slot.
-    assert!(STATRET + abi.stat_size <= MSG_HTTP, "STATRET reaches the messages");
+    assert!(STATRET + abi.stat_size <= MSG2, "STATRET reaches the messages");
 
     let parsed = parse_module(bytes)?;
     let Parsed {
@@ -74,6 +74,10 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     let has = |m: &str, n: &str| blocks.iter().flat_map(|b| b.iter()).any(|(_, bm, bn, _)| *bm == m && *bn == n);
     let fs = P3Fs::plan(host_ops, (park + PARK_SPAN) as u32, &resolve, &abi, &has)?;
     let fs_span: u64 = fs.as_ref().map_or(0, |_| FS_PAGE);
+    // The env.set overlay log (#3223): its own page past the fs page — the
+    // park's last page, where p1 keeps it, holds the http texts here.
+    let ovl_span: u64 = if env.set { crate::wasi::env_overlay::OVERLAY_BYTES } else { 0 };
+    let span = PARK_SPAN + fs_span + ovl_span;
     let n_imports = n_env + fs.as_ref().map_or(0, |f| f.splice.fresh_imports());
     let shift = n_imports - 5;
     let shim_base = n_imports + n_funcs;
@@ -111,11 +115,13 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     let g_slots = global_count + 9; // fan slot-table base (0 = unallocated)
     let g_slotn = global_count + 10; // slot high-water mark
     let (g_env, g_envn) = (global_count + 11, global_count + 12); // cached environment list
-    let fs_first_global = global_count + 13; // the fs service's own globals
+    // g_ovl: bytes appended to the overlay log, when env.set ships.
+    let g_ovl = env.set.then_some(global_count + 13);
+    let fs_first_global = global_count + 13 + u32::from(env.set); // the fs service's own globals
     let mut globals = GlobalSection::new();
     for (idx, (gt, i32v, i64v, f64v)) in parsed_globals.iter().enumerate() {
         let init = if idx as u32 == heap_global {
-            ConstExpr::i32_const((heap_init + PARK_SPAN + fs_span) as i32)
+            ConstExpr::i32_const((heap_init + span) as i32)
         } else if let Some(v) = i32v {
             ConstExpr::i32_const(*v)
         } else if let Some(v) = i64v {
@@ -135,6 +141,9 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     globals.global(mutable_i32, &ConstExpr::i32_const(0)); // g_slotn
     globals.global(mutable_i32, &ConstExpr::i32_const(-1)); // g_env (unfetched)
     globals.global(mutable_i32, &ConstExpr::i32_const(0)); // g_envn
+    if g_ovl.is_some() {
+        globals.global(mutable_i32, &ConstExpr::i32_const(0)); // g_ovl
+    }
     if let Some(f) = &fs {
         f.splice.emit_globals(&mut globals);
     }
@@ -190,9 +199,9 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
 
     let mut memories = MemorySection::new();
     memories.memory(MemoryType {
-        minimum: old_mem_min + (PARK_SPAN + fs_span) / 65536,
+        minimum: old_mem_min + span / 65536,
         // #1729: carry the heap-cap maximum through, span-shifted.
-        maximum: old_mem_max.map(|m| m.max(old_mem_min) + (PARK_SPAN + fs_span) / 65536),
+        maximum: old_mem_max.map(|m| m.max(old_mem_min) + span / 65536),
         memory64: false,
         shared: false,
         page_size_log2: None,
@@ -225,7 +234,8 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     code.function(&shim_print(out_port, park, f_await, true));
     code.function(&shim_print(err_port, park, f_await, true));
     code.function(&shim_exit());
-    code.function(&shim_fs_call(g, &abi, f_fs_self, f_http, f_env, svc.as_ref()));
+    let env_ops = env.ops();
+    code.function(&shim_fs_call(g, &abi, f_fs_self, f_http, f_env.map(|fe| (fe, env_ops.as_slice())), svc.as_ref()));
     code.function(&shim_host_read(g_plen, g_ppos));
     code.function(&shim_cabi_realloc(heap_global));
     code.function(&shim_run(main_index + shift, g));
@@ -240,7 +250,11 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     code.function(&shim_realloc_checked(f_reserve, f_realloc));
     code.function(&shim_await(park));
     let texts = habi.as_ref().map(|h| HttpErrTexts::new(park, h));
-    push_optional_shims(&mut code, g, habi.as_ref().zip(texts.as_ref()).zip(http_fns), env, f_env);
+    let ovl = g_ovl.map(|g_len| P3Overlay {
+        log: crate::wasi::env_overlay::OverlayLog { base: park + PARK_SPAN + fs_span, g_len },
+        f_eprintln,
+    });
+    push_optional_shims(&mut code, g, habi.as_ref().zip(texts.as_ref()).zip(http_fns), (env, ovl), f_env);
     let fs_to = fs_import_at.map(|import_at| SpliceTargets {
         import_at,
         g_plen,
@@ -269,6 +283,9 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     }
     if let Some(t) = &texts {
         data.active(0, &ConstExpr::i32_const(t.base as i32), t.blob.iter().copied());
+    }
+    if ovl.is_some() {
+        data.active(0, &ConstExpr::i32_const((park + MSG2) as i32), ENV_FULL_MSG.iter().copied());
     }
 
     let mut m = Module::new();
@@ -311,14 +328,14 @@ fn push_optional_shims(
     code: &mut CodeSection,
     g: P3Globals,
     http: Option<((&HttpAbi, &HttpErrTexts), HttpErrFns)>,
-    env: EnvImports,
+    (env, ovl): (EnvImports, Option<P3Overlay>),
     f_env: Option<u32>,
 ) {
     if let Some(((h, t), fns)) = http {
         code.function(&shim_http(g, h, t, fns));
     }
     if env.any() {
-        code.function(&shim_env(g, env));
+        code.function(&shim_env(g, env, ovl));
     }
     if let (Some(((_, t), fns)), Some(fe)) = (http, f_env) {
         code.function(&shim_http_quote());

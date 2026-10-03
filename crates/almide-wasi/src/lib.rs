@@ -59,6 +59,7 @@ pub const P1_SERVED_OPS: &[i32] = &[
     29, 30, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 51, 52, 60, 61, 62, 63, 64, 73,
 ];
 
+pub mod env_overlay;
 pub mod fs_service;
 mod prune;
 pub use fs_service::{fs_op_name, FS_SERVICE_OPS};
@@ -94,13 +95,15 @@ pub const MSG3: u64 = 384;
 pub const MSG4: u64 = 512;
 const _: () = assert!(MSG3 + OOM_MSG.len() as u64 <= MSG4 && MSG4 + EXIT_WALL_MSG.len() as u64 <= DATA);
 pub const DATA: u64 = 1024; // stdin/entropy bytes + op result staging
-/// The env.set overlay log (#1716): [klen u32][vlen u32][key][val] entries,
-/// append-only, scanned last-write-wins by op 26. Its page sits above the
-/// staging span the other ops use.
+/// The env.set overlay log (#1716, `env_overlay.rs`): [klen u32][vlen u32]
+/// [key][val] entries, append-only, scanned last-write-wins by op 26. Its
+/// page sits above the staging span the other ops use.
 pub const OVL: u64 = 4 * 65536;
 /// The staging room the emitter refuses to overrun (#2118) and this layout
 /// provides: one number, checked here rather than trusted.
 const _: () = assert!((OVL - DATA) as i64 == almide_wasm::WASI_STAGING_ROOM);
+/// The log fills the park's last page exactly.
+const _: () = assert!(OVL + env_overlay::OVERLAY_BYTES == PARK_SPAN);
 /// The park span: five pages carved out at the original heap base — four
 /// for iovecs/messages/stdin, one for the env overlay log.
 pub const PARK_SPAN: u64 = 5 * 65536;

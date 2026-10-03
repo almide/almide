@@ -116,8 +116,8 @@ struct FsService {
 /// The host contract over p3 (op codes shared with the embedded host): 30
 /// raw stdout, 31 stdin read-to-end, 35 stdin take-n, 32 entropy, 34 wall
 /// clock, 60 monotonic clock, plus the fs (through the spliced service), http
-/// and env (26 / 29 / 36) families; anything else = the defined refusal.
-fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>, f_env: Option<u32>, svc: Option<&FsService>) -> Function {
+/// and env (26 / 29 / 36 / 37) families; anything else = the defined refusal.
+fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>, f_env: Option<(u32, &[i32])>, svc: Option<&FsService>) -> Function {
     let P3Globals { park, g_plen, g_ppos, g_in_rx, g_in_fut, g_out_tx, g_out_fut, g_err_tx, g_err_fut, f_reserve, f_await, .. } = g;
     let (op, a_len, b_ptr, b_len) = (0u32, 2u32, 3u32, 4u32);
     let n = 6u32;
@@ -139,13 +139,16 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>, f_e
         i.end();
     }
 
-    // ops 26 / 29 / 36 (env.get, the program arguments, env.sleep_ms) —
-    // forwarded whole to the env service when the op set earned its
-    // imports (ADR-0023 step 3).
-    if let Some(e) = f_env {
-        i.local_get(op).i32_const(26).i32_eq();
-        i.local_get(op).i32_const(29).i32_eq().i32_or();
-        i.local_get(op).i32_const(36).i32_eq().i32_or();
+    // ops 26 / 29 / 36 / 37 (env.get, the program arguments, env.sleep_ms,
+    // env.set) — the ones the op set names, forwarded whole to the env
+    // service (ADR-0023 step 3, #3223).
+    if let Some((e, ops)) = f_env.filter(|(_, ops)| !ops.is_empty()) {
+        for (k, o) in ops.iter().enumerate() {
+            i.local_get(op).i32_const(*o).i32_eq();
+            if k > 0 {
+                i.i32_or();
+            }
+        }
         i.if_(BlockType::Empty);
         for pidx in 0..5u32 {
             i.local_get(pidx);

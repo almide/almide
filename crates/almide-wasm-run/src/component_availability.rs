@@ -4,27 +4,26 @@
 /// Whether the direct component shim serves `op`. Both worlds serve stdio,
 /// entropy, the clocks and panic; p3 adds env.get (26), the program
 /// arguments (29) and env.sleep_ms (36) over wasi:cli/environment and
-/// monotonic-clock.wait-for (ADR-0023 step 3), the http client (43..=50),
-/// and — through the spliced p1 fs service over its wasi:filesystem@0.3
-/// adapter (#3140) — every op the p1 fs service answers, the fan prefetch
-/// triple (40..=42) and env.os / env.temp_dir / env.cwd (27 / 28 / 33)
-/// among them.
+/// monotonic-clock.wait-for (ADR-0023 step 3), env.set (37) through the
+/// guest-side overlay env.get reads first (#3223), the http client
+/// (43..=50), and — through the spliced p1 fs service over its
+/// wasi:filesystem@0.3 adapter (#3140) — every op the p1 fs service
+/// answers, the fan prefetch triple (40..=42) and env.os / env.temp_dir /
+/// env.cwd (27 / 28 / 33) among them.
 pub fn serves(op: i32, p3: bool) -> bool {
     let common = matches!(op, 30..=32 | 34..=35 | 60 | 73);
     let extra = p3
-        && (matches!(op, 26 | 29 | 36 | 40..=50)
+        && (matches!(op, 26 | 29 | 36 | 37 | 40..=50)
             || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op));
     common || extra
 }
 
 /// The p1-served ops the p3 component does NOT serve, each with the reason
 /// (#3140's gate: the p3 served set covers `P1_SERVED_OPS` minus exactly
-/// these; `tests` below hold both directions).
-pub const P3_EXCLUDED_P1_OPS: &[(i32, &str)] = &[(
-    37,
-    "env.set: the p1 shim keeps an overlay log env.get reads through; the p3 env service \
-     answers env.get from wasi:cli/environment's fixed list, which has no overlay",
-)];
+/// these; `tests` below hold both directions). Empty since #3223 served
+/// env.set: a program that builds as a p1 core module builds as a p3
+/// component.
+pub const P3_EXCLUDED_P1_OPS: &[(i32, &str)] = &[];
 
 /// Reject an artifact before writing it when its direct shim cannot serve it.
 /// P3 HTTP imports are selected separately whenever an HTTP operation is emitted.

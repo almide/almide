@@ -310,29 +310,14 @@ fn shim_host_read(park: u64, g_plen: u32, g_ppos: Option<u32>) -> Function {
     f
 }
 
-/// op 37 (env.set): append `[klen u32][vlen u32][key][val]` to the overlay
-/// log page. The log is append-only; op 26 scans it last-write-wins, so a
-/// re-set key needs no in-place edit. A full page takes the defined
-/// refusal — never a silent drop.
+/// op 37 (env.set): append to the overlay log page (`env_overlay.rs`). A
+/// full page takes the defined refusal — never a silent drop.
 fn shim_env_set(park: u64, g_ovl: u32) -> Function {
     // params: 0=op 1=a_ptr 2=a_len 3=b_ptr 4=b_len; locals: 5=at
-    let (a_ptr, a_len, b_ptr, b_len, at) = (1u32, 2u32, 3u32, 4u32, 5u32);
     let mut f = Function::new([(1, ValType::I32)]);
     let mut i = f.instructions();
-    i.i32_const((park + OVL) as i32).global_get(g_ovl).i32_add().local_set(at);
-    // Room check: entry must fit under the park end.
-    i.local_get(at).i32_const(8).i32_add().local_get(a_len).i32_add().local_get(b_len).i32_add();
-    i.i32_const((park + PARK_SPAN) as i32).i32_gt_u().if_(BlockType::Empty);
-    refuse(&mut i, park, MSG2, ENV_FULL_MSG.len());
-    i.end();
-    i.local_get(at).local_get(a_len).i32_store(mem(0));
-    i.local_get(at).local_get(b_len).i32_store(mem(4));
-    i.local_get(at).i32_const(8).i32_add().local_get(a_ptr).local_get(a_len).memory_copy(0, 0);
-    i.local_get(at).i32_const(8).i32_add().local_get(a_len).i32_add();
-    i.local_get(b_ptr).local_get(b_len).memory_copy(0, 0);
-    i.global_get(g_ovl).i32_const(8).i32_add().local_get(a_len).i32_add().local_get(b_len).i32_add();
-    i.global_set(g_ovl);
-    i.i64_const(0).return_();
+    let log = env_overlay::OverlayLog { base: park + OVL, g_len: g_ovl };
+    env_overlay::emit_append(&mut i, log, 5, |i| refuse(i, park, MSG2, ENV_FULL_MSG.len()));
     i.unreachable();
     i.end();
     f
@@ -355,37 +340,8 @@ fn shim_env_get(park: u64, g_plen: u32, g_ppos: u32, g_ovl: u32, i_sizes: u32, i
     let mut i = f.instructions();
 
     // ── overlay scan, last match wins ──
-    i.i32_const(0).local_set(best);
-    i.i32_const((park + OVL) as i32).local_set(p);
-    i.i32_const((park + OVL) as i32).global_get(g_ovl).i32_add().local_set(endp);
-    i.block(BlockType::Empty).loop_(BlockType::Empty);
-    i.local_get(p).local_get(endp).i32_ge_u().br_if(1);
-    i.local_get(p).i32_load(mem(0)).local_set(klen);
-    i.local_get(p).i32_load(mem(4)).local_set(vlen);
-    i.local_get(klen).local_get(a_len).i32_eq().if_(BlockType::Empty);
-    // byte compare key at p+8 vs a_ptr
-    i.i32_const(0).local_set(j);
-    i.block(BlockType::Empty).loop_(BlockType::Empty);
-    i.local_get(j).local_get(klen).i32_ge_u().if_(BlockType::Empty);
-    i.local_get(p).local_set(best); // full match
-    i.br(2);
-    i.end();
-    i.local_get(p).i32_const(8).i32_add().local_get(j).i32_add().i32_load8_u(mem8(0));
-    i.local_get(a_ptr).local_get(j).i32_add().i32_load8_u(mem8(0));
-    i.i32_ne().br_if(1);
-    i.local_get(j).i32_const(1).i32_add().local_set(j);
-    i.br(0).end().end();
-    i.end();
-    i.local_get(p).i32_const(8).i32_add().local_get(klen).i32_add().local_get(vlen).i32_add().local_set(p);
-    i.br(0).end().end();
-    // A hit: the value already sits in the overlay log, so point at it in
-    // place rather than copying it into a page that may not hold it (#2120).
-    i.local_get(best).i32_const(0).i32_ne().if_(BlockType::Empty);
-    i.local_get(best).i32_load(mem(4)).local_set(vlen);
-    i.local_get(best).i32_const(8).i32_add().local_get(best).i32_load(mem(0)).i32_add().global_set(g_ppos);
-    i.local_get(vlen).global_set(g_plen);
-    i.local_get(vlen).i64_extend_i32_u().return_();
-    i.end();
+    let log = env_overlay::OverlayLog { base: park + OVL, g_len: g_ovl };
+    env_overlay::emit_scan(&mut i, log, (g_ppos, g_plen), env_overlay::ScanLocals { p, endp, klen, vlen, best, j });
 
     // ── real environ fallthrough ──
     i.i32_const((park + NREAD) as i32).i32_const((park + NREAD + 4) as i32).call(i_sizes); // environ_sizes_get
