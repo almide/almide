@@ -658,6 +658,7 @@ fn is_unit_type_expr(ty: &almide_lang::ast::TypeExpr) -> bool {
 
 include!("pass_borrow_inference_ownership.rs");
 include!("pass_borrow_inference_call_sites.rs");
+include!("pass_borrow_inference_seq_hoist.rs");
 
 #[cfg(test)]
 mod declared_mut_agrees_with_runtime {
