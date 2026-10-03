@@ -1817,6 +1817,7 @@ evidence  = [
   { path = "spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_nested_place_writeback.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_interpolated.almd", class = "fixture" },
+  { path = "spec/wasm_cross/interp_mut_call_part_order.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_loop_stays_in_place.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_global_callee_sees_precall.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_global_no_reach_in_place.almd", class = "fixture" },
