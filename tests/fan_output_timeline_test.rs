@@ -24,7 +24,7 @@ fn almide_bin() -> String {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let release = root.join("target/release/almide");
     if release.exists() {
-        return release.to_str().unwrap().to_string();
+        return release.to_string_lossy().into_owned();
     }
     env!("CARGO_BIN_EXE_almide").to_string()
 }
