@@ -9,15 +9,29 @@
 // thread::scope and receive `Box<dyn Fn + Send[+ Sync]>` thunks (the box pass
 // boxes them), which still satisfy the existing `impl Fn + Send + Sync` bounds.
 //
-// `fan.map` is EFFECTFUL: if any element fn returns `Err`, the whole map
-// propagates the FIRST `Err` (in list order) as a defined Result error. The
-// caller's auto-`?` then routes it to the effect-main termination path
-// (`Error: <msg>` + exit 1), byte-identical to the wasm `__main_runner`.
+// `fan.map` is EFFECTFUL and runs EVERY element (ADR-0024 D1, C-005): an
+// element's `Err` does not stop the map, the elements after it still run, and
+// the LOWEST-INDEX `Err` is the map's defined Result error — the rule the block
+// form `fan { }` follows (C-199). The caller's `!` then routes it to the
+// effect-main termination path (`Error: <msg>` + exit 1), byte-identical to
+// the wasm `__main_runner`.
 pub fn almide_rt_fan_map<A, B>(
     items: Vec<A>,
     f: std::rc::Rc<dyn Fn(A) -> Result<B, String>>,
 ) -> Result<Vec<B>, String> {
-    items.into_iter().map(|item| f(item)).collect()
+    let mut out = Vec::with_capacity(items.len());
+    let mut first_err: Option<String> = None;
+    for item in items {
+        match (f(item), &first_err) {
+            (Ok(v), None) => out.push(v),
+            (Err(e), None) => first_err = Some(e),
+            _ => {}
+        }
+    }
+    match first_err {
+        Some(e) => Err(e),
+        None => Ok(out),
+    }
 }
 
 // `fan.map`'s PARALLEL twin (#2044). RustLowering's fan routing (native only) routes a
@@ -29,12 +43,9 @@ pub fn almide_rt_fan_map<A, B>(
 // The callback is a raw `impl Fn` (the box pass leaves fan args unboxed), so
 // a non-Send capture the pass missed is a loud rustc error, never a race.
 //
-// Observably identical to the sequential twin: results land in pre-sized
-// slots by index, and the map's Err is the FIRST Err in LIST ORDER. A worker
-// stops at any index above an Err already recorded, so elements past the
-// first Err are evaluated only while that Err is still in flight — pure, hence
-// unobservable, except through a TRAP in such an element (the sequential twin,
-// which the wasm leg is, would never reach it). Threshold 2, not a "big list"
+// Observably identical to the sequential twin: every element runs (ADR-0024
+// D1 — no worker stops at an Err), results land in pre-sized slots by index,
+// and the map's Err is the LOWEST-INDEX Err in LIST ORDER. Threshold 2, not a "big list"
 // cut-off: `fan.map` IS the user's fan-out signal, each element a task (a
 // 64-chunk fan over 14 cores would never clear a size threshold).
 // `ALMIDE_FAN_SEQUENTIAL=1` forces the sequential path — the ablation knob.
@@ -42,44 +53,41 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
     items: Vec<A>,
     f: F,
 ) -> Result<Vec<B>, String> {
+    let mut slots: Vec<Option<Result<B, String>>> = (0..items.len()).map(|_| None).collect();
     if items.len() < 2 || almide_rt_list_par_sequential() {
-        return items.into_iter().map(&f).collect();
+        for (slot, item) in slots.iter_mut().zip(items) {
+            *slot = Some(f(item));
+        }
+        return almide_fan_map_settle_slots(slots);
     }
     let workers = almide_rt_list_par_workers(items.len());
     let chunk_size = items.len().div_ceil(workers);
-    let first_err = std::sync::atomic::AtomicUsize::new(usize::MAX);
-    let mut slots: Vec<Option<Result<B, String>>> = (0..items.len()).map(|_| None).collect();
     // Flush before the workers start: a runtime abort on a worker exits
     // without reaching this thread's stdout buffer (C-197, see rust.toml fan_expr).
     almide_stdout_flush();
     std::thread::scope(|s| {
-        for (chunk_idx, (chunk, out)) in items.chunks(chunk_size).zip(slots.chunks_mut(chunk_size)).enumerate() {
+        for (chunk, out) in items.chunks(chunk_size).zip(slots.chunks_mut(chunk_size)) {
             let f = &f;
-            let first_err = &first_err;
-            let base = chunk_idx * chunk_size;
             s.spawn(move || {
-                for (i, (slot, item)) in out.iter_mut().zip(chunk).enumerate() {
-                    let idx = base + i;
-                    if idx > first_err.load(std::sync::atomic::Ordering::Acquire) {
-                        break;
-                    }
-                    let r = f(item.clone());
-                    if r.is_err() {
-                        first_err.fetch_min(idx, std::sync::atomic::Ordering::AcqRel);
-                    }
-                    *slot = Some(r);
+                for (slot, item) in out.iter_mut().zip(chunk) {
+                    *slot = Some(f(item.clone()));
                 }
             });
         }
     });
-    let mut out = Vec::with_capacity(items.len());
+    almide_fan_map_settle_slots(slots)
+}
+
+// The map's result from its filled slots: the ok values in list order, or the
+// LOWEST-INDEX Err (every element ran — ADR-0024 D1).
+fn almide_fan_map_settle_slots<B>(slots: Vec<Option<Result<B, String>>>) -> Result<Vec<B>, String> {
+    let mut out = Vec::with_capacity(slots.len());
     for slot in slots {
         match slot {
             Some(Ok(v)) => out.push(v),
             Some(Err(e)) => return Err(e),
-            // A slot is left empty only at an index ABOVE the first Err, and
-            // that Err returns from this loop before the scan reaches it.
-            None => unreachable!("fan.map_par: empty slot below the first Err"),
+            // Every worker fills every slot of its chunk.
+            None => unreachable!("fan.map_par: an element that never ran"),
         }
     }
     Ok(out)
