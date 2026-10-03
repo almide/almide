@@ -1,8 +1,7 @@
 # ADR-0026: Effect categories ride the transparent fn type — sets flow through callbacks unannotated, categories form a two-level hierarchy, and inferred ⊆ manifest ⊆ host is one chain
 
-- **Status**: Accepted (D1–D3, 2026-10-03). Nothing beyond the inference
-  fixpoint (#3238) is implemented. D4 (diagnostics) and the open questions in
-  §Open are not decided.
+- **Status**: Accepted (D1–D4, 2026-10-03). Nothing beyond the inference
+  fixpoint (#3238) is implemented. The questions in §Open are not decided.
 - **Date**: 2026-10-03
 - **Scope**: what an effect *category* is (as opposed to the effect bit), how
   a category set moves through function values, callbacks and closures, how
@@ -23,7 +22,8 @@
   v0.1", baseline 902e58d23) asked for a closed category set as an upper bound
   on function types. A cross-language comparison (below) was run before
   ruling, and three questions were put to the maintainer one at a time; all
-  three were answered ○.
+  three were answered ○. A fourth (diagnostics) was answered ○ after the
+  query command's shape was compared across tools (D4).
 
 ## Context
 
@@ -137,6 +137,52 @@ inferred set   ⊆   [permissions].allow   ⊆   capabilities the host grants
   a run may reach stays the host's decision; an effect summary is never an
   authorization token.
 
+### D4. A violation names its path; the query is `almide check --effects` (○ 2026-10-03)
+
+```
+error[E0xx]: `validate` may write files, but its bound is {FS.read}
+  --> src/check.almd:12:1
+   = added: FS.write
+   = path:  validate → normalize → save_cache → fs.write_text   (src/cache.almd:40:3)
+   = hint:  1. return the data and let the caller save it
+            2. move `save_cache(...)` out of `normalize` into the caller
+            3. if writing is intended, widen the bound to {FS.read, FS.write}
+```
+
+(Code and wording are illustrative; the error code is assigned when built.)
+
+- The first line names the boundary and the added category. `path:` gives
+  one representative path per category, ending at the operation's location.
+- Through a callback, the path names the concrete callee when it is known,
+  and otherwise the parameter (`apply → f (arg 2 of apply)`). It never
+  invents a callee.
+- Fix-its are ordered *take it as a value / move it to the caller / widen
+  the bound*. Widening is last, and no `almide fix` adds a category to a
+  bound or to `[permissions]`: the diagnostic does not offer an agent the
+  shortcut of granting itself the permission.
+- **The query extends the existing view instead of adding a verb**:
+
+  ```
+  almide check --effects              # every function's set (today's output)
+  almide check --effects FS.write     # functions carrying FS.write, with every path
+  almide check --effects validate     # validate's categories, with a path for each
+  almide check --effects FS.write --json
+  ```
+
+  A category (`FS.write`, capitalised, dotted) and a function name cannot be
+  spelled alike, so the argument is unambiguous. `--json` combines with
+  `--effects` (today they conflict), the output order is stable, and the same
+  report is an MCP tool. A `path:` line in a diagnostic and a line of
+  `--effects` output have the same shape, so a reader can go from the error to
+  the query without translating.
+- Precedent for the shape: `cargo tree -i` (a new way to ask an existing view)
+  rather than a new top-level verb. Rejected: a hyphenated top-level
+  `why-effect` (Jacquard's `jac why-effect`; Almide's verbs are one word), a
+  general `almide why` (one use does not justify a general verb), and a noun
+  command `almide effects` (two places would list the same sets). Other
+  precedents weighed: `go mod why`, `npm explain` / `yarn why`,
+  `nix why-depends A B`, Gradle `dependencyInsight`, Bazel `somepath`.
+
 ## Rejected
 
 1. **User-defined effects and handlers** (Koka, Effekt, Unison, OCaml 5,
@@ -159,11 +205,10 @@ inferred set   ⊆   [permissions].allow   ⊆   capabilities the host grants
 
 ## Open — not decided by this ADR
 
-- **D4, diagnostics**: a violation names the boundary, the added category,
-  the causing operation and the call path (`main → load_cfg →
-  fs.read_text`), with fix-its in the order "take it as a value / move the
-  operation to the caller / widen the bound"; plus `almide why-effect <cat>`
-  and a JSON form. To be ruled separately.
+- **One category vocabulary**: `almide check --profile critical --allow`
+  accepts `IO, Net, Env, Time, Rand, Process` — a third spelling beside the
+  six in `effect.rs` and the 13 in the roadmap (`Process` vs `Proc`). The
+  versioned registry of D2 has to replace all three.
 - **Surface syntax** for a declared upper bound and for an explicitly empty
   set (the proposal's `effects {}`).
 - **The compatibility bound of a plain `fn`**: ADR-0022 admits output and
