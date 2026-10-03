@@ -88,6 +88,13 @@ fn every_valid_name_still_passes() {
     assert!(!ok && stderr.contains("IO is not in [permissions].allow"), "{stderr}");
     assert!(!stderr.contains("unknown capability"), "{stderr}");
     let _ = std::fs::remove_dir_all(&dir);
+
+    // `proc` (#2589) lists commands, not capabilities: the name gate leaves
+    // it alone.
+    let dir = project("valid-proc", "\"IO\"]\nproc = [\"git\", \"my-tool\"");
+    let (ok, stderr) = almide(&dir, &["check", "main.almd"]);
+    assert!(ok, "a proc list was judged as capability names:\n{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The critical-profile path gives the same message, its own vocabulary,
