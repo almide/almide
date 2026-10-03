@@ -63,7 +63,11 @@ pub fn almide_rt_process_exec(cmd: &str, args: &[String]) -> Result<String, Stri
     }
 }
 
+// Inside a `fan` element the exit waits for the elements below it, exactly as a
+// trap does (ADR-0024 D6): a failed assert outside a test lowers to
+// `eprintln` + `process.exit(1)`.
 pub fn almide_rt_process_exit(code: i64) -> ! {
+    almide_fan_trap_wait();
     almide_stdout_flush();
     std::process::exit(code as i32);
 }
