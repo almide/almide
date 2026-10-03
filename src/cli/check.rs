@@ -372,18 +372,9 @@ fn enforce_effect_permissions(
     proj: &project::Project,
     entries: &[(&String, &almide::codegen::pass_effect_inference::FunctionEffects)],
 ) {
-    use almide::codegen::pass_effect_inference::Effect;
-    let allowed: std::collections::HashSet<Effect> = proj.permissions.iter()
-        .filter_map(|s| match s.as_str() {
-            "IO" => Some(Effect::IO),
-            "Net" => Some(Effect::Net),
-            "Env" => Some(Effect::Env),
-            "Time" => Some(Effect::Time),
-            "Rand" => Some(Effect::Rand),
-            "Fan" => Some(Effect::Fan),
-            _ => None,
-        })
-        .collect();
+    let Ok(allowed) = super::allowed_permissions_or_report(&proj.permissions) else {
+        std::process::exit(1);
+    };
 
     let mut violations = 0;
     for (name, fe) in entries {

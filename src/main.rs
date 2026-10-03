@@ -894,10 +894,7 @@ fn expand_capability_grants(allow: &[String]) -> Vec<String> {
     for cap in allow {
         let Some((_, granted)) = almide::check::CAPABILITY_GRANTS.iter().find(|(c, _)| c == cap) else {
             let names: Vec<&str> = almide::check::CAPABILITY_GRANTS.iter().map(|(c, _)| *c).collect();
-            eprintln!(
-                "error: unknown capability `{cap}` — grantable capabilities are {}",
-                names.join(", ")
-            );
+            eprintln!("error: {}", project::unknown_capability_message(cap, "--allow", &names));
             std::process::exit(1);
         };
         for m in *granted {
@@ -1117,15 +1114,16 @@ fn dispatch_rest(command: Commands) {
     }
 }
 
-/// Refuse a `./almide.toml` that declares a key twice (#2583) before any
-/// command runs. Most readers of the manifest treat a parse error as "no
+/// Refuse a `./almide.toml` that declares a key twice (#2583), or whose
+/// `[permissions].allow` names something that is not a capability (#3247),
+/// before any command runs. Most readers of the manifest treat a parse error as "no
 /// project" (`parse_toml(..).ok()`), which is right for a missing file but
 /// would turn this error into a silent run without dependencies; one gate
 /// here makes the refusal the same on every command. The commands that must
 /// keep working in a broken project are exempt: `init`, `clean`, the editor
 /// servers (an exit would kill the session; their manifest reads already
 /// fail closed), and the ones that never read the manifest.
-fn refuse_duplicate_manifest_keys(command: &Commands) {
+fn refuse_invalid_manifest(command: &Commands) {
     if matches!(
         command,
         Commands::Init
@@ -1141,7 +1139,9 @@ fn refuse_duplicate_manifest_keys(command: &Commands) {
     }
     let path = std::path::Path::new("almide.toml");
     let Ok(content) = std::fs::read_to_string(path) else { return };
-    if let Err(e) = project::check_manifest_duplicates(path, &content) {
+    let verdict = project::check_manifest_duplicates(path, &content)
+        .and_then(|()| project::check_manifest_permissions(path, &content));
+    if let Err(e) = verdict {
         err(&format!("error: {}", e));
         std::process::exit(1);
     }
@@ -1162,7 +1162,7 @@ fn dispatch(cli: Cli) {
             return;
         }
     };
-    refuse_duplicate_manifest_keys(&command);
+    refuse_invalid_manifest(&command);
     match command {
         Commands::Init => cli::cmd_init(),
         Commands::Run { file, no_check, release, target, verified: _, no_verified, time_report, program_args } =>

@@ -1,0 +1,6 @@
+[package]
+name = "permfx"
+version = "0.1.0"
+
+[permissions]
+allow = ["io"]

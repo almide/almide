@@ -23,6 +23,10 @@
 //! snippets, a follow-up test will mechanically apply them and
 //! assert equality with `fixed.almd`.
 //!
+//! A case whose defect is in `almide.toml` adds `broken.toml` / `fixed.toml`:
+//! each half is then checked in a scratch project with its manifest
+//! (`check_case`).
+//!
 //! Running: `cargo test --test diagnostic_harness_test`.
 
 use std::collections::HashMap;
@@ -101,6 +105,36 @@ fn run_check(file: &Path) -> (bool, String, String) {
     (out.status.success(), stdout, stderr)
 }
 
+/// Check one half (`"broken"` / `"fixed"`) of a case. A case whose defect is
+/// in the MANIFEST carries `broken.toml` / `fixed.toml` beside the two
+/// programs (#3247): the half is staged alone in a scratch project with its
+/// `.toml` as `almide.toml`, and checked from there, since the manifest is
+/// read from the working directory. Every other case checks in place.
+fn check_case(case: &Path, half: &str) -> (bool, String, String) {
+    let file = case.join(format!("{half}.almd"));
+    let manifest = case.join(format!("{half}.toml"));
+    if !manifest.exists() {
+        return run_check(&file);
+    }
+    let name = case.file_name().unwrap().to_string_lossy();
+    let dir = std::env::temp_dir().join(format!("almide-diagfx-{name}-{half}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("mkdir staged case");
+    std::fs::copy(&manifest, dir.join("almide.toml")).expect("stage manifest");
+    std::fs::copy(&file, dir.join(format!("{half}.almd"))).expect("stage program");
+    let out = Command::new(almide())
+        .args(["check", &format!("{half}.almd")])
+        .current_dir(&dir)
+        .output()
+        .expect("almide check");
+    let _ = std::fs::remove_dir_all(&dir);
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).to_string(),
+        String::from_utf8_lossy(&out.stderr).to_string(),
+    )
+}
+
 #[test]
 fn every_case_has_broken_and_fixed_pair() {
     let cases = collect_cases();
@@ -123,7 +157,7 @@ fn broken_files_produce_expected_diagnostics() {
     for case in &cases {
         let broken = case.join("broken.almd");
         let meta = parse_meta(&case.join("meta.toml"));
-        let (success, stdout, stderr) = run_check(&broken);
+        let (success, stdout, stderr) = check_case(case, "broken");
         let combined = format!("{}{}", stdout, stderr);
         // Warning-level diagnostics (E015 reimpl-lint etc.) don't fail
         // compilation; `!success` is the common case but
@@ -207,8 +241,7 @@ fn every_diagnostic_carries_a_hint() {
 fn fixed_files_compile_cleanly() {
     let cases = collect_cases();
     for case in &cases {
-        let fixed = case.join("fixed.almd");
-        let (success, stdout, stderr) = run_check(&fixed);
+        let (success, stdout, stderr) = check_case(case, "fixed");
         assert!(
             success,
             "fixed.almd in {} failed to compile:\nstdout: {}\nstderr: {}",

@@ -1,7 +1,8 @@
 //! EffectInferencePass: auto-infer capability requirements from stdlib usage.
 //!
 //! Analyzes which stdlib modules each function calls (directly and transitively)
-//! and maps them to effect categories (IO, Net, Env, Time, Rand, Fan, Log).
+//! and maps them to effect categories (IO, Net, Env, Time, Rand, Fan — the
+//! `almide_ir::effect::Effect` enum; there is no `Log` category).
 //!
 //! This is the foundation for Security Layer 2-3:
 //! - Layer 2: Package declares allowed capabilities in almide.toml

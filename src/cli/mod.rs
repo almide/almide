@@ -60,23 +60,12 @@ use crate::err;
 /// Check that all effects used in the program are allowed by [permissions].allow in almide.toml.
 /// Returns Ok(()) if no violations, or Err with a description of violations.
 pub fn check_permissions(ir: &almide::ir::IrProgram, permissions: &[String]) -> Result<(), String> {
-    use almide::codegen::pass_effect_inference::{EffectInferencePass, Effect};
+    use almide::codegen::pass_effect_inference::EffectInferencePass;
     use almide::codegen::pass::NanoPass;
 
+    let allowed = allowed_permissions_or_report(permissions)?;
     let result = EffectInferencePass.run(ir.clone(), almide::codegen::pass::Target::Rust);
     let ir_after = result.program;
-
-    let allowed: std::collections::HashSet<Effect> = permissions.iter()
-        .filter_map(|s| match s.as_str() {
-            "IO" => Some(Effect::IO),
-            "Net" => Some(Effect::Net),
-            "Env" => Some(Effect::Env),
-            "Time" => Some(Effect::Time),
-            "Rand" => Some(Effect::Rand),
-            "Fan" => Some(Effect::Fan),
-            _ => None,
-        })
-        .collect();
 
     let mut violations = 0;
     for (name, fe) in &ir_after.effect_map.functions {
@@ -175,6 +164,16 @@ pub fn enforce_proc_allowlist(ir: &almide::ir::IrProgram, allow: Option<&[String
         Some(list) => check_proc_allowlist(ir, list),
         None => Ok(()),
     }
+}
+
+/// `[permissions].allow` → the categories it grants, via the one shared
+/// matcher (`project::allowed_effects`). The manifest gate in `main` refuses
+/// an unknown name on its line before any command runs; this reports it
+/// again for a caller that reached here without that gate (#3247).
+pub(crate) fn allowed_permissions_or_report(
+    permissions: &[String],
+) -> Result<std::collections::HashSet<almide::ir::effect::Effect>, String> {
+    crate::project::allowed_effects(permissions).inspect_err(|e| err(&format!("error: {e}")))
 }
 
 /// Compute a 64-bit hash of a byte slice (using DefaultHasher).
