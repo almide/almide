@@ -8,7 +8,7 @@
 //! surface (console out, exit codes, stdin, entropy, wall clock) PLUS the
 //! whole filesystem surface: since #3140 the component carries the p1 fs
 //! service itself (`fs_service.wat`, the code the stock-p1 artifact runs)
-//! over a preview-1 adapter on wasi:filesystem@0.3 (`p3_fs_adapter.wat`,
+//! over a preview-1 adapter on wasi:filesystem@0.3.0 (`p3_fs_adapter.wat`,
 //! `wasi_p3_fs_service.rs`) — path resolution against the full preopen
 //! table and the cwd, every fs op, env.os / env.temp_dir / env.cwd, and
 //! native's `fs.<call>("<path>")` error heads. The fan prefetch triple

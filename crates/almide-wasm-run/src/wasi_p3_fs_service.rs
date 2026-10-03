@@ -7,7 +7,7 @@
 // built as a p1 module lost fs surface — and behaviour — as a p3 component.
 // Now the component carries the p1 fs service itself (crates/almide-wasi/src/
 // fs_service.wat, the code the stock-p1 artifact runs) with its preview-1
-// imports served by a small adapter over wasi:filesystem@0.3
+// imports served by a small adapter over wasi:filesystem@0.3.0
 // (`p3_fs_adapter.wat`): path resolution against the full preopen table and
 // the cwd, list_dir / walk / glob, the metadata family, copy / rename, the
 // temp-dir family, the line readers and env.os / env.temp_dir / env.cwd all
@@ -18,7 +18,7 @@ use crate::wasi::fs_service::{service_wat_ext, FsSplice, FsTypes, SpliceTargets,
 /// The adapter text: its imports, `;; @@FUNCS@@`, then its functions.
 const P3_FS_ADAPTER: &str = include_str!("p3_fs_adapter.wat");
 
-/// wasi_snapshot_preview1's `errno` value for each wasi:filesystem@0.3
+/// wasi_snapshot_preview1's `errno` value for each wasi:filesystem@0.3.0
 /// `error-code` case, by NAME (the service's `$errno_text` is keyed on the
 /// preview-1 numbers). `other(option<string>)` has no preview-1 twin and
 /// reads as `io`, which the service spells as its numbered fallback.
