@@ -216,11 +216,11 @@ fn wasm_legs(src: &Path, cwd: &Path, scratch: &Path, envs: &[(&str, &str)]) -> (
 const ENV_OVER_HOST: &str = r#"import env
 
 effect fn main() -> Unit = {
-  println(env.get("ALMIDE_3223_HOST") ?? "unset")
-  env.set("ALMIDE_3223_HOST", "guest")
-  println(env.get("ALMIDE_3223_HOST") ?? "unset")
-  env.set("ALMIDE_3223_HOST", "")
-  println("[${env.get("ALMIDE_3223_HOST") ?? "unset"}]")
+  println(env.get("ENVSET_3223_HOST") ?? "unset")
+  env.set("ENVSET_3223_HOST", "guest")
+  println(env.get("ENVSET_3223_HOST") ?? "unset")
+  env.set("ENVSET_3223_HOST", "")
+  println("[${env.get("ENVSET_3223_HOST") ?? "unset"}]")
 }
 "#;
 
@@ -231,7 +231,7 @@ const ENV_LOG_FULL: &str = r#"import env
 effect fn main() -> Unit = {
   let v = string.repeat("x", 1000)
   for k in list.range(0, 100) {
-    env.set("ALMIDE_3223_K${k}", v)
+    env.set("ENVSET_3223_K${k}", v)
   }
   println("not reached on a stock world")
 }
@@ -250,7 +250,7 @@ fn p3_component_env_set_matches_native_and_p1() {
     std::fs::create_dir_all(&cwd).expect("cwd");
     let over_host = scratch.path().join("env_over_host.almd");
     std::fs::write(&over_host, ENV_OVER_HOST).expect("write");
-    let envs = [("ALMIDE_3223_HOST", "host")];
+    let envs = [("ENVSET_3223_HOST", "host")];
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/wasm_cross");
     for src in [root.join("env_set_overlay.almd"), over_host] {
         let mut native = Command::new(almide_bin());
