@@ -16,7 +16,9 @@
 //! (increment 2b), on the descriptor the service resolves. `env.get`, the
 //! program arguments and `env.sleep_ms` ride `wasi:cli/environment` and
 //! `monotonic-clock.wait-for` (ADR-0023 step 3, `wasi_p3_env.rs`), each
-//! import shipped only when the op set names its op.
+//! import shipped only when the op set names its op; `env.set` writes the
+//! p1 shim's guest-side overlay log, which `env.get` reads before the
+//! environment snapshot (#3223).
 //! Canonical-ABI facts (variant discriminants, payload offsets) are
 //! DERIVED from the vendored WIT at emit time (`FsAbi`), never
 //! hand-counted. Requested p3 filesystem programs route here without an
@@ -72,8 +74,8 @@ use wasm_encoder::{
 
 use crate::component_alloc::{shim_cabi_realloc, shim_realloc_checked, shim_reserve};
 use crate::wasi::{
-    mem, mem8, parse_module, reencode_body, type_index, Parsed, Remap, DATA, MSG, OOM_MSG,
-    PARK_SPAN, UNSUPPORTED_MSG,
+    mem, mem8, parse_module, reencode_body, type_index, Parsed, Remap, DATA, ENV_FULL_MSG, MSG,
+    MSG2, OOM_MSG, PARK_SPAN, UNSUPPORTED_MSG,
 };
 
 // Import indices (18 imports replace the 5 almide.* ones).
@@ -220,6 +222,8 @@ const AWAIT_EV: u64 = 800;
 const _: () = {
     assert!(RET + 32 <= MSG);
     assert!(MSG + UNSUPPORTED_MSG.len() as u64 <= STATRET);
+    // The env.set refusal line (#3223) sits in the gap past the stat result.
+    assert!(MSG2 + ENV_FULL_MSG.len() as u64 <= MSG_HTTP);
     assert!(MSG_HTTP + E_HTTP.len() as u64 <= MSG_CLEN);
     assert!(MSG_CLEN + E_CLEN.len() as u64 <= CLEN_BUF);
     assert!(CLEN_BUF + 20 <= MSG_OOM);

@@ -14,6 +14,10 @@
 //! creators, is_symlink, walk, stat, glob, the *_if_exists readers and the
 //! raw-bytes readers, with their `fs.<call>("<path>")` error heads.
 //!
+//! #3223 adds the env.set overlay: the env fixtures run on three legs —
+//! native, the stock p1 core module and the p3 component — and must agree
+//! byte-for-byte (`p3_component_env_set_matches_native_and_p1`).
+//!
 //! The runtime floor is the pin policy's (wasmtime 46); below it the test
 //! skips, and under ALMIDE_EXPECT_TOOLS (CI) that is a failure.
 
@@ -181,4 +185,85 @@ fn p3_component_reads_and_writes_past_the_host_per_call_bound() {
     let (native, p3) = both_legs(&src, scratch.path(), scratch.path()).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(native.0, "len=640000 same=true\nsize=1280000\nbytes=1280000\ncopy=1280000\nfan=2 1280000\n", "native: {native:?}");
     assert_eq!(p3, native, "the p3 component differs from native past the per-call bound");
+}
+
+/// `src` as a stock p1 core module and as a p3 component, both run on
+/// wasmtime from `cwd` with `envs` added to the inherited environment.
+fn wasm_legs(src: &Path, cwd: &Path, scratch: &Path, envs: &[(&str, &str)]) -> (Seen, Seen) {
+    let name = src.file_name().expect("name").to_string_lossy().into_owned();
+    let mut seen = Vec::new();
+    for (leg, p3) in [("p1", false), ("p3", true)] {
+        let wasm = scratch.join(format!("{name}.{leg}.wasm"));
+        let mut build = Command::new(almide_bin());
+        build.args(["build", src.to_str().expect("utf8"), "--target", "wasm", "-o", wasm.to_str().expect("utf8")]);
+        if p3 {
+            build.arg("--component").env("ALMIDE_COMPONENT_P3", "1");
+        } else {
+            build.env_remove("ALMIDE_COMPONENT_P3");
+        }
+        let built = build.output().expect("almide build");
+        assert!(built.status.success(), "{name}: the {leg} build failed:\n{}", String::from_utf8_lossy(&built.stderr));
+        let mut run = Command::new("wasmtime");
+        run.args(["run", "--dir=/", "-S", "inherit-env=y"]).arg(&wasm).current_dir(cwd).env("PWD", cwd).envs(envs.iter().copied());
+        seen.push(observe(run, "wasmtime run"));
+    }
+    let p3 = seen.pop().expect("p3");
+    (seen.pop().expect("p1"), p3)
+}
+
+/// The overlay over a variable the host DOES set: the inherited value is
+/// read first, then a set shadows it — within the instance only.
+const ENV_OVER_HOST: &str = r#"import env
+
+effect fn main() -> Unit = {
+  println(env.get("ALMIDE_3223_HOST") ?? "unset")
+  env.set("ALMIDE_3223_HOST", "guest")
+  println(env.get("ALMIDE_3223_HOST") ?? "unset")
+  env.set("ALMIDE_3223_HOST", "")
+  println("[${env.get("ALMIDE_3223_HOST") ?? "unset"}]")
+}
+"#;
+
+/// More names and values than the 64 KiB log holds: the defined refusal,
+/// the same line and exit code on both stock worlds (native has no log).
+const ENV_LOG_FULL: &str = r#"import env
+
+effect fn main() -> Unit = {
+  let v = string.repeat("x", 1000)
+  for k in list.range(0, 100) {
+    env.set("ALMIDE_3223_K${k}", v)
+  }
+  println("not reached on a stock world")
+}
+"#;
+
+/// #3223: env.set (op 37) on the p3 component writes the p1 shim's
+/// guest-side overlay, and env.get reads it before the `get-environment`
+/// snapshot — C-329's set-then-get answers on all three legs alike.
+#[test]
+fn p3_component_env_set_matches_native_and_p1() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() || !wasmtime_runs_p3() {
+        return;
+    }
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let cwd = scratch.path().join("cwd");
+    std::fs::create_dir_all(&cwd).expect("cwd");
+    let over_host = scratch.path().join("env_over_host.almd");
+    std::fs::write(&over_host, ENV_OVER_HOST).expect("write");
+    let envs = [("ALMIDE_3223_HOST", "host")];
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/wasm_cross");
+    for src in [root.join("env_set_overlay.almd"), over_host] {
+        let mut native = Command::new(almide_bin());
+        native.arg("run").arg(&src).current_dir(&cwd).env("PWD", &cwd).envs(envs);
+        let native = observe(native, "almide run");
+        let (p1, p3) = wasm_legs(&src, &cwd, scratch.path(), &envs);
+        assert_eq!(p1, native, "{}: p1 differs from native", src.display());
+        assert_eq!(p3, native, "{}: p3 differs from native", src.display());
+    }
+
+    let full = scratch.path().join("env_log_full.almd");
+    std::fs::write(&full, ENV_LOG_FULL).expect("write");
+    let (p1, p3) = wasm_legs(&full, &cwd, scratch.path(), &[]);
+    assert_eq!(p1, (String::new(), "Error: env.set log full (64 KiB of names and values)\n".to_string(), Some(1)), "p1: {p1:?}");
+    assert_eq!(p3, p1, "the p3 log refuses where the p1 log does");
 }
