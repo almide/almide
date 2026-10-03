@@ -124,8 +124,6 @@
 spec/gauntlet/cells/x09_tuple_list_of_record.almd :: f
 spec/gauntlet/cells/x13_bang_nested_in_field.almd :: f
 spec/wasm_cross/codec_triple_list.almd :: T.__dec_list_list_list_int_go
-spec/wasm_cross/list_pop_map_insert_on_record_field.almd :: drain
-spec/wasm_cross/list_pop_map_insert_on_record_field.almd :: last_word
 spec/wasm_cross/nested_three_level_literal.almd :: main
 # (2026-08-30, C-326/#1696) The gzip inflate joined the corpus lowering on the
 # STRUCTURAL leg (the phase-4 hoist); the incumbent's brick walls its loop-level
@@ -286,10 +284,6 @@ spec/wasm_cross/branch_lift_stdlib_mut_arg.almd :: arm_writes
 # mutators (`insert(tag, mut m)`, `push(label, mut xs)`); the lift declines on
 # every leg now, so the incumbent walls honestly on it too.
 spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd :: arm_writes
-# #2933/#2944: every mut form through a two- and three-level record field path
-# (`o.inner.xs`, `o.a.b.m`). The MIR classifier walls the deeper field write;
-# the structural leg serves it byte-identically to native.
-spec/wasm_cross/nested_field_path_mut.almd :: drain
 # 2026-09-30 (#3058, class 1): 58 rows pruned (171 -> 113). The effect-fn ABI
 # facts the deleted registries held are now DERIVED from the typed IR on every
 # product path and in the classifier (`almide_ir::effect_abi`, sharing the C-132
