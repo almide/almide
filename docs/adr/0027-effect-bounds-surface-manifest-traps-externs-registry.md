@@ -21,16 +21,16 @@
 ## Findings that stand on their own
 
 These were found while surveying and are defects today, independent of how
-the questions below are ruled. Each deserves an issue.
+the questions below are ruled. Each is filed.
 
 | # | Finding | Where |
 |---|---|---|
-| F1 | A plain-`fn` `@extern` counts as pure in category inference; nothing in the pass reads `@extern`. `tests/licm_extern_test.rs` patched the same hole for LICM only. | `pass_effect_inference.rs`, `effect.rs` |
-| F2 | `random.*` is never inferred: `module_to_effect` has no arm that yields `Rand`. `path` and `url` (pure) are classified `IO` / `Net`; `process` is classified `Env`. | `pass_effect_inference.rs:23-31` |
-| F3 | An unknown name in `[permissions].allow` is dropped silently; a list of only unknown names (the doc comment's `"Log"`) enforces with nothing allowed. `--profile critical --allow` rejects unknown names — the two paths disagree. | `src/cli/mod.rs:69-78`, `src/cli/check.rs:372-381`, `src/project.rs:77-83`, `src/main.rs:892` |
-| F4 | `io.read_byte`, `io.read_n_bytes` and `process.args` are plain `fn` but read stdin / argv. ADR-0022 admits writes and aborts in a plain `fn`, "never reads". `env.args` is `effect fn`; `process.args` is not. | `stdlib/io.almd:28,32`, `stdlib/process.almd:20`, `stdlib/env.almd:24` |
-| F5 | `docs/specs/effect-system.md` lists a `Log` category backed by a module that does not exist; `docs/diagnostics/E085.md` points to a `--profile critical` section of `docs/specs/cli.md` that does not exist. | as named |
-| F6 | `@pure` is in `KNOWN_ATTRS` with no semantics and no uses: a model that writes it today is silently unchecked. | `crates/almide-frontend/src/attr_vocab.rs:39` |
+| F1 (#3245) | A plain-`fn` `@extern` counts as pure in category inference; nothing in the pass reads `@extern`. `tests/licm_extern_test.rs` patched the same hole for LICM only. | `pass_effect_inference.rs`, `effect.rs` |
+| F2 (#3246) | `random.*` is never inferred: `module_to_effect` has no arm that yields `Rand`. `path` and `url` (pure) are classified `IO` / `Net`; `process` is classified `Env`. | `pass_effect_inference.rs:23-31` |
+| F3 (#3247) | An unknown name in `[permissions].allow` is dropped silently; a list of only unknown names (the doc comment's `"Log"`) enforces with nothing allowed. `--profile critical --allow` rejects unknown names — the two paths disagree. | `src/cli/mod.rs:69-78`, `src/cli/check.rs:372-381`, `src/project.rs:77-83`, `src/main.rs:892` |
+| F4 (#3248) | `io.read_byte`, `io.read_n_bytes` and `process.args` are plain `fn` but read stdin / argv. ADR-0022 admits writes and aborts in a plain `fn`, "never reads". `env.args` is `effect fn`; `process.args` is not. | `stdlib/io.almd:28,32`, `stdlib/process.almd:20`, `stdlib/env.almd:24` |
+| F5 (#3249) | `docs/specs/effect-system.md` lists a `Log` category backed by a module that does not exist; `docs/diagnostics/E085.md` points to a `--profile critical` section of `docs/specs/cli.md` that does not exist. | as named |
+| F6 (#3250) | `@pure` is in `KNOWN_ATTRS` with no semantics and no uses: a model that writes it today is silently unchecked. | `crates/almide-frontend/src/attr_vocab.rs:39` |
 
 ## 1. Surface syntax for a declared bound
 
@@ -320,7 +320,7 @@ above as the first version.
 
 ## Order of work if accepted
 
-1. F1–F6 as issues (independent of the rulings).
+1. F1–F6 (#3245–#3250), independent of the rulings.
 2. §6 registry + generation/gates, with today's six names mapped (no
    behaviour change).
 3. §3 manifest key, unknown-name errors, `almide fix` migration.
