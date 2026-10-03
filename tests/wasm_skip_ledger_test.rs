@@ -51,16 +51,11 @@ const GENUINE_SKIPS: &[(&str, SkipReason)] = &[
     // a panic (unreachable trap; the coverage_assert_throws precedent).
     ("spec/stdlib/testing_polarity_test.almd", SkipReason::NoUnwinding),
     ("spec/integration/extern_c/extern_c_test.almd", SkipReason::NativeOnlyApi),
-    // OS sockets and subprocesses: outside the WASI surface the runtime targets.
+    // OS sockets: outside the WASI surface the runtime targets. (The three
+    // subprocess files left this list with #2589: the embedded host serves
+    // the private almide:process/spawn capability, ADR-0025, and they run
+    // the wasm leg.)
     ("spec/stdlib/net_test.almd", SkipReason::NativeOnlyApi),
-    ("spec/stdlib/process_ext_test.almd", SkipReason::NativeOnlyApi),
-    ("spec/stdlib/process_exec_status_test.almd", SkipReason::NativeOnlyApi),
-    // #2121: this one had NO marker and no row — its tests simply walled and
-    // the lane reported a benign skip. `process.exec` has no wasm surface at
-    // all (#1423, proofs/target-availability.toml) and `almide build --target
-    // wasm` refuses the same program, so it is a platform limit like its two
-    // siblings above, not the subset debt in proofs/wasm-test-walls.txt.
-    ("spec/stdlib/process_timeout_test.almd", SkipReason::NativeOnlyApi),
     // The status twins run on the embedded lane (#1710 increment 3,
     // spec/embedded_cross pins them) but the TEST harness's wasm lane is
     // the incumbent brick, which has no http capability — retires with

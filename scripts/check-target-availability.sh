@@ -14,10 +14,12 @@
 #   leg without a reason            → FAIL (mandatory-stability rule)
 #   class missing / unknown         → FAIL (schema 3: every row names its
 #                                     closure class — pending-self-host,
-#                                     pending-port, native-only-forever)
+#                                     pending-port, native-only-forever,
+#                                     host-capability)
 #   pending-self-host row count     → shrink-only ratchet vs the ceiling
 #   pending-port row count          → shrink-only ratchet vs its ceiling
-#   native-only-forever row         → FAIL without a `justification`
+#   native-only-forever /
+#   host-capability row             → FAIL without a `justification`
 #                                     sentence; a pending row → FAIL
 #                                     without an `issue`
 #   reason tag vs class             → FAIL when `reason = "pending-self-host"`
@@ -88,7 +90,7 @@ tmp, toml_path, legs = sys.argv[1], sys.argv[2], sys.argv[3:]
 toml = open(toml_path).read()
 ceiling = int(re.search(r"^pending_self_host_ceiling = (\d+)$", toml, re.M).group(1))
 port_ceiling = int(re.search(r"^pending_port_ceiling = (\d+)$", toml, re.M).group(1))
-CLASSES = ("pending-self-host", "pending-port", "native-only-forever")
+CLASSES = ("pending-self-host", "pending-port", "native-only-forever", "host-capability")
 
 
 def unprobed_ceiling(leg):
@@ -119,10 +121,10 @@ for block in re.findall(r"\[\[unavailable\]\]\n(?:[a-z0-9_-]+ = .*\n)+", toml):
     if tagged_pending and cls != "pending-self-host":
         print(f"::error::row {fn}: reason says pending-self-host but class is {cls!r} — the tag and the class cannot disagree")
         fail = 1
-    if cls == "native-only-forever":
+    if cls in ("native-only-forever", "host-capability"):
         j = re.search(r'^justification = "([^"]*)"$', block, re.M)
         if not j or len(j.group(1).split()) < 8:
-            print(f"::error::row {fn}: native-only-forever without a justification sentence (why the fn cannot exist on the wasm target as specified)")
+            print(f"::error::row {fn}: {cls} without a justification sentence (why the fn cannot exist on that leg as specified)")
             fail = 1
     elif cls.startswith("pending-") and not re.search(r'^issue = "#\d+"$', block, re.M):
         print(f"::error::row {fn}: {cls} without an `issue` — a pending row names where it closes")
@@ -192,12 +194,13 @@ if pending_port < port_ceiling:
     print(f"::error::pending-port shrank to {pending_port} — lower pending_port_ceiling to match (ratchet bookkeeping)")
     fail = 1
 forever = sum(1 for c in classes.values() if c == "native-only-forever")
+host_cap = sum(1 for c in classes.values() if c == "host-capability")
 
 if not fail:
     per = ", ".join(f"{leg}={len(declared[leg])}" for leg in legs)
     swept = ", ".join(f"{leg}={probed[leg]}" for leg in legs)
     print(f"target-availability OK ({row_count} rows; fns swept per leg: {swept}; declared walls per leg: {per}; "
           f"classes: pending-self-host {pending}/{ceiling}, pending-port {pending_port}/{port_ceiling}, "
-          f"native-only-forever {forever}; two directions agree per swept leg).")
+          f"native-only-forever {forever}, host-capability {host_cap}; two directions agree per swept leg).")
 sys.exit(fail)
 PY

@@ -2,6 +2,23 @@
 
 Process execution. import process, effect.
 
+**On wasm** ([ADR-0025](../adr/0025-wasm-process-is-a-private-host-capability.md)):
+`almide run --target wasm` and the wasm leg of `almide test` run every function
+here with native's results — the same captured text, exit codes and err
+strings. `almide build --target wasm` builds a program that starts a child, but
+its artifact imports the private `almide:process/spawn` interface, so a stock
+runtime such as `wasmtime run` refuses it at load; it runs on a host that
+implements that import. A `--component` build refuses it with E081.
+
+**`[permissions] proc`**: a project can list the commands this module may start.
+Every call that starts a child must then name its command as a string literal on
+the list, or the program does not compile:
+
+```toml
+[permissions]
+proc = ["git", "cargo"]
+```
+
 ### `process.exec(cmd: String, args: List[String]) -> Result[String, String]`
 
 Execute a command and return its stdout as a string
