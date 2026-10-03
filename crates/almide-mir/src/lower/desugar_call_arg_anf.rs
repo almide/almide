@@ -435,3 +435,158 @@ pub(crate) fn desugar_heap_if_call_args(body: &IrExpr) -> Option<IrExpr> {
     }
     changed.then_some(out)
 }
+
+/// `"a ${e0} ${ { s; r } } b"  ≡  { let t0 = e0; s; "a ${t0} ${r} b" }` — a string
+/// interpolation whose part is a statement block (the C-132 write-back of a `mut`-param
+/// call, `"${later(g)}"` → `{ let (r, b) = later(g); g = b; r }`) absorbs the block's
+/// statements, so the interp the lowering sees has only plain operands; a call holding it
+/// then absorbs the resulting block like any block argument ([`hoist_block_call_args`]).
+///
+/// Evaluation order is kept: an EARLIER part that calls something or reads a variable
+/// the block writes is bound to a fresh `let` first, in order, so it still evaluates
+/// before the block's statements ([`bind_earlier_interp_parts`] — a heap read through a
+/// written variable declines instead, leaving the interp untouched); parts after the
+/// block already evaluate after it. Returns whether `e` changed.
+fn absorb_interp_block_parts(e: &mut IrExpr, vt: &mut almide_ir::VarTable) -> bool {
+    let IrExprKind::StringInterp { parts } = &mut e.kind else { return false };
+    let mut hoisted: Vec<almide_ir::IrStmt> = Vec::new();
+    while let Some(bi) = first_interp_block_part(parts) {
+        let Some(mut binds) = bind_earlier_interp_parts(parts, bi, vt) else { break };
+        let almide_ir::IrStringPart::Expr { expr } = &mut parts[bi] else { unreachable!() };
+        let IrExprKind::Block { stmts, expr: Some(tail) } = &mut expr.kind else { unreachable!() };
+        binds.append(stmts);
+        let tail = (**tail).clone();
+        *expr = tail;
+        hoisted.append(&mut binds);
+    }
+    if hoisted.is_empty() {
+        return false;
+    }
+    let interp = std::mem::replace(
+        e,
+        IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
+    );
+    *e = IrExpr {
+        ty: interp.ty.clone(),
+        span: interp.span.clone(),
+        def_id: None,
+        kind: IrExprKind::Block { stmts: hoisted, expr: Some(Box::new(interp)) },
+    };
+    true
+}
+
+/// The index of the first interpolation part that is a block with statements.
+fn first_interp_block_part(parts: &[almide_ir::IrStringPart]) -> Option<usize> {
+    parts.iter().position(|p| {
+        matches!(p, almide_ir::IrStringPart::Expr { expr }
+            if matches!(&expr.kind, IrExprKind::Block { stmts, expr: Some(_) } if !stmts.is_empty()))
+    })
+}
+
+/// Make every part before `bi` safe to evaluate after the block at `bi`, and return the
+/// `let`s that do it, in order. Per non-literal part:
+///   - it reads no variable the block writes and calls nothing → stays (re-reading it
+///     after the block is unobservable);
+///   - a SCALAR part, or a heap part that is itself a call (a fresh owned result) → bound
+///     to a fresh `let`, so it is computed before the block;
+///   - any other heap part (a field or element read through a written variable, an
+///     operator over one) → `None`, nothing changed: a `let` of it would be a borrow
+///     into a value the block's write may release.
+fn bind_earlier_interp_parts(
+    parts: &mut [almide_ir::IrStringPart],
+    bi: usize,
+    vt: &mut almide_ir::VarTable,
+) -> Option<Vec<almide_ir::IrStmt>> {
+    use almide_ir::{IrStmt, IrStmtKind, IrStringPart, Mutability};
+    let (earlier, rest) = parts.split_at_mut(bi);
+    let IrStringPart::Expr { expr: block } = &rest[0] else { return None };
+    let written = stmts_written_vars(block);
+    let mut plan = Vec::with_capacity(earlier.len());
+    for p in earlier.iter() {
+        let IrStringPart::Expr { expr: a } = p else {
+            plan.push(false);
+            continue;
+        };
+        let (reads_written, calls) = part_reads_and_calls(a, &written);
+        let bind = match (reads_written || calls, crate::lower::is_heap_ty(&a.ty)) {
+            (false, _) => false,
+            (true, false) => true,
+            (true, true) if matches!(a.kind, IrExprKind::Call { .. }) => true,
+            (true, true) => return None,
+        };
+        plan.push(bind);
+    }
+    let mut binds = Vec::new();
+    for (p, bind) in earlier.iter_mut().zip(plan) {
+        let IrStringPart::Expr { expr: a } = p else { continue };
+        if !bind {
+            continue;
+        }
+        let ty = a.ty.clone();
+        let span = a.span.clone();
+        let var = vt.alloc(almide_base::intern::sym("__part"), ty.clone(), Mutability::Let, None);
+        let value = std::mem::replace(
+            a,
+            IrExpr { kind: IrExprKind::Var { id: var }, ty: ty.clone(), span: span.clone(), def_id: None },
+        );
+        binds.push(IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value }, span });
+    }
+    Some(binds)
+}
+
+/// Whether `e` reads a variable in `written`, and whether it contains a call.
+fn part_reads_and_calls(
+    e: &IrExpr,
+    written: &std::collections::HashSet<almide_ir::VarId>,
+) -> (bool, bool) {
+    struct R<'a> {
+        written: &'a std::collections::HashSet<almide_ir::VarId>,
+        reads: bool,
+        calls: bool,
+    }
+    impl almide_ir::visit::IrVisitor for R<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match &e.kind {
+                IrExprKind::Var { id } if self.written.contains(id) => self.reads = true,
+                IrExprKind::Call { .. } => self.calls = true,
+                _ => {}
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut r = R { written, reads: false, calls: false };
+    almide_ir::visit::IrVisitor::visit_expr(&mut r, e);
+    (r.reads, r.calls)
+}
+
+/// The variables a block's statements write: assignment targets, field / index / map
+/// write targets, and in-place mutator receivers.
+fn stmts_written_vars(block: &IrExpr) -> std::collections::HashSet<almide_ir::VarId> {
+    use almide_ir::IrStmtKind;
+    struct W(std::collections::HashSet<almide_ir::VarId>);
+    impl almide_ir::visit::IrVisitor for W {
+        fn visit_stmt(&mut self, s: &almide_ir::IrStmt) {
+            match &s.kind {
+                IrStmtKind::Assign { var, .. } => {
+                    self.0.insert(*var);
+                }
+                IrStmtKind::IndexAssign { target, .. }
+                | IrStmtKind::FieldAssign { target, .. }
+                | IrStmtKind::MapInsert { target, .. } => {
+                    self.0.insert(*target);
+                }
+                _ => {}
+            }
+            almide_ir::visit::walk_stmt(self, s);
+        }
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let Some(v) = crate::lower::inplace_mutated_receiver(e) {
+                self.0.insert(v);
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut w = W(std::collections::HashSet::new());
+    almide_ir::visit::IrVisitor::visit_expr(&mut w, block);
+    w.0
+}
