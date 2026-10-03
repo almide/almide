@@ -121,7 +121,6 @@
 # render). These are NOT lowering regressions: the corpus grew past the
 # incumbent's admitted profile by design. Each row prunes when the incumbent
 # learns the shape — or with the incumbent's retirement, whichever first.
-spec/gauntlet/cells/x09_tuple_list_of_record.almd :: f
 spec/gauntlet/cells/x13_bang_nested_in_field.almd :: f
 spec/wasm_cross/bytes_equality_call_operands.almd :: main
 spec/wasm_cross/codec_triple_list.almd :: T.__dec_list_list_list_int_go
@@ -378,7 +377,6 @@ spec/wasm_cross/mut_param_effect_unpropagated.almd :: main  # #3121
 # the executable subset", "?? over an Option/Result operand outside the
 # executable subset"); the structural leg serves all five byte-identically to
 # native and the interp.
-spec/wasm_cross/mut_param_move_mode_gaps.almd :: fill2  # #3121
 # (2026-09-30, C-038/#3060) the sized tail-literal matrix: every sized width's
 # `err(..)` payload cell (`-> Result[Bool, T]`) is a heap-result `if`, and each
 # width's printer matches on a heap Option / Result — both outside the
