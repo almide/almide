@@ -1,0 +1,38 @@
+// @contract: C-132
+// A `mut`-argument call inside a string interpolation runs in part order: the
+// parts before it are evaluated first, the parts after it see its write-back
+// (#2739 walls lane 3). The MIR rung used to refuse the interpolation because
+// the call's write-back block sat inside a part; it now absorbs the block, and
+// binds each earlier part that calls something to a `let` first so the order
+// holds. Byte-identical native == wasm == interp.
+type R = { n: Int, tag: String }
+
+fn later(mut r: R) -> Int = {
+  println("later runs")
+  r.n = r.n + 1
+  r.tag = r.tag + "!"
+  r.n
+}
+
+fn noisy(n: Int) -> Int = {
+  println("noisy ${n}")
+  n
+}
+
+fn shout(s: String) -> String = {
+  println("shout ${s}")
+  s + "?"
+}
+
+fn grow(mut xs: List[Int], v: Int) -> Int = {
+  list.push(xs, v)
+  list.len(xs)
+}
+
+fn main() -> Unit = {
+  var g = R { n: 1, tag: "t" }
+  println("first ${noisy(1)} ${shout("a")} later ${later(g)} after ${g.n} ${g.tag}")
+  var xs = [1, 2]
+  println("grow ${grow(xs, 9)} then ${noisy(2)} ${grow(xs, 8)} xs ${xs}")
+  println("again ${later(g)} ${later(g)} ${g.tag}")
+}
