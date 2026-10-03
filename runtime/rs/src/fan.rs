@@ -38,6 +38,12 @@ pub fn almide_rt_fan_map<A, B>(
 // cut-off: `fan.map` IS the user's fan-out signal, each element a task (a
 // 64-chunk fan over 14 cores would never clear a size threshold).
 // `ALMIDE_FAN_SEQUENTIAL=1` forces the sequential path — the ablation knob.
+//
+// Every element writes into its own output timeline (ADR-0024 D5), flushed in
+// list order. Until ADR-0024 step 3 the map still stops at the first Err, so
+// that Err CUTS the group: nothing above it is flushed, and a trap above it
+// (which the sequential twin never reaches) unwinds with `AlmideFanDiscard`
+// instead of aborting, caught here as an element that does not count.
 pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result<B, String> + Send + Sync>(
     items: Vec<A>,
     f: F,
@@ -49,13 +55,14 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
     let chunk_size = items.len().div_ceil(workers);
     let first_err = std::sync::atomic::AtomicUsize::new(usize::MAX);
     let mut slots: Vec<Option<Result<B, String>>> = (0..items.len()).map(|_| None).collect();
-    // Flush before the workers start: a runtime abort on a worker exits
-    // without reaching this thread's stdout buffer (C-197, see rust.toml fan_expr).
-    almide_stdout_flush();
+    // The group flushes this thread's stdout first: a runtime abort on a worker
+    // exits without reaching this thread's buffer (C-197, see rust.toml fan_expr).
+    let group = almide_fan_group(items.len());
     std::thread::scope(|s| {
         for (chunk_idx, (chunk, out)) in items.chunks(chunk_size).zip(slots.chunks_mut(chunk_size)).enumerate() {
             let f = &f;
             let first_err = &first_err;
+            let group = &group;
             let base = chunk_idx * chunk_size;
             s.spawn(move || {
                 for (i, (slot, item)) in out.iter_mut().zip(chunk).enumerate() {
@@ -63,11 +70,22 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
                     if idx > first_err.load(std::sync::atomic::Ordering::Acquire) {
                         break;
                     }
-                    let r = f(item.clone());
-                    if r.is_err() {
-                        first_err.fetch_min(idx, std::sync::atomic::Ordering::AcqRel);
+                    let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let _elem = almide_fan_enter(group, idx);
+                        let r = f(item.clone());
+                        if r.is_err() {
+                            // Cut before publishing the Err: a worker that skips an
+                            // index above it must find the cut already in place.
+                            almide_fan_cut(group, idx);
+                            first_err.fetch_min(idx, std::sync::atomic::Ordering::AcqRel);
+                        }
+                        r
+                    }));
+                    match run {
+                        Ok(r) => *slot = Some(r),
+                        Err(p) if p.is::<AlmideFanDiscard>() => break,
+                        Err(p) => std::panic::resume_unwind(p),
                     }
-                    *slot = Some(r);
                 }
             });
         }
@@ -134,20 +152,26 @@ pub fn almide_rt_fan_any_map<A, B>(
     Err("fan.any: all candidates failed".to_string())
 }
 
+// One output timeline per thunk, flushed in list order (ADR-0024 D5). The
+// group flushes this thread's stdout first: a runtime abort on a worker exits
+// without reaching this thread's buffer (C-197, see rust.toml fan_expr).
 pub fn almide_rt_fan_settle<T: Send + 'static>(
     thunks: Vec<impl Fn() -> Result<T, String> + Send + Sync>,
 ) -> Vec<Result<T, String>> {
-    // Flush before the workers start: a runtime abort on a worker exits
-    // without reaching this thread's stdout buffer (C-197, see rust.toml fan_expr).
-    almide_stdout_flush();
+    let group = almide_fan_group(thunks.len());
+    let group = &group;
     std::thread::scope(|s| {
         let handles: Vec<_> = thunks
             .iter()
-            .map(|thunk| s.spawn(move || thunk()))
+            .enumerate()
+            .map(|(i, thunk)| s.spawn(move || {
+                let _elem = almide_fan_enter(group, i);
+                thunk()
+            }))
             .collect();
         handles
             .into_iter()
-            .map(|h| h.join().unwrap())
+            .map(almide_fan_join)
             .collect()
     })
 }

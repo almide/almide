@@ -444,11 +444,13 @@ fn rewrite_call_as_macro(name: Sym, args: Vec<IrExpr>, ty: Ty, span: Option<Span
     }
     // println / eprintln → RustMacro. `println` is the runtime prelude's
     // `almide_println!` — the one stdout buffer (#2245), not Rust's
-    // line-buffered `println!`; `eprintln` stays Rust's (stderr, unbuffered).
+    // line-buffered `println!`. `eprintln` is the prelude's `almide_eprintln!`:
+    // unbuffered on stderr, but inside a `fan` element it joins the element's
+    // output timeline (ADR-0024 D5).
     if name == "println" || name == "eprintln" {
         let mut macro_args = vec![IrExpr { kind: IrExprKind::LitStr { value: "{}".into() }, ty: Ty::String, span: None, def_id: None }];
         macro_args.extend(args);
-        let name = if name == "println" { Sym::from("almide_println") } else { name };
+        let name = if name == "println" { Sym::from("almide_println") } else { Sym::from("almide_eprintln") };
         return IrExpr { kind: IrExprKind::RustMacro { name, args: macro_args }, ty, span, def_id: None };
     }
     unreachable!("rewrite_call_as_macro reached with a non-macro builtin: {}", name)

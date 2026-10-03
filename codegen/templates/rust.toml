@@ -525,11 +525,15 @@ template = "std::rc::Rc::new({inner})"
 # `process::exit` on the worker, which never reaches the spawning thread's
 # buffer — the lines printed before the fan were lost on native while the
 # sequential wasm leg kept them (C-197; fuzz seed 585689703894 index 4740).
+# `almide_fan_group` makes that flush and opens one output timeline per arm
+# (ADR-0024 D5/D6): each spawned arm enters its own (`almide_fan_enter`), and
+# the timelines reach stdout/stderr in arm order, as the sequential evaluation
+# prints them.
 [fan_expr]
-template = "{{ almide_stdout_flush(); std::thread::scope(|__s| {{ {spawns} {join_expr} }}) }}"
+template = "{{ almide_stdout_flush(); let __fan_go = almide_fan_group({count}); let __fan_g = &__fan_go; std::thread::scope(|__s| {{ {spawns} {join_expr} }}) }}"
 
 [fan_effect]
-template = "{{ almide_stdout_flush(); std::thread::scope(|__s| -> Result<_, String> {{ {spawns} Ok({join_expr}) }})? }}"
+template = "{{ almide_stdout_flush(); let __fan_go = almide_fan_group({count}); let __fan_g = &__fan_go; std::thread::scope(|__s| -> Result<_, String> {{ {spawns} Ok({join_expr}) }})? }}"
 
 [loop_block]
 template = "loop {{\n{body}\n}}"
