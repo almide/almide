@@ -177,10 +177,8 @@ pub fn almide_proc_exec_status_timeout(
         // hold either pipe. The same deadline covers BOTH process and drains.
         // (No let-chain: the native splice compiles under the generated
         // crate's edition, not this one's.)
-        if let Some(status) = exit_status {
-            if out_h.is_finished() && err_h.is_finished() {
-                break status;
-            }
+        if let (Some(status), true) = (exit_status, out_h.is_finished() && err_h.is_finished()) {
+            break status;
         }
         if std::time::Instant::now() >= deadline {
             almide_proc_stop_tree(&mut child);

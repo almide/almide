@@ -132,7 +132,7 @@ fn a_linker_without_the_import_refuses_the_guest_at_instantiation() {
     let module = wasmtime::Module::new(&engine, guest()).expect("guest validates");
     let linker = wasmtime::Linker::<()>::new(&engine);
     let mut store = wasmtime::Store::new(&engine, ());
-    let e = linker.instantiate(&mut store, &module).err().expect("a stock linker has no almide:process/spawn");
+    let Err(e) = linker.instantiate(&mut store, &module) else { panic!("a stock linker has no almide:process/spawn") };
     assert!(format!("{e:#}").contains("almide:process/spawn"), "{e:#}");
 }
 
@@ -278,6 +278,6 @@ fn the_p1_artifact_forwards_process_ops_to_the_private_import() {
     let mut stock = wasmtime::Linker::<()>::new(&engine);
     stock.func_wrap("wasi_snapshot_preview1", "fd_write", |_: i32, _: i32, _: i32, _: i32| -> i32 { 0 }).expect("fd_write");
     stock.func_wrap("wasi_snapshot_preview1", "proc_exit", |_: i32| {}).expect("proc_exit");
-    let e = stock.instantiate(&mut wasmtime::Store::new(&engine, ()), &module).err().expect("refused");
+    let Err(e) = stock.instantiate(&mut wasmtime::Store::new(&engine, ()), &module) else { panic!("refused") };
     assert!(format!("{e:#}").contains("almide:process/spawn"), "{e:#}");
 }
