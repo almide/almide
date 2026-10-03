@@ -293,6 +293,7 @@ spec/wasm_cross/fan_deterministic.almd
 spec/wasm_cross/fan_effect_mapper.almd
 spec/wasm_cross/fan_map_all_workers_abort_one_line.almd
 spec/wasm_cross/fan_map_err.almd
+spec/wasm_cross/fan_map_err_runs_every_element.almd
 spec/wasm_cross/fan_map_inline_err.almd
 spec/wasm_cross/fan_map_inline_lambda.almd
 spec/wasm_cross/fan_map_nested_combinators.almd
@@ -301,6 +302,7 @@ spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd
 spec/wasm_cross/fan_pure_thunks.almd
 spec/wasm_cross/fan_settle_tuple.almd
 spec/wasm_cross/fan_sibling_trap.almd
+spec/wasm_cross/fan_trap_waits_for_elements_below.almd
 spec/wasm_cross/fan_var_thunk_list.almd
 spec/wasm_cross/fan_worker_abort_keeps_stdout.almd
 spec/wasm_cross/filter_map_conditional_arm.almd
@@ -959,6 +961,7 @@ spec/wasm_cross/value_merge_duplicate_keys.almd
 spec/wasm_cross/value_object_leak_loop.almd
 spec/wasm_cross/value_object_ops_share.almd
 spec/wasm_cross/value_repr.almd
+spec/wasm_cross/var_destructure.almd
 spec/wasm_cross/variant_case_named_like_its_type.almd
 spec/wasm_cross/variant_pair_result_return.almd
 spec/wasm_cross/variant_record_literal_equality.almd
