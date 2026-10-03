@@ -280,13 +280,11 @@ impl LowerCtx {
 
     /// The `FieldAssign` arm of [`Self::lower_stmt`] — verbatim move (#781).
     fn lower_stmt_field_assign(&mut self, target: VarId, field: almide_lang::intern::Sym, value: &IrExpr) -> Result<(), LowerError> {
-                // Mutable-GLOBAL target: same COW-copy silent-miscompile class as the
-                // IndexAssign guard above — WALL.
-                if !self.value_of.contains_key(&target) && crate::lower::is_mutable_global(target) {
-                    return Err(LowerError::Unsupported(format!(
-                        "field-assign to mutable module-level var {target:?} (in-place \
-                         mutation through the global slot) is not in this brick"
-                    )));
+                // Mutable-GLOBAL target: the functional rebind through its storage slot.
+                if !self.value_of.contains_key(&target) {
+                    if let Some(global) = crate::lower::mutable_global_info(target) {
+                        return self.lower_mutable_global_field_assign(target, global, field, value);
+                    }
                 }
                 // A HEAP-typed field write takes the functional REBIND `r.f = v` ≡
                 // `r = { ...r, f: v }` — the same value-semantics treatment `m[k] = v`
@@ -389,6 +387,36 @@ impl LowerCtx {
                 Ok(())
     }
 
+
+    /// `g.f = v` on a mutable module-level record `var`: the functional rebind
+    /// `g = { ...g, f: v }` through the global's storage slot. The slot assign builds
+    /// the new record FIRST (the spread reads the old one through its own `Dup`), then
+    /// takes, drops and replaces the old block — value semantics, so a copy bound
+    /// before the write keeps the old field, as native's `RcCow` does. A global that
+    /// is not a record/tuple has no field to write and walls.
+    fn lower_mutable_global_field_assign(
+        &mut self,
+        target: VarId,
+        global: (u32, Ty),
+        field: almide_lang::intern::Sym,
+        value: &IrExpr,
+    ) -> Result<(), LowerError> {
+        let (index, gty) = global;
+        if self.aggregate_field_tys(&gty).is_none() {
+            return Err(LowerError::Unsupported(format!(
+                "field-assign to mutable module-level var {target:?} whose type has no \
+                 record layout is not in this brick"
+            )));
+        }
+        let base = IrExpr { kind: IrExprKind::Var { id: target }, ty: gty.clone(), span: None, def_id: None };
+        let spread = IrExpr {
+            kind: IrExprKind::SpreadRecord { base: Box::new(base), fields: vec![(field, value.clone())] },
+            ty: gty.clone(),
+            span: None,
+            def_id: None,
+        };
+        self.lower_mutable_global_assign(target, index, &gty, &spread)
+    }
 
     /// The `MapInsert` arm of [`Self::lower_stmt`] — verbatim move (#781).
     fn lower_stmt_map_insert(&mut self, target: VarId, key: &IrExpr, value: &IrExpr) -> Result<(), LowerError> {
