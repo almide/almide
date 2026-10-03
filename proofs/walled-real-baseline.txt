@@ -266,19 +266,13 @@ spec/lang/typed_error_callback_channel_test.almd :: fold_mid_block
 spec/lang/typed_error_callback_channel_test.almd :: sum_with
 spec/lang/typed_error_callback_channel_test.almd :: typed_slot
 # 2026-09-27 (#2725, ADR-0021 step 4, C-369): the lambda failure-channel files.
-# The incumbent MIR lowering walls a `!` bound under an operator whose typed error
-# erases into a String channel (`erased`, `fn_level`: "unwrap `!` bound to a
-# let/var"), a `__fallible_fold`/`__fallible_map` whose callback is not liftable
-# (`disagree`, `erased_fold`, `fold_mid_block`, `sum_with`), and a lambda passed to
-# a typed slot (`typed_slot`). The structural leg serves every one byte-identically
-# to native (3-way oracle agrees); the incumbent is retiring under #1696 (recorded,
-# not ported).
-spec/lang/lambda_channel_erasure_test.almd :: disagree
-spec/lang/lambda_channel_erasure_test.almd :: erased
-spec/lang/lambda_channel_erasure_test.almd :: erased_fold
-spec/lang/lambda_channel_erasure_test.almd :: fn_level
-spec/wasm_cross/lambda_failure_channel.almd :: disagree
-spec/wasm_cross/lambda_failure_channel.almd :: erased
+# The incumbent MIR lowering walls a `__fallible_fold` whose callback carries a
+# TYPED error channel through a block body (`fold_mid_block`, `sum_with`: its
+# `err(e) => err(e)` re-wrap of a variant payload is the heap-result re-wrap
+# family) and a lambda passed to a typed slot (`typed_slot`). The structural leg
+# serves every one byte-identically to native (3-way oracle agrees). The
+# String-erasure rows (`erased`, `fn_level`, `disagree`, `erased_fold`) lower since
+# walls lane 3 (#2739): the `!` carries the typed error's repr text.
 spec/wasm_cross/lambda_failure_channel.almd :: fold_mid_block
 spec/wasm_cross/lambda_failure_channel.almd :: sum_with
 spec/wasm_cross/lambda_failure_channel.almd :: typed_slot
