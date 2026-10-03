@@ -81,7 +81,14 @@ fn fns_with_spellings(program: &IrProgram) -> Vec<(Option<&str>, &IrFunction, Ve
 
 /// Derive [`EffectAbiFacts`] from `program`.
 pub fn effect_abi_facts(program: &IrProgram) -> EffectAbiFacts {
-    let never_err = crate::mut_param_unpropagated::never_err_effect_fn_keys(program);
+    // A declared-Result effect fn returns its Result as written, never raw,
+    // so a `!` over its call is a real unwrap even when its body cannot err:
+    // a caller whose only quiet callee is one would be lifted raw with a
+    // propagation arm it cannot express (#3121, the `let v = f()!; v` tail).
+    // Its own quietness never mattered to the ABI (`!result` below).
+    let never_err = crate::mut_param_unpropagated::never_err_effect_fn_keys_among(program, &|f| {
+        !declares(f, TypeConstructorId::Result)
+    });
     let mut facts = EffectAbiFacts::default();
     for (module, f, keys) in fns_with_spellings(program) {
         let quiet = keys.iter().any(|k| never_err.contains(k));
