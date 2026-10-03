@@ -180,6 +180,22 @@ impl LowerCtx {
     /// `live_heap_handles` (scope-end drops the FINAL object through the same local);
     /// its cert `a` is backed by the real `Op::Dup` (the borrow-by-default gate).
     pub(crate) fn precopy_borrowed_reassign_slots(&mut self, body: &[IrStmt]) {
+        // A borrowed RECORD param whose field path an in-place mutator writes
+        // (`list.pop(u.kids)`): the field COW copies the root record and rebinds the
+        // var, a heap reassignment of the root the loop carries. Its pre-loop copy is a
+        // real block of the param's record layout, so it takes the record read-shape
+        // (field loads, heap-slot mask, recursive drop route) the COW needs.
+        for (var, ty) in collect_field_mutator_roots(body) {
+            if let Some(&val) = self.value_of.get(&var) {
+                if self.param_values.contains(&val) && self.aggregate_field_tys(&ty).is_some() {
+                    let owned = self.fresh_value();
+                    self.ops.push(Op::Dup { dst: owned, src: val });
+                    self.value_of.insert(var, owned);
+                    self.live_heap_handles.push(owned);
+                    self.seed_call_named_heap_read_shape(owned, &ty);
+                }
+            }
+        }
         let mut vars: Vec<VarId> = Vec::new();
         collect_heap_reassign_vars(body, &mut vars);
         for var in vars {
@@ -652,4 +668,41 @@ fn while_body_is_unit(e: &IrExpr) -> bool {
         }
         _ => false,
     }
+}
+
+/// The root vars (with their types) of every FIELD-PATH receiver of an in-place
+/// mutator in a loop body (`list.pop(u.kids)` → `u`, `bytes.set_u8(d.a.buf, ..)` →
+/// `d`), in first-occurrence order. A nested loop pre-copies its own — not descended.
+fn collect_field_mutator_roots(stmts: &[IrStmt]) -> Vec<(VarId, Ty)> {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct Scan(Vec<(VarId, Ty)>);
+    impl IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match &e.kind {
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                    if crate::lower::is_inplace_mutator(module.as_str(), func.as_str()) =>
+                {
+                    if let Some(IrExprKind::Member { object, .. }) = args.first().map(|a| &a.kind) {
+                        let mut root: &IrExpr = object;
+                        while let IrExprKind::Member { object, .. } = &root.kind {
+                            root = object;
+                        }
+                        if let IrExprKind::Var { id } = &root.kind {
+                            if !self.0.iter().any(|(v, _)| v == id) {
+                                self.0.push((*id, root.ty.clone()));
+                            }
+                        }
+                    }
+                    walk_expr(self, e);
+                }
+                IrExprKind::ForIn { .. } | IrExprKind::While { .. } => {}
+                _ => walk_expr(self, e),
+            }
+        }
+    }
+    let mut s = Scan(Vec::new());
+    for stmt in stmts {
+        almide_ir::visit::IrVisitor::visit_stmt(&mut s, stmt);
+    }
+    s.0
 }
