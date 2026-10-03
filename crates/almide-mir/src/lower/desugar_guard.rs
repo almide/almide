@@ -615,7 +615,6 @@ pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
     // interp lowering then sees only plain operands. Sound when every EARLIER Expr
     // part is pure (a literal/Var); parts after the block already evaluate after it.
     fn hoist_in_stmts(stmts: &mut Vec<almide_ir::IrStmt>) {
-        
         let mut i = 0;
         while i < stmts.len() {
             let hoisted = take_first_block_part(&mut stmts[i]);
