@@ -168,6 +168,12 @@ run branch-mismatch ownership 1
 # use-after-free the cert previously could not witness → REJECT.
 run borrow-live ownership 0
 run borrow-uaf  ownership 1
+# ALIAS after the release (#3229): an owned object freed, then `Dup`'d and
+# moved out is `idam` — it BALANCES, so the count alone accepted it. On a line
+# born by a top-level `i`, a count of 0 means DEAD, and the owned-line rule
+# probes every later `a` → REJECT. (`balanced` above, `iadd`, aliases the
+# object while it is live and still accepts.)
+run alias-after-free ownership 1
 
 echo "-- property: ownership, format v5 (law 6: the arm-terminal Return exit) --"
 # The R2 `!` exit shape: the arm drops everything it owns BEFORE the

@@ -41,6 +41,8 @@ printf 'B\n'       > /tmp/borrow_nothing.cert   # 5b: borrow with nothing ever o
 printf 'I{I|I}DD\n'> /tmp/branch_agree.cert     # 5a: one-shot branch, arms AGREE at net +1 (heap-result if) → ACCEPT
 printf 'I{I|}D\n'  > /tmp/branch_disagree.cert  # 5a: arms DISAGREE (+1 vs 0) → REJECT
 printf '{I|D}\n'   > /tmp/branch_cross.cert     # 5a: cross-arm compensation (flat-balanced, runtime-unsafe) → REJECT
+printf 'IDAM\n'    > /tmp/resurrect.cert        # #3229: an OWNED object freed, then aliased + moved out (balanced, use-after-free) → REJECT
+printf 'AMAM\n'    > /tmp/param_realias.cert    # #3229: a borrowed param's line re-aliased at 0 (the caller holds it) → ACCEPT
 
 run() { # path expected_exit
   set +e; ./checker ownership "$1" >/tmp/checker.out 2>&1; local rc=$?; set -e
@@ -67,6 +69,8 @@ run /tmp/borrow_nothing.cert 1
 run /tmp/branch_agree.cert 0
 run /tmp/branch_disagree.cert 1
 run /tmp/branch_cross.cert 1
+run /tmp/resurrect.cert 1
+run /tmp/param_realias.cert 0
 
 # TRANSITIVE capability witness (call graph): functions ';'-separated, each
 # `allowed|direct|callee-indices`. accept ⟹ every function's transitive reach ⊆ declared.

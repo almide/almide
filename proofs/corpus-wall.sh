@@ -332,6 +332,55 @@ else
   rm -f "$KGEN"; exit 1
 fi
 
+# POISON RATCHET, the negative leg (#1147, #3229). The sweep above only shows
+# that honest witnesses ACCEPT; it cannot show the checker would notice a
+# dishonest one. proofs/poisoned-certs/ holds real witnesses of unsafe
+# lowerings, each of which every verdict must REJECT — a checker that starts
+# accepting one has lost a rule, whatever the corpus says.
+#   3229-modeled-frame-cow-drain{,-two-level}.cert — `drain(mut u)` in
+#   spec/wasm_cross/list_pop_map_insert_on_record_field.almd and
+#   nested_field_path_mut.almd, lowered with the field-path copy-on-write
+#   allowed inside a model-one-iteration `while` frame (the refusal in
+#   lower/calls_b.rs disabled). The frame-end `drop_arm_locals` frees the copy,
+#   then the write-back `Dup`s it: the owned line reads `idam` / `iiddam`,
+#   balanced to 0, accepted before the owned-line resurrection rule.
+echo
+echo "== POISON RATCHET (negative leg, #3229): every poisoned certificate is REJECTED by all three verdicts =="
+POISONED=("$ROOT"/proofs/poisoned-certs/*.cert)
+if [ ! -e "${POISONED[0]}" ]; then
+  echo "POISON RATCHET FAIL: proofs/poisoned-certs/ holds no certificate — the negative leg would pass vacuously." >&2
+  cleanup; exit 1
+fi
+PGEN="$(mktemp /tmp/KernelPoison_XXXXXX).v"
+python3 - "${POISONED[@]}" > "$PGEN" <<'PYEOF'
+import sys
+print("From AlmideTrust Require Import OwnershipChecker.")
+print("From Stdlib Require Import String.")
+print("Open Scope string_scope.")
+for path in sys.argv[1:]:
+    print('Goal check_xc "%s" = false.' % open(path).read().replace('"', '""'))
+    print("Proof. vm_compute. reflexivity. Qed.")
+PYEOF
+for cert in "${POISONED[@]}"; do
+  name="${cert#"$ROOT"/}"
+  set +e
+  ./checker ownership "$cert" >/dev/null 2>&1; XRC=$?
+  "$VERIFY" ownership "$cert" >/dev/null 2>&1; PRC=$?
+  set -e
+  if [ "$XRC" -ne 1 ] || [ "$PRC" -ne 1 ]; then
+    echo "POISON RATCHET FAIL: $name was not rejected (extracted checker exit $XRC, almide-verify exit $PRC; want 1 and 1)." >&2
+    rm -f "$PGEN"; cleanup; exit 1
+  fi
+  echo "  REJECT $name (extracted checker + almide-verify)"
+done
+if (cd "$ROOT/proofs" && "${COQC:-$(command -v coqc)}" -Q . AlmideTrust "$PGEN" >/dev/null 2>&1); then
+  echo "  KERNEL OK: the Rocq kernel rejects all ${#POISONED[@]} poisoned certificate(s)"
+  rm -f "$PGEN" "${PGEN%.v}.vo" "${PGEN%.v}.vos" "${PGEN%.v}.vok" "${PGEN%.v}.glob"
+else
+  echo "POISON RATCHET FAIL: the KERNEL did not reject a poisoned certificate (check_xc = false failed)." >&2
+  rm -f "$PGEN"; cleanup; exit 1
+fi
+
 cleanup
 echo
 echo "CORPUS WALL OK: over the whole v0 corpus, lower_function is total (wall holds,"

@@ -343,12 +343,15 @@ mod tests {
     /// Re-run the proven checker's decision in Rust (mirrors the Coq `check_bc`):
     /// every line's stream must never dec-below-zero and must end at 0, with the
     /// format-v4 branch rule — `{then|else}` arms both execute from the current
-    /// count, must not fault, and must AGREE on the leaving count.
+    /// count, must not fault, and must AGREE on the leaving count. A line born
+    /// by a top-level `i` is an OWNED object: an `a` at count 0 there aliases a
+    /// freed object and faults (the `check_xc` owned-line rule, #3229).
     fn cert_all_balanced(cert: &str) -> bool {
         // The flat fold (format v1 alphabet + the 5b `b` guard); None = fault.
-        fn fold(seg: &str, mut rc: i64) -> Option<i64> {
+        fn fold(seg: &str, mut rc: i64, owned: bool) -> Option<i64> {
             for c in seg.chars() {
                 match c {
+                    'a' if owned && rc == 0 => return None,
                     // i/a = +1 (fresh/alias), d/m = −1 (release/move-out).
                     'i' | 'a' => rc += 1,
                     'd' | 'm' => {
@@ -370,10 +373,11 @@ mod tests {
             Some(rc)
         }
         cert.lines().all(|line| {
+            let owned = line.starts_with('i');
             let mut rc: i64 = 0;
             let mut rest = line;
             while let Some(open) = rest.find('{') {
-                rc = match fold(&rest[..open], rc) {
+                rc = match fold(&rest[..open], rc, owned) {
                     Some(r) => r,
                     None => return false,
                 };
@@ -385,13 +389,13 @@ mod tests {
                     Some(p) => p,
                     None => return false,
                 };
-                match (fold(t, rc), fold(e, rc)) {
+                match (fold(t, rc, owned), fold(e, rc, owned)) {
                     (Some(rt), Some(re)) if rt == re => rc = rt, // arms AGREE
                     _ => return false, // an arm faults or the arms disagree
                 }
                 rest = &rest[close + 1..];
             }
-            match fold(rest, rc) {
+            match fold(rest, rc, owned) {
                 Some(r) => r == 0, // leak iff != 0
                 None => false,
             }
@@ -496,6 +500,27 @@ mod tests {
                 f.ops
             );
         }
+    }
+
+    /// #3229: an owned object released to 0, then `Dup`'d and moved out (what a
+    /// copy-on-write freed by a modeled frame's end produced). The cert BALANCES
+    /// (`idam`), so the count alone accepted it; verify_ownership sees the Dup of
+    /// a dead handle, and the owned-line rule makes the certificate agree.
+    #[test]
+    fn alias_after_free_is_rejected_by_both() {
+        let (a, b) = (ValueId(0), ValueId(1));
+        let f = func(vec![
+            Op::Alloc { dst: a, repr: heap(), init: Init::Opaque },
+            Op::Drop { v: a },
+            Op::Dup { dst: b, src: a },
+            Op::Consume { v: b },
+        ]);
+        let cert = ownership_certificate(&f);
+        assert_eq!(cert, "idam\n");
+        assert!(verify_ownership(&f).is_err());
+        assert!(!cert_all_balanced(&cert));
+        // a borrowed PARAM's line re-aliased at 0 stays legal (the caller holds it).
+        assert!(cert_all_balanced("amam\n"));
     }
 
     include!("certificate_p2.rs");
