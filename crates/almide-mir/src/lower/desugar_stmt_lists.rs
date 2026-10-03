@@ -20,6 +20,8 @@ pub(crate) fn normalize_stmt_lists(body: &mut IrExpr, vt: &mut almide_ir::VarTab
             };
             bind_nested_list_literal_elems(stmts, self.vt);
             flatten_block_destructures(stmts);
+            rewrite_c132_bang_sites(stmts, self.vt);
+            flatten_bang_statement_blocks(stmts);
         }
     }
     N { vt }.visit_expr_mut(body);
