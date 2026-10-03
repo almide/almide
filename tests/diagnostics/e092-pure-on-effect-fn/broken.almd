@@ -1,0 +1,7 @@
+import fs
+
+// #3250: an effect fn is never pure.
+@pure
+effect fn load(p: String) -> String = fs.read_text(p)!
+
+effect fn main() -> Unit = println(load("a.txt")!)

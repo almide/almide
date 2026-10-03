@@ -1,0 +1,2 @@
+expects_code = "E092"
+expects_error = "calls `io.write`, which has the IO effect"

@@ -252,6 +252,10 @@ pub struct TypeEnv {
     /// Explicit `fn Type.method` declarations that have a body, keyed by the
     /// prefixed fn key — the cross-module half of lowering's per-file set.
     pub explicit_convention_fns: std::collections::HashSet<Sym>,
+    /// Every `@extern` fn, by the key its callers resolve it under. Recorded
+    /// at registration — before any body is inferred — so the `@pure` check
+    /// (E092, #3250) knows a foreign callee in a file inferred later.
+    pub extern_fns: std::collections::HashSet<Sym>,
     /// Types' declared protocol conformances: type name → set of protocol names
     pub type_protocols: std::collections::HashMap<Sym, std::collections::HashSet<Sym>>,
     /// Type arguments of an explicit conformance to a GENERIC protocol
@@ -335,6 +339,7 @@ impl TypeEnv {
             field_default_exprs: std::collections::HashMap::new(),
             module_import_aliases: std::collections::HashMap::new(),
             explicit_convention_fns: std::collections::HashSet::new(),
+            extern_fns: std::collections::HashSet::new(),
             protocols: std::collections::HashMap::new(),
             type_protocols: std::collections::HashMap::new(),
             type_protocol_args: std::collections::HashMap::new(),

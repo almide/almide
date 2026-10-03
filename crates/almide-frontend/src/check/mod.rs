@@ -31,6 +31,7 @@ mod arm_blame;
 mod diagnostics;
 mod deprecation_warn;
 mod exit_literal;
+mod pure_attr;
 mod bang_error_channel;
 mod lambda_channel;
 mod intrinsic_authority;
@@ -236,6 +237,9 @@ pub struct Checker {
     /// under (`{module}.{name}` inside a module, bare in the entry), and its
     /// generic parameter names. `None` outside a fn body.
     pub(crate) current_fn: Option<(Sym, Vec<Sym>)>,
+    /// #3250, checker-wide: the resolved call graph and extern set the
+    /// `@pure` check (E092) closes over.
+    pub(crate) purity: pure_attr::PurityFacts,
     /// #2496, checker-wide (survives the per-program union-find swap): for
     /// each generic fn, the segment types (in its rigid generics) its body
     /// interpolates — a requirement every instantiation must meet.
@@ -653,6 +657,7 @@ impl Checker {
             deferred_result_interp_checks: Vec::new(),
             deferred_generic_calls: Vec::new(),
             current_fn: None,
+            purity: Default::default(),
             interp_reqs: std::collections::HashMap::new(),
             generic_calls: Vec::new(),
             interp_reported: std::collections::HashSet::new(),

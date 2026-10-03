@@ -441,6 +441,7 @@ impl Checker {
         (sig, qualified_via_direct)
     }
     pub(crate) fn check_named_call_with_type_args(&mut self, name: &str, arg_tys: &[Ty], type_args: Option<&[Ty]>) -> Ty {
+        self.record_purity_call(name);
         // Try builtin resolution first
         if let Some(ty) = self.check_builtin_call(name, arg_tys) {
             return ty;
