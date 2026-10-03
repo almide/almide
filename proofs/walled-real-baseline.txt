@@ -448,7 +448,6 @@ spec/wasm_cross/mut_param_closure_field_path_write.almd :: main  # #2739
 # the leg #3170 fixed — and the structural wasm leg and the interp agree with it.
 spec/wasm_cross/mut_param_reassign_from_hof.almd :: f_branch  # #2739
 spec/wasm_cross/mut_param_reassign_from_hof.almd :: f_fallible  # #2739
-spec/wasm_cross/mut_param_reassign_from_hof.almd :: f_filter_map  # #2739
 spec/wasm_cross/mut_param_reassign_from_hof.almd :: main  # #2739
 # #3174: the recursive-payload fixtures' MIR rung walls on a heap-result
 # `match` outside the executable subset (`left_bumped`, `swapped`,
