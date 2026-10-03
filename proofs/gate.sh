@@ -698,7 +698,7 @@ drill_structural_prop caps "#2759 file write from a plain fn"
 run_structural_prop "$WS" caps-transitive '(program)' 0
 python3 - > /tmp/structural.tamper <<'PYEOF'
 nodes = open("/tmp/structural.prop").read().split(";")
-k = next(i for i, n in enumerate(nodes) if n.split("|")[0] == "0 6")  # a plain fn's node
+k = next(i for i, n in enumerate(nodes) if n.split("|")[0] == "0")  # a plain fn's node: the console only (#3248 dropped stdin)
 d, direct, callees = nodes[k].split("|")
 nodes[k] = "|".join([d, (direct + " 4").strip(), callees])
 print(";".join(nodes), end="")
@@ -716,7 +716,7 @@ drill_structural_prop caps-transitive "#2759 call graph: file write from a plain
 # read that is the frame's own.
 FS=spec/wasm_cross/fs_read_text_utf8.almd
 run_structural_prop "$FS" caps branch_lift_synth_0 0
-sed 's/^[^|]*|/0 6|/' /tmp/structural.prop > /tmp/structural.tamper
+sed 's/^[^|]*|/0|/' /tmp/structural.prop > /tmp/structural.tamper
 drill_structural_prop caps "#3041 synthesized fn declared plain"
 TO=spec/wasm_cross/fuel_timeout_ends.almd
 run_structural_prop "$TO" caps heavy 0
