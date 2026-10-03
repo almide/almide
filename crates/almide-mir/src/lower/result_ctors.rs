@@ -458,7 +458,14 @@ impl LowerCtx {
         let IrExprKind::ResultErr { expr: inner } = &expr.kind else {
             return None;
         };
-        let piece = self.try_lower_variant_ctor(inner)?;
+        // `err(e)` over a BOUND variant (the re-wrap arm `err(e) => err(e)`, its
+        // binder a borrow of the subject's slot): acquire a fresh reference
+        // (`Dup`) and move THAT in — the binder's owner keeps its own, exactly as
+        // the record twin's `lower_result_str_piece` Var arm does.
+        let piece = match &inner.kind {
+            IrExprKind::Var { .. } => self.lower_result_str_piece(inner)?,
+            _ => self.try_lower_variant_ctor(inner)?,
+        };
         let needs_rec = self.variant_layouts.needs_recursive_drop(&type_name, &|rn| {
             crate::lower::canonical_record_key(&self.record_layouts, rn).is_some()
         });
