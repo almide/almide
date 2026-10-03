@@ -82,7 +82,7 @@ sha256sum -c --ignore-missing almide-checksums.sha256                # digest ma
 
 Each archive also carries `almide-verify`, the independently versioned certificate checker: `almide verify app.almd` emits the program's ownership / name / capability / call-mode witnesses and hands them to it (it must sit next to `almide` or on `PATH` — there is no built-in fallback).
 
-From source, with [Rust](https://rustup.rs/) 1.94+ (the binary embeds the wasmtime host): `cargo build --release && cp target/release/almide target/release/almide-verify ~/.local/bin/` (or `make install`).
+From source, with [Rust](https://rustup.rs/) 1.96+ (the `almide` package's `rust-version`, because the binary embeds the wasmtime host; CI builds with 1.96.0): `cargo build --release && cp target/release/almide target/release/almide-verify ~/.local/bin/` (or `make install`).
 
 ```almd
 fn main() -> Unit = {
@@ -104,7 +104,7 @@ almide run hello.almd --target wasm   # same bytes, on wasmtime
 - **Bidirectional type inference** — Annotations flow into expressions (`let xs: List[Int] = []`)
 - **Codec system** — `Type.decode(value)` / `Type.encode(value)` with auto-derive
 - **Map literals** — `["key": value]`, `m[key]`, `for (k, v) in m`
-- **Fan** — structured concurrency: `fan { a(); b() }` on real threads natively, sequential on wasm; `fan.map` / `fan.any` deterministic by list order on both
+- **Fan** — structured concurrency: `fan { a(); b() }` runs each arm on its own thread natively and one after another on wasm; `fan.map` / `fan.any` / `fan.settle` return results in list order on both, `fan.map` stops at the first `Err`, and natively it runs on threads only for a pure callback over scalars (an effect callback runs one element at a time). What concurrent native arms print comes out in finishing order, not source order (C-004's exception). [ADR-0024](./docs/adr/0024-fan-effect-callbacks-run-concurrently-as-if-sequential.md) is changing this, and none of it has landed yet: per-element output in list order (step 1, #3225), then `fan.map` running every element and surfacing the lowest-index `Err` (step 3, #3226, a new dialect epoch)
 - **Pipeline operator** — `data |> transform |> output`
 - **Module system** — Packages, sub-namespaces, visibility control, diamond dependency resolution
 - **Standard library** — self-hosted `.almd` modules: string, list, map, json, http, fs, and more ([reference](./docs/stdlib/); the count is derived under [Project Status](#project-status))
@@ -123,13 +123,13 @@ Measured by [almide-dojo](https://github.com/almide/almide-dojo) on 2026-09-22 a
 | Llama 3.3 70B (fp8-fast) | 65% (25/38) | 39% (15/38) |
 | Llama 3.1 8B | 44% (17/38) | 34% (13/38) |
 
-The most recent same-model comparison is the MiniGit bench: Sonnet 5 × 20 trials on 2026-07-15, 100% pass, the most concise of 5 languages (233 LOC), and the fastest agent wall-clock against Gleam and MoonBit — an LLM-writability number, measured under 6–9× self-parallelism, **not** generated-code speed ([chart](docs/figures/lang-bench-snapshot-2026-07.png) · [method](research/benchmark/lang-bench/README.md) · [upstream](https://github.com/mame/ai-coding-lang-bench)).
+The most recent same-model comparison is the MiniGit bench: Sonnet 5 × 20 trials on 2026-07-15 with almide 0.29.0 (it has not been re-run on a later compiler), 100% pass, the most concise of 5 languages (233 LOC), and a faster agent wall-clock than Gleam and MoonBit but slower than Rust and TypeScript (573 s against 297 s) — an LLM-writability number, measured under 6–9× self-parallelism, **not** generated-code speed ([chart](docs/figures/lang-bench-snapshot-2026-07.png) · [method](research/benchmark/lang-bench/README.md) · [upstream](https://github.com/mame/ai-coding-lang-bench)).
 
 ### Byte-identical across targets
 
 **Every program that compiles for both targets produces byte-identical observable output — stdout, stderr, exit code — whether it runs as a native binary or as WebAssembly.** Native is the oracle; `native == wasm` is a hard invariant, not a "target difference" to be documented around.
 
-The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-identical" means the execution output, not the compiled artifacts; inherently nondeterministic sources certify deterministic *invariants* instead of exact bytes; APIs not yet implemented on wasm are compile- or run-time *refusals* — never wrong bytes; and exactly two fns are exempt because their job is to report the host — `env.os()` and `env.temp_dir()`, bounded by C-189, since making them agree across targets would be the defect rather than the guarantee.
+The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-identical" means the execution output, not the compiled artifacts; inherently nondeterministic sources certify deterministic *invariants* instead of exact bytes; APIs not yet implemented on wasm are compile- or run-time *refusals* — never wrong bytes; exactly two fns are exempt because their job is to report the host — `env.os()` and `env.temp_dir()`, bounded by C-189, since making them agree across targets would be the defect rather than the guarantee; and, until ADR-0024 step 1 (#3225) lands, output printed from concurrent `fan { }` arms comes out in finishing order on native and in source order on wasm — only their results are pinned (C-004's exception clause).
 
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI):
 
@@ -152,28 +152,28 @@ You write no ownership annotations, no lifetimes, no `free`: [Perceus](https://w
 
 ### Performance
 
-No runtime, no GC, no interpreter — native compiles through Rust to machine code, and WASM is emitted directly as self-contained modules.
+No VM, no GC, no interpreter — native compiles through Rust to machine code, and WASM is emitted directly as self-contained modules (the runtime support a program reaches is linked in and the rest is pruned).
 
 <!-- wasm-size:generated:start — rendered from docs/benchmarks/wasm-size.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
-| Program (`almide build --target wasm`, as shipped) | structural leg |
-|---|---:|
-| Hello, world | **325 B** |
+| Program (`almide build --target wasm`, as shipped) | develop | released v0.66.0 |
+|---|---:|---:|
+| Hello, world | **325 B** | **953 B** |
 
-Measured on almide 0.66.0 (dev), 2026-10-03, from `docs/benchmarks/wasm-size.txt`; no post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the renderer's own module).
+The develop column is the develop build at 5f39c06ba, after the v0.66.0 release (`almide --version`: `almide 0.66.0 (dev, 5f39c06ba)`), measured 2026-10-03; CI rebuilds it on every push and fails if the bytes move without a restamp of `docs/benchmarks/wasm-size.txt`. The released column is the compiler from the v0.66.0 release asset (`almide 0.66.0 (release, 819bbc74f)`, `gh release download v0.66.0 -R almide/almide`), measured 2026-10-03. No post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the renderer's own module).
 <!-- wasm-size:generated:end -->
 
-Rust on the same wasm target is 40 KB+ for Hello, world even fully size-tuned; the native minigit CLI binary is 418 KB stripped with 0 dependencies. The byte-by-byte dissection, measured 2026-07-23 (it also covers the incumbent leg, since retired by #2761): **[docs/wasm/WASM-OUTPUT.md](./docs/wasm/WASM-OUTPUT.md)**.
+Rust on the same wasm target is 40 KB+ for Hello, world even fully size-tuned: 40,379 B with `rustc 1.96.1`, `wasm32-wasip1`, `opt-level="z"`, `lto`, `strip`, `panic="abort"`, `codegen-units=1` (64,844 B with the default release profile), measured 2026-10-03 by the recipe at the bottom of [WASM-OUTPUT.md](./docs/wasm/WASM-OUTPUT.md). The native CLI-shaped benchmark (`research/benchmark/perf/native/cli_app.almd`, built by `research/benchmark/perf/native/measure.sh`) is 464,488 B stripped on macOS arm64 with no crate dependencies (only `libSystem` is linked), measured 2026-10-03 with both the develop build and the v0.66.0 release. The byte-by-byte dissection, measured 2026-07-23 (it also covers the incumbent leg, since retired by #2761): **[docs/wasm/WASM-OUTPUT.md](./docs/wasm/WASM-OUTPUT.md)**.
 
-Against handwritten Rust the arithmetic kernels sit at parity (n-body, spectral-norm 1.00×; the ratchet's anchored rows). Where Almide has information Rust does not — a tree whose whole lifetime is one `check(make(depth))` expression, proven by the effect system — it is faster than the ordinary Rust for the same program:
+Against handwritten Rust the arithmetic kernels sit at parity: n-body and spectral-norm 1.00× on an Apple M4 Pro (2026-07-30), and 1.065× and 1.032× on the ubuntu-latest CI runner (develop CI run [37092258733](https://github.com/almide/almide/actions/runs/37092258733), 2026-10-03). Where Almide has information Rust does not — a tree whose whole lifetime is one `check(make(depth))` expression, proven by the effect system — it is faster than the ordinary Rust for the same program:
 
 <!-- native-victory:generated:start — rendered from docs/benchmarks/native-victory.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
-| Workload (`bench.py`, median of 9, interleaved) | optimization | Almide / ordinary Rust | without it (`ALMIDE_REGION_OFF=1` / `ALMIDE_FAN_SEQUENTIAL=1`) | CI runner |
+| Workload (`bench.py`, median of 9, interleaved) | optimization | Almide / ordinary Rust, M4 Pro | without it (`ALMIDE_REGION_OFF=1` / `ALMIDE_FAN_SEQUENTIAL=1`), M4 Pro | ubuntu-latest CI runner |
 |---|---|---:|---:|---:|
-| binarytrees | region window (#1991) | **0.35 (d17)** / **0.32 (d19)** | 1.25 | 0.61 |
-| treealloc | region window (#1991) | **0.30 (d20)** / **0.30 (d21)** | 1.10 | 0.61 (est.) |
-| fannkuchredux | parallel fan (#2044) | **0.21 (n10)** / **0.12 (n11)** | 1.06 | 0.60 (est.) |
+| binarytrees | region window (#1991) | **0.35 (d17)** / **0.32 (d19)** | 1.25 | 0.581 (d17) |
+| treealloc | region window (#1991) | **0.30 (d20)** / **0.30 (d21)** | 1.10 | 0.365 (d20) |
+| fannkuchredux | parallel fan (#2044) | **0.21 (n10)** / **0.12 (n11)** | 1.06 | 0.315 (n11) |
 
-Two ratios per row are the two input sizes (the win holds at both); the Rust side is the ordinary program a person writes for it — a `Box` per node, one thread, no arena, no `unsafe`, no SIMD — compiled with the same `rustc` flags, and the "without it" column is the same Almide source with the region window turned off, so the whole gap is that one optimization. The absolute ratio is allocator-dependent (the CI runner frees a `Box` cheaper), the direction is not: the `perf-ratchet` job fails if either row reaches 1.0 or the ablation stops paying. Declaration and methodology: [docs/project/BENCHMARKS.md](./docs/project/BENCHMARKS.md#faster-than-ordinary-rust-1330). Ledger: `docs/benchmarks/native-victory.txt` (almide 0.62.0, 2026-09-08).
+Two ratios per row are the two input sizes (the win holds at both); the Rust side is the ordinary program a person writes for it — a `Box` per node, one thread, no arena, no `unsafe`, no SIMD — compiled with the same `rustc` flags, and the "without it" column is the same Almide source with the region window turned off, so the whole gap is that one optimization. The absolute ratio is allocator-dependent (the CI runner frees a `Box` cheaper), the direction is not: the `perf-ratchet` job fails if either row reaches 1.0 or the ablation stops paying. Declaration and methodology: [docs/project/BENCHMARKS.md](./docs/project/BENCHMARKS.md#faster-than-ordinary-rust-1330). Ledger: `docs/benchmarks/native-victory.txt`. The M4 Pro columns were measured on almide 0.62.0, 2026-09-08 and have not been re-measured since; the runner column is what the `perf-ratchet` job of develop CI run [37092258733](https://github.com/almide/almide/actions/runs/37092258733) printed at `466cac59b` (a develop build carrying version 0.66.0, not the 0.66.0 release), 2026-10-03 (the size is in each cell).
 <!-- native-victory:generated:end -->
 
 <!-- build-speed:generated:start — derived from docs/benchmarks/build-speed.txt by the almide-gates `bench` subcommand; DO NOT EDIT between the markers -->
@@ -191,7 +191,7 @@ build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; t
 | build, cold, `--target wasm` | **61.7 ms** | 3 |
 <!-- build-speed:generated:end -->
 
-`almide check` scales linearly: over a 2k → 30k-line ladder of this repo's own stdlib the log-log slope of check time against project lines is **1.13** (1.0 is linear, 2.0 quadratic) and the 10k-line rung costs **4.4×** the empty-project floor — measured 2026-08-13, held by `scripts/check-edit-loop-scale.sh`, table in [BENCHMARKS.md](./docs/project/BENCHMARKS.md#edit-loop-scale-1334). Native runtime against handwritten Rust: **1.00×** on n-body and spectral-norm, 1.16–1.18× on fasta and FFT, ~1.6× where the workload is list materialization (#1004), CI-gated ratio ratchet ([scoreboard](./docs/project/BENCHMARKS.md)). Wasm runtime, measured and gated (#1701):
+`almide check` scales close to linearly: over a 2k → 30k-line ladder of this repo's own stdlib the log-log slope of check time against project lines is **1.13** (1.0 is linear, 2.0 quadratic) and the 10k-line rung costs **4.4×** the empty-project floor — measured 2026-08-13, held by `scripts/check-edit-loop-scale.sh`, table in [BENCHMARKS.md](./docs/project/BENCHMARKS.md#edit-loop-scale-1334). Native runtime against handwritten Rust, on an Apple M4 Pro (2026-07-30, FFT re-measured 2026-08-13): **1.00×** on n-body and spectral-norm, 1.16× on fasta, 1.18× on FFT ([scoreboard](./docs/project/BENCHMARKS.md)). The listbuild rows read 1.47–1.69× there and 0.87–1.05× on the CI runner (2026-10-03); their gap on the M4 Pro is the deterministic software `sin`/`cos` that byte-identity needs, not list building (measured 2026-08-13, `scripts/perf-ratio-baseline.txt`). The ubuntu-latest runner re-measures every row on each develop CI run, and the `perf-ratchet` job fails an anchored row (n-body, spectral-norm, fasta, FFT, wordfreq) that drifts more than 40% past its committed baseline (run [37092258733](https://github.com/almide/almide/actions/runs/37092258733), 2026-10-03: fasta 0.757×, FFT 1.002×). Wasm runtime, measured and gated (#1701):
 
 <!-- wasm-runtime:generated:start — rendered from docs/benchmarks/wasm-runtime.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
 | Benchmark (`almide bench`, verify-then-time, min of 2×5 interleaved) | wasm/native, `main` only | cold start (spawn vs compile + instantiate) |
@@ -211,7 +211,7 @@ build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; t
 | listbuild_prealloc | **1.68×** | 1.68× |
 | mapbuild | **0.67×** | 0.72× |
 
-Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. The ratio times the program's own `main`, entry to return, on both legs (native in-process, wasm around the host call): process spawn and module compile/instantiate are outside it, and the cold-start column shows them (#2980). Small workloads run at a ledger-fixed size (`args=`) so `main` is long enough to time. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the stamped ratio verdict runs on the stamping machine class; CI gates the STATUS taxonomy below and judges the wasm leg by a same-runner A/B against the latest release binary (interleaved, min-of-runs, `ab_band` in the ledger — #2143) (`scripts/check-wasm-runtime-ratio.sh`). binarytrees and mandelbrot run their fan arms on the embedded host's thread pool; fannkuchredux's fan runs sequentially on wasm, which is most of its gap. The unmeasured corpus cells stay honest instead of estimated: 0 wall on the wasm build path, 0 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (almide 0.65.1 (dev), 2026-09-29).
+Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. The ratio times the program's own `main`, entry to return, on both legs (native in-process, wasm around the host call): process spawn and module compile/instantiate are outside it, and the cold-start column shows them (#2980). Small workloads run at a ledger-fixed size (`args=`) so `main` is long enough to time. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the stamped ratio verdict runs on the stamping machine class; CI gates the STATUS taxonomy below and judges the wasm leg by a same-runner A/B against the latest release binary (interleaved, min-of-runs, `ab_band` in the ledger — #2143) (`scripts/check-wasm-runtime-ratio.sh`). The wasm leg runs `fan` arms and callbacks one at a time. Of these rows only fannkuchredux's native leg runs its `fan` on threads (#2044), which is most of its gap; binarytrees' and mandelbrot's `fan.map` callbacks run sequentially on both legs (user time equals wall time on both, measured 2026-10-03). The unmeasured corpus cells stay honest instead of estimated: 0 wall on the wasm build path, 0 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (a develop build carrying version 0.65.1, not the 0.65.1 release, 2026-09-29).
 <!-- wasm-runtime:generated:end -->
 
 ## How It Works
@@ -242,7 +242,7 @@ Run `almide --help` for the full command list (compile, add, deps, clean, …). 
 
 ### What's next — v1, the Trust Spine
 
-The Perceus proof above proves one compiler pass, once. v1 generalizes that principle to the **whole pipeline** — instead of proving the 100k-line compiler, it proves a tiny *checker* and has the compiler emit a certificate on every build that the checker re-verifies. If the checker accepts, the artifact has the property — a theorem that never mentions the compiler's internals. That collapses the trusted base from ~100,000 lines to the extracted checker (~1,400 lines of OCaml, machine-derived from the proofs), and asks a harder question than testing ever can: **not "do the tests pass?" but "can a machine prove the output is correct?"** The architecture, the receipts (C-SAFE / C-REPRO / C-FAITHFUL / C-PROVEN), and why builds are slower on purpose: **[docs/TRUST-SPINE.md](./docs/TRUST-SPINE.md)**.
+The Perceus proof above proves one compiler pass, once. v1 generalizes that principle to the **whole pipeline** — instead of proving the whole compiler, it proves a tiny *checker* and has the compiler emit a certificate on every build that the checker re-verifies. If the checker accepts, the artifact has the property — a theorem that never mentions the compiler's internals. That collapses the trusted base from the whole compiler (about 300,000 lines of Rust under `src/` and `crates/`, test directories excluded, counted 2026-10-03) to the extracted checker (~1,400 lines of OCaml, machine-derived from the proofs), and asks a harder question than testing ever can: **not "do the tests pass?" but "can a machine prove the output is correct?"** The architecture, the receipts (C-SAFE / C-REPRO / C-FAITHFUL / C-PROVEN), and why builds are slower on purpose: **[docs/TRUST-SPINE.md](./docs/TRUST-SPINE.md)**.
 
 ## Project Status
 
@@ -250,7 +250,7 @@ The Perceus proof above proves one compiler pass, once. v1 generalizes that prin
 |----------|--------|
 | Maturity | Pre-1.0, under active development on `develop`; the LLM-facing surface is frozen by [STABILITY.md](docs/STABILITY.md) (declared 2026-08-20) |
 | Support | Latest release line only, pre-1.0 — policy and versioning guarantees: [SUPPORT.md](./SUPPORT.md) · vulnerabilities: [SECURITY.md](./SECURITY.md) |
-| Compiler | Pure Rust, single binary, 0 ICE |
+| Compiler | Pure Rust, single binary |
 | Targets | Rust (native), WASM (direct emit — the structural leg, see [How It Works](#how-it-works)) |
 | Verified codegen | Structural wasm leg: byte-exact corpus and mutation gates, trusted with its per-build certificate pending (#2755–#2760); the PCC-certified incumbent leg (per-build re-verification since 0.29.0) was retired by #2761 |
 | Codegen | Rust: Nanopass + TOML templates; wasm: structural engine → direct emit (the v0 emitter and the incumbent MIR→WAT renderer are retired — a wall is an error, never a fallback) |
@@ -262,7 +262,7 @@ The Perceus proof above proves one compiler pass, once. v1 generalizes that prin
 | Derived count | Value |
 |---|---|
 | Stdlib | 1029 functions across 45 modules — self-hosted `.almd`, signature indexes regenerated from the compiler by `tools/gen-stdlib-doc-index.py` |
-| Tests | 485 `.almd` test files under `spec/` (`almide test spec/`) + the 372-contract cross-target ledger |
+| Tests | 486 `.almd` test files under `spec/` (`almide test spec/`) + the 372-contract cross-target ledger |
 <!-- counts:generated:end -->
 <!-- stats:generated:end -->
 
@@ -272,7 +272,7 @@ The Perceus proof above proves one compiler pass, once. v1 generalizes that prin
 
 ## Ecosystem and documentation
 
-- [almide-grammar](https://github.com/almide/almide-grammar) — the single source of truth for syntax (keywords, operators, precedence, TextMate scopes), written in Almide; the compiler generates its lexer keyword table from it at build time, so compiler and tooling cannot drift
+- [almide-grammar](https://github.com/almide/almide-grammar) — the syntax description the editor and tree-sitter tooling is generated from (keywords, operators, precedence, TextMate scopes), written in Almide; it mirrors the compiler's lexer rather than feeding it, and the weekly `downstream-sync` workflow (`scripts/check-downstream-grammar.sh`) fails when the two token sets differ
 - [vscode-almide](https://github.com/almide/vscode-almide) · [tree-sitter-almide](https://github.com/almide/tree-sitter-almide) (Neovim, Helix, Zed) · [playground](https://github.com/almide/playground)
 - [docs/CHEATSHEET.md](./docs/CHEATSHEET.md) — quick reference for AI code generation · [docs/SPEC.md](./docs/SPEC.md) — the language specification · [docs/GRAMMAR.md](./docs/GRAMMAR.md) — EBNF grammar + stdlib reference
 - [docs/design/DESIGN.md](./docs/design/DESIGN.md) — design philosophy · [docs/design/EQUIVALENCE.md](./docs/design/EQUIVALENCE.md) — the byte-identity claim · [docs/design/MEMORY-SAFETY.md](./docs/design/MEMORY-SAFETY.md) — the proven/trusted account · [docs/TRUST-SPINE.md](./docs/TRUST-SPINE.md) — v1
