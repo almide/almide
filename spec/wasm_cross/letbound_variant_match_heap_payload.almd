@@ -1,0 +1,121 @@
+// @contract: C-113
+// #3181: a String- (or List-) valued `match` over a user variant the function
+// OWNS — a `let`-bound constructor or a fresh call result, not a borrowed
+// parameter — whose arms bind a payload (positional or record) and build the
+// result from it. The MIR rung refused the owned subject ("heap-result `match`
+// outside the executable subset") although the tag dispatch serves it: each
+// returned payload is a fresh owned copy, and the subject is dropped at its
+// scope end, after the merged result exists. Every shape is printed so a wrong
+// arm, a stale payload or a freed subject is a visible byte.
+type Box = | Leaf { v: Int } | Pane(String) | Pair(String, String)
+
+type Opt = | Note { v: Int, text: String = "first" } | Blank
+
+type Tree = | Node(Tree, Tree) | Tip(String)
+
+fn mk(n: Int) -> Box = if n > 0 then Pane("p${n}")
+else Leaf { v: n }
+
+fn record_arm() -> String = {
+  let b = Leaf { v: 7 }
+  let y = match b {
+    Leaf { v } => "${v}",
+    Pane(s) => s,
+    Pair(a, _) => a,
+  }
+  "${y} ${y}"
+}
+
+fn defaulted_field() -> String = {
+  let a = Note { v: 1 }
+  let x = match a {
+    Note { v, text } => "${v} ${text}",
+    _ => "x",
+  }
+  "${x} ${x}"
+}
+
+fn payload_returned() -> String = {
+  let q = Pane("q")
+  let a = match q {
+    Pane(x) => x,
+    _ => "x",
+  }
+  "${a} ${a}"
+}
+
+fn fresh_subject(n: Int) -> String = match mk(n) {
+  Leaf { v } => "leaf ${v}",
+  Pane(s) => s,
+  Pair(a, b) => a + b,
+}
+
+fn matched_twice() -> String = {
+  let b = Pair("x", "y")
+  let y = match b {
+    Pair(a, c) => c + a,
+    _ => "z",
+  }
+  let z = match b {
+    Pair(a, _) => a,
+    _ => "w",
+  }
+  y + z
+}
+
+fn list_result() -> List[String] = {
+  let b = Pair("m", "n")
+  match b {
+    Pair(a, c) => [a, c],
+    _ => [],
+  }
+}
+
+fn nested() -> String = {
+  let t = Node(Tip("l"), Tip("r"))
+  match t {
+    Node(l, _) => match l {
+      Tip(s) => s,
+      _ => "deep",
+    },
+    Tip(s) => s,
+  }
+}
+
+fn whole_subject() -> Box = {
+  let b = Pane("q")
+  match b {
+    Pane(s) => Pane(s + "!"),
+    other => other,
+  }
+}
+
+fn in_loop() -> String = {
+  var acc = ""
+  for i in 0..<3 {
+    let b = mk(i)
+    let s = match b {
+      Pane(p) => p,
+      Leaf { v } => "${v}",
+      Pair(a, _) => a,
+    }
+    acc = acc + s + ","
+  }
+  acc
+}
+
+effect fn main() -> Unit = {
+  println(record_arm())
+  println(defaulted_field())
+  println(payload_returned())
+  println(fresh_subject(1))
+  println(fresh_subject(0))
+  println(matched_twice())
+  println(list.join(list_result(), "+"))
+  println(nested())
+  match whole_subject() {
+    Pane(s) => println(s),
+    _ => println("?"),
+  }
+  println(in_loop())
+}

@@ -1543,6 +1543,7 @@ evidence  = [
   { path = "spec/wasm_cross/destructure_let_unwrap.almd", class = "fixture" },
   { path = "spec/wasm_cross/unwrap_callarg_single_expr_effect_body.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_operand_unwrap_distinct.almd", class = "fixture" },
+  { path = "spec/wasm_cross/statement_after_tail_walker_bang.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-109"
@@ -1594,6 +1595,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/letbound_variant_match.almd", class = "fixture" },
+  { path = "spec/wasm_cross/letbound_variant_match_heap_payload.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-114"
@@ -2892,6 +2894,7 @@ evidence  = [
   { path = "spec/stdlib/fs_fold_lines_chunked_test.almd", class = "fixture" },
   { path = "spec/wasm_cross/line_endings_bare_cr.almd", class = "fixture" },
   { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
+  { path = "spec/wasm_cross/statement_after_tail_walker_bang.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-221"
