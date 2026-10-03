@@ -40,7 +40,7 @@ stdlib             22 モジュール / 390 関数 / ランタイム 100%
 Exercises          25 本 / 6 tiers
 並行処理           fan { }, fan.map, fan.race, fan.any, fan.settle
 セキュリティ       Layer 1 (Effect Isolation) + Layer 2 (Capability Restriction via almide.toml [permissions])
-Effect推論         自動capability推論 (IO/Net/Env/Time/Rand/Fan/Log) + almide check --effects
+Effect推論         自動capability推論 (IO/Net/Env/Time/Rand/Fan) + almide check --effects
 エラー処理         Option + Result の 2 機構のみ (Swift の 3 機構の失敗を回避)
 Codec              auto-derive encode/decode, Value 型, JSON roundtrip
 IR                 Typed IR + constant folding, dead code elimination + 12 nanopass
