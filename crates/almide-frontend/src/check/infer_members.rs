@@ -54,6 +54,7 @@ impl Checker {
             // member taken as a VALUE (`let f = process.pid`, an argument, a
             // pipe RHS) is as much a use as a call, which marks on its own path.
             if let Some(sig) = crate::stdlib::lookup_sig(mod_name, field) {
+                self.record_purity_ref(super::pure_attr::PurityCallee::Stdlib(*mod_name, *field), object.span);
                 self.type_map.insert(object.id, Ty::Unit); // placeholder; object isn't evaluated
                 self.env.import_table.mark_used(mod_name);
                 return Some(self.fn_value_ty(&sig));
@@ -63,6 +64,7 @@ impl Checker {
                 .unwrap_or_else(|| mod_name.to_string());
             let key = format!("{}.{}", resolved_mod_name, field);
             if let Some(sig) = self.env.functions.get(&sym(&key)).cloned() {
+                self.record_purity_ref(super::pure_attr::PurityCallee::User(sym(&key)), object.span);
                 self.type_map.insert(object.id, Ty::Unit);
                 self.env.import_table.mark_used(mod_name);
                 return Some(self.fn_value_ty(&sig));

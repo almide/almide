@@ -1,0 +1,4 @@
+expects_code = "E092"
+expects_error = "`@pure` fn `area` calls `println`, which writes to stdout"
+hint_substring = "remove `@pure`"
+expects_line_col = "4:3"

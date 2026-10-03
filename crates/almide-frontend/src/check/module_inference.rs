@@ -34,6 +34,7 @@ impl Checker {
         self.check_bounded_profile(program);
         self.check_concurrent_var_reach(program);
         self.check_scoped(program);
+        self.check_pure_attrs(program);
     }
 
     /// Type-check a module's declarations. Populates type_map for all expressions.
