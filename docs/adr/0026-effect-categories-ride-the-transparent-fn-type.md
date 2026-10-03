@@ -205,6 +205,8 @@ error[E0xx]: `validate` may write files, but its bound is {FS.read}
 
 ## Open — not decided by this ADR
 
+Drafted in [ADR-0027](./0027-effect-bounds-surface-manifest-traps-externs-registry.md) (Proposed).
+
 - **One category vocabulary**: `almide check --profile critical --allow`
   accepts `IO, Net, Env, Time, Rand, Process` — a third spelling beside the
   six in `effect.rs` and the 13 in the roadmap (`Process` vs `Proc`). The
