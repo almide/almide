@@ -1,0 +1,35 @@
+// @contract: C-200
+// A trap in fan element k is observed as the sequential evaluation would observe it
+// (ADR-0024 D6): elements 0..k-1 ran to completion and their output reaches stdout
+// in list order, then the abort; nothing of any element after k appears. Here the
+// trapping element is the SECOND, so the first element's line must be on stdout
+// before `Error: division by zero`, and the third element's line must not be. A
+// concurrent substrate meets this by waiting for every element below the trap and
+// discarding the output of the elements above it; fan_sibling_trap.almd pins the
+// case where the trapping element is the first.
+//
+// The trap is a division by zero routed through `int.parse` so constant folding
+// cannot see the zero at compile time.
+effect fn before() -> Result[Int, String] = {
+  println("element 0")
+  ok(1)
+}
+
+effect fn crash() -> Result[Int, String] = {
+  let zero = int.parse("0") ?? 1
+  ok(100 / zero)
+}
+
+effect fn after() -> Result[Int, String] = {
+  println("element 2")
+  ok(3)
+}
+
+effect fn main() -> Unit = {
+  let (a, b, c) = fan {
+    before()
+    crash()
+    after()
+  }
+  println("unreachable ${a} ${b} ${c}")
+}
