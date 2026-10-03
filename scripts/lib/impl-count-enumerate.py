@@ -33,8 +33,27 @@ import sys
 
 root = sys.argv[1]
 
-HOLE = re.compile(r"^fn\s+([a-z_][a-z0-9_]*)\b.*=\s*_\s*$")
+# A hole is declared by `fn` OR `effect fn` (#3242: `effect fn exec(..) = _`
+# and the rest of the effectful families were invisible to `^fn`).
+HOLE = re.compile(r"^(?:effect\s+)?fn\s+([a-z_][a-z0-9_]*)\b.*=\s*_\s*$")
 INTRINSIC = re.compile(r"^@intrinsic\(")
+
+# Negative control, run on every invocation: each declaration spelling that
+# can carry a hole must be counted, and a bodied fn must not. A pattern that
+# goes blind to one spelling fails here, loudly, instead of quietly dropping
+# that spelling's rows from the count.
+for line, want in [
+    ("fn pid() -> Int = _", "pid"),
+    ('effect fn exec(cmd: String, args: List[String]) -> Result[String, String] = _', "exec"),
+    ("effect  fn exit(code: Int) -> Never = _", "exit"),
+    ("fn len(s: String) -> Int = s.len()", None),
+    ("effect fn run() -> Unit = _ignored()", None),
+    ("// effect fn exec(..) = _", None),
+]:
+    m = HOLE.match(line)
+    got = m.group(1) if m else None
+    if got != want:
+        sys.exit(f"impl-count-enumerate: HOLE pattern self-check failed on {line!r}: got {got!r}, want {want!r}")
 LOWER_FN = re.compile(r"^\s*(?:pub(?:\(crate\))?\s+)?fn\s+lower_([a-z0-9_]+)\s*[<(]")
 REG_CALL = re.compile(r'\(\s*"[a-z0-9_]+"\s*,\s*"([a-z0-9]+)\.([a-z0-9_]+)"\s*\)')
 
