@@ -438,15 +438,21 @@ impl LowerCtx {
         // join the scope-end drop set (the container's masked drop frees the field).
         if !self.param_values.contains(&dst) {
             self.live_heap_handles.push(dst);
-        } else if extraction_root_var(value).is_some_and(|r| self.field_cow_roots.contains(&r)) {
+        } else if crate::lower::place_root(value).is_some_and(|r| self.borrow_release_roots.contains(&r)) {
             // #3261: a BORROW of a field of a record whose field path is copied-on-write
             // later in this function (`let snap = cell.words; list.pop(cell.words)`).
             // The copy releases the old block, after which the borrow has no owner: the
             // field's count is the copy's alone, the pop runs in place, and `snap` would
-            // observe it (C-033). Take a reference of its own, dropped at scope end.
+            // observe it (C-033). #3265: an ELEMENT borrow (`let s = xs[2]`,
+            // `let s = cell.xs[2]`) is the same shape, and so is a rebind of the root
+            // under a branch or a loop (`if c then { xs = list.set(xs, 2, v) }`), which
+            // drops the old block before scope end. Take a reference of its own,
+            // dropped at scope end. The var keeps reading through `dst`, whose
+            // read shape (record layout, masks) is keyed on it: a loaded child is
+            // live while the frame holds a `Dup` of it, so the reads land on the
+            // `Dup`'s own line once the parent is gone.
             let owned = self.fresh_value();
             self.ops.push(Op::Dup { dst: owned, src: dst });
-            self.value_of.insert(var, owned);
             self.seed_call_named_heap_drop_route(owned, ty);
             self.live_heap_handles.push(owned);
         }
@@ -526,17 +532,5 @@ impl LowerCtx {
         self.seed_call_module_heap_read_shape(dst, ty, "list", "range", true);
         self.seed_call_module_heap_drop_route(dst, ty);
         Ok(())
-    }
-}
-
-/// The var at the root of a field/tuple-slot path (`cell.words`, `d.inner.xs`,
-/// `t.0`), when the path is rooted at one (#3261).
-fn extraction_root_var(e: &IrExpr) -> Option<VarId> {
-    match &e.kind {
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => {
-            extraction_root_var(object)
-        }
-        IrExprKind::Var { id } => Some(*id),
-        _ => None,
     }
 }
