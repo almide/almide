@@ -564,7 +564,7 @@ pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
     impl IrMutVisitor for H<'_> {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
-            if absorb_unwrap_or_block_operand(e) {
+            if absorb_unwrap_or_block_operand(e) || absorb_interp_block_parts(e, self.vt) {
                 return;
             }
             let IrExprKind::Call { args, .. } = &mut e.kind else { return };
