@@ -245,10 +245,14 @@ impl CertScan {
         }
     }
 
+    /// A call's handle arg is probed on the object it points into, like a
+    /// dereference: a `prim.handle` carrier of a raw child is only in
+    /// `addr_of`, and passing it after the child's parent was freed is a use
+    /// after free (#3263; `verify_ownership`'s `call_arg_live`).
     fn call_arg_probes(&mut self, args: &[CallArg]) {
         for a in args {
             if let CallArg::Handle(v) = a {
-                self.probe_handle(*v);
+                self.probe_address(*v);
             }
         }
     }

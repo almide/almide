@@ -358,8 +358,12 @@ fi
 #   object (`LoadHandle`), `Dup`'d and the Dup released, the object released,
 #   then the raw payload read (`ibbdb` / `ad`). Before #3261 a raw loaded child
 #   had no line and its read no probe, so the object's line was `ibbd`.
+#   3263-child-carrier-callarg-after-free.cert — a `prim.handle` carrier of a
+#   raw loaded child passed as a call's handle argument after the child's
+#   parent was released (`ibdb`). Before #3263 the carrier sat only in
+#   `addr_of`, the call-arg probe found no line, and the object read `ibd`.
 echo
-echo "== POISON RATCHET (negative leg, #3229, #3233, #3261): every poisoned certificate is REJECTED by all three verdicts =="
+echo "== POISON RATCHET (negative leg, #3229, #3233, #3261, #3263): every poisoned certificate is REJECTED by all three verdicts =="
 POISONED=("$ROOT"/proofs/poisoned-certs/*.cert)
 if [ ! -e "${POISONED[0]}" ]; then
   echo "POISON RATCHET FAIL: proofs/poisoned-certs/ holds no certificate — the negative leg would pass vacuously." >&2
