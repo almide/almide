@@ -18,6 +18,8 @@
 /// uniqueness under duplication); Literal / record / list components decline (the literal
 /// tuple chain and the `[]`-column specializer own those). Runs in BOTH chains
 /// (desugar-before-both), so duplicated bodies count 1:1 in the caps `mir == ir` gate.
+/// The subject is a tuple literal or a tuple-typed `Var` (`match p { (Pair(l, r), k) => … }`,
+/// its columns re-read as `p.0`, `p.1`).
 pub fn desugar_tuple_variant_match_deep(
     body: &IrExpr,
     layouts: &crate::lower::VariantLayouts,
@@ -331,6 +333,33 @@ pub fn desugar_tuple_variant_match_deep(
     }
 
 
+    /// The column refs of a tuple subject: a tuple LITERAL hoists each non-Var
+    /// component ONCE into a temp (a Var component reads direct); a tuple-typed `Var`
+    /// re-reads column `i` as the side-effect-free `t.<i>`. Anything else declines.
+    fn tuple_subject_columns(
+        subject: &IrExpr,
+        next: &mut u32,
+        span: &Option<almide_ir::Span>,
+    ) -> Option<(Vec<almide_ir::IrStmt>, Vec<IrExpr>)> {
+        match (&subject.kind, &subject.ty) {
+            (IrExprKind::Tuple { elements }, _) => Some(hoist_tuple_components(elements, next, span)),
+            (IrExprKind::Var { .. }, Ty::Tuple(tys)) => {
+                let refs = tys
+                    .iter()
+                    .enumerate()
+                    .map(|(index, ty)| IrExpr {
+                        kind: IrExprKind::TupleIndex { object: Box::new(subject.clone()), index },
+                        ty: ty.clone(),
+                        span: subject.span.clone(),
+                        def_id: None,
+                    })
+                    .collect();
+                Some((Vec::new(), refs))
+            }
+            _ => None,
+        }
+    }
+
     struct V<'a> {
         next: u32,
         layouts: &'a crate::lower::VariantLayouts,
@@ -340,15 +369,13 @@ pub fn desugar_tuple_variant_match_deep(
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
             let IrExprKind::Match { subject, arms } = &e.kind else { return };
-            let IrExprKind::Tuple { elements } = &subject.kind else { return };
-            let n = elements.len();
+            let span = e.span.clone();
+            let Some((stmts, refs)) = tuple_subject_columns(subject, &mut self.next, &span) else { return };
+            let n = refs.len();
             if n < 2 || arms.is_empty() || arms.iter().any(|a| a.guard.is_some()) {
                 return;
             }
             let Some(rows) = normalize_pattern_rows(arms, n) else { return };
-            // Hoist each non-Var component ONCE into a temp (a Var component reads direct).
-            let span = e.span.clone();
-            let (stmts, refs) = hoist_tuple_components(elements, &mut self.next, &span);
             let mut emitted = vec![0usize; arms.len()];
             let mut next = self.next;
             let Some(compiled) =
