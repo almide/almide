@@ -170,6 +170,24 @@ fn scenario(which: &str) -> MirFunction {
             ],
             ..Default::default()
         },
+        // #3229: an owned object released to 0, then `Dup`'d and moved out —
+        // the shape a copy-on-write freed by a modeled frame's end produced.
+        // Cert `idam` BALANCES, so the count alone accepted it; the owned-line
+        // resurrection rule (an `a` on a dead owned object) → REJECT.
+        "alias-after-free" => MirFunction {
+            name: "f".into(),
+            ops: vec![
+                Op::Alloc {
+                    dst: a,
+                    repr: heap(),
+                    init: Init::Opaque,
+                },
+                Op::Drop { v: a },
+                Op::Dup { dst: b, src: a },
+                Op::Consume { v: b },
+            ],
+            ..Default::default()
+        },
         // The SAME use AFTER the release — a use-after-free the cert previously
         // could not witness: cert `idb` → the `b` guard faults → REJECT.
         "borrow-uaf" => MirFunction {
@@ -240,7 +258,7 @@ fn scenario(which: &str) -> MirFunction {
             eprintln!(
                 "unknown scenario: {other} \
                  (try: balanced | leak | dangling | sandboxed | undeclared | \
-                 branch-agree | branch-mismatch | borrow-live | borrow-uaf | \
+                 branch-agree | branch-mismatch | borrow-live | borrow-uaf | alias-after-free | \
                  branch-ret | branch-ret-leak)"
             );
             std::process::exit(2);
