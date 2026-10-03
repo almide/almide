@@ -351,6 +351,9 @@ fi
 #   both lines were a balanced `id`; the producer now probes every handle read
 #   with `b`, and these are its witnesses for the two shapes (`ibdb`, `idb` —
 #   the emit_cert scenarios loadhandle-after-free / callarg-after-free).
+#   3259-structural-read-after-free.cert — the structural recorder's witness
+#   of an owned block read after its release (`ibdb`); structural-wall.sh's
+#   poison leg judges it too.
 echo
 echo "== POISON RATCHET (negative leg, #3229, #3233): every poisoned certificate is REJECTED by all three verdicts =="
 POISONED=("$ROOT"/proofs/poisoned-certs/*.cert)

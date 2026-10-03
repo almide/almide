@@ -255,6 +255,51 @@ else
   exit 1
 fi
 
+# POISON LEG (#3259), the negative side of the sweep above: the sweep only
+# shows that honest structural witnesses ACCEPT. proofs/poisoned-certs/
+# *structural*.cert are witnesses the structural recorder (witness.rs) writes
+# for an unsafe emission, each of which every verdict must REJECT.
+#   3259-structural-read-after-free.cert — an owned block read after its
+#   release (`ibdb`). The recorder logs every read of a droppable local as
+#   the `b` probe on the block it holds; before #3259 a read logged nothing,
+#   so the line was a balanced `id`. witness_tests.rs pins this file to the
+#   recorder's own output.
+echo "== POISON LEG (#3259): every structural poisoned certificate is REJECTED by all three verdicts =="
+SPOISONED=("$ROOT"/proofs/poisoned-certs/*structural*.cert)
+if [ ! -e "${SPOISONED[0]}" ]; then
+  echo "STRUCTURAL WALL FAIL: proofs/poisoned-certs/ holds no structural certificate — the poison leg would pass vacuously." >&2
+  exit 1
+fi
+PGEN="$(mktemp /tmp/KernelStructuralPoison_XXXXXX).v"
+python3 - "${SPOISONED[@]}" > "$PGEN" <<'PYEOF'
+import sys
+print("From AlmideTrust Require Import OwnershipChecker.")
+print("From Stdlib Require Import String.")
+print("Open Scope string_scope.")
+for path in sys.argv[1:]:
+    print('Goal check_xc "%s" = false.' % open(path).read().replace('"', '""'))
+    print("Proof. vm_compute. reflexivity. Qed.")
+PYEOF
+for cert in "${SPOISONED[@]}"; do
+  name="${cert#"$ROOT"/}"
+  set +e
+  ./checker ownership "$cert" >/dev/null 2>&1; XRC=$?
+  "$VERIFY" ownership "$cert" >/dev/null 2>&1; PRC=$?
+  set -e
+  if [ "$XRC" -ne 1 ] || [ "$PRC" -ne 1 ]; then
+    echo "STRUCTURAL WALL FAIL: $name was not rejected (extracted checker exit $XRC, almide-verify exit $PRC; want 1 and 1)." >&2
+    rm -f "$PGEN"; exit 1
+  fi
+  echo "  REJECT $name (extracted checker + almide-verify)"
+done
+if (cd "$ROOT/proofs" && "$COQC" -Q . AlmideTrust "$PGEN" >/dev/null 2>&1); then
+  echo "  KERNEL OK: the Rocq kernel rejects all ${#SPOISONED[@]} structural poisoned certificate(s)"
+  rm -f "$PGEN" "${PGEN%.v}.vo" "${PGEN%.v}.vos" "${PGEN%.v}.vok" "${PGEN%.v}.glob"
+else
+  echo "STRUCTURAL WALL FAIL: the KERNEL did not reject a structural poisoned certificate (check_xc = false failed)." >&2
+  rm -f "$PGEN"; exit 1
+fi
+
 echo
 echo "STRUCTURAL WALL OK: over the $N certified spec/wasm_cross fixtures, every ownership, call-mode,"
 echo "name-totality, capability and call-graph witness of the structural build is accepted —"

@@ -4,6 +4,21 @@
 //! flat (format v5 arms do not nest) — flattening an exiting arm's nested
 //! exits, and hoisting a path's exit items to the line start.
 
+/// Record `c` on a path whose first event was `first` (#3259): a read `b`
+/// only on a line born by `i`, an OWNED line. A borrowed param's or a
+/// view's line, and a loop activation of a block born outside the loop, sit
+/// at 0 while another holder keeps the block, so a read there is no probe.
+pub(crate) fn record(events: &mut String, first: &mut Option<char>, c: char) {
+    if c == 'b' {
+        if *first == Some('i') {
+            events.push(c);
+        }
+        return;
+    }
+    first.get_or_insert(c);
+    events.push(c);
+}
+
 /// The net count a path's top-level events leave (a folded `{…|}` item's
 /// arms are not the path's own: its surviving side is empty).
 pub(crate) fn net(events: &str) -> i64 {

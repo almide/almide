@@ -48,7 +48,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::lines::{flat_exits, hoist, net};
+use super::lines::{flat_exits, hoist, net, record};
 
 /// The loop-carried locals (#2755), split for the file budget.
 #[path = "witness_carry.rs"]
@@ -276,6 +276,7 @@ struct Path {
     /// #2755: the path ended in a process ABORT: whatever it still holds is
     /// discharged by the checker's abort terminal (`t`, format v6).
     aborted: bool,
+    first: Option<char>, // the first event recorded (#3259, witness_lines.rs `record`)
 }
 
 /// The cap on enumerated paths per object: beyond it the frame declines.
@@ -297,7 +298,7 @@ type LoopEntries<'t> = Vec<(&'t [Node], &'t [u32], Path)>;
 fn step(ev: &Ev, o: u32, p: &mut Path) {
     match ev {
         Ev::Birth(b) if *b == o => p.born = true,
-        Ev::Op(b, c) if *b == o && p.born => p.events.push(*c),
+        Ev::Op(b, c) if *b == o && p.born => record(&mut p.events, &mut p.first, *c),
         Ev::Bind { local, obj, owner } => {
             if *obj == o {
                 p.holders.insert(*local, Holder { owner: *owner, fresh: true });
@@ -314,10 +315,10 @@ fn step(ev: &Ev, o: u32, p: &mut Path) {
         }
         // A release through a local that holds nothing on this path is a
         // release of NULL (a no-op) — skipped with every other op.
-        Ev::LOp(l, c) if p.holders.contains_key(l) => p.events.push(*c),
+        Ev::LOp(l, c) if p.holders.contains_key(l) => record(&mut p.events, &mut p.first, *c),
         Ev::DecOld(l) => {
             if p.holders.get(l).is_some_and(|h| h.owner && h.fresh) {
-                p.events.push('d');
+                record(&mut p.events, &mut p.first, 'd');
             }
             p.holders.remove(l);
         }
@@ -563,6 +564,7 @@ fn render_object(tree: &[Node], o: u32, exits: Exits, held: &[u32], out: &mut St
             holders: entry.holders.iter().map(|(&l, h)| (l, Holder { fresh: false, ..*h })).collect(),
             ended: false,
             aborted: false,
+            first: None,
         };
         let mut iter = walk(body, o, Scope::Iteration(carried), exits, vec![start], &mut loops)?;
         iter.iter_mut().filter(|p| !p.ended).for_each(|p| end_iteration(p, carried));

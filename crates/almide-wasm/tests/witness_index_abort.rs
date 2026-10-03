@@ -47,9 +47,9 @@ fn index_views_and_main_aborts_witness_exactly() {
     // has nothing of it.
     assert_eq!(get("elem_at"), "\n{|am}\n");
     // `t` is born after the first index's abort; the second index aborts
-    // holding it (`i`, a prefix of the returning `id`, so no arm of its own):
-    // one path empty, the other `id`.
-    assert!(get("tagged_at").contains("{|id}\n"), "{:?}", get("tagged_at"));
+    // holding it (`ib` — the index reads it, #3259 — a prefix of the
+    // returning `ibd`, so no arm of its own): one path empty, the other `ibd`.
+    assert!(get("tagged_at").contains("{|ibd}\n"), "{:?}", get("tagged_at"));
     // main's `!` aborts holding `keep` (born before it): nothing is released
     // on the abort path, and its prefix of the returning `id` is what the
     // line carries — a flat `id`, never `{i|id}` (which would reject).

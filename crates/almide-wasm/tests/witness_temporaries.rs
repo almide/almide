@@ -74,7 +74,7 @@ fn temporaries_witness_exactly_and_unhooked_shapes_decline() {
         ("nest_deep", "id\nim\n"),
         // `s` is only read (borrowed: no credit, an empty stream); the inner
         // concat is bound (`i` … `d`), the outer one moves out.
-        ("cat", "\nid\nim\n"),
+        ("cat", "\nibd\nim\n"),
         // The borrowed param shares into the payload slot; the cell moves out.
         ("wrap", "am\nim\n"),
         // mk's result moves into the slot, the cell moves out.
@@ -94,11 +94,11 @@ fn temporaries_witness_exactly_and_unhooked_shapes_decline() {
     // `and`'s right operand runs on one arm of a branch site (#2756): the
     // param's share into `take` happens on that path only.
     let short = w.get("short").map(String::as_str).unwrap_or("<none>");
-    assert_eq!(short, "{iamd|id}\n");
+    assert_eq!(short, "{ibamd|id}\n");
     assert!(accepted(short));
     // A fresh heap operand of `==` is bound first (#2972, arg_temps.rs): the
     // borrowed param records nothing, the operand is born and released.
     let eq = w.get("eq_fresh").map(String::as_str).unwrap_or("<none>");
-    assert_eq!(eq, "\nid\n");
+    assert_eq!(eq, "\nibd\n");
     assert!(accepted(eq));
 }

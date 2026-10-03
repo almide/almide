@@ -126,6 +126,9 @@ struct OwnershipScan {
     /// still set at scan end = a TOP-LEVEL return, so the phase-3/4 boundary
     /// checks are skipped (they already ran at the op).
     diverged: bool,
+    /// An ADDRESS → the object it points into, for the dereference liveness
+    /// check only (#3259): the certificate's `addr_of` rule, mirrored.
+    addr_of: BTreeMap<ValueId, ValueId>,
 }
 
     struct BranchFrame {
@@ -179,6 +182,14 @@ impl OwnershipScan {
             }
             _ => {}
         }
+        // The certificate's address rule (#3259): one operand that is an
+        // address into (or a handle on) an object makes `dst` an address into it.
+        match (self.address_object(a), self.address_object(b)) {
+            (Some(o), None) | (None, Some(o)) => {
+                self.addr_of.insert(dst, o);
+            }
+            _ => {}
+        }
     }
 
     fn step(&mut self, i: usize, op: &Op) {
@@ -211,7 +222,8 @@ impl OwnershipScan {
             // than fall off the model (#1037 — every `option.unwrap_or` tuple/
             // heap payload walled the native verifier on exactly this chain).
             // The `PrimKind::Handle` rule, extended one hop; no `dead` entry is
-            // created — an address is never itself live-checked, only traversed.
+            // created — the handle's own liveness is not checked, but a load or
+            // store through the address checks its OBJECT (#3259).
             Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } => {
                 self.step_add_address_alias(*dst, *a, *b)
             }
@@ -282,7 +294,10 @@ impl OwnershipScan {
             // spot for the NAMEABLE case: prim.handle(v) carries its source object in args[0], so the
             // self.rc events on it verify against the same self.rc machine. load64-fed handles have no carrier
             // and stay unmodeled (the differential-test floor). MIRRORED in ownership_certificate.
-            Op::Prim { kind, dst, args } => self.apply_prim_rc_event(kind, dst, args),
+            Op::Prim { kind, dst, args } => {
+                self.check_dereference(i, kind, *dst, args);
+                self.apply_prim_rc_event(kind, dst, args)
+            }
             // `SetLocal` into a HEAP slot is a loop-carried REBIND (`acc = acc + [x]`):
             // the slot now aliases the source's object. The slot's OLD object was
             // released by a preceding `Drop` in the loop body, so rebinding makes the
@@ -698,6 +713,44 @@ impl OwnershipScan {
         }
     }
 
+    /// A load or store DEREFERENCES the object its address points into, so that
+    /// object must still be live (#3259, the certificate's `b` probe of #3233).
+    /// `ElemAddr` reads its list's bounds, and its result is an address into the
+    /// list. `prim.handle` is not a dereference: it only turns the pointer into
+    /// an integer (the lowering's move into a container reads it after the
+    /// `Consume` that transferred the reference).
+    fn check_dereference(&mut self, i: usize, kind: &PrimKind, dst: Option<ValueId>, args: &[ValueId]) {
+        let Some(&addr) = args.first() else { return };
+        match kind {
+            PrimKind::LoadHandle | PrimKind::Load { .. } | PrimKind::Store { .. } => {
+                self.check_address_live(i, addr)
+            }
+            PrimKind::ElemAddr => {
+                self.check_address_live(i, addr);
+                if let (Some(d), Some(o)) = (dst, self.address_object(addr)) {
+                    self.addr_of.insert(d, o);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The object an address (or a handle used as one) points into.
+    fn address_object(&self, v: ValueId) -> Option<ValueId> {
+        self.addr_of.get(&v).or_else(|| self.object_of.get(&v)).copied()
+    }
+
+    /// The object behind `addr` is live: a borrowed param (the caller holds
+    /// it), or an object we still hold a reference to. The check is per OBJECT,
+    /// like the certificate's line: an address outlives the handle it came from.
+    /// An address with no tracked object stays off the model, as before.
+    fn check_address_live(&mut self, i: usize, addr: ValueId) {
+        let Some(o) = self.address_object(addr) else { return };
+        if !self.borrowed.contains(&o) && self.rc.get(&o).copied().unwrap_or(0) < 1 {
+            self.violations.push(violation(i, addr, ViolationKind::UseAfterFree));
+        }
+    }
+
     /// Extracted from [`Self::step`] (codopsy r2, #852): the `SetLocal` arm — a
     /// loop-carried rebind aliases the slot onto the source's object and makes it
     /// live again. Verbatim.
@@ -798,6 +851,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
         branches: Vec::new(),
         violations,
         diverged: false,
+        addr_of: BTreeMap::new(),
     };
     for (i, op) in func.ops.iter().enumerate() {
         scan.step(i, op);
