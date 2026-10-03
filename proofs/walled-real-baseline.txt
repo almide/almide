@@ -371,7 +371,6 @@ spec/wasm_cross/mut_param_move_mode_gaps.almd :: fill2  # #3121
 # Result-returning main over carrier releases, two hoisted mut-call arguments,
 # and nested / module-var assignment targets. The structural leg serves all five
 # byte-identically to native; #3084 owns burning them down.
-spec/wasm_cross/leak_free_propagating_literal_operand.almd :: in_list  # #3084
 # (2026-09-30, C-372) the Float32 display fixture: `${(t, t)}`, a tuple with a
 # Float32 element, walls on the MIR rung (a record with one lowers); native
 # falls back to v0 and the three legs agree.
