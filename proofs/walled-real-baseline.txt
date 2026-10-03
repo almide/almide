@@ -206,19 +206,6 @@ spec/serve_cross/http_serve_shutdown.almd :: handle
 # incumbent work by design (#1696 retires it); prunes with #1696.
 spec/stdlib/http_router_test.almd :: __test_almd_an app bound at the top level is tested by calling it
 
-# (2026-09-03, C-132/#1576) a CAN-ERR effect fn with a `mut` param takes the
-# move-mode tuple rewrite (`(T, Buf)` on the ok payload only); the incumbent
-# brick walls the synthesized `let (r, b) = call!` destructure-unwrap in the
-# callers (`unwrap `!` in a call-argument position`) and the generic port's
-# heap-result `if` tail (`uc__Mem`), where the STRUCTURAL leg (the default)
-# lowers every cell byte-identical to native. Prunes with #1696 4-5.
-spec/wasm_cross/mut_param_effect_can_err.almd :: go
-spec/wasm_cross/mut_param_effect_can_err.almd :: main
-spec/wasm_cross/mut_param_effect_can_err.almd :: uc__Mem
-spec/wasm_cross/mut_param_move_mode_gaps.almd :: run_fill
-# #1576 also: the DDD gauntlet's mut_port `main` (the can-err mut-param port call
-# consumed by `!`) walls on the incumbent for the same reason as the fixture's fns.
-spec/gauntlet/pkg/mut_port/src/main.almd :: main
 # 2026-09-30 (#3058, class 1): 58 rows pruned (171 -> 113). The effect-fn ABI
 # facts the deleted registries held are now DERIVED from the typed IR on every
 # product path and in the classifier (`almide_ir::effect_abi`, sharing the C-132
@@ -334,12 +321,13 @@ spec/gauntlet/pkg/mut_port/src/main.almd :: main
 # same `err(e) => err(e)`); a record-slot closure field is callable in tail
 # (3); the nested-list concat admits `List[List[scalar]]` elements (the codec
 # triple-list worker); and the closure env captures a user variant (4).
-# #3170: the mut-param reassign-from-HOF fixture's MIR rung walls on the
-# can-err `mut`-param carrier: `f_fallible` reassigns its `mut` param from a
-# fallible map (a heap-result `match` over the carrier) and `main` calls it with
-# `!`. Native falls back to the classic renderer — the leg #3170 fixed — and the
-# structural wasm leg and the interp agree with it. (`main`'s interpolated
-# mut-call, `f_filter_map`'s option-literal closure and `f_branch`'s bound
-# heap-result `if` lower since walls lane 3, #2739.)
-spec/wasm_cross/mut_param_reassign_from_hof.almd :: f_fallible  # #2739
-spec/wasm_cross/mut_param_reassign_from_hof.almd :: main  # #2739
+# (2026-10-04, #2739 lane 4) 14 rows pruned (25 -> 11), every non-http/env row:
+# operands read before a mut-call write-back are bound first (the #3230 fixture's
+# `main`); a three-level list literal binds its nested elements; a record field's
+# nested `!` hoists (x13); a destructuring `let` splices its write-back block
+# (gzip `inflate` / `gunzip`); a borrowed record param under a field-path in-place
+# mutator is pre-copied before an executing loop (the two `drain`s); and the C-132
+# can-err `!` call sites become the write-visible match plus a let-bound `!` (the
+# can-err fixture's `go` / `main` / `uc__Mem`, `run_fill`, the mut_port `main`,
+# and the reassign-from-HOF `f_fallible` / `main`). What remains is the 11 http /
+# env capability rows, B and B2, which wait on a ruling.
