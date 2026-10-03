@@ -49,11 +49,9 @@ fn compute_output_path(file: &str, output: Option<&str>, is_wasm: bool) -> Strin
     let default_output = if is_wasm {
         format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"))
     } else if std::path::Path::new("almide.toml").exists() {
-        let toml_content = std::fs::read_to_string("almide.toml").unwrap_or_default();
-        toml_content.lines()
-            .find(|l| l.starts_with("name"))
-            .and_then(|l| l.split('=').nth(1))
-            .map(|s| s.trim().trim_matches('"').to_string())
+        // `[package].name` as TOML reads it — not the first line that starts
+        // with `name`, which could be a key in any table (#3253).
+        project::manifest_package_name(std::path::Path::new("almide.toml"))
             .unwrap_or_else(|| file.strip_suffix(".almd").unwrap_or("a.out").to_string())
     } else {
         file.strip_suffix(".almd").unwrap_or("a.out").to_string()

@@ -1114,9 +1114,9 @@ fn dispatch_rest(command: Commands) {
     }
 }
 
-/// Refuse a `./almide.toml` that declares a key twice (#2583), or whose
-/// `[permissions].allow` names something that is not a capability (#3247),
-/// before any command runs. Most readers of the manifest treat a parse error as "no
+/// Refuse a `./almide.toml` that declares a key twice (#2583), is not TOML
+/// (#3253), or whose `[permissions].allow` names something that is not a
+/// capability (#3247), before any command runs. Most readers of the manifest treat a parse error as "no
 /// project" (`parse_toml(..).ok()`), which is right for a missing file but
 /// would turn this error into a silent run without dependencies; one gate
 /// here makes the refusal the same on every command. The commands that must
@@ -1139,9 +1139,7 @@ fn refuse_invalid_manifest(command: &Commands) {
     }
     let path = std::path::Path::new("almide.toml");
     let Ok(content) = std::fs::read_to_string(path) else { return };
-    let verdict = project::check_manifest_duplicates(path, &content)
-        .and_then(|()| project::check_manifest_permissions(path, &content));
-    if let Err(e) = verdict {
+    if let Err(e) = project::check_manifest(path, &content) {
         err(&format!("error: {}", e));
         std::process::exit(1);
     }

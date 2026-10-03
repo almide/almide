@@ -1,0 +1,9 @@
+// The defect is in broken.toml: its multi-line `allow` names `io`, which is
+// not a capability. A multi-line array used to read as empty — every
+// capability, no name judged — so this read passed in silence (#3253).
+import fs
+
+effect fn main() -> Unit = {
+  let text = fs.read_text("notes.txt")!
+  println(text)
+}

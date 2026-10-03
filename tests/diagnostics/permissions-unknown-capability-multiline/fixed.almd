@@ -1,0 +1,7 @@
+// fixed.toml spells the capability `IO`; the program is unchanged.
+import fs
+
+effect fn main() -> Unit = {
+  let text = fs.read_text("notes.txt")!
+  println(text)
+}

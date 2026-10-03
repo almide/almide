@@ -272,11 +272,18 @@ fn the_manifest_reader_refuses_every_duplicate_it_reads() {
     assert!(e.contains(":7: table [dependencies] is declared twice (first at line 4)"), "{e}");
 
     // The same key in two DIFFERENT tables is fine, as is a multi-line array
-    // whose items contain `=`, and a table the reader never reads.
+    // whose items contain `=`.
     let ok = parse(
         "[package]\nname = \"a\"\nversion = \"0.1.0\"\n\n[native-deps]\nversion = \"1\"\n\n\
-         [permissions]\nallow = [\n  \"IO\",\n  \"a=b\",\n  \"a=b\",\n]\n\n[tool]\nx = 1\nx = 2\n",
+         [permissions]\nallow = [\n  \"IO\",\n  \"a=b\",\n  \"a=b\",\n]\n",
     );
     assert!(ok.is_ok(), "{:?}", ok.err());
+    assert_eq!(ok.unwrap().permissions, ["IO", "a=b", "a=b"], "the multi-line array reads whole (#3253)");
+
+    // A table the reader never reads is still TOML: since the manifest is read
+    // by the `toml` crate (#3253), a key repeated there is refused on its line
+    // too, by the parser rather than by this scan.
+    let e = parse("[package]\nname = \"a\"\n\n[tool]\nx = 1\nx = 2\n").err().expect("duplicate in [tool]");
+    assert!(e.contains("almide.toml:6:"), "{e}");
     let _ = std::fs::remove_dir_all(&dir);
 }

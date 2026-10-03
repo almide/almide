@@ -1,4 +1,4 @@
-//! `[permissions].allow` refuses a name that is not a capability (#3247).
+//! `[permissions].allow` refuses a name that is not a capability (#3247), and reads every TOML array spelling (#3253).
 //!
 //! The names were matched against `IO|Net|Env|Time|Rand|Fan` in two copies and
 //! anything else became nothing: `allow = ["Log"]` was accepted in silence, and
@@ -112,5 +112,92 @@ fn critical_allow_suggests_the_nearest_capability() {
             && stderr.contains("hint: did you mean `Rand`?"),
         "{stderr}"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── #3253: every TOML array spelling reads as TOML says ──────────────────
+//
+// The manifest was read one line at a time, so `allow = [` with its names on
+// the lines below read as `allow = []` — "every capability" — and none of the
+// names was judged. It is the `toml` crate now.
+
+/// A scratch project whose `[permissions]` table is `permissions` verbatim,
+/// with a main that reads a file (`IO`) and runs `git` (`Env`, `proc`).
+fn raw_project(tag: &str, permissions: &str, main: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("almide-issue3253-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    std::fs::write(
+        dir.join("almide.toml"),
+        format!("[package]\nname = \"permfx\"\nversion = \"0.1.0\"\n\n[permissions]\n{permissions}\n"),
+    )
+    .expect("write manifest");
+    std::fs::write(dir.join("main.almd"), main).expect("write program");
+    dir
+}
+
+/// A multi-line grant, with a trailing comma and comments between the items,
+/// is the grant it spells: `Net` only, so the file read is refused for `IO`.
+#[test]
+fn a_multi_line_allow_is_the_narrow_grant_it_spells() {
+    let allow = "allow = [\n  # network only\n  \"Net\",  # the API client\n]";
+    let dir = raw_project("narrow", allow, READS_A_FILE);
+    let (ok, stderr) = almide(&dir, &["check", "main.almd"]);
+    assert!(!ok, "a multi-line `Net` grant admitted a file read:\n{stderr}");
+    assert!(stderr.contains("IO is not in [permissions].allow"), "{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // The same grant widened to IO on its own line admits it.
+    let dir = raw_project("narrow-io", "allow = [\n  \"Net\",\n  \"IO\",\n]", READS_A_FILE);
+    let (ok, stderr) = almide(&dir, &["check", "main.almd"]);
+    assert!(ok, "a multi-line grant naming IO refused the read:\n{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An unknown name inside a multi-line array is refused on its own line.
+#[test]
+fn an_unknown_name_in_a_multi_line_allow_is_refused_on_its_line() {
+    // Lines: 6 `allow = [`, 7 `"IO",`, 8 `"Bogus",`.
+    let dir = raw_project("unknown", "allow = [\n  \"IO\",\n  \"Bogus\",\n]", READS_A_FILE);
+    for args in [&["check", "main.almd"][..], &["run", "main.almd"][..]] {
+        let (ok, stderr) = almide(&dir, args);
+        assert!(!ok, "`almide {}` accepted `Bogus`:\n{stderr}", args.join(" "));
+        assert!(
+            stderr.contains("almide.toml:8: unknown capability `Bogus` in [permissions].allow"),
+            "`almide {}` should name line 8:\n{stderr}",
+            args.join(" ")
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A multi-line `proc` list is the list it spells: `git` runs past the
+/// static gate, `make` is refused by name.
+#[test]
+fn a_multi_line_proc_list_is_the_list_it_spells() {
+    let permissions = "allow = [\"Env\"]\nproc = [\n  \"git\",  # version control\n  \"cargo\",\n]";
+    let listed = "import process\n\neffect fn main() -> Unit = {\n  let out = process.exec(\"git\", [\"--version\"])!\n  println(out)\n}\n";
+    let dir = raw_project("proc-ok", permissions, listed);
+    let (ok, stderr) = almide(&dir, &["check", "main.almd"]);
+    assert!(ok, "`git` is on the multi-line proc list:\n{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let unlisted = listed.replace("\"git\"", "\"make\"");
+    let dir = raw_project("proc-bad", permissions, &unlisted);
+    let (ok, stderr) = almide(&dir, &["check", "main.almd"]);
+    assert!(!ok, "`make` is not on the multi-line proc list:\n{stderr}");
+    assert!(stderr.contains("`make` is not in [permissions] proc"), "{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A manifest that is not TOML is refused where it breaks, on every
+/// command, instead of reading as "no project" (no dependencies, no
+/// permissions) through the readers that ignore a parse error.
+#[test]
+fn a_manifest_that_is_not_toml_is_refused_on_its_line() {
+    let dir = raw_project("not-toml", "allow = [\n  \"IO\"\n  \"Net\",\n]", READS_A_FILE);
+    let (ok, stderr) = almide(&dir, &["check", "main.almd"]);
+    assert!(!ok, "a broken array was accepted:\n{stderr}");
+    assert!(stderr.contains("almide.toml:8:") && stderr.contains("almide.toml is read as TOML"), "{stderr}");
     let _ = std::fs::remove_dir_all(&dir);
 }
