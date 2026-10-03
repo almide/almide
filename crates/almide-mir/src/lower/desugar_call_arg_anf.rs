@@ -522,18 +522,18 @@ fn bind_earlier_interp_parts(
     for (p, bind) in earlier.iter_mut().zip(plan) {
         let IrStringPart::Expr { expr: a } = p else { continue };
         let Some(render) = bind else { continue };
-        let span = a.span.clone();
+        let span = a.span;
         let ty = if render { Ty::String } else { a.ty.clone() };
         let var = vt.alloc(almide_base::intern::sym("__part"), ty.clone(), Mutability::Let, None);
         let part = std::mem::replace(
             a,
-            IrExpr { kind: IrExprKind::Var { id: var }, ty: ty.clone(), span: span.clone(), def_id: None },
+            IrExpr { kind: IrExprKind::Var { id: var }, ty: ty.clone(), span, def_id: None },
         );
         let value = if render {
             IrExpr {
                 kind: IrExprKind::StringInterp { parts: vec![IrStringPart::Expr { expr: part }] },
                 ty: Ty::String,
-                span: span.clone(),
+                span,
                 def_id: None,
             }
         } else {

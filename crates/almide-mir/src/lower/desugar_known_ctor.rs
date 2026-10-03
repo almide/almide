@@ -387,11 +387,11 @@ fn bind_earlier_call_operands(
             continue;
         }
         let ty = a.ty.clone();
-        let span = a.span.clone();
+        let span = a.span;
         let var = vt.alloc(almide_base::intern::sym("__arg"), ty.clone(), Mutability::Let, None);
         let value = std::mem::replace(
             a,
-            IrExpr { kind: IrExprKind::Var { id: var }, ty: ty.clone(), span: span.clone(), def_id: None },
+            IrExpr { kind: IrExprKind::Var { id: var }, ty: ty.clone(), span, def_id: None },
         );
         binds.push(IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value }, span });
     }

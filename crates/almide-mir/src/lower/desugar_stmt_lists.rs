@@ -65,18 +65,18 @@ fn bind_nested_list_literal_elems(stmts: &mut Vec<almide_ir::IrStmt>, vt: &mut a
             i += 1;
             continue;
         };
-        if !elements.iter().any(|e| nested(e)) || !elements.iter().all(|e| nested(e) || plain(e)) {
+        if !elements.iter().any(nested) || !elements.iter().all(|e| nested(e) || plain(e)) {
             i += 1;
             continue;
         }
         let mut binds = Vec::new();
         for el in elements.iter_mut().filter(|e| nested(e)) {
             let ty = el.ty.clone();
-            let span = el.span.clone();
+            let span = el.span;
             let var = vt.alloc(almide_base::intern::sym("__elem"), ty.clone(), Mutability::Let, None);
             let value = std::mem::replace(
                 el,
-                IrExpr { kind: IrExprKind::Var { id: var }, ty: ty.clone(), span: span.clone(), def_id: None },
+                IrExpr { kind: IrExprKind::Var { id: var }, ty: ty.clone(), span, def_id: None },
             );
             binds.push(IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value }, span });
         }
