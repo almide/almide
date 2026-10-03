@@ -699,22 +699,44 @@ impl LowerCtx {
 /// COW-or-wall discipline as `bytes.clear`). Shared with `inline_pure_call_globals`,
 /// which must not substitute a global's initializer into a RECEIVER position: the write
 /// would land in a fresh temporary (#906).
-/// #3261: the vars whose record field path an in-place mutator writes through
-/// (`list.pop(cell.words)`, `bytes.set_u8(p.buf, …)`) anywhere in `body` — the
-/// receivers `cow_inplace_receiver` sends to the two-level field COW, which
-/// releases the var's old block.
-pub(crate) fn field_cow_roots(body: &IrExpr) -> std::collections::HashSet<VarId> {
-    use almide_ir::visit::{walk_expr, IrVisitor};
+/// #3261 / #3265: the vars whose block, or a block on their field path, may be
+/// released or written in place before scope end somewhere in `body`:
+/// - the receiver root of an in-place mutator (`list.pop(cell.words)`,
+///   `list.pop(xs)`, `bytes.set_u8(p.buf, …)`): the two-level field COW
+///   releases the var's old block, and a unique list is popped in place;
+/// - the target of a write (`xs = …`, `xs[i] = …`, `cell.f = …`, `m[k] = …`,
+///   and a `mut`-param call's write-back `xs = f(xs)`): under a branch or a
+///   loop the rebind drops the old block before the scope ends.
+/// A field or element borrow of such a var has no owner once that happens.
+pub(crate) fn borrow_release_roots(body: &IrExpr) -> std::collections::HashSet<VarId> {
+    use almide_ir::visit::{walk_expr, walk_stmt, IrVisitor};
     struct Scan(std::collections::HashSet<VarId>);
     impl IrVisitor for Scan {
+        fn visit_stmt(&mut self, stmt: &IrStmt) {
+            match &stmt.kind {
+                IrStmtKind::Assign { var: v, .. }
+                | IrStmtKind::IndexAssign { target: v, .. }
+                | IrStmtKind::MapInsert { target: v, .. }
+                | IrStmtKind::FieldAssign { target: v, .. }
+                | IrStmtKind::ListSwap { target: v, .. }
+                | IrStmtKind::ListReverse { target: v, .. }
+                | IrStmtKind::ListRotateLeft { target: v, .. }
+                | IrStmtKind::ListCopySlice { dst: v, .. } => {
+                    self.0.insert(*v);
+                }
+                _ => {}
+            }
+            walk_stmt(self, stmt);
+        }
         fn visit_expr(&mut self, e: &IrExpr) {
             if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind {
                 let (m, f) = (module.as_str(), func.as_str());
-                let mutates = is_inplace_mutator(m, f) || (m == "list" && f == "pop");
-                if let (true, Some(a)) = (mutates, args.first()) {
-                    if matches!(a.kind, IrExprKind::Member { .. }) {
-                        self.0.extend(field_path_root(a));
-                    }
+                let mutates = is_inplace_mutator(m, f)
+                    || (m == "list" && matches!(f, "push" | "clear"))
+                    || (m == "string" && f == "push")
+                    || (m == "bytes" && f == "push");
+                if mutates {
+                    self.0.extend(args.first().and_then(place_root));
                 }
             }
             walk_expr(self, e);
@@ -725,10 +747,13 @@ pub(crate) fn field_cow_roots(body: &IrExpr) -> std::collections::HashSet<VarId>
     s.0
 }
 
-/// The var at the root of a field path (`d.inner.xs` → `d`).
-fn field_path_root(e: &IrExpr) -> Option<VarId> {
+/// The var at the root of a field / tuple-slot / element path (`d.inner.xs` → `d`,
+/// `cell.xs[2]` → `cell`, `xs[i]` → `xs`), when the path is rooted at one.
+pub(crate) fn place_root(e: &IrExpr) -> Option<VarId> {
     match &e.kind {
-        IrExprKind::Member { object, .. } => field_path_root(object),
+        IrExprKind::Member { object, .. }
+        | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::IndexAccess { object, .. } => place_root(object),
         IrExprKind::Var { id } => Some(*id),
         _ => None,
     }

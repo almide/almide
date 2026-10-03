@@ -522,7 +522,7 @@ mod calls;
 // The in-place `&mut` mutator surface (a free fn in the private `calls` module) — re-exported so
 // `inline_pure_call_globals`'s receiver fence tests the SAME predicate the receiver COW does, and
 // the two can never drift apart (#906).
-pub(crate) use calls::{field_cow_roots, is_inplace_mutator};
+pub(crate) use calls::{borrow_release_roots, is_inplace_mutator, place_root};
 
 
 #[cfg(test)]
