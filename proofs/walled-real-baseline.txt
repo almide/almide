@@ -345,8 +345,6 @@ spec/wasm_cross/nested_field_path_mut.almd :: drain
 # call-argument position"), and `fail_after` returns a heap-result `if`
 # ("heap-result `if` outside the executable subset"). The structural leg serves
 # both files byte-identically to native and the interp.
-spec/wasm_cross/mut_param_closure_capture_write.almd :: fail_after  # #2739
-spec/wasm_cross/mut_param_closure_field_path_write.almd :: fail_after  # #2739
 
 # (2026-10-01, #3121/#3084) eleven rows pruned (77 -> 66): a match over an inert
 # Result literal reduces to the arm it selects (the err carrier's `err((m, b))!`
