@@ -314,7 +314,12 @@ whose hint names the public function that wraps the floor op.
 テスト: `tests/diagnostics/e085-intrinsic-outside-stdlib/`,
 `tests/diagnostics/e085-prim-outside-stdlib/`.
 
-Other attribute names (`@pure`, `@schedule`, `@rewrite`) parse without
+`@pure` is checked (#3250): the fn and everything it calls has the empty
+effect set — no effect category, no output, no `panic` / `assert*` — or the
+build stops with E092 at the call that breaks it. See
+[effect-system.md §2.3](./effect-system.md).
+
+Other attribute names (`@schedule`, `@rewrite`) parse without
 error and are preserved in the AST, but carry no semantic behavior yet. They are reserved for later
 sub-phases of the Stdlib Declarative Unification and MLIR Backend
 arcs (see `docs/roadmap/done/stdlib-declarative-unification.md` and
