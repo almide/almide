@@ -356,7 +356,6 @@ spec/wasm_cross/nested_field_path_mut.almd :: main
 # top-let reads (no name bridge), and never-err / auto-wrap effect-fn ABIs (no
 # ABI registries). The structural leg serves these programs; this is the
 # MIR-lowering frontier, recorded rather than ported.
-spec/integration/modules/cross_module_toplet_byvalue_test.almd :: __test_almd_cross-module record top-let list and fn-returned record  # #3121
 spec/lang/effect_assign_unwrap_test.almd :: unannotated_unwraps  # #3121
 spec/lang/explicit_propagation_test.almd :: explicit_unwraps  # #3121
 # The same #2950 classifier change, on a fixture that landed after the list above
