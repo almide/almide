@@ -178,9 +178,6 @@ spec/wasm_cross/endian_explicit_import.almd :: main
 # computed call (`heap-result method/computed call`), the STRUCTURAL leg
 # (the default) lowers it. Same division as the list_rest_pattern rows;
 # prunes with #1696 4-5.
-spec/wasm_cross/generic_record_fn_field.almd :: call_any__String
-spec/wasm_cross/generic_record_fn_field.almd :: call_it
-spec/wasm_cross/generic_record_fn_field.almd :: call_q
 
 # (2026-09-03, C-213/#1849) a TEMPORARY receiver of a Unit-returning bytes
 # mutator (`bytes.append_i16_be(bytes.new(2), 258)`, `let _ = …` on the
