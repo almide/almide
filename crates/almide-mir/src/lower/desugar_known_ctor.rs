@@ -342,8 +342,10 @@ fn absorb_unwrap_or_block_operand(e: &mut IrExpr) -> bool {
     true
 }
 
-/// The operands BEFORE a call's block argument, made safe to evaluate after
-/// the block's statements, and the `let`s that do it, in order. An operand that
+/// The operands BEFORE the block argument at `bi` of a call (or the block
+/// element of a list literal, which absorbs it the same way: `[a, { s; r }]` ≡
+/// `{ let t = a; s; [t, r] }`), made safe to evaluate after the block's
+/// statements, and the `let`s that do it, in order. An operand that
 /// calls nothing and reads no variable the block writes stays (re-reading it
 /// later is unobservable). Otherwise it is bound to a fresh `let` first —
 /// `f(g(x), { s; e })` becomes `{ let t = g(x); s; f(t, e) }`, so `g` still runs
@@ -356,12 +358,13 @@ fn absorb_unwrap_or_block_operand(e: &mut IrExpr) -> bool {
 /// field or index place, an operator) declines with `None`, leaving the call
 /// untouched.
 fn bind_earlier_call_operands(
-    args: &mut [IrExpr],
-    block: &IrExpr,
+    all: &mut [IrExpr],
+    bi: usize,
     vt: &mut almide_ir::VarTable,
 ) -> Option<Vec<almide_ir::IrStmt>> {
     use almide_ir::{IrStmt, IrStmtKind, Mutability};
-    let written = stmts_written_vars(block);
+    let (args, rest) = all.split_at_mut(bi);
+    let written = stmts_written_vars(&rest[0]);
     let mut plan = Vec::with_capacity(args.len());
     for a in args.iter() {
         let (reads_written, calls) = part_reads_and_calls(a, &written);
