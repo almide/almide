@@ -66,11 +66,15 @@ fn is_str_value_tuple_elem(elem_ty: &Ty) -> bool {
 /// co-owns each row); the outer's recursive `Op::DropListListStr` frees each row's cells + each
 /// row block.
 /// Extracted from `try_lower_concat_list` (codopsy round-2 complexity sweep, nested-list family 1 of 2).
+/// A `List[List[scalar]]` element (the derived Codec's `List[List[List[Int]]]`
+/// decode accumulator, #2739 family Q) has the same two-level physics: each inner
+/// cell is a FLAT block (`is_flat_scalar_list_elem`), whose rc_dec is its full free
+/// exactly as a String cell's is, so the nested sweep is exact for it too.
 fn is_list_str_elem(elem_ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     matches!(elem_ty,
         Ty::Applied(TypeConstructorId::List, a)
-            if a.len() == 1 && matches!(a[0], Ty::String))
+            if a.len() == 1 && (matches!(a[0], Ty::String) || is_flat_scalar_list_elem(&a[0])))
 }
 
 /// A `List[scalar]` ELEMENT (so the concat's `value` is `List[List[Int]]` — the memory_stress
