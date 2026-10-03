@@ -8,4 +8,4 @@
 version          = almide 0.66.0 (dev)
 date             = 2026-10-03
 program          = fn main() -> Unit = { println("Hello, world!") }
-structural_bytes = 953
+structural_bytes = 325
