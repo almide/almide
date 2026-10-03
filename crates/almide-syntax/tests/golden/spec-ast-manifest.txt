@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at c93e87cf8 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at aa1b7566b — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -314,6 +314,7 @@ b3570ea3309e505e86797c95a037a4ed434c1eaa3267e3594f8e530e5c7433ff	spec/lang/fan_m
 3100f8b9f4631fe454ba53332fdabae4d997a93f71169b70d4e8a64b7a74fc16	spec/lang/fan_mapper_test.almd
 3955f0e5fcd3734b4d7bf3953f691344c939a5fd5c95ee2a3658a83b9721f27e	spec/lang/fan_test.almd
 f25c1bb422ed14df5aeef689b69795b2626d9a107e10ab5e1d76d0c308c232b9	spec/lang/fan_value_regression_test.almd
+031aba0d8a1b47b5ef12d8dc7badc8cf26a7544b87c39735a798013464ad4f93	spec/lang/field_borrow_cow_test.almd
 2fa0726e32c64ef3382a47ee26a59eb0ddfff7c0d6763420f23e66a9fbe21437	spec/lang/fn_ref_hof_test.almd
 cff670ba3c598622a8cafa1d9eb98a74effa40d86492982ca49fb42f7c08b931	spec/lang/fn_type_test.almd
 2a11a878c718c1ed889378609c954dba50271a296b472a3ecfee13fd825b51b2	spec/lang/fn_value_no_equality_test.almd
