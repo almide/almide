@@ -45,6 +45,12 @@ impl LowerCtx {
         if borrowed && (self.scalar_loop_depth > 0 || self.unit_arm_depth > 0) {
             return None;
         }
+        // A MODELED frame (the model-one-iteration `while`, a non-executing arm) releases
+        // its own handles at frame end, so a copy made there would be dropped while the
+        // var still names it — the heap-rebind-in-a-frame refusal `Assign` makes.
+        if self.in_frame > 0 && self.scalar_loop_depth == 0 && self.unit_arm_depth == 0 {
+            return None;
+        }
         if !borrowed && !self.materialized_aggregates.contains(&old) {
             return None;
         }
