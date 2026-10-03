@@ -89,7 +89,9 @@ fn measure(root: &Path, rung: &str, rel: &str) -> (u64, u64) {
     let wasi = almide_wasm_run::wasi::to_wasi(&bytes, &host_ops)
         .unwrap_or_else(|e| panic!("{rel}: to_wasi failed on an emitted module — an Almide bug: {e}"));
     let w = wasi.len() as u64;
-    assert!(w >= n, "{rel}: shipped {w} B < emitted {n} B — the transform only ADDS sections, measurement broken");
+    // Not `w >= n`: the shipped form drops the emitted module's unreached
+    // fixed-slot helper stubs (#3136), so it can be the smaller of the two.
+    assert!(w >= 100, "{rel}: shipped {w} B — too small to be a real module, measurement broken");
     (n, w)
 }
 

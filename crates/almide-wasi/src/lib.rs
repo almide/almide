@@ -10,9 +10,10 @@
 //!     plus the environ/args quartet ONLY when the module's emitted op
 //!     set reaches it (below); every non-import index shifts by the
 //!     import delta, and the element section re-encodes through the
-//!     same Remap (#1716). A final pass (`prune.rs`, #3114) then drops
-//!     the imports no shipped body calls — hello, world keeps fd_write
-//!     and proc_exit — along with unreferenced globals and types;
+//!     same Remap (#1716). A final pass (`prune.rs`, #3114, #3136) then
+//!     drops every function no export reaches — the emitter's unreached
+//!     helper slots and the shims nothing calls — and the imports, globals
+//!     and types only dead code named: hello, world keeps fd_write alone;
 //!   - every call to an old import retargets to one of 5 appended SHIM
 //!     functions implementing the almide host contract over WASI;
 //!   - one PARK span is appended to linear memory for iovecs, the
@@ -61,6 +62,8 @@ pub const P1_SERVED_OPS: &[i32] = &[
 pub mod fs_service;
 mod prune;
 pub use fs_service::{fs_op_name, FS_SERVICE_OPS};
+/// The last pass every shipped form runs (p1 here, p2/p3 in almide-wasm-run).
+pub use prune::prune;
 
 pub const UNSUPPORTED_MSG: &[u8] = b"Error: host op unsupported in the WASI build\n";
 /// The env.set overlay log's own refusal. It used to borrow the line above,
@@ -585,7 +588,8 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     // (and `host_read` only copies an op's result out), so both shims ship
     // as index-stable `unreachable` stubs — the fs_call dispatcher alone is
     // ~460 B, a quarter of a hello-world artifact. The op set is the same
-    // audited one the build path routes on, so a stub is never reached.
+    // audited one the build path routes on, so a stub is never reached, and
+    // the final prune drops it (#3136) — this only skips building the bodies.
     if host_ops.is_empty() {
         let mut stub = Function::new([]);
         stub.instructions().unreachable().end();
@@ -653,9 +657,10 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         .section(&element_sec)
         .section(&code)
         .section(&data);
-    // Last: drop the imports, globals and types nothing in the finished
-    // module names (#3114) — the base five WASI imports keep fixed indices
-    // above so the shims are written once, and most programs call two.
+    // Last: drop the functions no export reaches, and the imports, globals
+    // and types nothing live names (#3114, #3136) — the emitter's helper
+    // slots and the base five WASI imports keep fixed indices above so the
+    // shims are written once, and most programs reach few of them.
     let out = prune::prune(&m.finish())?;
     wasmparser::validate(&out)?;
     Ok(out)

@@ -53,48 +53,76 @@ fn stage_for(i: &mut wasm_encoder::InstructionSink<'_>, park: u64, need: u32, st
 /// spec's 4096; this is the p1 twin, at a size no host refuses.
 const WRITE_CHUNK: i32 = 65536;
 
+/// Where a shim reads the park's base address from: the constant itself, or
+/// a local that holds it. A shim that names the park eight times or more
+/// spends fewer bytes loading it once into a local (#3136): a local.get is
+/// two bytes, the constant four.
+#[derive(Clone, Copy)]
+enum ParkAt {
+    Const(u64),
+    Local(u32),
+}
+
+impl ParkAt {
+    fn push(self, i: &mut wasm_encoder::InstructionSink<'_>) {
+        match self {
+            ParkAt::Const(park) => i.i32_const(park as i32),
+            ParkAt::Local(l) => i.local_get(l),
+        };
+    }
+}
+
 /// Write all of `len` bytes at `ptr` to `fd`: slice at [`WRITE_CHUNK`] and
 /// advance by each call's `nwritten`, so neither a host's per-call bound nor
 /// a short write drops the tail (#3206 — a `println` of 128 MiB or more
 /// printed an empty line, exit 0). An errno or a zero-byte write ends the
 /// loop, the prior single-call behavior for a stream that refuses output.
-/// `ptr` and `len` are locals this consumes.
-fn write_all(i: &mut wasm_encoder::InstructionSink<'_>, fd: i32, park: u64, ptr: u32, len: u32) {
+/// `ptr` and `len` are locals this consumes; `n` is an i32 scratch local that
+/// holds each call's `nwritten`, read once from the park (#3136: the three
+/// reloads it replaces were 8 B of every printing artifact). `park` is the
+/// park's address, and `at` where to load it from.
+fn write_all(i: &mut wasm_encoder::InstructionSink<'_>, fd: i32, park: u64, at: ParkAt, (ptr, len, n): (u32, u32, u32)) {
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(len).i32_eqz().br_if(1);
-    i.i32_const(park as i32).local_get(ptr).i32_store(mem(IOV));
-    i.i32_const(park as i32);
+    at.push(i);
+    i.local_get(ptr).i32_store(mem(IOV));
+    at.push(i);
     i.local_get(len).i32_const(WRITE_CHUNK).local_get(len).i32_const(WRITE_CHUNK).i32_lt_u().select();
     i.i32_store(mem(IOV + 4));
     i.i32_const(fd);
-    i.i32_const((park + IOV) as i32);
+    at.push(i); // park + IOV, IOV = 0
     i.i32_const(1);
     i.i32_const((park + NREAD) as i32);
     i.call(0); // fd_write: one slice
     i.br_if(1);
-    i.i32_const(park as i32).i32_load(mem(NREAD)).i32_eqz().br_if(1);
-    i.local_get(ptr).i32_const(park as i32).i32_load(mem(NREAD)).i32_add().local_set(ptr);
-    i.local_get(len).i32_const(park as i32).i32_load(mem(NREAD)).i32_sub().local_set(len);
+    at.push(i);
+    i.i32_load(mem(NREAD)).local_tee(n).i32_eqz().br_if(1);
+    i.local_get(ptr).local_get(n).i32_add().local_set(ptr);
+    i.local_get(len).local_get(n).i32_sub().local_set(len);
     i.br(0);
     i.end().end();
 }
+const _: () = assert!(IOV == 0, "write_all passes the park itself as the iovec address");
 
 /// `(ptr, len) -> ()`: the payload through [`write_all`], then `"\n"` in its
 /// own call. Not one call over both iovecs: wasmtime's preview-1
 /// `fd_write` writes only the FIRST non-empty iovec and returns its count
 /// (measured 2026-09-24, wasmtime 47: `fd_write(1, [("hello",5),("\n",1)])`
 /// printed `hello` with no newline), so a single call would drop every
-/// line's `\n` unless the shim looped on `nwritten` (#2312 shape 3).
+/// line's `\n` unless the shim looped on `nwritten` (#2312 shape 3). The
+/// park's address is named eight times, so it rides in a local.
 fn shim_print(fd: i32, park: u64) -> Function {
-    let (ptr, len) = (0u32, 1u32);
-    let mut f = Function::new([]);
+    let (ptr, len, n, p) = (0u32, 1u32, 2u32, 3u32);
+    let at = ParkAt::Local(p);
+    let mut f = Function::new([(2, ValType::I32)]);
     let mut i = f.instructions();
-    write_all(&mut i, fd, park, ptr, len);
-    i.i32_const(park as i32).i32_const(0x0A).i32_store8(mem8(NL));
-    i.i32_const(park as i32).i32_const((park + NL) as i32).i32_store(mem(IOV));
-    i.i32_const(park as i32).i32_const(1).i32_store(mem(IOV + 4));
+    i.i32_const(park as i32).local_set(p);
+    write_all(&mut i, fd, park, at, (ptr, len, n));
+    i.local_get(p).i32_const(0x0A).i32_store8(mem8(NL));
+    i.local_get(p).i32_const((park + NL) as i32).i32_store(mem(IOV));
+    i.local_get(p).i32_const(1).i32_store(mem(IOV + 4));
     i.i32_const(fd);
-    i.i32_const((park + IOV) as i32);
+    i.local_get(p); // park + IOV
     i.i32_const(1);
     i.i32_const((park + NREAD) as i32);
     i.call(0); // fd_write: the newline
@@ -168,7 +196,7 @@ fn shim_fs_call(
     // module's op set names it (`panic`), so no other artifact grows.
     for (code, fd) in [(30, 1), (73, 2)].into_iter().filter(|(code, _)| has(*code)) {
         i.local_get(op).i32_const(code).i32_eq().if_(BlockType::Empty);
-        write_all(&mut i, fd, park, b_ptr, b_len);
+        write_all(&mut i, fd, park, ParkAt::Const(park), (b_ptr, b_len, nread));
         i.i64_const(0).return_();
         i.end();
     }

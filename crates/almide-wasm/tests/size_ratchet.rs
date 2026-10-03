@@ -125,21 +125,25 @@ fn measure_one(root: &Path, rel: &str) -> Fixture {
     let wasi = almide_wasm_run::wasi::to_wasi(&bytes, &host_ops)
         .unwrap_or_else(|e| panic!("{rel}: to_wasi failed on an emitted module — an Almide bug: {e}"));
     let w = wasi.len() as u64;
-    assert!(w >= n, "{rel}: shipped {w} B < emitted {n} B — the transform only ADDS sections, measurement broken");
-    let dead = [dead_weight(&bytes, false), dead_weight(&wasi, true)].concat();
+    // Not `w >= n` any more: the shipped form drops the emitted module's
+    // unreached fixed-slot helper stubs (#3136), so it can be the smaller.
+    assert!(w >= 100, "{rel}: shipped {w} B — too small to be a real module, measurement broken");
+    let mut dead = [dead_weight(&bytes, false), dead_weight(&wasi, true)].concat();
+    dead.extend(component_dead_weight(&bytes, &host_ops));
     assert!(dead.is_empty(), "{rel}: ships bytes it can prove dead (#3114):\n  {}", dead.join("\n  "));
     let digest = |b: &[u8]| Sha256::digest(b).iter().map(|x| format!("{x:02x}")).collect::<String>();
     let print = format!("emitted {n} B {} / shipped {w} B {}", digest(&bytes), digest(&wasi));
     Fixture { rel: rel.to_string(), sizes: Some((n, w)), print }
 }
 
-/// The dead weight #3114 removed, held out (the cost is fixed, so it would
-/// come back on every module at once): an active data segment that begins
-/// or ends with a zero byte (linear memory is already zero), and — in the
-/// SHIPPED form, the one the transform finishes — a function import or a
-/// global that nothing in the module names. The emitted form keeps its five
-/// `almide.*` imports and its fixed globals at constant indices on purpose:
-/// the transforms and the embedded host address them by position.
+/// The dead weight #3114 and #3136 removed, held out (the cost is fixed, so
+/// it would come back on every module at once): an active data segment that
+/// begins or ends with a zero byte (linear memory is already zero), and — in
+/// a SHIPPED form, the one a transform finishes — a defined function no
+/// export, element or start reaches, or a function import or a global that
+/// nothing reached names. The emitted form keeps its five `almide.*` imports,
+/// its fixed helper slots and its fixed globals at constant indices on
+/// purpose: the transforms and the embedded host address them by position.
 fn dead_weight(wasm: &[u8], shipped: bool) -> Vec<String> {
     let mut refs = Refs::default();
     for payload in wasmparser::Parser::new(0).parse_all(wasm) {
@@ -147,36 +151,101 @@ fn dead_weight(wasm: &[u8], shipped: bool) -> Vec<String> {
     }
     let mut out = std::mem::take(&mut refs.zero_ended);
     if shipped {
-        out.extend((0..refs.imports).filter(|f| !refs.funcs.contains(f)).map(|f| format!("function import {f} is never called")));
-        out.extend((0..refs.globals).filter(|g| !refs.gets.contains(g)).map(|g| format!("global {g} is never read, written or exported")));
+        let (live, gets) = refs.live();
+        let n = refs.imports + refs.bodies.len() as u32;
+        out.extend((0..refs.imports).filter(|f| !live.contains(f)).map(|f| format!("function import {f} is never called")));
+        out.extend((refs.imports..n).filter(|f| !live.contains(f)).map(|f| format!("function {f} is never reached")));
+        out.extend((0..refs.globals).filter(|g| !gets.contains(g)).map(|g| format!("global {g} is never read, written or exported")));
     }
     out
 }
 
+/// The same check on the p2 and p3 components' core module (#3136), for every
+/// fixture whose op set the direct component shims serve.
+fn component_dead_weight(bytes: &[u8], host_ops: &[i32]) -> Vec<String> {
+    let mut out = Vec::new();
+    for p3 in [false, true] {
+        if almide_wasm_run::component_availability::check(host_ops, p3).is_err() {
+            continue;
+        }
+        let form = if p3 { "p3" } else { "p2" };
+        let component = if p3 { almide_wasm_run::wasi_p3::to_p3(bytes, host_ops) } else { almide_wasm_run::wasi_p2::to_p2(bytes) }
+            .unwrap_or_else(|e| panic!("{form} transform failed on a served module — an Almide bug: {e}"));
+        out.extend(dead_weight(core_module(&component), true).into_iter().map(|d| format!("{form}: {d}")));
+    }
+    out
+}
+
+/// The component's main core module: the largest one it embeds (the others
+/// are wit-component's small indirect-lowering shims).
+fn core_module(component: &[u8]) -> &[u8] {
+    wasmparser::Parser::new(0)
+        .parse_all(component)
+        .filter_map(|p| match p.expect("valid component") {
+            wasmparser::Payload::ModuleSection { unchecked_range, .. } => {
+                Some(unchecked_range.start as usize..unchecked_range.end as usize)
+            }
+            _ => None,
+        })
+        .max_by_key(|r| r.len())
+        .map(|r| &component[r])
+        .expect("a component embeds its core module")
+}
+
 /// What [`dead_weight`] reads off a module: the function-import and global
-/// counts, every function and global something names, and the zero-ended
-/// active data segments.
+/// counts, what each body and what the rest of the module names, and the
+/// zero-ended active data segments.
 #[derive(Default)]
 struct Refs {
     imports: u32,
     globals: u32,
+    /// The defined function whose body is being read.
+    cur: Option<usize>,
+    /// Functions and globals named outside every body.
     funcs: std::collections::BTreeSet<u32>,
     gets: std::collections::BTreeSet<u32>,
+    /// Each body's named functions and globals.
+    bodies: Vec<(std::collections::BTreeSet<u32>, std::collections::BTreeSet<u32>)>,
     zero_ended: Vec<String>,
 }
 
 impl Refs {
     fn op(&mut self, op: wasmparser::Operator<'_>) {
         use wasmparser::Operator as O;
+        let (funcs, gets) = match self.cur {
+            Some(i) => {
+                let (f, g) = &mut self.bodies[i];
+                (f, g)
+            }
+            None => (&mut self.funcs, &mut self.gets),
+        };
         match op {
             O::Call { function_index } | O::ReturnCall { function_index } | O::RefFunc { function_index } => {
-                self.funcs.insert(function_index);
+                funcs.insert(function_index);
             }
             O::GlobalGet { global_index } | O::GlobalSet { global_index } => {
-                self.gets.insert(global_index);
+                gets.insert(global_index);
             }
             _ => {}
         }
+    }
+
+    /// The functions the roots reach through the bodies, and the globals
+    /// the roots and the reached bodies name.
+    fn live(&self) -> (std::collections::BTreeSet<u32>, std::collections::BTreeSet<u32>) {
+        let mut live = std::collections::BTreeSet::new();
+        let mut gets = self.gets.clone();
+        let mut work: Vec<u32> = self.funcs.iter().copied().collect();
+        while let Some(f) = work.pop() {
+            if !live.insert(f) {
+                continue;
+            }
+            if let Some((fs, gs)) = f.checked_sub(self.imports).and_then(|d| self.bodies.get(d as usize)) {
+                work.extend(fs.iter().copied());
+                gets.extend(gs.iter().copied());
+            }
+        }
+        (live, gets)
     }
 
     fn expr(&mut self, e: wasmparser::ConstExpr<'_>) {
@@ -226,7 +295,12 @@ impl Refs {
                 self.funcs.insert(func);
             }
             P::ElementSection(r) => r.into_iter().for_each(|e| self.element(e.expect("element"))),
-            P::CodeSectionEntry(b) => b.get_operators_reader().expect("body").into_iter().for_each(|op| self.op(op.expect("operator"))),
+            P::CodeSectionEntry(b) => {
+                self.cur = Some(self.bodies.len());
+                self.bodies.push(Default::default());
+                b.get_operators_reader().expect("body").into_iter().for_each(|op| self.op(op.expect("operator")));
+                self.cur = None;
+            }
             P::DataSection(r) => r.into_iter().enumerate().for_each(|(i, d)| self.data(i, d.expect("data segment"))),
             _ => {}
         }
