@@ -18,6 +18,7 @@ pub(crate) const BYTES_CORE_FNS: &[(&str, &str)] = &[("bytes_to_string", "bytes.
                 ("bytes_ends_with", "bytes.ends_with"),
                 ("bytes_slice", "bytes.slice"),
                 ("bytes_cmp", "bytes.cmp"),
+                ("bytes_eq", "bytes.eq"),
                 ("bytes_set", "bytes.set"),
                 ("bytes_append", "bytes.append"),
                 ("bytes_pad_left", "bytes.pad_left"),
