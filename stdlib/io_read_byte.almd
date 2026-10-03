@@ -5,7 +5,7 @@
 // anything else -1). The Bytes block's length field (@4) distinguishes the
 // two: a short read leaves it 0. Reaching prim.read_n_bytes carries
 // Capability::Stdin.
-fn io_read_byte() -> Int = {
+effect fn io_read_byte() -> Int = {
   let b = prim.read_n_bytes(1)
   let h = prim.handle(b)
   if prim.load32(h + 4) < 1 then 0 - 1 else prim.load8(h + 12)

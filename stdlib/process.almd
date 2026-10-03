@@ -17,7 +17,7 @@ effect fn exit(code: Int) -> Never = _
 
 /// Full argv, program name at index 0.
 @intrinsic("almide_rt_process_args")
-fn args() -> List[String] = _
+effect fn args() -> List[String] = _
 
 /// All stdin lines; err on non-UTF-8 input.
 @intrinsic("almide_rt_process_stdin_lines")
