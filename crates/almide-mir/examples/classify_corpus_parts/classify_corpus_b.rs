@@ -42,7 +42,7 @@ fn discover_self_modules(
 /// (`bindgen` + `get_str` → `almide_rt_bindgen_get_str`) — the v1 analogue of v0's
 /// `ir_link_flatten` module-fn renaming.
 fn user_module_fn_name(module: &str, func: &str) -> String {
-    format!("almide_rt_{}_{}", module.replace('.', "_"), func.replace('.', "_"))
+    format!("almide_rt_{}_{}", almide_base::names::module_ident(module), func.replace('.', "_"))
 }
 
 /// Build the set of NATIVE-FFI function keys over the LINKED IR: functions that TRANSITIVELY

@@ -137,7 +137,7 @@ impl Purity {
         }
         for m in &program.modules {
             let mod_name = m.versioned_name.map(|v| v.to_string()).unwrap_or_else(|| m.name.to_string());
-            let mod_ident = mod_name.replace('.', "_");
+            let mod_ident = almide_base::names::module_ident(&mod_name);
             for f in &m.functions {
                 if f.is_effect || f.is_test { continue; }
                 // Every spelling a call site may carry after StdlibLowering's

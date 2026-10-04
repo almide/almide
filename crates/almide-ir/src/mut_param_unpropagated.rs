@@ -92,7 +92,7 @@ pub(crate) fn fn_spellings(module: Option<&str>, fname: &str) -> Vec<String> {
     match module {
         None => vec![crate::mut_param::scope_key("", fname)],
         Some(mname) => vec![
-            format!("almide_rt_{}_{}", mname.replace('.', "_"), fname.replace('.', "_")),
+            format!("almide_rt_{}_{}", almide_base::names::module_ident(mname), fname.replace('.', "_")),
             format!("{mname}.{fname}"),
             fname.to_string(),
             crate::mut_param::scope_key(mname, fname),
