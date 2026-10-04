@@ -373,7 +373,7 @@ fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) 
             let dotted = name.contains('.');
             let mod_ident = almide_base::names::module_ident(mod_name);
             let stripped = if dotted { almide_base::names::strip_module_path(name.as_str(), &mod_ident).unwrap_or(name.as_str()) } else { name.as_str() };
-            let sanitized = stripped.replace(' ', "_").replace('-', "_").replace('.', "_");
+            let sanitized = stripped.replace([' ', '-', '.'], "_");
             // A QUALIFIED-method sibling (`varlib.Pigment.encode` called from inside
             // module `varlib`) already carries the module in its name — strip it before
             // prefixing, MIRRORING the walker's definition rename (#433 × #411-B), or
@@ -393,7 +393,7 @@ fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) 
             let mod_ident = almide_base::names::module_ident(mod_name);
             // Same qualified-sibling strip as the Named-call arm above.
             let stripped = if dotted { almide_base::names::strip_module_path(name.as_str(), &mod_ident).unwrap_or(name.as_str()) } else { name.as_str() };
-            let base = stripped.replace(' ', "_").replace('-', "_").replace('.', "_");
+            let base = stripped.replace([' ', '-', '.'], "_");
             return IrExpr {
                 kind: IrExprKind::FnRef { name: format!("almide_rt_{}_{}", mod_ident, base).into() },
                 ty: expr.ty, span: expr.span, def_id: None,
