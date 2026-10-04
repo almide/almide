@@ -16,22 +16,3 @@
 #
 # Refresh: SHAPE_MATRIX_RESULTS=/tmp/r.tsv cargo test --test shape_matrix_test
 # writes every cell's verdict; rows come from its failing lines.
-bind/destructure_record.bytes.param.module_var  native-build  # #3303
-bind/destructure_record.bytes.param.outer_field  native-build  # #3303
-bind/destructure_record.bytes.param.outer_push  native-build  # #3303
-bind/destructure_record.bytes.param.outer_var  native-build  # #3303
-bind/destructure_record.int.param.module_var  native-build  # #3303
-bind/destructure_record.int.param.outer_field  native-build  # #3303
-bind/destructure_record.int.param.outer_push  native-build  # #3303
-bind/destructure_record.int.param.outer_var  native-build  # #3303
-bind/destructure_record.list.param.module_var  native-build  # #3303
-bind/destructure_record.list.param.outer_field  native-build  # #3303
-bind/destructure_record.list.param.outer_push  native-build  # #3303
-bind/destructure_record.list.param.outer_var  native-build  # #3303
-bind/destructure_record.record.param.module_var  native-build  # #3303
-bind/destructure_record.record.param.outer_field  native-build  # #3303
-bind/destructure_record.record.param.outer_push  native-build  # #3303
-bind/destructure_record.record.param.outer_var  native-build  # #3303
-bind/destructure_record.string.param.outer_field  native-build  # #3303
-bind/destructure_record.string.param.outer_push  native-build  # #3303
-bind/destructure_record.string.param.outer_var  native-build  # #3303
