@@ -1,13 +1,17 @@
 //! #2758 (#1696 step 4) — the Emitter-built HELPER frames in the structural
-//! witness: the display body of a recursive type. Its block param is lent
-//! (no credit here); its only RC events are the temporaries its walk
-//! creates. The certificate is audited against the helper's bytes
+//! witness: the display, equality and ordering bodies of a recursive type.
+//! Their block params are lent (no credit here); their only RC events are
+//! the temporaries the walk creates. The certificate is audited against the helper's bytes
 //! (witness_helper.rs): a helper whose emitted RC calls differ from what
 //! was recorded withdraws.
 
 const PROGRAM: &str = r#"type Tree =
   | Leaf
   | Node(Tree, Float, Tree)
+
+type Expr: Ord =
+  | Lit(Int)
+  | Add(Expr, Expr)
 
 type Chain = { label: String, weight: Float, next: Option[Chain] }
 
@@ -16,6 +20,9 @@ effect fn main() -> Unit = {
   println("${t}")
   let c: Chain = { label: "a", weight: 0.5, next: some({ label: "b", weight: 1.0, next: none }) }
   println("${c}")
+  let u = Node(Leaf, 1.5, Leaf)
+  println("${t == u} ${u == u} ${c == c}")
+  println("${list.sort([Add(Lit(2), Lit(1)), Lit(3), Add(Lit(1), Lit(1))])}")
 }
 "#;
 
@@ -31,20 +38,36 @@ fn accepted(cert: &str) -> bool {
 }
 
 #[test]
-fn a_recursive_types_display_helper_witnesses_its_lent_block_and_its_temporaries() {
+fn recursive_types_display_and_comparison_helpers_witness_their_lent_blocks_and_temporaries() {
     // ONE test: the witness sink is process-global.
     let w = witnesses();
-    for name in ["<display:0>", "<display:1>"] {
-        let cert = w.get(name).unwrap_or_else(|| panic!("{name} is witnessed: {w:?}"));
-        assert!(!cert.starts_with('!'), "{name} no longer declines display: {cert:?}");
-        assert!(accepted(cert), "{name}: the portable checker must accept {cert:?}");
+    let pinned = [
         // The lent block: known, no credit here, no event (the empty first
-        // line). The Float field's printed text: a block the linked printer
+        // line). A Float field's printed text: a block the linked printer
         // hands over, copied into the line and released at the site (`id`).
-        assert_eq!(cert, "\nid\n", "{name}");
+        ("<display:0>", "\nid\n"),
+        ("<display:2>", "\nid\n"),
+        // No Float field: a pure walk over the lent block.
+        ("<display:1>", "\n"),
+        // Equality and ordering read both lent operands and allocate nothing.
+        ("<named-op:Eq:0>", "\n\n"),
+        ("<named-op:Eq:2>", "\n\n"),
+        ("<named-op:Cmp:1>", "\n\n"),
+    ];
+    for (name, want) in pinned {
+        let cert = w.get(name).unwrap_or_else(|| panic!("{name} is witnessed: {w:?}"));
+        assert!(!cert.starts_with('!'), "{name} no longer declines: {cert:?}");
+        assert!(accepted(cert), "{name}: the portable checker must accept {cert:?}");
+        assert_eq!(cert, want, "{name}");
     }
-    // A temporary the walk leaks, or releases twice, is refused.
-    for (bad, what) in [("\ni\n", "leaked temporary"), ("\nidd\n", "double-released temporary"), ("d\nid\n", "released lent block")] {
+    // A temporary the walk leaks, or releases twice, and a release of a
+    // lent operand, are refused.
+    for (bad, what) in [
+        ("\ni\n", "leaked temporary"),
+        ("\nidd\n", "double-released temporary"),
+        ("d\nid\n", "released lent block"),
+        ("\nd\n", "released lent right operand"),
+    ] {
         assert!(!accepted(bad), "{what}: the checker must refuse {bad:?}");
     }
 }
