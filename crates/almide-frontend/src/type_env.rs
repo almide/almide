@@ -106,6 +106,16 @@ pub struct TypeEnv {
     /// produced it. Popped with the scope; cleared by any non-`let` binding
     /// of the same name (`define_var`), so it never outlives its binding.
     pub let_origins: Vec<std::collections::HashMap<Sym, crate::ast::Span>>,
+    /// #3274: parallel to `scopes` — a local bound to an EFFECT fn value
+    /// (`let g = rd`), mapped to the effect fn it holds. A named effect fn's
+    /// value type is its carrier with the effect bit off (`fn_value_ty`), so
+    /// the bit rides the binding here: a call of `g` (or `g` passed to a plain
+    /// slot) is the effect use a call of `rd` is. Same lifetime as
+    /// `let_origins`.
+    pub effect_aliases: Vec<std::collections::HashMap<Sym, Sym>>,
+    /// #3274: the module-scope twin of `effect_aliases` — a top-level
+    /// `let g = rd`, keyed by the bare name.
+    pub top_effect_aliases: std::collections::HashMap<Sym, Sym>,
     /// Current function's return type
     pub current_ret: Option<Ty>,
     /// ADR-0006 D1 (#1108 Phase 2b): the INNERMOST lambda's provisional
@@ -297,6 +307,8 @@ impl TypeEnv {
             functions: std::collections::HashMap::new(),
             scopes: vec![std::collections::HashMap::new()],
             let_origins: vec![std::collections::HashMap::new()],
+            effect_aliases: vec![std::collections::HashMap::new()],
+            top_effect_aliases: std::collections::HashMap::new(),
             current_ret: None,
             lambda_ret: None,
             lambda_prop_used: false,
@@ -639,11 +651,13 @@ impl TypeEnv {
     pub fn push_scope(&mut self) {
         self.scopes.push(std::collections::HashMap::new());
         self.let_origins.push(std::collections::HashMap::new());
+        self.effect_aliases.push(std::collections::HashMap::new());
     }
 
     pub fn pop_scope(&mut self) {
         self.scopes.pop();
         self.let_origins.pop();
+        self.effect_aliases.pop();
     }
 
     pub fn define_var(&mut self, name: &str, ty: Ty) {
@@ -655,6 +669,9 @@ impl TypeEnv {
         // scope: it has no call origin, so the entry must not survive it.
         if let Some(origins) = self.let_origins.last_mut() {
             origins.remove(&sym(name));
+        }
+        if let Some(aliases) = self.effect_aliases.last_mut() {
+            aliases.remove(&sym(name));
         }
         // A new binding also shadows a parameter of the same name; the fn
         // decl re-inserts its own parameters right after defining them.
@@ -679,6 +696,27 @@ impl TypeEnv {
         self.scopes.iter().zip(self.let_origins.iter()).rev()
             .find(|(scope, _)| scope.contains_key(&key))
             .and_then(|(_, origins)| origins.get(&key).copied())
+    }
+
+    /// #3274: record that the local `name` now holds the effect fn `target`,
+    /// in the scope that binds `name` (a `var` reassigned in a nested block
+    /// is marked where it lives). Never cleared by reassignment: a `var` that
+    /// ever held an effect fn may still hold it.
+    pub fn record_effect_alias(&mut self, name: &str, target: Sym) {
+        let key = sym(name);
+        let at = self.scopes.iter().rposition(|scope| scope.contains_key(&key));
+        if let Some(aliases) = at.and_then(|i| self.effect_aliases.get_mut(i)) {
+            aliases.insert(key, target);
+        }
+    }
+
+    /// #3274: the effect fn the local `name` currently resolves to holding —
+    /// `None` when the visible binding holds no effect fn value.
+    pub fn effect_alias(&self, name: &str) -> Option<Sym> {
+        let key = sym(name);
+        self.scopes.iter().zip(self.effect_aliases.iter()).rev()
+            .find(|(scope, _)| scope.contains_key(&key))
+            .and_then(|(_, aliases)| aliases.get(&key).copied())
     }
 
     pub fn define_var_at(&mut self, name: &str, ty: Ty, line: usize, col: usize) {

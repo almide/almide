@@ -136,6 +136,8 @@ impl Checker {
                     let _ = self.infer_expr(callee);
                 }
                 self.arg_spans = args.iter().map(|a| a.span).collect();
+                // #3274: `let g = rd; g(x)` is a call of `rd`.
+                self.check_effect_alias_call(&name);
                 // SHADOWING FIRST. A local binding or function PARAMETER of Fn
                 // type is called THROUGH that variable, never as a same-named
                 // top-level fn — the rule `lower/calls_target.rs` already
@@ -519,39 +521,49 @@ impl Checker {
     /// Effect isolation: pure fn cannot call effect fn. Verbatim text move out of [`Self::check_named_call_with_type_args`].
     pub(crate) fn check_effect_isolation(&mut self, name: &str, sig: &crate::types::FnSig) {
         if sig.is_effect && !self.env.can_call_effect {
-            let (msg, hint) = match self.env.metered_region {
-                // Inside a metered region the caller usually IS an effect fn —
-                // "mark it effect" would send the user in a circle. The region
-                // is pure BY DESIGN (determinism), so the fix is to move the
-                // effect out.
-                Some(region) => (
-                    format!("cannot call effect function '{}' inside a {} region", name, region),
-                    format!(
-                        "{region} meters deterministic computation, so its body is PURE. \
-                         Run the effect before the region and pass the value in"
-                    ),
-                ),
-                None if self.env.lambda_depth > 0 => (
-                    format!("cannot call effect function '{}' from a pure function", name),
-                    // The call sits in a LAMBDA: a lambda has no effect marker
-                    // of its own — it inherits the enclosing fn's capability
-                    // (one rule for every higher-order callee, list.map and
-                    // http.serve alike, #1051) — so the fix is one level up.
-                    "A lambda inherits its context's effect capability — mark the enclosing \
-                     function as `effect fn`"
-                        .to_string(),
-                ),
-                None => (
-                    format!("cannot call effect function '{}' from a pure function", name),
-                    "Mark the calling function as `effect fn`".to_string(),
-                ),
-            };
-            let mut diag = super::err(msg, hint, format!("call to {}()", name)).with_code("E006");
-            if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(name)) {
-                diag = diag.with_secondary(line, Some(col), format!("'{}' declared as effect fn here", name));
-            }
-            self.emit(diag);
+            self.report_effect_isolation(name, None);
         }
+    }
+
+    /// The E006 of [`Self::check_effect_isolation`]. `via` names the binding
+    /// the effect fn `name` was reached through (#3274: `let g = rd; g(x)`).
+    pub(crate) fn report_effect_isolation(&mut self, name: &str, via: Option<&str>) {
+        let (msg, hint) = match self.env.metered_region {
+            // Inside a metered region the caller usually IS an effect fn —
+            // "mark it effect" would send the user in a circle. The region
+            // is pure BY DESIGN (determinism), so the fix is to move the
+            // effect out.
+            Some(region) => (
+                format!("cannot call effect function '{}' inside a {} region", name, region),
+                format!(
+                    "{region} meters deterministic computation, so its body is PURE. \
+                     Run the effect before the region and pass the value in"
+                ),
+            ),
+            None if self.env.lambda_depth > 0 => (
+                format!("cannot call effect function '{}' from a pure function", name),
+                // The call sits in a LAMBDA: a lambda has no effect marker
+                // of its own — it inherits the enclosing fn's capability
+                // (one rule for every higher-order callee, list.map and
+                // http.serve alike, #1051) — so the fix is one level up.
+                "A lambda inherits its context's effect capability — mark the enclosing \
+                 function as `effect fn`"
+                    .to_string(),
+            ),
+            None => (
+                format!("cannot call effect function '{}' from a pure function", name),
+                "Mark the calling function as `effect fn`".to_string(),
+            ),
+        };
+        let (msg, context) = match via {
+            Some(alias) => (format!("{} (through `{}`, which holds it)", msg, alias), format!("call to {}()", alias)),
+            None => (msg, format!("call to {}()", name)),
+        };
+        let mut diag = super::err(msg, hint, context).with_code("E006");
+        if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(name)) {
+            diag = diag.with_secondary(line, Some(col), format!("'{}' declared as effect fn here", name));
+        }
+        self.emit(diag);
     }
     /// Validate argument count, emitting a placeholder-signature E004 on mismatch. Verbatim text move out of [`Self::check_named_call_with_type_args`].
     fn check_arg_count(&mut self, name: &str, sig: &crate::types::FnSig, arg_tys: &[Ty]) {

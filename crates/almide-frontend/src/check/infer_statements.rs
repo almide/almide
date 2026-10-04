@@ -132,6 +132,8 @@ impl Checker {
             }
         }
         let val_ty = self.infer_expr(value);
+        // #3274: resolved BEFORE `define_var`, so `let g = g` reads the outer `g`.
+        let effect_target = self.effect_alias_target(value, ty.as_ref());
         let final_ty = if let Some(te) = ty {
             let declared = self.resolve_type_expr(te);
             // E029: an undeclared Named in the annotation compiles to a
@@ -177,12 +179,52 @@ impl Checker {
         if let Some(vs) = value.span {
             self.env.record_let_origin(name, vs);
         }
+        if let Some(target) = effect_target {
+            self.env.record_effect_alias(name, target);
+        }
+    }
+
+    /// #3274: the effect fn a `let`/`var` binds when its value is a bare
+    /// effect fn reference — unless the annotation is itself an
+    /// `effect (A) -> B` type, whose bit the binding's type already carries
+    /// (calls of it are E006-checked by `call_fn_typed_local`).
+    pub(crate) fn effect_alias_target(&mut self, value: &ast::Expr, ty: Option<&ast::TypeExpr>) -> Option<Sym> {
+        let target = self.effect_fn_value_target(value)?;
+        let declared_effect = ty.is_some_and(|te| {
+            let declared = self.resolve_type_expr(te);
+            matches!(resolve_ty(&declared, &self.uf), Ty::Fn { is_effect: true, .. })
+        });
+        if declared_effect { None } else { Some(target) }
+    }
+
+    /// #3274: fill `top_effect_aliases` for this program's top-level `let`s
+    /// before any body is checked (a fn may sit above the `let` it calls
+    /// through), returning the map it replaces. Iterated to a fixed point so
+    /// `let b = a` resolves whichever of `a`/`b` is declared first.
+    pub(crate) fn collect_top_effect_aliases(&mut self, decls: &[ast::Decl]) -> std::collections::HashMap<Sym, Sym> {
+        let saved = std::mem::take(&mut self.env.top_effect_aliases);
+        loop {
+            let before = self.env.top_effect_aliases.len();
+            for decl in decls {
+                let ast::Decl::TopLet { name, ty, value, .. } = decl else { continue };
+                if self.env.top_effect_aliases.contains_key(name) {
+                    continue;
+                }
+                if let Some(target) = self.effect_alias_target(value, ty.as_ref()) {
+                    self.env.top_effect_aliases.insert(*name, target);
+                }
+            }
+            if self.env.top_effect_aliases.len() == before {
+                return saved;
+            }
+        }
     }
 
     /// `ast::Stmt::Var` arm of [`Self::check_stmt`]. Verbatim text move.
     fn check_stmt_var(&mut self, stmt: &mut ast::Stmt) {
         let ast::Stmt::Var { name, ty, value, span } = stmt else { unreachable!() };
         let val_ty = self.infer_expr(value);
+        let effect_target = self.effect_alias_target(value, ty.as_ref());
         let final_ty = if let Some(te) = ty {
             let declared = self.resolve_type_expr(te);
             // E029: same undeclared-Named annotation check as Let.
@@ -217,6 +259,9 @@ impl Checker {
         self.env.define_var(name, final_ty);
         self.env.mutable_vars.insert(sym(name));
         self.env.var_lambda_depth.insert(sym(name), self.env.lambda_depth);
+        if let Some(target) = effect_target {
+            self.env.record_effect_alias(name, target);
+        }
     }
 
     /// `ast::Stmt::Assign` arm of [`Self::check_stmt`]: the Unit-mutator
@@ -226,6 +271,12 @@ impl Checker {
     fn check_stmt_assign(&mut self, stmt: &mut ast::Stmt) {
         let ast::Stmt::Assign { name, value, .. } = stmt else { unreachable!() };
         let val_ty = self.infer_expr(value);
+        // #3274: `var g = pure_fn; g = rd` — the var now may hold `rd`.
+        if let Some(target) = self.effect_fn_value_target(value)
+            && self.env.lookup_var(name).is_some_and(|t| !matches!(resolve_ty(t, &self.uf), Ty::Fn { is_effect: true, .. }))
+        {
+            self.env.record_effect_alias(name, target);
+        }
         self.check_stmt_assign_unify(name, &val_ty, value);
         self.check_stmt_assign_immutable(name);
         self.check_stmt_assign_escape(name);
