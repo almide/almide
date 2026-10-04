@@ -1,6 +1,7 @@
 # ADR-0027: The effect surface — `effect[...]` bounds, `pure fn`, a versioned manifest, declared-only `Abort`, fail-closed externs, and one category registry
 
-- **Status**: Proposed (draft for review, 2026-10-03). Nothing here is
+- **Status**: Proposed (draft for review, 2026-10-03; brought up to develop
+  5d89bc220 on 2026-10-04). Nothing here is
   implemented. Each section ends with a **Ruling** line for the reviewer.
 - **Date**: 2026-10-03
 - **Scope**: the six questions ADR-0026 left open — §1 surface syntax for a
@@ -20,17 +21,17 @@
 
 ## Findings that stand on their own
 
-These were found while surveying and are defects today, independent of how
-the questions below are ruled. Each is filed.
+These were found while surveying on 2026-10-03 and filed as issues. Status
+as of develop 5d89bc220 (2026-10-04) is in the last column.
 
-| # | Finding | Where |
-|---|---|---|
-| F1 (#3245) | A plain-`fn` `@extern` counts as pure in category inference; nothing in the pass reads `@extern`. `tests/licm_extern_test.rs` patched the same hole for LICM only. | `pass_effect_inference.rs`, `effect.rs` |
-| F2 (#3246) | `random.*` is never inferred: `module_to_effect` has no arm that yields `Rand`. `path` and `url` (pure) are classified `IO` / `Net`; `process` is classified `Env`. | `pass_effect_inference.rs:23-31` |
-| F3 (#3247) | An unknown name in `[permissions].allow` is dropped silently; a list of only unknown names (the doc comment's `"Log"`) enforces with nothing allowed. `--profile critical --allow` rejects unknown names — the two paths disagree. | `src/cli/mod.rs:69-78`, `src/cli/check.rs:372-381`, `src/project.rs:77-83`, `src/main.rs:892` |
-| F4 (#3248) | `io.read_byte`, `io.read_n_bytes` and `process.args` are plain `fn` but read stdin / argv. ADR-0022 admits writes and aborts in a plain `fn`, "never reads". `env.args` is `effect fn`; `process.args` is not. | `stdlib/io.almd:28,32`, `stdlib/process.almd:20`, `stdlib/env.almd:24` |
-| F5 (#3249) | `docs/specs/effect-system.md` lists a `Log` category backed by a module that does not exist; `docs/diagnostics/E085.md` points to a `--profile critical` section of `docs/specs/cli.md` that does not exist. | as named |
-| F6 (#3250) | `@pure` is in `KNOWN_ATTRS` with no semantics and no uses: a model that writes it today is silently unchecked. | `crates/almide-frontend/src/attr_vocab.rs:39` |
+| # | Finding | Where | Status |
+|---|---|---|---|
+| F1 (#3245) | A plain-`fn` `@extern` counts as pure in category inference; nothing in the pass reads `@extern`. `tests/licm_extern_test.rs` patched the same hole for LICM only. | `pass_effect_inference.rs`, `effect.rs` | open — fixed in #3255 (extern = ⊤ of today's six; held for §5) |
+| F2 (#3246) | `random.*` is never inferred: `module_to_effect` has no arm that yields `Rand`. `path` and `url` (pure) are classified `IO` / `Net`; `process` is classified `Env`. | `pass_effect_inference.rs:23-31` | open — fixed in #3255 (one gated per-module table) |
+| F3 (#3247) | An unknown name in `[permissions].allow` is dropped silently; a list of only unknown names (the doc comment's `"Log"`) enforces with nothing allowed. `--profile critical --allow` rejects unknown names — the two paths disagree. | `src/cli/mod.rs:69-78`, `src/cli/check.rs:372-381`, `src/project.rs:77-83`, `src/main.rs:892` | **closed by #3252**: one matcher (`Effect::ALL`), unknown name is an error on its manifest line with a did-you-mean, shared with `--profile critical` |
+| F4 (#3248) | `io.read_byte`, `io.read_n_bytes` and `process.args` are plain `fn` but read stdin / argv. ADR-0022 admits writes and aborts in a plain `fn`, "never reads". `env.args` is `effect fn`; `process.args` is not. | `stdlib/io.almd:28,32`, `stdlib/process.almd:20`, `stdlib/env.almd:24` | open — fixed in #3255 (the three become `effect fn`; interface diff: breaking) |
+| F5 (#3249) | `docs/specs/effect-system.md` lists a `Log` category backed by a module that does not exist; `docs/diagnostics/E085.md` points to a `--profile critical` section of `docs/specs/cli.md` that does not exist. | as named | **closed by #3252** |
+| F6 (#3250) | `@pure` is in `KNOWN_ATTRS` with no semantics and no uses: a model that writes it today is silently unchecked. | `crates/almide-frontend/src/attr_vocab.rs:39` | open — fixed in #3255 (`@pure` checked as `{}`, E092) |
 
 ## 1. Surface syntax for a declared bound
 
@@ -141,18 +142,32 @@ effects = 1                              # registry version; pins what each pare
 allow = ["FS.read", "Net", "IO.stdout"]  # [] = deny all, ["*"] = every leaf of version 1
 ```
 
-- **No `effects` key = legacy**: today's meaning exactly (empty = everything,
-  old names), plus a warning, and `almide fix` rewrites it by a fixed table
-  (`IO` → `["FS", "IO"]`, `[]` → `["*"]`). Meaning changes only through a
-  visible edit.
+- **No `effects` key = legacy**: develop's meaning exactly — the six names
+  `IO Net Env Time Rand Fan`, empty = everything, and (since #3252) an
+  unknown name is an error on its line with a did-you-mean. Plus a warning,
+  and `almide fix` rewrites it by a fixed table (`IO` → `["FS", "IO"]`,
+  `[]` → `["*"]`). Meaning changes only through a visible edit.
+- **Leaf names need the key.** `FS.read` and the other ADR-0026 names are
+  accepted only under `effects = 1`. Today they are unknown names and
+  refused: porta's `allow = ["FS.read", "FS.write", "IO", "Env", "Time",
+  "Net"]` has failed on develop since #3252. Until this section lands, porta
+  is fixed by writing the six legacy names; afterwards, by `effects = 1`.
 - **With `effects`**: omitting `allow` is an error; `[]` is deny all; `"*"`
   is all leaves of that version (one spelling — no `all = true`); an unknown
   or misspelt name is an error with a did-you-mean.
 - Raising `effects` is a one-line edit and `check` prints the leaves each
   parent gained. A registry version bumps when a leaf is added under an
   existing parent.
-- `--profile critical --allow` takes the same names (F3); `Process` is
-  accepted as a legacy alias of `Proc` with a warning.
+- `--profile critical --allow` takes the same names; #3252 already shares the
+  matcher and the refusal text. `Process` is accepted as a legacy alias of
+  `Proc` with a warning.
+- **Resource lists are a second axis.** `[permissions] proc = ["git",
+  "cargo"]` (ADR-0025) names *which* commands may start, checked statically
+  and by the embedded host; it is not a category and is not versioned by
+  `effects`. Under `effects = 1`, a `proc` list without `Proc` in `allow` is
+  an error (it grants nothing). Any later resource list (filesystem roots,
+  network hosts) takes `proc`'s shape: one key per category, values are
+  resources.
 - **Later stage** (ADR-0026 D3 order): per-dependency grants and an effect
   summary in the lock.
 
@@ -256,6 +271,11 @@ pure fn fnv(b: Bytes) -> Int = _                     // {} = recorded assumption
 
 - An extern without a bound is ⊤ — all leaves, Flix's rule. A plain-`fn`
   extern without `pure` is a warning for one release, then an error (F1).
+- **Already built, held for this ruling**: #3255 makes an `@extern` ⊤ over
+  today's six categories. Measured on porta, its 45 externs leave 69
+  functions needing `Rand` and `Fan` in `allow`. Under this section porta
+  would instead bound its externs (`effect[...]` / `pure`) and keep a narrow
+  `allow`; until the syntax lands, widening porta's `allow` is the only fix.
 - A bound or `pure` on an extern is an **assumption**, never a proof.
   `almide check --effects --trusted` lists every one with its location, like
   Lean's `#print axioms`. The D3 lock records each dependency's assumption
@@ -272,20 +292,27 @@ assumptions; plain-`fn` extern warned then rejected.
 
 ## 6. One category vocabulary
 
-**Today** there are five code vocabularies and three doc vocabularies, and
-none matches ADR-0026:
+**On 2026-10-03** there were five code vocabularies and three doc
+vocabularies, and none matched ADR-0026. #3252 merged the two
+`[permissions]` matchers and the critical-profile refusal into one
+(`Effect::ALL`, `src/project.rs::allowed_effects`); #3255 (open) replaces
+module-name inference with one gated per-module table in `effect.rs`. The
+remaining spellings:
 
 | Spelling | Where | Problem |
 |---|---|---|
-| `IO Net Env Time Rand Fan` | `effect.rs`, inference, `[permissions]` match (two copies) | `IO` means files; `Rand` never inferred; unknown names dropped |
+| `IO Net Env Time Rand Fan` | `effect.rs` (`Effect::ALL`), inference, `[permissions]` matcher | `IO` means files and streams; one matcher since #3252; `Rand` inferred once #3255 lands |
 | `IO Net Env Time Rand Process` | `--profile critical --allow`, help, hint (`bounded.rs:118-125`) | `Process` vs `Proc`; grants by module (`duration` is pure but granted under Time) |
 | `Stdout Entropy CliArgs FsRead FsWrite Clock Stdin` | MIR witness (`lib_b.rs:520-585`), `certificate.rs:477-494` | manifest `IO` maps to stdin+stdout+files; no stderr, Net, Fan |
 | `STDOUT … STDIN NET FOREIGN` | wasm witness (`cert_project.rs:55-101`) | `PURE_BOUND = {STDOUT, STDIN}` contradicts ADR-0022 (F4) |
 | 13 bits `FS.read=0 … IO.stderr=12` | `docs/wasm/capability-system.md`, roadmap | numbering conflicts with the witness; no `Abort`; `IO` includes files |
-| seven incl. `Log` | `docs/specs/effect-system.md` | phantom module (F5) |
+| command names | `[permissions] proc` (ADR-0025) | a resource list, not a category — see §3 |
 
 **Proposal: one versioned registry, everything else derived or gated.**
 
+- #3255's gated per-module table is the right first step and the seed of the
+  registry: its gate already refuses a module with no row and an intrinsic
+  whose classification disagrees with its declaring function.
 - One file — `stdlib/effects.toml` — holds the registry version, the leaves,
   the four parents and their leaves per version, and a **per-operation**
   contract row for every stdlib function that has a category. It sits next
@@ -320,7 +347,8 @@ above as the first version.
 
 ## Order of work if accepted
 
-1. F1–F6 (#3245–#3250), independent of the rulings.
+1. F1–F6 (#3245–#3250): #3247 / #3249 done (#3252); the rest in #3255,
+   which waits on the §5 ruling and a porta fix.
 2. §6 registry + generation/gates, with today's six names mapped (no
    behaviour change).
 3. §3 manifest key, unknown-name errors, `almide fix` migration.
