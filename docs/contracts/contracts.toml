@@ -3353,6 +3353,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/declaration_forms.almd", class = "fixture" },
   { path = "spec/wasm_cross/top_let_closure_record.almd", class = "fixture" },
+  { path = "spec/wasm_cross/top_let_rc_value.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-261"

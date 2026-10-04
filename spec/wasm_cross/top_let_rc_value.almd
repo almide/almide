@@ -1,0 +1,62 @@
+// @contract: C-260
+// #3287: a top-level `let` whose value holds a `Bytes` (directly, in a record
+// field, in a variant payload, in a list of records, in an option of a
+// record, in a map) is a declaration form that must run identically on both
+// targets. Native `Bytes` is an `Rc`-backed value, and native used to put
+// every such value in a `static LazyLock`, which needs `Sync`: rustc refused
+// the generated Rust (E0277) while the wasm leg printed the answer. A value
+// the static can hold raw (`Bytes`, `List[Bytes]`) stays a shared static; the
+// rest live in a per-thread lazy slot, still evaluated once per thread, and
+// every read site is unchanged.
+type Blob = { data: Bytes, n: Int }
+
+type Packet = | Raw(Bytes) | Empty
+
+type Nest = { blob: Blob, tag: String }
+
+let EMPTY: Blob = { data: bytes.new(0), n: 0 }
+
+let RAW: Bytes = bytes.from_list([1, 2, 3])
+
+let LIST: List[Bytes] = [
+  bytes.from_list([4]),
+  bytes.from_list([5, 6])
+]
+
+let PACKET: Packet = Raw(bytes.from_list([7, 8, 9, 10]))
+
+let NEST: Nest = { blob: { data: bytes.from_list([1]), n: 1 }, tag: "t" }
+
+let BLOBS: List[Blob] = [
+  { data: bytes.from_list([2, 2]), n: 2 }
+]
+
+let MAYBE: Blob? = some({ data: bytes.from_list([3, 3, 3]), n: 3 })
+
+let BY_NAME: Map[String, Bytes] = map.from_list([
+  ("a", bytes.from_list([1, 2]))
+])
+
+fn packet_len(p: Packet) -> Int = match p {
+  Raw(b) => bytes.len(b),
+  Empty => 0,
+}
+
+fn total(bs: List[Bytes]) -> Int = bs |> list.map((b) => bytes.len(b)) |> list.fold(
+  0,
+  (a, x) => a + x,
+)
+
+effect fn main() -> Unit = {
+  println(int.to_string(EMPTY.n + bytes.len(EMPTY.data)))
+  println(int.to_string(bytes.len(RAW)))
+  println(int.to_string(total(LIST)))
+  println(int.to_string(packet_len(PACKET)))
+  println("${bytes.len(NEST.blob.data)}${NEST.tag}")
+  println(int.to_string(total(BLOBS |> list.map((b) => b.data))))
+  match MAYBE {
+    some(b) => println(int.to_string(bytes.len(b.data))),
+    none => println("none"),
+  }
+  println(int.to_string(bytes.len(map.get(BY_NAME, "a") ?? bytes.new(0))))
+}
