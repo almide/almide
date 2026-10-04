@@ -178,8 +178,8 @@ const MODULE_STATIC_PREFIX: &str = "ALMIDE_RT_";
 ///
 /// The two prefixes differ before any user text starts, and within each
 /// form the user text decodes uniquely, so no two inputs share an output.
-/// (`origin` is the module ident the frontend already flattened with
-/// `.` → `_`; that spelling is shared with module FUNCTION names.)
+/// (`origin` is the module's `almide_base::names::module_ident`, itself
+/// injective over module paths — `a.b` and `a_b` are two origins, #3338.)
 pub fn static_name(vi: &VarInfo) -> String {
     match &vi.module_origin {
         Some(origin) => format!("{MODULE_STATIC_PREFIX}{}_{origin}_{}", origin.len(), vi.name.as_str()),

@@ -120,7 +120,7 @@ fn lift_module_effect_fn_signatures(
     let mod_name = module.versioned_name
         .map(|v| v.to_string())
         .unwrap_or_else(|| module.name.to_string());
-    let mod_ident = mod_name.replace('.', "_");
+    let mod_ident = almide_base::names::module_ident(&mod_name);
     for (fi, func) in module.functions.iter_mut().enumerate() {
         if should_lift_effect_fn_ret(func, wrap_non_result) {
             let orig = std::mem::replace(&mut func.ret_ty, Ty::Unit);

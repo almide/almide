@@ -63,7 +63,7 @@ pub(super) fn mangle_ty(ty: &Ty) -> String {
             // called by one spelling and defined under another (an unlinked
             // wall misread as a registry gap, #1496). Sanitize at the single
             // mint point every consumer shares.
-            let name = name.replace('.', "_");
+            let name = almide_base::names::qualified_ident(name);
             if args.is_empty() { name }
             else {
                 let arg_strs: Vec<String> = args.iter().map(mangle_ty).collect();

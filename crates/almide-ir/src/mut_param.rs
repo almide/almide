@@ -675,7 +675,7 @@ fn collect_mut_fns(program: &IrProgram) -> MutFns {
                 mut_fns.insert(
                     format!(
                         "almide_rt_{}_{}",
-                        m.name.as_str().replace('.', "_"),
+                        almide_base::names::module_ident(m.name.as_str()),
                         func.name.as_str().replace('.', "_")
                     ),
                     entry.clone(),

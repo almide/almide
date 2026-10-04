@@ -52,10 +52,9 @@ fn collect_effect_fn_names(program: &IrProgram) -> std::collections::HashSet<Sym
         }
     }
     for module in &program.modules {
-        let mod_ident = module.versioned_name
+        let mod_ident = almide_base::names::module_ident(&module.versioned_name
             .map(|v| v.to_string())
-            .unwrap_or_else(|| module.name.to_string())
-            .replace('.', "_");
+            .unwrap_or_else(|| module.name.to_string()));
         for func in &module.functions {
             if func.is_effect {
                 // Module-QUALIFIED plus the mangled runtime symbol
