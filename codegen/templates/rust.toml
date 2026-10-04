@@ -558,10 +558,11 @@ template = "#[allow(non_upper_case_globals)]\nstatic {name}: std::sync::LazyLock
 
 # A top-level let whose value holds a closure (`Rc<dyn Fn>`, not `Sync`) cannot
 # live in a `static LazyLock` (#2537). The value lives in a per-thread lazy
-# slot instead, evaluated once per thread; a zero-sized `static` handle derefs
-# to it, so every read site renders `(*NAME)` exactly as for `top_let_lazy`.
+# slot instead — field `{name}` of the program's one `__ALMIDE_TLS` struct
+# (#3347), evaluated once per thread; a zero-sized `static` handle derefs to
+# it, so every read site renders `(*NAME)` exactly as for `top_let_lazy`.
 [top_let_thread_lazy]
-template = "#[allow(non_camel_case_types)]\nstruct __AlmideTl_{name};\nimpl std::ops::Deref for __AlmideTl_{name} {{\n    type Target = {type};\n    fn deref(&self) -> &{type} {{\n        thread_local! {{ static SLOT: &'static {type} = std::boxed::Box::leak(std::boxed::Box::new({value})); }}\n        SLOT.with(|v| *v)\n    }}\n}}\n#[allow(non_upper_case_globals)]\nstatic {name}: __AlmideTl_{name} = __AlmideTl_{name};"
+template = "#[allow(non_camel_case_types)]\nstruct __AlmideTl_{name};\nimpl std::ops::Deref for __AlmideTl_{name} {{\n    type Target = {type};\n    fn deref(&self) -> &{type} {{\n        __ALMIDE_TLS.with(|g| *g.{name}.get_or_init(|| std::boxed::Box::leak(std::boxed::Box::new({value}))))\n    }}\n}}\n#[allow(non_upper_case_globals)]\nstatic {name}: __AlmideTl_{name} = __AlmideTl_{name};"
 
 [top_var]
 template = "thread_local! { #[allow(non_upper_case_globals)] static {name}: std::cell::RefCell<{type}> = std::cell::RefCell::new({value}); }"
