@@ -604,14 +604,16 @@ fn topo_sort_emit(
     emitted
 }
 
-/// Alias-resolution key: (normalized module origin, UPPERCASE name). The
-/// use-site synthetic Var carries the SCREAMING_CASE spelling and a
-/// dot-normalized origin; the declaration keeps the source name and the
-/// lowering-set origin. Normalizing both sides makes the match total.
+/// Alias-resolution key: (normalized module origin, EXACT name). The
+/// use-site synthetic Var and the declaration both carry the source
+/// spelling; only the origin is normalized (dot vs underscore, case). The
+/// name must not be case-folded: `var buf` and `let BUF` in one module are
+/// two top-lets, and a folded key resolved every use of either to whichever
+/// was declared last (#3316).
 fn alias_key(vi: &VarInfo) -> (String, String) {
     (
         vi.module_origin.as_deref().unwrap_or("").to_uppercase().replace('.', "_"),
-        vi.name.as_str().to_uppercase(),
+        vi.name.as_str().to_string(),
     )
 }
 
