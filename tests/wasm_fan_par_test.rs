@@ -24,7 +24,9 @@ fn run(dir: &std::path::Path, extra: &[&str], dbg: bool) -> Run {
     let mut cmd = Command::new(almide());
     cmd.current_dir(dir).args(["run", "m.almd"]).args(extra);
     if dbg {
-        cmd.env("ALMIDE_DBG_FAN", "1");
+        // the parallel route is what these tests pin: the cost model (#3341)
+        // would keep their small chunks sequential
+        cmd.env("ALMIDE_DBG_FAN", "1").env("ALMIDE_FAN_COST_OFF", "1");
     }
     let out = cmd.output().expect("spawn almide");
     Run {
@@ -81,7 +83,7 @@ effect fn main() -> Unit = {
 }
 "#;
     let route = same_on_every_leg(src);
-    assert!(route.contains("__fan_site_0: served on separate instances (12 elements)"), "{route}");
+    assert!(route.contains("__fan_site_0: served on separate instances (12 elements"), "{route}");
 }
 
 #[test]
@@ -97,7 +99,7 @@ fn a_scalar_chunk_map_with_float_and_bool_captures_is_served() {
 }
 "#;
     let route = same_on_every_leg(src);
-    assert!(route.contains("served on separate instances (9 elements)"), "{route}");
+    assert!(route.contains("served on separate instances (9 elements"), "{route}");
 }
 
 #[test]
@@ -174,7 +176,7 @@ fn a_chunk_map_in_a_sibling_module_is_served() {
         let mut cmd = Command::new(almide());
         cmd.current_dir(dir.path()).args(["run", "src/main.almd"]).args(extra);
         if dbg {
-            cmd.env("ALMIDE_DBG_FAN", "1");
+            cmd.env("ALMIDE_DBG_FAN", "1").env("ALMIDE_FAN_COST_OFF", "1");
         }
         cmd.output().expect("spawn almide")
     };
@@ -183,7 +185,7 @@ fn a_chunk_map_in_a_sibling_module_is_served() {
     assert_eq!(String::from_utf8_lossy(&native.stdout), "0,1,4,9,16,25\n");
     assert_eq!(wasm.stdout, native.stdout);
     let route = String::from_utf8_lossy(&wasm.stderr);
-    assert!(route.contains("served on separate instances (6 elements)"), "{route}");
+    assert!(route.contains("served on separate instances (6 elements"), "{route}");
 }
 
 const REUSE_SRC: &str = r#"fn sq(i: Int, k: Int) -> Int = {
@@ -279,6 +281,81 @@ effect fn main() -> Unit = {
 }
 "#;
     let route = same_on_every_leg(src);
-    assert!(route.contains("served on separate instances (8 elements)"), "{route}");
+    assert!(route.contains("served on separate instances (8 elements"), "{route}");
     assert!(route.contains("not served (a chunk failed), sequential"), "{route}");
+}
+
+/// The route the cost model picks on its own (no ablation): the embedded
+/// run's debug stderr, after checking native and wasm agree with and
+/// without `ALMIDE_FAN_COST_OFF`.
+fn route_by_cost_model(src: &str, args: &[&str]) -> String {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("m.almd"), src).expect("write");
+    let go = |wasm: bool, off: bool, dbg: bool| {
+        let mut cmd = Command::new(almide());
+        cmd.current_dir(dir.path()).args(["run", "m.almd"]);
+        if wasm {
+            cmd.args(["--target", "wasm"]);
+        }
+        cmd.arg("--").args(args);
+        if off {
+            cmd.env("ALMIDE_FAN_COST_OFF", "1");
+        }
+        if dbg {
+            cmd.env("ALMIDE_DBG_FAN", "1");
+        }
+        cmd.output().expect("spawn almide")
+    };
+    let native = go(false, false, false);
+    assert!(native.status.success(), "{}", String::from_utf8_lossy(&native.stderr));
+    for (wasm, off) in [(false, true), (true, false), (true, true)] {
+        let o = go(wasm, off, false);
+        assert_eq!(o.stdout, native.stdout, "wasm={wasm} cost_off={off}");
+        assert_eq!(o.status.code(), native.status.code(), "wasm={wasm} cost_off={off}");
+    }
+    String::from_utf8_lossy(&go(true, false, true).stderr).into_owned()
+}
+
+const COST_SRC: &str = r#"import env
+
+fn work(i: Int, iters: Int) -> Int = {
+  var acc = 0
+  for j in 0..<iters {
+    acc = (acc + j * (i + 1)) % 1000003
+  }
+  acc
+}
+
+effect fn main() -> Unit = {
+  let iters = int.parse(list.get(env.args(), 0) ?? "10") ?? 10
+  for k in 0..<3 {
+    let rs = fan {
+      list.map(list.range(0, 8), (i) => work(i + k, iters))
+    }
+    println(list.join(list.map(rs, (x) => int.to_string(x)), ","))
+  }
+}
+"#;
+
+#[test]
+fn the_cost_model_keeps_a_cheap_chunk_map_sequential() {
+    // ~10 iterations per element: far below the measured break-even. The
+    // site's first offer goes parallel (no measurement yet); the next two
+    // know better.
+    let route = route_by_cost_model(COST_SRC, &["10"]);
+    let lines: Vec<&str> = route.lines().filter(|l| l.contains("__fan_site_0: served")).collect();
+    assert_eq!(lines.len(), 3, "{route}");
+    assert!(lines[0].contains("separate instances (8 elements"), "{route}");
+    assert!(lines[1..].iter().all(|l| l.contains("the cost model kept it sequential (8 elements)")), "{route}");
+}
+
+#[test]
+fn the_cost_model_runs_an_expensive_chunk_map_in_parallel() {
+    // ~3M iterations per element (milliseconds): far above the break-even,
+    // on any machine that has two cores.
+    if std::thread::available_parallelism().map_or(1, |p| p.get()) < 2 {
+        return;
+    }
+    let route = route_by_cost_model(COST_SRC, &["3000000"]);
+    assert_eq!(route.matches("served on separate instances (8 elements").count(), 3, "{route}");
 }
