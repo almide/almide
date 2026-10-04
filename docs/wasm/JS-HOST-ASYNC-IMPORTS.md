@@ -82,7 +82,13 @@ reach an async import, read from the shipped bytes (after the optional
 
 **5. Where JSPI is missing**, `init()` throws before instantiating. The error
 names the async imports and what is missing (`WebAssembly.Suspending /
-WebAssembly.promising`), and points at Node ≥ 24, Chrome ≥ 137 or workerd.
+WebAssembly.promising`), and points at Node ≥ 24.20, Chrome ≥ 137 or workerd.
+Under Node it also names the running version: 24.0 through 24.19 share a V8
+with JSPI off by default, and only 24.20 turns it on (#3362). Managed "Node 24"
+runtimes can lag behind; on 2026-10-04, Google Cloud Run functions' `nodejs24`
+was 24.19.0. On those versions, `--experimental-wasm-jspi` works only on the
+`node` command line: Node refuses it in `NODE_OPTIONS`, and
+`v8.setFlagsFromString` at run time does not install the API.
 Nothing is attempted half-way. A module without `--async-import` produces the
 same glue as before, byte for byte, and runs where it ran before.
 
@@ -121,5 +127,6 @@ fixture's `// @host-flags:` line passes the flag. The fixture checks:
 - flat memory;
 - the refusal without JSPI.
 
-The gate needs a node with JSPI, so CI's JS host job runs Node 24. Locally an
-older node skips that fixture with a warning.
+The gate needs a node with JSPI, so CI's JS host job runs Node 24 (setup-node
+resolves the latest 24.x, which is past 24.20). Locally a node without JSPI skips
+that fixture with a warning.
