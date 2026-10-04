@@ -598,3 +598,41 @@ fn a_merge_stored_into_a_container_holds_no_reference() {
     assert!(cert_all_balanced(&ownership_certificate(&released)));
     assert_eq!(verify_ownership(&released), Ok(()));
 }
+
+/// #3279: an arm rebinds a `var` slot onto a `Dup` of a payload loaded before
+/// the branch (the C-132 write-back), the other arm keeps the slot's old
+/// object. Both paths leave the slot holding one reference; per object the
+/// arms disagree, and neither object is arm-fresh. The certificate's slot line
+/// balances; `verify_ownership` moves the slot's reference onto a slot object
+/// and agrees. Rebinding without releasing the old object is rejected by both.
+#[test]
+fn a_slot_rebound_onto_a_pre_branch_payload_balances() {
+    let v = ValueId;
+    let case = |release_old: bool| {
+        let mut ops = vec![
+            Op::Alloc { dst: v(0), repr: heap(), init: Init::Opaque },
+            Op::Prim { kind: PrimKind::LoadHandle, dst: Some(v(1)), args: vec![v(0)] },
+            Op::Alloc { dst: v(2), repr: heap(), init: Init::Opaque },
+            Op::ConstInt { dst: v(9), value: 1 },
+            Op::IfThen { cond: v(9), dst: None },
+            Op::Else { val: None },
+            Op::Dup { dst: v(3), src: v(1) },
+        ];
+        if release_old {
+            ops.push(Op::DropListStr { v: v(2) });
+        }
+        ops.extend([
+            Op::SetLocal { local: v(2), src: v(3) },
+            Op::EndIf { val: None },
+            Op::Drop { v: v(2) },
+            Op::Drop { v: v(0) },
+        ]);
+        func(ops)
+    };
+    let ok = case(true);
+    assert!(cert_all_balanced(&ownership_certificate(&ok)), "{}", ownership_certificate(&ok));
+    assert_eq!(verify_ownership(&ok), Ok(()));
+    let leak = case(false);
+    assert!(!cert_all_balanced(&ownership_certificate(&leak)));
+    assert!(verify_ownership(&leak).is_err());
+}

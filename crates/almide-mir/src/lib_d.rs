@@ -159,3 +159,37 @@ impl OwnershipScan {
         }
     }
 }
+
+// ── a slot rebound onto two pre-existing objects (#3279) ──
+// A `SetLocal` rebinds a slot inside one arm (`DropListStr xs; SetLocal xs =
+// dup(child)`, the C-132 write-back of a `mut` var): on that path the slot
+// holds a reference to an object that already existed at the `IfThen` (a
+// payload loaded from a carrier), on the other path its old object. Each path
+// keeps exactly one reference in the slot, but per object the arms disagree.
+// When both objects existed at the `IfThen` neither can be renamed onto the
+// other (#3031 renames only an arm-fresh one), so the slot's reference moves
+// off both onto a slot object of its own, the certificate's slot line.
+
+impl OwnershipScan {
+    fn move_slot_reference(
+        &mut self,
+        slot: ValueId,
+        (then_object, else_object): (ValueId, ValueId),
+        then_rc: &mut BTreeMap<ValueId, i64>,
+        then_obj: &mut BTreeMap<ValueId, ValueId>,
+    ) {
+        let held_then = then_rc.get(&then_object).copied().unwrap_or(0);
+        let held_else = self.rc.get(&else_object).copied().unwrap_or(0);
+        if held_then < 1 || held_else < 1 {
+            return;
+        }
+        self.slot_objects += 1;
+        let own = ValueId(u32::MAX - self.slot_objects);
+        then_rc.insert(then_object, held_then - 1);
+        then_rc.insert(own, 1);
+        then_obj.insert(slot, own);
+        self.rc.insert(else_object, held_else - 1);
+        self.rc.insert(own, 1);
+        self.object_of.insert(slot, own);
+    }
+}
