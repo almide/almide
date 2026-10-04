@@ -179,20 +179,20 @@ fn render_program_top_lets(ctx: &RenderContext, program: &IrProgram, parts: &mut
             ctx.var_table.get(tl.var).name.as_str()
         ));
         use almide_ir::top_let_storage::TopLetStorage as Tls;
-        let name_upper = info.static_name.as_str();
+        let static_name = info.static_name.as_str();
         let mut rendered = match info.storage {
             Tls::Cell =>
-                format!("thread_local! {{ static {}: std::cell::Cell<{}> = std::cell::Cell::new({}); }}", name_upper, ty_str, val_str),
+                format!("thread_local! {{ #[allow(non_upper_case_globals)] static {}: std::cell::Cell<{}> = std::cell::Cell::new({}); }}", static_name, ty_str, val_str),
             Tls::RcRefCell =>
-                format!("thread_local! {{ static {}: std::cell::RefCell<std::rc::Rc<{}>> = std::cell::RefCell::new(std::rc::Rc::new({})); }}", name_upper, ty_str, val_str),
+                format!("thread_local! {{ #[allow(non_upper_case_globals)] static {}: std::cell::RefCell<std::rc::Rc<{}>> = std::cell::RefCell::new(std::rc::Rc::new({})); }}", static_name, ty_str, val_str),
             Tls::Const | Tls::Lazy { .. } => {
                 let construct = match info.storage {
                     Tls::Const => "top_let_const",
                     _ if top_let_is_thread_local(ctx, &tl.ty) => "top_let_thread_lazy",
                     _ => "top_let_lazy",
                 };
-                ctx.templates.render_with(construct, None, &[], &[("name", name_upper), ("type", ty_str.as_str()), ("value", val_str.as_str())])
-                    .unwrap_or_else(|| format!("const {} = {};", name_upper, val_str))
+                ctx.templates.render_with(construct, None, &[], &[("name", static_name), ("type", ty_str.as_str()), ("value", val_str.as_str())])
+                    .unwrap_or_else(|| format!("const {} = {};", static_name, val_str))
             }
         };
         if let Some(ref doc) = tl.doc {
