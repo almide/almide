@@ -2,6 +2,185 @@
 source: tests/codegen_snapshot_test.rs
 expression: code
 ---
+pub fn almide_rt_fan_map<A, B>(
+    items: Vec<A>,
+    f: std::rc::Rc<dyn Fn(A) -> Result<B, String>>,
+) -> Result<Vec<B>, String> {
+    let mut out = Vec::with_capacity(items.len());
+    let mut first_err: Option<String> = None;
+    for item in items {
+        match (f(item), &first_err) {
+            (Ok(v), None) => out.push(v),
+            (Err(e), None) => first_err = Some(e),
+            _ => {}
+        }
+    }
+    match first_err {
+        Some(e) => Err(e),
+        None => Ok(out),
+    }
+}
+
+// `fan.map`'s PARALLEL twin (#2044). RustLowering's fan routing (native only) routes a
+// `fan.map` here when its callback is a PURE lambda LITERAL whose element,
+// result and captured types are all Send-safe scalars — Int/Float/Bool/Unit,
+// the sized numerics, and tuples/records of those. Anything carrying an `Rc`
+// (List/Map/Set/Bytes/String, closure values) and every EFFECT callback (its
+// side effects must stay in list order) keeps the sequential `almide_rt_fan_map`.
+// The callback is a raw `impl Fn` (the box pass leaves fan args unboxed), so
+// a non-Send capture the pass missed is a loud rustc error, never a race.
+//
+// Observably identical to the sequential twin: every element runs (ADR-0024
+// D1 — no worker stops at an Err), results land in pre-sized slots by index,
+// and the map's Err is the LOWEST-INDEX Err in LIST ORDER. No "big list"
+// cut-off (a 64-chunk fan over 14 cores would never clear a size threshold):
+// the cost model (#3341, list.rs `almide_rt_fan_plan`) goes parallel only
+// when the site's measured time per element is worth the offer's cost.
+// `ALMIDE_FAN_SEQUENTIAL=1` forces the sequential path — the ablation knob.
+//
+// Every element writes into its own output timeline (ADR-0024 D5), flushed in
+// list order. Every element runs, so no Err cuts the group: a trap in element k
+// waits for the elements below it and discards everything above (ADR-0024 D6).
+pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result<B, String> + Send + Sync>(
+    items: Vec<A>,
+    f: F,
+) -> Result<Vec<B>, String> {
+    let mut slots: Vec<Option<Result<B, String>>> = (0..items.len()).map(|_| None).collect();
+    if items.len() < 2 || almide_rt_list_par_sequential() {
+        for (slot, item) in slots.iter_mut().zip(items) {
+            *slot = Some(f(item));
+        }
+        return almide_fan_map_settle_slots(slots);
+    }
+    // #3341: the cost model (list.rs `almide_rt_fan_plan`) decides from the
+    // site's last measured time per element whether this offer is worth a
+    // parallel run; every offer records what its elements took.
+    let site = almide_rt_fan_map_par::<A, B, F> as fn(Vec<A>, F) -> Result<Vec<B>, String> as usize;
+    let n = items.len();
+    let workers = almide_rt_fan_plan(n, almide_fan_estimate(site));
+    let busy = std::sync::atomic::AtomicU64::new(0);
+    if workers < 2 {
+        almide_fan_busy(&busy, || {
+            for (slot, item) in slots.iter_mut().zip(items) {
+                *slot = Some(f(item));
+            }
+        });
+        almide_fan_record(site, busy.into_inner() as u128, n);
+        return almide_fan_map_settle_slots(slots);
+    }
+    let chunk_size = n.div_ceil(workers);
+    // The group flushes this thread's stdout first: a runtime abort on a worker
+    // exits without reaching this thread's buffer (C-197, see rust.toml fan_expr).
+    let group = almide_fan_group(n);
+    std::thread::scope(|s| {
+        for (chunk_idx, (chunk, out)) in items.chunks(chunk_size).zip(slots.chunks_mut(chunk_size)).enumerate() {
+            let (f, busy) = (&f, &busy);
+            let group = &group;
+            let base = chunk_idx * chunk_size;
+            s.spawn(move || {
+                for (i, (slot, item)) in out.iter_mut().zip(chunk).enumerate() {
+                    let _elem = almide_fan_enter(group, base + i);
+                    *slot = Some(almide_fan_busy(busy, || f(item.clone())));
+                }
+            });
+        }
+    });
+    almide_fan_record(site, busy.into_inner() as u128, n);
+    almide_fan_map_settle_slots(slots)
+}
+
+// The map's result from its filled slots: the ok values in list order, or the
+// LOWEST-INDEX Err (every element ran — ADR-0024 D1).
+fn almide_fan_map_settle_slots<B>(slots: Vec<Option<Result<B, String>>>) -> Result<Vec<B>, String> {
+    let mut out = Vec::with_capacity(slots.len());
+    for slot in slots {
+        match slot {
+            Some(Ok(v)) => out.push(v),
+            Some(Err(e)) => return Err(e),
+            // Every worker fills every slot of its chunk.
+            None => unreachable!("fan.map_par: an element that never ran"),
+        }
+    }
+    Ok(out)
+}
+
+// `fan.race` returns the FIRST thunk in LIST ORDER to SETTLE — i.e. thunk[0]'s
+// `Result` (Ok or Err), DETERMINISTIC (not wall-clock fastest, which is neither
+// reproducible nor expressible on the single-threaded WASM target). It differs
+// from `fan.any`, which SKIPS failures to find the first Ok: race surfaces
+// thunk[0]'s Err. Since fan thunks are pure (capturing a `var` is a compile
+// error), the non-head thunks are observably irrelevant, so evaluating only the
+// head is equivalent to "start all, take the first to settle". An empty list is
+// a defined Err, never a panic. EFFECTFUL: the caller's auto-`?` routes a head
+// Err to the unified main-error exit, byte-identical to the wasm path.
+pub fn almide_rt_fan_race<T>(
+    thunks: Vec<impl Fn() -> Result<T, String>>,
+) -> Result<T, String> {
+    match thunks.into_iter().next() {
+        Some(thunk) => thunk(),
+        None => Err("fan.race: no candidates".to_string()),
+    }
+}
+
+// `fan.any` tries the thunks in LIST ORDER and returns the FIRST `Ok`
+// (deterministic — NOT wall-clock fastest). If every candidate fails it returns
+// a defined `Err`, never panicking or trapping. This is intentionally NOT
+// `fan.race` (which is parallel + wall-clock nondeterministic and stays as-is).
+pub fn almide_rt_fan_any<T>(
+    thunks: Vec<impl Fn() -> Result<T, String>>,
+) -> Result<T, String> {
+    for thunk in &thunks {
+        if let Ok(val) = thunk() {
+            return Ok(val);
+        }
+    }
+    Err("fan.any: all candidates failed".to_string())
+}
+
+// `fan.any_map` -- the T2-3 MAPPER form: apply `f` to the items IN LIST ORDER
+// and return the FIRST `Ok`; an element's Err disqualifies that element only.
+// All-fail (and the empty list) is the ledger-constant Err. Deterministic --
+// the early cut is structural (later elements are never evaluated).
+pub fn almide_rt_fan_any_map<A, B>(
+    items: Vec<A>,
+    f: std::rc::Rc<dyn Fn(A) -> Result<B, String>>,
+) -> Result<B, String> {
+    for item in items {
+        if let Ok(v) = f(item) {
+            return Ok(v);
+        }
+    }
+    Err("fan.any: all candidates failed".to_string())
+}
+
+// One output timeline per thunk, flushed in list order (ADR-0024 D5). The
+// group flushes this thread's stdout first: a runtime abort on a worker exits
+// without reaching this thread's buffer (C-197, see rust.toml fan_expr).
+pub fn almide_rt_fan_settle<T: Send + 'static>(
+    thunks: Vec<impl Fn() -> Result<T, String> + Send + Sync>,
+) -> Vec<Result<T, String>> {
+    let group = almide_fan_group(thunks.len());
+    let group = &group;
+    std::thread::scope(|s| {
+        let handles: Vec<_> = thunks
+            .iter()
+            .enumerate()
+            .map(|(i, thunk)| s.spawn(move || {
+                let _elem = almide_fan_enter(group, i);
+                thunk()
+            }))
+            .collect();
+        handles
+            .into_iter()
+            .map(almide_fan_join)
+            .collect()
+    })
+}
+
+
+// list extern — Rust native implementations
+// Signatures match TOML templates: &Vec for read-only, Vec for consuming
+
 pub fn almide_rt_list_len<T>(xs: &[T]) -> i64 { xs.len() as i64 }
 pub fn almide_rt_list_is_empty<T>(xs: &[T]) -> bool { xs.is_empty() }
 pub fn almide_rt_list_first<A: Clone>(xs: &[A]) -> Option<A> { xs.first().cloned() }
@@ -239,17 +418,96 @@ pub fn almide_rt_list_par_sequential() -> bool {
 }
 
 /// Worker count for `len` items: one per available core, never more than `len`.
+/// `ALMIDE_FAN_THREADS=N` (read once) caps it further — the thread-scaling
+/// lever #3003 measures both legs with; the result is the same at any N.
 pub fn almide_rt_list_par_workers(len: usize) -> usize {
+    static CAP: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    let cap = *CAP.get_or_init(|| {
+        std::env::var("ALMIDE_FAN_THREADS").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&n| n > 0).unwrap_or(usize::MAX)
+    });
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-    cpus.max(1).min(len.max(1))
+    cpus.max(1).min(cap).min(len.max(1))
+}
+
+// #3341 — THE FAN COST MODEL, one formula on both legs (the embedded wasm
+// host's copy is crates/almide-wasm-run/src/host_fan.rs `plan`; the two
+// constants are pinned to docs/benchmarks/fan-cost-model.txt by
+// tests/fan_cost_model_test.rs). Every parallel twin is a SITE (one per
+// callback type — the monomorphised twin's own address), and every offer at
+// a site records the compute time its elements took (inside the elements,
+// so spawn latency is not counted). A site's FIRST offer goes parallel, as
+// before #3341; later offers estimate each element at the site's last
+// measured time `t`. A parallel offer on W workers COSTS `OFFER + W·WORKER`
+// (thread spawn, join, the group's bookkeeping — measured) and SAVES
+// `t·(n − ⌈n/W⌉)`; the W with the largest positive net saving wins, and none
+// = the offer runs here, sequentially. Output is the same either way (C-321).
+// Timing element 0 first and deciding after it was measured and rejected: it
+// serialises one whole chunk, ~2x wall time when n ≈ workers (fannkuchredux).
+pub const ALMIDE_FAN_OFFER_NS: u128 = 30_000;
+pub const ALMIDE_FAN_WORKER_NS: u128 = 9_000;
+
+/// The worker count for an offer of `n` elements whose site last measured
+/// `per_elem` ns per element (`None` = its first offer): >= 2 = go parallel
+/// on that many workers, 1 = stay sequential.
+pub fn almide_rt_fan_plan(n: usize, per_elem: Option<u128>) -> usize {
+    // `ALMIDE_FAN_COST_OFF` (read once): every offer goes parallel — the
+    // pre-#3341 behaviour, the ablation the crossover is measured against.
+    static OFF: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let off = *OFF.get_or_init(|| std::env::var("ALMIDE_FAN_COST_OFF").map(|v| !v.is_empty() && v != "0").unwrap_or(false));
+    let Some(t) = per_elem.filter(|_| !off) else { return almide_rt_list_par_workers(n) };
+    let mut best = (1usize, 0u128);
+    for w in 2..=almide_rt_list_par_workers(n) {
+        let saved = t.saturating_mul((n - n.div_ceil(w)) as u128);
+        let cost = ALMIDE_FAN_OFFER_NS + ALMIDE_FAN_WORKER_NS * w as u128;
+        if saved > cost && saved - cost > best.1 {
+            best = (w, saved - cost);
+        }
+    }
+    best.0
+}
+
+fn almide_fan_history() -> &'static std::sync::Mutex<std::collections::HashMap<usize, u128>> {
+    static H: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<usize, u128>>> = std::sync::OnceLock::new();
+    H.get_or_init(Default::default)
+}
+
+/// The site's last measured time per element, if it has run before.
+fn almide_fan_estimate(site: usize) -> Option<u128> {
+    almide_fan_history().lock().ok()?.get(&site).copied()
+}
+
+/// Record an offer: `busy` ns of element compute over `count` elements.
+fn almide_fan_record(site: usize, busy: u128, count: usize) {
+    if count > 0 {
+        if let Ok(mut h) = almide_fan_history().lock() {
+            h.insert(site, busy / count as u128);
+        }
+    }
+}
+
+/// Time `g` and add it to `busy` (the workers' element compute).
+fn almide_fan_busy<R>(busy: &std::sync::atomic::AtomicU64, g: impl FnOnce() -> R) -> R {
+    let t0 = std::time::Instant::now();
+    let r = g();
+    busy.fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+    r
 }
 
 pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + Send + Sync>(xs: Vec<A>, f: F) -> Vec<B> {
     if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.into_iter().map(&f).collect();
     }
-    let chunk_size = xs.len().div_ceil(almide_rt_list_par_workers(xs.len()));
-    let mut slots: Vec<Option<B>> = (0..xs.len()).map(|_| None).collect();
+    let site = almide_rt_list_par_map::<A, B, F> as fn(Vec<A>, F) -> Vec<B> as usize;
+    let n = xs.len();
+    let workers = almide_rt_fan_plan(n, almide_fan_estimate(site));
+    let busy = std::sync::atomic::AtomicU64::new(0);
+    if workers < 2 {
+        let out = almide_fan_busy(&busy, || xs.into_iter().map(&f).collect());
+        almide_fan_record(site, busy.into_inner() as u128, n);
+        return out;
+    }
+    let chunk_size = n.div_ceil(workers);
+    let mut slots: Vec<Option<B>> = (0..n).map(|_| None).collect();
     // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
     almide_stdout_flush();
     // The workers work for the enclosing fan element: a trap on one waits for
@@ -257,16 +515,19 @@ pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + S
     let sink = almide_fan_current();
     std::thread::scope(|s| {
         for (chunk, out) in xs.chunks(chunk_size).zip(slots.chunks_mut(chunk_size)) {
-            let f = &f;
+            let (f, busy) = (&f, &busy);
             let sink = sink.clone();
             s.spawn(move || {
                 almide_fan_adopt(sink);
-                for (slot, x) in out.iter_mut().zip(chunk) {
-                    *slot = Some(f(x.clone()));
-                }
+                almide_fan_busy(busy, || {
+                    for (slot, x) in out.iter_mut().zip(chunk) {
+                        *slot = Some(f(x.clone()));
+                    }
+                });
             });
         }
     });
+    almide_fan_record(site, busy.into_inner() as u128, n);
     slots.into_iter().map(|b| b.expect("list.par_map: every slot is written by its worker")).collect()
 }
 
@@ -274,9 +535,17 @@ pub fn almide_rt_list_par_filter<A: Send + Sync + Clone, F: Fn(A) -> bool + Send
     if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.into_iter().filter(|x| f(x.clone())).collect();
     }
-    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-    let chunk_size = (xs.len() + cpus - 1) / cpus;
-    let chunks: Vec<Vec<A>> = xs.chunks(chunk_size).map(|c| c.to_vec()).collect();
+    let site = almide_rt_list_par_filter::<A, F> as fn(Vec<A>, F) -> Vec<A> as usize;
+    let n = xs.len();
+    let workers = almide_rt_fan_plan(n, almide_fan_estimate(site));
+    let busy = std::sync::atomic::AtomicU64::new(0);
+    if workers < 2 {
+        let out = almide_fan_busy(&busy, || xs.into_iter().filter(|x| f(x.clone())).collect());
+        almide_fan_record(site, busy.into_inner() as u128, n);
+        return out;
+    }
+    let chunk_size = n.div_ceil(workers);
+    let chunks: Vec<&[A]> = xs.chunks(chunk_size).collect();
     let mut results: Vec<Option<Vec<A>>> = (0..chunks.len()).map(|_| None).collect();
     // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
     almide_stdout_flush();
@@ -286,84 +555,77 @@ pub fn almide_rt_list_par_filter<A: Send + Sync + Clone, F: Fn(A) -> bool + Send
     std::thread::scope(|s| {
         let mut handles = Vec::new();
         for chunk in &chunks {
-            let f = &f;
+            let (f, busy) = (&f, &busy);
             let sink = sink.clone();
             handles.push(s.spawn(move || {
                 almide_fan_adopt(sink);
-                chunk.iter().filter(|x| f((*x).clone())).cloned().collect::<Vec<A>>()
+                almide_fan_busy(busy, || chunk.iter().filter(|x| f((*x).clone())).cloned().collect::<Vec<A>>())
             }));
         }
         for (i, handle) in handles.into_iter().enumerate() {
             results[i] = Some(handle.join().unwrap());
         }
     });
+    almide_fan_record(site, busy.into_inner() as u128, n);
     results.into_iter().flatten().flatten().collect()
+}
+
+/// `any` (`stop_on` = true) / `all` (`stop_on` = false): does some element's
+/// verdict equal `stop_on`. Records the elements it actually evaluated.
+fn almide_fan_search<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(site: usize, xs: &[A], f: &F, stop_on: bool) -> bool {
+    let busy = std::sync::atomic::AtomicU64::new(0);
+    let seen = std::sync::atomic::AtomicUsize::new(0);
+    let look = |x: &A| {
+        seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        f(x.clone()) == stop_on
+    };
+    let workers = almide_rt_fan_plan(xs.len(), almide_fan_estimate(site));
+    let hit = if workers < 2 {
+        almide_fan_busy(&busy, || xs.iter().any(look))
+    } else {
+        let chunk_size = xs.len().div_ceil(workers);
+        let hit = std::sync::atomic::AtomicBool::new(false);
+        // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
+        almide_stdout_flush();
+        // The workers work for the enclosing fan element: a trap on one waits for
+        // the elements below it (ADR-0024 D6).
+        let sink = almide_fan_current();
+        std::thread::scope(|s| {
+            for chunk in xs.chunks(chunk_size) {
+                let (hit, busy, look) = (&hit, &busy, &look);
+                let sink = sink.clone();
+                s.spawn(move || {
+                    almide_fan_adopt(sink);
+                    almide_fan_busy(busy, || {
+                        for x in chunk {
+                            if hit.load(std::sync::atomic::Ordering::Relaxed) { return; }
+                            if look(x) {
+                                hit.store(true, std::sync::atomic::Ordering::Relaxed);
+                                return;
+                            }
+                        }
+                    });
+                });
+            }
+        });
+        hit.load(std::sync::atomic::Ordering::Relaxed)
+    };
+    almide_fan_record(site, busy.into_inner() as u128, seen.into_inner());
+    hit
 }
 
 pub fn almide_rt_list_par_any<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(xs: &[A], f: F) -> bool {
     if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.iter().any(|x| f(x.clone()));
     }
-    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-    let chunk_size = (xs.len() + cpus - 1) / cpus;
-    let chunks: Vec<&[A]> = xs.chunks(chunk_size).collect();
-    let found = std::sync::atomic::AtomicBool::new(false);
-    // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
-    almide_stdout_flush();
-    // The workers work for the enclosing fan element: a trap on one waits for
-    // the elements below it (ADR-0024 D6).
-    let sink = almide_fan_current();
-    std::thread::scope(|s| {
-        for chunk in &chunks {
-            let f = &f;
-            let found = &found;
-            let sink = sink.clone();
-            s.spawn(move || {
-                almide_fan_adopt(sink);
-                for x in *chunk {
-                    if found.load(std::sync::atomic::Ordering::Relaxed) { return; }
-                    if f(x.clone()) {
-                        found.store(true, std::sync::atomic::Ordering::Relaxed);
-                        return;
-                    }
-                }
-            });
-        }
-    });
-    found.load(std::sync::atomic::Ordering::Relaxed)
+    almide_fan_search(almide_rt_list_par_any::<A, F> as fn(&[A], F) -> bool as usize, xs, &f, true)
 }
 
 pub fn almide_rt_list_par_all<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(xs: &[A], f: F) -> bool {
     if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.iter().all(|x| f(x.clone()));
     }
-    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-    let chunk_size = (xs.len() + cpus - 1) / cpus;
-    let chunks: Vec<&[A]> = xs.chunks(chunk_size).collect();
-    let failed = std::sync::atomic::AtomicBool::new(false);
-    // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
-    almide_stdout_flush();
-    // The workers work for the enclosing fan element: a trap on one waits for
-    // the elements below it (ADR-0024 D6).
-    let sink = almide_fan_current();
-    std::thread::scope(|s| {
-        for chunk in &chunks {
-            let f = &f;
-            let failed = &failed;
-            let sink = sink.clone();
-            s.spawn(move || {
-                almide_fan_adopt(sink);
-                for x in *chunk {
-                    if failed.load(std::sync::atomic::Ordering::Relaxed) { return; }
-                    if !f(x.clone()) {
-                        failed.store(true, std::sync::atomic::Ordering::Relaxed);
-                        return;
-                    }
-                }
-            });
-        }
-    });
-    !failed.load(std::sync::atomic::Ordering::Relaxed)
+    !almide_fan_search(almide_rt_list_par_all::<A, F> as fn(&[A], F) -> bool as usize, xs, &f, false)
 }
 
 // ── Mutable operations ──
