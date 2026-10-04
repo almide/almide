@@ -152,9 +152,41 @@ fn a_break_ends_the_iteration() {
 }
 
 #[test]
-fn an_exit_inside_a_loop_body_withdraws() {
+fn an_exit_inside_a_loop_body_is_a_path_of_the_holder_of_each_object() {
+    // #2758. xs (frame-held) is released by the exit: the exiting iteration's
+    // account of it is one more frame path (`id`, the same as the loop-free
+    // one); t, born in the iteration, ends its activation path at the exit.
+    let exit = |rel: &[Ev]| {
+        let mut log = vec![Birth(0), Op(0, 'i'), bind(3, 0), LoopOpen, DecOld(4), Birth(1), Op(1, 'i'), bind(4, 1), Open];
+        log.extend_from_slice(rel);
+        log.extend([Exit, Arm, Close, LoopClose, LOp(3, 'd'), LOp(4, 'd')]);
+        cert(&log, 2)
+    };
+    assert_eq!(exit(&[LOp(3, 'd'), LOp(4, 'd')]), "id\n\nid\n");
+    // An exit that forgets xs: the frame path through it does not reach 0;
+    // one that forgets t: its iteration path does not.
+    assert_eq!(exit(&[LOp(4, 'd')]), "{i|id}\n\nid\n");
+    assert_eq!(exit(&[LOp(3, 'd')]), "id\n\n{i|id}\n");
+    // A share taken in the exiting iteration is on the frame path too.
     let log = [Birth(0), Op(0, 'i'), bind(3, 0), LoopOpen, LOp(3, 'a'), Exit, LoopClose, LOp(3, 'd')];
-    assert_eq!(render(&log, 1), Err("loop-exit".into()));
+    assert_eq!(cert(&log, 1), "{ia|id}\n");
+}
+
+#[test]
+fn an_exit_from_a_nested_loop_is_lifted_level_by_level() {
+    // xs (frame) and u (outer iteration) both released by an exit in the
+    // inner body, after the outer iteration shared xs once (`a`, moved on).
+    let log = [
+        Birth(0), Op(0, 'i'), bind(3, 0),
+        LoopOpen, LOp(3, 'a'), LOp(3, 'm'), DecOld(4), Birth(1), Op(1, 'i'), bind(4, 1),
+        LoopOpen, Open, LOp(3, 'd'), LOp(4, 'd'), Exit, Arm, Close, LoopClose,
+        LoopClose,
+        LOp(3, 'd'), LOp(4, 'd'),
+    ];
+    // xs: the frame's exit path runs through both iterations (`i am d`); its
+    // outer activation keeps only the path that does not exit (`am`). u:
+    // its outer iteration has the exit path (`id`) and the natural end (`id`).
+    assert_eq!(cert(&log, 2), "{iamd|id}\nam\n\nid\n");
 }
 
 #[test]
