@@ -97,6 +97,10 @@ pub struct Project {
 pub struct NativeDep {
     pub name: String,
     pub spec: String,
+    /// The platform key of `[target.<key>.native-deps]` (#3350) — a
+    /// `cfg(...)` expression or a target triple, as written and validated —
+    /// or `None` for `[native-deps]`, which every target gets.
+    pub target: Option<String>,
 }
 
 /// `almide.toml` as the `toml` crate reads it (#3253). The manifest used to
@@ -165,6 +169,52 @@ impl Manifest<'_> {
             .unwrap_or_default();
         keys.sort();
         keys.into_iter().filter_map(|(_, k)| values.get(&k).map(|v| (k, v.clone()))).collect()
+    }
+
+    /// Every `[target.<key>.native-deps]` entry (#3350), tables in file order
+    /// and entries in file order within each. A `<key>` Cargo would refuse,
+    /// a `[target.<key>]` table holding anything but `native-deps`, or a
+    /// `native-deps` that is not a table is refused on the line that writes it.
+    fn target_native_deps(&self, path: &Path, content: &str) -> Result<Vec<NativeDep>, String> {
+        let Some(target) = spanned_entry(&self.spans, "target") else { return Ok(Vec::new()) };
+        let Some(platforms) = target.get_ref().as_table() else {
+            return Err(located(path, content, target.span().start, "[target] must be a table of `[target.'cfg(...)'.native-deps]` tables"));
+        };
+        let mut keyed: Vec<_> = platforms.iter().collect();
+        keyed.sort_by_key(|(k, _)| k.span().start);
+        let mut out = Vec::new();
+        for (key, platform) in keyed {
+            let key_text = key.get_ref().to_string();
+            let at = key.span().start;
+            crate::cargo_cfg::validate_target_key(&key_text).map_err(|e| {
+                located(path, content, at, &format!(
+                    "invalid platform `{key_text}` in [target.'{key_text}'.native-deps]: {e}\n  \
+                     hint: write `cfg(...)` as Cargo does, e.g. [target.'cfg(target_os = \"android\")'.native-deps], or a target triple"
+                ))
+            })?;
+            let Some(tables) = platform.get_ref().as_table() else {
+                return Err(located(path, content, at, &format!("[target.'{key_text}'] must be a table holding `native-deps`")));
+            };
+            if let Some((sub, _)) = tables.iter().find(|(k, _)| k.get_ref().as_ref() != "native-deps") {
+                return Err(located(path, content, sub.span().start, &format!(
+                    "unknown table `{}` in [target.'{key_text}'] — only `native-deps` can be target-specific\n  \
+                     hint: write [target.'{key_text}'.native-deps]",
+                    sub.get_ref()
+                )));
+            }
+            let Some(deps) = spanned_entry(tables, "native-deps") else { continue };
+            let Some(deps) = deps.get_ref().as_table() else {
+                return Err(located(path, content, deps.span().start, &format!("[target.'{key_text}'.native-deps] must be a table")));
+            };
+            let values = self.values.get("target").and_then(|t| t.get(&key_text)).and_then(|t| t.get("native-deps"));
+            let mut entries: Vec<_> = deps.iter().map(|(k, _)| (k.span().start, k.get_ref().to_string())).collect();
+            entries.sort();
+            out.extend(entries.into_iter().filter_map(|(_, name)| {
+                let spec = values.and_then(|v| v.get(&name)).map(value_text)?;
+                Some(NativeDep { name, spec, target: Some(key_text.clone()) })
+            }));
+        }
+        Ok(out)
     }
 
     /// `[package].<key>` as text.
@@ -430,6 +480,7 @@ pub fn check_manifest(path: &Path, content: &str) -> Result<(), String> {
     check_manifest_duplicates(path, content)?;
     let manifest = read_manifest(path, content)?;
     manifest.permission_list(path, content, "proc")?;
+    manifest.target_native_deps(path, content)?;
     for (name, at) in manifest.permission_list(path, content, "allow")?.unwrap_or_default() {
         allowed_effects(std::slice::from_ref(&name)).map_err(|e| located(path, content, at, &e))?;
     }
@@ -468,11 +519,12 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
         .into_iter()
         .filter_map(|(name, value)| dependency_from(name, &value))
         .collect();
-    let native_deps = manifest
+    let mut native_deps: Vec<NativeDep> = manifest
         .entries_in_file_order("native-deps")
         .into_iter()
-        .map(|(name, value)| NativeDep { name, spec: value_text(&value) })
+        .map(|(name, value)| NativeDep { name, spec: value_text(&value), target: None })
         .collect();
+    native_deps.extend(manifest.target_native_deps(path, &content)?);
     Ok(Project {
         package,
         dependencies: anchor_relative_dep_paths(deps, &root),

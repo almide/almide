@@ -432,7 +432,7 @@ pub(crate) fn build_native_cached(
     // binary), so they are part of the key: the same rs_code built against
     // different [native-deps] must not collide on one cache entry.
     let dep_key = native_deps.iter()
-        .map(|d| format!("{}={}", d.name, d.spec))
+        .map(|d| format!("{}={}@{}", d.name, d.spec, d.target.as_deref().unwrap_or("")))
         .collect::<Vec<_>>()
         .join(",");
     // Everything copied INTO the crate besides `rs_code` — the package's and
