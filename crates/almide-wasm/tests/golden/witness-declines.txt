@@ -9,7 +9,6 @@ call-arg:Lambda:map.__fallible_map__Int_String_String_Int	1
 call:panic-arg	7
 callback:SpreadRecord	6
 caps:argv-in-plain-fn	8
-display	12
 forin-map	7
 heap-interp-part:Block	9
 heap-interp-part:UnwrapOr	6
@@ -18,7 +17,6 @@ heap-operand:OptionNone	3
 heap-operand:UnwrapOr	5
 interp-part:IndexAccess:non-list	2
 match-guard:binds	8
-named-op	11
 operand:IndexAccess:non-list	1
 pattern:list-rest	8
 payload:SpreadRecord	2
@@ -27,7 +25,6 @@ record:default	2
 rhs:Fan	8
 rhs:SpreadRecord	5
 rhs:Unwrap	10
-scan	3
 stmt:Expr:Unit	1
 stmt:Expr:Var	1
 stmt:MapInsert	10
