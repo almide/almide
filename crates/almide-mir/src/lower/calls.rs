@@ -749,43 +749,15 @@ pub(crate) fn is_inplace_mutator(module: &str, func: &str) -> bool {
         || (module == "string" && func == "clear")
 }
 
-/// Extracted from `LowerCtx::lower_pure_module_call_args` (codopsy8 complexity sweep): the
-/// admitted-EFFECTFUL stdlib call predicate — a pure, side-effect-free classification with
-/// no relation to the arg-lowering loop it used to sit above (which mutates `self` via
-/// `lift_lambda`/`ops.push`/etc — UNTOUCHED here). Verbatim.
-///
-/// `random.int` / `env.args` / `env.unix_timestamp` / `fs.read_text` / `fs.list_dir` /
-/// `fs.write` / `fs.mkdir_p` are the admitted EFFECTFUL stdlib calls: each is self-hosted
-/// (random_int.almd / env_args.almd / env_unix_timestamp.almd / fs_read_text.almd /
-/// fs_list_dir.almd / fs_write.almd / fs_mkdir_p.almd, linked here), so its prim floor
-/// (`prim.random_get` / `prim.args_get_list` / `prim.clock_time_get` / `prim.read_text_file`
-/// / `prim.read_dir` / `prim.write_text_file` / `prim.make_dir`) is in the program map and
-/// the transitive cap_witness counts its capability (Entropy / CliArgs / Clock / FsRead /
-/// FsRead / FsWrite / FsWrite) — UNLIKE a bodyless effectful intrinsic (which would
-/// contribute 0 caps = accept-but-unsafe, the reason is_pure walls the rest).
-/// `env.unix_timestamp` carries Capability::Clock — a DISTINCT cap (a clock read is neither
-/// a filesystem nor an entropy effect). `fs.mkdir_p` / `fs.remove_all` REUSE
-/// Capability::FsWrite (a mkdir / recursive remove IS a filesystem write). `io.print` REUSES
-/// Capability::Stdout (it self-hosts over the SAME prim.fd_write floor as println, no new
-/// prim). `io.read_line` carries Capability::Stdin — a DISTINCT cap (reading the operator's
-/// input stream is neither a write, a filesystem, an entropy, nor a clock effect). The
-/// caller is an `effect fn` (declares the host caps) so the `used ⊆ declared` checker
-/// verifies it; a pure caller is a frontend error.
-/// `random.choice` / `random.shuffle` self-host over the SAME prim.random_get floor
-/// (random_choice.almd / random_shuffle.almd — typed element variants selected in
-/// `list_heap_call_name`, unsupported elements route `_x` and wall at render), so the
-/// transitive cap_witness counts Entropy exactly like `random.int`.
+/// The admitted EFFECTFUL stdlib calls: exactly the rows of `crate::host_ops::HOST_OPS`
+/// (#3302 — one table, audited as a matrix by `tests/host_ops_contract.rs`). Each is
+/// lowered as an ordinary call and `cap_witness` counts its capabilities at the call
+/// site, so the witness never under-counts a host reach — on the native classifier,
+/// where no self-host body is linked, as much as on a program map that links one.
+/// A pure caller is a frontend error (E006), so the `used ⊆ declared` bound is an
+/// effect fn's.
 pub(crate) fn is_admitted_effectful_pure_module_call(module: &str, func: &str) -> bool {
-    // codopsy8 follow-up: the merged OR-chain still exceeded max-complexity on its own
-    // (cyc42, cog1 — a flat lookup table with no nesting, so splitting doesn't reduce
-    // real complexity, just brings each group under the per-function threshold). Split
-    // by capability FAMILY (entropy/env/clock, filesystem, stdio) — a pure text-move,
-    // no logic change: `||` across the 3 groups is identical to one flat OR-chain.
-    is_admitted_effectful_entropy_env_clock(module, func)
-        || is_admitted_effectful_fs(module, func)
-        || is_admitted_effectful_io(module, func)
-        // A host op (#2739): an ordinary call, its capability counted by cap_witness.
-        || crate::host_ops::host_op(module, func).is_some()
+    crate::host_ops::host_op(module, func).is_some()
 }
 
 /// Gate this `module.func` on purity: a pure call, one of the admitted effectful
@@ -812,53 +784,4 @@ fn admit_module_call_purity(module: &str, func: &str, args: &[IrExpr]) -> Result
     )))
 }
 
-/// The Entropy / CliArgs / Clock admitted calls, as a table.
-///
-/// - `random.int` / `choice` / `shuffle` / `float` — the entropy floor
-///   (`random_float.almd` → `prim.random_get`, `Capability::Entropy`).
-/// - `process.args` is argv[0]-inclusive CLI args (`std::env::args`), self-hosted
-///   over the SAME WASI args bridge as `env.args` (skip=0) —
-///   `Capability::CliArgs`.
-/// - `env.get` READS the process environment, also `Capability::CliArgs` (the Env
-///   profile's canonical cap: argv and environ are the same initial-state class).
-///   Self-hosted to `prim.env_get` (env_get.almd → the WASI environ `$env_get`
-///   floor), so its prim is in the program map and the transitive `cap_witness`
-///   counts CliArgs. Returns `Option[String]` (heap Option block).
-/// - `env.temp_dir` / `fs.temp_dir` are one temp-dir observable with two
-///   spellings (C-189), self-hosted to `$TMPDIR ?? "/tmp"` (the Go/Python WASI
-///   rule), so their reach is exactly `env.get`'s.
-/// - `env.unix_timestamp` / `env.millis` / `datetime.now` share the WASI
-///   wall-clock floor (clock_now.almd → `prim.clock_time_get`,
-///   `Capability::Clock`). All scalar returns.
-/// - `datetime.monotonic_ns` reaches the SAME prim with clock_id 1
-///   (CLOCK_MONOTONIC) instead of 0, so it carries the identical
-///   `Capability::Clock` and scalar-Int shape. It was the one datetime fn with
-///   no wasm body at all, which pushed every file touching it off the wasm leg.
-const ADMITTED_ENTROPY_ENV_CLOCK: &[(&str, &str)] = &[
-    ("random", "int"),
-    ("random", "choice"),
-    ("random", "shuffle"),
-    ("random", "float"),
-    ("process", "args"),
-    ("env", "args"),
-    ("env", "get"),
-    ("env", "temp_dir"),
-    ("fs", "temp_dir"),
-    ("env", "unix_timestamp"),
-    ("env", "millis"),
-    // `env.cwd` reads the PWD environment variable (the C-137 relative-path
-    // convention's cwd) — the SAME Capability::CliArgs env.get carries
-    // (env_cwd.almd composes over env.get).
-    ("env", "cwd"),
-    ("datetime", "now"),
-    ("datetime", "monotonic_ns"),
-];
-
-/// Extracted from `is_admitted_effectful_pure_module_call` (codopsy8 follow-up,
-/// group 1 of 3): the [`ADMITTED_ENTROPY_ENV_CLOCK`] table's membership test.
-fn is_admitted_effectful_entropy_env_clock(module: &str, func: &str) -> bool {
-    ADMITTED_ENTROPY_ENV_CLOCK.contains(&(module, func))
-}
-
-
-include!("calls_tail.rs");
+include!("calls_b.rs");
