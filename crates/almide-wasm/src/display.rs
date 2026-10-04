@@ -626,7 +626,7 @@ fn build_helper_body(
             deferred_ranges: &empty_ranges,
             metered: false,
             cells: &empty_cells,
-            moved_temp: None,
+            moves: Default::default(),
             region_repair: None,
             loop_ctl: None,
             hoisted_counts: HashMap::new(),

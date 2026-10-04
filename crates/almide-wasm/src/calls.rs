@@ -301,6 +301,9 @@ impl Emitter<'_> {
                         param_owned.get(k2).copied().unwrap_or(true) || !self.rc_droppable(w2)
                     });
                 let depth = self.borrowed_temps.len();
+                // #3337: the vars the write-back rebinds move in (writeback_move.rs).
+                let move_in = self.take_move_in(args, save.is_none() && !tail);
+                let mut moved_in: Vec<u32> = Vec::new();
                 let site = crate::witness::modes::site_begin();
                 for (k, (a, want)) in args.iter().zip(params).enumerate() {
                     // #2117: `build(acc + s, …)` at a self tail call in loop
@@ -322,6 +325,10 @@ impl Emitter<'_> {
                         self.modes_arg(want, true);
                         continue;
                     }
+                    if let Some(idx) = self.try_move_in_arg(&move_in, args, (i, k), want)? {
+                        moved_in.push(idx);
+                        continue;
+                    }
                     if !self.lower_mut_param_arg(a, param_mut.get(k).copied().unwrap_or(false))? {
                         self.lower(a, Some(want))?;
                     }
@@ -339,6 +346,7 @@ impl Emitter<'_> {
                         self.detach_global_mut_arg(a, i)?;
                     }
                 }
+                self.empty_moved_in(&moved_in);
                 crate::witness::modes::site_end(site, index);
                 let parked = self.borrowed_temps.len() > depth;
                 self.witness_raw_loop_back(loop_form_raw, &moved);
@@ -684,7 +692,7 @@ impl Emitter<'_> {
     /// Strings and maps fall through to the plain read inside
     /// `emit_read_mut_var_cow` (a string mutates functionally; a map has its
     /// own judge in map_inplace.rs).
-    fn lower_mut_param_arg(&mut self, a: &IrExpr, is_mut_param: bool) -> Result<bool, EmitError> {
+    pub(crate) fn lower_mut_param_arg(&mut self, a: &IrExpr, is_mut_param: bool) -> Result<bool, EmitError> {
         if !is_mut_param {
             return Ok(false);
         }
