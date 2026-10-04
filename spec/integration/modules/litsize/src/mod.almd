@@ -1,0 +1,5 @@
+// #3290: same field set as `litextent.Extent`, in another package once the
+// dependency-shaped leg re-homes it.
+type Size = { w: Float, h: Float }
+
+fn area(s: Size) -> Float = s.w * s.h

@@ -45,6 +45,7 @@ spec/integration/generics/generics_recursive_test.almd
 spec/integration/modules/cross_module_unit_effect_test.almd
 spec/integration/modules/vis_effect_test.almd
 spec/integration/qualified_ctor_names/src/main.almd
+spec/integration/record_literal_binding/src/main.almd
 spec/integration/same_leaf_submodules/src/main.almd
 spec/lang/block_comment_raw_string_test.almd
 spec/lang/closure_capturing_fn_wasm.almd
