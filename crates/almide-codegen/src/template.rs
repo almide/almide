@@ -240,7 +240,7 @@ fn parse_rule(t: &toml::Table) -> Option<TemplateRule> {
 
 /// Load Rust templates from embedded TOML
 pub fn rust_templates() -> TemplateSet {
-    load_from_toml("rust", include_str!("../../../codegen/templates/rust.toml"))
+    load_from_toml("rust", include_str!("../templates/rust.toml"))
 }
 
 /// Load built-in Rust templates (inline fallback — kept for reference)

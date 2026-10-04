@@ -139,7 +139,7 @@ Rust 経路が**2本に分裂**している:
 
 - **綺麗な所有権保存マッピング** = `crates/almide-mir/src/render_native.rs`(368行のデモ)。
   だが Vec<i64> 一律・CLI 未接続・`v0`/`v1` 番号ローカルで**レビュー不可グレード**。
-- **本番 Rust** = `crates/almide-codegen/src/walker/` + `codegen/templates/rust.toml`
+- **本番 Rust** = `crates/almide-codegen/src/walker/` + `crates/almide-codegen/templates/rust.toml`
   (v0/legacy)。イディオマティックで**レビュー可・DO-178C「ソースは可読」を満たす**が、
   **MIR-op ↔ Rust 片の対応オブジェクトが無く・v1 MIR で駆動されていない・未証明**。
 

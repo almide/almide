@@ -88,7 +88,7 @@ C-004 の EXCEPTION 節が過小評価されるのは、これで 2 度目でも
 
 | target | 基体 | 出どころ |
 |---|---|---|
-| native | OS スレッド（`std::thread::scope`） | `codegen/templates/rust.toml` `[fan_expr]` |
+| native | OS スレッド（`std::thread::scope`） | `crates/almide-codegen/templates/rust.toml` `[fan_expr]` |
 | wasm | 完全逐次（arm を inline 展開） | `crates/almide-mir/src/lower/desugar_fan.rs` |
 | interp | 完全逐次 | `crates/almide-interp/src/eval.rs` |
 
