@@ -635,19 +635,35 @@ fn collect_anon_from_stmt(stmt: &IrStmt, named: &RecordShapeIndex, seen: &mut Ha
 /// closure-carrying `Check` still derived Debug/PartialEq and the generated
 /// Rust did not compile). Mirror of `ty_blocks_eq_with`.
 pub(super) fn ty_has_fn_with(ty: &Ty, fn_blocked: &HashSet<String>) -> bool {
+    ty_holds_with(ty, fn_blocked, &|t| matches!(t, Ty::Fn { .. }))
+}
+
+/// True if `ty` mentions a `leaf` type anywhere — directly, nested in a
+/// container/tuple/record, or through a NAMED type of the precomputed
+/// transitive `blocked` set ([`compute_blocked_types`]).
+fn ty_holds_with(ty: &Ty, blocked: &HashSet<String>, leaf: &dyn Fn(&Ty) -> bool) -> bool {
+    if leaf(ty) {
+        return true;
+    }
     match ty {
-        Ty::Fn { .. } => true,
         Ty::Named(name, args) => {
-            fn_blocked.contains(name.as_str())
-                || args.iter().any(|t| ty_has_fn_with(t, fn_blocked))
+            blocked.contains(name.as_str())
+                || args.iter().any(|t| ty_holds_with(t, blocked, leaf))
         }
-        Ty::Tuple(elems) => elems.iter().any(|t| ty_has_fn_with(t, fn_blocked)),
-        Ty::Applied(_, args) => args.iter().any(|t| ty_has_fn_with(t, fn_blocked)),
+        Ty::Tuple(elems) | Ty::Applied(_, elems) => elems.iter().any(|t| ty_holds_with(t, blocked, leaf)),
         Ty::Record { fields } | Ty::OpenRecord { fields } => {
-            fields.iter().any(|(_, t)| ty_has_fn_with(t, fn_blocked))
+            fields.iter().any(|(_, t)| ty_holds_with(t, blocked, leaf))
         }
         _ => false,
     }
+}
+
+/// A leaf whose native value is `Rc`-backed, so neither `Send` nor `Sync`:
+/// a closure (`Rc<dyn Fn>`) and the `AlmideRcCow` value types `Bytes` /
+/// `Matrix` (#617, #3287).
+fn ty_is_rc_leaf(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    matches!(ty, Ty::Fn { .. } | Ty::Bytes | Ty::Matrix | Ty::Applied(TC::Matrix, _))
 }
 
 /// True if `ty` mentions a raw pointer anywhere — `*mut u8` has no `AlmideRepr`
@@ -660,26 +676,32 @@ pub(super) fn ty_has_raw_ptr(ty: &Ty) -> bool {
 /// value — fixed point over the whole decl set, exactly like
 /// `compute_eq_blocked_types`.
 pub(super) fn compute_fn_blocked_types(type_decls: &[IrTypeDecl]) -> HashSet<String> {
+    compute_blocked_types(type_decls, &|t| matches!(t, Ty::Fn { .. }))
+}
+
+/// The user-defined type names that transitively contain an `Rc`-backed leaf
+/// ([`ty_is_rc_leaf`]): a value of one is not `Sync`, so it cannot live in a
+/// `static LazyLock` (#3287).
+pub(super) fn compute_rc_blocked_types(type_decls: &[IrTypeDecl]) -> HashSet<String> {
+    compute_blocked_types(type_decls, &ty_is_rc_leaf)
+}
+
+/// Fixed point over the whole decl set: the type names whose fields hold a
+/// `leaf` type, directly or through another such named type.
+fn compute_blocked_types(type_decls: &[IrTypeDecl], leaf: &dyn Fn(&Ty) -> bool) -> HashSet<String> {
     let mut blocked: HashSet<String> = HashSet::new();
     loop {
         let mut changed = false;
         for td in type_decls {
             if blocked.contains(td.name.as_str()) { continue }
+            let holds = |t: &Ty| ty_holds_with(t, &blocked, leaf);
             let blocks = match &td.kind {
-                IrTypeDeclKind::Record { fields } => {
-                    fields.iter().any(|f| ty_has_fn_with(&f.ty, &blocked))
-                }
-                IrTypeDeclKind::Variant { cases, .. } => {
-                    cases.iter().any(|c| match &c.kind {
-                        IrVariantKind::Unit => false,
-                        IrVariantKind::Tuple { fields } => {
-                            fields.iter().any(|t| ty_has_fn_with(t, &blocked))
-                        }
-                        IrVariantKind::Record { fields } => {
-                            fields.iter().any(|f| ty_has_fn_with(&f.ty, &blocked))
-                        }
-                    })
-                }
+                IrTypeDeclKind::Record { fields } => fields.iter().any(|f| holds(&f.ty)),
+                IrTypeDeclKind::Variant { cases, .. } => cases.iter().any(|c| match &c.kind {
+                    IrVariantKind::Unit => false,
+                    IrVariantKind::Tuple { fields } => fields.iter().any(&holds),
+                    IrVariantKind::Record { fields } => fields.iter().any(|f| holds(&f.ty)),
+                }),
                 _ => false,
             };
             if blocks {
