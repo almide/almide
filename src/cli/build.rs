@@ -833,13 +833,7 @@ fn typecheck_wasm_program(file: &str, source_text: &str, program: &mut almide::a
 /// path), link, optimize, and monomorphize. Extracted verbatim.
 fn lower_and_link_wasm_ir(program: &almide::ast::Program, checker: &mut check::Checker, resolved: &mut resolve::ResolvedModules) -> Result<almide::ir::IrProgram, ()> {
     // Pre-register versioned names before root lowering
-    for (name, _, pkg_id, _) in &resolved.modules {
-        if let Some(pid) = pkg_id.as_ref() {
-            let base = pid.mod_name();
-            let v = if let Some(suffix) = name.strip_prefix(&pid.name) { format!("{}{}", base, suffix) } else { base };
-            checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(&v));
-        }
-    }
+    almide::wasm_leg::register_versioned_module_names(checker, &resolved.modules);
     let mut ir_program = almide::lower::lower_program(program, &checker.env, &checker.type_map);
 
     // Lower user modules to IR. Bundled stdlib modules (stdlib/<m>.almd) are
