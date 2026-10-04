@@ -37,6 +37,12 @@
 //! `is_pure(module)` needs no per-function table. (Per-function admission — e.g.
 //! the pure `datetime.add_days` inside a walled module — is a later refinement.)
 //!
+//! HOST OPS are the one effectful class admitted without a self-hosted prim
+//! floor: `env.set` / `env.sleep_ms` and the http client family
+//! ([`crate::host_ops`], #2739). They are certified as ordinary calls, and
+//! `cap_witness` counts each one's capability at the call site, so `used` stays
+//! complete without a body in the program map.
+//!
 //! HIGHER-ORDER calls are walled SEPARATELY in lowering (a pure module like `list`
 //! still has `list.map`, whose closure argument invokes user code with unmodelled
 //! capabilities) — see `lower::is_higher_order`. Purity here is necessary, not

@@ -340,8 +340,10 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         // `json.get_bool(v,k) ?? false`, `json.get_array(v,k) ?? []` and a `match` over any of them
         // EXECUTE (the typed-accessor sibling of json.get, the manifest/jsonrpc parser idiom root).
         // http.get_header is self-hosted (stdlib/http_response.almd) returning a real
-        // materialized Option[String] — a `match` over it EXECUTES.
-        "http" => matches!(func, "get_header"),
+        // materialized Option[String] — a `match` over it EXECUTES. `http.poll` is
+        // the one Option-returning host op (crate::host_ops, #2739): an ordinary
+        // call, so its result is a real Option block.
+        "http" => matches!(func, "get_header" | "poll"),
         "json" => matches!(
             func,
             "as_int" | "as_float" | "as_bool" | "as_string" | "get" | "as_array"

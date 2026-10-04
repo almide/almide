@@ -32,6 +32,7 @@ pub mod alias_safety;
 pub mod certificate;
 pub mod charge_probe;
 pub mod coown_names;
+pub mod host_ops;
 pub mod lower;
 pub mod mir_ops;
 pub(crate) mod mir_wellformed;

@@ -318,9 +318,15 @@ pub(crate) fn result_family(ty: &Ty) -> ResultFamily {
 /// membership means ONLY "materialized" — the layout family comes from
 /// [`result_family`] on the call's TYPE. (The two tables below survive as the
 /// merged set's storage; their split no longer carries family meaning.)
+///
+/// A host op (`crate::host_ops`, #2739) is a member: it is an ordinary call, so
+/// its result is a fresh owned block of its type's canonical layout, the same
+/// promise a user callee's return makes. Callers still key the family on the
+/// TYPE, so a Unit/String host op is unaffected.
 pub(crate) fn is_self_host_materialized_result_fn(module: &str, func: &str) -> bool {
     is_self_host_result_module_fn(module, func)
         || is_self_host_result_str_module_fn(module, func)
+        || crate::host_ops::host_op(module, func).is_some()
 }
 
 /// Is `ty` a `Result[Unit, String]` (the fs.write/fs.copy shape — no Ok payload, a String

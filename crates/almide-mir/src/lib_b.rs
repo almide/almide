@@ -564,6 +564,11 @@ pub enum Capability {
     /// un-witnessed (the checker REJECTS `used ⊄ allowed`); only an `effect fn` (which declares
     /// the host caps) may.
     Stdin,
+    /// Reaching the NETWORK — the `http` client host ops (`crate::host_ops`, #2739), the
+    /// manifest's `Net`. The eighth sandbox exit, distinct from every other one. A host op
+    /// has no prim floor in the program map, so `cap_witness` counts it at the `CallFn`
+    /// itself; a function that reaches it without declaring it is never caps-verified.
+    Net,
 }
 
 impl Capability {
@@ -571,7 +576,7 @@ impl Capability {
     /// proofs/CapabilityBound.v's checker is GENERIC over `list nat` (a `subset_check`,
     /// no per-capability enumeration), so it needs no edit to admit a new id — only
     /// this mapping must stay injective + stable (Stdout = 0, Entropy = 1, CliArgs = 2,
-    /// FsRead = 3, FsWrite = 4, Clock = 5, Stdin = 6).
+    /// FsRead = 3, FsWrite = 4, Clock = 5, Stdin = 6, Net = 7).
     pub const fn id(self) -> u32 {
         match self {
             Capability::Stdout => 0,
@@ -581,6 +586,7 @@ impl Capability {
             Capability::FsWrite => 4,
             Capability::Clock => 5,
             Capability::Stdin => 6,
+            Capability::Net => 7,
         }
     }
 }

@@ -65,7 +65,10 @@ fn the_merged_name_set_survives_the_historical_name_mangling_incidents() {
     }
     // Non-members stay out (the set still gates "materialized at all").
     assert!(!is_self_host_materialized_result_fn("fan", "nonexistent"));
-    assert!(!is_self_host_materialized_result_fn("http", "get"));
+    // A host op is an ordinary call (#2739): its result is materialized.
+    assert!(is_self_host_materialized_result_fn("http", "get"));
+    // An http fn that is not an admitted host op stays out.
+    assert!(!is_self_host_materialized_result_fn("http", "serve"));
 }
 
 #[test]
@@ -79,22 +82,13 @@ fn every_registry_result_fn_is_in_the_materialized_set() {
     // the pre-routing name the classify sites see) — or listed below.
     use crate::lower::is_self_host_materialized_result_fn;
     use crate::lower::registry_sig::{registered_call_names, registry_signature};
-    // http: every entry point needs a declared capability, and the call walls at
-    // that gate before any match could read its block — no corpus or user program
-    // reaches a match over these on the structural leg today. Admit them with the
-    // capability brick, not before.
+    // http: every client entry point is an admitted host op (crate::host_ops,
+    // #2739), an ordinary call whose result is materialized — none is listed.
     const NOT_YET: &[&str] = &[
-        "http.get_bytes",
-        "http.get_status",
-        "http.poll",
-        "http.request",
-        "http.request_bytes",
-        "http.request_status",
-        "http.wait",
         // process (#2589): these registry rows are the wasm legs' self-host
         // (stdlib/process_wasm.almd). The v1 lowering keeps treating a process
-        // Result as it did before the rows existed (untracked), exactly as for
-        // http above; admit them with the layout audit of their bodies, not before.
+        // Result as it did before the rows existed (untracked); admit them with
+        // the layout audit of their bodies, not before.
         "process.exec",
         "process.exec_attached",
         "process.exec_in",

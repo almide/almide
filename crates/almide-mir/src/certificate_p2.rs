@@ -535,14 +535,16 @@
     #[test]
     fn manifest_caps_refine_the_effect_bound_and_never_grant_a_pure_fn() {
         // The manifest vocabulary projects onto the registry: IO covers the
-        // console + filesystem caps, Rand → Entropy; unmodeled effects (Net)
-        // project to nothing (they cannot widen the bound).
+        // console + filesystem caps, Rand → Entropy, Net → Net (the http host
+        // ops, #2739); unmodeled effects (Fan) project to nothing (they cannot
+        // widen the bound).
         let allow = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
         assert_eq!(
             manifest_caps(&allow(&["IO"])),
             vec![Capability::Stdout, Capability::Stdin, Capability::FsRead, Capability::FsWrite]
         );
-        assert_eq!(manifest_caps(&allow(&["Rand", "Net"])), vec![Capability::Entropy]);
+        assert_eq!(manifest_caps(&allow(&["Rand", "Net"])), vec![Capability::Entropy, Capability::Net]);
+        assert_eq!(manifest_caps(&allow(&["Rand", "Fan"])), vec![Capability::Entropy]);
 
         // An effect fn's all-caps default is REFINED to the manifest…
         let mut eff = func(vec![]);
