@@ -100,6 +100,7 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
 }
 
 mod bytes;
+mod bytes_append;
 pub mod decline_site;
 mod imports;
 mod param_borrow;
