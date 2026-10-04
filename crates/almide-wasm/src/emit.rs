@@ -576,7 +576,11 @@ fn emit_program_pass(
                 ));
             }
             visited.extend(sub);
-            crate::host_exports::note_export(&export_name, table.infos[i].param_owned.clone());
+            crate::host_exports::note_export(
+                &export_name,
+                table.infos[i].param_owned.clone(),
+                crate::host_exports::export_ret(table.infos[i].ret, &types),
+            );
             export_fns.push((export_name, table.infos[i].wasm_index));
             export_owners.push(owner);
         }

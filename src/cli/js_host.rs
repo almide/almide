@@ -16,6 +16,11 @@
 //! - every `pub fn` becomes a wrapper marshalling `Int` ↔ `number` (range
 //!   checked at ±2^53), `Float`, `Bool`, `String` and `Unit`; any other type
 //!   is a compile-time refusal naming the function and the type;
+//! - an `effect fn` (or a declared `Result[T, String]`) returns a Result
+//!   block: its wrapper unwraps ok into `T` and throws `AlmideError` with the
+//!   err message (#3352). The wrapper follows the return ABI the emitter
+//!   records per export (`host_exports::export_rets`), and a record that
+//!   disagrees with the source type is a refusal, never a misread;
 //! - `main` is exposed as `run()`; `_start` is not called by `init`.
 //!
 //! The marshalling reads the module's OWN signatures (the wasm type section)
@@ -31,6 +36,7 @@
 use std::collections::BTreeMap;
 use almide_ir::IrProgram;
 use almide_lang::types::Ty;
+use almide_wasm::host_exports::{AbiKind, ExportRet};
 
 /// One function on the host boundary: an exported `pub fn` or an extern.
 #[derive(Debug, Clone)]
@@ -38,6 +44,9 @@ pub(crate) struct HostFn {
     pub name: String,
     pub params: Vec<(String, Ty)>,
     pub ret: Ty,
+    /// An `effect fn`: its wasm value is a `Result` block whatever `ret`
+    /// says (#3352).
+    pub is_effect: bool,
 }
 
 /// One `@extern(wasm, module, name)` import.
@@ -62,7 +71,16 @@ impl HostSurface {
     /// allocator/release exports and the glue's string helpers ship.
     pub(crate) fn needs_string_abi(&self) -> bool {
         let sigs = self.exports.iter().chain(self.externs.iter().map(|e| &e.sig));
-        sigs.flat_map(|f| f.params.iter().map(|(_, t)| t).chain(std::iter::once(&f.ret))).any(|t| matches!(t, Ty::String))
+        let carries_string = sigs.flat_map(|f| f.params.iter().map(|(_, t)| t).chain(std::iter::once(&f.ret))).any(|t| matches!(t, Ty::String));
+        // An unwrapped Result (#3352) reads its err message, a String, and
+        // releases the block through the module's release.
+        carries_string || self.exports.iter().any(returns_result)
+    }
+
+    /// Does any export's wrapper unwrap a `Result` (#3352)? Only then does
+    /// the glue carry `takeResult` and `AlmideError`.
+    fn unwraps_result(&self) -> bool {
+        self.exports.iter().any(returns_result)
     }
 
     pub(crate) fn of(program: &IrProgram) -> Self {
@@ -73,6 +91,7 @@ impl HostSurface {
                 name: name.to_string(),
                 params: f.params.iter().map(|p| (p.name.as_str().to_string(), p.ty.clone())).collect(),
                 ret: f.ret_ty.clone(),
+                is_effect: f.is_effect,
             };
             if let Some(a) = f.extern_attrs.iter().find(|a| a.target.as_str() == "wasm") {
                 s.externs.push(HostExtern {
@@ -118,6 +137,7 @@ impl HostSurface {
                     name: a.symbol.to_string(),
                     params: f.params.iter().map(|p| (p.name.as_str().to_string(), p.ty.clone())).collect(),
                     ret: f.ret_ty.clone(),
+                    is_effect: f.is_effect,
                 });
             }
             let Some(a) = f.extern_attrs.iter().find(|a| a.target.as_str() == "wasm") else { continue };
@@ -129,6 +149,7 @@ impl HostSurface {
                 name: f.name.as_str().to_string(),
                 params: f.params.iter().map(|p| (p.name.as_str().to_string(), p.ty.clone())).collect(),
                 ret: f.ret_ty.clone(),
+                is_effect: f.is_effect,
             };
             s.externs.push(HostExtern { module, import, sig });
         }
@@ -155,6 +176,25 @@ fn marshal_of(ty: &Ty) -> Option<Marshal> {
         Ty::Unit => Some(Marshal::Unit),
         _ => None,
     }
+}
+
+/// `Result[T, String]` → `T`'s type, for a declared-Result return.
+fn result_ok_ty(ty: &Ty) -> Option<&Ty> {
+    match ty {
+        Ty::Applied(c, args) if *c == almide_lang::types::constructor::TypeConstructorId::Result && args.len() == 2 && matches!(args[1], Ty::String) => Some(&args[0]),
+        _ => None,
+    }
+}
+
+/// Does the export's module function return a `Result` block the wrapper
+/// unwraps (#3352): an `effect fn` (always), or a declared `Result[T, String]`?
+fn returns_result(f: &HostFn) -> bool {
+    f.is_effect || result_ok_ty(&f.ret).is_some()
+}
+
+/// The JS-visible return type of an export: `T` of an unwrapped Result.
+fn visible_ret(f: &HostFn) -> &Ty {
+    result_ok_ty(&f.ret).unwrap_or(&f.ret)
 }
 
 fn ts_of(m: Marshal) -> &'static str {
@@ -362,11 +402,62 @@ fn check_marshallable(surface: &HostSurface) -> Result<(), String> {
                 return Err(refuse(&f.name, &format!("parameter `{p}`"), ty));
             }
         }
-        if marshal_of(&f.ret).is_none() {
+    }
+    // An export's visible return is its unwrapped `Result[T, String]`'s `T`
+    // (#3352); an extern's is its own.
+    let rets = surface.exports.iter().map(|f| (f, visible_ret(f))).chain(surface.externs.iter().map(|e| (&e.sig, &e.sig.ret)));
+    for (f, ret) in rets {
+        if marshal_of(ret).is_none() {
             return Err(refuse(&f.name, "the return type", &f.ret));
         }
     }
     Ok(())
+}
+
+/// How a wrapper turns the module's return into the JS value (#3352).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RetPlan {
+    /// The slot is the value.
+    Plain(Marshal),
+    /// The slot is a `Result` block: ok → the value, err → a thrown
+    /// `AlmideError` carrying the message.
+    Unwrap(Marshal),
+}
+
+fn abi_matches(k: &AbiKind, m: Marshal) -> bool {
+    matches!(
+        (k, m),
+        (AbiKind::Int, Marshal::Int) | (AbiKind::Float, Marshal::Float) | (AbiKind::Bool, Marshal::Bool) | (AbiKind::Str, Marshal::Str) | (AbiKind::Unit, Marshal::Unit)
+    )
+}
+
+/// The wrapper's return plan, from the return ABI the EMITTER recorded for
+/// the export — never guessed from the source type alone (#3352: an effect
+/// fn returning String was wrapped as a String and read its Result block as
+/// one). A record that disagrees with the source type, a Result whose err
+/// is not a String, or no record at all is a build-time refusal naming the
+/// function: never a wrapper that reads garbage.
+fn ret_plan(f: &HostFn, abi: Option<&ExportRet>) -> Result<RetPlan, String> {
+    let m = marshal_of(visible_ret(f)).expect("checked by check_marshallable");
+    let plan = match (abi, returns_result(f)) {
+        (Some(ExportRet::Void), false) if m == Marshal::Unit => Some(RetPlan::Plain(m)),
+        (Some(ExportRet::Value(k)), false) if abi_matches(k, m) => Some(RetPlan::Plain(m)),
+        (Some(ExportRet::Result(ok, AbiKind::Str)), true) if abi_matches(ok, m) => Some(RetPlan::Unwrap(m)),
+        _ => None,
+    };
+    plan.ok_or_else(|| {
+        let what = if f.is_effect { "effect fn" } else { "fn" };
+        format!(
+            "error: --host js cannot wrap the return of `{name}`: the {what} declares `{ty:?}` but the module returns {abi} — no wrapper would read it correctly (#3352)\n  \
+             hint: return Int, Float, Bool, String or Unit from `{name}` (an effect fn's err becomes a thrown AlmideError), or keep it off the host surface",
+            name = f.name,
+            ty = f.ret,
+            abi = match abi {
+                Some(a) => format!("{a:?}"),
+                None => "no recorded return ABI".to_string(),
+            },
+        )
+    })
 }
 
 /// The `wasi` object: one shim per `wasi_snapshot_preview1` import the
@@ -432,7 +523,7 @@ fn import_object_js(sigs: &WasmSigs, surface: &HostSurface) -> Result<String, St
 /// through the module's allocator; the callee owns the block iff its param
 /// is owned (the structural ownership table), and a borrowed block is the
 /// host's to release.
-fn wrapper_js(f: &HostFn, sig: &WasmSig, owned: &[bool]) -> Result<String, String> {
+fn wrapper_js(f: &HostFn, sig: &WasmSig, owned: &[bool], plan: RetPlan) -> Result<String, String> {
     let mut pre = Vec::new();
     let mut args = Vec::new();
     let mut post = Vec::new();
@@ -451,9 +542,13 @@ fn wrapper_js(f: &HostFn, sig: &WasmSig, owned: &[bool]) -> Result<String, Strin
         }
     }
     let call = format!("instance.exports.{}({})", f.name, args.join(", "));
-    let body = match (marshal_of(&f.ret).expect("checked"), sig.results.first()) {
-        (Marshal::Unit, _) | (_, None) => format!("    {call};\n"),
-        (m, Some(v)) => format!("    return {};\n", from_wasm(m, *v, &call, &f.name, true)),
+    let body = match (plan, sig.results.first()) {
+        (RetPlan::Unwrap(m), Some(Val::I32)) => format!("    return takeResult({call}, \"{}\", \"{}\");\n", result_kind(m), f.name),
+        (RetPlan::Unwrap(_), other) => {
+            return Err(format!("error: --host js cannot wrap `{}`: its Result block should be one i32 result, the module declares {other:?} (#3352)", f.name));
+        }
+        (RetPlan::Plain(Marshal::Unit), _) | (_, None) => format!("    {call};\n"),
+        (RetPlan::Plain(m), Some(v)) => format!("    return {};\n", from_wasm(m, *v, &call, &f.name, true)),
     };
     let names: Vec<&str> = f.params.iter().map(|(p, _)| p.as_str()).collect();
     let mut js = format!("\nexport function {}({}) {{\n  ready();\n{}", f.name, names.join(", "), pre.concat());
@@ -466,9 +561,20 @@ fn wrapper_js(f: &HostFn, sig: &WasmSig, owned: &[bool]) -> Result<String, Strin
     Ok(js)
 }
 
+/// The `kind` argument `takeResult` reads the ok slot with.
+fn result_kind(m: Marshal) -> &'static str {
+    match m {
+        Marshal::Int => "int",
+        Marshal::Float => "float",
+        Marshal::Bool => "bool",
+        Marshal::Str => "string",
+        Marshal::Unit => "unit",
+    }
+}
+
 fn signature_dts(f: &HostFn) -> String {
     let params: Vec<String> = f.params.iter().map(|(p, ty)| format!("{p}: {}", ts_of(marshal_of(ty).expect("checked")))).collect();
-    format!("({}) => {}", params.join(", "), ts_of(marshal_of(&f.ret).expect("checked")))
+    format!("({}) => {}", params.join(", "), ts_of(marshal_of(visible_ret(f)).expect("checked")))
 }
 
 /// The `Hooks` interface's `js` member: one entry per extern import.
@@ -489,6 +595,7 @@ pub(crate) fn generate(
     bytes: &[u8],
     surface: &HostSurface,
     export_param_owned: &BTreeMap<String, Vec<bool>>,
+    export_rets: &BTreeMap<String, ExportRet>,
 ) -> Result<(String, String), String> {
     let sigs = wasm_sigs(bytes)?;
     check_marshallable(surface)?;
@@ -500,12 +607,18 @@ pub(crate) fn generate(
 
     let mut js = banner.clone();
     js.push_str(&format!("const WASM_URL = new URL(\"./{wasm_name}\", import.meta.url);\n"));
-    let string_helpers = if surface.needs_string_abi() { JS_STRING_HELPERS.replace("{ALLOC_BODY}", alloc_body) } else { String::new() };
+    let mut string_helpers = if surface.needs_string_abi() { JS_STRING_HELPERS.replace("{ALLOC_BODY}", alloc_body) } else { String::new() };
+    if surface.unwraps_result() {
+        string_helpers.push_str(JS_RESULT_HELPERS);
+    }
     js.push_str(&JS_RUNTIME.replace("{STRING_HELPERS}", &string_helpers).replace("{WASI_OBJECT}", &wasi_object_js(&sigs)));
     js.push_str(&import_object_js(&sigs, surface)?);
 
     let mut dts = format!("// Generated by `almide build {source_file} --target wasm --host js` (almide {version}).\n\n");
     dts.push_str(DTS_RUNTIME);
+    if surface.unwraps_result() {
+        dts.push_str(DTS_RESULT);
+    }
     dts.push_str(&hooks_dts(surface));
     dts.push_str("export function init(source?: WasmSource, hooks?: Hooks): Promise<void>;\n");
     if surface.has_main && sigs.exports.contains_key("_start") {
@@ -517,7 +630,8 @@ pub(crate) fn generate(
         // closure lowers; a fn the module does not export gets no wrapper.
         let Some(sig) = sigs.exports.get(&f.name) else { continue };
         let owned = export_param_owned.get(&f.name).map(Vec::as_slice).unwrap_or(&[]);
-        js.push_str(&wrapper_js(f, sig, owned)?);
+        let plan = ret_plan(f, export_rets.get(&f.name))?;
+        js.push_str(&wrapper_js(f, sig, owned, plan)?);
         dts.push_str(&format!("export function {}{};\n", f.name, signature_dts(f).replacen(" => ", ": ", 1)));
     }
     Ok((js, dts))
@@ -631,6 +745,18 @@ function allocString(s) {
 }
 "#;
 
+/// The Result unwrapping (#3352): shipped only when some export returns a
+/// Result block. The block is `[rc][len][cap]` then the tag word at
+/// payload+0 (0 = ok) and the value slot at payload+8 (i64 / f64 / i32).
+/// The release is flat, so the slot's own block is the host's to release
+/// only when the Result block was the last reference to it.
+const JS_RESULT_HELPERS: &str = include_str!("js_host_result.js");
+
+const DTS_RESULT: &str = r#"/** Thrown by an exported effect fn that returned err: `message` is its error. */
+export class AlmideError extends Error {}
+
+"#;
+
 const DTS_RUNTIME: &str = r#"export type WasmSource =
   | BufferSource
   | Response
@@ -648,3 +774,7 @@ export interface Hooks {
   /** Raw stderr chunks; default: `process.stderr` / `console.error`. */
   stderr?: (chunk: Uint8Array) => void;
 "#;
+
+#[cfg(test)]
+#[path = "js_host_tests.rs"]
+mod tests;

@@ -19,6 +19,54 @@ thread_local! {
     static JS_HOST: Cell<bool> = const { Cell::new(false) };
     static STRING_ABI: Cell<bool> = const { Cell::new(false) };
     static EXPORT_OWNED: RefCell<BTreeMap<String, Vec<bool>>> = const { RefCell::new(BTreeMap::new()) };
+    static EXPORT_RET: RefCell<BTreeMap<String, ExportRet>> = const { RefCell::new(BTreeMap::new()) };
+}
+
+/// What one return slot of an exported function holds, as the host can
+/// convert it (#3352). `Other` names a shape the host has no marshalling for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AbiKind {
+    Int,
+    Float,
+    Bool,
+    Str,
+    Unit,
+    Other(String),
+}
+
+/// The return ABI the emitter gave an exported function (#3352) — read by
+/// the JS host instead of guessing it from the source type. An effect fn's
+/// wasm value is ALWAYS one `Result` block, whatever its declared return.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExportRet {
+    /// No result (a pure fn returning `Unit`).
+    Void,
+    /// The value itself.
+    Value(AbiKind),
+    /// An i32 `Result` block: tag at payload+`SUM_TAG` (0 = ok), the value
+    /// at payload+`SUM_FIELD`.
+    Result(AbiKind, AbiKind),
+}
+
+fn abi_kind(t: crate::SliceTy) -> AbiKind {
+    use crate::{Scalar, SliceTy};
+    match t {
+        SliceTy::Scalar(Scalar::Int) => AbiKind::Int,
+        SliceTy::Scalar(Scalar::Float) => AbiKind::Float,
+        SliceTy::Scalar(Scalar::Bool) => AbiKind::Bool,
+        SliceTy::Scalar(Scalar::Str) => AbiKind::Str,
+        SliceTy::Unit => AbiKind::Unit,
+        other => AbiKind::Other(format!("{other:?}")),
+    }
+}
+
+/// The host-facing form of an export's emitted return type.
+pub(crate) fn export_ret(ret: Option<crate::SliceTy>, types: &crate::types_table::TypeTable) -> ExportRet {
+    match ret {
+        None => ExportRet::Void,
+        Some(crate::SliceTy::Result(ok, err)) => ExportRet::Result(abi_kind(types.el(ok)), abi_kind(types.el(err))),
+        Some(t) => ExportRet::Value(abi_kind(t)),
+    }
 }
 
 /// Is a JS host being built for the module under emission?
@@ -45,15 +93,21 @@ pub const RELEASE_EXPORT: &str = "__release";
 
 /// Record which params of an exported function the CALLEE owns (releases
 /// at its exit plan) — `false` means borrowed, the caller keeps its credit.
-pub(crate) fn note_export(name: &str, param_owned: Vec<bool>) {
+pub(crate) fn note_export(name: &str, param_owned: Vec<bool>, ret: ExportRet) {
     if js_host() {
         EXPORT_OWNED.with(|m| { m.borrow_mut().insert(name.to_string(), param_owned); });
+        EXPORT_RET.with(|m| { m.borrow_mut().insert(name.to_string(), ret); });
     }
 }
 
 /// The ownership notes recorded since the guard was set, keyed by export name.
 pub fn export_param_owned() -> BTreeMap<String, Vec<bool>> {
     EXPORT_OWNED.with(|m| m.borrow().clone())
+}
+
+/// The return ABI of every export recorded since the guard was set (#3352).
+pub fn export_rets() -> BTreeMap<String, ExportRet> {
+    EXPORT_RET.with(|m| m.borrow().clone())
 }
 
 /// Turn the switch on for a scope and restore the previous state on drop.
@@ -66,6 +120,7 @@ impl JsHostGuard {
         JS_HOST.with(|c| c.set(true));
         STRING_ABI.with(|c| c.set(false));
         EXPORT_OWNED.with(|m| m.borrow_mut().clear());
+        EXPORT_RET.with(|m| m.borrow_mut().clear());
         Self(prev)
     }
 }

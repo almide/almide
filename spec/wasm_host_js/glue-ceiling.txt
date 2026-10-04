@@ -5,3 +5,4 @@ println_only 5130
 marshal_types 6249
 extern_js 6020
 extern_scalars 6089
+effect_exports 7900
