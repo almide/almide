@@ -16,11 +16,15 @@
         `dec_unique_files_take_class` consumes — the reuse CYCLE closes:
         take at class c → release → refile at class c → next take pops it.
 
-     `alloc_bumps_fresh` — when the class list is empty (or the request
-        is beyond the class table), `$alloc` returns the bump frontier,
-        advances it by the class-rounded want (exact for huge requests),
-        and writes the same header shape. `FreeList.alloc`'s frontier
-        branch, concrete.
+     `alloc_bumps_fresh` — when the class list is empty, `$alloc` returns
+        the bump frontier, advances it by the class-rounded want, and
+        writes the same header shape. `FreeList.alloc`'s frontier branch,
+        concrete.
+
+     `alloc_large_hit` / `alloc_large_bump` (#3348) — above the class
+        table (totals over 64 KiB) `$alloc` first runs the large-list take
+        (LargeTree.v): a hit is returned as is; otherwise the bump proceeds
+        from the (possibly lowered) frontier by the EXACT want.
 
    HONEST SCOPE, stated plainly:
    - Same tree-level binding as slice 1: the transcription is pinned to

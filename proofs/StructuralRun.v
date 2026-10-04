@@ -469,4 +469,510 @@ Proof.
   - exact (ki_floor k HK).
 Qed.
 
+(* Project the memory out of an alloc outcome — injection would
+   numeral-normalize the record; a projector keeps `4 * cl` folded. *)
+Definition out_mem (d : Mem) (o : aout) : Mem :=
+  match o with AFall c0 => am c0 | ARet _ c0 => am c0 | AAbort => d end.
+
+Definition out_val (o : aout) : Z :=
+  match o with ARet v _ => v | _ => 0 end.
+
+(* ── alloc, the classed pop ── *)
+Lemma k_new_pop_ok : forall k lenv pages w cl h a' v c',
+  KINV k ->
+  w = Z.land (lenv + 15) (-4) -> 16 <= w -> cl = class_of w -> cl < 13 ->
+  h = rmem (krs k) (fbase + 4 * cl) -> h <> 0 ->
+  freeS (ra (krs k)) h = true -> alloc (ra (krs k)) h = Some a' ->
+  run_alloc lenv fbase (mkA 0 0 0 0 (khp k) pages (rmem (krs k))) = ARet v c' ->
+  KINV (setmem k a' (am c')).
+Proof.
+  intros k lenv pages w cl h a' v c' HK Hw H16 Hcl Hcl13 Hh Hnz Hfr Halloc Hrun.
+  pose proof Hfloor. pose proof Hfb. pose proof Htable.
+  set (m := rmem (krs k)) in *.
+  rewrite (alloc_pops_filed_head lenv fbase (mkA 0 0 0 0 (khp k) pages m) w cl (fbase + 4 * cl) h
+             Hw H16 Hcl Hcl13 eq_refl Hh Hnz) in Hrun.
+  assert (Hmem := f_equal (out_mem m) Hrun). cbn [out_mem am] in Hmem. rewrite <- Hmem.
+  assert (Hcl0 : 0 <= cl) by (rewrite Hcl; apply class_nonneg; exact H16).
+  assert (Ht : tracked (ra (krs k)) h) by (left; exact Hfr).
+  destruct (ki_small k HK h Ht) as [Hfh _].
+  assert (HRmodel : RINV {| ra := a'; rmem := upd m h 1 |}).
+  { apply (r_new_preserves_RINV (krs k) h _ (ki_rinv k HK)).
+    unfold r_new, r_alloc. rewrite Halloc. unfold rc_init; cbn [ra rmem].
+    replace (h + RC_OFFSET) with h by (unfold RC_OFFSET; lia). reflexivity. }
+  apply kinv_frame; [ exact HK | intros x; exact (tracked_pop _ _ _ x (proj1 (ki_rinv k HK)) Hfr Halloc) | | ].
+  - apply (RINV_mem_agree a' (upd m h 1) _); [ | exact HRmodel ].
+    intros x Hx. assert (Hxt : tracked (ra (krs k)) x)
+      by (apply (tracked_pop _ _ _ x (proj1 (ki_rinv k HK)) Hfr Halloc); exact Hx).
+    destruct (ki_small k HK x Hxt) as [Hfx _].
+    assert (Hx16 : x = h \/ x + 16 <= h \/ h + 16 <= x).
+    { destruct (Z.eq_dec x h) as [E | Hne]; [ left; exact E | right ].
+      assert (Hhx : h <> x) by congruence. destruct (ki_sep k HK h x Ht Hxt Hhx); lia. }
+    unfold upd.
+    repeat match goal with |- context [?a =? ?b] => destruct (Z.eqb_spec a b) end;
+      try lia; reflexivity.
+  - intros a Ha.
+    rewrite upd_off by (apply (small_write_misses k h a HK Ht Ha); left; lia).
+    rewrite upd_off by (apply (small_write_misses k h a HK Ht Ha); left; lia).
+    rewrite upd_off by (apply (small_write_misses k h a HK Ht Ha); left; lia).
+    apply upd_off. apply (small_write_misses k h a HK Ht Ha). right. lia.
+Qed.
+
+Lemma LINV_grow : forall lo st h',
+  LINV lo st -> heap st <= h' -> LINV lo {| heap := h'; fl := fl st; live := live st |}.
+Proof.
+  intros lo st h' [Hwf [Heb [Hlv [Hpd Hd]]]] Hh. cbn.
+  split; [ exact Hwf | split; [ exact (ends_below_mono _ _ _ Heb Hh) | split; [ | split; assumption ] ] ].
+  eapply Forall_impl; [ | exact Hlv ]. intros a Ha. cbn in *. lia.
+Qed.
+
+Lemma pages_top : forall pages, pages <= 65536 -> Z.shiftl pages 16 <= MEMTOP.
+Proof. intros pages H. rewrite Z.shiftl_mul_pow2 by lia. unfold MEMTOP. lia. Qed.
+
+(* ── alloc, the classed fresh bump at the frontier ── *)
+Lemma k_new_bump_ok : forall k lenv pages w cl v c',
+  KINV k ->
+  w = Z.land (lenv + 15) (-4) -> 16 <= w -> cl = class_of w -> cl < 13 ->
+  rmem (krs k) (fbase + 4 * cl) = 0 -> 0 <= lenv -> pages <= 65536 ->
+  khp k + 16 * 2 ^ cl <= Z.shiftl pages 16 ->
+  run_alloc lenv fbase (mkA 0 0 0 0 (khp k) pages (rmem (krs k))) = ARet v c' ->
+  KINV (mkK {| ra := fresh (ra (krs k)) (khp k); rmem := am c' |}
+            (kfl k) (kll k) (khp k + 16 * 2 ^ cl)).
+Proof.
+  intros k lenv pages w cl v c' HK Hw H16 Hcl Hcl13 Hempty Hlen Hpg Hfit Hrun.
+  pose proof Hfloor.
+  set (m := rmem (krs k)) in *. set (hp := khp k) in *.
+  assert (Hcl0 : 0 <= cl) by (rewrite Hcl; apply class_nonneg; exact H16).
+  assert (Hpow : 1 <= 2 ^ cl) by (apply (Z.pow_le_mono_r 2 0 cl); lia).
+  rewrite (alloc_bumps_fresh_classed lenv fbase (mkA 0 0 0 0 hp pages m) w cl
+             Hw H16 Hcl Hcl13 Hempty Hlen Hfit) in Hrun.
+  assert (Hmem := f_equal (out_mem m) Hrun). cbn [out_mem am agh] in Hmem. rewrite <- Hmem.
+  set (M := upd (upd (upd m hp 1) (hp + 4) lenv) (hp + 8) (16 * 2 ^ cl - 12)).
+  assert (HM : forall a, a < hp -> M a = m a) by (intros a Ha; unfold M; rewrite !upd_off by lia; reflexivity).
+  assert (Hold : forall x, tracked (ra (krs k)) x -> x + 16 <= hp)
+    by (intros x Hx; exact (proj1 (proj2 (ki_small k HK x Hx)))).
+  assert (Hcovhp : forall a, cov (kfl k) a \/ cov (kll k) a -> a < hp)
+    by (intros a Ha; exact (proj2 (cov_lo k a HK Ha))).
+  pose proof (ki_floor k HK) as Hfl.
+  constructor; cbn [krs kfl kll khp ra rmem lst].
+  - apply (fresh_RINV _ m); [ exact (RINV_eta _ (ki_rinv k HK)) | | | ].
+    + intros Ht. pose proof (Hold hp Ht). lia.
+    + unfold M. rewrite !upd_off by lia. unfold upd. rewrite Z.eqb_refl. reflexivity.
+    + intros x Hx. apply HM. pose proof (Hold x Hx). lia.
+  - intros x Hx. apply tracked_fresh in Hx as [-> | Hx].
+    + split; [ exact Hfl | split; [ lia | ] ].
+      intros a Ha Hc. apply cov_app in Hc. pose proof (Hcovhp a Hc). lia.
+    + destruct (ki_small k HK x Hx) as [Hfx [Hhx Hw']]. split; [ exact Hfx | split; [ lia | exact Hw' ] ].
+  - intros x y Hx Hy Hne.
+    apply tracked_fresh in Hx as [-> | Hx]; apply tracked_fresh in Hy as [-> | Hy].
+    + contradiction.
+    + pose proof (Hold y Hy). lia.
+    + pose proof (Hold x Hx). lia.
+    + exact (ki_sep k HK x y Hx Hy Hne).
+  - apply (LINV_grow floor (lst k)); [ exact (ki_linv k HK) | cbn [lst heap khp]; fold hp; lia ].
+  - apply (LMEM_frame m); [ exact (ki_lmem k HK) | exact (proj1 (linv_parts k HK)) | exact (ki_live16 k HK) | ].
+    intros a Ha. apply HM. destruct Ha as [Ha | [Ha | Ha]]; [ unfold LHEAD in *; lia | unfold LHEAD in *; lia | exact (Hcovhp a Ha) ].
+  - exact (ki_live16 k HK).
+  - pose proof (ki_hal k HK) as Hh. fold hp in Hh.
+    replace (hp + 16 * 2 ^ cl) with (hp + (4 * 2 ^ cl) * 4) by lia.
+    rewrite Z_mod_plus_full. exact Hh.
+  - exact (ki_fal k HK).
+  - exact (ki_lal k HK).
+  - pose proof (pages_top pages Hpg). lia.
+  - lia.
+Qed.
+
+Lemma land_m4_mod : forall x, Z.land x (-4) mod 4 = 0.
+Proof. intros x. rewrite land_m4. rewrite Zminus_mod, Z.mod_mod by lia. rewrite Z.sub_diag. reflexivity. Qed.
+
+(* The memory after the large take, read through the step's own result. *)
+Lemma lalloc_shape : forall st w,
+  snd (lalloc st w) =
+  match take (fl st) w (heap st) with
+  | TFound q z l' => {| heap := heap st; fl := l'; live := (q, z) :: live st |}
+  | TExtend p l' => {| heap := p + w; fl := l'; live := (p, w) :: live st |}
+  | TMiss => {| heap := heap st + w; fl := fl st; live := (heap st, w) :: live st |}
+  end /\
+  fst (lalloc st w) =
+  match take (fl st) w (heap st) with
+  | TFound q _ _ => q | TExtend p _ => p | TMiss => heap st
+  end.
+Proof. intros st w. unfold lalloc. destruct (take (fl st) w (heap st)); split; reflexivity. Qed.
+
+(* ── alloc above the class table: the large-list take, then (on no fit)
+   the exact bump from the possibly-lowered frontier ── *)
+Lemma k_new_large_ok : forall k lenv pages w v c',
+  KINV k ->
+  w = Z.land (lenv + 15) (-4) -> 16 <= w -> 13 <= class_of w -> 0 <= lenv ->
+  pages <= 65536 -> khp k + w <= Z.shiftl pages 16 ->
+  run_alloc lenv fbase (mkA 0 0 0 0 (khp k) pages (rmem (krs k))) = ARet v c' ->
+  let st' := snd (lalloc (lst k) w) in
+  v = fst (lalloc (lst k) w) /\
+  KINV (mkK {| ra := ra (krs k); rmem := am c' |} (fl st') (live st') (heap st')).
+Proof.
+  intros k lenv pages w v c' HK Hw H16 Hcl Hlen Hpg Hfit Hrun st'.
+  pose proof Hfloor. pose proof (pages_top pages Hpg) as Htop.
+  set (m := rmem (krs k)) in *. set (hp := khp k) in *.
+  destruct (linv_parts k HK) as [Hg [Hflo [Heb [Hlv [Hpd Hd]]]]].
+  destruct (ki_lmem k HK) as [H4 [Hrep Hrc]]. fold m in H4, Hrep, Hrc.
+  pose proof (ki_floor k HK) as Hfh. fold hp in Hfh.
+  assert (Hw4 : w mod 4 = 0) by (rewrite Hw; apply land_m4_mod).
+  assert (HL' : LINV floor st')
+    by (exact (alloc_preserves_LINV floor (lst k) w (ki_linv k HK) ltac:(unfold MINSZ; lia) Hfh)).
+  destruct (lalloc_shape (lst k) w) as [Hst Hv]. fold st' in Hst. cbn [lst fl heap live] in Hst, Hv. fold hp in Hst, Hv.
+  pose proof (take_al4 (kfl k) w hp (ki_fal k HK) Hw4) as Hal.
+  destruct (ltake_run_spec (kfl k) lenv 0 (28 - clz32 (w - 1)) w 0 m hp Hg (fl_ge16 k HK) (fl_top k HK)
+              H16 ltac:(lia) H4 Hrep) as [s' [Hfr [_ [_ [Hl3 [_ Hres]]]]]].
+  (* every tracked small cell and every live large base sat outside the take's reach *)
+  assert (Hsm : forall x, tracked (ra (krs k)) x -> LargeTree.mem s' x = m x).
+  { intros x Hx. destruct (small_off_large k x x HK Hx ltac:(lia)) as [Hnf _].
+    destruct (ki_small k HK x Hx) as [Hfx _].
+    destruct (Z.eq_dec (LargeTree.mem s' x) (m x)) as [E | E]; [ exact E | exfalso ].
+    destruct (Hfr x E) as [Ha | Ha]; [ unfold LHEAD in Ha; lia | exact (Hnf Ha) ]. }
+  assert (Hlb : forall q z, In (q, z) (kll k) -> LargeTree.mem s' q = m q /\ floor <= q /\ q + 16 <= hp + 0
+                                                  /\ cov (kll k) q).
+  { intros q z Hq. assert (Hz : 16 <= z) by (pose proof (ki_live16 k HK) as H1; rewrite Forall_forall in H1; exact (H1 _ Hq)).
+    assert (Hqc : cov (kll k) q) by (apply (base_cov _ q z Hq); lia).
+    rewrite Forall_forall in Hlv. specialize (Hlv _ Hq). cbn in Hlv.
+    split; [ | split; [ lia | split; [ lia | exact Hqc ] ] ].
+    destruct (Z.eq_dec (LargeTree.mem s' q) (m q)) as [E | E]; [ exact E | exfalso ].
+    destruct (Hfr q E) as [Ha | Ha]; [ unfold LHEAD in Ha; lia | exact (Hd q Ha Hqc) ]. }
+  destruct (take (kfl k) w hp) as [ q z l' | p l' | ] eqn:Et.
+  - (* hit *)
+    destruct Hres as [Hrun0 [Hgh [H4' [Hrep' [Hq1 [Hq4 Hq8]]]]]].
+    rewrite (alloc_large_hit lenv fbase (mkA 0 0 0 0 hp pages m) w q s' Hw H16 Hcl Hrun0) in Hrun.
+    assert (Hmem := f_equal (out_mem m) Hrun). cbn [out_mem am] in Hmem.
+    assert (Hvq := f_equal out_val Hrun). cbn [out_val] in Hvq.
+    destruct (take_found (kfl k) w hp q z l' Hg ltac:(unfold MINSZ; lia) Et) as [Hwz [Hmz [Hcv [Hrest Hgl]]]].
+    destruct Hal as [Hqz Hl'].
+    split; [ rewrite Hv; symmetry; exact Hvq | ].
+    rewrite Hst. cbn [fl live heap]. rewrite <- Hmem.
+    constructor; cbn [krs kfl kll khp ra rmem lst].
+    + apply (RINV_mem_agree _ m); [ exact Hsm | exact (RINV_eta _ (ki_rinv k HK)) ].
+    + intros x Hx. destruct (ki_small k HK x Hx) as [Hfx [Hhx Hw']].
+      split; [ exact Hfx | split; [ exact Hhx | ] ].
+      intros a Ha Hc. apply (Hw' a Ha). apply cov_app.
+      apply cov_app in Hc as [Hc | Hc]; [ left; exact (proj1 (proj1 (Hrest a) Hc)) | ].
+      apply cov_cons in Hc as [Hc | Hc]; [ left; apply Hcv; unfold inside in Hc; cbn in Hc; lia | right; exact Hc ].
+    + exact (ki_sep k HK).
+    + rewrite Hst in HL'. exact HL'.
+    + split; [ exact H4' | split; [ exact Hrep' | ] ].
+      constructor; [ cbn; lia | ].
+      apply Forall_forall. intros [q0 z0] Hq0. destruct (Hlb q0 z0 Hq0) as [E _]. cbn. rewrite E.
+      rewrite Forall_forall in Hrc. exact (Hrc _ Hq0).
+    + constructor; [ cbn; lia | exact (ki_live16 k HK) ].
+    + exact (ki_hal k HK).
+    + exact Hl'.
+    + constructor; [ exact Hqz | exact (ki_lal k HK) ].
+    + exact (ki_top k HK).
+    + exact Hfh.
+  - (* no fit, the tail node ends at the frontier: extend it *)
+    destruct Hres as [Hrun0 [Hgh [H4' Hrep']]].
+    destruct (take_extend (kfl k) w hp p l' Hg Et) as [sp [Hfl [Hph [Hsp [Hends Hgl]]]]].
+    destruct Hal as [Hp4 Hl'].
+    assert (Hsp16 : 16 <= sp).
+    { assert (Hin : In (p, sp) (kfl k)) by (rewrite Hfl; apply in_or_app; right; left; reflexivity).
+      exact (gaps_In_size _ _ _ Hg Hin). }
+    assert (Hpfl : floor <= p).
+    { rewrite Forall_forall in Hflo. apply (Hflo (p, sp)). rewrite Hfl. apply in_or_app. right. left. reflexivity. }
+    assert (Htail : forall a, p <= a < hp -> cov (kfl k) a).
+    { intros a Ha. rewrite Hfl. apply cov_app. right. apply cov_cons. left. unfold inside; cbn; lia. }
+    assert (Hnx : Z.land (p + 12 + lenv + 3) (-4) = p + w) by (rewrite land_m4_shift by exact Hp4; rewrite <- Hw; reflexivity).
+    pose proof (alloc_large_bump lenv fbase (mkA 0 0 0 0 hp pages m) w s' Hw H16 Hcl Hrun0 Hl3) as Hb.
+    cbv zeta in Hb. rewrite Hgh, Hnx in Hb.
+    specialize (Hb ltac:(lia) ltac:(cbn [apages]; lia)).
+    rewrite Hb in Hrun.
+    assert (Hmem := f_equal (out_mem m) Hrun). cbn [out_mem am] in Hmem.
+    assert (Hvq := f_equal out_val Hrun). cbn [out_val] in Hvq.
+    split; [ rewrite Hv; symmetry; exact Hvq | ].
+    rewrite Hst. cbn [fl live heap]. rewrite <- Hmem.
+    set (M := upd (upd (upd (LargeTree.mem s') p 1) (p + 4) lenv) (p + 8) (w - 12)).
+    assert (HM : forall a, a < p \/ p + 16 <= a -> M a = LargeTree.mem s' a)
+      by (intros a Ha; unfold M; rewrite !upd_off by lia; reflexivity).
+    constructor; cbn [krs kfl kll khp ra rmem lst].
+    + apply (RINV_mem_agree _ m); [ | exact (RINV_eta _ (ki_rinv k HK)) ].
+      intros x Hx. destruct (small_off_large k x x HK Hx ltac:(lia)) as [Hnf _].
+      destruct (ki_small k HK x Hx) as [Hfx [Hhx _]].
+      rewrite HM; [ exact (Hsm x Hx) | ].
+      destruct (Z_lt_ge_dec x p) as [Hlt | Hge]; [ left; exact Hlt | right ].
+      destruct (Z_lt_ge_dec x hp) as [Hlt' | Hge']; [ exfalso; exact (Hnf (Htail x ltac:(lia))) | lia ].
+    + intros x Hx. destruct (ki_small k HK x Hx) as [Hfx [Hhx Hw']].
+      split; [ exact Hfx | split; [ lia | ] ].
+      intros a Ha Hc. apply (Hw' a Ha). apply cov_app.
+      apply cov_app in Hc as [Hc | Hc]; [ left; rewrite Hfl; apply cov_app; left; exact Hc | ].
+      apply cov_cons in Hc as [Hc | Hc]; [ left; apply Htail; unfold inside in Hc; cbn in Hc; lia | right; exact Hc ].
+    + exact (ki_sep k HK).
+    + rewrite Hst in HL'. exact HL'.
+    + assert (Hfl' : forall a, field l' a -> a < p).
+      { intros a Ha. destruct Ha as [b' [s'' [Hin Ha]]].
+        rewrite Forall_forall in Hends. specialize (Hends _ Hin). cbn in Hends.
+        pose proof (gaps_In_size _ _ _ Hgl Hin). lia. }
+      split; [ rewrite HM by lia; exact H4' | split ].
+      * unfold LHEAD. rewrite HM by lia. apply (lrep_frame l' (LargeTree.mem s')); [ | exact Hrep' ].
+        intros a Ha. apply HM. left. exact (Hfl' a Ha).
+      * constructor; [ cbn; unfold M; rewrite !upd_off by lia; unfold upd; rewrite Z.eqb_refl; lia | ].
+        apply Forall_forall. intros [q0 z0] Hq0. destruct (Hlb q0 z0 Hq0) as [E [_ [_ Hqc]]]. cbn.
+        rewrite HM; [ rewrite E; rewrite Forall_forall in Hrc; exact (Hrc _ Hq0) | ].
+        destruct (Z_lt_ge_dec q0 p) as [Hlt | Hge]; [ left; exact Hlt | right ].
+        destruct (Z_lt_ge_dec q0 hp) as [Hlt' | Hge'].
+        -- exfalso. exact (Hd q0 (Htail q0 ltac:(lia)) Hqc).
+        -- lia.
+    + constructor; [ cbn; lia | exact (ki_live16 k HK) ].
+    + rewrite Z.add_mod by lia. rewrite Hp4, Hw4. reflexivity.
+    + exact Hl'.
+    + constructor; [ split; assumption | exact (ki_lal k HK) ].
+    + lia.
+    + lia.
+  - (* no fit and no tail at the frontier: bump fresh *)
+    destruct Hres as [Hrun0 [Hgh Hsame]].
+    assert (Hhp4 : hp mod 4 = 0) by exact (ki_hal k HK).
+    assert (Hnx : Z.land (hp + 12 + lenv + 3) (-4) = hp + w) by (rewrite land_m4_shift by exact Hhp4; rewrite <- Hw; reflexivity).
+    pose proof (alloc_large_bump lenv fbase (mkA 0 0 0 0 hp pages m) w s' Hw H16 Hcl Hrun0 Hl3) as Hb.
+    cbv zeta in Hb. rewrite Hgh, Hnx in Hb.
+    specialize (Hb ltac:(lia) ltac:(cbn [apages]; lia)).
+    rewrite Hb in Hrun.
+    assert (Hmem := f_equal (out_mem m) Hrun). cbn [out_mem am] in Hmem.
+    assert (Hvq := f_equal out_val Hrun). cbn [out_val] in Hvq.
+    split; [ rewrite Hv; symmetry; exact Hvq | ].
+    rewrite Hst. cbn [fl live heap]. rewrite <- Hmem.
+    set (M := upd (upd (upd (LargeTree.mem s') hp 1) (hp + 4) lenv) (hp + 8) (w - 12)).
+    assert (HM : forall a, a < hp -> M a = m a)
+      by (intros a Ha; unfold M; rewrite !upd_off by lia; exact (Hsame a)).
+    assert (Hcovhp : forall a, cov (kfl k) a \/ cov (kll k) a -> a < hp)
+      by (intros a Ha; exact (proj2 (cov_lo k a HK Ha))).
+    constructor; cbn [krs kfl kll khp ra rmem lst].
+    + apply (RINV_mem_agree _ m); [ | exact (RINV_eta _ (ki_rinv k HK)) ].
+      intros x Hx. destruct (ki_small k HK x Hx) as [_ [Hhx _]]. apply HM. lia.
+    + intros x Hx. destruct (ki_small k HK x Hx) as [Hfx [Hhx Hw']].
+      split; [ exact Hfx | split; [ lia | ] ].
+      intros a Ha Hc. apply cov_app in Hc as [Hc | Hc]; [ apply (Hw' a Ha); apply cov_app; left; exact Hc | ].
+      apply cov_cons in Hc as [Hc | Hc]; [ unfold inside in Hc; cbn in Hc; lia | ].
+      apply (Hw' a Ha). apply cov_app. right. exact Hc.
+    + exact (ki_sep k HK).
+    + rewrite Hst in HL'. exact HL'.
+    + split; [ rewrite HM by lia; exact H4 | split ].
+      * unfold LHEAD. rewrite HM by lia. apply (lrep_frame (kfl k) m); [ | exact Hrep ].
+        intros a Ha. apply HM. apply Hcovhp. left. exact (field_cov _ _ Hg Ha).
+      * constructor; [ cbn; unfold M; rewrite !upd_off by lia; unfold upd; rewrite Z.eqb_refl; lia | ].
+        apply Forall_forall. intros [q0 z0] Hq0. destruct (Hlb q0 z0 Hq0) as [_ [_ [_ Hqc]]]. cbn.
+        rewrite HM; [ rewrite Forall_forall in Hrc; exact (Hrc _ Hq0) | apply Hcovhp; right; exact Hqc ].
+    + constructor; [ cbn; lia | exact (ki_live16 k HK) ].
+    + rewrite Z.add_mod by lia. rewrite Hhp4, Hw4. reflexivity.
+    + exact (ki_fal k HK).
+    + constructor; [ split; assumption | exact (ki_lal k HK) ].
+    + lia.
+    + lia.
+Qed.
+
+(* ══ THE CONCRETE RUN RELATION ═════════════════════════════════════════
+   Memory moves by the PROVEN TREES; the allocator states are the ghost. *)
+
+Inductive kstep : KState -> KState -> Prop :=
+| k_inc : forall k p,
+    liveS (ra (krs k)) p = true ->
+    kstep k (setmem k (ra (krs k)) (cm (run_inc p floor (mkC 0 0 0 (rmem (krs k))))))
+| k_inc_large : forall k p s,
+    In (p, s) (kll k) ->
+    kstep k (setmem k (ra (krs k)) (cm (run_inc p floor (mkC 0 0 0 (rmem (krs k))))))
+| k_dec_shared : forall k p,
+    liveS (ra (krs k)) p = true -> 2 <= rmem (krs k) p ->
+    kstep k (setmem k (ra (krs k)) (cm (run_dec p floor fbase (mkC 0 0 0 (rmem (krs k))))))
+| k_dec_shared_large : forall k p s,
+    In (p, s) (kll k) -> 2 <= rmem (krs k) p ->
+    kstep k (setmem k (ra (krs k)) (cm (run_dec p floor fbase (mkC 0 0 0 (rmem (krs k))))))
+| k_dec_unique : forall k p a',
+    liveS (ra (krs k)) p = true -> rmem (krs k) p = 1 ->
+    free_op (ra (krs k)) p = Some a' ->
+    Z.land (rmem (krs k) (p + 8) + 15) (-4) < 16 \/
+    class_of (Z.land (rmem (krs k) (p + 8) + 15) (-4)) < 13 ->
+    kstep k (setmem k a' (cm (run_dec p floor fbase (mkC 0 0 0 (rmem (krs k))))))
+| k_dec_unique_large : forall k p t l1 l2,
+    kll k = l1 ++ (p, t) :: l2 -> rmem (krs k) p = 1 ->
+    Z.land (rmem (krs k) (p + 8) + 15) (-4) = t -> 13 <= class_of t ->
+    kstep k (mkK {| ra := ra (krs k);
+                    rmem := cm (run_dec p floor fbase (mkC 0 0 0 (rmem (krs k)))) |}
+                 (ins (kfl k) (p, t)) (l1 ++ l2) (khp k))
+| k_new_pop : forall k lenv pages w cl h a' v c',
+    w = Z.land (lenv + 15) (-4) -> 16 <= w -> cl = class_of w -> cl < 13 ->
+    h = rmem (krs k) (fbase + 4 * cl) -> h <> 0 ->
+    freeS (ra (krs k)) h = true -> alloc (ra (krs k)) h = Some a' ->
+    run_alloc lenv fbase (mkA 0 0 0 0 (khp k) pages (rmem (krs k))) = ARet v c' ->
+    kstep k (setmem k a' (am c'))
+| k_new_bump : forall k lenv pages w cl v c',
+    w = Z.land (lenv + 15) (-4) -> 16 <= w -> cl = class_of w -> cl < 13 ->
+    rmem (krs k) (fbase + 4 * cl) = 0 -> 0 <= lenv -> pages <= 65536 ->
+    khp k + 16 * 2 ^ cl <= Z.shiftl pages 16 ->
+    run_alloc lenv fbase (mkA 0 0 0 0 (khp k) pages (rmem (krs k))) = ARet v c' ->
+    kstep k (mkK {| ra := fresh (ra (krs k)) (khp k); rmem := am c' |}
+                 (kfl k) (kll k) (khp k + 16 * 2 ^ cl))
+| k_new_large : forall k lenv pages w v c',
+    w = Z.land (lenv + 15) (-4) -> 16 <= w -> 13 <= class_of w -> 0 <= lenv ->
+    pages <= 65536 -> khp k + w <= Z.shiftl pages 16 ->
+    run_alloc lenv fbase (mkA 0 0 0 0 (khp k) pages (rmem (krs k))) = ARet v c' ->
+    kstep k (mkK {| ra := ra (krs k); rmem := am c' |}
+                 (fl (snd (lalloc (lst k) w))) (live (snd (lalloc (lst k) w)))
+                 (heap (snd (lalloc (lst k) w)))).
+
+Lemma large_base : forall k p s, KINV k -> In (p, s) (kll k) ->
+  floor <= p /\ 1 <= rmem (krs k) p.
+Proof.
+  intros k p s HK Hin.
+  destruct (linv_parts k HK) as [_ [_ [_ [Hlv _]]]]. rewrite Forall_forall in Hlv.
+  destruct (Hlv _ Hin) as [Hf _]. cbn in Hf.
+  destruct (ki_lmem k HK) as [_ [_ Hrc]]. rewrite Forall_forall in Hrc.
+  split; [ exact Hf | exact (Hrc _ Hin) ].
+Qed.
+
+Theorem kstep_preserves_KINV : forall k k', kstep k k' -> KINV k -> KINV k'.
+Proof.
+  intros k k' Hs HK. destruct Hs.
+  - (* inc, small *)
+    assert (Ht : tracked (ra (krs k)) p) by (right; exact H).
+    destruct (ki_small k HK p Ht) as [Hfp _].
+    rewrite (inc_realizes_rt_inc p floor (mkC 0 0 0 (rmem (krs k))) Hfp). cbn [cm].
+    rewrite rt_inc_plain. apply small_cell_ok; [ exact HK | exact Ht | ].
+    rewrite <- rt_inc_plain.
+    apply (r_inc_preserves_RINV (krs k) p _ (ki_rinv k HK)).
+    unfold r_inc. rewrite H. reflexivity.
+  - (* inc, large *)
+    destruct (large_base k p s HK H) as [Hfp Hrc].
+    rewrite (inc_realizes_rt_inc p floor (mkC 0 0 0 (rmem (krs k))) Hfp). cbn [cm].
+    rewrite rt_inc_plain. apply (large_cell_ok k p s); [ exact HK | exact H | lia ].
+  - (* dec, shared, small *)
+    assert (Ht : tracked (ra (krs k)) p) by (right; exact H).
+    destruct (ki_small k HK p Ht) as [Hfp _].
+    destruct (dec_shared_realizes_rt_dec p floor fbase (mkC 0 0 0 (rmem (krs k))) Hfp H0) as [_ Hmem].
+    cbn [cm] in Hmem. rewrite Hmem.
+    apply small_cell_ok; [ exact HK | exact Ht | ].
+    apply (r_dec_preserves_RINV (krs k) p _ (ki_rinv k HK)).
+    rewrite (r_dec_pos (krs k) p) by (rewrite rc_at_plain; lia).
+    rewrite rc_at_plain.
+    replace (rmem (krs k) p =? 1) with false by (symmetry; apply Z.eqb_neq; lia).
+    replace (p + RC_OFFSET) with p by (unfold RC_OFFSET; lia).
+    reflexivity.
+  - (* dec, shared, large *)
+    destruct (large_base k p s HK H) as [Hfp _].
+    destruct (dec_shared_realizes_rt_dec p floor fbase (mkC 0 0 0 (rmem (krs k))) Hfp H0) as [_ Hmem].
+    cbn [cm] in Hmem. rewrite Hmem.
+    apply (large_cell_ok k p s); [ exact HK | exact H | lia ].
+  - apply (k_dec_unique_small_ok k p a'); assumption.
+  - apply (k_dec_unique_large_ok k p t l1 l2); assumption.
+  - apply (k_new_pop_ok k lenv pages w cl h a' v c'); assumption.
+  - apply (k_new_bump_ok k lenv pages w cl v c'); assumption.
+  - exact (proj2 (k_new_large_ok k lenv pages w v c' HK H H0 H1 H2 H3 H4 H5)).
+Qed.
+
+Inductive ksteps : KState -> KState -> Prop :=
+| ksteps_refl : forall k, ksteps k k
+| ksteps_step : forall k k' k'', kstep k k' -> ksteps k' k'' -> ksteps k k''.
+
+Theorem structural_runs_preserve_KINV : forall k k',
+  ksteps k k' -> KINV k -> KINV k'.
+Proof.
+  intros k k' Hst. induction Hst as [ k0 | k0 k1 k2 Hs _ IH ]; intro HK.
+  - exact HK.
+  - apply IH. exact (kstep_preserves_KINV k0 k1 Hs HK).
+Qed.
+
+(* Boot: nothing tracked, no large extents, the frontier at an aligned
+   address at or above the floor. *)
+Definition k_init (b h0 : Z) : KState := mkK (r_init b) [] [] h0.
+
+Theorem structural_boot_KINV : forall b h0,
+  floor <= h0 -> h0 mod 4 = 0 -> h0 <= MEMTOP -> KINV (k_init b h0).
+Proof.
+  intros b h0 Hf H4 Ht. constructor; cbn [k_init krs kfl kll khp lst].
+  - apply r_init_RINV.
+  - intros x [Hx | Hx]; discriminate Hx.
+  - intros x y [Hx | Hx]; discriminate Hx.
+  - split; [ split; [ exact I | constructor ] | split; [ constructor | split; [ constructor | split; [ exact I | ] ] ] ].
+    intros x Hx. exfalso. exact (cov_nil x Hx).
+  - split; [ reflexivity | split; [ reflexivity | constructor ] ].
+  - constructor.
+  - exact H4.
+  - constructor.
+  - constructor.
+  - exact Ht.
+  - exact Hf.
+Qed.
+
+(* ══ THE F-CLASS, AS VIOLATED LEMMAS OF THE EMITTED CODE ═══════════════
+   Over ANY structural run from boot — however many allocations, shares
+   and releases the program performed through the emitted trees, small
+   or large: *)
+
+Section Reachable.
+
+Variables b h0 : Z.
+Hypothesis Hh0f : floor <= h0.
+Hypothesis Hh04 : h0 mod 4 = 0.
+Hypothesis Hh0t : h0 <= MEMTOP.
+
+Lemma reach_KINV : forall k, ksteps (k_init b h0) k -> KINV k.
+Proof.
+  intros k Hst. apply (structural_runs_preserve_KINV _ _ Hst).
+  apply structural_boot_KINV; assumption.
+Qed.
+
+(* No aliased small handout: a block the ghost validates for allocation
+   is never currently live, and off the free list it reads count 0. *)
+Theorem structural_no_aliased_handout : forall k p a',
+  ksteps (k_init b h0) k ->
+  alloc (ra (krs k)) p = Some a' ->
+  liveS (ra (krs k)) p = false
+  /\ (freeS (ra (krs k)) p = true -> rmem (krs k) p = 0).
+Proof.
+  intros k p a' Hst Ha.
+  destruct (ki_rinv k (reach_KINV k Hst)) as [Hi [Hf _]].
+  split.
+  - exact (alloc_not_live (ra (krs k)) p a' Hi Ha).
+  - intro Hfr. specialize (Hf p Hfr). rewrite rc_at_plain in Hf. exact Hf.
+Qed.
+
+(* Counts stay honest: every filed small block reads 0, every live block
+   — small or large — reads at least 1. *)
+Theorem structural_counts_stay_honest : forall k,
+  ksteps (k_init b h0) k ->
+  (forall x, freeS (ra (krs k)) x = true -> rmem (krs k) x = 0)
+  /\ (forall x, liveS (ra (krs k)) x = true -> 1 <= rmem (krs k) x)
+  /\ Forall (fun e => 1 <= rmem (krs k) (fst e)) (kll k).
+Proof.
+  intros k Hst. pose proof (reach_KINV k Hst) as HK.
+  destruct (ki_rinv k HK) as [_ [Hf Hl]].
+  split; [ | split ].
+  - intros x Hx. specialize (Hf x Hx). rewrite rc_at_plain in Hf. exact Hf.
+  - intros x Hx. specialize (Hl x Hx). rewrite rc_at_plain in Hl. exact Hl.
+  - exact (proj2 (proj2 (ki_lmem k HK))).
+Qed.
+
+(* No aliased large handout: the extent a large allocation hands out
+   overlaps no live large extent and no small block's header window —
+   reuse-after-free at extent granularity cannot happen, and the large
+   list cannot hand out a small block's memory. *)
+Theorem structural_large_handout_is_free : forall k w,
+  ksteps (k_init b h0) k -> 16 <= w ->
+  match live (snd (lalloc (lst k) w)) with
+  | e :: _ =>
+      Forall (disj e) (kll k) /\
+      (forall x a, tracked (ra (krs k)) x -> x <= a < x + 16 -> ~ inside e a)
+  | [] => False
+  end.
+Proof.
+  intros k w Hst Hw. pose proof (reach_KINV k Hst) as HK.
+  pose proof Hfloor.
+  pose proof (alloc_disjoint_live floor (lst k) w (ki_linv k HK) ltac:(unfold MINSZ; lia) (ki_floor k HK)) as Hd.
+  destruct (lalloc_shape (lst k) w) as [Hs _]. cbn [lst fl heap live] in Hs.
+  pose proof (linv_parts k HK) as [Hg _].
+  destruct (take (kfl k) w (khp k)) as [ q z l' | p l' | ] eqn:Et;
+    rewrite Hs in Hd |- *; cbn [live] in Hd |- *; split; try exact Hd.
+  - intros x a Hx Ha Hi. destruct (take_found (kfl k) w (khp k) q z l' Hg ltac:(unfold MINSZ; lia) Et) as [_ [_ [Hcv _]]].
+    destruct (small_off_large k x a HK Hx Ha) as [Hnf _]. apply Hnf, Hcv. unfold inside in Hi; cbn in Hi; lia.
+  - intros x a Hx Ha Hi. destruct (take_extend (kfl k) w (khp k) p l' Hg Et) as [sp [Hfl [Hph _]]].
+    destruct (small_off_large k x a HK Hx Ha) as [Hnf _].
+    destruct (ki_small k HK x Hx) as [_ [Hhx _]]. unfold inside in Hi; cbn in Hi.
+    apply Hnf. rewrite Hfl. apply cov_app. right. apply cov_cons. left. unfold inside; cbn; lia.
+  - intros x a Hx Ha Hi. destruct (ki_small k HK x Hx) as [_ [Hhx _]]. unfold inside in Hi; cbn in Hi. lia.
+Qed.
+
+End Reachable.
+
 End Composition.
