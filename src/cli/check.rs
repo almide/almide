@@ -69,6 +69,14 @@ fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Progra
     }
     let diagnostics = checker.infer_program(program);
     checker.profile_critical = false;
+    // The entry's expression types, as the build path lowers them: it lowers
+    // the entry before any module is inferred. Module inference below writes
+    // its own expressions into the same map and overwrites entries of the
+    // entry program, so a later `lower_program(program, ..)` read the wrong
+    // types (`let f = make()!` lowered as a Float64 call with no unwrap) —
+    // invisible to a type-blind analysis, wrong for the category-set flow of
+    // ADR-0026 D1, which follows fn-typed values.
+    let entry_types = checker.type_map.clone();
 
     // #862: an imported module's OWN body was never inferred on the check
     // path, so an E006 (or any other body-level error) inside it stayed
@@ -91,6 +99,7 @@ fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Progra
     if crate::compile_driver::report_module_diagnostics(&module_diags).is_err() {
         std::process::exit(1);
     }
+    checker.type_map = entry_types;
 
     (diagnostics, checker)
 }
