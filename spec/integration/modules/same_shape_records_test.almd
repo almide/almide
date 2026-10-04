@@ -1,0 +1,17 @@
+// #3283: two libraries declaring the same field set each build their own
+// record from an anonymous literal — in-tree, and as two path dependencies
+// on the dependency-shaped leg.
+import shapesize
+import shapeextent
+
+test "each library's literal is its own record" {
+  assert_eq(shapesize.area(shapesize.unit()), 1.0)
+  assert_eq(shapeextent.span(shapeextent.measure(3.0)), 9.0)
+  assert_eq(list.len(shapeextent.many()), 2)
+  assert_eq(shapeextent.maybe(0.0), none)
+}
+
+test "a literal passed to a library fn takes the parameter's type" {
+  assert_eq(shapeextent.span({ w: 1.0, h: 2.5 }), 3.5)
+  assert_eq(shapesize.area({ w: 2.0, h: 2.0 }), 4.0)
+}
