@@ -140,7 +140,8 @@ almide/                    Workspace root
 │   ├── almide-optimize/   Monomorphization, DCE, constant propagation,
 │   │                      stream fusion
 │   ├── almide-codegen/    Codegen v3 for Rust (+ WGSL): nanopass pipeline,
-│   │                      TOML template renderer, target-agnostic walker
+│   │                      TOML template renderer, target-agnostic walker;
+│   │                      templates/rust.toml = Rust syntax templates (~330 rules)
 │   ├── almide-interp/     Pre-codegen IR interpreter — 3rd cross-target oracle
 │   ├── almide-tools/      Formatter, module interface (almide compile), ALMDI
 │   ├── almide-dialect/    Pure-Rust MLIR dialect schema (no FFI)
@@ -152,7 +153,6 @@ almide/                    Workspace root
 ├── grammar/               Git submodule → almide/almide-grammar: descriptive
 │                          keyword/precedence data consumed by the tree-sitter
 │                          and TextMate generators (not by the compiler build)
-├── codegen/templates/rust.toml   Rust syntax templates (~330 rules)
 ├── stdlib/                Self-hosted stdlib: ~280 .almd files (see below)
 └── runtime/rs/src/        Native Rust runtime for @intrinsic functions
 ```

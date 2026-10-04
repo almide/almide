@@ -1353,7 +1353,7 @@ Target source code
 6. BuiltinLowering -- assert_eq, println, etc. to Rust macros
 7. FanLowering -- fan blocks to scoped threads (`std::thread::scope`)
 
-Templates are defined in TOML files (`codegen/templates/*.toml`), separating syntax from semantics.
+Templates are defined in TOML files (`crates/almide-codegen/templates/*.toml`), separating syntax from semantics.
 
 ### 18.3 Cross-Target Semantics
 
