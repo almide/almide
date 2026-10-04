@@ -62,8 +62,8 @@ pub fn ir_link_flatten(program: &mut IrProgram) {
 
     for module in modules {
         let mod_ident = module.versioned_name
-            .map(|v| v.to_string().replace('.', "_"))
-            .unwrap_or_else(|| module.name.to_string().replace('.', "_"));
+            .map(|v| almide_base::names::module_ident(v.as_str()))
+            .unwrap_or_else(|| almide_base::names::module_ident(module.name.as_str()));
 
         // Merge type declarations (deduplicate by name)
         for td in module.type_decls {

@@ -295,12 +295,12 @@ fn collect_module_generics(program: &IrProgram) -> Vec<ModuleGeneric> {
 
 /// The flatten spelling of a module fn: `almide_rt_<module>_<fn>`, a dotted
 /// module name (`pkg.sub`, or a project module under a directory, `a.util` —
-/// #2654) with its dots as underscores, exactly as the module-fn flattening
+/// #2654) as its `module_ident` (#3338), exactly as the module-fn flattening
 /// (`pass_ir_link_flatten`) and the MIR pipeline's call resolution spell it.
 /// Spelling the module raw (`almide_rt_a.util_f`) matched no call site, so a
 /// cross-module generic in a dotted module was never specialized.
 fn flat_fn_name(module: &str, func: &str) -> String {
-    format!("almide_rt_{}_{}", module.replace('.', "_"), func)
+    format!("almide_rt_{}_{}", almide_base::names::module_ident(module), func)
 }
 
 /// The interned flatten spelling (`almide_rt_<module>_<fn>`) per generic,

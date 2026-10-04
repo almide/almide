@@ -406,7 +406,7 @@ fn mirror_keys(mod_name: &str, func: &IrFunction) -> Vec<(String, bool)> {
     if is_dispatch_only {
         return Vec::new();
     }
-    let origin = mod_name.replace('.', "_");
+    let origin = almide_base::names::module_ident(mod_name);
     let flat = func.name.as_str().replace('.', "_");
     let mut keys = vec![
         (format!("almide_rt_{}_{}", origin, flat), false),
@@ -418,7 +418,7 @@ fn mirror_keys(mod_name: &str, func: &IrFunction) -> Vec<(String, bool)> {
     let segs: Vec<&str> = func.name.as_str().split('.').collect();
     if segs.len() > 2 {
         let tail = format!("{}.{}", segs[segs.len() - 2], segs[segs.len() - 1]);
-        let base = flat.strip_prefix(&format!("{}_", origin)).unwrap_or(&flat).to_string();
+        let base = almide_base::names::strip_module_path(func.name.as_str(), &origin).map_or_else(|| flat.clone(), |r| r.replace('.', "_"));
         keys.push((format!("{}::{}", mod_name, tail), true));
         keys.push((tail, true));
         keys.push((format!("almide_rt_{}_{}", origin, base), true));

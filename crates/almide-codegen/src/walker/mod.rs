@@ -480,7 +480,7 @@ fn render_fn_safe_name(
         // avoid doubling the module (#433 × #411-B). Mirrors the call-site strip;
         // gated on a dotted IR name so plain module fns are unaffected.
         let base: String = if func.name.as_str().contains('.') {
-            safe_name.strip_prefix(&format!("{}_", origin)).unwrap_or(&safe_name).to_string()
+            almide_base::names::strip_module_path(&raw_name, origin).map_or_else(|| safe_name.clone(), rust_safe_fn_name)
         } else {
             safe_name.clone()
         };

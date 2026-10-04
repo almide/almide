@@ -332,7 +332,7 @@ pub fn lower_module(
     ir_prog.functions.retain(|f| !f.is_test);
     // Set module_origin on top_let VarInfo — walker prefixes at emit time.
     // IR names stay clean (no ALMIDE_RT_ mangling in the IR).
-    let mod_ident = versioned_name.as_deref().unwrap_or(name).replace('.', "_");
+    let mod_ident = almide_base::names::module_ident(versioned_name.as_deref().unwrap_or(name));
     for tl in &ir_prog.top_lets {
         ir_prog.var_table.entries[tl.var.0 as usize].module_origin = Some(mod_ident.clone());
     }

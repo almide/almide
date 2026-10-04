@@ -77,3 +77,99 @@ mod tests {
         assert!(!test_name_matches_filter(n, "BETA"));
     }
 }
+
+/// The identifier a module PATH contributes to every generated item name —
+/// a module function `almide_rt_<ident>_<fn>`, a module type
+/// `almide_rt_<ident>_<Type>`, a module global's static, and the
+/// `module_origin` the IR carries (#3338).
+///
+/// INJECTIVE, and so is `<ident>_<name>` for any identifier `name`: a `_`
+/// inside a segment is `_0`, a segment boundary (`.`) is `_1`, and the `_`
+/// before `name` is a bare `_` — never followed by a digit, because neither a
+/// segment nor a name starts with one. Reading left to right, `_0` / `_1` /
+/// `_` decode without lookahead past one character, so `a.b` (`a_1b`), `a_b`
+/// (`a_0b`) and module `a` + name `b_c` (`a_b_c`) are three spellings. The
+/// historic `.` → `_` fold made all three `a_b`, which collided on both legs.
+///
+/// The identity on a single segment without `_` — every stdlib module, and so
+/// every `almide_rt_<module>_<fn>` runtime symbol, keeps its spelling.
+pub fn module_ident(path: &str) -> String {
+    let mut out = String::with_capacity(path.len() + 4);
+    for (i, seg) in path.split('.').enumerate() {
+        if i > 0 {
+            out.push_str("_1");
+        }
+        for ch in seg.chars() {
+            if ch == '_' {
+                out.push_str("_0");
+            } else {
+                out.push(ch);
+            }
+        }
+    }
+    out
+}
+
+/// A module-qualified declaration name (`a.b.Tok`) as one identifier:
+/// [`module_ident`] of the module path, `_`, the bare name (`a_1b_Tok`). A
+/// name with no module part is returned as is.
+pub fn qualified_ident(qualified: &str) -> String {
+    match qualified.rsplit_once('.') {
+        Some((module, name)) => format!("{}_{}", module_ident(module), name),
+        None => qualified.to_string(),
+    }
+}
+
+/// The rest of a dotted IR name after the module path whose
+/// [`module_ident`] is `origin` (`varlib.Pigment.encode` under origin
+/// `varlib` → `Pigment.encode`), or `None` when the name does not start with
+/// that module. A qualified-method fn's definition and every call site strip
+/// the module this one way before prefixing `almide_rt_<origin>_`, so the
+/// module is never spelled twice (#433 × #411-B).
+pub fn strip_module_path<'a>(name: &'a str, origin: &str) -> Option<&'a str> {
+    name.match_indices('.')
+        .map(|(i, _)| i)
+        .find(|&i| module_ident(&name[..i]) == origin)
+        .map(|i| &name[i + 1..])
+}
+
+#[cfg(test)]
+mod module_ident_tests {
+    use super::{module_ident, qualified_ident};
+
+    #[test]
+    fn stdlib_and_plain_modules_keep_their_spelling() {
+        for m in ["list", "string", "int8", "m", "parser"] {
+            assert_eq!(module_ident(m), m);
+        }
+    }
+
+    #[test]
+    fn dotted_underscored_and_name_boundaries_never_collide() {
+        let spellings = [
+            format!("{}_{}", module_ident("a.b"), "c"),
+            format!("{}_{}", module_ident("a_b"), "c"),
+            format!("{}_{}", module_ident("a"), "b_c"),
+            format!("{}_{}", module_ident("a._b"), "c"),
+            format!("{}_{}", module_ident("a_.b"), "c"),
+            format!("{}_{}", module_ident("a"), "_b_c"),
+            qualified_ident("a.b.c"),
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for s in &spellings[..6] {
+            assert!(seen.insert(s.clone()), "collision on {s}");
+        }
+        assert_eq!(spellings[6], spellings[0]);
+        assert_eq!(qualified_ident("Tok"), "Tok");
+    }
+
+    #[test]
+    fn strip_module_path_matches_the_encoded_origin() {
+        use super::strip_module_path;
+        assert_eq!(strip_module_path("varlib.Pigment.encode", "varlib"), Some("Pigment.encode"));
+        assert_eq!(strip_module_path("a.b.T.m", "a_1b"), Some("T.m"));
+        assert_eq!(strip_module_path("a_b.T.m", "a_0b"), Some("T.m"));
+        assert_eq!(strip_module_path("a.b.T.m", "a_0b"), None);
+        assert_eq!(strip_module_path("Pigment.encode", "varlib"), None);
+    }
+}
