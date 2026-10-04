@@ -520,26 +520,32 @@ fn emit_program_pass(
     // fn's own name, and makes the export an obligation: a declared export
     // that does not lower refuses the module in either form, never ships an
     // artifact silently missing the entry point its host calls.
+    // #3281: a fn of a linked module (sibling `import self.x`, dependency
+    // package) exports only when it DECLARES `@export(wasm, ..)` — its own
+    // pub surface stays internal — under the same obligation and the same
+    // one-namespace duplicate wall as an entry fn.
     let mut export_fns: Vec<(String, u32)> = Vec::new();
+    let mut export_owners: Vec<String> = Vec::new();
     for (i, (f, qual, _space)) in program_fns.iter().enumerate() {
         let name = f.name.as_str();
-        if qual.is_some()
-            || name == "main"
+        let declared = f.export_attrs.iter().find(|a| a.target.as_str() == "wasm").map(|a| a.symbol.to_string());
+        let skip_entry = !matches!(f.visibility, almide_ir::IrVisibility::Public);
+        if name == "main"
             || name.starts_with("__")
             || f.is_test
             || f.generics.as_ref().is_some_and(|g| !g.is_empty())
-            || !matches!(f.visibility, almide_ir::IrVisibility::Public)
+            || if qual.is_some() { declared.is_none() } else { skip_entry }
         {
             continue;
         }
-        let declared = f.export_attrs.iter().find(|a| a.target.as_str() == "wasm").map(|a| a.symbol.to_string());
+        let owner = qual.clone().unwrap_or_else(|| name.to_string());
         let export_name = declared.clone().unwrap_or_else(|| name.to_string());
         let (sub, err, site) = reach(vec![i], Vec::new());
         if let Some(reason) = &err
             && (library || declared.is_some())
         {
             crate::decline_site::set(site);
-            return unsup(&format!("exported function `{name}` cannot be lowered: {reason}"));
+            return unsup(&format!("exported function `{owner}` cannot be lowered: {reason}"));
         }
         if err.is_none() {
             // A second export of one name is an invalid module — a wall,
@@ -547,14 +553,20 @@ fn emit_program_pass(
             // `memory`, `main` and the `__`-prefixed runtime exports are the
             // module's own.
             let reserved = matches!(export_name.as_str(), "memory" | "main") || export_name.starts_with("__");
-            if reserved || export_fns.iter().any(|(e, _)| *e == export_name) {
+            let prior = export_fns.iter().position(|(e, _)| *e == export_name);
+            if reserved || prior.is_some() {
+                let claimants = match prior {
+                    Some(p) => format!("fns `{}` and `{owner}`", export_owners[p]),
+                    None => format!("fn `{owner}` and the module's own export"),
+                };
                 return unsup(&format!(
-                    "duplicate wasm export name `{export_name}` (fn `{name}`) — two exports claim it, which is an invalid module"
+                    "duplicate wasm export name `{export_name}` ({claimants}) — two exports claim it, which is an invalid module"
                 ));
             }
             visited.extend(sub);
             crate::host_exports::note_export(&export_name, table.infos[i].param_owned.clone());
             export_fns.push((export_name, table.infos[i].wasm_index));
+            export_owners.push(owner);
         }
     }
 
