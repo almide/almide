@@ -133,6 +133,7 @@ pub fn route_wasm(
     let program = crate::wasm_leg::parse_entry(file, source_text).map_err(RouteError::Front)?;
     let resolved = crate::wasm_leg::resolve_modules(file, &program, modules).map_err(RouteError::Front)?;
     let ast_inputs = RouteInputs::of_ast(&program);
+    let generic_export = generic_wasm_export(&program, &resolved);
     let lowered = crate::wasm_leg::lower_resolved(file, source_text, program, resolved, None);
     let RouteInputs { has_main } = match (inputs, &lowered) {
         (Some(i), _) => i,
@@ -155,6 +156,9 @@ pub fn route_wasm(
         Ok(ir) => ir,
         Err(e) => return Err(wall(format!("front: {e}"), trace)),
     };
+    if let Some(why) = generic_export {
+        return Err(wall(why, trace));
+    }
     let emitted = if has_main || !library {
         almide_wasm::emit_program_with_ops(ir)
     } else {
@@ -189,6 +193,31 @@ pub fn route_wasm(
         trace(&format!("[almide] structural leg emitted the module ({} bytes)", bytes.len()));
     }
     Ok(RoutedWasm { bytes, host_ops: host_ops.iter().copied().collect() })
+}
+
+/// #3285: `@export(wasm, "sym")` on a generic fn, in the entry file or any
+/// linked module. A wasm export is one function with one signature; a
+/// generic fn has none until it is instantiated, and its instances are not
+/// the declaration the host was promised. The emitter used to skip it, so
+/// the artifact shipped without the export — refused here instead (E082),
+/// read off the source so monomorphization cannot hide the generic.
+fn generic_wasm_export(program: &crate::ast::Program, resolved: &crate::resolve::ResolvedModules) -> Option<String> {
+    let entry = std::iter::once((None, program));
+    let modules = resolved.modules.iter().map(|(name, prog, _, _)| (Some(name.as_str()), prog));
+    entry.chain(modules).find_map(|(module, prog)| {
+        prog.decls.iter().find_map(|d| match d {
+            crate::ast::Decl::Fn { name, generics: Some(g), export_attrs, .. } if !g.is_empty() => {
+                let attr = export_attrs.iter().find(|a| a.target.as_str() == "wasm")?;
+                let fn_name = module.map_or_else(|| name.to_string(), |m| format!("{m}.{name}"));
+                Some(format!(
+                    "exported function `{fn_name}` is generic: a wasm export needs a concrete signature — \
+                     write a non-generic fn for `@export(wasm, \"{}\")` that calls `{name}` at the types the host passes",
+                    attr.symbol
+                ))
+            }
+            _ => None,
+        })
+    })
 }
 
 /// The library form: [`route_wasm`] with the routing facts read off the

@@ -1,0 +1,2 @@
+@export(wasm, "tick")
+fn step(x: Int) -> Int = x + 1
