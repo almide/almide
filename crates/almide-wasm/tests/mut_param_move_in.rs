@@ -151,3 +151,63 @@ effect fn main() -> Unit = {
     let (_, out) = run(src);
     assert_eq!(out, "1 99\n[99, 1] [0, 0]\n");
 }
+
+/// #3343: a closure-captured var (a C-319 cell) and a record field place
+/// move in too — the cell is emptied through its address, the field slot
+/// in the (unshared) record — so neither copies per call.
+#[test]
+fn a_captured_var_and_a_field_place_are_in_place() {
+    let bump = "fn bump(mut xs: List[Int], i: Int) -> Unit = { xs[i % 2] = xs[i % 2] + 1 }";
+    in_place(
+        "closure-captured var",
+        bump,
+        "var buf: List[Int] = list.repeat(0, 70000)\n  let f = (k: Int) => bump(buf, k)",
+        "f(k)",
+        SHOW,
+        ("1 1 0\n", "100 100 0\n"),
+    );
+    let fns = format!("type H = {{ xs: List[Int], n: Int }}\n{bump}");
+    in_place(
+        "record field place",
+        &fns,
+        "var h = H { xs: list.repeat(0, 70000), n: 3 }",
+        "bump(h.xs, k)",
+        r#""${h.xs[0]} ${h.xs[1]} ${h.n}""#,
+        ("1 1 3\n", "100 100 3\n"),
+    );
+    let fns = format!("type H = {{ xs: List[Int], n: Int }}\n{bump}");
+    in_place(
+        "field place inside a closure",
+        &fns,
+        "var h = H { xs: list.repeat(0, 70000), n: 3 }\n  let f = (k: Int) => bump(h.xs, k)",
+        "f(k)",
+        r#""${h.xs[0]} ${h.xs[1]} ${h.n}""#,
+        ("1 1 3\n", "100 100 3\n"),
+    );
+}
+
+/// The moves never let a write show through an alias of the captured var,
+/// of the field's block, or of the whole record (C-033).
+#[test]
+fn a_moved_cell_or_field_keeps_its_aliases() {
+    let src = r#"type H = { xs: List[Int], n: Int }
+fn bump(mut xs: List[Int], i: Int) -> Unit = { xs[i] = xs[i] + 1 }
+fn grow(mut xs: List[Int], v: Int) -> Unit = list.push(xs, v)
+effect fn main() -> Unit = {
+  var buf: List[Int] = [0, 0, 0]
+  let f = (k: Int) => bump(buf, k)
+  let snap = buf
+  f(0)
+  f(1)
+  println("${buf} ${snap}")
+  var h = H { xs: [0, 0], n: 1 }
+  let kept = h.xs
+  let h2 = h
+  bump(h.xs, 0)
+  grow(h.xs, 5)
+  println("${h.xs} ${kept} ${h2.xs} ${h.n}")
+}
+"#;
+    let (_, out) = run(src);
+    assert_eq!(out, "[1, 1, 0] [0, 0, 0]\n[1, 0, 5] [0, 0] [0, 0] 1\n");
+}
