@@ -179,6 +179,28 @@ impl LowerCtx {
     /// intermediates — the same accounting the TCO pre-copy proves. The Dup joins
     /// `live_heap_handles` (scope-end drops the FINAL object through the same local);
     /// its cert `a` is backed by the real `Op::Dup` (the borrow-by-default gate).
+    /// #3270: an OWNED COPY at function entry for every borrowed param an index,
+    /// field or map write mutates inside a branch arm (`xs = list.set(xs, 2, v)`
+    /// lowers to such a write under its bounds check). `lower_place_mutation` took
+    /// the param's copy-on-write `Dup` INSIDE the arm, the arm's teardown dropped
+    /// it, and the var still named it after the join: the else path read a value
+    /// it never computed and the then path a freed block. Taken before the
+    /// branch, the copy is the var on every path; the arm's write only
+    /// `MakeUnique`s it, and the scope end drops it once.
+    pub(crate) fn precopy_branch_mutated_params(&mut self, body: &IrExpr) {
+        for var in branch_place_targets(body) {
+            let Some(&val) = self.value_of.get(&var) else { continue };
+            let Some(ty) = self.var_decl_tys.get(&var).cloned() else { continue };
+            if self.param_values.contains(&val) && is_heap_ty(&ty) {
+                let owned = self.fresh_value();
+                self.ops.push(Op::Dup { dst: owned, src: val });
+                self.value_of.insert(var, owned);
+                self.live_heap_handles.push(owned);
+                self.seed_call_named_heap_read_shape(owned, &ty);
+            }
+        }
+    }
+
     pub(crate) fn precopy_borrowed_reassign_slots(&mut self, body: &[IrStmt]) {
         // A borrowed RECORD param whose field path an in-place mutator writes
         // (`list.pop(u.kids)`): the field COW copies the root record and rebinds the
@@ -717,4 +739,36 @@ fn collect_field_mutator_roots(stmts: &[IrStmt]) -> Vec<(VarId, Ty)> {
         almide_ir::visit::IrVisitor::visit_stmt(&mut s, stmt);
     }
     s.0
+}
+
+/// The targets of the index / field / map writes nested in an `if` or `match`
+/// arm of `body` (#3270), in first-occurrence order.
+fn branch_place_targets(body: &IrExpr) -> Vec<VarId> {
+    use almide_ir::visit::{walk_expr, walk_stmt, IrVisitor};
+    struct Scan {
+        depth: u32,
+        out: Vec<VarId>,
+    }
+    impl IrVisitor for Scan {
+        fn visit_stmt(&mut self, stmt: &IrStmt) {
+            if let IrStmtKind::IndexAssign { target, .. }
+            | IrStmtKind::FieldAssign { target, .. }
+            | IrStmtKind::MapInsert { target, .. } = &stmt.kind
+            {
+                if self.depth > 0 && !self.out.contains(target) {
+                    self.out.push(*target);
+                }
+            }
+            walk_stmt(self, stmt);
+        }
+        fn visit_expr(&mut self, e: &IrExpr) {
+            let arm = matches!(e.kind, IrExprKind::If { .. } | IrExprKind::Match { .. });
+            self.depth += u32::from(arm);
+            walk_expr(self, e);
+            self.depth -= u32::from(arm);
+        }
+    }
+    let mut s = Scan { depth: 0, out: Vec::new() };
+    s.visit_expr(body);
+    s.out
 }
