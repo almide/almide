@@ -26,7 +26,10 @@ effect fn lookup(key: String) -> String = {
   string.slice(held, 0, 1) + "=" + got
 }
 
-effect fn total(keys: List[String]) -> Int = keys |> list.map((k) => count(k)!)! |> list.fold(0, (a, b) => a + b)
+effect fn total(keys: List[String]) -> Int = keys |> list.map((k) => count(k)!)! |> list.fold(
+  0,
+  (a, b) => a + b,
+)
 
 effect fn mark(key: String) -> String = {
   touch(key)!
