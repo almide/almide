@@ -8,10 +8,10 @@ impl Checker {
     pub(crate) fn check_concurrent_var_reach(&mut self, program: &ast::Program) {
         use crate::concurrent_reach::{Analyzer, World};
         let module = self.current_module_prefix.as_deref().map(sym);
-        let aliases = self.env.import_table.aliases.clone();
-        let direct = self.env.import_table.direct.clone();
         let findings = {
             let env = &self.env;
+            let aliases = &env.import_table.aliases;
+            let direct = &env.import_table.direct;
             let type_map = &self.type_map;
             let arg_is_fn = |e: &ast::Expr| -> Option<bool> {
                 type_map.get(&e.id).map(|t| crate::concurrent_reach_types::ty_is_fn_valued(env, t))
@@ -19,8 +19,8 @@ impl Checker {
             let type_is_fn = |te: &ast::TypeExpr| crate::concurrent_reach_types::type_expr_is_fn_valued(env, te);
             let w = World {
                 module,
-                aliases: &aliases,
-                direct: &direct,
+                aliases,
+                direct,
                 ext: &env.concurrent_summaries,
                 arg_is_fn: &arg_is_fn,
                 type_is_fn: &type_is_fn,
