@@ -326,6 +326,7 @@ struct CertScan {
     line_slots: BTreeSet<ValueId>,
     addr_of: BTreeMap<ValueId, ValueId>, // address → the object it points into (#3233)
     child_of: BTreeMap<ValueId, ValueId>, // raw LoadHandle child → the object it was loaded from (#3261)
+    paths: PathScopes, // the handle maps scoped to the control-flow path (#3267, certificate_b_tail.rs)
 }
 
 impl CertScan {
@@ -334,6 +335,7 @@ impl CertScan {
     /// [`drop_family_value`] / [`alloc_class_prim_dst`] / [`heap_call_dst`] and
     /// the loop-slot feeder routing is [`Self::feed_or_own`].
     fn step(&mut self, op: &Op) {
+        self.cross_path_probes(op); // a handle the current path never defined (#3267)
         self.read_probes(op); // every handle READ is a `b` probe (#3233, certificate_b_tail.rs)
         // Plain release (−1). A `DropListStr`/`DropListValue` is the SAME single `d` on the LIST
         // object — its elements were already accounted as `m` (consumed) when stored into it, so
@@ -410,18 +412,7 @@ impl CertScan {
             // side alone. An object created later (in the surviving
             // continuation) correctly gets no `x`; a borrowed param's lone
             // `x` sits at count 0 and passes trivially.
-            Op::Return { val } => {
-                if let Some(v) = val {
-                    if self.s.of.contains_key(v) {
-                        let o = self.s.object_of(*v);
-                        self.s.event(o, 'm');
-                    }
-                }
-                let objs: BTreeSet<ValueId> = self.s.of.values().copied().collect();
-                for o in objs {
-                    self.s.event(o, 'x');
-                }
-            }
+            Op::Return { val } => self.return_step(*val),
             // A LIVE USE — a read-only borrow or an in-place unique use (`xs[i] = v`
             // via MakeUnique) — on an object whose stream HOLDS ownership (it has a
             // +1 event) is witnessed as `b` (+0, liveness-guarded, brick 5b): a use
@@ -488,6 +479,7 @@ impl CertScan {
         } else {
             self.s.else_branch();
         }
+        self.leave_arm(is_end);
     }
 
     /// Route `dst`'s event into its loop-carried SLOT stream when it FEEDS one.
@@ -615,6 +607,7 @@ impl CertScan {
             }
         }
         self.s.open_branch();
+        self.enter_branch_scope();
     }
 
     /// A LIVE USE (Borrow / MakeUnique) on an object whose stream HOLDS

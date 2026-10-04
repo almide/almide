@@ -156,8 +156,8 @@ run_mode modes-agree    modes call-modes 0
 run_mode modes-mismatch modes call-modes 1
 
 echo "-- property: ownership, format v4 (brick 5a/5b: branch agreement + borrow) --"
-# BRANCH agreement: both arms acquire one alias (net +1, a heap-result-branch
-# shape) → `i{a|a}dd` ACCEPT; a mis-lowered branch whose arms disagree
+# BRANCH agreement: both arms release the alias taken before the branch (net
+# −1) → `ia{d|d}d` ACCEPT; a mis-lowered branch whose arms disagree
 # (+1 vs 0 — a path-dependent leak) → `i{a|}d` REJECT. The lowering's per-arm
 # balance is no longer a trusted convention: the proven CBranch rule re-derives
 # arm agreement from the witness itself.
