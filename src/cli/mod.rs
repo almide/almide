@@ -158,6 +158,18 @@ pub fn check_proc_allowlist(ir: &almide::ir::IrProgram, allow: &[String]) -> Res
 /// Apply `[permissions] proc`: the static gate above, and the same list as
 /// the embedded wasm host's run-time bound (`almide:process/spawn` answers a
 /// command outside it with an err naming the command).
+/// The whole `[permissions]` gate: the capability allow-list (`allow`, via
+/// [`check_permissions`]) and the subprocess allow-list (`proc`, #2589).
+/// `[permissions]` is a property of the program, not of the target (#3275):
+/// the build routes reach it through `compile_driver::optimize_gate_and_link`,
+/// and `check` calls it directly. Each violation is printed as it is found.
+pub fn enforce_project_permissions(ir: &almide::ir::IrProgram, proj: &crate::project::Project) -> Result<(), String> {
+    if !proj.permissions.is_empty() {
+        check_permissions(ir, &proj.permissions)?;
+    }
+    enforce_proc_allowlist(ir, proj.proc_allow.as_deref())
+}
+
 pub fn enforce_proc_allowlist(ir: &almide::ir::IrProgram, allow: Option<&[String]>) -> Result<(), String> {
     almide_wasm_run::set_proc_allowlist(allow.map(<[String]>::to_vec));
     match allow {

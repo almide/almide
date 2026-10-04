@@ -212,16 +212,41 @@ pub(crate) fn lower_one_user_module(
     }
 }
 
-fn verify_ir_or_err(ir_program: &Option<almide::ir::IrProgram>) -> Result<(), String> {
-    if let Some(ir) = ir_program {
-        let verify_errors = almide::ir::verify_program(ir);
-        if !verify_errors.is_empty() {
-            for e in &verify_errors {
-                err(&format!("internal compiler error: {}", e));
-            }
-            return Err(format!("{} IR verification error(s)", verify_errors.len()));
+fn verify_ir_or_err(ir: &almide::ir::IrProgram) -> Result<(), String> {
+    let verify_errors = almide::ir::verify_program(ir);
+    if !verify_errors.is_empty() {
+        for e in &verify_errors {
+            err(&format!("internal compiler error: {}", e));
         }
+        return Err(format!("{} IR verification error(s)", verify_errors.len()));
     }
+    Ok(())
+}
+
+/// The project manifest in the working directory, if there is one that
+/// parses — the same lookup every command makes.
+pub(crate) fn cwd_project() -> Option<project::Project> {
+    let path = std::path::Path::new("almide.toml");
+    if path.exists() { project::parse_toml(path).ok() } else { None }
+}
+
+/// The post-lowering pipeline every build route runs: the driver's optimize
+/// half, the route's integrity check (`verify`), the `[permissions]` gate,
+/// then monomorphize + link. The gate inspects the post-optimize, pre-mono
+/// IR on every route, and lives here once so a route cannot reach codegen
+/// around it: the wasm build/run route skipped it entirely while the native
+/// build refused the same program (#3275).
+pub(crate) fn optimize_gate_and_link(
+    ir: &mut almide::ir::IrProgram,
+    proj: Option<&project::Project>,
+    verify: impl FnOnce(&almide::ir::IrProgram) -> Result<(), String>,
+) -> Result<(), String> {
+    almide_driver::optimize_half(ir);
+    verify(ir)?;
+    if let Some(proj) = proj {
+        cli::enforce_project_permissions(ir, proj)?;
+    }
+    almide_driver::link_half(ir);
     Ok(())
 }
 
@@ -320,37 +345,12 @@ fn typecheck_and_lower_for_compile(
 /// integrity, check `[permissions]`, monomorphize, and link dependency
 /// modules into the root. Extracted verbatim.
 fn optimize_verify_and_link(ir_program: &mut Option<almide::ir::IrProgram>, parsed_project: &Option<project::Project>) -> Result<(), String> {
-    // The driver's FIRST half (optimize + top-let reclassify). The integrity gates below
-    // deliberately run on the post-optimize, pre-mono IR, so this site takes the two halves
-    // rather than one `link_ir` call — the order still lives in `almide-driver`, and the
-    // gate insertion point is now explicit instead of implicit in a hand-copied sequence.
-    if let Some(ir) = ir_program.as_mut() {
-        almide_driver::optimize_half(ir);
+    // The driver's two halves with the integrity check and the `[permissions]`
+    // gate (Security Layer 2) between them — the sequence the wasm route shares.
+    match ir_program.as_mut() {
+        Some(ir) => optimize_gate_and_link(ir, parsed_project.as_ref(), verify_ir_or_err),
+        None => Ok(()),
     }
-
-    // Verify IR integrity
-    verify_ir_or_err(ir_program)?;
-
-    // Security Layer 2: check permissions if defined in almide.toml
-    if let Some(proj) = parsed_project {
-        if !proj.permissions.is_empty() {
-            if let Some(ir) = ir_program.as_ref() {
-                cli::check_permissions(ir, &proj.permissions)?;
-            }
-        }
-        // #2589: `[permissions] proc` — statically, and as the embedded wasm
-        // host's run-time bound.
-        if let Some(ir) = ir_program.as_ref() {
-            cli::enforce_proc_allowlist(ir, proj.proc_allow.as_deref())?;
-        }
-    }
-
-    // The driver's SECOND half (monomorphize + link), after the gates above.
-    if let Some(ir) = ir_program.as_mut() {
-        almide_driver::link_half(ir);
-    }
-
-    Ok(())
 }
 
 pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(String, Option<almide::ir::IrProgram>), String> {
