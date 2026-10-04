@@ -143,9 +143,42 @@ impl Emitter<'_> {
             }
             return;
         }
-        if self.rc_droppable(ty) {
+        if self.rc_droppable(ty) && !self.rc_owned_result(e) && self.is_pool_static_case(e, ty) {
+            // #2758: a nullary case the ownership predicate did not class as
+            // owned (a generic instance's case, resolved only by the slot's
+            // type): the share guard's `rc_inc_top` is a real call that
+            // no-ops on the pool static, and the container's credit on it
+            // is never released for real. A view's share and move (`am`).
+            if let Some(w) = self.witness.as_mut() {
+                w.view_share_move();
+            }
+        } else if self.rc_droppable(ty) {
             self.witness_share_or_move(e, "store:borrowed-temp");
         }
+    }
+
+    /// Does `e`, lowered against the slot type `ty`, build a NULLARY variant
+    /// case — the pool static `lower_variant_ctor` interns (#1961)? The same
+    /// two routes `lower_call_at` resolves a ctor by: the hint's own cases,
+    /// then the global ctor map. A ctor reached with no argument lowers only
+    /// when its case has no field (the arity check), so either route is a
+    /// static.
+    fn is_pool_static_case(&self, e: &almide_ir::IrExpr, ty: SliceTy) -> bool {
+        use crate::types_table::NamedDef;
+        let almide_ir::IrExprKind::Call { target: almide_ir::CallTarget::Named { name }, args, .. } = &e.kind else {
+            return false;
+        };
+        let name = name.as_str();
+        let nullary = |ti: u32, ci: usize| matches!(self.types.def(ti), NamedDef::Variant(v) if v.cases.get(ci).is_some_and(|c| c.fields.is_empty()));
+        let by_type = match ty {
+            SliceTy::Named(ti) => match self.types.def(ti) {
+                NamedDef::Variant(v) => v.cases.iter().position(|c| c.name == name).map(|ci| (ti, ci)),
+                _ => None,
+            },
+            _ => None,
+        };
+        let ctor = by_type.or_else(|| self.types.ctors.get(name).map(|&(ti, ci)| (ti, ci as usize)));
+        args.is_empty() && ctor.is_some_and(|(ti, ci)| nullary(ti, ci))
     }
 
     /// One arm of `r ?? fallback` (data.rs, #2970), right after the arm's
