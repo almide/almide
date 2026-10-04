@@ -354,6 +354,7 @@ fn source_to_ir(path: &Path, source: &str) -> FrontendOutcome {
         almide_ir::mut_param::lower_mut_params_move_mode(&mut ir);
         // Arg-block hoist, THEN guard → if restructure — the SAME order the
         // pipeline runs (see source_to_ir_with, #1968).
+        almide_mir::lower::bind_heap_unwrap_or_literal_elems(&mut ir);
         almide_mir::lower::hoist_block_call_args(&mut ir);
         // #3058: list-rest matches become the length-test chain the lowering runs.
         almide_mir::lower::desugar_list_rest_matches(&mut ir);
