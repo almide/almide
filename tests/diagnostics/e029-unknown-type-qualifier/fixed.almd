@@ -1,0 +1,7 @@
+// #3336: a type qualified by a module this file never imports is E029 naming
+// the qualifier — it no longer falls back to the file's own `View`.
+type View = { n: Int }
+
+fn root() -> View = { n: 1 }
+
+effect fn main() -> Unit = println(int.to_string(root().n))
