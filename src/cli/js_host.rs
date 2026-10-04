@@ -42,6 +42,8 @@ use almide_wasm::host_exports::{AbiShape, ExportRet};
 
 #[path = "js_host_exports.rs"]
 mod exports;
+#[path = "js_host_async.rs"]
+mod jspi;
 
 /// One function on the host boundary: an exported `pub fn` or an extern.
 #[derive(Debug, Clone)]
@@ -68,6 +70,9 @@ pub(crate) struct HostSurface {
     pub exports: Vec<HostFn>,
     pub externs: Vec<HostExtern>,
     pub has_main: bool,
+    /// `--async-import` (#3353): the extern import names whose hook may
+    /// return a Promise.
+    pub async_imports: Vec<String>,
 }
 
 impl HostSurface {
@@ -83,6 +88,22 @@ impl HostSurface {
             returns_result(f) || !exports::scalar_only(visible_ret(f)) || f.params.iter().any(|(_, t)| !exports::scalar_only(t))
         });
         externs_string || exports_block
+    }
+
+    /// Take `--async-import` (#3353): every name must be an extern import
+    /// the program declares, or the build refuses naming it.
+    pub(crate) fn set_async_imports(&mut self, names: &[String]) -> Result<(), String> {
+        for n in names {
+            if !self.externs.iter().any(|e| &e.import == n) {
+                let declared: Vec<&str> = self.externs.iter().map(|e| e.import.as_str()).collect();
+                return Err(format!(
+                    "error: --async-import `{n}` names no @extern(wasm, ..., \"{n}\") import of this program — it declares: {}",
+                    if declared.is_empty() { "none".to_string() } else { declared.join(", ") }
+                ));
+            }
+        }
+        self.async_imports = names.to_vec();
+        Ok(())
     }
 
     pub(crate) fn of(program: &IrProgram) -> Self {
@@ -456,7 +477,7 @@ fn check_imports_served(sigs: &WasmSigs, surface: &HostSurface) -> Result<(), St
 
 /// The `imports()` function: the WASI shims the module names and one
 /// marshalling closure per extern import.
-fn import_object_js(sigs: &WasmSigs, surface: &HostSurface) -> Result<String, String> {
+fn import_object_js(sigs: &WasmSigs, surface: &HostSurface, suspension: &jspi::Suspension) -> Result<String, String> {
     let mut js = String::from("\nfunction imports() {\n  const wasiImports = {};\n  const jsImports = {};\n");
     for (module, name, sig) in &sigs.imports {
         if module == "wasi_snapshot_preview1" {
@@ -471,12 +492,23 @@ fn import_object_js(sigs: &WasmSigs, surface: &HostSurface) -> Result<String, St
             let v = *sig.params.get(i).ok_or_else(|| format!("import `{name}` has fewer wasm params than `{}` declares", e.sig.name))?;
             conv.push(from_wasm(m, v, &args[i], name, false));
         }
-        let call = format!("hook(\"{module}\", \"{name}\")({})", conv.join(", "));
+        let suspends = suspension.imports.contains(name);
+        // An async hook's arguments are decoded before it runs (the call
+        // expression), its result encoded after the promise settles.
+        let call = if suspends {
+            format!("(await hook(\"{module}\", \"{name}\")({}))", conv.join(", "))
+        } else {
+            format!("hook(\"{module}\", \"{name}\")({})", conv.join(", "))
+        };
         let body = match (marshal_of(&e.sig.ret).expect("checked"), sig.results.first()) {
             (Marshal::Unit, _) | (_, None) => format!("{call};"),
             (m, Some(v)) => format!("return {};", to_wasm(m, *v, &call, name)),
         };
-        js.push_str(&format!("  jsImports.{name} = ({}) => {{ {body} }};\n", args.join(", ")));
+        if suspends {
+            js.push_str(&format!("  jsImports.{name} = new WebAssembly.Suspending(async ({}) => {{ {body} }});\n", args.join(", ")));
+        } else {
+            js.push_str(&format!("  jsImports.{name} = ({}) => {{ {body} }};\n", args.join(", ")));
+        }
     }
     js.push_str("  const obj = { wasi_snapshot_preview1: wasiImports };\n");
     let modules: std::collections::BTreeSet<&str> = surface.externs.iter().map(|e| e.module.as_str()).collect();
@@ -497,7 +529,19 @@ fn hooks_dts(surface: &HostSurface) -> String {
     if surface.externs.is_empty() {
         return "  /** The program declares no `@extern(wasm, ...)` import. */\n  js?: Record<string, never>;\n}\n\n".to_string();
     }
-    let rows: Vec<String> = surface.externs.iter().map(|e| format!("    {}: {};", e.import, signature_dts(&e.sig))).collect();
+    let rows: Vec<String> = surface
+        .externs
+        .iter()
+        .map(|e| {
+            let sig = signature_dts(&e.sig);
+            // An async import's hook may return the value or a Promise of it (#3353).
+            let sig = match sig.rsplit_once(" => ") {
+                Some((params, ret)) if surface.async_imports.contains(&e.import) => format!("{params} => {ret} | Promise<{ret}>"),
+                _ => sig,
+            };
+            format!("    {}: {};", e.import, sig)
+        })
+        .collect();
     format!("  /** The `@extern(wasm, \"js\", ...)` imports the program declares. */\n  js: {{\n{}\n  }};\n}}\n\n", rows.join("\n"))
 }
 
@@ -524,6 +568,8 @@ pub(crate) fn generate(
     let sigs = wasm_sigs(bytes)?;
     check_marshallable(surface)?;
     check_imports_served(&sigs, surface)?;
+    let wrapped = surface.exports.iter().map(|f| f.name.clone()).chain(std::iter::once("_start".to_string())).collect();
+    let suspension = jspi::analyse(bytes, &surface.async_imports, &wrapped)?;
 
     let version = env!("CARGO_PKG_VERSION");
     let alloc_body = "  const h = instance.exports.__alloc(b.length); // the module sets rc = 1, len, cap";
@@ -543,15 +589,24 @@ pub(crate) fn generate(
         let owned = export_param_owned.get(&f.name).map(Vec::as_slice).unwrap_or(&[]);
         let plan = exports::plan_export(f, export_params.get(&f.name).map(Vec::as_slice), export_rets.get(&f.name))?;
         needs_values |= plan.needs_values();
-        wrappers.push_str(&exports::wrapper_js(f, sig, owned, &plan)?);
-        export_dts.push_str(&exports::export_dts(f, &plan));
+        let entry = suspension.entry(&f.name);
+        wrappers.push_str(&exports::wrapper_js(f, sig, owned, &plan, entry)?);
+        export_dts.push_str(&exports::export_dts(f, &plan, entry));
     }
     let mut string_helpers = if surface.needs_string_abi() { JS_STRING_HELPERS.replace("{ALLOC_BODY}", alloc_body) } else { String::new() };
     if needs_values {
         string_helpers.push_str(JS_VALUE_HELPERS);
     }
-    js.push_str(&JS_RUNTIME.replace("{STRING_HELPERS}", &string_helpers).replace("{WASI_OBJECT}", &wasi_object_js(&sigs)));
-    js.push_str(&import_object_js(&sigs, surface)?);
+    if suspension.active() {
+        string_helpers.push_str(jspi::JS_ASYNC_RUNTIME);
+    }
+    let runtime = JS_RUNTIME
+        .replace("{STRING_HELPERS}", &string_helpers)
+        .replace("{WASI_OBJECT}", &wasi_object_js(&sigs))
+        .replace("{JSPI_CHECK}", &jspi::init_check(&suspension))
+        .replace("{JSPI_PROMISED}", &jspi::init_promised(&suspension));
+    js.push_str(&runtime);
+    js.push_str(&import_object_js(&sigs, surface, &suspension)?);
 
     let mut dts = format!("// Generated by `almide build {source_file} --target wasm --host js` (almide {version}).\n\n");
     dts.push_str(DTS_RUNTIME);
@@ -561,8 +616,16 @@ pub(crate) fn generate(
     dts.push_str(&hooks_dts(surface));
     dts.push_str("export function init(source?: WasmSource, hooks?: Hooks): Promise<void>;\n");
     if surface.has_main && sigs.exports.contains_key("_start") {
-        js.push_str(RUN_JS);
-        dts.push_str("/** Run `main`; a non-zero exit code throws `AlmideExit`. */\nexport function run(): void;\n");
+        if suspension.exports.contains("_start") {
+            js.push_str(jspi::RUN_ASYNC_JS);
+            dts.push_str("/** Run `main`, which awaits async imports; a non-zero exit code rejects with `AlmideExit`. */\nexport function run(): Promise<void>;\n");
+        } else {
+            // With async imports present, a synchronous entry refuses while
+            // an async call is suspended (#3353).
+            let guard = if suspension.active() { "  ready();\n  idle(\"run\");\n" } else { "  ready();\n" };
+            js.push_str(&RUN_JS.replacen("  ready();\n", guard, 1));
+            dts.push_str("/** Run `main`; a non-zero exit code throws `AlmideExit`. */\nexport function run(): void;\n");
+        }
     }
     js.push_str(&wrappers);
     dts.push_str(&export_dts);
@@ -635,7 +698,7 @@ function flush() {
  * chunks (default: `process.stdout` under node, `console.log` per line in a page).
  */
 export async function init(source, h = {}) {
-  hooks = h;
+{JSPI_CHECK}  hooks = h;
   let module;
   if (source instanceof WebAssembly.Module) {
     module = source;
@@ -654,7 +717,7 @@ export async function init(source, h = {}) {
   }
   instance = await WebAssembly.instantiate(module, imports());
   memory = instance.exports.memory;
-}
+{JSPI_PROMISED}}
 "#;
 
 /// The String marshalling helpers: shipped only for a surface that

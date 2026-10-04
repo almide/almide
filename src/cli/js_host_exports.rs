@@ -11,6 +11,7 @@
 //! type, is a build-time refusal naming the function: never a wrapper that
 //! reads garbage.
 
+use super::jspi::Entry;
 use super::{from_wasm, returns_result, to_wasm, visible_ret, HostFn, Marshal, Val, WasmSig};
 use almide_lang::types::constructor::TypeConstructorId;
 use almide_lang::types::Ty;
@@ -200,7 +201,7 @@ fn ts_marshal(m: Marshal) -> &'static str {
 }
 
 /// The `.d.ts` line of an export.
-pub(super) fn export_dts(f: &HostFn, plan: &ExportPlan) -> String {
+pub(super) fn export_dts(f: &HostFn, plan: &ExportPlan, entry: Entry) -> String {
     let params: Vec<String> = f
         .params
         .iter()
@@ -219,6 +220,7 @@ pub(super) fn export_dts(f: &HostFn, plan: &ExportPlan) -> String {
         RetPlan::Scalar(m) => ts_marshal(*m).to_string(),
         RetPlan::Block(s) | RetPlan::Unwrap(s) => ts_shape(s, true),
     };
+    let ret = if entry == Entry::Async { format!("Promise<{ret}>") } else { ret };
     format!("export function {}({}): {ret};\n", f.name, params.join(", "))
 }
 
@@ -226,7 +228,7 @@ pub(super) fn export_dts(f: &HostFn, plan: &ExportPlan) -> String {
 /// function. A block argument the CALLEE owns (the recorded ownership) is
 /// its to release; a borrowed one is released here after the call, with
 /// the children it was the last owner of.
-pub(super) fn wrapper_js(f: &HostFn, sig: &WasmSig, owned: &[bool], plan: &ExportPlan) -> Result<String, String> {
+pub(super) fn wrapper_js(f: &HostFn, sig: &WasmSig, owned: &[bool], plan: &ExportPlan, entry: Entry) -> Result<String, String> {
     let mut consts = String::new();
     let mut shape_const = |key: String, s: &AbiShape| {
         let name = format!("S_{}_{key}", f.name);
@@ -256,7 +258,11 @@ pub(super) fn wrapper_js(f: &HostFn, sig: &WasmSig, owned: &[bool], plan: &Expor
             }
         }
     }
-    let call = format!("instance.exports.{}({})", f.name, args.join(", "));
+    let call = if entry == Entry::Async {
+        format!("(await promised.{}({}))", f.name, args.join(", "))
+    } else {
+        format!("instance.exports.{}({})", f.name, args.join(", "))
+    };
     let block_result = |what: &str| -> Result<(), String> {
         match sig.results.first() {
             Some(Val::I32) => Ok(()),
@@ -280,14 +286,20 @@ pub(super) fn wrapper_js(f: &HostFn, sig: &WasmSig, owned: &[bool], plan: &Expor
         }
     };
     let names: Vec<&str> = f.params.iter().map(|(p, _)| p.as_str()).collect();
-    let mut js = format!("\n{consts}export function {}({}) {{\n  ready();\n{}", f.name, names.join(", "), pre.concat());
+    let guard = if entry == Entry::Guarded { format!("  idle(\"{}\");\n", f.name) } else { String::new() };
+    let mut inner = format!("  ready();\n{guard}{}", pre.concat());
     if post.is_empty() {
-        js.push_str(&body);
+        inner.push_str(&body);
     } else {
-        js.push_str(&format!("  try {{\n{body}  }} finally {{\n{}  }}\n", post.concat()));
+        inner.push_str(&format!("  try {{\n{body}  }} finally {{\n{}  }}\n", post.concat()));
     }
-    js.push_str("}\n");
-    Ok(js)
+    let names = names.join(", ");
+    Ok(match entry {
+        // One call in the instance at a time (#3353): the body runs when the
+        // calls before it have settled.
+        Entry::Async => format!("\n{consts}export function {}({names}) {{\n  return serial(async () => {{\n{inner}  }});\n}}\n", f.name),
+        _ => format!("\n{consts}export function {}({names}) {{\n{inner}}}\n", f.name),
+    })
 }
 
 /// Is `ty` (an export's param or visible return) carried by the wasm value
