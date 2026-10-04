@@ -141,6 +141,55 @@ almide add bindgen@v0.1.0
 # → git = "https://github.com/almide/almide-bindgen", tag = "v0.1.0"
 ```
 
+### 6.1 Native Rust dependencies: `[native-deps]`
+
+A package with `native/*.rs` modules or `@extern(rust, …)` functions declares
+the crates.io crates they use in `[native-deps]`. Each entry is copied verbatim
+into the generated crate's Cargo.toml, on every native build route (binary,
+`--cdylib`, `--repr-c`, `almide run`, `almide test`). A dependency package's
+`[native-deps]` are added the same way.
+
+```toml
+[native-deps]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+```
+
+**Target-specific native deps** (#3350). A crate that builds only on some
+targets goes under `[target.<platform>.native-deps]`, which uses Cargo's
+syntax and meaning. It is emitted as `[target.<platform>.dependencies]`, so
+Cargo compiles the crate only when the build's target (the host, or
+`--target <triple>`) matches:
+
+```toml
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.native-deps]
+arboard = "3"
+
+[target.'cfg(target_os = "android")'.native-deps]
+jni = "0.21"
+
+[target.x86_64-pc-windows-gnu.native-deps]
+winapi = "0.3"
+```
+
+`<platform>` is either `cfg(<expr>)` or a target triple, exactly as Cargo
+accepts them. `<expr>` is `all(…)`, `any(…)`, `not(…)`, a name (`unix`), or
+`name = "value"`. Every command that reads `almide.toml` refuses a key Cargo
+would refuse, and names the key and its line:
+
+```text
+error: almide.toml:4: invalid platform `cfg(target_os = android)` in [target.'cfg(target_os = android)'.native-deps]: expected a string after `target_os =`, found `android`
+```
+
+Only `native-deps` can be target-specific: any other table under
+`[target.<platform>]` is an error. A crate the runtime itself needs (for
+example `flate2` for `zlib`, or the TLS crates for `http`) is always declared
+for every target. If you also declare that crate for one target, both
+declarations are written and Cargo merges them.
+
+Tests: `tests/manifest_toml_reader_test.rs`, `tests/native_deps_target_cfg_test.rs`,
+and the `cargo_build` unit tests.
+
 ## 7. Lock File
 
 ```toml
