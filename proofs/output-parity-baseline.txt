@@ -184,6 +184,7 @@ spec/wasm_cross/chunk_str.almd
 spec/wasm_cross/closure_accumulator.almd
 spec/wasm_cross/closure_borrowed_arg_guard.almd
 spec/wasm_cross/closure_captured_list_mutation.almd
+spec/wasm_cross/closure_captured_map_key_write.almd
 spec/wasm_cross/closure_captured_map_records.almd
 spec/wasm_cross/closure_captured_record_field_mutation.almd
 spec/wasm_cross/closure_reads_var_written_by_mut_call.almd

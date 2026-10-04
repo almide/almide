@@ -3971,6 +3971,7 @@ since     = "0.60.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/closure_captured_list_mutation.almd", class = "fixture" },
+  { path = "spec/wasm_cross/closure_captured_map_key_write.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_captured_map_records.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_writer_mut_from_declaration.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_reads_var_written_by_mut_call.almd", class = "fixture" },

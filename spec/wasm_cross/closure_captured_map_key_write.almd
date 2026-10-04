@@ -1,0 +1,51 @@
+// @contract: C-319
+// A Map key write `seen[k] = v` to a captured `var` Map from inside a closure
+// lands in the one map the enclosing scope reads (#3339). The wasm leg walled
+// every such write (E082 `cell-write:map-insert`: a captured-and-written var
+// is a shared cell, and the key-write route had no cell form) while native
+// ran it. It is now the functional `set` and rebind the plain route runs,
+// through the cell.
+// Rows: a first write, a second key, an overwrite; writes from a lambda handed
+// to `list.map`; a nested closure; a map of records; a read of the map inside
+// the writing closure.
+type P = { n: Int }
+
+fn run() -> String = {
+  var seen: Map[String, Int] = [:]
+  let put = (k: String, v: Int) => {
+    seen[k] = v
+  }
+  put("a", 1)
+  put("b", 2)
+  put("a", 3)
+  let ys = [4, 5] |> list.map((v) => {
+    seen["k${v}"] = v
+    v
+  })
+  let twice = (k: String) => {
+    let bump = () => {
+      seen[k] = (seen[k] ?? 0) + 10
+    }
+    bump()
+    bump()
+  }
+  twice("a")
+  twice("z")
+  "${map.len(seen)} ${seen["a"] ?? 0} ${seen["z"] ?? 0} ${list.sum(ys)}"
+}
+
+fn records() -> String = {
+  var by: Map[Int, P] = [:]
+  let add = (i: Int) => {
+    by[i] = { n: i * i }
+  }
+  add(2)
+  add(3)
+  add(2)
+  "${map.len(by)} ${(by[3] ?? { n: 0 }).n}"
+}
+
+effect fn main() -> Unit = {
+  println(run())
+  println(records())
+}
