@@ -380,9 +380,11 @@ pub(super) fn module_top_let_var(
             None
         })
         .unwrap_or_else(|| resolved_mod.clone());
-    let clean_name = field.as_str().to_uppercase();
+    // The use-site Var keeps the SOURCE spelling (#3316): `buf` and `BUF`
+    // are two top-lets, and every resolver that keys on this name must be
+    // able to tell them apart.
     let origin = mod_ident.replace('.', "_");
-    let var_id = ctx.var_table.alloc(sym(&clean_name), ty.clone(), Mutability::Let, None);
+    let var_id = ctx.var_table.alloc(field, ty.clone(), Mutability::Let, None);
     ctx.var_table.entries[var_id.0 as usize].module_origin = Some(origin);
     let def_id = ctx.def_map.get(&sym(&qual_let_key)).copied();
     Some((var_id, def_id))
