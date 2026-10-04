@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at 286fcaa11 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at 1d1cf27e9 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -963,6 +963,7 @@ fe7d96478976a37cd0d5f708126ed6756a638c54c990b8370ab8cda314a9adbe	spec/wasm_cross
 ad9cf29fbbd4c726f829ecfc9f8db3cfbbdd5f78e7ce66f0036e2be401145231	spec/wasm_cross/fusion_two_aborting_stages_staged.almd
 b1543d205647bec8621d51912a12c460e73de46a3188cd4b59de382eb6242c29	spec/wasm_cross/fuzz_found_nested_interp_capture.almd
 de6623048a4256b984f2ed2bfdcf8540c64f006ecdc1961b73ad78d8dd69c73b	spec/wasm_cross/general_recursion_tail.almd
+4f4faefa6cc1b5eb7a5de81c21fcf22c8283bec19afcbd771d4019117d6b2903	spec/wasm_cross/generated_binder_hygiene.almd
 02013a8bab0e4460bff8561f4bf6bfe9353eda23a1e2e2d2b8d9fb916c33dc82	spec/wasm_cross/generic_chain_unwrap_or.almd
 405c4ec271edf489510ea8d7beeeb8d5c400b9546e704b97a09f5582cb3ee3ac	spec/wasm_cross/generic_concat.almd
 1291ef469423209b99d5ffa60f972215e674f0ebbe5980e84201c74d824c0ef9	spec/wasm_cross/generic_fn_in_inferred_lambda.almd

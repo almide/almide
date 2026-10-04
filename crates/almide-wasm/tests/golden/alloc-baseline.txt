@@ -259,6 +259,7 @@
 65952	spec/wasm_cross/fusion_two_aborting_stages_staged.almd
 65984	spec/wasm_cross/fuzz_found_nested_interp_capture.almd
 65872	spec/wasm_cross/general_recursion_tail.almd
+66848	spec/wasm_cross/generated_binder_hygiene.almd
 66000	spec/wasm_cross/generic_chain_unwrap_or.almd
 65904	spec/wasm_cross/generic_concat.almd
 66112	spec/wasm_cross/generic_fn_in_inferred_lambda.almd

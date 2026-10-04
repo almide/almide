@@ -345,6 +345,7 @@ spec/wasm_cross/fuel_zero_budget_inline.almd
 spec/wasm_cross/fusion_two_aborting_stages_staged.almd
 spec/wasm_cross/fuzz_found_nested_interp_capture.almd
 spec/wasm_cross/general_recursion_tail.almd
+spec/wasm_cross/generated_binder_hygiene.almd
 spec/wasm_cross/generic_chain_unwrap_or.almd
 spec/wasm_cross/generic_concat.almd
 spec/wasm_cross/generic_fn_in_inferred_lambda.almd
