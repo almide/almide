@@ -195,6 +195,25 @@ impl Checker {
             ExprKind::SpreadRecord { base, fields, .. } => {
                 let base_ty = self.infer_expr(base);
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
+                // #3358: an updated field takes the base record's DECLARED field
+                // type, as the same field of a record literal does
+                // (`constrain_record_fields`). Without this the value was
+                // inferred bare: `{ ...r, rows: [] }` was E018 though `rows` is
+                // `List[Int]`, and `{ ...r, rows: ["x"] }` passed check. Only a
+                // base whose record shape is already known pins its fields; an
+                // unresolved base is left as before.
+                let decl = match self.env.resolve_named(&resolve_ty(&base_ty, &self.uf)) {
+                    Ty::Record { fields } | Ty::OpenRecord { fields } => fields,
+                    _ => Vec::new(),
+                };
+                for f in fields.iter() {
+                    if let Some((_, ety)) = decl.iter().find(|(n, _)| n.as_str() == f.name.as_str()) {
+                        self.record_int_literal_context(&f.value, ety);
+                        if let Some(vty) = self.type_map.get(&f.value.id).cloned() {
+                            self.constrain(ety.clone(), vty, format!("field {}", f.name));
+                        }
+                    }
+                }
                 base_ty
             }
             ExprKind::IndexAccess { object: _, index: _, .. } => self.infer_expr_g2_index_access(expr),
