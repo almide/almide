@@ -1094,6 +1094,7 @@ impl Checker {
             let arg = arg_exprs[idx];
             match &arg.kind {
                 ExprKind::Ident { name, .. } => {
+                    self.check_closure_escape(name, format!("{}({}, ...)", fn_name, name));
                     if !self.env.mutable_vars.contains(&sym(name)) {
                         self.emit(super::err(
                             format!("cannot pass immutable binding '{}' to `mut` parameter of {}()", name, fn_name),
@@ -1105,7 +1106,9 @@ impl Checker {
                 // A field/element of a mutable place is itself a mutable place: `list.push(box.items, x)` with `var box` (or a `mut box` param) lowers to `&mut box.items`, valid Rust. Walk the member/index chain down to its root identifier.
                 ExprKind::Member { .. } | ExprKind::TupleIndex { .. } => {
                     match Self::place_root(arg) {
-                        Some(root) if self.env.mutable_vars.contains(&sym(root)) => {}
+                        Some(root) if self.env.mutable_vars.contains(&sym(root)) => {
+                            self.check_closure_escape(root, format!("{}({}..., ...)", fn_name, root));
+                        }
                         Some(root) => {
                             self.emit(super::err(
                                 format!("cannot mutate a field of immutable binding '{}' via `mut` parameter of {}()", root, fn_name),
