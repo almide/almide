@@ -420,14 +420,17 @@ impl LowerCtx {
 
     /// The `MapInsert` arm of [`Self::lower_stmt`] — verbatim move (#781).
     fn lower_stmt_map_insert(&mut self, target: VarId, key: &IrExpr, value: &IrExpr) -> Result<(), LowerError> {
-                // Mutable-GLOBAL target: same COW-copy silent-miscompile class as the
-                // IndexAssign guard above — WALL.
-                if !self.value_of.contains_key(&target) && crate::lower::is_mutable_global(target) {
-                    return Err(LowerError::Unsupported(format!(
-                        "map-insert to mutable module-level var {target:?} (in-place \
-                         mutation through the global slot) is not in this brick"
-                    )));
-                }
+                // Mutable-GLOBAL target: an in-place insert through the slot would be the
+                // COW-copy silent-miscompile class of the IndexAssign guard above, so it
+                // takes the same functional REBIND as a local below — `g = map.set(g, k, v)`
+                // through the global's storage slot (`lower_mutable_global_assign`: the new
+                // map is built first, then the old block is taken and dropped), typed by
+                // the global's declared type (#2739).
+                let global_ty = if self.value_of.contains_key(&target) {
+                    None
+                } else {
+                    crate::lower::mutable_global_info(target).map(|(_, ty)| ty)
+                };
                 // Functional REBIND: `m[k] = v` ≡ `m = map.set(m, k, v)` (value
                 // semantics) — the SAME treatment the `map.insert(m, k, v)` CALL form
                 // already gets below; the repr dispatch suffixes the self-host
@@ -436,7 +439,7 @@ impl LowerCtx {
                 // MapInsert node with the one synthetic call. Needs the declared map ty
                 // for the Var reference — a target without one (a param, not a local
                 // bind) keeps the historic wall below.
-                if let Some(map_ty) = self.var_decl_tys.get(&target).cloned() {
+                if let Some(map_ty) = global_ty.or_else(|| self.var_decl_tys.get(&target).cloned()) {
                     let m_ref = IrExpr {
                         kind: IrExprKind::Var { id: target },
                         ty: map_ty.clone(),
