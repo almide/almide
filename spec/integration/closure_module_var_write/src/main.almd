@@ -11,7 +11,8 @@
 // read-modify-write; a List index write, a Map key write, a field write and a
 // nested field write — at the top level, in a closure, in a nested closure,
 // in a lambda handed to a higher-order fn and in one passed to a user fn.
-// Native and wasm print the same.
+// #3339: a Map key write to the module's var inside a callback walled the
+// wasm leg (E082 cell-write:map-insert). Native and wasm print the same.
 import self.m as m
 
 fn bump() -> Unit = {
@@ -51,6 +52,7 @@ effect fn main() -> Unit = {
     let inner = () => {
       m.x = m.x * 2
       m.xs[1] = m.xs[1] * 2
+      m.counts["inner"] = m.xs[1]
     }
     inner()
     inner()
@@ -60,6 +62,7 @@ effect fn main() -> Unit = {
   let seen = [1, 2, 3] |> list.map((v) => {
     m.x = m.x + v
     m.xs[0] = m.xs[0] + v
+    m.counts["k${v}"] = v
     m.x
   })
   run(() => {
