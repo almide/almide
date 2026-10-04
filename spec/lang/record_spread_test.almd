@@ -66,3 +66,13 @@ test "record spread preserves original" {
   assert_eq(updated.first, 99)
   assert_eq(updated.second, 2)
 }
+
+type Table = { name: String, rows: List[Int] }
+
+fn reset_rows(t: Table) -> Table = { ...t, rows: [] }
+
+test "record spread takes an empty list's type from the field" {
+  let t = reset_rows({ name: "a", rows: [1, 2] })
+  assert_eq(t.rows.len(), 0)
+  assert_eq(t.name, "a")
+}
