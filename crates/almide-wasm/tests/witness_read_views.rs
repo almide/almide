@@ -1,7 +1,9 @@
 //! #2758 (#1696 step 4) — values READ by an operator or an interpolation
 //! (they spend no credit) beyond a Var, a literal and a slot read: `r ?? v`
 //! / `r ?? "lit"` over a bound carrier, a join that is never owned (both
-//! arms views, no RC site). No new event letter.
+//! arms views, no RC site); and arg_temps.rs's `{ let t = f(x); read(t) }`,
+//! whose bind is the Bind hook's and whose tail is read under the same
+//! rule. No new event letter.
 
 use std::collections::BTreeMap;
 
@@ -20,7 +22,7 @@ fn accepted(cert: &str) -> bool {
 }
 
 #[test]
-fn a_never_owned_unwrap_or_join_is_read_as_a_view() {
+fn read_views_witness_as_reads() {
     // ONE test: the witness sink is process-global.
     // `fn os(o: String?) = if option.is_some(o) then "S" + (o ?? "?") else
     // "N"`: the concat reads the join; only the owned param's own reads and
@@ -38,6 +40,30 @@ fn a_never_owned_unwrap_or_join_is_read_as_a_view() {
     // A read that released the param it reads, or never released it, is
     // refused.
     for (bad, what) in [("{ibbdd|ibd}\n{|im}\n{|im}\nim\n", "released twice"), ("{ibb|ibd}\n{|im}\n{|im}\nim\n", "never released")] {
+        assert!(!accepted(bad), "{what}: the checker must refuse {bad:?}");
+    }
+    a_named_produced_operand_block_is_read_through_its_tail();
+}
+
+fn a_named_produced_operand_block_is_read_through_its_tail() {
+    // `report` (string_codepoint): every `${…}` of a produced String is
+    // `{ let t = …; t }`: the temporary is born, read by the build and
+    // released by the frame (`ibd`); an Option part's carrier likewise.
+    let w = witnesses("string_codepoint");
+    let cert = &w["report"];
+    assert!(accepted(cert), "the portable checker must accept {cert:?}");
+    assert!(cert.starts_with("ibbbbbbbbambambbbbbbbbd\nid\nibd\n"), "{cert:?}");
+    // A lambda whose interpolation names `f(x)` first.
+    let w = witnesses("generic_record_fn_field");
+    assert_eq!(w["<lambda#0>"], "ibd\nibd\nibd\nim\nim\n");
+    for fixture in ["env_set_overlay", "ord_recursive", "witness_straightline", "json_gltf_walk", "top_let_stored_in_container"] {
+        let w = witnesses(fixture);
+        let cert = &w["main"];
+        assert!(!cert.starts_with('!'), "{fixture}/main no longer declines: {cert:?}");
+        assert!(accepted(cert), "{fixture}/main: the portable checker must accept {cert:?}");
+    }
+    // A named temporary the frame never releases, or releases twice.
+    for (bad, what) in [("ibd\nib\nibd\nim\nim\n", "leaked temporary"), ("ibd\nibdd\nibd\nim\nim\n", "double release")] {
         assert!(!accepted(bad), "{what}: the checker must refuse {bad:?}");
     }
 }
