@@ -13,14 +13,19 @@
 # only moves, or that was already there, needs nothing. Rows that go away are
 # the point and are never judged.
 #
-# usage: check-walled-real-growth.sh <base-ref> [head-ref]
+# The same owner check holds the shape-matrix known-open list (#3309), whose
+# rows are `<cell>  <columns>  # #NNNN`: run it with
+# LEDGER=proofs/shape-matrix-baseline.txt. The key is everything before the
+# citation, so a row whose columns change is a new row and needs an open owner.
+#
+# usage: [LEDGER=<ledger>] check-walled-real-growth.sh <base-ref> [head-ref]
 #        check-walled-real-growth.sh --self-test
 # The open-state lookup uses `gh`; set WALLED_REAL_OFFLINE=1 to check the
 # citation syntax only (the self-test does). A lookup that fails is a refusal:
 # an unverifiable citation is not an owner.
 set -euo pipefail
 
-LEDGER=proofs/walled-real-baseline.txt
+LEDGER="${LEDGER:-proofs/walled-real-baseline.txt}"
 
 # `file :: fn` keys of a ledger text on stdin (comments, blanks and the
 # citation stripped — the same normalisation corpus-wall.sh applies).
@@ -41,7 +46,7 @@ judge() {
   local base="$1" head="$2" bad=0 key line n
   local added
   added="$(LC_ALL=C comm -13 <(keys < "$base") <(keys < "$head"))"
-  [ -z "$added" ] && { echo "walled-real growth: no new rows"; return 0; }
+  [ -z "$added" ] && { echo "$LEDGER growth: no new rows"; return 0; }
   while IFS= read -r key; do
     [ -z "$key" ] && continue
     line="$(grep -F -- "$key" "$head" | grep -v '^#' | head -1)"
@@ -55,7 +60,7 @@ judge() {
     fi
   done <<< "$added"
   if [ "$bad" = 1 ]; then
-    echo "walled-real growth FAIL: a new walled-real row must end in '  # #NNNN' naming the open issue that will burn it ($LEDGER)." >&2
+    echo "$LEDGER growth FAIL: a new row must end in '  # #NNNN' naming the open issue that will burn it." >&2
     return 1
   fi
 }
