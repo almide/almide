@@ -33,53 +33,6 @@ pub(crate) fn record_field_receiver(xs: &IrExpr) -> Option<(almide_ir::VarId, Ve
 }
 
 impl Emitter<'_> {
-    /// A realloc-on-growth helper (`$list_push`, `$bytes_push`) frees the
-    /// outgrown block only when its rc is 1. A PARAMETER receiver skips the
-    /// COW (`emit_read_mut_var_cow`: the caller keeps its credit and the
-    /// frame holds the site's), so there the block is shared and the helper
-    /// kept it — with the frame's credit on it, and with the grown copy
-    /// holding its element handles without credits of their own (#2968).
-    /// With the receiver on the stack, remember it and whether it was
-    /// shared; `settle_outgrown_receiver` pays both after the helper. Any
-    /// other receiver was made unique by the COW: `None`, nothing emitted.
-    pub(crate) fn note_shared_receiver(&mut self, idx: u32, global: bool) -> Result<Option<(u32, u32)>, EmitError> {
-        if global || idx >= self.rc_param_ceiling {
-            return Ok(None);
-        }
-        let old = self.hold_i32()?;
-        let sh = self.hold_i32()?;
-        let rc = wasm_encoder::MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, memory_index: 0 };
-        let mut i = self.f.instructions();
-        i.local_tee(old);
-        i.local_get(old).global_get(G_LINE_END).i32_ge_u();
-        i.local_get(old).i32_load(rc).i32_const(1).i32_ne();
-        i.i32_and().local_set(sh);
-        Ok(Some((old, sh)))
-    }
-
-    /// The helper's result is on the stack (left there). When it is a new
-    /// block and the receiver was shared, the grown copy takes its own
-    /// element credits and the frame's credit on the outgrown block goes.
-    pub(crate) fn settle_outgrown_receiver(&mut self, shared: Option<(u32, u32)>, ty: SliceTy) {
-        let Some((old, sh)) = shared else { return };
-        let inc = match ty {
-            SliceTy::List(h) => self.inc_elems_fn(self.types.el(h)),
-            _ => None,
-        };
-        let dec = self.dec_fn_of(ty);
-        let scr = self.scr_i32_local;
-        let mut i = self.f.instructions();
-        i.local_tee(scr).local_get(scr).local_get(old).i32_ne().local_get(sh).i32_and();
-        i.if_(BlockType::Empty);
-        if let Some(inc) = inc {
-            i.local_get(old).call(inc);
-        }
-        i.local_get(old).call(dec);
-        i.end();
-        self.release_i32();
-        self.release_i32();
-    }
-
     /// The copy-on-write field write on a record var — copy the block,
     /// release the replaced slot's credit, store the value `emit` leaves on
     /// the stack (it owns that credit), rebind the var. `lower_field_assign`
@@ -434,8 +387,9 @@ impl Emitter<'_> {
                     return unsup(&format!("list-push-of:{var_ty:?}"));
                 };
                 let elem = self.types.el(h);
+                // The judge made the receiver unique (a param too, #3342),
+                // so the helper frees the block it outgrows.
                 self.emit_read_mut_var_cow(id, var_idx, var_ty, vglob)?;
-                let shared = self.note_shared_receiver(var_idx, vglob)?;
                 self.lower_arg(v, Some(elem), ArgMode::Retain)?;
                 // The 8-byte helper's value param is i64; an f64 element
                 // crosses the call boundary as its BIT PATTERN (memory is
@@ -448,7 +402,6 @@ impl Emitter<'_> {
                     _ => F_LIST_PUSH_4,
                 };
                 self.f.instructions().call(helper);
-                self.settle_outgrown_receiver(shared, var_ty);
                 self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
                 self.witness_mut_rebind(*id, vglob);
                 Ok(None)

@@ -774,13 +774,8 @@ impl Emitter<'_> {
     fn lower_bytes_push(&mut self, b: &IrExpr, v: &IrExpr) -> ArmResult {
         let recv = self.bytes_recv("push", b)?;
         self.emit_read_bytes_recv(&recv, b)?;
-        let shared = match &recv {
-            crate::bytes_recv::BytesRecv::Var { idx, global, .. } => self.note_shared_receiver(*idx, *global)?,
-            crate::bytes_recv::BytesRecv::Temp => None,
-        };
         self.lower_arg(v, Some(INT), ArgMode::Borrow)?;
         self.f.instructions().call(F_BYTES_PUSH);
-        self.settle_outgrown_receiver(shared, BYTES);
         self.emit_bytes_writeback(&recv)?;
         if let crate::bytes_recv::BytesRecv::Var { id, global, .. } = &recv {
             self.witness_mut_rebind(*id, *global);

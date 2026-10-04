@@ -82,8 +82,8 @@ impl Emitter<'_> {
         }
     }
 
-    /// #2755: a mut receiver read WITHOUT the copy-on-write — a parameter,
-    /// whose writes stay caller-visible (`emit_read_mut_var_cow`). The read
+    /// #2755: a mut receiver read WITHOUT the copy-on-write — a String or a
+    /// Map, which `emit_read_mut_var_cow` does not judge. The read
     /// moves no credit; an in-place write through it records nothing, and a
     /// helper that answers with another block is a rebind of its own.
     pub(crate) fn witness_mut_read(&mut self, id: almide_ir::VarId, global: bool) {
