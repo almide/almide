@@ -463,7 +463,10 @@ impl Lower<'_> {
             return branches.into_iter().for_each(|b| self.own_consumed_ref_mut(b));
         }
         let Some(id) = var_id(e) else { return };
-        if !is_ref_mut_param(self.params, id) || is_copy_scalar(&e.ty) {
+        // A field a destructure bound by reference off a borrowed record
+        // (`let { b, n } = p`, #3303) is in the same position: the binder is
+        // `&T`, and a by-value slot owns it first.
+        if !(is_ref_mut_param(self.params, id) || self.ref_binders.contains(&id)) || is_copy_scalar(&e.ty) {
             return;
         }
         let ty = e.ty.clone();
@@ -560,6 +563,22 @@ impl IrMutVisitor for Lower<'_> {
         // carries the reference on purpose, and only becomes a bare `Var`
         // once the expression walk below lowers it.
         self.take_overwritten_ref_mut(stmt);
+        // `let { b, n } = p` over a by-reference param (or a binder such a
+        // match or destructure bound) binds its fields by reference, exactly
+        // like a match arm's payloads (#3303): record them before the
+        // statements that read them are walked.
+        if let IrStmtKind::BindDestructure { pattern, value } = &stmt.kind
+            && let Some(id) = (match &value.kind {
+                IrExprKind::Borrow { expr: inner, .. } => var_id(inner),
+                _ => var_id(value),
+            })
+            && (matches!(param_mode(self.params, id), Some(ParamBorrow::Ref)) || self.ref_binders.contains(&id))
+        {
+            let mut bound = Vec::new();
+            pattern_binders(pattern, &mut bound);
+            self.ref_binders.insert(id);
+            self.ref_binders.extend(bound);
+        }
         match &mut stmt.kind {
             IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. }
             | IrStmtKind::FieldAssign { value, .. } | IrStmtKind::IndexAssign { value, .. } => {
