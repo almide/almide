@@ -435,6 +435,7 @@ impl Emitter<'_> {
                         e.f.instructions().i32_eqz();
                         Ok(())
                     })?;
+                    let ptrs = self.hoist_payload_ptrs(None, body, &pre)?; // #3345
                     self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                     self.emit_det_charge_const(1);
                     self.range_exit_test(var_idx, floor, stop, *inclusive);
@@ -451,6 +452,7 @@ impl Emitter<'_> {
                         .br(0)
                         .end()
                         .end();
+                    self.drop_payload_ptrs(ptrs);
                     self.drop_prejudged(pre);
                     self.drop_cow_flags(flags);
                     self.release_i64();
@@ -473,6 +475,7 @@ impl Emitter<'_> {
                             e.f.instructions().i32_eqz();
                             Ok(())
                         })?;
+                        let ptrs = self.hoist_payload_ptrs(None, body, &pre)?; // #3345
                         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                         self.emit_det_charge_const(1);
                         self.range_exit_test(var_idx, sl, el, inclusive);
@@ -489,7 +492,8 @@ impl Emitter<'_> {
                             .br(0)
                             .end()
                             .end();
-                        self.drop_prejudged(pre);
+                        self.drop_payload_ptrs(ptrs);
+                    self.drop_prejudged(pre);
                         self.drop_cow_flags(flags);
                         return Ok(());
                     }

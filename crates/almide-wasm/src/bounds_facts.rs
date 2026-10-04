@@ -5,9 +5,10 @@
 //! to both: four checks per iteration where two decide everything (native's
 //! LLVM drops the repeats the same way).
 //!
-//! A FACT `(xs, i)` says: "`i <u count(xs)` was checked and passed, and
-//! neither side of that comparison has changed since". It is recorded right
-//! after an emitted check of `xs[i]`, where `i` is a plain variable and the
+//! A FACT `(xs, i, c)` says: "`i + c <u count(xs)` was checked and passed,
+//! and neither side of that comparison has changed since". It is recorded
+//! right after an emitted check of `xs[i + c]` (`c` a small literal, 0 for a
+//! plain `xs[i]` — payload_ptr.rs `affine_index`), where `i` is a variable and the
 //! count is the loop's HOISTED count (len_hoist.rs) — and a later `xs[i]`,
 //! read or store, under the same fact skips its check.
 //!
@@ -83,20 +84,19 @@ impl Emitter<'_> {
         if let IrStmtKind::Bind { var, .. } | IrStmtKind::Assign { var, .. } = &st.kind
             && let Some(facts) = self.bounds_facts.as_mut()
         {
-            facts.retain(|&(xs, i)| xs != *var && i != *var);
+            facts.retain(|&(xs, i, _)| xs != *var && i != *var);
         }
         Ok(())
     }
 
-    /// `(xs, i)` when `xs[index]` is a fact candidate here: recording is on,
-    /// the index is a variable and `xs`'s count is hoisted.
-    fn fact_key(&self, xs: VarId, index: &IrExpr) -> Option<(VarId, VarId)> {
+    /// `(xs, v, c)` when `xs[index]` is a fact candidate here: recording is
+    /// on, the index is `v` or `v + c` (payload_ptr.rs `affine_index`) and
+    /// `xs`'s count is hoisted.
+    fn fact_key(&self, xs: VarId, index: &IrExpr) -> Option<(VarId, VarId, i64)> {
         self.bounds_facts.as_ref()?;
         self.hoisted_counts.get(&xs)?;
-        match index.kind {
-            IrExprKind::Var { id } => Some((xs, id)),
-            _ => None,
-        }
+        let (v, c) = crate::payload_ptr::affine_index(index)?;
+        Some((xs, v, c))
     }
 
     /// Is `xs[index]` already known in bounds (its check can be skipped)?

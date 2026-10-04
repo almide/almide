@@ -633,6 +633,7 @@ fn build_helper_body(
             cow_flags: HashMap::new(),
             cow_prejudged: HashSet::new(),
             bounds_facts: None,
+            payload_ptrs: HashMap::new(),
             in_tail: false,
             try_see_through: false,
             branch_depth: 0,

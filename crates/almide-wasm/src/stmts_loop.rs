@@ -31,6 +31,8 @@ impl Emitter<'_> {
         } else {
             Vec::new()
         };
+        // #3345: address-stable lists address through a payload pointer.
+        let ptrs = self.hoist_payload_ptrs(Some(cond), body, &pre)?;
         // Counted-shape fast lane (unroll.rs): on `true` the rolled loop
         // below drains the remainder iterations.
         let _ = self.try_unroll_while(cond, body)?;
@@ -55,6 +57,7 @@ impl Emitter<'_> {
         self.witness_loop_close();
         self.f.instructions().br(0).end().end();
         self.drop_hoisted_counts(hoisted);
+        self.drop_payload_ptrs(ptrs);
         self.drop_prejudged(pre);
         self.drop_cow_flags(flags);
         Ok(())
