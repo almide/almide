@@ -311,6 +311,24 @@ marshalling. `app.js` is a dependency-free ES module:
   and declares `AlmideError`, which ships only when some export unwraps a
   Result. Gate: `spec/wasm_host_js/effect_exports.almd` runs every
   marshalled type × {fn, effect fn} × {ok, err} under node.
+- A hook that throws (or, for an `--async-import`, rejects) (#3356). An
+  exception that unwinds through wasm skips every release the unwound frames
+  would have run, so the glue never lets one through:
+  - A **fallible** extern is an `effect fn` or one declaring
+    `Result[T, String]` (`T` a scalar, `String` or `Unit`). It imports as an
+    i32 `Result` block the host builds. The hook's value is ok and its throw
+    is err (the message). The Almide caller propagates the err with `!`
+    through its own release path, and an export that propagates it rejects or
+    throws `AlmideError`. Failing calls leave memory flat:
+    `spec/wasm_host_js/hook_errors{,_async}.almd` pin it over 3,000 and 600
+    rounds. Unwinding instead grew linear memory from 0.9 MB to 7.3 MB over
+    the same 3,000 rounds.
+  - An **infallible** extern (a plain `fn` returning `T`) cannot fail by its
+    declaration, so a throw there is a trap. The glue rethrows an error that
+    names the import and the fix (declare it `effect fn`), and *abandons* the
+    instance. Every later call throws `… abandoned … call init() again`
+    instead of running on a heap whose unwound frames kept their blocks.
+    `init()` starts a fresh instance.
 - `main` is `run()`; `_start` is not called by `init`.
 
 String marshalling reads the block layout (`almide-layout`:

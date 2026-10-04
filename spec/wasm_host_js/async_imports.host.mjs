@@ -1,7 +1,8 @@
 // Host-side checks for async_imports.almd (#3353): the async hooks really
 // await; the exports that reach them return Promises and the others stay
 // synchronous; overlapping calls run one at a time in call order; an err
-// and a rejected hook both surface as rejections; memory stays flat over a
+// surfaces as a rejection, a rejected infallible hook abandons the instance
+// (#3356); memory stays flat over a
 // long run; and without JSPI `init()` refuses with a message naming it.
 import assert from "node:assert/strict";
 
@@ -54,8 +55,11 @@ export async function after(m) {
   // An effect fn: ok, and an err from Almide code.
   assert.equal(await m.must_get("k"), "v-k");
   await assert.rejects(m.must_get("none"), (e) => e instanceof m.AlmideError && e.message === "missing none");
-  // A rejected hook rejects the call; the next call is unaffected.
-  await assert.rejects(m.lookup("boom"), /hook failed/);
+  // A rejection out of the infallible `kv_get` abandons the instance
+  // (#3356: its unwound frames kept their blocks); init() starts afresh.
+  await assert.rejects(m.lookup("boom"), /hooks\.js\.kv_get threw, but its @extern is infallible.*hook failed/);
+  await assert.rejects(m.lookup("after"), /abandoned/);
+  await m.init(undefined, { js });
   assert.equal(await m.lookup("after"), "value=v-after");
   // A long run: every block released, memory flat.
   for (let i = 0; i < 200; i++) await m.must_get("w" + i);
