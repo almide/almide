@@ -5,44 +5,46 @@ type Extent = { w: Float, h: Float }
 
 type Framed = { size: Extent, label: String }
 
-type Shape =
-  | Rect(Extent)
-  | Dot
+type Shape = | Rect(Extent) | Dot
 
-pub let ZERO: Extent = { w: 0.0, h: 0.0 }
+let ZERO: Extent = { w: 0.0, h: 0.0 }
 
-pub fn measure(n: Float) -> Extent = { w: n, h: n * 2.0 }
+fn measure(n: Float) -> Extent = { w: n, h: n * 2.0 }
 
-pub fn pick(big: Bool) -> Extent = if big then { w: 10.0, h: 20.0 } else { w: 1.0, h: 2.0 }
+fn pick(big: Bool) -> Extent = if big then { w: 10.0, h: 20.0 } else { w: 1.0, h: 2.0 }
 
-pub fn many() -> List[Extent] = [{ w: 1.0, h: 1.0 }, { w: 2.0, h: 2.0 }]
+fn many() -> List[Extent] = [
+  { w: 1.0, h: 1.0 },
+  { w: 2.0, h: 2.0 }
+]
 
-pub fn maybe(n: Float) -> Option[Extent] = if n > 0.0 then some({ w: n, h: n }) else none
+fn maybe(n: Float) -> Extent? = if n > 0.0 then some({ w: n, h: n })
+else none
 
-pub fn annotated(n: Float) -> Extent = {
+fn annotated(n: Float) -> Extent = {
   let e: Extent = { w: n, h: n }
   e
 }
 
-pub fn reassigned(n: Float) -> Extent = {
+fn reassigned(n: Float) -> Extent = {
   var e: Extent = { w: 0.0, h: 0.0 }
   e = { w: n, h: n * 3.0 }
   e
 }
 
-pub fn span(e: Extent) -> Float = e.w + e.h
+fn span(e: Extent) -> Float = e.w + e.h
 
-pub fn widen(e: Extent) -> Extent = { ...e, w: e.w * 10.0 }
+fn widen(e: Extent) -> Extent = { ...e, w: e.w * 10.0 }
 
-pub fn total(n: Float) -> Float = span({ w: n, h: n })
+fn total(n: Float) -> Float = span({ w: n, h: n })
 
-pub fn framed(n: Float) -> Framed = { size: { w: n, h: n + 1.0 }, label: "f" }
+fn framed(n: Float) -> Framed = { size: { w: n, h: n + 1.0 }, label: "f" }
 
-pub fn rect(n: Float) -> Shape = Rect({ w: n, h: n })
+fn rect(n: Float) -> Shape = Rect({ w: n, h: n })
 
-pub fn shape_span(s: Shape) -> Float = match s {
+fn shape_span(s: Shape) -> Float = match s {
   Rect(e) => span(e),
   Dot => 0.0,
 }
 
-pub fn maker() -> (Float) -> Extent = (n) => { w: n, h: 0.5 }
+fn maker() -> (Float) -> Extent = (n) => { w: n, h: 0.5 }

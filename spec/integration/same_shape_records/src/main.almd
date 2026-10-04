@@ -6,7 +6,12 @@ fn row(xs: List[Float]) -> String = xs |> list.map((x) => float.to_string(x)) |>
 effect fn main() -> Unit = {
   let s = a.unit()
   let e = b.measure(3.0)
-  println(row([s.w + e.h, a.area(s), b.span(b.pick(true)), b.span(b.pick(false))]))
+  println(row([
+    s.w + e.h,
+    a.area(s),
+    b.span(b.pick(true)),
+    b.span(b.pick(false))
+  ]))
   let n = b.many() |> list.map((x) => b.span(x)) |> list.fold(0.0, (acc, x) => acc + x)
   let m = match b.maybe(2.0) {
     some(x) => x.h,
@@ -17,8 +22,18 @@ effect fn main() -> Unit = {
     none => -1.0,
   }
   println(row([n, m, z, b.span(b.annotated(4.0)), b.span(b.reassigned(2.0))]))
-  println(row([b.widen(e).w, b.total(5.0), b.framed(2.0).size.h, b.shape_span(b.rect(1.5)), b.span(b.maker()(4.0)), b.span(b.ZERO)]))
-  println(row([b.span({ w: 1.0, h: 2.5 }), a.area({ w: 2.0, h: 2.0 })]))
+  println(row([
+    b.widen(e).w,
+    b.total(5.0),
+    b.framed(2.0).size.h,
+    b.shape_span(b.rect(1.5)),
+    b.span(b.maker()(4.0)),
+    b.span(b.ZERO)
+  ]))
+  println(row([
+    b.span({ w: 1.0, h: 2.5 }),
+    a.area({ w: 2.0, h: 2.0 })
+  ]))
   println("${e}")
   println("${s}")
 }
