@@ -139,6 +139,8 @@ struct OwnershipScan {
     rebound_frames: Vec<(BTreeSet<ValueId>, BTreeSet<ValueId>)>,
     /// `prim.handle` carriers of a tracked object (#3269).
     carriers: BTreeSet<ValueId>,
+    /// `Dup`s the function later `MakeUnique`s (#3321, lib_d.rs).
+    cow_dups: BTreeSet<ValueId>,
 }
 
     struct BranchFrame {
@@ -381,6 +383,9 @@ impl OwnershipScan {
     /// Verbatim.
     fn acquire_reference(&mut self, i: usize, dst: ValueId, src: ValueId) {
         if let Some(o) = self.live(src) {
+            if self.cow_copy(dst, o) {
+                return;
+            }
             // Acquire OUR own reference. A `Dup` of a self.borrowed param has no
             // prior self.rc entry (we owned none) — start it at 0, then +1.
             *self.rc.entry(o).or_insert(0) += 1;
@@ -930,6 +935,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
         rebound: BTreeSet::new(),
         rebound_frames: Vec::new(),
         carriers: BTreeSet::new(),
+        cow_dups: crate::certificate::cow_dup_dsts(func),
     };
     for (i, op) in func.ops.iter().enumerate() {
         scan.step(i, op);

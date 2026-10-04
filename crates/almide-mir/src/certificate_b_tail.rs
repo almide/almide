@@ -134,7 +134,7 @@ pub fn ownership_certificate_with_poison(func: &MirFunction) -> (String, bool) {
         line_slots,
         addr_of: BTreeMap::new(),
         child_of: BTreeMap::new(),
-        paths: PathScopes::default(),
+        paths: PathScopes { cow_dups: cow_dup_dsts(func), ..PathScopes::default() },
     };
     for op in &func.ops {
         scan.step(op);
@@ -486,6 +486,51 @@ impl CertScan {
     }
 }
 
+/// Copy-on-write copies (#3321). A `Dup` onto a line the frame does not own
+/// (a borrowed param's, a raw child's: no `i` on it) is one more reference to a
+/// block someone else keeps alive, and every read of such a line is safe at
+/// count 0, so the line takes no read probe. When the function later
+/// `MakeUnique`s that `Dup`, it is a copy-on-write copy: `MakeUnique` always
+/// copies there (the other holder plus the `Dup` make the count at least 2) and
+/// the handle then owns a block of its own. Such a `Dup` opens its OWN line with
+/// a fresh `i`: an owned line like any other, so a read of it after its release
+/// is probed, and a `Dup` of it after its release is the resurrection the guard
+/// rejects. A slot or a slot feeder keeps its fold.
+impl CertScan {
+    fn cow_copy(&mut self, dst: ValueId, src: ValueId) -> bool {
+        if !self.paths.cow_dups.contains(&dst) || self.feeder_to_slot.contains_key(&dst) || self.slot_object(dst) {
+            return false;
+        }
+        let src_obj = if self.s.of.contains_key(&src) { Some(self.s.object_of(src)) } else { None };
+        let shared = match src_obj {
+            Some(o) => !self.owned_line(o),
+            None => self.is_raw_child(src),
+        };
+        if !shared {
+            return false;
+        }
+        self.s.of.insert(dst, dst);
+        self.s.event(dst, 'i');
+        true
+    }
+
+    /// Is `h` a loop-carried or straight-line slot, or the object one rides on?
+    fn slot_object(&self, h: ValueId) -> bool {
+        self.slots.iter().chain(&self.line_slots).any(|&sl| sl == h || self.s.object_of(sl) == h)
+    }
+}
+
+/// The `Dup`s a function later `MakeUnique`s (#3321).
+pub(crate) fn cow_dup_dsts(func: &MirFunction) -> BTreeSet<ValueId> {
+    let uniqued: BTreeSet<ValueId> =
+        func.ops.iter().filter_map(|op| if let Op::MakeUnique { v } = op { Some(*v) } else { None }).collect();
+    func.ops
+        .iter()
+        .filter_map(|op| if let Op::Dup { dst, .. } = op { Some(*dst) } else { None })
+        .filter(|d| uniqued.contains(d))
+        .collect()
+}
+
 /// The handle maps as one path sees them (#3267).
 type PathMaps = (BTreeMap<ValueId, ValueId>, BTreeMap<ValueId, ValueId>, BTreeMap<ValueId, ValueId>);
 
@@ -512,6 +557,8 @@ struct PathScopes {
     rebound: BTreeSet<ValueId>,
     /// `prim.handle` carriers of a tracked object (#3269).
     carriers: BTreeSet<ValueId>,
+    /// `Dup`s the function later `MakeUnique`s (#3321).
+    cow_dups: BTreeSet<ValueId>,
     /// Each view (carrier, address, loaded child) → the handle it was taken
     /// from, at the base of its chain (#3269).
     view_src: BTreeMap<ValueId, ValueId>,
