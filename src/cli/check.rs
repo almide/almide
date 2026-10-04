@@ -442,14 +442,16 @@ pub fn cmd_check_effects(file: &str) {
     entries.sort_by_key(|(name, _)| (*name).clone());
 
     for (name, fe) in &entries {
-        let effects = EffectMap::format_effects(&fe.transitive);
         let marker = if fe.is_effect { " (effect fn)" } else { "" };
-        err(&format!("  {}  → {}{}", name, effects, marker));
+        err(&format!("  {}  → {}{}", name, fe.report(), marker));
     }
 
-    let pure_count = entries.iter().filter(|(_, fe)| fe.transitive.is_empty()).count();
-    let effect_count = entries.len() - pure_count;
-    err(&format!("\n{} functions: {} pure, {} with effects", entries.len(), pure_count, effect_count));
+    // A function that calls closures it is handed runs whatever they do, and
+    // their effects are charged where they are created (#3268): it is not
+    // counted pure.
+    let (pure, dependent, effects) = EffectMap::summary_counts(entries.iter().map(|(_, fe)| *fe));
+    let dependent_part = if dependent > 0 { format!(", {dependent} callback-dependent") } else { String::new() };
+    err(&format!("\n{} functions: {} pure{}, {} with effects", entries.len(), pure, dependent_part, effects));
 
     // Check permissions from almide.toml
     if std::path::Path::new("almide.toml").exists() {

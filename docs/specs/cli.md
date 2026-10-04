@@ -365,7 +365,7 @@ almide check app.almd --profile critical --allow IO  # critical profile (#567)
 `docs/diagnostics/codes.toml`。行の集合はコンパイラが出すコードの集合と一致し
 (`with_code` の 77 + ビルド経路が `error[EXXX]` を直接出す E081–E083)、
 severity はフィクスチャ全件で実際の level と照合される(`tests/explain_list_test.rs`)。
-| `--effects` | 各関数のエフェクト/ケイパビリティ分析 |
+| `--effects` | 各関数のエフェクト/ケイパビリティ分析。受け取ったクロージャを呼ぶ関数は `{} + whatever f (arg 1) does` と表示され pure に数えない(#3268、`docs/specs/effect-system.md` §8) |
 | `--timings` | lex / parse / check の phase 別 wall time（#1311） |
 
 #### `--profile critical`
