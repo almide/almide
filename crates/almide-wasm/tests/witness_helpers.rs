@@ -1,5 +1,6 @@
 //! #2758 (#1696 step 4) — the Emitter-built HELPER frames in the structural
-//! witness: the display, equality and ordering bodies of a recursive type.
+//! witness: the display, equality and ordering bodies of a recursive type, and the
+//! deep-equality scan of a composite key.
 //! Their block params are lent (no credit here); their only RC events are
 //! the temporaries the walk creates. The certificate is audited against the helper's bytes
 //! (witness_helper.rs): a helper whose emitted RC calls differ from what
@@ -23,14 +24,20 @@ effect fn main() -> Unit = {
   let u = Node(Leaf, 1.5, Leaf)
   println("${t == u} ${u == u} ${c == c}")
   println("${list.sort([Add(Lit(2), Lit(1)), Lit(3), Add(Lit(1), Lit(1))])}")
+  let seen = [["a"], ["b"]]
+  println("${list.contains(seen, ["b"])} ${list.index_of(seen, ["c"])}")
 }
 "#;
 
-fn witnesses() -> std::collections::BTreeMap<String, String> {
-    let ir = almide_spine::s5::lower_to_ir("helpers.almd", PROGRAM).expect("front");
+fn witnesses_of(rel: &str, text: &str) -> std::collections::BTreeMap<String, String> {
+    let ir = almide_spine::s5::lower_to_ir(rel, text).expect("front");
     almide_wasm::witness::start_collecting();
     let _ = almide_wasm::emit_program(&ir).expect("the structural leg lowers the probe");
     almide_wasm::witness::take().into_iter().collect()
+}
+
+fn witnesses() -> std::collections::BTreeMap<String, String> {
+    witnesses_of("helpers.almd", PROGRAM)
 }
 
 fn accepted(cert: &str) -> bool {
@@ -60,6 +67,16 @@ fn recursive_types_display_and_comparison_helpers_witness_their_lent_blocks_and_
         assert!(accepted(cert), "{name}: the portable checker must accept {cert:?}");
         assert_eq!(cert, want, "{name}");
     }
+    // A composite-key scan (map_rich_variant_key: a Map keyed by a rich
+    // variant): its entry block is lent, and the deep `==` it runs per entry
+    // allocates nothing.
+    let rel = "spec/wasm_cross/map_rich_variant_key.almd";
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let text = std::fs::read_to_string(root.join(rel)).expect("fixture readable");
+    let w = witnesses_of(rel, &text);
+    let cert = w.get("<scan:ETy(0)>").unwrap_or_else(|| panic!("the scan helper is witnessed: {w:?}"));
+    assert!(accepted(cert), "the portable checker must accept {cert:?}");
+    assert_eq!(cert, "\n", "<scan:ETy(0)>");
     // A temporary the walk leaks, or releases twice, and a release of a
     // lent operand, are refused.
     for (bad, what) in [
