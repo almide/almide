@@ -123,7 +123,7 @@ almide build --fast                     # 最大性能 (opt-level=3, LTO, native
 
 | オプション | 説明 |
 |---|---|
-| `-o <name>` | 出力ファイル名 |
+| `-o <path>` | 出力ファイルのパス。どのネイティブ経路（バイナリ / `--cdylib` / `--repr-c` / その組み合わせ）でも同じ意味で、書いたパスそのものに出力し、親ディレクトリが無ければ作る（#3349）。拡張子や `lib` 接頭辞は付け足さない |
 | `--target wasm` | WASM バイナリを生成（直接 emit） |
 | `--target <triple>` | ネイティブバイナリのターゲット（#2772）。`rust` / `native`（既定、このホスト）、`linux-musl`（ホストのアーキテクチャの `<arch>-unknown-linux-musl`。x86_64 と aarch64）、または rustc のターゲット三つ組。cargo に `--target` を渡し、`target/<triple>/<profile>/` から成果物を拾う。ターゲットの標準ライブラリは `rustup target add <triple>` で入れる。musl ターゲットは Rust の既定（`crt-static`）で**静的リンク**になり、almide は追加のリンクフラグを付けない（glibc ターゲットは従来どおり動的）。依存の無いプログラムは rustc 同梱の musl crt で x86_64 ホスト上なら追加ツール無しにリンクできる。別アーキテクチャ向けや C を含む `[native-deps]` には、そのターゲットのリンカ / C コンパイラ（`musl-tools` 等）が要る。未知の値（三つ組の形をしていないもの）と `wasm32-*` は、ホスト向けに黙ってビルドせず終了コード 2 で拒否する |
 | `--host js` | `--target wasm` 専用: モジュールの隣に JS ホスト `<mod>.js`（依存なしの ES module）と `<mod>.d.ts` を書く（#2265）。`init(source?, hooks?)` がインスタンス化、`run()` が `main`、`pub fn` ごとに 1 つのラッパ。`@extern(wasm, "js", "name")` は `init({ js: { name } })` で結線。マーシャルは Int（`number`、±2^53 の範囲検査）/ Float / Bool / String / Unit — それ以外の型を境界に持つ `pub fn` はビルド時に型名を挙げて拒否。出荷物はプログラムが使う分だけ（#2276）: `__alloc`/`__release` の export と glue の String ヘルパは境界に `String` がある時だけ、WASI shim は出荷モジュール（`--wasm-opt` 後）が import する名前だけ。ゲート: `scripts/check-js-host.sh`（`spec/wasm_host_js/` を node で実行し、期待出力と native 出力に一致させ、モジュールのバイト同一性・shim 集合・`glue-ceiling.txt` の上限を検査）。仕様: docs/wasm/WASM-OUTPUT.md「JS host」節 |
@@ -132,6 +132,7 @@ almide build --fast                     # 最大性能 (opt-level=3, LTO, native
 | `--unchecked-index` | 配列の境界チェックを無効化（unsafe） |
 | `--no-check` | 型チェックをスキップ |
 | `--repr-c` | struct/enum に `#[repr(C)]` を付与（C ABI 互換） |
+| `--cdylib` | 共有ライブラリ（`.so` / `.dylib` / `.dll`）を生成。`-o` 省略時はカレントディレクトリの `lib<名前>.<拡張子>`（Windows は `<名前>.dll`）。Cargo の crate 名は `-o` ではなくパッケージ名（`almide.toml` の `[package].name`、無ければエントリファイル名）から作る（#3349） |
 
 **`CARGO_BUILD_TARGET`**(#2772): `--target` が無いとき、環境変数 `CARGO_BUILD_TARGET` はターゲットの指定として
 `--target <triple>` と同じに扱う（`--target rust` はそれを打ち消してホスト向けにする）。どちらの場合も almide は cargo に

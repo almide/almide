@@ -394,7 +394,9 @@ fn append_cargo_dep(cargo: &mut String, name: &str, spec: &str) {
     }
 }
 
-/// Build generated Rust code as a cdylib shared library (.dylib/.so).
+/// Build generated Rust code as a cdylib shared library (.dylib/.so) in
+/// `project_dir` and return the built library's path there. `lib_name` is the
+/// Cargo crate name — a valid identifier, never the output path (#3349).
 pub(super) fn cargo_build_cdylib(rs_code: &str, project_dir: &std::path::Path, lib_name: &str, release: bool, native_deps: &[crate::project::NativeDep], source_root: Option<&std::path::Path>) -> Result<std::path::PathBuf, String> {
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
@@ -478,11 +480,9 @@ codegen-units = 1
         return Err(format!("expected library not found at {}", lib_path.display()));
     }
 
-    // Copy to current directory
-    let dest = std::path::Path::new(".").join(&lib_filename);
-    std::fs::copy(&lib_path, &dest)
-        .map_err(|e| format!("failed to copy library: {}", e))?;
-    Ok(dest)
+    // The library stays in the scratch dir; the caller installs it at the
+    // requested output path (#3349).
+    Ok(lib_path)
 }
 
 /// Does the generated crate DEFINE an entry point?
