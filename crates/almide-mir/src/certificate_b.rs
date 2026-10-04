@@ -293,11 +293,12 @@ fn loop_carried_slots_feeder_slots(
     let mut slots: BTreeSet<ValueId> = BTreeSet::new();
     let mut line_slots: BTreeSet<ValueId> = BTreeSet::new();
     let mut depth: u32 = 0;
+    let borrowed = borrowed_roots(func); // never a slot (#3298, certificate_b_tail.rs)
     for op in &func.ops {
         match op {
             Op::LoopStart => depth += 1,
             Op::LoopEnd => depth = depth.saturating_sub(1),
-            Op::SetLocal { local, src } if heap_objs.contains(src) => {
+            Op::SetLocal { local, src } if heap_objs.contains(src) && !borrowed.contains(local) => {
                 feeder_to_slot.insert(*src, *local);
                 if depth > 0 {
                     slots.insert(*local);
