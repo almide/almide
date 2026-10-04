@@ -339,11 +339,17 @@ const EXTERN_SET: &str = "an @extern(wasm, ...) import carries Int, Float, Bool,
 /// What an export's signature may carry (#3354).
 const EXPORT_SET: &str = "an export carries Int, Float, Bool, String, Unit, Bytes, List[T], Option[T] and records (#3354); variants, maps, sets, tuples and functions are not marshalled";
 
-/// The refusal for a type the host cannot marshal.
+/// The refusal for a type the host cannot marshal. The type is printed as
+/// it is spelled in source. An unmarked `fn` is public, so the fix for a
+/// helper is `local fn`, not dropping a `pub` it may not have (#3360).
 fn refuse(fn_name: &str, what: &str, ty: &Ty, set: &str) -> String {
-    format!(
-        "error: --host js cannot marshal {what} of `{fn_name}`: `{ty:?}` — {set}\n  hint: keep `{fn_name}` private (drop `pub`) or wrap it in a pub fn over the marshalled types"
-    )
+    let ty = ty.display();
+    let hint = if set == EXTERN_SET {
+        format!("pass `{fn_name}`'s value across the boundary as one of those types (a String carrying JSON, for example)")
+    } else {
+        format!("an unmarked or `pub` fn is public and becomes a JS export; write `local fn {fn_name}` (or `mod fn`) to keep it internal, or wrap it in a pub fn over the marshalled types")
+    };
+    format!("error: --host js cannot marshal {what} of `{fn_name}`: `{ty}` — {set}\n  hint: {hint}")
 }
 
 /// The JS expression converting `expr` (a JS value) into the wasm slot `v`
