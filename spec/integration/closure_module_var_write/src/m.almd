@@ -1,0 +1,17 @@
+// Mutable globals another module writes, whole and through a place, from
+// inside closures and outside them (#3307, #3312).
+type In = { n: Int }
+
+type Rec = { n: Int, tag: String, inner: In }
+
+var x = 0
+
+var f = 0.5
+
+var name = "m"
+
+var xs: List[Int] = [0, 0]
+
+var rec: Rec = { n: 0, tag: "r", inner: { n: 1 } }
+
+var counts: Map[String, Int] = [:]
