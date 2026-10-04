@@ -185,3 +185,100 @@ fn a_chunk_map_in_a_sibling_module_is_served() {
     let route = String::from_utf8_lossy(&wasm.stderr);
     assert!(route.contains("served on separate instances (6 elements)"), "{route}");
 }
+
+const REUSE_SRC: &str = r#"fn sq(i: Int, k: Int) -> Int = {
+  var acc = 0
+  for j in 0..<(200 + i) {
+    acc = acc + (j * k + i) % 11
+  }
+  acc
+}
+
+fn halve(i: Int) -> (Int, Float) = (i / 2, int.to_float(i) / 2.0)
+
+fn pick(i: Int) -> Int = {
+  let xs = [1, 2, 3]
+  xs[i]
+}
+
+effect fn round(k: Int) -> Unit = {
+  let a = fan {
+    list.map(list.range(0, 9), (i) => sq(i, k))
+  }
+  let b = fan {
+    list.map(list.range(0, 7), (i) => halve(i + k))
+  }
+  println(list.join(list.map(a, (x) => int.to_string(x)), ","))
+  for p in b {
+    let (q, r) = p
+    println("${q} ${r}")
+  }
+}
+
+effect fn main() -> Unit = {
+  round(1)!
+  round(2)!
+  let picked = fan {
+    list.map(list.range(0, 3), (i) => pick(i))
+  }
+  println(int.to_string(list.len(picked)))
+  round(3)!
+}
+"#;
+
+#[test]
+fn pooled_workers_serve_every_site_and_every_call() {
+    // Two sites, three calls each, and between them an offer whose every
+    // chunk succeeds: the same pooled workers serve all seven offers.
+    let route = same_on_every_leg(REUSE_SRC);
+    assert_eq!(route.matches("served on separate instances").count(), 7, "{route}");
+}
+
+#[test]
+fn the_worker_cap_changes_nothing_observable_on_either_leg() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("m.almd"), REUSE_SRC).expect("write");
+    let base = run(dir.path(), &[], false).stdout;
+    assert_eq!(base.lines().count(), 25, "the program ran: {base}");
+    for n in ["1", "2", "3"] {
+        for extra in [&[][..], &["--target", "wasm"][..]] {
+            let out = Command::new(almide())
+                .current_dir(dir.path())
+                .args(["run", "m.almd"])
+                .args(extra)
+                .env("ALMIDE_FAN_THREADS", n)
+                .output()
+                .expect("spawn almide");
+            assert_eq!(String::from_utf8_lossy(&out.stdout), base, "ALMIDE_FAN_THREADS={n} {extra:?}");
+        }
+    }
+}
+
+#[test]
+fn a_failed_offer_after_a_served_one_falls_back_like_native() {
+    // The first offer's element 3 traps: its workers are dropped and the map
+    // aborts sequentially, like native. Nothing is offered after the abort,
+    // so this pins the abort path with workers in the pool from an earlier
+    // offer.
+    let src = r#"fn sq(i: Int) -> Int = i * i
+
+fn pick(i: Int) -> Int = {
+  let xs = [10, 20, 30]
+  xs[i]
+}
+
+effect fn main() -> Unit = {
+  let a = fan {
+    list.map(list.range(0, 8), (i) => sq(i))
+  }
+  println(int.to_string(list.len(a)))
+  let b = fan {
+    list.map(list.range(0, 5), (i) => pick(i))
+  }
+  println(int.to_string(list.len(b)))
+}
+"#;
+    let route = same_on_every_leg(src);
+    assert!(route.contains("served on separate instances (8 elements)"), "{route}");
+    assert!(route.contains("not served (a chunk failed), sequential"), "{route}");
+}

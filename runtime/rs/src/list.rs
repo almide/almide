@@ -238,9 +238,15 @@ pub fn almide_rt_list_par_sequential() -> bool {
 }
 
 /// Worker count for `len` items: one per available core, never more than `len`.
+/// `ALMIDE_FAN_THREADS=N` (read once) caps it further — the thread-scaling
+/// lever #3003 measures both legs with; the result is the same at any N.
 pub fn almide_rt_list_par_workers(len: usize) -> usize {
+    static CAP: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    let cap = *CAP.get_or_init(|| {
+        std::env::var("ALMIDE_FAN_THREADS").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&n| n > 0).unwrap_or(usize::MAX)
+    });
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-    cpus.max(1).min(len.max(1))
+    cpus.max(1).min(cap).min(len.max(1))
 }
 
 pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + Send + Sync>(xs: Vec<A>, f: F) -> Vec<B> {
