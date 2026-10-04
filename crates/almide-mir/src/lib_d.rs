@@ -143,3 +143,19 @@ impl OwnershipScan {
         }
     }
 }
+
+// ── merge dsts that hold no reference (#3279) ──
+// A heap `IfThen` dst whose value is stored into a container slot and never
+// released (`Store(addr, prim.handle(dst))`, no `Consume`) was a fresh owned
+// object here and so a leak at the end, while the certificate opens no line
+// for it: the arms moved their values into the merge, and the merge's value
+// moved on into the container, which releases it. The certificate's rule
+// decides which merges own a reference.
+
+impl OwnershipScan {
+    fn own_merge(&mut self, dst: ValueId) {
+        if self.owning_merges.contains(&dst) {
+            self.own_fresh_object(dst);
+        }
+    }
+}
