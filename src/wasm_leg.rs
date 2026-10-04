@@ -147,6 +147,12 @@ pub(crate) fn lower_resolved(
         return Err(format!("type errors: {n_errors}"));
     }
 
+    // #3286: every module's versioned name is known BEFORE the entry lowers.
+    // The entry's `lib.CENTER` use-site Var takes its `module_origin` from this
+    // table; registered only inside the module loop below, a dependency's
+    // name arrived after the entry had already spelled the bare `lib`, and
+    // the use-site never met its `almide_rt_lib_v0` declaration (var:unmapped).
+    register_versioned_module_names(&mut checker, &resolved.modules);
     let mut ir = crate::lower::lower_program(&program, &checker.env, &checker.type_map);
     // Lower every resolved module into the program before linking — the
     // incumbent's lower_one_user_module loop (src/compile_driver.rs:172-222,
@@ -186,16 +192,8 @@ pub(crate) fn lower_resolved(
         // Dependency modules lower under their VERSIONED name so two major
         // versions of one package coexist (incumbent's lower_one_user_module
         // versioning, verbatim). Project-local modules keep their bare name.
-        let versioned = pkg_id.as_ref().map(|pid| {
-            let base = pid.mod_name();
-            match name.strip_prefix(&pid.name) {
-                Some(suffix) => format!("{}{}", base, suffix),
-                None => base,
-            }
-        });
-        if let Some(ref v) = versioned {
-            checker.env.module_versioned_names.insert(crate::intern::sym(name), crate::intern::sym(v));
-        }
+        // (registered for every module up front: `register_versioned_module_names`).
+        let versioned = versioned_module_name(name, pkg_id.as_ref());
         let self_name = checker.env.self_module_name.map(|s| s.to_string());
         let import_table_name = self_name.as_deref().unwrap_or(name);
         let (mod_table, _) = crate::import_table::build_import_table(mod_prog, Some(import_table_name), &checker.env.user_modules);
@@ -444,6 +442,34 @@ fn link_self_host(
         }
         if !grew {
             break;
+        }
+    }
+}
+
+/// The name a resolved module lowers under: a dependency module's
+/// `pkg_id`-derived versioned name (`<pkg mod_name><suffix>` for a
+/// submodule), `None` for a project-local module, which keeps its bare name.
+pub fn versioned_module_name(name: &str, pkg_id: Option<&crate::project::PkgId>) -> Option<String> {
+    pkg_id.map(|pid| {
+        let base = pid.mod_name();
+        match name.strip_prefix(&pid.name) {
+            Some(suffix) => format!("{base}{suffix}"),
+            None => base,
+        }
+    })
+}
+
+/// Register every resolved module's versioned name before ANY program is
+/// lowered — the entry's (and each module's) `mod.NAME` use-site resolves its
+/// origin through this table (`module_top_let_var`). The one copy every
+/// driver calls: the native driver, both incumbent wasm paths and this leg.
+pub fn register_versioned_module_names(
+    checker: &mut crate::check::Checker,
+    modules: &[(String, crate::ast::Program, Option<crate::project::PkgId>, bool)],
+) {
+    for (name, _, pkg_id, _) in modules {
+        if let Some(v) = versioned_module_name(name, pkg_id.as_ref()) {
+            checker.env.module_versioned_names.insert(crate::intern::sym(name), crate::intern::sym(&v));
         }
     }
 }

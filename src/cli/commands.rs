@@ -565,13 +565,7 @@ fn render_error_summary<'a>(errors: impl Iterator<Item = &'a diagnostic::Diagnos
 /// stay in the caller so the ALMIDE_PROFILE "lower_modules" mark lands at
 /// the same point as before. Extracted verbatim.
 fn lower_wasm_test_modules(program: &almide_lang::ast::Program, checker: &mut check::Checker, resolved: &mut resolve::ResolvedModules) -> Result<almide::ir::IrProgram, String> {
-    for (name, _, pkg_id, _) in &resolved.modules {
-        if let Some(pid) = pkg_id.as_ref() {
-            let base = pid.mod_name();
-            let v = if let Some(suffix) = name.strip_prefix(&pid.name) { format!("{}{}", base, suffix) } else { base };
-            checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(&v));
-        }
-    }
+    almide::wasm_leg::register_versioned_module_names(checker, &resolved.modules);
     let mut ir_program = almide::lower::lower_program(program, &checker.env, &checker.type_map);
     let mut module_diags = Vec::new();
     let sources = std::mem::take(&mut resolved.sources);
