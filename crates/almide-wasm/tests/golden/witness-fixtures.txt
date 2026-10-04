@@ -139,6 +139,8 @@ spec/wasm_cross/effect_slot_never_err_bang.almd
 spec/wasm_cross/effect_tail_carrier_family.almd
 spec/wasm_cross/effect_tco.almd
 spec/wasm_cross/effect_tco_err_rewrap.almd
+spec/wasm_cross/effect_unit_yields_result.almd
+spec/wasm_cross/effect_unwrap_in_loop.almd
 spec/wasm_cross/empty_collection_annotated.almd
 spec/wasm_cross/empty_collection_fold.almd
 spec/wasm_cross/empty_from_list_mono.almd
@@ -211,7 +213,9 @@ spec/wasm_cross/fuel_bare_result.almd
 spec/wasm_cross/fuel_block_body.almd
 spec/wasm_cross/fuel_bounded_boundary.almd
 spec/wasm_cross/fuel_cut_in_arm_loop.almd
+spec/wasm_cross/fuel_cut_releases_frame.almd
 spec/wasm_cross/fuel_divergence_cut.almd
+spec/wasm_cross/fuel_dyn_charge.almd
 spec/wasm_cross/fuel_race_boundary.almd
 spec/wasm_cross/fuel_race_err_skip.almd
 spec/wasm_cross/fuel_timeout_ends.almd
@@ -247,8 +251,10 @@ spec/wasm_cross/grain_pattern_guards.almd
 spec/wasm_cross/grain_string_escapes.almd
 spec/wasm_cross/grouping_unary.almd
 spec/wasm_cross/guard_err_in_call_arg_block.almd
+spec/wasm_cross/guard_jump_in_value_fn.almd
 spec/wasm_cross/guard_let_statement.almd
 spec/wasm_cross/guard_statement.almd
+spec/wasm_cross/guard_value_exit_in_loop.almd
 spec/wasm_cross/gzip_inflate_members.almd
 spec/wasm_cross/hash_digests.almd
 spec/wasm_cross/heap_arena.almd
@@ -500,6 +506,7 @@ spec/wasm_cross/nested_tuple_destructure.almd
 spec/wasm_cross/nested_tuple_pattern.almd
 spec/wasm_cross/nested_tuples.almd
 spec/wasm_cross/nested_unwrap_or_share.almd
+spec/wasm_cross/nested_unwrap_propagation.almd
 spec/wasm_cross/nested_variant_match_bind.almd
 spec/wasm_cross/nested_variant_tag_box.almd
 spec/wasm_cross/nested_variant_tree.almd
