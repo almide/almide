@@ -104,6 +104,10 @@ fn a_boundary_type_the_host_cannot_marshal_is_refused_by_name() {
     assert!(!ok, "a Map on the boundary must be refused:\n{stderr}");
     assert!(stderr.contains("--host js cannot marshal parameter `xs` of `total`"), "{stderr}");
     assert!(stderr.contains("Map"), "{stderr}");
+    // The type is spelled as in source, and the hint names `local fn`: an
+    // unmarked fn is public, so "drop `pub`" would not apply (#3360).
+    assert!(!stderr.contains("Applied("), "{stderr}");
+    assert!(stderr.contains("local fn total"), "{stderr}");
     assert!(!dir.path().join("app.js").exists() && !dir.path().join("app.wasm").exists(), "a refused build writes nothing");
     // The same program builds without the switch: the refusal is the host's, not the module's.
     let (ok, stderr) = build(dir.path(), UNMARSHALLABLE, &["--target", "wasm", "-o", "app.wasm"]);
