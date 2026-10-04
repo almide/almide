@@ -16,6 +16,7 @@
 
 use std::collections::{HashMap, HashSet};
 use almide_ir::*;
+use almide_lang::types::Ty;
 use super::pass::{NanoPass, PassResult, Target};
 
 // Re-export from almide-ir
@@ -79,29 +80,44 @@ impl NanoPass for EffectInferencePass {
 /// accumulator w.r.t. this phase). Collects each function's direct effects
 /// (top-level, then module-scoped).
 fn seed_function_effects(program: &IrProgram, effect_map: &mut EffectMap) {
+    let known = known_function_names(program);
     for func in &program.functions {
-        let direct = collect_direct_effects(&func.body);
-        let is_effect = func.is_effect;
-        effect_map.functions.insert(func.name.to_string(), FunctionEffects {
-            direct: direct.clone(),
-            transitive: direct,
-            is_effect,
-        });
+        effect_map.functions.insert(func.name.to_string(), function_effects(func, &program.var_table, &known));
     }
 
-    // Also scan module functions
+    // Also scan module functions (each module numbers its own variables).
     for module in &program.modules {
         for func in &module.functions {
-            let direct = collect_direct_effects(&func.body);
             let qualified = format!("{}.{}", module.name, func.name);
-            let is_effect = func.is_effect;
-            effect_map.functions.insert(qualified, FunctionEffects {
-                direct: direct.clone(),
-                transitive: direct,
-                is_effect,
-            });
+            effect_map.functions.insert(qualified, function_effects(func, &module.var_table, &known));
         }
     }
+}
+
+/// One function's seed: its direct categories, and the closure values it
+/// calls without creating them (#3268).
+fn function_effects(func: &IrFunction, vt: &VarTable, known: &HashSet<String>) -> FunctionEffects {
+    let direct = collect_direct_effects(&func.body);
+    FunctionEffects {
+        direct: direct.clone(),
+        transitive: direct,
+        is_effect: func.is_effect,
+        indirect: collect_indirect_calls(func, vt, known),
+    }
+}
+
+/// The names a `Named` call can resolve to a user function by: top-level
+/// fns bare, module fns bare and qualified. A `Named` call outside this set
+/// (a variant constructor, a builtin) does not run its arguments.
+fn known_function_names(program: &IrProgram) -> HashSet<String> {
+    let mut names: HashSet<String> = program.functions.iter().map(|f| f.name.to_string()).collect();
+    for module in &program.modules {
+        for func in &module.functions {
+            names.insert(func.name.to_string());
+            names.insert(format!("{}.{}", module.name, func.name));
+        }
+    }
+    names
 }
 
 /// Step 3 of `EffectInferencePass::run`: solve the call graph to its least
@@ -148,21 +164,20 @@ fn debug_print_effects(effect_map: &EffectMap) {
     let mut entries: Vec<_> = effect_map.functions.iter().collect();
     entries.sort_by_key(|(name, _)| (*name).clone());
     for (name, fe) in &entries {
-        if !fe.transitive.is_empty() {
+        if !fe.transitive.is_empty() || !fe.indirect.is_empty() {
             eprintln!(
                 "[EffectInference] {} → {} {}",
                 name,
-                EffectMap::format_effects(&fe.transitive),
+                fe.report(),
                 if fe.is_effect { "(effect fn)" } else { "" }
             );
         }
     }
     // Summary
-    let pure_count = entries.iter().filter(|(_, fe)| fe.transitive.is_empty()).count();
-    let effect_count = entries.len() - pure_count;
+    let (pure, dependent, effects) = EffectMap::summary_counts(entries.iter().map(|(_, fe)| *fe));
     eprintln!(
-        "[EffectInference] {} functions analyzed: {} pure, {} with effects",
-        entries.len(), pure_count, effect_count
+        "[EffectInference] {} functions analyzed: {} pure, {} callback-dependent, {} with effects",
+        entries.len(), pure, dependent, effects
     );
 }
 
@@ -222,6 +237,104 @@ impl IrVisitor for EffectCollector {
     }
 }
 
+/// The closure values `func` calls without creating them (#3268), sorted.
+///
+/// A fn-typed parameter is named with its position (`f (arg 1)`) whether it
+/// is called here or handed to another call that may run it (`list.map(xs,
+/// f)`, `apply(f, x)`). Any other called value is named by its path: a record
+/// field `b.run`, a local `g`, `an element of hs`. A local bound to a lambda
+/// or a named fn in this body is not listed: its body is this function's own
+/// code and is already in its sets. No callee name is invented (ADR-0026 D4).
+fn collect_indirect_calls(func: &IrFunction, vt: &VarTable, known: &HashSet<String>) -> Vec<String> {
+    let fn_params = func.params.iter().enumerate()
+        .filter(|(_, p)| matches!(p.ty, Ty::Fn { .. }))
+        .map(|(i, p)| (p.var, format!("{} (arg {})", p.name, i + 1)))
+        .collect();
+    let mut collector = IndirectCallCollector { vt, known, fn_params, own_closures: HashSet::new(), found: Default::default() };
+    collector.visit_expr(&func.body);
+    collector.found.into_iter().collect()
+}
+
+struct IndirectCallCollector<'a> {
+    vt: &'a VarTable,
+    known: &'a HashSet<String>,
+    /// fn-typed parameter → `name (arg N)`.
+    fn_params: HashMap<VarId, String>,
+    /// Locals bound to a lambda or a named fn in this body.
+    own_closures: HashSet<VarId>,
+    found: std::collections::BTreeSet<String>,
+}
+
+impl IndirectCallCollector<'_> {
+    /// How a called value is named in the report, or `None` when the call
+    /// runs code this function already accounts for.
+    fn describe_callee(&self, callee: &IrExpr) -> Option<String> {
+        match &callee.kind {
+            IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. } => None,
+            IrExprKind::Var { id } if self.own_closures.contains(id) => None,
+            IrExprKind::Var { id } => Some(self.fn_params.get(id).cloned().unwrap_or_else(|| self.var_name(*id))),
+            IrExprKind::IndexAccess { object, .. } | IrExprKind::MapAccess { object, .. } => {
+                Some(self.path(object).map_or_else(|| "a closure value".to_string(), |p| format!("an element of {p}")))
+            }
+            _ => Some(self.path(callee).unwrap_or_else(|| "a closure value".to_string())),
+        }
+    }
+
+    /// `b.run`, `t.0`, `g` — a value spelled by variables and fields only.
+    fn path(&self, expr: &IrExpr) -> Option<String> {
+        match &expr.kind {
+            IrExprKind::Var { id } => Some(self.var_name(*id)),
+            IrExprKind::Member { object, field } => Some(format!("{}.{}", self.path(object)?, field)),
+            IrExprKind::TupleIndex { object, index } => Some(format!("{}.{}", self.path(object)?, index)),
+            _ => None,
+        }
+    }
+
+    fn var_name(&self, id: VarId) -> String {
+        self.vt.entries.get(id.0 as usize).map_or_else(|| "a closure value".to_string(), |v| v.name.to_string())
+    }
+
+    /// A call that may run its arguments: a module function or a user fn.
+    fn may_run_args(&self, target: &CallTarget) -> bool {
+        match target {
+            CallTarget::Module { .. } => true,
+            CallTarget::Named { name } => self.known.contains(name.as_str()),
+            CallTarget::Method { .. } | CallTarget::Computed { .. } => true,
+        }
+    }
+}
+
+impl IrVisitor for IndirectCallCollector<'_> {
+    fn visit_stmt(&mut self, stmt: &IrStmt) {
+        if let IrStmtKind::Bind { var, value, .. } = &stmt.kind
+            && matches!(value.kind, IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. })
+        {
+            self.own_closures.insert(*var);
+        }
+        walk_stmt(self, stmt);
+    }
+
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        if let IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } = &expr.kind {
+            if let CallTarget::Computed { callee } = target
+                && let Some(name) = self.describe_callee(callee)
+            {
+                self.found.insert(name);
+            }
+            if self.may_run_args(target) {
+                for arg in args {
+                    if let IrExprKind::Var { id } = &arg.kind
+                        && let Some(name) = self.fn_params.get(id)
+                    {
+                        self.found.insert(name.clone());
+                    }
+                }
+            }
+        }
+        walk_expr(self, expr);
+    }
+}
+
 /// Build a call graph: caller → set of callee function names.
 fn build_call_graph(program: &IrProgram) -> HashMap<String, HashSet<String>> {
     let mut graph: HashMap<String, HashSet<String>> = HashMap::new();
@@ -268,6 +381,12 @@ impl IrVisitor for CalleeCollector {
             IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. }
             | IrExprKind::TailCall { target: CallTarget::Module { module, func, .. }, .. } => {
                 self.callees.insert(format!("{}.{}", module, func));
+            }
+            // A named fn taken as a value is a closure created here: whoever
+            // takes it is charged with what it does, the same as a lambda
+            // written here (#3268).
+            IrExprKind::FnRef { name } => {
+                self.callees.insert(name.to_string());
             }
             _ => {}
         }
@@ -335,6 +454,7 @@ mod tests {
                 direct: direct.clone(),
                 transitive: direct,
                 is_effect: false,
+                indirect: Vec::new(),
             });
         }
         map

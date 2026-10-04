@@ -1,4 +1,4 @@
-> Last updated: 2026-10-03
+> Last updated: 2026-10-04
 
 # Effect System
 
@@ -387,6 +387,36 @@ effect fn fetch() -> Result[String, String] = http.get("https://example.com")
 
 The gate runs after codegen: `almide check` and `almide test` accept the file,
 `almide build` refuses it.
+
+### Callbacks: charged to the creator
+
+A closure's categories are charged to the function that **creates** it: the
+function that writes the lambda, or takes a named fn as a value. Creating an
+effectful closure already needs an effect context (E006 otherwise), so the
+creator is where `[permissions].allow` judges it.
+
+A function that **calls** a closure it is handed (a fn-typed parameter, a
+record field holding a function, an element of a list of functions) runs
+whatever that closure does, but its own set does not include it. `almide
+check --effects` names such a function *callback-dependent* instead of
+reporting it as pure, and names the value it calls, never a guessed callee:
+
+```
+  call_box  → {} + whatever b.run does
+  make  → {IO} (effect fn)
+  use_it  → {} + whatever f (arg 1) does
+
+5 functions: 1 pure, 2 callback-dependent, 2 with effects
+```
+
+A fn-typed parameter counts when it is called and when it is handed to
+another call that may run it (`xs |> list.map(f)`). A lambda the function
+writes and calls itself is its own code and is already in its set. So a plain
+`fn`'s `{}` means "no category of its own"; only a function that is neither
+effectful nor callback-dependent is counted pure (#3268). ADR-0026 (#3243)
+will carry the category set on the fn type itself.
+
+Test: `tests/effects_report_callbacks_test.rs`
 
 ### Design layers
 

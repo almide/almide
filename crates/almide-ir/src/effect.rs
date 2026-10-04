@@ -42,6 +42,31 @@ pub struct FunctionEffects {
     pub direct: HashSet<Effect>,
     pub transitive: HashSet<Effect>,
     pub is_effect: bool,
+    /// The closure values this function calls, named by where they come from
+    /// (#3268): a fn-typed parameter as `f (arg 1)`, anything else by its
+    /// path (`b.run`, `g`, `an element of hs`). Sorted, no duplicates. The
+    /// effects of these calls are charged to whoever creates the closure, not
+    /// to this function, so `transitive` alone does not say what it runs. A
+    /// callee is never invented for them (ADR-0026 D4).
+    pub indirect: Vec<String>,
+}
+
+impl FunctionEffects {
+    /// No category of its own, but it runs closures it does not create.
+    pub fn is_callback_dependent(&self) -> bool {
+        self.transitive.is_empty() && !self.indirect.is_empty()
+    }
+
+    /// The `almide check --effects` cell: `{IO}`, `{}`, or
+    /// `{} + whatever f (arg 1) does`.
+    pub fn report(&self) -> String {
+        let set = EffectMap::format_effects(&self.transitive);
+        match self.indirect.as_slice() {
+            [] => set,
+            [one] => format!("{set} + whatever {one} does"),
+            many => format!("{set} + whatever {} do", many.join(", ")),
+        }
+    }
 }
 
 /// Effect analysis results for the entire program.
@@ -51,6 +76,16 @@ pub struct EffectMap {
 }
 
 impl EffectMap {
+    /// `(pure, callback-dependent, with effects)` over `functions`: a
+    /// function that only calls closures it is handed is not counted pure.
+    pub fn summary_counts<'a>(functions: impl Iterator<Item = &'a FunctionEffects>) -> (usize, usize, usize) {
+        functions.fold((0, 0, 0), |(p, d, e), fe| match (fe.transitive.is_empty(), fe.indirect.is_empty()) {
+            (true, true) => (p + 1, d, e),
+            (true, false) => (p, d + 1, e),
+            (false, _) => (p, d, e + 1),
+        })
+    }
+
     pub fn format_effects(effects: &HashSet<Effect>) -> String {
         if effects.is_empty() {
             return "{}".to_string();
