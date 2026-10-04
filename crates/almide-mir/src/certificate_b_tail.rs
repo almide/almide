@@ -242,6 +242,7 @@ impl CertScan {
             // after free), go through the child rule (#3261).
             Op::Borrow { v } | Op::MakeUnique { v } => self.probe_raw_child(*v),
             Op::Dup { src, .. } => self.probe_raw_child(*src),
+            Op::SetLocal { local, src } => self.rebind_ends_children(*local, *src),
             _ => {}
         }
     }
@@ -270,14 +271,22 @@ impl CertScan {
             PrimKind::LoadHandle => {
                 self.probe_address(first);
                 self.load_child(dst, first);
+                self.note_view(dst, first);
             }
             PrimKind::Load { .. } | PrimKind::Store { .. } => self.probe_address(first),
-            PrimKind::Handle => self.child_handle(dst, first),
+            PrimKind::Handle => {
+                self.child_handle(dst, first);
+                self.note_view(dst, first);
+                if let (Some(d), true) = (dst, self.s.of.contains_key(&first)) {
+                    self.paths.carriers.insert(d);
+                }
+            }
             PrimKind::ElemAddr => {
                 self.probe_address(first);
                 if let (Some(d), Some(o)) = (dst, self.address_object(first)) {
                     self.addr_of.insert(d, o);
                 }
+                self.note_view(dst, first);
             }
             _ => {}
         }
@@ -287,8 +296,13 @@ impl CertScan {
     /// operand's object (verify_ownership's `step_add_address_alias`).
     fn address_alias(&mut self, dst: ValueId, a: ValueId, b: ValueId) {
         match (self.address_object(a), self.address_object(b)) {
-            (Some(o), None) | (None, Some(o)) => {
+            (Some(o), None) => {
                 self.addr_of.insert(dst, o);
+                self.note_view(Some(dst), a);
+            }
+            (None, Some(o)) => {
+                self.addr_of.insert(dst, o);
+                self.note_view(Some(dst), b);
             }
             _ => {}
         }
@@ -306,13 +320,19 @@ impl CertScan {
     }
 
     fn probe_address(&mut self, addr: ValueId) {
+        if self.paths.rebound.contains(&addr) {
+            self.s.event(addr, 'b');
+            return;
+        }
         if let Some(o) = self.address_object(addr) {
             self.probe_object(o);
         }
     }
 
     fn probe_handle(&mut self, v: ValueId) {
-        if self.s.of.contains_key(&v) {
+        if self.paths.rebound.contains(&v) {
+            self.s.event(v, 'b');
+        } else if self.s.of.contains_key(&v) {
             let o = self.s.object_of(v);
             self.probe_object(o);
         } else {
@@ -385,6 +405,51 @@ impl CertScan {
         }
     }
 
+    /// #3269: a `SetLocal` rebinds a slot to a new block (`xs = list.set(xs,
+    /// i, v)`: new block, `Drop` of the old, `SetLocal`). The new block's `i`
+    /// lands on the slot's line, so that line never reaches 0, yet the views
+    /// taken of the old block still point into it: a raw child loaded from it,
+    /// an address into it, a `prim.handle` carrier of it. Every such view of
+    /// the slot's object ends here; a later read of one lands on its own line
+    /// at 0, unless (a child) a `Dup` the frame took keeps it. A `Dup` of the
+    /// slot owns a reference of its own and is not a view.
+    ///
+    /// The slot's line also holds the NEW block (its feeder's `i` is routed
+    /// there), so a view is ended only when it was taken from a handle other
+    /// than the rebind's source: a view of the new block stays live.
+    fn rebind_ends_children(&mut self, local: ValueId, new: ValueId) {
+        if !self.s.of.contains_key(&local) {
+            return;
+        }
+        let slot = self.s.object_of(local);
+        let mut ended: Vec<ValueId> = self.child_of.keys().copied().filter(|&c| self.child_root(c) == slot).collect();
+        ended.extend(self.addr_of.iter().filter(|(_, &o)| o == slot).map(|(&a, _)| a));
+        ended.extend(self.paths.carriers.iter().copied().filter(|&c| c != local && self.s.of.contains_key(&c) && self.s.object_of(c) == slot));
+        ended.retain(|v| self.paths.view_src.get(v) != Some(&new));
+        self.paths.rebound.extend(ended);
+    }
+
+    /// `view` was taken from `from` (a carrier, an address, a loaded child):
+    /// record the handle at the base of the chain (#3269).
+    fn note_view(&mut self, view: Option<ValueId>, from: ValueId) {
+        let Some(v) = view else { return };
+        let base = self.paths.view_src.get(&from).copied().unwrap_or(from);
+        self.paths.view_src.insert(v, base);
+        self.paths.rebound.remove(&v);
+        if self.paths.rebound.contains(&from) {
+            self.paths.rebound.insert(v);
+        }
+    }
+
+    /// The object at the top of a raw child's chain of parents.
+    fn child_root(&self, c: ValueId) -> ValueId {
+        let mut o = c;
+        while let Some(&p) = self.child_of.get(&o) {
+            o = p;
+        }
+        o
+    }
+
     fn probe_raw_child(&mut self, v: ValueId) {
         if self.is_raw_child(v) {
             self.child_probe(v);
@@ -394,7 +459,7 @@ impl CertScan {
     fn child_probe(&mut self, child: ValueId) {
         let mut c = child;
         loop {
-            if self.path_balance(c) > 0 {
+            if self.path_balance(c) > 0 || self.paths.rebound.contains(&c) {
                 self.s.event(c, 'b');
                 return;
             }
@@ -442,6 +507,16 @@ struct PathScopes {
     /// Objects of handles now out of scope: a later `Return` still takes
     /// its exit obligation on them, as before.
     retired: BTreeSet<ValueId>,
+    /// Views of a slot's old block (raw children, addresses, carriers) whose
+    /// slot was rebound on the current path (#3269).
+    rebound: BTreeSet<ValueId>,
+    /// `prim.handle` carriers of a tracked object (#3269).
+    carriers: BTreeSet<ValueId>,
+    /// Each view (carrier, address, loaded child) → the handle it was taken
+    /// from, at the base of its chain (#3269).
+    view_src: BTreeMap<ValueId, ValueId>,
+    /// `rebound` at each open `IfThen`, and what the then arm left at `Else`.
+    rebound_entry: Vec<(BTreeSet<ValueId>, BTreeSet<ValueId>)>,
 }
 
 impl CertScan {
@@ -452,11 +527,26 @@ impl CertScan {
     fn enter_branch_scope(&mut self) {
         let maps = self.path_maps();
         self.paths.entry.push(maps);
+        let rebound = self.paths.rebound.clone();
+        self.paths.rebound_entry.push((rebound, BTreeSet::new()));
+    }
+
+    /// The rebound children per path (#3269): each arm starts from the set at
+    /// the `IfThen`, and after the `EndIf` a child rebound on either arm stays
+    /// ended (its block may be gone on that path).
+    fn leave_arm_rebound(&mut self, is_end: bool) {
+        if is_end {
+            let Some((_, then_left)) = self.paths.rebound_entry.pop() else { return };
+            self.paths.rebound.extend(then_left);
+        } else if let Some((entry, then_left)) = self.paths.rebound_entry.last_mut() {
+            *then_left = std::mem::replace(&mut self.paths.rebound, entry.clone());
+        }
     }
 
     /// At `Else` (`is_end` false) and `EndIf`: retire what the arm just
     /// closed defined, and restore the maps at the `IfThen`.
     fn leave_arm(&mut self, is_end: bool) {
+        self.leave_arm_rebound(is_end);
         let Some(entry) = (if is_end { self.paths.entry.pop() } else { self.paths.entry.last().cloned() }) else {
             return;
         };

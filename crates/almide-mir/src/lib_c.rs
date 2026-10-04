@@ -133,6 +133,12 @@ struct OwnershipScan {
     child_parent: BTreeMap<ValueId, ValueId>,
     /// Handles a closed `IfThen` arm defined (#3267, lib_d.rs).
     out_of_path: BTreeSet<ValueId>,
+    /// Raw children whose slot was rebound on the current path, and that set
+    /// at each open `IfThen` with what its then arm left (#3269, lib_d.rs).
+    rebound: BTreeSet<ValueId>,
+    rebound_frames: Vec<(BTreeSet<ValueId>, BTreeSet<ValueId>)>,
+    /// `prim.handle` carriers of a tracked object (#3269).
+    carriers: BTreeSet<ValueId>,
 }
 
     struct BranchFrame {
@@ -190,6 +196,9 @@ impl OwnershipScan {
         }
         // The certificate's address rule (#3259): one operand that is an
         // address into (or a handle on) an object makes `dst` an address into it.
+        if self.rebound.contains(&a) || self.rebound.contains(&b) {
+            self.rebound.insert(dst);
+        }
         match (self.address_object(a), self.address_object(b)) {
             (Some(o), None) | (None, Some(o)) => {
                 self.addr_of.insert(dst, o);
@@ -439,6 +448,7 @@ impl OwnershipScan {
     /// Extracted from [`Self::step`] (codopsy r2, #852): the `IfThen` arm — open a
     /// branch frame remembering the ENTRY state both arms run from. Verbatim.
     fn enter_branch_frame(&mut self, dst: Option<ValueId>) {
+        self.enter_rebound_frame();
         self.branches.push(BranchFrame {
             entry_rc: self.rc.clone(),
             entry_dead: self.dead.clone(),
@@ -463,6 +473,7 @@ impl OwnershipScan {
         // seen" witness either way).
         let diverged = std::mem::take(&mut self.diverged);
         let moved = if diverged { false } else { self.merge_val_move(val) };
+        self.leave_rebound_arm(false);
         if let Some(entry) = self.branches.last().map(|fr| fr.entry_keys.clone()) {
             self.retire_arm_keys(&entry);
         }
@@ -486,6 +497,7 @@ impl OwnershipScan {
         // diverged arm moved nothing into the merge and is not a join input.
         let pending = std::mem::take(&mut self.diverged);
         let moved = if pending { false } else { self.merge_val_move(val) };
+        self.leave_rebound_arm(true);
         if let Some(mut fr) = self.branches.pop() {
             self.retire_arm_keys(&fr.entry_keys);
             let else_seen = fr.then_exit.is_some();
@@ -684,6 +696,7 @@ impl OwnershipScan {
                 {
                     self.object_of.insert(*d, o);
                     self.dead.insert(*d, false);
+                    self.carriers.insert(*d);
                 }
             }
             // T1-3 native Result carrier: the borrowed Err-String read ALIASES
@@ -777,6 +790,9 @@ impl OwnershipScan {
             if self.borrowed.contains(&o) || self.rc.get(&o).copied().unwrap_or(0) >= 1 {
                 return true;
             }
+            if self.rebound.contains(&o) {
+                return false;
+            }
             match self.child_parent.get(&o) {
                 Some(&p) => o = p,
                 None => return false,
@@ -788,7 +804,7 @@ impl OwnershipScan {
     /// probe (#3263): a handle released while a sibling still holds its object
     /// passes the same live pointer. An untracked argument stays a violation.
     fn call_arg_live(&self, v: ValueId) -> bool {
-        self.address_object(v).is_some_and(|o| self.object_alive(o))
+        !self.ended_view(v) && self.address_object(v).is_some_and(|o| self.object_alive(o))
     }
 
     /// The object an address (or a handle used as one) points into.
@@ -802,7 +818,7 @@ impl OwnershipScan {
     /// An address with no tracked object stays off the model, as before.
     fn check_address_live(&mut self, i: usize, addr: ValueId) {
         let Some(o) = self.address_object(addr) else { return };
-        if !self.object_alive(o) {
+        if self.ended_view(addr) || !self.object_alive(o) {
             self.violations.push(violation(i, addr, ViolationKind::UseAfterFree));
         }
     }
@@ -811,6 +827,7 @@ impl OwnershipScan {
     /// loop-carried rebind aliases the slot onto the source's object and makes it
     /// live again. Verbatim.
     fn rebind_local_slot(&mut self, local: ValueId, src: ValueId) {
+        self.end_rebound_children(local);
         if let Some(o) = self.object_of.get(&src).copied() {
             self.object_of.insert(local, o);
             self.dead.insert(local, false);
@@ -910,6 +927,9 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
         addr_of: BTreeMap::new(),
         child_parent: BTreeMap::new(),
         out_of_path: BTreeSet::new(),
+        rebound: BTreeSet::new(),
+        rebound_frames: Vec::new(),
+        carriers: BTreeSet::new(),
     };
     for (i, op) in func.ops.iter().enumerate() {
         scan.step(i, op);
