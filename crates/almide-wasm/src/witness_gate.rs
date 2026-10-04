@@ -606,8 +606,14 @@ fn stmt_body_subset(e: &IrExpr) -> Option<Why> {
 /// A match's subject and arm heads (#2756): the subject is evaluated once,
 /// before the site; a pattern binds VIEWS of it (patterns.rs, no share, no
 /// release) — except a named list rest, a fresh block no owner releases
-/// (#2971), declined; a guard runs between two arms' tests, so it must be
-/// RC-free.
+/// (#2971), declined. A guard runs between two arms' tests (patterns.rs
+/// `lower_arm_chain`) and is recorded on its own arm's path, where the
+/// state before it is the one every path through it starts from. Its value
+/// is a scalar Bool, so each credit it takes inside is settled inside it (a
+/// temporary born and released, a share moved into a callee): the path that
+/// falls through to the next arm leaves it in that same state, and the
+/// events checked on the guard's own arm are the ones that path ran. A guard
+/// that BINDS a local declines — the local outlives the guard.
 fn match_head_subset(subject: &IrExpr, arms: &[almide_ir::IrMatchArm]) -> Option<String> {
     // A tuple / record literal subject is a fresh block the match only
     // reads: no route owns or releases it (arg_temps.rs names a produced or
@@ -646,11 +652,37 @@ fn match_head_subset(subject: &IrExpr, arms: &[almide_ir::IrMatchArm]) -> Option
         if pattern_has_named_rest(&a.pattern) {
             return Some("pattern:list-rest".into());
         }
-        if a.guard.as_ref().is_some_and(|g| !rc_free(g)) {
-            return Some("match-guard".into());
+        if let Some(g) = a.guard.as_ref().filter(|g| !rc_free(g)) {
+            if binds_a_local(g) {
+                return Some("match-guard:binds".into());
+            }
+            if let Some(w) = value_subset(g) {
+                return Some(w.at("match-guard"));
+            }
         }
     }
     None
+}
+
+/// Does `e` bind a local anywhere (a `let` in a block, a lambda param, a
+/// loop var, a pattern)? A guard that does keeps that local past the guard.
+fn binds_a_local(e: &IrExpr) -> bool {
+    struct V(bool);
+    impl almide_ir::visit::IrVisitor for V {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if matches!(
+                e.kind,
+                IrExprKind::Block { .. } | IrExprKind::Lambda { .. } | IrExprKind::ForIn { .. } | IrExprKind::Match { .. }
+            ) {
+                self.0 = true;
+                return;
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut v = V(false);
+    almide_ir::visit::IrVisitor::visit_expr(&mut v, e);
+    v.0
 }
 
 fn pattern_has_named_rest(p: &almide_ir::IrPattern) -> bool {
