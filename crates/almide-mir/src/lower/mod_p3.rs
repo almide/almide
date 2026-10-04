@@ -315,6 +315,7 @@ impl LowerCtx {
         // element bind take its own reference, balanced whether or not the release
         // happens.
         self.borrow_release_roots.extend(crate::lower::borrow_release_roots(body));
+        self.precopy_branch_mutated_params(body);
         for (v, r) in crate::lower::range_counting_vars(body) {
             self.range_counting_vars.entry(v).or_insert(r);
         }
