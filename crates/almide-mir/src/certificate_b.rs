@@ -585,6 +585,9 @@ impl CertScan {
     /// reads `(ad)` (rc-preserving), instead of the drop-old landing flat
     /// next to the scope-end drop (`idd` — a false double-free).
     fn dup_step(&mut self, dst: ValueId, src: ValueId) {
+        if self.cow_copy(dst, src) {
+            return;
+        }
         if !self.try_feed(dst, 'a') {
             let o = self.s.object_of(src);
             self.s.of.insert(dst, o);

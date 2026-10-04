@@ -129,6 +129,13 @@ impl ReadGen {
         self.ops.push(Op::Call { dst: None, func: RtFn::PrintStr, args: vec![CallArg::Handle(v)], result: None });
     }
 
+    /// #3321: `MakeUnique` on a live handle — on a `Dup` of the param or of a
+    /// raw child it copies, and the handle owns the copy from here.
+    fn make_unique(&mut self) {
+        let Some(v) = self.pick(&self.live.clone()) else { return };
+        self.ops.push(Op::MakeUnique { v });
+    }
+
     /// A `Borrow` of a live handle or a raw child.
     fn borrow(&mut self) {
         let mut pool = self.live.clone();
@@ -162,7 +169,7 @@ impl ReadGen {
     fn step(&mut self) {
         // The high bits: the LCG's low three bits cycle with period 8, so a
         // `% 8` on them never draws some arms between the other draws.
-        match (next_rand(&mut self.st) >> 33) % 8 {
+        match (next_rand(&mut self.st) >> 33) % 9 {
             0 => self.alloc(),
             1 => self.dup(),
             2 => self.drop_one(),
@@ -170,6 +177,7 @@ impl ReadGen {
             4 => self.deref(),
             5 => self.borrow(),
             6 => self.rebind(),
+            7 => self.make_unique(),
             _ => self.call(),
         }
     }
@@ -754,4 +762,53 @@ fn certificate_verdict_matches_verify_ownership_on_loop_slots() {
         }
     }
     assert!(accepted > 300 && rejected > 300, "accepted {accepted}, rejected {rejected}");
+}
+
+/// #3321: a copy-on-write `Dup` of a borrowed param, `MakeUnique`d (so it
+/// owns a fresh block), released, then read — or `Dup`'d again and moved out.
+/// The `Dup` put the copy on the param's line, which no read probe watches (the
+/// caller keeps the param's block alive), so both shapes certified while
+/// `verify_ownership` rejected them. `MakeUnique` now gives the copy its own
+/// `i`-born line: the read is probed and the late `Dup` is a resurrection.
+#[test]
+fn a_released_copy_on_write_dup_is_not_read() {
+    let v = ValueId;
+    let (p, copy, again) = (v(0), v(1), v(2));
+    let f = |tail: Vec<Op>| {
+        let mut ops = vec![Op::Dup { dst: copy, src: p }, Op::MakeUnique { v: copy }];
+        ops.extend(tail);
+        let mut f = func(ops);
+        f.params = vec![MirParam { value: p, repr: heap() }];
+        f
+    };
+    let read = |h: ValueId| Op::Call { dst: None, func: RtFn::PrintStr, args: vec![CallArg::Handle(h)], result: None };
+    // Read while held, then released: fine on both sides.
+    let live = f(vec![read(copy), Op::Drop { v: copy }]);
+    assert!(cert_all_balanced(&ownership_certificate(&live)), "{:?}", ownership_certificate(&live));
+    assert_eq!(verify_ownership(&live), Ok(()));
+    // Read after the release: rejected by both.
+    let late_read = f(vec![Op::Drop { v: copy }, read(copy)]);
+    assert!(!cert_all_balanced(&ownership_certificate(&late_read)), "{:?}", ownership_certificate(&late_read));
+    assert!(verify_ownership(&late_read).is_err());
+    // `Dup` after the release, moved out: the resurrection, rejected by both.
+    let late_dup = f(vec![Op::Drop { v: copy }, Op::Dup { dst: again, src: copy }, Op::Consume { v: again }]);
+    assert!(!cert_all_balanced(&ownership_certificate(&late_dup)), "{:?}", ownership_certificate(&late_dup));
+    assert!(verify_ownership(&late_dup).is_err());
+    // The param itself is still the caller's after the copy's release.
+    let param_read = f(vec![Op::Drop { v: copy }, read(p)]);
+    assert!(cert_all_balanced(&ownership_certificate(&param_read)), "{:?}", ownership_certificate(&param_read));
+    assert_eq!(verify_ownership(&param_read), Ok(()));
+    // The poisoned witness: both late uses after the copy's release.
+    let both = f(vec![
+        read(p),
+        Op::Drop { v: copy },
+        read(copy),
+        Op::Dup { dst: again, src: copy },
+        Op::Consume { v: again },
+    ]);
+    assert!(verify_ownership(&both).is_err());
+    assert_eq!(
+        ownership_certificate(&both),
+        include_str!("../../../proofs/poisoned-certs/3321-copy-on-write-dup-read-after-release.cert")
+    );
 }

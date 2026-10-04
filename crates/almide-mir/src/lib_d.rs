@@ -193,3 +193,24 @@ impl OwnershipScan {
         self.object_of.insert(slot, own);
     }
 }
+
+// ── copy-on-write copies (#3321) ──
+// A `Dup` of a block someone else keeps alive (a borrowed param, a raw loaded
+// child), which the function later `MakeUnique`s, is a COPY-ON-WRITE copy:
+// `MakeUnique` always copies there (the other holder plus the `Dup` make the
+// count at least 2), and from then on the handle owns a block of its own. The
+// shared object's liveness says nothing about it, so the handle is its own
+// object from the `Dup`: a read of it after its release is a use after free
+// wherever it is checked (a call arg, an address, a `Dup`). The certificate's
+// `cow_copy`, mirrored.
+
+impl OwnershipScan {
+    fn cow_copy(&mut self, dst: ValueId, o: ValueId) -> bool {
+        let shared = self.borrowed.contains(&o) || self.child_parent.contains_key(&o);
+        if !shared || !self.cow_dups.contains(&dst) {
+            return false;
+        }
+        self.own_fresh_object(dst);
+        true
+    }
+}
