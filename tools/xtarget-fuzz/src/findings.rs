@@ -145,6 +145,9 @@ fn render_meta(seed: u64, index: u64, family: &str, origin: &Origin, f: &Finding
         Origin::Composition { probes } => {
             format!("composition family, {probes} probes (oracle: by construction)")
         }
+        Origin::Shape { files } => {
+            format!("shape family, a {files}-file project bundled in repro.almd (oracle: by construction, #3309)")
+        }
     };
     // An identity repro carries its own oracle, so `ladder repro.almd` is
     // the more robust replay: it does not depend on the corpus (or this

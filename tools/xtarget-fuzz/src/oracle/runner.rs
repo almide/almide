@@ -212,6 +212,13 @@ impl Toolchain {
     fn run_almide(&self, args: &[&str]) -> ProcResult {
         let mut cmd = Command::new(&self.almide);
         cmd.args(args);
+        // A project program (the shape family, #3309) is `<root>/src/x.almd`
+        // under a `<root>/almide.toml`: almide resolves the manifest — and
+        // its path dependencies — from the working directory, so run there.
+        // A loose single file (no `src/` + manifest pair) runs as before.
+        if let Some(root) = args.iter().find(|a| a.ends_with(".almd")).and_then(|f| project_root(Path::new(f))) {
+            cmd.current_dir(root);
+        }
         cmd.env("ALMIDE_RUN_PROJECT_DIR", &self.scratch);
         // Force deterministic, colourless diagnostics so captured stderr
         // is comparable and free of ANSI codes.
@@ -317,6 +324,17 @@ impl Toolchain {
             duration,
         }
     }
+}
+
+/// `<root>` when `file` is `<root>/src/<name>.almd` and `<root>/almide.toml`
+/// exists — the layout of a generated project.
+fn project_root(file: &Path) -> Option<PathBuf> {
+    let src = file.parent()?;
+    if src.file_name()? != "src" {
+        return None;
+    }
+    let root = src.parent()?;
+    root.join("almide.toml").is_file().then(|| root.to_path_buf())
 }
 
 /// Polling granularity while waiting on a child. Small enough that a
