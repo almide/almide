@@ -57,8 +57,12 @@ use crate::*;
 /// no heap block (the incumbent's `region_safe_op` whitelist).
 const SCALAR_MODULES: &[&str] = &["int", "float", "math", "bool"];
 
-/// Size of the save block payload: the bump pointer + one head per class.
-const SAVE_BYTES: u32 = 4 + HEADS_BYTES;
+/// Size of the save block payload: the bump pointer + one head per class
+/// + the large-list head (#3348).
+const SAVE_BYTES: u32 = 4 + HEADS_BYTES + 4;
+/// Where the save block keeps the large-list head: after the class heads.
+const SAVED_LARGE: u32 = SAVED_HEADS + HEADS_BYTES;
+const LARGE_HEAD: i32 = crate::runtime_large::LARGE_HEAD as i32;
 /// The free-list class heads, `class_slot(0) .. class_slot(FREELIST_CLASSES)`.
 const HEADS_BYTES: u32 = 4 * FREELIST_CLASSES;
 /// Where the save block keeps the heads: after the payload's bump word.
@@ -354,6 +358,8 @@ impl<'a> Emitter<'a> {
         i.local_get(blk).i32_const(SAVED_HEADS as i32).i32_add();
         i.i32_const(class_slot(0)).i32_const(HEADS_BYTES as i32).memory_copy(0, 0);
         i.i32_const(class_slot(0)).i32_const(0).i32_const(HEADS_BYTES as i32).memory_fill(0);
+        i.local_get(blk).i32_const(LARGE_HEAD).i32_load(abs(0)).i32_store(abs(SAVED_LARGE));
+        i.i32_const(LARGE_HEAD).i32_const(0).i32_store(abs(0));
         Ok((blk, snap))
     }
 
@@ -398,6 +404,7 @@ impl<'a> Emitter<'a> {
             i.i32_const(class_slot(0));
             i.local_get(blk).i32_const(SAVED_HEADS as i32).i32_add();
             i.i32_const(HEADS_BYTES as i32).memory_copy(0, 0);
+            i.i32_const(LARGE_HEAD).local_get(blk).i32_load(abs(SAVED_LARGE)).i32_store(abs(0));
             i.local_get(blk).i32_load(abs(almide_layout::PAYLOAD)).global_set(G_HEAP);
             i.local_get(blk).call(F_FREE);
             if let Some((snap, c)) = snap {
