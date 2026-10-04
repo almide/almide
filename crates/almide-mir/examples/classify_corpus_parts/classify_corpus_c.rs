@@ -65,6 +65,16 @@ for mir in mirs {
             t.cert_backing_breaches
                 .push(format!("{}::{}", ctx.file.display(), mir.name));
         }
+        // The capability gate (#3302): a call into a capability module must be a
+        // host op (capabilities counted) or pure — anything else is a host reach
+        // the caps witness would silently omit.
+        for op in &mir.ops {
+            if let Op::CallFn { name, .. } = op {
+                if almide_mir::host_ops::is_uncounted_host_call(name) {
+                    t.uncounted_host_calls.push(format!("{}::{} -> {name}", ctx.file.display(), mir.name));
+                }
+            }
+        }
         // Ownership is one heap object per line; names are one line per
         // function. Both are LOCAL properties — no transitivity.
         let (cert, poisoned) = almide_mir::certificate::ownership_certificate_with_poison(mir);
@@ -667,6 +677,10 @@ fn print_wall_report(t: &Tally) {
         t.cert_backing_breaches.len()
     );
     eprintln!(
+        "  uncounted host call (BUG): {}  <- capability-module call neither a host op nor pure (#3302)",
+        t.uncounted_host_calls.len()
+    );
+    eprintln!(
         "  caps-verified        : {}  <- provably reach no Stdout (transitive); witness emitted",
         t.caps_verified
     );
@@ -710,10 +724,14 @@ fn print_wall_report(t: &Tally) {
     for p in &t.forbidden_unwalled {
         eprintln!("      FORBIDDEN {p}");
     }
+    for p in &t.uncounted_host_calls {
+        eprintln!("      UNCOUNTED {p}");
+    }
 
     let total_breaches = t.lower_panics.len()
         + t.cert_backing_breaches.len()
-        + t.forbidden_unwalled.len();
+        + t.forbidden_unwalled.len()
+        + t.uncounted_host_calls.len();
     if total_breaches == 0 {
         eprintln!(
             "WALL OK: lower_function was TOTAL over {} corpus functions \
@@ -738,6 +756,13 @@ fn print_wall_report(t: &Tally) {
                  a param or op injected ownership no runtime op performs \
                  (the gate-blind use-after-free class).",
                 t.cert_backing_breaches.len()
+            );
+        }
+        if !t.uncounted_host_calls.is_empty() {
+            eprintln!(
+                "WALL BREACH: {} lowered call(s) into a capability module are neither a host op \
+                 nor pure — the caps witness would omit their host reach (crate::host_ops, #3302).",
+                t.uncounted_host_calls.len()
             );
         }
         if !t.forbidden_unwalled.is_empty() {
