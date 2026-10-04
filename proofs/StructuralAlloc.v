@@ -61,7 +61,9 @@ From Stdlib Require Import Lia.
 Open Scope Z_scope.
 
 (* The large-list loops stay folded under the trees' reductions. *)
+Arguments LargeTree.ltake_run_of : simpl never.
 Arguments LargeTree.ltake_run : simpl never.
+Opaque LargeTree.ltake_tree LargeTree.LFUEL.
 
 Section AllocTree.
 
@@ -120,7 +122,7 @@ Inductive astmt : Type :=
   | AStore (addr v : aexpr)
   | AIf (cond : aexpr) (body : list astmt)
   | AIfElse (cond : aexpr) (th el : list astmt)
-  | SLTake   (* the inlined large-list take (LargeTree.ltake_tree) *)
+  | SLTake (ss : list LargeTree.lstmt)   (* an inlined loop tree: the large-list take *)
   | ARetV (e : aexpr)
   | SGrow    (* the abstract grow step (see the header) *)
   | SOom.    (* the abstract C-197 abort (the wrap guard's body) *)
@@ -155,8 +157,8 @@ Fixpoint astep (s : astmt) (c : A) {struct s} : aout :=
   | ARetV e => ARet (aev e c) c
   | SGrow => AFall (grow_sem c)
   | SOom => AAbort
-  | SLTake =>
-      match LargeTree.ltake_run len (abase c) (anext c) (awant c) (ahead c) (am c) (agh c) with
+  | SLTake ss =>
+      match LargeTree.ltake_run_of ss len (abase c) (anext c) (awant c) (ahead c) (am c) (agh c) with
       | LargeTree.RRet q s' =>
           ARet q (mkA (LargeTree.loc s' 1) (LargeTree.loc s' 2) (LargeTree.loc s' 3)
                       (LargeTree.loc s' 4) (LargeTree.gh s') (apages c) (LargeTree.mem s'))
@@ -227,7 +229,7 @@ Definition alloc_body : list astmt :=
         ASetNext (ASub (AC 28) (AClz (ASub AWant (AC 1))));
         ASetWant (AShl (AC 16) ANext) ]
       [ (* above the class table: the exact-size large list (#3348) *)
-        SLTake ];
+        SLTake LargeTree.ltake_tree ];
     (* bump *)
     ASetBase AGHeap;
     ASetNext (ALand (AAdd (AAdd (AAdd ABase (AC 12)) ALen) (AC 3)) (AC (-4)));
@@ -440,7 +442,7 @@ Theorem alloc_large_hit : forall c w q s',
   = ARet q (mkA (LargeTree.loc s' 1) (LargeTree.loc s' 2) (LargeTree.loc s' 3)
                 (LargeTree.loc s' 4) (LargeTree.gh s') (apages c) (LargeTree.mem s')).
 Proof.
-  intros c w q s' Hw H16 Hc Hrun.
+  intros c w q s' Hw H16 Hc Hrun. unfold LargeTree.ltake_run in Hrun.
   destruct (large_class_guard w H16 Hc) as [Hg1 _].
   unfold run_alloc, alloc_body. acbn. rewrite <- Hw.
   replace (w <? 16) with false by (symmetry; apply Z.ltb_ge; exact H16).
@@ -462,7 +464,7 @@ Theorem alloc_large_bump : forall c w s',
   = ARet g (mkA g nx w (LargeTree.loc s' 4) nx (apages c)
                (upd (upd (upd (LargeTree.mem s') g 1) (g + 4) len) (g + 8) (w - 12))).
 Proof.
-  intros c w s' Hw H16 Hc Hrun Hw' g nx Hwrap Hfit.
+  intros c w s' Hw H16 Hc Hrun Hw' g nx Hwrap Hfit. unfold LargeTree.ltake_run in Hrun.
   destruct (large_class_guard w H16 Hc) as [Hg1 Hg2].
   unfold run_alloc, alloc_body. acbn. rewrite <- Hw.
   replace (w <? 16) with false by (symmetry; apply Z.ltb_ge; exact H16).

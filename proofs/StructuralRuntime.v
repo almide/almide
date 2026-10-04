@@ -60,7 +60,9 @@ From Stdlib Require Import Lia.
 Open Scope Z_scope.
 
 (* The large-list loops stay folded under the trees' reductions. *)
+Arguments LargeTree.lfree_mem_of : simpl never.
 Arguments LargeTree.lfree_mem : simpl never.
+Opaque LargeTree.lfree_tree LargeTree.LFUEL.
 
 (* ── Layout/runtime constants (matched by the Rust-side pin):
       almide_layout: RC = 0, CAP = 8, PAYLOAD = 12; 13 size classes (totals
@@ -258,7 +260,9 @@ Inductive stmt : Type :=
   | SIf (cond : expr) (body : stmt)
   | SRet
   | SCallFree
-  | SLFree.   (* the inlined large-list release (LargeTree.lfree_tree), then return *)
+  | SLRun (ss : list LargeTree.lstmt).
+      (* an inlined loop tree (the large-list release, LargeTree.lfree_tree),
+         then return *)
 
 (* One statement: `(returned?, state)`. `fsem` is the semantics of
    `call $free` — instantiated below with free's own runner, so dec's
@@ -273,8 +277,8 @@ Fixpoint sstep (fsem : C -> C) (s : stmt) (c : C) : bool * C :=
   | SIf e b => if Z.eqb (ev e c) 0 then (false, c) else sstep fsem b c
   | SRet => (true, c)
   | SCallFree => (false, fsem c)
-  | SLFree => (true, mkC (ctot c) (ccls c) (ctmp c)
-                         (LargeTree.lfree_mem blk (ctot c) (ccls c) (cm c)))
+  | SLRun ss => (true, mkC (ctot c) (ccls c) (ctmp c)
+                            (LargeTree.lfree_mem_of ss blk (ctot c) (ccls c) (cm c)))
   end.
 
 Fixpoint srun (fsem : C -> C) (ss : list stmt) (c : C) : C :=
@@ -315,7 +319,7 @@ Definition free_body : list stmt :=
   [ SSetTot (ELand (EAdd (ELoad (EAdd EBlk (EC 8))) (EC 15)) (EC (-4)));
     SIf (ELtU ETot (EC 16)) SRet;
     SSetCls (ESub (EC 28) (EClz (ESub ETot (EC 1))));
-    SIf (EGeU ECls (EC 13)) SLFree;
+    SIf (EGeU ECls (EC 13)) (SLRun LargeTree.lfree_tree);
     SSetCls (EAdd (EShl ECls (EC 2)) (EC fbase));
     SStore (EAdd EBlk (EC 12)) (ELoad ECls);
     SStore ECls EBlk ].
@@ -430,7 +434,7 @@ Proof.
   replace (28 - clz32 (t - 1) >=? 13) with true.
   2:{ symmetry. apply Z.geb_le. unfold class_of in Hcls. exact Hcls. }
   rcbn. replace (1 =? 0) with false by reflexivity. rcbn.
-  reflexivity.
+  unfold LargeTree.lfree_mem, class_of. reflexivity.
 Qed.
 
 (* `$free`, the FILING: for a class-eligible total, memory receives
