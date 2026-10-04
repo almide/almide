@@ -275,21 +275,15 @@ impl Emitter<'_> {
         })
     }
 
-    /// Push the moved place's block (judged unique first, no share) and
-    /// record the hand-over: the place's credit becomes the callee's.
+    /// Push the moved place's block (judged unique first, no share) and note
+    /// the hand-over convention; the credit itself moves at
+    /// [`Self::empty_moved_in`].
     fn hand_over_moved(&mut self, emptied: &Emptied, arg: &IrExpr, want: crate::SliceTy) -> Result<(), crate::EmitError> {
-        let holder = match *emptied {
-            Emptied::Var(id, ..) => {
+        match *emptied {
+            Emptied::Var(..) | Emptied::Global(..) => {
                 if !self.lower_mut_param_arg(arg, true)? {
                     self.lower(arg, Some(want))?;
                 }
-                self.witness_holder(id, false)
-            }
-            Emptied::Global(id, _) => {
-                if !self.lower_mut_param_arg(arg, true)? {
-                    self.lower(arg, Some(want))?;
-                }
-                self.witness_holder(id, true)
             }
             // Unshare the path (the record, then the leaf), then read the
             // slot's block with the slot's own credit.
@@ -300,18 +294,16 @@ impl Emitter<'_> {
                     self.f.instructions().i32_load(crate::slot_memarg(0));
                 }
                 self.f.instructions().i32_load(crate::slot_memarg(off));
-                None
             }
-        };
+        }
         self.modes_arg(want, true);
+        // The place's credit moves at [`Self::empty_moved_in`], not here: a
+        // later argument may still read the block through the place (a
+        // scalar `w[1]`, `mentions_beyond_scalar`), and that read is the
+        // frame's — its line must show the read before the hand-over.
         if let Some(w) = self.witness.as_mut() {
             w.note_arg(arg as *const IrExpr as usize);
             w.convention('m');
-            if let Some(l) = holder
-                && !w.move_local(l)
-            {
-                w.poison();
-            }
         }
         Ok(())
     }
@@ -349,19 +341,11 @@ impl Emitter<'_> {
                 Emptied::Var(id, idx, ty) => {
                     self.f.instructions().i32_const(0);
                     self.emit_store_var(id, idx, ty)?;
-                    if let Some(l) = self.witness_holder(id, false)
-                        && let Some(w) = self.witness.as_mut()
-                    {
-                        w.empty_local(l);
-                    }
+                    self.witness_move_and_empty(id, false);
                 }
                 Emptied::Global(id, gidx) => {
                     self.f.instructions().i32_const(0).global_set(gidx);
-                    if let Some(l) = self.witness_holder(id, true)
-                        && let Some(w) = self.witness.as_mut()
-                    {
-                        w.empty_local(l);
-                    }
+                    self.witness_move_and_empty(id, true);
                 }
                 Emptied::Slot(rec, off, in_cell) => {
                     self.f.instructions().local_get(rec);
@@ -373,6 +357,17 @@ impl Emitter<'_> {
             }
         }
         Ok(())
+    }
+
+    /// The moved place's credit goes to the callee — every argument has been
+    /// lowered, so no later read precedes it — and its holder is now empty.
+    fn witness_move_and_empty(&mut self, id: VarId, global: bool) {
+        let Some(l) = self.witness_holder(id, global) else { return };
+        let Some(w) = self.witness.as_mut() else { return };
+        if !w.move_local(l) {
+            w.poison();
+        }
+        w.empty_local(l);
     }
 
     /// The moved temp's local index, when the statement the block walk
