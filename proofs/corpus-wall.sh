@@ -373,8 +373,14 @@ fi
 #   the slot's line, so before #3269 the read probed a positive line
 #   (`ib(id)bd`) although the payload's block was freed; a rebind now ends
 #   every view of the old block and the read lands on the payload's own line.
+#   3321-copy-on-write-dup-read-after-release.cert — a `Dup` of a borrowed
+#   param, `MakeUnique`d (so it owns a copy), released, then read and `Dup`'d
+#   again and moved out (`ibdbam`). Before #3321 the `Dup` put the copy on the
+#   param's line, which takes no read probe and no resurrection guard (the
+#   caller keeps the param's block alive): the same function emitted `abd…`,
+#   accepted; a copy-on-write `Dup` now opens its own `i`-born line.
 echo
-echo "== POISON RATCHET (negative leg, #3229, #3233, #3261, #3263, #3267, #3269): every poisoned certificate is REJECTED by all three verdicts =="
+echo "== POISON RATCHET (negative leg, #3229, #3233, #3261, #3263, #3267, #3269, #3321): every poisoned certificate is REJECTED by all three verdicts =="
 POISONED=("$ROOT"/proofs/poisoned-certs/*.cert)
 if [ ! -e "${POISONED[0]}" ]; then
   echo "POISON RATCHET FAIL: proofs/poisoned-certs/ holds no certificate — the negative leg would pass vacuously." >&2
