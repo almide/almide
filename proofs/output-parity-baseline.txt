@@ -43,6 +43,7 @@ spec/integration/cross_module_field_defaults/src/main.almd
 spec/integration/generic_protocol_ports/src/main.almd
 spec/integration/generics/generics_recursive_test.almd
 spec/integration/global_static_names/src/main.almd
+spec/integration/module_path_identity/src/main.almd
 spec/integration/modules/cross_module_unit_effect_test.almd
 spec/integration/modules/vis_effect_test.almd
 spec/integration/qualified_ctor_names/src/main.almd
