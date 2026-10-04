@@ -242,6 +242,33 @@ effect fn main() -> Unit = {
         fns: &["per_head_rms_norm", "repeat_kv", "main"],
         loops: &[],
     },
+    Case {
+        name: "host_env_ops",
+        shape: "env.set / env.sleep_ms as ordinary host calls (host_ops.rs, #2739)",
+        src: r#"import env
+effect fn main() -> Unit = {
+  env.set("ALMIDE_LIVE_SHAPE_KEY", "v")
+  env.sleep_ms(0)!
+  println(env.get("ALMIDE_LIVE_SHAPE_KEY") ?? "unset")
+}
+"#,
+        fns: &["main"],
+        loops: &[],
+    },
+    Case {
+        name: "host_http_result_match",
+        shape: "a match over a host op's Result, err payload bound (host_ops.rs, #2739)",
+        src: r#"import http
+effect fn main() -> Unit = {
+  match http.get("http://127.0.0.1:9/") {
+    ok(_) => println("unexpected"),
+    err(e) => println("get: ${e}"),
+  }
+}
+"#,
+        fns: &["main"],
+        loops: &[],
+    },
 ];
 
 #[test]
