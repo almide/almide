@@ -523,7 +523,7 @@ fn display_protocol_ref(env: &TypeEnv, name: Sym, r: Option<&ast::ProtocolRef>, 
 }
 /// `ast::Decl::TopLet` arm of [`register_decls`] — top-level `let` type seeding (or reuse of a fully-inferred prior entry) and DefTable registration. Verbatim text move out of [`register_decls`].
 fn register_decl_top_let(env: &mut TypeEnv, decl: &ast::Decl, prefix: Option<&str>) {
-    let ast::Decl::TopLet { name, ty, value, .. } = decl else { unreachable!() };
+    let ast::Decl::TopLet { name, ty, value, mutable, .. } = decl else { unreachable!() };
     // #2645: the annotation pins to `mod.Type` exactly as a fn signature does
     // (`register_fn_sig`). With the plain `resolve` a module's
     // `let STEPS: List[Step]` stayed bare `Step`; that seed is concrete, so
@@ -549,4 +549,5 @@ fn register_decl_top_let(env: &mut TypeEnv, decl: &ast::Decl, prefix: Option<&st
     let mod_path = prefix.unwrap_or("");
     let did = env.def_table.alloc(sym(pkg), sym(mod_path), sym(name), almide_ir::DefKind::TopLet, rt);
     env.def_map.insert(sym(&key), did);
+    if *mutable { env.mutable_top_lets.insert(sym(&key)); }
 }

@@ -210,6 +210,9 @@ pub struct TypeEnv {
     pub var_decl_locs: std::collections::HashMap<Sym, (usize, usize)>,
     /// Top-level `let` constants: name -> type
     pub top_lets: std::collections::HashMap<Sym, Ty>,
+    /// The `top_lets` keys declared `var` — what another module may write
+    /// through `m.x = v`, `m.xs[i] = v` or `m.r.f = v` (#3312).
+    pub mutable_top_lets: std::collections::HashSet<Sym>,
     /// Record type key (same keys as `types`) -> field names that carry a
     /// declared DEFAULT. Used by record-construction validation: a missing
     /// field is an error only when it has no default (#488).
@@ -331,6 +334,7 @@ impl TypeEnv {
             skip_auto_unwrap: false,
             skip_auto_unwrap_for: std::collections::HashSet::new(),
             mutable_vars: std::collections::HashSet::new(),
+            mutable_top_lets: std::collections::HashSet::new(),
             lambda_depth: 0,
             var_lambda_depth: std::collections::HashMap::new(),
             param_vars: std::collections::HashSet::new(),
