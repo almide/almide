@@ -705,27 +705,27 @@ fn gen_loop_slots(seed: u64) -> MirFunction {
         }
     };
     // A third of the draws rebind straight-line (the line-slot fold).
-    let looped = next_rand(&mut st) % 3 != 0;
+    let looped = !next_rand(&mut st).is_multiple_of(3);
     if looped {
         ops.extend([Op::LoopStart, Op::ConstInt { dst: c, value: 1 }, Op::LoopBreakUnless { cond: c }]);
     }
-    if next_rand(&mut st) % 2 == 0 {
+    if next_rand(&mut st).is_multiple_of(2) {
         ops.push(Op::Alloc { dst: feed, repr: heap(), init: Init::Opaque });
     } else {
         ops.push(Op::Dup { dst: feed, src: parent });
     }
-    if next_rand(&mut st) % 5 != 0 {
+    if !next_rand(&mut st).is_multiple_of(5) {
         ops.push(Op::Drop { v: root });
     }
     ops.push(Op::SetLocal { local: root, src: feed });
-    if next_rand(&mut st) % 6 == 0 {
+    if next_rand(&mut st).is_multiple_of(6) {
         ops.push(Op::Alloc { dst: extra, repr: heap(), init: Init::Opaque });
         ops.push(Op::Drop { v: extra });
     }
     if looped {
         ops.push(Op::LoopEnd);
     }
-    if next_rand(&mut st) % 4 != 0 {
+    if !next_rand(&mut st).is_multiple_of(4) {
         ops.push(Op::Drop { v: root });
     }
     ops.push(Op::Drop { v: parent });
