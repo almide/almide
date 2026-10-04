@@ -67,13 +67,19 @@ spec/wasm_cross/bytes_string_window_domain.almd
 spec/wasm_cross/bytes_temp_receiver.almd
 spec/wasm_cross/bytes_to_string_err_release.almd
 spec/wasm_cross/bytes_writer_family.almd
+spec/wasm_cross/bytes_writer_mut_from_declaration.almd
 spec/wasm_cross/call_closure_lambda_param.almd
 spec/wasm_cross/call_lambda_ctor.almd
 spec/wasm_cross/callee_shadowing_family.almd
+spec/wasm_cross/captured_var_value_stored.almd
 spec/wasm_cross/checked_conversion_exact_bounds.almd
 spec/wasm_cross/checked_conversion_value_match.almd
 spec/wasm_cross/chunk_str.almd
 spec/wasm_cross/closure_accumulator.almd
+spec/wasm_cross/closure_captured_list_mutation.almd
+spec/wasm_cross/closure_captured_map_records.almd
+spec/wasm_cross/closure_captured_record_field_mutation.almd
+spec/wasm_cross/closure_reads_var_written_by_mut_call.almd
 spec/wasm_cross/closure_rich_list_capture.almd
 spec/wasm_cross/closure_scalar_captures.almd
 spec/wasm_cross/closure_tail_recursion.almd
@@ -446,6 +452,9 @@ spec/wasm_cross/module_global_const.almd
 spec/wasm_cross/mut_call_hoisted_args_distinct.almd
 spec/wasm_cross/mut_map_param.almd
 spec/wasm_cross/mut_param_branch_forward.almd
+spec/wasm_cross/mut_param_cell_tail_capture_read.almd
+spec/wasm_cross/mut_param_cell_tail_capture_write.almd
+spec/wasm_cross/mut_param_closure_capture_read.almd
 spec/wasm_cross/mut_param_global_callee_sees_precall.almd
 spec/wasm_cross/mut_param_global_no_reach_in_place.almd
 spec/wasm_cross/mut_param_interpolated.almd
@@ -559,6 +568,7 @@ spec/wasm_cross/result_combinators_heap_ok.almd
 spec/wasm_cross/result_ctor_call_payload.almd
 spec/wasm_cross/result_default_and_passthrough.almd
 spec/wasm_cross/result_eq.almd
+spec/wasm_cross/result_filter_heap_ok.almd
 spec/wasm_cross/result_heap_err_match.almd
 spec/wasm_cross/result_heap_ok_match.almd
 spec/wasm_cross/result_list_str_int_tuple.almd
@@ -585,6 +595,7 @@ spec/wasm_cross/sized_int_record_fields.almd
 spec/wasm_cross/sized_numeric_literals.almd
 spec/wasm_cross/sized_tail_literal_matrix.almd
 spec/wasm_cross/snapshot_mismatch_abort.almd
+spec/wasm_cross/sort_by_call_count.almd
 spec/wasm_cross/sort_by_compound_key.almd
 spec/wasm_cross/sort_by_str_key_heap.almd
 spec/wasm_cross/split_empty_sep.almd
