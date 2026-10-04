@@ -132,9 +132,7 @@ pub enum TopLetStorage {
 #[derive(Debug, Clone)]
 pub struct GlobalInfo {
     pub storage: TopLetStorage,
-    /// The emitted static identifier — THE one site that owns the
-    /// `ALMIDE_RT_{ORIGIN}_{NAME}` format (mirrors the walker's
-    /// `global_static_name`, byte-for-byte).
+    /// The emitted static identifier ([`static_name`]).
     pub static_name: String,
     /// The DECLARATION VarId (alias-resolve synthetic use-site ids to this).
     pub decl: VarId,
@@ -158,11 +156,34 @@ pub fn classify_storage(mutable: bool, kind: TopLetKind, ty: &Ty, init_aborts: b
     }
 }
 
-/// The emitted static name — mirrors `walker::global_static_name` exactly.
+/// Prefix of an entry-program global's static.
+const ENTRY_STATIC_PREFIX: &str = "ALMIDE_G_";
+/// Prefix of a module global's static.
+const MODULE_STATIC_PREFIX: &str = "ALMIDE_RT_";
+
+/// The emitted static name of a top-level `let`/`var` — THE one site that
+/// owns the spelling (the definition, every read and write, the thread-local
+/// wrapper `__AlmideTl_<static>` all derive from it).
+///
+/// INJECTIVE over (module, name), so two globals never share a static
+/// (#3305). The spelling keeps the source CASE — upper-casing is not
+/// injective (`let nest` and `let NEST` both became `NEST`, rustc E0428) —
+/// and every global lives under a prefix, so a user name can never equal
+/// another global's static or a prelude item (`let almide_stdout_buf` was
+/// `ALMIDE_STDOUT_BUF`, the runtime's own stdout buffer):
+///
+/// - entry program: `ALMIDE_G_<name>`;
+/// - module `<origin>`: `ALMIDE_RT_<len(origin)>_<origin>_<name>` — the
+///   length delimits the origin, so `a` + `b_c` and `a_b` + `c` stay apart.
+///
+/// The two prefixes differ before any user text starts, and within each
+/// form the user text decodes uniquely, so no two inputs share an output.
+/// (`origin` is the module ident the frontend already flattened with
+/// `.` → `_`; that spelling is shared with module FUNCTION names.)
 pub fn static_name(vi: &VarInfo) -> String {
     match &vi.module_origin {
-        Some(origin) => format!("ALMIDE_RT_{}_{}", origin.to_uppercase(), vi.name.as_str().to_uppercase()),
-        None => vi.name.as_str().to_uppercase(),
+        Some(origin) => format!("{MODULE_STATIC_PREFIX}{}_{origin}_{}", origin.len(), vi.name.as_str()),
+        None => format!("{ENTRY_STATIC_PREFIX}{}", vi.name.as_str()),
     }
 }
 
