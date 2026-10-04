@@ -133,7 +133,11 @@ impl LowerCtx {
             // materialization. Before, `(o ?? ("", 0)).0` walled here while the
             // eager `option.unwrap_or(o, ("", 0)).0` (a Call) lowered, which
             // made ADR-0005 D4's recommended spelling the one that walls.
-            IrExprKind::Call { .. } | IrExprKind::UnwrapOr { .. } if is_heap_ty(&container.ty) => {
+            // A RECORD-literal container (`{ blob: …, tag: "t" }.tag` — a pure
+            // call-initialized global after `inline_pure_call_globals`, #2739) too.
+            IrExprKind::Call { .. } | IrExprKind::UnwrapOr { .. } | IrExprKind::Record { .. }
+                if is_heap_ty(&container.ty) =>
+            {
                 let tmp = self.fresh_synth_var();
                 self.lower_bind(tmp, &container.ty, container)?;
                 let synth_container = IrExpr {
@@ -271,6 +275,22 @@ impl LowerCtx {
                 let inner = self.try_lower_heap_field_borrow(container)?;
                 let h = self.fresh_value();
                 self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![inner] });
+                h
+            }
+            // A RECORD-literal container (`{ blob: …, tag: "t" }.blob` — a pure
+            // call-initialized global after `inline_pure_call_globals` substituted its
+            // init, #2739): build it into an ANF temp through the `let tmp = { … }` path
+            // (tracked, recursive scope-end drop), then borrow from that block like a
+            // materialized local's.
+            IrExprKind::Record { .. } if is_heap_ty(&container.ty) => {
+                let tmp = self.fresh_synth_var();
+                self.lower_bind(tmp, &container.ty, container).ok()?;
+                let src = self.value_for(tmp).ok()?;
+                if !self.materialized_aggregates.contains(&src) {
+                    return None;
+                }
+                let h = self.fresh_value();
+                self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![src] });
                 h
             }
             _ => return None,

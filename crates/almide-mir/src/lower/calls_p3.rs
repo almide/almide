@@ -642,7 +642,11 @@ impl LowerCtx {
             // `let tmp = mk_paren()` takes (tracked, recursive scope-end drop, read shapes
             // seeded), then resolve the temp — the exact mirror of `lower_heap_extraction`'s
             // Call arm on the scalar-field side.
-            IrExprKind::Call { .. } if is_heap_ty(&container.ty) => {
+            // A RECORD-literal container (`{ blob: …, tag: "t" }.tag` — what a reference
+            // to a pure call-initialized global becomes once `inline_pure_call_globals`
+            // substitutes its init, #2739) takes the same ANF temp: the literal is built
+            // once, read, and dropped at scope end.
+            IrExprKind::Call { .. } | IrExprKind::Record { .. } if is_heap_ty(&container.ty) => {
                 let tmp = self.fresh_synth_var();
                 self.lower_bind(tmp, &container.ty, container).ok()?;
                 self.value_for(tmp).ok()?

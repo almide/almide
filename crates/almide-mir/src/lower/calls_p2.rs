@@ -239,8 +239,9 @@ impl LowerCtx {
         // element; the source's recursive drop frees its own refs). A heap-FIELD aggregate element
         // (tuple/record with inner heap) still DEFERS — it needs the masked recursive drop (tuple-heap).
         let scalar_elem = !is_heap_ty(elem_ty);
+        // `Bytes` is the same one-level block as `String` (#2739).
         let heap_elem =
-            is_heap_ty(elem_ty) && (matches!(elem_ty, Ty::String) || crate::lower::is_value_ty(elem_ty));
+            is_heap_ty(elem_ty) && (matches!(elem_ty, Ty::String | Ty::Bytes) || crate::lower::is_value_ty(elem_ty));
         // A RECORD element (`parent.children + [child]` — the svg `add_child` shape): `__list_concat_rc`
         // rc-incs each record handle (the new list co-owns each), freed recursively by the generated
         // `$__drop_list_<R>` (each element → `$__drop_<R>`). Gated to a recursive-drop record so that fn
