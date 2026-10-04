@@ -154,21 +154,6 @@
 # fixture no longer uses a call-result receiver. The bytes writers take `mut`
 # receivers now, so the fixture drives them through a `var` and the incumbent
 # renders it — the determinism ceilings fell 34 -> 33 in the same change.
-# 2026-09-26 (#2650, C-367): the http.serve server fixture's handler and its
-# query renderer take an HttpRequest, which exists only inside http.serve — a
-# network-effect call the incumbent MIR lowering walls by design. The STRUCTURAL
-# leg serves the fixture on the embedded lane (tests/http_serve_cross_test.rs);
-# stock artifacts refuse http.serve (E081). Retires with #2659 or #1696.
-# 2026-09-26 (#2588): render_query pruned — query_params now links to the
-# self-host copy in stdlib/http_url_decode.almd, which the incumbent lowers.
-spec/serve_cross/http_serve_replay.almd :: handle
-# 2026-09-27 (#2696, ADR-0020 pillar 3): the router fixture's app bound as a
-# top-level VALUE (`let site = http.router(...)`, then `let h = site!` and a
-# call). The incumbent MIR lowering walls the heap-result `match` the router
-# value reaches; the STRUCTURAL leg (the test lane's default, and
-# ALMIDE_WASM_SKIP_STOCK_AUDIT=1) runs the test byte-for-byte with native. No
-# incumbent work by design (#1696 retires it); prunes with #1696.
-spec/stdlib/http_router_test.almd :: __test_almd_an app bound at the top level is tested by calling it
 
 # 2026-09-30 (#3058, class 1): 58 rows pruned (171 -> 113). The effect-fn ABI
 # facts the deleted registries held are now DERIVED from the typed IR on every
@@ -303,3 +288,12 @@ spec/stdlib/http_router_test.almd :: __test_almd_an app bound at the top level i
 # in its runtime floor), so every shipped output is unchanged. The two rows left
 # are B2: the replay handler's `String` match returning a `HttpResponse`, and the
 # router value bound at top level.
+# (2026-10-04, #2739 B2) the last 2 rows pruned (2 -> 0). Neither was http-specific
+# once measured. The replay handler's wall was a map literal with a heap `??` element
+# (`["X-Echo": http.req_header(req, "x-token") ?? "none", ...]`), which walls in any
+# position; `bind_heap_unwrap_or_literal_elems` binds such an element first when every
+# other element is a variable or a literal. The router test's wall was a closure bound
+# from an `ok(h)` payload (`let h = site!`) and then called for a heap result: the
+# borrowed payload now joins the closure dispatch set, as variant-payload and tuple-
+# slot closures already did. The set is EMPTY: the wall=0 endgame over the full test-fn
+# corpus, with no intended exceptions. ANY row is a regression.
