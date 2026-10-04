@@ -34,11 +34,16 @@ keys() {
     | sed -E 's/[[:space:]]+#[[:space:]]*#[0-9]+[[:space:]]*$//' | LC_ALL=C sort -u || true
 }
 
+# One lookup per issue, not per row: a ledger landing hundreds of rows under a
+# handful of issues (the shape matrix) would otherwise spend the token's hourly
+# API budget on repeats.
+declare -A ISSUE_STATE=()
 issue_open() {
   [ "${WALLED_REAL_OFFLINE:-0}" = 1 ] && return 0
-  local state
-  state="$(gh issue view "$1" --json state -q .state 2>/dev/null)" || return 1
-  [ "$state" = OPEN ]
+  if [ -z "${ISSUE_STATE[$1]:-}" ]; then
+    ISSUE_STATE[$1]="$(gh issue view "$1" --json state -q .state 2>/dev/null || echo UNKNOWN)"
+  fi
+  [ "${ISSUE_STATE[$1]}" = OPEN ]
 }
 
 # judge <base ledger file> <head ledger file>; prints refusals, returns 1 on any.
