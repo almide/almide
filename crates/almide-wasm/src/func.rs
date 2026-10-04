@@ -243,8 +243,8 @@ pub(crate) fn lower_fn(
         seen.insert(*var);
     }
 
-    // C-319: shared-cell vars (captured ∩ mutated) — their locals hold
-    // the CELL ADDRESS (i32); env-captured cells arrive pre-flagged.
+    // C-319: shared-cell LOCALS (captured ∩ mutated; never a global, #3317)
+    // hold the CELL ADDRESS (i32); env-captured cells arrive pre-flagged.
     let mut cell_vars = crate::cells::cell_vars_of(body);
     let mut binds: Vec<(VarId, SliceTy)> = Vec::new();
     if let Some(caps) = &env_captures {
@@ -296,6 +296,7 @@ pub(crate) fn lower_fn(
             if cell_vars.contains(var) { ValType::I32 } else { ty.val_type() },
         ));
     }
+    cell_vars.retain(|v| locals.contains_key(v));
     let base = env_shift + (params.len() + binds.len()) as u32;
     let (cursor_local, tmp_i32_local, scr_i32_local, scr_i64_local, scr_f64_local) =
         (base, base + 1, base + 2, base + 3, base + 4);
