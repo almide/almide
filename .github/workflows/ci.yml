@@ -729,23 +729,18 @@ jobs:
       - name: Install wasm-opt (binaryen)
         run: sudo apt-get update && sudo apt-get install -y binaryen && wasm-opt --version
 
-      - name: Generated runtime registry matches committed sources (regenerate and diff)
-        # crates/almide-codegen/src/generated/{rust_runtime,runtime_fn_modes}.rs
-        # are committed, but build.rs regenerates them from runtime/rs/src by
-        # embedding each module's source TEXT. A draft edited in runtime/rs/src
-        # but not committed can be baked into the generated file and committed on
-        # its own, silently desyncing the two (this is exactly how the #419
-        # codepoint draft leaked). Force a fresh regen (touch the generator so
-        # cargo re-runs the build script) and fail on any diff — in CI only
-        # committed sources exist, so a leaked draft cannot reproduce. Mirrors the
-        # "Contract README up to date" regenerate-and-diff gate.
-        run: |
-          touch crates/almide-codegen/buildscript/runtime_registry.rs
-          cargo build -p almide-codegen
-          git diff --exit-code -- \
-            crates/almide-codegen/src/generated/rust_runtime.rs \
-            crates/almide-codegen/src/generated/runtime_fn_modes.rs \
-            || { echo "::error::generated runtime registry is stale — a runtime/rs/src edit was not committed, or a generated file was hand-edited. Rebuild almide-codegen and commit crates/almide-codegen/src/generated/*.rs"; exit 1; }
+      - name: Generated build tables match committed sources (regenerate and diff, #3361)
+        # Every table a crate embeds from files OUTSIDE its package is committed
+        # under that crate's src/generated/ — almide-types (stdlib/*.almd),
+        # almide-codegen (runtime/rs/src -> rust_runtime.rs, runtime_fn_modes.rs),
+        # almide-egg-lab (stdlib/matrix.almd), almide-interp (runtime libm) — so a
+        # crate vendored on its own builds from what it ships (#3361). Their build
+        # scripts regenerate them inside a checkout; this forces that and fails
+        # on any diff. In CI only committed sources exist, so a draft edited in
+        # runtime/rs/src but baked into a committed table cannot reproduce (the
+        # #419 codepoint-draft leak this step was first written for), and a
+        # stdlib/ edit committed without its table goes red here.
+        run: bash scripts/check-build-inputs-in-package.sh --regen
 
       # #2183: the AST / check / run parity goldens the greenfield legs are
       # judged by claimed a pinned old oracle while being re-recorded from the
@@ -1522,6 +1517,9 @@ jobs:
 
       - name: Forbidden impurities (no raw clocks/threads in the compile path)
         run: scripts/check-forbidden-impurities.sh
+
+      - name: Every crate builds from its own package (#3361 — no shipped source reads past its crate dir; the shared build-script copies are identical)
+        run: bash scripts/check-build-inputs-in-package.sh
 
       - name: Workflow files parse strictly (a schedule-only workflow that cannot parse fails silently, #1234)
         run: bash scripts/check-workflows.sh

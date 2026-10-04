@@ -46,8 +46,10 @@ sources() {
   # anywhere in almide-types (build.rs generates one per stdlib/<stem>.almd),
   # plus direct `include_str!` of a stdlib file anywhere in crates/. `sort -u`
   # makes the total a real footprint rather than a sum with duplicates.
+  # `src/generated/` is the committed table itself (#3361): it DEFINES a const
+  # for every stdlib file, referenced or not, so it is not an embed site.
   {
-    grep -rho 'SRC_[A-Z0-9_]*' crates/almide-types/src/ \
+    grep -rho --exclude-dir=generated 'SRC_[A-Z0-9_]*' crates/almide-types/src/ \
       | sed 's/^SRC_//' | tr 'A-Z' 'a-z' | sed 's|^|stdlib/|; s|$|.almd|'
     grep -rho 'include_str!("[^"]*stdlib/[^"]*\.almd")' crates/ \
       | sed 's|.*stdlib/|stdlib/|; s|")$||'
