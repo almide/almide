@@ -582,10 +582,9 @@ impl LowerCtx {
             let new = self.lower_scalar_loop_fresh_owned_producer(value);
             if let Some(new) = new {
                 if new != slot_local {
-                    let drop_op = self.drop_op_for(slot_local);
-                    self.ops.push(drop_op);
-                    self.ops.push(Op::SetLocal { local: slot_local, src: new });
-                    self.live_heap_handles.retain(|&v| v != new);
+                    if self.rebind_loop_slot(var, slot_local, new)? {
+                        self.live_heap_handles.retain(|&v| v != new);
+                    }
                     return Ok(());
                 }
             }
@@ -625,11 +624,7 @@ impl LowerCtx {
             if matches!(&left.kind, IrExprKind::Var { id } if id == &var) {
                 if let Some(&slot_local) = self.value_of.get(&var) {
                     if let Some(new) = self.try_lower_concat_list(value) {
-                        let drop_op = self.drop_op_for(slot_local);
-                        self.ops.push(drop_op);
-                        self.ops
-                            .push(Op::SetLocal { local: slot_local, src: new });
-                        return true;
+                        return self.rebind_loop_slot(var, slot_local, new).is_ok();
                     }
                 }
             }
@@ -665,10 +660,7 @@ impl LowerCtx {
                     repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
                     init,
                 });
-                let drop_op = self.drop_op_for(slot_local);
-                self.ops.push(drop_op);
-                self.ops.push(Op::SetLocal { local: slot_local, src: new });
-                return true;
+                return self.rebind_loop_slot(var, slot_local, new).is_ok();
             }
         }
         false

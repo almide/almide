@@ -67,6 +67,28 @@ impl LowerCtx {
         args: &[IrExpr],
         result_ty: &Ty,
     ) -> Option<ValueId> {
+        let (_, _, _, lambda_body) = self.defunc_call_shape(func, args)?;
+        // A callback that rebinds a captured borrowed `mut` param (the C-132
+        // write-back `g = __mp_buf`) runs that rebind in the inlined loop: the
+        // loop slot must start as an owned copy, or its first drop-old frees
+        // the caller's reference (#3298). Rolled back with the route.
+        let marks = (self.ops.len(), self.live_heap_handles.len(), self.lifted.len(), self.value_of.clone());
+        let mut vars: Vec<VarId> = Vec::new();
+        crate::lower::collect_heap_reassign_vars_in_expr(&lambda_body, &mut vars);
+        self.precopy_borrowed_vars(vars);
+        let result = self.try_lower_defunc_list_hof_routes(func, args, result_ty);
+        if result.is_none() {
+            self.rollback_scalar_loop(marks.0, marks.1, marks.2, marks.3);
+        }
+        result
+    }
+
+    fn try_lower_defunc_list_hof_routes(
+        &mut self,
+        func: &str,
+        args: &[IrExpr],
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
         let (xs, init_idx, lambda_params, lambda_body) = self.defunc_call_shape(func, args)?;
         let (params, body) = (&lambda_params, &lambda_body);
         // `list.find` — an EARLY-EXIT scan returning `Option[elem]`, with its OWN gating
