@@ -527,7 +527,7 @@ Lemma lfree_loop : forall L b t r pre px sx s,
   gaps r -> Forall (fun y => px + sx < fst y) r -> incl r L ->
   Forall (fun y => 16 <= fst y) L -> (forall a, inside (b, t) a -> ~ cov L a) ->
   16 <= b -> 16 <= t ->
-  exists f s', lexec f (lfree_walk :: lfree_fin) s = RNorm s' /\ gh s' = gh s /\
+  exists f s', (f <= 5 * length r + 21)%nat /\ lexec f (lfree_walk :: lfree_fin) s = RNorm s' /\ gh s' = gh s /\
     lrep (mem s') 0 (pre ++ insp (px, sx) r (b, t)) /\
     (forall a, mem s' a <> mem s a -> inside (b, t) a \/ a = 12 \/ cov L a).
 Proof.
@@ -538,7 +538,7 @@ Proof.
                 (fun a Ha => ltac:(destruct Ha as [? [? [[] _]]])) Hxb
                 ltac:(destruct Hx as [[? [? ?]] | [? [? [? ?]]]]; [ left | right ]; auto)
                 Hlast Hb16 Ht16) as [s' [Hrun [Hgh [Hrep Hfr]]]].
-    exists 21%nat, s'. split; [ | split; [ exact Hgh | split; [ exact Hrep | ] ] ].
+    exists 21%nat, s'. split; [ cbn [length]; lia | ]. split; [ | split; [ exact Hgh | split; [ exact Hrep | ] ] ].
     + rewrite lexec_cons. cbv beta iota. unfold lfree_walk. lsimpl. rewrite Hq, Hb. cbn [hdb].
       change ((if 0 =? 0 then 0 else 1)) with 0. rewrite land0x. change (0 =? 0) with true.
       cbv beta iota. exact Hrun.
@@ -583,8 +583,8 @@ Proof.
       { right. split; [ destruct pre; discriminate | auto ]. }
       destruct (IH (pre ++ [(px, sx)]) qy sy s1 E0 E1 E4 E5 Hseg1 Hsy Hnx1 Hr'' Hlast1 Hfp1 Hx1 Hyb
                   (gaps_tail _ _ Hg) Hord1 (fun z Hz => Hinc z (or_intror Hz)) HL16 Hdis Hb16 Ht16)
-        as [f1 [s' [Hrun [Hgh [Hrep Hfr]]]]].
-      exists (S (4 + f1)), s'. split; [ | split; [ exact Hgh | split ] ].
+        as [f1 [s' [Hf1 [Hrun [Hgh [Hrep Hfr]]]]]].
+      exists (S (4 + f1)), s'. split; [ cbn [length]; lia | ]. split; [ | split; [ exact Hgh | split ] ].
       * rewrite lexec_cons. cbv beta iota. unfold lfree_walk at 1. lsimpl. rewrite Hq, Hb.
         replace (qy =? 0) with false by (symmetry; apply Z.eqb_neq; lia).
         replace (qy <? b) with true by (symmetry; apply Z.ltb_lt; exact Hlt).
@@ -612,7 +612,7 @@ Proof.
                   Hfr Hxb
                   ltac:(destruct Hx as [[? [? ?]] | [? [? [? ?]]]]; [ left | right ]; auto)
                   Hlast Hb16 Ht16) as [s' [Hrun [Hgh [Hrep Hfr']]]].
-      exists 21%nat, s'. split; [ | split; [ exact Hgh | split ] ].
+      exists 21%nat, s'. split; [ cbn [length]; lia | ]. split; [ | split; [ exact Hgh | split ] ].
       * rewrite lexec_cons. cbv beta iota. unfold lfree_walk. lsimpl. rewrite Hq, Hb. cbn [hdb fst].
         replace (qy =? 0) with false by (symmetry; apply Z.eqb_neq; lia).
         replace (qy <? b) with false by (symmetry; apply Z.ltb_ge; exact Hge).
@@ -636,7 +636,7 @@ Theorem lfree_realizes : forall L b t s,
   (forall a, inside (b, t) a -> ~ cov L a) -> 16 <= b -> 16 <= t ->
   mem s 4 = 0 -> lrep (mem s) (mem s LHEAD) L ->
   loc s 0%nat = b -> loc s 1%nat = t -> loc s 4%nat = 0 ->
-  exists f s', lexec f lfree_tree s = RNorm s' /\ gh s' = gh s /\
+  exists f s', (f <= 5 * length L + 22)%nat /\ lexec f lfree_tree s = RNorm s' /\ gh s' = gh s /\
     mem s' 4 = 0 /\ lrep (mem s') (mem s' LHEAD) (ins L (b, t)) /\
     (forall a, mem s' a <> mem s a -> a = LHEAD \/ cov (ins L (b, t)) a).
 Proof.
@@ -654,8 +654,8 @@ Proof.
               (fun H => ltac:(contradiction)) (fun a Ha => ltac:(destruct Ha as [? [? [[] _]]]))
               (or_introl (conj eq_refl (conj eq_refl eq_refl))) ltac:(lia) Hg Hord
               (fun z Hz => Hz) H16 Hdis Hb16 Ht16)
-    as [f [s' [Hrun [Hgh [Hrep' Hfr]]]]].
-  exists (S f), s'. rewrite insp_sentinel in Hrep' by (cbn; lia). cbn [app lrep] in Hrep'.
+    as [f [s' [Hf [Hrun [Hgh [Hrep' Hfr]]]]]].
+  exists (S f), s'. split; [ lia | ]. rewrite insp_sentinel in Hrep' by (cbn; lia). cbn [app lrep] in Hrep'.
   destruct Hrep' as [_ [H4' Hrep']]. replace (0 + 4) with 4 in H4' by lia. replace (0 + 12) with 12 in Hrep' by lia.
   split; [ | split; [ exact Hgh | split; [ exact H4' | split; [ exact Hrep' | ] ] ] ].
   - unfold lfree_tree. rewrite lexec_cons. exact Hrun.
@@ -860,7 +860,7 @@ Lemma ltake_loop : forall L w h len r pre px sx s,
   ((pre = [] /\ px = 0 /\ sx = 0) \/ (pre <> [] /\ 16 <= px /\ 16 <= sx /\ In (px, sx) L)) ->
   gaps r -> Forall (fun y => px + sx < fst y) r -> incl r L ->
   Forall (fun y => 16 <= fst y) L -> h <> 0 -> 16 <= w ->
-  exists f s' out, lexec f (ltake_walk :: ltake_fin) s = out /\
+  exists f s' out, (f <= 5 * length r + 33)%nat /\ lexec f (ltake_walk :: ltake_fin) s = out /\
     tpost pre (tkx (px, sx) r w h) h len s s' out /\
     (forall a, mem s' a <> mem s a -> a = 12 \/ cov L a).
 Proof.
@@ -869,7 +869,7 @@ Proof.
   - destruct (ltake_nofit L s pre px sx h len Hp Hq Hh Hseg Hsx Hnx Hlast
                 ltac:(destruct Hx as [H | [? [? [? _]]]]; [ left; exact H | right; auto ]) Hh0)
       as [s' [out [Hrun [Hpost Hfr]]]].
-    exists 11%nat, s', out. split; [ | split; [ exact Hpost | exact Hfr ] ].
+    exists 11%nat, s', out. split; [ cbn [length]; lia | ]. split; [ | split; [ exact Hpost | exact Hfr ] ].
     rewrite lexec_cons. cbv beta iota. unfold ltake_walk. lsimpl. rewrite Hq. cbn [hdb].
     change ((if 0 =? 0 then 0 else 1)) with 0. rewrite land0x. change (0 =? 0) with true.
     cbv beta iota. exact Hrun.
@@ -902,8 +902,8 @@ Proof.
       { right. split; [ destruct pre; discriminate | auto ]. }
       destruct (IH (pre ++ [(px, sx)]) qy zy s1 E0 E3 E6 E7 Hh Hseg1 Hzy Hnq Hr'' Hlast1 Hfp1 Hx1
                   (gaps_tail _ _ Hg) (gaps_head_le _ _ Hg) (fun z Hz => Hinc z (or_intror Hz)) HL16 Hh0 Hw16)
-        as [f1 [s' [out [Hrun [Hpost Hfr]]]]].
-      exists (S (4 + f1)), s', out. split; [ | split; [ | exact Hfr ] ].
+        as [f1 [s' [out [Hf1 [Hrun [Hpost Hfr]]]]]].
+      exists (S (4 + f1)), s', out. split; [ cbn [length]; lia | ]. split; [ | split; [ | exact Hfr ] ].
       * rewrite lexec_cons. cbv beta iota. unfold ltake_walk at 1. lsimpl. rewrite Hq, Hw, Hzy.
         replace (qy =? 0) with false by (symmetry; apply Z.eqb_neq; lia).
         replace (zy <? w) with true by (symmetry; apply Z.ltb_lt; exact Hlt).
@@ -924,7 +924,7 @@ Proof.
         by (destruct Hx as [H | [? [? [? _]]]]; [ left; exact H | right; auto ]).
       destruct (ltake_hit_ok s pre px sx qy zy r' w len Hl Hw Hp Hq Hseg Hsx Hnx Hzy Hnq Hr'' Hfp Hfr' Hx'
                   Hxq Hq16 ltac:(lia)) as [s' [Hrun [Hgh [Hrep [H1 [H2 [H3 Hfr]]]]]]].
-      exists 33%nat, s', (RRet qy s'). split; [ | split ].
+      exists 33%nat, s', (RRet qy s'). split; [ cbn [length]; lia | ]. split; [ | split ].
       * rewrite lexec_cons. cbv beta iota. unfold ltake_walk at 1. lsimpl. rewrite Hq, Hw, Hzy.
         replace (qy =? 0) with false by (symmetry; apply Z.eqb_neq; lia).
         replace (zy <? w) with false by (symmetry; apply Z.ltb_ge; exact Hge).
@@ -953,7 +953,7 @@ Theorem ltake_realizes : forall L w h len s,
   gaps L -> Forall (fun y => 16 <= fst y) L -> 16 <= w -> h <> 0 ->
   mem s 4 = 0 -> lrep (mem s) (mem s LHEAD) L ->
   loc s 0%nat = len -> loc s 3%nat = w -> loc s 6%nat = 0 -> gh s = h ->
-  exists f s' out, lexec f ltake_tree s = out /\
+  exists f s' out, (f <= 5 * length L + 34)%nat /\ lexec f ltake_tree s = out /\
     (forall a, mem s' a <> mem s a -> a = LHEAD \/ cov L a) /\
     match take L w h with
     | TFound q z l' => out = RRet q s' /\ gh s' = h /\ mem s' 4 = 0 /\
@@ -978,12 +978,165 @@ Proof.
               (fun H => ltac:(contradiction)) (fun a Ha => ltac:(destruct Ha as [? [? [[] _]]]))
               (or_introl (conj eq_refl (conj eq_refl eq_refl))) Hg Hord
               (fun z Hz => Hz) H16 Hh0 Hw16)
-    as [f [s' [out [Hrun [Hpost Hfr]]]]].
-  exists (S f), s', out. split; [ unfold ltake_tree; rewrite lexec_cons; exact Hrun | ].
+    as [f [s' [out [Hf [Hrun [Hpost Hfr]]]]]].
+  exists (S f), s', out. split; [ lia | ]. split; [ unfold ltake_tree; rewrite lexec_cons; exact Hrun | ].
   split; [ exact Hfr | ].
   rewrite tkx_sentinel in Hpost by exact Hh0.
   destruct (take L w h) as [ q z l' | p l' | ]; cbn [tlift tpost app lrep] in Hpost.
   - destruct Hpost as [Ho [Hg' [[_ [H4' Hrep']] Hhdr]]]. auto.
   - destruct Hpost as [Ho [Hg' [_ [H4' Hrep']]]]. auto.
   - exact Hpost.
+Qed.
+
+(* ══ FIXED-FUEL SEMANTICS FOR THE CALLERS' TREES ═════════════════════
+   StructuralRuntime / StructuralAlloc run their trees as total
+   functions; the two loops enter them through ONE fuel bound. A gapped
+   list of nodes at or above 16 that ends below 2^32 (the i32 memory)
+   has fewer than 2^28 nodes, and the realization theorems spend at most
+   5 per node plus a constant, so `LFUEL` always suffices: the fixed-fuel
+   run IS the realized run (`lfree_mem_spec`, `ltake_run_spec`). *)
+
+Definition MEMTOP : Z := 4294967296.
+Definition LFUELZ : Z := 1342177344.   (* 5 * 2^28 + 64 *)
+Definition LFUEL : nat := Z.to_nat LFUELZ.
+
+Lemma gaps_length : forall l lo,
+  lo <= MEMTOP -> gaps l -> Forall (fun e => lo <= fst e) l -> ends_below l MEMTOP ->
+  16 * Z.of_nat (length l) <= MEMTOP - lo.
+Proof.
+  induction l as [ | [b s] r IH ]; intros lo Hm Hg Hlo Hend; cbn [length].
+  - lia.
+  - rewrite Forall_cons_iff in Hlo. destruct Hlo as [Hb Hlo].
+    unfold ends_below in Hend. rewrite Forall_cons_iff in Hend. destruct Hend as [He Hend].
+    cbn [fst snd] in *.
+    assert (Hs : 16 <= s) by (destruct Hg as [H _]; unfold MINSZ in H; exact H).
+    destruct r as [ | e r' ].
+    + cbn [length]. change (Z.of_nat 1) with 1. lia.
+    + specialize (IH (b + s) ltac:(lia) (gaps_tail _ _ Hg)).
+      assert (Hlo' : Forall (fun e0 => b + s <= fst e0) (e :: r')).
+      { eapply Forall_impl; [ | exact (gaps_head_le _ _ Hg) ]. intros a Ha. cbn in Ha. lia. }
+      specialize (IH Hlo' Hend). rewrite Nat2Z.inj_succ. lia.
+Qed.
+
+Lemma fuel_fits : forall (f : nat) (n : nat) k,
+  (f <= 5 * n + k)%nat -> (k <= 64)%nat -> 16 * Z.of_nat n <= MEMTOP -> (f <= LFUEL)%nat.
+Proof.
+  intros f n k Hf Hk Hn. unfold LFUEL, LFUELZ.
+  apply Nat2Z.inj_le. rewrite Z2Nat.id by lia. unfold MEMTOP in Hn. lia.
+Qed.
+
+(* `$lfree` as the function `$free`'s tree calls: locals b, t, the
+   class scratch, and zeroed walk locals. *)
+Definition lfree_locals (b t cls : Z) : nat -> Z :=
+  fun j => match j with 0%nat => b | 1%nat => t | 2%nat => cls | _ => 0 end.
+
+Definition lfree_mem (b t cls : Z) (m : Mem) : Mem :=
+  match lexec LFUEL lfree_tree (mkLS (lfree_locals b t cls) m 0) with
+  | RNorm s' => mem s'
+  | _ => m
+  end.
+
+Theorem lfree_mem_spec : forall L b t cls m,
+  gaps L -> Forall (fun y => 16 <= fst y) L -> ends_below L MEMTOP ->
+  (forall a, inside (b, t) a -> ~ cov L a) -> 16 <= b -> 16 <= t ->
+  m 4 = 0 -> lrep m (m LHEAD) L ->
+  let m' := lfree_mem b t cls m in
+  m' 4 = 0 /\ lrep m' (m' LHEAD) (ins L (b, t)) /\
+  (forall a, m' a <> m a -> a = LHEAD \/ cov (ins L (b, t)) a).
+Proof.
+  intros L b t cls m Hg H16 Hend Hdis Hb Ht H4 Hrep m'.
+  destruct (lfree_realizes L b t (mkLS (lfree_locals b t cls) m 0) Hg H16 Hdis Hb Ht H4 Hrep
+              eq_refl eq_refl eq_refl) as [f [s' [Hf [Hrun [_ [H4' [Hrep' Hfr]]]]]]].
+  assert (Hlen : 16 * Z.of_nat (length L) <= MEMTOP)
+    by (pose proof (gaps_length L 16 ltac:(unfold MEMTOP; lia) Hg H16 Hend); lia).
+  assert (HF : lexec LFUEL lfree_tree (mkLS (lfree_locals b t cls) m 0) = RNorm s')
+    by (apply (lexec_mono_le f); [ exact (fuel_fits f _ 22 Hf ltac:(lia) Hlen) | exact Hrun | discriminate ]).
+  unfold m', lfree_mem. rewrite HF. split; [ exact H4' | split; [ exact Hrep' | exact Hfr ] ].
+Qed.
+
+(* A tree that never sets local i leaves it alone. *)
+Fixpoint noset (i : nat) (st : lstmt) : bool :=
+  match st with
+  | LSet j _ => negb (Nat.eqb i j)
+  | LIf _ th el => forallb (noset i) th && forallb (noset i) el
+  | LWhile _ b => forallb (noset i) b
+  | _ => true
+  end.
+
+Definition res_loc (r : lres) (i : nat) (v : Z) : Prop :=
+  match r with RNorm s' => loc s' i = v | RRet _ s' => loc s' i = v | RFuel => True end.
+
+Lemma lexec_noset : forall f ss s i,
+  forallb (noset i) ss = true -> res_loc (lexec f ss s) i (loc s i).
+Proof.
+  induction f as [ | f IH ]; intros ss s i H; [ exact I | ].
+  destruct ss as [ | st rest ]; [ rewrite lexec_nil; reflexivity | ].
+  cbn [forallb] in H. apply andb_prop in H as [Hst Hr].
+  rewrite lexec_cons. destruct st as [ j e | a v | e | c th el | c body | e ]; cbv beta iota.
+  - cbn [noset] in Hst. apply negb_true_iff, Nat.eqb_neq in Hst.
+    pose proof (IH rest (setl s j (lev e s)) i Hr) as H1.
+    assert (E : loc (setl s j (lev e s)) i = loc s i)
+      by (cbn [loc setl]; destruct (Nat.eqb_spec i j); [ contradiction | reflexivity ]).
+    rewrite E in H1. exact H1.
+  - exact (IH rest _ i Hr).
+  - exact (IH rest _ i Hr).
+  - cbn [noset] in Hst. apply andb_prop in Hst as [Ht He].
+    pose proof (IH (if lev c s =? 0 then el else th) s i ltac:(destruct (lev c s =? 0); assumption)) as H1.
+    destruct (lexec f (if lev c s =? 0 then el else th) s) as [ s1 | v s1 | ]; cbn in H1 |- *; auto.
+    specialize (IH rest s1 i Hr). rewrite H1 in IH. exact IH.
+  - destruct (lev c s =? 0); [ exact (IH rest s i Hr) | ].
+    cbn [noset] in Hst.
+    pose proof (IH body s i Hst) as H1.
+    destruct (lexec f body s) as [ s1 | v s1 | ]; cbn in H1 |- *; auto.
+    specialize (IH (LWhile c body :: rest) s1 i ltac:(cbn [forallb noset]; rewrite Hst, Hr; reflexivity)).
+    rewrite H1 in IH. exact IH.
+  - reflexivity.
+Qed.
+
+(* `$ltake` as the function `$alloc`'s tree calls: locals len, base,
+   next, want, head, and zeroed walk locals. *)
+Definition ltake_locals (len base next want head : Z) : nat -> Z :=
+  fun j => match j with
+           | 0%nat => len | 1%nat => base | 2%nat => next | 3%nat => want | 4%nat => head
+           | _ => 0 end.
+
+Definition ltake_run (len base next want head : Z) (m : Mem) (g : Z) : lres :=
+  lexec LFUEL ltake_tree (mkLS (ltake_locals len base next want head) m g).
+
+Theorem ltake_run_spec : forall L len base next want head m h,
+  gaps L -> Forall (fun y => 16 <= fst y) L -> ends_below L MEMTOP ->
+  16 <= want -> h <> 0 -> m 4 = 0 -> lrep m (m LHEAD) L ->
+  exists s',
+    (forall a, mem s' a <> m a -> a = LHEAD \/ cov L a) /\
+    loc s' 1%nat = base /\ loc s' 2%nat = next /\ loc s' 3%nat = want /\ loc s' 4%nat = head /\
+    match take L want h with
+    | TFound q z l' => ltake_run len base next want head m h = RRet q s' /\ gh s' = h /\
+                       mem s' 4 = 0 /\ lrep (mem s') (mem s' LHEAD) l' /\
+                       mem s' q = 1 /\ mem s' (q + 4) = len /\ mem s' (q + 8) = z - 12
+    | TExtend p l' => ltake_run len base next want head m h = RNorm s' /\ gh s' = p /\
+                      mem s' 4 = 0 /\ lrep (mem s') (mem s' LHEAD) l'
+    | TMiss => ltake_run len base next want head m h = RNorm s' /\ gh s' = h /\
+               (forall a, mem s' a = m a)
+    end.
+Proof.
+  intros L len base next want head m h Hg H16 Hend Hw Hh0 H4 Hrep.
+  set (s0 := mkLS (ltake_locals len base next want head) m h).
+  destruct (ltake_realizes L want h len s0 Hg H16 Hw Hh0 H4 Hrep eq_refl eq_refl eq_refl eq_refl)
+    as [f [s' [out [Hf [Hrun [Hfr Hres]]]]]].
+  assert (Hlen : 16 * Z.of_nat (length L) <= MEMTOP)
+    by (pose proof (gaps_length L 16 ltac:(unfold MEMTOP; lia) Hg H16 Hend); lia).
+  assert (HF : ltake_run len base next want head m h = out).
+  { unfold ltake_run. apply (lexec_mono_le f); [ exact (fuel_fits f _ 34 Hf ltac:(lia) Hlen) | exact Hrun | ].
+    intros ->. destruct (take L want h); destruct Hres as [Ho _]; discriminate. }
+  assert (Hloc : forall i, (1 <= i <= 4)%nat -> res_loc out i (loc s0 i)).
+  { intros i Hi. rewrite <- Hrun.
+    apply lexec_noset. unfold ltake_tree, ltake_walk, ltake_fin, ltake_hit.
+    destruct i as [ | [ | [ | [ | [ | i ] ] ] ] ]; try lia; reflexivity. }
+  assert (Hl : forall i, (1 <= i <= 4)%nat -> loc s' i = loc s0 i).
+  { intros i Hi. specialize (Hloc i Hi).
+    destruct (take L want h); destruct Hres as [-> _]; exact Hloc. }
+  exists s'. split; [ exact Hfr | ].
+  split; [ exact (Hl 1%nat ltac:(lia)) | split; [ exact (Hl 2%nat ltac:(lia)) |
+    split; [ exact (Hl 3%nat ltac:(lia)) | split; [ exact (Hl 4%nat ltac:(lia)) | ] ] ] ].
+  rewrite HF. exact Hres.
 Qed.
