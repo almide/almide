@@ -1,0 +1,3 @@
+// Module `a` + global `b_c`: the same underscore-joined text as module
+// `a_b` + global `c` (#3305).
+let b_c = 1

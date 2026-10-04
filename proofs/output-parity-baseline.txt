@@ -42,6 +42,7 @@ spec/integration/alias_record_literal/src/main.almd
 spec/integration/cross_module_field_defaults/src/main.almd
 spec/integration/generic_protocol_ports/src/main.almd
 spec/integration/generics/generics_recursive_test.almd
+spec/integration/global_static_names/src/main.almd
 spec/integration/modules/cross_module_unit_effect_test.almd
 spec/integration/modules/vis_effect_test.almd
 spec/integration/qualified_ctor_names/src/main.almd
@@ -918,6 +919,7 @@ spec/wasm_cross/to_fixed_wide_precision.almd
 spec/wasm_cross/to_option_owned_carrier_release.almd
 spec/wasm_cross/to_result_custom_e.almd
 spec/wasm_cross/to_result_nested_share.almd
+spec/wasm_cross/top_let_case_distinct_names.almd
 spec/wasm_cross/top_let_closure_eager.almd
 spec/wasm_cross/top_let_closure_record.almd
 spec/wasm_cross/top_let_div_eager.almd
