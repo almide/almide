@@ -79,7 +79,7 @@
 4874	spec/wasm_cross/chunk_str.almd
 1998	spec/wasm_cross/closure_accumulator.almd
 7120	spec/wasm_cross/closure_borrowed_arg_guard.almd
-4348	spec/wasm_cross/closure_bytes_list_index_arg.almd
+4634	spec/wasm_cross/closure_bytes_list_index_arg.almd
 2728	spec/wasm_cross/closure_captured_list_mutation.almd
 6362	spec/wasm_cross/closure_captured_map_key_write.almd
 5057	spec/wasm_cross/closure_captured_map_records.almd
