@@ -27,7 +27,7 @@ rhs:SpreadRecord	5
 rhs:Unwrap	10
 stmt:Expr:Unit	1
 stmt:Expr:Var	1
-stmt:MapInsert	10
+stmt:MapInsert	14
 store:borrowed-temp	11
 tail:SpreadRecord	4
 tail:Unwrap	4
