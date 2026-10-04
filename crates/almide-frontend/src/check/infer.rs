@@ -191,7 +191,10 @@ impl Checker {
                         let ty = self.type_map.get(&f.value.id).map(|it| resolve_ty(it, &self.uf)).unwrap_or(Ty::Unknown);
                         (sym(&f.name), ty)
                     }).collect();
-                    Ty::Record { fields: field_tys }
+                    // #3290: deferred — the nominal record the literal is
+                    // unified with becomes its type (`unify_record_literal`).
+                    let id = self.uf.fresh_record_literal(Ty::Record { fields: field_tys });
+                    Ty::TypeVar(sym(&format!("?{}", id)))
                 }
     }
 
