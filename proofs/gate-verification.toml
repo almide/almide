@@ -72,7 +72,7 @@
 # originals — joined the twin parity test in #2163 and both ceilings are 0.
 #
 # unverified_ceiling = "0"
-# unclassified_reads_ceiling = "83"
+# unclassified_reads_ceiling = "84"
 # unwired_ceiling = "2"
 # unvaried_ceiling = "1"#
 # A fifth axis (#3032) says what the gate does NOT see. The four axes above
@@ -99,7 +99,7 @@
 # its measurand (0 -> 1). Both are enumerated gates, not new ones.
 #
 # unmapped_blind_ceiling = "108"
-# uncompensated_blind_ceiling = "15"
+# uncompensated_blind_ceiling = "16"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -502,6 +502,20 @@ evidence = "#1244 round 2: a std::time::Instant::now planted in almide-codegen d
 measures = "count of std::time / thread / RNG call sites in the codegen path outside the sanctioned wasm-safe shim, read from the source"
 varies = "#1244 round 2: a std::time::Instant::now planted in almide-codegen read 1 naming the line; the tree reads 0"
 blind = "UNMAPPED"
+
+[[gate]]
+path = "scripts/check-build-inputs-in-package.sh"
+# The --regen half compares committed generated tables with their regeneration,
+# which is `structured` by the rule in the header; it was the un-ledgered inline
+# registry-regen step in ci.yml before #3361 widened it to four crates. Newly
+# visible, not new: UNCLASSIFIED until ported (83 -> 84).
+reads = "UNCLASSIFIED"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#3361 (2026-10-04): the script run over origin/develop c60371fcb went red naming all six outside reads (types/codegen/egg-lab build.rs joins, codegen's codegen/templates include_str!, egg-lab's #[path] into almide-codegen, interp's CARGO_MANIFEST_DIR/../../runtime include) and the four missing in-package copies; planted src/ include of a nested package and a buildscript join(\"../../stdlib\") each went red; a stdlib/ edit without its regenerated table went red under --regen; restored green"
+measures = "count of shipped-source paths (include_str!/include_bytes!/include!/#[path] literals, CARGO_MANIFEST_DIR concats, build-script `..` joins) that resolve outside their package, plus byte equality of the shared build-script copies and of each committed src/generated tree with its regeneration, read from crates/*/{build.rs,buildscript,src} and the root build.rs/src"
+varies = "#3361 (2026-10-04): origin/develop c60371fcb read 6 outside paths; the fix-3361 branch reads 0"
+blind = "an outside read through a path computed at runtime or assembled from non-literals (format!/join of a variable, std::fs on a computed path), which the literal scan cannot resolve -> UNCOMPENSATED"
 
 [[gate]]
 path = "scripts/check-frees-churn.sh"
