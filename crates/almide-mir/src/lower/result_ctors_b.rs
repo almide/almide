@@ -129,6 +129,26 @@ impl LowerCtx {
         let (ok_ty, is_str) = Self::option_leaf_str_or_scalar(result_ty)?;
         let repr = repr_of(result_ty).ok()?;
         match &expr.kind {
+            // `ok(opt_fn(o))` / `ok(o)` — the Ok payload is an Option VALUE produced elsewhere
+            // (the effect-fn tail `{ let _ = gate(p)!; opt_fn(o) }` wraps the callee's Option): a
+            // user call returns a fresh owned block (rc 1), a Var is `Dup`ed to a fresh owned
+            // reference (`lower_result_str_piece`), then moved into the Result @12 under the SAME
+            // per-leaf drop as the ctor spellings below (flat for scalar, `opt_str` for String).
+            IrExprKind::ResultOk { expr: inner }
+                if inner.ty == *ok_ty
+                    && matches!(
+                        &inner.kind,
+                        IrExprKind::Var { .. }
+                            | IrExprKind::Call { target: CallTarget::Named { .. }, .. }
+                    ) =>
+            {
+                let piece = self.lower_result_str_piece(inner)?;
+                if is_str {
+                    Some(self.materialize_result_aggregate(piece, repr, false, "opt_str".to_string()))
+                } else {
+                    Some(self.materialize_result_str(piece, repr, false, false))
+                }
+            }
             IrExprKind::ResultOk { expr: inner } => {
                 if is_str {
                     let opt_repr = repr_of(ok_ty).ok()?;
