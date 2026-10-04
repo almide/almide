@@ -194,8 +194,8 @@
 66048	spec/wasm_cross/fan_map_err_runs_every_element.almd
 66048	spec/wasm_cross/fan_map_inline_err.almd
 67168	spec/wasm_cross/fan_map_inline_lambda.almd
-67840	spec/wasm_cross/fan_map_nested_combinators.almd
-71088	spec/wasm_cross/fan_map_parallel_scalar.almd
+68032	spec/wasm_cross/fan_map_nested_combinators.almd
+71600	spec/wasm_cross/fan_map_parallel_scalar.almd
 66000	spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd
 ~	spec/wasm_cross/fan_prefetch_fs.almd
 66240	spec/wasm_cross/fan_pure_thunks.almd
