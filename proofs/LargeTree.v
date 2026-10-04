@@ -1030,11 +1030,15 @@ Qed.
 Definition lfree_locals (b t cls : Z) : nat -> Z :=
   fun j => match j with 0%nat => b | 1%nat => t | 2%nat => cls | _ => 0 end.
 
-Definition lfree_mem (b t cls : Z) (m : Mem) : Mem :=
-  match lexec LFUEL lfree_tree (mkLS (lfree_locals b t cls) m 0) with
+(* Over any tree (the decoder hands over the tree it read from the
+   bytes); the transcribed `lfree_tree` is the one the theorems are about. *)
+Definition lfree_mem_of (ss : list lstmt) (b t cls : Z) (m : Mem) : Mem :=
+  match lexec LFUEL ss (mkLS (lfree_locals b t cls) m 0) with
   | RNorm s' => mem s'
   | _ => m
   end.
+
+Definition lfree_mem (b t cls : Z) (m : Mem) : Mem := lfree_mem_of lfree_tree b t cls m.
 
 Theorem lfree_mem_spec : forall L b t cls m,
   gaps L -> Forall (fun y => 16 <= fst y) L -> ends_below L MEMTOP ->
@@ -1051,7 +1055,7 @@ Proof.
     by (pose proof (gaps_length L 16 ltac:(unfold MEMTOP; lia) Hg H16 Hend); lia).
   assert (HF : lexec LFUEL lfree_tree (mkLS (lfree_locals b t cls) m 0) = RNorm s')
     by (apply (lexec_mono_le f); [ exact (fuel_fits f _ 22 Hf ltac:(lia) Hlen) | exact Hrun | discriminate ]).
-  unfold m', lfree_mem. rewrite HF. split; [ exact H4' | split; [ exact Hrep' | exact Hfr ] ].
+  unfold m', lfree_mem, lfree_mem_of. rewrite HF. split; [ exact H4' | split; [ exact Hrep' | exact Hfr ] ].
 Qed.
 
 (* A tree that never sets local i leaves it alone. *)
@@ -1100,8 +1104,11 @@ Definition ltake_locals (len base next want head : Z) : nat -> Z :=
            | 0%nat => len | 1%nat => base | 2%nat => next | 3%nat => want | 4%nat => head
            | _ => 0 end.
 
+Definition ltake_run_of (ss : list lstmt) (len base next want head : Z) (m : Mem) (g : Z) : lres :=
+  lexec LFUEL ss (mkLS (ltake_locals len base next want head) m g).
+
 Definition ltake_run (len base next want head : Z) (m : Mem) (g : Z) : lres :=
-  lexec LFUEL ltake_tree (mkLS (ltake_locals len base next want head) m g).
+  ltake_run_of ltake_tree len base next want head m g.
 
 Theorem ltake_run_spec : forall L len base next want head m h,
   gaps L -> Forall (fun y => 16 <= fst y) L -> ends_below L MEMTOP ->
@@ -1126,7 +1133,7 @@ Proof.
   assert (Hlen : 16 * Z.of_nat (length L) <= MEMTOP)
     by (pose proof (gaps_length L 16 ltac:(unfold MEMTOP; lia) Hg H16 Hend); lia).
   assert (HF : ltake_run len base next want head m h = out).
-  { unfold ltake_run. apply (lexec_mono_le f); [ exact (fuel_fits f _ 34 Hf ltac:(lia) Hlen) | exact Hrun | ].
+  { unfold ltake_run, ltake_run_of. apply (lexec_mono_le f); [ exact (fuel_fits f _ 34 Hf ltac:(lia) Hlen) | exact Hrun | ].
     intros ->. destruct (take L want h); destruct Hres as [Ho _]; discriminate. }
   assert (Hloc : forall i, (1 <= i <= 4)%nat -> res_loc out i (loc s0 i)).
   { intros i Hi. rewrite <- Hrun.

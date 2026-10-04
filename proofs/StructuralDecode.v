@@ -17,10 +17,14 @@
    (dumped by `runtime_alloc.rs::byte_dump::dump_runtime_bytes`, pinned
    by `runtime_trees_match_the_proof_transcription` — the hash pin now
    guards THESE lists' provenance rather than the transcription itself).
-   Their constants are all single-byte LEB128: positive immediates < 64
-   verbatim, and 124 = SLEB(-4); `48` is FREELIST_BASE (= ITOA_END, the
-   layout constant), `3` is G_LINE_END's global index, `33` is `$free`'s
-   fixed function index.
+   Their constants are single-byte LEB128 (positive immediates < 64
+   verbatim, 124 = SLEB(-4)) except the large-list split threshold
+   65536 = [128;128;4]; `48` is FREELIST_BASE (= ITOA_END, the layout
+   constant), `3` is G_LINE_END's global index, `33` is `$free`'s fixed
+   function index. Since #3348 `$free`'s above-ceiling arm and `$alloc`'s
+   else arm carry the inlined large-list loops; they decode through the
+   loop-sublanguage decoder below into EXACTLY LargeTree.v's
+   `lfree_tree` / `ltake_tree`.
 
    The decoder is CONSERVATIVE: an unknown opcode, an unexpected local
    or global index, a call to anything but `$free` with anything but the
@@ -30,6 +34,7 @@
    kernel. *)
 
 From AlmideTrust Require Import StructuralRuntime.
+From AlmideTrust Require LargeTree.
 From Stdlib Require Import ZArith.
 From Stdlib Require Import List.
 Import ListNotations.
@@ -44,6 +49,132 @@ Record naming := mkNaming {
 
 (* Single-byte SLEB128 constant: 0..63 verbatim, 64..127 = negative. *)
 Definition sleb1 (b : Z) : Z := if b <? 64 then b else b - 128.
+
+(* Multi-byte SLEB128 (up to 3 bytes — the largest immediate here). *)
+Definition sleb_dec (bs : list Z) : option (Z * list Z) :=
+  match bs with
+  | b0 :: r0 =>
+      if b0 <? 128 then Some (sleb1 b0, r0)
+      else match r0 with
+           | b1 :: r1 =>
+               if b1 <? 128
+               then Some ((b0 - 128) + Z.shiftl (sleb1 b1) 7, r1)
+               else match r1 with
+                    | b2 :: r2 =>
+                        if b2 <? 128
+                        then Some ((b0 - 128) + Z.shiftl (b1 - 128) 7
+                                   + Z.shiftl (sleb1 b2) 14, r2)
+                        else None
+                    | [] => None
+                    end
+           | [] => None
+           end
+  | [] => None
+  end.
+
+(* ══ THE LOOP SUBLANGUAGE (#3348) ═════════════════════════════════════
+   `$free` and `$alloc` inline the large-list release / take: straight-
+   line locals, loads, stores, `if`/`else`, and the `block { loop { cond;
+   eqz; br_if 1; body; br 0 } }` while shape. This decoder maps those
+   bytes into LargeTree.v's `lstmt` language — local i reads as `LL i`
+   (the trees use the wasm local indices directly), a memarg always folds
+   as `base + off`, global 1 is the bump frontier. It returns at a
+   TERMINATOR, reported by its opcode: 11 = end, 5 = else, 13 = the
+   loop-exit `eqz; br_if 1`, 12 = the back-edge `br 0; end; end`, 15 = a
+   void return. Anything else decodes to None. *)
+Module L := LargeTree.
+
+Definition lbin (op : Z) (a b : L.lexpr) : option L.lexpr :=
+  if op =? 70 then Some (L.LEq a b)
+  else if op =? 71 then Some (L.LNe a b)
+  else if op =? 73 then Some (L.LLtU a b)
+  else if op =? 79 then Some (L.LGeU a b)
+  else if op =? 106 then Some (L.LAdd a b)
+  else if op =? 107 then Some (L.LSub a b)
+  else if op =? 113 then Some (L.LAnd a b)
+  else None.
+
+Fixpoint ldecode_go (fuel : nat) (bs : list Z) (stk : list L.lexpr) (acc : list L.lstmt)
+  : option (list L.lstmt * list L.lexpr * Z * list Z) :=
+  match fuel with
+  | O => None
+  | S f =>
+      match bs with
+      | 11 :: r => Some (rev acc, stk, 11, r)
+      | 5 :: r => Some (rev acc, stk, 5, r)
+      | 69 :: 13 :: 1 :: r => Some (rev acc, stk, 13, r)
+      | 12 :: 0 :: 11 :: 11 :: r => Some (rev acc, stk, 12, r)
+      | 15 :: r =>
+          match stk with
+          | [] => Some (rev acc, [], 15, r)
+          | v :: stk' => ldecode_go f r stk' (L.LRet v :: acc)
+          end
+      | 32 :: i :: r =>
+          if andb (0 <=? i) (i <? 16) then ldecode_go f r (L.LL (Z.to_nat i) :: stk) acc else None
+      | 33 :: i :: r =>
+          match stk with
+          | v :: stk' =>
+              if andb (0 <=? i) (i <? 16) then ldecode_go f r stk' (L.LSet (Z.to_nat i) v :: acc)
+              else None
+          | [] => None
+          end
+      | 35 :: 1 :: r => ldecode_go f r (L.LG :: stk) acc
+      | 36 :: 1 :: r =>
+          match stk with
+          | v :: stk' => ldecode_go f r stk' (L.LSetG v :: acc)
+          | [] => None
+          end
+      | 40 :: 2 :: off :: r =>
+          match stk with
+          | a :: stk' => ldecode_go f r (L.LLoad (L.LAdd a (L.LC off)) :: stk') acc
+          | [] => None
+          end
+      | 54 :: 2 :: off :: r =>
+          match stk with
+          | v :: a :: stk' => ldecode_go f r stk' (L.LStore (L.LAdd a (L.LC off)) v :: acc)
+          | _ => None
+          end
+      | 65 :: r =>
+          match sleb_dec r with
+          | Some (z, r') => ldecode_go f r' (L.LC z :: stk) acc
+          | None => None
+          end
+      | 2 :: 64 :: 3 :: 64 :: r =>
+          match ldecode_go f r [] [] with
+          | Some ([], [cnd], 13, r1) =>
+              match ldecode_go f r1 [] [] with
+              | Some (body, [], 12, r2) => ldecode_go f r2 stk (L.LWhile cnd body :: acc)
+              | _ => None
+              end
+          | _ => None
+          end
+      | 4 :: 64 :: r =>
+          match stk with
+          | cnd :: stk' =>
+              match ldecode_go f r [] [] with
+              | Some (th, [], 11, r1) => ldecode_go f r1 stk' (L.LIf cnd th [] :: acc)
+              | Some (th, [], 5, r1) =>
+                  match ldecode_go f r1 [] [] with
+                  | Some (el, [], 11, r2) => ldecode_go f r2 stk' (L.LIf cnd th el :: acc)
+                  | _ => None
+                  end
+              | _ => None
+              end
+          | [] => None
+          end
+      | op :: r =>
+          match stk with
+          | b :: a :: stk' =>
+              match lbin op a b with
+              | Some e => ldecode_go f r (e :: stk') acc
+              | None => None
+              end
+          | _ => None
+          end
+      | [] => None
+      end
+  end.
+
 
 (* Fold a memarg offset the way the transcription spells addresses:
    offset 0 is the bare base, a positive offset is `base + off`. *)
@@ -139,13 +270,19 @@ Fixpoint decode_go (fuel : nat) (nm : naming) (bs : list Z)
           | EBlk :: stk' => decode_go f nm r stk' (SCallFree :: acc)
           | _ => None
           end
-      | 4 :: 64 :: r => (* if, empty blocktype — body must be ONE stmt *)
+      | 4 :: 64 :: r => (* if, empty blocktype — body must be ONE stmt,
+                           or an inlined loop tree closed by a void return *)
           match stk with
           | cnd :: stk' =>
+              match ldecode_go f r [] [] with
+              | Some (s0 :: ss, [], 15, 11 :: rest) =>
+                  decode_go f nm rest stk' (SIf cnd (SLRun (s0 :: ss)) :: acc)
+              | _ =>
               match decode_go f nm r [] [] with
               | Some ([s], rest) =>
                   decode_go f nm rest stk' (SIf cnd s :: acc)
               | _ => None
+              end
               end
           | [] => None
           end
@@ -195,14 +332,18 @@ Definition dec_bytes : list Z :=
    11].
 
 Definition free_bytes : list Z :=
-  [32;0;40;2;8;65;15;106;65;124;113;33;1;
-   32;1;65;16;73;4;64;15;11;
-   65;28;32;1;65;1;107;103;107;33;2;
-   32;2;65;16;79;4;64;15;11;
-   32;2;65;2;116;65;48;106;33;2;
-   32;0;32;2;40;2;0;54;2;12;
-   32;2;32;0;54;2;0;
-   11].
+  [32;0;40;2;8;65;15;106;65;124;113;33;1;32;1;65;16;73;
+   4;64;15;11;65;28;32;1;65;1;107;103;107;33;2;32;2;65;
+   13;79;4;64;65;0;40;2;12;33;5;2;64;3;64;32;5;65;
+   0;71;32;5;32;0;73;113;69;13;1;32;4;33;3;32;5;33;
+   4;32;5;40;2;12;33;5;12;0;11;11;32;0;32;1;106;32;
+   5;70;4;64;32;1;32;5;40;2;4;106;33;1;32;5;40;2;
+   12;33;5;11;32;4;32;4;40;2;4;106;32;0;70;4;64;32;
+   1;32;4;40;2;4;106;33;1;32;4;33;0;32;3;33;4;11;
+   32;0;65;0;54;2;0;32;0;32;1;54;2;4;32;0;32;5;
+   54;2;12;32;4;32;0;54;2;12;15;11;32;2;65;2;116;65;
+   48;106;33;2;32;0;32;2;40;2;0;54;2;12;32;2;32;0;
+   54;2;0;11].
 
 (* ══ THE DECODE THEOREMS — by computation ══════════════════════════════
 
@@ -229,35 +370,13 @@ Proof. reflexivity. Qed.
    the transcription spells it), the second global (`G_HEAP`, index 1)
    read AND written, `memory.size`, the value-carrying `return` and the
    value-carrying implicit fall-through at `end`, multi-byte SLEB128
-   (524288 = [128;128;32]), and the GROW ARM: its guard decodes
+   (65536 = [128;128;4]), and the GROW ARM: its guard decodes
    structurally, its BODY is matched VERBATIM against the emitted span
    (parameterized by the per-program OOM-message immediate) and
    abstracted to `SGrow` — the same honesty boundary slice 2 declared
    for its semantics. *)
 
 From AlmideTrust Require Import StructuralAlloc.
-
-(* Multi-byte SLEB128 (up to 3 bytes — the largest immediate here). *)
-Definition sleb_dec (bs : list Z) : option (Z * list Z) :=
-  match bs with
-  | b0 :: r0 =>
-      if b0 <? 128 then Some (sleb1 b0, r0)
-      else match r0 with
-           | b1 :: r1 =>
-               if b1 <? 128
-               then Some ((b0 - 128) + Z.shiftl (sleb1 b1) 7, r1)
-               else match r1 with
-                    | b2 :: r2 =>
-                        if b2 <? 128
-                        then Some ((b0 - 128) + Z.shiftl (b1 - 128) 7
-                                   + Z.shiftl (sleb1 b2) 14, r2)
-                        else None
-                    | [] => None
-                    end
-           | [] => None
-           end
-  | [] => None
-  end.
 
 (* The emitted grow-arm BODY span, verbatim (select/grow/OOM), with the
    OOM-message immediate as a parameter (its SLEB bytes). Matched byte-
@@ -323,6 +442,11 @@ Fixpoint adecode_go (fuel : nat) (oom_leb : list Z) (bs : list Z)
           match stk with
           | [] => Some (rev acc, r)
           | [v] => Some (rev (ARetV v :: acc), r)
+          | _ => None
+          end
+      | 5 :: r =>
+          match stk with
+          | [] => Some (rev acc, 5 :: r)
           | _ => None
           end
       | 15 :: r =>
@@ -421,6 +545,13 @@ Fixpoint adecode_go (fuel : nat) (oom_leb : list Z) (bs : list Z)
           match stk with
           | cnd :: stk' =>
               match adecode_go f oom_leb r [] [] with
+              | Some (body, 5 :: r1) =>
+                  (* the else arm: the inlined large-list take *)
+                  match ldecode_go f r1 [] [] with
+                  | Some (ss, [], 11, r2) =>
+                      adecode_go f oom_leb r2 stk' (AIfElse cnd body [SLTake ss] :: acc)
+                  | _ => None
+                  end
               | Some (body, rest) =>
                   adecode_go f oom_leb rest stk' (AIf cnd body :: acc)
               | None => None
@@ -446,7 +577,7 @@ Definition alloc_bytes : list Z :=
   [32;0;65;15;106;65;124;113;33;3;
    32;3;65;16;73;4;64;65;16;33;3;11;
    65;28;32;3;65;1;107;103;107;33;2;
-   32;2;65;16;73;4;64;
+   32;2;65;13;73;4;64;
      32;2;65;2;116;65;48;106;33;2;
      32;2;40;2;0;34;4;4;64;
        32;2;32;4;40;2;12;54;2;0;
@@ -455,10 +586,21 @@ Definition alloc_bytes : list Z :=
        32;4;65;16;32;2;65;48;107;65;2;118;116;65;12;107;54;2;8;
        32;4;15;11;
      65;28;32;3;65;1;107;103;107;33;2;
-     65;16;32;2;116;33;3;11;
+     65;16;32;2;116;33;3;5;
+     65;0;40;2;12;33;7;2;64;3;64;32;7;65;0;71;32;7;
+     40;2;4;32;3;73;113;69;13;1;32;6;33;5;32;7;33;6;
+     32;7;40;2;12;33;7;12;0;11;11;32;7;65;0;71;4;64;
+     32;7;40;2;4;33;8;32;8;32;3;107;65;128;128;4;79;4;
+     64;32;7;32;3;106;33;9;32;9;65;0;54;2;0;32;9;32;
+     8;32;3;107;54;2;4;32;9;32;7;40;2;12;54;2;12;32;
+     6;32;9;54;2;12;32;3;33;8;5;32;6;32;7;40;2;12;
+     54;2;12;11;32;7;65;1;54;2;0;32;7;32;0;54;2;4;
+     32;7;32;8;65;12;107;54;2;8;32;7;15;11;32;6;32;6;
+     40;2;4;106;35;1;70;4;64;32;5;65;0;54;2;12;32;6;
+     36;1;11;11;
    35;1;33;1;
    32;1;65;12;106;32;0;106;65;3;106;65;124;113;33;2;
-   32;3;65;128;128;32;77;4;64;32;1;32;3;106;33;2;11;
+   32;3;65;128;128;4;77;4;64;32;1;32;3;106;33;2;11;
    32;2;32;1;73;4;64;65;0;16;6;65;1;16;2;0;11;
    32;2;63;0;65;16;116;75;
    4;64;32;2;63;0;65;16;116;107;65;255;255;3;106;65;16;118;63;0;
