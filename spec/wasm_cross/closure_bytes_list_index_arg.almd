@@ -1,0 +1,54 @@
+// @contract: C-319
+// A Bytes element read by index out of a List a closure shares (a captured
+// and mutated `var`), or out of a module-level `var` List, passes to a stdlib
+// call (#3318). Native rendered the stdlib argument as
+// `&almide_index!(acc.get(), 0)` — a block whose `AlmideRcCow<Vec<u8>>` value
+// rustc checked against the raw `Vec<u8>` parameter (E0308) — while wasm
+// printed the length. Native now takes the raw value out first.
+// Rows: the issue's closure push then `bytes.len(acc[0])`; a second stdlib
+// call with an index and default; a nested closure
+// push; a computed index into a plain local List of Bytes; a module-level
+// `var` List of Bytes read the same way.
+var stash: List[Bytes] = []
+
+fn run(x: Bytes) -> Int = {
+  var acc: List[Bytes] = []
+  let put = (b: Bytes) => { list.push(acc, b) }
+  put(x)
+  bytes.len(acc[0])
+}
+
+fn more(x: Bytes, y: Bytes) -> String = {
+  var acc: List[Bytes] = []
+  let put = (b: Bytes) => { list.push(acc, b) }
+  let twice = (b: Bytes) => {
+    put(b)
+    put(b)
+  }
+  put(x)
+  twice(y)
+  "${list.len(acc)} ${bytes.get_or(acc[1], 1, 0)} ${bytes.get_or(acc[2], 0, 0)} ${bytes.len(acc[0])}"
+}
+
+fn local_computed(xs: List[Bytes], i: Int) -> Int = bytes.len(xs[i + 1]) + bytes.get_or(
+  xs[i * 2],
+  0,
+  0,
+)
+
+fn from_global() -> Int = {
+  stash = stash + [
+    bytes.from_list([4, 5])
+  ]
+  bytes.len(stash[0]) + bytes.get_or(stash[0], 0, 0)
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(run(bytes.from_list([1, 2, 3]))))
+  println(more(bytes.from_list([9]), bytes.from_list([7, 8])))
+  println(int.to_string(local_computed([
+    bytes.from_list([3]),
+    bytes.from_list([1, 1])
+  ], 0)))
+  println(int.to_string(from_global()))
+}
