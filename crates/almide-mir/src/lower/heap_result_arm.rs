@@ -644,6 +644,16 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 p
             }
+            // `some("hi " + s)` — a String concat payload: the `__str_concat` chain's fresh
+            // owned String moves into the Option (sole owner, no Dup); its operand temps free
+            // WITHIN the arm (the untaken-arm garbage rc_dec trap, as for the list concat below).
+            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
+                let arm_mark = self.live_heap_handles.len();
+                let p = self.try_lower_concat_str(expr)?;
+                self.live_heap_handles.retain(|h| *h != p);
+                self.drop_arm_locals(arm_mark);
+                p
+            }
             // `some(stack + ["("])` — the fold-step push: a fresh owned concat list
             // moves into the Option directly (no Dup — sole owner). The concat's
             // materialized RHS-element temp frees WITHIN the arm (same trap avoidance
