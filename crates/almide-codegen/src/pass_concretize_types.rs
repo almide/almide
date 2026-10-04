@@ -152,35 +152,30 @@ fn concretize_top_lets(program: &mut IrProgram, prog_vt: &mut VarTable, symbols:
 
 /// Phase 1b: Propagate top_let types by name into VarTable entries
 /// that are cross-module synthetic references (different VarId, same name).
-/// Insert `name` → `ty` under both its source spelling and its
-/// SCREAMING_CASE const spelling. The use-site synthetic Var carries the
-/// SCREAMING_CASE spelling (`lower/expressions.rs` `field.to_uppercase()`)
-/// while the definition keeps the source name — bridge BOTH spellings, or
-/// a lowercase module top-let never propagates (#502 fix C). Extracted
-/// from `propagate_top_let_types_by_name` (cog>25 decomposition): was a
-/// local closure, promoted to a named function.
-fn insert_top_let_ty_both_spellings(name: String, ty: &Ty, map: &mut std::collections::HashMap<String, Ty>) {
-    let upper = name.to_uppercase();
-    if upper != name { map.entry(upper).or_insert_with(|| ty.clone()); }
+/// The use-site synthetic Var carries the declaration's SOURCE spelling
+/// (`lower/expressions_block.rs` `module_top_let_var`, #3316), so the name
+/// is inserted exactly as declared: folding case here would hand `BUF`'s
+/// type to a use of `buf`.
+fn insert_top_let_ty(name: String, ty: &Ty, map: &mut std::collections::HashMap<String, Ty>) {
     map.insert(name, ty.clone());
 }
 
 /// Collect every resolved top-let's type (top-level and per-module), keyed
-/// by name (both spellings — see [`insert_top_let_ty_both_spellings`]).
+/// by name (the exact spelling — see [`insert_top_let_ty`]).
 /// Extracted from `propagate_top_let_types_by_name` (cog>25 decomposition).
 fn collect_top_let_types(program: &IrProgram, prog_vt: &VarTable) -> std::collections::HashMap<String, Ty> {
     let mut top_let_types: std::collections::HashMap<String, Ty> = std::collections::HashMap::new();
     for tl in &program.top_lets {
         if !tl.ty.has_unresolved_deep() {
             let name = prog_vt.get(tl.var).name.to_string();
-            insert_top_let_ty_both_spellings(name, &tl.ty, &mut top_let_types);
+            insert_top_let_ty(name, &tl.ty, &mut top_let_types);
         }
     }
     for module in &program.modules {
         for tl in &module.top_lets {
             if !tl.ty.has_unresolved_deep() {
                 let name = prog_vt.get(tl.var).name.to_string();
-                insert_top_let_ty_both_spellings(name, &tl.ty, &mut top_let_types);
+                insert_top_let_ty(name, &tl.ty, &mut top_let_types);
             }
         }
     }

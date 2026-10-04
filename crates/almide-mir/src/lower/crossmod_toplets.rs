@@ -1,8 +1,10 @@
 //! Cross-module top-let references (#3058).
 //!
 //! The entry file reads `lib.TITLE` through a VarId the frontend synthesizes
-//! in the ENTRY var table (`module_top_let_var`: the name uppercased,
-//! `module_origin` = the module's mangled ident). The module's own top-let
+//! in the ENTRY var table (`module_top_let_var`: the source spelling,
+//! `module_origin` = the module's mangled ident). This resolver folds case
+//! on both sides, so case twins (`buf` / `BUF`, #3316) are a name defined
+//! twice and stay unbound. The module's own top-let
 //! lives in the MODULE's var table under another id, so no globals map keyed
 //! by the module's ids binds the reference, and the function walled on
 //! "use of unbound var" or an unresolvable condition.
