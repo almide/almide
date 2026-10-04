@@ -614,6 +614,7 @@ spec/wasm_cross/module_global_const.almd
 spec/wasm_cross/module_var_alias_cow.almd
 spec/wasm_cross/mut_call_hoisted_args_distinct.almd
 spec/wasm_cross/mut_call_nested_read_before.almd
+spec/wasm_cross/mut_call_two_mut_args_read.almd
 spec/wasm_cross/mut_heap_param.almd
 spec/wasm_cross/mut_map_param.almd
 spec/wasm_cross/mut_param_alias_cow.almd
