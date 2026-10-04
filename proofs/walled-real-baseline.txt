@@ -113,31 +113,16 @@
 # arms) lowers where the old `__decode_default_*` helper shape walled. The
 # baseline is EMPTY again; ANY row is a regression.
 #
-# (2026-08-31, C-327) env.sleep_ms has no capability seat in the incumbent
-# brick; the structural leg serves it (embedded-host op 36 / p1 clock spin).
-# Prunes with #1696 steps 4-5. (The gzip inflate pair that sat above lowers
-# since walls lane 4, #2739: the loop-level tuple write-back executes.)
-spec/wasm_cross/env_sleep_pause.almd :: main
-# 2026-08-31 (#1710 increment 1): the embedded_cross http fixture's `main` walls
-# on the BUILD path by DESIGN — ops 43-47 are served by the embedded host
-# (`almide run --target wasm`, spec/embedded_cross gate) and declared
-# wasm-unavailable with an embedded-lane-served reason in the availability
-# matrix. Retires when the p3 client leg ships the ops on stock artifacts
-# (#1710 increment 2 / #1716).
-spec/embedded_cross/http_client_errs.almd :: main
-# 2026-09-26 (#2633, the http call handle): the embedded_cross handle fixture's
-# `main` walls on the incumbent BUILD path by design, the http_client_errs shape
-# above — ops 53..=59 are served by the embedded host (`almide run --target
-# wasm`, the spec/embedded_cross gate), and the handle's rows keep stock-p1 in
-# the availability matrix. Retires when a stock host serves the call handle
-# (#1710).
-spec/embedded_cross/http_call_handle_errs.almd :: main
-# (2026-09-01, C-329/#1716) env.set has no seat in the incumbent brick; the
-# STRUCTURAL leg serves the overlay (embedded op 37/26, p1 shim overlay log +
-# real-environ fallthrough), so the env-overlay fixture lowers there and on
-# every execution sweep. Same division as the C-326/C-327 rows; prunes with
-# #1696 steps 4-5.
-spec/wasm_cross/env_set_overlay.almd :: main
+# (2026-10-04, #2739 ruling A) PRUNED: the env.sleep_ms / env.set fixtures'
+# `main`, the embedded_cross http client and call-handle `main`s, the three
+# http_status_test fns, http_call_test's `gather` and the shutdown fixture's
+# `handle`. A host call is certified as an ordinary call (borrowed args, an owned
+# result): crate::host_ops admits env.set / env.sleep_ms and the http client
+# family, its contract gated against the stdlib `@intrinsic` and the runtime
+# signature (crates/almide-mir/tests/host_ops_contract.rs), and cap_witness
+# counts each call's capability with the structural leg's ids (env.set ->
+# CliArgs, env.sleep_ms -> Clock, http -> the new Net, id 7); an effect fn's
+# default bound now declares Clock and Net, as the structural leg's does.
 # (2026-09-02, C-332/#1461) list-rest patterns have no seat in the incumbent
 # brick (binds_p4 walls the form honestly); the STRUCTURAL leg — the default
 # route — lowers them on every execution sweep. Same division as the
@@ -169,20 +154,6 @@ spec/wasm_cross/env_set_overlay.almd :: main
 # fixture no longer uses a call-result receiver. The bytes writers take `mut`
 # receivers now, so the fixture drives them through a `var` and the incumbent
 # renders it — the determinism ceilings fell 34 -> 33 in the same change.
-# 2026-09-03 (#1791, the http response family): the loopback round-trip test's
-# three fns (a retrying dial through `net` + `fan`, and the transport-err test
-# block) are network-effect shapes the incumbent MIR lowering walls; the native
-# lane pins them and the structural leg is capability-walled on wasip1 by
-# design (C-328). Retire with #1696.
-spec/stdlib/http_status_test.almd :: __test_almd_request_response to a closed local port is a transport err
-spec/stdlib/http_status_test.almd :: fetch_retry
-spec/stdlib/http_status_test.almd :: get_retry
-# 2026-09-25 (#2631, the http call handle): the fixture's `gather` — a read_new
-# loop over a live HttpCall — calls a network-effect fn the incumbent MIR
-# lowering walls (no declared capability for http, by design); the native lane
-# pins it. #2633 serves the handle on the structural leg (embedded lane) —
-# the incumbent still has no http, and the fixture's server is `net`.
-spec/stdlib/http_call_test.almd :: gather
 # 2026-09-26 (#2650, C-367): the http.serve server fixture's handler and its
 # query renderer take an HttpRequest, which exists only inside http.serve — a
 # network-effect call the incumbent MIR lowering walls by design. The STRUCTURAL
@@ -191,13 +162,6 @@ spec/stdlib/http_call_test.almd :: gather
 # 2026-09-26 (#2588): render_query pruned — query_params now links to the
 # self-host copy in stdlib/http_url_decode.almd, which the incumbent lowers.
 spec/serve_cross/http_serve_replay.almd :: handle
-# 2026-09-28 (#2692, C-367 shutdown): the shutdown server fixture's handler
-# takes an HttpRequest (it exists only inside http.serve) and matches its path
-# with arms that sleep — the incumbent walls the untracked-subject match. The
-# STRUCTURAL leg serves the fixture on the embedded lane
-# (tests/http_serve_cross_test.rs); stock artifacts refuse http.serve (E081).
-# Retires with #2659 or #1696, like the replay fixture's row above.
-spec/serve_cross/http_serve_shutdown.almd :: handle
 # 2026-09-27 (#2696, ADR-0020 pillar 3): the router fixture's app bound as a
 # top-level VALUE (`let site = http.router(...)`, then `let h = site!` and a
 # call). The incumbent MIR lowering walls the heap-result `match` the router
@@ -331,3 +295,11 @@ spec/stdlib/http_router_test.almd :: __test_almd_an app bound at the top level i
 # can-err fixture's `go` / `main` / `uc__Mem`, `run_fill`, the mut_port `main`,
 # and the reassign-from-HOF `f_fallible` / `main`). What remains is the 11 http /
 # env capability rows, B and B2, which wait on a ruling.
+# (2026-10-04, #2739 ruling A, family B) 9 rows pruned (11 -> 2): the six B rows
+# and three B2 rows the same change reaches (the two `*_retry` fns and `gather`,
+# whose heap result is a host op's `Result[HttpResponse, String]` / a read over an
+# `HttpCall`). See the host-op note above. almide-verify certifies the corpus
+# witness set; the native rung still walls these programs at render (no host op is
+# in its runtime floor), so every shipped output is unchanged. The two rows left
+# are B2: the replay handler's `String` match returning a `HttpResponse`, and the
+# router value bound at top level.
