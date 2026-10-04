@@ -187,6 +187,7 @@ spec/wasm_cross/checked_conversion_value_match.almd
 spec/wasm_cross/chunk_str.almd
 spec/wasm_cross/closure_accumulator.almd
 spec/wasm_cross/closure_borrowed_arg_guard.almd
+spec/wasm_cross/closure_bytes_list_index_arg.almd
 spec/wasm_cross/closure_captured_list_mutation.almd
 spec/wasm_cross/closure_captured_map_key_write.almd
 spec/wasm_cross/closure_captured_map_records.almd
