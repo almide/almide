@@ -38,7 +38,7 @@ Open Scope Z_scope.
 
 Inductive lexpr : Type :=
   | LC (z : Z)
-  | LL (i : Z)             (* local.get i *)
+  | LL (i : nat)           (* local.get i *)
   | LG                     (* global.get $heap *)
   | LLoad (a : lexpr)      (* i32.load *)
   | LAdd (a b : lexpr)
@@ -51,17 +51,17 @@ Inductive lexpr : Type :=
   | LAnd (a b : lexpr).    (* i32.and of two 0/1 flags *)
 
 Inductive lstmt : Type :=
-  | LSet (i : Z) (e : lexpr)
+  | LSet (i : nat) (e : lexpr)
   | LStore (a v : lexpr)
   | LSetG (e : lexpr)
   | LIf (c : lexpr) (th el : list lstmt)
   | LWhile (c : lexpr) (body : list lstmt)
   | LRet (e : lexpr).
 
-Record LS := mkLS { loc : Z -> Z; mem : Mem; gh : Z }.
+Record LS := mkLS { loc : nat -> Z; mem : Mem; gh : Z }.
 
-Definition setl (s : LS) (i v : Z) : LS :=
-  mkLS (fun j => if j =? i then v else loc s j) (mem s) (gh s).
+Definition setl (s : LS) (i : nat) (v : Z) : LS :=
+  mkLS (fun j => if Nat.eqb j i then v else loc s j) (mem s) (gh s).
 
 Fixpoint lev (e : lexpr) (s : LS) : Z :=
   match e with
@@ -278,4 +278,389 @@ Proof.
   intros l a Hg [b [s [Hin Ha]]].
   pose proof (gaps_In_size l b s Hg Hin) as Hs.
   apply Exists_exists. exists (b, s). split; [ exact Hin | unfold inside; cbn; lia ].
+Qed.
+
+Lemma field_cov' : forall l a,
+  Forall (fun e => 16 <= snd e) l -> field l a -> cov l a.
+Proof.
+  intros l a Hs [b [s [Hin Ha]]]. rewrite Forall_forall in Hs.
+  specialize (Hs _ Hin). cbn in Hs.
+  apply Exists_exists. exists (b, s). split; [ exact Hin | unfold inside; cbn; lia ].
+Qed.
+
+Lemma lseg_frame : forall l m m' x y,
+  (forall a, field l a -> m' a = m a) -> lseg m x l y -> lseg m' x l y.
+Proof.
+  induction l as [ | [b s] r IH ]; intros m m' x y Hf H; cbn in *; [ exact H | ].
+  destruct H as [Hx [Hs Hr]]. split; [ exact Hx | split ].
+  - rewrite Hf; [ exact Hs | exists b, s; split; [ left; reflexivity | left; reflexivity ] ].
+  - rewrite Hf by (exists b, s; split; [ left; reflexivity | right; reflexivity ]).
+    apply (IH m); [ | exact Hr ].
+    intros a [b' [s' [Hin Ha]]]. apply Hf. exists b', s'. split; [ right; exact Hin | exact Ha ].
+Qed.
+
+Lemma field_cons : forall e l a, field (e :: l) a <-> (a = fst e + 4 \/ a = fst e + 12) \/ field l a.
+Proof.
+  intros [b s] l a. split.
+  - intros [b' [s' [[H | H] Ha]]].
+    + injection H as <- <-. left. exact Ha.
+    + right. exists b', s'. split; assumption.
+  - intros [Ha | [b' [s' [Hin Ha]]]].
+    + exists b, s. split; [ left; reflexivity | exact Ha ].
+    + exists b', s'. split; [ right; exact Hin | exact Ha ].
+Qed.
+
+Lemma field_app : forall l1 l2 a, field (l1 ++ l2) a <-> field l1 a \/ field l2 a.
+Proof.
+  intros l1 l2 a. unfold field. split.
+  - intros [b [s [Hin Ha]]]. apply in_app_or in Hin as [H | H]; [ left | right ]; exists b, s; auto.
+  - intros [[b [s [Hin Ha]]] | [b [s [Hin Ha]]]]; exists b, s; split; auto using in_or_app.
+Qed.
+
+(* The last base of a nonempty segment, and the link it holds. *)
+Fixpoint lastb (l : list ext) (d : Z) : Z :=
+  match l with [] => d | (b, _) :: r => lastb r b end.
+
+Lemma lseg_last : forall l m x y d,
+  lseg m x l y -> l <> [] -> field l (lastb l d + 12) /\ m (lastb l d + 12) = y.
+Proof.
+  induction l as [ | [b s] r IH ]; intros m x y d H Hne; [ contradiction | ].
+  destruct H as [Hx [Hs Hr]]. destruct r as [ | e r' ].
+  - cbn in Hr |- *. split; [ exists b, s; split; [ left; reflexivity | right; reflexivity ] | exact Hr ].
+  - destruct (IH m _ y b Hr ltac:(discriminate)) as [Hf Hm].
+    cbn [lastb]. split; [ apply field_cons; right; exact Hf | exact Hm ].
+Qed.
+
+Lemma lseg_app_lrep : forall m x pre y l,
+  lseg m x pre y -> lrep m y l -> lrep m x (pre ++ l).
+Proof. intros m x pre y l H1 H2. apply lrep_app. exists y. split; assumption. Qed.
+
+Definition hdb (l : list ext) : Z := match l with [] => 0 | e :: _ => fst e end.
+
+Lemma lrep_hd : forall m x l, lrep m x l -> x = hdb l.
+Proof. intros m x [ | [b s] r ] H; cbn in *; [ exact H | apply H ]. Qed.
+
+(* ══ $lfree ═══════════════════════════════════════════════════════════ *)
+
+(* Locals inside `$free`: 0 = b (the block), 1 = t (its total), 3 = pp,
+   4 = p, 5 = q (fresh, zero on entry; 2 is $free's class scratch). *)
+Definition at_ (e : lexpr) (off : Z) : lexpr := LLoad (LAdd e (LC off)).
+
+Definition lfree_walk : lstmt :=
+  LWhile (LAnd (LNe (LL 5) (LC 0)) (LLtU (LL 5) (LL 0)))
+    [ LSet 3 (LL 4); LSet 4 (LL 5); LSet 5 (at_ (LL 5) 12) ].
+
+Definition lfree_fin : list lstmt :=
+  [ LIf (LEq (LAdd (LL 0) (LL 1)) (LL 5))
+        [ LSet 1 (LAdd (LL 1) (at_ (LL 5) 4)); LSet 5 (at_ (LL 5) 12) ] [];
+    LIf (LEq (LAdd (LL 4) (at_ (LL 4) 4)) (LL 0))
+        [ LSet 1 (LAdd (LL 1) (at_ (LL 4) 4)); LSet 0 (LL 4); LSet 4 (LL 3) ] [];
+    LStore (LAdd (LL 0) (LC 0)) (LC 0);
+    LStore (LAdd (LL 0) (LC 4)) (LL 1);
+    LStore (LAdd (LL 0) (LC 12)) (LL 5);
+    LStore (LAdd (LL 4) (LC 12)) (LL 0) ].
+
+Definition lfree_tree : list lstmt :=
+  LSet 5 (at_ (LC 0) LHEAD) :: lfree_walk :: lfree_fin.
+
+Ltac lsimpl := cbn [lev at_ loc mem gh setl Nat.eqb] in *.
+
+Ltac cnd := change (1 =? 0) with false in *; change (0 =? 0) with true in *; cbv beta iota.
+Ltac run := repeat progress (first [ rewrite lexec_nil | rewrite lexec_cons ]; cbv beta iota; lsimpl).
+Ltac eqbs := repeat match goal with |- context [?a =? ?b] => destruct (Z.eqb_spec a b) end.
+Ltac eqbs_in H := repeat match type of H with context [?a =? ?b] => destruct (Z.eqb_spec a b) end.
+
+Lemma upd_same : forall m a v x, m a = v -> upd m a v x = m x.
+Proof. intros m a v x H. unfold upd. destruct (Z.eqb_spec x a); congruence. Qed.
+
+(* The straight-line tail after the walk: x = (px, sx) is the
+   predecessor (the sentinel (0,0) when pre = []), r the successors. *)
+Lemma lfree_finish : forall s pre px sx r b t pp,
+  loc s 0%nat = b -> loc s 1%nat = t -> loc s 3%nat = pp -> loc s 4%nat = px -> loc s 5%nat = hdb r ->
+  lseg (mem s) 0 pre px -> mem s (px + 4) = sx -> mem s (px + 12) = hdb r ->
+  lrep (mem s) (hdb r) r ->
+  (forall a, field pre a -> a < px) ->
+  (forall a, field r a -> b + t <= a) ->
+  px + sx <= b ->
+  ((pre = [] /\ sx = 0) \/ (pre <> [] /\ 16 <= px /\ 16 <= sx)) ->
+  (pre <> [] -> field pre (pp + 12) /\ mem s (pp + 12) = px) ->
+  16 <= b -> 16 <= t ->
+  exists s', lexec 20 lfree_fin s = RNorm s' /\ gh s' = gh s /\
+    lrep (mem s') 0 (pre ++ link_pred (px, sx) (merge_succ (b, t) r)) /\
+    (forall a, mem s' a <> mem s a -> (b <= a < b + t) \/ (px <= a < px + sx) \/ a = px + 12).
+Proof.
+  intros s pre px sx r b t pp Hb Ht Hpp Hp Hq Hseg Hsx Hnx Hr Hfp Hfr Hxb Hcase Hlast Hb16 Ht16.
+  assert (Hpx0 : 0 <= px).
+  { destruct Hcase as [[-> _] | [_ [H _]]]; [ cbn in Hseg; lia | lia ]. }
+  unfold lfree_fin. lstepg. lsimpl. rewrite Hb, Ht, Hq.
+  destruct (Z.eqb_spec (b + t) (hdb r)) as [Esm | Esm]; cnd; run;
+    rewrite ?Hb, ?Ht, ?Hp, ?Hq, ?Hpp in *.
+  all: rewrite ?Hsx.
+  all: destruct (Z.eqb_spec (px + sx) b) as [Epm | Epm]; cnd; run;
+    rewrite ?Hb, ?Ht, ?Hp, ?Hq, ?Hpp in *.
+  all: eexists; split; [ reflexivity | ]; cbn [mem gh]; split; [ reflexivity | ].
+  (* the facts every case reads *)
+  all: assert (Hx : (pre = [] /\ px = 0 /\ sx = 0) \/ (pre <> [] /\ 16 <= px /\ 16 <= sx))
+         by (destruct Hcase as [[-> ->] | H]; [ left; cbn in Hseg; split; [ reflexivity | lia ] | right; exact H ]).
+  all: clear Hcase.
+  all: assert (Hpre : forall m', (forall a, a < px -> m' a = mem s a) -> lseg m' 0 pre px)
+         by (intros m' Hm; apply (lseg_frame pre (mem s)); [ intros a Ha; apply Hm, Hfp, Ha | exact Hseg ]).
+  all: assert (Hrest : forall m' l, (l = r \/ exists y, r = y :: l) ->
+                 (forall a, b + t <= a -> m' a = mem s a) -> lrep m' (hdb l) l)
+         by (intros m' l Hl Hm; destruct Hl as [-> | [y ->]];
+             [ apply (lrep_frame r (mem s)); [ intros a Ha; apply Hm, Hfr, Ha | exact Hr ]
+             | destruct y as [qy sy]; cbn in Hr; destruct Hr as [_ [_ Hr']];
+               rewrite (lrep_hd _ _ _ Hr') in Hr';
+               apply (lrep_frame l (mem s)); [ intros a Ha; apply Hm, Hfr, field_cons; right; exact Ha
+                                             | exact Hr' ] ]).
+  - (* both merges: r = y :: r'' with b + t = fst y, px + sx = b *)
+    destruct r as [ | [qy sy] r'' ]; cbn [hdb fst snd] in *; [ lia | ].
+    destruct Hx as [[_ [-> ->]] | [Hne [Hp16 Hs16]]]; [ lia | ].
+    destruct (Hlast Hne) as [Hfpp Hmpp]. pose proof (Hfp _ Hfpp).
+    pose proof Hr as Hr0. cbn in Hr0. destruct Hr0 as [_ [Hsy Hr'']].
+    rewrite (lrep_hd _ _ _ Hr'') in *.
+    rewrite ?Hsy, ?Hsx in *.
+    cbn [merge_succ fst snd]. rewrite Esm, Z.eqb_refl. cbn [link_pred fst snd]. rewrite Epm, Z.eqb_refl.
+    split.
+    + apply (lseg_app_lrep _ _ _ px).
+      * apply Hpre. intros a Ha. unfold upd. eqbs; try lia. subst a. symmetry. exact Hmpp.
+      * cbn. split; [ reflexivity | ]. unfold upd. eqbs; try lia. split; [ lia | ].
+        apply Hrest; [ right; eexists; reflexivity | ]. intros a Ha. unfold upd. eqbs; lia.
+    + intros a Ha. revert Ha. unfold upd. eqbs; intros Ha; try lia. subst a. congruence.
+  - (* successor merge only *)
+    destruct r as [ | [qy sy] r'' ]; cbn [hdb fst snd] in *; [ lia | ].
+    pose proof Hr as Hr0. cbn in Hr0. destruct Hr0 as [_ [Hsy Hr'']].
+    rewrite (lrep_hd _ _ _ Hr'') in *.
+    rewrite ?Hsy in *.
+    cbn [merge_succ fst snd]. rewrite Esm, Z.eqb_refl. cbn [link_pred fst snd].
+    replace (px + sx =? b) with false by (symmetry; apply Z.eqb_neq; exact Epm).
+    assert (Hxb' : px + 12 < b) by (destruct Hx as [[_ [-> ->]] | [_ [? ?]]]; lia).
+    split.
+    + apply (lseg_app_lrep _ _ _ px).
+      * apply Hpre. intros a Ha. unfold upd. eqbs; lia.
+      * cbn. split; [ reflexivity | ]. unfold upd. eqbs; try lia. split; [ exact Hsx | ].
+        split; [ reflexivity | ]. split; [ reflexivity | ].
+        apply Hrest; [ right; eexists; reflexivity | ]. intros a Ha. unfold upd. eqbs; lia.
+    + intros a Ha. revert Ha. unfold upd. eqbs; intros Ha; lia.
+  - (* predecessor merge only *)
+    destruct Hx as [[_ [-> ->]] | [Hne [Hp16 Hs16]]]; [ lia | ].
+    destruct (Hlast Hne) as [Hfpp Hmpp]. pose proof (Hfp _ Hfpp).
+    rewrite ?Hsx in *.
+    assert (Hms : merge_succ (b, t) r = (b, t) :: r).
+    { destruct r as [ | [qy sy] r'' ]; [ reflexivity | ]. cbn [merge_succ fst snd hdb] in *.
+      replace (b + t =? qy) with false by (symmetry; apply Z.eqb_neq; exact Esm). reflexivity. }
+    rewrite Hms. cbn [link_pred fst snd]. rewrite Epm, Z.eqb_refl.
+    split.
+    + apply (lseg_app_lrep _ _ _ px).
+      * apply Hpre. intros a Ha. unfold upd. eqbs; try lia. subst a. symmetry. exact Hmpp.
+      * cbn. split; [ reflexivity | ]. unfold upd. eqbs; try lia. split; [ lia | ].
+        apply Hrest; [ left; reflexivity | ]. intros a Ha. unfold upd. eqbs; lia.
+    + intros a Ha. revert Ha. unfold upd. eqbs; intros Ha; try lia. subst a. congruence.
+  - (* no merge *)
+    assert (Hms : merge_succ (b, t) r = (b, t) :: r).
+    { destruct r as [ | [qy sy] r'' ]; [ reflexivity | ]. cbn [merge_succ fst snd hdb] in *.
+      replace (b + t =? qy) with false by (symmetry; apply Z.eqb_neq; exact Esm). reflexivity. }
+    rewrite Hms. cbn [link_pred fst snd].
+    replace (px + sx =? b) with false by (symmetry; apply Z.eqb_neq; exact Epm).
+    assert (Hxb' : px + 12 < b) by (destruct Hx as [[_ [-> ->]] | [_ [? ?]]]; lia).
+    split.
+    + apply (lseg_app_lrep _ _ _ px).
+      * apply Hpre. intros a Ha. unfold upd. eqbs; lia.
+      * cbn. split; [ reflexivity | ]. unfold upd. eqbs; try lia. split; [ exact Hsx | ].
+        split; [ reflexivity | ]. split; [ reflexivity | ].
+        apply Hrest; [ left; reflexivity | ]. intros a Ha. unfold upd. eqbs; lia.
+    + intros a Ha. revert Ha. unfold upd. eqbs; intros Ha; lia.
+Qed.
+
+(* ins from a known predecessor x (base below e): the walk's view. *)
+Fixpoint insp (x : ext) (r : list ext) (e : ext) : list ext :=
+  match r with
+  | y :: r' => if fst y <? fst e then x :: insp y r' e else link_pred x (merge_succ e r)
+  | [] => link_pred x (merge_succ e [])
+  end.
+
+Lemma ins_insp : forall r x e, fst x < fst e -> ins (x :: r) e = insp x r e.
+Proof.
+  induction r as [ | y r IH ]; intros x e H; cbn [ins insp].
+  - replace (fst x <? fst e) with true by (symmetry; apply Z.ltb_lt; exact H). reflexivity.
+  - replace (fst x <? fst e) with true by (symmetry; apply Z.ltb_lt; exact H).
+    destruct (Z.ltb_spec (fst y) (fst e)) as [Hy | Hy]; [ | reflexivity ].
+    f_equal. rewrite <- (IH y e Hy). cbn [ins].
+    replace (fst y <? fst e) with true by (symmetry; apply Z.ltb_lt; exact Hy). reflexivity.
+Qed.
+
+(* The sentinel (0,0) in front: insp from it is the sentinel before ins. *)
+Lemma insp_sentinel : forall L e, 0 < fst e -> insp (0, 0) L e = (0, 0) :: ins L e.
+Proof.
+  intros L [b t] Hb. cbn [fst] in Hb.
+  assert (Hl : forall l, link_pred (0, 0) (merge_succ (b, t) l) = (0, 0) :: merge_succ (b, t) l).
+  { assert (E : (0 + 0 =? b) = false) by (apply Z.eqb_neq; lia).
+    intros [ | [q s] l ]; unfold merge_succ, link_pred; cbn [fst snd];
+      [ | destruct (b + t =? q) ]; cbn [fst snd]; rewrite E; reflexivity. }
+  destruct L as [ | y r ]; cbn [insp fst]; [ apply Hl | ].
+  destruct (Z.ltb_spec (fst y) b) as [Hy | Hy]; cbv beta iota.
+  - f_equal. symmetry. apply ins_insp. exact Hy.
+  - rewrite Hl. f_equal. cbn [ins fst].
+    replace (fst y <? b) with false by (symmetry; apply Z.ltb_ge; exact Hy). reflexivity.
+Qed.
+
+Lemma lseg_snoc : forall pre m x px sx y,
+  lseg m x pre px -> m (px + 4) = sx -> m (px + 12) = y -> lseg m x (pre ++ [(px, sx)]) y.
+Proof.
+  induction pre as [ | [b s] r IH ]; intros m x px sx y H Hs Hn; cbn in *.
+  - subst x. repeat split; assumption.
+  - destruct H as [Hx [Hb Hr]]. repeat split; try assumption. apply IH; assumption.
+Qed.
+
+Lemma land11 : Z.land 1 1 = 1. Proof. reflexivity. Qed.
+Lemma land0x : forall x, Z.land 0 x = 0. Proof. reflexivity. Qed.
+Lemma land10 : Z.land 1 0 = 0. Proof. reflexivity. Qed.
+
+Lemma lfree_loop : forall L b t r pre px sx s,
+  loc s 0%nat = b -> loc s 1%nat = t -> loc s 4%nat = px -> loc s 5%nat = hdb r ->
+  lseg (mem s) 0 pre px -> mem s (px + 4) = sx -> mem s (px + 12) = hdb r ->
+  lrep (mem s) (hdb r) r ->
+  (pre <> [] -> field pre (loc s 3%nat + 12) /\ mem s (loc s 3%nat + 12) = px) ->
+  (forall a, field pre a -> a < px) ->
+  ((pre = [] /\ px = 0 /\ sx = 0) \/ (pre <> [] /\ 16 <= px /\ 16 <= sx /\ In (px, sx) L)) ->
+  px + sx <= b ->
+  gaps r -> Forall (fun y => px + sx < fst y) r -> incl r L ->
+  Forall (fun y => 16 <= fst y) L -> (forall a, inside (b, t) a -> ~ cov L a) ->
+  16 <= b -> 16 <= t ->
+  exists f s', lexec f (lfree_walk :: lfree_fin) s = RNorm s' /\ gh s' = gh s /\
+    lrep (mem s') 0 (pre ++ insp (px, sx) r (b, t)) /\
+    (forall a, mem s' a <> mem s a -> inside (b, t) a \/ a = 12 \/ cov L a).
+Proof.
+  intros L b t r. induction r as [ | [qy sy] r' IH ];
+    intros pre px sx s Hb Ht Hp Hq Hseg Hsx Hnx Hr Hlast Hfp Hx Hxb Hg Hord Hinc HL16 Hdis Hb16 Ht16.
+  - (* exit: no successor *)
+    destruct (lfree_finish s pre px sx [] b t (loc s 3%nat) Hb Ht eq_refl Hp Hq Hseg Hsx Hnx Hr Hfp
+                (fun a Ha => ltac:(destruct Ha as [? [? [[] _]]])) Hxb
+                ltac:(destruct Hx as [[? [? ?]] | [? [? [? ?]]]]; [ left | right ]; auto)
+                Hlast Hb16 Ht16) as [s' [Hrun [Hgh [Hrep Hfr]]]].
+    exists 21%nat, s'. split; [ | split; [ exact Hgh | split; [ exact Hrep | ] ] ].
+    + rewrite lexec_cons. cbv beta iota. unfold lfree_walk. lsimpl. rewrite Hq, Hb. cbn [hdb].
+      change ((if 0 =? 0 then 0 else 1)) with 0. rewrite land0x. change (0 =? 0) with true.
+      cbv beta iota. exact Hrun.
+    + intros a Ha. destruct (Hfr a Ha) as [H | [H | H]]; [ left; exact H | | ].
+      * destruct Hx as [[_ [-> ->]] | [_ [_ [Hs16 Hin]]]]; [ lia | ].
+        right; right. apply Exists_exists. exists (px, sx). split; [ exact Hin | unfold inside; cbn; lia ].
+      * destruct Hx as [[_ [-> ->]] | [_ [_ [Hs16 Hin]]]]; [ right; left; lia | ].
+        right; right. apply Exists_exists. exists (px, sx). split; [ exact Hin | unfold inside; cbn; lia ].
+  - cbn [hdb fst] in Hq, Hnx.
+    pose proof Hr as Hr0. cbn in Hr0. destruct Hr0 as [Hqy [Hsy Hr'']].
+    pose proof (lrep_hd _ _ _ Hr'') as Hnq. rewrite Hnq in Hr''.
+    assert (HinL : In (qy, sy) L) by (apply Hinc; left; reflexivity).
+    assert (Hq16 : 16 <= qy) by (rewrite Forall_forall in HL16; exact (HL16 _ HinL)).
+    assert (Hsy16 : 16 <= sy) by (destruct Hg as [H _]; unfold MINSZ in H; exact H).
+    destruct (Z.ltb_spec qy b) as [Hlt | Hge].
+    + (* step: y is below b, it becomes the predecessor *)
+      assert (Hyb : qy + sy <= b).
+      { destruct (Z_le_gt_dec (qy + sy) b) as [ | Hc ]; [ assumption | exfalso ].
+        apply (Hdis b); [ unfold inside; cbn; lia | ].
+        apply Exists_exists. exists (qy, sy). split; [ exact HinL | unfold inside; cbn; lia ]. }
+      set (s1 := setl (setl (setl s 3 (loc s 4)) 4 (loc s 5)) 5 (mem s (loc s 5 + 12))).
+      assert (Hord1 : Forall (fun y => qy + sy < fst y) r') by exact (gaps_head_le _ _ Hg).
+      assert (Hpx_lt : px < qy) by (rewrite Forall_forall in Hord; specialize (Hord _ (or_introl eq_refl)); cbn in Hord;
+                                    destruct Hx as [[_ [-> ->]] | [_ [_ [? _]]]]; lia).
+      assert (E0 : loc s1 0%nat = b) by (unfold s1; lsimpl; exact Hb).
+      assert (E1 : loc s1 1%nat = t) by (unfold s1; lsimpl; exact Ht).
+      assert (E3 : loc s1 3%nat = px) by (unfold s1; lsimpl; exact Hp).
+      assert (E4 : loc s1 4%nat = qy) by (unfold s1; lsimpl; rewrite Hq; reflexivity).
+      assert (E5 : loc s1 5%nat = hdb r') by (unfold s1; lsimpl; rewrite Hq; exact Hnq).
+      assert (Hseg1 : lseg (mem s1) 0 (pre ++ [(px, sx)]) qy) by (apply lseg_snoc; assumption).
+      assert (Hnx1 : mem s1 (qy + 12) = hdb r') by exact Hnq.
+      assert (Hlast1 : pre ++ [(px, sx)] <> [] ->
+                field (pre ++ [(px, sx)]) (loc s1 3%nat + 12) /\ mem s1 (loc s1 3%nat + 12) = qy).
+      { intros _. rewrite E3. split; [ apply field_app; right; exists px, sx; split; [ left; reflexivity | right; reflexivity ] | exact Hnx ]. }
+      assert (Hfp1 : forall a, field (pre ++ [(px, sx)]) a -> a < qy).
+      { intros a Ha. apply field_app in Ha as [Ha | Ha]; [ pose proof (Hfp a Ha); lia | ].
+        destruct Ha as [b' [s'' [[H | []] Ha]]]. injection H as <- <-.
+        destruct Hx as [[_ [-> ->]] | [_ [_ [? _]]]]; [ lia | ].
+        rewrite Forall_forall in Hord. specialize (Hord _ (or_introl eq_refl)). cbn in Hord. lia. }
+      assert (Hx1 : (pre ++ [(px, sx)] = [] /\ qy = 0 /\ sy = 0) \/
+                    (pre ++ [(px, sx)] <> [] /\ 16 <= qy /\ 16 <= sy /\ In (qy, sy) L)).
+      { right. split; [ destruct pre; discriminate | auto ]. }
+      destruct (IH (pre ++ [(px, sx)]) qy sy s1 E0 E1 E4 E5 Hseg1 Hsy Hnx1 Hr'' Hlast1 Hfp1 Hx1 Hyb
+                  (gaps_tail _ _ Hg) Hord1 (fun z Hz => Hinc z (or_intror Hz)) HL16 Hdis Hb16 Ht16)
+        as [f1 [s' [Hrun [Hgh [Hrep Hfr]]]]].
+      exists (S (4 + f1)), s'. split; [ | split; [ exact Hgh | split ] ].
+      * rewrite lexec_cons. cbv beta iota. unfold lfree_walk at 1. lsimpl. rewrite Hq, Hb.
+        replace (qy =? 0) with false by (symmetry; apply Z.eqb_neq; lia).
+        replace (qy <? b) with true by (symmetry; apply Z.ltb_lt; exact Hlt).
+        cbv beta iota. rewrite land11. change (1 =? 0) with false. cbv beta iota.
+        change (4 + f1)%nat with (S (S (S (S f1)))).
+        rewrite lexec_cons, lexec_cons, lexec_cons, lexec_nil. cbv beta iota.
+        apply (lexec_mono_le f1); [ lia | | discriminate ].
+        unfold lfree_walk. exact Hrun.
+      * cbn [insp fst]. replace (qy <? b) with true by (symmetry; apply Z.ltb_lt; exact Hlt).
+        rewrite <- app_assoc in Hrep. exact Hrep.
+      * intros a Ha. exact (Hfr a Ha).
+    + (* exit: y is at or past b *)
+      assert (Hfr : forall a, field ((qy, sy) :: r') a -> b + t <= a).
+      { intros a Ha.
+        assert (Hall : Forall (fun z => b <= fst z /\ 16 <= snd z) ((qy, sy) :: r')).
+        { constructor; [ cbn; lia | ]. apply Forall_forall. intros z Hz.
+          pose proof (gaps_head_le _ _ Hg) as Hh. rewrite Forall_forall in Hh. specialize (Hh _ Hz).
+          split; [ cbn in Hh; lia | exact (gaps_In_size r' (fst z) (snd z) (gaps_tail _ _ Hg) ltac:(destruct z; exact Hz)) ]. }
+        destruct Ha as [b' [s' [Hin Ha]]]. rewrite Forall_forall in Hall. destruct (Hall _ Hin) as [Hb' Hs'].
+        cbn in Hb', Hs'.
+        destruct (Z_le_gt_dec (b + t) b') as [ | Hc ]; [ lia | exfalso ].
+        apply (Hdis b'); [ unfold inside; cbn; lia | ].
+        apply Exists_exists. exists (b', s'). split; [ apply Hinc; exact Hin | unfold inside; cbn; lia ]. }
+      destruct (lfree_finish s pre px sx ((qy, sy) :: r') b t (loc s 3%nat) Hb Ht eq_refl Hp Hq Hseg Hsx Hnx Hr Hfp
+                  Hfr Hxb
+                  ltac:(destruct Hx as [[? [? ?]] | [? [? [? ?]]]]; [ left | right ]; auto)
+                  Hlast Hb16 Ht16) as [s' [Hrun [Hgh [Hrep Hfr']]]].
+      exists 21%nat, s'. split; [ | split; [ exact Hgh | split ] ].
+      * rewrite lexec_cons. cbv beta iota. unfold lfree_walk. lsimpl. rewrite Hq, Hb. cbn [hdb fst].
+        replace (qy =? 0) with false by (symmetry; apply Z.eqb_neq; lia).
+        replace (qy <? b) with false by (symmetry; apply Z.ltb_ge; exact Hge).
+        cbv beta iota. rewrite land10. change (0 =? 0) with true. cbv beta iota. exact Hrun.
+      * cbn [insp fst]. replace (qy <? b) with false by (symmetry; apply Z.ltb_ge; exact Hge). exact Hrep.
+      * intros a Ha. destruct (Hfr' a Ha) as [H | [H | H]]; [ left; exact H | | ].
+        -- destruct Hx as [[_ [-> ->]] | [_ [_ [Hs16 Hin]]]]; [ lia | ].
+           right; right. apply Exists_exists. exists (px, sx). split; [ exact Hin | unfold inside; cbn; lia ].
+        -- destruct Hx as [[_ [-> ->]] | [_ [_ [Hs16 Hin]]]]; [ right; left; lia | ].
+           right; right. apply Exists_exists. exists (px, sx). split; [ exact Hin | unfold inside; cbn; lia ].
+Qed.
+
+(* ══ THE $lfree THEOREM ══════════════════════════════════════════════ *)
+
+(* From a memory holding the gapped list L (head at 12, sentinel size
+   [4] = 0), releasing an extent (b, t) disjoint from L leaves a memory
+   holding `ins L (b, t)`; every changed address is the head cell or lies
+   inside an extent of the result. *)
+Theorem lfree_realizes : forall L b t s,
+  gaps L -> Forall (fun y => 16 <= fst y) L ->
+  (forall a, inside (b, t) a -> ~ cov L a) -> 16 <= b -> 16 <= t ->
+  mem s 4 = 0 -> lrep (mem s) (mem s LHEAD) L ->
+  loc s 0%nat = b -> loc s 1%nat = t -> loc s 4%nat = 0 ->
+  exists f s', lexec f lfree_tree s = RNorm s' /\ gh s' = gh s /\
+    mem s' 4 = 0 /\ lrep (mem s') (mem s' LHEAD) (ins L (b, t)) /\
+    (forall a, mem s' a <> mem s a -> a = LHEAD \/ cov (ins L (b, t)) a).
+Proof.
+  intros L b t s Hg H16 Hdis Hb16 Ht16 H4 Hrep Hb Ht Hp.
+  set (s0 := setl s 5 (mem s 12)).
+  pose proof (lrep_hd _ _ _ Hrep) as Hh. unfold LHEAD in *.
+  assert (Hord : Forall (fun y => 0 + 0 < fst y) L)
+    by (eapply Forall_impl; [ | exact H16 ]; intros [q z]; cbn; lia).
+  assert (E0 : loc s0 0%nat = b) by (unfold s0; lsimpl; exact Hb).
+  assert (E1 : loc s0 1%nat = t) by (unfold s0; lsimpl; exact Ht).
+  assert (E4 : loc s0 4%nat = 0) by (unfold s0; lsimpl; exact Hp).
+  assert (E5 : loc s0 5%nat = hdb L) by (unfold s0; lsimpl; exact Hh).
+  assert (Hr0 : lrep (mem s0) (hdb L) L) by (unfold s0; cbn [mem]; rewrite <- Hh; exact Hrep).
+  destruct (lfree_loop L b t L [] 0 0 s0 E0 E1 E4 E5 eq_refl H4 Hh Hr0
+              (fun H => ltac:(contradiction)) (fun a Ha => ltac:(destruct Ha as [? [? [[] _]]]))
+              (or_introl (conj eq_refl (conj eq_refl eq_refl))) ltac:(lia) Hg Hord
+              (fun z Hz => Hz) H16 Hdis Hb16 Ht16)
+    as [f [s' [Hrun [Hgh [Hrep' Hfr]]]]].
+  exists (S f), s'. rewrite insp_sentinel in Hrep' by (cbn; lia). cbn [app lrep] in Hrep'.
+  destruct Hrep' as [_ [H4' Hrep']]. replace (0 + 4) with 4 in H4' by lia. replace (0 + 12) with 12 in Hrep' by lia.
+  split; [ | split; [ exact Hgh | split; [ exact H4' | split; [ exact Hrep' | ] ] ] ].
+  - unfold lfree_tree. rewrite lexec_cons. exact Hrun.
+  - intros a Ha. destruct (Hfr a Ha) as [H | [H | H]].
+    + right. apply cov_ins; [ exact (gaps_nonneg _ Hg) | cbn; lia | left; exact H ].
+    + left. exact H.
+    + right. apply cov_ins; [ exact (gaps_nonneg _ Hg) | cbn; lia | right; exact H ].
 Qed.
