@@ -75,6 +75,33 @@ fn scan_diagnostic_codes() -> BTreeSet<String> {
     codes
 }
 
+/// Codes the CLI under `src/` spells as `error[E###]` itself — the build and
+/// check routes' target verdicts (E081, E082), not `with_code` diagnostics.
+fn scan_cli_codes() -> BTreeSet<String> {
+    fn walk(dir: &Path, codes: &mut BTreeSet<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, codes);
+            } else if path.extension().map_or(false, |e| e == "rs") {
+                let Ok(text) = std::fs::read_to_string(&path) else { continue };
+                let mut rest = text.as_str();
+                while let Some(pos) = rest.find("error[E") {
+                    rest = &rest[pos + "error[E".len()..];
+                    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+                    if digits.len() == 3 && rest[digits.len()..].starts_with(']') {
+                        codes.insert(format!("E{digits}"));
+                    }
+                }
+            }
+        }
+    }
+    let mut codes = BTreeSet::new();
+    walk(&repo_root().join("src"), &mut codes);
+    codes
+}
+
 fn scan_fixture_codes() -> BTreeMap<String, Vec<String>> {
     // Returns code → list of fixture names that declare it.
     let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -334,7 +361,10 @@ fn every_fixture_meta_declares_known_code() {
     // Reverse gate: every `meta.toml` with `expects_code` must name a
     // code that actually exists in source. Catches typos like
     // `E02` → fixture orphaned.
-    let source_codes = scan_diagnostic_codes();
+    // A code the CLI reports itself (`error[E082]` on the wasm route, #3285)
+    // exists in source too, though no `with_code` names it.
+    let mut source_codes = scan_diagnostic_codes();
+    source_codes.extend(scan_cli_codes());
     let fixtures = scan_fixture_codes();
     let mut orphans: Vec<String> = Vec::new();
     for (code, cases) in &fixtures {
