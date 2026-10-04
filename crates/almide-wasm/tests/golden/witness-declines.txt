@@ -17,7 +17,6 @@ heap-operand:Block	4
 heap-operand:OptionNone	3
 heap-operand:UnwrapOr	5
 interp-part:IndexAccess:non-list	2
-loop-exit	14
 match-guard:binds	8
 named-op	11
 operand:IndexAccess:non-list	1
