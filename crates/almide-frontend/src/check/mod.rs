@@ -1441,6 +1441,10 @@ struct ImportSpellings {
     /// of one is the file's own declaration — a user `type Endian` shadows
     /// the stdlib's, it never uses `import bytes` (#1837).
     declared: std::collections::HashSet<Sym>,
+    /// Collect only `bare_types` (#3340): the visibility check reads nothing
+    /// else, and skipping the value spellings spares a text lookup of every
+    /// identifier in the file.
+    types_only: bool,
 }
 
 impl ImportSpellings {
@@ -1455,6 +1459,9 @@ impl ImportSpellings {
     /// Lower-case bare names are variables, which no constructor table
     /// holds — skipped so the set stays the constructor candidates.
     fn value_name(&mut self, name: Sym) {
+        if self.types_only {
+            return;
+        }
         match name.as_str().split_once('.') {
             Some((h, _)) => { self.heads.insert(sym(h)); }
             None if name.as_str().starts_with(|c: char| c.is_ascii_uppercase()) => {
@@ -1466,6 +1473,16 @@ impl ImportSpellings {
 }
 
 fn import_spellings(program: &mut ast::Program) -> ImportSpellings {
+    spellings(program, false)
+}
+
+/// The bare type spellings alone (`ImportSpellings::bare_types`), by the same
+/// walk with the value spellings skipped (#3340).
+fn bare_type_spellings(program: &mut ast::Program) -> std::collections::HashSet<(Sym, TypeSpelling)> {
+    spellings(program, true).bare_types
+}
+
+fn spellings(program: &mut ast::Program, types_only: bool) -> ImportSpellings {
     fn walk_ty(te: &ast::TypeExpr, s: &mut ImportSpellings) {
         match te {
             ast::TypeExpr::Simple { name } => s.ty_name(*name, TypeSpelling::Bare),
@@ -1538,7 +1555,7 @@ fn import_spellings(program: &mut ast::Program) -> ImportSpellings {
             ast::TestWhere::Bind { .. } => {}
         }
     }
-    let mut s = ImportSpellings::default();
+    let mut s = ImportSpellings { types_only, ..ImportSpellings::default() };
     for decl in &program.decls {
         match decl {
             ast::Decl::Fn { params, return_type, generics, .. } => {
@@ -1798,7 +1815,7 @@ impl Checker {
         let cur = self.current_module_prefix.clone();
         let names_a_case = |env: &crate::types::TypeEnv, n: Sym, sp: TypeSpelling|
             sp == TypeSpelling::RecordHead && env.lookup_ctor_in(&n, cur.as_deref()).is_some();
-        let spelled: Vec<(Sym, TypeSpelling)> = import_spellings(program).bare_types
+        let spelled: Vec<(Sym, TypeSpelling)> = bare_type_spellings(program)
             .into_iter().filter(|(n, sp)| !names_a_case(&self.env, *n, *sp)).collect();
         let names: std::collections::HashSet<Sym> = spelled.iter().map(|(n, _)| *n).collect();
         let scope = FileTypeScope::new(&self.env, self.current_module_prefix.as_deref(), own, &names);
@@ -1822,7 +1839,7 @@ impl Checker {
             };
             let letters: std::collections::HashSet<Sym> = generics.iter().flatten().map(|g| sym(&g.name)).collect();
             shell.decls = vec![decl.clone()];
-            let mut here: Vec<(Sym, TypeSpelling)> = import_spellings(&mut shell).bare_types
+            let mut here: Vec<(Sym, TypeSpelling)> = bare_type_spellings(&mut shell)
                 .into_iter()
                 .filter(|(n, sp)| !letters.contains(n) && !names_a_case(&self.env, *n, *sp))
                 .collect();
