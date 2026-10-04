@@ -150,8 +150,10 @@ pub struct Analyzer<'a> {
     top_vars: HashSet<Sym>,
     top_lets: HashMap<Sym, &'a Expr>,
     fns: HashMap<Sym, TopFn<'a>>,
-    /// Names written somewhere in the program (see `Witness::maybe_assigned`).
-    written: HashSet<Sym>,
+    /// Names written somewhere in the program (see `Witness::maybe_assigned`),
+    /// collected on the first witness: most programs never build one (#3340).
+    written: std::cell::OnceCell<HashSet<Sym>>,
+    prog: &'a Program,
     /// Inferred slots of this program's fns.
     pub slots: HashMap<Sym, Vec<(usize, SlotKind)>>,
     fn_memo: HashMap<Sym, Option<Witness>>,
@@ -167,6 +169,26 @@ pub struct Analyzer<'a> {
     reached: Vec<Witness>,
     visited_inits: HashSet<u32>,
     reported: HashSet<(Sym, Option<Sym>)>,
+    /// Some fn of this program is named `Type.method` (see `method_fn`).
+    has_dotted_fns: bool,
+    /// The cheap syntactic pre-scan (`Shape`), taken once in `new`.
+    shape: Shape,
+}
+
+/// What one pass over the program's syntax rules out before the walk (#3340).
+/// Both flags are conservative: `false` is a proof, `true` only "maybe".
+#[derive(Clone, Copy, Default)]
+struct Shape {
+    /// A `fan` form, a declared `@concurrent` fn, or a name that can resolve
+    /// to a callee with concurrent slots appears. When false no argument of
+    /// the program sits in a concurrent slot, so slot inference infers
+    /// nothing and discovery records nothing.
+    may_have_sites: bool,
+    /// A `var` (top-level or local) is declared, a `fan` form appears (the
+    /// AST visitor is shallow in those), or a module this program reads
+    /// facts from has a fn that reaches a `var`. When false no body of the
+    /// program reaches a `var`: every fn's reach is None.
+    may_reach: bool,
 }
 
 impl<'a> Analyzer<'a> {
@@ -176,7 +198,8 @@ impl<'a> Analyzer<'a> {
             top_vars: HashSet::new(),
             top_lets: HashMap::new(),
             fns: HashMap::new(),
-            written: HashSet::new(),
+            written: std::cell::OnceCell::new(),
+            prog,
             slots: HashMap::new(),
             fn_memo: HashMap::new(),
             in_progress: HashSet::new(),
@@ -188,22 +211,20 @@ impl<'a> Analyzer<'a> {
             reached: Vec::new(),
             visited_inits: HashSet::new(),
             reported: HashSet::new(),
+            has_dotted_fns: false,
+            shape: Shape::default(),
         };
         for d in &prog.decls {
             match d {
-                Decl::TopLet { name, value, mutable: true, .. } => {
+                Decl::TopLet { name, mutable: true, .. } => {
                     a.top_vars.insert(*name);
-                    collect_written(value, &mut a.written);
                 }
                 Decl::TopLet { name, value, .. } => {
                     a.top_lets.insert(*name, value);
-                    collect_written(value, &mut a.written);
                 }
                 Decl::Fn { name, params, body: Some(body), span, attrs, .. } => {
                     a.fns.insert(*name, TopFn { params, body, line: span.map(|s| s.line), attrs });
-                    collect_written(body, &mut a.written);
                 }
-                Decl::Test { body, .. } => collect_written(body, &mut a.written),
                 _ => {}
             }
         }
@@ -215,12 +236,76 @@ impl<'a> Analyzer<'a> {
                 a.slots.insert(*name, declared.into_iter().map(|i| (i, kind.clone())).collect());
             }
         }
+        a.has_dotted_fns = a.fns.keys().any(|k| k.as_str().contains('.'));
+        a.shape = a.scan_shape(prog);
         a
+    }
+
+    /// The pre-scan behind `Shape` (#3340).
+    fn scan_shape(&self, prog: &Program) -> Shape {
+        let mut shape = Shape { may_have_sites: !self.slots.is_empty(), may_reach: !self.top_vars.is_empty() };
+        // A module this program can name (`import m` / `import m.{f}`)
+        // carries facts the walk reads through `ext` (`call_slots`,
+        // `ext_ref`); every such read starts from these two maps.
+        for &m in self.w.aliases.values().chain(self.w.direct.values()) {
+            if self.module_has_slots(m) {
+                shape.may_have_sites = true;
+            }
+            if self.w.ext.get(&m).is_some_and(|fs| fs.values().any(|s| s.reach.is_some())) {
+                shape.may_reach = true;
+            }
+        }
+        let heads = slot_heads();
+        let mut see = |e: &Expr| match &e.kind {
+            ExprKind::Fan { .. }
+            | ExprKind::FanSettle { .. }
+            | ExprKind::FanRace { .. }
+            | ExprKind::FanBounded { .. }
+            | ExprKind::FanTimeout { .. }
+            | ExprKind::FanRaceMap { .. } => {
+                shape.may_have_sites = true;
+                shape.may_reach = true;
+            }
+            // `fan.map(…)`, `http.serve(…)`: a callee head spelled as the
+            // module itself, which `resolve_callee` honours with no import.
+            ExprKind::Ident { name } => {
+                if heads.contains(name) {
+                    shape.may_have_sites = true;
+                }
+            }
+            ExprKind::Block { stmts, .. } | ExprKind::ForIn { body: stmts, .. } | ExprKind::While { body: stmts, .. } => {
+                if stmts.iter().any(|s| matches!(s, Stmt::Var { .. })) {
+                    shape.may_reach = true;
+                }
+            }
+            _ => {}
+        };
+        for d in &prog.decls {
+            match d {
+                Decl::Fn { body: Some(body), .. } => ast::visit_expr(body, &mut see),
+                Decl::TopLet { value, .. } => ast::visit_expr(value, &mut see),
+                Decl::Test { body, .. } => ast::visit_expr(body, &mut see),
+                _ => {}
+            }
+        }
+        shape
+    }
+
+    /// Whether a call resolved into module `m` can have concurrent slots:
+    /// `fan`, a stdlib module that declares `@concurrent`, or a user module
+    /// with a fn whose slots are known.
+    fn module_has_slots(&self, m: Sym) -> bool {
+        slot_heads().contains(&m)
+            || self.w.ext.get(&m).is_some_and(|fs| fs.values().any(|s| !s.slots.is_empty()))
     }
 
     /// Run slot inference to a fixpoint, then collect every site that
     /// reaches a `var`.
     pub fn run(mut self, prog: &'a Program) -> (Vec<Finding>, HashMap<Sym, Vec<(usize, SlotKind)>>) {
+        if !self.shape.may_have_sites {
+            // No site: nothing to infer and nothing to record (`Shape`).
+            return (self.findings, self.slots);
+        }
         self.infer_slots(prog);
         self.record = true;
         self.discover_program(prog);
@@ -229,6 +314,9 @@ impl<'a> Analyzer<'a> {
 
     /// Slot inference only (§3.1), to a fixpoint.
     pub fn infer_slots(&mut self, prog: &'a Program) {
+        if !self.shape.may_have_sites {
+            return;
+        }
         let saved = self.record;
         self.record = false;
         for _ in 0..=self.fns.len() {
@@ -247,7 +335,7 @@ impl<'a> Analyzer<'a> {
         names
             .into_iter()
             .map(|n| {
-                let reach = self.fn_reach(n);
+                let reach = if self.shape.may_reach { self.fn_reach(n) } else { None };
                 let slots = self.slots.get(&n).cloned().unwrap_or_default();
                 (n, FnSummary { slots, reach })
             })
@@ -352,6 +440,11 @@ impl<'a> Analyzer<'a> {
         if self.fns.contains_key(&field) {
             return Some(field);
         }
+        // No dotted (`Type.method`) fn in this program: nothing can match the
+        // suffix scan below, so skip building it per method call.
+        if !self.has_dotted_fns {
+            return None;
+        }
         let suffix = format!(".{field}");
         let mut hits = self.fns.keys().filter(|k| k.as_str().ends_with(&suffix));
         hits.next().copied()
@@ -383,8 +476,12 @@ impl<'a> Analyzer<'a> {
                     .collect()
             }
             Callee::Stdlib(m, f) => {
+                let declared = stdlib_declared_slots(m.as_str(), f.as_str());
+                if declared.is_empty() {
+                    return Vec::new();
+                }
                 let surface = format!("{m}.{f}");
-                stdlib_declared_slots(m.as_str(), f.as_str())
+                declared
                     .into_iter()
                     .map(|i| {
                         let kind = if m.as_str() == "http" {
@@ -898,7 +995,18 @@ impl<'a> Analyzer<'a> {
     }
 
     fn witness(&self, var: Sym, var_module: Option<Sym>) -> Witness {
-        Witness { var, var_module, path: Vec::new(), maybe_assigned: self.written.contains(&var) }
+        let written = self.written.get_or_init(|| {
+            let mut out = HashSet::new();
+            for d in &self.prog.decls {
+                match d {
+                    Decl::TopLet { value, .. } => collect_written(value, &mut out),
+                    Decl::Fn { body: Some(body), .. } | Decl::Test { body, .. } => collect_written(body, &mut out),
+                    _ => {}
+                }
+            }
+            out
+        });
+        Witness { var, var_module, path: Vec::new(), maybe_assigned: written.contains(&var) }
     }
 }
 
@@ -1012,37 +1120,60 @@ fn declared_slots_of(attrs: &[ast::Attribute], params: &[ast::Param]) -> Vec<usi
     out
 }
 
-/// The concurrent slots a bundled stdlib fn declares with `@concurrent`.
-pub fn stdlib_declared_slots(module: &str, func: &str) -> Vec<usize> {
-    use std::sync::{Mutex, OnceLock};
-    type Table = HashMap<String, HashMap<String, Vec<usize>>>;
-    static CACHE: OnceLock<Mutex<Table>> = OnceLock::new();
-    if !almide_lang::stdlib_info::is_bundled_module(module) {
-        return Vec::new();
-    }
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut guard = match cache.lock() {
-        Ok(g) => g,
-        Err(p) => p.into_inner(),
-    };
-    let table = guard.entry(module.to_string()).or_insert_with(|| {
-        let mut t = HashMap::new();
-        let Some(src) = crate::stdlib::get_bundled_source(module) else { return t };
-        if !src.contains("@concurrent") {
-            return t;
-        }
-        let Some(prog) = almide_lang::parse_cached(src) else { return t };
-        for d in &prog.decls {
-            if let Decl::Fn { name, attrs, params, .. } = d {
-                let slots = declared_slots_of(attrs, params);
-                if !slots.is_empty() {
-                    t.insert(name.to_string(), slots);
+/// Every bundled stdlib module's `@concurrent` declarations: module → fn →
+/// declared slot indices. Only modules that declare at least one slot have an
+/// entry. Built once; read without a lock on every call the walk resolves to
+/// the stdlib (#3340: the per-call lock and key allocation showed in profiles).
+fn stdlib_slot_table() -> &'static HashMap<&'static str, HashMap<String, Vec<usize>>> {
+    use std::sync::OnceLock;
+    static TABLE: OnceLock<HashMap<&'static str, HashMap<String, Vec<usize>>>> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut out = HashMap::new();
+        for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
+            let Some(src) = crate::stdlib::get_bundled_source(module) else { continue };
+            if !src.contains("@concurrent") {
+                continue;
+            }
+            let Some(prog) = almide_lang::parse_cached(src) else { continue };
+            let mut t = HashMap::new();
+            for d in &prog.decls {
+                if let Decl::Fn { name, attrs, params, .. } = d {
+                    let slots = declared_slots_of(attrs, params);
+                    if !slots.is_empty() {
+                        t.insert(name.to_string(), slots);
+                    }
                 }
             }
+            if !t.is_empty() {
+                out.insert(module, t);
+            }
         }
-        t
-    });
-    table.get(func).cloned().unwrap_or_default()
+        out
+    })
+}
+
+/// The concurrent slots a bundled stdlib fn declares with `@concurrent`.
+pub fn stdlib_declared_slots(module: &str, func: &str) -> Vec<usize> {
+    stdlib_slot_table().get(module).and_then(|t| t.get(func)).cloned().unwrap_or_default()
+}
+
+/// The names a call's head can spell to land on a callee with concurrent
+/// slots: `fan`, and every bundled stdlib module whose source mentions
+/// `@concurrent`. A text match, not a parse — a superset, which is all the
+/// pre-scan needs — and interned, so the scan compares integers per
+/// identifier instead of resolving each one to its text.
+fn slot_heads() -> &'static [Sym] {
+    use std::sync::OnceLock;
+    static HEADS: OnceLock<Vec<Sym>> = OnceLock::new();
+    HEADS.get_or_init(|| {
+        let mut out = vec![sym("fan")];
+        for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
+            if crate::stdlib::get_bundled_source(module).is_some_and(|src| src.contains("@concurrent")) {
+                out.push(sym(module));
+            }
+        }
+        out
+    })
 }
 
 /// The cross-module facts of every user module, to a fixpoint over the
@@ -1053,9 +1184,31 @@ pub fn module_summaries(
 ) -> Summaries {
     let mut ext: Summaries = HashMap::new();
     let no_type = |_: &Expr| -> Option<bool> { None };
+    // The modules each module's analysis can read facts of: every `ext`
+    // lookup starts from a value of its alias or direct-import map (#3340).
+    let deps: Vec<Vec<Sym>> = modules
+        .iter()
+        .map(|(_, _, aliases, direct)| {
+            let mut d: Vec<Sym> = aliases.values().chain(direct.values()).copied().collect();
+            d.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
+            d.dedup();
+            d
+        })
+        .collect();
+    // The `ext` the previous round ran against. A module none of whose deps'
+    // facts moved since then would compute exactly what it computed last
+    // round — which is its entry in the current `ext` — so it is not re-run.
+    // Same rounds, same fixpoint, same result as re-running every module.
+    let mut before: Option<Summaries> = None;
     for _ in 0..=modules.len() {
         let mut next: Summaries = HashMap::new();
-        for (name, prog, aliases, direct) in modules {
+        for ((name, prog, aliases, direct), deps) in modules.iter().zip(&deps) {
+            if let (Some(prev), Some(mine)) = (&before, ext.get(name)) {
+                if deps.iter().all(|d| same_facts(prev.get(d), ext.get(d))) {
+                    next.insert(*name, mine.clone());
+                    continue;
+                }
+            }
             let w = World { module: Some(*name), aliases, direct, ext: &ext, arg_is_fn: &no_type, type_is_fn };
             let mut a = Analyzer::new(prog, w);
             a.infer_slots(prog);
@@ -1064,7 +1217,21 @@ pub fn module_summaries(
         if next == ext {
             break;
         }
-        ext = next;
+        before = Some(std::mem::replace(&mut ext, next));
     }
     ext
+}
+
+/// Whether two rounds' facts about one module read the same to the walk. The
+/// walk only ever looks a fn up (`ext.get(m).and_then(|fs| fs.get(f))`) and
+/// takes its slots or reach, so a missing module, a missing fn and a fn with
+/// no slots and no reach all read alike. (Whether the module is a key at all
+/// does not matter either: `is_user_module` is already true for every key,
+/// since no stdlib-named module is ever summarized.)
+fn same_facts(a: Option<&HashMap<Sym, FnSummary>>, b: Option<&HashMap<Sym, FnSummary>>) -> bool {
+    let empty = FnSummary::default();
+    let covers = |x: Option<&HashMap<Sym, FnSummary>>, y: Option<&HashMap<Sym, FnSummary>>| {
+        x.into_iter().flatten().all(|(f, s)| y.and_then(|y| y.get(f)).unwrap_or(&empty) == s)
+    };
+    covers(a, b) && covers(b, a)
 }
