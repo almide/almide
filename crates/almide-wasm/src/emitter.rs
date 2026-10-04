@@ -138,9 +138,10 @@ pub(crate) struct Emitter<'a> {
     /// C-319 shared-cell vars: the local holds a one-slot heap cell's
     /// ADDRESS; reads load through it, writes store through it.
     pub(crate) cells: &'a std::collections::HashSet<VarId>,
-    /// #3104: the block temp the statement being lowered may MOVE out of
-    /// (writeback_move.rs) — set by the block walk, taken by the assign.
-    pub(crate) moved_temp: Option<VarId>,
+    /// #3104 / #3337: what the statement being lowered may MOVE
+    /// (writeback_move.rs) — set by the block walk, taken by the assign
+    /// (the temp) and by the call site (the vars handed to `mut` params).
+    pub(crate) moves: crate::writeback_move::BlockMoves,
     /// C-320: Some((saved_local, depth_entry_local)) when this fn is a
     /// region ARM — a cut here runs the exit bookkeeping its early
     /// return would otherwise skip (guarded by depth > depth-at-entry,
@@ -565,9 +566,9 @@ impl Emitter<'_> {
             },
             IrExprKind::BinOp { op, left, right } => self.lower_binop(*op, left, right)?,
             IrExprKind::Block { stmts, expr } => {
-                for s in stmts {
-                    self.lower_stmt(s)?;
-                }
+                // The statement walk's moves (#3104, #3337) hold in value
+                // position too: a non-Unit `mut` call's write-back block.
+                self.lower_block_stmts(stmts, expr.as_deref())?;
                 let Some(t) = expr else { return unsup("expr:Block-no-tail") };
                 self.in_tail = tail;
                 self.lower(t, want)?
