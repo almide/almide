@@ -1,0 +1,8 @@
+// Another module's `let` is immutable here too: an index write into it
+// is E009, as a whole or field write is (#3312).
+import self.cfg as c
+
+effect fn main() -> Unit = {
+  c.limits[0] = 5
+  println(int.to_string(c.limits[0]))
+}
