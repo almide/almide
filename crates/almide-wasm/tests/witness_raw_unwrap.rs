@@ -58,7 +58,12 @@ fn a_bang_over_a_move_mode_effect_call_witnesses_its_abi_carrier_as_owned() {
     // `Mem.put` (effect_mut_generic_port) and Tally's `main`
     // (mut_param_effect_never_err) carry the buffer the call hands back.
     assert_eq!(by_fixture["effect_mut_generic_port"]["Mem.put"], "ibd\nam\nibd\nim\nibamd\nim\n");
-    assert_eq!(by_fixture["mut_param_effect_never_err"]["main"], "ibamd\nid\n{|ibd}\n{|ad}\n{|ibamd}\n{|ibd}\n{|ad}\n");
+    // Tally's `t` and `u` are rebound by the writeback before any read, so
+    // the mut-param move-in (writeback_move.rs) hands their block to the
+    // callee and stores NULL in the var: `i b m` — no share (`a`) at the
+    // call, and the writeback's release of the old block is a release of
+    // NULL, so no `d` on that line.
+    assert_eq!(by_fixture["mut_param_effect_never_err"]["main"], "ibm\nid\n{|ibd}\n{|ad}\n{|ibm}\n{|ibd}\n{|ad}\n");
     // A carrier the ok path never releases, or releases twice, is refused.
     for (bad, what) in [("{i|im}\n{|im}\n", "leaked carrier"), ("{idd|im}\n{|im}\n", "double-released carrier")] {
         assert!(!accepted(bad), "{what}: the checker must refuse {bad:?}");
