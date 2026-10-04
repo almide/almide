@@ -114,6 +114,14 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
 /// them (#1146); the kernel-proven checker still rejects the poisoned cert,
 /// which is the poison's whole job.
 pub fn ownership_certificate_with_poison(func: &MirFunction) -> (String, bool) {
+    let (cert, poisoned, _) = certificate_scan(func);
+    (cert, poisoned)
+}
+
+/// The certificate, its poison flag, and how many copy-on-write `Dup`s opened
+/// their own `i`-born line (#3321) — each backed by its `Dup` op rather than an
+/// allocation, which [`plus_one_events_backed`] accounts.
+fn certificate_scan(func: &MirFunction) -> (String, bool, usize) {
     // Sequential-phase split (codopsy8 complexity sweep): the two pre-scan sets below are
     // each an independent, self-contained computation over `func.ops` (the original code
     // already delineated the first as its own `{ .. }` scope) — extracted verbatim as their
@@ -178,7 +186,7 @@ pub fn ownership_certificate_with_poison(func: &MirFunction) -> (String, bool) {
         out.push_str(&scan.s.stream[o]);
         out.push('\n');
     }
-    (out, scan.s.poisoned)
+    (out, scan.s.poisoned, scan.paths.cow_opened)
 }
 
 /// The NON-RECURRING soundness gate for the borrow-by-default calling
@@ -191,7 +199,7 @@ pub fn ownership_certificate_with_poison(func: &MirFunction) -> (String, bool) {
 /// fs.fold_lines_chunked loop shape: one more real op than cert lines) both
 /// refuse.
 pub fn plus_one_events_backed(func: &MirFunction) -> bool {
-    let (cert, poisoned) = ownership_certificate_with_poison(func);
+    let (cert, poisoned, cow_opened) = certificate_scan(func);
     // A POISONED certificate deliberately replaced a nested-region arm's real
     // events with the always-rejecting `{i|}` — its counts cannot be compared
     // against the op list (the fs.fold_lines_chunked class, #1146). The
@@ -225,11 +233,14 @@ pub fn plus_one_events_backed(func: &MirFunction) -> bool {
         .count();
     let dups = func.ops.iter().filter(|o| matches!(o, crate::Op::Dup { .. })).count();
     let merge_credits = merge_dst_i_credits(func);
+    // A copy-on-write `Dup` (#3321) opens its own line with `i`, not `a`: the
+    // same one +1, backed by the same `Dup` op, moved from the `a` count to the
+    // `i` count.
     // Single-condition decisions (MC/DC ledger, #566): && as early return.
-    if i != allocs + heap_results + merge_credits {
+    if i != allocs + heap_results + merge_credits + cow_opened {
         return false;
     }
-    a == dups
+    a + cow_opened == dups
 }
 
 /// The handle-READ probes (#3233). A line witnessed only its `+1`/`−1` events
@@ -529,6 +540,7 @@ impl CertScan {
         }
         self.s.of.insert(dst, dst);
         self.s.event(dst, 'i');
+        self.paths.cow_opened += 1;
         true
     }
 
@@ -577,6 +589,8 @@ struct PathScopes {
     carriers: BTreeSet<ValueId>,
     /// `Dup`s the function later `MakeUnique`s (#3321).
     cow_dups: BTreeSet<ValueId>,
+    /// How many of them opened their own line.
+    cow_opened: usize,
     /// Each view (carrier, address, loaded child) → the handle it was taken
     /// from, at the base of its chain (#3269).
     view_src: BTreeMap<ValueId, ValueId>,
