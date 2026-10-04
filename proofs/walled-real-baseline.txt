@@ -308,3 +308,15 @@
 # same_shape_records fixture binds its list elements and asserted fields first
 # and lowers.) Owned by #2739, which stays open until it lowers.
 spec/wasm_cross/top_let_rc_value.almd :: main  # #2739
+# (2026-10-04, batch 2026-10-04b: #3307 / #3318 fixtures) two rows the new
+# fixtures expose on the incumbent MIR brick, both the shape each fixture
+# exists to pin, so neither is rewritten around. Native, the structural leg
+# (the default wasm route) and the interp print the same bytes:
+#  - closure_module_var_write `main`: a field assign to another module's record
+#    `var` (no record layout for a module-level var in this brick);
+#  - closure_bytes_list_index_arg `from_global`: a heap `List[Bytes]` assigned
+#    to a module-level `var`.
+# (global_static_names binds its interpolations first and lowers.) Owned by
+# #2739, which stays open until they lower.
+spec/integration/closure_module_var_write/src/main.almd :: main  # #2739
+spec/wasm_cross/closure_bytes_list_index_arg.almd :: from_global  # #2739
