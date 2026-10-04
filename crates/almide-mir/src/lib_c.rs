@@ -139,6 +139,10 @@ struct OwnershipScan {
     rebound_frames: Vec<(BTreeSet<ValueId>, BTreeSet<ValueId>)>,
     /// `prim.handle` carriers of a tracked object (#3269).
     carriers: BTreeSet<ValueId>,
+    /// Constant values, slot roots and their `prim.handle` carriers (#3279, lib_d.rs).
+    consts: BTreeMap<ValueId, i64>,
+    slot_roots: BTreeMap<ValueId, i64>,
+    carried: BTreeMap<ValueId, ValueId>,
 }
 
     struct BranchFrame {
@@ -209,6 +213,11 @@ impl OwnershipScan {
 
     fn step(&mut self, i: usize, op: &Op) {
         self.check_defined_uses(i, op);
+        self.step_op(i, op);
+        self.end_slot_roots(op);
+    }
+
+    fn step_op(&mut self, i: usize, op: &Op) {
         match op {
             // Probe charge: no ownership event (no alloc, no dup, no drop).
             // The dyn charge READS its src (a borrow-class use, like a Prim
@@ -243,9 +252,9 @@ impl OwnershipScan {
             Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } => {
                 self.step_add_address_alias(*dst, *a, *b)
             }
+            Op::ConstInt { dst, value } => self.record_const(*dst, *value),
             // A scalar — no ownership accounting.
             Op::Const { dst: _ }
-            | Op::ConstInt { .. }
             // A function-table slot index — a scalar constant, no ownership.
             | Op::FuncRef { .. }
             // Scalar arithmetic — no ownership.
@@ -691,6 +700,7 @@ impl OwnershipScan {
             // It acquires nothing, so a release through it still needs a held
             // reference.
             PrimKind::Handle => {
+                self.record_carrier(*dst, args);
                 if let (Some(d), Some(&o)) =
                     (dst.as_ref(), args.first().and_then(|a| self.object_of.get(a)))
                 {
@@ -732,6 +742,8 @@ impl OwnershipScan {
                     self.object_of.insert(*d, *d);
                     self.child_parent.insert(*d, o);
                     self.dead.insert(*d, false);
+                } else if let (Some(d), Some(a)) = (dst, args.first()) {
+                    self.load_slot_root(*d, *a);
                 }
             }
             PrimKind::RcInc => {
@@ -930,6 +942,9 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
         rebound: BTreeSet::new(),
         rebound_frames: Vec::new(),
         carriers: BTreeSet::new(),
+        consts: BTreeMap::new(),
+        slot_roots: BTreeMap::new(),
+        carried: BTreeMap::new(),
     };
     for (i, op) in func.ops.iter().enumerate() {
         scan.step(i, op);
