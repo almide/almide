@@ -113,6 +113,17 @@ fn lower_module_member(
         {
             return Some(e);
         }
+        // A function-VALUED top-level `let` of the module (`let thing = inc1`)
+        // is that let's value, not an eta-expansion of a fn `m.thing` that
+        // does not exist (#3315).
+        if !names_fn
+            && let Some((var_id, def_id)) = module_top_let_var(ctx, mod_name, *field, ty)
+        {
+            return Some(match def_id {
+                Some(def_id) => ctx.mk_def(IrExprKind::Var { id: var_id }, ty.clone(), span, def_id),
+                None => ctx.mk(IrExprKind::Var { id: var_id }, ty.clone(), span),
+            });
+        }
         let is_module_fn = names_fn
             || ctx.env.user_modules.contains(&sym(&mod_name))
             || ctx.env.import_table.aliases.contains_key(&sym(&mod_name));
