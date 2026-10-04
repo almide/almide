@@ -60,6 +60,20 @@ impl NanoPass for BorrowLoweringPass {
             lower.own_consumed_ref_mut(body_tail(&mut func.body));
             ref_binders.extend(lower.ref_binders);
         }
+        // A top-level let's value is code too: the call-site borrow pass
+        // inserts its `Borrow` nodes (`insert_borrows_at_call_sites`), so its
+        // final form is decided here like a fn body's. Unvisited, a named fn
+        // taken as a value (`let keep = apply`) kept `&_fn_arg0` of its
+        // eta-expansion's closure param — `&Rc<dyn Fn>` at a `&dyn Fn` slot,
+        // rustc E0277 (#3297). A top-let has no params of its own.
+        let top_lets = program.top_lets.iter_mut()
+            .chain(program.modules.iter_mut().flat_map(|m| m.top_lets.iter_mut()));
+        for tl in top_lets {
+            let mut lower = Lower { params: &[], ann: &program.codegen_annotations, counting_binders: HashSet::new(), ref_binders: HashSet::new() };
+            lower.visit_expr_mut(&mut tl.value);
+            ref_binders.extend(lower.ref_binders);
+        }
+        let codegen_annotations = &mut program.codegen_annotations;
         codegen_annotations.param_borrows = param_borrows;
         codegen_annotations.ref_binders = ref_binders;
         PassResult { program, changed: true }
