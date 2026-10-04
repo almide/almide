@@ -4,8 +4,7 @@
 arm-value:borrowed-temp	3
 assign:SpreadRecord	2
 assign:Unwrap	1
-bind:cell	54
-bind:view-result	5
+bind:view-result	6
 call-arg:Lambda:fs.__fallible_fold_lines:propagating	1
 call-arg:Lambda:map.__fallible_map__Int_String_String_Int	1
 call:panic-arg	7
