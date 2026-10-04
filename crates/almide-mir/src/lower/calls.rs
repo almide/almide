@@ -784,6 +784,8 @@ pub(crate) fn is_admitted_effectful_pure_module_call(module: &str, func: &str) -
     is_admitted_effectful_entropy_env_clock(module, func)
         || is_admitted_effectful_fs(module, func)
         || is_admitted_effectful_io(module, func)
+        // A host op (#2739): an ordinary call, its capability counted by cap_witness.
+        || crate::host_ops::host_op(module, func).is_some()
 }
 
 /// Gate this `module.func` on purity: a pure call, one of the admitted effectful

@@ -251,12 +251,24 @@ pub fn cap_witness(func: &MirFunction) -> CapWitness {
     let mut used: Vec<Capability> = Vec::new();
     for op in &func.ops {
         cap_witness_op_call(op, &mut used);
+        cap_witness_op_host_call(op, &mut used);
         cap_witness_op_prim_floor(op, &mut used);
         cap_witness_op_call_indirect(func, op, &mut used);
     }
     CapWitness {
         allowed: func.declared_caps.clone(),
         used,
+    }
+}
+
+/// A `CallFn` to a host op (`crate::host_ops`, #2739): the op has no prim floor in the
+/// program map for the transitive fold to reach, so its capability is counted HERE, at
+/// the call site. Without this the dotted name would read as capability-free.
+fn cap_witness_op_host_call(op: &Op, used: &mut Vec<Capability>) {
+    if let Op::CallFn { name, .. } = op {
+        if let Some(cap) = crate::host_ops::host_op_capability(name) {
+            used.push(cap);
+        }
     }
 }
 
@@ -472,8 +484,9 @@ pub fn program_cap_graph_witness(
 /// `Rand` / `Env` / `Time` / …) onto the MIR [`Capability`] registry. This is
 /// the DECLARED side of the capability witness when a manifest exists — the
 /// operator's written bound, not the vacuous effect-fn-declares-everything
-/// default. Effects with no modeled MIR capability yet (`Net`, `Fan`) project
-/// to nothing: they cannot silently widen the bound.
+/// default. `Net` projects to [`Capability::Net`], the capability the http host
+/// ops reach (`crate::host_ops`). Effects with no modeled MIR capability yet
+/// (`Fan`) project to nothing: they cannot silently widen the bound.
 pub fn manifest_caps(allow: &[String]) -> Vec<Capability> {
     let mut caps: Vec<Capability> = Vec::new();
     for p in allow {
@@ -487,6 +500,7 @@ pub fn manifest_caps(allow: &[String]) -> Vec<Capability> {
             "Rand" => caps.push(Capability::Entropy),
             "Env" => caps.push(Capability::CliArgs),
             "Time" => caps.push(Capability::Clock),
+            "Net" => caps.push(Capability::Net),
             _ => {}
         }
     }
