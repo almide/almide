@@ -4,13 +4,14 @@
 arm-value:borrowed-temp	3
 assign:SpreadRecord	2
 assign:Unwrap	1
-bind:cell	54
+bind:cell	55
 bind:view-result	5
 call-arg:Lambda:fs.__fallible_fold_lines:propagating	1
 call-arg:Lambda:map.__fallible_map__Int_String_String_Int	1
 call:panic-arg	7
 callback:SpreadRecord	6
 caps:argv-in-plain-fn	8
+capture:cell	1
 display	12
 forin-map	7
 heap-interp-part:Block	9
@@ -35,7 +36,7 @@ stmt:Expr:Unit	1
 stmt:Expr:Unwrap	1
 stmt:Expr:Var	1
 stmt:Guard:Unwrap	4
-stmt:MapInsert	10
+stmt:MapInsert	14
 store:borrowed-temp	11
 tail:SpreadRecord	4
 tail:Unwrap	26
