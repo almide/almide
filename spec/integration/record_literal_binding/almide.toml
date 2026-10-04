@@ -1,0 +1,3 @@
+[package]
+name = "record_literal_binding"
+version = "0.1.0"

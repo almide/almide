@@ -1,0 +1,39 @@
+// #3290: an anonymous record literal bound by an UN-annotated `let` takes
+// the nominal record its binding is later unified with: returned, passed,
+// stored in a list, chosen by an `if`, read field by field, and shown.
+type Extent = { w: Float, h: Float }
+
+fn span(e: Extent) -> Float = e.w + e.h
+
+fn returned(n: Float) -> Extent = {
+  let e = { w: n, h: n + 1.0 }
+  e
+}
+
+fn passed(n: Float) -> Float = {
+  let e = { w: n, h: 2.0 }
+  span(e)
+}
+
+fn stored(n: Float) -> List[Extent] = {
+  let e = { w: n, h: 3.0 }
+  let f = { w: 1.0, h: n }
+  [e, f]
+}
+
+fn branch(c: Bool) -> Extent = {
+  let e = if c then { w: 1.0, h: 2.0 } else { w: 3.0, h: 4.0 }
+  e
+}
+
+fn field_read(n: Float) -> Extent = {
+  let e = { w: n, h: 5.0 }
+  let total = e.w + e.h
+  { w: total, h: e.h }
+}
+
+fn shown(n: Float) -> String = {
+  let e = { w: n, h: 1.0 }
+  let x: Extent = e
+  "${x}"
+}
