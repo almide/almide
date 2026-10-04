@@ -137,14 +137,39 @@ impl ReadGen {
         self.ops.push(Op::Borrow { v });
     }
 
+    /// #3269: rebind a slot (`xs = list.set(xs, i, v)`): a new block, the
+    /// old block's `Drop`, the `SetLocal`. The slot keeps its handle, now on the
+    /// new block; the old block's children are no longer kept by the slot.
+    fn rebind(&mut self) {
+        // A slot no other handle ever denoted: a `Dup` of it (live or
+        // released) is a handle on the old block after the rebind, which the
+        // certificate's per-object line cannot tell from the slot (the
+        // existing per-handle difference); a view of it (child, address,
+        // carrier) is what this step exercises.
+        let slots: Vec<ValueId> = self
+            .live
+            .iter()
+            .copied()
+            .filter(|&l| self.obj.get(&l) == Some(&l) && self.obj.iter().all(|(&h, &o)| h == l || o != l))
+            .collect();
+        let Some(l) = self.pick(&slots) else { return };
+        let new = self.fresh();
+        self.ops.push(Op::Alloc { dst: new, repr: heap(), init: Init::Opaque });
+        self.ops.push(Op::Drop { v: l });
+        self.ops.push(Op::SetLocal { local: l, src: new });
+    }
+
     fn step(&mut self) {
-        match next_rand(&mut self.st) % 7 {
+        // The high bits: the LCG's low three bits cycle with period 8, so a
+        // `% 8` on them never draws some arms between the other draws.
+        match (next_rand(&mut self.st) >> 33) % 8 {
             0 => self.alloc(),
             1 => self.dup(),
             2 => self.drop_one(),
             3 => self.address(),
             4 => self.deref(),
             5 => self.borrow(),
+            6 => self.rebind(),
             _ => self.call(),
         }
     }
@@ -188,12 +213,24 @@ fn gen_reads(seed: u64) -> MirFunction {
 /// are NOT scoped to the path, so an arm reads handles the other arm defined
 /// and the code after the join reads handles one arm defined: both sides must
 /// reject those, and agree everywhere else.
+/// A cut never splits a rebind (`Alloc new; Drop l; SetLocal l = new`) across
+/// a branch boundary: the lowering emits the three together.
+fn whole_rebind_cut(ops: &[Op], mut k: usize) -> usize {
+    let is_set = |i: usize| matches!(ops.get(i), Some(Op::SetLocal { .. }));
+    if is_set(k + 1) {
+        k += 2;
+    } else if is_set(k) {
+        k += 1;
+    }
+    k.min(ops.len())
+}
+
 fn gen_branch_reads(seed: u64) -> MirFunction {
     let mut f = gen_reads(seed);
     let mut st = seed.wrapping_add(11);
     let n = f.ops.len();
     // Cut the body into prefix / then / else / suffix at three points.
-    let mut cuts: Vec<usize> = (0..3).map(|_| (next_rand(&mut st) as usize) % (n + 1)).collect();
+    let mut cuts: Vec<usize> = (0..3).map(|_| whole_rebind_cut(&f.ops, (next_rand(&mut st) as usize) % (n + 1))).collect();
     cuts.sort_unstable();
     let c = ValueId(10_000);
     let mut ops = vec![Op::ConstInt { dst: c, value: 1 }];
@@ -421,4 +458,60 @@ fn a_handle_from_the_other_arm_is_not_defined() {
     let own = f(p);
     assert!(cert_all_balanced(&ownership_certificate(&own)));
     assert_eq!(verify_ownership(&own), Ok(()));
+}
+
+/// #3269: a child loaded from a slot's block, read after the slot is rebound
+/// (`xs = list.set(xs, 2, v)` under its bounds check: the new block, the old
+/// block's `Drop`, the `SetLocal`). The slot's line carries the new block's
+/// `i`, so it never reaches 0 and the child's probe landed on a positive line
+/// although the block the child lives in was freed (accepted). A rebind ends
+/// the old block's children: the read lands on the child's own line at 0.
+#[test]
+fn a_child_of_a_rebound_slot_dies_with_the_old_block() {
+    let v = ValueId;
+    let (xs, child, new, kept) = (v(0), v(1), v(2), v(3));
+    let read = Op::Call { dst: None, func: RtFn::PrintStr, args: vec![CallArg::Handle(child)], result: None };
+    let f = |keep: bool, in_branch: bool| {
+        let mut ops = vec![
+            Op::Alloc { dst: xs, repr: heap(), init: Init::Opaque },
+            Op::Prim { kind: PrimKind::LoadHandle, dst: Some(child), args: vec![xs] },
+        ];
+        if keep {
+            ops.push(Op::Dup { dst: kept, src: child });
+        }
+        let rebind = vec![
+            Op::Alloc { dst: new, repr: heap(), init: Init::Opaque },
+            Op::Drop { v: xs },
+            Op::SetLocal { local: xs, src: new },
+        ];
+        if in_branch {
+            ops.push(Op::ConstInt { dst: v(9), value: 1 });
+            ops.push(Op::IfThen { cond: v(9), dst: None });
+            ops.extend(rebind);
+            ops.push(Op::Else { val: None });
+            ops.push(Op::EndIf { val: None });
+        } else {
+            ops.extend(rebind);
+        }
+        ops.push(read.clone());
+        if keep {
+            ops.push(Op::Drop { v: kept });
+        }
+        ops.push(Op::Drop { v: xs });
+        func(ops)
+    };
+    for in_branch in [false, true] {
+        let gone = f(false, in_branch);
+        let cert = ownership_certificate(&gone);
+        assert!(!cert_all_balanced(&cert), "in_branch {in_branch}: {cert:?}");
+        assert!(verify_ownership(&gone).is_err(), "in_branch {in_branch}");
+        // A `Dup` of the child keeps it across the rebind on both sides.
+        let held = f(true, in_branch);
+        assert!(cert_all_balanced(&ownership_certificate(&held)), "in_branch {in_branch}: {:?}", ownership_certificate(&held));
+        assert_eq!(verify_ownership(&held), Ok(()), "in_branch {in_branch}");
+    }
+    assert_eq!(
+        ownership_certificate(&f(false, false)),
+        include_str!("../../../proofs/poisoned-certs/3269-child-after-slot-rebind.cert")
+    );
 }
