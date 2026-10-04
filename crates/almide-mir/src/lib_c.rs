@@ -147,6 +147,8 @@ struct OwnershipScan {
     owning_merges: std::collections::HashSet<ValueId>,
     /// Slot objects made at joins so far (#3279, lib_d.rs).
     slot_objects: u32,
+    /// `Dup`s the function later `MakeUnique`s (#3321, lib_d.rs).
+    cow_dups: BTreeSet<ValueId>,
 }
 
     struct BranchFrame {
@@ -398,6 +400,9 @@ impl OwnershipScan {
     /// Verbatim.
     fn acquire_reference(&mut self, i: usize, dst: ValueId, src: ValueId) {
         if let Some(o) = self.live(src) {
+            if self.cow_copy(dst, o) {
+                return;
+            }
             // Acquire OUR own reference. A `Dup` of a self.borrowed param has no
             // prior self.rc entry (we owned none) — start it at 0, then +1.
             *self.rc.entry(o).or_insert(0) += 1;
@@ -957,6 +962,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
         carried: BTreeMap::new(),
         owning_merges: crate::certificate::merge_dsts_holding_a_reference(func),
         slot_objects: 0,
+        cow_dups: crate::certificate::cow_dup_dsts(func),
     };
     for (i, op) in func.ops.iter().enumerate() {
         scan.step(i, op);
