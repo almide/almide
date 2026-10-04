@@ -425,7 +425,13 @@ impl Lower<'_> {
             IrExprKind::Clone { expr } => match var_id(expr) { Some(id) => id, None => return },
             _ => return,
         };
-        let owns_first = is_ref_param(self.params, id) || (is_ref_mut_param(self.params, id) && !is_copy_scalar(&value.ty));
+        // A payload binder of a match over a borrowed subject is bound `&T`
+        // by Rust's default binding modes (`ref_binders`): stored into an
+        // owned place it is owned first, like the param it was read from
+        // (#3303 — `color = c` in `Solid(c) => ..` was `expected C, found &C`).
+        // A `Copy` scalar binder is already read as `*n`.
+        let owns_first = is_ref_param(self.params, id)
+            || ((is_ref_mut_param(self.params, id) || self.ref_binders.contains(&id)) && !is_copy_scalar(&value.ty));
         if !owns_first {
             return;
         }
