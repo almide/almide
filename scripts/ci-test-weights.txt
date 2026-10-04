@@ -30,6 +30,7 @@ exit_tail_positions_test         203
 wasm_test_lane_wall_test         185
 bridge_test                      173
 native_result_ownership          144
+shape_matrix_test                140
 fuzz_differential                136
 charge_probe_test                122
 libm_trig_cross_target_test      122
