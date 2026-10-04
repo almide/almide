@@ -10,6 +10,9 @@
 
 use std::sync::{Arc, Mutex};
 
+#[path = "host_fan.rs"]
+mod fan;
+
 /// One wasm run's cross-target observables: stdout, stderr, exit code.
 /// A trap WITHOUT a recorded `almide.exit` code is a runtime abort
 /// (unreachable / div-by-zero / OOB) — exit 1, the native abort contract,
@@ -106,6 +109,9 @@ struct Host {
     /// The last stderr line written, in either mode: the die convention
     /// (#1912) reads it after a trap.
     err_last: Arc<Mutex<String>>,
+    /// The instance-parallel fan context (#3003): set on a run's own store,
+    /// `None` on a chunk's — a chunk's nested offer runs sequentially.
+    par: Option<Arc<fan::ParCtx>>,
 }
 
 /// Is the process's stdout a terminal (native flushes per write there).
@@ -323,10 +329,112 @@ fn run_wasm_src(
             serve: Arc::new(Mutex::new(crate::host_serve::ServeState::default())),
             live_out: live.then(|| Arc::new(Mutex::new(std::io::BufWriter::with_capacity(65536, std::io::stdout())))),
             err_last: Arc::new(Mutex::new(String::new())),
+            par: None,
         },
     );
     store.limiter(|h| &mut h.limits);
-    let mut linker = wasmtime::Linker::new(&engine);
+    let linker = host_linker(&engine)?;
+    // #3003 (ADR-0011 §D2a): the instance-parallel fan offer (op 74) runs a
+    // chunk on fresh instances of THIS module, through THIS import set.
+    store.data_mut().par = Some(Arc::new(fan::ParCtx {
+        engine: engine.clone(),
+        module: module.clone(),
+        linker: linker.clone(),
+        max_memory_bytes,
+        epoch: watchdog.is_some(),
+        args: args.to_vec(),
+    }));
+    let ticker = watchdog.map(|after| {
+        store.set_epoch_deadline(1);
+        let eng = engine.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(after);
+            eng.increment_epoch();
+        })
+    });
+    let instance = linker.instantiate(&mut store, &module)?;
+    let main = instance.get_typed_func::<(), ()>(&mut store, "main")?;
+    let main_started = std::time::Instant::now();
+    let call = main.call(&mut store, ());
+    let main_secs = main_started.elapsed().as_secs_f64();
+    let recorded = exit.lock().expect("test harness invariant").take();
+    let exit_code = match (&call, recorded) {
+        (Ok(()), None) => 0,
+        (Err(_), Some(code)) => code,
+        (Err(e), None) => {
+            if almide_base::env::flag("ALMIDE_DBG_TRAP") {
+                eprintln!("TRAP: {e:?}");
+            }
+            // A genuine trap is a runtime abort: exit 1, and (#1826) the
+            // abort NAMES itself on stderr in the `Error: ` form native's
+            // aborts use. Native never has this case (its aborts are all
+            // `Error: <msg>` from a defined guard), so the `wasm trap:`
+            // prefix is this leg's own spelling — a fuzz finding or a
+            // user is never left with an empty stderr and a bare 1.
+            // EXCEPT the die convention (#1912): a defined guard's
+            // `prim.die` prints its `Error: <msg>` line and then executes
+            // `unreachable` — the trap IS the exit, already named. The stock
+            // wasmtime lane and native show that one line; adding
+            // `Error: wasm trap: unreachable…` after it made the embedded
+            // lane the odd one out.
+            let named_die = is_unreachable_trap(e)
+                && store.data().err_last.lock().expect("err last").starts_with("Error: ");
+            if !named_die {
+                emit_err_line(store.data(), trap_line(e).trim_end_matches('\n'));
+            }
+            1
+        }
+        (Ok(()), Some(_)) => {
+            anyhow::bail!("almide.exit recorded a code but the run returned normally")
+        }
+    };
+    drop(ticker);
+    if let Some(w) = &store.data().live_out {
+        use std::io::Write as _;
+        let _ = w.lock().expect("live stdout").flush();
+    }
+    let read_global = |store: &mut wasmtime::Store<_>, name: &str| {
+        instance.get_global(&mut *store, name).map(|g| match g.get(&mut *store) {
+            wasmtime::Val::I32(v) => v as u32 as u64,
+            wasmtime::Val::I64(v) => v as u64,
+            _ => 0,
+        })
+    };
+    // A region window (#1961) rewinds `__heap`; the allocation total is
+    // the peak, kept in `__heap_high` when the module has windows.
+    let heap_end = read_global(&mut store, "__heap");
+    let heap_end = match (heap_end, read_global(&mut store, "__heap_high")) {
+        (Some(h), Some(hi)) => Some(h.max(hi)),
+        (h, _) => h,
+    };
+    // #2407: the counters ride five i64 globals an armed build exports;
+    // all five or none — a module missing any is a shipped one.
+    let alloc_count = match (
+        read_global(&mut store, "__alloc_count"),
+        read_global(&mut store, "__alloc_reused"),
+        read_global(&mut store, "__alloc_bytes"),
+        read_global(&mut store, "__free_count"),
+        read_global(&mut store, "__region_reclaimed"),
+    ) {
+        (Some(allocs), Some(reused), Some(bytes), Some(frees), Some(reclaimed)) => {
+            Some(AllocCount { allocs, reused, bytes, frees, reclaimed })
+        }
+        _ => None,
+    };
+    Ok(RunResult {
+        stdout: out.lock().expect("test harness invariant").clone(),
+        stderr: err.lock().expect("test harness invariant").clone(),
+        exit: exit_code,
+        heap_end,
+        alloc_count,
+        main_secs,
+    })
+}
+
+/// The `almide.*` import set every instance of a run links against — the
+/// run's own and, for the instance-parallel fan offer (#3003), its chunks'.
+fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Host>> {
+    let mut linker = wasmtime::Linker::new(engine);
     linker.func_wrap(
         "almide",
         "println",
@@ -364,6 +472,11 @@ fn run_wasm_src(
          b_ptr: i32,
          b_len: i32|
          -> wasmtime::Result<i64> {
+            // op 74 = the instance-parallel fan offer (#3003): the request
+            // and the answer room are raw i64 slots, never text.
+            if op == fan::OP_FAN_PAR {
+                return fan::serve(&mut caller, (a_ptr, a_len), (b_ptr, b_len));
+            }
             // op 35 = incremental stdin (up to a_len bytes off the cursor).
             // Handled BEFORE the a/b buffer reads: the count rides in
             // a_len with a null a_ptr, and materializing it as a guest
@@ -483,91 +596,7 @@ fn run_wasm_src(
             Ok(())
         },
     )?;
-    let ticker = watchdog.map(|after| {
-        store.set_epoch_deadline(1);
-        let eng = engine.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(after);
-            eng.increment_epoch();
-        })
-    });
-    let instance = linker.instantiate(&mut store, &module)?;
-    let main = instance.get_typed_func::<(), ()>(&mut store, "main")?;
-    let main_started = std::time::Instant::now();
-    let call = main.call(&mut store, ());
-    let main_secs = main_started.elapsed().as_secs_f64();
-    let recorded = exit.lock().expect("test harness invariant").take();
-    let exit_code = match (&call, recorded) {
-        (Ok(()), None) => 0,
-        (Err(_), Some(code)) => code,
-        (Err(e), None) => {
-            if almide_base::env::flag("ALMIDE_DBG_TRAP") {
-                eprintln!("TRAP: {e:?}");
-            }
-            // A genuine trap is a runtime abort: exit 1, and (#1826) the
-            // abort NAMES itself on stderr in the `Error: ` form native's
-            // aborts use. Native never has this case (its aborts are all
-            // `Error: <msg>` from a defined guard), so the `wasm trap:`
-            // prefix is this leg's own spelling — a fuzz finding or a
-            // user is never left with an empty stderr and a bare 1.
-            // EXCEPT the die convention (#1912): a defined guard's
-            // `prim.die` prints its `Error: <msg>` line and then executes
-            // `unreachable` — the trap IS the exit, already named. The stock
-            // wasmtime lane and native show that one line; adding
-            // `Error: wasm trap: unreachable…` after it made the embedded
-            // lane the odd one out.
-            let named_die = is_unreachable_trap(e)
-                && store.data().err_last.lock().expect("err last").starts_with("Error: ");
-            if !named_die {
-                emit_err_line(store.data(), trap_line(e).trim_end_matches('\n'));
-            }
-            1
-        }
-        (Ok(()), Some(_)) => {
-            anyhow::bail!("almide.exit recorded a code but the run returned normally")
-        }
-    };
-    drop(ticker);
-    if let Some(w) = &store.data().live_out {
-        use std::io::Write as _;
-        let _ = w.lock().expect("live stdout").flush();
-    }
-    let read_global = |store: &mut wasmtime::Store<_>, name: &str| {
-        instance.get_global(&mut *store, name).map(|g| match g.get(&mut *store) {
-            wasmtime::Val::I32(v) => v as u32 as u64,
-            wasmtime::Val::I64(v) => v as u64,
-            _ => 0,
-        })
-    };
-    // A region window (#1961) rewinds `__heap`; the allocation total is
-    // the peak, kept in `__heap_high` when the module has windows.
-    let heap_end = read_global(&mut store, "__heap");
-    let heap_end = match (heap_end, read_global(&mut store, "__heap_high")) {
-        (Some(h), Some(hi)) => Some(h.max(hi)),
-        (h, _) => h,
-    };
-    // #2407: the counters ride five i64 globals an armed build exports;
-    // all five or none — a module missing any is a shipped one.
-    let alloc_count = match (
-        read_global(&mut store, "__alloc_count"),
-        read_global(&mut store, "__alloc_reused"),
-        read_global(&mut store, "__alloc_bytes"),
-        read_global(&mut store, "__free_count"),
-        read_global(&mut store, "__region_reclaimed"),
-    ) {
-        (Some(allocs), Some(reused), Some(bytes), Some(frees), Some(reclaimed)) => {
-            Some(AllocCount { allocs, reused, bytes, frees, reclaimed })
-        }
-        _ => None,
-    };
-    Ok(RunResult {
-        stdout: out.lock().expect("test harness invariant").clone(),
-        stderr: err.lock().expect("test harness invariant").clone(),
-        exit: exit_code,
-        heap_end,
-        alloc_count,
-        main_secs,
-    })
+    Ok(linker)
 }
 
 /// The one stderr line a trapped run reports (#1826), in the `Error: `
