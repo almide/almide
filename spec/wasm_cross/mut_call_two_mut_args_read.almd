@@ -1,0 +1,67 @@
+// @contract: C-132
+// A call with TWO `mut` arguments and a value argument that reads one of them
+// sees that variable's value from BEFORE the call, in left-to-right order
+// (#3306). The hoist that binds such a read to a temporary checked it against
+// the FIRST `&mut` argument only, so `put(out, w, 8 - w[1])` rendered
+// `put(&mut out, &mut w, 8 - almide_index!(w, 1))` (rustc E0502) while wasm
+// printed 1. Native now hoists against every `&mut` argument, and binds the
+// value arguments of the prefix in source order.
+// Rows: the read after both mut args; the read between them; the read before
+// both; a read of the FIRST mut arg; a record-field read and a field place; a
+// nested call reading both; effectful operands around the read (order).
+type Box = { items: List[Int], n: Int }
+
+var log: List[String] = []
+
+fn put(mut out: List[Int], mut w: List[Int], n: Int) -> Unit = {
+  list.push(out, n)
+  w[0] = n
+}
+
+fn put_mid(mut out: List[Int], n: Int, mut w: List[Int]) -> Unit = {
+  list.push(out, n)
+  w[0] = n
+}
+
+fn put_first(n: Int, mut out: List[Int], mut w: List[Int]) -> Unit = {
+  list.push(out, n)
+  w[0] = n
+}
+
+fn put3(mut out: List[Int], mut w: List[Int], a: Int, b: Int) -> Unit = {
+  list.push(out, a)
+  w[0] = b
+}
+
+fn fill(mut b: Box, mut w: List[Int], n: Int) -> Unit = {
+  list.push(b.items, n)
+  b.n = b.n + n
+  w[0] = n
+}
+
+fn sum2(a: List[Int], b: List[Int]) -> Int = list.sum(a) + list.sum(b)
+
+fn note(tag: String, v: Int) -> Int = {
+  log = log + [tag]
+  v
+}
+
+effect fn main() -> Unit = {
+  var out: List[Int] = []
+  var w: List[Int] = [0, 7]
+  put(out, w, 8 - w[1])
+  println("${w[0]} ${list.len(out)}")
+  put_mid(out, w[1] + 1, w)
+  println("${w[0]} ${list.len(out)}")
+  put_first(w[0] * 3, out, w)
+  println("${w[0]} ${list.len(out)}")
+  put(out, w, list.len(out) + out[0])
+  println("${w[0]} ${list.sum(out)}")
+  var b: Box = { items: [1], n: 5 }
+  fill(b, w, b.n + w[1] + list.len(b.items))
+  println("${b.n} ${list.len(b.items)} ${w[0]}")
+  fill(b, w, sum2(b.items, w))
+  println("${b.n} ${w[0]}")
+  put3(out, w, note("a", w[1]), note("b", list.len(out)))
+  println("${w[0]} ${list.len(out)} ${list.join(log, ",")}")
+}
