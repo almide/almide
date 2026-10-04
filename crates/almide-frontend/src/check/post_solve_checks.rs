@@ -166,6 +166,11 @@ impl Checker {
                 if s.as_str() == "Value" || self.env.types.contains_key(&s) || !reported.insert(s) {
                     continue;
                 }
+                // Its qualified spelling already carries the root E029 (#3336).
+                if self.qualified_type_misses.contains(&s) {
+                    rooted.insert(s);
+                    continue;
+                }
                 // A runtime-backed stdlib nominal (`HttpRequest`, bare or
                 // `http.`-qualified) is a valid annotation whenever its owner
                 // module is in scope — the stdlib's own signatures use it, so
