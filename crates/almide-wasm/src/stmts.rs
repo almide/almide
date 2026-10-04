@@ -314,6 +314,18 @@ impl Emitter<'_> {
         Ok(())
     }
 
+    /// `m[k] = v` on a C-319 cell (#3339) — the `map.insert` mut form,
+    /// whose write-back reads the occupant through the cell, releases it
+    /// and stores the functional `set`'s fresh block back. It walled before:
+    /// a captured-and-written var is such a cell (a module `var` written
+    /// from a callback too), so `seen[k] = v` in a closure was E082.
+    fn lower_cell_map_insert(&mut self, target: &VarId, key: &IrExpr, value: &IrExpr) -> Result<(), EmitError> {
+        let var_expr = IrExpr { kind: IrExprKind::Var { id: *target }, ty: Ty::Unit, span: None, def_id: None };
+        let args = self.owned_call_marks.pin_args(vec![var_expr, key.clone(), value.clone()]);
+        self.arm_scope(|em| em.lower_map_call("insert", &args, None))?;
+        Ok(())
+    }
+
     pub(crate) fn rc_own(&mut self, idx: u32, ty: SliceTy) {
         self.rc_owned.insert(idx);
         self.owned_ty.insert(idx, ty);
@@ -338,7 +350,7 @@ impl Emitter<'_> {
                     return Ok(());
                 }
                 if self.cells.contains(target) {
-                    return unsup("cell-write:map-insert");
+                    return self.lower_cell_map_insert(target, key, value);
                 }
                 let Some(&(var_idx, _)) = self.locals.get(target) else {
                     return unsup("map-insert:unmapped");
