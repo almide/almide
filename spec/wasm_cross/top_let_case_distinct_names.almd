@@ -1,0 +1,57 @@
+// @contract: C-246
+// Top-level names that differ only in case, or that spell a name the native
+// emitter itself generates, are distinct bindings: each read and write reaches
+// its own declaration (#3305). Native named a global's static by upper-casing
+// the binding name, which is not injective — `let nest` and `let NEST` both
+// became `NEST` (rustc E0428 / E0119) — and a top-level
+// `let almide_stdout_buf` became the runtime's own stdout buffer static. Wasm
+// already ran every row; native now mangles every global injectively.
+// Rows: an immutable fn-typed let beside a record let of the case-twin name
+// (the thread-local lazy wrapper form); Int lets in three casings; mutable
+// scalar and List vars in two casings written from a function; a String let
+// whose upper-cased name is the runtime's stdout buffer; a let spelled like
+// the generated static of another.
+type Nest = { run: (Int) -> Int }
+
+fn inc(n: Int) -> Int = n + 1
+
+fn dbl(n: Int) -> Int = n * 2
+
+let nest = inc
+
+let NEST: Nest = { run: dbl }
+
+let count = 1
+
+let Count = 20
+
+let COUNT = 300
+
+var total = 0
+
+var TOTAL = 0
+
+var items: List[Int] = []
+
+var ITEMS: List[Int] = [9]
+
+let almide_stdout_buf = "a user string, not the stdout buffer"
+
+let ALMIDE_G_count = 4000
+
+fn bump() -> Unit = {
+  total = total + 1
+  TOTAL = TOTAL + 10
+  items = items + [total]
+  ITEMS = ITEMS + [TOTAL]
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(nest(1) + NEST.run(2)))
+  println("${count} ${Count} ${COUNT} ${ALMIDE_G_count}")
+  bump()
+  bump()
+  println("${total} ${TOTAL}")
+  println("${list.len(items)} ${list.len(ITEMS)} ${list.sum(items)} ${list.sum(ITEMS)}")
+  println(almide_stdout_buf)
+}
