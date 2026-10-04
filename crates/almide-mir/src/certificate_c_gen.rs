@@ -515,3 +515,46 @@ fn a_child_of_a_rebound_slot_dies_with_the_old_block() {
         include_str!("../../../proofs/poisoned-certs/3269-child-after-slot-rebind.cert")
     );
 }
+
+/// #3279: a module-global slot root. `LoadHandle` of the slot's constant
+/// address yields a handle the slot holds; the lowering `Dup`s it to read the
+/// global, or `MakeUnique`s it and stores it back. The certificate counts it
+/// as a line with no `i` (a root kept alive outside the frame), and
+/// `verify_ownership` as a borrowed root, while the slot keeps it.
+#[test]
+fn a_global_slot_load_is_a_borrowed_root() {
+    let v = ValueId;
+    let slot = |dst: u32| Op::ConstInt { dst: v(dst), value: 8192 };
+    let load = Op::Prim { kind: PrimKind::LoadHandle, dst: Some(v(1)), args: vec![v(0)] };
+    let read = func(vec![slot(0), load.clone(), Op::Dup { dst: v(2), src: v(1) }, Op::Drop { v: v(2) }]);
+    assert!(cert_all_balanced(&ownership_certificate(&read)));
+    assert_eq!(verify_ownership(&read), Ok(()));
+    // The in-place write: unique the slot's block, store it back, mutate it.
+    let call = |h: u32| Op::Call { dst: None, func: RtFn::PrintStr, args: vec![CallArg::Handle(v(h))], result: None };
+    let write = func(vec![
+        slot(0),
+        load.clone(),
+        Op::MakeUnique { v: v(1) },
+        slot(2),
+        Op::Prim { kind: PrimKind::Handle, dst: Some(v(3)), args: vec![v(1)] },
+        Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![v(2), v(3)] },
+        call(1),
+    ]);
+    assert!(cert_all_balanced(&ownership_certificate(&write)));
+    assert_eq!(verify_ownership(&write), Ok(()));
+    // The slot no longer keeps the handle after a call (which may reassign
+    // the global) or after another value is stored in it: a read then is
+    // rejected (stricter than the certificate, which has no slot model).
+    let after_call = func(vec![slot(0), load.clone(), call(9), Op::Dup { dst: v(2), src: v(1) }, Op::Drop { v: v(2) }]);
+    assert!(verify_ownership(&after_call).is_err());
+    let after_store = func(vec![
+        slot(0),
+        load,
+        slot(2),
+        Op::ConstInt { dst: v(3), value: 0 },
+        Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![v(2), v(3)] },
+        Op::Dup { dst: v(4), src: v(1) },
+        Op::Drop { v: v(4) },
+    ]);
+    assert!(verify_ownership(&after_store).is_err());
+}
