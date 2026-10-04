@@ -330,8 +330,9 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
         // The operand is a bound carrier (arg_temps.rs parks every
         // non-tail `f(x)!`; the payload is then a view) or, in tail
         // position, the call itself (an owned carrier). A call typed with
-        // its raw payload (a move-mode effect call, mut_param.rs) has an
-        // ABI carrier no hook sees: declined.
+        // its raw payload (a move-mode effect call, mut_param.rs) still
+        // returns its Result block at the ABI: an owned carrier the same
+        // route takes (#2758, `extraction_or_rt_subset`).
         IrExprKind::UnwrapOr { .. } | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } | IrExprKind::RuntimeCall { .. } => {
             extraction_or_rt_subset(e)
         }
@@ -423,11 +424,21 @@ fn extraction_or_rt_subset(e: &IrExpr) -> Option<Why> {
         IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => match &expr.kind {
             IrExprKind::Var { .. } => None,
             IrExprKind::Call { .. } if carrier_ty(&expr.ty) => call_subset(expr).map(|w| w.inside("unwrap-operand")),
+            // #2758: a MOVE-MODE effect call (C-132, mut_param.rs) is typed
+            // with its raw payload, but its wasm value is the effect ABI's
+            // one Result block (func.rs `fn_signature`), handed over at rc 1.
+            // `lower_try_unwrap` reads it as an owned carrier exactly as for
+            // a carrier-typed tail call: born at the site, out on the err
+            // arm, released on the ok path (`release_ok_carrier`), its
+            // payload's credit moving to the value. A call whose lowered
+            // type is no carrier is refused by the lowering itself.
+            IrExprKind::Call { .. } => call_subset(expr).map(|w| w.inside("unwrap-operand")),
             // #2758: `err(m)!`, the explicit raise, is a certainly-fresh
             // carrier — the owned-carrier route of the `!` site
             // (witness_unwrap.rs): born at the site, out on the err arm,
             // released on the ok path. Its payload store is the constructor's.
             IrExprKind::ResultErr { .. } => value_subset(expr).map(|w| w.inside("unwrap-operand")),
+            IrExprKind::Call { .. } => call_subset(expr).map(|w| w.inside("unwrap-operand")),
             _ => Some(Why::Here(tag(&e.kind))),
         },
         // The deterministic-meter / wall-deadline prims (fuel.rs
