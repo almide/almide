@@ -56,13 +56,33 @@ ratio 4.403
 # 7e854a919 vs c6e979542 on the gate's top rung at +0.5% (median) / +0.8% (min):
 # worth ~0.001 of share_lex. Pinned to the CI median; the +/-20% band keeps a
 # ~15% check slowdown and a ~12% lex slowdown as the detection thresholds.
-share_lex 0.1340
+# share_lex/parse/check moved 0.1340/0.1355/0.7320 -> 0.1111/0.1201/0.7682
+# (2026-10-04, #3328). Not noise: the band had been spent. Same-run check/lex
+# time on the top rung (machine speed cancels) read ~5.2 on 2026-09-26 and ~6.9
+# on 2026-10-03 while the lexed lines grew 6%: the checker's per-line cost rose
+# ~33% against the lexer's in three accepted steps, each inside the band —
+# 09-27 (5.3 -> 5.9), 09-30 (-> 6.4), and 10-03 be61ee66f "Generalize E008 to
+# any var reachable from a concurrent body" (6.5 -> 6.9, the queue runs on
+# either side of it). That left share_lex's median 3.6% above the 0.1072 floor
+# with a 2.9% run-to-run sd, so it failed 9 of 88 jobs on PRs that did not touch
+# the front end and passed on rerun. Anchored at the median of the 45 develop +
+# merge-queue Perf ratchet jobs from 5f39c06ba (2026-10-03T03:25) to
+# 2026-10-04T03:20; spread over those and the 43 PR jobs of the same window
+# (88 jobs, ubuntu x86-64):
+#     share_lex    p5 0.1044  median 0.1111  p95 0.1164  sd 2.9%  worst -6.9%/+9.2%
+#     share_parse  p5 0.1156  median 0.1201  p95 0.1229  sd 2.0%  worst -8.0%/+5.3%
+#     share_check  p5 0.7627  median 0.7682  p95 0.7791  sd 0.6%  worst -1.9%/+1.7%
+# The +/-20% band is over twice the worst single-run deviation. The accepted
+# check cost is recorded here, not excused: re-anchoring is what the gate asks
+# for on a deliberate cost, and the half-band warning (#3328) is what should
+# have surfaced the first two steps.
+share_lex 0.1111
 #     share_parse  0.1334 0.1339 0.1341 0.1347 0.1363 0.1369 0.1371 0.1378
-#                  median 0.1355, 3.2% spread
-share_parse 0.1355
+#                  median 0.1355, 3.2% spread (2026-08-14, M4 Pro)
+share_parse 0.1201
 #     share_check  0.7268 0.7269 0.7280 0.7290 0.7349 0.7351 0.7352 0.7352
-#                  median 0.7320, 1.2% spread
-share_check 0.7320
+#                  median 0.7320, 1.2% spread (2026-08-14, M4 Pro)
+share_check 0.7682
 # slope_check — `slope` localized to the phase that owns it. The aggregate reads
 #   1.15; the split shows lex 1.00 and parse 1.03 flat and the checker carrying
 #   all of the superlinearity. Anchoring it separately means a checker going
