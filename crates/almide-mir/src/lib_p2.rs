@@ -221,9 +221,11 @@ mod tests {
         // A LoadHandle through a RAW address (no tracked root): the loaded
         // handle stays unknown, and a Dup of it still reports — the load64
         // floor is not widened (#1037's discipline: unknown, never guessed).
+        // (A constant address in the mutable-global slot region is a slot
+        // root instead, #3279; this one sits below `MG_SLOT_BASE`.)
         let (raw, payload, owned) = (v(0), v(1), v(2));
         let f = func(vec![
-            Op::ConstInt { dst: raw, value: 8192 },
+            Op::ConstInt { dst: raw, value: 4096 },
             Op::Prim { kind: PrimKind::LoadHandle, dst: Some(payload), args: vec![raw] },
             Op::Dup { dst: owned, src: payload },
             Op::Drop { v: owned },

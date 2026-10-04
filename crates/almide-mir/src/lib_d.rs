@@ -30,3 +30,69 @@ impl OwnershipScan {
         }
     }
 }
+
+// ── module-global slot roots (#3279) ──
+// A mutable module-level `var` lives in a slot at a constant address; the slot
+// holds the block's reference. `LoadHandle` of that address yields a handle the
+// frame owns no reference to, held by the slot: the lowering `Dup`s it to read
+// the global, or `MakeUnique`s it and stores it back for an in-place write.
+// The certificate counts it as a line with no `i` (a root the caller keeps
+// alive, like a borrowed param). Here it is a borrowed root for as long as the
+// slot keeps it: a call may reassign the global (`__mg_take` + drop), and a
+// store of any other value replaces it, so either ends the root.
+
+impl OwnershipScan {
+    fn record_const(&mut self, dst: ValueId, value: i64) {
+        self.consts.insert(dst, value);
+    }
+
+    /// `LoadHandle` of a constant address in the mutable-global slot region
+    /// ([`mg_slot_addr`]): a handle the slot at that address holds. Any other
+    /// untracked address stays off the model.
+    fn load_slot_root(&mut self, dst: ValueId, addr: ValueId) {
+        let Some(&slot) = self.consts.get(&addr) else { return };
+        let base = i64::from(MG_SLOT_BASE);
+        if slot < base || (slot - base) % 8 != 0 {
+            return;
+        }
+        self.object_of.insert(dst, dst);
+        self.dead.insert(dst, false);
+        self.borrowed.insert(dst);
+        self.slot_roots.insert(dst, slot);
+    }
+
+    /// After an op: a call, or a store into a slot of anything but a carrier
+    /// of the root it holds, ends the slot roots it may have replaced.
+    fn end_slot_roots(&mut self, op: &Op) {
+        if self.slot_roots.is_empty() {
+            return;
+        }
+        let ended: Vec<ValueId> = match op {
+            Op::Call { .. } | Op::CallFn { .. } | Op::CallImport { .. } | Op::CallIndirect { .. } => {
+                self.slot_roots.keys().copied().collect()
+            }
+            Op::Prim { kind: PrimKind::Store { .. }, args, .. } => {
+                let (Some(slot), Some(val)) = (args.first().and_then(|a| self.consts.get(a)), args.get(1)) else {
+                    return;
+                };
+                let kept = self.carried.get(val).copied();
+                self.slot_roots.iter().filter(|(r, s)| *s == slot && Some(**r) != kept).map(|(r, _)| *r).collect()
+            }
+            _ => return,
+        };
+        for r in ended {
+            self.slot_roots.remove(&r);
+            self.borrowed.remove(&r);
+            self.dead.insert(r, true);
+        }
+    }
+
+    /// `prim.handle(src)` of a slot root: the integer the COW write-back stores.
+    fn record_carrier(&mut self, dst: Option<ValueId>, args: &[ValueId]) {
+        if let (Some(d), Some(&src)) = (dst, args.first()) {
+            if self.slot_roots.contains_key(&src) {
+                self.carried.insert(d, src);
+            }
+        }
+    }
+}
