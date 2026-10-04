@@ -153,3 +153,40 @@ fn a_module_export_that_does_not_lower_refuses_the_module() {
     assert!(!ok && bytes.is_empty(), "a declared module export that does not lower must refuse the build:\n{err}");
     assert!(err.contains("error[E082]") && err.contains("exported function `sub.grow`"), "{err}");
 }
+
+/// #3285: `@export(wasm, ..)` on a generic fn used to be skipped — the build
+/// shipped without the export. It is E082 in every module, at build time and
+/// at `almide check --target wasm` time.
+#[test]
+fn a_generic_export_is_e082_in_every_module() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let app = dir.path().join("exp");
+    write(&app.join("almide.toml"), TOML);
+    write(&app.join("src/sub.almd"), "@export(wasm, \"first\")\npub fn first[T](xs: List[T], d: T) -> T = list.first(xs) ?? d\n");
+    write(&app.join("src/main.almd"), "import self.sub\neffect fn main() -> Unit = println(int.to_string(sub.first([3], 0)))\n");
+    let root_src = "@export(wasm, \"ident\")\npub fn ident[T](x: T) -> T = x\n\neffect fn main() -> Unit = println(int.to_string(ident(1)))\n";
+    let solo = dir.path().join("solo");
+    write(&solo.join("almide.toml"), TOML);
+    write(&solo.join("src/main.almd"), root_src);
+    for (app, fn_name) in [(&app, "sub.first"), (&solo, "ident")] {
+        let entry = "src/main.almd";
+        let wasm = app.join("g.wasm");
+        let build = Command::new(almide())
+            .current_dir(app)
+            .args(["build", entry, "--target", "wasm", "-o", wasm.to_str().unwrap()])
+            .output()
+            .expect("spawn almide");
+        let check = Command::new(almide()).current_dir(app).args(["check", entry, "--target", "wasm"]).output().expect("spawn almide");
+        for (what, out) in [("build", build), ("check --target wasm", check)] {
+            let err = String::from_utf8_lossy(&out.stderr).into_owned();
+            assert!(!out.status.success(), "{what} ({fn_name}): a generic export must refuse, not ship without it:\n{err}");
+            assert!(
+                err.contains("error[E082]")
+                    && err.contains(&format!("exported function `{fn_name}` is generic"))
+                    && err.contains("a wasm export needs a concrete signature"),
+                "{what} ({fn_name}):\n{err}"
+            );
+        }
+        assert!(!wasm.exists(), "no artifact for {fn_name}");
+    }
+}

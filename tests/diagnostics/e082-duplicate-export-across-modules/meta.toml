@@ -1,0 +1,3 @@
+check_target = "wasm"
+expects_code = "E082"
+expects_error = "duplicate wasm export name `tick`"

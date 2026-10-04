@@ -1,0 +1,8 @@
+// The artifact has one export namespace: a root export and a module
+// export claiming one name refuse the build, naming both (#3281).
+import self.clock
+
+@export(wasm, "advance")
+fn advance(x: Int) -> Int = clock.step(x) * 2
+
+effect fn main() -> Unit = println(int.to_string(advance(1)))
