@@ -15,12 +15,14 @@ fn kv_count(prefix: String) -> Int
 @extern(wasm, "js", "log_line")
 fn log_line(msg: String) -> Unit
 
-local fn present(v: String, key: String) -> Result[String, String] =
-  if string.len(v) > 0 then ok(v) else err("missing ${key}")
+local fn present(v: String, key: String) -> Result[String, String] = if string.len(v) > 0 then ok(v) else err("missing ${key}")
 
 fn lookup(key: String) -> String = "value=" + kv_get(key)
 
-fn total(keys: List[String]) -> Int = keys |> list.map((k) => kv_count(k)) |> list.fold(0, (a, b) => a + b)
+fn total(keys: List[String]) -> Int = keys |> list.map((k) => kv_count(k)) |> list.fold(
+  0,
+  (a, b) => a + b,
+)
 
 effect fn must_get(key: String) -> String = present(kv_get(key), key)!
 

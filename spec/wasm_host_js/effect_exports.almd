@@ -4,8 +4,7 @@
 // message — for every marshalled return type, next to the plain fn of the
 // same type. `pass` picks the exit. `main` prints the native reference
 // lines; the host-side matrix lives in effect_exports.host.mjs.
-local fn gate(pass: Bool, what: String) -> Result[Int, String] =
-  if pass then ok(1) else err("no ${what}")
+local fn gate(pass: Bool, what: String) -> Result[Int, String] = if pass then ok(1) else err("no ${what}")
 
 effect fn e_string(pass: Bool) -> String = {
   let n = gate(pass, "string")!

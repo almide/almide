@@ -320,3 +320,14 @@ spec/wasm_cross/top_let_rc_value.almd :: main  # #2739
 # #2739, which stays open until they lower.
 spec/integration/closure_module_var_write/src/main.almd :: main  # #2739
 spec/wasm_cross/closure_bytes_list_index_arg.almd :: from_global  # #2739
+# (2026-10-05, #3354 marshal_blocks fixture) three rows the --host js
+# marshalling fixture exposes on the incumbent MIR brick: `opt_greet`,
+# `e_opt_inc` and `e_opt_greet` return a heap Option through a `match`
+# ("heap-result `match` outside the executable subset cannot be faithfully
+# returned in this brick"). The Option boundary is the shape the fixture exists
+# to pin, so it is not rewritten around. The structural leg (the default wasm
+# route, which --host js builds on) runs it under scripts/check-js-host.sh and
+# matches its expected output. Owned by #2739, which stays open until they lower.
+spec/wasm_host_js/marshal_blocks.almd :: e_opt_greet  # #2739
+spec/wasm_host_js/marshal_blocks.almd :: e_opt_inc  # #2739
+spec/wasm_host_js/marshal_blocks.almd :: opt_greet  # #2739
