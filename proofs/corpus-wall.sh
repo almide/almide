@@ -367,8 +367,13 @@ fi
 #   effect fn wrote back the then arm's copy-on-write clone. Before #3267 the
 #   producer's handle map was not scoped to the path, so the read counted on
 #   the param's line (`adad`) and certified.
+#   3298-borrowed-param-loop-slot.cert — a loop that drops a borrowed `mut`
+#   param and rebinds it (`Drop p; SetLocal p = new`, the functional rebind of
+#   `map.insert` in a tail-recursive fn): the first drop releases the caller's
+#   reference. Before #3298 the slot fold read the param's line as `(id)`,
+#   rc-preserving from 0, and certified; unfolded it is `i` / `d`.
 echo
-echo "== POISON RATCHET (negative leg, #3229, #3233, #3261, #3263, #3267): every poisoned certificate is REJECTED by all three verdicts =="
+echo "== POISON RATCHET (negative leg, #3229, #3233, #3261, #3263, #3267, #3298): every poisoned certificate is REJECTED by all three verdicts =="
 POISONED=("$ROOT"/proofs/poisoned-certs/*.cert)
 if [ ! -e "${POISONED[0]}" ]; then
   echo "POISON RATCHET FAIL: proofs/poisoned-certs/ holds no certificate — the negative leg would pass vacuously." >&2

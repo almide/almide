@@ -547,3 +547,36 @@ pub(crate) fn handle_uses(op: &Op) -> Vec<ValueId> {
         _ => drop_family_value(op).into_iter().collect(),
     }
 }
+
+/// Borrowed roots — heap params (the caller keeps them) and handles loaded
+/// out of another block (`LoadHandle`) — that the function DROPS before it
+/// rebinds them (`Drop p; SetLocal p = new`). Such a `SetLocal` is NOT folded
+/// into a slot: the fold reads the drop as the previous rebind's object,
+/// rc-preserving from 0 (`(id)`), while the first drop releases the caller's —
+/// or the parent block's — reference (#3298). Unfolded, that drop lands on the
+/// root's own line at count 0, which the checker rejects. A root rebound
+/// without a drop first (its old value left to its owner) still folds, and the
+/// lowering's pre-loop `Dup` copy is an ordinary owned slot.
+fn borrowed_roots(func: &MirFunction) -> BTreeSet<ValueId> {
+    let mut roots: BTreeSet<ValueId> = func.params.iter().filter(|p| p.repr.is_heap()).map(|p| p.value).collect();
+    for op in &func.ops {
+        if let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), .. } = op {
+            roots.insert(*d);
+        }
+    }
+    let mut dropped: BTreeSet<ValueId> = BTreeSet::new();
+    let mut refused: BTreeSet<ValueId> = BTreeSet::new();
+    for op in &func.ops {
+        if let Some(v) = drop_family_value(op) {
+            if roots.contains(&v) {
+                dropped.insert(v);
+            }
+        }
+        if let Op::SetLocal { local, .. } = op {
+            if dropped.contains(local) {
+                refused.insert(*local);
+            }
+        }
+    }
+    refused
+}
