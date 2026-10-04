@@ -151,6 +151,12 @@ impl Checker {
             let call_hint = self.let_call_fix_hint(value);
             self.constrain_with_hint(declared.clone(), val_ty, format!("let {}", name), call_hint);
             declared
+        } else if let Some(deferred) = self.deferred_record_literal(&val_ty) {
+            // #3290: an un-annotated binding of an anonymous record literal
+            // keeps the literal's deferred type, so the nominal record a later
+            // use unifies it with (a return, an argument, an element) is the
+            // binding's type and every use's.
+            deferred
         } else {
             let t = resolve_ty(&val_ty, &self.uf);
             // ADR-0008 (#1123 N+1): a Result on an un-annotated binding is an

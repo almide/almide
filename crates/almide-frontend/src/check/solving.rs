@@ -3,7 +3,7 @@
 use crate::types::Ty;
 use super::Checker;
 use super::err;
-use super::types::{is_inference_var, resolve_ty, FixHint, IfArm};
+use super::types::{is_inference_var, resolve_ty, resolve_ty_keeping_literals, FixHint, IfArm};
 
 impl Checker {
     pub(super) fn solve_constraints(&mut self) {
@@ -192,11 +192,22 @@ impl Checker {
         // but the inference var case never returns false — matching HashMap semantics.
         match (is_inference_var(a), is_inference_var(b)) {
             (Some(ia), Some(ib)) => {
+                if self.uf.is_record_literal(ia.0) || self.uf.is_record_literal(ib.0) {
+                    return self.union_record_literal(ia.0, ib.0);
+                }
                 self.uf.union(ia.0, ib.0);
                 true
             }
+            (Some(ia), None) if self.uf.is_record_literal(ia.0) => {
+                let b_resolved = resolve_ty_keeping_literals(b, &self.uf);
+                self.unify_record_literal(ia.0, b_resolved, false)
+            }
+            (None, Some(ib)) if self.uf.is_record_literal(ib.0) => {
+                let a_resolved = resolve_ty_keeping_literals(a, &self.uf);
+                self.unify_record_literal(ib.0, a_resolved, true)
+            }
             (Some(ia), None) => {
-                let b_resolved = resolve_ty(b, &self.uf);
+                let b_resolved = resolve_ty_keeping_literals(b, &self.uf);
                 if !self.uf.occurs(ia.0, &b_resolved) {
                     if let Some(existing) = self.uf.bind(ia.0, b_resolved.clone()) {
                         // Existing binding — try structural unify but don't fail
@@ -206,7 +217,7 @@ impl Checker {
                 true
             }
             (None, Some(ib)) => {
-                let a_resolved = resolve_ty(a, &self.uf);
+                let a_resolved = resolve_ty_keeping_literals(a, &self.uf);
                 if !self.uf.occurs(ib.0, &a_resolved) {
                     if let Some(existing) = self.uf.bind(ib.0, a_resolved.clone()) {
                         self.unify_infer(&a_resolved, &existing);
@@ -215,10 +226,61 @@ impl Checker {
                 true
             }
             (None, None) => {
-                let a_resolved = resolve_ty(a, &self.uf);
-                let b_resolved = resolve_ty(b, &self.uf);
+                let a_resolved = resolve_ty_keeping_literals(a, &self.uf);
+                let b_resolved = resolve_ty_keeping_literals(b, &self.uf);
                 self.unify_structural(&a_resolved, &b_resolved)
             }
+        }
+    }
+
+    /// An anonymous record literal's deferred type (#3290) against a concrete
+    /// type: the two must unify exactly as the literal's structural record
+    /// would, and a nominal record the literal unifies with becomes its type —
+    /// so the binding of `let e = { .. }` and every use of it carry `b.Extent`
+    /// once `e` reaches a slot of that type. A structural record never
+    /// replaces a nominal binding; the first nominal type wins.
+    /// `literal_is_actual`: the literal stands on the constraint's ACTUAL
+    /// side, so the pair keeps its orientation (an open-row slot `{ name, .. }`
+    /// is only satisfied as expected-vs-actual).
+    fn unify_record_literal(&mut self, id: u32, other: Ty, literal_is_actual: bool) -> bool {
+        let Some(existing) = self.uf.resolve(id).cloned() else {
+            self.uf.bind(id, other);
+            return true;
+        };
+        let ok = if literal_is_actual {
+            self.unify_infer(&other, &existing)
+        } else {
+            self.unify_infer(&existing, &other)
+        };
+        if ok
+            && super::types::is_structural_record(&existing)
+            && matches!(other, Ty::Named(..))
+            && super::types::is_structural_record(&self.env.resolve_named(&other))
+        {
+            self.uf.bind(id, other);
+        }
+        ok
+    }
+
+    /// `ty` when it is a record literal's deferred type still bound to its
+    /// structural record (#3290) — the binding must keep the variable, not the
+    /// shape it resolves to today.
+    pub(crate) fn deferred_record_literal(&self, ty: &Ty) -> Option<Ty> {
+        let id = is_inference_var(ty)?;
+        (self.uf.is_record_literal(id.0)
+            && self.uf.resolve(id.0).is_some_and(super::types::is_structural_record))
+            .then(|| ty.clone())
+    }
+
+    /// Two classes, at least one a record literal's (#3290): merged, and
+    /// their bindings unified the way the two concrete types they stand for
+    /// were before the literal's type was deferred.
+    fn union_record_literal(&mut self, a: u32, b: u32) -> bool {
+        let (ba, bb) = (self.uf.resolve(a).cloned(), self.uf.resolve(b).cloned());
+        self.uf.union(a, b);
+        match (ba, bb) {
+            (Some(x), Some(y)) => self.unify_infer(&x, &y),
+            _ => true,
         }
     }
 
