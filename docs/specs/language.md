@@ -294,6 +294,15 @@ Attribute names with semantic meaning today:
   runtime. See [§11 of module-system.md](./module-system.md#11-extern).
 - `@export(c, "symbol")` — export with C ABI. Paired with
   `--repr-c` output (see module-system §10).
+- `@export(wasm, "symbol")` — the fn is a `--target wasm` export named
+  `symbol` (not its own name) and a DCE root the host can call. Honoured in
+  every module linked into the artifact: the entry file, a sibling
+  `import self.x` module, a dependency package (#3281). A module's
+  un-annotated `pub fn`s are not exports; the entry file's are. The artifact
+  has one export namespace: two fns claiming one symbol, in any modules, and
+  a declared export that does not lower both refuse the build (E082, naming
+  the fns). テスト: `tests/wasm_export_attr_test.rs`,
+  `tests/wasm_export_nonroot_test.rs`.
 - `@inline_rust("template")` — **bundled stdlib only**. Routes the
   Rust target's codegen for the annotated fn to an inline template,
   overriding the TOML-backed `arg_transforms` dispatch. `{param_name}`
