@@ -131,6 +131,8 @@ struct OwnershipScan {
     addr_of: BTreeMap<ValueId, ValueId>,
     /// A raw `LoadHandle` child → the object it was loaded from (#3261).
     child_parent: BTreeMap<ValueId, ValueId>,
+    /// Handles a closed `IfThen` arm defined (#3267, lib_d.rs).
+    out_of_path: BTreeSet<ValueId>,
 }
 
     struct BranchFrame {
@@ -140,6 +142,8 @@ struct OwnershipScan {
         /// in one arm rewrites a slot's object; the other arm must still start
         /// from the entry binding (#3031).
         entry_object_of: BTreeMap<ValueId, ValueId>,
+        /// Every key tracked at the `IfThen` (#3267).
+        entry_keys: BTreeSet<ValueId>,
         then_exit: Option<ArmExit>,
         /// The `IfThen`'s result slot, and whether any arm MOVED a heap value
         /// into it — the branch-result modeling of #1037's second gap. An arm's
@@ -195,6 +199,7 @@ impl OwnershipScan {
     }
 
     fn step(&mut self, i: usize, op: &Op) {
+        self.check_defined_uses(i, op);
         match op {
             // Probe charge: no ownership event (no alloc, no dup, no drop).
             // The dyn charge READS its src (a borrow-class use, like a Prim
@@ -438,6 +443,7 @@ impl OwnershipScan {
             entry_rc: self.rc.clone(),
             entry_dead: self.dead.clone(),
             entry_object_of: self.object_of.clone(),
+            entry_keys: self.defined_keys(),
             then_exit: None,
             dst,
             moved_in: false,
@@ -457,6 +463,9 @@ impl OwnershipScan {
         // seen" witness either way).
         let diverged = std::mem::take(&mut self.diverged);
         let moved = if diverged { false } else { self.merge_val_move(val) };
+        if let Some(entry) = self.branches.last().map(|fr| fr.entry_keys.clone()) {
+            self.retire_arm_keys(&entry);
+        }
         if let Some(fr) = self.branches.last_mut() {
             fr.moved_in |= moved;
             fr.then_diverged = diverged;
@@ -478,6 +487,7 @@ impl OwnershipScan {
         let pending = std::mem::take(&mut self.diverged);
         let moved = if pending { false } else { self.merge_val_move(val) };
         if let Some(mut fr) = self.branches.pop() {
+            self.retire_arm_keys(&fr.entry_keys);
             let else_seen = fr.then_exit.is_some();
             let (then_diverged, else_diverged) = if else_seen {
                 (fr.then_diverged, pending)
@@ -899,6 +909,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
         diverged: false,
         addr_of: BTreeMap::new(),
         child_parent: BTreeMap::new(),
+        out_of_path: BTreeSet::new(),
     };
     for (i, op) in func.ops.iter().enumerate() {
         scan.step(i, op);
@@ -994,4 +1005,5 @@ fn release(
     }
 }
 
+include!("lib_d.rs");
 include!("lib_p2.rs");

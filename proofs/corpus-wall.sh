@@ -362,8 +362,13 @@ fi
 #   raw loaded child passed as a call's handle argument after the child's
 #   parent was released (`ibdb`). Before #3263 the carrier sat only in
 #   `addr_of`, the call-arg probe found no line, and the object read `ibd`.
+#   3267-cross-arm-handle.cert — the else arm of an `if` reads a handle only
+#   the then arm defined (`ad` / `bad`): the guard err arm of a `mut`-param
+#   effect fn wrote back the then arm's copy-on-write clone. Before #3267 the
+#   producer's handle map was not scoped to the path, so the read counted on
+#   the param's line (`adad`) and certified.
 echo
-echo "== POISON RATCHET (negative leg, #3229, #3233, #3261, #3263): every poisoned certificate is REJECTED by all three verdicts =="
+echo "== POISON RATCHET (negative leg, #3229, #3233, #3261, #3263, #3267): every poisoned certificate is REJECTED by all three verdicts =="
 POISONED=("$ROOT"/proofs/poisoned-certs/*.cert)
 if [ ! -e "${POISONED[0]}" ]; then
   echo "POISON RATCHET FAIL: proofs/poisoned-certs/ holds no certificate — the negative leg would pass vacuously." >&2

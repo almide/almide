@@ -134,6 +134,7 @@ pub fn ownership_certificate_with_poison(func: &MirFunction) -> (String, bool) {
         line_slots,
         addr_of: BTreeMap::new(),
         child_of: BTreeMap::new(),
+        paths: PathScopes::default(),
     };
     for op in &func.ops {
         scan.step(op);
@@ -417,5 +418,114 @@ impl CertScan {
             b += arm.get(&o).map_or(0, |l| seg_net(l));
         }
         b
+    }
+}
+
+/// The handle maps as one path sees them (#3267).
+type PathMaps = (BTreeMap<ValueId, ValueId>, BTreeMap<ValueId, ValueId>, BTreeMap<ValueId, ValueId>);
+
+/// The handle-to-object, address and loaded-child maps are scoped to the
+/// control-flow path: each arm of an `IfThen` starts from the maps at the
+/// `IfThen`, and after the `EndIf` only what dominates the `if` stays. A
+/// handle an arm defined is not defined on the other arm's path, nor after the
+/// join (the merge value reaches the join through the `IfThen` dst). Before
+/// this, a handle the then arm bound stayed visible in the else arm, so the
+/// else arm's `Dup` of it counted on the then arm's object and certified a
+/// read of a value its path never computed (#3267, the guard err arm of a
+/// `mut`-param effect fn).
+#[derive(Default)]
+struct PathScopes {
+    /// The maps at each open `IfThen`, innermost last.
+    entry: Vec<PathMaps>,
+    /// Handles some arm defined that are now out of scope.
+    out: BTreeSet<ValueId>,
+    /// Objects of handles now out of scope: a later `Return` still takes
+    /// its exit obligation on them, as before.
+    retired: BTreeSet<ValueId>,
+}
+
+impl CertScan {
+    fn path_maps(&self) -> PathMaps {
+        (self.s.of.clone(), self.addr_of.clone(), self.child_of.clone())
+    }
+
+    fn enter_branch_scope(&mut self) {
+        let maps = self.path_maps();
+        self.paths.entry.push(maps);
+    }
+
+    /// At `Else` (`is_end` false) and `EndIf`: retire what the arm just
+    /// closed defined, and restore the maps at the `IfThen`.
+    fn leave_arm(&mut self, is_end: bool) {
+        let Some(entry) = (if is_end { self.paths.entry.pop() } else { self.paths.entry.last().cloned() }) else {
+            return;
+        };
+        let defined = |m: &BTreeMap<ValueId, ValueId>, e: &BTreeMap<ValueId, ValueId>| {
+            m.keys().filter(|k| !e.contains_key(k)).copied().collect::<Vec<_>>()
+        };
+        let mut gone = defined(&self.s.of, &entry.0);
+        gone.extend(defined(&self.addr_of, &entry.1));
+        gone.extend(defined(&self.child_of, &entry.2));
+        self.paths.retired.extend(self.s.of.values().copied());
+        self.paths.out.extend(gone);
+        (self.s.of, self.addr_of, self.child_of) = entry;
+    }
+
+    /// Is `v` a handle some arm defined that the current path does not?
+    fn out_of_path(&self, v: ValueId) -> bool {
+        self.paths.out.contains(&v)
+            && !self.s.of.contains_key(&v)
+            && !self.addr_of.contains_key(&v)
+            && !self.child_of.contains_key(&v)
+    }
+
+    /// A use of a handle the current path never defined reads a value that
+    /// was not computed: a `b` on that handle's own line, at count 0, which
+    /// the checker rejects.
+    fn cross_path_probes(&mut self, op: &Op) {
+        let uses: Vec<ValueId> = handle_uses(op).into_iter().filter(|v| self.out_of_path(*v)).collect();
+        for v in uses {
+            self.s.event(v, 'b');
+        }
+    }
+
+    /// Frame-targeted early exit (law 6): the returned value MOVES out HERE
+    /// — the same boundary `m` the tail emits for `func.ret` — then every
+    /// object tracked so far takes the divergence marker `x` (+0) into the
+    /// current arm buffer, so each object's `{then|else}` bracket carries its
+    /// own exit obligation. An object created later (in the surviving
+    /// continuation) gets no `x`; a borrowed param's lone `x` sits at 0.
+    fn return_step(&mut self, val: Option<ValueId>) {
+        if let Some(v) = val {
+            if self.s.of.contains_key(&v) {
+                let o = self.s.object_of(v);
+                self.s.event(o, 'm');
+            }
+        }
+        let mut objs: BTreeSet<ValueId> = self.s.of.values().copied().collect();
+        objs.extend(self.paths.retired.iter().copied());
+        for o in objs {
+            self.s.event(o, 'x');
+        }
+    }
+}
+
+/// Every value an op reads as a handle or an address.
+pub(crate) fn handle_uses(op: &Op) -> Vec<ValueId> {
+    match op {
+        Op::Dup { src, .. } => vec![*src],
+        Op::Consume { v } | Op::Borrow { v } | Op::MakeUnique { v } => vec![*v],
+        Op::ListGetScalar { list, .. } | Op::ListSetScalar { list, .. } => vec![*list],
+        Op::ChargeDyn { src, .. } => vec![*src],
+        Op::SetLocal { src, .. } => vec![*src],
+        Op::Pure { uses, .. } => uses.clone(),
+        Op::Prim { args, .. } => args.clone(),
+        Op::IntBinOp { a, b, .. } => vec![*a, *b],
+        Op::Else { val } | Op::EndIf { val } | Op::Return { val } => val.iter().copied().collect(),
+        Op::Call { args, .. } | Op::CallFn { args, .. } | Op::CallImport { args, .. } | Op::CallIndirect { args, .. } => args
+            .iter()
+            .filter_map(|a| if let CallArg::Handle(v) = a { Some(*v) } else { None })
+            .collect(),
+        _ => drop_family_value(op).into_iter().collect(),
     }
 }
