@@ -6,11 +6,16 @@
 //! atomics exist) — and writes the results back in list order.
 //!
 //! Workers are pooled per run: instantiated once, reused by every later
-//! offer of the run, from any fan site. The worker count is the available
-//! parallelism (capped by `ALMIDE_FAN_THREADS`) and never more than the
-//! elements; the elements are dealt dynamically (each worker takes the next
-//! unclaimed index), so a worker slowed by a busy core does less of the work
-//! instead of holding the offer back.
+//! offer of the run, from any fan site. The cost model (#3341, [`plan`] —
+//! the native runtime's `almide_rt_fan_plan` with the same constants, pinned
+//! to docs/benchmarks/fan-cost-model.txt) picks the worker count from the
+//! site's last measured compute time per element — a site's first offer
+//! goes parallel — capped by the available parallelism and
+//! `ALMIDE_FAN_THREADS`; when a parallel offer would cost more than it
+//! saves, one worker runs the whole map on the calling thread. Parallel
+//! elements are dealt dynamically (each worker takes the next unclaimed
+//! index), so a worker slowed by a busy core does less of the work instead
+//! of holding the offer back.
 //!
 //! **The reset invariant.** A pooled worker carries ONLY its heap from one
 //! chunk to the next — the allocator state and whatever blocks earlier
@@ -35,7 +40,7 @@
 //! `Host` and dropped with it — and the sequential run then produces exactly
 //! the observation it always did.
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::{Host, StdinSource};
@@ -46,6 +51,32 @@ pub(super) const OP_FAN_PAR: i32 = 74;
 /// A worker whose linear memory grew past this is re-instantiated rather
 /// than pooled (the reset invariant above).
 const RESET_BYTES: usize = 64 << 20;
+
+/// The fan cost model (#3341) — the SAME formula and constants as the native
+/// runtime's `almide_rt_fan_plan` (runtime/rs/src/list.rs), pinned to
+/// docs/benchmarks/fan-cost-model.txt by tests/fan_cost_model_test.rs. A
+/// parallel offer of `n` elements on W workers costs `OFFER + W·WORKER` and
+/// saves `t·(n − ⌈n/W⌉)`, `t` the site's last measured time per element;
+/// the largest positive net saving wins.
+const FAN_OFFER_NS: u128 = 30_000;
+const FAN_WORKER_NS: u128 = 9_000;
+
+/// The worker count for an offer of `n` elements whose site last measured
+/// `per_elem` ns per element (`None` = its first offer): >= 2 = parallel on
+/// that many workers, 1 = stay sequential.
+fn plan(n: usize, per_elem: Option<u128>) -> usize {
+    let off = almide_base::env::flag("ALMIDE_FAN_COST_OFF");
+    let Some(t) = per_elem.filter(|_| !off) else { return worker_count(n) };
+    let mut best = (1usize, 0u128);
+    for w in 2..=worker_count(n) {
+        let saved = t.saturating_mul((n - n.div_ceil(w)) as u128);
+        let cost = FAN_OFFER_NS + FAN_WORKER_NS * w as u128;
+        if saved > cost && saved - cost > best.1 {
+            best = (w, saved - cost);
+        }
+    }
+    best.0
+}
 
 /// What a worker needs: the run's engine, compiled module and import set,
 /// the run's own resource bounds — and the pooled workers.
@@ -60,6 +91,8 @@ pub(super) struct ParCtx {
     ticked: Option<Arc<AtomicBool>>,
     args: Vec<String>,
     pool: Mutex<Vec<Worker>>,
+    /// Per site: the last measured compute time per element (ns).
+    history: Mutex<std::collections::HashMap<String, u128>>,
 }
 
 impl ParCtx {
@@ -69,7 +102,7 @@ impl ParCtx {
         ticked: Option<Arc<AtomicBool>>,
         args: Vec<String>,
     ) -> Self {
-        ParCtx { engine, module, linker, max_memory_bytes, ticked, args, pool: Mutex::new(Vec::new()) }
+        ParCtx { engine, module, linker, max_memory_bytes, ticked, args, pool: Mutex::new(Vec::new()), history: Mutex::default() }
     }
 }
 
@@ -116,14 +149,18 @@ pub(super) fn serve(
     if b_len as u32 as usize != 8 * width * req.elems.len() {
         return Ok(0);
     }
-    let Some(results) = run_all(&ctx, &req) else {
+    let Some((results, workers)) = run_all(&ctx, &req) else {
         if almide_base::env::flag("ALMIDE_DBG_FAN") {
             eprintln!("[fan-dbg] {}: not served (a chunk failed), sequential", req.site);
         }
         return Ok(0);
     };
     if almide_base::env::flag("ALMIDE_DBG_FAN") {
-        eprintln!("[fan-dbg] {}: served on separate instances ({} elements)", req.site, req.elems.len());
+        if workers >= 2 {
+            eprintln!("[fan-dbg] {}: served on separate instances ({} elements, {workers} workers)", req.site, req.elems.len());
+        } else {
+            eprintln!("[fan-dbg] {}: served on one instance, the cost model kept it sequential ({} elements)", req.site, req.elems.len());
+        }
     }
     let mut b = Vec::with_capacity(b_len as u32 as usize);
     for v in results {
@@ -142,33 +179,36 @@ fn worker_count(n: usize) -> usize {
     cpus.min(cap.unwrap_or(usize::MAX)).min(n).max(1)
 }
 
-/// Every element's result slots, element-major — `None` if any chunk failed.
-fn run_all(ctx: &ParCtx, req: &Request) -> Option<Vec<i64>> {
+/// Every element's result slots, element-major, and the worker count — `None`
+/// if any chunk failed.
+fn run_all(ctx: &ParCtx, req: &Request) -> Option<(Vec<i64>, usize)> {
     let n = req.elems.len();
-    if n == 0 {
-        return Some(Vec::new());
-    }
-    let threads = worker_count(n);
-    let mut taken = {
-        let mut pool = ctx.pool.lock().ok()?;
-        let keep = pool.len().saturating_sub(threads);
-        pool.split_off(keep)
-    };
-    let next = AtomicUsize::new(0);
-    let failed = AtomicBool::new(false);
-    let deal = Deal { ctx, req, next: &next, failed: &failed };
-    let parts: Vec<Option<(Worker, Vec<(usize, Vec<i64>)>)>> = std::thread::scope(|s| {
-        let handles: Vec<_> = (0..threads)
-            .map(|_| {
-                let w = taken.pop();
-                let deal = &deal;
-                s.spawn(move || deal.run(w))
-            })
-            .collect();
-        handles.into_iter().map(|h| h.join().ok().flatten()).collect()
-    });
     let width = req.fields.len().max(1);
     let mut out = vec![0i64; n * width];
+    if n == 0 {
+        return Some((out, 0));
+    }
+    let estimate = ctx.history.lock().ok().and_then(|h| h.get(&req.site).copied());
+    let workers = plan(n, estimate);
+    let next = AtomicUsize::new(0);
+    let failed = AtomicBool::new(false);
+    let busy = AtomicU64::new(0);
+    let deal = Deal { ctx, req, next: &next, failed: &failed, busy: &busy };
+    let mut taken = take(ctx, workers);
+    let parts: Vec<Option<(Worker, Vec<(usize, Vec<i64>)>)>> = if workers < 2 {
+        vec![deal.run(taken.pop())]
+    } else {
+        std::thread::scope(|s| {
+            let handles: Vec<_> = (0..workers)
+                .map(|_| {
+                    let w = taken.pop();
+                    let deal = &deal;
+                    s.spawn(move || deal.run(w))
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().ok().flatten()).collect()
+        })
+    };
     let mut ok = !failed.load(Ordering::SeqCst);
     let mut back = Vec::new();
     for part in parts {
@@ -186,7 +226,17 @@ fn run_all(ctx: &ParCtx, req: &Request) -> Option<Vec<i64>> {
     if let Ok(mut pool) = ctx.pool.lock() {
         pool.extend(back);
     }
-    ok.then_some(out)
+    if ok && let Ok(mut h) = ctx.history.lock() {
+        h.insert(req.site.clone(), u128::from(busy.load(Ordering::SeqCst)) / n as u128);
+    }
+    ok.then_some((out, workers))
+}
+
+/// Up to `k` pooled workers (fewer when the pool is short).
+fn take(ctx: &ParCtx, k: usize) -> Vec<Worker> {
+    let Ok(mut pool) = ctx.pool.lock() else { return Vec::new() };
+    let keep = pool.len().saturating_sub(k);
+    pool.split_off(keep)
 }
 
 /// A finished worker goes back to the pool only when nothing of its run is
@@ -204,24 +254,32 @@ struct Deal<'a> {
     req: &'a Request,
     next: &'a AtomicUsize,
     failed: &'a AtomicBool,
+    /// The elements' compute time, summed over the workers (ns).
+    busy: &'a AtomicU64,
 }
 
 impl Deal<'_> {
     /// One thread: its worker (pooled, or instantiated now) takes the next
     /// unclaimed element until none is left or another chunk failed.
     fn run(&self, pooled: Option<Worker>) -> Option<(Worker, Vec<(usize, Vec<i64>)>)> {
-        let got = self.work(pooled);
+        let got = match pooled {
+            Some(w) => Some(w),
+            None => instantiate(self.ctx).ok(),
+        }
+        .and_then(|mut w| {
+            let (func, params) = self.arm(&mut w)?;
+            self.drain(w, func, &params)
+        });
         if got.is_none() {
             self.failed.store(true, Ordering::SeqCst);
         }
         got
     }
 
-    fn work(&self, pooled: Option<Worker>) -> Option<(Worker, Vec<(usize, Vec<i64>)>)> {
-        let mut w = match pooled {
-            Some(w) => w,
-            None => instantiate(self.ctx).ok()?,
-        };
+    /// Ready a worker for this offer: its deadline, the site's export and
+    /// its parameter types — `None` when the watchdog already fired or the
+    /// export does not have the offer's shape.
+    fn arm(&self, w: &mut Worker) -> Option<(wasmtime::Func, Vec<wasmtime::ValType>)> {
         if let Some(t) = &self.ctx.ticked {
             // deadline first, then the check: a tick after the check still
             // lands on this deadline
@@ -233,24 +291,37 @@ impl Deal<'_> {
         let func = w.instance.get_func(&mut w.store, &self.req.site)?;
         let ty = func.ty(&w.store);
         let params: Vec<wasmtime::ValType> = ty.params().collect();
-        if params.len() != 1 + self.req.caps.len() || ty.results().len() != 1 {
+        (params.len() == 1 + self.req.caps.len() && ty.results().len() == 1).then_some((func, params))
+    }
+
+    /// Element `i` on worker `w`: its result slots, read out before the
+    /// worker's next chunk allocates.
+    fn one(&self, w: &mut Worker, func: wasmtime::Func, params: &[wasmtime::ValType], i: usize) -> Option<Vec<i64>> {
+        let bits = std::iter::once(self.req.elems[i]).chain(self.req.caps.iter().copied());
+        let args: Vec<wasmtime::Val> = params.iter().zip(bits).map(|(p, b)| to_val(p, b)).collect();
+        let mut ret = [wasmtime::Val::I32(0)];
+        let t0 = std::time::Instant::now();
+        func.call(&mut w.store, &args, &mut ret).ok()?;
+        self.busy.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        if w.store.data().exit.lock().map_or(true, |e| e.is_some()) {
             return None;
         }
+        self.read_result(w, &ret[0])
+    }
+
+    /// Take unclaimed elements on `w` until none is left (or a chunk failed).
+    fn drain(&self, mut w: Worker, func: wasmtime::Func, params: &[wasmtime::ValType]) -> Option<(Worker, Vec<(usize, Vec<i64>)>)> {
         let mut done = Vec::new();
         loop {
             if self.failed.load(Ordering::SeqCst) {
                 return None;
             }
             let i = self.next.fetch_add(1, Ordering::SeqCst);
-            let Some(&x) = self.req.elems.get(i) else { break };
-            let bits = std::iter::once(x).chain(self.req.caps.iter().copied());
-            let args: Vec<wasmtime::Val> = params.iter().zip(bits).map(|(p, b)| to_val(p, b)).collect();
-            let mut ret = [wasmtime::Val::I32(0)];
-            func.call(&mut w.store, &args, &mut ret).ok()?;
-            if w.store.data().exit.lock().map_or(true, |e| e.is_some()) {
-                return None;
+            if i >= self.req.elems.len() {
+                break;
             }
-            done.push((i, self.read_result(&w, &ret[0])?));
+            let vals = self.one(&mut w, func, params, i)?;
+            done.push((i, vals));
         }
         Some((w, done))
     }

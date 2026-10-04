@@ -1,0 +1,86 @@
+# Fan cost model ledger (#3341) — the constants both legs' parallel-offer
+# decision uses, and the measurements they come from.
+# Pinned by tests/fan_cost_model_test.rs to the native runtime
+# (runtime/rs/src/list.rs `almide_rt_fan_plan`) and the embedded wasm host
+# (crates/almide-wasm-run/src/host_fan.rs `plan`): change a constant here
+# and in both copies, with the measurement that justifies it.
+#
+# The model. Every parallel twin is a SITE (native: one per callback type;
+# wasm: one per `__fan_site_K` export), and every offer at a site records
+# the compute time its elements took (inside the elements — spawn latency
+# is not counted): t ns per element. A site's FIRST offer goes parallel, as
+# before #3341. A later offer of n elements on W workers costs
+#   offer_ns + W * worker_ns   (thread spawn and join, the fan group's
+# bookkeeping; on wasm, the request round trip and the worker calls) and
+# saves   t * (n - ceil(n / W)).   The W in 2..=workers with the largest
+# positive net saving wins; none = the offer runs on the calling thread
+# (wasm: on one pooled instance), sequentially. Output is the same on every
+# path (C-321). ALMIDE_FAN_COST_OFF restores the pre-#3341 behaviour
+# (always parallel).
+#
+# Rejected: timing element 0 on the calling thread and deciding after it.
+# It serialises one whole chunk before the parallel part — measured on
+# fannkuchredux (10 chunks of ~18 ms): native 21 -> 35 ms, wasm 29 -> 45 ms.
+#
+# What it cannot see: a site's first offer (always parallel, so one cheap
+# offer pays ~40-120 us once), and a site whose work per element swings
+# between offers (the estimate is the last offer's).
+
+offer_ns  = 30_000
+worker_ns = 9_000
+
+# ── Where the constants come from ─────────────────────────────────────────
+# 2026-10-04, arm64 Darwin, 14 cores (10 P + 4 E), almide 0.65.1 (dev) at
+# fan-par-3003-pool; load average 25 (the machine was never quieter — a
+# loaded machine makes spawn/join SLOWER, so these are upper estimates and
+# the model errs toward sequential). Probe: 300 offers of a 10-element fan
+# map whose chunk does no work (scratch program `xover.almd -- 0 300 10`),
+# `almide bench` min of 5 runs x 2 rounds, ALMIDE_FAN_THREADS pinning W.
+# ms per run:
+#
+#   W        native   wasm (pooled)
+#   seq       5.73      0.02     native seq still spawned the single-arm
+#                                block's thread (19-25 us/offer) — #3341
+#                                inlines a one-arm fan, so it is gone
+#   1        11.13     11.65
+#   2        13.24     11.07
+#   4        16.48     15.40
+#   8        17.90     21.28
+#   10       29.42     26.87
+#
+# per offer: ~37-39 us at W=1, + ~6-9 us per further worker, both legs
+# -> offer_ns = 30 us, worker_ns = 9 us (the conservative end).
+#
+# Predicted crossover at n = 10 (r = 9, W = 9): t1 * 8 > 30 + 81 us, i.e.
+# t1 > ~14 us per element. The pre-model sweep agreed (load 37, 100 offers
+# x 10 elements, min of 5, ms per run):
+#
+#   iters/elem   ~us/elem   native seq  native par   wasm seq  wasm par
+#   10           ~0         2.67        14.45        0.02      14.28
+#   1000         ~3         5.77        11.14        3.43      13.81
+#   3000         ~10        12.53       13.93        14.97     15.92
+#   10000        ~35        35.60       22.34        41.23     42.30
+#   30000        ~120       120.97      50.87        378.59    53.59
+#
+# parallel loses at ~10 us/element and wins at ~35 us/element on both legs.
+# (`native seq` above includes the one-arm block thread #3341 removed.)
+
+# ── After #3341 (the model on) ────────────────────────────────────────────
+# Same probe program, 100 offers x 10 elements, min of 5, load 13-14; ms
+# per run. seq = ALMIDE_FAN_SEQUENTIAL / ALMIDE_FAN_PAR_OFF, par =
+# ALMIDE_FAN_COST_OFF (the pre-#3341 behaviour), model = the default.
+#
+#   iters   native seq  model    par   |  wasm seq  model    par
+#   0         0.03      0.15     8.84  |   0.01     0.51    11.22
+#   100       0.27      0.40     8.90  |   0.27     0.83    11.33
+#   1000      2.85      2.99     8.98  |   3.01     3.70    12.12
+#   3000      8.40      8.65    11.12  |   9.29     9.20    11.92
+#   5000     14.14      8.04    13.21  |  15.55     9.23    13.19
+#   10000    28.40     11.46    12.08  |  31.01    12.38    15.67
+#   30000    85.72     22.86    23.41  |  92.97    27.05    26.40
+#
+# The model tracks min(seq, par) on both legs and beats both in the middle
+# (it picks fewer workers than the cores). The residue over seq at the cheap
+# end is the site's first offer, which always goes parallel.
+# fannkuchredux (args=10, one offer of 10 chunks of ~18 ms) is unchanged:
+# its first offer goes parallel exactly as before.

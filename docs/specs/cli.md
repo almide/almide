@@ -1025,6 +1025,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_EXPECT_TOOLS` | harness | make a harness test FAIL instead of skipping when an external tool (wasmtime, wasm-tools) is missing; CI sets it |
 | `ALMIDE_F32_SWEEP_N=value` | harness | how many xorshift32 bit patterns the Float32 printer sweep prints (`${x}` and `float32.to_string`) and compares with Rust f32 Display on each leg (default 100000; tests/float32_to_string_cross_target_test.rs) |
 | `ALMIDE_FALLBACK_NAMES` | tool | make `almide test` print one `FALLBACK <file>` line per file the wasm leg did not pass — the wasm coverage ratchet's data feed |
+| `ALMIDE_FAN_COST_OFF` | ablation | go parallel on every `fan` offer the cost model (#3341) would keep sequential — the pre-#3341 behaviour, on both legs (native threads and the embedded wasm host's instances); the ablation the crossover measurement and the parallel-path tests use |
 | `ALMIDE_FAN_PAR_OFF` | ablation | keep `fan` chunk maps off the structural leg's instance-parallel offer (#3003): every chunk runs sequentially in the run's own instance |
 | `ALMIDE_FAN_SEQUENTIAL` | runtime | run `fan.*` sequentially in the native runtime (a determinism lever for measurement; the observable result is the same by contract) |
 | `ALMIDE_FAN_THREADS=value` | runtime | cap the worker count of `fan`'s parallel maps on both legs — native threads and the embedded wasm host's chunk instances (#3003; a measurement lever for thread-scaling curves, the observable result is the same by contract; default: available parallelism) |
