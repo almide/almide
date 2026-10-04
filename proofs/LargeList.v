@@ -798,3 +798,76 @@ Qed.
 Remark hit_keeps_frontier : forall st w q z l',
   take (fl st) w (heap st) = TFound q z l' -> heap (snd (lalloc st w)) = heap st.
 Proof. intros st w q z l' H. unfold lalloc. rewrite H. reflexivity. Qed.
+
+(* ══ ALIGNMENT ════════════════════════════════════════════════════════
+   Every block total is 4-aligned (`(cap + 15) & -4`) and so is every
+   base the runtime produces; merges add and splits subtract aligned
+   sizes, so the free list stays aligned. The composition (StructuralRun)
+   needs it to read the bump's `(base + 12 + len + 3) & -4` as base + want. *)
+
+Definition al4 (e : ext) : Prop := fst e mod 4 = 0 /\ snd e mod 4 = 0.
+
+Lemma al4_sum : forall a b c, a mod 4 = 0 -> b mod 4 = 0 -> c mod 4 = 0 -> al4 (a, b + c).
+Proof.
+  intros a b c Ha Hb Hc. split; [ exact Ha | cbn ].
+  rewrite Z.add_mod by lia. rewrite Hb, Hc. reflexivity.
+Qed.
+
+Lemma merge_succ_al4 : forall e post, al4 e -> Forall al4 post -> Forall al4 (merge_succ e post).
+Proof.
+  intros [b t] post [Hb Ht] Hp. destruct post as [ | [q s] post' ]; cbn.
+  - constructor; [ split; assumption | constructor ].
+  - inversion Hp as [ | ? ? [Hq Hs] Hp' ]; subst. cbn in *.
+    destruct (b + t =? q).
+    + constructor; [ apply al4_sum; assumption | exact Hp' ].
+    + constructor; [ split; assumption | exact Hp ].
+Qed.
+
+Lemma link_pred_al4 : forall x l, al4 x -> Forall al4 l -> Forall al4 (link_pred x l).
+Proof.
+  intros [b t] l [Hb Ht] Hl. destruct l as [ | [q s] r ]; cbn.
+  - constructor; [ split; assumption | constructor ].
+  - inversion Hl as [ | ? ? [Hq Hs] Hr ]; subst. cbn in *.
+    destruct (b + t =? q).
+    + constructor; [ apply al4_sum; assumption | exact Hr ].
+    + constructor; [ split; assumption | exact Hl ].
+Qed.
+
+Lemma ins_al4 : forall l e, Forall al4 l -> al4 e -> Forall al4 (ins l e).
+Proof.
+  induction l as [ | x r IH ]; intros e Hl He; cbn [ins].
+  - constructor; [ exact He | constructor ].
+  - inversion Hl as [ | ? ? Hx Hr ]; subst.
+    destruct (fst x <? fst e).
+    + destruct r as [ | y r' ].
+      * apply link_pred_al4; [ exact Hx | apply merge_succ_al4; [ exact He | constructor ] ].
+      * destruct (fst y <? fst e).
+        -- constructor; [ exact Hx | apply IH; assumption ].
+        -- apply link_pred_al4; [ exact Hx | apply merge_succ_al4; assumption ].
+    + apply merge_succ_al4; assumption.
+Qed.
+
+Lemma take_al4 : forall l w h,
+  Forall al4 l -> w mod 4 = 0 ->
+  match take l w h with
+  | TFound q z l' => al4 (q, z) /\ Forall al4 l'
+  | TExtend p l' => p mod 4 = 0 /\ Forall al4 l'
+  | TMiss => True
+  end.
+Proof.
+  induction l as [ | [q z] r IH ]; intros w h Hl Hw; cbn [take]; [ exact I | ].
+  inversion Hl as [ | ? ? [Hq Hz] Hr ]; subst. cbn in Hq, Hz.
+  destruct (z <? w).
+  - destruct r as [ | e r' ].
+    + destruct (q + z =? h); [ split; [ exact Hq | constructor ] | exact I ].
+    + specialize (IH w h Hr Hw).
+      destruct (take (e :: r') w h) as [ a b l' | p l' | ]; [ | | exact I ].
+      * destruct IH as [Hab Hl']. split; [ exact Hab | constructor; [ split; assumption | exact Hl' ] ].
+      * destruct IH as [Hp Hl']. split; [ exact Hp | constructor; [ split; assumption | exact Hl' ] ].
+  - destruct (SPLIT <=? z - w).
+    + split; [ split; assumption | ].
+      constructor; [ | exact Hr ]. split; cbn.
+      * rewrite Z.add_mod by lia. rewrite Hq, Hw. reflexivity.
+      * rewrite Zminus_mod. rewrite Hz, Hw. reflexivity.
+    + split; [ split; assumption | exact Hr ].
+Qed.
