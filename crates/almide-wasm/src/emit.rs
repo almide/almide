@@ -221,6 +221,7 @@ fn emit_program_pass(
             refuse,
             param_owned: Vec::new(),
             param_mut,
+            param_mut_decl: f.params.iter().map(|p| p.is_mut).collect(),
             import,
             scoped_entry: f.is_scoped_block_entry(),
         });
