@@ -256,10 +256,16 @@ fn rewrite_calls_stmt(stmt: IrStmt, sigs: &HashMap<String, Vec<ParamBorrow>>, mo
 /// would re-borrow the cell while it is mutably borrowed and panic. Those
 /// siblings are hoisted too, so they evaluate before the borrow is taken.
 pub fn hoist_conflicting_reads(program: &mut IrProgram) {
+    // Another module's global is reached through a USE-SITE var
+    // (`module_origin` set), a different VarId than its declaration, and the
+    // walker renders its `&mut` place through the same cell (#3307).
     let globals: HashSet<VarId> = program.top_lets.iter()
         .chain(program.modules.iter().flat_map(|m| m.top_lets.iter()))
         .filter(|tl| tl.mutable)
         .map(|tl| tl.var)
+        .chain(program.var_table.entries.iter().enumerate()
+            .filter(|(_, vi)| vi.module_origin.is_some())
+            .map(|(i, _)| VarId(i as u32)))
         .collect();
     let IrProgram { functions, modules, var_table, .. } = program;
     let mut cx = HoistCx { vt: var_table, globals: &globals };
