@@ -484,6 +484,16 @@ fn read_operand(x: &IrExpr, position: &str) -> Option<Why> {
         IrExprKind::IndexAccess { .. } | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } => {
             value_subset(x).map(|w| w.inside(position))
         }
+        // #2758: `r ?? v` / `r ?? "lit"` over a bound carrier: a join that is
+        // never owned (arg_temps.rs `unwrap_or_joins_owned`, the predicate
+        // `own_unwrap_or_join` reads), so both arms are views and the arm
+        // hook records no site — a read like a slot read's. Any other
+        // fallback may own the join, and an owned join must be bound first.
+        IrExprKind::UnwrapOr { fallback, .. }
+            if matches!(fallback.kind, IrExprKind::Var { .. } | IrExprKind::LitStr { .. }) =>
+        {
+            value_subset(x).map(|w| w.inside(position))
+        }
         other => Some(Why::Deep(format!("heap-{position}:{}", tag(other)))),
     }
 }
