@@ -1120,6 +1120,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/r5_lowmisc_param_try_err.almd", class = "fixture" },
+  { path = "spec/wasm_cross/match_binder_stored_owned.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-076"
