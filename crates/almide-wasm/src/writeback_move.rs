@@ -30,7 +30,7 @@
 //! alias it takes itself (`let ys = xs`) still makes its judge copy.
 
 use almide_ir::visit::{walk_expr, IrVisitor};
-use almide_ir::{CallTarget, IrExpr, IrExprKind, IrPattern, IrStmt, IrStmtKind, VarId};
+use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind, VarId};
 
 use crate::emitter::Emitter;
 
@@ -43,83 +43,16 @@ pub(crate) struct BlockMoves {
     move_in: Option<MoveIn>,
 }
 
-/// #3337: one `mut` call site's write-back, as the block walk found it.
-#[derive(Clone)]
-struct MoveIn {
-    /// The call's argument slice (its identity).
-    at: usize,
-    /// The vars the statements right after the call write back.
-    vars: Vec<VarId>,
-    /// The call sits under `!` / `?`: an err leaves the frame between the
-    /// call and the write-back, so only a var that dies with the frame (a
-    /// plain local, never a param a carry hands back) may move.
-    wrapped: bool,
-    /// The tuple the call answered (`let t = f(…); let (r, b) = t`,
-    /// arg_temps.rs names it) and its binds that are NOT written back: its
-    /// slots keep a credit on each buffer until the frame releases it —
-    /// released right after the last write-back instead
-    /// (`settle_subject`), when nothing else reads it.
-    subject: Option<(VarId, Vec<VarId>)>,
-    /// The index of the last write-back statement.
-    last: usize,
+/// #3337: the vars one call may move in — those its write-back rebinds,
+/// or any at a tail site.
+pub(crate) enum MoveSet {
+    Vars(Vec<VarId>),
+    Any,
 }
 
-/// #3337: statement `i` is `let b = f(…)` — or the destructured form
-/// `let t = f(…); let (r, b1, …) = t` — with a program-fn call, bare or
-/// under `!` / `?`, and the statements right after it write the buffers
-/// back, `xs = b`. Those `xs` (with the call's argument slice) are the vars
-/// the call may take by move.
-fn move_in_site(stmts: &[IrStmt], tail: Option<&IrExpr>, i: usize) -> Option<MoveIn> {
-    let (bound, value) = match &stmts.get(i)?.kind {
-        IrStmtKind::Bind { var, value, .. } => (*var, value),
-        _ => return None,
-    };
-    let (call, wrapped) = match &value.kind {
-        IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => (expr.as_ref(), true),
-        _ => (value, false),
-    };
-    let IrExprKind::Call { target: CallTarget::Named { .. }, args, .. } = &call.kind else { return None };
-    let (bufs, subject, first) = match stmts.get(i + 1).map(|s| &s.kind) {
-        Some(IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements }, value })
-            if matches!(&value.kind, IrExprKind::Var { id } if *id == bound) =>
-        {
-            let binds: Option<Vec<VarId>> = elements
-                .iter()
-                .map(|p| match p {
-                    IrPattern::Bind { var, .. } => Some(*var),
-                    _ => None,
-                })
-                .collect();
-            let binds = binds?;
-            (binds.clone(), Some((bound, binds)), i + 2)
-        }
-        _ => (vec![bound], None, i + 1),
-    };
-    let backs: Vec<(VarId, VarId)> = stmts[first..]
-        .iter()
-        .map_while(|s| match &s.kind {
-            IrStmtKind::Assign { var, value } => match &value.kind {
-                IrExprKind::Var { id } if bufs.contains(id) => Some((*var, *id)),
-                _ => None,
-            },
-            _ => None,
-        })
-        .collect();
-    if backs.is_empty() {
-        return None;
-    }
-    let last = first + backs.len() - 1;
-    let vars: Vec<VarId> = backs.iter().map(|&(v, _)| v).collect();
-    // The subject settles early only when the destructure is its one read
-    // and each written-back view is read once (by its write-back); the
-    // binds it hands on are the ones NOT written back.
-    let subject = subject.and_then(|(t, binds)| {
-        let once = reads_in_block(stmts, tail, t) == 1
-            && backs.iter().all(|&(_, b)| reads_in_block(stmts, tail, b) == 1);
-        once.then(|| (t, binds.into_iter().filter(|b| !backs.iter().any(|&(_, w)| w == *b)).collect()))
-    });
-    Some(MoveIn { at: args.as_ptr() as usize, vars, wrapped, subject, last })
-}
+#[path = "move_in_site.rs"]
+mod move_in_site;
+use move_in_site::{move_in_site, MoveIn};
 
 /// The temp statement `i` of a block may move out of, if any.
 pub(crate) fn movable_temp(stmts: &[IrStmt], tail: Option<&IrExpr>, i: usize) -> Option<VarId> {
@@ -135,7 +68,7 @@ pub(crate) fn movable_temp(stmts: &[IrStmt], tail: Option<&IrExpr>, i: usize) ->
 }
 
 /// How many times `var` is read in the block (statements and tail).
-fn reads_in_block(stmts: &[IrStmt], tail: Option<&IrExpr>, var: VarId) -> usize {
+pub(crate) fn reads_in_block(stmts: &[IrStmt], tail: Option<&IrExpr>, var: VarId) -> usize {
     struct Count(VarId, usize);
     impl IrVisitor for Count {
         fn visit_expr(&mut self, e: &IrExpr) {
@@ -159,6 +92,7 @@ impl Emitter<'_> {
     /// A block's statements, each told which temp it may move out of.
     pub(crate) fn lower_block_stmts(&mut self, stmts: &[IrStmt], tail: Option<&IrExpr>) -> Result<(), crate::EmitError> {
         let mut settle: Option<MoveIn> = None;
+        let outer = self.moves.move_in.take();
         for (i, s) in stmts.iter().enumerate() {
             let site = move_in_site(stmts, tail, i);
             if let Some(m) = &site
@@ -166,13 +100,14 @@ impl Emitter<'_> {
             {
                 settle = Some(m.clone());
             }
-            self.moves = BlockMoves { temp: movable_temp(stmts, tail, i), move_in: site };
+            self.moves = BlockMoves { temp: movable_temp(stmts, tail, i), move_in: MoveIn::joined(site, &outer) };
             self.lower_stmt(s)?;
             self.moves = BlockMoves::default();
             if settle.as_ref().is_some_and(|m| m.last == i) {
                 self.settle_subject(settle.take().and_then(|m| m.subject));
             }
         }
+        self.moves.move_in = outer;
         Ok(())
     }
 
@@ -194,18 +129,16 @@ impl Emitter<'_> {
     }
 
     /// #3337: the vars this call (by its argument slice) may take by move.
-    /// `open`: the site may move at all (no region window, not a tail).
-    pub(crate) fn take_move_in(&mut self, args: &[IrExpr], open: bool) -> Vec<VarId> {
-        match self.moves.move_in.take() {
-            Some(m) if open && m.at == args.as_ptr() as usize => {
-                let ceiling = self.rc_param_ceiling;
-                let dies_with_frame = |v: &VarId| self.locals.get(v).is_some_and(|&(idx, _)| idx >= ceiling);
-                m.vars.into_iter().filter(|v| !m.wrapped || dies_with_frame(v)).collect()
-            }
-            other => {
-                self.moves.move_in = other;
-                Vec::new()
-            }
+    /// `open`: the site may move at all (no region window). A `tail` site
+    /// (not a self call, whose loop form rebinds the params) may move ANY
+    /// var (#3342): nothing in this frame reads it after the call, and the
+    /// exit plan's release of the emptied local is a release of NULL — the
+    /// `if c then grow(xs, x) else ()` arm a write-back folds into the tail.
+    pub(crate) fn take_move_in(&mut self, args: &[IrExpr], open: bool, tail: bool) -> MoveSet {
+        match &self.moves.move_in {
+            Some(m) if open && let Some(vars) = m.vars_at(args) => MoveSet::Vars(vars),
+            _ if open && tail => MoveSet::Any,
+            _ => MoveSet::Vars(Vec::new()),
         }
     }
 
@@ -220,13 +153,13 @@ impl Emitter<'_> {
     /// the arguments. `None`: the share convention applies as before.
     pub(crate) fn try_move_in_arg(
         &mut self,
-        move_in: &[VarId],
+        move_in: &MoveSet,
         args: &[IrExpr],
         (i, k): (usize, usize),
         want: crate::SliceTy,
     ) -> Result<Option<u32>, crate::EmitError> {
         let info = &self.table.infos[i];
-        if move_in.is_empty() || info.param_mut_decl.get(k) != Some(&true) || info.param_owned.get(k) != Some(&true) {
+        if matches!(move_in, MoveSet::Vars(v) if v.is_empty()) || info.param_mut_decl.get(k) != Some(&true) || info.param_owned.get(k) != Some(&true) {
             return Ok(None);
         }
         let IrExprKind::Var { id } = &args[k].kind else { return Ok(None) };
@@ -236,7 +169,7 @@ impl Emitter<'_> {
         } else {
             self.rc_owned.contains(&idx)
         };
-        if !move_in.contains(id)
+        if matches!(move_in, MoveSet::Vars(v) if !v.contains(id))
             || !holds_credit
             || !self.rc_droppable(want)
             || self.cells.contains(id)
