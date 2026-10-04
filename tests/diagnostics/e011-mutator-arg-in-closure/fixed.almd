@@ -1,0 +1,4 @@
+// Build the List with a combinator — no closure mutates it (#3344).
+fn collect(xs: List[Int]) -> List[Int] = list.map(xs, (x) => x * 2)
+
+fn main() -> Unit = println("${collect([1, 2])}")

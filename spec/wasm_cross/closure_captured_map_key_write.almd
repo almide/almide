@@ -7,10 +7,11 @@
 // through the cell.
 // Rows: a first write, a second key, an overwrite; writes from a lambda handed
 // to `list.map`; a nested closure; a map of records; a read of the map inside
-// the writing closure.
+// the writing closure. The fns are `effect fn`: a closure that mutates an
+// enclosing `var` is an effect a pure fn cannot host (E011, #3344).
 type P = { n: Int }
 
-fn run() -> String = {
+effect fn run() -> String = {
   var seen: Map[String, Int] = [:]
   let put = (k: String, v: Int) => {
     seen[k] = v
@@ -34,7 +35,7 @@ fn run() -> String = {
   "${map.len(seen)} ${seen["a"] ?? 0} ${seen["z"] ?? 0} ${list.sum(ys)}"
 }
 
-fn records() -> String = {
+effect fn records() -> String = {
   var by: Map[Int, P] = [:]
   let add = (i: Int) => {
     by[i] = { n: i * i }
@@ -46,6 +47,6 @@ fn records() -> String = {
 }
 
 effect fn main() -> Unit = {
-  println(run())
-  println(records())
+  println(run()!)
+  println(records()!)
 }

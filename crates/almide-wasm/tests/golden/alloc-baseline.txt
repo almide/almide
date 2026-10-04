@@ -80,7 +80,7 @@
 65936	spec/wasm_cross/closure_accumulator.almd
 67248	spec/wasm_cross/closure_borrowed_arg_guard.almd
 66128	spec/wasm_cross/closure_captured_list_mutation.almd
-66384	spec/wasm_cross/closure_captured_map_key_write.almd
+66432	spec/wasm_cross/closure_captured_map_key_write.almd
 66320	spec/wasm_cross/closure_captured_map_records.almd
 66992	spec/wasm_cross/closure_captured_record_field_mutation.almd
 66304	spec/wasm_cross/closure_reads_var_written_by_mut_call.almd
