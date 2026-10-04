@@ -1,0 +1,10 @@
+// Another module's `let` is immutable here too: write a local copy, or
+// a `var` of that module (#3312).
+import self.cfg as c
+
+effect fn main() -> Unit = {
+  var mine = c.limits
+  mine[0] = 5
+  c.counts[0] = 5
+  println("${mine[0]} ${c.counts[0]}")
+}
