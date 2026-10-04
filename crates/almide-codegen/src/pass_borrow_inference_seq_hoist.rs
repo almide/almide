@@ -58,12 +58,30 @@ fn hoist_before_nested_mut(items: Vec<IrExpr>, hoisted: &mut Vec<IrStmt>, cx: &m
 }
 
 /// The direct rule: a call with `&mut x` as one argument hoists every other
-/// argument that reads `x` (see [`hoist_conflicting_reads`]).
+/// argument that reads `x` (see [`hoist_conflicting_reads`]) — for EVERY
+/// `&mut` argument, not only the first (#3306: `put(out, w, 8 - w[1])` with
+/// two `mut` params checked the read against `out` alone and rendered
+/// `put(&mut out, &mut w, 8 - almide_index!(w, 1))`, rustc E0502).
+///
+/// Order is the language's left-to-right (ALS-E26): a `&mut` argument is a
+/// place, not an evaluation, so the hoisted set is the value arguments of a
+/// PREFIX — every conflicting one up to the last, plus every one in between
+/// that can run user code — bound in source order before the call. An
+/// effectful argument is never moved past another.
 fn hoist_direct_mut_conflicts(args: Vec<IrExpr>, hoisted: &mut Vec<IrStmt>, cx: &mut HoistCx<'_>) -> Vec<IrExpr> {
-    let Some(mut_id) = args.iter().find_map(find_mut_borrow_var) else { return args };
+    let roots: Vec<VarId> = args.iter().filter_map(find_mut_borrow_var).collect();
+    if roots.is_empty() {
+        return args;
+    }
+    let conflicts: Vec<bool> = args.iter()
+        .map(|a| find_mut_borrow_var(a).is_none() && roots.iter().any(|r| cx.must_hoist(a, *r)))
+        .collect();
+    let Some(last) = conflicts.iter().rposition(|c| *c) else { return args };
     args.into_iter()
-        .map(|arg| {
-            if find_mut_borrow_var(&arg).is_none() && cx.must_hoist(&arg, mut_id) {
+        .enumerate()
+        .map(|(i, arg)| {
+            let in_prefix = i <= last && find_mut_borrow_var(&arg).is_none();
+            if in_prefix && (conflicts[i] || may_run_user_code(&arg)) {
                 hoist_one_arg(arg, hoisted, cx)
             } else {
                 arg
