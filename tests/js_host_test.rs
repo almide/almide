@@ -283,3 +283,40 @@ fn an_effect_export_unwraps_its_result_block() {
     assert!(js.contains("export class AlmideError extends Error"), "{js}");
     assert!(dts.contains("export function raw(key: string): string;") && dts.contains("export class AlmideError extends Error {}"), "{dts}");
 }
+
+const ASYNC_PROGRAM: &str = "@extern(wasm, \"js\", \"kv_get\")\nfn kv_get(key: String) -> String\n\nfn lookup(key: String) -> String = \"value=\" + kv_get(key)\nfn width(s: String) -> Int = string.len(s)\nfn main() -> Unit = {}\n";
+
+/// #3353: `--async-import` wraps the named import in `WebAssembly.Suspending`
+/// and makes exactly the exports that reach it async; the rest stay
+/// synchronous behind the busy guard. Running it is `async_imports` in
+/// `spec/wasm_host_js` (needs a node with JSPI).
+#[test]
+fn an_async_import_makes_the_exports_that_reach_it_async() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ok, stderr) = build(dir.path(), ASYNC_PROGRAM, &["--target", "wasm", "--host", "js", "--async-import", "kv_get", "-o", "app.wasm"]);
+    assert!(ok, "{stderr}");
+    let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
+    let dts = std::fs::read_to_string(dir.path().join("app.d.ts")).unwrap();
+    assert!(js.contains("jsImports.kv_get = new WebAssembly.Suspending(async (a0) =>"), "{js}");
+    assert!(js.contains("promised = { lookup: WebAssembly.promising(instance.exports.lookup) };"), "{js}");
+    assert!(js.contains("jspiOrRefuse([\"kv_get\"]);"), "{js}");
+    assert!(js.contains("idle(\"width\");"), "{js}");
+    assert!(dts.contains("export function lookup(key: string): Promise<string>;"), "{dts}");
+    assert!(dts.contains("export function width(s: string): number;"), "{dts}");
+    assert!(dts.contains("kv_get: (key: string) => string | Promise<string>;"), "{dts}");
+    // Without the flag, the glue is the synchronous one.
+    let (ok, stderr) = build(dir.path(), ASYNC_PROGRAM, &["--target", "wasm", "--host", "js", "-o", "sync.wasm"]);
+    assert!(ok, "{stderr}");
+    let sync = std::fs::read_to_string(dir.path().join("sync.js")).unwrap();
+    assert!(!sync.contains("Suspending") && !sync.contains("serial(") && !sync.contains("idle("), "{sync}");
+}
+
+#[test]
+fn an_async_import_must_name_a_declared_js_import() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ok, stderr) = build(dir.path(), ASYNC_PROGRAM, &["--target", "wasm", "--host", "js", "--async-import", "kv_put", "-o", "app.wasm"]);
+    assert!(!ok && stderr.contains("--async-import `kv_put` names no @extern") && stderr.contains("kv_get"), "{stderr}");
+    assert!(!dir.path().join("app.js").exists(), "a refused build writes no glue");
+    let (ok, stderr) = build(dir.path(), ASYNC_PROGRAM, &["--target", "wasm", "--async-import", "kv_get", "-o", "app.wasm"]);
+    assert!(!ok && stderr.contains("--async-import names imports of the JS host"), "{stderr}");
+}
