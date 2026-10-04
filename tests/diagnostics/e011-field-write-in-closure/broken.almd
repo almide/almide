@@ -1,0 +1,14 @@
+// A pure fn's closure writing a field of an enclosing `var` record
+// mutates the record (#3344).
+type Tally = { n: Int }
+
+fn tally(xs: List[Int]) -> Int = {
+  var t: Tally = { n: 0 }
+  let _ = list.map(xs, (x) => {
+    t.n = t.n + x
+    x
+  })
+  t.n
+}
+
+fn main() -> Unit = println(int.to_string(tally([1, 2, 3])))
