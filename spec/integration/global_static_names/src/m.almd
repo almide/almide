@@ -1,0 +1,15 @@
+// Two globals of this module whose names differ only in case (#3305).
+let x = 10
+
+let X = 20
+
+let THING = 41
+
+var hits = 0
+
+var HITS = 0
+
+fn bump() -> Unit = {
+  hits = hits + 1
+  HITS = HITS + 100
+}

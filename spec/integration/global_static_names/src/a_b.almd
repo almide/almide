@@ -1,0 +1,2 @@
+// Module `a_b` + global `c` (see a.almd).
+let c = 2

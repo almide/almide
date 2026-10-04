@@ -830,6 +830,7 @@
 2269	spec/wasm_cross/to_option_owned_carrier_release.almd
 2048	spec/wasm_cross/to_result_custom_e.almd
 2677	spec/wasm_cross/to_result_nested_share.almd
+2436	spec/wasm_cross/top_let_case_distinct_names.almd
 1866	spec/wasm_cross/top_let_closure_eager.almd
 2687	spec/wasm_cross/top_let_closure_record.almd
 757	spec/wasm_cross/top_let_div_eager.almd
