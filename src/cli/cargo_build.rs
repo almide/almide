@@ -45,43 +45,27 @@ lto = true
 codegen-units = 1
 "#;
 
-/// Cargo.toml template with HTTP/TLS dependencies (only when http runtime is used).
-const GENERATED_CARGO_TOML_HTTP: &str = r#"[package]
-name = "almide-out"
-version = "0.1.0"
-edition = "2021"
+/// Does the generated code use a runtime module whose source needs a crate?
+/// (The cdylib/bin/test fast paths that skip cargo ask exactly this.)
+pub(super) fn needs_runtime_crates(rs_code: &str) -> bool {
+    !almide_codegen::runtime_crate_deps(rs_code).is_empty()
+}
 
-[workspace]
-
-[dependencies]
-rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
-webpki-roots = "0.26"
-rustls-native-certs = "0.8"
-
-# `opt-level = 1` is LOAD-BEARING FOR CORRECTNESS, not a speed choice. Do not lower it.
-#
-# It was lowered to 0 once, for a real and large win: the cargo phase of `almide run` on a
-# 2,103-line program is 3,215ms at level 1 and 724ms at level 0 (4.4x), measured with a real
-# source edit each time and a phase trace inside the pipeline. It was reverted the same day
-# because `spec/wasm_cross/mutual_tail_recursion.almd` began overflowing the native stack:
-# **MUTUAL tail recursion is turned into a loop by LLVM's tail-call optimisation, which does
-# not run at opt-level 0.** Wasm is unaffected (it has `return_call`), so the two targets
-# diverged — a cross-target contract broken by a Cargo setting.
-#
-# What made the mistake possible: the pre-change check measured 200,000-deep SELF-recursion,
-# which Almide's own TCO already turns into a loop, so it passed at both levels and proved
-# nothing about the mutual case. A native semantic property must not depend on an
-# optimisation level; until the compiler eliminates mutual tail calls itself (#1043), this
-# line is what keeps the contract.
-[profile.dev]
-opt-level = 1
-overflow-checks = false
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-"#;
+/// Every crate dependency of a generated project, on EVERY build route (bin,
+/// `--cdylib`, `--repr-c`, test, `almide run`, #3346): `[native-deps]` first
+/// (the user's spelling of a crate wins), then the runtime's
+/// (`almide_codegen::runtime_crate_deps`) minus any crate the user already
+/// declared — so declaring `flate2` yourself (the #3346 workaround) never
+/// writes a second `flate2` key.
+pub(super) fn generated_crate_deps(rs_code: &str, native_deps: &[crate::project::NativeDep]) -> Vec<crate::project::NativeDep> {
+    let mut deps = native_deps.to_vec();
+    for (name, spec) in almide_codegen::runtime_crate_deps(rs_code) {
+        if !deps.iter().any(|d| d.name == name) {
+            deps.push(crate::project::NativeDep { name: name.into(), spec: spec.into() });
+        }
+    }
+    deps
+}
 
 /// `--cfg almide_par` enables the rayon-backed parallel runtime paths. The cfg
 /// follows the DEPENDENCY: inject it only when the generated project's Cargo.toml
@@ -439,7 +423,7 @@ opt-level = 3
 lto = true
 codegen-units = 1
 "#, lib_name.replace('-', "_"));
-    let cargo_toml = build_cargo_toml(&cdylib_base, native_deps);
+    let cargo_toml = build_cargo_toml(&cdylib_base, &generated_crate_deps(rs_code, native_deps));
     std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
         .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
 
@@ -579,8 +563,8 @@ fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bo
 }
 
 /// Write the generated Cargo.toml + `src/main.rs` for a cargo-based build:
-/// creates `src/`, selects the HTTP-enabled base Cargo.toml template when
-/// needed, appends zlib to `native_deps` when needed, injects native
+/// creates `src/`, writes the manifest with every crate the program needs
+/// ([`generated_crate_deps`], shared with the cdylib route), injects native
 /// modules (`inputs`: the package's and its dependencies'), auto-generates
 /// an empty `fn main()` for library-only code, and writes both files.
 /// Matrix programs need NO extra deps: the flat AlmideMatrix runtime + the
@@ -595,18 +579,11 @@ fn write_generated_cargo_project(
     project_dir: &std::path::Path,
     native_deps: &[crate::project::NativeDep],
     inputs: &CrateInputs,
-    uses_http: bool,
-    uses_zlib: bool,
 ) -> Result<std::path::PathBuf, String> {
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
 
-    let base_toml = if uses_http { GENERATED_CARGO_TOML_HTTP } else { GENERATED_CARGO_TOML };
-    let mut all_deps = native_deps.to_vec();
-    if uses_zlib {
-        all_deps.push(crate::project::NativeDep { name: "flate2".into(), spec: "1".into() });
-    }
-    let cargo_toml = build_cargo_toml(base_toml, &all_deps);
+    let cargo_toml = build_cargo_toml(GENERATED_CARGO_TOML, &generated_crate_deps(rs_code, native_deps));
     std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
         .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
 
@@ -687,14 +664,12 @@ pub(super) fn cargo_build_generated_with_native(
     inputs: &CrateInputs,
 ) -> Result<std::path::PathBuf, String> {
     let uses_matrix = rs_code.contains("almide_rt_matrix_");
-    let uses_http = rs_code.contains("almide_rt_http_") || rs_code.contains("use rustls");
-    let uses_zlib = rs_code.contains("almide_rt_zlib_") || rs_code.contains("use flate2");
 
     // The rlib fast path links a HOST-built runtime with a bare host rustc, so a
     // cross build (#2772) always takes the cargo path.
     if !almide_base::env::flag("ALMIDE_NO_RTLIB")
         && super::native_target::cross_target().is_none()
-        && !uses_matrix && !uses_http && !uses_zlib
+        && !uses_matrix && !needs_runtime_crates(rs_code)
         && native_deps.is_empty() && source_root.is_none()
     {
         if let Some(bin_path) = try_rlib_fast_build(rs_code, project_dir, release) {
@@ -702,7 +677,7 @@ pub(super) fn cargo_build_generated_with_native(
         }
     }
 
-    write_generated_cargo_project(rs_code, project_dir, native_deps, inputs, uses_http, uses_zlib)?;
+    write_generated_cargo_project(rs_code, project_dir, native_deps, inputs)?;
 
     run_cargo_build_and_locate_binary(project_dir, release)
 }
@@ -966,19 +941,16 @@ pub(super) fn cargo_build_test_with_native(
     source_root: Option<&std::path::Path>,
     inputs: &CrateInputs,
 ) -> Result<std::path::PathBuf, String> {
-    let uses_http = rs_code.contains("almide_rt_http_") || rs_code.contains("use rustls");
-    let uses_zlib = rs_code.contains("almide_rt_zlib_") || rs_code.contains("use flate2");
-
     // Fast path: the generated test crate is dependency-free (the runtime is
     // inlined as source). `cargo test --no-run` serializes concurrent builds on
     // cargo's global `~/.cargo/.package-cache` lock — even across separate
     // project dirs — so a parallel test run is effectively sequential. A bare
     // `rustc --test` has no such lock, so per-file builds run truly in parallel.
-    if !uses_http && !uses_zlib && native_deps.is_empty() && source_root.is_none() {
+    if !needs_runtime_crates(rs_code) && native_deps.is_empty() && source_root.is_none() {
         return cargo_build_test_fast_path(rs_code, project_dir);
     }
 
-    write_generated_cargo_project(rs_code, project_dir, native_deps, inputs, uses_http, uses_zlib)?;
+    write_generated_cargo_project(rs_code, project_dir, native_deps, inputs)?;
 
     run_cargo_test_no_run_and_locate_binary(project_dir)
 }
