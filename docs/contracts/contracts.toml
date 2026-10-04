@@ -1817,6 +1817,7 @@ evidence  = [
   { path = "spec/wasm_cross/mut_param_effect_unpropagated.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_call_hoisted_args_distinct.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_call_nested_read_before.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_call_two_mut_args_read.almd", class = "fixture" },
   { path = "spec/wasm_cross/mutator_writeback_releases_old_block.almd", class = "fixture" },
   { path = "spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_nested_place_writeback.almd", class = "fixture" },
