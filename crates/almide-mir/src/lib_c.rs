@@ -217,6 +217,9 @@ impl OwnershipScan {
 
     fn step(&mut self, i: usize, op: &Op) {
         self.check_defined_uses(i, op);
+        if let Op::ConstInt { dst, value } = op {
+            self.record_const(*dst, *value);
+        }
         self.step_op(i, op);
         self.end_slot_roots(op);
     }
@@ -256,9 +259,10 @@ impl OwnershipScan {
             Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } => {
                 self.step_add_address_alias(*dst, *a, *b)
             }
-            Op::ConstInt { dst, value } => self.record_const(*dst, *value),
-            // A scalar — no ownership accounting.
+            // A scalar — no ownership accounting (a constant is recorded in
+            // `step`, for the slot-root rule).
             Op::Const { dst: _ }
+            | Op::ConstInt { .. }
             // A function-table slot index — a scalar constant, no ownership.
             | Op::FuncRef { .. }
             // Scalar arithmetic — no ownership.
