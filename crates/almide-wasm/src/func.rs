@@ -396,7 +396,7 @@ pub(crate) fn lower_fn(
             deferred_ranges: &deferred_ranges,
             metered,
             cells: &cell_vars,
-            moved_temp: None,
+            moves: Default::default(),
             region_repair: region_saved_var.and_then(|v| {
                 let saved = locals.get(&v)?.0;
                 Some((saved, region_depth_entry.expect("allocated with the var")))
