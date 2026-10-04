@@ -11,7 +11,9 @@
 /// answers, the fan prefetch triple (40..=42) and env.os / env.temp_dir /
 /// env.cwd (27 / 28 / 33) among them.
 pub fn serves(op: i32, p3: bool) -> bool {
-    let common = matches!(op, 30..=32 | 34..=35 | 60 | 73);
+    // 74: the instance-parallel fan offer (#3003), answered "not served" by
+    // both component shims — the guest then runs its chunks sequentially.
+    let common = matches!(op, 30..=32 | 34..=35 | 60 | 73 | 74);
     let extra = p3
         && (matches!(op, 26 | 29 | 36 | 37 | 40..=50)
             || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op));
