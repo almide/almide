@@ -145,6 +145,8 @@ struct OwnershipScan {
     carried: BTreeMap<ValueId, ValueId>,
     /// The `IfThen` dsts that hold a reference after the join (#3279, lib_d.rs).
     owning_merges: std::collections::HashSet<ValueId>,
+    /// Slot objects made at joins so far (#3279, lib_d.rs).
+    slot_objects: u32,
 }
 
     struct BranchFrame {
@@ -648,6 +650,8 @@ impl OwnershipScan {
                 rename_object(then_obj, then_rc, oa, ob);
             } else if !entry_objects.contains(&ob) {
                 rename_object(&mut self.object_of, &mut self.rc, ob, oa);
+            } else {
+                self.move_slot_reference(h, (oa, ob), then_rc, then_obj);
             }
         }
     }
@@ -948,6 +952,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
         slot_roots: BTreeMap::new(),
         carried: BTreeMap::new(),
         owning_merges: crate::certificate::merge_dsts_holding_a_reference(func),
+        slot_objects: 0,
     };
     for (i, op) in func.ops.iter().enumerate() {
         scan.step(i, op);
