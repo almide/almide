@@ -11,3 +11,5 @@ extern_scalars 6089
 effect_exports 12200
 # #3354: every block shape as a param and a return, 23 wrappers + shape consts.
 marshal_blocks 19300
+# #3353: the JSPI runtime (feature check, serialising queue, busy guard), six wrappers, Suspending imports.
+async_imports 13600
