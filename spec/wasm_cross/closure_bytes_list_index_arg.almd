@@ -8,17 +8,18 @@
 // Rows: the issue's closure push then `bytes.len(acc[0])`; a second stdlib
 // call with an index and default; a nested closure
 // push; a computed index into a plain local List of Bytes; a module-level
-// `var` List of Bytes read the same way.
+// `var` List of Bytes read the same way. The closure-pushing fns are
+// `effect fn`: mutating an enclosing `var` from a closure is an effect (E011).
 var stash: List[Bytes] = []
 
-fn run(x: Bytes) -> Int = {
+effect fn run(x: Bytes) -> Int = {
   var acc: List[Bytes] = []
   let put = (b: Bytes) => { list.push(acc, b) }
   put(x)
   bytes.len(acc[0])
 }
 
-fn more(x: Bytes, y: Bytes) -> String = {
+effect fn more(x: Bytes, y: Bytes) -> String = {
   var acc: List[Bytes] = []
   let put = (b: Bytes) => { list.push(acc, b) }
   let twice = (b: Bytes) => {
@@ -44,8 +45,8 @@ fn from_global() -> Int = {
 }
 
 effect fn main() -> Unit = {
-  println(int.to_string(run(bytes.from_list([1, 2, 3]))))
-  println(more(bytes.from_list([9]), bytes.from_list([7, 8])))
+  println(int.to_string(run(bytes.from_list([1, 2, 3]))!))
+  println(more(bytes.from_list([9]), bytes.from_list([7, 8]))!)
   println(int.to_string(local_computed([
     bytes.from_list([3]),
     bytes.from_list([1, 1])
