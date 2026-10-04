@@ -767,6 +767,9 @@ fn render_fan(ctx: &RenderContext, exprs: &[IrExpr]) -> String {
         if e.ty.is_result() && body.ends_with('?') { body.pop(); }
         body
     }).collect();
+    if let ([e], [body]) = (exprs, rendered.as_slice()) {
+        return render_fan_single(ctx, e, body);
+    }
     let exprs_s = rendered.join(", ");
     let count_s = format!("{}", exprs.len());
     let handles: Vec<String> = (0..exprs.len()).map(|i| format!("__almide_fan_h{}", i)).collect();
@@ -786,4 +789,11 @@ fn render_fan(ctx: &RenderContext, exprs: &[IrExpr]) -> String {
     let construct = if any_result && ctx.auto_unwrap { "fan_effect" } else { "fan_expr" };
     ctx.templates.render_with(construct, None, &[], &[("exprs", exprs_s.as_str()), ("count", count_s.as_str()), ("spawns", spawns_s.as_str()), ("join_expr", join_expr.as_str())])
         .unwrap_or_else(|| format!("fan({})", rendered.join(", ")))
+}
+
+/// #3341: a one-arm fan runs its arm inline (`fan_single`), with the join's `?` / `.unwrap()`.
+fn render_fan_single(ctx: &RenderContext, e: &IrExpr, body: &str) -> String {
+    let tail = match (e.ty.is_result(), ctx.auto_unwrap) { (true, true) => "?", (true, false) => ".unwrap()", _ => "" };
+    let body = if tail.is_empty() { body.to_string() } else { format!("({body}){tail}") };
+    ctx.templates.render_with("fan_single", None, &[], &[("body", body.as_str())]).unwrap_or(body)
 }
