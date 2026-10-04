@@ -1,0 +1,94 @@
+// @contract: C-088
+// #3304: a user identifier never shares a spelling with a Rust binder the
+// native emitter generates around user code. A module `var` write rendered
+// `BUF.with(|c| … (c * 2.0))`, so a user local `c` inside it named the
+// `RefCell` (rustc E0369) while the wasm leg printed the answer. Every
+// generated binder now carries the reserved `__almide_` prefix and a user
+// identifier with that prefix is escaped, so: a local `c` inside each module
+// `var` write and read; the binders the range, fan and module-var `mut`
+// argument expansions used to introduce (`__rs`, `__re`, `__fan_g`, `__s`,
+// `__gp0`, `__gr`) as user names; and the reserved spellings themselves as a
+// param, a loop binder, a lambda param, a match binder and a record field.
+type Box = { xs: List[Int], n: Int }
+
+var buf: List[Float] = []
+
+var cfg: Box = { xs: [0, 0], n: 0 }
+
+var tbl: Map[String, Int] = map.new()
+
+fn shade(c: Float) -> Unit = {
+  buf[0] = c * 2.0
+}
+
+fn set_n(c: Int) -> Unit = {
+  cfg.n = c + 1
+}
+
+fn put(c: Int) -> Unit = {
+  tbl = map.set(tbl, "k", c * 3)
+}
+
+fn reset(c: List[Float]) -> Unit = {
+  buf = c
+}
+
+fn read_with(c: Int) -> Int = cfg.n + c
+
+fn bump(mut xs: List[Int], k: Int) -> Unit = {
+  xs[0] = xs[0] + k
+}
+
+fn bump_cfg(__gp0: Int, __gr: Int) -> Unit = bump(cfg.xs, __gp0 + __gr)
+
+fn upto(__rs: Int) -> Int = list.len(0..<__rs)
+
+fn upto_inclusive(__re: Int, __rs: Int) -> Int = list.len(__re...__rs)
+
+effect fn fanned(__fan_g: Int, __s: Int) -> Int = {
+  let r = fan {
+    __fan_g + 1
+    __s * 2
+  }
+  r.0 + r.1
+}
+
+fn reserved(__almide_cell: Float, __almide_rs: Int) -> Int = {
+  buf[1] = __almide_cell
+  list.len(0..<__almide_rs)
+}
+
+type Tagged = { __almide_rv: Int }
+
+fn reserved_binders(xs: List[Int], o: Int?) -> Int = {
+  var total = 0
+  for __almide_fan_g in xs {
+    total = total + __almide_fan_g
+  }
+  let doubled = xs |> list.map((__almide_s) => __almide_s * 2) |> list.fold(0, (a, b) => a + b)
+  let picked = match o {
+    some(__almide_gc) => __almide_gc,
+    none => 0,
+  }
+  let t: Tagged = { __almide_rv: picked }
+  total + doubled + t.__almide_rv
+}
+
+effect fn main() -> Unit = {
+  reset([0.0, 1.0])
+  shade(3.0)
+  println(float.to_string(buf[0]))
+  set_n(4)
+  println(int.to_string(cfg.n))
+  put(5)
+  println(int.to_string(map.get(tbl, "k") ?? 0))
+  println(int.to_string(read_with(2)))
+  bump_cfg(6, 1)
+  println(int.to_string(cfg.xs[0]))
+  println(int.to_string(upto(4)))
+  println(int.to_string(upto_inclusive(2, 5)))
+  println(int.to_string(fanned(10, 20)!))
+  println(int.to_string(reserved(7.5, 3)))
+  println(float.to_string(buf[1]))
+  println(int.to_string(reserved_binders([1, 2, 3], some(100))))
+}
