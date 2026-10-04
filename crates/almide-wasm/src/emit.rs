@@ -263,91 +263,98 @@ fn emit_program_pass(
     let mut fail_lines: HashMap<usize, usize> = HashMap::new();
     for (i, (f, qual, space)) in program_fns.iter().enumerate() {
         let lifted_before = work.lifted.borrow().len();
-        if let Some(r) = &table.infos[i].refuse {
-            lowered.push(Err(r.clone()));
-            fn_lambdas.push(lifted_before..lifted_before);
-            continue;
-        }
-        if table.infos[i].import.is_some() {
-            // A declared import's slot: the loud stub the post-pass removes.
-            let mut stub = Function::new([]);
-            stub.instructions().unreachable().end();
-            lowered.push(Ok((stub, HashSet::new())));
-            continue;
-        }
-        let params: Vec<(VarId, SliceTy)> =
-            f.params.iter().zip(&table.infos[i].params).map(|(p, &t)| (p.var, t)).collect();
-        let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map, var_name: &var_name };
-        let cur_module = fn_module(qual.as_deref(), f);
-        let effect_raw = if f.is_effect {
-            match slice_ty_of(&f.ret_ty, &types) {
-                Some(SliceTy::Unit) => Some(SliceTy::Unit),
-                // A declared-Result effect fn is SINGLE-layer (probe:
-                // `wrap_sum(p)!` strips once to Int): the body yields the
-                // Result value itself via ok()/err() — no wrap. Declared-
-                // Option and raw-T bodies yield the raw value and wrap
-                // (call sites are annotated Result[T?, E] / Result[T, E]).
-                Some(SliceTy::Result(..)) => None,
-                other => other,
+        // #3296: every iteration records its lambda range, whichever arm it
+        // leaves by — `fn_lambdas[i]` must stay aligned with `program_fns[i]`.
+        // The import arm used to `continue` without one, so every fn after a
+        // declared `@extern(wasm)` import read its NEIGHBOUR's lambdas: a
+        // closure's callees went unreached, pass 2 dropped them, and the
+        // closure walled with `call:<fn>`.
+        'one_fn: {
+            if let Some(r) = &table.infos[i].refuse {
+                lowered.push(Err(r.clone()));
+                break 'one_fn;
             }
-        } else {
-            None
-        };
-        let plan = FnPlan {
-            ret: table.infos[i].ret,
-            cur_module: cur_module.map(str::to_string),
-            effect_raw,
-            in_main: false,
-            env_captures: None,
-            metered: meter.user.contains(f.name.as_str()),
-            charge_entry: meter.user.contains(f.name.as_str())
-                && !meter.exempt.contains(f.name.as_str()),
-            var_space: *space,
-            name: qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
-            witness_name: Some(
-                qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
-            ),
-            self_index: Some(table.infos[i].wasm_index),
-            param_owned: Some(table.infos[i].param_owned.clone()),
-        };
-        crate::decline_site::reset_pending();
-        match lower_fn(&params, plan, &f.body, &[], &ctx, &mut pool) {
-            Ok(ok) => {
-                // Any display helpers this fn registered build NOW — a
-                // failing body refuses THIS fn, not the program.
-                match display::build_display_helpers(&table, &types, &work, &mut pool) {
-                    Ok(calls) => {
-                        display_helper_calls.extend(calls);
-                        // Self-tail-recursion → loop (tco.rs): only fns
-                        // whose call set includes THEMSELVES are scanned.
-                        let (body, fcalls) = ok;
-                        let body = if fcalls.contains(&i) {
-                            let info = &table.infos[i];
-                            let pvts: Vec<ValType> =
-                                info.params.iter().map(|t| t.val_type()).collect();
-                            let rvt = info.ret.map(SliceTy::val_type);
-                            tco::loop_convert(&body, &pvts, rvt, info.wasm_index)
-                                .unwrap_or(body)
-                        } else {
-                            body
-                        };
-                        lowered.push(Ok((body, fcalls)));
+            if table.infos[i].import.is_some() {
+                // A declared import's slot: the loud stub the post-pass removes.
+                let mut stub = Function::new([]);
+                stub.instructions().unreachable().end();
+                lowered.push(Ok((stub, HashSet::new())));
+                break 'one_fn;
+            }
+            let params: Vec<(VarId, SliceTy)> =
+                f.params.iter().zip(&table.infos[i].params).map(|(p, &t)| (p.var, t)).collect();
+            let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map, var_name: &var_name };
+            let cur_module = fn_module(qual.as_deref(), f);
+            let effect_raw = if f.is_effect {
+                match slice_ty_of(&f.ret_ty, &types) {
+                    Some(SliceTy::Unit) => Some(SliceTy::Unit),
+                    // A declared-Result effect fn is SINGLE-layer (probe:
+                    // `wrap_sum(p)!` strips once to Int): the body yields the
+                    // Result value itself via ok()/err() — no wrap. Declared-
+                    // Option and raw-T bodies yield the raw value and wrap
+                    // (call sites are annotated Result[T?, E] / Result[T, E]).
+                    Some(SliceTy::Result(..)) => None,
+                    other => other,
+                }
+            } else {
+                None
+            };
+            let plan = FnPlan {
+                ret: table.infos[i].ret,
+                cur_module: cur_module.map(str::to_string),
+                effect_raw,
+                in_main: false,
+                env_captures: None,
+                metered: meter.user.contains(f.name.as_str()),
+                charge_entry: meter.user.contains(f.name.as_str())
+                    && !meter.exempt.contains(f.name.as_str()),
+                var_space: *space,
+                name: qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
+                witness_name: Some(
+                    qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
+                ),
+                self_index: Some(table.infos[i].wasm_index),
+                param_owned: Some(table.infos[i].param_owned.clone()),
+            };
+            crate::decline_site::reset_pending();
+            match lower_fn(&params, plan, &f.body, &[], &ctx, &mut pool) {
+                Ok(ok) => {
+                    // Any display helpers this fn registered build NOW — a
+                    // failing body refuses THIS fn, not the program.
+                    match display::build_display_helpers(&table, &types, &work, &mut pool) {
+                        Ok(calls) => {
+                            display_helper_calls.extend(calls);
+                            // Self-tail-recursion → loop (tco.rs): only fns
+                            // whose call set includes THEMSELVES are scanned.
+                            let (body, fcalls) = ok;
+                            let body = if fcalls.contains(&i) {
+                                let info = &table.infos[i];
+                                let pvts: Vec<ValType> =
+                                    info.params.iter().map(|t| t.val_type()).collect();
+                                let rvt = info.ret.map(SliceTy::val_type);
+                                tco::loop_convert(&body, &pvts, rvt, info.wasm_index)
+                                    .unwrap_or(body)
+                            } else {
+                                body
+                            };
+                            lowered.push(Ok((body, fcalls)));
+                        }
+                        Err(EmitError::Unsupported(r)) => lowered.push(Err(r)),
+                // E083: a compiler defect is fatal for the whole program — a
+                // reachable-or-not leak is still a defect, never a wall.
+                Err(e @ EmitError::OwnershipLowering(_)) => return Err(e),
                     }
-                    Err(EmitError::Unsupported(r)) => lowered.push(Err(r)),
-            // E083: a compiler defect is fatal for the whole program — a
-            // reachable-or-not leak is still a defect, never a wall.
-            Err(e @ EmitError::OwnershipLowering(_)) => return Err(e),
                 }
-            }
-            Err(EmitError::Unsupported(r)) => {
-                if let Some(sp) = crate::decline_site::take_pending() {
-                    fail_lines.insert(i, sp.line);
+                Err(EmitError::Unsupported(r)) => {
+                    if let Some(sp) = crate::decline_site::take_pending() {
+                        fail_lines.insert(i, sp.line);
+                    }
+                    lowered.push(Err(r))
                 }
-                lowered.push(Err(r))
+                // E083: a compiler defect is fatal for the whole program — a
+                // reachable-or-not leak is still a defect, never a wall.
+                Err(e @ EmitError::OwnershipLowering(_)) => return Err(e),
             }
-            // E083: a compiler defect is fatal for the whole program — a
-            // reachable-or-not leak is still a defect, never a wall.
-            Err(e @ EmitError::OwnershipLowering(_)) => return Err(e),
         }
         fn_lambdas.push(lifted_before..work.lifted.borrow().len());
     }
