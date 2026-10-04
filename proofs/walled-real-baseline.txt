@@ -298,36 +298,13 @@
 # slot closures already did. The set is EMPTY: the wall=0 endgame over the full test-fn
 # corpus, with no intended exceptions. ANY row is a regression.
 
-# (2026-10-04, batch 2026-10-04: #3287 fixture) one row the I-divergence fix's
-# new fixture exposes on the incumbent MIR brick. The fix is native-side (rustc
-# refused the generated Rust); the fixture is its cross-target evidence and runs
-# byte-identically on native, the structural leg (the default wasm route) and
-# the interp. The incumbent brick walls honestly on `main`: a top-level
-# `Raw(bytes…)` variant whose payload is a heap field (ADT brick 5) — the very
-# shape the fixture exists to pin, so it is not rewritten around. (#3283's
-# same_shape_records fixture binds its list elements and asserted fields first
-# and lowers.) Owned by #2739, which stays open until it lowers.
-spec/wasm_cross/top_let_rc_value.almd :: main  # #2739
-# (2026-10-04, batch 2026-10-04b: #3307 / #3318 fixtures) two rows the new
-# fixtures expose on the incumbent MIR brick, both the shape each fixture
-# exists to pin, so neither is rewritten around. Native, the structural leg
-# (the default wasm route) and the interp print the same bytes:
-#  - closure_module_var_write `main`: a field assign to another module's record
-#    `var` (no record layout for a module-level var in this brick);
-#  - closure_bytes_list_index_arg `from_global`: a heap `List[Bytes]` assigned
-#    to a module-level `var`.
-# (global_static_names binds its interpolations first and lowers.) Owned by
-# #2739, which stays open until they lower.
-spec/integration/closure_module_var_write/src/main.almd :: main  # #2739
-spec/wasm_cross/closure_bytes_list_index_arg.almd :: from_global  # #2739
-# (2026-10-05, #3354 marshal_blocks fixture) three rows the --host js
-# marshalling fixture exposes on the incumbent MIR brick: `opt_greet`,
-# `e_opt_inc` and `e_opt_greet` return a heap Option through a `match`
-# ("heap-result `match` outside the executable subset cannot be faithfully
-# returned in this brick"). The Option boundary is the shape the fixture exists
-# to pin, so it is not rewritten around. The structural leg (the default wasm
-# route, which --host js builds on) runs it under scripts/check-js-host.sh and
-# matches its expected output. Owned by #2739, which stays open until they lower.
-spec/wasm_host_js/marshal_blocks.almd :: e_opt_greet  # #2739
-spec/wasm_host_js/marshal_blocks.almd :: e_opt_inc  # #2739
-spec/wasm_host_js/marshal_blocks.almd :: opt_greet  # #2739
+# (2026-10-04, #2739) the three rows batch 2026-10-04/04b added for the #3287,
+# #3307 and #3318 fixtures pruned (3 -> 0): the MIR rung now lowers the shapes
+# they pin. `Bytes` is a one-level block like `String` wherever the list,
+# concat, tuple-slot and non-recursive variant-payload builders admit one; a
+# record literal (a pure call-initialized global after its init is substituted)
+# is a container a field read borrows from through an ANF temp; a map key write
+# to a module `var` takes the `map.set` rebind a local's does; and the mutable
+# global slots are keyed by the ENTRY file's ids — a module's own top-let ids
+# had shared the key space, so `m.rec.n = 3` read `m.counts`' slot and type.
+# The set is EMPTY again. ANY row is a regression.
