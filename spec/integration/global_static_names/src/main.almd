@@ -17,12 +17,15 @@ let ALMIDE_RT_1_m_x = 5
 let almide_rt_m_thing = 100
 
 effect fn main() -> Unit = {
-  println("${m.x} ${m.X} ${x} ${ALMIDE_RT_M_X} ${ALMIDE_RT_1_m_x}")
-  println("${a.b_c} ${ab.c}")
+  let names = "${m.x} ${m.X} ${x} ${ALMIDE_RT_M_X} ${ALMIDE_RT_1_m_x}"
+  println(names)
+  let modules = "${a.b_c} ${ab.c}"
+  println(modules)
   println(int.to_string(m.THING + almide_rt_m_thing))
   m.bump()
   m.hits = m.hits + 1000
   m.HITS = m.HITS + 7
   m.bump()
-  println("${m.hits} ${m.HITS}")
+  let counts = "${m.hits} ${m.HITS}"
+  println(counts)
 }
