@@ -998,5 +998,7 @@ spec/wasm_fail/matrix_linear_row_bias_aborts.almd
 spec/wasm_fail/matrix_ragged_from_lists_aborts.almd
 spec/wasm_fail/matrix_shape_mismatch_aborts.almd
 spec/wasm_fail/rope_geometry_exceeds_aborts.almd
+spec/wasm_host_js/effect_exports.almd
+spec/wasm_host_js/marshal_blocks.almd
 spec/wasm_host_js/marshal_types.almd
 spec/wasm_host_js/println_only.almd
