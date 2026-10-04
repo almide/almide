@@ -145,8 +145,10 @@ pub fn list_fusion_rules() -> Vec<Rewrite<AlmideExpr, ()>> {
 // can pair egg vs imperative firings by rule name.
 //
 // To add or change a fusion rule, edit `stdlib/matrix.almd`. The
-// build script reparses on every stdlib change.
-include!(concat!(env!("OUT_DIR"), "/matrix_rules_gen.rs"));
+// build script reparses on every stdlib change and rewrites the COMMITTED
+// `src/generated/matrix_rules_gen.rs` — commit it with the edit (#3361: the
+// package carries the table, so a vendored crate builds without `stdlib/`).
+include!("generated/matrix_rules_gen.rs");
 
 /// Matrix fusion rules, read from `stdlib/matrix.almd` at build time.
 pub fn matrix_fusion_rules() -> Vec<Rewrite<AlmideExpr, ()>> {
