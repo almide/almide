@@ -83,6 +83,9 @@ fn lower_call_target_member(ctx: &mut LowerCtx, callee: &ast::Expr, object: &ast
     if let Some(t) = lower_call_target_cross_module_type(ctx, object, field) {
         return t;
     }
+    if let Some(t) = lower_call_target_module_top_let(ctx, callee, object, field) {
+        return t;
+    }
     if let Some(t) = lower_call_target_module_call(ctx, object, field) {
         return t;
     }
@@ -135,6 +138,31 @@ fn lower_call_target_cross_module_type(ctx: &mut LowerCtx, object: &ast::Expr, f
         }
     }
     None
+}
+
+/// `m.thing(1)` where `thing` is another module's function-VALUED top-level
+/// `let` (`let thing = inc1`), not a fn: an indirect call through the let's
+/// value, exactly as `thing(1)` is inside `m` (#3315). Taken as a module call
+/// it named a function `m.thing` that does not exist (IR verify ICE).
+fn lower_call_target_module_top_let(ctx: &mut LowerCtx, callee: &ast::Expr, object: &ast::Expr, field: &Sym) -> Option<CallTarget> {
+    let ast::ExprKind::Ident { name: module, .. } = &object.kind else { return None };
+    if ctx.lookup_var(module).is_some()
+        || !(ctx.env.user_modules.contains(module) || ctx.env.import_table.aliases.contains_key(module))
+    {
+        return None;
+    }
+    let resolved = ctx.env.import_table.resolve(module).map(|s| s.to_string()).unwrap_or_else(|| module.to_string());
+    if ctx.env.functions.contains_key(&sym(&format!("{}.{}", resolved, field))) {
+        return None;
+    }
+    let ty = ctx.expr_ty(callee);
+    let (var_id, def_id) = crate::lower::expressions::module_top_let_var(ctx, *module, *field, &ty)?;
+    let span = callee.span;
+    let var = match def_id {
+        Some(def_id) => ctx.mk_def(IrExprKind::Var { id: var_id }, ty, span, def_id),
+        None => ctx.mk(IrExprKind::Var { id: var_id }, ty, span),
+    };
+    Some(CallTarget::Computed { callee: Box::new(var) })
 }
 
 /// Module call (`string.trim`, `list.map`) and `Type.method` on a bare
