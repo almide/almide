@@ -48,7 +48,7 @@ fn render_stmt_list_swap(ctx: &RenderContext, target: VarId, a: &IrExpr, b: &IrE
     if let Some(info) = ctx.ann.global(target) {
         use almide_ir::top_let_storage::TopLetStorage as Tls;
         return match info.storage {
-            Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).swap({} as usize, {} as usize));", info.static_name, a_s, b_s),
+            Tls::RcRefCell => format!("{}.with(|__almide_cell| std::rc::Rc::make_mut(&mut *__almide_cell.borrow_mut()).swap({} as usize, {} as usize));", info.static_name, a_s, b_s),
             other => unreachable!("[COMPILER BUG] list-swap on {:?} global `{}`", other, info.static_name),
         };
     }
@@ -66,7 +66,7 @@ fn render_stmt_list_reverse(ctx: &RenderContext, target: VarId, end: &IrExpr) ->
     if let Some(info) = ctx.ann.global(target) {
         use almide_ir::top_let_storage::TopLetStorage as Tls;
         return match info.storage {
-            Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].reverse());", info.static_name, e),
+            Tls::RcRefCell => format!("{}.with(|__almide_cell| std::rc::Rc::make_mut(&mut *__almide_cell.borrow_mut())[..={} as usize].reverse());", info.static_name, e),
             other => unreachable!("[COMPILER BUG] list-reverse on {:?} global `{}`", other, info.static_name),
         };
     }
@@ -84,7 +84,7 @@ fn render_stmt_list_rotate_left(ctx: &RenderContext, target: VarId, end: &IrExpr
     if let Some(info) = ctx.ann.global(target) {
         use almide_ir::top_let_storage::TopLetStorage as Tls;
         return match info.storage {
-            Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].rotate_left(1));", info.static_name, e),
+            Tls::RcRefCell => format!("{}.with(|__almide_cell| std::rc::Rc::make_mut(&mut *__almide_cell.borrow_mut())[..={} as usize].rotate_left(1));", info.static_name, e),
             other => unreachable!("[COMPILER BUG] list-rotate on {:?} global `{}`", other, info.static_name),
         };
     }
@@ -105,13 +105,13 @@ fn render_stmt_list_copy_slice(ctx: &RenderContext, dst: VarId, src: VarId, len:
     // the ModuleRc protocol).
     let src_read = match ctx.ann.global(src) {
         Some(si) if matches!(si.storage, almide_ir::top_let_storage::TopLetStorage::RcRefCell) =>
-            format!("{}.with(|c| c.borrow().clone())", si.static_name),
+            format!("{}.with(|__almide_cell| __almide_cell.borrow().clone())", si.static_name),
         _ => s.clone(),
     };
     if let Some(info) = ctx.ann.global(dst) {
         use almide_ir::top_let_storage::TopLetStorage as Tls;
         return match info.storage {
-            Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..{n} as usize].copy_from_slice(&{src_read}[..{n} as usize]));", info.static_name, n=n, src_read=src_read),
+            Tls::RcRefCell => format!("{}.with(|__almide_cell| std::rc::Rc::make_mut(&mut *__almide_cell.borrow_mut())[..{n} as usize].copy_from_slice(&{src_read}[..{n} as usize]));", info.static_name, n=n, src_read=src_read),
             other => unreachable!("[COMPILER BUG] copy-slice into {:?} global `{}`", other, info.static_name),
         };
     }
@@ -178,8 +178,8 @@ fn render_mut_param_cell(cell: &str, param: &str, is_copy: bool) -> String {
     let copied_in = format!("(*{param}).clone()");
     let new_cell = if is_copy { format!("std::rc::Rc::new(std::cell::Cell::new({copied_in}))") } else { format!("AlmideSharedMut::new({copied_in})") };
     format!(
-        "let ({cell}, __wb_{cell}) = {{ let __cell = {new_cell}; \
-         let __wb = AlmideWriteBack({param}, {{ let __c = __cell.clone(); move || __c.get() }}); (__cell, __wb) }};"
+        "let ({cell}, __almide_wb_{cell}) = {{ let __almide_wb_cell = {new_cell}; \
+         let __almide_wb = AlmideWriteBack({param}, {{ let __almide_wb_c = __almide_wb_cell.clone(); move || __almide_wb_c.get() }}); (__almide_wb_cell, __almide_wb) }};"
     )
 }
 
@@ -444,8 +444,8 @@ fn render_stmt_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
         // rustc E0277 on `g = f()!`. Rust evaluates an assignment's value
         // before its place anyway, so hoisting it changes no order.
         return match info.storage {
-            Tls::Cell => format!("{{ let __almide_assigned = {}; {}.with(|c| c.set(__almide_assigned)); }}", value_s, info.static_name),
-            Tls::RcRefCell => format!("{{ let __almide_assigned = {}; {}.with(|c| *c.borrow_mut() = std::rc::Rc::new((__almide_assigned).into())); }}", value_s, info.static_name),
+            Tls::Cell => format!("{{ let __almide_assigned = {}; {}.with(|__almide_cell| __almide_cell.set(__almide_assigned)); }}", value_s, info.static_name),
+            Tls::RcRefCell => format!("{{ let __almide_assigned = {}; {}.with(|__almide_cell| *__almide_cell.borrow_mut() = std::rc::Rc::new((__almide_assigned).into())); }}", value_s, info.static_name),
             Tls::Const | Tls::Lazy { .. } => unreachable!(
                 "[COMPILER BUG] assignment to immutable global `{}` reached codegen",
                 info.static_name
@@ -559,7 +559,7 @@ fn render_stmt_index_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
     if let Some(info) = ctx.ann.global(*target) {
         use almide_ir::top_let_storage::TopLetStorage as Tls;
         return match info.storage {
-            Tls::RcRefCell => format!("{}.with(|c| almide_index_set!(std::rc::Rc::make_mut(&mut *c.borrow_mut()), {}, {}));", info.static_name, idx_str, cast_val),
+            Tls::RcRefCell => format!("{}.with(|__almide_cell| almide_index_set!(std::rc::Rc::make_mut(&mut *__almide_cell.borrow_mut()), {}, {}));", info.static_name, idx_str, cast_val),
             other => unreachable!(
                 "[COMPILER BUG] index-assign to {:?} global `{}`",
                 other, info.static_name
@@ -601,7 +601,7 @@ fn render_map_insert_form(ctx: &RenderContext, target: VarId, key_str: &str, val
     if let Some(info) = ctx.ann.global(target) {
         use almide_ir::top_let_storage::TopLetStorage as Tls;
         return match info.storage {
-            Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).insert({}, {}));", info.static_name, key_str, val_str),
+            Tls::RcRefCell => format!("{}.with(|__almide_cell| std::rc::Rc::make_mut(&mut *__almide_cell.borrow_mut()).insert({}, {}));", info.static_name, key_str, val_str),
             other => unreachable!(
                 "[COMPILER BUG] map-insert into {:?} global `{}`",
                 other, info.static_name
@@ -627,7 +627,7 @@ fn render_stmt_field_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
     if let Some(info) = ctx.ann.global(*target) {
         use almide_ir::top_let_storage::TopLetStorage as Tls;
         return match info.storage {
-            Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).{} = {});", info.static_name, field, val_str),
+            Tls::RcRefCell => format!("{}.with(|__almide_cell| std::rc::Rc::make_mut(&mut *__almide_cell.borrow_mut()).{} = {});", info.static_name, field, val_str),
             other => unreachable!(
                 "[COMPILER BUG] field-assign to {:?} global `{}`",
                 other, info.static_name

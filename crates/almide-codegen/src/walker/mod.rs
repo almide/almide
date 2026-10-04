@@ -95,6 +95,14 @@ pub(crate) fn ctor_enum_for(ctx: &RenderContext, ctor: &str, ty: Option<&Ty>) ->
 /// Prefix that renames the four keywords rustc refuses to raw-escape.
 const UNRAWABLE_KEYWORD_PREFIX: &str = "almide_kw_";
 
+/// The prefix every Rust binder the walker and the templates GENERATE around
+/// user code carries (`X.with(|__almide_cell| …)`, `__almide_rs`, the fan's
+/// `__almide_s` / `__almide_fan_g`, …). A user identifier with this prefix is
+/// escaped by [`escape_rust_ident`], so no user binding can share a spelling
+/// with a generated one and be captured by it (#3304 — `X.with(|c| … c * 2.0)`
+/// read the `RefCell` where the user's `c` was meant).
+pub(crate) const HYGIENE_PREFIX: &str = "__almide_";
+
 /// Escape `name` for use as a Rust identifier (definition or reference).
 /// Single source of truth for every emission site (`var_name`, fn param, fn
 /// DEFINITION, fn call site, and every record / variant-payload FIELD name:
@@ -112,9 +120,12 @@ const UNRAWABLE_KEYWORD_PREFIX: &str = "almide_kw_";
 /// already starts with `almide_kw_` is prefixed once more, so a record that
 /// declares both `self` and `almide_kw_self` (both legal Almide field names)
 /// still gets two distinct Rust fields (`almide_kw_self` and
-/// `almide_kw_almide_kw_self`). Every output that starts with the prefix came
-/// from exactly one prefixed input; every other output is `name` or
-/// `r#name`, which never starts with it.
+/// `almide_kw_almide_kw_self`). An identifier in the generated-binder space
+/// ([`HYGIENE_PREFIX`], `__almide_…`) is prefixed the same way, so it never
+/// spells a generated binder (#3304); `almide_kw___almide_…` cannot collide
+/// with the other two prefixed forms. Every output that starts with the
+/// prefix came from exactly one prefixed input; every other output is `name`
+/// or `r#name`, which never starts with it or with the hygiene prefix.
 ///
 /// Only the Rust SPELLING changes: user-visible text that names a field (the
 /// derived `AlmideRepr` format string, Codec's JSON keys) keeps the original
@@ -122,7 +133,9 @@ const UNRAWABLE_KEYWORD_PREFIX: &str = "almide_kw_";
 pub(crate) fn escape_rust_ident(name: &str, templates: &TemplateSet) -> String {
     match name {
         "self" | "Self" | "super" | "crate" => format!("{}{}", UNRAWABLE_KEYWORD_PREFIX, name),
-        _ if name.starts_with(UNRAWABLE_KEYWORD_PREFIX) => format!("{}{}", UNRAWABLE_KEYWORD_PREFIX, name),
+        _ if name.starts_with(UNRAWABLE_KEYWORD_PREFIX) || name.starts_with(HYGIENE_PREFIX) => {
+            format!("{}{}", UNRAWABLE_KEYWORD_PREFIX, name)
+        }
         _ if is_rust_keyword(name) => templates
             .render_with("keyword_escape", None, &[], &[("name", name)])
             .unwrap_or_else(|| name.to_string()),
@@ -489,10 +502,12 @@ fn render_fn_safe_name(
         // prefix_intra_module_calls, ...) mangle without escaping — escaping
         // before prefixing produced `almide_rt_util_r#move` (#1494).
         safe_name = format!("almide_rt_{}_{}", origin, base);
-    } else {
+    } else if !(is_rust_effect_main || is_rust_plain_main_with_forces) {
         // Escape a Rust-keyword fn name (`box` → `r#box`) so the DEFINITION
         // matches the CALL site exactly (#659). Only unprefixed names can
         // collide with a keyword, so the escape lives on this branch (#1494).
+        // The generated `__almide_main` is the compiler's own spelling (the
+        // `main` wrapper calls it verbatim), not a user name to keep hygienic.
         safe_name = escape_rust_ident(&safe_name, ctx.templates);
     }
     format!("{}{}", safe_name, fn_generics)

@@ -81,8 +81,8 @@ fn render_expr_var(ctx: &RenderContext, expr: &IrExpr) -> String {
     if let Some(info) = ctx.ann.global(*id) {
         use almide_ir::top_let_storage::TopLetStorage as Tls;
         let read = match info.storage {
-            Tls::Cell => format!("{}.with(|c| c.get())", info.static_name),
-            Tls::RcRefCell => format!("{}.with(|c| (**c.borrow()).clone())", info.static_name),
+            Tls::Cell => format!("{}.with(|__almide_cell| __almide_cell.get())", info.static_name),
+            Tls::RcRefCell => format!("{}.with(|__almide_cell| (**__almide_cell.borrow()).clone())", info.static_name),
             Tls::Lazy { .. } => ctx.templates
                 .render_with("deref_lazy", None, &[], &[("name", info.static_name.as_str())])
                 .unwrap_or_else(|| info.static_name.clone()),
@@ -769,9 +769,9 @@ fn render_fan(ctx: &RenderContext, exprs: &[IrExpr]) -> String {
     }).collect();
     let exprs_s = rendered.join(", ");
     let count_s = format!("{}", exprs.len());
-    let handles: Vec<String> = (0..exprs.len()).map(|i| format!("__fan_h{}", i)).collect();
+    let handles: Vec<String> = (0..exprs.len()).map(|i| format!("__almide_fan_h{}", i)).collect();
     let spawns: Vec<String> = rendered.iter().enumerate()
-        .map(|(i, body)| format!("let {} = __s.spawn(move || {{ let __fan_e = almide_fan_enter(__fan_g, {}); {} }});", handles[i], i, body))
+        .map(|(i, body)| format!("let {} = __almide_s.spawn(move || {{ let __almide_fan_e = almide_fan_enter(__almide_fan_g, {}); {} }});", handles[i], i, body))
         .collect();
     let any_result = exprs.iter().any(|e| e.ty.is_result());
     let joins: Vec<String> = exprs.iter().enumerate().map(|(i, e)| {
