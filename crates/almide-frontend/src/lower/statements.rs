@@ -398,6 +398,7 @@ pub(crate) fn coerce_literal_to_sized(ir_val: &mut IrExpr, declared: &Ty, env: &
         }
         _ => {}
     }
+    retag_anon_record_nominal(ir_val, declared, env);
     // Resolve a named type alias to its structural form so a record / sized
     // alias declared via `type Rec = { b: Int8, .. }` (a `Ty::Named`) becomes
     // its `Ty::Record { .. }` / `Ty::Int8` / etc. before the match below.
@@ -435,6 +436,28 @@ pub(crate) fn coerce_literal_to_sized(ir_val: &mut IrExpr, declared: &Ty, env: &
     }
 }
 
+/// #3283: an anonymous record literal in a slot of a declared record type IS
+/// that type. The checker types `{ w: .., h: .. }` structurally, so without
+/// this the literal reached codegen as a bare `Ty::Record` and native named
+/// it by a program-wide shape lookup — the FIRST module's same-field struct
+/// (`almide_rt_a_Size { .. }` in a fn returning `b.Extent`, rustc E0308).
+/// The slot's nominal type is the checker's answer; the literal takes it.
+fn retag_anon_record_nominal(ir_val: &mut IrExpr, declared: &Ty, env: &TypeEnv) {
+    if !matches!(declared, Ty::Named(..)) {
+        return;
+    }
+    let IrExprKind::Record { name: None, fields } = &ir_val.kind else { return };
+    if !matches!(ir_val.ty, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Unknown) {
+        return;
+    }
+    let Ty::Record { fields: decl_fields } = env.resolve_named(declared) else { return };
+    let same_names = decl_fields.len() == fields.len()
+        && decl_fields.iter().all(|(n, _)| fields.iter().any(|(f, _)| f == n));
+    if same_names {
+        ir_val.ty = declared.clone();
+    }
+}
+
 /// Whether `inner` is the default numeric type a literal of the sized `slot`
 /// starts at (`Int` for the integer widths, `Float` for `Float32`) — or not
 /// yet known — so a carrier or fn type built around it may take the slot.
@@ -442,6 +465,10 @@ fn is_default_width_of(inner: &Ty, slot: &Ty) -> bool {
     let default = match slot {
         Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 => Ty::Int,
         Ty::Float32 => Ty::Float,
+        // A structural record the checker unified with a nominal slot is that
+        // nominal type (#3283): `none` in `-> Option[b.Extent]` spells
+        // `None::<b.Extent>`, not the first same-field struct of the program.
+        Ty::Named(..) if matches!(inner, Ty::Record { .. } | Ty::OpenRecord { .. }) => return true,
         _ => return inner == slot,
     };
     *inner == default || *inner == *slot || matches!(inner, Ty::Unknown | Ty::TypeVar(_))
