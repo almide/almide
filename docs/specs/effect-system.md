@@ -454,35 +454,49 @@ effect fn fetch() -> Result[String, String] = http.get("https://example.com")
 The gate runs after codegen: `almide check` and `almide test` accept the file,
 `almide build` refuses it.
 
-### Callbacks: charged to the creator
+### Callbacks: the set rides the value (ADR-0026 D1)
 
-A closure's categories are charged to the function that **creates** it: the
-function that writes the lambda, or takes a named fn as a value. Creating an
-effectful closure already needs an effect context (E006 otherwise), so the
-creator is where `[permissions].allow` judges it.
+A closure's categories are performed where it is **called**, and the set moves
+with the value. Creating a closure performs nothing. The set is solved, never
+written:
 
-A function that **calls** a closure it is handed (a fn-typed parameter, a
-record field holding a function, an element of a list of functions) runs
-whatever that closure does, but its own set does not include it. `almide
-check --effects` names such a function *callback-dependent* instead of
-reporting it as pure, and names the value it calls, never a guessed callee:
+- **A bare fn-type parameter is transparent.** A function that calls a closure
+  it is handed (`f(x)`, or `xs |> list.map(f)`) is reported with the
+  parameter, never a guessed callee, and each call site that hands it a
+  closure is charged with that closure's set — `apply(paths, (p) => …fs…)`
+  carries `IO`, `apply(names, (s) => string.len(s))` carries nothing.
+- **A stored or returned value keeps its set**: a `let`/`var` local, a record
+  field (the union of every closure stored in that field), a return value, a
+  top-level `let`.
+- A closure put anywhere else (a list, an option payload, a variant, an
+  argument of a stdlib call) joins a pool of its arity; calling a value read
+  back from such a place is charged with that pool. A stdlib call is assumed
+  to run every closure it is given.
 
 ```
-  call_box  → {} + whatever b.run does
-  make  → {IO} (effect fn)
+  call_box  → {IO}
+  make  → {} (effect fn); returns a closure doing {IO}
   use_it  → {} + whatever f (arg 1) does
-
-5 functions: 1 pure, 2 callback-dependent, 2 with effects
+  main  → {IO} (effect fn)
 ```
 
-A fn-typed parameter counts when it is called and when it is handed to
-another call that may run it (`xs |> list.map(f)`). A lambda the function
-writes and calls itself is its own code and is already in its set. So a plain
-`fn`'s `{}` means "no category of its own"; only a function that is neither
-effectful nor callback-dependent is counted pure (#3268). ADR-0026 (#3243)
-will carry the category set on the fn type itself.
+`[permissions].allow` is checked on these sets, so a violation names the
+function that **runs** the closure, with one path per category (D4). A step
+through a callback names the parameter, then the concrete closure when it is
+known; where several values may flow (a parameter's other call sites, a
+pooled value) the next step is prefixed `e.g.`:
 
-Test: `tests/effects_report_callbacks_test.rs`
+```
+error: capability violation in `main`
+  IO is not in [permissions].allow
+  path: main → use_it → f (arg 1 of use_it) → closure (line 3:42 in make) → fs.read_text (line 3:49)
+```
+
+The sets live in the effect analysis (`crates/almide-codegen/src/effect_flow/`),
+not in `Ty::Fn`: they are computed after type checking and dropped with the
+report, so monomorphisation never sees them. No surface syntax is involved.
+
+Tests: `tests/effect_category_flow_test.rs`, `tests/effects_report_callbacks_test.rs`
 
 ### Design layers
 
