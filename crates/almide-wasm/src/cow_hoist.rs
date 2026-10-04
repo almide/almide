@@ -40,6 +40,19 @@
 //! copy, or none, on every run that does not abort, so the alloc ledgers do
 //! not move. Reads before that first store see the same contents either way.
 //!
+//! THE `while` PRE-JUDGE (#3345). A `while` loop has no range to test, so
+//! its preheader guard is the loop CONDITION itself, evaluated once more —
+//! allowed only for an INERT condition ([`inert_cond`]): scalar variables,
+//! literals, non-trapping scalar arithmetic and comparisons. Such a
+//! condition has no effect, cannot trap, allocates nothing, charges no meter
+//! and reads only scalar locals, so the extra evaluation is unobservable and
+//! returns exactly what the loop's first check returns (nothing runs between
+//! them but the judge, which touches only the list). The unrolled fast lane
+//! (unroll.rs) enters its body only under `i < LIT-(K-1)`, which implies the
+//! condition, so it too runs after the judge. fannkuchredux's flip loop
+//! (`while lo < hi { let t = perm[lo]; perm[lo] = perm[hi]; perm[hi] = t; … }`)
+//! kept a cold judge call in its hottest loop without this.
+//!
 //! WHAT THE SCAN REFUSES, conservatively: every candidate when the loop holds
 //! a lambda, a closure, a fan, an iterator chain or an inline-Rust node (each
 //! can reach variables by id rather than through a `Var` read); a candidate
@@ -185,6 +198,29 @@ pub(crate) fn first_iteration_stores(body: &[IrStmt]) -> Vec<VarId> {
     out.into_iter().collect()
 }
 
+/// A loop condition the `while` pre-judge may evaluate one extra time: no
+/// effect, no trap, no allocation, no call — scalar `Var`s and literals
+/// under wrapping `+ - *` and comparisons (`and`/`or` short-circuit into
+/// control flow, `/` and `%` can trap: both refused).
+pub(crate) fn inert_cond(e: &IrExpr) -> bool {
+    use almide_ir::BinOp as B;
+    let scalar = matches!(e.ty, almide_types::types::Ty::Int | almide_types::types::Ty::Float | almide_types::types::Ty::Bool);
+    scalar
+        && match &e.kind {
+            IrExprKind::Var { .. } | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitBool { .. } => true,
+            IrExprKind::UnOp { operand, .. } => inert_cond(operand),
+            IrExprKind::BinOp { op, left, right } => {
+                matches!(
+                    op,
+                    B::AddInt | B::SubInt | B::MulInt | B::AddFloat | B::SubFloat | B::MulFloat
+                        | B::Eq | B::Neq | B::Lt | B::Gt | B::Lte | B::Gte
+                ) && inert_cond(left)
+                    && inert_cond(right)
+            }
+            _ => false,
+        }
+}
+
 /// The lists a loop (its condition and body) stores into and otherwise
 /// reaches only through element reads, in VarId order (deterministic bytes).
 pub(crate) fn element_only_writes(cond: Option<&IrExpr>, body: &[IrStmt]) -> Vec<VarId> {
@@ -228,7 +264,7 @@ impl crate::emitter::Emitter<'_> {
         Ok(added)
     }
 
-    /// The pre-judge (module header, #2980): for a counting loop, judge each list
+    /// The pre-judge (module header, #2980; `while`, #3345): judge each list
     /// its body certainly stores into on the first iteration once, before
     /// the loop, when `emit_runs` (which pushes an i32: the loop runs at
     /// least once) holds — and mark it so the loop's stores skip the judge.
@@ -237,14 +273,15 @@ impl crate::emitter::Emitter<'_> {
     /// `drop_prejudged`.
     pub(crate) fn prejudge_first_stores(
         &mut self,
+        cond: Option<&IrExpr>,
         body: &[IrStmt],
-        emit_runs: &dyn Fn(&mut Self),
-    ) -> Vec<VarId> {
+        emit_runs: &dyn Fn(&mut Self) -> Result<(), crate::EmitError>,
+    ) -> Result<Vec<VarId>, crate::EmitError> {
         let certain = first_iteration_stores(body);
         if certain.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
-        let only = element_only_writes(None, body);
+        let only = element_only_writes(cond, body);
         let cands: Vec<VarId> = certain
             .into_iter()
             .filter(|v| {
@@ -255,16 +292,16 @@ impl crate::emitter::Emitter<'_> {
             })
             .collect();
         if cands.is_empty() {
-            return cands;
+            return Ok(cands);
         }
-        emit_runs(self);
+        emit_runs(self)?;
         self.f.instructions().if_(wasm_encoder::BlockType::Empty);
         for v in &cands {
             self.emit_prejudge_cow(*v);
         }
         self.f.instructions().end();
         self.cow_prejudged.extend(cands.iter().copied());
-        cands
+        Ok(cands)
     }
 
     /// Unmark one loop's pre-judged lists.

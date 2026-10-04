@@ -11,8 +11,7 @@ use crate::emitter::Emitter;
 use crate::types_table::TypeTable;
 use crate::*;
 
-/// The top-let prelude's store, gate and measurement release (split for
-/// the file budget).
+/// The top-let prelude's store, gate and measurement release (file budget).
 #[path = "func_toplets.rs"]
 mod toplets;
 use toplets::{release_runtime_blocks_for_measurement, release_top_lets_for_measurement, store_top_let, top_lets_gate};
@@ -383,6 +382,7 @@ pub(crate) fn lower_fn(
             hoisted_counts: HashMap::new(),
             cow_flags: HashMap::new(),
             cow_prejudged: HashSet::new(),
+            bounds_facts: None,
             in_tail: false,
             try_see_through: false,
             branch_depth: 0,
