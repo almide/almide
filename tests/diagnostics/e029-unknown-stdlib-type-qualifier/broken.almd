@@ -1,0 +1,5 @@
+// #3336: a stdlib module that needs an `import` qualifies a type only once
+// imported — the same fix-it the expression form `json.parse(..)` gives.
+fn keep(v: json.Value) -> json.Value = v
+
+effect fn main() -> Unit = println("ok")
