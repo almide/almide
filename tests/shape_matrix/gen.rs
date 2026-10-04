@@ -660,8 +660,12 @@ fn bind_cells(out: &mut Vec<Cell>) {
                         (String::new(), format!("let src: {src_ty} = {src_val}\n"), String::new())
                     };
                     let body = format!("{local}{pre}{stmts}\nlet v = {obs}");
+                    // A closure handing the enclosing `var` to an in-place
+                    // mutator is E011 in a pure fn (dialect epoch 9, #3344):
+                    // that cell's `run` is an effect fn.
+                    let (kw, bang) = if form == "lambda_param" && sink == "outer_push" { ("effect fn", "!") } else { ("fn", "") };
                     let src = format!(
-                        "{decls}\nfn run({params}) -> Int = {{\n{}\n  v\n}}\n\neffect fn main() -> Unit = println(int.to_string(run({arg})))\n",
+                        "{decls}\n{kw} run({params}) -> Int = {{\n{}\n  v\n}}\n\neffect fn main() -> Unit = println(int.to_string(run({arg}){bang}))\n",
                         indent(&body, 2)
                     )
                     .replace("TY", p.ty)
