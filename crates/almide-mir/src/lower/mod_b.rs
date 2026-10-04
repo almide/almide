@@ -145,12 +145,12 @@ fn build_variant_layouts_case_fields(
 /// The `__drop_<T>` FUNCTION IDENTIFIER for a (possibly module-prefixed) type name. A cross-module
 /// type carries its module prefix in the IR (`self.types.RunResult` → `Ty::Named("types.RunResult")`);
 /// a dot is illegal in an Almide function name, so the generated drop fn / its call sites / the
-/// rendered `(call $__drop_…)` all sanitize dots to underscores — the SAME mangling v0 codegen
-/// applies (`almide_rt_types_RunResult`). For a single-file (dot-free) type this is the identity, so
+/// rendered `(call $__drop_…)` all spell it as its `qualified_ident` — the SAME mangling v0 codegen
+/// applies (`almide_rt_types_RunResult`); injective, so `a.b.T` and `a_b.T` stay two (#3338). For a single-file (dot-free) type this is the identity, so
 /// the v0 corpus / spec fixtures render byte-identically. The `Op::DropVariant` renderer applies the
 /// IDENTICAL transform, keeping the call site and the definition in lockstep.
 pub fn drop_fn_ident(type_name: &str) -> String {
-    type_name.replace('.', "_")
+    almide_base::names::qualified_ident(type_name)
 }
 
 /// [`lower_function_all`] WITH the program's record-layout registry threaded in —

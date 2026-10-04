@@ -94,8 +94,8 @@ fn collect_decode_by_ref(program: &IrProgram) -> std::collections::HashSet<Strin
     }
     for m in &program.modules {
         let ident = m.versioned_name
-            .map(|v| v.to_string().replace('.', "_"))
-            .unwrap_or_else(|| m.name.to_string().replace('.', "_"));
+            .map(|v| almide_base::names::module_ident(v.as_str()))
+            .unwrap_or_else(|| almide_base::names::module_ident(m.name.as_str()));
         for f in &m.functions {
             add(f, Some(&ident));
         }
@@ -139,11 +139,11 @@ fn collect_module_method_fns(program: &IrProgram) -> HashMap<String, String> {
         if !name.contains('.') {
             return;
         }
-        let flat = name.replace('.', "_");
-        let base = flat.strip_prefix(&format!("{}_", origin)).unwrap_or(&flat);
+        let rest = almide_base::names::strip_module_path(name, origin);
+        let base = rest.unwrap_or(name).replace('.', "_");
         let symbol = format!("almide_rt_{}_{}", origin, base);
         map.insert(name.to_string(), symbol.clone());
-        if let Some(bare) = name.strip_prefix(&format!("{}.", origin)) {
+        if let Some(bare) = rest {
             map.insert(bare.to_string(), symbol.clone());
         } else {
             // The qualified spelling (`moda.Box.tag`) a call site emits when
@@ -169,8 +169,8 @@ fn collect_module_method_fns(program: &IrProgram) -> HashMap<String, String> {
     }
     for m in &program.modules {
         let ident = m.versioned_name
-            .map(|v| v.to_string().replace('.', "_"))
-            .unwrap_or_else(|| m.name.to_string().replace('.', "_"));
+            .map(|v| almide_base::names::module_ident(v.as_str()))
+            .unwrap_or_else(|| almide_base::names::module_ident(m.name.as_str()));
         for f in &m.functions {
             add(&mut map, f.name.as_str(), &ident);
         }

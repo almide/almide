@@ -19,8 +19,8 @@ pub fn unlinked_call_names(prog: &MirProgram) -> BTreeSet<String> {
         for op in &f.ops {
             let name = match op {
                 Op::CallFn { name, .. } => name.clone(),
-                Op::DropVariant { ty, .. } => format!("__drop_{}", ty.replace('.', "_")),
-                Op::DropWrapperRec { drop_fn, .. } => format!("__drop_{}", drop_fn.replace('.', "_")),
+                Op::DropVariant { ty, .. } => format!("__drop_{}", crate::lower::drop_fn_ident(ty)),
+                Op::DropWrapperRec { drop_fn, .. } => format!("__drop_{}", crate::lower::drop_fn_ident(drop_fn)),
                 _ => continue,
             };
             if name != "__mg_take" && !defined.contains(name.as_str()) {

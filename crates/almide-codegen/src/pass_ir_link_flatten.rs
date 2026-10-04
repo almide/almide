@@ -51,8 +51,8 @@ impl NanoPass for IrLinkFlattenPass {
 
         for module in modules {
             let mod_ident = module.versioned_name
-                .map(|v| v.to_string().replace('.', "_"))
-                .unwrap_or_else(|| module.name.to_string().replace('.', "_"));
+                .map(|v| almide_base::names::module_ident(v.as_str()))
+                .unwrap_or_else(|| almide_base::names::module_ident(module.name.as_str()));
 
             // Merge type declarations (deduplicate by name).
             // If both an alias and a non-alias exist for the same name,
@@ -302,7 +302,7 @@ fn build_type_rename_map(type_decls: &[IrTypeDecl]) -> HashMap<String, Sym> {
         // member's standard mangle.
         let canonical: Sym = match members.iter().find(|m| !m.contains('.')) {
             Some(bare) => sym(bare),
-            None => sym(&format!("almide_rt_{}", members[0].replace('.', "_"))),
+            None => sym(&format!("almide_rt_{}", almide_base::names::qualified_ident(&members[0]))),
         };
         for m in &members {
             if m.contains('.') {

@@ -82,7 +82,7 @@ pub fn registered_keys(module: Option<&str>, fname: &str) -> Vec<String> {
         None => vec![fname.to_string()],
         Some(m) => {
             let sanitized = fname.replace(' ', "_").replace('-', "_").replace('.', "_");
-            let mod_ident = m.replace('.', "_");
+            let mod_ident = almide_base::names::module_ident(m);
             vec![
                 fname.to_string(),                               // bare alias
                 format!("{}.{}", m, fname),                      // qualified

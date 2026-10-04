@@ -25,7 +25,7 @@ use std::collections::HashMap;
 fn user_module_fn_name(module: &str, func: &str) -> String {
     format!(
         "almide_rt_{}_{}",
-        module.replace('.', "_"),
+        almide_base::names::module_ident(module),
         func.replace('.', "_")
     )
 }

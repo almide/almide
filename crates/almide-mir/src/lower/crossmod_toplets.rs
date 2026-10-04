@@ -24,10 +24,10 @@ use almide_ir::{IrExpr, IrExprKind, IrModule, IrProgram, Mutability, VarId};
 use almide_lang::types::Ty;
 
 /// The `module_origin` spelling of a module: its versioned name when it has
-/// one, else its name, dots turned into underscores — byte for byte what the
+/// one, else its name, as its `module_ident` (#3338) — byte for byte what the
 /// frontend writes into a synthesized reference.
 fn origin_key(m: &IrModule) -> String {
-    m.versioned_name.map(|v| v.as_str().to_string()).unwrap_or_else(|| m.name.as_str().to_string()).replace('.', "_")
+    almide_base::names::module_ident(m.versioned_name.unwrap_or(m.name).as_str())
 }
 
 /// Does `e` read a variable or call a function? Either is resolved in the
