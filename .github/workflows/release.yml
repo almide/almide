@@ -103,7 +103,15 @@ jobs:
           Copy-Item "target/${{ matrix.target }}/release/almide.exe" "$staging/"
           Copy-Item "target/${{ matrix.target }}/release/almide-verify.exe" "$staging/"
           Copy-Item "LICENSE" "$staging/"
-          Compress-Archive -Path "$staging/*" -DestinationPath "$staging.zip"
+          # The folder itself, not its contents: the zip unpacks into
+          # `$staging/` like the tarballs, which is where tools/install.ps1 and
+          # `almide self-update` look for almide.exe (#3359).
+          Compress-Archive -Path "$staging" -DestinationPath "$staging.zip"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $entries = [System.IO.Compression.ZipFile]::OpenRead("$PWD/$staging.zip").Entries.FullName -replace '\\', '/'
+          foreach ($want in @("almide.exe", "almide-verify.exe", "LICENSE")) {
+            if ($entries -notcontains "$staging/$want") { Write-Error "$staging.zip has no $staging/$want (entries: $($entries -join ', '))"; exit 1 }
+          }
           echo "ASSET=$staging.zip" >> $env:GITHUB_ENV
 
       - uses: actions/upload-artifact@v7
