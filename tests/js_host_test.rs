@@ -7,7 +7,7 @@ use std::process::Command;
 
 const PROGRAM: &str = "@extern(wasm, \"js\", \"js_log\")\nfn js_log(msg: String) -> Unit\n\npub fn greet(n: Int) -> Int = n + 1\npub fn shout(s: String) -> String = string.to_upper(s)\nfn main() -> Unit = js_log(\"hi ${greet(1)}\")\n";
 
-const UNMARSHALLABLE: &str = "pub fn total(xs: List[Int]) -> Int = list.len(xs)\nfn main() -> Unit = println(int.to_string(total([1])))\n";
+const UNMARSHALLABLE: &str = "pub fn total(xs: Map[String, Int]) -> Int = map.len(xs)\nfn main() -> Unit = println(int.to_string(total(map.new())))\n";
 
 fn almide() -> String {
     std::env::var("ALMIDE_BIN").unwrap_or_else(|_| format!("{}/target/release/almide", env!("CARGO_MANIFEST_DIR")))
@@ -101,9 +101,9 @@ fn a_scalar_only_surface_keeps_the_module_bytes_and_ships_only_its_shims() {
 fn a_boundary_type_the_host_cannot_marshal_is_refused_by_name() {
     let dir = tempfile::tempdir().unwrap();
     let (ok, stderr) = build(dir.path(), UNMARSHALLABLE, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
-    assert!(!ok, "a List on the boundary must be refused:\n{stderr}");
+    assert!(!ok, "a Map on the boundary must be refused:\n{stderr}");
     assert!(stderr.contains("--host js cannot marshal parameter `xs` of `total`"), "{stderr}");
-    assert!(stderr.contains("List"), "{stderr}");
+    assert!(stderr.contains("Map"), "{stderr}");
     assert!(!dir.path().join("app.js").exists() && !dir.path().join("app.wasm").exists(), "a refused build writes nothing");
     // The same program builds without the switch: the refusal is the host's, not the module's.
     let (ok, stderr) = build(dir.path(), UNMARSHALLABLE, &["--target", "wasm", "-o", "app.wasm"]);
@@ -230,23 +230,40 @@ fn an_extern_declared_in_another_module_is_an_import_of_the_structural_module() 
     assert_eq!(String::from_utf8_lossy(&run.stdout), "12\n41\n80\n");
 }
 
-/// #3352: an export whose return the host cannot wrap is refused at build
-/// time by name — an effect fn over an unmarshalled type, and a declared
-/// Result whose err is not a String — never a wrapper that reads garbage.
+/// #3352, #3354: an export whose boundary the host cannot carry is refused
+/// at build time by name — a Map, a declared Result whose err is not a
+/// String, a variant (the module's record says so) — never a wrapper that
+/// reads garbage.
 #[test]
-fn an_effect_or_result_return_the_host_cannot_wrap_is_refused_by_name() {
+fn an_export_the_host_cannot_wrap_is_refused_by_name() {
     let cases = [
-        ("effect fn listed(n: Int) -> List[Int] = [n]\nfn main() -> Unit = {}\n", "listed"),
-        ("effect fn raw(n: Int) -> Bytes = bytes.from_string(int.to_string(n))\nfn main() -> Unit = {}\n", "raw"),
-        ("fn coded(n: Int) -> Result[Int, Int] = if n > 0 then ok(n) else err(n)\nfn main() -> Unit = {}\n", "coded"),
+        ("effect fn counts(n: Int) -> Map[String, Int] = map.new()\nfn main() -> Unit = {}\n", "cannot marshal the return type of `counts`"),
+        ("fn coded(n: Int) -> Result[Int, Int] = if n > 0 then ok(n) else err(n)\nfn main() -> Unit = {}\n", "cannot marshal the return type of `coded`"),
+        ("type Shape = | Dot | Box(Int)\nfn shape(n: Int) -> Shape = if n > 0 then Box(n) else Dot\nfn main() -> Unit = {}\n", "cannot wrap the return of `shape`"),
+        ("type Shape = | Dot | Box(Int)\nfn area(s: Shape) -> Int = 0\nfn main() -> Unit = {}\n", "cannot wrap parameter `s` of `area`"),
     ];
-    for (src, name) in cases {
+    for (src, needle) in cases {
         let dir = tempfile::tempdir().unwrap();
         let (ok, stderr) = build(dir.path(), src, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
-        assert!(!ok, "`{name}` must be refused:\n{stderr}");
-        assert!(stderr.contains(&format!("--host js cannot marshal the return type of `{name}`")), "{stderr}");
+        assert!(!ok, "must be refused ({needle}):\n{stderr}");
+        assert!(stderr.contains(needle), "{stderr}");
         assert!(!dir.path().join("app.js").exists() && !dir.path().join("app.wasm").exists(), "a refused build writes nothing");
     }
+}
+
+/// #3354: a block-shaped export is wrapped by its recorded layout, and the
+/// typings name the JS shape.
+#[test]
+fn a_block_shaped_export_is_wrapped_by_its_recorded_layout() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = "type P = { x: Int, name: String }\nfn pick(xs: List[P], b: Bytes, o: Int?) -> List[String] = xs |> list.map((p) => p.name)\nfn main() -> Unit = {}\n";
+    let (ok, stderr) = build(dir.path(), src, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(ok, "{stderr}");
+    let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
+    let dts = std::fs::read_to_string(dir.path().join("app.d.ts")).unwrap();
+    assert!(js.contains(r#"const S_pick_p0 = {k:"list",stride:4,el:{k:"rec",size:"#), "{js}");
+    assert!(js.contains("const h0 = putBlock(S_pick_p0, xs, \"pick\");") && js.contains("takeBlock(instance.exports.pick(h0, h1, h2), S_pick_r, \"pick\")"), "{js}");
+    assert!(dts.contains("export function pick(xs: Array<{ x: number; name: string }>, b: Uint8Array, o: number | undefined): Array<string>;"), "{dts}");
 }
 
 /// #3352: an effect fn's wrapper unwraps its Result block (`takeResult`) and
@@ -261,7 +278,7 @@ fn an_effect_export_unwraps_its_result_block() {
     assert!(ok, "{stderr}");
     let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
     let dts = std::fs::read_to_string(dir.path().join("app.d.ts")).unwrap();
-    assert!(js.contains("return takeResult(instance.exports.raw(h0), \"string\", \"raw\");"), "{js}");
+    assert!(js.contains("return takeResult(instance.exports.raw(h0), S_raw_r, \"raw\");") && js.contains(r#"const S_raw_r = {k:"res",ok:{k:"str"},err:{k:"str"}};"#), "{js}");
     assert!(js.contains("takeString(instance.exports.plain(h0))"), "{js}");
     assert!(js.contains("export class AlmideError extends Error"), "{js}");
     assert!(dts.contains("export function raw(key: string): string;") && dts.contains("export class AlmideError extends Error {}"), "{dts}");

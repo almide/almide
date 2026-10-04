@@ -5,4 +5,9 @@ println_only 5130
 marshal_types 6249
 extern_js 6020
 extern_scalars 6089
-effect_exports 7900
+# #3354: the Result unwrapping moved into the shared block helpers
+# (js_host_values.js: readers, builders, the flat-release child walk,
+# memoryBytes) — +4.4 KB once per glue that unwraps or carries a block.
+effect_exports 12200
+# #3354: every block shape as a param and a return, 23 wrappers + shape consts.
+marshal_blocks 19300
