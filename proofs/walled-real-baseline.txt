@@ -297,3 +297,20 @@
 # borrowed payload now joins the closure dispatch set, as variant-payload and tuple-
 # slot closures already did. The set is EMPTY: the wall=0 endgame over the full test-fn
 # corpus, with no intended exceptions. ANY row is a regression.
+
+# (2026-10-04, batch 2026-10-04: #3283 / #3287 fixtures) three rows the two
+# I-divergence fixes' new fixtures expose on the incumbent MIR brick. Both fixes
+# are native-side (rustc refused the generated Rust); the fixtures are their
+# cross-target evidence and run byte-identically on native, the structural leg
+# (the default wasm route) and the interp. The incumbent brick walls honestly:
+#  - same_shape_records `main`: a scalar `List[Float]` literal call argument
+#    whose elements include field reads of fresh record call results and a
+#    closure-result call (`List argument cannot be faithfully materialized`);
+#  - its test fn: an `if` over `Float ==` (a field read against a float
+#    literal) with a call-bearing arm (no both-arms linearization);
+#  - top_let_rc_value `main`: a top-level `Raw(bytes…)` variant whose payload
+#    is a heap field (ADT brick 5).
+# Owned by #2739 (the wall=0 burn), which stays open until they lower.
+spec/integration/same_shape_records/src/main.almd :: main  # #2739
+spec/integration/same_shape_records/src/same_shape_records_test.almd :: __test_almd_a literal in a slot of a module's record type is that module's record  # #2739
+spec/wasm_cross/top_let_rc_value.almd :: main  # #2739
