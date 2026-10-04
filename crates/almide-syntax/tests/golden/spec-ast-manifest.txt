@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at 286fcaa11 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at d2f4c0948 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -373,6 +373,7 @@ e4f053692420cb0669e9229d69ee8da92c8f0a8751b7ed7a0d2baf883f80749c	spec/lang/map_l
 890d04d640cbaf00e77f37d92b838a056d9b1187ecf3e9291c9d7ea9ae701ce5	spec/lang/module_var_index_test.almd
 6b9b39f8bc6c923559ec9324ee9d69f1f37aa4bd737f87541a9d1576cf27b1af	spec/lang/module_var_test.almd
 c8b30b0ec739258409a8408e1bf16281056c3b14850a8b0af829d33c2d19e09c	spec/lang/mut_list_param_test.almd
+5fcfc376367351b063c26548069024bb1fd0c7a6406e5c3b7c3026ec8c53b805	spec/lang/mut_param_branch_write_test.almd
 471cc499a20b7b93668fda3fa20f8ea5a97818eb7f3b33637b6806aeb557be73	spec/lang/mut_param_protocol_bound_test.almd
 979bdd37222ed442da4db1ce136c047d6acf44a6961aacbc6a8c94ad6432604c	spec/lang/mut_param_test.almd
 d05484fcc48aeea5ff8133a1305d8d74cc15b347025b02bf12834723aa2f3502	spec/lang/mut_param_whole_assign_test.almd
