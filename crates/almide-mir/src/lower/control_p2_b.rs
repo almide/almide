@@ -303,7 +303,14 @@ impl LowerCtx {
             }
         }
         // IMPURE effect Module / RuntimeCall: CallFn the dotted/symbol name directly.
+        // A capability-module call that is not an admitted host op is refused here
+        // (#3302): its raw `CallFn` would carry a host reach the witness never counts.
         let (name, args): (String, &[IrExpr]) = match &subject.kind {
+            IrExprKind::Call { target: CallTarget::Module { module, .. }, .. }
+                if crate::host_ops::CAP_MODULES.contains(&module.as_str()) =>
+            {
+                return rollback(self);
+            }
             IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
                 (format!("{}.{}", module.as_str(), func.as_str()), args)
             }
