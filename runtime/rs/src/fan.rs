@@ -71,14 +71,15 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
     let site = almide_rt_fan_map_par::<A, B, F> as fn(Vec<A>, F) -> Result<Vec<B>, String> as usize;
     let n = items.len();
     let workers = almide_rt_fan_plan(n, almide_fan_estimate(site));
-    let busy = std::sync::atomic::AtomicU64::new(0);
+    let clock = AlmideFanClock::new();
     if workers < 2 {
-        almide_fan_busy(&busy, || {
+        clock.calling(|| {
             for (slot, item) in slots.iter_mut().zip(items) {
                 *slot = Some(f(item));
             }
+            ((), n)
         });
-        almide_fan_record(site, busy.into_inner() as u128, n);
+        clock.record(site);
         return almide_fan_map_settle_slots(slots);
     }
     let chunk_size = n.div_ceil(workers);
@@ -87,18 +88,19 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
     let group = almide_fan_group(n);
     std::thread::scope(|s| {
         for (chunk_idx, (chunk, out)) in items.chunks(chunk_size).zip(slots.chunks_mut(chunk_size)).enumerate() {
-            let (f, busy) = (&f, &busy);
+            let (f, clock) = (&f, &clock);
             let group = &group;
             let base = chunk_idx * chunk_size;
             s.spawn(move || {
-                for (i, (slot, item)) in out.iter_mut().zip(chunk).enumerate() {
+                clock.worker(out.iter_mut().zip(chunk).enumerate(), |(i, (slot, item))| {
                     let _elem = almide_fan_enter(group, base + i);
-                    *slot = Some(almide_fan_busy(busy, || f(item.clone())));
-                }
+                    *slot = Some(f(item.clone()));
+                    Some(true)
+                });
             });
         }
     });
-    almide_fan_record(site, busy.into_inner() as u128, n);
+    clock.record(site);
     almide_fan_map_settle_slots(slots)
 }
 

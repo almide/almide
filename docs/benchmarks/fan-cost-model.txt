@@ -7,8 +7,13 @@
 #
 # The model. Every parallel twin is a SITE (native: one per callback type;
 # wasm: one per `__fan_site_K` export), and every offer at a site records
-# the compute time its elements took (inside the elements — spawn latency
-# is not counted): t ns per element. A site's FIRST offer goes parallel, as
+# the compute time its elements took: t ns per element. "Compute time" is
+# the thread's CPU time inside the elements (CLOCK_THREAD_CPUTIME_ID on
+# unix; a wall clock elsewhere), so spawn latency and the time a thread sat
+# descheduled are not counted, and a worker's FIRST element of the offer —
+# its warm-up, a fresh thread's (wasm: and instance's) first call — is kept
+# out of t (it is the WORKER term's), unless no worker ran a second one.
+# A site's FIRST offer goes parallel, as
 # before #3341. A later offer of n elements on W workers costs
 #   offer_ns + W * worker_ns   (thread spawn and join, the fan group's
 # bookkeeping; on wasm, the request round trip and the worker calls) and
@@ -21,6 +26,15 @@
 # Rejected: timing element 0 on the calling thread and deciding after it.
 # It serialises one whole chunk before the parallel part — measured on
 # fannkuchredux (10 chunks of ~18 ms): native 21 -> 35 ms, wasm 29 -> 45 ms.
+#
+# Rejected: wall time per element (the clock before 2026-10-05). On a loaded
+# runner one preempted element of a trivial body reads a whole time slice
+# and the site stays parallel: Linux container, 4 CPUs shared with 6 looping
+# parallel fan programs, the 10-iteration probe (8 elements, W=4, break-even
+# t > 11 us), 600 offers measured both ways — wall over break-even in 3
+# (max 1.44 ms per element), CPU time in none (max 1.6 us; the same three
+# offers read 263-277 ns). A wasm worker's warm-up call read 4-22 us (wall)
+# against ~0.2 us warm on that machine.
 #
 # What it cannot see: a site's first offer (always parallel, so one cheap
 # offer pays ~40-120 us once), and a site whose work per element swings

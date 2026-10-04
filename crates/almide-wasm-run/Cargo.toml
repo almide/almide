@@ -31,5 +31,10 @@ wasmtime = "49.0.2"
 wit-component = "0.259"
 wit-parser = "0.259"
 
+# The fan cost model's clock (#3341): a worker thread's CPU time, read
+# without `unsafe` (the workspace forbids it). Already in the tree via wasmtime.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "time"] }
+
 [lints]
 workspace = true
