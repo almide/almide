@@ -1,0 +1,50 @@
+// #3270: a `mut` param written inside a branch arm keeps the write, and the
+// value read after the branch is the one that path computed. `xs = list.set(xs,
+// i, v)` writes under its bounds check, so even a straight-line `set` is a write
+// inside an arm.
+type Point = { x: Int, y: Int }
+
+fn set_at(mut xs: List[Int], i: Int, v: Int) -> String = {
+  xs = list.set(xs, i, v)
+  "${xs}"
+}
+
+fn set_if(mut xs: List[Int], c: Bool) -> String = {
+  if c then {
+    xs[0] = 7
+  } else { () }
+  "${xs}"
+}
+
+fn bump_if(mut p: Point, c: Bool) -> Int = {
+  if c then {
+    p.x = p.x + 10
+  } else { () }
+  p.x + p.y
+}
+
+test "a mut param set under its bounds check keeps the write" {
+  var xs = [1, 2, 3]
+  assert_eq(set_at(xs, 2, 9), "[1, 2, 9]")
+  assert_eq(xs, [1, 2, 9])
+  assert_eq(set_at(xs, 5, 0), "[1, 2, 9]")
+  assert_eq(xs, [1, 2, 9])
+}
+
+test "a mut param list written on one arm reads each path's value" {
+  var a = [1, 2]
+  assert_eq(set_if(a, true), "[7, 2]")
+  assert_eq(a, [7, 2])
+  var b = [1, 2]
+  assert_eq(set_if(b, false), "[1, 2]")
+  assert_eq(b, [1, 2])
+}
+
+test "a mut param record written on one arm reads each path's value" {
+  var p = { x: 1, y: 2 }
+  assert_eq(bump_if(p, true), 13)
+  assert_eq(p.x, 11)
+  var q = { x: 1, y: 2 }
+  assert_eq(bump_if(q, false), 3)
+  assert_eq(q.x, 1)
+}
