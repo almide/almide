@@ -231,7 +231,16 @@ pub fn run_ladder(
         // matching the one-step form, which only ever minted this finding on
         // the diagnostic markers.
         let stderr = String::from_utf8_lossy(&nbuild.stderr);
-        if stderr.contains("Compile error") || stderr.contains("error[E") {
+        // An internal compiler error / `[COMPILER BUG]` refusal / compiler
+        // panic is the compiler failing on an accepted program — a finding,
+        // not a toolchain event (#3309: the shape family's IR-verify ICEs,
+        // #3315, were being skipped here).
+        if stderr.contains("Compile error")
+            || stderr.contains("error[E")
+            || stderr.contains("internal compiler error")
+            || stderr.contains("[COMPILER BUG]")
+            || stderr.contains("panicked at")
+        {
             return Outcome::Finding(Finding {
                 rung: Rung::NativeBuild,
                 kind: FindingKind::NativeBuildFailure,
