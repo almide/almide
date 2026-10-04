@@ -78,8 +78,8 @@ Inductive istep : instr -> cfg -> cfg -> Prop :=
       istep (IIf body) (mkcfg (0 :: s) l g m) (mkcfg s l g m)
 with irun : list instr -> cfg -> cfg -> Prop :=
   | R_nil : forall c, irun [] c c
-  | R_cons : forall i is c c' c'',
-      istep i c c' -> irun is c' c'' -> irun (i :: is) c c''.
+  | R_cons : forall i ins c c' c'',
+      istep i c c' -> irun ins c' c'' -> irun (i :: ins) c c''.
 
 (* THE EXECUTABLE: straight-line opcodes (non-recursive), and a single fixpoint `erun` that
    handles `IIf`/`IUnreachable` inline — so `erun body` / `erun rest` are both sub-terms of the
@@ -103,11 +103,11 @@ Definition estep1 (i : instr) (c : cfg) : option cfg :=
    an element (`erun body` where `body` sits inside `IIf body`), and the mutual `estep`/`erun`
    form too — a known limitation. So `erun` is FUEL-bounded (recursion on `fuel`), which makes
    the IIf body recursion well-founded. The relation `istep`/`irun` stays the fuel-free SPEC. *)
-Fixpoint erun (fuel : nat) (is : list instr) (c : cfg) {struct fuel} : option cfg :=
+Fixpoint erun (fuel : nat) (ins : list instr) (c : cfg) {struct fuel} : option cfg :=
   match fuel with
   | O => None
   | S f =>
-      match is with
+      match ins with
       | [] => Some c
       | i :: rest =>
           match i with
@@ -140,11 +140,11 @@ Opaque estep1.
 (* REFINEMENT (soundness): every result the executable produces is a real reduction in the SPEC
    relation. Induction on fuel — every sub-call (IIf body, the continuation) uses `f` < `S f`,
    so the single fuel IH covers them. So `erun` is a verified IMPLEMENTATION of `istep`/`irun`. *)
-Lemma erun_sound : forall fuel is c c', erun fuel is c = Some c' -> irun is c c'.
+Lemma erun_sound : forall fuel ins c c', erun fuel ins c = Some c' -> irun ins c c'.
 Proof.
-  induction fuel as [|f IHf]; intros is c c' H.
+  induction fuel as [|f IHf]; intros ins c c' H.
   - cbn in H; discriminate.
-  - destruct is as [|i rest].
+  - destruct ins as [|i rest].
     + cbn in H; injection H as <-; constructor.
     + destruct i.
       1-10: cbn in H; destruct (estep1 _ c) as [c1|] eqn:E1; try discriminate;
@@ -182,11 +182,11 @@ Proof. intros n i rest [s l g m]; destruct i; reflexivity. Qed.
 
 (* FUEL MONOTONICITY: a successful run stays successful with more fuel — so completeness can run
    the IIf body and the continuation at one common fuel bound. *)
-Lemma erun_mono_S : forall n is c c', erun n is c = Some c' -> erun (S n) is c = Some c'.
+Lemma erun_mono_S : forall n ins c c', erun n ins c = Some c' -> erun (S n) ins c = Some c'.
 Proof.
-  induction n as [|f IHf]; intros is c c' H.
+  induction n as [|f IHf]; intros ins c c' H.
   - cbn in H; discriminate.
-  - destruct is as [|i rest]; [ cbn in H |- *; exact H |].
+  - destruct ins as [|i rest]; [ cbn in H |- *; exact H |].
     rewrite erun_S_cons in H |- *. destruct i;
       try (destruct (estep1 _ c) as [c1|] eqn:E1; [ apply IHf; exact H | discriminate ]).
     + (* IIf body *) destruct c as [s l g m]; cbn [stk loc glob mem] in H |- *.
@@ -198,9 +198,9 @@ Proof.
     + (* IUnreachable *) discriminate.
 Qed.
 
-Lemma erun_mono_add : forall k n is c c', erun n is c = Some c' -> erun (n + k) is c = Some c'.
+Lemma erun_mono_add : forall k n ins c c', erun n ins c = Some c' -> erun (n + k) ins c = Some c'.
 Proof.
-  induction k as [|k IHk]; intros n is c c' H.
+  induction k as [|k IHk]; intros n ins c c' H.
   - rewrite Nat.add_0_r; exact H.
   - rewrite Nat.add_succ_r; apply erun_mono_S; apply IHk; exact H.
 Qed.
@@ -217,7 +217,7 @@ Combined Scheme step_run_ind from istep_ind2, irun_ind2.
 
 Lemma isa_det :
   (forall i c c1, istep i c c1 -> forall c2, istep i c c2 -> c1 = c2) /\
-  (forall is c c1, irun is c c1 -> forall c2, irun is c c2 -> c1 = c2).
+  (forall ins c c1, irun ins c c1 -> forall c2, irun ins c c2 -> c1 = c2).
 Proof.
   apply step_run_ind;
     try (intros; match goal with [ H : istep _ _ _ |- _ ] => inversion H; subst; reflexivity end).
@@ -227,10 +227,10 @@ Proof.
     inversion H2; subst; [ exfalso; match goal with [ H : _ <> _ |- _ ] => apply H; reflexivity end
                          | reflexivity ].
   - (* R_nil *) intros c c2 H2; inversion H2; subst; reflexivity.
-  - (* R_cons *) intros i is c c1 c'' Hs1 IHstep Hr1 IHrun c2 H2.
+  - (* R_cons *) intros i ins c c1 c'' Hs1 IHstep Hr1 IHrun c2 H2.
     inversion H2; subst.
     match goal with
-    | [ Hs2 : istep i c ?cm, Hr2 : irun is ?cm c2 |- _ ] =>
+    | [ Hs2 : istep i c ?cm, Hr2 : irun ins ?cm c2 |- _ ] =>
         assert (c1 = cm) as Hcm by (apply IHstep; exact Hs2);
         rewrite <- Hcm in Hr2; exact (IHrun _ Hr2)
     end.
@@ -242,12 +242,12 @@ Definition irun_det := proj2 isa_det.
    trap theorem this gives the RELATIONAL double-free trap (~irun). Combined induction on the
    derivation; the per-step property is "head composition at a head fuel `nh`", and the IIf case
    bumps the body/continuation to a common fuel via erun_mono_add. *)
-Lemma erun_complete : forall is c c', irun is c c' -> exists n, erun n is c = Some c'.
+Lemma erun_complete : forall ins c c', irun ins c c' -> exists n, erun n ins c = Some c'.
 Proof.
   enough (Hpair :
     (forall i c c', istep i c c' ->
        exists nh, forall rest cc n, erun n rest c' = Some cc -> erun (nh + n) (i :: rest) c = Some cc)
-    /\ (forall is c c', irun is c c' -> exists n, erun n is c = Some c'))
+    /\ (forall ins c c', irun ins c c' -> exists n, erun n ins c = Some c'))
     by exact (proj2 Hpair).
   apply step_run_ind.
   1-10: intros; exists 1%nat; intros rest cc n Hr; cbn; exact Hr.
@@ -259,7 +259,7 @@ Proof.
   - (* S_If_false *) intros body s l g m. exists 1%nat. intros rest cc n Hr.
     cbn [Nat.add]. rewrite erun_S_cons. cbn -[erun]. exact Hr.
   - (* R_nil *) intros c. exists 1%nat. reflexivity.
-  - (* R_cons *) intros i is c c1 c'' _ IHstep _ IHrun.
+  - (* R_cons *) intros i ins c c1 c'' _ IHstep _ IHrun.
     destruct IHstep as [nh Hh]. destruct IHrun as [n2 H2].
     exists (nh + n2)%nat. apply Hh. exact H2.
 Qed.
