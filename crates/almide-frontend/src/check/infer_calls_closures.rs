@@ -1104,10 +1104,12 @@ impl Checker {
             // fix (#1055: a bare `eff` laundering its effect bit).
             // Single-condition decisions (MC/DC ledger): each || arm is
             // its own continue guard, same order.
-            if self.env.lookup_var(name).is_some() {
-                continue;
-            }
-            if self.env.top_lets.contains_key(&sym(name)) {
+            // #3274: a local or top-level `let` holding an effect fn value is
+            // that fn here, exactly as its name would be.
+            if self.env.lookup_var(name).is_some() || self.env.top_lets.contains_key(&sym(name)) {
+                if let Some(target) = self.effect_alias_of_binding(name) {
+                    self.check_effect_alias_isolation(name, target);
+                }
                 continue;
             }
             if matches!(self.env.types.get(&sym(name)), Some(Ty::ConstParam { .. })) {
@@ -1117,6 +1119,61 @@ impl Checker {
             if sig.is_effect {
                 self.check_effect_isolation(name, &sig);
             }
+        }
+    }
+
+    /// #3274: the effect fn a binding named `name` holds — the local that
+    /// `name` resolves to, else the top-level `let` of that name.
+    pub(crate) fn effect_alias_of_binding(&self, name: &str) -> Option<Sym> {
+        if self.env.lookup_var(name).is_some() {
+            return self.env.effect_alias(name);
+        }
+        self.env.top_effect_aliases.get(&sym(name)).copied()
+    }
+
+    /// #3274: the effect fn a bare VALUE expression names — `rd`,
+    /// `fs.read_text`, or a binding that already holds one (`let g2 = g`).
+    /// Resolution follows `infer_expr_g2_ident` (local → top-level `let` →
+    /// const param → function), so a local that shadows an effect fn's name
+    /// names that local, never the fn.
+    pub(crate) fn effect_fn_value_target(&self, expr: &ast::Expr) -> Option<Sym> {
+        match &expr.kind {
+            ExprKind::Paren { expr } => self.effect_fn_value_target(expr),
+            ExprKind::Ident { name } => {
+                if self.env.lookup_var(name).is_some() || self.env.top_lets.contains_key(name) {
+                    return self.effect_alias_of_binding(name);
+                }
+                if matches!(self.env.types.get(name), Some(Ty::ConstParam { .. })) {
+                    return None;
+                }
+                self.env.functions.get(name).filter(|s| s.is_effect).map(|_| *name)
+            }
+            ExprKind::Member { object, field } => {
+                let ExprKind::Ident { name: module } = &object.kind else { return None };
+                if self.env.lookup_var(module).is_some() || self.env.top_lets.contains_key(module) {
+                    return None;
+                }
+                self.lookup_call_sig(expr).filter(|s| s.is_effect)
+                    .map(|_| sym(&format!("{}.{}", module, field)))
+            }
+            _ => None,
+        }
+    }
+
+    /// #3274: E006 for a use of `alias`, a binding that holds the effect fn
+    /// `target`, from a pure context — the direct call's diagnostic, naming
+    /// the binding it went through.
+    /// #3274: a call through `name` — `g(x)`, `x |> g` — is a call of the
+    /// effect fn `name` holds, if any.
+    pub(crate) fn check_effect_alias_call(&mut self, name: &str) {
+        if let Some(target) = self.effect_alias_of_binding(name) {
+            self.check_effect_alias_isolation(name, target);
+        }
+    }
+
+    pub(crate) fn check_effect_alias_isolation(&mut self, alias: &str, target: Sym) {
+        if !self.env.can_call_effect {
+            self.report_effect_isolation(target.as_str(), Some(alias));
         }
     }
 
@@ -1543,7 +1600,10 @@ impl Checker {
                 all_arg_tys.extend(self.infer_call_arg_tys(callee, args, &call_sig));
                 // Resolve module calls for pipe (e.g. xs |> list.filter(f))
                 match &mut callee.kind {
-                    ExprKind::Ident { name, .. } => self.check_named_call(name, &all_arg_tys),
+                    ExprKind::Ident { name, .. } => {
+                        self.check_effect_alias_call(name);
+                        self.check_named_call(name, &all_arg_tys)
+                    }
                     ExprKind::Member { object, field, .. } => {
                         let module_key = self.resolve_module_call(object, field);
                         if let Some(key) = module_key {
@@ -1564,6 +1624,7 @@ impl Checker {
             }
             // Pipe RHS is a bare function name (e.g. `5 |> double`)
             ExprKind::Ident { name, .. } => {
+                self.check_effect_alias_call(name);
                 let all_arg_tys = vec![left_ty];
                 self.check_named_call(name, &all_arg_tys)
             }

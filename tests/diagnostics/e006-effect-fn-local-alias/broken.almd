@@ -1,0 +1,12 @@
+// Binding an effect fn to a local does not launder its effect: calling the
+// local is a call of the effect fn, so a pure fn cannot do it (#3274).
+import fs
+
+effect fn rd(p: String) -> String = fs.read_text(p)!
+
+fn size(p: String) -> Int = {
+  let g = rd
+  string.len(g(p) ?? "")
+}
+
+effect fn main() -> Unit = println(size("/etc/hosts").to_string())

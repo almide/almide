@@ -1,0 +1,11 @@
+// The fix: the fn that calls through the local is itself an effect fn.
+import fs
+
+effect fn rd(p: String) -> String = fs.read_text(p)!
+
+effect fn size(p: String) -> Int = {
+  let g = rd
+  string.len(g(p)!)
+}
+
+effect fn main() -> Unit = println(size("/etc/hosts")!.to_string())

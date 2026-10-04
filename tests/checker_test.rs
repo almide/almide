@@ -1026,3 +1026,69 @@ fn without_expectation_the_message_names_the_arm_that_fixed_the_type() {
     assert_eq!(errs[0].0, Some(4));
     assert!(errs[0].1.contains("the first arm at line 3 fixed the type to Int"), "{:?}", errs[0]);
 }
+
+// ---- #3274: a binding that holds an effect fn is that effect fn ----
+//
+// A named effect fn's value type is its carrier with the effect bit off, so
+// before #3274 `let g = rd; g(x)` in a pure fn checked clean and ran `rd`'s
+// effects. The binding now carries the bit: every use of `g` that would be
+// E006 for `rd` is E006 for `g`, and a binding of a PURE fn is untouched.
+
+const RD: &str = "import fs\neffect fn rd(p: String) -> String = fs.read_text(p)!\n";
+
+fn alias_e006(src: &str) -> bool {
+    errors(&format!("{RD}{src}"))
+        .iter()
+        .any(|e| e.contains("cannot call effect function 'rd' from a pure function (through `g`"))
+}
+
+#[test]
+fn local_alias_of_effect_fn_is_e006_in_a_pure_fn() {
+    assert!(alias_e006("fn f() -> Int = {\n  let g = rd\n  string.len(g(\"/x\") ?? \"\")\n}\n"));
+    // `var`, and a `var` that is assigned the effect fn later.
+    assert!(alias_e006("fn f() -> Int = {\n  var g = rd\n  string.len(g(\"/x\") ?? \"\")\n}\n"));
+    assert!(alias_e006(
+        "fn f() -> Int = {\n  var g = (p: String) => ok(p)\n  g = rd\n  string.len(g(\"/x\") ?? \"\")\n}\n"
+    ));
+    // An alias of an alias, and a pipe through the alias.
+    assert!(alias_e006("fn f() -> Int = {\n  let h = rd\n  let g = h\n  string.len(g(\"/x\") ?? \"\")\n}\n"));
+    assert!(alias_e006("fn f() -> Int = {\n  let g = rd\n  string.len(\"/x\" |> g ?? \"\")\n}\n"));
+    // Passed to a plain slot, like `apply(rd, p)` is.
+    assert!(alias_e006(
+        "fn apply(h: (String) -> Result[String, String], p: String) -> Result[String, String] = h(p)\n\
+         fn f() -> Int = {\n  let g = rd\n  string.len(apply(g, \"/x\") ?? \"\")\n}\n"
+    ));
+    // A top-level binding, declared below the fn that calls it.
+    assert!(alias_e006("fn f() -> Int = string.len(g(\"/x\") ?? \"\")\nlet g = rd\n"));
+}
+
+#[test]
+fn local_alias_of_stdlib_effect_fn_is_e006_in_a_pure_fn() {
+    let errs = errors("import fs\nfn f() -> Int = {\n  let g = fs.read_text\n  string.len(g(\"/x\") ?? \"\")\n}\n");
+    assert!(
+        errs.iter().any(|e| e.contains("cannot call effect function 'fs.read_text' from a pure function (through `g`")),
+        "{errs:?}"
+    );
+}
+
+#[test]
+fn effect_fn_alias_stays_legal_where_the_fn_is() {
+    // In an effect fn, and in a lambda inside one.
+    has_no_errors(&format!(
+        "{RD}effect fn f() -> Int = {{\n  let g = rd\n  let n = string.len(g(\"/x\")!)\n  \
+         let xs = [\"/x\"] |> list.map((p) => g(p) ?? \"\")\n  n + xs.len()\n}}\n"
+    ));
+    // Handed to an `effect (A) -> B` slot from a pure fn, like `rd` itself.
+    has_no_errors(&format!(
+        "{RD}fn slot(h: effect (String) -> String) -> Int = 1\nfn f() -> Int = {{\n  let g = rd\n  slot(g)\n}}\n"
+    ));
+}
+
+#[test]
+fn alias_of_a_pure_fn_or_a_shadowing_binding_is_not_an_effect_call() {
+    has_no_errors("fn dbl(x: Int) -> Int = x * 2\nfn f() -> Int = {\n  let g = dbl\n  g(21)\n}\n");
+    // A parameter named like the effect fn is the parameter, not the fn.
+    has_no_errors(&format!(
+        "{RD}fn f(rd: (String) -> String) -> Int = {{\n  let g = rd\n  string.len(g(\"x\"))\n}}\n"
+    ));
+}
