@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 764 of 893
+# certified: 776 of 893
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -129,6 +129,7 @@ spec/wasm_cross/edge_map_order.almd
 spec/wasm_cross/edge_string_unicode.almd
 spec/wasm_cross/effect_assign_unwrap.almd
 spec/wasm_cross/effect_branch_keeps_result.almd
+spec/wasm_cross/effect_dispatcher_many_arms.almd
 spec/wasm_cross/effect_fn_value.almd
 spec/wasm_cross/effect_main_guard_err.almd
 spec/wasm_cross/effect_main_guard_ok.almd
@@ -136,6 +137,7 @@ spec/wasm_cross/effect_operand_unwrap_distinct.almd
 spec/wasm_cross/effect_slot_carrier.almd
 spec/wasm_cross/effect_slot_never_err_bang.almd
 spec/wasm_cross/effect_tail_carrier_family.almd
+spec/wasm_cross/effect_tco.almd
 spec/wasm_cross/effect_tco_err_rewrap.almd
 spec/wasm_cross/empty_collection_annotated.almd
 spec/wasm_cross/empty_collection_fold.almd
@@ -151,6 +153,10 @@ spec/wasm_cross/env_sleep_pause.almd
 spec/wasm_cross/error_operators.almd
 spec/wasm_cross/exit_code_out_of_range.almd
 spec/wasm_cross/expr_stmt_comment.almd
+spec/wasm_cross/fallible_hof_effect_callback_family.almd
+spec/wasm_cross/fallible_hof_large_input.almd
+spec/wasm_cross/fallible_hof_matrix_list.almd
+spec/wasm_cross/fallible_hof_option_effect_callback.almd
 spec/wasm_cross/fallible_tuple_value_tail.almd
 spec/wasm_cross/fan_any_allfail.almd
 spec/wasm_cross/fan_any_early_winner.almd
@@ -240,6 +246,7 @@ spec/wasm_cross/grain_pattern_destructure.almd
 spec/wasm_cross/grain_pattern_guards.almd
 spec/wasm_cross/grain_string_escapes.almd
 spec/wasm_cross/grouping_unary.almd
+spec/wasm_cross/guard_err_in_call_arg_block.almd
 spec/wasm_cross/guard_let_statement.almd
 spec/wasm_cross/guard_statement.almd
 spec/wasm_cross/gzip_inflate_members.almd
@@ -306,6 +313,7 @@ spec/wasm_cross/json_stringify_control_chars.almd
 spec/wasm_cross/json_stringify_nonfinite.almd
 spec/wasm_cross/json_stringify_pretty.almd
 spec/wasm_cross/json_value.almd
+spec/wasm_cross/kernel_conformance.almd
 spec/wasm_cross/koka_186_reused_names.almd
 spec/wasm_cross/koka_beans_pairs.almd
 spec/wasm_cross/koka_hqueens.almd
@@ -454,6 +462,9 @@ spec/wasm_cross/mut_param_branch_forward.almd
 spec/wasm_cross/mut_param_cell_tail_capture_read.almd
 spec/wasm_cross/mut_param_cell_tail_capture_write.almd
 spec/wasm_cross/mut_param_closure_capture_read.almd
+spec/wasm_cross/mut_param_closure_field_path_write.almd
+spec/wasm_cross/mut_param_effect_can_err.almd
+spec/wasm_cross/mut_param_err_write_visible.almd
 spec/wasm_cross/mut_param_global_callee_sees_precall.almd
 spec/wasm_cross/mut_param_global_no_reach_in_place.almd
 spec/wasm_cross/mut_param_interpolated.almd
@@ -574,6 +585,7 @@ spec/wasm_cross/result_list_str_int_tuple.almd
 spec/wasm_cross/result_list_value_int_tuple.almd
 spec/wasm_cross/result_match_rewrap_modcall.almd
 spec/wasm_cross/result_option_call_payload_return.almd
+spec/wasm_cross/result_param_not_first.almd
 spec/wasm_cross/result_str_int_tuple.almd
 spec/wasm_cross/result_tuple_list_slots.almd
 spec/wasm_cross/result_tuple_variant_payload.almd
