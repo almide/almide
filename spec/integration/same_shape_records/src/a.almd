@@ -2,6 +2,6 @@
 // this module is a `Size`; every literal in `b` is an `Extent`.
 type Size = { w: Float, h: Float }
 
-pub fn unit() -> Size = { w: 1.0, h: 1.0 }
+fn unit() -> Size = { w: 1.0, h: 1.0 }
 
-pub fn area(s: Size) -> Float = s.w * s.h
+fn area(s: Size) -> Float = s.w * s.h
