@@ -1,0 +1,54 @@
+// @leg: structural
+// An exported effect fn's wasm value is a Result block (#3352): the host
+// unwraps it — ok is the value, err is a thrown AlmideError carrying the
+// message — for every marshalled return type, next to the plain fn of the
+// same type. `pass` picks the exit. `main` prints the native reference
+// lines; the host-side matrix lives in effect_exports.host.mjs.
+local fn gate(pass: Bool, what: String) -> Result[Int, String] =
+  if pass then ok(1) else err("no ${what}")
+
+effect fn e_string(pass: Bool) -> String = {
+  let n = gate(pass, "string")!
+  "yes${int.to_string(n)}"
+}
+
+effect fn e_int(pass: Bool) -> Int = gate(pass, "int")! + 41
+
+effect fn e_float(pass: Bool) -> Float = {
+  let n = gate(pass, "float")!
+  float.from_int(n) / 4.0
+}
+
+effect fn e_bool(pass: Bool) -> Bool = {
+  let n = gate(pass, "bool")!
+  n == 1
+}
+
+effect fn e_unit(pass: Bool) -> Unit = {
+  let _ = gate(pass, "unit")!
+  println("e_unit ran")
+}
+
+effect fn e_echo(s: String) -> String = {
+  let n = gate(string.len(s) > 0, "empty")!
+  s + "/" + int.to_string(n)
+}
+
+effect fn e_declared(pass: Bool) -> Result[Int, String] = if pass then ok(7) else err("declared no")
+
+fn p_string(pass: Bool) -> String = if pass then "yes1" else "no"
+
+fn p_int(pass: Bool) -> Int = if pass then 42 else 0
+
+fn p_float(pass: Bool) -> Float = if pass then 0.25 else 0.0
+
+fn p_bool(pass: Bool) -> Bool = pass
+
+fn p_unit(pass: Bool) -> Unit = if pass then println("p_unit ran") else println("p_unit skipped")
+
+effect fn main() -> Unit = {
+  println(e_string(true)!)
+  println(int.to_string(e_int(true)!))
+  println(float.to_string(e_float(true)!))
+  println(p_string(true))
+}

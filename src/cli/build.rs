@@ -491,7 +491,8 @@ fn write_js_host(output: &str, file: &str, bytes: &[u8], surface: &crate::cli::j
     let (js_path, dts_path) = (format!("{base}.js"), format!("{base}.d.ts"));
     let wasm_name = std::path::Path::new(output).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| output.to_string());
     let owned = almide_wasm::host_exports::export_param_owned();
-    let (js, dts) = match crate::cli::js_host::generate(&wasm_name, file, bytes, surface, &owned) {
+    let rets = almide_wasm::host_exports::export_rets();
+    let (js, dts) = match crate::cli::js_host::generate(&wasm_name, file, bytes, surface, &owned, &rets) {
         Ok(g) => g,
         Err(message) => {
             let _ = std::fs::remove_file(output);

@@ -229,3 +229,40 @@ fn an_extern_declared_in_another_module_is_an_import_of_the_structural_module() 
     assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
     assert_eq!(String::from_utf8_lossy(&run.stdout), "12\n41\n80\n");
 }
+
+/// #3352: an export whose return the host cannot wrap is refused at build
+/// time by name — an effect fn over an unmarshalled type, and a declared
+/// Result whose err is not a String — never a wrapper that reads garbage.
+#[test]
+fn an_effect_or_result_return_the_host_cannot_wrap_is_refused_by_name() {
+    let cases = [
+        ("effect fn listed(n: Int) -> List[Int] = [n]\nfn main() -> Unit = {}\n", "listed"),
+        ("effect fn raw(n: Int) -> Bytes = bytes.from_string(int.to_string(n))\nfn main() -> Unit = {}\n", "raw"),
+        ("fn coded(n: Int) -> Result[Int, Int] = if n > 0 then ok(n) else err(n)\nfn main() -> Unit = {}\n", "coded"),
+    ];
+    for (src, name) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let (ok, stderr) = build(dir.path(), src, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+        assert!(!ok, "`{name}` must be refused:\n{stderr}");
+        assert!(stderr.contains(&format!("--host js cannot marshal the return type of `{name}`")), "{stderr}");
+        assert!(!dir.path().join("app.js").exists() && !dir.path().join("app.wasm").exists(), "a refused build writes nothing");
+    }
+}
+
+/// #3352: an effect fn's wrapper unwraps its Result block (`takeResult`) and
+/// the typings name the ok type; a plain fn of the same type keeps the plain
+/// wrapper. Running both exits under node is `effect_exports` in
+/// `spec/wasm_host_js`.
+#[test]
+fn an_effect_export_unwraps_its_result_block() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = "effect fn raw(key: String) -> String = key + \"!\"\nfn plain(key: String) -> String = key + \"?\"\nfn main() -> Unit = {}\n";
+    let (ok, stderr) = build(dir.path(), src, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(ok, "{stderr}");
+    let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
+    let dts = std::fs::read_to_string(dir.path().join("app.d.ts")).unwrap();
+    assert!(js.contains("return takeResult(instance.exports.raw(h0), \"string\", \"raw\");"), "{js}");
+    assert!(js.contains("takeString(instance.exports.plain(h0))"), "{js}");
+    assert!(js.contains("export class AlmideError extends Error"), "{js}");
+    assert!(dts.contains("export function raw(key: string): string;") && dts.contains("export class AlmideError extends Error {}"), "{dts}");
+}
