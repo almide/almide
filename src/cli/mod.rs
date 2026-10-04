@@ -67,11 +67,16 @@ pub fn check_permissions(ir: &almide::ir::IrProgram, permissions: &[String]) -> 
     let result = EffectInferencePass.run(ir.clone(), almide::codegen::pass::Target::Rust);
     let ir_after = result.program;
 
+    // Report in name order so the same program prints the same report on every run and route.
+    let mut functions: Vec<_> = ir_after.effect_map.functions.iter().collect();
+    functions.sort_by(|a, b| a.0.cmp(b.0));
     let mut violations = 0;
-    for (name, fe) in &ir_after.effect_map.functions {
-        let forbidden: Vec<_> = fe.transitive.iter()
+    for (name, fe) in functions {
+        let mut forbidden: Vec<_> = fe.transitive.iter()
             .filter(|e| !allowed.contains(e))
+            .map(|e| e.to_string())
             .collect();
+        forbidden.sort();
         if !forbidden.is_empty() {
             err(&format!("error: capability violation in `{}`", name));
             for e in &forbidden {
