@@ -269,6 +269,10 @@ pub struct Checker {
     /// construction: resolve_type_expr turns an in-scope generic into
     /// `Ty::TypeVar` at annotation time, never `Named`.
     pub(crate) deferred_unknown_type_checks: Vec<(Ty, Option<crate::ast::Span>, String)>,
+    /// The names a qualified-type E029 already reported (#3336), whole and
+    /// with the qualifier stripped (the resolver hands the bare name on): the
+    /// plain E029 walk roots them without a second diagnostic.
+    pub(crate) qualified_type_misses: std::collections::HashSet<Sym>,
     /// Diagnostics about a value whose type is an UNDECLARED name (#2771):
     /// `e.count` on `e: Entyr` is a consequence of the unknown type, not a
     /// second error, and its hint ("values outside records have no fields")
@@ -677,7 +681,7 @@ impl Checker {
             lambda_err_erasures: Vec::new(),
             lambda_channels: Default::default(),
             bang_erasure_mark: None,
-            deferred_unknown_type_checks: Vec::new(),
+            deferred_unknown_type_checks: Vec::new(), qualified_type_misses: std::collections::HashSet::new(),
             deferred_cascade_diags: Vec::new(),
             body_diag_start: 0,
             pending_toplet_tys: Vec::new(),
@@ -1179,6 +1183,7 @@ impl Checker {
         self.refresh_module_top_lets(program, "__entry");
         self.validate_protocol_refs(program);
         self.validate_bare_type_visibility(program);
+        self.validate_qualified_type_heads(program);
         self.body_diag_start = self.diagnostics.len();
         self.reject_user_prim_import(&program.imports);
         let saved_top_effect_aliases = self.collect_top_effect_aliases(&program.decls);
@@ -1414,6 +1419,7 @@ pub(crate) fn is_literal_numeric_ast(e: &ast::Expr) -> bool {
 
 include!("post_solve_validation.rs");
 include!("unknown_type_root.rs");
+include!("qualified_type_head.rs");
 include!("interp_string_form.rs");
 include!("lint_error_surface.rs");
 include!("bounded.rs");
@@ -1446,13 +1452,21 @@ struct ImportSpellings {
     /// of one is the file's own declaration — a user `type Endian` shadows
     /// the stdlib's, it never uses `import bytes` (#1837).
     declared: std::collections::HashSet<Sym>,
+    /// Every QUALIFIED name in a type position (`v.View`, `List[m.Row]`),
+    /// whole — the qualifier check (#3336) reads it.
+    qualified_types: std::collections::HashSet<Sym>,
 }
 
 impl ImportSpellings {
     /// `h.x` marks the alias `h`; a bare `X` is a type-position spelling.
     fn ty_name(&mut self, name: Sym, spelling: TypeSpelling) {
         match name.as_str().split_once('.') {
-            Some((h, _)) => { self.heads.insert(sym(h)); }
+            Some((h, _)) => {
+                self.heads.insert(sym(h));
+                if spelling != TypeSpelling::RecordHead {
+                    self.qualified_types.insert(name);
+                }
+            }
             None => { self.bare_types.insert((name, spelling)); }
         }
     }

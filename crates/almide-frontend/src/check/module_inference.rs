@@ -93,6 +93,7 @@ impl Checker {
         );
         self.validate_protocol_refs(prog);
         self.validate_bare_type_visibility(prog);
+        self.validate_qualified_type_heads(prog);
         self.body_diag_start = self.diagnostics.len();
         self.reject_user_prim_import(&prog.imports);
         let saved_top_effect_aliases = self.collect_top_effect_aliases(&prog.decls);
