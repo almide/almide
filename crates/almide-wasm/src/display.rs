@@ -631,6 +631,7 @@ fn build_helper_body(
             hoisted_counts: HashMap::new(),
             cow_flags: HashMap::new(),
             cow_prejudged: HashSet::new(),
+            bounds_facts: None,
             in_tail: false,
             try_see_through: false,
             branch_depth: 0,
