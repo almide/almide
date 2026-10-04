@@ -349,6 +349,8 @@ impl Emitter<'_> {
                 let Some(&(var_idx, _)) = self.locals.get(target) else {
                     return unsup("map-insert:unmapped");
                 };
+                // #2758: this write-back records no rebind of the var's block.
+                self.witness_decline("map-insert:functional");
                 let var_expr = IrExpr {
                     kind: IrExprKind::Var { id: *target },
                     ty: Ty::Unit,
