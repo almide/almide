@@ -1,0 +1,10 @@
+// Module `a_b`: every name also declared by module `a.b` (#3338).
+type Tok = { n: Int }
+
+let x = 2
+
+var hits = 0
+
+fn f() -> Int = 20
+
+fn mk() -> Tok = { n: 8 }
