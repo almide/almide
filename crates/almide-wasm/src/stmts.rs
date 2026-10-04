@@ -430,10 +430,11 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(var_idx).local_set(floor);
                     let flags = self.hoist_cow_flags(None, body)?;
                     let incl = *inclusive;
-                    let pre = self.prejudge_first_stores(body, &|e: &mut Self| {
+                    let pre = self.prejudge_first_stores(None, body, &|e: &mut Self| {
                         e.range_exit_test(var_idx, floor, stop, incl);
                         e.f.instructions().i32_eqz();
-                    });
+                        Ok(())
+                    })?;
                     self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                     self.emit_det_charge_const(1);
                     self.range_exit_test(var_idx, floor, stop, *inclusive);
@@ -467,10 +468,11 @@ impl Emitter<'_> {
                         }
                         self.f.instructions().local_get(sl).local_set(var_idx);
                         let flags = self.hoist_cow_flags(None, body)?;
-                        let pre = self.prejudge_first_stores(body, &|e: &mut Self| {
+                        let pre = self.prejudge_first_stores(None, body, &|e: &mut Self| {
                             e.range_exit_test(var_idx, sl, el, inclusive);
                             e.f.instructions().i32_eqz();
-                        });
+                            Ok(())
+                        })?;
                         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                         self.emit_det_charge_const(1);
                         self.range_exit_test(var_idx, sl, el, inclusive);

@@ -23,6 +23,14 @@ impl Emitter<'_> {
         // reaches only element-wise — cleared before the unrolled lane too,
         // which runs copies of this same condition and body.
         let flags = self.hoist_cow_flags(Some(cond), body)?;
+        // #3345: the pre-judge, guarded by one extra evaluation of an INERT
+        // condition (cow_hoist.rs) — before the unrolled lane, whose bodies
+        // run only where the condition holds.
+        let pre = if crate::cow_hoist::inert_cond(cond) {
+            self.prejudge_first_stores(Some(cond), body, &|e: &mut Self| e.lower(cond, Some(BOOL)).map(|_| ()))?
+        } else {
+            Vec::new()
+        };
         // Counted-shape fast lane (unroll.rs): on `true` the rolled loop
         // below drains the remainder iterations.
         let _ = self.try_unroll_while(cond, body)?;
@@ -47,6 +55,7 @@ impl Emitter<'_> {
         self.witness_loop_close();
         self.f.instructions().br(0).end().end();
         self.drop_hoisted_counts(hoisted);
+        self.drop_prejudged(pre);
         self.drop_cow_flags(flags);
         Ok(())
     }
@@ -64,9 +73,12 @@ impl Emitter<'_> {
         } else {
             self.loop_ctl = Some((0, 1));
         }
+        // #3345: each iteration starts with no bounds facts (bounds_facts.rs).
+        let outer_facts = self.bounds_facts.replace(Vec::new());
         for st in body {
-            self.lower_stmt(st)?;
+            self.lower_stmt_with_facts(st)?;
         }
+        self.bounds_facts = outer_facts;
         if for_in {
             self.f.instructions().end();
         }

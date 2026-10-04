@@ -14,19 +14,22 @@ impl Emitter<'_> {
     /// exactly once (#1770: both passes firing on one local double-freed
     /// the returned buffer, and its freelist link zeroed the first
     /// payload word).
-    /// The byte address of element `hi` (i64) of the list in `hb`:
-    /// `block + PAYLOAD + hi * stride`.
+    /// The PAYLOAD-relative address of element `hi` (i64, already bounds
+    /// checked) of the list in `hb`: `block + hi * stride`, in i32 — the
+    /// read path's shape (#3345). The access adds PAYLOAD through its memarg
+    /// offset (`slot_memarg`), so Cranelift folds it into the addressing
+    /// instead of an `add` per store. Same address as the old
+    /// `wrap(extend(block) + hi*stride) + PAYLOAD`: an in-bounds slot lies
+    /// inside linear memory (< 4 GiB), where i32 and i64 arithmetic agree,
+    /// and the memarg offset cannot wrap past it.
     pub(crate) fn emit_index_slot_addr(&mut self, hb: u32, hi: u32, stride: i64) {
         self.f
             .instructions()
             .local_get(hb)
-            .i64_extend_i32_u()
             .local_get(hi)
-            .i64_const(stride)
-            .i64_mul()
-            .i64_add()
             .i32_wrap_i64()
-            .i32_const(almide_layout::PAYLOAD as i32)
+            .i32_const(stride as i32)
+            .i32_mul()
             .i32_add();
     }
 
@@ -135,28 +138,36 @@ impl Emitter<'_> {
                 // index too, and a loop that cannot change this list's length
                 // already has the count in a local.
                 let hoisted = if in_cell { None } else { self.hoisted_count_of(*target) };
-                self.f.instructions().local_get(hi);
-                match hoisted {
-                    Some(count) => {
-                        self.f.instructions().local_get(count);
+                // #3345: an earlier check of this same `xs[i]` still decides
+                // it (bounds_facts.rs) — the check is not emitted again.
+                let known = is_local && !in_cell && self.bounds_known(*target, index);
+                if !known {
+                    self.f.instructions().local_get(hi);
+                    match hoisted {
+                        Some(count) => {
+                            self.f.instructions().local_get(count);
+                        }
+                        None => {
+                            get_target(self.f, self.locals, self.globals);
+                            let mut i = self.f.instructions();
+                            i.i32_load(len_memarg())
+                                .i64_extend_i32_u()
+                                .i64_const(stride)
+                                .i64_div_u();
+                        }
                     }
-                    None => {
-                        get_target(self.f, self.locals, self.globals);
+                    {
                         let mut i = self.f.instructions();
-                        i.i32_load(len_memarg())
-                            .i64_extend_i32_u()
-                            .i64_const(stride)
-                            .i64_div_u();
+                        i.i64_ge_u().if_(BlockType::Empty);
+                        i.i32_const(msg as i32);
+                    }
+                    self.emit_error_frame_abort();
+                    self.witness_abort_site();
+                    self.f.instructions().end();
+                    if is_local && !in_cell {
+                        self.bounds_record(*target, index);
                     }
                 }
-                {
-                    let mut i = self.f.instructions();
-                    i.i64_ge_u().if_(BlockType::Empty);
-                    i.i32_const(msg as i32);
-                }
-                self.emit_error_frame_abort();
-                self.witness_abort_site();
-                self.f.instructions().end();
                 // RC-5: the COW judge, not an unconditional copy — a
                 // uniquely-held list takes the store IN PLACE, a shared one
                 // copies and releases one source ref. The old
@@ -183,11 +194,11 @@ impl Emitter<'_> {
                 // The replaced element's credit goes with it.
                 if let Some(dec) = self.elem_is_handle(el).then(|| self.dec_fn_of(el)) {
                     self.emit_index_slot_addr(hb, hi, stride);
-                    self.f.instructions().i32_load(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 }).call(dec);
+                    self.f.instructions().i32_load(slot_memarg(0)).call(dec);
                 }
                 self.emit_index_slot_addr(hb, hi, stride);
                 self.f.instructions().local_get(hv);
-                self.store_ty_slot_raw(el);
+                self.store_ty_slot(el, 0);
                 self.release_i32();
                 self.release_val(el);
                 self.release_i64();

@@ -167,6 +167,9 @@ pub(crate) struct Emitter<'a> {
     /// #2980: lists a counting loop judged copy-on-write in its preheader
     /// (cow_hoist.rs, the pre-judge) — their stores inside it skip the judge.
     pub(crate) cow_prejudged: HashSet<VarId>,
+    /// #3345: bounds facts of the current straight-line stretch of a loop
+    /// body (bounds_facts.rs); `None` = recording off.
+    pub(crate) bounds_facts: Option<Vec<(VarId, VarId)>>,
     /// One-shot tail-position marker: set by `lower_tail`, TAKEN at
     /// `lower`'s entry so it never leaks into operand lowering. A direct
     /// call in tail position with a matching return type emits
@@ -263,10 +266,13 @@ impl Emitter<'_> {
         index: &IrExpr,
     ) -> Result<SliceTy, EmitError> {
         // #2319: an enclosing loop may have loaded this list's count already.
-        let hoisted = match &object.kind {
-            almide_ir::IrExprKind::Var { id } => self.hoisted_count_of(*id),
+        let list_var = match &object.kind {
+            almide_ir::IrExprKind::Var { id } => Some(*id),
             _ => None,
         };
+        let hoisted = list_var.and_then(|id| self.hoisted_count_of(id));
+        // #3345: an earlier check of this same `xs[i]` still decides it.
+        let known = list_var.is_some_and(|id| self.bounds_known(id, index));
         let elem = match self.lower(object, None)? {
             SliceTy::List(h) => self.types.el(h),
             crate::bytes::BYTES => return self.lower_bytes_index(index),
@@ -277,7 +283,27 @@ impl Emitter<'_> {
         self.f.instructions().local_set(hold);
         self.lower(index, Some(INT))?;
         let idx = self.hold_i64()?;
-        self.f.instructions().local_tee(idx);
+        if known {
+            self.f.instructions().local_set(idx);
+        } else {
+            self.f.instructions().local_tee(idx);
+            self.emit_read_bounds_check(hold, hoisted, stride);
+            if let Some(id) = list_var {
+                self.bounds_record(id, index);
+            }
+        }
+        // element address: hold + idx*stride, slot at offset PAYLOAD
+        let mut i = self.f.instructions();
+        i.local_get(hold);
+        i.local_get(idx).i32_wrap_i64().i32_const(stride as i32).i32_mul().i32_add();
+        self.load_ty_slot(elem, 0);
+        self.release_i64();
+        self.release_i32();
+        Ok(elem)
+    }
+
+    /// The read's bounds check of the index on the stack (consumed).
+    fn emit_read_bounds_check(&mut self, hold: u32, hoisted: Option<u32>, stride: u32) {
         let msg = self.pool.intern("index out of bounds");
         // ONE UNSIGNED compare (#2319): `idx >=u count` is exactly
         // `idx < 0 || idx >= count` — a negative i64 index reads as a value
@@ -307,15 +333,7 @@ impl Emitter<'_> {
         self.abort_frame();
         self.witness_branch_arm();
         self.witness_branch_close();
-        let mut i = self.f.instructions();
-        i.end();
-        // element address: hold + idx*stride, slot at offset PAYLOAD
-        i.local_get(hold);
-        i.local_get(idx).i32_wrap_i64().i32_const(stride as i32).i32_mul().i32_add();
-        self.load_ty_slot(elem, 0);
-        self.release_i64();
-        self.release_i32();
-        Ok(elem)
+        self.f.instructions().end();
     }
 
     /// The main-level / pure-fn abort frame for a failed `!`: the exact
