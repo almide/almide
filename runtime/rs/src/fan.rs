@@ -45,9 +45,10 @@ pub fn almide_rt_fan_map<A, B>(
 //
 // Observably identical to the sequential twin: every element runs (ADR-0024
 // D1 — no worker stops at an Err), results land in pre-sized slots by index,
-// and the map's Err is the LOWEST-INDEX Err in LIST ORDER. Threshold 2, not a "big list"
-// cut-off: `fan.map` IS the user's fan-out signal, each element a task (a
-// 64-chunk fan over 14 cores would never clear a size threshold).
+// and the map's Err is the LOWEST-INDEX Err in LIST ORDER. No "big list"
+// cut-off (a 64-chunk fan over 14 cores would never clear a size threshold):
+// the cost model (#3341, list.rs `almide_rt_fan_plan`) goes parallel only
+// when the site's measured time per element is worth the offer's cost.
 // `ALMIDE_FAN_SEQUENTIAL=1` forces the sequential path — the ablation knob.
 //
 // Every element writes into its own output timeline (ADR-0024 D5), flushed in
@@ -64,24 +65,40 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
         }
         return almide_fan_map_settle_slots(slots);
     }
-    let workers = almide_rt_list_par_workers(items.len());
-    let chunk_size = items.len().div_ceil(workers);
+    // #3341: the cost model (list.rs `almide_rt_fan_plan`) decides from the
+    // site's last measured time per element whether this offer is worth a
+    // parallel run; every offer records what its elements took.
+    let site = almide_rt_fan_map_par::<A, B, F> as fn(Vec<A>, F) -> Result<Vec<B>, String> as usize;
+    let n = items.len();
+    let workers = almide_rt_fan_plan(n, almide_fan_estimate(site));
+    let busy = std::sync::atomic::AtomicU64::new(0);
+    if workers < 2 {
+        almide_fan_busy(&busy, || {
+            for (slot, item) in slots.iter_mut().zip(items) {
+                *slot = Some(f(item));
+            }
+        });
+        almide_fan_record(site, busy.into_inner() as u128, n);
+        return almide_fan_map_settle_slots(slots);
+    }
+    let chunk_size = n.div_ceil(workers);
     // The group flushes this thread's stdout first: a runtime abort on a worker
     // exits without reaching this thread's buffer (C-197, see rust.toml fan_expr).
-    let group = almide_fan_group(items.len());
+    let group = almide_fan_group(n);
     std::thread::scope(|s| {
         for (chunk_idx, (chunk, out)) in items.chunks(chunk_size).zip(slots.chunks_mut(chunk_size)).enumerate() {
-            let f = &f;
+            let (f, busy) = (&f, &busy);
             let group = &group;
             let base = chunk_idx * chunk_size;
             s.spawn(move || {
                 for (i, (slot, item)) in out.iter_mut().zip(chunk).enumerate() {
                     let _elem = almide_fan_enter(group, base + i);
-                    *slot = Some(f(item.clone()));
+                    *slot = Some(almide_fan_busy(busy, || f(item.clone())));
                 }
             });
         }
     });
+    almide_fan_record(site, busy.into_inner() as u128, n);
     almide_fan_map_settle_slots(slots)
 }
 
