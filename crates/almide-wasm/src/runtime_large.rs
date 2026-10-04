@@ -1,5 +1,5 @@
 //! The LARGE-block free list (#3348): blocks whose total exceeds the
-//! largest size class (512 KiB) are kept on one address-ordered list of
+//! largest size class (64 KiB) are kept on one address-ordered list of
 //! free extents with exact sizes — split on take, coalesced with both
 //! list neighbours on release — instead of being abandoned to the bump
 //! graveyard. The sixteen power-of-two classes below the ceiling are
