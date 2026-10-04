@@ -247,7 +247,7 @@ impl Emitter<'_> {
         if self.cells.contains(&root) && !args.iter().all(|a| inert_ty(&a.ty)) {
             return Ok(None);
         }
-        let Some(emptied) = self.local_emptied(place, idx, root_ty, want)? else { return Ok(None) };
+        let Some(emptied) = self.emptied_place(place, idx, root_ty, want)? else { return Ok(None) };
         self.hand_over_moved(&emptied, &args[k], want)?;
         Ok(Some(emptied))
     }
@@ -260,7 +260,7 @@ impl Emitter<'_> {
 
     /// Where a moved place in local `idx` lives, if it can move: a var (a
     /// cell holds its occupant's credit), or a handle field of a record var.
-    fn local_emptied(&self, place: Place, idx: u32, root_ty: crate::SliceTy, want: crate::SliceTy) -> Result<Option<Emptied>, crate::EmitError> {
+    fn emptied_place(&self, place: Place, idx: u32, root_ty: crate::SliceTy, want: crate::SliceTy) -> Result<Option<Emptied>, crate::EmitError> {
         Ok(match place {
             Place::Var(id) if self.cells.contains(&id) || self.holds_credit(idx) => Some(Emptied::Var(id, idx, root_ty)),
             Place::Var(_) => None,
