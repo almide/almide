@@ -108,12 +108,24 @@
 # catch anything the share bands miss, since a lexer going quadratic blows up
 # share_lex at the top rung long before its slope band would fire.
 #
-# BAND WIDTH AND THE MACHINE IT WAS ANCHORED ON. The share bands are +/-20%,
-# wider than the 4.2% worst-case load spread justifies, because the baseline is
-# anchored on an M4 Pro and CI runs ubuntu x86-64: the phase SPLIT (unlike the
-# slope) can legitimately differ between microarchitectures, and #1337 is the
-# standing lesson about discovering that in production. Tighten them once the
-# runner's own numbers are on record — that direction of the ratchet is free.
+# BAND WIDTH AND THE MACHINE IT WAS ANCHORED ON. The share bands are +/-20%.
+# The shares are anchored on the CI runner's own numbers (ubuntu x86-64, the
+# median of the develop + merge-queue Perf ratchet jobs since the last accepted
+# step), not on a dev box: the phase SPLIT can legitimately differ between
+# microarchitectures (#1337). Run-to-run spread on the runner, measured over 88
+# jobs on 2026-10-03/04 (#3328): share_lex sd 2.9%, worst -6.9% / +9.2% from
+# the median; share_parse sd 2.0%, worst -8.0%; share_check sd 0.6%, worst 1.9%.
+# +/-20% is over twice the worst single-run deviation, so a run-to-run flake is
+# not what a red share means.
+#
+# DRIFT. What DID flake (#3328) was a band that had been used up one accepted
+# step at a time: the checker's per-line cost relative to the lexer's rose ~33%
+# over three steps (09-27, 09-30, be61ee66f's generalized E008 on 10-03), each
+# a ~7-10% step inside the band, so no PR ever failed on its own and the gate
+# then went red at random on PRs that did not touch the front end, sitting a
+# few percent from its floor. A value past HALF its budget now prints a
+# ::warning:: — the drift is visible while there is still band left, and the
+# fix is to re-anchor on purpose (or to find the cost) before the floor is hit.
 #
 # NOT covered here: `almide run` at scale. `run` shells out to rustc and the
 # linker, so its cost at 10k lines is rustc's scale story, not the frontend's,
@@ -311,6 +323,7 @@ checks = [("slope", slope, slope_budget, 0.85),
 checks += [(f"share_{n}", shares[n], share_budget, 1 - share_budget / 100) for n in PHASES]
 
 failed = False
+drifted = []
 for name, value, budget, floor_frac in checks:
     base = baseline[name]
     ceiling = base * (1 + budget / 100)
@@ -322,7 +335,21 @@ for name, value, budget, floor_frac in checks:
     elif value < band_floor:
         verdict = f"UNDER floor {band_floor:.4f} (ladder broke, or a durable win — re-anchor on purpose)"
         failed = True
+    else:
+        # Half the band used: in budget, but past anything run-to-run spread
+        # explains (see DRIFT in the header). Only the directions the band
+        # guards — a share both ways, slope/ratio upward.
+        half_up = base * (1 + budget / 200)
+        half_down = base * (1 - (1 - floor_frac) / 2)
+        if value > half_up or (name.startswith("share_") and value < half_down):
+            verdict = f"ok, but past half its band ({100 * (value / base - 1):+.1f}%)"
+            drifted.append(name)
     print(f"editloop-scale: {name:12s} {value:.4f} (baseline {base:.4f}, +/-{budget:.0f}% budget) {verdict}")
+
+if drifted and not failed:
+    print(f"::warning::editloop-scale: {', '.join(drifted)} used more than half the band. One run "
+          "can read this far out; if the next runs on develop agree, the anchor has drifted "
+          "(accepted cost accumulating) — re-anchor on purpose before it fails unrelated PRs (#3328).")
 
 if failed:
     print("::error::editloop-scale: the edit loop left its scale band. `slope` over 1.3 means")
