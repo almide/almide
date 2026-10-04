@@ -70,6 +70,7 @@ fn build_program_ann(ctx: &RenderContext, program: &IrProgram) -> CodegenAnnotat
         .collect();
     ann.eq_blocked_types = super::walker::declarations::compute_eq_blocked_types(&all_type_decls);
     ann.fn_blocked_types = super::walker::declarations::compute_fn_blocked_types(&all_type_decls);
+    ann.rc_blocked_types = super::walker::declarations::compute_rc_blocked_types(&all_type_decls);
     ann.phantom_param_structs = super::walker::declarations::compute_phantom_param_structs(&all_type_decls);
     // §4 endgame: the legacy pre-index (lazy_top_let_names /
     // eager_force_top_lets / const_top_let_vars) and the mutable-storage
@@ -166,7 +167,12 @@ fn render_program_top_lets(ctx: &RenderContext, program: &IrProgram, parts: &mut
         // #617: a shared static stores the RAW Bytes/Matrix shape (Rc is not Sync;
         // fan threads read globals) — type and initializer un-wrap here, every
         // READ site re-wraps into the AlmideRcCow value shape.
-        let ty_str = expressions::rc_cow_raw_type(&render_type_fn(ctx, &tl.ty));
+        // Only a type the glue converts (`Bytes` / `Matrix` through List /
+        // Option / Result / tuple) is stored raw: a `Map[String, Bytes]` or a
+        // record of Bytes keeps its value shape, in a per-thread slot (#3287).
+        let raw = expressions::rc_cow_needs_glue(&tl.ty);
+        let ty_str = render_type_fn(ctx, &tl.ty);
+        let ty_str = if raw { expressions::rc_cow_raw_type(&ty_str) } else { ty_str };
         let val_str = expressions::rc_cow_unglue(render_expr_fn(ctx, &tl.value), &tl.ty);
         let info = ctx.ann.globals.get(&tl.var).unwrap_or_else(|| panic!(
             "[COMPILER BUG] top-let `{}` missing from the storage attribute",

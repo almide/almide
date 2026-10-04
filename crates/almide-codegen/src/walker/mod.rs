@@ -519,33 +519,40 @@ const MAIN_SIGPIPE_PRELUDE: &str = "    #[cfg(unix)]\n    {\n        extern \"C\
 /// panic to the default hook — the message and exit code are unchanged.
 const MAIN_STDOUT_PRELUDE: &str = "    {\n        let __almide_hook = std::panic::take_hook();\n        std::panic::set_hook(std::boxed::Box::new(move |info| { almide_stdout_flush(); __almide_hook(info); }));\n    }\n";
 
-/// A lazy top-let whose value holds a closure renders as a per-thread slot
-/// behind a `Deref` handle (`top_let_thread_lazy`), not a `static LazyLock`:
-/// `Rc<dyn Fn>` is not `Sync`, so rustc refuses it in a static (#2537).
-/// A public alias (`type Handler = (Int) -> Int`) is expanded transparently
-/// by `render_type`, so it is looked through here too; `fn_blocked_types`
-/// already covers records and variants transitively.
+/// A lazy top-let whose stored value is not `Sync` renders as a per-thread
+/// slot behind a `Deref` handle (`top_let_thread_lazy`), not a `static
+/// LazyLock`: rustc refuses a non-`Sync` static. Decided by type — an
+/// `Rc`-backed leaf (a closure, #2537; a `Bytes` / `Matrix`, #3287) anywhere
+/// in the STORED shape, through user records and variants transitively
+/// (`rc_blocked_types`). A `Bytes` / `Matrix` the glue stores raw (`Vec<u8>`,
+/// through List / Option / Result / tuple, #617) is `Sync` and stays a
+/// shared static. A public alias (`type Handler = (Int) -> Int`) is expanded
+/// transparently by `render_type`, so it is looked through here too.
 pub(crate) fn top_let_is_thread_local(ctx: &RenderContext, ty: &Ty) -> bool {
-    fn holds_fn(ctx: &RenderContext, ty: &Ty, depth: u32) -> bool {
-        if declarations::ty_has_fn_with(ty, &ctx.ann.fn_blocked_types) {
-            return true;
-        }
+    fn stored_holds_rc(ctx: &RenderContext, ty: &Ty, raw: bool, depth: u32) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
         if depth > 32 {
             return false;
         }
         match ty {
+            Ty::Bytes | Ty::Matrix | Ty::Applied(TC::Matrix, _) => !raw,
+            Ty::Fn { .. } => true,
             Ty::Named(name, args) => {
-                args.iter().any(|t| holds_fn(ctx, t, depth + 1))
-                    || ctx.type_aliases.get(name).is_some_and(|t| holds_fn(ctx, t, depth + 1))
+                ctx.ann.rc_blocked_types.contains(name.as_str())
+                    || args.iter().any(|t| stored_holds_rc(ctx, t, false, depth + 1))
+                    || ctx.type_aliases.get(name).is_some_and(|t| stored_holds_rc(ctx, t, raw, depth + 1))
             }
-            Ty::Tuple(elems) | Ty::Applied(_, elems) => elems.iter().any(|t| holds_fn(ctx, t, depth + 1)),
+            Ty::Applied(TC::List | TC::Option | TC::Result, args) | Ty::Tuple(args) => {
+                args.iter().any(|t| stored_holds_rc(ctx, t, raw, depth + 1))
+            }
+            Ty::Applied(_, args) => args.iter().any(|t| stored_holds_rc(ctx, t, false, depth + 1)),
             Ty::Record { fields } | Ty::OpenRecord { fields } => {
-                fields.iter().any(|(_, t)| holds_fn(ctx, t, depth + 1))
+                fields.iter().any(|(_, t)| stored_holds_rc(ctx, t, false, depth + 1))
             }
             _ => false,
         }
     }
-    holds_fn(ctx, ty, 0)
+    stored_holds_rc(ctx, ty, expressions::rc_cow_needs_glue(ty), 0)
 }
 
 fn wrap_main_fn_code(fn_code: String, ctx: &RenderContext, is_rust_effect_main: bool, is_rust_plain_main_with_forces: bool) -> String {
