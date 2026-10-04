@@ -123,7 +123,7 @@ almide build --fast                     # 最大性能 (opt-level=3, LTO, native
 
 | オプション | 説明 |
 |---|---|
-| `-o <name>` | 出力ファイル名 |
+| `-o <path>` | 出力ファイルのパス。どのネイティブ経路（バイナリ / `--cdylib` / `--repr-c` / その組み合わせ）でも同じ意味で、書いたパスそのものに出力し、親ディレクトリが無ければ作る（#3349）。拡張子や `lib` 接頭辞は付け足さない |
 | `--target wasm` | WASM バイナリを生成（直接 emit） |
 | `--target <triple>` | ネイティブバイナリのターゲット（#2772）。`rust` / `native`（既定、このホスト）、`linux-musl`（ホストのアーキテクチャの `<arch>-unknown-linux-musl`。x86_64 と aarch64）、または rustc のターゲット三つ組。cargo に `--target` を渡し、`target/<triple>/<profile>/` から成果物を拾う。ターゲットの標準ライブラリは `rustup target add <triple>` で入れる。musl ターゲットは Rust の既定（`crt-static`）で**静的リンク**になり、almide は追加のリンクフラグを付けない（glibc ターゲットは従来どおり動的）。依存の無いプログラムは rustc 同梱の musl crt で x86_64 ホスト上なら追加ツール無しにリンクできる。別アーキテクチャ向けや C を含む `[native-deps]` には、そのターゲットのリンカ / C コンパイラ（`musl-tools` 等）が要る。未知の値（三つ組の形をしていないもの）と `wasm32-*` は、ホスト向けに黙ってビルドせず終了コード 2 で拒否する |
 | `--async-import <name>[,…]` | `--host js` 専用（#3353）: Promise を返す hook を持つ `@extern(wasm, "js", name)` import。glue がそれを `WebAssembly.Suspending` で包み、そこへ到達しうる export（と `run()`）だけを `WebAssembly.promising` 経由の async 関数（`.d.ts` は `Promise<T>`）にする。インスタンスへの呼び出しは 1 つずつ呼んだ順に直列化され、async 呼び出しが中断中の同期 export は入らずに例外。JSPI の無い実行系では `init()` が理由を挙げて拒否。言語の型・効果は変わらない。設計: docs/wasm/JS-HOST-ASYNC-IMPORTS.md |
@@ -133,6 +133,7 @@ almide build --fast                     # 最大性能 (opt-level=3, LTO, native
 | `--unchecked-index` | 配列の境界チェックを無効化（unsafe） |
 | `--no-check` | 型チェックをスキップ |
 | `--repr-c` | struct/enum に `#[repr(C)]` を付与（C ABI 互換） |
+| `--cdylib` | 共有ライブラリ（`.so` / `.dylib` / `.dll`）を生成。`-o` 省略時はカレントディレクトリの `lib<名前>.<拡張子>`（Windows は `<名前>.dll`）。Cargo の crate 名は `-o` ではなくパッケージ名（`almide.toml` の `[package].name`、無ければエントリファイル名）から作る（#3349） |
 
 **`CARGO_BUILD_TARGET`**(#2772): `--target` が無いとき、環境変数 `CARGO_BUILD_TARGET` はターゲットの指定として
 `--target <triple>` と同じに扱う（`--target rust` はそれを打ち消してホスト向けにする）。どちらの場合も almide は cargo に
