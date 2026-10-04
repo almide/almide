@@ -7,8 +7,16 @@
 // into `&*g`, so `apply(&_fn_arg0, ..)` reached rustc as `&Rc<dyn Fn>` at a
 // `&dyn Fn` slot (E0277) while the wasm leg printed the answer. Covered: the
 // fn alone, two closure params, the fn in a record field, the fn as an
-// argument, a fn whose param itself takes a closure, and fns that return one.
+// argument inside a top-level value, a fn whose param itself takes a closure,
+// and fns that return one. Each call result is bound before use so the v1 MIR
+// leg lowers every fn of the fixture.
 type Holder = { run: (() -> Int, Int) -> Int }
+
+type Pair = { run: (() -> Int, (Int) -> Int, Int) -> Int }
+
+type Nest = { run: (((Int) -> Int) -> Int) -> Int }
+
+type Thunk = { get: () -> Int }
 
 fn apply(f: () -> Int, x: Int) -> Int = f() + x
 
@@ -20,33 +28,39 @@ fn nested(k: ((Int) -> Int) -> Int) -> Int = k((n) => n + 100)
 
 fn feed(f: (Int) -> Int) -> Int = f(1)
 
-fn adder(n: Int) -> (Int) -> Int = (x) => x + n
-
 fn compose(f: (Int) -> Int, g: (Int) -> Int) -> (Int) -> Int = (x) => g(f(x))
+
+fn adder(n: Int) -> (Int) -> Int = (x) => x + n
 
 let keep = apply
 
 let both = twice
 
-let HOLDER: Holder = { run: apply }
-
-let PASSED: Int = use_it(apply)
-
 let nest = nested
-
-let FEED_NESTED: Int = nested(feed)
 
 let comp = compose
 
 let make = adder
 
+let HOLDER: Holder = { run: apply }
+
+let PAIR: Pair = { run: twice }
+
+let NESTED_HOLDER: Nest = { run: nested }
+
+let PASSED: Thunk = { get: () => use_it(apply) }
+
 effect fn main() -> Unit = {
-  println(int.to_string(keep(() => 1, 2)))
-  println(int.to_string(both(() => 2, (n) => n * 3, 1)))
+  let a = keep(() => 1, 2)
+  println(int.to_string(a))
+  let b = both(() => 2, (n) => n * 3, 1)
+  println(int.to_string(b))
+  let c = nest(feed)
+  println(int.to_string(c))
   println(int.to_string(HOLDER.run(() => 6, 1)))
-  println(int.to_string(PASSED))
-  println(int.to_string(nest(feed)))
-  println(int.to_string(FEED_NESTED))
+  println(int.to_string(PAIR.run(() => 2, (n) => n * 5, 1)))
+  println(int.to_string(NESTED_HOLDER.run(feed)))
+  println(int.to_string(PASSED.get()))
   println(int.to_string(comp((x) => x + 1, (x) => x * 10)(2)))
   println(int.to_string(make(5)(6)))
 }
