@@ -618,16 +618,19 @@ impl FileTypeScope {
         own: std::collections::HashSet<Sym>,
         names: &std::collections::HashSet<Sym>,
     ) -> Self {
-        let user_modules: std::collections::HashSet<&str> = env.user_modules.iter().map(|m| m.as_str()).collect();
+        // The file's spelled names are checked first, so a key no file
+        // spells costs no module lookup; the module set is the env's own,
+        // probed by symbol rather than copied into a string set per file.
         let mut owners: HashMap<Sym, Vec<Sym>> = HashMap::new();
         for k in env.types.keys() {
-            if let Some((m, base)) = k.as_str().rsplit_once('.')
-                && user_modules.contains(m)
-                && !almide_lang::stdlib_info::is_bundled_module(m)
-            {
+            if let Some((m, base)) = k.as_str().rsplit_once('.') {
                 let base = sym(base);
-                if names.contains(&base) {
-                    owners.entry(base).or_default().push(sym(m));
+                if !names.contains(&base) || almide_lang::stdlib_info::is_bundled_module(m) {
+                    continue;
+                }
+                let m = sym(m);
+                if env.user_modules.contains(&m) {
+                    owners.entry(base).or_default().push(m);
                 }
             }
         }
@@ -635,9 +638,17 @@ impl FileTypeScope {
             mods.sort_by(|a, b| a.as_str().cmp(b.as_str()));
             mods.dedup();
         }
-        let mut visible: std::collections::HashSet<Sym> = env.import_table.accessible.clone();
-        visible.extend(env.import_table.aliases.values().copied());
-        if let Some(h) = scope { visible.insert(sym(h)); }
+        // `locate` asks `visible` only about a module in `owners`, so only
+        // those are decided — not a copy of every module the file can see
+        // (#3340: that copy, per file, was most of this check's cost).
+        let here = scope.map(sym);
+        let visible: std::collections::HashSet<Sym> = owners.values().flatten().copied()
+            .filter(|m| {
+                env.import_table.accessible.contains(m)
+                    || env.import_table.aliases.values().any(|a| a == m)
+                    || Some(*m) == here
+            })
+            .collect();
         FileTypeScope { own, visible, owners }
     }
 
