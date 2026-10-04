@@ -1,0 +1,21 @@
+// #3290: two libraries declaring the same field set; an un-annotated literal
+// binding takes the type of the library slot it is used in — in-tree, and as
+// two path dependencies on the dependency-shaped leg.
+import litsize
+import litextent
+
+test "library literal bindings carry the library's type" {
+  let r = litextent.span(litextent.returned(2.0))
+  assert_eq(r, 5.0)
+  let n = list.len(litextent.stored(1.0))
+  assert_eq(n, 1)
+}
+
+test "a caller's binding takes the type of the library slot it fills" {
+  let e = { w: 1.0, h: 2.5 }
+  let s = litextent.span(e)
+  assert_eq(s, 3.5)
+  let u = { w: 2.0, h: 2.0 }
+  let a = litsize.area(u)
+  assert_eq(a, 4.0)
+}
