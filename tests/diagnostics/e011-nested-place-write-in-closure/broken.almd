@@ -1,0 +1,16 @@
+// A nested place (`o.inner.xs[i]`) roots at the enclosing `var` the
+// closure mutates (#3344).
+type Inner = { xs: List[Int] }
+
+type Outer = { inner: Inner }
+
+fn fill(k: Int) -> Int = {
+  var o: Outer = { inner: { xs: [0, 0] } }
+  let set = (i: Int) => {
+    o.inner.xs = [i, k]
+  }
+  set(1)
+  list.sum(o.inner.xs)
+}
+
+fn main() -> Unit = println(int.to_string(fill(5)))

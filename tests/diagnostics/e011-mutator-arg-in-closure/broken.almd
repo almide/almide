@@ -1,0 +1,12 @@
+// An in-place mutator handed the enclosing `var` as its `mut` argument
+// mutates it from inside the closure (#3344).
+fn collect(xs: List[Int]) -> List[Int] = {
+  var acc: List[Int] = []
+  let _ = list.map(xs, (x) => {
+    list.push(acc, x * 2)
+    x
+  })
+  acc
+}
+
+fn main() -> Unit = println("${collect([1, 2])}")

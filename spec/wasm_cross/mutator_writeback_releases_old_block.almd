@@ -40,7 +40,7 @@ fn show_bytes(b: Bytes) -> String = "${bytes.to_list(b)}"
 
 fn show_map(m: Map[String, Int]) -> String = map.keys(m) |> list.map((k) => k + "=" + int.to_string(map.get_or(m, k, 0))) |> list.join(",")
 
-fn main() -> Unit = {
+effect fn main() -> Unit = {
   // Strings: push and clear on a local, an alias keeps the old text.
   var s = "a"
   let s0 = s

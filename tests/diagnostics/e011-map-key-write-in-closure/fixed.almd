@@ -1,0 +1,5 @@
+// Build the Map with a fold instead — no closure mutates it (#3344).
+fn counts(ws: List[String]) -> Map[String, Int] =
+  list.fold(ws, [:], (m, w) => map.set(m, w, (map.get(m, w) ?? 0) + 1))
+
+fn main() -> Unit = println(int.to_string(map.len(counts(["a", "b", "a"]))))
