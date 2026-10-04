@@ -319,14 +319,16 @@ pub(crate) fn result_family(ty: &Ty) -> ResultFamily {
 /// [`result_family`] on the call's TYPE. (The two tables below survive as the
 /// merged set's storage; their split no longer carries family meaning.)
 ///
-/// A host op (`crate::host_ops`, #2739) is a member: it is an ordinary call, so
-/// its result is a fresh owned block of its type's canonical layout, the same
-/// promise a user callee's return makes. Callers still key the family on the
-/// TYPE, so a Unit/String host op is unaffected.
+/// A Result-returning host op (`crate::host_ops`, #2739) is a member: it is an
+/// ordinary call, so its result is a fresh owned block of its type's canonical
+/// layout, the same promise a user callee's return makes. Only the rows whose
+/// declaration returns a `Result` (`HostOp::returns_result`, checked against
+/// the stdlib by the contract test) — an Option- or scalar-returning host op
+/// (`random.choice`, `env.millis`) must not be read as a Result block.
 pub(crate) fn is_self_host_materialized_result_fn(module: &str, func: &str) -> bool {
     is_self_host_result_module_fn(module, func)
         || is_self_host_result_str_module_fn(module, func)
-        || crate::host_ops::host_op(module, func).is_some()
+        || crate::host_ops::host_op(module, func).is_some_and(|o| o.returns_result)
 }
 
 /// Is `ty` a `Result[Unit, String]` (the fs.write/fs.copy shape — no Ok payload, a String
