@@ -584,7 +584,7 @@ pub(crate) fn marker_is_option_identity(node_ty: &Ty) -> bool {
 
 /// How a `!` hands its operand's error to a `String` failure channel
 /// (ADR-0021 D2, #2725) — the native `unwrap_expr` template's variants
-/// (codegen/templates/rust.toml): a typed `E` becomes its repr text
+/// (crates/almide-codegen/templates/rust.toml): a typed `E` becomes its repr text
 /// (`map_err_debug`, `almide_repr`), a `List[String]` joins with `", "`
 /// (`map_err_join`), a `String` passes through.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

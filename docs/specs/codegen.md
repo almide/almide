@@ -161,7 +161,7 @@ table as an index, and `target.rs` as the truth.
 
 ## 4. Template System
 
-**Source**: `crates/almide-codegen/src/template.rs`, `codegen/templates/rust.toml`
+**Source**: `crates/almide-codegen/src/template.rs`, `crates/almide-codegen/templates/rust.toml`
 
 Templates define syntax only. All semantic decisions are made by nanopass passes.
 
@@ -240,7 +240,7 @@ Guarded rules are checked before unguarded defaults. First matching rule wins. T
 
 ### Key Template Constructs (Rust)
 
-The Rust template set (`codegen/templates/rust.toml`) defines constructs for:
+The Rust template set (`crates/almide-codegen/templates/rust.toml`) defines constructs for:
 
 | Category | Examples |
 |----------|----------|
