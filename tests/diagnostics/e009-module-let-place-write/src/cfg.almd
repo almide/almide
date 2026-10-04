@@ -1,0 +1,4 @@
+// A `let` is immutable from every module; `counts` is the writable one.
+let limits: List[Int] = [1, 2]
+
+var counts: List[Int] = [0, 0]
