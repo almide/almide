@@ -3,8 +3,12 @@ type Extent = { w: Float, h: Float }
 
 fn measure(n: Float) -> Extent = { w: n, h: n * 2.0 }
 
-fn many() -> List[Extent] = [{ w: 1.0, h: 1.0 }, { w: 2.0, h: 2.0 }]
+fn many() -> List[Extent] = [
+  { w: 1.0, h: 1.0 },
+  { w: 2.0, h: 2.0 }
+]
 
-fn maybe(n: Float) -> Option[Extent] = if n > 0.0 then some({ w: n, h: n }) else none
+fn maybe(n: Float) -> Extent? = if n > 0.0 then some({ w: n, h: n })
+else none
 
 fn span(e: Extent) -> Float = e.w + e.h
