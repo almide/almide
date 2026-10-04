@@ -25,7 +25,7 @@ almide-verify = { path = "../almide-verify" }
 almide-wasm-run = { path = "../almide-wasm-run" }
 almide = { path = "../.." }
 wasmparser = "0.259"
-wasmtime = "49.0.1"
+wasmtime = "49.0.2"
 sha2 = "0.11"
 
 [lints]
