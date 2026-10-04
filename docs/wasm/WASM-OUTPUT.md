@@ -284,6 +284,19 @@ marshalling. `app.js` is a dependency-free ES module:
   wider value exact), `Float`, `Bool`, `String`, `Unit`. Any other type on the
   boundary is a build-time refusal naming the function and the type (lists,
   records and variants are the next step, following the bindgen table).
+- An `effect fn` export (and a fn declaring `Result[T, String]`) returns one
+  `Result` block (tag at payload+0, 0 = ok; value slot at payload+8), whatever
+  its declared `T` (#3352). Its wrapper unwraps it: ok is `T` marshalled as
+  above, err throws `AlmideError` (an `Error`) whose `message` is the err
+  String. The block is released through `__release`, and the slot's own
+  String block too when the Result held the last reference. The wrapper is
+  chosen from the return ABI the emitter records for each export
+  (`almide_wasm::host_exports::export_rets`), not from the source type, and a
+  record that disagrees with the source type (or an err that is not a
+  String) is a build-time refusal naming the function. The `.d.ts` gives `T`
+  and declares `AlmideError`, which ships only when some export unwraps a
+  Result. Gate: `spec/wasm_host_js/effect_exports.almd` runs every
+  marshalled type × {fn, effect fn} × {ok, err} under node.
 - `main` is `run()`; `_start` is not called by `init`.
 
 String marshalling reads the block layout (`almide-layout`:
