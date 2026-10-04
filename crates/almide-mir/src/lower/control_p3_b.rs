@@ -198,6 +198,12 @@ impl LowerCtx {
         }
         let mut vars: Vec<VarId> = Vec::new();
         collect_heap_reassign_vars(body, &mut vars);
+        self.precopy_borrowed_vars(vars);
+    }
+
+    /// The plain-var half of [`Self::precopy_borrowed_reassign_slots`]: every var
+    /// in `vars` still bound to a borrowed param takes an owned `Dup` before the loop.
+    pub(crate) fn precopy_borrowed_vars(&mut self, vars: Vec<VarId>) {
         for var in vars {
             if let Some(&val) = self.value_of.get(&var) {
                 if self.param_values.contains(&val) {
@@ -205,6 +211,12 @@ impl LowerCtx {
                     self.ops.push(Op::Dup { dst: owned, src: val });
                     self.value_of.insert(var, owned);
                     self.live_heap_handles.push(owned);
+                    // A record copy keeps the param's read shape, so a field
+                    // rebind (`list.push(s.ys, k)` → the spread) can read it.
+                    let ty = self.var_decl_tys.get(&var).cloned();
+                    if let Some(ty) = ty.filter(|t| self.aggregate_field_tys(t).is_some()) {
+                        self.seed_call_named_heap_read_shape(owned, &ty);
+                    }
                 }
             }
         }
