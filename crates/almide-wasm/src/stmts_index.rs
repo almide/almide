@@ -14,25 +14,6 @@ impl Emitter<'_> {
     /// exactly once (#1770: both passes firing on one local double-freed
     /// the returned buffer, and its freelist link zeroed the first
     /// payload word).
-    /// The PAYLOAD-relative address of element `hi` (i64, already bounds
-    /// checked) of the list in `hb`: `block + hi * stride`, in i32 — the
-    /// read path's shape (#3345). The access adds PAYLOAD through its memarg
-    /// offset (`slot_memarg`), so Cranelift folds it into the addressing
-    /// instead of an `add` per store. Same address as the old
-    /// `wrap(extend(block) + hi*stride) + PAYLOAD`: an in-bounds slot lies
-    /// inside linear memory (< 4 GiB), where i32 and i64 arithmetic agree,
-    /// and the memarg offset cannot wrap past it.
-    pub(crate) fn emit_index_slot_addr(&mut self, hb: u32, hi: u32, stride: i64) {
-        self.f
-            .instructions()
-            .local_get(hb)
-            .local_get(hi)
-            .i32_wrap_i64()
-            .i32_const(stride as i32)
-            .i32_mul()
-            .i32_add();
-    }
-
     /// Judge a LOCAL list copy-on-write into `hb` and write the result back
     /// to its slot. Inside a loop that reaches the list only element-wise
     /// (cow_hoist.rs, #2150) the judge runs once per loop entry: the first
@@ -192,13 +173,17 @@ impl Emitter<'_> {
                     self.witness_mut_rebind(*target, true);
                 }
                 // The replaced element's credit goes with it.
+                // #3345: the address through the loop's payload pointer when
+                // it has one, with an index `v + c` folded into the offset
+                // (payload_ptr.rs) — the read path's shape.
+                let list = (is_local && !in_cell).then_some(*target);
                 if let Some(dec) = self.elem_is_handle(el).then(|| self.dec_fn_of(el)) {
-                    self.emit_index_slot_addr(hb, hi, stride);
-                    self.f.instructions().i32_load(slot_memarg(0)).call(dec);
+                    let off = self.emit_elem_addr(list, hb, hi, index, stride)?;
+                    self.f.instructions().i32_load(wasm_encoder::MemArg { offset: off, align: 2, memory_index: 0 }).call(dec);
                 }
-                self.emit_index_slot_addr(hb, hi, stride);
+                let off = self.emit_elem_addr(list, hb, hi, index, stride)?;
                 self.f.instructions().local_get(hv);
-                self.store_ty_slot(el, 0);
+                self.store_slot_off(el, off);
                 self.release_i32();
                 self.release_val(el);
                 self.release_i64();

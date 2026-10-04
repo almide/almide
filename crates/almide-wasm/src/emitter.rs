@@ -167,9 +167,9 @@ pub(crate) struct Emitter<'a> {
     /// #2980: lists a counting loop judged copy-on-write in its preheader
     /// (cow_hoist.rs, the pre-judge) — their stores inside it skip the judge.
     pub(crate) cow_prejudged: HashSet<VarId>,
-    /// #3345: bounds facts of the current straight-line stretch of a loop
-    /// body (bounds_facts.rs); `None` = recording off.
-    pub(crate) bounds_facts: Option<Vec<(VarId, VarId)>>,
+    /// #3345: bounds facts (bounds_facts.rs; `None` = off), payload pointers (payload_ptr.rs).
+    pub(crate) bounds_facts: Option<Vec<(VarId, VarId, i64)>>,
+    pub(crate) payload_ptrs: HashMap<VarId, u32>,
     /// One-shot tail-position marker: set by `lower_tail`, TAKEN at
     /// `lower`'s entry so it never leaks into operand lowering. A direct
     /// call in tail position with a matching return type emits
@@ -292,11 +292,8 @@ impl Emitter<'_> {
                 self.bounds_record(id, index);
             }
         }
-        // element address: hold + idx*stride, slot at offset PAYLOAD
-        let mut i = self.f.instructions();
-        i.local_get(hold);
-        i.local_get(idx).i32_wrap_i64().i32_const(stride as i32).i32_mul().i32_add();
-        self.load_ty_slot(elem, 0);
+        let off = self.emit_elem_addr(list_var, hold, idx, index, i64::from(stride))?;
+        self.load_slot_off(elem, off);
         self.release_i64();
         self.release_i32();
         Ok(elem)
