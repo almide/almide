@@ -23,6 +23,12 @@
 //!   * a listed cell that passes (the fix landed — delete the row),
 //!   * a listed cell that fails in a different set of columns than listed,
 //!   * a row naming no generated cell (renamed axis — re-key the row).
+//! CI runs a fixed quarter per PR (`SHAPE_MATRIX_SLICE=0/4` in the Rust test
+//! shards) and every cell nightly (`shape-matrix-nightly.yml`). A PR that
+//! fixes one of the listed issues should run the whole matrix locally
+//! (`cargo test --test shape_matrix_test`, about six minutes on four cores)
+//! and delete every row it burned — the PR slice only sees a quarter of them,
+//! and the nightly reports the rest as `PASSES BUT LISTED`.
 //! Rows only shrink, except with an open issue cited
 //! (`scripts/check-walled-real-growth.sh` with `LEDGER=` this file, in CI).
 //!
@@ -389,7 +395,8 @@ fn shape_matrix() {
         match (fail, baseline.get(name)) {
             (None, None) => pass += 1,
             (None, Some((col, issue))) => problems.push(format!(
-                "PASSES BUT LISTED {name} (listed {col} under #{issue}) — the fix landed: delete its row from {BASELINE}"
+                "PASSES BUT LISTED {name} (listed {col} under #{issue}) — the fix landed: delete its row from {BASELINE} \
+                 (and run the whole matrix for the issue's other rows: SHAPE_MATRIX_FILTER is a substring filter)"
             )),
             (Some((col, _)), Some((lcol, issue))) if col == lcol => {
                 known += 1;
