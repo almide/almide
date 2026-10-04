@@ -471,6 +471,7 @@
 12009	spec/wasm_cross/map_set_typechange.almd
 6019	spec/wasm_cross/map_upsert_str.almd
 3141	spec/wasm_cross/map_wide_int_key.almd
+8498	spec/wasm_cross/match_binder_stored_owned.almd
 1470	spec/wasm_cross/match_box_pattern_backstop.almd
 2999	spec/wasm_cross/match_container_literal.almd
 5814	spec/wasm_cross/match_err_arm_typed_payload.almd
