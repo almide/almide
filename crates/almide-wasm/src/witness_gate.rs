@@ -494,10 +494,8 @@ fn read_operand(x: &IrExpr, position: &str) -> Option<Why> {
         {
             value_subset(x).map(|w| w.inside(position))
         }
-        // #2758: arg_temps.rs's `{ let t = f(x); read(t) }` — the produced
-        // operand named first: its binds are the Bind hook's (the frame's
-        // exit plan releases them), and the value read is the tail's, under
-        // this same rule.
+        // #2758: arg_temps.rs's `{ let t = f(x); read(t) }`: the binds are
+        // the Bind hook's, the value read is the tail's, under this rule.
         IrExprKind::Block { stmts, expr: Some(tail) } => {
             stmts_subset(stmts).map(Why::Deep).or_else(|| read_operand(tail, position))
         }
