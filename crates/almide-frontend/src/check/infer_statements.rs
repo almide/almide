@@ -285,7 +285,7 @@ impl Checker {
         }
         self.check_stmt_assign_unify(name, &val_ty, value);
         self.check_stmt_assign_immutable(name);
-        self.check_stmt_assign_escape(name);
+        self.check_closure_escape(name.as_str(), format!("{} = ...", name));
     }
 
     /// A mut-receiver stdlib mutator (`list.push`, `map.insert`,
@@ -553,21 +553,6 @@ impl Checker {
         }
     }
 
-    /// E011: escape analysis — block `var` mutation inside a closure in a
-    /// pure fn. Verbatim text move out of [`Self::check_stmt_assign`].
-    fn check_stmt_assign_escape(&mut self, name: &Sym) {
-        if self.env.mutable_vars.contains(&sym(name)) && !self.env.can_call_effect {
-            if let Some(&decl_depth) = self.env.var_lambda_depth.get(&sym(name)) {
-                if self.env.lambda_depth > decl_depth {
-                    self.emit(super::err(
-                        format!("mutable variable '{}' is mutated inside a closure in a pure function — use effect fn instead", name),
-                        "Move the mutation out of the closure, or mark the enclosing function as `effect fn`",
-                        format!("{} = ...", name)).with_code("E011"));
-                }
-            }
-        }
-    }
-
     /// `ast::Stmt::IndexAssign` arm of [`Self::check_stmt`]. Verbatim text move.
     /// E009: a place write (`xs[i] = v`, `s.f = v`, `o.inner.xs = v`)
     /// mutates its ROOT binding, which must be a `var` (or a `mut` param).
@@ -582,6 +567,7 @@ impl Checker {
         {
             return self.check_module_place_mutable(target, first, key, shape);
         }
+        self.check_closure_escape(target.as_str(), shape.clone());
         let is_known_binding = self.env.lookup_var(target.as_str()).is_some()
             || self.env.top_lets.contains_key(&sym(target.as_str()));
         if is_known_binding && !self.env.mutable_vars.contains(target) {
@@ -643,6 +629,7 @@ impl Checker {
 
 include!("infer_patterns.rs");
 include!("infer_module_place.rs");
+include!("infer_closure_escape.rs");
 
 impl Checker {
 
