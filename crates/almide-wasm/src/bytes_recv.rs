@@ -84,8 +84,8 @@ impl Emitter<'_> {
     /// the slot is repointed). Without it `var p2 = p1` shares one block
     /// and the write shows through `p1.f` — native's RcCow never lets it.
     /// Pushes the now-unique field block and answers `true`; `false` for
-    /// any other receiver, and for a PARAMETER's field, whose writes stay
-    /// caller-visible exactly as the var arm exempts a parameter. No block
+    /// any other receiver. A PARAMETER's field is judged too (#3342): the
+    /// write-back hands the copy back to the caller. No block
     /// reached here is pooled: the pool holds strings, nullary variant
     /// cases and closure blocks, never a record with a field or a Bytes.
     pub(crate) fn emit_read_field_bytes_cow(&mut self, b: &IrExpr) -> Result<bool, EmitError> {
@@ -101,9 +101,6 @@ impl Emitter<'_> {
         let SliceTy::Named(ti) = rty else {
             return Ok(false);
         };
-        if !global && idx < self.rc_param_ceiling {
-            return Ok(false);
-        }
         let off = {
             let crate::types_table::NamedDef::Record(r) = self.types.def(ti) else {
                 return Ok(false);

@@ -19,10 +19,9 @@ pub(crate) mod node_marks;
 pub(crate) struct Emitter<'a> {
     pub(crate) pool: &'a mut Pool,
     pub(crate) locals: &'a HashMap<VarId, (u32, SliceTy)>,
-    /// Locals below this index are PARAMS (borrowed views of the
-    /// caller's blocks): the COW gate exempts them — in-place writes
-    /// through a plain Bytes param are the caller-visibility contract
-    /// (bytes_param_writeback), exactly the pre-share behavior.
+    /// Locals below this index are PARAMS. The COW gate judges a `mut`
+    /// param like any var (#3342): the C-132 write-back hands its buffer
+    /// back, so a copy is caller-visible (bytes_param_writeback).
     pub(crate) rc_param_ceiling: u32,
     /// Whether a `return_call` site may release ANY frame credit (params
     /// and rc_owned locals alike): the raw-address rule (func.rs

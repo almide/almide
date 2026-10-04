@@ -1,0 +1,102 @@
+// @contract: C-033, C-132
+// Every in-place mutator on a `mut` parameter judges copy-on-write (#3342).
+// An alias the CALLEE binds (`let ys = xs`) keeps its value, as one the
+// caller bound before the call does: native clones on the alias, and the
+// wasm leg used to skip the judge on a parameter, so `list.push` and the
+// `bytes.set_*` / `copy_from` family wrote through the block the alias
+// still shared (native ys=4, wasm ys=5). The C-132 write-back hands the
+// callee's (possibly copied) buffer back, so the caller still sees every
+// write; the write-back site moves its var in (#3337), so an unaliased
+// param arrives unshared and the judge copies nothing.
+type Holder = { xs: List[Int], b: Bytes }
+
+fn push_list(mut xs: List[Int]) -> Unit = {
+  let ys = xs
+  list.push(xs, 7)
+  println("push ys=${ys} xs=${xs}")
+}
+
+fn pop_list(mut xs: List[Int]) -> Unit = {
+  let ys = xs
+  let last = list.pop(xs)
+  println("pop ys=${ys} xs=${xs} last=${last}")
+}
+
+fn clear_list(mut xs: List[Int]) -> Unit = {
+  let ys = xs
+  list.clear(xs)
+  println("clear ys=${ys} xs=${xs}")
+}
+
+fn index_list(mut xs: List[String]) -> Unit = {
+  let ys = xs
+  xs[0] = "z"
+  list.push(xs, "c")
+  println("index ys=${ys} xs=${xs}")
+}
+
+fn bytes_writes(mut b: Bytes) -> Unit = {
+  let c = b
+  bytes.set_u8(b, 0, 9)
+  bytes.set_i16_be(b, 1, 1027)
+  bytes.set_f32_le(b, 4, 2.5)
+  bytes.set_uint16(b, 6, 772.to_uint16(), BigEndian)
+  println("set c=${bytes.to_list(c)} b=${bytes.to_list(b)}")
+}
+
+fn bytes_grow(mut b: Bytes) -> Unit = {
+  let c = b
+  bytes.push(b, 1)
+  bytes.append_u8(b, 2)
+  bytes.write_u32_be(b, 3)
+  bytes.copy_from(b, bytes.from_list([8, 8]), 0, 0, 2)
+  bytes.copy_within(b, 0, 2, 2)
+  b[1] = 6
+  println("grow c=${bytes.to_list(c)} b=${bytes.to_list(b)}")
+}
+
+fn fields(mut h: Holder) -> Unit = {
+  let kept = h.xs
+  let kept_b = h.b
+  list.push(h.xs, 9)
+  bytes.set_u8(h.b, 0, 7)
+  println("field kept=${kept} xs=${h.xs} kept_b=${bytes.to_list(kept_b)} b=${bytes.to_list(h.b)}")
+}
+
+fn forward(mut xs: List[Int]) -> Unit = {
+  let ys = xs
+  push_list(xs)
+  println("forward ys=${ys} xs=${xs}")
+}
+
+effect fn main() -> Unit = {
+  var xs = [1, 2, 3, 4]
+  let held = xs
+  push_list(xs)
+  pop_list(xs)
+  clear_list(xs)
+  forward(xs)
+  println("caller held=${held} xs=${xs}")
+  var names = ["a", "b"]
+  let names_held = names
+  index_list(names)
+  println("caller names_held=${names_held} names=${names}")
+  var b = bytes.from_list([
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ])
+  let b_held = b
+  bytes_writes(b)
+  bytes_grow(b)
+  println("caller b_held=${bytes.to_list(b_held)} b=${bytes.to_list(b)}")
+  var h = Holder { xs: [1, 2], b: bytes.from_list([1, 2]) }
+  let h_held = h
+  fields(h)
+  println("caller h_held=${h_held.xs} ${bytes.to_list(h_held.b)} h=${h.xs} ${bytes.to_list(h.b)}")
+}

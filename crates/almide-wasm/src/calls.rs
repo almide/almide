@@ -302,7 +302,7 @@ impl Emitter<'_> {
                     });
                 let depth = self.borrowed_temps.len();
                 // #3337: the vars the write-back rebinds move in (writeback_move.rs).
-                let move_in = self.take_move_in(args, save.is_none() && !tail);
+                let move_in = self.take_move_in(args, save.is_none(), tail && Some(index) != self.self_index);
                 let mut moved_in: Vec<u32> = Vec::new();
                 let site = crate::witness::modes::site_begin();
                 for (k, (a, want)) in args.iter().zip(params).enumerate() {
