@@ -1,8 +1,9 @@
 (* Almide v1 trust spine — #3348: the LARGE-BLOCK free list, as a model.
 
    The structural wasm allocator files a freed block whose total is at
-   most 512 KiB into one of 16 power-of-two classes (StructuralRuntime.v /
-   StructuralAlloc.v). Before #3348 a bigger block was ABANDONED, so a loop
+   most 64 KiB into one of 13 power-of-two classes (StructuralRuntime.v /
+   StructuralAlloc.v). Before #3348 a block above the (then 512 KiB)
+   ceiling was ABANDONED, so a loop
    that copied an 8 MB list grew linear memory by 8 MB per iteration
    (#3337 reached 2 GB). Above the class ceiling the runtime now keeps an
    ADDRESS-ORDERED, EXACT-SIZE free list with COALESCE on free and SPLIT on
