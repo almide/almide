@@ -10,7 +10,7 @@ fn enumerate_fold_preserves_scalar_and_escaping_results() {
 fn calc(xs: List[Float]) -> Float =
   list.fold(list.enumerate(xs), 0.0, (acc, p) => acc + float.from_int(p.0) * p.1)
 fn item(p: (Int, Int)) -> Int = p.1
-fn main() -> Unit = {
+effect fn main() -> Unit = {
   assert(calc([]) == 0.0)
   assert(calc([2.0, 3.0, 4.0]) == 11.0)
   assert(list.fold(list.enumerate([true, false, true]), 0, (a, p) => if p.1 then a + p.0 else a) == 2)
