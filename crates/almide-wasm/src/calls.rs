@@ -303,7 +303,7 @@ impl Emitter<'_> {
                 let depth = self.borrowed_temps.len();
                 // #3337: the vars the write-back rebinds move in (writeback_move.rs).
                 let move_in = self.take_move_in(args, save.is_none(), tail && Some(index) != self.self_index);
-                let mut moved_in: Vec<u32> = Vec::new();
+                let mut moved_in = Vec::new();
                 let site = crate::witness::modes::site_begin();
                 for (k, (a, want)) in args.iter().zip(params).enumerate() {
                     // #2117: `build(acc + s, …)` at a self tail call in loop
@@ -346,7 +346,7 @@ impl Emitter<'_> {
                         self.detach_global_mut_arg(a, i)?;
                     }
                 }
-                self.empty_moved_in(&moved_in);
+                self.empty_moved_in(&moved_in)?;
                 crate::witness::modes::site_end(site, index);
                 let parked = self.borrowed_temps.len() > depth;
                 self.witness_raw_loop_back(loop_form_raw, &moved);
