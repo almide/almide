@@ -57,6 +57,9 @@ use wasmparser::{Parser, Payload};
 pub const P1_SERVED_OPS: &[i32] = &[
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
     29, 30, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 51, 52, 60, 61, 62, 63, 64, 73,
+    // The instance-parallel fan offer (#3003): answered "not served" (0), so
+    // the guest's sequential path runs — byte-identical to the embedded host.
+    74,
     // The subprocess family (#2589, ADR-0025): forwarded to the private
     // `almide:process/spawn` import, which a stock runtime refuses at load.
     80, 81, 82, 83, 84, 85, 86, 87, 88, 89,

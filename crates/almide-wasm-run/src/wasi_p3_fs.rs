@@ -223,6 +223,13 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>, f_e
     i.call(I_MONO_NOW).return_();
     i.end();
 
+    // op 74: the instance-parallel fan offer (#3003, ADR-0011 §D2a). This
+    // runtime has no second instance to run a chunk on: 0 = not served, and
+    // the guest runs the chunks sequentially, as on every host before it.
+    i.local_get(op).i32_const(74).i32_eq().if_(BlockType::Empty);
+    i.i64_const(0).return_();
+    i.end();
+
     // ── The filesystem (#3140): the spliced service ───────────────────
     // Every fs op but the fan prefetch triple goes to the p1 fs service,
     // spliced over its p3 adapter — the same code the stock-p1 artifact
