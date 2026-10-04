@@ -464,6 +464,9 @@ struct Tally {
     /// Functions whose certificate has an UNBACKED `+1` (the borrow-by-default
     /// soundness gate). Must stay empty — a non-empty list is a wall breach.
     cert_backing_breaches: Vec<String>,
+    /// Lowered calls into a capability module that are neither a host op nor
+    /// pure (#3302): a host reach the caps witness would omit. Must stay empty.
+    uncounted_host_calls: Vec<String>,
     /// Poisoned certificates EXCLUDED from the ownership witness (#1146):
     /// kernel-unrepresentable nested-region arms, counted so the exclusion is
     /// never a silent shrink of the proof surface.
