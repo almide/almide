@@ -255,13 +255,13 @@ pub fn resolve_ty_keeping_literals(ty: &Ty, uf: &UnionFind) -> Ty {
             is_effect: *is_effect,
         },
         Ty::Named(name, args) if !args.is_empty() => {
-            Ty::Named(name.clone(), args.iter().map(|a| resolve_ty_keeping_literals(a, uf)).collect())
+            Ty::Named(*name, args.iter().map(|a| resolve_ty_keeping_literals(a, uf)).collect())
         }
         Ty::Record { fields } => Ty::Record {
-            fields: fields.iter().map(|(n, t)| (n.clone(), resolve_ty_keeping_literals(t, uf))).collect(),
+            fields: fields.iter().map(|(n, t)| (*n, resolve_ty_keeping_literals(t, uf))).collect(),
         },
         Ty::OpenRecord { fields } => Ty::OpenRecord {
-            fields: fields.iter().map(|(n, t)| (n.clone(), resolve_ty_keeping_literals(t, uf))).collect(),
+            fields: fields.iter().map(|(n, t)| (*n, resolve_ty_keeping_literals(t, uf))).collect(),
         },
         _ => ty.clone(),
     }
