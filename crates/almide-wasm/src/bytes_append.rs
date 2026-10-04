@@ -11,8 +11,8 @@
 //! Every member now IS that push: the value's k bytes go through `$bytes_push`
 //! one at a time, so the whole family shares its one growth rule (in place
 //! while `cap - len >= 1`, else a fresh block at `max(cap * 2, 16)`, the
-//! outgrown block freed at rc 1), its receiver protocol (the COW read, the
-//! shared-parameter settle) and its write-back. No second growth policy
+//! outgrown block freed at rc 1), its receiver protocol (the COW read, which
+//! makes a parameter receiver unique too, #3342) and its write-back. No second growth policy
 //! exists to drift from list.push's.
 //!
 //! Byte values are the twins' exactly: integers are the i64's two's-complement
@@ -25,7 +25,6 @@
 use almide_ir::IrExpr;
 use wasm_encoder::{BlockType, MemArg, ValType};
 
-use crate::bytes::BYTES;
 use crate::emitter::Emitter;
 use crate::*;
 
@@ -110,7 +109,7 @@ impl Emitter<'_> {
             ([b, v, e], Order::Endian) => (b, v, Some(e)),
             _ => return unsup(&format!("bytes-append-arity:{func}")),
         };
-        let shared = self.append_open(b)?;
+        let recv = self.append_open(b)?;
         self.lower_append_bits(v, bits)?;
         let hv = self.hold_i64()?;
         self.f.instructions().local_set(hv);
@@ -134,13 +133,13 @@ impl Emitter<'_> {
             self.release_i32();
         }
         self.release_i64();
-        self.append_close(b, shared)
+        self.append_close(b, recv)
     }
 
     /// `write_string_be(b, s)`: a u32 BE byte-length prefix, then the
     /// string's UTF-8 bytes — each byte one `$bytes_push`.
     fn lower_bytes_write_string_be(&mut self, b: &IrExpr, s: &IrExpr) -> ArmResult {
-        let shared = self.append_open(b)?;
+        let recv = self.append_open(b)?;
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
         self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
@@ -169,29 +168,21 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         self.release_i32();
-        self.append_close(b, shared)
+        self.append_close(b, recv)
     }
 
     /// The receiver half `lower_bytes_push` runs: the block on the stack,
-    /// and whether it was a shared parameter's (settled after the pushes).
-    fn append_open(&mut self, b: &IrExpr) -> Result<(crate::bytes_recv::BytesRecv, Option<(u32, u32)>), EmitError> {
+    /// made unique by the COW read (a parameter's too, #3342), so the helper
+    /// frees the block it outgrows.
+    fn append_open(&mut self, b: &IrExpr) -> Result<crate::bytes_recv::BytesRecv, EmitError> {
         let recv = self.bytes_recv("append", b)?;
         self.emit_read_bytes_recv(&recv, b)?;
-        let shared = match &recv {
-            crate::bytes_recv::BytesRecv::Var { idx, global, .. } => self.note_shared_receiver(*idx, *global)?,
-            crate::bytes_recv::BytesRecv::Temp => None,
-        };
-        Ok((recv, shared))
+        Ok(recv)
     }
 
-    /// The final block is on the stack: settle a shared receiver, write
-    /// the block back (`lower_bytes_push`'s tail).
-    fn append_close(
-        &mut self,
-        _b: &IrExpr,
-        (recv, shared): (crate::bytes_recv::BytesRecv, Option<(u32, u32)>),
-    ) -> ArmResult {
-        self.settle_outgrown_receiver(shared, BYTES);
+    /// The final block is on the stack: write it back (`lower_bytes_push`'s
+    /// tail).
+    fn append_close(&mut self, _b: &IrExpr, recv: crate::bytes_recv::BytesRecv) -> ArmResult {
         self.emit_bytes_writeback(&recv)?;
         if let crate::bytes_recv::BytesRecv::Var { id, global, .. } = &recv {
             self.witness_mut_rebind(*id, *global);
