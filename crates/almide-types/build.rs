@@ -29,15 +29,26 @@
 //!
 //! Measured 374234 bytes saved of 1190489 — 31%.
 //!
-//! The generated module is `embedded.rs` in `OUT_DIR`: one `pub const` per
-//! source plus `source_of(stem)`. Consumers `include!` it rather than
-//! `include_str!`ing the files directly.
+//! The generated module is the COMMITTED `src/generated/embedded.rs`: one
+//! `pub const` per source plus `source_of(stem)`. Consumers `include!` it
+//! rather than `include_str!`ing the files directly. It is committed (#3361)
+//! because `stdlib/` is outside this package: a vendored or packaged
+//! almide-types builds from the committed table, and this script regenerates
+//! it only inside an almide checkout (see `buildscript/in_checkout.rs`).
 
 use std::fmt::Write as _;
 
+#[path = "buildscript/in_checkout.rs"]
+mod in_checkout;
+
 fn main() {
-    let manifest = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-    let stdlib = manifest.join("../../stdlib");
+    let manifest = in_checkout::manifest_dir();
+    let Some(root) = in_checkout::checkout_root(&manifest) else {
+        // Standalone (vendored / packaged): the committed table is the input.
+        println!("cargo:rerun-if-changed=build.rs");
+        return;
+    };
+    let stdlib = root.join("stdlib");
     println!("cargo:rerun-if-changed={}", stdlib.display());
 
     let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&stdlib)
@@ -68,8 +79,7 @@ fn main() {
     )
     .expect("write to String");
 
-    let dest = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR")).join("embedded.rs");
-    std::fs::write(&dest, out).unwrap_or_else(|e| panic!("write {}: {e}", dest.display()));
+    in_checkout::write_if_changed(&manifest.join("src/generated/embedded.rs"), &out);
 }
 
 /// Blank every WHOLE-LINE `//` comment, keeping the line itself so line

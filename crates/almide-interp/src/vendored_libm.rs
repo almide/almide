@@ -21,6 +21,13 @@
 // still delegate to the PLATFORM libm, so they have no stable oracle — they
 // are also unreachable from Almide today (no `@intrinsic` in stdlib/math.almd),
 // and the interp keeps abstaining on those names.
+//
+// The include reads the in-crate snapshot `src/generated/libm/` (#3361):
+// `runtime/rs/` is outside this package, so a vendored almide-interp could not
+// reach it. `build.rs` refreshes the snapshot from `runtime/rs/src` on every
+// build inside a checkout, and `scripts/check-build-inputs-in-package.sh`
+// fails a commit whose snapshot differs — so it is still one source, not a
+// copy that can drift.
 #![allow(dead_code, clippy::all)]
 
-include!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../runtime/rs/src/libm.rs"));
+include!("generated/libm/libm.rs");
