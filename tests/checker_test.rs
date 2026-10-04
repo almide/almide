@@ -220,6 +220,24 @@ fn check_spread_record() {
     has_no_errors("type Point = { x: Int, y: Int }\nfn f(p: Point) -> Point = { ...p, x: 1 }");
 }
 
+// #3358: an updated field takes the base record's declared field type, so an
+// empty `[]` has its element type and a mistyped value is rejected.
+#[test]
+fn check_spread_record_empty_list_takes_field_type() {
+    has_no_errors("type R = { name: String, rows: List[Int] }\nfn f(r: R) -> R = { ...r, rows: [] }");
+}
+
+#[test]
+fn check_spread_record_empty_list_in_generic_record() {
+    has_no_errors("type Box[T] = { items: List[T], tag: String }\nfn f(b: Box[Int]) -> Box[Int] = { ...b, items: [] }");
+}
+
+#[test]
+fn check_spread_record_rejects_mistyped_field() {
+    let errs = errors("type R = { name: String, rows: List[Int] }\nfn f(r: R) -> R = { ...r, rows: [\"x\"] }");
+    assert!(!errs.is_empty(), "expected a type error for a String list in a List[Int] field");
+}
+
 #[test]
 fn check_index_access() {
     has_no_errors("fn f(xs: List[Int]) -> Int = xs[0]");
