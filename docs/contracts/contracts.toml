@@ -1261,6 +1261,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/reserved_keyword_fn.almd", class = "fixture" },
+  { path = "spec/wasm_cross/generated_binder_hygiene.almd", class = "fixture" },
   { path = "tests/keyword_submodule_test.rs", name = "keyword_fn_in_submodule_builds_and_runs_native", class = "fixture" },
   { path = "tests/keyword_submodule_test.rs", name = "keyword_fn_in_submodule_matches_on_wasm", class = "fixture" },
 ]
