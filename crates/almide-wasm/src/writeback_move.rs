@@ -34,6 +34,56 @@ use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind, VarId};
 
 use crate::emitter::Emitter;
 
+/// Does another argument mention `var` in a way that could hold or change
+/// its block? A scalar-typed argument that only READS it by index or field
+/// (`xs[0]`, `h.n`) is computed before the var is emptied, carries no
+/// handle and writes nothing, so it cannot.
+fn mentions_beyond_scalar(a: &IrExpr, var: VarId) -> bool {
+    use almide_types::types::Ty;
+    struct Reads {
+        var: VarId,
+        other: bool,
+    }
+    impl IrVisitor for Reads {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match &e.kind {
+                IrExprKind::IndexAccess { object, index } if matches!(&object.kind, IrExprKind::Var { id } if *id == self.var) => {
+                    self.visit_expr(index)
+                }
+                IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
+                    if matches!(&object.kind, IrExprKind::Var { id } if *id == self.var) => {}
+                IrExprKind::Var { id } if *id == self.var => self.other = true,
+                IrExprKind::Block { .. } | IrExprKind::Lambda { .. } => self.other |= crate::rc_ownership::rc_mentions_var(e, self.var),
+                _ => walk_expr(self, e),
+            }
+        }
+    }
+    let scalar = matches!(
+        a.ty,
+        Ty::Int | Ty::Float | Ty::Bool | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::Float32 | Ty::Float64
+    );
+    if !scalar {
+        return crate::rc_ownership::rc_mentions_var(a, var);
+    }
+    let mut r = Reads { var, other: false };
+    r.visit_expr(a);
+    r.other
+}
+
+/// A type no closure can hide in: scalars, text, bytes, and the builtin
+/// containers of such — never a function, a record or a variant, which
+/// might carry one.
+fn inert_ty(t: &almide_types::types::Ty) -> bool {
+    use almide_types::types::Ty;
+    match t {
+        Ty::Applied(_, args) | Ty::Tuple(args) => args.iter().all(inert_ty),
+        Ty::Fn { .. } | Ty::Named(..) | Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. } => false,
+        Ty::TypeVar(_) | Ty::Union(_) | Ty::Unknown | Ty::Never => false,
+        _ => true,
+    }
+}
+
 /// What a block statement may move: the temp an Assign moves out of
 /// (#3104) and the vars a `mut` call site moves in (#3337), the latter
 /// keyed by the call's argument slice so only that call takes them.
@@ -43,16 +93,28 @@ pub(crate) struct BlockMoves {
     move_in: Option<MoveIn>,
 }
 
-/// #3337: the vars one call may move in — those its write-back rebinds,
-/// or any at a tail site.
+/// #3337: the places one call may move in — those its write-back
+/// rebinds, or any plain local at a tail site.
 pub(crate) enum MoveSet {
-    Vars(Vec<VarId>),
+    Vars(Vec<Place>),
     Any,
+}
+
+/// Where a moved-in argument came from, emptied once every argument is
+/// lowered: a var (a local, or a C-319 cell through its address) or a
+/// record var's field slot (#3343).
+pub(crate) enum Emptied {
+    Var(VarId, u32, crate::SliceTy),
+    /// The record var's local, the slot's offset, and whether the local
+    /// holds a C-319 cell (the record one load deeper).
+    Slot(u32, u32, bool),
+    /// A top-let global the callee cannot reach.
+    Global(VarId, u32),
 }
 
 #[path = "move_in_site.rs"]
 mod move_in_site;
-use move_in_site::{move_in_site, MoveIn};
+use move_in_site::{move_in_site, MoveIn, Place};
 
 /// The temp statement `i` of a block may move out of, if any.
 pub(crate) fn movable_temp(stmts: &[IrStmt], tail: Option<&IrExpr>, i: usize) -> Option<VarId> {
@@ -144,58 +206,173 @@ impl Emitter<'_> {
 
     /// #3337: hand argument `k` of a call to table entry `i` to the callee
     /// by MOVE when its position is a declared `mut` param the callee owns
-    /// and it is a var the write-back rebinds: read it
-    /// through the site's judge, take no share, and return its local for
+    /// and it names a place the write-back rebinds: read it through the
+    /// site's judge, take no share, and return where it lives for
     /// [`Self::empty_moved_in`] to empty once every argument is lowered (a
-    /// later argument may still read it). The var must be a plain local
-    /// holding its own credit (an owned frame param counts), not a cell a
-    /// closure the callee runs could read, and the only mention of it among
-    /// the arguments. `None`: the share convention applies as before.
+    /// later argument may still read it). It must be the only mention of
+    /// its var among the arguments. `None`: the share convention applies.
     pub(crate) fn try_move_in_arg(
         &mut self,
         move_in: &MoveSet,
         args: &[IrExpr],
         (i, k): (usize, usize),
         want: crate::SliceTy,
-    ) -> Result<Option<u32>, crate::EmitError> {
+    ) -> Result<Option<Emptied>, crate::EmitError> {
         let info = &self.table.infos[i];
-        if matches!(move_in, MoveSet::Vars(v) if v.is_empty()) || info.param_mut_decl.get(k) != Some(&true) || info.param_owned.get(k) != Some(&true) {
-            return Ok(None);
-        }
-        let IrExprKind::Var { id } = &args[k].kind else { return Ok(None) };
-        let Some(&(idx, _)) = self.locals.get(id) else { return Ok(None) };
-        let holds_credit = if idx < self.rc_param_ceiling {
-            self.rc_frame_params.contains(&idx)
-        } else {
-            self.rc_owned.contains(&idx)
-        };
-        if matches!(move_in, MoveSet::Vars(v) if !v.contains(id))
-            || !holds_credit
+        if matches!(move_in, MoveSet::Vars(v) if v.is_empty())
+            || info.param_mut_decl.get(k) != Some(&true)
+            || info.param_owned.get(k) != Some(&true)
             || !self.rc_droppable(want)
-            || self.cells.contains(id)
-            || args.iter().enumerate().any(|(j, o)| j != k && crate::rc_ownership::rc_mentions_var(o, *id))
         {
             return Ok(None);
         }
-        if !self.lower_mut_param_arg(&args[k], true)? {
-            self.lower(&args[k], Some(want))?;
+        let Some(place) = Place::of(&args[k]) else { return Ok(None) };
+        let root = match place {
+            Place::Var(v) | Place::Field(v, _) => v,
+        };
+        let Some(&(idx, root_ty)) = self.locals.get(&root) else {
+            return self.try_move_in_global(move_in, args, (i, k), place, want);
+        };
+        let listed = match move_in {
+            MoveSet::Vars(v) => v.contains(&place),
+            MoveSet::Any => matches!(place, Place::Var(_)) && !self.cells.contains(&root),
+        };
+        if !listed || args.iter().enumerate().any(|(j, o)| j != k && mentions_beyond_scalar(o, root)) {
+            return Ok(None);
         }
+        // A C-319 cell (#3343) is shared with every closure that captured
+        // it, so a closure the callee runs could read it while it is empty —
+        // admitted only when no argument can carry one (a closure value, or
+        // a record that might hold one).
+        if self.cells.contains(&root) && !args.iter().all(|a| inert_ty(&a.ty)) {
+            return Ok(None);
+        }
+        let Some(emptied) = self.local_emptied(place, idx, root_ty, want)? else { return Ok(None) };
+        self.hand_over_moved(&emptied, &args[k], want)?;
+        Ok(Some(emptied))
+    }
+
+    /// Does the local at `idx` hold its own credit (an owned frame param,
+    /// or an owned local)?
+    fn holds_credit(&self, idx: u32) -> bool {
+        if idx < self.rc_param_ceiling { self.rc_frame_params.contains(&idx) } else { self.rc_owned.contains(&idx) }
+    }
+
+    /// Where a moved place in local `idx` lives, if it can move: a var (a
+    /// cell holds its occupant's credit), or a handle field of a record var.
+    fn local_emptied(&self, place: Place, idx: u32, root_ty: crate::SliceTy, want: crate::SliceTy) -> Result<Option<Emptied>, crate::EmitError> {
+        Ok(match place {
+            Place::Var(id) if self.cells.contains(&id) || self.holds_credit(idx) => Some(Emptied::Var(id, idx, root_ty)),
+            Place::Var(_) => None,
+            Place::Field(h, field) => {
+                let in_cell = self.cells.contains(&h);
+                if !(in_cell || self.holds_credit(idx)) || !matches!(root_ty, crate::SliceTy::Named(_)) {
+                    return Ok(None);
+                }
+                let (fty, off) = self.record_field_slot(root_ty, &field)?;
+                (fty == want && self.elem_is_handle(fty)).then_some(Emptied::Slot(idx, off, in_cell))
+            }
+        })
+    }
+
+    /// Push the moved place's block (judged unique first, no share) and
+    /// record the hand-over: the place's credit becomes the callee's.
+    fn hand_over_moved(&mut self, emptied: &Emptied, arg: &IrExpr, want: crate::SliceTy) -> Result<(), crate::EmitError> {
+        let holder = match *emptied {
+            Emptied::Var(id, ..) => {
+                if !self.lower_mut_param_arg(arg, true)? {
+                    self.lower(arg, Some(want))?;
+                }
+                self.witness_holder(id, false)
+            }
+            Emptied::Global(id, _) => {
+                if !self.lower_mut_param_arg(arg, true)? {
+                    self.lower(arg, Some(want))?;
+                }
+                self.witness_holder(id, true)
+            }
+            // Unshare the path (the record, then the leaf), then read the
+            // slot's block with the slot's own credit.
+            Emptied::Slot(rec, off, in_cell) => {
+                self.make_mut_place_unique(arg)?;
+                self.f.instructions().local_get(rec);
+                if in_cell {
+                    self.f.instructions().i32_load(crate::slot_memarg(0));
+                }
+                self.f.instructions().i32_load(crate::slot_memarg(off));
+                None
+            }
+        };
         self.modes_arg(want, true);
         if let Some(w) = self.witness.as_mut() {
-            w.note_arg(&args[k] as *const IrExpr as usize);
+            w.note_arg(arg as *const IrExpr as usize);
             w.convention('m');
-            if !w.move_local(idx) {
+            if let Some(l) = holder
+                && !w.move_local(l)
+            {
                 w.poison();
             }
         }
-        Ok(Some(idx))
+        Ok(())
     }
 
-    /// The moved-in vars no longer hold their blocks: the callee does.
-    pub(crate) fn empty_moved_in(&mut self, locals: &[u32]) {
-        for &idx in locals {
-            self.empty_moved_temp(Some(idx));
+    /// #3343: a top-let global the write-back rebinds moves in like a local
+    /// when the callee cannot reach it (global_reach.rs) — the one reader
+    /// that could see it empty.
+    fn try_move_in_global(
+        &mut self,
+        move_in: &MoveSet,
+        args: &[IrExpr],
+        (i, k): (usize, usize),
+        place: Place,
+        want: crate::SliceTy,
+    ) -> Result<Option<Emptied>, crate::EmitError> {
+        let Place::Var(id) = place else { return Ok(None) };
+        let g = (self.var_space, id);
+        let Some(&(gidx, _)) = self.globals.get(&g) else { return Ok(None) };
+        let reaches = !matches!(self.work.global_reach.borrow().get(i), Some(Some(set)) if !set.contains(&g));
+        if reaches
+            || !matches!(move_in, MoveSet::Vars(v) if v.contains(&place))
+            || args.iter().enumerate().any(|(j, o)| j != k && mentions_beyond_scalar(o, id))
+        {
+            return Ok(None);
         }
+        let emptied = Emptied::Global(id, gidx);
+        self.hand_over_moved(&emptied, &args[k], want)?;
+        Ok(Some(emptied))
+    }
+
+    /// The moved-in places no longer hold their blocks: the callee does.
+    pub(crate) fn empty_moved_in(&mut self, emptied: &[Emptied]) -> Result<(), crate::EmitError> {
+        for e in emptied {
+            match *e {
+                Emptied::Var(id, idx, ty) => {
+                    self.f.instructions().i32_const(0);
+                    self.emit_store_var(id, idx, ty)?;
+                    if let Some(l) = self.witness_holder(id, false)
+                        && let Some(w) = self.witness.as_mut()
+                    {
+                        w.empty_local(l);
+                    }
+                }
+                Emptied::Global(id, gidx) => {
+                    self.f.instructions().i32_const(0).global_set(gidx);
+                    if let Some(l) = self.witness_holder(id, true)
+                        && let Some(w) = self.witness.as_mut()
+                    {
+                        w.empty_local(l);
+                    }
+                }
+                Emptied::Slot(rec, off, in_cell) => {
+                    self.f.instructions().local_get(rec);
+                    if in_cell {
+                        self.f.instructions().i32_load(crate::slot_memarg(0));
+                    }
+                    self.f.instructions().i32_const(0).i32_store(crate::slot_memarg(off));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The moved temp's local index, when the statement the block walk
