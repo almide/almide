@@ -95,7 +95,7 @@ pub(crate) fn desugar_mutable_global_projection_args(body: &IrExpr) -> Option<Ir
     /// Block the arg/concat machinery declines, which re-walled the
     /// wasm_cross_pkg println): binds collect into the enclosing statement
     /// list; lambda bodies are their own hoist roots.
-    fn hoist(e: &mut IrExpr, binds: &mut Vec<IrStmt>, next: &mut u32, changed: &mut bool) {
+    fn hoist(e: &mut IrExpr, binds: &mut Vec<IrStmt>, post: &mut Vec<IrStmt>, next: &mut u32, changed: &mut bool) {
         if let IrExprKind::Lambda { body, .. } = &mut e.kind {
             if let Some(new_body) = desugar_mutable_global_projection_args(body) {
                 **body = new_body;
@@ -116,11 +116,27 @@ pub(crate) fn desugar_mutable_global_projection_args(body: &IrExpr) -> Option<Ir
             // pre-existing arg machinery lowers or walls it honestly).
             return;
         }
-        almide_ir::visit_mut::walk_expr_mut(&mut HoistWalk { binds, next, changed }, e);
+        almide_ir::visit_mut::walk_expr_mut(&mut HoistWalk { binds, post, next, changed }, e);
+        // The RECEIVER of an in-place mutator (`list.push(g.xs, v)`) is the
+        // place it writes, not a value it reads: binding it to a temp made the
+        // call mutate the temp and drop the write to the global (#3327).
+        // A mutator the statement lowering rewrites to a rebind of its
+        // receiver place keeps that place; one it lowers in place on a local
+        // (`list.pop`, the byte setters) works on a hoisted temp, which is
+        // written back to the place after the statement.
+        let rebinds = rewrite_inplace_mutation(e).is_some();
+        let in_place = !rebinds && mutates_its_receiver(e);
         let IrExprKind::Call { args, .. } = &mut e.kind else { return };
-        for a in args.iter_mut() {
+        for (k, a) in args.iter_mut().enumerate() {
+            if k == 0 && rebinds {
+                continue;
+            }
+            let place = a.clone();
             if hoist_qualifying(a, next, binds) {
                 *changed = true;
+                if k == 0 && in_place {
+                    post.extend(place_rebind(&place, a.clone()));
+                }
             }
         }
     }
@@ -129,38 +145,40 @@ pub(crate) fn desugar_mutable_global_projection_args(body: &IrExpr) -> Option<Ir
     fn hoist_stmt_list(stmts: &mut Vec<IrStmt>, next: &mut u32, changed: &mut bool) {
         let mut out: Vec<IrStmt> = Vec::with_capacity(stmts.len());
         for mut s in stmts.drain(..) {
-            let mut binds = Vec::new();
+            let (mut binds, mut post) = (Vec::new(), Vec::new());
             match &mut s.kind {
                 IrStmtKind::Bind { value, .. }
                 | IrStmtKind::Assign { value, .. }
                 | IrStmtKind::Expr { expr: value }
                 | IrStmtKind::BindDestructure { value, .. } => {
-                    hoist(value, &mut binds, next, changed)
+                    hoist(value, &mut binds, &mut post, next, changed)
                 }
                 IrStmtKind::IndexAssign { index, value, .. } => {
-                    hoist(index, &mut binds, next, changed);
-                    hoist(value, &mut binds, next, changed);
+                    hoist(index, &mut binds, &mut post, next, changed);
+                    hoist(value, &mut binds, &mut post, next, changed);
                 }
                 IrStmtKind::MapInsert { key, value, .. } => {
-                    hoist(key, &mut binds, next, changed);
-                    hoist(value, &mut binds, next, changed);
+                    hoist(key, &mut binds, &mut post, next, changed);
+                    hoist(value, &mut binds, &mut post, next, changed);
                 }
-                IrStmtKind::FieldAssign { value, .. } => hoist(value, &mut binds, next, changed),
+                IrStmtKind::FieldAssign { value, .. } => hoist(value, &mut binds, &mut post, next, changed),
                 _ => {}
             }
             out.extend(binds);
             out.push(s);
+            out.extend(post);
         }
         *stmts = out;
     }
     struct HoistWalk<'a> {
         binds: &'a mut Vec<IrStmt>,
+        post: &'a mut Vec<IrStmt>,
         next: &'a mut u32,
         changed: &'a mut bool,
     }
     impl almide_ir::IrMutVisitor for HoistWalk<'_> {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
-            hoist(e, self.binds, self.next, self.changed);
+            hoist(e, self.binds, self.post, self.next, self.changed);
         }
     }
     fn rewrite_block(
@@ -171,34 +189,42 @@ pub(crate) fn desugar_mutable_global_projection_args(body: &IrExpr) -> Option<Ir
     ) {
         let mut out: Vec<IrStmt> = Vec::with_capacity(stmts.len());
         for mut s in stmts.drain(..) {
-            let mut binds = Vec::new();
+            let (mut binds, mut post) = (Vec::new(), Vec::new());
             match &mut s.kind {
                 IrStmtKind::Bind { value, .. }
                 | IrStmtKind::Assign { value, .. }
                 | IrStmtKind::Expr { expr: value }
                 | IrStmtKind::BindDestructure { value, .. } => {
-                    hoist(value, &mut binds, next, changed)
+                    hoist(value, &mut binds, &mut post, next, changed)
                 }
                 IrStmtKind::IndexAssign { index, value, .. } => {
-                    hoist(index, &mut binds, next, changed);
-                    hoist(value, &mut binds, next, changed);
+                    hoist(index, &mut binds, &mut post, next, changed);
+                    hoist(value, &mut binds, &mut post, next, changed);
                 }
                 IrStmtKind::MapInsert { key, value, .. } => {
-                    hoist(key, &mut binds, next, changed);
-                    hoist(value, &mut binds, next, changed);
+                    hoist(key, &mut binds, &mut post, next, changed);
+                    hoist(value, &mut binds, &mut post, next, changed);
                 }
-                IrStmtKind::FieldAssign { value, .. } => hoist(value, &mut binds, next, changed),
+                IrStmtKind::FieldAssign { value, .. } => hoist(value, &mut binds, &mut post, next, changed),
                 _ => {}
             }
             out.extend(binds);
             out.push(s);
+            out.extend(post);
         }
         *stmts = out;
         if let Some(t) = tail {
-            let mut binds = Vec::new();
-            hoist(t, &mut binds, next, changed);
-            if !binds.is_empty() {
-                stmts.extend(binds);
+            let (mut binds, mut post) = (Vec::new(), Vec::new());
+            hoist(t, &mut binds, &mut post, next, changed);
+            stmts.extend(binds);
+            if !post.is_empty() {
+                // The tail's value is read before its receiver is written back.
+                let r = VarId(*next);
+                *next += 1;
+                let ty = t.ty.clone();
+                let value = std::mem::replace(&mut **t, IrExpr { kind: IrExprKind::Var { id: r }, ty, span: None, def_id: None });
+                stmts.push(IrStmt { kind: IrStmtKind::Bind { var: r, mutability: Mutability::Let, ty: value.ty.clone(), value }, span: None });
+                stmts.extend(post);
             }
         }
     }
@@ -224,8 +250,16 @@ pub(crate) fn desugar_mutable_global_projection_args(body: &IrExpr) -> Option<Ir
     );
     // A non-Block body whose tail needs hoists: wrap it in a Block carrying them.
     if !matches!(out.kind, IrExprKind::Block { .. }) {
-        let mut binds = Vec::new();
-        hoist(&mut out, &mut binds, &mut next, &mut changed);
+        let (mut binds, mut post) = (Vec::new(), Vec::new());
+        hoist(&mut out, &mut binds, &mut post, &mut next, &mut changed);
+        if !post.is_empty() {
+            // A bare-call body whose receiver needs a write-back: bind its value.
+            let r = VarId(next);
+            let ty = out.ty.clone();
+            let value = std::mem::replace(&mut out, IrExpr { kind: IrExprKind::Var { id: r }, ty: ty.clone(), span: None, def_id: None });
+            binds.push(IrStmt { kind: IrStmtKind::Bind { var: r, mutability: Mutability::Let, ty, value }, span: None });
+            binds.extend(post);
+        }
         if !binds.is_empty() {
             let ty = out.ty.clone();
             let span = out.span.clone();
@@ -599,4 +633,56 @@ fn stmts_written_vars(block: &IrExpr) -> std::collections::HashSet<almide_ir::Va
     let mut w = W(std::collections::HashSet::new());
     almide_ir::visit::IrVisitor::visit_expr(&mut w, block);
     w.0
+}
+
+/// Does `call` write through its first argument — an in-place mutator the
+/// statement lowering rewrites to a rebind of that place, or one it lowers in
+/// place (`list.pop`, the byte setters)?
+fn mutates_its_receiver(call: &IrExpr) -> bool {
+    if rewrite_inplace_mutation(call).is_some() {
+        return true;
+    }
+    match &call.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {
+            let (module, func) = (module.as_str(), func.as_str());
+            crate::lower::is_inplace_mutator(module, func)
+                || matches!((module, func), ("list" | "string" | "bytes", "push") | ("map", "insert" | "delete") | (_, "clear"))
+        }
+        _ => false,
+    }
+}
+
+/// The rebind that writes `value` back to `place`: a `Var` is an `Assign`, a
+/// field of a var a `FieldAssign` (whose spread owns the write-back), and a
+/// deeper field path rooted at a MUTABLE GLOBAL (`g.h.ys`) writes each
+/// enclosing record back as a spread — `g.h = { ...g.h, ys: value }` — so the
+/// global's slot receives it. The write-back of a mutator receiver hoisted
+/// off a mutable global (#3327, desugar_call_arg_anf.rs).
+fn place_rebind(place: &IrExpr, value: IrExpr) -> Option<IrStmt> {
+    let kind = match &place.kind {
+        IrExprKind::Var { id } => IrStmtKind::Assign { var: *id, value },
+        IrExprKind::Member { object, field } => match &object.kind {
+            IrExprKind::Var { id } => IrStmtKind::FieldAssign { target: *id, field: *field, value },
+            IrExprKind::Member { .. } if member_root(object).is_some_and(crate::lower::is_mutable_global) => {
+                let spread = IrExpr {
+                    kind: IrExprKind::SpreadRecord { base: object.clone(), fields: vec![(*field, value)] },
+                    ty: object.ty.clone(),
+                    span: None,
+                    def_id: None,
+                };
+                return place_rebind(object, spread);
+            }
+            _ => return None,
+        },
+        _ => return None,
+    };
+    Some(IrStmt { kind, span: None })
+}
+
+fn member_root(e: &IrExpr) -> Option<VarId> {
+    match &e.kind {
+        IrExprKind::Member { object, .. } => member_root(object),
+        IrExprKind::Var { id } => Some(*id),
+        _ => None,
+    }
 }
