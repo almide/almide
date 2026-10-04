@@ -115,17 +115,10 @@ pub(crate) fn register_versioned_module_names(
     checker: &mut check::Checker,
     resolved_modules: &[(String, ast::Program, Option<project::PkgId>, bool)],
 ) {
-    for (name, _, pkg_id, _) in resolved_modules {
-        if let Some(pid) = pkg_id.as_ref() {
-            let base = pid.mod_name();
-            let versioned = if let Some(suffix) = name.strip_prefix(&pid.name) {
-                format!("{}{}", base, suffix)
-            } else {
-                base
-            };
-            checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(&versioned));
-        }
-    }
+    // The single copy lives in the lib, shared with the structural wasm leg
+    // (#3286: that leg had no pre-registration and walled a dependency's
+    // top-let read with var:unmapped).
+    almide::wasm_leg::register_versioned_module_names(checker, resolved_modules)
 }
 
 /// Lower the root program to IR once parsing succeeded, printing unused-var
