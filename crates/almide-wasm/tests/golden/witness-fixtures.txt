@@ -106,6 +106,7 @@ spec/wasm_cross/codec_whitespace_tolerance.almd
 spec/wasm_cross/composition_fuzz_batch.almd
 spec/wasm_cross/compound_repr_interp.almd
 spec/wasm_cross/compound_repr_records_interp.almd
+spec/wasm_cross/compound_repr_recursive_interp.almd
 spec/wasm_cross/const_fold_nonfinite_float.almd
 spec/wasm_cross/container_alias_return.almd
 spec/wasm_cross/control_flow.almd
@@ -409,6 +410,7 @@ spec/wasm_cross/map_interp_string_value.almd
 spec/wasm_cross/map_literal_borrowed_if_arg.almd
 spec/wasm_cross/map_literal_ctor_values.almd
 spec/wasm_cross/map_of_maps_value.almd
+spec/wasm_cross/map_rich_variant_key.almd
 spec/wasm_cross/map_set_eq.almd
 spec/wasm_cross/map_set_ops.almd
 spec/wasm_cross/map_set_typechange.almd
@@ -525,6 +527,7 @@ spec/wasm_cross/optional_chain_scalar.almd
 spec/wasm_cross/or_pattern.almd
 spec/wasm_cross/or_pattern_guarded_nullary.almd
 spec/wasm_cross/or_pattern_heap_subject_matrix.almd
+spec/wasm_cross/ord_record_variant.almd
 spec/wasm_cross/path_extension_hidden.almd
 spec/wasm_cross/phantom_type_param.almd
 spec/wasm_cross/pipe_chain_scalar_bind.almd
@@ -564,6 +567,7 @@ spec/wasm_cross/record_pair_result_return.almd
 spec/wasm_cross/record_variant_field_literal.almd
 spec/wasm_cross/records_variants.almd
 spec/wasm_cross/recursion_depth_within_limits.almd
+spec/wasm_cross/recursive_generic_repr_interp.almd
 spec/wasm_cross/recursive_payload_closure_capture.almd
 spec/wasm_cross/recursive_payload_nested_pattern.almd
 spec/wasm_cross/reduce_str.almd
@@ -711,6 +715,7 @@ spec/wasm_cross/tm_str_list_in_list.almd
 spec/wasm_cross/tm_str_list_interp.almd
 spec/wasm_cross/tm_str_list_lit_print.almd
 spec/wasm_cross/tm_str_list_shadow_drop.almd
+spec/wasm_cross/tm_tree_eq.almd
 spec/wasm_cross/tm_tree_fn_pass.almd
 spec/wasm_cross/tm_tree_in_list.almd
 spec/wasm_cross/tm_tree_interp.almd
@@ -766,6 +771,7 @@ spec/wasm_cross/unwrap_or_unwrap_fallback.almd
 spec/wasm_cross/unwrap_or_value_fn_named_parse.almd
 spec/wasm_cross/uoe_heap_ok_share.almd
 spec/wasm_cross/url_authority_edges.almd
+spec/wasm_cross/user_box_recursive_enum.almd
 spec/wasm_cross/value_array_leak_loop.almd
 spec/wasm_cross/value_array_tuple_tco.almd
 spec/wasm_cross/value_as_array_leak_loop.almd
