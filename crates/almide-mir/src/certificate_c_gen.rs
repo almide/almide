@@ -465,3 +465,43 @@ fn a_global_slot_load_is_a_borrowed_root() {
     ]);
     assert!(verify_ownership(&after_store).is_err());
 }
+
+/// #3279: a heap branch result stored into a container slot without a
+/// `Consume` (a list element built from an `if`). The arms move their values
+/// into the merge, and the merge's value moves on into the list, which
+/// releases it: the certificate opens no line for the merge dst, and
+/// `verify_ownership` no longer owns it (it reported a leak). A merge that is
+/// released afterwards still owns its reference on both sides.
+#[test]
+fn a_merge_stored_into_a_container_holds_no_reference() {
+    let v = ValueId;
+    let arms = |merge: u32| {
+        vec![
+            Op::ConstInt { dst: v(9), value: 1 },
+            Op::IfThen { cond: v(9), dst: Some(v(merge)) },
+            Op::Alloc { dst: v(2), repr: heap(), init: Init::Opaque },
+            Op::Consume { v: v(2) },
+            Op::Else { val: Some(v(2)) },
+            Op::Alloc { dst: v(3), repr: heap(), init: Init::Opaque },
+            Op::Consume { v: v(3) },
+            Op::EndIf { val: Some(v(3)) },
+        ]
+    };
+    let list = Op::Alloc { dst: v(0), repr: heap(), init: Init::Opaque };
+    let mut stored = vec![list.clone()];
+    stored.extend(arms(4));
+    stored.extend([
+        Op::Prim { kind: PrimKind::Handle, dst: Some(v(5)), args: vec![v(4)] },
+        Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![v(0), v(5)] },
+        Op::DropListStr { v: v(0) },
+    ]);
+    let stored = func(stored);
+    assert!(cert_all_balanced(&ownership_certificate(&stored)));
+    assert_eq!(verify_ownership(&stored), Ok(()));
+    let mut released = vec![list];
+    released.extend(arms(4));
+    released.extend([Op::Drop { v: v(4) }, Op::Drop { v: v(0) }]);
+    let released = func(released);
+    assert!(cert_all_balanced(&ownership_certificate(&released)));
+    assert_eq!(verify_ownership(&released), Ok(()));
+}

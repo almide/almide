@@ -137,6 +137,8 @@ struct OwnershipScan {
     consts: BTreeMap<ValueId, i64>,
     slot_roots: BTreeMap<ValueId, i64>,
     carried: BTreeMap<ValueId, ValueId>,
+    /// The `IfThen` dsts that hold a reference after the join (#3279, lib_d.rs).
+    owning_merges: std::collections::HashSet<ValueId>,
 }
 
     struct BranchFrame {
@@ -525,7 +527,7 @@ impl OwnershipScan {
                         self.object_of = fr.entry_object_of;
                     }
                     if let Some(d) = dst {
-                        self.own_fresh_object(d);
+                        self.own_merge(d);
                     }
                     return;
                 }
@@ -536,7 +538,7 @@ impl OwnershipScan {
                     self.dead = then_dead;
                     self.object_of = then_obj;
                     if let Some(d) = dst {
-                        self.own_fresh_object(d);
+                        self.own_merge(d);
                     }
                     return;
                 }
@@ -564,7 +566,7 @@ impl OwnershipScan {
             // result (#1037, second gap: the unmodeled dst made every later
             // Drop of it a phantom DoubleFree).
             if let Some(d) = dst {
-                self.own_fresh_object(d);
+                self.own_merge(d);
             }
         }
     }
@@ -925,6 +927,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
         consts: BTreeMap::new(),
         slot_roots: BTreeMap::new(),
         carried: BTreeMap::new(),
+        owning_merges: crate::certificate::merge_dsts_holding_a_reference(func),
     };
     for (i, op) in func.ops.iter().enumerate() {
         scan.step(i, op);

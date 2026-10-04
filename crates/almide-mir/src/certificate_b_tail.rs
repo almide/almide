@@ -14,6 +14,24 @@
 /// physical rc: the arm's −1 and the merge's +1 are the same reference changing hands). An
 /// UNUSED merge dst stays event-free exactly as before. Without this the chained-`!`
 /// witness read as a bare `m` and the proven checker REJECTED it (flight-evidence-gaps F8).
+/// The `IfThen` dsts the certificate opens a line for (an `i` at the merge):
+/// a released merge, or one that feeds a loop-carried slot. Any other merge
+/// dst carries no reference of the frame's own — its value was moved on into
+/// a container slot (`Store(addr, prim.handle(dst))`) without a `Consume`.
+/// `verify_ownership` owns exactly these (#3279).
+pub(crate) fn merge_dsts_holding_a_reference(func: &MirFunction) -> std::collections::HashSet<crate::ValueId> {
+    let mut held = ownership_certificate_released_merge_dsts(func);
+    let (feeder_to_slot, _, _) = loop_carried_slots(func);
+    for op in &func.ops {
+        if let Op::IfThen { dst: Some(d), .. } = op {
+            if feeder_to_slot.contains_key(d) {
+                held.insert(*d);
+            }
+        }
+    }
+    held
+}
+
 fn ownership_certificate_released_merge_dsts(
     func: &MirFunction,
 ) -> std::collections::HashSet<crate::ValueId> {
