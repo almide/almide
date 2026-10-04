@@ -151,6 +151,11 @@ pub struct CodegenAnnotations {
     /// containing a fn-carrying type still derived Debug and rustc refused
     /// the generated Rust.
     pub fn_blocked_types: HashSet<String>,
+    /// User-defined record/enum names that transitively contain an
+    /// `Rc`-backed value — a closure, or a `Bytes` / `Matrix` (`AlmideRcCow`).
+    /// A value of one is neither `Send` nor `Sync`, so a top-level `let` of it
+    /// cannot be a `static LazyLock` (#3287).
+    pub rc_blocked_types: HashSet<String>,
     /// Record types ALL of whose generic params are phantom (declared but used
     /// by no field). Rust rejects an unused type param (`error[E0392]`), so the
     /// Rust struct is emitted WITHOUT generics and every `Ty::Named` reference to
