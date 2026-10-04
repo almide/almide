@@ -27,7 +27,7 @@ anyhow = "1"
 ctrlc = { version = "3.5", features = ["termination"] }
 wasmparser = "0.259"
 wasm-encoder = "0.259"
-wasmtime = "49.0.1"
+wasmtime = "49.0.2"
 wit-component = "0.259"
 wit-parser = "0.259"
 
