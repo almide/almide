@@ -221,7 +221,7 @@ use types_table::TypeTable;
 /// itoa scratch region: digits are written back-to-front ending here.
 /// 32 bytes ≥ the longest rendering, `-9223372036854775808` (20 bytes).
 const ITOA_END: u32 = 48;
-/// Free-list heads (RC-2): 16 size classes × 4B at `[48,112)`. Class c
+/// Free-list heads (RC-2): 16 slots × 4B at `[48,112)`, 13 in use. Class c
 /// holds freed blocks whose TOTAL (header+payload, 4-aligned) is in
 /// `[16<<c, 32<<c)` — filed by floor, taken by ceil, so a taken block
 /// always fits the request without rounding the bump path.
