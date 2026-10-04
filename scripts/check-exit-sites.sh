@@ -22,6 +22,7 @@ cd "$(dirname "$0")/.."
 SRC=crates/almide-wasm/src
 NOT_FRAMES=(
   runtime.rs runtime_alloc.rs runtime_str.rs runtime_line.rs
+  runtime_large.rs   # the >64 KiB free-list half of $alloc/$free (#3348)
   json_path_helpers.rs map_index.rs matrix_scalars.rs
   utf8_helpers.rs value_helpers.rs   # decoder / Value-equality helper bodies
   display.rs   # display/eq/scan helper bodies: no RC frame of their own
