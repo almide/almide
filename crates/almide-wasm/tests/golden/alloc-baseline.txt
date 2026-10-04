@@ -531,7 +531,6 @@
 67296	spec/wasm_cross/mut_heap_param.almd
 66080	spec/wasm_cross/mut_map_param.almd
 135184	spec/wasm_cross/mut_param_alias_cow.almd
-67440	spec/wasm_cross/mut_param_alias_in_place_mutators.almd
 65760	spec/wasm_cross/mut_param_branch_forward.almd
 67968	spec/wasm_cross/mut_param_call_chain.almd
 67536	spec/wasm_cross/mut_param_cell_tail_capture_read.almd
