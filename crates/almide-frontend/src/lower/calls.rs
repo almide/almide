@@ -490,7 +490,10 @@ fn lower_call_coerce_args(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, target:
 /// dotted stdlib fn's signature. Verbatim text move.
 fn lower_call_coerce_args_named(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, name: &Sym) {
     lower_call_coerce_assert_macro(ctx, ir_args, name);
-    if let Some(sig) = ctx.env.functions.get(name).cloned() {
+    // A call to a sibling fn of the same module is keyed `mod.f` (#3283).
+    let own = || ctx.current_module
+        .and_then(|m| ctx.env.functions.get(&almide_base::intern::sym(&format!("{}.{}", m, name))));
+    if let Some(sig) = ctx.env.functions.get(name).or_else(own).cloned() {
         lower_call_coerce_from_sig(ctx, ir_args, &sig);
     } else if let Some((_, case)) = ctx.env.lookup_ctor_in(&almide_base::intern::sym(name), ctx.current_module.map(|s| s.as_str())) {
         // Owned-first (#1426): mirror the checker's candidate choice so the
@@ -559,6 +562,13 @@ fn lower_call_coerce_from_ctor(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, ca
 fn lower_call_coerce_args_module(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, module: &Sym, func: &Sym) {
     if let Some(sig) = crate::stdlib::lookup_sig(module.as_str(), func.as_str()) {
         lower_call_coerce_from_sig(ctx, ir_args, &sig);
+    } else if let Some(sig) = ctx.env.functions.get(&almide_base::intern::sym(&format!("{}.{}", module, func))) {
+        // A user module's fn: its declared params are the slots the args
+        // fill — an anonymous record literal takes the param's nominal type
+        // rather than the first same-field struct of the program (#3283).
+        for (arg, (_, param_ty)) in ir_args.iter_mut().zip(sig.params.iter()) {
+            super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
+        }
     }
 }
 
