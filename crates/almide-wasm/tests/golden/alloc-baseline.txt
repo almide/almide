@@ -3,13 +3,13 @@
 66064	spec/wasm_cross/adr0005_operator_equivalence.almd
 66432	spec/wasm_cross/alias_combinator_rc.almd
 68592	spec/wasm_cross/alias_cow.almd
-2162836	spec/wasm_cross/allocation_within_limits.almd
+2162536	spec/wasm_cross/allocation_within_limits.almd
 66448	spec/wasm_cross/anon_record_structural_identity.almd
 65952	spec/wasm_cross/anon_record_variant_payloads.almd
 65920	spec/wasm_cross/anon_records_and_fusion.almd
 65792	spec/wasm_cross/append_accumulator.almd
 65824	spec/wasm_cross/append_accumulator_heap.almd
-1427040	spec/wasm_cross/append_accumulator_heap_linear.almd
+1427016	spec/wasm_cross/append_accumulator_heap_linear.almd
 ~	spec/wasm_cross/args_surface.almd
 66000	spec/wasm_cross/as_pattern.almd
 65776	spec/wasm_cross/assert_abort_eq.almd
@@ -58,7 +58,7 @@
 65808	spec/wasm_cross/bytes_new_exhaustion.almd
 65808	spec/wasm_cross/bytes_pad_ceiling_oom.almd
 66640	spec/wasm_cross/bytes_param_writeback.almd
-327968	spec/wasm_cross/bytes_push_growth.almd
+327956	spec/wasm_cross/bytes_push_growth.almd
 65696	spec/wasm_cross/bytes_push_inplace.almd
 66256	spec/wasm_cross/bytes_rawptr.almd
 65952	spec/wasm_cross/bytes_repeat_product_wrap_oom.almd
@@ -178,7 +178,7 @@
 ~	spec/wasm_cross/exit_code_out_of_range.almd
 65696	spec/wasm_cross/expr_stmt_comment.almd
 67088	spec/wasm_cross/fallible_hof_effect_callback_family.almd
-18443808	spec/wasm_cross/fallible_hof_large_input.almd
+15295968	spec/wasm_cross/fallible_hof_large_input.almd
 68944	spec/wasm_cross/fallible_hof_matrix_containers.almd
 68352	spec/wasm_cross/fallible_hof_matrix_list.almd
 68528	spec/wasm_cross/fallible_hof_option_effect_callback.almd
@@ -446,10 +446,10 @@
 65696	spec/wasm_cross/literal_int_forms.almd
 65696	spec/wasm_cross/literal_unit.almd
 65648	spec/wasm_cross/loop_break_continue.almd
-3211412	spec/wasm_cross/loop_buffer_churn.almd
+3210980	spec/wasm_cross/loop_buffer_churn.almd
 65952	spec/wasm_cross/loop_effect_match_stmt.almd
 65920	spec/wasm_cross/loop_outer_inplace_mutate_rc.almd
-29357736	spec/wasm_cross/loop_push_trailing_increment.almd
+25159532	spec/wasm_cross/loop_push_trailing_increment.almd
 66624	spec/wasm_cross/map_core_trio.almd
 67200	spec/wasm_cross/map_entries_reclaim.almd
 66464	spec/wasm_cross/map_entry_loop.almd
@@ -504,7 +504,7 @@
 67264	spec/wasm_cross/matrix_neg_signed_zero.almd
 67616	spec/wasm_cross/matrix_pow_libm.almd
 68160	spec/wasm_cross/matrix_product_family.almd
-96073352	spec/wasm_cross/matrix_q1_full_loader_cols_beyond_buffer.almd
+48073284	spec/wasm_cross/matrix_q1_full_loader_cols_beyond_buffer.almd
 100384	spec/wasm_cross/matrix_q1_full_loader_wrapped_offset.almd
 71040	spec/wasm_cross/matrix_q_dims_guard.almd
 75984	spec/wasm_cross/matrix_q_fp16_scale_domain.almd
@@ -676,7 +676,7 @@
 70768	spec/wasm_cross/regex_captures_accumulator_release.almd
 74384	spec/wasm_cross/regex_engine.almd
 93856	spec/wasm_cross/regex_fuzz_batch.almd
-117503080	spec/wasm_cross/regex_repetition_depth.almd
+67840244	spec/wasm_cross/regex_repetition_depth.almd
 ~	spec/wasm_cross/repeat_size_ceiling.almd
 65920	spec/wasm_cross/replace_empty_pat.almd
 66992	spec/wasm_cross/repr_parity_pin.almd
@@ -735,7 +735,7 @@
 66288	spec/wasm_cross/string_empty_pattern.almd
 66400	spec/wasm_cross/string_float_stable.almd
 66304	spec/wasm_cross/string_from_bytes.almd
-3081872	spec/wasm_cross/string_interp_large_hole.almd
+1435032	spec/wasm_cross/string_interp_large_hole.almd
 66528	spec/wasm_cross/string_interpolation.almd
 76752	spec/wasm_cross/string_is_alphanumeric.almd
 65920	spec/wasm_cross/string_lines.almd
@@ -743,7 +743,7 @@
 66784	spec/wasm_cross/string_ops_drain.almd
 65888	spec/wasm_cross/string_pad_ceiling_oom.almd
 86896	spec/wasm_cross/string_passthrough_share.almd
-11791200	spec/wasm_cross/string_position_large_offset.almd
+10666880	spec/wasm_cross/string_position_large_offset.almd
 94464	spec/wasm_cross/string_predicates.almd
 66144	spec/wasm_cross/string_repeat_empty.almd
 66208	spec/wasm_cross/string_rle.almd
