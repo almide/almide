@@ -1,0 +1,14 @@
+// A mutator handed a FIELD of the enclosing `var` mutates that var
+// (#3344).
+type Bag = { items: List[Int] }
+
+fn gather(xs: List[Int]) -> Int = {
+  var b: Bag = { items: [] }
+  let _ = list.map(xs, (x) => {
+    list.push(b.items, x)
+    x
+  })
+  list.len(b.items)
+}
+
+fn main() -> Unit = println(int.to_string(gather([1, 2, 3])))

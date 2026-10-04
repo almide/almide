@@ -1,0 +1,12 @@
+// A pure fn's closure writing an element of an enclosing `var` List
+// mutates it as surely as reassigning it (#3344).
+fn marks(xs: List[Int]) -> List[Int] = {
+  var seen = [0, 0, 0]
+  let _ = list.map(xs, (x) => {
+    seen[x] = 1
+    x
+  })
+  seen
+}
+
+fn main() -> Unit = println("${marks([0, 2])}")

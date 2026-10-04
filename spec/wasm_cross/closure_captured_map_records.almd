@@ -9,7 +9,7 @@
 // canary: every round builds a cell + closure, feeds it, and tears both down.
 type Acc = { sum: Int, count: Int }
 
-fn main() -> Unit = {
+effect fn main() -> Unit = {
   var stats: Map[String, Acc] = map.new()
   let feed = (k: String, t: Int) => {
     match map.get(stats, k) {

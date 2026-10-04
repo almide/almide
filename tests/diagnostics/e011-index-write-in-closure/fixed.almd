@@ -1,0 +1,11 @@
+// Hosting the closure in an effect fn admits the write (#3344).
+effect fn marks(xs: List[Int]) -> List[Int] = {
+  var seen = [0, 0, 0]
+  let _ = list.map(xs, (x) => {
+    seen[x] = 1
+    x
+  })
+  seen
+}
+
+effect fn main() -> Unit = println("${marks([0, 2])!}")
