@@ -43,7 +43,7 @@
 //! the arms do NOT yet cover DECLINES at emission time with a counted
 //! reason (`!decline:…`, the measurement channel this step opened):
 //! an arm that lowers an argument outside `lower_arg`, a droppable View
-//! result, a Retain of a flat / cell local. The frame's certificate is
+//! result, a Retain of a flat local (or of a cell no hook bound). The frame's certificate is
 //! withdrawn, never under-recorded.
 //!
 //! Event vocabulary (certificate v0, the format `proofs/` checks):
