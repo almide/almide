@@ -290,7 +290,6 @@ pub(crate) fn lower_fn(
     let mut local_decls: Vec<(u32, ValType)> = Vec::new();
     for (i, (var, ty)) in binds.iter().enumerate() {
         locals.insert(*var, (env_shift + (params.len() + i) as u32, *ty));
-        // A cell var's local holds the cell ADDRESS.
         local_decls.push((
             1,
             if cell_vars.contains(var) { ValType::I32 } else { ty.val_type() },
