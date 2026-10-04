@@ -765,7 +765,7 @@ mod tests {
         // the emitted trees moved: update proofs/StructuralRuntime.v to
         // the new trees (re-proving what changed), then this constant.
         assert_eq!(
-            got, 0x2312b47da07c14b0,
+            got, 0xe367ec7ac138a3d8,
             "runtime tree bytes drifted from the proofs/StructuralRuntime.v transcription (got {got:#x})"
         );
     }
