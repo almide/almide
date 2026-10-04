@@ -1,0 +1,11 @@
+// #3315: function-valued top-level lets, called from another module (and,
+// on the dependency-shaped leg, from another package).
+fn inc1(n: Int) -> Int = n + 1
+
+fn twice(n: Int) -> Int = n * 2
+
+let thing = inc1
+
+let other = twice
+
+let local_use: Int = thing(1) + other(2)
