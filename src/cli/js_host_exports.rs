@@ -152,6 +152,22 @@ pub(super) fn plan_export(f: &HostFn, params: Option<&[AbiShape]>, ret: Option<&
     Ok(ExportPlan { params, ret })
 }
 
+/// The recorded shape a scalar marshal kind travels as.
+pub(super) fn shape_of_marshal(m: Marshal) -> AbiShape {
+    match m {
+        Marshal::Int => AbiShape::Int,
+        Marshal::Float => AbiShape::Float,
+        Marshal::Bool => AbiShape::Bool,
+        Marshal::Str => AbiShape::Str,
+        Marshal::Unit => AbiShape::Unit,
+    }
+}
+
+/// The JS shape literal of a scalar marshal kind.
+pub(super) fn shape_literal(m: Marshal) -> String {
+    shape_js(&shape_of_marshal(m))
+}
+
 /// The shape as the JS object literal the value helpers read.
 fn shape_js(s: &AbiShape) -> String {
     match s {

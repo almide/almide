@@ -549,6 +549,7 @@ fn write_js_host(output: &str, file: &str, bytes: &[u8], surface: &crate::cli::j
         owned: almide_wasm::host_exports::export_param_owned(),
         params: almide_wasm::host_exports::export_params_noted(),
         rets: almide_wasm::host_exports::export_rets(),
+        imports: almide_wasm::host_exports::import_rets(),
     };
     let (js, dts) = match crate::cli::js_host::generate(&wasm_name, file, bytes, surface, &notes) {
         Ok(g) => g,

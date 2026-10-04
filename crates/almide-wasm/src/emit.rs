@@ -191,10 +191,13 @@ fn emit_program_pass(
         };
         // #2275: a body-less `@extern` is a declared import on the wasm
         // target, or a wall — never a hollow body.
-        let (import, refuse) = match extern_import(f, &params, ret) {
+        let (import, refuse) = match extern_import(f, &params, ret, &types) {
             Ok(import) => (import, refuse),
             Err(reason) => (None, refuse.or(Some(reason))),
         };
+        if let Some((m, n)) = &import {
+            crate::host_exports::note_import(m, n, crate::host_exports::export_ret(ret, &types));
+        }
         let key = qual.clone().unwrap_or_else(|| f.name.as_str().to_string());
         // impl_index carries ONLY registry implementation symbols — a
         // global simple-name index over ALL module fns collides across
@@ -703,10 +706,13 @@ fn fn_site(entry: &(&IrFunction, Option<String>, u32), refused_at: Option<usize>
 /// The `@extern(wasm, module, name)` import a body-less fn declares (#2275):
 /// `Ok(Some((module, name)))` when its signature has the scalar host ABI
 /// (`Int`/sized ints → i64, `Float` → f64, `Bool` → i32, `String` → i32
-/// block, `Unit` → no result); `Ok(None)` for a fn with a body; `Err` for a
-/// native (`rs`/`rust`) extern — there is no wasm host for it, so an import
-/// would be a hollow lie — and for a param or return outside the ABI.
-fn extern_import(f: &IrFunction, params: &[SliceTy], ret: Option<SliceTy>) -> Result<Option<(String, String)>, String> {
+/// block, `Unit` → no result), or — a fallible import (#3356: an `effect fn`
+/// extern, or one declaring `Result[T, String]`) — an i32 `Result` block the
+/// host builds, ok a scalar or Unit, err a String; `Ok(None)` for a fn with
+/// a body; `Err` for a native (`rs`/`rust`) extern — there is no wasm host
+/// for it, so an import would be a hollow lie — and for a param or return
+/// outside the ABI.
+fn extern_import(f: &IrFunction, params: &[SliceTy], ret: Option<SliceTy>, types: &TypeTable) -> Result<Option<(String, String)>, String> {
     if f.extern_attrs.is_empty() {
         return Ok(None);
     }
@@ -721,7 +727,15 @@ fn extern_import(f: &IrFunction, params: &[SliceTy], ret: Option<SliceTy>) -> Re
             return Err(format!("extern-ty:{}:{}", f.name, p.name));
         }
     }
-    if !matches!(ret, None | Some(SliceTy::Scalar(_))) {
+    let fallible = |ok: crate::ETy, err: crate::ETy| {
+        matches!(types.el(ok), SliceTy::Scalar(_) | SliceTy::Unit) && types.el(err) == crate::STR
+    };
+    let host_ret = match ret {
+        None | Some(SliceTy::Scalar(_)) => true,
+        Some(SliceTy::Result(ok, err)) => fallible(ok, err),
+        _ => false,
+    };
+    if !host_ret {
         return Err(format!("extern-ret:{}", f.name));
     }
     Ok(Some((a.module.as_str().to_string(), a.function.as_str().to_string())))

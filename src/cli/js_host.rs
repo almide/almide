@@ -44,6 +44,8 @@ use almide_wasm::host_exports::{AbiShape, ExportRet};
 mod exports;
 #[path = "js_host_async.rs"]
 mod jspi;
+#[path = "js_host_imports.rs"]
+mod imports;
 
 /// One function on the host boundary: an exported `pub fn` or an extern.
 #[derive(Debug, Clone)]
@@ -80,7 +82,11 @@ impl HostSurface {
     /// the host build or take a block, so only then do the module's
     /// allocator/release exports and the glue's string helpers ship.
     pub(crate) fn needs_string_abi(&self) -> bool {
-        let externs_string = self.externs.iter().any(|e| e.sig.params.iter().map(|(_, t)| t).chain(std::iter::once(&e.sig.ret)).any(|t| matches!(t, Ty::String)));
+        // A fallible import (#3356) answers with a Result block, and its err
+        // carries a String.
+        let externs_string = self.externs.iter().any(|e| {
+            returns_result(&e.sig) || e.sig.params.iter().map(|(_, t)| t).chain(std::iter::once(&e.sig.ret)).any(|t| matches!(t, Ty::String))
+        });
         // An export builds or takes a block for anything but a scalar: a
         // String, Bytes, List, Option or record (#3354), or an unwrapped
         // Result (#3352), whose err message is a String.
@@ -335,7 +341,7 @@ fn wasm_sigs(bytes: &[u8]) -> Result<WasmSigs, String> {
 }
 
 /// What an extern's signature may carry.
-const EXTERN_SET: &str = "an @extern(wasm, ...) import carries Int, Float, Bool, String and Unit (#2265)";
+const EXTERN_SET: &str = "an @extern(wasm, ...) import carries Int, Float, Bool, String and Unit (#2265), and an `effect fn` (or `Result[T, String]`) one of those returns a hook's throw as an err (#3356)";
 /// What an export's signature may carry (#3354).
 const EXPORT_SET: &str = "an export carries Int, Float, Bool, String, Unit, Bytes, List[T], Option[T] and records (#3354); variants, maps, sets, tuples and functions are not marshalled";
 
@@ -438,7 +444,8 @@ fn check_marshallable(surface: &HostSurface) -> Result<(), String> {
                 return Err(refuse(&f.name, &format!("parameter `{p}`"), ty, EXTERN_SET));
             }
         }
-        if marshal_of(&f.ret).is_none() {
+        // A fallible extern (#3356) returns its `T` to the hook's caller.
+        if marshal_of(visible_ret(f)).is_none() {
             return Err(refuse(&f.name, "the return type", &f.ret, EXTERN_SET));
         }
     }
@@ -483,51 +490,10 @@ fn check_imports_served(sigs: &WasmSigs, surface: &HostSurface) -> Result<(), St
 
 /// The `imports()` function: the WASI shims the module names and one
 /// marshalling closure per extern import.
-fn import_object_js(sigs: &WasmSigs, surface: &HostSurface, suspension: &jspi::Suspension) -> Result<String, String> {
-    let mut js = String::from("\nfunction imports() {\n  const wasiImports = {};\n  const jsImports = {};\n");
-    for (module, name, sig) in &sigs.imports {
-        if module == "wasi_snapshot_preview1" {
-            js.push_str(&format!("  wasiImports.{name} = wasi.{name};\n"));
-            continue;
-        }
-        let e = surface.externs.iter().find(|e| &e.module == module && &e.import == name).expect("checked by check_imports_served");
-        let args: Vec<String> = (0..sig.params.len()).map(|i| format!("a{i}")).collect();
-        let mut conv = Vec::new();
-        for (i, (_, ty)) in e.sig.params.iter().enumerate() {
-            let m = marshal_of(ty).expect("checked by check_marshallable");
-            let v = *sig.params.get(i).ok_or_else(|| format!("import `{name}` has fewer wasm params than `{}` declares", e.sig.name))?;
-            conv.push(from_wasm(m, v, &args[i], name, false));
-        }
-        let suspends = suspension.imports.contains(name);
-        // An async hook's arguments are decoded before it runs (the call
-        // expression), its result encoded after the promise settles.
-        let call = if suspends {
-            format!("(await hook(\"{module}\", \"{name}\")({}))", conv.join(", "))
-        } else {
-            format!("hook(\"{module}\", \"{name}\")({})", conv.join(", "))
-        };
-        let body = match (marshal_of(&e.sig.ret).expect("checked"), sig.results.first()) {
-            (Marshal::Unit, _) | (_, None) => format!("{call};"),
-            (m, Some(v)) => format!("return {};", to_wasm(m, *v, &call, name)),
-        };
-        if suspends {
-            js.push_str(&format!("  jsImports.{name} = new WebAssembly.Suspending(async ({}) => {{ {body} }});\n", args.join(", ")));
-        } else {
-            js.push_str(&format!("  jsImports.{name} = ({}) => {{ {body} }};\n", args.join(", ")));
-        }
-    }
-    js.push_str("  const obj = { wasi_snapshot_preview1: wasiImports };\n");
-    let modules: std::collections::BTreeSet<&str> = surface.externs.iter().map(|e| e.module.as_str()).collect();
-    for m in &modules {
-        js.push_str(&format!("  obj[\"{m}\"] = jsImports;\n"));
-    }
-    js.push_str("  return obj;\n}\n");
-    Ok(js)
-}
 
 fn signature_dts(f: &HostFn) -> String {
     let params: Vec<String> = f.params.iter().map(|(p, ty)| format!("{p}: {}", ts_of(marshal_of(ty).expect("checked")))).collect();
-    format!("({}) => {}", params.join(", "), ts_of(marshal_of(&f.ret).expect("checked")))
+    format!("({}) => {}", params.join(", "), ts_of(marshal_of(visible_ret(f)).expect("checked")))
 }
 
 /// The `Hooks` interface's `js` member: one entry per extern import.
@@ -560,7 +526,11 @@ pub(crate) struct ExportNotes {
     pub owned: BTreeMap<String, Vec<bool>>,
     pub params: BTreeMap<String, Vec<AbiShape>>,
     pub rets: BTreeMap<String, ExportRet>,
+    /// The return ABI of each declared import, by (module, name) (#3356).
+    pub imports: ImportRets,
 }
+
+pub(crate) type ImportRets = BTreeMap<(String, String), ExportRet>;
 
 /// The generated host: `(js, d_ts)`.
 pub(crate) fn generate(
@@ -570,7 +540,7 @@ pub(crate) fn generate(
     surface: &HostSurface,
     notes: &ExportNotes,
 ) -> Result<(String, String), String> {
-    let ExportNotes { owned: export_param_owned, params: export_params, rets: export_rets } = notes;
+    let ExportNotes { owned: export_param_owned, params: export_params, rets: export_rets, imports: import_rets } = notes;
     let sigs = wasm_sigs(bytes)?;
     check_marshallable(surface)?;
     check_imports_served(&sigs, surface)?;
@@ -599,7 +569,12 @@ pub(crate) fn generate(
         wrappers.push_str(&exports::wrapper_js(f, sig, owned, &plan, entry)?);
         export_dts.push_str(&exports::export_dts(f, &plan, entry));
     }
+    // A fallible import (#3356) builds its Result block with the value helpers.
+    needs_values |= surface.externs.iter().any(|e| returns_result(&e.sig));
     let mut string_helpers = if surface.needs_string_abi() { JS_STRING_HELPERS.replace("{ALLOC_BODY}", alloc_body) } else { String::new() };
+    if !surface.externs.is_empty() {
+        string_helpers.push_str(JS_ABANDON);
+    }
     if needs_values {
         string_helpers.push_str(JS_VALUE_HELPERS);
     }
@@ -612,7 +587,7 @@ pub(crate) fn generate(
         .replace("{JSPI_CHECK}", &jspi::init_check(&suspension))
         .replace("{JSPI_PROMISED}", &jspi::init_promised(&suspension));
     js.push_str(&runtime);
-    js.push_str(&import_object_js(&sigs, surface, &suspension)?);
+    js.push_str(&imports::import_object_js(&sigs, surface, &suspension, import_rets)?);
 
     let mut dts = format!("// Generated by `almide build {source_file} --target wasm --host js` (almide {version}).\n\n");
     dts.push_str(DTS_RUNTIME);
@@ -658,7 +633,11 @@ const encoder = new TextEncoder();
 
 function bytes() { return new Uint8Array(memory.buffer); }
 function view() { return new DataView(memory.buffer); }
-function ready() { if (instance === null) throw new Error("almide: call init() before using the module"); }
+let abandoned = null;
+function ready() {
+  if (instance === null) throw new Error("almide: call init() before using the module");
+  if (abandoned !== null) throw new Error(abandoned);
+}
 
 {STRING_HELPERS}function toI64(x, what) {
   if (typeof x === "bigint") return x;
@@ -705,6 +684,7 @@ function flush() {
  */
 export async function init(source, h = {}) {
 {JSPI_CHECK}  hooks = h;
+  abandoned = null;
   let module;
   if (source instanceof WebAssembly.Module) {
     module = source;
@@ -743,6 +723,16 @@ function allocString(s) {
 {ALLOC_BODY}
   bytes().set(b, h + PAYLOAD);
   return h;
+}
+"#;
+
+/// A throw out of an infallible hook (#3356): the instance is abandoned —
+/// its unwound frames kept their blocks, so no later call may run on it —
+/// and the thrown error names the import and the fix. Shipped when the
+/// program declares an extern.
+const JS_ABANDON: &str = r#"function abandon(module, name, e) {
+  abandoned = `almide: the instance was abandoned after hooks.${module}.${name} threw — call init() again`;
+  return new Error(`almide: hooks.${module}.${name} threw, but its @extern is infallible, so the call cannot return an err and the instance is abandoned; declare it \`effect fn\` (or returning Result[T, String]) to receive a throw as an err: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
 }
 "#;
 
