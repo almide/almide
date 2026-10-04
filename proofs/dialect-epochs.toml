@@ -123,3 +123,13 @@ summary = "E011 judges the binding a closure mutates, so every write form of an 
 breaks = [
   "inside a closure of a pure fn, an index or map-key write (`seen[k] = v`), a field or nested-place write (`s.f = v`), or an in-place mutator handed the enclosing `var` (`list.push(acc, x)`) is E011, as `seen = v` already was — mark the enclosing fn `effect fn`, or move the mutation out of the closure (a `for` loop, or a `list.fold` / `list.map`)",
 ]
+
+[[epoch]]
+n = 10
+since = "0.67.0"
+name = "names-resolve-where-declared"
+summary = "Two names the checker used to accept without resolving them are refused: a module-qualified type resolves only through a module in scope that declares it, and every `[permissions].allow` name must be a grantable capability (#3252). Found by the v0.67.0-rc1 downstream canary (run 37224303801): almide/parsegen and O6lvl4/gramide (types), almide/porta (permissions)."
+breaks = [
+  "a type qualified by a module the file does not import (`lex.LexError` with no `import self.lex`), or by a module that does not itself declare it (`dfa.Dfa` where package `dfa` declares `Dfa` in its submodule `table`), is E029 — import the declaring module (`import self.lex`, `import dfa.table`) and qualify by it (`table.Dfa`)",
+  "an unknown name in `[permissions].allow` (`\"FS.read\"`, `\"FS.write\"`) is refused on its manifest line (0.66.0 accepted it) — write only IO, Net, Env, Time, Rand, Fan (file access is IO)",
+]
