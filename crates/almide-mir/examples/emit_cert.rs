@@ -121,11 +121,13 @@ fn scenario(which: &str) -> MirFunction {
             declared_caps: vec![], // declares no capability
             ..Default::default()
         },
-        // A one-shot BRANCH whose arms AGREE at net +1 on a pre-branch object
-        // (each arm acquires one alias of `a` — the heap-result-branch class):
-        // cert `i{a|a}dd`, ACCEPTED by the proven CBranch agreement rule.
+        // A one-shot BRANCH whose arms AGREE at net −1 on a pre-branch object
+        // (each arm releases the alias `y` taken before the branch): cert
+        // `ia{d|d}d`, ACCEPTED by the proven CBranch agreement rule. (#3267:
+        // the earlier `i{a|a}dd` form dropped after the join a handle only the
+        // then arm defined, which both sides now reject.)
         "branch-agree" => {
-            let (x, y, z, c) = (ValueId(0), ValueId(1), ValueId(2), ValueId(3));
+            let (x, y, c) = (ValueId(0), ValueId(1), ValueId(3));
             MirFunction {
                 name: "f".into(),
                 ops: vec![
@@ -134,14 +136,14 @@ fn scenario(which: &str) -> MirFunction {
                         repr: heap(),
                         init: Init::Opaque,
                     },
+                    Op::Dup { dst: y, src: x },
                     Op::Const { dst: c },
                     Op::IfThen { cond: c, dst: None },
-                    Op::Dup { dst: y, src: x },
+                    Op::Drop { v: y },
                     Op::Else { val: None },
-                    Op::Dup { dst: z, src: x },
+                    Op::Drop { v: y },
                     Op::EndIf { val: None },
                     Op::Drop { v: x },
-                    Op::Drop { v: y },
                 ],
                 ..Default::default()
             }

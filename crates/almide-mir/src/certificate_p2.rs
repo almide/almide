@@ -605,7 +605,10 @@
         // AGREEMENT at net +1: each arm acquires one alias of a pre-branch
         // object (the heap-result-branch class). Neither arm self-balances, so
         // the emitter GROUPS them (`{a|a}`) and the proven CBranch rule accepts
-        // (both arms leave the same count); verify_ownership's branch join agrees.
+        // (both arms leave the same count). Here the post-join `Drop` names `y`,
+        // which only the then arm defines: on the else path it was never
+        // computed, so both sides reject it (#3267) — `y`'s read lands on its
+        // own line at count 0 (`bd`).
         let (x, y, z, c) = (ValueId(0), ValueId(1), ValueId(2), ValueId(3));
         let agree = func(vec![
             Op::Alloc { dst: x, repr: heap(), init: Init::Opaque },
@@ -618,8 +621,39 @@
             Op::Drop { v: x },
             Op::Drop { v: y },
         ]);
-        assert_eq!(ownership_certificate(&agree), "i{a|a}dd\n");
-        assert_eq!(verify_ownership(&agree), Ok(()));
+        assert_eq!(ownership_certificate(&agree), "i{a|a}d\nbd\n");
+        assert!(verify_ownership(&agree).is_err());
+        // The defined form: each arm moves its alias into the `if`'s result,
+        // which reaches the join through the `IfThen` dst.
+        let m = ValueId(4);
+        let merged = func(vec![
+            Op::Alloc { dst: x, repr: heap(), init: Init::Opaque },
+            Op::Const { dst: c },
+            Op::IfThen { cond: c, dst: Some(m) },
+            Op::Dup { dst: y, src: x },
+            Op::Else { val: Some(y) },
+            Op::Dup { dst: z, src: x },
+            Op::EndIf { val: Some(z) },
+            Op::Drop { v: x },
+            Op::Drop { v: m },
+        ]);
+        assert!(cert_all_balanced(&ownership_certificate(&merged)));
+        assert_eq!(verify_ownership(&merged), Ok(()));
+        // Grouped agreement over defined handles: each arm releases the alias
+        // taken before the branch (net −1 on both paths, `{d|d}`).
+        let released = func(vec![
+            Op::Alloc { dst: x, repr: heap(), init: Init::Opaque },
+            Op::Dup { dst: y, src: x },
+            Op::Const { dst: c },
+            Op::IfThen { cond: c, dst: None },
+            Op::Drop { v: y },
+            Op::Else { val: None },
+            Op::Drop { v: y },
+            Op::EndIf { val: None },
+            Op::Drop { v: x },
+        ]);
+        assert_eq!(ownership_certificate(&released), "ia{d|d}d\n");
+        assert_eq!(verify_ownership(&released), Ok(()));
 
         // CROSS-ARM COMPENSATION (the closed accept-but-unsafe class): the then
         // arm acquires, the else arm releases — FLAT the events balance

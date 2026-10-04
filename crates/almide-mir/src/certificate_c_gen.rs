@@ -184,6 +184,52 @@ fn gen_reads(seed: u64) -> MirFunction {
     MirFunction { name: "reads".into(), params, ops: g.ops, ..Default::default() }
 }
 
+/// #3267: the read shapes around one two-armed `if`. The generator's pools
+/// are NOT scoped to the path, so an arm reads handles the other arm defined
+/// and the code after the join reads handles one arm defined: both sides must
+/// reject those, and agree everywhere else.
+fn gen_branch_reads(seed: u64) -> MirFunction {
+    let mut f = gen_reads(seed);
+    let mut st = seed.wrapping_add(11);
+    let n = f.ops.len();
+    // Cut the body into prefix / then / else / suffix at three points.
+    let mut cuts: Vec<usize> = (0..3).map(|_| (next_rand(&mut st) as usize) % (n + 1)).collect();
+    cuts.sort_unstable();
+    let c = ValueId(10_000);
+    let mut ops = vec![Op::ConstInt { dst: c, value: 1 }];
+    ops.extend_from_slice(&f.ops[..cuts[0]]);
+    ops.push(Op::IfThen { cond: c, dst: None });
+    ops.extend_from_slice(&f.ops[cuts[0]..cuts[1]]);
+    ops.push(Op::Else { val: None });
+    ops.extend_from_slice(&f.ops[cuts[1]..cuts[2]]);
+    ops.push(Op::EndIf { val: None });
+    ops.extend_from_slice(&f.ops[cuts[2]..]);
+    f.ops = ops;
+    f
+}
+
+#[test]
+fn certificate_verdict_matches_verify_ownership_around_a_branch() {
+    let (mut accepted, mut rejected) = (0, 0);
+    for seed in 0u64..4000 {
+        let f = gen_branch_reads(seed);
+        let cert = ownership_certificate(&f);
+        let cert_ok = cert_all_balanced(&cert);
+        let verify_ok = verify_ownership(&f).is_ok();
+        assert_eq!(
+            cert_ok, verify_ok,
+            "seed {seed}: certificate says {cert_ok}, verify_ownership says {verify_ok}\ncert: {cert:?}\nops: {:?}",
+            f.ops
+        );
+        if verify_ok {
+            accepted += 1;
+        } else {
+            rejected += 1;
+        }
+    }
+    assert!(accepted > 200 && rejected > 400, "accepted {accepted}, rejected {rejected}");
+}
+
 #[test]
 fn certificate_verdict_matches_verify_ownership_on_reads() {
     let (mut accepted, mut rejected) = (0, 0);
@@ -338,4 +384,41 @@ fn an_elem_addr_child_is_tracked() {
     let freed = func([vec![alloc], load(v(0)), vec![Op::Drop { v: v(0) }, call]].concat());
     assert!(!cert_all_balanced(&ownership_certificate(&freed)));
     assert!(verify_ownership(&freed).is_err());
+}
+
+/// #3267: a handle the then arm defines, read in the else arm. The guard err
+/// arm of a `mut`-param effect fn wrote back the then arm's copy-on-write
+/// clone, a value the err path never computes. The certificate's handle map
+/// was not scoped to the path, so the else arm's `Dup` counted on the param
+/// (`adad`, accepted). The maps now restart at each arm: the read lands on the
+/// out-of-path handle's own line at count 0 (`bad`), and both sides reject.
+#[test]
+fn a_handle_from_the_other_arm_is_not_defined() {
+    let v = ValueId;
+    let (p, c) = (v(0), v(9));
+    let f = |else_src: ValueId| {
+        let mut f = func(vec![
+            Op::ConstInt { dst: c, value: 1 },
+            Op::IfThen { cond: c, dst: None },
+            Op::Dup { dst: v(1), src: p },
+            Op::Drop { v: v(1) },
+            Op::Else { val: None },
+            Op::Dup { dst: v(2), src: else_src },
+            Op::Drop { v: v(2) },
+            Op::EndIf { val: None },
+        ]);
+        f.params = vec![MirParam { value: p, repr: heap() }];
+        f
+    };
+    let cross = f(v(1));
+    assert_eq!(
+        ownership_certificate(&cross),
+        include_str!("../../../proofs/poisoned-certs/3267-cross-arm-handle.cert")
+    );
+    assert!(!cert_all_balanced(&ownership_certificate(&cross)));
+    assert!(verify_ownership(&cross).is_err());
+    // The else arm reading the param itself is fine on both sides.
+    let own = f(p);
+    assert!(cert_all_balanced(&ownership_certificate(&own)));
+    assert_eq!(verify_ownership(&own), Ok(()));
 }
