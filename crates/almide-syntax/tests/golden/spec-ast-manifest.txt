@@ -1,4 +1,4 @@
-# oracle: almide 0.66.0 (dev) at e7ca803a2 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.66.0 (dev) at 80e9d896e — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -123,7 +123,7 @@ d6d9ec6bce8cf496630a30ba3075e40543ca25520efd4467ce19d5d815027bcb	spec/integratio
 cb124aa41a78c1733f4073be877e95b0067203155b4ba89ee5d0a6d419127262	spec/integration/global_static_names/src/a.almd
 9e3fc3f38b353cb598f8c116ee545ab0738f969e5c8a78c55a9ed152e7b7a326	spec/integration/global_static_names/src/a_b.almd
 86267172bc6c46000721cb724bf5210ce6630ff257e29718daf0d70c60306be5	spec/integration/global_static_names/src/m.almd
-46aa934826221da8dd57c46a0a4423cbefc8571f25155a2d867eb06219cdadd7	spec/integration/global_static_names/src/main.almd
+f07f982736a2696789f60e05211b7a8aaf6daa05c3bf98d500eac17def5cc632	spec/integration/global_static_names/src/main.almd
 dbdb5c5bcb258cbc34efec32a0a1cec5c14e67f3f8f7df0b1feddc11230d2a44	spec/integration/licm_test.almd
 236701fa7329909420a9ec7b35c819f550003218050889c5a14bfe00bfdbf65d	spec/integration/match_arm_effect_unify_test.almd
 1ed39ae68105798cec336b6bead9f8407c3608dd012f4f374db9611dc1720adc	spec/integration/module_path_identity/src/a.almd
