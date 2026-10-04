@@ -417,6 +417,13 @@ impl LowerCtx {
             // — the old split mis-seeded the former as len-as-tag, so an inner `match r` read
             // tag@4 (the `Option[Result[String,String]]` interp `some(ok)` → `some(err)` bug).
             self.seed_variant_param(payload, &bind_ty);
+            // A CLOSURE payload (`ok(h)` of a `Result[HttpHandler, String]` — a router value
+            // unwrapped with `!`, #2739): the borrowed handle IS a closure block, so admit it
+            // to the dispatch set and a later `h(req)` lowers to `CallIndirect` (the variant
+            // payload and tuple slot closures do the same).
+            if matches!(bind_ty, Ty::Fn { .. }) {
+                self.closure_values.insert(payload);
+            }
         }
     }
 
