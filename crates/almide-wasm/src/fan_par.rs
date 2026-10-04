@@ -210,7 +210,7 @@ impl Rewriter<'_> {
             doc: None,
             blank_lines_before: 0,
             def_id: None,
-            mutated_params: Vec::new(),
+            mutated_params: Vec::new(), // fresh-fn: a synthesized pure chunk export whose params are scalars, so nothing is written back
             module_origin: None,
         });
 
