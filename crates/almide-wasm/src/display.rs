@@ -716,8 +716,9 @@ fn build_one_named_helper(
     op: crate::work::NamedOp,
     ti: u32,
 ) -> Result<(wasm_encoder::Function, std::collections::HashSet<usize>), EmitError> {
-    crate::witness::decline_unrecorded(&format!("<named-op:{op:?}:{ti}>"), "named-op");
-    build_helper_body(table, types, work, pool, Shell::PAIR, None, |em| {
+    // #2758: both operand blocks are lent (params 0 and 1).
+    let hw = crate::witness::helper::HelperWitness::new(format!("<named-op:{op:?}:{ti}>"), "named-op", &[0, 1]);
+    build_helper_body(table, types, work, pool, Shell::PAIR, hw, |em| {
         em.f.instructions().local_get(0).local_get(1);
         match op {
             // `path` starts with `ti`, so a self-referencing field sees the
