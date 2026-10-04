@@ -861,7 +861,13 @@ fn lower_and_link_wasm_ir(program: &almide::ast::Program, checker: &mut check::C
     // `almide_mir::pipeline`. Both were green, so the cross-target equivalence claim was
     // resting on "the position of ir_link never matters" rather than on a shared driver
     // (#925, and #785 is a recorded bug from exactly that divergence).
-    almide_driver::link_ir(&mut ir_program);
+    //
+    // #3275: through the build routes' shared halves, so the `[permissions]`
+    // gate judges this route exactly as it does the native build, on the same
+    // post-optimize, pre-mono IR. This route's integrity check is
+    // `verify_wasm_ir`, after the link.
+    let proj = crate::compile_driver::cwd_project();
+    crate::compile_driver::optimize_gate_and_link(&mut ir_program, proj.as_ref(), |_| Ok(())).map_err(|_| ())?;
 
     Ok(ir_program)
 }
@@ -1156,11 +1162,8 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
         .filter(|name| resolved.sources.contains_key(name))
         .collect();
     check_wasm_availability(&ir_program, &package, embedded_leg)?;
-    // #2589: `[permissions] proc` bounds the subprocess family on this path
-    // too — statically here, and at run time in the embedded host.
-    if let Some(proj) = std::path::Path::new("almide.toml").exists().then(|| project::parse_toml(std::path::Path::new("almide.toml")).ok()).flatten() {
-        super::enforce_proc_allowlist(&ir_program, proj.proc_allow.as_deref()).map_err(|_| ())?;
-    }
+    // `[permissions]` (`allow`, and `proc` #2589 — statically, and as the
+    // embedded host's run-time bound) was enforced in `lower_and_link_wasm_ir`.
 
     // Routing inputs (`RouteInputs::of_ir`, the one rule): project shape,
     // decided from what the v0 gates already computed — never from a

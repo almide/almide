@@ -206,11 +206,7 @@ fn check_one(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critic
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
             if !proj.permissions.is_empty() || proj.proc_allow.is_some() {
                 let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
-                if !proj.permissions.is_empty() && super::check_permissions(&ir, &proj.permissions).is_err() {
-                    std::process::exit(1);
-                }
-                // #2589: `[permissions] proc`, the commands process.* may start.
-                if super::enforce_proc_allowlist(&ir, proj.proc_allow.as_deref()).is_err() {
+                if super::enforce_project_permissions(&ir, &proj).is_err() {
                     std::process::exit(1);
                 }
             }
