@@ -305,6 +305,7 @@ dependencies = [
  "almide-wasm",
  "anyhow",
  "ctrlc",
+ "rustix",
  "wasm-encoder 0.259.0",
  "wasmparser 0.259.0",
  "wasmtime",

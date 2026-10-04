@@ -254,8 +254,10 @@ pub fn almide_rt_list_par_workers(len: usize) -> usize {
 // constants are pinned to docs/benchmarks/fan-cost-model.txt by
 // tests/fan_cost_model_test.rs). Every parallel twin is a SITE (one per
 // callback type — the monomorphised twin's own address), and every offer at
-// a site records the compute time its elements took (inside the elements,
-// so spawn latency is not counted). A site's FIRST offer goes parallel, as
+// a site records the compute time its elements took (`AlmideFanClock`: the
+// threads' CPU time inside the elements, so spawn latency and the time a
+// thread sat descheduled are not counted, and each worker's first element —
+// its warm-up — is kept out of the mean). A site's FIRST offer goes parallel, as
 // before #3341; later offers estimate each element at the site's last
 // measured time `t`. A parallel offer on W workers COSTS `OFFER + W·WORKER`
 // (thread spawn, join, the group's bookkeeping — measured) and SAVES
@@ -296,21 +298,100 @@ fn almide_fan_estimate(site: usize) -> Option<u128> {
     almide_fan_history().lock().ok()?.get(&site).copied()
 }
 
-/// Record an offer: `busy` ns of element compute over `count` elements.
-fn almide_fan_record(site: usize, busy: u128, count: usize) {
-    if count > 0 {
-        if let Ok(mut h) = almide_fan_history().lock() {
-            h.insert(site, busy / count as u128);
-        }
+/// The calling thread's CPU time in ns — the clock an offer's elements are
+/// measured on (the wasm host's copy is host_fan.rs `cpu_ns`). Wall time
+/// would also count the time the thread sat descheduled: on a loaded
+/// machine ONE preempted element of a trivial body read 4.6 ms and kept its
+/// site parallel. Elsewhere: a monotonic wall clock.
+#[cfg(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64"))]
+fn almide_fan_cpu_ns() -> u64 {
+    #[repr(C)]
+    struct Timespec { sec: i64, nsec: i64 }
+    unsafe extern "C" {
+        fn clock_gettime(clock: i32, ts: *mut Timespec) -> i32;
     }
+    // CLOCK_THREAD_CPUTIME_ID
+    const CLOCK: i32 = if cfg!(target_os = "linux") { 3 } else { 16 };
+    let mut ts = Timespec { sec: 0, nsec: 0 };
+    if unsafe { clock_gettime(CLOCK, &mut ts) } != 0 {
+        return 0;
+    }
+    (ts.sec as u64).wrapping_mul(1_000_000_000).wrapping_add(ts.nsec as u64)
+}
+#[cfg(not(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64")))]
+fn almide_fan_cpu_ns() -> u64 {
+    static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    T0.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
 }
 
-/// Time `g` and add it to `busy` (the workers' element compute).
-fn almide_fan_busy<R>(busy: &std::sync::atomic::AtomicU64, g: impl FnOnce() -> R) -> R {
-    let t0 = std::time::Instant::now();
-    let r = g();
-    busy.fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
-    r
+/// What one offer's elements took. A worker thread's FIRST element is its
+/// warm-up (a fresh thread's first touch of the body) and is kept apart —
+/// that cost belongs to the offer's `WORKER` term, not to `t`; the estimate
+/// is the warm elements' mean, or the warm-ups' when no worker ran a second
+/// element. The calling thread's sequential run is all warm.
+struct AlmideFanClock {
+    warm: [std::sync::atomic::AtomicU64; 2],
+    cold: [std::sync::atomic::AtomicU64; 2],
+}
+
+impl AlmideFanClock {
+    fn new() -> Self {
+        let z = || std::sync::atomic::AtomicU64::new(0);
+        AlmideFanClock { warm: [z(), z()], cold: [z(), z()] }
+    }
+
+    fn add(cell: &[std::sync::atomic::AtomicU64; 2], ns: u64, n: u64) {
+        cell[0].fetch_add(ns, std::sync::atomic::Ordering::Relaxed);
+        cell[1].fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The calling thread runs the offer: `g` returns its result and how
+    /// many elements it evaluated.
+    fn calling<R>(&self, g: impl FnOnce() -> (R, usize)) -> R {
+        let t0 = almide_fan_cpu_ns();
+        let (r, n) = g();
+        Self::add(&self.warm, almide_fan_cpu_ns().wrapping_sub(t0), n as u64);
+        r
+    }
+
+    /// A worker thread runs `items` through `each`: `Some(go_on)` = it
+    /// evaluated the element, `None` = it stopped without evaluating it.
+    fn worker<T>(&self, items: impl IntoIterator<Item = T>, mut each: impl FnMut(T) -> Option<bool>) {
+        let mut it = items.into_iter();
+        let Some(first) = it.next() else { return };
+        let t0 = almide_fan_cpu_ns();
+        let go = each(first);
+        let t1 = almide_fan_cpu_ns();
+        if go.is_some() {
+            Self::add(&self.cold, t1.wrapping_sub(t0), 1);
+        }
+        if go != Some(true) {
+            return;
+        }
+        let mut n = 0u64;
+        for x in it {
+            match each(x) {
+                Some(go_on) => {
+                    n += 1;
+                    if !go_on { break; }
+                }
+                None => break,
+            }
+        }
+        Self::add(&self.warm, almide_fan_cpu_ns().wrapping_sub(t1), n);
+    }
+
+    /// Record the offer as the site's estimate: ns per element.
+    fn record(self, site: usize) {
+        let [w, wn] = self.warm.map(|a| a.into_inner());
+        let [c, cn] = self.cold.map(|a| a.into_inner());
+        let (ns, n) = if wn > 0 { (w, wn) } else { (c, cn) };
+        if n > 0 {
+            if let Ok(mut h) = almide_fan_history().lock() {
+                h.insert(site, u128::from(ns) / u128::from(n));
+            }
+        }
+    }
 }
 
 pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + Send + Sync>(xs: Vec<A>, f: F) -> Vec<B> {
@@ -320,10 +401,10 @@ pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + S
     let site = almide_rt_list_par_map::<A, B, F> as fn(Vec<A>, F) -> Vec<B> as usize;
     let n = xs.len();
     let workers = almide_rt_fan_plan(n, almide_fan_estimate(site));
-    let busy = std::sync::atomic::AtomicU64::new(0);
+    let clock = AlmideFanClock::new();
     if workers < 2 {
-        let out = almide_fan_busy(&busy, || xs.into_iter().map(&f).collect());
-        almide_fan_record(site, busy.into_inner() as u128, n);
+        let out = clock.calling(|| (xs.into_iter().map(&f).collect(), n));
+        clock.record(site);
         return out;
     }
     let chunk_size = n.div_ceil(workers);
@@ -335,19 +416,18 @@ pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + S
     let sink = almide_fan_current();
     std::thread::scope(|s| {
         for (chunk, out) in xs.chunks(chunk_size).zip(slots.chunks_mut(chunk_size)) {
-            let (f, busy) = (&f, &busy);
+            let (f, clock) = (&f, &clock);
             let sink = sink.clone();
             s.spawn(move || {
                 almide_fan_adopt(sink);
-                almide_fan_busy(busy, || {
-                    for (slot, x) in out.iter_mut().zip(chunk) {
-                        *slot = Some(f(x.clone()));
-                    }
+                clock.worker(out.iter_mut().zip(chunk), |(slot, x)| {
+                    *slot = Some(f(x.clone()));
+                    Some(true)
                 });
             });
         }
     });
-    almide_fan_record(site, busy.into_inner() as u128, n);
+    clock.record(site);
     slots.into_iter().map(|b| b.expect("list.par_map: every slot is written by its worker")).collect()
 }
 
@@ -358,10 +438,10 @@ pub fn almide_rt_list_par_filter<A: Send + Sync + Clone, F: Fn(A) -> bool + Send
     let site = almide_rt_list_par_filter::<A, F> as fn(Vec<A>, F) -> Vec<A> as usize;
     let n = xs.len();
     let workers = almide_rt_fan_plan(n, almide_fan_estimate(site));
-    let busy = std::sync::atomic::AtomicU64::new(0);
+    let clock = AlmideFanClock::new();
     if workers < 2 {
-        let out = almide_fan_busy(&busy, || xs.into_iter().filter(|x| f(x.clone())).collect());
-        almide_fan_record(site, busy.into_inner() as u128, n);
+        let out = clock.calling(|| (xs.into_iter().filter(|x| f(x.clone())).collect(), n));
+        clock.record(site);
         return out;
     }
     let chunk_size = n.div_ceil(workers);
@@ -375,33 +455,43 @@ pub fn almide_rt_list_par_filter<A: Send + Sync + Clone, F: Fn(A) -> bool + Send
     std::thread::scope(|s| {
         let mut handles = Vec::new();
         for chunk in &chunks {
-            let (f, busy) = (&f, &busy);
+            let (f, clock) = (&f, &clock);
             let sink = sink.clone();
             handles.push(s.spawn(move || {
                 almide_fan_adopt(sink);
-                almide_fan_busy(busy, || chunk.iter().filter(|x| f((*x).clone())).cloned().collect::<Vec<A>>())
+                let mut kept = Vec::new();
+                clock.worker(chunk.iter(), |x| {
+                    if f(x.clone()) {
+                        kept.push(x.clone());
+                    }
+                    Some(true)
+                });
+                kept
             }));
         }
         for (i, handle) in handles.into_iter().enumerate() {
             results[i] = Some(handle.join().unwrap());
         }
     });
-    almide_fan_record(site, busy.into_inner() as u128, n);
+    clock.record(site);
     results.into_iter().flatten().flatten().collect()
 }
 
 /// `any` (`stop_on` = true) / `all` (`stop_on` = false): does some element's
 /// verdict equal `stop_on`. Records the elements it actually evaluated.
 fn almide_fan_search<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(site: usize, xs: &[A], f: &F, stop_on: bool) -> bool {
-    let busy = std::sync::atomic::AtomicU64::new(0);
-    let seen = std::sync::atomic::AtomicUsize::new(0);
-    let look = |x: &A| {
-        seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        f(x.clone()) == stop_on
-    };
+    let clock = AlmideFanClock::new();
+    let look = |x: &A| f(x.clone()) == stop_on;
     let workers = almide_rt_fan_plan(xs.len(), almide_fan_estimate(site));
     let hit = if workers < 2 {
-        almide_fan_busy(&busy, || xs.iter().any(look))
+        clock.calling(|| {
+            let mut seen = 0usize;
+            let hit = xs.iter().any(|x| {
+                seen += 1;
+                look(x)
+            });
+            (hit, seen)
+        })
     } else {
         let chunk_size = xs.len().div_ceil(workers);
         let hit = std::sync::atomic::AtomicBool::new(false);
@@ -412,25 +502,24 @@ fn almide_fan_search<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(sit
         let sink = almide_fan_current();
         std::thread::scope(|s| {
             for chunk in xs.chunks(chunk_size) {
-                let (hit, busy, look) = (&hit, &busy, &look);
+                let (hit, clock, look) = (&hit, &clock, &look);
                 let sink = sink.clone();
                 s.spawn(move || {
                     almide_fan_adopt(sink);
-                    almide_fan_busy(busy, || {
-                        for x in chunk {
-                            if hit.load(std::sync::atomic::Ordering::Relaxed) { return; }
-                            if look(x) {
-                                hit.store(true, std::sync::atomic::Ordering::Relaxed);
-                                return;
-                            }
+                    clock.worker(chunk, |x| {
+                        if hit.load(std::sync::atomic::Ordering::Relaxed) { return None; }
+                        if look(x) {
+                            hit.store(true, std::sync::atomic::Ordering::Relaxed);
+                            return Some(false);
                         }
+                        Some(true)
                     });
                 });
             }
         });
         hit.load(std::sync::atomic::Ordering::Relaxed)
     };
-    almide_fan_record(site, busy.into_inner() as u128, seen.into_inner());
+    clock.record(site);
     hit
 }
 

@@ -61,6 +61,22 @@ const RESET_BYTES: usize = 64 << 20;
 const FAN_OFFER_NS: u128 = 30_000;
 const FAN_WORKER_NS: u128 = 9_000;
 
+/// The calling thread's CPU time in ns — the clock an offer's elements are
+/// measured on, the native runtime's `almide_fan_cpu_ns` (list.rs). Wall
+/// time would also count the time a worker sat descheduled: on a loaded
+/// machine ONE preempted call of a trivial body read 4.6 ms and kept its
+/// site parallel. Elsewhere: a monotonic wall clock.
+#[cfg(unix)]
+fn cpu_ns() -> u64 {
+    let ts = rustix::time::clock_gettime(rustix::time::ClockId::ThreadCPUTime);
+    (ts.tv_sec as u64).wrapping_mul(1_000_000_000).wrapping_add(ts.tv_nsec as u64)
+}
+#[cfg(not(unix))]
+fn cpu_ns() -> u64 {
+    static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    T0.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
+}
+
 /// The worker count for an offer of `n` elements whose site last measured
 /// `per_elem` ns per element (`None` = its first offer): >= 2 = parallel on
 /// that many workers, 1 = stay sequential.
@@ -192,8 +208,8 @@ fn run_all(ctx: &ParCtx, req: &Request) -> Option<(Vec<i64>, usize)> {
     let workers = plan(n, estimate);
     let next = AtomicUsize::new(0);
     let failed = AtomicBool::new(false);
-    let busy = AtomicU64::new(0);
-    let deal = Deal { ctx, req, next: &next, failed: &failed, busy: &busy };
+    let (warm, cold) = ([AtomicU64::new(0), AtomicU64::new(0)], [AtomicU64::new(0), AtomicU64::new(0)]);
+    let deal = Deal { ctx, req, next: &next, failed: &failed, warm: &warm, cold: &cold };
     let mut taken = take(ctx, workers);
     let parts: Vec<Option<(Worker, Vec<(usize, Vec<i64>)>)>> = if workers < 2 {
         vec![deal.run(taken.pop())]
@@ -226,8 +242,15 @@ fn run_all(ctx: &ParCtx, req: &Request) -> Option<(Vec<i64>, usize)> {
     if let Ok(mut pool) = ctx.pool.lock() {
         pool.extend(back);
     }
-    if ok && let Ok(mut h) = ctx.history.lock() {
-        h.insert(req.site.clone(), u128::from(busy.load(Ordering::SeqCst)) / n as u128);
+    // The warm elements' mean; the warm-ups' when no worker ran a second one.
+    let [w, wn] = warm.map(AtomicU64::into_inner);
+    let [c, cn] = cold.map(AtomicU64::into_inner);
+    let (ns, k) = if wn > 0 { (w, wn) } else { (c, cn) };
+    if almide_base::env::flag("ALMIDE_DBG_FAN") {
+        eprintln!("[fan-dbg] {}: measured {} ns per element (warm {w} ns / {wn}, warm-up {c} ns / {cn})", req.site, ns / k.max(1));
+    }
+    if ok && k > 0 && let Ok(mut h) = ctx.history.lock() {
+        h.insert(req.site.clone(), u128::from(ns) / u128::from(k));
     }
     ok.then_some((out, workers))
 }
@@ -254,8 +277,13 @@ struct Deal<'a> {
     req: &'a Request,
     next: &'a AtomicUsize,
     failed: &'a AtomicBool,
-    /// The elements' compute time, summed over the workers (ns).
-    busy: &'a AtomicU64,
+    /// `[ns, count]` of the elements' compute (thread CPU time), split as
+    /// the native runtime's `AlmideFanClock` splits it: a worker's FIRST
+    /// element is its warm-up (a fresh thread's and instance's first call —
+    /// that cost belongs to the offer's `WORKER` term, not to `t`) and goes
+    /// to `cold`; the rest go to `warm`.
+    warm: &'a [AtomicU64; 2],
+    cold: &'a [AtomicU64; 2],
 }
 
 impl Deal<'_> {
@@ -300,9 +328,7 @@ impl Deal<'_> {
         let bits = std::iter::once(self.req.elems[i]).chain(self.req.caps.iter().copied());
         let args: Vec<wasmtime::Val> = params.iter().zip(bits).map(|(p, b)| to_val(p, b)).collect();
         let mut ret = [wasmtime::Val::I32(0)];
-        let t0 = std::time::Instant::now();
         func.call(&mut w.store, &args, &mut ret).ok()?;
-        self.busy.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
         if w.store.data().exit.lock().map_or(true, |e| e.is_some()) {
             return None;
         }
@@ -312,6 +338,7 @@ impl Deal<'_> {
     /// Take unclaimed elements on `w` until none is left (or a chunk failed).
     fn drain(&self, mut w: Worker, func: wasmtime::Func, params: &[wasmtime::ValType]) -> Option<(Worker, Vec<(usize, Vec<i64>)>)> {
         let mut done = Vec::new();
+        let mut t0 = cpu_ns();
         loop {
             if self.failed.load(Ordering::SeqCst) {
                 return None;
@@ -322,6 +349,14 @@ impl Deal<'_> {
             }
             let vals = self.one(&mut w, func, params, i)?;
             done.push((i, vals));
+            if done.len() == 1 {
+                let t1 = cpu_ns();
+                add(self.cold, t1.wrapping_sub(t0), 1);
+                t0 = t1;
+            }
+        }
+        if done.len() > 1 {
+            add(self.warm, cpu_ns().wrapping_sub(t0), done.len() as u64 - 1);
         }
         Some((w, done))
     }
@@ -347,6 +382,12 @@ impl Deal<'_> {
             })
             .collect()
     }
+}
+
+/// Add `ns` over `n` elements to a `[ns, count]` cell.
+fn add(cell: &[AtomicU64; 2], ns: u64, n: u64) {
+    cell[0].fetch_add(ns, Ordering::Relaxed);
+    cell[1].fetch_add(n, Ordering::Relaxed);
 }
 
 /// A fresh worker: a new store with the run's bounds and its own captures.
