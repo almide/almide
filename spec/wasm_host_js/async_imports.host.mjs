@@ -69,7 +69,7 @@ export async function after(m) {
   const saved = WebAssembly.Suspending;
   delete WebAssembly.Suspending;
   try {
-    await assert.rejects(m.init(undefined, { js }), /JSPI.*WebAssembly\.Suspending/);
+    await assert.rejects(m.init(undefined, { js }), /JSPI.*WebAssembly\.Suspending.*\(this is Node \d+\.\d+\.\d+\).*Node >= 24\.20/);
   } finally {
     WebAssembly.Suspending = saved;
   }

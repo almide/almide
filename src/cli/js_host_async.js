@@ -8,7 +8,9 @@ let inFlight = false;
 let tail = Promise.resolve();
 function jspiOrRefuse(names) {
   if (typeof WebAssembly.Suspending === "function" && typeof WebAssembly.promising === "function") return;
-  throw new Error(`almide: this module awaits async JS imports (${names.join(", ")}) through JSPI, and this runtime has no WebAssembly.Suspending / WebAssembly.promising — run it on Node >= 24, Chrome >= 137 or workerd, or build without --async-import`);
+  // Node 24.0–24.19 share a V8 with JSPI off by default; 24.20 turns it on (#3362).
+  const node = typeof process !== "undefined" && process.versions && process.versions.node ? ` (this is Node ${process.versions.node})` : "";
+  throw new Error(`almide: this module awaits async JS imports (${names.join(", ")}) through JSPI, and this runtime has no WebAssembly.Suspending / WebAssembly.promising${node} — run it on Node >= 24.20, Chrome >= 137 or workerd, or build without --async-import`);
 }
 function serial(run) {
   const result = tail.then(async () => {
