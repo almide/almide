@@ -261,14 +261,13 @@ pub fn cap_witness(func: &MirFunction) -> CapWitness {
     }
 }
 
-/// A `CallFn` to a host op (`crate::host_ops`, #2739): the op has no prim floor in the
-/// program map for the transitive fold to reach, so its capability is counted HERE, at
-/// the call site. Without this the dotted name would read as capability-free.
+/// A `CallFn` to a host op (`crate::host_ops`, #2739/#3302) or one of its routed
+/// twins: the op's body is not in the program map for the transitive fold to reach,
+/// so its capabilities are counted HERE, at the call site. Without this the dotted
+/// name would read as capability-free.
 fn cap_witness_op_host_call(op: &Op, used: &mut Vec<Capability>) {
     if let Op::CallFn { name, .. } = op {
-        if let Some(cap) = crate::host_ops::host_op_capability(name) {
-            used.push(cap);
-        }
+        used.extend_from_slice(crate::host_ops::host_op_capabilities(name));
     }
 }
 
