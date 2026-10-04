@@ -416,6 +416,11 @@ fn extraction_or_rt_subset(e: &IrExpr) -> Option<Why> {
         IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => match &expr.kind {
             IrExprKind::Var { .. } => None,
             IrExprKind::Call { .. } if carrier_ty(&expr.ty) => call_subset(expr).map(|w| w.inside("unwrap-operand")),
+            // #2758: `err(m)!`, the explicit raise, is a certainly-fresh
+            // carrier — the owned-carrier route of the `!` site
+            // (witness_unwrap.rs): born at the site, out on the err arm,
+            // released on the ok path. Its payload store is the constructor's.
+            IrExprKind::ResultErr { .. } => value_subset(expr).map(|w| w.inside("unwrap-operand")),
             _ => Some(Why::Here(tag(&e.kind))),
         },
         // The deterministic-meter / wall-deadline prims (fuel.rs
