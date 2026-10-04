@@ -980,6 +980,19 @@ fn render_runtime_call_arg_owned(ctx: &RenderContext, symbol: &almide_base::inte
     if !rc_cow_symbol_is_native_runtime(symbol.as_str()) {
         return render_user_call_arg(ctx, a);
     }
+    // #3318: `&xs[i]` of a Bytes/Matrix element read out of a captured cell
+    // stays a snapshot `&almide_index!(..)` — a block whose `AlmideRcCow` tail
+    // rustc checks against the raw param type it expects (E0308), where a
+    // reference would have deref-coerced. `&*` takes the raw value out
+    // first. (A global's elements are stored raw already.)
+    if let IrExprKind::Borrow { expr: inner, as_str: false, mutable: false } = &a.kind
+        && let IrExprKind::IndexAccess { object, .. } = &inner.kind
+        && let IrExprKind::Var { id } = &object.kind
+        && ctx.ann.global(*id).is_none()
+        && matches!(inner.ty, Ty::Bytes | Ty::Matrix | Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Matrix, _))
+    {
+        return format!("(&*{})", render_expr(ctx, inner));
+    }
     let r = render_expr_owned(ctx, a);
     // #617: a concrete container-of-raw runtime param cannot deref-coerce
     // through AlmideRcCow ELEMENTS — clone them out at this (rare) boundary. The
