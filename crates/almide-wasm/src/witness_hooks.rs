@@ -250,17 +250,16 @@ impl Emitter<'_> {
         self.globals.get(&(self.var_space, *id)).map(|&(_, t)| t)
     }
 
-    /// Retain of a Var mirrors `rc_share_guard`: a cell var shares
-    /// nothing (decline — the cell's credit is not this frame's); a
-    /// handle-typed local took the real `rc_inc` and its credit moves
-    /// into the arm (`am`); a droppable local that is not a handle took
-    /// no +1 at all — the arm retains what it did not share: decline.
+    /// Retain of a Var mirrors `rc_share_guard`: a handle-typed local took
+    /// the real `rc_inc` and its credit moves into the arm (`am`); a
+    /// droppable local that is not a handle took no +1 at all — the arm
+    /// retains what it did not share: decline. A C-319 cell var shares its
+    /// OCCUPANT the same way (`rc_share_guard`, #2010); the share lands on
+    /// the cell's line (witness_mut.rs `witness_cell_bind`), and a cell no
+    /// hook bound declines.
     fn witness_retain_var(&mut self, e: &almide_ir::IrExpr, position: &str) {
         let almide_ir::IrExprKind::Var { id } = &e.kind else { return };
-        if self.cells.contains(id) {
-            self.witness_decline(&format!("{position}:retain-cell"));
-            return;
-        }
+        let is_cell = self.cells.contains(id);
         let Some(&(l, vt)) = self.locals.get(id) else {
             // A global's block: `rc_share_guard` shares a handle, a view's
             // share moved into the holder (`am`).
@@ -281,22 +280,29 @@ impl Emitter<'_> {
         if let Some(w) = self.witness.as_mut()
             && !w.arg_share_move(l)
         {
-            w.poison();
+            if is_cell {
+                w.decline(&format!("{position}:retain-cell"));
+            } else {
+                w.poison();
+            }
         }
     }
 
     /// #2758: a capture stored into a new closure's env (emitter_values.rs
     /// `lower_lambda_value`). The env is a holder: a handle-typed capture
     /// takes the `share_handle_top` +1 and its credit moves into the env
-    /// (`am`, released by the env's drop glue). A C-319 cell co-owns the
-    /// cell, not the value (decline); a droppable capture that is not a
-    /// handle took no +1 (decline, as `witness_retain_var`).
+    /// (`am`, released by the env's drop glue). A C-319 cell: the env
+    /// co-owns the CELL (witness_mut.rs); a droppable capture that is not
+    /// a handle took no +1 (decline, as `witness_retain_var`).
     pub(crate) fn witness_capture(&mut self, idx: u32, t: SliceTy, is_cell: bool) {
-        if self.witness.is_none() || !self.rc_droppable(t) {
+        if self.witness.is_none() {
             return;
         }
         if is_cell {
-            self.witness_decline("capture:cell");
+            self.witness_cell_capture(idx);
+            return;
+        }
+        if !self.rc_droppable(t) {
             return;
         }
         if !self.elem_is_handle(t) {

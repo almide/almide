@@ -418,9 +418,9 @@ pub(crate) fn lower_fn(
             // share, below). A C-319 cell's ADDRESS travels instead, and the
             // env holds the cell (its drop glue releases it): a READ of the
             // cell's occupant is a view like any capture's — a share it
-            // takes lands on the occupant, a block the frame does not hold —
-            // and every WRITE through the cell declines at its own route
-            // (`assign:global-or-cell`, `mut-receiver:cell`, `*:retain-cell`).
+            // takes lands on the cell's line (witness_mut.rs) — and a WRITE
+            // through the cell is the outer holder's (#3138,
+            // `witness_holder`).
             let pre_gate = if crate::witness::argv_exception(name) {
                 Some("caps:argv-in-plain-fn".to_string())
             } else {
