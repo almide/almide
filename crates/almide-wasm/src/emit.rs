@@ -579,6 +579,7 @@ fn emit_program_pass(
             crate::host_exports::note_export(
                 &export_name,
                 table.infos[i].param_owned.clone(),
+                crate::host_exports::export_params(&table.infos[i].params, &types),
                 crate::host_exports::export_ret(table.infos[i].ret, &types),
             );
             export_fns.push((export_name, table.infos[i].wasm_index));

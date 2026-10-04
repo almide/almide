@@ -20,18 +20,41 @@ thread_local! {
     static STRING_ABI: Cell<bool> = const { Cell::new(false) };
     static EXPORT_OWNED: RefCell<BTreeMap<String, Vec<bool>>> = const { RefCell::new(BTreeMap::new()) };
     static EXPORT_RET: RefCell<BTreeMap<String, ExportRet>> = const { RefCell::new(BTreeMap::new()) };
+    static EXPORT_PARAMS: RefCell<BTreeMap<String, Vec<AbiShape>>> = const { RefCell::new(BTreeMap::new()) };
 }
 
-/// What one return slot of an exported function holds, as the host can
-/// convert it (#3352). `Other` names a shape the host has no marshalling for.
+/// What one slot on the export boundary holds, as the host converts it
+/// (#3352, #3354) — the layout the emitter itself uses, so the host never
+/// re-derives it. `Other` names a shape the host has no marshalling for.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AbiKind {
+pub enum AbiShape {
     Int,
     Float,
     Bool,
     Str,
     Unit,
+    /// A byte-packed block; len = byte count.
+    Bytes,
+    /// A block of `len / stride` element slots of `stride` bytes.
+    List { el: Box<AbiShape>, stride: u32 },
+    /// `NULL_ADDR` = none; `some` is a block whose payload+0 slot holds the value.
+    Option(Box<AbiShape>),
+    /// A record block: `(field, payload-relative offset, shape)` in declared
+    /// order, `size` payload bytes.
+    Record { name: String, size: u32, fields: Vec<(String, u32, AbiShape)> },
     Other(String),
+}
+
+impl AbiShape {
+    /// Does the shape (or anything inside it) lack a host marshalling?
+    pub fn unsupported(&self) -> Option<&str> {
+        match self {
+            AbiShape::Other(what) => Some(what),
+            AbiShape::List { el, .. } | AbiShape::Option(el) => el.unsupported(),
+            AbiShape::Record { fields, .. } => fields.iter().find_map(|(_, _, f)| f.unsupported()),
+            _ => None,
+        }
+    }
 }
 
 /// The return ABI the emitter gave an exported function (#3352) — read by
@@ -42,30 +65,56 @@ pub enum ExportRet {
     /// No result (a pure fn returning `Unit`).
     Void,
     /// The value itself.
-    Value(AbiKind),
+    Value(AbiShape),
     /// An i32 `Result` block: tag at payload+`SUM_TAG` (0 = ok), the value
     /// at payload+`SUM_FIELD`.
-    Result(AbiKind, AbiKind),
+    Result(AbiShape, AbiShape),
 }
 
-fn abi_kind(t: crate::SliceTy) -> AbiKind {
+/// Records nest at most this deep on the boundary; a deeper (or recursive)
+/// type is `Other`, a refusal rather than an unbounded walk.
+const MAX_DEPTH: u32 = 16;
+
+fn abi_shape(t: crate::SliceTy, types: &crate::types_table::TypeTable, depth: u32) -> AbiShape {
     use crate::{Scalar, SliceTy};
-    match t {
-        SliceTy::Scalar(Scalar::Int) => AbiKind::Int,
-        SliceTy::Scalar(Scalar::Float) => AbiKind::Float,
-        SliceTy::Scalar(Scalar::Bool) => AbiKind::Bool,
-        SliceTy::Scalar(Scalar::Str) => AbiKind::Str,
-        SliceTy::Unit => AbiKind::Unit,
-        other => AbiKind::Other(format!("{other:?}")),
+    if depth > MAX_DEPTH {
+        return AbiShape::Other(format!("a type nested deeper than {MAX_DEPTH}"));
     }
+    match t {
+        SliceTy::Scalar(Scalar::Int) => AbiShape::Int,
+        SliceTy::Scalar(Scalar::Float) => AbiShape::Float,
+        SliceTy::Scalar(Scalar::Bool) => AbiShape::Bool,
+        SliceTy::Scalar(Scalar::Str) => AbiShape::Str,
+        SliceTy::Scalar(Scalar::Bytes) => AbiShape::Bytes,
+        SliceTy::Unit => AbiShape::Unit,
+        SliceTy::List(e) => {
+            let el = types.el(e);
+            AbiShape::List { stride: el.slot_size(), el: Box::new(abi_shape(el, types, depth + 1)) }
+        }
+        SliceTy::Option(e) => AbiShape::Option(Box::new(abi_shape(types.el(e), types, depth + 1))),
+        SliceTy::Named(i) => match types.def(i) {
+            crate::types_table::NamedDef::Record(r) => AbiShape::Record {
+                name: types.name_of(i),
+                size: r.size,
+                fields: r.fields.iter().map(|f| (f.name.clone(), f.offset, abi_shape(f.ty, types, depth + 1))).collect(),
+            },
+            _ => AbiShape::Other(format!("variant `{}`", types.name_of(i))),
+        },
+        other => AbiShape::Other(format!("{other:?}")),
+    }
+}
+
+/// The host-facing form of an export's emitted parameter types.
+pub(crate) fn export_params(params: &[crate::SliceTy], types: &crate::types_table::TypeTable) -> Vec<AbiShape> {
+    params.iter().map(|t| abi_shape(*t, types, 0)).collect()
 }
 
 /// The host-facing form of an export's emitted return type.
 pub(crate) fn export_ret(ret: Option<crate::SliceTy>, types: &crate::types_table::TypeTable) -> ExportRet {
     match ret {
         None => ExportRet::Void,
-        Some(crate::SliceTy::Result(ok, err)) => ExportRet::Result(abi_kind(types.el(ok)), abi_kind(types.el(err))),
-        Some(t) => ExportRet::Value(abi_kind(t)),
+        Some(crate::SliceTy::Result(ok, err)) => ExportRet::Result(abi_shape(types.el(ok), types, 0), abi_shape(types.el(err), types, 0)),
+        Some(t) => ExportRet::Value(abi_shape(t, types, 0)),
     }
 }
 
@@ -93,8 +142,9 @@ pub const RELEASE_EXPORT: &str = "__release";
 
 /// Record which params of an exported function the CALLEE owns (releases
 /// at its exit plan) — `false` means borrowed, the caller keeps its credit.
-pub(crate) fn note_export(name: &str, param_owned: Vec<bool>, ret: ExportRet) {
+pub(crate) fn note_export(name: &str, param_owned: Vec<bool>, params: Vec<AbiShape>, ret: ExportRet) {
     if js_host() {
+        EXPORT_PARAMS.with(|m| { m.borrow_mut().insert(name.to_string(), params); });
         EXPORT_OWNED.with(|m| { m.borrow_mut().insert(name.to_string(), param_owned); });
         EXPORT_RET.with(|m| { m.borrow_mut().insert(name.to_string(), ret); });
     }
@@ -110,6 +160,11 @@ pub fn export_rets() -> BTreeMap<String, ExportRet> {
     EXPORT_RET.with(|m| m.borrow().clone())
 }
 
+/// The parameter shapes of every export recorded since the guard was set (#3354).
+pub fn export_params_noted() -> BTreeMap<String, Vec<AbiShape>> {
+    EXPORT_PARAMS.with(|m| m.borrow().clone())
+}
+
 /// Turn the switch on for a scope and restore the previous state on drop.
 #[must_use = "the guard restores the previous state when dropped; binding it to `_` restores immediately"]
 pub struct JsHostGuard(bool);
@@ -121,6 +176,7 @@ impl JsHostGuard {
         STRING_ABI.with(|c| c.set(false));
         EXPORT_OWNED.with(|m| m.borrow_mut().clear());
         EXPORT_RET.with(|m| m.borrow_mut().clear());
+        EXPORT_PARAMS.with(|m| m.borrow_mut().clear());
         Self(prev)
     }
 }

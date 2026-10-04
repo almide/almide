@@ -27,8 +27,14 @@ export async function after(m) {
   assert.throws(() => m.e_declared(false), { name: "AlmideError", message: "declared no" });
   // Both exits many times over: every block the module hands back is released.
   const big = "x".repeat(50000);
-  for (let i = 0; i < 2000; i++) {
-    assert.equal(m.e_echo(big + i), big + i + "/1");
-    assert.throws(() => m.e_string(false), { message: "no string" });
-  }
+  const rounds = (n) => {
+    for (let i = 0; i < n; i++) {
+      assert.equal(m.e_echo(big + i), big + i + "/1");
+      assert.throws(() => m.e_string(false), { message: "no string" });
+    }
+  };
+  rounds(200);
+  const settled = m.memoryBytes();
+  rounds(2000);
+  assert.equal(m.memoryBytes(), settled, "memory grew: a Result block or its payload leaks");
 }
