@@ -1,0 +1,5 @@
+// A generic wasm export in a linked module is refused like one in the
+// entry file (#3285), naming the fn by its module.
+import self.concrete
+
+effect fn main() -> Unit = println(int.to_string(concrete.first([3], 0)))

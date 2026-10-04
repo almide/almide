@@ -1,0 +1,2 @@
+@export(wasm, "first")
+fn first(xs: List[Int], d: Int) -> Int = list.first(xs) ?? d

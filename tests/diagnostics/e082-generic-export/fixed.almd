@@ -1,0 +1,8 @@
+// A wasm export on a generic fn: the export has no one signature, so the
+// wasm target refuses it (#3285) instead of shipping without it.
+fn ident[T](x: T) -> T = x
+
+@export(wasm, "ident")
+fn ident_int(x: Int) -> Int = ident(x)
+
+effect fn main() -> Unit = println(int.to_string(ident_int(1)))

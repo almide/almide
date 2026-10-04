@@ -27,6 +27,10 @@
 //! each half is then checked in a scratch project with its manifest
 //! (`check_case`).
 //!
+//! A case whose diagnostic is a TARGET verdict sets `check_target = "wasm"`
+//! in `meta.toml`: both halves are then checked with `almide check
+//! --target wasm` (#1922), the route E082 is reported on (#3285).
+//!
 //! Running: `cargo test --test diagnostic_harness_test`.
 
 use std::collections::HashMap;
@@ -45,6 +49,8 @@ struct Meta {
     /// #2804: `"LINE:COL"` of the first diagnostic, asserted against both the
     /// rendered `broken.almd:LINE:COL` header and the `--json` primary span.
     expects_line_col: Option<String>,
+    /// `--target` for `almide check` (only `wasm`): the E082 families.
+    check_target: Option<String>,
 }
 
 fn parse_meta(path: &Path) -> Meta {
@@ -62,6 +68,7 @@ fn parse_meta(path: &Path) -> Meta {
                 "expects_code" => "expects_code",
                 "hint_substring" => "hint_substring",
                 "expects_line_col" => "expects_line_col",
+                "check_target" => "check_target",
                 _ => continue,
             },
             value,
@@ -72,6 +79,7 @@ fn parse_meta(path: &Path) -> Meta {
         expects_code: fields.remove("expects_code"),
         hint_substring: fields.remove("hint_substring"),
         expects_line_col: fields.remove("expects_line_col"),
+        check_target: fields.remove("check_target"),
     }
 }
 
@@ -96,8 +104,16 @@ fn collect_cases() -> Vec<PathBuf> {
 }
 
 fn run_check(file: &Path) -> (bool, String, String) {
+    run_check_target(file, None)
+}
+
+fn run_check_target(file: &Path, target: Option<&str>) -> (bool, String, String) {
+    let mut args = vec!["check", file.to_str().unwrap()];
+    if let Some(t) = target {
+        args.extend(["--target", t]);
+    }
     let out = Command::new(almide())
-        .args(["check", file.to_str().unwrap()])
+        .args(&args)
         .output()
         .expect("almide check");
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
@@ -114,7 +130,8 @@ fn check_case(case: &Path, half: &str) -> (bool, String, String) {
     let file = case.join(format!("{half}.almd"));
     let manifest = case.join(format!("{half}.toml"));
     if !manifest.exists() {
-        return run_check(&file);
+        let meta = parse_meta(&case.join("meta.toml"));
+        return run_check_target(&file, meta.check_target.as_deref());
     }
     let name = case.file_name().unwrap().to_string_lossy();
     let dir = std::env::temp_dir().join(format!("almide-diagfx-{name}-{half}-{}", std::process::id()));
