@@ -111,7 +111,10 @@ impl Why {
 /// value moves into the slot (`witness_store`), an out-of-range index aborts;
 /// `h.f = v` — the copy-on-write field write rebinds the root var
 /// (`witness_field_rebind`), the value moves into the copy's slot
-/// (`witness_field_value`).
+/// (`witness_field_value`). #2758: `m[k] = v` — the in-place window
+/// (map_inplace.rs) lowers the key and the value through `lower_arg`
+/// (`Retain`) and rebinds the var (`witness_mut_rebind`), exactly the
+/// `map.insert(m, k, v)` route; its functional fallback declines at emission.
 fn write_subset(s: &IrStmtKind) -> Option<String> {
     match s {
         IrStmtKind::Assign { value, .. } => value_subset(value).map(|w| w.at("assign")),
@@ -119,6 +122,7 @@ fn write_subset(s: &IrStmtKind) -> Option<String> {
             value_subset(index).or_else(|| value_subset(value)).map(|w| w.at("index-assign"))
         }
         IrStmtKind::FieldAssign { value, .. } => value_subset(value).map(|w| w.at("field-assign")),
+        IrStmtKind::MapInsert { key, value, .. } => value_subset(key).or_else(|| value_subset(value)).map(|w| w.at("map-insert")),
         _ => None,
     }
 }
@@ -174,7 +178,10 @@ fn stmts_subset(stmts: &[almide_ir::IrStmt]) -> Option<String> {
                 }
             }
             IrStmtKind::Expr { expr } => return Some(format!("stmt:Expr:{}", expr_tag(expr))),
-            IrStmtKind::Assign { .. } | IrStmtKind::IndexAssign { .. } | IrStmtKind::FieldAssign { .. } => {
+            IrStmtKind::Assign { .. }
+            | IrStmtKind::IndexAssign { .. }
+            | IrStmtKind::FieldAssign { .. }
+            | IrStmtKind::MapInsert { .. } => {
                 if let Some(why) = write_subset(&s.kind) {
                     return Some(why);
                 }
