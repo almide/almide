@@ -319,7 +319,10 @@ impl Checker {
     /// `o.inner.xs = v` writes into `o.inner`). `None` when the root is not
     /// a binding or a step names no field of its record.
     fn place_ty(&mut self, target: &Sym, path: &[Sym]) -> Option<Ty> {
-        let mut ty = self.assign_target_ty(target)?;
+        let (mut ty, path) = match self.module_place(target, path.first()) {
+            Some(key) => (self.env.top_lets.get(&key)?.clone(), &path[1..]),
+            None => (self.assign_target_ty(target)?, path),
+        };
         for step in path {
             let next = self.resolve_field_type(&ty, step.as_str());
             if matches!(resolve_ty(&next, &self.uf), Ty::Unknown) {
@@ -366,7 +369,15 @@ impl Checker {
         let ast::Stmt::FieldAssign { target, path, field, value, .. } = stmt else { unreachable!() };
         let val_ty = self.infer_expr(value);
         let shape = format!("{}.{} = ...", Self::place_label(target, path), field);
-        self.check_place_root_mutable(target, shape);
+        // `m.x = v`: the whole of another module's top-level binding (#3312).
+        if path.is_empty() && let Some(key) = self.module_place(target, Some(field)) {
+            self.check_module_place_mutable(target, field, key, shape);
+            if let Some(var_ty) = self.env.top_lets.get(&key).cloned() {
+                self.unify_assigned_value(&format!("{}.{}", target, field), var_ty, &val_ty, value);
+            }
+            return;
+        }
+        self.check_place_root_mutable(target, path, shape);
         let Some(obj_ty) = self.place_ty(target, path) else { return };
         let field_ty = self.resolve_field_type(&obj_ty, field.as_str());
         if matches!(resolve_ty(&field_ty, &self.uf), Ty::Unknown) {
@@ -565,7 +576,12 @@ impl Checker {
     /// `let g; g[2]=…` slipped past this check and only failed later as
     /// opaque rustc `E0425`. A field write on a `let` passed check the same
     /// way and failed natively as rustc E0594 (#3064).
-    fn check_place_root_mutable(&mut self, target: &Sym, shape: String) {
+    fn check_place_root_mutable(&mut self, target: &Sym, path: &[Sym], shape: String) {
+        if let Some(first) = path.first()
+            && let Some(key) = self.module_place(target, Some(first))
+        {
+            return self.check_module_place_mutable(target, first, key, shape);
+        }
         let is_known_binding = self.env.lookup_var(target.as_str()).is_some()
             || self.env.top_lets.contains_key(&sym(target.as_str()));
         if is_known_binding && !self.env.mutable_vars.contains(target) {
@@ -586,7 +602,7 @@ impl Checker {
         let val_ty = self.infer_expr(value);
         self.unify_index_assign(target, path, (index, idx_ty), (value, &val_ty));
         let shape = format!("{}[...] = ...", Self::place_label(target, path));
-        self.check_place_root_mutable(target, shape);
+        self.check_place_root_mutable(target, path, shape);
     }
 
     /// `ast::Stmt::GuardLet` arm of [`Self::check_stmt`]: Swift-style
@@ -626,6 +642,7 @@ impl Checker {
 }
 
 include!("infer_patterns.rs");
+include!("infer_module_place.rs");
 
 impl Checker {
 
