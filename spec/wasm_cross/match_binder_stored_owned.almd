@@ -1,0 +1,211 @@
+// @contract: C-075
+// #3303: a payload a `match` binds out of a BORROWED subject (a by-reference
+// param, or a binder such a match bound) is bound `&T` on the native leg, and
+// storing it into an owned place — a `let` / `var` initializer, a `var`
+// reassignment, a field write, a list slot write — must own it first. Native
+// stored the reference (`color = c`, rustc E0308 expected `C`, found `&C`)
+// while the wasm leg printed the answer. Every store site, tuple and record
+// payload patterns, String / List payloads and a nested match are covered;
+// the positions that already owned it (return, record field, concatenation,
+// loop binders) are kept beside them.
+type C = { r: Float }
+
+type P = | Solid(C) | NoP
+
+type Box = { inner: C }
+
+type Pair = | Two(C, C) | Zero
+
+type Q = | Painted { inner: C } | Blank
+
+fn ret(p: P) -> C = match p {
+  Solid(c) => c,
+  NoP => { r: 0.0 },
+}
+
+fn bind_let(p: P) -> Float = match p {
+  Solid(c) => {
+    let d = c
+    d.r
+  },
+  NoP => 0.0,
+}
+
+fn assign_var(p: P) -> Float = {
+  var color: C = { r: 0.0 }
+  match p {
+    Solid(c) => {
+      color = c
+    },
+    NoP => (),
+  }
+  color.r
+}
+
+fn assign_field(p: P) -> Float = {
+  var b: Box = { inner: { r: 0.0 } }
+  match p {
+    Solid(c) => {
+      b.inner = c
+    },
+    NoP => (),
+  }
+  b.inner.r
+}
+
+fn assign_slot(p: P) -> Float = {
+  var xs: List[C] = [
+    { r: 0.0 }
+  ]
+  match p {
+    Solid(c) => {
+      xs[0] = c
+    },
+    NoP => (),
+  }
+  xs[0].r
+}
+
+fn construct(p: P) -> Float = match p {
+  Solid(c) => {
+    let b: Box = { inner: c }
+    b.inner.r
+  },
+  NoP => 0.0,
+}
+
+fn append(p: P) -> Int = {
+  var xs: List[C] = []
+  match p {
+    Solid(c) => {
+      xs = xs + [c]
+    },
+    NoP => (),
+  }
+  list.len(xs)
+}
+
+fn tuple_assign(p: Pair) -> Float = {
+  var a: C = { r: 0.0 }
+  var b: C = { r: 0.0 }
+  match p {
+    Two(x, y) => {
+      a = x
+      b = y
+    },
+    Zero => (),
+  }
+  a.r + b.r
+}
+
+fn iflet_assign(o: C?) -> Float = {
+  var color: C = { r: 0.0 }
+  match o {
+    some(c) => {
+      color = c
+    },
+    none => (),
+  }
+  color.r
+}
+
+fn record_pat(q: Q) -> Float = {
+  var color: C = { r: 0.0 }
+  match q {
+    Painted { inner } => {
+      color = inner
+    },
+    Blank => (),
+  }
+  color.r
+}
+
+fn for_assign(xs: List[C]) -> Float = {
+  var last: C = { r: 0.0 }
+  for c in xs {
+    last = c
+  }
+  last.r
+}
+
+fn for_destructure(xs: List[(C, Int)]) -> Float = {
+  var last: C = { r: 0.0 }
+  for (c, _) in xs {
+    last = c
+  }
+  last.r
+}
+
+type Tag = | Named(String) | Items(List[Int]) | Nothing
+
+type Wrap = | Inner(Tag) | Empty
+
+fn name_of(t: Tag) -> String = {
+  var s = "none"
+  match t {
+    Named(n) => {
+      s = n
+    },
+    _ => (),
+  }
+  s
+}
+
+fn items_of(t: Tag) -> Int = {
+  var xs: List[Int] = []
+  match t {
+    Items(v) => {
+      xs = v
+    },
+    _ => (),
+  }
+  list.len(xs)
+}
+
+fn nested_tag(w: Wrap) -> String = {
+  var s = "none"
+  match w {
+    Inner(t) => match t {
+      Named(n) => {
+        s = n
+      },
+      _ => (),
+    },
+    Empty => (),
+  }
+  s
+}
+
+fn var_init(t: Tag) -> String = match t {
+  Named(n) => {
+    var copy = n
+    copy = copy + "!"
+    copy
+  },
+  _ => "",
+}
+
+effect fn main() -> Unit = {
+  let p = Solid({ r: 1.5 })
+  println(float.to_string(ret(p).r))
+  println(float.to_string(bind_let(p)))
+  println(float.to_string(assign_var(p)))
+  println(float.to_string(assign_field(p)))
+  println(float.to_string(assign_slot(p)))
+  println(float.to_string(construct(p)))
+  println(int.to_string(append(p)))
+  println(float.to_string(tuple_assign(Two({ r: 1.0 }, { r: 2.0 }))))
+  println(float.to_string(iflet_assign(some({ r: 4.0 }))))
+  println(float.to_string(record_pat(Painted { inner: { r: 5.0 } })))
+  println(float.to_string(for_assign([
+    { r: 6.0 },
+    { r: 7.0 }
+  ])))
+  println(float.to_string(for_destructure([
+    ({ r: 8.0 }, 1)
+  ])))
+  println(name_of(Named("a")))
+  println(int.to_string(items_of(Items([1, 2, 3]))))
+  println(nested_tag(Inner(Named("b"))))
+  println(var_init(Named("c")))
+}
