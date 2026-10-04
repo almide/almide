@@ -73,7 +73,12 @@ fn print_usage() {
          \x20 xtarget-fuzz ladder <file.almd> [--timeout S]\n\
          \x20 xtarget-fuzz gen    --seed N --index I [--family F]\n\
          \x20 xtarget-fuzz stats\n\n\
-         --family all|identity|synthesis|composition  (default: all)\n\
+         --family all|identity|synthesis|composition|shape  (default: all)\n\
+         \x20 `shape` runs ONLY the multi-module family (#3309): projects of sibling\n\
+         \x20 modules and path-dependency packages with top-level lets of every kind,\n\
+         \x20 module vars mutated from closures / other modules, and adversarial names\n\
+         \x20 (case-only twins, generated binders, mangled-static spellings); judged by\n\
+         \x20 construction, and a wasm wall counts. Part of `all` too.\n\
          \x20 `composition` runs ONLY the operator-interleaving family: `??` `!` `?`\n\
          \x20 `|>` match and tuple extraction over Int / String / tuple / record\n\
          \x20 payloads, judged by construction like `identity`. Part of `all` too.\n\
@@ -142,7 +147,7 @@ fn resolve_family(args: &[String]) -> Family {
     match flag_value(args, "--family") {
         None => Family::All,
         Some(s) => Family::parse(s).unwrap_or_else(|| {
-            eprintln!("unknown --family {s:?} (expected: all, identity, synthesis, composition)");
+            eprintln!("unknown --family {s:?} (expected: all, identity, synthesis, composition, shape)");
             std::process::exit(2);
         }),
     }
@@ -340,9 +345,22 @@ fn worker_loop(
         tc.prune_build_cache();
 
         let gen = engine.generate(cfg.seed, index);
-        if std::fs::write(&file, &gen.source).is_err() {
-            continue;
-        }
+        // A shape-family program is a whole project (#3309): its files land
+        // in their own dir and the ladder is pointed at the entry; the fmt
+        // and interp rungs see the entry's text (the interp abstains on a
+        // module it cannot resolve).
+        let (file, ladder_source) = match &gen.project {
+            Some(p) => match p.write_to(&work_dir.join("shape")) {
+                Ok(entry) => (entry, p.entry_source().to_string()),
+                Err(_) => continue,
+            },
+            None => {
+                if std::fs::write(&file, &gen.source).is_err() {
+                    continue;
+                }
+                (file.clone(), gen.source.clone())
+            }
+        };
 
         stats.generated.fetch_add(1, Ordering::Relaxed);
         if gen.expected_stdout.is_some() {
@@ -354,12 +372,25 @@ fn worker_loop(
         // ~half of generated programs that leak today.
         let outcome = run_ladder(
             &tc_ladder,
-            &gen.source,
+            &ladder_source,
             &file,
             &wasm,
             Some(&reference),
             gen.expected_stdout.as_deref(),
         );
+        // In the shape family `almide check` accepted the project, so a wasm
+        // wall is the bug class #3309 is about (#3286, #3296: an accepted
+        // program the wasm leg refuses), not subset-coverage debt.
+        let outcome = match outcome {
+            Outcome::Walled { reason } if gen.project.is_some() => Outcome::Finding(oracle::Finding {
+                rung: Rung::WasmBuild,
+                kind: FindingKind::WasmBuildFailure,
+                summary: format!("wasm walled an accepted multi-module program: {reason}"),
+                native: None,
+                wasm: None,
+            }),
+            other => other,
+        };
 
         match outcome {
             Outcome::Clean { native } => {
@@ -391,7 +422,7 @@ fn worker_loop(
                 // re-discovery dedups whatever the minimizer would produce:
                 // only the first leak of the campaign pays for minimizing
                 // (with the rung armed, so the ladder reproduces the kind).
-                if let Some(leak) = if tc.leak_check { leak_at_exit(&tc, &file) } else { None } {
+                if let Some(leak) = if tc.leak_check && gen.project.is_none() { leak_at_exit(&tc, &file) } else { None } {
                     stats.findings.fetch_add(1, Ordering::Relaxed);
                     if !sink.is_known(&leak) {
                         let minimized = match &gen.plan {
@@ -455,7 +486,9 @@ fn worker_loop(
                 // program is supposed to print — the text minimizer would
                 // "reproduce" for the wrong reason and turn a miscompile
                 // into a generator artifact.
-                let minimized = if matches!(finding.kind, FindingKind::Hang | FindingKind::Slow) {
+                // A shape project is recorded whole (its bundle): the text
+                // minimizer shrinks one file, and the plan is the cell.
+                let minimized = if matches!(finding.kind, FindingKind::Hang | FindingKind::Slow) || gen.project.is_some() {
                     minimize::Minimized { source: gen.source.clone(), finding: None }
                 } else if let Some(plan) = &gen.plan {
                     minimize::minimize_plan(&tc_ladder, plan, finding.kind, &work_dir, Some(&reference))
@@ -608,9 +641,19 @@ fn cmd_replay(args: &[String]) {
 
     let work_dir = scratch_root(&repo).join("replay");
     let _ = std::fs::create_dir_all(&work_dir);
-    let file = work_dir.join("replay.almd");
+    let mut file = work_dir.join("replay.almd");
     let wasm = work_dir.join("replay.wasm");
-    let _ = std::fs::write(&file, &gen.source);
+    let mut ladder_source = gen.source.clone();
+    match &gen.project {
+        Some(p) => {
+            file = p.write_to(&work_dir.join("shape")).expect("write the shape project");
+            ladder_source = p.entry_source().to_string();
+            eprintln!("(shape project written under {})", work_dir.join("shape").display());
+        }
+        None => {
+            let _ = std::fs::write(&file, &gen.source);
+        }
+    }
 
     let reference = crate::oracle::InterpOracle::new();
     let tc = Toolchain {
@@ -622,7 +665,7 @@ fn cmd_replay(args: &[String]) {
     };
     let outcome = run_ladder(
         &tc,
-        &gen.source,
+        &ladder_source,
         &file,
         &wasm,
         Some(&reference),

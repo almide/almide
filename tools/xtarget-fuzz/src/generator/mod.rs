@@ -23,6 +23,11 @@ mod denylist;
 pub mod identity;
 mod mutate;
 mod pools;
+/// The shape vocabulary of the multi-module matrix gate (#3309), shared
+/// verbatim with `tests/shape_matrix_test.rs` so the random hunt and the
+/// deterministic gate never drift apart.
+#[path = "../../../../tests/shape_matrix/gen.rs"]
+pub mod shape;
 mod program;
 mod sig_type;
 mod term;
@@ -42,6 +47,15 @@ const IDENTITY_WEIGHT: u32 = 3;
 /// Weight of the composition family among the NON-identity draws: with
 /// synthesis + mutation at 10, roughly one program in four of that share.
 const COMPOSITION_WEIGHT: u32 = 3;
+/// Weight of the shape family (#3309) among the draws neither identity nor
+/// composition claimed: with synthesis + mutation at 10, one in six.
+const SHAPE_WEIGHT: u32 = 2;
+
+/// Salt for the shape family's own sub-stream — the composition family's
+/// discipline: its roll touches no other family's stream, so every archived
+/// identity / composition seed keeps replaying, and only some former
+/// synthesis / mutation indices now belong to this family.
+const SHAPE_STREAM_SALT: u64 = 0x3309_0AC1_E5EE_D503;
 
 /// Salt for the composition family's own RNG sub-stream, split off exactly
 /// like the identity family's: the family roll must not touch the main
@@ -80,6 +94,10 @@ pub enum Family {
     /// record payloads in tail / let / call-argument positions, judged
     /// by construction like the identity family.
     Composition,
+    /// The self-checking multi-module shape family (#3309): projects of
+    /// sibling modules and path-dependency packages whose top-level lets,
+    /// module vars and mutation sites carry adversarial names.
+    Shape,
 }
 
 impl Family {
@@ -89,6 +107,7 @@ impl Family {
             "identity" => Some(Family::Identity),
             "synthesis" => Some(Family::Synthesis),
             "composition" => Some(Family::Composition),
+            "shape" => Some(Family::Shape),
             _ => None,
         }
     }
@@ -99,6 +118,7 @@ impl Family {
             Family::Identity => "identity",
             Family::Synthesis => "synthesis",
             Family::Composition => "composition",
+            Family::Shape => "shape",
         }
     }
 }
@@ -118,6 +138,41 @@ pub struct Generated {
     /// be shrunk WITHIN its family (text-level shrinking would break the
     /// by-construction invariant and invalidate the oracle).
     pub plan: Option<FamilyPlan>,
+    /// A multi-file program (the shape family): every file of the project
+    /// and the entry the ladder is pointed at. `source` then holds a
+    /// readable bundle of all the files, for the findings record.
+    pub project: Option<Project>,
+}
+
+/// A generated project: `(path relative to its root, text)` per file, and
+/// the entry file.
+#[derive(Debug, Clone)]
+pub struct Project {
+    pub files: Vec<(String, String)>,
+    pub entry: String,
+}
+
+impl Project {
+    /// The entry file's text (what the fmt and interp rungs see).
+    pub fn entry_source(&self) -> &str {
+        self.files.iter().find(|(p, _)| *p == self.entry).map(|(_, t)| t.as_str()).unwrap_or("")
+    }
+
+    /// Write every file under `root` (emptied first).
+    pub fn write_to(&self, root: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+        let _ = std::fs::remove_dir_all(root);
+        for (rel, text) in &self.files {
+            let p = root.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap_or(root))?;
+            std::fs::write(&p, text)?;
+        }
+        Ok(root.join(&self.entry))
+    }
+
+    /// Every file, each under a `// ==== <path> ====` header.
+    pub fn bundle(&self) -> String {
+        self.files.iter().map(|(p, t)| format!("// ==== {p} ====\n{t}\n")).collect()
+    }
 }
 
 /// The plan of a self-checking program, per family. The minimizer shrinks
@@ -130,7 +185,7 @@ pub enum FamilyPlan {
 
 impl Generated {
     fn plain(source: String, origin: Origin) -> Self {
-        Generated { source, origin, expected_stdout: None, plan: None }
+        Generated { source, origin, expected_stdout: None, plan: None, project: None }
     }
 }
 
@@ -145,6 +200,8 @@ pub enum Origin {
     Identity { blocks: usize },
     /// Operator round trips over a known literal by the composition family.
     Composition { probes: usize },
+    /// A multi-module project of the shape family (#3309).
+    Shape { files: usize },
 }
 
 /// Everything the generator needs that is constant across the campaign.
@@ -192,9 +249,12 @@ impl Engine {
 
         let mut comp = SplitMix64::for_program(seed ^ COMPOSITION_STREAM_SALT, index);
 
+        let mut shape_rng = SplitMix64::for_program(seed ^ SHAPE_STREAM_SALT, index);
+
         match self.family {
             Family::Identity => return self.identity(&mut alt),
             Family::Composition => return self.composition(&mut comp),
+            Family::Shape => return Self::shape(&mut shape_rng, seed, index),
             Family::Synthesis => {
                 let mut rng = SplitMix64::for_program(seed, index);
                 return program::synthesize(&mut rng, &self.catalogue);
@@ -209,6 +269,10 @@ impl Engine {
                 // now belong to this family.
                 if comp.pick_weighted(&[SYNTHESIS_WEIGHT + MUTATION_WEIGHT, COMPOSITION_WEIGHT]) == 1 {
                     return self.composition(&mut comp);
+                }
+                // Same discipline again, one roll later and on its own stream.
+                if shape_rng.pick_weighted(&[SYNTHESIS_WEIGHT + MUTATION_WEIGHT, SHAPE_WEIGHT]) == 1 {
+                    return Self::shape(&mut shape_rng, seed, index);
                 }
             }
         }
@@ -240,6 +304,7 @@ impl Engine {
             origin: Origin::Identity { blocks: plan.size() },
             expected_stdout: Some(expected),
             plan: Some(FamilyPlan::Identity(plan)),
+            project: None,
         }
     }
 
@@ -252,6 +317,21 @@ impl Engine {
             origin: Origin::Composition { probes: plan.size() },
             expected_stdout: Some(expected),
             plan: Some(FamilyPlan::Composition(plan)),
+            project: None,
+        }
+    }
+
+    /// One project of the shape family, judged by construction.
+    fn shape(rng: &mut SplitMix64, seed: u64, index: u64) -> Generated {
+        let mut next = || rng.next_u64();
+        let cell = shape::random_cell(&mut next, &format!("shape/{seed}/{index}"));
+        let project = Project { files: cell.files, entry: cell.entry };
+        Generated {
+            source: project.bundle(),
+            origin: Origin::Shape { files: project.files.len() },
+            expected_stdout: Some(cell.expected),
+            plan: None,
+            project: Some(project),
         }
     }
 }
@@ -319,6 +399,7 @@ mod tests {
         const N: u64 = 600;
         let mut identity = 0usize;
         let mut composition = 0usize;
+        let mut shape = 0usize;
         for index in 0..N {
             let g = engine.generate(1332, index);
             if matches!(g.origin, Origin::Identity { .. }) {
@@ -332,6 +413,12 @@ mod tests {
                 assert!(
                     g.expected_stdout.is_some() && g.plan.is_some(),
                     "a composition program must carry its oracle AND its plan"
+                );
+            } else if matches!(g.origin, Origin::Shape { .. }) {
+                shape += 1;
+                assert!(
+                    g.expected_stdout.is_some() && g.project.is_some(),
+                    "a shape program must carry its oracle AND its project"
                 );
             } else {
                 assert!(
@@ -348,6 +435,13 @@ mod tests {
             (comp_share - comp_declared).abs() < 0.06,
             "composition share {comp_share:.3} strayed from the declared {comp_declared:.3}"
         );
+        // The shape roll happens on what neither identity nor composition took.
+        let shape_share = shape as f64 / (N as usize - identity - composition) as f64;
+        let shape_declared = SHAPE_WEIGHT as f64 / (SYNTHESIS_WEIGHT + MUTATION_WEIGHT + SHAPE_WEIGHT) as f64;
+        assert!(
+            (shape_share - shape_declared).abs() < 0.07,
+            "shape share {shape_share:.3} strayed from the declared {shape_declared:.3}"
+        );
         let share = identity as f64 / N as f64;
         let declared = IDENTITY_WEIGHT as f64
             / (SYNTHESIS_WEIGHT + MUTATION_WEIGHT + IDENTITY_WEIGHT) as f64;
@@ -355,6 +449,30 @@ mod tests {
             (share - declared).abs() < 0.06,
             "identity share {share:.3} strayed from the declared {declared:.3}"
         );
+    }
+
+    /// The shape family regenerates byte-identically from `(seed, index)`,
+    /// and its projects are multi-file often enough to be worth the family.
+    #[test]
+    fn shape_projects_are_deterministic_and_multi_module() {
+        let engine = Engine::with_family(std::path::Path::new("/nonexistent"), Family::Shape);
+        let mut multi = 0;
+        for index in 0..100u64 {
+            let a = engine.generate(3309, index);
+            let b = engine.generate(3309, index);
+            assert_eq!(a.source, b.source, "non-deterministic shape program at index {index}");
+            let p = a.project.as_ref().expect("a shape program is a project");
+            assert!(p.files.iter().any(|(f, _)| *f == p.entry), "the entry is one of the files");
+            if p.files.len() > 1 {
+                multi += 1;
+            }
+            for (path, text) in &p.files {
+                if path.ends_with(".almd") {
+                    assert!(parses(text), "shape program {index}: {path} did not parse:\n{text}");
+                }
+            }
+        }
+        assert!(multi > 50, "only {multi}/100 shape programs had more than one file");
     }
 
     /// `(seed, index)` must map to a byte-identical program every time —
