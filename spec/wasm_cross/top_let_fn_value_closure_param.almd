@@ -1,0 +1,52 @@
+// @contract: C-260
+// #3297: a top-level `let` whose value is a named fn taken as a value — the
+// fn has closure params — is a declaration form that must run identically on
+// both targets. The value is the fn's eta-expansion, whose closure params are
+// `Rc<dyn Fn>` handles, and the callee borrows each as `&dyn Fn`. Native left
+// the top-level value out of the borrow lowering that turns `&g` of a handle
+// into `&*g`, so `apply(&_fn_arg0, ..)` reached rustc as `&Rc<dyn Fn>` at a
+// `&dyn Fn` slot (E0277) while the wasm leg printed the answer. Covered: the
+// fn alone, two closure params, the fn in a record field, the fn as an
+// argument, a fn whose param itself takes a closure, and fns that return one.
+type Holder = { run: (() -> Int, Int) -> Int }
+
+fn apply(f: () -> Int, x: Int) -> Int = f() + x
+
+fn twice(f: () -> Int, g: (Int) -> Int, x: Int) -> Int = g(f()) + x
+
+fn use_it(h: (() -> Int, Int) -> Int) -> Int = h(() => 10, 1)
+
+fn nested(k: ((Int) -> Int) -> Int) -> Int = k((n) => n + 100)
+
+fn feed(f: (Int) -> Int) -> Int = f(1)
+
+fn adder(n: Int) -> (Int) -> Int = (x) => x + n
+
+fn compose(f: (Int) -> Int, g: (Int) -> Int) -> (Int) -> Int = (x) => g(f(x))
+
+let keep = apply
+
+let both = twice
+
+let HOLDER: Holder = { run: apply }
+
+let PASSED: Int = use_it(apply)
+
+let nest = nested
+
+let FEED_NESTED: Int = nested(feed)
+
+let comp = compose
+
+let make = adder
+
+effect fn main() -> Unit = {
+  println(int.to_string(keep(() => 1, 2)))
+  println(int.to_string(both(() => 2, (n) => n * 3, 1)))
+  println(int.to_string(HOLDER.run(() => 6, 1)))
+  println(int.to_string(PASSED))
+  println(int.to_string(nest(feed)))
+  println(int.to_string(FEED_NESTED))
+  println(int.to_string(comp((x) => x + 1, (x) => x * 10)(2)))
+  println(int.to_string(make(5)(6)))
+}
