@@ -1,0 +1,115 @@
+// #3327: every in-place mutator on a field of a mutable module-level record,
+// straight-line, in a `for` loop and in a fold callback. Each must write the
+// global back (`__mg_take` + a store into its slot) — the projection hoist
+// used to bind the field to a temp and mutate the temp, dropping the write.
+type H = { ys: List[Int] }
+
+type G = { xs: List[Int], m: Map[String, Int], s: String, n: Int, h: H }
+
+var g: G = { xs: [], m: [:], s: "", n: 0, h: { ys: [] } }
+
+fn push_line() -> Unit = {
+  list.push(g.xs, 1)
+  ()
+}
+
+fn push_loop() -> Unit = {
+  for i in 0..<3 {
+    list.push(g.xs, i)
+  }
+}
+
+fn push_fold() -> Int = list.fold([1, 2], 0, (acc, k) => {
+  list.push(g.xs, k)
+  acc + k
+})
+
+fn pop_line() -> Unit = {
+  let _ = list.pop(g.xs)
+}
+
+fn pop_loop() -> Unit = {
+  for i in 0..<2 {
+    let _ = list.pop(g.xs)
+  }
+}
+
+fn insert_line() -> Unit = {
+  map.insert(g.m, "a", 1)
+  ()
+}
+
+fn insert_loop() -> Unit = {
+  for i in 0..<2 {
+    map.insert(g.m, "a", i)
+  }
+}
+
+fn delete_line() -> Unit = {
+  map.delete(g.m, "a")
+  ()
+}
+
+fn clear_line() -> Unit = {
+  list.clear(g.xs)
+  ()
+}
+
+fn clear_loop() -> Unit = {
+  for i in 0..<2 {
+    list.clear(g.xs)
+  }
+}
+
+fn spush_line() -> Unit = {
+  string.push(g.s, "x")
+  ()
+}
+
+fn spush_loop() -> Unit = {
+  for i in 0..<2 {
+    string.push(g.s, "x")
+  }
+}
+
+fn field_line() -> Unit = {
+  g.n = 3
+  ()
+}
+
+fn field_loop() -> Unit = {
+  for i in 0..<2 {
+    g.n = i
+  }
+}
+
+fn deep_line() -> Unit = {
+  list.push(g.h.ys, 1)
+  ()
+}
+
+fn deep_loop() -> Unit = {
+  for i in 0..<2 {
+    list.push(g.h.ys, i)
+  }
+}
+
+effect fn main() -> Unit = {
+  push_line()
+  push_loop()
+  let _ = push_fold()
+  pop_line()
+  pop_loop()
+  insert_line()
+  insert_loop()
+  delete_line()
+  clear_line()
+  clear_loop()
+  spush_line()
+  spush_loop()
+  field_line()
+  field_loop()
+  deep_line()
+  deep_loop()
+  println("${g.xs} ${g.n} ${g.s} ${g.h.ys}")
+}
