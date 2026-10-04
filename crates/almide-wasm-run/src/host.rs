@@ -336,19 +336,22 @@ fn run_wasm_src(
     let linker = host_linker(&engine)?;
     // #3003 (ADR-0011 §D2a): the instance-parallel fan offer (op 74) runs a
     // chunk on fresh instances of THIS module, through THIS import set.
-    store.data_mut().par = Some(Arc::new(fan::ParCtx {
-        engine: engine.clone(),
-        module: module.clone(),
-        linker: linker.clone(),
+    let ticked = watchdog.map(|_| Arc::new(std::sync::atomic::AtomicBool::new(false)));
+    store.data_mut().par = Some(Arc::new(fan::ParCtx::new(
+        (engine.clone(), module.clone(), linker.clone()),
         max_memory_bytes,
-        epoch: watchdog.is_some(),
-        args: args.to_vec(),
-    }));
+        ticked.clone(),
+        args.to_vec(),
+    )));
     let ticker = watchdog.map(|after| {
         store.set_epoch_deadline(1);
         let eng = engine.clone();
+        let ticked = ticked.clone();
         std::thread::spawn(move || {
             std::thread::sleep(after);
+            if let Some(t) = ticked {
+                t.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
             eng.increment_epoch();
         })
     });

@@ -133,6 +133,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_FALLBACK_NAMES", Flag, Tool, "make `almide test` print one `FALLBACK <file>` line per file the wasm leg did not pass — the wasm coverage ratchet's data feed"),
     sw("ALMIDE_FAN_PAR_OFF", Flag, Ablation, "keep `fan` chunk maps off the structural leg's instance-parallel offer (#3003): every chunk runs sequentially in the run's own instance"),
     sw("ALMIDE_FAN_SEQUENTIAL", Flag, Runtime, "run `fan.*` sequentially in the native runtime (a determinism lever for measurement; the observable result is the same by contract)"),
+    sw("ALMIDE_FAN_THREADS", Value, Runtime, "cap the worker count of `fan`'s parallel maps on both legs — native threads and the embedded wasm host's chunk instances (#3003; a measurement lever for thread-scaling curves, the observable result is the same by contract; default: available parallelism)"),
     sw("ALMIDE_FLOAT_SWEEP_N", Value, Harness, "how many xorshift64 bit patterns the float printer sweep prints and compares with Rust `format!` on each leg (default 100000; tests/float_to_string_cross_target_test.rs)"),
     sw("ALMIDE_FMOD_SWEEP_N", Value, Harness, "how many xorshift64 bit-pattern pairs the float `%` sweep compares with Rust `%` on each leg, as Float and as Float32 (default 20000; tests/float_fmod_cross_target_test.rs)"),
     sw("ALMIDE_FN_ESCAPE_OFF", Flag, Ablation, "make BorrowInsertion borrow EVERY fn-typed param as `&dyn Fn`, escaping or not (#2288) — the ablation the ownership certifier's C5 sensitivity test drives"),

@@ -39,8 +39,8 @@
 # fan=… on a fan row names the wasm route (#3003, ADR-0011 §D2a):
 #   fan=instance    — a pure scalar chunk map (`fan { list.map(xs, f) }`,
 #                     scalar or scalar-tuple results, scalar captures): the
-#                     embedded host runs the chunks on separate instances on
-#                     OS threads. Every other host — stock wasmtime, any WASI
+#                     embedded host runs the chunks on pooled instances of
+#                     the module, one per OS thread. Every other host — stock wasmtime, any WASI
 #                     runtime, the `to_wasi` / p2 / p3 artifacts — runs the
 #                     same artifact sequentially, byte-identical (C-321).
 #   fan=sequential  — a shape stage 1 does not offer (heap elements, results
