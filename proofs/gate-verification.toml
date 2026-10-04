@@ -819,7 +819,7 @@ reads = "scalar"
 wired_by = ".github/workflows/ci.yml"
 class = "NEGATIVE_TESTED"
 evidence = "walled-real burn-down (2026-09-30, #3058): `--self-test` judges a one-row base ledger against an unchanged, a cited-growth, a re-cited-old-row, a shrunk and an UNCITED-growth ledger, and requires only the last to exit 1; CI runs the self-test before every real check. The open-state lookup refuses a citation `gh` cannot confirm OPEN (an unverifiable owner is no owner)."
-measures = "the set of `file :: fn` keys in proofs/walled-real-baseline.txt at HEAD minus the set at the base commit, each checked for a trailing `# #NNNN` naming an issue whose state is OPEN"
+measures = "the set of `file :: fn` keys in proofs/walled-real-baseline.txt (and, run with LEDGER=, the `<cell>  <columns>` keys of proofs/shape-matrix-baseline.txt, #3309) at HEAD minus the set at the base commit, each checked for a trailing `# #NNNN` naming an issue whose state is OPEN"
 varies = "the self-test's forged uncited row (`spec/b.almd :: g` over a one-row base) reads a non-empty difference and is refused; the landing commit's range reads a shrinking ledger (no new rows)"
 blind = "UNMAPPED"
 
