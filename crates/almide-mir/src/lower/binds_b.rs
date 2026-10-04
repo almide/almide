@@ -132,8 +132,11 @@ impl LowerCtx {
         // call result) defers — a heap-field aggregate needs the masked recursive drop this builder
         // (a flat per-slot `rc_dec`) does not emit, so its inner heap would leak; gated out by
         // `scalar_slots` (which is `None` for any non-scalar field).
+        // A `Bytes` element is the same one-level block as a `String` (no inner handle, so a
+        // per-slot `rc_dec` is its full free — `drop_sources`' and `cells`' FlatHeap class),
+        // so `[bytes.from_list([4, 5])]` builds through the same arms (#2739).
         let elem_str = matches!(ty,
-            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String));
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String | Ty::Bytes));
         let elem_scalar_aggregate = matches!(ty,
             Ty::Applied(TypeConstructorId::List, a)
                 if a.len() == 1 && self.aggregate_field_tys(&a[0])

@@ -26,7 +26,7 @@ use almide_lang::types::Ty;
 /// The `module_origin` spelling of a module: its versioned name when it has
 /// one, else its name, as its `module_ident` (#3338) — byte for byte what the
 /// frontend writes into a synthesized reference.
-fn origin_key(m: &IrModule) -> String {
+pub(crate) fn origin_key(m: &IrModule) -> String {
     almide_base::names::module_ident(m.versioned_name.unwrap_or(m.name).as_str())
 }
 

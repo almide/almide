@@ -310,7 +310,8 @@ impl LowerCtx {
         if !is_heap_ty(ty) {
             return true; // a scalar needs no free at all — vacuously "flat"
         }
-        matches!(ty, Ty::String)
+        // `Bytes` is one buffer like `String` (#2739: `[("a", bytes.from_list([1]))]`).
+        matches!(ty, Ty::String | Ty::Bytes)
             || matches!(ty, Ty::Applied(TypeConstructorId::List, a)
                 if a.len() == 1 && !is_heap_ty(&a[0]))
             || self.variant_layouts.is_flat_variant_ty(ty)
@@ -354,7 +355,7 @@ impl LowerCtx {
         // generated `$__drop_<T>`. A List/other heap field is still ADT-brick-5+ → WALL.
         let mut field_vals: Vec<(ValueId, bool /* is_heap */)> = Vec::with_capacity(args.len());
         for arg in &args {
-            field_vals.push(self.lower_variant_ctor_field(arg)?);
+            field_vals.push(self.lower_variant_ctor_field(arg, needs_rec)?);
         }
         // Rung-5 variants slab: an ALL-SCALAR ctor block is a plain slot list
         // (tag@slot0, fields@1+, zero-filled to the type's uniform width), so
@@ -425,7 +426,7 @@ impl LowerCtx {
     /// its slot value — `Some((value, is_heap))`, or `None` to wall the whole ctor.
     /// Every branch keeps its condition, order, and lowering exactly as it stood in the
     /// inline field loop (the loop's push-and-`continue`s became `return Some(..)`).
-    fn lower_variant_ctor_field(&mut self, arg: &IrExpr) -> Option<(ValueId, bool)> {
+    fn lower_variant_ctor_field(&mut self, arg: &IrExpr, needs_rec: bool) -> Option<(ValueId, bool)> {
         if self.variant_layouts.field_is_variant(&arg.ty) {
             // A nested ctor field — positional (`Leaf(1)`) OR a record-ctor literal
             // (`right: Node { … }`) — recurses into this same builder.
@@ -445,7 +446,11 @@ impl LowerCtx {
             };
             return Some((v, true));
         }
-        if matches!(arg.ty, Ty::String) {
+        // A `Bytes` field is the same one-level block as a `String` one, so the masked
+        // per-slot `rc_dec` of a non-recursive variant (`Raw(Bytes) | Empty`) is its exact
+        // free (#2739). A variant whose drop is the GENERATED `$__drop_<T>` frees only the
+        // field kinds its generator lists, which do not include `Bytes`: that one stays walled.
+        if matches!(arg.ty, Ty::String) || (matches!(arg.ty, Ty::Bytes) && !needs_rec) {
             let obj = self.lower_owned_heap_field(arg)?;
             return Some((obj, true));
         }
