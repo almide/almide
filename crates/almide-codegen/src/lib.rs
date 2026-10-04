@@ -59,6 +59,7 @@ pub mod pass_stream_fusion;
 pub mod pass_chain_source_borrow;
 mod pass_fan_local_state;
 pub mod pass_effect_inference;
+pub mod effect_flow;
 pub mod pass_tco;
 pub mod pass_licm;
 pub mod pass_peephole;

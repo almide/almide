@@ -42,13 +42,21 @@ pub struct FunctionEffects {
     pub direct: HashSet<Effect>,
     pub transitive: HashSet<Effect>,
     pub is_effect: bool,
-    /// The closure values this function calls, named by where they come from
-    /// (#3268): a fn-typed parameter as `f (arg 1)`, anything else by its
-    /// path (`b.run`, `g`, `an element of hs`). Sorted, no duplicates. The
-    /// effects of these calls are charged to whoever creates the closure, not
-    /// to this function, so `transitive` alone does not say what it runs. A
+    /// The fn-typed parameters whose closures this function may run (#3268),
+    /// as `f (arg 1)`, in parameter order. What they do is charged at each
+    /// call site, with the closure that call site passes (ADR-0026 D1): a
+    /// bare fn-type parameter is transparent for the category set. A
     /// callee is never invented for them (ADR-0026 D4).
     pub indirect: Vec<String>,
+    /// The categories of the closure this function returns, when it returns
+    /// one: a returned fn value keeps the set of the value returned.
+    pub returns: HashSet<Effect>,
+    /// Parameters whose closures the returned closure may run.
+    pub returns_indirect: Vec<String>,
+    /// One representative path per category in `transitive`, from this
+    /// function to the operation (ADR-0026 D4): `main → use_it → f (arg 1 of
+    /// use_it) → closure (line 4:42 in make) → fs.read_text (line 4:51)`.
+    pub paths: HashMap<Effect, String>,
 }
 
 impl FunctionEffects {
@@ -66,6 +74,19 @@ impl FunctionEffects {
             [one] => format!("{set} + whatever {one} does"),
             many => format!("{set} + whatever {} do", many.join(", ")),
         }
+    }
+
+    /// `returns a closure doing {IO}`, when the function returns an
+    /// effectful closure (or one that runs a closure it was handed).
+    pub fn returns_report(&self) -> Option<String> {
+        if self.returns.is_empty() && self.returns_indirect.is_empty() {
+            return None;
+        }
+        let set = EffectMap::format_effects(&self.returns);
+        Some(match self.returns_indirect.as_slice() {
+            [] => format!("returns a closure doing {set}"),
+            many => format!("returns a closure doing {set} + whatever {} does", many.join(", ")),
+        })
     }
 }
 

@@ -76,6 +76,10 @@ pub fn check_permissions(ir: &almide::ir::IrProgram, permissions: &[String]) -> 
             err(&format!("error: capability violation in `{}`", name));
             for e in &forbidden {
                 err(&format!("  {} is not in [permissions].allow", e));
+                // ADR-0026 D4: the path the category reaches this function by.
+                if let Some(path) = fe.paths.get(*e) {
+                    err(&format!("  path: {path}"));
+                }
             }
             violations += 1;
         }

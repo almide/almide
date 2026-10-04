@@ -1,12 +1,13 @@
 //! `almide check --effects` says when a function runs closures it is handed (#3268).
 //!
 //! A plain fn that calls a fn-typed parameter or a record-field closure runs
-//! whatever that closure does, and the closure's categories are charged to the
-//! function that creates it, not to the one that calls it. The report printed
-//! such a function as `→ {}` and counted it pure. It now names the value it
-//! calls (`f (arg 1)`, `b.run`) and counts it as callback-dependent; it never
-//! invents a callee (ADR-0026 D4). The capability check, which charges the
-//! creator, is unchanged and still refuses these programs under a narrow grant.
+//! whatever that closure does. The report printed such a function as `→ {}`
+//! and counted it pure. A fn-typed parameter is now named with its position
+//! (`f (arg 1)`) and the function counts as callback-dependent; it never
+//! invents a callee (ADR-0026 D4). Since ADR-0026 D1 the closure's categories
+//! ride the value and are charged where it runs: a record field carries the
+//! set of the closures stored in it, and the call site that hands a closure
+//! to a parameter is charged with it (`tests/effect_category_flow_test.rs`).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -105,18 +106,18 @@ fn effects_report(tag: &str, main: &str) -> String {
 fn a_called_fn_parameter_is_named_with_its_position() {
     let report = effects_report("param", RETURNED_CLOSURE);
     assert!(report.contains("  use_it  → {} + whatever f (arg 1) does\n"), "{report}");
-    // The creator is charged, as before.
-    assert!(report.contains("  make  → {IO} (effect fn)\n"), "{report}");
-    // A fn with no indirect call stays `{}` and is the one counted pure.
+    // The builder performs nothing; the closure it returns carries IO (D1).
+    assert!(report.contains("  make  → {} (effect fn); returns a closure doing {IO}\n"), "{report}");
+    // A fn with no indirect call stays `{}` and is counted pure.
     assert!(report.contains("  shout  → {}\n"), "{report}");
-    assert!(report.contains("4 functions: 1 pure, 1 callback-dependent, 2 with effects"), "{report}");
+    assert!(report.contains("4 functions: 2 pure, 1 callback-dependent, 1 with effects"), "{report}");
 }
 
 #[test]
-fn a_called_record_field_is_named_by_its_path() {
+fn a_called_record_field_carries_the_set_stored_in_it() {
     let report = effects_report("record", RECORD_FIELD);
-    assert!(report.contains("  call_box  → {} + whatever b.run does\n"), "{report}");
-    assert!(report.contains("2 functions: 0 pure, 1 callback-dependent, 1 with effects"), "{report}");
+    assert!(report.contains("  call_box  → {IO}\n"), "{report}");
+    assert!(report.contains("2 functions: 0 pure, 2 with effects"), "{report}");
 }
 
 #[test]
@@ -137,19 +138,18 @@ fn a_named_fn_taken_as_a_value_charges_its_taker() {
     assert!(!ok && stderr.contains("capability violation in `main`"), "{stderr}");
 }
 
-/// The report changed; the gate did not. A closure's category is charged to
-/// the function that creates it, so a grant without IO still refuses both
-/// programs, and names the creator.
+/// A grant without IO still refuses both programs, and names the function
+/// that runs the closure (ADR-0026 D1), not the one that builds it.
 #[test]
-fn permissions_still_refuse_the_creator() {
-    for (tag, main, creator) in [("perm-param", RETURNED_CLOSURE, "make"), ("perm-record", RECORD_FIELD, "main")] {
+fn permissions_refuse_the_runner() {
+    for (tag, main, runner) in [("perm-param", RETURNED_CLOSURE, "main"), ("perm-record", RECORD_FIELD, "call_box")] {
         let dir = project(tag, Some("\"Env\""), main);
         for args in [&["check", "main.almd"][..], &["check", "--effects", "main.almd"][..]] {
             let (ok, stderr) = almide(&dir, args);
             assert!(!ok, "`almide {}` admitted a file read under allow = [\"Env\"]:\n{stderr}", args.join(" "));
             assert!(stderr.contains("IO is not in [permissions].allow"), "{stderr}");
             if args.contains(&"--effects") {
-                assert!(stderr.contains(&format!("capability violation in `{creator}`")), "{stderr}");
+                assert!(stderr.contains(&format!("capability violation in `{runner}`")), "{stderr}");
             }
         }
         let _ = std::fs::remove_dir_all(&dir);
