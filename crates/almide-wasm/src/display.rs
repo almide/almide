@@ -562,15 +562,14 @@ impl Shell {
 /// fresh Emitter, and the closed function comes back with the call set it
 /// accumulated. ONE scaffold for every Emitter-built helper in this
 /// module.
-/// #2758: `hw` arms the frame's recorder while a sweep collects; its
-/// certificate is audited against the closed body (witness_helper.rs).
+/// #2758: the frame's witness, armed while a sweep collects, is audited
+/// against the closed body (witness_helper.rs).
 fn build_helper_body(
     table: &FnTable,
     types: &TypeTable,
     work: &FnWork,
     pool: &mut Pool,
-    shell: Shell,
-    hw: Option<crate::witness::helper::HelperWitness>,
+    (shell, hw): (Shell, Option<crate::witness::helper::HelperWitness>),
     body: impl FnOnce(&mut Emitter<'_>) -> Result<(), EmitError>,
 ) -> Result<(wasm_encoder::Function, std::collections::HashSet<usize>), EmitError> {
     use crate::emitter::{HOLD_F64_POOL, HOLD_I32_POOL, HOLD_I64_POOL};
@@ -666,8 +665,10 @@ fn build_one_scan_helper(
     key: crate::ETy,
 ) -> Result<(wasm_encoder::Function, std::collections::HashSet<usize>), EmitError> {
     use wasm_encoder::BlockType;
-    crate::witness::decline_unrecorded(&format!("<scan:{key:?}>"), "scan");
-    build_helper_body(table, types, work, pool, Shell::SCAN, None, |em| {
+    // #2758: the entry block is lent (param 0); the needle's own RC calls,
+    // like every other, are held to the byte audit.
+    let hw = crate::witness::helper::HelperWitness::new(format!("<scan:{key:?}>"), "scan", &[0]);
+    build_helper_body(table, types, work, pool, (Shell::SCAN, hw), |em| {
         // params: 0=block, 1=stride, 2=off, 3=needle; locals 4=p, 5=end
         let (blk, stride, off, needle, p_, end_) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32);
         let kt = em.types.el(key);
@@ -718,7 +719,7 @@ fn build_one_named_helper(
 ) -> Result<(wasm_encoder::Function, std::collections::HashSet<usize>), EmitError> {
     // #2758: both operand blocks are lent (params 0 and 1).
     let hw = crate::witness::helper::HelperWitness::new(format!("<named-op:{op:?}:{ti}>"), "named-op", &[0, 1]);
-    build_helper_body(table, types, work, pool, Shell::PAIR, hw, |em| {
+    build_helper_body(table, types, work, pool, (Shell::PAIR, hw), |em| {
         em.f.instructions().local_get(0).local_get(1);
         match op {
             // `path` starts with `ti`, so a self-referencing field sees the
@@ -741,7 +742,7 @@ fn build_one_display_helper(
     // #2758: the block is lent (param 0); the cursor (param 1) is an i32.
     let hw = crate::witness::helper::HelperWitness::new(format!("<display:{ti}>"), "display", &[0]);
     let ir = work.display_ir(irk);
-    build_helper_body(table, types, work, pool, Shell::PAIR, hw, |em| {
+    build_helper_body(table, types, work, pool, (Shell::PAIR, hw), |em| {
         em.f.instructions().local_get(1).local_set(2);
         em.f.instructions().local_get(0);
         let mut path = vec![ti];
