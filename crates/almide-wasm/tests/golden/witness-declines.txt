@@ -25,7 +25,7 @@ pattern:list-rest	8
 payload:SpreadRecord	2
 payload:UnwrapOr-carrier:OptionNone	1
 record:default	2
-rhs:Fan	7
+rhs:Fan	8
 rhs:SpreadRecord	5
 rhs:Unwrap	10
 scan	3
