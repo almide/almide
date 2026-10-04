@@ -533,6 +533,23 @@ impl WitnessRecorder {
     /// One line per object, in object order — certificate v0. A poison
     /// outranks a decline: a hook disagreement is a bug even in a frame
     /// that withdrew.
+    /// #2758: the recorded `(a, d, i)` events, every path together — one
+    /// per emitted RC instruction (witness_helper.rs audits them).
+    pub(crate) fn event_totals(&self) -> (usize, usize, usize) {
+        let mut n = (0, 0, 0);
+        for ev in &self.log {
+            if let Ev::Op(_, c) | Ev::LOp(_, c) = ev {
+                match c {
+                    'a' => n.0 += 1,
+                    'd' => n.1 += 1,
+                    'i' => n.2 += 1,
+                    _ => {}
+                }
+            }
+        }
+        n
+    }
+
     pub fn certificate(&self) -> String {
         if self.poisoned {
             return "!poison\n".to_string();
@@ -751,6 +768,10 @@ pub(crate) fn decline_unrecorded(name: &str, reason: &str) {
 }
 
 // The Emitter-side hooks live in witness_hooks.rs.
+
+/// An Emitter-built helper frame's audited witness (#2758).
+#[path = "witness_helper.rs"]
+pub(crate) mod helper;
 
 use crate::{Scalar, SliceTy};
 
