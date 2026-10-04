@@ -371,7 +371,7 @@ fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) 
         {
             let IrExprKind::Call { target: CallTarget::Named { name }, args, type_args } = expr.kind else { unreachable!() };
             let dotted = name.contains('.');
-            let sanitized = name.replace(' ', "_").replace('-', "_").replace('.', "_");
+            let sanitized = name.replace([' ', '-', '.'], "_");
             let mod_ident = mod_name.replace('.', "_");
             // A QUALIFIED-method sibling (`varlib.Pigment.encode` called from inside
             // module `varlib`) already carries the module in its name — strip it before
@@ -394,7 +394,7 @@ fn prefix_intra_module_calls(expr: IrExpr, mod_name: &str, siblings: &[String]) 
         }
         IrExprKind::FnRef { name } if siblings.iter().any(|s| s == &**name) => {
             let dotted = name.contains('.');
-            let sanitized = name.replace(' ', "_").replace('-', "_").replace('.', "_");
+            let sanitized = name.replace([' ', '-', '.'], "_");
             let mod_ident = mod_name.replace('.', "_");
             // Same qualified-sibling strip as the Named-call arm above.
             let base = if dotted {
