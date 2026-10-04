@@ -438,7 +438,6 @@ fn extraction_or_rt_subset(e: &IrExpr) -> Option<Why> {
             // (witness_unwrap.rs): born at the site, out on the err arm,
             // released on the ok path. Its payload store is the constructor's.
             IrExprKind::ResultErr { .. } => value_subset(expr).map(|w| w.inside("unwrap-operand")),
-            IrExprKind::Call { .. } => call_subset(expr).map(|w| w.inside("unwrap-operand")),
             _ => Some(Why::Here(tag(&e.kind))),
         },
         // The deterministic-meter / wall-deadline prims (fuel.rs
