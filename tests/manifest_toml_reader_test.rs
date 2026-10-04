@@ -101,3 +101,66 @@ fn a_permission_list_that_is_not_an_array_of_strings_is_refused() {
         .expect("an integer is not a command");
     assert!(e.contains("[permissions].proc must be an array of strings"), "{e}");
 }
+
+/// `[target.<key>.native-deps]` (#3350): each entry carries its platform key,
+/// tables and entries in file order, after the unconditional `[native-deps]`.
+#[test]
+fn target_specific_native_deps_carry_their_platform() {
+    let p = parse(
+        "target-native",
+        "[package]\nname = \"app\"\n\n[native-deps]\nanyhow = \"1\"\n\n\
+         [target.'cfg(not(any(target_os = \"android\", target_os = \"ios\")))'.native-deps]\narboard = \"3\"\n\n\
+         [target.'cfg(target_os = \"android\")'.native-deps]\njni = \"0.21\"\nndk = { version = \"0.9\" }\n\n\
+         [target.x86_64-pc-windows-gnu.native-deps]\nwinapi = \"0.3\"\n",
+    )
+    .expect("valid manifest");
+    let got: Vec<(&str, Option<&str>)> = p.native_deps.iter().map(|d| (d.name.as_str(), d.target.as_deref())).collect();
+    assert_eq!(
+        got,
+        [
+            ("anyhow", None),
+            ("arboard", Some(r#"cfg(not(any(target_os = "android", target_os = "ios")))"#)),
+            ("jni", Some(r#"cfg(target_os = "android")"#)),
+            ("ndk", Some(r#"cfg(target_os = "android")"#)),
+            ("winapi", Some("x86_64-pc-windows-gnu")),
+        ]
+    );
+}
+
+/// A platform key Cargo would refuse is a manifest error on its line, naming
+/// the key — at `almide check` time too, not as a Cargo error about a
+/// generated file.
+#[test]
+fn a_malformed_cfg_key_is_refused_naming_the_key() {
+    for (tag, key) in [
+        ("cfg-open", r#"cfg(target_os = "android""#),
+        ("cfg-noval", "cfg(target_os = )"),
+        ("cfg-bareval", "cfg(target_os = android)"),
+        ("cfg-empty", "cfg()"),
+        ("cfg-two-in-not", "cfg(not(unix, windows))"),
+        ("triple-space", "x86_64 linux"),
+    ] {
+        let text = format!("[package]\nname = \"a\"\n\n[target.'{key}'.native-deps]\njni = \"0.21\"\n");
+        let e = parse(tag, &text).err().unwrap_or_else(|| panic!("accepted `{key}`"));
+        assert!(e.contains("almide.toml:4: invalid platform"), "{key}: {e}");
+        assert!(e.contains(&format!("`{key}`")), "the error names the key: {e}");
+
+        let dir = std::env::temp_dir().join(format!("almide-issue3350-check-{tag}-{}", std::process::id()));
+        let path = dir.join("almide.toml");
+        let e = almide::project::check_manifest(&path, &text).err().unwrap_or_else(|| panic!("check accepted `{key}`"));
+        assert!(e.contains("invalid platform"), "{e}");
+    }
+}
+
+/// Only `native-deps` can be target-specific; anything else under
+/// `[target.<key>]` is refused rather than silently ignored.
+#[test]
+fn a_target_table_other_than_native_deps_is_refused() {
+    let e = parse(
+        "target-other",
+        "[package]\nname = \"a\"\n\n[target.'cfg(unix)'.dependencies]\nfoo = { path = \"../foo\" }\n",
+    )
+    .err()
+    .expect("only native-deps is target-specific");
+    assert!(e.contains("almide.toml:4: unknown table `dependencies` in [target.'cfg(unix)']"), "{e}");
+}
