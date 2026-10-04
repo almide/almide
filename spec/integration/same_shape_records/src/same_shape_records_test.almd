@@ -1,0 +1,32 @@
+// #3283: two modules declaring the same field set each build their own
+// record from an anonymous literal.
+import self.a
+import self.b
+
+test "a literal in a slot of a module's record type is that module's record" {
+  assert_eq(b.span(b.measure(3.0)), 9.0)
+  assert_eq(a.area(a.unit()), 1.0)
+  assert_eq(b.span(b.pick(true)), 30.0)
+  assert_eq(list.len(b.many()), 2)
+  assert_eq(b.span(b.annotated(4.0)), 8.0)
+  assert_eq(b.span(b.reassigned(2.0)), 8.0)
+  assert_eq(b.widen(b.measure(1.0)).w, 10.0)
+  assert_eq(b.total(5.0), 10.0)
+  assert_eq(b.framed(2.0).size.h, 3.0)
+  assert_eq(b.shape_span(b.rect(1.5)), 3.0)
+  assert_eq(b.span(b.maker()(4.0)), 4.5)
+}
+
+test "a literal passed to another module's fn takes the parameter's type" {
+  assert_eq(b.span({ w: 1.0, h: 2.5 }), 3.5)
+  assert_eq(a.area({ w: 2.0, h: 2.0 }), 4.0)
+}
+
+test "an option of the record carries the record's type on both arms" {
+  let got = match b.maybe(2.0) {
+    some(x) => x.h,
+    none => -1.0,
+  }
+  assert_eq(got, 2.0)
+  assert_eq(b.maybe(0.0), none)
+}
