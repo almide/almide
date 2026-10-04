@@ -242,6 +242,24 @@ jobs:
           case "$BASE" in ""|0000000000000000000000000000000000000000) BASE="$(git rev-parse HEAD~1)";; esac
           git cat-file -e "$BASE^{commit}" 2>/dev/null || BASE="$(git rev-parse HEAD~1)"
           bash scripts/check-walled-real-growth.sh "$BASE"
+      - name: Shape-matrix known-open rows grow only with an open issue cited (#3309)
+        # tests/shape_matrix_test.rs holds the list to the matrix exactly (a
+        # listed cell that passes, or fails in other columns, is red); this
+        # holds each NEW row to an owner, with the walled-real owner check.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            BASE="$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
+          elif [ "${{ github.event_name }}" = merge_group ]; then
+            BASE="${{ github.event.merge_group.base_sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          case "$BASE" in ""|0000000000000000000000000000000000000000) BASE="$(git rev-parse HEAD~1)";; esac
+          git cat-file -e "$BASE^{commit}" 2>/dev/null || BASE="$(git rev-parse HEAD~1)"
+          LEDGER=proofs/shape-matrix-baseline.txt bash scripts/check-walled-real-growth.sh "$BASE"
       - name: The gate judges each commit by the law at its parent (negative controls)
         # Needs the full history this job checks out: the old law it replays
         # is the gate's real July version.
@@ -522,9 +540,13 @@ jobs:
         # ALMIDE_EXPECT_TOOLS=1: this leg CLAIMS full tool coverage, so the
         # tripwire test fails loudly if wasmtime/wasm-opt/almide ever go
         # missing instead of letting the tool-gated suites skip-as-pass (#983).
+        # SHAPE_MATRIX_SLICE (#3309): tests/shape_matrix_test.rs runs a fixed
+        # quarter of the shape matrix per PR (the cells whose name hashes to 0
+        # mod 4); .github/workflows/shape-matrix-nightly.yml runs all of it.
         env:
           ALMIDE_BIN: /tmp/almide-bin/almide
           ALMIDE_EXPECT_TOOLS: "1"
+          SHAPE_MATRIX_SLICE: "0/4"
         # The script enumerates every workspace test target from cargo's own
         # JSON (root package AND member crates — a bare `cargo test` at the root
         # tests only the root, and the members' suites silently never ran in CI
