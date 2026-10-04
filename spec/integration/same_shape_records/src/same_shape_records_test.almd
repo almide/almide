@@ -10,9 +10,11 @@ test "a literal in a slot of a module's record type is that module's record" {
   assert_eq(list.len(b.many()), 2)
   assert_eq(b.span(b.annotated(4.0)), 8.0)
   assert_eq(b.span(b.reassigned(2.0)), 8.0)
-  assert_eq(b.widen(b.measure(1.0)).w, 10.0)
+  let widened = b.widen(b.measure(1.0)).w
+  assert_eq(widened, 10.0)
   assert_eq(b.total(5.0), 10.0)
-  assert_eq(b.framed(2.0).size.h, 3.0)
+  let framed_h = b.framed(2.0).size.h
+  assert_eq(framed_h, 3.0)
   assert_eq(b.shape_span(b.rect(1.5)), 3.0)
   assert_eq(b.span(b.maker()(4.0)), 4.5)
 }
