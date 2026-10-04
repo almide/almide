@@ -21,6 +21,7 @@ thread_local! {
     static EXPORT_OWNED: RefCell<BTreeMap<String, Vec<bool>>> = const { RefCell::new(BTreeMap::new()) };
     static EXPORT_RET: RefCell<BTreeMap<String, ExportRet>> = const { RefCell::new(BTreeMap::new()) };
     static EXPORT_PARAMS: RefCell<BTreeMap<String, Vec<AbiShape>>> = const { RefCell::new(BTreeMap::new()) };
+    static IMPORT_RET: RefCell<BTreeMap<(String, String), ExportRet>> = const { RefCell::new(BTreeMap::new()) };
 }
 
 /// What one slot on the export boundary holds, as the host converts it
@@ -160,6 +161,20 @@ pub fn export_rets() -> BTreeMap<String, ExportRet> {
     EXPORT_RET.with(|m| m.borrow().clone())
 }
 
+/// Record the return ABI of a declared `@extern(wasm, module, name)` import
+/// (#3356): a `Result` there means the host answers with a Result block.
+pub(crate) fn note_import(module: &str, name: &str, ret: ExportRet) {
+    if js_host() {
+        IMPORT_RET.with(|m| { m.borrow_mut().insert((module.to_string(), name.to_string()), ret); });
+    }
+}
+
+/// The return ABI of every import recorded since the guard was set (#3356),
+/// keyed by (module, name).
+pub fn import_rets() -> BTreeMap<(String, String), ExportRet> {
+    IMPORT_RET.with(|m| m.borrow().clone())
+}
+
 /// The parameter shapes of every export recorded since the guard was set (#3354).
 pub fn export_params_noted() -> BTreeMap<String, Vec<AbiShape>> {
     EXPORT_PARAMS.with(|m| m.borrow().clone())
@@ -177,6 +192,7 @@ impl JsHostGuard {
         EXPORT_OWNED.with(|m| m.borrow_mut().clear());
         EXPORT_RET.with(|m| m.borrow_mut().clear());
         EXPORT_PARAMS.with(|m| m.borrow_mut().clear());
+        IMPORT_RET.with(|m| m.borrow_mut().clear());
         Self(prev)
     }
 }

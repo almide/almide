@@ -320,3 +320,23 @@ fn an_async_import_must_name_a_declared_js_import() {
     let (ok, stderr) = build(dir.path(), ASYNC_PROGRAM, &["--target", "wasm", "--async-import", "kv_get", "-o", "app.wasm"]);
     assert!(!ok && stderr.contains("--async-import names imports of the JS host"), "{stderr}");
 }
+
+const HOOK_ERRORS: &str = "@extern(wasm, \"js\", \"get\")\neffect fn get(key: String) -> String\n\n@extern(wasm, \"js\", \"count\")\nfn count(key: String) -> Result[Int, String]\n\n@extern(wasm, \"js\", \"peek\")\nfn peek(key: String) -> String\n\neffect fn lookup(key: String) -> String = get(key)! + peek(key)\neffect fn total(key: String) -> Int = count(key)! + 1\nfn main() -> Unit = {}\n";
+
+/// #3356: a fallible extern (`effect fn`, `Result[T, String]`) imports as a
+/// Result block the hook answers — a throw becomes the err; an infallible
+/// one abandons the instance on a throw. Running both is `hook_errors` in
+/// `spec/wasm_host_js`.
+#[test]
+fn a_hook_throw_is_an_err_for_a_fallible_extern_and_abandons_otherwise() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ok, stderr) = build(dir.path(), HOOK_ERRORS, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(ok, "{stderr}");
+    let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
+    let dts = std::fs::read_to_string(dir.path().join("app.d.ts")).unwrap();
+    assert!(js.contains(r#"jsImports.get = (a0) => { try { return okResult({k:"str"}, hook("js", "get")(readString(a0))); } catch (e) { return errResult(e); } };"#), "{js}");
+    assert!(js.contains(r#"return okResult({k:"int"}, hook("js", "count")"#), "{js}");
+    assert!(js.contains(r#"catch (e) { throw abandon("js", "peek", e); }"#), "{js}");
+    assert!(js.contains("if (abandoned !== null) throw new Error(abandoned);"), "{js}");
+    assert!(dts.contains("count: (key: string) => number;") && dts.contains("get: (key: string) => string;"), "{dts}");
+}

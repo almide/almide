@@ -102,10 +102,10 @@ same glue as before, byte for byte, and runs where it ran before.
 - **A hook that calls back into the module.** A synchronous export called from
   inside an async hook is refused by the busy guard. An async one would queue
   behind the call that is waiting for it, and never settle. Don't do it.
-- **A hook that rejects.** The rejection unwinds through wasm as an exception,
-  exactly as a throwing synchronous hook does today. The call rejects with the
-  hook's error and later calls work (the fixture checks this). The frames that
-  were unwound do not release their blocks.
+- **A hook that rejects** is handled like a throwing synchronous hook (#3356,
+  docs/wasm/WASM-OUTPUT.md "JS host"): a fallible extern (`effect fn` or
+  `Result[T, String]`) gets the rejection back as an err; an infallible one
+  abandons the instance until `init()` runs again.
 - **Flow / streams** (`docs/roadmap/on-hold/flow-design.md`, "JSPI での Flow
   実装"). This note covers single-value imports only.
 
@@ -117,7 +117,7 @@ fixture's `// @host-flags:` line passes the flag. The fixture checks:
 - which exports are async and which stay sync;
 - overlapping calls are answered correctly, in order, one at a time;
 - an async import reached through a closure, and an err from an effect fn;
-- a rejecting hook;
+- a rejecting infallible hook (abandons the instance; `init()` recovers);
 - flat memory;
 - the refusal without JSPI.
 

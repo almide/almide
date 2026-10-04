@@ -99,6 +99,26 @@ function storeSlot(a, s, x, what) {
   else if (s.k === "unit") view().setUint32(a, 0, true);
   else { const c = putBlock(s, x, what); view().setUint32(a, c, true); }
 }
+// A fallible import's answer (#3356): a Result block the module owns.
+function okResult(s, x) {
+  const h = instance.exports.__alloc(16);
+  bytes().fill(0, h + PAYLOAD, h + PAYLOAD + 16);
+  try {
+    storeSlot(h + PAYLOAD + 8, s, x, "hook");
+  } catch (e) {
+    drop(h, { k: "res", ok: s, err: { k: "str" } });
+    return errResult(e);
+  }
+  return h;
+}
+function errResult(e) {
+  const msg = allocString(e instanceof Error ? e.message : String(e));
+  const h = instance.exports.__alloc(16);
+  bytes().fill(0, h + PAYLOAD, h + PAYLOAD + 16);
+  view().setUint32(h + PAYLOAD, 1, true);
+  view().setUint32(h + PAYLOAD + 8, msg, true);
+  return h;
+}
 function takeBlock(h, s, what) {
   try { return readBlock(h, s, what); } finally { drop(h, s); }
 }
