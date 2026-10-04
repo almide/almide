@@ -393,6 +393,9 @@ fn enforce_effect_permissions(
             ));
             for e in &forbidden {
                 err(&format!("  {} is not in [permissions].allow", e));
+                if let Some(path) = fe.paths.get(*e) {
+                    err(&format!("  path: {path}"));
+                }
             }
             err(&format!(
                 "  hint: add {} to [permissions].allow in almide.toml",
@@ -448,12 +451,13 @@ pub fn cmd_check_effects(file: &str) {
 
     for (name, fe) in &entries {
         let marker = if fe.is_effect { " (effect fn)" } else { "" };
-        err(&format!("  {}  → {}{}", name, fe.report(), marker));
+        let returns = fe.returns_report().map(|r| format!("; {r}")).unwrap_or_default();
+        err(&format!("  {}  → {}{}{}", name, fe.report(), marker, returns));
     }
 
-    // A function that calls closures it is handed runs whatever they do, and
-    // their effects are charged where they are created (#3268): it is not
-    // counted pure.
+    // A function that calls closures it is handed runs whatever they do; their
+    // categories are charged at each call site that hands one over (ADR-0026
+    // D1), so it is not counted pure (#3268).
     let (pure, dependent, effects) = EffectMap::summary_counts(entries.iter().map(|(_, fe)| *fe));
     let dependent_part = if dependent > 0 { format!(", {dependent} callback-dependent") } else { String::new() };
     err(&format!("\n{} functions: {} pure{}, {} with effects", entries.len(), pure, dependent_part, effects));
