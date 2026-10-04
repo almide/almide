@@ -40,7 +40,7 @@
 66208	spec/wasm_cross/bundled_pure_modules.almd
 66080	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
 131488	spec/wasm_cross/bytes_array_count_domain.almd
-66224	spec/wasm_cross/bytes_clear_mut_param.almd
+66176	spec/wasm_cross/bytes_clear_mut_param.almd
 66528	spec/wasm_cross/bytes_copy_from_negative_len.almd
 66176	spec/wasm_cross/bytes_copy_within_offset_domain.almd
 72192	spec/wasm_cross/bytes_cursor_read_domain.almd
@@ -525,10 +525,10 @@
 66672	spec/wasm_cross/mg_rebuild_two_phase.almd
 65872	spec/wasm_cross/module_global_const.almd
 66544	spec/wasm_cross/module_var_alias_cow.almd
-67520	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
-67568	spec/wasm_cross/mut_call_nested_read_before.almd
-66800	spec/wasm_cross/mut_call_two_mut_args_read.almd
-67648	spec/wasm_cross/mut_heap_param.almd
+67184	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
+67376	spec/wasm_cross/mut_call_nested_read_before.almd
+66192	spec/wasm_cross/mut_call_two_mut_args_read.almd
+67296	spec/wasm_cross/mut_heap_param.almd
 66080	spec/wasm_cross/mut_map_param.almd
 135184	spec/wasm_cross/mut_param_alias_cow.almd
 65760	spec/wasm_cross/mut_param_branch_forward.almd
