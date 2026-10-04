@@ -281,9 +281,23 @@ marshalling. `app.js` is a dependency-free ES module:
   name (it has no host for the import) and points at `--host js`.
 - Every `pub fn` gets a wrapper: `Int` ↔ `number` (a `RangeError` outside
   ±2^53 rather than a silent truncation — pass a `BigInt`-aware hook to keep a
-  wider value exact), `Float`, `Bool`, `String`, `Unit`. Any other type on the
-  boundary is a build-time refusal naming the function and the type (lists,
-  records and variants are the next step, following the bindgen table).
+  wider value exact), `Float`, `Bool`, `String`, `Unit`, and (#3354) the block
+  shapes, as params and returns: `Bytes` ↔ `Uint8Array` (a copy), `List[T]` ↔
+  `Array<T>` (any element type here, nested lists included), `Option[T]` ↔
+  `T | undefined` (`none` is `undefined`; `null` is accepted going in), and a
+  record ↔ a plain object with the record's fields in declared order (a
+  missing field is a `TypeError` before the call). Each block is built and
+  read by the layout the emitter records per export
+  (`almide_wasm::host_exports::export_params_noted` / `export_rets`: element
+  stride, field offsets, record size), never re-derived by the host; a record
+  that disagrees with the source type is a build-time refusal. Ownership
+  follows the recorded param ownership: a block the callee owns is its to
+  release, a borrowed one the host releases after the call. Because the
+  module's `__release` is flat, the host walks the shape when it drops the
+  last credit on a block and releases the children that block held. Variants,
+  `Map`, `Set`, tuples and functions are still a build-time refusal naming the
+  function and the type. `memoryBytes()` (shipped with the block helpers)
+  reports the linear memory size, so a host can check for leaks.
 - An `effect fn` export (and a fn declaring `Result[T, String]`) returns one
   `Result` block (tag at payload+0, 0 = ok; value slot at payload+8), whatever
   its declared `T` (#3352). Its wrapper unwraps it: ok is `T` marshalled as
