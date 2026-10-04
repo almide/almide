@@ -77,26 +77,96 @@ fn compute_output_path(file: &str, output: Option<&str>, is_wasm: bool) -> Strin
     }
 }
 
-/// `cmd_build`'s cdylib target: build a shared library (.dylib/.so).
-/// Extracted verbatim — exits the process on a compile error, otherwise
-/// prints the built path and returns.
-fn cmd_build_cdylib(rs_code: &str, output: &str, use_release: bool, native_deps: &[project::NativeDep], source_root: Option<&std::path::Path>) {
+/// The generated crate's Cargo name for a native build of `file` (#3349):
+/// `[package].name` of the `almide.toml` in the working directory — the same
+/// source the default output name reads — else the entry file's stem. Never
+/// the `-o` value: that is an output PATH, and a path is not a crate name.
+fn native_crate_name(file: &str) -> String {
+    let manifest = std::path::Path::new("almide.toml");
+    let base = manifest.exists().then(|| project::manifest_package_name(manifest)).flatten()
+        .unwrap_or_else(|| std::path::Path::new(file).file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default());
+    sanitize_crate_name(&base)
+}
+
+/// Make `name` a valid Cargo library name: every character outside
+/// `[A-Za-z0-9_]` becomes `_`, and a name that is empty or starts with a digit
+/// gets a leading `almide_`.
+fn sanitize_crate_name(name: &str) -> String {
+    let clean: String = name.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect();
+    match clean.chars().next() {
+        Some(c) if !c.is_ascii_digit() => clean,
+        _ => format!("almide_{clean}"),
+    }
+}
+
+/// Where a cdylib build writes its library (#3349): the `-o` path exactly as
+/// given — the same meaning `-o` has for a binary — else today's default,
+/// `lib<crate>.<ext>` for the build's target in the working directory.
+fn cdylib_output_path(output: Option<&str>, crate_name: &str, triple: Option<&str>) -> std::path::PathBuf {
+    match output {
+        Some(o) => std::path::PathBuf::from(o),
+        None => std::path::PathBuf::from(super::native_target::cdylib_file_name(crate_name, triple)),
+    }
+}
+
+/// Install a built artifact at `dest`: create the parent directory, then
+/// stage-and-RENAME, never copy onto an existing file. A bare `fs::copy`
+/// rewrites the destination IN PLACE (same inode), and on macOS the kernel's
+/// code-signature cache is keyed by vnode: a binary overwritten at the same
+/// inode after its previous content was executed gets SIGKILLed on the next
+/// exec — no exit code, no stderr, nothing to debug. `almide build app.almd -o
+/// app` twice in a row then `./app` reproduced it sporadically, and the
+/// fuzzer's per-worker reused output path hit it reliably deep into a campaign
+/// (seed 1785165458340124000 index 572: a phantom "native run failed while
+/// wasm succeeded"). A loaded dylib is mapped the same way. The rename gives
+/// the destination a fresh inode atomically; the staging temp lives in the
+/// SAME directory so the rename cannot cross a filesystem. `-o build/app` must
+/// not fail just because `build/` doesn't exist yet.
+fn install_artifact(built: &std::path::Path, dest: &std::path::Path) -> std::io::Result<()> {
+    if let Some(parent) = dest.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    let file_name = dest.file_name().map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| dest.to_string_lossy().into_owned());
+    let staged = dest.with_file_name(format!(".{}.staged-{}", file_name, std::process::id()));
+    let copy_then_rename = std::fs::copy(built, &staged).and_then(|_| std::fs::rename(&staged, dest));
+    if copy_then_rename.is_err() {
+        let _ = std::fs::remove_file(&staged);
+    }
+    copy_then_rename
+}
+
+/// `cmd_build`'s cdylib target: build a shared library (.dylib/.so/.dll) and
+/// write it to `dest`. Exits the process on a compile error, otherwise prints
+/// the written path and returns.
+fn cmd_build_cdylib(rs_code: &str, crate_name: &str, dest: &std::path::Path, use_release: bool, native_deps: &[project::NativeDep], source_root: Option<&std::path::Path>) {
     let project_dir = std::env::temp_dir().join("almide-build-cdylib");
     // Strip fn main() from the code — cdylib has no entry point
     let lib_code = rs_code.replace("fn main()", "fn __almide_unused_main()");
     // Serialize across processes: the shared scratch dir's src + target would
-    // otherwise be corrupted by a concurrent `almide build`.
+    // otherwise be corrupted by a concurrent `almide build`. The lock is held
+    // through the install so the library copied out is this build's.
     let _ = std::fs::create_dir_all(&project_dir);
     let _flock = super::run::BuildDirLock::acquire(&project_dir)
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
     // Same stale-incremental-session recovery as the bin path (#2500), under
     // the lock just taken.
     let built = super::cargo_build::build_recovering_from_ice(&project_dir, || {
-        super::cargo_build_cdylib(&lib_code, &project_dir, output, use_release, native_deps, source_root)
+        super::cargo_build_cdylib(&lib_code, &project_dir, crate_name, use_release, native_deps, source_root)
     });
     match built {
         Ok(lib_path) => {
-            err(&format!("Built {}", lib_path.display()));
+            if let Err(e) = install_artifact(&lib_path, dest) {
+                err(&format!("Failed to copy library to {}: {}", dest.display(), e));
+                std::process::exit(1);
+            }
+            err(&format!("Built {}", dest.display()));
         }
         Err(e) => {
             err(&format!("Compile error:\n{}", e));
@@ -110,41 +180,11 @@ fn cmd_build_cdylib(rs_code: &str, output: &str, use_release: bool, native_deps:
 /// from any caller (or any source path) reuses one binary and skips cargo
 /// entirely. Locking and atomic binary staging live inside
 /// `build_native_cached`; the copy-out below reads a content-named,
-/// atomically-renamed file, so it needs no lock. Extracted verbatim.
+/// atomically-renamed file, so it needs no lock.
 fn cmd_build_native(rs_code: &str, output: &str, use_release: bool, native_deps: &[project::NativeDep], source_root: Option<&std::path::Path>) {
     match super::run::build_native_cached(rs_code, false, use_release, None, native_deps, source_root) {
         Ok(bin_path) => {
-            // Copy the built binary to the desired output location. Create the
-            // output's parent directory first — `-o build/app` must not fail
-            // just because `build/` doesn't exist yet (it's the natural place
-            // to put a binary, and every caller otherwise needs a manual mkdir).
-            if let Some(parent) = std::path::Path::new(&output).parent() {
-                if !parent.as_os_str().is_empty() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
-            }
-            // Stage-and-RENAME, never copy onto an existing executable. A bare
-            // `fs::copy` rewrites the destination IN PLACE (same inode), and on
-            // macOS the kernel's code-signature cache is keyed by vnode: a
-            // binary overwritten at the same inode after its previous content
-            // was executed gets SIGKILLed on the next exec — no exit code, no
-            // stderr, nothing to debug. `almide build app.almd -o app` twice in
-            // a row then `./app` reproduced it sporadically, and the fuzzer's
-            // per-worker reused output path hit it reliably deep into a
-            // campaign (seed 1785165458340124000 index 572: a phantom
-            // "native run failed while wasm succeeded"). The rename gives the
-            // destination a fresh inode atomically; the staging temp lives in
-            // the SAME directory so the rename cannot cross a filesystem.
-            let staged = {
-                let out_path = std::path::Path::new(&output);
-                let file_name = out_path.file_name().map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| output.to_string());
-                out_path.with_file_name(format!(".{}.staged-{}", file_name, std::process::id()))
-            };
-            let copy_then_rename = std::fs::copy(&bin_path, &staged)
-                .and_then(|_| std::fs::rename(&staged, output));
-            if let Err(e) = copy_then_rename {
-                let _ = std::fs::remove_file(&staged);
+            if let Err(e) = install_artifact(&bin_path, std::path::Path::new(output)) {
                 err(&format!("Failed to copy binary to {}: {}", output, e));
                 std::process::exit(1);
             }
@@ -199,6 +239,7 @@ pub fn cmd_build(args: BuildArgs) {
         }
     });
 
+    let requested_output = output;
     let output = compute_output_path(file, output, is_wasm);
 
     let opts = crate::codegen::CodegenOptions { repr_c, allow_unverified: false, trace: false };
@@ -256,7 +297,12 @@ pub fn cmd_build(args: BuildArgs) {
 
     // cdylib target: build shared library (.dylib/.so)
     if cdylib {
-        cmd_build_cdylib(&rs_code, &output, use_release, &native_deps, source_root.as_deref());
+        // #3349: `-o` is the library FILE, as it is for a binary; the crate
+        // name comes from the package / entry, not from the output path.
+        let crate_name = native_crate_name(file);
+        let triple = super::native_target::cross_target();
+        let dest = cdylib_output_path(requested_output, &crate_name, triple.as_deref());
+        cmd_build_cdylib(&rs_code, &crate_name, &dest, use_release, &native_deps, source_root.as_deref());
         return;
     }
 
@@ -1272,4 +1318,34 @@ fn run_wasm_opt(path: &str) -> Result<usize, String> {
     }
     let meta = std::fs::metadata(path).map_err(|e| format!("stat {}: {}", path, e))?;
     Ok(meta.len() as usize)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_crate_name_is_an_identifier_whatever_the_package_is_called() {
+        assert_eq!(sanitize_crate_name("ceangal"), "ceangal");
+        assert_eq!(sanitize_crate_name("my-lib"), "my_lib");
+        assert_eq!(sanitize_crate_name("out/libx.dylib"), "out_libx_dylib");
+        assert_eq!(sanitize_crate_name("3d"), "almide_3d");
+        assert_eq!(sanitize_crate_name(""), "almide_");
+    }
+
+    #[test]
+    fn a_cdylib_output_is_the_path_given_else_the_target_named_default() {
+        // #3349: `-o` is the file, verbatim, in every spelling.
+        for o in ["x", "out/libx.dylib", "/abs/dir/libx.so", "x.dll"] {
+            assert_eq!(cdylib_output_path(Some(o), "pkg", None), std::path::PathBuf::from(o));
+        }
+        assert_eq!(
+            cdylib_output_path(None, "pkg", Some("x86_64-unknown-linux-gnu")),
+            std::path::PathBuf::from("libpkg.so")
+        );
+        assert_eq!(
+            cdylib_output_path(None, "pkg", Some("x86_64-pc-windows-gnu")),
+            std::path::PathBuf::from("pkg.dll")
+        );
+    }
 }
