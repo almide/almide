@@ -835,7 +835,7 @@
 757	spec/wasm_cross/top_let_div_eager.almd
 890	spec/wasm_cross/top_let_div_used.almd
 1676	spec/wasm_cross/top_let_eager_through_call.almd
-2829	spec/wasm_cross/top_let_fn_value_closure_param.almd
+3171	spec/wasm_cross/top_let_fn_value_closure_param.almd
 4846	spec/wasm_cross/top_let_stored_in_container.almd
 835	spec/wasm_cross/toplevel_const_wrapping.almd
 13887	spec/wasm_cross/trig_libm.almd
