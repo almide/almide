@@ -731,7 +731,12 @@ impl LowerCtx {
         // With the Drop the arms agree (`{m|d}`) and the leak is gone. Nested
         // heap-result ifs recurse through here, so parity holds level by level.
         let outer: Vec<ValueId> = self.live_heap_handles.clone();
+        // Each arm starts from the bindings that dominate the `if` (#3267): a
+        // rebind made in the then arm (a `mut` param's copy-on-write clone)
+        // names a value the else path never defines.
+        let bindings = self.value_of.clone();
         let then_obj = self.lower_heap_result_arm(then, result_ty)?;
+        let then_bindings = std::mem::replace(&mut self.value_of, bindings.clone());
         let consumed_by_then: Vec<ValueId> =
             outer.iter().copied().filter(|h| !self.live_heap_handles.contains(h)).collect();
         let else_marker_at = self.ops.len();
@@ -756,6 +761,22 @@ impl LowerCtx {
             }
         }
         self.ops.push(Op::EndIf { val: Some(else_obj) });
+        self.join_arm_bindings(bindings, &then_bindings);
         Some(dst)
+    }
+
+    /// After a two-armed `if`: a binding both arms left as it was before the
+    /// `if` stays; one an arm rebound has no single value on every path, so it
+    /// is unbound and a later read walls instead of naming one arm's value
+    /// (#3267). The else arm's bindings are the current ones.
+    fn join_arm_bindings(
+        &mut self,
+        before: std::collections::HashMap<VarId, ValueId>,
+        then_bindings: &std::collections::HashMap<VarId, ValueId>,
+    ) {
+        let else_bindings = std::mem::replace(&mut self.value_of, before);
+        self.value_of.retain(|var, v| {
+            then_bindings.get(var) == Some(v) && else_bindings.get(var) == Some(v)
+        });
     }
 }

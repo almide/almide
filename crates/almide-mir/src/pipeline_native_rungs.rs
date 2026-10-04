@@ -397,6 +397,16 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
 /// Returns `(function name, certificate)` pairs; a function outside the
 /// lowering subset contributes nothing (an honest wall is not a certificate).
 pub fn ownership_certificates(source: &str) -> Result<Vec<(String, String)>, LowerError> {
+    Ok(lowered_functions(source)?
+        .iter()
+        .map(|f| (f.name.to_string(), crate::certificate::ownership_certificate(f)))
+        .collect())
+}
+
+/// Every function of `source` that lowers, test bodies included — the MIR
+/// [`ownership_certificates`] certifies, for a caller that also runs
+/// [`crate::verify_ownership`] on it.
+pub fn lowered_functions(source: &str) -> Result<Vec<crate::MirFunction>, LowerError> {
     let _strict = crate::lower::StrictValuesGuard::set(true);
     let ir = crate::pipeline::source_to_ir_for_certs(source)?;
     let globals = std::collections::HashMap::new();
@@ -414,12 +424,7 @@ pub fn ownership_certificates(source: &str) -> Result<Vec<(String, String)>, Low
         ) else {
             continue;
         };
-        for f in all {
-            out.push((
-                f.name.to_string(),
-                crate::certificate::ownership_certificate(&f),
-            ));
-        }
+        out.extend(all);
     }
     Ok(out)
 }
