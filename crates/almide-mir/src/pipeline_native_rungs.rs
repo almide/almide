@@ -403,6 +403,15 @@ pub fn ownership_certificates(source: &str) -> Result<Vec<(String, String)>, Low
         .collect())
 }
 
+/// [`ownership_certificates`] with `verify_ownership`'s verdict on the same
+/// lowered function: `(name, certificate, verify_ownership accepted)` (#3270).
+pub fn ownership_verdicts(source: &str) -> Result<Vec<(String, String, bool)>, LowerError> {
+    Ok(lowered_functions(source)?
+        .iter()
+        .map(|f| (f.name.to_string(), crate::certificate::ownership_certificate(f), crate::verify_ownership(f).is_ok()))
+        .collect())
+}
+
 /// Every function of `source` that lowers, test bodies included — the MIR
 /// [`ownership_certificates`] certifies, for a caller that also runs
 /// [`crate::verify_ownership`] on it.
