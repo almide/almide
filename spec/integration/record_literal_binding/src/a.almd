@@ -1,0 +1,6 @@
+// #3290: same field set as `b.Extent`; every literal here is a `Size`.
+type Size = { w: Float, h: Float }
+
+fn unit() -> Size = { w: 1.0, h: 1.0 }
+
+fn area(s: Size) -> Float = s.w * s.h

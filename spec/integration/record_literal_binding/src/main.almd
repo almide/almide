@@ -1,0 +1,16 @@
+// #3290: before the fix every binding below took the first declared record
+// with the same field set (`a.Size`): native rustc E0308, wasm wall E082.
+import self.a
+import self.b
+
+effect fn main() -> Unit = {
+  println(float.to_string(a.area(a.unit())))
+  println(float.to_string(b.span(b.returned(2.0))))
+  println(float.to_string(b.passed(4.0)))
+  println(int.to_string(list.len(b.stored(1.0))))
+  println(float.to_string(b.span(b.branch(false))))
+  println(float.to_string(b.field_read(1.0).w))
+  println(b.shown(2.0))
+  let anon = { w: 9.0, h: 9.0 }
+  println(float.to_string(anon.w + b.span(anon)))
+}
