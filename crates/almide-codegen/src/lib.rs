@@ -684,11 +684,8 @@ fn rust_runtime_modules(needed: &std::collections::HashSet<&str>) -> String {
     out
 }
 
-/// Runtime modules that cannot live in the bare-rustc `almide_rt` rlib: `http`
-/// needs rustls, `zlib` needs flate2, and `sse` calls into `http` for its
-/// streaming transport. Programs using these stay on the cargo path; the rlib
-/// fast path only covers std-only programs (a link error otherwise falls back).
-pub const NON_STD_RUNTIME_MODULES: &[&str] = &["http", "zlib", "sse"];
+mod runtime_crates;
+pub use runtime_crates::{runtime_crate_deps, RUNTIME_MODULE_CRATES};
 
 /// Emit the full `almide_rt` runtime crate source: the prelude (pub items +
 /// exported macros) plus every std-only runtime module. Built once into an
@@ -704,7 +701,7 @@ pub fn emit_runtime_crate() -> String {
     // Every std-only runtime module (exclude external-dep modules).
     let mut needed: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for (name, _) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
-        if !NON_STD_RUNTIME_MODULES.contains(name) {
+        if !RUNTIME_MODULE_CRATES.iter().any(|(m, _)| m == name) {
             needed.insert(*name);
         }
     }
