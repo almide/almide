@@ -40,6 +40,14 @@ impl Emitter<'_> {
         // the async imports unconditionally).
         let dbg = almide_base::env::flag("ALMIDE_DBG_FAN");
         let out = match (func, args) {
+            // #3003 stage 1: a pure scalar chunk map, offered to the host
+            // for instance-parallel execution (fan_par.rs / fan_par_lower.rs).
+            (f, _) if f.starts_with(crate::fan_par::PAR_PREFIX) => {
+                if dbg {
+                    eprintln!("[fan-dbg] {f}: instance-parallel offer");
+                }
+                Some(self.lower_fan_par(f, args)?)
+            }
             // The PREFETCH form (#1628 increment 2b): a map whose whole
             // arm body is one fs.read_text on the element starts every
             // read up front (op 40) and awaits in arm order (op 41) —

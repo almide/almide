@@ -1003,7 +1003,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_DBG_DESUGAR_FN=value` | debug | print the fully desugared body of the fn named by the value (v1 lowering; was `DBG_DESUGAR_FN` before #2205) |
 | `ALMIDE_DBG_DESUGAR_RAW` | debug | with `ALMIDE_DBG_DESUGAR_FN`, print the raw pre-desugar body too (was `DBG_DESUGAR_RAW`) |
 | `ALMIDE_DBG_ELEM` | debug | print why a list-literal Block element declined (v1 lowering) |
-| `ALMIDE_DBG_FAN` | debug | print the fan lowering's prefetch and pattern decisions (structural leg) |
+| `ALMIDE_DBG_FAN` | debug | print the fan lowering's prefetch, pattern and instance-parallel decisions (structural leg and embedded host) |
 | `ALMIDE_DBG_GINIT` | debug | print the eager top-let init runner's admission set and why an extended runner declined (v1 lowering, C-007) |
 | `ALMIDE_DBG_LINK` | debug | dump the wasm link demand set and what each key resolves to |
 | `ALMIDE_DBG_LOWER_FN=value` | debug | print the fully desugared body the v1 lowering actually lowers, for the fn named by the value (was `DBG_LOWER_FN`) |
@@ -1025,6 +1025,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_EXPECT_TOOLS` | harness | make a harness test FAIL instead of skipping when an external tool (wasmtime, wasm-tools) is missing; CI sets it |
 | `ALMIDE_F32_SWEEP_N=value` | harness | how many xorshift32 bit patterns the Float32 printer sweep prints (`${x}` and `float32.to_string`) and compares with Rust f32 Display on each leg (default 100000; tests/float32_to_string_cross_target_test.rs) |
 | `ALMIDE_FALLBACK_NAMES` | tool | make `almide test` print one `FALLBACK <file>` line per file the wasm leg did not pass — the wasm coverage ratchet's data feed |
+| `ALMIDE_FAN_PAR_OFF` | ablation | keep `fan` chunk maps off the structural leg's instance-parallel offer (#3003): every chunk runs sequentially in the run's own instance |
 | `ALMIDE_FAN_SEQUENTIAL` | runtime | run `fan.*` sequentially in the native runtime (a determinism lever for measurement; the observable result is the same by contract) |
 | `ALMIDE_FLOAT_SWEEP_N=value` | harness | how many xorshift64 bit patterns the float printer sweep prints and compares with Rust `format!` on each leg (default 100000; tests/float_to_string_cross_target_test.rs) |
 | `ALMIDE_FMOD_SWEEP_N=value` | harness | how many xorshift64 bit-pattern pairs the float `%` sweep compares with Rust `%` on each leg, as Float and as Float32 (default 20000; tests/float_fmod_cross_target_test.rs) |

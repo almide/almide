@@ -76,6 +76,10 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     // than substituted (inline_calls.rs) — the stdlib's own kernels too.
     let inlined = crate::inline_calls::inline_small_scalar_calls(ir);
     let ir = inlined.as_ref().unwrap_or(ir);
+    // #3003 stage 1 (ADR-0011 §D2a): pure scalar `fan` chunk maps become
+    // exported per-chunk fns the host may run on separate instances.
+    let routed = crate::fan_par::route(ir);
+    let ir = routed.as_ref().unwrap_or(ir);
     // Witness sweeps (#2754) see the pass boundaries and which pass shipped
     // (no-ops unless a sweep collects).
     use crate::witness::{mark_pass as mark, mark_shipped as ship};
@@ -557,6 +561,9 @@ fn emit_program_pass(
             export_fns.push((export_name, table.infos[i].wasm_index));
         }
     }
+
+    // #3003: every reached instance-parallel chunk is a host-callable export.
+    export_fns.extend(crate::fan_par::site_exports(&program_fns, &visited, &table));
 
     // Extra functions (ok-wrap adapters + lifted lambdas) resolve BEFORE
     // the type section is built — their call_indirect/type interning must

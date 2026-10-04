@@ -227,6 +227,15 @@ fn shim_fs_call(
         sleep_arm(&mut i, park, (op, a_len, deadline));
     }
 
+    // op 74: the instance-parallel fan offer (#3003, ADR-0011 §D2a). A stock
+    // runtime has no second instance to run a chunk on: 0 = not served, and
+    // the guest runs the chunks sequentially, as before the offer existed.
+    if has(74) {
+        i.local_get(op).i32_const(74).i32_eq().if_(BlockType::Empty);
+        i.i64_const(0).return_();
+        i.end();
+    }
+
     // Everything else: the defined refusal.
     refuse(&mut i, park, MSG, UNSUPPORTED_MSG.len());
     i.end();

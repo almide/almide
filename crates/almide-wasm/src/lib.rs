@@ -100,6 +100,7 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
 }
 
 mod bytes;
+mod fan_par;
 pub mod decline_site;
 mod imports;
 mod param_borrow;
@@ -534,8 +535,6 @@ impl SliceTy {
 
 
 // ── literal pool ────────────────────────────────────────────────────────
-
-
 
 fn len_memarg() -> MemArg {
     MemArg { offset: u64::from(almide_layout::LEN.offset), align: 2, memory_index: 0 }
