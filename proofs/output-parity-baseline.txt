@@ -46,6 +46,7 @@ spec/integration/modules/cross_module_unit_effect_test.almd
 spec/integration/modules/vis_effect_test.almd
 spec/integration/qualified_ctor_names/src/main.almd
 spec/integration/same_leaf_submodules/src/main.almd
+spec/integration/same_shape_records/src/main.almd
 spec/lang/block_comment_raw_string_test.almd
 spec/lang/closure_capturing_fn_wasm.almd
 spec/lang/closure_capturing_heap_wasm.almd
@@ -919,6 +920,7 @@ spec/wasm_cross/top_let_closure_record.almd
 spec/wasm_cross/top_let_div_eager.almd
 spec/wasm_cross/top_let_div_used.almd
 spec/wasm_cross/top_let_eager_through_call.almd
+spec/wasm_cross/top_let_rc_value.almd
 spec/wasm_cross/top_let_stored_in_container.almd
 spec/wasm_cross/toplevel_const_wrapping.almd
 spec/wasm_cross/trig_libm.almd
