@@ -3,7 +3,7 @@
 13	3	88	13	spec/wasm_cross/adr0005_operator_equivalence.almd
 27	12	206	27	spec/wasm_cross/alias_combinator_rc.almd
 168	114	1412	168	spec/wasm_cross/alias_cow.almd
-16	0	2096720	16	spec/wasm_cross/allocation_within_limits.almd
+16	0	2096456	16	spec/wasm_cross/allocation_within_limits.almd
 10	1	176	10	spec/wasm_cross/anon_record_structural_identity.almd
 9	6	104	9	spec/wasm_cross/anon_record_variant_payloads.almd
 6	1	144	6	spec/wasm_cross/anon_records_and_fusion.almd
@@ -176,7 +176,7 @@
 ~	spec/wasm_cross/exit_code_out_of_range.almd
 0	0	0	0	spec/wasm_cross/expr_stmt_comment.almd
 69	44	724	69	spec/wasm_cross/fallible_hof_effect_callback_family.almd
-2266785	2266741	58302905	2266785	spec/wasm_cross/fallible_hof_large_input.almd
+2266785	2266744	58299905	2266785	spec/wasm_cross/fallible_hof_large_input.almd
 603	578	7243	603	spec/wasm_cross/fallible_hof_matrix_containers.almd
 606	581	6233	606	spec/wasm_cross/fallible_hof_matrix_list.almd
 163	113	2308	163	spec/wasm_cross/fallible_hof_option_effect_callback.almd
@@ -443,10 +443,10 @@
 0	0	0	0	spec/wasm_cross/literal_int_forms.almd
 0	0	0	0	spec/wasm_cross/literal_unit.almd
 0	0	0	0	spec/wasm_cross/loop_break_continue.almd
-186	152	5762056	186	spec/wasm_cross/loop_buffer_churn.almd
+186	152	5761600	186	spec/wasm_cross/loop_buffer_churn.almd
 21	14	207	21	spec/wasm_cross/loop_effect_match_stmt.almd
 14	7	55	14	spec/wasm_cross/loop_outer_inplace_mutate_rc.almd
-158	124	33414560	158	spec/wasm_cross/loop_push_trailing_increment.almd
+158	127	33409688	158	spec/wasm_cross/loop_push_trailing_increment.almd
 16	4	417	16	spec/wasm_cross/map_core_trio.almd
 106001	105960	1149806	106001	spec/wasm_cross/map_entries_reclaim.almd
 24	11	322	24	spec/wasm_cross/map_entry_loop.almd
@@ -500,7 +500,7 @@
 32	17	557	32	spec/wasm_cross/matrix_neg_signed_zero.almd
 50	34	1704	50	spec/wasm_cross/matrix_pow_libm.almd
 132	114	2217	122	spec/wasm_cross/matrix_product_family.almd
-79	47	96005721	79	spec/wasm_cross/matrix_q1_full_loader_cols_beyond_buffer.almd
+79	52	96005721	79	spec/wasm_cross/matrix_q1_full_loader_cols_beyond_buffer.almd
 122	93	46175	122	spec/wasm_cross/matrix_q1_full_loader_wrapped_offset.almd
 32	9	2580	10	spec/wasm_cross/matrix_q_dims_guard.almd
 232	183	44345	232	spec/wasm_cross/matrix_q_fp16_scale_domain.almd
@@ -671,7 +671,7 @@
 916	891	127849	916	spec/wasm_cross/regex_captures_accumulator_release.almd
 599	539	252724	599	spec/wasm_cross/regex_engine.almd
 1663	1421	551735	1663	spec/wasm_cross/regex_fuzz_batch.almd
-90	50	119450452	90	spec/wasm_cross/regex_repetition_depth.almd
+90	66	119450452	90	spec/wasm_cross/regex_repetition_depth.almd
 ~	spec/wasm_cross/repeat_size_ceiling.almd
 7	3	32	7	spec/wasm_cross/replace_empty_pat.almd
 14	6	178	14	spec/wasm_cross/repr_parity_pin.almd
@@ -698,8 +698,8 @@
 54	31	1490	54	spec/wasm_cross/rope_geometry_family.almd
 4	1	28	4	spec/wasm_cross/scalar_if_arm_effects.almd
 9	1	93	9	spec/wasm_cross/scan_heap_acc.almd
-2070	30	41604	2070	spec/wasm_cross/scoped_region_value.almd
-17	4	532	17	spec/wasm_cross/scoped_worker_in_and_out.almd
+2070	30	41548	2070	spec/wasm_cross/scoped_region_value.almd
+17	4	492	17	spec/wasm_cross/scoped_worker_in_and_out.almd
 56001	55968	551345	56001	spec/wasm_cross/set_entries_reclaim.almd
 810	742	65423	810	spec/wasm_cross/set_index_order.almd
 87	75	997	87	spec/wasm_cross/set_insertion_order.almd
@@ -730,7 +730,7 @@
 26	15	221	26	spec/wasm_cross/string_empty_pattern.almd
 4	3	14	4	spec/wasm_cross/string_float_stable.almd
 52	44	744	52	spec/wasm_cross/string_from_bytes.almd
-40	20	2045881	40	spec/wasm_cross/string_interp_large_hole.almd
+40	23	2045881	40	spec/wasm_cross/string_interp_large_hole.almd
 1	0	3	1	spec/wasm_cross/string_interpolation.almd
 11	9	176	11	spec/wasm_cross/string_is_alphanumeric.almd
 52	47	178	52	spec/wasm_cross/string_lines.almd
@@ -738,7 +738,7 @@
 43	26	272	43	spec/wasm_cross/string_ops_drain.almd
 3	0	36	1	spec/wasm_cross/string_pad_ceiling_oom.almd
 17	12	71	17	spec/wasm_cross/string_passthrough_share.almd
-37	8	11600400	37	spec/wasm_cross/string_position_large_offset.almd
+37	9	11600400	37	spec/wasm_cross/string_position_large_offset.almd
 400	387	9572	400	spec/wasm_cross/string_predicates.almd
 25	10	56	25	spec/wasm_cross/string_repeat_empty.almd
 89	71	490	89	spec/wasm_cross/string_rle.almd
