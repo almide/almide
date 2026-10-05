@@ -1,6 +1,6 @@
 # ALS — 実行時規範（Runtime）
 
-> Last updated: 2026-09-26
+> Last updated: 2026-10-05
 
 プログラム実行の観測規範（エラー終了・文字列補間の表示形・並行コンビネータ）。
 参照方法は [strings.md](strings.md) 冒頭と同じ。
@@ -38,6 +38,16 @@ auto-wrap、map の mapper はしない)。`fan.settle { a; b }` の返りは
 `fan.any`・`fan.map`・`fan.settle` の結果は**リスト順で決定的**(最初に
 完了したものではなく、引数リストの先頭から評価した最初の該当)。エラーは
 ALS-R1 の統一 abort 形で表面化する。
+
+`fan.map` と `fan.settle` の観測(stdout・stderr・終了コード・返り値)は、
+**全要素をリスト順に一つずつ評価した逐次評価**の観測と同一でなければならない。
+実行基盤(逐次・スレッド・非同期 subtask)の選択はこの観測を変えてはならない
+(C-004)。`fan.map` はある要素が Err を返した後も**残りの全要素を評価し**、
+Err が複数あれば**最小 index の Err** を結果とする — ブロック形 `fan { }`
+と同じ規則(C-005、C-199、`spec/wasm_cross/fan_map_err_runs_every_element.almd`)。
+要素 k の trap は、要素 0..k-1 が完了して出力がリスト順に現れ、要素 k の
+trap までの出力の後に abort する観測となり、k より後の要素の出力は現れない
+(C-200、`spec/wasm_cross/fan_trap_waits_for_elements_below.almd`)。
 
 `fan.race` と `fan.timeout` は 0.42.0 / 0.29.0 でいったん削除された後、
 **決定的意味論を得て 0.47.0 で復活した**: race は (spend, index) 辞書式
@@ -82,6 +92,20 @@ temp_dir は非空かつ posix ホストでは絶対パス）が証明対象と�
 期限が発火した場合の err は従来どおり `exec timed out after <ms>ms` とする。
 テスト: `spec/stdlib/process_timeout_test.almd`
 
+wasm ターゲットでは、埋め込みホスト（`almide run --target wasm` と `almide test`
+の wasm レグ）が子プロセス族（`process.exec`・`exec_in`・`exec_with_stdin`・
+`exec_status`・`exec_status_timeout`・`run`・`run_in`・`spawn`・
+`kill`・`is_alive`・`pid`）を native と同じ観測で提供する。捕捉した stdout と stderr、
+終了コード（シグナルで終わった子は -1）、err の文字列は同一バイトである。pid は
+ホストの値であり、レグ間で比べない。単体の成果物（`almide build --target wasm`）
+は、プログラムが子プロセス操作を含むときに限り、非公開インターフェース
+`almide:process/spawn` の `call` をインポートする。含まないプログラムの成果物は
+このインポートを持たない。このインポートを定義しないランタイムは、`_start` を
+実行する前の読み込み時にモジュールを拒否する。したがって子プロセス呼び出しが
+実行時に誤った答えを返すことはない。そのようなプログラムのコンポーネント
+（`--component`）としてのビルドは E081 で拒否する。
+テスト: `spec/embedded_cross/process_spawn_family.almd`
+
 `http.start(method, url, body, headers, limits)` は、要求を始めてすぐに呼び出し
 ハンドル（`HttpCall`）を返す。上限は呼び出しごとに `limits = { total_ms,
 idle_ms }`（ミリ秒、0 は上限なし）で渡す。`total_ms` は `start` から測る壁時計で、
@@ -104,7 +128,89 @@ E081 で拒否する。`openai_streaming_call_with_limits` と
 `anthropic_streaming_call_with_limits` は native のみである。
 テスト: `spec/stdlib/http_call_test.almd`、`spec/embedded_cross/http_call_handle_errs.almd`
 
-Contracts: C-096, C-112, C-118, C-133, C-189, C-214, C-366。
+`http.serve(port, f)` は埋め込み wasm レーン（`almide run --target wasm`）でも
+native と同じ意味で動く。1 回の実行のすべての要求を 1 つのインスタンスが、受理順に
+1 件ずつ処理する。main は 1 回だけ走り、native と同じく `http.serve` を呼ぶ。
+ホストは `0.0.0.0:<port>` に bind し、解析済みの要求を 1 件ずつゲストに渡す。
+`serve` の前の main の効果は 1 回だけ起こる。`serve` に渡すアプリはインスタンスに
+閉じている（main の局所変数を読まない。almide/almide#2698）。したがって main が
+`serve` の前に計算した値については何も規定せず、アプリを評価するインスタンスの数は
+観測できない。要求の読み取りは両レグで同じコードが行う。
+要求行のメソッドとターゲット、最初のコロンで分けて前後の空白を除いたヘッダ行
+（到着順）、Content-Length の本文（UTF-8、不正バイトは置換文字）を読む。
+どの要求にも両レグは同じ status コード・ヘッダ集合・本文で答える。ヘッダ集合は
+応答のヘッダフィールドを (名前, 値) の組として見たもので、名前は ASCII の大小を
+区別せずに比べる。名前の異なるフィールドの順序は問わず、同じ名前のフィールドは
+互いの相対順序を保つ（RFC 9110 §5.3）。ホストが管理するフィールド `date`・
+`connection`・`keep-alive`・`transfer-encoding`・`content-length` は除く（これは
+フレーミングであり、本文はフレーミングを外して比べる）。理由句は規範に含まない。
+HTTP/2 と HTTP/3 は理由句を持たず（RFC 9113 §8.3.2、RFC 9114 §4.3.2）、ホストの
+HTTP ライブラリは自分の理由句を書く（native コアは `418 OK`、hyper は
+`418 I'm a teapot`。almide/almide#2659 の試作で測定）。`req_method`・`req_path`・
+`req_body`・`req_header`（最初の一致、ASCII 大小無視）・`query_params`（最初の
+`?` 以降を `&` で分け、各組を最初の `=` で分け、`=` の無い組は捨て、`+` と `%XX`
+を復号し、後のキーが勝つ）は同じ値を返す。ハンドラの `err(m)` は本文
+`Internal error: <m>`、`Content-Type: text/plain` の `500` になる。export ホスト
+（C-375 の成果物を走らせる `wasmtime serve`）では、ハンドラの trap や中断には
+ホスト自身の `500` が答え、そのインスタンスは捨てられる。ソケットホスト（native と
+埋め込みレーン）では、bind の失敗は、呼び出しがどの位置にあっても実行を中断し、stderr に
+`Error: bind failed: <os message>` を書いて終了コード 1 で終わる。`http.serve` は
+err を返さない型なので、呼び出し側の `!` は何もしない（この規範以前、native
+ランタイムが返す err が現れるのは呼び出しが関数の末尾にあるときだけで、それ以外の
+位置ではプログラムはサーバー無しで先へ進んでいた）。ソケットホストでは、サーバーが
+走る間もレーンは native のストリーム規則を保つ。stderr はバッファしないので、実行が stderr に書く行はどれも
+両レグでストリームに届き、2 つの記録は同じ行を持つ（要求をまたぐ行の順序は規範に
+含まない。`wasmtime serve` の行頭 `stdout [req_id] :: ` のようなホストのログ装飾は
+記録に含まない）。stdout は端末なら書き込みごとに、それ以外は行を終える書き込みごとに flush する（C-162）。
+ソケットホストでは、シグナルはサーバーの出力を失わせずに止める（almide/almide#2692）。`http.serve` が
+動いている間に最初の SIGTERM か SIGINT（Windows では Ctrl-C か Ctrl-Break）が届くと、
+ホストは受理をやめ（まだ受理していない接続は答えずに閉じる）、処理中の要求を最後まで
+処理して答え、stdout を flush し、`http.serve` から戻る。したがって後続の文が走り、
+終了コードは main のものになる。二つ目のシグナル（この後始末の間でも、`serve` が
+戻った後でもよい）、または要求タイムアウト（30 秒）を過ぎても後始末が待っている
+ことは、stdout を flush して終了コード 1 で終わらせ、処理中の要求には答えない。
+どの停止も 128+シグナル番号では終わらない（C-350 の `0..=125`）。
+対象外: HTTP のフレーミングと接続の再利用（ホストが決める）。その他のシグナル。
+native の Windows では、強制停止は stdout を flush せずに終了コード 1 で終わる。
+stdout のバッファには serve しているスレッドしか触れず、stdout がプロセス全体で
+一つのバッファになる（almide/almide の ADR-0020 §5.5）まではそうなる。標準の成果物（`almide build --target wasm`）は待ち受けソケットを持たない。
+serve 形のプログラムは `wasi:http/handler@0.3.0` を export するコンポーネントになり、
+その形は次の段落（C-375）が記述する。それ以外の `http.serve` に届くプログラムは、
+標準の成果物では check 時にもビルド時にも拒否される（E081。どちらも
+almide/almide#2659）。
+テスト: `spec/serve_cross/http_serve_replay.almd`（終了しないサーバー fixture で、
+汎用ランナーは実行しない。実装側のドライバが両レグで起動し、同じ要求列を再生して
+各応答の status コード・ヘッダ集合・フレーミングを外した本文と、行の多重集合としての
+stderr の記録を比べ、使用中のポートで起動して中断を比べる）、
+`spec/serve_cross/http_serve_shutdown.almd`（同じドライバが stdout をファイルに
+向けて両レグで起動する終了しないサーバー fixture。ハンドラが眠っている要求の最中に
+SIGTERM を 1 回送ると、その要求に答え、`http.serve` の後に main が書く行まで
+すべての行をファイルに残し、終了コード 0 で終わる。止まった要求の最中に SIGTERM を
+2 回送ると、停止前に書いたすべての行を残して終了コード 1 で終わる）
+
+serve の形のプログラム（`main` の本体がちょうど 1 つの `http.serve(port, app)`
+呼び出しで、その前には `port` だけが読む `let` しか置かない）を
+`almide build --target wasm` で作ると、`wasi:http/handler@0.3.0` を export する
+コンポーネントになり、`wasmtime serve` はフラグ無しでそれを読み込んで serve する。
+コンポーネントが import するのはサービス world のインターフェースだけで、
+`wasi:filesystem` は含まない。`main` は走らず、`port` も評価しない（アドレスは
+ホストが決める）。アプリとトップレベルの `let` はインスタンスごとに評価する。
+1 つのインスタンスで同時に走るハンドラは 1 つである（バックプレッシャー）。ホストは
+並行する要求をインスタンスを増やして処理する。ゲストは native の上限を適用する。
+上限（1 MiB）を超える要求本文には `413`、上限（8 KiB）を超える要求行には `414` で
+答え、ハンドラは呼ばない。ハンドラの trap や中断にはホストの `500` が答え、ホストは
+そのインスタンスを捨てる。それ以外の受理した要求には、native と同じ status コード・
+ヘッダ集合・フレーミングを外した本文で答える。比べ方は C-367 の HTTP 意味論の比較で
+あり、理由句・`date`・フレーミングはホストのもので、バイトでは比べない。
+対象外: ホストのアドレス、受理、並行度、インスタンスの再利用、タイムアウト、停止、
+ログ装飾（どれもホストの設定）。
+テスト: `spec/serve_cross/http_serve_export.almd`（終了しないサーバー fixture で、
+汎用ランナーは実行しない。実装側のドライバが標準 wasm 向けに作って `wasmtime serve`
+で serve し、native でも走らせ、同じ要求列を再生して各応答の status コード・ヘッダ
+集合・フレーミングを外した本文を比べ、成果物に上限超えの本文と長すぎる要求行を送り、
+最後に `/trap` を要求する）
+
+Contracts: C-096, C-112, C-118, C-133, C-189, C-214, C-366, C-367, C-375。
 
 ## ALS-R6 ファイルシステムのパス解決
 
@@ -176,7 +282,40 @@ Contracts: C-274。
 
 テスト: `spec/wasm_cross/http_response_headers.almd`,
 `spec/stdlib/http_response_test.almd`。
-Contracts: C-275。
+
+ハンドラは `HttpRequest` を受けて `HttpResponse` を返す関数
+（`HttpHandler = effect (HttpRequest) -> HttpResponse`）であり、ルーターと
+ミドルウェアを掛けたアプリもまたハンドラである。`http.new_request(method,
+target, body, headers)` はソケットなしでリクエストを作り、読み取り族
+（`req_method` / `req_path` / `req_body` / `req_header` / `query_params` /
+`param`）はそれに対して両ターゲットで同じ値を返す。`req_path` は target を
+クエリ文字列ごと返す。ルーティングは両ターゲットで同じ結果になる:
+
+- ルートは `"METHOD /path"`（メソッド省略は全メソッド）で、`{name}` は 1
+  セグメントを束縛し、最後の `{name...}` は残りのパス（空でもよい）を束縛する。
+  束縛値はパーセントデコードされ、`+` は `+` のまま残る。照合はクエリ文字列を
+  除いたパスで行い、空のセグメントは数えない。
+- 一致したルートのうち**最も具体的なもの**が応答し、登録順は結果に影響しない。
+  ルート A が一致するパスをすべて B も一致するとき A は B 以上に具体的であり、
+  メソッドを持つルートは同じパスのメソッドなしルートより具体的である。
+- `http.router(routes)` は、あるリクエストに共に一致しどちらも他方より具体的で
+  ないルートの組（同じパターンの二度書きを含む）、最後でない `{name...}`、二度
+  束縛される名前、大文字英字でないメソッド、`/` で始まらないパスを持つ表を、
+  問題をすべて名指す `err` で拒否する。拒否された表は応答しない。
+- どのルートもパスに一致しなければ `404 Not Found`、パスに一致するルートが別の
+  メソッドにしかなければ `405 Method Not Allowed` と `Allow` ヘッダ（メソッドを
+  整列し `, ` で連結、GET があれば HEAD を含む）を返す。HEAD は GET のルートに
+  落ち、本文を空にして返す。target が `/` で始まらない、またはパス中の `%` の
+  後に 16 進 2 桁が続かないリクエストは `400 Bad Request` である。
+- `http.mount(prefix, sub)` は prefix 以降のパスとクエリを `sub` に渡し、prefix
+  が束縛した名前は `sub` からも読める。`http.wrap(h, [a, b])` は `a(b(h))` で
+  あり、リストの先頭が最も外側になる。
+- `http.decode_json(req, decode)` は本文を JSON として読み decode に渡す。
+  失敗の `err` は理由を本文に持つ `400 Bad Request` のレスポンスである。
+  ハンドラの `err` は `err` のまま呼び出し側に返る。
+
+テスト: `spec/stdlib/http_router_test.almd`。
+Contracts: C-275, C-368。
 
 ## ALS-R9 プロセス終了コードの値域
 
