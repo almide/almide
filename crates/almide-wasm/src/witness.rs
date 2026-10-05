@@ -593,6 +593,9 @@ pub fn balanced(cert: &str) -> bool {
     true
 }
 
+#[path = "witness_rest.rs"]
+mod rest;
+
 // The subset gate lives in witness_gate.rs (the file budget).
 #[path = "witness_gate.rs"]
 mod gate;

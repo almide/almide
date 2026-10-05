@@ -714,19 +714,22 @@ impl Emitter<'_> {
 
     /// A match arm's pattern binds (#2756): each droppable binder is a VIEW
     /// of the subject's payload — a known object the frame holds no credit
-    /// of (patterns.rs binds by `local.set`, no share, no release).
+    /// of (patterns.rs binds by `local.set`, no share, no release). A NAMED
+    /// list rest is a fresh block instead, which its arm releases (#2971,
+    /// witness_rest.rs).
     pub(crate) fn witness_pattern_views(&mut self, p: &almide_ir::IrPattern) {
         if self.witness.is_none() {
             return;
         }
-        let mut vars = Vec::new();
+        let (mut vars, mut rests) = (Vec::new(), Vec::new());
         pattern_binders(p, &mut vars);
-        for v in vars {
-            let Some(&(idx, ty)) = self.locals.get(&v) else { continue };
+        crate::patterns::named_rests(p, &mut rests);
+        for v in vars.iter().map(|v| (v, false)).chain(rests.iter().map(|v| (v, true))) {
+            let Some(&(idx, ty)) = self.locals.get(v.0) else { continue };
             if self.rc_droppable(ty)
                 && let Some(w) = self.witness.as_mut()
             {
-                w.param_borrowed(idx);
+                if v.1 { w.rest_born(idx) } else { w.param_borrowed(idx) }
             }
         }
     }
@@ -741,8 +744,8 @@ impl Emitter<'_> {
     }
 }
 
-/// Every variable a pattern binds (the list-rest binder included: the gate
-/// declines a named rest before any frame reaches here).
+/// Every variable a pattern binds as a view (a named list rest is not one:
+/// `crate::patterns::named_rests`).
 fn pattern_binders(p: &almide_ir::IrPattern, out: &mut Vec<almide_ir::VarId>) {
     use almide_ir::IrPattern as P;
     match p {
@@ -758,7 +761,7 @@ fn pattern_binders(p: &almide_ir::IrPattern, out: &mut Vec<almide_ir::VarId>) {
         }
         P::List { elements, rest } => {
             elements.iter().for_each(|q| pattern_binders(q, out));
-            if let Some(r) = rest {
+            if let Some(r) = rest.as_deref().filter(|r| !matches!(r, P::Bind { .. })) {
                 pattern_binders(r, out);
             }
         }
