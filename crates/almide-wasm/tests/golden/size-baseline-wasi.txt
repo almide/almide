@@ -383,6 +383,7 @@
 2755	spec/wasm_cross/koka_reuse4_map_rebuild.almd
 25067	spec/wasm_cross/koka_unicode_combining.almd
 16297	spec/wasm_cross/lambda_failure_channel.almd
+5353	spec/wasm_cross/leak_free_list_rest_exit.almd
 5969	spec/wasm_cross/leak_free_map_walk_exit.almd
 6254	spec/wasm_cross/leak_free_propagating_literal_operand.almd
 12098	spec/wasm_cross/leak_free_reader_temporaries.almd
