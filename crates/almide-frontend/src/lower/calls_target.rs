@@ -44,9 +44,16 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             // (used-mark happens in checker pass; lowering only rewrites.)
             // A selectively imported variant constructor is no module fn
             // (#3384): it falls through to the constructor call below, as the
-            // checker resolved it.
+            // checker resolved it. A function-valued top-level `let` is called
+            // through its value (#3388).
             if let Some(module) = ctx.env.selective_fn_module(name) {
                 return CallTarget::Module { module, func: *name, def_id: ctx.def_map.get(&sym(&format!("{}.{}", module, name))).copied() };
+            }
+            if let Some((module, _)) = ctx.env.selective_top_let(name) {
+                let callee_ty = ctx.expr_ty(callee);
+                if let Some(callee) = crate::lower::expressions::module_top_let_ref(ctx, module, *name, &callee_ty, callee.span) {
+                    return CallTarget::Computed { callee: Box::new(callee) };
+                }
             }
             // An opaque newtype's constructor call is spelled by the bare
             // name and carries the newtype's IDENTITY into the IR (#1835):

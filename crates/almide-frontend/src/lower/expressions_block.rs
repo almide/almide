@@ -343,6 +343,23 @@ fn eta_expand_module_fn(
     }, lambda_ty, span)
 }
 
+/// The use-site expression of a module top-let — the `Var` that
+/// [`module_top_let_var`] mints, carrying the let's `DefId` when it has one.
+/// Shared by `mod.NAME` and a selectively imported bare `NAME` (#3388).
+pub(super) fn module_top_let_ref(
+    ctx: &mut LowerCtx,
+    mod_name: almide_base::intern::Sym,
+    field: almide_base::intern::Sym,
+    ty: &Ty,
+    span: Option<crate::ast::Span>,
+) -> Option<IrExpr> {
+    let (var_id, def_id) = module_top_let_var(ctx, mod_name, field, ty)?;
+    Some(match def_id {
+        Some(def_id) => ctx.mk_def(IrExprKind::Var { id: var_id }, ty.clone(), span, def_id),
+        None => ctx.mk(IrExprKind::Var { id: var_id }, ty.clone(), span),
+    })
+}
+
 /// Resolve `mod.NAME` against the cross-module top-let table and build the
 /// synthetic use-site Var: CLEAN uppercase name in the IR, `module_origin`
 /// carrying the (versioned) module for emit-time prefixing. ONE rule shared

@@ -956,8 +956,11 @@ impl Checker {
         }
         // #2588: a top-level `let` holding a closure is callable like a local
         // one — `app(http.new_request(...))` against `let app = http.router(...)`.
-        let ty = self.env.lookup_var(name).cloned()
-            .or_else(|| self.env.top_lets.get(&sym(name)).cloned())?;
+        let ty = match self.env.lookup_var(name).cloned() {
+            Some(ty) => ty,
+            None => self.selective_top_let_ty(name)
+                .or_else(|| self.env.top_lets.get(&sym(name)).cloned())?,
+        };
         if let Some(ret) = self.call_fn_typed_local(name, &ty, arg_tys) {
             return Some(ret);
         }

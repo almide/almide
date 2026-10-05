@@ -201,25 +201,36 @@ pub fn build_import_table(
     (table, diagnostics)
 }
 
-/// E050: reject a top-level `fn` whose bare name is also selectively
-/// imported. `@extern` re-exports keep E012's exemption — the name appearing
-/// twice is their design.
+/// E050: reject a top-level `fn` or `let` whose bare name is also
+/// selectively imported. `@extern` re-exports keep E012's exemption — the
+/// name appearing twice is their design. A top-level `let` is the same split
+/// since selective imports bind lets (#3388): the checker read the imported
+/// let while the lowering found the file's own.
 fn check_selective_import_fn_collisions(
     prog: &ast::Program,
     table: &ImportTable,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for decl in &prog.decls {
-        let ast::Decl::Fn { name, span, extern_attrs, .. } = decl else { continue };
-        if !extern_attrs.is_empty() { continue; }
+        let (kind, name, span) = match decl {
+            ast::Decl::Fn { name, span, extern_attrs, .. } if extern_attrs.is_empty() => ("fn", name, span),
+            ast::Decl::TopLet { name, span, .. } => ("let", name, span),
+            _ => continue,
+        };
         let Some(module) = table.direct.get(&sym(name)) else { continue };
         let mut diag = Diagnostic::error(
-            format!("local fn '{}' collides with selective import '{}.{{{}}}'", name, module, name),
-            format!(
-                "Rename the local fn, or drop '{}' from the import list and call '{}.{}' qualified. A bare call must have exactly one meaning.",
-                name, module, name
-            ),
-            format!("fn {}", name),
+            format!("local {} '{}' collides with selective import '{}.{{{}}}'", kind, name, module, name),
+            match kind {
+                "fn" => format!(
+                    "Rename the local fn, or drop '{}' from the import list and call '{}.{}' qualified. A bare call must have exactly one meaning.",
+                    name, module, name
+                ),
+                _ => format!(
+                    "Rename the local let, or drop '{}' from the import list and read '{}.{}' qualified. A bare name must have exactly one meaning.",
+                    name, module, name
+                ),
+            },
+            format!("{} {}", kind, name),
         ).with_code("E050");
         if let Some(s) = span {
             diag.line = Some(s.line);

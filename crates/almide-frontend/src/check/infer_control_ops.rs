@@ -652,6 +652,7 @@ impl Checker {
                 // never freshened anything (its mapping was never written), so
                 // it was an identity deep copy of the already-cloned type.
                 if let Some(ty) = self.env.lookup_var(name).cloned() { ty }
+                else if let Some(ty) = self.selective_top_let_ty(name) { ty }
                 else if let Some(ty) = self.env.top_lets.get(&sym(name)).cloned() { ty }
                 // Const param: `N: Int` in generic params resolves to its underlying type
                 else if let Some(Ty::ConstParam { ty, .. }) = self.env.types.get(&sym(name)).cloned() {
