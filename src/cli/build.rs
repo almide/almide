@@ -625,7 +625,17 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
         ));
         std::process::exit(1);
     }
-    let direct_p2 = component && !almide_base::env::flag("ALMIDE_COMPONENT_ADAPTER");
+    // #2659 (C-375): a program that reaches `http.serve` (its main
+    // serve-shaped — checked in `compile_to_wasm_bytes_surfaced`) builds as
+    // the stock serve export, a `wasi:http/handler@0.3.0` component, with or
+    // without `--component`.
+    let serve_export = host_ops.iter().any(|op| (70..=72).contains(op));
+    if serve_export && js_host {
+        err("error[E081]: `http.serve` builds as a wasi:http/handler@0.3.0 component, which --host js does not write");
+        std::process::exit(1);
+    }
+    let component = component || serve_export;
+    let direct_p2 = component && !serve_export && !almide_base::env::flag("ALMIDE_COMPONENT_ADAPTER");
     // `ALMIDE_COMPONENT_P3=1` (#1628 stage 2, experimental): the WASI 0.3
     // component — stdio over component-model streams on the async
     // canonical ABI. Needs a p3-capable runtime (wasmtime 46+); stays an
@@ -651,7 +661,15 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
         err(&message);
         std::process::exit(1);
     }
-    let bytes = if direct_p3 {
+    let bytes = if serve_export {
+        match almide_wasm_run::wasi_p3::to_p3_service(&bytes, &host_ops) {
+            Ok(c) => c,
+            Err(e) => {
+                err(&format!("error: p3 serve export transform failed — this is an Almide bug: {e}"));
+                std::process::exit(1);
+            }
+        }
+    } else if direct_p3 {
         match almide_wasm_run::wasi_p3::to_p3(&bytes, &host_ops) {
             Ok(c) => c,
             Err(e) => {
@@ -715,6 +733,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // diagnosis time — a "wasm doesn't work" report cannot be split
     // between legs without it.
     let leg = match component {
+        true if serve_export => "structural leg, WASI 0.3 wasi:http/handler export — serve it with `wasmtime serve`",
         false => "structural leg",
         true if direct_p3 => "structural leg, WASI 0.3 component (direct, async ABI)",
         true if direct_p2 => "structural leg, WASI 0.2 component (direct)",
@@ -958,12 +977,13 @@ fn check_wasm_availability(
     ir_program: &almide::ir::IrProgram,
     package: &std::collections::HashSet<String>,
     embedded_leg: bool,
-) -> Result<(), ()> {
+    serve_shape: &Result<(), String>,
+) -> Result<bool, ()> {
     // The measurement escape: the availability PROBE builds through this
     // binary to measure the ground truth the table declares — with the
     // check armed it would measure its own declaration (circular).
     if almide_base::env::flag("ALMIDE_NO_AVAIL_CHECK") {
-        return Ok(());
+        return Ok(!embedded_leg && serve_shape.is_ok() && reaches_http_serve(ir_program));
     }
     use std::collections::BTreeMap;
     use std::sync::OnceLock;
@@ -1024,6 +1044,8 @@ fn check_wasm_availability(
         own: &'a std::collections::HashSet<String>,
         leg_lit: &'static str,
         hits: BTreeMap<String, &'a Row>,
+        /// A reachable `http.serve` call (#2659), row or no row.
+        serves: bool,
     }
     impl<'a> IrVisitor for Scan<'a> {
         fn visit_expr(&mut self, e: &almide::ir::IrExpr) {
@@ -1032,6 +1054,7 @@ fn check_wasm_availability(
             } = &e.kind
             {
                 let key = format!("{}.{}", module.as_str(), func.as_str());
+                self.serves |= key == "http.serve" && !self.own.contains(&key);
                 if let Some(row) = self.table.get(&key)
                     && row.0.contains(self.leg_lit)
                     && !self.own.contains(&key)
@@ -1042,7 +1065,7 @@ fn check_wasm_availability(
             almide::ir::visit::walk_expr(self, e);
         }
     }
-    let mut scan = Scan { table, own: &own, leg_lit, hits: BTreeMap::new() };
+    let mut scan = Scan { table, own: &own, leg_lit, hits: BTreeMap::new(), serves: false };
     // Only REACHABLE bodies are scanned — the same reachability the wasm
     // emitter prunes by (`reachability::reachable_fn_names`), so the
     // check-time diagnostic and the emit agree: a call the emitter never
@@ -1063,6 +1086,7 @@ fn check_wasm_availability(
         }
     }
     hits.extend(scan.hits);
+    let serves = scan.serves;
     // The p3 component serves the http string family (#1710 PR B): under
     // ALMIDE_COMPONENT_P3 the ops-43..=50 fns ship through the to_p3 http
     // shim, so their stock-p1 rows do not bar THIS build path — the same
@@ -1084,8 +1108,24 @@ fn check_wasm_availability(
             hits.remove(k);
         }
     }
+    // The stock serve export (#2659, C-375): a program whose `main` is
+    // serve-shaped builds as a `wasi:http/handler@0.3.0` component; any other
+    // program that reaches `http.serve` is refused with the shape rule as the
+    // reason.
+    let serve_export = !embedded_leg && serves && serve_shape.is_ok();
+    let shape_refusal = match serve_shape {
+        Err(why) if !embedded_leg && serves => Some(why),
+        _ => None,
+    };
+    if let Some(why) = shape_refusal {
+        err(&format!(
+            "error[E081]: `http.serve` is not available on --target wasm from this `main`\n  \
+             reason: {why}\n  \
+             note: `almide run --target wasm` and the native target serve it as written"
+        ));
+    }
     if hits.is_empty() {
-        return Ok(());
+        return if shape_refusal.is_some() { Err(()) } else { Ok(serve_export) };
     }
     for (key, (_, r_stock, r_emb, r_shared, alt)) in &hits {
         let reason = if embedded_leg { r_emb.as_ref() } else { r_stock.as_ref() }
@@ -1101,6 +1141,29 @@ fn check_wasm_availability(
         ));
     }
     Err(())
+}
+
+/// Whether any reachable body calls `http.serve` — the measurement escape's
+/// stand-in for the availability scan's hit.
+fn reaches_http_serve(ir_program: &almide::ir::IrProgram) -> bool {
+    use almide::ir::visit::IrVisitor;
+    struct Find(bool);
+    impl IrVisitor for Find {
+        fn visit_expr(&mut self, e: &almide::ir::IrExpr) {
+            if let almide::ir::IrExprKind::Call { target: almide::ir::CallTarget::Module { module, func, .. }, .. } = &e.kind
+                && module.as_str() == "http"
+                && func.as_str() == "serve"
+            {
+                self.0 = true;
+            }
+            almide::ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut find = Find(false);
+    for f in ir_program.functions.iter().chain(ir_program.modules.iter().flat_map(|m| m.functions.iter())) {
+        find.visit_expr(&f.body);
+    }
+    find.0
 }
 
 fn check_no_native_only_matrix(ir_program: &almide::ir::IrProgram) -> Result<(), ()> {
@@ -1130,11 +1193,12 @@ fn render_wasm_module_routed(
     file: &str,
     source_text: &str,
     library_ok: bool,
+    serve_export: bool,
     inputs: almide::wasm_route::RouteInputs,
     dep_paths: &[(project::PkgId, std::path::PathBuf)],
 ) -> Result<(Vec<u8>, Vec<i32>), ()> {
     use almide::wasm_route::{route_wasm, ModuleSource, RouteOptions};
-    let opts = RouteOptions::from_env(library_ok);
+    let opts = RouteOptions { serve_export, ..RouteOptions::from_env(library_ok) };
     let mut trace = |line: &str| err(line);
     match route_wasm(file, source_text, ModuleSource::Disk { dep_paths }, Some(inputs), opts, &mut trace) {
         Ok(module) => Ok((module.bytes, module.host_ops)),
@@ -1196,6 +1260,8 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
 /// read from the IR before routing — what `--host js` marshals (#2265).
 pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<(Vec<u8>, Vec<i32>, crate::cli::js_host::HostSurface), ()> {
     let (mut program, source_text, mut resolved, dep_paths) = parse_and_resolve_wasm(file)?;
+    // Read off the source before the checker desugars it (#2659).
+    let serve_shape = almide::serve_export::check_serve_shape(&program);
     // ALMIDE_WASM_ALLOC_COUNT (#2407): arm the structural leg's allocation
     // counters for this emission — the wasm twin of `arm_alloc_count`. The
     // guard scopes the thread-local to this build; off, nothing is emitted.
@@ -1215,7 +1281,7 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
         .map(|(name, ..)| name.clone())
         .filter(|name| resolved.sources.contains_key(name))
         .collect();
-    check_wasm_availability(&ir_program, &package, embedded_leg)?;
+    let serve_export = library_ok && check_wasm_availability(&ir_program, &package, embedded_leg, &serve_shape)?;
     // `[permissions]` (`allow`, and `proc` #2589 — statically, and as the
     // embedded host's run-time bound) was enforced in `lower_and_link_wasm_ir`.
 
@@ -1239,8 +1305,15 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     // the module. An unlinked stdlib fn walls at lowering (#1598), so every
     // newly linked fn flips its own verdict with no hand-mirrored list.
     let _ = (&mut ir_program, allow_unverified, verified);
-    render_wasm_module_routed(file, &source_text, library_ok, inputs, &dep_paths)
-        .map(|(b, o)| (b, o, surface))
+    let (bytes, host_ops) = render_wasm_module_routed(file, &source_text, library_ok, serve_export, inputs, &dep_paths)?;
+    // The export's world imports no wasi:filesystem (`wasmtime serve` links
+    // none without a flag): an op the service shim cannot answer is refused
+    // here, at check time as at build time.
+    if serve_export && let Err(message) = almide_wasm_run::component_availability::check_service(&host_ops) {
+        err(&message);
+        return Err(());
+    }
+    Ok((bytes, host_ops, surface))
 }
 
 /// Run `wasm-opt -Oz` on the output file, in-place.
