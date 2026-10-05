@@ -1,0 +1,49 @@
+// @leg: structural
+// #3420: an address taken with `bytes.data_ptr` BORROWS its block — the
+// block must outlive the call the address is handed to. Each shape below
+// once freed the block before the host read it, so `js_peek` saw the
+// free-list header over the first four bytes ("\0\0\0\0o, world"):
+// a tail call whose last argument is the block's last use, a temporary
+// whose only reader is `data_ptr`, an address held in a `let`, and an
+// address that comes out of a helper fn.
+@extern(wasm, "js", "js_peek")
+fn js_peek(ptr: Int, len: Int) -> Int
+
+fn send(s: String) -> Int = {
+  let b = bytes.from_string(s)
+  js_peek(bytes.data_ptr(b), bytes.len(b))
+}
+
+fn send_temp(s: String) -> Int = js_peek(bytes.data_ptr(bytes.from_string(s)), string.len(s))
+
+fn send_temp_bound(s: String) -> Int = {
+  let n = js_peek(bytes.data_ptr(bytes.from_string(s)), string.len(s))
+  n
+}
+
+fn send_held(s: String) -> Int = {
+  let b = bytes.from_string(s)
+  let p = bytes.data_ptr(b)
+  let n = bytes.len(b)
+  let other = bytes.from_string("a block allocated in between")
+  js_peek(p, n + bytes.len(other) - 28)
+}
+
+fn address_of(b: Bytes) -> Int = {
+  let n = bytes.len(b)
+  if n > 1000000 then 0 else bytes.data_ptr(b)
+}
+
+fn send_helper(s: String) -> Int = {
+  let b = bytes.from_string(s)
+  js_peek(address_of(b), bytes.len(b))
+}
+
+fn send_helper_temp(s: String) -> Int = js_peek(address_of(bytes.from_string(s)), string.len(s))
+
+fn main() -> Unit = {
+  let total = send("hello, world") + send("añb") + send_temp("temporary")
+    + send_temp_bound("bound temporary") + send_held("held address")
+    + send_helper("helper address") + send_helper_temp("helper temporary")
+  println("bytes seen: ${total}")
+}
