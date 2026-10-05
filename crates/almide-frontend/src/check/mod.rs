@@ -1255,8 +1255,8 @@ impl Checker {
         // may have been the use, and the parse error is already the diagnosis.
         let judge_unused = !program.parse_recovered;
         for imp in program.imports.iter().filter(|_| judge_unused) {
-            let (path, alias, span) = match imp {
-                ast::Decl::Import { path, alias, span, .. } => (path, alias, span),
+            let (path, alias, names, span) = match imp {
+                ast::Decl::Import { path, alias, names, span } => (path, alias, names, span),
                 _ => continue,
             };
             let import_name = alias.as_ref().cloned()
@@ -1267,10 +1267,19 @@ impl Checker {
             // removal fix.
             let used_via_bound = self.env.import_table.aliases.get(&sym(&import_name))
                 .is_some_and(|canon| bound_origins.contains(canon));
+            // A selectively imported TYPE or CONSTRUCTOR is spelled bare
+            // (`import self.t.{T, V}` then `-> T`, `V(1)`, #3384): that
+            // spelling is the import's use, and deleting the line would
+            // strand it.
+            let used_via_selective = names.as_ref().is_some_and(|ns| ns.iter().any(|n| {
+                !spelled.declared.contains(n)
+                    && (spelled.bare_ctors.contains(n) || spelled.bare_types.iter().any(|(t, _)| t == n))
+            }));
             if import_name.is_empty()
                 || self.env.import_table.used.contains(&sym(&import_name))
                 || import_name.starts_with('_')
                 || used_via_bound
+                || used_via_selective
             { continue; }
             let line = span.as_ref().map(|s| s.line).unwrap_or(0);
             let mut diag = Diagnostic::warning(

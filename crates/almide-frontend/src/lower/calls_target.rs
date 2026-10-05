@@ -42,7 +42,10 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             }
             // Selective import: bare `from_string` → Module { json, from_string }.
             // (used-mark happens in checker pass; lowering only rewrites.)
-            if let Some(module) = ctx.env.import_table.direct.get(name).copied() {
+            // A selectively imported variant constructor is no module fn
+            // (#3384): it falls through to the constructor call below, as the
+            // checker resolved it.
+            if let Some(module) = ctx.env.selective_fn_module(name) {
                 return CallTarget::Module { module, func: *name, def_id: ctx.def_map.get(&sym(&format!("{}.{}", module, name))).copied() };
             }
             // An opaque newtype's constructor call is spelled by the bare

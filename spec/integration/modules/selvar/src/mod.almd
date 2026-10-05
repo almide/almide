@@ -1,0 +1,11 @@
+// #3384: a module whose variant constructors an importer brings in by a
+// selective import.
+type T =
+  | V(Int)
+  | A(T, T)
+
+fn size(t: T) -> Int = match t {
+  V(_) => 1,
+  A(f, a) => size(f) + size(a),
+}
+
