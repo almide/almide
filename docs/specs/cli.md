@@ -359,6 +359,13 @@ almide check app.almd --profile critical --allow IO  # critical profile (#567)
 | `--json` | 診断を JSON で出力（1 行 1 診断、エディタ/エージェント統合用） |
 | `--explain <code>` | エラーコードの説明(`almide explain <code>` と同じ) |
 
+`./almide.toml` にどのリーダーも読まないキー(`brnach = "main"` など)があると、
+`check` / `build` / `run` / `test` を含む全コマンドが一度だけ警告する(#3382):
+行(`almide.toml:LINE`)・キー・その表が受け付けるキー・1 編集距離の候補を出す。
+ビルドはキーが無い場合と同じに走り、終了コードは変わらない(`--deny-warnings`
+も数えない)。`--json` では `"level":"warning"` の行として stdout に、それ以外は
+stderr に出る。表ごとの受理キーは [package-system.md §6](package-system.md#6-dependency-declaration)。
+
 `almide explain --list [--json]`(#2149)は全コードを 1 行ずつ出す:
 `{code, mnemonic, severity, since, verdict}`。`mnemonic` は `docs/diagnostics/<CODE>.md`
 の題、`verdict` はその `## Fix-it verdict`(mechanical / conditional / not-fixable)、
