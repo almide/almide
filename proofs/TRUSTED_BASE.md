@@ -14,10 +14,12 @@ is the honest counterpart to the receipt's `C-PROVEN` claim.
 Reproduce every claim: `make verify-trust` (or `proofs/check.sh` + `proofs/gate.sh`).
 
 **CI cross-version note (honest).** The `Trust Spine` GitHub Actions workflow
-re-derives the whole spine on opam's latest Rocq 9.x — currently **9.2** (opam
-has no 9.1.1; the canonical pin above is a local source build). The proofs are
-kernel-checked and **axiom-clean on BOTH 9.1.1 and 9.2** — a cross-version
-re-derivation, not a single-version artifact (a strength, not a gap). Rocq 9.2
+re-derives the whole spine on opam's Rocq **9.3** — rocq-core pinned to 9.3.0
+(`ROCQ_CORE_VERSION`, also the cache key), with rocq-stdlib 9.2.0 (opam has no
+9.1.1; the canonical pin above is a local source build). The proofs are
+kernel-checked and **axiom-clean on 9.1.1, 9.2 and 9.3** — a cross-version
+re-derivation, not a single-version artifact (a strength, not a gap). 9.3
+reserves `is`, so no proof binds it (#3368). Rocq 9.2+
 ships only the `rocq` driver, so CI provides `coqc`/`coqchk` as thin shims over
 `rocq compile` / `rocq check` (the latter IS the Rocq Proof Checker — the
 independent De Bruijn re-check is genuine).
