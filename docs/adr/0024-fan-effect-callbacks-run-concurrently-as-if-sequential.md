@@ -5,6 +5,8 @@
   requests is part of the environment's answers (ω), not of the program's
   observation; (2) `fan.map` runs every element, and its result is the first
   `Err` in list order. None of it is implemented yet.
+  Amended 2026-10-05 (#3383): D3 and D8 for async JS hooks on `--host js`
+  (see the amendment section before the references).
 - **Date**: 2026-09-30
 - **Scope**: the execution substrate of `fan { … }`, `fan.settle { … }`,
   `fan.map(xs, f)` and `fan.settle(xs, f)` on native and on wasm; the
@@ -404,6 +406,57 @@ prints or writes) is measured in step 3, before the epoch is cut.
 | 5 | ADR-0011 D5 gate extended to the four surfaces, run repeatedly and with the substrate forced | 4 |
 | 6 | Wasm p3: host calls as async subtasks for single-call elements (generalizing b973a1dd4 to `http.*`), then multi-call elements (D8) | 1, 3, ADR-0023 |
 | 7 | Docs: CHEATSHEET fan section, `docs/specs/als/runtime.md` ALS-R3, LLM-facing docs | 4 |
+
+## Amendment 2026-10-05: async JS hooks on `--host js` (#3383)
+
+Accepted by the maintainer's ruling on #3383 (first slice only). #3371 put
+"this JS hook answers with a Promise" on the extern
+(`@extern(wasm, "js", NAME, returns: promise)`). This amendment says what a
+`fan` over such hooks means on the JS host.
+
+**D3, amended.** An extern marked `returns: promise` is a request to a system
+outside the process (Workers KV, `fetch`, Cloud Storage). The order in which
+that system receives the requests is the environment's ω (D2), the class D3
+already gives `http` client calls. So a `returns: promise` extern is **not**
+an ordered operation and does not force a fan sequential. A synchronous
+extern stays as it was: it is never overlapped.
+
+**D8, amended.** On `--host js`, JSPI (`WebAssembly.Suspending` /
+`WebAssembly.promising`) is the substrate, as WASI 0.3 async is on the p3
+component. A fan whose every element performs **one** async-hook call on
+values it already has is lowered as the p3 prefetch is (`fan.rs`, host ops
+40 start / 41 await / 42 abandon), with three imports the glue generates per
+hook the fan reaches:
+
+- `start:NAME(args) -> slot`: a plain import. It calls the hook and keeps its
+  Promise in a slot.
+- `wait()`: the **only** Suspending import. It awaits every started slot and
+  settles each as a value or a rejection.
+- `take:NAME(slot) -> value`: a plain import. It returns the settled value,
+  marshalled as the hook's own return. A rejection is the err of a fallible
+  extern and abandons the instance for an infallible one, as a direct call
+  does (#3356).
+
+The module starts every element in arm order, suspends once, and takes the
+values in arm order. Every element runs (D1), and the first `Err` in arm
+order is the result (D6), so the observation is the sequential lowering's
+(N7). `fan.any` takes until its first ok. The slots it does not take were
+awaited by `wait` (N5) and are dropped unread. The slice is `fan.map`,
+`fan.any` and a `fan { }` block. Any other fan on the JS host stays
+sequential under D4's note: an element that computes its arguments, calls
+a sync hook, or performs several calls one after another. Several calls
+need the element to suspend between them, which is the state machine or
+stack switch of D8 proper.
+
+Nothing reaches a type, a signature, a diagnostic or the LLM-facing docs (N1).
+The exports that reach `wait` are entered through `promising`, as they were
+for a direct async call (#3353). The module bytes differ from the
+sequential lowering only for a program with such a fan built with
+`--host js`; every other build is byte-identical. `ALMIDE_FAN_SEQUENTIAL=1`
+(D7) forces the sequential lowering. The gate `spec/wasm_host_js/fan_async_overlap`
+builds and runs both lowerings and requires the same output, and asserts that
+the overlapped one has every hook in flight at once (the issue measured
+510 ms → 50 ms for ten 50 ms reads).
 
 ## References
 
