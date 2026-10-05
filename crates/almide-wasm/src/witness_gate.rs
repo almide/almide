@@ -202,7 +202,7 @@ fn stmts_subset(stmts: &[almide_ir::IrStmt]) -> Option<String> {
             // exactly a match arm's binders. A named list rest is a fresh
             // block no owner releases (#2971).
             IrStmtKind::BindDestructure { pattern, value } => {
-                if pattern_has_named_rest(pattern) {
+                if pattern_has_named_rest(pattern, false) {
                     return Some("pattern:list-rest".into());
                 }
                 let subject = crate::rc_ownership::rc_tail(value);
@@ -624,8 +624,8 @@ fn stmt_body_subset(e: &IrExpr) -> Option<Why> {
 
 /// A match's subject and arm heads (#2756): the subject is evaluated once,
 /// before the site; a pattern binds VIEWS of it (patterns.rs, no share, no
-/// release) — except a named list rest, a fresh block no owner releases
-/// (#2971), declined. A guard runs between two arms' tests (patterns.rs
+/// release) — except a named list rest, a fresh block only an unguarded arm
+/// releases (#2971, `pattern_has_named_rest`). A guard runs between two arms' tests (patterns.rs
 /// `lower_arm_chain`) and is recorded on its own arm's path, where the
 /// state before it is the one every path through it starts from. Its value
 /// is a scalar Bool, so each credit it takes inside is settled inside it (a
@@ -668,7 +668,7 @@ fn match_head_subset(subject: &IrExpr, arms: &[almide_ir::IrMatchArm]) -> Option
         return Some("match-subject:fresh".into());
     }
     for a in arms {
-        if pattern_has_named_rest(&a.pattern) {
+        if pattern_has_named_rest(&a.pattern, a.guard.is_none()) {
             return Some("pattern:list-rest".into());
         }
         if let Some(g) = a.guard.as_ref().filter(|g| !rc_free(g)) {
@@ -704,15 +704,24 @@ fn binds_a_local(e: &IrExpr) -> bool {
     v.0
 }
 
-fn pattern_has_named_rest(p: &almide_ir::IrPattern) -> bool {
+/// A named list rest no route releases. `arm_releases`: an UNGUARDED match
+/// arm releases each `..t` binder after its body (patterns.rs
+/// `release_arm_rests`; an exit that skips it declines at emission,
+/// witness_rest.rs). A guarded arm's false guard falls through with the rest
+/// built, and a `let [h, ..t] = xs` never releases it.
+fn pattern_has_named_rest(p: &almide_ir::IrPattern, arm_releases: bool) -> bool {
     use almide_ir::IrPattern as P;
+    let any = |ps: &[P]| ps.iter().any(|q| pattern_has_named_rest(q, arm_releases));
     match p {
         P::List { elements, rest } => {
-            rest.as_deref().is_some_and(|r| !matches!(r, P::Wildcard)) || elements.iter().any(pattern_has_named_rest)
+            rest.as_deref().is_some_and(|r| !matches!(r, P::Wildcard) && !(arm_releases && matches!(r, P::Bind { .. })))
+                || any(elements)
         }
-        P::As { inner, .. } | P::Some { inner } | P::Ok { inner } | P::Err { inner } => pattern_has_named_rest(inner),
-        P::Constructor { args: ps, .. } | P::Tuple { elements: ps } => ps.iter().any(pattern_has_named_rest),
-        P::RecordPattern { fields, .. } => fields.iter().filter_map(|f| f.pattern.as_ref()).any(pattern_has_named_rest),
+        P::As { inner, .. } | P::Some { inner } | P::Ok { inner } | P::Err { inner } => pattern_has_named_rest(inner, arm_releases),
+        P::Constructor { args: ps, .. } | P::Tuple { elements: ps } => any(ps),
+        P::RecordPattern { fields, .. } => {
+            fields.iter().filter_map(|f| f.pattern.as_ref()).any(|q| pattern_has_named_rest(q, arm_releases))
+        }
         P::Bind { .. } | P::Wildcard | P::Literal { .. } | P::None => false,
     }
 }

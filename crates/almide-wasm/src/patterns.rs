@@ -155,36 +155,17 @@ impl Emitter<'_> {
     /// dangle. A guarded arm keeps the old leak: a false guard falls
     /// through with the rest already built.
     fn release_arm_rests(&mut self, p: &IrPattern) {
-        fn rests(p: &IrPattern, out: &mut Vec<almide_ir::VarId>) {
-            match p {
-                IrPattern::List { elements, rest } => {
-                    if let Some(r) = rest.as_deref()
-                        && let IrPattern::Bind { var, .. } = r
-                    {
-                        out.push(*var);
-                    }
-                    elements.iter().for_each(|e| rests(e, out));
-                }
-                IrPattern::As { inner, .. } | IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
-                    rests(inner, out)
-                }
-                IrPattern::Constructor { args: ps, .. } | IrPattern::Tuple { elements: ps } => {
-                    ps.iter().for_each(|e| rests(e, out))
-                }
-                IrPattern::RecordPattern { fields, .. } => {
-                    fields.iter().filter_map(|f| f.pattern.as_ref()).for_each(|e| rests(e, out))
-                }
-                _ => {}
-            }
-        }
         let mut vars = Vec::new();
-        rests(p, &mut vars);
+        named_rests(p, &mut vars);
         for v in vars {
             if let Some(&(idx, ty)) = self.locals.get(&v)
                 && self.rc_droppable(ty)
             {
                 let dec = self.dec_fn_of(ty);
                 self.f.instructions().local_get(idx).call(dec);
+                if let Some(w) = self.witness.as_mut() {
+                    w.rest_release(idx);
+                }
             }
         }
     }
@@ -725,5 +706,26 @@ fn result_halves(a: &IrPattern, b: &IrPattern) -> bool {
             pattern_irrefutable(x) && pattern_irrefutable(y)
         }
         _ => false,
+    }
+}
+
+/// Every NAMED list rest (`..t`) a pattern binds: the fresh blocks
+/// `emit_pattern_binds` materializes and `release_arm_rests` releases.
+pub(crate) fn named_rests(p: &IrPattern, out: &mut Vec<almide_ir::VarId>) {
+    match p {
+        IrPattern::List { elements, rest } => {
+            if let Some(IrPattern::Bind { var, .. }) = rest.as_deref() {
+                out.push(*var);
+            }
+            elements.iter().for_each(|e| named_rests(e, out));
+        }
+        IrPattern::As { inner, .. } | IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
+            named_rests(inner, out)
+        }
+        IrPattern::Constructor { args: ps, .. } | IrPattern::Tuple { elements: ps } => ps.iter().for_each(|e| named_rests(e, out)),
+        IrPattern::RecordPattern { fields, .. } => {
+            fields.iter().filter_map(|f| f.pattern.as_ref()).for_each(|e| named_rests(e, out))
+        }
+        _ => {}
     }
 }
