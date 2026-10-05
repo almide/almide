@@ -527,8 +527,8 @@ fn render_fn_safe_name(
 /// single-file and module layouts. A no-op off unix.
 const MAIN_SIGPIPE_PRELUDE: &str = "    #[cfg(unix)]\n    {\n        extern \"C\" {\n            fn signal(sig: i32, handler: usize) -> usize;\n        }\n        // SIGPIPE = 13, SIG_DFL = 0\n        unsafe {\n            signal(13, 0);\n        }\n    }\n";
 
-/// The stdout buffer's flush on a panic (#2245): stdout is block-buffered
-/// when it is not a terminal, and a panic unwinding out of `main` never runs
+/// The stdout buffer's flush on a panic (#2245): stdout is buffered (a
+/// line written in fragments, `io.print`-less pieces), and a panic unwinding out of `main` never runs
 /// the main thread's thread-local destructors, so the lines a program printed
 /// before an `assert` failed would be lost. The hook flushes, then hands the
 /// panic to the default hook — the message and exit code are unchanged.
