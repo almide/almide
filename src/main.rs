@@ -194,6 +194,12 @@ enum Commands {
         /// marshalled, anything else is refused at build time.
         #[arg(long = "host")]
         host: Option<String>,
+        /// `--target wasm` only: append DWARF (`.debug_line`, `.debug_info`,
+        /// …) custom sections mapping code offsets to `.almd` file:line
+        /// (#1315), read by Chrome DevTools and lldb on wasmtime. Off by
+        /// default: without it the module is byte-identical.
+        #[arg(long)]
+        debug: bool,
     },
     /// Run tests
     Test {
@@ -1210,7 +1216,7 @@ fn dispatch(cli: Cli) {
             let file = resolve_file(file);
             cli::cmd_bench(&file, runs, target.as_deref(), &program_args);
         }
-        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, component, heap_cap, host } => {
+        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, component, heap_cap, host, debug } => {
             let file = resolve_file(file);
             warn_no_verified_deprecated(no_verified);
             cli::cmd_build(cli::BuildArgs {
@@ -1230,6 +1236,7 @@ fn dispatch(cli: Cli) {
                 component,
                 heap_cap,
                 host: host.as_deref(),
+                debug,
                 });
         }
         Commands::Test { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests, show_output } => {
