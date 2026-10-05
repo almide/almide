@@ -35,8 +35,58 @@ fn call_borrowed_vars(args: &[IrExpr], target: Option<&CallTarget>) -> HashSet<V
 /// and its borrowed subject conflicts with a sibling-arg move exactly the
 /// same way — `map.fold(acc, (if … else acc), λ)` moved `acc` in the seed
 /// while `&acc` from the subject argument was still live (#866).
-pub(super) fn insert_clones_runtime_call(args: Vec<IrExpr>, ctx: &mut CloneCtx) -> Vec<IrExpr> {
-    let borrowed = call_borrowed_vars(&args, None);
+pub(super) fn insert_clones_runtime_call(symbol: almide_base::intern::Sym, args: Vec<IrExpr>, ctx: &mut CloneCtx) -> Vec<IrExpr> {
+    if crate::owned_source::takes_source_either_way(symbol.as_str()) {
+        return insert_clones_either_way_source(args, ctx);
+    }
+    insert_clones_runtime_args(args, None, ctx)
+}
+
+/// The arguments of a range op whose runtime takes its source owned or
+/// borrowed (#3398, `owned_source.rs`). The source is decided FIRST, by the
+/// same last-use countdown every other occurrence goes through: where a bare
+/// read of it would move (its last use, outside a loop or on a var the loop
+/// rebinds), the `Borrow` is dropped and the bare `Var` is the move —
+/// BorrowLowering then calls the op's owned twin. Anywhere else the borrow
+/// stays, exactly as the `Borrow` arm leaves it.
+///
+/// Only an owned binding moves (`ctx.owned`: a local or an owned param, never
+/// a by-reference param or a TCO param, whose moves TailCallOpt places), and
+/// never a loop or chain element binder: whether that one is bound `&T` is
+/// decided from its uses AFTER this walk (`only_borrowed_uses`), and a move
+/// would flip the whole loop to owned elements.
+fn insert_clones_either_way_source(mut args: Vec<IrExpr>, ctx: &mut CloneCtx) -> Vec<IrExpr> {
+    let movable = args.first().and_then(|a| match &a.kind {
+        IrExprKind::Borrow { expr, as_str: false, mutable: false } => match &expr.kind {
+            IrExprKind::Var { id } if ctx.owned.contains(id) && !ctx.loops.binders.contains(id) => Some(*id),
+            _ => None,
+        },
+        _ => None,
+    });
+    let Some(id) = movable else { return insert_clones_runtime_args(args, None, ctx) };
+    let IrExprKind::Borrow { expr, .. } = args.remove(0).kind else { unreachable!() };
+    let source = insert_clones_var(id, expr.ty.clone(), expr.span, ctx);
+    let (source, kept_borrow) = match source.kind {
+        IrExprKind::Var { .. } => (source, None),
+        // Not its last use: the borrow, its clone stripped (the Borrow arm).
+        IrExprKind::Clone { expr: var } => {
+            let (ty, span) = (var.ty.clone(), var.span);
+            (IrExpr { kind: IrExprKind::Borrow { expr: var, as_str: false, mutable: false }, ty, span, def_id: None }, Some(id))
+        }
+        _ => unreachable!("insert_clones_var yields a Var or its Clone"),
+    };
+    // The rest go through the E0505 guard with the source as it now stands: a
+    // kept borrow still forces sibling reads of the var to clone; a moved
+    // source has no sibling reads (it was the last).
+    let rest = insert_clones_runtime_args(args, kept_borrow, ctx);
+    std::iter::once(source).chain(rest).collect()
+}
+
+/// `args` under the E0505 guard; `also_borrowed` is a var an argument
+/// already walked off the front holds borrowed for the call.
+fn insert_clones_runtime_args(args: Vec<IrExpr>, also_borrowed: Option<VarId>, ctx: &mut CloneCtx) -> Vec<IrExpr> {
+    let mut borrowed = call_borrowed_vars(&args, None);
+    borrowed.extend(also_borrowed);
     if borrowed.is_empty() {
         return args.into_iter().map(|a| insert_clones_live(a, ctx)).collect();
     }

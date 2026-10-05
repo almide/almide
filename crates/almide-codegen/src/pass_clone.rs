@@ -647,7 +647,7 @@ pub(crate) fn insert_clones_live(mut expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr
 
         IrExprKind::Call { target, args, type_args } => insert_clones_call(target, args, type_args, ctx),
         IrExprKind::RuntimeCall { symbol, args } => {
-            let args = insert_clones_runtime_call(args, ctx);
+            let args = insert_clones_runtime_call(symbol, args, ctx);
             IrExprKind::RuntimeCall { symbol, args }
         }
 
