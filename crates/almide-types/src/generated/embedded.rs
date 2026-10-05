@@ -12058,14 +12058,17 @@ fn zip[A, B](xs: List[A], ys: List[B]) -> List[(A, B)] = _
 @intrinsic("almide_rt_list_flatten")
 fn flatten[T](xss: List[List[T]]) -> List[T] = _
 
+
+
+
+
+
 /// First n elements; all if n >= len or n < 0.
 @intrinsic("almide_rt_list_take")
-@consume(xs)
 fn take[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All but the first n; [] if n >= len or n < 0.
 @intrinsic("almide_rt_list_drop")
-@consume(xs)
 fn drop[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All but the first element; [] when empty.
@@ -12131,7 +12134,6 @@ fn filter[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
 /// First element where f holds, or none.
 @intrinsic("almide_rt_list_find")
-@consume(xs)
 fn find[A](xs: List[A], f: (A) -> Bool) -> A? = _
 
 /// true if f holds for some x; false when empty.
@@ -12169,12 +12171,10 @@ fn sort_by[A, B](xs: List[A], f: (A) -> B) -> List[A] = _
 
 /// Longest prefix where f holds.
 @intrinsic("almide_rt_list_take_while")
-@consume(xs)
 fn take_while[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
 /// Rest after the longest prefix where f holds.
 @intrinsic("almide_rt_list_drop_while")
-@consume(xs)
 fn drop_while[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
 /// (where f holds, the rest), order kept.
