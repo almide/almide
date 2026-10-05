@@ -179,6 +179,10 @@ pub(crate) fn lower_one_user_module(
         } else {
             base
         }
+    }).or_else(|| {
+        // A `self` module the package's native code calls back into is
+        // pre-registered under its versioned name (#3424).
+        checker.env.module_versioned_names.get(&almide::intern::sym(name)).map(|v| v.to_string())
     });
     if let Some(ref v) = versioned {
         checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(v));
@@ -247,7 +251,7 @@ pub(crate) fn optimize_gate_and_link(
 /// verbatim — each error arm prints via `err` before returning, exactly
 /// matching the original `.map_err(|e| { err(...); e })` chain.
 #[allow(clippy::type_complexity)]
-fn parse_and_resolve_for_compile(file: &str) -> Result<(ast::Program, String, Vec<diagnostic::Diagnostic>, bool, resolve::ResolvedModules, Option<project::Project>), String> {
+fn parse_and_resolve_for_compile(file: &str) -> Result<(ast::Program, String, Vec<diagnostic::Diagnostic>, bool, resolve::ResolvedModules, Option<project::Project>, resolve::SelfVersionedNames), String> {
     let (program, source_text, parse_errors) = parse_file(file);
     let has_parse_errors = !parse_errors.is_empty();
 
@@ -272,10 +276,15 @@ fn parse_and_resolve_for_compile(file: &str) -> Result<(ast::Program, String, Ve
         vec![]
     };
 
-    let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
+    let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
+        .map_err(|e| { err(&format!("{}", e)); e.clone() })?;
+    // #3424: this is the native (Rust) build, the one that compiles the
+    // package's `native/*.rs` — so it also loads the modules that native code
+    // calls back into, under the names it spells them by.
+    let self_versioned = resolve::include_native_callback_modules(file, &dep_paths, &mut resolved)
         .map_err(|e| { err(&format!("{}", e)); e.clone() })?;
 
-    Ok((program, source_text, parse_errors, has_parse_errors, resolved, parsed_project))
+    Ok((program, source_text, parse_errors, has_parse_errors, resolved, parsed_project, self_versioned))
 }
 
 /// `try_compile_with_ir`'s parse-phase output needed by the type-check
@@ -296,6 +305,7 @@ fn typecheck_and_lower_for_compile(
     parsed: ParsedSource,
     program: &mut ast::Program,
     resolved: &mut resolve::ResolvedModules,
+    self_versioned: &resolve::SelfVersionedNames,
     module_irs: &mut std::collections::HashMap<String, almide::ir::IrProgram>,
 ) -> Result<Option<almide::ir::IrProgram>, String> {
     let canon = canonicalize::canonicalize_program(
@@ -314,6 +324,11 @@ fn typecheck_and_lower_for_compile(
     // Pre-register versioned names BEFORE root lowering so cross-module
     // top_let references (mc_bot.DEFAULT_CONFIG) get correct V0 prefix.
     register_versioned_module_names(&mut checker, &resolved.modules);
+    // The package's own modules, when its native code calls them by their
+    // versioned name (#3424); `lower_one_user_module` reads them back.
+    for (name, versioned) in self_versioned {
+        checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(versioned));
+    }
 
     // Lower root program (versioned names now available)
     let mut ir_program = lower_root_program_if_ready(parsed.has_parse_errors, program, &checker, parsed.source_text, parsed.file);
@@ -347,13 +362,13 @@ fn optimize_verify_and_link(ir_program: &mut Option<almide::ir::IrProgram>, pars
 }
 
 pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(String, Option<almide::ir::IrProgram>), String> {
-    let (mut program, source_text, parse_errors, has_parse_errors, mut resolved, parsed_project) = parse_and_resolve_for_compile(file)?;
+    let (mut program, source_text, parse_errors, has_parse_errors, mut resolved, parsed_project, self_versioned) = parse_and_resolve_for_compile(file)?;
 
     let mut ir_program: Option<almide::ir::IrProgram> = None;
     let mut module_irs = std::collections::HashMap::new();
     if !no_check {
         let parsed = ParsedSource { file, source_text: &source_text, parse_errors: &parse_errors, has_parse_errors };
-        ir_program = typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &mut module_irs)?;
+        ir_program = typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &self_versioned, &mut module_irs)?;
     }
 
     optimize_verify_and_link(&mut ir_program, &parsed_project)?;
