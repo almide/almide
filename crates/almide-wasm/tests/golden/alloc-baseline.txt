@@ -270,6 +270,7 @@
 66176	spec/wasm_cross/generic_record_anon_field.almd
 65984	spec/wasm_cross/generic_record_field_size.almd
 66336	spec/wasm_cross/generic_record_fn_field.almd
+66192	spec/wasm_cross/generic_unit_ctor_pinned.almd
 66128	spec/wasm_cross/generics_mono.almd
 66048	spec/wasm_cross/get_or_strict_default.almd
 65808	spec/wasm_cross/gleam_bool_shortcircuit.almd

@@ -270,6 +270,7 @@
 3332	spec/wasm_cross/generic_record_anon_field.almd
 2656	spec/wasm_cross/generic_record_field_size.almd
 4053	spec/wasm_cross/generic_record_fn_field.almd
+3489	spec/wasm_cross/generic_unit_ctor_pinned.almd
 2778	spec/wasm_cross/generics_mono.almd
 4330	spec/wasm_cross/get_or_strict_default.almd
 1218	spec/wasm_cross/gleam_bool_shortcircuit.almd
@@ -288,7 +289,7 @@
 2458	spec/wasm_cross/grain_gc_shapes.almd
 2240	spec/wasm_cross/grain_pattern_destructure.almd
 3206	spec/wasm_cross/grain_pattern_guards.almd
-2794	spec/wasm_cross/grain_records_enums.almd
+2770	spec/wasm_cross/grain_records_enums.almd
 3880	spec/wasm_cross/grain_string_escapes.almd
 4567	spec/wasm_cross/grouping_unary.almd
 3333	spec/wasm_cross/guard_err_in_call_arg_block.almd
@@ -708,7 +709,7 @@
 7295	spec/wasm_cross/set_entries_reclaim.almd
 8016	spec/wasm_cross/set_index_order.almd
 9012	spec/wasm_cross/set_insertion_order.almd
-57949	spec/wasm_cross/sized_display_matrix.almd
+57853	spec/wasm_cross/sized_display_matrix.almd
 6895	spec/wasm_cross/sized_field_default_matrix.almd
 3088	spec/wasm_cross/sized_int_overflow_wrap.almd
 3363	spec/wasm_cross/sized_int_record_fields.almd
@@ -889,10 +890,10 @@
 11806	spec/wasm_cross/value_object_ops_share.almd
 8416	spec/wasm_cross/value_repr.almd
 4490	spec/wasm_cross/var_destructure.almd
-3389	spec/wasm_cross/variant_case_named_like_its_type.almd
+3395	spec/wasm_cross/variant_case_named_like_its_type.almd
 5219	spec/wasm_cross/variant_pair_result_return.almd
 2066	spec/wasm_cross/variant_record_literal_equality.almd
-3328	spec/wasm_cross/variant_result_credit_shapes.almd
+3320	spec/wasm_cross/variant_result_credit_shapes.almd
 2127	spec/wasm_cross/variant_result_one_credit_churn.almd
 841	spec/wasm_cross/while_loops.almd
 2658	spec/wasm_cross/whilep_str.almd

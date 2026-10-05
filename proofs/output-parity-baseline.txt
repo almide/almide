@@ -361,6 +361,7 @@ spec/wasm_cross/generic_protocol_conformance.almd
 spec/wasm_cross/generic_record_anon_field.almd
 spec/wasm_cross/generic_record_field_size.almd
 spec/wasm_cross/generic_record_fn_field.almd
+spec/wasm_cross/generic_unit_ctor_pinned.almd
 spec/wasm_cross/generics_mono.almd
 spec/wasm_cross/get_or_strict_default.almd
 spec/wasm_cross/gleam_bool_shortcircuit.almd

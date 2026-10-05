@@ -923,6 +923,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/empty_collection_annotated.almd", class = "fixture" },
   { path = "tests/diagnostics/e018-empty-collection-element/broken.almd", class = "fixture" },
+  { path = "spec/wasm_cross/generic_unit_ctor_pinned.almd", class = "fixture" },
 ]
 
 # ── COMPILE-TIME RECURSION IS HOST/PROFILE-INDEPENDENT (no stack-overflow crash) ─
