@@ -22,7 +22,12 @@ thread_local! {
     static EXPORT_RET: RefCell<BTreeMap<String, ExportRet>> = const { RefCell::new(BTreeMap::new()) };
     static EXPORT_PARAMS: RefCell<BTreeMap<String, Vec<AbiShape>>> = const { RefCell::new(BTreeMap::new()) };
     static IMPORT_RET: RefCell<BTreeMap<(String, String), ExportRet>> = const { RefCell::new(BTreeMap::new()) };
+    static ASYNC_IMPORTS: RefCell<std::collections::BTreeSet<(String, String)>> = const { RefCell::new(std::collections::BTreeSet::new()) };
 }
+
+/// The import module of the `--host js` fan overlap protocol (#3383,
+/// fan_js_async.rs): the glue serves it and refuses an `@extern` naming it.
+pub const FAN_MODULE: &str = "almide:fan";
 
 /// What one slot on the export boundary holds, as the host converts it
 /// (#3352, #3354) — the layout the emitter itself uses, so the host never
@@ -163,10 +168,21 @@ pub fn export_rets() -> BTreeMap<String, ExportRet> {
 
 /// Record the return ABI of a declared `@extern(wasm, module, name)` import
 /// (#3356): a `Result` there means the host answers with a Result block.
-pub(crate) fn note_import(module: &str, name: &str, ret: ExportRet) {
+/// `promise`: the extern is marked `returns: promise` (#3371), so a fan over
+/// it may overlap its waits (#3383).
+pub(crate) fn note_import(module: &str, name: &str, ret: ExportRet, promise: bool) {
     if js_host() {
-        IMPORT_RET.with(|m| { m.borrow_mut().insert((module.to_string(), name.to_string()), ret); });
+        let key = (module.to_string(), name.to_string());
+        if promise {
+            ASYNC_IMPORTS.with(|m| { m.borrow_mut().insert(key.clone()); });
+        }
+        IMPORT_RET.with(|m| { m.borrow_mut().insert(key, ret); });
     }
+}
+
+/// Is `module.name` an async hook noted under the guard (#3383)?
+pub(crate) fn is_async_import(module: &str, name: &str) -> bool {
+    ASYNC_IMPORTS.with(|m| m.borrow().contains(&(module.to_string(), name.to_string())))
 }
 
 /// The return ABI of every import recorded since the guard was set (#3356),
@@ -193,6 +209,7 @@ impl JsHostGuard {
         EXPORT_RET.with(|m| m.borrow_mut().clear());
         EXPORT_PARAMS.with(|m| m.borrow_mut().clear());
         IMPORT_RET.with(|m| m.borrow_mut().clear());
+        ASYNC_IMPORTS.with(|m| m.borrow_mut().clear());
         Self(prev)
     }
 }

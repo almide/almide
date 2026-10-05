@@ -46,6 +46,8 @@ mod exports;
 mod jspi;
 #[path = "js_host_imports.rs"]
 mod imports;
+#[path = "js_host_fan.rs"]
+mod fan;
 
 /// One function on the host boundary: an exported `pub fn` or an extern.
 #[derive(Debug, Clone)]
@@ -476,7 +478,8 @@ fn wasi_object_js(sigs: &WasmSigs) -> String {
 fn check_imports_served(sigs: &WasmSigs, surface: &HostSurface) -> Result<(), String> {
     for (module, name, _) in &sigs.imports {
         let known = (module == "wasi_snapshot_preview1" && WASI_SHIMS.iter().any(|(n, _)| n == name))
-            || surface.externs.iter().any(|e| &e.module == module && &e.import == name);
+            || surface.externs.iter().any(|e| &e.module == module && &e.import == name)
+            || fan::serves(module, name, surface);
         if !known {
             return Err(format!("error: --host js has no shim for the import `{module}.{name}` the module names — declare it with @extern(wasm, \"{module}\", \"{name}\") or file an issue naming the program shape"));
         }

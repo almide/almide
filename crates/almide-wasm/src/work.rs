@@ -212,6 +212,13 @@ pub(crate) enum Helper {
     /// the scratch, hand `[ITOA_END - len, ITOA_END)` to the stream import
     /// (`import` = println / eprintln). No block, no build.
     PrintI64 { import: u32 },
+    /// #3383: the `--host js` fan overlap protocol (fan_js_async.rs). Each
+    /// is a stub whose slot becomes a declared `almide:fan` import:
+    /// `start:<hook>(args…) -> slot` for the async extern at table index
+    /// `hook` (its wasm params), `wait()`, and `take:<hook>(slot) -> ret`.
+    FanStart { hook: u32, params: Vec<ValType> },
+    FanWait,
+    FanTake { hook: u32, ret: Option<ValType> },
 }
 
 /// The pretty printer's extra pooled fragments.

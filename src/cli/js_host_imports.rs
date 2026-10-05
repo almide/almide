@@ -15,7 +15,7 @@ use super::*;
 /// the fallible catch passes it through — and abandons the instance like a
 /// throw from an infallible hook. A marked (`returns: promise`) hook awaits
 /// instead and carries no check.
-fn hook_body(e: &HostExtern, call: &str, sync: bool, result: Option<&Val>, recorded: Option<&ExportRet>) -> Result<String, String> {
+pub(super) fn hook_body(e: &HostExtern, call: &str, sync: bool, result: Option<&Val>, recorded: Option<&ExportRet>) -> Result<String, String> {
     let (module, name) = (&e.module, &e.import);
     if returns_result(&e.sig) {
         let m = marshal_of(visible_ret(&e.sig)).expect("checked by check_marshallable");
@@ -41,9 +41,15 @@ fn hook_body(e: &HostExtern, call: &str, sync: bool, result: Option<&Val>, recor
 
 pub(super) fn import_object_js(sigs: &WasmSigs, surface: &HostSurface, suspension: &jspi::Suspension, import_rets: &ImportRets) -> Result<String, String> {
     let mut js = String::from("\nfunction imports() {\n  const wasiImports = {};\n  const jsImports = {};\n");
+    // #3383: the fan overlap protocol's imports (js_host_fan.rs).
+    let mut fan_js = String::new();
     for (module, name, sig) in &sigs.imports {
         if module == "wasi_snapshot_preview1" {
             js.push_str(&format!("  wasiImports.{name} = wasi.{name};\n"));
+            continue;
+        }
+        if module == almide_wasm::host_exports::FAN_MODULE {
+            fan_js.push_str(&super::fan::import_js(name, sig, surface, import_rets)?);
             continue;
         }
         let e = surface.externs.iter().find(|e| &e.module == module && &e.import == name).expect("checked by check_imports_served");
@@ -74,6 +80,10 @@ pub(super) fn import_object_js(sigs: &WasmSigs, surface: &HostSurface, suspensio
     for m in &modules {
         js.push_str(&format!("  obj[\"{m}\"] = jsImports;\n"));
     }
+    js.push_str(&super::fan::object_js(&fan_js, surface)?);
     js.push_str("  return obj;\n}\n");
+    if !fan_js.is_empty() {
+        js.push_str(super::fan::JS_FAN_RUNTIME);
+    }
     Ok(js)
 }

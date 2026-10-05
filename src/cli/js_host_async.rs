@@ -86,7 +86,9 @@ fn call_graph(bytes: &[u8], async_imports: &BTreeSet<String>) -> Result<CallGrap
             Payload::ImportSection(reader) => {
                 let funcs = reader.into_iter().flatten().flat_map(|grp| grp.into_iter().flatten()).filter(|(_, imp)| matches!(imp.ty, TypeRef::Func(_)));
                 for (_, imp) in funcs {
-                    if imp.module != "wasi_snapshot_preview1" && async_imports.contains(imp.name) {
+                    // #3383: a fan's overlap protocol suspends in `wait` alone.
+                    let suspends = if imp.module == almide_wasm::host_exports::FAN_MODULE { imp.name == "wait" } else { imp.module != "wasi_snapshot_preview1" && async_imports.contains(imp.name) };
+                    if suspends {
                         g.suspending.insert(g.imported);
                     }
                     g.imported += 1;

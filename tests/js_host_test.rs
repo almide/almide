@@ -362,3 +362,62 @@ fn a_hook_throw_is_an_err_for_a_fallible_extern_and_abandons_otherwise() {
     assert!(js.contains("if (abandoned !== null) throw new Error(abandoned);"), "{js}");
     assert!(dts.contains("count: (key: string) => number;") && dts.contains("get: (key: string) => string;"), "{dts}");
 }
+
+const FAN_PROGRAM: &str = "@extern(wasm, \"js\", \"fetch\", returns: promise)\neffect fn fetch(key: String) -> String\n\n@extern(wasm, \"js\", \"peek\", returns: promise)\nfn peek(key: String) -> String\n\n@extern(wasm, \"js\", \"tick\")\nfn tick(key: String) -> String\n\neffect fn all(keys: List[String]) -> List[String] = fan.map(keys, (k) => fetch(k))!\n\neffect fn shout(keys: List[String]) -> List[String] = fan.map(keys, (k) => fetch(k + \"!\"))!\n\neffect fn ticks(keys: List[String]) -> List[String] = fan.map(keys, (k) => ok(tick(k)))!\n\nfn main() -> Unit = println(\"fan\")\n";
+
+/// The `almide:fan` imports a module names, read from its bytes.
+fn fan_imports(wasm: &[u8]) -> Vec<String> {
+    let mut out = Vec::new();
+    for payload in wasmparser::Parser::new(0).parse_all(wasm) {
+        if let Ok(wasmparser::Payload::ImportSection(r)) = payload {
+            for (_, imp) in r.into_iter().flatten().flat_map(|g| g.into_iter().flatten()) {
+                if imp.module == "almide:fan" {
+                    out.push(imp.name.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// #3383: on `--host js`, a fan whose element is one async-hook call on
+/// values it already has imports the start / wait / take protocol, and only
+/// `wait` suspends. An element that computes its argument, or calls a sync
+/// hook, stays sequential; `ALMIDE_FAN_SEQUENTIAL=1` and a build without
+/// `--host js` name no protocol import. Running both lowerings and comparing
+/// them is `fan_async_overlap` in `spec/wasm_host_js` (needs JSPI).
+#[test]
+fn a_fan_over_async_hooks_overlaps_its_waits_on_the_js_host() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ok, stderr) = build(dir.path(), FAN_PROGRAM, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(ok, "{stderr}");
+    let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
+    let wasm = std::fs::read(dir.path().join("app.wasm")).unwrap();
+    // `all` overlaps; `shout` computes its argument and `ticks` calls a sync
+    // hook, so neither reaches the protocol.
+    assert_eq!(fan_imports(&wasm), ["start:fetch", "wait", "take:fetch"]);
+    assert!(js.contains(r#"fanImports["start:fetch"] = (a0) => fanStart(() => hook("js", "fetch")(readString(a0)));"#), "{js}");
+    assert!(js.contains(r#"fanImports["wait"] = new WebAssembly.Suspending(fanWait);"#), "{js}");
+    assert!(js.contains(r#"fanImports["take:fetch"] = (s) => { try { return okResult({k:"str"}, fanTake(s)); } catch (e) { return errResult(e); } };"#), "{js}");
+    assert!(js.contains("obj[\"almide:fan\"] = fanImports;") && js.contains("function fanTake(k)"), "{js}");
+    // The export reaching `wait` is entered through promising.
+    assert!(js.contains("all: WebAssembly.promising(instance.exports.all)"), "{js}");
+    // The ablation switch and a build without the host leave no protocol.
+    let seq = Command::new(almide()).current_dir(dir.path()).env("ALMIDE_FAN_SEQUENTIAL", "1").args(["build", "main.almd", "--target", "wasm", "--host", "js", "-o", "seq.wasm"]).output().unwrap();
+    assert!(seq.status.success(), "{}", String::from_utf8_lossy(&seq.stderr));
+    assert!(fan_imports(&std::fs::read(dir.path().join("seq.wasm")).unwrap()).is_empty());
+    assert!(!std::fs::read_to_string(dir.path().join("seq.js")).unwrap().contains("fanImports"));
+    let (ok, stderr) = build(dir.path(), FAN_PROGRAM, &["--target", "wasm", "-o", "plain.wasm"]);
+    assert!(ok, "{stderr}");
+    assert!(fan_imports(&std::fs::read(dir.path().join("plain.wasm")).unwrap()).is_empty());
+}
+
+/// #3383: the protocol's import module belongs to the glue; an extern that
+/// names it is refused by name.
+#[test]
+fn an_extern_on_the_fan_protocol_module_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = "@extern(wasm, \"almide:fan\", \"wait\")\nfn wait() -> Unit\n\nfn main() -> Unit = wait()\n";
+    let (ok, stderr) = build(dir.path(), src, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(!ok && stderr.contains("reserves the import module \"almide:fan\""), "{stderr}");
+}

@@ -203,7 +203,7 @@ fn emit_program_pass(
             Err(reason) => (None, refuse.or(Some(reason))),
         };
         if let Some((m, n)) = &import {
-            crate::host_exports::note_import(m, n, crate::host_exports::export_ret(ret, &types));
+            crate::host_exports::note_import(m, n, crate::host_exports::export_ret(ret, &types), crate::fan::js_async::returns_promise(f));
         }
         let key = qual.clone().unwrap_or_else(|| f.name.as_str().to_string());
         // impl_index carries ONLY registry implementation symbols — a
@@ -640,6 +640,7 @@ fn emit_program_pass(
             let (module, name) = info.import.clone()?;
             Some(imports::Declared { index: info.wasm_index, module, name })
         })
+        .chain(crate::fan::js_async::declared_protocol(&table, &work))
         .collect();
     let pre_declare = bytes;
     let bytes = imports::declare(&pre_declare, &declared).map_err(|e| EmitError::Unsupported(format!("extern-import:{e}")))?;
