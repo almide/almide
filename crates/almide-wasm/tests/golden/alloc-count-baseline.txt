@@ -849,6 +849,7 @@
 312	302	62801	312	spec/wasm_cross/trig_libm.almd
 10	0	184	10	spec/wasm_cross/tuple_eq.almd
 7	1	108	7	spec/wasm_cross/tuple_ops.almd
+87	61	915	87	spec/wasm_cross/tuple_scrutinee_recursive_variants.almd
 1	0	8	1	spec/wasm_cross/tuple_single.almd
 6	0	64	0	spec/wasm_cross/uint64_assert_display.almd
 31	22	554	31	spec/wasm_cross/uint64_upper_half.almd

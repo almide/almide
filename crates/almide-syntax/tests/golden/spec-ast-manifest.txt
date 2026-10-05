@@ -1,4 +1,4 @@
-# oracle: almide 0.67.0 (dev) at 4341857b0 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.67.0 (dev) at d55857f0f — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -1582,6 +1582,7 @@ e95bc63d4c76139445b51c643343b440aea16cb68876d3a47f15083fcd58fc63	spec/wasm_cross
 466cd2c61c5f2e6e619e29dd540a61eea765ff180a3eb0742f6b27bce56fa338	spec/wasm_cross/trig_libm.almd
 72ec8e5d1ce6a0ba977290073363898efb5886311a73c45ea8e9932a528d2ddb	spec/wasm_cross/tuple_eq.almd
 5d0fdd6253f9e0e48b8f9cb8d089d59413e422bcd0830be5f2b476e4d26276f1	spec/wasm_cross/tuple_ops.almd
+95dc6959b284f4cf0cf30cd2236afd291104c544ce1c89d6bb5653583e8ecff5	spec/wasm_cross/tuple_scrutinee_recursive_variants.almd
 4c8697e792eea51f58b3d136f3e914a0c8ce43922acb642a59eee22cce3ff1a2	spec/wasm_cross/tuple_single.almd
 641668d3741cc24712c07db50505e59a5001b5a0528eccd975dbfa90d173626a	spec/wasm_cross/uint64_assert_display.almd
 9ff198e756f223e78598b88f5fbbae61cff14db73837be7838dc19caec0ada29	spec/wasm_cross/uint64_upper_half.almd

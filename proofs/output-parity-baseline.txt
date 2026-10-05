@@ -938,6 +938,7 @@ spec/wasm_cross/toplevel_const_wrapping.almd
 spec/wasm_cross/trig_libm.almd
 spec/wasm_cross/tuple_eq.almd
 spec/wasm_cross/tuple_ops.almd
+spec/wasm_cross/tuple_scrutinee_recursive_variants.almd
 spec/wasm_cross/tuple_single.almd
 spec/wasm_cross/uint64_assert_display.almd
 spec/wasm_cross/uint64_upper_half.almd

@@ -1,0 +1,98 @@
+// @contract: C-070
+// #3390: a match on a TUPLE of recursive variant values —
+// `match (a, b) { (Node(l1, r1), Node(l2, r2)) => ... }` — bound the boxed
+// payloads as `Box<T>` and passed them where `T` was expected (rustc E0308)
+// on the native leg, while wasm ran. The tuple slot is a wrapper like
+// `some(..)`/`ok(..)`, so its constructor patterns get the same box rewrite
+// and deref marking as a direct scrutinee. Pinned shapes: both slots
+// recursive, a three-variant kernel (`conv`), a scalar slot beside a boxed
+// one, a three-tuple, binders moved into a new value, binders
+// read twice, an option slot, a guard, and a tuple-typed var subject.
+type T = | Leaf(Int) | Node(T, T)
+
+type E = | Lit(Int) | Lam(String, E, E) | App(E, E)
+
+fn size(t: T) -> Int = match t {
+  Leaf(_) => 1,
+  Node(l, r) => size(l) + size(r),
+}
+
+fn show(t: T) -> String = match t {
+  Leaf(v) => "${v}",
+  Node(l, r) => "(${show(l)} ${show(r)})",
+}
+
+fn same(a: T, b: T) -> Bool = match (a, b) {
+  (Leaf(x), Leaf(y)) => x == y,
+  (Node(l1, r1), Node(l2, r2)) => same(l1, l2) and same(r1, r2),
+  _ => false,
+}
+
+fn conv(a: E, b: E) -> Bool = match (a, b) {
+  (Lit(x), Lit(y)) => x == y,
+  (Lam(_, t1, b1), Lam(_, t2, b2)) => conv(t1, t2) and conv(b1, b2),
+  (App(f1, x1), App(f2, x2)) => conv(f1, f2) and conv(x1, x2),
+  _ => false,
+}
+
+// A scalar slot beside a boxed one.
+fn tag(n: Int, t: T) -> Int = match (n, t) {
+  (0, _) => 0,
+  (k, Leaf(v)) => k + v,
+  (k, Node(l, r)) => tag(k - 1, l) + tag(k - 1, r),
+}
+
+fn tri(a: T, b: T, c: T) -> Int = match (a, b, c) {
+  (Node(l, r), Node(l2, _), Leaf(z)) => size(l) + size(r) + size(l2) + z,
+  _ => 0,
+}
+
+// Binders moved into a freshly built value.
+fn swap(a: T, b: T) -> T = match (a, b) {
+  (Node(l1, r1), Node(l2, r2)) => Node(Node(r2, l1), Node(r1, l2)),
+  (Node(l, r), x) => Node(x, Node(r, l)),
+  (x, _) => x,
+}
+
+// A binder read twice.
+fn twice(a: T, b: T) -> Int = match (a, b) {
+  (Node(l, r), Leaf(v)) => size(l) + size(l) + size(r) + v,
+  _ => 0,
+}
+
+fn opt(a: T?, b: T) -> Int = match (a, b) {
+  (some(Node(l, _)), Node(_, r)) => size(l) + size(r),
+  (none, Leaf(v)) => v,
+  _ => 0,
+}
+
+fn guarded(a: T, b: T) -> Int = match (a, b) {
+  (Node(l, _), Node(_, r)) if size(l) > size(r) => 1,
+  (Node(l, r), _) if size(l) == size(r) => 2,
+  _ => 3,
+}
+
+fn via_var(a: T, b: T) -> Int = {
+  let p = (a, b)
+  match p {
+    (Node(l, _), Leaf(v)) => size(l) + v,
+    _ => 0,
+  }
+}
+
+effect fn main() -> Unit = {
+  let t = Node(Leaf(1), Node(Leaf(2), Leaf(3)))
+  let u = Node(Leaf(1), Leaf(2))
+  println("same: ${same(t, t)} ${same(t, u)}")
+  let e = Lam("x", Lit(1), App(Lit(2), Lit(3)))
+  println("conv: ${conv(e, e)} ${conv(e, Lit(1))}")
+  println("tag: ${tag(3, t)}")
+  println("tri: ${tri(t, u, Leaf(5))}")
+  println("swap: ${show(swap(t, u))} ${show(swap(t, Leaf(9)))}")
+  println("twice: ${twice(t, Leaf(6))}")
+  println("opt: ${opt(some(t), u)} ${opt(none, Leaf(8))}")
+  let w = Node(Node(Leaf(1), Leaf(2)), Leaf(3))
+  println("guarded: ${guarded(w, w)} ${guarded(u, Leaf(0))} ${guarded(Leaf(1), w)}")
+  println("via_var: ${via_var(w, Leaf(4))}")
+  println("after: ${show(t)} ${show(u)}")
+}
