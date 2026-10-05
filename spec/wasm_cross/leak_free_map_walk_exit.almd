@@ -1,12 +1,13 @@
 // @contract: C-066
-// An exit out of a `for (k, v) in m` body — a `!` that propagates, a guard
-// that returns — releases the map walk's hold on the map, as the loop's
-// normal end does. The structural wasm leg released the walk's credit only
-// after the loop, so an exit from the body left the map held forever and
-// every call leaked the map with its entries (#3374). A `break` and a
-// `continue` stay in the frame and reach the release themselves; they run
-// here too. The program prints the same text on both targets and ends with
-// no block live.
+// An exit out of a `for (k, v) in m` body — a `!` that propagates —
+// releases the map walk's hold on the map, as the loop's normal end does.
+// The structural wasm leg released the walk's credit only after the loop, so
+// an exit from the body left the map held forever and every call leaked the
+// map with its entries (#3374). A `continue` stays in the frame and reaches
+// the release itself; it runs here too. The program prints the same text on
+// both targets and ends with no block live. A guard return and a `break` out
+// of the body are judged in tests/leak_free_exits_test.rs: the native MIR
+// brick walls them, and a fixture would add walled-real baseline rows.
 fn chk(v: List[Int]) -> Result[Int, String] = if list.len(v) > 2 then err("big ${list.len(v)}") else ok(list.len(v))
 
 fn walk_prop(m: Map[String, List[Int]]) -> Result[Int, String] = {
@@ -15,24 +16,6 @@ fn walk_prop(m: Map[String, List[Int]]) -> Result[Int, String] = {
     acc = acc + chk(v)!
   }
   ok(acc)
-}
-
-fn walk_guard(m: Map[String, List[Int]]) -> Int = {
-  for (k, v) in m {
-    guard list.len(v) <= 2 else list.len(v) + string.len(k)
-  }
-  0
-}
-
-fn walk_break(m: Map[String, List[Int]]) -> Int = {
-  var found = 0
-  for (_, v) in m {
-    if list.len(v) > 2 then {
-      found = list.len(v)
-      break
-    } else ()
-  }
-  found
 }
 
 fn walk_continue(m: Map[String, List[Int]]) -> Int = {
@@ -68,13 +51,13 @@ effect fn main() -> Unit = {
       ("b" + int.to_string(i), list.repeat(i, i % 4)),
       ("c", [5, 6])
     ])
-    total = total + walk_guard(m) + walk_break(m) + walk_continue(m)
+    total = total + walk_continue(m)
     total = total + (walk_prop(m) ?? 1) + (walk_fresh_prop(i) ?? 2)
   }
   let m = map.from_list([
     ("x", [1]),
     ("y", [1, 2, 3])
   ])
-  println("${show(walk_prop(m))} ${show(walk_fresh_prop(3))} ${walk_guard(m)} ${walk_break(m)} ${walk_continue(m)}")
+  println("${show(walk_prop(m))} ${show(walk_fresh_prop(3))} ${walk_continue(m)}")
   println(int.to_string(total))
 }
