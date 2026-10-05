@@ -460,6 +460,7 @@ impl Emitter<'_> {
                         self.f.instructions().local_get(hold);
                         self.lower(fexpr, Some(fty))?;
                         self.rc_share_guard(fexpr, fty);
+                        self.witness_store(fexpr, fty);
                         self.store_ty_slot(fty, off);
                     }
                     self.f.instructions().local_get(hold);

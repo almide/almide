@@ -8,6 +8,12 @@
 
 const PROGRAM: &str = r#"type Pt = { name: String, n: Int, tag: String = "t" }
 
+type Ev =
+  | Scroll { label: String, dy: Int }
+  | Idle
+
+fn scroll(s: String) -> Ev = Scroll { label: s, dy: 3 }
+
 fn pair(s: String) -> (String, Int) = (s, 1)
 
 fn pair_fresh(n: Int) -> (List[Int], Int) = ([n], n)
@@ -39,6 +45,10 @@ effect fn main() -> Unit = {
   println("${left(pair("x"))} ${list.len(pair_fresh(3).0)} ${point("p").name}")
   println("${left_call("ab")} ${hello("y", 2)} ${fl(1.5)} ${subj(0, 1)}")
   shout("z")
+  match scroll("w") {
+    Scroll { label, dy } => println("${label} ${dy}"),
+    Idle => (),
+  }
 }
 "#;
 
@@ -65,6 +75,10 @@ fn aggregates_witness_exactly_and_unhooked_shapes_decline() {
         // A record literal's field store is the same share-and-move, and the
         // omitted field's literal default is born and moves in.
         ("point", "am\nim\nim\n"),
+        // A record-shaped variant CASE stores its fields exactly as a record
+        // literal does: the borrowed param shares into the slot behind the
+        // share guard (`am`), the case block moves out.
+        ("scroll", "am\nim\n"),
         // The borrowed param holds no credit (an empty line); the binder is a
         // view of its slot whose returned share moves out.
         ("left", "\nam\n"),
