@@ -1,4 +1,4 @@
-# Async JS imports on `--host js` (JSPI, #3353)
+# Async JS imports on `--host js` (JSPI, #3353, #3371)
 
 Status: implemented on the JS host only (`src/cli/js_host_async.rs`). The
 module bytes do not change. Only the generated `<mod>.js` / `<mod>.d.ts` do.
@@ -24,20 +24,35 @@ on workerd, and on the Cloudflare edge.
 
 ## Choices
 
-**1. The marker is a build flag, not source syntax.**
-`almide build app.almd --target wasm --host js --async-import kv_get,kv_count`.
+**1. The marker is on the extern declaration** (#3371).
 
-- ADR-0024 N1 keeps `async`, `await` and `Future` out of the language surface,
-  and the effect axis stays `fn` / `effect fn` "with no colour".
-- ADR-0011 makes the execution substrate a free variable that must not change
-  the observation. Whether a hook settles now or later is a property of the
-  host's substrate. It is not a property of the program.
-- The Almide declaration stays `fn kv_get(key: String) -> String`. Callers see
-  an ordinary synchronous call, and the same source builds for the native
-  target unchanged.
-- Each name must be an extern import the program declares. Otherwise the
-  build refuses, naming it. `--async-import` without `--host js` is also
-  refused.
+```almide
+@extern(wasm, "js", "kv_get", returns: promise)
+fn kv_get(key: String) -> String
+```
+
+- The marker states a fact about the host binding: this JS hook answers with
+  a Promise. It sits where the hook is bound, as wasm-bindgen's `suspending`,
+  Emscripten's `JSPI_IMPORTS` and WIT's `async func` do.
+- It is a named argument, not `async`. ADR-0024 N1 keeps `async`, `await` and
+  `Future` out of the language surface, and a bare `async` would invite an
+  `async fn` the language does not have. The effect axis stays `fn` /
+  `effect fn` "with no colour".
+- Types, effects and callers are unchanged. The Almide declaration is still
+  `fn kv_get(key: String) -> String`. Callers see an ordinary synchronous
+  call, and the native target ignores the marker.
+- The parser accepts `returns: promise` (or `returns = promise`) only after
+  the three positional arguments of an `@extern(wasm, "js", ...)`. Any other
+  named argument or value, a repeat, or the marker on another target or
+  module is a parse error. Its hint names the accepted spelling.
+  `almide fmt` writes `returns: promise`.
+- Without `--host js` the marker changes nothing in the module. The module
+  bytes are the same either way; only the generated glue reads it.
+- rc1 (v0.67.0-rc1) shipped the marker as a provisional build flag,
+  `--async-import NAME`. It was removed before the final release. A
+  build-time override can come back if a program ever has to bind the same
+  hook as sync on one host and async on another. The attribute stays the
+  default.
 
 **2. Effects.** An async import gets no new effect category.
 
@@ -61,8 +76,11 @@ reach an async import, read from the shipped bytes (after the optional
   correct. It would force every caller to await pure helpers (`width`), so
   reachability is used instead.
 - `run()` follows the same rule through `_start`.
-- An async export returns `Promise<T>` in the `.d.ts`. A hook's type becomes
-  `T | Promise<T>`.
+- An async export returns `Promise<T>` in the `.d.ts`. A marked hook's type
+  becomes `T | Promise<T>`.
+- Writers never mark exports, so no export can reach a suspending import
+  without being entered through `promising`, and `SuspendError` cannot be
+  reached.
 
 **4. One call in the instance at a time.**
 
@@ -94,8 +112,26 @@ runtimes can lag behind; on 2026-10-04, Google Cloud Run functions' `nodejs24`
 was 24.19.0. On those versions, `--experimental-wasm-jspi` works only on the
 `node` command line: Node refuses it in `NODE_OPTIONS`, and
 `v8.setFlagsFromString` at run time does not install the API.
-Nothing is attempted half-way. A module without `--async-import` produces the
-same glue as before, byte for byte, and runs where it ran before.
+Nothing is attempted half-way. A module with no marked extern needs no JSPI
+and runs where it ran before.
+
+**5a. A forgotten marker is refused** (#3371). Every UNMARKED hook's answer
+goes through one check, `typeof r?.then === "function"`. When it holds, the
+call throws:
+
+```
+almide: hooks.js.kv_get returned a Promise; mark its @extern with returns: promise
+```
+
+- Without the check, the Promise used to pass silently as `"[object Promise]"`
+  or `0`.
+- The throw unwinds the module's frames like any hook throw, so the instance
+  is abandoned until `init()` runs again.
+- For a fallible extern the refusal is not the hook's err: the catch that
+  turns a throw into an err passes it through.
+- The dropped promise gets a no-op rejection handler, so its own failure is
+  not reported a second time as an unhandled rejection.
+- Marked hooks await, and carry no check.
 
 **6. Marshalling around a suspension.**
 
@@ -122,8 +158,8 @@ same glue as before, byte for byte, and runs where it ran before.
 
 ## Gate
 
-`spec/wasm_host_js/async_imports.almd`, run by `scripts/check-js-host.sh`. A
-fixture's `// @host-flags:` line passes the flag. The fixture checks:
+`spec/wasm_host_js/async_imports.almd`, run by `scripts/check-js-host.sh`. Its
+async hooks are marked `returns: promise`. The fixture checks:
 
 - which exports are async and which stay sync;
 - overlapping calls are answered correctly, in order, one at a time;
@@ -132,6 +168,13 @@ fixture's `// @host-flags:` line passes the flag. The fixture checks:
 - flat memory;
 - the refusal without JSPI.
 
-The gate needs a node with JSPI, so CI's JS host job runs Node 24 (setup-node
-resolves the latest 24.x, which is past 24.20). Locally a node without JSPI skips
-that fixture with a warning.
+`hook_errors_async.almd` is the rejecting twin of `hook_errors.almd`.
+`unmarked_promise.almd` covers the refusal in 5a, for an infallible, a fallible
+and a `Unit` hook. It marks nothing, so it needs no JSPI.
+
+A fixture with a marked extern needs a node with JSPI, so CI's JS host job runs
+Node 24 (setup-node resolves the latest 24.x, which is past 24.20). Locally a
+node without JSPI skips those fixtures with a warning.
+
+The parser's acceptance and refusals are `crates/almide-syntax/src/parser/test_attributes.rs`
+and the diagnostics fixture `tests/diagnostics/plain-extern-returns-unknown`.
