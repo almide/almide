@@ -110,6 +110,43 @@ pub fn module_ident(path: &str) -> String {
     out
 }
 
+/// The pre-#3338 spelling of a module path in item names: every `.` folded to
+/// `_`, every `_` kept (`tf_v0.calc` → `tf_v0_calc`). NOT injective — `a.b`
+/// and `a_b` are both `a_b` — so it names nothing the compiler defines. It
+/// exists only to spell the deprecated aliases a package's `native/*.rs` may
+/// still call (#3425); this is the one place that spelling is made.
+pub fn legacy_module_ident(path: &str) -> String {
+    path.replace('.', "_")
+}
+
+/// Split a generated `<module_ident(path)>_<name>` back into the module path
+/// and the bare name: `tf_0v0_1calc_double` → (`tf_v0.calc`, `double`).
+/// Decodes [`module_ident`] left to right (`_0` → `_`, `_1` → `.`, the first
+/// other `_` ends the path). `None` when there is no such `_`.
+pub fn split_module_item(ident: &str) -> Option<(String, &str)> {
+    let mut path = String::with_capacity(ident.len());
+    let mut chars = ident.char_indices().peekable();
+    while let Some((i, ch)) = chars.next() {
+        if ch != '_' {
+            path.push(ch);
+            continue;
+        }
+        match chars.peek().map(|&(_, c)| c) {
+            Some('0') => {
+                path.push('_');
+                chars.next();
+            }
+            Some('1') => {
+                path.push('.');
+                chars.next();
+            }
+            Some(_) if !path.is_empty() => return Some((path, &ident[i + 1..])),
+            _ => return None,
+        }
+    }
+    None
+}
+
 /// A module-qualified declaration name (`a.b.Tok`) as one identifier:
 /// [`module_ident`] of the module path, `_`, the bare name (`a_1b_Tok`). A
 /// name with no module part is returned as is.
@@ -161,6 +198,25 @@ mod module_ident_tests {
         }
         assert_eq!(spellings[6], spellings[0]);
         assert_eq!(qualified_ident("Tok"), "Tok");
+    }
+
+    #[test]
+    fn split_module_item_inverts_module_ident() {
+        use super::split_module_item;
+        for (path, name) in [("tf_v0", "entry"), ("tf_v0.calc", "double"), ("a.b", "c"), ("a_b", "c"), ("a", "b_c"), ("a._b", "_c"), ("list", "map")] {
+            let ident = format!("{}_{}", module_ident(path), name);
+            assert_eq!(split_module_item(&ident), Some((path.to_string(), name)), "{ident}");
+        }
+        assert_eq!(split_module_item("main"), None);
+        assert_eq!(split_module_item("_x"), None);
+    }
+
+    #[test]
+    fn the_legacy_spelling_folds_dots_and_keeps_underscores() {
+        use super::legacy_module_ident;
+        assert_eq!(legacy_module_ident("tf_v0"), "tf_v0");
+        assert_eq!(legacy_module_ident("tf_v0.calc"), "tf_v0_calc");
+        assert_eq!(legacy_module_ident("a.b"), legacy_module_ident("a_b"));
     }
 
     #[test]
