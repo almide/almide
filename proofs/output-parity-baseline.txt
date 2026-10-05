@@ -197,6 +197,7 @@ spec/wasm_cross/closure_captured_list_mutation.almd
 spec/wasm_cross/closure_captured_map_key_write.almd
 spec/wasm_cross/closure_captured_map_records.almd
 spec/wasm_cross/closure_captured_record_field_mutation.almd
+spec/wasm_cross/closure_mut_arg_in_nested_match.almd
 spec/wasm_cross/closure_reads_var_written_by_mut_call.almd
 spec/wasm_cross/closure_rich_list_capture.almd
 spec/wasm_cross/closure_scalar_captures.almd

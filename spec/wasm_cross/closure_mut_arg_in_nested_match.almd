@@ -1,0 +1,43 @@
+// @contract: C-226
+// #3431: a closure that passes a captured `var` to a `mut` parameter, inside
+// a match arm nested in a `let` initializer inside a loop of an effect fn,
+// while the same `var` is also passed as `mut` elsewhere in that loop, mutates
+// the caller's record on both targets. 0.64.0 native emitted `.get()` on the
+// `&mut` binding (rustc E0599).
+type Cache = { memo: Map[String, Bool] }
+
+fn seen(mut c: Cache, k: String) -> Bool =
+  if map.contains(c.memo, k) then true
+  else {
+    map.insert(c.memo, k, true)
+    false
+  }
+
+fn note(mut c: Cache, k: String) -> Unit = {
+  map.insert(c.memo, k, true)
+}
+
+effect fn run(items: List[String]) -> Int = {
+  var c = Cache { memo: [:] }
+  var hits = 0
+  for x in items {
+    let why = match list.first(items) {
+      none => "none",
+      some(_) => match list.find(["a", "z"], (k) => seen(c, k)) {
+        some(k) => k,
+        none => "",
+      },
+    }
+    if why == "" then ()
+    else {
+      hits = hits + 1
+      note(c, x)
+    }
+  }
+  hits * 10 + map.len(c.memo)
+}
+
+effect fn main() -> Unit = {
+  let n = run(["a", "b", "c"])!
+  println(int.to_string(n))
+}
