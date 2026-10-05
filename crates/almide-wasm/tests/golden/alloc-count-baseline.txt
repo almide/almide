@@ -21,7 +21,7 @@
 21	7	824	21	spec/wasm_cross/assign_mut_callee_consumes_var.almd
 31	23	703	31	spec/wasm_cross/assign_nested_call_release.almd
 26	16	560	26	spec/wasm_cross/assign_nested_mut_writeback_release.almd
-15022	14989	42181645	15022	spec/wasm_cross/assign_self_call_release.almd
+14036	14002	34222229	14036	spec/wasm_cross/assign_self_call_release.almd
 9	0	121	9	spec/wasm_cross/autotry_construction.almd
 5	3	55	5	spec/wasm_cross/autotry_result_first_arg.almd
 205	140	2805	205	spec/wasm_cross/availability_pure_batch.almd
@@ -298,7 +298,7 @@
 7	3	69	7	spec/wasm_cross/guard_let_statement.almd
 3	0	34	3	spec/wasm_cross/guard_statement.almd
 25	10	389	25	spec/wasm_cross/guard_value_exit_in_loop.almd
-9197	9152	361817	9197	spec/wasm_cross/gzip_inflate_members.almd
+9197	9155	361817	9197	spec/wasm_cross/gzip_inflate_members.almd
 68	58	13349	68	spec/wasm_cross/hash_digests.almd
 266	249	77161	266	spec/wasm_cross/heap_arena.almd
 5	0	53	5	spec/wasm_cross/heap_result_err_interp.almd
@@ -472,7 +472,7 @@
 15	6	112	15	spec/wasm_cross/map_literal_borrowed_if_arg.almd
 43	19	427	43	spec/wasm_cross/map_literal_ctor_values.almd
 5	1	24	5	spec/wasm_cross/map_of_maps_value.almd
-3	0	28	3	spec/wasm_cross/map_rich_variant_key.almd
+3	0	76	3	spec/wasm_cross/map_rich_variant_key.almd
 32	14	436	32	spec/wasm_cross/map_set_eq.almd
 376	268	205302	376	spec/wasm_cross/map_set_in_place.almd
 3065	2583	180930	3065	spec/wasm_cross/map_set_index_threshold.almd
@@ -555,8 +555,8 @@
 23	11	19880	23	spec/wasm_cross/mut_param_loop_stays_in_place.almd
 78	43	824	78	spec/wasm_cross/mut_param_move_mode_gaps.almd
 182	93	1818	182	spec/wasm_cross/mut_param_nested_place_writeback.almd
-392	313	3755	392	spec/wasm_cross/mut_param_reassign_from_hof.almd
-5	3	80	5	spec/wasm_cross/mut_param_spread_reassign.almd
+391	312	3707	391	spec/wasm_cross/mut_param_reassign_from_hof.almd
+2	0	32	2	spec/wasm_cross/mut_param_spread_reassign.almd
 26	12	8304	26	spec/wasm_cross/mut_param_tail_recursion.almd
 13	3	327	13	spec/wasm_cross/mut_param_writeback_growth.almd
 1	0	1	1	spec/wasm_cross/mut_scalar_param_reassign.almd
@@ -655,9 +655,10 @@
 31	18	222	31	spec/wasm_cross/record_default_field_omitted.almd
 217	150	3165	217	spec/wasm_cross/record_field_rust_keyword.almd
 2	0	40	2	spec/wasm_cross/record_forms.almd
+614	61	22546	614	spec/wasm_cross/record_map_field_update.almd
 20	0	192	20	spec/wasm_cross/record_option_none_cells.almd
 16033	15998	184308	16033	spec/wasm_cross/record_pair_result_return.almd
-14	4	180	14	spec/wasm_cross/record_scalar_field_assign_alias.almd
+13	4	168	13	spec/wasm_cross/record_scalar_field_assign_alias.almd
 23	17	331	23	spec/wasm_cross/record_variant_field_literal.almd
 16	2	132	16	spec/wasm_cross/records_variants.almd
 0	0	0	0	spec/wasm_cross/recursion_depth_within_limits.almd
@@ -727,7 +728,7 @@
 17095	15855	462470	17095	spec/wasm_cross/sort_by_compound_key.almd
 180061	180037	1280468	180061	spec/wasm_cross/sort_by_str_key_heap.almd
 28	3	107	28	spec/wasm_cross/split_empty_sep.almd
-59	34	549	59	spec/wasm_cross/spread_record_share.almd
+56	31	525	56	spec/wasm_cross/spread_record_share.almd
 461	441	29143	461	spec/wasm_cross/sql_highlight_tokens.almd
 ~	spec/wasm_cross/statement_after_tail_walker_bang.almd
 61	28	3547	61	spec/wasm_cross/stdlib_call_temporaries_release.almd
@@ -908,7 +909,7 @@
 140	0	1120	140	spec/wasm_cross/wide_function_body.almd
 91	59	978	91	spec/wasm_cross/witness_straightline.almd
 15	1	643	15	spec/wasm_cross/zip_view_shape.almd
-4283	4208	342224	4283	spec/wasm_cross/zlib_selfhost.almd
+4283	4211	342224	4283	spec/wasm_cross/zlib_selfhost.almd
 3	0	55	1	spec/wasm_fail/effect_err_aborts_both_legs.almd
 3	0	55	1	spec/wasm_fail/int_parse_err_propagates.almd
 9	3	112	5	spec/wasm_fail/matrix_concat_cols_rows_aborts.almd
