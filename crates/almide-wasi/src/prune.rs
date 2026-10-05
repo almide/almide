@@ -274,7 +274,14 @@ fn live_functions(seen: &Prune) -> BTreeSet<u32> {
 /// imports and globals nothing live names, and the types only dead entries
 /// used. The caller validates the result.
 pub fn prune(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
-    let Some(shape) = prunable(bytes)? else { return Ok(bytes.to_vec()) };
+    prune_mapped(bytes).map(|(out, _)| out)
+}
+
+/// [`prune`] plus where each old function index went (`None`: dropped);
+/// the map is `None` when the module was returned unchanged (#1315: a debug
+/// build's line table follows its functions through this pass).
+pub fn prune_mapped(bytes: &[u8]) -> anyhow::Result<(Vec<u8>, Option<Vec<Option<u32>>>)> {
+    let Some(shape) = prunable(bytes)? else { return Ok((bytes.to_vec(), None)) };
     let fail = |e: Error<Infallible>| anyhow::anyhow!("prune reencode: {e}");
     let mut seen = Prune { record: true, imports: shape.imports, ..Prune::default() };
     seen.parse_core_module(&mut wasm_encoder::Module::new(), wasmparser::Parser::new(0), bytes).map_err(fail)?;
@@ -299,10 +306,9 @@ pub fn prune(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     let tmap = compact(shape.types, |t| types.contains(&t));
 
     let mut out = wasm_encoder::Module::new();
-    Prune { imports: shape.imports, fmap, gmap, tmap, ..Prune::default() }
-        .parse_core_module(&mut out, wasmparser::Parser::new(0), bytes)
-        .map_err(fail)?;
-    drop_empty_sections(&out.finish(), !seen.tables_used)
+    let mut pass = Prune { imports: shape.imports, fmap, gmap, tmap, ..Prune::default() };
+    pass.parse_core_module(&mut out, wasmparser::Parser::new(0), bytes).map_err(fail)?;
+    Ok((drop_empty_sections(&out.finish(), !seen.tables_used)?, Some(pass.fmap)))
 }
 
 /// `bytes` without its empty element section and — when `unused_table`, so
