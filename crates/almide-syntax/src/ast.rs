@@ -389,6 +389,12 @@ pub struct ExternAttr {
     pub target: Sym,     // "rust" or "ts"
     pub module: Sym,     // e.g., "fast_lib"
     pub function: Sym,   // e.g., "reverse"
+    /// `returns: promise` (#3371): the JS hook bound by
+    /// `@extern(wasm, "js", ...)` answers with a Promise, so the generated
+    /// JS host suspends on it through JSPI. Only that target/module takes
+    /// it; types, effects and callers are unchanged and native ignores it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub returns_promise: bool,
 }
 
 /// @export(c, "symbol") annotation — export function with C ABI.

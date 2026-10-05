@@ -383,7 +383,7 @@ mod attr_tests {
                 let mut out = format!("fn={} ext=[", name);
                 for (i, a) in extern_attrs.iter().enumerate() {
                     if i > 0 { out.push_str(","); }
-                    out.push_str(&format!("{}|{}|{}", a.target, a.module, a.function));
+                    out.push_str(&format!("{}|{}|{}|{}", a.target, a.module, a.function, a.returns_promise));
                 }
                 out.push_str("] exp=[");
                 for (i, a) in export_attrs.iter().enumerate() {
@@ -431,6 +431,20 @@ mod attr_tests {
         let before = shape_of_first_fn(src);
         let after = shape_of_first_fn(&formatted);
         assert_eq!(before, after);
+    }
+
+    /// #3371: `returns: promise` survives a format, and `returns = promise`
+    /// comes out in the canonical `:` spelling.
+    #[test]
+    fn format_roundtrip_extern_returns_promise() {
+        for src in [
+            "@extern(wasm, \"js\", \"kv_get\", returns: promise)\nfn kv_get(k: String) -> String",
+            "@extern(wasm, \"js\", \"kv_get\", returns = promise)\nfn kv_get(k: String) -> String",
+        ] {
+            let formatted = roundtrip(src);
+            assert!(formatted.contains("@extern(wasm, \"js\", \"kv_get\", returns: promise)"), "{formatted}");
+            assert_eq!(shape_of_first_fn(src), shape_of_first_fn(&formatted));
+        }
     }
 
     #[test]

@@ -1,0 +1,2 @@
+expects_error = "`returns: promise` applies only to @extern(wasm"
+hint_substring = "drop it here"
