@@ -277,10 +277,13 @@ pub fn prune(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     prune_mapped(bytes).map(|(out, _)| out)
 }
 
+/// Old function index → new index (`None`: dropped).
+pub type FuncIndexMap = Vec<Option<u32>>;
+
 /// [`prune`] plus where each old function index went (`None`: dropped);
 /// the map is `None` when the module was returned unchanged (#1315: a debug
 /// build's line table follows its functions through this pass).
-pub fn prune_mapped(bytes: &[u8]) -> anyhow::Result<(Vec<u8>, Option<Vec<Option<u32>>>)> {
+pub fn prune_mapped(bytes: &[u8]) -> anyhow::Result<(Vec<u8>, Option<FuncIndexMap>)> {
     let Some(shape) = prunable(bytes)? else { return Ok((bytes.to_vec(), None)) };
     let fail = |e: Error<Infallible>| anyhow::anyhow!("prune reencode: {e}");
     let mut seen = Prune { record: true, imports: shape.imports, ..Prune::default() };
