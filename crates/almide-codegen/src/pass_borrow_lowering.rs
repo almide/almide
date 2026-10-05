@@ -234,6 +234,18 @@ fn propagating_rc_cow_value(e: &IrExpr) -> bool {
     )
 }
 
+/// A list value no binding holds — a call's result, a collected chain, a
+/// literal: borrowing it borrows a temporary that dies with the statement, so
+/// handing it over by value moves nothing anyone reads again.
+fn is_temporary(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::RuntimeCall { symbol, .. } => !symbol.as_str().ends_with('!'),
+        IrExprKind::Call { .. } | IrExprKind::List { .. } => true,
+        IrExprKind::IterChain { collector, .. } => matches!(collector, IterCollector::Collect),
+        _ => false,
+    }
+}
+
 /// The runtime's borrowing twin of a decoded-field lookup (#1679): the plain
 /// lookup returns a copy of the field, the twin a borrow into the object,
 /// with the same two error strings on a miss.
@@ -512,6 +524,47 @@ impl Lower<'_> {
         *e = owned_read(mk(IrExprKind::Var { id }, ty, span));
     }
 
+    /// The source of a range op whose runtime takes it either way (#3398,
+    /// `owned_source.rs`). A source that is an owned value — the bare `Var`
+    /// the clone pass or TailCallOpt left at its last use, or a temporary the
+    /// borrow would have pointed at — is passed by value to the op's `_owned`
+    /// twin, which moves the kept elements instead of cloning them. A bare
+    /// `Var` that is a reference in Rust (a by-reference param or binder, a
+    /// borrowed loop binder) or a place a move cannot leave (a global, a
+    /// shared cell, a copy-on-write `var`) is borrowed again: the borrowing
+    /// op is what it takes.
+    fn lower_either_way_source(&self, expr: &mut IrExpr) {
+        let IrExprKind::RuntimeCall { symbol, args } = &mut expr.kind else { return };
+        let Some(twin) = crate::owned_source::owned_twin(symbol.as_str()) else { return };
+        let Some(source) = args.first_mut() else { return };
+        match &source.kind {
+            IrExprKind::Var { id } if self.stays_borrowed(*id) => {
+                let value = std::mem::replace(source, mk(IrExprKind::Unit, Ty::Unit, None));
+                let (ty, span) = (value.ty.clone(), value.span);
+                *source = mk(IrExprKind::Borrow { expr: Box::new(value), as_str: false, mutable: false }, ty, span);
+            }
+            IrExprKind::Var { .. } => *symbol = sym(twin),
+            IrExprKind::Borrow { expr: inner, as_str: false, mutable: false } if is_temporary(inner) => {
+                let IrExprKind::Borrow { expr: inner, .. } = std::mem::replace(&mut source.kind, IrExprKind::Unit) else { unreachable!() };
+                *source = *inner;
+                *symbol = sym(twin);
+            }
+            _ => {}
+        }
+    }
+
+    /// A var the walker renders as a reference or as a place nothing may be
+    /// moved out of.
+    fn stays_borrowed(&self, id: VarId) -> bool {
+        is_ref_param(self.params, id)
+            || is_ref_mut_param(self.params, id)
+            || self.ref_binders.contains(&id)
+            || self.ann.borrowed_loop_vars.contains(&id)
+            || self.ann.global(id).is_some()
+            || self.ann.is_shared_mut(&id)
+            || self.ann.is_rc_cow(&id)
+    }
+
     /// The by-value positions [`Lower::own_consumed_ref_mut`] applies to. A
     /// borrowed slot is a `Borrow` node here (BorrowInsertion ran), so a
     /// bare `Var` argument is an owned slot by construction.
@@ -543,6 +596,9 @@ impl IrMutVisitor for Lower<'_> {
         {
             self.counting_binders.insert(*var);
         }
+        // Before the consumer rule, which would own a bare reference source
+        // with `.to_vec()` where a borrow is what the op takes.
+        self.lower_either_way_source(expr);
         // Before the walk: the rule reads the ORIGINAL bare `Var` operands,
         // which the scalar-read lowering below would otherwise turn into
         // `Deref` first (a scalar is exempt anyway; the order keeps the two
