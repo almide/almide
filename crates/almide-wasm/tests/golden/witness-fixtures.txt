@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 874 of 909
+# certified: 880 of 915
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -371,6 +371,7 @@ spec/wasm_cross/koka_rbtree_balance.almd
 spec/wasm_cross/koka_reuse1_unzip.almd
 spec/wasm_cross/koka_reuse4_map_rebuild.almd
 spec/wasm_cross/koka_unicode_combining.almd
+spec/wasm_cross/lambda_captures_mut_param.almd
 spec/wasm_cross/leak_free_list_rest_exit.almd
 spec/wasm_cross/leak_free_map_walk_exit.almd
 spec/wasm_cross/leak_free_propagating_literal_operand.almd
@@ -412,6 +413,7 @@ spec/wasm_cross/list_minmax_str.almd
 spec/wasm_cross/list_modify_heap.almd
 spec/wasm_cross/list_of_maps_loop_build.almd
 spec/wasm_cross/list_of_tuples_equality.almd
+spec/wasm_cross/list_pattern_variant_element.almd
 spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 spec/wasm_cross/list_product_overflow.almd
 spec/wasm_cross/list_push_on_record_field.almd
@@ -447,6 +449,7 @@ spec/wasm_cross/map_fold.almd
 spec/wasm_cross/map_fold_heap_acc.almd
 spec/wasm_cross/map_fold_heap_acc_skv.almd
 spec/wasm_cross/map_fold_heap_accumulator.almd
+spec/wasm_cross/map_get_fallback_key_and_lazy.almd
 spec/wasm_cross/map_index_order.almd
 spec/wasm_cross/map_index_released_with_block.almd
 spec/wasm_cross/map_index_string_key_shapes.almd
@@ -513,6 +516,7 @@ spec/wasm_cross/memory_stress.almd
 spec/wasm_cross/mg_rebuild_two_phase.almd
 spec/wasm_cross/module_global_const.almd
 spec/wasm_cross/mut_call_hoisted_args_distinct.almd
+spec/wasm_cross/mut_call_hoisted_args_in_branch.almd
 spec/wasm_cross/mut_call_nested_read_before.almd
 spec/wasm_cross/mut_call_two_mut_args_read.almd
 spec/wasm_cross/mut_map_param.almd
@@ -628,6 +632,7 @@ spec/wasm_cross/rc_reclaim_churn.almd
 spec/wasm_cross/record_default_field_omitted.almd
 spec/wasm_cross/record_field_rust_keyword.almd
 spec/wasm_cross/record_forms.almd
+spec/wasm_cross/record_map_field_update.almd
 spec/wasm_cross/record_option_none_cells.almd
 spec/wasm_cross/record_pair_result_return.almd
 spec/wasm_cross/record_scalar_field_assign_alias.almd
@@ -680,6 +685,7 @@ spec/wasm_cross/scalar_if_arm_effects.almd
 spec/wasm_cross/scan_heap_acc.almd
 spec/wasm_cross/scoped_region_value.almd
 spec/wasm_cross/scoped_worker_in_and_out.almd
+spec/wasm_cross/self_call_swapped_params.almd
 spec/wasm_cross/set_entries_reclaim.almd
 spec/wasm_cross/set_index_order.almd
 spec/wasm_cross/set_insertion_order.almd

@@ -384,6 +384,7 @@
 4078	spec/wasm_cross/koka_reuse1_unzip.almd
 2778	spec/wasm_cross/koka_reuse4_map_rebuild.almd
 25073	spec/wasm_cross/koka_unicode_combining.almd
+3009	spec/wasm_cross/lambda_captures_mut_param.almd
 16226	spec/wasm_cross/lambda_failure_channel.almd
 4660	spec/wasm_cross/leak_free_list_rest_exit.almd
 5463	spec/wasm_cross/leak_free_map_walk_exit.almd
@@ -426,6 +427,7 @@
 7548	spec/wasm_cross/list_modify_heap.almd
 3528	spec/wasm_cross/list_of_maps_loop_build.almd
 1840	spec/wasm_cross/list_of_tuples_equality.almd
+2678	spec/wasm_cross/list_pattern_variant_element.almd
 9018	spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 2532	spec/wasm_cross/list_product_overflow.almd
 7203	spec/wasm_cross/list_push_on_record_field.almd
@@ -532,6 +534,7 @@
 2239	spec/wasm_cross/module_global_const.almd
 5160	spec/wasm_cross/module_var_alias_cow.almd
 8349	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
+3772	spec/wasm_cross/mut_call_hoisted_args_in_branch.almd
 9478	spec/wasm_cross/mut_call_nested_read_before.almd
 6080	spec/wasm_cross/mut_call_two_mut_args_read.almd
 5034	spec/wasm_cross/mut_heap_param.almd
