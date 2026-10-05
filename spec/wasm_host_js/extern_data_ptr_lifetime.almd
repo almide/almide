@@ -42,8 +42,6 @@ fn send_helper(s: String) -> Int = {
 fn send_helper_temp(s: String) -> Int = js_peek(address_of(bytes.from_string(s)), string.len(s))
 
 fn main() -> Unit = {
-  let total = send("hello, world") + send("añb") + send_temp("temporary")
-    + send_temp_bound("bound temporary") + send_held("held address")
-    + send_helper("helper address") + send_helper_temp("helper temporary")
+  let total = send("hello, world") + send("añb") + send_temp("temporary") + send_temp_bound("bound temporary") + send_held("held address") + send_helper("helper address") + send_helper_temp("helper temporary")
   println("bytes seen: ${total}")
 }
