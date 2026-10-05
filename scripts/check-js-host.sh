@@ -24,7 +24,9 @@
 #      ledger edit in the same change.
 #
 # A fixture's `// @host-flags: <flags>` line adds flags to its --host js
-# builds. A fixture with async imports (an `@extern(wasm, "js", ...,
+# builds. A `// @fan-sequential-twin` line also builds and runs it with
+# ALMIDE_FAN_SEQUENTIAL=1 and requires the same output (#3383, step 1b).
+# A fixture with async imports (an `@extern(wasm, "js", ...,
 # returns: promise)`, #3353/#3371) needs a node with JSPI
 # (WebAssembly.Suspending, Node >= 24.20): locally an older node skips that
 # fixture with a warning, in CI it is a failure.
@@ -119,6 +121,26 @@ for f in "$FIXTURE_DIR"/*.almd; do
   fi
   if ! cmp -s "$WORK/$stem.out" "$expected"; then
     echo "FAIL $f: stdout differs from $stem.expected"; diff "$expected" "$WORK/$stem.out" | head -20; fail=1; continue
+  fi
+  # 1b. (#3383) a `// @fan-sequential-twin` fixture is built again with
+  # ALMIDE_FAN_SEQUENTIAL=1, the fan lowering without the overlap protocol:
+  # its glue names no `almide:fan` import, the overlapped glue does, and the
+  # twin run prints the same .expected (ADR-0024 N7: the substrate never
+  # changes the observation). The host sees the variable too and asserts the
+  # in-flight count and timing of the lowering it runs.
+  if grep -q '^// @fan-sequential-twin' "$f"; then
+    if ! ALMIDE_FAN_SEQUENTIAL=1 "$BIN" build "$f" --target wasm --host js ${hostflags[@]+"${hostflags[@]}"} -o "$WORK/${stem}_seq.wasm" > "$WORK/$stem.seq.build" 2>&1; then
+      echo "FAIL $f: build with ALMIDE_FAN_SEQUENTIAL=1"; sed 's/^/    /' "$WORK/$stem.seq.build"; fail=1; continue
+    fi
+    if ! grep -q 'almide:fan' "$WORK/$stem.js" || grep -q 'almide:fan' "$WORK/${stem}_seq.js"; then
+      echo "FAIL $f: the overlapped glue must serve the almide:fan protocol and the sequential twin's must not"; fail=1; continue
+    fi
+    if ! ALMIDE_FAN_SEQUENTIAL=1 node "$WORK/run.mjs" "$WORK/${stem}_seq.js" $hostarg > "$WORK/$stem.seq.out" 2> "$WORK/$stem.seq.err"; then
+      echo "FAIL $f: node run of the sequential twin"; sed 's/^/    /' "$WORK/$stem.seq.err" | head -40; fail=1; continue
+    fi
+    if ! cmp -s "$WORK/$stem.seq.out" "$expected"; then
+      echo "FAIL $f: the sequential twin's stdout differs from $stem.expected"; diff "$expected" "$WORK/$stem.seq.out" | head -20; fail=1; continue
+    fi
   fi
   if ! grep -q '@extern(wasm' "$f"; then
     if ! "$BIN" run "$f" > "$WORK/$stem.native" 2> "$WORK/$stem.native.err"; then

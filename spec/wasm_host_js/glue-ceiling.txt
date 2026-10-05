@@ -26,3 +26,7 @@ hook_errors_async 15000
 # hook_errors raised above in this change). A glue whose every hook is marked
 # (hook_errors_async) ships only the 37-byte UnmarkedPromise class.
 unmarked_promise 12750
+# #3383: a fan over async hooks imports the almide:fan protocol — one
+# start/take pair per hook a fan reaches, the Suspending wait, and the slot
+# table runtime (fanStart / fanWait / fanTake, ~900 B).
+fan_async_overlap 17600
