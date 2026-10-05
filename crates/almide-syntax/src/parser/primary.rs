@@ -216,6 +216,32 @@ impl Parser {
         })
     }
 
+    /// The parenthesised operand of `some(` / `ok(` / `err(` (#3387). It is
+    /// read by the SAME argument-list parser an ordinary call uses, so the
+    /// constructors follow the call rule exactly: newlines inside the parens
+    /// are insignificant, a trailing comma is allowed, and leading comments
+    /// attach the same way. The constructor then requires exactly one
+    /// positional operand.
+    fn parse_ctor_arg(&mut self, open: &crate::lexer::Token, ctx: &str) -> Result<Expr, String> {
+        self.expect(TokenType::LParen)?;
+        let (mut args, named_args) = self.parse_call_args()?;
+        self.expect_closing(TokenType::RParen, open.line, open.col, ctx)?;
+        if args.len() != 1 || !named_args.is_empty() {
+            return Err(format!(
+                "{} takes exactly one argument at line {}:{}\n  Hint: Write {}(value) with a single positional value",
+                ctx, open.line, open.col, ctx.trim_end_matches("()"),
+            ));
+        }
+        let mut expr = args.pop().expect("one argument");
+        // `_` in an argument list is a partial-application placeholder; as a
+        // constructor's operand it keeps the meaning it had before (#3387):
+        // the expression hole.
+        if matches!(expr.kind, ExprKind::Placeholder) {
+            expr.kind = ExprKind::Hole;
+        }
+        Ok(expr)
+    }
+
     fn parse_some_expr(&mut self, span: Option<Span>) -> Result<Expr, String> {
         self.advance();
         let open = self.current().clone();
@@ -224,9 +250,7 @@ impl Parser {
         if open.token_type != TokenType::LParen {
             return Ok(self.bare_ctor_fn_value(span, |e| ExprKind::Some { expr: e }));
         }
-        self.expect(TokenType::LParen)?;
-        let expr = self.parse_expr()?;
-        self.expect_closing(TokenType::RParen, open.line, open.col, "some()")?;
+        let expr = self.parse_ctor_arg(&open, "some()")?;
         Ok(Expr::new(self.next_id(), span, ExprKind::Some { expr: Box::new(expr) }))
     }
 
@@ -237,9 +261,7 @@ impl Parser {
         if open.token_type != TokenType::LParen {
             return Ok(self.bare_ctor_fn_value(span, |e| ExprKind::Ok { expr: e }));
         }
-        self.expect(TokenType::LParen)?;
-        let expr = self.parse_expr()?;
-        self.expect_closing(TokenType::RParen, open.line, open.col, "ok()")?;
+        let expr = self.parse_ctor_arg(&open, "ok()")?;
         Ok(Expr::new(self.next_id(), span, ExprKind::Ok { expr: Box::new(expr) }))
     }
 
@@ -250,9 +272,7 @@ impl Parser {
         if open.token_type != TokenType::LParen {
             return Ok(self.bare_ctor_fn_value(span, |e| ExprKind::Err { expr: e }));
         }
-        self.expect(TokenType::LParen)?;
-        let expr = self.parse_expr()?;
-        self.expect_closing(TokenType::RParen, open.line, open.col, "err()")?;
+        let expr = self.parse_ctor_arg(&open, "err()")?;
         Ok(Expr::new(self.next_id(), span, ExprKind::Err { expr: Box::new(expr) }))
     }
 

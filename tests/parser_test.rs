@@ -1024,3 +1024,40 @@ fn fn_eq_without_return_type_teaches_return_type() {
     let msg = &errors[0];
     assert!(msg.contains("-> Type = { ... }"), "should teach the return-type rule: {}", msg);
 }
+
+// ---- #3387: `some(` / `ok(` / `err(` read their operand like a call ----
+
+/// The built-in constructors read their parenthesised operand with the
+/// argument-list parser an ordinary call uses: a newline after `(`, a
+/// trailing comma and a newline before `)` are insignificant there too.
+#[test]
+fn result_option_ctors_accept_a_multi_line_operand_like_a_call() {
+    for (src, ctor) in [
+        ("ok(\n  1,\n)", "ok"),
+        ("err(\n  \"x\"\n)", "err"),
+        ("some(\n\n  1\n)", "some"),
+    ] {
+        let e = parse_expr(src);
+        let operand = match &e.kind {
+            ExprKind::Ok { expr } | ExprKind::Err { expr } | ExprKind::Some { expr } => expr,
+            other => panic!("{ctor}: expected the {ctor} constructor, got {other:?}"),
+        };
+        assert!(
+            matches!(operand.kind, ExprKind::Int { .. } | ExprKind::String { .. }),
+            "{ctor}: operand must be the literal, got {:?}", operand.kind
+        );
+    }
+}
+
+#[test]
+fn result_option_ctors_still_take_exactly_one_operand() {
+    for src in ["fn f() -> Result[Int, String] = ok()", "fn f() -> Result[Int, String] = ok(1, 2)"] {
+        let tokens = Lexer::tokenize(src);
+        let mut parser = Parser::new(tokens);
+        let parsed = parser.parse();
+        assert!(
+            parsed.is_err() || !parser.errors.is_empty(),
+            "`{src}` must be rejected: ok() takes exactly one argument"
+        );
+    }
+}
