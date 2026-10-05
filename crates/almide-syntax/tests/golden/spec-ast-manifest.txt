@@ -1,4 +1,4 @@
-# oracle: almide 0.67.0 (dev) at a7bde5342 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.67.0 (dev) at 2714f7ccd — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -651,6 +651,7 @@ f64d64e0b5c6f9fadc48dc6912f95ec3b6efde8e3f42265395465d238d32514a	spec/stdlib/lis
 00dc92295fda1324fa0f95efe5080309f64b52835c2f4c778043c777b91ddee2	spec/stdlib/list_mutable_test.almd
 a7099495650c89f4c5791dc2688f63e5d9791a6083cf87a38e94d815d1f4dda8	spec/stdlib/list_new_test.almd
 805a9ba6045b44d151b82ef6b17378d72dd072269902c548e42a06b4be3fc12f	spec/stdlib/list_parallel_test.almd
+f27fdfbef19700511f25606775fe379c14b34faa76da46f0fe27fe6323b16bcc	spec/stdlib/list_range_source_borrow_test.almd
 954655dbb9b72e7b26243345fd549a63f7c70cb7b0813a314f878a9cdc986b78	spec/stdlib/list_semantics_manifest_test.almd
 1b483713bd727f7b332c66ead67200e2474a6f11a704e122cb8f17c684471048	spec/stdlib/list_tier3_test.almd
 b3fe26db783f56de07717c546cb71d8e57a3e6c27d70d7a722fc7be09367ea14	spec/stdlib/map_expansion_test.almd
