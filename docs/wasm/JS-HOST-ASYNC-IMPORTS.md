@@ -1,7 +1,10 @@
-# Async JS imports on `--host js` (JSPI, #3353, #3371)
+# Async JS imports on `--host js` (JSPI, #3353, #3371, #3383)
 
-Status: implemented on the JS host only (`src/cli/js_host_async.rs`). The
-module bytes do not change. Only the generated `<mod>.js` / `<mod>.d.ts` do.
+Status: implemented on the JS host only (`src/cli/js_host_async.rs`,
+`src/cli/js_host_fan.rs`). The module bytes do not change, except for a
+`fan` whose elements each make one async-hook call (choice 7, #3383): that
+fan imports the overlap protocol. Otherwise only the generated `<mod>.js` /
+`<mod>.d.ts` change.
 
 ## The problem
 
@@ -42,7 +45,9 @@ fn kv_get(key: String) -> String
   module is a parse error. Its hint names the accepted spelling.
   `almide fmt` writes `returns: promise`.
 - Without `--host js` the marker changes nothing in the module. The module
-  bytes are the same either way; only the generated glue reads it.
+  bytes are the same either way. With `--host js` it changes the module only
+  where a `fan` overlaps calls of the hook (choice 7); everywhere else only
+  the generated glue reads it.
 - rc1 (v0.67.0-rc1) shipped the marker as a provisional build flag,
   `--async-import NAME`. It was removed before the final release. A
   build-time override can come back if a program ever has to bind the same
@@ -139,6 +144,47 @@ almide: hooks.js.kv_get returned a Promise; mark its @extern with returns: promi
   wrappers (#3352, #3354). `memoryBytes()` stays flat over 1,000 async rounds
   in the fixture.
 
+**7. Fan overlap** (#3383, ADR-0024 amendment of 2026-10-05).
+
+- A `returns: promise` hook is a request to a system outside the process. The
+  order in which that system receives the requests is the environment's ω
+  (ADR-0024 D2/D3), so a `fan` over such hooks may overlap their waits. JSPI
+  is the substrate on the JS host (D8).
+- Lowering one call per element to its own Suspending call would wait once
+  per element. Instead the glue serves three imports of the module
+  `almide:fan` for each async hook some fan reaches:
+  - `start:NAME(args) -> slot` is a plain import. It decodes the arguments,
+    calls the hook and keeps its Promise in a slot.
+  - `wait()` is the only Suspending import. It awaits every started slot and
+    settles each as its value or its rejection.
+  - `take:NAME(slot) -> value` is a plain import. It returns the settled
+    value, encoded like the hook's own return through the same helpers. A
+    rejection is the err of a fallible extern and abandons the instance for
+    an infallible one, exactly as a direct call does (#3356).
+- The module starts every element in arm order, suspends once, and takes the
+  values in arm order. Every element runs (D1), and the first err in arm
+  order is the result (D6), so the observation is the sequential lowering's.
+  `fan.any` takes until its first ok. Its untaken slots were already awaited
+  by `wait`, and the next batch's first `start` drops them unread.
+- The emitter (`crates/almide-wasm/src/fan_js_async.rs`) engages only when
+  the module is built with `--host js` and every element is one call of a
+  `returns: promise` extern whose arguments are variables or literals and
+  whose value is a scalar or a fallible extern's Result over one. That covers
+  three shapes: `fan.map(xs, (x) => hook(x))` for a fallible hook or
+  `(x) => ok(hook(x))` for an infallible one, `fan.any` over the same, and a
+  `fan { hook(a); other(b) }` block whose every arm is such a call.
+- Everything else stays sequential, one Suspending call per element: an
+  element that computes its argument, calls a sync hook, or makes several
+  calls one after another. Several calls need the element to suspend between
+  them (ADR-0024 D8 proper).
+- Export inference is unchanged. An export whose call graph reaches `wait` is
+  entered through `promising` and serialised like any other async export.
+- **Module bytes.** A program with such a fan has different module bytes
+  under `--host js`: three extra imports and no direct call of the hook. Every
+  other program, and every build without `--host js`, is byte-identical to
+  what it was. `ALMIDE_FAN_SEQUENTIAL=1` (ADR-0024 D7) builds the sequential
+  lowering.
+
 ## Not covered
 
 - **A hook that calls back into the module.** A synchronous export called from
@@ -164,6 +210,14 @@ async hooks are marked `returns: promise`. The fixture checks:
 - the refusal without JSPI.
 
 `hook_errors_async.almd` is the rejecting twin of `hook_errors.almd`.
+`fan_async_overlap.almd` covers the fan overlap (7). The gate builds it twice,
+once overlapped and once with `ALMIDE_FAN_SEQUENTIAL=1`, and both runs must
+print the same `.expected`: values in arm order, a rejection in a middle arm,
+`fan.any`, a fan block, flat memory, and an abandoning infallible hook. The
+host asserts that the overlapped run has every hook in flight at once and
+takes about the slowest hook, and that the sequential run has one in flight
+and takes the sum. On Node 24.21, eight hooks of 10–80 ms took 82 ms
+overlapped and 369 ms sequential.
 `unmarked_promise.almd` covers the refusal in 5a, for an infallible, a fallible
 and a `Unit` hook. It marks nothing, so it needs no JSPI.
 
