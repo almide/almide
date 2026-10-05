@@ -706,8 +706,10 @@ impl Emitter<'_> {
     /// value moves (`im`), a borrowed Var arm took the normalizing +1 and
     /// moves (`am`), a borrowed non-Var declines. Mirrors `lower_if_arms` /
     /// `lower_arm_body`, which call it exactly where they settle the credit.
+    /// An arm that already left (a `panic`'s abort) settles nothing: its
+    /// settling instructions are unreachable.
     pub(crate) fn witness_arm_value(&mut self, e: &almide_ir::IrExpr) {
-        if self.witness.is_some() {
+        if self.witness.as_ref().is_some_and(|w| !w.dead()) {
             self.witness_share_or_move(e, "arm-value:borrowed-temp");
         }
     }
