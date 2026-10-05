@@ -10,10 +10,10 @@ fn only_plain(xs: List[Item]) -> Int = match xs {
   _ => -1,
 }
 
-fn pair_names(xs: List[Item]) -> String = match xs {
-  [Named(a), Named(b)] => a + b,
-  [Named(a), Plain(n)] => a + int.to_string(n),
-  _ => "?",
+fn pair_score(xs: List[Item]) -> Int = match xs {
+  [Named(_), Named(_)] => 2,
+  [Named(_), Plain(n)] => 100 + n,
+  _ => -1,
 }
 
 fn main() -> Unit = {
@@ -21,7 +21,7 @@ fn main() -> Unit = {
   println(int.to_string(only_plain([Named("x")])))
   println(int.to_string(only_plain([Plain(1), Plain(2)])))
   println(int.to_string(only_plain([])))
-  println(pair_names([Named("a"), Named("b")]))
-  println(pair_names([Named("a"), Plain(3)]))
-  println(pair_names([Plain(3), Named("a")]))
+  println(int.to_string(pair_score([Named("ab"), Named("cde")])))
+  println(int.to_string(pair_score([Named("a"), Plain(3)])))
+  println(int.to_string(pair_score([Plain(3), Named("a")])))
 }
