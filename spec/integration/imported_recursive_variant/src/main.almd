@@ -1,0 +1,35 @@
+// #3422: an entry program matching recursive variants imported from `tree`.
+import self.tree
+import self.tree.{T, Leaf, Node, R, RLeaf, Many}
+
+fn leftmost(t: T) -> String = {
+  var cur = t
+  var going = true
+  var out = ""
+  while going {
+    match cur {
+      Node(l, _) => {
+        cur = l
+      },
+      Leaf(s) => {
+        out = s
+        going = false
+      },
+    }
+  }
+  out
+}
+
+fn sum(r: R) -> Int = match r {
+  RLeaf(n) => n,
+  Many(xs) => xs |> list.fold(0, (a, x) => a + sum(x)),
+}
+
+effect fn main() -> Unit = {
+  let t = tree.Node(Node(Leaf("a"), Leaf("b")), Leaf("c"))
+  let r = Many([
+    RLeaf(1),
+    Many([RLeaf(2)])
+  ])
+  println("${leftmost(t)} ${tree.depth(t)} ${sum(r)}")
+}
