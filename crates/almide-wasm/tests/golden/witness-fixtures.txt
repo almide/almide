@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 845 of 902
+# certified: 851 of 902
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -175,6 +175,8 @@ spec/wasm_cross/fallible_hof_release_matrix.almd
 spec/wasm_cross/fallible_tuple_value_tail.almd
 spec/wasm_cross/fan_any_allfail.almd
 spec/wasm_cross/fan_any_early_winner.almd
+spec/wasm_cross/fan_arm_unwrap_or.almd
+spec/wasm_cross/fan_block_err_list_order.almd
 spec/wasm_cross/fan_deterministic.almd
 spec/wasm_cross/fan_effect_mapper.almd
 spec/wasm_cross/fan_effect_mapper_capability.almd
@@ -188,6 +190,8 @@ spec/wasm_cross/fan_prefetch_fs.almd
 spec/wasm_cross/fan_pure_thunks.almd
 spec/wasm_cross/fan_race_mapper.almd
 spec/wasm_cross/fan_settle_tuple.almd
+spec/wasm_cross/fan_sibling_trap.almd
+spec/wasm_cross/fan_trap_waits_for_elements_below.almd
 spec/wasm_cross/fan_var_thunk_list.almd
 spec/wasm_cross/filter_map_conditional_arm.almd
 spec/wasm_cross/flat_map_aliased_field.almd
@@ -242,6 +246,7 @@ spec/wasm_cross/fuel_zero_budget_inline.almd
 spec/wasm_cross/fusion_two_aborting_stages_staged.almd
 spec/wasm_cross/fuzz_found_nested_interp_capture.almd
 spec/wasm_cross/general_recursion_tail.almd
+spec/wasm_cross/generated_binder_hygiene.almd
 spec/wasm_cross/generic_chain_unwrap_or.almd
 spec/wasm_cross/generic_concat.almd
 spec/wasm_cross/generic_fn_in_inferred_lambda.almd
@@ -360,6 +365,7 @@ spec/wasm_cross/koka_reuse1_unzip.almd
 spec/wasm_cross/koka_reuse4_map_rebuild.almd
 spec/wasm_cross/koka_unicode_combining.almd
 spec/wasm_cross/leak_free_propagating_literal_operand.almd
+spec/wasm_cross/leak_free_result_option_carriers.almd
 spec/wasm_cross/let_unwrap_propagation.almd
 spec/wasm_cross/let_wildcard_discard.almd
 spec/wasm_cross/letbound_variant_match.almd
