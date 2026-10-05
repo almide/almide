@@ -43,8 +43,7 @@ pub fn include_native_callback_modules(
         return Ok(HashMap::new());
     }
     let native = native_sources(&root);
-    let pkg_ident = almide_base::names::module_ident(&pkg);
-    let Some(major) = callback_major(&native, &pkg_ident) else { return Ok(HashMap::new()) };
+    let Some(major) = callback_major(&native, &pkg) else { return Ok(HashMap::new()) };
     let prefix = format!("{pkg}_v{major}");
     let src_dir = root.join("src");
 
@@ -64,8 +63,11 @@ pub fn include_native_callback_modules(
     }
     // Every sub-module the native code names.
     for segs in self_module_paths(&src_dir) {
-        let ident = almide_base::names::module_ident(&format!("{prefix}.{}", segs.join(".")));
-        if !native.contains(&format!("almide_rt_{ident}_")) {
+        let path = format!("{prefix}.{}", segs.join("."));
+        let ident = almide_base::names::module_ident(&path);
+        // The pre-#3338 spelling too, kept as a deprecated alias (#3425).
+        let legacy = almide_base::names::legacy_module_ident(&path);
+        if !native.contains(&format!("almide_rt_{ident}_")) && !native.contains(&format!("almide_rt_{legacy}_")) {
             continue;
         }
         let mod_path: Vec<crate::intern::Sym> = segs.iter().map(|s| crate::intern::sym(s)).collect();
@@ -91,14 +93,21 @@ fn native_sources(root: &Path) -> String {
 }
 
 /// The major `N` of the first `almide_rt_<pkg>_0v<N>_` (module path
-/// `<pkg>_v<N>`) the native code names.
-fn callback_major(native: &str, pkg_ident: &str) -> Option<u64> {
-    let needle = format!("almide_rt_{pkg_ident}_0v");
-    native.match_indices(&needle).find_map(|(at, _)| {
-        let rest = &native[at + needle.len()..];
-        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-        let after = rest[digits.len()..].chars().next();
-        (!digits.is_empty() && after == Some('_')).then(|| digits.parse().ok()).flatten()
+/// `<pkg>_v<N>`) the native code names — or of its pre-#3338 spelling
+/// `almide_rt_<pkg>_v<N>_`, a deprecated alias (#3425).
+fn callback_major(native: &str, pkg: &str) -> Option<u64> {
+    let versioned = format!("{pkg}_v");
+    let needles = [
+        format!("almide_rt_{}_0v", almide_base::names::module_ident(pkg)),
+        format!("almide_rt_{}", almide_base::names::legacy_module_ident(&versioned)),
+    ];
+    needles.iter().find_map(|needle| {
+        native.match_indices(needle.as_str()).find_map(|(at, _)| {
+            let rest = &native[at + needle.len()..];
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            let after = rest[digits.len()..].chars().next();
+            (!digits.is_empty() && after == Some('_')).then(|| digits.parse().ok()).flatten()
+        })
     })
 }
 
@@ -166,6 +175,13 @@ mod tests {
     fn the_major_is_read_from_the_callback_name() {
         assert_eq!(callback_major("crate::almide_rt_tf_0v0_entry(x)", "tf"), Some(0));
         assert_eq!(callback_major("crate::almide_rt_tf_0v12_1calc_double(x)", "tf"), Some(12));
+    }
+
+    #[test]
+    fn the_major_is_read_from_the_pre_3338_spelling_too() {
+        assert_eq!(callback_major("crate::almide_rt_tf_v0_entry(x)", "tf"), Some(0));
+        assert_eq!(callback_major("crate::almide_rt_tf_v3_calc_double(x)", "tf"), Some(3));
+        assert_eq!(callback_major("crate::almide_rt_my_pkg_v1_go(x)", "my_pkg"), Some(1));
     }
 
     #[test]
