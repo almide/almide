@@ -182,6 +182,7 @@
 603	578	7243	603	spec/wasm_cross/fallible_hof_matrix_containers.almd
 606	581	6233	606	spec/wasm_cross/fallible_hof_matrix_list.almd
 163	113	2308	163	spec/wasm_cross/fallible_hof_option_effect_callback.almd
+109	87	1382	109	spec/wasm_cross/fallible_hof_recursive_callee.almd
 523	497	6660	523	spec/wasm_cross/fallible_hof_release_matrix.almd
 13	0	168	13	spec/wasm_cross/fallible_tuple_value_tail.almd
 5	3	101	3	spec/wasm_cross/fan_any_allfail.almd
@@ -606,6 +607,7 @@
 11	0	96	11	spec/wasm_cross/option_result_ctors.almd
 40	28	368	40	spec/wasm_cross/option_tuple_payload_matrix.almd
 20	10	177	20	spec/wasm_cross/option_unwrap_or_else_heap.almd
+29	20	172	29	spec/wasm_cross/optional_chain_heap_field.almd
 3	0	28	3	spec/wasm_cross/optional_chain_scalar.almd
 2	1	24	2	spec/wasm_cross/or_pattern.almd
 2	1	16	2	spec/wasm_cross/or_pattern_guarded_nullary.almd

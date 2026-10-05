@@ -1,0 +1,49 @@
+// The module half of #3392: fallible lambdas whose bodies call this module's
+// own fns (`count`) by their bare names, reached from the entry module.
+type T = | V(Int) | C(String) | A(T, T)
+
+type Env = { syms: Map[String, Int] }
+
+fn spine(t: T) -> (T, List[T]) = match t {
+  A(f, a) => {
+    let (h, args) = spine(f)
+    (h, args + [a])
+  },
+  other => (other, []),
+}
+
+fn head_name(h: T) -> String = match h {
+  C(c) => c,
+  _ => "",
+}
+
+fn var_index(p: T) -> Int = match p {
+  V(k) => k,
+  _ => -1,
+}
+
+fn count(env: Env, p: T, n: Int) -> Int! = {
+  let k = var_index(p)
+  guard k < n else err("bound")
+  if k >= 0 then ok(1)
+  else {
+    let (h, args) = spine(p)
+    let c = head_name(h)
+    guard map.contains(env.syms, c) else err("not a symbol")
+    let nested = args |> list.map((a) => count(env, a, n)!)!
+    ok(list.sum(nested))
+  }
+}
+
+fn total(env: Env, ps: List[T], n: Int) -> Int! = {
+  let all = ps |> list.map((p) => count(env, p, n)!)!
+  ok(list.sum(all))
+}
+
+fn spread(env: Env, ps: List[T], n: Int) -> Int! = {
+  let xs = ps |> list.flat_map((p) => [
+    count(env, p, n)!,
+    0
+  ])!
+  ok(list.len(xs) + list.sum(xs))
+}
