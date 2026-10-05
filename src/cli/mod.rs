@@ -30,6 +30,7 @@ mod survive_legs;
 mod docs_gen;
 mod cargo_build;
 mod native_target;
+mod native_legacy_aliases;
 mod js_host;
 mod wasm_debug;
 
