@@ -142,6 +142,7 @@ impl Emitter<'_> {
                     em.io_raw(crate::fs_meta::OP_STDERR_RAW)
                 })?;
                 self.f.instructions().i32_const(1).call(F_EXIT_IMPORT).unreachable();
+                self.witness_panic(&line);
                 Ok(None)
             }
             // codec_decode's ONE layout-reading helper gets a NATIVE

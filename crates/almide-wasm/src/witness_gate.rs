@@ -529,11 +529,11 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
             {
                 return Some(Why::Deep("call:host-splice".into()));
             }
-            // `__is_null` reads the Value tag of its lowered argument, and
-            // `panic` concatenates its message into a line it never binds:
-            // no argument hook fires for either, so only an RC-free
-            // argument is honest.
-            if matches!(name.as_str(), "__is_null" | "panic") && !args.iter().all(rc_free) {
+            // `__is_null` reads the Value tag of its lowered argument: no
+            // argument hook fires, so only an RC-free argument is honest.
+            // `panic` concatenates its message into a line and aborts: an
+            // owned message is a block the abort discharges (`witness_panic`).
+            if name.as_str() == "__is_null" && !args.iter().all(rc_free) {
                 return Some(Why::Deep(format!("call:{name}-arg")));
             }
         }

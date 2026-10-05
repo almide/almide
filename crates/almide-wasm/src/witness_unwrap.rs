@@ -199,6 +199,22 @@ impl Emitter<'_> {
         }
     }
 
+    /// #2758: `panic(msg)` (calls.rs), after the exit: the line `"PANIC: " +
+    /// msg` was a parked temporary of the arm scope (`id`, the argument
+    /// hook), and the process aborts — the path ends in the checker's abort
+    /// terminal. An OWNED message is an operand the concat only reads: a
+    /// block born here, discharged by the abort with everything else held. A
+    /// string literal is a pool static: no block.
+    pub(crate) fn witness_panic(&mut self, line: &almide_ir::IrExpr) {
+        let almide_ir::IrExprKind::BinOp { right, .. } = &line.kind else { return };
+        let owned = self.rc_owned_result(right) && !matches!(right.kind, almide_ir::IrExprKind::LitStr { .. });
+        let Some(w) = self.witness.as_mut() else { return };
+        if owned {
+            w.temp_born();
+        }
+        w.abort_end();
+    }
+
     /// #2758: a bare `err(e)` RAISED from an effect body (data.rs
     /// `lower_err_raise`), right before its exit plan: the exit's releases
     /// are recorded like a `!` propagation's.
