@@ -430,7 +430,10 @@ fn render_pattern_record(ctx: &RenderContext, name: &str, fields: &[almide_ir::I
         .map(|f| match &f.pattern {
             Some(p) => {
                 let fty = case_field_ty(ctx, subject, name, f.name.as_str());
-                format!("{}: {}", ctx.field_ident(f.name.as_str()), render_pattern_hinted(ctx, p, fty.as_ref()))
+                let field = ctx.field_ident(f.name.as_str());
+                let inner = render_pattern_hinted(ctx, p, fty.as_ref());
+                // `name: name` is rustc's non_shorthand_field_patterns warning.
+                if inner == field { field } else { format!("{}: {}", field, inner) }
             }
             None => ctx.field_ident(f.name.as_str()),
         })
