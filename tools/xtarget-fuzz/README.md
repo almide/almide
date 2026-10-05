@@ -228,8 +228,10 @@ resource-limit skips (C-196 stack, C-197 wasm32 memory), so a wasm OOM is
 still a skip rather than a bogus miscompile.
 
 The resource-limit skip (`resource_class` in `ladder.rs`) reads each leg's
-own abort signature — `call stack exhausted` / `Error: out of memory` on the
-wasm leg, `stack overflow` / `memory allocation of … bytes failed` on native
+own abort signature — `call stack exhausted` (stock wasmtime's trap) /
+`Error: out of memory` on the wasm leg, `stack overflow` (C-196's `Error:
+stack overflow`, or Rust's own message on a thread that never registered) /
+`memory allocation of … bytes failed` on native
 — and discards the run only when everything the limited leg printed before
 dying is a prefix of its sibling's stdout. The sibling's fate is not part of
 the question (#2382): "wasm OOMed at the first allocation while native ran on
