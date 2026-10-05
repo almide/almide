@@ -697,6 +697,7 @@ evidence  = [
   { path = "spec/wasm_cross/leak_free_result_option_carriers.almd", class = "fixture" },
   { path = "spec/wasm_cross/leak_free_spread_produced_base.almd", class = "fixture" },
   { path = "spec/wasm_cross/leak_free_map_walk_exit.almd", class = "fixture" },
+  { path = "spec/wasm_cross/leak_free_list_rest_exit.almd", class = "fixture" },
 ]
 
 # ── FILESYSTEM (WASI PREOPEN RESOLUTION) ─────────────────────────────
