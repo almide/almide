@@ -493,6 +493,7 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
         utf8_helpers::emit_bytes_to_string_helper(*inv_pre, *inv_mid, *inc_pre)
     }
     _ => match map_index::helper_body(h)
+        .or_else(|| crate::fan::js_async::helper_body(h))
         .or_else(|| runtime_alloc::helper_body(h, work))
         .or_else(|| runtime_line::helper_body(h, work))
     {
@@ -516,6 +517,7 @@ pub(crate) fn resolve_extras(
     let helper_snapshot: Vec<Helper> = work.helpers.borrow().clone();
     for (hpos, h) in helper_snapshot.iter().enumerate() {
         let params = match map_index::helper_params(h)
+            .or_else(|| crate::fan::js_async::helper_params(h))
             .or_else(|| runtime_alloc::helper_params(h))
             .or_else(|| runtime_line::helper_params(h))
         {
@@ -542,7 +544,7 @@ pub(crate) fn resolve_extras(
         let ret = match h {
             Helper::FastExp | Helper::GeluScalar { .. } | Helper::Q10Val => Some(ValType::F64),
             _ if runtime_line::helper_is_void(h) => None,
-            _ => runtime_alloc::helper_result(h),
+            _ => crate::fan::js_async::helper_result(h).unwrap_or_else(|| runtime_alloc::helper_result(h)),
         };
         let ti = work.itype(params, ret);
         let f = helper_body(h, work, helper_snapshot.as_slice(), hpos);
