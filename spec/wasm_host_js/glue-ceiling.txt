@@ -30,3 +30,5 @@ unmarked_promise 12750
 # start/take pair per hook a fan reaches, the Suspending wait, and the slot
 # table runtime (fanStart / fanWait / fanTake, ~900 B).
 fan_async_overlap 17600
+# #3420: one Int-only hook reading guest memory at a data_ptr address.
+extern_data_ptr_lifetime 13100
