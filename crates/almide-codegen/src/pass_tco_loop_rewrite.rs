@@ -508,6 +508,7 @@ fn rewrite_tail_expr(expr: IrExpr, f: &TailFrame<'_>) -> IrExpr {
         // non-terminal region — owned-param reads there clone.
         IrExprKind::Block { stmts, expr: Some(tail) } => {
             let new_stmts = stmts.into_iter().map(|s| wrap_owned_reads_stmt(s, owned_params)).collect();
+            let new_stmts = move_statement_sources(new_stmts, &tail, f);
             let new_tail = rewrite_tail_expr(*tail, f);
             IrExpr {
                 kind: IrExprKind::Block {
@@ -588,29 +589,29 @@ fn strip_borrow(expr: IrExpr) -> IrExpr {
 /// iteration) and whose reads across the whole block total exactly ONE, that
 /// read being a bare consuming Var. A borrow, an access-object, a lambda
 /// capture, or any second read disqualifies it (no sibling E0505, no order
-/// hazard); every other consuming read clones.
+/// hazard); every other consuming read clones. The same single read as a
+/// range op's borrowed source (#3398) is returned in the second set: that
+/// borrow becomes the move.
 fn movable_accumulators(
     args: &[Option<IrExpr>],
     params: &[(VarId, Ty)],
     identity_carry: &[bool],
     owned_params: &HashSet<VarId>,
-) -> HashSet<VarId> {
+) -> (HashSet<VarId>, HashSet<VarId>) {
     let mut census: HashMap<VarId, OwnedReadCensus> = HashMap::new();
     for arg in args.iter().flatten() {
         census_owned_reads(arg, owned_params, false, &mut census);
     }
-    let movable = |p_var: &VarId| {
-        census
-            .get(p_var)
-            .is_some_and(|c| c.bare == 1 && c.other == 0 && c.lambda == 0)
-    };
-    params
+    let reassigned = params
         .iter()
         .enumerate()
         .filter(|(j, _)| !identity_carry.get(*j).copied().unwrap_or(false))
         .map(|(_, (p_var, _))| *p_var)
-        .filter(|p_var| owned_params.contains(p_var) && movable(p_var))
-        .collect()
+        .filter(|p_var| owned_params.contains(p_var));
+    let read_once = |pred: fn(&OwnedReadCensus) -> bool| {
+        reassigned.clone().filter(|p| census.get(p).is_some_and(pred)).collect::<HashSet<VarId>>()
+    };
+    (read_once(OwnedReadCensus::only_bare), read_once(OwnedReadCensus::only_source))
 }
 
 fn emit_tail_call_replacement(args: Vec<IrExpr>, f: &TailFrame<'_>) -> IrExpr {
@@ -642,13 +643,13 @@ fn emit_tail_call_replacement(args: Vec<IrExpr>, f: &TailFrame<'_>) -> IrExpr {
         Some(if borrowed_params.contains(&i) { arg } else { strip_borrow(arg) })
     }).collect();
 
-    let moved = movable_accumulators(&args, params, &identity_carry, owned_params);
+    let (moved, moved_sources) = movable_accumulators(&args, params, &identity_carry, owned_params);
 
     // Bind temporaries to argument expressions.
     for (i, arg) in args.into_iter().enumerate() {
         let Some(arg) = arg else { continue };
         let (tmp_var, tmp_ty) = &temps[i];
-        let value = wrap_owned_reads_except(arg, owned_params, &moved);
+        let value = move_either_way_sources(wrap_owned_reads_except(arg, owned_params, &moved), &moved_sources);
         stmts.push(IrStmt {
             kind: IrStmtKind::Bind {
                 var: *tmp_var,
@@ -726,10 +727,11 @@ fn emit_base_case(expr: IrExpr, result_var: VarId, dec_params: &[VarId], owned_p
     // (`__tco_result = acc` was previously an O(n) parting clone.)
     let mut census: HashMap<VarId, OwnedReadCensus> = HashMap::new();
     census_owned_reads(&expr, owned_params, false, &mut census);
-    let moved: HashSet<VarId> = owned_params.iter().copied().filter(|p| {
-        census.get(p).is_some_and(|c| c.bare == 1 && c.other == 0 && c.lambda == 0)
-    }).collect();
-    let expr = wrap_owned_reads_except(expr, owned_params, &moved);
+    let moved_by = |pred: fn(&OwnedReadCensus) -> bool| -> HashSet<VarId> {
+        owned_params.iter().copied().filter(|p| census.get(p).is_some_and(pred)).collect()
+    };
+    let expr = wrap_owned_reads_except(expr, owned_params, &moved_by(OwnedReadCensus::only_bare));
+    let expr = move_either_way_sources(expr, &moved_by(OwnedReadCensus::only_source));
 
     let assign = IrStmt {
         kind: IrStmtKind::Assign {
