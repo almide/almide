@@ -1,0 +1,52 @@
+// @contract: C-291
+// #3391: `o?.f` over a HEAP record field (`String`, `List[String]`) is
+// `option.map(o, (v) => v.f)` on both targets. v0.64.0 walled the structural
+// leg on `expr:OptionalChain` and the incumbent refused the same program, so
+// it was E082 on wasm; the structural leg now rewrites the chain into the one
+// option.map lowering (front_desugar, #2747). The cells: a let-bound chain
+// compared with `== some(..)` (the issue's shape), a chain on a call subject
+// consumed by `??`, a list field through `??` into a call argument, and a
+// chain on a record field holding an Option — each on the some path and the
+// none path. Each heap `??` sits in a helper with a scalar result, so the
+// incumbent MIR brick lowers every fn too.
+type Entry = { kind: String, n: Int, tags: List[String] }
+
+type Slot = { inner: Entry? }
+
+fn is_symbol(m: Map[String, Entry], k: String) -> Bool = {
+  let e = map.get(m, k)
+  e?.kind == some("symbol")
+}
+
+fn kind_len(m: Map[String, Entry], k: String) -> Int = string.len(map.get(m, k)?.kind ?? "missing")
+
+fn tag_count(m: Map[String, Entry], k: String) -> Int = list.len(map.get(m, k)?.tags ?? [])
+
+fn has_kind(o: Entry?, want: String) -> Bool = o?.kind == some(want)
+
+fn kind_or_is(m: Map[String, Entry], k: String, want: String) -> Bool = (map.get(m, k)?.kind ?? "missing") == want
+
+fn slot_kind_is(s: Slot, want: String) -> Bool = (s.inner?.kind ?? "?") == want
+
+fn yes_no(b: Bool) -> String = if b then "yes" else "no"
+
+effect fn main() -> Unit = {
+  var m: Map[String, Entry] = map.new()
+  m = map.set(m, "a", Entry { kind: "symbol", n: 1, tags: ["x", "y"] })
+  m = map.set(m, "b", Entry { kind: "var", n: 2, tags: [] })
+  println(yes_no(is_symbol(m, "a")))
+  println(yes_no(is_symbol(m, "b")))
+  println(yes_no(is_symbol(m, "z")))
+  println(yes_no(kind_or_is(m, "b", "var")))
+  println(yes_no(kind_or_is(m, "z", "missing")))
+  println(int.to_string(kind_len(m, "b")))
+  println(int.to_string(tag_count(m, "a")))
+  println(int.to_string(tag_count(m, "z")))
+  println(yes_no(has_kind(map.get(m, "a"), "symbol")))
+  println(yes_no(has_kind(none, "symbol")))
+  let s = Slot { inner: map.get(m, "b") }
+  println(yes_no(slot_kind_is(s, "var")))
+  println(int.to_string(s.inner?.n ?? -1))
+  let empty = Slot { inner: none }
+  println(yes_no(slot_kind_is(empty, "?")))
+}
