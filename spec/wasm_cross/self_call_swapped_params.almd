@@ -43,8 +43,9 @@ fn pairs_rev(a: E, b: E) -> String = match a {
 }
 
 // A three-param rotation.
-fn rot(a: E, b: E, c: E, n: Int) -> String = if n == 0 then render(a) + "," + label(b) + "," + label(c)
-else render(a) + ";" + rot(b, c, a, n - 1)
+fn rot(a: E, b: E, c: E, n: Int) -> String =
+  if n == 0 then render(a) + "," + label(b) + "," + label(c)
+  else render(a) + ";" + rot(b, c, a, n - 1)
 
 // A param moved into a constructor.
 fn wrap(a: E, b: E, n: Int) -> E = if n == 0 then Node("w", [a])
