@@ -114,20 +114,25 @@ impl ReferenceOracle for InterpOracle {
             RunStatus::Aborted
             | RunStatus::Exited(_)
             | RunStatus::Unsupported(_)
-            | RunStatus::FuelExhausted => None,
+            | RunStatus::FuelExhausted
+            // C-196 at the interpreter's own threshold: not a clean run.
+            | RunStatus::StackExhausted => None,
         }
     }
 
     fn exhausts_fuel(&self, source: &str) -> bool {
         use almide::interp::RunStatus;
 
-        // ONLY `FuelExhausted`. `Unsupported` means the interpreter lacks a
+        // ONLY fuel or stack exhaustion. `Unsupported` means the interpreter lacks a
         // feature — it says nothing about whether the program terminates —
         // and treating it as non-termination would suppress real findings on
         // every shape the interpreter has not caught up to yet.
         matches!(
             catch_unwind(AssertUnwindSafe(|| self.run_inner(source))).ok().flatten(),
-            Some(out) if matches!(out.status, RunStatus::FuelExhausted)
+            // `StackExhausted` keeps the answer the depth bound gave when it
+            // was folded into fuel: this predicate only SUPPRESSES (a skip),
+            // so splitting the two must not turn a skip into a vote.
+            Some(out) if matches!(out.status, RunStatus::FuelExhausted | RunStatus::StackExhausted)
         )
     }
 }

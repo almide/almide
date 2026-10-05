@@ -72,7 +72,13 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
     // FuelExhausted (-3) is the interpreter's second distinguished outcome
     // ("NOT a hang or panic"): the one huge-range fixture hits it, and
     // effect_tco_err_rewrap pins a TCO the interpreter does not perform on
-    // the err-rewrap path, so it spins to fuel exhaustion there.
+    // the err-rewrap path, so it recurses past the interpreter's call-stack
+    // threshold there. That depth bound is now its own outcome,
+    // `StackExhausted` (C-196's defined abort at the interpreter's declared
+    // threshold, exit 1): it is `identical` when its stdout and exit match the
+    // oracle row (a fixture whose every leg overflows), and otherwise the
+    // one-sided C-196 resource class — counted HERE, under the same ceiling,
+    // as tools/xtarget-fuzz's ladder `resource_class` treats it.
     let max_fuel = almide_corpus::ratchet_ceiling(&root, BASELINE, "fuel_exhausted");
 
     // ALMIDE_CORPUS_SHARD (#2381). The per-fixture verdicts (a mismatch, a
@@ -135,6 +141,17 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
             }
             Ok(out) if out.exit == -3 => {
                 n_fuel += 1;
+            }
+            Ok(out) if out.stack_exhausted => {
+                // C-196: the interpreter's stack ran out at ITS threshold. A
+                // vote only where it reproduces the oracle row; a one-sided
+                // exhaustion (the backends recursed deeper, or TCO'd) is the
+                // resource class, never a mismatch and never a pass.
+                if normalized_hash(&out.stdout) == *want_hash && out.exit == *want_exit {
+                    n_ok += 1;
+                } else {
+                    n_fuel += 1;
+                }
             }
             Ok(out) => {
                 if normalized_hash(&out.stdout) == *want_hash && out.exit == *want_exit {

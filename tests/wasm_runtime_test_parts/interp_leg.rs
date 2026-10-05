@@ -170,7 +170,13 @@ fn run_interp_capture_with_fallbacks(source: &str) -> (InterpLeg, Vec<(String, S
         RunStatus::Unsupported(what) => {
             InterpLeg::Skip(format!("out-of-interp-scope capability: {what}"))
         }
-        RunStatus::FuelExhausted => {
+        // `StackExhausted` is C-196's defined abort at the INTERPRETER's
+        // declared threshold (MAX_DEPTH), and the thresholds are per target:
+        // where the backends recurse deeper (or TCO) and finish, an exit-1
+        // vote would raise a false BOTH-BACKENDS-WRONG banner. This leg cannot
+        // see the other legs, so it abstains under the same reason the old
+        // depth-as-fuel outcome gave (the abstain ledger and classes carry it).
+        RunStatus::FuelExhausted | RunStatus::StackExhausted => {
             InterpLeg::Skip("interp fuel/recursion budget exhausted".to_string())
         }
     };
