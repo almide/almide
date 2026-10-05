@@ -610,6 +610,7 @@
 65792	spec/wasm_cross/option_heap_eq.almd
 65808	spec/wasm_cross/option_match_heap_payload.almd
 65792	spec/wasm_cross/option_none_unwrap_term.almd
+66048	spec/wasm_cross/option_payload_recursive_variant.almd
 66064	spec/wasm_cross/option_result.almd
 66000	spec/wasm_cross/option_result_ctors.almd
 66400	spec/wasm_cross/option_tuple_payload_matrix.almd
@@ -858,6 +859,7 @@
 65744	spec/wasm_cross/top_let_div_eager.almd
 65744	spec/wasm_cross/top_let_div_used.almd
 65856	spec/wasm_cross/top_let_eager_through_call.almd
+65808	spec/wasm_cross/top_let_fn_value_bytes_param.almd
 66128	spec/wasm_cross/top_let_fn_value_closure_param.almd
 66288	spec/wasm_cross/top_let_rc_value.almd
 66432	spec/wasm_cross/top_let_stored_in_container.almd
