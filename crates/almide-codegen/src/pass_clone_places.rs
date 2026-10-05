@@ -100,3 +100,49 @@ pub(super) fn insert_clones_member(object: IrExpr, field: Sym, ty: Ty, span: Opt
     }
     access
 }
+
+/// `Assign { var: x, value }` arm of `insert_clone_stmts_live` (#3404): when
+/// `value` reads `x` exactly once, that read is `x`'s last use before the
+/// statement overwrites it, so it moves even inside a loop — `b = add(b, i)`
+/// hands `b` over instead of copying it, and the next iteration (or any later
+/// read) sees the new value. The read must be the only occurrence of `x` in
+/// `value`, outside every closure, loop body, iterator chain, guard and
+/// `&mut` (each of which may run it again or keep it borrowed), and `x` must
+/// be an owned, uncaptured, non-always-clone binding: a borrowed param or a
+/// global cannot be moved from at all.
+pub(super) fn insert_clones_reassign(var: VarId, value: IrExpr, ctx: &mut CloneCtx) -> IrStmtKind {
+    let movable = ctx.owned.contains(&var) && !ctx.always.contains(&var) && !ctx.captured.contains(&var)
+        && reads_once_plainly(&value, var);
+    let mut value = insert_clones_live(value, ctx);
+    if movable {
+        strip_var_clone(&mut value, var);
+    }
+    IrStmtKind::Assign { var, value }
+}
+
+fn reads_once_plainly(value: &IrExpr, var: VarId) -> bool {
+    use super::use_kind::{ExplicitBorrows, Site, UseSites};
+    let sites = UseSites::of_expr(value, Site::Assigned, &ExplicitBorrows);
+    let mut uses = sites.of(var);
+    let Some(u) = uses.next() else { return false };
+    uses.next().is_none() && u.is_node() && u.depth == 0 && !u.in_chain && !u.in_loop && !u.in_mut
+        && !u.in_guard && !u.guard_forced
+}
+
+/// `Clone(Var x)` → `Var x` (the single occurrence `reads_once_plainly` found).
+fn strip_var_clone(e: &mut IrExpr, var: VarId) {
+    use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut};
+    struct Strip(VarId);
+    impl IrMutVisitor for Strip {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            if let IrExprKind::Clone { expr } = &e.kind
+                && matches!(expr.kind, IrExprKind::Var { id } if id == self.0)
+            {
+                e.kind = IrExprKind::Var { id: self.0 };
+                return;
+            }
+            walk_expr_mut(self, e);
+        }
+    }
+    Strip(var).visit_expr_mut(e);
+}
