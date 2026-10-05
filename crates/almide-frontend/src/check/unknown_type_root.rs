@@ -135,21 +135,56 @@ impl Checker {
     /// expanded by the resolver; one applied to another count stays `Named`
     /// under its key, and so does a generic record or variant. A bare
     /// spelling (no brackets) is not an application and is never reported.
-    fn type_arity_diags(&self, ty: &Ty, span: Option<crate::ast::Span>, ctx: &str, seen: &mut std::collections::HashSet<(Sym, usize)>) -> Vec<Diagnostic> {
+    ///
+    /// A BUILTIN head applied to another count than its table entry declares
+    /// (`List[Int, Int]`, `Map[String]`, `Int[String]`, #3408) is not that
+    /// builtin either — the resolver leaves it a `Named` no declaration
+    /// registered — and is counted against `builtin_type_params`. Its name
+    /// goes into `rooted`: the E093 is the root, not an E029 for `Map`.
+    fn type_arity_diags(&self, ty: &Ty, span: Option<crate::ast::Span>, ctx: &str, seen: &mut std::collections::HashSet<(Sym, usize)>, rooted: &mut std::collections::HashSet<Sym>) -> Vec<Diagnostic> {
+        use crate::canonicalize::resolve::{builtin_type_params, declared_type_params};
         let mut out = Vec::new();
         let mut stack = vec![ty];
         while let Some(t) = stack.pop() {
             if let Ty::Named(s, args) = t
                 && !args.is_empty()
-                && let Some(params) = crate::canonicalize::resolve::declared_type_params(s.as_str(), &self.env.types)
-                && params.len() != args.len()
-                && seen.insert((*s, args.len()))
             {
-                out.push(self.type_arity_diag(s.as_str(), params, args.len(), span, ctx));
+                if let Some(params) = declared_type_params(s.as_str(), &self.env.types) {
+                    if params.len() != args.len() && seen.insert((*s, args.len())) {
+                        out.push(self.type_arity_diag(s.as_str(), params, args.len(), span, ctx));
+                    }
+                } else if !self.env.types.contains_key(s)
+                    && let Some(letters) = builtin_type_params(s.as_str())
+                    && letters.len() != args.len()
+                {
+                    rooted.insert(*s);
+                    if seen.insert((*s, args.len())) {
+                        let params: Vec<Ty> = letters.iter().map(|l| Ty::TypeVar(sym(l))).collect();
+                        out.push(self.type_arity_diag(s.as_str(), &params, args.len(), span, ctx));
+                    }
+                }
             }
             stack.extend(t.children());
         }
         out
+    }
+
+    /// E094 (#3407): every type-alias cycle among this file's declarations,
+    /// located at the first alias's name. Called once per checked file (the
+    /// entry program and each module), so a cycle is reported once.
+    pub(crate) fn validate_alias_cycles(&mut self, decls: &[crate::ast::Decl]) {
+        for (name, mut diag) in crate::canonicalize::registration::alias_cycle_diags(decls) {
+            diag.file = self.source_file.clone();
+            let name = name.as_str();
+            if let (Some(line), Some(col)) = (diag.line, diag.col)
+                && let Some((l, c)) = self.locate_type_name(line, col + "type".len(), name)
+            {
+                diag.line = Some(l);
+                diag.col = Some(c);
+                diag.end_col = Some(c + name.chars().count());
+            }
+            self.diagnostics.push(diag);
+        }
     }
 
     fn type_arity_diag(&self, name: &str, params: &[Ty], given: usize, span: Option<crate::ast::Span>, ctx: &str) -> Diagnostic {

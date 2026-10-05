@@ -1,0 +1,3 @@
+expects_code = "E094"
+expects_error = "type alias 'Tree' refers to itself (Tree → Tree)"
+hint_substring = "`type Tree = { inner: ... }`"

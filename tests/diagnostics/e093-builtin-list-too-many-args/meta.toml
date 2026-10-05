@@ -1,0 +1,3 @@
+expects_code = "E093"
+expects_error = "type 'List[T]' takes 1 type argument, but is applied to 2"
+hint_substring = "`List[T]`"

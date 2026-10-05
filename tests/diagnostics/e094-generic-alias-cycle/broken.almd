@@ -1,0 +1,10 @@
+// Three generic aliases that lead back to the first through type arguments.
+type Row[T] = Cells[T]
+
+type Cells[T] = List[Slot[T]]
+
+type Slot[T] = Option[Row[T]]
+
+fn width(r: Row[Int]) -> Int = list.len(r)
+
+effect fn main() -> Unit = println("rows")

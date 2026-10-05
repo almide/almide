@@ -1,0 +1,9 @@
+type Row[T] = Cells[T]
+
+type Cells[T] = List[Slot[T]]
+
+type Slot[T] = T?
+
+fn width(r: Row[Int]) -> Int = list.len(r)
+
+effect fn main() -> Unit = println(int.to_string(width([some(1), none])))

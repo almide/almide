@@ -488,17 +488,21 @@ pub enum TypeSpelling {
     RecordHead,
 }
 
-/// Which spellings of a builtin head the resolver answers.
+/// Which spellings of a builtin head the resolver answers — and, for an
+/// applied head, the parameters it DECLARES, which is the arity every
+/// application of it is checked against (E093, #3408).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuiltinArity {
     /// Only the bare spelling (`Int`, and `Matrix` without arguments).
     Bare,
-    /// Applied to any number of arguments (`List[T]`; a missing element type
-    /// resolves to `Unknown`).
-    Any,
-    /// Applied to at least this many (`Map[K, V]`; fewer is a nominal name).
-    AtLeast(usize),
-    /// Applied to between `lo` and `hi` arguments inclusive (`T!`, `T!E`).
+    /// Applied to exactly these parameters (`List[T]`, `Map[K, V]`). Another
+    /// count is not this builtin: it stays a nominal name, which the
+    /// checker reports against these letters unless a declaration of the
+    /// same name takes it.
+    Params(&'static [&'static str]),
+    /// Applied to between `lo` and `hi` arguments inclusive (`T!`, `T!E`) —
+    /// a pseudo-generic the parser builds from a suffix, never written with
+    /// brackets, so no count of it is ever an error.
     Between(usize, usize),
 }
 
@@ -506,20 +510,19 @@ impl BuiltinArity {
     fn accepts(self, spelling: TypeSpelling) -> bool {
         match (self, spelling) {
             (BuiltinArity::Bare, TypeSpelling::Bare) => true,
-            (BuiltinArity::Any, TypeSpelling::Applied(_)) => true,
-            (BuiltinArity::AtLeast(lo), TypeSpelling::Applied(n)) => n >= lo,
+            (BuiltinArity::Params(ps), TypeSpelling::Applied(n)) => n == ps.len(),
             (BuiltinArity::Between(lo, hi), TypeSpelling::Applied(n)) => lo <= n && n <= hi,
             _ => false,
         }
     }
 
     /// One spelling this arity accepts — what a test writes to exercise the
-    /// head (`Map[Int, Int]` for `AtLeast(2)`).
+    /// head (`Map[Int, Int]` for `Params(["K", "V"])`).
     pub fn sample(self) -> TypeSpelling {
         match self {
             BuiltinArity::Bare => TypeSpelling::Bare,
-            BuiltinArity::Any => TypeSpelling::Applied(1),
-            BuiltinArity::AtLeast(n) | BuiltinArity::Between(n, _) => TypeSpelling::Applied(n),
+            BuiltinArity::Params(ps) => TypeSpelling::Applied(ps.len()),
+            BuiltinArity::Between(n, _) => TypeSpelling::Applied(n),
         }
     }
 }
@@ -530,10 +533,6 @@ pub struct BuiltinTypeHead {
     pub name: &'static str,
     pub arity: BuiltinArity,
     pub build: fn(&[Ty]) -> Ty,
-}
-
-fn first_or_unknown(ra: &[Ty]) -> Ty {
-    ra.first().cloned().unwrap_or(Ty::Unknown)
 }
 
 /// EVERY type name the resolver answers without consulting a declaration,
@@ -586,22 +585,22 @@ pub const BUILTIN_TYPE_HEADS: &[BuiltinTypeHead] = &[
     // return-position marker: `?` is a property of the value, `!` of the
     // arrow).
     BuiltinTypeHead { name: "?", arity: BuiltinArity::Between(1, 1), build: |ra| Ty::option(ra[0].clone()) },
-    BuiltinTypeHead { name: "List", arity: BuiltinArity::Any, build: |ra| Ty::list(first_or_unknown(ra)) },
-    BuiltinTypeHead { name: "Option", arity: BuiltinArity::Any, build: |ra| Ty::option(first_or_unknown(ra)) },
+    BuiltinTypeHead { name: "List", arity: BuiltinArity::Params(&["T"]), build: |ra| Ty::list(ra[0].clone()) },
+    BuiltinTypeHead { name: "Option", arity: BuiltinArity::Params(&["T"]), build: |ra| Ty::option(ra[0].clone()) },
     BuiltinTypeHead {
-        name: "Result", arity: BuiltinArity::AtLeast(2),
+        name: "Result", arity: BuiltinArity::Params(&["T", "E"]),
         build: |ra| Ty::result(ra[0].clone(), ra[1].clone()),
     },
     BuiltinTypeHead {
-        name: "Map", arity: BuiltinArity::AtLeast(2),
+        name: "Map", arity: BuiltinArity::Params(&["K", "V"]),
         build: |ra| Ty::map_of(ra[0].clone(), ra[1].clone()),
     },
-    BuiltinTypeHead { name: "Set", arity: BuiltinArity::Any, build: |ra| Ty::set_of(first_or_unknown(ra)) },
+    BuiltinTypeHead { name: "Set", arity: BuiltinArity::Params(&["T"]), build: |ra| Ty::set_of(ra[0].clone()) },
     // Sized Numeric Types P4 kickoff: `Matrix[T]` resolves to
     // `Applied(Matrix, [T])` so the checker can discriminate
     // `Matrix[Float32]` / `Matrix[Float64]`.
     BuiltinTypeHead {
-        name: "Matrix", arity: BuiltinArity::Any,
+        name: "Matrix", arity: BuiltinArity::Params(&["T"]),
         build: |ra| Ty::Applied(TypeConstructorId::Matrix, ra.to_vec()),
     },
 ];
@@ -613,6 +612,25 @@ pub const BUILTIN_TYPE_HEADS: &[BuiltinTypeHead] = &[
 pub fn builtin_type_head(name: &str, spelling: TypeSpelling) -> Option<&'static BuiltinTypeHead> {
     let name = name.strip_prefix(GENERATED_BUILTIN_MARK).unwrap_or(name);
     BUILTIN_TYPE_HEADS.iter().find(|h| h.name == name && h.arity.accepts(spelling))
+}
+
+/// The parameters a builtin type name declares when it is applied, for the
+/// arity check (E093, #3408): `["K", "V"]` for `Map`, none for `Int` (a bare
+/// head applied to anything is applied to too many). `None` for a name no
+/// builtin head has, and for the bracket-free pseudo-generics `!` / `?`.
+/// Read off [`BUILTIN_TYPE_HEADS`], the table the resolver dispatches through.
+pub fn builtin_type_params(name: &str) -> Option<&'static [&'static str]> {
+    let mut heads = BUILTIN_TYPE_HEADS.iter().filter(|h| h.name == name).peekable();
+    heads.peek()?;
+    let mut params: &'static [&'static str] = &[];
+    for h in heads {
+        match h.arity {
+            BuiltinArity::Params(ps) => params = ps,
+            BuiltinArity::Between(..) => return None,
+            BuiltinArity::Bare => {}
+        }
+    }
+    Some(params)
 }
 
 /// The mark that makes a builtin's name the generated-source spelling. The

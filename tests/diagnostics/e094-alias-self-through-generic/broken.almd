@@ -1,0 +1,6 @@
+// An alias that contains itself through a type argument.
+type Tree = List[Tree]
+
+fn size(t: Tree) -> Int = list.len(t)
+
+effect fn main() -> Unit = println("tree")

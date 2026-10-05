@@ -1,0 +1,3 @@
+expects_code = "E094"
+expects_error = "type aliases form a cycle: Row → Cells → Slot → Row"
+hint_substring = "a record or variant may refer to itself"
