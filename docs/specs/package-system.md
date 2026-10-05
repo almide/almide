@@ -135,6 +135,41 @@ still one dependency declared twice.
 
 Test: `tests/manifest_duplicate_key_test.rs`.
 
+**A key no reader reads is a warning** (#3382). It used to be dropped without a
+word, so `brnach = "main"` or `tags = "v0.1.0"` in a dependency built from the
+default ref, not the one written. Every command that reads `almide.toml` now
+warns once, naming the line, the key, the keys that table accepts, and the key
+one edit away (insertion, deletion, substitution or an adjacent swap) when
+there is one:
+
+```text
+warning: unknown key `brnach` in dependency `foo` is ignored — it changes nothing
+  --> almide.toml:5
+  hint: did you mean `branch`? The keys dependency `foo` accepts are `git`, `tag`, `branch`, `version`, `path`, `subdir`
+```
+
+| Table | Accepted keys |
+|---|---|
+| top level | `[package]`, `[dependencies]`, `[native-deps]`, `[permissions]`, `[target]` |
+| `[package]` | `name`, `version`, `almide`; and `description`, `edition`, `license`, `repository`, which describe the package and are read by nothing (no warning) |
+| a `[dependencies]` entry (inline table, dotted keys or `[dependencies.<name>]`) | `git`, `tag`, `branch`, `version`, `path`, `subdir` |
+| `[permissions]` | `allow`, `proc` |
+
+A dependency entry that is not a table, or names neither `git` nor `path`,
+declares nothing and is warned about the same way. `[native-deps]` entries are
+crate names, so any key is one (their specs are Cargo's to judge); an unknown
+table under `[target.<platform>]` is already an error (§6.2).
+
+The build still runs exactly as if the key were absent, and the exit code does
+not change (`check --deny-warnings` does not count it either). `almide check
+--json` carries the warning as a `"level":"warning"` row on stdout; every other
+command prints it on stderr. Escalating it to an error is planned for a later
+dialect epoch, after a release that carries the warning; there is no epoch
+entry yet. The key lists live beside their readers in `src/project.rs`, and
+`tests/manifest_unknown_key_test.rs` asserts that every listed key changes the
+parse (and that every metadata key does not), so a list cannot drift from its
+reader.
+
 Short form (defaults to github.com/almide/):
 ```bash
 almide add bindgen@v0.1.0
