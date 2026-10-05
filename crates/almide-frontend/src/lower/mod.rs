@@ -409,8 +409,11 @@ fn lower_decls(
                 // wrapped only by the native codegen, so wasm refused them and
                 // a mixed `match` never type-checked. (An effect fn declaring
                 // `-> T` is sig-lifted by codegen; its ret_ty is not a Result
-                // here.)
-                let declared_result_effect = f.is_effect && f.ret_ty.is_result();
+                // here.) An intrinsic stub's `= _` body is not a value tail:
+                // dispatch recognises the bare hole, so it stays unwrapped.
+                let declared_result_effect = f.is_effect
+                    && f.ret_ty.is_result()
+                    && !matches!(f.body.kind, IrExprKind::Hole);
                 if declared_result_effect
                     || matches!(return_type, ast::TypeExpr::Generic { name: g, .. } if g.as_str() == "!")
                 {
