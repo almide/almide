@@ -76,8 +76,134 @@ fn source_key(git: &str) -> String {
 ///   be mistaken for a source key. Old entries MISS and are re-fetched under
 ///   the new key; they are inert, not reused, because a stale hit here is the
 ///   whole bug. They cost disk until `almide clean`.
+///
+/// A dependency with a `subdir` (#3381) is one package of a repository that
+/// may hold several, so its clone is keyed by the SOURCE alone:
+/// `~/.almide/cache/.repos/.src-<key>/`. Two packages of one repository at
+/// one ref (or locked commit) then resolve to the same checkout directory —
+/// one fetch — and each reads its own `subdir` inside it. `.repos` starts
+/// with a dot, which no package name (an identifier) can, so it never
+/// aliases a `<name>/` directory. A dependency without `subdir` keeps the
+/// name-keyed layout above, so no existing cache entry is orphaned.
 pub fn dep_cache_root(dep: &Dependency) -> PathBuf {
-    cache_dir().join(&dep.name).join(format!(".src-{}", source_key(&dep.git)))
+    let source = format!(".src-{}", source_key(&dep.git));
+    match dep.subdir {
+        Some(_) => cache_dir().join(".repos").join(source),
+        None => cache_dir().join(&dep.name).join(source),
+    }
+}
+
+/// The package directory a dependency names inside its checkout: the
+/// checkout itself, or its `subdir` (#3381) — refused unless it is a
+/// directory inside the checkout (no symlink out of it) that holds an
+/// `almide.toml` whose `[package] name` is the dependency's key. Without
+/// `subdir`, a checkout whose root is no package but whose subdirectories
+/// are says which `subdir` to write.
+fn package_dir_in(dep: &Dependency, checkout: &Path) -> Result<PathBuf, String> {
+    let at = dep_ref_name(dep);
+    let Some(subdir) = dep.subdir.as_deref() else {
+        if !checkout.join("almide.toml").exists()
+            && !checkout.join("src").is_dir()
+            && !has_almd_file(checkout)
+        {
+            let found = packages_in(checkout);
+            if !found.is_empty() {
+                return Err(format!(
+                    "{}the root of {} at {at} is not a package (no almide.toml) — dependency `{}` needs a `subdir`\n  \
+                     hint: this repository holds the packages {}; add `subdir = \"…\"` naming one, e.g. `subdir = \"{}\"`",
+                    dep.location_prefix(), dep.git, dep.name,
+                    found.iter().map(|p| format!("`{p}`")).collect::<Vec<_>>().join(", "),
+                    found.iter().find(|p| p.rsplit('/').next() == Some(dep.name.as_str())).unwrap_or(&found[0]),
+                ));
+            }
+        }
+        return Ok(checkout.to_path_buf());
+    };
+    let found_hint = || {
+        let found = packages_in(checkout);
+        match found.is_empty() {
+            true => "  hint: no directory in this repository holds an almide.toml — check the `git` url and the ref".to_string(),
+            false => format!(
+                "  hint: the packages in this repository are {} — point `subdir` at one",
+                found.iter().map(|p| format!("`{p}`")).collect::<Vec<_>>().join(", ")
+            ),
+        }
+    };
+    let dir = checkout.join(subdir);
+    if !dir.is_dir() {
+        return Err(format!(
+            "{}subdir `{subdir}` of dependency `{}` does not exist in {} at {at}\n{}",
+            dep.location_prefix(), dep.name, dep.git, found_hint()
+        ));
+    }
+    let inside = match (std::fs::canonicalize(&dir), std::fs::canonicalize(checkout)) {
+        (Ok(d), Ok(c)) => d.starts_with(&c),
+        _ => false,
+    };
+    if !inside {
+        return Err(format!(
+            "{}subdir `{subdir}` of dependency `{}` resolves outside the repository (through a symlink)\n  \
+             hint: point `subdir` at the package directory itself",
+            dep.location_prefix(), dep.name
+        ));
+    }
+    let manifest = dir.join("almide.toml");
+    if !manifest.exists() {
+        return Err(format!(
+            "{}subdir `{subdir}` of dependency `{}` has no almide.toml in {} at {at} — `subdir` must name a package directory\n{}",
+            dep.location_prefix(), dep.name, dep.git, found_hint()
+        ));
+    }
+    match crate::project::manifest_package_name(&manifest) {
+        Some(found) if found == dep.name => Ok(dir),
+        found => {
+            let found = found.unwrap_or_default();
+            Err(format!(
+                "{}dependency `{}` names subdir `{subdir}`, whose package is `{found}`\n  \
+                 hint: the dependency key is the import name and must be the package's name — \
+                 rename the key to `{found}`, or point `subdir` at the package `{}`",
+                dep.location_prefix(), dep.name, dep.name
+            ))
+        }
+    }
+}
+
+/// Whether `dir` directly holds a `.almd` file.
+fn has_almd_file(dir: &Path) -> bool {
+    std::fs::read_dir(dir).is_ok_and(|rd| {
+        rd.flatten().any(|e| e.path().extension().is_some_and(|x| x == "almd"))
+    })
+}
+
+/// The package directories of a checkout, relative to it: every directory
+/// up to two levels down (`pkg`, `pkgs/pkg`) holding an `almide.toml`,
+/// sorted. Dot directories (`.git`) are skipped. For hints only.
+fn packages_in(checkout: &Path) -> Vec<String> {
+    fn subdirs(dir: &Path) -> Vec<PathBuf> {
+        let mut out: Vec<PathBuf> = std::fs::read_dir(dir)
+            .map(|rd| {
+                rd.flatten()
+                    .filter(|e| e.path().is_dir() && !e.file_name().to_string_lossy().starts_with('.'))
+                    .map(|e| e.path())
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.sort();
+        out
+    }
+    let rel = |p: &Path| p.strip_prefix(checkout).unwrap_or(p).to_string_lossy().replace('\\', "/");
+    let mut found = Vec::new();
+    for d in subdirs(checkout) {
+        if d.join("almide.toml").exists() {
+            found.push(rel(&d));
+        }
+        for dd in subdirs(&d) {
+            if dd.join("almide.toml").exists() {
+                found.push(rel(&dd));
+            }
+        }
+    }
+    found
 }
 
 /// Populate cache dir `dir` atomically: run `clone` against a fresh sibling
@@ -195,11 +321,11 @@ pub fn fetch_dep_with_lock(dep: &Dependency, locked_commit: Option<&str>) -> Res
     }
 
     // If locked to a specific commit, use commit-based cache dir
-    if let Some(commit) = locked_commit {
-        return fetch_dep_at_commit(dep, commit);
-    }
-
-    fetch_dep_at_ref(dep, dep_ref_name(dep))
+    let checkout = match locked_commit {
+        Some(commit) => fetch_dep_at_commit(dep, commit)?,
+        None => fetch_dep_at_ref(dep, dep_ref_name(dep))?,
+    };
+    package_dir_in(dep, &checkout)
 }
 
 /// One fetch the walk made: the request as the lock would name it, the
@@ -248,7 +374,10 @@ pub fn update_lock_file(
     for dep in deps {
         let ref_name = dep_ref_name(dep);
         let Some(request) = resolved.iter().find(|r| {
-            r.lock.name == dep.name && r.lock.git == dep.git && r.lock.ref_name == ref_name
+            r.lock.name == dep.name
+                && r.lock.git == dep.git
+                && r.lock.ref_name == ref_name
+                && r.lock.subdir == dep.subdir
         }) else {
             // Nothing was resolved for it (a path dependency, or a checkout
             // with no git metadata) — a lock entry invented for it here
@@ -268,6 +397,7 @@ pub fn update_lock_file(
                 git: selected.lock.git.clone(),
                 ref_name: selected.lock.ref_name.clone(),
                 commit: selected.lock.commit.clone(),
+                subdir: selected.lock.subdir.clone(),
             });
         }
     }
@@ -376,10 +506,12 @@ fn fetch_one_dep_recursive(
     let version_str = resolve_dep_version(dep);
     let pkg_id = PkgId::from_version_str(&dep.name, &version_str);
 
+    // A package is a source AND a directory in it (#3381): two subdirs of
+    // one repository are two packages, each walked for its own requirements.
     let visit_key = if let Some(ref p) = dep.path {
         format!("path:{}@{}", p, version_str)
     } else {
-        format!("{}@{}", dep.git, version_str)
+        format!("{}#{}@{}", dep.git, dep.subdir.as_deref().unwrap_or(""), version_str)
     };
     if visited.contains(&visit_key) {
         return Ok(());
@@ -440,6 +572,7 @@ fn fetch_one_dep_recursive(
                 git: dep.git.clone(),
                 ref_name: want_ref.to_string(),
                 commit,
+                subdir: dep.subdir.clone(),
             },
             pkg_id: actual_pkg_id.clone(),
             source_dir: source_dir.clone(),
@@ -514,16 +647,31 @@ pub fn resolve_package_spec(spec: &str) -> (String, String, Option<String>) {
 /// applies to both spellings; a `pkg@tag` suffix in the spec is the fallback
 /// when `--tag` is absent. (Previously the spec's tag silently replaced
 /// `--tag`, so `almide add almide/svg --tag v0.1.0` pinned to `main`.)
-pub fn resolve_add_target(pkg: String, git: Option<String>, tag: Option<String>) -> (String, String, Option<String>) {
+///
+/// With `--subdir` (#3381) the spec names the REPOSITORY, so the package
+/// name defaults to the subdir's last component (`--subdir pkgs/ceangal` →
+/// `ceangal`) rather than the repository's name. With `--git` the first
+/// argument is the name, as before.
+pub fn resolve_add_target(
+    pkg: String,
+    git: Option<String>,
+    tag: Option<String>,
+    subdir: Option<&str>,
+) -> (String, String, Option<String>) {
     if let Some(git_url) = git {
         return (pkg, git_url, tag);
     }
     let (name, git_url, spec_tag) = resolve_package_spec(&pkg);
+    let name = subdir
+        .and_then(|s| s.rsplit('/').next())
+        .map(str::to_string)
+        .unwrap_or(name);
     (name, git_url, tag.or(spec_tag))
 }
 
-/// Add a dependency to almide.toml
-pub fn add_dep_to_toml(name: &str, git: &str, tag: Option<&str>) -> Result<(), String> {
+/// Add a dependency to almide.toml. `subdir` must already be normalized
+/// (`crate::project::normalize_subdir`).
+pub fn add_dep_to_toml(name: &str, git: &str, tag: Option<&str>, subdir: Option<&str>) -> Result<(), String> {
     // Package names must be valid Almide identifiers (no hyphens).
     // The package name IS the import name — no implicit conversion.
     if name.contains('-') {
@@ -543,11 +691,9 @@ pub fn add_dep_to_toml(name: &str, git: &str, tag: Option<&str>) -> Result<(), S
     let mut content = std::fs::read_to_string(toml_path)
         .map_err(|e| format!("Failed to read almide.toml: {}", e))?;
 
-    let dep_line = if let Some(tag) = tag {
-        format!("{} = {{ git = \"{}\", tag = \"{}\" }}", name, git, tag)
-    } else {
-        format!("{} = {{ git = \"{}\" }}", name, git)
-    };
+    let tag_part = tag.map(|t| format!(", tag = \"{t}\"")).unwrap_or_default();
+    let subdir_part = subdir.map(|s| format!(", subdir = \"{s}\"")).unwrap_or_default();
+    let dep_line = format!("{} = {{ git = \"{}\"{}{} }}", name, git, tag_part, subdir_part);
 
     if content.contains("[dependencies]") {
         content = content.replacen("[dependencies]", &format!("[dependencies]\n{}", dep_line), 1);
@@ -615,12 +761,14 @@ pub fn update_locked_deps(project: &Project, only: Option<&str>) -> Result<Vec<(
                 entry.git = dep.git.clone();
                 entry.ref_name = ref_name.to_string();
                 entry.commit = head.clone();
+                entry.subdir = dep.subdir.clone();
             }
             None => locked.push(LockedDep {
                 name: dep.name.clone(),
                 git: dep.git.clone(),
                 ref_name: ref_name.to_string(),
                 commit: head.clone(),
+                subdir: dep.subdir.clone(),
             }),
         }
         changed.push((dep.name.clone(), before.unwrap_or_default(), head));
@@ -669,6 +817,8 @@ mod tests {
             branch: None,
             version: None,
             path: None,
+            subdir: None,
+            declared_at: None,
         }
     }
 
@@ -711,9 +861,34 @@ mod tests {
         assert_eq!(root.parent().and_then(|p| p.file_name()).unwrap(), "fizz");
     }
 
+    /// #3381: two packages of one repository share ONE clone root (one fetch
+    /// per ref), whatever their names; a dependency without `subdir` keeps
+    /// its name-keyed root, so existing cache entries stay valid.
+    #[test]
+    fn subdir_packages_of_one_repository_share_a_clone_root() {
+        let with = |name: &str, sub: &str| Dependency {
+            subdir: Some(sub.into()),
+            ..dep(name, "https://github.com/almide-graphics/ceangal2", Some("v0.1.0"))
+        };
+        let a = dep_cache_root(&with("ceangal", "ceangal"));
+        let b = dep_cache_root(&with("snaidhm", "snaidhm"));
+        assert_eq!(a, b, "two subdirs of one repository must share the clone");
+        let plain = dep_cache_root(&dep("ceangal", "https://github.com/almide-graphics/ceangal2", Some("v0.1.0")));
+        assert_ne!(a, plain);
+        assert_eq!(plain.parent().and_then(|p| p.file_name()).unwrap(), "ceangal");
+        // Another repository still gets its own root.
+        let other = dep_cache_root(&Dependency {
+            subdir: Some("ceangal".into()),
+            ..dep("ceangal", "https://github.com/someone/else", Some("v0.1.0"))
+        });
+        assert_ne!(a, other);
+        // The shared level starts with a dot: no package name can spell it.
+        assert!(a.parent().unwrap().file_name().unwrap().to_string_lossy().starts_with('.'));
+    }
+
     #[test]
     fn add_tag_flag_is_kept_for_short_specs() {
-        let (name, git, tag) = resolve_add_target("almide/svg".into(), None, Some("v0.1.0".into()));
+        let (name, git, tag) = resolve_add_target("almide/svg".into(), None, Some("v0.1.0".into()), None);
         assert_eq!(name, "svg");
         assert_eq!(git, "https://github.com/almide/svg");
         assert_eq!(tag.as_deref(), Some("v0.1.0"));
@@ -721,10 +896,75 @@ mod tests {
 
     #[test]
     fn add_tag_flag_wins_over_spec_suffix_and_suffix_is_fallback() {
-        let (_, _, tag) = resolve_add_target("svg@v0.2.0".into(), None, Some("v0.1.0".into()));
+        let (_, _, tag) = resolve_add_target("svg@v0.2.0".into(), None, Some("v0.1.0".into()), None);
         assert_eq!(tag.as_deref(), Some("v0.1.0"));
-        let (_, _, tag) = resolve_add_target("svg@v0.2.0".into(), None, None);
+        let (_, _, tag) = resolve_add_target("svg@v0.2.0".into(), None, None, None);
         assert_eq!(tag.as_deref(), Some("v0.2.0"));
+    }
+
+    /// #3381: with `--subdir` the spec names the repository; the package is
+    /// named after the subdir's last component.
+    #[test]
+    fn add_subdir_names_the_package_after_the_subdir() {
+        let (name, git, tag) =
+            resolve_add_target("almide-graphics/ceangal2@v0.1.0".into(), None, None, Some("pkgs/ceangal"));
+        assert_eq!(name, "ceangal");
+        assert_eq!(git, "https://github.com/almide-graphics/ceangal2");
+        assert_eq!(tag.as_deref(), Some("v0.1.0"));
+        // `--git` keeps the first argument as the name.
+        let (name, _, _) = resolve_add_target("cg".into(), Some("file:///r".into()), None, Some("ceangal"));
+        assert_eq!(name, "cg");
+    }
+
+    /// #3381: the checks the fetch makes on a `subdir` — a package
+    /// directory whose manifest names this dependency, else a refusal that
+    /// lists the packages the repository does hold.
+    #[test]
+    fn package_dir_in_checks_the_subdir_against_the_checkout() {
+        let root = std::env::temp_dir().join(format!("almide-subdir-unit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let pkg = |dir: &str, name: &str| {
+            let d = root.join(dir);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("almide.toml"), format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n")).unwrap();
+        };
+        pkg("ceangal", "ceangal");
+        pkg("snaidhm", "snaidhm");
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        let with = |name: &str, sub: Option<&str>| Dependency {
+            subdir: sub.map(str::to_string),
+            declared_at: Some("almide.toml:7".into()),
+            ..dep(name, "file:///repo", Some("v0.1.0"))
+        };
+
+        assert_eq!(package_dir_in(&with("ceangal", Some("ceangal")), &root).unwrap(), root.join("ceangal"));
+
+        let missing = package_dir_in(&with("ceangal", Some("nope")), &root).unwrap_err();
+        assert!(missing.starts_with("almide.toml:7: subdir `nope`"), "{missing}");
+        assert!(missing.contains("does not exist") && missing.contains("`ceangal`, `snaidhm`"), "{missing}");
+
+        let no_manifest = package_dir_in(&with("docs", Some("docs")), &root).unwrap_err();
+        assert!(no_manifest.contains("has no almide.toml"), "{no_manifest}");
+
+        let mismatch = package_dir_in(&with("ceangal", Some("snaidhm")), &root).unwrap_err();
+        assert!(mismatch.contains("whose package is `snaidhm`") && mismatch.contains("rename the key to `snaidhm`"), "{mismatch}");
+
+        // No subdir, and the root is no package: say which subdir to write.
+        let root_only = package_dir_in(&with("ceangal", None), &root).unwrap_err();
+        assert!(root_only.contains("needs a `subdir`") && root_only.contains("`subdir = \"ceangal\"`"), "{root_only}");
+
+        #[cfg(unix)]
+        {
+            let outside = root.with_extension("outside");
+            let _ = std::fs::remove_dir_all(&outside);
+            std::fs::create_dir_all(&outside).unwrap();
+            std::fs::write(outside.join("almide.toml"), "[package]\nname = \"esc\"\n").unwrap();
+            std::os::unix::fs::symlink(&outside, root.join("esc")).unwrap();
+            let escaped = package_dir_in(&with("esc", Some("esc")), &root).unwrap_err();
+            assert!(escaped.contains("resolves outside the repository"), "{escaped}");
+            let _ = std::fs::remove_dir_all(&outside);
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

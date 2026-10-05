@@ -340,6 +340,11 @@ enum Commands {
         /// Git tag
         #[arg(long)]
         tag: Option<String>,
+        /// The package's directory inside the repository (a repository
+        /// holding several packages); the package is named after its last
+        /// component
+        #[arg(long)]
+        subdir: Option<String>,
     },
     /// List dependencies
     Deps,
@@ -967,19 +972,31 @@ fn dispatch_fmt(files: Vec<String>, check: bool, json: bool, dry_run: bool, no_i
 }
 
 /// `dispatch`'s `Commands::Add` arm. Extracted verbatim.
-fn dispatch_add(pkg: String, git: Option<String>, tag: Option<String>) {
-    let (name, git_url, tag) = project_fetch::resolve_add_target(pkg, git, tag);
-    project_fetch::add_dep_to_toml(&name, &git_url, tag.as_deref())
-        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+///
+/// The dependency is fetched BEFORE almide.toml is written, so a `--subdir`
+/// (#3381) or a tag the repository does not have leaves the manifest as it
+/// was rather than holding an entry no command can resolve.
+fn dispatch_add(pkg: String, git: Option<String>, tag: Option<String>, subdir: Option<String>) {
+    let subdir = subdir.map(|s| {
+        project::normalize_subdir(&s).unwrap_or_else(|why| {
+            err(&format!("invalid --subdir `{s}`: {why}"));
+            std::process::exit(1);
+        })
+    });
+    let (name, git_url, tag) = project_fetch::resolve_add_target(pkg, git, tag, subdir.as_deref());
     let dep = project::Dependency {
         name: name.clone(),
-        git: git_url,
-        tag,
+        git: git_url.clone(),
+        tag: tag.clone(),
         branch: None,
         version: None,
         path: None,
+        subdir: subdir.clone(),
+        declared_at: None,
     };
     project_fetch::fetch_dep(&dep)
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+    project_fetch::add_dep_to_toml(&name, &git_url, tag.as_deref(), subdir.as_deref())
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
 }
 
@@ -1023,7 +1040,10 @@ fn dispatch_deps() {
                     continue;
                 }
                 let ref_name = dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main");
-                out(&format!("{} = {} ({})", dep.name, dep.git, ref_name));
+                match &dep.subdir {
+                    Some(sub) => out(&format!("{} = {} ({}) subdir {}", dep.name, dep.git, ref_name, sub)),
+                    None => out(&format!("{} = {} ({})", dep.name, dep.git, ref_name)),
+                }
             }
         }
     } else {
@@ -1076,7 +1096,7 @@ fn dispatch_rest(command: Commands) {
             cli::cmd_compile(module.as_deref(), json, dry_run, output.as_deref());
         }
         Commands::Clean => cli::cmd_clean(),
-        Commands::Add { pkg, git, tag } => dispatch_add(pkg, git, tag),
+        Commands::Add { pkg, git, tag, subdir } => dispatch_add(pkg, git, tag, subdir),
         Commands::Update { dep } => dispatch_update(dep),
         Commands::Deps => dispatch_deps(),
         Commands::DepPath { name } => dispatch_dep_path(name),

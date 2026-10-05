@@ -174,6 +174,8 @@ fn resolve_source(
         branch: branch.map(String::from),
         version: None,
         path: None,
+        subdir: None,
+        declared_at: None,
     };
     // A tag names an immutable snapshot and keeps its cache entry. A branch
     // (or the remote's default HEAD) MOVES: resolve the remote head now and
