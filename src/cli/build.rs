@@ -1,5 +1,6 @@
 use std::process::Command;
 use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, project_fetch, err};
+use super::wasm_debug::{debug_build_guard, with_debug_lines};
 
 /// Flags for [`cmd_build`] — bundled into one struct (was 12 positional
 /// params, a max-params violation on its own) so the function signature
@@ -24,6 +25,8 @@ pub struct BuildArgs<'a> {
     pub heap_cap: Option<u32>,
     /// `--host js` (#2265): write the JS host next to the wasm output.
     pub host: Option<&'a str>,
+    /// `--debug` (#1315): DWARF line tables in the wasm output.
+    pub debug: bool,
 }
 
 /// The npm/JavaScript target was removed with the TS backend; reject it with
@@ -193,7 +196,7 @@ pub fn cmd_build(args: BuildArgs) {
     // (verbatim) — this is purely a call-site params bundling.
     let BuildArgs {
         file, output, target, release, fast, unchecked_index: _unchecked_index,
-        no_check, repr_c, cdylib, emit_unverified, verified, native_verified, wasm_opt, component, heap_cap, host,
+        no_check, repr_c, cdylib, emit_unverified, verified, native_verified, wasm_opt, component, heap_cap, host, debug,
     } = args;
     reject_removed_target(target);
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
@@ -207,8 +210,13 @@ pub fn cmd_build(args: BuildArgs) {
         // thread-local is exactly as scoped as this call.
         // #1729: the cap becomes the emitted memory's declared maximum.
         let _cap = heap_cap.map(almide_wasm::heap_cap::HeapCapGuard::set);
+        let _lines = debug.then(|| debug_build_guard(component, wasm_opt));
         cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified, wasm_opt, component, host);
         return;
+    }
+    if debug {
+        err("error: --debug is a wasm option (DWARF line tables): `almide build app.almd --target wasm --debug`");
+        std::process::exit(2);
     }
     if host.is_some() {
         err("error: --host is a wasm option: `almide build app.almd --target wasm --host js`");
@@ -660,13 +668,14 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
             }
         }
     } else {
-        let bytes = match almide_wasm_run::wasi::to_wasi(&bytes, &host_ops) {
+        let wasi = match almide_wasm_run::wasi::to_wasi_mapped(&bytes, &host_ops) {
             Ok(w) => w,
             Err(e) => {
                 err(&format!("error: WASI transform failed — this is an Almide bug: {e}"));
                 std::process::exit(1);
             }
         };
+        let bytes = with_debug_lines(file, &bytes, wasi);
         // Stage-0 adapter wrap: the WASI core module + the Cargo-pinned
         // preview1 adapter. Packaging, not a rewrite.
         if component {
