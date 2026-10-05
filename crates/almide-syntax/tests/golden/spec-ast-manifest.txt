@@ -1,4 +1,4 @@
-# oracle: almide 0.67.0 (dev) at f490e8917 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.67.0 (dev) at 37eaabc38 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -1426,6 +1426,7 @@ ce267395961f3f50b935149b12637832263310dc10f2efcddf0db9ae98929ca1	spec/wasm_cross
 d272f34cbbb8e26341a077cd0c11c1b83327d15dd574976c9c72c9fd06c868d9	spec/wasm_cross/recursive_generic_repr_interp.almd
 bea8d2e547907a76e86783f0202971560d47def9544dea539995adc4fe7f0e65	spec/wasm_cross/recursive_payload_closure_capture.almd
 e35c86a813a9ad00236579999b99bf053db0984a28281c65a2cf20d0a48634e0	spec/wasm_cross/recursive_payload_nested_pattern.almd
+d88dda29e9d430dbec6d7ae29b861726e2f98664b9c040c7150094b0a0179cc2	spec/wasm_cross/recursive_payload_top_let.almd
 5a053fcdd58414f86b8d6cb7e3d9ccda033a90d1e05475109a1eabaaf97a1d7d	spec/wasm_cross/reduce_str.almd
 58d52d4ba3ad06d069a3fed352702853556e11704ece65ddcf3feb8db7969e65	spec/wasm_cross/ref_gleam_capture_shadow.almd
 17804c0dfa078b0605598adb74735fabfafadc7142681de423d8eb1f3d03ba47	spec/wasm_cross/ref_gleam_div_zero_abort.almd

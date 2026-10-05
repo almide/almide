@@ -1,0 +1,44 @@
+// @contract: C-070
+// #3423: a match in a TOP-LEVEL let binding a recursive variant's boxed
+// payload. Box-deref collected binders from fn bodies only, so `l` below kept
+// its `Box<T>` and the native build failed (E0308) even with the global unread;
+// wasm built it. `main` reads no computed global (the MIR brick walls a read of
+// one), so the same matches run again in fns for the observable output; the
+// value read through the global is checked by tests/top_let_recursive_payload_test.rs.
+type T =
+  | Leaf(String)
+  | Node(T, T)
+
+let tree = Node(Node(Leaf("a"), Leaf("b")), Leaf("c"))
+
+let left = match tree {
+  Node(l, _) => l,
+  Leaf(_) => Leaf("none"),
+}
+
+let leftmost_leaf = match tree {
+  Node(Node(Leaf(s), _), _) => s,
+  _ => "?",
+}
+
+fn left_of(t: T) -> T = match t {
+  Node(l, _) => l,
+  Leaf(_) => Leaf("none"),
+}
+
+fn name(t: T) -> String = match t {
+  Leaf(s) => s,
+  Node(_, _) => "node",
+}
+
+fn first(t: T) -> String = match t {
+  Node(l, _) => first(l),
+  Leaf(s) => s,
+}
+
+effect fn main() -> Unit = {
+  let t = Node(Node(Leaf("a"), Leaf("b")), Leaf("c"))
+  println(name(left_of(t)))
+  println(first(left_of(t)))
+  println(name(left_of(Leaf("x"))))
+}
