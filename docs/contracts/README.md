@@ -51,7 +51,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-013 | Map is a compact-ordered-dict: iteration is insertion order | 0.24.0 | active | fixture | 10 |
 | C-014 | Set is insertion-ordered and deterministic | 0.24.0 | active | fixture | 3 |
 | C-015 | Structural deep equality for compound elements and heap values | 0.24.0 | active | fixture | 8 |
-| C-016 | UTF-8 codepoint-aware string ops are byte-identical | 0.24.0 | active | fixture | 2 |
+| C-016 | UTF-8 codepoint-aware string ops are byte-identical | 0.24.0 | active | fixture | 3 |
 | C-017 | Empty-pattern count / last_index_of follow native codepoint/byte semantics | 0.24.0 | active | fixture | 2 |
 | C-018 | Unicode string predicates match Rust char methods over the full domain | 0.24.0 | active | fixture | 1 |
 | C-019 | rt_string_extra ops (replace_first, strip_*, predicates, cmp) match native | 0.24.0 | active | fixture | 2 |

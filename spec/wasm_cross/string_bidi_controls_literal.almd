@@ -1,0 +1,52 @@
+// @contract: C-016
+// #3438: a string literal holding a Unicode bidi control (U+202A..U+202E,
+// U+2066..U+2069) must build and run on native as on wasm. rustc's
+// deny-by-default `text_direction_codepoint_in_literal` refused the raw
+// characters, so the Rust emitter spells them `\u{XXXX}`. Every literal
+// position is covered: a plain literal, an interpolation's literal pieces, a
+// match pattern, and a heredoc. Output is the code points in decimal, so it
+// stays ASCII.
+fn codes(s: String) -> String = string.chars(s) |> list.map((c) => int.to_string(string.codepoint(c) ?? -1)) |> list.join(",")
+
+fn classify(s: String) -> String = match s {
+  "\u{202A}" => "LRE",
+  "\u{202B}" => "RLE",
+  "\u{202C}" => "PDF",
+  "\u{202D}" => "LRO",
+  "\u{202E}" => "RLO",
+  "\u{2066}" => "LRI",
+  "\u{2067}" => "RLI",
+  "\u{2068}" => "FSI",
+  "\u{2069}" => "PDI",
+  _ => "other",
+}
+
+effect fn main() -> Unit = {
+  println("literal=${codes("a\u{202A}\u{202B}\u{202C}\u{202D}\u{202E}\u{2066}\u{2067}\u{2068}\u{2069}z")}")
+  let singles = [
+    "\u{202A}",
+    "\u{202B}",
+    "\u{202C}",
+    "\u{202D}",
+    "\u{202E}",
+    "\u{2066}",
+    "\u{2067}",
+    "\u{2068}",
+    "\u{2069}",
+    "x"
+  ]
+  for s in singles {
+    println("${codes(s)}=${classify(s)}")
+  }
+  let n = 42
+  let interp = "<\u{2067}${int.to_string(n)}\u{2069}|\u{202E}${int.to_string(n + 1)}\u{202C}>"
+  println("interp=${codes(interp)}")
+  let doc = """
+    h\u{2066}i\u{2069}
+    \u{202D}ok\u{202C}
+    """
+  println("heredoc=${codes(doc)}")
+  for c in string.chars("a\u{2067}b\u{2069}c") {
+    println("char=${codes(c)}")
+  }
+}

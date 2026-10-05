@@ -317,6 +317,7 @@ statement = "Codepoint-aware string ops (chars/reverse/slice/take/drop/first/las
 since     = "0.24.0"
 status    = "active"
 evidence  = [
+  { path = "spec/wasm_cross/string_bidi_controls_literal.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_codepoint.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_ops.almd", class = "fixture" },
 ]
