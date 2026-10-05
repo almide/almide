@@ -184,7 +184,10 @@ pub fn almide_rt_fs_fold_lines_chunked<A: Clone + Send, F: Fn(A, String) -> A + 
             .iter()
             .map(|&(s, e)| {
                 let init = init.clone();
-                scope.spawn(move || fold_lines_range_impl(path, s, e, init, f))
+                scope.spawn(move || {
+                    almide_stack_guard_register();
+                    fold_lines_range_impl(path, s, e, init, f)
+                })
             })
             .collect();
         handles

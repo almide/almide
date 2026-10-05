@@ -21,6 +21,7 @@ fn main() {
             signal(13, 0);
         }
     }
+    almide_stack_guard_install();
     {
         let __almide_hook = std::panic::take_hook();
         std::panic::set_hook(std::boxed::Box::new(move |info| { almide_stdout_flush(); __almide_hook(info); }));
