@@ -44,6 +44,7 @@ spec/integration/cross_module_field_defaults/src/main.almd
 spec/integration/generic_protocol_ports/src/main.almd
 spec/integration/generics/generics_recursive_test.almd
 spec/integration/global_static_names/src/main.almd
+spec/integration/module_fallible_lambda_callee/src/main.almd
 spec/integration/module_path_identity/src/main.almd
 spec/integration/modules/cross_module_unit_effect_test.almd
 spec/integration/modules/vis_effect_test.almd
@@ -290,6 +291,7 @@ spec/wasm_cross/fallible_hof_large_input.almd
 spec/wasm_cross/fallible_hof_matrix_containers.almd
 spec/wasm_cross/fallible_hof_matrix_list.almd
 spec/wasm_cross/fallible_hof_option_effect_callback.almd
+spec/wasm_cross/fallible_hof_recursive_callee.almd
 spec/wasm_cross/fallible_hof_release_matrix.almd
 spec/wasm_cross/fallible_tuple_value_tail.almd
 spec/wasm_cross/fan_any_allfail.almd
@@ -697,6 +699,7 @@ spec/wasm_cross/option_result.almd
 spec/wasm_cross/option_result_ctors.almd
 spec/wasm_cross/option_tuple_payload_matrix.almd
 spec/wasm_cross/option_unwrap_or_else_heap.almd
+spec/wasm_cross/optional_chain_heap_field.almd
 spec/wasm_cross/optional_chain_scalar.almd
 spec/wasm_cross/or_pattern.almd
 spec/wasm_cross/or_pattern_guarded_nullary.almd

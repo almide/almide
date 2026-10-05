@@ -1,0 +1,27 @@
+// @contract: C-284
+// #3392: a fallible lambda in a module fn (`ps |> list.map((p) => count(env, p, n)!)!`)
+// calls that module's own `count` by its bare name. Reached from the entry
+// module, v0.64.0 walled the structural wasm leg with `call:count` — the lifted
+// closure resolved bare calls in no module, so the lookup missed — and the
+// incumbent walled too, so the program was E082 on wasm. A lifted closure now
+// resolves bare calls in the module of the fn that created it (#2664). Rows:
+// map and flat_map callbacks, the recursive call inside the callee's own
+// callback, the ok path, and both err paths (first-err short-circuit).
+// Native and wasm print the same.
+import self.pattern as pattern
+
+fn show(r: Result[Int, String]) -> String = match r {
+  ok(n) => "ok ${int.to_string(n)}",
+  err(e) => "err ${e}",
+}
+
+effect fn main() -> Unit = {
+  let env = pattern.Env { syms: ["f": 1, "g": 2] }
+  println(show(pattern.total(env, [pattern.V(0), pattern.V(1)], 2)))
+  let app = pattern.A(pattern.A(pattern.C("f"), pattern.V(0)), pattern.V(1))
+  println(show(pattern.total(env, [app, pattern.V(1)], 2)))
+  println(show(pattern.total(env, [pattern.V(0), pattern.V(5)], 2)))
+  println(show(pattern.total(env, [pattern.A(pattern.C("h"), pattern.V(0))], 2)))
+  println(show(pattern.spread(env, [app, pattern.V(1)], 2)))
+  println(show(pattern.spread(env, [pattern.V(3)], 2)))
+}

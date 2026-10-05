@@ -3650,6 +3650,8 @@ evidence  = [
   { path = "spec/wasm_cross/list_find_map_short_circuit.almd", class = "fixture" },
   { path = "spec/wasm_cross/fallible_hof_matrix_list.almd", class = "fixture" },
   { path = "spec/wasm_cross/fallible_hof_matrix_containers.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fallible_hof_recursive_callee.almd", class = "fixture" },
+  { path = "spec/integration/module_fallible_lambda_callee/src/main.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-285"
@@ -3711,6 +3713,7 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/adr0005_operator_equivalence.almd", class = "fixture" },
+  { path = "spec/wasm_cross/optional_chain_heap_field.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-290"
