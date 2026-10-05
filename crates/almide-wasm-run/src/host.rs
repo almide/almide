@@ -293,7 +293,62 @@ pub fn run_wasm_real_stdin_args(bytes: &[u8], args: &[String]) -> anyhow::Result
     run_wasm_src(bytes, StdinSource::RealOnce, None, args, None, true)
 }
 
+/// The embedded host's wasm call-stack budget (#3435), set as wasmtime's
+/// `Config::max_wasm_stack` on the one engine every run (and every fan
+/// instance of that run) uses. wasmtime's default is 512 KiB, which made a
+/// plain non-tail recursion (a tree walk, a type checker's `infer`) trap
+/// with `call stack exhausted` 5–8x shallower than the native binary, whose
+/// main thread has an 8 MiB stack. 8 MiB matches native's budget; measured
+/// on 2026-10-06, the embedded lane then reaches at least native's depth on
+/// a non-tail tree walk and on a recursion with heap locals per frame (a
+/// wasm frame is smaller than its native twin). Exhaustion stays the
+/// resource limit C-196 names; this only sets where it is. Stock runtimes
+/// (`wasmtime run`, browsers) keep their own limits.
+pub const EMBEDDED_WASM_STACK: usize = 8 * 1024 * 1024;
+
+/// The native stack of the host thread a guest runs on. wasmtime requires
+/// it to exceed [`EMBEDDED_WASM_STACK`] plus the host frames below and
+/// between guest frames (host imports, the trap handler, and Cranelift
+/// compiling the module on this thread), or a deep guest overflows the
+/// thread's guard page instead of trapping. The size is a virtual
+/// reservation, committed lazily, so a shallow program pays nothing.
+pub(crate) const EMBEDDED_HOST_THREAD_STACK: usize = EMBEDDED_WASM_STACK + 56 * 1024 * 1024;
+
+/// Spawn a scoped thread with [`EMBEDDED_HOST_THREAD_STACK`] — every host
+/// thread that calls into a guest of an [`EMBEDDED_WASM_STACK`] engine.
+pub(crate) fn spawn_guest_thread<'scope, 'env, T: Send + 'scope>(
+    scope: &'scope std::thread::Scope<'scope, 'env>,
+    f: impl FnOnce() -> T + Send + 'scope,
+) -> std::thread::ScopedJoinHandle<'scope, T> {
+    std::thread::Builder::new()
+        .name("almide-wasm-guest".to_string())
+        .stack_size(EMBEDDED_HOST_THREAD_STACK)
+        .spawn_scoped(scope, f)
+        .expect("failed to spawn the embedded wasm guest thread")
+}
+
+/// Run the guest on its own host thread sized for [`EMBEDDED_WASM_STACK`]
+/// (the caller's thread may be any size: a test harness worker, the CLI's
+/// driver). Everything a run touches — stdout/stderr, the exit code, the
+/// serve loop and its signal handling — is per-run state or process-wide,
+/// so moving the run off the caller's thread changes nothing observable; a
+/// host panic is re-raised on the caller's thread.
 fn run_wasm_src(
+    bytes: &[u8],
+    stdin: StdinSource,
+    max_memory_bytes: Option<usize>,
+    args: &[String],
+    watchdog: Option<std::time::Duration>,
+    live: bool,
+) -> anyhow::Result<RunResult> {
+    std::thread::scope(|s| {
+        spawn_guest_thread(s, || run_wasm_src_here(bytes, stdin, max_memory_bytes, args, watchdog, live))
+            .join()
+            .unwrap_or_else(|p| std::panic::resume_unwind(p))
+    })
+}
+
+fn run_wasm_src_here(
     bytes: &[u8],
     stdin: StdinSource,
     max_memory_bytes: Option<usize>,
@@ -307,6 +362,11 @@ fn run_wasm_src(
     // deadline maps to a plain trap.
     let mut cfg = wasmtime::Config::new();
     cfg.epoch_interruption(watchdog.is_some());
+    cfg.max_wasm_stack(EMBEDDED_WASM_STACK);
+    // wasmtime refuses a `max_wasm_stack` above `async_stack_size` (2 MiB by
+    // default) even when, as here, nothing runs async: no fiber is ever
+    // allocated, so this only satisfies the engine's config check.
+    cfg.async_stack_size(EMBEDDED_WASM_STACK + 1024 * 1024);
     let engine = wasmtime::Engine::new(&cfg)?;
     let module = wasmtime::Module::new(&engine, bytes)?;
     let out = Arc::new(Mutex::new(String::new()));

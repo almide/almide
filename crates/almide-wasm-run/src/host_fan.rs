@@ -219,7 +219,9 @@ fn run_all(ctx: &ParCtx, req: &Request) -> Option<(Vec<i64>, usize)> {
                 .map(|_| {
                     let w = taken.pop();
                     let deal = &deal;
-                    s.spawn(move || deal.run(w))
+                    // #3435: a fan worker calls into a guest of the same
+                    // EMBEDDED_WASM_STACK engine, so it needs the same stack.
+                    crate::host::spawn_guest_thread(s, move || deal.run(w))
                 })
                 .collect();
             handles.into_iter().map(|h| h.join().ok().flatten()).collect()
