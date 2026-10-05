@@ -220,10 +220,9 @@ fn render_expr_match(ctx: &RenderContext, expr: &IrExpr) -> String {
 
 /// `LitStr { value }` case of `render_expr`.
 fn render_expr_lit_str(ctx: &RenderContext, value: &str) -> String {
-    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"")
-        .replace('\n', "\\n").replace('\t', "\\t").replace('\r', "\\r");
+    let escaped = escape_rust_str(value);
     ctx.templates.render_with("string_literal", None, &[], &[("value", escaped.as_str())])
-        .unwrap_or_else(|| format!("\"{}\"", value))
+        .unwrap_or_else(|| format!("\"{}\"", escaped))
 }
 
 /// `UnOp { op, operand }` case of `render_expr`.
@@ -574,13 +573,7 @@ fn render_expr_rust_macro(ctx: &RenderContext, name: &Sym, args: &[IrExpr]) -> S
     let args_str = args.iter().map(|a| {
         match &a.kind {
             IrExprKind::LitStr { value } => {
-                let escaped = value
-                    .replace('\\', "\\\\")
-                    .replace('"', "\\\"")
-                    .replace('\n', "\\n")
-                    .replace('\t', "\\t")
-                    .replace('\r', "\\r");
-                format!("\"{}\"", escaped)
+                format!("\"{}\"", escape_rust_str(value))
             }
             _ => render_expr(ctx, a),
         }
