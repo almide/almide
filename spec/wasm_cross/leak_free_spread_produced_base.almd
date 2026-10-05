@@ -1,0 +1,37 @@
+// @contract: C-066
+// A record spread over a PRODUCED base — `{ ...make(i), n: 3 }`, a call
+// result no variable holds — releases the base once its fields are copied.
+// The structural wasm leg copied the base block and never released it, so
+// every iteration leaked the base and the strings it held (#3373). The base
+// here is a call result, a value-position `if`, and a `match`; the spread
+// overwrites a scalar field, a string field, and a list field. The program
+// prints the same text on both targets and ends with no block live.
+type R = { name: String, n: Int, tags: List[String] }
+
+fn make(i: Int) -> R = {
+  name: "item-" + int.to_string(i),
+  n: i,
+  tags: ["t" + int.to_string(i), "u"],
+}
+
+fn pick(i: Int) -> R = if i % 2 == 0 then make(i) else make(i + 100)
+
+fn by_case(i: Int) -> R = match i % 3 {
+  0 => make(i),
+  _ => make(i * 2),
+}
+
+effect fn main() -> Unit = {
+  var total = 0
+  for i in 0..<40 {
+    let a = { ...make(i), n: 3 }
+    let b = { ...pick(i), name: "renamed-" + int.to_string(i) }
+    let c = { ...by_case(i), tags: ["fresh"] }
+    total = total + a.n + string.len(a.name) + list.len(a.tags)
+    total = total + b.n + string.len(b.name) + list.len(b.tags)
+    total = total + c.n + string.len(c.name) + list.len(c.tags)
+  }
+  let last = { ...make(7), n: 0 }
+  println("${last.name} ${last.n} ${list.join(last.tags, ",")}")
+  println(int.to_string(total))
+}
