@@ -1,0 +1,82 @@
+// @contract: C-033
+// A map held in a record, updated functionally through a spread whose base
+// dies there (#3406): `b = add(b, i)` with `fn add(b, i) = { ...b, m:
+// map.set(b.m, …), n: b.n + 1 }`. The structural wasm leg now hands the
+// dying base's credit over (a reassignment moves `b` into `add`; the spread
+// at `add`'s tail rebuilds the record in place and moves `b.m` out of its
+// slot; `map.set` writes an owned receiver in place when its count is 1),
+// so the loop is linear — it copied the whole map per update before (3.8 s
+// for 20 000). The copy-on-write promise is unchanged, and the negative
+// cells below are the ones the move must not break:
+//   A. the issue's loop (call form) and its inline twin;
+//   B. an alias of the record bound before the update keeps the old map;
+//   C. the base still read after a non-reassigning update keeps its map;
+//   D. `b.m` read twice in the update (a borrow beside the consumer);
+//   E. a snapshot of the FIELD taken before the update keeps the old map;
+//   F. two overridden fields that read each other (a swap) — every value
+//      is computed before any slot is overwritten;
+//   G. an owned map param moved into `map.set` at a fn's tail, with an
+//      alias kept by the caller.
+type Box = { m: Map[String, List[Int]], n: Int }
+
+type Pair = { a: Map[String, Int], b: Map[String, Int], tag: String }
+
+fn add(b: Box, i: Int) -> Box = { ...b, m: map.set(b.m, int.to_string(i), list.range(0, 3)), n: b.n + 1 }
+
+fn put(m: Map[String, Int], k: String) -> Map[String, Int] = map.set(m, k, string.len(k))
+
+fn swap(p: Pair) -> Pair = { ...p, a: p.b, b: p.a }
+
+fn yn(x: Bool) -> String = if x then "yes" else "no"
+
+fn keys_of(m: Map[String, List[Int]]) -> String = map.keys(m) |> list.sort |> list.join(",")
+
+fn show(m: Map[String, Int]) -> String = map.keys(m) |> list.sort |> list.map((k) => "${k}=${int.to_string(map.get_or(m, k, 0))}") |> list.join(",")
+
+fn main() -> Unit = {
+  // A. the call form, then the inline form
+  var b = Box { m: [:], n: 0 }
+  for i in 0..<200 {
+    b = add(b, i)
+  }
+  println("A.len=${int.to_string(map.len(b.m))} n=${int.to_string(b.n)} k7=${int.to_string(list.len(map.get_or(b.m, "7", [])))}")
+  var c = Box { m: [:], n: 0 }
+  for i in 0..<50 {
+    c = { ...c, m: map.set(c.m, int.to_string(i * 2), [i]), n: c.n + 2 }
+  }
+  println("A.inline len=${int.to_string(map.len(c.m))} n=${int.to_string(c.n)} k98=${int.to_string(list.sum(map.get_or(c.m, "98", [])))}")
+  // B. an alias of the record bound before the update
+  let old = b
+  b = add(b, 1000)
+  println("B.old=${int.to_string(map.len(old.m))} new=${int.to_string(map.len(b.m))} old.has1000=${yn(map.contains(old.m, "1000"))}")
+  // C. the base read after an update that does not rebind it
+  let next = add(c, 777)
+  println("C.c=${int.to_string(map.len(c.m))} next=${int.to_string(map.len(next.m))} c.has777=${yn(map.contains(c.m, "777"))} c.n=${int.to_string(c.n)}")
+  // D. the field read twice — a borrow beside the consumer
+  var d = Box { m: [:], n: 0 }
+  for i in 0..<5 {
+    let size = map.len(d.m)
+    d = { ...d, m: map.set(d.m, int.to_string(i), [
+      map.len(d.m)
+    ]), n: size }
+  }
+  println("D.keys=${keys_of(d.m)} n=${int.to_string(d.n)} k4=${int.to_string(list.sum(map.get_or(d.m, "4", [])))}")
+  // E. a snapshot of the field taken before the update
+  let snap = b.m
+  b = add(b, 2000)
+  println("E.snap=${int.to_string(map.len(snap))} b=${int.to_string(map.len(b.m))} snap.has2000=${yn(map.contains(snap, "2000"))}")
+  // F. a swap of two overridden fields
+  var p = Pair { a: map.set([:], "x", 1), b: map.set([:], "y", 2), tag: "p" }
+  p = swap(p)
+  let q = p
+  p = swap(p)
+  println("F.p.a=${show(p.a)} p.b=${show(p.b)} q.a=${show(q.a)} q.b=${show(q.b)} tag=${p.tag}")
+  // G. an owned map param moved into map.set at the tail
+  var m: Map[String, Int] = [:]
+  for k in ["a", "bb", "ccc"] {
+    m = put(m, k)
+  }
+  let kept = m
+  m = put(m, "dddd")
+  println("G.m=${show(m)} kept=${show(kept)}")
+}

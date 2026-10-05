@@ -750,6 +750,7 @@ spec/wasm_cross/rc_reclaim_churn.almd
 spec/wasm_cross/record_default_field_omitted.almd
 spec/wasm_cross/record_field_rust_keyword.almd
 spec/wasm_cross/record_forms.almd
+spec/wasm_cross/record_map_field_update.almd
 spec/wasm_cross/record_option_none_cells.almd
 spec/wasm_cross/record_pair_result_return.almd
 spec/wasm_cross/record_scalar_field_assign_alias.almd
