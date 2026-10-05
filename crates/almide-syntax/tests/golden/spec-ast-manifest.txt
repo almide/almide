@@ -1,4 +1,4 @@
-# oracle: almide 0.67.0 (dev) at 162c0c5f3 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.67.0 (dev) at b254678f6 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -1384,6 +1384,7 @@ f9e04d1da846a2f12b4beacf67ba937d06274d35ba21560acc5f22154ecc71ab	spec/wasm_cross
 247d9e62136f6b633e42d39a09d4defe5c4807e164623c370a3bb6526a18bef2	spec/wasm_cross/record_default_field_omitted.almd
 f87a9dc04938e5cdbb50847193c55cadb467cb134a17b37667c8c6d38e58b33c	spec/wasm_cross/record_field_rust_keyword.almd
 57bba4ce4190bc4d013fb1511a001b6e50b72fc3a221bdde1d7cde1b988f65fa	spec/wasm_cross/record_forms.almd
+a0eae11212ca9b55877498781774474edf69f2639208882a355bbdfa097f957e	spec/wasm_cross/record_map_field_update.almd
 6001b0da0b10913c6125405cc5c90a6a337bb4fab134b8ecd941185c11ddf4af	spec/wasm_cross/record_option_none_cells.almd
 77515cfcdcd5881a85ad14d881f95c02f5aa4fafc83c22a689baa99ae04e1ce2	spec/wasm_cross/record_pair_result_return.almd
 83ec1e2b382cecd879983a99c2cbe2a24b9fbb36ea732092c4d5bc81d8ca269f	spec/wasm_cross/record_scalar_field_assign_alias.almd
