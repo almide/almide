@@ -54,7 +54,9 @@ pub enum TypeExpr {
     OpenRecord { fields: Vec<FieldType> },
     Fn { params: Vec<TypeExpr>, ret: Box<TypeExpr>, is_effect: bool },
     Tuple { elements: Vec<TypeExpr> },
-    Variant { cases: Vec<VariantCase>, #[serde(skip)] comments: Vec<ExprComments> },
+    /// `multiline`: the declaration wrote its cases on separate lines — layout
+    /// trivia the formatter keeps (#3393), like `comments`, never type data.
+    Variant { cases: Vec<VariantCase>, #[serde(skip)] comments: Vec<ExprComments>, #[serde(skip)] multiline: bool },
     Union { members: Vec<TypeExpr> },
     /// Compile-time literal value in type argument position (e.g., `Array[Float, 128]`).
     ConstLit { value: i64 },
@@ -85,6 +87,12 @@ pub struct FieldType {
     /// record of its unit or invariant, and dropping it is unrecoverable.
     #[serde(skip)]
     pub comments: Vec<String>,
+    /// Comments written AFTER this field on its own line (`rooms: T, // why`).
+    /// Kept apart from `comments` so the formatter can put them back at the
+    /// end of the field's line: printed above the next field instead, they
+    /// would read as that field's doc (#3393).
+    #[serde(skip)]
+    pub trailing_comments: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
