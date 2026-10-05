@@ -1,4 +1,4 @@
-# oracle: almide 0.67.0 (dev) at 162c0c5f3 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.67.0 (dev) at d1259fd05 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -1441,6 +1441,7 @@ ae523b1c96cb5ed0dcd5d87939a629702e1dde5fe4299c135e5a9098bf47d5c6	spec/wasm_cross
 f5ea72c7f5db8bb32dd4a32658312ed7f6081d59b8b7a5381fb3f6388b040a01	spec/wasm_cross/scan_heap_acc.almd
 e21fdcbb8583602a6847b42033c780c2fa9a7dc40dfc16ee48b8978208a15483	spec/wasm_cross/scoped_region_value.almd
 6a6dc7e0a1816424ceb5317b6b8646513127365d8d7b62eb6322d179945d8b12	spec/wasm_cross/scoped_worker_in_and_out.almd
+2f2995a99eed03034305ba74d817df0a1bd2ec2ce4f5bd8cc7a9c8da8b20b672	spec/wasm_cross/self_call_swapped_params.almd
 acae630e7f0a607852ce6073c8d20b73ccd5492782f39db4bc1d3aa69de47aaa	spec/wasm_cross/set_entries_reclaim.almd
 0b8c7201f2d26abea5b7fe5142dc459440c92118ce77f9a0dc5d02bad4ceb9a7	spec/wasm_cross/set_index_order.almd
 012710321ffac50d4218514f53aaf855f20361e6e68cd6c8eb7c3eef046de0c1	spec/wasm_cross/set_insertion_order.almd

@@ -708,6 +708,7 @@
 66240	spec/wasm_cross/scan_heap_acc.almd
 98320	spec/wasm_cross/scoped_region_value.almd
 66240	spec/wasm_cross/scoped_worker_in_and_out.almd
+66512	spec/wasm_cross/self_call_swapped_params.almd
 66624	spec/wasm_cross/set_entries_reclaim.almd
 76480	spec/wasm_cross/set_index_order.almd
 66864	spec/wasm_cross/set_insertion_order.almd
