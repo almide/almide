@@ -1,4 +1,4 @@
-// @contract: C-062
+// @contract: C-062, C-376
 // Cross-target differential fixture: the RawPtr / linear-memory bridge
 // (`bytes.as_ptr` / `as_mut_ptr` / `from_raw_ptr` / `copy_to_ptr`, #440).
 //

@@ -4903,3 +4903,13 @@ evidence  = [
   { path = "spec/serve_cross/http_serve_export.almd", class = "fixture" },
   { path = "tests/http_serve_export_test.rs", name = "the_stock_serve_export_answers_what_native_answers_under_wasmtime_serve", class = "fixture" },
 ]
+[[contract]]
+id        = "C-376"
+spec      = "ALS-D7"
+title     = "A raw address taken from a Bytes block stays valid until the call it is handed to returns"
+statement = "ALS-D7 (almide/almide#3420): a RawPtr or address taken from a Bytes value (`bytes.as_ptr`, `bytes.as_mut_ptr`, `bytes.data_ptr`) BORROWS that value's block: on both targets the block is not released, and its bytes are not reused, before the call or expression the address is handed to has returned. This holds when the value's last use is in the same argument list as the address (`peek(bytes.data_ptr(b), bytes.len(b))`), when the call is in tail position, when the value is a temporary built inside the argument (`bytes.data_ptr(bytes.from_string(s))`), and when the address is returned by a fn that took it. A named value whose address is bound to a `let` stays valid as long as that binding can be used. Observable: the bytes read or written through the address are the value's own, byte-identical native and wasm. NOT covered: an address used after its value's enclosing fn has returned; the pointer's numeric value. Evidence: spec/wasm_cross/bytes_rawptr.almd, whose #3420 rows read through an address after the value's last use in a tail call, through a temporary, a helper and a `let`-bound address."
+since     = "0.67.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bytes_rawptr.almd", class = "fixture" },
+]
