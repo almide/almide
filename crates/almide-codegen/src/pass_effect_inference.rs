@@ -140,6 +140,7 @@ mod tests {
                 target: almide_base::intern::sym("rust"),
                 module: almide_base::intern::sym("host"),
                 function: almide_base::intern::sym(name),
+                returns_promise: false,
             }],
             export_attrs: vec![],
             attrs: vec![],

@@ -1,0 +1,2 @@
+expects_error = "@extern has no named argument `async`"
+hint_substring = "returns: promise"

@@ -1,0 +1,6 @@
+// A JS hook that answers with a Promise is marked on its @extern with the
+// one named argument there is (#3371); `async: true` is not it.
+@extern(wasm, "js", "kv_get", returns: promise)
+fn kv_get(key: String) -> String
+
+fn main() -> Unit = println("kv")

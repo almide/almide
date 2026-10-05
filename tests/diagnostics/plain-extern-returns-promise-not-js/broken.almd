@@ -1,0 +1,6 @@
+// `returns: promise` marks a hook of the generated JS host (#3371); a
+// native extern has no Promise to wait for.
+@extern(rust, "kv", "get", returns: promise)
+fn kv_get(key: String) -> String
+
+fn main() -> Unit = println("kv")
