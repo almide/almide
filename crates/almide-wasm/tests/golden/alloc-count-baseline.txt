@@ -84,6 +84,7 @@
 38	24	764	38	spec/wasm_cross/closure_captured_map_key_write.almd
 18012	17995	144108	18012	spec/wasm_cross/closure_captured_map_records.almd
 74	47	1431	74	spec/wasm_cross/closure_captured_record_field_mutation.almd
+25	13	208	25	spec/wasm_cross/closure_mut_arg_in_nested_match.almd
 25	7	208	25	spec/wasm_cross/closure_reads_var_written_by_mut_call.almd
 12016	11993	130146	12016	spec/wasm_cross/closure_rich_list_capture.almd
 11	6	184	11	spec/wasm_cross/closure_scalar_captures.almd
