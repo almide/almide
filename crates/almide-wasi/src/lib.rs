@@ -399,6 +399,13 @@ fn exit_can_exceed_preview1(bodies: &[wasmparser::FunctionBody<'_>]) -> anyhow::
 }
 
 pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
+    to_wasi_mapped(bytes, host_ops).map(|(out, _)| out)
+}
+
+/// [`to_wasi`] plus, per defined function of `bytes` (in order), the
+/// position of the defined function it became (`None`: pruned) — what a
+/// debug build's line table (#1315) follows its functions by.
+pub fn to_wasi_mapped(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<(Vec<u8>, Vec<Option<u32>>)> {
     let services = P1Services::from_ops(host_ops);
     let parsed = parse_module(bytes)?;
     let Parsed {
@@ -709,9 +716,16 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     // and types nothing live names (#3114, #3136) — the emitter's helper
     // slots and the base five WASI imports keep fixed indices above so the
     // shims are written once, and most programs reach few of them.
-    let out = prune::prune(&m.finish())?;
+    let (out, fmap) = prune::prune_mapped(&m.finish())?;
     wasmparser::validate(&out)?;
-    Ok(out)
+    let kept_imports = fmap.as_ref().map_or(imports_count, |m| m[..imports_count as usize].iter().flatten().count() as u32);
+    let defined = (0..func_types.len() as u32)
+        .map(|d| match &fmap {
+            None => Some(d),
+            Some(m) => m[(imports_count + d) as usize].map(|f| f - kept_imports),
+        })
+        .collect();
+    Ok((out, defined))
 }
 
 /// Hand-rolled body reencode: call indices remap through the shims, and
