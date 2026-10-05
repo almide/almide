@@ -73,10 +73,35 @@ impl NanoPass for BorrowLoweringPass {
             lower.visit_expr_mut(&mut tl.value);
             ref_binders.extend(lower.ref_binders);
         }
+        let mut guard_reads = GuardReads::default();
+        let bodies = program.functions.iter().map(|f| &f.body)
+            .chain(program.top_lets.iter().map(|tl| &tl.value))
+            .chain(program.modules.iter().flat_map(|m| m.functions.iter().map(|f| &f.body)
+                .chain(m.top_lets.iter().map(|tl| &tl.value))));
+        for body in bodies {
+            almide_ir::visit::IrVisitor::visit_expr(&mut guard_reads, body);
+        }
         let codegen_annotations = &mut program.codegen_annotations;
         codegen_annotations.param_borrows = param_borrows;
         codegen_annotations.ref_binders = ref_binders;
+        codegen_annotations.guard_read_vars = guard_reads.0;
         PassResult { program, changed: true }
+    }
+}
+
+/// Every variable a `match` arm's guard reads, over the FINAL IR — the
+/// `guard_read_vars` annotation the walker's box-pattern rewrite reads.
+#[derive(Default)]
+struct GuardReads(HashSet<VarId>);
+
+impl almide_ir::visit::IrVisitor for GuardReads {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        if let IrExprKind::Match { arms, .. } = &expr.kind {
+            for guard in arms.iter().filter_map(|a| a.guard.as_ref()) {
+                self.0.extend(almide_ir::free_vars::free_vars(guard, &HashSet::new()));
+            }
+        }
+        almide_ir::visit::walk_expr(self, expr);
     }
 }
 

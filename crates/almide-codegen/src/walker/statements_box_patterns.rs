@@ -279,23 +279,21 @@ struct UnboxedArm {
     guard_binds: Vec<String>,
 }
 
-/// Every name `pat` binds, as the renderer spells it (a record field's
-/// shorthand binds the field's name).
-fn binder_names(ctx: &RenderContext, pat: &IrPattern, out: &mut Vec<String>) {
+/// Every variable `pat` binds (a record field's shorthand is lowered to a
+/// `Bind` of its own).
+fn binder_vars(pat: &IrPattern, out: &mut Vec<VarId>) {
     match pat {
-        IrPattern::Bind { var, .. } => out.push(ctx.var_name(*var)),
-        IrPattern::As { var, inner, .. } => { out.push(ctx.var_name(*var)); binder_names(ctx, inner, out); }
-        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => binder_names(ctx, inner, out),
-        IrPattern::Constructor { args, .. } => args.iter().for_each(|a| binder_names(ctx, a, out)),
-        IrPattern::Tuple { elements } => elements.iter().for_each(|e| binder_names(ctx, e, out)),
+        IrPattern::Bind { var, .. } => out.push(*var),
+        IrPattern::As { var, inner, .. } => { out.push(*var); binder_vars(inner, out); }
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => binder_vars(inner, out),
+        IrPattern::Constructor { args, .. } => args.iter().for_each(|a| binder_vars(a, out)),
+        IrPattern::Tuple { elements } => elements.iter().for_each(|e| binder_vars(e, out)),
         IrPattern::List { elements, rest } => {
-            elements.iter().for_each(|e| binder_names(ctx, e, out));
-            if let Some(r) = rest { binder_names(ctx, r, out); }
+            elements.iter().for_each(|e| binder_vars(e, out));
+            if let Some(r) = rest { binder_vars(r, out); }
         }
-        IrPattern::RecordPattern { fields, .. } => fields.iter().for_each(|f| match &f.pattern {
-            Some(p) => binder_names(ctx, p, out),
-            None => out.push(ctx.field_ident(f.name.as_str())),
-        }),
+        IrPattern::RecordPattern { fields, .. } => fields.iter()
+            .filter_map(|f| f.pattern.as_ref()).for_each(|p| binder_vars(p, out)),
         IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => {}
     }
 }
@@ -307,13 +305,15 @@ fn binder_names(ctx: &RenderContext, pat: &IrPattern, out: &mut Vec<String>) {
 /// by-value match each name it reads is then cloned to the by-value type the
 /// guard's rendering expects (a by-reference match binds references in the
 /// body too, so the names already have the guard's type).
-fn guard_binds(ctx: &RenderContext, deferred: &Deferred<'_>, guard: &IrExpr, st: &UnboxState) -> Vec<String> {
+/// Which names the guard reads is `guard_read_vars` (`BorrowLoweringPass`):
+/// a binder is scoped to its own arm, so only this arm's guard can read it.
+fn guard_binds(ctx: &RenderContext, deferred: &Deferred<'_>, st: &UnboxState) -> Vec<String> {
     let mut inner = Vec::new();
-    deferred.iter().for_each(|(_, sub, _)| binder_names(ctx, sub, &mut inner));
-    let read: Vec<String> = almide_ir::free_vars::free_vars(guard, &std::collections::HashSet::new())
-        .into_iter().map(|id| ctx.var_name(id))
-        .filter(|n| inner.contains(n))
-        .collect();
+    deferred.iter().for_each(|(_, sub, _)| binder_vars(sub, &mut inner));
+    inner.retain(|v| ctx.ann.guard_read_vars.contains(v));
+    inner.sort_by_key(|v| v.0);
+    inner.dedup();
+    let read: Vec<String> = inner.into_iter().map(|v| ctx.var_name(v)).collect();
     if read.is_empty() {
         return Vec::new();
     }
@@ -347,7 +347,7 @@ fn unbox_arm_pattern(ctx: &RenderContext, pat: &IrPattern, subject: Option<&Ty>,
         let mv = st.out_of_box(v);
         box_extract(ctx, sub, sub_ty.as_ref(), &mv, &mut st);
     }
-    let guard_binds = guard.map(|g| guard_binds(ctx, &deferred, g, &st)).unwrap_or_default();
+    let guard_binds = if guard.is_some() { guard_binds(ctx, &deferred, &st) } else { Vec::new() };
     Some(UnboxedArm { flat, guards: st.guards, binds: st.binds, guard_binds })
 }
 
