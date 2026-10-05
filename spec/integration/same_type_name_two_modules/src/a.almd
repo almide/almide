@@ -1,0 +1,5 @@
+type Ctx = List[(String, Int)]
+
+fn extend(ctx: Ctx) -> Ctx = [("x", 1)] + ctx
+
+fn size(ctx: Ctx) -> Int = list.len(ctx)
