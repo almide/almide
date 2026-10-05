@@ -487,6 +487,7 @@
 65952	spec/wasm_cross/map_wide_int_key.almd
 66752	spec/wasm_cross/match_binder_stored_owned.almd
 65808	spec/wasm_cross/match_box_pattern_backstop.almd
+66112	spec/wasm_cross/match_catchall_binder_eq.almd
 66368	spec/wasm_cross/match_container_literal.almd
 66384	spec/wasm_cross/match_err_arm_typed_payload.almd
 65968	spec/wasm_cross/match_forms.almd
@@ -930,3 +931,4 @@
 65952	spec/wasm_fail/matrix_ragged_from_lists_aborts.almd
 66176	spec/wasm_fail/matrix_shape_mismatch_aborts.almd
 66960	spec/wasm_fail/rope_geometry_exceeds_aborts.almd
+65744	spec/wasm_fail/stack_overflow_abort.almd
