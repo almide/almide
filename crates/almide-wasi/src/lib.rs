@@ -62,7 +62,7 @@ pub const P1_SERVED_OPS: &[i32] = &[
     74,
     // The subprocess family (#2589, ADR-0025): forwarded to the private
     // `almide:process/spawn` import, which a stock runtime refuses at load.
-    80, 81, 82, 83, 84, 85, 86, 87, 88, 89,
+    80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90,
 ];
 
 pub mod env_overlay;
@@ -332,7 +332,7 @@ pub struct P1Services {
     /// any op of [`FS_SERVICE_OPS`] (#2742): the spliced fs service, its
     /// own page past the park, and the WASI imports it reaches.
     pub fs: bool,
-    /// any process op (80..=89, #2589): the `almide:process/spawn` import,
+    /// any process op (80..=90, #2589): the `almide:process/spawn` import,
     /// its forwarder and the `cabi_realloc` export (`proc_service.rs`).
     pub proc: bool,
 }

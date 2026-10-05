@@ -164,7 +164,7 @@ pub fn almide_proc_exec_status_timeout(
                     return Err(format!(
                         "process.exec_status_timeout({operand}): the child was stopped by {sig}: \
                          it tried to use the terminal from a background process group; \
-                         run terminal programs with process.exec_attached"
+                         run terminal programs with process.run"
                     ));
                 }
                 Err(e) => {
@@ -215,12 +215,26 @@ pub fn almide_proc_stop_tree(child: &mut std::process::Child) {
     let _ = child.wait();
 }
 
-/// The terminal-attached run (#2540): the child inherits stdin, stdout and
-/// stderr; nothing is captured; the answer is the exit code (-1 if signalled).
-pub fn almide_proc_exec_attached(cmd: &str, args: &[String]) -> Result<i64, String> {
+/// The terminal-attached run (#2540, `process.run` since #3379): the child
+/// inherits stdin, stdout and stderr; nothing is captured; the answer is the
+/// exit code (-1 if signalled).
+pub fn almide_proc_run(cmd: &str, args: &[String]) -> Result<i64, String> {
     match std::process::Command::new(cmd).args(args).status() {
         Ok(status) => Ok(status.code().unwrap_or(-1) as i64),
-        Err(e) => Err(almide_proc_call_err("process.exec_attached", &format!("{cmd:?}"), e)),
+        Err(e) => Err(almide_proc_call_err("process.run", &format!("{cmd:?}"), e)),
+    }
+}
+
+/// `run` in `dir`; a bad `dir` fails at spawn too, so both operands are named
+/// (exec_in's form).
+pub fn almide_proc_run_in(dir: &str, cmd: &str, args: &[String]) -> Result<i64, String> {
+    match std::process::Command::new(cmd).args(args).current_dir(dir).status() {
+        Ok(status) => Ok(status.code().unwrap_or(-1) as i64),
+        Err(e) => Err(almide_proc_call_err(
+            "process.run_in",
+            &format!("{}, {}", almide_proc_q(dir), almide_proc_q(cmd)),
+            e,
+        )),
     }
 }
 

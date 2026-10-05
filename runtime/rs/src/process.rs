@@ -145,9 +145,14 @@ fn almide_process_poll_child(child: &mut std::process::Child) -> std::io::Result
     Ok(AlmideChildPoll::Running)
 }
 
-pub fn almide_rt_process_exec_attached(cmd: &str, args: &[String]) -> Result<i64, String> {
+pub fn almide_rt_process_run(cmd: &str, args: &[String]) -> Result<i64, String> {
     almide_stdout_flush();
-    almide_proc_exec_attached(cmd, args)
+    almide_proc_run(cmd, args)
+}
+
+pub fn almide_rt_process_run_in(dir: &str, cmd: &str, args: &[String]) -> Result<i64, String> {
+    almide_stdout_flush();
+    almide_proc_run_in(dir, cmd, args)
 }
 
 pub fn almide_rt_process_pid() -> i64 {

@@ -100,7 +100,7 @@ effect fn main() -> Unit = {
 
 Execute a command and return exit code, stdout, and stderr. The child's stdin
 is null (not the terminal) and its output is captured, so a program that needs
-the terminal — a pager, an editor, `stty` — belongs in `process.exec_attached`.
+the terminal — a pager, an editor, `stty` — belongs in `process.run`.
 
 ```almd check
 import process
@@ -212,7 +212,7 @@ tree — which makes it a background job for the controlling terminal. A child
 that reads the terminal or changes its settings (`stty -echo`) is stopped by
 the kernel with SIGTTIN / SIGTTOU; that stop is answered at once with an err
 (`...: the child was stopped by SIGTTOU: it tried to use the terminal from a
-background process group; run terminal programs with process.exec_attached`)
+background process group; run terminal programs with process.run`)
 rather than by waiting out the deadline.
 
 ```almd check
@@ -226,26 +226,49 @@ effect fn main() -> Unit = {
 }
 ```
 
-### `process.exec_attached(cmd: String, args: List[String]) -> Result[Int, String]`
+### `process.run(cmd: String, args: List[String]) -> Result[Int, String]`
 
 Run a command ON this program's terminal: the child inherits stdin, stdout and
 stderr and stays in this program's process group, so pagers, editors, `stty`
-and anything else that reads or reconfigures the terminal work. Nothing is
-captured and there is no timeout; the answer is the exit code (-1 if the child
-was killed by a signal). Native only, like every process call.
+and anything else that reads or reconfigures the terminal work, and a long
+build streams its output as it runs. This program's stdout is flushed before
+the child starts. Nothing is captured and there is no timeout; the answer is
+the exit code (-1 if the child was killed by a signal). It runs natively and on
+the embedded wasm host (`almide run --target wasm`), like every process call.
+
+`exec*` captures the output and returns it; `run*` attaches to the terminal and
+returns the exit code.
 
 ```almd check
 import process
 
 effect fn main() -> Unit = {
-  let code = process.exec_attached("stty", ["-echo"])!
-  println("stty exited ${code}")
+  let code = process.run("cargo", ["build"])!
+  println("cargo build exited ${code}")
 }
 ```
 
+### `process.run_in(dir: String, cmd: String, args: List[String]) -> Result[Int, String]`
+
+`run` with the child's working directory set to `dir`. A `dir` that does not
+exist fails at the spawn, and the err names both `dir` and `cmd`.
+
+```almd check
+import process
+
+effect fn main() -> Unit = {
+  let code = process.run_in("/tmp", "ls", ["-la"])!
+  println("ls exited ${code}")
+}
+```
+
+### `process.exec_attached(cmd: String, args: List[String]) -> Result[Int, String]`
+
+Deprecated alias of `process.run` (the name it shipped under, 0.63.0..0.66.0).
+
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (15 functions)
+## Signature index (17 functions)
 
 ```
 // Stdout on exit 0; else err with stderr text.
@@ -282,7 +305,15 @@ effect process.exec_status_timeout(cmd: String, args: List[String], timeout_ms: 
 
 // Run cmd on this terminal; exit code, -1 if signalled.
 // @since unreleased
-effect process.exec_attached(cmd: String, args: List[String]) -> Int
+effect process.run(cmd: String, args: List[String]) -> Int
+
+// run in dir; exit code, -1 if signalled.
+// @since unreleased
+effect process.run_in(dir: String, cmd: String, args: List[String]) -> Int
+
+// Alias of process.run.
+// @since 0.63.0
+effect process.exec_attached(cmd: String, args: List[String]) -> Int   (deprecated — use process.run)
 
 // OS process ID of this program.
 // @since 0.12.3 or earlier

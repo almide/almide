@@ -38,6 +38,7 @@ pub const P3_EXCLUDED_P1_OPS: &[(i32, &str)] = &[
     (87, PROC_EXCLUDED),
     (88, PROC_EXCLUDED),
     (89, PROC_EXCLUDED),
+    (90, PROC_EXCLUDED),
 ];
 
 /// Reject an artifact before writing it when its direct shim cannot serve it.
@@ -55,7 +56,7 @@ pub fn check(host_ops: &[i32], p3: bool) -> Result<(), String> {
 
 /// `operation_name`, with the subprocess family (#2589) named as one.
 fn operation_label(op: i32) -> &'static str {
-    if (80..=89).contains(&op) { "the subprocess family (process.exec / exec_status / spawn / kill / …)" } else { operation_name(op) }
+    if (80..=90).contains(&op) { "the subprocess family (process.exec / exec_status / spawn / kill / …)" } else { operation_name(op) }
 }
 
 fn operation_name(op: i32) -> &'static str {

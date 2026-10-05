@@ -4,7 +4,7 @@
 //! verbatim), so the captured text, the exit code and every err string agree
 //! with native by construction.
 //!
-//! One operation = `(op, a, b) -> ok(text) | err(text)`, op 80..=89 in the
+//! One operation = `(op, a, b) -> ok(text) | err(text)`, op 80..=90 in the
 //! WIT `enum op` order (wit/process/spawn.wit). It reaches the host two ways:
 //!
 //! - the raw module's `almide.fs_call` (the embedded lane — `almide run
@@ -22,7 +22,7 @@ use std::sync::Mutex;
 
 /// The first and last process op (`almide:process/spawn`'s `enum op`).
 pub(crate) const OP_FIRST: i32 = 80;
-pub(crate) const OP_LAST: i32 = 89;
+pub(crate) const OP_LAST: i32 = 90;
 
 /// `None` = every command is allowed (no `proc` key in `[permissions]`).
 static ALLOW: Mutex<Option<Vec<String>>> = Mutex::new(None);
@@ -67,7 +67,7 @@ fn status_text((code, stdout, stderr): (i64, String, String)) -> String {
     format!("{code}\n{}\n{stdout}{stderr}", stdout.chars().count())
 }
 
-/// Split a frame whose FIRST cell is an extra operand (exec_in's command,
+/// Split a frame whose FIRST cell is an extra operand (exec_in's / run_in's command,
 /// exec_with_stdin's input, exec_status_timeout's bound) from the arguments.
 fn head_and_args(b: &str) -> Result<(String, Vec<String>), String> {
     let mut all = cells(b)?;
@@ -79,7 +79,7 @@ fn head_and_args(b: &str) -> Result<(String, Vec<String>), String> {
 }
 
 /// Serve one operation. `flush` runs before a child that shares this
-/// program's stdout starts (exec_attached), as native flushes its own.
+/// program's stdout starts (run / run_in), as native flushes its own.
 pub(crate) fn call(op: i32, a: &str, b: &str, flush: &dyn Fn()) -> Result<String, String> {
     use almide_rt_core::process_core as core;
     match op {
@@ -108,9 +108,9 @@ pub(crate) fn call(op: i32, a: &str, b: &str, flush: &dyn Fn()) -> Result<String
             core::almide_proc_exec_status_timeout(a, &args, ms, core::almide_proc_try_wait_poll).map(status_text)
         }
         85 => {
-            allowed("process.exec_attached", a)?;
+            allowed("process.run", a)?;
             flush();
-            core::almide_proc_exec_attached(a, &cells(b)?).map(|c| c.to_string())
+            core::almide_proc_run(a, &cells(b)?).map(|c| c.to_string())
         }
         86 => {
             allowed("process.spawn", a)?;
@@ -125,6 +125,12 @@ pub(crate) fn call(op: i32, a: &str, b: &str, flush: &dyn Fn()) -> Result<String
             Ok(if core::almide_proc_is_alive(pid) { "1" } else { "0" }.to_string())
         }
         89 => Ok(std::process::id().to_string()),
+        90 => {
+            let (cmd, args) = head_and_args(b)?;
+            allowed("process.run_in", &cmd)?;
+            flush();
+            core::almide_proc_run_in(a, &cmd, &args).map(|c| c.to_string())
+        }
         _ => Err(format!("unknown process op {op}")),
     }
 }

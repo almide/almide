@@ -141,7 +141,7 @@ fn a_linker_without_the_import_refuses_the_guest_at_instantiation() {
 /// canonical import above lowers. A reordered case or a changed signature
 /// fails here before it can disagree with the emitter or the host.
 #[test]
-fn the_wit_names_the_ten_ops_in_host_op_order_and_the_call_shape() {
+fn the_wit_names_the_eleven_ops_in_host_op_order_and_the_call_shape() {
     let mut resolve = wit_parser::Resolve::default();
     let pkg = resolve
         .push_str("spawn.wit", include_str!("../../wit/process/spawn.wit"))
@@ -153,7 +153,7 @@ fn the_wit_names_the_ten_ops_in_host_op_order_and_the_call_shape() {
     let cases: Vec<&str> = e.cases.iter().map(|c| c.name.as_str()).collect();
     assert_eq!(
         cases,
-        ["exec", "exec-in", "exec-with-stdin", "exec-status", "exec-status-timeout", "exec-attached", "spawn", "kill", "is-alive", "pid"]
+        ["exec", "exec-in", "exec-with-stdin", "exec-status", "exec-status-timeout", "run", "spawn", "kill", "is-alive", "pid", "run-in"]
     );
     assert_eq!(super::OP_LAST - super::OP_FIRST + 1, cases.len() as i32);
     let call = &resolve.interfaces[iface].functions["call"];
