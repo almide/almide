@@ -1,0 +1,9 @@
+type Cell[T] = { value: T }
+
+type Grid = { cells: List[Cell[Int]] }
+
+effect fn main() -> Unit = {
+  let c: Cell[Int] = { value: 1 }
+  let g: Grid = { cells: [c] }
+  println(int.to_string(list.len(g.cells)))
+}

@@ -128,4 +128,59 @@ impl Checker {
         }
         diag
     }
+
+    /// E093 (#3403): every application `X[A, ..]` in an annotation whose
+    /// argument count differs from the declared parameter count of the type
+    /// it names. A generic alias applied to its own count was already
+    /// expanded by the resolver; one applied to another count stays `Named`
+    /// under its key, and so does a generic record or variant. A bare
+    /// spelling (no brackets) is not an application and is never reported.
+    fn type_arity_diags(&self, ty: &Ty, span: Option<crate::ast::Span>, ctx: &str, seen: &mut std::collections::HashSet<(Sym, usize)>) -> Vec<Diagnostic> {
+        let mut out = Vec::new();
+        let mut stack = vec![ty];
+        while let Some(t) = stack.pop() {
+            if let Ty::Named(s, args) = t
+                && !args.is_empty()
+                && let Some(params) = crate::canonicalize::resolve::declared_type_params(s.as_str(), &self.env.types)
+                && params.len() != args.len()
+                && seen.insert((*s, args.len()))
+            {
+                out.push(self.type_arity_diag(s.as_str(), params, args.len(), span, ctx));
+            }
+            stack.extend(t.children());
+        }
+        out
+    }
+
+    fn type_arity_diag(&self, name: &str, params: &[Ty], given: usize, span: Option<crate::ast::Span>, ctx: &str) -> Diagnostic {
+        let letters: Vec<String> = params.iter().map(|p| p.display()).collect();
+        let (msg, hint) = if letters.is_empty() {
+            (
+                format!("type '{}' takes no type arguments, but is applied to {}", name, given),
+                format!("Drop the brackets: write `{}` — only a type declared with parameters (`type {}[T] = ...`) takes arguments", name, name),
+            )
+        } else {
+            let spelled = format!("{}[{}]", name, letters.join(", "));
+            (
+                format!("type '{}' takes {}, but is applied to {}", spelled, plural_args(letters.len()), given),
+                format!("Write exactly one type per parameter: `{}`", spelled),
+            )
+        };
+        let mut diag = err(msg, hint, ctx.to_string()).with_code("E093");
+        let Some(sp) = span else { return diag };
+        diag.file = self.source_file.clone();
+        diag.line = Some(sp.line);
+        diag.col = Some(sp.col);
+        let bare = name.rsplit('.').next().unwrap_or(name);
+        if let Some((line, col)) = self.locate_type_name(sp.line, sp.col, bare) {
+            diag.line = Some(line);
+            diag.col = Some(col);
+            diag.end_col = Some(col + bare.chars().count());
+        }
+        diag
+    }
+}
+
+fn plural_args(n: usize) -> String {
+    if n == 1 { "1 type argument".to_string() } else { format!("{} type arguments", n) }
 }

@@ -60,6 +60,7 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
     register_type_decl_variant_ctors(env, diagnostics, name, prefix, &mut resolved);
     register_type_decl_check_duplicate(env, diagnostics, name, prefix, &resolved);
     register_type_decl_finalize(env, name, ty, prefix, resolved, user_shadow);
+    register_type_params(env, name, prefix, &gnames, user_shadow);
 
     if let Some(derives) = deriving {
         register_derive_sigs(env, derives, name, prefix);
@@ -225,6 +226,19 @@ fn register_type_decl_finalize(env: &mut TypeEnv, name: &str, ty: &ast::TypeExpr
     } else if prefix.is_none() {
         // A local type owns the bare name now — it is no longer a dependency alias, so a later genuine local duplicate is still caught by E020.
         env.prefixed_bare_aliases.remove(&sym(name));
+    }
+}
+/// Record the declaration's parameter letters, in declared order, under the
+/// same keys as its `types` entry (#3403): a generic transparent alias
+/// substitutes its arguments for exactly these, and the checker counts them
+/// against every application. A non-generic declaration records none, so
+/// `Score[Int]` under `type Score = Int` is a count of 1 against 0.
+fn register_type_params(env: &mut TypeEnv, name: &str, prefix: Option<&str>, gnames: &[Sym], user_shadow: bool) {
+    let params = Ty::Tuple(gnames.iter().map(|g| Ty::TypeVar(*g)).collect());
+    let key = prefixed_key(prefix, name);
+    env.types.insert(crate::canonicalize::resolve::type_params_key(&key), params.clone());
+    if prefix.is_some() && !user_shadow {
+        env.types.insert(crate::canonicalize::resolve::type_params_key(name), params);
     }
 }
 /// A module type's field default expressions, keyed `mod.Type` /

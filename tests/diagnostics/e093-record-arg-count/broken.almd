@@ -1,0 +1,10 @@
+// A one-parameter generic record applied to two type arguments, in a field.
+type Cell[T] = { value: T }
+
+type Grid = { cells: List[Cell[Int, String]] }
+
+effect fn main() -> Unit = {
+  let c: Cell[Int] = { value: 1 }
+  let g: Grid = { cells: [c] }
+  println(int.to_string(list.len(g.cells)))
+}
