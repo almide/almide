@@ -11,8 +11,8 @@ almide-ir = { path = "../almide-ir" }
 almide-base = { path = "../almide-base" }
 almide-types = { path = "../almide-types" }
 almide-layout = { path = "../almide-layout" }
-wasm-encoder = { version = "0.259", features = ["wasmparser"] }
-wasmparser = "0.259"
+wasm-encoder = { version = "0.261", features = ["wasmparser"] }
+wasmparser = "0.261"
 # #1315: the DWARF line table of a debug build (`debug_lines.rs`). The writer
 # alone — no_std + alloc, so the wasm32 consumers of this crate still build;
 # the crate is already in the lock graph (wasmtime reads DWARF with it).
@@ -29,7 +29,7 @@ almide-verify = { path = "../almide-verify" }
 almide-wasm-run = { path = "../almide-wasm-run" }
 almide-wasm-vm = { path = "../almide-wasm-vm" }
 almide = { path = "../.." }
-wasmparser = "0.259"
+wasmparser = "0.261"
 wasmtime = "49.0.2"
 sha2 = "0.11"
 gimli = { version = "0.33", default-features = false, features = ["read", "std"] }
