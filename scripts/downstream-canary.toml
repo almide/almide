@@ -144,7 +144,7 @@ commands = ["check", "test"]
 
 [[project]]
 repo = "O6lvl4/arlk"
-commands = ["check", "test", "build"]
+commands = ["check", "test", "test src/", "build"]
 
 [[project]]
 repo = "O6lvl4/assay"
