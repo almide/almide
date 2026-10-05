@@ -487,6 +487,19 @@ impl Lower<'_> {
         if !branches.is_empty() {
             return branches.into_iter().for_each(|b| self.own_consumed_ref_mut(b));
         }
+        // The box-deref of a payload a by-reference match bound (`*a` with
+        // `a: &Box<T>`, #3434) is a `Box<T>` place behind a reference: a
+        // by-value slot owns the boxed value, `(**a).clone()`.
+        if let IrExprKind::Deref { expr: inner } = &e.kind
+            && var_id(inner).is_some_and(|id| self.ref_binders.contains(&id))
+            && !is_copy_scalar(&e.ty)
+        {
+            let ty = e.ty.clone();
+            let span = e.span;
+            let place = std::mem::replace(e, mk(IrExprKind::Unit, Ty::Unit, None));
+            *e = owned_read(mk(IrExprKind::Deref { expr: Box::new(place) }, ty, span));
+            return;
+        }
         let Some(id) = var_id(e) else { return };
         // A field a destructure bound by reference off a borrowed record
         // (`let { b, n } = p`, #3303) is in the same position: the binder is
