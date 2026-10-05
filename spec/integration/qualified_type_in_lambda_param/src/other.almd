@@ -1,0 +1,3 @@
+type Entry = { lookup: Int, mask: Int }
+
+fn hit(es: List[Entry], gs: List[Int]) -> Bool = list.len(es) > 0 and list.len(gs) > 1

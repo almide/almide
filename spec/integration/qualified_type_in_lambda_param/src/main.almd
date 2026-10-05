@@ -1,0 +1,17 @@
+// #3433: a lambda parameter annotated with a module-qualified type inside a
+// type application (`List[other.Entry]`) resolves to that module's type even
+// when another module declares a type with the same bare name.
+# /private/tmp/claude-501/-Users-o6lvl4-workspace-github-com-almide-almide/138ee738-3cee-4823-8bca-fc10f8010c68/scratchpad/p3433/src/main.almd  (12 lines, 339 B)
+ 1│ import self.other
+ 2│ import self.third
+ 3│ 
+ 4│ fn position(es: List[other.Entry], g: Int) -> Int = {
+ 5│   let w = (xs: List[other.Entry], gs: List[Int]) => other.hit(xs, gs)
+ 6│   if w(es, [g, 1]) or w(es, [1, g]) then 1 else 0
+ 7│ }
+ 8│ 
+ 9│ effect fn main() -> Unit = {
+10│   println(int.to_string(position([{ lookup: 3, mask: 1 }], 7)))
+11│   println(third.first().text)
+12│ }
+# shown: 12 lines, 387 B
