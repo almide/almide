@@ -149,9 +149,9 @@ id = "legacy-native-callback-names"
 issue = 3425
 since_epoch = 10
 since = "0.67.0"
-removal_epoch = 11
+removal_epoch = 12
 summary = "A package's `native/*.rs` may still call the package's own fns by their spelling before #3338 (`almide_rt_tf_v0_entry`, `almide_rt_tf_v0_calc_double`), through a deprecated alias of the injective name (`almide_rt_tf_0v0_entry`, `almide_rt_tf_0v0_1calc_double`). The build warns once per old name it finds. A name that the old spelling made ambiguous (`a.b` and `a_b`) gets no alias."
-removal = "epoch 11 drops the aliases: a `native/*.rs` calling `crate::almide_rt_<pkg>_v<N>_<fn>` or `..._v<N>_<sub>_<fn>` gets rustc E0425 — write the injective name the warning prints (`_` in a segment is `_0`, a `.` is `_1`)"
+removal = "epoch 12 drops the aliases: a `native/*.rs` calling `crate::almide_rt_<pkg>_v<N>_<fn>` or `..._v<N>_<sub>_<fn>` gets rustc E0425 — write the injective name the warning prints (`_` in a segment is `_0`, a `.` is `_1`)"
 =======
 [[epoch]]
 n = 11
