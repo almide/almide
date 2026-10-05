@@ -77,6 +77,9 @@ env:
   # Bump this suffix to force a clean rebuild of the opam (Rocq) cache.
   OPAM_CACHE_VERSION: v1
   OCAML_VERSION: "5.4.1"
+  # The rocq-core release CI proves on. It is in the cache key, so moving it
+  # rebuilds the toolchain instead of restoring an older one.
+  ROCQ_CORE_VERSION: "9.3.0"
 
 jobs:
   trust-spine:
@@ -111,7 +114,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.opam
-          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq9-${{ env.OPAM_CACHE_VERSION }}
+          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}
 
       - name: Install opam + wabt (wat2wasm for the A2 byte-binding grounding)
         run: |
@@ -151,10 +154,11 @@ jobs:
           opam switch create "${OCAML_VERSION}" -y
           eval "$(opam env)"
           # opam's published rocq-prover has no 9.1.1 (the local trusted base is a
-          # source build); CI re-derives on the latest opam 9.x — the proofs use
-          # only the Rocq-9 `From Stdlib Require` stdlib + basic List/Arith, stable
-          # across 9.x. The canonical trusted base stays 9.1.1 (TRUSTED_BASE.md).
-          opam install -y "rocq-prover>=9.0.0"
+          # source build); CI re-derives on the pinned ROCQ_CORE_VERSION. It is
+          # pinned because 9.x minors can break the spine: 9.3 reserved `is`, and
+          # an unpinned cold cache picked it up mid-release (#3368). The canonical
+          # trusted base stays 9.1.1 (TRUSTED_BASE.md).
+          opam install -y "rocq-prover>=9.0.0" "rocq-core=${ROCQ_CORE_VERSION}"
 
       # coqc/coqchk are what proofs/*.sh invoke. Rocq 9 may expose the prover as
       # `rocq compile` / `rocq check`; install guarded shims iff the classic
@@ -222,7 +226,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ~/.opam
-          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq9-${{ env.OPAM_CACHE_VERSION }}
+          key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}
 
       # ── #571: the qualification dossier, on release tags only ──────────
       # The spine just verified THIS tree, so the receipt inside the dossier
