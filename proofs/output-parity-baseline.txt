@@ -285,6 +285,7 @@ spec/wasm_cross/env_args.almd
 spec/wasm_cross/env_platform_reporting.almd
 spec/wasm_cross/env_set_overlay.almd
 spec/wasm_cross/env_sleep_pause.almd
+spec/wasm_cross/err_arm_takes_let_match_type.almd
 spec/wasm_cross/error_operators.almd
 spec/wasm_cross/exit_code_out_of_range.almd
 spec/wasm_cross/exit_code_upper_bound.almd
@@ -956,6 +957,7 @@ spec/wasm_cross/toplevel_const_wrapping.almd
 spec/wasm_cross/trig_libm.almd
 spec/wasm_cross/tuple_eq.almd
 spec/wasm_cross/tuple_ops.almd
+spec/wasm_cross/tuple_scrutinee_list_payload_into_ok.almd
 spec/wasm_cross/tuple_scrutinee_recursive_variants.almd
 spec/wasm_cross/tuple_single.almd
 spec/wasm_cross/uint64_assert_display.almd
