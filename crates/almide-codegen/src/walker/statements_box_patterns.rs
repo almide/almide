@@ -269,11 +269,70 @@ fn box_extract(ctx: &RenderContext, pat: &IrPattern, ty: Option<&Ty>, move_expr:
     }
 }
 
-/// Rewrite an arm whose pattern holds a boxed-nested refutable pattern.
-/// Returns `(flat_pattern, shape_guards, body_let_else_binds)` or None if the arm
-/// has no boxed-nested position (the common case → no rewrite).
-fn unbox_arm_pattern(ctx: &RenderContext, pat: &IrPattern, subject: Option<&Ty>, borrowed: bool)
-    -> Option<(String, Vec<String>, Vec<String>)>
+/// A boxed-nested arm's rewrite: the flat pattern, the structural shape
+/// guards, the body's `let-else` move-outs, and — when the user guard reads a
+/// name only those move-outs bind — the binds the guard runs under (#3414).
+struct UnboxedArm {
+    flat: String,
+    guards: Vec<String>,
+    binds: Vec<String>,
+    guard_binds: Vec<String>,
+}
+
+/// Every name `pat` binds, as the renderer spells it (a record field's
+/// shorthand binds the field's name).
+fn binder_names(ctx: &RenderContext, pat: &IrPattern, out: &mut Vec<String>) {
+    match pat {
+        IrPattern::Bind { var, .. } => out.push(ctx.var_name(*var)),
+        IrPattern::As { var, inner, .. } => { out.push(ctx.var_name(*var)); binder_names(ctx, inner, out); }
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => binder_names(ctx, inner, out),
+        IrPattern::Constructor { args, .. } => args.iter().for_each(|a| binder_names(ctx, a, out)),
+        IrPattern::Tuple { elements } => elements.iter().for_each(|e| binder_names(ctx, e, out)),
+        IrPattern::List { elements, rest } => {
+            elements.iter().for_each(|e| binder_names(ctx, e, out));
+            if let Some(r) = rest { binder_names(ctx, r, out); }
+        }
+        IrPattern::RecordPattern { fields, .. } => fields.iter().for_each(|f| match &f.pattern {
+            Some(p) => binder_names(ctx, p, out),
+            None => out.push(ctx.field_ident(f.name.as_str())),
+        }),
+        IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => {}
+    }
+}
+
+/// The binds a user guard needs when it reads a name bound inside a box
+/// (#3414): the body's move-outs only run AFTER the guard, so the guard used
+/// to name a variable not yet in scope (rustc E0425). A guard cannot move out
+/// of the matched value, so the guard re-destructures BY REFERENCE; on a
+/// by-value match each name it reads is then cloned to the by-value type the
+/// guard's rendering expects (a by-reference match binds references in the
+/// body too, so the names already have the guard's type).
+fn guard_binds(ctx: &RenderContext, deferred: &Deferred<'_>, guard: &IrExpr, st: &UnboxState) -> Vec<String> {
+    let mut inner = Vec::new();
+    deferred.iter().for_each(|(_, sub, _)| binder_names(ctx, sub, &mut inner));
+    let read: Vec<String> = almide_ir::free_vars::free_vars(guard, &std::collections::HashSet::new())
+        .into_iter().map(|id| ctx.var_name(id))
+        .filter(|n| inner.contains(n))
+        .collect();
+    if read.is_empty() {
+        return Vec::new();
+    }
+    let mut gst = UnboxState { borrowed: true, counter: st.counter, ..UnboxState::default() };
+    for (v, sub, sub_ty) in deferred {
+        let access = st.through_box(v);
+        box_extract(ctx, sub, sub_ty.as_ref(), &access, &mut gst);
+    }
+    let mut out = gst.binds;
+    if !st.borrowed {
+        out.extend(read.iter().map(|n| format!("let {n} = ::std::clone::Clone::clone({n});")));
+    }
+    out
+}
+
+/// Rewrite an arm whose pattern holds a boxed-nested refutable pattern, or
+/// None if the arm has no boxed-nested position (the common case → no rewrite).
+fn unbox_arm_pattern(ctx: &RenderContext, pat: &IrPattern, subject: Option<&Ty>, borrowed: bool, guard: Option<&IrExpr>)
+    -> Option<UnboxedArm>
 {
     if !has_box_nest(ctx, pat, subject) {
         return None;
@@ -281,14 +340,15 @@ fn unbox_arm_pattern(ctx: &RenderContext, pat: &IrPattern, subject: Option<&Ty>,
     let mut st = UnboxState { borrowed, ..UnboxState::default() };
     let mut deferred = Vec::new();
     let flat = flatten(ctx, pat, subject, &mut st, &mut deferred);
-    for (v, sub, sub_ty) in deferred {
-        let access = st.through_box(&v);
+    for (v, sub, sub_ty) in &deferred {
+        let access = st.through_box(v);
         let guard = box_shape_guard(ctx, sub, sub_ty.as_ref(), &access, &mut st.counter);
         st.guards.push(guard);
-        let mv = st.out_of_box(&v);
+        let mv = st.out_of_box(v);
         box_extract(ctx, sub, sub_ty.as_ref(), &mv, &mut st);
     }
-    Some((flat, st.guards, st.binds))
+    let guard_binds = guard.map(|g| guard_binds(ctx, &deferred, g, &st)).unwrap_or_default();
+    Some(UnboxedArm { flat, guards: st.guards, binds: st.binds, guard_binds })
 }
 
 // ── Match arm rendering ──
@@ -306,7 +366,7 @@ pub fn match_needs_unreachable_backstop(
     arms: &[IrMatchArm],
     subject_ty: &almide_lang::types::Ty,
 ) -> bool {
-    if !arms.iter().any(|a| unbox_arm_pattern(ctx, &a.pattern, Some(subject_ty), false).is_some()) {
+    if !arms.iter().any(|a| unbox_arm_pattern(ctx, &a.pattern, Some(subject_ty), false, None).is_some()) {
         return false;
     }
     let has_irrefutable = arms.iter().any(|a| {
@@ -336,9 +396,9 @@ pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide
     // #610: a boxed-nested constructor pattern is rewritten to a flat pattern + a
     // `matches!` shape-guard + `let-else` box move-outs in the body. None when the
     // arm has no boxed-nested position (the common case → identical to before).
-    let (pattern, shape_guards, box_binds) = match unbox_arm_pattern(ctx, &arm.pattern, Some(subject_ty), borrowed) {
-        Some((flat, guards, binds)) => (flat, guards, binds),
-        None => (render_pattern_hinted(ctx, &arm.pattern, Some(subject_ty)), Vec::new(), Vec::new()),
+    let (pattern, shape_guards, box_binds, guard_binds) = match unbox_arm_pattern(ctx, &arm.pattern, Some(subject_ty), borrowed, arm.guard.as_ref()) {
+        Some(u) => (u.flat, u.guards, u.binds, u.guard_binds),
+        None => (render_pattern_hinted(ctx, &arm.pattern, Some(subject_ty)), Vec::new(), Vec::new(), Vec::new()),
     };
     // err() in a match arm where the match type is NOT Result: early return.
     // This handles `let x: T = match ... { none => err("msg") }` in
@@ -368,7 +428,10 @@ pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide
     // arm to apply, so a non-match falls through) then any user guard.
     let mut guard_conds = shape_guards;
     if let Some(ref guard) = arm.guard {
-        guard_conds.push(render_expr(ctx, guard));
+        // The shape guards run first (`&&` short-circuits), so a guard's
+        // re-destructuring `let-else` only ever sees a value it matches.
+        let g = render_expr(ctx, guard);
+        guard_conds.push(if guard_binds.is_empty() { g } else { format!("{{ {} {} }}", guard_binds.join(" "), g) });
     }
     let full_pattern = if guard_conds.is_empty() {
         pattern

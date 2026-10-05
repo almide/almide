@@ -49,6 +49,7 @@ pub mod pass_var_storage;
 pub mod pass_borrow_lowering;
 pub mod pass_fan_lowering;
 pub mod pass_list_pattern;
+mod pass_list_pattern_nested;
 pub mod pass_match_subject;
 pub mod pass_pattern_literal_guard;
 pub mod pass_result_propagation;
