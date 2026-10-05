@@ -803,6 +803,7 @@ spec/wasm_cross/scalar_if_arm_effects.almd
 spec/wasm_cross/scan_heap_acc.almd
 spec/wasm_cross/scoped_region_value.almd
 spec/wasm_cross/scoped_worker_in_and_out.almd
+spec/wasm_cross/self_call_swapped_params.almd
 spec/wasm_cross/set_entries_reclaim.almd
 spec/wasm_cross/set_index_order.almd
 spec/wasm_cross/set_insertion_order.almd
