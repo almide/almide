@@ -1,0 +1,23 @@
+// #3401: two modules of one package each declare `Ctx` (an alias in `a`, a
+// record in `b`) and `Shape` (two variants with a same-named `Dot` case), and
+// the entry program declares its own alias `Ctx`. Each file's bare `Ctx` and
+// `Shape` mean its own declaration: v0.64.0 resolved `a`'s bare `Ctx` to
+// `b.Ctx` (E005 inside `a`, reported at a line past the end of `a.almd`),
+// and this file's `Ctx` to `b.Ctx` too. Native and wasm print the same.
+import self.a
+import self.b
+
+type Ctx = Int
+
+fn twice(n: Ctx) -> Ctx = n * 2
+
+effect fn main() -> Unit = {
+  println(int.to_string(a.count(["x", "y"])))
+  println(int.to_string(a.first_len(["abc", "d"])))
+  println(b.label(b.Ctx { label: "ok" }))
+  println(int.to_string(a.labelled(b.Ctx { label: "four" })))
+  println(int.to_string(b.width(b.Ctx { label: "seven!!" })))
+  println(int.to_string(a.size_of(0) + a.size_of(5)))
+  println(int.to_string(b.size_of("") + b.size_of("abc")))
+  println(int.to_string(twice(21)))
+}
