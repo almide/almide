@@ -1,4 +1,4 @@
-# oracle: almide 0.67.0 (dev) at 03bd20361 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.67.0 (dev) at 36b269107 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -61,7 +61,7 @@ b7f2cda2744a99ecb5a5ffe2d8fe194c3ad0bd2875f8c685e56da0658d3c66b0	0	spec/wasm_cro
 7f12bb3e398cd822504e36e7872e4d4995e3c14ec2b1383b1669160dd1b45a6c	0	spec/wasm_cross/bytes_param_writeback.almd
 c792fb4741f502bf10c03105ba8fccb0b8ebbab319a64f6572c5bcd454e738af	0	spec/wasm_cross/bytes_push_growth.almd
 9422b95a5e9325e99b4848aa8d911c6ddf0745dea8d00a54dc8915fa23de5d2f	0	spec/wasm_cross/bytes_push_inplace.almd
-8ce597b21e849f02dcc3836985537a52946bd397a5845d1e8186993001eefba4	0	spec/wasm_cross/bytes_rawptr.almd
+190324ebb94f17b07adc7b0fd2bb0396e2f544388787232b275cc7e138bb5782	0	spec/wasm_cross/bytes_rawptr.almd
 98262b6f9eeb458c5ce5258c76bd9cce11d69cbc9f3a38a1d55e922950570fb2	1	spec/wasm_cross/bytes_repeat_product_wrap_oom.almd
 91b0b7afca5bc66079f503d16264d18079b42a15117a21d0efca81b04a692135	0	spec/wasm_cross/bytes_search_edit_family.almd
 e094bfa52cffc8886ef4037802625e3f8e26a03a6badcee3fa66136a8b2fdc2b	0	spec/wasm_cross/bytes_set_on_record_field.almd
