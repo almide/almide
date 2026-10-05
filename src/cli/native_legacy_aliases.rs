@@ -224,7 +224,7 @@ pub fn almide_rt_tf_0v0_1solo_f() -> i64 { 5 }
         let text = "crate::almide_rt_tf_v0_entry(1) + crate::almide_rt_tf_v0_entry(2) + crate::almide_rt_tf_0v0_entry(3)";
         let w = warnings("native/host.rs", text, &a);
         assert_eq!(w.len(), 1, "{w:?}");
-        assert!(w[0].contains("`almide_rt_tf_0v0_entry`") && w[0].contains("dialect epoch 11"), "{}", w[0]);
+        assert!(w[0].contains("`almide_rt_tf_0v0_entry`") && w[0].contains("dialect epoch 12"), "{}", w[0]);
         assert!(warnings("native/host.rs", text, &a).is_empty());
     }
 }
