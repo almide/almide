@@ -1,0 +1,5 @@
+type Ctx = { names: List[String] }
+
+fn empty() -> Ctx = Ctx { names: [] }
+
+fn add(ctx: Ctx, n: String) -> Ctx = Ctx { names: ctx.names + [n] }
