@@ -461,6 +461,7 @@
 37	25	372	37	spec/wasm_cross/map_fold_heap_acc.almd
 44	29	328	44	spec/wasm_cross/map_fold_heap_acc_skv.almd
 5	0	24	5	spec/wasm_cross/map_fold_heap_accumulator.almd
+43	27	281	43	spec/wasm_cross/map_get_fallback_key_and_lazy.almd
 799	735	50963	799	spec/wasm_cross/map_index_order.almd
 17900	17703	3142658	17900	spec/wasm_cross/map_index_released_with_block.almd
 35	22	449	35	spec/wasm_cross/map_index_string_key_shapes.almd

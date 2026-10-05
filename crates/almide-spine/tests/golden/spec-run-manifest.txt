@@ -1,4 +1,4 @@
-# oracle: almide 0.67.0 (dev) at 162c0c5f3 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.67.0 (dev) at c13d73653 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -462,6 +462,7 @@ bb2bd47b404405938e181b9c7b50cbed8d4876e867fc99d90476cd4dbec74bab	0	spec/wasm_cro
 4032721872be9075dc2859d33de016e1060a4be55a43d8df3731e8c9565a3a47	0	spec/wasm_cross/map_fold_heap_acc.almd
 ee1e137a6285f347dac3ddaf5882b9b00d6cf0c2e0222b27e5a7c26a8a07057f	0	spec/wasm_cross/map_fold_heap_acc_skv.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/map_fold_heap_accumulator.almd
+176bdc8073f33ed820d91b01829f1056387a2da0000ccf2d44ea08b3c6a84b47	0	spec/wasm_cross/map_get_fallback_key_and_lazy.almd
 cf641d88ae39e757a5269a7246b68d961e50c1ce17fc6732acab2f8534d6b402	0	spec/wasm_cross/map_index_order.almd
 0c58ea383ba00afa364c7e74fd0b06b54e89e6ce0eee609bd0dc0a08cc4f7518	0	spec/wasm_cross/map_index_released_with_block.almd
 f14deed0e8352664923791544b1dbaab56ea38ac4c07aefb27644d418ef4a274	0	spec/wasm_cross/map_index_string_key_shapes.almd
