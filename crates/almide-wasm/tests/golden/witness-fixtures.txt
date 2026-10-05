@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 861 of 902
+# certified: 866 of 902
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -152,6 +152,7 @@ spec/wasm_cross/effect_slot_never_err_bang.almd
 spec/wasm_cross/effect_tail_carrier_family.almd
 spec/wasm_cross/effect_tco.almd
 spec/wasm_cross/effect_tco_err_rewrap.almd
+spec/wasm_cross/effect_tuple_result_tco.almd
 spec/wasm_cross/effect_unit_yields_result.almd
 spec/wasm_cross/effect_unwrap_in_loop.almd
 spec/wasm_cross/empty_collection_annotated.almd
@@ -513,6 +514,7 @@ spec/wasm_cross/mut_map_param.almd
 spec/wasm_cross/mut_param_alias_cow.almd
 spec/wasm_cross/mut_param_alias_in_place_mutators.almd
 spec/wasm_cross/mut_param_branch_forward.almd
+spec/wasm_cross/mut_param_call_chain.almd
 spec/wasm_cross/mut_param_cell_tail_capture_read.almd
 spec/wasm_cross/mut_param_cell_tail_capture_write.almd
 spec/wasm_cross/mut_param_closure_capture_read.almd
@@ -527,6 +529,7 @@ spec/wasm_cross/mut_param_interpolated.almd
 spec/wasm_cross/mut_param_loop_stays_in_place.almd
 spec/wasm_cross/mut_param_reassign_from_hof.almd
 spec/wasm_cross/mut_param_spread_reassign.almd
+spec/wasm_cross/mut_param_tail_recursion.almd
 spec/wasm_cross/mut_param_writeback_growth.almd
 spec/wasm_cross/mut_scalar_param_reassign.almd
 spec/wasm_cross/mutable_global_bytes_copy_from.almd
@@ -579,6 +582,8 @@ spec/wasm_cross/or_pattern_guarded_nullary.almd
 spec/wasm_cross/or_pattern_heap_subject_matrix.almd
 spec/wasm_cross/ord_record_variant.almd
 spec/wasm_cross/ord_recursive.almd
+spec/wasm_cross/panic_abort_positions.almd
+spec/wasm_cross/panic_value_arm.almd
 spec/wasm_cross/path_extension_hidden.almd
 spec/wasm_cross/phantom_type_param.almd
 spec/wasm_cross/pipe_chain_scalar_bind.almd
