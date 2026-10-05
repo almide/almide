@@ -3,7 +3,7 @@
 // this file only ever links on the wasm legs through the self-host registry.
 //
 // Every operation is one call of the private `almide:process/spawn`
-// capability: an op (the `__proc_*` leaf, host op 80..=89 in WIT `enum op`
+// capability: an op (the `__proc_*` leaf, host op 80..=90 in WIT `enum op`
 // order), two text operands, and an ok(text) / err(text) answer. The embedded
 // host serves it with the SAME core native runs
 // (crates/almide-rt-core/src/process_core.rs), so the captured text, the exit
@@ -13,7 +13,7 @@
 // Operand frames reuse http_framed's decimal CHAR-length cells
 // (`<string.len>\n<payload>`), parsed by the host with the same char
 // arithmetic: the argument list is one cell per argument, and an operation
-// that needs a third operand (exec_in's command, exec_with_stdin's input,
+// that needs a third operand (exec_in's / run_in's command, exec_with_stdin's input,
 // exec_status_timeout's bound) puts it in the first cell.
 import process
 
@@ -34,7 +34,9 @@ effect fn __proc_exec_status(cmd: String, argv: String) -> Result[String, String
 
 effect fn __proc_exec_status_timeout(cmd: String, argv: String) -> Result[String, String] = _
 
-effect fn __proc_exec_attached(cmd: String, argv: String) -> Result[String, String] = _
+effect fn __proc_run(cmd: String, argv: String) -> Result[String, String] = _
+
+effect fn __proc_run_in(dir: String, argv: String) -> Result[String, String] = _
 
 effect fn __proc_spawn(cmd: String, argv: String) -> Result[String, String] = _
 
@@ -87,8 +89,13 @@ effect fn __process_exec_status_timeout_impl(cmd: String, args: List[String], ti
   ok(__proc_status(f))
 }
 
-effect fn __process_exec_attached_impl(cmd: String, args: List[String]) -> Result[Int, String] = {
-  let code = __proc_exec_attached(cmd, __proc_argv(args))!
+effect fn __process_run_impl(cmd: String, args: List[String]) -> Result[Int, String] = {
+  let code = __proc_run(cmd, __proc_argv(args))!
+  ok(int.parse(code) ?? -1)
+}
+
+effect fn __process_run_in_impl(dir: String, cmd: String, args: List[String]) -> Result[Int, String] = {
+  let code = __proc_run_in(dir, __proc_argv([cmd] + args))!
   ok(int.parse(code) ?? -1)
 }
 

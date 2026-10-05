@@ -119,7 +119,7 @@ schema = 3
 # wasi_services.rs), testing.assert_throws is native-only-forever with
 # the subprocess family (process.exec/exec_in/exec_status/
 # exec_status_timeout/exec_with_stdin/spawn/is_alive/kill/pid; and
-# exec_attached, #2540);
+# exec_attached, #2540; run/run_in, #3379);
 # process.env and process.stdin_lines stay pending-port (environ and
 # stdin exist in WASI; the split the ruling asked for).
 # 2026-09-21 (schema 3): 34 -> 56 is the CLASS basis, not a regression.
@@ -721,6 +721,22 @@ issue = "#2589"
 
 [[unavailable]]
 fn = "process.exec_attached"
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host), and its stock artifact carries that import, which a stock runtime refuses at load (#2589, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
+issue = "#2589"
+
+[[unavailable]]
+fn = "process.run"
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host), and its stock artifact carries that import, which a stock runtime refuses at load (#2589, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
+issue = "#2589"
+
+[[unavailable]]
+fn = "process.run_in"
 legs = ["stock-p1"]
 class = "host-capability"
 justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host), and its stock artifact carries that import, which a stock runtime refuses at load (#2589, ADR-0025)"

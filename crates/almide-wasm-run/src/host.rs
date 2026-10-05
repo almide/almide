@@ -466,7 +466,7 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
     }
     linker.func_wrap("almide", "exit", exit_host)?;
     // The private subprocess import (#2589): the canonical form a stock
-    // artifact carries, served here with the same core as ops 80..=89.
+    // artifact carries, served here with the same core as ops 80..=90.
     crate::host_process::link_spawn_import(&mut linker)?;
     linker.func_wrap(
         "almide",
@@ -564,7 +564,7 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
                 *caller.data().fs_buf.lock().expect("fs buf") = buf;
                 return Ok(ret);
             }
-            // ops 80..=89 = almide:process/spawn (#2589, ADR-0025): the
+            // ops 80..=90 = almide:process/spawn (#2589, ADR-0025): the
             // subprocess core native runs; stdout flushed before a child
             // that shares it.
             if (crate::host_process::OP_FIRST..=crate::host_process::OP_LAST).contains(&op) {

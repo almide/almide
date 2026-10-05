@@ -617,7 +617,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // `almide:process/spawn` import, which the p1 core module carries and no
     // component world declares — refuse the component build by name rather
     // than let a transform fail on an import it cannot place.
-    let proc_op = host_ops.iter().copied().find(|op| (80..=89).contains(op));
+    let proc_op = host_ops.iter().copied().find(|op| (80..=90).contains(op));
     if component && let Some(op) = proc_op {
         err(&format!(
             "error[E081]: process.* (host op {op}) needs the private almide:process/spawn capability, which no component world declares (ADR-0025)\n  \

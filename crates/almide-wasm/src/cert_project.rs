@@ -64,7 +64,7 @@ pub mod cap {
     pub const NET: u32 = 7;
     /// A program-declared `@extern(wasm, ..)` host function.
     pub const FOREIGN: u32 = 8;
-    /// Starting and signalling child processes (ops 80..=89, the private
+    /// Starting and signalling child processes (ops 80..=90, the private
     /// `almide:process/spawn` capability, ADR-0025). Past [`super::SENTINEL`]
     /// so the sentinel keeps its small value.
     pub const PROC: u32 = 10;
@@ -100,7 +100,7 @@ pub fn op_caps(op: i32) -> &'static [u32] {
         34 | 36 | 60 => &[CLOCK],
         35 => &[STDIN],
         43..=50 | 53..=59 | 70..=72 => &[NET],
-        80..=89 => &[PROC],
+        80..=90 => &[PROC],
         _ => &[SENTINEL],
     }
 }
