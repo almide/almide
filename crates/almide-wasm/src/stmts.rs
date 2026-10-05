@@ -314,7 +314,8 @@ impl Emitter<'_> {
         self.owned_ty.insert(idx, ty);
     }
 
-    pub(crate) fn lower_stmt(&mut self, s: &IrStmt) -> Result<(), EmitError> {
+    /// A statement's lowering; `lower_stmt` (debug_lines.rs) brackets it.
+    pub(crate) fn lower_stmt_kind(&mut self, s: &IrStmt) -> Result<(), EmitError> {
         match &s.kind {
             IrStmtKind::Bind { var, value, .. } => self.lower_stmt_bind(var, value),
             // `p.field = v` on a record var: copy-on-write write-back —
