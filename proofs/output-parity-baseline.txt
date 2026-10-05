@@ -766,6 +766,7 @@ spec/wasm_cross/recursion_depth_within_limits.almd
 spec/wasm_cross/recursive_generic_repr_interp.almd
 spec/wasm_cross/recursive_payload_closure_capture.almd
 spec/wasm_cross/recursive_payload_nested_pattern.almd
+spec/wasm_cross/recursive_payload_top_let.almd
 spec/wasm_cross/reduce_str.almd
 spec/wasm_cross/ref_gleam_capture_shadow.almd
 spec/wasm_cross/ref_gleam_div_zero_abort.almd
