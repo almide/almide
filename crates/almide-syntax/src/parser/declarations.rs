@@ -256,12 +256,12 @@ impl Parser {
         // wrong inside braces too. The loop-keyword hint does not — "no
         // top-level loops" misreads a loop the author indented into the body.
         let loop_head = matches!(value.as_str(), "while" | "for" | "loop");
-        if typo_hint.is_none() || loop_head {
-            if let Some(diag) = self.braceless_body_overflow() {
-                let msg = format!("{} at line {}:{}", diag.message, line, col);
-                self.errors.push(diag);
-                return msg;
-            }
+        if (typo_hint.is_none() || loop_head)
+            && let Some(diag) = self.braceless_body_overflow()
+        {
+            let msg = format!("{} at line {}:{}", diag.message, line, col);
+            self.errors.push(diag);
+            return msg;
         }
         if let Some(result) = typo_hint {
             let msg = result.message.as_deref().unwrap_or("Unexpected token at top level");
