@@ -24,9 +24,10 @@
 #      ledger edit in the same change.
 #
 # A fixture's `// @host-flags: <flags>` line adds flags to its --host js
-# builds (#3353: `--async-import NAME`). A fixture with async imports needs
-# a node with JSPI (WebAssembly.Suspending, Node >= 24.20): locally an older
-# node skips that fixture with a warning, in CI it is a failure.
+# builds. A fixture with async imports (an `@extern(wasm, "js", ...,
+# returns: promise)`, #3353/#3371) needs a node with JSPI
+# (WebAssembly.Suspending, Node >= 24.20): locally an older node skips that
+# fixture with a warning, in CI it is a failure.
 #
 # Requires: node (>= 18). Locally a missing node skips with a warning; in CI
 # it is a failure (the job installs node, so its absence means the gate
@@ -94,7 +95,7 @@ for f in "$FIXTURE_DIR"/*.almd; do
   host="$dir/$stem.host.mjs"
   leg="$(sed -n 's|^// @leg: *||p' "$f" | head -1)"
   read -r -a hostflags <<< "$(sed -n 's|^// @host-flags: *||p' "$f" | head -1)"
-  if [ "$HAVE_JSPI" -eq 0 ] && printf '%s\n' "${hostflags[@]}" | grep -q -- '--async-import'; then
+  if [ "$HAVE_JSPI" -eq 0 ] && grep -Eq '^@extern\(wasm, *"js",.*returns *[:=] *promise' "$f"; then
     if [ "${CI:-}" = "true" ]; then
       echo "FAIL $f: async imports need a node with JSPI (WebAssembly.Suspending), this one is $(node --version)"; fail=1; continue
     fi

@@ -194,12 +194,6 @@ enum Commands {
         /// marshalled, anything else is refused at build time.
         #[arg(long = "host")]
         host: Option<String>,
-        /// With `--host js` (#3353): the `@extern(wasm, "js", NAME)` imports
-        /// whose hook returns a Promise. The module suspends on them through
-        /// JSPI, and every export that can reach one becomes async in the
-        /// glue. Repeat the flag or separate names with commas.
-        #[arg(long = "async-import", value_delimiter = ',')]
-        async_import: Vec<String>,
     },
     /// Run tests
     Test {
@@ -1175,7 +1169,7 @@ fn dispatch(cli: Cli) {
             let file = resolve_file(file);
             cli::cmd_bench(&file, runs, target.as_deref(), &program_args);
         }
-        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, component, heap_cap, host, async_import } => {
+        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, component, heap_cap, host } => {
             let file = resolve_file(file);
             warn_no_verified_deprecated(no_verified);
             cli::cmd_build(cli::BuildArgs {
@@ -1195,8 +1189,7 @@ fn dispatch(cli: Cli) {
                 component,
                 heap_cap,
                 host: host.as_deref(),
-                async_imports: &async_import,
-            });
+                });
         }
         Commands::Test { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests, show_output } => {
             dispatch_test(TestArgs { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests, show_output })

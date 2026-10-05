@@ -9,7 +9,13 @@ use super::*;
 /// code propagates through its own release path. An infallible one cannot
 /// return an err, so a throw abandons the instance: the frames it unwinds
 /// never release their blocks, and no later call may run on that heap.
-fn hook_body(e: &HostExtern, call: &str, result: Option<&Val>, recorded: Option<&ExportRet>) -> Result<String, String> {
+/// A SYNC hook's call (#3371) goes through `sync()`, which refuses a
+/// thenable: an unmarked hook that returns a Promise would otherwise hand the
+/// module `"[object Promise]"` or `0`. That refusal is not the hook's err —
+/// the fallible catch passes it through — and abandons the instance like a
+/// throw from an infallible hook. A marked (`returns: promise`) hook awaits
+/// instead and carries no check.
+fn hook_body(e: &HostExtern, call: &str, sync: bool, result: Option<&Val>, recorded: Option<&ExportRet>) -> Result<String, String> {
     let (module, name) = (&e.module, &e.import);
     if returns_result(&e.sig) {
         let m = marshal_of(visible_ret(&e.sig)).expect("checked by check_marshallable");
@@ -23,7 +29,8 @@ fn hook_body(e: &HostExtern, call: &str, result: Option<&Val>, recorded: Option<
                 e.sig.name
             ));
         }
-        return Ok(format!("try {{ return okResult({}, {call}); }} catch (e) {{ return errResult(e); }}", exports::shape_literal(m)));
+        let pass = if sync { "if (e instanceof UnmarkedPromise) throw e; " } else { "" };
+        return Ok(format!("try {{ return okResult({}, {call}); }} catch (e) {{ {pass}return errResult(e); }}", exports::shape_literal(m)));
     }
     let body = match (marshal_of(&e.sig.ret).expect("checked"), result) {
         (Marshal::Unit, _) | (_, None) => format!("{call};"),
@@ -53,9 +60,9 @@ pub(super) fn import_object_js(sigs: &WasmSigs, surface: &HostSurface, suspensio
         let call = if suspends {
             format!("(await hook(\"{module}\", \"{name}\")({}))", conv.join(", "))
         } else {
-            format!("hook(\"{module}\", \"{name}\")({})", conv.join(", "))
+            format!("sync(\"{module}\", \"{name}\", hook(\"{module}\", \"{name}\")({}))", conv.join(", "))
         };
-        let body = hook_body(e, &call, sig.results.first(), import_rets.get(&(module.clone(), name.clone())))?;
+        let body = hook_body(e, &call, !suspends, sig.results.first(), import_rets.get(&(module.clone(), name.clone())))?;
         if suspends {
             js.push_str(&format!("  jsImports.{name} = new WebAssembly.Suspending(async ({}) => {{ {body} }});\n", args.join(", ")));
         } else {

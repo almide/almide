@@ -1,6 +1,7 @@
-//! Async JS imports through JSPI (#3353): `--host js --async-import NAME`.
+//! Async JS imports through JSPI (#3353): `--host js` with an
+//! `@extern(wasm, "js", NAME, returns: promise)` (#3371).
 //!
-//! A named `@extern(wasm, "js", NAME)` import is wrapped in
+//! A marked `@extern(wasm, "js", NAME, ...)` import is wrapped in
 //! `WebAssembly.Suspending`, so a hook that returns a Promise suspends the
 //! wasm stack until it settles; Almide code sees an ordinary synchronous
 //! call. JSPI throws `SuspendError` when a Suspending import is reached from

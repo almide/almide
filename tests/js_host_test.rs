@@ -288,16 +288,16 @@ fn an_effect_export_unwraps_its_result_block() {
     assert!(dts.contains("export function raw(key: string): string;") && dts.contains("export class AlmideError extends Error {}"), "{dts}");
 }
 
-const ASYNC_PROGRAM: &str = "@extern(wasm, \"js\", \"kv_get\")\nfn kv_get(key: String) -> String\n\nfn lookup(key: String) -> String = \"value=\" + kv_get(key)\nfn width(s: String) -> Int = string.len(s)\nfn main() -> Unit = {}\n";
+const ASYNC_PROGRAM: &str = "@extern(wasm, \"js\", \"kv_get\", returns: promise)\nfn kv_get(key: String) -> String\n\nfn lookup(key: String) -> String = \"value=\" + kv_get(key)\nfn width(s: String) -> Int = string.len(s)\nfn main() -> Unit = {}\n";
 
-/// #3353: `--async-import` wraps the named import in `WebAssembly.Suspending`
-/// and makes exactly the exports that reach it async; the rest stay
-/// synchronous behind the busy guard. Running it is `async_imports` in
-/// `spec/wasm_host_js` (needs a node with JSPI).
+/// #3353/#3371: an `@extern(wasm, "js", ..., returns: promise)` import is
+/// wrapped in `WebAssembly.Suspending`, and exactly the exports that reach it
+/// become async; the rest stay synchronous behind the busy guard. Running it
+/// is `async_imports` in `spec/wasm_host_js` (needs a node with JSPI).
 #[test]
-fn an_async_import_makes_the_exports_that_reach_it_async() {
+fn a_promise_extern_makes_the_exports_that_reach_it_async() {
     let dir = tempfile::tempdir().unwrap();
-    let (ok, stderr) = build(dir.path(), ASYNC_PROGRAM, &["--target", "wasm", "--host", "js", "--async-import", "kv_get", "-o", "app.wasm"]);
+    let (ok, stderr) = build(dir.path(), ASYNC_PROGRAM, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
     assert!(ok, "{stderr}");
     let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
     let dts = std::fs::read_to_string(dir.path().join("app.d.ts")).unwrap();
@@ -305,24 +305,42 @@ fn an_async_import_makes_the_exports_that_reach_it_async() {
     assert!(js.contains("promised = { lookup: WebAssembly.promising(instance.exports.lookup) };"), "{js}");
     assert!(js.contains("jspiOrRefuse([\"kv_get\"]);"), "{js}");
     assert!(js.contains("idle(\"width\");"), "{js}");
+    // A marked hook awaits; it carries no thenable refusal.
+    assert!(!js.contains("sync(\"js\", \"kv_get\""), "{js}");
     assert!(dts.contains("export function lookup(key: string): Promise<string>;"), "{dts}");
     assert!(dts.contains("export function width(s: string): number;"), "{dts}");
     assert!(dts.contains("kv_get: (key: string) => string | Promise<string>;"), "{dts}");
-    // Without the flag, the glue is the synchronous one.
-    let (ok, stderr) = build(dir.path(), ASYNC_PROGRAM, &["--target", "wasm", "--host", "js", "-o", "sync.wasm"]);
+    // Unmarked, the glue is the synchronous one.
+    let unmarked = ASYNC_PROGRAM.replace(", returns: promise", "");
+    let (ok, stderr) = build(dir.path(), &unmarked, &["--target", "wasm", "--host", "js", "-o", "sync.wasm"]);
     assert!(ok, "{stderr}");
     let sync = std::fs::read_to_string(dir.path().join("sync.js")).unwrap();
     assert!(!sync.contains("Suspending") && !sync.contains("serial(") && !sync.contains("idle("), "{sync}");
 }
 
+/// #3371: the build flag `--async-import` is gone — the marker lives on the
+/// extern declaration.
 #[test]
-fn an_async_import_must_name_a_declared_js_import() {
+fn the_async_import_flag_is_removed() {
     let dir = tempfile::tempdir().unwrap();
-    let (ok, stderr) = build(dir.path(), ASYNC_PROGRAM, &["--target", "wasm", "--host", "js", "--async-import", "kv_put", "-o", "app.wasm"]);
-    assert!(!ok && stderr.contains("--async-import `kv_put` names no @extern") && stderr.contains("kv_get"), "{stderr}");
-    assert!(!dir.path().join("app.js").exists(), "a refused build writes no glue");
-    let (ok, stderr) = build(dir.path(), ASYNC_PROGRAM, &["--target", "wasm", "--async-import", "kv_get", "-o", "app.wasm"]);
-    assert!(!ok && stderr.contains("--async-import names imports of the JS host"), "{stderr}");
+    let (ok, stderr) = build(dir.path(), ASYNC_PROGRAM, &["--target", "wasm", "--host", "js", "--async-import", "kv_get", "-o", "app.wasm"]);
+    assert!(!ok && stderr.contains("--async-import"), "{stderr}");
+}
+
+/// #3371: a sync hook's answer goes through `sync()`, which refuses a
+/// thenable with the named fix and abandons the instance; a fallible hook's
+/// catch passes that refusal through instead of turning it into an err.
+/// Running it is `unmarked_promise` in `spec/wasm_host_js`.
+#[test]
+fn an_unmarked_hook_that_returns_a_promise_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ok, stderr) = build(dir.path(), HOOK_ERRORS, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(ok, "{stderr}");
+    let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
+    assert!(js.contains("if (typeof r?.then !== \"function\") return r;"), "{js}");
+    assert!(js.contains("returned a Promise; mark its @extern with returns: promise"), "{js}");
+    assert!(js.contains(r#"sync("js", "peek", hook("js", "peek")(readString(a0)))"#), "{js}");
+    assert!(js.contains("catch (e) { if (e instanceof UnmarkedPromise) throw e; return errResult(e); }"), "{js}");
 }
 
 const HOOK_ERRORS: &str = "@extern(wasm, \"js\", \"get\")\neffect fn get(key: String) -> String\n\n@extern(wasm, \"js\", \"count\")\nfn count(key: String) -> Result[Int, String]\n\n@extern(wasm, \"js\", \"peek\")\nfn peek(key: String) -> String\n\neffect fn lookup(key: String) -> String = get(key)! + peek(key)\neffect fn total(key: String) -> Int = count(key)! + 1\nfn main() -> Unit = {}\n";
@@ -338,8 +356,8 @@ fn a_hook_throw_is_an_err_for_a_fallible_extern_and_abandons_otherwise() {
     assert!(ok, "{stderr}");
     let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
     let dts = std::fs::read_to_string(dir.path().join("app.d.ts")).unwrap();
-    assert!(js.contains(r#"jsImports.get = (a0) => { try { return okResult({k:"str"}, hook("js", "get")(readString(a0))); } catch (e) { return errResult(e); } };"#), "{js}");
-    assert!(js.contains(r#"return okResult({k:"int"}, hook("js", "count")"#), "{js}");
+    assert!(js.contains(r#"jsImports.get = (a0) => { try { return okResult({k:"str"}, sync("js", "get", hook("js", "get")(readString(a0)))); } catch (e) { if (e instanceof UnmarkedPromise) throw e; return errResult(e); } };"#), "{js}");
+    assert!(js.contains(r#"return okResult({k:"int"}, sync("js", "count", hook("js", "count")"#), "{js}");
     assert!(js.contains(r#"catch (e) { throw abandon("js", "peek", e); }"#), "{js}");
     assert!(js.contains("if (abandoned !== null) throw new Error(abandoned);"), "{js}");
     assert!(dts.contains("count: (key: string) => number;") && dts.contains("get: (key: string) => string;"), "{dts}");

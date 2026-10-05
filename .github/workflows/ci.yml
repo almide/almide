@@ -1494,7 +1494,7 @@ jobs:
       - name: Doc fences execute (#1490 — marked stdlib examples check/run byte-exactly)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-doc-fences.sh
 
-      # Node 24: the JS host gate's async-import fixture needs JSPI
+      # Node 24: the JS host gate's `returns: promise` fixtures need JSPI
       # (WebAssembly.Suspending / promising, on by default from Node 24.20, #3353 #3362).
       - uses: actions/setup-node@v7
         with:
