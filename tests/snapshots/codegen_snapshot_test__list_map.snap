@@ -355,6 +355,21 @@ pub fn almide_rt_list_drop_end<T: Clone>(xs: &[T], n: i64) -> Vec<T> {
     let end = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize };
     xs[..end].to_vec()
 }
+
+// The OWNED twins of the range ops (#3398). The ops above borrow their source
+// (#3397); where the source is not read again — its last use, or a temporary —
+// BorrowLowering hands it over by value and calls the `_owned` twin, which
+// keeps the elements it returns by moving them instead of cloning each one.
+// Same results as the borrowing op for every argument (negative counts and
+// out-of-range bounds included); the twin table is `owned_source.rs`.
+pub fn almide_rt_list_take_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { xs.truncate(n as usize); xs }
+pub fn almide_rt_list_drop_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { let k = (n as usize).min(xs.len()); xs.drain(..k); xs }
+pub fn almide_rt_list_take_while_owned<A: Clone>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let k = xs.iter().take_while(|x| f((*x).clone())).count(); xs.truncate(k); xs }
+pub fn almide_rt_list_drop_while_owned<A: Clone>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let k = xs.iter().take_while(|x| f((*x).clone())).count(); xs.drain(..k); xs }
+pub fn almide_rt_list_find_owned<A: Clone>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<A> { let i = xs.iter().position(|x| f(x.clone()))?; Some(xs.swap_remove(i)) }
+pub fn almide_rt_list_slice_owned<T>(mut xs: Vec<T>, start: i64, end: i64) -> Vec<T> { let s = start as usize; let e = (end as usize).min(xs.len()); if s >= e { return Vec::new(); } xs.truncate(e); xs.drain(..s); xs }
+pub fn almide_rt_list_take_end_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { let start = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize }; xs.drain(..start); xs }
+pub fn almide_rt_list_drop_end_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { let end = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize }; xs.truncate(end); xs }
 // Keep the FIRST element of each distinct key, in first-occurrence order.
 // The key bound is `PartialEq` (not `Eq + Hash`) so a record, variant, tuple,
 // Option or Float key dedups exactly as the wasm leg's generic-equality scan
