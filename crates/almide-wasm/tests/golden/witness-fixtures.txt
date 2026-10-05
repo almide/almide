@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 882 of 917
+# certified: 887 of 922
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -584,6 +584,7 @@ spec/wasm_cross/option_eq.almd
 spec/wasm_cross/option_heap_eq.almd
 spec/wasm_cross/option_match_heap_payload.almd
 spec/wasm_cross/option_none_unwrap_term.almd
+spec/wasm_cross/option_payload_recursive_variant.almd
 spec/wasm_cross/option_result.almd
 spec/wasm_cross/option_result_ctors.almd
 spec/wasm_cross/option_tuple_payload_matrix.almd
@@ -645,6 +646,7 @@ spec/wasm_cross/recursion_depth_within_limits.almd
 spec/wasm_cross/recursive_generic_repr_interp.almd
 spec/wasm_cross/recursive_payload_closure_capture.almd
 spec/wasm_cross/recursive_payload_nested_pattern.almd
+spec/wasm_cross/recursive_payload_top_let.almd
 spec/wasm_cross/reduce_str.almd
 spec/wasm_cross/ref_gleam_capture_shadow.almd
 spec/wasm_cross/ref_gleam_div_zero_abort.almd
@@ -826,6 +828,7 @@ spec/wasm_cross/top_let_closure_record.almd
 spec/wasm_cross/top_let_div_eager.almd
 spec/wasm_cross/top_let_div_used.almd
 spec/wasm_cross/top_let_eager_through_call.almd
+spec/wasm_cross/top_let_fn_value_bytes_param.almd
 spec/wasm_cross/top_let_fn_value_closure_param.almd
 spec/wasm_cross/top_let_rc_value.almd
 spec/wasm_cross/top_let_stored_in_container.almd

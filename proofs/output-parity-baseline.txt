@@ -523,6 +523,7 @@ spec/wasm_cross/list_minmax_str.almd
 spec/wasm_cross/list_modify_heap.almd
 spec/wasm_cross/list_of_maps_loop_build.almd
 spec/wasm_cross/list_of_tuples_equality.almd
+spec/wasm_cross/list_pattern_in_option_payload.almd
 spec/wasm_cross/list_pattern_variant_element.almd
 spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 spec/wasm_cross/list_product_overflow.almd
@@ -674,6 +675,7 @@ spec/wasm_cross/nan_canonical_observation.almd
 spec/wasm_cross/native_wall_shapes.almd
 spec/wasm_cross/negative_float_literal_sized.almd
 spec/wasm_cross/negative_offset_and_width_totality.almd
+spec/wasm_cross/nested_box_guard_binder.almd
 spec/wasm_cross/nested_ctor_pattern.almd
 spec/wasm_cross/nested_field_path_mut.almd
 spec/wasm_cross/nested_hof_lambda_inference.almd
@@ -1023,6 +1025,7 @@ spec/wasm_fail/matrix_ragged_from_lists_aborts.almd
 spec/wasm_fail/matrix_shape_mismatch_aborts.almd
 spec/wasm_fail/rope_geometry_exceeds_aborts.almd
 spec/wasm_host_js/effect_exports.almd
+spec/wasm_host_js/extern_data_ptr_lifetime.almd
 spec/wasm_host_js/marshal_blocks.almd
 spec/wasm_host_js/marshal_types.almd
 spec/wasm_host_js/println_only.almd
