@@ -230,6 +230,7 @@ fn emit_program_pass(
             ret,
             refuse,
             param_owned: Vec::new(),
+            yields_address: false,
             param_mut,
             param_mut_decl: f.params.iter().map(|p| p.is_mut).collect(),
             import,
@@ -241,6 +242,10 @@ fn emit_program_pass(
     // read the same vector.
     for (i, owned) in crate::param_borrow::infer(&program_fns, &table, &types).into_iter().enumerate() {
         table.infos[i].param_owned = owned;
+    }
+    // #3420: which fns hand out an address their caller's blocks back.
+    for (i, y) in crate::exit_plan::address_yielders(&program_fns, &table).into_iter().enumerate() {
+        table.infos[i].yields_address = y;
     }
     let main_index = F_FN_BASE + program_fns.len() as u32;
     let region_pure = region::region_pure_fns(ir, &program_fns, &table);

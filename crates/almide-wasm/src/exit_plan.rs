@@ -396,6 +396,92 @@ fn check_window(
     Ok(())
 }
 
+/// The surface ops that hand out the ADDRESS of a heap block's data
+/// (#3420): `bytes.data_ptr` / `as_ptr` / `as_mut_ptr`. The address is a
+/// BORROW of the block — the host or a later read follows it — so the
+/// block must outlive every use of the pointer, exactly as under a `prim.*`
+/// body (bytes_rawptr.almd computes these as `prim.handle(b) + 12`).
+pub(crate) fn is_raw_address_op(target: &almide_ir::CallTarget) -> bool {
+    matches!(target, almide_ir::CallTarget::Module { module, func, .. }
+        if module.as_str() == "bytes" && matches!(func.as_str(), "data_ptr" | "as_ptr" | "as_mut_ptr"))
+}
+
+/// Does any call in `body` satisfy `hit`?
+fn any_call(body: &almide_ir::IrExpr, hit: &dyn Fn(&almide_ir::CallTarget) -> bool) -> bool {
+    struct Scan<'h>(bool, &'h dyn Fn(&almide_ir::CallTarget) -> bool);
+    impl almide_ir::visit::IrVisitor for Scan<'_> {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            if self.0 {
+                return;
+            }
+            if let almide_ir::IrExprKind::Call { target, .. } | almide_ir::IrExprKind::TailCall { target, .. } = &e.kind
+                && (self.1)(target)
+            {
+                self.0 = true;
+                return;
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut s = Scan(false, hit);
+    almide_ir::visit::IrVisitor::visit_expr(&mut s, body);
+    s.0
+}
+
+/// The program fns an ADDRESS can come out of (#3420): an `Int` / `RawPtr`
+/// result of a body that calls an address op, or calls such a fn —
+/// `fn ptr(b: Bytes) -> Int = bytes.data_ptr(b)` makes `peek(ptr(b), n)`
+/// the same hazard as the op in place. A fixed point over named calls,
+/// resolved the way the call site resolves them (module first). `prim.*`
+/// bodies are not seeds: the stdlib's audited registry is the incumbent
+/// raw tier, and its Int results are lengths and indices, not addresses
+/// a user frame can see.
+pub(crate) fn address_yielders(program_fns: &[(&almide_ir::IrFunction, Option<String>, u32)], table: &FnTable) -> Vec<bool> {
+    use almide_types::types::Ty;
+    let mut out = vec![false; program_fns.len()];
+    loop {
+        let mut changed = false;
+        for (i, (f, qual, _)) in program_fns.iter().enumerate() {
+            if out[i] || !matches!(f.ret_ty, Ty::Int | Ty::RawPtr) {
+                continue;
+            }
+            let module = crate::emit::fn_module(qual.as_deref(), f);
+            let hit = |t: &almide_ir::CallTarget| {
+                is_raw_address_op(t)
+                    || matches!(t, almide_ir::CallTarget::Named { name } if module
+                        .and_then(|m| table.by_name.get(&format!("{m}.{name}")))
+                        .or_else(|| table.by_name.get(name.as_str()))
+                        .is_some_and(|&j| out[j]))
+            };
+            if any_call(&f.body, &hit) {
+                out[i] = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            return out;
+        }
+    }
+}
+
+impl Emitter<'_> {
+    /// Does this body derive a raw address — a `prim.*` call, a surface
+    /// address op, or a call to a fn an address comes out of (#3420)? Such
+    /// a frame is under the raw-address rule (func.rs
+    /// `populate_tail_release_set`): a tail transfer may not release a
+    /// block before the jump, since the pointer among the arguments would
+    /// reach the callee dangling (`peek(bytes.data_ptr(b), bytes.len(b))`
+    /// in tail position handed the host the free-list header).
+    pub(crate) fn body_takes_raw_address(&self, body: &almide_ir::IrExpr) -> bool {
+        let hit = |t: &almide_ir::CallTarget| {
+            is_raw_address_op(t)
+                || matches!(t, almide_ir::CallTarget::Named { name }
+                    if self.resolve_named_fn(name).is_some_and(|j| self.table.infos[j].yields_address))
+        };
+        crate::rc_ownership::body_uses_prim(body) || any_call(body, &hit)
+    }
+}
+
 /// The params of a prim-using body a raw address may be derived from: any
 /// param mentioned in the arguments of a `prim.*` call, of a runtime-symbol
 /// call, or of any call whose value is an `Int` (an address rides an Int —
@@ -423,7 +509,8 @@ pub(crate) fn raw_address_sources(body: &almide_ir::IrExpr, params: &[almide_ir:
         fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
             match &e.kind {
                 almide_ir::IrExprKind::Call { target, args, .. } | almide_ir::IrExprKind::TailCall { target, args } => {
-                    let prim = matches!(target, almide_ir::CallTarget::Module { module, .. } if module.as_str() == "prim");
+                    let prim = matches!(target, almide_ir::CallTarget::Module { module, .. } if module.as_str() == "prim")
+                        || is_raw_address_op(target);
                     let computed = matches!(target, almide_ir::CallTarget::Computed { .. });
                     if prim || computed || e.ty == almide_types::types::Ty::Int {
                         self.mark_in(args);
