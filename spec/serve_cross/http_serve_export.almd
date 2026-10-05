@@ -1,0 +1,48 @@
+// @contract: C-375
+// A SERVER fixture for the stock export artifact (almide/almide#2659): no
+// generic runner executes it. The driver (in almide/almide) builds it with
+// `almide build --target wasm`, serves the artifact with `wasmtime serve`
+// (no flags) and runs it natively with `almide run`, replays one request
+// script against both and compares each response's status code, header set
+// and de-framed body (the reason phrase, `date` and the framing are the
+// host's). It also sends the artifact a body over 1 MiB (413) and a request
+// line over 8 KiB (414), and asks `/trap` last: the export host answers its
+// own 500 and discards the instance, where native aborts.
+// `main` is serve-shaped: one `http.serve` call, preceded only by a `let`
+// that `port` reads. The app is a top-level fn, so it is instance-closed.
+// Usage: almide run http_serve_export.almd -- <port>
+import env
+import http
+
+// A top-level `let`: evaluated per instance on the export host.
+let greeting = "hello from " + "almide"
+
+fn deny(path: String) -> Result[Unit, String] = err("denied ${path}")
+
+effect fn app(req: HttpRequest) -> HttpResponse = {
+  let path = http.req_path(req)
+  let route = string.split(path, "?") |> list.get(0) ?? path
+  match route {
+    "/hello" => http.response(200, greeting),
+    "/echo" => http.with_headers(
+      201,
+      "${http.req_method(req)} ${http.req_body(req)}",
+      [
+        "X-Echo": http.req_header(req, "x-token") ?? "none",
+        "Content-Type": "text/plain; charset=utf-8"
+      ],
+    ),
+    "/teapot" => http.response(200, "short and stout") |> http.status(418),
+    "/fail" => {
+      deny(route)!
+      http.response(200, "unreachable")
+    },
+    "/trap" => panic("trap requested"),
+    _ => http.response(404, "not found: ${route}"),
+  }
+}
+
+effect fn main() -> Unit = {
+  let port = env.args() |> list.get(0) ?? "0"
+  http.serve(int.parse(port) ?? 0, app)!
+}
