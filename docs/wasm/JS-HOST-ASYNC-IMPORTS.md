@@ -3,11 +3,6 @@
 Status: implemented on the JS host only (`src/cli/js_host_async.rs`). The
 module bytes do not change. Only the generated `<mod>.js` / `<mod>.d.ts` do.
 
-**Provisional.** `--async-import` ships in v0.67.0-rc1 but may be replaced
-before v0.67.0. #3371 proposes taking the JSPI boundary from `fan` instead:
-imports reachable inside a `fan` are suspendable, exports that contain a `fan`
-return a Promise, and no build flag is needed.
-
 ## The problem
 
 A `@extern(wasm, "js", NAME)` hook has to return its value synchronously.
