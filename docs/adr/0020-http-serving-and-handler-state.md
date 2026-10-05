@@ -12,6 +12,15 @@
   `-W component-model-more-async-builtins`, came from the probe's synchronous
   stream builtins. An async-builtin P3 handler serves on wasmtime 47 with no
   flags (ADR-0023 §2.1, §3.3).
+- **Step 2 implemented (#2698)**: the instance-closure rule of §5.2 is
+  **E095** (`docs/diagnostics/E095.md`), checked in the concurrent-slot
+  discovery of `crates/almide-frontend/src/concurrent_reach.rs`, so an app
+  passed through a wrapper's parameter is checked at the wrapper's callers
+  (§3.1). Its hint names a top-level `let` and a handler-local value; the kv
+  clause of the §5.2 text joins it with the `kv` module (step 3).
+  `spec/serve_cross/http_serve_replay.almd` draws `/boot` and reads the clock
+  in the handler. The rejection is dialect epoch 11
+  (`served-app-is-instance-closed`).
 - **Date**: 2026-09-27
 - **Scope**: `http.serve` and the `http` router family, `fan` bodies, a new `kv`
   stdlib module, the `almide build --target wasm` shape of a server, and the
@@ -461,10 +470,10 @@ The argument of `http.serve` / `http.serve_with_limits` must be
 that none of those bodies binds, must be a top-level item (a fn, a `let`, a
 type or a constructor). Main's locals do not exist on an export host (§5.4),
 and native worker threads build their own instance (§5.5). A new code,
-allocated by the implementing PR, reads:
+allocated by the implementing PR (E095, #2698), reads:
 
 ```
-error[E0NN]: the app passed to http.serve captures `boot`, a local of main
+error[E095]: the app passed to http.serve captures `boot`, a local of main
   hint: the app runs in several instances — one per worker natively, one per
         request on a wasi:http host — and main's locals do not exist there.
         Make `boot` a top-level `let`, compute it inside the handler, or keep it

@@ -325,6 +325,7 @@ fn isqrt(n: Int) -> Int = {
 | E092 | A `@pure` fn is not pure — it is an `effect fn` or an `@extern`, or it (or anything it calls) prints, panics, asserts, calls a stdlib fn with an effect category (`io.write`, `process.pid`, …) or calls an `@extern` | Move that call to a caller that is not `@pure`, or remove `@pure`; a call through a fn-typed parameter does not count |
 | E093 | A type applied to a different number of type arguments than its declaration has parameters — `Pair[Int, Int]` for `type Pair[T] = (T, T)`, `Score[Int]` for `type Score = Int`, or a builtin: `List[Int, Int]`, `Map[String]`, `Result[Int]` | Write one type per declared parameter (the message spells them: `Pair[T]`, `Map[K, V]`), or drop the brackets for a type without parameters |
 | E094 | Type aliases form a cycle — `type A = B` with `type B = A`, or `type Tree = List[Tree]` through a type argument | Give the cycle a nominal type: a record or variant may refer to itself (`type Tree = { kids: List[Tree] }`) |
+| E095 | The app passed to `http.serve` reads a local of the fn that serves it — `let boot = random.int(1, 9)` in main read by the handler, or `let app = http.router(…)!` in main passed to `serve` | Make the value a top-level `let` (`let app = http.router(…)` at top level, served as `http.serve(8080, app!)!`), or compute it inside the handler per request |
 | E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
 
 A rustc 4-digit code (`error[E0XXX]`) leaking through always indicates

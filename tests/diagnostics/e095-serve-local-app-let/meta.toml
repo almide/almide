@@ -1,0 +1,4 @@
+expects_code = "E095"
+expects_error = "captures `app`, a local of main"
+hint_substring = "one per worker natively, one per request on a wasi:http host"
+expects_line_col = "8:20"
