@@ -1,0 +1,101 @@
+// @contract: C-015
+// `==` / `!=` on a match binder that holds the WHOLE scrutinee (a catch-all
+// `other => other == b`) reads it as the reference the borrowed subject binds
+// it as (#3437). Native bound `other: &T` and compared it with `(*b)`, a `T`
+// (rustc E0277 `can't compare &T with T`), so the program built on wasm and
+// not on native. Covered: binder on the left and on the right, `!=`, compared
+// against a param, a record field, another binder and a constructor literal,
+// a binder of a match nested in a payload arm, a boxed payload binder against
+// a param and against a whole-scrutinee binder, and a non-recursive variant.
+// Expected: 10 10 01 10 10 010 10 10 10 01 10 (one per line).
+type T =
+  | Leaf(Int)
+  | Node(T, T)
+
+type C =
+  | Red
+  | Rgb(Int, Int, Int)
+
+type W = { t: T, n: Int }
+
+fn left_bind(a: T, b: T) -> Bool = match a {
+  Node(_, _) => false,
+  other => other == b,
+}
+
+fn right_bind(a: T, b: T) -> Bool = match a {
+  Node(_, _) => false,
+  other => b == other,
+}
+
+fn ne_bind(a: T, b: T) -> Bool = match a {
+  Node(_, _) => true,
+  other => other != b,
+}
+
+fn field_cmp(a: T, w: W) -> Bool = match a {
+  Node(_, _) => false,
+  other => other == w.t,
+}
+
+fn two_binders(a: T, b: T) -> Bool = match a {
+  Node(_, _) => false,
+  x => match b {
+    Node(_, _) => false,
+    y => x == y,
+  },
+}
+
+fn nested(a: T, b: T) -> Bool = match a {
+  Node(l, _) => match l {
+    Node(_, _) => false,
+    inner => inner == b,
+  },
+  _ => false,
+}
+
+fn sub_vs_param(a: T, b: T) -> Bool = match a {
+  Node(l, r) => l == b or r == b,
+  _ => false,
+}
+
+fn sub_vs_binder(a: T, b: T) -> Bool = match a {
+  Node(l, r) => match b {
+    whole => l == whole or whole != r
+  },
+  _ => false,
+}
+
+fn color(a: C, b: C) -> Bool = match a {
+  Red => false,
+  other => other == b and b == other,
+}
+
+fn color_ne(a: C, b: C) -> Bool = match a {
+  Red => true,
+  other => other != b,
+}
+
+fn color_lit(a: C) -> Bool = match a {
+  Red => false,
+  other => other == Rgb(1, 2, 3),
+}
+
+fn b2i(x: Bool) -> String = if x then "1" else "0"
+
+effect fn main() -> Unit = {
+  let l1 = Leaf(1)
+  let l2 = Leaf(2)
+  let n = Node(Leaf(1), Leaf(2))
+  println(b2i(left_bind(l1, Leaf(1))) + b2i(left_bind(l1, l2)))
+  println(b2i(right_bind(l1, Leaf(1))) + b2i(right_bind(l1, l2)))
+  println(b2i(ne_bind(l1, Leaf(1))) + b2i(ne_bind(l1, l2)))
+  println(b2i(field_cmp(l1, { t: Leaf(1), n: 0 })) + b2i(field_cmp(l1, { t: n, n: 0 })))
+  println(b2i(two_binders(l1, Leaf(1))) + b2i(two_binders(l1, l2)))
+  println(b2i(nested(Node(n, l1), n)) + b2i(nested(Node(l1, l1), l1)) + b2i(nested(Node(l2, l1), l1)))
+  println(b2i(sub_vs_param(n, Leaf(2))) + b2i(sub_vs_param(n, Leaf(3))))
+  println(b2i(sub_vs_binder(n, Leaf(1))) + b2i(sub_vs_binder(n, Leaf(2))))
+  println(b2i(color(Rgb(1, 2, 3), Rgb(1, 2, 3))) + b2i(color(Rgb(1, 2, 3), Red)))
+  println(b2i(color_ne(Rgb(1, 2, 3), Rgb(1, 2, 3))) + b2i(color_ne(Rgb(1, 2, 3), Red)))
+  println(b2i(color_lit(Rgb(1, 2, 3))) + b2i(color_lit(Rgb(1, 2, 4))))
+}
