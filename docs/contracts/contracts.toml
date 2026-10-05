@@ -541,6 +541,7 @@ evidence  = [
   { path = "spec/wasm_cross/nested_place_assign.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_nested_place_writeback.almd", class = "fixture" },
   { path = "spec/wasm_cross/record_map_field_update.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tuple_bound_list_mapped_in_loop.almd", class = "fixture" },
 ]
 
 # ── LIST BOUNDS GRACEFULNESS ─────────────────────────────────────────
