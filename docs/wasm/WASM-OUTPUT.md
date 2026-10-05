@@ -311,7 +311,7 @@ marshalling. `app.js` is a dependency-free ES module:
   and declares `AlmideError`, which ships only when some export unwraps a
   Result. Gate: `spec/wasm_host_js/effect_exports.almd` runs every
   marshalled type × {fn, effect fn} × {ok, err} under node.
-- A hook that throws (or, for an `--async-import`, rejects) (#3356). An
+- A hook that throws (or, for one marked `returns: promise`, rejects) (#3356). An
   exception that unwinds through wasm skips every release the unwound frames
   would have run, so the glue never lets one through:
   - A **fallible** extern is an `effect fn` or one declaring
@@ -329,6 +329,12 @@ marshalling. `app.js` is a dependency-free ES module:
     instance. Every later call throws `… abandoned … call init() again`
     instead of running on a heap whose unwound frames kept their blocks.
     `init()` starts a fresh instance.
+- A hook that returns a Promise is marked on its declaration,
+  `@extern(wasm, "js", "name", returns: promise)` (#3353, #3371), and the
+  glue suspends on it through JSPI. An UNMARKED hook that returns a thenable
+  throws `almide: hooks.js.<name> returned a Promise; mark its @extern with
+  returns: promise` and abandons the instance, for a fallible extern too.
+  Design: [JS-HOST-ASYNC-IMPORTS.md](./JS-HOST-ASYNC-IMPORTS.md).
 - `main` is `run()`; `_start` is not called by `init`.
 
 String marshalling reads the block layout (`almide-layout`:
