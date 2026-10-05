@@ -19,8 +19,10 @@ struct MatchArmTypes {
     peers: Vec<(Ty, Option<ast::Span>, bool)>,
     /// Every `err(..)` arm's payload type and body span. The join reads such
     /// an arm as `Never`, so its payload is judged separately against the
-    /// error type the match produces (#2722).
-    err_payloads: Vec<(Ty, Option<ast::Span>)>,
+    /// error type the match produces (#2722). The first element is the
+    /// arm's OK slot, joined with the match's own OK type when the match
+    /// produces a Result (#3415).
+    err_payloads: Vec<(Ty, Ty, Option<ast::Span>)>,
     /// Per arm: where its value is reported (a block body's tail) and the
     /// un-`!`ed call it wraps in `ok(..)` / `some(..)`, if any (#2927).
     blame_spans: Vec<Option<ast::Span>>,
@@ -259,17 +261,27 @@ impl Checker {
     /// joined slot is often still open (#2599 leaves `ok(v)`'s error slot
     /// fresh), and the payload must not pin it before the fn's declared return
     /// does — the arm then reports at itself, not at the fn.
-    fn check_err_arm_payloads(&mut self, joined: &Ty, err_payloads: Vec<(Ty, Option<ast::Span>)>) {
+    fn check_err_arm_payloads(&mut self, joined: &Ty, err_payloads: Vec<(Ty, Ty, Option<ast::Span>)>) {
         if err_payloads.is_empty() {
             return;
         }
         let target = match resolve_ty(joined, &self.uf) {
-            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => Some(args),
+            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
+                // #3415: a match that PRODUCES a Result (`let n = match o {
+                // N(n) => ok(n), _ => err(..) }!`) carries its `err(..)` arms
+                // as values of that Result, not as early returns, so their OK
+                // slot is the match's — not the enclosing fn's declared one,
+                // which `open_result_slot` only offers as a default.
+                for (ok_slot, _, _) in &err_payloads {
+                    self.unify_infer(ok_slot, &args[0]);
+                }
+                Some(args)
+            }
             Ty::Never | Ty::Unknown | Ty::TypeVar(_) => None,
             // ADR-0021: inside a lambda a value-join `err(..)` arm returns into
             // the lambda's own channel — its error type joins ε.
             _ if self.env.lambda_depth > 0 => {
-                for (payload, span) in &err_payloads {
+                for (_, payload, span) in &err_payloads {
                     self.record_lambda_returned_err(&Ty::result(Ty::Unit, payload.clone()), false, *span);
                 }
                 None
@@ -277,7 +289,7 @@ impl Checker {
             value => self.bang_channel_err_ty().map(|e| vec![value, e]),
         };
         let Some(target) = target else { return };
-        for (payload, span) in err_payloads {
+        for (_, payload, span) in err_payloads {
             let fix_hint = self.erased_callback_behind(&payload);
             self.constraints.push(super::types::Constraint {
                 expected: Ty::result(target[0].clone(), target[1].clone()),
@@ -365,8 +377,8 @@ impl Checker {
             out.blame_spans.push(super::arm_blame::value_leaf_span(&arm.body));
             out.bangs.push(self.wrapped_unbanged_call(&arm.body));
             if matches!(&arm.body.kind, ExprKind::Err { .. }) {
-                if let Some((_, payload)) = resolve_ty(&arm_ty, &self.uf).inner2() {
-                    out.err_payloads.push((payload.clone(), arm.body.span));
+                if let Some((ok_slot, payload)) = resolve_ty(&arm_ty, &self.uf).inner2() {
+                    out.err_payloads.push((ok_slot.clone(), payload.clone(), arm.body.span));
                 }
             }
             let arm_ty = self.match_arm_join_ty(arm, arm_ty, arms_have_result_ctor);
