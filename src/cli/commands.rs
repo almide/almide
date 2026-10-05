@@ -896,7 +896,9 @@ fn run_wasm_test_phase(test_files: &[String], scratch: &std::sync::Arc<TestScrat
 /// `cmd_test_fast`'s Phase 2: native rustc fallback (authoritative) for
 /// everything the WASM path didn't pass, parallel with per-file scratch
 /// dirs. Output is captured — see [`run_test_binaries_parallel`].
-fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<Vec<String>>, no_check: bool, cpus: usize, scratch: &std::sync::Arc<TestScratch>) -> Vec<TestRun> {
+/// The second element names the files whose native build FAILED — no test
+/// ran, so their result is a build error, not a verdict (#3424).
+fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<Vec<String>>, no_check: bool, cpus: usize, scratch: &std::sync::Arc<TestScratch>) -> (Vec<TestRun>, std::collections::HashSet<String>) {
     let (tx, rx) = std::sync::mpsc::channel();
     let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
     for _ in 0..cpus { let _ = sem_tx.send(()); }
@@ -912,22 +914,41 @@ fn run_native_fallback_phase(fallback: &[String], program_args: &std::sync::Arc<
         handles.push(std::thread::spawn(move || {
             let _ = sr.lock().unwrap().recv();
             let worker_dir = scratch.native_worker_dir(&tf);
-            let (code, stdout, stderr) = guard_worker_panic(
+            let (built, (code, stdout, stderr)) = guard_worker_panic(
                 || match super::run::compile_to_binary(&tf, no_check, true, false, Some(&worker_dir)) {
-                    Ok(bin) => super::run::run_binary_captured_io(&bin, &args),
-                    Err(e) => (1, format!("Compile error for {}:\n{}", tf, e), String::new()),
+                    Ok(bin) => (true, super::run::run_binary_captured_io(&bin, &args)),
+                    Err(e) => (false, (1, format!("Compile error for {}:\n{}", tf, e), String::new())),
                 },
-                |msg| (1, format!("Compile error for {}:\n{}", tf, msg), String::new()),
+                |msg| (false, (1, format!("Compile error for {}:\n{}", tf, msg), String::new())),
             );
             let _ = st.send(());
-            let _ = tx.send((tf, code, stdout, stderr));
+            let _ = tx.send(((tf, code, stdout, stderr), built));
         }));
     }
     drop(tx);
-    let mut v: Vec<TestRun> = rx.iter().collect();
+    let mut v: Vec<(TestRun, bool)> = rx.iter().collect();
     for h in handles { let _ = h.join(); }
-    v.sort_by(|a, b| a.0.cmp(&b.0));
-    v
+    v.sort_by(|a, b| a.0.0.cmp(&b.0.0));
+    let unbuilt = v.iter().filter(|(_, built)| !built).map(|(r, _)| r.0.clone()).collect();
+    (v.into_iter().map(|(r, _)| r).collect(), unbuilt)
+}
+
+/// A file that FAILED on the wasm leg whose native re-run did not build:
+/// the wasm failure is the verdict (`FAILED`, the failing test, what it
+/// printed), and the native build error follows as a note (#3424).
+fn report_wasm_verdict_without_native(file: &str, detail: &str, printed: Option<&super::test_output::TestOutput>, native_error: &str, show_output: bool) {
+    err(&format!("FAILED: {}", file));
+    err_no_nl(detail);
+    if let Some(printed) = printed {
+        // The wasm runner stops at the first failure, so the test that never
+        // printed its `ok` is the failing one.
+        err_no_nl(&printed.failure_stdout(None));
+        err_no_nl(&printed.render_rest(&[None], show_output));
+    }
+    err("note: this failure is the wasm leg's verdict; the native re-run that checks it could not build:");
+    for line in native_error.lines() {
+        err(&format!("  {}", line));
+    }
 }
 
 /// Default `almide test`: run each file on the fast rustc-free WASM path; for
@@ -947,6 +968,8 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow
     let mut wasm_pass = 0usize;
     let mut fallback: Vec<String> = Vec::new();
     let mut trapped: Vec<(String, String)> = Vec::new();
+    // What a failing wasm run printed, for the files in `trapped`.
+    let mut wasm_verdicts: std::collections::HashMap<String, super::test_output::TestOutput> = std::collections::HashMap::new();
     // Counted per LEG, because a file that walls on wasm is re-run natively and
     // would otherwise be counted twice.
     let mut counts = TestCounts::default();
@@ -973,8 +996,9 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow
             // it into "via native fallback" hid the #1165 `indirect call type
             // mismatch` for its whole life locally while CI's Test WASM failed
             // the PR.
-            WasmTestOutcome::Fail { file, detail, .. } => {
+            WasmTestOutcome::Fail { file, detail, printed, .. } => {
                 trapped.push((file.clone(), detail));
+                wasm_verdicts.insert(file.clone(), printed);
                 fallback.push(file);
             }
             // CompileError routes to the fallback like everything else here:
@@ -989,11 +1013,22 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>, allow
     // path didn't pass, parallel with per-file scratch dirs.
     let program_args = test_harness_args(run_filter);
 
-    let native_results = run_native_fallback_phase(&fallback, &program_args, no_check, cpus, &scratch);
+    let (native_results, native_unbuilt) = run_native_fallback_phase(&fallback, &program_args, no_check, cpus, &scratch);
+    let trap_detail: std::collections::HashMap<&String, &String> = trapped.iter().map(|(f, d)| (f, d)).collect();
 
     let mut failed = 0;
     for (file, code, stdout, stderr) in &native_results {
         counts.add(libtest_counts(&format!("{stdout}{stderr}")).unwrap_or_default());
+        // A test that RAN on wasm and failed has its verdict already. The
+        // native re-run is there to tell a failing test from a wasm
+        // miscompile; when it cannot even build, it has no verdict to offer,
+        // and its build error must not stand in for the failed assertion
+        // (#3424). Report the wasm verdict, then why the re-run is missing.
+        if let (true, Some(detail)) = (native_unbuilt.contains(file), trap_detail.get(file)) {
+            report_wasm_verdict_without_native(file, detail, wasm_verdicts.get(file), stdout, show_output);
+            failed += 1;
+            continue;
+        }
         if *code != 0 {
             report_test_failure_io(file, stdout, stderr, show_output);
             failed += 1;
