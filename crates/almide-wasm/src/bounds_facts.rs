@@ -95,7 +95,7 @@ impl Emitter<'_> {
     fn fact_key(&self, xs: VarId, index: &IrExpr) -> Option<(VarId, VarId, i64)> {
         self.bounds_facts.as_ref()?;
         self.hoisted_counts.get(&xs)?;
-        let (v, c) = crate::payload_ptr::affine_index(index)?;
+        let (v, c) = super::payload_ptr::affine_index(index)?;
         Some((xs, v, c))
     }
 

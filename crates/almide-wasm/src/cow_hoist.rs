@@ -65,6 +65,13 @@ use std::collections::BTreeSet;
 use almide_ir::visit::{walk_expr, walk_pattern, walk_stmt, IrVisitor};
 use almide_ir::{IrExpr, IrExprKind, IrPattern, IrStmt, IrStmtKind, VarId};
 
+// #3345's other loop-body companions (file budget of lib.rs): repeated
+// bounds checks dropped, and the per-loop payload pointer.
+#[path = "bounds_facts.rs"]
+mod bounds_facts;
+#[path = "payload_ptr.rs"]
+pub(crate) mod payload_ptr;
+
 /// At most this many flags per loop, and only while the i32 hold pool keeps
 /// this much headroom for the body — a flag must never be what pushes a body
 /// into the `hold-depth-i32` wall.
