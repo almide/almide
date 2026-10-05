@@ -10,7 +10,6 @@ effect fn home(req: HttpRequest) -> HttpResponse = {
 
 let routes = [http.route("GET /", home)]
 
-effect fn main() -> Unit = {
-  let app = http.router(routes)!
-  http.serve(8080, app)!
-}
+let app = http.router(routes)
+
+effect fn main() -> Unit = http.serve(8080, app!)!

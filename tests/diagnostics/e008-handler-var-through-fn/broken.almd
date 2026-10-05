@@ -8,9 +8,8 @@ effect fn bump() -> Int = {
   hits
 }
 
-effect fn main() -> Unit = {
-  let app = http.router([
-    http.route("GET /", (req) => http.response(200, "n=${bump()!}"))
-  ])!
-  http.serve(8080, app)!
-}
+let app = http.router([
+  http.route("GET /", (req) => http.response(200, "n=${bump()!}"))
+])
+
+effect fn main() -> Unit = http.serve(8080, app!)!

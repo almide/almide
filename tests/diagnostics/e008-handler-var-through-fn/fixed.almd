@@ -9,9 +9,8 @@ effect fn count(path: String) -> Int = {
   n
 }
 
-effect fn main() -> Unit = {
-  let app = http.router([
-    http.route("GET /", (req) => http.response(200, "n=${count(http.req_path(req))!}"))
-  ])!
-  http.serve(8080, app)!
-}
+let app = http.router([
+  http.route("GET /", (req) => http.response(200, "n=${count(http.req_path(req))!}"))
+])
+
+effect fn main() -> Unit = http.serve(8080, app!)!

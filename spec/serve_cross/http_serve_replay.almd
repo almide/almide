@@ -19,7 +19,7 @@ fn render_query(req: HttpRequest) -> String = {
   map.keys(q) |> list.sort |> list.map((k) => "${k}=${map.get(q, k) ?? ""}") |> list.join("&")
 }
 
-effect fn handle(req: HttpRequest, boot: Int, started: Int) -> HttpResponse = {
+effect fn handle(req: HttpRequest) -> HttpResponse = {
   let method = http.req_method(req)
   let path = http.req_path(req)
   let route = string.split(path, "?") |> list.get(0) ?? path
@@ -40,10 +40,18 @@ effect fn handle(req: HttpRequest, boot: Int, started: Int) -> HttpResponse = {
       "teapot",
     ),
     "/redirect" => http.redirect("/hello"),
-    "/boot" => http.response(200, "${boot}"),
-    // A clock read in main before serve and another in the handler (#2703):
-    // the values differ per run, the answer does not.
-    "/clock" => http.response(200, "${env.millis() >= started} ${datetime.now() >= started / 1000}"),
+    // A draw in the handler: the app is instance-closed (ADR-0020 §5.2), so
+    // nothing ties two requests' draws together, only the answer's shape.
+    "/boot" => {
+      let boot = random.int(1, 1000000000)
+      http.response(200, "${boot >= 1 and boot <= 1000000000}")
+    },
+    // Clock reads in the handler (#2703): the values differ per run, the
+    // answer does not.
+    "/clock" => {
+      let started = env.millis()
+      http.response(200, "${env.millis() >= started} ${datetime.now() >= started / 1000}")
+    },
     "/fail" => {
       deny(route)!
       http.response(200, "unreachable")
@@ -54,10 +62,9 @@ effect fn handle(req: HttpRequest, boot: Int, started: Int) -> HttpResponse = {
 
 effect fn main() -> Unit = {
   let port = env.args() |> list.get(0) ?? "0"
-  // Drawn ONCE per process and captured by the handler: every request of
-  // one run must answer the same value (one instance for the whole run).
-  let boot = random.int(1, 1000000000)
+  // A clock read in main before serve (#2703). The app below reads no local
+  // of main: it is instance-closed (ADR-0020 §5.2, E095).
   let started = env.millis()
-  eprintln("ready")
-  http.serve(int.parse(port) ?? 0, (req) => handle(req, boot, started)!)!
+  eprintln(if started >= 0 then "ready" else "a clock before the epoch")
+  http.serve(int.parse(port) ?? 0, (req) => handle(req)!)!
 }

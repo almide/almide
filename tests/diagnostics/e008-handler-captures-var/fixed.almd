@@ -1,9 +1,9 @@
-// The handler computes its answer from the request alone.
+// The handler computes its answer from the request alone, and the app is a
+// top-level `let` (an app passed to http.serve reads no local of main: E095).
 import http
 
-effect fn main() -> Unit = {
-  let app = http.router([
-    http.route("GET /", (req) => http.response(200, "path=${http.req_path(req)}"))
-  ])!
-  http.serve(8080, app)!
-}
+let app = http.router([
+  http.route("GET /", (req) => http.response(200, "path=${http.req_path(req)}"))
+])
+
+effect fn main() -> Unit = http.serve(8080, app!)!
