@@ -4,10 +4,10 @@
 arm-value:borrowed-temp	6
 bind:view-result	6
 call-arg:Lambda:fs.__fallible_fold_lines:propagating	1
+call-arg:Lambda:list.group_by	1
 call-arg:Lambda:map.__fallible_map__Int_String_String_Int	1
 call:panic-arg	7
 caps:argv-in-plain-fn	8
-forin-map	8
 heap-operand:OptionNone	3
 interp-part:IndexAccess:non-list	2
 match-guard:binds	8
