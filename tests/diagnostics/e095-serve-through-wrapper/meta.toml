@@ -1,0 +1,4 @@
+expects_code = "E095"
+expects_error = "the app passed to serve_on, which serves it with http.serve"
+hint_substring = "Make `prefix` a top-level `let`"
+expects_line_col = "9:49"

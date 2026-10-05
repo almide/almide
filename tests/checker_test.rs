@@ -1130,3 +1130,55 @@ fn pipe_argument_mismatch_points_at_the_piped_value() {
         .collect();
     assert_eq!(e005, vec![(Some(3), Some(35))], "{:?}", diags.iter().map(|d| &d.message).collect::<Vec<_>>());
 }
+
+// ---- ADR-0020 §5.2 / E095 (#2698): the app passed to http.serve is instance-closed ----
+
+/// The shapes an instance-closed app may take: a top-level fn, a lambda that
+/// reads only top-level `let`s, a lambda with its own locals, and a nested
+/// lambda binding its own parameters. None reads a local of main.
+#[test]
+fn served_app_closed_over_top_level_items_is_accepted() {
+    has_no_errors(
+        r#"import http
+
+let greeting = "hello"
+
+effect fn handle(req: HttpRequest) -> HttpResponse = http.response(200, greeting)
+
+effect fn main() -> Unit = {
+  let port = 8080
+  http.serve(port, handle)!
+  http.serve(port, (req) => http.response(200, greeting))!
+  http.serve(port, (req) => {
+    let path = http.req_path(req)
+    var n = 0
+    n = n + string.len(path)
+    http.response(200, "${path} ${n}")
+  })!
+  http.serve(port, (req) => {
+    let parts = string.split(http.req_path(req), "/") |> list.map((part) => "${part}${greeting}")
+    http.response(200, list.join(parts, ","))
+  })!
+}
+"#,
+    );
+}
+
+/// The same harness refuses a lambda that reads a local of main, so the
+/// acceptance above is not vacuous.
+#[test]
+fn served_app_reading_a_local_of_main_is_e095() {
+    let errs = errors(
+        r#"import http
+
+effect fn main() -> Unit = {
+  let greeting = "hello"
+  http.serve(8080, (req) => http.response(200, greeting))!
+}
+"#,
+    );
+    assert!(
+        errs.iter().any(|m| m == "the app passed to http.serve captures `greeting`, a local of main"),
+        "{errs:?}"
+    );
+}

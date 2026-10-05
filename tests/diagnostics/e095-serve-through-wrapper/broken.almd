@@ -1,0 +1,10 @@
+// `serve_on` hands its parameter to http.serve, so the app passed to it must
+// be instance-closed too, and this one reads `prefix`, a local of main.
+import http
+
+effect fn serve_on(port: Int, h: HttpHandler) -> Unit = http.serve(port, h)!
+
+effect fn main() -> Unit = {
+  let prefix = "v1"
+  serve_on(8080, (req) => http.response(200, "${prefix}${http.req_path(req)}"))!
+}
