@@ -61,7 +61,7 @@ The authoritative references are:
 | Doc | What |
 |-----|------|
 | [Capability System](./capability-system.md) | Compile-time least-privilege enforcement — current |
-| [JS host async imports](./JS-HOST-ASYNC-IMPORTS.md) | `--host js --async-import`: JSPI suspension, which exports become async, serialisation, the no-JSPI refusal (#3353) — current |
+| [JS host async imports](./JS-HOST-ASYNC-IMPORTS.md) | `--host js --async-import`: JSPI suspension, which exports become async, serialisation, the no-JSPI refusal (#3353) — provisional, may be replaced by a `fan`-derived boundary (#3371) |
 
 ## Archive
 
