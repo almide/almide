@@ -1,0 +1,14 @@
+fan overlap
+fetch_all: v-k0,v-k1,v-k2,v-k3,v-k4,v-k5,v-k6,v-k7
+fetch_all mixed: err: no bad1 (calls=5)
+fetch_all empty: []
+sizes: 1,2,3
+sizes mixed: err: size refused bad1
+peek_all: k0,k1,k2,k3,k4,k5,k6,k7
+first_found: v-k1
+first_found none: err: fan.any: all candidates failed
+pair: v-k0+k1
+pair err: err: almide: exit 1
+memory flat
+after init: v-k7
+fan overlap ok
