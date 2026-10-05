@@ -34,12 +34,13 @@ fn string_ends_with(s: String, suffix: String) -> Bool = {
 }
 
 // Scan each start position; at each, byte-compare `nlen` bytes against the needle.
-fn __contains_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int) -> Bool = if pos + nlen > slen then false
-else {
-  let m = __byte_eq(sbase + pos, nbase, nlen)
-  if m then true
-  else __contains_scan(sbase, slen, nbase, nlen, pos + 1)
-}
+fn __contains_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int) -> Bool =
+  if pos + nlen > slen then false
+  else {
+    let m = __byte_eq(sbase + pos, nbase, nlen)
+    if m then true
+    else __contains_scan(sbase, slen, nbase, nlen, pos + 1)
+  }
 
 fn string_contains(s: String, needle: String) -> Bool = {
   let hs = prim.handle(s)
@@ -65,12 +66,13 @@ else {
 
 // Count NON-OVERLAPPING needle matches from `pos`, skipping past each match (v0 semantics:
 // `s.matches(needle).count()`).
-fn __count_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int, acc: Int) -> Int = if pos + nlen > slen then acc
-else {
-  let m = __byte_eq(sbase + pos, nbase, nlen)
-  if m then __count_scan(sbase, slen, nbase, nlen, pos + nlen, acc + 1)
-  else __count_scan(sbase, slen, nbase, nlen, pos + 1, acc)
-}
+fn __count_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int, acc: Int) -> Int =
+  if pos + nlen > slen then acc
+  else {
+    let m = __byte_eq(sbase + pos, nbase, nlen)
+    if m then __count_scan(sbase, slen, nbase, nlen, pos + nlen, acc + 1)
+    else __count_scan(sbase, slen, nbase, nlen, pos + 1, acc)
+  }
 
 fn string_count(s: String, needle: String) -> Int = {
   let hs = prim.handle(s)
@@ -86,12 +88,13 @@ fn string_count(s: String, needle: String) -> Int = {
 
 // BYTE position of the first needle match from `pos`, or -1 if none (the empty needle
 // matches at 0). Reuses __byte_eq.
-fn __find_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int) -> Int = if pos + nlen > slen then -1
-else {
-  let m = __byte_eq(sbase + pos, nbase, nlen)
-  if m then pos
-  else __find_byte(sbase, slen, nbase, nlen, pos + 1)
-}
+fn __find_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int) -> Int =
+  if pos + nlen > slen then -1
+  else {
+    let m = __byte_eq(sbase + pos, nbase, nlen)
+    if m then pos
+    else __find_byte(sbase, slen, nbase, nlen, pos + 1)
+  }
 
 // The Option result is built in TAIL position by these helpers (so a `match` over
 // string.index_of's result executes via the materialized-Option layout). __io_at converts

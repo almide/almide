@@ -147,20 +147,22 @@ fn __sg_cell(xrow_h: Int, wg: List[List[Float]], wu: List[List[Float]], j: Int, 
   (g * sig) * u
 }
 
-fn __sg_row_cells(dh: Int, xrow_h: Int, wg: List[List[Float]], wu: List[List[Float]], d_out: Int, d_in: Int, j: Int) -> Int = if j >= d_out then 0
-else {
-  prim.store64(dh + 12 + j * 8, prim.fbits(__sg_cell(xrow_h, wg, wu, j, d_in)))
-  __sg_row_cells(dh, xrow_h, wg, wu, d_out, d_in, j + 1)
-}
+fn __sg_row_cells(dh: Int, xrow_h: Int, wg: List[List[Float]], wu: List[List[Float]], d_out: Int, d_in: Int, j: Int) -> Int =
+  if j >= d_out then 0
+  else {
+    prim.store64(dh + 12 + j * 8, prim.fbits(__sg_cell(xrow_h, wg, wu, j, d_in)))
+    __sg_row_cells(dh, xrow_h, wg, wu, d_out, d_in, j + 1)
+  }
 
-fn __sg_rows(ho: Int, x: List[List[Float]], wg: List[List[Float]], wu: List[List[Float]], r: Int, d_out: Int, d_in: Int, i: Int) -> Int = if i >= r then 0
-else {
-  let xrow_h = prim.load64(prim.handle(x) + 12 + i * 8)
-  let row = prim.alloc_list_f64(d_out)
-  let _c = __sg_row_cells(prim.handle(row), xrow_h, wg, wu, d_out, d_in, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __sg_rows(ho, x, wg, wu, r, d_out, d_in, i + 1)
-}
+fn __sg_rows(ho: Int, x: List[List[Float]], wg: List[List[Float]], wu: List[List[Float]], r: Int, d_out: Int, d_in: Int, i: Int) -> Int =
+  if i >= r then 0
+  else {
+    let xrow_h = prim.load64(prim.handle(x) + 12 + i * 8)
+    let row = prim.alloc_list_f64(d_out)
+    let _c = __sg_row_cells(prim.handle(row), xrow_h, wg, wu, d_out, d_in, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __sg_rows(ho, x, wg, wu, r, d_out, d_in, i + 1)
+  }
 
 // ── silu_mul: out[i][j] = a·σ(a)·b, cols zip-truncated per row ──
 // native (matrix_p2.rs almide_rt_matrix_silu_mul): EQUAL shapes run
@@ -264,26 +266,27 @@ else {
 // clamped negatives to 0, native rms_norm_heads clamped them to 1, native MHA
 // did not guard at all (`n_heads = i32::MIN` cast to usize and hung), and these
 // self-hosted bodies divided by a zero head count. Wave 5 R2.
-fn __rope_pairs(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, h: Int, head_dim: Int, half: Int, i_pair: Int) -> Int = if i_pair >= half then 0
-else {
-  let j0 = h * head_dim + 2 * i_pair
-  let x0 = prim.ffrombits(prim.load64(sh + 12 + j0 * 8))
-  let x1 = prim.ffrombits(prim.load64(sh + 12 + (j0 + 1) * 8))
-  let two_i_f = int.to_float(2 * i_pair)
-  // 1/pow, NOT fast-exp: the native leg computes `1.0 / libm_pow(theta, e)`
-  // and the deg-6 fast-exp diverges from it in the last ulps at any NON-ZERO
-  // exponent — every fixture before 2026-08-15 used head_dim <= 3, whose only
-  // pair has exponent 0, so the divergence was an unexecuted polarity until
-  // the rope_at burn-down probed head_dim 4 (0.9899501670824986 native vs
-  // 0.9899501671727345 wasm, both exit 0: the silent-wrong class).
-  let inv_freq = 1.0 / math.fpow(theta, two_i_f / head_dim_f)
-  let angle = pos_f * inv_freq
-  let s = math.sin(angle)
-  let c = math.cos(angle)
-  prim.store64(dh + 12 + j0 * 8, prim.fbits(x0 * c - x1 * s))
-  prim.store64(dh + 12 + (j0 + 1) * 8, prim.fbits(x0 * s + x1 * c))
-  __rope_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, i_pair + 1)
-}
+fn __rope_pairs(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, h: Int, head_dim: Int, half: Int, i_pair: Int) -> Int =
+  if i_pair >= half then 0
+  else {
+    let j0 = h * head_dim + 2 * i_pair
+    let x0 = prim.ffrombits(prim.load64(sh + 12 + j0 * 8))
+    let x1 = prim.ffrombits(prim.load64(sh + 12 + (j0 + 1) * 8))
+    let two_i_f = int.to_float(2 * i_pair)
+    // 1/pow, NOT fast-exp: the native leg computes `1.0 / libm_pow(theta, e)`
+    // and the deg-6 fast-exp diverges from it in the last ulps at any NON-ZERO
+    // exponent — every fixture before 2026-08-15 used head_dim <= 3, whose only
+    // pair has exponent 0, so the divergence was an unexecuted polarity until
+    // the rope_at burn-down probed head_dim 4 (0.9899501670824986 native vs
+    // 0.9899501671727345 wasm, both exit 0: the silent-wrong class).
+    let inv_freq = 1.0 / math.fpow(theta, two_i_f / head_dim_f)
+    let angle = pos_f * inv_freq
+    let s = math.sin(angle)
+    let c = math.cos(angle)
+    prim.store64(dh + 12 + j0 * 8, prim.fbits(x0 * c - x1 * s))
+    prim.store64(dh + 12 + (j0 + 1) * 8, prim.fbits(x0 * s + x1 * c))
+    __rope_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, i_pair + 1)
+  }
 
 fn __mx_head_count(n: Int) -> Int = {
   if n < 1 then prim.die(prim.handle("Error: head count must be positive\n")) else ()
@@ -301,80 +304,85 @@ fn __mx_head_geometry(nh: Int, head_dim: Int, rows: Int, cols: Int) -> Int = {
   nh
 }
 
-fn __rope_heads(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, n_heads: Int, head_dim: Int, half: Int, h: Int) -> Int = if h >= n_heads then 0
-else {
-  let _p = __rope_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, 0)
-  __rope_heads(dh, sh, pos_f, head_dim_f, theta, n_heads, head_dim, half, h + 1)
-}
+fn __rope_heads(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, n_heads: Int, head_dim: Int, half: Int, h: Int) -> Int =
+  if h >= n_heads then 0
+  else {
+    let _p = __rope_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, 0)
+    __rope_heads(dh, sh, pos_f, head_dim_f, theta, n_heads, head_dim, half, h + 1)
+  }
 
-fn __rope_rows(ho: Int, hx: Int, n_heads: Int, head_dim: Int, half: Int, head_dim_f: Float, theta: Float, cols: Int, rows: Int, start: Int, p: Int) -> Int = if p >= rows then 0
-else {
-  let sh = prim.load64(hx + 12 + p * 8)
-  let row = prim.alloc_list_f64(cols)
-  let dh = prim.handle(row)
-  let _cp = __rope_copy(dh, sh, cols, 0)
-  let _ht = __rope_heads(
-    dh,
-    sh,
-    int.to_float(start + p),
-    head_dim_f,
-    theta,
-    n_heads,
-    head_dim,
-    half,
-    0,
-  )
-  prim.store_str(ho + 12 + p * 8, row)
-  __rope_rows(ho, hx, n_heads, head_dim, half, head_dim_f, theta, cols, rows, start, p + 1)
-}
+fn __rope_rows(ho: Int, hx: Int, n_heads: Int, head_dim: Int, half: Int, head_dim_f: Float, theta: Float, cols: Int, rows: Int, start: Int, p: Int) -> Int =
+  if p >= rows then 0
+  else {
+    let sh = prim.load64(hx + 12 + p * 8)
+    let row = prim.alloc_list_f64(cols)
+    let dh = prim.handle(row)
+    let _cp = __rope_copy(dh, sh, cols, 0)
+    let _ht = __rope_heads(
+      dh,
+      sh,
+      int.to_float(start + p),
+      head_dim_f,
+      theta,
+      n_heads,
+      head_dim,
+      half,
+      0,
+    )
+    prim.store_str(ho + 12 + p * 8, row)
+    __rope_rows(ho, hx, n_heads, head_dim, half, head_dim_f, theta, cols, rows, start, p + 1)
+  }
 
 // NeoX / HF-convention pair loop: rotates (j, j+half) WITHIN each head — the
 // loader-side weight permutation becomes unnecessary — with the SAME
 // inv_freq = exp(-(2j/head_dim)·log(theta)) the interleaved loop uses (the
 // exponent is 2j/dim in both conventions; only the pairing differs). Op
 // order transcribed from the native almide_rt_matrix_rope_rotate_neox_at.
-fn __rope_neox_pairs(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, h: Int, head_dim: Int, half: Int, j: Int) -> Int = if j >= half then 0
-else {
-  let j0 = h * head_dim + j
-  let j1 = h * head_dim + half + j
-  let x0 = prim.ffrombits(prim.load64(sh + 12 + j0 * 8))
-  let x1 = prim.ffrombits(prim.load64(sh + 12 + j1 * 8))
-  let two_j_f = int.to_float(2 * j)
-  let inv_freq = 1.0 / math.fpow(theta, two_j_f / head_dim_f)
-  let angle = pos_f * inv_freq
-  let s = math.sin(angle)
-  let c = math.cos(angle)
-  prim.store64(dh + 12 + j0 * 8, prim.fbits(x0 * c - x1 * s))
-  prim.store64(dh + 12 + j1 * 8, prim.fbits(x0 * s + x1 * c))
-  __rope_neox_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, j + 1)
-}
+fn __rope_neox_pairs(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, h: Int, head_dim: Int, half: Int, j: Int) -> Int =
+  if j >= half then 0
+  else {
+    let j0 = h * head_dim + j
+    let j1 = h * head_dim + half + j
+    let x0 = prim.ffrombits(prim.load64(sh + 12 + j0 * 8))
+    let x1 = prim.ffrombits(prim.load64(sh + 12 + j1 * 8))
+    let two_j_f = int.to_float(2 * j)
+    let inv_freq = 1.0 / math.fpow(theta, two_j_f / head_dim_f)
+    let angle = pos_f * inv_freq
+    let s = math.sin(angle)
+    let c = math.cos(angle)
+    prim.store64(dh + 12 + j0 * 8, prim.fbits(x0 * c - x1 * s))
+    prim.store64(dh + 12 + j1 * 8, prim.fbits(x0 * s + x1 * c))
+    __rope_neox_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, j + 1)
+  }
 
-fn __rope_neox_heads(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, n_heads: Int, head_dim: Int, half: Int, h: Int) -> Int = if h >= n_heads then 0
-else {
-  let _p = __rope_neox_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, 0)
-  __rope_neox_heads(dh, sh, pos_f, head_dim_f, theta, n_heads, head_dim, half, h + 1)
-}
+fn __rope_neox_heads(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, n_heads: Int, head_dim: Int, half: Int, h: Int) -> Int =
+  if h >= n_heads then 0
+  else {
+    let _p = __rope_neox_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, 0)
+    __rope_neox_heads(dh, sh, pos_f, head_dim_f, theta, n_heads, head_dim, half, h + 1)
+  }
 
-fn __rope_neox_rows(ho: Int, hx: Int, n_heads: Int, head_dim: Int, half: Int, head_dim_f: Float, theta: Float, cols: Int, rows: Int, start: Int, p: Int) -> Int = if p >= rows then 0
-else {
-  let sh = prim.load64(hx + 12 + p * 8)
-  let row = prim.alloc_list_f64(cols)
-  let dh = prim.handle(row)
-  let _cp = __rope_copy(dh, sh, cols, 0)
-  let _ht = __rope_neox_heads(
-    dh,
-    sh,
-    int.to_float(start + p),
-    head_dim_f,
-    theta,
-    n_heads,
-    head_dim,
-    half,
-    0,
-  )
-  prim.store_str(ho + 12 + p * 8, row)
-  __rope_neox_rows(ho, hx, n_heads, head_dim, half, head_dim_f, theta, cols, rows, start, p + 1)
-}
+fn __rope_neox_rows(ho: Int, hx: Int, n_heads: Int, head_dim: Int, half: Int, head_dim_f: Float, theta: Float, cols: Int, rows: Int, start: Int, p: Int) -> Int =
+  if p >= rows then 0
+  else {
+    let sh = prim.load64(hx + 12 + p * 8)
+    let row = prim.alloc_list_f64(cols)
+    let dh = prim.handle(row)
+    let _cp = __rope_copy(dh, sh, cols, 0)
+    let _ht = __rope_neox_heads(
+      dh,
+      sh,
+      int.to_float(start + p),
+      head_dim_f,
+      theta,
+      n_heads,
+      head_dim,
+      half,
+      0,
+    )
+    prim.store_str(ho + 12 + p * 8, row)
+    __rope_neox_rows(ho, hx, n_heads, head_dim, half, head_dim_f, theta, cols, rows, start, p + 1)
+  }
 
 // multi_head_attention(q, k, v, n_heads) [+ causal for masked]. Per head h (col range
 // col0=h*dh .. +dh), per query row i: scores[j] = scale*Σ_k q[i,col0+k]*k[j,col0+k]
@@ -460,22 +468,24 @@ fn matrix_rope_rotate_neox_at(x: List[List[Float]], n_heads: Int, head_dim: Int,
 }
 
 // scores[j] for j in 0..sk. `mask` = (sk - sq) + i (causal cutoff); pass -1 to disable.
-fn __mha_dot(qh: Int, kh: Int, col0: Int, dh: Int, k: Int, acc: Float) -> Float = if k >= dh then acc
-else {
-  let qv = prim.ffrombits(prim.load64(qh + 12 + (col0 + k) * 8))
-  let kv = prim.ffrombits(prim.load64(kh + 12 + (col0 + k) * 8))
-  __mha_dot(qh, kh, col0, dh, k + 1, acc + qv * kv)
-}
+fn __mha_dot(qh: Int, kh: Int, col0: Int, dh: Int, k: Int, acc: Float) -> Float =
+  if k >= dh then acc
+  else {
+    let qv = prim.ffrombits(prim.load64(qh + 12 + (col0 + k) * 8))
+    let kv = prim.ffrombits(prim.load64(kh + 12 + (col0 + k) * 8))
+    __mha_dot(qh, kh, col0, dh, k + 1, acc + qv * kv)
+  }
 
-fn __mha_scores(sch: Int, qh: Int, kmat: List[List[Float]], col0: Int, dh: Int, sk: Int, scale: Float, mask: Int, j: Int) -> Int = if j >= sk then 0
-else {
-  let kh = prim.load64(prim.handle(kmat) + 12 + j * 8)
-  let dot = __mha_dot(qh, kh, col0, dh, 0, 0.0)
-  let scaled = dot * scale
-  let masked = if mask >= 0 and j > mask then scaled + (0.0 - 1000000000.0) else scaled
-  prim.store64(sch + 12 + j * 8, prim.fbits(masked))
-  __mha_scores(sch, qh, kmat, col0, dh, sk, scale, mask, j + 1)
-}
+fn __mha_scores(sch: Int, qh: Int, kmat: List[List[Float]], col0: Int, dh: Int, sk: Int, scale: Float, mask: Int, j: Int) -> Int =
+  if j >= sk then 0
+  else {
+    let kh = prim.load64(prim.handle(kmat) + 12 + j * 8)
+    let dot = __mha_dot(qh, kh, col0, dh, 0, 0.0)
+    let scaled = dot * scale
+    let masked = if mask >= 0 and j > mask then scaled + (0.0 - 1000000000.0) else scaled
+    prim.store64(sch + 12 + j * 8, prim.fbits(masked))
+    __mha_scores(sch, qh, kmat, col0, dh, sk, scale, mask, j + 1)
+  }
 
 fn __mha_max(sch: Int, sk: Int, j: Int, acc: Float) -> Float = if j >= sk then acc
 else {
@@ -506,30 +516,32 @@ else {
 // Native's order (#2624): reciprocal-multiply (`w = e * inv`, not `e / sum`,
 // which differs by an ULP), and a weight of exactly 0 contributes NOTHING — a
 // key whose exp underflowed does not turn an inf/NaN value into `inf * 0 = NaN`.
-fn __mha_out(oh: Int, sch: Int, vmat: List[List[Float]], col0: Int, dh: Int, sk: Int, inv: Float, j: Int) -> Int = if j >= sk then 0
-else {
-  let w = prim.ffrombits(prim.load64(sch + 12 + j * 8)) * inv
-  let _c = if w == 0.0 then 0
-  else __mha_acc_cols(oh, prim.load64(prim.handle(vmat) + 12 + j * 8), col0, dh, w, 0)
-  __mha_out(oh, sch, vmat, col0, dh, sk, inv, j + 1)
-}
+fn __mha_out(oh: Int, sch: Int, vmat: List[List[Float]], col0: Int, dh: Int, sk: Int, inv: Float, j: Int) -> Int =
+  if j >= sk then 0
+  else {
+    let w = prim.ffrombits(prim.load64(sch + 12 + j * 8)) * inv
+    let _c = if w == 0.0 then 0
+    else __mha_acc_cols(oh, prim.load64(prim.handle(vmat) + 12 + j * 8), col0, dh, w, 0)
+    __mha_out(oh, sch, vmat, col0, dh, sk, inv, j + 1)
+  }
 
-fn __mha_heads(oh: Int, qh: Int, kmat: List[List[Float]], vmat: List[List[Float]], nh: Int, dh: Int, sk: Int, sq: Int, i: Int, scale: Float, causal: Bool, h: Int) -> Int = if h >= nh then 0
-else {
-  let col0 = h * dh
-  let scores = prim.alloc_list_f64(sk)
-  let sch = prim.handle(scores)
-  let mask = if causal then (sk - sq) + i else 0 - 1
-  let _s = __mha_scores(sch, qh, kmat, col0, dh, sk, scale, mask, 0)
-  // Max from -inf over every score, as native (an empty key set reads nothing);
-  // 4095 << 52 is the bit pattern of -inf.
-  // No uniform fallback for a NaN sum (#2624): a score row holding NaN or +inf
-  // propagates NaN through the weights, the native IEEE answer.
-  let mx = __mha_max(sch, sk, 0, prim.ffrombits(int.bshl(4095, 52)))
-  let sum = __mha_exp(sch, sk, mx, 0, 0.0)
-  let _o = __mha_out(oh, sch, vmat, col0, dh, sk, 1.0 / sum, 0)
-  __mha_heads(oh, qh, kmat, vmat, nh, dh, sk, sq, i, scale, causal, h + 1)
-}
+fn __mha_heads(oh: Int, qh: Int, kmat: List[List[Float]], vmat: List[List[Float]], nh: Int, dh: Int, sk: Int, sq: Int, i: Int, scale: Float, causal: Bool, h: Int) -> Int =
+  if h >= nh then 0
+  else {
+    let col0 = h * dh
+    let scores = prim.alloc_list_f64(sk)
+    let sch = prim.handle(scores)
+    let mask = if causal then (sk - sq) + i else 0 - 1
+    let _s = __mha_scores(sch, qh, kmat, col0, dh, sk, scale, mask, 0)
+    // Max from -inf over every score, as native (an empty key set reads nothing);
+    // 4095 << 52 is the bit pattern of -inf.
+    // No uniform fallback for a NaN sum (#2624): a score row holding NaN or +inf
+    // propagates NaN through the weights, the native IEEE answer.
+    let mx = __mha_max(sch, sk, 0, prim.ffrombits(int.bshl(4095, 52)))
+    let sum = __mha_exp(sch, sk, mx, 0, 0.0)
+    let _o = __mha_out(oh, sch, vmat, col0, dh, sk, 1.0 / sum, 0)
+    __mha_heads(oh, qh, kmat, vmat, nh, dh, sk, sq, i, scale, causal, h + 1)
+  }
 
 fn __mha_zero(oh: Int, dm: Int, i: Int) -> Int = if i >= dm then 0
 else {
@@ -537,16 +549,17 @@ else {
   __mha_zero(oh, dm, i + 1)
 }
 
-fn __mha_rows(ho: Int, qmat: List[List[Float]], kmat: List[List[Float]], vmat: List[List[Float]], nh: Int, dh: Int, dm: Int, sk: Int, sq: Int, scale: Float, causal: Bool, i: Int) -> Int = if i >= sq then 0
-else {
-  let qh = prim.load64(prim.handle(qmat) + 12 + i * 8)
-  let row = prim.alloc_list_f64(dm)
-  let oh = prim.handle(row)
-  let _z = __mha_zero(oh, dm, 0)
-  let _h = __mha_heads(oh, qh, kmat, vmat, nh, dh, sk, sq, i, scale, causal, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __mha_rows(ho, qmat, kmat, vmat, nh, dh, dm, sk, sq, scale, causal, i + 1)
-}
+fn __mha_rows(ho: Int, qmat: List[List[Float]], kmat: List[List[Float]], vmat: List[List[Float]], nh: Int, dh: Int, dm: Int, sk: Int, sq: Int, scale: Float, causal: Bool, i: Int) -> Int =
+  if i >= sq then 0
+  else {
+    let qh = prim.load64(prim.handle(qmat) + 12 + i * 8)
+    let row = prim.alloc_list_f64(dm)
+    let oh = prim.handle(row)
+    let _z = __mha_zero(oh, dm, 0)
+    let _h = __mha_heads(oh, qh, kmat, vmat, nh, dh, sk, sq, i, scale, causal, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mha_rows(ho, qmat, kmat, vmat, nh, dh, dm, sk, sq, scale, causal, i + 1)
+  }
 
 // `k` and `v` are read at `[j][col0 + kk]` for j < sk: a narrower `k`/`v`
 // read past its row block here (the two wasm legs even disagreed on the
@@ -616,12 +629,13 @@ fn __dq_zero(v: Float) -> Float = if v == 0.0 then 0.0 else v
 // Normalize an fp16 SUBNORMAL mantissa: shift left until bit 10 is set, dropping
 // one from the exponent per shift — native's `while m & 0x400 == 0` loop in
 // `fp16_bits_to_f32`, as a recursion. `e` enters at 1 - 15 = -14.
-fn __fp16_subnormal_bits(signbits: Int, m: Int, e: Int) -> Int = if prim.band(m, 1024) == 0 then __fp16_subnormal_bits(
-  signbits,
-  prim.bshl(m, 1),
-  e - 1,
-)
-else prim.bor(prim.bor(signbits, prim.bshl(e + 127, 23)), prim.bshl(prim.band(m, 1023), 13))
+fn __fp16_subnormal_bits(signbits: Int, m: Int, e: Int) -> Int =
+  if prim.band(m, 1024) == 0 then __fp16_subnormal_bits(
+    signbits,
+    prim.bshl(m, 1),
+    e - 1,
+  )
+  else prim.bor(prim.bor(signbits, prim.bshl(e + 127, 23)), prim.bshl(prim.band(m, 1023), 13))
 
 // fp16 bit pattern -> f32 bit pattern, the exact mirror of native's
 // `fp16_bits_to_f32` (runtime/rs/src/matrix_p2.rs) over the WHOLE fp16 domain:
@@ -666,11 +680,12 @@ fn __q10_val(base: Int, limit: Int, k: Int) -> Float = {
   }
 }
 
-fn __q10_row(dh: Int, base: Int, limit: Int, row_k0: Int, cols: Int, c: Int) -> Int = if c >= cols then 0
-else {
-  prim.store64(dh + 12 + c * 8, prim.fbits(__q10_val(base, limit, row_k0 + c)))
-  __q10_row(dh, base, limit, row_k0, cols, c + 1)
-}
+fn __q10_row(dh: Int, base: Int, limit: Int, row_k0: Int, cols: Int, c: Int) -> Int =
+  if c >= cols then 0
+  else {
+    prim.store64(dh + 12 + c * 8, prim.fbits(__q10_val(base, limit, row_k0 + c)))
+    __q10_row(dh, base, limit, row_k0, cols, c + 1)
+  }
 
 // The FULL-MATRIX loader takes the same per-ROW OOB->zeros edge its row-subset
 // twin `__q10_sel_rows` already took (C-229). It had no `limit` at all, so a
@@ -687,13 +702,14 @@ else {
 // here it skipped every row whole once `cols/128*18` exceeded the buffer and
 // answered all zeros where native decoded block 0 (the third copy of the
 // same mistake, after the structural leg's `lower_matrix_q1_0`).
-fn __q10_rows(ho: Int, base: Int, limit: Int, rows: Int, cols: Int, r: Int) -> Int = if r >= rows then 0
-else {
-  let row = prim.alloc_list_f64(cols)
-  let _c = __q10_row(prim.handle(row), base, limit, r * cols, cols, 0)
-  prim.store_str(ho + 12 + r * 8, row)
-  __q10_rows(ho, base, limit, rows, cols, r + 1)
-}
+fn __q10_rows(ho: Int, base: Int, limit: Int, rows: Int, cols: Int, r: Int) -> Int =
+  if r >= rows then 0
+  else {
+    let row = prim.alloc_list_f64(cols)
+    let _c = __q10_row(prim.handle(row), base, limit, r * cols, cols, 0)
+    prim.store_str(ho + 12 + r * 8, row)
+    __q10_rows(ho, base, limit, rows, cols, r + 1)
+  }
 
 // #1525: the shared constructor ceiling — a mirror of `__mx_dims_guard` in
 // matrix_core.almd (helpers are file-local, hence the copy; 268435456 = 2^28,
@@ -750,20 +766,21 @@ else if offset > len then len else offset
 // all-zero row (`__q8_zfill`, the shared zero-filler) — the family's defined
 // OOB→zeros edge, per ROW; `limit` is the absolute end of the data block.
 // `offset` clamps to 0 like native's `offset.max(0)`.
-fn __q10_sel_rows(ho: Int, base: Int, limit: Int, ids: List[Int], cols: Int, i: Int) -> Int = if i >= list.len(ids) then 0
-else {
-  let rid0 = list.get(ids, i) ?? 0
-  let rid = if rid0 < 0 then 0 else rid0
-  let row_bytes = cols / 128 * 18
-  let cr = cols / 128 * 128
-  let row = prim.alloc_list_f64(cols)
-  let _c = if __q_row_fits(limit - base, rid, row_bytes) then {
-    let _d = __q10_row(prim.handle(row), base, limit, rid * cr, cr, 0)
-    __q8_zfill(prim.handle(row), cols, cr)
-  } else __q8_zfill(prim.handle(row), cols, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __q10_sel_rows(ho, base, limit, ids, cols, i + 1)
-}
+fn __q10_sel_rows(ho: Int, base: Int, limit: Int, ids: List[Int], cols: Int, i: Int) -> Int =
+  if i >= list.len(ids) then 0
+  else {
+    let rid0 = list.get(ids, i) ?? 0
+    let rid = if rid0 < 0 then 0 else rid0
+    let row_bytes = cols / 128 * 18
+    let cr = cols / 128 * 128
+    let row = prim.alloc_list_f64(cols)
+    let _c = if __q_row_fits(limit - base, rid, row_bytes) then {
+      let _d = __q10_row(prim.handle(row), base, limit, rid * cr, cr, 0)
+      __q8_zfill(prim.handle(row), cols, cr)
+    } else __q8_zfill(prim.handle(row), cols, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __q10_sel_rows(ho, base, limit, ids, cols, i + 1)
+  }
 
 fn matrix_select_rows_q1_0(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> List[List[Float]] = {
   let hd = prim.handle(data)
@@ -806,17 +823,18 @@ else {
 // all-zero row — the same defined edge as the non-multiple-cols guard in the
 // opener; `limit` is the absolute end of the data block. `offset` clamps to 0
 // like native's `offset.max(0)`.
-fn __q8_sel_rows(ho: Int, base: Int, limit: Int, ids: List[Int], cols: Int, row_bytes: Int, i: Int) -> Int = if i >= list.len(ids) then 0
-else {
-  let rid0 = list.get(ids, i) ?? 0
-  let rid = if rid0 < 0 then 0 else rid0
-  let row = prim.alloc_list_f64(cols)
-  let fits = __q_row_fits(limit - base, rid, row_bytes)
-  let _c = if fits then __q8_row(prim.handle(row), base, rid * row_bytes, cols, 0)
-  else __q8_zfill(prim.handle(row), cols, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __q8_sel_rows(ho, base, limit, ids, cols, row_bytes, i + 1)
-}
+fn __q8_sel_rows(ho: Int, base: Int, limit: Int, ids: List[Int], cols: Int, row_bytes: Int, i: Int) -> Int =
+  if i >= list.len(ids) then 0
+  else {
+    let rid0 = list.get(ids, i) ?? 0
+    let rid = if rid0 < 0 then 0 else rid0
+    let row = prim.alloc_list_f64(cols)
+    let fits = __q_row_fits(limit - base, rid, row_bytes)
+    let _c = if fits then __q8_row(prim.handle(row), base, rid * row_bytes, cols, 0)
+    else __q8_zfill(prim.handle(row), cols, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __q8_sel_rows(ho, base, limit, ids, cols, row_bytes, i + 1)
+  }
 
 fn matrix_select_rows_q8_0_dq(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> List[List[Float]] = {
   let hd = prim.handle(data)

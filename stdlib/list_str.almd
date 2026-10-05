@@ -51,13 +51,14 @@ fn list_index_of_str(xs: List[String], x: String) -> Int? = {
 // ── Higher-order list.all/any/count over a List[String] (the predicate takes a String element by
 // handle, heap-arg closure ABI; reads only, no allocation). Sum the predicate's 0/1 into a hit
 // count: any = count>0, all = count==len, count = the hit count itself. Pure predicate = v0-match.
-fn __list_str_count_hits(h: Int, f: (String) -> Bool, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else {
-  let x = prim.load_str(h + 12 + i * 8)
-  let hit = f(x)
-  if hit then __list_str_count_hits(h, f, n, i + 1, acc + 1)
-  else __list_str_count_hits(h, f, n, i + 1, acc)
-}
+fn __list_str_count_hits(h: Int, f: (String) -> Bool, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load_str(h + 12 + i * 8)
+    let hit = f(x)
+    if hit then __list_str_count_hits(h, f, n, i + 1, acc + 1)
+    else __list_str_count_hits(h, f, n, i + 1, acc)
+  }
 
 fn list_any_str(xs: List[String], f: (String) -> Bool) -> Bool = {
   let h = prim.handle(xs)
@@ -81,12 +82,13 @@ fn list_count_str(xs: List[String], f: (String) -> Bool) -> Int = {
 
 // list.fold over a List[String] — f : (Acc, String) -> Acc (Int accumulator), a 2-arity closure
 // with a String element second arg (heap-widened). Left fold in element order. Read-only.
-fn __list_str_fold_loop(h: Int, f: (Int, String) -> Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else {
-  let x = prim.load_str(h + 12 + i * 8)
-  let nacc = f(acc, x)
-  __list_str_fold_loop(h, f, n, i + 1, nacc)
-}
+fn __list_str_fold_loop(h: Int, f: (Int, String) -> Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load_str(h + 12 + i * 8)
+    let nacc = f(acc, x)
+    __list_str_fold_loop(h, f, n, i + 1, nacc)
+  }
 
 fn list_fold_str(xs: List[String], init: Int, f: (Int, String) -> Int) -> Int = {
   let h = prim.handle(xs)
@@ -113,8 +115,9 @@ fn __list_find_str_at(h: Int, f: (String) -> Bool, n: Int, i: Int) -> String? = 
   else __list_find_str_loop(h, f, n, i + 1)
 }
 
-fn __list_find_str_loop(h: Int, f: (String) -> Bool, n: Int, i: Int) -> String? = if i >= n then __lfs_none()
-else __list_find_str_at(h, f, n, i)
+fn __list_find_str_loop(h: Int, f: (String) -> Bool, n: Int, i: Int) -> String? =
+  if i >= n then __lfs_none()
+  else __list_find_str_at(h, f, n, i)
 
 fn list_find_str(xs: List[String], f: (String) -> Bool) -> String? = {
   let h = prim.handle(xs)
@@ -208,8 +211,9 @@ fn __intersperse_step(sh: Int, oh: Int, sep: String, n: Int, last: Int, i: Int, 
   }
 }
 
-fn __intersperse_fill(sh: Int, oh: Int, sep: String, n: Int, last: Int, i: Int, di: Int) -> Int = if i >= n then di
-else __intersperse_step(sh, oh, sep, n, last, i, di)
+fn __intersperse_fill(sh: Int, oh: Int, sep: String, n: Int, last: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else __intersperse_step(sh, oh, sep, n, last, i, di)
 
 fn list_intersperse_str(xs: List[String], sep: String) -> List[String] = {
   let h = prim.handle(xs)

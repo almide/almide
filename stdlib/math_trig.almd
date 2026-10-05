@@ -485,13 +485,14 @@ fn __ph_loop(tabh: Int, xh: Int, fh: Int, qh: Int, iqh: Int, sth: Int, jx: Int, 
 }
 
 // extend: f[jx+i] = IPIO2[jv+i]; q[i] = dot, for i = lo..=hi.
-fn __ph_extend(tabh: Int, xh: Int, fh: Int, qh: Int, jx: Int, jv: Int, lo: Int, hi: Int) -> Int = if lo > hi then 0
-else {
-  prim.store64(fh + 12 + (jx + lo) * 8, prim.fbits(prim.i2f(__ipio2(tabh, jv + lo))))
-  let fw = __ph_dot(xh, fh, jx, lo, 0, 0.0)
-  prim.store64(qh + 12 + lo * 8, prim.fbits(fw))
-  __ph_extend(tabh, xh, fh, qh, jx, jv, lo + 1, hi)
-}
+fn __ph_extend(tabh: Int, xh: Int, fh: Int, qh: Int, jx: Int, jv: Int, lo: Int, hi: Int) -> Int =
+  if lo > hi then 0
+  else {
+    prim.store64(fh + 12 + (jx + lo) * 8, prim.fbits(prim.i2f(__ipio2(tabh, jv + lo))))
+    let fw = __ph_dot(xh, fh, jx, lo, 0, 0.0)
+    prim.store64(qh + 12 + lo * 8, prim.fbits(fw))
+    __ph_extend(tabh, xh, fh, qh, jx, jv, lo + 1, hi)
+  }
 
 // chop off zero terms after the loop: while iq[jz]==0 { jz--; q0-=24 }. Mutates st (jz,q0).
 fn __ph_chop(iqh: Int, sth: Int) -> Int = {

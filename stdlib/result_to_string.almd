@@ -541,14 +541,15 @@ fn __rts_map_key_width(elem: Int) -> Int = {
   2 + __rts_esc_len(elem + 12, slen, 0, 0)
 }
 
-fn __rts_map_body_len(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int = if i >= count then acc
-else {
-  let kelem = prim.load64(kaddr + i * 8)
-  let v = prim.load64(vaddr + i * 8)
-  let sep = if i > 0 then 2 else 0
-  let ew = __rts_map_key_width(kelem) + 2 + __rts_int_width(v)
-  __rts_map_body_len(kaddr, vaddr, count, i + 1, acc + sep + ew)
-}
+fn __rts_map_body_len(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let kelem = prim.load64(kaddr + i * 8)
+    let v = prim.load64(vaddr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    let ew = __rts_map_key_width(kelem) + 2 + __rts_int_width(v)
+    __rts_map_body_len(kaddr, vaddr, count, i + 1, acc + sep + ew)
+  }
 
 fn __rts_map_fill_key(elem: Int, pos: Int) -> Int = {
   let slen = prim.load32(elem + 4)
@@ -558,23 +559,24 @@ fn __rts_map_fill_key(elem: Int, pos: Int) -> Int = {
   mid + 1
 }
 
-fn __rts_map_fill_body(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int = if i >= count then pos
-else {
-  let pos1 = if i > 0 then {
-    prim.store8(pos, 44)
-    prim.store8(pos + 1, 32)
-    pos + 2
-  } else pos
-  let kelem = prim.load64(kaddr + i * 8)
-  let pos2 = __rts_map_fill_key(kelem, pos1)
-  prim.store8(pos2, 58)
-  // ':'
-  prim.store8(pos2 + 1, 32)
-  // ' '
-  let v = prim.load64(vaddr + i * 8)
-  let pos3 = __rts_fill_int(v, pos2 + 2)
-  __rts_map_fill_body(kaddr, vaddr, count, i + 1, pos3)
-}
+fn __rts_map_fill_body(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)
+      prim.store8(pos + 1, 32)
+      pos + 2
+    } else pos
+    let kelem = prim.load64(kaddr + i * 8)
+    let pos2 = __rts_map_fill_key(kelem, pos1)
+    prim.store8(pos2, 58)
+    // ':'
+    prim.store8(pos2 + 1, 32)
+    // ' '
+    let v = prim.load64(vaddr + i * 8)
+    let pos3 = __rts_fill_int(v, pos2 + 2)
+    __rts_map_fill_body(kaddr, vaddr, count, i + 1, pos3)
+  }
 
 fn __rts_ok_map(m: Map[String, Int]) -> String = {
   let ks = map.keys(m)

@@ -10,9 +10,13 @@ fn size(t: T) -> Int = match t {
 }
 
 let LIMIT = 3
+
 let step = 2
+
 let NUMBERS = [1, 2, 3]
+
 let ZERO = V(0)
+
 fn inc1(x: Int) -> Int = x + 1
 
 let inc = inc1

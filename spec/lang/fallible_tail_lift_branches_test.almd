@@ -2,7 +2,6 @@
 // (ADR-0002 D3). An `if` lifts per branch exactly as a `match` lifts per
 // arm, so a plain value beside an explicit `ok(..)` / `err(..)` is no
 // mismatch in either form.
-
 fn if_value_then_ok(b: Bool) -> Int! =
   if b then {
     let x = 1
@@ -24,7 +23,8 @@ fn match_mixed(x: Int) -> Int! = match x {
   _ => x,
 }
 
-fn nested(a: Bool, b: Bool) -> Int! = if a then (if b then 1 else ok(2)) else 3
+fn nested(a: Bool, b: Bool) -> Int! = if a then (if b then 1 else ok(2))
+else 3
 
 fn block_tail(b: Bool) -> String! = {
   let base = "v"

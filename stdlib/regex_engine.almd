@@ -102,10 +102,12 @@ fn __rx_brace_end(p: Int, pe: Int) -> Int = {
 }
 
 // Decimal value of the digit run [p, e).
-fn __rx_digits_end(p: Int, pe: Int) -> Int = if p < pe and prim.load8(p) >= 48 and prim.load8(p) <= 57 then __rx_digits_end(
-  p + 1,
-  pe,
-) else p
+fn __rx_digits_end(p: Int, pe: Int) -> Int =
+  if p < pe and prim.load8(p) >= 48 and prim.load8(p) <= 57 then __rx_digits_end(
+    p + 1,
+    pe,
+  )
+  else p
 
 // min of the brace quantifier whose '{' is at `p` (well-formed by construction).
 fn __rx_digits_val(p: Int, e: Int, acc: Int) -> Int = if p >= e then acc
@@ -250,7 +252,8 @@ fn __rx_back(t: Int, ts: Int) -> Int = {
   else if prim.band(prim.load8(t1), 192) == 128 then __rx_back(t1, ts) else t1
 }
 
-fn __rx_flags(pat0: Int) -> Int = if prim.load8(pat0) == 40 and prim.load8(pat0 + 1) == 63 and prim.load8(pat0 + 2) == 109 and prim.load8(pat0 + 3) == 41 then 1 else 0
+fn __rx_flags(pat0: Int) -> Int =
+  if prim.load8(pat0) == 40 and prim.load8(pat0 + 1) == 63 and prim.load8(pat0 + 2) == 109 and prim.load8(pat0 + 3) == 41 then 1 else 0
 
 fn __rx_is_word(c: Int) -> Bool = (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95
 
@@ -579,7 +582,8 @@ fn __rx_alts(p: Int, pend: Int, t: Int, k: Int, m: Int) -> Int = {
 
 // Is the piece ending at `pnext` lazy (`*?` `+?` `??` `{n,m}?`)? The lazy `?`
 // sits at pnext-1 with a quantifier char right before it.
-fn __rx_lazy(ae: Int, pnext: Int) -> Int = if pnext >= ae + 2 and prim.load8(pnext - 1) == 63 and (prim.load8(pnext - 2) == 42 or prim.load8(pnext - 2) == 43 or prim.load8(pnext - 2) == 63 or prim.load8(pnext - 2) == 125) then 1 else 0
+fn __rx_lazy(ae: Int, pnext: Int) -> Int =
+  if pnext >= ae + 2 and prim.load8(pnext - 1) == 63 and (prim.load8(pnext - 2) == 42 or prim.load8(pnext - 2) == 43 or prim.load8(pnext - 2) == 63 or prim.load8(pnext - 2) == 125) then 1 else 0
 
 // Match the sequence [p, pend) at `t`, then `k`. Every step passes here, so
 // this is where the arena is kept from filling up.
@@ -663,13 +667,14 @@ fn __rx_repi_fwd(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, count: Int, mn:
   else __rx_repi_try(pnext, pend, t, count, mn, k, m)
 }
 
-fn __rx_repi_try(pnext: Int, pend: Int, t: Int, i: Int, mn: Int, k: Int, m: Int) -> Int = if i < mn then __rx_fail(m)
-else {
-  let ts = prim.load64(m + 32)
-  let _0 = if i > mn then __rx_back_choice(pnext, pend, __rx_back(t, ts), i - 1, mn, k, m)
-  else 0
-  __rx_seq(pnext, pend, t, k, m)
-}
+fn __rx_repi_try(pnext: Int, pend: Int, t: Int, i: Int, mn: Int, k: Int, m: Int) -> Int =
+  if i < mn then __rx_fail(m)
+  else {
+    let ts = prim.load64(m + 32)
+    let _0 = if i > mn then __rx_back_choice(pnext, pend, __rx_back(t, ts), i - 1, mn, k, m)
+    else 0
+    __rx_seq(pnext, pend, t, k, m)
+  }
 
 // ── public API ──
 // The text end, and the end of the last match found. The loops that grow an
@@ -746,20 +751,21 @@ fn regex_find(pat: String, s: String) -> String? = {
 }
 
 // v0 find_all: repeat leftmost; a zero-width match advances one char past `end`.
-fn __rx_find_all_go(p: Int, pe: Int, pos: Int, m: Int, acc: List[String]) -> List[String] = if pos > __rx_te(m) then acc
-else {
-  let st = __rx_find_start(p, pe, pos, m)
-  if st < 0 then acc
+fn __rx_find_all_go(p: Int, pe: Int, pos: Int, m: Int, acc: List[String]) -> List[String] =
+  if pos > __rx_te(m) then acc
   else {
-    let en = __rx_end(m)
-    let hit = __rx_sub(st, en)
-    if en > st then __rx_find_all_go(p, pe, en, m, acc + [hit])
+    let st = __rx_find_start(p, pe, pos, m)
+    if st < 0 then acc
     else {
-      if en < __rx_te(m) then __rx_find_all_go(p, pe, en + __rx_w(en), m, acc + [hit])
-      else acc + [hit]
+      let en = __rx_end(m)
+      let hit = __rx_sub(st, en)
+      if en > st then __rx_find_all_go(p, pe, en, m, acc + [hit])
+      else {
+        if en < __rx_te(m) then __rx_find_all_go(p, pe, en + __rx_w(en), m, acc + [hit])
+        else acc + [hit]
+      }
     }
   }
-}
 
 fn regex_find_all(pat: String, s: String) -> List[String] = {
   let ph = prim.handle(pat)
@@ -894,15 +900,16 @@ else {
   __rx_fill_neg(dst + 8, n - 1)
 }
 
-fn __rx_caps_out(caps: Int, i: Int, ncap: Int, acc: List[String]) -> List[String] = if i >= ncap then acc
-else {
-  let st = prim.load64(caps + i * 16)
-  if st < 0 then __rx_caps_out(caps, i + 1, ncap, acc + [""])
+fn __rx_caps_out(caps: Int, i: Int, ncap: Int, acc: List[String]) -> List[String] =
+  if i >= ncap then acc
   else {
-    let hit = __rx_sub(st, prim.load64(caps + i * 16 + 8))
-    __rx_caps_out(caps, i + 1, ncap, acc + [hit])
+    let st = prim.load64(caps + i * 16)
+    if st < 0 then __rx_caps_out(caps, i + 1, ncap, acc + [""])
+    else {
+      let hit = __rx_sub(st, prim.load64(caps + i * 16 + 8))
+      __rx_caps_out(caps, i + 1, ncap, acc + [hit])
+    }
   }
-}
 
 // Index 0 is the WHOLE match, 1.. are the groups — the shape every mainstream
 // regex API uses and the one docs/stdlib/regex.md always documented; the

@@ -31,10 +31,11 @@ fn als_sort_key(spec: String) -> String = {
 // The CI lane a fixture runs in, from its PATH. ORDER MATTERS: `spec/wasm_cross/` must be
 // tested before the general `spec/` prefix, or every cross-target fixture reads as an
 // ordinary both-target test.
-fn how_ci_runs(path: String) -> String = if string.starts_with(path, "spec/wasm_cross/") then "byte-compare"
-else if string.starts_with(path, "tests/diagnostics/") then "checker"
-else if string.starts_with(path, "spec/") then "both-target test"
-else if string.starts_with(path, "tests/") and string.ends_with(path, ".rs") then "cargo gate" else "other"
+fn how_ci_runs(path: String) -> String =
+  if string.starts_with(path, "spec/wasm_cross/") then "byte-compare"
+  else if string.starts_with(path, "tests/diagnostics/") then "checker"
+  else if string.starts_with(path, "spec/") then "both-target test"
+  else if string.starts_with(path, "tests/") and string.ends_with(path, ".rs") then "cargo gate" else "other"
 
 // Only fixture/exhaustive evidence appears in this report.
 fn executable_paths(t: toml.Table) -> List[String] = t.array_items |> list.filter((it) => {

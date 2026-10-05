@@ -4,7 +4,12 @@
 // implemented")` for any non-unit case.
 type Color: Codec = { r: Int, g: Int, b: Int }
 
-type Shape: Codec = | Wrap(Color) | Tag { name: String, c: Color } | Multi(List[Int]) | Pair(Int, String) | Plain
+type Shape: Codec =
+  | Wrap(Color)
+  | Tag { name: String, c: Color }
+  | Multi(List[Int])
+  | Pair(Int, String)
+  | Plain
 
 test "tuple variant with a nested Codec type" {
   match Shape.decode(Shape.encode(Wrap({ r: 1, g: 2, b: 3 }))) {

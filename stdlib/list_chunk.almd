@@ -19,14 +19,15 @@ fn __chunk_one(sh: Int, start: Int, clen: Int) -> List[Int] = {
 }
 
 // Fill the outer list: at chunk index ci / source offset `start`, build the chunk + move it in.
-fn __chunk_outer(oh: Int, sh: Int, total: Int, cn: Int, ci: Int, start: Int) -> Int = if start >= total then 0
-else {
-  let rem = total - start
-  let clen = if rem < cn then rem else cn
-  let chunk = __chunk_one(sh, start, clen)
-  prim.store_str(oh + 12 + ci * 8, chunk)
-  __chunk_outer(oh, sh, total, cn, ci + 1, start + cn)
-}
+fn __chunk_outer(oh: Int, sh: Int, total: Int, cn: Int, ci: Int, start: Int) -> Int =
+  if start >= total then 0
+  else {
+    let rem = total - start
+    let clen = if rem < cn then rem else cn
+    let chunk = __chunk_one(sh, start, clen)
+    prim.store_str(oh + 12 + ci * 8, chunk)
+    __chunk_outer(oh, sh, total, cn, ci + 1, start + cn)
+  }
 
 fn list_chunk(xs: List[Int], n: Int) -> List[List[Int]] = {
   // C-129 / ALS-T6: n == 0 is a DOMAIN ERROR aborting with v0's exact line + exit 1
@@ -101,14 +102,15 @@ fn __chunk_one_str(sh: Int, start: Int, clen: Int) -> List[String] = {
   c
 }
 
-fn __chunk_outer_str(oh: Int, sh: Int, total: Int, cn: Int, ci: Int, start: Int) -> Int = if start >= total then 0
-else {
-  let rem = total - start
-  let clen = if rem < cn then rem else cn
-  let chunk = __chunk_one_str(sh, start, clen)
-  prim.store_str(oh + 12 + ci * 8, chunk)
-  __chunk_outer_str(oh, sh, total, cn, ci + 1, start + cn)
-}
+fn __chunk_outer_str(oh: Int, sh: Int, total: Int, cn: Int, ci: Int, start: Int) -> Int =
+  if start >= total then 0
+  else {
+    let rem = total - start
+    let clen = if rem < cn then rem else cn
+    let chunk = __chunk_one_str(sh, start, clen)
+    prim.store_str(oh + 12 + ci * 8, chunk)
+    __chunk_outer_str(oh, sh, total, cn, ci + 1, start + cn)
+  }
 
 fn list_chunk_str(xs: List[String], n: Int) -> List[List[String]] = {
   if n == 0 then prim.die(prim.handle("Error: chunk size must be positive\n")) else ()

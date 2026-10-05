@@ -170,12 +170,13 @@ fn trailing_ident(s: String) -> String = {
   if run > 0 and before != "." and is_bare_ident(name) then name else ""
 }
 
-fn trailing_run(cs: List[String], n: Int, k: Int) -> Int = if k < n and is_ident_char(list.get_or(cs, n - k - 1, "")) then trailing_run(
-  cs,
-  n,
-  k + 1,
-)
-else k
+fn trailing_run(cs: List[String], n: Int, k: Int) -> Int =
+  if k < n and is_ident_char(list.get_or(cs, n - k - 1, "")) then trailing_run(
+    cs,
+    n,
+    k + 1,
+  )
+  else k
 
 // The receiver of `xs |> list.fold(` — the bare identifier piped in — or "".
 fn pipe_receiver(prefix: String) -> String = {

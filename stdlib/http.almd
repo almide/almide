@@ -538,7 +538,8 @@ fn __segment_ok(s: String, last: Bool) -> Bool = if __is_rest(s) then last and n
 else if __is_param(s) then __name_of(s) != "" and not string.contains(__name_of(s), "{") and not string.contains(
   __name_of(s),
   "}",
-) else not string.contains(s, "{") and not string.contains(s, "}")
+)
+else not string.contains(s, "{") and not string.contains(s, "}")
 
 fn __method_ok(m: String) -> Bool = string.chars(m) |> list.all((c) => string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c))
 
@@ -616,11 +617,12 @@ fn router(routes: List[HttpRoute]) -> Result[HttpHandler, String] = {
 
 /// Applies middleware; the first is the outermost.
 @concurrent(handler, middleware)
-fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler = if list.is_empty(middleware) then handler
-else wrap(
-  __apply(list.last(middleware) ?? __no_middleware, handler),
-  list.take(middleware, list.len(middleware) - 1),
-)
+fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler =
+  if list.is_empty(middleware) then handler
+  else wrap(
+    __apply(list.last(middleware) ?? __no_middleware, handler),
+    list.take(middleware, list.len(middleware) - 1),
+  )
 
 // Named rather than inline `mw(inner)`: the wasm legs return a handler out
 // of an `if` only through a call they can resolve. `wrap` applies the LAST

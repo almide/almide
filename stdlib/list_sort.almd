@@ -10,18 +10,19 @@ fn __sort_load(h: Int, i: Int) -> Int = prim.load64(h + 12 + i * 8)
 
 // Merge the runs [lo, mid) and [mid, hi) from src into dst; `i`/`j` walk the
 // two runs, `k` walks [lo, hi) in dst. `<=` keeps the merge stable.
-fn __merge_run(srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
-else {
-  let takel = if j >= hi then true
-  else if i >= mid then false else __sort_load(srch, i) <= __sort_load(srch, j)
-  if takel then {
-    prim.store64(dsth + 12 + k * 8, __sort_load(srch, i))
-    __merge_run(srch, dsth, mid, hi, i + 1, j, k + 1)
-  } else {
-    prim.store64(dsth + 12 + k * 8, __sort_load(srch, j))
-    __merge_run(srch, dsth, mid, hi, i, j + 1, k + 1)
+fn __merge_run(srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int =
+  if k >= hi then 0
+  else {
+    let takel = if j >= hi then true
+    else if i >= mid then false else __sort_load(srch, i) <= __sort_load(srch, j)
+    if takel then {
+      prim.store64(dsth + 12 + k * 8, __sort_load(srch, i))
+      __merge_run(srch, dsth, mid, hi, i + 1, j, k + 1)
+    } else {
+      prim.store64(dsth + 12 + k * 8, __sort_load(srch, j))
+      __merge_run(srch, dsth, mid, hi, i, j + 1, k + 1)
+    }
   }
-}
 
 // One width-pass: merge each adjacent pair of width-runs from src into dst,
 // `lo` stepping by 2*width across [0, n).
@@ -71,15 +72,16 @@ fn list_sort(xs: List[Int]) -> List[Int] = {
 // the silent bug). A String is a handle; bytes at h+12, byte length at h+4. rc-copy the handles to
 // co-own (the result is a List[String] → recursive DropListStr; without rc_inc the result+source
 // double-free at scale), then selection-sort in place by content (handle swaps, no rc change).
-fn __strcmp_at(ah: Int, bh: Int, la: Int, lb: Int, k: Int) -> Int = if k >= la then (if k >= lb then 0 else 0 - 1)
-else if k >= lb then 1
-else {
-  let ca = prim.load8(ah + 12 + k)
-  let cb = prim.load8(bh + 12 + k)
-  if ca < cb then 0 - 1
-  else if ca > cb then 1
-  else __strcmp_at(ah, bh, la, lb, k + 1)
-}
+fn __strcmp_at(ah: Int, bh: Int, la: Int, lb: Int, k: Int) -> Int =
+  if k >= la then (if k >= lb then 0 else 0 - 1)
+  else if k >= lb then 1
+  else {
+    let ca = prim.load8(ah + 12 + k)
+    let cb = prim.load8(bh + 12 + k)
+    if ca < cb then 0 - 1
+    else if ca > cb then 1
+    else __strcmp_at(ah, bh, la, lb, k + 1)
+  }
 
 fn __strcmp(ah: Int, bh: Int) -> Int = __strcmp_at(
   ah,
@@ -103,21 +105,23 @@ else {
 // between raw buffers — no rc traffic; the one rc_inc per element happened
 // in __sort_copy_rc, and the returned List[String]'s recursive drop is the
 // single matching rc_dec.
-fn __merge_run_str(srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
-else {
-  let takel = if j >= hi then true
-  else if i >= mid then false else __strcmp(
-    prim.load64(srch + 12 + i * 8),
-    prim.load64(srch + 12 + j * 8),
-  ) <= 0
-  if takel then {
-    prim.store64(dsth + 12 + k * 8, prim.load64(srch + 12 + i * 8))
-    __merge_run_str(srch, dsth, mid, hi, i + 1, j, k + 1)
-  } else {
-    prim.store64(dsth + 12 + k * 8, prim.load64(srch + 12 + j * 8))
-    __merge_run_str(srch, dsth, mid, hi, i, j + 1, k + 1)
+fn __merge_run_str(srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int =
+  if k >= hi then 0
+  else {
+    let takel = if j >= hi then true
+    else if i >= mid then false
+    else __strcmp(
+      prim.load64(srch + 12 + i * 8),
+      prim.load64(srch + 12 + j * 8),
+    ) <= 0
+    if takel then {
+      prim.store64(dsth + 12 + k * 8, prim.load64(srch + 12 + i * 8))
+      __merge_run_str(srch, dsth, mid, hi, i + 1, j, k + 1)
+    } else {
+      prim.store64(dsth + 12 + k * 8, prim.load64(srch + 12 + j * 8))
+      __merge_run_str(srch, dsth, mid, hi, i, j + 1, k + 1)
+    }
   }
-}
 
 fn __merge_pass_str(srch: Int, dsth: Int, n: Int, width: Int, lo: Int) -> Int = if lo >= n then 0
 else {

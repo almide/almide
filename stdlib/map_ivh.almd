@@ -23,20 +23,21 @@ fn __ivh_store_val(addr: Int, s: String) -> Int = {
 // Copy every entry from sh to rh: keys raw; the matched key's value is REPLACED
 // with a fresh copy of `v`, every other value handle is SHARED (rc_inc — the new
 // map co-owns it; both maps' drops rc_dec it once each).
-fn __ivh_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: Int, v: String, i: Int) -> Int = if i >= n then 0
-else {
-  let kk = prim.load64(sh + 12 + i * 8)
-  prim.store64(rh + 12 + i * 8, kk)
-  if kk == k then {
-    let _s = __ivh_store_val(rh + 12 + (rn + i) * 8, v)
-    ()
-  } else {
-    let old = prim.load64(sh + 12 + (n + i) * 8)
-    prim.rc_inc(old)
-    prim.store64(rh + 12 + (rn + i) * 8, old)
+fn __ivh_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: Int, v: String, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let kk = prim.load64(sh + 12 + i * 8)
+    prim.store64(rh + 12 + i * 8, kk)
+    if kk == k then {
+      let _s = __ivh_store_val(rh + 12 + (rn + i) * 8, v)
+      ()
+    } else {
+      let old = prim.load64(sh + 12 + (n + i) * 8)
+      prim.rc_inc(old)
+      prim.store64(rh + 12 + (rn + i) * 8, old)
+    }
+    __ivh_set_copy(sh, rh, n, rn, k, v, i + 1)
   }
-  __ivh_set_copy(sh, rh, n, rn, k, v, i + 1)
-}
 
 fn __ivh_set_append(rh: Int, rn: Int, idx: Int, k: Int, v: String) -> Int = if idx >= 0 then 0
 else {
@@ -101,14 +102,15 @@ fn __drop_map_ivh(m: Map[Int, String]) -> Unit = {
 // v0's `map.from_list` over (Int, String) pairs — duplicate key keeps FIRST position
 // with LAST value (map_set_ivh's replace-in-place gives exactly that). Recursion over
 // the pairs list; each step's map is a fresh block (the previous is dropped by scope).
-fn __ivh_from_list_at(pairs: List[(Int, String)], i: Int, m: Map[Int, String]) -> Map[Int, String] = if i >= list.len(pairs) then m
-else match list.get(pairs, i) {
-  some(p) => {
-    let (k, v) = p
-    __ivh_from_list_at(pairs, i + 1, map_set_ivh(m, k, v))
-  },
-  none => m,
-}
+fn __ivh_from_list_at(pairs: List[(Int, String)], i: Int, m: Map[Int, String]) -> Map[Int, String] =
+  if i >= list.len(pairs) then m
+  else match list.get(pairs, i) {
+    some(p) => {
+      let (k, v) = p
+      __ivh_from_list_at(pairs, i + 1, map_set_ivh(m, k, v))
+    },
+    none => m,
+  }
 
 fn map_from_list_ivh(pairs: List[(Int, String)]) -> Map[Int, String] = __ivh_from_list_at(
   pairs,

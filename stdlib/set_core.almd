@@ -364,21 +364,22 @@ fn set_new() -> Set[Int] = __set_alloc_cap(0)
 // Carry a VALID source index into the same-shape result (element indices survive a full
 // copy) and extend it with the appended element. A stale source index, or a grow that
 // changed the bucket count, leaves the result INVALID for the next read to rebuild.
-fn __set_idx_carry(sh: Int, rh: Int, secap: Int, necap: Int, len: Int, present: Bool, x: Int) -> Int = if necap < 16 then 0
-else if necap != secap then 0
-else {
-  let ilen = prim.load64(__set_il(sh, secap))
-  if ilen != len then 0
+fn __set_idx_carry(sh: Int, rh: Int, secap: Int, necap: Int, len: Int, present: Bool, x: Int) -> Int =
+  if necap < 16 then 0
+  else if necap != secap then 0
   else {
-    let _c = __set_copy_slots(sh, rh, secap, secap + 1, 0)
-    if present then 0
+    let ilen = prim.load64(__set_il(sh, secap))
+    if ilen != len then 0
     else {
-      let _p = __set_idx_put(__set_bb(rh, necap), necap * 2 - 1, x, len)
-      prim.store64(__set_il(rh, necap), len + 1)
-      0
+      let _c = __set_copy_slots(sh, rh, secap, secap + 1, 0)
+      if present then 0
+      else {
+        let _p = __set_idx_put(__set_bb(rh, necap), necap * 2 - 1, x, len)
+        prim.store64(__set_il(rh, necap), len + 1)
+        0
+      }
     }
   }
-}
 
 // GEOMETRIC capacity (#1219), same reasoning as map_core's map_set: a `s = set.insert(s, x)`
 // grow loop with exact-size allocs defeats the $alloc exact-size free-list (O(n^2) bytes, O(n)
@@ -405,15 +406,16 @@ fn set_insert(s: Set[Int], x: Int) -> Set[Int] = {
 }
 
 // Copy s's elements EXCEPT x into result rh (preserving the survivors' order); return the count.
-fn __set_remove_fill(sh: Int, slen: Int, rh: Int, x: Int, i: Int, w: Int) -> Int = if i >= slen then w
-else {
-  let e = prim.load64(sh + 12 + i * 8)
-  if e == x then __set_remove_fill(sh, slen, rh, x, i + 1, w)
+fn __set_remove_fill(sh: Int, slen: Int, rh: Int, x: Int, i: Int, w: Int) -> Int =
+  if i >= slen then w
   else {
-    prim.store64(rh + 12 + w * 8, e)
-    __set_remove_fill(sh, slen, rh, x, i + 1, w + 1)
+    let e = prim.load64(sh + 12 + i * 8)
+    if e == x then __set_remove_fill(sh, slen, rh, x, i + 1, w)
+    else {
+      prim.store64(rh + 12 + w * 8, e)
+      __set_remove_fill(sh, slen, rh, x, i + 1, w + 1)
+    }
   }
-}
 
 // The result is a FRESH block, so its index is born invalid — removal shifts every
 // survivor's element index, and the next read rebuilds. An index cannot rot here
@@ -430,16 +432,17 @@ fn set_remove(s: Set[Int], x: Int) -> Set[Int] = {
 
 // Append b's elements NOT in the ORIGINAL a (handle ah, len alen), growing count w. Used by
 // symmetric_difference after the a-not-in-b part is already written (disjoint, so no re-dedup).
-fn __set_addb_nota(ah: Int, bh: Int, blen: Int, rh: Int, j: Int, w: Int) -> Int = if j >= blen then w
-else {
-  let x = prim.load64(bh + 12 + j * 8)
-  let inA = __set_member(ah, x)
-  if inA then __set_addb_nota(ah, bh, blen, rh, j + 1, w)
+fn __set_addb_nota(ah: Int, bh: Int, blen: Int, rh: Int, j: Int, w: Int) -> Int =
+  if j >= blen then w
   else {
-    prim.store64(rh + 12 + w * 8, x)
-    __set_addb_nota(ah, bh, blen, rh, j + 1, w + 1)
+    let x = prim.load64(bh + 12 + j * 8)
+    let inA = __set_member(ah, x)
+    if inA then __set_addb_nota(ah, bh, blen, rh, j + 1, w)
+    else {
+      prim.store64(rh + 12 + w * 8, x)
+      __set_addb_nota(ah, bh, blen, rh, j + 1, w + 1)
+    }
   }
-}
 
 fn set_symmetric_difference(a: Set[Int], b: Set[Int]) -> Set[Int] = {
   let ah = prim.handle(a)
@@ -459,17 +462,18 @@ fn set_symmetric_difference(a: Set[Int], b: Set[Int]) -> Set[Int] = {
 // ── Higher-order Set[Int] (closures machinery) ── the predicate f is invoked via CallIndirect.
 // A pure predicate byte-matches v0 (single pass, no short-circuit). filter keeps a subset of an
 // already-unique set, so the result stays unique (no re-dedup).
-fn __set_filter_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, di: Int) -> Int = if i >= n then di
-else {
-  let x = prim.load64(sh + 12 + i * 8)
-  let keep = f(x)
-  if keep then {
-    prim.store64(dh + 12 + di * 8, x)
-    __set_filter_fill(dh, sh, f, n, i + 1, di + 1)
-  } else {
-    __set_filter_fill(dh, sh, f, n, i + 1, di)
+fn __set_filter_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let keep = f(x)
+    if keep then {
+      prim.store64(dh + 12 + di * 8, x)
+      __set_filter_fill(dh, sh, f, n, i + 1, di + 1)
+    } else {
+      __set_filter_fill(dh, sh, f, n, i + 1, di)
+    }
   }
-}
 
 fn set_filter(s: Set[Int], f: (Int) -> Bool) -> Set[Int] = {
   let sh = prim.handle(s)
@@ -507,14 +511,15 @@ fn set_any(s: Set[Int], f: (Int) -> Bool) -> Bool = {
 // set.map — apply f to each element, collecting UNIQUE results (f may collapse distinct inputs
 // to the same output, so the mapped values MUST be re-deduped, exactly v0's `.map(f).collect()`
 // into an AlmideSet). Append f(x) iff not already present; first-seen order. Int->Int.
-fn __set_map_fill(dh: Int, sh: Int, f: (Int) -> Int, ecap: Int, n: Int, i: Int, w: Int) -> Int = if i >= n then w
-else {
-  let x = prim.load64(sh + 12 + i * 8)
-  let y = f(x)
-  let present = __set_has_at(dh, ecap, w, y)
-  if present then __set_map_fill(dh, sh, f, ecap, n, i + 1, w)
-  else __set_map_fill(dh, sh, f, ecap, n, i + 1, __set_add_ix(dh, ecap, w, y))
-}
+fn __set_map_fill(dh: Int, sh: Int, f: (Int) -> Int, ecap: Int, n: Int, i: Int, w: Int) -> Int =
+  if i >= n then w
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let y = f(x)
+    let present = __set_has_at(dh, ecap, w, y)
+    if present then __set_map_fill(dh, sh, f, ecap, n, i + 1, w)
+    else __set_map_fill(dh, sh, f, ecap, n, i + 1, __set_add_ix(dh, ecap, w, y))
+  }
 
 fn set_map(s: Set[Int], f: (Int) -> Int) -> Set[Int] = {
   let sh = prim.handle(s)
@@ -530,12 +535,13 @@ fn set_map(s: Set[Int], f: (Int) -> Int) -> Set[Int] = {
 
 // set.fold — left fold with a TWO-arity closure f : (Acc, Int) -> Acc (acc first, element
 // second — v0's fold(s, init, f)). Int accumulator. The set walk order = insertion order.
-fn __set_fold_loop(sh: Int, f: (Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else {
-  let x = prim.load64(sh + 12 + i * 8)
-  let nacc = f(acc, x)
-  __set_fold_loop(sh, f, n, i + 1, nacc)
-}
+fn __set_fold_loop(sh: Int, f: (Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let nacc = f(acc, x)
+    __set_fold_loop(sh, f, n, i + 1, nacc)
+  }
 
 fn set_fold(s: Set[Int], init: Int, f: (Int, Int) -> Int) -> Int = {
   let sh = prim.handle(s)

@@ -13,14 +13,15 @@ fn flag(name: String) -> Bool = {
   __flag_at(env.args(), "--" + name, "-" + string.slice(name, 0, 1), 0)
 }
 
-fn __flag_at(args: List[String], long: String, short: String, i: Int) -> Bool = if i >= list.len(args) then false
-else {
-  // Read the element ONCE — a repeated `list.get_or` on a heap list param
-  // inside a bundled module doubled the borrow (#892).
-  let a = list.get_or(args, i, "")
-  if a == long or a == short then true
-  else __flag_at(args, long, short, i + 1)
-}
+fn __flag_at(args: List[String], long: String, short: String, i: Int) -> Bool =
+  if i >= list.len(args) then false
+  else {
+    // Read the element ONCE — a repeated `list.get_or` on a heap list param
+    // inside a bundled module doubled the borrow (#892).
+    let a = list.get_or(args, i, "")
+    if a == long or a == short then true
+    else __flag_at(args, long, short, i + 1)
+  }
 
 /// Value of --name=v or --name v; none if absent.
 fn option(name: String) -> String? = {
@@ -41,9 +42,10 @@ fn option(name: String) -> String? = {
   }
 }
 
-fn __find_prefixed(args: List[String], prefix: String, i: Int) -> String? = if i >= list.len(args) then none
-else if string.starts_with(list.get_or(args, i, ""), prefix) then list.get(args, i)
-else __find_prefixed(args, prefix, i + 1)
+fn __find_prefixed(args: List[String], prefix: String, i: Int) -> String? =
+  if i >= list.len(args) then none
+  else if string.starts_with(list.get_or(args, i, ""), prefix) then list.get(args, i)
+  else __find_prefixed(args, prefix, i + 1)
 
 /// option(name), or fallback when absent.
 fn option_or(name: String, fallback: String) -> String = match option(name) {

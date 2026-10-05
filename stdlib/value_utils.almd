@@ -16,31 +16,33 @@ else {
 }
 
 // Count the pairs whose membership matches `want` (true = pick, false = omit).
-fn __vu_count(v: Value, keys: List[String], want: Bool, i: Int, n: Int, nk: Int, acc: Int) -> Int = if i >= n then acc
-else {
-  let k: String = prim.load_handle(prim.handle(v) + 12 + (2 * i) * 8)
-  let hit = __vu_has(keys, k, 0, nk)
-  if hit == want then __vu_count(v, keys, want, i + 1, n, nk, acc + 1)
-  else __vu_count(v, keys, want, i + 1, n, nk, acc)
-}
+fn __vu_count(v: Value, keys: List[String], want: Bool, i: Int, n: Int, nk: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let k: String = prim.load_handle(prim.handle(v) + 12 + (2 * i) * 8)
+    let hit = __vu_has(keys, k, 0, nk)
+    if hit == want then __vu_count(v, keys, want, i + 1, n, nk, acc + 1)
+    else __vu_count(v, keys, want, i + 1, n, nk, acc)
+  }
 
 // Fill the kept pairs in object order, co-owning key AND value (rc_inc both).
-fn __vu_fill(v: Value, keys: List[String], dst: Value, want: Bool, i: Int, n: Int, nk: Int, w: Int) -> Int = if i >= n then w
-else {
-  let h = prim.handle(v)
-  let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
-  let hit = __vu_has(keys, k, 0, nk)
-  if hit == want then {
-    let dh = prim.handle(dst)
-    let kh = prim.load64(h + 12 + (2 * i) * 8)
-    let vh = prim.load64(h + 12 + (2 * i + 1) * 8)
-    prim.rc_inc(kh)
-    prim.rc_inc(vh)
-    prim.store64(dh + 12 + (2 * w) * 8, kh)
-    prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
-    __vu_fill(v, keys, dst, want, i + 1, n, nk, w + 1)
-  } else __vu_fill(v, keys, dst, want, i + 1, n, nk, w)
-}
+fn __vu_fill(v: Value, keys: List[String], dst: Value, want: Bool, i: Int, n: Int, nk: Int, w: Int) -> Int =
+  if i >= n then w
+  else {
+    let h = prim.handle(v)
+    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    let hit = __vu_has(keys, k, 0, nk)
+    if hit == want then {
+      let dh = prim.handle(dst)
+      let kh = prim.load64(h + 12 + (2 * i) * 8)
+      let vh = prim.load64(h + 12 + (2 * i + 1) * 8)
+      prim.rc_inc(kh)
+      prim.rc_inc(vh)
+      prim.store64(dh + 12 + (2 * w) * 8, kh)
+      prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
+      __vu_fill(v, keys, dst, want, i + 1, n, nk, w + 1)
+    } else __vu_fill(v, keys, dst, want, i + 1, n, nk, w)
+  }
 
 fn __vu_sel(v: Value, keys: List[String], want: Bool) -> Value = {
   let h = prim.handle(v)
@@ -55,19 +57,21 @@ fn __vu_sel(v: Value, keys: List[String], want: Bool) -> Value = {
   dst
 }
 
-fn value_pick(v: Value, keys: List[String]) -> Value = if prim.load32(prim.handle(v) + 4) == 6 then __vu_sel(
-  v,
-  keys,
-  true,
-)
-else v
+fn value_pick(v: Value, keys: List[String]) -> Value =
+  if prim.load32(prim.handle(v) + 4) == 6 then __vu_sel(
+    v,
+    keys,
+    true,
+  )
+  else v
 
-fn value_omit(v: Value, keys: List[String]) -> Value = if prim.load32(prim.handle(v) + 4) == 6 then __vu_sel(
-  v,
-  keys,
-  false,
-)
-else v
+fn value_omit(v: Value, keys: List[String]) -> Value =
+  if prim.load32(prim.handle(v) + 4) == 6 then __vu_sel(
+    v,
+    keys,
+    false,
+  )
+  else v
 
 // snake_case → camelCase: '_' drops and capitalizes the NEXT ASCII lowercase
 // letter (consecutive/leading/trailing underscores follow native's flag walk).
@@ -170,6 +174,8 @@ fn __vu_ren_s(v: Value) -> Value = {
   dst
 }
 
-fn value_to_camel_case(v: Value) -> Value = if prim.load32(prim.handle(v) + 4) == 6 then __vu_ren_c(v) else v
+fn value_to_camel_case(v: Value) -> Value =
+  if prim.load32(prim.handle(v) + 4) == 6 then __vu_ren_c(v) else v
 
-fn value_to_snake_case(v: Value) -> Value = if prim.load32(prim.handle(v) + 4) == 6 then __vu_ren_s(v) else v
+fn value_to_snake_case(v: Value) -> Value =
+  if prim.load32(prim.handle(v) + 4) == 6 then __vu_ren_s(v) else v

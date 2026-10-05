@@ -2,12 +2,13 @@
 // empty list, else Some(fold of xs[1..] starting from xs[0]). Combines the two-arity closure
 // (f: (Acc, Int) -> Acc via $closure_fn2) with the call-arm materialized-Option result (the
 // Some/None tail-position helpers, like list.find/max). List[Int]/Int; source borrowed.
-fn __reduce_loop(sh: Int, f: (Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else {
-  let x = prim.load64(sh + 12 + i * 8)
-  let nacc = f(acc, x)
-  __reduce_loop(sh, f, n, i + 1, nacc)
-}
+fn __reduce_loop(sh: Int, f: (Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let nacc = f(acc, x)
+    __reduce_loop(sh, f, n, i + 1, nacc)
+  }
 
 fn __reduce_none() -> Int? = none
 

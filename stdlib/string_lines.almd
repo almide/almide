@@ -47,14 +47,15 @@ fn __lntake(sh: Int, start: Int, n: Int) -> String = {
   piece
 }
 
-fn __lines_fill(lh: Int, sh: Int, slen: Int, from: Int, idx: Int, total: Int) -> Int = if idx >= total then idx
-else {
-  let nl = __find_nl(sh, slen, from)
-  let endp = __strip_cr(sh, slen, from, nl)
-  let piece = __lntake(sh, from, endp - from)
-  prim.store_str(lh + 12 + idx * 8, piece)
-  __lines_fill(lh, sh, slen, nl + 1, idx + 1, total)
-}
+fn __lines_fill(lh: Int, sh: Int, slen: Int, from: Int, idx: Int, total: Int) -> Int =
+  if idx >= total then idx
+  else {
+    let nl = __find_nl(sh, slen, from)
+    let endp = __strip_cr(sh, slen, from, nl)
+    let piece = __lntake(sh, from, endp - from)
+    prim.store_str(lh + 12 + idx * 8, piece)
+    __lines_fill(lh, sh, slen, nl + 1, idx + 1, total)
+  }
 
 fn string_lines(s: String) -> List[String] = {
   let sh = prim.handle(s)
