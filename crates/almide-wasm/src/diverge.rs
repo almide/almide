@@ -43,7 +43,15 @@ impl Emitter<'_> {
     /// Unit ok payload, which the callee never returns. It is lowered without
     /// an expectation, the payload dropped, and `unreachable` leaves the stack
     /// polymorphic, so the slot types as `want`.
+    /// The bytes it emits carry `e`'s line (#1315, debug_lines.rs).
     pub(crate) fn lower_node_or_never(&mut self, e: &IrExpr, want: Option<SliceTy>) -> Result<SliceTy, EmitError> {
+        crate::debug_lines::enter(self.f.byte_len(), e.span);
+        let r = self.lower_node_or_never_unspanned(e, want);
+        crate::debug_lines::leave(self.f.byte_len());
+        r
+    }
+
+    fn lower_node_or_never_unspanned(&mut self, e: &IrExpr, want: Option<SliceTy>) -> Result<SliceTy, EmitError> {
         let never_unwrap =
             e.ty == Ty::Never && matches!(e.kind, IrExprKind::Try { .. } | IrExprKind::Unwrap { .. });
         match want {
