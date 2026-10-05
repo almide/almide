@@ -1539,6 +1539,12 @@ impl Checker {
             self.reject_arg_placeholders(&**callee, args.as_slice(), None);
         }
         let left_ty = self.infer_expr(left);
+        // The piped value is argument 0 of the call this pipe checks: E005's
+        // caret reads `arg_spans`, which this path never wrote, so a mismatch
+        // pointed at whatever call last set them — another argument, or a
+        // line of ANOTHER FILE checked earlier (#3401: `src/a.almd:6:11` in a
+        // 3-line file was the entry program's `println` argument).
+        let left_span = left.span;
         match &right.kind {
             ExprKind::Call { callee, args, .. } if args.is_empty() => {
                 self.reject_exit_literal(callee, left);
@@ -1604,6 +1610,7 @@ impl Checker {
                 // Pipe inserts left as the first argument
                 let mut all_arg_tys: Vec<Ty> = vec![left_ty];
                 all_arg_tys.extend(self.infer_call_arg_tys(callee, args, &call_sig));
+                self.arg_spans = std::iter::once(left_span).chain(args.iter().map(|a| a.span)).collect();
                 // Resolve module calls for pipe (e.g. xs |> list.filter(f))
                 match &mut callee.kind {
                     ExprKind::Ident { name, .. } => {
@@ -1632,12 +1639,14 @@ impl Checker {
             ExprKind::Ident { name, .. } => {
                 self.check_effect_alias_call(name);
                 let all_arg_tys = vec![left_ty];
+                self.arg_spans = vec![left_span];
                 self.check_named_call(name, &all_arg_tys)
             }
             // Pipe RHS is a module-qualified function (e.g. `5 |> int.abs`)
             ExprKind::Member { object, field, .. } => {
                 let all_arg_tys = vec![left_ty];
                 if let Some(key) = self.resolve_module_call(object, field) {
+                    self.arg_spans = vec![left_span];
                     return self.check_named_call(&key, &all_arg_tys);
                 }
                 let ct = self.infer_expr(right);

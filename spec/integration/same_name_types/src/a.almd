@@ -1,0 +1,24 @@
+// #3401: `Ctx` here is this module's alias of `List[String]`. Module `b`
+// declares a record `Ctx`; a bare `Ctx` in this file is never `b.Ctx`, even
+// though `b` is imported and its `Ctx` is the only nominal one.
+import self.b
+
+type Ctx = List[String]
+
+type Shape = | Dot | Line(Int)
+
+fn count(ctx: Ctx) -> Int = list.len(ctx |> list.map((x) => x))
+
+fn first_len(ctx: Ctx) -> Int = match list.first(ctx) {
+  some(s) => string.len(s),
+  none => 0,
+}
+
+fn labelled(c: b.Ctx) -> Int = string.len(b.label(c))
+
+fn shape_size(s: Shape) -> Int = match s {
+  Dot => 0,
+  Line(n) => n,
+}
+
+fn size_of(n: Int) -> Int = shape_size(if n == 0 then Dot else Line(n))
