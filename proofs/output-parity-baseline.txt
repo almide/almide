@@ -46,6 +46,7 @@ spec/integration/generic_alias_modules/src/main.almd
 spec/integration/generic_protocol_ports/src/main.almd
 spec/integration/generics/generics_recursive_test.almd
 spec/integration/global_static_names/src/main.almd
+spec/integration/imported_recursive_variant/src/main.almd
 spec/integration/module_fallible_lambda_callee/src/main.almd
 spec/integration/module_path_identity/src/main.almd
 spec/integration/modules/cross_module_unit_effect_test.almd

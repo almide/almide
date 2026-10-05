@@ -1,0 +1,33 @@
+// #3422: the recursive variants the entry files match. A test block here
+// matches them from inside their declaring module.
+type T =
+  | Leaf(String)
+  | Node(T, T)
+
+type R =
+  | RLeaf(Int)
+  | Many(List[R])
+
+fn depth(t: T) -> Int = match t {
+  Leaf(_) => 1,
+  Node(l, r) => 1 + int.max(depth(l), depth(r)),
+}
+
+test "a match inside the declaring module" {
+  var cur = Node(Leaf("x"), Leaf("y"))
+  var out = ""
+  var going = true
+  while going {
+    match cur {
+      Node(l, _) => {
+        cur = l
+      },
+      Leaf(s) => {
+        out = s
+        going = false
+      },
+    }
+  }
+  assert_eq(out, "x")
+  assert_eq(depth(Node(Leaf("a"), Node(Leaf("b"), Leaf("c")))), 3)
+}
