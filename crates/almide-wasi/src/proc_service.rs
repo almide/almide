@@ -5,7 +5,7 @@
 //! `almide:process/spawn.call` — the canonical-ABI lowering of
 //! `call: func(op: op, a: string, b: string) -> result<string, string>`
 //! (crates/almide-wasm-run/wit/process/spawn.wit) — which ships only when the
-//! module's op set names a process op (80..=89), the selection the environ
+//! module's op set names a process op (80..=90), the selection the environ
 //! pair gets from op 26. A stock runtime has no such import and refuses the
 //! module at load, before `_start` runs: the failure is loud and early,
 //! never a wrong answer. A host that implements the import (the embedded
@@ -26,7 +26,7 @@
 use wasm_encoder::{BlockType, Function, ValType};
 
 /// The process ops: `almide:process/spawn`'s `enum op`, case index = op − 80.
-pub const PROC_OPS: std::ops::RangeInclusive<i32> = 80..=89;
+pub const PROC_OPS: std::ops::RangeInclusive<i32> = 80..=90;
 
 /// Where the import writes its `result<string, string>` (discriminant at +0,
 /// ptr at +4, len at +8): the park's free bytes between the newline byte and

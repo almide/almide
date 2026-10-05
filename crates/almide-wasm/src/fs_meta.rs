@@ -97,7 +97,7 @@ pub(crate) const OP_HTTP_CALL_READ: i32 = 56;
 pub(crate) const OP_HTTP_CALL_CANCEL: i32 = 57;
 pub(crate) const OP_HTTP_CALL_STEP: i32 = 58;
 pub(crate) const OP_HTTP_CALL_DROP: i32 = 59;
-/// The subprocess family (#2589, ADR-0025): `almide:process/spawn`'s ten
+/// The subprocess family (#2589, ADR-0025): `almide:process/spawn`'s eleven
 /// operations, in the WIT `enum op` order (op − 80 is the case index). Every
 /// one takes two text operands — a, b — and answers ok(text) or err(text),
 /// the shape `__proc_*` leaves in stdlib/process_wasm.almd build and decode.
@@ -112,11 +112,13 @@ pub(crate) const PROC_LEAVES: &[(&str, i32)] = &[
     ("__proc_exec_with_stdin", 82),
     ("__proc_exec_status", 83),
     ("__proc_exec_status_timeout", 84),
-    ("__proc_exec_attached", 85),
+    ("__proc_run", 85),
     ("__proc_spawn", 86),
     ("__proc_kill", 87),
     ("__proc_is_alive", 88),
     ("__proc_pid", 89),
+    // #3379: appended, so the earlier ops keep their numbers.
+    ("__proc_run_in", 90),
 ];
 pub(crate) const OP_STAT: i32 = 38;
 pub(crate) const OP_GLOB: i32 = 39;

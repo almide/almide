@@ -33,9 +33,14 @@ effect fn main() -> Unit = {
   println(show_status(process.exec_status("almide-no-such-binary-2589", [])))
   println(show_status(process.exec_status_timeout("sh", ["-c", "printf fast"], 30000)))
   println(show_status(process.exec_status_timeout("sleep", ["5"], 100)))
-  match process.exec_attached("sh", ["-c", "exit 7"]) {
-    ok(code) => println("attached code=${code}"),
-    err(e) => println("attached err ${e}"),
+  match process.run("sh", ["-c", "exit 7"]) {
+    ok(code) => println("run code=${code}"),
+    err(e) => println("run err ${e}"),
+  }
+  // The exit code is 9 only when the child's working directory is `/`.
+  match process.run_in("/", "sh", ["-c", "test \"$(pwd)\" = / && exit 9; exit 1"]) {
+    ok(code) => println("run_in code=${code}"),
+    err(e) => println("run_in err ${e}"),
   }
   let pid = process.spawn("sleep", ["5"])!
   println("spawned=${pid > 0} alive=${process.is_alive(pid)}")

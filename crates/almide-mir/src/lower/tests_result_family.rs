@@ -96,6 +96,8 @@ fn every_registry_result_fn_is_in_the_materialized_set() {
         "process.exec_status_timeout",
         "process.exec_with_stdin",
         "process.kill",
+        "process.run",
+        "process.run_in",
         "process.spawn",
     ];
     let member = |module: &str, func: &str| {

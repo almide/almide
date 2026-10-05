@@ -28343,8 +28343,19 @@ effect fn exec_status_timeout(cmd: String, args: List[String], timeout_ms: Int) 
 
 
 
+
+
 /// Run cmd on this terminal; exit code, -1 if signalled.
-@intrinsic("almide_rt_process_exec_attached")
+@intrinsic("almide_rt_process_run")
+effect fn run(cmd: String, args: List[String]) -> Result[Int, String] = _
+
+/// run in dir; exit code, -1 if signalled.
+@intrinsic("almide_rt_process_run_in")
+effect fn run_in(dir: String, cmd: String, args: List[String]) -> Result[Int, String] = _
+
+/// Alias of process.run.
+@deprecated(since=10, use="process.run")
+@intrinsic("almide_rt_process_run")
 effect fn exec_attached(cmd: String, args: List[String]) -> Result[Int, String] = _
 
 /// OS process ID of this program.
@@ -28416,7 +28427,9 @@ effect fn __proc_exec_status(cmd: String, argv: String) -> Result[String, String
 
 effect fn __proc_exec_status_timeout(cmd: String, argv: String) -> Result[String, String] = _
 
-effect fn __proc_exec_attached(cmd: String, argv: String) -> Result[String, String] = _
+effect fn __proc_run(cmd: String, argv: String) -> Result[String, String] = _
+
+effect fn __proc_run_in(dir: String, argv: String) -> Result[String, String] = _
 
 effect fn __proc_spawn(cmd: String, argv: String) -> Result[String, String] = _
 
@@ -28469,8 +28482,13 @@ effect fn __process_exec_status_timeout_impl(cmd: String, args: List[String], ti
   ok(__proc_status(f))
 }
 
-effect fn __process_exec_attached_impl(cmd: String, args: List[String]) -> Result[Int, String] = {
-  let code = __proc_exec_attached(cmd, __proc_argv(args))!
+effect fn __process_run_impl(cmd: String, args: List[String]) -> Result[Int, String] = {
+  let code = __proc_run(cmd, __proc_argv(args))!
+  ok(int.parse(code) ?? -1)
+}
+
+effect fn __process_run_in_impl(dir: String, cmd: String, args: List[String]) -> Result[Int, String] = {
+  let code = __proc_run_in(dir, __proc_argv([cmd] + args))!
   ok(int.parse(code) ?? -1)
 }
 

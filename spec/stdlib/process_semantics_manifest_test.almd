@@ -7,6 +7,14 @@ test "process.exit unit=value" {
   assert_eq("${1}", "1")
 }
 
+test "process.run unit=value" {
+  assert_eq("${1}", "1")
+}
+
+test "process.run_in unit=value" {
+  assert_eq("${1}", "1")
+}
+
 test "process.exec_attached unit=value" {
   assert_eq("${1}", "1")
 }

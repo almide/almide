@@ -125,7 +125,10 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
                         // #1040: the deadline twin — same no-child-process
                         // structural class as exec_status.
                         | "exec_status_timeout"
-                        // #2540: the terminal-attached run — same class.
+                        // #2540: the terminal-attached run — same class
+                        // (`run` above; #3379 adds the cwd twin and keeps
+                        // the deprecated alias).
+                        | "run_in"
                         | "exec_attached"
                         | "env"
                 ))

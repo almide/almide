@@ -104,6 +104,8 @@ const PROC_SPAWNING: &[(&str, usize)] = &[
     ("exec_with_stdin", 0),
     ("exec_status", 0),
     ("exec_status_timeout", 0),
+    ("run", 0),
+    ("run_in", 1),
     ("exec_attached", 0),
     ("spawn", 0),
 ];

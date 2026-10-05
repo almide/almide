@@ -5,7 +5,7 @@
 - **Date**: 2026-10-03
 - **Scope**: the subprocess family of `process` on `--target wasm`
   (`exec`, `exec_in`, `exec_with_stdin`, `exec_status`, `exec_status_timeout`,
-  `exec_attached`, `spawn`, `kill`, `is_alive`, `pid`); the embedded host
+  `run` (`exec_attached` until #3379), `run_in`, `spawn`, `kill`, `is_alive`, `pid`); the embedded host
   (`almide run --target wasm`, the wasm leg of `almide test`); the p1 build
   artifact (`almide build --target wasm`); `[permissions] proc` in
   `almide.toml`; `proofs/target-availability.toml`.
@@ -60,7 +60,7 @@ package almide:process;
 
 interface spawn {
   enum op { exec, exec-in, exec-with-stdin, exec-status, exec-status-timeout,
-            exec-attached, spawn, kill, is-alive, pid }
+            run, spawn, kill, is-alive, pid, run-in }
   call: func(op: op, a: string, b: string) -> result<string, string>;
 }
 ```
@@ -70,9 +70,11 @@ The argument list travels as decimal CHAR-length cells (`<chars>\n<payload>`,
 the http_framed cell format), and an operation that needs a third operand puts
 it in the first cell. The WIT comments define each operand and answer;
 the WIT test in `crates/almide-wasm-run/src/tests/host_process_test.rs` pins
-the case order and the `call` shape against the host's op numbers.
+the case order and the `call` shape against the host's op numbers. (#3379
+renamed case 5 from `exec-attached` to `run` and appended `run-in` as op 90,
+so the earlier cases keep their numbers.)
 
-The case index is the host op minus 80: ops 80..=89 at the boundary between
+The case index is the host op minus 80: ops 80..=90 at the boundary between
 the emitted code and its host (`crates/almide-wasm/src/fs_meta.rs`,
 `PROC_LEAVES`). The guest half is Almide
 (`stdlib/process_wasm.almd`, linked on the wasm legs through the self-host
@@ -81,7 +83,7 @@ registry); it builds the cells and decodes `exec_status`'s answer
 
 ### 2.2 Who serves it
 
-- **The embedded host** serves ops 80..=89 to the raw module through
+- **The embedded host** serves ops 80..=90 to the raw module through
   `almide.fs_call`, like every other embedded service, and also defines the
   import `almide:process/spawn.call` itself on its linker
   (`almide_wasm_run::link_spawn_import`). Both run

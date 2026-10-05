@@ -4,7 +4,7 @@
 // own, the one exception ADR-0025 makes to ADR-0023 §2.6 (no private host ABI
 // on stock runtimes). It is bounded three ways:
 //
-// - it ships only when the program's op set names a process op (80..=89):
+// - it ships only when the program's op set names a process op (80..=90):
 //   a program that never starts a child never carries the import;
 // - a host that does not implement it refuses the module at load (stock
 //   wasmtime: "unknown import: `almide:process/spawn::call` has not been
@@ -19,7 +19,7 @@
 //           (param $b-ptr i32) (param $b-len i32) (param $ret i32)))
 // with the answer's bytes placed through the module's `cabi_realloc` export.
 // The embedded host (`almide run --target wasm`, `almide test`) serves the
-// same operations to the raw module as `almide.fs_call` ops 80..=89.
+// same operations to the raw module as `almide.fs_call` ops 80..=90.
 package almide:process;
 
 interface spawn {
@@ -43,8 +43,8 @@ interface spawn {
     /// process group is killed).
     exec-status-timeout,
     /// a = cmd, b = argv. The child shares the host's stdin/stdout/stderr;
-    /// ok = the exit code in decimal.
-    exec-attached,
+    /// ok = the exit code in decimal, -1 when a signal ended the child.
+    run,
     /// a = cmd, b = argv. Starts the child in the background (stdin null);
     /// ok = its pid in decimal.
     spawn,
@@ -55,6 +55,9 @@ interface spawn {
     is-alive,
     /// ok = the host process's pid in decimal.
     pid,
+    /// a = dir, b = [cmd] ++ argv. `run` with the child's working directory
+    /// set to dir (appended last, so the earlier cases keep their numbers).
+    run-in,
   }
 
   /// Run one operation.

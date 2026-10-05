@@ -222,7 +222,8 @@ Setting environment variables is not part of WASI preview 1. The host must provi
 | `process.exec_with_stdin(cmd, args, input)` | `(String, List[String], String) -> Result[String, String]` | Execute with stdin pipe |
 | `process.exec_status(cmd, args)` | `(String, List[String]) -> Result[ProcessStatus, String]` | Execute, return code, stdout and stderr |
 | `process.exec_status_timeout(cmd, args, ms)` | `(String, List[String], Int) -> Result[ProcessStatus, String]` | `exec_status`, killed at the deadline |
-| `process.exec_attached(cmd, args)` | `(String, List[String]) -> Result[Int, String]` | Run on this terminal; exit code |
+| `process.run(cmd, args)` | `(String, List[String]) -> Result[Int, String]` | Run on this terminal; exit code |
+| `process.run_in(dir, cmd, args)` | `(String, String, List[String]) -> Result[Int, String]` | `run` in `dir` |
 | `process.spawn(cmd, args)` | `(String, List[String]) -> Result[Int, String]` | Start in the background; pid |
 | `process.kill(pid, signal)` | `(Int, Int) -> Result[Unit, String]` | Signal a process |
 | `process.is_alive(pid)` | `(Int) -> Bool` | Whether the process exists |
@@ -248,8 +249,8 @@ proc = ["git", "cargo"]
 ```
 
 - The compiler checks every call that starts a child (`exec`, `exec_in`,
-  `exec_with_stdin`, `exec_status`, `exec_status_timeout`, `exec_attached`,
-  `spawn`): its command must be a string literal on the list. A literal off the
+  `exec_with_stdin`, `exec_status`, `exec_status_timeout`, `run`, `run_in`,
+  `spawn`, and the deprecated `exec_attached`): its command must be a string literal on the list. A literal off the
   list is refused with ``process.exec("make") (line N): `make` is not in
   [permissions] proc``. A command computed at run time, or a spawning fn passed
   as a value, cannot be checked and is refused too (`cli::check_proc_allowlist`:
@@ -278,7 +279,7 @@ interface spawn {
 
 | Where | What happens |
 |-------|--------------|
-| `almide run --target wasm`, the wasm leg of `almide test` | The embedded host serves the family (host ops 80..=89) with the core native runs (`crates/almide-rt-core/src/process_core.rs`): the same stdout, exit code and err text as native. |
+| `almide run --target wasm`, the wasm leg of `almide test` | The embedded host serves the family (host ops 80..=90) with the core native runs (`crates/almide-rt-core/src/process_core.rs`): the same stdout, exit code and err text as native. |
 | `almide build --target wasm` | The p1 artifact imports `almide:process/spawn` `call` (its canonical-ABI form) and exports `cabi_realloc`, **only** when the program's op set names a process op. The build prints a note saying so. |
 | A stock runtime (`wasmtime run app.wasm`) | Refuses the module at load, before `_start`: ``unknown import: `almide:process/spawn::call` has not been defined``. Never a silent failure and never a wrong answer. |
 | A host that implements the import | Runs the artifact (`almide_wasm_run::link_spawn_import` is the embedded host's implementation). |
