@@ -72,4 +72,16 @@ grep -q "CURRENT_DIALECT_RENAMED" "$tmp/const_moved.rs" || { echo "FAIL: the ren
 expect_fail "$LEDGER" "$tmp/const_moved.rs" \
   "gate passed when it could not find the constant — extraction breaking must be loud"
 
-echo "dialect-epochs negative controls: 1 positive + 5 negatives all behaved"
+# A deprecation removed no later than it was deprecated is no window at all.
+sed -E 's/^removal_epoch = [0-9]+/removal_epoch = 1/' "$LEDGER" >"$tmp/dep_order.toml"
+grep -q '^removal_epoch = 1$' "$tmp/dep_order.toml" || { echo "FAIL: the deprecation-order mutation matched nothing" >&2; exit 1; }
+expect_fail "$tmp/dep_order.toml" "$CONST" \
+  "gate passed a deprecation whose removal_epoch is not above its since_epoch"
+
+# The ledger's removal epoch drifting from the one the alias warning prints (#3425).
+sed -E 's/^removal_epoch = ([0-9]+)/removal_epoch = 9\1/' "$LEDGER" >"$tmp/dep_drift.toml"
+grep -q '^removal_epoch = 9' "$tmp/dep_drift.toml" || { echo "FAIL: the deprecation-drift mutation matched nothing" >&2; exit 1; }
+expect_fail "$tmp/dep_drift.toml" "$CONST" \
+  "gate passed a removal epoch that disagrees with the one the warning prints"
+
+echo "dialect-epochs negative controls: 1 positive + 7 negatives all behaved"

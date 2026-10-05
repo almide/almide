@@ -23,6 +23,13 @@
 #     cross-checked by scripts/check-dialect-epochs.sh, so neither can drift.
 #   - Entries are APPEND-ONLY. An epoch that shipped is history; editing it
 #     rewrites what a stamp in an existing file means.
+#   - A spelling kept alive for a window before it is removed is a
+#     `[[deprecation]]` (after the epochs): `since_epoch` is the epoch it was
+#     deprecated in, `removal_epoch` the future epoch whose `breaks` will
+#     remove it. Deprecating breaks nothing, so it takes no epoch of its own;
+#     the removal does. `removal_epoch` must be above `since_epoch`, and the
+#     compiler constant that prints it is cross-checked by
+#     scripts/check-dialect-epochs.sh.
 #
 # What this ledger is not, yet: the join to per-break migration diagnostics.
 # The `breaks` strings are prose today. Making each one a `@deprecated`
@@ -133,3 +140,16 @@ breaks = [
   "a type qualified by a module the file does not import (`lex.LexError` with no `import self.lex`), or by a module that does not itself declare it (`dfa.Dfa` where package `dfa` declares `Dfa` in its submodule `table`), is E029 — import the declaring module (`import self.lex`, `import dfa.table`) and qualify by it (`table.Dfa`)",
   "an unknown name in `[permissions].allow` (`\"FS.read\"`, `\"FS.write\"`) is refused on its manifest line (0.66.0 accepted it) — write only IO, Net, Env, Time, Rand, Fan (file access is IO)",
 ]
+
+# =============================================================
+# DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
+# =============================================================
+
+[[deprecation]]
+id = "legacy-native-callback-names"
+issue = 3425
+since_epoch = 10
+since = "0.67.0"
+removal_epoch = 11
+summary = "A package's `native/*.rs` may still call the package's own fns by their spelling before #3338 (`almide_rt_tf_v0_entry`, `almide_rt_tf_v0_calc_double`), through a deprecated alias of the injective name (`almide_rt_tf_0v0_entry`, `almide_rt_tf_0v0_1calc_double`). The build warns once per old name it finds. A name that the old spelling made ambiguous (`a.b` and `a_b`) gets no alias."
+removal = "epoch 11 drops the aliases: a `native/*.rs` calling `crate::almide_rt_<pkg>_v<N>_<fn>` or `..._v<N>_<sub>_<fn>` gets rustc E0425 — write the injective name the warning prints (`_` in a segment is `_0`, a `.` is `_1`)"
