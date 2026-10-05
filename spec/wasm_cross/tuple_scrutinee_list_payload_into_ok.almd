@@ -1,0 +1,42 @@
+// @contract: C-070
+// #3416: a match on a TUPLE of values of a variant that recurses through a
+// `List` payload — `match (a, b) { (L(x), L(y)) => ok((x, y)), .. }` — bound
+// the boxed payloads as `Box<Vec<O>>` and moved them into the `ok((x, y))`
+// result of a `-> (List[O], List[O])!` fn (rustc E0308) on the native leg,
+// while wasm ran. The #3390 unboxing of tuple-slot constructor patterns
+// covers this shape; pinned here: list payloads on both slots moved into an
+// `ok` tuple, a list payload beside a scalar one, and the err fallback.
+type O =
+  | N(Int)
+  | L(List[O])
+
+fn both(a: O, b: O) -> (List[O], List[O])! = match (a, b) {
+  (L(x), L(y)) => ok((x, y)),
+  _ => err("expected two lists"),
+}
+
+fn count(n: O, l: O) -> (Int, List[O])! = match (n, l) {
+  (N(k), L(xs)) => ok((k, xs)),
+  _ => err("expected a number and a list"),
+}
+
+fn sizes(r: Result[(List[O], List[O]), String]) -> String = match r {
+  ok((x, y)) => int.to_string(list.len(x) + list.len(y)),
+  err(e) => e,
+}
+
+fn total(r: Result[(Int, List[O]), String]) -> String = match r {
+  ok((k, xs)) => int.to_string(k + list.len(xs)),
+  err(e) => e,
+}
+
+effect fn main() -> Unit = {
+  println(sizes(both(L([N(1)]), L([]))))
+  println(sizes(both(L([N(1), N(2)]), N(3))))
+  let nested = L([
+    N(5),
+    L([N(6)])
+  ])
+  println(total(count(N(4), nested)))
+  println(total(count(L([]), N(0))))
+}
