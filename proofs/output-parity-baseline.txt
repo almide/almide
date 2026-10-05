@@ -41,6 +41,7 @@ spec/gauntlet/pkg/mut_port/src/main.almd
 spec/integration/alias_record_literal/src/main.almd
 spec/integration/closure_module_var_write/src/main.almd
 spec/integration/cross_module_field_defaults/src/main.almd
+spec/integration/forward_alias_modules/src/main.almd
 spec/integration/generic_alias_modules/src/main.almd
 spec/integration/generic_protocol_ports/src/main.almd
 spec/integration/generics/generics_recursive_test.almd
