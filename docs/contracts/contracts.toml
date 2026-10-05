@@ -3372,6 +3372,7 @@ evidence  = [
   { path = "spec/wasm_cross/declaration_forms.almd", class = "fixture" },
   { path = "spec/wasm_cross/top_let_closure_record.almd", class = "fixture" },
   { path = "spec/wasm_cross/top_let_fn_value_closure_param.almd", class = "fixture" },
+  { path = "spec/wasm_cross/top_let_fn_value_bytes_param.almd", class = "fixture" },
   { path = "spec/wasm_cross/top_let_rc_value.almd", class = "fixture" },
 ]
 [[contract]]

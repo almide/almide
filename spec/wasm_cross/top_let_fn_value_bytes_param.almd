@@ -1,0 +1,22 @@
+// @contract: C-260
+// #3419: a top-level `let` bound to a named fn with a `Bytes` parameter runs
+// identically on both targets. 0.64.0 native declared the static as
+// `Rc<dyn Fn(i64, Vec<u8>)>` while the eta-expanded closure took
+// `AlmideRcCow<Vec<u8>>` (rustc E0308); String and Int params compiled.
+fn size_of(id: Int, body: Bytes) -> Int = id * 100 + bytes.len(body)
+
+fn tag(body: Bytes, extra: Int) -> Int = bytes.len(body) + extra
+
+let keep_size = size_of
+
+let keep_tag = tag
+
+effect fn main() -> Unit = {
+  let a = keep_size(1, bytes.from_string("xyz"))
+  println(int.to_string(a))
+  let b = keep_tag(bytes.from_string("hello"), 10)
+  println(int.to_string(b))
+  let data = bytes.from_string("ab")
+  let c = keep_size(2, data)
+  println(int.to_string(c + bytes.len(data)))
+}

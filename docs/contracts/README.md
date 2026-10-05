@@ -295,7 +295,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-257 | The scalar error operators evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-258 | Named calls and lambdas evaluate identically on both targets | 0.57.1 | active | fixture | 2 |
 | C-259 | Variant constructor references build values eliminated identically by match on both targets | 0.57.1 | active | fixture | 1 |
-| C-260 | The declaration family compiles and runs identically on both targets | 0.57.1 | active | fixture | 4 |
+| C-260 | The declaration family compiles and runs identically on both targets | 0.57.1 | active | fixture | 5 |
 | C-261 | Canonical float values including the negative-zero sign display identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-262 | The fmt-stable string escapes and the empty string evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-263 | Recovery nodes never appear in accepted programs; a broken file still reports past its first error | 0.57.1 | active | fixture | 1 |
