@@ -22,6 +22,9 @@ mod eta;
 /// loops, `?.`).
 #[path = "front_desugar.rs"]
 mod front_desugar;
+/// #1315: source lines of the emitted code, and their DWARF form.
+#[path = "debug_lines.rs"]
+pub mod debug_lines;
 
 /// Emit a core wasm module for `ir`, or say precisely why not yet.
 /// Two passes: the first loads the WHOLE linked registry graph (so
@@ -96,6 +99,7 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     };
     if !bounded.bounded_fired {
         ship(bounded_pass);
+        debug_lines::publish(&bounded.lines, ir);
         return Ok((bounded.bytes, bounded.ops));
     }
     // #2312: the bounded-line rewrites (line_bounded.rs) usually shrink a
@@ -112,6 +116,7 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
         ship(crate::witness::CHECKED_PASS);
         checked
     };
+    debug_lines::publish(&best.lines, ir);
     Ok((best.bytes, best.ops))
 }
 
@@ -148,6 +153,8 @@ struct Pass {
     ops: std::collections::BTreeSet<i32>,
     /// A bounded-line rewrite was emitted (`FnWork::bounded_fired`).
     bounded_fired: bool,
+    /// #1315: per-instruction source lines (empty unless recording).
+    lines: Vec<debug_lines::FnLines>,
 }
 
 fn emit_program_pass(
@@ -269,6 +276,7 @@ fn emit_program_pass(
     let mut fn_lambdas: Vec<std::ops::Range<usize>> = Vec::new();
     // #2807: the source line each failed body refused at (decline_site.rs).
     let mut fail_lines: HashMap<usize, usize> = HashMap::new();
+    let mut dbg = debug_lines::PassLines::default();
     for (i, (f, qual, space)) in program_fns.iter().enumerate() {
         let lifted_before = work.lifted.borrow().len();
         // #3296: every iteration records its lambda range, whichever arm it
@@ -325,8 +333,11 @@ fn emit_program_pass(
                 param_owned: Some(table.infos[i].param_owned.clone()),
             };
             crate::decline_site::reset_pending();
-            match lower_fn(&params, plan, &f.body, &[], &ctx, &mut pool) {
+            let (lowered_fn, frame) = debug_lines::framed(|| lower_fn(&params, plan, &f.body, &[], &ctx, &mut pool));
+            match lowered_fn {
                 Ok(ok) => {
+                    let name = qual.clone().unwrap_or_else(|| f.name.as_str().to_string());
+                    dbg.record(debug_lines::Body::Program(i), name, *space, &ok.0, frame);
                     // Any display helpers this fn registered build NOW — a
                     // failing body refuses THIS fn, not the program.
                     match display::build_display_helpers(&table, &types, &work, &mut pool) {
@@ -340,7 +351,9 @@ fn emit_program_pass(
                                 let pvts: Vec<ValType> =
                                     info.params.iter().map(|t| t.val_type()).collect();
                                 let rvt = info.ret.map(SliceTy::val_type);
-                                tco::loop_convert(&body, &pvts, rvt, info.wasm_index)
+                                let mut origin = Vec::new();
+                                tco::loop_convert(&body, &pvts, rvt, info.wasm_index, &mut origin)
+                                    .inspect(|_| dbg.remap(debug_lines::Body::Program(i), &origin))
                                     .unwrap_or(body)
                             } else {
                                 body
@@ -388,8 +401,10 @@ fn emit_program_pass(
     };
     let main_lambdas_from = work.lifted.borrow().len();
     crate::decline_site::reset_pending();
-    let (main_fn, main_calls) = lower_fn(&[], main_plan, main_body, &init_lets, &ctx, &mut pool)
-        .inspect_err(|_| crate::decline_site::set(Some(crate::decline_site::take_main_site())))?;
+    let (main_lowered, frame) = debug_lines::framed(|| lower_fn(&[], main_plan, main_body, &init_lets, &ctx, &mut pool));
+    let (main_fn, main_calls) =
+        main_lowered.inspect_err(|_| crate::decline_site::set(Some(crate::decline_site::take_main_site())))?;
+    dbg.record(debug_lines::Body::Main, "main".into(), 0, &main_fn, frame);
     let main_lambdas = main_lambdas_from..work.lifted.borrow().len();
     display_helper_calls.extend(display::build_display_helpers(&table, &types, &work, &mut pool)?);
 
@@ -439,8 +454,13 @@ fn emit_program_pass(
             };
             let children_from = work.lifted.borrow().len();
             crate::decline_site::reset_pending();
-            let (f, calls, err) = match lower_fn(&ll.params, plan, &ll.body, &[], &ctx, &mut pool) {
-                Ok((f, calls)) => (f, calls, None),
+            let (lowered_lambda, frame) = debug_lines::framed(|| lower_fn(&ll.params, plan, &ll.body, &[], &ctx, &mut pool));
+            let (f, calls, err) = match lowered_lambda {
+                Ok((f, calls)) => {
+                    let name = ll.site_name.clone().map_or(lambda_name.clone(), |s| format!("{s}::{lambda_name}"));
+                    dbg.record(debug_lines::Body::Lambda(lifted_fns.len()), name, ll.var_space, &f, frame);
+                    (f, calls, None)
+                }
                 Err(EmitError::Unsupported(r)) => {
                     // The stub ships unrecorded: counted, never certified.
                     crate::witness::decline_unrecorded(&lambda_name, "lambda:unlowered");
@@ -621,10 +641,21 @@ fn emit_program_pass(
             Some(imports::Declared { index: info.wasm_index, module, name })
         })
         .collect();
-    let bytes = imports::declare(&bytes, &declared).map_err(|e| EmitError::Unsupported(format!("extern-import:{e}")))?;
+    let pre_declare = bytes;
+    let bytes = imports::declare(&pre_declare, &declared).map_err(|e| EmitError::Unsupported(format!("extern-import:{e}")))?;
+    let lines = dbg.finish(debug_lines::Placement {
+        program: &|i| matches!(lowered[i], Ok(_) if visited.contains(&i)).then(|| table.infos[i].wasm_index),
+        main_index,
+        lambdas: work.entries.borrow().iter().zip(&entry_fn_indices).filter_map(|(e, &idx)| match e {
+            TableEntry::Lambda(j) => Some((*j as usize, idx)),
+            _ => None,
+        }).collect(),
+        pre_declare: &pre_declare,
+        stubs: declared.iter().map(|d| d.index).collect(),
+    });
     record_decls(&program_fns, (main, main_index), &work, &entry_fn_indices, &declared, &bytes);
     let host_ops = work.host_ops.borrow().clone();
-Ok(Pass { bytes, visited, total, ops: host_ops, bounded_fired: work.bounded_fired.get() })
+Ok(Pass { bytes, visited, total, ops: host_ops, bounded_fired: work.bounded_fired.get(), lines })
 }
 
 /// #2759: the declaration table the name and capability witnesses read

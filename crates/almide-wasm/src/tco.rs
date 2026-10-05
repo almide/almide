@@ -12,11 +12,14 @@ use wasm_encoder::reencode::{Reencode, RoundtripReencoder};
 use wasm_encoder::{BlockType, Function, Instruction, ValType};
 
 /// Rewrite `f` if it return_calls `self_idx`; None = no site (unchanged).
+/// `origin` receives, per instruction of the result, the ordinal of the
+/// instruction of `f` it came from (#1315: the line table follows it).
 pub(crate) fn loop_convert(
     f: &Function,
     param_vts: &[ValType],
     ret: Option<ValType>,
     self_idx: u32,
+    origin: &mut Vec<u32>,
 ) -> Option<Function> {
     let mut bytes = Vec::new();
     wasm_encoder::Encode::encode(f, &mut bytes);
@@ -55,11 +58,15 @@ pub(crate) fn loop_convert(
         Some(vt) => BlockType::Result(vt),
         None => BlockType::Empty,
     });
+    origin.clear();
+    origin.push(0);
     // depth = blocks currently open, INCLUDING our loop.
     let mut depth: u32 = 1;
     let mut ops = body.get_operators_reader().ok()?;
+    let mut k: u32 = 0;
     while !ops.eof() {
         let op = ops.read().ok()?;
+        k += 1;
         match &op {
             wasmparser::Operator::Block { .. }
             | wasmparser::Operator::Loop { .. }
@@ -68,6 +75,7 @@ pub(crate) fn loop_convert(
                 if depth == 1 {
                     // the function's closing `end`: close our loop first.
                     out.instructions().end().end();
+                    origin.extend([k - 1, k - 1]);
                     return Some(out);
                 }
                 depth -= 1;
@@ -79,12 +87,14 @@ pub(crate) fn loop_convert(
                     out.instructions().local_set(p);
                 }
                 out.instructions().br(depth - 1);
+                origin.extend(std::iter::repeat_n(k - 1, param_vts.len() + 1));
                 continue;
             }
             _ => {}
         }
         let inst: Instruction = RoundtripReencoder.instruction(op).ok()?;
         out.instruction(&inst);
+        origin.push(k - 1);
     }
     None
 }
