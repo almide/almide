@@ -422,10 +422,33 @@ impl Lower<'_> {
     /// (rustc E0308 behind a green check): the reference side derefs.
     /// Both sides references (`p == q`) compare as `&T == &T` and need
     /// nothing; strings are already borrowed on both sides as `&str`.
+    ///
+    /// A binder a match over a borrowed subject bound (`ref_binders`) is a
+    /// reference exactly like the param it reads: `other => other == b` was
+    /// `other == (*b)`, `&T == T` (rustc E0277, #3437). A `Copy` scalar
+    /// binder is already read as `*n` and is a value here.
     fn lower_compare(&self, expr: &mut IrExpr) {
         let IrExprKind::BinOp { op: BinOp::Eq | BinOp::Neq, left, right } = &mut expr.kind else { return };
+        // The box-deref of a boxed payload bound by reference (`Node(l, _)`
+        // over a borrowed subject binds `l: &Box<T>`) is `*l`, a `Box<T>`,
+        // which compares with neither a `T` nor a `&T`: read the value
+        // through both (`**l`).
+        for side in [&mut *left, &mut *right] {
+            if let IrExprKind::Deref { expr: inner } = &side.kind
+                && let Some(id) = var_id(inner)
+                && self.ref_binders.contains(&id)
+                && self.ann.box_binders.contains(&id)
+                && !is_copy_scalar(&side.ty)
+            {
+                let value = std::mem::replace(side.as_mut(), mk(IrExprKind::Unit, Ty::Unit, None));
+                let ty = value.ty.clone();
+                let span = value.span;
+                *side.as_mut() = mk(IrExprKind::Deref { expr: Box::new(value) }, ty, span);
+            }
+        }
         let is_ref = |e: &IrExpr| var_id(e).is_some_and(|id| {
             matches!(param_mode(self.params, id), Some(ParamBorrow::Ref | ParamBorrow::RefSlice))
+                || (self.ref_binders.contains(&id) && !is_copy_scalar(&e.ty))
         });
         let (l, r) = (is_ref(left), is_ref(right));
         if l == r {
