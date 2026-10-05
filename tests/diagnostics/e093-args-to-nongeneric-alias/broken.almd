@@ -1,0 +1,6 @@
+// Type arguments on an alias declared without parameters.
+type Score = Int
+
+fn bump(s: Score[Int]) -> Score = s + 1
+
+effect fn main() -> Unit = println(int.to_string(bump(1)))

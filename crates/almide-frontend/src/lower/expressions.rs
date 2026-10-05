@@ -8,7 +8,7 @@ use super::LowerCtx;
 use super::calls::{lower_call, lower_call_target};
 use super::statements::lower_stmt;
 use super::statements::lower_pattern;
-use super::types::resolve_type_expr;
+use super::types::resolve_type_expr_env;
 
 pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
     let mut e = lower_expr_dispatch(ctx, expr);
@@ -407,7 +407,7 @@ fn lower_expr_lambda(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
             // `let (a, b) = entry` workaround did by hand (#1060).
             let mut destructure: Vec<IrStmt> = Vec::new();
             let ir_params: Vec<(VarId, Ty)> = params.iter().enumerate().map(|(i, p)| {
-                let param_ty = p.ty.as_ref().map(|te| resolve_type_expr(te))
+                let param_ty = p.ty.as_ref().map(|te| resolve_type_expr_env(ctx, te))
                     .or_else(|| lambda_param_tys.get(i).cloned())
                     .unwrap_or(Ty::Unknown);
                 match &p.tuple_names {
@@ -692,7 +692,7 @@ fn lower_expr_misc(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<as
             // constrained the element.
             let mut inner = lower_expr(ctx, expr);
             if inner.ty.has_unresolved_deep() {
-                let ascribed = resolve_type_expr(ascribed_te);
+                let ascribed = resolve_type_expr_env(ctx, ascribed_te);
                 if !ascribed.has_unresolved_deep() {
                     inner.ty = ascribed;
                 } else if !ty.has_unresolved_deep() {

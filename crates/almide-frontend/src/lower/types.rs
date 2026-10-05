@@ -105,6 +105,15 @@ pub(super) fn resolve_type_expr(te: &ast::TypeExpr) -> Ty {
     crate::canonicalize::resolve::resolve_type_expr(te, None)
 }
 
+/// An annotation written inside a body (a lambda parameter, an ascription, a
+/// call's type arguments), resolved against the program's types in the
+/// module being lowered — the path `let` annotations and declarations take,
+/// so an alias is its target here too: a generic one applied to arguments is
+/// its substituted body (#3403), never a `Named` codegen has no type for.
+pub(super) fn resolve_type_expr_env(ctx: &LowerCtx, te: &ast::TypeExpr) -> Ty {
+    crate::canonicalize::resolve::resolve_type_expr_in(te, Some(&ctx.env.types), ctx.current_module.as_ref().map(|s| s.as_str()))
+}
+
 /// #1839: lower ONE bundled module's `type` declaration exactly as that
 /// module's own lowering does (`lower_module` → [`lower_type_decl`]: the bare
 /// name a bundled decl keeps, the env-resolved field types), for `ir_link`'s

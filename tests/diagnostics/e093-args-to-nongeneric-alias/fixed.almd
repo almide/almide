@@ -1,0 +1,5 @@
+type Score = Int
+
+fn bump(s: Score) -> Score = s + 1
+
+effect fn main() -> Unit = println(int.to_string(bump(1)))

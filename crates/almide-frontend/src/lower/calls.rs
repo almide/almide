@@ -6,7 +6,7 @@ use crate::types::{Ty, TypeConstructorId};
 use almide_base::intern::{sym, Sym};
 use super::LowerCtx;
 use super::expressions::lower_expr;
-use super::types::resolve_type_expr;
+use super::types::resolve_type_expr_env;
 
 /// The argument list of the call being lowered.
 ///
@@ -34,7 +34,7 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, call: CallArgs<
     }
 
     let mut ir_args: Vec<IrExpr> = Vec::new();
-    let ta_raw: Vec<Ty> = type_args.map(|tas| tas.iter().map(|t| resolve_type_expr(t)).collect()).unwrap_or_default();
+    let ta_raw: Vec<Ty> = type_args.map(|tas| tas.iter().map(|t| resolve_type_expr_env(ctx, t)).collect()).unwrap_or_default();
     let ta = split_const_value_type_args(ctx, &ta_raw, &mut ir_args, span);
 
     ir_args.extend(args.iter().map(|a| lower_expr(ctx, a)));

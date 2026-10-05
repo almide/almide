@@ -415,6 +415,23 @@ type Name = String
 type Handler = (String) -> String
 ```
 
+An alias may take type parameters. Applied to its arguments it is its body
+with each parameter replaced by its argument, wherever it is written — a
+parameter, a return type, a field, a variant payload, another alias's body —
+and from another module qualified (`geo.Pair[Int]`):
+
+```almide
+type Pair[T] = (T, T)            // Pair[Int] is (Int, Int)
+type Step[T] = (T) -> T          // Step[String] is (String) -> String
+type Both[T] = Pair[List[T]]     // Both[Int] is (List[Int], List[Int])
+
+fn first(p: Pair[Int]) -> Int = p.0
+```
+
+The arguments replace the parameters in declared order. Only an alias is
+expanded: a generic record or variant stays a nominal type. The argument
+count must equal the declared parameter count (E093).
+
 #### Generic Types
 
 ```almide
@@ -431,7 +448,7 @@ type Point: Codec = { x: Float, y: Float }
 
 Built-in conventions: `Eq`, `Repr`, `Ord`, `Hash`, `Codec`.
 
-テスト: `spec/lang/data_types_test.almd`, `spec/lang/type_alias_test.almd`, `spec/lang/variant_record_test.almd`, `spec/lang/derive_conventions_test.almd`
+テスト: `spec/lang/data_types_test.almd`, `spec/lang/type_alias_test.almd`, `spec/lang/generic_type_alias_test.almd`, `spec/lang/variant_record_test.almd`, `spec/lang/derive_conventions_test.almd`
 
 ### 4.4 Protocol Declarations
 
