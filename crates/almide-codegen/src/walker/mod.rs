@@ -527,6 +527,11 @@ fn render_fn_safe_name(
 /// single-file and module layouts. A no-op off unix.
 const MAIN_SIGPIPE_PRELUDE: &str = "    #[cfg(unix)]\n    {\n        extern \"C\" {\n            fn signal(sig: i32, handler: usize) -> usize;\n        }\n        // SIGPIPE = 13, SIG_DFL = 0\n        unsafe {\n            signal(13, 0);\n        }\n    }\n";
 
+/// Call-stack exhaustion as the defined abort (C-196): replace std's
+/// guard-page handler with the one that prints `Error: stack overflow` and
+/// exits 1 (prelude_stack.rs), before anything else in `main` runs.
+const MAIN_STACK_PRELUDE: &str = "    almide_stack_guard_install();\n";
+
 /// The stdout buffer's flush on a panic (#2245): stdout is buffered (a
 /// line written in fragments, `io.print`-less pieces), and a panic unwinding out of `main` never runs
 /// the main thread's thread-local destructors, so the lines a program printed
@@ -581,9 +586,9 @@ fn wrap_main_fn_code(fn_code: String, ctx: &RenderContext, is_rust_effect_main: 
         })
         .collect();
     if is_rust_effect_main {
-        format!("{}\n\nfn main() {{\n{}{}{}    if let Err(__almide_err) = __almide_main() {{\n        almide_stdout_finish();\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines)
+        format!("{}\n\nfn main() {{\n{}{}{}{}    if let Err(__almide_err) = __almide_main() {{\n        almide_stdout_finish();\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_STACK_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines)
     } else if is_rust_plain_main_with_forces {
-        format!("{}\n\nfn main() {{\n{}{}{}    __almide_main();\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines)
+        format!("{}\n\nfn main() {{\n{}{}{}{}    __almide_main();\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_STACK_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines)
     } else {
         fn_code
     }

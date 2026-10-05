@@ -70,6 +70,7 @@ pub mod pass_region_window;
 pub mod pass_region_window_clone;
 mod prelude_region;
 mod prelude_fan;
+mod prelude_stack;
 pub use prelude_region::region_arena_prelude_source;
 pub mod perceus_verified;
 pub mod pass_egg_saturation;
@@ -360,9 +361,13 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // `eprintln` stays unbuffered on stderr, so the RELATIVE order of stdout
     // and stderr is not preserved when stdout is not a terminal — the same as
     // every C/Rust program; the bytes on each stream are unchanged.
+    // `ALMIDE_STDOUT_LIVE` says whether this thread's buffer exists yet without
+    // creating it: the stack-overflow handler (C-196, prelude_stack.rs) writes
+    // out a partial line still in the buffer, and must not allocate one.
     s.push_str("thread_local! {\n");
+    s.push_str("    static ALMIDE_STDOUT_LIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };\n");
     s.push_str(&format!("    {vis}static ALMIDE_STDOUT_BUF: std::cell::RefCell<std::io::BufWriter<std::io::Stdout>> =\n"));
-    s.push_str("        std::cell::RefCell::new(std::io::BufWriter::with_capacity(65536, std::io::stdout()));\n}\n");
+    s.push_str("        { ALMIDE_STDOUT_LIVE.with(|c| c.set(true)); std::cell::RefCell::new(std::io::BufWriter::with_capacity(65536, std::io::stdout())) };\n}\n");
     s.push_str(&format!("{vis}fn almide_stdout_is_terminal() -> bool {{ static TTY: std::sync::OnceLock<bool> = std::sync::OnceLock::new(); *TTY.get_or_init(|| std::io::IsTerminal::is_terminal(&std::io::stdout())) }}\n"));
     s.push_str(&format!("{vis}fn almide_stdout_flush() {{ ALMIDE_STDOUT_BUF.with(|buf| {{ let _ = std::io::Write::flush(&mut *buf.borrow_mut()); }}); }}\n"));
     // The exit-time counterpart: flush, then give back the two allocations the
@@ -402,6 +407,7 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str(&format!("{vis}fn almide_fan_write_fmt(err: bool, args: std::fmt::Arguments<'_>, newline: bool) {{ let mut v: Vec<u8> = Vec::new(); let _ = std::io::Write::write_fmt(&mut v, args); if newline {{ v.push(b'\\n'); }} almide_out_write(err, &v) }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_eprintln {{ ($($arg:tt)*) => {{ $crate::almide_stderr_write_fmt(format_args!($($arg)*), true) }}; }}\n"));
     s.push_str(&prelude_fan::fan_timeline_prelude(vis));
+    s.push_str(&prelude_stack::stack_guard_prelude(vis));
     s.push_str(&format!("{macro_attr}macro_rules! almide_eq {{ ($a:expr, $b:expr) => {{ ($a) == ($b) }}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_ne {{ ($a:expr, $b:expr) => {{ ($a) != ($b) }}; }}\n"));
     // almide_div!/almide_mod!: total integer `/` and `%`. `checked_div`/`checked_rem`

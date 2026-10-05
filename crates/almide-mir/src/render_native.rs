@@ -86,6 +86,12 @@ pub(crate) fn var(v: ValueId) -> String {
 
 /// The rung-4 bounds-checked element accessors — byte-identical abort text to the
 /// wasm `$elem_addr_chk` ("Error: index out of bounds" + exit 1) and to v0 native.
+/// C-196: call-stack exhaustion is the defined abort `Error: stack overflow` +
+/// exit 1, as the codegen leg's runtime prelude makes it. The guard module is
+/// shared with that leg (`almide_base::native_stack_guard`); this render's
+/// stdout is std's own line-buffered handle, so the handler has no buffer of
+/// ours to write out first.
+const STACK_GUARD_GLUE_SHIM: &str = "fn almide_stack_guard_install() {\n    #[cfg(any(target_os = \"linux\", target_os = \"macos\"))]\n    almide_stack_guard::install();\n}\n#[cfg(any(target_os = \"linux\", target_os = \"macos\"))]\nfn almide_stack_guard_stdout() {}";
 const IDX_GET_SHIM: &str = "fn almide_idx_get(v: &[i64], i: i64) -> i64 {\n        if i < 0 || i as usize >= v.len() { eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }\n        v[i as usize]\n}";
 const IDX_SET_SHIM: &str = "fn almide_idx_set(v: &mut Vec<i64>, i: i64, x: i64) {\n        if i < 0 || i as usize >= v.len() { eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }\n        v[i as usize] = x;\n}";
 
@@ -304,6 +310,11 @@ fn render_fn(
     // side effect), so skipping an unused one is sound — and it keeps the
     // subset honest: a USED Handle still walls below.
     let used = native_used_values(func);
+    if is_main {
+        used_shims.push(almide_base::native_stack_guard::NATIVE_STACK_GUARD);
+        used_shims.push(STACK_GUARD_GLUE_SHIM);
+        line!("almide_stack_guard_install();");
+    }
     if is_main && crate::charge_probe::probe_enabled() {
         used_shims.push(COUNTER_SHIM);
         used_shims.push(CHARGE_SHIM);

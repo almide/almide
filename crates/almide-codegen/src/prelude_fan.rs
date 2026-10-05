@@ -38,7 +38,7 @@ VIS struct AlmideFanElem(AlmideFanSink, Option<AlmideFanSink>);
 thread_local! { VIS static ALMIDE_FAN_SINK: std::cell::RefCell<Option<AlmideFanSink>> = const { std::cell::RefCell::new(None) }; }
 fn almide_fan_lock(g: &AlmideFanGroup) -> std::sync::MutexGuard<'_, AlmideFanState> { g.state.lock().unwrap_or_else(|e| e.into_inner()) }
 VIS fn almide_fan_current() -> Option<AlmideFanSink> { ALMIDE_FAN_SINK.try_with(|c| c.borrow().clone()).ok().flatten() }
-VIS fn almide_fan_adopt(sink: Option<AlmideFanSink>) { let _ = ALMIDE_FAN_SINK.try_with(|c| *c.borrow_mut() = sink); }
+VIS fn almide_fan_adopt(sink: Option<AlmideFanSink>) { almide_stack_guard_register(); let _ = ALMIDE_FAN_SINK.try_with(|c| *c.borrow_mut() = sink); }
 VIS fn almide_fan_active() -> bool { ALMIDE_FAN_SINK.try_with(|c| c.borrow().is_some()).unwrap_or(false) }
 fn almide_out_real(err: bool, bytes: &[u8]) { if err { let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), bytes); } else { ALMIDE_STDOUT_BUF.with(|buf| { let mut w = buf.borrow_mut(); let _ = std::io::Write::write_all(&mut *w, bytes); if bytes.contains(&b'\n') || almide_stdout_is_terminal() { let _ = std::io::Write::flush(&mut *w); } }); } }
 fn almide_out_route(sink: Option<&AlmideFanSink>, err: bool, bytes: &[u8]) {
@@ -62,6 +62,7 @@ VIS fn almide_fan_group(n: usize) -> std::sync::Arc<AlmideFanGroup> {
     std::sync::Arc::new(AlmideFanGroup { state: std::sync::Mutex::new(state), cv: std::sync::Condvar::new(), parent: almide_fan_current() })
 }
 VIS fn almide_fan_enter(g: &std::sync::Arc<AlmideFanGroup>, index: usize) -> AlmideFanElem {
+    almide_stack_guard_register();
     let sink = AlmideFanSink { group: g.clone(), index };
     let prev = ALMIDE_FAN_SINK.with(|c| c.replace(Some(sink.clone())));
     AlmideFanElem(sink, prev)
