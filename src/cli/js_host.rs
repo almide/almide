@@ -72,8 +72,9 @@ pub(crate) struct HostSurface {
     pub exports: Vec<HostFn>,
     pub externs: Vec<HostExtern>,
     pub has_main: bool,
-    /// `--async-import` (#3353): the extern import names whose hook may
-    /// return a Promise.
+    /// The extern import names whose hook returns a Promise: an
+    /// `@extern(wasm, "js", name, returns: promise)` (#3371; #3353 took
+    /// them from a build flag).
     pub async_imports: Vec<String>,
 }
 
@@ -96,22 +97,6 @@ impl HostSurface {
         externs_string || exports_block
     }
 
-    /// Take `--async-import` (#3353): every name must be an extern import
-    /// the program declares, or the build refuses naming it.
-    pub(crate) fn set_async_imports(&mut self, names: &[String]) -> Result<(), String> {
-        for n in names {
-            if !self.externs.iter().any(|e| &e.import == n) {
-                let declared: Vec<&str> = self.externs.iter().map(|e| e.import.as_str()).collect();
-                return Err(format!(
-                    "error: --async-import `{n}` names no @extern(wasm, ..., \"{n}\") import of this program — it declares: {}",
-                    if declared.is_empty() { "none".to_string() } else { declared.join(", ") }
-                ));
-            }
-        }
-        self.async_imports = names.to_vec();
-        Ok(())
-    }
-
     pub(crate) fn of(program: &IrProgram) -> Self {
         let mut s = HostSurface::default();
         for f in &program.functions {
@@ -123,6 +108,7 @@ impl HostSurface {
                 is_effect: f.is_effect,
             };
             if let Some(a) = f.extern_attrs.iter().find(|a| a.target.as_str() == "wasm") {
+                s.mark_async(a);
                 s.externs.push(HostExtern {
                     module: a.module.as_str().to_string(),
                     import: a.function.as_str().to_string(),
@@ -170,6 +156,7 @@ impl HostSurface {
                 });
             }
             let Some(a) = f.extern_attrs.iter().find(|a| a.target.as_str() == "wasm") else { continue };
+            s.mark_async(a);
             let (module, import) = (a.module.as_str().to_string(), a.function.as_str().to_string());
             if s.externs.iter().any(|e| e.module == module && e.import == import) {
                 continue;
@@ -183,6 +170,15 @@ impl HostSurface {
             s.externs.push(HostExtern { module, import, sig });
         }
         s
+    }
+
+    /// `returns: promise` (#3371): the parser admits it only on
+    /// `@extern(wasm, "js", ...)`, so its import is a JS hook to suspend on.
+    fn mark_async(&mut self, a: &almide_lang::ast::ExternAttr) {
+        let import = a.function.as_str();
+        if a.returns_promise && !self.async_imports.iter().any(|n| n == import) {
+            self.async_imports.push(import.to_string());
+        }
     }
 }
 
@@ -575,6 +571,9 @@ pub(crate) fn generate(
     if !surface.externs.is_empty() {
         string_helpers.push_str(JS_ABANDON);
     }
+    if surface.externs.iter().any(|e| !suspension.imports.contains(&e.import)) {
+        string_helpers.push_str(JS_SYNC);
+    }
     if needs_values {
         string_helpers.push_str(JS_VALUE_HELPERS);
     }
@@ -730,9 +729,28 @@ function allocString(s) {
 /// its unwound frames kept their blocks, so no later call may run on it —
 /// and the thrown error names the import and the fix. Shipped when the
 /// program declares an extern.
-const JS_ABANDON: &str = r#"function abandon(module, name, e) {
+///
+/// `UnmarkedPromise` is the refusal [`JS_SYNC`] throws, passed through here.
+const JS_ABANDON: &str = r#"class UnmarkedPromise extends Error {}
+function abandon(module, name, e) {
+  if (e instanceof UnmarkedPromise) return e;
   abandoned = `almide: the instance was abandoned after hooks.${module}.${name} threw — call init() again`;
   return new Error(`almide: hooks.${module}.${name} threw, but its @extern is infallible, so the call cannot return an err and the instance is abandoned; declare it \`effect fn\` (or returning Result[T, String]) to receive a throw as an err: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
+}
+"#;
+
+/// `sync()` (#3371): the one check a SYNC hook's answer goes through. A
+/// thenable means the hook is async but its @extern is not marked
+/// `returns: promise`, so the call cannot wait for it. The refusal names the
+/// fix and abandons the instance (the throw unwinds the module's frames as
+/// any hook throw does); the dropped promise gets a no-op rejection handler
+/// so its own failure is not a second, unhandled one. Shipped when some
+/// extern is unmarked.
+const JS_SYNC: &str = r#"function sync(module, name, r) {
+  if (typeof r?.then !== "function") return r;
+  Promise.resolve(r).catch(() => {});
+  abandoned = `almide: the instance was abandoned after hooks.${module}.${name} returned a Promise — call init() again`;
+  throw new UnmarkedPromise(`almide: hooks.${module}.${name} returned a Promise; mark its @extern with returns: promise`);
 }
 "#;
 

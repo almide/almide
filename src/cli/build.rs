@@ -24,15 +24,6 @@ pub struct BuildArgs<'a> {
     pub heap_cap: Option<u32>,
     /// `--host js` (#2265): write the JS host next to the wasm output.
     pub host: Option<&'a str>,
-    /// `--async-import` (#3353): the JS imports the module suspends on.
-    pub async_imports: &'a [String],
-}
-
-/// The `--host` request of a wasm build: the host and its async imports.
-#[derive(Clone, Copy)]
-struct HostRequest<'a> {
-    name: Option<&'a str>,
-    async_imports: &'a [String],
 }
 
 /// The npm/JavaScript target was removed with the TS backend; reject it with
@@ -202,7 +193,7 @@ pub fn cmd_build(args: BuildArgs) {
     // (verbatim) — this is purely a call-site params bundling.
     let BuildArgs {
         file, output, target, release, fast, unchecked_index: _unchecked_index,
-        no_check, repr_c, cdylib, emit_unverified, verified, native_verified, wasm_opt, component, heap_cap, host, async_imports,
+        no_check, repr_c, cdylib, emit_unverified, verified, native_verified, wasm_opt, component, heap_cap, host,
     } = args;
     reject_removed_target(target);
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
@@ -216,10 +207,10 @@ pub fn cmd_build(args: BuildArgs) {
         // thread-local is exactly as scoped as this call.
         // #1729: the cap becomes the emitted memory's declared maximum.
         let _cap = heap_cap.map(almide_wasm::heap_cap::HeapCapGuard::set);
-        cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified, wasm_opt, component, HostRequest { name: host, async_imports });
+        cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified, wasm_opt, component, host);
         return;
     }
-    if host.is_some() || !async_imports.is_empty() {
+    if host.is_some() {
         err("error: --host is a wasm option: `almide build app.almd --target wasm --host js`");
         std::process::exit(2);
     }
@@ -568,23 +559,9 @@ fn write_js_host(output: &str, file: &str, bytes: &[u8], surface: &crate::cli::j
     format!(" + {js_path} + {dts_path}")
 }
 
-/// `--async-import` (#3353) onto the host surface, or exit naming the
-/// import the program does not declare.
-fn take_async_imports(surface: &mut crate::cli::js_host::HostSurface, names: &[String]) {
-    if let Err(message) = surface.set_async_imports(names) {
-        err(&message);
-        std::process::exit(1);
-    }
-}
-
-/// The `--host` switch, validated: `js` or nothing; never with `--component`;
-/// `--async-import` only with `--host js`.
-fn js_host_requested(host: HostRequest<'_>, component: bool) -> bool {
-    if host.name.is_none() && !host.async_imports.is_empty() {
-        err("error: --async-import names imports of the JS host: `almide build app.almd --target wasm --host js --async-import NAME`");
-        std::process::exit(2);
-    }
-    let js_host = match host.name {
+/// The `--host` switch, validated: `js` or nothing; never with `--component`.
+fn js_host_requested(host: Option<&str>, component: bool) -> bool {
+    let js_host = match host {
         None => false,
         Some("js") => true,
         Some(other) => {
@@ -600,7 +577,7 @@ fn js_host_requested(host: HostRequest<'_>, component: bool) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allow_unverified: bool, verified: bool, wasm_opt: bool, component: bool, host: HostRequest<'_>) {
+fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allow_unverified: bool, verified: bool, wasm_opt: bool, component: bool, host: Option<&str>) {
     let default_output = format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"));
     let output = output.unwrap_or(&default_output);
     // `--host js` (#2265): the compiler writes the JS host next to the
@@ -614,11 +591,10 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // command writes — the cross-target equivalence guarantee depends on both
     // entry points sharing one code path. Any compile diagnostic was already
     // printed there; we just propagate the exit.
-    let (bytes, host_ops, mut surface) = match compile_to_wasm_bytes_surfaced(file, allow_unverified, verified, true, false) {
+    let (bytes, host_ops, surface) = match compile_to_wasm_bytes_surfaced(file, allow_unverified, verified, true, false) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };
-    take_async_imports(&mut surface, host.async_imports);
     // The module imports `almide.*` (the embedded host's surface). A BUILD artifact must run on stock runtimes, so it ships in
     // the WASI form — same index space, shimmed imports, proc_exit on trap
     // (the #1588 transform; the 578-fixture stock-wasmtime gate is its

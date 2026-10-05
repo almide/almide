@@ -3,8 +3,8 @@
 # fails until its row is raised in the same change. Rows: `<stem> <bytes>`.
 println_only 5130
 marshal_types 6249
-extern_js 6700
-extern_scalars 6800
+extern_js 6900
+extern_scalars 7050
 # #3354: the Result unwrapping moved into the shared block helpers
 # (js_host_values.js: readers, builders, the flat-release child walk,
 # memoryBytes) — +4.4 KB once per glue that unwraps or carries a block.
@@ -12,11 +12,17 @@ effect_exports 13000
 # #3354: every block shape as a param and a return, 23 wrappers + shape consts.
 marshal_blocks 20100
 # #3353: the JSPI runtime (feature check, serialising queue, busy guard), six wrappers, Suspending imports.
-async_imports 14800
+async_imports 15300
 # #3356: every glue gained the abandoned-instance check in ready() (+98 B);
 # a glue with an @extern gained abandon() and a try/catch per hook (+~700 B
 # on extern_js / extern_scalars / effect_exports / marshal_blocks /
 # async_imports above,
 # raised in this change); fallible hooks answer through okResult/errResult.
-hook_errors 13100
+hook_errors 13450
 hook_errors_async 15000
+# #3371: a glue with an UNMARKED @extern gained sync(), the refusal of a hook
+# that returns a Promise without `returns: promise` (+~350 B: the helper and
+# one wrapped call per sync hook; extern_js / extern_scalars / async_imports /
+# hook_errors raised above in this change). A glue whose every hook is marked
+# (hook_errors_async) ships only the 37-byte UnmarkedPromise class.
+unmarked_promise 12750
