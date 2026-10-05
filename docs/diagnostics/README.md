@@ -60,7 +60,8 @@ equal to the set of codes the compiler emits.
 | [E089](E089.md) | Interpolating a value with no defined string form (Bytes, Unit, Matrix, a raw pointer, a function value or a value holding one) — including through a generic instantiation |
 | [E090](E090.md) | An `@extern(c)` signature with a type that has no C representation (a heap value, a `String` return, a `mut` parameter) |
 | [E092](E092.md) | A `@pure` fn is not pure: it is an `effect fn` or an `@extern`, or it reaches output, a `panic` / `assert*`, a stdlib call with an effect category, or an `@extern` |
-| [E093](E093.md) | A type written with brackets is applied to a different number of type arguments than its declaration has parameters (a generic alias, record or variant, or a type declared without parameters) |
+| [E093](E093.md) | A type written with brackets is applied to a different number of type arguments than its declaration has parameters (a generic alias, record or variant, a type declared without parameters, or a builtin: `List[Int, Int]`, `Map[String]`) |
+| [E094](E094.md) | Type aliases form a cycle: an alias leads back to itself through other aliases or a type argument (`type A = B` / `type B = A`, `type Tree = List[Tree]`) |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired

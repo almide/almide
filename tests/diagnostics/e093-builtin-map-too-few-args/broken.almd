@@ -1,0 +1,7 @@
+// The builtin `Map[K, V]` applied to one type argument, in a record field.
+type Index = { names: Map[String] }
+
+effect fn main() -> Unit = {
+  let ix: Index = { names: map.new() }
+  println(int.to_string(map.len(ix.names)))
+}

@@ -1,0 +1,13 @@
+// #3407 on the test lanes: a module's forward aliases used from another file.
+import self.shapes
+
+test "a module alias of a later alias is its body" {
+  let e: shapes.Ends = (2, 5)
+  assert_eq(e.0 + e.1, 7)
+  assert_eq(shapes.swap(e), (5, 2))
+}
+
+test "a module record field spells a later alias" {
+  assert_eq(shapes.span(shapes.Seg { ends: (1, 4), name: "x" }), 3)
+  assert_eq(shapes.cell(3).value, 3)
+}

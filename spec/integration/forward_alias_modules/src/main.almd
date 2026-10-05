@@ -1,0 +1,19 @@
+// #3407: forward aliases in the entry file and in an imported module.
+// v0.64.0 kept `Total` and `shapes.Ends` opaque: a tuple index on them was
+// E045. Native and wasm print the same.
+import self.shapes
+
+type Total = Sum
+
+type Sum = (Int, Int)
+
+fn add(t: Total) -> Int = t.0 + t.1
+
+effect fn main() -> Unit = {
+  println(int.to_string(add((3, 4))))
+  let e: shapes.Ends = (2, 9)
+  println(int.to_string(add(shapes.swap(e))))
+  println(int.to_string(shapes.span({ ends: (1, 6), name: "s" })))
+  let c: shapes.Cell[Int] = shapes.cell(5)
+  println(int.to_string(c.value))
+}

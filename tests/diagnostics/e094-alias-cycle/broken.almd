@@ -1,0 +1,8 @@
+// Two aliases that name each other: neither has a body to stand for.
+type Coord = Pos
+
+type Pos = Coord
+
+fn origin() -> Pos = (0, 0)
+
+effect fn main() -> Unit = println(int.to_string(origin().0))
