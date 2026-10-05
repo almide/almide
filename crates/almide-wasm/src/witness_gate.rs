@@ -10,6 +10,10 @@ use almide_ir::{IrExpr, IrExprKind, IrStmtKind};
 #[path = "witness_gate_callbacks.rs"]
 mod callbacks;
 use callbacks::{inline_callback_subset, is_self_hosted_hof};
+/// The built-value rules (split for the file budget).
+#[path = "witness_gate_built.rs"]
+mod built;
+use built::built_value_subset;
 
 /// The phase-A/B1 subset gate: `None` = the body is straight-line and
 /// every RC-affecting site is covered by the recorder hooks (bind,
@@ -282,9 +286,11 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
         // where the gate cannot see it: `witness_record_default` declines
         // one that is not a literal.
         IrExprKind::Tuple { elements } => elements.iter().find_map(|x| value_subset(x).map(|w| w.inside("tuple-elem"))),
-        IrExprKind::EmptyMap | IrExprKind::MapLiteral { .. } | IrExprKind::Range { .. } | IrExprKind::ToOption { .. } => {
-            built_value_subset(e)
-        }
+        IrExprKind::EmptyMap
+        | IrExprKind::MapLiteral { .. }
+        | IrExprKind::Range { .. }
+        | IrExprKind::ToOption { .. }
+        | IrExprKind::SpreadRecord { .. } => built_value_subset(e),
         IrExprKind::Record { fields, .. } => {
             fields.iter().find_map(|(_, x)| value_subset(x).map(|w| w.inside("field")))
         }
@@ -346,25 +352,6 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
         // a VIEW of the slot, like an element read, with no abort edge.
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => slot_subset(e, object),
         other => Some(Why::Here(tag(other))),
-    }
-}
-
-/// #2755: the values a route BUILDS from its operands. `[]` of a map is a
-/// fresh empty block; `["k": v, …]` lowers as `map.from_list` over a fresh
-/// pairs list (emitter_values.rs) — a borrowed temporary of the arm (`id`)
-/// whose tuple slots are `witness_store`s; a range is a fresh Int list over
-/// its bounds (ranges.rs), whose overflow abort is a recorded terminal; `r?`
-/// converts its carrier (data.rs `witness_to_option`).
-fn built_value_subset(e: &IrExpr) -> Option<Why> {
-    match &e.kind {
-        IrExprKind::MapLiteral { entries } => entries
-            .iter()
-            .find_map(|(k, v)| value_subset(k).or_else(|| value_subset(v)).map(|w| w.inside("map-entry"))),
-        IrExprKind::Range { start, end, .. } => {
-            value_subset(start).or_else(|| value_subset(end)).map(|w| w.inside("range-bound"))
-        }
-        IrExprKind::ToOption { expr } => value_subset(expr).map(|w| w.inside("to-option")),
-        _ => None,
     }
 }
 
@@ -586,9 +573,6 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
     }
     None
 }
-
-
-
 
 /// A statement body of a branch arm (#2756) or a loop (#2757): a call, a
 /// block of admitted statements, a nested branch or loop, a jump, or nothing.
