@@ -317,9 +317,13 @@ impl Checker {
     /// codegen resolves from the sibling arm — the "leave it alone"
     /// case the binding check already carves out.
     fn enqueue_ctor_arg_unresolved(&mut self, a: &ast::Expr, aty: &Ty) {
+        // #3394: a bare unit case of a generic variant (`depth(Tip)`)
+        // opens the same kind of slot. The validator only fires on an
+        // undecidable `?` var, so a non-generic `Red` costs one push.
         if matches!(
             a.kind,
             ExprKind::None | ExprKind::Some { .. } | ExprKind::Ok { .. } | ExprKind::Err { .. }
+                | ExprKind::TypeName { .. }
         ) {
             self.deferred_unresolved_binding_checks.push(crate::check::UnresolvedBindingSite {
                 ty: aty.clone(),
