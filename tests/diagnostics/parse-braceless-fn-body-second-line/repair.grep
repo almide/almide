@@ -1,0 +1,4 @@
+# #3370: the try: row is the braced rewrite of the author's own lines.
+fn main() -> Unit = {
+  println("Hello, world!")
+  hoge()

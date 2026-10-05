@@ -249,7 +249,21 @@ impl Parser {
         if token_type == TokenType::Unknown {
             return self.unknown_char_error(&value, line, col);
         }
-        if let Some(result) = self.check_hint(None, super::hints::HintScope::TopLevel) {
+        let typo_hint = self.check_hint(None, super::hints::HintScope::TopLevel);
+        // #3370: an indented line after a braceless `fn … =` body. Pushed as
+        // the rich diagnostic; the entry loop then skips the string twin. A
+        // keyword-typo hint (`return`, `const`, `def`, ...) wins: that line is
+        // wrong inside braces too. The loop-keyword hint does not — "no
+        // top-level loops" misreads a loop the author indented into the body.
+        let loop_head = matches!(value.as_str(), "while" | "for" | "loop");
+        if typo_hint.is_none() || loop_head {
+            if let Some(diag) = self.braceless_body_overflow() {
+                let msg = format!("{} at line {}:{}", diag.message, line, col);
+                self.errors.push(diag);
+                return msg;
+            }
+        }
+        if let Some(result) = typo_hint {
             let msg = result.message.as_deref().unwrap_or("Unexpected token at top level");
             return format!("{} at line {}:{}\n  Hint: {}", msg, line, col, result.hint);
         }

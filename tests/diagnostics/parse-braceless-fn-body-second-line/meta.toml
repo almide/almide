@@ -1,0 +1,2 @@
+expects_error = "this indented line is not part of `fn main`"
+hint_substring = "wrap the body in braces"
