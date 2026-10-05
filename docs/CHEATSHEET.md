@@ -101,6 +101,8 @@ fn name(x: Type) -> Int!                             // pure-fallible: sugar for
 effect fn name(x: Type) -> T = expr                  // touches the world; a call is written name(x)! — see Effects
 ```
 
+The body after `=` is ONE expression, even when the lines below it are indented. A body of several statements needs braces: `fn main() -> Unit = { ... }` (see Block).
+
 ### Option shorthand `T?` (ADR-0010)
 
 `T?` ≡ `Option[T]`, valid in EVERY type position (unlike `!`, which marks the
