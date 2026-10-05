@@ -269,6 +269,8 @@ impl Emitter<'_> {
                     w.temp_borrowed();
                 }
             }
+            // #3406: a dying var moves in — its site records the move.
+            ArgMode::Retain if is_var && self.owned_call_marks.is_moving(e) => {}
             ArgMode::Retain if is_var => self.witness_retain_var(e, "module-arg"),
             ArgMode::Retain => self.witness_share_or_move(e, "module-arg:retain-borrowed-temp"),
         }

@@ -683,7 +683,10 @@ impl Emitter<'_> {
                 // the epilogue releases the local once whichever arm ran —
                 // and the exit validator (E083) checks it; the refusal is
                 // retired (stage 2c-ii: records made the mut_port cell hit it).
+                // #3406: `var` dies at a consuming rhs over it (dying_move.rs).
+                self.note_dying(value, Some(*var), true);
                 self.lower(value, Some(declared))?;
+                self.note_dying(value, Some(*var), false);
                 // RC-5: same share discipline as Bind — except a MOVED
                 // temp (#3104), whose one credit becomes the var's.
                 if self.rc_droppable(declared) && !self.rc_owned_result(value) && moved.is_none() {

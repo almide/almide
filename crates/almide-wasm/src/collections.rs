@@ -223,6 +223,10 @@ impl Emitter<'_> {
             // appended (map_inplace.rs holds the core; the in-place
             // window shares it as its shared-block fallback).
             ("set", [m, key, value]) => {
+                // #3406: a receiver whose credit the op holds is judged.
+                if let Some(owned) = self.try_map_set_owned(m, key, value)? {
+                    return Ok(Some(owned));
+                }
                 let (mh, kh_local, eh, k, v, lay) = self.map_scan(m, key, ArgMode::Retain)?;
                 let vh = self.hold_for(v)?;
                 self.lower_arg(value, Some(v), ArgMode::Retain)?;
