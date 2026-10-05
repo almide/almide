@@ -773,18 +773,31 @@ impl TypeEnv {
         names
     }
 
+    /// A selectively imported bare name that the module declares as a
+    /// top-level `let` (`import self.k.{LIMIT}`, #3388): the module and the
+    /// `module.NAME` key the let is registered under. The checker and the
+    /// lowering both read the bare name through this one question, so the
+    /// type check and the IR name the same let.
+    pub fn selective_top_let(&self, name: &Sym) -> Option<(Sym, Sym)> {
+        let module = *self.import_table.direct.get(name)?;
+        let key = sym(&format!("{}.{}", module.as_str(), name.as_str()));
+        self.top_lets.contains_key(&key).then_some((module, key))
+    }
+
     /// The module a selectively imported bare CALL `name(..)` is a fn of
     /// (`import json.{parse}` → `json`). A name the module declares as a
-    /// variant constructor (#3384) and NOT as a fn is no module fn call: the
-    /// checker resolves it as that constructor, and the lowering must too —
-    /// routing it to `module.Name` named a function that does not exist (IR
-    /// verify: unknown function). A name the module declares as neither keeps
-    /// the module call, so an unknown name is reported where it always was.
+    /// variant constructor (#3384) or a top-level `let` (#3388) and NOT as a
+    /// fn is no module fn call: the checker resolves it as that constructor /
+    /// let, and the lowering must too — routing it to `module.Name` named a
+    /// function that does not exist (IR verify: unknown function). A name the
+    /// module declares as none of these keeps the module call, so an unknown
+    /// name is reported where it always was.
     pub fn selective_fn_module(&self, name: &Sym) -> Option<Sym> {
         let module = *self.import_table.direct.get(name)?;
         let names_fn = crate::stdlib::lookup_sig(module.as_str(), name.as_str()).is_some()
             || self.functions.contains_key(&sym(&format!("{}.{}", module.as_str(), name.as_str())));
-        let names_other = self.lookup_ctor_owned(name, module.as_str()).is_some();
+        let names_other = self.lookup_ctor_owned(name, module.as_str()).is_some()
+            || self.selective_top_let(name).is_some();
         (names_fn || !names_other).then_some(module)
     }
 
