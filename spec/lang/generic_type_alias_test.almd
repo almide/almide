@@ -1,0 +1,73 @@
+// #3403: a transparent alias with type parameters is its body with the
+// arguments substituted, at every position — a parameter, a return type, a
+// record field, a variant payload, a lambda parameter, a nested alias and a
+// function-type alias. v0.64.0 kept `Pair[Int]` nominal: a tuple index on it
+// was E045, and `Box[Int]` over `List[T]` passed check and emitted invalid Rust.
+type Pair[T] = (T, T)
+
+type Box[T] = List[T]
+
+type Both[T] = Pair[List[T]]
+
+type Step[T] = (T) -> T
+
+type Swapped[A, B] = (B, A)
+
+type Holder = { p: Pair[Int], f: Step[String] }
+
+type Shape =
+  | Seg(Pair[Int])
+  | Dot
+
+fn first(p: Pair[Int]) -> Int = p.0
+
+fn count(b: Box[Int]) -> Int = list.len(b)
+
+fn sizes(b: Both[String]) -> Int = list.len(b.0) * 10 + list.len(b.1)
+
+fn twice(f: Step[Int], x: Int) -> Int = f(f(x))
+
+fn left(s: Swapped[Int, String]) -> String = s.0
+
+fn second[T](p: Pair[T]) -> T = p.1
+
+fn swap[T](p: Pair[T]) -> Pair[T] = (p.1, p.0)
+
+fn seg_len(s: Shape) -> Int = match s {
+  Seg(p) => p.1 - p.0,
+  Dot => 0,
+}
+
+test "a generic tuple alias indexes like its tuple" {
+  assert_eq(first((3, 4)), 3)
+  assert_eq(second(("x", "y")), "y")
+  assert_eq(swap((1, 2)), (2, 1))
+}
+
+test "a generic list alias is the list" {
+  assert_eq(count([1, 2, 3]), 3)
+  let b: Box[Int] = [4, 5]
+  assert_eq(list.len(b), 2)
+}
+
+test "nested, function-type and reordered aliases substitute in declared order" {
+  assert_eq(sizes((["a", "b"], ["c"])), 21)
+  assert_eq(twice((x) => x * 3, 2), 18)
+  assert_eq(left(("s", 9)), "s")
+}
+
+test "a generic alias in a record field" {
+  let h: Holder = { p: (5, 6), f: (s) => s + "!" }
+  assert_eq(h.p.1, 6)
+  assert_eq(h.f("hi"), "hi!")
+}
+
+test "a generic alias in a variant payload" {
+  let n = seg_len(Seg((1, 4)))
+  assert_eq(n, 3)
+}
+
+test "a generic alias annotates a lambda parameter" {
+  let add = (p: Pair[Int]) => p.0 + p.1
+  assert_eq(add((1, 2)), 3)
+}

@@ -196,7 +196,7 @@ fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, s
             let mut all_args = vec![ir_left];
             all_args.extend(args.iter().map(|a| lower_expr(ctx, a)));
             let target = lower_call_target(ctx, callee);
-            let ta = type_args.as_ref().map(|tas| tas.iter().map(|t| resolve_type_expr(t)).collect()).unwrap_or_default();
+            let ta = type_args.as_ref().map(|tas| tas.iter().map(|t| super::types::resolve_type_expr_env(ctx, t)).collect()).unwrap_or_default();
             let resolved_ty = if matches!(ty, Ty::Unknown) {
                 if let CallTarget::Named { name } = &target {
                     ctx.env.functions.get(name).map(|f| f.ret.clone()).unwrap_or(ty)
@@ -220,7 +220,7 @@ fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, s
             let param_ty = p
                 .ty
                 .as_ref()
-                .map(resolve_type_expr)
+                .map(|te| super::types::resolve_type_expr_env(ctx, te))
                 .unwrap_or_else(|| ctx.expr_ty(left));
             ctx.push_scope();
             let bind = lower_pipe_lambda_bind(ctx, p, param_ty, ir_left, span);

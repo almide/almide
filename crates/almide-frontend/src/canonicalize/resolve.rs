@@ -25,6 +25,26 @@ pub fn scoped_bare_type_key(scope: Option<&str>, name: &str) -> Sym {
     sym(&format!("<in-scope:{}>|{}", scope.unwrap_or(""), name))
 }
 
+/// The key under which a GENERIC type declaration's parameter list is
+/// recorded (#3403): `<type-params:Pair>` / `<type-params:m.Pair>` holds
+/// `Ty::Tuple` of the declared letters, in declaration order, beside the
+/// declaration's own `types` entry. A transparent alias substitutes its
+/// arguments for exactly these letters, and the arity check counts them. No
+/// source can spell the key, and it has no `.Name` suffix, so no scan for a
+/// module's `m.Name` key ever matches it.
+pub fn type_params_key(type_key: &str) -> Sym {
+    sym(&format!("<type-params:{}>", type_key))
+}
+
+/// The declared parameter letters of the generic type registered under
+/// `type_key`, when it has any.
+pub fn declared_type_params<'t>(type_key: &str, types: &'t HashMap<Sym, Ty>) -> Option<&'t [Ty]> {
+    match types.get(&type_params_key(type_key))? {
+        Ty::Tuple(ps) => Some(ps.as_slice()),
+        _ => None,
+    }
+}
+
 /// The key recording that the file `scope` (`None` = the entry program)
 /// declares a type under the bare name of a builtin (#2858): `type Int = ..`
 /// in a package's `src/int.almd`, `type Path = ..` in `main.almd`. A file's
@@ -721,14 +741,7 @@ fn resolve_simple_type_other(other: &str, known_types: Option<&HashMap<Sym, Ty>>
     if let Some(qualified) = known_types.and_then(|types| canonical_user_type_sym(other, types, cur_mod)).map(|s| Ty::Named(s, vec![])) {
         return qualified;
     }
-    // The module's own alias of this name (#3401) — read under its qualified
-    // key, since the bare key belongs to whichever module registered last.
-    if let Some(alias) = known_types.and_then(|types| own_module_alias(other, types, cur_mod)) {
-        return alias.clone();
-    }
-    // A user ALIAS of a stdlib-owned name (`type Value = Int`) lives under
-    // the shadow key too (#1828); the nominal shapes were answered above.
-    if let Some((_, alias)) = known_types.and_then(|types| stdlib_shadow_entry(other, types, cur_mod)) {
+    if let Some((_, alias)) = known_types.and_then(|types| scoped_alias_entry(other, types, cur_mod)) {
         return alias.clone();
     }
     // - Generic type parameters (T, U, Self, ...) resolve via
@@ -746,13 +759,7 @@ fn resolve_simple_type_other(other: &str, known_types: Option<&HashMap<Sym, Ty>>
     // - Transparent aliases (e.g. `type Score = Int`) follow
     //   through to the target type so `a + b` works.
     if let Some(types) = known_types {
-        // Try exact match first (e.g. "Instr" or "binary.Instr")
-        let found = types.get(&sym(other)).or_else(|| {
-            // For module-qualified types like "binary.Instr",
-            // also try the unqualified name "Instr"
-            other.rsplit_once('.').and_then(|(_, bare)| types.get(&sym(bare)))
-        });
-        if let Some(found) = found {
+        if let Some((_, found)) = table_type_entry(other, types) {
             match found {
                 Ty::TypeVar(tv) => return Ty::TypeVar(*tv),
                 Ty::Record { .. } | Ty::Variant { .. } => {
@@ -773,6 +780,41 @@ fn resolve_simple_type_other(other: &str, known_types: Option<&HashMap<Sym, Ty>>
     }
 }
 
+// The alias entry a name means in `cur_mod` ahead of the plain table lookup:
+// the module's own alias of the name (#3401) — read under its qualified key,
+// since the bare key belongs to whichever module registered last — or a user
+// alias of a stdlib-owned name (`type Value = Int`), which lives under the
+// shadow key (#1828). The nominal shapes are `canonical_user_type_sym`'s.
+fn scoped_alias_entry<'t>(name: &str, types: &'t HashMap<Sym, Ty>, cur_mod: Option<&str>) -> Option<(Sym, &'t Ty)> {
+    if let Some(alias) = own_module_alias(name, types, cur_mod) {
+        return Some((sym(&format!("{}.{}", cur_mod?, name)), alias));
+    }
+    stdlib_shadow_entry(name, types, cur_mod)
+}
+
+// The table entry a type name falls back to: the exact key (`Instr` or
+// `binary.Instr`), else a qualified name's bare key.
+fn table_type_entry<'t>(name: &str, types: &'t HashMap<Sym, Ty>) -> Option<(Sym, &'t Ty)> {
+    let exact = sym(name);
+    if let Some(t) = types.get(&exact) {
+        return Some((exact, t));
+    }
+    let bare = sym(name.rsplit_once('.')?.1);
+    types.get(&bare).map(|t| (bare, t))
+}
+
+// The TRANSPARENT alias a non-nominal name resolves to, with the key it is
+// registered under — the same lookup `resolve_simple_type_other` makes for
+// the bare spelling, so `Pair` and `Pair[Int]` name one declaration. A
+// record, variant or type variable is not an alias.
+fn transparent_alias_entry<'t>(name: &str, types: &'t HashMap<Sym, Ty>, cur_mod: Option<&str>) -> Option<(Sym, &'t Ty)> {
+    let (key, body) = scoped_alias_entry(name, types, cur_mod).or_else(|| table_type_entry(name, types))?;
+    match body {
+        Ty::Record { .. } | Ty::Variant { .. } | Ty::TypeVar(_) | Ty::ConstParam { .. } => None,
+        _ => Some((key, body)),
+    }
+}
+
 // The nominal (non-builtin) arm of `TypeExpr::Generic` resolution, given the
 // already-resolved argument types `ra`.
 fn resolve_nominal_generic_type_expr(name: &Sym, ra: Vec<Ty>, known_types: Option<&HashMap<Sym, Ty>>, cur_mod: Option<&str>) -> Ty {
@@ -780,11 +822,26 @@ fn resolve_nominal_generic_type_expr(name: &Sym, ra: Vec<Ty>, known_types: Optio
     // name; stdlib / local generics stay bare.
     let qualified = known_types.and_then(|types| canonical_user_type_sym(name.as_str(), types, cur_mod));
     if let Some(qn) = qualified {
-        Ty::Named(qn, ra)
-    } else {
-        let resolved_name = name.as_str().rsplit_once('.').map(|(_, bare)| sym(bare)).unwrap_or(*name);
-        Ty::Named(resolved_name, ra)
+        return Ty::Named(qn, ra);
     }
+    // A generic TRANSPARENT alias applied to its arguments (#3403) is its
+    // body with each declared letter replaced by its argument, as a
+    // non-generic alias is its body: `Pair[Int]` under `type Pair[T] =
+    // (T, T)` is `(Int, Int)`. Records and variants stay nominal (above).
+    // A wrong argument count keeps the alias's `Named` key, which the
+    // checker's annotation sweep reports (E093).
+    if let Some((key, body)) = known_types.and_then(|types| transparent_alias_entry(name.as_str(), types, cur_mod)) {
+        let params = known_types.and_then(|types| declared_type_params(key.as_str(), types)).unwrap_or(&[]);
+        if params.len() != ra.len() {
+            return Ty::Named(key, ra);
+        }
+        let bindings: HashMap<Sym, Ty> = params.iter().zip(ra)
+            .filter_map(|(p, a)| match p { Ty::TypeVar(v) => Some((*v, a)), _ => None })
+            .collect();
+        return almide_lang::types::substitute(body, &bindings);
+    }
+    let resolved_name = name.as_str().rsplit_once('.').map(|(_, bare)| sym(bare)).unwrap_or(*name);
+    Ty::Named(resolved_name, ra)
 }
 
 // `TypeExpr::Variant { cases, .. }` resolution: lower each AST variant case form

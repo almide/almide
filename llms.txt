@@ -323,6 +323,7 @@ fn isqrt(n: Int) -> Int = {
 | E088 | A recursive call in a `scoped fn` retains the current activation — a single non-tail self-call, or mutual recursion between scoped workers (ALS-E31) | Carry the pending work in an accumulator and return the recursive call, or fold the mutual pair into one worker |
 | E090 | An `@extern(c)` signature with a type that has no C representation — a list, Bytes, map, record, variant, Option, tuple or fn value parameter, a `String` return, or a `mut` parameter | Pass C scalars (`Int`, sized ints, `Float`, `Bool`, `RawPtr`, `String` parameters), or bind through an `@extern(rust, "crate::host", "f")` fn in `native/*.rs`, which takes Almide values as `&[u8]` / `&[T]` / `&str` / `&Record` |
 | E092 | A `@pure` fn is not pure — it is an `effect fn` or an `@extern`, or it (or anything it calls) prints, panics, asserts, calls a stdlib fn with an effect category (`io.write`, `process.pid`, …) or calls an `@extern` | Move that call to a caller that is not `@pure`, or remove `@pure`; a call through a fn-typed parameter does not count |
+| E093 | A type applied to a different number of type arguments than its declaration has parameters — `Pair[Int, Int]` for `type Pair[T] = (T, T)`, `Score[Int]` for `type Score = Int` | Write one type per declared parameter (the message spells them: `Pair[T]`), or drop the brackets for a type without parameters |
 | E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
 
 A rustc 4-digit code (`error[E0XXX]`) leaking through always indicates

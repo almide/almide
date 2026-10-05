@@ -156,8 +156,10 @@ impl Checker {
         let mut rooted: HashSet<Sym> = HashSet::new();
         let mut roots: Vec<Diagnostic> = Vec::new();
         let checks = std::mem::take(&mut self.deferred_unknown_type_checks);
+        let mut arity_seen: HashSet<(Sym, usize)> = HashSet::new();
         for (ty, span, ctx) in checks {
             let resolved = resolve_ty(&ty, &self.uf);
+            roots.extend(self.type_arity_diags(&resolved, span, &ctx, &mut arity_seen));
             let mut names = Vec::new();
             collect_named(&resolved, &mut names);
             for s in names {
