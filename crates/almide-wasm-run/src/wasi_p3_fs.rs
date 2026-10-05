@@ -117,7 +117,7 @@ struct FsService {
 /// raw stdout, 31 stdin read-to-end, 35 stdin take-n, 32 entropy, 34 wall
 /// clock, 60 monotonic clock, plus the fs (through the spliced service), http
 /// and env (26 / 29 / 36 / 37) families; anything else = the defined refusal.
-fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>, f_env: Option<(u32, &[i32])>, svc: Option<&FsService>) -> Function {
+fn shim_fs_call(g: P3Globals, abi: &FsAbi, (f_self, f_http, f_serve): (u32, Option<u32>, Option<u32>), f_env: Option<(u32, &[i32])>, svc: Option<&FsService>) -> Function {
     let P3Globals { park, g_plen, g_ppos, g_in_rx, g_in_fut, g_out_tx, g_out_fut, g_err_tx, g_err_fut, f_reserve, f_await, .. } = g;
     let (op, a_len, b_ptr, b_len) = (0u32, 2u32, 3u32, 4u32);
     let n = 6u32;
@@ -136,6 +136,19 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, f_self: u32, f_http: Option<u32>, f_e
             i.local_get(pidx);
         }
         i.call(h).return_();
+        i.end();
+    }
+
+    // ops 70..=72 (`http.serve`'s loop): answered guest-side by the serve
+    // export's shim (#2659, wasi_p3_serve.rs).
+    if let Some(s) = f_serve {
+        i.local_get(op).i32_const(70).i32_ge_s();
+        i.local_get(op).i32_const(72).i32_le_s();
+        i.i32_and().if_(BlockType::Empty);
+        for pidx in 0..5u32 {
+            i.local_get(pidx);
+        }
+        i.call(s).return_();
         i.end();
     }
 

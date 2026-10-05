@@ -54,6 +54,32 @@ pub fn check(host_ops: &[i32], p3: bool) -> Result<(), String> {
     }
 }
 
+/// Whether the p3 SERVICE shim (the stock serve export, #2659, C-375) serves
+/// `op`: the p3 command shim's set without the filesystem — the service
+/// world imports no `wasi:filesystem`, which `wasmtime serve` does not link
+/// without a flag (#2659, measured on wasmtime 47) — plus `http.serve`'s
+/// own ops 70..=72, which the shim answers guest-side.
+pub fn serves_service(op: i32) -> bool {
+    let fs = matches!(op, 40..=42) || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op);
+    matches!(op, 70..=72) || (!fs && serves(op, true))
+}
+
+/// [`check`] for the service shape: an op the export cannot answer is E081
+/// with the reason the service world gives.
+pub fn check_service(host_ops: &[i32]) -> Result<(), String> {
+    match host_ops.iter().copied().find(|op| !serves_service(*op)) {
+        Some(op) => Err(format!(
+            "error[E081]: {} (host op {op}) is unavailable in the stock serve export\n  \
+             reason: an http.serve program builds as a wasi:http/handler@0.3.0 component, whose world imports no \
+             wasi:filesystem (`wasmtime serve` links none without a flag) and no capability beyond the WASI 0.3 service \
+             world (#2659)\n  \
+             note: `almide run --target wasm` and the native target serve it",
+            operation_label(op),
+        )),
+        None => Ok(()),
+    }
+}
+
 /// `operation_name`, with the subprocess family (#2589) named as one.
 fn operation_label(op: i32) -> &'static str {
     if (80..=90).contains(&op) { "the subprocess family (process.exec / exec_status / spawn / kill / …)" } else { operation_name(op) }
