@@ -110,14 +110,13 @@ impl Checker {
     /// lifted peer keeps its own (unresolved) type inside the `Result`, so a
     /// literal still narrows to the declared payload (`-> Int8!`).
     ///
-    /// An effect fn body is not a lifting tail here: its `if` already compares
-    /// branches auto-unwrapped, and codegen does not lift the value tails of
-    /// an effect fn that declares `-> Result[..]` itself.
+    /// An effect fn that declares `-> Result[T, E]` itself is a lifting tail
+    /// too (#3395, ADR-0002 D3: a `-> Result[T, String]` body has the same
+    /// auto-ok of a tail `T`): the lowering lifts its value leaves the same
+    /// way, so `if` and `match` follow one rule on both targets. An effect
+    /// fn declaring `-> T` is not — its expectation is not a `Result`.
     /// Returns the peer types to join, or `None` when nothing lifts.
     pub(super) fn lift_mixed_tail_peers(&self, expect: Option<&TailExpect>, tys: &[Ty]) -> Option<Vec<Ty>> {
-        if self.env.auto_unwrap {
-            return None;
-        }
         let expect = expect.filter(|e| e.effect_body)?;
         let Ty::Applied(TypeConstructorId::Result, want) = resolve_ty(&expect.ty, &self.uf) else { return None };
         if want.len() != 2 {
