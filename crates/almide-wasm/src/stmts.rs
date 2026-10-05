@@ -523,11 +523,21 @@ impl Emitter<'_> {
                         if !owned {
                             self.rc_inc_top();
                         }
-                        let cursor = self.witness.as_mut().map(|w| w.cursor_take(owned));
                         let drop_map = self.dec_fn_of(SliceTy::Map(kh, vh));
                         let bh = self.hold_i32()?;
                         let cur = self.hold_i32()?;
                         let end = self.hold_i32()?;
+                        if let Some(w) = self.witness.as_mut() {
+                            w.cursor_take(owned, bh);
+                        }
+                        // #3374: for the body's duration the cursor's credit
+                        // is a FRAME credit, so every exit edge out of the
+                        // body (a `!`, a guard return) releases it through
+                        // its exit plan, as the loop end below does. A
+                        // `break` / `continue` stays in the frame and reaches
+                        // that release itself.
+                        self.rc_owned.insert(bh);
+                        self.owned_ty.insert(bh, SliceTy::Map(kh, vh));
                         {
                             let mut i = self.f.instructions();
                             i.local_set(bh);
@@ -567,9 +577,11 @@ impl Emitter<'_> {
                             .br(0)
                             .end()
                             .end();
+                        self.rc_owned.remove(&bh);
+                        self.owned_ty.remove(&bh);
                         self.f.instructions().local_get(bh).call(drop_map);
-                        if let (Some(w), Some(o)) = (self.witness.as_mut(), cursor) {
-                            w.cursor_release(o);
+                        if let Some(w) = self.witness.as_mut() {
+                            w.cursor_release(bh);
                         }
                         self.release_i32();
                         self.release_i32();

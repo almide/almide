@@ -2,8 +2,8 @@
 //! walk's cursor takes a credit on the subject before the loop (a borrowed
 //! subject is shared, `a`; an owned one is the cursor's own block, `i`) and
 //! releases it after the loop (`d`). Each entry is one activation whose key
-//! and value are views of the entry's slots. An exit from the body leaves
-//! with the cursor's credit held, so that frame declines.
+//! and value are views of the entry's slots. An exit from the body releases
+//! the cursor's credit on its own edge (#3374), so that frame certifies too.
 
 const PROGRAM: &str = r#"fn make(n: Int) -> Map[String, Int] = ["a": n, "b": n + 1]
 
@@ -33,9 +33,16 @@ effect fn walk_exit(m: Map[String, Int]) -> Int = {
   t
 }
 
+fn walk_guard(m: Map[String, Int]) -> Int = {
+  for (_, v) in m {
+    guard v < 4 else v
+  }
+  0
+}
+
 effect fn main() -> Unit = {
   let m = make(3)
-  println("${walk(m)} ${walk_fresh(4)} ${walk_exit(m)!}")
+  println("${walk(m)} ${walk_fresh(4)} ${walk_exit(m)!} ${walk_guard(m)}")
 }
 "#;
 
@@ -59,6 +66,13 @@ fn map_walks_witness_the_cursor_credit_and_views() {
         // read by the walk (`b`), released at the exit (`d`); the cursor
         // shares it like a borrowed one (`ad`).
         ("walk_fresh", "ibd\nad\n\n"),
+        // #3374: the `!` exit releases the cursor's credit through its exit
+        // plan (`d` on that path), the loop end on the other — `ad` either
+        // way. The carrier is read and moved out on the err path (`ibadm`)
+        // or released on the ok path (`ibd`).
+        ("walk_exit", "\nad\n\n\n{ibadm|ibd}\nim\n"),
+        // A guard return out of the body releases it on its edge too.
+        ("walk_guard", "\nad\n\n"),
     ];
     for (name, cert) in expect {
         let got = w.get(name).unwrap_or_else(|| panic!("{name} must be witnessed"));
@@ -68,6 +82,4 @@ fn map_walks_witness_the_cursor_credit_and_views() {
             "{name}: the portable checker must accept {got:?}"
         );
     }
-    // The `!` exit leaves the loop with the cursor's credit held: declined.
-    assert_eq!(w.get("walk_exit").map(String::as_str), Some("!decline:forin-map:exit\n"));
 }
