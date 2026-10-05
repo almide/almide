@@ -132,6 +132,10 @@ pub fn route_wasm(
 ) -> Result<RoutedWasm, RouteError> {
     let program = crate::wasm_leg::parse_entry(file, source_text).map_err(RouteError::Front)?;
     let resolved = crate::wasm_leg::resolve_modules(file, &program, modules).map_err(RouteError::Front)?;
+    // #1315: a debug build's line table names each module's own file.
+    for (name, (path, _)) in &resolved.sources {
+        almide_wasm::debug_lines::note_unit_file(name, path);
+    }
     let ast_inputs = RouteInputs::of_ast(&program);
     let generic_export = generic_wasm_export(&program, &resolved);
     let lowered = crate::wasm_leg::lower_resolved(file, source_text, program, resolved, None);

@@ -123,6 +123,7 @@ pub fn cmd_install(
         component: false,
         heap_cap: None,
         host: None,
+        debug: false,
     });
 
     let _ = std::env::set_current_dir(&prev_cwd);
