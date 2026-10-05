@@ -77,3 +77,63 @@ test "out-of-range bounds clamp" {
   assert_eq(list.take(xs, 0), [])
   assert_eq(xs, [1, 2, 3])
 }
+
+// #3398: at the source's last use (and on a temporary) native moves it into
+// the op's owned twin instead of borrowing it. Same values, every edge.
+fn five() -> List[String] = ["a", "b", "c", "d", "e"]
+
+test "range ops at the source's last use" {
+  let a = five()
+  assert_eq(list.take(a, 2), ["a", "b"])
+  let b = five()
+  assert_eq(list.drop(b, 2), ["c", "d", "e"])
+  let c = five()
+  assert_eq(list.slice(c, 1, 4), ["b", "c", "d"])
+  let d = five()
+  assert_eq(list.take_end(d, 2), ["d", "e"])
+  let e = five()
+  assert_eq(list.drop_end(e, 2), ["a", "b", "c"])
+  let f = five()
+  assert_eq(list.take_while(f, (s) => s != "c"), ["a", "b"])
+  let g = five()
+  assert_eq(list.drop_while(g, (s) => s != "c"), ["c", "d", "e"])
+  let h = five()
+  assert_eq(list.find(h, (s) => s == "d"), some("d"))
+}
+
+test "moved sources keep every edge of the borrowing op" {
+  assert_eq(list.take(five(), 0 - 1), ["a", "b", "c", "d", "e"])
+  assert_eq(list.take(five(), 99), ["a", "b", "c", "d", "e"])
+  assert_eq(list.take(five(), 0), [])
+  assert_eq(list.drop(five(), 0 - 1), [])
+  assert_eq(list.drop(five(), 99), [])
+  assert_eq(list.drop(five(), 0), ["a", "b", "c", "d", "e"])
+  assert_eq(list.slice(five(), 3, 1), [])
+  assert_eq(list.slice(five(), 2, 99), ["c", "d", "e"])
+  assert_eq(list.slice(five(), 0 - 1, 3), [])
+  assert_eq(list.take_end(five(), 99), ["a", "b", "c", "d", "e"])
+  assert_eq(list.take_end(five(), 0), [])
+  assert_eq(list.drop_end(five(), 99), [])
+  assert_eq(list.drop_end(five(), 0), ["a", "b", "c", "d", "e"])
+  assert_eq(list.take_while(five(), (s) => s == "z"), [])
+  assert_eq(list.drop_while(five(), (s) => s != "z"), [])
+  assert_eq(list.find(five(), (s) => s == "z"), none)
+  assert_eq(list.find(five(), (s) => s == "a"), some("a"))
+}
+
+fn count_down(xs: List[String], acc: Int) -> Int = match xs {
+  [] => acc,
+  [x, ..] => count_down(list.drop(xs, 1), acc + string.len(x)),
+}
+
+fn count_rest(xs: List[String], acc: String) -> String = match xs {
+  [] => acc,
+  [x, ..rest] => count_rest(rest, acc + x),
+}
+
+test "a tail recursion that moves its list into the next drop" {
+  let xs = five()
+  assert_eq(count_down(xs, 0), 5)
+  assert_eq(count_rest(xs, ""), "abcde")
+  assert_eq(xs, ["a", "b", "c", "d", "e"])
+}
