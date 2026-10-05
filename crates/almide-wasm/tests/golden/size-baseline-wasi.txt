@@ -185,7 +185,7 @@
 12897	spec/wasm_cross/fallible_hof_release_matrix.almd
 2885	spec/wasm_cross/fallible_tuple_value_tail.almd
 2117	spec/wasm_cross/fan_any_allfail.almd
-3377	spec/wasm_cross/fan_any_early_winner.almd
+3557	spec/wasm_cross/fan_any_early_winner.almd
 3382	spec/wasm_cross/fan_arm_unwrap_or.almd
 2085	spec/wasm_cross/fan_block_err_list_order.almd
 5506	spec/wasm_cross/fan_deterministic.almd
