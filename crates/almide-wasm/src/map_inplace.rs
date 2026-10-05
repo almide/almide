@@ -42,6 +42,9 @@ use crate::emitter::Emitter;
 use crate::work::Helper;
 use crate::*;
 
+#[path = "dying_move.rs"]
+mod dying_move;
+
 /// The holds a map-set core works on: the receiver block, the key, the
 /// scan's ABSOLUTE entry address (0 = absent) and the value.
 pub(crate) struct MapSetHolds {
@@ -49,6 +52,15 @@ pub(crate) struct MapSetHolds {
     pub(crate) kh: u32,
     pub(crate) eh: u32,
     pub(crate) vh: u32,
+}
+
+/// The helper functions [`Emitter::emit_map_set_judged`] calls.
+#[derive(Clone, Copy)]
+pub(crate) struct MapSetFns {
+    scan: u32,
+    append: Option<u32>,
+    reserve: u32,
+    drop_map: u32,
 }
 
 impl Emitter<'_> {
@@ -148,6 +160,17 @@ impl Emitter<'_> {
         Ok(())
     }
 
+    /// The helpers a judged set calls, resolved before its operands lower:
+    /// the block is stable across the loop, so the index lane, and its
+    /// append hook after the store (#1219 stage 2).
+    pub(crate) fn map_set_fns(&mut self, k: SliceTy, v: SliceTy) -> Result<MapSetFns, EmitError> {
+        let scan = self.keyed_find(k)?;
+        let append = self.keyed_append(k);
+        let reserve = self.work.helper(Helper::MapReserve);
+        let drop_map = self.dec_fn_of(SliceTy::Map(self.types.intern(k), self.types.intern(v)));
+        Ok(MapSetFns { scan, append, reserve, drop_map })
+    }
+
     /// The window. `Ok(false)` when the receiver does not qualify — the
     /// caller keeps its functional set + var write-back.
     pub(crate) fn try_map_set_in_place(
@@ -169,14 +192,7 @@ impl Emitter<'_> {
             return Ok(false);
         };
         let (k, v) = (self.types.el(kt), self.types.el(vt));
-        let lay = crate::collections::entry_layout(k, v);
-        let (koff, voff, esz) = (lay.0 as i32, lay.1 as i32, lay.2 as i32);
-        // the var's block is stable across the loop: the index lane, and
-        // its append hook after the store (#1219 stage 2)
-        let scan = self.keyed_find(k)?;
-        let append = self.keyed_append(k);
-        let reserve = self.work.helper(Helper::MapReserve);
-        let drop_map = self.dec_fn_of(ty);
+        let fns = self.map_set_fns(k, v)?;
         let kh = self.hold_for(k)?;
         self.lower_arg(key, Some(k), ArgMode::Retain)?;
         self.f.instructions().local_set(kh);
@@ -186,6 +202,34 @@ impl Emitter<'_> {
         let mh = self.hold_i32()?;
         self.emit_read_mut_var(id, idx, ty, global);
         self.f.instructions().local_set(mh);
+        self.emit_map_set_judged(mh, kh, vh, (k, v), fns)?;
+        self.f.instructions().local_get(mh);
+        self.emit_store_mut_var(*id, idx, ty, global)?;
+        // #2755: the window rebinds the var — in place, grown, or the copy
+        // that replaced a shared block.
+        self.witness_mut_rebind(*id, global);
+        self.release_i32(); // mh
+        self.release_for(v);
+        self.release_for(k);
+        Ok(true)
+    }
+
+    /// The judged set over a receiver block `mh` whose ONE credit the
+    /// caller holds (the window's var, or an owned temporary handed to the
+    /// functional set — #3406): write in place when that credit is the
+    /// block's only one (overwrite the entry, or append through
+    /// `$map_reserve` and the index hook), else the functional copy and
+    /// the credit on the shared original goes. `mh` holds the result.
+    pub(crate) fn emit_map_set_judged(
+        &mut self,
+        mh: u32,
+        kh: u32,
+        vh: u32,
+        (k, v): (SliceTy, SliceTy),
+        MapSetFns { scan, append, reserve, drop_map }: MapSetFns,
+    ) -> Result<(), EmitError> {
+        let lay = crate::collections::entry_layout(k, v);
+        let (koff, voff, esz) = (lay.0 as i32, lay.1 as i32, lay.2 as i32);
         let oh = self.hold_i32()?;
         let eh = self.hold_i32()?;
         self.f
@@ -199,7 +243,7 @@ impl Emitter<'_> {
         let rc = MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, memory_index: 0 };
         {
             let mut i = self.f.instructions();
-            // the judge: a heap block whose only holder is this var
+            // the judge: a heap block whose only holder is this credit
             i.local_get(mh).global_get(G_LINE_END).i32_ge_u();
             i.local_get(mh).i32_load(rc).i32_const(1).i32_eq();
             i.i32_and().if_(BlockType::Empty);
@@ -246,23 +290,15 @@ impl Emitter<'_> {
             i.end();
             i.else_();
         }
-        // shared (or a static): the functional copy, and the var's credit
-        // on the shared original goes with the rebind
+        // shared (or a static): the functional copy, and the holder's
+        // credit on the shared original goes with it
         self.emit_map_set_copy(MapSetHolds { mh, kh, eh, vh }, k, v, lay)?;
         self.f.instructions().local_set(oh);
         self.f.instructions().local_get(mh).call(drop_map);
         self.f.instructions().local_get(oh).local_set(mh);
         self.f.instructions().end();
-        self.f.instructions().local_get(mh);
-        self.emit_store_mut_var(*id, idx, ty, global)?;
-        // #2755: the window rebinds the var — in place, grown, or the copy
-        // that replaced a shared block.
-        self.witness_mut_rebind(*id, global);
         self.release_i32(); // eh
         self.release_i32(); // oh
-        self.release_i32(); // mh
-        self.release_for(v);
-        self.release_for(k);
-        Ok(true)
+        Ok(())
     }
 }

@@ -153,6 +153,18 @@ pub(crate) fn reads_in_block(stmts: &[IrStmt], tail: Option<&IrExpr>, var: VarId
 impl Emitter<'_> {
     /// A block's statements, each told which temp it may move out of.
     pub(crate) fn lower_block_stmts(&mut self, stmts: &[IrStmt], tail: Option<&IrExpr>) -> Result<(), crate::EmitError> {
+        self.lower_stmts_moving(stmts, tail, Self::lower_stmt)
+    }
+
+    /// [`Self::lower_block_stmts`] with the statement lowering given — a
+    /// loop body lowers each statement with its bounds facts (#3406: a
+    /// loop body's `b = add(b, i)` moves `b` like a block's does).
+    pub(crate) fn lower_stmts_moving(
+        &mut self,
+        stmts: &[IrStmt],
+        tail: Option<&IrExpr>,
+        mut lower: impl FnMut(&mut Self, &IrStmt) -> Result<(), crate::EmitError>,
+    ) -> Result<(), crate::EmitError> {
         let mut settle: Option<MoveIn> = None;
         let outer = self.moves.move_in.take();
         for (i, s) in stmts.iter().enumerate() {
@@ -163,7 +175,7 @@ impl Emitter<'_> {
                 settle = Some(m.clone());
             }
             self.moves = BlockMoves { temp: movable_temp(stmts, tail, i), move_in: MoveIn::joined(site, &outer) };
-            self.lower_stmt(s)?;
+            lower(self, s)?;
             self.moves = BlockMoves::default();
             if settle.as_ref().is_some_and(|m| m.last == i) {
                 self.settle_subject(settle.take().and_then(|m| m.subject));
@@ -219,8 +231,12 @@ impl Emitter<'_> {
         want: crate::SliceTy,
     ) -> Result<Option<Emptied>, crate::EmitError> {
         let info = &self.table.infos[i];
+        // #3406: an OWNED non-`mut` param takes the var too where the
+        // statement itself rebinds it (`b = add(b, i)`: a reassignment
+        // moves) — never at a bare tail site, which only `mut` widens.
+        let is_mut = info.param_mut_decl.get(k) == Some(&true);
         if matches!(move_in, MoveSet::Vars(v) if v.is_empty())
-            || info.param_mut_decl.get(k) != Some(&true)
+            || (!is_mut && !matches!(move_in, MoveSet::Vars(_)))
             || info.param_owned.get(k) != Some(&true)
             || !self.rc_droppable(want)
         {
@@ -248,13 +264,13 @@ impl Emitter<'_> {
             return Ok(None);
         }
         let Some(emptied) = self.emptied_place(place, idx, root_ty, want)? else { return Ok(None) };
-        self.hand_over_moved(&emptied, &args[k], want)?;
+        self.hand_over_moved(&emptied, &args[k], want, is_mut)?;
         Ok(Some(emptied))
     }
 
     /// Does the local at `idx` hold its own credit (an owned frame param,
     /// or an owned local)?
-    fn holds_credit(&self, idx: u32) -> bool {
+    pub(crate) fn holds_credit(&self, idx: u32) -> bool {
         if idx < self.rc_param_ceiling { self.rc_frame_params.contains(&idx) } else { self.rc_owned.contains(&idx) }
     }
 
@@ -278,10 +294,10 @@ impl Emitter<'_> {
     /// Push the moved place's block (judged unique first, no share) and note
     /// the hand-over convention; the credit itself moves at
     /// [`Self::empty_moved_in`].
-    fn hand_over_moved(&mut self, emptied: &Emptied, arg: &IrExpr, want: crate::SliceTy) -> Result<(), crate::EmitError> {
+    fn hand_over_moved(&mut self, emptied: &Emptied, arg: &IrExpr, want: crate::SliceTy, is_mut: bool) -> Result<(), crate::EmitError> {
         match *emptied {
             Emptied::Var(..) | Emptied::Global(..) => {
-                if !self.lower_mut_param_arg(arg, true)? {
+                if !self.lower_mut_param_arg(arg, is_mut)? {
                     self.lower(arg, Some(want))?;
                 }
             }
@@ -330,7 +346,8 @@ impl Emitter<'_> {
             return Ok(None);
         }
         let emptied = Emptied::Global(id, gidx);
-        self.hand_over_moved(&emptied, &args[k], want)?;
+        let is_mut = self.table.infos[i].param_mut_decl.get(k) == Some(&true);
+        self.hand_over_moved(&emptied, &args[k], want, is_mut)?;
         Ok(Some(emptied))
     }
 
@@ -361,7 +378,7 @@ impl Emitter<'_> {
 
     /// The moved place's credit goes to the callee — every argument has been
     /// lowered, so no later read precedes it — and its holder is now empty.
-    fn witness_move_and_empty(&mut self, id: VarId, global: bool) {
+    pub(crate) fn witness_move_and_empty(&mut self, id: VarId, global: bool) {
         let Some(l) = self.witness_holder(id, global) else { return };
         let Some(w) = self.witness.as_mut() else { return };
         if !w.move_local(l) {
