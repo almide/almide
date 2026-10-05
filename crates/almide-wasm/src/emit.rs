@@ -644,7 +644,7 @@ fn emit_program_pass(
     let pre_declare = bytes;
     let bytes = imports::declare(&pre_declare, &declared).map_err(|e| EmitError::Unsupported(format!("extern-import:{e}")))?;
     let lines = dbg.finish(debug_lines::Placement {
-        program: &|i| matches!(lowered[i], Ok(_) if visited.contains(&i)).then(|| table.infos[i].wasm_index),
+        program: &|i| (lowered[i].is_ok() && visited.contains(&i)).then(|| table.infos[i].wasm_index),
         main_index,
         lambdas: work.entries.borrow().iter().zip(&entry_fn_indices).filter_map(|(e, &idx)| match e {
             TableEntry::Lambda(j) => Some((*j as usize, idx)),

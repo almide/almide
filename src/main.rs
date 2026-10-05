@@ -1003,7 +1003,7 @@ fn dispatch_add(pkg: String, git: Option<String>, tag: Option<String>, subdir: O
     project_fetch::fetch_dep(&dep)
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
     project_fetch::add_dep_to_toml(&name, &git_url, tag.as_deref(), subdir.as_deref())
-        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+        .unwrap_or_else(|e| { err(&e.to_string()); std::process::exit(1); });
 }
 
 /// `dispatch`'s `Commands::Update` arm (#1131): the sanctioned path FORWARD
@@ -1169,7 +1169,7 @@ fn refuse_invalid_manifest(command: &Commands) {
         err(&format!("error: {}", e));
         std::process::exit(1);
     }
-    report_manifest_warnings(&command, path, &content);
+    report_manifest_warnings(command, path, &content);
 }
 
 /// A key the manifest writes and no reader reads (#3382) is a warning, once

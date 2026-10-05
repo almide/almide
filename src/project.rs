@@ -357,7 +357,7 @@ fn dependency_from(
 pub fn normalize_subdir(raw: &str) -> Result<String, String> {
     let hint_rel = "  hint: write the package directory relative to the repository root, like `subdir = \"pkgs/ceangal\"`";
     if raw.trim().is_empty() {
-        return Err(format!("it is empty\n  hint: name the package directory, or delete `subdir` when the repository root is the package"));
+        return Err("it is empty\n  hint: name the package directory, or delete `subdir` when the repository root is the package".to_string());
     }
     if raw.contains('\\') {
         return Err(format!("`\\` is not a separator here — `subdir` uses `/` on every platform\n  hint: write `{}`", raw.replace('\\', "/")));
