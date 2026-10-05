@@ -474,6 +474,9 @@ fn mem64(offset: u64) -> MemArg {
     MemArg { offset, align: 3, memory_index: 0 }
 }
 
+// The stock serve export (`to_p3_service`'s shims): wasi_p3_serve.rs.
+include!("wasi_p3_serve.rs");
+
 // The p3 transform itself (`to_p3`): wasi_p3_emit.rs.
 include!("wasi_p3_emit.rs");
 
@@ -639,5 +642,9 @@ mod wit_tests {
         resolve2
             .select_world(&[pkg2], Some("p3-command-http"))
             .expect("p3-command-http");
+        // The stock serve export's world (#2659): its handler's ABI facts
+        // derive from the same resolve.
+        resolve2.select_world(&[pkg2], Some("p3-service")).expect("p3-service");
+        super::serve_abi(&resolve2).expect("the serve export's ABI facts");
     }
 }

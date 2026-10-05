@@ -49,3 +49,24 @@ world p3-command-http {
 
   export wasi:cli/run@0.3.0;
 }
+
+// The stock serve export (#2659, ADR-0020 §5.4, ADR-0023 §3.3, C-375): a
+// serve-shaped program's component, which `wasmtime serve` runs with no
+// flags. NO wasi:filesystem — `wasmtime serve` links none without
+// `-S cli=y` (measured on wasmtime 47), so the fs ops are E081 on this shape
+// — and no `wasi:cli/run`: `main` is not an entry point; the handler export
+// calls it once per request (wasi_p3_serve.rs).
+world p3-service {
+  import wasi:cli/stdin@0.3.0;
+  import wasi:cli/stdout@0.3.0;
+  import wasi:cli/stderr@0.3.0;
+  import wasi:cli/exit@0.3.0;
+  import wasi:cli/environment@0.3.0;
+  import wasi:clocks/system-clock@0.3.0;
+  import wasi:clocks/monotonic-clock@0.3.0;
+  import wasi:random/random@0.3.0;
+  import wasi:http/types@0.3.0;
+  import wasi:http/client@0.3.0;
+
+  export wasi:http/handler@0.3.0;
+}

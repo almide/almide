@@ -5,7 +5,19 @@
 /// input): the http block ships when it reaches ops 43..=50, and each env
 /// service import when it names op 26 / 29 / 36.
 pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
+    to_p3_shaped(bytes, host_ops, false)
+}
+
+/// The stock serve export (#2659, C-375): the same transform, shaped as a
+/// `wasi:http/handler@0.3.0` component (`wasi_p3_serve.rs`) — the world
+/// imports no filesystem, `main` runs once per request from the handler.
+pub fn to_p3_service(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
+    to_p3_shaped(bytes, host_ops, true)
+}
+
+fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result<Vec<u8>> {
     let wants_http = host_ops.iter().any(|op| (43..=50).contains(op));
+    let http_types = wants_http || service;
     // The vendored WIT first: the fs shim's layout facts derive from it,
     // so a WIT/shim drift refuses to emit instead of corrupting stores.
     let mut resolve = wit_parser::Resolve::default();
@@ -25,12 +37,19 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         .map_err(|e| anyhow::anyhow!("wit world: {e}"))?;
     // The http-importing world only when the module's op set reaches the
     // http family — a non-http component must not demand `-S http=y`.
-    let world_name = if wants_http { "p3-command-http" } else { "p3-command" };
+    let world_name = if service {
+        "p3-service"
+    } else if wants_http {
+        "p3-command-http"
+    } else {
+        "p3-command"
+    };
     let world = resolve
         .select_world(&[pkg], Some(world_name))
         .map_err(|e| anyhow::anyhow!("world: {e}"))?;
     let abi = fs_abi(&resolve)?;
-    let habi = if wants_http { Some(http_abi(&resolve)?) } else { None };
+    let habi = if http_types { Some(http_abi(&resolve)?) } else { None };
+    let sabi = if service { Some(serve_abi(&resolve)?) } else { None };
     // The stat result's WIT-derived footprint must fit its park slot.
     assert!(STATRET + abi.stat_size <= MSG2, "STATRET reaches the messages");
 
@@ -58,21 +77,41 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         .1
         .ok_or_else(|| anyhow::anyhow!("__heap init not i32"))? as u32 as u64;
     let park: u64 = heap_init;
-    let (env, n_env) =
-        EnvImports::plan(host_ops, if wants_http { IMPORTS_HTTP } else { IMPORTS }, wants_http);
+    let env_base = if service {
+        IMPORTS_SERVE
+    } else if wants_http {
+        IMPORTS_HTTP
+    } else {
+        IMPORTS
+    };
+    let (env, n_env) = EnvImports::plan(host_ops, env_base, wants_http);
     let t = P3Types::new(&mut types);
     let import_list = base_import_list(&t);
     let http_import_list = http_import_list(&t);
+    let serve_list = match &sabi {
+        Some(a) => {
+            let t_bp = type_index(&mut types, &[], &[]);
+            let t_tr = type_index(&mut types, &a.tr_params, &[]);
+            serve_import_list(&t, t_bp, t_tr)
+        }
+        None => Vec::new(),
+    };
     let env_import_list = env.import_list(t.retptr, t.wait);
     let mut blocks: Vec<&[(u32, &str, &str, u32)]> = vec![&import_list];
-    if wants_http {
+    if http_types {
         blocks.push(&http_import_list);
+    }
+    if service {
+        blocks.push(&serve_list);
     }
     blocks.push(&env_import_list);
     // The fs service (#3140): its page sits right past the park, and its
     // imports the artifact does not already carry follow the env block.
     let has = |m: &str, n: &str| blocks.iter().flat_map(|b| b.iter()).any(|(_, bm, bn, _)| *bm == m && *bn == n);
     let fs = P3Fs::plan(host_ops, (park + PARK_SPAN) as u32, &resolve, &abi, &has)?;
+    if service && fs.is_some() {
+        anyhow::bail!("the serve export reaches the filesystem, which its world does not import (check_service refuses it)");
+    }
     let fs_span: u64 = fs.as_ref().map_or(0, |_| FS_PAGE);
     let n_imports = n_env + fs.as_ref().map_or(0, |f| f.splice.fresh_imports());
     let shift = n_imports - 5;
@@ -103,7 +142,9 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         num: fe + 4,
     });
     // The fs service's functions come last, after every optional shim.
-    let fs_first = shim_base + 11 + u32::from(wants_http) + u32::from(env.any()) + 4 * u32::from(http_fns.is_some());
+    let serve_first = shim_base + 11 + u32::from(wants_http) + u32::from(env.any()) + 4 * u32::from(http_fns.is_some());
+    let serve_fns = service.then_some(ServeFns { op: serve_first, handle: serve_first + 1, cell: serve_first + 2 });
+    let fs_first = serve_first + 3 * u32::from(service);
 
     // Globals: originals, then plen, ppos, the stream state: stdout/stderr
     // writable ends + completion futures, stdin readable + its future.
@@ -143,6 +184,12 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     if let Some(f) = &fs {
         f.splice.emit_globals(&mut globals);
     }
+    // The service's globals, where the fs service's would start (the
+    // export carries no fs service).
+    let serve_globals = service.then(|| {
+        ServeGlobals::emit(&mut globals);
+        ServeGlobals::at(fs_first_global)
+    });
 
     let fs_types = fs.as_ref().map(|f| f.splice.register_types(&mut types));
     let mut type_sec = TypeSection::new();
@@ -186,6 +233,12 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
             functions.function(ti);
         }
     }
+    // The service's op shim, its export and the lossy cell writer.
+    if service {
+        for ti in [t.fs, t.call, t.rw] {
+            functions.function(ti);
+        }
+    }
     // The fs service's shipped functions, last; its dispatcher is what
     // shim_fs_call forwards the fs ops to.
     let svc = fs.as_ref().zip(fs_types.as_ref()).map(|(f, ft)| FsService {
@@ -206,12 +259,12 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     let exports = {
         let mut e = wasm_encoder::ExportSection::new();
         e.export("memory", ExportKind::Memory, 0);
-        e.export("[async-lift]wasi:cli/run@0.3.0#run", ExportKind::Func, f_run);
-        e.export(
-            "[callback][async-lift]wasi:cli/run@0.3.0#run",
-            ExportKind::Func,
-            f_callback,
-        );
+        let (lift, entry) = match serve_fns {
+            Some(s) => ("wasi:http/handler@0.3.0#handle", s.handle),
+            None => ("wasi:cli/run@0.3.0#run", f_run),
+        };
+        e.export(&format!("[async-lift]{lift}"), ExportKind::Func, entry);
+        e.export(&format!("[callback][async-lift]{lift}"), ExportKind::Func, f_callback);
         e.export("cabi_realloc", ExportKind::Func, f_realloc);
         e
     };
@@ -231,7 +284,7 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     code.function(&shim_print(err_port, park, f_await, true));
     code.function(&shim_exit());
     let env_ops = env.ops();
-    code.function(&shim_fs_call(g, &abi, f_fs_self, f_http, f_env.map(|fe| (fe, env_ops.as_slice())), svc.as_ref()));
+    code.function(&shim_fs_call(g, &abi, (f_fs_self, f_http, serve_fns.map(|s| s.op)), f_env.map(|fe| (fe, env_ops.as_slice())), svc.as_ref()));
     code.function(&shim_host_read(g_plen, g_ppos));
     code.function(&shim_cabi_realloc(heap_global));
     code.function(&shim_run(main_index + shift, g));
@@ -245,8 +298,14 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     ));
     code.function(&shim_realloc_checked(f_reserve, f_realloc));
     code.function(&shim_await(park));
-    let texts = habi.as_ref().map(|h| HttpErrTexts::new(park, h));
+    let texts = habi.as_ref().filter(|_| wants_http).map(|h| HttpErrTexts::new(park, h));
     push_optional_shims(&mut code, g, habi.as_ref().zip(texts.as_ref()).zip(http_fns), (env, ovl), f_env);
+    let serve_texts = sabi.as_ref().map(|a| ServeTexts::new(park, a));
+    if let (Some(a), Some(st), Some(sg), Some(sf)) = (&sabi, &serve_texts, serve_globals, serve_fns) {
+        code.function(&shim_serve_op(g, sg));
+        code.function(&shim_serve_handle(g, sg, sf, a, st, main_index + shift));
+        code.function(&shim_serve_cell());
+    }
     let fs_to = fs_import_at.map(|import_at| SpliceTargets {
         import_at,
         g_plen,
@@ -274,6 +333,10 @@ pub fn to_p3(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         data.active(0, &ConstExpr::i32_const((park + MSG_CLEN) as i32), E_CLEN.iter().copied());
     }
     if let Some(t) = &texts {
+        assert!(t.base + t.blob.len() as u64 <= park + SERVE_TEXT, "the http texts reach the service statics");
+        data.active(0, &ConstExpr::i32_const(t.base as i32), t.blob.iter().copied());
+    }
+    if let Some(t) = &serve_texts {
         data.active(0, &ConstExpr::i32_const(t.base as i32), t.blob.iter().copied());
     }
     P3Overlay::emit_data(ovl, &mut data, park);
