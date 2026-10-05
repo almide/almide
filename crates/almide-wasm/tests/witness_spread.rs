@@ -3,8 +3,8 @@
 //! only read, the copy helper's credit on each handle slot (and its release
 //! of the overwritten one) is the helper's interior bookkeeping, and each
 //! field store is the payload-store hook's (`am` for a shared Var, `im` for a
-//! moved temporary). A PRODUCED base is an owned block the copy reads and no
-//! route releases, so that frame declines instead of certifying.
+//! moved temporary). A PRODUCED base is an owned temporary the copy reads and
+//! the site releases right after the copy (#3373), so that frame certifies.
 
 const PROGRAM: &str = r#"type Pt = { name: String, n: Int, tags: List[String] }
 
@@ -42,7 +42,7 @@ fn witnesses() -> std::collections::BTreeMap<String, String> {
 }
 
 #[test]
-fn spread_records_witness_their_field_stores_and_a_produced_base_declines() {
+fn spread_records_witness_their_field_stores_and_release_a_produced_base() {
     // ONE test: the witness sink is process-global.
     let w = witnesses();
     let expect = [
@@ -57,6 +57,9 @@ fn spread_records_witness_their_field_stores_and_a_produced_base_declines() {
         // A LOCAL base: born by the call, read by the spread (`b`) and by
         // `p.n`, released at the exit; the copy is a fresh bind of its own.
         ("local_base", "\nibbd\nibd\n"),
+        // #3373: a PRODUCED base is born by the call and released by the
+        // site right after the copy (`id`); the copy is a fresh bind.
+        ("fresh_base", "\nid\nibd\n"),
     ];
     for (name, cert) in expect {
         let got = w.get(name).unwrap_or_else(|| panic!("{name} must be witnessed"));
@@ -66,6 +69,4 @@ fn spread_records_witness_their_field_stores_and_a_produced_base_declines() {
             "{name}: the portable checker must accept {got:?}"
         );
     }
-    // A produced base is an owned block nothing releases: declined, counted.
-    assert_eq!(w.get("fresh_base").map(String::as_str), Some("!decline:rhs:SpreadRecord-base:Call\n"));
 }
