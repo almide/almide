@@ -1,0 +1,22 @@
+// @expect-fail: Error: stack overflow
+// @contract: C-196
+// @xf-allow: this leg runs the module on STOCK wasmtime, whose call-stack exhaustion is the host's own trap (`wasm trap: call stack exhausted`, exit 134) — the stock residual C-196 declares; the embedded host (`almide run --target wasm`) prints this line and exits 1 as native does
+// Call-stack exhaustion is ALS-T6's defined abort: `Error: stack overflow` on
+// stderr, exit 1, and the `before` line written first stays written. Before
+// C-196 named this form, native died with Rust's `thread 'main' has overflowed
+// its stack` (SIGABRT, exit 134) and the embedded wasm host printed `Error:
+// wasm trap: call stack exhausted`. The recursion is not a tail call and the
+// work after the call is not an accumulator, so no leg turns it into a loop;
+// at depth 1e8 it exhausts every target's stack. WHERE each leg runs out is
+// its own declared threshold and is not observed here.
+fn grow(n: Int) -> String =
+  if n == 0 then ""
+  else {
+    let s = grow(n - 1)
+    if string.len(s) > 5 then "x" else s + "a"
+  }
+
+fn main() -> Unit = {
+  println("before")
+  println(grow(100000000))
+}

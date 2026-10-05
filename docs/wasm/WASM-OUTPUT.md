@@ -153,9 +153,10 @@ stdout/stderr/exit code** native ⇄ wasm, tracked contract-by-contract in
 
 ### The embedded host's call-stack budget (#3435)
 
-Recursion past a target's call-stack resources is a resource limit, not a
-cross-target promise (C-196). Where the limit sits is still a choice for the
-lane we ship: the embedded host behind `almide run --target wasm`, `almide
+Recursion past a target's call-stack resources ends in the defined abort
+`Error: stack overflow` + exit 1 on native and on the embedded host alike
+(C-196, ALS-T6); the depth it happens at is each target's own and is declared,
+not equalised. Where the embedded limit sits is a choice for the lane we ship: the embedded host behind `almide run --target wasm`, `almide
 bench --target wasm` and the wasm leg of `almide test` sets wasmtime's
 `max_wasm_stack` to **8 MiB** (`EMBEDDED_WASM_STACK` in
 `crates/almide-wasm-run/src/host.rs`), the size of native's main-thread stack.
@@ -173,8 +174,10 @@ still answers):
 | recursion with four heap locals per frame | ~32,500 | ~5,400 | ~87,000 |
 | `1 + depth(f)` over a tree | no limit (LLVM makes it a loop) | ~32,500 | ~523,000 |
 
-Stock runtimes keep their own limits: `wasmtime run` defaults to 512 KiB
-(`-W max-wasm-stack=N` raises it), and browsers set theirs.
+Stock runtimes keep their own limits and their own failure form — the
+residual C-196 declares: `wasmtime run` defaults to 512 KiB (`-W
+max-wasm-stack=N` raises it) and reports exhaustion as its `wasm trap: call
+stack exhausted`, exit 134; browsers set their own.
 
 ## Measuring allocation: the watermark and the counter (#2407)
 
