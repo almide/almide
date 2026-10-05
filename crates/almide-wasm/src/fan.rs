@@ -304,11 +304,13 @@ impl Emitter<'_> {
     pub(crate) fn lower_fan_block(&mut self, e: &IrExpr, exprs: &[IrExpr]) -> Result<SliceTy, EmitError> {
         let herr = self.hold_i32()?;
         self.f.instructions().i32_const(0).local_set(herr);
-        // (hold, type, does the hold own its value's credit)
-        let mut vals: Vec<(u32, SliceTy, bool)> = Vec::new();
+        // (hold, type, does the hold own its value's credit, the arm, was it
+        // a carrier) — the last two for the witness's slot record.
+        let mut vals: Vec<(u32, SliceTy, bool, &IrExpr, bool)> = Vec::new();
         for arm in exprs {
             let got = self.lower(arm, None)?;
             let owned = self.rc_owned_result(arm);
+            self.witness_fan_block_arm(matches!(got, SliceTy::Result(..)), owned);
             match got {
                 SliceTy::Result(o, er) => {
                     if self.types.el(er) != STR {
@@ -339,12 +341,12 @@ impl Emitter<'_> {
                         self.f.instructions().local_get(ha).call(F_DEC_FLAT);
                     }
                     self.release_i32();
-                    vals.push((hv, p, owned));
+                    vals.push((hv, p, owned, arm, true));
                 }
                 pure => {
                     let hv = self.hold_val(pure)?;
                     self.f.instructions().local_set(hv);
-                    vals.push((hv, pure, owned));
+                    vals.push((hv, pure, owned, arm, false));
                 }
             }
         }
@@ -353,17 +355,18 @@ impl Emitter<'_> {
         self.f.instructions().local_get(herr);
         self.emit_error_frame_abort();
         self.f.instructions().end();
+        self.witness_abort_site();
         let (out, owned_out) = if vals.len() == 1 {
-            let (hv, p, owned) = vals[0];
+            let (hv, p, owned, _, _) = vals[0];
             self.f.instructions().local_get(hv);
             (p, owned)
         } else {
-            let tys: Vec<SliceTy> = vals.iter().map(|(_, p, _)| *p).collect();
+            let tys: Vec<SliceTy> = vals.iter().map(|(_, p, ..)| *p).collect();
             let ti = self.types.tuple(tys);
             let def = self.types.tuple_def(ti);
             let hb = self.hold_i32()?;
             self.f.instructions().i32_const(def.size as i32).call(F_ALLOC).local_set(hb);
-            for ((hv, p, owned), (fty, off)) in vals.iter().zip(def.fields.clone()) {
+            for ((hv, p, owned, arm, carrier), (fty, off)) in vals.iter().zip(def.fields.clone()) {
                 debug_assert_eq!(*p, fty);
                 self.f.instructions().local_get(hb).local_get(*hv);
                 // #2969: the fresh tuple owns every slot — a borrowed
@@ -371,6 +374,7 @@ impl Emitter<'_> {
                 if !owned {
                     self.share_handle_top(*p);
                 }
+                self.witness_fan_block_slot(arm, *carrier, *p, *owned);
                 self.store_ty_slot(*p, off);
             }
             self.f.instructions().local_get(hb);
@@ -381,7 +385,7 @@ impl Emitter<'_> {
         if owned_out {
             self.owned_call_marks.mark(e);
         }
-        for (_, p, _) in vals.iter().rev() {
+        for (_, p, ..) in vals.iter().rev() {
             self.release_val(*p);
         }
         self.release_i32();

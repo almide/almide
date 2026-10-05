@@ -351,6 +351,9 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
         // #2755: `r.f` / `t.0` over a bound block (or a chain of such reads):
         // a VIEW of the slot, like an element read, with no abort edge.
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => slot_subset(e, object),
+        // #2758: `fan { a; b }` (fan.rs `lower_fan_block`): the arms run in
+        // order, each settled by the fan hooks; the first err aborts.
+        IrExprKind::Fan { exprs } => exprs.iter().find_map(|x| value_subset(x).map(|w| w.inside("fan-arm"))),
         other => Some(Why::Here(tag(other))),
     }
 }
