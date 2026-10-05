@@ -1,0 +1,44 @@
+// @contract: C-044
+// `map.get(m, k) ?? fallback` where the fallback is the key itself, a
+// record field that is also the key, a nested lookup that falls back to the
+// key, and a fallback with an observable effect. `??` evaluates its fallback
+// only on `none` and only after the lookup has returned.
+// (#3409: native fused the lookup and the fallback into one
+// `map_get_or(m, &key, key)` call — rustc E0505, the key borrowed and moved
+// in one argument list — and that fused call evaluated the fallback on a hit
+// too, so `noisy` printed for "a"; wasm printed `alpha b` and was lazy.)
+type Entry = { key: String, note: String }
+
+fn lookup(m: Map[String, String], key: String) -> String = map.get(m, key) ?? key
+
+fn lookup_then_use(m: Map[String, String], key: String) -> String = {
+  let v = map.get(m, key) ?? key
+  v + "/" + key
+}
+
+fn lookup_field(m: Map[String, String], e: Entry) -> String = map.get(m, e.key) ?? e.key
+
+fn lookup_nested(m: Map[String, String], key: String) -> String = {
+  let bang = key + "!"
+  map.get(m, key) ?? (map.get(m, bang) ?? key)
+}
+
+fn lookup_int(m: Map[Int, Int], k: Int) -> Int = map.get(m, k) ?? k
+
+fn noisy(k: String) -> String = {
+  println("fallback for " + k)
+  k
+}
+
+fn main() -> Unit = {
+  let m: Map[String, String] = ["a": "alpha", "c!": "gamma"]
+  println(lookup(m, "a") + " " + lookup(m, "b"))
+  println(lookup_then_use(m, "a") + " " + lookup_then_use(m, "q"))
+  println(lookup_field(m, { key: "a", note: "x" }) + " " + lookup_field(m, { key: "zz", note: "y" }))
+  println(lookup_nested(m, "a") + " " + lookup_nested(m, "c") + " " + lookup_nested(m, "e"))
+  let ints: Map[Int, Int] = [1: 10]
+  println(int.to_string(lookup_int(ints, 1)) + " " + int.to_string(lookup_int(ints, 2)))
+  let hit = map.get(m, "a") ?? noisy("a")
+  let miss = map.get(m, "b") ?? noisy("b")
+  println(hit + " " + miss)
+}
