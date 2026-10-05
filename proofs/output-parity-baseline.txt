@@ -52,6 +52,7 @@ spec/integration/module_path_identity/src/main.almd
 spec/integration/modules/cross_module_unit_effect_test.almd
 spec/integration/modules/vis_effect_test.almd
 spec/integration/qualified_ctor_names/src/main.almd
+spec/integration/qualified_type_in_lambda_param/src/main.almd
 spec/integration/record_literal_binding/src/main.almd
 spec/integration/same_leaf_submodules/src/main.almd
 spec/integration/same_name_types/src/main.almd
