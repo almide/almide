@@ -21,6 +21,7 @@ use almide_ir::*;
 use almide_lang::types::{Ty, TypeConstructorId};
 use almide_base::intern::sym;
 use super::pass::{NanoPass, PassResult, Target};
+use super::pass_list_pattern_nested::{CaseTable, Cx, is_list_at_top, lower_in_place};
 
 #[derive(Debug)]
 pub struct ListPatternLoweringPass;
@@ -37,28 +38,17 @@ impl NanoPass for ListPatternLoweringPass {
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut changed = false;
-        for func in &mut program.functions {
-            let (body, c) = rewrite_expr(std::mem::take(&mut func.body), &mut program.var_table);
-            func.body = body;
+        let cases = CaseTable::from_program(&program);
+        let IrProgram { functions, top_lets, modules, var_table, .. } = &mut program;
+        let cx = &mut Cx { vars: var_table, cases: &cases };
+        let bodies = functions.iter_mut().map(|f| &mut f.body)
+            .chain(top_lets.iter_mut().map(|tl| &mut tl.value))
+            .chain(modules.iter_mut().flat_map(|m| m.functions.iter_mut().map(|f| &mut f.body)
+                .chain(m.top_lets.iter_mut().map(|tl| &mut tl.value))));
+        for body in bodies {
+            let (b, c) = rewrite_expr(std::mem::take(body), cx);
+            *body = b;
             changed |= c;
-        }
-        for tl in &mut program.top_lets {
-            let (val, c) = rewrite_expr(std::mem::take(&mut tl.value), &mut program.var_table);
-            tl.value = val;
-            changed |= c;
-        }
-        let IrProgram { modules, var_table, .. } = &mut program;
-        for module in modules.iter_mut() {
-            for func in module.functions.iter_mut() {
-                let (body, c) = rewrite_expr(std::mem::take(&mut func.body), var_table);
-                func.body = body;
-                changed |= c;
-            }
-            for tl in module.top_lets.iter_mut() {
-                let (val, c) = rewrite_expr(std::mem::take(&mut tl.value), var_table);
-                tl.value = val;
-                changed |= c;
-            }
         }
         PassResult { program, changed }
     }
@@ -69,19 +59,21 @@ fn has_list_patterns(arms: &[IrMatchArm]) -> bool {
     arms.iter().any(|arm| pattern_contains_list(&arm.pattern))
 }
 
-fn pattern_contains_list(pat: &IrPattern) -> bool {
+pub(crate) fn pattern_contains_list(pat: &IrPattern) -> bool {
     match pat {
         IrPattern::List { .. } => true,
         IrPattern::Tuple { elements } => elements.iter().any(pattern_contains_list),
         IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner }
         | IrPattern::As { inner, .. } => pattern_contains_list(inner),
         IrPattern::Constructor { args, .. } => args.iter().any(pattern_contains_list),
+        IrPattern::RecordPattern { fields, .. } => fields.iter()
+            .any(|f| f.pattern.as_ref().is_some_and(pattern_contains_list)),
         _ => false,
     }
 }
 
 /// Recursively rewrite expressions, desugaring match with list patterns.
-fn rewrite_expr(expr: IrExpr, vt: &mut VarTable) -> (IrExpr, bool) {
+pub(crate) fn rewrite_expr(expr: IrExpr, vt: &mut Cx<'_>) -> (IrExpr, bool) {
     let mut changed = false;
     let kind = match expr.kind {
         IrExprKind::Match { subject, arms } if has_list_patterns(&arms) => {
@@ -94,7 +86,14 @@ fn rewrite_expr(expr: IrExpr, vt: &mut VarTable) -> (IrExpr, bool) {
                 IrMatchArm { pattern: arm.pattern, guard, body }
             }).collect();
             changed = true;
-            lower_list_match(subject, arms, &expr.ty, vt)
+            // A list only below a constructor / option / result / record
+            // position (#3413): the match stays one match, its list arms
+            // rewritten in place.
+            if arms.iter().any(|a| is_list_at_top(&a.pattern)) {
+                lower_list_match(subject, arms, &expr.ty, vt)
+            } else {
+                lower_in_place(subject, arms, &expr.ty, vt)
+            }
         }
         IrExprKind::Match { subject, arms } => {
             let (subject, c1) = rewrite_expr(*subject, vt);
@@ -147,7 +146,7 @@ fn rewrite_expr(expr: IrExpr, vt: &mut VarTable) -> (IrExpr, bool) {
     (IrExpr { kind, ty: expr.ty, span: expr.span, def_id: None }, changed)
 }
 
-fn rewrite_stmts(stmts: Vec<IrStmt>, vt: &mut VarTable, changed: &mut bool) -> Vec<IrStmt> {
+fn rewrite_stmts(stmts: Vec<IrStmt>, vt: &mut Cx<'_>, changed: &mut bool) -> Vec<IrStmt> {
     stmts.into_iter().map(|s| {
         let kind = match s.kind {
             IrStmtKind::Bind { var, mutability, ty, value } => {
@@ -177,7 +176,7 @@ fn rewrite_stmts(stmts: Vec<IrStmt>, vt: &mut VarTable, changed: &mut bool) -> V
 /// Lower a match with list patterns to an if/else chain.
 /// Uses the subject expression directly (no temp variable) to avoid
 /// type mismatches when borrow passes later change the parameter type.
-fn lower_list_match(subject: IrExpr, arms: Vec<IrMatchArm>, result_ty: &Ty, _vt: &mut VarTable) -> IrExprKind {
+fn lower_list_match(subject: IrExpr, arms: Vec<IrMatchArm>, result_ty: &Ty, _vt: &mut Cx<'_>) -> IrExprKind {
     build_list_if_chain(&subject, &arms, result_ty, _vt, 0, usize::MAX).kind
 }
 
@@ -189,7 +188,7 @@ fn build_list_if_chain_list_pattern(
     arm: &IrMatchArm,
     rest: &[IrMatchArm],
     result_ty: &Ty,
-    vt: &mut VarTable,
+    vt: &mut Cx<'_>,
     covered_below: usize,
     rest_from: usize,
 ) -> IrExpr {
@@ -583,7 +582,7 @@ impl Residual {
 
     /// `match (e1, .., en) { (p1, .., pn) [if guard] => body, _ => fallthrough }`,
     /// itself desugared again when a residual pattern holds a list.
-    fn into_match(mut self, arm: &IrMatchArm, fallthrough: IrExpr, result_ty: &Ty, vt: &mut VarTable) -> IrExpr {
+    fn into_match(mut self, arm: &IrMatchArm, fallthrough: IrExpr, result_ty: &Ty, vt: &mut Cx<'_>) -> IrExpr {
         let (subject, pattern) = if self.exprs.len() == 1 {
             (self.exprs.remove(0), self.pats.remove(0))
         } else {
@@ -614,7 +613,7 @@ fn build_list_if_chain_tuple_pattern(
     arm: &IrMatchArm,
     rest: &[IrMatchArm],
     result_ty: &Ty,
-    vt: &mut VarTable,
+    vt: &mut Cx<'_>,
     coverage: (usize, usize),
 ) -> IrExpr {
     let (covered_next, rest_from_next) = coverage;
@@ -688,7 +687,7 @@ fn terminal_rest_binds(
     subject: &IrExpr,
     elements: &[IrPattern],
     rest_pat: Option<&IrPattern>,
-    _vt: &mut VarTable,
+    _vt: &mut Cx<'_>,
 ) -> Vec<IrStmt> {
     let elem_ty = match &subject.ty {
         Ty::Applied(TypeConstructorId::List, args) if !args.is_empty() => args[0].clone(),
@@ -739,7 +738,7 @@ fn terminal_rest_binds(
     stmts
 }
 
-fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mut VarTable, covered_below: usize, rest_from: usize) -> IrExpr {
+fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt: &mut Cx<'_>, covered_below: usize, rest_from: usize) -> IrExpr {
     if arms.is_empty() {
         return fell_through_every_arm(result_ty);
     }
@@ -800,23 +799,19 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
             }
         }
         _ => {
-            // For non-list patterns mixed with list patterns, fall through to a sub-match
+            // A non-list arm (a guarded binder, a literal, a constructor
+            // holding a list): the rest of the match stays a match. Its later
+            // list arms are rewritten in place — they used to be DROPPED here,
+            // so `_ if c => .., [x] => ..` never reached `[x]`.
             let remaining_arms: Vec<IrMatchArm> = std::iter::once(arm.clone())
                 .chain(rest.iter().cloned())
-                .filter(|a| !matches!(&a.pattern, IrPattern::List { .. }))
                 .collect();
-            if remaining_arms.is_empty() {
-                fell_through_every_arm(result_ty)
+            let kind = if has_list_patterns(&remaining_arms) {
+                lower_in_place(subject.clone(), remaining_arms, result_ty, vt)
             } else {
-                IrExpr {
-                    kind: IrExprKind::Match {
-                        subject: Box::new(subject.clone()),
-                        arms: remaining_arms,
-                    },
-                    ty: result_ty.clone(),
-                    span: None, def_id: None,
-                }
-            }
+                IrExprKind::Match { subject: Box::new(subject.clone()), arms: remaining_arms }
+            };
+            IrExpr { kind, ty: result_ty.clone(), span: None, def_id: None }
         }
     }
 }
@@ -827,7 +822,7 @@ fn build_list_if_chain(subject: &IrExpr, arms: &[IrMatchArm], result_ty: &Ty, vt
 /// whose rows cover every length together. A `Unit` there was ill-typed for
 /// any non-`Unit` match (rustc E0308 on an exhaustive program); an abort is
 /// the honest value of a branch no input takes.
-fn fell_through_every_arm(result_ty: &Ty) -> IrExpr {
+pub(crate) fn fell_through_every_arm(result_ty: &Ty) -> IrExpr {
     let kind = if matches!(result_ty, Ty::Unit) {
         IrExprKind::Unit
     } else {

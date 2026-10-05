@@ -288,7 +288,7 @@ The Wgsl arm is the four rows marked W. Class:
 | # | Pass (`name()`) | File(s) | Targets | Class | Does | Structural wasm leg |
 |---|---|---|---|---|---|---|
 | 1 | `UnifyVarTables` | `pass_unify_var_tables.rs` | all, W | enabler | merge every `IrModule.var_table` into the program table | reads per-module tables (`build_globals`) |
-| 2 | `ListPatternLowering` | `pass_list_pattern.rs` | all | enabler | list patterns → length checks + indexing | lowers `IrPattern::List` natively (`patterns.rs`) |
+| 2 | `ListPatternLowering` | `pass_list_pattern.rs`, `pass_list_pattern_nested.rs` | all | enabler | list patterns → length checks + indexing; a list below a constructor / option / record position is rewritten in place (#3413) | lowers `IrPattern::List` natively (`patterns.rs`) |
 | 3 | `LambdaTypeResolve` | `pass_lambda_type_resolve.rs`, `pass_lambda_type_lookup.rs` | all, W | enabler | closure param types from the stdlib callee signature (top-down) | `TypeTable` (`types_table.rs`) |
 | 4 | `ConcretizeTypes` | `pass_concretize_types.rs`, `pass_concretize_types_call_ret.rs`, `pass_concretize_types_signatures.rs`, `pass_concretize_types_unresolved.rs`, `pass_concretize_types_walker.rs` | all, W | enabler | sync every `IrExpr.ty` with its authoritative concrete type | `TypeTable` |
 | 5 | `PatternLiteralGuard` | `pass_pattern_literal_guard.rs` | Rust | Rust by design | hoist payload-nested string literals into guards (the `as_deref` subject form) | n/a |
