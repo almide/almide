@@ -486,6 +486,40 @@ fn desugar_diverging_value_branches(body: &IrExpr) -> Option<IrExpr> {
             def_id: e.def_id,
         }
     }
+    /// A match with SEVERAL value arms and a `panic` arm (`match route { "/a"
+    /// => v1, "/trap" => panic(m), _ => v2 }`, the serve fixtures' router,
+    /// #2659): `{ match s { <every arm, the value bodies Unit> }; match s {
+    /// <the value arms> } }`. The statement match runs the first arm that
+    /// matches, so it panics exactly when the original would; when a value arm
+    /// matches first, the value match — the same arms in the same order, the
+    /// diverging ones removed — picks that same arm. Gated where the two
+    /// matches cannot disagree: the subject is a variable (read twice, no
+    /// effect), no arm has a guard (a guard would run twice), and the last arm
+    /// is a value arm (the value match keeps the original's catch-all).
+    fn several_value_arms(subject: &IrExpr, arms: &[almide_ir::IrMatchArm], e: &IrExpr) -> Option<IrExpr> {
+        let last_is_value = arms.last().is_some_and(|a| !diverges(&a.body));
+        if !matches!(subject.kind, IrExprKind::Var { .. }) || arms.iter().any(|a| a.guard.is_some()) || !last_is_value {
+            return None;
+        }
+        let stmt_arms = arms
+            .iter()
+            .map(|a| {
+                let mut a = a.clone();
+                if !diverges(&a.body) {
+                    a.body = unit();
+                }
+                a
+            })
+            .collect();
+        let value_arms = arms.iter().filter(|a| !diverges(&a.body)).cloned().collect();
+        let value = IrExpr {
+            kind: IrExprKind::Match { subject: Box::new(subject.clone()), arms: value_arms },
+            ty: e.ty.clone(),
+            span: e.span,
+            def_id: None,
+        };
+        Some(split(IrExprKind::Match { subject: Box::new(subject.clone()), arms: stmt_arms }, value, e))
+    }
     fn rewrite(e: &IrExpr) -> Option<IrExpr> {
         if matches!(e.ty, Ty::Unit | Ty::Never) {
             return None;
@@ -507,7 +541,10 @@ fn desugar_diverging_value_branches(body: &IrExpr) -> Option<IrExpr> {
             IrExprKind::Match { subject, arms } if arms.iter().any(|a| diverges(&a.body)) => {
                 let mut values = arms.iter().enumerate().filter(|(_, a)| !diverges(&a.body));
                 let (vi, va) = values.next()?;
-                if values.next().is_some() || va.guard.is_some() || binds(&va.pattern) {
+                if values.next().is_some() {
+                    return several_value_arms(subject, arms, e);
+                }
+                if va.guard.is_some() || binds(&va.pattern) {
                     return None;
                 }
                 let value = va.body.clone();
