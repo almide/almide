@@ -78,8 +78,8 @@ output path is a stdlib effect fn and stays E006 from a pure fn, including
    effect fn's. Only the checker enforces the pure/effect distinction.
 6. **Buffering (C-162, and the stream statement in C-367).** A pure fn's output
    uses the same streams as an effect fn's. Native stdout is one buffer,
-   flushed on every write when stdout is a terminal and 64 KiB-buffered
-   otherwise; stderr is unbuffered. The cross-target promise is **per
+   flushed at every line end (and on every write when stdout is a
+   terminal); stderr is unbuffered. The cross-target promise is **per
    stream**: stdout bytes, stderr bytes and the exit code are byte-identical
    between native and wasm. How the two streams interleave when both go to one
    file is not promised. An abort flushes the stdout written before it.

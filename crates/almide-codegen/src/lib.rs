@@ -344,9 +344,14 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // syscall per line, 50k lines = 0.35 s — while `io.write` went through a
     // separate 64 KiB BufWriter flushed per call to keep program order across
     // the two handles. Every stdout write now goes through this buffer, so the
-    // order is the program's by construction, and the buffer flushes per line
-    // only when stdout is a terminal (the usual rule); to a pipe or a file it
-    // fills 64 KiB. Flush points: exit (the `fn main` wrapper), a panic (the
+    // order is the program's by construction. The buffer is LINE-buffered
+    // (#3417): a write that ends a line flushes it, as Rust's own `println!`
+    // does on any stdout and as the verified native render (which lowers to
+    // `println!`) already did — a program that walls into this codegen must
+    // not hold a watcher's or a server's output until exit when stdout is a
+    // pipe or a file. What the buffer still saves is the second syscall of
+    // `print`-without-newline pieces and of a line written in fragments; on a
+    // terminal every write flushes. Other flush points: exit (the `fn main` wrapper), a panic (the
     // hook the wrapper installs), `io.print` (interactive output — always),
     // `process.exit`, before a child process runs (its output must follow
     // ours), and before every stdin read (a prompt precedes the read).
@@ -386,8 +391,8 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // prelude may be compiled once, as a crate of its own, without `--test`.
     s.push_str(&format!("{vis}fn almide_panic_abort(msg: std::fmt::Arguments<'_>) -> ! {{ almide_fan_trap_wait(); static ALMIDE_PANICKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false); if ALMIDE_PANICKING.swap(true, std::sync::atomic::Ordering::SeqCst) {{ loop {{ std::thread::park(); }} }} almide_stdout_flush(); {{ let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!(\"PANIC: {{}}\", msg)); }} std::process::exit(1) }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_panic {{ ($($arg:tt)*) => {{ if cfg!(test) {{ panic!($($arg)*) }} else {{ $crate::almide_panic_abort(format_args!($($arg)*)) }} }}; }}\n"));
-    s.push_str(&format!("{vis}fn almide_stdout_write_fmt(args: std::fmt::Arguments<'_>, newline: bool) {{ if almide_fan_active() {{ return almide_fan_write_fmt(false, args, newline); }} ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_fmt(&mut *w, args); if newline {{ let _ = std::io::Write::write_all(&mut *w, b\"\\n\"); }} if almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
-    s.push_str(&format!("{vis}fn almide_stdout_write_bytes(bytes: &[u8]) {{ if almide_fan_active() {{ return almide_out_write(false, bytes); }} ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_all(&mut *w, bytes); if almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
+    s.push_str(&format!("{vis}fn almide_stdout_write_fmt(args: std::fmt::Arguments<'_>, newline: bool) {{ if almide_fan_active() {{ return almide_fan_write_fmt(false, args, newline); }} ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_fmt(&mut *w, args); if newline {{ let _ = std::io::Write::write_all(&mut *w, b\"\\n\"); }} if newline || almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
+    s.push_str(&format!("{vis}fn almide_stdout_write_bytes(bytes: &[u8]) {{ if almide_fan_active() {{ return almide_out_write(false, bytes); }} ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_all(&mut *w, bytes); if bytes.contains(&b'\\n') || almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_println {{ ($($arg:tt)*) => {{ $crate::almide_stdout_write_fmt(format_args!($($arg)*), true) }}; }}\n"));
     // `eprintln` (ADR-0024 D5): unbuffered on stderr as before, except inside a
     // `fan` element, where it joins the element's one stdout+stderr timeline.
