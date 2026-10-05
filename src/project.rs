@@ -71,6 +71,23 @@ pub struct Dependency {
     pub branch: Option<String>,
     pub version: Option<String>,
     pub path: Option<String>,
+    /// `subdir = "…"` (#3381): the package directory inside the git
+    /// repository, relative to its root, normalized (`/`-separated, no `.`
+    /// or `..` components, no trailing `/`). `None` = the repository root
+    /// is the package. Only a git dependency has one.
+    pub subdir: Option<String>,
+    /// Where the manifest declares this dependency (`path:line`), for the
+    /// errors only the fetch can find (a missing `subdir`, a package name
+    /// that is not this key). `None` when it was not read from a manifest.
+    pub declared_at: Option<String>,
+}
+
+impl Dependency {
+    /// `<declared_at>: ` — the prefix a fetch-time error about this
+    /// dependency starts with, or nothing when it has no manifest line.
+    pub fn location_prefix(&self) -> String {
+        self.declared_at.as_deref().map(|at| format!("{at}: ")).unwrap_or_default()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -217,6 +234,20 @@ impl Manifest<'_> {
         Ok(out)
     }
 
+    /// `[dependencies]` in file order, each validated (a `subdir` is refused
+    /// on its line — #3381).
+    fn dependencies(&self, path: &Path, content: &str) -> Result<Vec<Dependency>, String> {
+        let spans = spanned_entry(&self.spans, "dependencies").and_then(|t| t.get_ref().as_table());
+        let mut out = Vec::new();
+        for (name, value) in self.entries_in_file_order("dependencies") {
+            let entry = spans.and_then(|t| spanned_entry(t, &name));
+            if let Some(dep) = dependency_from(name, &value, entry, path, content)? {
+                out.push(dep);
+            }
+        }
+        Ok(out)
+    }
+
     /// `[package].<key>` as text.
     fn package_field(&self, key: &str) -> Option<String> {
         self.values.get("package").and_then(|p| p.get(key)).map(value_text)
@@ -244,16 +275,102 @@ impl Manifest<'_> {
 }
 
 /// One `[dependencies]` entry: a table naming `git` or `path`. Any other
-/// shape is not a dependency this reader knows, as before.
-fn dependency_from(name: String, value: &toml::Value) -> Option<Dependency> {
-    let table = value.as_table()?;
+/// shape is not a dependency this reader knows, as before. `entry` is the
+/// entry's spanned value, for the line of a `subdir` that is refused.
+fn dependency_from(
+    name: String,
+    value: &toml::Value,
+    entry: Option<&SpannedValue<'_>>,
+    path: &Path,
+    content: &str,
+) -> Result<Option<Dependency>, String> {
+    let Some(table) = value.as_table() else { return Ok(None) };
     let field = |k: &str| table.get(k).map(value_text);
     let git = field("git").unwrap_or_default();
-    let path = field("path");
-    if git.is_empty() && path.is_none() {
-        return None;
+    let dep_path = field("path");
+    if git.is_empty() && dep_path.is_none() {
+        return Ok(None);
     }
-    Some(Dependency { name, git, tag: field("tag"), branch: field("branch"), version: field("version"), path })
+    // The byte offset of `key` in this entry (its value), else of the entry.
+    let offset_of = |key: &str| -> usize {
+        let Some(entry) = entry else { return 0 };
+        entry
+            .get_ref()
+            .as_table()
+            .and_then(|t| spanned_entry(t, key))
+            .map_or(entry.span().start, |v| v.span().start)
+    };
+    let declared_at = Some(format!("{}:{}", path.display(), line_of(content, offset_of("git"))));
+    let subdir = match table.get("subdir") {
+        None => None,
+        Some(raw) => {
+            let refuse = |msg: String| located(path, content, offset_of("subdir"), &msg);
+            let Some(raw) = raw.as_str() else {
+                return Err(refuse(format!(
+                    "`subdir` of dependency `{name}` must be a string, like `subdir = \"{name}\"`"
+                )));
+            };
+            if let Some(p) = &dep_path {
+                return Err(refuse(format!(
+                    "`subdir` applies to git dependencies only — dependency `{name}` is a `path` \
+                     dependency, and `path` already names the package directory\n  \
+                     hint: write `path = \"{}/{}\"` and delete `subdir`",
+                    p.trim_end_matches('/'),
+                    raw.trim_matches('/'),
+                )));
+            }
+            Some(normalize_subdir(raw).map_err(|why| {
+                refuse(format!("invalid `subdir = \"{raw}\"` in dependency `{name}`: {why}"))
+            })?)
+        }
+    };
+    Ok(Some(Dependency {
+        name,
+        git,
+        tag: field("tag"),
+        branch: field("branch"),
+        version: field("version"),
+        path: dep_path,
+        subdir,
+        declared_at,
+    }))
+}
+
+/// A `subdir` as written → its normalized spelling, or why it cannot name a
+/// directory inside the repository (#3381). The rule is lexical, so it is
+/// decided before anything is fetched: a relative path of `/`-separated
+/// names. `.` components and repeated or trailing `/` are dropped; `..` is
+/// refused outright (even `a/../b`, which stays inside — one spelling per
+/// directory keeps the lock and the cache key canonical), as are an absolute
+/// path, a `\` separator and a path that names the root itself. The fetch
+/// additionally refuses a subdir that resolves outside the clone through a
+/// symlink.
+pub fn normalize_subdir(raw: &str) -> Result<String, String> {
+    let hint_rel = "  hint: write the package directory relative to the repository root, like `subdir = \"pkgs/ceangal\"`";
+    if raw.trim().is_empty() {
+        return Err(format!("it is empty\n  hint: name the package directory, or delete `subdir` when the repository root is the package"));
+    }
+    if raw.contains('\\') {
+        return Err(format!("`\\` is not a separator here — `subdir` uses `/` on every platform\n  hint: write `{}`", raw.replace('\\', "/")));
+    }
+    let has_drive = raw.len() >= 2 && raw.as_bytes()[1] == b':' && raw.as_bytes()[0].is_ascii_alphabetic();
+    if raw.starts_with('/') || has_drive {
+        return Err(format!("it is an absolute path; `subdir` is relative to the repository root\n{hint_rel}"));
+    }
+    let mut parts = Vec::new();
+    for part in raw.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                return Err(format!("`..` is not allowed — `subdir` names a directory inside the repository\n{hint_rel}"));
+            }
+            p => parts.push(p),
+        }
+    }
+    if parts.is_empty() {
+        return Err("it names the repository root\n  hint: delete `subdir` — a dependency without one uses the repository root".to_string());
+    }
+    Ok(parts.join("/"))
 }
 
 /// Validate that a package name is a valid Almide identifier (no hyphens).
@@ -481,6 +598,7 @@ pub fn check_manifest(path: &Path, content: &str) -> Result<(), String> {
     let manifest = read_manifest(path, content)?;
     manifest.permission_list(path, content, "proc")?;
     manifest.target_native_deps(path, content)?;
+    manifest.dependencies(path, content)?;
     for (name, at) in manifest.permission_list(path, content, "allow")?.unwrap_or_default() {
         allowed_effects(std::slice::from_ref(&name)).map_err(|e| located(path, content, at, &e))?;
     }
@@ -514,11 +632,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
     let proc_allow = names("proc")?;
 
     let root = project_root_from_toml_path(path);
-    let deps = manifest
-        .entries_in_file_order("dependencies")
-        .into_iter()
-        .filter_map(|(name, value)| dependency_from(name, &value))
-        .collect();
+    let deps = manifest.dependencies(path, &content)?;
     let mut native_deps: Vec<NativeDep> = manifest
         .entries_in_file_order("native-deps")
         .into_iter()
@@ -580,6 +694,10 @@ pub struct LockedDep {
     pub git: String,
     pub ref_name: String,
     pub commit: String,
+    /// The package directory inside the repository (#3381), as the
+    /// manifest's normalized `subdir`; `None` = the repository root. Several
+    /// entries may share one `(git, commit)` — one clone, distinct packages.
+    pub subdir: Option<String>,
 }
 
 /// Parse almide.lock. The write format below is valid TOML (one inline table
@@ -635,7 +753,13 @@ pub fn parse_lock_file(path: &Path) -> Result<Vec<LockedDep>, String> {
         let commit = required("commit")?;
         let ref_name =
             entry.get("ref").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        locked.push(LockedDep { name, git, ref_name, commit });
+        let subdir = match entry.get("subdir") {
+            None => None,
+            Some(v) => Some(v.as_str().map(str::to_string).ok_or_else(|| {
+                format!("{}: lock entry '{}' has a `subdir` that is not a string", path.display(), name)
+            })?),
+        };
+        locked.push(LockedDep { name, git, ref_name, commit, subdir });
     }
     Ok(locked)
 }
@@ -654,12 +778,16 @@ pub fn write_lock_file(path: &Path, locked: &[LockedDep]) -> Result<(), String> 
     // wins — the manifest's own first declaration.
     let mut written = std::collections::HashSet::new();
     for dep in locked.iter().filter(|d| written.insert(d.name.as_str())) {
+        // `subdir` only when there is one, so a lock without subdir
+        // dependencies stays byte-identical to what earlier compilers wrote.
+        let subdir = dep.subdir.as_deref().map(|s| format!(", subdir = {}", toml_quoted(s))).unwrap_or_default();
         content.push_str(&format!(
-            "{} = {{ git = {}, ref = {}, commit = {} }}\n",
+            "{} = {{ git = {}, ref = {}, commit = {}{} }}\n",
             dep.name,
             toml_quoted(&dep.git),
             toml_quoted(&dep.ref_name),
-            toml_quoted(&dep.commit)
+            toml_quoted(&dep.commit),
+            subdir
         ));
     }
     std::fs::write(path, content)

@@ -226,6 +226,7 @@ fn the_lock_writer_never_emits_a_name_twice() {
         git: git.into(),
         ref_name: "main".into(),
         commit: "0123456789abcdef".into(),
+        subdir: None,
     };
     almide::project::write_lock_file(
         &lock,

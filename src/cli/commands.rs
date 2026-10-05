@@ -1261,7 +1261,13 @@ fn load_dep_info_for_fmt() -> (Vec<String>, std::collections::HashMap<String, St
                 if let Some(version_dir) = entries.flatten().find(|e| {
                     e.path().is_dir() && !e.file_name().to_string_lossy().starts_with('.')
                 }) {
-                    scan_submodules(&version_dir.path(), &dep.name, &mut submodules);
+                    // A `subdir` dependency's checkout is the whole
+                    // repository; its package is the subdir (#3381).
+                    let package_dir = match &dep.subdir {
+                        Some(sub) => version_dir.path().join(sub),
+                        None => version_dir.path(),
+                    };
+                    scan_submodules(&package_dir, &dep.name, &mut submodules);
                 }
             }
         }
