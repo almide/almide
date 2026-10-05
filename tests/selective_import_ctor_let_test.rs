@@ -4,10 +4,12 @@
 //! #3384: variant constructors named in a selective import passed
 //! `almide check`, then the lowering routed the bare `A(..)` to a module
 //! function `t.A` that does not exist (IR verify: call to unknown function).
+//! #3388: a top-level `let` named in a selective import was E003, although
+//! docs/CHEATSHEET.md documents `import self.classifier.{classify, NUMBERS}`.
 //!
 //! `spec/integration/modules/selective_ctor_let_test.almd` holds the shapes;
 //! `almide test` runs one leg, so this net runs it on both, and re-states the
-//! `import self.<module>.{..}` form in a package.
+//! cheatsheet's `import self.<module>.{..}` form in a package.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -41,14 +43,14 @@ fn cheatsheet_package() -> tempfile::TempDir {
     .unwrap();
     std::fs::write(
         root.join("src/classifier.almd"),
-        "fn classify(n: Int) -> String = if n > 1 then \"big\" else \"small\"\n",
+        "import self.t.{T}\n\nlet NUMBERS = [1, 2, 3]\nlet ZERO = V(0)\n\nfn classify(n: Int) -> String = if n > 1 then \"big\" else \"small\"\n",
     )
     .unwrap();
     std::fs::write(
         root.join("src/main.almd"),
-        "import self.t.{T, V, A, size}\nimport self.classifier.{classify}\n\n\
-         fn mk() -> T = A(V(1), V(0))\n\n\
-         effect fn main() -> Unit = {\n  println(\"${[1, 2, 3] |> list.map((n) => classify(n))} ${size(mk())}\")\n}\n",
+        "import self.t.{T, V, A, size}\nimport self.classifier.{classify, NUMBERS, ZERO}\n\n\
+         fn mk() -> T = A(V(1), ZERO)\n\n\
+         effect fn main() -> Unit = {\n  println(\"${NUMBERS |> list.map((n) => classify(n))} ${size(mk())}\")\n}\n",
     )
     .unwrap();
     dir
@@ -70,10 +72,11 @@ fn selective_ctor_and_let_imports_run_on_every_leg() {
 }
 
 #[test]
-fn selective_ctor_import_checks_clean() {
+fn the_cheatsheet_selective_import_form_checks_clean() {
     let pkg = cheatsheet_package();
     let (ok, out) = run(pkg.path(), &["check", "src/main.almd"]);
-    assert!(ok, "selectively imported constructors must check:\n{out}");
+    assert!(ok, "the documented `import self.m.{{f, NUMBERS}}` form must check:\n{out}");
+    assert!(!out.contains("E003"), "a selectively imported let must bind its bare name:\n{out}");
     // The constructors and the type are spelled bare, which IS the use of
     // `import self.t.{..}` — the import is not reported (and `almide fix`
     // would not delete it).
@@ -82,7 +85,7 @@ fn selective_ctor_import_checks_clean() {
 
 #[cfg_attr(debug_assertions, ignore = "compiles the program (CI: release-shape job)")]
 #[test]
-fn selective_ctor_import_runs() {
+fn the_cheatsheet_selective_import_form_runs() {
     let pkg = cheatsheet_package();
     let (ok, out) = run(pkg.path(), &["run", "src/main.almd"]);
     assert!(ok, "native run failed (the #3384 shape ICEd in IR verify):\n{out}");

@@ -142,6 +142,16 @@ impl Checker {
     }
 
 
+    /// The type of a bare name a selective import brings in from a module's
+    /// top-level `let` (`import self.k.{LIMIT}`, #3388), marking the import
+    /// used. Same question the lowering asks (`TypeEnv::selective_top_let`).
+    pub(super) fn selective_top_let_ty(&mut self, name: &str) -> Option<Ty> {
+        let (module, key) = self.env.selective_top_let(&sym(name))?;
+        let ty = self.env.top_lets.get(&key).cloned()?;
+        self.env.import_table.used.insert(module);
+        Some(ty)
+    }
+
     fn infer_expr_type_name(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::TypeName { name, .. } = &mut expr.kind else { unreachable!("infer_expr_type_name called on the wrong ExprKind") };
                 // Const param reference: `N` where `N: Int` is a compile-time value param
@@ -157,6 +167,7 @@ impl Checker {
                         _ => Ty::Named(type_name, vec![])
                     }
                 }
+                else if let Some(ty) = self.selective_top_let_ty(name) { ty }
                 else if let Some(ty) = self.env.top_lets.get(&sym(name)).cloned() { ty }
                 // A DECLARED type's bare name is a legitimate value-position
                 // occurrence (static-dispatch receiver `Type.method`, enum
