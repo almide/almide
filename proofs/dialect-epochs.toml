@@ -141,7 +141,6 @@ breaks = [
   "an unknown name in `[permissions].allow` (`\"FS.read\"`, `\"FS.write\"`) is refused on its manifest line (0.66.0 accepted it) — write only IO, Net, Env, Time, Rand, Fan (file access is IO)",
 ]
 
-# =============================================================
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
 # =============================================================
 
@@ -153,3 +152,14 @@ since = "0.67.0"
 removal_epoch = 11
 summary = "A package's `native/*.rs` may still call the package's own fns by their spelling before #3338 (`almide_rt_tf_v0_entry`, `almide_rt_tf_v0_calc_double`), through a deprecated alias of the injective name (`almide_rt_tf_0v0_entry`, `almide_rt_tf_0v0_1calc_double`). The build warns once per old name it finds. A name that the old spelling made ambiguous (`a.b` and `a_b`) gets no alias."
 removal = "epoch 11 drops the aliases: a `native/*.rs` calling `crate::almide_rt_<pkg>_v<N>_<fn>` or `..._v<N>_<sub>_<fn>` gets rustc E0425 — write the injective name the warning prints (`_` in a segment is `_0`, a `.` is `_1`)"
+=======
+[[epoch]]
+n = 11
+since = "0.67.0"
+name = "served-app-is-instance-closed"
+summary = "The app passed to `http.serve` is instance-closed: it reads no local of the fn that serves it, only top-level items (ADR-0020 §5.2, #2698). Measured impact: 1 program across spec/, examples/, stdlib and research exercises (spec/serve_cross/http_serve_replay.almd, migrated in the same change)."
+breaks = [
+  "an app passed to `http.serve` that reads a `let`, `var` or parameter of the fn that serves it (a handler lambda capturing a local of main, or `let app = http.router(…)!` in main) is E095; make the value a top-level `let` (`let app = http.router(…)` served as `http.serve(port, app!)!`) or compute it inside the handler",
+]
+
+# ======================================================

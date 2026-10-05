@@ -29,7 +29,7 @@ use almide_base::names::{legacy_module_ident, split_module_item};
 /// `[[deprecation]]` entry `legacy-native-callback-names` of
 /// `proofs/dialect-epochs.toml` (scripts/check-dialect-epochs.sh cross-checks
 /// the two).
-pub(super) const LEGACY_NATIVE_CALLBACK_REMOVAL_EPOCH: u32 = 11;
+pub(super) const LEGACY_NATIVE_CALLBACK_REMOVAL_EPOCH: u32 = 12;
 
 /// The old spellings resolved against one crate's code.
 #[derive(Debug, Default, PartialEq)]
