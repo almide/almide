@@ -297,7 +297,7 @@ impl Emitter<'_> {
                 self.lower_linked_call("matrix", func.as_str(), args, tail)
             }
             CallTarget::Module { module, func, .. } if module.as_str() == "fan" => {
-                if let Some(out) = self.lower_fan_call(func.as_str(), args)? {
+                if let Some(out) = self.lower_fan_module_call(func.as_str(), args)? {
                     return Ok(out);
                 }
                 unsup(&format!("call:fan.{func}"))

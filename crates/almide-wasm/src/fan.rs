@@ -18,6 +18,9 @@ use wasm_encoder::{BlockType, ValType};
 use crate::emitter::Emitter;
 use crate::*;
 
+#[path = "fan_js_async.rs"]
+pub(crate) mod js_async;
+
 impl Emitter<'_> {
     /// The prefetch protocol's host ops (40 start / 41 await / 42 abandon),
     /// noted for the build-time stock-service audit.
@@ -302,13 +305,29 @@ impl Emitter<'_> {
     /// eval_fan order), with the BARE String message. One arm = the bare
     /// value; several = a tuple of payloads.
     pub(crate) fn lower_fan_block(&mut self, e: &IrExpr, exprs: &[IrExpr]) -> Result<SliceTy, EmitError> {
+        // #3383: every arm one async-hook call on `--host js` — start them
+        // all and wait once; each arm's value is then its taken slot.
+        let overlap = self.fan_overlap_block(exprs);
+        if almide_base::env::flag("ALMIDE_DBG_FAN") {
+            eprintln!("[fan-dbg] fan block: {}", if overlap.is_some() { "js-host overlap lowering engaged" } else { "sequential arms" });
+        }
+        let slots = match &overlap {
+            Some(calls) => self.fan_overlap_block_start(calls)?,
+            None => Vec::new(),
+        };
         let herr = self.hold_i32()?;
         self.f.instructions().i32_const(0).local_set(herr);
         // (hold, type, does the hold own its value's credit, the arm, was it
         // a carrier) — the last two for the witness's slot record.
         let mut vals: Vec<(u32, SliceTy, bool, &IrExpr, bool)> = Vec::new();
-        for arm in exprs {
-            let got = self.lower(arm, None)?;
+        for (k, arm) in exprs.iter().enumerate() {
+            let got = match &overlap {
+                Some(calls) => {
+                    self.f.instructions().local_get(slots[k]);
+                    self.fan_take(&calls[k])?
+                }
+                None => self.lower(arm, None)?,
+            };
             let owned = self.rc_owned_result(arm);
             self.witness_fan_block_arm(matches!(got, SliceTy::Result(..)), owned);
             match got {
@@ -389,6 +408,9 @@ impl Emitter<'_> {
             self.release_val(*p);
         }
         self.release_i32();
+        for _ in &slots {
+            self.release_i32();
+        }
         Ok(out)
     }
 
