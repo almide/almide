@@ -382,8 +382,7 @@ pub(crate) fn lower_fn(
             hoisted_counts: HashMap::new(),
             cow_flags: HashMap::new(),
             cow_prejudged: HashSet::new(),
-            bounds_facts: None,
-            payload_ptrs: HashMap::new(),
+            bounds_facts: None, payload_ptrs: HashMap::new(), // #3345
             in_tail: false,
             try_see_through: false,
             branch_depth: 0,
