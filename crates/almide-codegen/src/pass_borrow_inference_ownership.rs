@@ -77,6 +77,14 @@ impl Scope<'_> {
     fn is_borrow_eligible(&self, ty: &Ty) -> bool {
         is_borrow_eligible(ty, self.round.records) || is_named_in(ty, self.round.variants)
     }
+
+    /// The slot mode a published signature gives `arg` at `index`. A
+    /// fn-typed argument rides a callee's NON-ESCAPING slot as a borrow too
+    /// (#2288): the callee only calls it.
+    fn known_slot(&self, borrows: &[ParamBorrow], index: usize, arg: &IrExpr) -> SlotMode {
+        let mode = slot_of(borrows.get(index), SlotMode::Consume);
+        if mode != SlotMode::Consume && (self.is_borrow_eligible(&arg.ty) || matches!(arg.ty, Ty::Fn { .. })) { mode } else { SlotMode::Consume }
+    }
 }
 
 /// The slot mode a signature entry spells: a missing slot is `absent`.
@@ -107,21 +115,27 @@ impl SlotOracle for Scope<'_> {
     /// nothing names their signature here.
     fn call_slot(&self, target: &CallTarget, index: usize, arg: &IrExpr) -> SlotMode {
         let name = match target {
-            // Self-recursive: optimistic. For tail-recursive parsers passing
-            // the same `data` through, the first-pass pessimism must not lock
-            // the param to Own and prevent the fixed point from promoting it.
-            CallTarget::Named { name } if name.as_str() == self.current_fn => return SlotMode::Borrow,
+            // Self-recursive: optimistic until the fn's own signature is
+            // published. For tail-recursive parsers passing the same `data`
+            // through, the first-pass pessimism must not lock the param to
+            // Own and prevent the fixed point from promoting it. Once the
+            // previous round published it, a self-call reads its slots like
+            // any callee's (#3402): `pairs(b, a)` hands `b` to the slot the
+            // body consumes `a` through, so `b` must be owned too — a
+            // permanently-borrowed self slot let `b` stay `&E` and the
+            // swapped call passed `&E` where `E` is expected (E0308).
+            CallTarget::Named { name } if name.as_str() == self.current_fn => {
+                return match self.resolve(name.as_str()) {
+                    Callee::Known(borrows) => self.known_slot(borrows, index, arg),
+                    Callee::Pending | Callee::Unknown => SlotMode::Borrow,
+                };
+            }
             CallTarget::Named { name } => name.to_string(),
             CallTarget::Module { module, func, .. } => format!("{}::{}", module, func),
             CallTarget::Method { .. } | CallTarget::Computed { .. } => return SlotMode::Consume,
         };
         match self.resolve(&name) {
-            Callee::Known(borrows) => {
-                let mode = slot_of(borrows.get(index), SlotMode::Consume);
-                // A fn-typed argument rides a callee's NON-ESCAPING slot as a
-                // borrow too (#2288): the callee only calls it.
-                if mode != SlotMode::Consume && (self.is_borrow_eligible(&arg.ty) || matches!(arg.ty, Ty::Fn { .. })) { mode } else { SlotMode::Consume }
-            }
+            Callee::Known(borrows) => self.known_slot(borrows, index, arg),
             Callee::Pending => SlotMode::Borrow,
             Callee::Unknown => SlotMode::Consume,
         }
