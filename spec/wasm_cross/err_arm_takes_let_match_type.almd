@@ -1,0 +1,89 @@
+// @contract: C-108
+// #3415: an `err(..)` arm of a match that PRODUCES a Result — here a
+// let-bound `match o { N(n) => ok(n), _ => err(..) }!` — took its OK slot
+// from the enclosing fn's declared `Unit!`, so native emitted
+// `Err::<(), String>` beside `Ok::<i64, String>` (rustc E0308) while wasm
+// ran. The arm's OK slot is the match's own; only a value-joined `err(..)`
+// (an early return) falls back to the fn's declared return.
+type O =
+  | N(Int)
+  | S(String)
+
+fn g(cmd: String, o: O) -> Unit! = match cmd {
+  "num" => {
+    let n = match o {
+      N(n) => ok(n),
+      _ => err("expected a number"),
+    }!
+    println(int.to_string(n))
+    ok(())
+  },
+  _ => err("unknown " + cmd),
+}
+
+// The same let-bound match, in a fn whose own OK type is a String.
+fn label(o: O) -> String! = {
+  let n = match o {
+    N(n) => ok(n * 2),
+    S(_) => err("not a number"),
+  }!
+  ok("n=" + int.to_string(n))
+}
+
+// An annotated let keeps the Result and matches on it.
+fn kept(o: O) -> Unit! = {
+  let r: Result[Int, String] = match o {
+    N(n) => ok(n + 1),
+    _ => err("kept: no number"),
+  }
+  match r {
+    ok(v) => println("kept " + int.to_string(v)),
+    err(e) => println(e),
+  }
+  ok(())
+}
+
+// The err arm first.
+fn first(o: O) -> Unit! = {
+  let n = match o {
+    S(_) => err("first: a string"),
+    N(n) => ok(n),
+  }!
+  println("first " + int.to_string(n))
+  ok(())
+}
+
+effect fn main() -> Unit = {
+  match g("num", N(3)) {
+    ok(_) => (),
+    err(e) => println(e),
+  }
+  match g("num", S("x")) {
+    ok(_) => (),
+    err(e) => println(e),
+  }
+  match label(N(21)) {
+    ok(s) => println(s),
+    err(e) => println(e),
+  }
+  match label(S("y")) {
+    ok(s) => println(s),
+    err(e) => println(e),
+  }
+  match kept(N(4)) {
+    ok(_) => (),
+    err(e) => println(e),
+  }
+  match kept(S("z")) {
+    ok(_) => (),
+    err(e) => println(e),
+  }
+  match first(N(5)) {
+    ok(_) => (),
+    err(e) => println(e),
+  }
+  match first(S("w")) {
+    ok(_) => (),
+    err(e) => println(e),
+  }
+}

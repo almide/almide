@@ -1079,6 +1079,7 @@ evidence  = [
   { path = "spec/wasm_cross/recursive_payload_closure_capture.almd", class = "fixture" },
   { path = "spec/wasm_cross/recursive_payload_nested_pattern.almd", class = "fixture" },
   { path = "spec/wasm_cross/tuple_scrutinee_recursive_variants.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tuple_scrutinee_list_payload_into_ok.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-071"
@@ -1558,6 +1559,7 @@ evidence  = [
   { path = "spec/wasm_cross/unwrap_callarg_single_expr_effect_body.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_operand_unwrap_distinct.almd", class = "fixture" },
   { path = "spec/wasm_cross/statement_after_tail_walker_bang.almd", class = "fixture" },
+  { path = "spec/wasm_cross/err_arm_takes_let_match_type.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-109"
