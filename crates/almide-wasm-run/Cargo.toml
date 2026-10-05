@@ -25,11 +25,11 @@ anyhow = "1"
 # and SIGINT (Ctrl-C / Ctrl-Break on Windows) start the drain. The crate's
 # handler thread keeps the host free of `unsafe` (the workspace forbids it).
 ctrlc = { version = "3.5", features = ["termination"] }
-wasmparser = "0.259"
-wasm-encoder = "0.259"
+wasmparser = "0.261"
+wasm-encoder = "0.261"
 wasmtime = "49.0.2"
-wit-component = "0.259"
-wit-parser = "0.259"
+wit-component = "0.261"
+wit-parser = "0.261"
 
 # The fan cost model's clock (#3341): a worker thread's CPU time, read
 # without `unsafe` (the workspace forbids it). Already in the tree via wasmtime.
