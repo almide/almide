@@ -1,8 +1,9 @@
 //! The recorder's SCOPED BLOCKS (#2758), split from witness.rs for the file
 //! budget: a block a construct takes a credit on and settles itself when the
 //! construct ends — a named list rest and a map walk's cursor. A path that
-//! leaves the construct before that settlement still holds the credit, so
-//! the frame declines rather than certify a block no route frees there.
+//! leaves a list rest's arm before that settlement still holds the credit,
+//! so the frame declines; a map walk's cursor is a frame credit for the
+//! walk's duration, so every exit edge releases it (#3374).
 //!
 //! `[h, ..t]` in a match arm materializes `t` as a fresh list block
 //! (patterns.rs `emit_pattern_binds`) that neither the local's rebind nor the
@@ -37,19 +38,22 @@ impl WitnessRecorder {
     /// `for (k, v) in m` (stmts.rs `lower_forin`): the cursor takes its credit
     /// on the subject before the loop — an OWNED subject is the cursor's own
     /// block (`i`), a borrowed one is shared (`a`, the route's `rc_inc_top`,
-    /// a holder line of its own beside the block's owner). Returns the line.
-    pub fn cursor_take(&mut self, owned: bool) -> u32 {
-        if owned { self.temp_born() } else { self.view_ops("a") }
+    /// a holder line of its own beside the block's owner). The cursor local
+    /// `local` holds it (not an owner: no dec-old, no iteration-end release),
+    /// so the release that settles it is resolved per path through `local`.
+    pub fn cursor_take(&mut self, owned: bool, local: u32) {
+        let o = self.fresh_obj(local, false);
+        self.ops(o, if owned { "i" } else { "a" });
     }
 
     /// After the loop the cursor releases its credit (`d`). An exit from the
-    /// body (a `!`, a `return_call`) left with it held: declined.
-    pub fn cursor_release(&mut self, o: u32) {
-        let born = self.log.iter().rposition(|e| matches!(e, Ev::Birth(b) if *b == o));
-        if born.is_some_and(|i| self.log[i..].iter().any(|e| matches!(e, Ev::Exit))) {
-            self.decline("forin-map:exit");
-        } else {
-            self.ops(o, "d");
+    /// body (a `!`, a guard return) released it on its own edge (#3374: the
+    /// walk lends the cursor local to the frame's exit plan for the body's
+    /// duration, so the exit's `witness_dec` is that path's `d`), and that
+    /// path is dead here.
+    pub fn cursor_release(&mut self, local: u32) {
+        if !self.held_ops(local, "d") {
+            self.poison();
         }
     }
 }
