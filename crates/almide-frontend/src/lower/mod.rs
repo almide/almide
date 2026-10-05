@@ -414,6 +414,12 @@ fn lower_decls(
                         _ => Ty::String,
                     };
                     f.body = wrap_fallible_value_tail(f.body, &err_ty);
+                    // The lift mints `ok(..)` nodes around value leaves; a
+                    // literal leaf takes the declared payload width through
+                    // them, like an `ok(..)` written in the source (#3385:
+                    // `-> Int8! = if b then 1 else ok(2)`).
+                    let ret_ty = f.ret_ty.clone();
+                    statements::coerce_literal_to_sized(&mut f.body, &ret_ty, ctx.env);
                 }
                 f.doc = doc;
                 f.blank_lines_before = blank_lines;
