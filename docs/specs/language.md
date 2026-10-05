@@ -430,7 +430,15 @@ fn first(p: Pair[Int]) -> Int = p.0
 
 The arguments replace the parameters in declared order. Only an alias is
 expanded: a generic record or variant stays a nominal type. The argument
-count must equal the declared parameter count (E093).
+count must equal the declared parameter count (E093) — for a builtin too:
+`List`, `Option` and `Set` take one, `Map` and `Result` two, and a scalar
+such as `Int` none.
+
+Declaration order does not matter: an alias may name a type declared further
+down the file or module (`type First = Pair2` above `type Pair2 = (Int,
+Int)`). An alias cannot lead back to itself — `type A = B` with `type B = A`,
+or `type Tree = List[Tree]` through a type argument — since it would name no
+type (E094); a record or variant may refer to itself.
 
 #### Generic Types
 
@@ -448,7 +456,7 @@ type Point: Codec = { x: Float, y: Float }
 
 Built-in conventions: `Eq`, `Repr`, `Ord`, `Hash`, `Codec`.
 
-テスト: `spec/lang/data_types_test.almd`, `spec/lang/type_alias_test.almd`, `spec/lang/generic_type_alias_test.almd`, `spec/lang/variant_record_test.almd`, `spec/lang/derive_conventions_test.almd`
+テスト: `spec/lang/data_types_test.almd`, `spec/lang/type_alias_test.almd`, `spec/lang/generic_type_alias_test.almd`, `spec/lang/forward_type_alias_test.almd`, `spec/lang/variant_record_test.almd`, `spec/lang/derive_conventions_test.almd`
 
 ### 4.4 Protocol Declarations
 

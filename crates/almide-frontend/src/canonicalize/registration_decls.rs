@@ -335,20 +335,28 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
     // registers, so the E020 duplicate check never sees it.
     let reserved = reserve_own_nominal_types(env, decls, prefix);
     super::resolve::register_builtin_named_type_keys(env, decls, type_cur_mod(env, prefix));
-    for decl in decls {
-        match decl {
-            ast::Decl::Type { name, .. } => {
+    // An alias registers after every alias of this module it spells, and an
+    // alias in a cycle registers as `Unknown` (#3407, registration_order.rs).
+    for step in type_registration_steps(decls) {
+        match step {
+            DeclStep::Type { decl, cyclic } => {
+                let ast::Decl::Type { name, .. } = decl else { continue };
                 if let Some(key) = reserved.iter().find(|k| k.as_str().rsplit_once('.').is_some_and(|(_, b)| b == name.as_str()))
                     && env.types.get(key).is_some_and(is_reservation)
                 {
                     env.types.remove(key);
                 }
-                register_decl_type(env, diagnostics, decl, prefix)
+                register_decl_type(env, diagnostics, decl, prefix);
+                if cyclic {
+                    register_cyclic_alias_unknown(env, name.as_str(), prefix);
+                }
             }
-            ast::Decl::Protocol { name, generics, methods, .. } => {
+            DeclStep::Protocol(ast::Decl::Protocol { name, generics, methods, .. }) => {
                 register_protocol_decl(env, name, generics, methods, prefix);
             }
-            _ => {}
+            DeclStep::Protocol(_) => {}
+            // Reported by the checker, which knows the file (`alias_cycle_diags`).
+            DeclStep::Cycle(_) => {}
         }
     }
     for decl in decls {

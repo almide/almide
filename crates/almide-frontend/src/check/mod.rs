@@ -1193,6 +1193,7 @@ impl Checker {
         self.validate_protocol_refs(program);
         self.validate_bare_type_visibility(program);
         self.validate_qualified_type_heads(program);
+        self.validate_alias_cycles(&program.decls);
         self.body_diag_start = self.diagnostics.len();
         self.reject_user_prim_import(&program.imports);
         let saved_top_effect_aliases = self.collect_top_effect_aliases(&program.decls);

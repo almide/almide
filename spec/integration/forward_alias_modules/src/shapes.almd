@@ -1,0 +1,17 @@
+// #3407: a module's aliases name types the module declares further down,
+// inside the module and from another file.
+type Seg = { ends: Ends, name: Name }
+
+type Ends = Pair[Int]
+
+type Pair[T] = (T, T)
+
+type Name = String
+
+type Cell[T] = { value: T }
+
+fn span(s: Seg) -> Int = s.ends.1 - s.ends.0
+
+fn swap(p: Ends) -> Ends = (p.1, p.0)
+
+fn cell(n: Int) -> Cell[Int] = { value: n }

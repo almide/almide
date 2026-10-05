@@ -642,6 +642,7 @@ pub fn register_protocol_decl(env: &mut TypeEnv, name: &str, generics: &Option<V
     });
 }
 include!("registration_decls.rs");
+include!("registration_order.rs");
 
 include!("registration_validate.rs");
 
