@@ -40,6 +40,12 @@ pub struct CodegenAnnotations {
     /// `BorrowLoweringPass`; the walker's box-pattern rewrite reads it to
     /// spell a borrowed subject's guards and move-outs through the reference.
     pub ref_binders: HashSet<VarId>,
+    /// Every variable a `match` arm's guard reads. Published by
+    /// `BorrowLoweringPass` from the final IR; the walker's box-pattern
+    /// rewrite reads it to bind, inside the guard, the names a boxed nested
+    /// pattern binds and the guard reads (#3414) — a binder is scoped to its
+    /// own arm, so membership here means its arm's guard reads it.
+    pub guard_read_vars: HashSet<VarId>,
     /// Pattern binders of a recursive enum's boxed field: the Almide type is
     /// `T`, the Rust binding is `Box<T>`, and every read is a `Deref`.
     /// Decided by `BoxDerefPass`; `CaptureClonePass` reads it so a closure's
