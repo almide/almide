@@ -52,11 +52,12 @@ fn parse_list(toks: List[String], i: Int, acc: List[Value]) -> (List[Value], Int
 }
 
 // Parse a whole program: a list of top-level forms.
-fn parse_program(toks: List[String], i: Int, acc: List[Value]) -> List[Value] = if i >= list.len(toks) then acc
-else {
-  let (v, next) = parse_one(toks, i)
-  parse_program(toks, next, acc + [v])
-}
+fn parse_program(toks: List[String], i: Int, acc: List[Value]) -> List[Value] =
+  if i >= list.len(toks) then acc
+  else {
+    let (v, next) = parse_one(toks, i)
+    parse_program(toks, next, acc + [v])
+  }
 
 // ── Environments ────────────────────────────────────────────────────────
 // A Value object of name → value, chained via "#parent". Lookup walks the

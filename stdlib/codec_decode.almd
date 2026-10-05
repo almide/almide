@@ -5,33 +5,36 @@
 fn __is_null(v: Value) -> Bool = prim.load32(prim.handle(v) + 4) == 0
 
 // ── List ──
-fn __dl_int(items: List[Value], n: Int, i: Int, acc: List[Int]) -> Result[List[Int], String] = if i >= n then ok(acc)
-else match value.as_int(list.get(items, i) ?? value.null()) {
-  ok(x) => __dl_int(items, n, i + 1, acc + [x]),
-  err(e) => err(__err_at_index(e, i)),
-}
+fn __dl_int(items: List[Value], n: Int, i: Int, acc: List[Int]) -> Result[List[Int], String] =
+  if i >= n then ok(acc)
+  else match value.as_int(list.get(items, i) ?? value.null()) {
+    ok(x) => __dl_int(items, n, i + 1, acc + [x]),
+    err(e) => err(__err_at_index(e, i)),
+  }
 
 fn __decode_list_int(v: Value) -> Result[List[Int], String] = match value.as_array(v) {
   ok(items) => __dl_int(items, list.len(items), 0, []),
   err(e) => err(e),
 }
 
-fn __dl_float(items: List[Value], n: Int, i: Int, acc: List[Float]) -> Result[List[Float], String] = if i >= n then ok(acc)
-else match value.as_float(list.get(items, i) ?? value.null()) {
-  ok(x) => __dl_float(items, n, i + 1, acc + [x]),
-  err(e) => err(__err_at_index(e, i)),
-}
+fn __dl_float(items: List[Value], n: Int, i: Int, acc: List[Float]) -> Result[List[Float], String] =
+  if i >= n then ok(acc)
+  else match value.as_float(list.get(items, i) ?? value.null()) {
+    ok(x) => __dl_float(items, n, i + 1, acc + [x]),
+    err(e) => err(__err_at_index(e, i)),
+  }
 
 fn __decode_list_float(v: Value) -> Result[List[Float], String] = match value.as_array(v) {
   ok(items) => __dl_float(items, list.len(items), 0, []),
   err(e) => err(e),
 }
 
-fn __dl_bool(items: List[Value], n: Int, i: Int, acc: List[Bool]) -> Result[List[Bool], String] = if i >= n then ok(acc)
-else match value.as_bool(list.get(items, i) ?? value.null()) {
-  ok(x) => __dl_bool(items, n, i + 1, acc + [x]),
-  err(e) => err(__err_at_index(e, i)),
-}
+fn __dl_bool(items: List[Value], n: Int, i: Int, acc: List[Bool]) -> Result[List[Bool], String] =
+  if i >= n then ok(acc)
+  else match value.as_bool(list.get(items, i) ?? value.null()) {
+    ok(x) => __dl_bool(items, n, i + 1, acc + [x]),
+    err(e) => err(__err_at_index(e, i)),
+  }
 
 fn __decode_list_bool(v: Value) -> Result[List[Bool], String] = match value.as_array(v) {
   ok(items) => __dl_bool(items, list.len(items), 0, []),
@@ -63,11 +66,12 @@ fn __err_at(e: String, seg: String) -> String = {
 // #1675: the list-element frame — `[i]` joins the path bracket-style.
 fn __err_at_index(e: String, i: Int) -> String = __err_at(e, "[" + int.to_string(i) + "]")
 
-fn __dl_string(items: List[Value], n: Int, i: Int, acc: List[String]) -> Result[List[String], String] = if i >= n then ok(acc)
-else match value.as_string(list.get(items, i) ?? value.null()) {
-  ok(x) => __dl_string(items, n, i + 1, acc + [x]),
-  err(e) => err(__err_at_index(e, i)),
-}
+fn __dl_string(items: List[Value], n: Int, i: Int, acc: List[String]) -> Result[List[String], String] =
+  if i >= n then ok(acc)
+  else match value.as_string(list.get(items, i) ?? value.null()) {
+    ok(x) => __dl_string(items, n, i + 1, acc + [x]),
+    err(e) => err(__err_at_index(e, i)),
+  }
 
 fn __decode_list_string(v: Value) -> Result[List[String], String] = match value.as_array(v) {
   ok(items) => __dl_string(items, list.len(items), 0, []),

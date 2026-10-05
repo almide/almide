@@ -22,10 +22,12 @@ fn __fmod_exp(bits: Int) -> Int = {
   if e != 0 then e else __fmod_sub_exp(prim.bshl(bits, 12), 0)
 }
 
-fn __fmod_sig(bits: Int, e: Int) -> Int = if prim.band(prim.bshr_u(bits, 52), 2047) != 0 then prim.bor(
-  prim.band(bits, 4503599627370495),
-  4503599627370496,
-) else prim.bshl(prim.band(bits, 4503599627370495), 1 - e)
+fn __fmod_sig(bits: Int, e: Int) -> Int =
+  if prim.band(prim.bshr_u(bits, 52), 2047) != 0 then prim.bor(
+    prim.band(bits, 4503599627370495),
+    4503599627370496,
+  )
+  else prim.bshl(prim.band(bits, 4503599627370495), 1 - e)
 
 // One shift-and-subtract step per exponent step: `ux mod uy` while ex > ey. -1 = an exact zero.
 fn __fmod_loop(ux: Int, uy: Int, ex: Int, ey: Int) -> Int = if ex <= ey then {

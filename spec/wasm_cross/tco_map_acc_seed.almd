@@ -21,11 +21,12 @@ else go(xs, i + 1, map.set(acc, list.get_or(xs, i, 0), 1))
 fn gs(xs: List[String], i: Int, acc: Set[String]) -> Set[String] = if i >= list.len(xs) then acc
 else gs(xs, i + 1, set.insert(acc, list.get_or(xs, i, "")))
 
-fn gm(xs: List[String], i: Int, acc: Map[String, String]) -> Map[String, String] = if i >= list.len(xs) then acc
-else {
-  let k = list.get_or(xs, i, "")
-  gm(xs, i + 1, map.set(acc, k, k + "!"))
-}
+fn gm(xs: List[String], i: Int, acc: Map[String, String]) -> Map[String, String] =
+  if i >= list.len(xs) then acc
+  else {
+    let k = list.get_or(xs, i, "")
+    gm(xs, i + 1, map.set(acc, k, k + "!"))
+  }
 
 fn main() -> Unit = {
   // The original counterexample: the seed entry must survive the loop.

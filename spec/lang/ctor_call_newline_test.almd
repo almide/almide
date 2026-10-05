@@ -1,23 +1,14 @@
 // #3387: `ok(` / `err(` / `some(` read their operand like any call — a
 // newline after `(`, a trailing comma and a newline before `)` are
 // insignificant, the shape a long error message wraps into.
+fn a() -> Result[Int, String] = ok(1)
 
-fn a() -> Result[Int, String] = ok(
-  1,
-)
+fn b() -> Int? = some(1)
 
-fn b() -> Int? = some(
-  1,
-)
-
-fn c(n: Int) -> Result[Int, String] = err(
-  "too long a message to fit on the line: ${n}",
-)
+fn c(n: Int) -> Result[Int, String] = err("too long a message to fit on the line: ${n}")
 
 fn checked(n: Int) -> Int! = {
-  guard n > 0 else err(
-    "must be positive, got ${n}",
-  )
+  guard n > 0 else err("must be positive, got ${n}")
   n
 }
 

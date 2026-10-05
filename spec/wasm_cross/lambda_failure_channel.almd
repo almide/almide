@@ -7,7 +7,14 @@
 // shows. native == wasm byte-for-byte on stdout.
 type Pt = { x: Int, y: Float }
 
-type E: Eq, Repr = | Neg(Int) | Bad(String) | At(Pt) | Wrap(E) | Opt(Float?) | Named { code: Int, why: String } | Gone
+type E: Eq, Repr =
+  | Neg(Int)
+  | Bad(String)
+  | At(Pt)
+  | Wrap(E)
+  | Opt(Float?)
+  | Named { code: Int, why: String }
+  | Gone
 
 fn step(acc: Int, x: Int) -> Int!E = if x < 0 then err(Neg(x)) else ok(acc + x)
 

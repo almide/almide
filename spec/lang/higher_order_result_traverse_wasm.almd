@@ -5,11 +5,12 @@
 // (2) hoists a computed-call match subject to a `let`. Together these lower a fallible list traverse
 // (apply f to each element, collect ok values, short-circuit on the first err) — the same sequential
 // semantics `fan.map` has on wasm. Byte-identical to v0 --target wasm.
-fn go(xs: List[Int], f: (Int) -> Result[Int, String], i: Int, acc: List[Int]) -> Result[List[Int], String] = if i >= list.len(xs) then ok(acc)
-else match f(list.get(xs, i) ?? 0) {
-  ok(y) => go(xs, f, i + 1, acc + [y]),
-  err(e) => err(e),
-}
+fn go(xs: List[Int], f: (Int) -> Result[Int, String], i: Int, acc: List[Int]) -> Result[List[Int], String] =
+  if i >= list.len(xs) then ok(acc)
+  else match f(list.get(xs, i) ?? 0) {
+    ok(y) => go(xs, f, i + 1, acc + [y]),
+    err(e) => err(e),
+  }
 
 fn traverse(xs: List[Int], f: (Int) -> Result[Int, String]) -> Result[List[Int], String] = go(
   xs,

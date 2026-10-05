@@ -1,4 +1,8 @@
-type Pat = | Match { scope: String, regex: String } | BeginEnd { scope: String, begin: String, end_pat: String, patterns: List[Pat] } | Include(String) | Empty
+type Pat =
+  | Match { scope: String, regex: String }
+  | BeginEnd { scope: String, begin: String, end_pat: String, patterns: List[Pat] }
+  | Include(String)
+  | Empty
 
 fn describe(p: Pat) -> String = match p {
   Match { scope, regex } => "match: ${scope} ${regex}",

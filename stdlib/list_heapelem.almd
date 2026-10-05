@@ -76,13 +76,14 @@ fn __lshu_val(hit: Bool, addr: Int, old: Value, f: (Value) -> Value) -> Int = if
   0
 }
 
-fn __lshu_fill(sh: Int, bh: Int, n: Int, i: Int, f: (Value) -> Value, j: Int) -> Int = if j >= n then 0
-else {
-  let old: Value = prim.load_handle(sh + 12 + j * 8)
-  let hit = j == i
-  let _s = __lshu_val(hit, bh + 12 + j * 8, old, f)
-  __lshu_fill(sh, bh, n, i, f, j + 1)
-}
+fn __lshu_fill(sh: Int, bh: Int, n: Int, i: Int, f: (Value) -> Value, j: Int) -> Int =
+  if j >= n then 0
+  else {
+    let old: Value = prim.load_handle(sh + 12 + j * 8)
+    let hit = j == i
+    let _s = __lshu_val(hit, bh + 12 + j * 8, old, f)
+    __lshu_fill(sh, bh, n, i, f, j + 1)
+  }
 
 fn list_update_heapelem(xs: List[Value], i: Int, f: (Value) -> Value) -> List[Value] = {
   let h = prim.handle(xs)
@@ -113,17 +114,18 @@ fn list_insert_heapelem(xs: List[Value], i: Int, x: Value) -> List[Value] = {
   buf
 }
 
-fn __lsh_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int = if oob == 1 then __lsh_copy(
-  srcbase,
-  dstbase,
-  n,
-  0,
-)
-else {
-  let _a = __lsh_copy(srcbase, dstbase, i, 0)
-  let i1 = i + 1
-  __lsh_copy(srcbase + i1 * 8, dstbase + i * 8, n - i1, 0)
-}
+fn __lsh_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int =
+  if oob == 1 then __lsh_copy(
+    srcbase,
+    dstbase,
+    n,
+    0,
+  )
+  else {
+    let _a = __lsh_copy(srcbase, dstbase, i, 0)
+    let i1 = i + 1
+    __lsh_copy(srcbase + i1 * 8, dstbase + i * 8, n - i1, 0)
+  }
 
 // The removed element is simply NOT copied, so the result never owns it and the
 // source's own drop frees it exactly once — no drop is owed here.

@@ -33,11 +33,12 @@ fn __flm_fill_step(dh: Int, sh: Int, f: (Int) -> List[Int], i: Int, di: Int) -> 
   __flm_copy(dh, subh, sublen, 0, di)
 }
 
-fn __flm_fill(dh: Int, sh: Int, f: (Int) -> List[Int], n: Int, i: Int, di: Int) -> Int = if i >= n then di
-else {
-  let ndi = __flm_fill_step(dh, sh, f, i, di)
-  __flm_fill(dh, sh, f, n, i + 1, ndi)
-}
+fn __flm_fill(dh: Int, sh: Int, f: (Int) -> List[Int], n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let ndi = __flm_fill_step(dh, sh, f, i, di)
+    __flm_fill(dh, sh, f, n, i + 1, ndi)
+  }
 
 fn list_flat_map(xs: List[Int], f: (Int) -> List[Int]) -> List[Int] = {
   let n = list.len(xs)
@@ -64,19 +65,21 @@ fn __flmstr_len_step(sh: Int, f: (String) -> List[String], i: Int) -> Int = {
   list.len(sub)
 }
 
-fn __flmstr_total(sh: Int, f: (String) -> List[String], n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else {
-  let s = __flmstr_len_step(sh, f, i)
-  __flmstr_total(sh, f, n, i + 1, acc + s)
-}
+fn __flmstr_total(sh: Int, f: (String) -> List[String], n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let s = __flmstr_len_step(sh, f, i)
+    __flmstr_total(sh, f, n, i + 1, acc + s)
+  }
 
-fn __flmstr_copy(dh: Int, sub: List[String], sublen: Int, j: Int, di: Int) -> Int = if j >= sublen then di
-else {
-  let e = list.get(sub, j) ?? ""
-  let copy = string.repeat(e, 1)
-  prim.store_str(dh + 12 + di * 8, copy)
-  __flmstr_copy(dh, sub, sublen, j + 1, di + 1)
-}
+fn __flmstr_copy(dh: Int, sub: List[String], sublen: Int, j: Int, di: Int) -> Int =
+  if j >= sublen then di
+  else {
+    let e = list.get(sub, j) ?? ""
+    let copy = string.repeat(e, 1)
+    prim.store_str(dh + 12 + di * 8, copy)
+    __flmstr_copy(dh, sub, sublen, j + 1, di + 1)
+  }
 
 fn __flmstr_fill_step(dh: Int, sh: Int, f: (String) -> List[String], i: Int, di: Int) -> Int = {
   let x = prim.load_str(sh + 12 + i * 8)
@@ -84,11 +87,12 @@ fn __flmstr_fill_step(dh: Int, sh: Int, f: (String) -> List[String], i: Int, di:
   __flmstr_copy(dh, sub, list.len(sub), 0, di)
 }
 
-fn __flmstr_fill(dh: Int, sh: Int, f: (String) -> List[String], n: Int, i: Int, di: Int) -> Int = if i >= n then di
-else {
-  let ndi = __flmstr_fill_step(dh, sh, f, i, di)
-  __flmstr_fill(dh, sh, f, n, i + 1, ndi)
-}
+fn __flmstr_fill(dh: Int, sh: Int, f: (String) -> List[String], n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let ndi = __flmstr_fill_step(dh, sh, f, i, di)
+    __flmstr_fill(dh, sh, f, n, i + 1, ndi)
+  }
 
 fn list_flat_map_str(xs: List[String], f: (String) -> List[String]) -> List[String] = {
   let n = list.len(xs)
@@ -116,11 +120,12 @@ fn __flmh_len_step(sh: Int, f: (String) -> List[String], i: Int) -> Int = {
   list.len(sub)
 }
 
-fn __flmh_total(sh: Int, f: (String) -> List[String], n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else {
-  let s = __flmh_len_step(sh, f, i)
-  __flmh_total(sh, f, n, i + 1, acc + s)
-}
+fn __flmh_total(sh: Int, f: (String) -> List[String], n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let s = __flmh_len_step(sh, f, i)
+    __flmh_total(sh, f, n, i + 1, acc + s)
+  }
 
 fn __flmh_copy_step(dh: Int, subh: Int, j: Int, di: Int) -> Int = {
   let e = prim.load64(subh + 12 + j * 8)
@@ -141,11 +146,12 @@ fn __flmh_fill_step(dh: Int, sh: Int, f: (String) -> List[String], i: Int, di: I
   __flmh_copy(dh, prim.handle(sub), list.len(sub), 0, di)
 }
 
-fn __flmh_fill(dh: Int, sh: Int, f: (String) -> List[String], n: Int, i: Int, di: Int) -> Int = if i >= n then di
-else {
-  let ndi = __flmh_fill_step(dh, sh, f, i, di)
-  __flmh_fill(dh, sh, f, n, i + 1, ndi)
-}
+fn __flmh_fill(dh: Int, sh: Int, f: (String) -> List[String], n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let ndi = __flmh_fill_step(dh, sh, f, i, di)
+    __flmh_fill(dh, sh, f, n, i + 1, ndi)
+  }
 
 fn list_flat_map_h(xs: List[String], f: (String) -> List[String]) -> List[String] = {
   let n = list.len(xs)

@@ -10,7 +10,13 @@ type Color: Codec = { r: Int, g: Int, b: Int }
 
 type Labeled: Codec = { label: String, n: Int }
 
-type Shape: Codec = | Wrap(Color) | Boxed(Labeled) | Tag { name: String, c: Color } | Multi(List[Int]) | Pair(Int, String) | Plain
+type Shape: Codec =
+  | Wrap(Color)
+  | Boxed(Labeled)
+  | Tag { name: String, c: Color }
+  | Multi(List[Int])
+  | Pair(Int, String)
+  | Plain
 
 effect fn main() -> Unit = {
   match Shape.decode(Shape.encode(Wrap({ r: 1, g: 2, b: 3 }))) {

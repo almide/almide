@@ -17,18 +17,19 @@ fn __sortf_load(h: Int, i: Int) -> Int = prim.load64(h + 12 + i * 8)
 // ── stable bottom-up mergesort by the monotone totalOrder key (#1459):
 // O(n log n) in place of the O(n^2) selection scan. The key transform is
 // applied per comparison; the stored slots stay the original f64 bits.
-fn __sortf_mrun(srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
-else {
-  let takel = if j >= hi then true
-  else if i >= mid then false else __ftotal_sf(__sortf_load(srch, i)) <= __ftotal_sf(__sortf_load(srch, j))
-  if takel then {
-    prim.store64(dsth + 12 + k * 8, __sortf_load(srch, i))
-    __sortf_mrun(srch, dsth, mid, hi, i + 1, j, k + 1)
-  } else {
-    prim.store64(dsth + 12 + k * 8, __sortf_load(srch, j))
-    __sortf_mrun(srch, dsth, mid, hi, i, j + 1, k + 1)
+fn __sortf_mrun(srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int =
+  if k >= hi then 0
+  else {
+    let takel = if j >= hi then true
+    else if i >= mid then false else __ftotal_sf(__sortf_load(srch, i)) <= __ftotal_sf(__sortf_load(srch, j))
+    if takel then {
+      prim.store64(dsth + 12 + k * 8, __sortf_load(srch, i))
+      __sortf_mrun(srch, dsth, mid, hi, i + 1, j, k + 1)
+    } else {
+      prim.store64(dsth + 12 + k * 8, __sortf_load(srch, j))
+      __sortf_mrun(srch, dsth, mid, hi, i, j + 1, k + 1)
+    }
   }
-}
 
 fn __sortf_mpass(srch: Int, dsth: Int, n: Int, width: Int, lo: Int) -> Int = if lo >= n then 0
 else {

@@ -24,11 +24,12 @@ fn __dpi_field(s: String) -> Int? = if string.is_digit(s) then match int.parse(s
 } else none
 
 // Every part as a number, or none at the first refused part.
-fn __dpi_nums(parts: List[String], i: Int, acc: List[Int]) -> List[Int]? = if i >= list.len(parts) then some(acc)
-else match __dpi_field(list.get(parts, i) ?? "") {
-  some(v) => __dpi_nums(parts, i + 1, acc + [v]),
-  none => none,
-}
+fn __dpi_nums(parts: List[String], i: Int, acc: List[Int]) -> List[Int]? =
+  if i >= list.len(parts) then some(acc)
+  else match __dpi_field(list.get(parts, i) ?? "") {
+    some(v) => __dpi_nums(parts, i + 1, acc + [v]),
+    none => none,
+  }
 
 // Index of the first '+' or '-' — where an offset would start.
 fn __dpi_sign_at(t: String) -> Int? = match (string.index_of(t, "+"), string.index_of(t, "-")) {

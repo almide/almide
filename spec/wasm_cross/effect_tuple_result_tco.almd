@@ -7,11 +7,12 @@
 // __drop_value_tuple). Byte-matches v0 (`3` then `3`).
 local effect fn dash_item(lines: List[String], pos: Int) -> (Value, Int) = (value.str(list.get(lines, pos) ?? ""), pos + 1)
 
-local effect fn cs(lines: List[String], pos: Int, items: List[Value]) -> (Value, Int) = if pos >= list.len(lines) then (value.array(items), pos)
-else {
-  let (val, next) = dash_item(lines, pos)!
-  cs(lines, next, items + [val])!
-}
+local effect fn cs(lines: List[String], pos: Int, items: List[Value]) -> (Value, Int) =
+  if pos >= list.len(lines) then (value.array(items), pos)
+  else {
+    let (val, next) = dash_item(lines, pos)!
+    cs(lines, next, items + [val])!
+  }
 
 effect fn main() -> Unit = {
   let (v, n) = cs(["a", "b", "c"], 0, [])!

@@ -5,13 +5,14 @@
 fn __clamp_str(n: Int, len: Int) -> Int = if n < 0 then len
 else if n > len then len else n
 
-fn __copy_slice_str(srch: Int, dsth: Int, start: Int, count: Int, i: Int) -> Int = if i >= count then 0
-else {
-  let x = prim.load_str(srch + 12 + (start + i) * 8)
-  let copy = string.repeat(x, 1)
-  prim.store_str(dsth + 12 + i * 8, copy)
-  __copy_slice_str(srch, dsth, start, count, i + 1)
-}
+fn __copy_slice_str(srch: Int, dsth: Int, start: Int, count: Int, i: Int) -> Int =
+  if i >= count then 0
+  else {
+    let x = prim.load_str(srch + 12 + (start + i) * 8)
+    let copy = string.repeat(x, 1)
+    prim.store_str(dsth + 12 + i * 8, copy)
+    __copy_slice_str(srch, dsth, start, count, i + 1)
+  }
 
 fn list_take_str(xs: List[String], n: Int) -> List[String] = {
   let h = prim.handle(xs)

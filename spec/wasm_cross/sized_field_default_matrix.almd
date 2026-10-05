@@ -28,7 +28,9 @@ let TOP_FLOAT32: Float32 = -3.25
 
 type Defaults = { n: Int, rec_int8: Int8 = 100, low_int8: Int8 = -100, rec_int16: Int16 = 30000, low_int16: Int16 = -30000, rec_int32: Int32 = 2000000000, low_int32: Int32 = -2000000000, rec_uint8: UInt8 = 250, low_uint8: UInt8 = 0, rec_uint16: UInt16 = 65000, low_uint16: UInt16 = 0, rec_uint32: UInt32 = 4000000000, low_uint32: UInt32 = 0, rec_uint64: UInt64 = 9000000000000000000, low_uint64: UInt64 = 0, rec_float32: Float32 = 1.5, low_float32: Float32 = -0.25 }
 
-type Cell = | Packed { tag: String, var_int8: Int8 = -7, var_int16: Int16 = 1234, var_int32: Int32 = -123456, var_uint8: UInt8 = 200, var_uint16: UInt16 = 60000, var_uint32: UInt32 = 3000000000, var_uint64: UInt64 = 8000000000000000000, var_float32: Float32 = 0.5 } | Empty
+type Cell =
+  | Packed { tag: String, var_int8: Int8 = -7, var_int16: Int16 = 1234, var_int32: Int32 = -123456, var_uint8: UInt8 = 200, var_uint16: UInt16 = 60000, var_uint32: UInt32 = 3000000000, var_uint64: UInt64 = 8000000000000000000, var_float32: Float32 = 0.5 }
+  | Empty
 
 fn show_defaults(d: Defaults) -> String = "${d.n} | ${d.rec_int8} ${d.low_int8} | ${d.rec_int16} ${d.low_int16} | ${d.rec_int32} ${d.low_int32} | ${d.rec_uint8} ${d.low_uint8} | ${d.rec_uint16} ${d.low_uint16} | ${d.rec_uint32} ${d.low_uint32} | ${d.rec_uint64} ${d.low_uint64} | ${d.rec_float32} ${d.low_float32}"
 

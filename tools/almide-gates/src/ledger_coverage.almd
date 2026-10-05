@@ -59,26 +59,29 @@ fn take_path_run(s: String, start: Int) -> String = {
   string.slice(s, start, e)
 }
 
-fn scan_path(s: String, p: Int) -> Int = if p < string.len(s) and is_path_char(string.slice(s, p, p + 1)) then scan_path(
-  s,
-  p + 1,
-) else p
+fn scan_path(s: String, p: Int) -> Int =
+  if p < string.len(s) and is_path_char(string.slice(s, p, p + 1)) then scan_path(
+    s,
+    p + 1,
+  )
+  else p
 
 // One line's candidates, in the order they appear — the bash sorts and de-dups them globally,
 // so per-line order does not survive, but keeping it makes the function testable.
-fn cited_paths_in(line: String, at: Int, acc: List[String]) -> List[String] = if at >= string.len(line) then acc
-else {
-  let rest = string.slice(line, at)
-  if is_source_prefix(rest) then {
-    let run = take_path_run(line, at)
-    cited_paths_in(
-      line,
-      at + string.len(run),
-      if has_source_suffix(run) then acc + [run]
-      else acc,
-    )
-  } else cited_paths_in(line, at + 1, acc)
-}
+fn cited_paths_in(line: String, at: Int, acc: List[String]) -> List[String] =
+  if at >= string.len(line) then acc
+  else {
+    let rest = string.slice(line, at)
+    if is_source_prefix(rest) then {
+      let run = take_path_run(line, at)
+      cited_paths_in(
+        line,
+        at + string.len(run),
+        if has_source_suffix(run) then acc + [run]
+        else acc,
+      )
+    } else cited_paths_in(line, at + 1, acc)
+  }
 
 test "a cited path is extracted from prose, and only when it looks like a source file" {
   // Statements legitimately contain prose around the path, and a bare directory or a doc file

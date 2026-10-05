@@ -800,14 +800,15 @@ fn __fallible_zip_with[A, B, C, E](xs: List[A], ys: List[B], f: (A, B) -> Result
 }
 
 // An index outside the list leaves it unchanged without calling `f`.
-fn __fallible_update[A, E](xs: List[A], i: Int, f: (A) -> Result[A, E]) -> Result[List[A], E] = if i < 0 then ok(xs)
-else match list.get(xs, i) {
-  none => ok(xs),
-  some(v) => match f(v) {
-    ok(nv) => ok(list.set(xs, i, nv)),
-    err(e) => err(e),
-  },
-}
+fn __fallible_update[A, E](xs: List[A], i: Int, f: (A) -> Result[A, E]) -> Result[List[A], E] =
+  if i < 0 then ok(xs)
+  else match list.get(xs, i) {
+    none => ok(xs),
+    some(v) => match f(v) {
+      ok(nv) => ok(list.set(xs, i, nv)),
+      err(e) => err(e),
+    },
+  }
 
 // `f` runs exactly `n` times, as in `iterate`; an err on any of them is the result.
 fn __fallible_iterate[T, E](seed: T, f: (T) -> Result[T, E], n: Int) -> Result[List[T], E] = {

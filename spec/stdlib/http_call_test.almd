@@ -62,12 +62,13 @@ effect fn peer_closed(peer: Int) -> Result[Bool, String] = match net.tcp_read_ti
 
 // Talk every 50 ms until the client closes; the number of events it took.
 // A client that never closes ends the arm with an err after 200 events.
-effect fn trickle(peer: Int, i: Int) -> Result[Int, String] = if i >= 200 then err("the client never closed the connection")
-else if peer_closed(peer)! then ok(i)
-else {
-  net.tcp_write(peer, bytes.from_string("data: ${i}\n\n"))!
-  trickle(peer, i + 1)
-}
+effect fn trickle(peer: Int, i: Int) -> Result[Int, String] =
+  if i >= 200 then err("the client never closed the connection")
+  else if peer_closed(peer)! then ok(i)
+  else {
+    net.tcp_write(peer, bytes.from_string("data: ${i}\n\n"))!
+    trickle(peer, i + 1)
+  }
 
 effect fn trickle_server(port: Int) -> Result[Int, String] = {
   let (server, peer) = accept_real(port)!

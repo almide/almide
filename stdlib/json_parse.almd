@@ -173,43 +173,44 @@ else {
 }
 
 // Returns (position after the closing quote / end, bytes written).
-fn __jp_str_fill(base: Int, len: Int, p: Int, dh: Int, o: Int) -> (Int, Int) = if p >= len then (p, o)
-else {
-  let b = prim.load8(base + p)
-  if b == 34 then (p + 1, o)
-  else if b == 92 then {
-    let e = if p + 1 < len then prim.load8(base + p + 1) else 0
-    if e == 110 then {
-      prim.store8(dh + o, 10)
-      __jp_str_fill(base, len, p + 2, dh, o + 1)
-    } else if e == 116 then {
-      prim.store8(dh + o, 9)
-      __jp_str_fill(base, len, p + 2, dh, o + 1)
-    } else if e == 114 then {
-      prim.store8(dh + o, 13)
-      __jp_str_fill(base, len, p + 2, dh, o + 1)
-    } else if e == 98 then {
-      prim.store8(dh + o, 8)
-      __jp_str_fill(base, len, p + 2, dh, o + 1)
-    } else if e == 102 then {
-      prim.store8(dh + o, 12)
-      __jp_str_fill(base, len, p + 2, dh, o + 1)
-    } else if e == 34 then {
-      prim.store8(dh + o, 34)
-      __jp_str_fill(base, len, p + 2, dh, o + 1)
-    } else if e == 92 then {
-      prim.store8(dh + o, 92)
-      __jp_str_fill(base, len, p + 2, dh, o + 1)
-    } else if e == 47 then {
-      prim.store8(dh + o, 47)
-      __jp_str_fill(base, len, p + 2, dh, o + 1)
-    } else if e == 117 then __jp_str_u(base, len, p, dh, o)
-    else __jp_str_fill(base, len, p + 2, dh, o)
-  } else {
-    prim.store8(dh + o, b)
-    __jp_str_fill(base, len, p + 1, dh, o + 1)
+fn __jp_str_fill(base: Int, len: Int, p: Int, dh: Int, o: Int) -> (Int, Int) =
+  if p >= len then (p, o)
+  else {
+    let b = prim.load8(base + p)
+    if b == 34 then (p + 1, o)
+    else if b == 92 then {
+      let e = if p + 1 < len then prim.load8(base + p + 1) else 0
+      if e == 110 then {
+        prim.store8(dh + o, 10)
+        __jp_str_fill(base, len, p + 2, dh, o + 1)
+      } else if e == 116 then {
+        prim.store8(dh + o, 9)
+        __jp_str_fill(base, len, p + 2, dh, o + 1)
+      } else if e == 114 then {
+        prim.store8(dh + o, 13)
+        __jp_str_fill(base, len, p + 2, dh, o + 1)
+      } else if e == 98 then {
+        prim.store8(dh + o, 8)
+        __jp_str_fill(base, len, p + 2, dh, o + 1)
+      } else if e == 102 then {
+        prim.store8(dh + o, 12)
+        __jp_str_fill(base, len, p + 2, dh, o + 1)
+      } else if e == 34 then {
+        prim.store8(dh + o, 34)
+        __jp_str_fill(base, len, p + 2, dh, o + 1)
+      } else if e == 92 then {
+        prim.store8(dh + o, 92)
+        __jp_str_fill(base, len, p + 2, dh, o + 1)
+      } else if e == 47 then {
+        prim.store8(dh + o, 47)
+        __jp_str_fill(base, len, p + 2, dh, o + 1)
+      } else if e == 117 then __jp_str_u(base, len, p, dh, o)
+      else __jp_str_fill(base, len, p + 2, dh, o)
+    } else {
+      prim.store8(dh + o, b)
+      __jp_str_fill(base, len, p + 1, dh, o + 1)
+    }
   }
-}
 
 // \uXXXX at p (p = the backslash). The oracle advances past the 4 hex digits
 // UNCONDITIONALLY, writes only when they parse; a D800–DBFF unit followed by a
@@ -274,12 +275,13 @@ else {
 }
 
 // ── numbers ──
-fn __jp_digits(base: Int, len: Int, p: Int) -> Int = if p < len and prim.load8(base + p) >= 48 and prim.load8(base + p) <= 57 then __jp_digits(
-  base,
-  len,
-  p + 1,
-)
-else p
+fn __jp_digits(base: Int, len: Int, p: Int) -> Int =
+  if p < len and prim.load8(base + p) >= 48 and prim.load8(base + p) <= 57 then __jp_digits(
+    base,
+    len,
+    p + 1,
+  )
+  else p
 
 fn __jp_number(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
   let p1 = if prim.load8(base + p) == 45 then p + 1 else p
@@ -308,26 +310,28 @@ fn __jp_number(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
 // ── literals ──
 fn __jp_lit_at(base: Int, len: Int, p: Int, b0: Int, b1: Int, b2: Int, b3: Int) -> Bool = p + 4 <= len and prim.load8(base + p) == b0 and prim.load8(base + p + 1) == b1 and prim.load8(base + p + 2) == b2 and prim.load8(base + p + 3) == b3
 
-fn __jp_bool(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = if __jp_lit_at(
-  base,
-  len,
-  p,
-  116,
-  114,
-  117,
-  101,
-) then ok((value.bool(true), p + 4))
-else if __jp_lit_at(base, len, p, 102, 97, 108, 115) and p + 5 <= len and prim.load8(base + p + 4) == 101 then ok((value.bool(false), p + 5)) else err("expected bool")
+fn __jp_bool(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] =
+  if __jp_lit_at(
+    base,
+    len,
+    p,
+    116,
+    114,
+    117,
+    101,
+  ) then ok((value.bool(true), p + 4))
+  else if __jp_lit_at(base, len, p, 102, 97, 108, 115) and p + 5 <= len and prim.load8(base + p + 4) == 101 then ok((value.bool(false), p + 5)) else err("expected bool")
 
-fn __jp_null(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = if __jp_lit_at(
-  base,
-  len,
-  p,
-  110,
-  117,
-  108,
-  108,
-) then ok((value.null(), p + 4)) else err("expected null")
+fn __jp_null(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] =
+  if __jp_lit_at(
+    base,
+    len,
+    p,
+    110,
+    117,
+    108,
+    108,
+  ) then ok((value.null(), p + 4)) else err("expected null")
 
 // ── collections ──
 // p is at the first element (post-`[`, post-ws, non-`]`).

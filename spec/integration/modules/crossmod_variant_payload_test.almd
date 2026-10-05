@@ -4,7 +4,10 @@
 // tuple payload, record-variant field, and a generic payload.
 import varlib
 
-type Tag = | PolicyTag(varlib.Policy) | SetPolicy { p: varlib.Policy } | Wrapped(List[varlib.Policy])
+type Tag =
+  | PolicyTag(varlib.Policy)
+  | SetPolicy { p: varlib.Policy }
+  | Wrapped(List[varlib.Policy])
 
 fn describe(t: Tag) -> String = match t {
   PolicyTag(_) => "tag",

@@ -9,14 +9,15 @@
 // values, where the tag read is total and the flat block drop is exact.
 fn __vtag(k: Value) -> Int = prim.load64(prim.handle(k) + 12)
 
-fn __mvt_at(pairs: List[(Value, Int)], i: Int, m: Map[Int, Int]) -> Map[Int, Int] = if i >= list.len(pairs) then m
-else match list.get(pairs, i) {
-  some(p) => {
-    let (k, v) = p
-    __mvt_at(pairs, i + 1, map.set(m, __vtag(k), v))
-  },
-  none => m,
-}
+fn __mvt_at(pairs: List[(Value, Int)], i: Int, m: Map[Int, Int]) -> Map[Int, Int] =
+  if i >= list.len(pairs) then m
+  else match list.get(pairs, i) {
+    some(p) => {
+      let (k, v) = p
+      __mvt_at(pairs, i + 1, map.set(m, __vtag(k), v))
+    },
+    none => m,
+  }
 
 fn map_from_list_vtag(pairs: List[(Value, Int)]) -> Map[Int, Int] = {
   let m: Map[Int, Int] = map.new()
@@ -41,14 +42,15 @@ fn __srec_key(k: Value) -> String = {
   __srec_key_go(h, n, 0, "")
 }
 
-fn __msr_at(pairs: List[(Value, String)], i: Int, m: Map[String, String]) -> Map[String, String] = if i >= list.len(pairs) then m
-else match list.get(pairs, i) {
-  some(p) => {
-    let (k, v) = p
-    __msr_at(pairs, i + 1, map.set(m, __srec_key(k), v))
-  },
-  none => m,
-}
+fn __msr_at(pairs: List[(Value, String)], i: Int, m: Map[String, String]) -> Map[String, String] =
+  if i >= list.len(pairs) then m
+  else match list.get(pairs, i) {
+    some(p) => {
+      let (k, v) = p
+      __msr_at(pairs, i + 1, map.set(m, __srec_key(k), v))
+    },
+    none => m,
+  }
 
 fn map_from_list_srec(pairs: List[(Value, String)]) -> Map[String, String] = {
   let m: Map[String, String] = map.new()
@@ -73,11 +75,12 @@ fn map_contains_srec(m: Map[String, String], k: Value) -> Bool = map.contains(m,
 // ── Set of flat all-scalar tuples (`Set[(Int, Int)]`) ── normalize each element
 // into a Set[String] (content dedup via the _str family). Iteration-returning fns
 // (to_list) are NOT admitted by the router — the normalized form is lookup-only.
-fn __sfl_srec_at(xs: List[Value], i: Int, acc: Set[String]) -> Set[String] = if i >= list.len(xs) then acc
-else match list.get(xs, i) {
-  some(x) => __sfl_srec_at(xs, i + 1, set.insert(acc, __srec_key(x))),
-  none => acc,
-}
+fn __sfl_srec_at(xs: List[Value], i: Int, acc: Set[String]) -> Set[String] =
+  if i >= list.len(xs) then acc
+  else match list.get(xs, i) {
+    some(x) => __sfl_srec_at(xs, i + 1, set.insert(acc, __srec_key(x))),
+    none => acc,
+  }
 
 fn set_from_list_srec(xs: List[Value]) -> Set[String] = {
   let acc: Set[String] = set.new()

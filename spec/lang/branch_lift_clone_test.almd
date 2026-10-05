@@ -12,8 +12,9 @@
 // String param and whose err arm REUSES it.
 type R = { task: String, model: String, ok: Bool }
 
-effect fn run_task(task: String, model: String) -> Result[R, String] = if task == "bad" then err("boom")
-else ok(R { task: task, model: model, ok: true })
+effect fn run_task(task: String, model: String) -> Result[R, String] =
+  if task == "bad" then err("boom")
+  else ok(R { task: task, model: model, ok: true })
 
 effect fn go(tasks: List[String], model: String, acc: List[R]) -> List[R] = match list.first(tasks) {
   none => acc,

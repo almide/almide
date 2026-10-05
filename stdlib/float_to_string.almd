@@ -260,16 +260,17 @@ fn __sf_render(f: Int, m: Int, k: Int, neg: Bool, dot0: Bool) -> String = {
 }
 
 // |v| = f * 10^e (f > 0): strip trailing zeros, then render.
-fn __sf_finish(f: Int, e: Int, neg: Bool, dot0: Bool) -> String = if (f / 10) * 10 == f then __sf_finish(
-  f / 10,
-  e + 1,
-  neg,
-  dot0,
-)
-else {
-  let m = __sf_ndig(f, 1, 0)
-  __sf_render(f, m, m + e, neg, dot0)
-}
+fn __sf_finish(f: Int, e: Int, neg: Bool, dot0: Bool) -> String =
+  if (f / 10) * 10 == f then __sf_finish(
+    f / 10,
+    e + 1,
+    neg,
+    dot0,
+  )
+  else {
+    let m = __sf_ndig(f, 1, 0)
+    __sf_render(f, m, m + e, neg, dot0)
+  }
 
 // v = c * 2^q (c > 0): the shortest decimal in the rounding interval, closest on a draw, and on
 // an exact tie the LARGER magnitude — Rust's `{}` (Dragon4 "2R >= S") rounds a half up, not to
