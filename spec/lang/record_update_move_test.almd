@@ -1,0 +1,80 @@
+// #3404: a functional record update that rebuilds a field of an owned value
+// moves that field, and a reassignment moves the value it rebuilds; every
+// cell where the old value is still read keeps its copy.
+type Box = { m: Map[String, List[Int]], n: Int, tag: String }
+
+fn add(b: Box, i: Int) -> Box = { ...b, m: map.set(b.m, int.to_string(i), [i]), n: b.n + 1 }
+
+fn add_keep(b: Box, i: Int) -> (Box, Box) = {
+  let c = { ...b, m: map.set(b.m, int.to_string(i), [i]), n: b.n + 1 }
+  (c, b)
+}
+
+fn add_reread(b: Box, i: Int) -> Box = { ...b, m: map.set(b.m, int.to_string(i), [i]), n: map.len(b.m) }
+
+fn add_tag(b: Box, i: Int) -> Box = { ...b, m: map.set(b.m, int.to_string(i), [i]), tag: b.tag + "!" }
+
+fn both(a: Box, b: Box) -> Box = { ...a, n: a.n + b.n }
+
+test "functional update in a growth loop moves the box" {
+  var b = Box { m: [:], n: 0, tag: "t" }
+  var i = 0
+  while i < 50 {
+    b = add(b, i)
+    i = i + 1
+  }
+  assert_eq(b.n, 50)
+  assert_eq(map.len(b.m), 50)
+  assert_eq(map.get(b.m, "49"), some([49]))
+}
+
+test "the old box is unchanged when it is still used" {
+  let b = Box { m: [:], n: 0, tag: "t" }
+  let c = add(b, 1)
+  assert_eq(map.len(b.m), 0)
+  assert_eq(b.n, 0)
+  assert_eq(map.len(c.m), 1)
+  let (d, e) = add_keep(c, 2)
+  assert_eq(map.len(d.m), 2)
+  assert_eq(map.len(e.m), 1)
+  assert_eq(map.len(c.m), 1)
+}
+
+test "a field read again after the update sees the old field" {
+  let m0 = [
+    "a": [0]
+  ]
+  let b = Box { m: m0, n: 0, tag: "t" }
+  let c = add_reread(b, 1)
+  assert_eq(c.n, 1)
+  assert_eq(map.len(c.m), 2)
+}
+
+test "two fields moved out of one box" {
+  var b = Box { m: [:], n: 0, tag: "t" }
+  for i in 0..<3 {
+    b = add_tag(b, i)
+  }
+  assert_eq(b.tag, "t!!!")
+  assert_eq(map.len(b.m), 3)
+}
+
+test "a reassignment that reads the box twice keeps a copy" {
+  let m0 = [
+    "k": [1]
+  ]
+  var b = Box { m: m0, n: 1, tag: "t" }
+  for _ in 0..<3 {
+    b = both(b, b)
+  }
+  assert_eq(b.n, 8)
+  assert_eq(map.len(b.m), 1)
+}
+
+test "a reassigned box captured by a closure stays intact" {
+  var b = Box { m: [:], n: 0, tag: "t" }
+  let peek = (k: Int) => b.n + k
+  b = add(b, 1)
+  assert_eq(peek(0), b.n)
+  assert_eq(b.n, 1)
+}
