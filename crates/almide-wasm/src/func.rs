@@ -361,7 +361,7 @@ pub(crate) fn lower_fn(
             owned_ty: std::collections::HashMap::new(),
             owned_call_marks: Default::default(),
             borrowed_temps: Vec::new(),
-            exit_ledger: Vec::new(),
+            exit_ledger: Vec::new(), arm_rests: Default::default(),
             borrow_base,
             table: ctx.table,
             types: ctx.types,
