@@ -511,6 +511,15 @@ impl Checker {
             self.record_int_literal_context(body, &Ty::result(ret_ty.clone(), Ty::String));
         }
         self.record_int_literal_context(body, &ret_ty);
+        // A `-> T!` body's value leaves lift into `ok(..)` one by one (#3385),
+        // so a bare literal leaf beside an explicit `ok(..)` one is a value of
+        // the payload `T` — pinned last, it faces T's range.
+        if fallible_marker
+            && let Ty::Applied(crate::types::TypeConstructorId::Result, args) = &ret_ty
+            && args.len() == 2
+        {
+            self.record_int_literal_context(body, &args[0]);
+        }
         // #2927: the body-vs-return mismatch is reported at the value that
         // fixed the body's type (a block's tail, the anchoring arm), not at
         // wherever inference happened to end — the last arm's last leaf.

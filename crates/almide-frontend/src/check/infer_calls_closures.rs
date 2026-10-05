@@ -141,7 +141,13 @@ impl Checker {
                 }
             }
 
-            ExprKind::Paren { expr, .. } => self.infer_expr(expr),
+            // A parenthesised tail is still the tail: the lowering is
+            // transparent to parens, so the tail expectation (and with it the
+            // per-branch lift, #3385) passes through.
+            ExprKind::Paren { expr, .. } => {
+                self.tail_expect = self.expr_expect.clone();
+                self.infer_expr(expr)
+            }
             ExprKind::Break | ExprKind::Continue => Ty::Unit,
             // Typed holes (#1325): `_` in EXPRESSION position and `todo("msg")`
             // take whatever type the context demands — that is the whole point
