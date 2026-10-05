@@ -368,7 +368,24 @@ impl Emitter<'_> {
                 }
                 let hold = self.hold_i32()?;
                 let copy = self.copy_fn_of(ty);
-                self.f.instructions().call(copy).local_set(hold);
+                // #3373: a PRODUCED base (a call result, any owned value)
+                // is a temporary the copy only reads — its credit, and
+                // through its slots the credits the copy took its own of,
+                // are released right after the copy. A bound base is
+                // borrowed: its owner releases it.
+                if self.rc_owned_result(base) {
+                    let src = self.hold_i32()?;
+                    let dec = self.dec_fn_of(ty);
+                    self.f.instructions().local_tee(src).call(copy).local_set(hold);
+                    self.f.instructions().local_get(src).call(dec);
+                    self.release_i32();
+                    self.witness_owned_released(base, ty);
+                } else {
+                    if !crate::witness_unwrap::slot_read_of_var(base) {
+                        self.witness_decline("SpreadRecord-base:borrowed");
+                    }
+                    self.f.instructions().call(copy).local_set(hold);
+                }
                 for ((_, fexpr), (fty, off)) in fields.iter().zip(slots) {
                     // The overwritten field's credit goes with it.
                     if let Some(dec) = self.elem_is_handle(fty).then(|| self.dec_fn_of(fty)) {
