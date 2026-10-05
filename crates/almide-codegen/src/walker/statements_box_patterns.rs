@@ -452,8 +452,7 @@ pub fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
 fn render_pattern_literal(ctx: &RenderContext, expr: &IrExpr) -> String {
     match &expr.kind {
         IrExprKind::LitStr { value } => {
-            let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
-            format!("\"{}\"", escaped)
+            format!("\"{}\"", super::helpers::escape_rust_str(value))
         }
         IrExprKind::LitInt { value } => format!("{}", value),
         IrExprKind::LitFloat { value } => format!("{}", value),

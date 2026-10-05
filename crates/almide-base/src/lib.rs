@@ -6,6 +6,7 @@ pub mod env;
 pub mod names;
 pub mod profile;
 pub mod fs_errno;
+pub mod rust_lit;
 
 // Re-export commonly used items at crate root
 pub use intern::{Sym, sym, resolve};

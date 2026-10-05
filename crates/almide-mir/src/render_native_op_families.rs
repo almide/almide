@@ -320,7 +320,11 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
         Op::Alloc { dst, init, .. } => match init {
             Init::Str(s) => {
                 tys.insert(*dst, NTy::Str);
-                line!("let mut {}: String = String::from({s:?});", var(*dst));
+                // The shared literal escaper (#3438): `{:?}` also escapes the
+                // bidi controls today, but one rule for every native renderer
+                // keeps that a property of the code, not of std's Debug tables.
+                let lit = almide_base::rust_lit::escape_rust_str(s);
+                line!("let mut {}: String = String::from(\"{lit}\");", var(*dst));
             }
             other => {
                 return Err(wall(format!(

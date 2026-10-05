@@ -4,14 +4,7 @@ fn render_string_interp(ctx: &RenderContext, parts: &[IrStringPart]) -> String {
     for part in parts {
         match part {
             IrStringPart::Lit { value } => {
-                fmt_parts.push(value
-                    .replace('\\', "\\\\")
-                    .replace('"', "\\\"")
-                    .replace('\n', "\\n")
-                    .replace('\t', "\\t")
-                    .replace('\r', "\\r")
-                    .replace('{', "{{")
-                    .replace('}', "}}"));
+                fmt_parts.push(super::helpers::escape_rust_fmt_str(value));
             }
             IrStringPart::Expr { expr } => {
                 fmt_parts.push("{}".to_string());
@@ -744,9 +737,7 @@ fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
     } else if *as_str {
         // String literal → bare &str in Rust, skip .to_string() allocation
         if let IrExprKind::LitStr { value } = &inner.kind {
-            let escaped = value.replace('\\', "\\\\").replace('"', "\\\"")
-                .replace('\n', "\\n").replace('\t', "\\t").replace('\r', "\\r");
-            return format!("\"{}\"", escaped);
+            return format!("\"{}\"", super::helpers::escape_rust_str(value));
         }
         format!("&*{}", render_expr(ctx, inner))
     } else {
