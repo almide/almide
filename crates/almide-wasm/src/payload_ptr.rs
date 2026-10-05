@@ -26,6 +26,7 @@
 //!   len_hoist.rs's scan proves it is never rebound, never handed to a call
 //!   and no lambda is present — so no judge and no rebind can touch the
 //!   local.
+//!
 //! In both cases the block the local names at the preheader is the block
 //! every access in the loop reads or writes, so `block + PAYLOAD` computed
 //! there is the payload of every one of them. A cell (a variable a closure
