@@ -610,6 +610,7 @@ fn build_helper_body(
             owned_call_marks: Default::default(),
             borrowed_temps: Vec::new(),
             exit_ledger: Vec::new(),
+            arm_rests: Default::default(),
             borrow_base: 0, // helper bodies lower no arm argument
             table,
             types,

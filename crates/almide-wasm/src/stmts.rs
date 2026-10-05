@@ -18,17 +18,6 @@ mod stmts_spend;
 
 impl Emitter<'_> {
     /// Statement position: Unit-typed shapes only (blocks, calls, control).
-    /// `continue` / `break` in statement position: a branch to the loop
-    /// context's continue label (`break` adds the depth to its exit).
-    fn lower_loop_jump(&mut self, brk: bool) -> Result<(), EmitError> {
-        let Some((extra, delta)) = self.loop_ctl else {
-            return unsup(if brk { "expr:Break" } else { "expr:Continue" });
-        };
-        self.f.instructions().br(if brk { extra + delta } else { extra });
-        self.witness_loop_jump();
-        Ok(())
-    }
-
     pub(crate) fn lower_stmt_expr(&mut self, e: &IrExpr) -> Result<(), EmitError> {
         // main's Result-typed statement/tail is the effect carrier —
         // err aborts with the native contract instead of discarding
