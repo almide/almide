@@ -43,8 +43,9 @@ fn kv_get(key: String) -> String
   `almide fmt` writes `returns: promise`.
 - Without `--host js` the marker changes nothing in the module. The module
   bytes are the same either way; only the generated glue reads it.
-- rc1 (v0.67.0-rc1) shipped the marker as a provisional build flag,
-  `--async-import NAME`. It was removed before the final release. A
+- Before the marker, develop carried a provisional build flag,
+  `--async-import NAME`. It was removed before v0.67.0-rc1 and never
+  shipped in a release. A
   build-time override can come back if a program ever has to bind the same
   hook as sync on one host and async on another. The attribute stays the
   default.
