@@ -427,6 +427,7 @@
 7570	spec/wasm_cross/list_modify_heap.almd
 3507	spec/wasm_cross/list_of_maps_loop_build.almd
 1774	spec/wasm_cross/list_of_tuples_equality.almd
+2490	spec/wasm_cross/list_pattern_in_option_payload.almd
 2245	spec/wasm_cross/list_pattern_variant_element.almd
 9071	spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 2488	spec/wasm_cross/list_product_overflow.almd
@@ -578,6 +579,7 @@
 5188	spec/wasm_cross/native_wall_shapes.almd
 4636	spec/wasm_cross/negative_float_literal_sized.almd
 8753	spec/wasm_cross/negative_offset_and_width_totality.almd
+3149	spec/wasm_cross/nested_box_guard_binder.almd
 2634	spec/wasm_cross/nested_ctor_pattern.almd
 12111	spec/wasm_cross/nested_field_path_mut.almd
 5764	spec/wasm_cross/nested_hof_lambda_inference.almd
