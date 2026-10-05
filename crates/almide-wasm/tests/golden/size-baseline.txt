@@ -852,6 +852,7 @@
 14204	spec/wasm_cross/trig_libm.almd
 2241	spec/wasm_cross/tuple_eq.almd
 1997	spec/wasm_cross/tuple_ops.almd
+7110	spec/wasm_cross/tuple_scrutinee_recursive_variants.almd
 1484	spec/wasm_cross/tuple_single.almd
 3227	spec/wasm_cross/uint64_assert_display.almd
 5809	spec/wasm_cross/uint64_upper_half.almd

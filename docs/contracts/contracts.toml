@@ -1074,6 +1074,7 @@ evidence  = [
   { path = "spec/wasm_cross/nested_tuple_pattern.almd", class = "fixture" },
   { path = "spec/wasm_cross/recursive_payload_closure_capture.almd", class = "fixture" },
   { path = "spec/wasm_cross/recursive_payload_nested_pattern.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tuple_scrutinee_recursive_variants.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-071"
