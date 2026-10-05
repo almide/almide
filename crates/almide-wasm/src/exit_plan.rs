@@ -62,11 +62,12 @@ pub(crate) struct ExitPlan {
 }
 
 impl Emitter<'_> {
-    /// The frame's credits right now: the rc_owned locals, then the
+    /// The frame's credits right now: the rc_owned locals and the named
+    /// list rests of the arms being lowered (#3377, arm_rests.rs), then the
     /// droppable params not among them (a param the Assign routes made
     /// an owner is released once — the #1770 double free).
     fn frame_credits(&self) -> (BTreeSet<u32>, BTreeSet<u32>) {
-        let owned: BTreeSet<u32> = self.rc_owned.clone();
+        let owned: BTreeSet<u32> = self.rc_owned.iter().copied().chain(self.arm_rests.locals()).collect();
         let params: BTreeSet<u32> = self
             .rc_frame_params
             .iter()
@@ -120,8 +121,10 @@ impl Emitter<'_> {
                     frame.clone()
                 } else {
                     // Loop form: the params are rebound by the loop-back,
-                    // the locals live on into the next iteration.
-                    params.clone()
+                    // the locals live on into the next iteration. An arm
+                    // rest does not (#3377): no rebind releases it, and the
+                    // arguments already took their own credit of it.
+                    params.iter().copied().chain(self.arm_rests.locals()).collect()
                 }
             }
         };
@@ -169,6 +172,11 @@ impl Emitter<'_> {
                         w.frame_replaced();
                     }
                 } else {
+                    // #3377: a raw-rule loop-back carries an arm rest (a raw
+                    // address into it may be an argument): the old leak.
+                    if plan.carried.iter().any(|&i| self.arm_rests.contains(i)) {
+                        self.witness_decline("pattern:list-rest:early-exit");
+                    }
                     let carried: Vec<u32> =
                         plan.carried.iter().filter(|i| self.rc_owned.contains(i)).copied().collect();
                     self.witness_loop_back(&carried);

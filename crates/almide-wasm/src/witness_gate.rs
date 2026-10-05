@@ -697,9 +697,9 @@ fn binds_a_local(e: &IrExpr) -> bool {
 }
 
 /// A named list rest no route releases. `arm_releases`: an UNGUARDED match
-/// arm releases each `..t` binder after its body (patterns.rs
-/// `release_arm_rests`; an exit that skips it declines at emission,
-/// witness_rest.rs). A guarded arm's false guard falls through with the rest
+/// arm releases each `..t` binder after its body, and every exit or loop
+/// jump out of the arm on its own edge (arm_rests.rs, #3377). A guarded
+/// arm's false guard falls through with the rest
 /// built, and a `let [h, ..t] = xs` never releases it.
 fn pattern_has_named_rest(p: &almide_ir::IrPattern, arm_releases: bool) -> bool {
     use almide_ir::IrPattern as P;

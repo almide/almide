@@ -6,7 +6,8 @@
 //! nothing on the jump edge: the body's heap locals are FRAME credits (the
 //! next pass's rebind releases the previous occupant, the epilogue the last),
 //! so leaving the body early leaves them exactly where a fall-through pass
-//! does.
+//! does. The one exception is a named list rest of an arm the jump leaves:
+//! no rebind releases it, so the jump edge does (#3377, arm_rests.rs).
 
 use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind};
 use wasm_encoder::BlockType;
@@ -70,6 +71,7 @@ impl Emitter<'_> {
     /// exit block (while: 1; for-in: 2 — the inner block adds one).
     pub(crate) fn lower_loop_body(&mut self, body: &[IrStmt], for_in: bool) -> Result<(), EmitError> {
         let saved = self.loop_ctl.take();
+        let rest_floor = self.open_loop_rests();
         if for_in {
             self.f.instructions().block(BlockType::Empty);
             self.loop_ctl = Some((0, 2));
@@ -86,6 +88,20 @@ impl Emitter<'_> {
             self.f.instructions().end();
         }
         self.loop_ctl = saved;
+        self.close_loop_rests(rest_floor);
+        Ok(())
+    }
+
+    /// `continue` / `break` in statement position: a branch to the loop
+    /// context's continue label (`break` adds the depth to its exit). The
+    /// arms the jump leaves release their list rests first (#3377).
+    pub(crate) fn lower_loop_jump(&mut self, brk: bool) -> Result<(), EmitError> {
+        let Some((extra, delta)) = self.loop_ctl else {
+            return unsup(if brk { "expr:Break" } else { "expr:Continue" });
+        };
+        self.release_jumped_rests();
+        self.f.instructions().br(if brk { extra + delta } else { extra });
+        self.witness_loop_jump();
         Ok(())
     }
 

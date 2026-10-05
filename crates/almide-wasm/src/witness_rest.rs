@@ -1,18 +1,18 @@
 //! The recorder's SCOPED BLOCKS (#2758), split from witness.rs for the file
 //! budget: a block a construct takes a credit on and settles itself when the
-//! construct ends — a named list rest and a map walk's cursor. A path that
-//! leaves a list rest's arm before that settlement still holds the credit,
-//! so the frame declines; a map walk's cursor is a frame credit for the
-//! walk's duration, so every exit edge releases it (#3374).
+//! construct ends — a named list rest and a map walk's cursor. Both are
+//! frame credits for the construct's duration, so every edge that leaves it
+//! early releases them on that edge (#3374 the cursor, #3377 the rest).
 //!
 //! `[h, ..t]` in a match arm materializes `t` as a fresh list block
 //! (patterns.rs `emit_pattern_binds`) that neither the local's rebind nor the
 //! epilogue releases: the ARM releases it once its body has run
-//! (`release_arm_rests`). The local is therefore a holder that is not an
-//! owner — no dec-old, no iteration-end release — whose one credit the
-//! arm's explicit `$dec` settles.
+//! (arm_rests.rs `release_arm_rests`), and an exit or a loop jump out of the
+//! arm releases it first (the exit plan's `witness_dec`, or the jump's). The
+//! local is therefore a holder that is not an owner — no dec-old, no
+//! iteration-end release — whose one credit exactly one `$dec` per path
+//! settles.
 
-use super::paths::Ev;
 use super::WitnessRecorder;
 
 impl WitnessRecorder {
@@ -23,14 +23,10 @@ impl WitnessRecorder {
     }
 
     /// The arm released the rest (`d`). A path that left the arm since the
-    /// block was built (a `!` exit, a `return_call`, a loop jump) skipped
-    /// that release and still holds it: the frame declines rather than
-    /// certify a block no route frees on that path.
+    /// block was built (a `!` exit, a guard return, a `return_call`, a loop
+    /// jump) released it on its own edge (#3377) and is dead here.
     pub fn rest_release(&mut self, local: u32) {
-        let born = self.log.iter().rposition(|e| matches!(e, Ev::Bind { local: l, .. } if *l == local));
-        if born.is_some_and(|i| self.log[i..].iter().any(|e| matches!(e, Ev::Jump | Ev::Exit))) {
-            self.decline("pattern:list-rest:early-exit");
-        } else if !self.held_ops(local, "d") {
+        if !self.held_ops(local, "d") {
             self.poison();
         }
     }

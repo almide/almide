@@ -291,6 +291,9 @@ impl Emitter<'_> {
     /// The release fn of an owned LOCAL, by the type `rc_own` recorded
     /// for it (a param is recorded at frame entry).
     pub(crate) fn dec_fn_of_local(&self, idx: u32) -> u32 {
+        if let Some(t) = self.arm_rests.ty_of(idx) {
+            return self.dec_fn_of(t);
+        }
         let Some(&t) = self.owned_ty.get(&idx) else { return F_DEC_FLAT };
         // A C-319 cell local owns the CELL, not the occupant (#2010).
         let is_cell = self.locals.iter().any(|(v, &(i, _))| i == idx && self.cells.contains(v));

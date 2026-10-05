@@ -88,6 +88,8 @@ pub(crate) struct Emitter<'a> {
     /// Every exit `emit_exit` wrote, with the byte offset it started at —
     /// the E083 validator (exit_plan.rs) reads the bytes back against it.
     pub(crate) exit_ledger: Vec<crate::exit_plan::ExitRecord>,
+    /// #3377: named list rests the exit plan releases (arm_rests.rs).
+    pub(crate) arm_rests: crate::patterns::arm_rests::ArmRests,
     // NOTE: rc_owned and rc_frame_params are BOTH dec'd by the
     // epilogue — a local in the two sets at once is a double free. Use
     // rc_own(), never a raw insert (#1770: a mut-param writeback's
