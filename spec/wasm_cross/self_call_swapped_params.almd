@@ -1,0 +1,62 @@
+// @contract: C-075
+// #3402: a self-recursive call that hands one param to ANOTHER param's slot
+// (`pairs(b, a)`) must give the arg the mode that slot has. Native borrow
+// inference read every self-call slot as borrowed, so a param the body only
+// read stayed `&E` while the slot it was swapped into was owned `E` (the
+// body consumed the other param), and the call passed `&E` where `E` is
+// expected: rustc E0308 while `check` accepted and the wasm leg printed the
+// answer. Both swap directions, a three-param rotation and a param moved
+// into a constructor are covered.
+type E = | Leaf(String) | Node(String, List[E])
+
+fn render(e: E) -> String = match e {
+  Leaf(x) => x,
+  Node(k, args) => k + "(" + list.join(args |> list.map((a) => render(a)), ", ") + ")",
+}
+
+fn call(f: String, args: List[String]) -> String = f + "(" + list.join(args, ", ") + ")"
+
+fn label(e: E) -> String = match e {
+  Leaf(v) => v,
+  Node(k, _) => k,
+}
+
+// The issue's shape: walks b; when b is a leaf and a is a node, swaps the two.
+fn pairs(a: E, b: E) -> String = match b {
+  Node(k, args) => {
+    let subs = args |> list.map((x) => pairs(a, x))
+    call(k, [render(a)] + (args |> list.map((x) => render(x))) + subs)
+  },
+  Leaf(v) => match a {
+    Node(_, _) => call("swap", [render(a), v, pairs(b, a)]),
+    Leaf(w) => w + "~" + v,
+  },
+}
+
+// The other direction: the SECOND param is the consumed one.
+fn pairs_rev(a: E, b: E) -> String = match a {
+  Node(k, _) => k + render(b),
+  Leaf(v) => match b {
+    Node(_, _) => v + "/" + pairs_rev(b, a),
+    Leaf(w) => w + "~" + v,
+  },
+}
+
+// A three-param rotation.
+fn rot(a: E, b: E, c: E, n: Int) -> String = if n == 0 then render(a) + "," + label(b) + "," + label(c)
+else render(a) + ";" + rot(b, c, a, n - 1)
+
+// A param moved into a constructor.
+fn wrap(a: E, b: E, n: Int) -> E = if n == 0 then Node("w", [a])
+else match b {
+  Leaf(_) => wrap(b, a, n - 1),
+  Node(_, _) => wrap(b, a, n - 1),
+}
+
+effect fn main() -> Unit = {
+  println(pairs(Node("f", [Leaf("x")]), Leaf("y")))
+  println(pairs_rev(Leaf("y"), Node("f", [Leaf("x")])))
+  println(pairs_rev(Leaf("y"), Leaf("z")))
+  println(rot(Leaf("a"), Leaf("b"), Node("c", []), 4))
+  println(render(wrap(Leaf("p"), Leaf("q"), 3)))
+}
