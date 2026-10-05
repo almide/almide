@@ -836,12 +836,18 @@ almide add bindgen                      # github.com/almide/bindgen
 almide add almide/almide-bindgen        # github.com/almide/almide-bindgen
 almide add user/repo@v0.1.0             # バージョン指定
 almide add --git https://example.com/repo.git --tag v1.0 mylib
+almide add almide-graphics/ceangal2@v0.1.0 --subdir ceangal  # リポジトリ内のサブディレクトリにあるパッケージ
 ```
 
 短縮記法:
 - `almide add name` → `https://github.com/almide/{name}`
 - `almide add user/repo` → `https://github.com/{user}/{repo}`
 - `@v0.1.0` → `tag = "v0.1.0"`
+- `--subdir <dir>` → `subdir = "<dir>"`(#3381、[package-system.md §6.1](./package-system.md))。パッケージ名は
+  subdir の最後の要素(`--git` 指定時は第 1 引数)。
+
+フェッチと検査(subdir の存在・`almide.toml` の package name が依存名と一致)が通ってから
+`almide.toml` に書き込む。失敗時はマニフェストを変更しない。
 
 ---
 
@@ -853,6 +859,7 @@ almide add --git https://example.com/repo.git --tag v1.0 mylib
 almide deps
 # bindgen = https://github.com/almide/almide-bindgen (v0.1.0)
 # json = https://github.com/almide/json (main)
+# ceangal = https://github.com/almide-graphics/ceangal2 (v0.1.0) subdir ceangal
 ```
 
 ---
@@ -864,6 +871,8 @@ almide deps
 ```bash
 almide dep-path bindgen
 # /Users/you/.almide/cache/bindgen/.src-2080cb5159116353/a629eded8d20/src
+almide dep-path ceangal     # subdir 依存: 共有クローン内のパッケージディレクトリ
+# /Users/you/.almide/cache/.repos/.src-<source>/<commit>/ceangal/src
 ```
 
 用途: 依存パッケージの `.almd` ファイルを `process.exec("almide", ["run", path])` で実行する場合のパス取得。
