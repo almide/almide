@@ -961,6 +961,7 @@ spec/wasm_cross/top_let_rc_value.almd
 spec/wasm_cross/top_let_stored_in_container.almd
 spec/wasm_cross/toplevel_const_wrapping.almd
 spec/wasm_cross/trig_libm.almd
+spec/wasm_cross/tuple_bound_list_mapped_in_loop.almd
 spec/wasm_cross/tuple_eq.almd
 spec/wasm_cross/tuple_ops.almd
 spec/wasm_cross/tuple_scrutinee_list_payload_into_ok.almd

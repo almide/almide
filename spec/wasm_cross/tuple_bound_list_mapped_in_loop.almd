@@ -1,0 +1,26 @@
+// @contract: C-033
+// #3440: a list bound by a tuple pattern and read with `|> list.map` inside an
+// inner loop that rebuilds a record keeps its value on every iteration (it was
+// moved on the first, E0382 in the generated Rust).
+type Sc = { funs: List[(String, List[Bool])], n: Int }
+
+fn split(x: Int) -> (List[(String, Bool)], Int) = ([("a", x > 0)], x)
+
+fn flags(names: List[String]) -> Sc = {
+  var sc = Sc { funs: [], n: 0 }
+  for k in [1, 2] {
+    let (xs, _) = split(k)
+    for n in names {
+      sc = { ...sc, funs: sc.funs + [
+        (n, xs |> list.map(((_, b)) => b))
+      ] }
+    }
+  }
+  sc
+}
+
+effect fn main() -> Unit = {
+  let sc = flags(["f", "g"])
+  println(int.to_string(list.len(sc.funs)))
+  println(sc.funs |> list.map(((n, bs)) => "${n}:${list.len(bs)}") |> list.join(","))
+}
