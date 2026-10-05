@@ -474,9 +474,11 @@ spec/wasm_cross/koka_reuse1_unzip.almd
 spec/wasm_cross/koka_reuse4_map_rebuild.almd
 spec/wasm_cross/koka_unicode_combining.almd
 spec/wasm_cross/lambda_failure_channel.almd
+spec/wasm_cross/leak_free_map_walk_exit.almd
 spec/wasm_cross/leak_free_propagating_literal_operand.almd
 spec/wasm_cross/leak_free_reader_temporaries.almd
 spec/wasm_cross/leak_free_result_option_carriers.almd
+spec/wasm_cross/leak_free_spread_produced_base.almd
 spec/wasm_cross/let_unwrap_propagation.almd
 spec/wasm_cross/let_wildcard_discard.almd
 spec/wasm_cross/letbound_variant_match.almd
