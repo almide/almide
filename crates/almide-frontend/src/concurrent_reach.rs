@@ -32,6 +32,10 @@ use std::collections::{HashMap, HashSet};
 use almide_base::intern::{sym, Sym};
 use almide_lang::ast::{self, Decl, Expr, ExprKind, Pattern, Program, Span, Stmt};
 
+#[path = "concurrent_reach_closed.rs"]
+mod closed;
+pub use closed::ClosureFinding;
+
 /// The `fan` surfaces whose fn-valued arguments are concurrent slots.
 /// `__any_block` is the parser's spelling of `fan.any { … }`.
 const FAN_OPS: &[&str] = &["map", "settle", "any", "any_map", "race", "timeout", "bounded", "__any_block"];
@@ -143,6 +147,9 @@ enum Mode {
     /// `body` is the body being walked; `live` is false while evaluating a
     /// `let` initializer outside the site (a var read there is a snapshot).
     Reach { body: u32, live: bool },
+    /// Collecting the free locals of an `http.serve` app (ADR-0020 §5.2):
+    /// a name bound below scope index `base` is a local of the enclosing fn.
+    Closed { base: usize },
 }
 
 pub struct Analyzer<'a> {
@@ -173,6 +180,10 @@ pub struct Analyzer<'a> {
     has_dotted_fns: bool,
     /// The cheap syntactic pre-scan (`Shape`), taken once in `new`.
     shape: Shape,
+    /// Apps passed to `http.serve` that read a local (ADR-0020 §5.2).
+    closure_findings: Vec<closed::ClosureFinding>,
+    /// The free locals of the app being walked in `Mode::Closed`.
+    closure_hits: Vec<(Sym, Option<Span>)>,
 }
 
 /// What one pass over the program's syntax rules out before the walk (#3340).
@@ -213,6 +224,8 @@ impl<'a> Analyzer<'a> {
             reported: HashSet::new(),
             has_dotted_fns: false,
             shape: Shape::default(),
+            closure_findings: Vec::new(),
+            closure_hits: Vec::new(),
         };
         for d in &prog.decls {
             match d {
@@ -300,16 +313,17 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Run slot inference to a fixpoint, then collect every site that
-    /// reaches a `var`.
-    pub fn run(mut self, prog: &'a Program) -> (Vec<Finding>, HashMap<Sym, Vec<(usize, SlotKind)>>) {
+    /// reaches a `var`, and every `http.serve` app that reads a local.
+    pub fn run(mut self, prog: &'a Program) -> (Vec<Finding>, Vec<ClosureFinding>) {
         if !self.shape.may_have_sites {
             // No site: nothing to infer and nothing to record (`Shape`).
-            return (self.findings, self.slots);
+            // `http.serve` has a declared slot, so its call is a site too.
+            return (self.findings, self.closure_findings);
         }
         self.infer_slots(prog);
         self.record = true;
         self.discover_program(prog);
-        (self.findings, self.slots)
+        (self.findings, self.closure_findings)
     }
 
     /// Slot inference only (§3.1), to a fixpoint.
@@ -551,13 +565,13 @@ impl<'a> Analyzer<'a> {
 
     fn walk(&mut self, e: &'a Expr, scope: &mut Scope<'a>, mode: Mode) {
         match &e.kind {
-            ExprKind::Ident { name } | ExprKind::TypeName { name } => self.name_ref(*name, scope, mode),
+            ExprKind::Ident { name } | ExprKind::TypeName { name } => self.name_ref(*name, e.span, scope, mode),
             ExprKind::Lambda { params, body } => self.lambda(params, body, scope, mode, false),
             ExprKind::Call { callee, args, named_args, .. } => {
                 let args: Vec<&'a Expr> = args.iter().chain(named_args.iter().map(|(_, a)| a)).collect();
                 self.call(callee, &args, scope, mode);
             }
-            ExprKind::Pipe { left, right } => match &right.kind {
+            ExprKind::Pipe { left, right } => match &pipe_call(right).kind {
                 ExprKind::Call { callee, args, named_args, .. } => {
                     let args: Vec<&'a Expr> = std::iter::once(&**left)
                         .chain(args.iter())
@@ -752,17 +766,17 @@ impl<'a> Analyzer<'a> {
                     self.walk(else_, scope, mode);
                     scope.push((*name, Bind::Let { body, init: scrutinee }));
                 }
-                Stmt::Assign { name, value, .. } => {
-                    self.name_ref(*name, scope, mode);
+                Stmt::Assign { name, value, span } => {
+                    self.name_ref(*name, *span, scope, mode);
                     self.walk(value, scope, mode);
                 }
-                Stmt::IndexAssign { target, index, value, .. } => {
-                    self.name_ref(*target, scope, mode);
+                Stmt::IndexAssign { target, index, value, span, .. } => {
+                    self.name_ref(*target, *span, scope, mode);
                     self.walk(index, scope, mode);
                     self.walk(value, scope, mode);
                 }
-                Stmt::FieldAssign { target, value, .. } => {
-                    self.name_ref(*target, scope, mode);
+                Stmt::FieldAssign { target, value, span, .. } => {
+                    self.name_ref(*target, *span, scope, mode);
                     self.walk(value, scope, mode);
                 }
                 Stmt::Guard { cond, else_, .. } => {
@@ -787,7 +801,7 @@ impl<'a> Analyzer<'a> {
             Mode::Reach { body: b, live } if folded => Mode::Reach { body: b, live },
             // An unfolded lambda is its own body, and it may be called: live.
             Mode::Reach { .. } => Mode::Reach { body: self.fresh_body(), live: true },
-            Mode::Discover => Mode::Discover,
+            Mode::Discover | Mode::Closed { .. } => mode,
         };
         self.walk(body, scope, inner);
         scope.truncate(mark);
@@ -810,7 +824,7 @@ impl<'a> Analyzer<'a> {
         }
         let slots = match mode {
             Mode::Discover => self.call_slots(&resolved, args, scope),
-            Mode::Reach { .. } => Vec::new(),
+            Mode::Reach { .. } | Mode::Closed { .. } => Vec::new(),
         };
         let wrapper = match &resolved {
             Callee::Local(f) | Callee::Ext(_, f) => Some(f.to_string()),
@@ -843,12 +857,14 @@ impl<'a> Analyzer<'a> {
                 let inner = Mode::Reach { body: self.fresh_body(), live: true };
                 self.walk(e, scope, inner);
             }
+            Mode::Closed { .. } => self.walk(e, scope, mode),
             Mode::Discover => {
                 if let Some(index) = self.flows_from_param(e, scope, 0) {
                     if let Some(f) = self.current_fn {
                         self.add_slot(f, index, kind);
                     }
                 } else if self.record {
+                    self.check_served_app(e, &kind, wrapper.as_deref(), scope);
                     self.check_site(e, kind, wrapper, scope);
                 }
                 // Sites nested inside the argument are discovered too.
@@ -898,7 +914,11 @@ impl<'a> Analyzer<'a> {
     }
 
     /// A reference to `name` (read or write) in the current mode.
-    fn name_ref(&mut self, name: Sym, scope: &mut Scope<'a>, mode: Mode) {
+    fn name_ref(&mut self, name: Sym, span: Option<Span>, scope: &mut Scope<'a>, mode: Mode) {
+        if let Mode::Closed { base } = mode {
+            self.closed_ref(name, span, scope, base);
+            return;
+        }
         let Mode::Reach { body, live } = mode else { return };
         match lookup(scope, name).copied() {
             Some(Bind::Var { body: owner }) => {
@@ -1023,10 +1043,23 @@ enum Callee {
     Unknown,
 }
 
+/// The call a pipe's right side applies: `x |> f(y)!` parses as a pipe into
+/// `Unwrap(f(y))`, and the piped value is still `f`'s first argument.
+fn pipe_call(right: &Expr) -> &Expr {
+    match &right.kind {
+        ExprKind::Unwrap { expr } | ExprKind::Try { expr } | ExprKind::ToOption { expr }
+            if matches!(expr.kind, ExprKind::Call { .. }) =>
+        {
+            expr
+        }
+        _ => right,
+    }
+}
+
 fn mode_body(mode: Mode) -> u32 {
     match mode {
         Mode::Reach { body, .. } => body,
-        Mode::Discover => 0,
+        Mode::Discover | Mode::Closed { .. } => 0,
     }
 }
 

@@ -8,7 +8,7 @@ impl Checker {
     pub(crate) fn check_concurrent_var_reach(&mut self, program: &ast::Program) {
         use crate::concurrent_reach::{Analyzer, World};
         let module = self.current_module_prefix.as_deref().map(sym);
-        let findings = {
+        let (findings, closure) = {
             let env = &self.env;
             let aliases = &env.import_table.aliases;
             let direct = &env.import_table.direct;
@@ -25,10 +25,14 @@ impl Checker {
                 arg_is_fn: &arg_is_fn,
                 type_is_fn: &type_is_fn,
             };
-            Analyzer::new(program, w).run(program).0
+            Analyzer::new(program, w).run(program)
         };
         for f in findings {
             let d = concurrent_reach_diagnostic(&f, self.source_file.clone());
+            self.diagnostics.push(d);
+        }
+        for f in closure {
+            let d = served_app_closure_diagnostic(&f, self.source_file.clone());
             self.diagnostics.push(d);
         }
     }
@@ -114,6 +118,33 @@ fn concurrent_reach_diagnostic(
         }
     };
     let mut d = Diagnostic::error(message, hint, context).with_code("E008");
+    d.file = file;
+    if let Some(s) = f.span {
+        d.line = Some(s.line);
+        d.col = Some(s.col);
+        d.end_col = Some(s.end_col);
+    }
+    d
+}
+
+/// E095 (ADR-0020 §5.2): the app passed to `http.serve` reads a local.
+fn served_app_closure_diagnostic(f: &crate::concurrent_reach::ClosureFinding, file: Option<String>) -> Diagnostic {
+    let name = f.name.as_str();
+    let (whose, theirs) = match f.owner.map(|o| o.to_string()) {
+        Some(o) if o == "main" => ("main".to_string(), "main's locals".to_string()),
+        Some(o) => (format!("fn `{o}`"), format!("the locals of `{o}`")),
+        None => ("the enclosing block".to_string(), "its locals".to_string()),
+    };
+    let message = format!("the app passed to {} captures `{name}`, a local of {whose}", f.surface);
+    let hint = format!(
+        "the app runs in several instances — one per worker natively, one per request on a wasi:http host — \
+         and {theirs} do not exist there. Make `{name}` a top-level `let`, or compute it inside the handler."
+    );
+    let context = match &f.wrapper {
+        Some(w) => format!("the app passed to {w}, which serves it with {}", f.surface),
+        None => format!("the app passed to {}", f.surface),
+    };
+    let mut d = Diagnostic::error(message, hint, context).with_code("E095");
     d.file = file;
     if let Some(s) = f.span {
         d.line = Some(s.line);
