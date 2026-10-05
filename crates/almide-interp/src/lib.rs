@@ -62,6 +62,9 @@ impl RunOutcome {
         match self.status {
             RunStatus::Ok => 0,
             RunStatus::Aborted => 1,
+            // C-196's defined abort: call-stack exhaustion exits 1 on every
+            // target, the interpreter's own threshold included.
+            RunStatus::StackExhausted => 1,
             RunStatus::Exited(code) => code,
             // Distinguished markers: the gate excludes these from the 3-way
             // assert rather than emitting a bogus third vote.
@@ -82,9 +85,19 @@ pub enum RunStatus {
     /// A capability the interpreter does not implement (a non-deterministic or
     /// out-of-scope intrinsic). NOT a bug — the gate skips this fixture.
     Unsupported(String),
-    /// The fuel / recursion-depth budget was exhausted. NOT a hang or panic —
-    /// a clean distinguished outcome for the future fuzz oracle.
+    /// The STEP-fuel budget was exhausted. NOT a hang or panic — a clean
+    /// distinguished outcome (exit marker -3) the gates read as an abstain.
     FuelExhausted,
+    /// The interpreter's own call stack ran out: call nesting reached
+    /// [`MAX_DEPTH`], its declared C-196 threshold. Rendered as C-196's
+    /// defined abort — the stdout written so far, `Error: stack overflow` on
+    /// stderr, exit 1 — the same observable form native and the embedded wasm
+    /// host give at THEIR thresholds. The thresholds are per target (declared,
+    /// not equalised), so a harness must not read this as a vote where the
+    /// backends recurse deeper and finish: it counts as identical only where
+    /// it matches the other leg, and is otherwise the C-196 resource class
+    /// (the abstain the old depth-as-fuel outcome gave).
+    StackExhausted,
     /// An explicit `process.exit(n)` with a NON-ZERO, NON-ONE code. Both
     /// backends exit with exactly `n`, so the third vote has to carry it: this
     /// used to collapse into `Aborted`, whose `exit_code()` is a flat 1, and
@@ -297,8 +310,10 @@ pub const DEFAULT_FUEL: u64 = 100_000_000;
 /// and a stuck body is still bounded — at ten programs' worth.
 pub const POOL_FUEL: u64 = 10 * DEFAULT_FUEL;
 /// Recursion-depth ceiling (interp call frames, not Rust frames per se). This is
-/// a *semantic* fuel-like bound on call nesting: a clean `FuelExhausted` once a
-/// program nests calls this deep, never a native stack overflow. The native
+/// the interpreter's declared C-196 call-stack threshold: once a program nests
+/// calls this deep the run ends as [`RunStatus::StackExhausted`] — C-196's
+/// defined abort (`Error: stack overflow`, exit 1), distinct from step-fuel
+/// `FuelExhausted` — never a native stack overflow. The native
 /// stack is decoupled from this number by running the evaluator on a dedicated
 /// [`INTERP_STACK_SIZE`]-byte thread (see [`Interpreter::run_main`]) so the
 /// guard is host-stack-independent.
@@ -315,7 +330,7 @@ pub const MAX_DEPTH: u32 = 4_000;
 
 /// Dedicated-thread stack size for the evaluator. Decouples [`MAX_DEPTH`] from
 /// the caller's thread stack so the recursion bound is host-independent: a
-/// program that exhausts [`MAX_DEPTH`] reports a clean `FuelExhausted` whether it
+/// program that exhausts [`MAX_DEPTH`] reports a clean `StackExhausted` whether it
 /// runs on a 2 MiB cargo-test worker thread, an 8 MiB main thread, or anywhere
 /// else. 256 MiB is *reserved* address space, not committed memory — thread
 /// stacks are demand-paged, so only the pages actually touched by the deepest
@@ -344,8 +359,11 @@ pub(crate) enum Flow {
     /// Modeled as Ok for n == 0, Aborted (exit 1) otherwise — the two codes
     /// the deterministic corpus uses.
     Exit(i64),
-    /// Out of fuel / too deep. Propagates straight to the top.
+    /// Out of step fuel. Propagates straight to the top.
     Fuel,
+    /// Call nesting reached [`MAX_DEPTH`] — the interpreter's own C-196
+    /// stack exhaustion. Propagates straight to the top.
+    Stack,
     /// An out-of-scope capability. Propagates straight to the top.
     Unsupported(String),
 }
