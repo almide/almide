@@ -268,7 +268,15 @@ pending_self_host_ceiling = 5
 # embedded host serves almide:process/spawn, ADR-0025), keeping its stock-p1
 # leg only. Evidence: spec/embedded_cross/process_spawn_family.almd and the
 # three process spec files on the wasm test lane.
-pending_port_ceiling = 41
+# 2026-10-06 (#2659): 41 -> 40. http.serve loses its stock-p1 leg: the
+# default `build --target wasm` of a serve-shaped program (main's body is
+# one `http.serve(port, app)` call, optionally after `let`s that only `port`
+# reads) is a wasi:http/handler@0.3.0 component that `wasmtime serve` runs
+# with no flags (C-375); any other main that reaches http.serve is E081 with
+# the shape rule as the reason. The probe measures it through its variant 5
+# (http.serve as main's only statement). Evidence:
+# spec/serve_cross/http_serve_export.almd under tests/http_serve_export_test.rs.
+pending_port_ceiling = 40
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
 # HttpRequest readers (http.query_params / req_body / req_header / req_method /
@@ -429,13 +437,6 @@ reason-embedded = "no wasm host binding for the streaming client (the framed ops
 reason-stock-p1 = "no wasm host binding for the streaming client (the framed ops 43..=50 serve the non-streaming family only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-structural = "host-surface"
 issue = "#1827"
-
-[[unavailable]]
-fn = "http.serve"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#2650, C-367): `almide run --target wasm` serves it — one instance, sequential, the same status, header set and body through the shared server core (host ops 70..=72); a stock p1 artifact has no listening socket, so `almide build --target wasm` refuses it — run it with `almide run --target wasm` or natively"
-issue = "#2659"
 
 [[unavailable]]
 fn = "matrix.linear_q1_0_row_no_bias"

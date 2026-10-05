@@ -341,6 +341,12 @@ def synth(mod, f, params, ret, types, variant, shape=0):
     variant 4: hoisted args AND the call as the FINAL statement (no
                trailing print) — the same lesson's second half: the
                postlude itself walls some shapes.
+    variant 5: `http.serve` alone — the call as main's ONLY statement, its
+               args inline. The stock build serves http.serve only from a
+               serve-shaped main (#2659, C-375: the artifact is a
+               wasi:http/handler@0.3.0 export, where main is not run), so
+               the opening print of every other variant walls it there by
+               the shape rule, not by the fn.
 
     Tuple-shaped returns are CONSUMED the way real code consumes them,
     through a `shape` ladder of their own (every variant tries each):
@@ -354,6 +360,12 @@ def synth(mod, f, params, ret, types, variant, shape=0):
     """
     ctx = Ctx()
     args = [dummy(t, ctx, types) for _, t in params]
+    if variant == 5:
+        if (mod, f["name"]) != ("http", "serve") or ctx.hoists:
+            return None, "not-the-serve-export"
+        bang = "!" if f.get("effect") else ""
+        imp = "".join(f"import {m}\n" for m in sorted(ctx.imports | {mod}))
+        return f"{imp}\neffect fn main() -> Unit = {mod}.serve({', '.join(args)}){bang}\n", ctx
     # A hoisted `var` carries the param's type: an un-annotated rebinding
     # of a Result value is E041 (ADR-0008), and the annotation is what
     # keeps a nested `Result[Result[A, E], E]` argument at its full depth.
@@ -596,7 +608,7 @@ def measure(mod, f, types, leg, tmp, env):
     except Unsynth as e:
         return "error", str(e)
     verdict, ctors = None, set()
-    for variant, shape in [(v, sh) for v in (0, 1, 2, 3, 4) for sh in (0, 1, 2)]:
+    for variant, shape in [(v, sh) for v in (0, 1, 2, 3, 4, 5) for sh in (0, 1, 2)]:
         try:
             prog, ctx = synth(mod, f, params, ret, types, variant, shape)
         except Unsynth as e:
