@@ -712,8 +712,8 @@ fn populate_tail_release_set(
     body: &IrExpr,
     param_owned: &Option<Vec<bool>>,
 ) {
-    // The raw-address rule: a prim-using body keeps every release on the
-    // epilogue (a raw view into a local or param may still be read by
+    // The raw-address rule: a prim-using or address-taking body (#3420)
+    // keeps every release on the epilogue (a raw view into a local may be read by
     // the code after the call); a lifted lambda's env block is not a
     // frame of its own. MODULE SPACE is not an exclusion: the structural
     // witness (#1696 B1) balanced every module-space certificate once
@@ -739,7 +739,7 @@ fn populate_tail_release_set(
     if env_shift != 0 {
         return;
     }
-    if crate::rc_ownership::body_uses_prim(body) {
+    if em.body_takes_raw_address(body) {
         let ids: Vec<VarId> = params.iter().map(|&(v, _)| v).collect();
         let raw = crate::exit_plan::raw_address_sources(body, &ids);
         em.loop_back_releasable = params
