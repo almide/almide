@@ -368,6 +368,7 @@ call:list.__fallible_find_map__String_String_String
 call:list.__fallible_flat_map__Int_Int_String
 call:list.__fallible_flat_map__Int_String_String
 call:list.__fallible_flat_map__String_Int_String
+call:list.__fallible_flat_map__T_Int_String
 call:list.__fallible_fold__Int_Int_E
 call:list.__fallible_fold__Int_Int_String
 call:list.__fallible_fold__String_Int_String
@@ -379,6 +380,7 @@ call:list.__fallible_map__Int_Option_List_Int_String
 call:list.__fallible_map__Int_Option_String_String
 call:list.__fallible_map__Int_String_String
 call:list.__fallible_map__String_Int_String
+call:list.__fallible_map__T_Int_String
 call:list.__fallible_map__W_W_String
 call:list.__fallible_partition__Int_String
 call:list.__fallible_reduce__Int_String
@@ -748,6 +750,7 @@ expr:Match
 expr:Member
 expr:OptionNone
 expr:OptionSome
+expr:OptionalChain
 expr:Range
 expr:Record
 expr:ResultErr
