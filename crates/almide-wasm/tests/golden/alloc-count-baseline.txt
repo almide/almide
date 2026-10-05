@@ -427,7 +427,7 @@
 29	22	316	29	spec/wasm_cross/list_modify_heap.almd
 8	3	64	8	spec/wasm_cross/list_of_maps_loop_build.almd
 4	0	32	4	spec/wasm_cross/list_of_tuples_equality.almd
-20	15	185	20	spec/wasm_cross/list_pattern_variant_element.almd
+17	13	180	17	spec/wasm_cross/list_pattern_variant_element.almd
 9060	9017	8165397	9060	spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 18	10	164	18	spec/wasm_cross/list_product_overflow.almd
 36	21	250	36	spec/wasm_cross/list_push_on_record_field.almd
