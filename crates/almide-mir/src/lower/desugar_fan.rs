@@ -539,8 +539,24 @@ pub fn desugar_fan_block(body: &IrExpr) -> Option<IrExpr> {
             // result (no tuple; a real-Result thunk keeps its `!`). fan thunks cannot
             // capture `var`s — the rewrite is observation-equal and count-invariant. It
             // previously fell through to the scalar-bind deferred-Const wall (fan_test).
+            // An `ok(e)` element (the frontend's lift of an infallible-at-IR
+            // call, e.g. an `@extern` effect hook: `ResultOk { fetch(a) }`) can
+            // never be the first Err, so its `!` IS `e` — a raw element like a
+            // phantom one, taking the inner expression. Count-invariant: the
+            // inner call appears exactly once.
+            let ok_inner = |x: &IrExpr| -> Option<IrExpr> {
+                match &x.kind {
+                    IrExprKind::ResultOk { expr } if crate::lower::is_result_ty(&x.ty) => {
+                        Some((**expr).clone())
+                    }
+                    _ => None,
+                }
+            };
             if exprs.len() == 1 {
-                if let Some(ok_ty) = phantom_ok_ty(&exprs[0]) {
+                if let Some(inner) = ok_inner(&exprs[0]) {
+                    *e = inner;
+                    self.changed = true;
+                } else if let Some(ok_ty) = phantom_ok_ty(&exprs[0]) {
                     let mut nx = exprs[0].clone();
                     nx.ty = ok_ty;
                     *e = nx;
@@ -566,8 +582,9 @@ pub fn desugar_fan_block(body: &IrExpr) -> Option<IrExpr> {
             let classes: Option<Vec<Elem>> = exprs
                 .iter()
                 .map(|x| {
-                    phantom_ok_ty(x)
-                        .map(Elem::Plain)
+                    ok_inner(x)
+                        .map(|inner| Elem::Plain(inner.ty.clone()))
+                        .or_else(|| phantom_ok_ty(x).map(Elem::Plain))
                         .or_else(|| real_result_ok_ty(x).map(Elem::Unwrap))
                 })
                 .collect();
@@ -579,7 +596,7 @@ pub fn desugar_fan_block(body: &IrExpr) -> Option<IrExpr> {
                     .zip(&classes)
                     .map(|(x, c)| {
                         let Elem::Plain(t) = c else { unreachable!() };
-                        let mut nx = x.clone();
+                        let mut nx = ok_inner(x).unwrap_or_else(|| x.clone());
                         nx.ty = t.clone();
                         nx
                     })
@@ -599,7 +616,7 @@ pub fn desugar_fan_block(body: &IrExpr) -> Option<IrExpr> {
             for (x, c) in exprs.iter().zip(&classes) {
                 let (val, vty) = match c {
                     Elem::Plain(t) => {
-                        let mut nx = x.clone();
+                        let mut nx = ok_inner(x).unwrap_or_else(|| x.clone());
                         nx.ty = t.clone();
                         (nx, t.clone())
                     }
