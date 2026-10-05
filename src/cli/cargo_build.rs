@@ -201,6 +201,9 @@ struct PackageNatives {
     files: Vec<(std::path::PathBuf, Vec<u8>)>,
     /// The `native/*.rs` stems that get a `mod <stem>;`, sorted.
     mod_stems: Vec<String>,
+    /// The package's `[package].name`, when it has `native/*.rs` modules:
+    /// whose items get their pre-#3338 aliases (#3425).
+    name: Option<String>,
 }
 
 impl CrateInputs {
@@ -243,12 +246,46 @@ impl CrateInputs {
             for (path, bytes) in &pkg.files {
                 acc.push_str(&format!("{}:{:016x};", path.display(), super::hash64(bytes)));
             }
-            acc.push_str(&format!("mods={}]", pkg.mod_stems.join(",")));
+            acc.push_str(&format!("mods={}", pkg.mod_stems.join(",")));
+            if let Some(name) = &pkg.name {
+                acc.push_str(&format!(";name={}", name));
+            }
+            acc.push(']');
         }
         for nd in &self.dep_native_deps {
             acc.push_str(&format!("dep:{}={}@{};", nd.name, nd.spec, nd.target.as_deref().unwrap_or("")));
         }
         acc
+    }
+
+    /// The pre-#3338 aliases of the items of every package whose `native/`
+    /// modules this crate carries, resolved against `code` (#3425).
+    fn legacy_aliases(&self, code: &str) -> super::native_legacy_aliases::LegacyAliases {
+        let pkgs: Vec<String> = self.packages.iter().filter_map(|p| p.name.clone()).collect();
+        if pkgs.is_empty() {
+            return Default::default();
+        }
+        super::native_legacy_aliases::legacy_aliases(code, &pkgs)
+    }
+
+    /// Warn, once per name, for every pre-#3338 spelling a package's
+    /// `native/*.rs` names (#3425). Called before the build cache is
+    /// consulted, so a cache hit warns too.
+    pub(super) fn warn_legacy_callbacks(&self, code: &str) {
+        if crate::warnings_suppressed() || self.packages.iter().all(|p| p.name.is_none()) {
+            return;
+        }
+        let aliases = self.legacy_aliases(code);
+        for pkg in &self.packages {
+            let Some(name) = &pkg.name else { continue };
+            for (rel, bytes) in pkg.files.iter().filter(|(rel, _)| rel.extension().is_some_and(|e| e == "rs")) {
+                let file = format!("native/{} of package `{}`", rel.display(), name);
+                let text = String::from_utf8_lossy(bytes);
+                for w in super::native_legacy_aliases::warnings(&file, &text, &aliases) {
+                    crate::err(&w);
+                }
+            }
+        }
     }
 
     /// Write the collected files into `src_dir`, declare their modules in
@@ -258,6 +295,9 @@ impl CrateInputs {
         for pkg in &self.packages {
             pkg.apply(code, src_dir)?;
         }
+        // The old spellings the packages' native code may still call (#3425).
+        // Nothing is added to a crate without a package `native/` module.
+        code.push_str(&super::native_legacy_aliases::render(&self.legacy_aliases(code)));
         if !self.dep_native_deps.is_empty() {
             let cargo_path = project_dir.join("Cargo.toml");
             let mut cargo = std::fs::read_to_string(&cargo_path).unwrap_or_default();
@@ -291,6 +331,11 @@ impl PackageNatives {
             } else if path.is_dir() {
                 read_tree(&path, std::path::Path::new(&entry), &mut pkg.files)?;
             }
+        }
+        if !pkg.mod_stems.is_empty() {
+            pkg.name = crate::project::parse_toml(&root.join("almide.toml")).ok()
+                .map(|p| p.package.name)
+                .filter(|n| !n.is_empty());
         }
         Ok(pkg)
     }
@@ -360,7 +405,7 @@ fn read_tree(dir: &std::path::Path, rel: &std::path::Path, out: &mut Vec<(std::p
 ///   `.cargo/config{,.toml}` in it and every ancestor, and in `CARGO_HOME`.
 pub(super) fn build_environment_key(project_dir: &std::path::Path) -> String {
     let recipe = super::hash64(
-        concat!(include_str!("cargo_build.rs"), include_str!("native_target.rs")).as_bytes(),
+        concat!(include_str!("cargo_build.rs"), include_str!("native_target.rs"), include_str!("native_legacy_aliases.rs")).as_bytes(),
     );
     let mut acc = format!("recipe={:016x};rustc={};", recipe, toolchain_identity());
     let mut vars: Vec<(String, String)> = std::env::vars()
@@ -465,7 +510,9 @@ codegen-units = 1
     // modules + `[native-deps]` from dependency packages — same wiring as
     // `cargo_build_generated_with_native`.
     let mut lib_code = rs_code.to_string();
-    CrateInputs::collect(source_root)?.apply(&mut lib_code, &src_dir, project_dir)?;
+    let inputs = CrateInputs::collect(source_root)?;
+    inputs.warn_legacy_callbacks(rs_code);
+    inputs.apply(&mut lib_code, &src_dir, project_dir)?;
     std::fs::write(src_dir.join("lib.rs"), &lib_code)
         .map_err(|e| format!("failed to write lib.rs: {}", e))?;
 
