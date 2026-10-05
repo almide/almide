@@ -560,9 +560,10 @@ struct FnInfo {
     /// Why call sites must refuse this function (None = callable).
     refuse: Option<String>,
     /// Per param: does the CALLEE own it (the site shares, the exit plan
-    /// releases) or only borrow it (neither) — param_borrow.rs (#2028).
-    /// Both sides of every call edge read this one vector.
+    /// releases) or only borrow it — param_borrow.rs (#2028).
     param_owned: Vec<bool>,
+    /// An Int address of a heap block can come out (#3420, exit_plan.rs).
+    yields_address: bool,
     /// Per param: was it declared `mut` (#2503), on a non-effect callee?
     /// The C-132 rewrite keeps each parameter's marker, so a CALL SITE can
     /// tell which argument the callee writes into and hands back, and makes
@@ -571,9 +572,8 @@ struct FnInfo {
     param_mut: Vec<bool>,
     /// Per param: declared `mut`, effect callee or not (writeback_move.rs).
     param_mut_decl: Vec<bool>,
-    /// `@extern(wasm, module, name)` (#2275): the slot is a declared import
-    /// the host serves, not a body — its stub leaves the module in the
-    /// `imports::declare` post-pass.
+    /// `@extern(wasm, module, name)` (#2275): a declared import the host
+    /// serves — its stub leaves the module in `imports::declare`.
     import: Option<(String, String)>,
     /// The outlined body of a `scoped { … }` block (#1997): every call to
     /// it is a DECLARED region boundary — `region.rs` opens the window

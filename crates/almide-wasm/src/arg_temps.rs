@@ -37,8 +37,10 @@ use almide_types::types::Ty;
 pub(crate) fn bind_native_temporaries(ir: &IrProgram) -> Option<IrProgram> {
     let mut out = ir.clone();
     let mut changed = false;
+    let yielders = address_yielder_names(ir);
+    let yielders = &yielders;
     {
-        let mut v = Binder { vars: &mut out.var_table, changed: &mut changed, tail: false };
+        let mut v = Binder { vars: &mut out.var_table, changed: &mut changed, tail: false, yielders };
         for f in out.functions.iter_mut() {
             v.visit_with_tail(&mut f.body, true);
         }
@@ -47,7 +49,7 @@ pub(crate) fn bind_native_temporaries(ir: &IrProgram) -> Option<IrProgram> {
         }
     }
     for m in out.modules.iter_mut() {
-        let mut v = Binder { vars: &mut m.var_table, changed: &mut changed, tail: false };
+        let mut v = Binder { vars: &mut m.var_table, changed: &mut changed, tail: false, yielders };
         for f in m.functions.iter_mut() {
             v.visit_with_tail(&mut f.body, true);
         }
@@ -56,6 +58,50 @@ pub(crate) fn bind_native_temporaries(ir: &IrProgram) -> Option<IrProgram> {
         }
     }
     changed.then_some(out)
+}
+
+/// #3420: the simple names of the fns an address can come out of — the
+/// IR-level twin of `exit_plan::address_yielders` (no table exists yet).
+/// Matched by simple name across modules: an over-approximation only names
+/// one more temporary.
+fn address_yielder_names(ir: &IrProgram) -> std::collections::HashSet<almide_base::intern::Sym> {
+    let fns: Vec<&almide_ir::IrFunction> =
+        ir.functions.iter().chain(ir.modules.iter().flat_map(|m| m.functions.iter())).collect();
+    let mut out = std::collections::HashSet::new();
+    loop {
+        let before = out.len();
+        for f in &fns {
+            if matches!(f.ret_ty, Ty::Int | Ty::RawPtr) && !out.contains(&f.name) && calls_address_source(&f.body, &out) {
+                out.insert(f.name);
+            }
+        }
+        if out.len() == before {
+            return out;
+        }
+    }
+}
+
+fn is_address_source(t: &CallTarget, yielders: &std::collections::HashSet<almide_base::intern::Sym>) -> bool {
+    crate::exit_plan::is_raw_address_op(t) || matches!(t, CallTarget::Named { name } if yielders.contains(name))
+}
+
+fn calls_address_source(e: &IrExpr, yielders: &std::collections::HashSet<almide_base::intern::Sym>) -> bool {
+    struct Scan<'y>(bool, &'y std::collections::HashSet<almide_base::intern::Sym>);
+    impl almide_ir::visit::IrVisitor for Scan<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Call { target, .. } | IrExprKind::TailCall { target, .. } = &e.kind
+                && is_address_source(target, self.1)
+            {
+                self.0 = true;
+            }
+            if !self.0 {
+                almide_ir::visit::walk_expr(self, e);
+            }
+        }
+    }
+    let mut s = Scan(false, yielders);
+    almide_ir::visit::IrVisitor::visit_expr(&mut s, e);
+    s.0
 }
 
 /// The RC-droppable shapes (rc_ownership.rs `rc_droppable`, by Ty): Str,
@@ -151,6 +197,7 @@ struct Binder<'a> {
     vars: &'a mut VarTable,
     changed: &'a mut bool,
     tail: bool,
+    yielders: &'a std::collections::HashSet<almide_base::intern::Sym>,
 }
 
 impl Binder<'_> {
@@ -417,6 +464,14 @@ impl IrMutVisitor for Binder<'_> {
             IrExprKind::IndexAccess { object, .. } => vec![object.as_mut()],
             IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => vec![object.as_mut()],
             IrExprKind::OptionalChain { expr, .. } => vec![expr.as_mut()],
+            // #3420: an address op's block must outlive the ADDRESS, not the
+            // op — `peek(bytes.data_ptr(bytes.from_string(s)), n)` released
+            // the temporary when `data_ptr` returned, before `peek` read it.
+            // Named, the frame holds it to its exit (the raw-address rule
+            // keeps a tail transfer from releasing it before the jump).
+            IrExprKind::Call { target, args, .. } if is_address_source(target, self.yielders) => {
+                args.iter_mut().collect()
+            }
             IrExprKind::StringInterp { parts } => parts
                 .iter_mut()
                 .filter_map(|p| match p {
