@@ -1,0 +1,32 @@
+// @contract: C-070
+// #3414: a guard that reads a name bound inside a nested pattern on a boxed
+// recursive payload runs after that name is bound, on both targets — for a
+// match on a borrowed value and on an owned one. Native used to test the
+// guard before the body bound the name (rustc E0425).
+type T =
+  | A(T, T)
+  | C(Int)
+
+fn on_borrowed(t: T) -> Int = match t {
+  A(A(C(c), _), _) if c == 1 => 10,
+  A(A(C(c), C(d)), C(e)) if c + d == e => 20 + c,
+  A(C(x), A(C(y), _)) if x < y => 30 + y,
+  _ => 0,
+}
+
+fn on_owned(n: Int, m: Int) -> Int = match A(A(C(n), C(m)), C(n + m)) {
+  A(A(C(c), _), _) if c == 1 => 10,
+  A(A(C(c), C(d)), C(e)) if c + d == e and c > d => 20 + c,
+  _ => 0,
+}
+
+fn main() -> Unit = {
+  println(int.to_string(on_borrowed(A(A(C(1), C(9)), C(9)))))
+  println(int.to_string(on_borrowed(A(A(C(2), C(3)), C(5)))))
+  println(int.to_string(on_borrowed(A(A(C(2), C(3)), C(6)))))
+  println(int.to_string(on_borrowed(A(C(4), A(C(7), C(0))))))
+  println(int.to_string(on_borrowed(A(C(8), A(C(7), C(0))))))
+  println(int.to_string(on_owned(1, 5)))
+  println(int.to_string(on_owned(4, 3)))
+  println(int.to_string(on_owned(3, 4)))
+}
