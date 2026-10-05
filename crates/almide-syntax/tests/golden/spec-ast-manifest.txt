@@ -1,4 +1,4 @@
-# oracle: almide 0.67.0 (dev) at b6dbc7fe8 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.67.0 (dev) at 312e83713 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -319,6 +319,7 @@ ea130f91be4a3b455dd12b280f2402bcfc44010b93db2ffb2d2894f1c0f88c04	spec/lang/effec
 df796de448cc2cf1d78a684407d9c9f62fec41ba302f3b8b9e3c86fe8f60d54e	spec/lang/effect_operand_unwrap_test.almd
 052a3e5dd2c2711f685164eab164e4a6126f31bd3dc60b0ed3e9757523c26934	spec/lang/effect_option_qq_test.almd
 ef32c5c7854ed3f7ccb4d5a28c54a521a53c250d6e6fbbe382f4bb28c03be6df	spec/lang/effect_result_arg_test.almd
+4d0cb3188e58b7c05c1df194ec92f75b5580997484bb17dd6c01ef52559b473a	spec/lang/effect_result_tail_lift_test.almd
 8f267f71b5d236ad57e82979c3c9730c2dbaeb52546f5aa00bb9d98e97659eaf	spec/lang/effect_slot_test.almd
 e9bad65b0fa99b99d7e020dd1d9c210d71e083f230df35dd212c7e91c7872803	spec/lang/element_borrow_release_test.almd
 1807b70863aa0c645405cbf27201ea264bd440933cd2c4a323f2cea171a794e3	spec/lang/eq_protocol_test.almd
