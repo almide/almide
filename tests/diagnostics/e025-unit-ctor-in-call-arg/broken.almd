@@ -1,0 +1,17 @@
+// #3394: a bare unit case of a generic variant in ARGUMENT position opens
+// the variant's type parameter as a slot nothing pins. `depth(Tip)` passed
+// check while both builds failed (native E0425, wasm E082): mono had no
+// instance to name. Never silently defaulted, as `none` and `[]` are not.
+type Tree[A] =
+  | Tip
+  | Bin(Tree[A], A, Tree[A])
+
+fn depth[A](t: Tree[A]) -> Int =
+  match t {
+    Tip => 0,
+    Bin(l, _, r) => 1 + int.max(depth(l), depth(r)),
+  }
+
+fn main() -> Unit = {
+  println(int.to_string(depth(Tip)))
+}
