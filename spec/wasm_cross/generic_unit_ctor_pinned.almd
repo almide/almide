@@ -1,0 +1,47 @@
+// @contract: C-058
+// #3394: a bare unit case of a generic variant (`Tip` of `Tree[A]`) carries
+// the variant's type parameter as an inference slot, like `none` and `[]`.
+// Unpinned (`depth(Tip)`, `let t = Tip` with no pinning use) it is E025 at
+// check time on both targets — see tests/diagnostics/e025-unit-ctor-* —
+// never silently defaulted. This fixture pins the POSITIVE side: every way
+// the slot gets pinned builds, monomorphises and prints identically native
+// == wasm, and two instantiations of one generic fn coexist.
+type Tree[A] = | Tip | Bin(Tree[A], A, Tree[A])
+
+fn depth[A](t: Tree[A]) -> Int = match t {
+  Tip => 0,
+  Bin(l, _, r) => 1 + int.max(depth(l), depth(r)),
+}
+
+fn leaf[A](x: A) -> Tree[A] = Bin(Tip, x, Tip)
+
+fn count[T](o: T?) -> Int = match o {
+  some(_) => 1,
+  none => 0,
+}
+
+fn size[T](xs: List[T]) -> Int = list.len(xs)
+
+fn main() -> Unit = {
+  // Pinned by the binding annotation.
+  let e: Tree[Int] = Tip
+  println("empty=${depth(e)}")
+  // empty=0
+  // Pinned by a sibling payload inside the constructor.
+  println("one=${depth(Bin(Tip, 1, Tip))}")
+  // one=1
+  // Pinned through a generic fn's argument; a second instantiation.
+  let s = Bin(leaf("a"), "b", Tip)
+  println("str=${depth(s)}")
+  // str=2
+  // Pinned by a later use of an un-annotated binding.
+  let t = Tip
+  let u = Bin(t, 2.5, leaf(1.5))
+  println("float=${depth(u)} tip=${depth(t)}")
+  // float=2 tip=0
+  // The Option and List twins, pinned by their annotations.
+  let o: String? = none
+  let xs: List[Bool] = []
+  // none=0 some=1 empty=0 three=3
+  println("none=${count(o)} some=${count(some(3))} empty=${size(xs)} three=${size([1, 2, 3])}")
+}
