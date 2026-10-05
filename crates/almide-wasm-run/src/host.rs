@@ -102,7 +102,8 @@ struct Host {
     /// `http.serve`'s listener and pending connection (ops 70..=72, #2650).
     serve: Arc<Mutex<crate::host_serve::ServeState>>,
     /// The product runner's LIVE streams (#2650): stdout through a 64 KiB
-    /// buffer flushed per write on a terminal — native's rule — and stderr
+    /// buffer flushed at every line end, and per write on a terminal —
+    /// native's rule (#3417) — and stderr
     /// straight through, so a program that never returns (a server) shows
     /// its output as it runs. None = the buffered harness capture.
     live_out: Option<Arc<Mutex<std::io::BufWriter<std::io::Stdout>>>>,
@@ -128,7 +129,9 @@ fn emit_out(host: &Host, text: &str) {
             use std::io::Write as _;
             let mut w = w.lock().expect("live stdout");
             let _ = w.write_all(text.as_bytes());
-            if stdout_is_terminal() {
+            // Line-buffered, native's rule (#3417): a line end flushes on any
+            // stdout, every write on a terminal.
+            if text.contains('\n') || stdout_is_terminal() {
                 let _ = w.flush();
             }
         }

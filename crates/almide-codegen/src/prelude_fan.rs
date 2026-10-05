@@ -40,7 +40,7 @@ fn almide_fan_lock(g: &AlmideFanGroup) -> std::sync::MutexGuard<'_, AlmideFanSta
 VIS fn almide_fan_current() -> Option<AlmideFanSink> { ALMIDE_FAN_SINK.try_with(|c| c.borrow().clone()).ok().flatten() }
 VIS fn almide_fan_adopt(sink: Option<AlmideFanSink>) { let _ = ALMIDE_FAN_SINK.try_with(|c| *c.borrow_mut() = sink); }
 VIS fn almide_fan_active() -> bool { ALMIDE_FAN_SINK.try_with(|c| c.borrow().is_some()).unwrap_or(false) }
-fn almide_out_real(err: bool, bytes: &[u8]) { if err { let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), bytes); } else { ALMIDE_STDOUT_BUF.with(|buf| { let mut w = buf.borrow_mut(); let _ = std::io::Write::write_all(&mut *w, bytes); if almide_stdout_is_terminal() { let _ = std::io::Write::flush(&mut *w); } }); } }
+fn almide_out_real(err: bool, bytes: &[u8]) { if err { let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), bytes); } else { ALMIDE_STDOUT_BUF.with(|buf| { let mut w = buf.borrow_mut(); let _ = std::io::Write::write_all(&mut *w, bytes); if bytes.contains(&b'\n') || almide_stdout_is_terminal() { let _ = std::io::Write::flush(&mut *w); } }); } }
 fn almide_out_route(sink: Option<&AlmideFanSink>, err: bool, bytes: &[u8]) {
     let mut cur = sink;
     while let Some(s) = cur {

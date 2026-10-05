@@ -95,3 +95,57 @@ fn a_prompt_printed_before_a_stdin_read_reaches_the_reader_before_the_read_block
     assert_eq!(reply.as_deref(), Some("hi ada"));
     assert!(child.wait().unwrap().success());
 }
+
+/// Spawn `cmd` with stdout to a pipe and wait (bounded) for its first line,
+/// then kill it: the program never exits on its own, so a line held in the
+/// buffer until exit never arrives and the deadline fails the test instead of
+/// hanging it.
+fn first_line_while_running(mut cmd: Command) -> Option<String> {
+    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let first = BufReader::new(stdout).lines().next().map(|l| l.unwrap_or_default());
+        let _ = tx.send(first);
+    });
+    let got = rx.recv_timeout(Duration::from_secs(20));
+    let _ = child.kill();
+    let _ = child.wait();
+    got.ok().flatten()
+}
+
+/// #3417: a program that walls the verified native render (here an
+/// `@extern(rust)` fn) builds through the standard codegen, whose stdout
+/// buffer held every line until exit when stdout was a pipe or a file — a
+/// watcher or a server never showed its output. The buffer is line-buffered:
+/// a printed line reaches the pipe while the program still runs.
+#[test]
+fn a_line_printed_by_a_long_running_standard_codegen_program_reaches_a_pipe_before_exit() {
+    let dir = tempfile::tempdir().unwrap();
+    let prog = write(
+        dir.path(),
+        "spin.almd",
+        "@extern(rust, \"std::thread\", \"yield_now\")\nfn yield_now() -> Unit = _\neffect fn main() -> Unit = {\n  println(\"hello\")\n  var i = 0\n  while i >= 0 { yield_now() }\n}\n",
+    );
+    let exe = dir.path().join("spin");
+    let built = Command::new(almide()).arg("build").arg(&prog).arg("-o").arg(&exe).env("ALMIDE_VERBOSE", "1").output().unwrap();
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    assert!(
+        String::from_utf8_lossy(&built.stderr).contains("building via the standard codegen"),
+        "the program must take the standard codegen path for this test to mean anything: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let line = first_line_while_running(Command::new(&exe));
+    assert_eq!(line.as_deref(), Some("hello"), "the line was held in the stdout buffer while the program ran");
+}
+
+/// The embedded wasm host's live stdout follows the same rule (#3417).
+#[test]
+fn a_line_printed_by_a_long_running_wasm_program_reaches_a_pipe_before_exit() {
+    let dir = tempfile::tempdir().unwrap();
+    let prog = write(dir.path(), "spin.almd", "effect fn main() -> Unit = {\n  println(\"hello\")\n  var i = 0\n  while i >= 0 { i = i + 1 }\n}\n");
+    let mut cmd = Command::new(almide());
+    cmd.arg("run").arg(&prog).args(["--target", "wasm"]);
+    let line = first_line_while_running(cmd);
+    assert_eq!(line.as_deref(), Some("hello"), "the line was held in the host's stdout buffer while the program ran");
+}

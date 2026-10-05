@@ -4,10 +4,10 @@ Standard I/O. import io, effect.
 
 **stdout is one buffer** (#2245). `println`, `io.print`, `io.write` and
 `io.write_bytes` all write through the same 64 KiB buffer, so they appear in
-program order. When stdout is a terminal the buffer flushes after every
-write (each line shows as it happens); when it is a pipe or a file it fills
-and flushes in blocks — 50,000 short lines cost the time of a handful of
-system calls instead of one each. It is flushed at exit, when the program
+program order. The buffer is line-buffered (#3417): a write that ends a line
+flushes it, on a terminal, a pipe or a file alike, so a long-running program
+(a watcher, a server) shows each line as it prints it. When stdout is a
+terminal every write flushes. It is also flushed at exit, when the program
 panics or `main` returns an error, before a child process runs, before every
 read of stdin, and by `io.print`, which always flushes (so `io.print("")` is
 an explicit flush). `eprintln` writes to stderr unbuffered, so when stdout is
