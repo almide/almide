@@ -1,8 +1,8 @@
 diff --git a/crates/almide-wasm/src/tco.rs b/crates/almide-wasm/src/tco.rs
-index 2af51f952..80162dd45 100644
+index bc5f28667..665ac4017 100644
 --- a/crates/almide-wasm/src/tco.rs
 +++ b/crates/almide-wasm/src/tco.rs
-@@ -75,8 +75,8 @@ pub(crate) fn loop_convert(
+@@ -83,8 +83,8 @@ pub(crate) fn loop_convert(
              wasmparser::Operator::ReturnCall { function_index }
                  if *function_index == self_idx =>
              {
@@ -12,4 +12,4 @@ index 2af51f952..80162dd45 100644
 +                    out.instructions().local_set(p); // [MUTANT: reverse order dropped]
                  }
                  out.instructions().br(depth - 1);
-                 continue;
+                 origin.extend(std::iter::repeat_n(k - 1, param_vts.len() + 1));
