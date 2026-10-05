@@ -5,6 +5,7 @@
 /// Owns:     syntax validation, operator precedence, ExprId assignment, depth limiting
 /// Does NOT: type checking, name resolution, semantic validation
 
+mod braceless_body;
 mod collections;
 mod compounds;
 mod declarations;
@@ -21,6 +22,7 @@ mod recovery;
 mod retired_range;
 mod statements;
 mod test_attributes;
+mod test_braceless_body;
 mod test_expr_precedence;
 mod test_let_rec;
 mod test_assign_ascription;
@@ -73,6 +75,12 @@ pub struct Parser {
     /// keeps its pre-#1997 meaning). Inside a `(`/`[` the depth is deeper and
     /// the scoped block is available again, as a struct literal is in Rust.
     pub(crate) block_head_depth: Option<usize>,
+    /// #3370: the shape of the last `= <body>` `parse_fn_decl_body` parsed.
+    pub(crate) last_fn_body: Option<braceless_body::FnBodyShape>,
+    /// #3370: the top-level fn parsed immediately before the current
+    /// declaration, when its body was one braceless expression — read by
+    /// `top_decl_error` to explain an indented line that follows it.
+    pub(crate) preceding_expr_fn: Option<braceless_body::ExprBodiedFn>,
 }
 
 /// A comment collected from a continuation gap (#1326): the Newline/Comment
@@ -100,7 +108,7 @@ pub(crate) enum CommentSide {
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         let (tokens, inline_comments) = Self::drop_inline_comments(tokens);
-        Parser { tokens, pos: 0, inline_comments, expr_comments: std::collections::HashMap::new(), pending_gap: None, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new(), delim_depth: 0, block_head_depth: None }
+        Parser { tokens, pos: 0, inline_comments, expr_comments: std::collections::HashMap::new(), pending_gap: None, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new(), delim_depth: 0, block_head_depth: None, last_fn_body: None, preceding_expr_fn: None }
     }
 
     /// Drop Comment tokens sitting INLINE mid-expression (`f(1 /* x */, 2)`) so the

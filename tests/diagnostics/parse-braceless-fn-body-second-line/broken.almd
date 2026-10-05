@@ -1,0 +1,9 @@
+// #3370: a single-expression body after `=` ends at its first expression,
+// so the indented `hoge()` is read as a new top-level item. The diagnostic
+// names that and shows the braced body built from these lines.
+fn main() -> Unit =
+  println("Hello, world!")
+  hoge()
+
+fn hoge() -> Unit =
+  println("hogehoge")
