@@ -1163,6 +1163,27 @@ fn refuse_invalid_manifest(command: &Commands) {
         err(&format!("error: {}", e));
         std::process::exit(1);
     }
+    report_manifest_warnings(&command, path, &content);
+}
+
+/// A key the manifest writes and no reader reads (#3382) is a warning, once
+/// per command, printed here with the manifest refusals above. `check
+/// --json` carries it as a diagnostic row on stdout; every other command
+/// prints it on stderr, so no other machine-readable stdout changes. The
+/// exit code never changes: the build runs exactly as if the key were absent.
+/// `survive-test-leg` is a child of `survive`, which already warned.
+fn report_manifest_warnings(command: &Commands, path: &std::path::Path, content: &str) {
+    if matches!(command, Commands::SurviveTestLeg { .. }) {
+        return;
+    }
+    let json = matches!(command, Commands::Check { json: true, .. });
+    for d in project::manifest_warnings(path, content) {
+        if json {
+            out(&diagnostic_render::to_json(&d));
+        } else {
+            err(&diagnostic_render::display(&d));
+        }
+    }
 }
 
 fn dispatch(cli: Cli) {

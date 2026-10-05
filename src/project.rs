@@ -2,6 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
+use almide_base::diagnostic::Diagnostic;
+
 /// Package identity for diamond dependency resolution.
 /// Two packages with the same (name, major) are considered the same package
 /// and will be unified to a single version. Different majors coexist.
@@ -179,6 +181,7 @@ fn value_text(v: &toml::Value) -> String {
 impl Manifest<'_> {
     /// `[table]`'s entries in the order the file writes them.
     fn entries_in_file_order(&self, table: &str) -> Vec<(String, toml::Value)> {
+        debug_assert!(TOP_LEVEL_KEYS.contains(&table), "[{table}] is read but not in TOP_LEVEL_KEYS");
         let Some(values) = self.values.get(table).and_then(toml::Value::as_table) else { return Vec::new() };
         let mut keys: Vec<(usize, String)> = spanned_entry(&self.spans, table)
             .and_then(|t| t.get_ref().as_table())
@@ -212,7 +215,7 @@ impl Manifest<'_> {
             let Some(tables) = platform.get_ref().as_table() else {
                 return Err(located(path, content, at, &format!("[target.'{key_text}'] must be a table holding `native-deps`")));
             };
-            if let Some((sub, _)) = tables.iter().find(|(k, _)| k.get_ref().as_ref() != "native-deps") {
+            if let Some((sub, _)) = tables.iter().find(|(k, _)| !TARGET_PLATFORM_KEYS.contains(&k.get_ref().as_ref())) {
                 return Err(located(path, content, sub.span().start, &format!(
                     "unknown table `{}` in [target.'{key_text}'] — only `native-deps` can be target-specific\n  \
                      hint: write [target.'{key_text}'.native-deps]",
@@ -248,8 +251,10 @@ impl Manifest<'_> {
         Ok(out)
     }
 
-    /// `[package].<key>` as text.
+    /// `[package].<key>` as text. `key` must be one of [`PACKAGE_KEYS`] — the
+    /// list the unknown-key warning judges against (#3382).
     fn package_field(&self, key: &str) -> Option<String> {
+        debug_assert!(PACKAGE_KEYS.contains(&key), "[package].{key} is read but not in PACKAGE_KEYS");
         self.values.get("package").and_then(|p| p.get(key)).map(value_text)
     }
 
@@ -257,6 +262,7 @@ impl Manifest<'_> {
     /// written at; `None` when the key is absent. Anything but an array of
     /// strings is refused on its line, never read as an empty list.
     fn permission_list(&self, path: &Path, content: &str, key: &str) -> Result<Option<Vec<(String, usize)>>, String> {
+        debug_assert!(PERMISSION_KEYS.contains(&key), "[permissions].{key} is read but not in PERMISSION_KEYS");
         let Some(perm) = spanned_entry(&self.spans, "permissions") else { return Ok(None) };
         let Some(table) = perm.get_ref().as_table() else {
             return Err(located(path, content, perm.span().start, "[permissions] must be a table"));
@@ -285,7 +291,10 @@ fn dependency_from(
     content: &str,
 ) -> Result<Option<Dependency>, String> {
     let Some(table) = value.as_table() else { return Ok(None) };
-    let field = |k: &str| table.get(k).map(value_text);
+    let field = |k: &str| {
+        debug_assert!(DEPENDENCY_KEYS.contains(&k), "dependency key `{k}` is read but not in DEPENDENCY_KEYS");
+        table.get(k).map(value_text)
+    };
     let git = field("git").unwrap_or_default();
     let dep_path = field("path");
     if git.is_empty() && dep_path.is_none() {
@@ -603,6 +612,139 @@ pub fn check_manifest(path: &Path, content: &str) -> Result<(), String> {
         allowed_effects(std::slice::from_ref(&name)).map_err(|e| located(path, content, at, &e))?;
     }
     Ok(())
+}
+
+// ── Unknown keys (#3382) ────────────────────────────────────────────
+//
+// Each list below is the set of keys its table's reader reads, and the one
+// place the unknown-key warning takes its vocabulary from. The readers
+// `debug_assert!` that every key they read is listed, and
+// `tests/manifest_unknown_key_test.rs` asserts the other direction: each
+// listed key changes what `parse_toml` returns, so a listed key the reader
+// stopped reading (or a new reader key nobody listed) fails a test instead of
+// drifting.
+
+/// The top-level tables `parse_toml` reads.
+pub const TOP_LEVEL_KEYS: &[&str] = &["package", "dependencies", "native-deps", "permissions", "target"];
+/// The keys `[package]` has.
+pub const PACKAGE_KEYS: &[&str] = &["name", "version", "almide"];
+/// `[package]` keys that describe the package and that no reader reads, so
+/// they draw no warning: `edition` is what `almide init` writes, and the
+/// others are the metadata manifests in use already carry (`description` is
+/// in most of them). A key here must change nothing — the test asserts it —
+/// so a reader that starts reading one moves it to [`PACKAGE_KEYS`].
+pub const PACKAGE_METADATA_KEYS: &[&str] = &["description", "edition", "license", "repository"];
+/// The keys one `[dependencies]` entry has.
+pub const DEPENDENCY_KEYS: &[&str] = &["git", "tag", "branch", "version", "path", "subdir"];
+/// The keys `[permissions]` has.
+pub const PERMISSION_KEYS: &[&str] = &["allow", "proc"];
+/// The tables a `[target.<platform>]` table may hold (anything else is an
+/// error, not a warning — it was refused before #3382).
+pub const TARGET_PLATFORM_KEYS: &[&str] = &["native-deps"];
+
+/// `a` and `b` differ by at most one insertion, deletion, substitution or
+/// swap of two adjacent characters (Damerau-Levenshtein ≤ 1) — `brnach` is
+/// one swap from `branch`, which plain Levenshtein counts as two.
+fn within_one_edit(a: &str, b: &str) -> bool {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    if a == b {
+        return true;
+    }
+    let prefix = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    let (ra, rb) = (&a[prefix..], &b[prefix..]);
+    match (ra.len(), rb.len()) {
+        (n, m) if n == m => ra[1..] == rb[1..] || (n >= 2 && ra[0] == rb[1] && ra[1] == rb[0] && ra[2..] == rb[2..]),
+        (n, m) if n == m + 1 => ra[1..] == *rb,
+        (n, m) if n + 1 == m => *ra == rb[1..],
+        _ => false,
+    }
+}
+
+/// A warning located at byte `offset` of the manifest.
+fn manifest_warning(path: &Path, content: &str, offset: usize, message: String, hint: String) -> Diagnostic {
+    let mut d = Diagnostic::warning(message, hint, String::new());
+    d.file = Some(path.display().to_string());
+    d.line = Some(line_of(content, offset));
+    d
+}
+
+/// One warning per key of `table` that is not in `accepted`, in file order.
+/// `site` names the table as a reader would; `what` is `key` or `table`.
+fn unknown_key_warnings(
+    path: &Path,
+    content: &str,
+    table: &toml::de::DeTable<'_>,
+    site: &str,
+    what: &str,
+    accepted: &[&str],
+) -> Vec<Diagnostic> {
+    let mut unknown: Vec<(usize, String)> = table
+        .iter()
+        .filter(|(k, _)| !accepted.contains(&k.get_ref().as_ref()))
+        .map(|(k, _)| (k.span().start, k.get_ref().to_string()))
+        .collect();
+    unknown.sort();
+    let list = accepted.iter().map(|k| format!("`{k}`")).collect::<Vec<_>>().join(", ");
+    unknown
+        .into_iter()
+        .map(|(at, key)| {
+            let hint = match accepted.iter().find(|k| within_one_edit(&key, k)) {
+                Some(k) => format!("did you mean `{k}`? The {what}s {site} accepts are {list}"),
+                None => format!("delete it, or write one of the {what}s {site} accepts: {list}"),
+            };
+            let message = format!("unknown {what} `{key}` in {site} is ignored — it changes nothing");
+            manifest_warning(path, content, at, message, hint)
+        })
+        .collect()
+}
+
+/// The warnings for keys `almide.toml` writes that no reader reads (#3382):
+/// an unknown top-level table, an unknown key in `[package]`,
+/// `[permissions]` or a `[dependencies]` entry (inline table, dotted keys or
+/// `[dependencies.<name>]`), and a dependency entry that names neither `git`
+/// nor `path`, which declares nothing. Each names its line, the key, the
+/// keys that table reads, and the key one edit away when there is one.
+/// `[native-deps]` entries are crate names, so any key is one; their specs
+/// are Cargo's to judge. `[target.<platform>]` refuses an unknown table
+/// already (an error). An unreadable manifest has no warnings — its error
+/// comes from [`check_manifest`]. A warning never fails a command.
+pub fn manifest_warnings(path: &Path, content: &str) -> Vec<Diagnostic> {
+    let Ok(manifest) = read_manifest(path, content) else { return Vec::new() };
+    let mut out = unknown_key_warnings(path, content, &manifest.spans, "almide.toml", "table", TOP_LEVEL_KEYS);
+    let sub = |name: &str| spanned_entry(&manifest.spans, name).and_then(|t| t.get_ref().as_table());
+    if let Some(t) = sub("package") {
+        let known: Vec<&str> = PACKAGE_KEYS.iter().chain(PACKAGE_METADATA_KEYS).copied().collect();
+        out.extend(unknown_key_warnings(path, content, t, "[package]", "key", &known));
+    }
+    if let Some(t) = sub("permissions") {
+        out.extend(unknown_key_warnings(path, content, t, "[permissions]", "key", PERMISSION_KEYS));
+    }
+    let Some(deps) = sub("dependencies") else { return out };
+    let mut entries: Vec<_> = deps.iter().collect();
+    entries.sort_by_key(|(k, _)| k.span().start);
+    for (name, entry) in entries {
+        let name = name.get_ref().as_ref();
+        let ignored = |why: &str| {
+            manifest_warning(
+                path,
+                content,
+                entry.span().start,
+                format!("dependency `{name}` is ignored — {why}"),
+                format!(
+                    "write `{name} = {{ git = \"https://…\", tag = \"v0.1.0\" }}` or `{name} = {{ path = \"../{name}\" }}`, or delete the entry"
+                ),
+            )
+        };
+        let Some(t) = entry.get_ref().as_table() else {
+            out.push(ignored("an entry is a table naming `git` or `path`"));
+            continue;
+        };
+        out.extend(unknown_key_warnings(path, content, t, &format!("dependency `{name}`"), "key", DEPENDENCY_KEYS));
+        if spanned_entry(t, "git").is_none() && spanned_entry(t, "path").is_none() {
+            out.push(ignored("it names neither `git` nor `path`"));
+        }
+    }
+    out
 }
 
 /// `[package].name` of the manifest at `path`, read as TOML and not otherwise
