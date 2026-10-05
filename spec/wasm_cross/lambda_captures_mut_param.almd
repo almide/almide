@@ -1,0 +1,19 @@
+// @contract: C-226
+// #3410: a lambda that captures a `mut` parameter and passes it on to another
+// `mut`-param fn mutates the caller's record once per call on both targets.
+// 0.64.0 native lowered the capture as `c.get()` on a `&mut Counter` (E0599).
+type Counter = { n: Int }
+
+fn next(mut c: Counter) -> Int = {
+  c.n = c.n + 1
+  c.n
+}
+
+fn fresh_ids(xs: List[String], mut c: Counter) -> List[Int] = xs |> list.map((_) => next(c))
+
+effect fn main() -> Unit = {
+  var c = Counter { n: 0 }
+  println(list.join(fresh_ids(["a", "b", "c"], c) |> list.map((i) => int.to_string(i)), ","))
+  println(list.join(fresh_ids(["d", "e"], c) |> list.map((i) => int.to_string(i)), ","))
+  println("n=${int.to_string(c.n)}")
+}
