@@ -1,0 +1,79 @@
+// #3397: the range ops borrow their source on native — slice, take, drop,
+// take_end, drop_end, take_while, drop_while and find copy only what they
+// return. These cases pin the values and that the source is intact and still
+// usable after each call: as a later argument, in a `for ... in`, and as a param.
+fn is_small(n: Int) -> Bool = n < 3
+
+fn ranges(xs: List[Int]) -> List[List[Int]] = [
+  list.slice(xs, 1, 3),
+  list.take(xs, 2),
+  list.drop(xs, 3),
+  list.take_end(xs, 2),
+  list.drop_end(xs, 2),
+  list.take_while(xs, is_small),
+  list.drop_while(xs, is_small)
+]
+
+test "range ops on a param leave the caller's list usable" {
+  let xs = [1, 2, 3, 4, 5]
+  assert_eq(
+    ranges(xs),
+    [
+      [2, 3],
+      [1, 2],
+      [4, 5],
+      [4, 5],
+      [1, 2, 3],
+      [1, 2],
+      [3, 4, 5]
+    ],
+  )
+  assert_eq(xs, [1, 2, 3, 4, 5])
+}
+
+test "a slice of a local, then the local again" {
+  let words = ["a", "b", "c", "d", "e"]
+  let mid = list.slice(words, 1, 4)
+  let head = list.take(words, 2)
+  let rest = list.drop(words, 2)
+  assert_eq(list.join(mid, ""), "bcd")
+  assert_eq(head, ["a", "b"])
+  assert_eq(rest, ["c", "d", "e"])
+  var seen = ""
+  for w in words {
+    seen = seen + w
+  }
+  assert_eq(seen, "abcde")
+  assert_eq(list.len(words), 5)
+}
+
+test "the same source sliced in a loop" {
+  let cs = list.map(0..<100, (k) => int.to_string(k % 10))
+  var total = 0
+  var i = 0
+  while i + 3 <= list.len(cs) {
+    total = total + list.len(list.slice(cs, i, i + 3)) + list.len(list.take(list.drop(cs, i), 2))
+    i = i + 10
+  }
+  assert_eq(total, 50)
+  assert_eq(list.join(list.slice(cs, 0, 3), ""), "012")
+}
+
+test "find and take_while stop early and keep the source" {
+  let names = ["ann", "bob", "cy", "dee"]
+  let short = (s: String) => string.len(s) < 3
+  assert_eq(list.find(names, short), some("cy"))
+  assert_eq(list.take_while(names, (s) => string.len(s) == 3), ["ann", "bob"])
+  assert_eq(list.drop_while(names, (s) => string.len(s) == 3), ["cy", "dee"])
+  assert_eq(names, ["ann", "bob", "cy", "dee"])
+}
+
+test "out-of-range bounds clamp" {
+  let xs = [1, 2, 3]
+  assert_eq(list.slice(xs, 2, 99), [3])
+  assert_eq(list.slice(xs, 3, 1), [])
+  assert_eq(list.take(xs, 99), [1, 2, 3])
+  assert_eq(list.drop(xs, 99), [])
+  assert_eq(list.take(xs, 0), [])
+  assert_eq(xs, [1, 2, 3])
+}
