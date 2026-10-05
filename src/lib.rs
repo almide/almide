@@ -59,6 +59,7 @@ pub mod project;
 pub mod cargo_cfg;
 pub mod wasm_leg;
 pub mod wasm_route;
+pub mod serve_export;
 pub mod project_fetch;
 pub mod resolve;
 pub mod source_overlay;

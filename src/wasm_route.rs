@@ -40,6 +40,11 @@ pub struct RouteOptions {
     pub component_p3: bool,
     /// `ALMIDE_VERIFIED_DEBUG=1`: the route narration through `trace`.
     pub debug: bool,
+    /// The stock serve export (#2659, C-375): `main` is serve-shaped and is
+    /// rewritten into the per-request body the `wasi:http/handler@0.3.0`
+    /// export calls ([`crate::serve_export::rewrite_main_for_export`]). Set
+    /// by the BUILD route of a program that reaches `http.serve`.
+    pub serve_export: bool,
 }
 
 impl RouteOptions {
@@ -51,6 +56,7 @@ impl RouteOptions {
             skip_stock_audit: almide_base::env::flag("ALMIDE_WASM_SKIP_STOCK_AUDIT"),
             component_p3: almide_base::env::flag("ALMIDE_COMPONENT_P3"),
             debug: almide_base::env::flag("ALMIDE_VERIFIED_DEBUG"),
+            serve_export: false,
         }
     }
 }
@@ -130,7 +136,10 @@ pub fn route_wasm(
     opts: RouteOptions,
     trace: &mut dyn FnMut(&str),
 ) -> Result<RoutedWasm, RouteError> {
-    let program = crate::wasm_leg::parse_entry(file, source_text).map_err(RouteError::Front)?;
+    let mut program = crate::wasm_leg::parse_entry(file, source_text).map_err(RouteError::Front)?;
+    if opts.serve_export {
+        crate::serve_export::rewrite_main_for_export(&mut program).map_err(|why| RouteError::Wall { why })?;
+    }
     let resolved = crate::wasm_leg::resolve_modules(file, &program, modules).map_err(RouteError::Front)?;
     // #1315: a debug build's line table names each module's own file.
     for (name, (path, _)) in &resolved.sources {
@@ -183,9 +192,12 @@ pub fn route_wasm(
     // switch probes the emitter frontier, not stock service), and not under
     // component_p3 (the p3 transform's shim carries the fs surface the p1 set
     // does not; an op it cannot map still fails loudly there).
+    // Nor under serve_export: the artifact is the p3 service component, and
+    // the CLI audits its op set against that shim (`check_service`).
     if library
         && !opts.skip_stock_audit
         && !opts.component_p3
+        && !opts.serve_export
         && let Some(op) = host_ops.iter().find(|op| !almide_wasi::P1_SERVED_OPS.contains(op))
     {
         return Err(wall(
