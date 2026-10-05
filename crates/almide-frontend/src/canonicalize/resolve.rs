@@ -214,8 +214,18 @@ pub fn canonical_user_type_sym(name: &str, types: &HashMap<Sym, Ty>, cur_mod: Op
     if let Some((key, Ty::Record { .. } | Ty::Variant { .. })) = stdlib_shadow_entry(name, types, cur_mod) {
         return Some(key);
     }
-    canonical_user_type_sym_own_module(name, types, cur_mod)
-        .or_else(|| canonical_user_type_sym_scoped_alias(name, types, cur_mod))
+    if let Some(own) = canonical_user_type_sym_own_module(name, types, cur_mod) {
+        return Some(own);
+    }
+    // The module declares the name itself as an ALIAS (`type Ctx =
+    // List[String]`): its own declaration is the answer, and it is not
+    // nominal, so no `X.Type` key may stand in for it. Without this the
+    // unique-owner fallback below handed a module's bare `Ctx` to ANOTHER
+    // module's same-named record (#3401).
+    if own_module_alias(name, types, cur_mod).is_some() {
+        return None;
+    }
+    canonical_user_type_sym_scoped_alias(name, types, cur_mod)
         .or_else(|| canonical_user_type_sym_qualified(name, types))
         .or_else(|| canonical_user_type_sym_sibling(name, types, cur_mod))
         .or_else(|| canonical_user_type_sym_bare(name, types, cur_mod))
@@ -275,6 +285,24 @@ fn canonical_user_type_sym_own_module(name: &str, types: &HashMap<Sym, Ty>, cur_
         }
     }
     None
+}
+
+// A user module's own bare reference to a type ALIAS it declares (#3401):
+// the alias target registered under `mod.Name`. A record or variant is
+// answered by `canonical_user_type_sym_own_module`; a generic letter in scope
+// is a bound variable, not this declaration.
+fn own_module_alias<'t>(name: &str, types: &'t HashMap<Sym, Ty>, cur_mod: Option<&str>) -> Option<&'t Ty> {
+    let m = cur_mod?;
+    if name.contains('.') || almide_lang::stdlib_info::is_bundled_module(m) {
+        return None;
+    }
+    if matches!(types.get(&sym(name)), Some(Ty::TypeVar(_) | Ty::ConstParam { .. })) {
+        return None;
+    }
+    match types.get(&sym(&format!("{}.{}", m, name)))? {
+        Ty::Record { .. } | Ty::Variant { .. } | Ty::TypeVar(_) | Ty::ConstParam { .. } => None,
+        t => Some(t),
+    }
 }
 
 // A qualified spelling through THIS file's import alias (`bx.Box` under
@@ -345,11 +373,16 @@ fn canonical_user_type_sym_bare(name: &str, types: &HashMap<Sym, Ty>, cur_mod: O
     };
     if cur_mod.is_none() {
         if let Some(bare) = types.get(&sym(name)) {
-            if matches!(bare, Ty::Record { .. } | Ty::Variant { .. }) {
-                let is_alias_of_a_qualified = types.iter().any(|(k, v)| user_module_owner(k) && v == bare);
-                if !is_alias_of_a_qualified {
-                    return Some(sym(name));
-                }
+            let is_alias_of_a_qualified = || types.iter().any(|(k, v)| user_module_owner(k) && v == bare);
+            match bare {
+                Ty::Record { .. } | Ty::Variant { .. } if !is_alias_of_a_qualified() => return Some(sym(name)),
+                // The entry program's own ALIAS of the name (#3401): not
+                // nominal, so it has no key to answer with, but it shadows an
+                // imported module's same-named record just as a local record
+                // does — the bare lookup after this returns it.
+                Ty::Record { .. } | Ty::Variant { .. } | Ty::TypeVar(_) | Ty::ConstParam { .. } | Ty::Named(..) => {}
+                _ if !is_alias_of_a_qualified() => return None,
+                _ => {}
             }
         }
     }
@@ -687,6 +720,11 @@ fn resolve_simple_type_other(other: &str, known_types: Option<&HashMap<Sym, Ty>>
     // to the existing bare resolution for stdlib / local types.
     if let Some(qualified) = known_types.and_then(|types| canonical_user_type_sym(other, types, cur_mod)).map(|s| Ty::Named(s, vec![])) {
         return qualified;
+    }
+    // The module's own alias of this name (#3401) — read under its qualified
+    // key, since the bare key belongs to whichever module registered last.
+    if let Some(alias) = known_types.and_then(|types| own_module_alias(other, types, cur_mod)) {
+        return alias.clone();
     }
     // A user ALIAS of a stdlib-owned name (`type Value = Int`) lives under
     // the shadow key too (#1828); the nominal shapes were answered above.

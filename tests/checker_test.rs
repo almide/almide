@@ -1110,3 +1110,23 @@ fn alias_of_a_pure_fn_or_a_shadowing_binding_is_not_an_effect_call() {
         "{RD}fn f(rd: (String) -> String) -> Int = {{\n  let g = rd\n  string.len(g(\"x\"))\n}}\n"
     ));
 }
+
+// #3401: a pipe's E005 caret is the PIPED value (argument 0 of the call the
+// pipe checks). The pipe path never wrote the per-argument spans, so the caret
+// landed wherever an earlier call left them — here the lambda (col 56); across
+// modules, a line of another file.
+#[test]
+fn pipe_argument_mismatch_points_at_the_piped_value() {
+    let src = "fn f(n: Int) -> Int = n\nfn g() -> Int = f(1)\nfn h(s: String) -> Int = list.len(s |> list.map((x) => x))\n";
+    let tokens = Lexer::tokenize(src);
+    let mut prog = Parser::new(tokens).parse().expect("parse failed");
+    let canon = canonicalize::canonicalize_program(&prog, std::iter::empty());
+    let mut checker = Checker::from_env(canon.env);
+    checker.diagnostics = canon.diagnostics;
+    let diags = checker.infer_program(&mut prog);
+    let e005: Vec<_> = diags.iter()
+        .filter(|d| d.level == Level::Error && d.message.contains("argument 'xs'"))
+        .map(|d| (d.line, d.col))
+        .collect();
+    assert_eq!(e005, vec![(Some(3), Some(35))], "{:?}", diags.iter().map(|d| &d.message).collect::<Vec<_>>());
+}

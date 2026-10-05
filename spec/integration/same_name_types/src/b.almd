@@ -1,0 +1,16 @@
+// #3401: the record `Ctx` and the variant `Shape` whose names module `a` also
+// declares.
+type Ctx = { label: String }
+
+type Shape = | Dot | Box(String)
+
+fn label(c: Ctx) -> String = c.label
+
+fn width(c: Ctx) -> Int = string.len(c.label)
+
+fn shape_size(s: Shape) -> Int = match s {
+  Dot => 100,
+  Box(t) => string.len(t),
+}
+
+fn size_of(t: String) -> Int = shape_size(if t == "" then Dot else Box(t))
